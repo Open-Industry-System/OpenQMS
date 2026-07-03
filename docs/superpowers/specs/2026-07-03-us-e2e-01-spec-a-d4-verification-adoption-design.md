@@ -42,6 +42,11 @@ US-E2E-01 故事要求 8D 全程闭环可审计：根因必须经现场验证才
 
 8. **未保存输入保护接口（Finding 3）**：D4/D5 RecPanel 不直接知道 TextArea 状态（dirty + `handleUpdate` 在 `CAPADetailPage`）。父组件传 `beforeAdopt?: () => Promise<void>`，RecPanel 采纳前 `await beforeAdopt?.()` flush 本地 d-step 字段，再调采纳端点。
 
+9. **D7 改判语义（Finding 5）**：D7 动作按"当前裁决"建模（一行 per capa+fmea+fm+fc，可改判），匹配现有 UI 可在 updated/skipped 间切换的行为：
+   - `record_d7_action`（confirm/skip）= **upsert**：无既有行 → insert + `D7_NODE_CONFIRMED`/`D7_NODE_SKIPPED` audit；有既有行且 `action != "auto_filled"` → 更新 `action`/`reason`/`acted_by`/`acted_at` + `D7_NODE_ACTION_CHANGED` audit（带 `old_action`/`new_action`）；既有行 `action == "auto_filled"` → 400 "已自动回填，不可改判"（前端禁用 confirm/skip 按钮并显示已锁定）。
+   - `auto_fill_d7`：无既有行 → insert `auto_filled` + 图改 + audits；既有行 `action == "auto_filled"` → 409 幂等拒绝（前端应禁用 auto-fill 按钮）；既有行 `action in {confirmed, skipped}` → 升级为 `auto_filled`（做图改 + 更新行 + `D7_NODE_ACTION_CHANGED` + `D7_AUTO_FILLED_FMEA` audits）。
+   - 唯一索引见数据模型（`COALESCE` 表达式索引）。
+
 ## 数据模型
 
 ### 新表 `capa_root_cause_verification`
@@ -107,12 +112,19 @@ class CapaD7NodeAction(Base):
     # 索引：ix_capa_d7_capa (capa_id), ix_capa_d7_factory (factory_id)
 ```
 
-- 一个 CAPA 一条 FMEA 节点只记一条 action（confirm/skip/auto_filled 三选一）；`UNIQUE (capa_id, fmea_id, failure_mode_node_id, failure_cause_node_id)` 防重复。
+- 一个 CAPA 一条 FMEA 节点只记一条 action 行（当前裁决，可改判，见决策 9）；用**表达式唯一索引** `CREATE UNIQUE INDEX ix_capa_d7_node_unique ON capa_d7_node_action (capa_id, fmea_id, failure_mode_node_id, COALESCE(failure_cause_node_id, ''))` 防重复——Postgres 普通 UNIQUE 允许多个 NULL，`failure_cause_node_id` 可空，故用 `COALESCE(...,'')` 收口（Finding 4）。
 - `auto_filled` 时 `prevention_control_name_after = capa.d5_correction`，`before` = 改动前该控制节点 name（若有），便于审计"把控制措施从 X 改成了 Y"。
 
 ### 迁移
 
-`backend/alembic/versions/20260703_add_capa_verification_adoption.py`，`down_revision` 取当前 head（实施时确认），手写 `op.create_table` ×3（`capa_root_cause_verification` / `capa_ai_adoption` / `capa_d7_node_action`）+ 索引 + `capa_d7_node_action` 的 UNIQUE 约束，遵循 ADR-0013（UUID `as_uuid=True`）、ADR-0001（Python 端 `uuid4`）。`downgrade()` 反向 drop。
+`backend/alembic/versions/20260703_add_capa_verification_adoption.py`，`down_revision` 取当前 head（实施时确认），手写 `op.create_table` ×3（`capa_root_cause_verification` / `capa_ai_adoption` / `capa_d7_node_action`）+ 普通索引（`capa_id`/`factory_id` 等）。`capa_d7_node_action` 的去重用**表达式唯一索引**（Finding 4，普通 UNIQUE 约束无法表达 `COALESCE`）：
+
+```python
+op.execute("CREATE UNIQUE INDEX ix_capa_d7_node_unique ON capa_d7_node_action "
+           "(capa_id, fmea_id, failure_mode_node_id, COALESCE(failure_cause_node_id, ''))")
+```
+
+遵循 ADR-0013（UUID `as_uuid=True`）、ADR-0001（Python 端 `uuid4`）。`downgrade()` 反向 drop（先 drop 表达式索引，再 drop 表）。
 
 ## API
 
@@ -132,7 +144,9 @@ class CapaD7NodeAction(Base):
 1. `level = await get_user_permission(scope.user, Module.CAPA, db)`；`< EDIT`（或 VIEW）→ 403
 2. `capa = await capa_service.get_capa(db, report_id)`；None → 404
 3. `check_factory_access(capa.factory_id, scope)` → 跨工厂 403
-4. 调服务层；`ValueError` → 400；`LookupError`（PATCH 归属不匹配 / verification 不属于该 CAPA）→ 404
+4. 调服务层；异常映射：`ValueError` → 400；`LookupError` → 404（PATCH 归属不匹配 / verification 不属于该 CAPA / D7 目标 FMEA 不存在 / auto_fill 重复幂等拒绝）；`PermissionError` → 403（D7 目标 FMEA 跨工厂）。D7 端点额外：`d7-node-actions` 需 `Module.FMEA` ≥ VIEW；`d7-auto-fill` 需 `Module.FMEA` ≥ EDIT。
+
+**`d7-node-actions`（confirm/skip）额外校验（Finding 3）**：`record_d7_action` 也接收 `fmea_id` 并落库，必须 fetch 目标 FMEA，校验：存在（None → 404）、与 CAPA 同工厂（`check_factory_access(fmea.factory_id, scope)` → 跨工厂 403）、用户对该 FMEA 有 VIEW 权限（`Module.FMEA` ≥ VIEW → 403）。防止记录"对不存在 / 跨工厂 FMEA 节点的动作"。
 
 **`d7-auto-fill` 额外校验**：需 FMEA EDIT 权限（`Module.FMEA` ≥ EDIT，因为后端要改 FMEA graph_data）；`capa.d5_correction` 为空 → 400 "D5 永久措施为空，无法自动回填"；目标 FMEA 必须与 CAPA 同工厂（`check_factory_access(fmea.factory_id, scope)`）。
 
@@ -340,18 +354,52 @@ def to_d5_suggestion_schema(self) -> dict[str, Any]:
 - `ROOT_CAUSE_VERIFICATION` audit action 新增；`ADOPT_RECOMMENDATION` audit action 新增。两者沿用 ADR-0004 手写 AuditLog 模式。
 - `stage_index` 在 `adopt_recommendation` 里现阶段硬写 `None`——`AdoptRequest` 不含该字段。待 P0-2 编排器落地后扩展 `AdoptRequest` 加 `stage_index` + 服务层透传（单点改动，plan 里标注 TODO）。
 
-### `backend/app/services/capa_d7_action_service.py`（新建，决策 6）
+### `backend/app/services/capa_d7_action_service.py`（新建，决策 6/9）
 
 ```python
+import copy
+from sqlalchemy import select
+from app.models.fmea import FMEADocument
+from app.models.capa import CapaD7NodeAction
+from app.models.audit import AuditLog
+from app.services import fmea_service
+
+NODE_KEY = lambda r: (r.capa_id, r.fmea_id, r.failure_mode_node_id, r.failure_cause_node_id or "")
+
+async def _fetch_fmea_for_d7(db, capa, fmea_id) -> FMEADocument:
+    """confirm/skip/auto-fill 共用：校验目标 FMEA 存在 + 同工厂（Finding 3）。FMEA VIEW/EDIT 权限在 handler 层查。"""
+    fmea = await db.get(FMEADocument, fmea_id)
+    if fmea is None:
+        raise LookupError("目标 FMEA 不存在")  # → 404
+    if fmea.factory_id != capa.factory_id:
+        raise PermissionError("目标 FMEA 跨工厂")  # → 403
+    return fmea
+
 async def record_d7_action(db, capa, req: D7NodeActionCreate, user) -> CapaD7NodeAction:
-    # UNIQUE (capa_id, fmea_id, failure_mode_node_id, failure_cause_node_id) 防重复
+    # Finding 3：fetch + 校验目标 FMEA 归属（FMEA VIEW 权限在 handler 层查）
+    await _fetch_fmea_for_d7(db, capa, req.fmea_id)
     existing = await db.scalar(select(CapaD7NodeAction).where(
         CapaD7NodeAction.capa_id == capa.report_id,
         CapaD7NodeAction.fmea_id == req.fmea_id,
         CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
         CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id))
     if existing is not None:
-        raise ValueError("该节点已有 D7 动作记录")  # → API 400；前端应先 GET 判断
+        if existing.action == "auto_filled":
+            raise ValueError("已自动回填，不可改判")  # → 400
+        old_action = existing.action
+        existing.action = req.action
+        existing.reason = req.reason
+        existing.acted_by = user.user_id
+        existing.acted_at = func.now()
+        db.add(AuditLog(table_name="capa_eightd", record_id=capa.report_id,
+                        action="D7_NODE_ACTION_CHANGED",
+                        changed_fields={"fmea_id": str(req.fmea_id),
+                                        "failure_mode_node_id": req.failure_mode_node_id,
+                                        "failure_cause_node_id": req.failure_cause_node_id,
+                                        "old_action": old_action, "new_action": req.action},
+                        operated_by=user.user_id))
+        await db.commit(); await db.refresh(existing)
+        return existing
     rec = CapaD7NodeAction(capa_id=capa.report_id, factory_id=capa.factory_id,
                            action=req.action, fmea_id=req.fmea_id,
                            failure_mode_node_id=req.failure_mode_node_id,
@@ -375,12 +423,10 @@ async def list_d7_actions(db, capa) -> list[CapaD7NodeAction]:
 
 async def auto_fill_d7(db, capa, req: D7AutoFillRequest, user) -> tuple[CapaD7NodeAction, dict]:
     if not capa.d5_correction:
-        raise ValueError("D5 永久措施为空，无法自动回填")  # → API 400
-    fmea = await db.get(FMEADocument, req.fmea_id)
-    if fmea is None or fmea.factory_id != capa.factory_id:
-        raise LookupError("目标 FMEA 不存在或跨工厂")  # → API 404
-    graph = fmea.graph_data or {"nodes": [], "edges": []}
-    # 找既有 PreventionControl：edge source=failure_cause_node_id, type=PREVENTED_BY, target type=PreventionControl
+        raise ValueError("D5 永久措施为空，无法自动回填")  # → 400
+    fmea = await _fetch_fmea_for_d7(db, capa, req.fmea_id)  # Finding 3
+    # Finding 1：deepcopy graph 再改，避免原地改 JSONB 不被 SQLAlchemy 持久化
+    graph = copy.deepcopy(fmea.graph_data or {"nodes": [], "edges": []})
     ctrl_node = None; name_before = None
     for e in graph["edges"]:
         if e["source"] == req.failure_cause_node_id and e["type"] == "PREVENTED_BY":
@@ -396,23 +442,41 @@ async def auto_fill_d7(db, capa, req: D7AutoFillRequest, user) -> tuple[CapaD7No
         ctrl_node = graph["nodes"][-1]
     else:
         ctrl_node["name"] = capa.d5_correction
-    fmea.graph_data = graph
-    # FMEA UPDATE audit（镜像 fmea_service 写法，单事务内）
-    db.add(AuditLog(table_name="fmea_documents", record_id=fmea.fmea_id,
-                    action="UPDATE",
-                    changed_fields={"graph_data": "auto-fill from CAPA D7",
-                                    "touched_control_node_id": ctrl_node["id"]},
-                    operated_by=user.user_id))
-    rec = CapaD7NodeAction(capa_id=capa.report_id, factory_id=capa.factory_id,
-                           action="auto_filled", fmea_id=req.fmea_id,
-                           failure_mode_node_id=req.failure_mode_node_id,
-                           failure_cause_node_id=req.failure_cause_node_id,
-                           match_source=req.match_source,
-                           prevention_control_node_id=ctrl_node["id"],
-                           prevention_control_name_before=name_before,
-                           prevention_control_name_after=capa.d5_correction,
-                           acted_by=user.user_id)
-    db.add(rec)
+    # Finding 2：调 fmea_service 无提交核心，复用 lock_version++/GraphSyncOutbox/缓存失效/embedding 全部副作用
+    await fmea_service._apply_fmea_update(db, fmea, title=None, graph_data=graph,
+                                           user_id=user.user_id)  # 不 commit
+    # D7 节点动作 upsert（Finding 5）
+    existing = await db.scalar(select(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa.report_id,
+        CapaD7NodeAction.fmea_id == req.fmea_id,
+        CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
+        CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id))
+    if existing is not None:
+        if existing.action == "auto_filled":
+            raise LookupError("已自动回填")  # → 409 幂等拒绝
+        old_action = existing.action
+        existing.action = "auto_filled"
+        existing.prevention_control_node_id = ctrl_node["id"]
+        existing.prevention_control_name_before = name_before
+        existing.prevention_control_name_after = capa.d5_correction
+        existing.acted_by = user.user_id; existing.acted_at = func.now()
+        rec = existing
+        db.add(AuditLog(table_name="capa_eightd", record_id=capa.report_id,
+                        action="D7_NODE_ACTION_CHANGED",
+                        changed_fields={"old_action": old_action, "new_action": "auto_filled",
+                                        "prevention_control_node_id": ctrl_node["id"]},
+                        operated_by=user.user_id))
+    else:
+        rec = CapaD7NodeAction(capa_id=capa.report_id, factory_id=capa.factory_id,
+                               action="auto_filled", fmea_id=req.fmea_id,
+                               failure_mode_node_id=req.failure_mode_node_id,
+                               failure_cause_node_id=req.failure_cause_node_id,
+                               match_source=req.match_source,
+                               prevention_control_node_id=ctrl_node["id"],
+                               prevention_control_name_before=name_before,
+                               prevention_control_name_after=capa.d5_correction,
+                               acted_by=user.user_id)
+        db.add(rec)
     db.add(AuditLog(table_name="capa_eightd", record_id=capa.report_id,
                     action="D7_AUTO_FILLED_FMEA",
                     changed_fields={"fmea_id": str(req.fmea_id),
@@ -420,13 +484,21 @@ async def auto_fill_d7(db, capa, req: D7AutoFillRequest, user) -> tuple[CapaD7No
                                     "prevention_control_node_id": ctrl_node["id"],
                                     "name_before": name_before, "name_after": capa.d5_correction},
                     operated_by=user.user_id))
-    await db.commit(); await db.refresh(rec)
+    await db.commit(); await db.refresh(rec)  # 单事务：FMEA 副作用 + D7 动作 + 两 audits 原子
     return rec, {"prevention_control_node_id": ctrl_node["id"],
                  "prevention_control_name_after": capa.d5_correction, "is_new_control": is_new}
 ```
 
-- 自动回填从前端 `updateFMEA`（`D7RecPanel.handleAutoFill`）**移到后端**，保证"FMEA graph 改动 + FMEA audit + CAPA D7 action + CAPA audit"四写原子。
-- 新增 AuditLog action：`D7_NODE_CONFIRMED` / `D7_NODE_SKIPPED` / `D7_AUTO_FILLED_FMEA`（沿用 ADR-0004 手写模式）。
+### `fmea_service` 重构（Finding 2）
+
+`fmea_service.update_fmea`（`fmea_service.py:196`）当前末尾 `await db.commit()`（L276）独立提交，且包含 FOR UPDATE 行锁 + `lock_version += 1` + `GraphSyncOutbox` + 推荐缓存失效 + `enqueue_embedding` 等副作用。Spec A 把它拆为：
+
+- `_apply_fmea_update(db, fmea, title, graph_data, user_id, product_line_code=None, lock_version=None, confirmed_latest_lock_version=None) -> FMEADocument`：**不 commit、不 refresh**，保留 L206-275 全部副作用（行锁 / 乐观锁校验 / 变更检测 / `lock_version++` / FMEA UPDATE audit / `GraphSyncOutbox` / 缓存失效 / `enqueue_embedding`）。`graph_data` 由调用方传**新对象**（auto_fill_d7 已 deepcopy），`fmea.graph_data = graph_data` 重赋值确保持久化（Finding 1）。
+- `update_fmea(...)` 改为 `fmea = await _apply_fmea_update(...); await db.commit(); await db.refresh(fmea); return fmea`——公开行为不变，既有调用方与测试零改动。
+
+`auto_fill_d7` 调 `_apply_fmea_update`（不 commit）后追加 D7 动作 + audits，再单 `commit`，保证"FMEA 全部副作用 + D7 写入"原子。
+
+- 新增 AuditLog action：`D7_NODE_CONFIRMED` / `D7_NODE_SKIPPED` / `D7_NODE_ACTION_CHANGED` / `D7_AUTO_FILLED_FMEA`（沿用 ADR-0004 手写模式）。
 
 ### `capa_service.advance_capa` 闸口改动（`backend/app/services/capa_service.py:257`）
 
@@ -458,10 +530,11 @@ if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECT
   （`handleUpdate` 走现有 PUT flush；对比 `localData` vs `capa` 判断 dirty——`capa` 是上次 fetch 的快照。）
 - `api/capa.ts` 新增 `adoptRecommendation(capaId, req): Promise<AdoptResponse>`。
 
-### D7RecPanel 改造（决策 6）
+### D7RecPanel 改造（决策 6/9）
 
-- confirm/skip 按钮：从内存 `confirmedNodes` 改为调 `POST /api/capa/{report_id}/d7-node-actions`（action=confirmed|skipped）；状态从 `GET /api/capa/{report_id}/d7-node-actions` 重载（修复刷新即丢的隐患）。`onConfirmationChange(allConfirmed, unconfirmedItems)` 改为从持久化动作派生。
-- 自动回填按钮：删除 `handleAutoFill` 里的 `getFMEA` + 图改 + `updateFMEA`，改为调 `POST /api/capa/{report_id}/d7-auto-fill`，后端返回 `{prevention_control_node_id, prevention_control_name_after, is_new_control}`；成功后 `message.success` + 标记该节点为 `auto_filled`（持久化动作）+ 刷新推荐列表。
+- confirm/skip 按钮：从内存 `confirmedNodes` 改为调 `POST /api/capa/{report_id}/d7-node-actions`（upsert，可改判）；状态从 `GET /api/capa/{report_id}/d7-node-actions` 重载（修复刷新即丢的隐患）。`onConfirmationChange(allConfirmed, unconfirmedItems)` 改为从持久化动作派生。
+- 已 `auto_filled` 的节点：confirm/skip 按钮禁用并显示"已自动回填"锁定态（后端已 400 拦截，前端先禁用避免误触）；auto-fill 按钮在已 `auto_filled` 时禁用（后端 409 幂等）。
+- 自动回填按钮：删除 `handleAutoFill` 里的 `getFMEA` + 图改 + `updateFMEA`，改为调 `POST /api/capa/{report_id}/d7-auto-fill`，后端返回 `{prevention_control_node_id, prevention_control_name_after, is_new_control}`；成功后 `message.success` + 刷新推荐列表 + 重载 d7-node-actions。
 - `api/capa.ts` 新增 `recordD7Action` / `listD7Actions` / `autoFillD7`。
 
 ### 新组件 `frontend/src/components/capa/D4VerificationCard.tsx`
@@ -489,7 +562,7 @@ if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECT
 | D7 确认按钮 | `d7-confirm` |
 | D7 跳过按钮 | `d7-skip` |
 | D7 自动回填按钮 | `d7-auto-fill` |
-| D7 节点动作状态 | `d7-node-action-{n}`（内含 `d7-action-status`） |
+| D7 节点动作状态 | `d7-node-action-{n}`（内含 `d7-action-status`，`auto_filled` 时带 `locked`） |
 
 ## E2E / 测试兼容
 
@@ -516,10 +589,17 @@ if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECT
 - 现有 `backend/tests/capa/test_capa_*`：扫描任何 `advance_capa` 越过 D4 的用例，补"前置：创建已验证根因"fixture 保持绿（实施时 grep 确认，预期无需改——现有测试多停在 D2/D3 或用 mock 跳过状态机）。D7 既有 `D7_SKIP_CONFIRMATION`（`capa_service.py:302`，advance 时按 `d7_skip_reasons` 汇总写）保留不动——新 `D7_NODE_SKIPPED` 是点击时逐条写，二者并存（前者汇总、后者明细），不冲突。
 - `backend/tests/recommendation/test_recommendation_types.py`（新增或既有）：`to_d5_suggestion_schema` 对 `rule_engine_measure` 输出 `match_source="rule"`、对 `historical_capa` 输出 `match_source="historical_capa"`（Finding 5 回归）。
 - `backend/tests/capa/test_capa_d7_action_service.py`（新）：
-  - `record_d7_action`：confirmed/skip 各插 `capa_d7_node_action` + 写 D7_NODE_CONFIRMED / D7_NODE_SKIPPED audit；UNIQUE 约束重复 → ValueError。
+  - `record_d7_action`：confirmed/skip 各插 `capa_d7_node_action` + 写 D7_NODE_CONFIRMED / D7_NODE_SKIPPED audit。
+  - `record_d7_action` 改判（Finding 5）：confirmed→skip upsert 更新同一行 + D7_NODE_ACTION_CHANGED audit（带 old/new_action）；auto_filled 行 → ValueError。
+  - `record_d7_action` FMEA 校验（Finding 3）：fmea_id 不存在 → LookupError(404)；跨工厂 FMEA → PermissionError(403)。
   - `list_d7_actions`：按 acted_at desc、`capa_id + factory_id` 联合过滤。
-  - `auto_fill_d7`：d5_correction 空 → ValueError；目标 FMEA 跨工厂 → LookupError；既有控制 → `name_before` 捕获、`is_new_control=False`；无既有控制 → 新建节点+边、`is_new_control=True`；assert FMEA graph_data 更新 + FMEA UPDATE audit + capa_d7_node_action(auto_filled) + D7_AUTO_FILLED_FMEA audit 四条同事务落库。
+  - `auto_fill_d7`：d5_correction 空 → ValueError；目标 FMEA 跨工厂/不存在 → LookupError/PermissionError；既有控制 → `name_before` 捕获、`is_new_control=False`；无既有控制 → 新建节点+边、`is_new_control=True`。
+  - `auto_fill_d7` 持久化（Finding 1）：commit 后**重新查询 FMEA**，断言 `graph_data` 已含新控制名（防原地改 JSONB 不持久化）；用 deepcopy 而非原对象引用。
+  - `auto_fill_d7` FMEA 副作用（Finding 2）：断言 `fmea.lock_version` 递增、`GraphSyncOutbox` 有 `fmea.updated` 行、推荐缓存失效（或调用 spy）、`document_embeddings` enqueue——与 `update_fmea` 等价。
+  - `auto_fill_d7` 原子性：四写（FMEA graph + FMEA UPDATE audit + capa_d7_node_action(auto_filled) + D7_AUTO_FILLED_FMEA audit）单 commit；中途模拟失败 → 全回滚。
+  - `auto_fill_d7` 改判（Finding 5）：既有 confirmed 行 → 升级 auto_filled（图改 + 行更新 + D7_NODE_ACTION_CHANGED + D7_AUTO_FILLED_FMEA）；既有 auto_filled → LookupError(409)。
   - `factory_id` 隔离：跨工厂 list / auto-fill 拒绝。
+- `backend/tests/fmea/test_fmea_service_update_core.py`（新或既有扩展）：`update_fmea` 公开行为不变（既有测试零改动）；`_apply_fmea_update` 不 commit，调用方可继续追加写入后单 commit。
 
 ### 前端 vitest（新建）
 
@@ -530,13 +610,15 @@ if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECT
 
 ## 验收
 
-- `capa_root_cause_verification` + `capa_ai_adoption` + `capa_d7_node_action` 三表通过 Alembic 迁移在干净库建出（含 UNIQUE 约束）。
-- 7 个新端点按权限矩阵工作；`advance_capa` D4→D5 闸口阻断/放行正确；PATCH 归属不匹配 → 404；`d7-auto-fill` 跨工厂 / d5 空 → 404/400。
-- 采纳端点**追加**到 d-step 字段（不覆盖，保留已有内容）；单事务原子（adoption + audit + 字段 + outbox）；服务层返回 `(adoption, new_value)`、handler 组装 `AdoptResponse.field_value`（Finding 2）；D4/D5 RecPanel 采纳前 `await beforeAdopt()` flush 本地字段（Finding 3）。
-- `to_d5_suggestion_schema` 始终输出 `match_source`（Finding 5）；前端 D4/D5 采纳按映射表填 `source`/`item_ref`。
-- `update_verification` 翻 `is_verified` 时正确设/清 `verified_by`/`verified_at`（Finding 4）。
-- D7 confirm/skip/auto-fill 全部经新端点落 `capa_d7_node_action` + 对应 audit；自动回填后端原子完成 FMEA graph 改动 + FMEA audit + CAPA audit；D7RecPanel 状态持久化（修复刷新即丢）；现有 `D7_SKIP_CONFIRMATION` 汇总审计保留不动。
-- 后端新增 pytest 全绿（含 Finding 1/3/4/5 + D7 动作回归）；现有 capa 测试不退化；前端 vitest + `tsc --noEmit` + `npm run build` 绿；`make check` 绿。
+- `capa_root_cause_verification` + `capa_ai_adoption` + `capa_d7_node_action` 三表通过 Alembic 迁移在干净库建出；`capa_d7_node_action` 的去重用 `COALESCE` 表达式唯一索引（R3-Finding 4）。
+- 7 个新端点按权限矩阵工作；`advance_capa` D4→D5 闸口阻断/放行正确；PATCH 归属不匹配 → 404；`d7-auto-fill` 跨工厂 / d5 空 → 404/400；`d7-node-actions` 目标 FMEA 不存在/跨工厂 → 404/403（R3-Finding 3）。
+- 采纳端点**追加**到 d-step 字段（不覆盖，保留已有内容）；单事务原子；服务层返回 `(adoption, new_value)`、handler 组装 `field_value`（R2-Finding 2）；D4/D5 RecPanel 采纳前 `await beforeAdopt()` flush 本地字段（R2-Finding 3）。
+- `to_d5_suggestion_schema` 始终输出 `match_source`（R1-Finding 5）；前端 D4/D5 采纳按映射表填 `source`/`item_ref`。
+- `update_verification` 翻 `is_verified` 时正确设/清 `verified_by`/`verified_at`（R1-Finding 4）。
+- D7 confirm/skip/auto-fill 全部经新端点落 `capa_d7_node_action` + 对应 audit；**改判 upsert**（confirmed↔skip 更新同一行 + D7_NODE_ACTION_CHANGED audit；auto_filled 行锁定不可改判，前端禁用并显锁定态）（R3-Finding 5）。
+- `auto_fill_d7` **deepcopy graph** 再改，commit 后重查 FMEA graph_data 已变化（持久化，R3-Finding 1）；通过 `_apply_fmea_update` 无提交核心**复用全部 FMEA 更新副作用**（lock_version++ / GraphSyncOutbox / 推荐缓存失效 / enqueue_embedding），且与 D7 写入单 commit 原子（R3-Finding 2）；`fmea_service.update_fmea` 公开行为不变、既有测试零改动。
+- D7RecPanel 状态持久化（修复刷新即丢）；现有 `D7_SKIP_CONFIRMATION` 汇总审计保留不动。
+- 后端新增 pytest 全绿（含 R1/R2/R3 全部 Finding 回归）；现有 capa/fmea 测试不退化；前端 vitest + `tsc --noEmit` + `npm run build` 绿；`make check` 绿。
 - data-e2e 钩子就位（Spec C 故事 spec 可依赖）。
 - `docs/` 同步：本 spec + `PROGRESS.md` 缺口清单 P0-1/P0-4 勾选；`CLAUDE.md` 无需改（无新命令/约定）。
 
