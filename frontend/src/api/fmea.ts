@@ -7,6 +7,7 @@ export async function listFMEAs(params: {
   status?: string;
   product_line?: string;
   high_rpn?: boolean;
+  pending?: boolean;
   fmea_type?: "PFMEA" | "DFMEA";
   search?: string;
 }): Promise<FMEAListResponse> {

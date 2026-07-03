@@ -1,7 +1,7 @@
 import difflib
 import math
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func, select, update
@@ -622,6 +622,7 @@ async def list_inspection_characteristics(
     product_line: Optional[str] = None, process_name: Optional[str] = None,
     factory_id: uuid.UUID | None = None,
     allowed_product_line_codes: list[str] | None = None,
+    abnormal: bool = False,
 ) -> Tuple[List[InspectionCharacteristic], int]:
     query = select(InspectionCharacteristic)
     count_query = select(func.count(InspectionCharacteristic.ic_id))
@@ -635,6 +636,14 @@ async def list_inspection_characteristics(
         filters.append(InspectionCharacteristic.factory_id == factory_id)
     if allowed_product_line_codes:
         filters.append(InspectionCharacteristic.product_line.in_(allowed_product_line_codes))
+    # 仪表盘「SPC 异常」下钻：近 7 天有未关闭告警的检验特性
+    if abnormal:
+        week_ago = datetime.now(UTC) - timedelta(days=7)
+        abnormal_ic_ids = select(SPCAlarm.ic_id).where(
+            SPCAlarm.status == "open",
+            SPCAlarm.triggered_at >= week_ago,
+        )
+        filters.append(InspectionCharacteristic.ic_id.in_(abnormal_ic_ids))
 
     if filters:
         query = query.where(and_(*filters))

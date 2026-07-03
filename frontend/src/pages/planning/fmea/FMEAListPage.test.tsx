@@ -139,6 +139,27 @@ describe("FMEAListPage filters", () => {
   });
 });
 
+describe("FMEAListPage pending drilldown", () => {
+  it("reads ?pending=true (dashboard drilldown) and sends pending=true", async () => {
+    renderAt("/fmea?pending=true");
+    await vi.waitFor(() => {
+      const call = mocks.listFMEAs.mock.calls[mocks.listFMEAs.mock.calls.length - 1][0];
+      expect(call.pending).toBe(true);
+    });
+  });
+
+  it("reset clears the pending param", async () => {
+    renderAt("/fmea?pending=true");
+    await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: /reset|重置/i }));
+    await vi.waitFor(() => {
+      const call = mocks.listFMEAs.mock.calls[mocks.listFMEAs.mock.calls.length - 1][0];
+      expect(call.pending).toBeUndefined();
+    });
+  });
+});
+
 describe("FMEAListPage create error", () => {
   // 复用 list mock 默认值，避免 beforeEach 的 module 级状态污染
   beforeEach(async () => {

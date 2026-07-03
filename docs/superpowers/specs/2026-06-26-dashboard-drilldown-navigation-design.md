@@ -2,7 +2,7 @@
 
 **日期**: 2026-06-26
 **分支**: `fix/dashboard-admin-pages`
-**状态**: 待评审
+**状态**: 已实现（2026-07-03）
 
 ## 背景
 
@@ -131,3 +131,15 @@
 - 不新增 widget、不改 widget 数据结构（仅补 `pending_breakdown`）。
 - 不为月度趋势卡片加下钻。
 - 不改预警列表的 Top-5 数量与排序。
+
+## 实现说明（2026-07-03）
+
+落地与原设计的几处偏差，记录在此供后续维护：
+
+- **`created_this_month` 未实现**：FMEA 列表只新增 `pending=true` 过滤，未加 `created_this_month`。该参数无任何 widget 下钻消费（月度趋势卡不可点），属无消费者死代码，按「Simplicity First」跳过。
+- **`dashboardDrilldown.ts` 为纯映射**：菜单项返回 i18n `labelKey`（非已翻译文案），由 `useDashboardDrilldown` hook 在渲染层翻译；这样纯函数单测无需 i18n 依赖。链接型返回含 `disabled`（无目标模块权限），菜单型每项独立 `disabled`。
+- **权限守卫检查目标模块**：如「超期事项」卡下钻到 `/capa`，守卫 `canView("capa")` 而非 `canView("dashboard")`，与 `ProtectedRoute requiredModule` 一致。无权限时 `KPICard` 经新增的 `opacity: 0.5` 灰显（原 `disabled` 仅影响可点击性，不灰显，已补）。
+- **`KpiPendingWidget` 用受控 Dropdown**：`open` 受控 + `onOpenChange`，卡片 `onClick` 切换菜单；Enter/Space 经 `KPICard` keydown 复用同一路径，菜单项原生键盘可达。
+- **`MesEquipmentWidget` 非 KPICard**：用 antd `Card` 的 `hoverable` + `onClick` 跳 `/mes/dashboard`，`canView("mes")` 守卫；retry 按钮阻冒泡。
+- **IQC `?status=pending` 后端已支持**：`/inspections` 端点已有 `status` Query 参数，前端仅补 `?status=` 初始化 `filterStatus`。
+- **测试**：纯映射 `dashboardDrilldown.test.ts`；hook `useDashboardDrilldown.test.tsx`（链接/禁用/菜单/预警）；widget `KpiOverdueWidget.test.tsx` + `AlertHighRpnWidget.test.tsx`（点击导航/无权限灰显）；列表页 FMEA `?pending`、SPC `?abnormal`、IQC `?status` 读取；后端 `test_dashboard_pending_breakdown.py`、`test_spc_abnormal_filter.py` + `test_fmea_list_filter.py` 新增 `pending` 用例。MSA 量具到期抽屉复用既有 `getExpiringGauges(30)`，仅加 `?expiring=30d` 触发，未单独单测。

@@ -30,6 +30,7 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = Query(False),
+    pending: bool = Query(False),
     fmea_type: Literal["PFMEA", "DFMEA"] | None = None,
     search: str | None = None,
     db: AsyncSession = Depends(get_db),
@@ -50,6 +51,7 @@ async def list_fmeas(
     items, total = await fmea_service.list_fmeas(
         db, page, page_size, status, product_line,
         high_rpn=high_rpn,
+        pending=pending,
         allowed_product_line_codes=allowed_pls,
         factory_id=scope.effective_factory_id,
         fmea_type=fmea_type,

@@ -26,6 +26,11 @@
       "ai": "AI/高级分析"
     }
   },
+  "drilldown": {
+    "pendingFmea": "FMEA 待办",
+    "pendingCapa": "CAPA 待办",
+    "pendingComplaint": "客诉 待办"
+  },
   "widget": {
     "unknown": "未知组件",
     "pendingActions": "待办事项",

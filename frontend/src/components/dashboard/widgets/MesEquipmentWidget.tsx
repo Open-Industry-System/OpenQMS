@@ -1,15 +1,27 @@
 import { Card, Statistic, Button, Row, Col } from "antd";
 import { ToolOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
+import { usePermission } from "../../../hooks/usePermission";
 import type { WidgetProps } from "./types";
 
 export default function MesEquipmentWidget({ data, loading, error, onRetry }: WidgetProps) {
   const { t } = useTranslation("dashboard");
+  const navigate = useNavigate();
+  const { canView } = usePermission();
   const mes = data.mes ?? {};
+  const canDrill = canView("mes");
   return (
-    <Card title={<><ToolOutlined /> {t("widget.equipmentStatus")}</>} size="small" loading={loading}>
+    <Card
+      title={<><ToolOutlined /> {t("widget.equipmentStatus")}</>}
+      size="small"
+      loading={loading}
+      hoverable={canDrill}
+      onClick={canDrill ? () => navigate("/mes/dashboard") : undefined}
+      style={{ cursor: canDrill ? "pointer" : "default", height: "100%", opacity: canDrill ? 1 : 0.6 }}
+    >
       {error ? (
-        <Button onClick={onRetry} size="small">{t("riskList.retry")}</Button>
+        <Button onClick={(e) => { e.stopPropagation(); onRetry(); }} size="small">{t("riskList.retry")}</Button>
       ) : (
         <Row gutter={16}>
           <Col span={8}>

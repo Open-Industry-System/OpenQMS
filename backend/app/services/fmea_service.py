@@ -27,6 +27,7 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = False,
+    pending: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
     fmea_type: str | None = None,
@@ -38,6 +39,11 @@ async def list_fmeas(
     if status:
         query = query.where(FMEADocument.status == status)
         count_query = count_query.where(FMEADocument.status == status)
+
+    # 仪表盘「待办事项」下钻：草稿 + 评审中
+    if pending:
+        query = query.where(FMEADocument.status.in_(["draft", "in_review"]))
+        count_query = count_query.where(FMEADocument.status.in_(["draft", "in_review"]))
 
     if product_line:
         query = query.where(FMEADocument.product_line_code == product_line)
