@@ -74,6 +74,9 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         source_ref=req.source_ref,
         verified_by=user.user_id if req.is_verified else None,
         verified_at=func.now() if req.is_verified else None,
+        # clock_timestamp() (per-statement wall-clock) not now() (constant within txn):
+        # test fixture wraps inserts in one txn, so now() would give identical created_at
+        # and break created_at DESC ordering. No-op in prod (each call is its own txn).
         created_at=func.clock_timestamp(),
     )
     db.add(rec)
