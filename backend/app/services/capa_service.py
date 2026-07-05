@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
-from app.models.capa import CAPAEightD
+from app.models.capa import CAPAEightD, CapaRootCauseVerification
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.state_machines.eightd_state import EightDState, can_transition
@@ -260,6 +260,8 @@ async def advance_capa(
     user_id: uuid.UUID,
     d7_skip_reasons: list[dict] | None = None,
 ) -> CAPAEightD:
+    from sqlalchemy import select
+
     current = EightDState(capa.status)
     transitions = [
         EightDState.D1_TEAM,
@@ -281,6 +283,15 @@ async def advance_capa(
 
     if not can_transition(current, next_state):
         raise ValueError(f"Cannot transition from {capa.status} to {next_state.value}")
+
+    if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECTION:
+        cnt = await db.scalar(select(func.count()).select_from(CapaRootCauseVerification).where(
+            CapaRootCauseVerification.capa_id == capa.report_id,
+            CapaRootCauseVerification.factory_id == capa.factory_id,
+            CapaRootCauseVerification.is_verified == True,  # noqa: E712
+        ))
+        if cnt < 1:
+            raise ValueError("D4→D5 需至少 1 条已验证根因记录")
 
     old_status = capa.status
     capa.status = next_state.value
@@ -311,8 +322,6 @@ async def advance_capa(
 
     # Write to MES outbox before commit
     if capa.product_line_code and old_status != capa.status:
-        from sqlalchemy import select
-
         from app.models.mes import MESConnection
         from app.services.mes_service import MESPushService
 
