@@ -36,6 +36,12 @@ async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = Fa
         raise LookupError("目标 FMEA 不存在")
     if fmea.factory_id != capa.factory_id:
         raise PermissionError("目标 FMEA 跨工厂")
+    # 产品线隔离：目标 FMEA 必须与 CAPA 同产品线，防同工厂跨产品线写入（绕过 pl_scope）
+    if fmea.product_line_code != capa.product_line_code:
+        raise PermissionError("目标 FMEA 跨产品线")
+    return fmea
+
+
     return fmea
 
 

@@ -28,10 +28,11 @@ class VerificationCreate(BaseModel):
     @field_validator("root_cause_text")
     @classmethod
     def root_cause_text_must_be_non_empty(cls, v: str) -> str:
-        # 防 D4 门禁被空验证记录绕过：gate 只数 is_verified=True，根因文本必须非空白
+        # 防 D4 门禁被空验证记录绕过：gate 只数 is_verified=True 且绑定当前 d4_root_cause，
+        # 根因文本必须非空白；strip 归一化后落库，与 gate 的 strip 比较一致
         if not v or not v.strip():
             raise ValueError("root_cause_text 不能为空")
-        return v
+        return v.strip()
 
 
 class VerificationUpdate(BaseModel):

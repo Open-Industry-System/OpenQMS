@@ -22,14 +22,14 @@ async def _make_capa(db, factory_id, user_id, d5="措施A", status="D7_PREVENTIO
     return capa
 
 
-async def _make_fmea(db, factory_id, user_id, fm_id="fm-1", cause_id="c-1"):
+async def _make_fmea(db, factory_id, user_id, fm_id="fm-1", cause_id="c-1", pl_code="DC-DC-100"):
     graph = {"nodes": [
         {"id": fm_id, "type": "FailureMode", "name": "虚焊"},
         {"id": cause_id, "type": "FailureCause", "name": "参数偏移"},
     ], "edges": [{"source": cause_id, "target": fm_id, "type": "CAUSE_OF"}]}
     fmea = FMEADocument(
         fmea_id=uuid.uuid4(), document_no=f"PFMEA-D7-{uuid.uuid4().hex[:6]}", title="t",
-        fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=factory_id,
+        fmea_type="PFMEA", product_line_code=pl_code, factory_id=factory_id,
         status="draft", created_by=user_id, graph_data=graph,
     )
     db.add(fmea); await db.flush()
@@ -284,3 +284,24 @@ async def test_auto_fill_d7_rejects_missing_cause_of_edge(db, default_factory, a
         await auto_fill_d7(db, capa, D7AutoFillRequest(
             fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
             failure_cause_node_id="c-2", match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_record_d7_action_rejects_cross_product_line_fmea(db, default_factory, admin_user):
+    # 同工厂、不同产品线 FMEA：防绕过 pl_scope 写入 → PermissionError
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)  # product_line_code=DC-DC-100
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, pl_code="OTHER-PL")
+    with pytest.raises(PermissionError, match="跨产品线"):
+        await record_d7_action(db, capa, D7NodeActionCreate(
+            action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+            failure_cause_node_id="c-1", match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_d7_rejects_cross_product_line_fmea(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, pl_code="OTHER-PL")
+    with pytest.raises(PermissionError, match="跨产品线"):
+        await auto_fill_d7(db, capa, D7AutoFillRequest(
+            fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+            failure_cause_node_id="c-1", match_source="linked"), admin_user)
