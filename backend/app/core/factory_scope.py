@@ -436,3 +436,18 @@ def check_factory_access(factory_id: UUID, scope: "RequestScope"):
             status_code=403,
             detail=f"无权在工厂 '{factory_id}' 下创建记录",
         )
+
+
+def check_product_line_access(product_line_code: str | None, scope: "RequestScope"):
+    """Verify the given product_line_code is within the user's product-line scope.
+
+    Raises HTTPException(403) if not accessible (NONE scope, or EXPLICIT scope
+    that doesn't include the code). Mutations/reads of a specific CAPA/FMEA row
+    must call this AFTER check_factory_access to enforce per-row product-line
+    isolation (LIST endpoints already filter via apply_scope_filter).
+    """
+    pl = scope.pl_scope
+    if pl.mode == "ALL":
+        return
+    if pl.mode == "NONE" or product_line_code is None or pl.codes is None or product_line_code not in pl.codes:
+        raise HTTPException(status_code=403, detail="目标对象不在可访问产品线内")

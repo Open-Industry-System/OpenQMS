@@ -159,3 +159,36 @@ async def test_list_verification_403_without_capa_view(low_perm_client_builder, 
     async with ac:
         r = await ac.get(f"/api/capa/{capa.report_id}/root-cause-verifications")
         assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_adopt_403_when_capa_product_line_out_of_scope(db, default_factory, admin_user):
+    # 用户 pl_scope EXPLICIT 只允许 OTHER-PL；CAPA 在 DC-DC-100 → adopt 应 403（产品线隔离）
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-PL-ADOPT")
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None,
+                       pl_mode="EXPLICIT", pl_codes=["OTHER-PL"])
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post(f"/api/capa/{capa.report_id}/adopt-recommendation",
+            json={"d_step": "d4", "adopted_text": "x", "source": "fmea_graph"})
+        assert r.status_code == 403
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_create_verification_403_when_capa_product_line_out_of_scope(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-PL-CRT")
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None,
+                       pl_mode="EXPLICIT", pl_codes=["OTHER-PL"])
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
+            json={"root_cause_text": "rc"})
+        assert r.status_code == 403
+    app.dependency_overrides.clear()

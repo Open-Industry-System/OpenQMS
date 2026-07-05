@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.core.tenant import tenant_schema
 from app.database import get_db
@@ -616,6 +616,7 @@ async def adopt_recommendation_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
     return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
 
@@ -632,6 +633,7 @@ async def create_verification_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     rec = await capa_verification_service.create_verification(db, capa, req, scope.user)
     return VerificationResponse.model_validate(rec)
 
@@ -648,6 +650,7 @@ async def list_verifications_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     items = await capa_verification_service.list_verifications(db, capa)
     return [VerificationResponse.model_validate(i) for i in items]
 
@@ -664,6 +667,7 @@ async def update_verification_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     try:
         rec = await capa_verification_service.update_verification(db, capa, vid, req, scope.user)
     except LookupError:
@@ -684,6 +688,7 @@ async def d7_record_action_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     try:
         rec = await capa_d7_action_service.record_d7_action(db, capa, req, scope.user)
     except LookupError:
@@ -709,6 +714,7 @@ async def d7_list_actions_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     items = await capa_d7_action_service.list_d7_actions(db, capa)
     return [D7NodeActionResponse.model_validate(i) for i in items]
 
@@ -726,6 +732,7 @@ async def d7_auto_fill_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     try:
         rec, info = await capa_d7_action_service.auto_fill_d7(db, capa, req, scope.user)
     except ValueError as e:

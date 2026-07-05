@@ -177,3 +177,21 @@ async def test_d7_list_403_without_fmea_view(low_perm_client_builder, db, defaul
     async with ac:
         r = await ac.get(f"/api/capa/{capa.report_id}/d7-node-actions")
         assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_d7_record_403_when_capa_product_line_out_of_scope(db, default_factory, admin_user):
+    # 用户 pl_scope EXPLICIT 只允许 OTHER-PL；CAPA 在 DC-DC-100 → D7 record 应 403（产品线隔离）
+    capa, fmea = await _make(db, default_factory.id, admin_user.user_id, "8D-D7-API-PL")
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None,
+                       pl_mode="EXPLICIT", pl_codes=["OTHER-PL"])
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post(f"/api/capa/{capa.report_id}/d7-node-actions",
+            json={"action": "confirmed", "fmea_id": str(fmea.fmea_id),
+                  "failure_mode_node_id": "fm-1", "failure_cause_node_id": "c-1", "match_source": "linked"})
+        assert r.status_code == 403
+    app.dependency_overrides.clear()
