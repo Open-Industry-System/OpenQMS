@@ -23,8 +23,12 @@ from app.schemas.capa import (
     D5RecommendationResponse,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.capa_verification import (
+    AdoptRequest, AdoptResponse, VerificationCreate, VerificationResponse, VerificationUpdate,
+)
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.services import capa_service
+from app.services import capa_verification_service
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
@@ -594,3 +598,70 @@ async def get_capa_lessons(
     )
     await db.commit()
     return result
+
+
+@router.post("/{report_id}/adopt-recommendation", response_model=AdoptResponse)
+async def adopt_recommendation_ep(
+    report_id: uuid.UUID, req: AdoptRequest,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
+    return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
+
+
+@router.post("/{report_id}/root-cause-verifications", response_model=VerificationResponse)
+async def create_verification_ep(
+    report_id: uuid.UUID, req: VerificationCreate,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    rec = await capa_verification_service.create_verification(db, capa, req, scope.user)
+    return VerificationResponse.model_validate(rec)
+
+
+@router.get("/{report_id}/root-cause-verifications", response_model=list[VerificationResponse])
+async def list_verifications_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    items = await capa_verification_service.list_verifications(db, capa)
+    return [VerificationResponse.model_validate(i) for i in items]
+
+
+@router.patch("/{report_id}/root-cause-verifications/{vid}", response_model=VerificationResponse)
+async def update_verification_ep(
+    report_id: uuid.UUID, vid: uuid.UUID, req: VerificationUpdate,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    try:
+        rec = await capa_verification_service.update_verification(db, capa, vid, req, scope.user)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="verification not found")
+    return VerificationResponse.model_validate(rec)
