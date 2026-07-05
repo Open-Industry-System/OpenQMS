@@ -58,6 +58,8 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）
         await db.rollback()
         existing = await _find_existing_adoption(db, capa, req)
+        if existing is None:
+            raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
         await db.refresh(capa)
         return existing, getattr(capa, field) or ""
     await db.refresh(adoption)
