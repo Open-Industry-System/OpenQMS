@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
-from app.models.capa import CapaAIAdoption, CapaRootCauseVerification
+from app.models.capa import CAPAEightD, CapaAIAdoption, CapaRootCauseVerification
 from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services import capa_service
 from app.services.embedding_outbox import enqueue_embedding
@@ -31,6 +31,11 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         await db.refresh(capa)
         return existing, getattr(capa, field) or ""
 
+    # 锁 CAPA 行（FOR UPDATE），串行化并发采纳，防 lost update：
+    # 两个并发采纳都读到旧 current、各自追加，后提交者覆盖前者（追加丢失）
+    await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
+    # 锁后重读 capa 字段，拿到最新值再追加
+    await db.refresh(capa)
     current = getattr(capa, field) or ""
     new_value = f"{current}\n{req.adopted_text}" if current else req.adopted_text
     setattr(capa, field, new_value)

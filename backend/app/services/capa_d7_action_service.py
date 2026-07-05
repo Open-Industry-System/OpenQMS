@@ -42,9 +42,6 @@ async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = Fa
     return fmea
 
 
-    return fmea
-
-
 async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user) -> CapaD7NodeAction:
     await _assert_d7_stage(capa)
     await _fetch_fmea_for_d7(db, capa, req.fmea_id)
@@ -99,7 +96,21 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         },
         operated_by=user.user_id, factory_id=capa.factory_id,
     ))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 并发 confirm/skip 同节点：另一事务先插 → ix_capa_d7_node_unique 兜底。
+        # 回滚后查既有行返回（幂等），不泄漏 500；既有行不存在则重新抛（非 dedupe 冲突）
+        await db.rollback()
+        existing = await db.scalar(select(CapaD7NodeAction).where(
+            CapaD7NodeAction.capa_id == capa.report_id,
+            CapaD7NodeAction.fmea_id == req.fmea_id,
+            CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
+            CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id,
+        ))
+        if existing is None:
+            raise
+        return existing
     await db.refresh(rec)
     return rec
 

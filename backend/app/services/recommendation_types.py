@@ -73,7 +73,7 @@ class RecommendationCandidate:
             "basis": self.metadata.get("basis", ""),
             "confidence": round(self.confidence, 2),
             "match_reason": self.match_reason,
-            "match_source": "rule" if self.source == "rule_engine_measure" else self.source,
+            "match_source": "rule" if self.source in ("rule_engine", "rule_engine_measure") else self.source,
         }
         if self.source == "historical_capa":
             result["source_capa_id"] = self.metadata.get("historical_capa_id")
