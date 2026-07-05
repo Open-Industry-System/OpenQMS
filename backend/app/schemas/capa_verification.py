@@ -1,0 +1,88 @@
+import uuid
+from datetime import datetime
+from typing import Literal
+from pydantic import BaseModel, ConfigDict
+
+
+class AdoptRequest(BaseModel):
+    d_step: Literal["d4", "d5"]
+    adopted_text: str
+    source: str
+    item_ref: dict | None = None
+
+
+class AdoptResponse(BaseModel):
+    adoption_id: uuid.UUID
+    d_step: str
+    field_value: str
+
+
+class VerificationCreate(BaseModel):
+    root_cause_text: str
+    method: str | None = None
+    result: str | None = None
+    is_verified: bool = False
+    evidence_attachments: list[dict] = []
+    source_ref: dict | None = None
+
+
+class VerificationUpdate(BaseModel):
+    method: str | None = None
+    result: str | None = None
+    is_verified: bool | None = None
+    evidence_attachments: list[dict] | None = None
+
+
+class VerificationResponse(BaseModel):
+    verification_id: uuid.UUID
+    capa_id: uuid.UUID
+    root_cause_text: str
+    method: str | None
+    result: str | None
+    is_verified: bool
+    evidence_attachments: list[dict]
+    source_ref: dict | None
+    verified_by: uuid.UUID | None
+    verified_at: datetime | None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class D7NodeActionCreate(BaseModel):
+    action: Literal["confirmed", "skipped"]
+    fmea_id: uuid.UUID
+    failure_mode_node_id: str
+    failure_cause_node_id: str | None = None
+    match_source: str
+    reason: str | None = None
+
+
+class D7AutoFillRequest(BaseModel):
+    fmea_id: uuid.UUID
+    failure_mode_node_id: str
+    failure_cause_node_id: str
+    match_source: str
+
+
+class D7AutoFillResponse(BaseModel):
+    action_id: uuid.UUID
+    prevention_control_node_id: str
+    prevention_control_name_after: str
+    is_new_control: bool
+
+
+class D7NodeActionResponse(BaseModel):
+    action_id: uuid.UUID
+    capa_id: uuid.UUID
+    action: str
+    fmea_id: uuid.UUID
+    failure_mode_node_id: str
+    failure_cause_node_id: str | None
+    match_source: str
+    prevention_control_node_id: str | None
+    prevention_control_name_before: str | None
+    prevention_control_name_after: str | None
+    reason: str | None
+    acted_by: uuid.UUID
+    acted_at: datetime
+    model_config = ConfigDict(from_attributes=True)
