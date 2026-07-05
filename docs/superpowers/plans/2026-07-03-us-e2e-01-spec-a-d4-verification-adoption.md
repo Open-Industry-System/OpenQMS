@@ -12,9 +12,9 @@
 
 - ADR-0001：业务表 PK = Python 端 `uuid.uuid4()`，DB 列 `UUID(as_uuid=True)`，不按 PK 排序（`created_at DESC`）。
 - ADR-0003：所有新表带 `factory_id NOT NULL FK→factories.id`，服务层读写显式 `capa_id + factory_id` 联合过滤，`check_factory_access` 在 handler 层做。
-- ADR-0004：Service 层手写 `AuditLog`（`table_name/record_id/action/changed_fields/operated_by`），不引入 SQLAlchemy event hook。
+- ADR-0004：Service 层手写 `AuditLog`（`table_name/record_id/action/changed_fields/operated_by`），不引入 SQLAlchemy event hook。**`audit_logs.action` 列为 `String(20)`（`backend/app/models/audit.py:19`），新 action 值必须 ≤20 字符。** 本计划使用：`ADOPT_RECOMMENDATION`(20)、`RC_VERIFY`(9)、`D7_AUTO_FILLED_FMEA`(19)、`D7_ACTION_CHANGED`(17)、以及动态 `D7_NODE_{ACTION}`（如 `D7_NODE_CONFIRMED`/`D7_NODE_SKIPPED`/`D7_NODE_AUTO_FILLED`，最长 19）。
 - ADR-0013：Alembic 迁移手写 `op.create_table` / `op.execute`，不用 autogenerate。
-- `SECRET_KEY=test-secret-key-for-pytest-only`（test env 已在 conftest 设置）。
+- `SECRET_KEY=test-secret-key-for-pytest-only`：**`pytest` 命令无需显式传**（`tests/conftest.py:12` 在 collection 前用 `os.environ.setdefault` 注入，先于 `app.config.Settings()` 实例化）；**`alembic` 命令必须显式带 `SECRET_KEY=test-secret-key-for-pytest-only` 前缀**——alembic 走 `alembic/env.py` 直接 import `app.database`→`app.config`，不加载 conftest，而 `Settings` 校验器拒绝默认值 `dev-secret-key-change-in-production`（`backend/app/config.py:51-59`），无前缀则 import 期即报错。
 - 测试 `db` fixture 把 `commit()` 打成 flush-only，服务代码的 `await db.commit()` 在测试里安全。
 - 中文 UI（zh_CN），i18n key 走 `react-i18next`，`frontend/src/test-setup.ts` 已把测试语言切到 en-US。
 - 生产代码仅可加 `data-e2e` testid（不引入测试专属 prod 代码路径）。
@@ -74,12 +74,12 @@
 
 Run:
 ```bash
-cd backend && alembic heads
+cd backend && SECRET_KEY=test-secret-key-for-pytest-only alembic heads
 ```
 若输出 >1 行，先合并：
 ```bash
-alembic merge -m "merge heads before capa verification adoption" $(alembic heads | awk '{print $1}' | paste -sd ' ')
-alembic heads   # 应只剩 1 行 = 新 merge revision
+SECRET_KEY=test-secret-key-for-pytest-only alembic merge -m "merge heads before capa verification adoption" $(SECRET_KEY=test-secret-key-for-pytest-only alembic heads | awk '{print $1}' | paste -sd ' ')
+SECRET_KEY=test-secret-key-for-pytest-only alembic heads   # 应只剩 1 行 = 新 merge revision
 ```
 记下唯一的 head revision id（下文 `<HEAD>`）。若已是单 head，`<HEAD>` 即该值。
 
@@ -93,6 +93,7 @@ from sqlalchemy import select
 from app.models.capa import (
     CAPAEightD, CapaRootCauseVerification, CapaAIAdoption, CapaD7NodeAction,
 )
+from app.models.fmea import FMEADocument
 
 pytestmark = pytest.mark.requires_db
 
@@ -105,6 +106,15 @@ async def test_can_persist_three_new_tables(db, default_factory, admin_user):
         created_by=admin_user.user_id,
     )
     db.add(capa); await db.flush()
+
+    # CapaD7NodeAction.fmea_id 是 FK→fmea_documents.fmea_id，必须先建真实 FMEA 行
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no="PFMEA-MODEL-001", title="t",
+        fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        status="draft", created_by=admin_user.user_id,
+        graph_data={"nodes": [], "edges": []},
+    )
+    db.add(fmea); await db.flush()
 
     rcv = CapaRootCauseVerification(
         verification_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=default_factory.id,
@@ -122,7 +132,7 @@ async def test_can_persist_three_new_tables(db, default_factory, admin_user):
 
     d7 = CapaD7NodeAction(
         action_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=default_factory.id,
-        action="confirmed", fmea_id=uuid.uuid4(), failure_mode_node_id="fm-1",
+        action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id=None, match_source="linked", acted_by=admin_user.user_id,
     )
     db.add(d7); await db.flush()
@@ -275,6 +285,12 @@ def upgrade() -> None:
     )
     op.create_index("ix_capa_adopt_capa_step", "capa_ai_adoption", ["capa_id", "d_step"])
     op.create_index("ix_capa_adopt_factory", "capa_ai_adoption", ["factory_id"])
+    # 幂等去重：同 (capa, d_step, source, item_ref, adopted_text) 重复采纳 → 命中 unique 兜底，服务层 catch 后返回既有 adoption
+    # item_ref 是 JSONB，::text 规范化（JSONB 按规范序存储，::text 确定性）；COALESCE 收口 NULL
+    op.execute(
+        "CREATE UNIQUE INDEX ix_capa_ai_adoption_dedupe ON capa_ai_adoption "
+        "(capa_id, d_step, source, COALESCE(item_ref::text, ''), adopted_text)"
+    )
 
     op.create_table(
         "capa_d7_node_action",
@@ -311,6 +327,7 @@ def downgrade() -> None:
     op.drop_index("ix_capa_d7_factory", table_name="capa_d7_node_action")
     op.drop_index("ix_capa_d7_capa", table_name="capa_d7_node_action")
     op.drop_table("capa_d7_node_action")
+    op.execute("DROP INDEX IF EXISTS ix_capa_ai_adoption_dedupe")
     op.drop_index("ix_capa_adopt_factory", table_name="capa_ai_adoption")
     op.drop_index("ix_capa_adopt_capa_step", table_name="capa_ai_adoption")
     op.drop_table("capa_ai_adoption")
@@ -324,7 +341,7 @@ def downgrade() -> None:
 
 Run:
 ```bash
-cd backend && alembic upgrade head
+cd backend && SECRET_KEY=test-secret-key-for-pytest-only alembic upgrade head
 python -m pytest tests/capa/test_models_verification_adoption.py -x -q
 ```
 Expected: PASS（3 行落库可查回）。
@@ -495,6 +512,39 @@ async def test_adopt_d5_appends_to_d5_correction(db, default_factory, admin_user
     req = AdoptRequest(d_step="d5", adopted_text="措施B", source="historical_capa")
     _, new_value = await adopt_recommendation(db, capa, req, admin_user)
     assert new_value == "措施A\n措施B"
+
+
+@pytest.mark.asyncio
+async def test_adopt_idempotent_same_payload_no_duplicate(db, default_factory, admin_user):
+    # 双击/重试同一条推荐：第二次返回既有 adoption，不重复追加 d-step 文本、不新增行、不新增 audit
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4="rc")
+    req = AdoptRequest(d_step="d4", adopted_text="根因B", source="fmea_graph",
+                       item_ref={"failure_cause_node_id": "c1", "fmea_id": "f1"})
+    first, v1 = await adopt_recommendation(db, capa, req, admin_user)
+    second, v2 = await adopt_recommendation(db, capa, req, admin_user)
+    assert second.adoption_id == first.adoption_id   # 幂等返回既有
+    assert v2 == v1                                   # 字段值不再翻倍
+    await db.refresh(capa)
+    assert capa.d4_root_cause == "rc\n根因B"           # 只追加一次
+    rows = (await db.execute(select(CapaAIAdoption).where(CapaAIAdoption.capa_id == capa.report_id))).scalars().all()
+    assert len(rows) == 1                              # 仅 1 条 adoption
+    audits = (await db.execute(select(AuditLog).where(
+        AuditLog.record_id == capa.report_id, AuditLog.action == "ADOPT_RECOMMENDATION"))).scalars().all()
+    assert len(audits) == 1                            # 仅 1 条 audit
+
+
+@pytest.mark.asyncio
+async def test_adopt_different_item_ref_not_deduped(db, default_factory, admin_user):
+    # 不同 item_ref（不同推荐）应各落一条，不被幂等去重误杀
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4=None)
+    req1 = AdoptRequest(d_step="d4", adopted_text="根因B", source="fmea_graph",
+                         item_ref={"failure_cause_node_id": "c1", "fmea_id": "f1"})
+    req2 = AdoptRequest(d_step="d4", adopted_text="根因B", source="fmea_graph",
+                         item_ref={"failure_cause_node_id": "c2", "fmea_id": "f1"})
+    await adopt_recommendation(db, capa, req1, admin_user)
+    await adopt_recommendation(db, capa, req2, admin_user)
+    rows = (await db.execute(select(CapaAIAdoption).where(CapaAIAdoption.capa_id == capa.report_id))).scalars().all()
+    assert len(rows) == 2
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -600,6 +650,8 @@ class D7NodeActionResponse(BaseModel):
 
 `backend/app/services/capa_verification_service.py`：
 ```python
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
@@ -611,8 +663,26 @@ from app.services.embedding_outbox import enqueue_embedding
 FIELD_MAP = {"d4": "d4_root_cause", "d5": "d5_correction"}
 
 
+async def _find_existing_adoption(db: AsyncSession, capa, req: AdoptRequest):
+    # 幂等去重 key：同 (capa, d_step, source, item_ref, adopted_text)。item_ref 是 JSONB，
+    # SQLAlchemy == None 生成 IS NULL、== {} 生成 = '{}'::jsonb，与 ix_capa_ai_adoption_dedupe 的 COALESCE 收口一致
+    return await db.scalar(select(CapaAIAdoption).where(
+        CapaAIAdoption.capa_id == capa.report_id,
+        CapaAIAdoption.d_step == req.d_step,
+        CapaAIAdoption.source == req.source,
+        CapaAIAdoption.adopted_text == req.adopted_text,
+        CapaAIAdoption.item_ref == req.item_ref,
+    ))
+
+
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     field = FIELD_MAP[req.d_step]
+    # 幂等：重复采纳（双击/重试/代理重发）直接返回既有 adoption，不重复追加 d-step 文本、不重复 audit
+    existing = await _find_existing_adoption(db, capa, req)
+    if existing is not None:
+        await db.refresh(capa)
+        return existing, getattr(capa, field) or ""
+
     current = getattr(capa, field) or ""
     new_value = f"{current}\n{req.adopted_text}" if current else req.adopted_text
     setattr(capa, field, new_value)
@@ -634,7 +704,14 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     ))
     if field in capa_service.EMBEDDING_FIELDS:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）
+        await db.rollback()
+        existing = await _find_existing_adoption(db, capa, req)
+        await db.refresh(capa)
+        return existing, getattr(capa, field) or ""
     await db.refresh(adoption)
     return adoption, new_value
 ```
@@ -763,7 +840,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     db.add(rec)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
-        action="ROOT_CAUSE_VERIFICATION",
+        action="RC_VERIFY",
         changed_fields={
             "is_verified": req.is_verified, "root_cause_text": req.root_cause_text,
             "source_ref": req.source_ref,
@@ -809,7 +886,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         rec.evidence_attachments = req.evidence_attachments
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
-        action="ROOT_CAUSE_VERIFICATION",
+        action="RC_VERIFY",
         changed_fields={"verification_id": str(vid), "is_verified": rec.is_verified,
                         "method": req.method, "result": req.result},
         operated_by=user.user_id, factory_id=capa.factory_id,
@@ -960,7 +1037,7 @@ pytestmark = pytest.mark.requires_db
 
 async def _make_fmea(db, factory_id, user_id, graph=None):
     fmea = FMEADocument(
-        fmea_id=uuid.uuid4(), document_no=f"PFMEA-CORE-{uuid.uuid4().hex[:6]}",
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-CORE-{uuid.uuid4().hex[:6]}", title="t",
         fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=factory_id,
         status="draft", created_by=user_id, graph_data=graph or {"nodes": [], "edges": []},
     )
@@ -1126,8 +1203,10 @@ git commit -m "refactor(fmea): extract _apply_fmea_update no-commit core"
 
 `backend/tests/capa/test_capa_d7_action_service.py`：
 ```python
+import copy
 import uuid
 import pytest
+from sqlalchemy import select
 from app.models.capa import CAPAEightD, CapaD7NodeAction
 from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import D7NodeActionCreate
@@ -1154,7 +1233,7 @@ async def _make_fmea(db, factory_id, user_id, fm_id="fm-1", cause_id="c-1"):
         {"id": cause_id, "type": "FailureCause", "name": "参数偏移"},
     ], "edges": [{"source": cause_id, "target": fm_id, "type": "CAUSE_OF"}]}
     fmea = FMEADocument(
-        fmea_id=uuid.uuid4(), document_no=f"PFMEA-D7-{uuid.uuid4().hex[:6]}",
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-D7-{uuid.uuid4().hex[:6]}", title="t",
         fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=factory_id,
         status="draft", created_by=user_id, graph_data=graph,
     )
@@ -1183,7 +1262,7 @@ async def test_record_idempotent_same_action_and_reason(db, default_factory, adm
     second = await record_d7_action(db, capa, req, admin_user)
     assert second.action_id == first.action_id   # 幂等返回既有行，无新行
     all_rows = (await db.execute(
-        __import__("sqlalchemy").select(CapaD7NodeAction).where(CapaD7NodeAction.capa_id == capa.report_id)
+        select(CapaD7NodeAction).where(CapaD7NodeAction.capa_id == capa.report_id)
     )).scalars().all()
     assert len(all_rows) == 1
 
@@ -1236,6 +1315,7 @@ Expected: FAIL（`ImportError`：service 未建）。
 ```python
 import uuid
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
@@ -1245,11 +1325,18 @@ from app.schemas.capa_verification import D7NodeActionCreate
 
 
 class ConflictError(Exception):
-    """D7 动作幂等冲突（如已 auto_filled 再 auto-fill）—— handler 映射 409。"""
+    """D7 动作幂等冲突（如已 auto_filled 再 auto-fill）—— handler 映 409。"""
 
 
-async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id) -> FMEADocument:
-    fmea = await db.get(FMEADocument, fmea_id)
+async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = False) -> FMEADocument:
+    # lock=True 时 SELECT ... FOR UPDATE，串行化并发 auto-fill（必须在读 graph_data 之前锁，
+    # 否则另一事务可能在读 graph 与 _apply_fmea_update 之间改 FMEA graph）
+    if lock:
+        fmea = (await db.execute(
+            select(FMEADocument).where(FMEADocument.fmea_id == fmea_id).with_for_update()
+        )).scalar_one_or_none()
+    else:
+        fmea = await db.get(FMEADocument, fmea_id)
     if fmea is None:
         raise LookupError("目标 FMEA 不存在")
     if fmea.factory_id != capa.factory_id:
@@ -1278,7 +1365,7 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         existing.acted_at = func.now()
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
-            action="D7_NODE_ACTION_CHANGED",
+            action="D7_ACTION_CHANGED",
             changed_fields={
                 "fmea_id": str(req.fmea_id),
                 "failure_mode_node_id": req.failure_mode_node_id,
@@ -1388,7 +1475,7 @@ async def test_auto_fill_existing_control_captures_before(db, default_factory, a
     ]}
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控")
     fmea = FMEADocument(
-        fmea_id=uuid.uuid4(), document_no=f"PFMEA-EX-{uuid.uuid4().hex[:6]}",
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-EX-{uuid.uuid4().hex[:6]}", title="t",
         fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=default_factory.id,
         status="draft", created_by=admin_user.user_id, graph_data=graph,
     )
@@ -1435,6 +1522,32 @@ async def test_auto_fill_upgrades_confirmed_to_auto_filled(db, default_factory, 
     assert rec.action == "auto_filled"
     rows = (await db.execute(_sel(CapaD7NodeAction).where(CapaD7NodeAction.capa_id == capa.report_id))).scalars().all()
     assert len(rows) == 1   # 升级同一行，未新增
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_integrity_error_maps_to_conflict_not_500(db, default_factory, admin_user, monkeypatch):
+    """并发 auto-fill 撞 ix_capa_d7_node_unique 时应映 ConflictError(409)，不泄漏 IntegrityError/500；
+    rollback 应撤销 FMEA graph 改动（无 stale graph write）。
+    db fixture 是 flush-only，无法起真并发——用 monkeypatch 让首次 commit 抛 IntegrityError 模拟撞约束。"""
+    from sqlalchemy.exc import IntegrityError as _IntErr
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="监控")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    graph_before = copy.deepcopy(fmea.graph_data)
+    req = D7AutoFillRequest(fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+                            failure_cause_node_id="c-1", match_source="linked")
+    real_commit = db.commit
+    calls = {"n": 0}
+    async def _patched_commit(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _IntErr("simulated unique violation", {}, Exception("unique"))
+        return await real_commit(*a, **kw)
+    monkeypatch.setattr(db, "commit", _patched_commit)
+    with pytest.raises(ConflictError):
+        await auto_fill_d7(db, capa, req, admin_user)
+    # 回滚后 FMEA graph 未被污染（stale write 会被 rollback 撤销）
+    await db.refresh(fmea)
+    assert fmea.graph_data == graph_before
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1455,7 +1568,18 @@ from app.services.fmea_service import _apply_fmea_update
 async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     if not capa.d5_correction:
         raise ValueError("D5 永久措施为空，无法自动回填")
-    fmea = await _fetch_fmea_for_d7(db, capa, req.fmea_id)
+    # 锁 FMEA 行（FOR UPDATE），串行化并发 auto-fill；必须在读 graph_data 之前锁，
+    # 否则两个并发请求都读到旧 graph、都过既有行检查，一个 commit 时撞 unique index → 500
+    fmea = await _fetch_fmea_for_d7(db, capa, req.fmea_id, lock=True)
+    # 先查既有行：已 auto_filled 直接 409，必须在改 FMEA graph 之前，避免污染 session
+    existing = await db.scalar(select(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa.report_id,
+        CapaD7NodeAction.fmea_id == req.fmea_id,
+        CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
+        CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id,
+    ))
+    if existing is not None and existing.action == "auto_filled":
+        raise ConflictError("已自动回填")
     graph = copy.deepcopy(fmea.graph_data or {"nodes": [], "edges": []})
     ctrl_node = None
     name_before = None
@@ -1482,15 +1606,8 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     # 复用 FMEA 全部副作用（lock_version++/outbox/cache/embedding），不 commit
     await _apply_fmea_update(db, fmea, title=None, graph_data=graph, user_id=user.user_id)
 
-    existing = await db.scalar(select(CapaD7NodeAction).where(
-        CapaD7NodeAction.capa_id == capa.report_id,
-        CapaD7NodeAction.fmea_id == req.fmea_id,
-        CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
-        CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id,
-    ))
     if existing is not None:
-        if existing.action == "auto_filled":
-            raise ConflictError("已自动回填")
+        # existing.action in {confirmed, skipped} → 升级为 auto_filled（auto_filled 已在上方提前 409）
         old_action = existing.action
         existing.action = "auto_filled"
         existing.prevention_control_node_id = ctrl_node["id"]
@@ -1501,7 +1618,7 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
         rec = existing
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
-            action="D7_NODE_ACTION_CHANGED",
+            action="D7_ACTION_CHANGED",
             changed_fields={"old_action": old_action, "new_action": "auto_filled",
                             "prevention_control_node_id": ctrl_node["id"]},
             operated_by=user.user_id, factory_id=capa.factory_id,
@@ -1529,7 +1646,13 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
         },
         operated_by=user.user_id, factory_id=capa.factory_id,
     ))
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 并发 auto-fill：另一事务先 commit 同 (capa, fmea, fm, cause) → ix_capa_d7_node_unique 兜底
+        # 命中 → 回滚后映 409（不是 500），与"已自动回填"语义一致
+        await db.rollback()
+        raise ConflictError("已自动回填")
     await db.refresh(rec)
     return rec, {
         "prevention_control_node_id": ctrl_node["id"],
@@ -1660,6 +1783,73 @@ async def test_advance_d4_to_d5_blocked_api(capa_client, db, default_factory, ad
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-GATE")
     resp = await capa_client.post(f"/api/capa/{capa.report_id}/advance", json={})
     assert resp.status_code == 400
+
+
+@pytest.fixture
+async def low_perm_client_builder(db, admin_user, default_factory):
+    """工厂：按指定 capa 权限级别构造 AsyncClient（这些端点只校验 CAPA 模块；fmea 固定 5 不影响）。级别用 PermissionLevel 数值（NONE=0/VIEW=1/CREATE=2/EDIT=3/APPROVE=4/ADMIN=5）。"""
+    async def _build(capa_level: int):
+        existing = (await db.execute(select(RolePermission).where(
+            RolePermission.role_id == admin_user.role_id, RolePermission.module == "capa"))).scalar_one_or_none()
+        if existing is None:
+            db.add(RolePermission(role_id=admin_user.role_id, module="capa", permission_level=capa_level))
+        else:
+            existing.permission_level = capa_level
+        await db.flush()
+        scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_request_scope] = lambda: scope
+        return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    yield _build
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_adopt_403_without_capa_edit(low_perm_client_builder, db, default_factory, admin_user):
+    # capa=CREATE(2) < EDIT(3) → adopt 应 403
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-ADOPT-403")
+    ac = await low_perm_client_builder(capa_level=2)
+    async with ac:
+        resp = await ac.post(f"/api/capa/{capa.report_id}/adopt-recommendation",
+            json={"d_step": "d4", "adopted_text": "x", "source": "fmea_graph"})
+        assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_verification_403_without_capa_edit(low_perm_client_builder, db, default_factory, admin_user):
+    # capa=CREATE(2) < EDIT(3) → create verification 应 403
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-CRT-403")
+    ac = await low_perm_client_builder(capa_level=2)
+    async with ac:
+        resp = await ac.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
+            json={"root_cause_text": "rc"})
+        assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_list_verification_200_with_capa_view(low_perm_client_builder, db, default_factory, admin_user):
+    # capa=VIEW(1) ≥ VIEW(1) → list 应 200（先以 EDIT 建一条记录，再降到 VIEW 列举）
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-LIST-200")
+    ac_edit = await low_perm_client_builder(capa_level=3)
+    async with ac_edit:
+        await ac_edit.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
+            json={"root_cause_text": "rc"})
+    ac_view = await low_perm_client_builder(capa_level=1)
+    async with ac_view:
+        r = await ac_view.get(f"/api/capa/{capa.report_id}/root-cause-verifications")
+        assert r.status_code == 200
+        assert len(r.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_verification_403_without_capa_view(low_perm_client_builder, db, default_factory, admin_user):
+    # capa=NONE(0) < VIEW(1) → list 应 403
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-LIST-403")
+    ac = await low_perm_client_builder(capa_level=0)
+    async with ac:
+        r = await ac.get(f"/api/capa/{capa.report_id}/root-cause-verifications")
+        assert r.status_code == 403
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1815,7 +2005,7 @@ async def _make(db, factory_id, user_id, doc_no, d5="监控"):
         created_by=user_id, status="D7_PREVENTION", d5_correction=d5)
     db.add(capa); await db.flush()
     fmea = FMEADocument(
-        fmea_id=uuid.uuid4(), document_no=f"PFMEA-{doc_no}", fmea_type="PFMEA",
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-{doc_no}", title="t", fmea_type="PFMEA",
         product_line_code="DC-DC-100", factory_id=factory_id, status="draft",
         created_by=user_id,
         graph_data={"nodes": [
@@ -1877,7 +2067,7 @@ async def test_d7_record_cross_factory_fmea_403(d7_client, db, default_factory, 
     other = Factory(id=uuid.uuid4(), code="OTHER2", name="Other2")
     db.add(other); await db.flush()
     fmea = FMEADocument(
-        fmea_id=uuid.uuid4(), document_no="PFMEA-X", fmea_type="PFMEA",
+        fmea_id=uuid.uuid4(), document_no="PFMEA-X", title="t", fmea_type="PFMEA",
         product_line_code="DC-DC-100", factory_id=other.id, status="draft",
         created_by=admin_user.user_id, graph_data={"nodes": [], "edges": []})
     db.add(fmea); await db.flush()
@@ -1885,6 +2075,73 @@ async def test_d7_record_cross_factory_fmea_403(d7_client, db, default_factory, 
         json={"action": "confirmed", "fmea_id": str(fmea.fmea_id),
               "failure_mode_node_id": "fm-1", "match_source": "linked"})
     assert r.status_code == 403
+
+
+@pytest.fixture
+async def low_perm_client_builder(db, admin_user, default_factory):
+    """工厂：按指定 capa/fmea 权限级别构造 AsyncClient。级别用 PermissionLevel 数值（NONE=0/VIEW=1/CREATE=2/EDIT=3/APPROVE=4/ADMIN=5）。"""
+    async def _build(capa_level: int, fmea_level: int):
+        for mod, lvl in (("capa", capa_level), ("fmea", fmea_level)):
+            existing = (await db.execute(select(RolePermission).where(
+                RolePermission.role_id == admin_user.role_id, RolePermission.module == mod))).scalar_one_or_none()
+            if existing is None:
+                db.add(RolePermission(role_id=admin_user.role_id, module=mod, permission_level=lvl))
+            else:
+                existing.permission_level = lvl
+        await db.flush()
+        scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+        app.dependency_overrides[get_current_user] = lambda: admin_user
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_request_scope] = lambda: scope
+        return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    yield _build
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_d7_record_403_without_capa_edit(low_perm_client_builder, db, default_factory, admin_user):
+    # capa=CREATE(2) < EDIT(3) → d7-node-actions 应 403（fmea 给到 ADMIN 仍不够）
+    capa, fmea = await _make(db, default_factory.id, admin_user.user_id, "8D-D7-API-6")
+    ac = await low_perm_client_builder(capa_level=2, fmea_level=5)
+    async with ac:
+        r = await ac.post(f"/api/capa/{capa.report_id}/d7-node-actions",
+            json={"action": "confirmed", "fmea_id": str(fmea.fmea_id),
+                  "failure_mode_node_id": "fm-1", "failure_cause_node_id": "c-1", "match_source": "linked"})
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_d7_record_403_without_fmea_view(low_perm_client_builder, db, default_factory, admin_user):
+    # fmea=NONE(0) < VIEW(1) → d7-node-actions 应 403（capa 给到 ADMIN 仍不够）
+    capa, fmea = await _make(db, default_factory.id, admin_user.user_id, "8D-D7-API-7")
+    ac = await low_perm_client_builder(capa_level=5, fmea_level=0)
+    async with ac:
+        r = await ac.post(f"/api/capa/{capa.report_id}/d7-node-actions",
+            json={"action": "confirmed", "fmea_id": str(fmea.fmea_id),
+                  "failure_mode_node_id": "fm-1", "failure_cause_node_id": "c-1", "match_source": "linked"})
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_d7_auto_fill_403_without_fmea_edit(low_perm_client_builder, db, default_factory, admin_user):
+    # fmea=CREATE(2) < EDIT(3) → d7-auto-fill 应 403（capa 给到 ADMIN 仍不够）
+    capa, fmea = await _make(db, default_factory.id, admin_user.user_id, "8D-D7-API-8", d5="新监控")
+    ac = await low_perm_client_builder(capa_level=5, fmea_level=2)
+    async with ac:
+        r = await ac.post(f"/api/capa/{capa.report_id}/d7-auto-fill",
+            json={"fmea_id": str(fmea.fmea_id), "failure_mode_node_id": "fm-1",
+                  "failure_cause_node_id": "c-1", "match_source": "linked"})
+        assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_d7_list_403_without_fmea_view(low_perm_client_builder, db, default_factory, admin_user):
+    # capa=VIEW(1) 但 fmea=NONE(0)：GET /d7-node-actions 返回 FMEA 衍生元数据，读也需 FMEA VIEW → 403
+    capa, _ = await _make(db, default_factory.id, admin_user.user_id, "8D-D7-API-9")
+    ac = await low_perm_client_builder(capa_level=1, fmea_level=0)
+    async with ac:
+        r = await ac.get(f"/api/capa/{capa.report_id}/d7-node-actions")
+        assert r.status_code == 403
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1935,6 +2192,9 @@ async def d7_list_actions_ep(
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    # D7 action 行含 fmea_id/node_id/control 状态，属 FMEA 衍生数据——读也要 FMEA VIEW（与 POST 对齐，防 CAPA-only 用户绕过 FMEA 权限读 D7 元数据）
+    if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -2024,7 +2284,7 @@ describe("capa verification/d7 api", () => {
     (client.post as any).mockResolvedValue({ data: { adoption_id: "a1", d_step: "d4", field_value: "x" } });
     const r = await adoptRecommendation("c1", { d_step: "d4", adopted_text: "x", source: "fmea_graph" });
     expect(client.post).toHaveBeenCalledWith("/capa/c1/adopt-recommendation",
-      { d_step: "d4", adopted_text: "x", source: "fmea_graph", item_ref: undefined });
+      { d_step: "d4", adopted_text: "x", source: "fmea_graph" });
     expect(r.field_value).toBe("x");
   });
 
@@ -2195,8 +2455,10 @@ git commit -m "feat(frontend): capa verification + D7 api functions + types"
 
 `frontend/src/components/capa/D4VerificationCard.test.tsx`：
 ```typescript
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
+configure({ testIdAttribute: "data-e2e" }); // 生产组件用 data-e2e（计划 Global Constraint），切 Testing Library 的 testIdAttribute
+afterAll(() => configure({ testIdAttribute: "data-testid" })); // 复位默认，防止 vitest 非默认隔离配置下泄漏到后续测试文件
 import { App, ConfigProvider } from "antd";
 import D4VerificationCard from "./D4VerificationCard";
 
@@ -2223,7 +2485,8 @@ describe("D4VerificationCard", () => {
     ]);
     renderCard();
     await waitFor(() => expect(screen.queryByTestId("verification-item-0")).toBeInTheDocument());
-    expect(screen.getByTestId("verification-status").textContent).toContain("已验证");
+    // test-setup.ts 把 i18n 切到 en-US，不要断言中文文案；组件 verified 时渲染 "✅"，按图标断言语言无关
+    expect(screen.getByTestId("verification-status").textContent).toContain("✅");
   });
 
   it("creates a verification record on submit", async () => {
@@ -2245,8 +2508,9 @@ describe("D4VerificationCard", () => {
     (updateVerification as any).mockResolvedValue({ verification_id: "v1", is_verified: true });
     renderCard();
     await waitFor(() => expect(screen.queryByTestId("verification-item-0")).toBeInTheDocument());
-    const sw = screen.getByTestId("verification-is-verified").querySelector("button")!;
-    fireEvent.click(sw);
+    // Ant Switch 根节点本身就是 <button>，data-e2e 落在根 button 上——直接 click testid 节点，
+    // 不要再 .querySelector("button")（Switch 内部无子 button，会返回 null 导致 NPE）
+    fireEvent.click(screen.getByTestId("verification-is-verified"));
     await waitFor(() => expect(updateVerification).toHaveBeenCalledWith("c1", "v1", expect.objectContaining({ is_verified: true })));
   });
 });
@@ -2263,7 +2527,7 @@ Expected: FAIL（组件未建）。
 ```tsx
 import { useEffect, useState } from "react";
 import { Card, List, Tag, Button, Form, Input, Switch, Space, App, Empty, Spin, Upload } from "antd";
-import { CheckCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { listVerifications, createVerification, updateVerification } from "../../api/capa";
 import type { Verification } from "../../types";
@@ -2280,7 +2544,7 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause }
 
   const reload = async () => {
     setLoading(true);
-    try { setItems(await listVerifications(capaId)); } catch { message.error(t("d4.loadFailed")); }
+    try { setItems(await listVerifications(capaId)); } catch { message.error(t("d4.verificationLoadFailed")); }
     finally { setLoading(false); }
   };
   useEffect(() => { reload(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [capaId]);
@@ -2351,7 +2615,7 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause }
             </Upload>
           </Form.Item>
           <Form.Item name="is_verified" label={t("d4.isVerified")} valuePropName="checked">
-            <Switch />
+            <Switch data-e2e="verification-form-is-verified" />
           </Form.Item>
           <Space>
             <Button type="primary" htmlType="submit" data-e2e="verification-submit">{t("d4.save")}</Button>
@@ -2364,29 +2628,45 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause }
 }
 ```
 
-- [ ] **Step 4: 加 i18n key**
+- [ ] **Step 4: 追加 i18n key（合并进既有 `d4`/`d5`/`d7` 对象，禁止整体覆盖；统一覆盖 Task 12/13/14/15 全部新增文案）**
 
-`frontend/src/locales/zh-CN/capa.json`（或对应 i18n 文件，按现有结构追加；若 key 文件是 flat JSON，追加）：
+`frontend/src/locales/zh-CN/capa.json` 的 `"d4"` / `"d5"` / `"d7"` 对象**均已存在**（`d4` 现有：`title`/`subtitle`/`empty`/`hint`/`groups`/`adopt`/`skip`/`readonlyTooltip`/`loadFailed`；`d5` 现有：`title`/`controls`/`suggestions`/`controlTypes`/`categories`/`defaultBasis`/`loadFailed`/`adopt`/`skip`/`readonlyTooltip`；`d7` 现有：`title`/`linkedNodes`/`similarNodes`/`empty`/`jump`/`autoFill`/`updated`/`skipped`/`needsNew`/`existing`/`autoFillTooltip*`/`autoFillDisabled*`/`autoFillSuccess`/`autoFillFailed`/`loadFailed`/`matchSource`/`skipDialog*`/`causeLabel`/`skipReason*`）。**只能往对应既有对象里追加下列新 key，不要粘贴整个块覆盖**，否则现有文案会丢。
+
+往 `d4` 对象内追加（zh-CN）：
 ```
-"d4": {
-  "verificationTitle": "D4 现场根因验证",
-  "noVerification": "暂无验证记录",
-  "newVerification": "新增验证",
-  "rootCause": "根因",
-  "method": "验证方法",
-  "result": "验证结果",
-  "evidence": "证据附件",
-  "addEvidence": "添加证据",
-  "isVerified": "已验证",
-  "verified": "已验证",
-  "notVerified": "待验证",
-  "save": "保存",
-  "cancel": "取消",
-  "verificationSaved": "验证记录已保存",
-  "loadFailed": "验证记录加载失败"
-}
+"verificationTitle": "D4 现场根因验证",
+"noVerification": "暂无验证记录",
+"newVerification": "新增验证",
+"rootCause": "根因",
+"method": "验证方法",
+"result": "验证结果",
+"evidence": "证据附件",
+"addEvidence": "添加证据",
+"isVerified": "已验证",
+"verified": "已验证",
+"notVerified": "待验证",
+"save": "保存",
+"cancel": "取消",
+"verificationSaved": "验证记录已保存",
+"verificationLoadFailed": "验证记录加载失败",
+"adopted": "已采纳",
+"adoptFailed": "采纳失败"
 ```
-若 `d4` 已有 key，合并追加新 key。en-US 对应文件补同 key 英文。
+> **注意 key 命名冲突**：现有 `d4.loadFailed` 已是 "加载 D4 推荐失败"（D4RecPanel 用）。D4VerificationCard 的"验证记录加载失败"**必须用新 key `verificationLoadFailed`**，组件代码已对应 `t("d4.verificationLoadFailed")`，不要复用 `loadFailed` 以免误显示推荐面板的文案。`d4.adopted`/`d4.adoptFailed` 由 D4RecPanel 采纳端点调用时使用（Task 13）。
+
+往 `d5` 对象内追加（zh-CN）：
+```
+"adopted": "已采纳",
+"adoptFailed": "采纳失败"
+```
+
+往 `d7` 对象内追加（zh-CN）：
+```
+"actionFailed": "动作保存失败"
+```
+（`d7.autoFillSuccess`/`autoFillFailed` 已存在，D7RecPanel 直接复用；`d7.actionFailed` 是 confirm/skip 落库失败用，区别于 auto-fill 失败。）
+
+en-US 对应文件 `frontend/src/locales/en-US/capa.json` 的 `d4`/`d5`/`d7` 对象追加同 key 英文（如 `"verificationTitle": "D4 On-site Root Cause Verification"`、`"adopted": "Adopted"`、`"adoptFailed": "Adopt failed"`、`"actionFailed": "Action save failed"` 等）。
 
 - [ ] **Step 5: 运行确认通过**
 
@@ -2418,8 +2698,10 @@ git commit -m "feat(frontend): D4VerificationCard component"
 
 `frontend/src/components/capa/D4RecPanel.test.tsx`：
 ```typescript
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
+configure({ testIdAttribute: "data-e2e" }); // 生产组件用 data-e2e（计划 Global Constraint），切 Testing Library 的 testIdAttribute
+afterAll(() => configure({ testIdAttribute: "data-testid" })); // 复位默认，防止 vitest 非默认隔离配置下泄漏到后续测试文件
 import { App, ConfigProvider } from "antd";
 import D4RecPanel from "./D4RecPanel";
 
@@ -2455,6 +2737,32 @@ describe("D4RecPanel adopt", () => {
       item_ref: expect.objectContaining({ failure_cause_node_id: "c1", fmea_id: "f1" }),
     })));
     await waitFor(() => expect(onAdopted).toHaveBeenCalled());
+  });
+
+  it("does not call adoptRecommendation until beforeAdopt resolves (flush-then-adopt ordering)", async () => {
+    // 关键路径：未保存输入保护要求"先 flush 且等待完成再采纳"。用 deferred promise 钉死顺序。
+    let resolveBefore!: () => void;
+    const beforeAdopt = vi.fn().mockReturnValue(new Promise<void>((r) => { resolveBefore = r; }));
+    renderPanel({ beforeAdopt });
+    await waitFor(() => expect(screen.queryByTestId("d4-adopt")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d4-adopt"));
+    await waitFor(() => expect(beforeAdopt).toHaveBeenCalled());
+    // beforeAdopt 未 resolve：让微任务跑完一轮，采纳端点仍不应被调用
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adoptRecommendation).not.toHaveBeenCalled();
+    // resolve beforeAdopt → 采纳端点才被调用
+    resolveBefore();
+    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d4" })));
+  });
+
+  it("does not call adoptRecommendation when beforeAdopt rejects (save failed → block adopt)", async () => {
+    const beforeAdopt = vi.fn().mockRejectedValue(new Error("save failed"));
+    renderPanel({ beforeAdopt });
+    await waitFor(() => expect(screen.queryByTestId("d4-adopt")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d4-adopt"));
+    await waitFor(() => expect(beforeAdopt).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adoptRecommendation).not.toHaveBeenCalled();
   });
 
   it("disables adopt when canAdopt=false", async () => {
@@ -2545,8 +2853,10 @@ git commit -m "feat(frontend): D4RecPanel adopt via endpoint + testids"
 
 `frontend/src/components/capa/D5RecPanel.test.tsx`：
 ```typescript
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
+configure({ testIdAttribute: "data-e2e" }); // 生产组件用 data-e2e（计划 Global Constraint），切 Testing Library 的 testIdAttribute
+afterAll(() => configure({ testIdAttribute: "data-testid" })); // 复位默认，防止 vitest 非默认隔离配置下泄漏到后续测试文件
 import { App, ConfigProvider } from "antd";
 import D5RecPanel from "./D5RecPanel";
 
@@ -2593,6 +2903,30 @@ describe("D5RecPanel adopt", () => {
     await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({
       d_step: "d5", adopted_text: "通用措施", source: "rule",
     })));
+  });
+
+  it("waits for beforeAdopt to resolve before adopting (flush-then-adopt ordering)", async () => {
+    // 关键路径：D5 也要求"先 flush D5 措施且等待完成再采纳"，用 deferred promise 钉死顺序
+    let resolveBefore!: () => void;
+    const beforeAdopt = vi.fn().mockReturnValue(new Promise<void>((r) => { resolveBefore = r; }));
+    renderPanel({ beforeAdopt });
+    await waitFor(() => expect(screen.queryByTestId("d5-adopt-control")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d5-adopt-control"));
+    await waitFor(() => expect(beforeAdopt).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adoptRecommendation).not.toHaveBeenCalled();
+    resolveBefore();
+    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d5" })));
+  });
+
+  it("does not adopt when beforeAdopt rejects (save failed → block adopt)", async () => {
+    const beforeAdopt = vi.fn().mockRejectedValue(new Error("save failed"));
+    renderPanel({ beforeAdopt });
+    await waitFor(() => expect(screen.queryByTestId("d5-adopt-control")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d5-adopt-control"));
+    await waitFor(() => expect(beforeAdopt).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(adoptRecommendation).not.toHaveBeenCalled();
   });
 });
 ```
@@ -2667,8 +3001,10 @@ git commit -m "feat(frontend): D5RecPanel adopt via endpoint + testids"
 
 `frontend/src/components/capa/D7RecPanel.test.tsx`：
 ```typescript
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
+configure({ testIdAttribute: "data-e2e" }); // 生产组件用 data-e2e（计划 Global Constraint），切 Testing Library 的 testIdAttribute
+afterAll(() => configure({ testIdAttribute: "data-testid" })); // 复位默认，防止 vitest 非默认隔离配置下泄漏到后续测试文件
 import { App, ConfigProvider } from "antd";
 import { MemoryRouter } from "react-router-dom";
 import D7RecPanel from "./D7RecPanel";
@@ -2728,7 +3064,18 @@ Expected: FAIL。
 
 - [ ] **Step 3: 改 `D7RecPanel.tsx`**
 
-import 追加 `recordD7Action, listD7Actions, autoFillD7` 与 `D7NodeAction` type。`handleConfirm` 改为异步调端点：
+import 追加 `recordD7Action, listD7Actions, autoFillD7` 与 `D7NodeAction` type。**`D7RecPanelProps` 加 `canAdopt?: boolean`（默认 true，与 D4/D5 RecPanel 一致；read-only 用户禁用三按钮，真正权限仍由后端 403 兜底）**：
+```tsx
+interface D7RecPanelProps {
+  capaId: string;
+  d5Correction: string | null;
+  canAdopt?: boolean;
+  onConfirmationChange: (allConfirmed: boolean, unconfirmedItems: D7UnconfirmedItem[]) => void;
+}
+
+export default function D7RecPanel({ capaId, d5Correction, canAdopt = true, onConfirmationChange }: D7RecPanelProps) {
+```
+`handleConfirm` 改为异步调端点：
 ```tsx
 const [actions, setActions] = useState<D7NodeAction[]>([]);
 
@@ -2772,8 +3119,40 @@ const handleAutoFill = async (rec: D7Recommendation) => {
 `confirmed` 派生改用 `actions`：
 ```tsx
 const actionOf = (rec: D7Recommendation) => actionFor(rec);
+// 现有组件标题 `<Badge count={confirmedCount}>`（D7RecPanel.tsx:256）依赖此计数；
+// 删除 confirmedNodes 后必须改用 actions 派生，否则 Badge 渲染 0/NaN
+const confirmedCount = recommendations.filter((r) => actionFor(r)).length;
 ```
-按钮加 `data-e2e`：确认按钮 `d7-confirm`、跳过按钮 `d7-skip`、自动回填按钮 `d7-auto-fill`。已 `auto_filled` 的节点（`actionOf(rec)?.action === "auto_filled"`）禁用 confirm/skip/auto-fill 按钮并显"已自动回填"锁定态。`onConfirmationChange` 改为从 `actions` + `recommendations` 派生（未确认 = recommendations 中没有对应 action 的项）：
+按钮加 `data-e2e`：确认按钮 `d7-confirm`、跳过按钮 `d7-skip`、自动回填按钮 `d7-auto-fill`。已 `auto_filled` 的节点（`actionOf(rec)?.action === "auto_filled"`）禁用 confirm/skip/auto-fill 按钮并显"已自动回填"锁定态。**每条推荐行 + 状态 Tag 必须按 spec testid 表落 `data-e2e`**（Spec C/E2E 依赖这些选择器），渲染形如：
+```tsx
+{recommendations.map((rec, i) => {
+  const act = actionOf(rec);
+  const locked = act?.action === "auto_filled";
+  return (
+    <List.Item key={`${rec.fmea_id}:${rec.failure_mode_node_id}`} data-e2e={`d7-node-action-${i}`}>
+      {/* ...既有内容... */}
+      {act && (
+        <Tag data-e2e="d7-action-status" className={locked ? "locked" : undefined}>
+          {act.action === "confirmed" ? t("d7.updated")
+            : act.action === "skipped" ? t("d7.skipped")
+            : t("d7.autoFill")}
+        </Tag>
+      )}
+      <Space>
+        <Button size="small" data-e2e="d7-confirm" disabled={locked || !canAdopt}
+          onClick={() => handleConfirm(rec, "confirmed")}>{t("d7.updated")}</Button>
+        <Button size="small" data-e2e="d7-skip" disabled={locked || !canAdopt}
+          onClick={() => handleConfirm(rec, "skipped")}>{t("d7.skipped")}</Button>
+        <Button size="small" data-e2e="d7-auto-fill" disabled={locked || !canAdopt || !d5Correction || !rec.failure_cause_node_id}
+          loading={fillingNode === rec.failure_cause_node_id}
+          onClick={() => handleAutoFill(rec)}>{t("d7.autoFill")}</Button>
+      </Space>
+    </List.Item>
+  );
+})}
+```
+（`locked` 用 className 表达，spec testid 表的 "auto_filled 时带 `locked`" 即此；E2E 可用 `[data-e2e="d7-action-status"].locked` 锁定态断言。）
+`onConfirmationChange` 改为从 `actions` + `recommendations` 派生（未确认 = recommendations 中没有对应 action 的项）：
 ```tsx
 useEffect(() => {
   if (recommendations.length === 0) { onConfirmationChange(true, []); return; }
@@ -2821,10 +3200,8 @@ import D4VerificationCard from "../../components/capa/D4VerificationCard";
                   capaId={id!}
                   canAdopt={canEdit('capa')}
                   beforeAdopt={async () => {
-                    if ((localData.d4_root_cause ?? "") !== (capa.d4_root_cause ?? "")) {
-                      handleUpdate("d4_root_cause", localData.d4_root_cause);
-                      await new Promise(r => setTimeout(r, 0));  // 让 onBlur PUT 触发
-                    }
+                    // handleUpdate 已内部判重（值未变即早返回）并 await PUT；throwOnError=true，保存失败则抛出、不继续采纳
+                    await handleUpdate("d4_root_cause", localData.d4_root_cause, true);
                   }}
                   onAdopted={() => refreshCapa()}
                 />
@@ -2840,10 +3217,7 @@ import D4VerificationCard from "../../components/capa/D4VerificationCard";
                   capaId={id!}
                   canAdopt={canEdit('capa')}
                   beforeAdopt={async () => {
-                    if ((localData.d5_correction ?? "") !== (capa.d5_correction ?? "")) {
-                      handleUpdate("d5_correction", localData.d5_correction);
-                      await new Promise(r => setTimeout(r, 0));
-                    }
+                    await handleUpdate("d5_correction", localData.d5_correction, true);
                   }}
                   onAdopted={() => refreshCapa()}
                 />
@@ -2851,7 +3225,16 @@ import D4VerificationCard from "../../components/capa/D4VerificationCard";
 
 - [ ] **Step 3: D7 区块**
 
-`<D7RecPanel capaId={id!} d5Correction={localData.d5_correction} onConfirmationChange={...} />` 保持（其内部已改调端点）。确认 `d5Correction` 传的是最新 `localData.d5_correction`（已是）。
+`<D7RecPanel capaId={id!} d5Correction={localData.d5_correction} onConfirmationChange={...} />` 改为加 `canAdopt={canEdit('capa')}`（与 D4/D5 RecPanel 一致，read-only 用户禁用三按钮；FMEA VIEW/EDIT 差异仍由后端 403 兜底）：
+```tsx
+<D7RecPanel
+  capaId={id!}
+  d5Correction={localData.d5_correction}
+  canAdopt={canEdit('capa')}
+  onConfirmationChange={...}
+/>
+```
+确认 `d5Correction` 传的是最新 `localData.d5_correction`（已是）。
 
 - [ ] **Step 4: 确认 `refreshCapa` 存在**
 
@@ -2907,7 +3290,7 @@ Expected: 绿（backend pytest + frontend tsc --noEmit + frontend build）。
 
 Run:
 ```bash
-cd backend && alembic downgrade -1 && alembic upgrade head
+cd backend && SECRET_KEY=test-secret-key-for-pytest-only alembic downgrade -1 && SECRET_KEY=test-secret-key-for-pytest-only alembic upgrade head
 ```
 Expected: 干净 down/up 成功（验证 downgrade 可逆）。
 
