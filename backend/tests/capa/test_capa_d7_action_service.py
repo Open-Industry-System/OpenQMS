@@ -1,11 +1,12 @@
+import copy
 import uuid
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, select as _sel
 from app.models.capa import CAPAEightD, CapaD7NodeAction
 from app.models.fmea import FMEADocument
-from app.schemas.capa_verification import D7NodeActionCreate
+from app.schemas.capa_verification import D7AutoFillRequest, D7NodeActionCreate
 from app.services.capa_d7_action_service import (
-    record_d7_action, list_d7_actions,
+    ConflictError, auto_fill_d7, list_d7_actions, record_d7_action,
 )
 
 pytestmark = pytest.mark.requires_db
@@ -119,3 +120,118 @@ async def test_list_d7_actions_filters_by_capa_and_orders_desc(db, default_facto
     assert all(r.capa_id == capa_a.report_id for r in rows)
     assert all(r.factory_id == capa_a.factory_id for r in rows)
     assert {r.action for r in rows} == {"confirmed", "skipped"}
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_new_control_persists_graph(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    rec, info = await auto_fill_d7(db, capa, D7AutoFillRequest(
+        fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1", match_source="linked"), admin_user)
+    assert info["is_new_control"] is True
+    assert info["prevention_control_name_after"] == "新监控"
+    # 重新查询 FMEA，graph_data 已持久化（防原地改 JSONB）
+    refreshed = await db.get(FMEADocument, fmea.fmea_id)
+    ctrl = [n for n in refreshed.graph_data["nodes"] if n["type"] == "PreventionControl"]
+    assert len(ctrl) == 1
+    assert ctrl[0]["name"] == "新监控"
+    assert rec.action == "auto_filled"
+    assert rec.prevention_control_name_after == "新监控"
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_existing_control_captures_before(db, default_factory, admin_user):
+    ctrl_id = "ctrl-1"
+    graph = {"nodes": [
+        {"id": "fm-1", "type": "FailureMode", "name": "虚焊"},
+        {"id": "c-1", "type": "FailureCause", "name": "参数偏移"},
+        {"id": ctrl_id, "type": "PreventionControl", "name": "旧监控"},
+    ], "edges": [
+        {"source": "c-1", "target": "fm-1", "type": "CAUSE_OF"},
+        {"source": "c-1", "target": ctrl_id, "type": "PREVENTED_BY"},
+    ]}
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控")
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-EX-{uuid.uuid4().hex[:6]}", title="t",
+        fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        status="draft", created_by=admin_user.user_id, graph_data=graph,
+    )
+    db.add(fmea); await db.flush()
+    rec, info = await auto_fill_d7(db, capa, D7AutoFillRequest(
+        fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1", match_source="linked"), admin_user)
+    assert info["is_new_control"] is False
+    assert rec.prevention_control_name_before == "旧监控"
+    assert rec.prevention_control_name_after == "新监控"
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_d5_empty_raises(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5=None)
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    with pytest.raises(ValueError):
+        await auto_fill_d7(db, capa, D7AutoFillRequest(
+            fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+            failure_cause_node_id="c-1", match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_idempotent_conflict(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="监控")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    req = D7AutoFillRequest(fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+                            failure_cause_node_id="c-1", match_source="linked")
+    await auto_fill_d7(db, capa, req, admin_user)
+    with pytest.raises(ConflictError):
+        await auto_fill_d7(db, capa, req, admin_user)
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_upgrades_confirmed_to_auto_filled(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="监控")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await record_d7_action(db, capa, D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1", match_source="linked"), admin_user)
+    rec, info = await auto_fill_d7(db, capa, D7AutoFillRequest(
+        fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1", match_source="linked"), admin_user)
+    assert rec.action == "auto_filled"
+    rows = (await db.execute(_sel(CapaD7NodeAction).where(CapaD7NodeAction.capa_id == capa.report_id))).scalars().all()
+    assert len(rows) == 1   # 升级同一行，未新增
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_integrity_error_maps_to_conflict_not_500(db, default_factory, admin_user, monkeypatch):
+    """并发 auto-fill 撞 ix_capa_d7_node_unique 时应映 ConflictError(409)，不泄漏 IntegrityError/500；
+    rollback 应撤销 FMEA graph 改动（无 stale graph write）。
+    db fixture 是 flush-only，无法起真并发——用 monkeypatch 让首次 commit 抛 IntegrityError 模拟撞约束。"""
+    from sqlalchemy.exc import IntegrityError as _IntErr
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="监控")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    graph_before = copy.deepcopy(fmea.graph_data)
+    req = D7AutoFillRequest(fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+                            failure_cause_node_id="c-1", match_source="linked")
+    real_commit = db.commit
+    calls = {"n": 0}
+    async def _patched_commit(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _IntErr("simulated unique violation", {}, Exception("unique"))
+        return await real_commit(*a, **kw)
+    monkeypatch.setattr(db, "commit", _patched_commit)
+    # db fixture 包了一层外层事务；service 真调 db.rollback() 会连外层 tx 一起回滚，
+    # fmea 行被删 → db.refresh 抛 InvalidRequestError。改用 SAVEPOINT：把 service 的
+    # rollback 引导到 savepoint.rollback()，仅回滚 savepoint 内的 pending graph 改动，
+    # 外层 tx 与 fmea 行保留，refresh 能从 DB 重读原始 graph（验证 stale write 被撤销）。
+    # ConflictError 映射仍由 service 真实 raise 路径验证。
+    sp = await db.begin_nested()
+    async def _sp_rollback(*a, **kw):
+        await sp.rollback()
+    monkeypatch.setattr(db, "rollback", _sp_rollback)
+    with pytest.raises(ConflictError):
+        await auto_fill_d7(db, capa, req, admin_user)
+    # savepoint 回滚后 pending graph 改动撤销；refresh 从 DB 重读原始 graph
+    await db.refresh(fmea)
+    assert fmea.graph_data == graph_before
