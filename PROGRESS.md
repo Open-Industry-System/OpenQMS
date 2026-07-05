@@ -25,9 +25,9 @@
 
 对照 `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（v6，定稿）逐条审计当前系统实现的结果。**结论：故事结构上无法端到端通过**，需先补齐以下产品实现，再写故事级 spec `capa-story-closed-loop.spec.ts`。审计口径：代码路径（models/api/services/state_machines + frontend components/e2e），未跑运行时。
 
-**进度**：6 项已完成（约 40%） / 11 项待补（P0×4 / P1×6 / P2×1）
+**进度**：8 项已完成（约 50%） / 9 项待补（P0×2 / P1×6 / P2×1）
 
-### 已完成 ✅（约 40%）
+### 已完成 ✅（约 50%）
 
 - [x] **CAPA 8D 状态机 D1→D2→…→D8_CLOSURE 严格顺序** —— `backend/app/state_machines/eightd_state.py`
 - [x] **权限模型**：D1-D6 需编辑权限、D7→D8 需 `canApprove('capa')` —— `backend/app/api/capa.py:189 advance_capa`
@@ -38,18 +38,18 @@
 
 ### 待补（P0 — 补齐后故事才能落地）
 
-1. [ ] **P0-1 D4 现场根因验证子流程** — 故事验收：「根因必须经现场验证才可确认；验证记录（方法/结果/证据）落库且可追溯；未验证的根因不能推进 D4→D5」
+1. [x] **P0-1 D4 现场根因验证子流程** — 故事验收：「根因必须经现场验证才可确认；验证记录（方法/结果/证据）落库且可追溯；未验证的根因不能推进 D4→D5」
    - 当前 `d4_root_cause` 只是单个 `Text` 列，**无** 方法/结果/证据字段，**无** 附件表关联，**无** D4→D5 阻断校验
-   - **交付物**：新表 `capa_root_cause_verification`（`capa_id, root_cause_text, method, result, evidence_attachments(JSONB), verified_by, verified_at, is_verified`）+ API（create/list/update） + `D4RecPanel` 增加「候选根因 → 验证卡」子面板（method 输入 / result 选择 / 证据附件上传）+ `advance_capa` 在 `D4_ROOT_CAUSE → D5_CORRECTION` 时校验至少 1 条 `is_verified=true` 记录
+   - **交付物**：新表 `capa_root_cause_verification`（`capa_id, root_cause_text, method, result, evidence_attachments(JSONB), verified_by, verified_at, is_verified`）+ API（create/list/update） + `D4RecPanel` 增加「候选根因 → 验证卡」子面板（method 输入 / result 选择 / 证据附件上传）+ `advance_capa` 在 `D4_ROOT_CAUSE → D5_CORRECTION` 时校验至少 1 条 `is_verified=true` 记录 (Spec A 已落地，commit 见 git log)
 2. [ ] **P0-2 AI 推荐 12 阶段可视化 DAG 面板** — 故事验收：「触发 D4/D5 推荐后，流程编排面板出现，展示 12 阶段（名称/来源/状态 pending·running·done·skipped·error/命中数·摘要）」
    - 当前 `D4RecPanel.tsx` 仅按 `match_source` 分组（5 组），无 stage/status 概念；后端也无 stage 事件流
    - **交付物**：新服务 `RecommendationOrchestrator` 把现有 sources 组织成 12 阶段执行图，返回 `{stages: [{name, source, status, hit_count, summary, error?}], items: [...]}`；`D4/D5RecPanel` 增加 `<RecommendationDAG>` 组件（12 节点 + 状态色 + 命中数徽标）；无 LLM 凭证时相关阶段 `status="skipped"` 且带 reason
 3. [ ] **P0-3 AI 推荐来源 provenance 落地到 UI + testid** — 故事验收：「最终推荐列表非空、**每条带来源标签**」
    - 后端已有 `match_source`（linked/keyword/rule/llm/historical_capa/semantic_search/fmea_graph）但 UI 层无 `data-e2e` 钩子
    - **交付物**：`<RecItem>` 渲染 `<Tag data-e2e="rec-source-{source}">` + 阶段命中位置徽标；每条推荐 payload 增加 `stage_index` 便于 UI 关联到 DAG 节点
-4. [ ] **P0-4 AI 采纳审计留痕** — 故事验收：「AI 推荐采纳 + 根因验证记录留痕（含来源）」
+4. [x] **P0-4 AI 采纳审计留痕** — 故事验收：「AI 推荐采纳 + 根因验证记录留痕（含来源）」
    - `grep "adopt_recommendation|recommendation_audit"` = 0 命中；当前采纳只把文本追加到 `d4_root_cause`/`d5_correction`，未记录 which item / from which source / at what stage
-   - **交付物**：新表 `capa_ai_adoption`（`capa_id, d_step, adopted_text, source, stage_index, item_ref, adopted_by, adopted_at`）；D4/D5/D7 采纳按钮点击时 insert 记录并写 `AuditLog(action='ADOPT_RECOMMENDATION', metadata={source, stage})`
+   - **交付物**：新表 `capa_ai_adoption`（`capa_id, d_step, adopted_text, source, stage_index, item_ref, adopted_by, adopted_at`）；D4/D5/D7 采纳按钮点击时 insert 记录并写 `AuditLog(action='ADOPT_RECOMMENDATION', metadata={source, stage})` (Spec A 已落地，commit 见 git log)
 
 ### 待补（P1 — 4 类推荐源接入）
 
@@ -68,7 +68,7 @@
 
 ### 补齐建议顺序
 
-`P0-1 (D4 验证) → P0-4 (采纳审计) → P0-2 (DAG 面板) → P0-3 (provenance UI) → P1-5/6 (SPC/IQC 源) → P2-11 (故事 spec) → P1-7~10 (MES/供货/同类型/lessons，视实际 ROI 决定)`
+`[x] P0-1 (D4 验证) → [x] P0-4 (采纳审计) → [ ] P0-2 (DAG 面板) → [ ] P0-3 (provenance UI) → [ ] P1-5/6 (SPC/IQC 源) → [ ] P2-11 (故事 spec) → [ ] P1-7~10 (MES/供货/同类型/lessons，视实际 ROI 决定)`
 
 理由：D4 验证 + 采纳审计是**数据模型缺口**，先落表结构；DAG + provenance 是**观测层缺口**，依赖 orchestrator；4 类源里 SPC/IQC 数据已在库最优先；MES/供货/同类型/lessons 优先级由业务实际数据密度决定。
 
