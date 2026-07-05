@@ -24,11 +24,15 @@ from app.schemas.capa import (
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
 from app.schemas.capa_verification import (
-    AdoptRequest, AdoptResponse, VerificationCreate, VerificationResponse, VerificationUpdate,
+    AdoptRequest, AdoptResponse, D7AutoFillRequest, D7AutoFillResponse,
+    D7NodeActionCreate, D7NodeActionResponse,
+    VerificationCreate, VerificationResponse, VerificationUpdate,
 )
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
+from app.services import capa_d7_action_service
 from app.services import capa_service
 from app.services import capa_verification_service
+from app.services.capa_d7_action_service import ConflictError
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
@@ -665,3 +669,74 @@ async def update_verification_ep(
     except LookupError:
         raise HTTPException(status_code=404, detail="verification not found")
     return VerificationResponse.model_validate(rec)
+
+
+@router.post("/{report_id}/d7-node-actions", response_model=D7NodeActionResponse)
+async def d7_record_action_ep(
+    report_id: uuid.UUID, req: D7NodeActionCreate,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    try:
+        rec = await capa_d7_action_service.record_d7_action(db, capa, req, scope.user)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="目标 FMEA 跨工厂")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return D7NodeActionResponse.model_validate(rec)
+
+
+@router.get("/{report_id}/d7-node-actions", response_model=list[D7NodeActionResponse])
+async def d7_list_actions_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    # D7 action 行含 fmea_id/node_id/control 状态，属 FMEA 衍生数据——读也要 FMEA VIEW（与 POST 对齐，防 CAPA-only 用户绕过 FMEA 权限读 D7 元数据）
+    if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    items = await capa_d7_action_service.list_d7_actions(db, capa)
+    return [D7NodeActionResponse.model_validate(i) for i in items]
+
+
+@router.post("/{report_id}/d7-auto-fill", response_model=D7AutoFillResponse)
+async def d7_auto_fill_ep(
+    report_id: uuid.UUID, req: D7AutoFillRequest,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    try:
+        rec, info = await capa_d7_action_service.auto_fill_d7(db, capa, req, scope.user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="目标 FMEA 跨工厂")
+    except ConflictError:
+        raise HTTPException(status_code=409, detail="已自动回填")
+    return D7AutoFillResponse(action_id=rec.action_id,
+                              prevention_control_node_id=info["prevention_control_node_id"],
+                              prevention_control_name_after=info["prevention_control_name_after"],
+                              is_new_control=info["is_new_control"])
