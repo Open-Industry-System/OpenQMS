@@ -1,4 +1,3 @@
-import copy
 import uuid
 import pytest
 from sqlalchemy import select
@@ -6,7 +5,7 @@ from app.models.capa import CAPAEightD, CapaD7NodeAction
 from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import D7NodeActionCreate
 from app.services.capa_d7_action_service import (
-    ConflictError, record_d7_action, list_d7_actions,
+    record_d7_action, list_d7_actions,
 )
 
 pytestmark = pytest.mark.requires_db
@@ -97,3 +96,26 @@ async def test_record_cross_factory_fmea_permission(db, default_factory, admin_u
         await record_d7_action(db, capa, D7NodeActionCreate(
             action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
             match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_list_d7_actions_filters_by_capa_and_orders_desc(db, default_factory, admin_user):
+    capa_a = await _make_capa(db, default_factory.id, admin_user.user_id)
+    fmea_a1 = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id="fm-1", cause_id="c-1")
+    await record_d7_action(db, capa_a, D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea_a1.fmea_id, failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1", match_source="linked"), admin_user)
+    fmea_a2 = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id="fm-2", cause_id="c-2")
+    await record_d7_action(db, capa_a, D7NodeActionCreate(
+        action="skipped", fmea_id=fmea_a2.fmea_id, failure_mode_node_id="fm-2",
+        failure_cause_node_id="c-2", match_source="manual", reason="不适用"), admin_user)
+    capa_b = await _make_capa(db, default_factory.id, admin_user.user_id)
+    fmea_b = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id="fm-b", cause_id="c-b")
+    await record_d7_action(db, capa_b, D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea_b.fmea_id, failure_mode_node_id="fm-b",
+        failure_cause_node_id="c-b", match_source="linked"), admin_user)
+    rows = await list_d7_actions(db, capa_a)
+    assert len(rows) == 2
+    assert all(r.capa_id == capa_a.report_id for r in rows)
+    assert all(r.factory_id == capa_a.factory_id for r in rows)
+    assert {r.action for r in rows} == {"confirmed", "skipped"}
