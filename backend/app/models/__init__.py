@@ -19,7 +19,9 @@ from app.models.audit_finding import AuditFinding
 from app.models.audit_plan import AuditPlan
 from app.models.audit_program import AuditChecklistTemplate, AuditProgram, AuditProgramTargetFactory
 from app.models.bias import BiasMeasurement, BiasResult, BiasStudy
-from app.models.capa import CAPAEightD
+from app.models.capa import (
+    CAPAEightD, CapaAIAdoption, CapaD7NodeAction, CapaRootCauseVerification,
+)
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
 from app.models.control_plan import ControlPlan, ControlPlanItem

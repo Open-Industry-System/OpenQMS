@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,3 +40,52 @@ class CAPAEightD(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class CapaRootCauseVerification(Base):
+    __tablename__ = "capa_root_cause_verification"
+    verification_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    root_cause_text: Mapped[str] = mapped_column(Text, nullable=False)
+    method: Mapped[str | None] = mapped_column(Text)
+    result: Mapped[str | None] = mapped_column(Text)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    evidence_attachments: Mapped[list] = mapped_column(JSONB, default=lambda: [])
+    source_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    verified_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CapaAIAdoption(Base):
+    __tablename__ = "capa_ai_adoption"
+    adoption_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    d_step: Mapped[str] = mapped_column(String(8), nullable=False)
+    adopted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    stage_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    adopted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    adopted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CapaD7NodeAction(Base):
+    __tablename__ = "capa_d7_node_action"
+    action_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    fmea_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id"), nullable=False)
+    failure_mode_node_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    failure_cause_node_id: Mapped[str | None] = mapped_column(String(36))
+    match_source: Mapped[str] = mapped_column(String(40), nullable=False)
+    prevention_control_node_id: Mapped[str | None] = mapped_column(String(36))
+    prevention_control_name_before: Mapped[str | None] = mapped_column(Text)
+    prevention_control_name_after: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    acted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    acted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
