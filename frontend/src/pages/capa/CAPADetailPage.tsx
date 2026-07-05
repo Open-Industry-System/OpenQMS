@@ -518,12 +518,6 @@ export default function CAPADetailPage() {
                 <D5RecPanel
                   capaId={id!}
                   canAdopt={canEdit('capa')}
-                  onAdopt={(text) => {
-                    const current = localData.d5_correction || "";
-                    const newVal = current ? `${current}\n${text}` : text;
-                    setLocalData({ ...localData, d5_correction: newVal });
-                    handleUpdate("d5_correction", newVal);
-                  }}
                 />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d5", t("fields.d5Label", "永久纠正措施"))}>
