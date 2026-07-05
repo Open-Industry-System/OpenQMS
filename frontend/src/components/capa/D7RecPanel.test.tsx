@@ -29,6 +29,14 @@ const renderPanel = (props = {}) => render(
 beforeEach(() => vi.clearAllMocks());
 
 describe("D7RecPanel", () => {
+  it("renders recommendations with d7-confirm/d7-skip/d7-auto-fill testids", async () => {
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId("d7-node-action-0")).toBeInTheDocument());
+    expect(screen.getByTestId("d7-confirm")).toBeInTheDocument();
+    expect(screen.getByTestId("d7-skip")).toBeInTheDocument();
+    expect(screen.getByTestId("d7-auto-fill")).toBeInTheDocument();
+  });
+
   it("records confirmed action via endpoint", async () => {
     renderPanel();
     await waitFor(() => expect(screen.queryByTestId("d7-confirm")).toBeInTheDocument());
