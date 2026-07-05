@@ -2,12 +2,12 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
-from app.models.capa import CAPAEightD
+from app.models.capa import CAPAEightD, CapaD7NodeAction
 from app.models.control_plan import ControlPlan
 from app.models.customer_quality import CustomerComplaint, RMARecord
 from app.models.fmea import FMEADocument
@@ -314,6 +314,13 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     # ControlPlan / CAPA / etc. doesn't raise IntegrityError. Mirrors the
     # ondelete=SET NULL already used by apqp.
     await _null_out_fmea_references(db, fmea_id)
+    # capa_d7_node_action.fmea_id is NOT NULL (ON DELETE CASCADE at DB level for
+    # fresh schemas), but also clean explicitly so deletion works on schemas
+    # where the constraint is still NO ACTION, and to mirror the app-level
+    # cleanup pattern above. D7 action state is meaningless once the FMEA is
+    # gone; the AuditLog D7_NODE_* / D7_AUTO_FILLED_FMEA entries still record
+    # what happened.
+    await db.execute(delete(CapaD7NodeAction).where(CapaD7NodeAction.fmea_id == fmea_id))
     await db.delete(fmea)
     await db.commit()
 

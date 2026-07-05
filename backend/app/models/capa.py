@@ -79,7 +79,7 @@ class CapaD7NodeAction(Base):
     capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
     factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
     action: Mapped[str] = mapped_column(String(20), nullable=False)
-    fmea_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id"), nullable=False)
+    fmea_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=False)
     failure_mode_node_id: Mapped[str] = mapped_column(String(36), nullable=False)
     failure_cause_node_id: Mapped[str | None] = mapped_column(String(36))
     match_source: Mapped[str] = mapped_column(String(40), nullable=False)

@@ -71,7 +71,7 @@ def upgrade() -> None:
                   sa.ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("action", sa.String(20), nullable=False),
         sa.Column("fmea_id", postgresql.UUID(as_uuid=True),
-                  sa.ForeignKey("fmea_documents.fmea_id"), nullable=False),
+                  sa.ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=False),
         sa.Column("failure_mode_node_id", sa.String(36), nullable=False),
         sa.Column("failure_cause_node_id", sa.String(36)),
         sa.Column("match_source", sa.String(40), nullable=False),

@@ -305,3 +305,19 @@ async def test_auto_fill_d7_rejects_cross_product_line_fmea(db, default_factory,
         await auto_fill_d7(db, capa, D7AutoFillRequest(
             fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
             failure_cause_node_id="c-1", match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_fmea_delete_cascades_d7_actions(db, default_factory, admin_user):
+    # capa_d7_node_action.fmea_id ON DELETE CASCADE：删 FMEA 不应 IntegrityError，
+    # 且其 D7 action 行应被级联删除（D7 action 状态在 FMEA 删除后无意义）
+    from app.services.fmea_service import delete_fmea
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await record_d7_action(db, capa, D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1", match_source="linked"), admin_user)
+    await delete_fmea(db, fmea.fmea_id, admin_user.user_id)
+    rows = (await db.execute(select(CapaD7NodeAction).where(
+        CapaD7NodeAction.fmea_id == fmea.fmea_id))).scalars().all()
+    assert len(rows) == 0
