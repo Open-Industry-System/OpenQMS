@@ -1,10 +1,10 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
-from app.models.capa import CapaAIAdoption
-from app.schemas.capa_verification import AdoptRequest
+from app.models.capa import CapaAIAdoption, CapaRootCauseVerification
+from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services import capa_service
 from app.services.embedding_outbox import enqueue_embedding
 
@@ -64,3 +64,72 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         return existing, getattr(capa, field) or ""
     await db.refresh(adoption)
     return adoption, new_value
+
+
+async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user):
+    rec = CapaRootCauseVerification(
+        capa_id=capa.report_id, factory_id=capa.factory_id,
+        root_cause_text=req.root_cause_text, method=req.method, result=req.result,
+        is_verified=req.is_verified, evidence_attachments=req.evidence_attachments,
+        source_ref=req.source_ref,
+        verified_by=user.user_id if req.is_verified else None,
+        verified_at=func.now() if req.is_verified else None,
+        created_at=func.clock_timestamp(),
+    )
+    db.add(rec)
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id,
+        action="RC_VERIFY",
+        changed_fields={
+            "is_verified": req.is_verified, "root_cause_text": req.root_cause_text,
+            "source_ref": req.source_ref,
+        },
+        operated_by=user.user_id, factory_id=capa.factory_id,
+    ))
+    await db.commit()
+    await db.refresh(rec)
+    return rec
+
+
+async def list_verifications(db: AsyncSession, capa):
+    result = await db.execute(
+        select(CapaRootCauseVerification)
+        .where(CapaRootCauseVerification.capa_id == capa.report_id,
+               CapaRootCauseVerification.factory_id == capa.factory_id)
+        .order_by(CapaRootCauseVerification.created_at.desc()))
+    return list(result.scalars().all())
+
+
+async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpdate, user):
+    rec = await db.scalar(select(CapaRootCauseVerification).where(
+        CapaRootCauseVerification.verification_id == vid,
+        CapaRootCauseVerification.capa_id == capa.report_id,
+        CapaRootCauseVerification.factory_id == capa.factory_id,
+    ))
+    if rec is None:
+        raise LookupError("verification not found")
+    if req.is_verified is not None and req.is_verified != rec.is_verified:
+        if req.is_verified:
+            rec.is_verified = True
+            rec.verified_by = user.user_id
+            rec.verified_at = func.now()
+        else:
+            rec.is_verified = False
+            rec.verified_by = None
+            rec.verified_at = None
+    if req.method is not None:
+        rec.method = req.method
+    if req.result is not None:
+        rec.result = req.result
+    if req.evidence_attachments is not None:
+        rec.evidence_attachments = req.evidence_attachments
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id,
+        action="RC_VERIFY",
+        changed_fields={"verification_id": str(vid), "is_verified": rec.is_verified,
+                        "method": req.method, "result": req.result},
+        operated_by=user.user_id, factory_id=capa.factory_id,
+    ))
+    await db.commit()
+    await db.refresh(rec)
+    return rec

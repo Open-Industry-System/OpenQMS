@@ -2,9 +2,11 @@ import uuid
 import pytest
 from sqlalchemy import select
 from app.models.audit import AuditLog
-from app.models.capa import CAPAEightD, CapaAIAdoption
-from app.schemas.capa_verification import AdoptRequest
-from app.services.capa_verification_service import adopt_recommendation
+from app.models.capa import CAPAEightD, CapaAIAdoption, CapaRootCauseVerification
+from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
+from app.services.capa_verification_service import (
+    adopt_recommendation, create_verification, list_verifications, update_verification,
+)
 
 pytestmark = pytest.mark.requires_db
 
@@ -89,3 +91,66 @@ async def test_adopt_different_item_ref_not_deduped(db, default_factory, admin_u
     await adopt_recommendation(db, capa, req2, admin_user)
     rows = (await db.execute(select(CapaAIAdoption).where(CapaAIAdoption.capa_id == capa.report_id))).scalars().all()
     assert len(rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_verification_is_verified_sets_verifier(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    req = VerificationCreate(root_cause_text="rc", method="m", result="r", is_verified=True)
+    rec = await create_verification(db, capa, req, admin_user)
+    assert rec.is_verified is True
+    assert rec.verified_by == admin_user.user_id
+    assert rec.verified_at is not None
+
+
+@pytest.mark.asyncio
+async def test_create_verification_not_verified_no_verifier(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    req = VerificationCreate(root_cause_text="rc", is_verified=False)
+    rec = await create_verification(db, capa, req, admin_user)
+    assert rec.is_verified is False
+    assert rec.verified_by is None
+    assert rec.verified_at is None
+
+
+@pytest.mark.asyncio
+async def test_update_flip_false_to_true_sets_verifier(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc"), admin_user)
+    assert rec.verified_by is None
+    updated = await update_verification(db, capa, rec.verification_id,
+                                        VerificationUpdate(is_verified=True), admin_user)
+    assert updated.is_verified is True
+    assert updated.verified_by == admin_user.user_id
+    assert updated.verified_at is not None
+
+
+@pytest.mark.asyncio
+async def test_update_flip_true_to_false_clears_verifier(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", is_verified=True), admin_user)
+    updated = await update_verification(db, capa, rec.verification_id,
+                                        VerificationUpdate(is_verified=False), admin_user)
+    assert updated.is_verified is False
+    assert updated.verified_by is None
+    assert updated.verified_at is None
+
+
+@pytest.mark.asyncio
+async def test_update_other_capa_record_returns_404_lookup(db, default_factory, admin_user):
+    capa_a = await _make_capa(db, default_factory.id, admin_user.user_id, doc_no="8D-A")
+    capa_b = await _make_capa(db, default_factory.id, admin_user.user_id, doc_no="8D-B")
+    rec_b = await create_verification(db, capa_b, VerificationCreate(root_cause_text="b"), admin_user)
+    # 用 capa_a 的上下文去改 capa_b 的记录 → LookupError
+    with pytest.raises(LookupError):
+        await update_verification(db, capa_a, rec_b.verification_id,
+                                  VerificationUpdate(is_verified=True), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_list_verifications_desc_by_created(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    await create_verification(db, capa, VerificationCreate(root_cause_text="first"), admin_user)
+    await create_verification(db, capa, VerificationCreate(root_cause_text="second"), admin_user)
+    items = await list_verifications(db, capa)
+    assert [i.root_cause_text for i in items] == ["second", "first"]
