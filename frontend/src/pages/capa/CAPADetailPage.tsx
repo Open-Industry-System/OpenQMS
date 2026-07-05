@@ -498,12 +498,6 @@ export default function CAPADetailPage() {
                 <D4RecPanel
                   capaId={id!}
                   canAdopt={canEdit('capa')}
-                  beforeAdopt={async () => {
-                    await handleUpdate("d4_root_cause", localData.d4_root_cause);
-                  }}
-                  onAdopted={() => {
-                    if (id) getCAPA(id).then(setCapa);
-                  }}
                 />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label", "根因分析 (5Why / 鱼骨图)"))}>

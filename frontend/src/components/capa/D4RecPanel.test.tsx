@@ -14,7 +14,7 @@ vi.mock("../../api/capa", () => ({
   adoptRecommendation: vi.fn().mockResolvedValue({ adoption_id: "a1", d_step: "d4", field_value: "根因A" }),
 }));
 
-import { adoptRecommendation, getD4Recommendations } from "../../api/capa";
+import { adoptRecommendation } from "../../api/capa";
 
 const renderPanel = (props = {}) => render(
   <ConfigProvider><App>
