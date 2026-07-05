@@ -154,3 +154,14 @@ async def test_list_verifications_desc_by_created(db, default_factory, admin_use
     await create_verification(db, capa, VerificationCreate(root_cause_text="second"), admin_user)
     items = await list_verifications(db, capa)
     assert [i.root_cause_text for i in items] == ["second", "first"]
+
+
+def test_verification_create_rejects_empty_root_cause_text():
+    # 防 D4 门禁被空验证记录绕过：root_cause_text 空白串必须被 schema 拒绝
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        VerificationCreate(root_cause_text="")
+    with pytest.raises(ValidationError):
+        VerificationCreate(root_cause_text="   ")
+    # 非空（含可见字符）应通过
+    VerificationCreate(root_cause_text="螺栓尺寸超差")

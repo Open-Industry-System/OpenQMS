@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class AdoptRequest(BaseModel):
@@ -24,6 +24,14 @@ class VerificationCreate(BaseModel):
     is_verified: bool = False
     evidence_attachments: list[dict] = []
     source_ref: dict | None = None
+
+    @field_validator("root_cause_text")
+    @classmethod
+    def root_cause_text_must_be_non_empty(cls, v: str) -> str:
+        # 防 D4 门禁被空验证记录绕过：gate 只数 is_verified=True，根因文本必须非空白
+        if not v or not v.strip():
+            raise ValueError("root_cause_text 不能为空")
+        return v
 
 
 class VerificationUpdate(BaseModel):

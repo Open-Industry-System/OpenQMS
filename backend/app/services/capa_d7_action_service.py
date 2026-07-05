@@ -10,10 +10,17 @@ from app.models.capa import CapaD7NodeAction
 from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import D7AutoFillRequest, D7NodeActionCreate
 from app.services.fmea_service import _apply_fmea_update
+from app.state_machines.eightd_state import EightDState
 
 
 class ConflictError(Exception):
     """D7 动作幂等冲突（如已 auto_filled 再 auto-fill）—— handler 映 409。"""
+
+
+async def _assert_d7_stage(capa) -> None:
+    # D7 写操作（confirm/skip/auto-fill）只能在 D7_PREVENTION 阶段执行，防跨阶段写入
+    if capa.status != EightDState.D7_PREVENTION:
+        raise ValueError("D7 动作只能在 D7 预防复发阶段执行")
 
 
 async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = False) -> FMEADocument:
@@ -33,6 +40,7 @@ async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = Fa
 
 
 async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user) -> CapaD7NodeAction:
+    await _assert_d7_stage(capa)
     await _fetch_fmea_for_d7(db, capa, req.fmea_id)
     existing = await db.scalar(select(CapaD7NodeAction).where(
         CapaD7NodeAction.capa_id == capa.report_id,
@@ -102,6 +110,7 @@ async def list_d7_actions(db: AsyncSession, capa) -> list[CapaD7NodeAction]:
 async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     if not capa.d5_correction:
         raise ValueError("D5 永久措施为空，无法自动回填")
+    await _assert_d7_stage(capa)
     # 锁 FMEA 行（FOR UPDATE），串行化并发 auto-fill；必须在读 graph_data 之前锁，
     # 否则两个并发请求都读到旧 graph、都过既有行检查，一个 commit 时撞 unique index → 500
     fmea = await _fetch_fmea_for_d7(db, capa, req.fmea_id, lock=True)
@@ -114,6 +123,20 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     ))
     if existing is not None and existing.action == "auto_filled":
         raise ConflictError("已自动回填")
+    # 校验目标节点存在于 graph 且 cause→mode CAUSE_OF 关系匹配，防过期/恶意请求写悬空边
+    pre_graph = fmea.graph_data or {"nodes": [], "edges": []}
+    node_ids = {n.get("id") for n in pre_graph.get("nodes", [])}
+    if req.failure_mode_node_id not in node_ids:
+        raise ValueError("目标失效模式节点不存在于 FMEA graph")
+    if req.failure_cause_node_id not in node_ids:
+        raise ValueError("目标失效原因节点不存在于 FMEA graph")
+    if not any(
+        e.get("source") == req.failure_cause_node_id
+        and e.get("target") == req.failure_mode_node_id
+        and e.get("type") == "CAUSE_OF"
+        for e in pre_graph.get("edges", [])
+    ):
+        raise ValueError("失效原因与失效模式无 CAUSE_OF 关系")
     graph = copy.deepcopy(fmea.graph_data or {"nodes": [], "edges": []})
     ctrl_node = None
     name_before = None

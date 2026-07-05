@@ -12,11 +12,11 @@ from app.services.capa_d7_action_service import (
 pytestmark = pytest.mark.requires_db
 
 
-async def _make_capa(db, factory_id, user_id, d5="措施A"):
+async def _make_capa(db, factory_id, user_id, d5="措施A", status="D7_PREVENTION"):
     capa = CAPAEightD(
         report_id=uuid.uuid4(), document_no=f"8D-D7-{uuid.uuid4().hex[:6]}",
         title="t", product_line_code="DC-DC-100", factory_id=factory_id,
-        created_by=user_id, status="D7_PREVENTION", d5_correction=d5,
+        created_by=user_id, status=status, d5_correction=d5,
     )
     db.add(capa); await db.flush()
     return capa
@@ -235,3 +235,52 @@ async def test_auto_fill_integrity_error_maps_to_conflict_not_500(db, default_fa
     # savepoint 回滚后 pending graph 改动撤销；refresh 从 DB 重读原始 graph
     await db.refresh(fmea)
     assert fmea.graph_data == graph_before
+
+
+@pytest.mark.asyncio
+async def test_record_d7_action_rejects_non_d7_stage(db, default_factory, admin_user):
+    # 非 D7_PREVENTION 阶段不允许记录 D7 动作（防跨阶段写入）
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, status="D5_CORRECTION")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    with pytest.raises(ValueError, match="D7"):
+        await record_d7_action(db, capa, D7NodeActionCreate(
+            action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+            failure_cause_node_id="c-1", match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_d7_rejects_non_d7_stage(db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控", status="D5_CORRECTION")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    with pytest.raises(ValueError, match="D7"):
+        await auto_fill_d7(db, capa, D7AutoFillRequest(
+            fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+            failure_cause_node_id="c-1", match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_d7_rejects_nonexistent_cause_node(db, default_factory, admin_user):
+    # cause 节点不在 graph → 不应写悬空 PREVENTED_BY 边
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控")
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    with pytest.raises(ValueError, match="失效原因节点不存在"):
+        await auto_fill_d7(db, capa, D7AutoFillRequest(
+            fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+            failure_cause_node_id="c-x", match_source="linked"), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_auto_fill_d7_rejects_missing_cause_of_edge(db, default_factory, admin_user):
+    # cause/mode 节点都在但无 CAUSE_OF 关系 → 拒绝
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控")
+    # _make_fmea 默认带 c-1→fm-1 CAUSE_OF；用一个独立 cause 节点 c-2 但不连边
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id="fm-1", cause_id="c-1")
+    # 额外加一个孤立 cause c-2
+    graph = copy.deepcopy(fmea.graph_data)
+    graph["nodes"].append({"id": "c-2", "type": "FailureCause", "name": "孤立原因"})
+    fmea.graph_data = graph
+    await db.flush()
+    with pytest.raises(ValueError, match="CAUSE_OF"):
+        await auto_fill_d7(db, capa, D7AutoFillRequest(
+            fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+            failure_cause_node_id="c-2", match_source="linked"), admin_user)

@@ -124,7 +124,7 @@ export default function D7RecPanel({
 
     return (
       <List.Item
-        key={`${rec.fmea_id}:${rec.failure_mode_node_id}`}
+        key={`${rec.fmea_id}:${rec.failure_mode_node_id}:${rec.failure_cause_node_id ?? "none"}`}
         data-e2e={`d7-node-action-${index}`}
         actions={[
           <Button
@@ -258,7 +258,7 @@ export default function D7RecPanel({
           <Text strong style={{ display: "block", marginBottom: 8 }}>
             {t("d7.similarNodes")}
           </Text>
-          <List size="small" dataSource={keyword} renderItem={(rec, i) => renderRecItem(rec, i)} />
+          <List size="small" dataSource={keyword} renderItem={(rec, i) => renderRecItem(rec, i + linked.length)} />
         </>
       )}
     </Card>

@@ -211,7 +211,8 @@ export default function CAPADetailPage() {
   const refreshCapa = async () => {
     const updated = await getCAPA(id!);
     setCapa(updated);
-    setLocalData({ ...localData, d4_root_cause: updated.d4_root_cause, d5_correction: updated.d5_correction });
+    // 不在此处用闭包 localData 覆盖 d4/d5——交给下方 useEffect([capa]) 统一同步全部 localData，
+    // 避免闭包陈旧 localData 覆盖刚同步的其它字段（如 d6/d7/d8）造成闪回
   };
 
   const stepToField: Record<string, string> = {
