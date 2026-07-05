@@ -193,7 +193,7 @@ async def create_fmea(
     return fmea
 
 
-async def update_fmea(
+async def _apply_fmea_update(
     db: AsyncSession,
     fmea: FMEADocument,
     title: str | None,
@@ -203,7 +203,7 @@ async def update_fmea(
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
 ) -> FMEADocument:
-    # 原子乐观锁校验：强制刷新 + SELECT ... FOR UPDATE
+    """无提交核心：执行 update_fmea 的全部副作用但不 commit/refresh，供 auto_fill_d7 单事务复用。"""
     result = await db.execute(
         select(FMEADocument)
         .where(FMEADocument.fmea_id == fmea.fmea_id)
@@ -237,42 +237,47 @@ async def update_fmea(
     fmea.updated_by = user_id
 
     if changed_fields:
-        fmea.lock_version += 1  # 只在有实际变更时递增乐观锁版本
-        audit_log = AuditLog(
-            table_name="fmea_documents",
-            record_id=fmea.fmea_id,
-            action="UPDATE",
-            changed_fields=changed_fields,
-            operated_by=user_id,
-        )
-        db.add(audit_log)
-
-        # Outbox: enqueue Neo4j projection sync
+        fmea.lock_version += 1
+        db.add(AuditLog(
+            table_name="fmea_documents", record_id=fmea.fmea_id,
+            action="UPDATE", changed_fields=changed_fields, operated_by=user_id,
+            factory_id=fmea.factory_id,
+        ))
         db.add(GraphSyncOutbox(
-            aggregate_type="fmea",
-            aggregate_id=fmea.fmea_id,
+            aggregate_type="fmea", aggregate_id=fmea.fmea_id,
             event_type="fmea.updated",
             payload={"version": fmea.version, "product_line_code": fmea.product_line_code},
         ))
-
-        # 强制覆盖时记录审计日志
         if confirmed_latest_lock_version is not None:
-            force_audit = AuditLog(
-                table_name="fmea_documents",
-                record_id=fmea.fmea_id,
+            db.add(AuditLog(
+                table_name="fmea_documents", record_id=fmea.fmea_id,
                 action="FORCE_SAVE_OVERRIDE",
                 changed_fields={"reason": "User confirmed overwrite after conflict detection"},
-                operated_by=user_id,
-            )
-            db.add(force_audit)
-
-        # Invalidate recommendation cache when graph_data or product_line changes
+                operated_by=user_id, factory_id=fmea.factory_id,
+            ))
         if graph_data is not None or product_line_code is not None:
             from app.services.recommendation_service import RecommendationService, _NullGraphRepo
             rec_service = RecommendationService(db=db, graph_repo=_NullGraphRepo())
             await rec_service.invalidate_cache_for_fmea(fmea.fmea_id)
 
     await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code, fmea.factory_id)
+    return fmea
+
+
+async def update_fmea(
+    db: AsyncSession,
+    fmea: FMEADocument,
+    title: str | None,
+    graph_data: dict | None,
+    user_id: uuid.UUID,
+    product_line_code: str | None = None,
+    lock_version: int | None = None,
+    confirmed_latest_lock_version: int | None = None,
+) -> FMEADocument:
+    fmea = await _apply_fmea_update(
+        db, fmea, title, graph_data, user_id, product_line_code,
+        lock_version, confirmed_latest_lock_version,
+    )
     await db.commit()
     await db.refresh(fmea)
     return fmea
