@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import {
   Card, List, Tag, Button, Space, Typography, Tooltip, Badge, App, Empty, Spin,
 } from "antd";
@@ -7,9 +7,8 @@ import {
 } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { getD7Recommendations } from "../../api/capa";
-import { getFMEA, updateFMEA } from "../../api/fmea";
-import type { D7Recommendation } from "../../types";
+import { getD7Recommendations, recordD7Action, listD7Actions, autoFillD7 } from "../../api/capa";
+import type { D7Recommendation, D7NodeAction } from "../../types";
 
 const { Text } = Typography;
 
@@ -23,12 +22,14 @@ export interface D7UnconfirmedItem {
 interface D7RecPanelProps {
   capaId: string;
   d5Correction: string | null;
+  canAdopt?: boolean;
   onConfirmationChange: (allConfirmed: boolean, unconfirmedItems: D7UnconfirmedItem[]) => void;
 }
 
 export default function D7RecPanel({
   capaId,
   d5Correction,
+  canAdopt = true,
   onConfirmationChange,
 }: D7RecPanelProps) {
   const { t } = useTranslation("capa");
@@ -36,7 +37,7 @@ export default function D7RecPanel({
   const navigate = useNavigate();
   const [recommendations, setRecommendations] = useState<D7Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
-  const [confirmedNodes, setConfirmedNodes] = useState<Map<string, "updated" | "skipped">>(new Map());
+  const [actions, setActions] = useState<D7NodeAction[]>([]);
   const [fillingNode, setFillingNode] = useState<string | null>(null);
 
   useEffect(() => {
@@ -48,93 +49,60 @@ export default function D7RecPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
-  useEffect(() => {
-    if (recommendations.length === 0) {
-      onConfirmationChange(true, []);
-      return;
-    }
-    const unconfirmed: D7UnconfirmedItem[] = recommendations
-      .filter((r) => !confirmedNodes.has(r.failure_mode_node_id + (r.failure_cause_node_id || "")))
-      .map((r) => ({
-        fmea_id: String(r.fmea_id),
-        failure_mode_node_id: r.failure_mode_node_id,
-        failure_mode_name: r.failure_mode_name,
-        failure_cause_node_id: r.failure_cause_node_id,
-      }));
-    onConfirmationChange(unconfirmed.length === 0, unconfirmed);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [confirmedNodes, recommendations]);
+  const reloadActions = async () => {
+    try { setActions(await listD7Actions(capaId)); } catch { /* ignore */ }
+  };
 
-  const linked = useMemo(
-    () => recommendations.filter((r) => r.match_source === "linked"),
-    [recommendations]
-  );
-  const keyword = useMemo(
-    () => recommendations.filter((r) => r.match_source === "keyword"),
-    [recommendations]
-  );
+  useEffect(() => { reloadActions(); /* eslint-disable-line */ }, [capaId]);
 
-  const confirmedCount = useMemo(() => {
-    return recommendations.filter((r) =>
-      confirmedNodes.has(r.failure_mode_node_id + (r.failure_cause_node_id || ""))
-    ).length;
-  }, [confirmedNodes, recommendations]);
+  const actionFor = (rec: D7Recommendation): D7NodeAction | undefined =>
+    actions.find(a => a.fmea_id === rec.fmea_id && a.failure_mode_node_id === rec.failure_mode_node_id
+                      && (a.failure_cause_node_id || null) === (rec.failure_cause_node_id || null));
 
-  const handleConfirm = (rec: D7Recommendation, status: "updated" | "skipped") => {
-    const key = rec.failure_mode_node_id + (rec.failure_cause_node_id || "");
-    setConfirmedNodes((prev) => new Map(prev).set(key, status));
+  const actionOf = (rec: D7Recommendation) => actionFor(rec);
+
+  const handleConfirm = async (rec: D7Recommendation, action: "confirmed" | "skipped") => {
+    try {
+      await recordD7Action(capaId, {
+        action, fmea_id: rec.fmea_id, failure_mode_node_id: rec.failure_mode_node_id,
+        failure_cause_node_id: rec.failure_cause_node_id, match_source: rec.match_source,
+      });
+      await reloadActions();
+      const refreshed = await getD7Recommendations(capaId);
+      setRecommendations(refreshed.recommendations);
+    } catch { message.error(t("d7.actionFailed")); }
   };
 
   const handleAutoFill = async (rec: D7Recommendation) => {
     if (!d5Correction || !rec.failure_cause_node_id) return;
     setFillingNode(rec.failure_cause_node_id);
     try {
-      const fmea = await getFMEA(rec.fmea_id);
-      const graph = fmea.graph_data;
-
-      const existingControl = graph.nodes.find(
-        (n: any) =>
-          n.type === "PreventionControl" &&
-          graph.edges.some(
-            (e: any) =>
-              e.source === rec.failure_cause_node_id &&
-              e.target === n.id &&
-              e.type === "PREVENTED_BY"
-          )
-      );
-
-      if (existingControl) {
-        existingControl.name = d5Correction;
-      } else {
-        const newControlId = crypto.randomUUID();
-        graph.nodes.push({
-          id: newControlId,
-          type: "PreventionControl",
-          name: d5Correction,
-          severity: 1,
-          occurrence: 1,
-          detection: 1,
-        });
-        graph.edges.push({
-          source: rec.failure_cause_node_id,
-          target: newControlId,
-          type: "PREVENTED_BY",
-        });
-      }
-
-      await updateFMEA(rec.fmea_id, { graph_data: graph });
+      await autoFillD7(capaId, {
+        fmea_id: rec.fmea_id, failure_mode_node_id: rec.failure_mode_node_id,
+        failure_cause_node_id: rec.failure_cause_node_id, match_source: rec.match_source,
+      });
       message.success(t("d7.autoFillSuccess"));
-
-      handleConfirm(rec, "updated");
-
+      await reloadActions();
       const refreshed = await getD7Recommendations(capaId);
       setRecommendations(refreshed.recommendations);
-    } catch {
-      message.error(t("d7.autoFillFailed"));
-    } finally {
-      setFillingNode(null);
-    }
+    } catch { message.error(t("d7.autoFillFailed")); }
+    finally { setFillingNode(null); }
   };
+
+  useEffect(() => {
+    if (recommendations.length === 0) { onConfirmationChange(true, []); return; }
+    const unconfirmed = recommendations
+      .filter(r => !actionFor(r))
+      .map(r => ({ fmea_id: String(r.fmea_id), failure_mode_node_id: r.failure_mode_node_id,
+                   failure_mode_name: r.failure_mode_name, failure_cause_node_id: r.failure_cause_node_id }));
+    onConfirmationChange(unconfirmed.length === 0, unconfirmed);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actions, recommendations]);
+
+  const linked = recommendations.filter((r) => r.match_source === "linked");
+  const keyword = recommendations.filter((r) => r.match_source === "keyword");
+
+  const confirmedCount = recommendations.filter((r) => actionFor(r)).length;
 
   const handleJump = (rec: D7Recommendation) => {
     navigate(`/fmea/${rec.fmea_id}?node=${rec.failure_mode_node_id}`);
@@ -150,13 +118,14 @@ export default function D7RecPanel({
     );
   }
 
-  const renderRecItem = (rec: D7Recommendation) => {
-    const key = rec.failure_mode_node_id + (rec.failure_cause_node_id || "");
-    const confirmed = confirmedNodes.get(key);
+  const renderRecItem = (rec: D7Recommendation, index: number) => {
+    const act = actionOf(rec);
+    const locked = act?.action === "auto_filled";
 
     return (
       <List.Item
-        key={key}
+        key={`${rec.fmea_id}:${rec.failure_mode_node_id}`}
+        data-e2e={`d7-node-action-${index}`}
         actions={[
           <Button
             key="jump"
@@ -180,6 +149,8 @@ export default function D7RecPanel({
                 type="primary"
                 ghost
                 icon={<ThunderboltOutlined />}
+                data-e2e="d7-auto-fill"
+                disabled={locked || !canAdopt}
                 loading={fillingNode === rec.failure_cause_node_id}
                 onClick={() => handleAutoFill(rec)}
               >
@@ -191,7 +162,13 @@ export default function D7RecPanel({
               key="fill-disabled"
               title={!rec.failure_cause_node_id ? t("d7.autoFillDisabledNoCause") : t("d7.autoFillDisabledNoD5")}
             >
-              <Button size="small" icon={<ThunderboltOutlined />} disabled>
+              <Button
+                size="small"
+                icon={<ThunderboltOutlined />}
+                data-e2e="d7-auto-fill"
+                disabled={locked || !canAdopt || !d5Correction || !rec.failure_cause_node_id}
+                loading={fillingNode === rec.failure_cause_node_id}
+              >
                 {t("d7.autoFill")}
               </Button>
             </Tooltip>
@@ -199,17 +176,21 @@ export default function D7RecPanel({
           <Button
             key="confirm"
             size="small"
-            type={confirmed === "updated" ? "primary" : "default"}
+            type={act?.action === "confirmed" ? "primary" : "default"}
             icon={<CheckOutlined />}
-            onClick={() => handleConfirm(rec, "updated")}
+            data-e2e="d7-confirm"
+            disabled={locked || !canAdopt}
+            onClick={() => handleConfirm(rec, "confirmed")}
           >
             {t("d7.updated")}
           </Button>,
           <Button
             key="skip"
             size="small"
-            danger={confirmed === "skipped"}
+            danger={act?.action === "skipped"}
             icon={<CloseOutlined />}
+            data-e2e="d7-skip"
+            disabled={locked || !canAdopt}
             onClick={() => handleConfirm(rec, "skipped")}
           >
             {t("d7.skipped")}
@@ -229,6 +210,13 @@ export default function D7RecPanel({
               {!rec.prevention_control_name && rec.failure_cause_node_id && (
                 <Tag color="orange">{t("d7.needsNew")}</Tag>
               )}
+              {act && (
+                <Tag data-e2e="d7-action-status" className={locked ? "locked" : undefined}>
+                  {act.action === "confirmed" ? t("d7.updated")
+                    : act.action === "skipped" ? t("d7.skipped")
+                    : t("d7.autoFill")}
+                </Tag>
+              )}
             </Space>
           }
           description={
@@ -236,11 +224,6 @@ export default function D7RecPanel({
               <Tag color="blue">{rec.fmea_document_no}</Tag>
               <Tag>{t(`d7.matchSource.${rec.match_source === "linked" ? "linked" : "similar"}`)}</Tag>
               {rec.match_reason && <Text type="secondary">{rec.match_reason}</Text>}
-              {confirmed && (
-                <Tag color={confirmed === "updated" ? "green" : "default"}>
-                  {confirmed === "updated" ? `✓ ${t("d7.updated")}` : `✗ ${t("d7.skipped")}`}
-                </Tag>
-              )}
             </Space>
           }
         />
@@ -265,7 +248,7 @@ export default function D7RecPanel({
           <List
             size="small"
             dataSource={linked}
-            renderItem={renderRecItem}
+            renderItem={(rec, i) => renderRecItem(rec, i)}
             style={{ marginBottom: 16 }}
           />
         </>
@@ -275,7 +258,7 @@ export default function D7RecPanel({
           <Text strong style={{ display: "block", marginBottom: 8 }}>
             {t("d7.similarNodes")}
           </Text>
-          <List size="small" dataSource={keyword} renderItem={renderRecItem} />
+          <List size="small" dataSource={keyword} renderItem={(rec, i) => renderRecItem(rec, i)} />
         </>
       )}
     </Card>
