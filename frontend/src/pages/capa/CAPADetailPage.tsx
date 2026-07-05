@@ -498,11 +498,11 @@ export default function CAPADetailPage() {
                 <D4RecPanel
                   capaId={id!}
                   canAdopt={canEdit('capa')}
-                  onAdopt={(text) => {
-                    const current = localData.d4_root_cause || "";
-                    const newVal = current ? `${current}\n${text}` : text;
-                    setLocalData({ ...localData, d4_root_cause: newVal });
-                    handleUpdate("d4_root_cause", newVal);
+                  beforeAdopt={async () => {
+                    await handleUpdate("d4_root_cause", localData.d4_root_cause);
+                  }}
+                  onAdopted={() => {
+                    if (id) getCAPA(id).then(setCapa);
                   }}
                 />
                 <Form layout="vertical">
