@@ -5,17 +5,7 @@ import uuid
 
 from app.models.user import User
 from app.services.agent import audit as audit_mod
-from app.services.fusion_engine import FusionEngine
-from app.services.llm_fusion_layer import LLMFusionLayer
-from app.services.recommendation_sources import (
-    FMEAControlExpander,
-    FMEAGraphSource,
-    HistoricalCAPAMeasureSource,
-    HistoricalCAPASource,
-    RuleEngineMeasureSource,
-    RuleEngineSource,
-    SemanticSearchSource,
-)
+from app.services.recommendation_orchestrator import RecommendationOrchestrator
 from app.services.recommendation_types import (
     RecommendationContext,
     RecommendationResult,
@@ -25,33 +15,13 @@ logger = logging.getLogger(__name__)
 
 
 class HybridRecommendationPipeline:
-    """8D D4/D5 全混合推荐管道。"""
+    """8D D4/D5 全混合推荐管道（薄壳）：委托 RecommendationOrchestrator 执行 12 阶段流水线。"""
 
     def __init__(self, db, pc, embedding_provider):
         self.db = db
         self.pc = pc
         self.embedding = embedding_provider
-
-        # D4 Sources
-        self.d4_sources = [
-            FMEAGraphSource(),
-            SemanticSearchSource(db, embedding_provider),
-            HistoricalCAPASource(db, embedding_provider),
-            RuleEngineSource(),
-        ]
-
-        # D5 Sources (Stage 1: text/semantic recall)
-        self.d5_sources = [
-            SemanticSearchSource(db, embedding_provider),
-            HistoricalCAPAMeasureSource(db, embedding_provider),
-            RuleEngineMeasureSource(),
-        ]
-
-        # D5 Stage 2: control expander (not an independent Source)
-        self.d5_control_expander = FMEAControlExpander()
-
-        self.fusion = FusionEngine()
-        self.llm_layer = LLMFusionLayer(pc)
+        self.orchestrator = RecommendationOrchestrator(db, pc, embedding_provider)
 
     async def recommend(
         self,
@@ -63,57 +33,48 @@ class HybridRecommendationPipeline:
         tenant_schema: str,
     ) -> RecommendationResult:
         """执行完整推荐管道。"""
-        stage = context.stage
-        all_candidates = []
+        result = await self.orchestrator.run(
+            context,
+            user=user,
+            report_id=report_id,
+            factory_id=factory_id,
+            tenant_schema=tenant_schema,
+        )
+        await self._maybe_write_llm_audit(
+            result, context, user, report_id, factory_id, tenant_schema
+        )
+        return result
 
-        # --- Stage 1: 召回 ---
-        sources = self.d4_sources if stage == "d4" else self.d5_sources
+    async def _maybe_write_llm_audit(
+        self,
+        result: RecommendationResult,
+        context: RecommendationContext,
+        user: User,
+        report_id: uuid.UUID,
+        factory_id: uuid.UUID,
+        tenant_schema: str,
+    ) -> None:
+        # R4-修复：从 stage 11 StageRun 结构化字段取计数（非 summary 字符串），避免 error 时审计层抛错
+        stage11 = next((s for s in result.stages if s.index == 11), None)
+        if stage11 is None or stage11.llm_attempted is None or stage11.llm_attempted == 0:
+            return  # skipped（无 pc）/ error（attempted=0）→ 无 LLM 尝试，不写 llm_recommend audit
 
-        for source in sources:
-            try:
-                candidates = await source.retrieve(context)
-                all_candidates.extend(candidates)
-                logger.debug(f"Source {source.name} returned {len(candidates)} candidates")
-            except Exception as e:
-                logger.warning(f"Source {source.name} failed: {e}")
+        if stage11.llm_failed == 0:
+            status = "success"
+        elif stage11.llm_failed < stage11.llm_attempted:
+            status = "partial"
+        else:
+            status = "llm_failed"
 
-        # --- D5 Stage 2: Control expansion ---
-        if stage == "d5":
-            # Collect FailureCause candidates from Stage 1 for expander
-            cause_candidates = [
-                c for c in all_candidates
-                if c.metadata.get("failure_cause_node_id")
-            ]
-            if cause_candidates and context.fmea_docs is not None:
-                try:
-                    control_candidates = await self.d5_control_expander.expand(
-                        cause_candidates, context.fmea_docs
-                    )
-                    all_candidates.extend(control_candidates)
-                except Exception as e:
-                    logger.warning(f"FMEAControlExpander failed: {e}")
+        capa_hash = hashlib.sha256(
+            json.dumps(context.capa_data, sort_keys=True, default=str).encode()
+        ).hexdigest()[:16]
+        correlation_id = uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{context.stage}_recommend:{report_id}:{capa_hash}",
+        )
 
-        # --- Stage 3: 融合去重排序 ---
-        fused = self.fusion.merge(all_candidates, context)
-
-        # --- Stage 4: LLM 增强 ---
-        outcome = await self.llm_layer.enrich(fused, context)
-
-        # --- Stage 5: LLM 审计（仅当真正尝试过 LLM） ---
-        if outcome.attempted > 0:
-            if outcome.failed == 0:
-                status = "success"
-            elif outcome.failed < outcome.attempted:
-                status = "partial"
-            else:
-                status = "llm_failed"
-            capa_hash = hashlib.sha256(
-                json.dumps(context.capa_data, sort_keys=True, default=str).encode()
-            ).hexdigest()[:16]
-            correlation_id = uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"{context.stage}_recommend:{report_id}:{capa_hash}",
-            )
+        try:
             await audit_mod.write_audit_raw(
                 self.db,
                 user_id=user.user_id,
@@ -126,10 +87,10 @@ class HybridRecommendationPipeline:
                 new_values={
                     "status": status,
                     "trigger": context.stage,
-                    "attempted": outcome.attempted,
-                    "succeeded": outcome.succeeded,
-                    "failed": outcome.failed,
+                    "attempted": stage11.llm_attempted,
+                    "succeeded": stage11.llm_succeeded,
+                    "failed": stage11.llm_failed,
                 },
             )
-
-        return RecommendationResult(items=outcome.candidates)
+        except Exception as e:
+            logger.warning(f"llm_recommend audit write failed (non-blocking): {e}")

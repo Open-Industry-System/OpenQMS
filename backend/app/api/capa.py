@@ -407,6 +407,7 @@ async def get_d4_fmea_recommendations(
         },
         user_product_lines=allowed_pls,
         stage="d4",
+        factory_id=capa.factory_id,   # R13-修复：源查询按 factory_id 隔离
         fmea_docs=fmea_docs,
         linked_fmea=linked_fmea,
     )
@@ -490,6 +491,7 @@ async def get_d5_fmea_recommendations(
         },
         user_product_lines=allowed_pls,
         stage="d5",
+        factory_id=capa.factory_id,   # R13-修复：源查询按 factory_id 隔离
         fmea_docs=fmea_docs,
         linked_fmea=linked_fmea,
     )
