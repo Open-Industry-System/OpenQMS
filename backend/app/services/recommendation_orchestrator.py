@@ -27,6 +27,7 @@ from app.services.recommendation_sources import (
 )
 from app.services.recommendation_sources_extra import (
     IQCSource,
+    LessonsLearnedSource,
     MESSource,
     SameTypeProductKBSource,
     SPCAnomalySource,
@@ -101,6 +102,7 @@ class RecommendationOrchestrator:
             "iqc": IQCSource(self.db, self.embedding),
             "supplier_history": SupplierHistorySource(self.db, self.embedding),
             "same_type_product_kb": SameTypeProductKBSource(self.db, self.embedding),
+            "lessons_learned": LessonsLearnedSource(self.db, self.embedding),
         }
 
     def _check_source_protocol(self, spec, source) -> str | None:

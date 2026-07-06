@@ -9,6 +9,8 @@ from app.models.iqc_inspection import IqcInspection
 from app.models.mes import MESEquipmentStatus, MESScrapRecord
 from app.models.product_line import ProductLine
 from app.models.spc import InspectionCharacteristic, SPCAlarm
+from app.models.capa import CAPAEightD
+from app.models.capa_lesson import CapaLessonLearned
 from app.models.supplier import SupplierSCAR
 from app.services import spc_service, supplier_quality_service
 from app.services.embedding_provider import EmbeddingProvider
@@ -575,4 +577,116 @@ class SameTypeProductKBSource:
                     },
                 ))
 
+        return candidates
+
+
+class LessonsLearnedSource:
+    """经验教训库语义召回：按 factory + 产品线权限检索 capa_lessons_learned。"""
+
+    name = "lessons_learned"
+
+    def __init__(self, db, embedding_provider: EmbeddingProvider | None):
+        self.db = db
+        self.embedding = embedding_provider
+
+    async def should_skip(self, context: RecommendationContext) -> str | None:
+        fid = context.factory_id
+        if not fid:
+            return "无经验教训库数据"
+        # R16-修复：三表 factory_id 过滤，但 should_skip 仅数 lesson 表即可（NOT NULL factory_id）
+        cnt = await self.db.scalar(
+            select(func.count())
+            .select_from(CapaLessonLearned)
+            .where(CapaLessonLearned.factory_id == fid)
+        )
+        return "无经验教训库数据" if cnt == 0 else None
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        if not self.embedding:
+            return []
+
+        if context.user_product_lines == []:
+            return []
+
+        fid = context.factory_id
+        if not fid:
+            return []
+
+        # 构造查询文本：D4 用 d2_description；D5 优先 d4_root_cause，fallback d2_description
+        if context.stage == "d4":
+            query_text = context.capa_data.get("d2_description", "")
+        else:
+            query_text = context.capa_data.get("d4_root_cause", "")
+            if not query_text:
+                query_text = context.capa_data.get("d2_description", "")
+
+        if not query_text or not query_text.strip():
+            return []
+
+        query_vector = await self.embedding.embed([query_text])
+        if not query_vector:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
+        user_pls = context.user_product_lines
+
+        params: dict[str, Any] = {
+            "query_vector": vec_str,
+            "factory_id": fid,
+            "limit": 20,
+        }
+        pl_filter = ""
+        if user_pls is not None:
+            pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
+            params["product_line_codes"] = user_pls
+
+        # R15-修复：JOIN capa_eightd 取 source_capa_document_no（lesson 表无 document_no）
+        # R16-修复：三表 factory_id 过滤（de + lesson + capa），防止孤儿/跨工厂串读
+        stmt = text(f"""
+            SELECT de.entity_id AS lesson_id, de.chunk_text,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
+                   lesson.lesson_text, lesson.category, lesson.capa_id, lesson.product_line_code,
+                   capa.document_no AS source_capa_document_no
+            FROM document_embeddings de
+            JOIN capa_lessons_learned lesson ON de.entity_id = lesson.lesson_id
+            JOIN capa_eightd capa ON lesson.capa_id = capa.report_id AND capa.factory_id = lesson.factory_id
+            WHERE de.entity_type = 'capa_lesson'
+              AND de.entity_field = 'lesson_text'
+              AND lesson.lesson_id IS NOT NULL
+              AND de.factory_id = :factory_id
+              AND lesson.factory_id = :factory_id
+              AND capa.factory_id = :factory_id
+              {pl_filter}
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
+            LIMIT :limit
+        """)
+
+        rows = await self.db.execute(stmt, params)
+        candidates: list[RecommendationCandidate] = []
+        for row in rows.fetchall():
+            lesson_text = row.lesson_text or row.chunk_text or ""
+            category = row.category
+            source_capa_id = row.capa_id
+            source_capa_document_no = row.source_capa_document_no
+            lesson_id = row.lesson_id
+            similarity = float(row.similarity)
+            confidence = min(similarity * 0.8, 0.8)
+
+            candidates.append(
+                RecommendationCandidate(
+                    source="lessons_learned",
+                    content=f"经验教训：{lesson_text}（来自 {source_capa_document_no}，类别 {category}）",
+                    category=None,
+                    confidence=confidence,
+                    match_reason="经验教训库相似命中",
+                    metadata={
+                        "source_capa_id": str(source_capa_id),
+                        "source_capa_document_no": source_capa_document_no,
+                        "lesson_id": str(lesson_id),
+                        "category": category,
+                        "product_line_code": row.product_line_code,
+                        "factory_id": str(fid),
+                    },
+                )
+            )
         return candidates

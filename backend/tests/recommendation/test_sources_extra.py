@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import text
 
 from app.models.capa import CAPAEightD
+from app.models.capa_lesson import CapaLessonLearned
 from app.models.factory import Factory
 from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
@@ -16,6 +17,7 @@ from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
 from app.services.recommendation_sources_extra import (
     IQCSource,
+    LessonsLearnedSource,
     MESSource,
     SameTypeProductKBSource,
     SPCAnomalySource,
@@ -915,3 +917,177 @@ async def test_same_type_factory_isolation(db, default_factory, admin_user):
     returned_doc_nos = {c.metadata.get("fmea_document_no") for c in cands}
     assert fmea_a.document_no in returned_doc_nos
     assert fmea_b.document_no not in returned_doc_nos
+
+
+# ── LessonsLearnedSource (Task 10) ───────────────────────────────────────────
+
+
+def _make_capa(db, factory_id, report_id, document_no):
+    capa = CAPAEightD(
+        report_id=report_id,
+        document_no=document_no,
+        title=f"CAPA {document_no}",
+        factory_id=factory_id,
+        product_line_code="DC-DC-100",
+        status="D2_DESCRIPTION",
+    )
+    db.add(capa)
+    return capa
+
+
+def _make_lesson(db, factory_id, capa_id, lesson_id, lesson_text, category="prevention"):
+    lesson = CapaLessonLearned(
+        lesson_id=lesson_id,
+        capa_id=capa_id,
+        factory_id=factory_id,
+        product_line_code="DC-DC-100",
+        lesson_text=lesson_text,
+        lesson_text_normalized=lesson_text,
+        category=category,
+        source_d_step="d5",
+    )
+    db.add(lesson)
+    return lesson
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_lessons_should_skip_no_lessons(db, default_factory):
+    src = LessonsLearnedSource(db, MagicMock())
+    ctx = RecommendationContext(
+        capa_data={"d2_description": "螺栓尺寸超差", "product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    reason = await src.should_skip(ctx)
+    assert reason is not None
+    assert "经验教训" in reason or "无" in reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_lessons_retrieves_when_data(db, default_factory):
+    suffix = uuid.uuid4().hex[:8]
+    doc_no = f"8D-LL-{suffix}"
+    report_id = uuid.uuid4()
+    lesson_id = uuid.uuid4()
+
+    _make_capa(db, default_factory.id, report_id, doc_no)
+    _make_lesson(
+        db,
+        default_factory.id,
+        report_id,
+        lesson_id,
+        "预防螺栓尺寸超差",
+        category="prevention",
+    )
+    await db.flush()
+
+    dim = await _embedding_dim(db)
+    if dim is None:
+        pytest.skip("document_embeddings.embedding column not present (pgvector schema not available)")
+
+    await _seed_embedding(
+        db,
+        dim,
+        "capa_lesson",
+        lesson_id,
+        "lesson_text",
+        "预防螺栓尺寸超差",
+        default_factory.id,
+        "DC-DC-100",
+        "test-model",
+        hot_idx=0,
+    )
+
+    query_vec = [0.0] * dim
+    query_vec[0] = 1.0
+
+    emb = MagicMock()
+    emb.embed = AsyncMock(return_value=[query_vec])
+    src = LessonsLearnedSource(db, emb)
+    ctx = RecommendationContext(
+        capa_data={"d2_description": "螺栓尺寸超差", "product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0
+    assert all(c.source == "lessons_learned" for c in cands)
+    assert all(c.metadata.get("source_capa_document_no") is not None for c in cands)
+    assert any(c.metadata.get("source_capa_document_no") == doc_no for c in cands)
+    assert any(c.metadata.get("category") == "prevention" for c in cands)
+    assert any(c.metadata.get("lesson_id") == str(lesson_id) for c in cands)
+    assert any("预防螺栓尺寸超差" in c.content for c in cands)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_lessons_factory_isolation(db, default_factory, admin_user):
+    suffix = uuid.uuid4().hex[:8]
+    other = Factory(id=uuid.uuid4(), code=f"OTHER-LL-{suffix}", name="Other Lessons Factory")
+    db.add(other)
+    await db.flush()
+
+    report_a = uuid.uuid4()
+    lesson_a = uuid.uuid4()
+    _make_capa(db, default_factory.id, report_a, "8D-A")
+    _make_lesson(db, default_factory.id, report_a, lesson_a, "问题 A", category="prevention")
+
+    report_b = uuid.uuid4()
+    lesson_b = uuid.uuid4()
+    _make_capa(db, other.id, report_b, "8D-B")
+    _make_lesson(db, other.id, report_b, lesson_b, "问题 B", category="prevention")
+    await db.flush()
+
+    dim = await _embedding_dim(db)
+    if dim is None:
+        pytest.skip("document_embeddings.embedding column not present (pgvector schema not available)")
+
+    await _seed_embedding(
+        db,
+        dim,
+        "capa_lesson",
+        lesson_a,
+        "lesson_text",
+        "问题 A",
+        default_factory.id,
+        "DC-DC-100",
+        "test-model",
+        hot_idx=0,
+    )
+    await _seed_embedding(
+        db,
+        dim,
+        "capa_lesson",
+        lesson_b,
+        "lesson_text",
+        "问题 B",
+        other.id,
+        "DC-DC-100",
+        "test-model",
+        hot_idx=1,
+    )
+
+    query_vec = [0.0] * dim
+    query_vec[0] = 1.0
+
+    emb = MagicMock()
+    emb.embed = AsyncMock(return_value=[query_vec])
+    src = LessonsLearnedSource(db, emb)
+    ctx = RecommendationContext(
+        capa_data={"d2_description": "问题 A", "product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0, "default 工厂有经验教训数据，retrieve 不应为空"
+    returned_doc_nos = {c.metadata.get("source_capa_document_no") for c in cands}
+    assert "8D-A" in returned_doc_nos
+    assert "8D-B" not in returned_doc_nos
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
