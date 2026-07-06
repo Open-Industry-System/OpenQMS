@@ -569,15 +569,30 @@ Expected: PASS。
 `cd backend && python -m pytest tests/test_capa_recommendation.py tests/test_d7_recommendations.py tests/ -k "recommend" -q`
 Expected: PASS（既有断言不破）。
 
-- [ ] **Step 5b: 轻量 API/context factory_id 测试（R14-修复）**
+- [ ] **Step 5b: API handler factory_id 透传测试（R14+R15-修复：必须 mock pipeline 验证 handler 构造的 context.factory_id）**
 
 `backend/tests/recommendation/test_d4_recommend_context_factory_id.py`：
 ```python
-import pytest
+import pytest, uuid
+from unittest.mock import AsyncMock, patch
 from app.api.capa import get_d4_fmea_recommendations
-# 用 ASGITransport 或直调 handler，断言 context.factory_id == capa.factory_id（mock pipeline 验证传参）
+# 用 ASGITransport + dependency_overrides 构造 scope/user/db
+# mock HybridRecommendationPipeline.recommend 捕获 context 参数
+captured = {}
+async def fake_recommend(self, context, **kw):
+    captured["factory_id"] = context.factory_id
+    from app.services.recommendation_types import RecommendationResult
+    return RecommendationResult(items=[], stages=[])
+
+@pytest.mark.asyncio
+async def test_d4_handler_passes_factory_id(client, db, default_factory, admin_user, monkeypatch):
+    # 建 CAPA（factory_id=default_factory.id）+ 关联 FMEA
+    monkeypatch.setattr("app.services.hybrid_recommendation_pipeline.HybridRecommendationPipeline.recommend", fake_recommend)
+    r = await client.get(f"/api/capa/{capa.report_id}/d4-fmea-recommendations")
+    assert r.status_code == 200
+    assert captured["factory_id"] == capa.factory_id   # R15-修复：handler 真的传了 capa.factory_id，非 None
 ```
-或更简单：单测断言 `RecommendationContext(..., factory_id=capa.factory_id)` 字段就位（避免重 mock 整 handler）；目的只是确保 Step 4b 的 API 改动有测试覆盖，不漏 `capa.factory_id`。
+**R15-修复：必须 mock `HybridRecommendationPipeline.recommend`（或 orchestrator.run）捕获 context，断言 `context.factory_id == capa.factory_id`**——不能只断言 `RecommendationContext` 字段就位（那证明不了 handler 真传）。D5 同理补一个（或共用 fixture）。
 
 - [ ] **Step 7: 提交（R14-修复：含 backend/app/api/capa.py）**
 
@@ -820,7 +835,7 @@ git commit -m "feat(source): SPCAnomalySource"
 
 - [ ] **Step 1: 写失败测试** — 无 embedding/无 lessons → should_skip reason；有 lessons → retrieve 返回 `source="lessons_learned"` 候选，JOIN `capa_lessons_learned` 排除孤儿。
 - [ ] **Step 2: 运行确认失败** → FAIL。
-- [ ] **Step 3: 写 `LessonsLearnedSource`** — `should_skip`：`embedding is None` 或无 `capa_lessons_learned` 行 → reason；`retrieve`：pgvector 语义查 `document_embeddings de` JOIN `capa_lessons_learned lesson` ON `de.entity_id=lesson.lesson_id` WHERE `de.entity_type='capa_lesson' AND de.entity_field='lesson_text' AND lesson.lesson_id IS NOT NULL`，受 `user_product_lines` 收口，匹配 `d2_description`(D4)/`d4_root_cause`(D5)；候选 "经验教训：{lesson_text}（来自 {source_capa_document_no}，类别 {category}）"，metadata 含 `source_capa_id`/`lesson_id`/`category`/`product_line_code`。
+- [ ] **Step 3: 写 `LessonsLearnedSource`** — `should_skip`：`embedding is None` 或无 `capa_lessons_learned` 行 → reason；`retrieve`：pgvector 语义查 `document_embeddings de` JOIN `capa_lessons_learned lesson` ON `de.entity_id=lesson.lesson_id` **JOIN `capa_eightd capa` ON `lesson.capa_id=capa.report_id AND capa.factory_id=lesson.factory_id`**（R15-修复：取 `capa.document_no` 作 `source_capa_document_no`，`capa_lessons_learned` 表无 document_no）WHERE `de.entity_type='capa_lesson' AND de.entity_field='lesson_text' AND lesson.lesson_id IS NOT NULL`，受 `user_product_lines` 收口（`de.factory_id=context.factory_id`，R1-修复），匹配 `d2_description`(D4)/`d4_root_cause`(D5)；候选 "经验教训：{lesson_text}（来自 {capa.document_no}，类别 {category}）"，metadata 含 `source_capa_id=lesson.capa_id`/`source_capa_document_no=capa.document_no`/`lesson_id`/`category`/`product_line_code`/`factory_id`。**测试断言候选含 `source_capa_document_no`**（R15-修复，非 None）。
 - [ ] **Step 4: 注册 `lessons_learned`** — `self._sources["lessons_learned"] = LessonsLearnedSource(db, embedding_provider)`。
 - [ ] **Step 5: 运行确认通过** → PASS。
 - [ ] **Step 6: 提交** `git commit -m "feat(source): LessonsLearnedSource"`。
@@ -1053,13 +1068,13 @@ async def test_worker_skips_deleted_lesson(db, default_factory, admin_user, monk
 
 - [ ] **Step 4: `advance_capa` D7→D8 调 `_extract_lessons(capa, "d7")`（R4+R13-修复：抽取先于状态 mutation + savepoint 包裹）** — 顺序：① 闸口（Task 12）通过 → ② **`async with db.begin_nested()` savepoint 内**调 `_extract_lessons(db, capa, "d7")` + 写 `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d7")`）（**R13-修复：savepoint 包裹，`_extract_lessons` 内 insert/upsert + `enqueue_embedding` 任一步抛错 → savepoint rollback 撤销已 insert 的 lesson 行 + outbox 行，脏数据不留在当前事务**），异常 → `ValueError("D7 lessons 抽取失败，不可关闭，请重试")`（**此时状态尚未 mutation**，fail-closed 干净）→ ③ 抽取成功**后**才 `capa.status = D8_CLOSURE` + 写 TRANSITION audit → ④ commit。这样抽取失败时状态/audit/lesson 均未动（savepoint rollback + 状态未 mutate），事务回滚干净。
 
-- [ ] **Step 4a: `embedding_sync_worker` 支持 `capa_lesson`（R14-修复：与 enqueue 同 commit）** — ① `embedding_sync_worker.py:table_field_map`（line 111）加（符合现有 `(table_from, pk_expr, plc_expr, doc_no_expr, fields)` 结构，`fields=[(field,alias)]`，`doc_no_expr` 是 SQL 表达式字符串非 None）：
+- [ ] **Step 4a: `embedding_sync_worker` 支持 `capa_lesson` + `factory_id` 写入（R14+R15-修复：与 enqueue 同 commit + 补 document_embeddings.factory_id NOT NULL）** — ① `embedding_sync_worker.py:table_field_map`（line 111）加（符合现有 `(table_from, pk_expr, plc_expr, doc_no_expr, fields)` 结构，`fields=[(field,alias)]`，`doc_no_expr` 是 SQL 表达式字符串非 None）：
 ```python
 "capa_lesson": ("capa_lessons_learned", "lesson_id", "product_line_code", "''", [
     ("lesson_text", "lesson_text"),
 ]),
 ```
-worker 查询 `SELECT lesson_text, product_line_code AS product_line_code, '' AS document_no FROM capa_lessons_learned WHERE lesson_id=:entity_id`。② worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`，行已删 → 丢弃 job（mark completed/skipped，不写 embedding，R9 防race）。③ **R14-修复：测试不调 `run_worker()` 循环**——先抽 `process_batch_once()` 单轮函数（claim_batch → fetch_chunks → provider.embed → upsert_embeddings → mark_completed），或测试直接调这几个函数链（claim一批 → fetch → embed mock → upsert → mark），避免循环卡住/复杂 monkeypatch。④ `embedding_backfill.py` `ENTITY_TABLE_MAP`/`ENTITY_TYPES` 同步加 `capa_lesson`。
+worker 查询 `SELECT lesson_text, product_line_code AS product_line_code, '' AS document_no FROM capa_lessons_learned WHERE lesson_id=:entity_id`。② **R15-修复：`fetch_chunks` 给每个 chunk 带 `factory_id`**——`table_field_map` 元组加 `fid_expr`（factory_id 列表达式），SELECT 加 `{fid_expr} AS factory_id`，chunk dict 加 `"factory_id": row.get("factory_id")`。**既有 entity_type（capa/audit_finding/...）也补 `fid_expr`**（如 `"capa": (..., "factory_id", [...])`），因 `document_embeddings.factory_id` NOT NULL（`document_embedding.py:24`），现有 worker INSERT 不含 factory_id 列 → 对所有 entity_type 都会 NOT NULL 违约失败（既有 bug，本 task 顺修）。③ **R15-修复：`upsert_embeddings` 的 INSERT 加 `factory_id` 列 + `:factory_id` 参数**（`embedding_sync_worker.py:218` INSERT 列加 `factory_id`，VALUES 加 `:factory_id`，参数 dict 加 `"factory_id": chunk.get("factory_id")`）。④ worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`（仅 capa_lesson），行已删 → 丢弃 job（mark completed/skipped，不写 embedding，R9 防race）。⑤ **R14-修复：测试不调 `run_worker()` 循环**——先抽 `process_batch_once()` 单轮函数（claim_batch → fetch_chunks → provider.embed → upsert_embeddings → mark_completed），或测试直接调这几个函数链。⑥ `embedding_backfill.py` `ENTITY_TABLE_MAP`/`ENTITY_TYPES` 同步加 `capa_lesson` + `fid_expr`。**测试断言 `DocumentEmbedding.factory_id == default_factory.id`**（R15-修复，非空 + 正确工厂）。
 
 - [ ] **Step 5: 运行确认通过** → PASS（D7 抽取 + worker capa_lesson 处理 + 删 lesson 丢弃 测试）。
 
@@ -1124,7 +1139,7 @@ async def test_d8_inflight_worker_race(db, default_factory, admin_user, monkeypa
 
 - [ ] **Step 4: `update_capa` 接钩子（R4-修复：抽取先于字段 mutation）** — 检测 `d8_closure` 字段变更且 `capa.status == "D8_CLOSURE"`：① 计算 `new_d8_closure = <新值>`（不先 `capa.d8_closure = ...`）；② 调 `_extract_d8_with_cleanup(db, capa, new_d8_closure)`（savepoint）；③ **成功后**才 `capa.d8_closure = new_d8_closure` + commit；④ 异常向上冒泡 → handler 400（**capa.d8_closure 仍是旧值**，未 mutate）。
 
-- [ ] **Step 5: embedding worker 重查 → 见 Task 15** — worker `capa_lesson` 实体支持 + 写入前重查 lesson 存在性（防 in-flight race）统一在 Task 15 落地（`embedding_sync_worker.py` `table_field_map` 加 `capa_lesson` + upsert 前重查）。本任务只负责 enqueue + cleanup（savepoint 内 cancel pending outbox + delete embeddings）。
+- [ ] **Step 5: embedding worker 重查 → 见 Task 13 Step 4a** — worker `capa_lesson` 实体支持 + 写入前重查 lesson 存在性 + `document_embeddings.factory_id` 写入，统一在 Task 13 Step 4a 落地（R14-修复合并）；本任务依赖该能力（Task 14 enqueue 的 outbox 事件由 Task 13 的 worker 处理）。本任务只负责 enqueue + cleanup（savepoint 内 cancel pending outbox + delete embeddings + 传 `text_override=new_d8_closure` 抽取）。
 
 - [ ] **Step 6: 运行确认通过** → PASS。
 
