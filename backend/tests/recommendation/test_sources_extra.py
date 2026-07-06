@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from app.models.capa import CAPAEightD
 from app.models.factory import Factory
@@ -14,7 +14,13 @@ from app.models.product_line import ProductLine
 from app.models.product_type import ProductType
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
-from app.services.recommendation_sources_extra import IQCSource, MESSource, SameTypeProductKBSource, SPCAnomalySource, SupplierHistorySource
+from app.services.recommendation_sources_extra import (
+    IQCSource,
+    MESSource,
+    SameTypeProductKBSource,
+    SPCAnomalySource,
+    SupplierHistorySource,
+)
 from app.services.recommendation_types import RecommendationContext
 
 pytestmark = pytest.mark.requires_db

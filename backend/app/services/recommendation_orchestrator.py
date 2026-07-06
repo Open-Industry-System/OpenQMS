@@ -17,13 +17,13 @@ from typing import Literal
 from app.services.fusion_engine import FusionEngine
 from app.services.llm_fusion_layer import LLMFusionLayer
 from app.services.recommendation_sources import (
+    FMEAControlExpander,
     FMEAGraphSource,
     HistoricalCAPAMeasureSource,
     HistoricalCAPASource,
     RuleEngineMeasureSource,
     RuleEngineSource,
     SemanticSearchSource,
-    FMEAControlExpander,
 )
 from app.services.recommendation_sources_extra import (
     IQCSource,
