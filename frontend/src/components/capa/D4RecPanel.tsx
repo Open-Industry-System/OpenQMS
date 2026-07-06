@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getD4Recommendations } from "../../api/capa";
+import { getD4Recommendations, adoptRecommendation } from "../../api/capa";
 import type { D4Recommendation } from "../../types";
 
 const { Text } = Typography;
 
 interface D4RecPanelProps {
   capaId: string;
-  onAdopt: (adoptedText: string) => void;
   canAdopt?: boolean;
+  beforeAdopt?: () => Promise<void>;
+  onAdopted?: () => void;
 }
 
-export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPanelProps) {
+export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdopted }: D4RecPanelProps) {
   const { t } = useTranslation("capa");
   const { message } = App.useApp();
   const [recommendations, setRecommendations] = useState<D4Recommendation[]>([]);
@@ -78,9 +79,32 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
                     type="link"
                     size="small"
                     icon={<CheckOutlined />}
+                    data-e2e="d4-adopt"
                     disabled={!canAdopt}
                     title={!canAdopt ? t("d4.readonlyTooltip") : undefined}
-                    onClick={() => onAdopt(item.failure_cause_name)}
+                    onClick={async () => {
+                      try {
+                        await beforeAdopt?.();
+                        await adoptRecommendation(capaId, {
+                          d_step: "d4",
+                          adopted_text: item.failure_cause_name,
+                          source: item.match_source,
+                          item_ref: {
+                            failure_cause_node_id: item.failure_cause_node_id,
+                            fmea_id: item.fmea_id,
+                            failure_mode_node_id: item.failure_mode_node_id,
+                            // historical_capa 来源的节点 ID 为 null，靠 source_capa_id/document_no 区分，
+                            // 否则两条同根因文本的历史推荐会被后端 dedupe 误并
+                            source_capa_id: item.source_capa_id,
+                            source_capa_document_no: item.source_capa_document_no,
+                          },
+                        });
+                        message.success(t("d4.adopted"));
+                        onAdopted?.();
+                      } catch {
+                        message.error(t("d4.adoptFailed"));
+                      }
+                    }}
                   >
                     {t("d4.adopt")}
                   </Button>,

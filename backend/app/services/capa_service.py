@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
-from app.models.capa import CAPAEightD
+from app.models.capa import CAPAEightD, CapaRootCauseVerification
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
 from app.state_machines.eightd_state import EightDState, can_transition
@@ -260,6 +260,8 @@ async def advance_capa(
     user_id: uuid.UUID,
     d7_skip_reasons: list[dict] | None = None,
 ) -> CAPAEightD:
+    from sqlalchemy import select
+
     current = EightDState(capa.status)
     transitions = [
         EightDState.D1_TEAM,
@@ -281,6 +283,21 @@ async def advance_capa(
 
     if not can_transition(current, next_state):
         raise ValueError(f"Cannot transition from {capa.status} to {next_state.value}")
+
+    if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECTION:
+        # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，
+        # 防 d4_root_cause 被改后用陈旧验证记录放行
+        current_rc = (capa.d4_root_cause or "").strip()
+        if not current_rc:
+            raise ValueError("D4→D5 需先填写根因并验证")
+        cnt = await db.scalar(select(func.count()).select_from(CapaRootCauseVerification).where(
+            CapaRootCauseVerification.capa_id == capa.report_id,
+            CapaRootCauseVerification.factory_id == capa.factory_id,
+            CapaRootCauseVerification.is_verified == True,  # noqa: E712
+            CapaRootCauseVerification.root_cause_text == current_rc,
+        ))
+        if cnt < 1:
+            raise ValueError("D4→D5 需当前根因已验证")
 
     old_status = capa.status
     capa.status = next_state.value
@@ -311,8 +328,6 @@ async def advance_capa(
 
     # Write to MES outbox before commit
     if capa.product_line_code and old_status != capa.status:
-        from sqlalchemy import select
-
         from app.models.mes import MESConnection
         from app.services.mes_service import MESPushService
 

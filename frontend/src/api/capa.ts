@@ -1,5 +1,5 @@
 import client from "./client";
-import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse } from "../types";
+import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse, AdoptRequest, AdoptResponse, Verification, VerificationCreate, VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse } from "../types";
 
 export async function listCAPAs(params: {
   page?: number;
@@ -64,5 +64,34 @@ export async function linkFMEA(id: string, fmea_id: string): Promise<CAPAReport>
   const resp = await client.post(`/capa/${id}/link-fmea`, null, {
     params: { fmea_id },
   });
+  return resp.data;
+}
+
+export async function adoptRecommendation(capaId: string, req: AdoptRequest): Promise<AdoptResponse> {
+  const resp = await client.post(`/capa/${capaId}/adopt-recommendation`, req);
+  return resp.data;
+}
+export async function listVerifications(capaId: string): Promise<Verification[]> {
+  const resp = await client.get(`/capa/${capaId}/root-cause-verifications`);
+  return resp.data;
+}
+export async function createVerification(capaId: string, req: VerificationCreate): Promise<Verification> {
+  const resp = await client.post(`/capa/${capaId}/root-cause-verifications`, req);
+  return resp.data;
+}
+export async function updateVerification(capaId: string, vid: string, req: VerificationUpdate): Promise<Verification> {
+  const resp = await client.patch(`/capa/${capaId}/root-cause-verifications/${vid}`, req);
+  return resp.data;
+}
+export async function recordD7Action(capaId: string, req: D7NodeActionCreate): Promise<D7NodeAction> {
+  const resp = await client.post(`/capa/${capaId}/d7-node-actions`, req);
+  return resp.data;
+}
+export async function listD7Actions(capaId: string): Promise<D7NodeAction[]> {
+  const resp = await client.get(`/capa/${capaId}/d7-node-actions`);
+  return resp.data;
+}
+export async function autoFillD7(capaId: string, req: D7AutoFillRequest): Promise<D7AutoFillResponse> {
+  const resp = await client.post(`/capa/${capaId}/d7-auto-fill`, req);
   return resp.data;
 }

@@ -67,17 +67,15 @@ class RecommendationCandidate:
         return None
 
     def to_d5_suggestion_schema(self) -> dict[str, Any]:
-        """转换为 D5GeneralSuggestion 响应字典。"""
         result = {
             "content": self.content,
             "category": self.category or "预防措施",
             "basis": self.metadata.get("basis", ""),
             "confidence": round(self.confidence, 2),
             "match_reason": self.match_reason,
+            "match_source": "rule" if self.source in ("rule_engine", "rule_engine_measure") else self.source,
         }
-        # 历史 CAPA 来源字段（可选）
         if self.source == "historical_capa":
-            result["match_source"] = "historical_capa"
             result["source_capa_id"] = self.metadata.get("historical_capa_id")
             result["source_capa_document_no"] = self.metadata.get("document_no")
         return result

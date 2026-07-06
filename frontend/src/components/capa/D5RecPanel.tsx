@@ -2,16 +2,17 @@ import { useEffect, useState } from "react";
 import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse } from "antd";
 import { CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getD5Recommendations } from "../../api/capa";
+import { getD5Recommendations, adoptRecommendation } from "../../api/capa";
 import type { D5ExistingControl, D5GeneralSuggestion } from "../../types";
 
 interface D5RecPanelProps {
   capaId: string;
-  onAdopt: (adoptedText: string) => void;
+  beforeAdopt?: () => Promise<void>;
+  onAdopted?: () => void;
   canAdopt?: boolean;
 }
 
-export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPanelProps) {
+export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = true }: D5RecPanelProps) {
   const { t } = useTranslation("capa");
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
@@ -49,9 +50,25 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
             type="link"
             size="small"
             icon={<CheckOutlined />}
+            data-e2e="d5-adopt-control"
             disabled={!canAdopt}
             title={!canAdopt ? t("d5.readonlyTooltip") : undefined}
-            onClick={() => onAdopt(item.control_name)}
+            onClick={async () => {
+              try {
+                await beforeAdopt?.();
+                await adoptRecommendation(capaId, {
+                  d_step: "d5",
+                  adopted_text: item.control_name,
+                  source: item.match_source || "rule",
+                  item_ref: {
+                    control_node_id: item.control_node_id,
+                    failure_cause_node_id: item.failure_cause_node_id,
+                    fmea_id: item.fmea_id,
+                  },
+                });
+                message.success(t("d5.adopted")); onAdopted?.();
+              } catch { message.error(t("d5.adoptFailed")); }
+            }}
           >
             {t("d5.adopt")}
           </Button>,
@@ -102,9 +119,28 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
             type="link"
             size="small"
             icon={<CheckOutlined />}
+            data-e2e="d5-adopt-suggestion"
             disabled={!canAdopt}
             title={!canAdopt ? t("d5.readonlyTooltip") : undefined}
-            onClick={() => onAdopt(item.content)}
+            onClick={async () => {
+              try {
+                await beforeAdopt?.();
+                await adoptRecommendation(capaId, {
+                  d_step: "d5",
+                  adopted_text: item.content,
+                  source: item.match_source || "rule",
+                  // 含 provenance：不同来源（historical_capa 的 source_capa_id / category / basis）
+                  // 的同文本建议各有独立 item_ref，避免被后端 dedupe 误并
+                  item_ref: {
+                    source_capa_id: item.source_capa_id,
+                    source_capa_document_no: item.source_capa_document_no,
+                    category: item.category,
+                    basis: item.basis,
+                  },
+                });
+                message.success(t("d5.adopted")); onAdopted?.();
+              } catch { message.error(t("d5.adoptFailed")); }
+            }}
           >
             {t("d5.adopt")}
           </Button>,

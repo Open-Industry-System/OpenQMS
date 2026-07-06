@@ -110,7 +110,24 @@
     "adopt": "采纳",
     "skip": "跳过",
     "readonlyTooltip": "只读用户无法采纳",
-    "loadFailed": "加载 D4 推荐失败"
+    "loadFailed": "加载 D4 推荐失败",
+    "verificationTitle": "D4 现场根因验证",
+    "noVerification": "暂无验证记录",
+    "newVerification": "新增验证",
+    "rootCause": "根因",
+    "method": "验证方法",
+    "result": "验证结果",
+    "evidence": "证据附件",
+    "addEvidence": "添加证据",
+    "isVerified": "已验证",
+    "verified": "已验证",
+    "notVerified": "待验证",
+    "save": "保存",
+    "cancel": "取消",
+    "verificationSaved": "验证记录已保存",
+    "verificationLoadFailed": "验证记录加载失败",
+    "adopted": "已采纳",
+    "adoptFailed": "采纳失败"
   },
   "d5": {
     "title": "D5 纠正措施推荐",
@@ -128,7 +145,9 @@
     "loadFailed": "加载 D5 推荐失败",
     "adopt": "采纳",
     "skip": "跳过",
-    "readonlyTooltip": "只读用户无法采纳"
+    "readonlyTooltip": "只读用户无法采纳",
+    "adopted": "已采纳",
+    "adoptFailed": "采纳失败"
   },
   "d7": {
     "title": "预防复发提示",
@@ -158,7 +177,8 @@
     "skipReasonLabel": "如需跳过，请填写理由（可选）：",
     "skipReasonPlaceholder": "跳过理由（可选）",
     "skipReasonEmpty": "未填写理由",
-    "skipConfirm": "确认跳过并推进"
+    "skipConfirm": "确认跳过并推进",
+    "actionFailed": "动作保存失败"
   },
   "draft": {
     "button": "AI 草拟",

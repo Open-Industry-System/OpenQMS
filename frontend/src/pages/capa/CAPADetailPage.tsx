@@ -12,6 +12,7 @@ import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import D4RecPanel from "../../components/capa/D4RecPanel";
+import D4VerificationCard from "../../components/capa/D4VerificationCard";
 import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import AIDraftButton from "../../components/capa/AIDraftButton";
@@ -205,6 +206,13 @@ export default function CAPADetailPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const refreshCapa = async () => {
+    const updated = await getCAPA(id!);
+    setCapa(updated);
+    // 不在此处用闭包 localData 覆盖 d4/d5——交给下方 useEffect([capa]) 统一同步全部 localData，
+    // 避免闭包陈旧 localData 覆盖刚同步的其它字段（如 d6/d7/d8）造成闪回
   };
 
   const stepToField: Record<string, string> = {
@@ -498,13 +506,12 @@ export default function CAPADetailPage() {
                 <D4RecPanel
                   capaId={id!}
                   canAdopt={canEdit('capa')}
-                  onAdopt={(text) => {
-                    const current = localData.d4_root_cause || "";
-                    const newVal = current ? `${current}\n${text}` : text;
-                    setLocalData({ ...localData, d4_root_cause: newVal });
-                    handleUpdate("d4_root_cause", newVal);
+                  beforeAdopt={async () => {
+                    await handleUpdate("d4_root_cause", localData.d4_root_cause, true);
                   }}
+                  onAdopted={() => refreshCapa()}
                 />
+                <D4VerificationCard capaId={id!} canEdit={canEdit('capa')} currentRootCause={localData.d4_root_cause} />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label", "根因分析 (5Why / 鱼骨图)"))}>
                     <TextArea
@@ -524,12 +531,10 @@ export default function CAPADetailPage() {
                 <D5RecPanel
                   capaId={id!}
                   canAdopt={canEdit('capa')}
-                  onAdopt={(text) => {
-                    const current = localData.d5_correction || "";
-                    const newVal = current ? `${current}\n${text}` : text;
-                    setLocalData({ ...localData, d5_correction: newVal });
-                    handleUpdate("d5_correction", newVal);
+                  beforeAdopt={async () => {
+                    await handleUpdate("d5_correction", localData.d5_correction, true);
                   }}
+                  onAdopted={() => refreshCapa()}
                 />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d5", t("fields.d5Label", "永久纠正措施"))}>
@@ -576,6 +581,8 @@ export default function CAPADetailPage() {
                 <D7RecPanel
                   capaId={id!}
                   d5Correction={localData.d5_correction}
+                  canAdopt={canEdit('capa')}
+                  canAutoFill={canEdit('fmea')}
                   onConfirmationChange={(allConfirmed, unconfirmed) => {
                     setAllD7Confirmed(allConfirmed);
                     setD7UnconfirmedItems(unconfirmed);

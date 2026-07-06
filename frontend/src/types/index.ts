@@ -1797,3 +1797,78 @@ export interface SystemLogItem {
   traceback: string | null;
   occurred_at: string | null;
 }
+
+// --- CAPA D4 verification / adoption / D7 node actions (Spec A) ---
+export interface AdoptRequest {
+  d_step: "d4" | "d5";
+  adopted_text: string;
+  source: string;
+  item_ref?: Record<string, unknown> | null;
+}
+export interface AdoptResponse {
+  adoption_id: string;
+  d_step: string;
+  field_value: string;
+}
+export interface Verification {
+  verification_id: string;
+  capa_id: string;
+  root_cause_text: string;
+  method: string | null;
+  result: string | null;
+  is_verified: boolean;
+  evidence_attachments: Record<string, unknown>[];
+  source_ref: Record<string, unknown> | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  created_at: string;
+}
+export interface VerificationCreate {
+  root_cause_text: string;
+  method?: string | null;
+  result?: string | null;
+  is_verified?: boolean;
+  evidence_attachments?: Record<string, unknown>[];
+  source_ref?: Record<string, unknown> | null;
+}
+export interface VerificationUpdate {
+  method?: string | null;
+  result?: string | null;
+  is_verified?: boolean;
+  evidence_attachments?: Record<string, unknown>[];
+}
+export interface D7NodeAction {
+  action_id: string;
+  capa_id: string;
+  action: "confirmed" | "skipped" | "auto_filled";
+  fmea_id: string;
+  failure_mode_node_id: string;
+  failure_cause_node_id: string | null;
+  match_source: string;
+  prevention_control_node_id: string | null;
+  prevention_control_name_before: string | null;
+  prevention_control_name_after: string | null;
+  reason: string | null;
+  acted_by: string;
+  acted_at: string;
+}
+export interface D7NodeActionCreate {
+  action: "confirmed" | "skipped";
+  fmea_id: string;
+  failure_mode_node_id: string;
+  failure_cause_node_id?: string | null;
+  match_source: string;
+  reason?: string | null;
+}
+export interface D7AutoFillRequest {
+  fmea_id: string;
+  failure_mode_node_id: string;
+  failure_cause_node_id: string;
+  match_source: string;
+}
+export interface D7AutoFillResponse {
+  action_id: string;
+  prevention_control_node_id: string;
+  prevention_control_name_after: string;
+  is_new_control: boolean;
+}
