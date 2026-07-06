@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import uuid
 
 from sqlalchemy import func, select
@@ -11,6 +12,74 @@ from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import D7AutoFillRequest, D7NodeActionCreate
 from app.services.fmea_service import _apply_fmea_update
 from app.state_machines.eightd_state import EightDState
+
+
+def recommendation_fingerprint(
+    *,
+    fmea_id,
+    failure_mode_node_id,
+    failure_cause_node_id,
+    failure_mode_name,
+    failure_cause_name,
+    match_reason,
+) -> str:
+    # Canonical content hash (R11): record + gate 调同一函数，byte-identical 输入 → 相同输出。
+    # node_id 稳定 + name/reason 内容指纹：FMEA 节点改名/推荐内容变 → hash 变 → 旧动作 stale。
+    raw = (
+        f"{fmea_id}|{failure_mode_node_id}|{failure_cause_node_id or ''}|"
+        f"{failure_mode_name}|{failure_cause_name or ''}|{match_reason}"
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+async def _compute_current_d7_recs(db: AsyncSession, capa) -> list[dict]:
+    # 复用 D7 recommend 端点的 fmea_docs 预加载方式（canonical scope: capa 自己的工厂+产品线），
+    # 重算当前 D7 推荐集。record + gate 均调此函数，确保 key/hash 一致。
+    from app.services.capa_service import get_d7_recommendations
+
+    result = await db.execute(
+        select(FMEADocument).where(
+            FMEADocument.factory_id == capa.factory_id,
+            FMEADocument.product_line_code == capa.product_line_code,
+        )
+    )
+    fmea_docs = [
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        for f in result.scalars().all()
+    ]
+    capa_data = {
+        "fmea_ref_id": capa.fmea_ref_id,
+        "fmea_node_id": capa.fmea_node_id,
+        "d4_root_cause": capa.d4_root_cause or "",
+        "d5_correction": capa.d5_correction,
+        "product_line_code": capa.product_line_code,
+    }
+    return get_d7_recommendations(
+        capa_data, fmea_docs, allowed_product_lines=[capa.product_line_code]
+    )
+
+
+def _find_rec(recs, *, fmea_id, failure_mode_node_id, failure_cause_node_id):
+    target_cause = failure_cause_node_id or ""
+    for r in recs:
+        if (
+            r["fmea_id"] == fmea_id
+            and r["failure_mode_node_id"] == failure_mode_node_id
+            and (r["failure_cause_node_id"] or "") == target_cause
+        ):
+            return r
+    return None
+
+
+def _hash_for_rec(rec) -> str:
+    return recommendation_fingerprint(
+        fmea_id=rec["fmea_id"],
+        failure_mode_node_id=rec["failure_mode_node_id"],
+        failure_cause_node_id=rec["failure_cause_node_id"],
+        failure_mode_name=rec["failure_mode_name"],
+        failure_cause_name=rec["failure_cause_name"],
+        match_reason=rec["match_reason"],
+    )
 
 
 class ConflictError(Exception):
@@ -45,6 +114,18 @@ async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = Fa
 async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user) -> CapaD7NodeAction:
     await _assert_d7_stage(capa)
     await _fetch_fmea_for_d7(db, capa, req.fmea_id)
+    # R13: 重算当前 D7 推荐集，要求 req 的 key 在其中——防 stale UI / 恶意 key 写入悬空 action。
+    # key 命中 → 用 canonical helper 算 recommendation_hash；未命中 → 400，不落 action。
+    current_recs = await _compute_current_d7_recs(db, capa)
+    rec = _find_rec(
+        current_recs,
+        fmea_id=req.fmea_id,
+        failure_mode_node_id=req.failure_mode_node_id,
+        failure_cause_node_id=req.failure_cause_node_id,
+    )
+    if rec is None:
+        raise ValueError("D7 推荐 key 不存在于当前推荐集")
+    rec_hash = _hash_for_rec(rec)
     existing = await db.scalar(select(CapaD7NodeAction).where(
         CapaD7NodeAction.capa_id == capa.report_id,
         CapaD7NodeAction.fmea_id == req.fmea_id,
@@ -60,6 +141,7 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         old_reason = existing.reason
         existing.action = req.action
         existing.reason = req.reason
+        existing.recommendation_hash = rec_hash
         existing.acted_by = user.user_id
         existing.acted_at = func.now()
         db.add(AuditLog(
@@ -77,14 +159,15 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         await db.commit()
         await db.refresh(existing)
         return existing
-    rec = CapaD7NodeAction(
+    rec_row = CapaD7NodeAction(
         capa_id=capa.report_id, factory_id=capa.factory_id,
         action=req.action, fmea_id=req.fmea_id,
         failure_mode_node_id=req.failure_mode_node_id,
         failure_cause_node_id=req.failure_cause_node_id,
         match_source=req.match_source, reason=req.reason, acted_by=user.user_id,
+        recommendation_hash=rec_hash,
     )
-    db.add(rec)
+    db.add(rec_row)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
         action=f"D7_NODE_{req.action.upper()}",
@@ -113,8 +196,8 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         if existing is None:
             raise
         return existing
-    await db.refresh(rec)
-    return rec
+    await db.refresh(rec_row)
+    return rec_row
 
 
 async def list_d7_actions(db: AsyncSession, capa) -> list[CapaD7NodeAction]:
@@ -156,6 +239,18 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
         for e in pre_graph.get("edges", [])
     ):
         raise ValueError("失效原因与失效模式无 CAUSE_OF 关系")
+    # R13: graph 结构校验通过后、mutation 前，重算当前 D7 推荐集并要求 req key 在其中。
+    # 防 stale UI / 恶意 key 写悬空 action；命中 → 用 canonical helper 算 recommendation_hash。
+    current_recs = await _compute_current_d7_recs(db, capa)
+    rec_match = _find_rec(
+        current_recs,
+        fmea_id=req.fmea_id,
+        failure_mode_node_id=req.failure_mode_node_id,
+        failure_cause_node_id=req.failure_cause_node_id,
+    )
+    if rec_match is None:
+        raise ValueError("D7 推荐 key 不存在于当前推荐集")
+    rec_hash = _hash_for_rec(rec_match)
     graph = copy.deepcopy(fmea.graph_data or {"nodes": [], "edges": []})
     ctrl_node = None
     name_before = None
@@ -189,6 +284,7 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
         existing.prevention_control_node_id = ctrl_node["id"]
         existing.prevention_control_name_before = name_before
         existing.prevention_control_name_after = capa.d5_correction
+        existing.recommendation_hash = rec_hash
         existing.acted_by = user.user_id
         existing.acted_at = func.now()
         rec = existing
@@ -210,6 +306,7 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
             prevention_control_name_before=name_before,
             prevention_control_name_after=capa.d5_correction,
             acted_by=user.user_id,
+            recommendation_hash=rec_hash,
         )
         db.add(rec)
     db.add(AuditLog(

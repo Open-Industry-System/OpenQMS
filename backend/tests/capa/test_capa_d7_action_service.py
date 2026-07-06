@@ -36,10 +36,20 @@ async def _make_fmea(db, factory_id, user_id, fm_id="fm-1", cause_id="c-1", pl_c
     return fmea
 
 
+async def _link_capa_fmea(db, capa, fmea, fm_id="fm-1"):
+    # R13 backfill：record/auto_fill 现在要求 req key 在当前 D7 推荐集中——
+    # 关联 FMEA + 指向 FailureMode 节点，使 linked matching 产出该 key 的推荐。
+    capa.fmea_ref_id = fmea.fmea_id
+    capa.fmea_node_id = fm_id
+    await db.flush()
+    return capa
+
+
 @pytest.mark.asyncio
 async def test_record_confirmed_inserts_and_audits(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     rec = await record_d7_action(db, capa, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
@@ -50,6 +60,7 @@ async def test_record_confirmed_inserts_and_audits(db, default_factory, admin_us
 async def test_record_idempotent_same_action_and_reason(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     req = D7NodeActionCreate(action="confirmed", fmea_id=fmea.fmea_id,
                             failure_mode_node_id="fm-1", failure_cause_node_id="c-1",
                             match_source="linked")
@@ -66,6 +77,7 @@ async def test_record_idempotent_same_action_and_reason(db, default_factory, adm
 async def test_record_change_action_writes_changed_audit(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     await record_d7_action(db, capa, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
@@ -103,15 +115,18 @@ async def test_record_cross_factory_fmea_permission(db, default_factory, admin_u
 async def test_list_d7_actions_filters_by_capa_and_orders_desc(db, default_factory, admin_user):
     capa_a = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea_a1 = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id="fm-1", cause_id="c-1")
+    await _link_capa_fmea(db, capa_a, fmea_a1)
     await record_d7_action(db, capa_a, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea_a1.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
     fmea_a2 = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id="fm-2", cause_id="c-2")
+    await _link_capa_fmea(db, capa_a, fmea_a2, fm_id="fm-2")
     await record_d7_action(db, capa_a, D7NodeActionCreate(
         action="skipped", fmea_id=fmea_a2.fmea_id, failure_mode_node_id="fm-2",
         failure_cause_node_id="c-2", match_source="manual", reason="不适用"), admin_user)
     capa_b = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea_b = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id="fm-b", cause_id="c-b")
+    await _link_capa_fmea(db, capa_b, fmea_b, fm_id="fm-b")
     await record_d7_action(db, capa_b, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea_b.fmea_id, failure_mode_node_id="fm-b",
         failure_cause_node_id="c-b", match_source="linked"), admin_user)
@@ -126,6 +141,7 @@ async def test_list_d7_actions_filters_by_capa_and_orders_desc(db, default_facto
 async def test_auto_fill_new_control_persists_graph(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="新监控")
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     rec, info = await auto_fill_d7(db, capa, D7AutoFillRequest(
         fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
@@ -158,6 +174,7 @@ async def test_auto_fill_existing_control_captures_before(db, default_factory, a
         status="draft", created_by=admin_user.user_id, graph_data=graph,
     )
     db.add(fmea); await db.flush()
+    await _link_capa_fmea(db, capa, fmea)
     rec, info = await auto_fill_d7(db, capa, D7AutoFillRequest(
         fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
@@ -180,6 +197,7 @@ async def test_auto_fill_d5_empty_raises(db, default_factory, admin_user):
 async def test_auto_fill_idempotent_conflict(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="监控")
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     req = D7AutoFillRequest(fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
                             failure_cause_node_id="c-1", match_source="linked")
     await auto_fill_d7(db, capa, req, admin_user)
@@ -191,6 +209,7 @@ async def test_auto_fill_idempotent_conflict(db, default_factory, admin_user):
 async def test_auto_fill_upgrades_confirmed_to_auto_filled(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="监控")
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     await record_d7_action(db, capa, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
@@ -210,6 +229,7 @@ async def test_auto_fill_integrity_error_maps_to_conflict_not_500(db, default_fa
     from sqlalchemy.exc import IntegrityError as _IntErr
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="监控")
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     graph_before = copy.deepcopy(fmea.graph_data)
     req = D7AutoFillRequest(fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
                             failure_cause_node_id="c-1", match_source="linked")
@@ -314,6 +334,7 @@ async def test_fmea_delete_cascades_d7_actions(db, default_factory, admin_user):
     from app.services.fmea_service import delete_fmea
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
     await record_d7_action(db, capa, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
@@ -330,6 +351,11 @@ async def test_record_d7_action_accepts_wizard_length_node_ids(db, default_facto
     fm_id = f"w{uuid.uuid4()}_FailureMode"
     cause_id = f"w{uuid.uuid4()}_FailureCause"
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id=fm_id, cause_id=cause_id)
+    # capa.fmea_node_id 列是 String(36)，装不下 wizard ID；改用 d4_root_cause 关键词匹配
+    # 命中 linked FMEA 的 FailureMode（fmea_node_id=None 路径），仍产出 (fmea_id, fm_id, cause_id) 推荐。
+    capa.fmea_ref_id = fmea.fmea_id
+    capa.d4_root_cause = "虚焊"
+    await db.flush()
     rec = await record_d7_action(db, capa, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id=fm_id,
         failure_cause_node_id=cause_id, match_source="linked"), admin_user)

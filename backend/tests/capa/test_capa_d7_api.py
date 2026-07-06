@@ -48,6 +48,10 @@ async def _make(db, factory_id, user_id, doc_no, d5="监控"):
             {"id": "c-1", "type": "FailureCause", "name": "参数偏移"},
         ], "edges": [{"source": "c-1", "target": "fm-1", "type": "CAUSE_OF"}]})
     db.add(fmea); await db.flush()
+    # R13 backfill：record/auto-fill 现要求 key 在当前 D7 推荐集中——关联 FMEA + 指向 FailureMode。
+    capa.fmea_ref_id = fmea.fmea_id
+    capa.fmea_node_id = "fm-1"
+    await db.flush()
     return capa, fmea
 
 

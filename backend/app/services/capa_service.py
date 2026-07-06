@@ -254,6 +254,95 @@ async def update_capa(
     return capa
 
 
+async def _load_d7_gate_fmea_docs(db: AsyncSession, capa) -> list[dict]:
+    # Canonical scope: capa 自己的 factory_id + product_line_code（R2+R5：不用用户 allowed_pls，
+    # 不用整工厂）。FOR UPDATE 锁 FMEA 依赖集（R11：防并发 FMEA 编辑 race）。
+    from app.models.fmea import FMEADocument
+
+    result = await db.execute(
+        select(FMEADocument).where(
+            FMEADocument.factory_id == capa.factory_id,
+            FMEADocument.product_line_code == capa.product_line_code,
+        ).with_for_update()
+    )
+    return [
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
+        for f in result.scalars().all()
+    ]
+
+
+async def _d7_to_d8_gate(db: AsyncSession, capa) -> None:
+    from app.models.capa import CapaD7NodeAction
+    from app.models.fmea import FMEADocument
+    from app.services.capa_d7_action_service import recommendation_fingerprint
+
+    # 1. 锁 capa 行（re-fetch FOR UPDATE，串行化并发 advance，决策 17）
+    await db.execute(
+        select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update()
+    )
+
+    # 2. completeness check（R7+R8+R9：生成前跑，partial preload / 关联 FMEA 缺失 → fail-closed）
+    fmea_count = await db.scalar(
+        select(func.count()).select_from(FMEADocument).where(
+            FMEADocument.factory_id == capa.factory_id,
+            FMEADocument.product_line_code == capa.product_line_code,
+        )
+    )
+    fmea_docs = await _load_d7_gate_fmea_docs(db, capa)
+    if len(fmea_docs) != fmea_count:
+        raise ValueError("D7 推荐重算异常：FMEA 预加载不完整")
+    if capa.fmea_ref_id is not None and not any(
+        d["fmea_id"] == capa.fmea_ref_id for d in fmea_docs
+    ):
+        raise ValueError("D7 推荐重算异常：FMEA 预加载不完整")
+
+    # 3. 重算 D7 推荐（canonical scope，allowed_pls=[capa.product_line_code]）
+    capa_data = {
+        "fmea_ref_id": capa.fmea_ref_id,
+        "fmea_node_id": capa.fmea_node_id,
+        "d4_root_cause": capa.d4_root_cause or "",
+        "d5_correction": capa.d5_correction,
+        "product_line_code": capa.product_line_code,
+    }
+    recs = get_d7_recommendations(
+        capa_data, fmea_docs, allowed_product_lines=[capa.product_line_code]
+    )
+
+    # 4. 真无推荐（completeness 通过 + count=0 + 无 linked）→ 平凡通过
+    if not recs:
+        return
+
+    # 5. per-rec action check：capa_id 过滤（R8）+ recommendation_hash 匹配（R10+R11，同一 helper）
+    #    + action IN (confirmed/skipped/auto_filled)（R6）。未处置/stale → fail-closed。
+    unprocessed = 0
+    for rec in recs:
+        current_hash = recommendation_fingerprint(
+            fmea_id=rec["fmea_id"],
+            failure_mode_node_id=rec["failure_mode_node_id"],
+            failure_cause_node_id=rec["failure_cause_node_id"],
+            failure_mode_name=rec["failure_mode_name"],
+            failure_cause_name=rec["failure_cause_name"],
+            match_reason=rec["match_reason"],
+        )
+        cause_norm = rec["failure_cause_node_id"] or ""
+        matched = await db.scalar(
+            select(func.count()).select_from(CapaD7NodeAction).where(
+                CapaD7NodeAction.capa_id == capa.report_id,
+                CapaD7NodeAction.fmea_id == rec["fmea_id"],
+                CapaD7NodeAction.failure_mode_node_id == rec["failure_mode_node_id"],
+                func.coalesce(CapaD7NodeAction.failure_cause_node_id, "") == cause_norm,
+                CapaD7NodeAction.recommendation_hash == current_hash,
+                CapaD7NodeAction.action.in_(["confirmed", "skipped", "auto_filled"]),
+            )
+        )
+        if not matched:
+            unprocessed += 1
+    if unprocessed:
+        raise ValueError(
+            f"D7 有 {unprocessed} 条推荐未处置或已 stale（FMEA 变更），不可关闭"
+        )
+
+
 async def advance_capa(
     db: AsyncSession,
     capa: CAPAEightD,
@@ -283,6 +372,11 @@ async def advance_capa(
 
     if not can_transition(current, next_state):
         raise ValueError(f"Cannot transition from {capa.status} to {next_state.value}")
+
+    if current == EightDState.D7_PREVENTION and next_state == EightDState.D8_CLOSURE:
+        # D7→D8 闭环闸口（决策 18）：completeness + capa_id 过滤 + recommendation_hash 匹配 + fail-closed。
+        # 闸口不通过 → ValueError（API 映 400），不推进、不审计、不抽 lessons。
+        await _d7_to_d8_gate(db, capa)
 
     if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECTION:
         # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，
