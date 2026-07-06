@@ -116,8 +116,10 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     ))
     if rec is None:
         raise LookupError("verification not found")
-    if req.is_verified is not None and req.is_verified != rec.is_verified:
-        if req.is_verified:
+    # 用 exclude_unset 区分"省略"与"显式 null"：PATCH {method: null} 应清空，而非被当作省略跳过
+    updates = req.model_dump(exclude_unset=True)
+    if "is_verified" in updates and updates["is_verified"] != rec.is_verified:
+        if updates["is_verified"]:
             rec.is_verified = True
             rec.verified_by = user.user_id
             rec.verified_at = func.now()
@@ -125,12 +127,12 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
             rec.is_verified = False
             rec.verified_by = None
             rec.verified_at = None
-    if req.method is not None:
-        rec.method = req.method
-    if req.result is not None:
-        rec.result = req.result
-    if req.evidence_attachments is not None:
-        rec.evidence_attachments = req.evidence_attachments
+    if "method" in updates:
+        rec.method = updates["method"]
+    if "result" in updates:
+        rec.result = updates["result"]
+    if "evidence_attachments" in updates:
+        rec.evidence_attachments = updates["evidence_attachments"]
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
         action="RC_VERIFY",

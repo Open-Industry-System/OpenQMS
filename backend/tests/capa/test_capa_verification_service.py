@@ -137,6 +137,30 @@ async def test_update_flip_true_to_false_clears_verifier(db, default_factory, ad
 
 
 @pytest.mark.asyncio
+async def test_update_explicit_null_clears_method_and_result(db, default_factory, admin_user):
+    # PATCH {method: null, result: null} 应清空，而非被当作省略跳过
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    rec = await create_verification(db, capa, VerificationCreate(
+        root_cause_text="rc", method="千分尺", result="超差"), admin_user)
+    updated = await update_verification(db, capa, rec.verification_id,
+                                        VerificationUpdate(method=None, result=None), admin_user)
+    assert updated.method is None
+    assert updated.result is None
+
+
+@pytest.mark.asyncio
+async def test_update_omitted_fields_preserved(db, default_factory, admin_user):
+    # PATCH 只改 method，省略的 result 应保持原值
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    rec = await create_verification(db, capa, VerificationCreate(
+        root_cause_text="rc", method="千分尺", result="超差"), admin_user)
+    updated = await update_verification(db, capa, rec.verification_id,
+                                        VerificationUpdate(method="卡尺"), admin_user)
+    assert updated.method == "卡尺"
+    assert updated.result == "超差"
+
+
+@pytest.mark.asyncio
 async def test_update_other_capa_record_returns_404_lookup(db, default_factory, admin_user):
     capa_a = await _make_capa(db, default_factory.id, admin_user.user_id, doc_no="8D-A")
     capa_b = await _make_capa(db, default_factory.id, admin_user.user_id, doc_no="8D-B")
