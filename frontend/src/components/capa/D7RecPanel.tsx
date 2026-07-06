@@ -23,6 +23,7 @@ interface D7RecPanelProps {
   capaId: string;
   d5Correction: string | null;
   canAdopt?: boolean;
+  canAutoFill?: boolean;
   onConfirmationChange: (allConfirmed: boolean, unconfirmedItems: D7UnconfirmedItem[]) => void;
 }
 
@@ -30,6 +31,7 @@ export default function D7RecPanel({
   capaId,
   d5Correction,
   canAdopt = true,
+  canAutoFill = true,
   onConfirmationChange,
 }: D7RecPanelProps) {
   const { t } = useTranslation("capa");
@@ -150,7 +152,7 @@ export default function D7RecPanel({
                 ghost
                 icon={<ThunderboltOutlined />}
                 data-e2e="d7-auto-fill"
-                disabled={locked || !canAdopt}
+                disabled={locked || !canAutoFill}
                 loading={fillingNode === rec.failure_cause_node_id}
                 onClick={() => handleAutoFill(rec)}
               >
@@ -166,7 +168,7 @@ export default function D7RecPanel({
                 size="small"
                 icon={<ThunderboltOutlined />}
                 data-e2e="d7-auto-fill"
-                disabled={locked || !canAdopt || !d5Correction || !rec.failure_cause_node_id}
+                disabled={locked || !canAutoFill || !d5Correction || !rec.failure_cause_node_id}
                 loading={fillingNode === rec.failure_cause_node_id}
               >
                 {t("d7.autoFill")}

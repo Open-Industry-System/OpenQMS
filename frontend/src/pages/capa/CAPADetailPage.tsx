@@ -582,6 +582,7 @@ export default function CAPADetailPage() {
                   capaId={id!}
                   d5Correction={localData.d5_correction}
                   canAdopt={canEdit('capa')}
+                  canAutoFill={canEdit('fmea')}
                   onConfirmationChange={(allConfirmed, unconfirmed) => {
                     setAllD7Confirmed(allConfirmed);
                     setD7UnconfirmedItems(unconfirmed);
