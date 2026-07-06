@@ -75,3 +75,22 @@ async def test_per_stage_protocol_violation_is_error(monkeypatch):
     result = await orch.run(_ctx(), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
     s6 = next(s for s in result.stages if s.index == 6)
     assert s6.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_d5_stage2_direct_lookup_when_embedding_off(monkeypatch):
+    orch = RecommendationOrchestrator(MagicMock(), None, None)  # embedding=None → stage 3 skipped
+    linked = {"fmea_id": "f1", "document_no": "PFMEA-1", "product_line_code": "DC-DC-100",
+              "graph_data": {"nodes": [{"id":"c1","type":"FailureCause","name":"螺栓尺寸超差"},
+                                       {"id":"fm1","type":"FailureMode","name":"虚焊"}],
+                             "edges": [{"source":"c1","target":"fm1","type":"CAUSE_OF"}]}}
+    ctx = _ctx(stage="d5", linked_fmea=linked)
+    ctx.capa_data["d4_root_cause"] = "螺栓尺寸超差"
+    from app.services.recommendation_types import RecommendationCandidate
+    orch.d5_control_expander.expand = AsyncMock(return_value=[
+        RecommendationCandidate(source="fmea_graph", content="监控", category=None, confidence=0.6,
+                                match_reason="扩展控制措施", metadata={"control_node_id":"ctrl1"})
+    ])
+    result = await orch.run(ctx, user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s2 = next(s for s in result.stages if s.index == 2)
+    assert s2.status == "done"  # 直查命中 cause → 扩展 control，不 skipped

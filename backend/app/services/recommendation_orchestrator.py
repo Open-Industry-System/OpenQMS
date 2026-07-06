@@ -232,9 +232,40 @@ class RecommendationOrchestrator:
         return None
 
     async def _lookup_linked_fmea_causes(self, context) -> list[RecommendationCandidate]:
-        # Task 11 完善此方法（按 D4 根因关键词直查 linked FMEA 的 FailureCause，不依赖 embedding）。
-        # Task 3: 暂返回 []，D5 stage 2 仅靠 semantic（stage 3/4）召回的 cause。
-        return []
+        # R10-修复：D5 stage 2 直查 linked FMEA 的 FailureCause（按 D4 根因关键词），不依赖 embedding。
+        # embedding 不可用 / semantic 0 命中时仍能扩展 FMEA 控制措施（与既有纯函数 _match_existing_controls 一致）。
+        from app.utils.text import extract_keywords
+        linked = context.linked_fmea
+        if not linked or not linked.get("graph_data"):
+            return []
+        d4 = context.capa_data.get("d4_root_cause", "") or context.capa_data.get("d2_description", "")
+        keywords = extract_keywords(d4)
+        if not keywords:
+            return []
+        graph = linked["graph_data"]; node_map = {n["id"]: n for n in graph.get("nodes", [])}
+        edges = graph.get("edges", [])
+        forward: dict[str, list] = {}
+        for e in edges:
+            forward.setdefault(e["source"], []).append((e["target"], e["type"]))
+        cands: list[RecommendationCandidate] = []
+        for node in graph.get("nodes", []):
+            if node.get("type") != "FailureCause":
+                continue
+            name = node.get("name", ""); desc = node.get("description", "")
+            if not any(kw in name or kw in desc for kw in keywords):
+                continue
+            fm_id = fm_name = None
+            for tgt, etype in forward.get(node["id"], []):
+                if etype == "CAUSE_OF" and node_map.get(tgt, {}).get("type") == "FailureMode":
+                    fm_id = tgt; fm_name = node_map[tgt].get("name"); break
+            cands.append(RecommendationCandidate(
+                source="fmea_graph", content=name, category=None, confidence=0.5,
+                match_reason="关联 FMEA 失效原因（D4 关键词直查）",
+                metadata={"failure_cause_node_id": node["id"], "failure_cause_desc": desc or None,
+                          "failure_mode_node_id": fm_id, "failure_mode_name": fm_name,
+                          "fmea_id": str(linked["fmea_id"]), "fmea_document_no": linked.get("document_no"),
+                          "product_line_code": linked.get("product_line_code"), "stage_index": 2}))
+        return cands
 
     async def _exec_llm_stage(self, spec, fused, context) -> tuple[StageRun, list[RecommendationCandidate]]:
         # LLM enrich over FUSED 集（保既有 fusion→LLM 顺序，R2-修复）；返回 (StageRun, 增强后候选)
