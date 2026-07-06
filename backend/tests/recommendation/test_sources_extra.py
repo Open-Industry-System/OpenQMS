@@ -8,8 +8,8 @@ from app.models.factory import Factory
 from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
 from app.models.spc import InspectionCharacteristic, SPCAlarm
-from app.models.supplier import Supplier
-from app.services.recommendation_sources_extra import IQCSource, SPCAnomalySource
+from app.models.supplier import Supplier, SupplierEvaluation
+from app.services.recommendation_sources_extra import IQCSource, SPCAnomalySource, SupplierHistorySource
 from app.services.recommendation_types import RecommendationContext
 
 pytestmark = pytest.mark.requires_db
@@ -167,6 +167,32 @@ def _make_supplier(db, factory_id, admin_user, supplier_no):
     return supplier
 
 
+def _make_supplier_evaluation(db, supplier_id, factory_id, admin_user, grade="A"):
+    evaluation = SupplierEvaluation(
+        eval_id=uuid.uuid4(),
+        supplier_id=supplier_id,
+        factory_id=factory_id,
+        eval_period="2026-Q2",
+        eval_type="季度",
+        quality_score=85.0,
+        delivery_score=85.0,
+        service_score=85.0,
+        capa_count=0,
+        finding_count=0,
+        premium_freight_count=0,
+        customer_disruption_count=0,
+        capa_penalty=0.0,
+        finding_penalty=0.0,
+        premium_freight_penalty=0.0,
+        customer_disruption_penalty=0.0,
+        total_score=85.0,
+        grade=grade,
+        evaluated_by=admin_user.user_id,
+    )
+    db.add(evaluation)
+    return evaluation
+
+
 def _make_iqc_inspection(
     db,
     factory_id,
@@ -178,6 +204,7 @@ def _make_iqc_inspection(
     defect_description=None,
     inspection_date=None,
     part_no=None,
+    lot_qty=10,
 ):
     if inspection_date is None:
         inspection_date = datetime.now(timezone.utc).date()
@@ -193,6 +220,7 @@ def _make_iqc_inspection(
         defect_description=defect_description,
         inspection_date=inspection_date,
         part_no=part_no,
+        lot_qty=lot_qty,
         inspection_result="rejected" if defect_qty > 0 else "passed",
         inspected_by=admin_user.user_id,
         judged_by=admin_user.user_id,
@@ -295,3 +323,104 @@ async def test_iqc_factory_isolation(db, default_factory, admin_user):
     other_inspection_ids = {str(inspection_b.inspection_id)}
     assert not any(c.metadata.get("inspection_id") in other_inspection_ids for c in cands)
     assert any(c.metadata.get("inspection_id") == str(inspection_a.inspection_id) for c in cands)
+
+
+@pytest.mark.asyncio
+async def test_supplier_should_skip_no_suppliers(db, default_factory):
+    src = SupplierHistorySource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    reason = await src.should_skip(ctx)
+    assert reason is not None
+    assert "无关联供应商历史" in reason
+
+
+@pytest.mark.asyncio
+async def test_supplier_retrieves_when_history(db, default_factory, admin_user):
+    supplier = _make_supplier(db, default_factory.id, admin_user, "SUP-HIST-01")
+    await db.flush()
+    _make_supplier_evaluation(db, supplier.supplier_id, default_factory.id, admin_user, grade="A")
+    _make_iqc_inspection(
+        db,
+        default_factory.id,
+        supplier.supplier_id,
+        admin_user,
+        "IQC-SUP-001",
+        defect_qty=3,
+        defect_description="镀层脱落",
+        part_no="PART-SUP-001",
+        lot_qty=100,
+    )
+    await db.flush()
+
+    src = SupplierHistorySource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+    assert len(cands) > 0
+    assert all(c.source == "supplier_history" for c in cands)
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+    assert any(c.metadata.get("supplier_id") == str(supplier.supplier_id) for c in cands)
+    assert all(c.metadata.get("grade") is not None for c in cands)
+    assert any("评级" in c.content and "PPM=" in c.content for c in cands)
+
+
+@pytest.mark.asyncio
+async def test_supplier_factory_isolation(db, default_factory, admin_user):
+    other = Factory(id=uuid.uuid4(), code="OTHER", name="Other")
+    db.add(other)
+    await db.flush()
+
+    supplier_a = _make_supplier(db, default_factory.id, admin_user, "SUP-HIST-A")
+    await db.flush()
+    _make_iqc_inspection(
+        db,
+        default_factory.id,
+        supplier_a.supplier_id,
+        admin_user,
+        "IQC-SUP-A",
+        defect_qty=5,
+        defect_description="外观划伤",
+        part_no="PART-A",
+        lot_qty=100,
+    )
+
+    supplier_b = _make_supplier(db, other.id, admin_user, "SUP-HIST-B")
+    await db.flush()
+    _make_iqc_inspection(
+        db,
+        other.id,
+        supplier_b.supplier_id,
+        admin_user,
+        "IQC-SUP-B",
+        product_line_code="DC-DC-100",
+        defect_qty=7,
+        defect_description="镀层脱落",
+        part_no="PART-B",
+        lot_qty=100,
+    )
+    await db.flush()
+
+    src = SupplierHistorySource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0, "default 工厂有 IQC 不良数据，retrieve 不应为空"
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+
+    other_supplier_ids = {str(supplier_b.supplier_id)}
+    assert not any(c.metadata.get("supplier_id") in other_supplier_ids for c in cands)
+    assert any(c.metadata.get("supplier_id") == str(supplier_a.supplier_id) for c in cands)

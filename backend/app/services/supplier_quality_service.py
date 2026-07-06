@@ -275,11 +275,14 @@ async def get_supplier_quality_detail(
 
     trend_result = await db.execute(
         select(
-            func.extract("year", IqcInspection.inspection_date),
-            func.extract("month", IqcInspection.inspection_date),
+            func.extract("year", IqcInspection.inspection_date).label("year"),
+            func.extract("month", IqcInspection.inspection_date).label("month"),
             func.coalesce(func.sum(IqcInspection.defect_qty), 0),
             func.coalesce(func.sum(IqcInspection.lot_qty), 0),
-        ).where(*iqc_filter).group_by("year", "month").order_by("year", "month")
+        )
+        .where(*iqc_filter)
+        .group_by("year", "month")
+        .order_by("year", "month")
     )
     ppm_trend = [
         {
@@ -291,11 +294,14 @@ async def get_supplier_quality_detail(
 
     acc_trend_result = await db.execute(
         select(
-            func.extract("year", IqcInspection.inspection_date),
-            func.extract("month", IqcInspection.inspection_date),
+            func.extract("year", IqcInspection.inspection_date).label("year"),
+            func.extract("month", IqcInspection.inspection_date).label("month"),
             func.count(),
             func.count(case((IqcInspection.inspection_result == "accepted", 1))),
-        ).where(*iqc_filter).group_by("year", "month").order_by("year", "month")
+        )
+        .where(*iqc_filter)
+        .group_by("year", "month")
+        .order_by("year", "month")
     )
     acceptance_trend = [
         {

@@ -25,7 +25,7 @@ from app.services.recommendation_sources import (
     SemanticSearchSource,
     FMEAControlExpander,
 )
-from app.services.recommendation_sources_extra import IQCSource, SPCAnomalySource
+from app.services.recommendation_sources_extra import IQCSource, SPCAnomalySource, SupplierHistorySource
 from app.services.recommendation_types import (
     RecommendationCandidate,
     RecommendationContext,
@@ -92,6 +92,7 @@ class RecommendationOrchestrator:
             "rule_engine_measure": RuleEngineMeasureSource(),
             "spc_anomaly": SPCAnomalySource(self.db, self.embedding),
             "iqc": IQCSource(self.db, self.embedding),
+            "supplier_history": SupplierHistorySource(self.db, self.embedding),
         }
 
     def _check_source_protocol(self, spec, source) -> str | None:

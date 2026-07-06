@@ -1,11 +1,15 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 
 from app.models.iqc_inspection import IqcInspection
 from app.models.spc import InspectionCharacteristic, SPCAlarm
+from app.models.supplier import SupplierSCAR
+from app.services import spc_service, supplier_quality_service
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
-from app.services import spc_service
+
+logger = logging.getLogger(__name__)
 
 
 class SPCAnomalySource:
@@ -130,6 +134,96 @@ class IQCSource:
                         "part_no": insp.part_no,
                         "inspection_id": str(insp.inspection_id),
                         "defect_qty": insp.defect_qty,
+                        "product_line_code": pl,
+                        "factory_id": str(fid),
+                    },
+                )
+            )
+        return cands
+
+
+class SupplierHistorySource:
+    name = "supplier_history"
+
+    def __init__(self, db, embedding_provider=None):
+        self.db = db
+
+    async def should_skip(self, context: RecommendationContext) -> str | None:
+        pl = context.capa_data.get("product_line_code")
+        fid = context.factory_id
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        supplier_ids = set()
+
+        # 路径 (a)：该工厂 + 产品线近 30 天有不良的 IQC 检验
+        if pl and fid:
+            rows = await self.db.execute(
+                select(distinct(IqcInspection.supplier_id)).where(
+                    IqcInspection.product_line_code == pl,
+                    IqcInspection.factory_id == fid,
+                    IqcInspection.defect_qty > 0,
+                    IqcInspection.inspection_date >= since.date(),
+                )
+            )
+            supplier_ids.update(rows.scalars().all())
+
+        # 路径 (b)：关联到当前 CAPA 的 SupplierSCAR（工厂级作用域）
+        # 注：当前 context.capa_data 未携带 report_id，此分支在未来补齐后才生效
+        capa_report_id = context.capa_data.get("report_id")
+        if capa_report_id and fid:
+            scar_rows = await self.db.execute(
+                select(distinct(SupplierSCAR.supplier_id)).where(
+                    SupplierSCAR.capa_ref_id == capa_report_id,
+                    SupplierSCAR.factory_id == fid,
+                )
+            )
+            supplier_ids.update(scar_rows.scalars().all())
+
+        return None if supplier_ids else "产品线无关联供应商历史"
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        pl = context.capa_data.get("product_line_code")
+        fid = context.factory_id
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+
+        rows = await self.db.execute(
+            select(distinct(IqcInspection.supplier_id))
+            .where(
+                IqcInspection.product_line_code == pl,
+                IqcInspection.factory_id == fid,
+                IqcInspection.defect_qty > 0,
+                IqcInspection.inspection_date >= since.date(),
+            )
+            .limit(5)
+        )
+        supplier_ids = rows.scalars().all()
+
+        cands = []
+        for sid in supplier_ids:
+            try:
+                detail = await supplier_quality_service.get_supplier_quality_detail(
+                    self.db, str(sid), factory_id=fid
+                )
+            except Exception as exc:
+                logger.warning("SupplierHistorySource detail failed for %s: %s", sid, exc)
+                continue
+            supplier = detail.get("supplier")
+            stats = detail.get("stats") or {}
+            name = getattr(supplier, "name", None) or "未知"
+            grade = stats.get("grade") or "N/A"
+            ppm = stats.get("ppm") or 0.0
+            scar_count = stats.get("open_scar_count") or 0
+            cands.append(
+                RecommendationCandidate(
+                    source="supplier_history",
+                    content=f"供应商 {name} 评级 {grade}，PPM={ppm:.2f}，历史 SCAR {scar_count} 条",
+                    category=None,
+                    confidence=0.5,
+                    match_reason="供应商历史质量表现",
+                    metadata={
+                        "supplier_id": str(sid),
+                        "grade": grade,
+                        "ppm": ppm,
+                        "scar_count": scar_count,
                         "product_line_code": pl,
                         "factory_id": str(fid),
                     },
