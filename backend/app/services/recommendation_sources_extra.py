@@ -185,6 +185,7 @@ class SupplierHistorySource:
         fid = context.factory_id
         since = datetime.now(timezone.utc) - timedelta(days=30)
 
+        # 路径 (a)：近 30 天有不良 IQC 检验的供应商
         rows = await self.db.execute(
             select(distinct(IqcInspection.supplier_id))
             .where(
@@ -193,9 +194,22 @@ class SupplierHistorySource:
                 IqcInspection.defect_qty > 0,
                 IqcInspection.inspection_date >= since.date(),
             )
-            .limit(5)
         )
-        supplier_ids = rows.scalars().all()
+        supplier_ids = list(rows.scalars().all())
+
+        # 路径 (b)：当前 CAPA 关联的 SupplierSCAR 供应商（report_id 已知时生效）
+        capa_report_id = context.capa_data.get("report_id")
+        if capa_report_id and fid:
+            scar_rows = await self.db.execute(
+                select(distinct(SupplierSCAR.supplier_id)).where(
+                    SupplierSCAR.capa_ref_id == capa_report_id,
+                    SupplierSCAR.factory_id == fid,
+                )
+            )
+            supplier_ids.extend(scar_rows.scalars().all())
+
+        # 去重并保留顺序（IQC 优先，SCAR 补充），再限制数量
+        supplier_ids = list(dict.fromkeys(supplier_ids))[:5]
 
         cands = []
         for sid in supplier_ids:

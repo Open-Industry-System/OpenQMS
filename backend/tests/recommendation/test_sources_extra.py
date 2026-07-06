@@ -484,6 +484,8 @@ async def test_supplier_retrieves_via_scar(db, default_factory, admin_user):
     skip_reason = await src.should_skip(ctx)
     assert skip_reason is None
 
-    # retrieve still runs (it only has the IQC path, so no defects means empty here)
+    # retrieve must also find supplier_A through the SCAR path
     cands = await src.retrieve(ctx)
-    assert cands == []
+    assert len(cands) > 0
+    assert all(c.source == "supplier_history" for c in cands)
+    assert any(c.metadata.get("supplier_id") == str(supplier.supplier_id) for c in cands)
