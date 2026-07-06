@@ -192,3 +192,24 @@ async def test_create_verification_403_when_capa_product_line_out_of_scope(db, d
             json={"root_cause_text": "rc"})
         assert r.status_code == 403
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_patch_verification_to_verified_without_details_returns_400(capa_client, db, default_factory, admin_user):
+    # is_verified=true 但无 method/result/evidence → 400（不是 500）
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-VRF-400")
+    r = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
+        json={"root_cause_text": "rc", "is_verified": False})
+    assert r.status_code == 200, r.text
+    vid = r.json()["verification_id"]
+    patch = await capa_client.patch(f"/api/capa/{capa.report_id}/root-cause-verifications/{vid}",
+        json={"is_verified": True})
+    assert patch.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_verification_to_verified_without_details_returns_400(capa_client, db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-CRT-400")
+    r = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
+        json={"root_cause_text": "rc", "is_verified": True})
+    assert r.status_code == 400
