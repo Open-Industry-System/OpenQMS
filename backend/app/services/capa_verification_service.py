@@ -11,6 +11,12 @@ from app.services.embedding_outbox import enqueue_embedding
 FIELD_MAP = {"d4": "d4_root_cause", "d5": "d5_correction"}
 
 
+def _assert_verified_has_details(method, result, evidence) -> None:
+    # 已验证记录须留下现场验证细节（方法/结果/证据至少一项非空），防空验证记录绕过 D4 门禁
+    if not (method or result or evidence):
+        raise ValueError("已验证记录须填写验证方法、结果或证据")
+
+
 async def _find_existing_adoption(db: AsyncSession, capa, req: AdoptRequest):
     # 幂等去重 key：同 (capa, d_step, source, item_ref, adopted_text)。item_ref 是 JSONB，
     # SQLAlchemy == None 生成 IS NULL、== {} 生成 = '{}'::jsonb，与 ix_capa_ai_adoption_dedupe 的 COALESCE 收口一致
@@ -77,6 +83,8 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
 
 
 async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user):
+    if req.is_verified:
+        _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
     rec = CapaRootCauseVerification(
         capa_id=capa.report_id, factory_id=capa.factory_id,
         root_cause_text=req.root_cause_text, method=req.method, result=req.result,
@@ -139,6 +147,8 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     if "evidence_attachments" in updates:
         # 列为 NOT NULL（默认 []）：显式 null 视为清空到 []，避免 IntegrityError/500
         rec.evidence_attachments = updates["evidence_attachments"] or []
+    if rec.is_verified:
+        _assert_verified_has_details(rec.method, rec.result, rec.evidence_attachments)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
         action="RC_VERIFY",

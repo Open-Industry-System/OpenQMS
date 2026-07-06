@@ -66,7 +66,7 @@ async def test_adopt_rejects_d7_step(capa_client, db, default_factory, admin_use
 async def test_create_and_list_verification(capa_client, db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-VER")
     r1 = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
-        json={"root_cause_text": "rc", "is_verified": True})
+        json={"root_cause_text": "rc", "method": "复测", "is_verified": True})
     assert r1.status_code == 200, r1.text
     assert r1.json()["is_verified"] is True
     r2 = await capa_client.get(f"/api/capa/{capa.report_id}/root-cause-verifications")

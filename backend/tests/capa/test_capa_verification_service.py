@@ -126,7 +126,7 @@ async def test_create_verification_not_verified_no_verifier(db, default_factory,
 @pytest.mark.asyncio
 async def test_update_flip_false_to_true_sets_verifier(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc"), admin_user)
+    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", method="复测"), admin_user)
     assert rec.verified_by is None
     updated = await update_verification(db, capa, rec.verification_id,
                                         VerificationUpdate(is_verified=True), admin_user)
@@ -138,7 +138,7 @@ async def test_update_flip_false_to_true_sets_verifier(db, default_factory, admi
 @pytest.mark.asyncio
 async def test_update_flip_true_to_false_clears_verifier(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", is_verified=True), admin_user)
+    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", method="复测", is_verified=True), admin_user)
     updated = await update_verification(db, capa, rec.verification_id,
                                         VerificationUpdate(is_verified=False), admin_user)
     assert updated.is_verified is False
@@ -211,3 +211,22 @@ def test_verification_create_rejects_empty_root_cause_text():
         VerificationCreate(root_cause_text="   ")
     # 非空（含可见字符）应通过
     VerificationCreate(root_cause_text="螺栓尺寸超差")
+
+
+@pytest.mark.asyncio
+async def test_create_verification_rejects_verified_without_details(db, default_factory, admin_user):
+    # is_verified=True 但无 method/result/evidence → 拒绝（防空验证记录放行 D4 门禁）
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    with pytest.raises(ValueError, match="验证方法|结果|证据"):
+        await create_verification(db, capa, VerificationCreate(
+            root_cause_text="rc", is_verified=True), admin_user)
+
+
+@pytest.mark.asyncio
+async def test_update_verification_rejects_flip_to_verified_without_details(db, default_factory, admin_user):
+    # 翻到 is_verified=True 但无 method/result/evidence → 拒绝
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", is_verified=False), admin_user)
+    with pytest.raises(ValueError, match="验证方法|结果|证据"):
+        await update_verification(db, capa, rec.verification_id,
+                                  VerificationUpdate(is_verified=True), admin_user)
