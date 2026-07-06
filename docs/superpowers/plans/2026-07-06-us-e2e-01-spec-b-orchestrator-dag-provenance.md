@@ -312,6 +312,19 @@ class RecommendationResult:
 ```
 `to_d4_schema` 在 result dict 加 `"stage_index": self.metadata.get("stage_index"),`；`to_d5_control_schema` 同理；`to_d5_suggestion_schema` 在 result dict 加 `"stage_index": self.metadata.get("stage_index"),`（放在 `match_source` 之后）。
 
+**R1-修复 factory_id 隔离**：`RecommendationContext` 加 `factory_id: uuid.UUID | None = None` 字段（import `uuid`）：
+```python
+@dataclass
+class RecommendationContext:
+    capa_data: dict[str, Any]
+    user_product_lines: list[str] | None
+    stage: Literal["d4", "d5"]
+    factory_id: uuid.UUID | None = None   # R1-修复：源查询按 factory_id 隔离，防跨工厂同 PL 串读
+    fmea_docs: list[dict[str, Any]] | None = None
+    linked_fmea: dict[str, Any] | None = None
+```
+API handler（Task 17）构造 context 时传 `factory_id=capa.factory_id`；6 类新源（Task 5-10）`retrieve`/`should_skip` 查询必须 `WHERE factory_id = context.factory_id`（与 `product_line_code` 联合），防跨工厂同产品线数据串读。
+
 - [ ] **Step 4: 写 `StageRunSchema`**
 
 `backend/app/schemas/recommendation_stage.py`：
@@ -565,7 +578,7 @@ git commit -m "refactor(recommendation): thin shell + structured llm audit + enr
 - [ ] **Step 1: 写失败测试**
 
 ```python
-import pytest
+import pytest, uuid
 from app.services.recommendation_sources_extra import SPCAnomalySource
 from app.services.recommendation_types import RecommendationContext
 
@@ -573,19 +586,35 @@ pytestmark = pytest.mark.requires_db
 
 
 @pytest.mark.asyncio
-async def test_spc_should_skip_no_alarms(db):
+async def test_spc_should_skip_no_alarms(db, default_factory):
     src = SPCAnomalySource(db)
-    ctx = RecommendationContext(capa_data={"product_line_code": "DC-DC-100"}, user_product_lines=["DC-DC-100"], stage="d4")
+    ctx = RecommendationContext(capa_data={"product_line_code": "DC-DC-100"}, user_product_lines=["DC-DC-100"],
+                                stage="d4", factory_id=default_factory.id)
     assert (await src.should_skip(ctx)) is not None  # 无 SPC 数据 → reason
 
 
 @pytest.mark.asyncio
 async def test_spc_retrieves_when_alarms(db, default_factory, admin_user):
-    # seed spc_alarm + inspection_characteristic (略，按 spc.py 模型)
+    # seed spc_alarm + inspection_characteristic (略，按 spc.py 模型，factory_id=default_factory.id)
     src = SPCAnomalySource(db)
-    ctx = RecommendationContext(capa_data={"product_line_code": "DC-DC-100"}, user_product_lines=["DC-DC-100"], stage="d4")
+    ctx = RecommendationContext(capa_data={"product_line_code": "DC-DC-100"}, user_product_lines=["DC-DC-100"],
+                                stage="d4", factory_id=default_factory.id)
     cands = await src.retrieve(ctx)
     assert all(c.source == "spc_anomaly" for c in cands)
+
+
+@pytest.mark.asyncio
+async def test_spc_factory_isolation(db, default_factory, admin_user):
+    # R1-修复：双工厂同产品线 SPC 数据不可串读
+    from app.models.factory import Factory
+    other = Factory(id=uuid.uuid4(), code="OTHER", name="Other")
+    db.add(other); await db.flush()
+    # 在 other 工厂建同 PL 的 spc_alarm（略）
+    src = SPCAnomalySource(db)
+    ctx = RecommendationContext(capa_data={"product_line_code": "DC-DC-100"}, user_product_lines=["DC-DC-100"],
+                                stage="d4", factory_id=default_factory.id)  # 查 default_factory
+    cands = await src.retrieve(ctx)
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)  # 不含 other 工厂数据
 ```
 
 - [ ] **Step 2: 运行确认失败** → FAIL（`recommendation_sources_extra` 未建）。
@@ -594,7 +623,7 @@ async def test_spc_retrieves_when_alarms(db, default_factory, admin_user):
 
 ```python
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.models.spc import SPCAlarm, InspectionCharacteristic
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 from app.services import spc_service
@@ -607,23 +636,24 @@ class SPCAnomalySource:
 
     async def should_skip(self, context: RecommendationContext) -> str | None:
         pl = context.capa_data.get("product_line_code")
+        fid = context.factory_id   # R1-修复：factory_id 隔离
         since = datetime.now(timezone.utc) - timedelta(days=30)
-        cnt = await self.db.scalar(
-            select(SPCAlarm).join(InspectionCharacteristic, SPCAlarm.ic_id == InspectionCharacteristic.ic_id)
-            .where(InspectionCharacteristic.product_line == pl, SPCAlarm.triggered_at >= since))
-        # count query:
-        from sqlalchemy import func
         cnt = await self.db.scalar(select(func.count()).select_from(SPCAlarm)
             .join(InspectionCharacteristic, SPCAlarm.ic_id == InspectionCharacteristic.ic_id)
-            .where(InspectionCharacteristic.product_line == pl, SPCAlarm.triggered_at >= since))
+            .where(InspectionCharacteristic.product_line == pl,
+                   InspectionCharacteristic.factory_id == fid,   # R1-修复
+                   SPCAlarm.triggered_at >= since))
         return "产品线暂无 SPC 数据" if cnt == 0 else None
 
     async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
         pl = context.capa_data.get("product_line_code")
+        fid = context.factory_id   # R1-修复
         since = datetime.now(timezone.utc) - timedelta(days=30)
         alarms = (await self.db.execute(
             select(SPCAlarm).join(InspectionCharacteristic, SPCAlarm.ic_id == InspectionCharacteristic.ic_id)
-            .where(InspectionCharacteristic.product_line == pl, SPCAlarm.triggered_at >= since)
+            .where(InspectionCharacteristic.product_line == pl,
+                   InspectionCharacteristic.factory_id == fid,   # R1-修复
+                   SPCAlarm.triggered_at >= since)
             .order_by(SPCAlarm.triggered_at.desc()))).scalars().all()
         cands = []
         for alarm in alarms[:10]:
@@ -638,9 +668,11 @@ class SPCAnomalySource:
                     category=None, confidence=0.5, match_reason="SPC 判异关联失效模式",
                     metadata={"spc_chart_id": str(alarm.ic_id), "alarm_id": str(alarm.alarm_id),
                               "failure_mode_node_id": m.get("failure_mode_node_id"),
-                              "product_line_code": pl}))
+                              "product_line_code": pl, "factory_id": str(fid)}))   # R1-修复
         return cands
 ```
+
+**R1-修复 factory_id 隔离（Task 6-10 同模式）**：`IQCSource`/`SupplierHistorySource`/`MESSource`/`SameTypeProductKBSource`/`LessonsLearnedSource` 的 `should_skip`/`retrieve` 查询必须 `WHERE factory_id = context.factory_id`（与 `product_line_code` 联合），metadata 含 `factory_id=str(fid)`；各源补"双工厂同 PL 不可串读"测试（仿 `test_spc_factory_isolation`）。`SameTypeProductKBSource` 跨工厂同 product_type 检索仍受 `factory_id` 收口——**仅匹配 `context.factory_id` 内其他产品线的同类型**（不跨工厂），防跨工厂读。
 
 - [ ] **Step 4: 注册到 orchestrator `_build_sources`** — `self._sources["spc_anomaly"] = SPCAnomalySource(db)`（D4 only，`stage_filter` 已在 STAGE_PLAN）。
 
@@ -798,15 +830,16 @@ async def test_d5_stage2_direct_lookup_when_embedding_off(monkeypatch):
 
 ---
 
-## Task 12: D7→D8 闭环闸口（`advance_capa`）
+## Task 12: D7→D8 闭环闸口 + D7 端点 populate `recommendation_hash`（合并，同 commit 无中间不可用态）
 
 **Files:**
-- Modify: `backend/app/services/capa_service.py:advance_capa`（D7→D8 闸口：completeness + capa_id + recommendation_hash + fail-closed）
-- Test: `backend/tests/capa/test_capa_d7_gate.py`
+- Modify: `backend/app/services/capa_d7_action_service.py` — 加 `recommendation_fingerprint` canonical helper + `record_d7_action`/`auto_fill_d7` 写 `recommendation_hash`
+- Modify: `backend/app/services/capa_service.py:advance_capa`（D7→D8 闸口：completeness + capa_id + recommendation_hash + fail-closed，用同一 helper）
+- Test: `backend/tests/capa/test_capa_d7_gate.py` + `backend/tests/capa/test_capa_d7_action_service.py`（追加 hash + action 类型用例）
 
 **Interfaces:**
 - Consumes: `get_d7_recommendations`、`capa_d7_node_action`、`fmea_documents` count。
-- Produces: D7→D8 闸口阻断/放行。
+- Produces: D7 端点写 `recommendation_hash`（canonical `recommendation_fingerprint`）+ D7→D8 闸口用同一 helper 校验。**R3-修复顺序**：hash 写入与 gate 同 task 同 commit，避免 Task 12 落地后、hash 写入前 D7 action API 产生的动作 hash=None 被闸口判 stale。
 
 - [ ] **Step 1: 写失败测试**（节选）
 
@@ -846,6 +879,37 @@ async def test_d7_gate_passes_when_all_actioned(db, default_factory, admin_user)
 
 
 @pytest.mark.asyncio
+async def test_d7_gate_passes_all_skipped(db, default_factory, admin_user):
+    # R6-修复：2 条推荐全 skipped（带 reason，hash 匹配）→ 推进 D8（skipped 算已处置）
+    advanced = await advance_capa(db, capa, admin_user.user_id)
+    assert advanced.status == "D8_CLOSURE"
+
+
+@pytest.mark.asyncio
+async def test_d7_gate_passes_all_auto_filled(db, default_factory, admin_user):
+    # R6-修复：2 条推荐全 auto_filled（hash 匹配）→ 推进 D8（auto_filled 算已处置）
+    advanced = await advance_capa(db, capa, admin_user.user_id)
+    assert advanced.status == "D8_CLOSURE"
+
+
+@pytest.mark.asyncio
+async def test_d7_gate_blocks_mixed_unprocessed(db, default_factory, admin_user):
+    # 2 条推荐：1 confirmed + 1 未处置 → 仍 400（部分处置不满足）
+    with pytest.raises(ValueError, match="未处置|stale"):
+        await advance_capa(db, capa, admin_user.user_id)
+
+
+@pytest.mark.asyncio
+async def test_d7_action_records_recommendation_hash(db, default_factory, admin_user):
+    # R3-修复：record_d7_action 后行的 recommendation_hash == recommendation_fingerprint(...)（canonical helper）
+    from app.services.capa_d7_action_service import recommendation_fingerprint
+    # ... record action ...
+    assert action.recommendation_hash == recommendation_fingerprint(
+        fmea_id=..., failure_mode_node_id=..., failure_cause_node_id=...,
+        failure_mode_name=..., failure_cause_name=..., match_reason=...)
+
+
+@pytest.mark.asyncio
 async def test_d7_gate_cross_capa_not_satisfied(db, default_factory, admin_user):
     # CAPA-B 有同 key 动作，CAPA-A 无 → CAPA-A 仍 400
     with pytest.raises(ValueError):
@@ -861,13 +925,24 @@ async def test_d7_gate_no_recs_passes(db, default_factory, admin_user):
 
 - [ ] **Step 2: 运行确认失败** → FAIL（无闸口，未处置也推进）。
 
-- [ ] **Step 3: 加闸口到 `advance_capa`** — 在 D7_PREVENTION→D8_CLOSURE 转换、`SELECT FOR UPDATE` 之后、状态写入之前插入（按设计稿 step 2 a/b/c/d）：a. completeness check（canonical `count(*) FROM fmea_documents WHERE factory_id=capa.factory_id AND product_line_code=capa.product_line_code` vs loaded fmea_docs 数 + linked FMEA 缺失 → fail-closed）；b. 重算 D7 推荐（canonical scope: `capa.factory_id + capa.product_line_code`，`allowed_pls=[capa.product_line_code]`）；c. 取每条推荐 key + `recommendation_hash=sha256(f"{fm_name}|{cause_name}|{match_reason}").hexdigest()[:16]`，查 `capa_d7_node_action WHERE capa_id=capa.report_id AND key AND recommendation_hash=:hash`；未处置/stale → `ValueError`；d. 真无推荐（completeness 通过 + count=0）→ 放行。闸口不通过早返回（不写 TRANSITION audit、不抽 lessons、不推进）。
+- [ ] **Step 3: 加 canonical `recommendation_fingerprint` helper + D7 端点写 hash + 闸口**
 
-- [ ] **Step 4: 运行确认通过** → PASS。
+① `capa_d7_action_service.py` 加 canonical helper（R11-修复：record + gate 单源）：
+```python
+import hashlib
+def recommendation_fingerprint(*, fmea_id, failure_mode_node_id, failure_cause_node_id,
+                               failure_mode_name, failure_cause_name, match_reason) -> str:
+    raw = f"{fmea_id}|{failure_mode_node_id}|{failure_cause_node_id or ''}|{failure_mode_name}|{failure_cause_name or ''}|{match_reason}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+```
+② `record_d7_action`/`auto_fill_d7` 在 insert/升级 `CapaD7NodeAction` 前，从 `get_d7_recommendations(capa_data, fmea_docs, allowed_pls)` 取该 key 推荐的 `failure_mode_name`/`failure_cause_name`/`match_reason` + 稳定 ID，调 `recommendation_fingerprint(...)` 存入 `recommendation_hash`（复用 recommend 端点 fmea_docs 预加载）。
+③ `advance_capa` D7→D8 闸口（`SELECT capa + fmea_documents FOR UPDATE` 之后、状态写入之前）：a. completeness check（`SELECT fmea_id FROM fmea_documents WHERE factory_id=capa.factory_id AND product_line_code=capa.product_line_code FOR UPDATE` + count vs loaded + linked FMEA 缺失 → fail-closed）；b. 重算 D7 推荐（canonical scope: `capa.factory_id + capa.product_line_code`，`allowed_pls=[capa.product_line_code]`）；c. 取每条推荐 key + `current_hash = recommendation_fingerprint(...)`（**同一 helper**），查 `capa_d7_node_action WHERE capa_id=capa.report_id AND key AND recommendation_hash=:current_hash AND action IN ('confirmed','skipped','auto_filled')`（**R6-修复：confirmed/skipped/auto_filled 均算已处置**）；未处置/stale → `ValueError("D7 有 N 条推荐未处置或已 stale（FMEA 变更），不可关闭")`；d. 真无推荐（completeness 通过 + count=0）→ 放行。闸口不通过早返回（不写 TRANSITION audit、不抽 lessons、不推进）。
+
+- [ ] **Step 4: 运行确认通过** → PASS（含 action 类型 + hash + stale + cross-capa + partial preload 测试）。
 
 - [ ] **Step 5: 回归既有 capa 测试** — `python -m pytest tests/capa/ tests/test_capa_recommendation.py -q` → PASS（既有测试越过 D7 或补 fixture）。
 
-- [ ] **Step 6: 提交** `git commit -m "feat(capa): D7->D8 closed-loop gate (canonical+capa_id+hash+completeness)"`。
+- [ ] **Step 6: 提交** `git commit -m "feat(capa): D7->D8 gate + D7 endpoint recommendation_hash (canonical fingerprint, action types)"`。
 
 ---
 
@@ -894,10 +969,19 @@ async def test_d7_lessons_extracted_on_advance(db, default_factory, admin_user):
 
 @pytest.mark.asyncio
 async def test_d7_extraction_failure_blocks_transition(db, default_factory, admin_user, monkeypatch):
-    # mock enqueue_embedding 抛错 → advance 400，D8 不推进，状态仍 D7
+    # mock enqueue_embedding 抛错 → advance 400，D8 不推进
     with pytest.raises(ValueError, match="D7 lessons 抽取失败"):
         await advance_capa(db, capa, admin_user.user_id)
+    # R4-修复：重查 DB（非仅内存对象）确认状态未推进 + 无 TRANSITION audit + 无 d7 lesson 行
+    await db.refresh(capa)
     assert capa.status == "D7_PREVENTION"
+    from sqlalchemy import select
+    from app.models.audit import AuditLog
+    audits = (await db.execute(select(AuditLog).where(AuditLog.record_id == capa.report_id, AuditLog.action == "TRANSITION"))).scalars().all()
+    assert len(audits) == 0   # 未写 TRANSITION audit
+    from app.models.capa_lesson import CapaLessonLearned
+    lessons = (await db.execute(select(CapaLessonLearned).where(CapaLessonLearned.capa_id == capa.report_id))).scalars().all()
+    assert len(lessons) == 0   # 未落 lessons
 
 
 @pytest.mark.asyncio
@@ -911,7 +995,7 @@ async def test_d7_no_d8_closure_extracted(db, default_factory, admin_user):
 
 - [ ] **Step 3: 写 `_extract_lessons`** — `capa_lessons_service.py`：从 `d7_prevention`（source_d_step="d7"）或 `d8_closure`（="d8"）切句（按句号/换行），过滤空句，按 `normalized_text="".join(text.lower().split())` 去重，`category` 启发式判定（含"预防/防呆/poka"→prevention；含"检测/探测/检验"→detection；含"体系/流程/制度"→systemic；余 process），`lesson_id=uuid5(NAMESPACE_URL, f"capa_lesson:{capa_id}:{source_d_step}:{normalized_text}")`，`pg_insert.on_conflict_do_update(index_elements=["lesson_id"], set_={category,tags,updated_at})` upsert，`enqueue_embedding(db,"capa_lesson",lesson_id,pl,factory_id)`。返回 lessons 列表。
 
-- [ ] **Step 4: `advance_capa` D7→D8 调 `_extract_lessons(capa, "d7")`** — 在状态转换 + TRANSITION audit 之后、commit 之前调；异常 → `ValueError("D7 lessons 抽取失败，不可关闭，请重试")`（fail-closed，D8 不推进）；写 `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d7")`）。
+- [ ] **Step 4: `advance_capa` D7→D8 调 `_extract_lessons(capa, "d7")`（R4-修复：抽取先于状态 mutation）** — 顺序：① 闸口（Task 12）通过 → ② **先**调 `_extract_lessons(capa, "d7")` + 写 `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d7")`），异常 → `ValueError("D7 lessons 抽取失败，不可关闭，请重试")`（**此时状态尚未 mutation**，fail-closed 干净，无需回滚状态）→ ③ 抽取成功**后**才 `capa.status = D8_CLOSURE` + 写 TRANSITION audit → ④ commit。这样抽取失败时状态/audit 均未动，事务回滚干净（仅 lessons 行回滚）。
 
 - [ ] **Step 5: 运行确认通过** → PASS。
 
@@ -944,10 +1028,17 @@ async def test_d8_duplicate_sentences_deduped(db, default_factory, admin_user):
 
 @pytest.mark.asyncio
 async def test_d8_extraction_failure_blocks_save(db, default_factory, admin_user, monkeypatch):
-    # mock enqueue_embedding 抛错 → 保存 400，d8_closure 未保存，KB 未变
+    # mock enqueue_embedding 抛错 → 保存 400
     with pytest.raises(ValueError, match="D8 lessons 抽取失败"):
         await update_capa(...)
-    # d8_closure 仍是旧值
+    # R4-修复：重查 DB 确认 d8_closure 仍是旧值 + 无 d8 lesson 行（非仅内存对象）
+    await db.refresh(capa)
+    assert capa.d8_closure == "<旧值>"
+    from sqlalchemy import select
+    from app.models.capa_lesson import CapaLessonLearned
+    lessons = (await db.execute(select(CapaLessonLearned).where(
+        CapaLessonLearned.capa_id == capa.report_id, CapaLessonLearned.source_d_step == "d8"))).scalars().all()
+    assert len(lessons) == 0   # 旧 d8 lesson 保留（savepoint rollback 撤销 delete+rebuild）或未变
 
 @pytest.mark.asyncio
 async def test_d8_embedding_cleanup(db, default_factory, admin_user):
@@ -962,11 +1053,11 @@ async def test_d8_inflight_worker_race(db, default_factory, admin_user, monkeypa
 
 - [ ] **Step 2: 运行确认失败** → FAIL。
 
-- [ ] **Step 3: 写 `_extract_d8_with_cleanup`** — `async with db.begin_nested()` savepoint 内：① 取旧 d8 lesson_ids；② `UPDATE embedding_outbox SET status='cancelled' WHERE entity_type='capa_lesson' AND entity_id IN (旧 ids) AND status='pending'`；③ `DELETE FROM document_embeddings WHERE entity_type='capa_lesson' AND entity_id IN (旧 ids)`；④ `DELETE FROM capa_lessons_learned WHERE capa_id=X AND source_d_step='d8'`；⑤ 调 `_extract_lessons(capa, "d8")` 重插 + enqueue；⑥ 写 `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d8")`）。任一步异常 → savepoint rollback + `ValueError("D8 lessons 抽取失败，无法保存闭环总结，请重试")`（fail-closed 阻断保存）。
+- [ ] **Step 3: 写 `_extract_d8_with_cleanup(db, capa, new_d8_closure)`** — **R4-修复：传新 d8_closure 文本，不先 mutate capa.d8_closure**。`async with db.begin_nested()` savepoint 内：① 取旧 d8 lesson_ids（`SELECT lesson_id FROM capa_lessons_learned WHERE capa_id=X AND source_d_step='d8'`）；② **`UPDATE embedding_sync_outbox SET status='cancelled' WHERE entity_type='capa_lesson' AND entity_id IN (旧 ids) AND status='pending'`**（Fix 5：真实表名 `embedding_sync_outbox`，非 `embedding_outbox`）；③ `DELETE FROM document_embeddings WHERE entity_type='capa_lesson' AND entity_id IN (旧 ids)`；④ `DELETE FROM capa_lessons_learned WHERE capa_id=X AND source_d_step='d8'`；⑤ 用 **new_d8_closure**（参数，非 capa.d8_closure）调 `_extract_lessons` 重插 + enqueue；⑥ 写 `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d8")`）。任一步异常 → savepoint rollback + `ValueError("D8 lessons 抽取失败，无法保存闭环总结，请重试")`（fail-closed；**capa.d8_closure 未被 mutate**，外层事务无需回滚字段）。
 
-- [ ] **Step 4: `update_capa` 接钩子** — 检测 `d8_closure` 字段变更且 `capa.status == "D8_CLOSURE"` → 调 `_extract_d8_with_cleanup(db, capa)`；异常向上冒泡 → handler 400。
+- [ ] **Step 4: `update_capa` 接钩子（R4-修复：抽取先于字段 mutation）** — 检测 `d8_closure` 字段变更且 `capa.status == "D8_CLOSURE"`：① 计算 `new_d8_closure = <新值>`（不先 `capa.d8_closure = ...`）；② 调 `_extract_d8_with_cleanup(db, capa, new_d8_closure)`（savepoint）；③ **成功后**才 `capa.d8_closure = new_d8_closure` + commit；④ 异常向上冒泡 → handler 400（**capa.d8_closure 仍是旧值**，未 mutate）。
 
-- [ ] **Step 5: embedding worker 重查** — 在 embedding worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`（或对应实体表存在性检查），行已删 → 丢弃 job 不写（R9 防race）。注：worker 改动属 P0 follow-up 范围，本任务在 worker 代码加 lesson 存在性重查（如 worker 已有 entity 校验机制则复用）。
+- [ ] **Step 5: embedding worker 重查 → 见 Task 15** — worker `capa_lesson` 实体支持 + 写入前重查 lesson 存在性（防 in-flight race）统一在 Task 15 落地（`embedding_sync_worker.py` `table_field_map` 加 `capa_lesson` + upsert 前重查）。本任务只负责 enqueue + cleanup（savepoint 内 cancel pending outbox + delete embeddings）。
 
 - [ ] **Step 6: 运行确认通过** → PASS。
 
@@ -974,21 +1065,52 @@ async def test_d8_inflight_worker_race(db, default_factory, admin_user, monkeypa
 
 ---
 
-## Task 15: D7 端点 populate `recommendation_hash`
+## Task 15: `embedding_sync_worker` 支持 `capa_lesson` 实体（Fix 2）
 
 **Files:**
-- Modify: `backend/app/services/capa_d7_action_service.py`（`record_d7_action`/`auto_fill_d7` 写 `recommendation_hash`）
-- Test: `backend/tests/capa/test_capa_d7_action_service.py`（追加 hash 用例）
+- Modify: `backend/app/services/embedding_sync_worker.py`（`table_field_map` 加 `capa_lesson` + 写入前重查 lesson 存在性）
+- Modify: `backend/app/services/embedding_backfill.py`（`ENTITY_TABLE_MAP`/`ENTITY_TYPES` 加 `capa_lesson`，如需 backfill）
+- Test: `backend/tests/test_embedding_sync_worker.py`（追加 capa_lesson 用例）
 
 **Interfaces:**
-- Consumes: `get_d7_recommendations`（取当前推荐内容算 hash）。
-- Produces: `CapaD7NodeAction.recommendation_hash` 填充。
+- Consumes: `capa_lessons_learned` 模型（Task 1）、`enqueue_embedding`（Task 13/14 入队 `entity_type='capa_lesson'`）。
+- Produces: worker 处理 `capa_lesson` outbox 事件 → upsert `document_embeddings`（entity_type='capa_lesson', entity_field='lesson_text'），`LessonsLearnedSource`（Task 10）方可检索到 lesson embedding。
 
-- [ ] **Step 1: 写失败测试** — `record_d7_action` 后行的 `recommendation_hash == sha256(f"{fm_name}|{cause_name}|{match_reason}").hexdigest()[:16]`。
-- [ ] **Step 2: 运行确认失败** → FAIL（hash 为 None）。
-- [ ] **Step 3: 实现** — `record_d7_action`/`auto_fill_d7` 在 insert/升级前，从 `get_d7_recommendations(capa_data, fmea_docs, allowed_pls)` 取该 key 推荐的 `failure_mode_name`/`failure_cause_name`/`match_reason`，算 hash 存入 `CapaD7NodeAction.recommendation_hash`。（复用 recommend 端点的 fmea_docs 预加载逻辑。）
-- [ ] **Step 4: 运行确认通过** → PASS。
-- [ ] **Step 5: 提交** `git commit -m "feat(capa): D7 actions populate recommendation_hash"`。
+**背景（Fix 2）**：worker `table_field_map`（`embedding_sync_worker.py:111`）未含 `capa_lesson` → line 140 `if entity_type not in table_field_map: continue` → capa_lesson 事件被跳过 → `document_embeddings` 无 lesson 行 → `LessonsLearnedSource` 长期无数据。本任务补全链路。
+
+- [ ] **Step 1: 写失败测试**
+
+```python
+@pytest.mark.asyncio
+async def test_worker_processes_capa_lesson(db, default_factory, admin_user, monkeypatch):
+    # seed capa_lessons_learned 行 + embedding_sync_outbox 行（entity_type='capa_lesson'）
+    # mock embedding_provider.embed 返回向量
+    # 跑 worker 一轮
+    # 断言 document_embeddings 出现 entity_type='capa_lesson' entity_id=lesson_id 行
+    ...
+    assert de is not None and de.entity_type == "capa_lesson"
+
+
+@pytest.mark.asyncio
+async def test_worker_skips_deleted_lesson(db, default_factory, admin_user, monkeypatch):
+    # R9-修复：worker 认领 capa_lesson job 后，lesson 行已被 d8 delete-and-rebuild 删除 → 重查不存在 → 丢弃不写 stale embedding
+    ...
+    assert de is None  # 不写 stale
+```
+
+- [ ] **Step 2: 运行确认失败** → FAIL（worker `continue` 跳过 capa_lesson，无 document_embeddings 行）。
+
+- [ ] **Step 3: 加 `capa_lesson` 到 `table_field_map`** — `embedding_sync_worker.py` 的 `table_field_map` 加：
+```python
+"capa_lesson": ("capa_lessons_learned", "lesson_id", "product_line_code", None, ["lesson_text"]),
+```
+（表名 `capa_lessons_learned`，PK `lesson_id`，product_line_code 列，无 document_no，字段 `lesson_text`。）`embedding_backfill.py` 的 `ENTITY_TABLE_MAP`/`ENTITY_TYPES` 同步加 `capa_lesson`（如需 backfill）。
+
+- [ ] **Step 4: worker 写入前重查 lesson 存在性（R9-修复防race）** — worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`，行已删 → 丢弃 job（mark outbox done/skipped，不写 embedding），防 d8 delete-and-rebuild 后 in-flight worker 写 stale embedding。
+
+- [ ] **Step 5: 运行确认通过** → PASS。
+
+- [ ] **Step 6: 提交** `git commit -m "feat(embedding): worker supports capa_lesson entity + re-check existence"`。
 
 ---
 
