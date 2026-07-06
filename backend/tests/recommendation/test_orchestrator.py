@@ -2,10 +2,10 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from app.services.recommendation_orchestrator import RecommendationOrchestrator, STAGE_PLAN
-from app.services.recommendation_types import RecommendationContext, RecommendationCandidate, StageRun
+from app.services.recommendation_types import RecommendationContext
 
 
-def _ctx(stage="d4", linked_fmea=None, embedding_on=True):
+def _ctx(stage="d4", linked_fmea=None):
     return RecommendationContext(
         capa_data={"d2_description": "螺栓尺寸超差", "d4_root_cause": "", "fmea_ref_id": None,
                    "fmea_node_id": None, "product_line_code": "DC-DC-100"},
@@ -69,6 +69,7 @@ async def test_per_stage_protocol_violation_is_error(monkeypatch):
     orch = RecommendationOrchestrator(MagicMock(), None, None)
     # 让某新源（注册后）should_skip 不存在 — 通过 _sources 注入坏源
     bad = MagicMock()
+    # MagicMock 删除属性后 getattr 返回 None（不会自动重建），借此测试缺失 should_skip 路径
     del bad.should_skip  # ensure missing
     orch._sources["spc_anomaly"] = bad
     result = await orch.run(_ctx(), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
