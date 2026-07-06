@@ -223,6 +223,15 @@ async def test_create_verification_rejects_verified_without_details(db, default_
 
 
 @pytest.mark.asyncio
+async def test_create_verification_rejects_verified_with_whitespace_only_details(db, default_factory, admin_user):
+    # method="   " 纯空白也不算验证细节 → 拒绝（防绕过）
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    with pytest.raises(ValueError, match="验证方法|结果|证据"):
+        await create_verification(db, capa, VerificationCreate(
+            root_cause_text="rc", method="   ", result="  ", is_verified=True), admin_user)
+
+
+@pytest.mark.asyncio
 async def test_update_verification_rejects_flip_to_verified_without_details(db, default_factory, admin_user):
     # 翻到 is_verified=True 但无 method/result/evidence → 拒绝
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)

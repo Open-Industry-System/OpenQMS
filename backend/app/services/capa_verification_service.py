@@ -12,8 +12,8 @@ FIELD_MAP = {"d4": "d4_root_cause", "d5": "d5_correction"}
 
 
 def _assert_verified_has_details(method, result, evidence) -> None:
-    # 已验证记录须留下现场验证细节（方法/结果/证据至少一项非空），防空验证记录绕过 D4 门禁
-    if not (method or result or evidence):
+    # 已验证记录须留下现场验证细节（方法/结果/证据至少一项非空白），防空/纯空格验证记录绕过 D4 门禁
+    if not ((method or "").strip() or (result or "").strip() or (evidence or [])):
         raise ValueError("已验证记录须填写验证方法、结果或证据")
 
 
