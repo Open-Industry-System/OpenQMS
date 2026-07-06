@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import distinct, func, select
 
 from app.models.iqc_inspection import IqcInspection
+from app.models.mes import MESEquipmentStatus, MESScrapRecord
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import SupplierSCAR
 from app.services import spc_service, supplier_quality_service
@@ -243,4 +244,110 @@ class SupplierHistorySource:
                     },
                 )
             )
+        return cands
+
+
+class MESSource:
+    name = "mes"
+
+    def __init__(self, db, embedding_provider=None):
+        self.db = db
+
+    async def should_skip(self, context: RecommendationContext) -> str | None:
+        pl = context.capa_data.get("product_line_code")
+        fid = context.factory_id
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+
+        scrap_cnt = await self.db.scalar(
+            select(func.count())
+            .select_from(MESScrapRecord)
+            .where(
+                MESScrapRecord.product_line_code == pl,
+                MESScrapRecord.factory_id == fid,
+                MESScrapRecord.recorded_at >= since,
+            )
+        )
+        equipment_cnt = await self.db.scalar(
+            select(func.count())
+            .select_from(MESEquipmentStatus)
+            .where(
+                MESEquipmentStatus.product_line_code == pl,
+                MESEquipmentStatus.factory_id == fid,
+                MESEquipmentStatus.downtime_reason.is_not(None),
+                MESEquipmentStatus.recorded_at >= since,
+            )
+        )
+        return "产品线暂无 MES 数据" if scrap_cnt == 0 and equipment_cnt == 0 else None
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        pl = context.capa_data.get("product_line_code")
+        fid = context.factory_id
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+
+        scrap_records = (
+            await self.db.execute(
+                select(MESScrapRecord)
+                .where(
+                    MESScrapRecord.product_line_code == pl,
+                    MESScrapRecord.factory_id == fid,
+                    MESScrapRecord.recorded_at >= since,
+                )
+                .order_by(MESScrapRecord.recorded_at.desc())
+                .limit(5)
+            )
+        ).scalars().all()
+
+        equipment_records = (
+            await self.db.execute(
+                select(MESEquipmentStatus)
+                .where(
+                    MESEquipmentStatus.product_line_code == pl,
+                    MESEquipmentStatus.factory_id == fid,
+                    MESEquipmentStatus.downtime_reason.is_not(None),
+                    MESEquipmentStatus.recorded_at >= since,
+                )
+                .order_by(MESEquipmentStatus.recorded_at.desc())
+                .limit(5)
+            )
+        ).scalars().all()
+
+        cands = []
+        for record in scrap_records:
+            desc = record.defect_description or record.defect_type
+            cands.append(
+                RecommendationCandidate(
+                    source="mes",
+                    content=f"MES 报废：{record.defect_type}（{record.defect_qty} 件）",
+                    category=None,
+                    confidence=0.5,
+                    match_reason="MES 报废记录",
+                    metadata={
+                        "scrap_record_id": str(record.scrap_id),
+                        "defect_type": record.defect_type,
+                        "defect_qty": record.defect_qty,
+                        "product_line_code": pl,
+                        "factory_id": str(fid),
+                    },
+                )
+            )
+
+        for record in equipment_records:
+            equipment_label = record.equipment_name or record.equipment_code
+            cands.append(
+                RecommendationCandidate(
+                    source="mes",
+                    content=f"设备停机：{equipment_label} {record.downtime_reason}",
+                    category=None,
+                    confidence=0.5,
+                    match_reason="MES 设备停机记录",
+                    metadata={
+                        "equipment_id": str(record.record_id),
+                        "equipment_code": record.equipment_code,
+                        "downtime_reason": record.downtime_reason,
+                        "product_line_code": pl,
+                        "factory_id": str(fid),
+                    },
+                )
+            )
+
         return cands

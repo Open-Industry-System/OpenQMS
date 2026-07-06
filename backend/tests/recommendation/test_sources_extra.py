@@ -8,9 +8,10 @@ from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
+from app.models.mes import MESConnection, MESEquipmentStatus, MESScrapRecord
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
-from app.services.recommendation_sources_extra import IQCSource, SPCAnomalySource, SupplierHistorySource
+from app.services.recommendation_sources_extra import IQCSource, MESSource, SPCAnomalySource, SupplierHistorySource
 from app.services.recommendation_types import RecommendationContext
 
 pytestmark = pytest.mark.requires_db
@@ -489,3 +490,193 @@ async def test_supplier_retrieves_via_scar(db, default_factory, admin_user):
     assert len(cands) > 0
     assert all(c.source == "supplier_history" for c in cands)
     assert any(c.metadata.get("supplier_id") == str(supplier.supplier_id) for c in cands)
+
+
+def _make_mes_connection(db, factory_id, admin_user, name="MES-CONN-01"):
+    conn = MESConnection(
+        connection_id=uuid.uuid4(),
+        name=name,
+        connector_type="mock",
+        config={},
+        is_active=True,
+        product_line_code="DC-DC-100",
+        factory_id=factory_id,
+        created_by=admin_user.user_id,
+    )
+    db.add(conn)
+    return conn
+
+
+def _make_scrap_record(
+    db,
+    factory_id,
+    connection_id,
+    external_id,
+    defect_type="划伤",
+    defect_qty=5,
+    total_qty=100,
+    defect_description=None,
+):
+    record = MESScrapRecord(
+        scrap_id=uuid.uuid4(),
+        connection_id=connection_id,
+        factory_id=factory_id,
+        external_id=external_id,
+        defect_type=defect_type,
+        defect_qty=defect_qty,
+        total_qty=total_qty,
+        defect_description=defect_description,
+        recorded_at=datetime.now(timezone.utc),
+        product_line_code="DC-DC-100",
+    )
+    db.add(record)
+    return record
+
+
+def _make_equipment_status(
+    db,
+    factory_id,
+    connection_id,
+    external_id,
+    equipment_code="EQ-01",
+    equipment_name=None,
+    downtime_reason=None,
+):
+    status = MESEquipmentStatus(
+        record_id=uuid.uuid4(),
+        connection_id=connection_id,
+        factory_id=factory_id,
+        external_id=external_id,
+        equipment_code=equipment_code,
+        equipment_name=equipment_name,
+        status="downtime",
+        recorded_at=datetime.now(timezone.utc),
+        downtime_reason=downtime_reason,
+        product_line_code="DC-DC-100",
+    )
+    db.add(status)
+    return status
+
+
+@pytest.mark.asyncio
+async def test_mes_should_skip_no_data(db, default_factory):
+    src = MESSource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    reason = await src.should_skip(ctx)
+    assert reason is not None
+    assert "MES" in reason or "暂无" in reason
+
+
+@pytest.mark.asyncio
+async def test_mes_retrieves_when_data(db, default_factory, admin_user):
+    conn = _make_mes_connection(db, default_factory.id, admin_user)
+    await db.flush()
+    _make_scrap_record(
+        db,
+        default_factory.id,
+        conn.connection_id,
+        "SCRAP-001",
+        defect_type="划伤",
+        defect_qty=3,
+        defect_description="表面划伤",
+    )
+    _make_equipment_status(
+        db,
+        default_factory.id,
+        conn.connection_id,
+        "EQ-001",
+        equipment_code="P1-01",
+        equipment_name="贴片机 1",
+        downtime_reason="轨道卡滞",
+    )
+    await db.flush()
+
+    src = MESSource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    reason = await src.should_skip(ctx)
+    assert reason is None
+    cands = await src.retrieve(ctx)
+    assert len(cands) > 0
+    assert all(c.source == "mes" for c in cands)
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+    assert any(c.metadata.get("scrap_record_id") for c in cands)
+    assert any(c.metadata.get("equipment_id") for c in cands)
+    assert any("MES 报废" in c.content for c in cands)
+    assert any("设备停机" in c.content for c in cands)
+
+
+@pytest.mark.asyncio
+async def test_mes_factory_isolation(db, default_factory, admin_user):
+    other = Factory(id=uuid.uuid4(), code="OTHER", name="Other")
+    db.add(other)
+    await db.flush()
+
+    conn_a = _make_mes_connection(db, default_factory.id, admin_user, "MES-CONN-A")
+    conn_b = _make_mes_connection(db, other.id, admin_user, "MES-CONN-B")
+    await db.flush()
+
+    scrap_a = _make_scrap_record(
+        db,
+        default_factory.id,
+        conn_a.connection_id,
+        "SCRAP-A",
+        defect_type="裂纹",
+        defect_qty=2,
+    )
+    equip_a = _make_equipment_status(
+        db,
+        default_factory.id,
+        conn_a.connection_id,
+        "EQ-A",
+        equipment_code="P1-A",
+        downtime_reason="缺料停机",
+    )
+
+    scrap_b = _make_scrap_record(
+        db,
+        other.id,
+        conn_b.connection_id,
+        "SCRAP-B",
+        defect_type="变形",
+        defect_qty=4,
+    )
+    equip_b = _make_equipment_status(
+        db,
+        other.id,
+        conn_b.connection_id,
+        "EQ-B",
+        equipment_code="P1-B",
+        downtime_reason="气压不足",
+    )
+    await db.flush()
+
+    src = MESSource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0, "default 工厂有 MES 数据，retrieve 不应为空"
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+
+    other_ids = {str(scrap_b.scrap_id), str(equip_b.record_id)}
+    assert not any(
+        c.metadata.get("scrap_record_id") in other_ids
+        or c.metadata.get("equipment_id") in other_ids
+        for c in cands
+    )
+    assert any(c.metadata.get("scrap_record_id") == str(scrap_a.scrap_id) for c in cands)
+    assert any(c.metadata.get("equipment_id") == str(equip_a.record_id) for c in cands)
