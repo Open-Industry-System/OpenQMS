@@ -93,6 +93,10 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
                             failure_cause_node_id: item.failure_cause_node_id,
                             fmea_id: item.fmea_id,
                             failure_mode_node_id: item.failure_mode_node_id,
+                            // historical_capa 来源的节点 ID 为 null，靠 source_capa_id/document_no 区分，
+                            // 否则两条同根因文本的历史推荐会被后端 dedupe 误并
+                            source_capa_id: item.source_capa_id,
+                            source_capa_document_no: item.source_capa_document_no,
                           },
                         });
                         message.success(t("d4.adopted"));

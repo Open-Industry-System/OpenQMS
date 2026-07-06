@@ -129,7 +129,14 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                   d_step: "d5",
                   adopted_text: item.content,
                   source: item.match_source || "rule",
-                  item_ref: {},
+                  // 含 provenance：不同来源（historical_capa 的 source_capa_id / category / basis）
+                  // 的同文本建议各有独立 item_ref，避免被后端 dedupe 误并
+                  item_ref: {
+                    source_capa_id: item.source_capa_id,
+                    source_capa_document_no: item.source_capa_document_no,
+                    category: item.category,
+                    basis: item.basis,
+                  },
                 });
                 message.success(t("d5.adopted")); onAdopted?.();
               } catch { message.error(t("d5.adoptFailed")); }
