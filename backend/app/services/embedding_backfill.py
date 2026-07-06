@@ -14,12 +14,13 @@ from app.services.embedding_outbox import enqueue_embedding
 
 logger = logging.getLogger(__name__)
 
-ENTITY_TYPES = ["fmea_node", "capa", "audit_finding", "complaint", "scar", "rma"]
+ENTITY_TYPES = ["fmea_node", "capa", "capa_lesson", "audit_finding", "complaint", "scar", "rma"]
 
 ENTITY_TABLE_MAP = {
     # (from_clause, pk_expr, plc_expr, factory_id_expr)
     "fmea_node": ("fmea_documents", "fmea_id", "product_line_code", "factory_id"),
     "capa": ("capa_eightd", "report_id", "product_line_code", "factory_id"),
+    "capa_lesson": ("capa_lessons_learned", "lesson_id", "product_line_code", "factory_id"),
     "audit_finding": (
         "audit_findings",
         "finding_id",

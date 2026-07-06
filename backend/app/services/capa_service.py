@@ -377,6 +377,26 @@ async def advance_capa(
         # D7→D8 闭环闸口（决策 18）：completeness + capa_id 过滤 + recommendation_hash 匹配 + fail-closed。
         # 闸口不通过 → ValueError（API 映 400），不推进、不审计、不抽 lessons。
         await _d7_to_d8_gate(db, capa)
+        # 闸口通过 → savepoint 内抽 d7_prevention lessons（fail-closed）。
+        # 抽取失败 → savepoint rollback（撤销已 insert 的 lesson 行 + outbox 行），
+        # 状态尚未 mutation，事务回滚干净。
+        from app.services.capa_lessons_service import _extract_lessons
+        try:
+            async with db.begin_nested():
+                await _extract_lessons(db, capa, "d7")
+                db.add(AuditLog(
+                    table_name="capa_eightd",
+                    record_id=capa.report_id,
+                    action="LESSON_EXTRACTED",
+                    changed_fields={"source_d_step": "d7"},
+                    operated_by=user_id,
+                    factory_id=capa.factory_id,
+                    correlation_id=uuid.uuid5(
+                        uuid.NAMESPACE_URL, f"lesson_extract_d7:{capa.report_id}"
+                    ),
+                ))
+        except Exception as e:
+            raise ValueError("D7 lessons 抽取失败，不可关闭，请重试") from e
 
     if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECTION:
         # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，

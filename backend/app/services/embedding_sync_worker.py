@@ -76,7 +76,8 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
                            COALESCE(node->>'requirement', '') as requirement,
                            COALESCE(node->>'specification', '') as specification,
                            fmea.product_line_code,
-                           fmea.document_no
+                           fmea.document_no,
+                           fmea.factory_id
                     FROM fmea_documents fmea,
                          jsonb_array_elements(fmea.graph_data->'nodes') node
                     WHERE fmea.fmea_id = :fmea_id
@@ -101,37 +102,42 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
                         "entity_field": "name",
                         "chunk_text": chunk_text,
                         "product_line_code": row["product_line_code"],
+                        "factory_id": row["factory_id"],
                         "metadata": {
                             "document_no": row["document_no"],
                             "node_type": row["node_type"],
                         },
                     })
         else:
-            # (table_from, pk_expr, plc_expr, doc_no_expr, fields)
+            # (table_from, pk_expr, plc_expr, doc_no_expr, fid_expr, fields)
             table_field_map = {
-                "capa": ("capa_eightd", "report_id", "product_line_code", "document_no", [
+                "capa": ("capa_eightd", "report_id", "product_line_code", "document_no", "factory_id", [
                     ("d2_description", "d2_description"),
                     ("d4_root_cause", "d4_root_cause"),
                     ("d5_correction", "d5_correction"),
                     ("d7_prevention", "d7_prevention"),
                 ]),
+                "capa_lesson": (
+                    "capa_lessons_learned", "lesson_id", "product_line_code", "''", "factory_id", [
+                    ("lesson_text", "lesson_text"),
+                ]),
                 "audit_finding": (
                     "audit_findings af LEFT JOIN audit_plans ap ON af.audit_id = ap.audit_id",
-                    "af.finding_id", "ap.product_line_code", "ap.plan_no", [
+                    "af.finding_id", "ap.product_line_code", "ap.plan_no", "af.factory_id", [
                     ("af.description", "description"),
                     ("af.root_cause", "root_cause"),
                     ("af.corrective_action", "corrective_action"),
                 ]),
-                "complaint": ("customer_complaints", "complaint_id", "product_line_code", "complaint_no", [
+                "complaint": ("customer_complaints", "complaint_id", "product_line_code", "complaint_no", "factory_id", [
                     ("defect_desc", "defect_desc"),
                     ("root_cause", "root_cause"),
                     ("corrective_action", "corrective_action"),
                 ]),
-                "scar": ("supplier_scars", "scar_id", "product_line_code", "scar_no", [
+                "scar": ("supplier_scars", "scar_id", "product_line_code", "scar_no", "factory_id", [
                     ("description", "description"),
                     ("resolution_summary", "resolution_summary"),
                 ]),
-                "rma": ("rma_records", "rma_id", "product_line_code", "rma_no", [
+                "rma": ("rma_records", "rma_id", "product_line_code", "rma_no", "factory_id", [
                     ("analysis_result", "analysis_result"),
                     ("corrective_action", "corrective_action"),
                 ]),
@@ -142,11 +148,12 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
 
             # SECURITY: all interpolated names come from the hardcoded
             # table_field_map constant — never user input.
-            table_from, pk_expr, plc_expr, doc_no_expr, fields = table_field_map[entity_type]
+            table_from, pk_expr, plc_expr, doc_no_expr, fid_expr, fields = table_field_map[entity_type]
             field_names = [f[0] for f in fields]
             result = await db.execute(
                 text(f"""
-                    SELECT {', '.join(field_names)}, {plc_expr} AS product_line_code, {doc_no_expr} AS document_no
+                    SELECT {', '.join(field_names)}, {plc_expr} AS product_line_code,
+                           {doc_no_expr} AS document_no, {fid_expr} AS factory_id
                     FROM {table_from}
                     WHERE {pk_expr} = :entity_id
                 """),
@@ -167,6 +174,7 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
                         "entity_field": field_name,
                         "chunk_text": str(field_value),
                         "product_line_code": row.get("product_line_code"),
+                        "factory_id": row.get("factory_id"),
                         "metadata": {
                             "document_no": row.get("document_no", ""),
                         },
@@ -181,6 +189,15 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
     Uses DELETE + INSERT because partial unique indexes can't be used in a single ON CONFLICT clause.
     """
     for chunk, vector in zip(chunks, vectors, strict=False):
+        # R9: capa_lesson upsert 前重查存在性，已删则丢弃（防 race / stale embedding）
+        if chunk["entity_type"] == "capa_lesson":
+            exists = await db.scalar(
+                text("SELECT 1 FROM capa_lessons_learned WHERE lesson_id = :id"),
+                {"id": chunk["entity_id"]},
+            )
+            if not exists:
+                continue
+
         vec_str = "[" + ",".join(str(v) for v in vector) + "]"
 
         # Delete existing embedding for this entity (if any)
@@ -217,10 +234,11 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
             text("""
                 INSERT INTO document_embeddings
                     (entity_type, entity_id, node_id, entity_field, chunk_index,
-                     chunk_text, embedding, product_line_code, metadata, embedding_model)
+                     chunk_text, embedding, product_line_code, factory_id, metadata, embedding_model)
                 VALUES
                     (:entity_type, :entity_id, :node_id, :entity_field, 0,
-                     :chunk_text, CAST(:embedding AS vector), :product_line_code, CAST(:metadata AS jsonb), :embedding_model)
+                     :chunk_text, CAST(:embedding AS vector), :product_line_code, :factory_id,
+                     CAST(:metadata AS jsonb), :embedding_model)
             """),
             {
                 "entity_type": chunk["entity_type"],
@@ -230,6 +248,7 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
                 "chunk_text": chunk["chunk_text"],
                 "embedding": vec_str,
                 "product_line_code": chunk.get("product_line_code"),
+                "factory_id": chunk.get("factory_id"),
                 "metadata": json.dumps(chunk.get("metadata", {})),
                 "embedding_model": model_name,
             },
@@ -272,6 +291,34 @@ async def mark_failed(db: AsyncSession, event_id: str, error: str, retry_count: 
     await db.commit()
 
 
+async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
+    """Claim one batch, embed, upsert, mark completed. Raises on error.
+
+    Extracted from run_worker() so tests can drive a single round without the loop.
+    Returns the claimed events (or None if no pending events).
+    """
+    events = await claim_batch(db, BATCH_SIZE)
+    if not events:
+        return None
+
+    logger.info(f"Processing {len(events)} embedding events")
+
+    chunks = await fetch_chunks(db, events)
+    if not chunks:
+        await mark_completed(db, [str(e["id"]) for e in events])
+        return events
+
+    # Batch embed all chunks in a single API call
+    texts = [c["chunk_text"] for c in chunks]
+    vectors = await provider.embed(texts)
+
+    await upsert_embeddings(db, chunks, vectors, provider.model_name)
+    await mark_completed(db, [str(e["id"]) for e in events])
+
+    logger.info(f"Embedded {len(chunks)} chunks from {len(events)} events")
+    return events
+
+
 async def run_worker():
     """Main worker loop."""
     logger.info("Embedding sync worker starting")
@@ -312,35 +359,18 @@ async def run_worker():
     signal.signal(signal.SIGTERM, shutdown)
 
     while running:
+        events: list[dict] | None = None
         try:
             async with get_tenant_aware_session() as db:
                 # Recover events stuck in processing from prior crashes
                 await recover_stale_events(db)
-
-                events = await claim_batch(db, BATCH_SIZE)
-                if not events:
+                events = await process_batch_once(db, provider)
+                if events is None:
                     await asyncio.sleep(POLL_INTERVAL)
-                    continue
-
-                logger.info(f"Processing {len(events)} embedding events")
-
-                chunks = await fetch_chunks(db, events)
-                if not chunks:
-                    await mark_completed(db, [str(e["id"]) for e in events])
-                    continue
-
-                # Batch embed all chunks in a single API call
-                texts = [c["chunk_text"] for c in chunks]
-                vectors = await provider.embed(texts)
-
-                await upsert_embeddings(db, chunks, vectors, provider.model_name)
-                await mark_completed(db, [str(e["id"]) for e in events])
-
-                logger.info(f"Embedded {len(chunks)} chunks from {len(events)} events")
 
         except Exception as e:
             logger.error(f"Worker error: {e}", exc_info=True)
-            if 'events' in locals() and events:
+            if events:
                 async with get_tenant_aware_session() as db:
                     for event in events:
                         try:
