@@ -132,7 +132,8 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     if "result" in updates:
         rec.result = updates["result"]
     if "evidence_attachments" in updates:
-        rec.evidence_attachments = updates["evidence_attachments"]
+        # 列为 NOT NULL（默认 []）：显式 null 视为清空到 []，避免 IntegrityError/500
+        rec.evidence_attachments = updates["evidence_attachments"] or []
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
         action="RC_VERIFY",

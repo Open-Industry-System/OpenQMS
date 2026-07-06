@@ -153,7 +153,7 @@ export default function D7RecPanel({
                 icon={<ThunderboltOutlined />}
                 data-e2e="d7-auto-fill"
                 disabled={locked || !canAdopt || !canAutoFill}
-                loading={fillingNode === rec.failure_cause_node_id}
+                loading={fillingNode !== null && fillingNode === rec.failure_cause_node_id}
                 onClick={() => handleAutoFill(rec)}
               >
                 {t("d7.autoFill")}
@@ -169,7 +169,7 @@ export default function D7RecPanel({
                 icon={<ThunderboltOutlined />}
                 data-e2e="d7-auto-fill"
                 disabled={locked || !canAdopt || !canAutoFill || !d5Correction || !rec.failure_cause_node_id}
-                loading={fillingNode === rec.failure_cause_node_id}
+                loading={fillingNode !== null && fillingNode === rec.failure_cause_node_id}
               >
                 {t("d7.autoFill")}
               </Button>

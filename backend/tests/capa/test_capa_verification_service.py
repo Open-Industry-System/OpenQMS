@@ -161,6 +161,18 @@ async def test_update_omitted_fields_preserved(db, default_factory, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_update_null_evidence_clears_to_empty_not_integrity_error(db, default_factory, admin_user):
+    # 列 NOT NULL：PATCH {evidence_attachments: null} 应清空到 []，而非 IntegrityError/500
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    rec = await create_verification(db, capa, VerificationCreate(
+        root_cause_text="rc",
+        evidence_attachments=[{"filename": "a.jpg", "size": 10}]), admin_user)
+    updated = await update_verification(db, capa, rec.verification_id,
+                                        VerificationUpdate(evidence_attachments=None), admin_user)
+    assert updated.evidence_attachments == []
+
+
+@pytest.mark.asyncio
 async def test_update_other_capa_record_returns_404_lookup(db, default_factory, admin_user):
     capa_a = await _make_capa(db, default_factory.id, admin_user.user_id, doc_no="8D-A")
     capa_b = await _make_capa(db, default_factory.id, admin_user.user_id, doc_no="8D-B")
