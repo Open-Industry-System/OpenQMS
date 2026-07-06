@@ -96,14 +96,16 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         },
         operated_by=user.user_id, factory_id=capa.factory_id,
     ))
+    capa_id = capa.report_id  # 捕获标量，供 rollback（expire capa）后的重试查询使用
     try:
         await db.commit()
     except IntegrityError:
         # 并发 confirm/skip 同节点：另一事务先插 → ix_capa_d7_node_unique 兜底。
         # 回滚后查既有行返回（幂等），不泄漏 500；既有行不存在则重新抛（非 dedupe 冲突）
+        # rollback 会 expire capa；async 下访问 capa.report_id 会 MissingGreenlet → 用捕获的标量 capa_id
         await db.rollback()
         existing = await db.scalar(select(CapaD7NodeAction).where(
-            CapaD7NodeAction.capa_id == capa.report_id,
+            CapaD7NodeAction.capa_id == capa_id,
             CapaD7NodeAction.fmea_id == req.fmea_id,
             CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
             CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id,

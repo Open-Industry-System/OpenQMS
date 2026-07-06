@@ -17,11 +17,12 @@ def _assert_verified_has_details(method, result, evidence) -> None:
         raise ValueError("已验证记录须填写验证方法、结果或证据")
 
 
-async def _find_existing_adoption(db: AsyncSession, capa, req: AdoptRequest):
+async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest):
     # 幂等去重 key：同 (capa, d_step, source, item_ref, adopted_text)。item_ref 是 JSONB，
     # SQLAlchemy == None 生成 IS NULL、== {} 生成 = '{}'::jsonb，与 ix_capa_ai_adoption_dedupe 的 COALESCE 收口一致
+    # 接收标量 capa_id（非 capa 对象）：rollback 会 expire capa，async 下访问 capa.report_id 会 MissingGreenlet
     return await db.scalar(select(CapaAIAdoption).where(
-        CapaAIAdoption.capa_id == capa.report_id,
+        CapaAIAdoption.capa_id == capa_id,
         CapaAIAdoption.d_step == req.d_step,
         CapaAIAdoption.source == req.source,
         CapaAIAdoption.adopted_text == req.adopted_text,
@@ -37,7 +38,8 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     if req.item_ref is None:
         req = req.model_copy(update={"item_ref": {}})
     # 幂等：重复采纳（双击/重试/代理重发）直接返回既有 adoption，不重复追加 d-step 文本、不重复 audit
-    existing = await _find_existing_adoption(db, capa, req)
+    capa_id = capa.report_id  # 捕获标量，供 IntegrityError handler 在 rollback（expire capa）后使用
+    existing = await _find_existing_adoption(db, capa_id, req)
     if existing is not None:
         await db.refresh(capa)
         return existing, getattr(capa, field) or ""
@@ -72,8 +74,9 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         await db.commit()
     except IntegrityError:
         # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）
+        # rollback 会 expire capa；async 下访问 capa.report_id 会 MissingGreenlet → 用上方捕获的标量 capa_id
         await db.rollback()
-        existing = await _find_existing_adoption(db, capa, req)
+        existing = await _find_existing_adoption(db, capa_id, req)
         if existing is None:
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
         await db.refresh(capa)

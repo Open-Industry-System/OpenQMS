@@ -98,13 +98,13 @@ Stage 5 llm_recommend 审计（attempted>0 时）
 
 14. **编排器不引入 SSE/流式**：本 spec 同步执行 12 阶段，API 一次返回全部终态。`running`/`pending` 状态在 DAG 组件预留但 API 响应不出现。流式 SSE 留后续（故事不要求）。
 
-15. **显示顺序 ≠ 执行顺序（R1-修复 D5 stage 2 依赖）**：12 阶段的 `index` 是**显示顺序**（DAG 节点编号 + `rec-dag-stage-{index}` testid 契约），不是执行顺序。`FMEAControlExpander`（D5 stage 2）是**派生阶段**——它不独立 retrieve，而是消费 stage 3（semantic）/ stage 4（same-type）召回的 FailureCause 候选扩展出 Control。编排器分两遍执行：①**召回遍**跑所有独立 retrieve 阶段（1 上下文 / 2 D4=FMEAGraphSource / 3 / 4 / 5 / 6-9 D4 / 10 规则 / 11 LLM），把 cause 候选收入 `all_candidates`；②**派生遍**跑 stage 2 D5（FMEAControlExpander over 已召回 causes），产出 control 候选。每个 `StageRun` 仍按其 `index` 报告（D5 stage 2 的 `StageRun` 在派生遍产出，显示位置不变）。D4 无派生阶段，stage 2 = FMEAGraphSource 在召回遍即完成。**回归测试**：D5 语义召回产 1 cause → stage 2 FMEAControlExpander 扩展出 control，hit_count≥1，control 的 `stage_index=2`。
+15. **显示顺序 ≠ 执行顺序（R1-修复 D5 stage 2 依赖 + R10-修复不只依赖 semantic）**：12 阶段的 `index` 是**显示顺序**（DAG 节点编号 + `rec-dag-stage-{index}` testid 契约），不是执行顺序。`FMEAControlExpander`（D5 stage 2）是**派生阶段**——它消费 **stage 3/4 召回的 FailureCause 候选 ∪ linked FMEA 按 D4 关键词直查的 FailureCause**（R10-修复：`_lookup_linked_fmea_causes`，不依赖 embedding，embedding 不可用/semantic 0 命中时仍能扩展 FMEA 控制措施，与既有纯函数 `_match_existing_controls` 一致）扩展出 Control。编排器分两遍执行：①**召回遍**跑独立 retrieve 阶段（1/2 D4/3/4/5/6-9 D4/10/11）；②**派生遍**跑 stage 2 D5（合并 semantic+直查 causes 去重后 expand）。每个 `StageRun` 仍按 `index` 报告。D5 stage 2 **skip 条件**：semantic 无 cause 且 linked FMEA 直查无 cause（或无 linked FMEA）→ skipped；有 linked FMEA 且直查命中 → 即使 embedding 不可用也 done。**回归测试**：D5 embedding 不可用 + linked FMEA 有 D4 关键词匹配的 cause → stage 2 done 扩展出 control（不 skipped）；D5 无 linked FMEA 且 semantic 无 cause → stage 2 skipped。
 
 16. **stage 12 终态单次发射（R1-修复重复 output stage）**：`STAGE_PLAN` 含 12 项，但 stage 12（输出推荐列表）标记 `terminal=True`，**编排器主循环跳过 terminal 阶段**——它在 FusionEngine merge 之后单次发射。主循环只处理 stage 1-11（stage 1 internal 上下文、stage 2-10 sources、stage 11 LLM）。主循环结束后：`fused = fusion.merge(all_candidates, context)` → 追加**唯一一个** `StageRun(12, "输出推荐列表", "internal", "done", hit_count=len(fused))`。**禁止**在主循环的 `internal` 分支处理 stage 12 + 循环后再 append（那会产生 13 行/重复 index 12）。**回归测试**：响应 `stages` 恰好 12 行、`index` 集合 = {1..12} 无重复。
 
 17. **lesson 抽取幂等（R1-修复 lesson 重复）**：`capa_lessons_learned.lesson_id` 用**确定性** `uuid5(NAMESPACE_URL, f"capa_lesson:{capa_id}:{source_d_step}:{normalized_lesson_text}")`（非随机 uuid4），同一 CAPA 同一原文反复抽取产生相同 `lesson_id`。抽取用 `pg_insert.on_conflict_do_update(index_elements=["lesson_id"], set_={category/tags/updated_at})` upsert，重试/双击/并发 advance 不会产生重复行、不会重复入队 embedding（同 `entity_id` 幂等）。`advance_capa` D7→D8 转换开头 `SELECT capa ... FOR UPDATE` 串行化并发 advance（状态机本身也拒绝 D8→D8 再转，FOR UPDATE 兜底不确定提交后的重试）。`LESSON_EXTRACTED` 审计带 `correlation_id = uuid5(capa_id, "lesson_extract")`，重试产生相同 correlation_id 便于去重查询；审计 append-only 可接受（它是转换日志，不喂 KB）。**回归测试**：同一 CAPA 两次触发抽取 → lessons 行数不变（upsert）、embedding 入队不重复、audit correlation_id 相同。
 
-18. **D7→D8 闭环闸口（R2-修复 D7 旁路，Codex 评审发现）**：Spec A 落地了 `CapaD7NodeAction` 持久化（confirm/skip/auto-fill），但 `advance_capa` D7_PREVENTION → D8_CLOSURE **未强制**每条 D7 推荐都已处置——直接 `POST /api/capa/{id}/advance`（body 可空）可绕过 UI 弹窗关闭 D7，闭环审计可被旁路。Spec B 在同一次 `advance_capa` D7→D8 改动里（决策 17 lessons 钩子同处）补**服务端闸口**：转换前重算当前 D7 推荐（复用纯函数 `capa_service.get_d7_recommendations(capa_data, fmea_docs, allowed_pls)`，按 recommend 端点同样方式预加载 fmea_docs + `_resolve_allowed_pls`），取每条推荐 key `(fmea_id, failure_mode_node_id, failure_cause_node_id)`，要求每个 key 在 `capa_d7_node_action` 表里有**当前 CAPA 限定**的一条 `confirmed`/`skipped`/`auto_filled` 记录——查询 `WHERE capa_id = capa.report_id AND fmea_id = ... AND failure_mode_node_id = ... AND COALESCE(failure_cause_node_id,'') = ...`（R8-修复：按当前 `capa_id`/`report_id` 限定，避免他 CAPA 同 FMEA key 的动作误满足本 CAPA 闸口；`ix_capa_d7_node_unique` 已含 `capa_id`，查询显式带 `capa_id` 对齐）；存在未处置 key → `ValueError("D7 有 N 条推荐未处置（确认/跳过/自动回填），不可关闭")` → API 400。**completeness 健康检查（R7+R8+R9-修复，生成前跑，不只在空集）**：重算前独立查 canonical scope FMEA count（`SELECT count(*) FROM fmea_documents WHERE factory_id=capa.factory_id AND product_line_code=capa.product_line_code`）与加载的 fmea_docs 数对比——**任何不一致（partial preload / 关联 FMEA 缺失 / PL 有 FMEA 但 preload 空）→ fail-closed 400 "D7 推荐重算异常：FMEA 预加载不完整"**（R9-修复：partial preload 也拦截，避免只验证已加载子集漏未加载 FMEA 的推荐）；count=0 且无 fmea_ref_id → 真无推荐，闸口平凡通过。`failure_cause_node_id` 为 NULL 的推荐 key 用 `COALESCE(...,'')` 收口匹配（与 `ix_capa_d7_node_unique` 一致）。闸口校验在 `SELECT FOR UPDATE` 之后、状态写入之前、lessons 抽取之前——闸口不通过则不抽取 lessons、不推进、不审计 TRANSITION（早返回 400）。**canonical scope（R2+R5-修复 over-block）**：重算 D7 推荐用**授权无关但 CAPA 相关**的 scope——`capa.factory_id` + `capa.product_line_code`（CAPA 自己的产品线），fmea_docs 按 `capa.factory_id AND product_line_code = capa.product_line_code` 加载，`allowed_pls = [capa.product_line_code]`。**不**用整工厂 scope（避免无关产品线的推荐阻塞本 CAPA 关闭），**不**用推进用户的 `allowed_pls`（避免用户 PL 窄而误放行）。重算异常 → fail-closed 400。**回归测试**：CAPA 属 PL-A，工厂另有 PL-B 的 D7 推荐 → 闸口只看 PL-A 推荐，PL-B 未处置不阻塞 PL-A CAPA 关闭。**权限**：D7→D8 本就需 `canApprove('capa')`（既有），闸口不改变权限模型，只补闭环完整性。
+18. **D7→D8 闭环闸口（R2-修复 D7 旁路，Codex 评审发现）**：Spec A 落地了 `CapaD7NodeAction` 持久化（confirm/skip/auto-fill），但 `advance_capa` D7_PREVENTION → D8_CLOSURE **未强制**每条 D7 推荐都已处置——直接 `POST /api/capa/{id}/advance`（body 可空）可绕过 UI 弹窗关闭 D7，闭环审计可被旁路。Spec B 在同一次 `advance_capa` D7→D8 改动里（决策 17 lessons 钩子同处）补**服务端闸口**：转换前重算当前 D7 推荐（复用纯函数 `capa_service.get_d7_recommendations(capa_data, fmea_docs, allowed_pls)`，按 recommend 端点同样方式预加载 fmea_docs + `_resolve_allowed_pls`），取每条推荐 key `(fmea_id, failure_mode_node_id, failure_cause_node_id)`，要求每个 key 在 `capa_d7_node_action` 表里有**当前 CAPA 限定**且**`recommendation_hash` 匹配**的一条 `confirmed`/`skipped`/`auto_filled` 记录——查询 `WHERE capa_id = capa.report_id AND fmea_id = ... AND failure_mode_node_id = ... AND COALESCE(failure_cause_node_id,'') = ... AND recommendation_hash = :current_hash`（R8-修复：按当前 `capa_id` 限定，防他 CAPA 同 key 动作误满足；**R10+R11-修复：`recommendation_hash` 防 stale 处置**——`current_hash = recommendation_fingerprint(fmea_id=..., failure_mode_node_id=..., failure_cause_node_id=..., failure_mode_name=..., failure_cause_name=..., match_reason=...)`，与 D7 端点 record 路径用**同一 canonical helper**（稳定 ID + 内容指纹 + 固定 `|` delimiter），FMEA 节点改名/推荐内容变 → hash 变 → 旧动作 stale → 闸口阻断，强制重新处置；既有 Spec A 动作 hash NULL → 视为 stale）；存在未处置/stale key → `ValueError("D7 有 N 条推荐未处置或已 stale（FMEA 变更），不可关闭")` → API 400。**completeness 健康检查（R7+R8+R9-修复，生成前跑，不只在空集）**：重算前独立查 canonical scope FMEA count（`SELECT count(*) FROM fmea_documents WHERE factory_id=capa.factory_id AND product_line_code=capa.product_line_code`）与加载的 fmea_docs 数对比——**任何不一致（partial preload / 关联 FMEA 缺失 / PL 有 FMEA 但 preload 空）→ fail-closed 400 "D7 推荐重算异常：FMEA 预加载不完整"**（R9-修复：partial preload 也拦截，避免只验证已加载子集漏未加载 FMEA 的推荐）；count=0 且无 fmea_ref_id → 真无推荐，闸口平凡通过。`failure_cause_node_id` 为 NULL 的推荐 key 用 `COALESCE(...,'')` 收口匹配（与 `ix_capa_d7_node_unique` 一致）。闸口校验在 `SELECT FOR UPDATE` 之后、状态写入之前、lessons 抽取之前——闸口不通过则不抽取 lessons、不推进、不审计 TRANSITION（早返回 400）。**canonical scope（R2+R5-修复 over-block）**：重算 D7 推荐用**授权无关但 CAPA 相关**的 scope——`capa.factory_id` + `capa.product_line_code`（CAPA 自己的产品线），fmea_docs 按 `capa.factory_id AND product_line_code = capa.product_line_code` 加载，`allowed_pls = [capa.product_line_code]`。**不**用整工厂 scope（避免无关产品线的推荐阻塞本 CAPA 关闭），**不**用推进用户的 `allowed_pls`（避免用户 PL 窄而误放行）。重算异常 → fail-closed 400。**回归测试**：CAPA 属 PL-A，工厂另有 PL-B 的 D7 推荐 → 闸口只看 PL-A 推荐，PL-B 未处置不阻塞 PL-A CAPA 关闭。**权限**：D7→D8 本就需 `canApprove('capa')`（既有），闸口不改变权限模型，只补闭环完整性。
 
 ## 12 阶段编排模型
 
@@ -125,7 +125,7 @@ Stage 5 llm_recommend 审计（attempted>0 时）
 | 11 | LLM 融合排序 | `LLMFusionLayer`（既有） | both | 无 `pc`（LLM 未配置）→ skipped "未配置 LLM" | 增强后候选数（attempted/succeeded/failed 入 summary） |
 | 12 | 输出推荐列表 | `ProvenanceTagger`（internal，**terminal**） | both | 永不 | hit_count=最终去重后 items 数，summary="输出 N 条带来源推荐" |
 
-注：阶段 6-9 仅 D4（D5 是措施推荐，SPC/MES/IQC/供货是根因线索，D5 用不上）；D5 时这些阶段 `skipped` reason="D5 阶段不适用"。阶段 2 D5 用 `FMEAControlExpander`（基于阶段 3/4 召回的 cause 扩展控制），是**派生阶段**（决策 15）：主循环召回遍先跑 stage 3/4 收 cause，派生遍再跑 stage 2 扩展 control，`StageRun` 仍按 index=2 报告。阶段 12 是 **terminal**（决策 16）：主循环跳过，FusionEngine merge 后单次发射。`index` 是显示顺序（DAG 节点 + `rec-dag-stage-{index}` 契约），非执行顺序。
+注：阶段 6-9 仅 D4（D5 是措施推荐，SPC/MES/IQC/供货是根因线索，D5 用不上）；D5 时这些阶段 `skipped` reason="D5 阶段不适用"。阶段 2 D5 用 `FMEAControlExpander`（基于 stage 3/4 召回 cause ∪ linked FMEA 按 D4 关键词直查 cause 扩展控制，R10-修复不依赖 embedding），是**派生阶段**（决策 15）：召回遍先跑 stage 3/4，派生遍合并 semantic+直查 causes 去重后跑 stage 2，`StageRun` 仍按 index=2 报告。阶段 12 是 **terminal**（决策 16）：主循环跳过，FusionEngine merge 后单次发射。`index` 是显示顺序（DAG 节点 + `rec-dag-stage-{index}` 契约），非执行顺序。
 
 ## 数据模型
 
@@ -192,7 +192,7 @@ class RecommendationResult:
 
 ### 迁移
 
-`backend/alembic/versions/20260706_add_capa_lessons_learned.py`，`down_revision` 取 Spec A head（`20260703_capa_verif` 或其后继，实施时 `alembic heads` 确认），手写 `op.create_table("capa_lessons_learned")` + 普通索引（`capa_id` / `product_line_code`）+ **唯一表达式索引** `CREATE UNIQUE INDEX ix_capa_lessons_unique ON capa_lessons_learned (capa_id, source_d_step, md5(lesson_text_normalized))`（决策 17 防重复，PK 确定性 uuid5 已是第一道防线，此索引为并发兜底）。遵循 ADR-0013/0001/0003。（R7-修复：不引入 `lessons_dirty` 列——lessons 抽取 fail-closed，无需 dirty 标记/重试。）
+`backend/alembic/versions/20260706_add_capa_lessons_learned.py`，`down_revision` 取 Spec A head（`20260703_capa_verif` 或其后继，实施时 `alembic heads` 确认），手写：① `op.create_table("capa_lessons_learned")` + 普通索引（`capa_id` / `product_line_code`）+ **唯一表达式索引** `CREATE UNIQUE INDEX ix_capa_lessons_unique ON capa_lessons_learned (capa_id, source_d_step, md5(lesson_text_normalized))`（决策 17 防重复，PK 确定性 uuid5 已是第一道防线，此索引为并发兜底）；② **`op.add_column("capa_d7_node_action", sa.Column("recommendation_hash", sa.String(16), nullable=True))`**（R10-修复：Spec A 表扩展，存动作创建时的推荐内容 hash `sha256(failure_mode_name+failure_cause_name+match_reason)` 截 16 位；nullable 让既有行兼容，新动作必填；D7 闸口据此防 FMEA 改名后 stale 处置误满足）。遵循 ADR-0013/0001/0003。（R7-修复：不引入 `lessons_dirty` 列——lessons 抽取 fail-closed，无需 dirty 标记/重试。）
 
 ## API
 
@@ -271,22 +271,34 @@ class RecommendationOrchestrator:
         self.fusion = FusionEngine(); self.llm_layer = LLMFusionLayer(pc)
         self.d5_control_expander = FMEAControlExpander()   # D5 stage 2 派生处理器（决策 15）
         self._sources = self._build_sources()   # source_kind -> instance（D5 stage 2 不在此列，派生）
-        self._validate_new_source_protocol()   # R4-修复：强制 6 新源实现 should_skip，fail-fast
+        # R10-修复：不在构造时 fail-fast 校验协议——避免单源配置错误导致所有 D4/D5 请求硬失败（含 D4-only 源本应 skipped 的 D5 请求）。
+        # 协议校验改为 per-stage 运行时（_exec_recall_stage 内，违规 → 该 stage error，其余 stage + 12 阶段响应照常）。
+        # 启动/CI 应另跑 `validate_all_new_sources()` lint（见下）提前发现配置错误。
 
     NEW_SOURCE_KINDS = frozenset({"spc_anomaly", "iqc", "supplier_history", "mes", "same_type_product_kb", "lessons_learned"})
 
-    def _validate_new_source_protocol(self):
-        # R4+R5+R6-修复：6 新源 MUST 存在、should_skip 可调用且为 async 协程函数（否则无数据时 done(0) 而非 skipped，
-        # 或同步调用返回 coroutine 被误判 truthy → 误 skipped）
+    def _check_source_protocol(self, spec, source) -> str | None:
+        # R10-修复：per-stage 运行时协议校验（不阻断构造/整请求）。新源 should_skip 必须存在、可调用、async。
+        # 违规 → 返回 error reason（该 stage 标 error，其余 stage + 12 阶段响应照常）；合规 → None
         import inspect
-        for kind in self.NEW_SOURCE_KINDS:
-            src = self._sources.get(kind)
-            if src is None:
-                raise TypeError(f"New source {kind} missing from _sources (must be registered)")
-            if not callable(getattr(src, "should_skip", None)):
-                raise TypeError(f"New source {kind} must have callable should_skip(context) -> str | None")
-            if not inspect.iscoroutinefunction(src.should_skip):
-                raise TypeError(f"New source {kind} should_skip must be async def (Awaitable[str | None])")
+        if spec.source_kind not in self.NEW_SOURCE_KINDS:
+            return None   # 既有源无 should_skip 协议要求
+        if source is None:
+            return f"source {spec.source_kind} 未注册"
+        if not callable(getattr(source, "should_skip", None)):
+            return f"source {spec.source_kind} should_skip 不可调用"
+        if not inspect.iscoroutinefunction(source.should_skip):
+            return f"source {spec.source_kind} should_skip 非 async"
+        return None
+
+    def validate_all_new_sources(self) -> list[str]:
+        # R10-修复：启动/CI lint（非请求路径），返回违规列表供提前发现配置错误；不 raise
+        violations = []
+        for spec in STAGE_PLAN:
+            if spec.source_kind in self.NEW_SOURCE_KINDS:
+                v = self._check_source_protocol(spec, self._sources.get(spec.source_kind))
+                if v: violations.append(f"stage {spec.index} {spec.name}: {v}")
+        return violations
 
     async def run(self, context, *, user, report_id, factory_id, tenant_schema) -> RecommendationResult:
         stages: list[StageRun] = []
@@ -301,15 +313,24 @@ class RecommendationOrchestrator:
                 continue   # D5 stage 2 派生留派生遍
             stages.append(await self._exec_recall_stage(spec, context, all_candidates))
 
-        # ── 派生遍：D5 stage 2 FMEAControlExpander over stage 3/4 召回 causes（决策 15 + R3-修复边界 + R4-修复 guard）──
+        # ── 派生遍：D5 stage 2 FMEAControlExpander over stage 3/4 召回 causes + linked FMEA 直查 causes（决策 15 + R3 边界 + R4 guard + R10-修复）──
         if context.stage == "d5":
             spec = next(s for s in STAGE_PLAN if s.index == 2)
-            cause_cands = [c for c in all_candidates
-                           if c.metadata.get("failure_cause_node_id") and c.metadata.get("stage_index") in (3, 4)]   # R3-修复：仅 stage 3/4 召回的 cause
+            semantic_causes = [c for c in all_candidates
+                               if c.metadata.get("failure_cause_node_id") and c.metadata.get("stage_index") in (3, 4)]   # R3-修复：仅 stage 3/4 召回的 cause
+            # R10-修复：D5 stage 2 不只依赖 semantic（embedding 不可用 / semantic 0 命中时仍能扩展 FMEA 控制措施）——
+            # 直接从 linked FMEA 按 D4 根因关键词查 FailureCause（与既有纯函数 _match_existing_controls 一致，不依赖 embedding）
+            direct_causes = await self._lookup_linked_fmea_causes(context)
+            # 合并 + 按 (fmea_id, failure_cause_node_id) 去重
+            seen: set = set(); cause_cands = []
+            for c in semantic_causes + direct_causes:
+                k = (c.metadata.get("fmea_id"), c.metadata.get("failure_cause_node_id"))
+                if k not in seen:
+                    seen.add(k); cause_cands.append(c)
             if not cause_cands:
-                # R4-修复：无 stage 3/4 cause（即使 stage 5 lesson 等带 failure_cause_node_id）→ skipped，不调 expand 误报 done(0)
+                # R4-修复：无 FMEA cause（semantic + linked FMEA 直查均空）→ skipped，不调 expand 误报 done(0)
                 stages.append(StageRun(2, spec.name, "fmea_graph", "skipped",
-                                       summary="D5 无 stage 3/4 召回 cause，跳过控制扩展"))
+                                       summary="D5 无 FMEA cause（semantic + linked FMEA 直查均空），跳过控制扩展"))
             else:
                 try:
                     controls = await self.d5_control_expander.expand(cause_cands, context.fmea_docs or [])
@@ -351,6 +372,11 @@ class RecommendationOrchestrator:
         # 3. 普通 source（LLM stage 11 不在此，由 _exec_llm_stage 处理）
         source = self._sources.get(spec.source_kind)
         try:
+            # R10-修复：per-stage 协议校验（违规 → 该 stage error，不阻断构造/整请求；其余 stage + 12 阶段响应照常）
+            proto_violation = self._check_source_protocol(spec, source)
+            if proto_violation:
+                return StageRun(spec.index, spec.name, spec.source_kind, "error",
+                                error=proto_violation, summary=f"source 协议违规: {proto_violation}")
             # 唯一 skip/done(0) 规则（R3-修复合约一致性 + R6-修复 async）：
             # ① 编排器 _stage_precondition 查结构性前置（既有源：linked_fmea None / embedding None）
             # ② 新源 async should_skip 查底层数据存在性（强制，R6-修复：async + await）
@@ -378,6 +404,42 @@ class RecommendationOrchestrator:
             return "未配置 embedding"
         return None
 
+    async def _lookup_linked_fmea_causes(self, context) -> list[RecommendationCandidate]:
+        # R10-修复：D5 stage 2 直查 linked FMEA 的 FailureCause（按 D4 根因关键词），不依赖 embedding。
+        # embedding 不可用 / semantic 0 命中时仍能扩展 FMEA 控制措施（与既有纯函数 _match_existing_controls 一致）。
+        from app.utils.text import extract_keywords
+        linked = context.linked_fmea
+        if not linked or not linked.get("graph_data"):
+            return []
+        d4 = context.capa_data.get("d4_root_cause", "") or context.capa_data.get("d2_description", "")
+        keywords = extract_keywords(d4)
+        if not keywords:
+            return []
+        graph = linked["graph_data"]; node_map = {n["id"]: n for n in graph.get("nodes", [])}
+        edges = graph.get("edges", [])
+        forward: dict[str, list] = {}
+        for e in edges:
+            forward.setdefault(e["source"], []).append((e["target"], e["type"]))
+        cands: list[RecommendationCandidate] = []
+        for node in graph.get("nodes", []):
+            if node.get("type") != "FailureCause":
+                continue
+            name = node.get("name", ""); desc = node.get("description", "")
+            if not any(kw in name or kw in desc for kw in keywords):
+                continue
+            fm_id = fm_name = None
+            for tgt, etype in forward.get(node["id"], []):
+                if etype == "CAUSE_OF" and node_map.get(tgt, {}).get("type") == "FailureMode":
+                    fm_id = tgt; fm_name = node_map[tgt].get("name"); break
+            cands.append(RecommendationCandidate(
+                source="fmea_graph", content=name, category=None, confidence=0.5,
+                match_reason="关联 FMEA 失效原因（D4 关键词直查）",
+                metadata={"failure_cause_node_id": node["id"], "failure_cause_desc": desc or None,
+                          "failure_mode_node_id": fm_id, "failure_mode_name": fm_name,
+                          "fmea_id": str(linked["fmea_id"]), "fmea_document_no": linked.get("document_no"),
+                          "product_line_code": linked.get("product_line_code"), "stage_index": 2}))
+        return cands
+
     async def _exec_llm_stage(self, spec, fused, context) -> tuple[StageRun, list[RecommendationCandidate]]:
         # LLM enrich over FUSED 集（保既有 fusion→LLM 顺序，R2-修复）；返回 (StageRun, 增强后候选)
         if self.pc is None:
@@ -387,13 +449,18 @@ class RecommendationOrchestrator:
             outcome = await self.llm_layer.enrich(fused, context)
             for c in outcome.candidates:
                 c.metadata.setdefault("stage_index", spec.index)
-            # R6-修复：全失败（attempted>0 且 succeeded=0）→ status='error'（不绿，DAG 显红给用户/E2E），
-            # 仍返回 fused 候选 + 写 llm_failed audit（attempted>0）；部分失败 → done（summary 记 failed 计数）
+            # R6+R11-修复：全失败（attempted>0 且 succeeded=0）→ status='error'（不绿，DAG 显红），
+            # **返回原 fused 候选（非 outcome.candidates——后者可能为空，会丢确定性 fused 推荐，R11-修复）**
+            # + 写 llm_failed audit（attempted>0）；部分失败 → done（summary 记 failed 计数），返回 outcome.candidates
             status = "error" if (outcome.attempted > 0 and outcome.succeeded == 0) else "done"
+            returned_cands = fused if status == "error" else outcome.candidates
+            if status == "done":
+                for c in returned_cands:
+                    c.metadata.setdefault("stage_index", spec.index)
             return StageRun(spec.index, spec.name, "llm", status,
-                            hit_count=len(outcome.candidates),
+                            hit_count=len(returned_cands),
                             summary=f"attempted={outcome.attempted} succeeded={outcome.succeeded} failed={outcome.failed}",
-                            llm_attempted=outcome.attempted, llm_succeeded=outcome.succeeded, llm_failed=outcome.failed), outcome.candidates
+                            llm_attempted=outcome.attempted, llm_succeeded=outcome.succeeded, llm_failed=outcome.failed), returned_cands
         except Exception as e:
             # R3+R4+R5-修复：LLMFusionLayer.enrich 已硬化为 catch-all（见下），正常不会抛——此 except 仅兜底
             # 意外的非 LLM 调用错误（如 prompt 构造 bug），此时无 provider 调用完成，attempted=0 诚实，不审计。
@@ -407,7 +474,7 @@ class RecommendationOrchestrator:
                             llm_attempted=0, llm_succeeded=0, llm_failed=0), fused
 ```
 
-**关键不变量**（实施时测试断言）：① `stages` 恰好 12 行，`index` 集合 = {1..12} 无重复（决策 16）；② D5 stage 2 的 `StageRun` 在 stage 3/4 召回 cause 后才产出（决策 15）；③ stage 12 只出现一次（terminal）；④ **执行顺序 recall → fusion → LLM（LLM 吃 fused 不吃 raw），与既有 `HybridRecommendationPipeline` 合约一致（R2-修复）**——测试断言 `LLMFusionLayer.enrich` 收到的候选数 == `FusionEngine.merge` 输出数（非 raw 召回数）；⑤ no-data 源 → skipped（should_skip 返回 reason），0-match → done(0)（should_skip None + retrieve []），测试覆盖两条路径（R2-修复）；⑥ **LLM 失败隔离 + 审计结构化 + 全失败显 error（R3+R4+R5+R6-修复）**：`LLMFusionLayer.enrich` 硬化为 catch-all（内部 catch 所有异常 → 返回 `LLMOutcome(attempted, succeeded, failed)`，不抛）——provider 调用全失败 → `attempted>0, succeeded=0` → stage 11 **`error`（不绿，DAG 显红，R6-修复）** + `llm_attempted>0` → `_maybe_write_llm_audit` 写 `status="llm_failed"`（**全失败也审计，R5-修复**，不隐藏 LLM 用量），仍返回 fused 候选；enrich 仅意外非 LLM 错误才抛 → `_exec_llm_stage` except → stage 11 `error` + `llm_attempted=0`（诚实）+ 未修改 fused，stage 12 照常发射，`run()` 不抛；`_maybe_write_llm_audit` 读结构化字段（不解析 summary）→ attempted=0 不写 audit，审计层 try/except 兜底，**审计不破坏响应**——测试断言 enrich 抛错后响应仍 12 阶段 + items 非空 + 无 500，enrich 全失败 → audit 记 `llm_failed`；⑦ **D5 stage 2 输入边界（R3+R4-修复）**：仅 `metadata.stage_index in {3,4}` 的 cause 触发 FMEAControlExpander；**先算 `cause_cands` 再分支**——空则 skipped（不调 expand 误报 done(0)），非 stage 3/4 的 cause（lessons/rule/SPC 等）不触发；⑧ **should_skip 强制 + async（R4+R6-修复）**：构造时 `_validate_new_source_protocol` 校验 6 新源**存在**、`should_skip` **可调用**且 **`iscoroutinefunction`**（async），缺失/非 callable/非 async → `TypeError` fail-fast；编排器 `await source.should_skip(context)`（R6-修复：async DB 查存在性，同步调用会返回 coroutine 被误判 truthy → 误 skipped）；⑨ **LLM 审计结构化（R4-修复）**：`llm_recommend` 审计从 stage 11 `StageRun.llm_attempted/succeeded/failed` 取值，不解析 summary 字符串；⑩ **lessons 抽取 fail-closed（R7-修复）**：d7/d8 lesson 抽取失败 → 阻断转换/保存（400），KB==CAPA 保证，**无 dirty marker / 读路径副作用 / JSONB list 并发丢状态风险**；抽取是 DB 事务一部分（`db.add`+`enqueue_embedding`+audit 全 DB 写），失败即事务失败，与转换/保存同命运，fail-closed 无额外 UX 代价。
+**关键不变量**（实施时测试断言）：① `stages` 恰好 12 行，`index` 集合 = {1..12} 无重复（决策 16）；② D5 stage 2 的 `StageRun` 在 stage 3/4 召回 cause 后才产出（决策 15）；③ stage 12 只出现一次（terminal）；④ **执行顺序 recall → fusion → LLM（LLM 吃 fused 不吃 raw），与既有 `HybridRecommendationPipeline` 合约一致（R2-修复）**——测试断言 `LLMFusionLayer.enrich` 收到的候选数 == `FusionEngine.merge` 输出数（非 raw 召回数）；⑤ no-data 源 → skipped（should_skip 返回 reason），0-match → done(0)（should_skip None + retrieve []），测试覆盖两条路径（R2-修复）；⑥ **LLM 失败隔离 + 审计结构化 + 全失败显 error + 全失败保留 fused（R3+R4+R5+R6+R11-修复）**：`LLMFusionLayer.enrich` 硬化为 catch-all（内部 catch 所有异常 → 返回 `LLMOutcome(attempted, succeeded, failed)`，不抛）——provider 调用全失败 → `attempted>0, succeeded=0` → stage 11 **`error`（不绿，DAG 显红，R6-修复）** + `llm_attempted>0` → `_maybe_write_llm_audit` 写 `status="llm_failed"`（**全失败也审计，R5-修复**，不隐藏 LLM 用量），**`_exec_llm_stage` 返回原 `fused` 候选（非 `outcome.candidates`——后者可能为空会丢确定性 fused 推荐，R11-修复）**，stage 12 发射 fused（非空）；enrich 仅意外非 LLM 错误才抛 → `_exec_llm_stage` except → stage 11 `error` + `llm_attempted=0`（诚实）+ 未修改 fused，stage 12 照常发射，`run()` 不抛；`_maybe_write_llm_audit` 读结构化字段（不解析 summary）→ attempted=0 不写 audit，审计层 try/except 兜底，**审计不破坏响应**——测试断言 enrich 抛错后响应仍 12 阶段 + items 非空 + 无 500，**enrich 全失败（candidates=[]）→ stage 12 仍发射原 fused（非空，R11-修复）**，enrich 全失败 → audit 记 `llm_failed`；⑦ **D5 stage 2 输入边界 + 直查（R3+R4+R10-修复）**：`cause_cands` = semantic（stage 3/4）∪ linked FMEA 直查（`_lookup_linked_fmea_causes`，不依赖 embedding）；先算合并去重再分支——空则 skipped（不调 expand 误报 done(0)），非 stage 3/4 且非直查的 cause（lessons/rule/SPC 等）不触发；**embedding 不可用但 linked FMEA 直查命中 → stage 2 仍 done（R10-修复，不丢 FMEA 控制措施）**；⑧ **should_skip 强制 + async + per-stage 校验（R4+R6+R10-修复）**：6 新源 `should_skip` 必须存在、可调用、`iscoroutinefunction`（async）；编排器 `await source.should_skip(context)`（R6-修复：async DB 查存在性，不误判 coroutine truthy）；**协议校验 per-stage 运行时（R10-修复）**——`_exec_recall_stage` 调 `_check_source_protocol`，违规 → 该 stage `error`（不阻断构造/整请求，其余 stage + 12 阶段响应照常）；启动/CI 另跑 `validate_all_new_sources()` lint 提前发现配置错误（不 raise 在请求路径）；⑨ **LLM 审计结构化（R4-修复）**：`llm_recommend` 审计从 stage 11 `StageRun.llm_attempted/succeeded/failed` 取值，不解析 summary 字符串；⑩ **lessons 抽取 fail-closed（R7-修复）**：d7/d8 lesson 抽取失败 → 阻断转换/保存（400），KB==CAPA 保证，**无 dirty marker / 读路径副作用 / JSONB list 并发丢状态风险**；抽取是 DB 事务一部分（`db.add`+`enqueue_embedding`+audit 全 DB 写），失败即事务失败，与转换/保存同命运，fail-closed 无额外 UX 代价。
 
 注：`should_skip(context) -> str | None` 是**新 Source 强制协议方法**（R2-修复）：6 类新源各须实现，查底层数据是否存在（如 SPC 查 `spc_alarms` count、IQC 查 `iqc_inspections` 不良 count）。返回非 None → skipped reason；返回 None → retrieve。既有 `FMEAGraphSource`/`SemanticSearchSource`/`HistoricalCAPASource`/`RuleEngineSource` 无此方法，编排器据 `context.linked_fmea is None` / `self.embedding is None` 等上下文判 skipped（既有源不新增 should_skip，避免改既有源）。
 
@@ -499,7 +566,7 @@ class HybridRecommendationPipeline:
 2. **D7 闭环闸口（决策 18，转换前，R2+R5+R7+R8+R9-修复）**，按序：
    a. **canonical completeness check（R9-修复，生成前跑，不只在空集）**：独立查 `SELECT count(*) FROM fmea_documents WHERE factory_id=capa.factory_id AND product_line_code=capa.product_line_code`（canonical count），与加载的 fmea_docs 数对比——**任何不一致（partial preload：加载部分 FMEA）→ fail-closed `ValueError("D7 推荐重算异常：FMEA 预加载不完整")` → 400**（R9-修复：不只在推荐为空时检查，partial preload 也拦截，避免只验证已加载子集而漏未加载 FMEA 的推荐）；`capa.fmea_ref_id` 非空但 fmea_docs 未含该 FMEA → fail-closed 400 "关联 FMEA 未加载"。
    b. **重算 D7 推荐**（canonical CAPA 相关 scope：fmea_docs 按 `capa.factory_id AND product_line_code=capa.product_line_code` 加载，`allowed_pls=[capa.product_line_code]`；不用整工厂避免无关 PL 阻塞，不用用户 allowed_pls 避免 PL 窄误放行）。重算异常 → fail-closed `ValueError("D7 推荐重算失败，不可关闭")` → 400。
-   c. **处置校验**：取每条推荐 key `(fmea_id, failure_mode_node_id, COALESCE(failure_cause_node_id,''))`，查 `capa_d7_node_action` 表是否每个 key 都有 `confirmed`/`skipped`/`auto_filled` 记录——**查询显式 `WHERE capa_id = capa.report_id`（R8-修复：按当前 CAPA 限定，防他 CAPA 同 FMEA key 动作误满足）**；存在未处置 key → `ValueError("D7 有 N 条推荐未处置（确认/跳过/自动回填），不可关闭")` → API 400，**早返回**（不写 TRANSITION audit、不抽 lessons、不推进状态）。
+   c. **处置校验**：取每条推荐 key `(fmea_id, failure_mode_node_id, COALESCE(failure_cause_node_id,''))` + **当前推荐 fingerprint**（`current_hash = recommendation_fingerprint(fmea_id=..., failure_mode_node_id=..., failure_cause_node_id=..., failure_mode_name=..., failure_cause_name=..., match_reason=...)`，与 D7 端点 record 路径用同一 canonical helper，R11-修复），查 `capa_d7_node_action` 表是否每个 key 都有 `confirmed`/`skipped`/`auto_filled` 记录——**查询显式 `WHERE capa_id = capa.report_id AND recommendation_hash = :current_hash`（R8+R10+R11-修复：按当前 CAPA 限定 + hash 匹配，防他 CAPA 同 key 动作 + 防 FMEA 改名后旧动作 stale + record/gate 单源一致）**；存在未处置/stale key → `ValueError("D7 有 N 条推荐未处置或已 stale（FMEA 变更），不可关闭")` → API 400，**早返回**（不写 TRANSITION audit、不抽 lessons、不推进状态）。
    d. **D7 推荐为空 + completeness 通过**（a 步 count=0 或 loaded==canonical）→ 真无推荐，闸口平凡通过。
 3. **状态转换**（既有）：`capa.status = next_state.value` + 写 TRANSITION audit（D7→D8）。
 4. **D7 lessons 抽取（决策 10/17，转换后 commit 前，R2+R7-修复 fail-closed）**：调 `_extract_lessons(capa, source_d_step="d7")`：**仅从 `d7_prevention` 切句**（d7_prevention 在 D7 已定稿；`d8_closure` 此时为空，**不在此抽取**——见下方 d8_closure 更新钩子），逐句构造 `CapaLessonLearned`（`lesson_id = uuid5(NAMESPACE_URL, f"capa_lesson:{capa_id}:d7:{normalized_text}")`），用 `pg_insert(...).on_conflict_do_update(index_elements=["lesson_id"], set_={category, tags, updated_at})` upsert，`enqueue_embedding(db, "capa_lesson", lesson_id, ...)` 入队。**抽取异常 → 阻断转换**：`ValueError("D7 lessons 抽取失败，不可关闭，请重试")` → API 400，D8 **不推进**（KB==CAPA 保证，无 dirty/读路径副作用，R7-修复）。
@@ -526,6 +593,20 @@ D8_CLOSURE 是终态（无 D9 转换），`d8_closure` 文本在 D8 期间可编
 ### `adopt_recommendation` 透传 `stage_index`（Spec A 决策 1 兑现）
 
 `capa_verification_service.adopt_recommendation`（Spec A）把 `CapaAIAdoption(..., stage_index=None, ...)` 改为 `stage_index=req.stage_index`。`AdoptRequest` 加字段（决策 4）。单点改动。
+
+### D7 端点 populate `recommendation_hash` + canonical fingerprint（R10+R11-修复防 stale 处置）
+
+**单一 canonical helper（R11-修复：record + gate 用同一函数，避免 delimiter/字段不一致导致 closure deadlock）**——`backend/app/services/capa_d7_action_service.py` 暴露：
+```python
+import hashlib
+def recommendation_fingerprint(*, fmea_id, failure_mode_node_id, failure_cause_node_id,
+                               failure_mode_name, failure_cause_name, match_reason) -> str:
+    # 稳定 ID + 内容指纹：node_id 稳定（同节点改名 → 内容部分变 → hash 变 → stale 检测）；
+    # delimiter 固定 "|"，record 与 gate 调同一函数 → byte-identical 输入
+    raw = f"{fmea_id}|{failure_mode_node_id}|{failure_cause_node_id or ''}|{failure_mode_name}|{failure_cause_name or ''}|{match_reason}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+```
+Spec A 的 `record_d7_action` / `auto_fill_d7` 在 insert/升级 `CapaD7NodeAction` 时调 `recommendation_fingerprint(...)`（从当前 D7 推荐取字段），存入 `recommendation_hash`。D7 闸口（决策 18）重算当前推荐时调**同一** `recommendation_fingerprint(...)` 生成 `current_hash`，要求动作 `recommendation_hash == current_hash`——FMEA 节点改名/推荐内容变 → hash 变 → 旧动作 stale → 闸口阻断。既有 Spec A 动作行（hash NULL）→ 视为 stale。**测试**：record + gate 用 byte-identical 输入 → hash 相等；改名任一 name 字段 → hash 变。
 
 ## 前端
 
@@ -579,9 +660,9 @@ D8_CLOSURE 是终态（无 D9 转换），`d8_closure` 文本在 D8 期间可编
   - **fusion→LLM 顺序（R2-修复）**：spy `LLMFusionLayer.enrich` + `FusionEngine.merge`，断言 `enrich` 收到的候选数 == `merge` 输出数（fused），**不等于** raw 召回候选数（all_candidates）；即 LLM 吃 fused 不吃 raw，保既有合约。
   - **no-data vs done(0)（R2-修复）**：SPC 有告警但无 FMEA 匹配 → `should_skip` 返回 None + `retrieve` 返回 [] → stage 6 **done(0)**（有数据 0 命中）；SPC 无告警 → `should_skip` 返回 reason → stage 6 **skipped**。两路径分别断言 status。新源（SPC/IQC/MES/...）各测 should_skip 返回 reason 的无数据场景。
   - **LLM 失败隔离（R3-修复）**：`LLMFusionLayer.enrich` 抛异常（mock timeout/provider error）→ stage 11 `error` + 返回未修改 fused，stage 12 照常发射 done，`run()` 不抛，响应仍是 12 阶段 + items 非空（fused 候选保留）。
-  - **D5 stage 2 输入边界 + guard（R3+R4-修复）**：D5 上下文，stage 5 lesson 候选带 `failure_cause_node_id` 但 `stage_index=5` → **不**进 stage 2 FMEAControlExpander（仅 stage_index in {3,4} 的 cause 触发）；**且 stage 2 标 `skipped`（非 done(0)），不调 expand**——即使 all_candidates 里有非 stage 3/4 的 cause，guard 据过滤后的 cause_cands 分支。
-  - **LLM 审计结构化 + 失败隔离 + 全失败也审计 + 全失败显 error（R3+R4+R5+R6+R7-修复）**：mock `LLMFusionLayer.enrich` 抛错 → stage 11 `error` + `llm_attempted=0` → `_maybe_write_llm_audit` 不写 `llm_recommend` audit，响应 12 阶段 + items 非空 + 无 500；mock enrich 成功 → audit 读结构化 `llm_attempted/succeeded/failed`（不解析 summary 字符串）；mock `_maybe_write_llm_audit` 内部异常 → 仍不破坏响应（try/except 兜底）；**mock enrich 全失败（`LLMOutcome(attempted=2, succeeded=0, failed=2)`，不抛）→ stage 11 `error`（不绿，R6-修复，单源合约）+ audit 写 `status="llm_failed"`（全失败也审计，R5-修复）+ 仍返回 fused 候选**。
-  - **should_skip 强制 + callable（R4+R5-修复）**：构造 `RecommendationOrchestrator` 时某新源缺 should_skip → `TypeError`；某新源 should_skip 非 callable（如设成属性）→ `TypeError`；某新源未注册到 `_sources`（missing）→ `TypeError`（fail-fast）。
+  - **D5 stage 2 输入边界 + guard + 直查（R3+R4+R10-修复）**：D5 上下文，stage 5 lesson 候选带 `failure_cause_node_id` 但 `stage_index=5` → **不**进 stage 2（仅 semantic 3/4 + linked FMEA 直查触发）；且 stage 2 标 `skipped`（非 done(0)），不调 expand。**R10-修复**：D5 embedding 不可用（stage 3 skipped）+ linked FMEA 有 D4 关键词匹配的 FailureCause → stage 2 **done**（`_lookup_linked_fmea_causes` 命中，扩展出 control，不因 semantic skip 丢 FMEA 控制措施）；D5 无 linked FMEA 且 semantic 无 cause → stage 2 skipped。
+  - **LLM 审计结构化 + 失败隔离 + 全失败也审计 + 全失败显 error + 全失败保留 fused（R3+R4+R5+R6+R7+R11-修复）**：mock `LLMFusionLayer.enrich` 抛错 → stage 11 `error` + `llm_attempted=0` → `_maybe_write_llm_audit` 不写 `llm_recommend` audit，响应 12 阶段 + items 非空 + 无 500；mock enrich 成功 → audit 读结构化 `llm_attempted/succeeded/failed`（不解析 summary 字符串）；mock `_maybe_write_llm_audit` 内部异常 → 仍不破坏响应（try/except 兜底）；**mock enrich 全失败（`LLMOutcome(attempted=2, succeeded=0, failed=2, candidates=[])`，不抛）→ stage 11 `error`（不绿，R6）+ audit 写 `status="llm_failed"`（R5）+ **stage 12 发射原 fused（非空，R11-修复：不因 outcome.candidates 空丢确定性推荐）**。
+  - **should_skip 强制 + callable + async + per-stage（R4+R5+R6+R10-修复）**：mock 某新源缺 should_skip / 非 callable（设成属性）/ 非 async → 该 stage `error`（不阻断整请求，其余 stage + 12 阶段响应照常，**不**在构造时 raise）；`validate_all_new_sources()` lint 返回违规列表（启动/CI 用，非请求路径）。
 - `backend/tests/recommendation/test_sources_spc.py` / `test_sources_iqc.py` / `test_sources_supplier.py` / `test_sources_mes.py` / `test_sources_same_type.py` / `test_sources_lessons.py`：每源 `retrieve` 返回结构 + `should_skip`（无数据返 reason、有数据返 None）+ factory_id 隔离 + 空 vs 有数据。
 - `backend/tests/recommendation/test_lessons_extraction.py`：
   - `advance_capa` D7→D8 抽取 **d7_prevention** lessons（`source_d_step='d7'`）+ enqueue_embedding + `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d7")`）；**抽取异常 → fail-closed 阻断转换 400（D8 不推进、状态仍 D7、无 TRANSITION audit），重试 advance 重新抽取后再推进（R7+R9-修复，单源合约）**。
@@ -598,12 +679,14 @@ D8_CLOSURE 是终态（无 D9 转换），`d8_closure` 文本在 D8 期间可编
   - D7 无推荐（canonical scope 下真无：无关联 FMEA 且 PL 无 FMEA）→ 闸口平凡通过，200 推进。
   - **degraded-empty 健康检查（R7+R8-修复）**：① CAPA 有 `fmea_ref_id` 但 fmea_docs preload 降级未含该 FMEA → fail-closed 400 "关联 FMEA 未加载"；② **CAPA 无 `fmea_ref_id`，PL 有 FMEA（canonical count>0），但 preload 返回空（降级）→ fail-closed 400 "PL FMEA 未加载"（R8-修复：D7 推荐可来自 PL keyword 匹配，不仅 linked fmea_ref_id）**；③ PL 真 0 FMEA + 无 fmea_ref_id → 真无推荐，200 通过。
   - **capa_id 限定（R8-修复）**：CAPA-A 与 CAPA-B 共用同 FMEA key（fmea_id+fm+cause），CAPA-B 有该 key 的 `CapaD7NodeAction`，CAPA-A 无 → CAPA-A 闸口**仍 400**（查询 `WHERE capa_id=CAPA-A.report_id`，他 CAPA 动作不满足本 CAPA 闸口）。
+  - **partial preload（R9-修复）**：PL 有 3 个 FMEA（canonical count=3），但 fmea_docs 只加载 2 个（partial preload），D7 重算返回 2 条推荐（已加载子集）→ 闸口 **completeness check 在生成前跑**：loaded(2) ≠ canonical(3) → fail-closed 400 "FMEA 预加载不完整"（不验证已加载 2 条子集而漏第 3 个 FMEA 的未处置推荐）。
+  - **stale 处置（R10-修复）**：CAPA 有 D7 推荐 key K（fm_name="虚焊"），用户 confirmed（动作存 `recommendation_hash=hash("虚焊|...|...")`）；之后 FMEA 节点改名 fm_name="虚焊2" → 闸口重算当前推荐 hash ≠ 动作 hash → key K 视为 stale/未处置 → 400 "已 stale（FMEA 变更）"，强制重新处置；既有 Spec A 动作（hash NULL）→ 视为 stale → 需重新处置。
   - `failure_cause_node_id` 为 NULL 的推荐 key 与 `capa_d7_node_action` 同 NULL key 匹配（COALESCE 收口）。
   - 直接 `POST /api/capa/{id}/advance`（空 body）无 D7 动作 → 400（不可绕过 UI）。
   - **canonical scope（R2+R5-修复 over-block）**：CAPA 属 PL-A，工厂另有 PL-B 的 D7 推荐 → 闸口只看 PL-A 推荐（`capa.factory_id AND product_line_code=PL-A`），**PL-B 未处置不阻塞 PL-A CAPA 关闭**；推进用户 `allowed_pls` 窄于 PL-A 时（用户只能看 PL-A 的子集）闸口仍看 PL-A 全部 D7 推荐，未处置 → 400。两 PL 测试断言无关 PL 不阻塞。
   - **fail-closed（R2-修复 subset）**：重算 D7 推荐异常（fmea_docs load 失败 / `get_d7_recommendations` 抛错）→ `ValueError("D7 推荐重算失败")` → 400（不误判"无推荐"放行）。
 - `backend/tests/recommendation/test_adopt_stage_index.py`：`adopt_recommendation` 透传 `stage_index` 到 `capa_ai_adoption`（Spec A 列非 None）。
-- 既有 `test_capa_recommendation.py` / `test_d7_recommendations.py` / `test_hybrid_recommendation_pipeline.py`：响应加 `stages` 字段后断言不破（既有断言查 `items`/`existing_controls`，不拒新字段）。
+- 既有 `test_capa_recommendation.py` / `test_d7_recommendations.py` / `test_hybrid_recommendation_pipeline.py`：响应加 `stages` 字段后断言不破（既有断言查 `items`/`existing_controls`，不拒新字段）；**新增 D5 形状断言（R9-修复）**：D5 响应仍是 `{stages, existing_controls, general_suggestions}`（非 `{stages, items}`），`existing_controls` 用 `to_d5_control_schema`、`general_suggestions` 用 `to_d5_suggestion_schema`（不被 `to_d4_schema` 覆盖），各含 `stage_index`。
 
 ### 前端 vitest
 
@@ -617,25 +700,25 @@ D8_CLOSURE 是终态（无 D9 转换），`d8_closure` 文本在 D8 期间可编
 ## 验收
 
 - `RecommendationOrchestrator` 把现有 4 D4 源 + 3 D5 源 + 6 新源组织成 12 阶段，返回 `{stages, items}`；每阶段 `status/hit_count/summary/error` 正确；skipped 注明原因；error 不阻断后续（R-决策 5）。
-- **响应 `stages` 恰好 12 行、`index` 集合 = {1..12} 无重复，stage 12 单次发射**（R1-决策 16）；**D5 stage 2 FMEAControlExpander 在 stage 3/4 召回 cause 后派生产出，control 的 `stage_index=2`，不再因执行序丢失 D5 控制**（R1-决策 15）。
+- **响应 `stages` 恰好 12 行、`index` 集合 = {1..12} 无重复，stage 12 单次发射**（R1-决策 16）；**D5 stage 2 FMEAControlExpander 消费 stage 3/4 semantic ∪ linked FMEA 直查 causes（R10-修复：embedding 不可用时仍扩展 FMEA 控制措施），control 的 `stage_index=2`**（R1-决策 15）。
 - D4/D5 API 响应含 `stages`，`items`/controls/suggestions 每项含 `stage_index`（R-决策 3）。
 - `AdoptRequest` 加 `stage_index`，`adopt_recommendation` 透传入库（Spec A 决策 1 兑现，R-决策 4）。
 - 6 新源各 `retrieve` 返回 `RecommendationCandidate`，`match_source` 按决策 7 表；无数据 `should_skip` 返回 reason，编排器标 skipped（R-决策 6）。
 - `capa_lessons_learned` 表通过 Alembic 迁移建出（含 `ix_capa_lessons_unique` 唯一索引）；**D7→D8 抽 d7_prevention lessons，d8_closure 更新时抽 d8 lessons**（R2-修复按生命周期拆分）；enqueue_embedding + audit；**抽取异常 fail-closed 阻断转换/保存 400（KB==CAPA，R7+R9-修复，不残留 stale）**（R-决策 10）。
 - **lesson 抽取幂等：d7 lessons 用确定性 uuid5 upsert（同 CAPA 重试/双击/并发 advance → 不新增行、不重复入队 embedding、audit `correlation_id` 相同；`SELECT FOR UPDATE` 串行化并发 advance）；d8 lessons 用 delete-and-rebuild（编辑后旧行删除，不残留）**（R1-决策 17 + R3-修复 stale）。
-- **D7→D8 闭环闸口：转换前用 canonical CAPA 相关 scope（`capa.factory_id` + `capa.product_line_code`）重算 D7 推荐，要求每个 key 有**当前 `capa_id` 限定**的 `CapaD7NodeAction`（R8-修复：防他 CAPA 同 key 动作误满足）；未处置 → 400 早返回；重算异常 → fail-closed 400；**degraded-empty 健康检查（R7+R8-修复）：关联 FMEA 缺失 或 PL 有 FMEA 但 preload 空 → fail-closed 400，不因降级空集误判"无推荐"放行**；直接 `POST /advance` 不可绕过；真无推荐（PL 0 FMEA + 无 linked）平凡通过**（R2+R5+R7+R8-决策 18）。
+- **D7→D8 闭环闸口：转换前用 canonical CAPA 相关 scope（`capa.factory_id` + `capa.product_line_code`）重算 D7 推荐，要求每个 key 有**当前 `capa_id` 限定 + `recommendation_hash` 匹配**的 `CapaD7NodeAction`（R8+R10-修复：防他 CAPA 同 key 动作 + 防 FMEA 改名 stale 处置）；未处置/stale → 400 早返回；重算异常 → fail-closed 400；**completeness-before-generation（R9-修复）：partial preload / 关联 FMEA 缺失 / PL 有 FMEA 但 preload 空 → fail-closed 400**；直接 `POST /advance` 不可绕过；真无推荐（PL 0 FMEA + 无 linked）平凡通过**（R2+R5+R7+R8+R9+R10-决策 18）。
 - **执行顺序 recall → fusion → LLM（LLM 吃 fused 不吃 raw），与既有 `HybridRecommendationPipeline` 合约一致**（R2-修复）；`LLMFusionLayer.enrich` 收到 `FusionEngine.merge` 输出，非 raw 召回集。
 - **no-data vs done(0) 区分：新源 `should_skip` 返回 reason → skipped；`should_skip` None + retrieve [] → done(0)；测试覆盖两路径**（R2-修复）。
 - **选择器合约：DAG 节点 `rec-dag-stage-{index}`、项徽标 `rec-item-stage-{index}`，index 1..12 与 `StageRun.index` 对齐**（R2-修复冲突）。
 - **lessons 抽取 fail-closed + savepoint 原子 + embedding 清理 + in-flight 防race（R3+R4+R7+R8+R9-修复）**：D7→D8 仅抽 d7_prevention（upsert），d8_closure 更新时 delete-and-rebuild（savepoint）；**任一抽取失败 → 阻断转换/保存 400（KB==CAPA，无 dirty/读路径副作用）**；d8 delete-and-rebuild **同步清理孤儿 `document_embeddings` + claim-safe 取消 pending outbox（R8+R9）**；**embedding worker upsert 前重查 lesson 行存在，in-flight job 行已删则丢弃（R9-修复防 stale 写入）**；重复 normalized_text 去重；`LessonsLearnedSource` JOIN 双保险。
-- **LLM 失败隔离 + 审计结构化 + 全失败也审计 + 全失败显 error（R3+R4+R5+R6-修复）**：`LLMFusionLayer.enrich` 硬化 catch-all 不抛——provider 全失败 → `attempted>0, succeeded=0` → stage 11 **`error`（不绿，DAG 显红，R6-修复）** + audit 写 `status="llm_failed"`（**全失败也审计，不隐藏 LLM 用量，R5-修复**），仍返回 fused 候选；仅意外非 LLM 错误才抛 → stage 11 `error` + `llm_attempted=0` + 未修改 fused，stage 12 照常发射，`run()` 不抛；审计读结构化字段（不解析 summary），审计层 try/except 兜底，**审计不破坏响应**。
+- **LLM 失败隔离 + 审计结构化 + 全失败也审计 + 全失败显 error + 全失败保留 fused（R3+R4+R5+R6+R11-修复）**：`LLMFusionLayer.enrich` 硬化 catch-all 不抛——provider 全失败 → `attempted>0, succeeded=0` → stage 11 **`error`（不绿，DAG 显红，R6-修复）** + audit 写 `status="llm_failed"`（**全失败也审计，不隐藏 LLM 用量，R5-修复**），**`_exec_llm_stage` 返回原 fused（非空，R11-修复：不因 `outcome.candidates` 空丢确定性推荐）**，stage 12 发射 fused；仅意外非 LLM 错误才抛 → stage 11 `error` + `llm_attempted=0` + 未修改 fused，stage 12 照常发射，`run()` 不抛；审计读结构化字段（不解析 summary），审计层 try/except 兜底，**审计不破坏响应**。
 - **D5 stage 2 输入边界 + guard（R3+R4-修复）**：先算 `cause_cands`（stage_index in {3,4}）再分支——空则 `skipped`（不调 expand 误报 done(0)），非 stage 3/4 的 cause 不触发。
-- **should_skip 强制 + callable + async（R4+R5+R6-修复）**：构造时 `_validate_new_source_protocol` 校验 6 新源**存在**、`should_skip` **可调用**且 **`iscoroutinefunction`**（async），缺失/非 callable/非 async → `TypeError` fail-fast；编排器 `await should_skip(context)`（async DB 查存在性，不误判 coroutine truthy，R6-修复）。
+- **should_skip 强制 + callable + async + per-stage（R4+R5+R6+R10-修复）**：6 新源 `should_skip` 必须存在、可调用、`iscoroutinefunction`（async）；**协议校验 per-stage 运行时**——`_exec_recall_stage` 调 `_check_source_protocol`，违规 → 该 stage `error`（不阻断构造/整请求，其余 stage + 12 阶段响应照常）；启动/CI 跑 `validate_all_new_sources()` lint；编排器 `await should_skip(context)`（async DB 查存在性，不误判 coroutine truthy）。
 - **skip/done(0) 合约一致（R3-修复）**：6 新源强制 `should_skip`（数据存在性），既有源结构性前置（embedding/linked_fmea/pc None）由编排器 `_stage_precondition` 集中，唯一规则——`should_skip`/`_stage_precondition` 返回 reason → skipped；None + retrieve [] → done(0)；非空 → done(N)。
 - `SameTypeProductKBSource` 跨工厂同类型检索受 `user_product_lines` 收口；`capa_eightd` 无 supplier_id 时 `SupplierHistorySource` 经 IQC/SCAR 取供应商（R-决策 11/13）。
 - `<RecommendationDAG>` 12 节点 + 状态色 + 命中数 + `data-e2e="rec-dag-stage-{index}"` + `data-status`；D4/D5 RecPanel 每项 `rec-source-{source}` + `rec-item-stage-{index}` Tag（R-决策 8/9）。
 - 无 LLM 凭证时阶段 11 skipped + 核心闭环照跑（故事验收"无 LLM 凭证时 AI 步骤跳过+告警"）。
-- 后端新增 pytest 全绿（含 R1~R7 各项 + R8 四项回归：lessons 生命周期单源(D7-only/d8-update) / D7 闸口 capa_id 限定 / degraded-empty PL-FMEA-count 健康检查 / d8 embedding 清理）；既有推荐/D7/capa 测试不退化；前端 vitest + `tsc --noEmit` + `npm run build` 绿；`make check` 绿。
+- 后端新增 pytest 全绿（含 R1~R9 各项 + R10 三项回归：D5 stage 2 linked-FMEA 直查不依赖 embedding / 源协议 per-stage error 不阻断整请求 / D7 闸口 recommendation_hash 防 stale 处置）；既有推荐/D7/capa 测试不退化；前端 vitest + `tsc --noEmit` + `npm run build` 绿；`make check` 绿。
 - `docs/` 同步：本 spec + `PROGRESS.md` 缺口清单 P0-2/P0-3/P1-5~10 勾选。
 
 ## 参考
