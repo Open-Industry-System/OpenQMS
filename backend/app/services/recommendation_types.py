@@ -1,7 +1,23 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+
+@dataclass
+class StageRun:
+    """单阶段执行记录（供 orchestrator 追踪 12 阶段流水线）。"""
+    index: int
+    name: str
+    source: str
+    status: Literal["pending", "running", "done", "skipped", "error"]
+    hit_count: int = 0
+    summary: str = ""
+    error: str | None = None
+    llm_attempted: int | None = None
+    llm_succeeded: int | None = None
+    llm_failed: int | None = None
 
 
 @dataclass
@@ -10,6 +26,7 @@ class RecommendationContext:
     capa_data: dict[str, Any]
     user_product_lines: list[str] | None  # None = admin 全权限
     stage: Literal["d4", "d5"]
+    factory_id: uuid.UUID | None = None   # R1-修复：源查询按 factory_id 隔离，防跨工厂同 PL 串读
     # 预加载的共享数据（避免每个 Source 重复查库）
     fmea_docs: list[dict[str, Any]] | None = None
     linked_fmea: dict[str, Any] | None = None
@@ -40,6 +57,7 @@ class RecommendationCandidate:
             "match_reason": self.match_reason,
             "related_d2_keywords": self.metadata.get("related_d2_keywords", []),
             "confidence": round(self.confidence, 2),
+            "stage_index": self.metadata.get("stage_index"),
         }
         # 历史 CAPA 来源字段（可选）
         if self.source == "historical_capa":
@@ -63,6 +81,7 @@ class RecommendationCandidate:
                 "match_reason": self.match_reason,
                 "fmea_id": self.metadata.get("fmea_id"),
                 "fmea_document_no": self.metadata.get("fmea_document_no"),
+                "stage_index": self.metadata.get("stage_index"),
             }
         return None
 
@@ -74,6 +93,7 @@ class RecommendationCandidate:
             "confidence": round(self.confidence, 2),
             "match_reason": self.match_reason,
             "match_source": "rule" if self.source in ("rule_engine", "rule_engine_measure") else self.source,
+            "stage_index": self.metadata.get("stage_index"),
         }
         if self.source == "historical_capa":
             result["source_capa_id"] = self.metadata.get("historical_capa_id")
@@ -85,3 +105,4 @@ class RecommendationCandidate:
 class RecommendationResult:
     """管道输出。"""
     items: list[RecommendationCandidate]
+    stages: list[StageRun] = field(default_factory=list)

@@ -3,6 +3,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
+from app.schemas.recommendation_stage import StageRunSchema
+
 
 class CAPACreate(BaseModel):
     title: str
@@ -96,10 +98,12 @@ class D4Recommendation(BaseModel):
     source_capa_id: str | None = None
     source_capa_document_no: str | None = None
     source_product_line_code: str | None = None
+    stage_index: int | None = None
 
 
 class D4RecommendationResponse(BaseModel):
     items: list[D4Recommendation]
+    stages: list[StageRunSchema] = []
 
 
 class D5ExistingControl(BaseModel):
@@ -114,6 +118,7 @@ class D5ExistingControl(BaseModel):
     match_reason: str
     fmea_id: str | None = None
     fmea_document_no: str | None = None
+    stage_index: int | None = None
 
 
 class D5GeneralSuggestion(BaseModel):
@@ -126,11 +131,13 @@ class D5GeneralSuggestion(BaseModel):
     match_source: str | None = None
     source_capa_id: str | None = None
     source_capa_document_no: str | None = None
+    stage_index: int | None = None
 
 
 class D5RecommendationResponse(BaseModel):
     existing_controls: list[D5ExistingControl]
     general_suggestions: list[D5GeneralSuggestion]
+    stages: list[StageRunSchema] = []
 
 
 class AdvanceRequest(BaseModel):
