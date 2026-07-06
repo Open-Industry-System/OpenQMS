@@ -189,6 +189,45 @@ async def test_worker_processes_fmea_node_factory_id(vector_db, default_factory,
     assert de.factory_id == default_factory.id
 
 
+# ── mark_failed error path (regression: events must not be left in processing) ──
+
+
+@pytest.mark.asyncio
+async def test_worker_mark_failed_on_embed_error(vector_db, default_factory, admin_user):
+    db, dim = vector_db
+    capa = CAPAEightD(
+        report_id=uuid.uuid4(),
+        document_no=f"8D-FAIL-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        created_by=admin_user.user_id,
+        status="D8_CLOSURE",
+        d7_prevention="预防内容",
+    )
+    db.add(capa)
+    await db.flush()
+    await _seed_outbox(db, "capa", capa.report_id, factory_id=default_factory.id)
+
+    class _FailingProvider(_FakeProvider):
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("embed failed")
+
+    provider = _FailingProvider(dimensions=dim)
+    await process_batch_once(db, provider)
+
+    row = await db.execute(
+        text("SELECT status, retry_count, last_error FROM embedding_sync_outbox WHERE entity_id = :eid"),
+        {"eid": capa.report_id},
+    )
+    event = row.fetchone()
+    assert event is not None
+    assert event[0] != "processing"
+    assert event[1] == 1
+    assert event[2] is not None
+    assert "embed failed" in event[2]
+
+
 # ── R18: capa 通用路径回归 ────────────────────────────────────────────────
 
 

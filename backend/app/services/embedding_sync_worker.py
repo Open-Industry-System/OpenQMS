@@ -292,10 +292,10 @@ async def mark_failed(db: AsyncSession, event_id: str, error: str, retry_count: 
 
 
 async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
-    """Claim one batch, embed, upsert, mark completed. Raises on error.
+    """Claim one batch, embed, upsert, mark completed. Handles errors internally.
 
     Extracted from run_worker() so tests can drive a single round without the loop.
-    Returns the claimed events (or None if no pending events).
+    Returns the claimed events (or None if no pending events / on error).
     """
     events = await claim_batch(db, BATCH_SIZE)
     if not events:
@@ -303,20 +303,32 @@ async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
 
     logger.info(f"Processing {len(events)} embedding events")
 
-    chunks = await fetch_chunks(db, events)
-    if not chunks:
+    try:
+        chunks = await fetch_chunks(db, events)
+        if not chunks:
+            await mark_completed(db, [str(e["id"]) for e in events])
+            return events
+
+        # Batch embed all chunks in a single API call
+        texts = [c["chunk_text"] for c in chunks]
+        vectors = await provider.embed(texts)
+
+        await upsert_embeddings(db, chunks, vectors, provider.model_name)
         await mark_completed(db, [str(e["id"]) for e in events])
+
+        logger.info(f"Embedded {len(chunks)} chunks from {len(events)} events")
         return events
-
-    # Batch embed all chunks in a single API call
-    texts = [c["chunk_text"] for c in chunks]
-    vectors = await provider.embed(texts)
-
-    await upsert_embeddings(db, chunks, vectors, provider.model_name)
-    await mark_completed(db, [str(e["id"]) for e in events])
-
-    logger.info(f"Embedded {len(chunks)} chunks from {len(events)} events")
-    return events
+    except Exception as e:
+        logger.error(f"Batch error: {e}", exc_info=True)
+        for event in events:
+            try:
+                await mark_failed(
+                    db, str(event["id"]), str(e),
+                    event.get("retry_count", 0), event.get("max_attempts", 5)
+                )
+            except Exception:
+                pass
+        return None
 
 
 async def run_worker():
@@ -359,7 +371,6 @@ async def run_worker():
     signal.signal(signal.SIGTERM, shutdown)
 
     while running:
-        events: list[dict] | None = None
         try:
             async with get_tenant_aware_session() as db:
                 # Recover events stuck in processing from prior crashes
@@ -370,16 +381,6 @@ async def run_worker():
 
         except Exception as e:
             logger.error(f"Worker error: {e}", exc_info=True)
-            if events:
-                async with get_tenant_aware_session() as db:
-                    for event in events:
-                        try:
-                            await mark_failed(
-                                db, str(event["id"]), str(e),
-                                event.get("retry_count", 0), event.get("max_attempts", 5)
-                            )
-                        except Exception:
-                            pass
             await asyncio.sleep(POLL_INTERVAL)
 
     if hasattr(provider, "aclose"):
