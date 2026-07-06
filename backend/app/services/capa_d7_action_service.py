@@ -136,7 +136,12 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         if existing.action == "auto_filled":
             raise ValueError("已自动回填，不可改判")
         if existing.action == req.action and (existing.reason or None) == (req.reason or None):
-            return existing   # 幂等：同 action + reason 不变
+            # 幂等：同 action + reason 不变，但仍刷新 recommendation_hash——
+            # 若 FMEA 节点改名/推荐内容变，重新确认应让 hash 与当前 rec 保持一致，避免 stale 锁死。
+            existing.recommendation_hash = rec_hash
+            await db.commit()
+            await db.refresh(existing)
+            return existing
         old_action = existing.action
         old_reason = existing.reason
         existing.action = req.action

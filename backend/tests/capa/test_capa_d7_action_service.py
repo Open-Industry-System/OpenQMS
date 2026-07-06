@@ -74,6 +74,51 @@ async def test_record_idempotent_same_action_and_reason(db, default_factory, adm
 
 
 @pytest.mark.asyncio
+async def test_record_d7_action_idempotent_refreshes_hash(db, default_factory, admin_user):
+    # 幂等 re-confirm 应刷新 recommendation_hash，避免 FMEA 节点改名后 stale 锁死。
+    from app.services.capa_d7_action_service import _compute_current_d7_recs, _find_rec, _hash_for_rec
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _link_capa_fmea(db, capa, fmea)
+    req = D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea.fmea_id,
+        failure_mode_node_id="fm-1", failure_cause_node_id="c-1",
+        match_source="linked",
+    )
+    action = await record_d7_action(db, capa, req, admin_user)
+    rec1 = _find_rec(
+        await _compute_current_d7_recs(db, capa),
+        fmea_id=fmea.fmea_id,
+        failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1",
+    )
+    h1 = _hash_for_rec(rec1)
+    assert action.recommendation_hash == h1
+
+    # 改名 FailureMode → 当前 rec hash 变 (H2)
+    graph = copy.deepcopy(fmea.graph_data)
+    for n in graph["nodes"]:
+        if n["id"] == "fm-1":
+            n["name"] = "虚焊（已改名）"
+    fmea.graph_data = graph
+    await db.flush()
+
+    rec2 = _find_rec(
+        await _compute_current_d7_recs(db, capa),
+        fmea_id=fmea.fmea_id,
+        failure_mode_node_id="fm-1",
+        failure_cause_node_id="c-1",
+    )
+    h2 = _hash_for_rec(rec2)
+    assert h2 != h1
+
+    # 同 action + reason 重新确认：走 idempotent 分支，hash 应刷新为 H2
+    refreshed = await record_d7_action(db, capa, req, admin_user)
+    assert refreshed.action_id == action.action_id
+    assert refreshed.recommendation_hash == h2
+
+
+@pytest.mark.asyncio
 async def test_record_change_action_writes_changed_audit(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
