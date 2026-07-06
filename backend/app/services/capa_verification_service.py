@@ -25,6 +25,11 @@ async def _find_existing_adoption(db: AsyncSession, capa, req: AdoptRequest):
 
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     field = FIELD_MAP[req.d_step]
+    # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
+    # 若不归一化，pre-query 的 IS NULL 查不到刚插的 JSON null 行，重试会撞 unique index 后 re-raise 500。
+    # 统一成 {} 后 insert 与 pre-query 用同一表示，幂等正确。
+    if req.item_ref is None:
+        req = req.model_copy(update={"item_ref": {}})
     # 幂等：重复采纳（双击/重试/代理重发）直接返回既有 adoption，不重复追加 d-step 文本、不重复 audit
     existing = await _find_existing_adoption(db, capa, req)
     if existing is not None:

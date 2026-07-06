@@ -80,6 +80,16 @@ async def test_adopt_idempotent_same_payload_no_duplicate(db, default_factory, a
 
 
 @pytest.mark.asyncio
+async def test_adopt_idempotent_with_omitted_item_ref(db, default_factory, admin_user):
+    # item_ref 省略 (None) 时，重复采纳应幂等返回既有，不 IntegrityError/500
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4="rc")
+    req = AdoptRequest(d_step="d4", adopted_text="根因B", source="rule")  # item_ref defaults None
+    first, _ = await adopt_recommendation(db, capa, req, admin_user)
+    second, _ = await adopt_recommendation(db, capa, req, admin_user)
+    assert second.adoption_id == first.adoption_id
+
+
+@pytest.mark.asyncio
 async def test_adopt_different_item_ref_not_deduped(db, default_factory, admin_user):
     # 不同 item_ref（不同推荐）应各落一条，不被幂等去重误杀
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4=None)

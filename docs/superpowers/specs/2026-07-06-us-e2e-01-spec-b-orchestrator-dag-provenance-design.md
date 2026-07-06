@@ -35,14 +35,14 @@ Stage 5 llm_recommend 审计（attempted>0 时）
 ### 本 spec 交付
 
 1. **P0-2 12 阶段推荐编排器** — 新 `RecommendationOrchestrator` 把现有 sources + 6 类新源组织成 12 阶段执行图，返回 `{stages: [...], items: [...]}`，每阶段带 `status/hit_count/summary/error`。
-2. **P0-2 DAG 可视化面板** — 前端新 `<RecommendationDAG>` 组件，12 节点 + 状态色 + 命中数徽标 + `data-e2e="rec-stage-{n}"`。
+2. **P0-2 DAG 可视化面板** — 前端新 `<RecommendationDAG>` 组件，12 节点 + 状态色 + 命中数徽标 + `data-e2e="rec-dag-stage-{index}"`。
 3. **P0-3 provenance UI + testid** — 每条推荐 `<Tag data-e2e="rec-source-{source}">` + 阶段命中徽标；payload 加 `stage_index`。
 4. **P1-5~10 六类新推荐源** — `SPCAnomalySource` / `IQCSource` / `SupplierHistorySource` / `MESSource` / `SameTypeProductKBSource` / 结构化 `LessonsLearnedSource`（含新表 `capa_lessons_learned`）。
 5. **采纳 `stage_index` 透传闭环** — Spec A 留的口子：编排器返回 `stage_index` → 前端采纳回传 → `AdoptRequest` 扩字段 → `adopt_recommendation` 透传入库。
 
 ### 不在本 spec 范围
 
-- 故事级 E2E spec `capa-story-closed-loop.spec.ts`（P2-11，Spec C）—— 但本 spec 的 `data-e2e="rec-stage-{n}"` / `rec-source-{source}` 选择器是 Spec C 断言的依赖
+- 故事级 E2E spec `capa-story-closed-loop.spec.ts`（P2-11，Spec C）—— 但本 spec 的 `data-e2e="rec-dag-stage-{index}"` / `rec-item-stage-{index}` / `rec-source-{source}` 选择器是 Spec C 断言的依赖
 - D7 推荐管线改造（D7 走独立纯函数，非 12 阶段；D7 的 confirm/skip/auto-fill 审计已在 Spec A 落地）
 - AI 推荐准确率/排序质量评测（故事明确排除）
 - 真实 MES 集成（本 spec 用已持久化的 mock MES 数据；真实连接器已有，数据写入路径已通）
@@ -81,11 +81,14 @@ Stage 5 llm_recommend 审计（attempted>0 时）
 | 10 规则启发 | `rule_engine` | `rule` | `{}` |
 | 11 LLM 融合 | `llm` | `llm` | `{}` |
 
-8. **DAG 组件独立、D4/D5 共用**：`<RecommendationDAG stages={stages} />` 放在 `D4RecPanel` / `D5RecPanel` 的 `<Card>` 顶部（推荐列表上方）。12 节点用 Ant `Steps`（垂直方向，`size="small"`）或自定义 grid 渲染；每节点：名称 + 来源 Tag + 状态色（done=green/skipped=orange/error=red/running=blue/pending=default）+ 命中数 Badge。`data-e2e="rec-stage-{n}"` + `data-status="{status}"` 供 Spec C E2E 断言。无 LLM 凭证时阶段 11 `skipped`。
+8. **DAG 组件独立、D4/D5 共用**：`<RecommendationDAG stages={stages} />` 放在 `D4RecPanel` / `D5RecPanel` 的 `<Card>` 顶部（推荐列表上方）。12 节点用 Ant `Steps`（垂直方向，`size="small"`）或自定义 grid 渲染；每节点：名称 + 来源 Tag + 状态色（done=green/skipped=orange/error=red/running=blue/pending=default）+ 命中数 Badge。`data-e2e="rec-dag-stage-{index}"` + `data-status="{status}"` 供 Spec C E2E 断言。无 LLM 凭证时阶段 11 `skipped`。
 
-9. **provenance Tag per item**：D4/D5 RecPanel 的每个推荐项加 `<Tag data-e2e="rec-source-{match_source}">{来源标签}</Tag>` + `<Tag data-e2e="rec-stage-{stage_index}">阶段{stage_index}</Tag>`。D4 现有按 `match_source` 分组保留（分组标题 + 每项 provenance Tag 并存）。`rec-source-*` 与 `rec-stage-*` 是 Spec C 故事 spec 的断言钩子。
+9. **provenance Tag per item**：D4/D5 RecPanel 的每个推荐项加 `<Tag data-e2e="rec-source-{match_source}">{来源标签}</Tag>` + `<Tag data-e2e="rec-item-stage-{stage_index}">阶段{stage_index}</Tag>`。D4 现有按 `match_source` 分组保留（分组标题 + 每项 provenance Tag 并存）。`rec-source-*` 与 `rec-item-stage-*`（项徽标）/ `rec-dag-stage-*`（DAG 节点）是 Spec C 故事 spec 的断言钩子（R2-修复：前缀区分 DAG 节点 vs 项徽标）。
 
-10. **P1-10 经验教训结构化 = 新表 + 闭合钩子**：新表 `capa_lessons_learned`（`lesson_id, capa_id, factory_id, lesson_text, category, tags(JSONB), source_d_step, created_at`），在 `advance_capa` D7→D8_CLOSURE 转换时从 `d7_prevention` / `d8_closure` 抽取结构化 lesson 行（一句预防/一条经验 → 一行）。`LessonsLearnedSource`（阶段 5）用 pgvector 语义匹配 `lesson_text` 而非裸 D2→D2（`HistoricalCAPASource` 仍保留作 fallback，阶段 5 优先 lessons，无结果时 orchestrator 不降级到 historical，保持阶段边界清晰）。闭合钩子复用 `advance_capa` 既有事务，单 commit。
+10. **P1-10 经验教训结构化 = 新表 + 按生命周期拆分抽取（R2-修复 D8 lessons 丢失）**：新表 `capa_lessons_learned`（`lesson_id, capa_id, factory_id, lesson_text, category, tags(JSONB), source_d_step, created_at`）。**抽取按生命周期点拆分**（Codex R2 发现：D7→D8 转换是**进入** D8 而非完成 D8，此时 `d8_closure` 为空/未填，单点抽取会永久丢失 D8 闭环 lessons）：
+   - **D7 prevention lessons**：在 `advance_capa` D7→D8_CLOSURE 转换时从 `d7_prevention` 抽取（`source_d_step='d7'`）——d7_prevention 在 D7 已定稿。
+   - **D8 closure lessons**：在 `d8_closure` 字段更新时抽取（`source_d_step='d8'`）——D8_CLOSURE 是终态（无 D9 转换），d8_closure 在 D8 期间填写，故在 CAPA 更新路径（`update_capa` / advance 时 d8_closure 字段变更）触发幂等抽取。每次保存重抽（upsert），最终 d8_closure 文本必被捕获。
+   `LessonsLearnedSource`（阶段 5）用 pgvector 语义匹配 `lesson_text` 而非裸 D2→D2（`HistoricalCAPASource` 仍保留作 fallback，阶段 5 优先 lessons，无结果时 orchestrator 不降级到 historical，保持阶段边界清晰）。两处抽取均复用 `advance_capa`/`update_capa` 既有事务，单 commit，幂等（决策 17）。
 
 11. **P1-9 同类型产品 KB = 新 Source，不改 SemanticSearchSource**：`SemanticSearchSource` 按 `user_product_lines` 过滤（行级权限语义），改它加 `product_type` 维度会混淆两种 scope。新 `SameTypeProductKBSource` 查 `document_embeddings` JOIN `product_lines` ON `de.product_line_code = pl.code` WHERE `pl.product_type_code = (当前 CAPA 产品线的 product_type)` AND `de.product_line_code != 当前 PL`（跨工厂同类型，排除本产品线避免与阶段 2/3 重复），仍受 `user_product_lines` 行级权限收口（admin 全权限；非 admin 仅在用户可见产品线内匹配同类型）。依赖 `product_lines.product_type_code` 列（实施时确认列名）。
 
@@ -95,7 +98,7 @@ Stage 5 llm_recommend 审计（attempted>0 时）
 
 14. **编排器不引入 SSE/流式**：本 spec 同步执行 12 阶段，API 一次返回全部终态。`running`/`pending` 状态在 DAG 组件预留但 API 响应不出现。流式 SSE 留后续（故事不要求）。
 
-15. **显示顺序 ≠ 执行顺序（R1-修复 D5 stage 2 依赖）**：12 阶段的 `index` 是**显示顺序**（DAG 节点编号 + `rec-stage-{n}` testid 契约），不是执行顺序。`FMEAControlExpander`（D5 stage 2）是**派生阶段**——它不独立 retrieve，而是消费 stage 3（semantic）/ stage 4（same-type）召回的 FailureCause 候选扩展出 Control。编排器分两遍执行：①**召回遍**跑所有独立 retrieve 阶段（1 上下文 / 2 D4=FMEAGraphSource / 3 / 4 / 5 / 6-9 D4 / 10 规则 / 11 LLM），把 cause 候选收入 `all_candidates`；②**派生遍**跑 stage 2 D5（FMEAControlExpander over 已召回 causes），产出 control 候选。每个 `StageRun` 仍按其 `index` 报告（D5 stage 2 的 `StageRun` 在派生遍产出，显示位置不变）。D4 无派生阶段，stage 2 = FMEAGraphSource 在召回遍即完成。**回归测试**：D5 语义召回产 1 cause → stage 2 FMEAControlExpander 扩展出 control，hit_count≥1，control 的 `stage_index=2`。
+15. **显示顺序 ≠ 执行顺序（R1-修复 D5 stage 2 依赖）**：12 阶段的 `index` 是**显示顺序**（DAG 节点编号 + `rec-dag-stage-{index}` testid 契约），不是执行顺序。`FMEAControlExpander`（D5 stage 2）是**派生阶段**——它不独立 retrieve，而是消费 stage 3（semantic）/ stage 4（same-type）召回的 FailureCause 候选扩展出 Control。编排器分两遍执行：①**召回遍**跑所有独立 retrieve 阶段（1 上下文 / 2 D4=FMEAGraphSource / 3 / 4 / 5 / 6-9 D4 / 10 规则 / 11 LLM），把 cause 候选收入 `all_candidates`；②**派生遍**跑 stage 2 D5（FMEAControlExpander over 已召回 causes），产出 control 候选。每个 `StageRun` 仍按其 `index` 报告（D5 stage 2 的 `StageRun` 在派生遍产出，显示位置不变）。D4 无派生阶段，stage 2 = FMEAGraphSource 在召回遍即完成。**回归测试**：D5 语义召回产 1 cause → stage 2 FMEAControlExpander 扩展出 control，hit_count≥1，control 的 `stage_index=2`。
 
 16. **stage 12 终态单次发射（R1-修复重复 output stage）**：`STAGE_PLAN` 含 12 项，但 stage 12（输出推荐列表）标记 `terminal=True`，**编排器主循环跳过 terminal 阶段**——它在 FusionEngine merge 之后单次发射。主循环只处理 stage 1-11（stage 1 internal 上下文、stage 2-10 sources、stage 11 LLM）。主循环结束后：`fused = fusion.merge(all_candidates, context)` → 追加**唯一一个** `StageRun(12, "输出推荐列表", "internal", "done", hit_count=len(fused))`。**禁止**在主循环的 `internal` 分支处理 stage 12 + 循环后再 append（那会产生 13 行/重复 index 12）。**回归测试**：响应 `stages` 恰好 12 行、`index` 集合 = {1..12} 无重复。
 
@@ -122,7 +125,7 @@ Stage 5 llm_recommend 审计（attempted>0 时）
 | 11 | LLM 融合排序 | `LLMFusionLayer`（既有） | both | 无 `pc`（LLM 未配置）→ skipped "未配置 LLM" | 增强后候选数（attempted/succeeded/failed 入 summary） |
 | 12 | 输出推荐列表 | `ProvenanceTagger`（internal，**terminal**） | both | 永不 | hit_count=最终去重后 items 数，summary="输出 N 条带来源推荐" |
 
-注：阶段 6-9 仅 D4（D5 是措施推荐，SPC/MES/IQC/供货是根因线索，D5 用不上）；D5 时这些阶段 `skipped` reason="D5 阶段不适用"。阶段 2 D5 用 `FMEAControlExpander`（基于阶段 3/4 召回的 cause 扩展控制），是**派生阶段**（决策 15）：主循环召回遍先跑 stage 3/4 收 cause，派生遍再跑 stage 2 扩展 control，`StageRun` 仍按 index=2 报告。阶段 12 是 **terminal**（决策 16）：主循环跳过，FusionEngine merge 后单次发射。`index` 是显示顺序（DAG 节点 + `rec-stage-{n}` 契约），非执行顺序。
+注：阶段 6-9 仅 D4（D5 是措施推荐，SPC/MES/IQC/供货是根因线索，D5 用不上）；D5 时这些阶段 `skipped` reason="D5 阶段不适用"。阶段 2 D5 用 `FMEAControlExpander`（基于阶段 3/4 召回的 cause 扩展控制），是**派生阶段**（决策 15）：主循环召回遍先跑 stage 3/4 收 cause，派生遍再跑 stage 2 扩展 control，`StageRun` 仍按 index=2 报告。阶段 12 是 **terminal**（决策 16）：主循环跳过，FusionEngine merge 后单次发射。`index` 是显示顺序（DAG 节点 + `rec-dag-stage-{index}` 契约），非执行顺序。
 
 ## 数据模型
 
@@ -265,16 +268,14 @@ class RecommendationOrchestrator:
         stages: list[StageRun] = []
         all_candidates: list[RecommendationCandidate] = []
 
-        # ── 召回遍：跑所有非 terminal、非 derived 阶段（stage 1, 3-11，及 D4 的 stage 2）──
+        # ── 召回遍：stage 1-10（跳过 11 LLM、12 terminal、D5 stage 2 derived）──
+        # 顺序合约（R2-修复 LLM/融合顺序）：recall → fusion → LLM，与既有管线一致——LLM 吃 fused 集，不吃 raw
         for spec in STAGE_PLAN:
-            if spec.terminal or spec.derived:
-                continue   # stage 12 terminal 暂留；D5 stage 2 derived 留派生遍
-            # D5 时 stage 2 是派生（_D5_DERIVED），跳过召回遍；D4 时 stage 2 = FMEAGraphSource 正常跑
+            if spec.terminal or spec.source_kind == "llm":
+                continue   # stage 12 terminal 留末尾；stage 11 LLM 留 fusion 之后
             if context.stage == "d5" and spec.index in _D5_DERIVED:
-                continue
-            run = await self._exec_recall_stage(spec, context, all_candidates)
-            stages.append(run)
-            # _exec_recall_stage 内部把 candidate.metadata["stage_index"] = spec.index 后 extend all_candidates
+                continue   # D5 stage 2 派生留派生遍
+            stages.append(await self._exec_recall_stage(spec, context, all_candidates))
 
         # ── 派生遍：D5 stage 2 FMEAControlExpander over 已召回 causes（决策 15）──
         if context.stage == "d5" and any(c.metadata.get("failure_cause_node_id") for c in all_candidates):
@@ -294,12 +295,20 @@ class RecommendationOrchestrator:
             stages.append(StageRun(2, "本产品 FMEA 检索", "fmea_graph", "skipped",
                                    summary="D5 无召回 cause，跳过控制扩展"))
 
-        # ── Fusion + terminal stage 12 单次发射（决策 16）──
+        # ── Fusion（既有序：fusion 在 LLM 之前，R2-修复顺序）──
         fused = self.fusion.merge(all_candidates, context)
+
+        # ── Stage 11 LLM enrich over FUSED（不是 raw，保既有合约，R2-修复）──
+        spec11 = next(s for s in STAGE_PLAN if s.index == 11)
+        stage11, enriched = await self._exec_llm_stage(spec11, fused, context)
+        stages.append(stage11)
+        fused = enriched   # LLM 增强后的 fused 集
+
+        # ── Stage 12 terminal 单次发射（决策 16）──
         stages.append(StageRun(12, "输出推荐列表", "internal", "done",
                                hit_count=len(fused), summary=f"输出 {len(fused)} 条带来源推荐"))
 
-        # 按 index 排序，保证显示顺序 1..12（派生遍/召回遍交错不影响最终序）
+        # 按 index 排序，保证显示顺序 1..12
         stages.sort(key=lambda s: s.index)
         return RecommendationResult(items=fused, stages=stages)
 
@@ -312,20 +321,12 @@ class RecommendationOrchestrator:
         if spec.source_kind == "internal":
             return StageRun(spec.index, spec.name, "internal", "done",
                             summary="上下文已采集（D2/D4 + 关联 FMEA + 产品线）")
-        # 3. LLM（stage 11）—— enrich 当前候选，attempted/succeeded/failed 入 summary
-        if spec.source_kind == "llm":
-            if self.pc is None:
-                return StageRun(spec.index, spec.name, "llm", "skipped", summary="未配置 LLM")
-            outcome = await self.llm_layer.enrich(all_candidates, context)
-            all_candidates.clear(); all_candidates.extend(outcome.candidates)
-            for c in all_candidates:
-                c.metadata.setdefault("stage_index", spec.index)
-            return StageRun(spec.index, spec.name, "llm", "done",
-                            hit_count=len(outcome.candidates),
-                            summary=f"attempted={outcome.attempted} succeeded={outcome.succeeded} failed={outcome.failed}")
-        # 4. 普通 source
+        # 3. 普通 source（LLM stage 11 不在此，由 _exec_llm_stage 处理）
         source = self._sources.get(spec.source_kind)
         try:
+            # should_skip 合约（R2-修复 no-data vs done）：新源 MUST 实现 should_skip 查底层数据是否存在；
+            # 返回 reason → skipped（无数据，如产品线无 SPC 图）；返回 None → retrieve，[] 即 done(0)
+            # （有数据但 0 命中），非空即 done(N)。既有源无 should_skip 时编排器据上下文判（如 linked_fmea is None）
             pre_skipped = source.should_skip(context) if hasattr(source, "should_skip") else None
             if pre_skipped:
                 return StageRun(spec.index, spec.name, spec.source_kind, "skipped", summary=pre_skipped)
@@ -338,11 +339,22 @@ class RecommendationOrchestrator:
         except Exception as e:
             logger.warning(f"Stage {spec.index} {spec.name} failed: {e}")
             return StageRun(spec.index, spec.name, spec.source_kind, "error", error=str(e)[:200])
+
+    async def _exec_llm_stage(self, spec, fused, context) -> tuple[StageRun, list[RecommendationCandidate]]:
+        # LLM enrich over FUSED 集（保既有 fusion→LLM 顺序，R2-修复）；返回 (StageRun, 增强后候选)
+        if self.pc is None:
+            return StageRun(spec.index, spec.name, "llm", "skipped", summary="未配置 LLM"), fused
+        outcome = await self.llm_layer.enrich(fused, context)
+        for c in outcome.candidates:
+            c.metadata.setdefault("stage_index", spec.index)
+        return StageRun(spec.index, spec.name, "llm", "done",
+                        hit_count=len(outcome.candidates),
+                        summary=f"attempted={outcome.attempted} succeeded={outcome.succeeded} failed={outcome.failed}"), outcome.candidates
 ```
 
-**关键不变量**（实施时测试断言）：① `stages` 恰好 12 行，`index` 集合 = {1..12} 无重复（决策 16）；② D5 stage 2 的 `StageRun` 在 stage 3/4 召回 cause 后才产出（决策 15），`hit_count` 反映扩展出的 control 数；③ stage 12 只出现一次（terminal，主循环跳过）。`llm_recommend` 审计从 stage 11 summary 的 attempted/succeeded/failed 取值（`HybridRecommendationPipeline` 薄壳在 `run()` 后调 `write_audit_raw`，逻辑保留）。
+**关键不变量**（实施时测试断言）：① `stages` 恰好 12 行，`index` 集合 = {1..12} 无重复（决策 16）；② D5 stage 2 的 `StageRun` 在 stage 3/4 召回 cause 后才产出（决策 15）；③ stage 12 只出现一次（terminal）；④ **执行顺序 recall → fusion → LLM（LLM 吃 fused 不吃 raw），与既有 `HybridRecommendationPipeline` 合约一致（R2-修复）**——测试断言 `LLMFusionLayer.enrich` 收到的候选数 == `FusionEngine.merge` 输出数（非 raw 召回数）；⑤ no-data 源 → skipped（should_skip 返回 reason），0-match → done(0)（should_skip None + retrieve []），测试覆盖两条路径（R2-修复）。`llm_recommend` 审计从 stage 11 summary 的 attempted/succeeded/failed 取值（`HybridRecommendationPipeline` 薄壳在 `run()` 后调 `write_audit_raw`，逻辑保留）。
 
-注：`should_skip(context) -> str | None` 是新 Source 可选协议方法，返回非 None 即 skipped reason（避免"无数据"与"执行成功 0 命中"混淆——前者 skipped，后者 done）。既有 `FMEAGraphSource` 等无此方法，编排器据 `context.linked_fmea is None` 等上下文判 skipped。
+注：`should_skip(context) -> str | None` 是**新 Source 强制协议方法**（R2-修复）：6 类新源各须实现，查底层数据是否存在（如 SPC 查 `spc_alarms` count、IQC 查 `iqc_inspections` 不良 count）。返回非 None → skipped reason；返回 None → retrieve。既有 `FMEAGraphSource`/`SemanticSearchSource`/`HistoricalCAPASource`/`RuleEngineSource` 无此方法，编排器据 `context.linked_fmea is None` / `self.embedding is None` 等上下文判 skipped（既有源不新增 should_skip，避免改既有源）。
 
 ### `HybridRecommendationPipeline` 改为薄壳
 
@@ -401,15 +413,23 @@ class HybridRecommendationPipeline:
 - `match_source=lessons_learned`，`item_ref={source_capa_id, lesson_id, category}`。
 - 依赖：embedding worker 支持 `capa_lesson` 实体（决策 10 依赖）；未支持时降级 FTS `lesson_text`。
 
-### `advance_capa` 闭合钩子（P1-10，决策 17 幂等）
+### `advance_capa` D7→D8 改动（P1-10 lessons 钩子 + 决策 17 幂等 + 决策 18 闸口）
 
 `backend/app/services/capa_service.py:advance_capa` 在 `D7_PREVENTION → D8_CLOSURE` 转换时：
 1. **开头 `SELECT capa ... FOR UPDATE`**（行锁，串行化并发 advance；状态机本身也拒 D8→D8 再转，FOR UPDATE 兜底不确定提交后的重试）。
-2. 转换成功后、commit 前，调 `_extract_lessons(capa) -> list[CapaLessonLearned]`：从 `d7_prevention` / `d8_closure` 切句，逐句构造 `CapaLessonLearned`（`lesson_id = uuid5(NAMESPACE_URL, f"capa_lesson:{capa_id}:{source_d_step}:{normalized_text}")`），用 `pg_insert(...).on_conflict_do_update(index_elements=["lesson_id"], set_={category, tags, updated_at})` upsert，`enqueue_embedding(db, "capa_lesson", lesson_id, ...)` 入队。
-3. 审计 `LESSON_EXTRACTED`（≤20 字符）记 lesson 数，`correlation_id = uuid5(capa_id, "lesson_extract")`（重试产生相同 correlation_id 便于去重查询；audit append-only 可接受，它是转换日志不喂 KB）。
-4. 失败不阻断闭合（lesson 抽取异常 → log warning + skip，D8 仍推进）。
+2. **D7 闭环闸口（决策 18，转换前，R2-修复 canonical scope + fail-closed）**：重算当前 D7 推荐**用 canonical 服务端 scope，不依赖推进用户的 `allowed_pls`**——fmea_docs 按 `capa.factory_id` 加载（工厂隔离），`allowed_pls=None`（不按用户产品线过滤，闸口看 CAPA 所属工厂的全部 D7 推荐）。重算异常 → **fail-closed**：`ValueError("D7 推荐重算失败，不可关闭")` → 400（不因 preload 错误误判"无推荐"而放行）。取每条推荐 key `(fmea_id, failure_mode_node_id, COALESCE(failure_cause_node_id,''))`，查 `capa_d7_node_action` 表是否每个 key 都有 `confirmed`/`skipped`/`auto_filled` 记录；存在未处置 key → `ValueError("D7 有 N 条推荐未处置（确认/跳过/自动回填），不可关闭")` → API 400，**早返回**（不写 TRANSITION audit、不抽 lessons、不推进状态）。D7 推荐为空（canonical scope 下真无推荐）→ 闸口平凡通过。
+3. **状态转换**（既有）：`capa.status = next_state.value` + 写 TRANSITION audit（D7→D8）。
+4. **D7 lessons 抽取（决策 10/17，转换后 commit 前，R2-修复按生命周期拆分）**：调 `_extract_lessons(capa, source_d_step="d7")`：**仅从 `d7_prevention` 切句**（d7_prevention 在 D7 已定稿；`d8_closure` 此时为空，**不在此抽取**——见下方 d8_closure 更新钩子），逐句构造 `CapaLessonLearned`（`lesson_id = uuid5(NAMESPACE_URL, f"capa_lesson:{capa_id}:d7:{normalized_text}")`），用 `pg_insert(...).on_conflict_do_update(index_elements=["lesson_id"], set_={category, tags, updated_at})` upsert，`enqueue_embedding(db, "capa_lesson", lesson_id, ...)` 入队。
+5. **审计 `LESSON_EXTRACTED`**（≤20 字符）记 d7 lesson 数，`correlation_id = uuid5(capa_id, "lesson_extract_d7")`（重试产生相同 correlation_id 便于去重查询；audit append-only 可接受，它是转换日志不喂 KB）。
+6. **失败不阻断闭合**（lesson 抽取异常 → log warning + skip，D8 仍推进）。注：闸口（步骤 2）失败**阻断**（400，不推进）；lessons 抽取（步骤 4）失败**不阻断**（D8 仍推进）。
 
-**幂等保证**：同一 CAPA 重试/双击/并发 advance → 相同 `lesson_id` 命中 upsert（不新增行）、相同 `entity_id` 重复入队 embedding 幂等、相同 `correlation_id` audit 可识别。
+**幂等保证**：同一 CAPA 重试/双击/并发 advance → `SELECT FOR UPDATE` 串行化 + 状态机拒 D8→D8；d7 lessons 相同 `lesson_id` 命中 upsert（不新增行）、相同 `entity_id` 重复入队 embedding 幂等、相同 `correlation_id` audit 可识别。
+
+**闸口不变量**：D7→D8 推进成功 ⇒ canonical scope 下所有当前 D7 推荐键均有 `CapaD7NodeAction`（闭环可审计，不可旁路，不受推进用户 PL 范围影响）。直接 `POST /advance` 无 D7 动作 → 400。重算失败 → 400（fail-closed，不误放行）。
+
+### `update_capa` d8_closure 更新钩子（P1-10，R2-修复 D8 lessons 丢失）
+
+D8_CLOSURE 是终态（无 D9 转换），`d8_closure` 文本在 D8 期间填写。`backend/app/services/capa_service.py:update_capa`（或 CAPA 字段保存路径）在检测到 `d8_closure` 字段变更且 `capa.status == D8_CLOSURE` 时，调 `_extract_lessons(capa, source_d_step="d8")`：从 `d8_closure` 切句，`lesson_id = uuid5(NAMESPACE_URL, f"capa_lesson:{capa_id}:d8:{normalized_text}")`，upsert + `enqueue_embedding`。每次保存重抽（upsert 幂等），最终 `d8_closure` 文本必被捕获。审计 `LESSON_EXTRACTED` 带 `correlation_id = uuid5(capa_id, "lesson_extract_d8")`。失败不阻断保存（log warning + skip）。**回归测试**：CAPA 进 D8 后填 `d8_closure` 并保存 → `capa_lessons_learned` 出现 `source_d_step='d8'` 行；再次保存（同文本）→ upsert 不新增行；改文本再保存 → 旧 d8 lesson 保留（不同 normalized_text → 不同 lesson_id）+ 新 d8 lesson 入库。
 
 ### `adopt_recommendation` 透传 `stage_index`（Spec A 决策 1 兑现）
 
@@ -421,13 +441,13 @@ class HybridRecommendationPipeline:
 
 - Props: `stages: StageRun[]`。
 - 渲染：Ant `Steps direction="vertical" size="small"`，每步 `title={阶段名}` + `description={<Space><Tag>{来源}</Tag><Badge count={hit_count} /><Text type="secondary">{summary}</Text></Space>}`，`status` 映射：done→`finish`/skipped→`wait`+灰/error→`error`。或自定义 grid（3 列 × 4 行）更紧凑——实施时择优。
-- 每节点 `data-e2e="rec-stage-{index}"` + `data-status="{status}"`。
+- 每节点 `data-e2e="rec-dag-stage-{index}"`（index=1..12）+ `data-status="{status}"`。
 - 空状态：无 stages → 不渲染（兼容旧响应）。
 
 ### `D4RecPanel.tsx` / `D5RecPanel.tsx` 改造
 
 - `getD4Recommendations` / `getD5Recommendations` 返回值取 `res.stages`，传给 `<RecommendationDAG stages={stages} />`，放 `<Card>` 顶部。
-- 每个推荐项加 `<Tag data-e2e="rec-source-{item.match_source}">{来源标签}</Tag>` + `<Tag data-e2e="rec-stage-{item.stage_index}">阶段{stage_index}</Tag>`。D4 现有分组（linked/semantic/...）保留，分组内每项加 provenance Tag。
+- 每个推荐项加 `<Tag data-e2e="rec-source-{item.match_source}">{来源标签}</Tag>` + `<Tag data-e2e="rec-item-stage-{item.stage_index}">阶段{stage_index}</Tag>`（`rec-item-stage-*` 区别于 DAG 节点的 `rec-dag-stage-*`，R2-修复冲突）。D4 现有分组（linked/semantic/...）保留，分组内每项加 provenance Tag。
 - 采纳按钮 `adoptRecommendation` 调用时 payload 加 `stage_index: item.stage_index`（决策 4）。
 - 来源标签 i18n：`d4.sources.{match_source}` / `d5.sources.{match_source}`（zh-CN/en-US 追加）。
 
@@ -439,10 +459,12 @@ class HybridRecommendationPipeline:
 
 | 元素 | testid |
 |---|---|
-| DAG 阶段节点 | `rec-stage-{n}`（n=0..11，0-indexed）+ `data-status` |
+| DAG 阶段节点 | `rec-dag-stage-{index}`（index=1..12，1-indexed 与 `StageRun.index` 对齐）+ `data-status="{status}"` |
 | 推荐来源标签 | `rec-source-{match_source}` |
-| 推荐阶段徽标 | `rec-stage-{stage_index}` |
+| 推荐项阶段徽标 | `rec-item-stage-{stage_index}`（index=1..12，与 `StageRun.index` 对齐；**区别于 DAG 节点的 `rec-dag-stage-*`**） |
 | DAG 容器 | `recommendation-dag` |
+
+**选择器合约（R2-修复冲突）**：DAG 节点用 `rec-dag-stage-{index}`，推荐项阶段徽标用 `rec-item-stage-{index}`——两者前缀不同，避免 Spec C E2E 误选。`index` 统一 1..12（与后端 `StageRun.index` 一致，非 0-indexed）。
 
 ## E2E / 测试兼容
 
@@ -462,23 +484,36 @@ class HybridRecommendationPipeline:
   - skipped 语义：无 embedding → 阶段 3/4/5 skipped；无 SPC 数据 → 阶段 6 skipped reason 含 "SPC"；D5 → 阶段 6-9 skipped reason "D5 阶段不适用"。
   - error 隔离：某 source 抛异常 → 该阶段 error，后续阶段继续，items 不含该阶段候选。
   - LLM 未配置（pc=None）→ 阶段 11 skipped "未配置 LLM"，不审计 `llm_recommend`（attempted=0）。
-- `backend/tests/recommendation/test_sources_spc.py` / `test_sources_iqc.py` / `test_sources_supplier.py` / `test_sources_mes.py` / `test_sources_same_type.py` / `test_sources_lessons.py`：每源 `retrieve` 返回结构 + `should_skip` + factory_id 隔离 + 空 vs 有数据。
+  - **fusion→LLM 顺序（R2-修复）**：spy `LLMFusionLayer.enrich` + `FusionEngine.merge`，断言 `enrich` 收到的候选数 == `merge` 输出数（fused），**不等于** raw 召回候选数（all_candidates）；即 LLM 吃 fused 不吃 raw，保既有合约。
+  - **no-data vs done(0)（R2-修复）**：SPC 有告警但无 FMEA 匹配 → `should_skip` 返回 None + `retrieve` 返回 [] → stage 6 **done(0)**（有数据 0 命中）；SPC 无告警 → `should_skip` 返回 reason → stage 6 **skipped**。两路径分别断言 status。新源（SPC/IQC/MES/...）各测 should_skip 返回 reason 的无数据场景。
+- `backend/tests/recommendation/test_sources_spc.py` / `test_sources_iqc.py` / `test_sources_supplier.py` / `test_sources_mes.py` / `test_sources_same_type.py` / `test_sources_lessons.py`：每源 `retrieve` 返回结构 + `should_skip`（无数据返 reason、有数据返 None）+ factory_id 隔离 + 空 vs 有数据。
 - `backend/tests/recommendation/test_lessons_extraction.py`：
-  - `advance_capa` D7→D8 抽取 lessons 行 + enqueue_embedding + `LESSON_EXTRACTED` audit；抽取异常不阻断闭合。
-  - **幂等（R1-决策 17）**：同一 CAPA 两次触发 `_extract_lessons`（模拟重试/双击）→ `capa_lessons_learned` 行数不变（upsert 同 `lesson_id`）、`enqueue_embedding` 对同 `lesson_id` 不重复入队（或入队幂等）、`LESSON_EXTRACTED` audit `correlation_id` 两次相同。
-  - **并发（R1-决策 17）**：并发 advance D7→D8（两协程）→ 仅一个成功推进（`SELECT FOR UPDATE` 串行化 + 状态机拒 D8→D8），lessons 不重复。
+  - `advance_capa` D7→D8 抽取 **d7_prevention** lessons（`source_d_step='d7'`）+ enqueue_embedding + `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d7")`）；抽取异常不阻断闭合。
+  - **d8_closure 更新钩子（R2-修复 D8 lessons 丢失）**：CAPA 进 D8 后填 `d8_closure` 保存 → 出现 `source_d_step='d8'` lesson 行；同文本再保存 → upsert 不新增；改文本再保存 → 旧 d8 lesson 保留 + 新 d8 lesson 入库。
+  - **D7→D8 不抽 d8_closure（R2-修复）**：D7→D8 转换时 `d8_closure` 为空，断言此时**不产生** `source_d_step='d8'` 行（只产 d7）。
+  - **幂等（R1-决策 17）**：同一 CAPA 两次触发 `_extract_lessons`（同 source_d_step）→ 行数不变（upsert 同 `lesson_id`）、embedding 不重复、audit `correlation_id` 相同。
+  - **并发（R1-决策 17）**：并发 advance D7→D8 → 仅一个推进，lessons 不重复。
   - **确定性 lesson_id**：同 (capa, source_d_step, normalized_text) → 相同 `lesson_id`（uuid5）。
+- `backend/tests/capa/test_capa_d7_gate.py`（R2-决策 18）：
+  - D7 有 2 条推荐、0 处置 → `advance_capa` 抛 `ValueError`（API 400），未写 TRANSITION audit、未抽 lessons、状态仍 D7_PREVENTION。
+  - 处置 1 条（剩 1 条未处置）→ 仍 400。
+  - 2 条全处置（confirmed/skipped/auto_filled 任一）→ 200 推进 D8_CLOSURE + 抽 d7 lessons + 写 TRANSITION audit。
+  - D7 无推荐（canonical scope 下真无）→ 闸口平凡通过，200 推进。
+  - `failure_cause_node_id` 为 NULL 的推荐 key 与 `capa_d7_node_action` 同 NULL key 匹配（COALESCE 收口）。
+  - 直接 `POST /api/capa/{id}/advance`（空 body）无 D7 动作 → 400（不可绕过 UI）。
+  - **canonical scope（R2-修复 subset）**：推进用户的 `allowed_pls` 窄于 CAPA 工厂时（用户只能看 1 个 PL，CAPA 工厂有 2 个 PL 的 D7 推荐），闸口仍看**全部** D7 推荐（按 `capa.factory_id` 不按用户 PL），未处置 → 400。断言闸口不因用户 PL 范围窄而误放行。
+  - **fail-closed（R2-修复 subset）**：重算 D7 推荐异常（fmea_docs load 失败 / `get_d7_recommendations` 抛错）→ `ValueError("D7 推荐重算失败")` → 400（不误判"无推荐"放行）。
 - `backend/tests/recommendation/test_adopt_stage_index.py`：`adopt_recommendation` 透传 `stage_index` 到 `capa_ai_adoption`（Spec A 列非 None）。
 - 既有 `test_capa_recommendation.py` / `test_d7_recommendations.py` / `test_hybrid_recommendation_pipeline.py`：响应加 `stages` 字段后断言不破（既有断言查 `items`/`existing_controls`，不拒新字段）。
 
 ### 前端 vitest
 
-- `RecommendationDAG.test.tsx`：12 节点渲染 + 状态色 + `data-e2e="rec-stage-{n}"` + `data-status`。
-- `D4RecPanel.test.tsx` / `D5RecPanel.test.tsx`（既有扩展）：DAG 渲染、每项 provenance Tag `rec-source-*` / `rec-stage-*`、采纳 payload 含 `stage_index`。
+- `RecommendationDAG.test.tsx`：12 节点渲染 + 状态色 + `data-e2e="rec-dag-stage-{index}"`（index=1..12）+ `data-status`。
+- `D4RecPanel.test.tsx` / `D5RecPanel.test.tsx`（既有扩展）：DAG 渲染（`rec-dag-stage-*`）、每项 provenance Tag `rec-source-*` / `rec-item-stage-*`（区别于 DAG 节点）、采纳 payload 含 `stage_index`。
 
 ### Spec C 依赖就绪
 
-本 spec 落地后，Spec C 故事 spec 可断言：`data-e2e="rec-stage-{n}"` 的 `data-status`（关键阶段 done/skipped）、`rec-source-{source}` 标签存在、采纳留痕 `capa_ai_adoption.stage_index` 非 None。
+本 spec 落地后，Spec C 故事 spec 可断言：`data-e2e="rec-dag-stage-{index}"` 的 `data-status`（关键阶段 done/skipped）、`rec-source-{source}` 标签存在、`rec-item-stage-{index}` 项阶段徽标、采纳留痕 `capa_ai_adoption.stage_index` 非 None。
 
 ## 验收
 
@@ -487,12 +522,16 @@ class HybridRecommendationPipeline:
 - D4/D5 API 响应含 `stages`，`items`/controls/suggestions 每项含 `stage_index`（R-决策 3）。
 - `AdoptRequest` 加 `stage_index`，`adopt_recommendation` 透传入库（Spec A 决策 1 兑现，R-决策 4）。
 - 6 新源各 `retrieve` 返回 `RecommendationCandidate`，`match_source` 按决策 7 表；无数据 `should_skip` 返回 reason，编排器标 skipped（R-决策 6）。
-- `capa_lessons_learned` 表通过 Alembic 迁移建出（含 `ix_capa_lessons_unique` 唯一索引）；`advance_capa` D7→D8 抽取 lessons + enqueue_embedding + audit；抽取异常不阻断闭合（R-决策 10）。
+- `capa_lessons_learned` 表通过 Alembic 迁移建出（含 `ix_capa_lessons_unique` 唯一索引）；**D7→D8 抽 d7_prevention lessons，d8_closure 更新时抽 d8 lessons**（R2-修复按生命周期拆分，D8 lessons 不再丢失）；enqueue_embedding + audit；抽取异常不阻断闭合/保存（R-决策 10）。
 - **lesson 抽取幂等：同 CAPA 重试/双击/并发 advance → `lesson_id` 确定性 uuid5 命中 upsert，不新增行、不重复入队 embedding、audit `correlation_id` 相同；`SELECT FOR UPDATE` 串行化并发 advance**（R1-决策 17）。
+- **D7→D8 闭环闸口：转换前用 canonical scope（`capa.factory_id`，不依赖推进用户 `allowed_pls`）重算 D7 推荐，要求每个 key 有 `CapaD7NodeAction`；未处置 → 400 早返回；重算异常 → fail-closed 400（不误放行）；直接 `POST /advance` 不可绕过；D7 无推荐平凡通过**（R2-决策 18）。
+- **执行顺序 recall → fusion → LLM（LLM 吃 fused 不吃 raw），与既有 `HybridRecommendationPipeline` 合约一致**（R2-修复）；`LLMFusionLayer.enrich` 收到 `FusionEngine.merge` 输出，非 raw 召回集。
+- **no-data vs done(0) 区分：新源 `should_skip` 返回 reason → skipped；`should_skip` None + retrieve [] → done(0)；测试覆盖两路径**（R2-修复）。
+- **选择器合约：DAG 节点 `rec-dag-stage-{index}`、项徽标 `rec-item-stage-{index}`，index 1..12 与 `StageRun.index` 对齐**（R2-修复冲突）。
 - `SameTypeProductKBSource` 跨工厂同类型检索受 `user_product_lines` 收口；`capa_eightd` 无 supplier_id 时 `SupplierHistorySource` 经 IQC/SCAR 取供应商（R-决策 11/13）。
-- `<RecommendationDAG>` 12 节点 + 状态色 + 命中数 + `data-e2e="rec-stage-{n}"` + `data-status`；D4/D5 RecPanel 每项 `rec-source-{source}` + `rec-stage-{index}` Tag（R-决策 8/9）。
+- `<RecommendationDAG>` 12 节点 + 状态色 + 命中数 + `data-e2e="rec-dag-stage-{index}"` + `data-status`；D4/D5 RecPanel 每项 `rec-source-{source}` + `rec-item-stage-{index}` Tag（R-决策 8/9）。
 - 无 LLM 凭证时阶段 11 skipped + 核心闭环照跑（故事验收"无 LLM 凭证时 AI 步骤跳过+告警"）。
-- 后端新增 pytest 全绿（含 R1 三项回归：12 唯一索引 / D5 派生依赖 / lesson 幂等）；既有推荐/D7/capa 测试不退化；前端 vitest + `tsc --noEmit` + `npm run build` 绿；`make check` 绿。
+- 后端新增 pytest 全绿（含 R1 三项回归：12 唯一索引 / D5 派生依赖 / lesson 幂等 + R2 五项回归：D7 闸口 canonical+fail-closed / D8 lessons 按生命周期拆分 / fusion→LLM 顺序 / no-data vs done(0) / 选择器合约）；既有推荐/D7/capa 测试不退化；前端 vitest + `tsc --noEmit` + `npm run build` 绿；`make check` 绿。
 - `docs/` 同步：本 spec + `PROGRESS.md` 缺口清单 P0-2/P0-3/P1-5~10 勾选。
 
 ## 参考
@@ -503,4 +542,4 @@ class HybridRecommendationPipeline:
 - 数据层：`backend/app/services/{spc_service,iqc_inspection_service,supplier_quality_service,mes_service,mes_connector}.py`、`backend/app/models/{iqc_inspection,mes,capa}.py`
 - 相关 ADR：ADR-0001（UUID v4）、ADR-0003（factory_id 行级隔离）、ADR-0004（手写 AuditLog）、ADR-0013（手写 Alembic）
 - 依赖：embedding worker 扩 `capa_lesson` 实体（P0 follow-up 同类）；`product_lines.product_type_code` 已确认存在（`product_line.py:20`）；SPC 复用 `match_fmea_for_alarm`（`spc_service.py:379`）
-- 后续 spec：Spec C（故事级 E2E `capa-story-closed-loop.spec.ts`，依赖本 spec 的 `rec-stage-*` / `rec-source-*` 选择器与 `stage_index` 留痕）
+- 后续 spec：Spec C（故事级 E2E `capa-story-closed-loop.spec.ts`，依赖本 spec 的 `rec-dag-stage-*` / `rec-item-stage-*` / `rec-source-*` 选择器与 `stage_index` 留痕）
