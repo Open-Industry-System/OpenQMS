@@ -1,13 +1,16 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, select, text
 
+from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
 from app.models.mes import MESEquipmentStatus, MESScrapRecord
+from app.models.product_line import ProductLine
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import SupplierSCAR
 from app.services import spc_service, supplier_quality_service
+from app.services.embedding_provider import EmbeddingProvider
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 
 logger = logging.getLogger(__name__)
@@ -351,3 +354,224 @@ class MESSource:
             )
 
         return cands
+
+
+class SameTypeProductKBSource:
+    """同类型产品 KB 召回：同 factory、同 product_type_code、跨 product_line 的 FMEA 语义搜索。"""
+
+    name = "same_type_product_kb"
+
+    def __init__(self, db, embedding_provider: EmbeddingProvider | None):
+        self.db = db
+        self.embedding = embedding_provider
+
+    async def _resolve_product_type_code(self, context: RecommendationContext) -> str | None:
+        pl_code = context.capa_data.get("product_line_code")
+        fid = context.factory_id
+        if not pl_code or not fid:
+            return None
+        result = await self.db.execute(
+            select(ProductLine.product_type_code).where(
+                ProductLine.code == pl_code,
+                ProductLine.factory_id == fid,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def should_skip(self, context: RecommendationContext) -> str | None:
+        pt = await self._resolve_product_type_code(context)
+        if not pt:
+            return "无同类型产品 KB"
+        return None
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        if not self.embedding:
+            return []
+
+        # 与 SemanticSearchSource 一致：无授权产品线时直接返回空
+        if context.user_product_lines == []:
+            return []
+
+        fid = context.factory_id
+        if not fid:
+            return []
+
+        pl_code = context.capa_data.get("product_line_code")
+        if not pl_code:
+            return []
+
+        pt = await self._resolve_product_type_code(context)
+        if not pt:
+            return []
+
+        # 构造查询文本（D4 用 d2_description，D5 优先 d4_root_cause）
+        if context.stage == "d4":
+            query_text = context.capa_data.get("d2_description", "")
+        else:
+            query_text = context.capa_data.get("d4_root_cause", "")
+            if not query_text:
+                query_text = context.capa_data.get("d2_description", "")
+
+        if not query_text or not query_text.strip():
+            return []
+
+        query_vector = await self.embedding.embed([query_text])
+        if not query_vector:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
+        user_pls = context.user_product_lines
+
+        params: dict[str, Any] = {
+            "query_vector": vec_str,
+            "product_type_code": pt,
+            "current_pl": pl_code,
+            "factory_id": fid,
+            "limit": 20,
+        }
+        pl_filter = ""
+        if user_pls is not None:
+            pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
+            params["product_line_codes"] = user_pls
+
+        # R16-修复：按 factory_id 收口，同时过滤 document_embeddings 与 product_lines，
+        # 防止同 product_type 跨工厂串读。
+        stmt = text(f"""
+            SELECT de.entity_id AS fmea_id, de.node_id,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
+                   de.product_line_code
+            FROM document_embeddings de
+            JOIN product_lines pl ON de.product_line_code = pl.code
+            WHERE pl.product_type_code = :product_type_code
+              AND de.product_line_code != :current_pl
+              AND de.entity_type = 'fmea_node'
+              AND (de.metadata->>'node_type' = 'FailureCause'
+                   OR de.metadata->>'node_type' = 'FailureMode')
+              AND de.factory_id = :factory_id
+              AND pl.factory_id = :factory_id
+              {pl_filter}
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
+            LIMIT :limit
+        """)
+
+        rows = await self.db.execute(stmt, params)
+        raw_matches = rows.fetchall()
+
+        # 关键修复：D4/D5 API 预加载的 fmea_docs 仅含当前 PL，跨 PL 召回时
+        # 无法通过 context.fmea_docs 回溯图结构。这里直接按 fmea_id 从 DB 拉取
+        # 当前工厂内的 FMEA 文档，自建 doc_map。
+        fmea_ids = {str(row.fmea_id) for row in raw_matches}
+        docs = (await self.db.execute(
+            select(FMEADocument).where(
+                FMEADocument.fmea_id.in_(fmea_ids),
+                FMEADocument.factory_id == fid,
+            )
+        )).scalars().all()
+        doc_map = {
+            str(f.fmea_id): {
+                "fmea_id": f.fmea_id,
+                "document_no": f.document_no,
+                "graph_data": f.graph_data,
+                "product_line_code": f.product_line_code,
+            }
+            for f in docs
+        }
+
+        candidates: list[RecommendationCandidate] = []
+        for row in raw_matches:
+            fmea_id = str(row.fmea_id)
+            node_id = row.node_id
+            similarity = float(row.similarity)
+
+            doc = doc_map.get(fmea_id)
+            if not doc or not node_id:
+                continue
+
+            graph = doc["graph_data"]
+            node_map = {n["id"]: n for n in graph.get("nodes", [])}
+            node = node_map.get(node_id)
+            if not node:
+                continue
+
+            node_type = node.get("type")
+            edges = graph.get("edges", [])
+
+            # D4: 召回 FailureCause 或 FailureMode
+            if context.stage == "d4":
+                if node_type == "FailureCause":
+                    fm_id = None
+                    fm_name = None
+                    for e in edges:
+                        if e["source"] == node_id and e["type"] == "CAUSE_OF":
+                            parent = node_map.get(e["target"])
+                            if parent and parent.get("type") == "FailureMode":
+                                fm_id = parent["id"]
+                                fm_name = parent.get("name")
+                                break
+                    candidates.append(RecommendationCandidate(
+                        source="same_type_product_kb",
+                        content=node.get("name", ""),
+                        category=None,
+                        confidence=similarity * 0.7,
+                        match_reason="同类型产品 KB 相关失效原因",
+                        metadata={
+                            "failure_cause_node_id": node_id,
+                            "failure_cause_desc": node.get("description"),
+                            "failure_mode_node_id": fm_id,
+                            "failure_mode_name": fm_name,
+                            "fmea_id": fmea_id,
+                            "fmea_document_no": doc.get("document_no"),
+                            "product_line_code": doc.get("product_line_code"),
+                            "product_type_code": pt,
+                            "factory_id": str(fid),
+                        },
+                    ))
+                elif node_type == "FailureMode":
+                    candidates.append(RecommendationCandidate(
+                        source="same_type_product_kb",
+                        content=node.get("name", ""),
+                        category=None,
+                        confidence=similarity * 0.5,
+                        match_reason="同类型产品 KB 相关失效模式",
+                        metadata={
+                            "failure_mode_node_id": node_id,
+                            "failure_mode_name": node.get("name"),
+                            "fmea_id": fmea_id,
+                            "fmea_document_no": doc.get("document_no"),
+                            "product_line_code": doc.get("product_line_code"),
+                            "product_type_code": pt,
+                            "factory_id": str(fid),
+                        },
+                    ))
+
+            # D5: 只召回 FailureCause（后续交给 FMEAControlExpander）
+            elif context.stage == "d5" and node_type == "FailureCause":
+                fm_id = None
+                fm_name = None
+                for e in edges:
+                    if e["source"] == node_id and e["type"] == "CAUSE_OF":
+                        parent = node_map.get(e["target"])
+                        if parent and parent.get("type") == "FailureMode":
+                            fm_id = parent["id"]
+                            fm_name = parent.get("name")
+                            break
+                candidates.append(RecommendationCandidate(
+                    source="same_type_product_kb",
+                    content=node.get("name", ""),
+                    category=None,
+                    confidence=similarity * 0.8,
+                    match_reason="同类型产品 KB 相关失效原因",
+                    metadata={
+                        "failure_cause_node_id": node_id,
+                        "failure_cause_desc": node.get("description"),
+                        "failure_mode_node_id": fm_id,
+                        "failure_mode_name": fm_name,
+                        "fmea_id": fmea_id,
+                        "fmea_document_no": doc.get("document_no"),
+                        "product_line_code": doc.get("product_line_code"),
+                        "product_type_code": pt,
+                        "factory_id": str(fid),
+                    },
+                ))
+
+        return candidates

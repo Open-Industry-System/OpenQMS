@@ -1,17 +1,20 @@
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
 from app.models.mes import MESConnection, MESEquipmentStatus, MESScrapRecord
+from app.models.product_line import ProductLine
+from app.models.product_type import ProductType
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
-from app.services.recommendation_sources_extra import IQCSource, MESSource, SPCAnomalySource, SupplierHistorySource
+from app.services.recommendation_sources_extra import IQCSource, MESSource, SameTypeProductKBSource, SPCAnomalySource, SupplierHistorySource
 from app.services.recommendation_types import RecommendationContext
 
 pytestmark = pytest.mark.requires_db
@@ -680,3 +683,229 @@ async def test_mes_factory_isolation(db, default_factory, admin_user):
     )
     assert any(c.metadata.get("scrap_record_id") == str(scrap_a.scrap_id) for c in cands)
     assert any(c.metadata.get("equipment_id") == str(equip_a.record_id) for c in cands)
+
+
+# ── SameTypeProductKBSource (Task 9) ───────────────────────────────────────
+
+
+async def _embedding_dim(db) -> int | None:
+    """Query the actual pgvector dimension configured for document_embeddings."""
+    result = await db.execute(text("""
+        SELECT atttypmod FROM pg_attribute
+        WHERE attrelid = 'document_embeddings'::regclass AND attname = 'embedding'
+    """))
+    row = result.fetchone()
+    return row[0] if row else None
+
+
+def _vec_str(dim: int, hot_idx: int) -> str:
+    """Return a pgvector literal with a single hot dimension."""
+    parts = ["0.0"] * dim
+    parts[hot_idx] = "1.0"
+    return "[" + ",".join(parts) + "]"
+
+
+async def _seed_product_type(db, code: str):
+    pt = ProductType(code=code, name=f"Type {code}")
+    db.add(pt)
+    await db.flush()
+    await db.refresh(pt)
+    return pt
+
+
+async def _seed_pl(db, code: str, factory_id: uuid.UUID, product_type_code: str | None = None):
+    pl = ProductLine(code=code, name=f"PL {code}", factory_id=factory_id, product_type_code=product_type_code)
+    db.add(pl)
+    await db.flush()
+    await db.refresh(pl)
+    return pl
+
+
+async def _seed_fmea_doc(db, factory_id: uuid.UUID, pl_code: str, user_id: uuid.UUID, suffix: str):
+    node_id = str(uuid.uuid4())
+    doc = FMEADocument(
+        fmea_id=uuid.uuid4(),
+        document_no=f"PFMEA-{suffix}",
+        title=f"FMEA {suffix}",
+        fmea_type="PFMEA",
+        product_line_code=pl_code,
+        factory_id=factory_id,
+        created_by=user_id,
+        status="approved",
+        graph_data={
+            "nodes": [
+                {"id": node_id, "type": "FailureCause", "name": f"cause {suffix}", "description": f"desc {suffix}"}
+            ],
+            "edges": [],
+        },
+    )
+    db.add(doc)
+    await db.flush()
+    await db.refresh(doc)
+    return doc, node_id
+
+
+async def _seed_embedding(
+    db,
+    dim: int,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    entity_field: str,
+    chunk_text: str,
+    factory_id: uuid.UUID,
+    pl_code: str,
+    model: str,
+    hot_idx: int = 0,
+    node_id: str | None = None,
+    metadata: dict | None = None,
+):
+    emb_id = uuid.uuid4()
+    await db.execute(
+        text("""
+            INSERT INTO document_embeddings
+                (id, entity_type, entity_id, node_id, entity_field, chunk_index, chunk_text,
+                 embedding, product_line_code, factory_id, metadata, embedding_model)
+            VALUES
+                (:id, :entity_type, :entity_id, :node_id, :entity_field, 0, :chunk_text,
+                 CAST(:embedding AS vector), :product_line_code, :factory_id, :metadata, :embedding_model)
+        """),
+        {
+            "id": emb_id,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "node_id": node_id,
+            "entity_field": entity_field,
+            "chunk_text": chunk_text,
+            "embedding": _vec_str(dim, hot_idx),
+            "product_line_code": pl_code,
+            "factory_id": factory_id,
+            "metadata": metadata or {},
+            "embedding_model": model,
+        },
+    )
+    await db.flush()
+    return emb_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_same_type_should_skip_no_product_type(db, default_factory):
+    """当前 PL 无 product_type_code → should_skip 返回原因。"""
+    suffix = uuid.uuid4().hex[:8]
+    pl_code = f"PL-NULL-{suffix}"
+    pl = ProductLine(code=pl_code, name=f"PL NULL {suffix}", factory_id=default_factory.id, product_type_code=None)
+    db.add(pl)
+    await db.flush()
+
+    src = SameTypeProductKBSource(db, MagicMock())
+    ctx = RecommendationContext(
+        capa_data={"d2_description": "螺栓尺寸超差", "product_line_code": pl_code},
+        user_product_lines=None,
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    reason = await src.should_skip(ctx)
+    assert reason is not None
+    assert "无同类型产品 KB" in reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_same_type_retrieves_cross_pl(db, default_factory, admin_user):
+    """同工厂、同 product_type、不同 PL 的 FMEA embedding 应被召回。"""
+    suffix = uuid.uuid4().hex[:8]
+    pt_code = f"PT-CROSS-{suffix}"
+    await _seed_product_type(db, pt_code)
+
+    pl_current = await _seed_pl(db, f"PL-CUR-{suffix}", default_factory.id, pt_code)
+    pl_other = await _seed_pl(db, f"PL-OTH-{suffix}", default_factory.id, pt_code)
+
+    dim = await _embedding_dim(db)
+    if dim is None:
+        pytest.skip("document_embeddings.embedding column not present (pgvector schema not available)")
+
+    doc, node_id = await _seed_fmea_doc(db, default_factory.id, pl_other.code, admin_user.user_id, f"CROSS-{suffix}")
+    await _seed_embedding(
+        db, dim, "fmea_node", doc.fmea_id, "name", "螺栓尺寸超差",
+        default_factory.id, pl_other.code, "test-model", hot_idx=0, node_id=node_id,
+        metadata={"node_type": "FailureCause"},
+    )
+
+    query_vec = [0.0] * dim
+    query_vec[0] = 1.0
+
+    emb = MagicMock()
+    emb.embed = AsyncMock(return_value=[query_vec])
+    src = SameTypeProductKBSource(db, emb)
+    ctx = RecommendationContext(
+        capa_data={"d2_description": "螺栓尺寸超差", "product_line_code": pl_current.code},
+        user_product_lines=None,
+        stage="d4",
+        factory_id=default_factory.id,
+        fmea_docs=[],
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0
+    assert all(c.source == "same_type_product_kb" for c in cands)
+    assert all(c.metadata.get("product_type_code") == pt_code for c in cands)
+    assert all(c.metadata.get("product_line_code") == pl_other.code for c in cands)
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+    returned_doc_nos = {c.metadata.get("fmea_document_no") for c in cands}
+    assert doc.document_no in returned_doc_nos
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_same_type_factory_isolation(db, default_factory, admin_user):
+    """同 product_type 但跨工厂时，只返回当前工厂的候选。"""
+    suffix = uuid.uuid4().hex[:8]
+    pt_code = f"PT-ISO-{suffix}"
+    await _seed_product_type(db, pt_code)
+
+    pl_current = await _seed_pl(db, f"PL-CUR-{suffix}", default_factory.id, pt_code)
+    pl_other_a = await _seed_pl(db, f"PL-OTH-A-{suffix}", default_factory.id, pt_code)
+
+    factory_b = Factory(code=f"FB-{suffix}", name=f"Factory B {suffix}")
+    db.add(factory_b)
+    await db.flush()
+    await db.refresh(factory_b)
+    pl_other_b = await _seed_pl(db, f"PL-OTH-B-{suffix}", factory_b.id, pt_code)
+
+    dim = await _embedding_dim(db)
+    if dim is None:
+        pytest.skip("document_embeddings.embedding column not present (pgvector schema not available)")
+
+    fmea_a, node_id_a = await _seed_fmea_doc(db, default_factory.id, pl_other_a.code, admin_user.user_id, f"ISO-A-{suffix}")
+    fmea_b, node_id_b = await _seed_fmea_doc(db, factory_b.id, pl_other_b.code, admin_user.user_id, f"ISO-B-{suffix}")
+
+    await _seed_embedding(
+        db, dim, "fmea_node", fmea_a.fmea_id, "name", "问题 A",
+        default_factory.id, pl_other_a.code, "test-model", hot_idx=0, node_id=node_id_a,
+        metadata={"node_type": "FailureCause"},
+    )
+    await _seed_embedding(
+        db, dim, "fmea_node", fmea_b.fmea_id, "name", "问题 B",
+        factory_b.id, pl_other_b.code, "test-model", hot_idx=1, node_id=node_id_b,
+        metadata={"node_type": "FailureCause"},
+    )
+
+    query_vec = [0.0] * dim
+    query_vec[0] = 1.0
+
+    emb = MagicMock()
+    emb.embed = AsyncMock(return_value=[query_vec])
+    src = SameTypeProductKBSource(db, emb)
+    ctx = RecommendationContext(
+        capa_data={"d2_description": "问题 A", "product_line_code": pl_current.code},
+        user_product_lines=None,
+        stage="d4",
+        factory_id=default_factory.id,
+        fmea_docs=[],
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0
+    returned_doc_nos = {c.metadata.get("fmea_document_no") for c in cands}
+    assert fmea_a.document_no in returned_doc_nos
+    assert fmea_b.document_no not in returned_doc_nos
