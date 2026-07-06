@@ -475,11 +475,21 @@ Expected: FAIL（`recommendation_orchestrator` 未建）。
 `cd backend && python -m pytest tests/recommendation/test_orchestrator.py -q`
 Expected: PASS。
 
+- [ ] **Step 4b: 既有源补 `factory_id` 过滤（R17-修复：新源全补 factory_id，旧源仍按 product_line_code 收口 → Spec B 落地后旧源仍可能跨 factory 读 embedding/CAPA）**
+
+`backend/app/services/recommendation_sources.py`（3 处，按 `context.factory_id` 收口，不破坏 `factory_id is None` 的既有测试）：
+- `SemanticSearchSource.retrieve`（`:152`）：SQL WHERE 加 `AND de.factory_id = :factory_id`，params 加 `"factory_id": context.factory_id`（仅当 `context.factory_id is not None`；None 时不加该过滤，保持既有行为）。
+- `HistoricalCAPASource._search`（`:327`）：SQL WHERE 加 `AND de.factory_id = :factory_id AND capa.factory_id = :factory_id`，params 加 `"factory_id"`（同上 None 守卫）。
+- `HistoricalCAPAMeasureSource` 同样补 `de.factory_id` / `capa.factory_id` 过滤（若有 JOIN capa）。
+
+测试 `backend/tests/recommendation/test_sources_existing_factory_isolation.py`（新文件）：双工厂双 PL seed，`context.factory_id=factory_A` → `SemanticSearchSource.retrieve` 只命中 factory_A 的 embedding，`HistoricalCAPASource._search` 只命中 factory_A 的 CAPA；断言候选不含 factory_B 的 document_no/entity_id。**None 守卫回归**：`context.factory_id=None` → 查询不崩（不加 factory 过滤，行为同旧），断言返回非空。
+
 - [ ] **Step 5: 提交**
 
 ```bash
-git add backend/app/services/recommendation_orchestrator.py backend/tests/recommendation/test_orchestrator.py
-git commit -m "feat(recommendation): RecommendationOrchestrator 12-stage skeleton"
+git add backend/app/services/recommendation_orchestrator.py backend/tests/recommendation/test_orchestrator.py \
+        backend/app/services/recommendation_sources.py backend/tests/recommendation/test_sources_existing_factory_isolation.py
+git commit -m "feat(recommendation): RecommendationOrchestrator 12-stage skeleton + existing sources factory_id filter (R17)"
 ```
 
 ---
@@ -1052,6 +1062,8 @@ async def test_worker_processes_capa_lesson(db, default_factory, admin_user, mon
     de = await db.scalar(select(DocumentEmbedding).where(
         DocumentEmbedding.entity_type == "capa_lesson", DocumentEmbedding.entity_id == lesson_id))
     assert de is not None and de.entity_field == "lesson_text"
+    # R17-修复：显式断言 factory_id 写入（非空 + 正确工厂），防实现者只满足 embedding 不验证 factory
+    assert de.factory_id == default_factory.id
 
 
 @pytest.mark.asyncio
@@ -1068,13 +1080,14 @@ async def test_worker_skips_deleted_lesson(db, default_factory, admin_user, monk
 
 - [ ] **Step 4: `advance_capa` D7→D8 调 `_extract_lessons(capa, "d7")`（R4+R13-修复：抽取先于状态 mutation + savepoint 包裹）** — 顺序：① 闸口（Task 12）通过 → ② **`async with db.begin_nested()` savepoint 内**调 `_extract_lessons(db, capa, "d7")` + 写 `LESSON_EXTRACTED` audit（`correlation_id=uuid5(capa_id,"lesson_extract_d7")`）（**R13-修复：savepoint 包裹，`_extract_lessons` 内 insert/upsert + `enqueue_embedding` 任一步抛错 → savepoint rollback 撤销已 insert 的 lesson 行 + outbox 行，脏数据不留在当前事务**），异常 → `ValueError("D7 lessons 抽取失败，不可关闭，请重试")`（**此时状态尚未 mutation**，fail-closed 干净）→ ③ 抽取成功**后**才 `capa.status = D8_CLOSURE` + 写 TRANSITION audit → ④ commit。这样抽取失败时状态/audit/lesson 均未动（savepoint rollback + 状态未 mutate），事务回滚干净。
 
-- [ ] **Step 4a: `embedding_sync_worker` 支持 `capa_lesson` + `factory_id` 写入（R14+R15-修复：与 enqueue 同 commit + 补 document_embeddings.factory_id NOT NULL）** — ① `embedding_sync_worker.py:table_field_map`（line 111）加（符合现有 `(table_from, pk_expr, plc_expr, doc_no_expr, fields)` 结构，`fields=[(field,alias)]`，`doc_no_expr` 是 SQL 表达式字符串非 None）：
+- [ ] **Step 4a: `embedding_sync_worker` 支持 `capa_lesson` + `factory_id` 写入（R14+R15+R16+R17-修复：与 enqueue 同 commit + 补 document_embeddings.factory_id NOT NULL + 示例与文字一致）** — ① `embedding_sync_worker.py:table_field_map`（line 111）加（**R17-修复：6 元组，与 ② 的 `fid_expr` unpack 一致**，`fields=[(field,alias)]`，`doc_no_expr`/`fid_expr` 都是 SQL 表达式字符串非 None）：
 ```python
-"capa_lesson": ("capa_lessons_learned", "lesson_id", "product_line_code", "''", [
-    ("lesson_text", "lesson_text"),
-]),
+"capa_lesson": (
+    "capa_lessons_learned", "lesson_id", "product_line_code", "''", "factory_id",
+    [("lesson_text", "lesson_text")],
+),
 ```
-worker 查询 `SELECT lesson_text, product_line_code AS product_line_code, '' AS document_no FROM capa_lessons_learned WHERE lesson_id=:entity_id`。② **R15-修复：`fetch_chunks` 给每个 chunk 带 `factory_id`**——`table_field_map` 元组加 `fid_expr`（factory_id 列表达式），SELECT 加 `{fid_expr} AS factory_id`，chunk dict 加 `"factory_id": row.get("factory_id")`。**既有 entity_type（capa/audit_finding/...）也补 `fid_expr`**（如 `"capa": (..., "factory_id", [...])`），因 `document_embeddings.factory_id` NOT NULL（`document_embedding.py:24`），现有 worker INSERT 不含 factory_id 列 → 对所有 entity_type 都会 NOT NULL 违约失败（既有 bug，本 task 顺修）。②-bis **R16-修复：`fmea_node` 分支也补 `factory_id`**——`fetch_chunks` 的 `fmea_node` 分支（`embedding_sync_worker.py:69-108`，独立于 `table_field_map`，走自己的 SELECT）SELECT 加 `fmea.factory_id`，chunk dict 加 `"factory_id": row["factory_id"]`。否则 ③ 的 `upsert_embeddings` INSERT 加 `factory_id` 列后，fmea_node chunk 仍缺 `factory_id` → NOT NULL 违约，现有 FMEA embedding 全部失败（R15 引入的回归）。补 fmea_node worker 回归测试：seed FMEA + outbox event `entity_type='fmea_node'` → 跑 `process_batch_once()` → 断言 `DocumentEmbedding.factory_id == default_factory.id` 且 `entity_type='fmea_node'`。③ **R15-修复：`upsert_embeddings` 的 INSERT 加 `factory_id` 列 + `:factory_id` 参数**（`embedding_sync_worker.py:218` INSERT 列加 `factory_id`，VALUES 加 `:factory_id`，参数 dict 加 `"factory_id": chunk.get("factory_id")`）。④ worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`（仅 capa_lesson），行已删 → 丢弃 job（mark completed/skipped，不写 embedding，R9 防race）。⑤ **R14-修复：测试不调 `run_worker()` 循环**——先抽 `process_batch_once()` 单轮函数（claim_batch → fetch_chunks → provider.embed → upsert_embeddings → mark_completed），或测试直接调这几个函数链。⑥ `embedding_backfill.py` `ENTITY_TABLE_MAP`/`ENTITY_TYPES` 同步加 `capa_lesson` + `fid_expr`。**测试断言 `DocumentEmbedding.factory_id == default_factory.id`**（R15-修复，非空 + 正确工厂）。
+worker 查询 `SELECT lesson_text, product_line_code AS product_line_code, '' AS document_no, factory_id AS factory_id FROM capa_lessons_learned WHERE lesson_id=:entity_id`。② **R15-修复：`fetch_chunks` 给每个 chunk 带 `factory_id`**——`table_field_map` 元组加 `fid_expr`（factory_id 列表达式，**R17-修复：6 元组 unpack `table_from, pk_expr, plc_expr, doc_no_expr, fid_expr, fields`**），SELECT 加 `{fid_expr} AS factory_id`，chunk dict 加 `"factory_id": row.get("factory_id")`。**既有 entity_type（capa/audit_finding/...）也补 `fid_expr`**（如 `"capa": ("capa_eightd", "report_id", "product_line_code", "document_no", "factory_id", [...])`），因 `document_embeddings.factory_id` NOT NULL（`document_embedding.py:24`），现有 worker INSERT 不含 factory_id 列 → 对所有 entity_type 都会 NOT NULL 违约失败（既有 bug，本 task 顺修）。②-bis **R16-修复：`fmea_node` 分支也补 `factory_id`**——`fetch_chunks` 的 `fmea_node` 分支（`embedding_sync_worker.py:69-108`，独立于 `table_field_map`，走自己的 SELECT）SELECT 加 `fmea.factory_id`，chunk dict 加 `"factory_id": row["factory_id"]`。否则 ③ 的 `upsert_embeddings` INSERT 加 `factory_id` 列后，fmea_node chunk 仍缺 `factory_id` → NOT NULL 违约，现有 FMEA embedding 全部失败（R15 引入的回归）。补 fmea_node worker 回归测试：seed FMEA + outbox event `entity_type='fmea_node'` → 跑 `process_batch_once()` → 断言 `DocumentEmbedding.factory_id == default_factory.id` 且 `entity_type='fmea_node'`。③ **R15-修复：`upsert_embeddings` 的 INSERT 加 `factory_id` 列 + `:factory_id` 参数**（`embedding_sync_worker.py:218` INSERT 列加 `factory_id`，VALUES 加 `:factory_id`，参数 dict 加 `"factory_id": chunk.get("factory_id")`）。④ worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`（仅 capa_lesson），行已删 → 丢弃 job（mark completed/skipped，不写 embedding，R9 防race）。⑤ **R14-修复：测试不调 `run_worker()` 循环**——先抽 `process_batch_once()` 单轮函数（claim_batch → fetch_chunks → provider.embed → upsert_embeddings → mark_completed），或测试直接调这几个函数链。⑥ `embedding_backfill.py` `ENTITY_TABLE_MAP`/`ENTITY_TYPES` 同步加 `capa_lesson` + `fid_expr`。**测试断言 `DocumentEmbedding.factory_id == default_factory.id`**（R15+R17-修复，非空 + 正确工厂，**断言写进测试片段而非仅文字**）。
 
 - [ ] **Step 5: 运行确认通过** → PASS（D7 抽取 + worker capa_lesson 处理 + 删 lesson 丢弃 测试）。
 
