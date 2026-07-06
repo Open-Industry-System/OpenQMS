@@ -56,10 +56,10 @@ def upgrade() -> None:
     op.create_index("ix_capa_adopt_capa_step", "capa_ai_adoption", ["capa_id", "d_step"])
     op.create_index("ix_capa_adopt_factory", "capa_ai_adoption", ["factory_id"])
     # 幂等去重：同 (capa, d_step, source, item_ref, adopted_text) 重复采纳 → 命中 unique 兜底，服务层 catch 后返回既有 adoption
-    # item_ref 是 JSONB，::text 规范化（JSONB 按规范序存储，::text 确定性）；COALESCE 收口 NULL
+    # 用 md5(...) 哈希表达式而非原始 TEXT，避免长 LLM 文本 / 大 item_ref 超过 Postgres btree 索引项最大字节数导致 insert 失败
     op.execute(
         "CREATE UNIQUE INDEX ix_capa_ai_adoption_dedupe ON capa_ai_adoption "
-        "(capa_id, d_step, source, COALESCE(item_ref::text, ''), adopted_text)"
+        "(capa_id, d_step, source, md5(COALESCE(item_ref::text, '')), md5(adopted_text))"
     )
 
     op.create_table(
@@ -72,10 +72,10 @@ def upgrade() -> None:
         sa.Column("action", sa.String(20), nullable=False),
         sa.Column("fmea_id", postgresql.UUID(as_uuid=True),
                   sa.ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=False),
-        sa.Column("failure_mode_node_id", sa.String(36), nullable=False),
-        sa.Column("failure_cause_node_id", sa.String(36)),
+        sa.Column("failure_mode_node_id", sa.String(128), nullable=False),
+        sa.Column("failure_cause_node_id", sa.String(128)),
         sa.Column("match_source", sa.String(40), nullable=False),
-        sa.Column("prevention_control_node_id", sa.String(36)),
+        sa.Column("prevention_control_node_id", sa.String(128)),
         sa.Column("prevention_control_name_before", sa.Text),
         sa.Column("prevention_control_name_after", sa.Text),
         sa.Column("reason", sa.Text),

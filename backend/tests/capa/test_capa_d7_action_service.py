@@ -321,3 +321,17 @@ async def test_fmea_delete_cascades_d7_actions(db, default_factory, admin_user):
     rows = (await db.execute(select(CapaD7NodeAction).where(
         CapaD7NodeAction.fmea_id == fmea.fmea_id))).scalars().all()
     assert len(rows) == 0
+
+
+@pytest.mark.asyncio
+async def test_record_d7_action_accepts_wizard_length_node_ids(db, default_factory, admin_user):
+    # FMEA wizard 生成的节点 ID 形如 w${uuid}_${type}，远超 36 字符；String(128) 列须能存
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    fm_id = f"w{uuid.uuid4()}_FailureMode"
+    cause_id = f"w{uuid.uuid4()}_FailureCause"
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, fm_id=fm_id, cause_id=cause_id)
+    rec = await record_d7_action(db, capa, D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id=fm_id,
+        failure_cause_node_id=cause_id, match_source="linked"), admin_user)
+    assert rec.failure_mode_node_id == fm_id
+    assert len(rec.failure_mode_node_id) > 36
