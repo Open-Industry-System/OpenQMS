@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
@@ -147,6 +148,12 @@ class SemanticSearchSource:
             pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
             params["product_line_codes"] = user_pls
 
+        # R17-修复：按 factory_id 收口，防跨工厂同 PL 串读（None 不加过滤，保持既有行为）
+        factory_filter = ""
+        if context.factory_id is not None:
+            factory_filter = "AND de.factory_id = :factory_id"
+            params["factory_id"] = context.factory_id
+
         # SQL-level node_type filter: only FailureCause / FailureMode are useful for D4/D5
         # Metadata JSONB stores node_type from embedding_sync_worker
         stmt = text(f"""
@@ -158,6 +165,7 @@ class SemanticSearchSource:
               AND (de.metadata->>'node_type' = 'FailureCause'
                    OR de.metadata->>'node_type' = 'FailureMode')
               {pl_filter}
+              {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
@@ -300,10 +308,12 @@ class HistoricalCAPASource:
             # 优先搜索当前 CAPA 的产品线
             search_pls = [capa_pl]
 
-        results = await self._search(vec_str, search_pls, "d2_description", limit=5)
+        results = await self._search(vec_str, search_pls, "d2_description", limit=5,
+                                     factory_id=context.factory_id)
         if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
             # 当前产品线无结果，放宽到用户允许的所有产品线
-            results = await self._search(vec_str, user_pls, "d2_description", limit=5)
+            results = await self._search(vec_str, user_pls, "d2_description", limit=5,
+                                        factory_id=context.factory_id)
 
         return results
 
@@ -313,6 +323,7 @@ class HistoricalCAPASource:
         product_line_codes: list[str] | None,
         target_field: str,
         limit: int,
+        factory_id: uuid.UUID | None = None,
     ) -> list[RecommendationCandidate]:
         params: dict[str, Any] = {
             "query_vector": vec_str,
@@ -323,6 +334,12 @@ class HistoricalCAPASource:
         if product_line_codes is not None:
             pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
             params["product_line_codes"] = product_line_codes
+
+        # R17-修复：按 factory_id 收口，防跨工厂同 PL 串读（None 不加过滤，保持既有行为）
+        factory_filter = ""
+        if factory_id is not None:
+            factory_filter = "AND de.factory_id = :factory_id AND capa.factory_id = :factory_id"
+            params["factory_id"] = factory_id
 
         stmt = text(f"""
             SELECT de.entity_id, de.chunk_text,
@@ -335,6 +352,7 @@ class HistoricalCAPASource:
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
               {pl_filter}
+              {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
@@ -395,9 +413,11 @@ class HistoricalCAPAMeasureSource:
         if user_pls is not None and capa_pl and capa_pl in user_pls:
             search_pls = [capa_pl]
 
-        results = await self._search(vec_str, search_pls, "d4_root_cause", limit=5)
+        results = await self._search(vec_str, search_pls, "d4_root_cause", limit=5,
+                                     factory_id=context.factory_id)
         if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
-            results = await self._search(vec_str, user_pls, "d4_root_cause", limit=5)
+            results = await self._search(vec_str, user_pls, "d4_root_cause", limit=5,
+                                        factory_id=context.factory_id)
 
         return results
 
@@ -407,6 +427,7 @@ class HistoricalCAPAMeasureSource:
         product_line_codes: list[str] | None,
         target_field: str,
         limit: int,
+        factory_id: uuid.UUID | None = None,
     ) -> list[RecommendationCandidate]:
         params: dict[str, Any] = {
             "query_vector": vec_str,
@@ -417,6 +438,12 @@ class HistoricalCAPAMeasureSource:
         if product_line_codes is not None:
             pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
             params["product_line_codes"] = product_line_codes
+
+        # R17-修复：按 factory_id 收口，防跨工厂同 PL 串读（None 不加过滤，保持既有行为）
+        factory_filter = ""
+        if factory_id is not None:
+            factory_filter = "AND de.factory_id = :factory_id AND capa.factory_id = :factory_id"
+            params["factory_id"] = factory_id
 
         stmt = text(f"""
             SELECT de.entity_id, de.chunk_text,
@@ -429,6 +456,7 @@ class HistoricalCAPAMeasureSource:
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
               {pl_filter}
+              {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
