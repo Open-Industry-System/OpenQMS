@@ -559,17 +559,7 @@ context = RecommendationContext(
 ```
 这样 Task 5-10 注册新源后，真实 D4/D5 API 即传 factory_id，新源查询有 factory_id 过滤（不会 factory_id=None 全空/跨工厂）。Task 17 只再加 `stages` 响应字段，不再改 context 构造。
 
-- [ ] **Step 5: 运行确认通过**
-
-`cd backend && python -m pytest tests/recommendation/test_hybrid_pipeline_thin.py tests/recommendation/test_orchestrator.py -q`
-Expected: PASS。
-
-- [ ] **Step 6: 回归既有推荐 + D7 测试**
-
-`cd backend && python -m pytest tests/test_capa_recommendation.py tests/test_d7_recommendations.py tests/ -k "recommend" -q`
-Expected: PASS（既有断言不破）。
-
-- [ ] **Step 5b: API handler factory_id 透传测试（R14+R15-修复：必须 mock pipeline 验证 handler 构造的 context.factory_id）**
+- [ ] **Step 5: API handler factory_id 透传测试（R14+R15+R16-修复：必须 mock pipeline 验证 handler 构造的 context.factory_id；步骤重排先于运行/回归，避免 checklist 漏跑）**
 
 `backend/tests/recommendation/test_d4_recommend_context_factory_id.py`：
 ```python
@@ -594,7 +584,17 @@ async def test_d4_handler_passes_factory_id(client, db, default_factory, admin_u
 ```
 **R15-修复：必须 mock `HybridRecommendationPipeline.recommend`（或 orchestrator.run）捕获 context，断言 `context.factory_id == capa.factory_id`**——不能只断言 `RecommendationContext` 字段就位（那证明不了 handler 真传）。D5 同理补一个（或共用 fixture）。
 
-- [ ] **Step 7: 提交（R14-修复：含 backend/app/api/capa.py）**
+- [ ] **Step 6: 运行确认通过**（原 Step 5，R16 重排）
+
+`cd backend && python -m pytest tests/recommendation/test_hybrid_pipeline_thin.py tests/recommendation/test_orchestrator.py tests/recommendation/test_d4_recommend_context_factory_id.py -q`
+Expected: PASS。
+
+- [ ] **Step 7: 回归既有推荐 + D7 测试**（原 Step 6，R16 重排）
+
+`cd backend && python -m pytest tests/test_capa_recommendation.py tests/test_d7_recommendations.py tests/ -k "recommend" -q`
+Expected: PASS（既有断言不破）。
+
+- [ ] **Step 8: 提交（R14-修复：含 backend/app/api/capa.py；原 Step 7，R16 重排）**
 
 ```bash
 git add backend/app/services/hybrid_recommendation_pipeline.py backend/app/services/llm_fusion_layer.py \
@@ -815,7 +815,7 @@ git commit -m "feat(source): SPCAnomalySource"
 
 - [ ] **Step 1: 写失败测试** — 当前 PL `product_type_code` 为 NULL → should_skip reason；有同类型数据 → retrieve 返回跨 PL 候选，`source="same_type_product_kb"`，排除当前 PL。
 - [ ] **Step 2: 运行确认失败** → FAIL。
-- [ ] **Step 3: 写 `SameTypeProductKBSource`** — `__init__(db, embedding_provider)`；`should_skip`：解析当前 PL 的 `product_type_code`（JOIN `product_lines`），NULL → "无同类型产品 KB"；`retrieve`：pgvector 语义查 `document_embeddings de` JOIN `product_lines pl` ON `de.product_line_code=pl.code` WHERE `pl.product_type_code=:pt AND de.product_line_code != :current_pl AND de.entity_type='fmea_node' AND node_type in (FailureCause,FailureMode)`，受 `user_product_lines` 收口；候选同 `SemanticSearchSource` 结构回溯，metadata 加 `product_type_code`。
+- [ ] **Step 3: 写 `SameTypeProductKBSource`** — `__init__(db, embedding_provider)`；`should_skip`：解析当前 PL 的 `product_type_code`（JOIN `product_lines`），NULL → "无同类型产品 KB"；`retrieve`：pgvector 语义查 `document_embeddings de` JOIN `product_lines pl` ON `de.product_line_code=pl.code` WHERE `pl.product_type_code=:pt AND de.product_line_code != :current_pl AND de.entity_type='fmea_node' AND node_type in (FailureCause,FailureMode)` **R16-修复：加 `AND de.factory_id=:factory_id AND pl.factory_id=:factory_id`**（同工厂跨 PL，不串读他厂同 product_type 数据），受 `user_product_lines` 收口；候选同 `SemanticSearchSource` 结构回溯，metadata 加 `product_type_code`。**R16-修复：测试用双工厂同 product_type**——seed factory_A + factory_B 各一个同 `product_type_code` 的 PL + FMEA embedding，context.factory_id=factory_A → retrieve 只命中 factory_A 的候选，断言不含 factory_B 的 document_no。
 - [ ] **Step 4: 注册 `same_type_product_kb`** — `self._sources["same_type_product_kb"] = SameTypeProductKBSource(db, embedding_provider)`。
 - [ ] **Step 5: 运行确认通过** → PASS。
 - [ ] **Step 6: 提交** `git commit -m "feat(source): SameTypeProductKBSource"`。
@@ -835,7 +835,7 @@ git commit -m "feat(source): SPCAnomalySource"
 
 - [ ] **Step 1: 写失败测试** — 无 embedding/无 lessons → should_skip reason；有 lessons → retrieve 返回 `source="lessons_learned"` 候选，JOIN `capa_lessons_learned` 排除孤儿。
 - [ ] **Step 2: 运行确认失败** → FAIL。
-- [ ] **Step 3: 写 `LessonsLearnedSource`** — `should_skip`：`embedding is None` 或无 `capa_lessons_learned` 行 → reason；`retrieve`：pgvector 语义查 `document_embeddings de` JOIN `capa_lessons_learned lesson` ON `de.entity_id=lesson.lesson_id` **JOIN `capa_eightd capa` ON `lesson.capa_id=capa.report_id AND capa.factory_id=lesson.factory_id`**（R15-修复：取 `capa.document_no` 作 `source_capa_document_no`，`capa_lessons_learned` 表无 document_no）WHERE `de.entity_type='capa_lesson' AND de.entity_field='lesson_text' AND lesson.lesson_id IS NOT NULL`，受 `user_product_lines` 收口（`de.factory_id=context.factory_id`，R1-修复），匹配 `d2_description`(D4)/`d4_root_cause`(D5)；候选 "经验教训：{lesson_text}（来自 {capa.document_no}，类别 {category}）"，metadata 含 `source_capa_id=lesson.capa_id`/`source_capa_document_no=capa.document_no`/`lesson_id`/`category`/`product_line_code`/`factory_id`。**测试断言候选含 `source_capa_document_no`**（R15-修复，非 None）。
+- [ ] **Step 3: 写 `LessonsLearnedSource`** — `should_skip`：`embedding is None` 或无 `capa_lessons_learned` 行 → reason；`retrieve`：pgvector 语义查 `document_embeddings de` JOIN `capa_lessons_learned lesson` ON `de.entity_id=lesson.lesson_id` **JOIN `capa_eightd capa` ON `lesson.capa_id=capa.report_id AND capa.factory_id=lesson.factory_id`**（R15-修复：取 `capa.document_no` 作 `source_capa_document_no`，`capa_lessons_learned` 表无 document_no）WHERE `de.entity_type='capa_lesson' AND de.entity_field='lesson_text' AND lesson.lesson_id IS NOT NULL` **R16-修复：加 `AND lesson.factory_id=:factory_id AND capa.factory_id=:factory_id`**（不只靠 embedding 行 `de.factory_id` 收口——lesson/capa 表本身也 NOT NULL factory_id，三表同过滤防孤儿/串读），受 `user_product_lines` 收口（`de.factory_id=context.factory_id`，R1-修复），匹配 `d2_description`(D4)/`d4_root_cause`(D5)；候选 "经验教训：{lesson_text}（来自 {capa.document_no}，类别 {category}）"，metadata 含 `source_capa_id=lesson.capa_id`/`source_capa_document_no=capa.document_no`/`lesson_id`/`category`/`product_line_code`/`factory_id`。**测试断言候选含 `source_capa_document_no`**（R15-修复，非 None）。
 - [ ] **Step 4: 注册 `lessons_learned`** — `self._sources["lessons_learned"] = LessonsLearnedSource(db, embedding_provider)`。
 - [ ] **Step 5: 运行确认通过** → PASS。
 - [ ] **Step 6: 提交** `git commit -m "feat(source): LessonsLearnedSource"`。
@@ -1074,7 +1074,7 @@ async def test_worker_skips_deleted_lesson(db, default_factory, admin_user, monk
     ("lesson_text", "lesson_text"),
 ]),
 ```
-worker 查询 `SELECT lesson_text, product_line_code AS product_line_code, '' AS document_no FROM capa_lessons_learned WHERE lesson_id=:entity_id`。② **R15-修复：`fetch_chunks` 给每个 chunk 带 `factory_id`**——`table_field_map` 元组加 `fid_expr`（factory_id 列表达式），SELECT 加 `{fid_expr} AS factory_id`，chunk dict 加 `"factory_id": row.get("factory_id")`。**既有 entity_type（capa/audit_finding/...）也补 `fid_expr`**（如 `"capa": (..., "factory_id", [...])`），因 `document_embeddings.factory_id` NOT NULL（`document_embedding.py:24`），现有 worker INSERT 不含 factory_id 列 → 对所有 entity_type 都会 NOT NULL 违约失败（既有 bug，本 task 顺修）。③ **R15-修复：`upsert_embeddings` 的 INSERT 加 `factory_id` 列 + `:factory_id` 参数**（`embedding_sync_worker.py:218` INSERT 列加 `factory_id`，VALUES 加 `:factory_id`，参数 dict 加 `"factory_id": chunk.get("factory_id")`）。④ worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`（仅 capa_lesson），行已删 → 丢弃 job（mark completed/skipped，不写 embedding，R9 防race）。⑤ **R14-修复：测试不调 `run_worker()` 循环**——先抽 `process_batch_once()` 单轮函数（claim_batch → fetch_chunks → provider.embed → upsert_embeddings → mark_completed），或测试直接调这几个函数链。⑥ `embedding_backfill.py` `ENTITY_TABLE_MAP`/`ENTITY_TYPES` 同步加 `capa_lesson` + `fid_expr`。**测试断言 `DocumentEmbedding.factory_id == default_factory.id`**（R15-修复，非空 + 正确工厂）。
+worker 查询 `SELECT lesson_text, product_line_code AS product_line_code, '' AS document_no FROM capa_lessons_learned WHERE lesson_id=:entity_id`。② **R15-修复：`fetch_chunks` 给每个 chunk 带 `factory_id`**——`table_field_map` 元组加 `fid_expr`（factory_id 列表达式），SELECT 加 `{fid_expr} AS factory_id`，chunk dict 加 `"factory_id": row.get("factory_id")`。**既有 entity_type（capa/audit_finding/...）也补 `fid_expr`**（如 `"capa": (..., "factory_id", [...])`），因 `document_embeddings.factory_id` NOT NULL（`document_embedding.py:24`），现有 worker INSERT 不含 factory_id 列 → 对所有 entity_type 都会 NOT NULL 违约失败（既有 bug，本 task 顺修）。②-bis **R16-修复：`fmea_node` 分支也补 `factory_id`**——`fetch_chunks` 的 `fmea_node` 分支（`embedding_sync_worker.py:69-108`，独立于 `table_field_map`，走自己的 SELECT）SELECT 加 `fmea.factory_id`，chunk dict 加 `"factory_id": row["factory_id"]`。否则 ③ 的 `upsert_embeddings` INSERT 加 `factory_id` 列后，fmea_node chunk 仍缺 `factory_id` → NOT NULL 违约，现有 FMEA embedding 全部失败（R15 引入的回归）。补 fmea_node worker 回归测试：seed FMEA + outbox event `entity_type='fmea_node'` → 跑 `process_batch_once()` → 断言 `DocumentEmbedding.factory_id == default_factory.id` 且 `entity_type='fmea_node'`。③ **R15-修复：`upsert_embeddings` 的 INSERT 加 `factory_id` 列 + `:factory_id` 参数**（`embedding_sync_worker.py:218` INSERT 列加 `factory_id`，VALUES 加 `:factory_id`，参数 dict 加 `"factory_id": chunk.get("factory_id")`）。④ worker upsert `document_embeddings` 前加 `SELECT 1 FROM capa_lessons_learned WHERE lesson_id=:id`（仅 capa_lesson），行已删 → 丢弃 job（mark completed/skipped，不写 embedding，R9 防race）。⑤ **R14-修复：测试不调 `run_worker()` 循环**——先抽 `process_batch_once()` 单轮函数（claim_batch → fetch_chunks → provider.embed → upsert_embeddings → mark_completed），或测试直接调这几个函数链。⑥ `embedding_backfill.py` `ENTITY_TABLE_MAP`/`ENTITY_TYPES` 同步加 `capa_lesson` + `fid_expr`。**测试断言 `DocumentEmbedding.factory_id == default_factory.id`**（R15-修复，非空 + 正确工厂）。
 
 - [ ] **Step 5: 运行确认通过** → PASS（D7 抽取 + worker capa_lesson 处理 + 删 lesson 丢弃 测试）。
 
