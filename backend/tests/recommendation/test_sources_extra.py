@@ -952,6 +952,20 @@ def _make_lesson(db, factory_id, capa_id, lesson_id, lesson_text, category="prev
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+async def test_lessons_should_skip_no_embedding(db, default_factory):
+    src = LessonsLearnedSource(db, None)
+    ctx = RecommendationContext(
+        capa_data={"d2_description": "螺栓尺寸超差", "product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    reason = await src.should_skip(ctx)
+    assert reason == "未配置 embedding"
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_lessons_should_skip_no_lessons(db, default_factory):
     src = LessonsLearnedSource(db, MagicMock())
     ctx = RecommendationContext(

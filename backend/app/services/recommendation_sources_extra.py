@@ -590,6 +590,8 @@ class LessonsLearnedSource:
         self.embedding = embedding_provider
 
     async def should_skip(self, context: RecommendationContext) -> str | None:
+        if self.embedding is None:
+            return "未配置 embedding"
         fid = context.factory_id
         if not fid:
             return "无经验教训库数据"
