@@ -4,11 +4,12 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import select
 
+from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
 from app.models.spc import InspectionCharacteristic, SPCAlarm
-from app.models.supplier import Supplier, SupplierEvaluation
+from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
 from app.services.recommendation_sources_extra import IQCSource, SPCAnomalySource, SupplierHistorySource
 from app.services.recommendation_types import RecommendationContext
 
@@ -424,3 +425,65 @@ async def test_supplier_factory_isolation(db, default_factory, admin_user):
     other_supplier_ids = {str(supplier_b.supplier_id)}
     assert not any(c.metadata.get("supplier_id") in other_supplier_ids for c in cands)
     assert any(c.metadata.get("supplier_id") == str(supplier_a.supplier_id) for c in cands)
+
+
+def _make_scar(db, supplier_id, factory_id, admin_user, capa_ref_id, scar_no):
+    scar = SupplierSCAR(
+        scar_id=uuid.uuid4(),
+        scar_no=scar_no,
+        supplier_id=supplier_id,
+        factory_id=factory_id,
+        source_type="capa",
+        source_id=capa_ref_id,
+        capa_ref_id=capa_ref_id,
+        description="SCAR linked to CAPA",
+        status="open",
+        issued_by=admin_user.user_id,
+    )
+    db.add(scar)
+    return scar
+
+
+@pytest.mark.asyncio
+async def test_supplier_retrieves_via_scar(db, default_factory, admin_user):
+    # Build CAPA with report_id=R in default factory
+    report_id = uuid.uuid4()
+    capa = CAPAEightD(
+        report_id=report_id,
+        document_no="8D-SCAR-REC-001",
+        title="SCAR recommendation test",
+        factory_id=default_factory.id,
+        product_line_code="DC-DC-100",
+        status="D2_DESCRIPTION",
+    )
+    db.add(capa)
+
+    supplier = _make_supplier(db, default_factory.id, admin_user, "SUP-SCAR-01")
+    await db.flush()
+
+    # Link supplier to CAPA via SupplierSCAR, but DO NOT seed IQC defects
+    _make_scar(
+        db,
+        supplier.supplier_id,
+        default_factory.id,
+        admin_user,
+        capa_ref_id=report_id,
+        scar_no="SCAR-REC-001",
+    )
+    await db.flush()
+
+    src = SupplierHistorySource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100", "report_id": report_id},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+
+    # should_skip returns None because the SCAR path activates now that report_id is in capa_data
+    skip_reason = await src.should_skip(ctx)
+    assert skip_reason is None
+
+    # retrieve still runs (it only has the IQC path, so no defects means empty here)
+    cands = await src.retrieve(ctx)
+    assert cands == []

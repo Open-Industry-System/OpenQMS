@@ -54,8 +54,11 @@ async def get_quality_dashboard(
     batch_acceptance_rate = acc_row.accepted / acc_row.total if acc_row.total > 0 else 0.0
 
     # Open SCAR count
+    open_scar_where = [SupplierSCAR.status != "closed"]
+    if factory_id is not None:
+        open_scar_where.append(SupplierSCAR.factory_id == factory_id)
     open_scar_count = await db.scalar(
-        select(func.count()).select_from(SupplierSCAR).where(SupplierSCAR.status != "closed")
+        select(func.count()).select_from(SupplierSCAR).where(*open_scar_where)
     ) or 0
 
     # Total suppliers
@@ -242,6 +245,8 @@ async def get_supplier_quality_detail(
         IqcInspection.inspection_date >= start_date,
         IqcInspection.inspection_date <= end_date,
     ]
+    if factory_id is not None and hasattr(IqcInspection, "factory_id"):
+        iqc_filter.append(IqcInspection.factory_id == factory_id)
 
     ppm_result = await db.execute(
         select(
@@ -263,14 +268,21 @@ async def get_supplier_quality_detail(
     accepted_count = acc_row[1]
     batch_acceptance_rate = accepted_count / total_inspections if total_inspections > 0 else 0.0
 
+    scar_where = [SupplierSCAR.supplier_id == supplier_id]
+    if factory_id is not None:
+        scar_where.append(SupplierSCAR.factory_id == factory_id)
     scar_count = await db.scalar(
-        select(func.count()).select_from(SupplierSCAR)
-        .where(SupplierSCAR.supplier_id == supplier_id)
+        select(func.count()).select_from(SupplierSCAR).where(*scar_where)
     ) or 0
 
+    open_scar_where = [
+        SupplierSCAR.supplier_id == supplier_id,
+        SupplierSCAR.status != "closed",
+    ]
+    if factory_id is not None:
+        open_scar_where.append(SupplierSCAR.factory_id == factory_id)
     open_scar_count = await db.scalar(
-        select(func.count()).select_from(SupplierSCAR)
-        .where(SupplierSCAR.supplier_id == supplier_id, SupplierSCAR.status != "closed")
+        select(func.count()).select_from(SupplierSCAR).where(*open_scar_where)
     ) or 0
 
     trend_result = await db.execute(
