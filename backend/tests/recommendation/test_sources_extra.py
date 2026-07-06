@@ -6,8 +6,10 @@ from sqlalchemy import select
 
 from app.models.factory import Factory
 from app.models.fmea import FMEADocument
+from app.models.iqc_inspection import IqcInspection
 from app.models.spc import InspectionCharacteristic, SPCAlarm
-from app.services.recommendation_sources_extra import SPCAnomalySource
+from app.models.supplier import Supplier
+from app.services.recommendation_sources_extra import IQCSource, SPCAnomalySource
 from app.services.recommendation_types import RecommendationContext
 
 pytestmark = pytest.mark.requires_db
@@ -149,3 +151,147 @@ async def test_spc_factory_isolation(db, default_factory, admin_user):
 
     other_alarm_ids = {str(alarm_b.alarm_id)}
     assert not any(c.metadata.get("alarm_id") in other_alarm_ids for c in cands)
+
+
+def _make_supplier(db, factory_id, admin_user, supplier_no):
+    supplier = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=supplier_no,
+        factory_id=factory_id,
+        name=f"Supplier {supplier_no}",
+        short_name=supplier_no,
+        created_by=admin_user.user_id,
+        status="approved",
+    )
+    db.add(supplier)
+    return supplier
+
+
+def _make_iqc_inspection(
+    db,
+    factory_id,
+    supplier_id,
+    admin_user,
+    inspection_no,
+    product_line_code="DC-DC-100",
+    defect_qty=0,
+    defect_description=None,
+    inspection_date=None,
+    part_no=None,
+):
+    if inspection_date is None:
+        inspection_date = datetime.now(timezone.utc).date()
+    # inspection_no is globally unique; suffix with UUID to avoid collisions
+    unique_no = f"{inspection_no}-{uuid.uuid4().hex[:8]}"
+    inspection = IqcInspection(
+        inspection_id=uuid.uuid4(),
+        inspection_no=unique_no,
+        supplier_id=supplier_id,
+        factory_id=factory_id,
+        product_line_code=product_line_code,
+        defect_qty=defect_qty,
+        defect_description=defect_description,
+        inspection_date=inspection_date,
+        part_no=part_no,
+        inspection_result="rejected" if defect_qty > 0 else "passed",
+        inspected_by=admin_user.user_id,
+        judged_by=admin_user.user_id,
+    )
+    db.add(inspection)
+    return inspection
+
+
+@pytest.mark.asyncio
+async def test_iqc_should_skip_no_defects(db, default_factory):
+    src = IQCSource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    reason = await src.should_skip(ctx)
+    assert reason is not None
+    assert "IQC" in reason or "不良" in reason
+
+
+@pytest.mark.asyncio
+async def test_iqc_retrieves_when_defects(db, default_factory, admin_user):
+    supplier = _make_supplier(db, default_factory.id, admin_user, "SUP-IQC-01")
+    await db.flush()
+    _make_iqc_inspection(
+        db,
+        default_factory.id,
+        supplier.supplier_id,
+        admin_user,
+        "IQC-2026-001",
+        defect_qty=3,
+        defect_description="尺寸超差",
+        part_no="PART-001",
+    )
+    await db.flush()
+
+    src = IQCSource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+    assert len(cands) > 0
+    assert all(c.source == "iqc" for c in cands)
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+    assert any(c.metadata.get("part_no") == "PART-001" for c in cands)
+    assert any("尺寸超差" in c.content for c in cands)
+
+
+@pytest.mark.asyncio
+async def test_iqc_factory_isolation(db, default_factory, admin_user):
+    other = Factory(id=uuid.uuid4(), code="OTHER", name="Other")
+    db.add(other)
+    await db.flush()
+
+    supplier_a = _make_supplier(db, default_factory.id, admin_user, "SUP-IQC-A")
+    await db.flush()
+    inspection_a = _make_iqc_inspection(
+        db,
+        default_factory.id,
+        supplier_a.supplier_id,
+        admin_user,
+        "IQC-2026-A",
+        defect_qty=5,
+        defect_description="外观划伤",
+        part_no="PART-A",
+    )
+
+    supplier_b = _make_supplier(db, other.id, admin_user, "SUP-IQC-B")
+    await db.flush()
+    inspection_b = _make_iqc_inspection(
+        db,
+        other.id,
+        supplier_b.supplier_id,
+        admin_user,
+        "IQC-2026-B",
+        product_line_code="DC-DC-100",
+        defect_qty=7,
+        defect_description="镀层脱落",
+        part_no="PART-B",
+    )
+    await db.flush()
+
+    src = IQCSource(db)
+    ctx = RecommendationContext(
+        capa_data={"product_line_code": "DC-DC-100"},
+        user_product_lines=["DC-DC-100"],
+        stage="d4",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0, "default 工厂有 IQC 不良数据，retrieve 不应为空"
+    assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+
+    other_inspection_ids = {str(inspection_b.inspection_id)}
+    assert not any(c.metadata.get("inspection_id") in other_inspection_ids for c in cands)
+    assert any(c.metadata.get("inspection_id") == str(inspection_a.inspection_id) for c in cands)
