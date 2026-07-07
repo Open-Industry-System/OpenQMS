@@ -189,3 +189,14 @@ The JSONB graph is the most complex part of the system:
 - Redis configured but no caching logic implemented
 - Frontend bundle is 5.5MB — needs code splitting
 - Some Alembic migration numbers overlap; needs normalization
+
+## User Story ↔ Skill 同步规则
+
+每个 `verify-*` skill 是某条用户故事的**派生走查剧本**（单向派生）：
+
+- 源头：`docs/user-stories/US-<id>-<name>.md`（含「状态: 定稿 vX（日期）」）
+- 派生：`.claude/skills/verify-<name>/SKILL.md`（顶部声明依据的故事版本）
+
+**规则**：当用户故事的版本号或日期变更，对应 skill 剧本必须重新核对并同步，
+更新顶部版本声明后才能用于走查。agent 每次跑 `verify-*` skill 前先比对
+skill 内记的故事版本与用户故事顶部实际版本——不一致则停下、提示用户先同步。
