@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import client from "./client";
+import type { StageRun, D4RecommendationResponse, AdoptRequest } from "../types";
 
 vi.mock("./client", () => ({
   default: { post: vi.fn(), get: vi.fn(), patch: vi.fn() },
@@ -35,5 +36,52 @@ describe("capa verification/d7 api", () => {
     expect(client.post).toHaveBeenCalledWith("/capa/c1/d7-auto-fill",
       { fmea_id: "f1", failure_mode_node_id: "fm", failure_cause_node_id: "c", match_source: "linked" });
     expect(r.is_new_control).toBe(true);
+  });
+});
+
+describe("capa recommendation stages (Spec B)", () => {
+  it("accepts a D4 response with stages and per-item stage_index", () => {
+    const stages: StageRun[] = Array.from({ length: 12 }, (_, i) => ({
+      index: i,
+      name: `stage-${i}`,
+      source: i % 2 === 0 ? "fmea_graph" : "llm",
+      status: i < 10 ? "done" : "pending",
+      hit_count: i * 2,
+      summary: `summary ${i}`,
+    }));
+    const resp: D4RecommendationResponse = {
+      stages,
+      items: stages.map((s) => ({
+        failure_cause_node_id: `cause-${s.index}`,
+        failure_cause_name: "cause",
+        failure_cause_desc: null,
+        failure_mode_node_id: null,
+        failure_mode_name: null,
+        fmea_document_no: null,
+        fmea_id: null,
+        match_source: "fmea_graph",
+        match_reason: "reason",
+        related_d2_keywords: [],
+        confidence: 0.5,
+        source_capa_id: null,
+        source_capa_document_no: null,
+        source_product_line_code: null,
+        stage_index: s.index,
+      })),
+    };
+    expect(resp.stages).toHaveLength(12);
+    expect(resp.items[0].stage_index).toBe(0);
+    expect(resp.stages[11].status).toBe("pending");
+  });
+
+  it("adoptRecommendation sends stage_index in the POST body", async () => {
+    (client.post as any).mockResolvedValue({ data: { adoption_id: "a1", d_step: "d5", field_value: "x" } });
+    const req: AdoptRequest = { d_step: "d5", adopted_text: "control-x", source: "existing_control", stage_index: 2 };
+    const r = await adoptRecommendation("c1", req);
+    expect(client.post).toHaveBeenCalledWith(
+      "/capa/c1/adopt-recommendation",
+      expect.objectContaining({ stage_index: 2 }),
+    );
+    expect(r.d_step).toBe("d5");
   });
 });

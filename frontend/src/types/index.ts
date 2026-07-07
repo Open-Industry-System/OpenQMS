@@ -1389,6 +1389,7 @@ export interface D7RecommendationResponse {
 }
 
 export interface D4Recommendation {
+  stage_index?: number | null;
   failure_cause_node_id: string | null;
   failure_cause_name: string;
   failure_cause_desc: string | null;
@@ -1405,11 +1406,26 @@ export interface D4Recommendation {
   source_product_line_code: string | null;
 }
 
+export interface StageRun {
+  index: number;
+  name: string;
+  source: string;
+  status: "pending" | "running" | "done" | "skipped" | "error";
+  hit_count: number;
+  summary: string;
+  error?: string | null;
+  llm_attempted?: number | null;
+  llm_succeeded?: number | null;
+  llm_failed?: number | null;
+}
+
 export interface D4RecommendationResponse {
+  stages: StageRun[];
   items: D4Recommendation[];
 }
 
 export interface D5ExistingControl {
+  stage_index?: number | null;
   failure_mode_node_id: string | null;
   failure_mode_name: string | null;
   failure_cause_node_id: string | null;
@@ -1424,6 +1440,7 @@ export interface D5ExistingControl {
 }
 
 export interface D5GeneralSuggestion {
+  stage_index?: number | null;
   content: string;
   category: string;
   basis: string;
@@ -1435,6 +1452,7 @@ export interface D5GeneralSuggestion {
 }
 
 export interface D5RecommendationResponse {
+  stages: StageRun[];
   existing_controls: D5ExistingControl[];
   general_suggestions: D5GeneralSuggestion[];
 }
@@ -1803,6 +1821,7 @@ export interface AdoptRequest {
   d_step: "d4" | "d5";
   adopted_text: string;
   source: string;
+  stage_index?: number | null;
   item_ref?: Record<string, unknown> | null;
 }
 export interface AdoptResponse {
