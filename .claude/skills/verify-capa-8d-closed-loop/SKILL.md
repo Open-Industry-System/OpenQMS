@@ -179,7 +179,7 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 - 点 `[data-e2e="d4-verification-new"]` 打开新建验证表单：
   - 填 `[data-e2e="verification-method"]`（input）
   - 填 `[data-e2e="verification-result"]`（textarea）
-  - 上传证据：点 `[data-e2e="verification-evidence"]` 内「添加证据」按钮触发文件选择 → `browser_file_upload` 传临时证据文件（在 `docs/e2e/reports/assets/US-E2E-01-<date>/evidence-<n>.png` 生成一个小 PNG，与截图同目录）
+  - 上传证据：点 `[data-e2e="verification-evidence"]` 内「添加证据」按钮触发文件选择 → `browser_file_upload` 传临时证据文件（在本走查文件夹的 `evidence/` 子目录生成一个小 PNG，见「报告路径」）
   - 勾 `[data-e2e="verification-form-is-verified"]`（**不要**点 `verification-is-verified`）
   - 点 `[data-e2e="verification-submit"]`
 - **断言**：`[data-e2e="verification-status"]` 显示已验证；`GET /api/capa/{report_id}/root-cause-verifications` 回读验证记录含 method/result/evidence。
@@ -204,11 +204,20 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 
 **当作已实现去测**：找不到 selector / 面板没渲染 → 直接判 MISSING，**不**自行脑补「这功能可能还没做所以跳过」。
 
-每个 FAIL/MISSING 用浏览器 MCP 截图存 `docs/e2e/reports/assets/US-E2E-01-<date>/step-<n>.png`。
+每个 FAIL/MISSING 用浏览器 MCP 截图存到本走查文件夹的 `screenshots/` 子目录（`<走查文件夹>/screenshots/step-<n>.png`，见「报告路径」）。
 
 ## 报告模板
 
-路径：`docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>.md`
+每次走查生成**一个带日期的文件夹**，报告 + 截图 + 证据都放里面（一一对应，便于审核）：
+
+```
+docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/   ← 一次走查一个文件夹
+  report.md                                  验收报告
+  screenshots/                               FAIL/MISSING 截图 (step-<n>.png)
+  evidence/                                  现场验证上传的证据文件 (evidence-<n>.png)
+```
+
+走查开始时先创建该文件夹（含 `screenshots/`、`evidence/` 子目录）。报告写 `<文件夹>/report.md`。
 
 ```markdown
 # US-E2E-01 验收报告 — <date>

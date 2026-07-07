@@ -16,7 +16,7 @@
 - **Never** use `make e2e` to bring up services — it runs the full Playwright spec suite (Makefile:75-77). Use `make e2e-up && make e2e-seed`; clean env via `make e2e-reset`.
 - Default to the `:5174` e2e stack only. `/api/e2e/*` routes register only under `E2E_MODE=1` + non-production (`backend/app/main.py:450`), set only in `docker-compose.e2e.yml:21`.
 - Account passwords come from `GET /api/e2e/seed-state` at walk time — never hardcoded.
-- Reports land in `docs/e2e/reports/`, screenshots in `docs/e2e/reports/assets/`.
+- Reports land in a per-walk dated folder `docs/e2e/reports/US-E2E-01-<date>/` (report.md + screenshots/ + evidence/).
 - Story version referenced by the skill: 定稿 v7 (2026-07-07) — must match `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md` header.
 - CAPA response field is `status` (not `current_step`); initial value `D1_TEAM` (`backend/app/schemas/capa.py:39`, `models/capa.py:23`).
 - The sync rule added to `CLAUDE.md` applies to **all** future `verify-*` skills, not just this one.
@@ -508,16 +508,16 @@ Expected: `READY`. If `NOT_READY`, stop this task and record "live walk deferred
 
 - [ ] **Step 2: Dispatch a fresh subagent to execute the skill**
 
-Use the Agent tool with a prompt: "Use the `verify-capa-8d-closed-loop` skill (at `.claude/skills/verify-capa-8d-closed-loop/SKILL.md`) to walk US-E2E-01 end-to-end. Follow the skill exactly: run the preflight checks, execute the B/C/D walkthrough, and write the report to `docs/e2e/reports/US-E2E-01-$(date +%F).md`. Report back the pass/fail counts and any FAIL/MISSING defects."
+Use the Agent tool with a prompt: "Use the `verify-capa-8d-closed-loop` skill (at `.claude/skills/verify-capa-8d-closed-loop/SKILL.md`) to walk US-E2E-01 end-to-end. Follow the skill exactly: run the preflight checks, execute the B/C/D walkthrough, and write the report to `docs/e2e/reports/US-E2E-01-$(date +%F)/report.md` (with `screenshots/` and `evidence/` subdirs in the same folder). Report back the pass/fail counts and any FAIL/MISSING defects."
 
 - [ ] **Step 3: Review the produced report**
 
-Read `docs/e2e/reports/US-E2E-01-<date>.md`. Confirm it has all 9 sections from the report template and the B/C matrices are filled.
+Read `docs/e2e/reports/US-E2E-01-<date>/report.md`. Confirm it has all 9 sections from the report template and the B/C matrices are filled.
 
 - [ ] **Step 4: Commit the report**
 
 ```bash
-git add docs/e2e/reports/US-E2E-01-<date>.md
+git add docs/e2e/reports/US-E2E-01-<date>/
 git commit -m "docs(e2e): US-E2E-01 acceptance walk report <date>"
 ```
 

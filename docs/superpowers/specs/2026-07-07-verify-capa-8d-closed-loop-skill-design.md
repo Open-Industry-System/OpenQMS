@@ -141,8 +141,15 @@ skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件�
 
 ## 报告格式 + 落点
 
-- 路径：`docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>.md`（新增 `docs/e2e/reports/` 子目录）。
-- 截图：每个 FAIL/MISSING 用浏览器 MCP 截图存 `docs/e2e/reports/assets/US-E2E-01-<date>/step-<n>.png`，报告引用路径。
+- 路径：每次走查生成一个带日期的文件夹，报告 + 截图 + 证据统一放里面（一一对应，便于审核）：
+
+```
+docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/   ← 一次走查一个文件夹
+  report.md                                  验收报告
+  screenshots/                               FAIL/MISSING 截图 (step-<n>.png)
+  evidence/                                  现场验证上传的证据文件 (evidence-<n>.png)
+```
+- 走查开始时 agent 创建该文件夹（含子目录）；报告写 `<文件夹>/report.md`；截图存 `screenshots/`；证据存 `evidence/`。
 - 结构：
   1. **头部**：故事名 + 版本 + skill 依据版本 + 走查时间 + app commit + LLM 凭证状态。
   2. **总览**：PASS/PASS-NOTE/FAIL/MISSING 计数 + 整体结论（PASS / 有缺陷 / BLOCKED）。
@@ -197,8 +204,7 @@ skill 内记的故事版本与用户故事顶部实际版本——不一致则�
 |---|---|
 | `.claude/skills/verify-capa-8d-closed-loop/SKILL.md` | 新增（skill 主体） |
 | `CLAUDE.md` | 新增「User Story ↔ Skill 同步规则」一节 |
-| `docs/e2e/reports/` | 新增目录（报告落点，首次走查时由 agent 创建） |
-| `docs/e2e/reports/assets/` | 新增目录（截图落点） |
+| `docs/e2e/reports/US-E2E-01-<date>/` | 每次走查生成一个带日期的文件夹（report.md + screenshots/ + evidence/），首次走查时由 agent 创建 |
 
 ## 不在本 skill 范围
 
