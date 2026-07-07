@@ -29,6 +29,7 @@ from app.schemas.capa_verification import (
     VerificationCreate, VerificationResponse, VerificationUpdate,
 )
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
+from app.schemas.recommendation_stage import StageRunSchema
 from app.services import capa_d7_action_service
 from app.services import capa_service
 from app.services import capa_verification_service
@@ -421,7 +422,10 @@ async def get_d4_fmea_recommendations(
         tenant_schema=tenant_schema(request),
     )
     await db.commit()
-    return {"items": [c.to_d4_schema() for c in result.items]}
+    return {
+        "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages],
+        "items": [c.to_d4_schema() for c in result.items],
+    }
 
 
 @router.get("/{report_id}/d5-fmea-recommendations", response_model=D5RecommendationResponse)
@@ -517,6 +521,7 @@ async def get_d5_fmea_recommendations(
             general_suggestions.append(c.to_d5_suggestion_schema())
 
     return {
+        "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages],
         "existing_controls": existing_controls,
         "general_suggestions": general_suggestions,
     }
