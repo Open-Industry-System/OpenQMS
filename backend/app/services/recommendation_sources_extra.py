@@ -319,7 +319,6 @@ class MESSource:
 
         cands = []
         for record in scrap_records:
-            desc = record.defect_description or record.defect_type
             cands.append(
                 RecommendationCandidate(
                     source="mes",
