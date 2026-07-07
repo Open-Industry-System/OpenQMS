@@ -225,6 +225,30 @@
   "relatedCapa": {
     "title": "Related CAPA"
   },
+  "dag": {
+    "title": "Recommendation Pipeline",
+    "stageNames": {
+      "1": "Context Collection",
+      "2": "This Product FMEA Search",
+      "3": "Global KB RAG",
+      "4": "Same-Type Product KB",
+      "5": "Lessons Learned",
+      "6": "SPC Anomaly Association",
+      "7": "MES Equipment / Process",
+      "8": "IQC Incoming",
+      "9": "Supplier History",
+      "10": "Rule Engine",
+      "11": "LLM Fusion Ranking",
+      "12": "Output Recommendation List"
+    },
+    "status": {
+      "done": "Done",
+      "skipped": "Skipped",
+      "error": "Error",
+      "running": "Running",
+      "pending": "Pending"
+    }
+  },
   "subtitle": "Customer Complaint & Quality Issue Tracking",
   "listTitle": "8D Report List"
 }
