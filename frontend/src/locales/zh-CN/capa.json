@@ -107,6 +107,16 @@
       "llm": "智能建议",
       "rule": "规则引擎建议"
     },
+    "sources": {
+      "linked": "已关联",
+      "fmea_graph": "FMEA 图",
+      "semantic_search": "语义匹配",
+      "keyword": "关键词",
+      "historical_capa": "历史 CAPA",
+      "llm": "智能建议",
+      "rule": "规则引擎"
+    },
+    "stageLabel": "阶段 {{n}}",
     "adopt": "采纳",
     "skip": "跳过",
     "readonlyTooltip": "只读用户无法采纳",
@@ -141,6 +151,18 @@
       "预防措施": "预防措施",
       "纠正措施": "纠正措施"
     },
+    "sources": {
+      "fmea_graph": "FMEA 图",
+      "semantic_search": "语义匹配",
+      "historical_capa": "历史 CAPA",
+      "historical_capa_measure": "历史 CAPA 措施",
+      "rule_engine": "规则引擎",
+      "rule_engine_measure": "规则引擎措施",
+      "rule": "规则引擎",
+      "llm": "智能建议",
+      "graph": "图相似匹配"
+    },
+    "stageLabel": "阶段 {{n}}",
     "defaultBasis": "系统推荐",
     "loadFailed": "加载 D5 推荐失败",
     "adopt": "采纳",

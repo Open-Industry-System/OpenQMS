@@ -3,7 +3,8 @@ import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse } from "antd
 import { CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getD5Recommendations, adoptRecommendation } from "../../api/capa";
-import type { D5ExistingControl, D5GeneralSuggestion } from "../../types";
+import RecommendationDAG from "./RecommendationDAG";
+import type { D5ExistingControl, D5GeneralSuggestion, StageRun } from "../../types";
 
 interface D5RecPanelProps {
   capaId: string;
@@ -18,6 +19,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
   const { message } = App.useApp();
   const [controls, setControls] = useState<D5ExistingControl[]>([]);
   const [suggestions, setSuggestions] = useState<D5GeneralSuggestion[]>([]);
+  const [stages, setStages] = useState<StageRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
@@ -27,6 +29,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
       .then((res) => {
         setControls(res.existing_controls);
         setSuggestions(res.general_suggestions);
+        setStages(res.stages ?? []);
       })
       .catch(() => message.error(t("d5.loadFailed")))
       .finally(() => setLoading(false));
@@ -60,6 +63,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                   d_step: "d5",
                   adopted_text: item.control_name,
                   source: item.match_source || "rule",
+                  stage_index: item.stage_index,
                   item_ref: {
                     control_node_id: item.control_node_id,
                     failure_cause_node_id: item.failure_cause_node_id,
@@ -96,6 +100,14 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
           }
           description={
             <Space size={4} wrap>
+              <Tag data-e2e={`rec-source-${item.match_source}`}>
+                {t(`d5.sources.${item.match_source}`, { defaultValue: item.match_source })}
+              </Tag>
+              {item.stage_index != null && (
+                <Tag data-e2e={`rec-item-stage-${item.stage_index}`}>
+                  {t("d5.stageLabel", { n: item.stage_index })}
+                </Tag>
+              )}
               {item.failure_cause_name && <Tag>{item.failure_cause_name}</Tag>}
               {item.failure_mode_name && <Tag>{item.failure_mode_name}</Tag>}
               {item.fmea_document_no && <Tag color="blue">{item.fmea_document_no}</Tag>}
@@ -129,6 +141,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                   d_step: "d5",
                   adopted_text: item.content,
                   source: item.match_source || "rule",
+                  stage_index: item.stage_index,
                   // 含 provenance：不同来源（historical_capa 的 source_capa_id / category / basis）
                   // 的同文本建议各有独立 item_ref，避免被后端 dedupe 误并
                   item_ref: {
@@ -160,7 +173,15 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
         <List.Item.Meta
           title={item.content}
           description={
-            <Space size={4}>
+            <Space size={4} wrap>
+              <Tag data-e2e={`rec-source-${item.match_source}`}>
+                {t(`d5.sources.${item.match_source}`, { defaultValue: item.match_source })}
+              </Tag>
+              {item.stage_index != null && (
+                <Tag data-e2e={`rec-item-stage-${item.stage_index}`}>
+                  {t("d5.stageLabel", { n: item.stage_index })}
+                </Tag>
+              )}
               <Tag color="blue">
                 {categoryLabel}
               </Tag>
@@ -208,6 +229,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
       title={<Space><SafetyOutlined />{t("d5.title")}</Space>}
       style={{ marginBottom: 16 }}
     >
+      <RecommendationDAG stages={stages} />
       <Collapse defaultActiveKey={["controls", "suggestions"]} items={collapseItems} />
     </Card>
   );

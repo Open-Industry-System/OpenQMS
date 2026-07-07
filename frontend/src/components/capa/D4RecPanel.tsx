@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getD4Recommendations, adoptRecommendation } from "../../api/capa";
-import type { D4Recommendation } from "../../types";
+import RecommendationDAG from "./RecommendationDAG";
+import type { D4Recommendation, StageRun } from "../../types";
 
 const { Text } = Typography;
 
@@ -17,13 +18,17 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
   const { t } = useTranslation("capa");
   const { message } = App.useApp();
   const [recommendations, setRecommendations] = useState<D4Recommendation[]>([]);
+  const [stages, setStages] = useState<StageRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLoading(true);
     getD4Recommendations(capaId)
-      .then((res) => setRecommendations(res.items))
+      .then((res) => {
+        setRecommendations(res.items);
+        setStages(res.stages ?? []);
+      })
       .catch(() => message.error(t("d4.loadFailed")))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -89,6 +94,7 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
                           d_step: "d4",
                           adopted_text: item.failure_cause_name,
                           source: item.match_source,
+                          stage_index: item.stage_index,
                           item_ref: {
                             failure_cause_node_id: item.failure_cause_node_id,
                             fmea_id: item.fmea_id,
@@ -125,6 +131,14 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
                   title={item.failure_cause_name}
                   description={
                     <Space size={4} wrap>
+                      <Tag data-e2e={`rec-source-${item.match_source}`}>
+                        {t(`d4.sources.${item.match_source}`, { defaultValue: item.match_source })}
+                      </Tag>
+                      {item.stage_index != null && (
+                        <Tag data-e2e={`rec-item-stage-${item.stage_index}`}>
+                          {t("d4.stageLabel", { n: item.stage_index })}
+                        </Tag>
+                      )}
                       {item.failure_mode_name && <Tag>{item.failure_mode_name}</Tag>}
                       {item.fmea_document_no && <Tag color="blue">{item.fmea_document_no}</Tag>}
                       {item.match_reason && <Tag color="default">{item.match_reason}</Tag>}
@@ -149,6 +163,7 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
       style={{ marginBottom: 16 }}
       extra={<Text type="secondary" style={{ fontSize: 12 }}>{t("d4.subtitle")}</Text>}
     >
+      <RecommendationDAG stages={stages} />
       {renderGroup(t("d4.groups.linked"), groups.linked)}
       {renderGroup(t("d4.groups.semantic"), groups.semantic)}
       {renderGroup(t("d4.groups.historical"), groups.historical)}

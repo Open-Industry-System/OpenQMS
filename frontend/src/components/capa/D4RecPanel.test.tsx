@@ -5,12 +5,35 @@ afterAll(() => configure({ testIdAttribute: "data-testid" })); // 复位默认�
 import { App, ConfigProvider } from "antd";
 import D4RecPanel from "./D4RecPanel";
 
+const mockStages = vi.hoisted(() =>
+  Array.from({ length: 12 }, (_, i) => ({
+    index: i + 1,
+    name: `Stage ${i + 1}`,
+    source: "test",
+    status: i === 11 ? "done" : "pending",
+    hit_count: 0,
+    summary: `summary ${i + 1}`,
+  }))
+);
+
 vi.mock("../../api/capa", () => ({
-  getD4Recommendations: vi.fn().mockResolvedValue({ items: [
-    { failure_cause_node_id: "c1", failure_cause_name: "根因A", failure_mode_name: "虚焊",
-      fmea_document_no: "PFMEA-1", match_source: "fmea_graph", match_reason: "r",
-      related_d2_keywords: [], confidence: 0.6, fmea_id: "f1" },
-  ] }),
+  getD4Recommendations: vi.fn().mockResolvedValue({
+    stages: mockStages,
+    items: [
+      {
+        failure_cause_node_id: "c1",
+        failure_cause_name: "根因A",
+        failure_mode_name: "虚焊",
+        fmea_document_no: "PFMEA-1",
+        match_source: "fmea_graph",
+        match_reason: "r",
+        related_d2_keywords: [],
+        confidence: 0.6,
+        fmea_id: "f1",
+        stage_index: 2,
+      },
+    ],
+  }),
   adoptRecommendation: vi.fn().mockResolvedValue({ adoption_id: "a1", d_step: "d4", field_value: "根因A" }),
 }));
 
@@ -25,7 +48,15 @@ const renderPanel = (props = {}) => render(
 beforeEach(() => vi.clearAllMocks());
 
 describe("D4RecPanel adopt", () => {
-  it("calls beforeAdopt then adoptRecommendation with source/item_ref", async () => {
+  it("renders DAG and provenance tags", async () => {
+    renderPanel();
+    await waitFor(() => expect(screen.queryByTestId("rec-dag-stage-1")).toBeInTheDocument());
+    expect(screen.getByTestId("rec-dag-stage-12")).toBeInTheDocument();
+    expect(screen.getByTestId("rec-source-fmea_graph")).toBeInTheDocument();
+    expect(screen.getByTestId("rec-item-stage-2")).toBeInTheDocument();
+  });
+
+  it("calls beforeAdopt then adoptRecommendation with source/item_ref and stage_index", async () => {
     const beforeAdopt = vi.fn().mockResolvedValue(undefined);
     const onAdopted = vi.fn();
     renderPanel({ beforeAdopt, onAdopted });
@@ -33,14 +64,16 @@ describe("D4RecPanel adopt", () => {
     fireEvent.click(screen.getByTestId("d4-adopt"));
     await waitFor(() => expect(beforeAdopt).toHaveBeenCalled());
     await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({
-      d_step: "d4", adopted_text: "根因A", source: "fmea_graph",
+      d_step: "d4",
+      adopted_text: "根因A",
+      source: "fmea_graph",
+      stage_index: 2,
       item_ref: expect.objectContaining({ failure_cause_node_id: "c1", fmea_id: "f1" }),
     })));
     await waitFor(() => expect(onAdopted).toHaveBeenCalled());
   });
 
   it("does not call adoptRecommendation until beforeAdopt resolves (flush-then-adopt ordering)", async () => {
-    // 关键路径：未保存输入保护要求"先 flush 且等待完成再采纳"。用 deferred promise 钉死顺序。
     let resolveBefore!: () => void;
     const beforeAdopt = vi.fn().mockReturnValue(new Promise<void>((r) => { resolveBefore = r; }));
     renderPanel({ beforeAdopt });
@@ -50,9 +83,8 @@ describe("D4RecPanel adopt", () => {
     // beforeAdopt 未 resolve：让微任务跑完一轮，采纳端点仍不应被调用
     await new Promise((r) => setTimeout(r, 0));
     expect(adoptRecommendation).not.toHaveBeenCalled();
-    // resolve beforeAdopt → 采纳端点才被调用
     resolveBefore();
-    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d4" })));
+    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d4", stage_index: 2 })));
   });
 
   it("does not call adoptRecommendation when beforeAdopt rejects (save failed → block adopt)", async () => {

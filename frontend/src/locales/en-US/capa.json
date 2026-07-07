@@ -107,6 +107,16 @@
       "llm": "AI Suggestions",
       "rule": "Rule Engine Suggestions"
     },
+    "sources": {
+      "linked": "Linked",
+      "fmea_graph": "FMEA Graph",
+      "semantic_search": "Semantic Match",
+      "keyword": "Keyword",
+      "historical_capa": "Historical CAPA",
+      "llm": "AI Suggestion",
+      "rule": "Rule Engine"
+    },
+    "stageLabel": "Stage {{n}}",
     "adopt": "Adopt",
     "skip": "Skip",
     "readonlyTooltip": "Read-only users cannot adopt",
@@ -141,6 +151,18 @@
       "预防措施": "Preventive",
       "纠正措施": "Corrective"
     },
+    "sources": {
+      "fmea_graph": "FMEA Graph",
+      "semantic_search": "Semantic Match",
+      "historical_capa": "Historical CAPA",
+      "historical_capa_measure": "Historical CAPA Measure",
+      "rule_engine": "Rule Engine",
+      "rule_engine_measure": "Rule Engine Measure",
+      "rule": "Rule Engine",
+      "llm": "AI Suggestion",
+      "graph": "Graph Similarity"
+    },
+    "stageLabel": "Stage {{n}}",
     "defaultBasis": "System recommendation",
     "loadFailed": "Failed to load D5 recommendations",
     "adopt": "Adopt",
