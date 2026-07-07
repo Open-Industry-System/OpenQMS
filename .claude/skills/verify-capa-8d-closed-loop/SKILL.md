@@ -105,7 +105,8 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 - **落库**：UPDATE。
 
 #### B5 D4 根因分析（含 AI 推荐 + 现场验证）
-- **做**：点 `[data-e2e="capa-advance"]` 推进到 D4 → 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因 → 现场验证（见 C2）→ 等 D4 label「根因分析 (5Why / 鱼骨图)」可见 → `page.locator("textarea").first()` 填根因 → `.blur()` 落库 → 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
+- **做**：点 `[data-e2e="capa-advance"]` 推进到 D4 → 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因（`adopt-recommendation` 把采纳的根因写入 `d4_root_cause` 并回填 TextArea，`onAdopted` → `refreshCapa`）→ **断言 D4 TextArea 已显示采纳的根因**（`GET /api/capa/{report_id}` 回读 `d4_root_cause` 与采纳值一致）→ 现场验证（见 C2）→ 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
+- **关键**：D4→D5 闸口要求**已验证记录的 `root_cause_text` 与当前 `d4_root_cause` 完全一致**（空白归一化后，`capa_service.py:412-416`）。采纳后**不要手动覆盖 TextArea**——验证记录绑定的是采纳那一刻的根因文本，改了就放行不了。若需手填根因，必须在采纳/验证**之前**填，且验证时用同一文本。
 - **期望**：D4 视图出现 D4RecPanel + D4VerificationCard + 根因 TextArea。
 - **断言**：**未完成现场验证时 D4→D5 应被阻断**（advance 报错或禁用）；验证通过后才可推进。
 - **落库**：审计 1 条 TRANSITION `D4_ROOT_CAUSE → D5_CORRECTION`，`operated_by == "engineer"`。
@@ -165,7 +166,11 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 读 `data-status` 属性；`source`（Tag）/`hit_count`（Badge）/`summary`（Text）是节点可见文本，从渲染内容读（`frontend/src/components/capa/RecommendationDAG.tsx:45-51`）。
 
 **断言**：
-- 推荐列表非空；每条推荐可见 `[data-e2e^="rec-source-"]`（来源 provenance 标签）和 `[data-e2e^="rec-item-stage-"]`（命中阶段索引）；`AP∈{H,M,L}`、`S/O/D∈1..10`。
+- 推荐列表非空；每条推荐可见 `[data-e2e^="rec-source-"]`（来源 provenance 标签）和 `[data-e2e^="rec-item-stage-"]`（命中阶段索引）。
+- **AP / S / O / D 失败规则**：用户故事要求每条推荐带 `AP∈{H,M,L}`、`S/O/D∈1..10`。当前 `D4Recommendation`/`D5Recommendation` schema **不暴露** AP/S/O/D 字段（只有 `match_source`/`confidence`/`stage_index` 等，`schemas/capa.py:85,109`）。
+  - 先查 UI 推荐卡片可见文本和 `GET /api/capa/{report_id}/d4-fmea-recommendations`（及 d5）响应里有无 AP/S/O/D；
+  - **有** → 断言取值范围，标 PASS；
+  - **无**（schema/UI 都没有）→ 标 **MISSING**（功能未实现），不自行脑补「故事没要求所以跳过」，也不在别处搜。缺陷清单单列：「D4/D5 推荐未暴露 AP/S/O/D provenance」。
 - 阶段 `hit_count`/`summary` 可见（非黑盒）。
 - D4、D5 各跑一遍，分别记录。
 
