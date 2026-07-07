@@ -11,6 +11,7 @@ Two verification layers:
    DocumentEmbedding rows in two factories, then assert only factory A's rows
    are returned when context.factory_id=factory_A.
 """
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -374,7 +375,7 @@ async def _seed_embedding(
             "embedding": _vec_str(dim, hot_idx),
             "product_line_code": pl_code,
             "factory_id": factory_id,
-            "metadata": metadata or {},
+            "metadata": json.dumps(metadata) if metadata else "{}",
             "embedding_model": model,
         },
     )
