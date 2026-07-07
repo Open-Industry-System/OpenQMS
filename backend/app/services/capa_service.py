@@ -214,6 +214,17 @@ async def update_capa(
         if k in EMBEDDING_FIELDS and getattr(capa, k) != v
     }
 
+    # Task 14: d8_closure 变更且 status=D8_CLOSURE 时，先 savepoint 内 delete-and-rebuild
+    # d8 lessons + 清理旧 embedding/outbox，成功后才 mutate capa.d8_closure（R4 fail-closed）。
+    if (
+        "d8_closure" in update_data
+        and update_data["d8_closure"] is not None
+        and capa.d8_closure != update_data["d8_closure"]
+        and capa.status == "D8_CLOSURE"
+    ):
+        from app.services.capa_lessons_service import _extract_d8_with_cleanup
+        await _extract_d8_with_cleanup(db, capa, update_data["d8_closure"])
+
     changed_fields = {}
     for key, value in update_data.items():
         if value is not None and hasattr(capa, key):
