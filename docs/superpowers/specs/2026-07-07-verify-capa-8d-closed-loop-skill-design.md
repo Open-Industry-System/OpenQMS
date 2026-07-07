@@ -60,7 +60,7 @@
 
 每步四段式，内联具体 selector。10 步骨架（B1/B5 详写为锚点，其余同形，完整四段式留到实现阶段写进 SKILL.md）：
 
-- **B1** engineer 登录 → CAPA 列表 → `[data-e2e="capa-create"]` → 新建 8D：单号 `E2E-STORY-CAPA-001` / 标题「来料螺栓尺寸超差」/ 严重度「致命」/ 产品线 `DC-DC-100-E2E`。断言：列表出现该单号；`GET /api/capa/{report_id}` 回读 `current_step=D1`；审计 1 条 CREATE（engineer）。
+- **B1** engineer 登录 → CAPA 列表 → `[data-e2e="capa-create"]` → 新建 8D：单号 `E2E-STORY-CAPA-001` / 标题「来料螺栓尺寸超差」/ 严重度「致命」 / 产品线 `DC-DC-100-E2E`。断言：列表出现该单号；`GET /api/capa/{report_id}` 回读 `status == "D1_TEAM"`（CAPAResponse 字段是 `status`，非 `current_step`；初始值 `D1_TEAM`，见 `backend/app/schemas/capa.py:34` / `models/capa.py:23`）；审计 1 条 CREATE（engineer）。
 - **B2** D1 团队组建，指定 8D 负责人。
 - **B3** D2 问题描述 + `[data-e2e="capa-ai-draft"]` AI 草拟 → 确认后保存。
 - **B4** D3 临时措施。
@@ -122,7 +122,7 @@ skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件�
 
 1. **账号表**：从 `/api/e2e/seed-state` 动态取密码；列 4 角色 + 各自能/不能推进的 D 步。
 2. **selector 表**：上述所有 `[data-e2e="..."]` 一览（统一带引号，避免 agent 复制出不稳定 selector）；每项标注断言读取方式——属性（如 `data-status`）还是可见文本（如 stage 的 `source`/`hit_count`/`summary`）。
-3. **8D 状态机表**：D1→…→D8 顺序、每步需权限（编辑/审批）、不可跳步。
+3. **8D 状态机表**：`D1_TEAM → D2_DESCRIPTION → D3_INTERIM → D4_ROOT_CAUSE → D5_CORRECTION → D6_VERIFICATION → D7_PREVENTION → D8_CLOSURE`（`backend/app/state_machines/eightd_state.py`）；回退边 `D4→D3`、`D6→D5`（对应「现场验证不通过回到上一步」）；每步需权限——D1–D6 推进需 EDIT（engineer 可），D7→D8 需审批（manager 可，engineer 不可）；不可跳步。
 4. **审计轨迹期望**：1 CREATE + 7 TRANSITION；6 条 D1→D2…D6→D7 由 engineer，末条 D7→D8 由 manager（故事「D1-D7 由现场质量工程师」指 D 步内容归属，过渡归属按此拆分）。
 5. **报告模板**：见下。
 
@@ -148,10 +148,11 @@ skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件�
   2. **总览**：PASS/PASS-NOTE/FAIL/MISSING 计数 + 整体结论（PASS / 有缺陷 / BLOCKED）。
   3. **B 段步骤表**：10 步 × {做什么 / 期望 / 断言结果 / 标签}。
   4. **C 段 DAG 阶段矩阵**：D4 和 D5 各一张 12 阶段表（index / 名称 / 来源 / 状态 / 命中数 / 摘要 / 标签）。
-  5. **审计轨迹核对**：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /auth/login` 拿 token → `GET /api/admin/logs/audit?table_name=capa_eightd&page=1&page_size=200&start=<走查开始ISO>` → 客户端按 `record_id` == 该 8D id 过滤（`/api/audit-logs?target_id` 不存在，勿用）。期望 1 CREATE + 7 TRANSITION；6 条 D1→D2…D6→D7 由 engineer，末条 D7→D8 由 manager。
-  6. **落库抽查**：`GET /api/capa/{report_id}` 回读，核对单号/标题/严重度/current_step/各 D 步字段；`GET /api/capa/{report_id}/root-cause-verifications` 核对验证记录；采纳记录核对（`POST /api/capa/{report_id}/adopt-recommendation` 留痕）。
-  7. **缺陷清单**：所有 FAIL + MISSING，每条含「步骤 / 期望 / 实际 / 严重度 / 截图路径」。
-  8. **证据附件**：现场验证上传的文件名 + 上传后是否在详情可见。
+  5. **审计轨迹核对**：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /auth/login` 拿 token → `GET /api/admin/logs/audit?table_name=capa_eightd&page=1&page_size=200&start=<走查开始ISO>` → 客户端按 `record_id` == 该 8D id 过滤（`/api/audit-logs?target_id` 不存在，勿用）。期望 1 CREATE + 7 TRANSITION；6 条 D1→D2…D6→D7 由 engineer、末条 D7→D8 由 manager。过渡断言形状：`changed_fields.old_status` / `changed_fields.new_status` / `operated_by`（参考 `frontend/e2e/specs/m1-core/capa-story-closed-loop.spec.ts:240-249`）。
+  6. **AI 采纳留痕核对**（同上 audit 查询）：过滤 `action == "ADOPT_RECOMMENDATION"`，断 `changed_fields.source` 真值、`changed_fields.stage_index` 为数字、`operated_by == "engineer"`（`adopt-recommendation` 是 POST 写入、无 GET 回读端点，留痕只能从审计查；参考 `capa-story-closed-loop.spec.ts:248-256`）。
+  7. **落库抽查**：`GET /api/capa/{report_id}` 回读，核对 `document_no`/`title`/`severity`/`status`/各 D 步字段；`GET /api/capa/{report_id}/root-cause-verifications` 核对验证记录。
+  8. **缺陷清单**：所有 FAIL + MISSING，每条含「步骤 / 期望 / 实际 / 严重度 / 截图路径」。
+  9. **证据附件**：现场验证上传的文件名 + 上传后是否在详情可见。
 
 ## 同步机制
 
