@@ -28,6 +28,7 @@ pgdata/
 
 # ── Tool-specific (Claude Code, CodeGraph, Playwright, etc.) ─────────────────
 .claude/
+!.claude/skills/
 .codegraph/
 .agents/
 .superpowers/
