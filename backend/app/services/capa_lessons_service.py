@@ -83,9 +83,9 @@ async def _extract_d8_with_cleanup(
                 ),
             ))
         return lessons
-    except Exception:
+    except Exception as exc:
         # savepoint 已 rollback；fail-closed：阻止 d8_closure 字段 mutation
-        raise ValueError("D8 lessons 抽取失败，无法保存闭环总结，请重试")
+        raise ValueError("D8 lessons 抽取失败，无法保存闭环总结，请重试") from exc
 
 
 async def _extract_lessons(
