@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from app.services.recommendation_orchestrator import RecommendationOrchestrator, STAGE_PLAN
-from app.services.recommendation_types import RecommendationContext
+from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 
 
 def _ctx(stage="d4", linked_fmea=None):
@@ -21,6 +21,26 @@ def _stub_source(*candidates):
             return "stub summary"
 
     return _Source()
+
+
+def _async_stub_source(*candidates):
+    """返回一个可被 await 的 mock source，记录 retrieve 调用，提供新源协议所需的 should_skip。"""
+    class _AsyncSource:
+        def __init__(self, candidates):
+            self.candidates = candidates
+            self.retrieve_calls = []
+
+        async def should_skip(self, context):
+            return None
+
+        async def retrieve(self, context):
+            self.retrieve_calls.append(context)
+            return list(self.candidates)
+
+        def summary(self, candidates):
+            return "stub summary"
+
+    return _AsyncSource(candidates)
 
 
 @pytest.mark.asyncio
@@ -149,3 +169,71 @@ async def test_stage10_d4_uses_rule_engine():
     markers = {c.metadata.get("marker") for c in result.items}
     assert "d4" in markers
     assert "d5" not in markers
+
+
+@pytest.mark.asyncio
+async def test_d4_stage3_runs_historical_capa():
+    """D4 stage 3 以 semantic_search 为主源，并额外执行 historical_capa。"""
+    from app.services.llm_fusion_layer import LLMOutcome
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), MagicMock())
+    orch.llm_layer.enrich = AsyncMock(side_effect=lambda cands, ctx: LLMOutcome(candidates=list(cands), attempted=0))
+
+    ss_cand = RecommendationCandidate(
+        source="semantic_search", content="语义召回根因", category=None, confidence=0.8,
+        match_reason="语义相似", metadata={"marker": "semantic"})
+    hist_cand = RecommendationCandidate(
+        source="historical_capa", content="历史CAPA根因", category=None, confidence=0.7,
+        match_reason="历史 CAPA 相似", metadata={"marker": "historical_capa", "historical_capa_id": "capa-1"})
+
+    orch._sources["semantic_search"] = _async_stub_source(ss_cand)
+    orch._sources["historical_capa"] = _async_stub_source(hist_cand)
+
+    result = await orch.run(_ctx(stage="d4"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s3 = next(s for s in result.stages if s.index == 3)
+    assert s3.source == "semantic_search"
+    assert s3.status == "done"
+    assert s3.hit_count == 2
+
+    markers = {c.metadata.get("marker") for c in result.items}
+    assert "semantic" in markers
+    assert "historical_capa" in markers
+    assert len(orch._sources["historical_capa"].retrieve_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_d5_stage5_runs_historical_capa_measure():
+    """D5 stage 5 以 lessons_learned 为主源，并额外执行 historical_capa_measure。"""
+    from app.services.llm_fusion_layer import LLMOutcome
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), MagicMock())
+    orch.llm_layer.enrich = AsyncMock(side_effect=lambda cands, ctx: LLMOutcome(candidates=list(cands), attempted=0))
+
+    ll_cand = RecommendationCandidate(
+        source="lessons_learned", content="经验教训措施", category="预防措施", confidence=0.8,
+        match_reason="经验教训命中", metadata={"marker": "lessons_learned"})
+    hist_cand = RecommendationCandidate(
+        source="historical_capa_measure", content="历史CAPA措施", category="纠正措施", confidence=0.7,
+        match_reason="历史 CAPA 措施命中", metadata={"marker": "historical_capa_measure"})
+
+    orch._sources["lessons_learned"] = _async_stub_source(ll_cand)
+    orch._sources["historical_capa_measure"] = _async_stub_source(hist_cand)
+
+    result = await orch.run(_ctx(stage="d5"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s5 = next(s for s in result.stages if s.index == 5)
+    assert s5.source == "lessons_learned"
+    assert s5.status == "done"
+    assert s5.hit_count == 2
+
+    markers = {c.metadata.get("marker") for c in result.items}
+    assert "lessons_learned" in markers
+    assert "historical_capa_measure" in markers
+    assert len(orch._sources["historical_capa_measure"].retrieve_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_d4_stage3_historical_capa_skipped_when_no_embedding():
+    """embedding 未配置时，D4 stage 3 因主源/额外源均依赖 embedding 而 skipped。"""
+    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    result = await orch.run(_ctx(stage="d4"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s3 = next(s for s in result.stages if s.index == 3)
+    assert s3.status == "skipped"
+    assert "未配置 embedding" in s3.summary

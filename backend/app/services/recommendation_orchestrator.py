@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import inspect
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from app.services.fusion_engine import FusionEngine
@@ -53,14 +53,16 @@ class StageSpec:
     derived: bool = False               # 派生阶段：消费已召回候选，非独立 retrieve（决策 15，D5 stage 2）
     terminal: bool = False              # 终态阶段：主循环跳过，fusion 后单次发射（决策 16，stage 12）
     d5_source_kind: str | None = None   # D5 覆盖 source：D4 用 source_kind，D5 用本字段（如 stage 10 措施规则）
+    extra_sources_d4: list[str] = field(default_factory=list)
+    extra_sources_d5: list[str] = field(default_factory=list)
 
 
 STAGE_PLAN: list[StageSpec] = [
     StageSpec(1,  "上下文采集",        "internal",        "both"),
     StageSpec(2,  "本产品 FMEA 检索",   "fmea_graph",      "both"),   # D5: derived（下方 executes_after）
-    StageSpec(3,  "全局知识库 RAG 检索", "semantic_search", "both"),
+    StageSpec(3,  "全局知识库 RAG 检索", "semantic_search", "both", extra_sources_d4=["historical_capa"]),
     StageSpec(4,  "同类型产品 KB 检索",  "same_type_product_kb", "both"),
-    StageSpec(5,  "经验教训库检索",     "lessons_learned", "both"),
+    StageSpec(5,  "经验教训库检索",     "lessons_learned", "both", extra_sources_d5=["historical_capa_measure"]),
     StageSpec(6,  "SPC 异常关联检索",   "spc_anomaly",     "d4"),
     StageSpec(7,  "MES 设备/过程检索",  "mes",             "d4"),
     StageSpec(8,  "IQC 来料检索",       "iqc",             "d4"),
@@ -94,8 +96,8 @@ class RecommendationOrchestrator:
         return {
             "fmea_graph": FMEAGraphSource(),
             "semantic_search": SemanticSearchSource(self.db, self.embedding),
-            # Registered as fallback per design L91 — NOT executed by STAGE_PLAN
-            # (superseded by lessons_learned stage 5 + 6 new D4 sources); kept for future use.
+            # historical_capa: D4 stage 3 extra (global KB RAG recalls similar past CAPA root causes);
+            # historical_capa_measure: D5 stage 5 extra (lessons learned + historical correction measures).
             "historical_capa": HistoricalCAPASource(self.db, self.embedding),
             "historical_capa_measure": HistoricalCAPAMeasureSource(self.db, self.embedding),
             "rule_engine": RuleEngineSource(),
@@ -193,48 +195,99 @@ class RecommendationOrchestrator:
         return RecommendationResult(items=fused, stages=stages)
 
     async def _exec_recall_stage(self, spec, context, all_candidates) -> StageRun:
-        # 运行时 source_kind 解析：D5 优先使用 d5_source_kind（如 stage 10 措施规则）
-        kind = spec.d5_source_kind if (context.stage == "d5" and spec.d5_source_kind) else spec.source_kind
+        # 解析本 stage 在当前上下文要执行的 source 列表：primary（DAG 标签）+ extras
+        primary = spec.d5_source_kind if (context.stage == "d5" and spec.d5_source_kind) else spec.source_kind
+        extras = spec.extra_sources_d4 if context.stage == "d4" else spec.extra_sources_d5
+        kinds = [primary] + list(extras)
+
         # 1. stage_filter 不匹配 → skipped
         if spec.stage_filter != "both" and spec.stage_filter != context.stage:
-            return StageRun(spec.index, spec.name, kind, "skipped",
+            return StageRun(spec.index, spec.name, primary, "skipped",
                             summary=f"{context.stage.upper()} 阶段不适用")
         # 2. internal（stage 1 上下文）
-        if kind == "internal":
+        if primary == "internal":
             return StageRun(spec.index, spec.name, "internal", "done",
                             summary="上下文已采集（D2/D4 + 关联 FMEA + 产品线）")
-        # 3. 普通 source（LLM stage 11 不在此，由 _exec_llm_stage 处理）
-        source = self._sources.get(kind)
-        try:
-            # R10-修复：per-stage 协议校验（违规 → 该 stage error，不阻断构造/整请求；其余 stage + 12 阶段响应照常）
-            proto_violation = self._check_source_protocol(spec, source, kind)
-            if proto_violation:
-                return StageRun(spec.index, spec.name, kind, "error",
-                                error=proto_violation, summary=f"source 协议违规: {proto_violation}")
-            # 唯一 skip/done(0) 规则（R3-修复合约一致性 + R6-修复 async）：
-            # ① 编排器 _stage_precondition 查结构性前置（既有源：linked_fmea None / embedding None）
-            # ② 新源 async should_skip 查底层数据存在性（强制，R6-修复：async + await）
-            # 返回 reason → skipped；None → retrieve，[] 即 done(0)，非空即 done(N)
-            pre = self._stage_precondition(spec, context)
-            if pre is None and hasattr(source, "should_skip"):
-                pre = await source.should_skip(context)   # R6-修复：should_skip 是 async，必须 await（否则返回 coroutine 被误判 truthy → 误 skipped）
-            if pre:
-                return StageRun(spec.index, spec.name, kind, "skipped", summary=pre)
-            candidates = await source.retrieve(context)
-            for c in candidates:
-                c.metadata["stage_index"] = spec.index
-            all_candidates.extend(candidates)
-            return StageRun(spec.index, spec.name, kind, "done", hit_count=len(candidates),
-                            summary=source.summary(candidates) if hasattr(source, "summary") else "")
-        except Exception as e:
-            logger.warning(f"Stage {spec.index} {spec.name} failed: {e}")
-            return StageRun(spec.index, spec.name, kind, "error", error=str(e)[:200])
 
-    def _stage_precondition(self, spec, context) -> str | None:
+        # 3. 结构性前置：组合阶段中任一源依赖 embedding/linked_fmea 则整阶段 skipped
+        pre = self._stage_precondition(spec, context, kinds)
+        if pre:
+            return StageRun(spec.index, spec.name, primary, "skipped", summary=pre)
+
+        stage_candidates: list[RecommendationCandidate] = []
+        per_source_summary: list[str] = []
+        errors: list[str] = []
+        skipped_sources: list[str] = []
+
+        for kind in kinds:
+            source = self._sources.get(kind)
+            if source is None:
+                if kind == primary:
+                    errors.append(f"source {kind} 未注册")
+                else:
+                    logger.warning(f"Stage {spec.index} extra source {kind} not registered, skipping")
+                continue
+
+            # 协议校验仅对新源；额外源违规时跳过，不阻断主源
+            if kind in self.NEW_SOURCE_KINDS:
+                proto_violation = self._check_source_protocol(spec, source, kind)
+                if proto_violation:
+                    if kind == primary:
+                        errors.append(proto_violation)
+                    else:
+                        logger.warning(f"Stage {spec.index} extra source {kind} protocol violation, skipping: {proto_violation}")
+                    continue
+
+            try:
+                # should_skip：按源独立处理。主源 skipped 且无候选时 stage skipped；额外源 skipped 仅跳过自身
+                if hasattr(source, "should_skip"):
+                    skip_reason = await source.should_skip(context)
+                    if skip_reason:
+                        if kind == primary:
+                            skipped_sources.append(f"{kind}: {skip_reason}")
+                        else:
+                            logger.warning(f"Stage {spec.index} extra source {kind} skipped: {skip_reason}")
+                        continue
+
+                candidates = await source.retrieve(context)
+                for c in candidates:
+                    c.metadata["stage_index"] = spec.index
+                stage_candidates.extend(candidates)
+                if candidates:
+                    per_source_summary.append(f"{kind}: {len(candidates)}")
+            except Exception as e:
+                logger.warning(f"Stage {spec.index} {spec.name} source {kind} failed: {e}")
+                if kind == primary:
+                    errors.append(f"{kind}: {str(e)[:100]}")
+
+        all_candidates.extend(stage_candidates)
+
+        # 4. 组合结果汇总：source 标签保持 primary，hit_count 为所有源候选总数
+        if stage_candidates:
+            summary = ", ".join(per_source_summary) if per_source_summary else f"{primary}: {len(stage_candidates)}"
+            return StageRun(spec.index, spec.name, primary, "done",
+                            hit_count=len(stage_candidates), summary=summary)
+
+        if errors:
+            return StageRun(spec.index, spec.name, primary, "error",
+                            error="; ".join(errors),
+                            summary=f"组合执行失败: {'; '.join(errors)}")
+
+        if skipped_sources:
+            return StageRun(spec.index, spec.name, primary, "skipped",
+                            summary="; ".join(skipped_sources))
+
+        return StageRun(spec.index, spec.name, primary, "done",
+                        hit_count=0, summary=f"{primary}: 0")
+
+    def _stage_precondition(self, spec, context, kinds) -> str | None:
         # R3-修复：集中既有源 + 新源共用的结构性前置条件（不要求既有源新增 should_skip）
-        if spec.source_kind == "fmea_graph" and context.stage == "d4" and not context.linked_fmea:
+        # 组合执行：检查 kinds 列表中任一源是否依赖缺失的 embedding / linked_fmea
+        if "fmea_graph" in kinds and context.stage == "d4" and not context.linked_fmea:
             return "未关联 FMEA"
-        if spec.source_kind in ("semantic_search", "same_type_product_kb", "lessons_learned") and self.embedding is None:
+        embedding_dependent = {"semantic_search", "same_type_product_kb", "lessons_learned",
+                               "historical_capa", "historical_capa_measure"}
+        if self.embedding is None and any(k in embedding_dependent for k in kinds):
             return "未配置 embedding"
         return None
 
