@@ -31,7 +31,7 @@
 - **存放**: `.claude/skills/verify-capa-8d-closed-loop/SKILL.md`（项目级，随仓库走）
 - **类型**: technique/reference —— 给清晰步骤 + 查表 + 优秀实例；不做 rationalization 表 / red flags（那是 discipline-enforcing skill 的事）
 - **description**（触发条件，第三人称，只写何时用不写怎么做）:
-  > Use when asked to verify / walk through / 验收 / 走查 the OpenQMS CAPA 8D closed-loop user story (US-E2E-01) end-to-end in a real browser — e.g. "验收 US-E2E-01" / "walk through this user story" / "端到端测试这个用户故事". Drives the live app via Playwright browser tools, logs in as each role, fills/clicks through the 8D flow, asserts each acceptance criterion, and writes a markdown pass/fail report.
+  > Use when asked to verify / walk through / 验收 / 走查 the OpenQMS CAPA 8D closed-loop user story (US-E2E-01) end-to-end in a real browser — e.g. "验收 US-E2E-01" / "walk through this user story" / "端到端测试这个用户故事". Symptoms include needing to confirm acceptance criteria pass, check the AI recommendation orchestration DAG, or produce an acceptance report for the 8D closed-loop story.
 
 ## 走查剧本结构（skill 主体）
 

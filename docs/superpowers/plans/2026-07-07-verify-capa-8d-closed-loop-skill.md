@@ -123,10 +123,16 @@ head -20 "$SKILL" | grep -q '^description: Use when' || { echo "FAIL: missing/ba
 # 2. every [data-e2e="X"] in SKILL.md must appear in frontend/src
 status=0
 for sel in $(grep -oE 'data-e2e="[^"]+"' "$SKILL" | sed -E 's/data-e2e="([^"]+)"/\1/' | sort -u); do
-  pat="$sel"
-  # rec-dag-stage-<i> / rec-dag-stage-* are templated — match the prefix
-  [[ "$sel" == "rec-dag-stage-"* ]] && pat='rec-dag-stage-'
-  if ! grep -rqs "data-e2e=\"$pat" frontend/src; then
+  # rec-dag-stage-<i> is a JSX template literal (data-e2e={`rec-dag-stage-${i}`}),
+  # not a quoted attr — search the bare prefix, not data-e2e="rec-dag-stage-.
+  if [[ "$sel" == "rec-dag-stage-"* ]]; then
+    if ! grep -rqs 'rec-dag-stage-' frontend/src; then
+      echo "MISSING selector in frontend/src: $sel"
+      status=1
+    fi
+    continue
+  fi
+  if ! grep -rqs "data-e2e=\"$sel\"" frontend/src; then
     echo "MISSING selector in frontend/src: $sel"
     status=1
   fi
@@ -168,7 +174,7 @@ Write `.claude/skills/verify-capa-8d-closed-loop/SKILL.md` with exactly this con
 ````markdown
 ---
 name: verify-capa-8d-closed-loop
-description: Use when asked to verify / walk through / 验收 / 走查 the OpenQMS CAPA 8D closed-loop user story (US-E2E-01) end-to-end in a real browser — e.g. "验收 US-E2E-01" / "walk through this user story" / "端到端测试这个用户故事". Drives the live app via Playwright browser MCP tools, logs in as each role, fills/clicks through the 8D flow, asserts each acceptance criterion, and writes a markdown pass/fail report.
+description: Use when asked to verify / walk through / 验收 / 走查 the OpenQMS CAPA 8D closed-loop user story (US-E2E-01) end-to-end in a real browser — e.g. "验收 US-E2E-01" / "walk through this user story" / "端到端测试这个用户故事". Symptoms include needing to confirm acceptance criteria pass, check the AI recommendation orchestration DAG, or produce an acceptance report for the 8D closed-loop story.
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop.md
@@ -497,8 +503,8 @@ Only run this if the e2e stack is up AND `.env.e2e` has all four LLM credentials
 
 - [ ] **Step 1: Confirm env is ready**
 
-Run: `curl -sf http://localhost:5174 >/dev/null && grep -qE '^LLM_(PROVIDER|API_KEY|MODEL|BASE_URL)=.+' .env.e2e && echo READY || echo NOT_READY`
-Expected: `READY`. If `NOT_READY`, stop this task and record "live walk deferred".
+Run: `curl -sf http://localhost:5174 >/dev/null && for k in LLM_PROVIDER LLM_API_KEY LLM_MODEL LLM_BASE_URL; do grep -qE "^${k}=.+" .env.e2e || exit 1; done && echo READY || echo NOT_READY`
+Expected: `READY`. If `NOT_READY`, stop this task and record "live walk deferred". (Per-line `grep -qE` in the loop ensures all four fields are present; the `|| exit 1` short-circuits on the first missing one.)
 
 - [ ] **Step 2: Dispatch a fresh subagent to execute the skill**
 
