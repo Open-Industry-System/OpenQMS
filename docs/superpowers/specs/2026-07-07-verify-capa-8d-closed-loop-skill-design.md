@@ -115,7 +115,7 @@ skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件�
 
 ### D 段 — 收尾与报告
 
-- 清理：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /auth/login` 拿 admin token → `POST /api/e2e/cleanup?prefix=E2E-STORY-`（后端 gated 端点，只删本前缀走查产生的记录，**不删 seed**）。
+- 清理：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /api/auth/login` 拿 admin token → `POST /api/e2e/cleanup?prefix=E2E-STORY-`（后端 gated 端点，只删本前缀走查产生的记录，**不删 seed**）。
 - 汇总每步标签 → 写报告 → 关浏览器。
 
 ## 内联查表（skill 里给 agent 速查）
@@ -148,7 +148,7 @@ skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件�
   2. **总览**：PASS/PASS-NOTE/FAIL/MISSING 计数 + 整体结论（PASS / 有缺陷 / BLOCKED）。
   3. **B 段步骤表**：10 步 × {做什么 / 期望 / 断言结果 / 标签}。
   4. **C 段 DAG 阶段矩阵**：D4 和 D5 各一张 12 阶段表（index / 名称 / 来源 / 状态 / 命中数 / 摘要 / 标签）。
-  5. **审计轨迹核对**：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /auth/login` 拿 token → `GET /api/admin/logs/audit?table_name=capa_eightd&page=1&page_size=200&start=<走查开始ISO>` → 客户端按 `record_id` == 该 8D id 过滤（`/api/audit-logs?target_id` 不存在，勿用）。期望 1 CREATE + 7 TRANSITION；6 条 D1→D2…D6→D7 由 engineer、末条 D7→D8 由 manager。过渡断言形状：`changed_fields.old_status` / `changed_fields.new_status` / `operated_by`（参考 `frontend/e2e/specs/m1-core/capa-story-closed-loop.spec.ts:240-249`）。
+  5. **审计轨迹核对**：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /api/auth/login` 拿 token → `GET /api/admin/logs/audit?table_name=capa_eightd&page=1&page_size=200&start=<走查开始ISO>` → 客户端按 `record_id` == 该 8D id 过滤（`/api/audit-logs?target_id` 不存在，勿用）。期望 1 CREATE + 7 TRANSITION；6 条 D1→D2…D6→D7 由 engineer、末条 D7→D8 由 manager。过渡断言形状：`changed_fields.old_status` / `changed_fields.new_status` / `operated_by`（参考 `frontend/e2e/specs/m1-core/capa-story-closed-loop.spec.ts:240-249`）。
   6. **AI 采纳留痕核对**（同上 audit 查询）：过滤 `action == "ADOPT_RECOMMENDATION"`，断 `changed_fields.source` 真值、`changed_fields.stage_index` 为数字、`operated_by == "engineer"`（`adopt-recommendation` 是 POST 写入、无 GET 回读端点，留痕只能从审计查；参考 `capa-story-closed-loop.spec.ts:248-256`）。
   7. **落库抽查**：`GET /api/capa/{report_id}` 回读，核对 `document_no`/`title`/`severity`/`status`/各 D 步字段；`GET /api/capa/{report_id}/root-cause-verifications` 核对验证记录。
   8. **缺陷清单**：所有 FAIL + MISSING，每条含「步骤 / 期望 / 实际 / 严重度 / 截图路径」。
