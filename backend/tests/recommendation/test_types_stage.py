@@ -20,6 +20,19 @@ def test_to_d5_suggestion_schema_emits_stage_index():
     assert c.to_d5_suggestion_schema()["match_source"] == "rule"
 
 
+def test_to_d5_suggestion_schema_historical_capa_measure_provenance():
+    # historical_capa_measure (D5) must emit source_capa_id/source_capa_document_no
+    # so D5 adopt/audit provenance is preserved (not just historical_capa).
+    c = RecommendationCandidate(source="historical_capa_measure", content="更换供应商批次",
+                                category="纠正措施", confidence=0.8, match_reason="历史 CAPA 相似措施",
+                                metadata={"stage_index": 5, "historical_capa_id": "capa-abc",
+                                          "document_no": "8D-2026-001"})
+    schema = c.to_d5_suggestion_schema()
+    assert schema["match_source"] == "historical_capa_measure"
+    assert schema["source_capa_id"] == "capa-abc"
+    assert schema["source_capa_document_no"] == "8D-2026-001"
+
+
 def test_recommendation_result_has_stages():
     r = RecommendationResult(items=[], stages=[StageRun(1, "ctx", "internal", "done")])
     assert len(r.stages) == 1

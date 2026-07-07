@@ -95,7 +95,7 @@ class RecommendationCandidate:
             "match_source": "rule" if self.source in ("rule_engine", "rule_engine_measure") else self.source,
             "stage_index": self.metadata.get("stage_index"),
         }
-        if self.source == "historical_capa":
+        if self.source in ("historical_capa", "historical_capa_measure"):
             result["source_capa_id"] = self.metadata.get("historical_capa_id")
             result["source_capa_document_no"] = self.metadata.get("document_no")
         return result
