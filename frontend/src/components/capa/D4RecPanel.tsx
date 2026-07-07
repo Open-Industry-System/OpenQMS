@@ -35,22 +35,22 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;
-  if (recommendations.length === 0) {
-    return (
-      <Empty
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={
-          <span>
-            {t("d4.empty")}
-            <br />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("d4.hint")}
-            </Text>
-          </span>
-        }
-      />
-    );
-  }
+
+  const knownSources = [
+    "linked",
+    "fmea_graph",
+    "semantic_search",
+    "keyword",
+    "historical_capa",
+    "llm",
+    "rule",
+    "same_type_product_kb",
+    "lessons_learned",
+    "spc_anomaly",
+    "mes",
+    "iqc",
+    "supplier_history",
+  ];
 
   const groups = {
     linked: recommendations.filter(
@@ -62,7 +62,16 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
     historical: recommendations.filter((r) => r.match_source === "historical_capa"),
     llm: recommendations.filter((r) => r.match_source === "llm"),
     rule: recommendations.filter((r) => r.match_source === "rule"),
+    same_type_product_kb: recommendations.filter((r) => r.match_source === "same_type_product_kb"),
+    lessons_learned: recommendations.filter((r) => r.match_source === "lessons_learned"),
+    spc_anomaly: recommendations.filter((r) => r.match_source === "spc_anomaly"),
+    mes: recommendations.filter((r) => r.match_source === "mes"),
+    iqc: recommendations.filter((r) => r.match_source === "iqc"),
+    supplier_history: recommendations.filter((r) => r.match_source === "supplier_history"),
+    other: recommendations.filter((r) => !knownSources.includes(r.match_source)),
   };
+
+  const hasRecommendations = recommendations.length > 0;
 
   const renderGroup = (title: string, items: D4Recommendation[]) => {
     if (items.length === 0) return null;
@@ -163,12 +172,37 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
       style={{ marginBottom: 16 }}
       extra={<Text type="secondary" style={{ fontSize: 12 }}>{t("d4.subtitle")}</Text>}
     >
-      <RecommendationDAG stages={stages} />
-      {renderGroup(t("d4.groups.linked"), groups.linked)}
-      {renderGroup(t("d4.groups.semantic"), groups.semantic)}
-      {renderGroup(t("d4.groups.historical"), groups.historical)}
-      {renderGroup(t("d4.groups.llm"), groups.llm)}
-      {renderGroup(t("d4.groups.rule"), groups.rule)}
+      {stages.length > 0 && <RecommendationDAG stages={stages} />}
+      {!hasRecommendations && (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <span>
+              {t("d4.empty")}
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t("d4.hint")}
+              </Text>
+            </span>
+          }
+        />
+      )}
+      {hasRecommendations && (
+        <>
+          {renderGroup(t("d4.groups.linked"), groups.linked)}
+          {renderGroup(t("d4.groups.semantic"), groups.semantic)}
+          {renderGroup(t("d4.groups.historical"), groups.historical)}
+          {renderGroup(t("d4.groups.llm"), groups.llm)}
+          {renderGroup(t("d4.groups.rule"), groups.rule)}
+          {renderGroup(t("d4.groups.same_type_product_kb"), groups.same_type_product_kb)}
+          {renderGroup(t("d4.groups.lessons_learned"), groups.lessons_learned)}
+          {renderGroup(t("d4.groups.spc_anomaly"), groups.spc_anomaly)}
+          {renderGroup(t("d4.groups.mes"), groups.mes)}
+          {renderGroup(t("d4.groups.iqc"), groups.iqc)}
+          {renderGroup(t("d4.groups.supplier_history"), groups.supplier_history)}
+          {renderGroup(t("d4.groups.other"), groups.other)}
+        </>
+      )}
     </Card>
   );
 }

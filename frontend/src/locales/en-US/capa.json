@@ -105,7 +105,14 @@
       "semantic": "Semantic Match",
       "historical": "Historical CAPA",
       "llm": "AI Suggestions",
-      "rule": "Rule Engine Suggestions"
+      "rule": "Rule Engine Suggestions",
+      "same_type_product_kb": "Same-Type Product KB",
+      "lessons_learned": "Lessons Learned",
+      "spc_anomaly": "SPC Anomaly",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "Supplier History",
+      "other": "Other"
     },
     "sources": {
       "linked": "Linked",
@@ -114,7 +121,13 @@
       "keyword": "Keyword",
       "historical_capa": "Historical CAPA",
       "llm": "AI Suggestion",
-      "rule": "Rule Engine"
+      "rule": "Rule Engine",
+      "same_type_product_kb": "Same-Type Product KB",
+      "lessons_learned": "Lessons Learned",
+      "spc_anomaly": "SPC Anomaly",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "Supplier History"
     },
     "stageLabel": "Stage {{n}}",
     "adopt": "Adopt",
@@ -160,7 +173,13 @@
       "rule_engine_measure": "Rule Engine Measure",
       "rule": "Rule Engine",
       "llm": "AI Suggestion",
-      "graph": "Graph Similarity"
+      "graph": "Graph Similarity",
+      "same_type_product_kb": "Same-Type Product KB",
+      "lessons_learned": "Lessons Learned",
+      "spc_anomaly": "SPC Anomaly",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "Supplier History"
     },
     "stageLabel": "Stage {{n}}",
     "defaultBasis": "System recommendation",

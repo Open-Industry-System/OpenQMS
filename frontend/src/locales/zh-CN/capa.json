@@ -105,7 +105,14 @@
       "semantic": "语义匹配",
       "historical": "历史 CAPA",
       "llm": "智能建议",
-      "rule": "规则引擎建议"
+      "rule": "规则引擎建议",
+      "same_type_product_kb": "同类型产品 KB",
+      "lessons_learned": "经验教训",
+      "spc_anomaly": "SPC 异常",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "供货历史",
+      "other": "其他"
     },
     "sources": {
       "linked": "已关联",
@@ -114,7 +121,13 @@
       "keyword": "关键词",
       "historical_capa": "历史 CAPA",
       "llm": "智能建议",
-      "rule": "规则引擎"
+      "rule": "规则引擎",
+      "same_type_product_kb": "同类型产品 KB",
+      "lessons_learned": "经验教训",
+      "spc_anomaly": "SPC 异常",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "供货历史"
     },
     "stageLabel": "阶段 {{n}}",
     "adopt": "采纳",
@@ -160,7 +173,13 @@
       "rule_engine_measure": "规则引擎措施",
       "rule": "规则引擎",
       "llm": "智能建议",
-      "graph": "图相似匹配"
+      "graph": "图相似匹配",
+      "same_type_product_kb": "同类型产品 KB",
+      "lessons_learned": "经验教训",
+      "spc_anomaly": "SPC 异常",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "供货历史"
     },
     "stageLabel": "阶段 {{n}}",
     "defaultBasis": "系统推荐",

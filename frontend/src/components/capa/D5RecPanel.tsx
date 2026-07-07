@@ -37,9 +37,6 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;
-  if (controls.length === 0 && suggestions.length === 0) {
-    return <Empty description={tc("empty.data")} image={Empty.PRESENTED_IMAGE_SIMPLE} />;
-  }
 
   const renderControl = (item: D5ExistingControl) => {
     const key = item.control_node_id;
@@ -223,14 +220,17 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
     });
   }
 
+  const hasItems = collapseItems.length > 0;
+
   return (
     <Card
       size="small"
       title={<Space><SafetyOutlined />{t("d5.title")}</Space>}
       style={{ marginBottom: 16 }}
     >
-      <RecommendationDAG stages={stages} />
-      <Collapse defaultActiveKey={["controls", "suggestions"]} items={collapseItems} />
+      {stages.length > 0 && <RecommendationDAG stages={stages} />}
+      {!hasItems && <Empty description={tc("empty.data")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+      {hasItems && <Collapse defaultActiveKey={["controls", "suggestions"]} items={collapseItems} />}
     </Card>
   );
 }

@@ -4,6 +4,8 @@ configure({ testIdAttribute: "data-e2e" }); // 生产组件用 data-e2e（计划
 afterAll(() => configure({ testIdAttribute: "data-testid" })); // 复位默认，防止 vitest 非默认隔离配置下泄漏到后续测试文件
 import { App, ConfigProvider } from "antd";
 import D5RecPanel from "./D5RecPanel";
+import { getD5Recommendations } from "../../api/capa";
+import type { StageRun } from "../../types";
 
 const mockStages = vi.hoisted(() =>
   Array.from({ length: 12 }, (_, i) => ({
@@ -13,7 +15,7 @@ const mockStages = vi.hoisted(() =>
     status: i === 11 ? "done" : "pending",
     hit_count: 0,
     summary: `summary ${i + 1}`,
-  }))
+  } as StageRun))
 );
 
 vi.mock("../../api/capa", () => ({
@@ -110,5 +112,12 @@ describe("D5RecPanel adopt", () => {
     await waitFor(() => expect(beforeAdopt).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(adoptRecommendation).not.toHaveBeenCalled();
+  });
+
+  it("renders DAG even when controls and suggestions are empty", async () => {
+    vi.mocked(getD5Recommendations).mockResolvedValueOnce({ stages: mockStages, existing_controls: [], general_suggestions: [] });
+    renderPanel();
+    await waitFor(() => expect(screen.queryByTestId("rec-dag-stage-1")).toBeInTheDocument());
+    expect(screen.getByTestId("rec-dag-stage-12")).toBeInTheDocument();
   });
 });

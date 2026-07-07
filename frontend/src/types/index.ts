@@ -1397,7 +1397,20 @@ export interface D4Recommendation {
   failure_mode_name: string | null;
   fmea_document_no: string | null;
   fmea_id: string | null;
-  match_source: "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "llm";
+  match_source:
+    | "linked"
+    | "keyword"
+    | "rule"
+    | "fmea_graph"
+    | "semantic_search"
+    | "historical_capa"
+    | "llm"
+    | "same_type_product_kb"
+    | "lessons_learned"
+    | "spc_anomaly"
+    | "mes"
+    | "iqc"
+    | "supplier_history";
   match_reason: string;
   related_d2_keywords: string[];
   confidence: number;

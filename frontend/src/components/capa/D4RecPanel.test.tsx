@@ -4,6 +4,7 @@ configure({ testIdAttribute: "data-e2e" }); // 生产组件用 data-e2e（计划
 afterAll(() => configure({ testIdAttribute: "data-testid" })); // 复位默认，防止 vitest 非默认隔离配置下泄漏到后续测试文件
 import { App, ConfigProvider } from "antd";
 import D4RecPanel from "./D4RecPanel";
+import type { StageRun } from "../../types";
 
 const mockStages = vi.hoisted(() =>
   Array.from({ length: 12 }, (_, i) => ({
@@ -13,7 +14,7 @@ const mockStages = vi.hoisted(() =>
     status: i === 11 ? "done" : "pending",
     hit_count: 0,
     summary: `summary ${i + 1}`,
-  }))
+  } as StageRun))
 );
 
 vi.mock("../../api/capa", () => ({
@@ -37,7 +38,7 @@ vi.mock("../../api/capa", () => ({
   adoptRecommendation: vi.fn().mockResolvedValue({ adoption_id: "a1", d_step: "d4", field_value: "根因A" }),
 }));
 
-import { adoptRecommendation } from "../../api/capa";
+import { getD4Recommendations, adoptRecommendation } from "../../api/capa";
 
 const renderPanel = (props = {}) => render(
   <ConfigProvider><App>
@@ -101,5 +102,129 @@ describe("D4RecPanel adopt", () => {
     renderPanel({ canAdopt: false });
     await waitFor(() => expect(screen.queryByTestId("d4-adopt")).toBeInTheDocument());
     expect((screen.getByTestId("d4-adopt") as HTMLButtonElement).closest("button")!).toBeDisabled();
+  });
+
+  it("renders DAG even when recommendations list is empty", async () => {
+    vi.mocked(getD4Recommendations).mockResolvedValueOnce({ stages: mockStages, items: [] });
+    renderPanel();
+    await waitFor(() => expect(screen.queryByTestId("rec-dag-stage-1")).toBeInTheDocument());
+    expect(screen.getByTestId("rec-dag-stage-12")).toBeInTheDocument();
+  });
+
+  it("renders all 6 new D4 match_source groups", async () => {
+    vi.mocked(getD4Recommendations).mockResolvedValueOnce({
+      stages: mockStages,
+      items: [
+        {
+          failure_cause_node_id: "c2",
+          failure_cause_name: "同类型产品 KB 根因",
+          failure_cause_desc: null,
+          failure_mode_node_id: null,
+          failure_mode_name: null,
+          fmea_document_no: null,
+          fmea_id: null,
+          match_source: "same_type_product_kb",
+          match_reason: "r",
+          related_d2_keywords: [],
+          confidence: 0.5,
+          source_capa_id: null,
+          source_capa_document_no: null,
+          source_product_line_code: null,
+          stage_index: 4,
+        },
+        {
+          failure_cause_node_id: "c3",
+          failure_cause_name: "经验教训根因",
+          failure_cause_desc: null,
+          failure_mode_node_id: null,
+          failure_mode_name: null,
+          fmea_document_no: null,
+          fmea_id: null,
+          match_source: "lessons_learned",
+          match_reason: "r",
+          related_d2_keywords: [],
+          confidence: 0.5,
+          source_capa_id: null,
+          source_capa_document_no: null,
+          source_product_line_code: null,
+          stage_index: 5,
+        },
+        {
+          failure_cause_node_id: "c4",
+          failure_cause_name: "SPC 异常根因",
+          failure_cause_desc: null,
+          failure_mode_node_id: null,
+          failure_mode_name: null,
+          fmea_document_no: null,
+          fmea_id: null,
+          match_source: "spc_anomaly",
+          match_reason: "r",
+          related_d2_keywords: [],
+          confidence: 0.5,
+          source_capa_id: null,
+          source_capa_document_no: null,
+          source_product_line_code: null,
+          stage_index: 6,
+        },
+        {
+          failure_cause_node_id: "c5",
+          failure_cause_name: "MES 根因",
+          failure_cause_desc: null,
+          failure_mode_node_id: null,
+          failure_mode_name: null,
+          fmea_document_no: null,
+          fmea_id: null,
+          match_source: "mes",
+          match_reason: "r",
+          related_d2_keywords: [],
+          confidence: 0.5,
+          source_capa_id: null,
+          source_capa_document_no: null,
+          source_product_line_code: null,
+          stage_index: 7,
+        },
+        {
+          failure_cause_node_id: "c6",
+          failure_cause_name: "IQC 根因",
+          failure_cause_desc: null,
+          failure_mode_node_id: null,
+          failure_mode_name: null,
+          fmea_document_no: null,
+          fmea_id: null,
+          match_source: "iqc",
+          match_reason: "r",
+          related_d2_keywords: [],
+          confidence: 0.5,
+          source_capa_id: null,
+          source_capa_document_no: null,
+          source_product_line_code: null,
+          stage_index: 8,
+        },
+        {
+          failure_cause_node_id: "c7",
+          failure_cause_name: "供货历史根因",
+          failure_cause_desc: null,
+          failure_mode_node_id: null,
+          failure_mode_name: null,
+          fmea_document_no: null,
+          fmea_id: null,
+          match_source: "supplier_history",
+          match_reason: "r",
+          related_d2_keywords: [],
+          confidence: 0.5,
+          source_capa_id: null,
+          source_capa_document_no: null,
+          source_product_line_code: null,
+          stage_index: 9,
+        },
+      ],
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.queryByTestId("rec-source-same_type_product_kb")).toBeInTheDocument());
+    expect(screen.getByTestId("rec-source-lessons_learned")).toBeInTheDocument();
+    expect(screen.getByTestId("rec-source-spc_anomaly")).toBeInTheDocument();
+    expect(screen.getByTestId("rec-source-mes")).toBeInTheDocument();
+    expect(screen.getByTestId("rec-source-iqc")).toBeInTheDocument();
+    expect(screen.getByTestId("rec-source-supplier_history")).toBeInTheDocument();
   });
 });
