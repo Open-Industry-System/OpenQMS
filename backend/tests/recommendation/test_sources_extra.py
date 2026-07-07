@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -775,7 +776,7 @@ async def _seed_embedding(
                  embedding, product_line_code, factory_id, metadata, embedding_model)
             VALUES
                 (:id, :entity_type, :entity_id, :node_id, :entity_field, 0, :chunk_text,
-                 CAST(:embedding AS vector), :product_line_code, :factory_id, :metadata, :embedding_model)
+                 CAST(:embedding AS vector), :product_line_code, :factory_id, CAST(:metadata AS jsonb), :embedding_model)
         """),
         {
             "id": emb_id,
@@ -787,7 +788,7 @@ async def _seed_embedding(
             "embedding": _vec_str(dim, hot_idx),
             "product_line_code": pl_code,
             "factory_id": factory_id,
-            "metadata": metadata or {},
+            "metadata": json.dumps(metadata or {}),
             "embedding_model": model,
         },
     )

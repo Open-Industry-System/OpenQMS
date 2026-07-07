@@ -39,17 +39,25 @@ async def _seed_doc(db, factory_id, user_id, pl=None):
 async def _seed_embedding(db, entity_id, factory_id):
     """Insert a document_embeddings row for an fmea_node via raw SQL (the
     embedding column is a pgvector type not mapped on the ORM model)."""
+    dim_row = await db.execute(text(
+        "SELECT atttypmod FROM pg_attribute "
+        "WHERE attrelid='document_embeddings'::regclass AND attname='embedding'"
+    ))
+    dim = dim_row.fetchone()
+    dim = dim[0] if dim and dim[0] > 0 else 1536
+    vector = "[" + ",".join(["0.1"] * dim) + "]"
+
     emb_id = uuid.uuid4()
     await db.execute(
         text("""
             INSERT INTO document_embeddings
                 (id, entity_type, entity_id, entity_field, chunk_text,
-                 factory_id, embedding_model)
+                 embedding, factory_id, embedding_model)
             VALUES
                 (:id, 'fmea_node', :entity_id, 'name', 'sample',
-                 :factory_id, 'test-model')
+                 CAST(:embedding AS vector), :factory_id, 'test-model')
         """),
-        {"id": emb_id, "entity_id": entity_id, "factory_id": factory_id},
+        {"id": emb_id, "entity_id": entity_id, "embedding": vector, "factory_id": factory_id},
     )
     await db.flush()
     return emb_id
