@@ -170,7 +170,7 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 - 点 `[data-e2e="d4-verification-new"]` 打开新建验证表单：
   - 填 `[data-e2e="verification-method"]`（input）
   - 填 `[data-e2e="verification-result"]`（textarea）
-  - 上传证据：点 `[data-e2e="verification-evidence"]` 内「添加证据」按钮触发文件选择 → `browser_file_upload` 传临时证据文件（`$CLAUDE_JOB_DIR/tmp/evidence-<n>.png`）
+  - 上传证据：点 `[data-e2e="verification-evidence"]` 内「添加证据」按钮触发文件选择 → `browser_file_upload` 传临时证据文件（在 `docs/e2e/reports/assets/US-E2E-01-<date>/evidence-<n>.png` 生成一个小 PNG，与截图同目录）
   - 勾 `[data-e2e="verification-form-is-verified"]`（**不要**点 `verification-is-verified`）
   - 点 `[data-e2e="verification-submit"]`
 - **断言**：`[data-e2e="verification-status"]` 显示已验证；`GET /api/capa/{report_id}/root-cause-verifications` 回读验证记录含 method/result/evidence。

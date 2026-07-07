@@ -18,7 +18,7 @@
 - Account passwords come from `GET /api/e2e/seed-state` at walk time — never hardcoded.
 - Reports land in `docs/e2e/reports/`, screenshots in `docs/e2e/reports/assets/`.
 - Story version referenced by the skill: 定稿 v7 (2026-07-07) — must match `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md` header.
-- CAPA response field is `status` (not `current_step`); initial value `D1_TEAM` (`backend/app/schemas/capa.py:34`, `models/capa.py:23`).
+- CAPA response field is `status` (not `current_step`); initial value `D1_TEAM` (`backend/app/schemas/capa.py:39`, `models/capa.py:23`).
 - The sync rule added to `CLAUDE.md` applies to **all** future `verify-*` skills, not just this one.
 
 **Source of truth:** `docs/superpowers/specs/2026-07-07-verify-capa-8d-closed-loop-skill-design.md`.

@@ -60,7 +60,7 @@
 
 每步四段式，内联具体 selector。10 步骨架（B1/B5 详写为锚点，其余同形，完整四段式留到实现阶段写进 SKILL.md）：
 
-- **B1** engineer 登录 → CAPA 列表 → `[data-e2e="capa-create"]` → 新建 8D：单号 `E2E-STORY-CAPA-001` / 标题「来料螺栓尺寸超差」/ 严重度「致命」 / 产品线 `DC-DC-100-E2E`。断言：列表出现该单号；`GET /api/capa/{report_id}` 回读 `status == "D1_TEAM"`（CAPAResponse 字段是 `status`，非 `current_step`；初始值 `D1_TEAM`，见 `backend/app/schemas/capa.py:34` / `models/capa.py:23`）；审计 1 条 CREATE（engineer）。
+- **B1** engineer 登录 → CAPA 列表 → `[data-e2e="capa-create"]` → 新建 8D：单号 `E2E-STORY-CAPA-001` / 标题「来料螺栓尺寸超差」/ 严重度「致命」 / 产品线 `DC-DC-100-E2E`。断言：列表出现该单号；`GET /api/capa/{report_id}` 回读 `status == "D1_TEAM"`（CAPAResponse 字段是 `status`，非 `current_step`；初始值 `D1_TEAM`，见 `backend/app/schemas/capa.py:39` / `models/capa.py:23`）；审计 1 条 CREATE（engineer）。
 - **B2** D1 团队组建，指定 8D 负责人。
 - **B3** D2 问题描述 + `[data-e2e="capa-ai-draft"]` AI 草拟 → 确认后保存。
 - **B4** D3 临时措施。

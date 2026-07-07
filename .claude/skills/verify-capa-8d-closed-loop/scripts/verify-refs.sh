@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Verify references in verify-capa-8d-closed-loop SKILL.md.
+# Verify selector references + frontmatter in verify-capa-8d-closed-loop SKILL.md.
 # Checks: SKILL.md exists, frontmatter valid, every [data-e2e="X"] in SKILL.md
-# appears in frontend/src. Exit non-zero on any problem.
+# appears in frontend/src. Backend /api/... paths are NOT checked here — verify
+# them manually against backend/app/api/ (see plan Task 5). Exit non-zero on any problem.
 set -uo pipefail
 SKILL=".claude/skills/verify-capa-8d-closed-loop/SKILL.md"
 [ -f "$SKILL" ] || { echo "FAIL: $SKILL not found"; exit 1; }
