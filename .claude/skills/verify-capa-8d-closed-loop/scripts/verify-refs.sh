@@ -28,4 +28,11 @@ for sel in $(grep -oE 'data-e2e="[^"]+"' "$SKILL" | sed -E 's/data-e2e="([^"]+)"
     status=1
   fi
 done
+# 3. prefix-match selectors [data-e2e^="X"] — validate the bare prefix appears in frontend/src
+for sel in $(grep -oE 'data-e2e\^="[^"]+"' "$SKILL" | sed -E 's/data-e2e\^="([^"]+)"/\1/' | sort -u); do
+  if ! grep -rqs "data-e2e={\`$sel" frontend/src && ! grep -rqs "data-e2e=\"$sel" frontend/src; then
+    echo "MISSING prefix selector in frontend/src: $sel"
+    status=1
+  fi
+done
 exit $status

@@ -62,8 +62,10 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 | `[data-e2e="d7-confirm"]` | 点击 | D7 确认预防项 |
 | `[data-e2e="d7-skip"]` | 点击 | D7 跳过预防项（需填理由） |
 | `[data-e2e="rec-dag-stage-<i>"]` | 读 `data-status` 属性 + 节点内可见文本 | 12 阶段 DAG 第 i 阶段（`source`/`hit_count`/`summary` 是 Tag/Badge/Text，不是属性） |
+| `[data-e2e^="rec-source-"]` | 读 Tag 文本（模板 `rec-source-${match_source}`） | 每条推荐的来源 provenance 标签（D4RecPanel:143 / D5RecPanel:100,174） |
+| `[data-e2e^="rec-item-stage-"]` | 读 Tag 文本（模板 `rec-item-stage-${stage_index}`） | 每条推荐命中的阶段索引（D4RecPanel:147 / D5RecPanel:104,178） |
 
-**无 data-e2e 的字段**：D1 团队表、D2/D3/D4/D5/D6 的 TextArea、登录表单——用可见 label/placeholder 定位（Ant Form）：`getByLabel("5W2H 问题描述")`、`getByPlaceholder("成员姓名")`、登录用 `getByLabel("用户名")` / `getByLabel("密码")` + 登录按钮文本。
+**无 data-e2e 的字段**：D1 团队表、D2/D3/D4/D5/D6/D7 的 TextArea、登录表单。**CAPA 各 D 步 TextArea 不要用 `getByLabel`**——label 是 `renderLabelWithDraft` 渲染的自定义节点（含「撤销修改」+ AI 草拟按钮，`CAPADetailPage.tsx:273`），Ant `getByLabel` 不可靠。用现有 E2E 验证过的模式：先 `waitForStep` 等该步 label 文本可见，再 `page.locator("textarea").first()` 定位当前步唯一的 TextArea，填值后 `.evaluate((el) => el.blur())` 触发 onBlur 落库（参考 `frontend/e2e/specs/m1-core/capa-story-closed-loop.spec.ts:110`）。登录用 `getByLabel("用户名")` / `getByLabel("密码")` + 登录按钮文本（登录表单是标准 Ant Form，`getByLabel` 可用）。
 
 ## 8D 状态机
 
@@ -91,44 +93,47 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 - **落库**：UPDATE 审计（engineer）。
 
 #### B3 D2 问题描述 + AI 草拟
-- **做**：`getByLabel("5W2H 问题描述")` 填描述 → 点 `[data-e2e="capa-ai-draft"]` 触发 AI 草拟 → 确认/采纳后保存（onBlur 落库）。
+- **做**：等 D2 label「5W2H 问题描述」可见 → `page.locator("textarea").first()` 填描述 → `.blur()` 落库 → 点 `[data-e2e="capa-ai-draft"]` 触发 AI 草拟 → 确认/采纳后保存。
 - **期望**：AI 草拟返回文本；保存后字段落库。
 - **断言**：回读 `d2_description` 非空。
 - **落库**：UPDATE + AI 草拟留痕。
 
 #### B4 D3 临时措施
-- **做**：`getByLabel("临时遏制措施")` 填临时围堵 → onBlur 保存。
+- **做**：等 D3 label「临时遏制措施」可见 → `page.locator("textarea").first()` 填临时围堵 → `.blur()` 保存。
 - **期望**：字段落库。
 - **断言**：回读 `d3_interim` 非空。
 - **落库**：UPDATE。
 
 #### B5 D4 根因分析（含 AI 推荐 + 现场验证）
-- **做**：点 `[data-e2e="capa-advance"]` 推进到 D4 → 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因 → 现场验证（见 C2）→ `getByLabel("根因分析 (5Why / 鱼骨图)")` 填根因 → 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
+- **做**：点 `[data-e2e="capa-advance"]` 推进到 D4 → 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因 → 现场验证（见 C2）→ 等 D4 label「根因分析 (5Why / 鱼骨图)」可见 → `page.locator("textarea").first()` 填根因 → `.blur()` 落库 → 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
 - **期望**：D4 视图出现 D4RecPanel + D4VerificationCard + 根因 TextArea。
 - **断言**：**未完成现场验证时 D4→D5 应被阻断**（advance 报错或禁用）；验证通过后才可推进。
 - **落库**：审计 1 条 TRANSITION `D4_ROOT_CAUSE → D5_CORRECTION`，`operated_by == "engineer"`。
 
 #### B6 D5 永久措施（含 AI 推荐）
-- **做**：推进到 D5 → 触发 D5 AI 推荐（见 C1）→ 点 `[data-e2e="d5-adopt-suggestion"]`（或 `d5-adopt-control`）采纳 → `getByLabel("永久纠正措施")` 填措施 → 保存。
+- **做**：推进到 D5 → 触发 D5 AI 推荐（见 C1）→ 点 `[data-e2e="d5-adopt-suggestion"]`（或 `d5-adopt-control`）采纳 → 等 D5 label「永久纠正措施」可见 → `page.locator("textarea").first()` 填措施 → `.blur()` 保存。
 - **期望**：D5RecPanel + 措施 TextArea。
 - **断言**：回读 `d5_correction` 非空；采纳留痕（审计 `action == "ADOPT_RECOMMENDATION"`）。
 - **落库**：UPDATE + 采纳留痕。
 
 #### B7 D6 实施验证
-- **做**：`getByLabel("效果验证")` 填验证结果 → 保存 → 点 `[data-e2e="capa-advance"]` 推进 D6→D7。
+- **做**：等 D6 label「效果验证」可见 → `page.locator("textarea").first()` 填验证结果 → `.blur()` 保存 → 点 `[data-e2e="capa-advance"]` 推进 D6→D7。
 - **期望**：字段落库；推进成功。
 - **断言**：回读 `d6_verification` 非空；审计 1 条 TRANSITION `D6_VERIFICATION → D7_PREVENTION`，`operated_by == "engineer"`。
 
 #### B8 D7 预防复发（含 AI 预防提示）
-- **做**：D7 视图下对每个预防项用 `[data-e2e="d7-auto-fill"]`（AI 填充）/ `[data-e2e="d7-confirm"]`（确认）/ `[data-e2e="d7-skip"]`（跳过，填理由）。
+- **做**（两部分，分开落库）：
+  1. **D7 预防措施正文**：等 D7 label「预防复发措施」可见 → `page.locator("textarea").first()` 填预防措施正文 → `.blur()` 落库 `d7_prevention`（`CAPADetailPage.tsx:570`，Text 列 `models/capa.py:31`）。
+  2. **D7 节点动作（AI 预防提示）**：对每个预防项用 `[data-e2e="d7-auto-fill"]`（AI 填充）/ `[data-e2e="d7-confirm"]`（确认）/ `[data-e2e="d7-skip"]`（跳过，填理由）——这些按钮写 **node-action 记录**，不写 `d7_prevention`。
 - **期望**：D7 预防项全部确认或跳过后才可推进。
-- **断言**：`d7_*` 字段落库；engineer 此时**不能**推进 D7→D8（见 B9）。
+- **断言**：`GET /api/capa/{report_id}` 回读 `d7_prevention` 非空；`GET /api/capa/{report_id}/d7-node-actions` 回读节点动作记录（`capa.py:717`）；engineer 此时**不能**推进 D7→D8（见 B9）。
+- **落库**：`d7_prevention` UPDATE + node-action 记录 + D7 skip reasons 审计（若跳过）。
 
 #### B9 manager 登录 + 审批 D7→D8 关闭
 - **做**：登出 → manager 登录 → CAPA 列表见该 8D（待审批）→ 进详情 → 点 `[data-e2e="capa-advance"]`（D7→D8，需 canApprove）→ 关闭。
 - **期望**：manager 能推进；engineer 不能（先切 engineer 验证 `capa-advance` 不可见/禁用，再切 manager 推进）。
-- **断言**：审计 1 条 TRANSITION `D7_PREVENTION → D8_CLOSURE`，`operated_by == "manager"`。
-- **落库**：D8 closure 字段。
+- **断言**：`GET /api/capa/{report_id}` 回读 `status == "D8_CLOSURE"`；审计 1 条 TRANSITION `D7_PREVENTION → D8_CLOSURE`，`operated_by == "manager"`。
+- **注意**：`advance_capa` 只改 `status` + 写 TRANSITION 审计，**不**自动填 `d8_closure`（`capa_service.py:427`）。若故事要求关闭内容落库，关闭后**单独**一步：等 D8 label 可见 → `page.locator("textarea").first()` 填关闭总结 → `.blur()` 落库 `d8_closure`（Text 列 `models/capa.py:32`）；否则只断言 `status == "D8_CLOSURE"`。
 
 #### B10 viewer 只读可见
 - **做**：登出 → viewer 登录 → CAPA 列表见已关闭 8D → 进详情可读内容。
@@ -160,7 +165,7 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 读 `data-status` 属性；`source`（Tag）/`hit_count`（Badge）/`summary`（Text）是节点可见文本，从渲染内容读（`frontend/src/components/capa/RecommendationDAG.tsx:45-51`）。
 
 **断言**：
-- 推荐列表非空、每条带 source provenance、`AP∈{H,M,L}`、`S/O/D∈1..10`。
+- 推荐列表非空；每条推荐可见 `[data-e2e^="rec-source-"]`（来源 provenance 标签）和 `[data-e2e^="rec-item-stage-"]`（命中阶段索引）；`AP∈{H,M,L}`、`S/O/D∈1..10`。
 - 阶段 `hit_count`/`summary` 可见（非黑盒）。
 - D4、D5 各跑一遍，分别记录。
 
