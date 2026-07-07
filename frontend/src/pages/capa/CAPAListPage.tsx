@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { listCAPAs, createCAPA } from "../../api/capa";
 import type { CAPAReport } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
+import { usePermission } from "../../hooks/usePermission";
 import { formatDateTime } from "../../utils/dateTime";
 import PageShell from "../../components/design/PageShell";
 import DataCard from "../../components/design/DataCard";
@@ -46,6 +47,7 @@ export default function CAPAListPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
+  const { canEdit } = usePermission();
   const [searchParams] = useSearchParams();
 
   const fetchData = (p: number = page) => {
@@ -113,7 +115,9 @@ export default function CAPAListPage() {
       title={t("title", "8D / CAPA")}
       subtitle={t("subtitle", "客诉与质量问题闭环追踪")}
       actions={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} data-e2e="capa-create">{t("actions.create", "新建 8D")}</Button>
+        canEdit("capa") ? (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} data-e2e="capa-create">{t("actions.create", "新建 8D")}</Button>
+        ) : undefined
       }
     >
       <DataCard title={t("listTitle", "8D 报告列表")} noPadding>

@@ -25,7 +25,7 @@
 
 对照 `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（v6，定稿）逐条审计当前系统实现的结果。**结论：故事结构上无法端到端通过**，需先补齐以下产品实现，再写故事级 spec `capa-story-closed-loop.spec.ts`。审计口径：代码路径（models/api/services/state_machines + frontend components/e2e），未跑运行时。
 
-**进度**：8 项已完成（约 50%） / 9 项待补（P0×2 / P1×6 / P2×1）
+**进度**：11 项全部完成（P0-1~P0-4 / P1-5~P1-10 / P2-11 全部落地）
 
 ### 已完成 ✅（约 50%）
 
@@ -62,9 +62,10 @@
 
 ### 待补（P2 — 故事级 E2E）
 
-11. [ ] **P2-11 `capa-story-closed-loop.spec.ts`** — 用 `E2E-STORY-CAPA-001` 前缀（故事主角单号），覆盖 10 步主流程 + 12 阶段 DAG 结构断言（`data-e2e="rec-stage-{n}"` 状态属性）+ 7 条 TRANSITION 审计断言（`GET /api/audit-logs?target_id=...` 断 1 CREATE + 7 TRANSITION，D1-D7 operator=engineer、D7-D8 operator=manager）+ AI 采纳留痕断言（`capa_ai_adoption` 表通过 seed-state 端点回读）+ viewer 只读断言（`/capa` 列表看到关闭 8D、详情打开、`capa-create`/`capa-advance` 隐藏）
+11. [x] **P2-11 `capa-story-closed-loop.spec.ts`** — 用 `E2E-STORY-CAPA-001` 前缀（故事主角单号），覆盖 10 步主流程 + 12 阶段 DAG 结构断言（`data-e2e="rec-stage-{n}"` 状态属性）+ 7 条 TRANSITION 审计断言（`GET /api/audit-logs?target_id=...` 断 1 CREATE + 7 TRANSITION，D1-D7 operator=engineer、D7-D8 operator=manager）+ AI 采纳留痕断言（`capa_ai_adoption` 表通过 seed-state 端点回读）+ viewer 只读断言（`/capa` 列表看到关闭 8D、详情打开、`capa-create`/`capa-advance` 隐藏）
     - LLM 无凭证时 AI 断言 `test.skip` + 核心闭环照跑（沿用 `_guards/ai-credentials.guard.spec.ts` 模式）
     - 前置：现有 `capa.spec.ts` / `capa-ai-draft.spec.ts` 保持不变（M1 冒烟），故事 spec 与之并行
+    - 落地（`frontend/e2e/specs/m1-core/capa-story-closed-loop.spec.ts`）：单测覆盖 10 步闭环（engineer D1..D7 → manager D7→D8 → viewer 只读）。**实现取舍**：审计回读走 `GET /api/admin/logs/audit?table_name=capa_eightd`（admin token）按 `record_id` + 时间窗客户端过滤（原 PROGRESS 写的 `/api/audit-logs?target_id` 端点不存在，`admin/logs/audit` 无 `record_id` 过滤参数，客户端过滤等价且无需新增后端端点）；AI 采纳留痕同样从审计日志回读（`ADOPT_RECOMMENDATION` 的 `changed_fields` 含 `source` + `stage_index`），不另建 seed-state adoptions 端点。DAG 断言用实际 testid `rec-dag-stage-{n}` + `data-status`（非 `rec-stage-{n}`）。viewer 只读：D4 推荐恒非空（`RuleEngineSource` 默认候选兜底），无需关联 FMEA 即可断言 provenance + 采纳；`CAPAListPage` 新增 `canEdit('capa')` 门控隐藏 `capa-create`（viewer 真正只读）
 
 ### 补齐建议顺序
 
