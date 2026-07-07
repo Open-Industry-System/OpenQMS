@@ -12,6 +12,17 @@ def _ctx(stage="d4", linked_fmea=None):
         user_product_lines=["DC-DC-100"], stage=stage, fmea_docs=[], linked_fmea=linked_fmea)
 
 
+def _stub_source(*candidates):
+    class _Source:
+        async def retrieve(self, context):
+            return list(candidates)
+
+        def summary(self, candidates):
+            return "stub summary"
+
+    return _Source()
+
+
 @pytest.mark.asyncio
 async def test_stages_exactly_12_unique_indexes(monkeypatch):
     orch = RecommendationOrchestrator(MagicMock(), None, None)
@@ -94,3 +105,47 @@ async def test_d5_stage2_direct_lookup_when_embedding_off(monkeypatch):
     result = await orch.run(ctx, user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
     s2 = next(s for s in result.stages if s.index == 2)
     assert s2.status == "done"  # 直查命中 cause → 扩展 control，不 skipped
+
+
+@pytest.mark.asyncio
+async def test_stage10_d5_uses_rule_engine_measure():
+    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    from app.services.recommendation_types import RecommendationCandidate
+    d4_cand = RecommendationCandidate(
+        source="rule_engine", content="D4 root cause marker", category=None, confidence=0.8,
+        match_reason="D4 rule", metadata={"marker": "d4"})
+    d5_cand = RecommendationCandidate(
+        source="rule_engine_measure", content="D5 measure marker", category="预防措施", confidence=0.8,
+        match_reason="D5 measure rule", metadata={"marker": "d5"})
+    orch._sources["rule_engine"] = _stub_source(d4_cand)
+    orch._sources["rule_engine_measure"] = _stub_source(d5_cand)
+
+    result = await orch.run(_ctx(stage="d5"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s10 = next(s for s in result.stages if s.index == 10)
+    assert s10.source == "rule_engine_measure"
+    assert s10.status == "done"
+    markers = {c.metadata.get("marker") for c in result.items}
+    assert "d5" in markers
+    assert "d4" not in markers
+
+
+@pytest.mark.asyncio
+async def test_stage10_d4_uses_rule_engine():
+    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    from app.services.recommendation_types import RecommendationCandidate
+    d4_cand = RecommendationCandidate(
+        source="rule_engine", content="D4 root cause marker", category=None, confidence=0.8,
+        match_reason="D4 rule", metadata={"marker": "d4"})
+    d5_cand = RecommendationCandidate(
+        source="rule_engine_measure", content="D5 measure marker", category="预防措施", confidence=0.8,
+        match_reason="D5 measure rule", metadata={"marker": "d5"})
+    orch._sources["rule_engine"] = _stub_source(d4_cand)
+    orch._sources["rule_engine_measure"] = _stub_source(d5_cand)
+
+    result = await orch.run(_ctx(stage="d4"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s10 = next(s for s in result.stages if s.index == 10)
+    assert s10.source == "rule_engine"
+    assert s10.status == "done"
+    markers = {c.metadata.get("marker") for c in result.items}
+    assert "d4" in markers
+    assert "d5" not in markers

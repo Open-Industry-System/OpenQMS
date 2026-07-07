@@ -52,6 +52,7 @@ class StageSpec:
     skipped_reason: str | None = None   # 静态 skipped（如 D5 不适用）
     derived: bool = False               # 派生阶段：消费已召回候选，非独立 retrieve（决策 15，D5 stage 2）
     terminal: bool = False              # 终态阶段：主循环跳过，fusion 后单次发射（决策 16，stage 12）
+    d5_source_kind: str | None = None   # D5 覆盖 source：D4 用 source_kind，D5 用本字段（如 stage 10 措施规则）
 
 
 STAGE_PLAN: list[StageSpec] = [
@@ -64,7 +65,7 @@ STAGE_PLAN: list[StageSpec] = [
     StageSpec(7,  "MES 设备/过程检索",  "mes",             "d4"),
     StageSpec(8,  "IQC 来料检索",       "iqc",             "d4"),
     StageSpec(9,  "供货历史检索",       "supplier_history","d4"),
-    StageSpec(10, "规则启发",           "rule_engine",     "both"),
+    StageSpec(10, "规则启发",           "rule_engine",     "both", d5_source_kind="rule_engine_measure"),
     StageSpec(11, "LLM 融合排序",       "llm",             "both"),
     StageSpec(12, "输出推荐列表",       "internal",        "both", terminal=True),
 ]
@@ -93,6 +94,8 @@ class RecommendationOrchestrator:
         return {
             "fmea_graph": FMEAGraphSource(),
             "semantic_search": SemanticSearchSource(self.db, self.embedding),
+            # Registered as fallback per design L91 — NOT executed by STAGE_PLAN
+            # (superseded by lessons_learned stage 5 + 6 new D4 sources); kept for future use.
             "historical_capa": HistoricalCAPASource(self.db, self.embedding),
             "historical_capa_measure": HistoricalCAPAMeasureSource(self.db, self.embedding),
             "rule_engine": RuleEngineSource(),
@@ -105,17 +108,19 @@ class RecommendationOrchestrator:
             "lessons_learned": LessonsLearnedSource(self.db, self.embedding),
         }
 
-    def _check_source_protocol(self, spec, source) -> str | None:
+    def _check_source_protocol(self, spec, source, kind=None) -> str | None:
         # R10-修复：per-stage 运行时协议校验（不阻断构造/整请求）。新源 should_skip 必须存在、可调用、async。
         # 违规 → 返回 error reason（该 stage 标 error，其余 stage + 12 阶段响应照常）；合规 → None
-        if spec.source_kind not in self.NEW_SOURCE_KINDS:
+        # kind 为实际执行的 source_kind（D5 可能被 d5_source_kind 覆盖）。
+        kind = kind or spec.source_kind
+        if kind not in self.NEW_SOURCE_KINDS:
             return None   # 既有源无 should_skip 协议要求
         if source is None:
-            return f"source {spec.source_kind} 未注册"
+            return f"source {kind} 未注册"
         if not callable(getattr(source, "should_skip", None)):
-            return f"source {spec.source_kind} should_skip 不可调用"
+            return f"source {kind} should_skip 不可调用"
         if not inspect.iscoroutinefunction(source.should_skip):
-            return f"source {spec.source_kind} should_skip 非 async"
+            return f"source {kind} should_skip 非 async"
         return None
 
     def validate_all_new_sources(self) -> list[str]:
@@ -188,21 +193,23 @@ class RecommendationOrchestrator:
         return RecommendationResult(items=fused, stages=stages)
 
     async def _exec_recall_stage(self, spec, context, all_candidates) -> StageRun:
+        # 运行时 source_kind 解析：D5 优先使用 d5_source_kind（如 stage 10 措施规则）
+        kind = spec.d5_source_kind if (context.stage == "d5" and spec.d5_source_kind) else spec.source_kind
         # 1. stage_filter 不匹配 → skipped
         if spec.stage_filter != "both" and spec.stage_filter != context.stage:
-            return StageRun(spec.index, spec.name, spec.source_kind, "skipped",
+            return StageRun(spec.index, spec.name, kind, "skipped",
                             summary=f"{context.stage.upper()} 阶段不适用")
         # 2. internal（stage 1 上下文）
-        if spec.source_kind == "internal":
+        if kind == "internal":
             return StageRun(spec.index, spec.name, "internal", "done",
                             summary="上下文已采集（D2/D4 + 关联 FMEA + 产品线）")
         # 3. 普通 source（LLM stage 11 不在此，由 _exec_llm_stage 处理）
-        source = self._sources.get(spec.source_kind)
+        source = self._sources.get(kind)
         try:
             # R10-修复：per-stage 协议校验（违规 → 该 stage error，不阻断构造/整请求；其余 stage + 12 阶段响应照常）
-            proto_violation = self._check_source_protocol(spec, source)
+            proto_violation = self._check_source_protocol(spec, source, kind)
             if proto_violation:
-                return StageRun(spec.index, spec.name, spec.source_kind, "error",
+                return StageRun(spec.index, spec.name, kind, "error",
                                 error=proto_violation, summary=f"source 协议违规: {proto_violation}")
             # 唯一 skip/done(0) 规则（R3-修复合约一致性 + R6-修复 async）：
             # ① 编排器 _stage_precondition 查结构性前置（既有源：linked_fmea None / embedding None）
@@ -212,16 +219,16 @@ class RecommendationOrchestrator:
             if pre is None and hasattr(source, "should_skip"):
                 pre = await source.should_skip(context)   # R6-修复：should_skip 是 async，必须 await（否则返回 coroutine 被误判 truthy → 误 skipped）
             if pre:
-                return StageRun(spec.index, spec.name, spec.source_kind, "skipped", summary=pre)
+                return StageRun(spec.index, spec.name, kind, "skipped", summary=pre)
             candidates = await source.retrieve(context)
             for c in candidates:
                 c.metadata["stage_index"] = spec.index
             all_candidates.extend(candidates)
-            return StageRun(spec.index, spec.name, spec.source_kind, "done", hit_count=len(candidates),
+            return StageRun(spec.index, spec.name, kind, "done", hit_count=len(candidates),
                             summary=source.summary(candidates) if hasattr(source, "summary") else "")
         except Exception as e:
             logger.warning(f"Stage {spec.index} {spec.name} failed: {e}")
-            return StageRun(spec.index, spec.name, spec.source_kind, "error", error=str(e)[:200])
+            return StageRun(spec.index, spec.name, kind, "error", error=str(e)[:200])
 
     def _stage_precondition(self, spec, context) -> str | None:
         # R3-修复：集中既有源 + 新源共用的结构性前置条件（不要求既有源新增 should_skip）
