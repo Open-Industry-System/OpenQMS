@@ -87,40 +87,39 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 - **落库**：审计 1 条 CREATE，`operated_by == "engineer"`。
 
 #### B2 D1 团队组建
-- **做**：D1 视图下用 `getByPlaceholder("成员姓名")` 填名 + Select 选 role（含一人为「8D 团队负责人」）→ 点「添加成员」加 2–3 人。
-- **期望**：团队成员表出现新增行。
-- **断言**：`GET /api/capa/{report_id}` 回读 `d1_team` 数组含所加成员。
-- **落库**：UPDATE 审计（engineer）。
+- **做**：D1 视图下用 `getByPlaceholder("成员姓名")` 填名 + Select 选 role（含一人为「8D 团队负责人」）→ 点「添加成员」加 2–3 人 → 点 `[data-e2e="capa-advance"]` 推进 D1→D2。
+- **期望**：团队成员表出现新增行；推进后 D2 label「5W2H 问题描述」可见。
+- **断言**：`GET /api/capa/{report_id}` 回读 `d1_team` 数组含所加成员；`status == "D2_DESCRIPTION"`；审计 1 条 TRANSITION `D1_TEAM → D2_DESCRIPTION`。
+- **落库**：UPDATE + TRANSITION（engineer）。
 
 #### B3 D2 问题描述 + AI 草拟
-- **做**：等 D2 label「5W2H 问题描述」可见 → `page.locator("textarea").first()` 填描述 → `.blur()` 落库 → 点 `[data-e2e="capa-ai-draft"]` 触发 AI 草拟 → 确认/采纳后保存。
-- **期望**：AI 草拟返回文本；保存后字段落库。
-- **断言**：回读 `d2_description` 非空。
-- **落库**：UPDATE + AI 草拟留痕。
+- **做**：等 D2 label「5W2H 问题描述」可见 → `page.locator("textarea").first()` 填描述 → `.blur()` 落库 → 点 `[data-e2e="capa-ai-draft"]` 触发 AI 草拟 → 确认/采纳后保存 → 点 `[data-e2e="capa-advance"]` 推进 D2→D3。
+- **期望**：AI 草拟返回文本；保存后字段落库；推进后 D3 label「临时遏制措施」可见。
+- **断言**：回读 `d2_description` 非空；`status == "D3_INTERIM"`；审计 1 条 TRANSITION `D2_DESCRIPTION → D3_INTERIM`。
+- **落库**：UPDATE + AI 草拟留痕 + TRANSITION。
 
 #### B4 D3 临时措施
-- **做**：等 D3 label「临时遏制措施」可见 → `page.locator("textarea").first()` 填临时围堵 → `.blur()` 保存。
-- **期望**：字段落库。
-- **断言**：回读 `d3_interim` 非空。
-- **落库**：UPDATE。
+- **做**：等 D3 label「临时遏制措施」可见 → `page.locator("textarea").first()` 填临时围堵 → `.blur()` 保存 → 点 `[data-e2e="capa-advance"]` 推进 D3→D4。
+- **期望**：字段落库；推进后 D4 视图出现 D4RecPanel + D4VerificationCard + 根因 TextArea。
+- **断言**：回读 `d3_interim` 非空；`status == "D4_ROOT_CAUSE"`；审计 1 条 TRANSITION `D3_INTERIM → D4_ROOT_CAUSE`。
+- **落库**：UPDATE + TRANSITION。
 
 #### B5 D4 根因分析（含 AI 推荐 + 现场验证）
-- **做**：点 `[data-e2e="capa-advance"]` 推进到 D4 → 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因（`adopt-recommendation` 把采纳的根因写入 `d4_root_cause` 并回填 TextArea，`onAdopted` → `refreshCapa`）→ **断言 D4 TextArea 已显示采纳的根因**（`GET /api/capa/{report_id}` 回读 `d4_root_cause` 与采纳值一致）→ 现场验证（见 C2）→ 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
+- **做**：B4 已推进到 D4。等 D4 视图出现（D4RecPanel + D4VerificationCard + 根因 TextArea）→ 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因（`adopt-recommendation` 把采纳的根因写入 `d4_root_cause` 并回填 TextArea，`onAdopted` → `refreshCapa`）→ **断言 D4 TextArea 已显示采纳的根因**（`GET /api/capa/{report_id}` 回读 `d4_root_cause` 与采纳值一致）→ 现场验证（见 C2）→ 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
 - **关键**：D4→D5 闸口要求**已验证记录的 `root_cause_text` 与当前 `d4_root_cause` 完全一致**（空白归一化后，`capa_service.py:412-416`）。采纳后**不要手动覆盖 TextArea**——验证记录绑定的是采纳那一刻的根因文本，改了就放行不了。若需手填根因，必须在采纳/验证**之前**填，且验证时用同一文本。
-- **期望**：D4 视图出现 D4RecPanel + D4VerificationCard + 根因 TextArea。
-- **断言**：**未完成现场验证时 D4→D5 应被阻断**（advance 报错或禁用）；验证通过后才可推进。
-- **落库**：审计 1 条 TRANSITION `D4_ROOT_CAUSE → D5_CORRECTION`，`operated_by == "engineer"`。
+- **期望**：推进后 D5 label「永久纠正措施」可见。
+- **断言**：**未完成现场验证时 D4→D5 应被阻断**（advance 报错或禁用）；验证通过后才可推进；`status == "D5_CORRECTION"`；审计 1 条 TRANSITION `D4_ROOT_CAUSE → D5_CORRECTION`，`operated_by == "engineer"`。
 
 #### B6 D5 永久措施（含 AI 推荐）
-- **做**：推进到 D5 → 触发 D5 AI 推荐（见 C1）→ 点 `[data-e2e="d5-adopt-suggestion"]`（或 `d5-adopt-control`）采纳 → 等 D5 label「永久纠正措施」可见 → `page.locator("textarea").first()` 填措施 → `.blur()` 保存。
-- **期望**：D5RecPanel + 措施 TextArea。
-- **断言**：回读 `d5_correction` 非空；采纳留痕（审计 `action == "ADOPT_RECOMMENDATION"`）。
-- **落库**：UPDATE + 采纳留痕。
+- **做**：等 D5 label「永久纠正措施」可见 → 触发 D5 AI 推荐（见 C1）→ 点 `[data-e2e="d5-adopt-suggestion"]`（或 `d5-adopt-control`）采纳 → `page.locator("textarea").first()` 填措施 → `.blur()` 保存 → 点 `[data-e2e="capa-advance"]` 推进 D5→D6。
+- **期望**：D5RecPanel + 措施 TextArea；推进后 D6 label「效果验证」可见。
+- **断言**：回读 `d5_correction` 非空；采纳留痕（审计 `action == "ADOPT_RECOMMENDATION"`）；`status == "D6_VERIFICATION"`；审计 1 条 TRANSITION `D5_CORRECTION → D6_VERIFICATION`。
+- **落库**：UPDATE + 采纳留痕 + TRANSITION。
 
 #### B7 D6 实施验证
 - **做**：等 D6 label「效果验证」可见 → `page.locator("textarea").first()` 填验证结果 → `.blur()` 保存 → 点 `[data-e2e="capa-advance"]` 推进 D6→D7。
-- **期望**：字段落库；推进成功。
-- **断言**：回读 `d6_verification` 非空；审计 1 条 TRANSITION `D6_VERIFICATION → D7_PREVENTION`，`operated_by == "engineer"`。
+- **期望**：字段落库；推进后 D7 label「预防复发措施」可见。
+- **断言**：回读 `d6_verification` 非空；`status == "D7_PREVENTION"`；审计 1 条 TRANSITION `D6_VERIFICATION → D7_PREVENTION`，`operated_by == "engineer"`。
 
 #### B8 D7 预防复发（含 AI 预防提示）
 - **做**（两部分，分开落库）：
@@ -176,7 +175,7 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 
 #### C2 真点接受 + 现场验证（D4）
 
-- 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因。
+- **采纳**：B5 已点 `[data-e2e="d4-adopt"]` 采纳候选根因（不要重复采纳）。若从 B5 进入，D4 TextArea 已显示采纳的根因，直接开始现场验证。仅当独立验证 C2（未走 B5）时才单独点 `[data-e2e="d4-adopt"]` 采纳一次。
 - 点 `[data-e2e="d4-verification-new"]` 打开新建验证表单：
   - 填 `[data-e2e="verification-method"]`（input）
   - 填 `[data-e2e="verification-result"]`（textarea）
