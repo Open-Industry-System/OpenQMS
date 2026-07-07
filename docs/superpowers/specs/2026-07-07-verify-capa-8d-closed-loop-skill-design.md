@@ -2,7 +2,7 @@
 
 **状态**: 定稿，待用户复核
 **日期**: 2026-07-07
-**依据**: `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（定稿 v6，2026-07-02）
+**依据**: `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（定稿 v7，2026-07-07）
 **类型**: OpenQMS 专属的 technique/reference skill（非 discipline-enforcing）
 
 ## 目标
@@ -18,8 +18,8 @@
 | 项 | 决策 |
 |---|---|
 | 产物 | 验收走查 → markdown 报告 |
-| 范围 | OpenQMS 专属（账号/selector/baseURL/8D 流程/LLM-skip 路径都内联） |
-| app 启动 | 检测 :5173/:5174，未启动则 `make e2e` 拉起 |
+| 范围 | OpenQMS 专属（账号/selector/baseURL/8D 流程/LLM 强制前置路径都内联） |
+| app 启动 | 默认连 :5174 e2e 栈；未跑则 `make e2e-up && make e2e-seed` 拉起服务（**不**跑 spec）；干净环境用 `make e2e-reset` |
 | AI 步骤 | 当作已实现去测；真点「接受/采纳」；走完整 12 阶段 DAG |
 | 缺 LLM 凭证 | 提示用户配置 `.env.e2e` 后再跑（交互式，给字段清单） |
 | 结构形态 | 方案 A：写死 B/C 剧本（非实时推导） |
@@ -47,7 +47,9 @@
 
 ### A 段 — 启动与前置
 
-1. 检测 `:5174`（e2e 栈）/ `:5173`（dev 栈）是否在跑；未跑则 `make e2e`（up + migrate + seed_e2e）。优先连 `:5174`。
+1. 默认连 `:5174`（e2e 栈）。检测 `:5174` 是否在跑；未跑则 `make e2e-up && make e2e-seed` 拉起服务并 seed（**不**用 `make e2e`——它会跑整套 Playwright spec）。需要干净环境时用 `make e2e-reset`。
+   - **不支持默认连 dev 栈 `:5173`**：skill 依赖 `/api/e2e/seed-state` 和 `/api/e2e/cleanup`，这些路由只在 `E2E_MODE=1` 且非 production 时注册（`backend/app/main.py:450`），只有 e2e compose 设了 `E2E_MODE=1`（`docker-compose.e2e.yml:21`）。
+   - 若用户强制用 `:5173`，skill 必须先 `GET /api/e2e/seed-state` 验证可达；不可达 → 停下，提示改用 e2e 栈（`make e2e-up`）。
 2. 读 `.env.e2e`：
    - LLM 凭证齐（`LLM_PROVIDER`/`LLM_API_KEY`/`LLM_MODEL`/`LLM_BASE_URL`）→ 继续。
    - 缺 → 停下，提示用户配置（给字段清单），配好后再继续。不自行降级跑。
@@ -58,14 +60,14 @@
 
 每步四段式，内联具体 selector。10 步骨架（B1/B5 详写为锚点，其余同形，完整四段式留到实现阶段写进 SKILL.md）：
 
-- **B1** engineer 登录 → CAPA 列表 → `[data-e2e=capa-create]` → 新建 8D：单号 `E2E-STORY-CAPA-001` / 标题「来料螺栓尺寸超差」/ 严重度「致命」/ 产品线 `DC-DC-100-E2E`。断言：列表出现该单号；DB `capa_eightd` 有该行 `current_step=D1`；审计 1 条 CREATE（engineer）。
+- **B1** engineer 登录 → CAPA 列表 → `[data-e2e="capa-create"]` → 新建 8D：单号 `E2E-STORY-CAPA-001` / 标题「来料螺栓尺寸超差」/ 严重度「致命」/ 产品线 `DC-DC-100-E2E`。断言：列表出现该单号；`GET /api/capa/{report_id}` 回读 `current_step=D1`；审计 1 条 CREATE（engineer）。
 - **B2** D1 团队组建，指定 8D 负责人。
-- **B3** D2 问题描述 + `[data-e2e=capa-ai-draft]` AI 草拟 → 确认后保存。
+- **B3** D2 问题描述 + `[data-e2e="capa-ai-draft"]` AI 草拟 → 确认后保存。
 - **B4** D3 临时措施。
-- **B5** D4 根因分析 → 推进到 D4 → 触发 AI 推荐（见 C1）→ `[data-e2e=d4-adopt]` 采纳 → 现场验证（见 C2）→ 确认根因 → `[data-e2e=capa-advance]` 推进 D4→D5。断言：未验证根因时 D4→D5 阻断；审计 1 条 TRANSITION。
-- **B6** D5 永久措施 → 触发 AI 推荐（见 C1）→ `[data-e2e=d5-adopt-suggestion]` / `[data-e2e=d5-adopt-control]` 采纳 → 保存。
+- **B5** D4 根因分析 → 推进到 D4 → 触发 AI 推荐（见 C1）→ `[data-e2e="d4-adopt"]` 采纳 → 现场验证（见 C2）→ 确认根因 → `[data-e2e="capa-advance"]` 推进 D4→D5。断言：未验证根因时 D4→D5 阻断；审计 1 条 TRANSITION。
+- **B6** D5 永久措施 → 触发 AI 推荐（见 C1）→ `[data-e2e="d5-adopt-suggestion"]` / `[data-e2e="d5-adopt-control"]` 采纳 → 保存。
 - **B7** D6 实施验证 → 推进 D6→D7。
-- **B8** D7 预防复发 → `[data-e2e=d7-auto-fill]` / `[data-e2e=d7-confirm]` / `[data-e2e=d7-skip]`，含 AI 预防提示。
+- **B8** D7 预防复发 → `[data-e2e="d7-auto-fill"]` / `[data-e2e="d7-confirm"]` / `[data-e2e="d7-skip"]`，含 AI 预防提示。
 - **B9** manager 登录 → 列表见待审批 8D → 详情 → 审批 D7→D8 关闭。断言：engineer 不能审批 D7→D8（权限）。
 - **B10** viewer 登录 → 列表见已关闭 8D → 详情可读，无编辑/推进/删除按钮。断言：只读可见。
 
@@ -73,7 +75,7 @@
 
 #### C1 触发 + 12 阶段断言
 
-触发 D4RecPanel / D5RecPanel 推荐，对 `i=1..12` 查 `[data-e2e=rec-dag-stage-<i>]` 的 `data-status`、`source`、`hit_count`、`summary`：
+触发 D4RecPanel / D5RecPanel 推荐，对 `i=1..12` 查 `[data-e2e="rec-dag-stage-<i>"]`。注意 `RecommendationDAG` 只在节点上暴露 `data-status` 属性；`source`（Tag）、`hit_count`（Badge）、`summary`（Text）是节点的**可见文本**，从渲染内容读取（`frontend/src/components/capa/RecommendationDAG.tsx:45-51`）：
 
 | i | 阶段 | 期望状态 |
 |---|---|---|
@@ -97,26 +99,31 @@
 
 #### C2 真点接受 + 现场验证（D4）
 
-- 点 `[data-e2e=d4-adopt]` 采纳一条候选根因。
-- 点 `[data-e2e=d4-verification-new]` → 填 `[data-e2e=verification-method]` / `[verification-result]` / `[verification-evidence]`（**上传证据文件**，见下）→ 勾 `[data-e2e=verification-is-verified]` → `[data-e2e=verification-submit]`。
-- 断言：`[data-e2e=verification-status]` 显示已验证；DB 验证记录落库可追溯。
+- 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因。
+- 点 `[data-e2e="d4-verification-new"]` 打开新建验证表单，依次：
+  - 填 `[data-e2e="verification-method"]`（input，验证方法）
+  - 填 `[data-e2e="verification-result"]`（textarea，测量/观察结果）
+  - 上传证据：点 `[data-e2e="verification-evidence"]` 内的「添加证据」按钮触发文件选择 → 用浏览器 MCP `browser_file_upload` 传临时证据文件（Ant `Upload`，`beforeUpload={() => false}`，只收集 fileList 不自动上传）
+  - 勾 `[data-e2e="verification-form-is-verified"]`（**新建表单**的 Switch；**不要**点列表上的 `[data-e2e="verification-is-verified"]`——那是已有记录的切换开关）
+  - 提交 `[data-e2e="verification-submit"]`
+- 断言：`[data-e2e="verification-status"]` 显示已验证；`GET /api/capa/{report_id}/root-cause-verifications` 回读验证记录落库可追溯。
 - 断言：未验证时 D4→D5 阻断；验证通过后可推进。
 
 #### 证据附件上传
 
-skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件（小 PNG 或文本），用浏览器 MCP 文件上传能力（`browser_file_upload` / `browser_drop`）传到 `[data-e2e=verification-evidence]`。断言上传后在详情页可见该附件名。
+skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件（小 PNG 或文本）。上传方式：点 `[data-e2e="verification-evidence"]` 区域的「添加证据」按钮触发原生文件选择对话框 → 浏览器 MCP `browser_file_upload`（paths 指向临时文件）。断言上传后 fileList 含该文件、详情页可见附件名。
 
 ### D 段 — 收尾与报告
 
-- 清理：调 `cleanupByPrefix("E2E-STORY-")`（后端 gated 端点；不删 seed）。
+- 清理：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /auth/login` 拿 admin token → `POST /api/e2e/cleanup?prefix=E2E-STORY-`（后端 gated 端点，只删本前缀走查产生的记录，**不删 seed**）。
 - 汇总每步标签 → 写报告 → 关浏览器。
 
 ## 内联查表（skill 里给 agent 速查）
 
 1. **账号表**：从 `/api/e2e/seed-state` 动态取密码；列 4 角色 + 各自能/不能推进的 D 步。
-2. **selector 表**：上述所有 `data-e2e` 一览。
+2. **selector 表**：上述所有 `[data-e2e="..."]` 一览（统一带引号，避免 agent 复制出不稳定 selector）；每项标注断言读取方式——属性（如 `data-status`）还是可见文本（如 stage 的 `source`/`hit_count`/`summary`）。
 3. **8D 状态机表**：D1→…→D8 顺序、每步需权限（编辑/审批）、不可跳步。
-4. **审计轨迹期望**：1 CREATE + 7 TRANSITION；D1–D6 engineer，D7–D8 manager。
+4. **审计轨迹期望**：1 CREATE + 7 TRANSITION；6 条 D1→D2…D6→D7 由 engineer，末条 D7→D8 由 manager（故事「D1-D7 由现场质量工程师」指 D 步内容归属，过渡归属按此拆分）。
 5. **报告模板**：见下。
 
 ## 缺陷分类（每步打一个标签）
@@ -126,7 +133,7 @@ skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件�
 | **PASS** | 通过，断言全满足 | D4→D5 推进成功、落库正确 |
 | **PASS-NOTE** | 通过但有备注（不阻断） | SPC 阶段 `skipped` 且注明「无 SPC 数据」（故事允许） |
 | **FAIL** | 断言失败 = 缺陷 | FMEA 阶段状态 `error`、推荐列表空、provenance 缺失、未验证却放行 D4→D5 |
-| **MISSING** | 故事要求的功能根本不存在 = 缺陷 | D4RecPanel 没渲染、`rec-dag-stage-*` 找不到、无「采纳」按钮 |
+| **MISSING** | 故事要求的功能根本不存在 = 缺陷 | D4RecPanel 没渲染、`[data-e2e="rec-dag-stage-*"]` 找不到、无「采纳」按钮 |
 
 约定：**MISSING 和 FAIL 都算缺陷**（严重度不同）；都在报告「缺陷清单」单列。PASS-NOTE 不算缺陷。
 
@@ -141,8 +148,8 @@ skill 在 `$CLAUDE_JOB_DIR/tmp`（或 fixture）生成一个临时证据文件�
   2. **总览**：PASS/PASS-NOTE/FAIL/MISSING 计数 + 整体结论（PASS / 有缺陷 / BLOCKED）。
   3. **B 段步骤表**：10 步 × {做什么 / 期望 / 断言结果 / 标签}。
   4. **C 段 DAG 阶段矩阵**：D4 和 D5 各一张 12 阶段表（index / 名称 / 来源 / 状态 / 命中数 / 摘要 / 标签）。
-  5. **审计轨迹核对**：期望 1 CREATE + 7 TRANSITION，实际查 DB/AuditLog 比对。
-  6. **落库抽查**：单号/标题/严重度/各 D 步字段/验证记录/采纳记录。
+  5. **审计轨迹核对**：从 `/api/e2e/seed-state` 取 admin 密码 → `POST /auth/login` 拿 token → `GET /api/admin/logs/audit?table_name=capa_eightd&page=1&page_size=200&start=<走查开始ISO>` → 客户端按 `record_id` == 该 8D id 过滤（`/api/audit-logs?target_id` 不存在，勿用）。期望 1 CREATE + 7 TRANSITION；6 条 D1→D2…D6→D7 由 engineer，末条 D7→D8 由 manager。
+  6. **落库抽查**：`GET /api/capa/{report_id}` 回读，核对单号/标题/严重度/current_step/各 D 步字段；`GET /api/capa/{report_id}/root-cause-verifications` 核对验证记录；采纳记录核对（`POST /api/capa/{report_id}/adopt-recommendation` 留痕）。
   7. **缺陷清单**：所有 FAIL + MISSING，每条含「步骤 / 期望 / 实际 / 严重度 / 截图路径」。
   8. **证据附件**：现场验证上传的文件名 + 上传后是否在详情可见。
 
@@ -161,7 +168,7 @@ docs/user-stories/US-E2E-01-capa-8d-closed-loop.md  (源头，含「状态: 定�
 - 顶部声明：
   ```
   依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop.md
-  故事版本：定稿 v6（2026-07-02）
+  故事版本：定稿 v7（2026-07-07）
   同步规则：当用户故事版本号或日期变更，本剧本必须重新核对并同步。
   ```
 - 维护节：agent 跑前比对 skill 内版本与故事顶部实际版本；不一致 → 停下，提示用户先同步；同步 = 重读故事 → 逐条核对剧本 → 改 SKILL.md → 更新顶部版本声明 → 重跑。
