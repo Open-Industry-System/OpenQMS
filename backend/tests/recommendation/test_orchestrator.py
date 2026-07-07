@@ -230,6 +230,57 @@ async def test_d5_stage5_runs_historical_capa_measure():
 
 
 @pytest.mark.asyncio
+async def test_d4_stage3_extra_failure_recorded():
+    """D4 stage 3 主源成功但额外源失败时，StageRun 仍标 done，且 error/summary 记录失败。"""
+    from app.services.llm_fusion_layer import LLMOutcome
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), MagicMock())
+    orch.llm_layer.enrich = AsyncMock(side_effect=lambda cands, ctx: LLMOutcome(candidates=list(cands), attempted=0))
+
+    ss_cand = RecommendationCandidate(
+        source="semantic_search", content="语义召回根因", category=None, confidence=0.8,
+        match_reason="语义相似", metadata={"marker": "semantic"})
+    orch._sources["semantic_search"] = _async_stub_source(ss_cand)
+    hist_source = _async_stub_source()
+    hist_source.retrieve = AsyncMock(side_effect=RuntimeError("boom"))
+    orch._sources["historical_capa"] = hist_source
+
+    result = await orch.run(_ctx(stage="d4"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s3 = next(s for s in result.stages if s.index == 3)
+    assert s3.source == "semantic_search"
+    assert s3.status == "done"
+    assert s3.hit_count == 1
+    assert s3.error is not None
+    assert "historical_capa" in s3.error
+    assert "boom" in s3.error
+    assert "extra failures:" in s3.summary
+
+    markers = {c.metadata.get("marker") for c in result.items}
+    assert "semantic" in markers
+
+
+@pytest.mark.asyncio
+async def test_d4_stage3_primary_empty_extra_failure_is_error():
+    """D4 stage 3 主源返回 0 候选且额外源失败时，StageRun 标 error 而非 done(0)。"""
+    from app.services.llm_fusion_layer import LLMOutcome
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), MagicMock())
+    orch.llm_layer.enrich = AsyncMock(side_effect=lambda cands, ctx: LLMOutcome(candidates=list(cands), attempted=0))
+
+    orch._sources["semantic_search"] = _async_stub_source()
+    hist_source = _async_stub_source()
+    hist_source.retrieve = AsyncMock(side_effect=RuntimeError("boom"))
+    orch._sources["historical_capa"] = hist_source
+
+    result = await orch.run(_ctx(stage="d4"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
+    s3 = next(s for s in result.stages if s.index == 3)
+    assert s3.source == "semantic_search"
+    assert s3.status == "error"
+    assert s3.hit_count == 0
+    assert s3.error is not None
+    assert "historical_capa" in s3.error
+    assert "boom" in s3.error
+
+
+@pytest.mark.asyncio
 async def test_d4_stage3_historical_capa_skipped_when_no_embedding():
     """embedding 未配置时，D4 stage 3 因主源/额外源均依赖 embedding 而 skipped。"""
     orch = RecommendationOrchestrator(MagicMock(), None, None)

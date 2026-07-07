@@ -470,7 +470,7 @@ class HistoricalCAPAMeasureSource:
             if not d5:
                 continue
             candidates.append(RecommendationCandidate(
-                source="historical_capa",
+                source="historical_capa_measure",
                 content=d5,
                 category="纠正措施",
                 confidence=min(float(sim) * 0.85, 0.85),

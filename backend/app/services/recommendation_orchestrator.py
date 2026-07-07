@@ -216,14 +216,15 @@ class RecommendationOrchestrator:
 
         stage_candidates: list[RecommendationCandidate] = []
         per_source_summary: list[str] = []
-        errors: list[str] = []
+        primary_errors: list[str] = []
+        extra_errors: list[str] = []
         skipped_sources: list[str] = []
 
         for kind in kinds:
             source = self._sources.get(kind)
             if source is None:
                 if kind == primary:
-                    errors.append(f"source {kind} 未注册")
+                    primary_errors.append(f"source {kind} 未注册")
                 else:
                     logger.warning(f"Stage {spec.index} extra source {kind} not registered, skipping")
                 continue
@@ -233,7 +234,7 @@ class RecommendationOrchestrator:
                 proto_violation = self._check_source_protocol(spec, source, kind)
                 if proto_violation:
                     if kind == primary:
-                        errors.append(proto_violation)
+                        primary_errors.append(proto_violation)
                     else:
                         logger.warning(f"Stage {spec.index} extra source {kind} protocol violation, skipping: {proto_violation}")
                     continue
@@ -258,24 +259,41 @@ class RecommendationOrchestrator:
             except Exception as e:
                 logger.warning(f"Stage {spec.index} {spec.name} source {kind} failed: {e}")
                 if kind == primary:
-                    errors.append(f"{kind}: {str(e)[:100]}")
+                    primary_errors.append(f"{kind}: {str(e)[:100]}")
+                else:
+                    extra_errors.append(f"{kind}: {str(e)[:100]}")
 
         all_candidates.extend(stage_candidates)
 
         # 4. 组合结果汇总：source 标签保持 primary，hit_count 为所有源候选总数
-        if stage_candidates:
-            summary = ", ".join(per_source_summary) if per_source_summary else f"{primary}: {len(stage_candidates)}"
-            return StageRun(spec.index, spec.name, primary, "done",
-                            hit_count=len(stage_candidates), summary=summary)
-
-        if errors:
+        # 主源失败 → stage error（保留既有行为）
+        if primary_errors:
+            errors = primary_errors + extra_errors
             return StageRun(spec.index, spec.name, primary, "error",
                             error="; ".join(errors),
                             summary=f"组合执行失败: {'; '.join(errors)}")
 
+        # 主源被静态 skipped → 保持 skipped，不因额外源失败而转 error
         if skipped_sources:
             return StageRun(spec.index, spec.name, primary, "skipped",
                             summary="; ".join(skipped_sources))
+
+        # 主源成功但额外源失败 → 失败必须可观测；若无候选则整体 error（避免 done(0) 隐藏失败）
+        if extra_errors:
+            error_str = "; ".join(extra_errors)
+            if stage_candidates:
+                summary = ", ".join(per_source_summary) if per_source_summary else f"{primary}: {len(stage_candidates)}"
+                summary += f" | extra failures: {error_str}"
+                return StageRun(spec.index, spec.name, primary, "done",
+                                hit_count=len(stage_candidates), error=error_str, summary=summary)
+            return StageRun(spec.index, spec.name, primary, "error",
+                            error=error_str,
+                            summary=f"stage produced no candidates; extra failures: {error_str}")
+
+        if stage_candidates:
+            summary = ", ".join(per_source_summary) if per_source_summary else f"{primary}: {len(stage_candidates)}"
+            return StageRun(spec.index, spec.name, primary, "done",
+                            hit_count=len(stage_candidates), summary=summary)
 
         return StageRun(spec.index, spec.name, primary, "done",
                         hit_count=0, summary=f"{primary}: 0")

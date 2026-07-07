@@ -16,6 +16,7 @@ from app.models.product_line import ProductLine
 from app.models.product_type import ProductType
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import Supplier, SupplierEvaluation, SupplierSCAR
+from app.services.recommendation_sources import HistoricalCAPAMeasureSource
 from app.services.recommendation_sources_extra import (
     IQCSource,
     LessonsLearnedSource,
@@ -1106,3 +1107,66 @@ async def test_lessons_factory_isolation(db, default_factory, admin_user):
     assert "8D-A" in returned_doc_nos
     assert "8D-B" not in returned_doc_nos
     assert all(c.metadata.get("factory_id") == str(default_factory.id) for c in cands)
+
+
+# ── HistoricalCAPAMeasureSource (source value regression) ───────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_historical_capa_measure_source_value(db, default_factory):
+    """HistoricalCAPAMeasureSource 返回的候选 source 必须是 historical_capa_measure，而非 historical_capa。"""
+    suffix = uuid.uuid4().hex[:8]
+    report_id = uuid.uuid4()
+    capa = CAPAEightD(
+        report_id=report_id,
+        document_no=f"8D-MEASURE-{suffix}",
+        title="Measure source test",
+        factory_id=default_factory.id,
+        product_line_code="DC-DC-100",
+        status="D8_CLOSURE",
+        d4_root_cause="温度不稳定导致偏移",
+        d5_correction="增加温控并校准",
+    )
+    db.add(capa)
+    await db.flush()
+
+    dim = await _embedding_dim(db)
+    if dim is None:
+        pytest.skip("document_embeddings.embedding column not present (pgvector schema not available)")
+
+    await _seed_embedding(
+        db,
+        dim,
+        "capa",
+        report_id,
+        "d4_root_cause",
+        "温度不稳定导致偏移",
+        default_factory.id,
+        "DC-DC-100",
+        "test-model",
+        hot_idx=0,
+    )
+
+    query_vec = [0.0] * dim
+    query_vec[0] = 1.0
+
+    emb = MagicMock()
+    emb.embed = AsyncMock(return_value=[query_vec])
+    src = HistoricalCAPAMeasureSource(db, emb)
+    ctx = RecommendationContext(
+        capa_data={
+            "d4_root_cause": "温度不稳定导致偏移",
+            "d2_description": "焊接问题",
+            "product_line_code": "DC-DC-100",
+        },
+        user_product_lines=["DC-DC-100"],
+        stage="d5",
+        factory_id=default_factory.id,
+    )
+    cands = await src.retrieve(ctx)
+
+    assert len(cands) > 0, " seeded D8_CLOSURE CAPA d5_correction 应被召回"
+    assert all(c.source == "historical_capa_measure" for c in cands)
+    assert any(c.content == "增加温控并校准" for c in cands)
+    assert all(c.category == "纠正措施" for c in cands)
