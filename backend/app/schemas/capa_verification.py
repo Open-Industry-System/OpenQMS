@@ -8,6 +8,7 @@ class AdoptRequest(BaseModel):
     d_step: Literal["d4", "d5"]
     adopted_text: str
     source: str
+    stage_index: int | None = None
     item_ref: dict | None = None
 
 

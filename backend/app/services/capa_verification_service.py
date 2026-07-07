@@ -55,7 +55,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     adoption = CapaAIAdoption(
         capa_id=capa.report_id, factory_id=capa.factory_id,
         d_step=req.d_step, adopted_text=req.adopted_text,
-        source=req.source, stage_index=None, item_ref=req.item_ref,
+        source=req.source, stage_index=req.stage_index, item_ref=req.item_ref,
         adopted_by=user.user_id,
     )
     db.add(adoption)
@@ -63,7 +63,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         table_name="capa_eightd", record_id=capa.report_id,
         action="ADOPT_RECOMMENDATION",
         changed_fields={
-            "d_step": req.d_step, "source": req.source, "stage_index": None,
+            "d_step": req.d_step, "source": req.source, "stage_index": req.stage_index,
             "adopted_text": req.adopted_text, "item_ref": req.item_ref,
         },
         operated_by=user.user_id, factory_id=capa.factory_id,
