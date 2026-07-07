@@ -503,8 +503,8 @@ Only run this if the e2e stack is up AND `.env.e2e` has all four LLM credentials
 
 - [ ] **Step 1: Confirm env is ready**
 
-Run: `curl -sf http://localhost:5174 >/dev/null && for k in LLM_PROVIDER LLM_API_KEY LLM_MODEL LLM_BASE_URL; do grep -qE "^${k}=.+" .env.e2e || exit 1; done && echo READY || echo NOT_READY`
-Expected: `READY`. If `NOT_READY`, stop this task and record "live walk deferred". (Per-line `grep -qE` in the loop ensures all four fields are present; the `|| exit 1` short-circuits on the first missing one.)
+Run: `bash -c 'curl -sf http://localhost:5174 >/dev/null || exit 1; missing=0; for k in LLM_PROVIDER LLM_API_KEY LLM_MODEL LLM_BASE_URL; do grep -qE "^${k}=.+" .env.e2e || missing=1; done; [ "$missing" -eq 0 ] && echo READY || echo NOT_READY'`
+Expected: `READY`. If `NOT_READY`, stop this task and record "live walk deferred". (A missing field sets `missing=1` instead of short-circuit-exiting, so the final `[ ]` always prints READY or NOT_READY; `bash -c` wraps it so the `exit 1` on curl failure and the `&&`/`;` precedence are unambiguous.)
 
 - [ ] **Step 2: Dispatch a fresh subagent to execute the skill**
 
