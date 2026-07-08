@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
+from app.state_machines.eightd_state import capa_open_clause
 
 DEFAULT_LAYOUT = {
     "lg": [
@@ -108,12 +109,12 @@ async def get_dashboard(db: AsyncSession, product_line: str | None = None, produ
 
     total_capa = await db.scalar(capa_base)
     open_capa = await db.scalar(
-        capa_base.where(CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]))
+        capa_base.where(capa_open_clause(CAPAEightD.status))
     )
 
     overdue_capa = await db.scalar(
         capa_base.where(
-            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            capa_open_clause(CAPAEightD.status),
             CAPAEightD.due_date < now.date(),
         )
     )
@@ -252,7 +253,7 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     fmea_pending_count = await db.scalar(fmea_pending) or 0
 
     capa_pending = select(func.count(CAPAEightD.report_id)).where(
-        CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+        capa_open_clause(CAPAEightD.status)
     )
     if codes:
         capa_pending = capa_pending.where(CAPAEightD.product_line_code.in_(codes))
@@ -276,7 +277,7 @@ async def get_summary(db: AsyncSession, product_line: str | None = None, product
     pending_actions = fmea_pending_count + capa_pending_count + complaint_pending_count
 
     overdue_capa_q = select(func.count(CAPAEightD.report_id)).where(
-        CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+        capa_open_clause(CAPAEightD.status),
         CAPAEightD.due_date < now.date(),
     )
     if codes:
@@ -394,7 +395,7 @@ async def get_alerts(db: AsyncSession, product_line: str | None = None, product_
     capa_query = (
         select(CAPAEightD.report_id, CAPAEightD.document_no, CAPAEightD.due_date)
         .where(
-            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            capa_open_clause(CAPAEightD.status),
             CAPAEightD.due_date < now.date(),
         )
         .order_by(CAPAEightD.due_date)

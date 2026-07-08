@@ -9,7 +9,7 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
-from app.state_machines.eightd_state import EightDState, _linear_next, can_transition
+from app.state_machines.eightd_state import EightDState, _linear_next, can_transition, capa_open_clause
 
 EMBEDDING_FIELDS = {"d2_description", "d4_root_cause", "d5_correction", "d7_prevention"}
 
@@ -49,20 +49,20 @@ async def list_capas(
 
     if overdue:
         query = query.where(
-            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            capa_open_clause(CAPAEightD.status),
             CAPAEightD.due_date < now.date(),
         )
         count_query = count_query.where(
-            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]),
+            capa_open_clause(CAPAEightD.status),
             CAPAEightD.due_date < now.date(),
         )
 
     if pending_action:
         query = query.where(
-            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+            capa_open_clause(CAPAEightD.status)
         )
         count_query = count_query.where(
-            CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"])
+            capa_open_clause(CAPAEightD.status)
         )
 
     query = query.order_by(CAPAEightD.created_at.desc())

@@ -13,6 +13,7 @@ from app.models.fmea import FMEADocument
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.schemas.quality_trend import QualityTrendMetadata, QualityTrendSummary
 from app.services.agent import provider_adapter
+from app.state_machines.eightd_state import capa_open_clause
 from app.services.agent.audit import write_audit_raw
 from app.utils.fmea_graph import build_rpn_rows
 
@@ -60,8 +61,8 @@ async def build_quality_trend_summary(
         score += max(0, trend_delta)
 
     if "capa" in allowed_modules:
-        open_capa_q = select(func.count()).where(CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]))
-        overdue_capa_q = select(func.count()).where(CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]), CAPAEightD.due_date.isnot(None), CAPAEightD.due_date < now.date())
+        open_capa_q = select(func.count()).where(capa_open_clause(CAPAEightD.status))
+        overdue_capa_q = select(func.count()).where(capa_open_clause(CAPAEightD.status), CAPAEightD.due_date.isnot(None), CAPAEightD.due_date < now.date())
         if filter_codes:
             open_capa_q = open_capa_q.where(CAPAEightD.product_line_code.in_(filter_codes))
             overdue_capa_q = overdue_capa_q.where(CAPAEightD.product_line_code.in_(filter_codes))
