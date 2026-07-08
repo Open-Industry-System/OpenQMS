@@ -37,6 +37,7 @@ from app.services.capa_d7_action_service import ConflictError
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
+from app.state_machines.eightd_state import EightDState, _linear_next_safe
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
 
@@ -175,12 +176,16 @@ async def update_capa(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
     update_data = req.model_dump(exclude_unset=True)
-    capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
+    try:
+        capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
 
 
-async def require_close_permission(
+async def require_advance_permission(
     report_id: uuid.UUID,
+    body: AdvanceRequest | None = None,
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ) -> tuple[RequestScope, Any]:
@@ -188,10 +193,24 @@ async def require_close_permission(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
-    if capa.status in ["D7_PREVENTION", "D8_CLOSURE"]:
+    target = body.target_state if body else None
+    # target_state=None（线性 advance）时算出实际 target，否则归档边 (D8_CLOSURE→ARCHIVED)
+    # 因 target=None 不命中 approve_edges，会误落 EDIT 分支放行 field_qe 归档。
+    target = target or _linear_next_safe(capa.status)
+    # APPROVE 边：审批 / 驳回 / 归档
+    approve_edges = (
+        (EightDState.D8_APPROVAL_PENDING.value, EightDState.D8_CLOSURE.value),
+        (EightDState.D8_APPROVAL_PENDING.value, EightDState.D7_PREVENTION.value),
+        (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value),
+    )
+    if (capa.status, target.value if target else None) in approve_edges:
         level = await get_user_permission(scope.user, Module.CAPA, db)
         if level < PermissionLevel.APPROVE:
             raise HTTPException(status_code=403, detail="审批权限不足")
+    else:
+        level = await get_user_permission(scope.user, Module.CAPA, db)
+        if level < PermissionLevel.EDIT:
+            raise HTTPException(status_code=403, detail="编辑权限不足")
     return scope, capa
 
 
@@ -200,11 +219,13 @@ async def advance_capa(
     report_id: uuid.UUID,
     body: AdvanceRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    result: tuple[RequestScope, Any] = Depends(require_close_permission),
+    result: tuple[RequestScope, Any] = Depends(require_advance_permission),
 ):
     scope, capa = result
     try:
-        capa = await capa_service.advance_capa(db, capa, scope.user.user_id, body)
+        capa = await capa_service.advance_capa(
+            db, capa, scope.user.user_id, body or AdvanceRequest()
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)
