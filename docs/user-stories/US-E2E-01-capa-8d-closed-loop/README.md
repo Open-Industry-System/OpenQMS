@@ -49,7 +49,7 @@ D8 关闭后知识沉淀 + 横向扩散预警 + 报告输出——
 | 01.7 | D8 关闭前文档更新审核门禁 | `US-E2E-01.7-doc-update-gate.md` | 定稿 v1 | true |
 | 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | 定稿 v1 | true |
 | 01.9 | 横向扩散预警与通知 | `US-E2E-01.9-lateral-diffusion.md` | 定稿 v1 | true |
-| 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | 定稿 v1 | false |
+| 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | 定稿 v2 | false |
 
 > **AI_REQUIRED**：true = 该子故事有 AI 步骤，无 LLM 凭证时验收为 `BLOCKED`（环境缺失，不可降级）；false = 该子故事无 AI 步骤，但功能错误时为 `FAILED`。
 
