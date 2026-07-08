@@ -239,7 +239,62 @@ FastAPI 自动生成交互式 API 文档：
 
 ---
 
-## 8. 已知限制
+## 8. 8D PPT 输出与审查 Skill 管理
+
+### 8.1 8D 报告 PPT 生成
+
+D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封面 + D1-D8 各页 + 联动附录（根因验证证据附件）。
+
+**数据流**：
+
+```
+用户点击「生成 PPT」→ POST /api/capa/{id}/ppt-export
+  ├── capa_ppt_service.generate_content()  → 从 capa_eightd 各 D 步字段组装 PptContent
+  ├── capa_ppt_service._validate()        → 校验 D1-D8 各页内容非空
+  ├── capa_ppt_review_service.review_and_correct() → 3 轮 LLM 审查闭环
+  │     ├── 第 1 轮：LLM 审查内容质量 → 返回 issues + suggestions
+  │     ├── 第 2 轮：LLM 修正内容 → 返回修正后内容
+  │     └── 第 3 轮：LLM 最终审查 → 返回 review_status (skipped/passed/needs_review)
+  ├── capa_ppt_service.render_pptx()     → 生成 .pptx 字节流
+  └── 写入 capa_ppt_export 表 + AuditLog
+```
+
+**关键表**：
+
+| 表 | 说明 |
+|----|------|
+| `capa_ppt_export` | PPT 导出记录（content JSONB、meta JSONB、review_status、review_rounds、file_data BYTEA、generated_at、generated_by） |
+| `agent_review_skill` | 审查 skill 配置（name、content JSONB、is_active、factory_id 支持租户覆盖） |
+
+**权限**：
+- 生成按钮：`canCreate('capa')`（L2，quality_engineer 及以上）
+- 可见状态：仅 D8_CLOSURE / ARCHIVED 状态可见
+- 管理页：`canAdmin('capa')`（L5，admin 角色）
+
+### 8.2 审查 Skill 管理
+
+审查 skill 是 LLM 审查的提示词模板，由管理员通过 `/api/admin/review-skills` 端点管理：
+
+- **默认 skill**：迁移 seed 写入 `agent_review_skill` 表（name=`capa_ppt_review`），含 D1-D8 各页审查标准
+- **租户覆盖**：`factory_id` 支持按工厂自定义 skill 内容，未设置时回退到公共默认
+- **CRUD**：管理员可创建/读取/更新/删除 skill（`require_admin` 守卫）
+- **去重**：按 name 去重，租户自定义优先于公共默认
+
+### 8.3 3 轮 LLM 审查闭环
+
+`capa_ppt_review_service` 实现 3 轮审查闭环：
+
+1. **审查**：调用 LLM 审查 PPT 内容质量，返回 issues + suggestions
+2. **修正**：LLM 根据 issues 修正内容
+3. **最终审查**：LLM 确认修正结果，返回 `review_status`（`skipped`/`passed`/`needs_review`）
+
+- LLM 未配置时（`pc is None`）跳过审查，`review_status="skipped"`
+- LLM 调用异常时 try/except 捕获，返回 `needs_review` + 错误信息
+- 审查结果写入 `capa_ppt_export.review_status` + `review_rounds`
+
+---
+
+## 9. 已知限制
 
 | 限制 | 说明 |
 |------|------|

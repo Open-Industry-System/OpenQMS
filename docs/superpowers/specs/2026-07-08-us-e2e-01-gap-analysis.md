@@ -18,13 +18,13 @@
 | 01.7 D8 文档更新门禁 | true | ❌ 未实现 | 现有 D7→D8 闸口只查 node-action 完整性，无文档更新审核；CP/FMEA 版本模型可复用 |
 | 01.8 知识库沉淀 | true | ⚠️ 部分实现 | D7/D8 lessons 抽取已有（capa_lessons_learned）；非结构化 8 字段沉淀、时机非 D8 关闭后全报告 |
 | 01.9 横向扩散预警 | true | ❌ 未实现 | 同类产品 KB 检索有（recommendation_sources_extra）；横向扩散检查+通知完全缺失 |
-| 01.10 PPT 输出 | false | ❌ 未实现 | 仅有 management_review 的 markdown 导出；无 PPT 生成 |
+| 01.10 PPT 输出 | false | ✅ 已实现 | capa_ppt_export 表 + agent_review_skill 表 + COALESCE 索引 + seed；capa_ppt_service（generate_content + render_pptx + validate）；capa_ppt_review_service（3 轮 LLM 闭环 + skip）；admin review-skill CRUD API；PPT 导出 API（POST + GET + X-PPT-Export-Id header + 权限/状态门控）；前端 generatePpt 按钮 + review report Modal + admin ReviewSkillsPage + i18n |
 
 **结论**：
 - **大部分已实现**：01.2（12 源编排器已就绪，但 LLM 降级/持久化有 gap）
 - **部分实现**：01.3、01.4、01.8
 - **数据模型就绪、链路缺失**：01.5（SCAR.capa_ref_id）、01.6（RiskAlert.linked_capa_id）——外键都在，只缺 8D 侧触发
-- **完全缺失**：01.1（D3 遏制全链路）、01.7（文档门禁）、01.9（横向扩散）、01.10（PPT）
+- **完全缺失**：01.1（D3 遏制全链路）、01.7（文档门禁）、01.9（横向扩散）
 
 **数据模型基础设施齐全**：ERP（库存/发货）、SCAR（capa_ref_id）、供应商风险（linked_capa_id）、控制计划版本、FMEA 版本、lessons 表均存在，新建子故事可复用，不需从零建表。
 
@@ -186,7 +186,7 @@
 | P2 | 01.7（D8 文档门禁）新建 | 完全缺失，需扩展 D7→D8 闸口 + 新增 D8_GATE_PENDING 状态；版本模型可复用 |
 | P2 | 01.8（知识沉淀）收尾 | lessons 已有，补结构化 8 字段 + 按产品检索入口 |
 | P3 | 01.9（横向扩散）新建 | 完全缺失，同类型产品 KB 检索可复用 |
-| P3 | 01.10（PPT）新建 | 完全缺失，需引入 PPT 生成依赖 |
+| ~~P3 | 01.10（PPT）新建 | 完全缺失，需引入 PPT 生成依赖~~ |
 
 ## 意外发现
 
@@ -199,3 +199,4 @@
 7. **01.8 知识沉淀已有基础**：D7/D8 lessons 抽取 + embedding 已有，但非结构化 8 字段、时机非 D8 关闭后全报告。
 8. **数据模型基础设施齐全**：ERP（库存/发货）、SCAR（capa_ref_id）、供应商风险（linked_capa_id）、控制计划版本、FMEA 版本、lessons 表均存在，新建子故事可复用，不需从零建表。
 9. **01.3 method 是自由文本**：CapaRootCauseVerification.method 是 `str | None`，故事要求枚举（measurement/observation/reproduction），需改 schema + 可能迁移。
+10. **01.10 PPT 输出已实现**（2026-07-09）：capa_ppt_export 表 + agent_review_skill 表 + COALESCE 索引 + seed；capa_ppt_service（generate_content + render_pptx + validate）；capa_ppt_review_service（3 轮 LLM 闭环 + skip）；admin review-skill CRUD API；PPT 导出 API（POST + GET + X-PPT-Export-Id header + 权限/状态门控）；前端 generatePpt 按钮 + review report Modal + admin ReviewSkillsPage + i18n。经 7 轮 adversarial review 修复后落地。
