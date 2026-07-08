@@ -12,6 +12,7 @@ from app.models.agent import (
     AgentSession,
     AgentToolCall,
 )
+from app.models.agent_review_skill import AgentReviewSkill
 from app.models.audit import AuditLog
 from app.models.login_audit_log import LoginAuditLog
 from app.models.system_log import SystemLog
@@ -20,7 +21,7 @@ from app.models.audit_plan import AuditPlan
 from app.models.audit_program import AuditChecklistTemplate, AuditProgram, AuditProgramTargetFactory
 from app.models.bias import BiasMeasurement, BiasResult, BiasStudy
 from app.models.capa import (
-    CAPAEightD, CapaAIAdoption, CapaD7NodeAction, CapaRootCauseVerification,
+    CAPAEightD, CapaAIAdoption, CapaD7NodeAction, CapaPptExport, CapaRootCauseVerification,
 )
 from app.models.capa_lesson import CapaLessonLearned
 from app.models.change_impact import ChangeImpactAnalysis
