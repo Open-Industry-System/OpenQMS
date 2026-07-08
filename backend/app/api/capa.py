@@ -575,6 +575,10 @@ async def draft_capabilities(
         "D6_VERIFICATION": ["d6"],
         "D7_PREVENTION": ["d7"],
         "D8_CLOSURE": ["d8"],
+        # 新壳状态：无可用编辑步骤（D7 已冻结、D8 待审批冻结）
+        "D7_COMPLETED": [],
+        "D8_GATE_PENDING": [],
+        "D8_APPROVAL_PENDING": [],
     }
 
     return {
