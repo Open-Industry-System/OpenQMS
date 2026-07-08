@@ -34,9 +34,10 @@ async def test_d7_completed_allows_other_fields(db, default_factory, admin_user)
     assert capa.d2_description == "改"
 
 
+@pytest.mark.parametrize("status", ["D8_GATE_PENDING", "D8_APPROVAL_PENDING"])
 @pytest.mark.asyncio
-async def test_d8_approval_pending_freezes_d8_closure(db, default_factory, admin_user):
-    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "D8_APPROVAL_PENDING")
+async def test_d8_pending_states_freeze_d8_closure(status, db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, status)
     with pytest.raises(ValueError, match="冻结字段不可修改"):
         await update_capa(db, capa, {"d8_closure": "改写"}, admin_user.user_id)
 
@@ -68,7 +69,6 @@ async def test_archived_freezes_all(db, default_factory, admin_user):
 
 
 # ── HTTP 级：验证 API try/except 映 400（非 500）──
-import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from app.core.deps import get_current_user, get_db, get_request_scope
