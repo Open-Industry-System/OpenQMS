@@ -1,6 +1,6 @@
-"""D7→D8 闭环闸口测试（决策 18）：completeness + capa_id 过滤 + recommendation_hash 匹配 + fail-closed。
+"""D7→D7_COMPLETED 完成闸口测试（决策 18）：completeness + capa_id 过滤 + recommendation_hash 匹配 + fail-closed。
 
-闸口在 advance_capa D7_PREVENTION → D8_CLOSURE 转换前跑：
+闸口在 advance_capa D7_PREVENTION → D7_COMPLETED 转换前跑：
 - 锁 capa + FMEA 依赖集（FOR UPDATE）
 - completeness check（DB count vs loaded fmea_docs；linked FMEA 缺失 → fail-closed）
 - 重算 D7 推荐（canonical scope: capa.factory_id + capa.product_line_code）
@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import select
 from app.models.capa import CAPAEightD, CapaD7NodeAction
 from app.models.fmea import FMEADocument
+from app.schemas.capa import AdvanceRequest
 from app.schemas.capa_verification import D7AutoFillRequest, D7NodeActionCreate
 from app.services.capa_d7_action_service import (
     auto_fill_d7,
@@ -89,7 +90,7 @@ async def test_d7_gate_blocks_unprocessed(db, default_factory, admin_user):
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, g)
     await _link(db, capa, fmea, fm_id="fm-1")
     with pytest.raises(ValueError, match="未处置|stale"):
-        await advance_capa(db, capa, admin_user.user_id)
+        await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
 
 
 @pytest.mark.asyncio
@@ -115,7 +116,7 @@ async def test_d7_gate_partial_preload_failclosed(db, default_factory, admin_use
 
     monkeypatch.setattr(cs, "_load_d7_gate_fmea_docs", _partial)
     with pytest.raises(ValueError, match="预加载不完整"):
-        await advance_capa(db, capa, admin_user.user_id)
+        await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
     assert loaded["n"] == 1
 
 
@@ -137,7 +138,7 @@ async def test_d7_gate_stale_hash_blocks(db, default_factory, admin_user):
     fmea.graph_data = new_graph
     await db.flush()
     with pytest.raises(ValueError, match="stale"):
-        await advance_capa(db, capa, admin_user.user_id)
+        await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
 
 
 @pytest.mark.asyncio
@@ -151,7 +152,7 @@ async def test_d7_gate_blocks_mixed_unprocessed(db, default_factory, admin_user)
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
     with pytest.raises(ValueError, match="未处置|stale"):
-        await advance_capa(db, capa, admin_user.user_id)
+        await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
 
 
 @pytest.mark.asyncio
@@ -169,7 +170,7 @@ async def test_d7_gate_cross_capa_not_satisfied(db, default_factory, admin_user)
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
     with pytest.raises(ValueError):
-        await advance_capa(db, capa_a, admin_user.user_id)
+        await advance_capa(db, capa_a, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
 
 
 # ── 闸口放行 ──────────────────────────────────────────────────────────────
@@ -188,8 +189,8 @@ async def test_d7_gate_passes_when_all_actioned(db, default_factory, admin_user)
     await record_d7_action(db, capa, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-2", match_source="linked"), admin_user)
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
 
 
 @pytest.mark.asyncio
@@ -205,8 +206,8 @@ async def test_d7_gate_passes_all_skipped(db, default_factory, admin_user):
     await record_d7_action(db, capa, D7NodeActionCreate(
         action="skipped", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-2", match_source="linked", reason="不适用"), admin_user)
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
 
 
 @pytest.mark.asyncio
@@ -222,16 +223,16 @@ async def test_d7_gate_passes_all_auto_filled(db, default_factory, admin_user):
     await auto_fill_d7(db, capa, D7AutoFillRequest(
         fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-2", match_source="linked"), admin_user)
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
 
 
 @pytest.mark.asyncio
 async def test_d7_gate_no_recs_passes(db, default_factory, admin_user):
     # PL 0 FMEA + 无 linked → 真无推荐 → 推进
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
 
 
 # ── hash 写入（R3 + R11）──────────────────────────────────────────────────
@@ -311,5 +312,30 @@ async def test_d7_gate_passes_single_rec_confirmed(db, default_factory, admin_us
     await record_d7_action(db, capa, D7NodeActionCreate(
         action="confirmed", fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
         failure_cause_node_id="c-1", match_source="linked"), admin_user)
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_d7_completion_gate_blocks_until_all_actioned_then_advances_to_d7_completed(
+    db, default_factory, admin_user,
+):
+    """全 node-action 处置后 D7_PREVENTION→D7_COMPLETED 通过；未处置阻断。"""
+    g = _graph()
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, g)
+    await _link(db, capa, fmea, fm_id="fm-1")
+    # 未处置 → 阻断
+    with pytest.raises(ValueError, match="未处置|stale"):
+        await advance_capa(db, capa, admin_user.user_id,
+                           AdvanceRequest(target_state="D7_COMPLETED"))
+    # 处置 → 通过到 D7_COMPLETED
+    await record_d7_action(db, capa, D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea.fmea_id,
+        failure_mode_node_id="fm-1", failure_cause_node_id="c-1",
+        match_source="linked",
+    ), admin_user)
+    await advance_capa(db, capa, admin_user.user_id,
+                       AdvanceRequest(target_state="D7_COMPLETED"))
+    await db.refresh(capa)
+    assert capa.status == "D7_COMPLETED"

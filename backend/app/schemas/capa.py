@@ -4,6 +4,7 @@ from datetime import date, datetime
 from pydantic import BaseModel
 
 from app.schemas.recommendation_stage import StageRunSchema
+from app.state_machines.eightd_state import EightDState
 
 
 class CAPACreate(BaseModel):
@@ -156,4 +157,6 @@ class D5RecommendationResponse(BaseModel):
 
 
 class AdvanceRequest(BaseModel):
-    d7_skip_reasons: list[dict] | None = None
+    target_state: EightDState | None = None   # 显式；None = 线性 next（D1→D6→D7_PREVENTION、D8→ARCHIVED）
+    reject_reason: str | None = None          # target=D7_PREVENTION（自 D8_APPROVAL_PENDING）时必填
+    d7_skip_reasons: list[dict] | None = None  # 不变

@@ -9,7 +9,7 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
-from app.state_machines.eightd_state import EightDState, can_transition
+from app.state_machines.eightd_state import EightDState, _linear_next, can_transition
 
 EMBEDDING_FIELDS = {"d2_description", "d4_root_cause", "d5_correction", "d7_prevention"}
 
@@ -282,7 +282,7 @@ async def _load_d7_gate_fmea_docs(db: AsyncSession, capa) -> list[dict]:
     ]
 
 
-async def _d7_to_d8_gate(db: AsyncSession, capa) -> None:
+async def _d7_completion_gate(db: AsyncSession, capa) -> None:
     from app.models.capa import CapaD7NodeAction
     from app.models.fmea import FMEADocument
     from app.services.capa_d7_action_service import recommendation_fingerprint
@@ -358,39 +358,26 @@ async def advance_capa(
     db: AsyncSession,
     capa: CAPAEightD,
     user_id: uuid.UUID,
-    d7_skip_reasons: list[dict] | None = None,
+    req: "AdvanceRequest | None" = None,  # 默认 None 保 9 个现存 3-arg 调用方（test_capa_d4_gate / recommendation lessons tests）
 ) -> CAPAEightD:
     from sqlalchemy import select
+    from app.schemas.capa import AdvanceRequest
+
+    if req is None:
+        req = AdvanceRequest()  # 3-arg 调用方走线性 next（D1→D6→D7_PREVENTION、D8→ARCHIVED）
 
     current = EightDState(capa.status)
-    transitions = [
-        EightDState.D1_TEAM,
-        EightDState.D2_DESCRIPTION,
-        EightDState.D3_INTERIM,
-        EightDState.D4_ROOT_CAUSE,
-        EightDState.D5_CORRECTION,
-        EightDState.D6_VERIFICATION,
-        EightDState.D7_PREVENTION,
-        EightDState.D8_CLOSURE,
-        EightDState.ARCHIVED,
-    ]
+    target = req.target_state
+    if target is None:
+        target = _linear_next(current)  # 壳/分支状态 raise；D1→D6→D7_PREVENTION、D8→ARCHIVED 线性
 
-    if current in transitions:
-        idx = transitions.index(current)
-        next_state = transitions[idx + 1] if idx + 1 < len(transitions) else EightDState.ARCHIVED
-    else:
-        raise ValueError(f"Cannot advance from {capa.status}")
+    if not can_transition(current, target):
+        raise ValueError(f"Cannot transition from {capa.status} to {target.value}")
 
-    if not can_transition(current, next_state):
-        raise ValueError(f"Cannot transition from {capa.status} to {next_state.value}")
-
-    if current == EightDState.D7_PREVENTION and next_state == EightDState.D8_CLOSURE:
-        # D7→D8 闭环闸口（决策 18）：completeness + capa_id 过滤 + recommendation_hash 匹配 + fail-closed。
-        # 闸口不通过 → ValueError（API 映 400），不推进、不审计、不抽 lessons。
-        await _d7_to_d8_gate(db, capa)
-        # 闸口通过 → savepoint 内抽 d7_prevention lessons（fail-closed）。
-        # 抽取失败 → savepoint rollback（撤销已 insert 的 lesson 行 + outbox 行），
-        # 状态尚未 mutation，事务回滚干净。
+    # per-edge 闸口分发
+    if current == EightDState.D7_PREVENTION and target == EightDState.D7_COMPLETED:
+        await _d7_completion_gate(db, capa)
+        # savepoint 内抽 d7 lessons（fail-closed）
         from app.services.capa_lessons_service import _extract_lessons
         try:
             async with db.begin_nested():
@@ -407,9 +394,15 @@ async def advance_capa(
                     ),
                 ))
         except Exception as e:
-            raise ValueError("D7 lessons 抽取失败，不可关闭，请重试") from e
-
-    if current == EightDState.D4_ROOT_CAUSE and next_state == EightDState.D5_CORRECTION:
+            raise ValueError("D7 lessons 抽取失败，不可推进，请重试") from e
+    elif current == EightDState.D8_GATE_PENDING and target == EightDState.D8_APPROVAL_PENDING:
+        pass  # 01.7 接入文档门禁；本切片直通
+    elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
+        pass  # 权限由 require_advance_permission 强制；闸口即「审批」
+    elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D7_PREVENTION:
+        if not req.reject_reason or not req.reject_reason.strip():
+            raise ValueError("驳回需填写理由")
+    elif current == EightDState.D4_ROOT_CAUSE and target == EightDState.D5_CORRECTION:
         # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，
         # 防 d4_root_cause 被改后用陈旧验证记录放行
         current_rc = (capa.d4_root_cause or "").strip()
@@ -423,33 +416,45 @@ async def advance_capa(
         ))
         if cnt < 1:
             raise ValueError("D4→D5 需当前根因已验证")
+    # D1→D2、D2→D3、D3→D4、D5→D6、D6→D7_PREVENTION、D8→ARCHIVED：无闸口
 
     old_status = capa.status
-    capa.status = next_state.value
+    capa.status = target.value
 
-    # Audit log for transition
     audit_log = AuditLog(
         table_name="capa_eightd",
         record_id=capa.report_id,
         action="TRANSITION",
-        changed_fields={
-            "old_status": old_status,
-            "new_status": next_state.value,
-        },
+        changed_fields={"old_status": old_status, "new_status": target.value},
         operated_by=user_id,
     )
     db.add(audit_log)
 
-    # D7 skip reasons audit
-    if d7_skip_reasons and old_status == "D7_PREVENTION":
+    # D7 skip reasons audit（仅 D7_PREVENTION→D7_COMPLETED）
+    if req.d7_skip_reasons and old_status == "D7_PREVENTION":
         skip_log = AuditLog(
             table_name="capa_eightd",
             record_id=capa.report_id,
             action="D7_SKIP_CONFIRMATION",
-            changed_fields={"skipped_nodes": d7_skip_reasons},
+            changed_fields={"skipped_nodes": req.d7_skip_reasons},
             operated_by=user_id,
         )
         db.add(skip_log)
+
+    # 审批/驳回专项审计
+    if current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id,
+            action="D8_APPROVED", changed_fields={"old_status": old_status, "new_status": target.value},
+            operated_by=user_id,
+        ))
+    elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D7_PREVENTION:
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id,
+            action="D8_REJECTED",
+            changed_fields={"reject_reason": req.reject_reason, "old_status": old_status, "new_status": target.value},
+            operated_by=user_id,
+        ))
 
     # Write to MES outbox before commit
     if capa.product_line_code and old_status != capa.status:

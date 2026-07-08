@@ -203,9 +203,8 @@ async def advance_capa(
     result: tuple[RequestScope, Any] = Depends(require_close_permission),
 ):
     scope, capa = result
-    skip_reasons = body.d7_skip_reasons if body else None
     try:
-        capa = await capa_service.advance_capa(db, capa, scope.user.user_id, skip_reasons)
+        capa = await capa_service.advance_capa(db, capa, scope.user.user_id, body)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return CAPAResponse.model_validate(capa)

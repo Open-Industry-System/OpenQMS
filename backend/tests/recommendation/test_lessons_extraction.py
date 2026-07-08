@@ -16,6 +16,7 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.capa_lesson import CapaLessonLearned
 from app.models.document_embedding import DocumentEmbedding
+from app.schemas.capa import AdvanceRequest
 from app.services.capa_service import advance_capa, update_capa
 from app.services.embedding_sync_worker import fetch_chunks, process_batch_once, upsert_embeddings
 
@@ -47,8 +48,8 @@ async def test_d7_lessons_extracted_on_advance(db, default_factory, admin_user):
         db, default_factory.id, admin_user.user_id,
         d7_prevention="更新防呆工装避免误装。\n增加检测工序识别偏移。完善流程制度。",
     )
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
 
     lessons = (
         await db.execute(
@@ -80,7 +81,7 @@ async def test_d7_extraction_failure_blocks_transition(db, default_factory, admi
     monkeypatch.setattr(svc, "enqueue_embedding", _boom)
 
     with pytest.raises(ValueError, match="D7 lessons 抽取失败"):
-        await advance_capa(db, capa, admin_user.user_id)
+        await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
 
     # R4：重查 DB（非仅内存对象）确认状态未推进 + 无 TRANSITION audit + 无 lesson 行
     await db.refresh(capa)
@@ -112,8 +113,8 @@ async def test_d7_no_d8_closure_extracted(db, default_factory, admin_user):
     capa.d8_closure = None
     await db.flush()
 
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
 
     lessons = (
         await db.execute(

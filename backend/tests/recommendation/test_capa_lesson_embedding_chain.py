@@ -16,6 +16,7 @@ from sqlalchemy import select, text
 from app.models.capa import CAPAEightD
 from app.models.capa_lesson import CapaLessonLearned
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
+from app.schemas.capa import AdvanceRequest
 from app.services.capa_service import advance_capa, update_capa
 from app.services.embedding_sync_worker import process_batch_once
 from app.services.recommendation_sources_extra import LessonsLearnedSource
@@ -86,8 +87,8 @@ async def test_capa_lesson_chain_d7_to_retrieval(db, default_factory, admin_user
     )
 
     # No linked FMEA -> D7 gate trivially passes; advance extracts d7 lessons.
-    advanced = await advance_capa(db, capa, admin_user.user_id)
-    assert advanced.status == "D8_CLOSURE"
+    advanced = await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D7_COMPLETED"))
+    assert advanced.status == "D7_COMPLETED"
 
     lessons = (
         await db.execute(
