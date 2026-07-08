@@ -2,7 +2,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from app.core.deps import get_current_user, get_db
 from app.main import app
-from tests.conftest import _scope_for
 
 pytestmark = pytest.mark.requires_db
 

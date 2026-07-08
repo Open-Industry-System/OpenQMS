@@ -98,6 +98,7 @@ async def test_llm_exception_continues(db, admin_user, default_factory, monkeypa
     )
     assert review.status == "needs_review"
     assert review.rounds == 3
+    assert review.report == {"issues": ["LLM 调用异常"], "suggestions": []}
 
 
 async def test_skill_not_configured_reports_config_issue(db, admin_user, default_factory, monkeypatch):

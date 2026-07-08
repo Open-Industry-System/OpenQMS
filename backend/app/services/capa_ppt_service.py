@@ -47,12 +47,6 @@ class ExportMeta:
     generated_by: uuid.UUID
 
 
-_PAGE_TITLES = [
-    "封面", "D1 团队", "D2 问题描述", "D3 遏制措施", "D4 根因分析",
-    "D5 永久措施", "D6 实施验证", "D7 预防复发", "D8 关闭结论", "联动附录", "生成信息",
-]
-
-
 async def generate_content(db: AsyncSession, capa_id: uuid.UUID) -> PptContent:
     """从落库数据组装 PptContent（不渲染 pptx）。"""
     capa = await db.get(CAPAEightD, capa_id)

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import agent_review_skill_service, capa_ppt_service, capa_service
+from app.services.capa_ppt_service import PptContent
 from app.services.agent import provider_adapter
 
 
@@ -44,7 +45,7 @@ class ReviewResult:
 
 async def review_and_correct(
     db: AsyncSession, capa_id: uuid.UUID, pc, tenant_schema: str,
-) -> tuple[object, ReviewResult]:
+) -> tuple[PptContent, ReviewResult]:
     """生成 → 审查 → 校正闭环，3 轮上限。pc=None 表示 LLM 未配置。返回 (content, review)。"""
     capa = await capa_service.get_capa(db, capa_id)
     if capa is None:
@@ -71,7 +72,7 @@ async def review_and_correct(
     last_report: dict = {"issues": [], "suggestions": []}
     for round_idx in range(1, 4):
         try:
-            review = await _subagent_review(db, pc, skill, content)
+            review = await _subagent_review(pc, skill, content)
         except Exception:
             review = ReviewOutcome(passed=False, issues=["LLM 调用异常"], suggestions=[])
         last_report = review.report
@@ -83,7 +84,7 @@ async def review_and_correct(
             return content, ReviewResult("needs_review", 3, last_report)
 
 
-async def _subagent_review(db, pc, skill, content) -> ReviewOutcome:
+async def _subagent_review(pc, skill, content) -> ReviewOutcome:
     """构造审查 prompt = skill.content + PptContent 序列化 → LLM → 解析。"""
     prompt = f"{skill.content}\n\n--- 待审查 PPT 内容 ---\n{_serialize_content(content)}"
     result = await provider_adapter.complete_json(pc, prompt, REVIEW_SCHEMA)
@@ -102,11 +103,11 @@ def _serialize_content(content) -> str:
     return "\n".join(lines)
 
 
-async def _correct_by_issues(db, capa_id, issues) -> object:
+async def _correct_by_issues(db, capa_id, issues) -> PptContent:
     """按规则 issues 重组 PptContent（不渲染 pptx）。"""
     return await capa_ppt_service.generate_content(db, capa_id)
 
 
-async def _correct_by_suggestions(db, capa_id, suggestions) -> object:
+async def _correct_by_suggestions(db, capa_id, suggestions) -> PptContent:
     """按 suggestions 重组 PptContent（不渲染 pptx）。数据源缺失则跳过。"""
     return await capa_ppt_service.generate_content(db, capa_id)
