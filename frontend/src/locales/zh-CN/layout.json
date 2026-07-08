@@ -59,7 +59,8 @@
     "productTypes": "产品类型管理",
     "productLines": "产品线管理",
     "users": "用户管理",
-    "logs": "日志管理"
+    "logs": "日志管理",
+    "reviewSkills": "审查技能管理"
   },
   "header": {
     "selectFactory": "选择工厂",

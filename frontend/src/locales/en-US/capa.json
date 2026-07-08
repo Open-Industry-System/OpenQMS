@@ -277,6 +277,16 @@
   "relatedCapa": {
     "title": "Related CAPA"
   },
+  "ppt": {
+    "generate": "Generate PPT",
+    "llmNotConfigured": "LLM not configured, auto-review skipped",
+    "needsReview": "Needs manual review after {rounds} rounds",
+    "generated": "PPT generated (review passed, {rounds} rounds)",
+    "generateFailed": "PPT generation failed",
+    "reviewReport": "Review report",
+    "issues": "Issues",
+    "suggestions": "Suggestions"
+  },
   "dag": {
     "title": "Recommendation Pipeline",
     "stageNames": {

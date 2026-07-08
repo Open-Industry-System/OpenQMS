@@ -4,10 +4,10 @@ import {
   Button, Space, Tag, Typography, Steps, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
 } from "antd";
-import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, CheckOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, CheckOutlined, FilePptOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
-import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
+import { getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport } from "../../api/capa";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
@@ -64,7 +64,7 @@ export default function CAPADetailPage() {
   const [linkModal, setLinkModal] = useState(false);
 
   const _user = useAuthStore((s) => s.user);
-  const { canEdit, canApprove } = usePermission();
+  const { canEdit, canApprove, canCreate } = usePermission();
 
   const [localData, setLocalData] = useState<Record<string, any>>({});
   const [newMemberName, setNewMemberName] = useState("");
@@ -75,6 +75,9 @@ export default function CAPADetailPage() {
   const [lessonsLoading, setLessonsLoading] = useState(false);
   const [lessonsData, setLessonsData] = useState<LessonsLearnedResponse | null>(null);
   const lessonsShownRef = useRef(false);
+
+  const [pptLoading, setPptLoading] = useState(false);
+  const [reviewReport, setReviewReport] = useState<any>(null);
 
   const stepItems = useMemo(() => {
     const subLabelKey = capa?.status ? stepSubLabelKey[capa.status] : undefined;
@@ -416,6 +419,29 @@ export default function CAPADetailPage() {
     }
   };
 
+  const handleGeneratePpt = async () => {
+    if (!capa) return;
+    setPptLoading(true);
+    try {
+      const { reviewStatus, reviewRounds, exportId } = await generatePpt(capa.report_id);
+      if (reviewStatus === "skipped") {
+        message.warning(t("capa:ppt.llmNotConfigured"));
+      } else if (reviewStatus === "needs_review") {
+        message.warning(t("capa:ppt.needsReview", { rounds: reviewRounds }));
+        if (exportId) {
+          const { reviewReport: rr } = await getPptExportReviewReport(capa.report_id, exportId);
+          setReviewReport(rr);
+        }
+      } else {
+        message.success(t("capa:ppt.generated", { rounds: reviewRounds }));
+      }
+    } catch {
+      message.error(t("capa:ppt.generateFailed"));
+    } finally {
+      setPptLoading(false);
+    }
+  };
+
   const handleLinkFMEA = async (fmeaId: string) => {
     if (!id) return;
     try {
@@ -465,6 +491,11 @@ export default function CAPADetailPage() {
             </Button>
           )}
         </>
+      )}
+      {canCreate("capa") && (capa.status === "D8_CLOSURE" || capa.status === "ARCHIVED") && (
+        <Button icon={<FilePptOutlined />} loading={pptLoading} onClick={handleGeneratePpt} data-e2e="capa-ppt">
+          {t("capa:ppt.generate")}
+        </Button>
       )}
     </Space>
   );
@@ -775,6 +806,22 @@ export default function CAPADetailPage() {
           rows={4}
           data-e2e="capa-reject-reason"
         />
+      </Modal>
+
+      <Modal
+        open={reviewReport !== null}
+        title={t("capa:ppt.reviewReport")}
+        onCancel={() => setReviewReport(null)}
+        footer={null}
+      >
+        {reviewReport && (
+          <>
+            <h4>{t("capa:ppt.issues")}</h4>
+            <ul>{(reviewReport.issues || []).map((i: string, idx: number) => <li key={idx}>{i}</li>)}</ul>
+            <h4>{t("capa:ppt.suggestions")}</h4>
+            <ul>{(reviewReport.suggestions || []).map((s: string, idx: number) => <li key={idx}>{s}</li>)}</ul>
+          </>
+        )}
       </Modal>
 
       <AIDraftPreview

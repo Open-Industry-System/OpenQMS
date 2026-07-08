@@ -98,3 +98,35 @@ export async function autoFillD7(capaId: string, req: D7AutoFillRequest): Promis
   const resp = await client.post(`/capa/${capaId}/d7-auto-fill`, req);
   return resp.data;
 }
+
+export async function generatePpt(
+  reportId: string,
+): Promise<{ reviewStatus: string; reviewRounds: number; exportId: string | null }> {
+  const resp = await client.post(`/capa/${reportId}/ppt-export`, {}, {
+    responseType: "blob",
+    timeout: 120000,
+  });
+  const reviewStatus = resp.headers["x-ppt-review-status"] || "skipped";
+  const reviewRounds = parseInt(resp.headers["x-ppt-review-rounds"] || "0", 10);
+  const exportId = resp.headers["x-ppt-export-id"] || null;
+  const blob = new Blob([resp.data]);
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const cd = resp.headers["content-disposition"] || "";
+  const m = cd.match(/filename\*=UTF-8''(.+)/);
+  link.setAttribute("download", m ? decodeURIComponent(m[1]) : `8D_report_${reportId}.pptx`);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+  return { reviewStatus, reviewRounds, exportId };
+}
+
+export async function getPptExportReviewReport(
+  reportId: string,
+  exportId: string,
+): Promise<{ reviewReport: any }> {
+  const resp = await client.get(`/capa/${reportId}/ppt-exports/${exportId}`);
+  return { reviewReport: resp.data.review_report };
+}
