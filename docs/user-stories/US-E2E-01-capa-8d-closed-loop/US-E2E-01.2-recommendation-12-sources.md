@@ -1,6 +1,6 @@
 # 子故事 US-E2E-01.2：AI 推荐 12 源全接入（编排 DAG + provenance + 执行验证）
 
-**状态**: 评审稿 v1（2026-07-08）
+**状态**: 定稿 v1（2026-07-08）
 **所属 epic**: US-E2E-01（README.md v8.1）
 **关联 skill**: `verify-capa-8d-recommendation-sources`
 **前置**: 无（纯后端推荐管道，无外部系统依赖）

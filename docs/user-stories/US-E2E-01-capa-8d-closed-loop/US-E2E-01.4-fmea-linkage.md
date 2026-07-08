@@ -1,6 +1,6 @@
 # 子故事 US-E2E-01.4：8D ↔ FMEA 双向追溯
 
-**状态**: 评审稿 v1（2026-07-08）
+**状态**: 定稿 v1（2026-07-08）
 **所属 epic**: US-E2E-01（README.md v8.1）
 **关联 skill**: `verify-capa-8d-fmea-linkage`
 **前置**: 01.2、01.3（D4 根因 + D7 node-action 数据就绪，方有 FMEA 关联点）

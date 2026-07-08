@@ -1,6 +1,6 @@
 # Epic US-E2E-01：8D 全程闭环（AI 多源推荐 + 遏制措施 + 根因现场验证 + 流程可视化 + 跨模块联动 + 知识沉淀）
 
-**状态**: 评审稿 v8.1（2026-07-08），含未决评审问题，待修订后转定稿
+**状态**: 定稿 v8.1（2026-07-08），经 3 轮评审修订后转定稿
 **关联**: E2E 测试套件（`docs/superpowers/specs/2026-07-01-system-e2e-test-suite-design.md`）
 **前序版本**: v7（2026-07-07，见 git 历史，原为单文件形态）；v8（2026-07-08，6 子故事，评审后拆分扩为 10 子故事）
 
@@ -40,16 +40,16 @@ D8 关闭后知识沉淀 + 横向扩散预警 + 报告输出——
 
 | 编号 | 子故事 | 文件 | 状态 | AI_REQUIRED |
 |---|---|---|---|---|
-| 01.1 | D3 遏制措施（数据导入 + AI 分析报告 + 遏制建议） | `US-E2E-01.1-d3-containment-ai.md` | 评审稿 v1 | true |
-| 01.2 | AI 推荐 12 源全接入（编排 DAG + provenance + 执行验证） | `US-E2E-01.2-recommendation-12-sources.md` | 评审稿 v1 | true |
-| 01.3 | D4 现场验证深化 + D7 node-action + 审批壳 | `US-E2E-01.3-d4-verification-d7-node-action.md` | 评审稿 v1 | true |
-| 01.4 | 8D ↔ FMEA 双向追溯 | `US-E2E-01.4-fmea-linkage.md` | 评审稿 v1 | false |
-| 01.5 | 8D → SCAR 触发与回写 | `US-E2E-01.5-scar-trigger.md` | 评审稿 v1 | false |
-| 01.6 | 8D → 供应商风险评级输入 | `US-E2E-01.6-supplier-risk-input.md` | 评审稿 v1 | false |
-| 01.7 | D8 关闭前文档更新审核门禁 | `US-E2E-01.7-doc-update-gate.md` | 评审稿 v1 | true |
-| 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | 评审稿 v1 | true |
-| 01.9 | 横向扩散预警与通知 | `US-E2E-01.9-lateral-diffusion.md` | 评审稿 v1 | true |
-| 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | 评审稿 v1 | false |
+| 01.1 | D3 遏制措施（数据导入 + AI 分析报告 + 遏制建议） | `US-E2E-01.1-d3-containment-ai.md` | 定稿 v1 | true |
+| 01.2 | AI 推荐 12 源全接入（编排 DAG + provenance + 执行验证） | `US-E2E-01.2-recommendation-12-sources.md` | 定稿 v1 | true |
+| 01.3 | D4 现场验证深化 + D7 node-action + 审批壳 | `US-E2E-01.3-d4-verification-d7-node-action.md` | 定稿 v1 | true |
+| 01.4 | 8D ↔ FMEA 双向追溯 | `US-E2E-01.4-fmea-linkage.md` | 定稿 v1 | false |
+| 01.5 | 8D → SCAR 触发与回写 | `US-E2E-01.5-scar-trigger.md` | 定稿 v1 | false |
+| 01.6 | 8D → 供应商风险评级输入 | `US-E2E-01.6-supplier-risk-input.md` | 定稿 v1 | false |
+| 01.7 | D8 关闭前文档更新审核门禁 | `US-E2E-01.7-doc-update-gate.md` | 定稿 v1 | true |
+| 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | 定稿 v1 | true |
+| 01.9 | 横向扩散预警与通知 | `US-E2E-01.9-lateral-diffusion.md` | 定稿 v1 | true |
+| 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | 定稿 v1 | false |
 
 > **AI_REQUIRED**：true = 该子故事有 AI 步骤，无 LLM 凭证时验收为 `BLOCKED`（环境缺失，不可降级）；false = 该子故事无 AI 步骤，但功能错误时为 `FAILED`。
 
@@ -111,9 +111,12 @@ epic 级验收 = 各子故事验收的**合取**（全部子故事通过，epic 
 - README 版本变更，总 skill `verify-capa-8d-closed-loop` 必须重新核对同步。
 - 子故事可独立迭代，无需 bumping epic 版本；仅当 epic 验收骨架、状态机、依赖关系或 D 步顺序变更时才 bumping README 版本。
 
-## 评审待决项（v8.1）
+## 评审决议（v8.1，已定）
 
-本版为评审稿，以下待确认后转定稿：
-- 01.6（供应商风险）的评级算法是否在本故事定义（当前只管 8D 作为输入的传递）。
-- 01.7（文档门禁）的延期规则已定为"记录待办但阻断关闭"（不可关闭）。
-- 01.3 node-action 状态已定为本故事只要求 pending + 双向追溯，D8 关闭前不要求已验证。
+经 3 轮评审修订，以下决议已确定：
+- 01.6（供应商风险）的评级算法不在本故事定义（本故事只管 8D 作为输入的传递，评级算法归供应商模块）。
+- 01.7（文档门禁）的延期规则 = 记录待办但阻断关闭（不可关闭，无旁路）。
+- 01.3 node-action 状态 = 本故事只要求 pending 创建 + 双向追溯，D8 关闭前不要求已验证（状态流转归后续故事）。
+- 01.3（审批壳）与 01.7（门禁逻辑）边界已拆分：01.3 只验审批壳，01.7 验门禁，状态机衔接不互耦。
+- 01.4/01.5 拆分粒度：原 01.4（3 模块）拆为 01.4/01.5/01.6，原 01.5（3 能力）拆为 01.8/01.9/01.10，每子故事单一业务结果。
+- 每子故事含验收契约（落库实体/字段/枚举/审计事件/seed/通过-失败-阻塞）。

@@ -1,8 +1,10 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-03
-**当前分支**: `fix/dashboard-admin-pages`（领先 `main` 125 个 commit，尚未合并）
+**更新日期**: 2026-07-08
+**当前分支**: `feature/us-e2e-01-spec-a`（US-E2E-01 v8.1 定稿 + gap analysis；基于 `fix/dashboard-admin-pages`）
 **最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）；**系统级 E2E 测试套件 M0+M1 已落地**（见下）；**US-E2E-01 8D 全程闭环特性缺口清单已录入 + 已完成项标注**（见下，6 项已完成 / 11 项待补，可勾选跟踪）
+
+> **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
@@ -258,6 +260,48 @@
 | Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
 | 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
+| US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
+| US-E2E-01 v8.1 实现（10 子故事） | 🟡 待启动（见文末任务表，P0-P3 分级） | — |
+| US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
+
+---
+
+## US-E2E-01 v8.1 待办任务（2026-07-08 录入）
+
+US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事）。配套 gap analysis：`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`。以下为按 gap 分析结论排定的实现任务，按优先级 + 交付顺序。
+
+### P0 — 收尾（编排器已就绪，补硬 gap）
+
+- [ ] **01.2 12 源推荐收尾** — LLM 未配置时静默降级（`llm_fusion_layer.py:34` pc=None 返回 attempted=0）应改为按故事判 `BLOCKED`；`RecommendationCache` 无 `stage_runs` 字段（仅 suggestions JSONB），编排执行过程未结构化持久化；前端编排面板可视化 + AP/S/O/D 展示待核
+- [ ] **01.3 D4 验证 + D7 + 审批壳收尾** — `CapaRootCauseVerification.method` 自由文本→枚举（measurement/observation/reproduction）+ schema/迁移；加 `retry_count` 回退计数器；状态机细化（`eightd_state.py` D7_PREVENTION→D8_CLOSURE 直连，缺 D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING + 驳回回退）；`CapaD7NodeAction` 加 `status` 字段（仅 action=confirmed/skipped，缺 pending）；FMEA 反查覆盖 Prevention 节点（见 01.4）
+
+### P1 — 新建/收尾
+
+- [ ] **01.1 D3 遏制全链路新建** — 4 类数据导入（在途/库存、发货/物流、IQC、SPC 判异）+ 受影响范围分析报告（5 项）+ AI 遏制建议（带 provenance）；ERP 数据模型（`ERPInventoryBalance`/`ERPShipment`）+ `capa_draft` 的 containment_actions 可复用；补 D3→D4 闸口（`advance_capa` 当前不检查 d3_interim 非空）
+- [ ] **01.4 8D↔FMEA 双向收尾** — 反查基础已有（`GET /api/capa/by-fmea-node` + `get_capas_by_fmea_node` + 前端 `RelatedCAPAList`），补 Prevention 节点覆盖 + 反查审计
+- [ ] **01.5 8D→SCAR 触发新建** — `SupplierSCAR.capa_ref_id` 外键已就绪，补 8D 侧触发入口 + 单号回写读取 + 状态同步 + 审计
+- [ ] **01.6 8D→供应商风险新建** — `SupplierRiskAlert.linked_capa_id` 外键已就绪，补 8D 侧触发写入（severity/disposition/repeat）+ 评级变化回显 + 审计
+
+### P2 — 新建/收尾
+
+- [ ] **01.7 D8 文档更新门禁新建** — 文档影响分析（CP/FMEA/SOP）+ 自动审核（版本 bump + 覆盖）+ 门禁阻断（扩展现有 `_d7_to_d8_gate` 或新增 D8_GATE_PENDING 状态）；延期=记录待办但阻断关闭；`control_plan_version`/`fmea_version` 可复用
+- [ ] **01.8 知识库沉淀收尾** — D7/D8 lessons 抽取已有（`capa_lessons_learned`），补结构化 8 字段沉淀 + 时机改为 D8 关闭后全报告 + 按产品检索入口
+
+### P3 — 新建
+
+- [ ] **01.9 横向扩散预警新建** — 4 依据并集类似产品检查（同 product_type/共享 FMEA 模式/共享控制计划/同供应商+物料）+ 通知提示 + 状态追踪；`recommendation_sources_extra` 同类型产品 KB 检索可复用
+- [ ] **01.10 PPT 输出新建** — D8 关闭后一键生成 8D 报告 PPT（D1-D8 + 封面 + 联动附录）；引入 PPT 生成依赖（python-pptx）
+
+### 配套（非子故事）
+
+- [ ] **verify skill 同步** — `verify-capa-8d-closed-loop` 重定义为编排器（依据 README v8.1），端到端走查逻辑拆进 10 个子 skill（`verify-capa-8d-d3-containment` / `-recommendation-sources` / `-d4-d7-audit` / `-fmea-linkage` / `-scar-trigger` / `-supplier-risk-input` / `-doc-update-gate` / `-knowledge-sink` / `-lateral-diffusion` / `-ppt-output`），各顶部声明依据的子故事版本
+- [ ] **gap analysis 维护** — 实现推进中若发现新 gap，回写 `docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`
+
+### 关键约束
+
+- **交付顺序**：01.1→01.2→01.3→01.7→01.4→01.5→01.6→01.8→01.9→01.10（D 步业务流程；01.4/01.5/01.6 可并行）
+- **状态机**：实现时须先把 `eightd_state.py` 细化为 D7_PREVENTION→D7_COMPLETED→D8_GATE_PENDING→D8_APPROVAL_PENDING→D8_CLOSURE（含驳回回退），01.3/01.7 依赖此细化
+- **AI_REQUIRED**：01.1/01.2/01.3/01.7/01.8/01.9 为 true（无 LLM 凭证→BLOCKED）；01.4/01.5/01.6/01.10 为 false
 
 ---
 
