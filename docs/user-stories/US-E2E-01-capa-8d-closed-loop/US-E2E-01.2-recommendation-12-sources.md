@@ -69,7 +69,7 @@
 | 审计事件 | `RECOMMENDATION_TRIGGERED`（含 stage 集合）、`RECOMMENDATION_ADOPTED` |
 | E2E seed 前置 | 产品线 DC-DC-100-E2E 有 FMEA + 知识库 + SPC + IQC + MES + 供应商历史数据 |
 | 通过条件 | 12 阶段全接入 + 关键阶段 done + skipped 注明原因 + 推荐非空带 provenance + AP/S/O/D 齐全 |
-| 失败条件（FAILED） | 关键阶段非 done（无 skipped_reason）；LLM 阶段 skipped/error；provenance 缺失；AP/S/O/D 缺失 |
+| 失败条件（FAILED） | 关键阶段非 done；可跳过阶段 skipped 但缺 skipped_reason；LLM 阶段 skipped/error；provenance 缺失；AP/S/O/D 缺失 |
 | 阻塞条件（BLOCKED） | 无 LLM 凭证 |
 
 ## 不在本子故事范围

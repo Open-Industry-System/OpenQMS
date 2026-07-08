@@ -26,15 +26,15 @@ D8 关闭后知识沉淀 + 横向扩散预警 + 报告输出——
 |---|---|---|---|
 | D1_TEAM … D6_VERIFICATION | D1-D6 各阶段 | 按序流转 | 各 D 步对应子故事 |
 | D7_PREVENTION | D7 预防复发填写中 | field_qe 填写 + 采纳 node-action | 01.3 |
-| D7_COMPLETED | D7 填写完成，待文档门禁 | 自动进入 | 01.3 → 01.6 |
-| D8_GATE_PENDING | 文档更新门禁待审核 | 01.6 自动审核 | 01.6 |
+| D7_COMPLETED | D7 填写完成，待文档门禁 | 自动进入 | 01.3 → 01.7 |
+| D8_GATE_PENDING | 文档更新门禁待审核 | 01.7 自动审核 | 01.7 |
 | D8_APPROVAL_PENDING | 门禁通过，待 8D 团队负责人审批 | manager 审批 | 01.3（审批壳）|
 | D8_CLOSURE（CLOSED） | 已关闭 | 审批通过 → 关闭 | 01.3 |
 
 - **状态流转**：D7_PREVENTION →（field_qe 完成 D7）→ D7_COMPLETED →（系统自动审核文档）→ D8_GATE_PENDING →（门禁通过）→ D8_APPROVAL_PENDING →（manager 审批）→ D8_CLOSURE。
-- **门禁未通过**：D8_GATE_PENDING 不可推进到 D8_APPROVAL_PENDING（01.6 阻断）。
+- **门禁未通过**：D8_GATE_PENDING 不可推进到 D8_APPROVAL_PENDING（01.7 阻断）。
 - **审批未通过**：D8_APPROVAL_PENDING 可驳回回 D7_PREVENTION（field_qe 修改后重走）。
-- **责任边界**：01.3 只负责"审批壳"（权限校验 + 待审批状态 + 审批审计 + 驳回回退）；01.6 只负责"门禁逻辑"（文档影响分析 + 自动审核 + 阻断/放行）。两者通过状态机衔接，不在验收标准里互相耦合。
+- **责任边界**：01.3 只负责"审批壳"（权限校验 + 待审批状态 + 审批审计 + 驳回回退）；01.7 只负责"门禁逻辑"（文档影响分析 + 自动审核 + 阻断/放行）。两者通过状态机衔接，不在验收标准里互相耦合。
 
 ## 子故事索引
 

@@ -81,7 +81,7 @@
 | 项 | 定义 |
 |---|---|
 | 落库实体 | `capa_d3_containment_snapshot`（导入快照）、`capa_d3_impact_report`（分析报告）、`capa_d3_ai_advice`（AI 建议含 provenance）、`capa_d3_advice_adoption`（采纳记录） |
-| 关键字段 | snapshot_type∈{inventory, shipment, iqc, spc}；report 含 batches[]/impact_qty/customer_impact[]/risk_level∈{high,medium,low}/time_window；advice 含 source_provenance[]、advice_type∈{recall,isolage,notify_customer,strict_inspection,alternative} |
+| 关键字段 | snapshot_type∈{inventory, shipment, iqc, spc}；report 含 batches[]/impact_qty/customer_impact[]/risk_level∈{high,medium,low}/time_window；advice 含 source_provenance[]、advice_type∈{recall,isolate,notify_customer,strict_inspection,alternative} |
 | 状态枚举 | D3→D4 推进条件：d3_interim 非空 OR advice_adoption 非空 |
 | 审计事件 | `D3_DATA_IMPORTED`、`D3_REPORT_GENERATED`、`D3_ADVICE_ADOPTED`、`D3_ADVICE_REJECTED` |
 | E2E seed 前置 | 产品线 DC-DC-100-E2E 有 SPC 控制图 + IQC 记录；物流/库存/发货样本数据（seed 或导入文件） |
