@@ -57,6 +57,29 @@ async def test_record_confirmed_inserts_and_audits(db, default_factory, admin_us
 
 
 @pytest.mark.asyncio
+async def test_record_action_on_rule_engine_fallback_rec(db, default_factory, admin_user):
+    """规则引擎兜底推荐（fmea_id=None）的 confirm/skip 可落库（US-E2E-01 缺陷 5）。"""
+    from app.services.capa_service import get_d7_recommendations
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, d5="收紧螺栓尺寸公差")
+    capa.d4_root_cause = "来料螺栓尺寸超差"
+    await db.flush()
+    recs = get_d7_recommendations(
+        {"fmea_ref_id": None, "fmea_node_id": None, "d4_root_cause": capa.d4_root_cause,
+         "d5_correction": capa.d5_correction, "product_line_code": capa.product_line_code},
+        [], allowed_product_lines=[capa.product_line_code],
+    )
+    assert recs and recs[0]["match_source"] == "rule" and recs[0]["fmea_id"] is None
+    fallback = recs[0]
+    action = await record_d7_action(db, capa, D7NodeActionCreate(
+        action="confirmed", fmea_id=None,
+        failure_mode_node_id=fallback["failure_mode_node_id"],
+        match_source="rule"), admin_user)
+    assert action.action == "confirmed"
+    assert action.fmea_id is None
+    assert action.failure_mode_node_id == fallback["failure_mode_node_id"]
+
+
+@pytest.mark.asyncio
 async def test_record_idempotent_same_action_and_reason(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)

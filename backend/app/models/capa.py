@@ -79,7 +79,10 @@ class CapaD7NodeAction(Base):
     capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
     factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
     action: Mapped[str] = mapped_column(String(20), nullable=False)
-    fmea_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=False)
+    # 可空：规则引擎兜底推荐无关联 FMEA（US-E2E-01 D7 兜底）
+    fmea_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=True
+    )
     failure_mode_node_id: Mapped[str] = mapped_column(String(128), nullable=False)
     failure_cause_node_id: Mapped[str | None] = mapped_column(String(128))
     match_source: Mapped[str] = mapped_column(String(40), nullable=False)

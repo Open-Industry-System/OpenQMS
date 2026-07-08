@@ -4,6 +4,7 @@ import { CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons"
 import { useTranslation } from "react-i18next";
 import { getD5Recommendations, adoptRecommendation } from "../../api/capa";
 import RecommendationDAG from "./RecommendationDAG";
+import RiskTags from "./RiskTags";
 import type { D5ExistingControl, D5GeneralSuggestion, StageRun } from "../../types";
 
 interface D5RecPanelProps {
@@ -105,6 +106,12 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                   {t("d5.stageLabel", { n: item.stage_index })}
                 </Tag>
               )}
+              <RiskTags
+                ap={item.ap}
+                severity={item.severity}
+                occurrence={item.occurrence}
+                detection={item.detection}
+              />
               {item.failure_cause_name && <Tag>{item.failure_cause_name}</Tag>}
               {item.failure_mode_name && <Tag>{item.failure_mode_name}</Tag>}
               {item.fmea_document_no && <Tag color="blue">{item.fmea_document_no}</Tag>}
@@ -179,6 +186,12 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                   {t("d5.stageLabel", { n: item.stage_index })}
                 </Tag>
               )}
+              <RiskTags
+                ap={item.ap}
+                severity={item.severity}
+                occurrence={item.occurrence}
+                detection={item.detection}
+              />
               <Tag color="blue">
                 {categoryLabel}
               </Tag>

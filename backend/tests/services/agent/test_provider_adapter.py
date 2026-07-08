@@ -282,6 +282,28 @@ async def test_build_client_local_returns_base_url_and_no_client(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_client_ollama_aliases_local(monkeypatch):
+    """ollama provider is recognized and routed through the local (/api/generate) path,
+    so .env.e2e's LLM_PROVIDER=ollama no longer falls through to '未知 provider'."""
+    from app.schemas.ai_config import AIConfigOut
+
+    async def _cfg(db):
+        return AIConfigOut(llm_provider="ollama", llm_api_key="ollama", llm_model="kimi-k2",
+                           llm_base_url="http://127.0.0.1:11434", llm_timeout=30,
+                           capa_draft_llm_timeout=15, report_llm_timeout=10,
+                           embedding_provider="", embedding_api_key="",
+                           embedding_model="", embedding_base_url="", embedding_dimensions=1536,
+                           search_vector_weight=0.7, search_fulltext_weight=0.3)
+
+    monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
+    pc = await provider_adapter.build_client(object())
+    assert pc.provider == "local"
+    assert pc.client is None
+    assert pc.base_url == "http://127.0.0.1:11434"
+    assert pc.model == "kimi-k2"
+
+
+@pytest.mark.asyncio
 async def test_complete_json_local_success(monkeypatch):
     from unittest.mock import AsyncMock
 

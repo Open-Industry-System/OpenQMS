@@ -6,6 +6,22 @@ from typing import Any
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 
 
+def _fmea_risk(node: dict[str, Any] | None) -> dict[str, Any]:
+    """从 FMEA 图节点提取 AP / S / O / D（FMEA 命中推荐 provenance）。
+
+    FailureMode 节点携带 severity/occurrence/detection/ap。缺字段返回 None，不臆造。
+    规则引擎兜底候选不调用此函数（由调用方按默认 AP=M 处理）。
+    """
+    if not node:
+        return {"ap": None, "severity": None, "occurrence": None, "detection": None}
+    return {
+        "ap": node.get("ap"),
+        "severity": node.get("severity"),
+        "occurrence": node.get("occurrence"),
+        "detection": node.get("detection"),
+    }
+
+
 class FMEAGraphSource:
     """关联 FMEA 结构性图匹配。纯结构解析，不做文本匹配。"""
 
@@ -76,6 +92,7 @@ class FMEAGraphSource:
                         "fmea_document_no": linked_fmea.get("document_no"),
                         "fmea_id": str(linked_fmea["fmea_id"]),
                         "product_line_code": linked_fmea.get("product_line_code"),
+                        **_fmea_risk(fm_node),
                     },
                 ))
 
@@ -93,6 +110,7 @@ class FMEAGraphSource:
                         "fmea_document_no": linked_fmea.get("document_no"),
                         "fmea_id": str(linked_fmea["fmea_id"]),
                         "product_line_code": linked_fmea.get("product_line_code"),
+                        **_fmea_risk(fm_node),
                     },
                 ))
 
@@ -200,6 +218,7 @@ class SemanticSearchSource:
                 if node_type == "FailureCause":
                     fm_id = None
                     fm_name = None
+                    parent = None
                     for e in edges:
                         if e["source"] == node_id and e["type"] == "CAUSE_OF":
                             parent = node_map.get(e["target"])
@@ -221,6 +240,7 @@ class SemanticSearchSource:
                             "fmea_id": fmea_id,
                             "fmea_document_no": doc.get("document_no"),
                             "product_line_code": doc.get("product_line_code"),
+                            **_fmea_risk(parent),
                         },
                     ))
                 elif node_type == "FailureMode":
@@ -236,6 +256,7 @@ class SemanticSearchSource:
                             "fmea_id": fmea_id,
                             "fmea_document_no": doc.get("document_no"),
                             "product_line_code": doc.get("product_line_code"),
+                            **_fmea_risk(node),
                         },
                     ))
 
@@ -243,6 +264,7 @@ class SemanticSearchSource:
             elif context.stage == "d5" and node_type == "FailureCause":
                 fm_id = None
                 fm_name = None
+                parent = None
                 for e in edges:
                     if e["source"] == node_id and e["type"] == "CAUSE_OF":
                         parent = node_map.get(e["target"])
@@ -264,6 +286,7 @@ class SemanticSearchSource:
                         "fmea_id": fmea_id,
                         "fmea_document_no": doc.get("document_no"),
                         "product_line_code": doc.get("product_line_code"),
+                        **_fmea_risk(parent),
                     },
                 ))
 
@@ -509,7 +532,8 @@ class RuleEngineSource:
                 category=None,
                 confidence=s.confidence * 0.5,
                 match_reason="规则引擎推断",
-                metadata={"explanation": s.explanation},
+                # 规则引擎兜底无 FMEA 命中：AP 默认 M，S/O/D 留空（不臆造）
+                metadata={"explanation": s.explanation, "ap": "M"},
             ))
         return candidates
 
@@ -524,8 +548,9 @@ class RuleEngineMeasureSource:
 
         engine = RuleEngine()
 
-        # Try to get AP level from linked FMEA
+        # Try to get AP level (and S/O/D) from linked FMEA
         ap_level = None
+        risk: dict[str, Any] = {"ap": None, "severity": None, "occurrence": None, "detection": None}
         linked_fmea = context.linked_fmea
         target_node_id = context.capa_data.get("fmea_node_id")
         if linked_fmea and linked_fmea.get("graph_data"):
@@ -547,12 +572,15 @@ class RuleEngineMeasureSource:
                                     target_fm_id = e["target"]
                                     break
 
-            if target_fm_id and node_map.get(target_fm_id, {}).get("ap"):
-                ap_level = node_map[target_fm_id]["ap"]
+            target_fm = node_map.get(target_fm_id) if target_fm_id else None
+            if target_fm and target_fm.get("ap"):
+                ap_level = target_fm["ap"]
+                risk = _fmea_risk(target_fm)
             else:
                 for node in graph.get("nodes", []):
                     if node.get("type") == "FailureMode" and node.get("ap"):
                         ap_level = node["ap"]
+                        risk = _fmea_risk(node)
                         break
 
         failure_mode_text = context.capa_data.get("d2_description", "")
@@ -570,7 +598,13 @@ class RuleEngineMeasureSource:
                 category=cat,
                 confidence=s.confidence,
                 match_reason=f"AP={ap_level or 'M'} 规则建议",
-                metadata={"basis": f"AP={ap_level or 'M'}"},
+                metadata={
+                    "basis": f"AP={ap_level or 'M'}",
+                    "ap": ap_level or "M",
+                    "severity": risk.get("severity"),
+                    "occurrence": risk.get("occurrence"),
+                    "detection": risk.get("detection"),
+                },
             ))
         return candidates
 
@@ -613,6 +647,7 @@ class FMEAControlExpander:
             fm_id = cause_candidate.metadata.get("failure_mode_node_id")
             fm_name = cause_candidate.metadata.get("failure_mode_name")
             cause_name = cause_candidate.content
+            fm_risk = _fmea_risk(node_map.get(fm_id))
 
             # Path 1: Cause -> PREVENTED_BY -> PreventionControl
             for tgt, etype in forward_edges.get(cause_id, []):
@@ -637,6 +672,7 @@ class FMEAControlExpander:
                                     "control_type": "prevention",
                                     "fmea_id": fmea_id,
                                     "fmea_document_no": doc.get("document_no"),
+                                    **fm_risk,
                                 },
                             ))
 
@@ -663,6 +699,7 @@ class FMEAControlExpander:
                                     "control_type": "detection",
                                     "fmea_id": fmea_id,
                                     "fmea_document_no": doc.get("document_no"),
+                                    **fm_risk,
                                 },
                             ))
 
@@ -690,6 +727,7 @@ class FMEAControlExpander:
                                         "control_type": "detection",
                                         "fmea_id": fmea_id,
                                         "fmea_document_no": doc.get("document_no"),
+                                        **fm_risk,
                                     },
                                 ))
 

@@ -102,7 +102,7 @@ def create_llm_provider(config=None) -> LLMProvider | None:
         return None
 
     api_key = getattr(cfg, "LLM_API_KEY", "") or getattr(cfg, "llm_api_key", "")
-    if not api_key and provider_name != "local":
+    if not api_key and provider_name not in ("local", "ollama"):
         logger.warning("LLM_PROVIDER=%s requires LLM_API_KEY, falling back to rule-only mode", provider_name)
         return None
 
@@ -114,13 +114,13 @@ def create_llm_provider(config=None) -> LLMProvider | None:
         elif provider_name == "openai":
             base_url = getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
             return OpenAIProvider(api_key=api_key, model=model or "gpt-4o", base_url=base_url)
-        elif provider_name == "local":
+        elif provider_name in ("local", "ollama"):
             base_url = getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
             if not base_url:
-                logger.warning("LLM_PROVIDER=local requires LLM_BASE_URL, falling back to rule-only mode")
+                logger.warning("LLM_PROVIDER=%s requires LLM_BASE_URL, falling back to rule-only mode", provider_name)
                 return None
             if not model:
-                logger.warning("LLM_PROVIDER=local requires LLM_MODEL, falling back to rule-only mode")
+                logger.warning("LLM_PROVIDER=%s requires LLM_MODEL, falling back to rule-only mode", provider_name)
                 return None
             return LocalProvider(base_url=base_url, model=model)
         else:

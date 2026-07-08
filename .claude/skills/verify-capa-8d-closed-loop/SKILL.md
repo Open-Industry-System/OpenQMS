@@ -105,8 +105,8 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 - **落库**：UPDATE + TRANSITION。
 
 #### B5 D4 根因分析（含 AI 推荐 + 现场验证）
-- **做**：B4 已推进到 D4。等 D4 视图出现（D4RecPanel + D4VerificationCard + 根因 TextArea）→ 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因（`adopt-recommendation` 把采纳的根因写入 `d4_root_cause` 并回填 TextArea，`onAdopted` → `refreshCapa`）→ **断言 D4 TextArea 已显示采纳的根因**（`GET /api/capa/{report_id}` 回读 `d4_root_cause` 与采纳值一致）→ 现场验证（见 C2）→ 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
-- **关键**：D4→D5 闸口要求**已验证记录的 `root_cause_text` 与当前 `d4_root_cause` 完全一致**（空白归一化后，`capa_service.py:412-416`）。采纳后**不要手动覆盖 TextArea**——验证记录绑定的是采纳那一刻的根因文本，改了就放行不了。若需手填根因，必须在采纳/验证**之前**填，且验证时用同一文本。
+- **做**：B4 已推进到 D4。等 D4 视图出现（D4RecPanel + D4VerificationCard + 根因 TextArea）→ 触发 D4 AI 推荐（见 C1）→ 点 `[data-e2e="d4-adopt"]` 采纳一条候选根因（`adopt-recommendation` 把采纳的根因写入 `d4_root_cause` 并回填 TextArea，`onAdopted` → `refreshCapa`）→ **断言 D4 TextArea 已显示采纳的根因**（`GET /api/capa/{report_id}` 回读 `d4_root_cause` 与采纳值一致）→ **关联本产品线 FMEA**：点详情头部「关联FMEA」按钮 → 在弹出列表选 `PFMEA-E2E-001`（`handleLinkFMEA` 写 `fmea_ref_id`，不设 `fmea_node_id`）→ 回读 `fmea_ref_id` 非空 → 现场验证（见 C2）→ 点 `[data-e2e="capa-advance"]` 推进 D4→D5。
+- **关键**：D4→D5 闸口要求**已验证记录的 `root_cause_text` 与当前 `d4_root_cause` 完全一致**（空白归一化后，`capa_service.py:412-416`）。采纳后**不要手动覆盖 TextArea**——验证记录绑定的是采纳那一刻的根因文本，改了就放行不了。若需手填根因，必须在采纳/验证**之前**填，且验证时用同一文本。关联 FMEA 是为让 D7 linked matching 有数据；若种子 FMEA 图谱无匹配失效模式，D7 仍有规则引擎兜底（见 B8）。
 - **期望**：推进后 D5 label「永久纠正措施」可见。
 - **断言**：**未完成现场验证时 D4→D5 应被阻断**（advance 报错或禁用）；验证通过后才可推进；`status == "D5_CORRECTION"`；审计 1 条 TRANSITION `D4_ROOT_CAUSE → D5_CORRECTION`，`operated_by == "engineer"`。
 
@@ -124,9 +124,11 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 #### B8 D7 预防复发（含 AI 预防提示）
 - **做**（两部分，分开落库）：
   1. **D7 预防措施正文**：等 D7 label「预防复发措施」可见 → `page.locator("textarea").first()` 填预防措施正文 → `.blur()` 落库 `d7_prevention`（`CAPADetailPage.tsx:570`，Text 列 `models/capa.py:31`）。
-  2. **D7 节点动作（AI 预防提示）**：对每个预防项用 `[data-e2e="d7-auto-fill"]`（AI 填充）/ `[data-e2e="d7-confirm"]`（确认）/ `[data-e2e="d7-skip"]`（跳过，填理由）——这些按钮写 **node-action 记录**，不写 `d7_prevention`。
-- **期望**：D7 预防项全部确认或跳过后才可推进。
-- **断言**：`GET /api/capa/{report_id}` 回读 `d7_prevention` 非空；`GET /api/capa/{report_id}/d7-node-actions` 回读节点动作记录（`capa.py:717`）；engineer 此时**不能**推进 D7→D8（见 B9）。
+  2. **D7 节点动作（AI 预防提示）**：`D7RecPanel` 按 `linked`/`keyword`/`rule` 分组渲染。对每个预防项：
+     - FMEA 命中项（`match_source ∈ {linked, keyword}`，有 `failure_cause_node_id`）：`[data-e2e="d7-auto-fill"]`（AI 填充）/ `[data-e2e="d7-confirm"]`（确认）/ `[data-e2e="d7-skip"]`（跳过，填理由）——写 **node-action 记录**，不写 `d7_prevention`。
+     - 规则引擎兜底项（`match_source == "rule"`，无 `fmea_id`/`failure_cause_node_id`）：`d7-auto-fill` 禁用、`d7-confirm`/`d7-skip` 可用——confirm/skip 同样写 node-action 记录（`fmea_id` 为空）。
+- **期望**：D7 面板非空（FMEA 命中或规则引擎兜底至少其一）；全部预防项确认或跳过后才可推进。
+- **断言**：`[data-e2e^="d7-node-action-"]` 至少 1 行；`GET /api/capa/{report_id}` 回读 `d7_prevention` 非空；`GET /api/capa/{report_id}/d7-node-actions` 回读节点动作记录（`capa.py:717`），兜底项 `fmea_id == null`；engineer 此时**不能**推进 D7→D8（见 B9）。
 - **落库**：`d7_prevention` UPDATE + node-action 记录 + D7 skip reasons 审计（若跳过）。
 
 #### B9 manager 登录 + 审批 D7→D8 关闭

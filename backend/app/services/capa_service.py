@@ -745,7 +745,52 @@ def get_d7_recommendations(
         for _, rec in keyword_results[:5]:
             recommendations.append(rec)
 
+    # --- 规则引擎兜底：FMEA 命中为空时，给出预防措施建议让 D7 节点动作可操作 ---
+    if not recommendations:
+        recommendations = _d7_rule_engine_fallback(capa_data)
+
     return recommendations
+
+
+def _d7_rule_engine_fallback(capa_data: dict) -> list[dict]:
+    """无 FMEA 命中时的 D7 规则引擎兜底：基于 D2/D4 文本生成预防措施建议。
+
+    每条兜底推荐无关联 FMEA（fmea_id=None），用合成 failure_mode_node_id（rule:<hash>）
+    作为动作 key，使 D7RecPanel 的 d7-confirm/d7-skip 可操作（d7-auto-fill 因无 cause 节点
+    自动禁用）。AP 默认 M，S/O/D 不臆造。
+    """
+    import hashlib
+
+    from app.services.recommendation_service import RuleEngine
+    from app.utils.text import extract_keywords
+
+    text = capa_data.get("d4_root_cause") or capa_data.get("d2_description", "")
+    if not text.strip():
+        return []
+    engine = RuleEngine()
+    result = engine.evaluate("measure", {"failure_mode": text, "ap": "M"})
+    keywords = extract_keywords(text)
+    recs: list[dict] = []
+    for s in result.suggestions:
+        cat = s.explanation or "预防措施"
+        if cat == "检测措施":
+            cat = "探测措施"
+        synthetic_key = "rule:" + hashlib.sha256(s.name.encode()).hexdigest()[:16]
+        recs.append({
+            "fmea_id": None,
+            "fmea_document_no": None,
+            "failure_mode_node_id": synthetic_key,
+            "failure_mode_name": None,
+            "failure_cause_node_id": None,
+            "failure_cause_name": None,
+            "prevention_control_node_id": None,
+            "prevention_control_name": None,
+            "match_source": "rule",
+            "match_reason": "规则引擎预防建议",
+            "related_d4_keywords": keywords,
+            "suggested_prevention": s.name,
+        })
+    return recs
 
 
 async def get_capas_by_fmea_node(

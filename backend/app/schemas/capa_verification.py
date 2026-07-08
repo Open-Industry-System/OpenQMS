@@ -60,15 +60,15 @@ class VerificationResponse(BaseModel):
 
 class D7NodeActionCreate(BaseModel):
     action: Literal["confirmed", "skipped"]
-    fmea_id: uuid.UUID
-    failure_mode_node_id: str
+    fmea_id: uuid.UUID | None = None  # 规则引擎兜底推荐无关联 FMEA
+    failure_mode_node_id: str  # FMEA 节点 id 或合成 key（rule:<hash>）
     failure_cause_node_id: str | None = None
     match_source: str
     reason: str | None = None
 
 
 class D7AutoFillRequest(BaseModel):
-    fmea_id: uuid.UUID
+    fmea_id: uuid.UUID | None = None
     failure_mode_node_id: str
     failure_cause_node_id: str
     match_source: str
@@ -85,7 +85,7 @@ class D7NodeActionResponse(BaseModel):
     action_id: uuid.UUID
     capa_id: uuid.UUID
     action: str
-    fmea_id: uuid.UUID
+    fmea_id: uuid.UUID | None
     failure_mode_node_id: str
     failure_cause_node_id: str | None
     match_source: str

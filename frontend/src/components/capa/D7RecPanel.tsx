@@ -13,9 +13,9 @@ import type { D7Recommendation, D7NodeAction } from "../../types";
 const { Text } = Typography;
 
 export interface D7UnconfirmedItem {
-  fmea_id: string;
+  fmea_id: string | null;
   failure_mode_node_id: string;
-  failure_mode_name: string;
+  failure_mode_name: string | null;
   failure_cause_node_id: string | null;
 }
 
@@ -95,7 +95,7 @@ export default function D7RecPanel({
     if (recommendations.length === 0) { onConfirmationChange(true, []); return; }
     const unconfirmed = recommendations
       .filter(r => !actionFor(r))
-      .map(r => ({ fmea_id: String(r.fmea_id), failure_mode_node_id: r.failure_mode_node_id,
+      .map(r => ({ fmea_id: r.fmea_id, failure_mode_node_id: r.failure_mode_node_id,
                    failure_mode_name: r.failure_mode_name, failure_cause_node_id: r.failure_cause_node_id }));
     onConfirmationChange(unconfirmed.length === 0, unconfirmed);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,10 +103,12 @@ export default function D7RecPanel({
 
   const linked = recommendations.filter((r) => r.match_source === "linked");
   const keyword = recommendations.filter((r) => r.match_source === "keyword");
+  const rule = recommendations.filter((r) => r.match_source === "rule");
 
   const confirmedCount = recommendations.filter((r) => actionFor(r)).length;
 
   const handleJump = (rec: D7Recommendation) => {
+    if (!rec.fmea_id) return;
     navigate(`/fmea/${rec.fmea_id}?node=${rec.failure_mode_node_id}`);
   };
 
@@ -133,6 +135,7 @@ export default function D7RecPanel({
             key="jump"
             size="small"
             icon={<LinkOutlined />}
+            disabled={!rec.fmea_id}
             onClick={() => handleJump(rec)}
           >
             {t("d7.jump")}
@@ -202,7 +205,7 @@ export default function D7RecPanel({
         <List.Item.Meta
           title={
             <Space>
-              <Text strong>{rec.failure_mode_name}</Text>
+              <Text strong>{rec.failure_mode_name || rec.suggested_prevention}</Text>
               {rec.failure_cause_name && (
                 <Text type="secondary">→ {rec.failure_cause_name}</Text>
               )}
@@ -223,8 +226,8 @@ export default function D7RecPanel({
           }
           description={
             <Space>
-              <Tag color="blue">{rec.fmea_document_no}</Tag>
-              <Tag>{t(`d7.matchSource.${rec.match_source === "linked" ? "linked" : "similar"}`)}</Tag>
+              {rec.fmea_document_no && <Tag color="blue">{rec.fmea_document_no}</Tag>}
+              <Tag>{t(`d7.matchSource.${rec.match_source === "linked" ? "linked" : rec.match_source === "rule" ? "rule" : "similar"}`)}</Tag>
               {rec.match_reason && <Text type="secondary">{rec.match_reason}</Text>}
             </Space>
           }
@@ -261,6 +264,19 @@ export default function D7RecPanel({
             {t("d7.similarNodes")}
           </Text>
           <List size="small" dataSource={keyword} renderItem={(rec, i) => renderRecItem(rec, i + linked.length)} />
+        </>
+      )}
+      {rule.length > 0 && (
+        <>
+          <Text strong style={{ display: "block", marginBottom: 8 }}>
+            {t("d7.ruleSuggestions", { defaultValue: "规则引擎预防建议" })}
+          </Text>
+          <List
+            size="small"
+            dataSource={rule}
+            renderItem={(rec, i) => renderRecItem(rec, i + linked.length + keyword.length)}
+            style={{ marginTop: 8 }}
+          />
         </>
       )}
     </Card>

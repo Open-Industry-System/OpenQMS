@@ -43,6 +43,34 @@ def test_create_llm_provider_openai_defaults_to_openai_without_base_url():
     assert "openai.com" in str(provider.client.base_url)
 
 
+def test_create_llm_provider_ollama_aliases_local():
+    """LLM_PROVIDER=ollama is recognized (aliases local) so .env.e2e's ollama config
+    no longer falls through to rule-only mode."""
+    cfg = SimpleNamespace(
+        LLM_PROVIDER="ollama",
+        LLM_API_KEY="ollama",
+        LLM_MODEL="kimi-k2",
+        LLM_BASE_URL="http://127.0.0.1:11434",
+    )
+    provider = create_llm_provider(cfg)
+    assert provider is not None
+    # LocalProvider stores the stripped base_url and model
+    assert provider.base_url.rstrip("/") == "http://127.0.0.1:11434"
+    assert provider.model == "kimi-k2"
+
+
+def test_create_llm_provider_ollama_without_api_key_still_builds():
+    """ollama (like local) does not require LLM_API_KEY."""
+    cfg = SimpleNamespace(
+        LLM_PROVIDER="ollama",
+        LLM_API_KEY="",
+        LLM_MODEL="kimi-k2",
+        LLM_BASE_URL="http://127.0.0.1:11434",
+    )
+    provider = create_llm_provider(cfg)
+    assert provider is not None
+
+
 async def test_openai_provider_response_format_fallback_parses_fenced_json():
     """When the gateway rejects response_format=json_object, OpenAIProvider
     retries without it and _extract_json parses the fenced ```json response.

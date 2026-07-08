@@ -113,7 +113,9 @@ async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = Fa
 
 async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user) -> CapaD7NodeAction:
     await _assert_d7_stage(capa)
-    await _fetch_fmea_for_d7(db, capa, req.fmea_id)
+    # 规则引擎兜底推荐无关联 FMEA（fmea_id=None）——跳过 FMEA 校验，仅记录 confirm/skip
+    if req.fmea_id is not None:
+        await _fetch_fmea_for_d7(db, capa, req.fmea_id)
     # R13: 重算当前 D7 推荐集，要求 req 的 key 在其中——防 stale UI / 恶意 key 写入悬空 action。
     # key 命中 → 用 canonical helper 算 recommendation_hash；未命中 → 400，不落 action。
     current_recs = await _compute_current_d7_recs(db, capa)
@@ -126,12 +128,16 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
     if rec is None:
         raise ValueError("D7 推荐 key 不存在于当前推荐集")
     rec_hash = _hash_for_rec(rec)
-    existing = await db.scalar(select(CapaD7NodeAction).where(
+    existing_query = select(CapaD7NodeAction).where(
         CapaD7NodeAction.capa_id == capa.report_id,
-        CapaD7NodeAction.fmea_id == req.fmea_id,
         CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
         CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id,
-    ))
+    )
+    if req.fmea_id is None:
+        existing_query = existing_query.where(CapaD7NodeAction.fmea_id.is_(None))
+    else:
+        existing_query = existing_query.where(CapaD7NodeAction.fmea_id == req.fmea_id)
+    existing = await db.scalar(existing_query)
     if existing is not None:
         if existing.action == "auto_filled":
             raise ValueError("已自动回填，不可改判")
@@ -192,12 +198,16 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         # 回滚后查既有行返回（幂等），不泄漏 500；既有行不存在则重新抛（非 dedupe 冲突）
         # rollback 会 expire capa；async 下访问 capa.report_id 会 MissingGreenlet → 用捕获的标量 capa_id
         await db.rollback()
-        existing = await db.scalar(select(CapaD7NodeAction).where(
+        retry_query = select(CapaD7NodeAction).where(
             CapaD7NodeAction.capa_id == capa_id,
-            CapaD7NodeAction.fmea_id == req.fmea_id,
             CapaD7NodeAction.failure_mode_node_id == req.failure_mode_node_id,
             CapaD7NodeAction.failure_cause_node_id == req.failure_cause_node_id,
-        ))
+        )
+        if req.fmea_id is None:
+            retry_query = retry_query.where(CapaD7NodeAction.fmea_id.is_(None))
+        else:
+            retry_query = retry_query.where(CapaD7NodeAction.fmea_id == req.fmea_id)
+        existing = await db.scalar(retry_query)
         if existing is None:
             raise
         return existing
@@ -217,6 +227,9 @@ async def list_d7_actions(db: AsyncSession, capa) -> list[CapaD7NodeAction]:
 async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     if not capa.d5_correction:
         raise ValueError("D5 永久措施为空，无法自动回填")
+    if req.fmea_id is None or not req.failure_cause_node_id:
+        # 规则引擎兜底推荐无 FMEA 节点，不支持 auto-fill（UI 已禁用，兜底拒绝）
+        raise ValueError("规则引擎兜底推荐不支持自动回填到 FMEA")
     await _assert_d7_stage(capa)
     # 锁 FMEA 行（FOR UPDATE），串行化并发 auto-fill；必须在读 graph_data 之前锁，
     # 否则两个并发请求都读到旧 graph、都过既有行检查，一个 commit 时撞 unique index → 500

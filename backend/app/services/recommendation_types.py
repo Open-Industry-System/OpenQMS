@@ -58,6 +58,10 @@ class RecommendationCandidate:
             "related_d2_keywords": self.metadata.get("related_d2_keywords", []),
             "confidence": round(self.confidence, 2),
             "stage_index": self.metadata.get("stage_index"),
+            "ap": self.metadata.get("ap"),
+            "severity": self.metadata.get("severity"),
+            "occurrence": self.metadata.get("occurrence"),
+            "detection": self.metadata.get("detection"),
         }
         # 历史 CAPA 来源字段（可选）
         if self.source == "historical_capa":
@@ -82,6 +86,10 @@ class RecommendationCandidate:
                 "fmea_id": self.metadata.get("fmea_id"),
                 "fmea_document_no": self.metadata.get("fmea_document_no"),
                 "stage_index": self.metadata.get("stage_index"),
+                "ap": self.metadata.get("ap"),
+                "severity": self.metadata.get("severity"),
+                "occurrence": self.metadata.get("occurrence"),
+                "detection": self.metadata.get("detection"),
             }
         return None
 
@@ -94,6 +102,10 @@ class RecommendationCandidate:
             "match_reason": self.match_reason,
             "match_source": "rule" if self.source in ("rule_engine", "rule_engine_measure") else self.source,
             "stage_index": self.metadata.get("stage_index"),
+            "ap": self.metadata.get("ap"),
+            "severity": self.metadata.get("severity"),
+            "occurrence": self.metadata.get("occurrence"),
+            "detection": self.metadata.get("detection"),
         }
         if self.source in ("historical_capa", "historical_capa_measure"):
             result["source_capa_id"] = self.metadata.get("historical_capa_id")

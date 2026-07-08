@@ -51,11 +51,12 @@ async def build_client(db: AsyncSession) -> ProviderClient:
             client=AsyncAnthropic(api_key=cfg.llm_api_key),
             model=cfg.llm_model or "claude-sonnet-4-6-20250514",
         )
-    if provider == "local":
+    # "ollama" 走与 "local" 相同的原生 /api/generate 路径（OpenAI 兼容端点用 local 即可）
+    if provider in ("local", "ollama"):
         if not cfg.llm_base_url:
-            raise ProviderNotConfiguredError("local 需要 LLM_BASE_URL")
+            raise ProviderNotConfiguredError("local/ollama 需要 LLM_BASE_URL")
         if not cfg.llm_model:
-            raise ProviderNotConfiguredError("local 需要 LLM_MODEL")
+            raise ProviderNotConfiguredError("local/ollama 需要 LLM_MODEL")
         return ProviderClient(
             provider="local",
             client=None,

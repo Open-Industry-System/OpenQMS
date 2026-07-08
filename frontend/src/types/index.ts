@@ -1370,15 +1370,15 @@ export interface ShipmentRecord {
 // ─── D7 Prevention Recurrence ───
 
 export interface D7Recommendation {
-  fmea_id: string;
-  fmea_document_no: string;
+  fmea_id: string | null;
+  fmea_document_no: string | null;
   failure_mode_node_id: string;
-  failure_mode_name: string;
+  failure_mode_name: string | null;
   failure_cause_node_id: string | null;
   failure_cause_name: string | null;
   prevention_control_node_id: string | null;
   prevention_control_name: string | null;
-  match_source: "linked" | "keyword";
+  match_source: "linked" | "keyword" | "rule";
   match_reason: string;
   related_d4_keywords: string[];
   suggested_prevention: string | null;
@@ -1417,6 +1417,10 @@ export interface D4Recommendation {
   source_capa_id: string | null;
   source_capa_document_no: string | null;
   source_product_line_code: string | null;
+  ap?: string | null;
+  severity?: number | null;
+  occurrence?: number | null;
+  detection?: number | null;
 }
 
 export interface StageRun {
@@ -1450,6 +1454,10 @@ export interface D5ExistingControl {
   match_reason: string;
   fmea_id: string | null;
   fmea_document_no: string | null;
+  ap?: string | null;
+  severity?: number | null;
+  occurrence?: number | null;
+  detection?: number | null;
 }
 
 export interface D5GeneralSuggestion {
@@ -1462,6 +1470,10 @@ export interface D5GeneralSuggestion {
   match_source: string | null;
   source_capa_id: string | null;
   source_capa_document_no: string | null;
+  ap?: string | null;
+  severity?: number | null;
+  occurrence?: number | null;
+  detection?: number | null;
 }
 
 export interface D5RecommendationResponse {
@@ -1873,7 +1885,7 @@ export interface D7NodeAction {
   action_id: string;
   capa_id: string;
   action: "confirmed" | "skipped" | "auto_filled";
-  fmea_id: string;
+  fmea_id: string | null;
   failure_mode_node_id: string;
   failure_cause_node_id: string | null;
   match_source: string;
@@ -1886,14 +1898,14 @@ export interface D7NodeAction {
 }
 export interface D7NodeActionCreate {
   action: "confirmed" | "skipped";
-  fmea_id: string;
+  fmea_id: string | null;
   failure_mode_node_id: string;
   failure_cause_node_id?: string | null;
   match_source: string;
   reason?: string | null;
 }
 export interface D7AutoFillRequest {
-  fmea_id: string;
+  fmea_id: string | null;
   failure_mode_node_id: string;
   failure_cause_node_id: string;
   match_source: string;

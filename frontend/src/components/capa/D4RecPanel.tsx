@@ -3,6 +3,7 @@ import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App } from "an
 import { useTranslation } from "react-i18next";
 import { getD4Recommendations, adoptRecommendation } from "../../api/capa";
 import RecommendationDAG from "./RecommendationDAG";
+import RiskTags from "./RiskTags";
 import type { D4Recommendation, StageRun } from "../../types";
 
 const { Text } = Typography;
@@ -148,6 +149,12 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
                           {t("d4.stageLabel", { n: item.stage_index })}
                         </Tag>
                       )}
+                      <RiskTags
+                        ap={item.ap}
+                        severity={item.severity}
+                        occurrence={item.occurrence}
+                        detection={item.detection}
+                      />
                       {item.failure_mode_name && <Tag>{item.failure_mode_name}</Tag>}
                       {item.fmea_document_no && <Tag color="blue">{item.fmea_document_no}</Tag>}
                       {item.match_reason && <Tag color="default">{item.match_reason}</Tag>}

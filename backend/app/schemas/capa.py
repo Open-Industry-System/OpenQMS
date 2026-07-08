@@ -64,15 +64,15 @@ class CAPAListResponse(BaseModel):
 
 
 class D7Recommendation(BaseModel):
-    fmea_id: uuid.UUID
-    fmea_document_no: str
-    failure_mode_node_id: str
-    failure_mode_name: str
+    fmea_id: uuid.UUID | None = None
+    fmea_document_no: str | None = None
+    failure_mode_node_id: str  # FMEA 命中为节点 id；规则引擎兜底为合成 key（rule:<hash>）
+    failure_mode_name: str | None = None
     failure_cause_node_id: str | None = None
     failure_cause_name: str | None = None
     prevention_control_node_id: str | None = None
     prevention_control_name: str | None = None
-    match_source: str  # "linked" | "keyword"
+    match_source: str  # "linked" | "keyword" | "rule"
     match_reason: str
     related_d4_keywords: list[str] = []
     suggested_prevention: str | None = None
@@ -99,6 +99,11 @@ class D4Recommendation(BaseModel):
     source_capa_document_no: str | None = None
     source_product_line_code: str | None = None
     stage_index: int | None = None
+    # --- AP / S/O/D provenance（FMEA 命中时来自 FailureMode 节点；规则引擎兜底仅 AP=M） ---
+    ap: str | None = None
+    severity: int | None = None
+    occurrence: int | None = None
+    detection: int | None = None
 
 
 class D4RecommendationResponse(BaseModel):
@@ -119,6 +124,11 @@ class D5ExistingControl(BaseModel):
     fmea_id: str | None = None
     fmea_document_no: str | None = None
     stage_index: int | None = None
+    # --- AP / S/O/D provenance ---
+    ap: str | None = None
+    severity: int | None = None
+    occurrence: int | None = None
+    detection: int | None = None
 
 
 class D5GeneralSuggestion(BaseModel):
@@ -132,6 +142,11 @@ class D5GeneralSuggestion(BaseModel):
     source_capa_id: str | None = None
     source_capa_document_no: str | None = None
     stage_index: int | None = None
+    # --- AP / S/O/D provenance ---
+    ap: str | None = None
+    severity: int | None = None
+    occurrence: int | None = None
+    detection: int | None = None
 
 
 class D5RecommendationResponse(BaseModel):

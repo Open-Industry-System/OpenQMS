@@ -39,7 +39,7 @@ export async function updateCAPA(
 
 export async function advanceCAPA(
   id: string,
-  skipReasons?: { d7_skip_reasons?: Array<{ fmea_id: string; node_id: string; reason: string }> }
+  skipReasons?: { d7_skip_reasons?: Array<{ fmea_id: string | null; node_id: string; reason: string }> }
 ): Promise<CAPAReport> {
   const resp = await client.post(`/capa/${id}/advance`, skipReasons ?? {});
   return resp.data;
