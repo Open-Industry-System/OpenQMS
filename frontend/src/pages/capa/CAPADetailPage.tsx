@@ -383,7 +383,7 @@ export default function CAPADetailPage() {
     try {
       const updated = await advanceCAPA(id, { target_state: "D8_CLOSURE" });
       setCapa(updated);
-      message.success(t("messages.advanceSuccess", "已推进到下一步"));
+      message.success(t("messages.approveSuccess", "已审批关闭"));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
       message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
@@ -395,7 +395,7 @@ export default function CAPADetailPage() {
     try {
       const updated = await advanceCAPA(id, {});  // target_state 缺省 → ARCHIVED（线性）
       setCapa(updated);
-      message.success(t("messages.advanceSuccess", "已归档"));
+      message.success(t("messages.archiveSuccess", "已归档"));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
       message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
@@ -409,7 +409,7 @@ export default function CAPADetailPage() {
       setCapa(updated);
       setRejectDialogOpen(false);
       setRejectReason("");
-      message.success(t("messages.advanceSuccess", "已驳回"));
+      message.success(t("messages.rejectSuccess", "已驳回"));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
       message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
