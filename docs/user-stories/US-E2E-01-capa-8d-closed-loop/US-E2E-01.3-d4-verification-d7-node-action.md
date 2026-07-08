@@ -127,3 +127,19 @@ D7 填写完成 → D7_COMPLETED →（01.7 文档门禁通过）→ D8_APPROVAL
 
 - 回退循环阈值与升级处理流程为后续细化。
 - node-action 状态（pending→已执行→已验证）的后续跟踪闭环可另立故事。
+
+## 实现注记（2026-07-08，状态机细化切片）
+
+本子故事的状态机切片已交付：
+- 新增 `D7_COMPLETED`/`D8_GATE_PENDING`/`D8_APPROVAL_PENDING` 3 个状态 + 驳回回退边
+- `_d7_to_d8_gate` 重命名为 `_d7_completion_gate`，挂载 D7_PREVENTION→D7_COMPLETED
+- `advance_capa` 改为 `target_state` 驱动的 per-edge 闸口
+- `capa_d7_node_action.status` 列（default `pending`）+ 迁移
+- 边权限：D8_APPROVAL_PENDING→D8_CLOSURE/→D7_PREVENTION、D8_CLOSURE→ARCHIVED 需 APPROVE
+- `update_capa` 冻结守卫：d7_prevention 永久冻结（D7_COMPLETED+）、d8_closure 在 D8_GATE_PENDING/D8_APPROVAL_PENDING/ARCHIVED 冻结（D8_CLOSURE 例外可补报告）
+- 前端 Steps 折叠壳状态到 D7/D8 主步骤 + 审批/驳回/归档 UI
+
+**仍待后续切片**（同属 01.3 但未在本切片交付）：
+- D4 验证 method 枚举化（measurement/observation/reproduction）+ 回退计数器
+- FMEA 反查覆盖 Prevention 节点 + 审计（01.4）
+- 审计命名对齐（`RC_VERIFY`→`D4_VERIFICATION_*`、`D7_NODE_CONFIRMED`→`D7_NODE_ACTION_CREATED`、`TRANSITION`→`D8_APPROVAL_PENDING`）

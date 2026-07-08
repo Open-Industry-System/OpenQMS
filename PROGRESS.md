@@ -261,7 +261,7 @@
 | 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 | US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
-| US-E2E-01 v8.1 实现（10 子故事） | 🟡 待启动（见文末任务表，P0-P3 分级） | — |
+| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.3 状态机细化切片已交付；method 枚举+回退计数器切片待启动） | — |
 | US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
 
 ---
@@ -273,8 +273,8 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 ### P0 — 收尾（编排器已就绪，补硬 gap）
 
 - [ ] **01.2 12 源推荐收尾** — LLM 未配置时静默降级（`llm_fusion_layer.py:34` pc=None 返回 attempted=0）应改为按故事判 `BLOCKED`；`RecommendationCache` 无 `stage_runs` 字段（仅 suggestions JSONB），编排执行过程未结构化持久化；前端编排面板可视化 + AP/S/O/D 展示待核
-- [ ] **01.3 D4 验证 + D7 + 审批壳收尾** — `CapaRootCauseVerification.method` 自由文本→枚举（measurement/observation/reproduction）+ schema/迁移；加 `retry_count` 回退计数器；状态机细化（`eightd_state.py` D7_PREVENTION→D8_CLOSURE 直连，缺 D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING + 驳回回退）；`CapaD7NodeAction` 加 `status` 字段（仅 action=confirmed/skipped，缺 pending）；FMEA 反查覆盖 Prevention 节点（见 01.4）
-
+- [x] **01.3 D4 验证 + D7 + 审批壳状态机细化切片** — 新增 `D7_COMPLETED`/`D8_GATE_PENDING`/`D8_APPROVAL_PENDING` 3 状态 + 驳回回退边 + `capa_d7_node_action.status=pending` + edge 权限 + `update_capa` 冻结守卫；9 任务已落地，backend 测试绿
+- [ ] **01.3 D4 验证 method 枚举 + 回退计数器切片（待启动）** — `CapaRootCauseVerification.method` 自由文本→枚举（measurement/observation/reproduction）+ schema/迁移；加 `retry_count` 回退计数器 + 阈值提示"建议升级处理"
 ### P1 — 新建/收尾
 
 - [ ] **01.1 D3 遏制全链路新建** — 4 类数据导入（在途/库存、发货/物流、IQC、SPC 判异）+ 受影响范围分析报告（5 项）+ AI 遏制建议（带 provenance）；ERP 数据模型（`ERPInventoryBalance`/`ERPShipment`）+ `capa_draft` 的 containment_actions 可复用；补 D3→D4 闸口（`advance_capa` 当前不检查 d3_interim 非空）

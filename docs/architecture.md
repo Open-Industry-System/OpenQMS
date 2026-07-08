@@ -194,6 +194,28 @@ FMEA 使用 JSONB 列 `graph_data` 存储图结构：
 
 前端 `fmeaTable.ts` 负责图结构与表格行的双向转换。
 
+### 5.3 CAPA 8D 状态机
+
+`capa_eightd` 的状态流转由 `backend/app/state_machines/eightd_state.py` 定义，严格顺序推进：
+
+```
+D1_TEAM → D2_DESCRIPTION → D3_INTERIM → D4_ROOT_CAUSE → D5_CORRECTION
+  → D6_VERIFICATION → D7_PREVENTION → D7_COMPLETED → D8_GATE_PENDING
+  → D8_APPROVAL_PENDING → D8_CLOSURE → ARCHIVED
+                     ↑                                   │
+                     └───── 驳回（reject） ──────────────┘
+```
+
+**边权限**：
+- `D8_APPROVAL_PENDING → D8_CLOSURE`、 `D8_APPROVAL_PENDING → D7_PREVENTION`（驳回）、`D8_CLOSURE → ARCHIVED` 需 `APPROVE` 权限；
+- 其余推进边（`D1_TEAM → … → D8_APPROVAL_PENDING`）需 `EDIT` 权限。
+
+**关键门控**：
+- `D4_ROOT_CAUSE → D5_CORRECTION`：至少存在一条 `is_verified=true` 的根因验证记录；
+- `D7_PREVENTION → D7_COMPLETED`：所有 D7 node-action 已处理（confirmed / skipped / auto_filled）；
+- `D7_COMPLETED → D8_GATE_PENDING → D8_APPROVAL_PENDING`：由 01.7 文档更新门禁衔接；
+- `D8_APPROVAL_PENDING → D8_CLOSURE`：需审批权限并写审计；驳回回退时记录 `reject_reason`。
+
 ---
 
 ## 6. 模块间数据流
