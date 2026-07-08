@@ -95,4 +95,5 @@ class D7NodeActionResponse(BaseModel):
     reason: str | None
     acted_by: uuid.UUID
     acted_at: datetime
+    status: str
     model_config = ConfigDict(from_attributes=True)

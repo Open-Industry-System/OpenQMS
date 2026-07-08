@@ -93,3 +93,5 @@ class CapaD7NodeAction(Base):
     acted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
     acted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     recommendation_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # US-E2E-01.3：node-action 执行生命周期（pending→executed→verified）；本切片止于 pending
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)

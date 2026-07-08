@@ -429,3 +429,66 @@ async def test_record_d7_action_accepts_wizard_length_node_ids(db, default_facto
         failure_cause_node_id=cause_id, match_source="linked"), admin_user)
     assert rec.failure_mode_node_id == fm_id
     assert len(rec.failure_mode_node_id) > 36
+
+
+@pytest.mark.asyncio
+async def test_node_action_defaults_to_pending_status(db, default_factory, admin_user):
+    """新列 status 在 insert 时由模型默认置 'pending'（US-E2E-01.3 node-action.status 切片）。"""
+    capa = CAPAEightD(
+        report_id=uuid.uuid4(), document_no=f"8D-NA-{uuid.uuid4().hex[:6]}",
+        title="t", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        created_by=admin_user.user_id, status="D7_PREVENTION", d5_correction="措施A",
+        d6_verification="已验证",
+    )
+    db.add(capa); await db.flush()
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-NA-{uuid.uuid4().hex[:6]}",
+        title="t", fmea_type="PFMEA", product_line_code="DC-DC-100",
+        factory_id=default_factory.id, status="draft", created_by=admin_user.user_id,
+        graph_data={"nodes": [
+            {"id": "fm-1", "type": "FailureMode", "name": "虚焊"},
+            {"id": "c-1", "type": "FailureCause", "name": "参数偏移"},
+        ], "edges": [{"source": "c-1", "target": "fm-1", "type": "CAUSE_OF"}]},
+    )
+    db.add(fmea); await db.flush()
+    capa.fmea_ref_id = fmea.fmea_id; capa.fmea_node_id = "fm-1"; await db.flush()
+
+    await record_d7_action(db, capa, D7NodeActionCreate(
+        action="confirmed", fmea_id=fmea.fmea_id,
+        failure_mode_node_id="fm-1", failure_cause_node_id="c-1",
+        match_source="linked",
+    ), admin_user)
+    row = (await db.execute(select(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa.report_id
+    ))).scalar_one()
+    assert row.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_record_d7_action_rejects_d7_completed(db, default_factory, admin_user):
+    """D7_COMPLETED 态 record_d7_action 应被拒（D7 写操作仅 D7_PREVENTION 允许）。
+    现有 test_record_d7_action_rejects_non_d7_stage（:329）用 D5_CORRECTION 验通用路径；
+    本测试显式断言 D7_COMPLETED（新状态）也走同一拒绝。"""
+    capa = CAPAEightD(
+        report_id=uuid.uuid4(), document_no=f"8D-NA-REJ-{uuid.uuid4().hex[:6]}",
+        title="t", product_line_code="DC-DC-100", factory_id=default_factory.id,
+        created_by=admin_user.user_id, status="D7_COMPLETED", d5_correction="措施A",
+        d6_verification="已验证",
+    )
+    db.add(capa); await db.flush()
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-NA-REJ-{uuid.uuid4().hex[:6]}",
+        title="t", fmea_type="PFMEA", product_line_code="DC-DC-100",
+        factory_id=default_factory.id, status="draft", created_by=admin_user.user_id,
+        graph_data={"nodes": [
+            {"id": "fm-1", "type": "FailureMode", "name": "虚焊"},
+            {"id": "c-1", "type": "FailureCause", "name": "参数偏移"},
+        ], "edges": [{"source": "c-1", "target": "fm-1", "type": "CAUSE_OF"}]},
+    )
+    db.add(fmea); await db.flush()
+    capa.fmea_ref_id = fmea.fmea_id; capa.fmea_node_id = "fm-1"; await db.flush()
+    with pytest.raises(ValueError, match="D7"):
+        await record_d7_action(db, capa, D7NodeActionCreate(
+            action="confirmed", fmea_id=fmea.fmea_id,
+            failure_mode_node_id="fm-1", failure_cause_node_id="c-1", match_source="linked",
+        ), admin_user)
