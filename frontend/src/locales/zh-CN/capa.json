@@ -11,6 +11,14 @@
     "handle": "处理",
     "viewDetail": "查看详情"
   },
+  "reject": {
+    "title": "驳回 8D",
+    "reasonLabel": "驳回原因",
+    "reasonPlaceholder": "请填写驳回理由（必填）",
+    "confirm": "驳回",
+    "approve": "审批关闭",
+    "archive": "归档"
+  },
   "status": {
     "D1_TEAM": "D1 团队组建",
     "D2_DESCRIPTION": "D2 问题描述",
@@ -19,7 +27,10 @@
     "D5_CORRECTION": "D5 永久措施",
     "D6_VERIFICATION": "D6 实施验证",
     "D7_PREVENTION": "D7 预防复发",
+    "D7_COMPLETED": "D7 已完成",
     "D8_CLOSURE": "D8 关闭",
+    "D8_GATE_PENDING": "D8 文档门禁",
+    "D8_APPROVAL_PENDING": "D8 待审批",
     "ARCHIVED": "已归档"
   },
   "steps": {

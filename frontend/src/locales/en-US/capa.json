@@ -11,6 +11,14 @@
     "handle": "Process",
     "viewDetail": "View Detail"
   },
+  "reject": {
+    "title": "Reject 8D",
+    "reasonLabel": "Reject reason",
+    "reasonPlaceholder": "Please provide a reject reason (required)",
+    "confirm": "Reject",
+    "approve": "Approve & Close",
+    "archive": "Archive"
+  },
   "status": {
     "D1_TEAM": "D1 Team Formation",
     "D2_DESCRIPTION": "D2 Problem Description",
@@ -19,7 +27,10 @@
     "D5_CORRECTION": "D5 Permanent Corrective Action",
     "D6_VERIFICATION": "D6 Implementation Verification",
     "D7_PREVENTION": "D7 Prevent Recurrence",
+    "D7_COMPLETED": "D7 Completed",
     "D8_CLOSURE": "D8 Closure",
+    "D8_GATE_PENDING": "D8 Doc Gate",
+    "D8_APPROVAL_PENDING": "D8 Pending Approval",
     "ARCHIVED": "Archived"
   },
   "steps": {

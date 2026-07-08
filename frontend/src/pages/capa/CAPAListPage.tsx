@@ -21,14 +21,21 @@ export default function CAPAListPage() {
     D1_TEAM: t("status.D1_TEAM"), D2_DESCRIPTION: t("status.D2_DESCRIPTION"),
     D3_INTERIM: t("status.D3_INTERIM"), D4_ROOT_CAUSE: t("status.D4_ROOT_CAUSE"),
     D5_CORRECTION: t("status.D5_CORRECTION"), D6_VERIFICATION: t("status.D6_VERIFICATION"),
-    D7_PREVENTION: t("status.D7_PREVENTION"), D8_CLOSURE: t("status.D8_CLOSURE"),
-    ARCHIVED: t("status.ARCHIVED"),
+    D7_PREVENTION: t("status.D7_PREVENTION"), D7_COMPLETED: t("status.D7_COMPLETED"),
+    D8_GATE_PENDING: t("status.D8_GATE_PENDING"), D8_APPROVAL_PENDING: t("status.D8_APPROVAL_PENDING"),
+    D8_CLOSURE: t("status.D8_CLOSURE"), ARCHIVED: t("status.ARCHIVED"),
   };
 
   const statusVariant = (s: string): string => {
-    if (["D8_CLOSURE", "ARCHIVED"].includes(s)) return "success";
-    if (s === "OVERDUE") return "error";
-    return "warning";
+    // StatusBadge 的 status 输入是 *alias 字符串*，经内部 switch 映射到 variant（success/warning/error/info/draft）。
+    // 认识的 alias：success 类=approved/closed/done/completed/ok/pass；warning 类=in_review/rework/pending/processing/open；
+    // error 类=high/fatal/critical/error/failed/reject/overdue；info 类=medium/normal/info。
+    // 直接传 "success"/"warning" 不命中任何 case → 落 draft 变体。故返回 alias，而非 variant 名。
+    if (["D8_CLOSURE", "ARCHIVED"].includes(s)) return "done";        // → success
+    if (s === "D8_APPROVAL_PENDING") return "pending";                // → warning（待审批高亮）
+    if (s === "OVERDUE") return "overdue";                            // → error
+    if (["D7_COMPLETED", "D8_GATE_PENDING"].includes(s)) return "info";  // → info（进行中）
+    return "processing";                                              // → warning（D1-D7 默认进行中）
   };
 
   const severityKeyToVariant: Record<string, string> = {

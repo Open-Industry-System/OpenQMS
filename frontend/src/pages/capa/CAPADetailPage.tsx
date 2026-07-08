@@ -4,7 +4,7 @@ import {
   Button, Space, Tag, Typography, Steps, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
 } from "antd";
-import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, CheckOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
 import { getCAPA, updateCAPA, advanceCAPA, linkFMEA } from "../../api/capa";
@@ -31,7 +31,17 @@ const { TextArea } = Input;
 
 const stepIndex: Record<string, number> = {
   D1_TEAM: 0, D2_DESCRIPTION: 1, D3_INTERIM: 2, D4_ROOT_CAUSE: 3,
-  D5_CORRECTION: 4, D6_VERIFICATION: 5, D7_PREVENTION: 6, D8_CLOSURE: 7, ARCHIVED: 8,
+  D5_CORRECTION: 4, D6_VERIFICATION: 5,
+  D7_PREVENTION: 6, D7_COMPLETED: 6,        // 折叠到 D7 主步骤
+  D8_GATE_PENDING: 7, D8_APPROVAL_PENDING: 7, D8_CLOSURE: 7, ARCHIVED: 7,  // 折叠到 D8 主步骤
+};
+
+// 子状态标记：status → i18n key（在 useMemo 内用 t() 解析，确保 en-US 正确翻译，不硬编码中文）
+const stepSubLabelKey: Record<string, string> = {
+  D7_COMPLETED: "status.D7_COMPLETED",
+  D8_GATE_PENDING: "status.D8_GATE_PENDING",
+  D8_APPROVAL_PENDING: "status.D8_APPROVAL_PENDING",
+  ARCHIVED: "status.ARCHIVED",
 };
 
 const severityMap: Record<string, string> = {
@@ -66,19 +76,31 @@ export default function CAPADetailPage() {
   const [lessonsData, setLessonsData] = useState<LessonsLearnedResponse | null>(null);
   const lessonsShownRef = useRef(false);
 
-  const stepItems = useMemo(
-    () => [
+  const stepItems = useMemo(() => {
+    const subLabelKey = capa?.status ? stepSubLabelKey[capa.status] : undefined;
+    const subLabel = subLabelKey ? t(subLabelKey) : undefined;
+    return [
       { title: t("steps.d1", "D1 团队组建") },
       { title: t("steps.d2", "D2 问题描述") },
       { title: t("steps.d3", "D3 临时措施") },
       { title: t("steps.d4", "D4 根因分析") },
       { title: t("steps.d5", "D5 永久措施") },
       { title: t("steps.d6", "D6 实施验证") },
-      { title: t("steps.d7", "D7 预防复发") },
-      { title: t("steps.d8", "D8 关闭") },
-    ],
-    [t]
-  );
+      {
+        title: t("steps.d7", "D7 预防复发"),
+        // D7 主步骤副标：仅 D7_COMPLETED 时显示
+        description: capa?.status === "D7_COMPLETED" ? subLabel : undefined,
+      },
+      {
+        title: t("steps.d8", "D8 关闭"),
+        // D8 主步骤副标：D8_GATE_PENDING/D8_APPROVAL_PENDING/ARCHIVED 时显示
+        description: ["D8_GATE_PENDING", "D8_APPROVAL_PENDING", "ARCHIVED"].includes(capa?.status ?? "")
+          ? subLabel : undefined,
+        // ARCHIVED 时整步标 finish（已完成）
+        status: capa?.status === "ARCHIVED" ? "finish" as const : undefined,
+      },
+    ];
+  }, [t, capa?.status]);
 
   const roleOptions = [
     { value: "quality_engineer", label: t("team.roles.quality_engineer", "质量工程师") },
@@ -133,6 +155,9 @@ export default function CAPADetailPage() {
   const [d7UnconfirmedItems, setD7UnconfirmedItems] = useState<D7UnconfirmedItem[]>([]);
   const [d7SkipDialogOpen, setD7SkipDialogOpen] = useState(false);
   const [d7SkipReasons, setD7SkipReasons] = useState<Record<string, string>>({});
+
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   const [aiDraftEnabled, setAiDraftEnabled] = useState(false);
 
@@ -305,12 +330,20 @@ export default function CAPADetailPage() {
 
   const handleAdvance = async () => {
     if (!id) return;
+    // D7_PREVENTION 未全确认 → skip 对话框
     if (capa?.status === "D7_PREVENTION" && !allD7Confirmed) {
       setD7SkipDialogOpen(true);
       return;
     }
+    // 分支态显式 target_state；线性态（D1-D6、D8_CLOSURE→ARCHIVED 已单独处理）传空对象（无 target_state）
+    const branchTarget: Record<string, string> = {
+      D7_PREVENTION: "D7_COMPLETED",
+      D7_COMPLETED: "D8_GATE_PENDING",
+      D8_GATE_PENDING: "D8_APPROVAL_PENDING",
+    };
+    const target = branchTarget[capa?.status || ""];
     try {
-      const updated = await advanceCAPA(id);
+      const updated = await advanceCAPA(id, target ? { target_state: target } : {});
       setCapa(updated);
       message.success(t("messages.advanceSuccess", "已推进到下一步"));
     } catch (e: unknown) {
@@ -332,12 +365,51 @@ export default function CAPADetailPage() {
 
     try {
       const updated = await advanceCAPA(id, {
+        target_state: "D7_COMPLETED",
         d7_skip_reasons: skipReasonsList.length > 0 ? skipReasonsList : undefined,
       });
       setCapa(updated);
       message.success(t("messages.advanceSuccess", "已推进到下一步"));
       setD7SkipReasons({});
       setD7UnconfirmedItems([]);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!id) return;
+    try {
+      const updated = await advanceCAPA(id, { target_state: "D8_CLOSURE" });
+      setCapa(updated);
+      message.success(t("messages.advanceSuccess", "已推进到下一步"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+    }
+  };
+
+  const handleArchive = async () => {
+    if (!id) return;
+    try {
+      const updated = await advanceCAPA(id, {});  // target_state 缺省 → ARCHIVED（线性）
+      setCapa(updated);
+      message.success(t("messages.advanceSuccess", "已归档"));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } };
+      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+    }
+  };
+
+  const handleRejectSubmit = async () => {
+    if (!id || !rejectReason.trim()) return;
+    try {
+      const updated = await advanceCAPA(id, { target_state: "D7_PREVENTION", reject_reason: rejectReason.trim() });
+      setCapa(updated);
+      setRejectDialogOpen(false);
+      setRejectReason("");
+      message.success(t("messages.advanceSuccess", "已驳回"));
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } };
       message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
@@ -370,10 +442,29 @@ export default function CAPADetailPage() {
           {capa.fmea_ref_id ? t("fmea.changeFMEA", "更换FMEA关联") : t("fmea.linkFMEA", "关联FMEA")}
         </Button>
       )}
-      {capa.status !== "ARCHIVED" && capa.status !== "D8_CLOSURE" && (!["D7_PREVENTION", "D8_CLOSURE"].includes(capa.status) || canApprove('capa')) && canEdit('capa') && (
-        <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance} data-e2e="capa-advance">
-          {t("actions.advance", "推进下一步")}
-        </Button>
+      {capa.status !== "ARCHIVED" && canEdit('capa') && (
+        <>
+          {capa.status === "D8_APPROVAL_PENDING" && canApprove('capa') && (
+            <>
+              <Button type="primary" icon={<CheckOutlined />} onClick={handleApprove} data-e2e="capa-approve">
+                {t("reject.approve", "审批关闭")}
+              </Button>
+              <Button danger icon={<UndoOutlined />} onClick={() => setRejectDialogOpen(true)} data-e2e="capa-reject">
+                {t("reject.confirm", "驳回")}
+              </Button>
+            </>
+          )}
+          {capa.status === "D8_CLOSURE" && canApprove('capa') && (
+            <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleArchive} data-e2e="capa-archive">
+              {t("reject.archive", "归档")}
+            </Button>
+          )}
+          {!["D8_APPROVAL_PENDING", "D8_CLOSURE"].includes(capa.status) && (
+            <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance} data-e2e="capa-advance">
+              {t("actions.advance", "推进下一步")}
+            </Button>
+          )}
+        </>
       )}
     </Space>
   );
@@ -564,13 +655,13 @@ export default function CAPADetailPage() {
               </Form>
             )}
 
-            {capa.status === "D7_PREVENTION" && (
+            {["D7_PREVENTION", "D7_COMPLETED", "D8_GATE_PENDING", "D8_APPROVAL_PENDING"].includes(capa.status) && (
               <>
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d7", t("fields.d7Label", "预防复发措施"))}>
                     <TextArea
                       rows={4}
-                      disabled={!canEdit('capa')}
+                      disabled={capa.status !== "D7_PREVENTION" || !canEdit('capa')}
                       value={localData.d7_prevention || ""}
                       onChange={(e) => setLocalData({ ...localData, d7_prevention: e.target.value })}
                       onBlur={() => handleUpdate("d7_prevention", localData.d7_prevention)}
@@ -581,8 +672,8 @@ export default function CAPADetailPage() {
                 <D7RecPanel
                   capaId={id!}
                   d5Correction={localData.d5_correction}
-                  canAdopt={canEdit('capa')}
-                  canAutoFill={canEdit('fmea')}
+                  canAdopt={capa.status === "D7_PREVENTION" && canEdit('capa')}
+                  canAutoFill={capa.status === "D7_PREVENTION" && canEdit('fmea')}
                   onConfirmationChange={(allConfirmed, unconfirmed) => {
                     setAllD7Confirmed(allConfirmed);
                     setD7UnconfirmedItems(unconfirmed);
@@ -665,6 +756,24 @@ export default function CAPADetailPage() {
           onChange={(e) =>
             setD7SkipReasons({ ...d7SkipReasons, __global__: e.target.value })
           }
+        />
+      </Modal>
+
+      <Modal
+        open={rejectDialogOpen}
+        title={t("reject.title", "驳回 8D")}
+        onCancel={() => { setRejectDialogOpen(false); setRejectReason(""); }}
+        onOk={handleRejectSubmit}
+        okText={t("reject.confirm", "驳回")}
+        okButtonProps={{ danger: true, disabled: !rejectReason.trim() }}
+        cancelText={tc("actions.cancel", "取消")}
+      >
+        <Input.TextArea
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+          placeholder={t("reject.reasonPlaceholder", "请填写驳回理由（必填）")}
+          rows={4}
+          data-e2e="capa-reject-reason"
         />
       </Modal>
 

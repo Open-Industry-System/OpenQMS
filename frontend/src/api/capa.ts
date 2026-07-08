@@ -37,11 +37,14 @@ export async function updateCAPA(
   return resp.data;
 }
 
-export async function advanceCAPA(
-  id: string,
-  skipReasons?: { d7_skip_reasons?: Array<{ fmea_id: string | null; node_id: string; reason: string }> }
-): Promise<CAPAReport> {
-  const resp = await client.post(`/capa/${id}/advance`, skipReasons ?? {});
+export interface AdvanceRequest {
+  target_state?: string;
+  reject_reason?: string;
+  d7_skip_reasons?: Array<{ fmea_id: string | null; node_id: string; reason: string }>;
+}
+
+export async function advanceCAPA(id: string, req: AdvanceRequest = {}): Promise<CAPAReport> {
+  const resp = await client.post(`/capa/${id}/advance`, req);
   return resp.data;
 }
 
