@@ -1,9 +1,10 @@
 # 子故事 US-E2E-01.2：AI 推荐 12 源全接入（编排 DAG + provenance + 执行验证）
 
-**状态**: 定稿 v1（2026-07-08）
-**所属 epic**: US-E2E-01（README.md v8）
+**状态**: 评审稿 v1（2026-07-08）
+**所属 epic**: US-E2E-01（README.md v8.1）
 **关联 skill**: `verify-capa-8d-recommendation-sources`
 **前置**: 无（纯后端推荐管道，无外部系统依赖）
+**AI_REQUIRED**: true（无 LLM 凭证 → `BLOCKED`）
 
 ## 故事
 
@@ -50,13 +51,26 @@
   - 阶段 2（本产品 FMEA）/ 3（全局知识库）/ 10（规则）/ 11（LLM）/ 12（输出）必须达 `done`；
   - 阶段 4（同类型产品）/ 5（经验教训）/ 6（SPC）/ 7（MES）/ 8（IQC）/ 9（供货历史）可在无对应数据时 `skipped`，但必须注明原因；
   - 阶段 1（上下文采集）必须 `done`（提供后续阶段的检索上下文）；
-  - 任何阶段 `error` 视为验收失败。
+  - 任何阶段 `error` 视为 `FAILED`。
 - **provenance 标注**：每条推荐标注命中的阶段集合；点击推荐项可展开看各来源的命中详情。
 - **AP/S/O/D**：每条推荐带 `AP∈{H,M,L}`、`S/O/D∈1..10`（来自 FMEA 节点风险）。
-- **LLM 不可降级**：无 LLM 凭证、LLM 阶段 `skipped`、LLM 阶段 `error` 都视为验收阻塞或失败，不能按核心闭环通过处理。
+- **LLM 不可降级**：无 LLM 凭证 → `BLOCKED`；LLM 阶段 `skipped`/`error` → `FAILED`。
 - **执行验证**：E2E 断言**编排被执行**（面板各阶段状态符合预期，非黑盒），只验结构/状态/来源，不验精确文字。
 - **审计**：推荐触发与采纳写审计日志（操作人、命中阶段集合、采纳记录）。
 - **数据落库**：推荐结果（含每条的来源 provenance、AP/S/O/D、命中阶段）持久化，可回溯。
+
+## 验收契约（字段级）
+
+| 项 | 定义 |
+|---|---|
+| 落库实体 | `recommendation_cache`（含 stage_runs[]、candidates[]）、`capa_ai_adoption`（采纳记录） |
+| 关键字段 | stage_run.index∈1..12、status∈{pending,running,done,skipped,error}、skipped_reason；candidate.source_provenance[]∈stage_index 集合、AP∈{H,M,L}、S/O/D∈1..10 |
+| 状态枚举 | 阶段状态见上；LLM 阶段不可 skipped |
+| 审计事件 | `RECOMMENDATION_TRIGGERED`（含 stage 集合）、`RECOMMENDATION_ADOPTED` |
+| E2E seed 前置 | 产品线 DC-DC-100-E2E 有 FMEA + 知识库 + SPC + IQC + MES + 供应商历史数据 |
+| 通过条件 | 12 阶段全接入 + 关键阶段 done + skipped 注明原因 + 推荐非空带 provenance + AP/S/O/D 齐全 |
+| 失败条件（FAILED） | 关键阶段非 done（无 skipped_reason）；LLM 阶段 skipped/error；provenance 缺失；AP/S/O/D 缺失 |
+| 阻塞条件（BLOCKED） | 无 LLM 凭证 |
 
 ## 不在本子故事范围
 
@@ -68,4 +82,4 @@
 ## 后续
 
 - 各推荐源的命中质量/召回率优化为后续迭代，不在本子故事验收范围。
-- 01.5 的知识库沉淀条目会进入阶段 5（经验教训库）与阶段 3（全局知识库），形成"当前 8D → 知识库 → 未来 8D"闭环。
+- 01.8 的知识库沉淀条目会进入阶段 5（经验教训库）与阶段 3（全局知识库），形成"当前 8D → 知识库 → 未来 8D"闭环。

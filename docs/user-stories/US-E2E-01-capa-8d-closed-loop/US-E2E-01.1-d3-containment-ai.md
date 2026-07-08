@@ -1,9 +1,10 @@
 # 子故事 US-E2E-01.1：D3 临时/遏制措施（数据导入 + 受影响范围分析 + AI 遏制建议）
 
-**状态**: 定稿 v1（2026-07-08）
-**所属 epic**: US-E2E-01（README.md v8）
+**状态**: 评审稿 v1（2026-07-08）
+**所属 epic**: US-E2E-01（README.md v8.1）
 **关联 skill**: `verify-capa-8d-d3-containment`
 **前置**: 无（D3 是业务流程最靠前的 AI 步骤，独立交付，不依赖推荐源抽象）
+**AI_REQUIRED**: true（无 LLM 凭证 → `BLOCKED`）
 
 ## 故事
 
@@ -67,13 +68,26 @@
 - **AI 遏制建议**：
   - 触发后 AI 基于分析报告输出建议列表，非空，每条带来源 provenance 标注（命中的数据源 + 分析阶段）；
   - 建议类型覆盖召回/隔离/通知客户/加严检验等；
-  - 无 LLM 凭证、LLM 阶段 `skipped`、LLM 阶段 `error` 都视为验收阻塞或失败。
+  - 无 LLM 凭证 → `BLOCKED`；LLM 阶段 `skipped`/`error` → `FAILED`。
 - **AI 辅助定位**：AI 遏制建议是辅助参考，不强制采纳；工程师可全部自填人工措施、不采纳任何 AI 建议也能推进 D3→D4。采纳与不采纳均留痕。
 - **provenance 标注**：每条 AI 建议标注命中的数据源与分析阶段；点击可展开看来源详情。
 - **采纳留痕**：工程师采纳的 AI 建议写审计日志（操作人、采纳建议、来源）；未采纳的建议也留存。
 - **数据落库**：导入数据快照、分析报告、AI 建议列表（含 provenance）、采纳记录、执行结果均正确持久化。
 - **执行验证**：E2E 断言导入 → 报告生成 → AI 建议 → 采纳执行的链路完整，只验结构/状态/来源，不验精确文字。
 - **状态机**：D3 推进至 D4 需遏制措施已填写（人工或采纳 AI 均可）。
+
+## 验收契约（字段级）
+
+| 项 | 定义 |
+|---|---|
+| 落库实体 | `capa_d3_containment_snapshot`（导入快照）、`capa_d3_impact_report`（分析报告）、`capa_d3_ai_advice`（AI 建议含 provenance）、`capa_d3_advice_adoption`（采纳记录） |
+| 关键字段 | snapshot_type∈{inventory, shipment, iqc, spc}；report 含 batches[]/impact_qty/customer_impact[]/risk_level∈{high,medium,low}/time_window；advice 含 source_provenance[]、advice_type∈{recall,isolage,notify_customer,strict_inspection,alternative} |
+| 状态枚举 | D3→D4 推进条件：d3_interim 非空 OR advice_adoption 非空 |
+| 审计事件 | `D3_DATA_IMPORTED`、`D3_REPORT_GENERATED`、`D3_ADVICE_ADOPTED`、`D3_ADVICE_REJECTED` |
+| E2E seed 前置 | 产品线 DC-DC-100-E2E 有 SPC 控制图 + IQC 记录；物流/库存/发货样本数据（seed 或导入文件） |
+| 通过条件 | 4 类导入成功 + 报告 5 项齐全 + AI 建议非空带 provenance + 采纳留痕 + D3→D4 可推进 |
+| 失败条件（FAILED） | LLM 阶段 skipped/error；provenance 缺失；采纳未留痕 |
+| 阻塞条件（BLOCKED） | 无 LLM 凭证 |
 
 ## 不在本子故事范围
 
