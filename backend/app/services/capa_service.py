@@ -208,6 +208,19 @@ async def update_capa(
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         await validate_product_line(db, update_data["product_line_code"])
 
+    # US-E2E-01.3：冻结字段后端约束（防 direct API 修改）
+    _FROZEN_FIELDS_BY_STATUS = {
+        EightDState.D7_COMPLETED.value: {"d7_prevention"},
+        EightDState.D8_GATE_PENDING.value: {"d7_prevention", "d8_closure"},
+        EightDState.D8_APPROVAL_PENDING.value: {"d7_prevention", "d8_closure"},
+        EightDState.D8_CLOSURE.value: {"d7_prevention"},      # d8_closure 例外不冻结
+        EightDState.ARCHIVED.value: {"d7_prevention", "d8_closure"},
+    }
+    frozen = _FROZEN_FIELDS_BY_STATUS.get(capa.status, set())
+    violations = {k for k in update_data if k in frozen and update_data[k] is not None}
+    if violations:
+        raise ValueError(f"当前状态 {capa.status} 冻结字段不可修改: {sorted(violations)}")
+
     # Detect embedding field changes BEFORE mutating capa
     embedding_changed = {
         k for k, v in update_data.items()
