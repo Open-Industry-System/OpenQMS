@@ -307,7 +307,7 @@ def mig_db_url(monkeypatch):
         admin.dispose()
 ```
 
-> **三轮 P1-2**：`mig_db_url` fixture 只创建空一次性 PG 库（不 apply 迁移），各测试自行 `command.upgrade(_cfg(mig_url), <target>)`。A3/B1 共用此 fixture（B1 复用，不重建 conftest）。`_cfg` helper 定义在 conftest 供同目录测试导入（`from .conftest import _cfg` 或各测试文件自定义 4 行 `_cfg`，二选一；推荐各测试文件自定义避免跨文件导入）。`backend/alembic/env.py` 须读 `config.get_main_option("sqlalchemy.url")`（非硬编码）——本任务在 env.py 加 `url = config.get_main_option("sqlalchemy.url") or os.environ["DATABASE_URL"]` 兼容；psycopg 须在 backend dev deps（若缺加 `psycopg[binary]` 到 requirements）。二者计入 A3 commit。
+> **三轮 P1-2**：`mig_db_url` fixture 只创建空一次性 PG 库（不 apply 迁移），各测试自行 `command.upgrade(_cfg(mig_url), <target>)`。A3/B1 共用此 fixture（B1 复用，不重建 conftest）。`_cfg` helper 定义在 conftest 供同目录测试导入（`from .conftest import _cfg` 或各测试文件自定义 4 行 `_cfg`，二选一；推荐各测试文件自定义避免跨文件导入）。`backend/alembic/env.py` 已读 `config.get_main_option("sqlalchemy.url")`（非硬编码，无需改动）——（五轮 P1：env.py **不改动**）既有 env.py:50 已是 `url = os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))`（DATABASE_URL env 优先），测试靠 `mig_db_url` fixture 的 `monkeypatch.setenv("DATABASE_URL", mig_url)` 指向 mig 库；psycopg 须在 backend dev deps（若缺加 `psycopg[binary]` 到 requirements）。二者计入 A3 commit。
 
 ```python
 # backend/tests/migrations/test_migration_cache_stage_runs.py（新增，完整可执行，无 ...）
@@ -316,7 +316,7 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 from pathlib import Path
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import create_engine
 
 def _cfg(mig_url: str) -> Config:
     cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))  # 四轮 P0-2：绝对路径（cwd=backend 时 "backend/alembic.ini" 会双前缀）
@@ -324,28 +324,27 @@ def _cfg(mig_url: str) -> Config:
     # 故不设 set_main_option（无效）；mig_db_url fixture 已用 monkeypatch.setenv("DATABASE_URL", mig_url) 指向 mig 库。
     return cfg
 
-@pytest.mark.asyncio
-async def test_stage_runs_column_added_and_removed(mig_db_url):
+def test_stage_runs_column_added_and_removed(mig_db_url):
     """A3：upgrade head → stage_runs 列存在；downgrade -1 → 移除。"""
     command.upgrade(_cfg(mig_db_url), "<A3_rev>")  # 四轮 P1：pin A3 revision（非 head，B1 成 head 后 -1 不移除 A3）
-    engine = create_async_engine(mig_db_url)
-    async with engine.connect() as conn:
-        cols = [r[0] for r in (await conn.execute(sa.text(
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))  # 五轮 P0：同步 engine（command.upgrade 内部 asyncio.run，测试须同步否则嵌套事件循环）
+    with engine.connect() as conn:
+        cols = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name='recommendation_cache' AND column_name='stage_runs'")))]
         assert "stage_runs" in cols
-    await engine.dispose()
+    engine.dispose()
     command.downgrade(_cfg(mig_db_url), "<A3_parent>")  # 四轮 P1：pin A3 parent（非 -1）
-    engine = create_async_engine(mig_db_url)
-    async with engine.connect() as conn:
-        cols = [r[0] for r in (await conn.execute(sa.text(
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))  # 五轮 P0：同步 engine（command.upgrade 内部 asyncio.run，测试须同步否则嵌套事件循环）
+    with engine.connect() as conn:
+        cols = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name='recommendation_cache' AND column_name='stage_runs'")))]
         assert "stage_runs" not in cols
-    await engine.dispose()
+    engine.dispose()
 ```
 
-> `_cfg` 从 `backend/tests/migrations/conftest.py` 导入（同目录 pytest 自动发现）。A3 commit 含 `conftest.py` + `test_migration_cache_stage_runs.py` + env.py 兼容 + psycopg 依赖。B1 复用同一 `mig_db_url`/`_cfg`（不再新建 conftest）。
+> `_cfg` 从 `backend/tests/migrations/conftest.py` 导入（同目录 pytest 自动发现）。A3 commit 含 `conftest.py` + `test_migration_cache_stage_runs.py` + psycopg 依赖（**env.py 不改动**，五轮 P1）。B1 复用同一 `mig_db_url`/`_cfg`（不再新建 conftest）。
 
 简化版（用模型直接断言，覆盖 create_all 路径）：
 
@@ -412,12 +411,12 @@ git add backend/app/models/recommendation_cache.py backend/alembic/versions/<ts>
   backend/tests/recommendations/test_cache_model_stage_runs.py \
   backend/tests/migrations/__init__.py backend/tests/migrations/conftest.py \
   backend/tests/migrations/test_migration_cache_stage_runs.py \
-  backend/alembic/env.py  # 加 sqlalchemy.url config 兼容（若现硬编码）\
   backend/requirements.txt  # 加 psycopg[binary]（若缺）
+# 五轮 P1：env.py 不改动（既有 env.py:50 已读 DATABASE_URL env 优先），故不 add env.py
 git commit -m "feat(cache): add recommendation_cache.stage_runs JSONB column + migration + PG migration test infra"
 ```
 
-> 三轮 P1-2：A3 是首个迁移任务，本 commit 建立 `backend/tests/migrations/` 基础设施（`conftest.py` `mig_db_url` fixture + `__init__.py` + env.py `sqlalchemy.url` 兼容 + psycopg 依赖），B1 复用。
+> 三轮 P1-2 + 五轮 P1：A3 是首个迁移任务，本 commit 建立 `backend/tests/migrations/` 基础设施（`conftest.py` `mig_db_url` fixture + `__init__.py` + psycopg 依赖）。**env.py 不改动**（既有 env.py:50 已读 DATABASE_URL env 优先，测试靠 monkeypatch.setenv）。B1 复用。
 
 ---
 
@@ -440,8 +439,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext, RecommendationResult, StageRun
 
-@pytest.mark.asyncio
-async def test_serialize_capa_suggestions_d4_is_list_with_kind():
+def test_serialize_capa_suggestions_d4_is_list_with_kind():
     pipe = HybridRecommendationPipeline(db=MagicMock(), pc=None, embedding_provider=None)
     cand = RecommendationCandidate(source="fmea_graph", content="cause1", confidence=0.5,
                                     match_reason="r", metadata={"stage_index": 2})
@@ -450,8 +448,7 @@ async def test_serialize_capa_suggestions_d4_is_list_with_kind():
     assert out[0]["kind"] == "d4_cause"
     assert "failure_cause_name" in out[0]
 
-@pytest.mark.asyncio
-async def test_serialize_capa_suggestions_d5_mutually_exclusive():
+def test_serialize_capa_suggestions_d5_mutually_exclusive():
     pipe = HybridRecommendationPipeline(db=MagicMock(), pc=None, embedding_provider=None)
     # 一个 control 候选（to_d5_control_schema 非空）+ 一个 suggestion 候选（返回 None）
     ctrl = MagicMock(); ctrl.to_d5_control_schema.return_value = {"control_node_id": "n1", "name": "c"}
@@ -463,8 +460,7 @@ async def test_serialize_capa_suggestions_d5_mutually_exclusive():
     assert kinds == ["d5_control", "d5_suggestion"]  # control 不重复进 suggestion
     assert len(out) == 2
 
-@pytest.mark.asyncio
-async def test_cache_capa_result_persists_stage_runs(real_db_session, capa_factory):
+def test_cache_capa_result_persists_stage_runs(real_db_session, capa_factory):
     # 三轮 P1-1：用真实测试 DB 回读 RecommendationCache，断言写入内容（非仅 execute 被调用）
     pipe = HybridRecommendationPipeline(db=real_db_session, pc=MagicMock(), embedding_provider=None)
     capa = await capa_factory(session=real_db_session)
@@ -491,8 +487,7 @@ async def test_cache_capa_result_persists_stage_runs(real_db_session, capa_facto
 ```python
 # 追加：降级测试（三轮 P1-1 + P1 三轮）——构造确实触发 StageRunSchema 序列化异常的 StageRun，
 # 回读断言 stage_runs IS NULL 且 suggestions 仍写入（非仅"未抛异常"）
-@pytest.mark.asyncio
-async def test_cache_capa_result_stage_runs_serialize_failure_degrades(real_db_session, capa_factory):
+def test_cache_capa_result_stage_runs_serialize_failure_degrades(real_db_session, capa_factory):
     pipe = HybridRecommendationPipeline(db=real_db_session, pc=MagicMock(), embedding_provider=None)
     capa = await capa_factory(session=real_db_session)
     ctx = RecommendationContext(capa_data={"d2_description":"d","d3_interim":"","d4_root_cause":"rc",
@@ -515,8 +510,7 @@ async def test_cache_capa_result_stage_runs_serialize_failure_degrades(real_db_s
 
 ```python
 # 追加到 backend/tests/recommendations/test_hybrid_recommendation_pipeline.py
-@pytest.mark.asyncio
-async def test_blocked_skips_audit_and_cache(monkeypatch):
+def test_blocked_skips_audit_and_cache(monkeypatch):
     pipe = HybridRecommendationPipeline(db=MagicMock(), pc=None, embedding_provider=None)
     # mock orchestrator.run 返回 blocked=True
     pipe.orchestrator = MagicMock(); pipe.orchestrator.run = AsyncMock(return_value=RecommendationResult(items=[], stages=[], blocked=True))
@@ -669,8 +663,7 @@ git commit -m "feat(recommend): pipeline passes through BLOCKED + adds _cache_ca
 # backend/tests/capa/test_capa_api_d4_d5.py
 import pytest
 
-@pytest.mark.asyncio
-async def test_d4_endpoint_returns_422_blocked_when_no_llm(authed_client_factory, e2e_seed):
+def test_d4_endpoint_returns_422_blocked_when_no_llm(authed_client_factory, e2e_seed):
     # provider_adapter.build_client 抛 ProviderNotConfiguredError（无 LLM 配置）
     # 复用既有 capa API 测试 fixture；构造一个 D4 状态的 8D
     ...
@@ -897,7 +890,7 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 from pathlib import Path
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import create_engine
 
 def _cfg(mig_url: str) -> Config:
     cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))  # 四轮 P0-2：绝对路径（cwd=backend 时 "backend/alembic.ini" 会双前缀）
@@ -905,89 +898,87 @@ def _cfg(mig_url: str) -> Config:
     # 故不设 set_main_option（无效）；mig_db_url fixture 已用 monkeypatch.setenv("DATABASE_URL", mig_url) 指向 mig 库。
     return cfg
 
-@pytest.mark.asyncio
-async def test_migration_aborts_on_dirty_method_data(mig_db_url):
+def test_migration_aborts_on_dirty_method_data(mig_db_url):
     """三轮 P1-2：插入非法 method 行后 upgrade 抛 RuntimeError 且三者均未残留
     （RuntimeError 在首个 create_check_constraint 之前 raise）。"""
-    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy import create_engine
     # 1. apply 到 <Task_A3_head>（B1 上一版本，含 capa_root_cause_verification 表 + factories 表）
     command.upgrade(_cfg(mig_db_url), "<Task_A3_head>")
     # 2. seed 一行 factory + capa_eightd（INSERT 依赖 factories.id；verification 依赖 capa_eightd.report_id）
-    engine = create_async_engine(mig_db_url)
-    async with engine.connect() as conn:
-        await conn.execute(sa.text(
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))  # 五轮 P0：同步 engine（command.upgrade 内部 asyncio.run，测试须同步否则嵌套事件循环）
+    with engine.connect() as conn:
+        conn.execute(sa.text(
             "INSERT INTO factories (id, factory_code, name, tenant_schema, is_active, created_at, updated_at) "
             "VALUES ('00000000-0000-0000-0000-000000000001', 'TEST', 'Test', 'test', true, now(), now())"))
-        await conn.execute(sa.text(
+        conn.execute(sa.text(
             "INSERT INTO capa_eightd (report_id, document_no, title, product_line_code, status, severity, "
             " factory_id, d1_team, d2_description, d3_interim, d4_root_cause, d5_correction, d6_verification, "
             " d7_prevention, d8_closure, due_date, created_at, updated_at) "
             "VALUES (gen_random_uuid(), '8D-TEST-001', 't', 'PL', 'D4_ROOT_CAUSE', '一般', "
             " '00000000-0000-0000-0000-000000000001', '[]'::jsonb, '', '', '', '', '', '', '', NULL, now(), now())"))
         # 3. 插入脏数据（method='guess' 非法）——capa_id 引用刚建的 8D（子查询取其 report_id）
-        await conn.execute(sa.text(
+        conn.execute(sa.text(
             "INSERT INTO capa_root_cause_verification "
             "(verification_id, capa_id, factory_id, root_cause_text, is_verified, "
             " method, result, evidence_attachments, source_ref, created_at, updated_at) "
             "SELECT gen_random_uuid(), report_id, factory_id, 'rc', false, 'guess', NULL, '[]'::jsonb, NULL, now(), now() "
             "FROM capa_eightd WHERE document_no='8D-TEST-001'"
         ))
-        await conn.commit()
-    await engine.dispose()
+        conn.commit()
+    engine.dispose()
     # 4. upgrade head → 触发 B1 → 期望 RuntimeError
     with pytest.raises(RuntimeError, match="non-enum method"):
         command.upgrade(_cfg(mig_db_url), "head")
     # 5. 断言三者均未残留
-    engine = create_async_engine(mig_db_url)
-    async with engine.connect() as conn:
-        cols_v = [r[0] for r in (await conn.execute(sa.text(
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))  # 五轮 P0：同步 engine（command.upgrade 内部 asyncio.run，测试须同步否则嵌套事件循环）
+    with engine.connect() as conn:
+        cols_v = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'")))]
         assert "conclusion" not in cols_v
-        cols_e = [r[0] for r in (await conn.execute(sa.text(
+        cols_e = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'")))]
         assert "d4_retry_count" not in cols_e
-        cons = [r[0] for r in (await conn.execute(sa.text(
+        cons = [r[0] for r in conn.execute(sa.text(
             "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass")))]
         assert "chk_verification_method" not in cons
         assert "chk_verification_conclusion" not in cons
-    await engine.dispose()
+    engine.dispose()
 
-@pytest.mark.asyncio
-async def test_migration_clean_upgrade_downgrade(mig_db_url):
+def test_migration_clean_upgrade_downgrade(mig_db_url):
     """三轮 P1-2：无脏数据 upgrade head → 三者存在；downgrade -1 → 三者移除。"""
-    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy import create_engine
     command.upgrade(_cfg(mig_db_url), "<B1_rev>")  # 四轮 P1：pin B1 revision（非 head）
-    engine = create_async_engine(mig_db_url)
-    async with engine.connect() as conn:
-        cols_v = [r[0] for r in (await conn.execute(sa.text(
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))  # 五轮 P0：同步 engine（command.upgrade 内部 asyncio.run，测试须同步否则嵌套事件循环）
+    with engine.connect() as conn:
+        cols_v = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'")))]
         assert "conclusion" in cols_v
-        cols_e = [r[0] for r in (await conn.execute(sa.text(
+        cols_e = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'")))]
         assert "d4_retry_count" in cols_e
-        cons = [r[0] for r in (await conn.execute(sa.text(
+        cons = [r[0] for r in conn.execute(sa.text(
             "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass")))]
         assert "chk_verification_method" in cons
         assert "chk_verification_conclusion" in cons
-    await engine.dispose()
+    engine.dispose()
 
     command.downgrade(_cfg(mig_db_url), "<A3_rev>")  # 四轮 P1：pin B1 parent = A3 rev（非 -1）
-    engine = create_async_engine(mig_db_url)
-    async with engine.connect() as conn:
-        cols_v = [r[0] for r in (await conn.execute(sa.text(
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))  # 五轮 P0：同步 engine（command.upgrade 内部 asyncio.run，测试须同步否则嵌套事件循环）
+    with engine.connect() as conn:
+        cols_v = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'")))]
         assert "conclusion" not in cols_v
-        cols_e = [r[0] for r in (await conn.execute(sa.text(
+        cols_e = [r[0] for r in conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'")))]
         assert "d4_retry_count" not in cols_e
-        cons = [r[0] for r in (await conn.execute(sa.text(
+        cons = [r[0] for r in conn.execute(sa.text(
             "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass")))]
         assert "chk_verification_method" not in cons
         assert "chk_verification_conclusion" not in cons
-    await engine.dispose()
+    engine.dispose()
 ```
 
-> **三轮 P1-2 修订总结**：仓库当前**无** `backend/tests/migrations/`——本任务新建 `backend/tests/migrations/__init__.py` + `conftest.py`（`mig_db_url` fixture：一次性 PG 库，CREATE/DROP via psycopg，apply 到 `<Task_A3_head>`，seed factory）+ `test_conclusion_retrycount_migration.py`（完整测试体，无 `...`）。**不用 SQLite**（CHECK/JSONB/pg_constraint/information_schema 无 SQLite 等价）。`RuntimeError` 在首个 `create_check_constraint` **之前** raise（断言点 = upgrade 第一行 `bind.scalar` 后 `if dirty: raise`），故 method CHECK / conclusion 列 / d4_retry_count 列**三者都不应残留**。env.py 加 `sqlalchemy.url` config 兼容 + psycopg 依赖计入 B1 commit。
+> **三轮 P1-2 修订总结**：仓库当前**无** `backend/tests/migrations/`——本任务新建 `backend/tests/migrations/__init__.py` + `conftest.py`（`mig_db_url` fixture：一次性 PG 库，CREATE/DROP via psycopg，apply 到 `<Task_A3_head>`，seed factory）+ `test_conclusion_retrycount_migration.py`（完整测试体，无 `...`）。**不用 SQLite**（CHECK/JSONB/pg_constraint/information_schema 无 SQLite 等价）。`RuntimeError` 在首个 `create_check_constraint` **之前** raise（断言点 = upgrade 第一行 `bind.scalar` 后 `if dirty: raise`），故 method CHECK / conclusion 列 / d4_retry_count 列**三者都不应残留**。env.py **不改动**（五轮 P1：既有 env.py:50 已读 DATABASE_URL env 优先，测试靠 monkeypatch.setenv）+ psycopg 依赖计入 B1 commit。
 
 - [ ] **Step 2: 跑测试验证失败**
 
@@ -1096,11 +1087,11 @@ Expected: 模型测试 PASS；迁移测试 PASS（脏数据中止 + 干净 up/do
 git add backend/app/models/capa.py backend/alembic/versions/<ts>_conclusion_retrycount.py \
   backend/tests/capa/test_models_conclusion_retrycount.py \
   backend/tests/migrations/test_conclusion_retrycount_migration.py
-# 注：backend/tests/migrations/conftest.py + __init__.py + env.py 兼容 + psycopg 依赖由 A3 commit 已含（B1 复用，不重复 add）
+# 注：backend/tests/migrations/conftest.py + __init__.py + psycopg 依赖由 A3 commit 已含（B1 复用，不重复 add；env.py 不改动）
 git commit -m "feat(capa): add verification.conclusion + d4_retry_count + CHECK constraints + backfill migration + conclusion migration test"
 ```
 
-> 三轮 P1-2：迁移测试基础设施（`backend/tests/migrations/conftest.py` + `__init__.py` + env.py `sqlalchemy.url` 兼容 + psycopg 依赖）由 **A3 commit 已建立**（A3 是首个迁移任务），B1 复用 `mig_db_url` fixture，仅新增 `test_conclusion_retrycount_migration.py`。
+> 三轮 P1-2 + 五轮 P1：迁移测试基础设施（`backend/tests/migrations/conftest.py` + `__init__.py` + psycopg 依赖；**env.py 不改动**）由 **A3 commit 已建立**（A3 是首个迁移任务），B1 复用 `mig_db_url` fixture，仅新增 `test_conclusion_retrycount_migration.py`。
 
 ---
 
@@ -1247,8 +1238,7 @@ git commit -m "feat(capa): verification schemas — conclusion Literal, drop is_
 import pytest, asyncio
 from app.schemas.capa_verification import VerificationCreate, VerificationUpdate
 
-@pytest.mark.asyncio
-async def test_create_default_pending_no_increment(db_session, capa_factory, admin_user):
+def test_create_default_pending_no_increment(db_session, capa_factory, admin_user):
     capa = await capa_factory()
     rec = await create_verification(db_session, capa, VerificationCreate(root_cause_text="rc"), admin_user)
     assert rec.conclusion == "pending"
@@ -1256,8 +1246,7 @@ async def test_create_default_pending_no_increment(db_session, capa_factory, adm
     await db_session.refresh(capa)
     assert capa.d4_retry_count == 0
 
-@pytest.mark.asyncio
-async def test_conclusion_failed_increments_retry_count(db_session, capa_factory, admin_user):
+def test_conclusion_failed_increments_retry_count(db_session, capa_factory, admin_user):
     capa = await capa_factory()
     rec = await create_verification(db_session, capa, VerificationCreate(root_cause_text="rc"), admin_user)
     await update_verification(db_session, capa, rec.verification_id, VerificationUpdate(conclusion="failed"), admin_user)
@@ -1266,8 +1255,7 @@ async def test_conclusion_failed_increments_retry_count(db_session, capa_factory
     assert rec.conclusion == "failed"
     assert rec.is_verified is False
 
-@pytest.mark.asyncio
-async def test_conclusion_passed_no_increment(db_session, capa_factory, admin_user):
+def test_conclusion_passed_no_increment(db_session, capa_factory, admin_user):
     capa = await capa_factory()
     rec = await create_verification(db_session, capa, VerificationCreate(root_cause_text="rc", method="measurement", result="ok", evidence_attachments=[{"u":1}]), admin_user)
     await update_verification(db_session, capa, rec.verification_id, VerificationUpdate(conclusion="passed"), admin_user)
@@ -1275,8 +1263,7 @@ async def test_conclusion_passed_no_increment(db_session, capa_factory, admin_us
     assert capa.d4_retry_count == 0
     assert rec.is_verified is True
 
-@pytest.mark.asyncio
-async def test_failed_no_transition_no_double_count(db_session, capa_factory, admin_user):
+def test_failed_no_transition_no_double_count(db_session, capa_factory, admin_user):
     capa = await capa_factory()
     rec = await create_verification(db_session, capa, VerificationCreate(root_cause_text="rc"), admin_user)
     await update_verification(db_session, capa, rec.verification_id, VerificationUpdate(conclusion="failed"), admin_user)
@@ -1285,8 +1272,7 @@ async def test_failed_no_transition_no_double_count(db_session, capa_factory, ad
     await db_session.refresh(capa)
     assert capa.d4_retry_count == 1
 
-@pytest.mark.asyncio
-async def test_same_record_concurrent_failed_increments_once(sessionmaker, capa_factory, admin_user):
+def test_same_record_concurrent_failed_increments_once(sessionmaker, capa_factory, admin_user):
     # 三轮 P1-2：单 AsyncSession 不支持并发，须每 worker 独立 session。
     # seed：建 capa + verification（pending），提交并关闭 seed session
     seed_session = sessionmaker()
@@ -1315,8 +1301,7 @@ async def test_same_record_concurrent_failed_increments_once(sessionmaker, capa_
     assert c.d4_retry_count == 1  # verification 行锁去重，仅 +1
     await check.close()
 
-@pytest.mark.asyncio
-async def test_different_records_concurrent_failed_increments_twice(sessionmaker, capa_factory, admin_user):
+def test_different_records_concurrent_failed_increments_twice(sessionmaker, capa_factory, admin_user):
     # 同一 CAPA 两条不同 verification 记录并发 failed → +2（capa 行锁防跨记录丢计数）
     seed = sessionmaker()
     capa = await capa_factory(session=seed)
@@ -1483,8 +1468,7 @@ git commit -m "feat(capa): verification service conclusion-driven + dual-lock re
 import pytest
 from app.state_machines.eightd_state import EightDState
 
-@pytest.mark.asyncio
-async def test_advance_d4_to_d5_warns_at_threshold(client_factory, capa_at_d4_with_retry3):
+def test_advance_d4_to_d5_warns_at_threshold(client_factory, capa_at_d4_with_retry3):
     # capa 处于 D4_ROOT_CAUSE，d4_retry_count=3
     r = await client.post(f"/api/capa/{report_id}/advance", json={}, headers=auth)
     assert r.status_code == 200
@@ -1493,20 +1477,17 @@ async def test_advance_d4_to_d5_warns_at_threshold(client_factory, capa_at_d4_wi
     assert body["capa"]["status"] == "D5_CORRECTION"
     assert body["capa"]["d4_retry_count"] == 3  # 三轮 P1-3：可观察
 
-@pytest.mark.asyncio
-async def test_capa_response_exposes_d4_retry_count(client_factory, capa_factory):
+def test_capa_response_exposes_d4_retry_count(client_factory, capa_factory):
     capa = await capa_factory()  # d4_retry_count=0 default
     r = await client.get(f"/api/capa/{capa.report_id}", headers=auth)
     assert r.json()["d4_retry_count"] == 0  # CAPAResponse 暴露 retry_count
 
-@pytest.mark.asyncio
-async def test_advance_non_d4_edge_no_warning(client_factory, capa_at_d5):
+def test_advance_non_d4_edge_no_warning(client_factory, capa_at_d5):
     r = await client.post(f"/api/capa/{report_id}/advance", json={}, headers=auth)
     body = r.json()
     assert body["warning"] is None  # D5→D6 边不触发
 
-@pytest.mark.asyncio
-async def test_advance_below_threshold_no_warning(client_factory, capa_at_d4_retry1):
+def test_advance_below_threshold_no_warning(client_factory, capa_at_d4_retry1):
     r = await client.post(f"/api/capa/{report_id}/advance", json={}, headers=auth)
     body = r.json()
     assert body["warning"] is None
