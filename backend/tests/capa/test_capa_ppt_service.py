@@ -58,8 +58,9 @@ async def test_generate_content_with_linked_risk_alert(db, admin_user, default_f
                    short_name="S", factory_id=default_factory.id, created_by=admin_user.user_id)
     db.add(sup)
     await db.flush()
+    alert_id = uuid.uuid4()
     db.add(SupplierRiskAlert(
-        alert_id=uuid.uuid4(), supplier_id=sup.supplier_id, factory_id=default_factory.id,
+        alert_id=alert_id, supplier_id=sup.supplier_id, factory_id=default_factory.id,
         risk_level="high", risk_score=80, quality_score=70, delivery_score=60, compliance_score=90,
         rule_results={}, alert_type="initial", status="open",
         linked_capa_id=capa.report_id, snapshot_date=date(2026, 7, 8),
@@ -67,7 +68,22 @@ async def test_generate_content_with_linked_risk_alert(db, admin_user, default_f
     await db.flush()
     content = await capa_ppt_service.generate_content(db, capa.report_id)
     assert len(content.linked_risk_alerts) == 1
-    assert content.linked_risk_alerts[0]["risk_level"] == "high"
+    alert = content.linked_risk_alerts[0]
+    assert alert["risk_level"] == "high"
+    # 故事 §40/§71 要求「预警单号与状态」——必须含标识号
+    assert alert["alert_id"] == str(alert_id)
+
+
+async def test_d1_team_renders_member_names_not_dict_repr(db, admin_user, default_factory):
+    """D1 团队页应渲染成员姓名/角色可读文本，而非 str(dict) 的 {'name':...} 字典字面量。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    capa.d1_team = [{"name": "张三", "role": "负责人"}, {"name": "李四", "role": "工程师"}]
+    await db.flush()
+    content = await capa_ppt_service.generate_content(db, capa.report_id)
+    d1_values = [s["value"] for s in content.pages[1].sections]
+    joined = " ".join(d1_values)
+    assert "张三" in joined and "李四" in joined
+    assert "{'name'" not in joined and "\"name\"" not in joined  # 不应出现 dict 字面量
 
 
 async def test_render_pptx_returns_valid_pptx(db, admin_user, default_factory):
@@ -83,6 +99,9 @@ async def test_render_pptx_returns_valid_pptx(db, admin_user, default_factory):
     import io
     prs = Presentation(io.BytesIO(pptx_bytes))
     assert len(prs.slides) == 11
+    # 每页使用 Blank 布局（slide_layouts[6]）——无标题占位符（避免与手绘标题文本框重复）
+    for slide in prs.slides:
+        assert list(slide.placeholders) == [], "Blank 布局不应带占位符（Title Only 会带空标题占位符）"
 
 
 async def test_validate_ppt_content_missing_page(db, admin_user, default_factory):

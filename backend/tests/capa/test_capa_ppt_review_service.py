@@ -14,6 +14,7 @@ async def _make_capa(db, factory_id, user_id):
         report_id=uuid.uuid4(), document_no="8D-REV-001", title="t",
         product_line_code="DC-DC-100", factory_id=factory_id, created_by=user_id,
         status="D8_CLOSURE",
+        d1_team=[{"name": "张三", "role": "负责人"}],
         d2_description="d2", d3_interim="d3", d4_root_cause="d4", d5_correction="d5",
         d6_verification="d6", d7_prevention="d7", d8_closure="d8",
     )
@@ -35,6 +36,20 @@ async def test_skip_when_llm_not_configured(db, admin_user, default_factory):
     assert review.status == "skipped"
     assert review.rounds == 0
     assert review.report is None
+
+
+async def test_skipped_surfaces_rule_issues(db, admin_user, default_factory):
+    """pc=None 且内置规则校验未通过（D1 空）→ skipped 但报告须暴露规则 issue（不静默丢弃）。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    capa.d1_team = []  # D1 空 → 规则 issue
+    await db.flush()
+    content, review = await capa_ppt_review_service.review_and_correct(
+        db, capa.report_id, None, "public",
+    )
+    assert review.status == "skipped"
+    assert review.rounds == 0
+    assert review.report is not None
+    assert any("D1" in i for i in review.report["issues"])
 
 
 async def test_pass_first_round(db, admin_user, default_factory, monkeypatch):
@@ -85,20 +100,18 @@ async def test_needs_review_after_3_rounds(db, admin_user, default_factory, monk
     assert review.report == {"issues": ["i"], "suggestions": ["s"]}
 
 
-async def test_llm_exception_continues(db, admin_user, default_factory, monkeypatch):
-    """LLM 异常该轮失败继续；3 轮全失败 → needs_review。"""
+async def test_llm_exception_raises_failed(db, admin_user, default_factory, monkeypatch):
+    """LLM 运行时异常（非未配置）→ 审查闭环异常应失败（抛出），不降级为 needs_review（故事 §92）。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
 
     async def _boom(pc, prompt, response_schema):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(provider_adapter, "complete_json", _boom)
-    content, review = await capa_ppt_review_service.review_and_correct(
-        db, capa.report_id, _PC(), "public",
-    )
-    assert review.status == "needs_review"
-    assert review.rounds == 3
-    assert review.report == {"issues": ["LLM 调用异常"], "suggestions": []}
+    with pytest.raises(RuntimeError):
+        await capa_ppt_review_service.review_and_correct(
+            db, capa.report_id, _PC(), "public",
+        )
 
 
 async def test_skill_not_configured_reports_config_issue(db, admin_user, default_factory, monkeypatch):

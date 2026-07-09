@@ -1,7 +1,10 @@
 import pytest
+import uuid
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from app.core.deps import get_current_user, get_db
 from app.main import app
+from app.models.audit import AuditLog
 
 pytestmark = pytest.mark.requires_db
 
@@ -57,3 +60,21 @@ async def test_reject_non_default_skill_name(admin_client):
     assert r.status_code == 404
     r2 = await admin_client.get("/api/admin/review-skills/some_other_skill")
     assert r2.status_code == 404
+
+
+async def test_upsert_skill_writes_skill_updated_audit(admin_client, db):
+    """故事 §89：admin 改 skill content 必须写 SKILL_UPDATED 审计事件。"""
+    r = await admin_client.put(
+        "/api/admin/review-skills/capa_ppt_review",
+        json={"content": "audit-test standard"},
+    )
+    assert r.status_code == 200
+    skill_id = uuid.UUID(r.json()["skill_id"])
+    logs = (await db.execute(select(AuditLog).where(
+        AuditLog.action == "SKILL_UPDATED",
+        AuditLog.record_id == skill_id,
+    ))).scalars().all()
+    assert len(logs) >= 1, "SKILL_UPDATED 审计未写入"
+    log = logs[-1]
+    assert log.table_name == "agent_review_skill"
+    assert log.operated_by is not None

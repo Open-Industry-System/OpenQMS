@@ -47,6 +47,15 @@ class ExportMeta:
     generated_by: uuid.UUID
 
 
+def _format_team_member(m) -> str:
+    """d1_team 成员渲染为可读文本（name/role），而非 str(dict) 的字典字面量。"""
+    if isinstance(m, dict):
+        name = m.get("name", "")
+        role = m.get("role", "")
+        return f"{name}（{role}）" if role else str(name)
+    return str(m)
+
+
 async def generate_content(db: AsyncSession, capa_id: uuid.UUID) -> PptContent:
     """从落库数据组装 PptContent（不渲染 pptx）。"""
     capa = await db.get(CAPAEightD, capa_id)
@@ -95,7 +104,7 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID) -> PptContent:
             {"label": "状态", "value": capa.status},
             {"label": "日期", "value": str(capa.created_at)},
         ]),
-        PptPage("D1 团队", [{"label": "成员", "value": str(m)} for m in (capa.d1_team or [])]),
+        PptPage("D1 团队", [{"label": "成员", "value": _format_team_member(m)} for m in (capa.d1_team or [])]),
         PptPage("D2 问题描述", [{"label": "描述", "value": capa.d2_description or ""}]),
         PptPage("D3 遏制措施", [{"label": "措施", "value": capa.d3_interim or ""}]),
         PptPage("D4 根因分析", [
@@ -151,7 +160,7 @@ async def _load_linked_risk_alerts(db: AsyncSession, capa) -> list[dict]:
     """反查 SupplierRiskAlert.linked_capa_id == capa_id（模型在 app.models.supplier_risk）。"""
     from app.models.supplier_risk import SupplierRiskAlert
     rows = (await db.execute(select(SupplierRiskAlert).where(SupplierRiskAlert.linked_capa_id == capa.report_id))).scalars().all()
-    return [{"risk_level": r.risk_level, "status": r.status} for r in rows]
+    return [{"alert_id": str(r.alert_id), "risk_level": r.risk_level, "status": r.status} for r in rows]
 
 
 def render_pptx(
@@ -161,7 +170,7 @@ def render_pptx(
     prs = Presentation()
     # 使用默认幻灯片布局（空白）
     for page in content.pages:
-        slide = prs.slides.add_slide(prs.slide_layouts[5])  # 5 = blank
+        slide = prs.slides.add_slide(prs.slide_layouts[6])  # 6 = blank（无标题占位符，避免与手绘标题文本框重复）
         title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.6))
         title_box.text_frame.text = page.title
         title_box.text_frame.paragraphs[0].runs[0].font.size = Pt(28)

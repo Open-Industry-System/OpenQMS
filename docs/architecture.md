@@ -288,8 +288,8 @@ D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封�
 2. **重生成**：`_correct_by_suggestions()` / `_correct_by_issues()` 均直接调用 `generate_content(db, capa_id)`，从最新数据库数据重新组装 PptContent（不是让 LLM 改写内容）
 3. **最终审查**：LLM 确认重生成后的内容，返回 `review_status`（`skipped`/`passed`/`needs_review`）
 
-- LLM 未配置时（`pc is None`）跳过审查，`review_status="skipped"`
-- LLM 调用异常时 try/except 捕获，返回 `needs_review` + 错误信息
+- LLM 未配置时（`pc is None`）跳过审查，`review_status="skipped"`；内置规则校验的 issues 仍写入 `review_report`（不静默丢弃）
+- LLM 运行时异常（超时/鉴权/响应格式，非「未配置」）属故事 §92 FAILED 条件，不降级为 `needs_review`：异常上抛，API 层转 500 且不落 export 记录
 - 审查结果写入 `capa_ppt_export.review_status` + `review_rounds` + `review_report`
 
 ---

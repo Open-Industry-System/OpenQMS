@@ -821,16 +821,21 @@ async def export_ppt(
     except provider_adapter.ProviderNotConfiguredError:
         pc = None
 
-    content, review = await capa_ppt_review_service.review_and_correct(
-        db, report_id, pc, tenant,
-    )
-
-    # 最终渲染一次（审查后 review_status 已知）
-    meta = capa_ppt_service.ExportMeta(
-        export_id=export_id, version=version,
-        generated_at=generated_at, generated_by=scope.user.user_id,
-    )
-    pptx_bytes = capa_ppt_service.render_pptx(content, meta, review.status, review.rounds)
+    # 审查闭环 + 渲染：审查闭环异常（非 LLM 缺失）/ 渲染失败均属故事 §92 FAILED 条件 → 500，不落 export
+    try:
+        content, review = await capa_ppt_review_service.review_and_correct(
+            db, report_id, pc, tenant,
+        )
+        # 最终渲染一次（审查后 review_status 已知）
+        meta = capa_ppt_service.ExportMeta(
+            export_id=export_id, version=version,
+            generated_at=generated_at, generated_by=scope.user.user_id,
+        )
+        pptx_bytes = capa_ppt_service.render_pptx(content, meta, review.status, review.rounds)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(500, "PPT 生成失败（审查闭环异常或渲染失败）")
 
     # 写 capa_ppt_export + PPT_GENERATED 审计
     export = CapaPptExport(
@@ -863,6 +868,9 @@ async def get_ppt_export(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(404, "CAPA 不存在")

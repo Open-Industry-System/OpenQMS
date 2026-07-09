@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_review_skill import AgentReviewSkill
+from app.models.audit import AuditLog
 
 
 async def get_by_name(db: AsyncSession, tenant_schema: str, name: str) -> AgentReviewSkill | None:
@@ -66,4 +67,13 @@ async def upsert(
         if user_id is not None:
             skill.updated_by = user_id
     await db.flush()
+    # 故事 §89：admin 改 skill content → SKILL_UPDATED 审计事件
+    db.add(AuditLog(
+        table_name="agent_review_skill",
+        record_id=skill.skill_id,
+        action="SKILL_UPDATED",
+        changed_fields={"name": skill.name, "version": skill.version, "tenant_schema": tenant_schema},
+        operated_by=user_id,
+        tenant_schema=tenant_schema,
+    ))
     return skill

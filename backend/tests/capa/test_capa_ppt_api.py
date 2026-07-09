@@ -109,3 +109,66 @@ async def test_get_export_detail(qe_client, db, admin_user, default_factory):
     r2 = await qe_client.get(f"/api/capa/{capa.report_id}/ppt-exports/{export_id}")
     assert r2.status_code == 200
     assert r2.json()["export_id"] == export_id
+
+
+@pytest.fixture
+async def no_capa_perm_client(db, admin_user, default_factory):
+    """角色有 factory 访问但 CAPA 模块权限=0（NONE）→ 读 export 应 403。"""
+    await _seed_perm(db, admin_user.role_id, "capa", 0)  # NONE
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+async def test_get_export_requires_capa_view(db, admin_user, default_factory):
+    """get_ppt_export 必须校验 CAPA 模块 VIEW 权限（与同级 GET 端点一致），而非仅 factory 访问。"""
+    capa = await _make_closed_capa(db, default_factory.id, admin_user.user_id)
+    # 1. 用 CREATE 权限生成 export 记录
+    await _seed_perm(db, admin_user.role_id, "capa", 2)
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        gen = await ac.post(f"/api/capa/{capa.report_id}/ppt-export")
+        assert gen.status_code == 200
+        export_id = gen.headers["x-ppt-export-id"]
+    # 2. 降到 NONE 权限再读 → 应 403
+    await _seed_perm(db, admin_user.role_id, "capa", 0)
+    transport2 = ASGITransport(app=app)
+    async with AsyncClient(transport=transport2, base_url="http://test") as ac2:
+        r = await ac2.get(f"/api/capa/{capa.report_id}/ppt-exports/{export_id}")
+    assert r.status_code == 403
+    app.dependency_overrides.clear()
+
+
+async def test_generate_ppt_llm_runtime_error_returns_500(db, admin_user, default_factory, monkeypatch):
+    """LLM 运行时异常（审查闭环异常，非未配置）→ 500（故事 §92 FAILED），不返回 200/needs_review，不落 export。"""
+    # build_client 返回伪 client（不 raise ProviderNotConfigured）→ 走 LLM 审查路径
+    async def _build(*a, **kw):
+        return object()
+    monkeypatch.setattr(provider_adapter, "build_client", _build)
+    async def _boom(*a, **kw):
+        raise RuntimeError("llm timeout")
+    monkeypatch.setattr(provider_adapter, "complete_json", _boom)
+
+    await _seed_perm(db, admin_user.role_id, "capa", 2)
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    capa = await _make_closed_capa(db, default_factory.id, admin_user.user_id)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post(f"/api/capa/{capa.report_id}/ppt-export")
+    assert r.status_code == 500
+    # 失败不应落 export 记录
+    rows = (await db.execute(select(CapaPptExport).where(CapaPptExport.capa_id == capa.report_id))).scalars().all()
+    assert rows == []
+    app.dependency_overrides.clear()

@@ -56,10 +56,13 @@ async def review_and_correct(
     rule_issues = capa_ppt_service._validate_ppt_content(content, capa)
     if rule_issues:
         content = await _correct_by_issues(db, capa_id, rule_issues)
+        # 校正后重新校验；若仍存在（数据缺失无法自动补），保留以在报告中暴露
+        rule_issues = capa_ppt_service._validate_ppt_content(content, capa)
 
-    # 2. LLM 未配置 → 跳过审查
+    # 2. LLM 未配置 → 跳过 sub-agent 审查；但内置规则 issues 须在报告中暴露（不静默丢弃）
     if pc is None:
-        return content, ReviewResult("skipped", 0, None)
+        report = {"issues": rule_issues, "suggestions": []} if rule_issues else None
+        return content, ReviewResult("skipped", 0, report)
 
     # 3. LLM 审查闭环（3 轮上限）
     skill = await agent_review_skill_service.get_by_name(db, tenant_schema, "capa_ppt_review")
@@ -71,10 +74,9 @@ async def review_and_correct(
         })
     last_report: dict = {"issues": [], "suggestions": []}
     for round_idx in range(1, 4):
-        try:
-            review = await _subagent_review(pc, skill, content)
-        except Exception:
-            review = ReviewOutcome(passed=False, issues=["LLM 调用异常"], suggestions=[])
+        # 审查闭环异常（超时/鉴权/响应格式）属故事 §92 FAILED 条件，不在此吞掉降级为 needs_review；
+        # 让异常上抛，由 API 层转为 500。LLM 未配置（ProviderNotConfigured）已在 API 层 pc=None 处理为 skipped。
+        review = await _subagent_review(pc, skill, content)
         last_report = review.report
         if review.passed:
             return content, ReviewResult("passed", round_idx, last_report)
@@ -104,10 +106,22 @@ def _serialize_content(content) -> str:
 
 
 async def _correct_by_issues(db, capa_id, issues) -> PptContent:
-    """按规则 issues 重组 PptContent（不渲染 pptx）。"""
+    """按规则 issues 重组 PptContent（不渲染 pptx）。
+
+    故事 §46「校正＝重新查数据/修结构，非 LLM 重写」。当前实现：重新查最新落库数据
+    （generate_content）以拾取数据变更；结构由 generate_content 固定产出 11 页，无需修补。
+    issues 中的「D 页内容为空」属数据缺失，按 §101「不编造数据」不可自动补全。
+    真正按反馈改写内容需 LLM 重写，故事 §101/§109 明确为后续迭代——见 follow-up。
+    """
     return await capa_ppt_service.generate_content(db, capa_id)
 
 
 async def _correct_by_suggestions(db, capa_id, suggestions) -> PptContent:
-    """按 suggestions 重组 PptContent（不渲染 pptx）。数据源缺失则跳过。"""
+    """按 LLM suggestions 重组 PptContent（不渲染 pptx）。数据源缺失则跳过。
+
+    与 _correct_by_issues 同理：当前只能重新查最新落库数据（§46），无法按 LLM 内容建议
+    改写文本（需 LLM 重写，§101/§109 后续迭代）。故 3 轮闭环在 LLM 重写落地前，
+    若首轮不通过且数据未变更，后续轮次审查的是近乎相同的内容——这是当前范围的已知约束，
+    非 bug；达上限返回 needs_review + 审查报告（故事 §73）。
+    """
     return await capa_ppt_service.generate_content(db, capa_id)
