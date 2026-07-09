@@ -12,13 +12,24 @@ import json
 import uuid
 import hashlib
 import pytest
-from sqlalchemy import select, text
+from fastapi import HTTPException
+from sqlalchemy import select, text, delete
+from sqlalchemy.ext.asyncio import AsyncSession
+from tests.conftest import _test_session_factory, _scope_for, DEFAULT_FACTORY_ID
+from app.core.security import hash_password
+from app.core.permissions import Module, PermissionLevel
 from app.models.capa import CAPAEightD
+from app.models.audit import AuditLog
+from app.models.factory import Factory
 from app.models.fmea import FMEADocument
 from app.models.fmea_version import FMEAVersion
+from app.models.product_line import ProductLine
+from app.models.role import RoleDefinition, RolePermission
+from app.models.user import User
 from app.schemas.capa import AdvanceRequest
 from app.services.capa_service import advance_capa, get_capa
 from app.services.version_service import rollback_fmea
+from app.api.capa import require_advance_permission
 
 pytestmark = pytest.mark.requires_db
 
@@ -125,3 +136,96 @@ async def test_open_capa_still_blocks_fmea_rollback(db, default_factory, admin_u
     with pytest.raises(ValueError, match="无法回退"):
         await rollback_fmea(db, fmea, target_major=1, target_minor=0,
                             reason="测试回退", user_id=admin_user.user_id)
+
+
+# ── P1 TOCTOU: two independent transactions ─────────────────────────────────
+
+
+async def _ensure_edit_user(s: AsyncSession) -> tuple[User, uuid.UUID]:
+    """Idempotent committed setup: factory + product line + EDIT-level role/user (capa=3)."""
+    if await s.get(Factory, DEFAULT_FACTORY_ID) is None:
+        s.add(Factory(id=DEFAULT_FACTORY_ID, code="TEST", name="Test Factory"))
+        await s.flush()
+    if (await s.execute(select(ProductLine).where(ProductLine.code == "DC-DC-100"))).scalar_one_or_none() is None:
+        s.add(ProductLine(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=DEFAULT_FACTORY_ID))
+        await s.flush()
+    role = (await s.execute(select(RoleDefinition).where(RoleDefinition.role_key == "test_toctou_edit"))).scalar_one_or_none()
+    if role is None:
+        role = RoleDefinition(role_key="test_toctou_edit", name_zh="TOCTOU编辑",
+                              name_en="TOCTOU Edit", bypass_row_level_security=True)
+        s.add(role); await s.flush()
+        s.add(RolePermission(role_id=role.id, module="capa", permission_level=PermissionLevel.EDIT))
+        await s.flush()
+    user = (await s.execute(select(User).where(User.username == "test_toctou_edit"))).scalar_one_or_none()
+    if user is None:
+        user = User(username="test_toctou_edit", password_hash=hash_password("X@2026"),
+                    display_name="TOCTOU", role_id=role.id, legacy_role="quality_engineer",
+                    is_active=True, factory_id=DEFAULT_FACTORY_ID)
+        s.add(user); await s.flush()
+    await s.commit()
+    return user, role.id
+
+
+async def _cleanup_toctou(s: AsyncSession, capa_id: uuid.UUID, user_id: uuid.UUID, role_id: uuid.UUID):
+    # audit_logs first (operated_by→users FK + record_id→capa FK would otherwise block deletes)
+    await s.execute(delete(AuditLog).where(
+        (AuditLog.record_id == capa_id) | (AuditLog.operated_by == user_id)
+    ))
+    await s.execute(delete(CAPAEightD).where(CAPAEightD.created_by == user_id))  # all capas by this user (incl. leftovers from prior failed runs)
+    await s.execute(delete(User).where(User.user_id == user_id))
+    await s.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
+    await s.execute(delete(RoleDefinition).where(RoleDefinition.id == role_id))
+    await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_toctou_edit_user_cannot_approve_after_concurrent_advance():
+    """P1 TOCTOU（两个独立事务）：EDIT 用户在 capa=D8_GATE_PENDING 时请求 target=D8_CLOSURE
+    （边无效 → 锁前按 EDIT 放行）；事务 B 先推进到 D8_APPROVAL_PENDING 并提交；事务 A 锁后
+    刷新状态为 D8_APPROVAL_PENDING，(D8_APPROVAL_PENDING→D8_CLOSURE) 变合法 APPROVE 边。
+    修复后 require_advance_permission 在 FOR UPDATE 锁+刷新后重做边权限校验 → EDIT 用户 403。
+    （未修复时锁前 EDIT 决策成立、放行，advance_capa 越权完成审批——privilege bypass。）"""
+    capa_id = None
+    user_id = role_id = None
+    try:
+        # Setup (committed): EDIT user + capa D8_GATE_PENDING
+        async with _test_session_factory() as s0:
+            edit_user, role_id = await _ensure_edit_user(s0)
+            user_id = edit_user.user_id
+            capa = CAPAEightD(
+                report_id=uuid.uuid4(), document_no=f"8D-TOCTOU-{uuid.uuid4().hex[:6]}",
+                title="t", product_line_code="DC-DC-100", factory_id=DEFAULT_FACTORY_ID,
+                created_by=edit_user.user_id, status="D8_GATE_PENDING", d5_correction="措施A",
+                d6_verification="已验证", d7_prevention="预防",
+            )
+            s0.add(capa); await s0.commit()
+            capa_id = capa.report_id
+
+        # Session A (EDIT user's request): load capa stale (D8_GATE_PENDING) — pre-lock read
+        async with _test_session_factory() as db_a:
+            capa_a = await get_capa(db_a, capa_id)
+            assert capa_a.status == "D8_GATE_PENDING"  # stale baseline
+
+            # Session B (concurrent approver): advance → D8_APPROVAL_PENDING + commit
+            async with _test_session_factory() as db_b:
+                capa_b = await get_capa(db_b, capa_id)
+                await advance_capa(db_b, capa_b, edit_user.user_id,
+                                   AdvanceRequest(target_state="D8_APPROVAL_PENDING"))
+                await db_b.commit()
+            # DB now D8_APPROVAL_PENDING; db_a's capa_a still stale (identity map)
+
+            factory_a = await db_a.get(Factory, DEFAULT_FACTORY_ID)
+            scope = _scope_for(edit_user, factory_a, accessible_factory_ids=None)
+            # Fix: require_advance_permission locks+refreshes → fresh D8_APPROVAL_PENDING →
+            # (D8_APPROVAL_PENDING→D8_CLOSURE) APPROVE edge → EDIT user 403.
+            with pytest.raises(HTTPException) as exc:
+                await require_advance_permission(
+                    capa_id, AdvanceRequest(target_state="D8_CLOSURE"),
+                    scope=scope, db=db_a,
+                )
+            assert exc.value.status_code == 403
+            await db_a.rollback()
+    finally:
+        if capa_id and user_id and role_id:
+            async with _test_session_factory() as sc:
+                await _cleanup_toctou(sc, capa_id, user_id, role_id)

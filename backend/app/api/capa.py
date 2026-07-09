@@ -193,11 +193,19 @@ async def require_advance_permission(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    # P1 TOCTOU：锁 capa 行 FOR UPDATE + 刷新状态，再做边权限校验，确保授权与状态迁移基于
+    # 同一份锁定状态。否则「锁前按 D8_GATE_PENDING 判 EDIT 放行 → 并发推进到 D8_APPROVAL_PENDING
+    # → 锁后 (D8_APPROVAL_PENDING→D8_CLOSURE) 变合法 APPROVE 边」会让 EDIT 用户越权完成审批。
+    # 锁在同一请求 session 上持有至 advance_capa（后者再锁为 no-op，并保护绕过依赖的直接调用方）。
+    await db.execute(
+        select(CAPAEightD).where(CAPAEightD.report_id == report_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     target = body.target_state if body else None
     # target_state=None（线性 advance）时算出实际 target，否则归档边 (D8_CLOSURE→ARCHIVED)
     # 因 target=None 不命中 approve_edges，会误落 EDIT 分支放行 field_qe 归档。
     target = target or _linear_next_safe(capa.status)
-    # APPROVE 边：审批 / 驳回 / 归档
+    # APPROVE 边：审批 / 驳回 / 归档（capa.status 此时为锁后刷新值，与 advance_capa 迁移同一状态）
     approve_edges = (
         (EightDState.D8_APPROVAL_PENDING.value, EightDState.D8_CLOSURE.value),
         (EightDState.D8_APPROVAL_PENDING.value, EightDState.D7_PREVENTION.value),
