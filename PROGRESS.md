@@ -273,7 +273,8 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 
 ### P0 — 收尾（编排器已就绪，补硬 gap）
 
-- [ ] **01.2 12 源推荐收尾** — LLM 未配置时静默降级（`llm_fusion_layer.py:34` pc=None 返回 attempted=0）应改为按故事判 `BLOCKED`；`RecommendationCache` 无 `stage_runs` 字段（仅 suggestions JSONB），编排执行过程未结构化持久化；前端编排面板可视化 + AP/S/O/D 展示待核
+- [ ] **01.2 12 源推荐收尾** — LLM 未配置时静默降级（`llm_fusion_layer.py:34` pc=None 返回 attempted=0）应改为按故事判 `BLOCKED`；`RecommendationCache` 无 `stage_runs` 字段（仅 suggestions JSONB），编排执行过程未结构化持久化；前端编排面板可视化 + AP/S/O/D 展示待核  
+  → **A3 已完成**：`RecommendationCache.stage_runs` JSONB 列 + Alembic 迁移 `20260709_capa_cache_stage_runs` + `backend/tests/migrations/` PG 迁移测试基础设施（`mig_db_url` fixture + `_cfg` helper），B1 可复用。
 - [x] **01.3 D4 验证 + D7 + 审批壳状态机细化切片** — 新增 `D7_COMPLETED`/`D8_GATE_PENDING`/`D8_APPROVAL_PENDING` 3 状态 + 驳回回退边 + `capa_d7_node_action.status=pending` + edge 权限 + `update_capa` 冻结守卫；9 任务已落地，backend 测试绿
 - [ ] **01.3 D4 验证 method 枚举 + 回退计数器切片（待启动）** — `CapaRootCauseVerification.method` 自由文本→枚举（measurement/observation/reproduction）+ schema/迁移；加 `retry_count` 回退计数器 + 阈值提示"建议升级处理"
 ### P1 — 新建/收尾
