@@ -45,7 +45,7 @@ def _async_stub_source(*candidates):
 
 @pytest.mark.asyncio
 async def test_stages_exactly_12_unique_indexes(monkeypatch):
-    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), None)
     # stub sources to return [] so all done(0)/skipped
     result = await orch.run(_ctx(), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
     assert len(result.stages) == 12
@@ -89,7 +89,7 @@ async def test_llm_exception_isolated(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_d5_stage2_skipped_when_no_cause(monkeypatch):
-    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), None)
     result = await orch.run(_ctx(stage="d5"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
     s2 = next(s for s in result.stages if s.index == 2)
     assert s2.status == "skipped"
@@ -97,7 +97,7 @@ async def test_d5_stage2_skipped_when_no_cause(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_per_stage_protocol_violation_is_error(monkeypatch):
-    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), None)
     # 让某新源（注册后）should_skip 不存在 — 通过 _sources 注入坏源
     bad = MagicMock()
     # MagicMock 删除属性后 getattr 返回 None（不会自动重建），借此测试缺失 should_skip 路径
@@ -110,7 +110,7 @@ async def test_per_stage_protocol_violation_is_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_d5_stage2_direct_lookup_when_embedding_off(monkeypatch):
-    orch = RecommendationOrchestrator(MagicMock(), None, None)  # embedding=None → stage 3 skipped
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), None)  # embedding=None → stage 3 skipped
     linked = {"fmea_id": "f1", "document_no": "PFMEA-1", "product_line_code": "DC-DC-100",
               "graph_data": {"nodes": [{"id":"c1","type":"FailureCause","name":"螺栓尺寸超差"},
                                        {"id":"fm1","type":"FailureMode","name":"虚焊"}],
@@ -129,7 +129,7 @@ async def test_d5_stage2_direct_lookup_when_embedding_off(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stage10_d5_uses_rule_engine_measure():
-    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), None)
     from app.services.recommendation_types import RecommendationCandidate
     d4_cand = RecommendationCandidate(
         source="rule_engine", content="D4 root cause marker", category=None, confidence=0.8,
@@ -151,7 +151,7 @@ async def test_stage10_d5_uses_rule_engine_measure():
 
 @pytest.mark.asyncio
 async def test_stage10_d4_uses_rule_engine():
-    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), None)
     from app.services.recommendation_types import RecommendationCandidate
     d4_cand = RecommendationCandidate(
         source="rule_engine", content="D4 root cause marker", category=None, confidence=0.8,
@@ -282,8 +282,12 @@ async def test_d4_stage3_primary_empty_extra_failure_is_error():
 
 @pytest.mark.asyncio
 async def test_d4_stage3_historical_capa_skipped_when_no_embedding():
-    """embedding 未配置时，D4 stage 3 因主源/额外源均依赖 embedding 而 skipped。"""
-    orch = RecommendationOrchestrator(MagicMock(), None, None)
+    """embedding 未配置时，D4 stage 3 因主源/额外源均依赖 embedding 而 skipped。
+
+    Note: A2 blocks the entire pipeline when pc=None. To exercise the pipeline
+    and verify per-stage embedding-skipping behavior, pc must be non-None.
+    """
+    orch = RecommendationOrchestrator(MagicMock(), MagicMock(), None)
     result = await orch.run(_ctx(stage="d4"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
     s3 = next(s for s in result.stages if s.index == 3)
     assert s3.status == "skipped"

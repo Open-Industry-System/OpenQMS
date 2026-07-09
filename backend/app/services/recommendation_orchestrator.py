@@ -135,6 +135,10 @@ class RecommendationOrchestrator:
         return violations
 
     async def run(self, context, *, user, report_id, factory_id, tenant_schema) -> RecommendationResult:
+        # 顶部 BLOCKED 判定（AI_REQUIRED=true，故事契约不可降级）
+        if self.pc is None:
+            return RecommendationResult(items=[], stages=self._blocked_stages(), blocked=True)
+
         stages: list[StageRun] = []
         all_candidates: list[RecommendationCandidate] = []
 
@@ -193,6 +197,22 @@ class RecommendationOrchestrator:
         # 按 index 排序，保证显示顺序 1..12
         stages.sort(key=lambda s: s.index)
         return RecommendationResult(items=fused, stages=stages)
+
+    def _blocked_stages(self) -> list[StageRun]:
+        """pc=None 时构造 12 行结构化 BLOCKED 状态（stage 1 done、stage 11 blocked、其余 skipped）。"""
+        stages: list[StageRun] = []
+        for spec in STAGE_PLAN:
+            if spec.index == 1:
+                stages.append(StageRun(spec.index, spec.name, "internal", "done",
+                                       summary="上下文已采集（D2/D4 + 关联 FMEA + 产品线）"))
+            elif spec.index == 11:
+                stages.append(StageRun(spec.index, spec.name, "llm", "blocked",
+                                       summary="未配置 LLM 凭证"))
+            else:
+                stages.append(StageRun(spec.index, spec.name, spec.source_kind, "skipped",
+                                       summary="LLM 未配置，编排未执行"))
+        stages.sort(key=lambda s: s.index)
+        return stages
 
     async def _exec_recall_stage(self, spec, context, all_candidates) -> StageRun:
         # 解析本 stage 在当前上下文要执行的 source 列表：primary（DAG 标签）+ extras
