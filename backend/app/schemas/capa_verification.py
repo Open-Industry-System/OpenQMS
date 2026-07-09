@@ -19,10 +19,11 @@ class AdoptResponse(BaseModel):
 
 
 class VerificationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     root_cause_text: str
-    method: str | None = None
+    method: Literal["measurement", "observation", "reproduction"] | None = None
     result: str | None = None
-    is_verified: bool = False
+    conclusion: Literal["pending", "passed", "failed"] = "pending"
     evidence_attachments: list[dict] = []
     source_ref: dict | None = None
 
@@ -37,9 +38,10 @@ class VerificationCreate(BaseModel):
 
 
 class VerificationUpdate(BaseModel):
-    method: str | None = None
+    model_config = ConfigDict(extra="forbid")
+    method: Literal["measurement", "observation", "reproduction"] | None = None
     result: str | None = None
-    is_verified: bool | None = None
+    conclusion: Literal["pending", "passed", "failed"] | None = None
     evidence_attachments: list[dict] | None = None
 
 
@@ -47,9 +49,10 @@ class VerificationResponse(BaseModel):
     verification_id: uuid.UUID
     capa_id: uuid.UUID
     root_cause_text: str
-    method: str | None
+    method: Literal["measurement", "observation", "reproduction"] | None
     result: str | None
-    is_verified: bool
+    is_verified: bool  # 响应字段保留（列派生）
+    conclusion: Literal["pending", "passed", "failed"]
     evidence_attachments: list[dict]
     source_ref: dict | None
     verified_by: uuid.UUID | None
