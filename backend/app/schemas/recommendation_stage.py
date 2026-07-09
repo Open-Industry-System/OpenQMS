@@ -7,7 +7,7 @@ class StageRunSchema(BaseModel):
     index: int
     name: str
     source: str
-    status: Literal["pending", "running", "done", "skipped", "error"]
+    status: Literal["pending", "running", "done", "skipped", "error", "blocked"]
     hit_count: int
     summary: str
     error: str | None = None

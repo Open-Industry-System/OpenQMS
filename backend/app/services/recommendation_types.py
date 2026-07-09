@@ -11,7 +11,7 @@ class StageRun:
     index: int
     name: str
     source: str
-    status: Literal["pending", "running", "done", "skipped", "error"]
+    status: Literal["pending", "running", "done", "skipped", "error", "blocked"]
     hit_count: int = 0
     summary: str = ""
     error: str | None = None
@@ -118,3 +118,4 @@ class RecommendationResult:
     """管道输出。"""
     items: list[RecommendationCandidate]
     stages: list[StageRun] = field(default_factory=list)
+    blocked: bool = False
