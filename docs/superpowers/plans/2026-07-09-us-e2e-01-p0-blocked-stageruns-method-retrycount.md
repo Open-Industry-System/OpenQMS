@@ -399,15 +399,22 @@ def downgrade():
 
 - [ ] **Step 5: 跑测试验证通过 + 迁移 up/down**
 
-Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/recommendations/test_cache_model_stage_runs.py -v && alembic upgrade head && alembic downgrade -1 && alembic upgrade head`
-Expected: 模型测试 PASS；迁移 up/down 干净。
+Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/recommendations/test_cache_model_stage_runs.py tests/migrations/test_migration_cache_stage_runs.py -v && alembic upgrade head && alembic downgrade -1 && alembic upgrade head`
+Expected: 模型测试 PASS；A3 迁移测试 PASS（stage_runs 列 up/down 干净）；迁移 up/down 干净。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/models/recommendation_cache.py backend/alembic/versions/<ts>_capa_cache_stage_runs.py backend/tests/recommendations/test_cache_model_stage_runs.py
-git commit -m "feat(cache): add recommendation_cache.stage_runs JSONB column + migration"
+git add backend/app/models/recommendation_cache.py backend/alembic/versions/<ts>_capa_cache_stage_runs.py \
+  backend/tests/recommendations/test_cache_model_stage_runs.py \
+  backend/tests/migrations/__init__.py backend/tests/migrations/conftest.py \
+  backend/tests/migrations/test_migration_cache_stage_runs.py \
+  backend/alembic/env.py  # 加 sqlalchemy.url config 兼容（若现硬编码）\
+  backend/requirements.txt  # 加 psycopg[binary]（若缺）
+git commit -m "feat(cache): add recommendation_cache.stage_runs JSONB column + migration + PG migration test infra"
 ```
+
+> 三轮 P1-2：A3 是首个迁移任务，本 commit 建立 `backend/tests/migrations/` 基础设施（`conftest.py` `mig_db_url` fixture + `__init__.py` + env.py `sqlalchemy.url` 兼容 + psycopg 依赖），B1 复用。
 
 ---
 
