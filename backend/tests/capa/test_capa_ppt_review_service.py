@@ -146,6 +146,71 @@ def test_apply_revised_pages_title_mismatch_falls_back():
     assert out is base
 
 
+def test_apply_revised_pages_section_count_mismatch_falls_back():
+    """LLM 删除 section（section 数量变化）→ 回退原内容，不允许删 D4 验证等。"""
+    base = _base_content()
+    revised = [
+        {"title": "A", "sections": []},  # 删除了 x section
+        {"title": "B", "sections": [{"label": "y", "value": "2"}]},
+    ]
+    out = capa_ppt_review_service._apply_revised_pages(base, revised)
+    assert out is base
+
+
+def test_apply_revised_pages_label_changed_falls_back():
+    """LLM 修改 label → 回退原内容（不允许改标签）。"""
+    base = _base_content()
+    revised = [
+        {"title": "A", "sections": [{"label": "CHANGED", "value": "1R"}]},
+        {"title": "B", "sections": [{"label": "y", "value": "2"}]},
+    ]
+    out = capa_ppt_review_service._apply_revised_pages(base, revised)
+    assert out is base
+
+
+def test_apply_revised_pages_added_section_falls_back():
+    """LLM 新增 section（含编造事实）→ section 数量变化 → 回退原内容。"""
+    base = _base_content()
+    revised = [
+        {"title": "A", "sections": [{"label": "x", "value": "1"}, {"label": "fabricated", "value": "fake"}]},
+        {"title": "B", "sections": [{"label": "y", "value": "2"}]},
+    ]
+    out = capa_ppt_review_service._apply_revised_pages(base, revised)
+    assert out is base
+
+
+async def test_correction_empties_d_page_falls_back_via_rule_revalidation(
+    db, admin_user, default_factory, monkeypatch
+):
+    """LLM 校正清空某 D 页 value → _apply 通过结构（label/数量一致）但规则再校验失败 → 回退原内容。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    base = await capa_ppt_service.generate_content(db, capa.report_id)
+    # 构造「结构合法但 D3 value 被清空」的修订：保持 label/数量，仅清空 D3 的 value
+    revised_pages = []
+    for p in base.pages:
+        secs = []
+        for s in p.sections:
+            val = "" if p.title == "D3 遏制措施" else s["value"]
+            secs.append({"label": s["label"], "value": val})
+        revised_pages.append({"title": p.title, "sections": secs})
+
+    review_calls = {"n": 0}
+
+    async def _mock(pc, prompt, response_schema):
+        if "passed" in response_schema.get("properties", {}):
+            review_calls["n"] += 1
+            return {"passed": review_calls["n"] >= 2, "issues": ["i"], "suggestions": ["s"]}
+        return {"pages": revised_pages}  # 校正清空 D3
+
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
+    content, review = await capa_ppt_review_service.review_and_correct(
+        db, capa.report_id, _PC(), "public",
+    )
+    # 校正清空 D3 → 规则再校验失败 → 回退原内容（D3 仍非空）→ 最终 review 看原内容
+    d3 = next(p for p in content.pages if p.title == "D3 遏制措施")
+    assert d3.sections[0]["value"] == "d3", "校正清空 D3 应被规则再校验拒绝并回退原内容"
+
+
 async def test_correction_llm_failure_falls_back_not_500(db, admin_user, default_factory, monkeypatch):
     """校正 LLM 异常 → 回退原内容（不上抛 500），审查报告保留；最终 needs_review。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)

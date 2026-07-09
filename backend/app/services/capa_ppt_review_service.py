@@ -35,7 +35,17 @@ CORRECTION_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string"},
-                    "sections": {"type": "array", "items": {"type": "object"}},
+                    "sections": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string"},
+                                "value": {"type": "string"},
+                            },
+                            "required": ["label", "value"],
+                        },
+                    },
                 },
                 "required": ["title", "sections"],
             },
@@ -105,7 +115,12 @@ async def review_and_correct(
         if review.passed:
             return content, ReviewResult("passed", round_idx, last_report)
         if round_idx < 3:
-            content = await _correct_by_suggestions(pc, skill, content, review.suggestions)
+            corrected = await _correct_by_suggestions(pc, skill, content, review.suggestions)
+            # 校正后重新跑内置规则校验：若校正清空了必填页或破坏结构 → 回退校正前内容
+            # （不采用被破坏的内容，避免下一轮 LLM 把残缺内容误判为 passed）
+            if not capa_ppt_service._validate_ppt_content(corrected, capa):
+                content = corrected
+            # else: 校正破坏规则 → 保留原 content，下一轮审查原内容
         else:
             return content, ReviewResult("needs_review", 3, last_report)
 
@@ -139,18 +154,28 @@ async def _subagent_correct(pc, skill, content, suggestions) -> PptContent:
 
 
 def _apply_revised_pages(content: PptContent, revised_pages: list) -> PptContent:
-    """将 LLM 修订的 pages 应用回 PptContent；结构不符（页数/标题对齐）则回退原 pages。"""
+    """将 LLM 修订的 pages 应用回 PptContent。
+
+    严格结构保护（防止 LLM 破坏 PPT 结构）：页数、各页 title、各页 section 数量、label
+    序列必须与原内容完全一致；任一不符 → 回退原内容（不删除 section、不改 label、不新增）。
+    仅允许改写各 section 的 value（呈现层）。语义校验（必填非空等）由调用方重新跑
+    _validate_ppt_content 兜底。
+    """
     if not revised_pages or len(revised_pages) != len(content.pages):
         return content
     revised = []
     for orig, rev in zip(content.pages, revised_pages):
         if rev.get("title") != orig.title:
             return content
-        sections = [
-            {"label": s.get("label", ""), "value": s.get("value", "")}
-            for s in (rev.get("sections") or [])
-        ]
-        revised.append(PptPage(title=orig.title, sections=sections))
+        rev_sections = rev.get("sections") or []
+        orig_labels = [s["label"] for s in orig.sections]
+        rev_labels = [s.get("label", "") for s in rev_sections]
+        # section 数量与 label 序列必须一致（不允许删除/新增/改 label）
+        if len(rev_sections) != len(orig.sections) or rev_labels != orig_labels:
+            return content
+        revised.append(PptPage(title=orig.title, sections=[
+            {"label": s.get("label", ""), "value": s.get("value", "")} for s in rev_sections
+        ]))
     return PptContent(
         capa_id=content.capa_id, pages=revised,
         linked_fmea_node=content.linked_fmea_node, linked_scars=content.linked_scars,
