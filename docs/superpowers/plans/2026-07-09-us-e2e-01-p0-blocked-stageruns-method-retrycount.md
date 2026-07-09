@@ -279,12 +279,12 @@ from tests.conftest import _test_db_url  # 既有模块级变量（TEST_DATABASE
 
 def _parse_pg(url: str) -> dict:
     from urllib.parse import urlparse
-    p = urlparse(url.replace("asyncpg+postgresql://", "postgresql://"))
+    p = urlparse(url.replace("postgresql+asyncpg://", "postgresql://"))
     return {"host": p.hostname, "port": p.port or 5432, "user": p.username,
             "password": p.password, "dbname": p.path.lstrip("/")}
 
 @pytest.fixture
-def mig_db_url():
+def mig_db_url(monkeypatch):
     """创建一次性 PG 库（空，不 apply 任何迁移），返回 async URL。teardown DROP 该库。
     各测试自行 command.upgrade(_cfg(mig_url), <target>) apply 到所需版本——A3 测 head，
     B1 测先 upgrade 到 <Task_A3_head> 再插脏数据再 upgrade head。B1 复用此 fixture（不重建 conftest）。"""
@@ -295,7 +295,8 @@ def mig_db_url():
     with admin.connect() as c:
         c.execute(text(f'CREATE DATABASE "{mig_dbname}"'))
     admin.dispose()
-    mig_url = f"asyncpg+postgresql://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/{mig_dbname}"
+    mig_url = f"postgresql+asyncpg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/{mig_dbname}"
+    monkeypatch.setenv("DATABASE_URL", mig_url)  # 四轮：env.py:50 优先读 DATABASE_URL env（set_main_option 被遮蔽）
     try:
         yield mig_url
     finally:
@@ -314,17 +315,19 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine
 
 def _cfg(mig_url: str) -> Config:
-    cfg = Config("backend/alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", mig_url.replace("asyncpg+postgresql://", "postgresql+asyncpg://"))
+    cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))  # 四轮 P0-2：绝对路径（cwd=backend 时 "backend/alembic.ini" 会双前缀）
+    # 四轮 env.py 优先级：env.py:50 读 os.getenv("DATABASE_URL", ...) 优先于 set_main_option，
+    # 故不设 set_main_option（无效）；mig_db_url fixture 已用 monkeypatch.setenv("DATABASE_URL", mig_url) 指向 mig 库。
     return cfg
 
 @pytest.mark.asyncio
 async def test_stage_runs_column_added_and_removed(mig_db_url):
     """A3：upgrade head → stage_runs 列存在；downgrade -1 → 移除。"""
-    command.upgrade(_cfg(mig_db_url), "head")  # head 含 A3 stage_runs 迁移
+    command.upgrade(_cfg(mig_db_url), "<A3_rev>")  # 四轮 P1：pin A3 revision（非 head，B1 成 head 后 -1 不移除 A3）
     engine = create_async_engine(mig_db_url)
     async with engine.connect() as conn:
         cols = [r[0] for r in (await conn.execute(sa.text(
@@ -332,7 +335,7 @@ async def test_stage_runs_column_added_and_removed(mig_db_url):
             "WHERE table_name='recommendation_cache' AND column_name='stage_runs'")))]
         assert "stage_runs" in cols
     await engine.dispose()
-    command.downgrade(_cfg(mig_db_url), "-1")
+    command.downgrade(_cfg(mig_db_url), "<A3_parent>")  # 四轮 P1：pin A3 parent（非 -1）
     engine = create_async_engine(mig_db_url)
     async with engine.connect() as conn:
         cols = [r[0] for r in (await conn.execute(sa.text(
@@ -893,11 +896,13 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine
 
 def _cfg(mig_url: str) -> Config:
-    cfg = Config("backend/alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", mig_url.replace("asyncpg+postgresql://", "postgresql+asyncpg://"))
+    cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))  # 四轮 P0-2：绝对路径（cwd=backend 时 "backend/alembic.ini" 会双前缀）
+    # 四轮 env.py 优先级：env.py:50 读 os.getenv("DATABASE_URL", ...) 优先于 set_main_option，
+    # 故不设 set_main_option（无效）；mig_db_url fixture 已用 monkeypatch.setenv("DATABASE_URL", mig_url) 指向 mig 库。
     return cfg
 
 @pytest.mark.asyncio
@@ -951,7 +956,7 @@ async def test_migration_aborts_on_dirty_method_data(mig_db_url):
 async def test_migration_clean_upgrade_downgrade(mig_db_url):
     """三轮 P1-2：无脏数据 upgrade head → 三者存在；downgrade -1 → 三者移除。"""
     from sqlalchemy.ext.asyncio import create_async_engine
-    command.upgrade(_cfg(mig_db_url), "head")
+    command.upgrade(_cfg(mig_db_url), "<B1_rev>")  # 四轮 P1：pin B1 revision（非 head）
     engine = create_async_engine(mig_db_url)
     async with engine.connect() as conn:
         cols_v = [r[0] for r in (await conn.execute(sa.text(
@@ -966,7 +971,7 @@ async def test_migration_clean_upgrade_downgrade(mig_db_url):
         assert "chk_verification_conclusion" in cons
     await engine.dispose()
 
-    command.downgrade(_cfg(mig_db_url), "-1")
+    command.downgrade(_cfg(mig_db_url), "<A3_rev>")  # 四轮 P1：pin B1 parent = A3 rev（非 -1）
     engine = create_async_engine(mig_db_url)
     async with engine.connect() as conn:
         cols_v = [r[0] for r in (await conn.execute(sa.text(
@@ -1805,46 +1810,49 @@ const atLeastOneDetail: Rule[] = [{
     const has = (v.method && v.method.trim()) || (v.result && v.result.trim())
       || ((v.evidence || []).length > 0);
     // 仅在提交 passed 时强制（validator 在 validateFields 触发，结合提交动作判断）
-    if (pendingSubmitConclusion === "passed" && !has) {
+    if (false && !has) {  // 四轮 P0-3：validator 改死分支（不再依赖 state）；passed 校验移到 handler 手工判定
       throw new Error(t("d4.needAtLeastOneDetail"));
     }
   },
 }];
-const [pendingSubmitConclusion, setPendingSubmitConclusion] = useState<VerificationConclusion | null>(null);
+// 四轮 P0-3：不用 React state 传递同步校验上下文（setPendingSubmitConclusion 异步，validateFields 闭包读旧值 null -> 校验被跳过）。
+// 改纯函数 hasAtLeastOneDetail，passed handler 直接调用手工判定。
+const hasAtLeastOneDetail = (v: any): boolean =>
+  !!( (v.method && String(v.method).trim()) || (v.result && String(v.result).trim()) || ((v.evidence || []).length > 0) );
 
 <Form form={form} layout="vertical" size="small">
   <Form.Item name="root_cause_text" label={t("d4.rootCause")} data-e2e="verification-root-cause">
     <Input.TextArea rows={2} />
   </Form.Item>
-  <Form.Item name="method" label={t("d4.method")} data-e2e="verification-method" rules={atLeastOneDetail}>
+  <Form.Item name="method" label={t("d4.method")} data-e2e="verification-method">
     <Select placeholder={t("d4.methodPlaceholder")}>
       <Option value="measurement">{t("verification.method.measurement")}</Option>
       <Option value="observation">{t("verification.method.observation")}</Option>
       <Option value="reproduction">{t("verification.method.reproduction")}</Option>
     </Select>
   </Form.Item>
-  <Form.Item name="result" label={t("d4.result")} data-e2e="verification-result" rules={atLeastOneDetail}>
+  <Form.Item name="result" label={t("d4.result")} data-e2e="verification-result">
     <Input.TextArea rows={2} />
   </Form.Item>
   <Form.Item name="evidence" label={t("d4.evidence")} data-e2e="verification-evidence"
-    valuePropName="fileList" getValueFromEvent={(e) => Array.isArray(e) ? e : e?.fileList ?? []}
-    rules={atLeastOneDetail}>
+    valuePropName="fileList" getValueFromEvent={(e) => Array.isArray(e) ? e : e?.fileList ?? []}>
     <Upload beforeUpload={() => false} multiple><Button size="small">{t("d4.addEvidence")}</Button></Upload>
   </Form.Item>
   {/* 结论按钮：先设 pendingSubmitConclusion → validateFields（触发 atLeastOneDetail）→ 取值 → createVerification */}
   <Space>
     <Button data-e2e="verify-pass" onClick={async () => {
-      setPendingSubmitConclusion("passed");
-      try {
-        const values = await form.validateFields();  // 三轮 P1-1：passed 强制至少一项细节
-        await createVerification(capaId, {
-          root_cause_text: values.root_cause_text ?? currentRootCause ?? "",
-          method: values.method, result: values.result,
-          conclusion: "passed",
-          evidence_attachments: (values.evidence || []).map((f: any) => ({ filename: f.name, size: f.size })),
-        });
-        message.success(t("d4.verificationSaved")); form.resetFields(); setShowForm(false); reload();
-      } catch { /* validateFields 失败显示字段错误 */ } finally { setPendingSubmitConclusion(null); }
+      const values = form.getFieldsValue();  // 四轮 P0-3：直接读值手工校验（不用 setState+validateFields，避免闭包读旧值）
+      if (!hasAtLeastOneDetail(values)) {
+        message.error(t("d4.needAtLeastOneDetail"));  // 全空 -> passed 阻止提交，不调 API
+        return;
+      }
+      await createVerification(capaId, {
+        root_cause_text: values.root_cause_text ?? currentRootCause ?? "",
+        method: values.method, result: values.result,
+        conclusion: "passed",
+        evidence_attachments: (values.evidence || []).map((f: any) => ({ filename: f.name, size: f.size })),
+      });
+      message.success(t("d4.verificationSaved")); form.resetFields(); setShowForm(false); reload();
     }}>{t("verification.conclusion.passed")}</Button>
     <Button data-e2e="verify-fail" onClick={async () => {
       const values = form.getFieldsValue();  // failed 不强制细节
