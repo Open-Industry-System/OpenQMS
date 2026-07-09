@@ -169,10 +169,14 @@ def _apply_revised_pages(content: PptContent, revised_pages: list) -> PptContent
     序列必须与原内容完全一致；任一不符 → 回退原内容（不删除 section、不改 label、不新增）。
     仅允许改写各 section 的 value（呈现层）。语义校验（必填非空等）由调用方重新跑
     _validate_ppt_content 兜底。
+
+    no-op 检测：若所有 value 均与原值一致（LLM 原样返回），返回原对象——使调用方的
+    `corrected_content is not content` 判定不计为校正，避免 no-op 重写被误判为 corrected。
     """
     if not revised_pages or len(revised_pages) != len(content.pages):
         return content
     revised = []
+    changed = False
     for orig, rev in zip(content.pages, revised_pages):
         if rev.get("title") != orig.title:
             return content
@@ -182,9 +186,15 @@ def _apply_revised_pages(content: PptContent, revised_pages: list) -> PptContent
         # section 数量与 label 序列必须一致（不允许删除/新增/改 label）
         if len(rev_sections) != len(orig.sections) or rev_labels != orig_labels:
             return content
-        revised.append(PptPage(title=orig.title, sections=[
+        new_sections = [
             {"label": s.get("label", ""), "value": s.get("value", "")} for s in rev_sections
-        ]))
+        ]
+        for orig_s, new_s in zip(orig.sections, new_sections):
+            if orig_s.get("value") != new_s["value"]:
+                changed = True
+        revised.append(PptPage(title=orig.title, sections=new_sections))
+    if not changed:
+        return content  # LLM 原样返回 → 视为未校正，返回原对象
     return PptContent(
         capa_id=content.capa_id, pages=revised,
         linked_fmea_node=content.linked_fmea_node, linked_scars=content.linked_scars,

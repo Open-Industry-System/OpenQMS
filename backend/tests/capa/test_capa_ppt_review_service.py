@@ -128,6 +128,17 @@ def test_apply_revised_pages_applies_values_preserves_linked():
     assert out.capa_id == base.capa_id
 
 
+def test_apply_revised_pages_noop_returns_original():
+    """所有 value 不变（LLM 原样返回）→ 返回原对象，不计为校正（避免假阳性 needs_review）。"""
+    base = _base_content()
+    revised = [
+        {"title": "A", "sections": [{"label": "x", "value": "1"}]},  # 同原
+        {"title": "B", "sections": [{"label": "y", "value": "2"}]},  # 同原
+    ]
+    out = capa_ppt_review_service._apply_revised_pages(base, revised)
+    assert out is base  # no-op → 原对象
+
+
 def test_apply_revised_pages_wrong_count_falls_back():
     """修订页数不符 → 回退原内容（不破坏结构）。"""
     base = _base_content()
@@ -260,6 +271,31 @@ async def test_uncorrected_pass_still_passed(db, admin_user, default_factory, mo
     )
     assert review.status == "passed"
     assert review.rounds == 1
+
+
+async def test_noop_rewrite_not_flagged_corrected(db, admin_user, default_factory, monkeypatch):
+    """LLM 原样返回（所有 value 不变，结构合法）→ no-op，不计为校正 → 后续通过仍 passed（不强制 needs_review）。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    base = await capa_ppt_service.generate_content(db, capa.report_id)
+    # 原样返回：pages/sections/values 完全一致
+    revised_pages = [
+        {"title": p.title, "sections": [{"label": s["label"], "value": s["value"]} for s in p.sections]}
+        for p in base.pages
+    ]
+    review_calls = {"n": 0}
+
+    async def _mock(pc, prompt, response_schema):
+        if "passed" in response_schema.get("properties", {}):
+            review_calls["n"] += 1
+            return {"passed": review_calls["n"] >= 2, "issues": ["i"], "suggestions": ["s"]}
+        return {"pages": revised_pages}  # 原样返回（no-op）
+
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
+    content, review = await capa_ppt_review_service.review_and_correct(
+        db, capa.report_id, _PC(), "public",
+    )
+    assert review.status == "passed", "no-op 重写不应触发强制 needs_review"
+    assert review.rounds == 2
 
 
 async def test_correction_llm_failure_falls_back_not_500(db, admin_user, default_factory, monkeypatch):
