@@ -50,7 +50,9 @@ async def _make_closed_capa(db, factory_id, user_id, status="D8_CLOSURE"):
     capa = CAPAEightD(
         report_id=uuid.uuid4(), document_no="8D-API-001", title="t",
         product_line_code="DC-DC-100", factory_id=factory_id, created_by=user_id,
-        status=status, d2_description="d2", d8_closure="c",
+        status=status, d1_team=[{"name": "张三", "role": "负责人"}],
+        d2_description="d2", d3_interim="d3", d4_root_cause="d4", d5_correction="d5",
+        d6_verification="d6", d7_prevention="d7", d8_closure="c",
     )
     db.add(capa)
     await db.flush()
@@ -74,6 +76,22 @@ async def test_generate_ppt_archived_allowed(qe_client, db, admin_user, default_
     capa = await _make_closed_capa(db, default_factory.id, admin_user.user_id, status="ARCHIVED")
     r = await qe_client.post(f"/api/capa/{capa.report_id}/ppt-export")
     assert r.status_code == 200
+
+
+async def test_incomplete_capa_returns_needs_review(qe_client, db, admin_user, default_factory):
+    """结构/数据不完整（D1 空）→ needs_review + 报告暴露 issue，前端可读 review_report（§92 内容不完整）。"""
+    capa = await _make_closed_capa(db, default_factory.id, admin_user.user_id)
+    capa.d1_team = []  # D1 空
+    await db.flush()
+    r = await qe_client.post(f"/api/capa/{capa.report_id}/ppt-export")
+    assert r.status_code == 200
+    assert r.headers.get("x-ppt-review-status") == "needs_review"
+    export_id = r.headers["x-ppt-export-id"]
+    # GET 回读 review_report 含 D1 issue
+    r2 = await qe_client.get(f"/api/capa/{capa.report_id}/ppt-exports/{export_id}")
+    assert r2.status_code == 200
+    report = r2.json()["review_report"]
+    assert report is not None and any("D1" in i for i in report["issues"])
 
 
 async def test_generate_ppt_not_closed_400(qe_client, db, admin_user, default_factory):

@@ -427,7 +427,10 @@ export default function CAPADetailPage() {
       if (reviewStatus === "skipped") {
         message.warning(t("capa:ppt.llmNotConfigured"));
       } else if (reviewStatus === "needs_review") {
-        message.warning(t("capa:ppt.needsReview", { rounds: reviewRounds }));
+        // rounds=0 = 内置规则校验未通过（数据/结构缺口）；>0 = LLM 审查 3 轮仍不合格
+        message.warning(reviewRounds > 0
+          ? t("capa:ppt.needsReview", { rounds: reviewRounds })
+          : t("capa:ppt.needsReviewRuleIssues"));
         if (exportId) {
           const { reviewReport: rr } = await getPptExportReviewReport(capa.report_id, exportId);
           setReviewReport(rr);

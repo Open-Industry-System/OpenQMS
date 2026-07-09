@@ -285,7 +285,8 @@
     "generateFailed": "PPT 生成失败",
     "reviewReport": "审查报告",
     "issues": "问题",
-    "suggestions": "建议"
+    "suggestions": "建议",
+    "needsReviewRuleIssues": "内容校验未通过，需人工复核（见审查报告）"
   },
   "dag": {
     "title": "推荐生成链路",

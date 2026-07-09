@@ -27,8 +27,8 @@ class _PC:
     pass  # fake provider client
 
 
-async def test_skip_when_llm_not_configured(db, admin_user, default_factory):
-    """pc=None → review_status=skipped, rounds=0, 不调 LLM。"""
+async def test_skipped_when_clean_and_llm_off(db, admin_user, default_factory):
+    """完整 CAPA + pc=None → skipped, report=None（无规则 issues，无 LLM）。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     content, review = await capa_ppt_review_service.review_and_correct(
         db, capa.report_id, None, "public",
@@ -38,15 +38,15 @@ async def test_skip_when_llm_not_configured(db, admin_user, default_factory):
     assert review.report is None
 
 
-async def test_skipped_surfaces_rule_issues(db, admin_user, default_factory):
-    """pc=None 且内置规则校验未通过（D1 空）→ skipped 但报告须暴露规则 issue（不静默丢弃）。"""
+async def test_rule_issues_return_needs_review(db, admin_user, default_factory):
+    """残留规则 issues（D1 空，校正无法补全）→ needs_review + 报告暴露（不静默 skipped，§92 内容不完整）。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    capa.d1_team = []  # D1 空 → 规则 issue
+    capa.d1_team = []  # D1 空 → 规则 issue，校正（重新查数据）无法补全
     await db.flush()
     content, review = await capa_ppt_review_service.review_and_correct(
         db, capa.report_id, None, "public",
     )
-    assert review.status == "skipped"
+    assert review.status == "needs_review"
     assert review.rounds == 0
     assert review.report is not None
     assert any("D1" in i for i in review.report["issues"])

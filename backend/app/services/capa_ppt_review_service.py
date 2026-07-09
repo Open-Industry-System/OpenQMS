@@ -56,13 +56,17 @@ async def review_and_correct(
     rule_issues = capa_ppt_service._validate_ppt_content(content, capa)
     if rule_issues:
         content = await _correct_by_issues(db, capa_id, rule_issues)
-        # 校正后重新校验；若仍存在（数据缺失无法自动补），保留以在报告中暴露
+        # 校正后重新校验；若仍存在（数据缺失无法自动补全，§101 不编造数据），保留以暴露
         rule_issues = capa_ppt_service._validate_ppt_content(content, capa)
 
-    # 2. LLM 未配置 → 跳过 sub-agent 审查；但内置规则 issues 须在报告中暴露（不静默丢弃）
+    # 残留规则 issues = 结构/数据缺口，校正（重新查数据，§46）无法补全 → needs_review 并暴露报告；
+    # 不静默 skipped，也不耗 LLM 轮次（数据缺失 LLM 亦无法修复，跑 3 轮等同空耗）。
+    if rule_issues:
+        return content, ReviewResult("needs_review", 0, {"issues": rule_issues, "suggestions": []})
+
+    # 2. 无规则 issues：LLM 未配置 → 跳过 sub-agent 审查
     if pc is None:
-        report = {"issues": rule_issues, "suggestions": []} if rule_issues else None
-        return content, ReviewResult("skipped", 0, report)
+        return content, ReviewResult("skipped", 0, None)
 
     # 3. LLM 审查闭环（3 轮上限）
     skill = await agent_review_skill_service.get_by_name(db, tenant_schema, "capa_ppt_review")

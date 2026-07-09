@@ -285,7 +285,8 @@
     "generateFailed": "PPT generation failed",
     "reviewReport": "Review report",
     "issues": "Issues",
-    "suggestions": "Suggestions"
+    "suggestions": "Suggestions",
+    "needsReviewRuleIssues": "Content validation failed; manual review required (see review report)"
   },
   "dag": {
     "title": "Recommendation Pipeline",
