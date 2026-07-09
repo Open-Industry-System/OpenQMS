@@ -908,8 +908,8 @@ def test_migration_aborts_on_dirty_method_data(mig_db_url):
     engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))  # 五轮 P0：同步 engine（command.upgrade 内部 asyncio.run，测试须同步否则嵌套事件循环）
     with engine.connect() as conn:
         conn.execute(sa.text(
-            "INSERT INTO factories (id, factory_code, name, tenant_schema, is_active, created_at, updated_at) "
-            "VALUES ('00000000-0000-0000-0000-000000000001', 'TEST', 'Test', 'test', true, now(), now())"))
+            "INSERT INTO factories (id, code, name, is_active, created_at, updated_at) "  # 六轮 P0：实际列名 id/code/name/is_active/created_at/updated_at（无 factory_code/tenant_schema）
+            "VALUES ('00000000-0000-0000-0000-000000000001', 'TEST', 'Test', true, now(), now())"))
         conn.execute(sa.text(
             "INSERT INTO capa_eightd (report_id, document_no, title, product_line_code, status, severity, "
             " factory_id, d1_team, d2_description, d3_interim, d4_root_cause, d5_correction, d6_verification, "
