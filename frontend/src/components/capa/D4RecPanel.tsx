@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
+import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App, Alert } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getD4Recommendations, adoptRecommendation } from "../../api/capa";
+import { getD4Recommendations, adoptRecommendation, RecommendationBlockedError } from "../../api/capa";
 import RecommendationDAG from "./RecommendationDAG";
 import RiskTags from "./RiskTags";
 import type { D4Recommendation, StageRun } from "../../types";
@@ -21,21 +21,47 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
   const [recommendations, setRecommendations] = useState<D4Recommendation[]>([]);
   const [stages, setStages] = useState<StageRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLoading(true);
+    setBlocked(false);
     getD4Recommendations(capaId)
       .then((res) => {
         setRecommendations(res.items);
         setStages(res.stages ?? []);
       })
-      .catch(() => message.error(t("d4.loadFailed")))
+      .catch((err) => {
+        if (err instanceof RecommendationBlockedError) {
+          setBlocked(true);
+        } else {
+          message.error(t("d4.loadFailed"));
+        }
+      })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;
+
+  if (blocked) {
+    return (
+      <Card
+        size="small"
+        title={<Space><SearchOutlined />{t("d4.title")}</Space>}
+        style={{ marginBottom: 16 }}
+        extra={<Text type="secondary" style={{ fontSize: 12 }}>{t("d4.subtitle")}</Text>}
+      >
+        <Alert
+          data-e2e="rec-blocked-banner"
+          type="warning"
+          showIcon
+          message={t("d4.blocked.banner")}
+        />
+      </Card>
+    );
+  }
 
   const knownSources = [
     "linked",

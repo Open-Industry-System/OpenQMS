@@ -1,5 +1,13 @@
 import client from "./client";
-import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse, AdoptRequest, AdoptResponse, Verification, VerificationCreate, VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse } from "../types";
+import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse, AdoptRequest, AdoptResponse, Verification, VerificationCreate, VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse, StageRun } from "../types";
+
+export class RecommendationBlockedError extends Error {
+  detail: { blocked: true; reason: string; stages: StageRun[] };
+  constructor(detail: { blocked: true; reason: string; stages: StageRun[] }) {
+    super(detail.reason);
+    this.detail = detail;
+  }
+}
 
 export async function listCAPAs(params: {
   page?: number;
@@ -54,13 +62,27 @@ export async function getD7Recommendations(id: string): Promise<D7Recommendation
 }
 
 export async function getD4Recommendations(id: string): Promise<D4RecommendationResponse> {
-  const resp = await client.get(`/capa/${id}/d4-fmea-recommendations`);
-  return resp.data;
+  try {
+    const resp = await client.get(`/capa/${id}/d4-fmea-recommendations`);
+    return resp.data;
+  } catch (e: any) {
+    if (e.response?.status === 422 && e.response?.data?.detail?.blocked === true) {
+      throw new RecommendationBlockedError(e.response.data.detail);
+    }
+    throw e;
+  }
 }
 
 export async function getD5Recommendations(id: string): Promise<D5RecommendationResponse> {
-  const resp = await client.get(`/capa/${id}/d5-fmea-recommendations`);
-  return resp.data;
+  try {
+    const resp = await client.get(`/capa/${id}/d5-fmea-recommendations`);
+    return resp.data;
+  } catch (e: any) {
+    if (e.response?.status === 422 && e.response?.data?.detail?.blocked === true) {
+      throw new RecommendationBlockedError(e.response.data.detail);
+    }
+    throw e;
+  }
 }
 
 export async function linkFMEA(id: string, fmea_id: string): Promise<CAPAReport> {

@@ -164,7 +164,10 @@
     "verificationSaved": "Verification record saved",
     "verificationLoadFailed": "Failed to load verification records",
     "adopted": "Adopted",
-    "adoptFailed": "Adopt failed"
+    "adoptFailed": "Adopt failed",
+    "blocked": {
+      "banner": "AI recommendations unavailable — LLM credentials not configured. Please contact admin to configure /admin/ai-config"
+    }
   },
   "d5": {
     "title": "D5 Corrective Action Recommendations",
@@ -202,7 +205,10 @@
     "skip": "Skip",
     "readonlyTooltip": "Read-only users cannot adopt",
     "adopted": "Adopted",
-    "adoptFailed": "Adopt failed"
+    "adoptFailed": "Adopt failed",
+    "blocked": {
+      "banner": "AI recommendations unavailable — LLM credentials not configured. Please contact admin to configure /admin/ai-config"
+    }
   },
   "d7": {
     "title": "Prevent Recurrence Reminder",

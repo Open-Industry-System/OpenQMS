@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse } from "antd";
+import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse, Alert } from "antd";
 import { CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getD5Recommendations, adoptRecommendation } from "../../api/capa";
+import { getD5Recommendations, adoptRecommendation, RecommendationBlockedError } from "../../api/capa";
 import RecommendationDAG from "./RecommendationDAG";
 import RiskTags from "./RiskTags";
 import type { D5ExistingControl, D5GeneralSuggestion, StageRun } from "../../types";
@@ -22,22 +22,47 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
   const [suggestions, setSuggestions] = useState<D5GeneralSuggestion[]>([]);
   const [stages, setStages] = useState<StageRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLoading(true);
+    setBlocked(false);
     getD5Recommendations(capaId)
       .then((res) => {
         setControls(res.existing_controls);
         setSuggestions(res.general_suggestions);
         setStages(res.stages ?? []);
       })
-      .catch(() => message.error(t("d5.loadFailed")))
+      .catch((err) => {
+        if (err instanceof RecommendationBlockedError) {
+          setBlocked(true);
+        } else {
+          message.error(t("d5.loadFailed"));
+        }
+      })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;
+
+  if (blocked) {
+    return (
+      <Card
+        size="small"
+        title={<Space><SafetyOutlined />{t("d5.title")}</Space>}
+        style={{ marginBottom: 16 }}
+      >
+        <Alert
+          data-e2e="rec-blocked-banner"
+          type="warning"
+          showIcon
+          message={t("d5.blocked.banner")}
+        />
+      </Card>
+    );
+  }
 
   const renderControl = (item: D5ExistingControl) => {
     const key = item.control_node_id;

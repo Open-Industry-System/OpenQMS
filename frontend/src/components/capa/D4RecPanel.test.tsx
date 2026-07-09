@@ -18,6 +18,13 @@ const mockStages = vi.hoisted(() =>
 );
 
 vi.mock("../../api/capa", () => ({
+  RecommendationBlockedError: class RecommendationBlockedError extends Error {
+    detail: { blocked: true; reason: string; stages: StageRun[] };
+    constructor(detail: { blocked: true; reason: string; stages: StageRun[] }) {
+      super(detail.reason);
+      this.detail = detail;
+    }
+  },
   getD4Recommendations: vi.fn().mockResolvedValue({
     stages: mockStages,
     items: [
@@ -38,7 +45,7 @@ vi.mock("../../api/capa", () => ({
   adoptRecommendation: vi.fn().mockResolvedValue({ adoption_id: "a1", d_step: "d4", field_value: "根因A" }),
 }));
 
-import { getD4Recommendations, adoptRecommendation } from "../../api/capa";
+import { getD4Recommendations, adoptRecommendation, RecommendationBlockedError } from "../../api/capa";
 
 const renderPanel = (props = {}) => render(
   <ConfigProvider><App>
@@ -109,6 +116,15 @@ describe("D4RecPanel adopt", () => {
     renderPanel();
     await waitFor(() => expect(screen.queryByTestId("rec-dag-stage-1")).toBeInTheDocument());
     expect(screen.getByTestId("rec-dag-stage-12")).toBeInTheDocument();
+  });
+
+  it("renders BLOCKED banner on 422 detail.blocked", async () => {
+    vi.mocked(getD4Recommendations).mockRejectedValueOnce(
+      new RecommendationBlockedError({ blocked: true, reason: "LLM credentials not configured", stages: [] })
+    );
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId("rec-blocked-banner")).toBeInTheDocument());
+    expect(screen.getByTestId("rec-blocked-banner")).toHaveTextContent("LLM");
   });
 
   it("renders all 6 new D4 match_source groups", async () => {
