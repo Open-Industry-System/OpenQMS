@@ -4,7 +4,7 @@
 
 **Goal:** 补齐 US-E2E-01 子故事 01.2 / 01.3 的 P0 硬 gap——01.2 LLM 未配置严格 BLOCKED + stage_runs 持久化；01.3 method 枚举 + conclusion 驱动 retry_count 回退计数器。
 
-**Architecture:** 切片 A 在 orchestrator 顶部判 BLOCKED（pc is None）+ 新增 CAPA 专属缓存写入路径（write-only，report_id 键）；切片 B 用 conclusion 枚举（pending/passed/failed）替代 is_verified 请求语义，retry_count 仅 conclusion→failed 跃迁递增（双行锁去重），warning 在 API 层算。两切片无代码依赖。
+**Architecture:** 切片 A 在 orchestrator 顶部判 BLOCKED（pc is None）+ 新增 CAPA 专属缓存写入路径（write-only，report_id 键）；切片 B 用 conclusion 枚举（pending/passed/failed）替代 is_verified 请求语义，retry_count 仅 conclusion→failed 跃迁递增（双行锁去重），warning 在 API 层算。两切片业务代码无依赖可并行，但迁移层 B1 硬依赖 A3（`down_revision` 链），须 A3 先落地。
 
 **Tech Stack:** Python 3.11 + FastAPI + SQLAlchemy 2.0 (async) + Pydantic v2 + Alembic | React 18 + TypeScript 5.6 + Ant Design 5 | pytest + vitest + Playwright。
 
@@ -391,39 +391,54 @@ async def test_serialize_capa_suggestions_d5_mutually_exclusive():
     assert len(out) == 2
 
 @pytest.mark.asyncio
-async def test_cache_capa_result_persists_stage_runs(monkeypatch):
-    # mock db.execute 捕获 upsert 语句的 values
-    db = MagicMock(); db.execute = AsyncMock()
-    pipe = HybridRecommendationPipeline(db=db, pc=MagicMock(), embedding_provider=None)
+async def test_cache_capa_result_persists_stage_runs(real_db_session, capa_factory):
+    # 三轮 P1-1：用真实测试 DB 回读 RecommendationCache，断言写入内容（非仅 execute 被调用）
+    pipe = HybridRecommendationPipeline(db=real_db_session, pc=MagicMock(), embedding_provider=None)
+    capa = await capa_factory(session=real_db_session)
     ctx = RecommendationContext(capa_data={"d2_description":"d","d3_interim":"","d4_root_cause":"rc",
-        "fmea_ref_id":None,"fmea_node_id":None,"product_line_code":"PL","report_id":None},
-        user_product_lines=None, stage="d4", factory_id=None, fmea_docs=[], linked_fmea=None)
-    result = RecommendationResult(items=[],
+        "fmea_ref_id":None,"fmea_node_id":None,"product_line_code":"PL","report_id":str(capa.report_id)},
+        user_product_lines=None, stage="d4", factory_id=capa.factory_id, fmea_docs=[], linked_fmea=None)
+    result = RecommendationResult(items=[MagicMock(to_d4_schema=lambda: {"failure_cause_name":"c1"})],
         stages=[StageRun(i, f"s{i}", "internal", "done") for i in range(1, 13)], blocked=False)
-    import uuid
-    await pipe._cache_capa_result(uuid.uuid4(), ctx, result)
-    db.execute.assert_awaited_once()
-    # 验证调用参数含 stage_runs（通过 stmt.values，需解析 compiled params——简化为断言 execute 被调用且不抛）
+    await pipe._cache_capa_result(capa.report_id, ctx, result)
+    await real_db_session.commit()
+    # 回读
+    from app.models.recommendation_cache import RecommendationCache
+    row = await real_db_session.scalar(select(RecommendationCache).where(
+        RecommendationCache.report_id == capa.report_id,
+        RecommendationCache.trigger_type == "d4"))
+    assert row is not None
+    assert row.doc_type == "capa"
+    assert row.stage_runs is not None and len(row.stage_runs) == 12  # 12 行 stage_runs 实际写入
+    assert row.stage_runs[10]["status"] == "done"  # stage 11 (index 10)
+    assert row.suggestions is not None and len(row.suggestions) == 1  # suggestions 非空
+    assert row.suggestions[0]["kind"] == "d4_cause"
 ```
 
 ```python
-# 追加：降级测试（三轮 P1-1）——构造一个确实触发 StageRunSchema 序列化异常的 StageRun，断言 stage_runs=NULL 但 suggestions 正常写入
+# 追加：降级测试（三轮 P1-1 + P1 三轮）——构造确实触发 StageRunSchema 序列化异常的 StageRun，
+# 回读断言 stage_runs IS NULL 且 suggestions 仍写入（非仅"未抛异常"）
 @pytest.mark.asyncio
-async def test_cache_capa_result_stage_runs_serialize_failure_degrades(monkeypatch):
-    db = MagicMock(); db.execute = AsyncMock()
-    pipe = HybridRecommendationPipeline(db=db, pc=MagicMock(), embedding_provider=None)
+async def test_cache_capa_result_stage_runs_serialize_failure_degrades(real_db_session, capa_factory):
+    pipe = HybridRecommendationPipeline(db=real_db_session, pc=MagicMock(), embedding_provider=None)
+    capa = await capa_factory(session=real_db_session)
     ctx = RecommendationContext(capa_data={"d2_description":"d","d3_interim":"","d4_root_cause":"rc",
-        "fmea_ref_id":None,"fmea_node_id":None,"product_line_code":"PL","report_id":None},
-        user_product_lines=None, stage="d4", factory_id=None, fmea_docs=[], linked_fmea=None)
-    # status 非法 → StageRunSchema 构造抛 ValidationError
-    bad_stage = StageRun(11, "LLM", "llm", "bogus_status")  # 非法 status
-    result = RecommendationResult(items=[MagicMock(to_d4_schema=lambda: {"k": "v"})],
+        "fmea_ref_id":None,"fmea_node_id":None,"product_line_code":"PL","report_id":str(capa.report_id)},
+        user_product_lines=None, stage="d4", factory_id=capa.factory_id, fmea_docs=[], linked_fmea=None)
+    bad_stage = StageRun(11, "LLM", "llm", "bogus_status")  # 非法 status → StageRunSchema 构造抛
+    result = RecommendationResult(items=[MagicMock(to_d4_schema=lambda: {"failure_cause_name":"c1"})],
                                    stages=[bad_stage], blocked=False)
-    import uuid
-    await pipe._cache_capa_result(uuid.uuid4(), ctx, result)  # 不抛
-    db.execute.assert_awaited_once()
-    # 断言写入的 stage_runs 为 None（降级），suggestions 仍写入——需解析 stmt bound params
-    # 简化：断言未抛异常即可；完整断言解析 compiled params 的 stage_runs is None
+    await pipe._cache_capa_result(capa.report_id, ctx, result)  # 不抛
+    await real_db_session.commit()
+    from app.models.recommendation_cache import RecommendationCache
+    row = await real_db_session.scalar(select(RecommendationCache).where(
+        RecommendationCache.report_id == capa.report_id))
+    assert row is not None
+    assert row.stage_runs is None  # 降级：stage_runs NULL
+    assert row.suggestions is not None and len(row.suggestions) == 1  # suggestions 仍写入
+```
+
+> 注：用真实测试 DB 回读（`real_db_session` + `capa_factory`，复用既有 `backend/tests/capa/` 真实 DB fixture 模式——参考 `test_capa_verification_service.py` 的真实 session fixture）。这比解析 mock 的 bound params 可靠：直接断言落库内容。`MagicMock(to_d4_schema=...)` 提供 items；若 RecommendationContext 构造签名与实际不符，按 `recommendation_types.py:24` 实际字段对齐。
 
 ```python
 # 追加到 backend/tests/recommendations/test_hybrid_recommendation_pipeline.py
@@ -802,16 +817,63 @@ def test_eightd_has_d4_retry_count():
 ```
 
 ```python
-# 追加：脏数据前置断言测试（三轮 P0-1）——插入非法 method 行后 upgrade 应明确失败且不留下半迁移结构
+# backend/tests/migrations/test_conclusion_retrycount_migration.py（新增文件——三轮 P1-2：
+# 仓库当前无 backend/tests/migrations/，本任务新建该目录 + 迁移测试基础设施）
+import pytest
+import sqlalchemy as sa
+from alembic import command
+from alembic.config import Config
+
+@pytest.fixture
+def alembic_engine(tmp_path):
+    """新建独立 SQLite/Postgres 测试 engine + 应用 base 元数据到 pre-migration 状态。
+    复用 backend/alembic.ini + backend/alembic/ env.py；若 env.py 硬编码 DB URL，
+    用 monkeypatch/test-INI 覆盖到 tmp_path 上的测试库。参考 backend/tests/conftest.py
+    既有 engine fixture 模式扩展。"""
+    # 实现时：建测试库 → apply 既有迁移到 B1 上一版本（<Task_A3_head>）→ 返回 engine
+    ...
+
 @pytest.mark.asyncio
 async def test_migration_aborts_on_dirty_method_data(alembic_engine):
-    # 在 pre-migration 表中插入 method='guess'（非法），跑 upgrade → 期望 RuntimeError，
-    # 且 conclusion 列未被添加（半迁移结构未残留）。复用既有 alembic 迁移测试 fixture 模式。
-    # 参考 backend/tests/migrations/ 既有迁移测试的 engine/fixture。
+    """三轮 P1-2：插入非法 method 行后 upgrade 应抛 RuntimeError 且不留半迁移结构。
+    RuntimeError 在 create_check_constraint 之前 raise，故 method CHECK / conclusion 列 /
+    d4_retry_count 列均不应残留（三者都在断言点之后）。"""
+    with alembic_engine.connect() as conn:
+        # 插入脏数据（method='guess'）
+        conn.execute(sa.text("INSERT INTO capa_root_cause_verification "
+                             "(verification_id, capa_id, factory_id, root_cause_text, is_verified, "
+                             "method, result, evidence_attachments, source_ref, created_at, updated_at) "
+                             "VALUES (...)"))  # 按实际列填
+        conn.commit()
+    # 跑 upgrade → 期望抛 RuntimeError
+    with pytest.raises(RuntimeError, match="non-enum method"):
+        command.upgrade(Config("backend/alembic.ini"), "head")
+    # 断言半迁移结构未残留（三者都不应存在，因 RuntimeError 在首个 create_check_constraint 之前）
+    with alembic_engine.connect() as conn:
+        cols = [r[0] for r in conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'"))]
+        assert "conclusion" not in cols  # conclusion 列未加
+        assert "d4_retry_count" not in [r[0] for r in conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'"))]
+        # method CHECK 未创建（断言点之前 raise）——查 pg_constraint 无 chk_verification_method
+        constraints = [r[0] for r in conn.execute(sa.text(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass"))]
+        assert "chk_verification_method" not in constraints
+        assert "chk_verification_conclusion" not in constraints
+
+@pytest.mark.asyncio
+async def test_migration_clean_upgrade_downgrade(alembic_engine_clean):
+    """三轮 P1-2：无脏数据时 upgrade head → method CHECK + conclusion 列 + d4_retry_count 列均存在；
+    downgrade -1 → 三者移除。"""
+    command.upgrade(Config("backend/alembic.ini"), "head")
+    # upgrade 后断言存在（同 test_models_conclusion_retrycount 的 information_schema 断言）
+    ...
+    command.downgrade(Config("backend/alembic.ini"), "-1")
+    # downgrade 后断言移除
     ...
 ```
 
-> 注：该测试复用既有 `backend/tests/migrations/` 迁移测试 fixture（alembic_engine 或等价）。断言：插入 `method='guess'` 行 → `alembic upgrade head` 抛 `RuntimeError`（含 "non-enum method"）→ 事后 `information_schema.columns` 不含 `conclusion`（即 method CHECK 已加但 conclusion 列未加，验证中止在断言点而非半应用完）。若 fixture 不便构造，替代方案：直接单测 `upgrade()` 函数传一个含脏数据的 bind mock，断言 raise。
+> **三轮 P1-2 修订**：仓库当前**无** `backend/tests/migrations/` 目录，也**无** `alembic_engine` fixture——本任务须新建 `backend/tests/migrations/__init__.py` + `conftest.py`（或扩展 `backend/tests/conftest.py`）提供 `alembic_engine` / `alembic_engine_clean` fixture，并在该 task 的 commit 中一并提交。fixture 实现参考 `backend/tests/conftest.py` 既有 engine fixture + `backend/alembic/env.py`（若 env.py 硬编码 URL，用测试 INI/monkeypatch 覆盖到 tmp_path 测试库）。**修正之前的错误说明**：`RuntimeError` 在首个 `create_check_constraint("chk_verification_method", ...)` **之前** raise（断言点是 upgrade 函数第一行 `bind.scalar(...)` 后的 `if dirty: raise`），故 method CHECK / conclusion 列 / d4_retry_count 列**三者都不应残留**（不是"method CHECK 已加但 conclusion 未加"）。若 PostgreSQL `information_schema`/`pg_constraint` 在测试库不便用，退化用 `Base.metadata` 比对或 SQLAlchemy `inspect(engine).get_columns(...)`。
 
 - [ ] **Step 2: 跑测试验证失败**
 
@@ -878,7 +940,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "<new_rev>"
-down_revision = "<Task_A3_head>"
+down_revision = "<Task_A3_head>"  # 三轮 P1-3：迁移层硬依赖 A3 的 stage_runs 迁移——须 A3 先落地取其 head revision，不可并行生成（否则多 head）
 
 def upgrade():
     bind = op.get_bind()
@@ -911,15 +973,20 @@ def downgrade():
 
 - [ ] **Step 5: 跑测试 + 迁移 up/down**
 
-Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/capa/test_models_conclusion_retrycount.py -v && alembic upgrade head && alembic downgrade -1 && alembic upgrade head`
-Expected: 模型测试 PASS；迁移 up/down 干净（回填后 is_verified=True 旧行 conclusion=passed）。
+Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/capa/test_models_conclusion_retrycount.py tests/migrations/test_conclusion_retrycount_migration.py -v && alembic upgrade head && alembic downgrade -1 && alembic upgrade head`
+Expected: 模型测试 PASS；迁移测试 PASS（脏数据中止 + 干净 up/down）；迁移 up/down 干净（回填后 is_verified=True 旧行 conclusion=passed）。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/app/models/capa.py backend/alembic/versions/<ts>_conclusion_retrycount.py backend/tests/capa/test_models_conclusion_retrycount.py
-git commit -m "feat(capa): add verification.conclusion + d4_retry_count + CHECK constraints + backfill migration"
+git add backend/app/models/capa.py backend/alembic/versions/<ts>_conclusion_retrycount.py \
+  backend/tests/capa/test_models_conclusion_retrycount.py \
+  backend/tests/migrations/__init__.py backend/tests/migrations/test_conclusion_retrycount_migration.py \
+  backend/tests/conftest.py  # 若新增 alembic_engine fixture
+git commit -m "feat(capa): add verification.conclusion + d4_retry_count + CHECK constraints + backfill migration + migration test infra"
 ```
+
+> 三轮 P1-2：本 commit 含新建 `backend/tests/migrations/` 目录 + 迁移测试基础设施（fixture）。
 
 ---
 
@@ -1495,12 +1562,17 @@ git commit -m "test(capa): migrate 4 existing test files from is_verified to con
 - [ ] **Step 1: 写失败测试**
 
 ```tsx
-// D4VerificationCard.test.tsx — 改 mock 断言 conclusion
-it("submits conclusion=passed via verify-pass button", async () => {
-  // render；click verify-pass；assert createVerification/updateVerification called with { conclusion: "passed" }（无 is_verified）
+// D4VerificationCard.test.tsx — 改 mock 断言 conclusion + 完整 payload（三轮 P0：按钮须合并表单值）
+it("submits full payload with conclusion=passed via verify-pass", async () => {
+  // render with Form；填 root_cause_text + 选 method=measurement + 填 result="ok"
+  // click verify-pass
+  // 断言 createVerification/updateVerification called with { root_cause_text, method: "measurement", result: "ok", conclusion: "passed", evidence_attachments }（非仅 conclusion）
 });
-it("submits conclusion=failed via verify-fail button", async () => {
-  // click verify-fail；assert { conclusion: "failed" }
+it("submits conclusion=failed via verify-fail carrying filled fields", async () => {
+  // 填字段 → click verify-fail → 断言 payload 含 method/result + conclusion: "failed"
+});
+it("submits conclusion=pending via verify-save-draft (draft allowed empty details)", async () => {
+  // click verify-save-draft → 断言 conclusion: "pending"（草稿不强校验细节）
 });
 it("renders method Select with three options", async () => {
   // assert verification-method select has measurement/observation/reproduction
@@ -1514,29 +1586,49 @@ Expected: FAIL
 
 - [ ] **Step 3: 实现**
 
-`types/index.ts` — VerificationCreate/Update：
+`types/index.ts` — Verification 响应类型加 conclusion + method 收窄（三轮 P1-4）；VerificationCreate/Update 加 conclusion + method 收窄 + 删 is_verified：
 
 ```ts
+export type VerificationMethod = "measurement" | "observation" | "reproduction";
+export type VerificationConclusion = "pending" | "passed" | "failed";
+
+export interface Verification {  // 响应类型：加 conclusion（三轮 P1-4），method 收窄
+  verification_id: string;
+  capa_id: string;
+  root_cause_text: string;
+  method: VerificationMethod | null;
+  result: string | null;
+  is_verified: boolean;  // 响应字段保留（列派生）
+  conclusion: VerificationConclusion;  // 新增：UI 类型安全区分草稿/失败（两者 is_verified 都 false）
+  evidence_attachments: Record<string, unknown>[];
+  source_ref: Record<string, unknown> | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  created_at: string;
+}
 export interface VerificationCreate {
   root_cause_text: string;
-  method?: "measurement" | "observation" | "reproduction";
+  method?: VerificationMethod;
   result?: string;
-  conclusion?: "pending" | "passed" | "failed";
+  conclusion?: VerificationConclusion;  // 默认 pending
   evidence_attachments?: Record<string, unknown>[];
   source_ref?: Record<string, unknown> | null;
+  // 删除 is_verified 请求字段
 }
 export interface VerificationUpdate {
-  method?: "measurement" | "observation" | "reproduction";
+  method?: VerificationMethod;
   result?: string;
-  conclusion?: "pending" | "passed" | "failed";
+  conclusion?: VerificationConclusion;
   evidence_attachments?: Record<string, unknown>[];
+  // 删除 is_verified 请求字段
 }
-// 删除 is_verified 字段
 ```
 
-`D4VerificationCard.tsx` — 替换 `is_verified` Switch 为结论按钮 + method Select：
+`D4VerificationCard.tsx` — 替换 `is_verified` Switch 为 method Select + 结论按钮。**三轮 P0：按钮必须先取表单值再合并 conclusion 提交**（直接 `submit({ conclusion })` 会丢 method/result/evidence/root_cause_text，导致 passed 因 `_assert_verified_has_details` 返回 400）：
 
 ```tsx
+const [form] = Form.useForm();
+
 <Form.Item name="method" label={t("d4.method")}>
   <Select data-e2e="verification-method" placeholder={t("d4.methodPlaceholder")}>
     <Option value="measurement">{t("verification.method.measurement")}</Option>
@@ -1544,13 +1636,27 @@ export interface VerificationUpdate {
     <Option value="reproduction">{t("verification.method.reproduction")}</Option>
   </Select>
 </Form.Item>
-{/* 提交结论按钮 */}
-<Button data-e2e="verify-pass" onClick={() => submit({ conclusion: "passed" })}>{t("verification.conclusion.passed")}</Button>
-<Button data-e2e="verify-fail" onClick={() => submit({ conclusion: "failed" })}>{t("verification.conclusion.failed")}</Button>
-<Button data-e2e="verify-save-draft" onClick={() => submit({ conclusion: "pending" })}>{t("verification.conclusion.saveDraft")}</Button>
+<Form.Item name="result" label={t("d4.result")}><Input data-e2e="verification-result" /></Form.Item>
+{/* 证据上传省略（既有） */}
+
+{/* 提交结论按钮：先校验/取表单值，再合并 conclusion 统一提交（三轮 P0） */}
+<Button data-e2e="verify-pass" onClick={async () => {
+  const values = await form.validateFields();  // 触发必填校验 + 取 method/result/evidence
+  await submit({ ...values, conclusion: "passed" });
+}}>{t("verification.conclusion.passed")}</Button>
+<Button data-e2e="verify-fail" onClick={async () => {
+  const values = form.getFieldsValue();  // failed 不强制校验，但仍带已填字段
+  await submit({ ...values, conclusion: "failed" });
+}}>{t("verification.conclusion.failed")}</Button>
+<Button data-e2e="verify-save-draft" onClick={async () => {
+  const values = form.getFieldsValue();
+  await submit({ ...values, conclusion: "pending" });
+}}>{t("verification.conclusion.saveDraft")}</Button>
 ```
 
-`submit` 调 `createVerification`/`updateVerification`（去掉 is_verified，用 conclusion）。i18n 补 `verification.method.*` + `verification.conclusion.*`（zh-CN + en-US）。
+`submit(payload)` 调 `createVerification`/`updateVerification`（payload 含 root_cause_text/method/result/evidence/conclusion）。i18n 补 `verification.method.*` + `verification.conclusion.*`（zh-CN + en-US）。
+
+> 注：新建走 `createVerification`（payload 须含 root_cause_text），编辑走 `updateVerification`（按 verification_id）。`form.validateFields()` 对 passed 强制 method/result/evidence 至少一项（与后端 `_assert_verified_has_details` 一致）。
 
 `api/capa.ts` — advance 调用方适配 `CAPAAdvanceResponse`（三轮命名修正：既有符号是 `client`（default import from `./client`）+ `advanceCAPA`，非 `api`/`advanceCapa`）：
 
@@ -1682,7 +1788,7 @@ git commit -m "docs(progress): tick US-E2E-01 P0 收尾 (01.2 BLOCKED+stage_runs
 - advance service 签名 `-> CAPAEightD` 不变 ✓
 - 前端符号 `client`（default import）+ `advanceCAPA`（非 api/advanceCapa），三轮命名修正 ✓
 
-**4. 依赖顺序:** A1→A2→A3→A4→A5→A6→A7（切片 A）；B1→B2→B3→B4→B5→B6→B7→B8（切片 B）。切片 A 与 B 无代码依赖可并行，但建议 A 先（解锁 BLOCKED 语义）。B5（测试迁移）依赖 B2/B3 落地。B7 e2e 依赖 B4（d4_retry_count 可观察）+ B6（前端 testid）。
+**4. 依赖顺序:** A1→A2→A3→A4→A5→A6→A7（切片 A）；B1→B2→B3→B4→B5→B6→B7→B8（切片 B）。**业务代码可并行，但迁移必须 A3→B1 串行**（三轮 P1-3：B1 `down_revision=<Task_A3_head>` 硬依赖 A3 的 stage_runs 迁移——并行生成 revision 会拿不到该 revision 或产生多 head；须 A3 落地后取其 head revision 再写 B1）。建议 A 先全落地再启动 B（解锁 BLOCKED 语义 + 避免 migration revision 冲突）。B5（测试迁移）依赖 B2/B3 落地。B7 e2e 依赖 B4（d4_retry_count 可观察）+ B6（前端 testid）。
 
 **已知风险（实现时注意）：**
 - 既有 pipeline 测试可能未 mock `_cache_capa_result`，真实 DB 写入可能改变 `db.execute` 断言（Task A4 Step 5）。
@@ -1710,3 +1816,15 @@ git commit -m "docs(progress): tick US-E2E-01 P0 收尾 (01.2 BLOCKED+stage_runs
 另：Task B6 命名修正 `api`→`client`、`advanceCapa`→`advanceCAPA`（既有符号）。
 
 15 项计划评审全部闭合。
+
+### 第二轮（人工复审，2026-07-09）：1 P0 + 4 P1，全部接受
+
+| 评审项 | 级别 | 缺陷 | 修订 |
+|---|---|---|---|
+| 结论按钮丢表单数据 | P0 | `submit({ conclusion })` 不带 Form 的 method/result/evidence/root_cause_text，passed 因 `_assert_verified_has_details` 返回 400；草稿/失败也丢数据 | Task B6 按钮 `await form.validateFields()`/`getFieldsValue()` 取表单值 → `{...values, conclusion}` 合并提交；测试断言完整 payload（含 method/result/conclusion），非仅 conclusion |
+| stage_runs 持久化测试未验证内容 | P1 | 仅断言 `db.execute` 被调用 / "未抛异常"，stage_runs/suggestions 即使没写测试也过 | Task A4 改用真实测试 DB 回读 RecommendationCache 行：正常路径断言 12 行 stage_runs + suggestions 非空 + kind；降级路径断言 stage_runs IS NULL 且 suggestions 仍写入 |
+| 迁移测试不可执行占位 | P1 | 仓库无 `backend/tests/migrations/`、无 `alembic_engine` fixture、测试体 `...`；且说明误写"method CHECK 已加但 conclusion 未加"（RuntimeError 在 create_check_constraint 之前，三者都不应残留） | Task B1 新建 `backend/tests/migrations/` + `alembic_engine`/`alembic_engine_clean` fixture + 真实测试体：脏数据 upgrade 抛 RuntimeError + 断言 method CHECK/conclusion 列/d4_retry_count 列三者均未残留；干净 up/down 测试；commit 含新基础设施 |
+| 切片非完全可并行 | P1 | B1 `down_revision=<Task_A3_head>` 迁移层硬依赖 A3，并行生成 revision 会多 head/拿不到 | 修正表述：业务代码可并行但迁移 A3→B1 串行；B1 `down_revision` 注释标明硬依赖；Architecture + 依赖顺序段同步 |
+| 前端 Verification 响应类型漏 conclusion | P1 | 后端 VerificationResponse 加 conclusion，前端只改 Create/Update；Verification.method 仍 `string\|null` | Task B6 前端 `Verification` 加 `conclusion: 'pending'\|'passed'\|'failed'` + method 收窄为三值联合；UI 类型安全区分草稿/失败（is_verified 都 false） |
+
+20 项计划评审全部闭合。
