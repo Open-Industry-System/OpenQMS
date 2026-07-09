@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import agent_review_skill_service, capa_ppt_service, capa_service
-from app.services.capa_ppt_service import PptContent
+from app.services.capa_ppt_service import PptContent, PptPage
 from app.services.agent import provider_adapter
 
 
@@ -22,6 +22,26 @@ REVIEW_SCHEMA = {
         "suggestions": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["passed", "issues", "suggestions"],
+}
+
+
+# 校正输出：仅各页 section 的 value（呈现层），不动 linked/verification 等落库事实
+CORRECTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "pages": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "sections": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["title", "sections"],
+            },
+        }
+    },
+    "required": ["pages"],
 }
 
 
@@ -85,7 +105,7 @@ async def review_and_correct(
         if review.passed:
             return content, ReviewResult("passed", round_idx, last_report)
         if round_idx < 3:
-            content = await _correct_by_suggestions(db, capa_id, review.suggestions)
+            content = await _correct_by_suggestions(pc, skill, content, review.suggestions)
         else:
             return content, ReviewResult("needs_review", 3, last_report)
 
@@ -96,6 +116,46 @@ async def _subagent_review(pc, skill, content) -> ReviewOutcome:
     result = await provider_adapter.complete_json(pc, prompt, REVIEW_SCHEMA)
     return ReviewOutcome(
         passed=result["passed"], issues=result["issues"], suggestions=result["suggestions"],
+    )
+
+
+async def _subagent_correct(pc, skill, content, suggestions) -> PptContent:
+    """LLM 按 suggestions 重写各页 section 的 value（呈现层）。
+
+    约束（故事 §101「不编造数据」）：仅改写已存在内容的呈现，不得添加输入中不存在的
+    事实；保持 11 页结构与 label 不变；linked_fmea_node/scars/alerts/verifications
+    等落库事实不动。结构不符（页数/标题对不上）→ 回退原内容（不破坏），下一轮审查原内容。
+    """
+    sug_text = "\n".join(f"- {s}" for s in suggestions) or "- (无具体建议)"
+    prompt = (
+        f"{skill.content}\n\n--- 待校正 PPT 内容 ---\n{_serialize_content(content)}"
+        f"\n\n--- 审查建议 ---\n{sug_text}"
+        "\n\n请据此修订各页 section 的 value 以回应建议。约束：仅改写已存在内容的呈现，"
+        "不得添加输入中不存在的事实（不编造数据）；保持页数与各页 title/label 不变。"
+        "输出 JSON: {pages: [{title, sections: [{label, value}]}]}"
+    )
+    result = await provider_adapter.complete_json(pc, prompt, CORRECTION_SCHEMA)
+    return _apply_revised_pages(content, result.get("pages", []))
+
+
+def _apply_revised_pages(content: PptContent, revised_pages: list) -> PptContent:
+    """将 LLM 修订的 pages 应用回 PptContent；结构不符（页数/标题对齐）则回退原 pages。"""
+    if not revised_pages or len(revised_pages) != len(content.pages):
+        return content
+    revised = []
+    for orig, rev in zip(content.pages, revised_pages):
+        if rev.get("title") != orig.title:
+            return content
+        sections = [
+            {"label": s.get("label", ""), "value": s.get("value", "")}
+            for s in (rev.get("sections") or [])
+        ]
+        revised.append(PptPage(title=orig.title, sections=sections))
+    return PptContent(
+        capa_id=content.capa_id, pages=revised,
+        linked_fmea_node=content.linked_fmea_node, linked_scars=content.linked_scars,
+        linked_risk_alerts=content.linked_risk_alerts,
+        root_cause_verifications=content.root_cause_verifications,
     )
 
 
@@ -110,22 +170,22 @@ def _serialize_content(content) -> str:
 
 
 async def _correct_by_issues(db, capa_id, issues) -> PptContent:
-    """按规则 issues 重组 PptContent（不渲染 pptx）。
+    """按规则 issues 重组 PptContent：重新查最新落库数据（§46「重新查数据」）。
 
-    故事 §46「校正＝重新查数据/修结构，非 LLM 重写」。当前实现：重新查最新落库数据
-    （generate_content）以拾取数据变更；结构由 generate_content 固定产出 11 页，无需修补。
-    issues 中的「D 页内容为空」属数据缺失，按 §101「不编造数据」不可自动补全。
-    真正按反馈改写内容需 LLM 重写，故事 §101/§109 明确为后续迭代——见 follow-up。
+    规则 issues（页数/必填非空/FMEA 一致性）属结构或数据缺口：结构由 generate_content 固定
+    产出 11 页（页数 issue 不会触发）；「D 页内容为空」属数据缺失，按 §101「不编造数据」
+    不可自动补全 → 残留时由 review_and_correct 短路为 needs_review（不耗 LLM 轮次）。
     """
     return await capa_ppt_service.generate_content(db, capa_id)
 
 
-async def _correct_by_suggestions(db, capa_id, suggestions) -> PptContent:
-    """按 LLM suggestions 重组 PptContent（不渲染 pptx）。数据源缺失则跳过。
+async def _correct_by_suggestions(pc, skill, content, suggestions) -> PptContent:
+    """按 LLM suggestions 用 LLM 重写各页 section 呈现（§101「不编造数据」约束下）。
 
-    与 _correct_by_issues 同理：当前只能重新查最新落库数据（§46），无法按 LLM 内容建议
-    改写文本（需 LLM 重写，§101/§109 后续迭代）。故 3 轮闭环在 LLM 重写落地前，
-    若首轮不通过且数据未变更，后续轮次审查的是近乎相同的内容——这是当前范围的已知约束，
-    非 bug；达上限返回 needs_review + 审查报告（故事 §73）。
+    校正异常 → 不上抛 500：审查已成功产出报告，仅自动校正失败 → 回退原内容，下一轮审查
+    原内容；最终达 3 轮仍不通过 → needs_review + 报告（保留审查产出，用户可见 issues/suggestions）。
     """
-    return await capa_ppt_service.generate_content(db, capa_id)
+    try:
+        return await _subagent_correct(pc, skill, content, suggestions)
+    except Exception:
+        return content

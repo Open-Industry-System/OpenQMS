@@ -282,14 +282,17 @@ D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封�
 
 ### 8.3 3 轮 LLM 审查闭环
 
-`capa_ppt_review_service` 实现「审查 → 从数据库重新生成 → 再审查」的 3 轮闭环：
+`capa_ppt_review_service` 实现「审查 → 校正 → 再审查」的 3 轮闭环（v3：校正现含 LLM 改写）：
 
 1. **审查**：调用 LLM 审查 PptContent 质量，返回 issues + suggestions
-2. **重生成**：`_correct_by_suggestions()` / `_correct_by_issues()` 均直接调用 `generate_content(db, capa_id)`，从最新数据库数据重新组装 PptContent（不是让 LLM 改写内容）
-3. **最终审查**：LLM 确认重生成后的内容，返回 `review_status`（`skipped`/`passed`/`needs_review`）
+2. **校正**（分两类）：
+   - 规则 issues（结构/数据缺口）→ `_correct_by_issues()` 重新查数据（`generate_content`）；残留短路 `needs_review`
+   - LLM 内容建议 → `_correct_by_suggestions()` 调 LLM 改写各页 section 的 value（**仅呈现层，不编造数据、不动 linked/verification 落库事实**；结构不符回退原内容）
+3. **最终审查**：LLM 确认校正后的内容，返回 `review_status`（`skipped`/`passed`/`needs_review`）
 
 - 内置规则校验残留 issues（结构/数据缺口，校正无法补全）→ `review_status="needs_review"` + 报告暴露 issues，短路不耗 LLM 轮次；LLM 未配置且无规则 issues → `review_status="skipped"`
-- LLM 运行时异常（超时/鉴权/响应格式，非「未配置」）属故事 §92 FAILED 条件，不降级为 `needs_review`：异常上抛，API 层转 500 且不落 export 记录
+- 校正 LLM 异常 → 不上抛 500：审查已产出报告，仅自动校正失败 → 回退原内容，最终 needs_review + 报告（保留用户可见信息）
+- 审查 LLM 运行时异常（超时/鉴权/响应格式，非「未配置」）属故事 §92 FAILED 条件，不降级为 `needs_review`：异常上抛，API 层转 500 且不落 export 记录
 - 审查结果写入 `capa_ppt_export.review_status` + `review_rounds` + `review_report`
 
 ---

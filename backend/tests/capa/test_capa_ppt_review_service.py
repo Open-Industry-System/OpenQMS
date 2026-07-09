@@ -5,6 +5,7 @@ import pytest
 from app.models.capa import CAPAEightD
 from app.services import agent_review_skill_service, capa_ppt_review_service, capa_ppt_service
 from app.services.agent import provider_adapter
+from app.services.capa_ppt_service import PptContent, PptPage
 
 pytestmark = pytest.mark.requires_db
 
@@ -68,15 +69,18 @@ async def test_pass_first_round(db, admin_user, default_factory, monkeypatch):
 
 
 async def test_pass_after_correction(db, admin_user, default_factory, monkeypatch):
-    """首轮不通过 + 第 2 轮通过 → passed, rounds=2。"""
+    """首轮不通过 + LLM 校正 + 第 2 轮通过 → passed, rounds=2。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    calls = {"n": 0}
+    review_calls = {"n": 0}
 
-    async def _ok(pc, prompt, response_schema):
-        calls["n"] += 1
-        return {"passed": calls["n"] >= 2, "issues": ["issue1"], "suggestions": ["fix1"]}
+    async def _mock(pc, prompt, response_schema):
+        if "passed" in response_schema.get("properties", {}):  # 审查调用
+            review_calls["n"] += 1
+            return {"passed": review_calls["n"] >= 2, "issues": ["issue1"], "suggestions": ["fix1"]}
+        # 校正调用 → 返回空 pages → 回退原内容（不破坏结构）
+        return {"pages": []}
 
-    monkeypatch.setattr(provider_adapter, "complete_json", _ok)
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
     content, review = await capa_ppt_review_service.review_and_correct(
         db, capa.report_id, _PC(), "public",
     )
@@ -85,18 +89,78 @@ async def test_pass_after_correction(db, admin_user, default_factory, monkeypatc
 
 
 async def test_needs_review_after_3_rounds(db, admin_user, default_factory, monkeypatch):
-    """3 轮全不通过 → needs_review, rounds=3, 返回报告。"""
+    """3 轮全不通过 → needs_review, rounds=3, 返回最后审查报告。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
 
-    async def _fail(pc, prompt, response_schema):
-        return {"passed": False, "issues": ["i"], "suggestions": ["s"]}
+    async def _mock(pc, prompt, response_schema):
+        if "passed" in response_schema.get("properties", {}):  # 审查调用
+            return {"passed": False, "issues": ["i"], "suggestions": ["s"]}
+        return {"pages": []}  # 校正回退原内容
 
-    monkeypatch.setattr(provider_adapter, "complete_json", _fail)
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
     content, review = await capa_ppt_review_service.review_and_correct(
         db, capa.report_id, _PC(), "public",
     )
     assert review.status == "needs_review"
     assert review.rounds == 3
+    assert review.report == {"issues": ["i"], "suggestions": ["s"]}
+
+
+def _base_content():
+    return PptContent(
+        capa_id=uuid.uuid4(),
+        pages=[PptPage("A", [{"label": "x", "value": "1"}]), PptPage("B", [{"label": "y", "value": "2"}])],
+        linked_fmea_node=None, linked_scars=[], linked_risk_alerts=[], root_cause_verifications=[],
+    )
+
+
+def test_apply_revised_pages_applies_values_preserves_linked():
+    """LLM 修订有效 → 各页 value 改写，落库事实（linked_*）保留不变。"""
+    base = _base_content()
+    revised = [
+        {"title": "A", "sections": [{"label": "x", "value": "1R"}]},
+        {"title": "B", "sections": [{"label": "y", "value": "2"}]},
+    ]
+    out = capa_ppt_review_service._apply_revised_pages(base, revised)
+    assert out.pages[0].sections[0]["value"] == "1R"   # 改写
+    assert out.pages[1].sections[0]["value"] == "2"     # 未动
+    assert out.linked_fmea_node is None and out.linked_scars == []  # 落库事实保留
+    assert out.capa_id == base.capa_id
+
+
+def test_apply_revised_pages_wrong_count_falls_back():
+    """修订页数不符 → 回退原内容（不破坏结构）。"""
+    base = _base_content()
+    out = capa_ppt_review_service._apply_revised_pages(base, [{"title": "A", "sections": []}])
+    assert out is base  # 回退，返回原对象
+
+
+def test_apply_revised_pages_title_mismatch_falls_back():
+    """修订标题对不上 → 回退原内容。"""
+    base = _base_content()
+    revised = [
+        {"title": "WRONG", "sections": [{"label": "x", "value": "1R"}]},
+        {"title": "B", "sections": [{"label": "y", "value": "2"}]},
+    ]
+    out = capa_ppt_review_service._apply_revised_pages(base, revised)
+    assert out is base
+
+
+async def test_correction_llm_failure_falls_back_not_500(db, admin_user, default_factory, monkeypatch):
+    """校正 LLM 异常 → 回退原内容（不上抛 500），审查报告保留；最终 needs_review。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+
+    async def _mock(pc, prompt, response_schema):
+        if "passed" in response_schema.get("properties", {}):
+            return {"passed": False, "issues": ["i"], "suggestions": ["s"]}
+        raise RuntimeError("correction boom")  # 校正异常
+
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
+    content, review = await capa_ppt_review_service.review_and_correct(
+        db, capa.report_id, _PC(), "public",
+    )
+    # 校正异常未上抛；3 轮审查均不通过 → needs_review + 报告
+    assert review.status == "needs_review"
     assert review.report == {"issues": ["i"], "suggestions": ["s"]}
 
 
