@@ -455,6 +455,12 @@ async def get_d4_fmea_recommendations(
         tenant_schema=tenant_schema(request),
     )
     await db.commit()
+    if result.blocked:
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "reason": "LLM credentials not configured",
+                    "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages]},
+        )
     return {
         "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages],
         "items": [c.to_d4_schema() for c in result.items],
@@ -543,6 +549,12 @@ async def get_d5_fmea_recommendations(
         tenant_schema=tenant_schema(request),
     )
     await db.commit()
+    if result.blocked:
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "reason": "LLM credentials not configured",
+                    "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages]},
+        )
 
     existing_controls = []
     general_suggestions = []
