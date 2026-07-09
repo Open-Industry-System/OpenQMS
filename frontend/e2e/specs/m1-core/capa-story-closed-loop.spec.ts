@@ -1,41 +1,29 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync } from "fs";
-import path from "path";
 import { accountPassword } from "../../fixtures/seed-state";
 import { cleanupByPrefix, loginForToken, authedApi } from "../../helpers/api-client";
 
 /**
- * US-E2E-01 — 8D 全程闭环故事级 spec（Spec C / P2-11）。
+ * US-E2E-01 — 8D 非 AI 闭环故事级 spec（Spec C / P2-11）。
  *
- * 覆盖故事主流程 10 步、12 阶段推荐编排 DAG 结构断言、7 条 TRANSITION 审计断言、
- * AI 采纳 provenance 留痕、viewer 只读。
+ * 覆盖故事主流程 10 步、7 条 TRANSITION 审计断言、viewer 只读。
+ * 原混合 spec 中的 AI 推荐断言（D4 12 阶段 DAG / AI 采纳 provenance）已拆分至
+ * capa-story-ai-recommend.spec.ts；本文件无 LLM 凭证也必须全绿。
  *
- * 与 m1-core/capa.spec.ts（D1→D2 冒烟）、capa-ai-draft.spec.ts（按钮可见性）并行；
- * 用独立单号前缀 E2E-STORY-CAPA-，afterAll 清理不互斥。
+ * 与 m1-core/capa.spec.ts（D1→D2 冒烟）、capa-ai-draft.spec.ts（按钮可见性）、
+ * capa-story-ai-recommend.spec.ts（AI D4 推荐）并行；用独立单号前缀
+ * E2E-STORY-CAPA-，afterAll 清理不互斥。
  *
  * 设计取舍：
  * - 审计断言走 GET /api/admin/logs/audit?table_name=capa_eightd（admin token），按 record_id 客户端过滤。
  *   故事的 1 CREATE + 7 TRANSITION（D1→D2…D6→D7 由 engineer、D7→D8 由 manager）在此回读。
  *   （PROGRESS 初稿写「/api/audit-logs?target_id」，但该端点不存在；实际 admin/logs/audit 无 record_id 过滤，
  *   客户端过滤等价且无需新增后端端点——Surgical Changes。）
- * - AI 采纳留痕同样从审计日志回读（action=ADOPT_RECOMMENDATION，changed_fields 含 source + stage_index），
- *   不另建 seed-state adoptions 回读端点；审计日志由 adopt_recommendation 服务同事务写入，证明全链路。
- * - 无 LLM 凭证时：stage 11（LLM 融合）断言 skipped，核心闭环照跑；有凭证时断言 done。
- *   D4 推荐即使无 LLM 也由 FMEA 图 / 规则等源产出，provenance + 采纳断言仍可执行。
+ * - D4 验证子流程断言（method / conclusion / retry_count）是切片 B（Task B7/B8）的关注项，
+ *   此处仅占位，待切片 B 落地后补完。
  */
 
 const STORY_DOC_NO = "E2E-STORY-CAPA-001";
 const PRODUCT_LINE = "DC-DC-100-E2E";
-
-function hasLLMCreds(): boolean {
-  const envPath = path.resolve(process.cwd(), "e2e/.storage-state/e2e-env.json");
-  try {
-    const env = JSON.parse(readFileSync(envPath, "utf-8"));
-    return env.hasLLM === true;
-  } catch {
-    return false;
-  }
-}
 
 async function setProductLine(page: import("@playwright/test").Page, code: string) {
   await page.addInitScript((c) => {
@@ -66,8 +54,7 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
   });
 
   test("10-step closed loop: create → D1..D7 (engineer) → D8 (manager) → viewer read-only + audit trail", async ({ browser }) => {
-    test.setTimeout(240000); // 全故事驱动 7 次推进 + D4 推荐 + D7 处置 + 三角色，远超默认 30s。
-    const llm = hasLLMCreds();
+    test.setTimeout(240000); // 全故事驱动 7 次推进 + D7 处置 + 三角色，远超默认 30s。
     // 审计窗口起点（留 5s 抵消时钟漂移）。
     const auditStart = new Date(Date.now() - 5000).toISOString();
 
@@ -103,10 +90,7 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     await page.locator('[data-e2e="capa-advance"]').click();
     await waitForStep(page, /^5W2H 问题描述$|^5W2H Problem Description$/);
 
-    // Step 3: D2 问题描述 — AI 草拟按钮可见性（LLM 凭证齐时），填写描述后推进。
-    if (llm) {
-      await expect(page.locator('[data-e2e="capa-ai-draft"]')).toBeVisible({ timeout: 10000 });
-    }
+    // Step 3: D2 问题描述 — 填写描述后推进。
     const d2 = page.locator("textarea").first();
     await d2.fill("现场抽检一批 DC-DC-100-E2E 来料螺栓，发现 M8 螺栓孔径超差，实测 8.12mm（上限 8.05mm）。");
     await d2.evaluate((el: any) => el.blur());
@@ -121,36 +105,13 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     // Step 5: D4 — 用验证卡 testid 作哨兵（D4 字段标签含括号，比文本匹配更稳）。
     await expect(page.locator('[data-e2e="d4-verification-card"]')).toBeVisible({ timeout: 10000 });
 
-    // 12 阶段 DAG 结构断言（rec-dag-stage-{index} + data-status）。
-    await expect(page.locator('[data-e2e="rec-dag-stage-1"]')).toBeVisible({ timeout: 20000 });
-    for (let i = 1; i <= 12; i++) {
-      const stage = page.locator(`[data-e2e="rec-dag-stage-${i}"]`);
-      await expect(stage).toBeVisible();
-      const status = await stage.getAttribute("data-status");
-      expect(["pending", "running", "done", "skipped", "error"]).toContain(status);
-    }
-    // 输出阶段恒为 done；LLM 融合阶段随凭证状态。
-    await expect(page.locator('[data-e2e="rec-dag-stage-12"]')).toHaveAttribute("data-status", "done");
-    await expect(page.locator('[data-e2e="rec-dag-stage-11"]')).toHaveAttribute(
-      "data-status",
-      llm ? "done" : "skipped",
-    );
-
-    // provenance + AI 采纳（推荐非空时采纳首条，留痕含来源）。
-    const recSourceCount = await page.locator('[data-e2e^="rec-source-"]').count();
-    let adopted = false;
+    // D4 根因由工程师手动填写（AI 推荐断言已拆分至 capa-story-ai-recommend.spec.ts）。
     const d4Textarea = page.locator("textarea").first();
-    if (recSourceCount > 0) {
-      await page.locator('[data-e2e="d4-adopt"]').first().click();
-      // 采纳后 d4_root_cause 被服务端追加并 refresh，textarea 反映非空即采纳成功。
-      await expect(d4Textarea).not.toHaveValue("", { timeout: 10000 });
-      adopted = true;
-    } else {
-      await d4Textarea.fill("现场根因：螺栓孔径定位销磨损导致孔径偏大");
-      await d4Textarea.evaluate((el: any) => el.blur());
-    }
+    await d4Textarea.fill("现场根因：螺栓孔径定位销磨损导致孔径偏大");
+    await d4Textarea.evaluate((el: any) => el.blur());
 
-    // 现场验证卡：记录方法/结果/证据，标记已验证（root_cause_text 预填当前 d4_root_cause）。
+    // 现场验证卡：记录方法/结果/证据，标记已验证。
+    // TODO(B7/B8): 切片 B 落地后补充 method / conclusion / retry_count 子流程断言。
     await page.locator('[data-e2e="d4-verification-new"]').click();
     await page.locator('[data-e2e="verification-method"] input').fill("三坐标测量机复测孔径 + 定位销磨损量");
     await page.locator('[data-e2e="verification-result"] textarea').fill("孔径实测 8.12mm 超差，定位销磨损 0.07mm，根因验证通过");
@@ -243,19 +204,6 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
       expect(transitions[i].changed_fields.old_status).toBe(expectedTransitions[i][0]);
       expect(transitions[i].changed_fields.new_status).toBe(expectedTransitions[i][1]);
       expect(transitions[i].operated_by).toBe(expectedTransitions[i][2]);
-    }
-
-    // AI 采纳留痕（含来源 + 阶段）。
-    const adopts = logs.filter((l) => l.action === "ADOPT_RECOMMENDATION");
-    if (adopted) {
-      expect(adopts.length).toBeGreaterThanOrEqual(1);
-      const a = adopts[0];
-      expect(a.changed_fields.source).toBeTruthy();
-      expect(typeof a.changed_fields.stage_index).toBe("number");
-      expect(a.operated_by).toBe("engineer");
-    } else {
-      // 无推荐可采纳（环境异常）——记录但不阻断核心闭环。
-      console.warn("[capa-story] no D4 recommendation to adopt; ADOPT_RECOMMENDATION assertion skipped");
     }
   });
 });
