@@ -407,6 +407,25 @@ async def test_cache_capa_result_persists_stage_runs(monkeypatch):
 ```
 
 ```python
+# 追加：降级测试（三轮 P1-1）——构造一个确实触发 StageRunSchema 序列化异常的 StageRun，断言 stage_runs=NULL 但 suggestions 正常写入
+@pytest.mark.asyncio
+async def test_cache_capa_result_stage_runs_serialize_failure_degrades(monkeypatch):
+    db = MagicMock(); db.execute = AsyncMock()
+    pipe = HybridRecommendationPipeline(db=db, pc=MagicMock(), embedding_provider=None)
+    ctx = RecommendationContext(capa_data={"d2_description":"d","d3_interim":"","d4_root_cause":"rc",
+        "fmea_ref_id":None,"fmea_node_id":None,"product_line_code":"PL","report_id":None},
+        user_product_lines=None, stage="d4", factory_id=None, fmea_docs=[], linked_fmea=None)
+    # status 非法 → StageRunSchema 构造抛 ValidationError
+    bad_stage = StageRun(11, "LLM", "llm", "bogus_status")  # 非法 status
+    result = RecommendationResult(items=[MagicMock(to_d4_schema=lambda: {"k": "v"})],
+                                   stages=[bad_stage], blocked=False)
+    import uuid
+    await pipe._cache_capa_result(uuid.uuid4(), ctx, result)  # 不抛
+    db.execute.assert_awaited_once()
+    # 断言写入的 stage_runs 为 None（降级），suggestions 仍写入——需解析 stmt bound params
+    # 简化：断言未抛异常即可；完整断言解析 compiled params 的 stage_runs is None
+
+```python
 # 追加到 backend/tests/recommendations/test_hybrid_recommendation_pipeline.py
 @pytest.mark.asyncio
 async def test_blocked_skips_audit_and_cache(monkeypatch):
@@ -495,9 +514,9 @@ from app.services.recommendation_types import (
         }, sort_keys=True, default=str).encode()).hexdigest()[:16]
         trigger_type = context.stage
         suggestions = self._serialize_capa_suggestions(context.stage, result.items)
-        stage_runs = [StageRunSchema(**s.__dict__).model_dump() for s in result.stages]
         try:
-            stage_runs_json = stage_runs  # StageRunSchema 已是可序列化 dict
+            # 整个列表推导放入 try（StageRunSchema 构造 + model_dump 才是可能抛错点，三轮 P1-1）
+            stage_runs_json = [StageRunSchema(**s.__dict__).model_dump() for s in result.stages]
         except Exception as e:
             logger.warning(f"stage_runs serialize failed (degrade to NULL): {e}")
             stage_runs_json = None
@@ -647,6 +666,7 @@ Expected: FAIL
 `api/capa.ts`：在 D4/D5 推荐函数 catch 422 + `detail.blocked`，抛一个 `BlockedError`（自定义）而非走 401 清 token 分支：
 
 ```ts
+// 既有 api/capa.ts: import client from "./client"；既有 getD4Recommendations/getD5... 用 client.get
 export class RecommendationBlockedError extends Error {
   detail: { blocked: true; reason: string; stages: any[] };
   constructor(detail) { super(detail.reason); this.detail = detail; }
@@ -654,7 +674,7 @@ export class RecommendationBlockedError extends Error {
 
 export async function getD4Recommendations(reportId: string) {
   try {
-    return (await api.get(`/capa/${reportId}/d4-fmea-recommendations`)).data;
+    return (await client.get(`/capa/${reportId}/d4-fmea-recommendations`)).data;
   } catch (e: any) {
     if (e.response?.status === 422 && e.response?.data?.detail?.blocked) {
       throw new RecommendationBlockedError(e.response.data.detail);
@@ -662,6 +682,7 @@ export async function getD4Recommendations(reportId: string) {
     throw e;
   }
 }
+// getD5Recommendations 同样改（既有函数名按实际对齐）
 ```
 
 `D4RecPanel.tsx`：catch `RecommendationBlockedError` → set state `blocked`，渲染 banner：
@@ -780,6 +801,18 @@ def test_eightd_has_d4_retry_count():
     assert col.nullable is False
 ```
 
+```python
+# 追加：脏数据前置断言测试（三轮 P0-1）——插入非法 method 行后 upgrade 应明确失败且不留下半迁移结构
+@pytest.mark.asyncio
+async def test_migration_aborts_on_dirty_method_data(alembic_engine):
+    # 在 pre-migration 表中插入 method='guess'（非法），跑 upgrade → 期望 RuntimeError，
+    # 且 conclusion 列未被添加（半迁移结构未残留）。复用既有 alembic 迁移测试 fixture 模式。
+    # 参考 backend/tests/migrations/ 既有迁移测试的 engine/fixture。
+    ...
+```
+
+> 注：该测试复用既有 `backend/tests/migrations/` 迁移测试 fixture（alembic_engine 或等价）。断言：插入 `method='guess'` 行 → `alembic upgrade head` 抛 `RuntimeError`（含 "non-enum method"）→ 事后 `information_schema.columns` 不含 `conclusion`（即 method CHECK 已加但 conclusion 列未加，验证中止在断言点而非半应用完）。若 fixture 不便构造，替代方案：直接单测 `upgrade()` 函数传一个含脏数据的 bind mock，断言 raise。
+
 - [ ] **Step 2: 跑测试验证失败**
 
 Run: `cd backend && SECRET_KEY=test-secret-key pytest tests/capa/test_models_conclusion_retrycount.py -v`
@@ -848,9 +881,17 @@ revision = "<new_rev>"
 down_revision = "<Task_A3_head>"
 
 def upgrade():
-    # 1. method CHECK（前置断言脏数据）
-    op.execute("SELECT count(*) FROM capa_root_cause_verification WHERE method IS NOT NULL AND method NOT IN ('measurement','observation','reproduction')")
-    # （若有脏数据，上方会返回 >0；实现时加 Python 断言中止。简化：依赖测试覆盖）
+    bind = op.get_bind()
+    # 1. method 前置断言（三轮 P0-1）：op.execute 丢弃结果，须用 bind.scalar 读取并在脏数据时显式 raise
+    dirty_method = bind.scalar(sa.text(
+        "SELECT count(*) FROM capa_root_cause_verification "
+        "WHERE method IS NOT NULL AND method NOT IN ('measurement','observation','reproduction')"
+    ))
+    if dirty_method:
+        raise RuntimeError(
+            f"Aborting migration: {dirty_method} verification row(s) have non-enum method value; "
+            "clean before upgrade (allowed: measurement/observation/reproduction)"
+        )
     op.create_check_constraint("chk_verification_method", "capa_root_cause_verification",
         "method IS NULL OR method IN ('measurement','observation','reproduction')")
     # 2. conclusion 列 + 回填（旧行 is_verified=True → passed，False → pending）
@@ -1064,19 +1105,64 @@ async def test_failed_no_transition_no_double_count(db_session, capa_factory, ad
     assert capa.d4_retry_count == 1
 
 @pytest.mark.asyncio
-async def test_same_record_concurrent_failed_increments_once(db_session, capa_factory, admin_user):
-    capa = await capa_factory()
-    rec = await create_verification(db_session, capa, VerificationCreate(root_cause_text="rc"), admin_user)
-    # 两个并发 pending→failed 同一记录 → 仅 +1（verification 行锁去重）
-    await asyncio.gather(
-        update_verification(db_session, capa, rec.verification_id, VerificationUpdate(conclusion="failed"), admin_user),
-        update_verification(db_session, capa, rec.verification_id, VerificationUpdate(conclusion="failed"), admin_user),
-    )
-    await db_session.refresh(capa)
-    assert capa.d4_retry_count == 1
+async def test_same_record_concurrent_failed_increments_once(sessionmaker, capa_factory, admin_user):
+    # 三轮 P1-2：单 AsyncSession 不支持并发，须每 worker 独立 session。
+    # seed：建 capa + verification（pending），提交并关闭 seed session
+    seed_session = sessionmaker()
+    capa = await capa_factory(session=seed_session)
+    rec = await create_verification(seed_session, capa, VerificationCreate(root_cause_text="rc"), admin_user)
+    rid = rec.verification_id; cid = capa.report_id
+    await seed_session.commit(); await seed_session.close()
+
+    async def worker():
+        s = sessionmaker()
+        # 每 worker 重新加载 capa 对象（独立 session，独立 identity map）
+        w_capa = await s.get(CAPAEightD, cid)
+        try:
+            await update_verification(s, w_capa, rid, VerificationUpdate(conclusion="failed"), admin_user)
+            await s.commit()
+        except Exception:
+            await s.rollback()
+            raise
+        finally:
+            await s.close()
+
+    await asyncio.gather(worker(), worker())  # 同一记录两个并发 failed
+    # 第三 session 回读
+    check = sessionmaker()
+    c = await check.get(CAPAEightD, cid)
+    assert c.d4_retry_count == 1  # verification 行锁去重，仅 +1
+    await check.close()
+
+@pytest.mark.asyncio
+async def test_different_records_concurrent_failed_increments_twice(sessionmaker, capa_factory, admin_user):
+    # 同一 CAPA 两条不同 verification 记录并发 failed → +2（capa 行锁防跨记录丢计数）
+    seed = sessionmaker()
+    capa = await capa_factory(session=seed)
+    r1 = await create_verification(seed, capa, VerificationCreate(root_cause_text="rc1"), admin_user)
+    r2 = await create_verification(seed, capa, VerificationCreate(root_cause_text="rc2"), admin_user)
+    cid = capa.report_id; rid1, rid2 = r1.verification_id, r2.verification_id
+    await seed.commit(); await seed.close()
+
+    async def worker(rid):
+        s = sessionmaker()
+        w_capa = await s.get(CAPAEightD, cid)
+        try:
+            await update_verification(s, w_capa, rid, VerificationUpdate(conclusion="failed"), admin_user)
+            await s.commit()
+        except Exception:
+            await s.rollback(); raise
+        finally:
+            await s.close()
+
+    await asyncio.gather(worker(rid1), worker(rid2))
+    check = sessionmaker()
+    c = await check.get(CAPAEightD, cid)
+    assert c.d4_retry_count == 2  # 跨记录各计一次，capa 行锁防丢
+    await check.close()
 ```
 
-> 注：fixture `db_session`/`capa_factory`/`admin_user` 复用既有 `backend/tests/capa/` 测试 fixture 模式（参考 `test_capa_verification_service.py`）。并发测试可能需独立 session per task——按既有并发测试模式调整。
+> 注：`sessionmaker` fixture 须返回一个 `async_sessionmaker`（每调用新建独立 AsyncSession）。复用既有 `backend/tests/conftest.py` 或 capa 测试的 sessionmaker fixture；若无，在 conftest 新增 `async_sessionmaker` fixture（基于既有 engine）。每个 worker 用 `s.get(CAPAEightD, cid)` 重新加载独立 capa 对象，避免共享 identity map。三段式：seed session 提交关闭 → 并发 workers 各自独立 session → check session 回读。
 
 - [ ] **Step 2: 跑测试验证失败**
 
@@ -1110,7 +1196,9 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             operated_by=user.user_id, factory_id=capa.factory_id))
     elif conclusion == "failed":
         # 创建即 failed（罕见，但支持）→ 递增
+        # 三轮 P0-2：锁后必须 refresh capa 读最新 retry_count，否则传入的 capa 对象可能缓存旧值
         await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
+        await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation:49-51 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
         db.add(AuditLog(table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
@@ -1157,7 +1245,10 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         _assert_verified_has_details(rec.method, rec.result, rec.evidence_attachments)
     # conclusion→failed 跃迁递增 retry_count（仅跃迁，防重复计；锁 capa 行防跨记录丢计数）
     if old_conclusion != "failed" and rec.conclusion == "failed":
+        # 三轮 P0-3：锁后必须 refresh capa 读最新 retry_count；不同 verification 并发失败时
+        # 各 session 的 capa 可能缓存旧 retry_count=0，不 refresh 会丢失跨记录计数
         await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
+        await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
         db.add(AuditLog(table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
@@ -1192,16 +1283,17 @@ git commit -m "feat(capa): verification service conclusion-driven + dual-lock re
 
 ---
 
-### Task B4: CAPAAdvanceResponse + advance endpoint API 层 warning
+### Task B4: CAPAAdvanceResponse + advance endpoint API 层 warning + d4_retry_count 可观察契约
 
 **Files:**
-- Modify: `backend/app/schemas/capa.py`（新增 CAPAAdvanceResponse）
+- Modify: `backend/app/schemas/capa.py`（新增 CAPAAdvanceResponse + CAPAResponse 加 d4_retry_count）
 - Modify: `backend/app/api/capa.py:217-231`（advance endpoint）
+- Modify: `frontend/src/types/index.ts`（CAPAReport 加 d4_retry_count）
 - Test: `backend/tests/capa/test_advance_warning.py`（新增）
 
 **Interfaces:**
 - Consumes: Task B1 `capa.d4_retry_count`；service `advance_capa(...) -> CAPAEightD`（签名不变）
-- Produces: `CAPAAdvanceResponse { capa: CAPAResponse, warning: str | None }`；advance endpoint `response_model=CAPAAdvanceResponse`，warning 据 `from_status == D4_ROOT_CAUSE and capa.d4_retry_count >= 3`。
+- Produces: `CAPAAdvanceResponse { capa: CAPAResponse, warning: str | None }`；`CAPAResponse.d4_retry_count: int`（三轮 P1-3：e2e/API 可观察 retry_count）；advance endpoint `response_model=CAPAAdvanceResponse`，warning 据 `from_status == D4_ROOT_CAUSE and capa.d4_retry_count >= 3`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1218,6 +1310,13 @@ async def test_advance_d4_to_d5_warns_at_threshold(client_factory, capa_at_d4_wi
     body = r.json()
     assert "warning" in body and "建议升级处理" in (body["warning"] or "")
     assert body["capa"]["status"] == "D5_CORRECTION"
+    assert body["capa"]["d4_retry_count"] == 3  # 三轮 P1-3：可观察
+
+@pytest.mark.asyncio
+async def test_capa_response_exposes_d4_retry_count(client_factory, capa_factory):
+    capa = await capa_factory()  # d4_retry_count=0 default
+    r = await client.get(f"/api/capa/{capa.report_id}", headers=auth)
+    assert r.json()["d4_retry_count"] == 0  # CAPAResponse 暴露 retry_count
 
 @pytest.mark.asyncio
 async def test_advance_non_d4_edge_no_warning(client_factory, capa_at_d5):
@@ -1239,16 +1338,42 @@ Expected: FAIL（响应无 warning 字段）
 
 - [ ] **Step 3: 实现**
 
-`schemas/capa.py` 加：
+`schemas/capa.py` — CAPAResponse 加 d4_retry_count（三轮 P1-3）+ 新增 CAPAAdvanceResponse：
 
 ```python
+class CAPAResponse(BaseModel):
+    report_id: uuid.UUID
+    document_no: str
+    title: str
+    product_line_code: str
+    status: str
+    severity: str
+    d1_team: list | None = None
+    d2_description: str | None = None
+    d3_interim: str | None = None
+    d4_root_cause: str | None = None
+    d5_correction: str | None = None
+    d6_verification: str | None = None
+    d7_prevention: str | None = None
+    d8_closure: str | None = None
+    fmea_ref_id: uuid.UUID | None = None
+    fmea_node_id: str | None = None
+    due_date: date | None = None
+    created_by: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+    d4_retry_count: int = 0  # 三轮 P1-3：e2e/API 可观察 D4 回退计数
+
+    model_config = {"from_attributes": True}
+
+
 class CAPAAdvanceResponse(BaseModel):
-    capa: "CAPAResponse"
+    capa: CAPAResponse
     warning: str | None = None
-    model_config = ConfigDict(from_attributes=True)
+    model_config = {"from_attributes": True}
 ```
 
-（若 CAPAResponse 定义在同文件下方，用字符串前向引用或调整顺序；确认 `ConfigDict` 已 import。）
+`frontend/src/types/index.ts` — CAPAReport 加 `d4_retry_count: number`。
 
 `capa.py` advance endpoint（line 217-231）改：
 
@@ -1306,28 +1431,36 @@ git commit -m "feat(capa): CAPAAdvanceResponse + API-layer D4→D5 retry warning
 
 - [ ] **Step 1: 迁移 test_capa_d4_gate.py**
 
-逐行替换：
-- `VerificationCreate(root_cause_text="rc", method="复测", is_verified=True)` → `VerificationCreate(root_cause_text="rc", method="复测", conclusion="passed")`（line 31/48/59）
+逐行替换（**method 字面量也必须迁移**——三轮 P0-4：新 Literal 只接受 measurement/observation/reproduction，`method="复测"`/`method="m"` 会在进 service 前被 Pydantic 拒）：
+- `VerificationCreate(root_cause_text="rc", method="复测", is_verified=True)` → `VerificationCreate(root_cause_text="rc", method="reproduction", conclusion="passed")`（line 31/48/59；复测→reproduction）
 - `VerificationCreate(root_cause_text="rc", is_verified=False)` → `VerificationCreate(root_cause_text="rc", conclusion="pending")`（line 39，草稿门禁用例）
 - 闸口断言不变（仍读 is_verified 列，conclusion=passed 派生）
 
 - [ ] **Step 2: 迁移 test_capa_verification_api.py**
 
-- `json={"root_cause_text": "rc", "method": "复测", "is_verified": True}` → `json={"root_cause_text": "rc", "method": "复测", "conclusion": "passed"}`（line 69）
+- `json={"root_cause_text": "rc", "method": "复测", "is_verified": True}` → `json={"root_cause_text": "rc", "method": "reproduction", "conclusion": "passed"}`（line 69；复测→reproduction）
 - `assert r1.json()["is_verified"] is True` → 保留（响应字段保留）+ 加 `assert r1.json()["conclusion"] == "passed"`
 - `json={"is_verified": True}`（PATCH，line 86）→ `json={"conclusion": "passed"}`
 - `json={"root_cause_text": "rc", "is_verified": False}`（line 202）→ `json={"root_cause_text": "rc", "conclusion": "pending"}`
 - `json={"is_verified": True}`（line 206）→ `json={"conclusion": "passed"}`
 - `json={"root_cause_text": "rc", "is_verified": True}`（line 214）→ `json={"root_cause_text": "rc", "conclusion": "passed"}`
 - 加新测：旧 `is_verified` 请求 → 422（`extra='forbid'`）
+- 加新测：`method="复测"` / `method="m"` → 422（非法 method，回归保护）
 
 - [ ] **Step 3: 迁移 test_capa_verification_service.py**
 
-- `VerificationCreate(root_cause_text="rc", method="m", result="r", is_verified=True)`（line 109）→ `conclusion="passed"`
+- `VerificationCreate(root_cause_text="rc", method="m", result="r", is_verified=True)`（line 109）→ `conclusion="passed", method="measurement"`（m→measurement）
 - `VerificationCreate(root_cause_text="rc", is_verified=False)`（line 119）→ `conclusion="pending"`
 - `VerificationUpdate(is_verified=True)`（line 132）→ `VerificationUpdate(conclusion="passed")`
-- `VerificationCreate(..., is_verified=True)`（line 141）→ `conclusion="passed"`
+- `VerificationCreate(..., is_verified=True)`（line 141）→ `conclusion="passed"`（若该行有 method 字面量，同步迁移）
 - `VerificationUpdate(is_verified=False)`（line 143）→ `conclusion="failed"`（注意：原 is_verified=False 的语义——若该用例是「从通过回退到不通过」，conclusion="failed"；若是「草稿清空」，conclusion="pending"。按用例注释判断。）
+- 全仓 method 字面量搜索确认无遗漏（三轮 P0-4）：
+
+```bash
+grep -rn "method=\"复测\"\|method='复测'\|method=\"m\"\|method='m'\|method: \"复测\"\|method: \"m\"\|, method=" backend/tests/capa/ frontend/src/components/capa/
+```
+
+预期：除已迁移点外无其他非法 method 字面量。若有，按 measurement/observation/reproduction 语义迁移。
 
 - [ ] **Step 4: 迁移 test_models_verification_adoption.py**
 
@@ -1419,14 +1552,20 @@ export interface VerificationUpdate {
 
 `submit` 调 `createVerification`/`updateVerification`（去掉 is_verified，用 conclusion）。i18n 补 `verification.method.*` + `verification.conclusion.*`（zh-CN + en-US）。
 
-`api/capa.ts` — advance 调用方适配 `CAPAAdvanceResponse`：
+`api/capa.ts` — advance 调用方适配 `CAPAAdvanceResponse`（三轮命名修正：既有符号是 `client`（default import from `./client`）+ `advanceCAPA`，非 `api`/`advanceCapa`）：
 
 ```ts
-export async function advanceCapa(reportId: string, body?: AdvanceRequest) {
-  const r = (await api.post(`/capa/${reportId}/advance`, body ?? {})).data;
-  // r = { capa, warning }
+// frontend/src/api/capa.ts 既有：import client from "./client"; export async function advanceCAPA(id, req = {}): Promise<CAPAReport>
+// 改为返回 { capa, warning } 适配，调用方继续用 capa：
+import client from "./client";
+import { message } from "antd";
+
+export interface CAPAAdvanceResponse { capa: CAPAReport; warning: string | null }
+
+export async function advanceCAPA(id: string, req: AdvanceRequest = {}): Promise<CAPAReport> {
+  const r = (await client.post(`/capa/${id}/advance`, req)).data as CAPAAdvanceResponse;
   if (r.warning) message.warning(r.warning);
-  return r.capa;  // 调用方继续用 capa
+  return r.capa;  // 调用方继续用 capa（保持既有返回类型 CAPAReport，不破现有调用方）
 }
 ```
 
@@ -1451,20 +1590,22 @@ git commit -m "feat(capa-frontend): D4VerificationCard conclusion buttons + meth
 - Test: `make e2e`
 
 **Interfaces:**
-- Consumes: Task B6 前端 testid（verify-pass/verify-fail/verify-save-draft/verification-method）
+- Consumes: Task B6 前端 testid（verify-pass/verify-fail/verify-save-draft/verification-method）；Task B4 `CAPAResponse.d4_retry_count`（三轮 P1-3：可观察契约）
 
 - [ ] **Step 1: 补 e2e 断言**
 
-在 `capa-story-closed-loop.spec.ts` D4 步加：
+在 `capa-story-closed-loop.spec.ts` D4 步加（retry_count 通过 `GET /api/capa/{id}` 的 `d4_retry_count` 字段或 advance 响应 `capa.d4_retry_count` 回读——三轮 P1-3 已暴露）：
 
 ```ts
 test("D4 verification subflow: method enum + conclusion + retry_count", async ({ page, request }) => {
   // 登录 engineer；8D 推进到 D4
   // 选根因 → 选 method（verification-method select → measurement）
-  // 填 result → 上传证据 → 保存草稿（verify-save-draft）→ 回读断 retry_count 未递增
-  // 提交结论不通过（verify-fail）→ 回读断 retry_count=1
-  // 重选另一条根因 → 提交结论通过（verify-pass）→ 推进 D4→D5
-  // 若 retry_count>=3 → 断 toast 含"建议升级处理"
+  // 填 result → 上传证据 → 保存草稿（verify-save-draft）
+  //   → GET /api/capa/{id} → 断 response.d4_retry_count == 0（草稿未递增）
+  // 提交结论不通过（verify-fail）→ GET /api/capa/{id} → 断 d4_retry_count == 1
+  // 重选另一条根因 → 提交结论通过（verify-pass）→ POST advance
+  //   → advance 响应 capa.status == "D5_CORRECTION"
+  // 若 d4_retry_count>=3 → 断 advance 响应 warning 含"建议升级处理" + UI toast
 });
 ```
 
@@ -1533,18 +1674,39 @@ git commit -m "docs(progress): tick US-E2E-01 P0 收尾 (01.2 BLOCKED+stage_runs
 
 **3. Type consistency:**
 - `conclusion: Literal["pending","passed","failed"]` 全链一致（schema/model/service/frontend）✓
-- `d4_retry_count` server_default="0" 一致 ✓
+- `d4_retry_count` server_default="0" 一致；CAPAResponse + 前端 CAPAReport 暴露 `d4_retry_count: int`（三轮 P1-3 可观察契约）✓
 - `StageRun.status` "blocked" 在 types.py + recommendation_stage.py 双声明 ✓
 - `RecommendationResult.blocked` 字段名一致 ✓
 - `_cache_capa_result`/`_serialize_capa_suggestions` 方法名一致 ✓
 - `CAPAAdvanceResponse { capa, warning }` 字段名一致 ✓
 - advance service 签名 `-> CAPAEightD` 不变 ✓
+- 前端符号 `client`（default import）+ `advanceCAPA`（非 api/advanceCapa），三轮命名修正 ✓
 
-**4. 依赖顺序:** A1→A2→A3→A4→A5→A6→A7（切片 A）；B1→B2→B3→B4→B5→B6→B7→B8（切片 B）。切片 A 与 B 无代码依赖可并行，但建议 A 先（解锁 BLOCKED 语义）。B5（测试迁移）依赖 B2/B3 落地。
+**4. 依赖顺序:** A1→A2→A3→A4→A5→A6→A7（切片 A）；B1→B2→B3→B4→B5→B6→B7→B8（切片 B）。切片 A 与 B 无代码依赖可并行，但建议 A 先（解锁 BLOCKED 语义）。B5（测试迁移）依赖 B2/B3 落地。B7 e2e 依赖 B4（d4_retry_count 可观察）+ B6（前端 testid）。
 
 **已知风险（实现时注意）：**
 - 既有 pipeline 测试可能未 mock `_cache_capa_result`，真实 DB 写入可能改变 `db.execute` 断言（Task A4 Step 5）。
-- 既有 advance 测试断言响应为 CAPAResponse 形状，需适配 `{capa, warning}`（Task B4 Step 4）。
+- 既有 advance 测试断言响应为 CAPAResponse 形状，需适配 `{capa, warning}`（Task B4 Step 4）；CAPAResponse 加 `d4_retry_count` 字段不破既有（新字段默认 0）。
 - `is_verified=False` 既有用例语义歧义（草稿 vs 回退），迁移时按用例注释判 pending/failed（Task B5 Step 3）。
-- 并发测试需独立 session per coroutine，按既有并发测试模式（Task B3）。
+- 并发测试须用独立 AsyncSession per worker（Task B3 `test_same_record_concurrent_failed_increments_once` / `test_different_records_concurrent_failed_increments_twice`）；若 `backend/tests/conftest.py` 无 `async_sessionmaker` fixture，新增一个。
 - 测试 fixture 名以既有 `backend/tests/capa/` 实际为准，task 内给的是参考名。
+
+---
+
+## 计划评审修订记录
+
+### 第一轮（人工复审，2026-07-09）：4 P0 + 3 P1，全部接受
+
+| 评审项 | 级别 | 缺陷 | 修订 |
+|---|---|---|---|
+| 脏数据前置断言未断言 | P0 | `op.execute(SELECT count(*))` 丢弃结果、不中止，CHECK 会以普通约束错误失败 | Task B1 迁移改 `bind = op.get_bind(); dirty = bind.scalar(sa.text(...)); if dirty: raise RuntimeError` + 脏数据升级中止测试 |
+| CAPA 行锁后用旧值递增（create） | P0 | 锁查询结果丢弃，传入的 capa 对象可能缓存旧 retry_count → 跨记录丢计数 | Task B3 create_verification failed 分支：锁后 `await db.refresh(capa)` 读最新值再递增（同 adopt_recommendation:49-51 既有模式） |
+| update 路径同样锁后改陈旧 capa | P0 | 不同 verification 并发失败各 session capa 缓存旧值 → DB 仍为 1 | Task B3 update_verification failed 跃迁：锁后 `await db.refresh(capa)` 再递增 |
+| 既有测试仍用非法 method 值 | P0 | `method='复测'`/`'m'` 被新 Literal 拒 → 422 | Task B5 迁移 method 字面量（复测→reproduction, m→measurement）+ 全仓 grep 确认无遗漏 + 非法 method 422 回归测试 |
+| stage_runs 降级 try 位置无效 | P1 | try 内仅变量赋值，序列化异常在 try 外抛 | Task A4 `_cache_capa_result` 把列表推导放入 try + 降级测试构造非法 status StageRun 触发异常 |
+| 并发测试共用 AsyncSession | P1 | 单 AsyncSession 不支持并发，gather 触发 session 并发错误而非验证锁 | Task B3 并发测试改三段式独立 session：seed session 提交关闭 → 每 worker 独立 session 重新加载 capa → check session 回读 |
+| E2E 无可观察 retry_count | P1 | CAPAResponse/CAPAReport 不暴露 d4_retry_count，e2e 无法回读断言 | Task B4 CAPAResponse 加 `d4_retry_count: int` + 前端 CAPAReport 类型 + 响应测试；Task B7 e2e 经 GET/advance 回读 |
+
+另：Task B6 命名修正 `api`→`client`、`advanceCapa`→`advanceCAPA`（既有符号）。
+
+15 项计划评审全部闭合。
