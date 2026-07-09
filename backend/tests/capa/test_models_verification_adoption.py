@@ -29,7 +29,7 @@ async def test_can_persist_three_new_tables(db, default_factory, admin_user):
 
     rcv = CapaRootCauseVerification(
         verification_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=default_factory.id,
-        root_cause_text="螺栓尺寸超差", method="千分尺复测", result="4/5 超差",
+        root_cause_text="螺栓尺寸超差", method="measurement", result="4/5 超差",
         is_verified=True, verified_by=admin_user.user_id,
     )
     db.add(rcv)

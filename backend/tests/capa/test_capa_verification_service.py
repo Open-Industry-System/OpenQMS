@@ -106,7 +106,7 @@ async def test_adopt_different_item_ref_not_deduped(db, default_factory, admin_u
 @pytest.mark.asyncio
 async def test_create_verification_is_verified_sets_verifier(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    req = VerificationCreate(root_cause_text="rc", method="m", result="r", is_verified=True)
+    req = VerificationCreate(root_cause_text="rc", method="measurement", result="r", is_verified=True)
     rec = await create_verification(db, capa, req, admin_user)
     assert rec.is_verified is True
     assert rec.verified_by == admin_user.user_id
@@ -126,7 +126,7 @@ async def test_create_verification_not_verified_no_verifier(db, default_factory,
 @pytest.mark.asyncio
 async def test_update_flip_false_to_true_sets_verifier(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", method="复测"), admin_user)
+    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", method="measurement"), admin_user)
     assert rec.verified_by is None
     updated = await update_verification(db, capa, rec.verification_id,
                                         VerificationUpdate(is_verified=True), admin_user)
@@ -138,7 +138,7 @@ async def test_update_flip_false_to_true_sets_verifier(db, default_factory, admi
 @pytest.mark.asyncio
 async def test_update_flip_true_to_false_clears_verifier(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", method="复测", is_verified=True), admin_user)
+    rec = await create_verification(db, capa, VerificationCreate(root_cause_text="rc", method="measurement", is_verified=True), admin_user)
     updated = await update_verification(db, capa, rec.verification_id,
                                         VerificationUpdate(is_verified=False), admin_user)
     assert updated.is_verified is False
@@ -151,7 +151,7 @@ async def test_update_explicit_null_clears_method_and_result(db, default_factory
     # PATCH {method: null, result: null} 应清空，而非被当作省略跳过
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     rec = await create_verification(db, capa, VerificationCreate(
-        root_cause_text="rc", method="千分尺", result="超差"), admin_user)
+        root_cause_text="rc", method="measurement", result="超差"), admin_user)
     updated = await update_verification(db, capa, rec.verification_id,
                                         VerificationUpdate(method=None, result=None), admin_user)
     assert updated.method is None
@@ -163,10 +163,10 @@ async def test_update_omitted_fields_preserved(db, default_factory, admin_user):
     # PATCH 只改 method，省略的 result 应保持原值
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     rec = await create_verification(db, capa, VerificationCreate(
-        root_cause_text="rc", method="千分尺", result="超差"), admin_user)
+        root_cause_text="rc", method="measurement", result="超差"), admin_user)
     updated = await update_verification(db, capa, rec.verification_id,
-                                        VerificationUpdate(method="卡尺"), admin_user)
-    assert updated.method == "卡尺"
+                                        VerificationUpdate(method="observation"), admin_user)
+    assert updated.method == "observation"
     assert updated.result == "超差"
 
 

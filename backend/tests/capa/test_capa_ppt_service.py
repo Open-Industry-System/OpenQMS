@@ -40,7 +40,7 @@ async def test_generate_content_with_verification_and_evidence(db, admin_user, d
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     db.add(CapaRootCauseVerification(
         verification_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=default_factory.id,
-        root_cause_text="根因A", method="复现", result="复现成功", is_verified=True,
+        root_cause_text="根因A", method="reproduction", result="复现成功", is_verified=True,
         evidence_attachments=[{"filename": "evidence.png", "content_type": "image/png"}],
     ))
     await db.flush()

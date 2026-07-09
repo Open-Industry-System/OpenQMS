@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,7 @@ class CAPAEightD(Base):
     )
     status: Mapped[str] = mapped_column(String(20), default="D1_TEAM")
     severity: Mapped[str] = mapped_column(String(20), default="general")
+    d4_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     d1_team: Mapped[dict] = mapped_column(JSONB, default=lambda: [])
     d2_description: Mapped[str | None] = mapped_column(Text)
     d3_interim: Mapped[str | None] = mapped_column(Text)
@@ -44,6 +45,16 @@ class CAPAEightD(Base):
 
 class CapaRootCauseVerification(Base):
     __tablename__ = "capa_root_cause_verification"
+    __table_args__ = (
+        CheckConstraint(
+            "method IS NULL OR method IN ('measurement','observation','reproduction')",
+            name="chk_verification_method",
+        ),
+        CheckConstraint(
+            "conclusion IN ('pending','passed','failed')",
+            name="chk_verification_conclusion",
+        ),
+    )
     verification_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
     factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
@@ -51,6 +62,7 @@ class CapaRootCauseVerification(Base):
     method: Mapped[str | None] = mapped_column(Text)
     result: Mapped[str | None] = mapped_column(Text)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    conclusion: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     evidence_attachments: Mapped[list] = mapped_column(JSONB, default=lambda: [])
     source_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     verified_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
