@@ -76,7 +76,12 @@ async def capa_with_fmea(db, default_factory, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_d4_recommend_response_includes_stages(admin_client, capa_with_fmea):
+async def test_d4_recommend_response_includes_stages(monkeypatch, admin_client, capa_with_fmea):
+    async def _fake_build_client(db):
+        from unittest.mock import MagicMock
+        return MagicMock()
+    monkeypatch.setattr("app.services.agent.provider_adapter.build_client", _fake_build_client)
+
     capa, _ = capa_with_fmea
     resp = await admin_client.get(
         f"/api/capa/{capa.report_id}/d4-fmea-recommendations"
@@ -96,7 +101,12 @@ async def test_d4_recommend_response_includes_stages(admin_client, capa_with_fme
 
 
 @pytest.mark.asyncio
-async def test_d5_recommend_response_includes_stages(admin_client, capa_with_fmea):
+async def test_d5_recommend_response_includes_stages(monkeypatch, admin_client, capa_with_fmea):
+    async def _fake_build_client(db):
+        from unittest.mock import MagicMock
+        return MagicMock()
+    monkeypatch.setattr("app.services.agent.provider_adapter.build_client", _fake_build_client)
+
     capa, _ = capa_with_fmea
     resp = await admin_client.get(
         f"/api/capa/{capa.report_id}/d5-fmea-recommendations"
