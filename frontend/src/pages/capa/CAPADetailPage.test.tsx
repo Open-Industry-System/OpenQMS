@@ -214,3 +214,59 @@ describe("CAPADetailPage AI draft integration", () => {
     });
   });
 });
+
+describe("CAPADetailPage 生成PPT button visibility", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
+      ai_draft_enabled: false,
+      llm_provider: null,
+    });
+  });
+
+  it("engineer (capa=2 CREATE) sees 生成PPT button on D8_CLOSURE", async () => {
+    useAuthStore.setState({
+      user: { user_id: "u1", username: "engineer", role_key: "quality_engineer",
+              permissions: { capa: 2 } } as any,  // CREATE level
+      token: "test-token",
+    });
+    const closedCapa = { ...mockCapa, status: "D8_CLOSURE", d8_closure: "已关闭" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(closedCapa as any);
+
+    renderPage();
+    await waitFor(() => expect(screen.getByDisplayValue(/已关闭/)).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByRole("button", { name: /Generate PPT|生成 PPT/ })).toBeInTheDocument();
+  });
+
+  it("viewer (capa=1 VIEW) does NOT see 生成PPT button on D8_CLOSURE", async () => {
+    useAuthStore.setState({
+      user: { user_id: "u1", username: "viewer", role_key: "viewer",
+              permissions: { capa: 1 } } as any,  // VIEW only
+      token: "test-token",
+    });
+    const closedCapa = { ...mockCapa, status: "D8_CLOSURE", d8_closure: "已关闭" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(closedCapa as any);
+
+    renderPage();
+    await waitFor(() => expect(screen.getByDisplayValue(/已关闭/)).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.queryByRole("button", { name: /Generate PPT|生成 PPT/ })).not.toBeInTheDocument();
+  });
+
+  it("engineer (capa=2) does NOT see 生成PPT button on D7_PREVENTION (not closed)", async () => {
+    useAuthStore.setState({
+      user: { user_id: "u1", username: "engineer", role_key: "quality_engineer",
+              permissions: { capa: 2 } } as any,
+      token: "test-token",
+    });
+    // mockCapa.status 默认 "D2_DESCRIPTION"（未关闭）
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(mockCapa as any);
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/5W2H Problem Description/)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /Generate PPT|生成 PPT/ })).not.toBeInTheDocument();
+  });
+});
+

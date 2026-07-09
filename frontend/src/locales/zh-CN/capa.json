@@ -280,6 +280,17 @@
   "relatedCapa": {
     "title": "关联 CAPA"
   },
+  "ppt": {
+    "generate": "生成 PPT",
+    "llmNotConfigured": "大模型未配置，已跳过自动审核",
+    "needsReview": "经 {rounds} 轮审核仍需人工复核",
+    "generated": "PPT 已生成（审核通过，{rounds} 轮）",
+    "generateFailed": "PPT 生成失败",
+    "reviewReport": "审查报告",
+    "issues": "问题",
+    "suggestions": "建议",
+    "needsReviewRuleIssues": "内容校验未通过，需人工复核（见审查报告）"
+  },
   "dag": {
     "title": "推荐生成链路",
     "stageNames": {

@@ -163,6 +163,15 @@ export interface CAPAReport {
 
 export type CAPAListResponse = PaginatedResponse<CAPAReport>;
 
+export interface ReviewSkill {
+  skill_id: string;
+  tenant_schema: string | null;
+  name: string;
+  content: string;
+  version: number;
+  is_active: boolean;
+}
+
 export interface DashboardData {
   kpi: {
     total_fmea: number;

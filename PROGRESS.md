@@ -1,6 +1,6 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-08
+**更新日期**: 2026-07-09
 **当前分支**: `feature/us-e2e-01-spec-a`（US-E2E-01 v8.1 定稿 + gap analysis；基于 `fix/dashboard-admin-pages`）
 **最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）；**系统级 E2E 测试套件 M0+M1 已落地**（见下）；**US-E2E-01 8D 全程闭环特性缺口清单已录入 + 已完成项标注**（见下，6 项已完成 / 11 项待补，可勾选跟踪）
 
@@ -263,6 +263,7 @@
 | US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
 | US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.3 状态机细化切片已交付；method 枚举+回退计数器切片待启动） | — |
 | US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
+| 01.10 PPT 输出 | ✅ 已落地（PPT generator + sub-agent 3-round review + admin review-skill management + frontend） | `feature/us-e2e-01-spec-a` |
 
 ---
 
@@ -290,7 +291,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 ### P3 — 新建
 
 - [ ] **01.9 横向扩散预警新建** — 4 依据并集类似产品检查（同 product_type/共享 FMEA 模式/共享控制计划/同供应商+物料）+ 通知提示 + 状态追踪；`recommendation_sources_extra` 同类型产品 KB 检索可复用
-- [ ] **01.10 PPT 输出新建** — D8 关闭后一键生成 8D 报告 PPT（D1-D8 + 封面 + 联动附录）；引入 PPT 生成依赖（python-pptx）
+- [x] **01.10 PPT 输出新建** — D8 关闭后一键生成 8D 报告 PPT（D1-D8 + 封面 + 联动附录）；前端 `generatePpt` API + 生成按钮（`canCreate('capa')` L2 门控，D8_CLOSURE/ARCHIVED 可见）+ 审核报告 Modal + admin ReviewSkillsPage 已落地（commit `c78d774d`）
 
 ### 配套（非子故事）
 

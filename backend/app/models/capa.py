@@ -95,3 +95,19 @@ class CapaD7NodeAction(Base):
     recommendation_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # US-E2E-01.3：node-action 执行生命周期（pending→executed→verified）；本切片止于 pending
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+
+
+class CapaPptExport(Base):
+    __tablename__ = "capa_ppt_export"
+    export_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    tenant_schema: Mapped[str | None] = mapped_column(String(63))
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    generated_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    version: Mapped[str] = mapped_column(String(40), nullable=False)  # YYYYMMDDTHHMMSSZ
+    file_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 恒 None（不落盘）
+    review_status: Mapped[str] = mapped_column(String(20), default="skipped", nullable=False)
+    review_rounds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    review_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

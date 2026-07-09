@@ -261,7 +261,66 @@ FastAPI 自动生成交互式 API 文档：
 
 ---
 
-## 8. 已知限制
+## 8. 8D PPT 输出与审查 Skill 管理
+
+### 8.1 8D 报告 PPT 生成
+
+D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封面 + D1-D8 各页 + 联动附录（根因验证证据附件）。
+
+**数据流**：
+
+```
+用户点击「生成 PPT」→ POST /api/capa/{id}/ppt-export
+  ├── capa_ppt_service.generate_content()  → 从 capa_eightd 各 D 步字段组装 PptContent
+  ├── capa_ppt_review_service.review_and_correct() → 规则校验 + 3 轮 LLM 审查闭环
+  │     ├── 规则校验：_validate_ppt_content() 返回 issues，触发 regenerate-from-DB
+  │     ├── 第 1 轮：LLM 审查内容质量 → 返回 issues + suggestions
+  │     ├── 第 2 轮：regenerate_from_db() → 从数据库重新生成 PptContent（非 LLM 改写）
+  │     └── 第 3 轮：LLM 最终审查 → 返回 review_status (skipped/passed/needs_review)
+  ├── capa_ppt_service.render_pptx()     → 生成 .pptx 字节流
+  └── 写入 capa_ppt_export 表 + AuditLog
+```
+
+**关键表**：
+
+| 表 | 说明 |
+|----|------|
+| `capa_ppt_export` | PPT 导出记录（export_id、capa_id、factory_id、tenant_schema、generated_at、generated_by、version `YYYYMMDDTHHMMSSZ`、file_url 恒为 `None`、review_status、review_rounds、review_report JSONB、created_at） |
+| `agent_review_skill` | 审查 skill 配置（skill_id、tenant_schema 租户隔离、`name` 固定为 `capa_ppt_review`、content Text、version、is_active、updated_by、updated_at、created_at；唯一性由 `COALESCE(tenant_schema, '')` 表达式索引保证） |
+
+**权限**：
+- 生成按钮：`canCreate('capa')`（L2，quality_engineer 及以上）
+- 可见状态：仅 D8_CLOSURE / ARCHIVED 状态可见
+- 管理页：`require_admin`（admin 角色专属）
+
+### 8.2 审查 Skill 管理
+
+审查 skill 是 LLM 审查的提示词模板，由管理员通过 `/api/admin/review-skills` 端点管理：
+
+- **默认 skill**：迁移 seed 写入 `agent_review_skill` 表（name=`capa_ppt_review`），含 D1-D8 各页审查标准
+- **租户隔离**：按 `tenant_schema` 支持租户级自定义 skill 内容；`name` 固定为 `capa_ppt_review`，未找到租户配置时回退到公共默认
+- **操作**：管理员可读取/更新 skill（`GET /api/admin/review-skills`、`GET /api/admin/review-skills/{name}`、`PUT /api/admin/review-skills/{name}`，无 DELETE 端点）
+- **去重**：按 `name` + `tenant_schema` 去重，租户自定义优先于公共默认
+
+### 8.3 3 轮 LLM 审查闭环
+
+`capa_ppt_review_service` 实现「审查 → 校正 → 再审查」的 3 轮闭环（v3：校正现含 LLM 改写）：
+
+1. **审查**：调用 LLM 审查 PptContent 质量，返回 issues + suggestions
+2. **校正**（分两类）：
+   - 规则 issues（结构/数据缺口）→ `_correct_by_issues()` 重新查数据（`generate_content`）；残留短路 `needs_review`
+   - LLM 内容建议 → `_correct_by_suggestions()` 调 LLM 改写各页 section 的 value（**仅呈现层，不编造数据、不动 linked/verification 落库事实**；结构不符回退原内容）
+3. **最终审查**：LLM 确认校正后的内容，返回 `review_status`（`skipped`/`passed`/`needs_review`）
+
+- **v4 事实真实性保护**：结构校验只能保证页/section/label 不变，无法保证 LLM 未篡改事实值。故**首轮即通过（无校正，内容 DB-faithful）→ `passed`；任何经 LLM 校正采用的内容 → 强制 `needs_review`** + 报告标注「需人工复核确认未编造数据」（守 §70「内容来自落库数据」/§101「不编造数据」）。校正回退原内容（结构不符/破坏规则/LLM 异常）不计为「校正过」，首轮通过仍可 `passed`。
+- 内置规则校验残留 issues（结构/数据缺口，校正无法补全）→ `review_status="needs_review"` + 报告暴露 issues，短路不耗 LLM 轮次；LLM 未配置且无规则 issues → `review_status="skipped"`
+- 校正 LLM 异常 → 不上抛 500：审查已产出报告，仅自动校正失败 → 回退原内容，最终 needs_review + 报告（保留用户可见信息）
+- 审查 LLM 运行时异常（超时/鉴权/响应格式，非「未配置」）属故事 §92 FAILED 条件，不降级为 `needs_review`：异常上抛，API 层转 500 且不落 export 记录
+- 审查结果写入 `capa_ppt_export.review_status` + `review_rounds` + `review_report`
+
+---
+
+## 9. 已知限制
 
 | 限制 | 说明 |
 |------|------|

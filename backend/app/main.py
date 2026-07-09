@@ -10,6 +10,7 @@ from app.api import agent as agent_api
 from app.api.admin import ai_config as admin_ai_config_api
 from app.api.admin import logs as admin_logs_api
 from app.api.admin import permissions as admin_permissions_api
+from app.api.admin import review_skills as admin_review_skills_api
 from app.api.apqp import router as apqp_router
 from app.api.audit_finding import router as audit_finding_router
 from app.api.audit_plan import router as audit_plan_router
@@ -434,6 +435,7 @@ app.include_router(graph_router)
 app.include_router(admin_permissions_api.router)
 app.include_router(admin_ai_config_api.router)
 app.include_router(admin_logs_api.router)
+app.include_router(admin_review_skills_api.router)
 app.include_router(agent_api.router)
 app.include_router(search_router)
 app.include_router(change_impact_router)

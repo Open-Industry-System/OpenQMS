@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -11,7 +12,8 @@ from app.core.factory_scope import check_factory_access, check_product_line_acce
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.core.tenant import tenant_schema
 from app.database import get_db
-from app.models.capa import CAPAEightD
+from app.models.audit import AuditLog
+from app.models.capa import CAPAEightD, CapaPptExport
 from app.models.fmea import FMEADocument
 from app.schemas.capa import (
     AdvanceRequest,
@@ -23,6 +25,7 @@ from app.schemas.capa import (
     D5RecommendationResponse,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.capa_ppt import PptExportDetailResponse
 from app.schemas.capa_verification import (
     AdoptRequest, AdoptResponse, D7AutoFillRequest, D7AutoFillResponse,
     D7NodeActionCreate, D7NodeActionResponse,
@@ -31,13 +34,15 @@ from app.schemas.capa_verification import (
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.schemas.recommendation_stage import StageRunSchema
 from app.services import capa_d7_action_service
-from app.services import capa_service
+from app.services import capa_ppt_review_service, capa_ppt_service, capa_service
 from app.services import capa_verification_service
 from app.services.capa_d7_action_service import ConflictError
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
+from app.services.agent import provider_adapter
 from app.state_machines.eightd_state import EightDState, _linear_next_safe
+from app.utils.pptx import pptx_response
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
 
@@ -793,3 +798,97 @@ async def d7_auto_fill_ep(
                               prevention_control_node_id=info["prevention_control_node_id"],
                               prevention_control_name_after=info["prevention_control_name_after"],
                               is_new_control=info["is_new_control"])
+
+
+@router.post("/{report_id}/ppt-export")
+async def export_ppt(
+    report_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(404, "CAPA 不存在")
+    check_factory_access(capa.factory_id, scope)
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.CREATE:  # engineer+（L2=CREATE，seed quality_engineer capa=2）
+        raise HTTPException(403, "生成权限不足（需 engineer+）")
+    if capa.status not in (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value):
+        raise HTTPException(400, "8D 未关闭，不可生成 PPT")
+
+    # 预生成 export 元数据
+    export_id = uuid.uuid4()
+    generated_at = datetime.now(UTC)
+    version = generated_at.strftime("%Y%m%dT%H%M%SZ")
+    tenant = tenant_schema(request)
+
+    # 解析 LLM provider client（None = 未配置）
+    try:
+        pc = await provider_adapter.build_client(db)
+    except provider_adapter.ProviderNotConfiguredError:
+        pc = None
+
+    # 审查闭环 + 渲染：审查闭环异常（非 LLM 缺失）/ 渲染失败均属故事 §92 FAILED 条件 → 500，不落 export
+    try:
+        content, review = await capa_ppt_review_service.review_and_correct(
+            db, report_id, pc, tenant,
+        )
+        # 最终渲染一次（审查后 review_status 已知）
+        meta = capa_ppt_service.ExportMeta(
+            export_id=export_id, version=version,
+            generated_at=generated_at, generated_by=scope.user.user_id,
+        )
+        pptx_bytes = capa_ppt_service.render_pptx(content, meta, review.status, review.rounds)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(500, "PPT 生成失败（审查闭环异常或渲染失败）")
+
+    # 写 capa_ppt_export + PPT_GENERATED 审计
+    export = CapaPptExport(
+        export_id=export_id, capa_id=report_id, factory_id=capa.factory_id,
+        tenant_schema=tenant, generated_at=generated_at, generated_by=scope.user.user_id,
+        version=version, file_url=None,
+        review_status=review.status, review_rounds=review.rounds, review_report=review.report,
+    )
+    db.add(export)
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=report_id, action="PPT_GENERATED",
+        changed_fields={"export_id": str(export_id), "version": version,
+                        "review_status": review.status, "review_rounds": review.rounds},
+        operated_by=scope.user.user_id, factory_id=capa.factory_id, tenant_schema=tenant,
+    ))
+    await db.commit()
+
+    headers = {
+        "X-PPT-Review-Status": review.status,
+        "X-PPT-Review-Rounds": str(review.rounds),
+        "X-PPT-Export-Id": str(export_id),
+    }
+    return pptx_response(pptx_bytes, f"8D_{capa.document_no}_{version}.pptx", headers)
+
+
+@router.get("/{report_id}/ppt-exports/{export_id}", response_model=PptExportDetailResponse)
+async def get_ppt_export(
+    report_id: uuid.UUID,
+    export_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(404, "CAPA 不存在")
+    check_factory_access(capa.factory_id, scope)
+    export = await capa_ppt_service.get_export(db, export_id, report_id)
+    if export is None:
+        raise HTTPException(404, "PPT 生成记录不存在")
+    return PptExportDetailResponse(
+        export_id=str(export.export_id), capa_id=str(export.capa_id),
+        generated_at=export.generated_at, generated_by=str(export.generated_by),
+        version=export.version, review_status=export.review_status,
+        review_rounds=export.review_rounds, review_report=export.review_report,
+    )

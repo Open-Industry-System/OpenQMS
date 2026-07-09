@@ -264,22 +264,85 @@ git commit -m "feat(recommend): orchestrator BLOCKED when pc=None + _blocked_sta
 **Interfaces:**
 - Produces: `RecommendationCache.stage_runs: Mapped[list] = JSONB nullable`。迁移 `ALTER TABLE recommendation_cache ADD COLUMN stage_runs JSONB`。
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: 写失败测试 + 迁移测试基础设施（三轮 P1-2：A3 是首个迁移任务，在此创建 `backend/tests/migrations/` 基础设施，B1 复用）**
 
 ```python
-# backend/tests/migrations/test_migration_cache_stage_runs.py
+# backend/tests/migrations/conftest.py（新增——三轮 P1-2：仓库无 backend/tests/migrations/，
+# 本任务（A3，首个迁移）新建完整 PostgreSQL 迁移测试基础设施。不用 SQLite：CHECK/JSONB/
+# pg_constraint/information_schema 无 SQLite 等价。用一次性 PG 库避免污染共享测试库。B1 复用此 fixture。）
+import uuid
 import pytest
+from sqlalchemy import create_engine, text
 from alembic import command
 from alembic.config import Config
+from tests.conftest import _test_db_url  # 既有模块级变量（TEST_DATABASE_URL 或 settings.DATABASE_URL）
 
-@pytest.mark.asyncio
-async def test_stage_runs_column_added_and_removed(clean_alembic_db):
-    # upgrade 后 stage_runs 列存在；downgrade 后移除。复用既有迁移测试 fixture 模式
-    # 参考既有 backend/tests/migrations/ 下其他迁移测试的 fixture
-    ...
+def _parse_pg(url: str) -> dict:
+    from urllib.parse import urlparse
+    p = urlparse(url.replace("asyncpg+postgresql://", "postgresql://"))
+    return {"host": p.hostname, "port": p.port or 5432, "user": p.username,
+            "password": p.password, "dbname": p.path.lstrip("/")}
+
+@pytest.fixture
+def mig_db_url():
+    """创建一次性 PG 库（空，不 apply 任何迁移），返回 async URL。teardown DROP 该库。
+    各测试自行 command.upgrade(_cfg(mig_url), <target>) apply 到所需版本——A3 测 head，
+    B1 测先 upgrade 到 <Task_A3_head> 再插脏数据再 upgrade head。B1 复用此 fixture（不重建 conftest）。"""
+    pg = _parse_pg(_test_db_url)
+    mig_dbname = f"qms_migtest_{uuid.uuid4().hex}"
+    admin = create_engine(f"postgresql+psycopg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/postgres",
+                          isolation_level="AUTOCOMMIT")
+    with admin.connect() as c:
+        c.execute(text(f'CREATE DATABASE "{mig_dbname}"'))
+    admin.dispose()
+    mig_url = f"asyncpg+postgresql://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/{mig_dbname}"
+    try:
+        yield mig_url
+    finally:
+        admin = create_engine(f"postgresql+psycopg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/postgres",
+                              isolation_level="AUTOCOMMIT")
+        with admin.connect() as c:
+            c.execute(text(f'DROP DATABASE IF EXISTS "{mig_dbname}"'))
+        admin.dispose()
 ```
 
-> 注：本仓库迁移测试模式参考既有 `backend/tests/migrations/` 文件（如 lessons↔capa_verif 迁移测试）。实现时复用其 fixture（`clean_alembic_db` 或等价），断言 `information_schema.columns` 含 `stage_runs`。
+> **三轮 P1-2**：`mig_db_url` fixture 只创建空一次性 PG 库（不 apply 迁移），各测试自行 `command.upgrade(_cfg(mig_url), <target>)`。A3/B1 共用此 fixture（B1 复用，不重建 conftest）。`_cfg` helper 定义在 conftest 供同目录测试导入（`from .conftest import _cfg` 或各测试文件自定义 4 行 `_cfg`，二选一；推荐各测试文件自定义避免跨文件导入）。`backend/alembic/env.py` 须读 `config.get_main_option("sqlalchemy.url")`（非硬编码）——本任务在 env.py 加 `url = config.get_main_option("sqlalchemy.url") or os.environ["DATABASE_URL"]` 兼容；psycopg 须在 backend dev deps（若缺加 `psycopg[binary]` 到 requirements）。二者计入 A3 commit。
+
+```python
+# backend/tests/migrations/test_migration_cache_stage_runs.py（新增，完整可执行，无 ...）
+import pytest
+import sqlalchemy as sa
+from alembic import command
+from alembic.config import Config
+from sqlalchemy.ext.asyncio import create_async_engine
+
+def _cfg(mig_url: str) -> Config:
+    cfg = Config("backend/alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", mig_url.replace("asyncpg+postgresql://", "postgresql+asyncpg://"))
+    return cfg
+
+@pytest.mark.asyncio
+async def test_stage_runs_column_added_and_removed(mig_db_url):
+    """A3：upgrade head → stage_runs 列存在；downgrade -1 → 移除。"""
+    command.upgrade(_cfg(mig_db_url), "head")  # head 含 A3 stage_runs 迁移
+    engine = create_async_engine(mig_db_url)
+    async with engine.connect() as conn:
+        cols = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='recommendation_cache' AND column_name='stage_runs'")))]
+        assert "stage_runs" in cols
+    await engine.dispose()
+    command.downgrade(_cfg(mig_db_url), "-1")
+    engine = create_async_engine(mig_db_url)
+    async with engine.connect() as conn:
+        cols = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='recommendation_cache' AND column_name='stage_runs'")))]
+        assert "stage_runs" not in cols
+    await engine.dispose()
+```
+
+> `_cfg` 从 `backend/tests/migrations/conftest.py` 导入（同目录 pytest 自动发现）。A3 commit 含 `conftest.py` + `test_migration_cache_stage_runs.py` + env.py 兼容 + psycopg 依赖。B1 复用同一 `mig_db_url`/`_cfg`（不再新建 conftest）。
 
 简化版（用模型直接断言，覆盖 create_all 路径）：
 
@@ -817,63 +880,102 @@ def test_eightd_has_d4_retry_count():
 ```
 
 ```python
-# backend/tests/migrations/test_conclusion_retrycount_migration.py（新增文件——三轮 P1-2：
-# 仓库当前无 backend/tests/migrations/，本任务新建该目录 + 迁移测试基础设施）
+# backend/tests/migrations/test_conclusion_retrycount_migration.py（新增，完整可执行，无 ...）
+# 复用 A3 创建的 backend/tests/migrations/conftest.py（mig_db_url fixture）——B1 不重建 conftest。
 import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from sqlalchemy.ext.asyncio import create_async_engine
 
-@pytest.fixture
-def alembic_engine(tmp_path):
-    """新建独立 SQLite/Postgres 测试 engine + 应用 base 元数据到 pre-migration 状态。
-    复用 backend/alembic.ini + backend/alembic/ env.py；若 env.py 硬编码 DB URL，
-    用 monkeypatch/test-INI 覆盖到 tmp_path 上的测试库。参考 backend/tests/conftest.py
-    既有 engine fixture 模式扩展。"""
-    # 实现时：建测试库 → apply 既有迁移到 B1 上一版本（<Task_A3_head>）→ 返回 engine
-    ...
+def _cfg(mig_url: str) -> Config:
+    cfg = Config("backend/alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", mig_url.replace("asyncpg+postgresql://", "postgresql+asyncpg://"))
+    return cfg
 
 @pytest.mark.asyncio
-async def test_migration_aborts_on_dirty_method_data(alembic_engine):
-    """三轮 P1-2：插入非法 method 行后 upgrade 应抛 RuntimeError 且不留半迁移结构。
-    RuntimeError 在 create_check_constraint 之前 raise，故 method CHECK / conclusion 列 /
-    d4_retry_count 列均不应残留（三者都在断言点之后）。"""
-    with alembic_engine.connect() as conn:
-        # 插入脏数据（method='guess'）
-        conn.execute(sa.text("INSERT INTO capa_root_cause_verification "
-                             "(verification_id, capa_id, factory_id, root_cause_text, is_verified, "
-                             "method, result, evidence_attachments, source_ref, created_at, updated_at) "
-                             "VALUES (...)"))  # 按实际列填
-        conn.commit()
-    # 跑 upgrade → 期望抛 RuntimeError
+async def test_migration_aborts_on_dirty_method_data(mig_db_url):
+    """三轮 P1-2：插入非法 method 行后 upgrade 抛 RuntimeError 且三者均未残留
+    （RuntimeError 在首个 create_check_constraint 之前 raise）。"""
+    from sqlalchemy.ext.asyncio import create_async_engine
+    # 1. apply 到 <Task_A3_head>（B1 上一版本，含 capa_root_cause_verification 表 + factories 表）
+    command.upgrade(_cfg(mig_db_url), "<Task_A3_head>")
+    # 2. seed 一行 factory + capa_eightd（INSERT 依赖 factories.id；verification 依赖 capa_eightd.report_id）
+    engine = create_async_engine(mig_db_url)
+    async with engine.connect() as conn:
+        await conn.execute(sa.text(
+            "INSERT INTO factories (id, factory_code, name, tenant_schema, is_active, created_at, updated_at) "
+            "VALUES ('00000000-0000-0000-0000-000000000001', 'TEST', 'Test', 'test', true, now(), now())"))
+        await conn.execute(sa.text(
+            "INSERT INTO capa_eightd (report_id, document_no, title, product_line_code, status, severity, "
+            " factory_id, d1_team, d2_description, d3_interim, d4_root_cause, d5_correction, d6_verification, "
+            " d7_prevention, d8_closure, due_date, created_at, updated_at) "
+            "VALUES (gen_random_uuid(), '8D-TEST-001', 't', 'PL', 'D4_ROOT_CAUSE', '一般', "
+            " '00000000-0000-0000-0000-000000000001', '[]'::jsonb, '', '', '', '', '', '', '', NULL, now(), now())"))
+        # 3. 插入脏数据（method='guess' 非法）——capa_id 引用刚建的 8D（子查询取其 report_id）
+        await conn.execute(sa.text(
+            "INSERT INTO capa_root_cause_verification "
+            "(verification_id, capa_id, factory_id, root_cause_text, is_verified, "
+            " method, result, evidence_attachments, source_ref, created_at, updated_at) "
+            "SELECT gen_random_uuid(), report_id, factory_id, 'rc', false, 'guess', NULL, '[]'::jsonb, NULL, now(), now() "
+            "FROM capa_eightd WHERE document_no='8D-TEST-001'"
+        ))
+        await conn.commit()
+    await engine.dispose()
+    # 4. upgrade head → 触发 B1 → 期望 RuntimeError
     with pytest.raises(RuntimeError, match="non-enum method"):
-        command.upgrade(Config("backend/alembic.ini"), "head")
-    # 断言半迁移结构未残留（三者都不应存在，因 RuntimeError 在首个 create_check_constraint 之前）
-    with alembic_engine.connect() as conn:
-        cols = [r[0] for r in conn.execute(sa.text(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'"))]
-        assert "conclusion" not in cols  # conclusion 列未加
-        assert "d4_retry_count" not in [r[0] for r in conn.execute(sa.text(
-            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'"))]
-        # method CHECK 未创建（断言点之前 raise）——查 pg_constraint 无 chk_verification_method
-        constraints = [r[0] for r in conn.execute(sa.text(
-            "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass"))]
-        assert "chk_verification_method" not in constraints
-        assert "chk_verification_conclusion" not in constraints
+        command.upgrade(_cfg(mig_db_url), "head")
+    # 5. 断言三者均未残留
+    engine = create_async_engine(mig_db_url)
+    async with engine.connect() as conn:
+        cols_v = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'")))]
+        assert "conclusion" not in cols_v
+        cols_e = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'")))]
+        assert "d4_retry_count" not in cols_e
+        cons = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass")))]
+        assert "chk_verification_method" not in cons
+        assert "chk_verification_conclusion" not in cons
+    await engine.dispose()
 
 @pytest.mark.asyncio
-async def test_migration_clean_upgrade_downgrade(alembic_engine_clean):
-    """三轮 P1-2：无脏数据时 upgrade head → method CHECK + conclusion 列 + d4_retry_count 列均存在；
-    downgrade -1 → 三者移除。"""
-    command.upgrade(Config("backend/alembic.ini"), "head")
-    # upgrade 后断言存在（同 test_models_conclusion_retrycount 的 information_schema 断言）
-    ...
-    command.downgrade(Config("backend/alembic.ini"), "-1")
-    # downgrade 后断言移除
-    ...
+async def test_migration_clean_upgrade_downgrade(mig_db_url):
+    """三轮 P1-2：无脏数据 upgrade head → 三者存在；downgrade -1 → 三者移除。"""
+    from sqlalchemy.ext.asyncio import create_async_engine
+    command.upgrade(_cfg(mig_db_url), "head")
+    engine = create_async_engine(mig_db_url)
+    async with engine.connect() as conn:
+        cols_v = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'")))]
+        assert "conclusion" in cols_v
+        cols_e = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'")))]
+        assert "d4_retry_count" in cols_e
+        cons = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass")))]
+        assert "chk_verification_method" in cons
+        assert "chk_verification_conclusion" in cons
+    await engine.dispose()
+
+    command.downgrade(_cfg(mig_db_url), "-1")
+    engine = create_async_engine(mig_db_url)
+    async with engine.connect() as conn:
+        cols_v = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_root_cause_verification'")))]
+        assert "conclusion" not in cols_v
+        cols_e = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='capa_eightd'")))]
+        assert "d4_retry_count" not in cols_e
+        cons = [r[0] for r in (await conn.execute(sa.text(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'capa_root_cause_verification'::regclass")))]
+        assert "chk_verification_method" not in cons
+        assert "chk_verification_conclusion" not in cons
+    await engine.dispose()
 ```
 
-> **三轮 P1-2 修订**：仓库当前**无** `backend/tests/migrations/` 目录，也**无** `alembic_engine` fixture——本任务须新建 `backend/tests/migrations/__init__.py` + `conftest.py`（或扩展 `backend/tests/conftest.py`）提供 `alembic_engine` / `alembic_engine_clean` fixture，并在该 task 的 commit 中一并提交。fixture 实现参考 `backend/tests/conftest.py` 既有 engine fixture + `backend/alembic/env.py`（若 env.py 硬编码 URL，用测试 INI/monkeypatch 覆盖到 tmp_path 测试库）。**修正之前的错误说明**：`RuntimeError` 在首个 `create_check_constraint("chk_verification_method", ...)` **之前** raise（断言点是 upgrade 函数第一行 `bind.scalar(...)` 后的 `if dirty: raise`），故 method CHECK / conclusion 列 / d4_retry_count 列**三者都不应残留**（不是"method CHECK 已加但 conclusion 未加"）。若 PostgreSQL `information_schema`/`pg_constraint` 在测试库不便用，退化用 `Base.metadata` 比对或 SQLAlchemy `inspect(engine).get_columns(...)`。
+> **三轮 P1-2 修订总结**：仓库当前**无** `backend/tests/migrations/`——本任务新建 `backend/tests/migrations/__init__.py` + `conftest.py`（`mig_db_url` fixture：一次性 PG 库，CREATE/DROP via psycopg，apply 到 `<Task_A3_head>`，seed factory）+ `test_conclusion_retrycount_migration.py`（完整测试体，无 `...`）。**不用 SQLite**（CHECK/JSONB/pg_constraint/information_schema 无 SQLite 等价）。`RuntimeError` 在首个 `create_check_constraint` **之前** raise（断言点 = upgrade 第一行 `bind.scalar` 后 `if dirty: raise`），故 method CHECK / conclusion 列 / d4_retry_count 列**三者都不应残留**。env.py 加 `sqlalchemy.url` config 兼容 + psycopg 依赖计入 B1 commit。
 
 - [ ] **Step 2: 跑测试验证失败**
 
@@ -981,12 +1083,12 @@ Expected: 模型测试 PASS；迁移测试 PASS（脏数据中止 + 干净 up/do
 ```bash
 git add backend/app/models/capa.py backend/alembic/versions/<ts>_conclusion_retrycount.py \
   backend/tests/capa/test_models_conclusion_retrycount.py \
-  backend/tests/migrations/__init__.py backend/tests/migrations/test_conclusion_retrycount_migration.py \
-  backend/tests/conftest.py  # 若新增 alembic_engine fixture
-git commit -m "feat(capa): add verification.conclusion + d4_retry_count + CHECK constraints + backfill migration + migration test infra"
+  backend/tests/migrations/test_conclusion_retrycount_migration.py
+# 注：backend/tests/migrations/conftest.py + __init__.py + env.py 兼容 + psycopg 依赖由 A3 commit 已含（B1 复用，不重复 add）
+git commit -m "feat(capa): add verification.conclusion + d4_retry_count + CHECK constraints + backfill migration + conclusion migration test"
 ```
 
-> 三轮 P1-2：本 commit 含新建 `backend/tests/migrations/` 目录 + 迁移测试基础设施（fixture）。
+> 三轮 P1-2：迁移测试基础设施（`backend/tests/migrations/conftest.py` + `__init__.py` + env.py `sqlalchemy.url` 兼容 + psycopg 依赖）由 **A3 commit 已建立**（A3 是首个迁移任务），B1 复用 `mig_db_url` fixture，仅新增 `test_conclusion_retrycount_migration.py`。
 
 ---
 
@@ -1562,17 +1664,29 @@ git commit -m "test(capa): migrate 4 existing test files from is_verified to con
 - [ ] **Step 1: 写失败测试**
 
 ```tsx
-// D4VerificationCard.test.tsx — 改 mock 断言 conclusion + 完整 payload（三轮 P0：按钮须合并表单值）
-it("submits full payload with conclusion=passed via verify-pass", async () => {
-  // render with Form；填 root_cause_text + 选 method=measurement + 填 result="ok"
-  // click verify-pass
-  // 断言 createVerification/updateVerification called with { root_cause_text, method: "measurement", result: "ok", conclusion: "passed", evidence_attachments }（非仅 conclusion）
+// D4VerificationCard.test.tsx — 三轮 P0/P1：覆盖 create(POST) + 既有记录 PATCH 跃迁 + 跨字段校验 + 三态标签
+it("creates verification via POST with conclusion=passed + full payload", async () => {
+  // render 新建 Form；填 root_cause_text + 选 method=measurement + 填 result="ok"
+  // click verify-pass → 断言 createVerification called with { root_cause_text, method: "measurement", result: "ok", conclusion: "passed", evidence_attachments }（完整 payload，非仅 conclusion）
 });
-it("submits conclusion=failed via verify-fail carrying filled fields", async () => {
-  // 填字段 → click verify-fail → 断言 payload 含 method/result + conclusion: "failed"
+it("patches existing record conclusion=failed via list inline button (PATCH not re-POST)", async () => {
+  // render 列表含一条 pending 记录（带 verification_id）
+  // click verify-fail-0（行内按钮）→ 断言 updateVerification called with (capaId, verification_id, { conclusion: "failed" })
+  // 且 createVerification **未**被调用（三轮 P0：跃迁走 PATCH 不重复 POST）
 });
-it("submits conclusion=pending via verify-save-draft (draft allowed empty details)", async () => {
-  // click verify-save-draft → 断言 conclusion: "pending"（草稿不强校验细节）
+it("patches existing draft→passed via list inline button", async () => {
+  // 列表含 pending 记录（已带 method/result/evidence）→ click verify-pass-0
+  // → 断言 updateVerification(capaId, vid, { conclusion: "passed" })（PATCH）
+});
+it("passed submit blocked when all details empty (cross-field validator)", async () => {
+  // render 新建 Form；不填 method/result/evidence → click verify-pass
+  // → 断言 createVerification **未**被调用 + 字段错误显示「至少一项验证细节」（三轮 P1-1）
+});
+it("renders conclusion three-state tag (draft/passed/failed), not 2-state is_verified", async () => {
+  // render 列表含 pending/passed/failed 三条记录 → 断言 verification-conclusion-{i} Tag 文案为草稿/通过/不通过（非 is_verified 二态）
+});
+it("save-draft creates pending record without detail validation", async () => {
+  // click verify-save-draft（不填细节）→ 断言 createVerification called with { conclusion: "pending" }
 });
 it("renders method Select with three options", async () => {
   // assert verification-method select has measurement/observation/reproduction
@@ -1624,39 +1738,133 @@ export interface VerificationUpdate {
 }
 ```
 
-`D4VerificationCard.tsx` — 替换 `is_verified` Switch 为 method Select + 结论按钮。**三轮 P0：按钮必须先取表单值再合并 conclusion 提交**（直接 `submit({ conclusion })` 会丢 method/result/evidence/root_cause_text，导致 passed 因 `_assert_verified_has_details` 返回 400）：
+`D4VerificationCard.tsx` — 既有组件**同时有**：(a) 记录列表（每条带 `is_verified` Switch → `updateVerification`）+ (b) 新建 Form（→ `createVerification`）。**三轮 P0：既有记录的状态跃迁（draft→failed/passed）须走 PATCH updateVerification，不能重复 POST create**。改造分两处：
+
+**(a) 记录列表：conclusion 三态标签 + 行内结论按钮（PATCH 既有记录）**
+
+```tsx
+// 列表项：替换 is_verified Switch 为 conclusion 三态标签 + 行内结论按钮（三轮 P0 + UI 三态建议）
+<List.Item data-e2e={`verification-item-${i}`}>
+  <Space direction="vertical" size={2} style={{ width: "100%" }}>
+    <Space>
+      <Tag data-e2e={`verification-conclusion-${i}`} color={
+        rec.conclusion === "passed" ? "green" : rec.conclusion === "failed" ? "red" : "default"}>
+        {rec.conclusion === "passed" ? `✅ ${t("verification.conclusion.passed")}`
+          : rec.conclusion === "failed" ? `❌ ${t("verification.conclusion.failed")}`
+          : `⏳ ${t("verification.conclusion.draft")}`}
+      </Tag>
+      <span>{rec.root_cause_text}</span>
+    </Space>
+    {rec.method && <span style={{ fontSize: 12 }}>{t("d4.method")}: {rec.method}</span>}
+    {rec.result && <span style={{ fontSize: 12 }}>{t("d4.result")}: {rec.result}</span>}
+    {rec.evidence_attachments?.length > 0 && (/* 既有证据展示 */)}
+    {/* 行内结论按钮：对既有记录 PATCH conclusion（draft→failed/passed 跃迁走这里，非重复 POST） */}
+    {canEdit && rec.conclusion === "pending" && (
+      <Space>
+        <Button size="small" data-e2e={`verify-pass-${i}`}
+          onClick={() => patchConclusion(rec, "passed")}>{t("verification.conclusion.passed")}</Button>
+        <Button size="small" data-e2e={`verify-fail-${i}`}
+          onClick={() => patchConclusion(rec, "failed")}>{t("verification.conclusion.failed")}</Button>
+      </Space>
+    )}
+  </Space>
+</List.Item>
+```
+
+```tsx
+// patchConclusion：对既有记录 PATCH { conclusion }（记录的 method/result/evidence 在草稿创建时已存）。
+// passed 时后端 _assert_verified_has_details 检查记录现有细节——若草稿未填细节会 400（正确：通过须有细节）。
+const patchConclusion = async (rec: Verification, conclusion: VerificationConclusion) => {
+  try {
+    await updateVerification(capaId, rec.verification_id, { conclusion });
+    message.success(t("d4.verificationSaved")); reload();
+  } catch (e: any) {
+    message.error(e.response?.data?.detail?.[0]?.msg ?? t("d4.verificationFailed"));
+  }
+};
+```
+
+> **三轮 P0 关键**：草稿→失败/通过走 `updateVerification(verification_id, { conclusion })`（PATCH 既有记录），**不是**重复 `createVerification`（POST）。记录的 `verification_id` 从列表项 `rec.verification_id` 取；method/result/evidence 在草稿创建时已落库，PATCH conclusion 时后端用记录现有值校验。
+
+**(b) 新建 Form：method Select + result + evidence + root_cause_text + 结论按钮（POST createVerification）**
 
 ```tsx
 const [form] = Form.useForm();
 
-<Form.Item name="method" label={t("d4.method")}>
-  <Select data-e2e="verification-method" placeholder={t("d4.methodPlaceholder")}>
-    <Option value="measurement">{t("verification.method.measurement")}</Option>
-    <Option value="observation">{t("verification.method.observation")}</Option>
-    <Option value="reproduction">{t("verification.method.reproduction")}</Option>
-  </Select>
-</Form.Item>
-<Form.Item name="result" label={t("d4.result")}><Input data-e2e="verification-result" /></Form.Item>
-{/* 证据上传省略（既有） */}
+// 三轮 P1-1：跨字段 validator——passed 时 method/result/evidence 至少一项（与后端 _assert_verified_has_details 一致）
+const atLeastOneDetail: Rule[] = [{
+  validator: async (_rule, _value) => {
+    const v = form.getFieldsValue();
+    const has = (v.method && v.method.trim()) || (v.result && v.result.trim())
+      || ((v.evidence || []).length > 0);
+    // 仅在提交 passed 时强制（validator 在 validateFields 触发，结合提交动作判断）
+    if (pendingSubmitConclusion === "passed" && !has) {
+      throw new Error(t("d4.needAtLeastOneDetail"));
+    }
+  },
+}];
+const [pendingSubmitConclusion, setPendingSubmitConclusion] = useState<VerificationConclusion | null>(null);
 
-{/* 提交结论按钮：先校验/取表单值，再合并 conclusion 统一提交（三轮 P0） */}
-<Button data-e2e="verify-pass" onClick={async () => {
-  const values = await form.validateFields();  // 触发必填校验 + 取 method/result/evidence
-  await submit({ ...values, conclusion: "passed" });
-}}>{t("verification.conclusion.passed")}</Button>
-<Button data-e2e="verify-fail" onClick={async () => {
-  const values = form.getFieldsValue();  // failed 不强制校验，但仍带已填字段
-  await submit({ ...values, conclusion: "failed" });
-}}>{t("verification.conclusion.failed")}</Button>
-<Button data-e2e="verify-save-draft" onClick={async () => {
-  const values = form.getFieldsValue();
-  await submit({ ...values, conclusion: "pending" });
-}}>{t("verification.conclusion.saveDraft")}</Button>
+<Form form={form} layout="vertical" size="small">
+  <Form.Item name="root_cause_text" label={t("d4.rootCause")} data-e2e="verification-root-cause">
+    <Input.TextArea rows={2} />
+  </Form.Item>
+  <Form.Item name="method" label={t("d4.method")} data-e2e="verification-method" rules={atLeastOneDetail}>
+    <Select placeholder={t("d4.methodPlaceholder")}>
+      <Option value="measurement">{t("verification.method.measurement")}</Option>
+      <Option value="observation">{t("verification.method.observation")}</Option>
+      <Option value="reproduction">{t("verification.method.reproduction")}</Option>
+    </Select>
+  </Form.Item>
+  <Form.Item name="result" label={t("d4.result")} data-e2e="verification-result" rules={atLeastOneDetail}>
+    <Input.TextArea rows={2} />
+  </Form.Item>
+  <Form.Item name="evidence" label={t("d4.evidence")} data-e2e="verification-evidence"
+    valuePropName="fileList" getValueFromEvent={(e) => Array.isArray(e) ? e : e?.fileList ?? []}
+    rules={atLeastOneDetail}>
+    <Upload beforeUpload={() => false} multiple><Button size="small">{t("d4.addEvidence")}</Button></Upload>
+  </Form.Item>
+  {/* 结论按钮：先设 pendingSubmitConclusion → validateFields（触发 atLeastOneDetail）→ 取值 → createVerification */}
+  <Space>
+    <Button data-e2e="verify-pass" onClick={async () => {
+      setPendingSubmitConclusion("passed");
+      try {
+        const values = await form.validateFields();  // 三轮 P1-1：passed 强制至少一项细节
+        await createVerification(capaId, {
+          root_cause_text: values.root_cause_text ?? currentRootCause ?? "",
+          method: values.method, result: values.result,
+          conclusion: "passed",
+          evidence_attachments: (values.evidence || []).map((f: any) => ({ filename: f.name, size: f.size })),
+        });
+        message.success(t("d4.verificationSaved")); form.resetFields(); setShowForm(false); reload();
+      } catch { /* validateFields 失败显示字段错误 */ } finally { setPendingSubmitConclusion(null); }
+    }}>{t("verification.conclusion.passed")}</Button>
+    <Button data-e2e="verify-fail" onClick={async () => {
+      const values = form.getFieldsValue();  // failed 不强制细节
+      await createVerification(capaId, {
+        root_cause_text: values.root_cause_text ?? currentRootCause ?? "",
+        method: values.method, result: values.result, conclusion: "failed",
+        evidence_attachments: (values.evidence || []).map((f: any) => ({ filename: f.name, size: f.size })),
+      });
+      message.success(t("d4.verificationSaved")); form.resetFields(); setShowForm(false); reload();
+    }}>{t("verification.conclusion.failed")}</Button>
+    <Button data-e2e="verify-save-draft" onClick={async () => {
+      const values = form.getFieldsValue();
+      await createVerification(capaId, {
+        root_cause_text: values.root_cause_text ?? currentRootCause ?? "",
+        method: values.method, result: values.result, conclusion: "pending",
+        evidence_attachments: (values.evidence || []).map((f: any) => ({ filename: f.name, size: f.size })),
+      });
+      message.success(t("d4.verificationSaved")); form.resetFields(); setShowForm(false); reload();
+    }}>{t("verification.conclusion.saveDraft")}</Button>
+    <Button onClick={() => setShowForm(false)}>{t("d4.cancel")}</Button>
+  </Space>
+</Form>
 ```
 
-`submit(payload)` 调 `createVerification`/`updateVerification`（payload 含 root_cause_text/method/result/evidence/conclusion）。i18n 补 `verification.method.*` + `verification.conclusion.*`（zh-CN + en-US）。
+i18n 补 `verification.method.{measurement,observation,reproduction}` + `verification.conclusion.{passed,failed,draft,saveDraft}` + `d4.needAtLeastOneDetail` + `d4.verificationFailed`（zh-CN + en-US）。
 
-> 注：新建走 `createVerification`（payload 须含 root_cause_text），编辑走 `updateVerification`（按 verification_id）。`form.validateFields()` 对 passed 强制 method/result/evidence 至少一项（与后端 `_assert_verified_has_details` 一致）。
+> **流程总览**（三轮 P0）：新建记录走 createVerification（POST，带 conclusion）；既有记录的状态跃迁走 updateVerification（PATCH，按 verification_id，仅带 conclusion）；两者区分明确。E2E「先保存草稿（POST pending）→ 再把同一记录提交 failed（PATCH { conclusion: "failed" }）」经列表项行内 `verify-fail-{i}` 按钮完成，验证状态跃迁语义。
 
 `api/capa.ts` — advance 调用方适配 `CAPAAdvanceResponse`（三轮命名修正：既有符号是 `client`（default import from `./client`）+ `advanceCAPA`，非 `api`/`advanceCapa`）：
 
@@ -1828,3 +2036,14 @@ git commit -m "docs(progress): tick US-E2E-01 P0 收尾 (01.2 BLOCKED+stage_runs
 | 前端 Verification 响应类型漏 conclusion | P1 | 后端 VerificationResponse 加 conclusion，前端只改 Create/Update；Verification.method 仍 `string\|null` | Task B6 前端 `Verification` 加 `conclusion: 'pending'\|'passed'\|'failed'` + method 收窄为三值联合；UI 类型安全区分草稿/失败（is_verified 都 false） |
 
 20 项计划评审全部闭合。
+
+### 第三轮（人工复审，2026-07-09）：1 P0 + 2 P1 + 1 UI 建议，全部接受
+
+| 评审项 | 级别 | 缺陷 | 修订 |
+|---|---|---|---|
+| 既有 verification 编辑/提交结论流程缺失 | P0 | 示例只在新建 Form 放结论按钮，未说明如何选既有 pending 记录并调 updateVerification；E2E「先草稿再同记录提交 failed」按当前 UI 只能重复 create，无法状态跃迁 | Task B6 既有组件分两处：(a) 列表项行内结论按钮 `patchConclusion(rec, conclusion)` → `updateVerification(verification_id, { conclusion })`（PATCH 既有记录，draft→failed/passed 跃迁走此，非重复 POST）；(b) 新建 Form 结论按钮 → `createVerification`（POST）；测试覆盖 draft→failed / draft→passed 走 PATCH 且 create 未被调用 |
+| validateFields 未实现"至少一项细节"校验 | P1 | method/result/evidence 无 rules，`validateFields()` 只返回值不强制至少一项 | Task B6 加跨字段 validator `atLeastOneDetail`（passed 时 method/result/evidence 至少一项，与后端 `_assert_verified_has_details` 一致）+ 测试「全空 → passed 阻止提交」 |
+| 迁移测试基础设施仍不可执行占位 | P1 | fixture/INSERT/clean upgrade 断言仍是 `...`，且建议 SQLite（CHECK/JSONB/pg_constraint/information_schema 无 SQLite 等价） | Task B1 给出确定 PostgreSQL 策略 + 完整 fixture：`mig_db_url` 一次性 PG 库（psycopg CREATE/DROP，apply 到 `<Task_A3_head>`，seed factory）+ 完整测试体（无 `...`，PG information_schema/pg_constraint 断言）+ env.py sqlalchemy.url 兼容 + psycopg 依赖；commit 含全部 |
+| UI 列表状态标签二态 | 建议 | 列表用 `is_verified` 二态显示，三态 conclusion 被压成两态 | Task B6 列表项 Tag 按 `conclusion` 三态显示（草稿 default/通过 green/失败 red），testid `verification-conclusion-{i}`；测试断言三态文案 |
+
+23 项计划评审全部闭合。
