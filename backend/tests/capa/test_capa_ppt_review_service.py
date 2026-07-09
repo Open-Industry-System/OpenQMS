@@ -211,6 +211,57 @@ async def test_correction_empties_d_page_falls_back_via_rule_revalidation(
     assert d3.sections[0]["value"] == "d3", "校正清空 D3 应被规则再校验拒绝并回退原内容"
 
 
+async def test_corrected_content_forced_needs_review_not_passed(
+    db, admin_user, default_factory, monkeypatch
+):
+    """LLM 校正被采用（结构合法、规则通过，但篡改事实如 D8 关闭结论）+ 后续轮 LLM 自判 passed
+    → 仍强制 needs_review（不自动 passed），报告标注需人工复核（§101「不编造数据」）。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    base = await capa_ppt_service.generate_content(db, capa.report_id)
+    # 篡改 D8 关闭结论：label/数量/结构保持，规则校验通过（非空），但 value 为虚构文本
+    revised_pages = []
+    for p in base.pages:
+        secs = [
+            {"label": s["label"], "value": ("虚构客户已确认验收" if p.title == "D8 关闭结论" else s["value"])}
+            for s in p.sections
+        ]
+        revised_pages.append({"title": p.title, "sections": secs})
+
+    review_calls = {"n": 0}
+
+    async def _mock(pc, prompt, response_schema):
+        if "passed" in response_schema.get("properties", {}):
+            review_calls["n"] += 1
+            return {"passed": review_calls["n"] >= 2, "issues": [], "suggestions": ["补充关闭确认"]}
+        return {"pages": revised_pages}  # 校正篡改 D8
+
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
+    content, review = await capa_ppt_review_service.review_and_correct(
+        db, capa.report_id, _PC(), "public",
+    )
+    # 第 2 轮 LLM 自判 passed，但因内容经 LLM 校正 → 强制 needs_review，不得自动 passed
+    assert review.status == "needs_review", "采用 LLM 校正后的内容不得自动标记 passed"
+    assert review.rounds == 2
+    d8 = next(p for p in content.pages if p.title == "D8 关闭结论")
+    assert "虚构客户已确认验收" in d8.sections[0]["value"]  # 校正被采用（内容已改）
+    assert any("人工复核" in i for i in review.report["issues"]), "报告须标注需人工复核"
+
+
+async def test_uncorrected_pass_still_passed(db, admin_user, default_factory, monkeypatch):
+    """无校正（首轮即通过，内容 DB-faithful）→ 仍可 passed（不误伤：仅校正过的才强制 needs_review）。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+
+    async def _mock(pc, prompt, response_schema):
+        return {"passed": True, "issues": [], "suggestions": []}
+
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
+    content, review = await capa_ppt_review_service.review_and_correct(
+        db, capa.report_id, _PC(), "public",
+    )
+    assert review.status == "passed"
+    assert review.rounds == 1
+
+
 async def test_correction_llm_failure_falls_back_not_500(db, admin_user, default_factory, monkeypatch):
     """校正 LLM 异常 → 回退原内容（不上抛 500），审查报告保留；最终 needs_review。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)

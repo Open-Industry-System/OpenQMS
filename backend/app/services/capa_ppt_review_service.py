@@ -107,20 +107,29 @@ async def review_and_correct(
             "suggestions": [],
         })
     last_report: dict = {"issues": [], "suggestions": []}
+    corrected = False  # 是否采用了 LLM 校正后的内容（采用 → 不得自动 passed，强制 needs_review）
     for round_idx in range(1, 4):
         # 审查闭环异常（超时/鉴权/响应格式）属故事 §92 FAILED 条件，不在此吞掉降级为 needs_review；
         # 让异常上抛，由 API 层转为 500。LLM 未配置（ProviderNotConfigured）已在 API 层 pc=None 处理为 skipped。
         review = await _subagent_review(pc, skill, content)
         last_report = review.report
         if review.passed:
+            if corrected:
+                # 内容经 LLM 自动校正（§101「不编造数据」无法用结构校验保证事实真实）→
+                # 不自动标记 passed，强制 needs_review + 标注需人工复核确认未编造数据。
+                last_report = {
+                    "issues": list(last_report.get("issues", [])) + ["内容经 LLM 自动校正，需人工复核确认未编造数据"],
+                    "suggestions": last_report.get("suggestions", []),
+                }
+                return content, ReviewResult("needs_review", round_idx, last_report)
             return content, ReviewResult("passed", round_idx, last_report)
         if round_idx < 3:
-            corrected = await _correct_by_suggestions(pc, skill, content, review.suggestions)
-            # 校正后重新跑内置规则校验：若校正清空了必填页或破坏结构 → 回退校正前内容
-            # （不采用被破坏的内容，避免下一轮 LLM 把残缺内容误判为 passed）
-            if not capa_ppt_service._validate_ppt_content(corrected, capa):
-                content = corrected
-            # else: 校正破坏规则 → 保留原 content，下一轮审查原内容
+            corrected_content = await _correct_by_suggestions(pc, skill, content, review.suggestions)
+            # 仅当校正产生了「新内容且通过规则校验」才采用并标记 corrected（回退原内容不计）
+            if corrected_content is not content and not capa_ppt_service._validate_ppt_content(corrected_content, capa):
+                content = corrected_content
+                corrected = True
+            # else: 校正回退原内容（结构不符/LLM 异常）或破坏规则 → 保留原 content，corrected 不变
         else:
             return content, ReviewResult("needs_review", 3, last_report)
 

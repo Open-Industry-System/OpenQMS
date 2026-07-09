@@ -290,6 +290,7 @@ D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封�
    - LLM 内容建议 → `_correct_by_suggestions()` 调 LLM 改写各页 section 的 value（**仅呈现层，不编造数据、不动 linked/verification 落库事实**；结构不符回退原内容）
 3. **最终审查**：LLM 确认校正后的内容，返回 `review_status`（`skipped`/`passed`/`needs_review`）
 
+- **v4 事实真实性保护**：结构校验只能保证页/section/label 不变，无法保证 LLM 未篡改事实值。故**首轮即通过（无校正，内容 DB-faithful）→ `passed`；任何经 LLM 校正采用的内容 → 强制 `needs_review`** + 报告标注「需人工复核确认未编造数据」（守 §70「内容来自落库数据」/§101「不编造数据」）。校正回退原内容（结构不符/破坏规则/LLM 异常）不计为「校正过」，首轮通过仍可 `passed`。
 - 内置规则校验残留 issues（结构/数据缺口，校正无法补全）→ `review_status="needs_review"` + 报告暴露 issues，短路不耗 LLM 轮次；LLM 未配置且无规则 issues → `review_status="skipped"`
 - 校正 LLM 异常 → 不上抛 500：审查已产出报告，仅自动校正失败 → 回退原内容，最终 needs_review + 报告（保留用户可见信息）
 - 审查 LLM 运行时异常（超时/鉴权/响应格式，非「未配置」）属故事 §92 FAILED 条件，不降级为 `needs_review`：异常上抛，API 层转 500 且不落 export 记录
