@@ -18,6 +18,7 @@ from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.control_plan_version import ControlPlanVersion
 from app.models.fmea import FMEADocument
 from app.models.fmea_version import FMEAVersion
+from app.state_machines.eightd_state import capa_open_clause
 
 # ---------------------------------------------------------------------------
 # SHA-256 helpers
@@ -412,7 +413,7 @@ async def rollback_fmea(
     capa_result = await db.execute(
         select(CAPAEightD.report_id, CAPAEightD.document_no)
         .where(CAPAEightD.fmea_ref_id == fmea.fmea_id)
-        .where(CAPAEightD.status != "D8_CLOSURE")
+        .where(capa_open_clause(CAPAEightD.status))  # P2: 仅「未关闭」CAPA 阻断回滚；ARCHIVED 不算活动
     )
     for row in capa_result.all():
         cascade_refs.append(f"8D/CAPA {row.document_no}")

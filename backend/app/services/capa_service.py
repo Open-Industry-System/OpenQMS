@@ -379,6 +379,15 @@ async def advance_capa(
     if req is None:
         req = AdvanceRequest()  # 3-arg 调用方走线性 next（D1→D6→D7_PREVENTION、D8→ARCHIVED）
 
+    # P1 并发安全：锁 capa 行 FOR UPDATE 串行化并发 advance。审批/驳回/归档边无闸口，
+    # 若不锁，两并发请求都从同一状态推进 → 重复 TRANSITION/D8_APPROVED 审计/MES 事件。
+    # populate_existing 强制把 identity-mapped 对象属性刷新为最新 DB 值，防 dep 加载的
+    # capa.status 陈旧（另一事务已推进）→ can_transition 误判放行重复推进。
+    await db.execute(
+        select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+
     current = EightDState(capa.status)
     target = req.target_state
     if target is None:
