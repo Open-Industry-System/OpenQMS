@@ -244,9 +244,18 @@ async def _cache_capa_result(self, report_id, context, result: RecommendationRes
 - 缓存键 = `report_id + trigger_type(d4/d5) + context_hash`，复用既有 `uq_cache_capa` 部分索引做 upsert。
 - `context_hash` 捕获所有影响推荐的输入（d2/d3/d4/fmea_ref_id/fmea_node_id/product_line_code）——本设计为 write-only，不读缓存，故 context_hash 仅作去重键与回溯定位，无陈旧缓存风险（陈旧风险只在读缓存时才存在）。
 - `doc_type="capa"` 区分 FMEA（`doc_type="fmea"`）行，便于回溯查询过滤。
-- `_serialize_capa_suggestions(stage, items)` — **统一为候选列表 + kind 判别**（评审修订 P1-3：`suggestions: Mapped[list[dict]]` 是 list 类型，D5 不可写 dict-envelope）。`to_d4_schema()`/`to_d5_*_schema()` 返回的是 dict（非 pydantic 模型，评审修订 P1-1：`.model_dump()` 会抛 AttributeError），直接用：
+- `_serialize_capa_suggestions(stage, items)` — **统一为候选列表 + kind 判别**（评审修订 P1-3：`suggestions: Mapped[list[dict]]` 是 list 类型，D5 不可写 dict-envelope）。`to_d4_schema()`/`to_d5_*_schema()` 返回的是 dict（非 pydantic 模型，评审修订 P1-1：`.model_dump()` 会抛 AttributeError），直接用。**单次遍历互斥分组**（评审修订 P1-2 三轮：复用既有 capa.py:536-541 的 `if control: controls else: suggestions` 逻辑，control 非空只写 d5_control，否则才写 d5_suggestion，不重复序列化）：
   - D4 → `[{"kind": "d4_cause", **c.to_d4_schema()} for c in items]`
-  - D5 → `[{"kind": "d5_control", **c.to_d5_control_schema()} for c in items if c.to_d5_control_schema() is not None] + [{"kind": "d5_suggestion", **c.to_d5_suggestion_schema()} for c in items]`
+  - D5 → 单次遍历：
+    ```python
+    out = []
+    for c in items:
+        control = c.to_d5_control_schema()
+        if control:
+            out.append({"kind": "d5_control", **control})
+        else:
+            out.append({"kind": "d5_suggestion", **c.to_d5_suggestion_schema()})
+    ```
   - 统一 list 形状对齐 `Mapped[list[dict]]` 与故事契约 `candidates[]`，回溯时按 `kind` 解析（d4_cause / d5_control / d5_suggestion）。
 - **write-only**：D4/D5 端点不查缓存，仍每次重算编排；缓存行仅供审计/verify skill 回溯（故事要求「可回溯」，不要求性能缓存）。回溯查询：`SELECT suggestions, stage_runs, llm_available FROM recommendation_cache WHERE report_id=... AND trigger_type='d4' ORDER BY created_at DESC LIMIT 1`。
 - BLOCKED 时不写 cache（pipeline 在 `if not result.blocked` 内调用）。
@@ -320,6 +329,7 @@ ALTER TABLE capa_root_cause_verification
 
 ```python
 class VerificationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 评审修订 P0（三轮）：防旧 is_verified 请求被静默忽略→pending 误降级
     root_cause_text: str
     method: Literal["measurement","observation","reproduction"] | None = None
     result: str | None = None
@@ -328,12 +338,15 @@ class VerificationCreate(BaseModel):
     source_ref: dict | None = None
     # is_verified 请求字段删除（评审修订 P0-1）
 class VerificationUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # 评审修订 P0（三轮）：同上
     method: Literal["measurement","observation","reproduction"] | None = None
     result: str | None = None
     conclusion: Literal["pending","passed","failed"] | None = None  # 提交结论=passed/failed；保存草稿可不传或传 pending
     evidence_attachments: list[dict] | None = None
     # is_verified 请求字段删除
 ```
+
+评审修订 P0（三轮）：Pydantic v2 默认 `extra='ignore'`——仅删除 is_verified 字段，旧请求会被**静默忽略**该字段并按 conclusion=pending 处理，恰好重现设计想避免的「已通过验证降级为 false 破坏门禁」问题。故两个请求模型必须设 `extra='forbid'`，旧 `is_verified` 请求 → 422（而非静默忽略）。测试断言 422，不是只断言字段已删除（见 §7.2 `test_old_is_verified_request_rejected_422`）。
 
 `VerificationResponse` 加 `conclusion: Literal["pending","passed","failed"]`，保留 `is_verified: bool`（响应字段，列派生），`method` 改 `Literal | None`。旧 NULL method 值兼容；非 NULL 非枚举值由 CHECK 拒（迁移前若有脏数据需先清洗，迁移脚本加前置断言，见 §6.2-1）。
 
@@ -361,10 +374,13 @@ ALTER TABLE capa_eightd ADD COLUMN d4_retry_count INTEGER NOT NULL DEFAULT 0;
 
 评审修订 P1：`mapped_column(default=0)` 仅 ORM 侧默认，旧行与绕过 ORM 的 INSERT 不受保护；迁移 `DEFAULT 0` NOT NULL + 模型 `server_default="0"` 双保险。
 
-**递增时机（conclusion 驱动，评审修订 P0-3）**：`capa_verification_service` 在 conclusion **跃迁到 `failed`** 时 `capa.d4_retry_count += 1`（FOR UPDATE 锁 capa 行，见 §6.2-2）：
+**递增时机（conclusion 驱动，评审修订 P0-3 + 三轮 P1-1 并发去重）**：`capa_verification_service` 在 conclusion **跃迁到 `failed`** 时 `capa.d4_retry_count += 1`。**双行锁**（评审修订三轮 P1-1）：
+- **锁 verification 行 `SELECT ... FOR UPDATE`**：序列化同一记录的并发 failed 跃迁——第二个并发请求阻塞至第一个提交后，读到 conclusion=failed（已跃迁）→ 无 pending→failed 跃迁 → **不递增**（同一记录两个并发 failed 请求只 +1，不 +2）。
+- **锁 capa 行 `SELECT ... FOR UPDATE`**：序列化跨记录的 retry_count 递增——不同 verification 记录各自 failed 应各 +1，capa 锁保证两次递增不丢（不同记录各失败 → +2）。
+- 判定顺序：先锁 verification 行 → 读 old_conclusion → 若 old_conclusion != failed 且 new_conclusion == failed → 锁 capa 行 → `capa.d4_retry_count += 1`。
 - 新建记录 conclusion=pending → **不递增**（草稿不计回退）。
 - 显式提交 conclusion=failed（pending→failed）→ 递增 1。
-- 已 failed 记录改 method/result 但 conclusion 仍 failed（无跃迁）→ **不递增**（避免编辑重复计数）。
+- 已 failed 记录改 method/result 但 conclusion 仍 failed（无跃迁）→ **不递增**（避免编辑重复计数；并发同记录 failed 亦不重复计）。
 - conclusion true→false 不存在（conclusion 是三态，passed→failed 跃迁计 1，符合「回退选另一条」语义）。
 
 语义 = 「选了根因去验证但结论不通过」的累计尝试次数，对齐故事「回退循环计数器记录尝试次数」。conclusion=passed 不递增（通过=确认根因，非回退）。
@@ -507,10 +523,13 @@ orchestrator.run → RecommendationResult(stages=[12 StageRun], items=[...])
 工程师提交结论（不通过）
   → PATCH {conclusion:"failed"}   # pending→failed 跃迁
   → service:
-      SELECT capa FOR UPDATE                        # 锁行防并发丢计数
-      capa.d4_retry_count += 1                      # 仅跃迁到 failed 递增 1
-      is_verified 列同步为 False
-      写审计 D4_VERIFICATION_FAILED {retry_count, method, root_cause_text}
+      SELECT verification FOR UPDATE                # 锁记录行，序列化同记录并发跃迁（三轮 P1-1）
+      old_conclusion = verification.conclusion       # 锁后读
+      if old_conclusion != "failed":                # 仍需跃迁（防同记录并发重复计）
+          SELECT capa FOR UPDATE                     # 锁 capa 行，序列化跨记录 retry_count 递增
+          capa.d4_retry_count += 1
+      verification.conclusion = "failed"; is_verified 列同步 False
+      写审计 D4_VERIFICATION_FAILED {retry_count, method, root_cause_text}  # 仅跃迁时
       db.commit()
 
 工程师提交结论（通过）
@@ -574,10 +593,14 @@ orchestrator.run → RecommendationResult(stages=[12 StageRun], items=[...])
 - DB 层：CHECK 约束兜底（防绕过 API 直写）→ IntegrityError → service 层转 ValueError → API 层 HTTPException(400)。CHECK 同时在 Alembic 与 `CapaRootCauseVerification.__table_args__` 声明（评审修订 P1），保证 Base.metadata.create_all 测试库与迁移后生产库一致。
 - 既有自由文本脏数据（迁移前）：CHECK 添加前若存在非枚举非 NULL 值会迁移失败——核验现有 method 基本为 NULL，迁移安全；迁移脚本加前置断言 `SELECT count(*) WHERE method IS NOT NULL AND method NOT IN ('measurement','observation','reproduction')` 非零则中止并报脏数据。
 
-**2. retry_count 并发递增 — FOR UPDATE 串行化（conclusion 跃迁触发）**
-- 触发：两个并发 conclusion=failed 跃迁同时递增同一 8D 的 d4_retry_count。
-- 处理：递增前 `SELECT ... FOR UPDATE` 锁 capa 行（既有 advance_capa 已用此模式），保证计数不丢。
-- 取舍：验证是低频操作，行锁开销可接受。
+**2. retry_count 并发递增 — 双行锁（评审修订三轮 P1-1）**
+- 触发 A（同记录并发 failed）：两个并发 PATCH {conclusion:failed} 同一 verification 记录。
+- 触发 B（跨记录并发 failed）：两条不同 verification 记录（同一 CAPA）并发 failed。
+- 处理：
+  - 锁 verification 行 `FOR UPDATE` → 序列化同记录跃迁：第二个请求阻塞至第一个提交，读到 conclusion=failed → old_conclusion==failed → **不递增**（A 场景只 +1）。
+  - 锁 capa 行 `FOR UPDATE` → 序列化跨记录 retry_count 递增：两条不同记录各自 failed → 两次 capa 锁串行 → +2 不丢（B 场景 +2）。
+  - 判定顺序：先锁 verification → 读 old_conclusion → 仅 old_conclusion != failed 且 new==failed 时锁 capa 递增。
+- 取舍：验证低频，双行锁开销可接受；verification 锁是同记录去重的关键，capa 锁是跨记录不丢的关键。
 
 **3. conclusion 非法值 — Literal + DB CHECK（评审修订 P1-2）**
 - API 层：Pydantic Literal["pending","passed","failed"] 拒非法值 → 422。
@@ -619,7 +642,7 @@ orchestrator.run → RecommendationResult(stages=[12 StageRun], items=[...])
 `test_cache_capa_result.py`（新增）：
 - `test_cache_capa_result_persists_stage_runs` — 正常路径 cache 行 stage_runs 非 NULL、含 12 行、字段齐全；report_id 键 + doc_type="capa"。
 - `test_cache_capa_result_upsert_on_conflict` — 同 report_id+trigger_type+context_hash 二次写 upsert 更新而非插入。
-- `test_cache_capa_result_d4_d5_suggestions_shape` — D4 suggestions=list[{kind:"d4_cause", ...}]、D5 suggestions=list[{kind:"d5_control"|"d5_suggestion", ...}]，统一 list 形状对齐 `Mapped[list[dict]]`（评审修订 P1-3）。
+- `test_cache_capa_result_d4_d5_suggestions_shape` — D4 suggestions=list[{kind:"d4_cause", ...}]、D5 suggestions=list[{kind:"d5_control"|"d5_suggestion", ...}]，统一 list 形状对齐 `Mapped[list[dict]]`（评审修订 P1-3）。**互斥断言**（三轮 P1-2）：有 control_node_id 的候选只出现在 d5_control，不重复出现在 d5_suggestion（单次遍历互斥分组，复用既有 capa.py:536-541 逻辑）。
 - `test_cache_capa_result_no_model_dump_on_dicts` — to_d4_schema/to_d5_*_schema 返回 dict，序列化不调 `.model_dump()`（评审修订 P1-1：防 AttributeError）。
 - `test_cache_capa_result_stage_runs_serialize_failure_degrades` — stage_runs 序列化抛错时 stage_runs=NULL 但 suggestions 正常写。
 - `test_blocked_does_not_write_cache` — blocked=True 时 RecommendationCache 无新行。
@@ -651,13 +674,14 @@ orchestrator.run → RecommendationResult(stages=[12 StageRun], items=[...])
 - `test_db_check_rejects_invalid_conclusion` — 绕过 API 直写 conclusion="garbage" → IntegrityError（评审修订 P1-2）。
 - `test_is_verified_request_field_removed` — POST/PATCH 带 `is_verified` → 422（字段已删除，评审修订 P0-1）。
 
-`test_capa_verification_conclusion.py`（新增，评审修订 P0-3/P0-1）：
+`test_capa_verification_conclusion.py`（新增，评审修订 P0-3/P0-1 + 三轮 P1-1）：
 - `test_create_verification_default_pending` — 新建 conclusion=pending，is_verified 列=False，**不递增 retry_count**。
 - `test_conclusion_failed_increments_retry_count` — pending→failed 跃迁 → retry_count +=1，is_verified 列同步 False。
 - `test_conclusion_passed_does_not_increment` — pending→passed 跃迁 → retry_count 不变，is_verified 列同步 True。
 - `test_conclusion_failed_no_transition_no_double_count` — 已 failed 记录改 method/result（conclusion 不变）→ retry_count 不再递增（防重复计数）。
-- `test_concurrent_failed_transitions_serialize` — 两个并发 pending→failed 跃迁 → retry_count 精确+2（FOR UPDATE 生效）。
-- `test_old_is_verified_true_request_rejected` — 旧 `is_verified=true` 请求被 schema 拒（422），不静默降级为 pending 破坏门禁（评审修订 P0-1 回归保护）。
+- `test_same_record_concurrent_failed_increments_once` — 同一 verification 记录两个并发 pending→failed 请求 → retry_count 精确 +1（三轮 P1-1：verification 行锁去重，不 +2）。
+- `test_different_records_concurrent_failed_increments_twice` — 同一 CAPA 两条不同 verification 记录并发 failed → retry_count 精确 +2（三轮 P1-1：capa 行锁防丢，跨记录各计一次）。
+- `test_old_is_verified_request_rejected_422` — 旧 `is_verified=true`（及 `false`）请求 → **422**（`extra='forbid'`，三轮 P0），不静默降级为 pending 破坏门禁。断言 HTTP 422 非仅字段删除。
 
 `test_d4_retry_count.py`（新增）：
 - `test_advance_d4_to_d5_warns_at_threshold` — from_status=D4_ROOT_CAUSE + d4_retry_count=3 → advance 响应 `CAPAAdvanceResponse.warning` 含「建议升级处理」。
@@ -761,3 +785,13 @@ orchestrator.run → RecommendationResult(stages=[12 StageRun], items=[...])
 | suggestions 形状不一致 | P1 | `Mapped[list[dict]]` 是 list，D5 写 dict-envelope `{existing_controls,general_suggestions}` 违反类型 | §4.1.4 统一为候选 list + kind 判别（d4_cause/d5_control/d5_suggestion），对齐 `Mapped[list[dict]]` 与故事 `candidates[]` |
 
 两轮共 12 项评审全部闭合。保留判断：BLOCKED/FAILED 区分、Text+CHECK+Literal、行锁并发计数、service 签名不变、write-only 缓存。
+
+### 10.3 第三轮（人工复审，2026-07-09）：1 P0 + 2 P1，全部接受
+
+| 评审项 | 级别 | 缺陷 | 修订 |
+|---|---|---|---|
+| 删除字段不产生 422 | P0 | Pydantic v2 默认 `extra='ignore'`；仅删 is_verified 字段，旧请求被静默忽略→conclusion=pending，重现「已通过验证降级 false 破坏门禁」 | §4.2.1 两个请求模型加 `model_config = ConfigDict(extra='forbid')`，旧 is_verified 请求 → 422；测试断言 422 非仅字段删除 |
+| 同记录并发重试重复计数 | P1 | 只锁 capa 行不能去重同记录并发 failed——两请求都读到旧 pending，各自获 capa 锁递增一次 → +2 | §4.2.2/§5.4/§6.2 双行锁：先锁 verification 行 FOR UPDATE（同记录去重，+1）再锁 capa 行 FOR UPDATE（跨记录不丢，+2）；加 same-record +1 / different-records +2 测试 |
+| D5 control 重复序列化为 suggestion | P1 | 第二个 list 遍历全部 items，有 control_node_id 的候选既入 d5_control 又经 to_d5_suggestion_schema 入 d5_suggestion | §4.1.4 单次遍历互斥分组（复用既有 capa.py:536-541 `if control: controls else: suggestions`），control 非空只写 d5_control，否则才写 d5_suggestion；shape 测试加互斥断言 |
+
+三轮共 15 项评审全部闭合，设计稿通过评审。
