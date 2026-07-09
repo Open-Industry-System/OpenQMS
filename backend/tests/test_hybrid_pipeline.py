@@ -47,6 +47,7 @@ async def test_pipeline_writes_success_audit(db, default_factory, admin_user, mo
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
+    pipeline._cache_capa_result = AsyncMock()
     two = [
         RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
                                 match_reason="r", metadata={}),
@@ -83,6 +84,7 @@ async def test_pipeline_writes_partial_audit(db, default_factory, admin_user, mo
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
+    pipeline._cache_capa_result = AsyncMock()
     two = [
         RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
                                 match_reason="r", metadata={}),
@@ -117,6 +119,7 @@ async def test_pipeline_writes_llm_failed_audit(db, default_factory, admin_user,
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
+    pipeline._cache_capa_result = AsyncMock()
 
     async def _enrich(candidates, context):
         return LLMOutcome(candidates=[], attempted=2, succeeded=0, failed=2)
@@ -148,6 +151,7 @@ async def test_pipeline_no_audit_when_pc_none(db, default_factory, admin_user, m
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=None, embedding_provider=_NoEmbed())
+    pipeline._cache_capa_result = AsyncMock()
     report_id = uuid.uuid4()
     await pipeline.recommend(
         _ctx("d4"), user=admin_user, report_id=report_id,
@@ -206,6 +210,7 @@ class TestHybridRecommendationPipeline:
         mock_embedding = AsyncMock()
 
         pipeline = HybridRecommendationPipeline(mock_db, mock_llm, mock_embedding)
+        pipeline._cache_capa_result = AsyncMock()
         ctx = RecommendationContext(
             capa_data={"d2_description": "焊接问题", "d4_root_cause": ""},
             user_product_lines=["DC-DC-100"],
@@ -229,6 +234,7 @@ class TestHybridRecommendationPipeline:
         mock_embedding = AsyncMock()
 
         pipeline = HybridRecommendationPipeline(mock_db, mock_llm, mock_embedding)
+        pipeline._cache_capa_result = AsyncMock()
         semantic_source = pipeline.orchestrator._sources["semantic_search"]
 
         # Create a candidate with failure_cause_node_id

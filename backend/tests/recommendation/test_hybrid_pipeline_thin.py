@@ -12,6 +12,7 @@ from app.services.recommendation_types import RecommendationResult, StageRun
 @pytest.mark.asyncio
 async def test_thin_shell_delegates_and_audits_structured(monkeypatch):
     pipe = HybridRecommendationPipeline(MagicMock(), MagicMock(), None)
+    pipe._cache_capa_result = AsyncMock()
     stage11 = StageRun(11, "LLM", "llm", "done", llm_attempted=2, llm_succeeded=1, llm_failed=1)
     pipe.orchestrator.run = AsyncMock(return_value=RecommendationResult(items=[], stages=[stage11]))
     audit = AsyncMock()
@@ -31,6 +32,7 @@ async def test_thin_shell_delegates_and_audits_structured(monkeypatch):
 @pytest.mark.asyncio
 async def test_no_audit_when_attempted_zero(monkeypatch):
     pipe = HybridRecommendationPipeline(MagicMock(), MagicMock(), None)
+    pipe._cache_capa_result = AsyncMock()
     stage11 = StageRun(11, "LLM", "llm", "error", llm_attempted=0)
     pipe.orchestrator.run = AsyncMock(return_value=RecommendationResult(items=[], stages=[stage11]))
     audit = AsyncMock()
