@@ -8,7 +8,7 @@ vi.mock("./client", () => ({
 
 import {
   adoptRecommendation, listVerifications, createVerification, updateVerification,
-  recordD7Action, listD7Actions, autoFillD7,
+  recordD7Action, listD7Actions, autoFillD7, advanceCAPA,
 } from "./capa";
 
 beforeEach(() => vi.clearAllMocks());
@@ -23,11 +23,19 @@ describe("capa verification/d7 api", () => {
   });
 
   it("createVerification posts and returns record", async () => {
-    (client.post as any).mockResolvedValue({ data: { verification_id: "v1", is_verified: true } });
-    const r = await createVerification("c1", { root_cause_text: "rc", is_verified: true });
+    (client.post as any).mockResolvedValue({ data: { verification_id: "v1", conclusion: "passed" } });
+    const r = await createVerification("c1", { root_cause_text: "rc", conclusion: "passed" });
     expect(client.post).toHaveBeenCalledWith("/capa/c1/root-cause-verifications",
-      { root_cause_text: "rc", is_verified: true });
+      { root_cause_text: "rc", conclusion: "passed" });
     expect(r.verification_id).toBe("v1");
+  });
+
+  it("advanceCAPA adapts { capa, warning } and returns capa", async () => {
+    const capa = { capa_id: "c1", document_no: "8D-2026-001" } as any;
+    (client.post as any).mockResolvedValue({ data: { capa, warning: "D7 skipped" } });
+    const r = await advanceCAPA("c1");
+    expect(client.post).toHaveBeenCalledWith("/capa/c1/advance", {});
+    expect(r.document_no).toBe("8D-2026-001");
   });
 
   it("autoFillD7 posts to d7-auto-fill", async () => {

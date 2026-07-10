@@ -163,6 +163,8 @@
     "cancel": "Cancel",
     "verificationSaved": "Verification record saved",
     "verificationLoadFailed": "Failed to load verification records",
+    "verificationFailed": "Verification submission failed",
+    "needAtLeastOneDetail": "To pass verification, fill in at least one detail (method, result, or evidence)",
     "adopted": "Adopted",
     "adoptFailed": "Adopt failed",
     "blocked": {
@@ -285,6 +287,19 @@
   },
   "relatedCapa": {
     "title": "Related CAPA"
+  },
+  "verification": {
+    "method": {
+      "measurement": "Measurement",
+      "observation": "Observation",
+      "reproduction": "Reproduction"
+    },
+    "conclusion": {
+      "passed": "Passed",
+      "failed": "Failed",
+      "draft": "Draft",
+      "saveDraft": "Save Draft"
+    }
   },
   "ppt": {
     "generate": "Generate PPT",

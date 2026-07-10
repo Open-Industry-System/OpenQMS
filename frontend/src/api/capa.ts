@@ -1,4 +1,5 @@
 import client from "./client";
+import { message } from "antd";
 import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse, AdoptRequest, AdoptResponse, Verification, VerificationCreate, VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse, StageRun } from "../types";
 
 export class RecommendationBlockedError extends Error {
@@ -51,9 +52,12 @@ export interface AdvanceRequest {
   d7_skip_reasons?: Array<{ fmea_id: string | null; node_id: string; reason: string }>;
 }
 
+export interface CAPAAdvanceResponse { capa: CAPAReport; warning: string | null }
+
 export async function advanceCAPA(id: string, req: AdvanceRequest = {}): Promise<CAPAReport> {
-  const resp = await client.post(`/capa/${id}/advance`, req);
-  return resp.data;
+  const r = (await client.post(`/capa/${id}/advance`, req)).data as CAPAAdvanceResponse;
+  if (r.warning) message.warning(r.warning);
+  return r.capa;
 }
 
 export async function getD7Recommendations(id: string): Promise<D7RecommendationResponse> {

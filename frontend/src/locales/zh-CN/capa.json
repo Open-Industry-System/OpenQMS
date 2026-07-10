@@ -163,6 +163,8 @@
     "cancel": "取消",
     "verificationSaved": "验证记录已保存",
     "verificationLoadFailed": "验证记录加载失败",
+    "verificationFailed": "验证提交失败",
+    "needAtLeastOneDetail": "通过验证时至少填写一项验证细节（方法、结果或证据）",
     "adopted": "已采纳",
     "adoptFailed": "采纳失败",
     "blocked": {
@@ -285,6 +287,19 @@
   },
   "relatedCapa": {
     "title": "关联 CAPA"
+  },
+  "verification": {
+    "method": {
+      "measurement": "测量",
+      "observation": "观察",
+      "reproduction": "复现"
+    },
+    "conclusion": {
+      "passed": "通过",
+      "failed": "不通过",
+      "draft": "草稿",
+      "saveDraft": "保存草稿"
+    }
   },
   "ppt": {
     "generate": "生成 PPT",

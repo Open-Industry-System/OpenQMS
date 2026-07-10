@@ -1864,13 +1864,17 @@ export interface AdoptResponse {
   d_step: string;
   field_value: string;
 }
+export type VerificationMethod = "measurement" | "observation" | "reproduction";
+export type VerificationConclusion = "pending" | "passed" | "failed";
+
 export interface Verification {
   verification_id: string;
   capa_id: string;
   root_cause_text: string;
-  method: string | null;
+  method: VerificationMethod | null;
   result: string | null;
   is_verified: boolean;
+  conclusion: VerificationConclusion;
   evidence_attachments: Record<string, unknown>[];
   source_ref: Record<string, unknown> | null;
   verified_by: string | null;
@@ -1879,16 +1883,16 @@ export interface Verification {
 }
 export interface VerificationCreate {
   root_cause_text: string;
-  method?: string | null;
-  result?: string | null;
-  is_verified?: boolean;
+  method?: VerificationMethod;
+  result?: string;
+  conclusion?: VerificationConclusion;
   evidence_attachments?: Record<string, unknown>[];
   source_ref?: Record<string, unknown> | null;
 }
 export interface VerificationUpdate {
-  method?: string | null;
-  result?: string | null;
-  is_verified?: boolean;
+  method?: VerificationMethod;
+  result?: string;
+  conclusion?: VerificationConclusion;
   evidence_attachments?: Record<string, unknown>[];
 }
 export interface D7NodeAction {
