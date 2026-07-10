@@ -53,6 +53,14 @@ class CAPAResponse(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    d4_retry_count: int = 0  # P1-3: D4 验证回退计数，API/e2e 可观察
+
+    model_config = {"from_attributes": True}
+
+
+class CAPAAdvanceResponse(BaseModel):
+    capa: CAPAResponse
+    warning: str | None = None
 
     model_config = {"from_attributes": True}
 

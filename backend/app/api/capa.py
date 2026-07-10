@@ -17,6 +17,7 @@ from app.models.capa import CAPAEightD, CapaPptExport
 from app.models.fmea import FMEADocument
 from app.schemas.capa import (
     AdvanceRequest,
+    CAPAAdvanceResponse,
     CAPACreate,
     CAPAListResponse,
     CAPAResponse,
@@ -45,6 +46,8 @@ from app.state_machines.eightd_state import EightDState, _linear_next_safe
 from app.utils.pptx import pptx_response
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
+
+D4_RETRY_THRESHOLD = 3
 
 
 @router.get("", response_model=CAPAListResponse)
@@ -227,7 +230,7 @@ async def require_advance_permission(
     return scope, capa
 
 
-@router.post("/{report_id}/advance", response_model=CAPAResponse)
+@router.post("/{report_id}/advance", response_model=CAPAAdvanceResponse)
 async def advance_capa(
     report_id: uuid.UUID,
     body: AdvanceRequest | None = None,
@@ -235,13 +238,18 @@ async def advance_capa(
     result: tuple[RequestScope, Any] = Depends(require_advance_permission),
 ):
     scope, capa = result
+    from_status = capa.status
     try:
         capa = await capa_service.advance_capa(
             db, capa, scope.user.user_id, body or AdvanceRequest()
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return CAPAResponse.model_validate(capa)
+    await db.commit()
+    warning = None
+    if from_status == EightDState.D4_ROOT_CAUSE.value and (capa.d4_retry_count or 0) >= D4_RETRY_THRESHOLD:
+        warning = "建议升级处理（D4 验证已回退 {} 次）".format(capa.d4_retry_count)
+    return CAPAAdvanceResponse(capa=CAPAResponse.model_validate(capa), warning=warning)
 
 
 @router.post("/{report_id}/link-fmea", response_model=CAPAResponse)

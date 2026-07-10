@@ -293,6 +293,25 @@ Rollback operations are performed via `PUT /api/capa/{report_id}` updating the s
 - `d7_skip_reasons` is only used when advancing D7→D8 and there are unconfirmed FMEA nodes
 - Each advancement automatically generates a `TRANSITION` type audit log, recording the old and new status
 
+**Response body:**
+
+```json
+{
+  "capa": {
+    "report_id": "uuid",
+    "document_no": "8D-2026-001",
+    "title": "...",
+    "status": "D5_CORRECTION",
+    "d4_retry_count": 3,
+    "...": "..."
+  },
+  "warning": "建议升级处理（D4 验证已回退 3 次）"
+}
+```
+
+- `capa` is the CAPA report after advancement (same shape as `GET /api/capa/{id}`)
+- `warning` is returned only when advancing from `D4_ROOT_CAUSE` to `D5_CORRECTION` and `d4_retry_count >= 3`; otherwise `null`
+
 ---
 
 ## 5. FMEA Linkage

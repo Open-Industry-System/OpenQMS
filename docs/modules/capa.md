@@ -293,6 +293,25 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
 - `d7_skip_reasons` 仅在 D7→D8 推进且存在未确认 FMEA 节点时使用
 - 每次推进自动生成 `TRANSITION` 类型审计日志，记录旧状态和新状态
 
+**响应体：**
+
+```json
+{
+  "capa": {
+    "report_id": "uuid",
+    "document_no": "8D-2026-001",
+    "title": "...",
+    "status": "D5_CORRECTION",
+    "d4_retry_count": 3,
+    "...": "..."
+  },
+  "warning": "建议升级处理（D4 验证已回退 3 次）"
+}
+```
+
+- `capa` 为推进后的 CAPA 报告（结构与 `GET /api/capa/{id}` 一致）
+- `warning` 仅当本次推进从 `D4_ROOT_CAUSE` 进入 `D5_CORRECTION` 且 `d4_retry_count >= 3` 时返回；其他情况为 `null`
+
 ---
 
 ## 5. FMEA 关联

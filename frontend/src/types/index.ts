@@ -156,6 +156,7 @@ export interface CAPAReport {
   fmea_ref_id: string | null;
   fmea_node_id: string | null;
   due_date: string | null;
+  d4_retry_count: number;
   created_by: string | null;
   created_at: string;
   updated_at: string;
