@@ -213,3 +213,15 @@ async def test_create_verification_to_verified_without_details_returns_400(capa_
     r = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
         json={"root_cause_text": "rc", "conclusion": "passed"})
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_old_is_verified_request_rejected_422(capa_client, db, default_factory, admin_user):
+    # extra='forbid' 拒绝旧 is_verified 字段 → 422
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-OLD-422")
+    r = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
+        json={"root_cause_text": "rc", "is_verified": True})
+    assert r.status_code == 422, r.text
+    r2 = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
+        json={"root_cause_text": "rc", "is_verified": False})
+    assert r2.status_code == 422, r2.text

@@ -104,7 +104,7 @@ async def test_adopt_different_item_ref_not_deduped(db, default_factory, admin_u
 
 
 @pytest.mark.asyncio
-async def test_create_verification_is_verified_sets_verifier(db, default_factory, admin_user):
+async def test_create_verification_passed_sets_verifier(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     req = VerificationCreate(root_cause_text="rc", method="measurement", result="r", conclusion="passed")
     rec = await create_verification(db, capa, req, admin_user)
