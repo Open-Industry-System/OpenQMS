@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-09
-**当前分支**: `feature/us-e2e-01-spec-a`（US-E2E-01 v8.1 定稿 + gap analysis；基于 `fix/dashboard-admin-pages`）
-**最近合并**: `4102de5` P1-B 质量趋势迁移；P1-C FMEA 推荐迁移；P1-D 剩余 4 个 LLM 消费者迁移（5 任务 TDD 已落地，948 backend 测试绿）；**系统级 E2E 测试套件 M0+M1 已落地**（见下）；**US-E2E-01 8D 全程闭环特性缺口清单已录入 + 已完成项标注**（见下，6 项已完成 / 11 项待补，可勾选跟踪）
+**更新日期**: 2026-07-10
+**当前分支**: `feature/us-e2e-01-spec-a`
+**最近合并**: `8ccb29c5` B3: D4 验证结论驱动 + 双行锁 retry_count 递增 + 审计重命名；B1 `conclusion`/`d4_retry_count` + B2 schema 已就绪
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
@@ -276,7 +276,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 - [ ] **01.2 12 源推荐收尾** — LLM 未配置时静默降级（`llm_fusion_layer.py:34` pc=None 返回 attempted=0）应改为按故事判 `BLOCKED`；`RecommendationCache` 无 `stage_runs` 字段（仅 suggestions JSONB），编排执行过程未结构化持久化；前端编排面板可视化 + AP/S/O/D 展示待核  
   → **A3 已完成**：`RecommendationCache.stage_runs` JSONB 列 + Alembic 迁移 `20260709_capa_cache_stage_runs` + `backend/tests/migrations/` PG 迁移测试基础设施（`mig_db_url` fixture + `_cfg` helper），B1 可复用。
 - [x] **01.3 D4 验证 + D7 + 审批壳状态机细化切片** — 新增 `D7_COMPLETED`/`D8_GATE_PENDING`/`D8_APPROVAL_PENDING` 3 状态 + 驳回回退边 + `capa_d7_node_action.status=pending` + edge 权限 + `update_capa` 冻结守卫；9 任务已落地，backend 测试绿
-- [ ] **01.3 D4 验证 method 枚举 + 回退计数器切片（待启动）** — `CapaRootCauseVerification.method` 自由文本→枚举（measurement/observation/reproduction）+ schema/迁移；加 `retry_count` 回退计数器 + 阈值提示"建议升级处理"
+- [x] **01.3 D4 验证 method 枚举 + 回退计数器切片** — `CapaRootCauseVerification.method` 自由文本→枚举（measurement/observation/reproduction）+ CHECK 约束 + 迁移测试；`conclusion`（pending/passed/failed）+ `d4_retry_count` 回退计数器 + 双行锁递增 + 审计 `D4_VERIFICATION_PASSED`/`D4_VERIFICATION_FAILED`；服务层 `create_verification`/`update_verification` 结论驱动，`is_verified` 派生；同记录并发仅 +1，跨记录并发 +2（commit `8ccb29c5`）
 ### P1 — 新建/收尾
 
 - [ ] **01.1 D3 遏制全链路新建** — 4 类数据导入（在途/库存、发货/物流、IQC、SPC 判异）+ 受影响范围分析报告（5 项）+ AI 遏制建议（带 provenance）；ERP 数据模型（`ERPInventoryBalance`/`ERPShipment`）+ `capa_draft` 的 containment_actions 可复用；补 D3→D4 闸口（`advance_capa` 当前不检查 d3_interim 非空）
