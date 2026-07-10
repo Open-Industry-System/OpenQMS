@@ -1,19 +1,26 @@
 # 子故事 US-E2E-01.1：D3 临时/遏制措施（数据导入 + 受影响范围分析 + AI 遏制建议）
 
-**状态**: 定稿 v3（2026-07-10）
+**状态**: 定稿 v4（2026-07-10）
 **所属 epic**: US-E2E-01（README.md v8.1）
 **关联 skill**: `verify-capa-8d-d3-containment`
 **前置**: 无（D3 是业务流程最靠前的 AI 步骤，独立交付，不依赖推荐源抽象）
 **AI_REQUIRED**: true（无 LLM 凭证 → `BLOCKED`）
 
+> **v4 变更**（基于 spec 第五轮审查 1 P0 + 2 P1 + 4 一致性修订）：
+> 1. execution 模型修正（P0）：`report_id` NOT NULL（业务归属，manual/adopted 都有）+ `generation_id` nullable（仅 adopted）+ `advice_id` nullable + CHECK 区分 manual/adopted。**从未生成 AI 建议也能建 manual execution**（v3 把 generation_id 设 NOT NULL 导致 manual 无法建模）。
+> 2. 闸口按 `report_id` 查 execution：manual 无 generation 也算有效；adopted 须属当前 advice_generation。
+> 3. batches[] 数量契约：加 `qty_by_status{inventory,in_transit,shipped:{qty,unit}}`；**只 inventory/shipment 贡献数量，IQC/SPC 仅证据**；按源主键去重；不同单位不混加；impact_qty 从 qty_by_status 汇总。
+> 4. advice generation 先 running 非 current，LLM 成功才原子切 current；失败旧代保持 current + 落 failed 行 + 200 status=failed（非 422 回滚）。
+> 5. 审计事件补 `D3_EXECUTION_UPDATED`（v3 已补，v4 确认）。
+>
 > **v3 变更**（基于 spec 第四轮审查 4 P1 + 4 次要修订）：
 > 1. 落库实体新增 `capa_d3_advice_generation`（建议代，不可变 generation 覆盖到 advice 层）。
-> 2. 闸口 adopted execution 须属当前 advice_generation（`source='manual' OR (source='adopted' AND gen==current)`）；建议重生成后旧 adopted execution 失效。
-> 3. 删冗余 report_id 避免双真源：advice 只 generation_id、adoption 只 advice_id、execution 只 generation_id，report 从 generation 派生。
+> 2. 闸口 adopted execution 须属当前 advice_generation；建议重生成后旧 adopted execution 失效。
+> 3. 删冗余 report_id 避免双真源：advice 只 generation_id、adoption 只 advice_id（**execution 除外**，v4 恢复 report_id 归属）。
 > 4. 全链 ON DELETE RESTRICT + CAPA 软删除（归档不物理删）；存在 D3 审计实体禁止物理删除。
 > 5. batch_key = `hash(normalized_material + normalized_lot)`（跨来源合并），lot 缺失退化；batches[].source_refs 保留原始 provenance。
 > 6. record_key 永不为空，只有 snapshot_id 可空。
-> 7. 建议生成先检查 LLM 凭证再切 generation（blocked 不破坏旧可用 generation）。
+> 7. 建议生成先检查 LLM 凭证再建 generation（blocked 不破坏旧可用 generation）。
 > 8. 审计事件补 `D3_EXECUTION_UPDATED`。
 >
 > **v2 变更**（基于 spec 对抗性审查 8 findings 修订）：
@@ -108,9 +115,9 @@
 
 | 项 | 定义 |
 |---|---|
-| 落库实体 | `capa_d3_import_run`（导入代，run 状态+完成时间）、`capa_d3_containment_snapshot`（快照，绑 run_id，run 内 type 唯一）、`capa_d3_impact_report`（报告，绑 run_id，不可变 generation + is_current）、`capa_d3_advice_generation`（建议代，绑 report_id，不可变 generation + is_current）、`capa_d3_ai_advice`（建议含 provenance，绑 generation_id）、`capa_d3_advice_adoption`（采纳/拒绝，UQ(advice_id) 单一当前决策）、`capa_d3_execution`（执行记录，绑 generation_id，source manual 或 adopted） |
-| 关键字段 | snapshot_type∈{inventory, shipment, iqc, spc}；report 含 batches[]/impact_qty/customer_impact[]/risk_level∈{high,medium,low}/time_window/status∈{done,failed}；advice 含 source_provenance[](snapshot_id+record_key+source_type+stage，record_key 永不为空)、advice_type∈{recall,isolate,notify_customer,strict_inspection,alternative}；batch_key=hash(material+lot)；execution 含 measure_text/result_status/evidence_refs/source∈{manual,adopted}/advice_ref/executed_by/executed_at |
-| 状态枚举 | D3→D4 推进条件：当前 run 4 类快照齐全 AND 当前代报告 status=done AND 存在有效 execution（manual 或 adopted 且属当前 advice_generation） |
+| 落库实体 | `capa_d3_import_run`（导入代，run 状态+完成时间）、`capa_d3_containment_snapshot`（快照，绑 run_id，run 内 type 唯一）、`capa_d3_impact_report`（报告，绑 run_id，不可变 generation + is_current）、`capa_d3_advice_generation`（建议代，绑 report_id，不可变 generation + is_current）、`capa_d3_ai_advice`（建议含 provenance，绑 generation_id）、`capa_d3_advice_adoption`（采纳/拒绝，UQ(advice_id) 单一当前决策）、`capa_d3_execution`（执行记录，report_id NOT NULL 归属 + generation_id nullable 仅 adopted，source manual 或 adopted） |
+| 关键字段 | snapshot_type∈{inventory, shipment, iqc, spc}；report 含 batches[](batch_key+qty_by_status+source_refs)/impact_qty/customer_impact[]/risk_level∈{high,medium,low}/time_window/status∈{done,failed}；advice 含 source_provenance[](snapshot_id+record_key+source_type+stage，record_key 永不为空)、advice_type∈{recall,isolate,notify_customer,strict_inspection,alternative}；batch_key=hash(material+lot)；qty_by_status 只 inventory/shipment 贡献数量，IQC/SPC 仅证据；execution 含 measure_text/result_status/evidence_refs/source∈{manual,adopted}/advice_ref(仅adopted)/executed_by/executed_at |
+| 状态枚举 | D3→D4 推进条件：当前 run 4 类快照齐全 AND 当前代报告 status=done AND 存在有效 execution（manual 或 adopted 且属当前 advice_generation；从未生成 AI 建议时纯 manual 也算） |
 | 审计事件 | `D3_DATA_IMPORTED`、`D3_REPORT_GENERATED`、`D3_AI_ADVICE_GENERATED`、`D3_ADVICE_ADOPTED`、`D3_ADVICE_REJECTED`、`D3_ADVICE_DECISION_CHANGED`、`D3_EXECUTION_RECORDED`、`D3_EXECUTION_UPDATED` |
 | E2E seed 前置 | 产品线 DC-DC-100-E2E 有 SPC 控制图 + iqc_inspections 记录 + ERPInventoryBalance/ERPShipment 样本（mock ERPConnection）+ Customer.segment='key' |
 | 通过条件 | 当前 run 4 类导入成功 + 报告 5 项齐全(确定性事实+LLM风险) + AI 建议非空带 provenance + 执行记录有效 + D3→D4 可推进 |
