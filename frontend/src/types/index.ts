@@ -1437,7 +1437,7 @@ export interface StageRun {
   index: number;
   name: string;
   source: string;
-  status: "pending" | "running" | "done" | "skipped" | "error";
+  status: "pending" | "running" | "done" | "skipped" | "error" | "blocked";
   hit_count: number;
   summary: string;
   error?: string | null;

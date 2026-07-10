@@ -37,6 +37,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
       .catch((err) => {
         if (err instanceof RecommendationBlockedError) {
           setBlocked(true);
+          setStages(err.detail.stages ?? []);
         } else {
           message.error(t("d5.loadFailed"));
         }
@@ -60,6 +61,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
           showIcon
           message={t("d5.blocked.banner")}
         />
+        {stages.length > 0 && <RecommendationDAG stages={stages} />}
       </Card>
     );
   }

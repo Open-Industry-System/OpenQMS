@@ -14,6 +14,7 @@ const statusToAnt = (status: StageRun["status"]) => {
     case "done":
       return "finish";
     case "error":
+    case "blocked":
       return "error";
     case "running":
       return "process";

@@ -119,12 +119,16 @@ describe("D4RecPanel adopt", () => {
   });
 
   it("renders BLOCKED banner on 422 detail.blocked", async () => {
+    const blockedStages = mockStages.map((s) =>
+      s.index === 11 ? { ...s, status: "blocked" as const } : s
+    );
     vi.mocked(getD4Recommendations).mockRejectedValueOnce(
-      new RecommendationBlockedError({ blocked: true, reason: "LLM credentials not configured", stages: [] })
+      new RecommendationBlockedError({ blocked: true, reason: "LLM credentials not configured", stages: blockedStages })
     );
     renderPanel();
     await waitFor(() => expect(screen.getByTestId("rec-blocked-banner")).toBeInTheDocument());
     expect(screen.getByTestId("rec-blocked-banner")).toHaveTextContent("LLM");
+    expect(screen.getByTestId("rec-dag-stage-11")).toHaveAttribute("data-status", "blocked");
   });
 
   it("renders all 6 new D4 match_source groups", async () => {

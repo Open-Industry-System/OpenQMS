@@ -35,6 +35,7 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
       .catch((err) => {
         if (err instanceof RecommendationBlockedError) {
           setBlocked(true);
+          setStages(err.detail.stages ?? []);
         } else {
           message.error(t("d4.loadFailed"));
         }
@@ -59,6 +60,7 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
           showIcon
           message={t("d4.blocked.banner")}
         />
+        {stages.length > 0 && <RecommendationDAG stages={stages} />}
       </Card>
     );
   }
