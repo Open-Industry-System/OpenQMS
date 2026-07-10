@@ -2,7 +2,7 @@
 
 **更新日期**: 2026-07-10
 **当前分支**: `feature/us-e2e-01-spec-a`
-**最近合并**: `8ccb29c5` B3: D4 验证结论驱动 + 双行锁 retry_count 递增 + 审计重命名；B1 `conclusion`/`d4_retry_count` + B2 schema 已就绪
+**最近合并**: `8ccb29c5` B3: D4 验证结论驱动 + 双行锁 retry_count 递增 + 审计重命名；B1 `conclusion`/`d4_retry_count` + B2 schema 已就绪；**B7 e2e 断言已补**（`capa-story-closed-loop.spec.ts` D4 method/conclusion/retry_count，含 threshold warning toast）
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 

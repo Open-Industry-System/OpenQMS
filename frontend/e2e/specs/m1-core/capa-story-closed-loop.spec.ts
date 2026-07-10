@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { accountPassword } from "../../fixtures/seed-state";
-import { cleanupByPrefix, loginForToken, authedApi } from "../../helpers/api-client";
+import { cleanupByPrefix, loginForToken, authedApi, E2E_API_BASE_URL } from "../../helpers/api-client";
 
 /**
  * US-E2E-01 — 8D 非 AI 闭环故事级 spec（Spec C / P2-11）。
@@ -15,14 +15,15 @@ import { cleanupByPrefix, loginForToken, authedApi } from "../../helpers/api-cli
  *
  * 设计取舍：
  * - 审计断言走 GET /api/admin/logs/audit?table_name=capa_eightd（admin token），按 record_id 客户端过滤。
- *   故事的 1 CREATE + 7 TRANSITION（D1→D2…D6→D7 由 engineer、D7→D8 由 manager）在此回读。
+ *   故事的 1 CREATE + 7 TRANSITION（D1→D2…D6→D7_PREVENTION 由 engineer、D7→D8 由 manager）在此回读。
  *   （PROGRESS 初稿写「/api/audit-logs?target_id」，但该端点不存在；实际 admin/logs/audit 无 record_id 过滤，
  *   客户端过滤等价且无需新增后端端点——Surgical Changes。）
- * - D4 验证子流程断言（method / conclusion / retry_count）是切片 B（Task B7/B8）的关注项，
- *   此处仅占位，待切片 B 落地后补完。
+ * - D4 验证子流程断言（method / conclusion / retry_count）在独立 test 中覆盖，使用与主故事相同的
+ *   create→D4 初始化 helper，避免重复登录/seed 代码。
  */
 
 const STORY_DOC_NO = "E2E-STORY-CAPA-001";
+const D4_SUBFLOW_DOC_NO = "E2E-STORY-CAPA-D4-001";
 const PRODUCT_LINE = "DC-DC-100-E2E";
 
 async function setProductLine(page: import("@playwright/test").Page, code: string) {
@@ -48,6 +49,60 @@ async function waitForStep(page: import("@playwright/test").Page, label: RegExp)
   await expect(page.getByText(label)).toBeVisible({ timeout: 10000 });
 }
 
+/** 创建 8D 并推进到 D4（engineer）。返回 page/context/capId，调用方负责关闭 context。 */
+async function createCapaAndAdvanceToD4(
+  browser: import("@playwright/test").Browser,
+  docNo: string,
+) {
+  const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
+  const page = await ctx.newPage();
+  await setProductLine(page, PRODUCT_LINE);
+  await page.goto("/capa");
+  await page.waitForLoadState("networkidle");
+
+  // Step 1: create 8D
+  await page.locator('[data-e2e="capa-create"]').click();
+  await page.getByLabel(/报告编号|document no|report no/i).fill(docNo);
+  await page.getByLabel(/标题|title/i).fill("来料螺栓尺寸超差");
+  // 严重度「致命」。Ant Select 虚拟滚动会滚到已选项（默认「一般」），首项「致命」被滚出视口且不在 DOM，
+  // 故用键盘从「一般」上移两次到「致命」再回车（虚拟列表跟随活跃项渲染）。
+  await page.locator('[role="dialog"] .ant-select-selector').first().click();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("Enter");
+  await page.locator('[role="dialog"]').getByRole("button", { name: /创建|确定|Create|OK/i }).click();
+  await page.waitForURL(/\/capa\//, { timeout: 10000 });
+  const capId = page.url().split("/capa/")[1];
+  expect(capId).toBeTruthy();
+
+  // 创建后弹出经验教训弹窗，跳过进入编辑。
+  await expect(page.getByRole("button", { name: /跳过，直接编辑|Skip, edit directly/i })).toBeVisible({ timeout: 8000 });
+  await page.getByRole("button", { name: /跳过，直接编辑|Skip, edit directly/i }).click();
+
+  // Step 2: D1 团队组建
+  await page.getByPlaceholder(/成员姓名|Member name/i).first().fill("张工");
+  await page.getByRole("button", { name: /添加成员|Add Member/i }).click();
+  await page.locator('[data-e2e="capa-advance"]').click();
+  await waitForStep(page, /^5W2H 问题描述$|^5W2H Problem Description$/);
+
+  // Step 3: D2 问题描述
+  const d2 = page.locator("textarea").first();
+  await d2.fill("现场抽检一批 DC-DC-100-E2E 来料螺栓，发现 M8 螺栓孔径超差，实测 8.12mm（上限 8.05mm）。");
+  await d2.evaluate((el: any) => el.blur());
+  await page.locator('[data-e2e="capa-advance"]').click();
+  await waitForStep(page, /^临时遏制措施$|^Interim Containment$/);
+
+  // Step 4: D3 临时措施
+  const d3 = page.locator("textarea").first();
+  await d3.fill("对该批螺栓 100% 复检隔离，超差件判退供应商。");
+  await d3.evaluate((el: any) => el.blur());
+  await page.locator('[data-e2e="capa-advance"]').click();
+  // Step 5: D4 — 用验证卡 testid 作哨兵。
+  await expect(page.locator('[data-e2e="d4-verification-card"]')).toBeVisible({ timeout: 10000 });
+
+  return { page, context: ctx, capId };
+}
+
 test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
   test.afterAll(async () => {
     await cleanupByPrefix("E2E-STORY-CAPA");
@@ -59,65 +114,23 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     const auditStart = new Date(Date.now() - 5000).toISOString();
 
     // ── Engineer: create + D1..D7 ──────────────────────────────────────────
-    const engCtx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
-    const page = await engCtx.newPage();
-    await setProductLine(page, PRODUCT_LINE);
-    await page.goto("/capa");
-    await page.waitForLoadState("networkidle");
-
-    // Step 1: create 8D
-    await page.locator('[data-e2e="capa-create"]').click();
-    await page.getByLabel(/报告编号|document no|report no/i).fill(STORY_DOC_NO);
-    await page.getByLabel(/标题|title/i).fill("来料螺栓尺寸超差");
-    // 严重度「致命」。Ant Select 虚拟滚动会滚到已选项（默认「一般」），首项「致命」被滚出视口且不在 DOM，
-    // 故用键盘从「一般」上移两次到「致命」再回车（虚拟列表跟随活跃项渲染）。
-    await page.locator('[role="dialog"] .ant-select-selector').first().click();
-    await page.keyboard.press("ArrowUp");
-    await page.keyboard.press("ArrowUp");
-    await page.keyboard.press("Enter");
-    await page.locator('[role="dialog"]').getByRole("button", { name: /创建|确定|Create|OK/i }).click();
-    await page.waitForURL(/\/capa\//, { timeout: 10000 });
-    const capId = page.url().split("/capa/")[1];
-    expect(capId).toBeTruthy();
-
-    // 创建后弹出经验教训弹窗，跳过进入编辑。
-    await expect(page.getByRole("button", { name: /跳过，直接编辑|Skip, edit directly/i })).toBeVisible({ timeout: 8000 });
-    await page.getByRole("button", { name: /跳过，直接编辑|Skip, edit directly/i }).click();
-
-    // Step 2: D1 团队组建 — 添加一名成员（8D 团队负责人由后续 manager 账号审批 D7→D8 代表）。
-    await page.getByPlaceholder(/成员姓名|Member name/i).first().fill("张工");
-    await page.getByRole("button", { name: /添加成员|Add Member/i }).click();
-    await page.locator('[data-e2e="capa-advance"]').click();
-    await waitForStep(page, /^5W2H 问题描述$|^5W2H Problem Description$/);
-
-    // Step 3: D2 问题描述 — 填写描述后推进。
-    const d2 = page.locator("textarea").first();
-    await d2.fill("现场抽检一批 DC-DC-100-E2E 来料螺栓，发现 M8 螺栓孔径超差，实测 8.12mm（上限 8.05mm）。");
-    await d2.evaluate((el: any) => el.blur());
-    await page.locator('[data-e2e="capa-advance"]').click();
-    await waitForStep(page, /^临时遏制措施$|^Interim Containment$/);
-
-    // Step 4: D3 临时措施
-    const d3 = page.locator("textarea").first();
-    await d3.fill("对该批螺栓 100% 复检隔离，超差件判退供应商。");
-    await d3.evaluate((el: any) => el.blur());
-    await page.locator('[data-e2e="capa-advance"]').click();
-    // Step 5: D4 — 用验证卡 testid 作哨兵（D4 字段标签含括号，比文本匹配更稳）。
-    await expect(page.locator('[data-e2e="d4-verification-card"]')).toBeVisible({ timeout: 10000 });
+    const { page, context: engCtx, capId } = await createCapaAndAdvanceToD4(browser, STORY_DOC_NO);
 
     // D4 根因由工程师手动填写（AI 推荐断言已拆分至 capa-story-ai-recommend.spec.ts）。
     const d4Textarea = page.locator("textarea").first();
     await d4Textarea.fill("现场根因：螺栓孔径定位销磨损导致孔径偏大");
     await d4Textarea.evaluate((el: any) => el.blur());
 
-    // 现场验证卡：记录方法/结果/证据，标记已验证。
-    // TODO(B7/B8): 切片 B 落地后补充 method / conclusion / retry_count 子流程断言。
+    // D4 现场验证：method 选 measurement，填写 result，提交 passed，满足 D4→D5 闸口。
     await page.locator('[data-e2e="d4-verification-new"]').click();
-    await page.locator('[data-e2e="verification-method"] input').fill("三坐标测量机复测孔径 + 定位销磨损量");
-    await page.locator('[data-e2e="verification-result"] textarea').fill("孔径实测 8.12mm 超差，定位销磨损 0.07mm，根因验证通过");
-    await page.locator('[data-e2e="verification-form-is-verified"]').click();
-    await page.locator('[data-e2e="verification-submit"]').click();
-    await expect(page.locator('[data-e2e="verification-status"]')).toBeVisible({ timeout: 10000 });
+    await page.locator('[data-e2e="verification-method"] .ant-select-selector').click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+      .filter({ hasText: /测量|Measurement/i }).first().click();
+    await page.locator('[data-e2e="verification-result"] textarea')
+      .fill("孔径实测 8.12mm 超差，定位销磨损 0.07mm，根因验证通过");
+    await page.locator('[data-e2e="verify-pass"]').click();
+    await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+      .toContainText(/通过|Passed/i, { timeout: 10000 });
 
     // D4→D5 闸口要求当前根因已验证，推进。
     await page.locator('[data-e2e="capa-advance"]').click();
@@ -205,5 +218,116 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
       expect(transitions[i].changed_fields.new_status).toBe(expectedTransitions[i][1]);
       expect(transitions[i].operated_by).toBe(expectedTransitions[i][2]);
     }
+  });
+
+  test("D4 verification subflow: method enum + conclusion + retry_count", async ({ browser, request }) => {
+    test.setTimeout(180000);
+
+    const { page, context, capId } = await createCapaAndAdvanceToD4(browser, D4_SUBFLOW_DOC_NO);
+
+    // 用 request 登录 engineer，取得独立 token 用于 GET /api/capa/{id} 断言。
+    const engineerPw = await accountPassword("engineer");
+    const loginResp = await request.post(`${E2E_API_BASE_URL}/auth/login`, {
+      data: { username: "engineer", password: engineerPw },
+    });
+    expect(loginResp.ok()).toBeTruthy();
+    const token = ((await loginResp.json()) as any).access_token as string;
+    const apiHeaders = { Authorization: `Bearer ${token}` };
+
+    async function fetchCapa(id: string) {
+      const r = await request.get(`${E2E_API_BASE_URL}/capa/${id}`, { headers: apiHeaders });
+      expect(r.ok()).toBeTruthy();
+      return r.json() as Promise<any>;
+    }
+
+    async function setCurrentRootCause(text: string) {
+      const d4 = page.locator("textarea").first();
+      await d4.fill(text);
+      await d4.evaluate((el: any) => el.blur());
+    }
+
+    async function openVerificationForm() {
+      await page.locator('[data-e2e="d4-verification-new"]').click();
+    }
+
+    async function fillVerificationDetail() {
+      await page.locator('[data-e2e="verification-method"] .ant-select-selector').click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+        .filter({ hasText: /测量|Measurement/i }).first().click();
+      await page.locator('[data-e2e="verification-result"] textarea')
+        .fill("实测孔径 8.12mm 超差，定位销磨损 0.07mm");
+    }
+
+    async function saveDraft() {
+      await page.locator('[data-e2e="verify-save-draft"]').click();
+      await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+        .toContainText(/草稿|Draft|Pending/i, { timeout: 10000 });
+    }
+
+    async function submitFail() {
+      await page.locator('[data-e2e="verify-fail-0"]').click();
+      await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+        .toContainText(/不通过|Failed|未通过/i, { timeout: 10000 });
+    }
+
+    async function submitPass() {
+      await page.locator('[data-e2e="verify-pass-0"]').click();
+      await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+        .toContainText(/通过|Passed/i, { timeout: 10000 });
+    }
+
+    // 根因 A：保存草稿 → retry_count 不递增。
+    await setCurrentRootCause("根因 A：定位销磨损导致孔径偏大");
+    await openVerificationForm();
+    await fillVerificationDetail();
+    await saveDraft();
+    let capa = await fetchCapa(capId);
+    expect(capa.d4_retry_count).toBe(0);
+
+    // 根因 A：提交 failed → retry_count = 1。
+    await submitFail();
+    capa = await fetchCapa(capId);
+    expect(capa.d4_retry_count).toBe(1);
+
+    // 根因 B：failed → retry_count = 2。
+    await setCurrentRootCause("根因 B：夹具重复定位误差");
+    await openVerificationForm();
+    await fillVerificationDetail();
+    await saveDraft();
+    await submitFail();
+    capa = await fetchCapa(capId);
+    expect(capa.d4_retry_count).toBe(2);
+
+    // 根因 C：failed → retry_count = 3（达到阈值）。
+    await setCurrentRootCause("根因 C：切削液温度波动");
+    await openVerificationForm();
+    await fillVerificationDetail();
+    await saveDraft();
+    await submitFail();
+    capa = await fetchCapa(capId);
+    expect(capa.d4_retry_count).toBe(3);
+
+    // 根因 D：passed → 不递增；随后 advance 触发 threshold 警告。
+    await setCurrentRootCause("根因 D：刀具磨损补偿未生效");
+    await openVerificationForm();
+    await fillVerificationDetail();
+    await saveDraft();
+    await submitPass();
+
+    const advanceResponsePromise = page.waitForResponse(
+      (res) => res.url().includes(`/api/capa/${capId}/advance`) && res.request().method() === "POST"
+    );
+    await page.locator('[data-e2e="capa-advance"]').click();
+    const advanceRes = await advanceResponsePromise;
+    expect(advanceRes.ok()).toBeTruthy();
+    const advanceBody = await advanceRes.json();
+    expect(advanceBody.capa.status).toBe("D5_CORRECTION");
+    expect(advanceBody.capa.d4_retry_count).toBe(3);
+    expect(advanceBody.warning).toContain("建议升级处理");
+
+    // UI 侧 advanceCAPA() 把 warning 展示为 message.warning。
+    await expect(page.locator(".ant-message").getByText("建议升级处理")).toBeVisible({ timeout: 5000 });
+
+    await context.close();
   });
 });

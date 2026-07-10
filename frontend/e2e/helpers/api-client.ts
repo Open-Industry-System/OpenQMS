@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const E2E_API_BASE_URL = process.env.E2E_API_BASE_URL ?? "http://localhost:8001/api";
+export const E2E_API_BASE_URL = process.env.E2E_API_BASE_URL ?? "http://localhost:8001/api";
 
 export const apiClient = axios.create({ baseURL: E2E_API_BASE_URL });
 
