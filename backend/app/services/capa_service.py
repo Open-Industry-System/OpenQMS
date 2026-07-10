@@ -433,7 +433,7 @@ async def advance_capa(
         cnt = await db.scalar(select(func.count()).select_from(CapaRootCauseVerification).where(
             CapaRootCauseVerification.capa_id == capa.report_id,
             CapaRootCauseVerification.factory_id == capa.factory_id,
-            CapaRootCauseVerification.is_verified == True,  # noqa: E712
+            CapaRootCauseVerification.conclusion == "passed",
             CapaRootCauseVerification.root_cause_text == current_rc,
         ))
         if cnt < 1:

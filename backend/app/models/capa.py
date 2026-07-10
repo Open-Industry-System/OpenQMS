@@ -54,6 +54,10 @@ class CapaRootCauseVerification(Base):
             "conclusion IN ('pending','passed','failed')",
             name="chk_verification_conclusion",
         ),
+        CheckConstraint(
+            "is_verified = (conclusion = 'passed')",
+            name="chk_verification_conclusion_is_verified",
+        ),
     )
     verification_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
