@@ -107,7 +107,7 @@ D7 填写完成 → D7_COMPLETED →（01.7 文档门禁通过）→ D8_APPROVAL
 | 项 | 定义 |
 |---|---|
 | 落库实体 | `capa_root_cause_verification`（D4 验证）、`capa_d7_node_action`（node-action）、`audit_log`（审批/驳回） |
-| 关键字段 | verification.method∈{measurement,observation,reproduction}、is_verified、evidence_attachments[]、retry_count；node_action.fmea_id+fmea_node_id、action_type∈{new_control,optimize_control,lesson_register}、source∈{ai,manual}、status=pending、capa_id |
+| 关键字段 | verification.method∈{measurement,observation,reproduction}、conclusion∈{pending,passed,failed}（结论真相源，is_verified 派生自 conclusion=passed）、evidence_attachments[]、d4_retry_count（capa_eightd，仅 conclusion→failed 跃迁递增）；node_action.fmea_id+fmea_node_id、action_type∈{new_control,optimize_control,lesson_register}、source∈{ai,manual}、status=pending、capa_id |
 | 状态枚举 | D7_PREVENTION→D7_COMPLETED→D8_GATE_PENDING（01.7）→D8_APPROVAL_PENDING→D8_CLOSURE；node_action.status=pending（本故事止） |
 | 审计事件 | `D4_VERIFICATION_PASSED`/`D4_VERIFICATION_FAILED`（含 retry_count）、`D7_NODE_ACTION_CREATED`、`D8_APPROVAL_PENDING`、`D8_APPROVED`/`D8_REJECTED` |
 | E2E seed 前置 | 8D 推进到 D4；产品有 FMEA；manager 账号可审批 |
