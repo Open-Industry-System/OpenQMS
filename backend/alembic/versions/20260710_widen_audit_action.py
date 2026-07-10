@@ -21,4 +21,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.alter_column("audit_logs", "action", existing_type=sa.String(50), type_=sa.String(20))
+    bind = op.get_bind()
+    long_count = bind.scalar(
+        sa.text("SELECT count(*) FROM audit_logs WHERE length(action) > 20")
+    )
+    if long_count:
+        raise RuntimeError(
+            f"Cannot downgrade audit_logs.action to VARCHAR(20): {long_count} row(s) have action >20 chars "
+            "(D4_VERIFICATION_*). This widen migration is irreversible once long audit events exist; "
+            "truncate or archive those rows first."
+        )
+    op.alter_column("audit_logs", "action", existing_type=sa.String(50), type_=sa.String(20), existing_nullable=False)
