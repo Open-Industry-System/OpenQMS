@@ -16,7 +16,7 @@ class AuditLog(Base):
     )
     table_name: Mapped[str] = mapped_column(String(100), nullable=False)
     record_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
     changed_fields: Mapped[dict | None] = mapped_column(JSONB)
     old_values: Mapped[dict | None] = mapped_column(JSONB)
     new_values: Mapped[dict | None] = mapped_column(JSONB)

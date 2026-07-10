@@ -66,7 +66,7 @@ async def test_adopt_rejects_d7_step(capa_client, db, default_factory, admin_use
 async def test_create_and_list_verification(capa_client, db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-VER")
     r1 = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
-        json={"root_cause_text": "rc", "method": "measurement", "is_verified": True})
+        json={"root_cause_text": "rc", "method": "measurement", "conclusion": "passed"})
     assert r1.status_code == 200, r1.text
     assert r1.json()["is_verified"] is True
     r2 = await capa_client.get(f"/api/capa/{capa.report_id}/root-cause-verifications")
@@ -83,7 +83,7 @@ async def test_patch_verification_other_capa_404(capa_client, db, default_factor
     vid = r.json()["verification_id"]
     # 用 capa_a 的 URL 改 capa_b 的记录
     patch = await capa_client.patch(f"/api/capa/{capa_a.report_id}/root-cause-verifications/{vid}",
-        json={"is_verified": True})
+        json={"conclusion": "passed"})
     assert patch.status_code == 404
 
 
@@ -196,14 +196,14 @@ async def test_create_verification_403_when_capa_product_line_out_of_scope(db, d
 
 @pytest.mark.asyncio
 async def test_patch_verification_to_verified_without_details_returns_400(capa_client, db, default_factory, admin_user):
-    # is_verified=true 但无 method/result/evidence → 400（不是 500）
+    # conclusion=passed 但无 method/result/evidence → 400（不是 500）
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-VRF-400")
     r = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
-        json={"root_cause_text": "rc", "is_verified": False})
+        json={"root_cause_text": "rc", "conclusion": "pending"})
     assert r.status_code == 200, r.text
     vid = r.json()["verification_id"]
     patch = await capa_client.patch(f"/api/capa/{capa.report_id}/root-cause-verifications/{vid}",
-        json={"is_verified": True})
+        json={"conclusion": "passed"})
     assert patch.status_code == 400
 
 
@@ -211,5 +211,5 @@ async def test_patch_verification_to_verified_without_details_returns_400(capa_c
 async def test_create_verification_to_verified_without_details_returns_400(capa_client, db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-CRT-400")
     r = await capa_client.post(f"/api/capa/{capa.report_id}/root-cause-verifications",
-        json={"root_cause_text": "rc", "is_verified": True})
+        json={"root_cause_text": "rc", "conclusion": "passed"})
     assert r.status_code == 400

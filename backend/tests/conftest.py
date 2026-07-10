@@ -72,6 +72,16 @@ _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, ex
 DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+@pytest.fixture
+def sessionmaker():
+    """返回测试引擎上的 async_sessionmaker，用于需要真实提交会话的并发测试。
+
+    常规 ``db`` fixture 把 commit() 替换为 flush 并在外层事务内回滚，无法验证
+    FOR UPDATE 行锁的并发语义。此 fixture 提供独立的、真实提交的 AsyncSession。
+    """
+    return _test_session_factory
+
+
 def pytest_configure(config):
     """Register the requires_db marker."""
     config.addinivalue_line("markers", "requires_db: mark test as requiring a live database connection")
