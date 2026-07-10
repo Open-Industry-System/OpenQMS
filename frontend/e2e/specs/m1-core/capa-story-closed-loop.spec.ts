@@ -24,6 +24,7 @@ import { cleanupByPrefix, loginForToken, authedApi, E2E_API_BASE_URL } from "../
 
 const STORY_DOC_NO = "E2E-STORY-CAPA-001";
 const D4_SUBFLOW_DOC_NO = "E2E-STORY-CAPA-D4-001";
+const D4_BASE_DOC_NO = "E2E-STORY-CAPA-D4-BASE-001";
 const PRODUCT_LINE = "DC-DC-100-E2E";
 
 async function setProductLine(page: import("@playwright/test").Page, code: string) {
@@ -220,7 +221,96 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     }
   });
 
-  test("D4 verification subflow: method enum + conclusion + retry_count", async ({ browser, request }) => {
+  test("D4 verification subflow: passed does not increment retry_count (base case)", async ({ browser, request }) => {
+    test.setTimeout(180000);
+
+    const { page, context, capId } = await createCapaAndAdvanceToD4(browser, D4_BASE_DOC_NO);
+
+    // 用 request 登录 engineer，取得独立 token 用于 GET /api/capa/{id} 断言。
+    const engineerPw = await accountPassword("engineer");
+    const loginResp = await request.post(`${E2E_API_BASE_URL}/auth/login`, {
+      data: { username: "engineer", password: engineerPw },
+    });
+    expect(loginResp.ok()).toBeTruthy();
+    const token = ((await loginResp.json()) as any).access_token as string;
+    const apiHeaders = { Authorization: `Bearer ${token}` };
+
+    async function fetchCapa(id: string) {
+      const r = await request.get(`${E2E_API_BASE_URL}/capa/${id}`, { headers: apiHeaders });
+      expect(r.ok()).toBeTruthy();
+      return r.json() as Promise<any>;
+    }
+
+    async function setCurrentRootCause(text: string) {
+      const d4 = page.locator("textarea").first();
+      await d4.fill(text);
+      await d4.evaluate((el: any) => el.blur());
+    }
+
+    async function openVerificationForm() {
+      await page.locator('[data-e2e="d4-verification-new"]').click();
+    }
+
+    async function fillVerificationDetail() {
+      await page.locator('[data-e2e="verification-method"] .ant-select-selector').click();
+      await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+        .filter({ hasText: /测量|Measurement/i }).first().click();
+      await page.locator('[data-e2e="verification-result"] textarea')
+        .fill("实测孔径 8.12mm 超差，定位销磨损 0.07mm");
+    }
+
+    async function saveDraft() {
+      await page.locator('[data-e2e="verify-save-draft"]').click();
+      await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+        .toContainText(/草稿|Draft|Pending/i, { timeout: 10000 });
+    }
+
+    async function submitFail() {
+      await page.locator('[data-e2e="verify-fail-0"]').click();
+      await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+        .toContainText(/不通过|Failed|未通过/i, { timeout: 10000 });
+    }
+
+    async function submitPass() {
+      await page.locator('[data-e2e="verify-pass-0"]').click();
+      await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+        .toContainText(/通过|Passed/i, { timeout: 10000 });
+    }
+
+    // 根因 A：保存草稿 → retry_count 不递增。
+    await setCurrentRootCause("根因 A：定位销磨损导致孔径偏大");
+    await openVerificationForm();
+    await fillVerificationDetail();
+    await saveDraft();
+    let capa = await fetchCapa(capId);
+    expect(capa.d4_retry_count).toBe(0);
+
+    // 根因 A：提交 failed → retry_count = 1。
+    await submitFail();
+    capa = await fetchCapa(capId);
+    expect(capa.d4_retry_count).toBe(1);
+
+    // 根因 A：提交 passed → retry_count 仍为 1（passed 不递增）。
+    await submitPass();
+    capa = await fetchCapa(capId);
+    expect(capa.d4_retry_count).toBe(1);
+
+    // 推进到 D5：无阈值警告（retry_count < 3）。
+    const advanceResponsePromise = page.waitForResponse(
+      (res) => res.url().includes(`/api/capa/${capId}/advance`) && res.request().method() === "POST"
+    );
+    await page.locator('[data-e2e="capa-advance"]').click();
+    const advanceRes = await advanceResponsePromise;
+    expect(advanceRes.ok()).toBeTruthy();
+    const advanceBody = await advanceRes.json();
+    expect(advanceBody.capa.status).toBe("D5_CORRECTION");
+    expect(advanceBody.capa.d4_retry_count).toBe(1);
+    expect(advanceBody.warning).toBeUndefined();
+
+    await context.close();
+  });
+
+  test("D4 verification subflow: threshold warning at retry_count >= 3", async ({ browser, request }) => {
     test.setTimeout(180000);
 
     const { page, context, capId } = await createCapaAndAdvanceToD4(browser, D4_SUBFLOW_DOC_NO);
