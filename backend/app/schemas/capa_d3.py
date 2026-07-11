@@ -97,13 +97,39 @@ class D3ReportRunningResponse(BaseModel):
     status: Literal["running"]
 
 
-class D3AdviceRequest(BaseModel):
-    """Placeholder for Task 8 advice generation request."""
+class ProvenanceEntry(BaseModel):
+    """Provenance entry for an advice item."""
 
-    pass
+    source_type: str  # inventory, shipment, iqc, spc, report
+    snapshot_id: uuid.UUID | None = None
+    record_key: str  # Always non-null
+    stage: str = "llm_advice"
+
+
+class D3AdviceItem(BaseModel):
+    """Single advice item with provenance."""
+
+    advice_id: uuid.UUID
+    advice_type: str  # recall, isolate, notify_customer, strict_inspection, alternative
+    advice_text: str
+    source_provenance: list[ProvenanceEntry]
+    adoption_status: str | None = None  # From capa_d3_advice_adoption if exists
+
+
+class D3AdviceRunningResponse(BaseModel):
+    """Response body for POST /d3/advice when generation is already running."""
+
+    generation_id: uuid.UUID
+    status: Literal["running"]
 
 
 class D3AdviceResponse(BaseModel):
-    """Placeholder for Task 8 advice generation response."""
+    """Response body for POST/GET /d3/advice."""
+
+    advice: list[D3AdviceItem]
+
+
+class D3AdviceRequest(BaseModel):
+    """Request body for POST /d3/advice (empty - no parameters needed)."""
 
     pass

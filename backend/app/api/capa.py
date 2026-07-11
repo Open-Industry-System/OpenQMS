@@ -15,7 +15,14 @@ from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaPptExport
-from app.models.capa_d3 import CapaD3ContainmentSnapshot, CapaD3ImpactReport, CapaD3ImportRun
+from app.models.capa_d3 import (
+    CapaD3AdviceAdoption,
+    CapaD3AdviceGeneration,
+    CapaD3AiAdvice,
+    CapaD3ContainmentSnapshot,
+    CapaD3ImpactReport,
+    CapaD3ImportRun,
+)
 from app.models.fmea import FMEADocument
 from app.schemas.capa import (
     AdvanceRequest,
@@ -28,14 +35,17 @@ from app.schemas.capa import (
     D5RecommendationResponse,
 )
 from app.schemas.capa_d3 import (
+    D3AdviceItem,
     D3AdviceRequest,
     D3AdviceResponse,
+    D3AdviceRunningResponse,
     D3ImportRequest,
     D3ImportResponse,
     D3ReportResponse,
     D3ReportRunningResponse,
     D3RunResponse,
     D3SnapshotResponse,
+    ProvenanceEntry,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
 from app.schemas.capa_ppt import PptExportDetailResponse
@@ -1116,3 +1126,186 @@ async def d3_generate_report_ep(
     if report is None:
         raise HTTPException(status_code=404, detail="D3 影响报告不存在")
     return D3ReportResponse.model_validate(report)
+"""D3 Advice endpoint implementation to append to capa.py"""
+
+# ===== D3 Advice endpoints (US-E2E-01.1 Task 8) =====
+
+
+@router.post("/{report_id}/d3/advice")
+async def d3_generate_advice_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /d3/advice: Generate AI advice for a CAPA's current impact report."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    # Find current run -> current report
+    current_run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
+    )
+    if current_run is None:
+        raise HTTPException(status_code=400, detail="需先导入遏制数据")
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        raise HTTPException(status_code=400, detail="需先生成影响报告")
+
+    # 1. Already running -> 202
+    running_gen = await db.scalar(
+        select(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.status == "running",
+        )
+    )
+    if running_gen is not None:
+        retry_after = capa_d3_containment_service.RETRY_AFTER_SECONDS
+        return JSONResponse(
+            status_code=202,
+            content={"generation_id": str(running_gen.generation_id), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # 2. Current generation done -> return advice list
+    current_gen = await db.scalar(
+        select(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+    if current_gen is not None and current_gen.status == "done":
+        return await _build_advice_response(db, current_gen)
+
+    # 3. No generation yet -> generate
+    result = await capa_d3_containment_service.generate_advice(
+        db, capa.report_id, current_report.report_id, scope.user, None
+    )
+    if result["status"] == "blocked":
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "message": "LLM 凭证未配置，建议生成被阻断"},
+        )
+    if result["status"] == "running":
+        retry_after = result.get("retry_after", capa_d3_containment_service.RETRY_AFTER_SECONDS)
+        return JSONResponse(
+            status_code=202,
+            content={"generation_id": str(result["generation_id"]), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # done / failed -> return advice list or empty
+    gen_id = result.get("generation_id")
+    if gen_id:
+        gen = await db.get(CapaD3AdviceGeneration, uuid.UUID(str(gen_id)))
+        if gen and gen.status == "done":
+            return await _build_advice_response(db, gen)
+
+    # failed generation -> return empty list
+    return D3AdviceResponse(advice=[])
+
+
+@router.get("/{report_id}/d3/advice", response_model=D3AdviceResponse)
+async def d3_get_advice_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /d3/advice: Return current generation's advice list with provenance and adoption status."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    # Find current report
+    current_run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
+    )
+    if current_run is None:
+        return D3AdviceResponse(advice=[])
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        return D3AdviceResponse(advice=[])
+
+    # Find current generation
+    current_gen = await db.scalar(
+        select(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+    if current_gen is None:
+        return D3AdviceResponse(advice=[])
+
+    return await _build_advice_response(db, current_gen)
+
+
+async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) -> D3AdviceResponse:
+    """Build D3AdviceResponse from a current advice generation."""
+    advice_rows = (
+        await db.execute(
+            select(CapaD3AiAdvice).where(
+                CapaD3AiAdvice.generation_id == gen.generation_id
+            )
+        )
+    ).scalars().all()
+
+    # Fetch adoption status for each advice
+    advice_ids = [a.advice_id for a in advice_rows]
+    adoptions = {}
+    if advice_ids:
+        adoption_rows = (
+            await db.execute(
+                select(CapaD3AdviceAdoption).where(
+                    CapaD3AdviceAdoption.advice_id.in_(advice_ids)
+                )
+            )
+        ).scalars().all()
+        for ad in adoption_rows:
+            adoptions[ad.advice_id] = ad.decision
+
+    items = []
+    for a in advice_rows:
+        provenance = [
+            ProvenanceEntry(
+                source_type=p["source_type"],
+                snapshot_id=uuid.UUID(p["snapshot_id"]) if p.get("snapshot_id") else None,
+                record_key=p["record_key"],
+                stage=p.get("stage", "llm_advice"),
+            )
+            for p in (a.source_provenance or [])
+        ]
+        items.append(
+            D3AdviceItem(
+                advice_id=a.advice_id,
+                advice_type=a.advice_type,
+                advice_text=a.advice_text,
+                source_provenance=provenance,
+                adoption_status=adoptions.get(a.advice_id),
+            )
+        )
+
+    return D3AdviceResponse(advice=items)
