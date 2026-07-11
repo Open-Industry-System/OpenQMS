@@ -1,0 +1,182 @@
+"""Tests for D3 Containment Report Computation (US-E2E-01.1 Task 3).
+
+Pure function tests for deterministic calculations.
+"""
+
+from app.services.capa_d3_containment_service import (
+    _compute_batches,
+    _compute_impact_qty,
+    _compute_customer_impact,
+    _compute_time_window,
+    _compute_risk_floor,
+)
+
+
+# ===== Batch Key Tests =====
+
+def test_batch_key_hash_material_lot_merges_cross_source():
+    """Same material+lot from different sources merge into one batch."""
+    snapshots = [
+        {"snapshot_type": "inventory", "snapshot_id": "s1", "payload": [
+            {"record_key": "k1", "source_id": "b1", "material_code": "M1", "lot_no": "L1", "quantity": 70, "unit": "pcs"}
+        ]},
+        {"snapshot_type": "shipment", "snapshot_id": "s2", "payload": [
+            {"record_key": "k2", "source_id": "sh1", "material_code": "M1", "lot_no": "L1", "quantity": 30, "unit": "pcs", "customer_code": "C1", "customer_name": "Acme", "customer_segment": "key", "arrival_status": "signed"}
+        ]},
+    ]
+    batches = _compute_batches(snapshots)
+    assert len(batches) == 1  # Same M1+L1 merge
+    assert batches[0]["material_code"] == "M1" and batches[0]["lot_no"] == "L1"
+    assert batches[0]["qty_by_status"]["inventory"] == [{"qty": 70, "unit": "pcs"}]
+    assert batches[0]["qty_by_status"]["shipped"] == [{"qty": 30, "unit": "pcs"}]
+
+
+def test_batch_key_degrades_when_lot_missing():
+    """Batch key degrades to {snapshot_type}:{source_id} when lot is missing."""
+    snapshots = [
+        {"snapshot_type": "inventory", "snapshot_id": "s1", "payload": [
+            {"record_key": "k1", "source_id": "b1", "material_code": "M1", "lot_no": None, "quantity": 70, "unit": "pcs"}
+        ]}
+    ]
+    batches = _compute_batches(snapshots)
+    assert batches[0]["batch_key"] == "inventory:b1"  # Degraded
+
+
+def test_qty_by_status_only_inventory_shipment_contribute():
+    """IQC does not contribute to qty_by_status, only to source_refs."""
+    snapshots = [
+        {"snapshot_type": "inventory", "snapshot_id": "s1", "payload": [
+            {"record_key": "k1", "source_id": "b1", "material_code": "M1", "lot_no": "L1", "quantity": 70, "unit": "pcs"}
+        ]},
+        {"snapshot_type": "shipment", "snapshot_id": "s2", "payload": [
+            {"record_key": "k2", "source_id": "sh1", "material_code": "M1", "lot_no": "L1", "quantity": 30, "unit": "pcs", "customer_code": "C1", "customer_name": "Acme", "customer_segment": "key", "arrival_status": "signed"}
+        ]},
+        {"snapshot_type": "iqc", "snapshot_id": "s3", "payload": [
+            {"record_key": "k3", "source_id": "i1", "inspection_no": "IQ1", "supplier_id": "sup1", "supplier_name": "S", "part_no": "M1", "lot_no": "L1", "defect_qty": 100, "defect_description": "d", "inspection_result": "reject", "inspection_date": "2026-07-01"}
+        ]},
+    ]
+    batches = _compute_batches(snapshots)
+    total = sum(q["qty"] for qs in batches[0]["qty_by_status"].values() for q in qs)
+    assert total == 100  # 70+30, NOT 200
+    assert any(r["snapshot_type"] == "iqc" for r in batches[0]["source_refs"])  # IQC in source_refs
+
+
+def test_qty_by_status_multi_unit_not_merged():
+    """Different lot -> different batch; same batch multi-unit not merged."""
+    snapshots = [
+        {"snapshot_type": "inventory", "snapshot_id": "s1", "payload": [
+            {"record_key": "k1", "source_id": "b1", "material_code": "M1", "lot_no": "L1", "quantity": 70, "unit": "pcs"}
+        ]},
+        {"snapshot_type": "inventory", "snapshot_id": "s2", "payload": [
+            {"record_key": "k2", "source_id": "b2", "material_code": "M1", "lot_no": "L2", "quantity": 5, "unit": "kg"}
+        ]},
+    ]
+    batches = _compute_batches(snapshots)
+    # Different lot -> different batch
+    assert len(batches) == 2
+
+
+def test_dedup_by_source_id():
+    """Duplicate source_id records are deduped."""
+    snapshots = [
+        {"snapshot_type": "inventory", "snapshot_id": "s1", "payload": [
+            {"record_key": "k1", "source_id": "b1", "material_code": "M1", "lot_no": "L1", "quantity": 70, "unit": "pcs"},
+            {"record_key": "k1b", "source_id": "b1", "material_code": "M1", "lot_no": "L1", "quantity": 70, "unit": "pcs"}  # Same source_id duplicate
+        ]}
+    ]
+    batches = _compute_batches(snapshots)
+    assert batches[0]["qty_by_status"]["inventory"] == [{"qty": 70, "unit": "pcs"}]  # Deduped, not double-counted
+
+
+def test_iqc_part_no_merges_with_inventory_shipment():
+    """IQC uses part_no (not material_code) - same part_no+lot merges with inventory/shipment."""
+    snapshots = [
+        {"snapshot_type": "inventory", "snapshot_id": "s1", "payload": [
+            {"record_key": "k1", "source_id": "b1", "material_code": "M1", "lot_no": "L1", "quantity": 70, "unit": "pcs"}
+        ]},
+        {"snapshot_type": "iqc", "snapshot_id": "s3", "payload": [
+            {"record_key": "k3", "source_id": "i1", "part_no": "M1", "lot_no": "L1", "defect_qty": 100, "inspection_result": "reject"}
+        ]},
+    ]
+    batches = _compute_batches(snapshots)
+    assert len(batches) == 1  # part_no=M1+L1 merges with material_code=M1+L1
+    assert any(r["snapshot_type"] == "iqc" for r in batches[0]["source_refs"])  # IQC in source_refs
+    assert batches[0]["qty_by_status"]["inventory"] == [{"qty": 70, "unit": "pcs"}]  # IQC does not contribute qty
+
+
+def test_shipment_arrival_status_splits_in_transit_vs_shipped():
+    """Shipment arrival_status splits into in_transit vs shipped."""
+    snapshots = [
+        {"snapshot_type": "shipment", "snapshot_id": "s2", "payload": [
+            {"record_key": "k2", "source_id": "sh1", "material_code": "M1", "lot_no": "L1", "quantity": 30, "unit": "pcs", "arrival_status": "signed", "customer_code": "C1"},
+            {"record_key": "k2b", "source_id": "sh2", "material_code": "M1", "lot_no": "L2", "quantity": 40, "unit": "pcs", "arrival_status": "in_transit", "customer_code": "C2"},
+        ]},
+    ]
+    batches = _compute_batches(snapshots)
+    by_lot = {b["lot_no"]: b for b in batches}
+    assert by_lot["L1"]["qty_by_status"]["shipped"] == [{"qty": 30, "unit": "pcs"}]  # signed -> shipped
+    assert by_lot["L2"]["qty_by_status"]["in_transit"] == [{"qty": 40, "unit": "pcs"}]  # in_transit -> in_transit
+    assert by_lot["L1"]["qty_by_status"]["in_transit"] == []  # L1 has no in_transit
+
+
+# ===== Impact Qty Tests =====
+
+def test_impact_qty_same_unit_sums_different_unit_separate():
+    """Same status+unit sums and merges; different unit stays separate."""
+    snapshots = [
+        {"snapshot_type": "inventory", "snapshot_id": "s1", "payload": [
+            {"record_key": "k1", "source_id": "b1", "material_code": "M1", "lot_no": "L1", "quantity": 70, "unit": "pcs"},
+            {"record_key": "k2", "source_id": "b2", "material_code": "M1", "lot_no": "L2", "quantity": 30, "unit": "pcs"},
+            {"record_key": "k3", "source_id": "b3", "material_code": "M2", "lot_no": "L3", "quantity": 5, "unit": "kg"},
+        ]},
+    ]
+    batches = _compute_batches(snapshots)
+    impact = _compute_impact_qty(batches)
+    # 70+30 pcs merged; 5 kg separate
+    assert {"qty": 100, "unit": "pcs"} in impact["inventory"]
+    assert {"qty": 5, "unit": "kg"} in impact["inventory"]
+    assert len(impact["inventory"]) == 2  # Two unit groups
+
+
+# ===== Customer Impact Tests =====
+
+def test_customer_impact_quantities_array_with_segment_from_payload():
+    """Customer impact includes quantities array with segment from payload."""
+    ship = {"snapshot_id": "s2", "payload": [
+        {"customer_code": "C1", "customer_name": "Acme", "customer_segment": "key", "quantity": 30, "unit": "pcs", "arrival_status": "signed", "material_code": "M1", "lot_no": "L1"}
+    ]}
+    ci = _compute_customer_impact(ship)
+    assert ci == [{"customer_name": "Acme", "customer_segment": "key", "arrival_status": "signed", "quantities": [{"qty": 30, "unit": "pcs"}]}]
+
+
+# ===== Time Window Tests =====
+
+def test_time_window_alarm_min_max():
+    """Time window returns min/max triggered_at."""
+    spc = {"snapshot_id": "s4", "payload": [
+        {"triggered_at": "2026-07-01T10:00:00Z"},
+        {"triggered_at": "2026-07-05T08:00:00Z"}
+    ]}
+    tw = _compute_time_window(spc)
+    assert tw == {"start": "2026-07-01T10:00:00Z", "end": "2026-07-05T08:00:00Z"}
+
+
+# ===== Risk Floor Tests =====
+
+def test_risk_floor_unknown_arrival_with_customer_is_high():
+    """Unknown arrival status with affected customer -> high (conservative)."""
+    ci = [{"customer_name": "Acme", "customer_segment": "key", "arrival_status": "unknown", "quantities": [{"qty": 30, "unit": "pcs"}]}]
+    floor, err = _compute_risk_floor(ci, {"capa_severity": "general", "risk_mapping_version": "v1"})
+    assert floor == "high" and err is None  # unknown affected customer -> high
+
+
+def test_risk_floor_severity_via_risk_mappings_version():
+    """Risk floor uses capa_severity via RISK_MAPPINGS version."""
+    floor, err = _compute_risk_floor([], {"capa_severity": "serious", "risk_mapping_version": "v1"})
+    assert floor == "medium" and err is None  # RISK_MAPPINGS["v1"]["serious"]
+
+
+def test_risk_floor_unknown_mapping_version_returns_error_code():
+    """Unknown mapping version returns error code, does not silently use latest."""
+    floor, err = _compute_risk_floor([], {"capa_severity": "serious", "risk_mapping_version": "v9"})
+    assert floor is None and err == "unknown_risk_mapping_version"  # Does not silently use latest

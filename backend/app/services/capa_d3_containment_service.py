@@ -1,13 +1,15 @@
-"""D3 Containment Import Service (US-E2E-01.1 Task 2)
+"""D3 Containment Import Service (US-E2E-01.1 Task 2+3)
 
 Implements Transaction A: 4 source queries + 5-step run promotion.
+Implements deterministic calculations: batch_key, impact_qty, customer_impact, time_window, risk_floor.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +21,7 @@ from app.models.iqc_inspection import IqcInspection
 from app.models.spc import SPCAlarm
 from app.models.customer_quality import Customer
 from app.models.supplier import Supplier
-from app.services.capa_d3_risk_mappings import CURRENT_RISK_MAPPING_VERSION
+from app.services.capa_d3_risk_mappings import CURRENT_RISK_MAPPING_VERSION, RISK_MAPPINGS
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -27,6 +29,224 @@ if TYPE_CHECKING:
 
 # Valid arrival status values for shipment
 VALID_ARRIVAL_STATUSES = {"signed", "in_transit", "pending", "unknown"}
+
+
+# ===== Deterministic Calculation Functions (Task 3) =====
+
+def _norm(v: str | None) -> str:
+    """Normalize string for comparison: strip, lowercase."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip().lower()
+    return str(v)
+
+
+def _batch_key(material_code: str | None, lot_no: str | None, snapshot_type: str, source_id: str) -> str:
+    """Compute batch key: hash(normalized_material + normalized_lot).
+
+    If lot is missing, degrades to {snapshot_type}:{source_id}.
+    """
+    m = _norm(material_code)
+    lot = _norm(lot_no)
+    if not lot:
+        return f"{snapshot_type}:{source_id}"  # Degraded
+    raw = f"{m}|{lot}"
+    return sha256(raw.encode()).hexdigest()[:16]
+
+
+def _material_of(rec: dict, snapshot_type: str) -> str:
+    """Get material identifier: inventory/shipment use material_code; IQC uses part_no."""
+    if snapshot_type == "iqc":
+        return rec.get("part_no", "")
+    return rec.get("material_code", "")
+
+
+def _arrival_status_to_status(arrival_status: str | None) -> str:
+    """Map arrival_status to qty_by_status key.
+
+    signed -> shipped
+    in_transit -> in_transit
+    pending/unknown/None -> in_transit (conservative)
+    """
+    if arrival_status == "signed":
+        return "shipped"
+    return "in_transit"
+
+
+def _compute_batches(snapshots: list[dict]) -> list[dict]:
+    """Compute batches from snapshots.
+
+    Each snapshot is {"snapshot_type", "snapshot_id", "payload": [record, ...]}.
+    Returns list of batches, each with:
+    - batch_key
+    - material_code
+    - lot_no
+    - qty_by_status: {"inventory": [...], "shipped": [...], "in_transit": [...]}
+    - source_refs: [{"snapshot_type", "snapshot_id", "source_id", ...}]
+    """
+    batches: dict[str, dict] = {}  # batch_key -> batch
+
+    for snap in snapshots:
+        snapshot_type = snap["snapshot_type"]
+        snapshot_id = snap["snapshot_id"]
+        payload = snap.get("payload", [])
+
+        seen_source_ids: set[str] = set()  # Dedup within snapshot
+
+        for rec in payload:
+            source_id = rec.get("source_id", "")
+            if not source_id or source_id in seen_source_ids:
+                continue  # Skip empty or duplicate source_id
+            seen_source_ids.add(source_id)
+
+            material = _material_of(rec, snapshot_type)
+            lot_no = rec.get("lot_no")
+            qty = rec.get("quantity")
+            unit = rec.get("unit", "pcs")
+            arrival_status = rec.get("arrival_status")
+
+            # Compute batch key
+            bkey = _batch_key(material, lot_no, snapshot_type, source_id)
+
+            # Initialize batch if needed
+            if bkey not in batches:
+                batches[bkey] = {
+                    "batch_key": bkey,
+                    "material_code": material,
+                    "lot_no": lot_no,
+                    "qty_by_status": {
+                        "inventory": [],
+                        "shipped": [],
+                        "in_transit": [],
+                    },
+                    "source_refs": [],
+                }
+
+            batch = batches[bkey]
+
+            # Add source ref (all sources)
+            batch["source_refs"].append({
+                "snapshot_type": snapshot_type,
+                "snapshot_id": snapshot_id,
+                "source_id": source_id,
+            })
+
+            # Add quantity only for inventory/shipment
+            if qty is not None and snapshot_type in ("inventory", "shipment"):
+                status_key = "inventory" if snapshot_type == "inventory" else _arrival_status_to_status(arrival_status)
+                qty_entry = {"qty": qty, "unit": unit}
+                batch["qty_by_status"][status_key].append(qty_entry)
+
+    return list(batches.values())
+
+
+def _compute_impact_qty(batches: list[dict]) -> dict[str, list[dict]]:
+    """Compute impact quantities by status.
+
+    Sums quantities by status+unit across all batches.
+    Returns {"inventory": [{"qty", "unit"}], "shipped": [...], "in_transit": [...]}.
+    """
+    result: dict[str, dict[str, float]] = {}  # status -> {unit: qty}
+
+    for batch in batches:
+        for status, qtys in batch["qty_by_status"].items():
+            if status not in result:
+                result[status] = {}
+            for q in qtys:
+                unit = q["unit"]
+                if unit not in result[status]:
+                    result[status][unit] = 0.0
+                result[status][unit] += q["qty"]
+
+    # Convert to output format
+    output: dict[str, list[dict]] = {}
+    for status, units in result.items():
+        output[status] = [{"qty": qty, "unit": unit} for unit, qty in units.items()]
+
+    return output
+
+
+def _compute_customer_impact(shipment_snapshot: dict) -> list[dict]:
+    """Compute customer impact from shipment snapshot.
+
+    Returns list of {"customer_name", "customer_segment", "arrival_status", "quantities"}.
+    """
+    result: dict[tuple, dict] = {}  # (customer_code, arrival_status) -> impact
+
+    for rec in shipment_snapshot.get("payload", []):
+        customer_code = rec.get("customer_code")
+        customer_name = rec.get("customer_name", "")
+        customer_segment = rec.get("customer_segment", "")
+        arrival_status = rec.get("arrival_status", "unknown")
+        qty = rec.get("quantity")
+        unit = rec.get("unit", "pcs")
+
+        if not customer_code:
+            continue
+
+        key = (customer_code, arrival_status)
+        if key not in result:
+            result[key] = {
+                "customer_name": customer_name,
+                "customer_segment": customer_segment,
+                "arrival_status": arrival_status,
+                "quantities": [],
+            }
+
+        if qty is not None:
+            result[key]["quantities"].append({"qty": qty, "unit": unit})
+
+    return list(result.values())
+
+
+def _compute_time_window(spc_snapshot: dict) -> dict[str, str | None]:
+    """Compute time window from SPC snapshot.
+
+    Returns {"start": min_triggered_at, "end": max_triggered_at}.
+    """
+    timestamps = []
+    for rec in spc_snapshot.get("payload", []):
+        ts = rec.get("triggered_at")
+        if ts:
+            timestamps.append(ts)
+
+    if not timestamps:
+        return {"start": None, "end": None}
+
+    timestamps.sort()
+    return {"start": timestamps[0], "end": timestamps[-1]}
+
+
+def _compute_risk_floor(customer_impact: list[dict], analysis_context: dict) -> tuple[str | None, str | None]:
+    """Compute risk floor based on customer impact and CAPA severity.
+
+    Returns (floor, error_code). error_code is None on success.
+    Unknown risk_mapping_version returns (None, "unknown_risk_mapping_version").
+    """
+    version = analysis_context.get("risk_mapping_version")
+    capa_severity = analysis_context.get("capa_severity", "general")
+
+    # Check version exists
+    if version not in RISK_MAPPINGS:
+        return (None, "unknown_risk_mapping_version")
+
+    version_mappings = RISK_MAPPINGS[version]
+
+    # Check for unknown arrival status with affected customer
+    for ci in customer_impact:
+        arrival = ci.get("arrival_status", "unknown")
+        if arrival == "unknown" and ci.get("quantities"):
+            # Unknown arrival with affected customer -> high (conservative)
+            return ("high", None)
+
+    # Use CAPA severity mapping
+    severity_floor = version_mappings.get(capa_severity)
+    if severity_floor:
+        return (severity_floor, None)
+
+    # Default to general
+    return (version_mappings.get("general", "low"), None)
 
 
 async def import_containment_data(
