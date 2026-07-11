@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -18,6 +18,7 @@ from app.models.capa_d3 import (
     CapaD3ImportRun,
     CapaD3ImpactReport,
     CapaD3ContainmentSnapshot,
+    CapaD3AdviceGeneration,
 )
 from app.models.customer_quality import Customer
 from app.models.erp import ERPConnection, ERPInventoryBalance, ERPShipment
@@ -61,7 +62,25 @@ async def _mark_report_stale(db: AsyncSession, run_id: uuid.UUID):
         .values(
             status="failed",
             error="stale",
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
+            stage_runs=[{"stage": "stale_recovery", "error": "marked stale by test"}],
+        )
+    )
+    await db.commit()
+
+
+async def _mark_advice_generation_stale(db: AsyncSession, report_id: uuid.UUID):
+    """CAS a running advice generation to failed (simulate preemption)."""
+    await db.execute(
+        update(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == report_id,
+            CapaD3AdviceGeneration.status == "running",
+        )
+        .values(
+            status="failed",
+            error="stale",
+            completed_at=datetime.now(timezone.utc),
             stage_runs=[{"stage": "stale_recovery", "error": "marked stale by test"}],
         )
     )
@@ -465,7 +484,7 @@ async def stale_running_report(db: AsyncSession, capa_d3_imported):
         is_current=False,
         status="running",
         attempt_token=uuid.uuid4(),
-        started_at=datetime.utcnow() - timedelta(seconds=300),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=300),
         generated_by=user.user_id,
         stage_runs=[],
         prompt_stats={},
@@ -484,3 +503,217 @@ async def stale_running_report(db: AsyncSession, capa_d3_imported):
 async def customer_segment_changed():
     """No-op placeholder; tests update customers table inline."""
     return None
+
+
+# ===== Advice generation fixtures (Task 7) =====
+
+
+@pytest_asyncio.fixture
+async def capa_d3_done_report(db: AsyncSession, capa_d3_imported):
+    """Return (capa, report, run, user) with a done impact report."""
+    capa, run, user = capa_d3_imported
+    report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    return capa, report, run, user
+
+
+@pytest_asyncio.fixture
+async def capa_d3_two_shipment_batches_report(db: AsyncSession, capa_d3_setup, monkeypatch):
+    """Create a CAPA with 2 shipment batches for batch-level trace tests."""
+    capa, user = capa_d3_setup
+
+    async def _build_client(db):
+        return type("FakeClient", (), {"model": "test-model"})()
+
+    monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+    monkeypatch.setattr(
+        provider_adapter,
+        "complete_json",
+        AsyncMock(return_value={"risk_level": "medium", "risk_explanation": "ok"}),
+    )
+
+    # Seed source data with two shipments (different lot_no -> different batches)
+    erp_conn = ERPConnection(
+        connection_id=uuid.uuid4(),
+        name="Test ERP",
+        connector_type="mock",
+        config={},
+        factory_id=capa.factory_id,
+        created_by=user.user_id,
+    )
+    db.add(erp_conn)
+    await db.flush()
+
+    # Inventory for both lots
+    inv1 = ERPInventoryBalance(
+        balance_id=uuid.uuid4(),
+        connection_id=erp_conn.connection_id,
+        material_code="M1",
+        location_code="LOC-A",
+        lot_no="L1",
+        quantity=100.0,
+        unit="pcs",
+        factory_id=capa.factory_id,
+    )
+    inv2 = ERPInventoryBalance(
+        balance_id=uuid.uuid4(),
+        connection_id=erp_conn.connection_id,
+        material_code="M1",
+        location_code="LOC-B",
+        lot_no="L2",
+        quantity=50.0,
+        unit="pcs",
+        factory_id=capa.factory_id,
+    )
+    db.add(inv1)
+    db.add(inv2)
+    await db.flush()
+
+    # Two customers
+    customer1 = Customer(
+        customer_id=uuid.uuid4(),
+        customer_code="C1",
+        name="Acme",
+        segment="key",
+        factory_id=capa.factory_id,
+    )
+    customer2 = Customer(
+        customer_id=uuid.uuid4(),
+        customer_code="C2",
+        name="Beta",
+        segment="normal",
+        factory_id=capa.factory_id,
+    )
+    db.add(customer1)
+    db.add(customer2)
+    await db.flush()
+
+    # Two shipments with different lot_no
+    shipment1 = ERPShipment(
+        erp_shipment_id=uuid.uuid4(),
+        connection_id=erp_conn.connection_id,
+        external_id="SH001",
+        shipment_number="SH001",
+        customer_code="C1",
+        material_code="M1",
+        lot_no="L1",
+        quantity=30,
+        factory_id=capa.factory_id,
+        erp_raw_data={"arrival_status": "signed", "unit": "pcs"},
+    )
+    shipment2 = ERPShipment(
+        erp_shipment_id=uuid.uuid4(),
+        connection_id=erp_conn.connection_id,
+        external_id="SH002",
+        shipment_number="SH002",
+        customer_code="C2",
+        material_code="M1",
+        lot_no="L2",
+        quantity=20,
+        factory_id=capa.factory_id,
+        erp_raw_data={"arrival_status": "in_transit", "unit": "pcs"},
+    )
+    db.add(shipment1)
+    db.add(shipment2)
+    await db.flush()
+
+    # Supplier + IQC
+    supplier = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no="SUP-001",
+        factory_id=capa.factory_id,
+        name="Test Supplier",
+        short_name="TS",
+        created_by=user.user_id,
+    )
+    db.add(supplier)
+    await db.flush()
+
+    iqc = IqcInspection(
+        inspection_id=uuid.uuid4(),
+        inspection_no="IQC-001",
+        supplier_id=supplier.supplier_id,
+        part_no="M1",
+        lot_no="L1",
+        lot_qty=200,
+        defect_qty=5,
+        defect_description="scratch",
+        inspection_result="reject",
+        factory_id=capa.factory_id,
+    )
+    db.add(iqc)
+    await db.flush()
+
+    # SPC
+    ic = InspectionCharacteristic(
+        ic_id=uuid.uuid4(),
+        ic_code="IC-001",
+        product_line="DC-DC-100",
+        factory_id=capa.factory_id,
+        process_name="Assy",
+        characteristic_name="Dim",
+        spec_upper=10.0,
+        spec_lower=9.0,
+        chart_type="xbar",
+        created_by_id=user.user_id,
+    )
+    db.add(ic)
+    await db.flush()
+
+    alarm = SPCAlarm(
+        alarm_id=uuid.uuid4(),
+        ic_id=ic.ic_id,
+        factory_id=capa.factory_id,
+        rule_no=1,
+        severity="high",
+        status="open",
+        triggered_at=datetime.now(),
+    )
+    db.add(alarm)
+    await db.flush()
+
+    result = await import_containment_data(db, capa.report_id, user, {})
+    run = await db.get(CapaD3ImportRun, uuid.UUID(result["run_id"]))
+    report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    return capa, report, run, user
+
+
+@pytest_asyncio.fixture
+async def superseded_report(db: AsyncSession, capa_d3_done_report):
+    """Mark the report as non-current (superseded by a concurrent re-import)."""
+    capa, report, run, user = capa_d3_done_report
+    report.is_current = False
+    await db.flush()
+    return report
+
+
+@pytest_asyncio.fixture
+async def stale_running_generation(db: AsyncSession, capa_d3_done_report):
+    """Insert a stale running advice_generation row for the done report."""
+    capa, report, run, user = capa_d3_done_report
+    gen = CapaD3AdviceGeneration(
+        generation_id=uuid.uuid4(),
+        report_id=report.report_id,
+        factory_id=report.factory_id,
+        is_current=False,
+        status="running",
+        attempt_token=uuid.uuid4(),
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=300),
+        generated_by=user.user_id,
+        stage_runs=[],
+        advice_count=0,
+        rejected_advice_count=0,
+        llm_available=False,
+    )
+    db.add(gen)
+    await db.flush()
+    return gen

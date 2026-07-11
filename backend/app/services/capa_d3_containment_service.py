@@ -19,6 +19,7 @@ from app.models.capa_d3 import (
     CapaD3ContainmentSnapshot,
     CapaD3ImpactReport,
     CapaD3AdviceGeneration,
+    CapaD3AiAdvice,
     CapaD3Execution,
 )
 from app.models.capa import CAPAEightD
@@ -139,6 +140,7 @@ def _compute_batches(snapshots: list[dict]) -> list[dict]:
                 "snapshot_type": snapshot_type,
                 "snapshot_id": snapshot_id,
                 "source_id": source_id,
+                "record_key": rec.get("record_key", ""),
             })
 
             # Add quantity only for inventory/shipment
@@ -427,7 +429,7 @@ async def _report_phase1_create_running(db, run_id, user):
         is_current=False,
         status="running",
         attempt_token=attempt_token,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
         generated_by=user.user_id,
         stage_runs=[],
         prompt_stats={},
@@ -571,7 +573,7 @@ async def _report_phase3_cas(db, capa_id, run_id, report_id, attempt_token, phas
                 action="D3_REPORT_GENERATED",
                 changed_fields=fields,
                 operated_by=user.user_id,
-                operated_at=datetime.utcnow(),
+                operated_at=datetime.now(timezone.utc),
             )
         )
 
@@ -587,7 +589,7 @@ async def _report_phase3_cas(db, capa_id, run_id, report_id, attempt_token, phas
             .values(
                 status="failed",
                 error="superseded",
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 stage_runs=[{"stage": "phase3", "error": "run superseded"}],
             )
         )
@@ -609,7 +611,7 @@ async def _report_phase3_cas(db, capa_id, run_id, report_id, attempt_token, phas
             .values(
                 status="failed",
                 error="unknown_risk_mapping_version",
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 stage_runs=[{"stage": "risk_floor", "error": "unknown_risk_mapping_version"}],
                 batches=phase2["batches"],
                 impact_qty=phase2["impact_qty"],
@@ -645,7 +647,7 @@ async def _report_phase3_cas(db, capa_id, run_id, report_id, attempt_token, phas
             .values(
                 status="failed",
                 error="llm_failed",
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 stage_runs=phase2["stage_runs"],
             )
         )
@@ -667,7 +669,7 @@ async def _report_phase3_cas(db, capa_id, run_id, report_id, attempt_token, phas
             .values(
                 status="failed",
                 error="schema_failed",
-                completed_at=datetime.utcnow(),
+                completed_at=datetime.now(timezone.utc),
                 stage_runs=phase2["stage_runs"],
             )
         )
@@ -687,7 +689,7 @@ async def _report_phase3_cas(db, capa_id, run_id, report_id, attempt_token, phas
         )
         .values(
             status="done",
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
             llm_available=True,
             model=model,
             stage_runs=[],
@@ -770,12 +772,12 @@ async def _recover_stale_report(db, run_id):
         .where(
             CapaD3ImpactReport.run_id == run_id,
             CapaD3ImpactReport.status == "running",
-            CapaD3ImpactReport.started_at < datetime.utcnow() - (STALE_THRESHOLD * 2),
+            CapaD3ImpactReport.started_at < datetime.now(timezone.utc) - (STALE_THRESHOLD * 2),
         )
         .values(
             status="failed",
             error="stale",
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
             stage_runs=stale_runs,
         )
     )
@@ -1141,3 +1143,619 @@ async def _promote_run(
     await db.refresh(run)
 
     return run, snapshots
+
+
+# ===== Advice Generation Service (Task 7) =====
+
+ADVICE_TYPE_ENUMS = {"recall", "isolate", "notify_customer", "strict_inspection", "alternative"}
+
+ADVICE_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "advice": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "advice_type": {"type": "string"},
+                    "advice_text": {"type": "string"},
+                    "target_batch_refs": {"type": ["array", "null"], "items": {"type": "string"}},
+                    "provenance_sources_hint": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["advice_type", "advice_text"],
+            },
+        },
+    },
+    "required": ["advice"],
+}
+
+
+async def _running_advice_generation(db, report_id):
+    """Return the running advice generation for a report, if any."""
+    return await db.scalar(
+        select(CapaD3AdviceGeneration).where(
+            CapaD3AdviceGeneration.report_id == report_id,
+            CapaD3AdviceGeneration.status == "running",
+        )
+    )
+
+
+async def _recover_stale_advice_generation(db, report_id):
+    """CAS any stale running advice generation for this report to failed."""
+    stale_runs = [
+        {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
+    ]
+    cutoff = datetime.now(timezone.utc) - (STALE_THRESHOLD * 2)
+    await db.execute(
+        update(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == report_id,
+            CapaD3AdviceGeneration.status == "running",
+            CapaD3AdviceGeneration.started_at < cutoff,
+        )
+        .values(
+            status="failed",
+            error="stale",
+            completed_at=datetime.now(timezone.utc),
+            stage_runs=stale_runs,
+        )
+    )
+
+
+def _build_advice_prompt(report_batches, snapshots, name_to_alias):
+    """Build a prompt with anonymized customer names and deterministic facts."""
+    system_block = (
+        "你是一位资深质量遏制专家。请根据以下确定性事实，给出遏制措施建议。"
+        "请只输出 JSON，格式为："
+        '{"advice": [{"advice_type": "recall|isolate|notify_customer|strict_inspection|alternative", '
+        '"advice_text": "...", "target_batch_refs": ["batch_key", ...] 或 null, '
+        '"provenance_sources_hint": ["shipment", "inventory", "iqc", "spc", "report"]}]}'
+    )
+
+    # Anonymize customer names in batch data
+    anonymized_batches = []
+    for batch in report_batches:
+        b = dict(batch)
+        # Anonymize customer names in source_refs if present
+        if "source_refs" in b:
+            b["source_refs"] = [
+                {**ref, "customer_name": name_to_alias.get(ref.get("customer_name", ""), ref.get("customer_name", ""))}
+                for ref in b["source_refs"]
+            ]
+        anonymized_batches.append(b)
+
+    user_data_block = f"""【确定性事实】
+批次汇总：{anonymized_batches}
+
+请在建议文本中直接使用上述客户代号（customer_01 等），不要编造客户名称。"""
+
+    prompt = system_block + "\n\n" + user_data_block
+    if len(prompt) > MAX_PROMPT_CHARS:
+        prompt = prompt[:MAX_PROMPT_CHARS] + SAFETY_TRAILER
+    return prompt
+
+
+def _map_provenance(advice_type: str, target_batch_refs: list | None, report_batches: list, snapshots: list, report_id: str) -> list:
+    """Map advice to provenance records based on advice_type.
+
+    - recall/notify_customer -> shipment (batch-level trace via target_batch_refs)
+    - isolate -> inventory (batch-level trace)
+    - strict_inspection -> iqc (all IQC records)
+    - alternative -> report summary (no snapshot)
+
+    Returns list of {source_type, snapshot_id, record_key}. record_key is always non-null.
+    Returns empty list if no valid provenance can be found (advice will be rejected).
+    """
+    SNAPSHOT_FOR = {
+        "recall": "shipment",
+        "notify_customer": "shipment",
+        "isolate": "inventory",
+        "strict_inspection": "iqc",
+    }
+    snap_type = SNAPSHOT_FOR.get(advice_type)
+
+    if snap_type is None:
+        # alternative -> report summary provenance (no snapshot dependency)
+        return [{
+            "source_type": "report",
+            "snapshot_id": None,
+            "record_key": f"report:{report_id}:summary",
+        }]
+
+    # Find the corresponding snapshot
+    snap = next((s for s in snapshots if s["snapshot_type"] == snap_type), None)
+    if snap is None or not snap.get("payload"):
+        return []
+
+    sid = snap["snapshot_id"]
+    valid_record_keys = {rec.get("record_key") for rec in snap["payload"] if rec.get("record_key")}
+    if not valid_record_keys:
+        return []
+
+    if advice_type in ("recall", "notify_customer"):
+        # Batch-level trace: find shipment record_keys matching target_batch_refs
+        if not target_batch_refs:
+            return []
+        hit_keys = []
+        batch_keys_set = set(target_batch_refs)
+        for b in report_batches:
+            if b.get("batch_key") in batch_keys_set:
+                for ref in b.get("source_refs", []):
+                    if ref.get("snapshot_type") == snap_type and ref.get("record_key") in valid_record_keys:
+                        rk = ref["record_key"]
+                        if rk not in hit_keys:
+                            hit_keys.append(rk)
+        if not hit_keys:
+            return []
+        return [{"source_type": snap_type, "snapshot_id": sid, "record_key": rk} for rk in hit_keys]
+
+    if advice_type == "isolate":
+        # Batch-level trace for inventory
+        if not target_batch_refs:
+            return []
+        hit_keys = []
+        batch_keys_set = set(target_batch_refs)
+        for b in report_batches:
+            if b.get("batch_key") in batch_keys_set:
+                for ref in b.get("source_refs", []):
+                    if ref.get("snapshot_type") == snap_type and ref.get("record_key") in valid_record_keys:
+                        rk = ref["record_key"]
+                        if rk not in hit_keys:
+                            hit_keys.append(rk)
+        if not hit_keys:
+            return []
+        return [{"source_type": snap_type, "snapshot_id": sid, "record_key": rk} for rk in hit_keys]
+
+    # strict_inspection: all IQC records
+    return [{"source_type": snap_type, "snapshot_id": sid, "record_key": rk} for rk in valid_record_keys]
+
+
+async def _advice_phase1_create_running(db, capa_id, report_id, user):
+    """Phase 1: check credentials, lock CAPA, validate report, create running generation, commit."""
+    try:
+        client = await provider_adapter.build_client(db)
+    except ProviderNotConfiguredError:
+        return {"status": "blocked"}, None
+
+    await db.execute(
+        text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"),
+        {"cid": capa_id},
+    )
+
+    report = await db.get(CapaD3ImpactReport, report_id)
+    if report is None or report.status != "done":
+        return {"status": "failed", "error": "report_not_done"}, None
+
+    run = await db.get(CapaD3ImportRun, report.run_id)
+    if run is None or run.capa_id != capa_id:
+        return {"status": "failed", "error": "capa_mismatch"}, None
+
+    await _recover_stale_advice_generation(db, report_id)
+
+    existing = await _running_advice_generation(db, report_id)
+    if existing:
+        return {
+            "status": "running",
+            "generation_id": str(existing.generation_id),
+            "retry_after": RETRY_AFTER_SECONDS,
+        }, None
+
+    attempt_token = uuid.uuid4()
+    gen = CapaD3AdviceGeneration(
+        generation_id=uuid.uuid4(),
+        report_id=report_id,
+        factory_id=report.factory_id,
+        is_current=False,
+        status="running",
+        attempt_token=attempt_token,
+        advice_count=0,
+        rejected_advice_count=0,
+        stage_runs=[],
+        llm_available=False,
+        started_at=datetime.now(timezone.utc),
+        generated_by=user.user_id,
+    )
+    db.add(gen)
+    await db.flush()
+    await db.commit()
+
+    return {
+        "status": "phase1_done",
+        "generation_id": gen.generation_id,
+        "attempt_token": attempt_token,
+        "report": report,
+        "client": client,
+    }, None
+
+
+async def _advice_phase2_llm(db, gen_id, report, report_id, client):
+    """Phase 2: read snapshots, build prompt, call LLM, validate schema, compute provenance."""
+    gen = await db.get(CapaD3AdviceGeneration, gen_id)
+    snap_rows = (
+        await db.execute(
+            select(CapaD3ContainmentSnapshot).where(
+                CapaD3ContainmentSnapshot.run_id == report.run_id
+            )
+        )
+    ).scalars().all()
+
+    gen_factory_id = gen.factory_id
+    model = getattr(client, "model", "unknown")
+    report_batches = list(report.batches or [])
+    customer_impact = list(report.customer_impact or [])
+    report_id_str = str(report_id)
+
+    snapshots = [
+        {
+            "snapshot_type": s.snapshot_type,
+            "snapshot_id": str(s.snapshot_id),
+            "payload": s.payload,
+        }
+        for s in snap_rows
+    ]
+
+    # Build customer alias map for anonymization and restoration
+    customer_alias_map = {}
+    for idx, ci in enumerate(customer_impact, start=1):
+        alias = f"customer_{idx:02d}"
+        name = ci.get("customer_name") if isinstance(ci, dict) else None
+        if name:
+            customer_alias_map[alias] = name
+    name_to_alias = {v: k for k, v in customer_alias_map.items()}
+
+    await db.commit()
+
+    prompt = _build_advice_prompt(report_batches, snapshots, name_to_alias)
+
+    try:
+        llm_result = await provider_adapter.complete_json(client, prompt, ADVICE_RESPONSE_SCHEMA)
+    except Exception as e:
+        return {
+            "outcome": "llm_failed",
+            "error": "llm_failed",
+            "model": model,
+            "gen_factory_id": gen_factory_id,
+            "stage_runs": [{"stage": "llm", "error": str(e)}],
+        }
+
+    # Schema validation
+    if not isinstance(llm_result, dict) or not isinstance(llm_result.get("advice"), list):
+        return {
+            "outcome": "schema_failed",
+            "error": "schema_failed",
+            "model": model,
+            "gen_factory_id": gen_factory_id,
+            "stage_runs": [{"stage": "schema", "error": "expected {advice: [...]}"}],
+        }
+
+    advice_list = llm_result["advice"]
+
+    try:
+        accepted_advice = []
+        rejected = []
+        batch_keys = {b.get("batch_key") for b in report_batches}
+
+        for i, item in enumerate(advice_list):
+            if not isinstance(item, dict):
+                raise ValueError(f"advice[{i}] not a dict")
+
+            advice_type = item.get("advice_type")
+            if advice_type not in ADVICE_TYPE_ENUMS:
+                rejected.append({
+                    "index": i,
+                    "advice_type": advice_type,
+                    "rejection_reason": f"invalid advice_type: {advice_type}",
+                })
+                continue
+
+            advice_text = item.get("advice_text")
+            if not isinstance(advice_text, str) or not advice_text.strip():
+                rejected.append({
+                    "index": i,
+                    "advice_type": advice_type,
+                    "rejection_reason": "advice_text must be non-empty str",
+                })
+                continue
+
+            target_batch_refs = item.get("target_batch_refs")
+            if target_batch_refs is not None and not isinstance(target_batch_refs, list):
+                rejected.append({
+                    "index": i,
+                    "advice_type": advice_type,
+                    "rejection_reason": "target_batch_refs must be list[str] or null",
+                })
+                continue
+
+            if target_batch_refs is not None and any(not isinstance(r, str) for r in target_batch_refs):
+                rejected.append({
+                    "index": i,
+                    "advice_type": advice_type,
+                    "rejection_reason": "target_batch_refs must be list[str]",
+                })
+                continue
+
+            hints = item.get("provenance_sources_hint")
+            if hints is not None and not isinstance(hints, list):
+                rejected.append({
+                    "index": i,
+                    "advice_type": advice_type,
+                    "rejection_reason": "provenance_sources_hint must be list[str] or null",
+                })
+                continue
+
+            # Validate target_batch_refs exist in report.batches
+            missing = [ref for ref in (target_batch_refs or []) if ref not in batch_keys]
+            if missing:
+                rejected.append({
+                    "index": i,
+                    "advice_type": advice_type,
+                    "rejection_reason": f"target_batch_refs not in batches: {missing}",
+                })
+                continue
+
+            provenance = _map_provenance(advice_type, target_batch_refs, report_batches, snapshots, report_id_str)
+            if not provenance:
+                rejected.append({
+                    "index": i,
+                    "advice_type": advice_type,
+                    "rejection_reason": "provenance mapping empty (no hit record)",
+                })
+                continue
+
+            accepted_advice.append({
+                "advice_type": advice_type,
+                "advice_text": _restore_customer_names(advice_text, customer_alias_map),
+                "target_batch_refs": target_batch_refs,
+                "source_provenance": provenance,
+            })
+
+    except Exception as e:
+        return {
+            "outcome": "schema_failed",
+            "error": "schema_failed",
+            "model": model,
+            "gen_factory_id": gen_factory_id,
+            "stage_runs": [{"stage": "schema", "error": str(e)}],
+        }
+
+    return {
+        "outcome": "mapped",
+        "accepted": accepted_advice,
+        "rejected": rejected,
+        "model": model,
+        "gen_factory_id": gen_factory_id,
+    }
+
+
+async def _advice_phase3_cas(db, capa_id, report_id, gen_id, attempt_token, phase2, user):
+    """Phase 3: re-lock, CAS promote generation to done/failed/superseded, insert advice rows."""
+    model = phase2.get("model", "unknown")
+    gen_factory_id = phase2["gen_factory_id"]
+
+    await db.execute(
+        text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"),
+        {"cid": capa_id},
+    )
+
+    report = await db.get(CapaD3ImpactReport, report_id)
+    run = await db.get(CapaD3ImportRun, report.run_id) if report else None
+
+    superseded = (
+        report is None
+        or report.status != "done"
+        or not report.is_current
+        or run is None
+        or not run.is_current
+    )
+
+    gen = await db.get(CapaD3AdviceGeneration, gen_id)
+
+    def _audit(fields):
+        db.add(
+            AuditLog(
+                table_name="capa_eightd",
+                record_id=capa_id,
+                action="D3_AI_ADVICE_GENERATED",
+                changed_fields=fields,
+                operated_by=user.user_id,
+                operated_at=datetime.now(timezone.utc),
+            )
+        )
+
+    if superseded:
+        res = await db.execute(
+            update(CapaD3AdviceGeneration)
+            .where(
+                CapaD3AdviceGeneration.generation_id == gen_id,
+                CapaD3AdviceGeneration.status == "running",
+                CapaD3AdviceGeneration.attempt_token == attempt_token,
+            )
+            .values(
+                status="failed",
+                error="superseded",
+                completed_at=datetime.now(timezone.utc),
+                stage_runs=[{"stage": "phase3", "error": "report/run superseded"}],
+            )
+        )
+        if res.rowcount == 0:
+            await db.commit()
+            return {"status": "superseded"}
+        _audit({"generation_id": str(gen_id), "status": "failed", "error": "superseded"})
+        await db.commit()
+        return {"status": "superseded", "generation_id": str(gen_id)}
+
+    if phase2["outcome"] == "llm_failed":
+        res = await db.execute(
+            update(CapaD3AdviceGeneration)
+            .where(
+                CapaD3AdviceGeneration.generation_id == gen_id,
+                CapaD3AdviceGeneration.status == "running",
+                CapaD3AdviceGeneration.attempt_token == attempt_token,
+            )
+            .values(
+                status="failed",
+                error="llm_failed",
+                completed_at=datetime.now(timezone.utc),
+                stage_runs=phase2["stage_runs"],
+            )
+        )
+        if res.rowcount == 0:
+            await db.commit()
+            return {"status": "superseded"}
+        _audit({"generation_id": str(gen_id), "status": "failed", "error": "llm_failed"})
+        await db.commit()
+        return {"status": "failed", "generation_id": str(gen_id), "error": "llm_failed"}
+
+    if phase2["outcome"] == "schema_failed":
+        res = await db.execute(
+            update(CapaD3AdviceGeneration)
+            .where(
+                CapaD3AdviceGeneration.generation_id == gen_id,
+                CapaD3AdviceGeneration.status == "running",
+                CapaD3AdviceGeneration.attempt_token == attempt_token,
+            )
+            .values(
+                status="failed",
+                error="schema_failed",
+                completed_at=datetime.now(timezone.utc),
+                stage_runs=phase2["stage_runs"],
+            )
+        )
+        if res.rowcount == 0:
+            await db.commit()
+            return {"status": "superseded"}
+        _audit({"generation_id": str(gen_id), "status": "failed", "error": "schema_failed"})
+        await db.commit()
+        return {"status": "failed", "generation_id": str(gen_id), "error": "schema_failed"}
+
+    accepted = phase2["accepted"]
+    rejected = phase2["rejected"]
+
+    if not accepted:
+        res = await db.execute(
+            update(CapaD3AdviceGeneration)
+            .where(
+                CapaD3AdviceGeneration.generation_id == gen_id,
+                CapaD3AdviceGeneration.status == "running",
+                CapaD3AdviceGeneration.attempt_token == attempt_token,
+            )
+            .values(
+                status="failed",
+                error="all_provenance_mapping_failed",
+                rejected_advice_count=len(rejected),
+                completed_at=datetime.now(timezone.utc),
+                stage_runs=rejected,
+            )
+        )
+        if res.rowcount == 0:
+            await db.commit()
+            return {"status": "superseded"}
+        _audit({
+            "generation_id": str(gen_id),
+            "status": "failed",
+            "error": "all_provenance_mapping_failed",
+            "rejected_advice_count": len(rejected),
+        })
+        await db.commit()
+        return {
+            "status": "failed",
+            "generation_id": str(gen_id),
+            "error": "all_provenance_mapping_failed",
+            "rejected_advice_count": len(rejected),
+        }
+
+    # Success: 5-step promotion
+    res = await db.execute(
+        update(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.generation_id == gen_id,
+            CapaD3AdviceGeneration.status == "running",
+            CapaD3AdviceGeneration.attempt_token == attempt_token,
+        )
+        .values(
+            status="done",
+            completed_at=datetime.now(timezone.utc),
+            llm_available=True,
+            model=model,
+            advice_count=len(accepted),
+            rejected_advice_count=len(rejected),
+            stage_runs=rejected,
+        )
+    )
+    if res.rowcount == 0:
+        await db.commit()
+        return {"status": "superseded"}
+
+    # Insert advice rows
+    for a in accepted:
+        db.add(
+            CapaD3AiAdvice(
+                advice_id=uuid.uuid4(),
+                generation_id=gen_id,
+                factory_id=gen_factory_id,
+                advice_type=a["advice_type"],
+                advice_text=a["advice_text"],
+                target_batch_refs=a["target_batch_refs"],
+                source_provenance=a["source_provenance"],
+                llm_available=True,
+                generated_by=user.user_id,
+            )
+        )
+
+    # Demote old current generation
+    await db.execute(
+        update(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == report_id,
+            CapaD3AdviceGeneration.generation_id != gen_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+        .values(is_current=False)
+    )
+
+    # Promote new generation to current
+    await db.execute(
+        update(CapaD3AdviceGeneration)
+        .where(CapaD3AdviceGeneration.generation_id == gen_id)
+        .values(is_current=True)
+    )
+
+    _audit({
+        "generation_id": str(gen_id),
+        "status": "done",
+        "advice_count": len(accepted),
+    })
+    await db.commit()
+
+    return {
+        "status": "done",
+        "generation_id": str(gen_id),
+        "advice_count": len(accepted),
+        "rejected_advice_count": len(rejected),
+    }
+
+
+async def generate_advice(db, capa_id, report_id, user, req):
+    """Three-phase advice generation: create running -> LLM + provenance -> CAS promote.
+
+    Args:
+        db: Database session
+        capa_id: CAPA report_id
+        report_id: Impact report ID
+        user: User requesting generation
+        req: D3AdviceRequest (currently unused)
+
+    Returns:
+        dict with status, generation_id, advice_count, rejected_advice_count
+    """
+    p1, _ = await _advice_phase1_create_running(db, capa_id, report_id, user)
+    if p1["status"] in ("blocked", "failed", "running"):
+        return p1
+
+    gen_id = p1["generation_id"] if isinstance(p1["generation_id"], uuid.UUID) else uuid.UUID(p1["generation_id"])
+    attempt_token = p1["attempt_token"]
+    report = p1["report"]
+    client = p1["client"]
+
+    phase2 = await _advice_phase2_llm(db, gen_id, report, report_id, client)
+    return await _advice_phase3_cas(db, capa_id, report_id, gen_id, attempt_token, phase2, user)
