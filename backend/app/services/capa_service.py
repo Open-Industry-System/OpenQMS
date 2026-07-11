@@ -429,7 +429,6 @@ async def advance_capa(
         await _d3_to_d4_gate(db, capa)
     elif current == EightDState.D4_ROOT_CAUSE and target == EightDState.D5_CORRECTION:
         # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，
-        # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，
         # 防 d4_root_cause 被改后用陈旧验证记录放行
         current_rc = (capa.d4_root_cause or "").strip()
         if not current_rc:
