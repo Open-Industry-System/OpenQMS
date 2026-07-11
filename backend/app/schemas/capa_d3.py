@@ -157,3 +157,35 @@ class D3AdoptionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class D3ExecutionRequest(BaseModel):
+    """Request body for POST /d3/execution."""
+
+    source: Literal["manual", "adopted"]
+    advice_id: uuid.UUID | None = None
+    measure_text: str
+    result_status: Literal["completed", "in_progress", "pending", "failed"] = "in_progress"
+    evidence_refs: list[dict] | None = None
+
+
+class D3ExecutionUpdateRequest(BaseModel):
+    """Request body for PATCH /d3/execution/{id}."""
+
+    result_status: Literal["completed", "in_progress", "pending", "failed"] | None = None
+    measure_text: str | None = None
+    evidence_refs: list[dict] | None = None
+
+
+class D3ExecutionResponse(BaseModel):
+    """Response body for POST/PATCH /d3/execution."""
+
+    execution_id: uuid.UUID
+    source: str
+    advice_id: uuid.UUID | None = None
+    generation_id: uuid.UUID | None = None
+    result_status: str
+    measure_text: str | None = None
+    evidence_refs: list = []
+
+    model_config = {"from_attributes": True}

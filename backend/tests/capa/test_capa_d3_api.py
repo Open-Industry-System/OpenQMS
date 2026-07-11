@@ -562,3 +562,80 @@ async def test_adoptions_get_returns_adopted(client, capa_d3_with_adopted):
     assert resp.status_code == 200
     data = resp.json()
     assert any(a["decision"] == "adopted" for a in data), f"No adopted decision in response: {data}"
+
+
+# ===== D3 Execution endpoints (US-E2E-01.1 Task 10) =====
+
+
+@pytest_asyncio.fixture
+async def capa_d3_with_done_report_url(db, capa_d3_done_report):
+    """CAPA with done report. Returns (capa, report, user)."""
+    capa, report, run, user = capa_d3_done_report
+    # Need to ensure the CAPA is in D3_INTERIM status for execution
+    capa.status = "D3_INTERIM"
+    await db.flush()
+    return capa, report, user
+
+
+@pytest_asyncio.fixture
+async def capa_d3_with_execution_url(client, db, capa_d3_with_done_report_url):
+    """CAPA with execution. Returns (capa, ex_dict, user)."""
+    capa, report, user = capa_d3_with_done_report_url
+    resp = await client.post(
+        f"/api/capa/{capa.report_id}/d3/execution",
+        json={
+            "source": "manual",
+            "measure_text": "隔离库位 A",
+            "result_status": "completed",
+        },
+    )
+    assert resp.status_code == 200
+    return capa, {"execution_id": resp.json()["execution_id"], "result_status": resp.json()["result_status"]}, user
+
+
+async def test_execution_post_manual_no_generation(client, capa_d3_with_done_report_url):
+    """POST /d3/execution with manual source returns 200."""
+    capa, report, _ = capa_d3_with_done_report_url
+    resp = await client.post(
+        f"/api/capa/{capa.report_id}/d3/execution",
+        json={
+            "source": "manual",
+            "measure_text": "t",
+            "result_status": "in_progress",
+        },
+    )
+    assert resp.status_code == 200 and resp.json()["advice_id"] is None
+
+
+async def test_execution_patch_demote(client, capa_d3_with_execution_url):
+    """PATCH /d3/execution/{id} changes result_status."""
+    capa, ex, _ = capa_d3_with_execution_url
+    resp = await client.patch(
+        f"/api/capa/{capa.report_id}/d3/execution/{ex['execution_id']}",
+        json={"result_status": "failed"},
+    )
+    assert resp.status_code == 200
+
+
+async def test_execution_post_javascript_422(client, capa_d3_with_done_report_url):
+    """POST /d3/execution with javascript: URL returns 422."""
+    capa, report, _ = capa_d3_with_done_report_url
+    resp = await client.post(
+        f"/api/capa/{capa.report_id}/d3/execution",
+        json={
+            "source": "manual",
+            "measure_text": "t",
+            "result_status": "in_progress",
+            "evidence_refs": [
+                {"name": "e", "url": "javascript:1", "uploaded_at": "..."}
+            ],
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_executions_get_returns_current_report(client, capa_d3_with_execution_url):
+    """GET /d3/executions returns list of executions for current report."""
+    capa, _, _ = capa_d3_with_execution_url
+    resp = await client.get(f"/api/capa/{capa.report_id}/d3/executions")
+    assert resp.status_code == 200 and len(resp.json()) >= 1

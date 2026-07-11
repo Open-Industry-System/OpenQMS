@@ -1907,3 +1907,239 @@ async def adopt_advice(db, capa_id, advice_id, decision, adopted_text, user):
         )
         await db.flush()
         return {"adoption_id": str(existing.adoption_id)}
+
+
+# ===== Execution Record Service (Task 10) =====
+
+
+def _validate_evidence_refs(refs: list[dict]) -> None:
+    """Validate evidence_refs URLs.
+
+    Allowed: https://, /relative, ./relative
+    Rejected: //, javascript:, file:, data:
+    """
+    if len(refs) > 10:
+        raise ValueError("证据最多 10 条")
+    for r in refs:
+        if len(r.get("name", "")) > 200 or len(r.get("url", "")) > 500:
+            raise ValueError("name≤200/url≤500")
+        url = r.get("url", "")
+        # Reject dangerous schemes
+        if url.startswith(("javascript:", "file:", "data:")):
+            raise ValueError("非法 url scheme")
+        # Reject protocol-relative URL
+        if url.startswith("//"):
+            raise ValueError("非法 url scheme: protocol-relative not allowed")
+        # Allow https://, absolute path /, relative path ./
+        if not (
+            url.startswith("https://")
+            or (url.startswith("/") and not url.startswith("//"))
+            or url.startswith("./")
+        ):
+            raise ValueError("非法 url scheme: 仅允许 https://、/path、./path")
+
+
+async def record_execution(
+    db: AsyncSession,
+    capa_id: uuid.UUID,
+    report_id: uuid.UUID,
+    user: "User",
+    req: dict,
+) -> dict:
+    """Create an execution record.
+
+    Args:
+        db: Database session
+        capa_id: CAPA report_id
+        report_id: Impact report ID
+        user: User creating the execution
+        req: Execution request dict
+
+    Returns:
+        dict with execution_id, source, advice_id, generation_id
+
+    Raises:
+        LookupError: If report/run/capa chain is broken or cross-factory
+        ValueError: If evidence_refs validation fails
+    """
+    # Link-chain validation: report → run → capa
+    report = await db.get(CapaD3ImpactReport, report_id)
+    if report is None:
+        raise LookupError("报告不存在")
+
+    run = await db.get(CapaD3ImportRun, report.run_id)
+    if run is None or run.capa_id != capa_id:
+        raise LookupError("报告不属于该 CAPA")
+
+    capa_factory = await _capa_factory(db, capa_id)
+    if report.factory_id != capa_factory:
+        raise LookupError("报告跨工厂")
+
+    source = req.get("source")
+    advice_id = None
+    generation_id = None
+
+    if source == "manual":
+        if req.get("advice_id") is not None:
+            raise ValueError("manual execution should not have advice_id")
+        advice_id = None
+        generation_id = None
+    elif source == "adopted":
+        advice_id_val = req.get("advice_id")
+        if advice_id_val is None:
+            raise ValueError("adopted execution requires advice_id")
+        advice_id = uuid.UUID(str(advice_id_val)) if not isinstance(advice_id_val, uuid.UUID) else advice_id_val
+
+        advice = await db.get(CapaD3AiAdvice, advice_id)
+        if advice is None:
+            raise LookupError("建议不存在")
+
+        gen = await _current_advice_generation(db, report_id)
+        if gen is None or advice.generation_id != gen.generation_id:
+            raise ValueError("建议不属于当前 generation")
+
+        # Verify advice has adopted decision
+        adoption = await db.scalar(
+            select(CapaD3AdviceAdoption).where(
+                CapaD3AdviceAdoption.advice_id == advice_id,
+                CapaD3AdviceAdoption.decision == "adopted",
+            )
+        )
+        if adoption is None:
+            raise ValueError("建议未被采纳")
+
+        advice_id = advice.advice_id
+        generation_id = gen.generation_id
+    else:
+        raise ValueError(f"invalid source: {source}")
+
+    evidence_refs = req.get("evidence_refs")
+    if evidence_refs is not None:
+        _validate_evidence_refs(evidence_refs)
+
+    ex = CapaD3Execution(
+        execution_id=uuid.uuid4(),
+        report_id=report_id,
+        generation_id=generation_id,
+        advice_id=advice_id,
+        factory_id=report.factory_id,
+        source=source,
+        measure_text=req.get("measure_text", ""),
+        result_status=req.get("result_status", "in_progress"),
+        evidence_refs=evidence_refs or [],
+        executed_by=user.user_id,
+        executed_at=datetime.now(timezone.utc),
+    )
+    db.add(ex)
+
+    db.add(
+        AuditLog(
+            table_name="capa_eightd",
+            record_id=capa_id,
+            action="D3_EXECUTION_RECORDED",
+            changed_fields={
+                "report_id": str(report_id),
+                "source": source,
+                "advice_id": str(advice_id) if advice_id else None,
+                "result_status": ex.result_status,
+            },
+            operated_by=user.user_id,
+            operated_at=datetime.now(timezone.utc),
+        )
+    )
+    await db.flush()
+
+    return {
+        "execution_id": str(ex.execution_id),
+        "source": ex.source,
+        "advice_id": str(advice_id) if advice_id else None,
+        "generation_id": str(generation_id) if generation_id else None,
+    }
+
+
+def _hash(refs: list[dict]) -> str:
+    """Hash evidence_refs for audit log."""
+    import json
+
+    return sha256(json.dumps(refs, sort_keys=True).encode()).hexdigest()[:16]
+
+
+async def update_execution(
+    db: AsyncSession,
+    capa_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    user: "User",
+    req: dict,
+) -> dict:
+    """Update an execution record.
+
+    Args:
+        db: Database session
+        capa_id: CAPA report_id
+        execution_id: Execution ID
+        user: User updating the execution
+        req: Update request dict
+
+    Returns:
+        dict with execution_id, result_status
+
+    Raises:
+        LookupError: If execution/report/run/capa chain is broken or cross-factory
+        ValueError: If evidence_refs validation fails
+    """
+    ex = await db.get(CapaD3Execution, execution_id)
+    if ex is None:
+        raise LookupError("执行记录不存在")
+
+    # Link-chain validation: execution → report → run → capa
+    report = await db.get(CapaD3ImpactReport, ex.report_id)
+    if report is None:
+        raise LookupError("报告不存在")
+
+    run = await db.get(CapaD3ImportRun, report.run_id)
+    if run is None or run.capa_id != capa_id:
+        raise LookupError("执行记录不属于该 CAPA")
+
+    capa_factory = await _capa_factory(db, capa_id)
+    if ex.factory_id != capa_factory:
+        raise LookupError("执行记录跨工厂")
+
+    old_status = ex.result_status
+    old_text = ex.measure_text
+    old_ev = ex.evidence_refs
+
+    if "result_status" in req and req["result_status"] is not None:
+        ex.result_status = req["result_status"]
+    if "measure_text" in req and req["measure_text"] is not None:
+        ex.measure_text = req["measure_text"]
+    if "evidence_refs" in req:
+        evidence_refs = req["evidence_refs"]
+        if evidence_refs is not None:
+            _validate_evidence_refs(evidence_refs)
+        ex.evidence_refs = evidence_refs if evidence_refs is not None else []
+
+    ex.updated_at = datetime.now(timezone.utc)
+
+    db.add(
+        AuditLog(
+            table_name="capa_eightd",
+            record_id=capa_id,
+            action="D3_EXECUTION_UPDATED",
+            changed_fields={
+                "execution_id": str(execution_id),
+                "old_result_status": old_status,
+                "new_result_status": ex.result_status,
+                "measure_text_changed": old_text != ex.measure_text,
+                "evidence_hash_old": _hash(old_ev),
+                "evidence_hash_new": _hash(ex.evidence_refs),
+            },
+            operated_by=user.user_id,
+            operated_at=datetime.now(timezone.utc),
+        )
+    )
+    await db.flush()
+
+    return {
+        "execution_id": str(ex.execution_id),
+        "result_status": ex.result_status,
+    }

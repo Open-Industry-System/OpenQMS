@@ -21,6 +21,7 @@ from app.models.capa_d3 import (
     CapaD3AdviceGeneration,
     CapaD3AiAdvice,
     CapaD3ContainmentSnapshot,
+    CapaD3Execution,
     CapaD3ImpactReport,
     CapaD3ImportRun,
 )
@@ -42,6 +43,9 @@ from app.schemas.capa_d3 import (
     D3AdviceRunningResponse,
     D3AdoptionResponse,
     D3DecisionRequest,
+    D3ExecutionRequest,
+    D3ExecutionResponse,
+    D3ExecutionUpdateRequest,
     D3ImportRequest,
     D3ImportResponse,
     D3ReportResponse,
@@ -1417,3 +1421,132 @@ async def d3_list_adoptions_ep(
     ).scalars().all()
 
     return [D3AdoptionResponse.model_validate(a) for a in adoptions]
+
+
+# ===== D3 Execution endpoints (US-E2E-01.1 Task 10) =====
+
+
+@router.post("/{report_id}/d3/execution")
+async def d3_record_execution_ep(
+    report_id: uuid.UUID,
+    req: D3ExecutionRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /d3/execution: Record a containment execution.
+
+    Note: Uses report_id as both CAPA ID and URL parameter.
+    """
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    try:
+        # Find current report
+        current_run = await db.scalar(
+            select(CapaD3ImportRun).where(
+                CapaD3ImportRun.capa_id == capa.report_id, CapaD3ImportRun.is_current == True
+            )
+        )
+        if current_run is None:
+            raise HTTPException(status_code=400, detail="需先导入遏制数据")
+
+        current_report = await db.scalar(
+            select(CapaD3ImpactReport).where(
+                CapaD3ImpactReport.run_id == current_run.run_id,
+                CapaD3ImpactReport.is_current == True,
+            )
+        )
+        if current_report is None:
+            raise HTTPException(status_code=400, detail="需先生成影响报告")
+
+        # First param is capa_id, second is report_id
+        result = await capa_d3_containment_service.record_execution(
+            db, capa.report_id, current_report.report_id, scope.user, req.model_dump()
+        )
+        # Re-fetch to get full data
+        execution = await db.get(CapaD3Execution, uuid.UUID(result["execution_id"]))
+        await db.commit()
+        return D3ExecutionResponse.model_validate(execution)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.patch("/{report_id}/d3/execution/{execution_id}")
+async def d3_update_execution_ep(
+    report_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    req: D3ExecutionUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """PATCH /d3/execution/{id}: Update execution status/text/evidence."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    try:
+        result = await capa_d3_containment_service.update_execution(
+            db, report_id, execution_id, scope.user, req.model_dump(exclude_unset=True)
+        )
+        await db.commit()
+        execution = await db.get(CapaD3Execution, execution_id)
+        return D3ExecutionResponse.model_validate(execution)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+@router.get("/{report_id}/d3/executions", response_model=list[D3ExecutionResponse])
+async def d3_list_executions_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /d3/executions: List executions for current report."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    # Find current report
+    current_run = await db.scalar(
+        select(CapaD3ImportRun).where(
+            CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True
+        )
+    )
+    if current_run is None:
+        return []
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        return []
+
+    executions = (
+        await db.execute(
+            select(CapaD3Execution)
+            .where(CapaD3Execution.report_id == current_report.report_id)
+            .order_by(CapaD3Execution.created_at)
+        )
+    ).scalars().all()
+
+    return [D3ExecutionResponse.model_validate(e) for e in executions]
