@@ -1,12 +1,13 @@
-"""Tests for D3 Containment Import Service (US-E2E-01.1 Task 2).
+"""Tests for D3 Containment Import Service (US-E2E-01.1 Task 2+4).
 
-Unit tests for core service functions.
+Unit tests for core service functions plus integration tests for Transaction B.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -17,6 +18,8 @@ from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.user import User
 from app.models.role import RoleDefinition
+from app.services.agent import provider_adapter
+from app.services.agent.provider_adapter import ProviderNotConfiguredError
 from app.services.capa_d3_containment_service import import_containment_data
 from app.services.capa_d3_risk_mappings import get_risk_floor, CURRENT_RISK_MAPPING_VERSION
 
@@ -212,3 +215,64 @@ async def test_sequential_imports_create_two_runs_with_one_current(
     run2 = next(r for r in runs if r.run_id == run2_id)
     assert run1.is_current is False
     assert run2.is_current is True
+
+
+# ===== Transaction B Tests (Task 4) =====
+
+
+@pytest.mark.asyncio
+async def test_import_transaction_b_does_not_rollback_a_on_failure(
+    db: AsyncSession, capa_d3_setup, monkeypatch
+):
+    capa, user = capa_d3_setup
+    async def _build_client(db):
+        return type("FakeClient", (), {"model": "test-model"})()
+    monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+    monkeypatch.setattr(
+        provider_adapter,
+        "complete_json",
+        AsyncMock(side_effect=RuntimeError("LLM down")),
+    )
+    result = await import_containment_data(db, capa.report_id, user, {})
+    assert result["report_status"] == "failed"
+    run = await db.get(CapaD3ImportRun, uuid.UUID(result["run_id"]))
+    assert run.is_current is True and run.status == "completed"
+    snaps = (
+        await db.execute(
+            select(CapaD3ContainmentSnapshot).where(
+                CapaD3ContainmentSnapshot.run_id == result["run_id"]
+            )
+        )
+    ).scalars().all()
+    assert len(snaps) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("behavior", ["ok", "fail", "no_creds"])
+async def test_import_report_status_only_done_failed_blocked_superseded(
+    db: AsyncSession, capa_d3_setup, monkeypatch, behavior
+):
+    capa, user = capa_d3_setup
+    if behavior == "ok":
+        fake_client = type("FakeClient", (), {"model": "test-model"})()
+        monkeypatch.setattr(provider_adapter, "build_client", lambda db: fake_client)
+        monkeypatch.setattr(
+            provider_adapter,
+            "complete_json",
+            AsyncMock(return_value={"risk_level": "low", "risk_explanation": "x"}),
+        )
+    elif behavior == "fail":
+        fake_client = type("FakeClient", (), {"model": "test-model"})()
+        monkeypatch.setattr(provider_adapter, "build_client", lambda db: fake_client)
+        monkeypatch.setattr(
+            provider_adapter,
+            "complete_json",
+            AsyncMock(side_effect=RuntimeError("LLM down")),
+        )
+    else:  # no_creds
+        async def _raise(*args, **kwargs):
+            raise ProviderNotConfiguredError("no cfg")
+        monkeypatch.setattr(provider_adapter, "build_client", _raise)
+
+    result = await import_containment_data(db, capa.report_id, user, {})
+    assert result["report_status"] in {"done", "failed", "blocked", "superseded"}
