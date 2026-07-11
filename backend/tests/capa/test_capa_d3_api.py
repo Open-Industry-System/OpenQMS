@@ -394,3 +394,171 @@ async def test_advice_get_current_generation_list(client, db, capa_d3_done_repor
             assert "snapshot_id" in p and p["record_key"]
             assert p["source_type"] in {"inventory", "shipment", "iqc", "spc", "report"}
             assert p["stage"] == "llm_advice"
+
+
+# ============================================================================
+# Task 9: decision/adoptions API tests
+# ============================================================================
+
+
+@pytest_asyncio.fixture
+async def capa_d3_with_current_advice_url(client, db, capa_d3_done_report, llm_mock):
+    """CAPA with current advice for decision API tests. Returns (capa, advice, user)."""
+    capa, report, run, user = capa_d3_done_report
+    llm_mock.return_value = {
+        "advice": [
+            {
+                "advice_type": "strict_inspection",
+                "advice_text": "加强检验",
+                "target_batch_refs": None,
+                "provenance_sources_hint": ["iqc"],
+            }
+        ]
+    }
+    resp = await client.post(f"/api/capa/{capa.report_id}/d3/advice")
+    assert resp.status_code == 200, f"Advice generation failed: {resp.text}"
+    advice_id = resp.json()["advice"][0]["advice_id"]
+    from app.models.capa_d3 import CapaD3AiAdvice
+    advice = await db.get(CapaD3AiAdvice, advice_id)
+    return capa, advice, user
+
+
+@pytest_asyncio.fixture
+async def two_capas_with_advice(client, db, capa_d3_setup, llm_mock):
+    """Two CAPAs with advice for cross-CAPA test. Returns (capa_a, advice_a, capa_b)."""
+    from app.models.capa import CAPAEightD
+    from app.models.factory import Factory
+
+    capa_a, user = capa_d3_setup
+    factory = await db.get(Factory, capa_a.factory_id)
+
+    # Create capa_b in same factory
+    capa_b = CAPAEightD(
+        report_id=uuid.uuid4(),
+        document_no="CAPA-D3-B",
+        title="D3 Test CAPA B",
+        product_line_code="DC-DC-100",
+        factory_id=factory.id,
+        status="D3_INTERIM",
+        severity="serious",
+    )
+    db.add(capa_b)
+    await db.flush()
+
+    # Seed source data for capa_b
+    await _seed_d3_source_data(
+        db, capa_b.factory_id, user.user_id,
+        customer_code="CB", supplier_no="SUP-B", inspection_no="IQC-B", ic_code="IC-B"
+    )
+
+    # Import for capa_b
+    llm_mock.return_value = {"risk_level": "medium", "risk_explanation": "ok"}
+    resp_import = await client.post(f"/api/capa/{capa_b.report_id}/d3/import")
+    assert resp_import.status_code == 200
+
+    # Generate advice for capa_b
+    llm_mock.return_value = {
+        "advice": [{"advice_type": "strict_inspection", "advice_text": "加强检验B", "target_batch_refs": None, "provenance_sources_hint": ["iqc"]}]
+    }
+    resp_b = await client.post(f"/api/capa/{capa_b.report_id}/d3/advice")
+    assert resp_b.status_code == 200
+
+    # Return advice_a from capa_a (need to generate first)
+    llm_mock.return_value = {
+        "advice": [{"advice_type": "strict_inspection", "advice_text": "加强检验A", "target_batch_refs": None, "provenance_sources_hint": ["iqc"]}]
+    }
+    resp_a = await client.post(f"/api/capa/{capa_a.report_id}/d3/advice")
+    assert resp_a.status_code == 200
+    advice_a_id = resp_a.json()["advice"][0]["advice_id"]
+
+    from app.models.capa_d3 import CapaD3AiAdvice
+    advice_a = await db.get(CapaD3AiAdvice, advice_a_id)
+
+    return capa_a, advice_a, capa_b
+
+
+@pytest_asyncio.fixture
+async def capa_d3_with_adopted(client, db, capa_d3_done_report, llm_mock):
+    """CAPA with an adopted advice. Returns (capa, adoption)."""
+    capa, report, run, user = capa_d3_done_report
+    llm_mock.return_value = {
+        "advice": [
+            {
+                "advice_type": "strict_inspection",
+                "advice_text": "加强检验",
+                "target_batch_refs": None,
+                "provenance_sources_hint": ["iqc"],
+            }
+        ]
+    }
+    resp = await client.post(f"/api/capa/{capa.report_id}/d3/advice")
+    assert resp.status_code == 200
+    advice_id = resp.json()["advice"][0]["advice_id"]
+
+    # Adopt it
+    resp_adopt = await client.post(
+        f"/api/capa/{capa.report_id}/d3/advice/{advice_id}/decision",
+        json={"decision": "adopted", "adopted_text": "已采纳执行"},
+    )
+    assert resp_adopt.status_code == 200
+
+    return capa, resp_adopt.json()
+
+
+async def test_decision_post_adopted(client, capa_d3_with_current_advice_url):
+    """POST /d3/advice/{advice_id}/decision with adopted decision returns 200."""
+    capa, advice, _ = capa_d3_with_current_advice_url
+    resp = await client.post(
+        f"/api/capa/{capa.report_id}/d3/advice/{advice.advice_id}/decision",
+        json={"decision": "adopted", "adopted_text": "采纳执行"},
+    )
+    assert resp.status_code == 200
+
+
+async def test_decision_cross_capa_advice_404(client, capa_d3_with_current_advice_url, db):
+    """Decision on cross-CAPA advice_id returns 404."""
+    from app.models.capa import CAPAEightD
+
+    capa_a, advice_a, _ = capa_d3_with_current_advice_url
+
+    # Create capa_b in same factory but different CAPA
+    capa_b = CAPAEightD(
+        report_id=uuid.uuid4(),
+        document_no="CAPA-D3-B",
+        title="D3 Test CAPA B",
+        product_line_code="DC-DC-100",
+        factory_id=capa_a.factory_id,
+        status="D3_INTERIM",
+        severity="serious",
+    )
+    db.add(capa_b)
+    await db.flush()
+
+    # Try to adopt advice_a (belongs to capa_a) on capa_b's endpoint → 404
+    resp = await client.post(
+        f"/api/capa/{capa_b.report_id}/d3/advice/{advice_a.advice_id}/decision",
+        json={"decision": "adopted", "adopted_text": "t"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_decision_cross_factory_404(other_factory_client, capa_d3_done_report):
+    """Decision on cross-factory advice returns 404 (factory scope checked at API layer)."""
+    capa, report, run, user = capa_d3_done_report
+    # Even though we don't have advice yet, the cross-factory check happens at CAPA lookup
+    # So we test with a valid advice_id (any UUID) - the 404 comes from _d3_check_scope
+    fake_advice_id = uuid.uuid4()
+    resp = await other_factory_client.post(
+        f"/api/capa/{capa.report_id}/d3/advice/{fake_advice_id}/decision",
+        json={"decision": "adopted", "adopted_text": "t"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_adoptions_get_returns_adopted(client, capa_d3_with_adopted):
+    """GET /d3/adoptions returns list with adopted decision."""
+    capa, _ = capa_d3_with_adopted
+    resp = await client.get(f"/api/capa/{capa.report_id}/d3/adoptions")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert any(a["decision"] == "adopted" for a in data), f"No adopted decision in response: {data}"
