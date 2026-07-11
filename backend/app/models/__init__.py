@@ -23,6 +23,15 @@ from app.models.bias import BiasMeasurement, BiasResult, BiasStudy
 from app.models.capa import (
     CAPAEightD, CapaAIAdoption, CapaD7NodeAction, CapaPptExport, CapaRootCauseVerification,
 )
+from app.models.capa_d3 import (
+    CapaD3ImportRun,
+    CapaD3ContainmentSnapshot,
+    CapaD3ImpactReport,
+    CapaD3AdviceGeneration,
+    CapaD3AiAdvice,
+    CapaD3AdviceAdoption,
+    CapaD3Execution,
+)
 from app.models.capa_lesson import CapaLessonLearned
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
@@ -116,6 +125,9 @@ from .plm import (
 
 __all__ = [
     "User", "FMEADocument", "CAPAEightD", "CapaLessonLearned", "AuditLog",
+    "CapaD3ImportRun", "CapaD3ContainmentSnapshot", "CapaD3ImpactReport",
+    "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
+    "CapaD3Execution",
     "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",

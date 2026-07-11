@@ -47,5 +47,12 @@ def mig_db_url(monkeypatch):
             isolation_level="AUTOCOMMIT",
         )
         with admin.connect() as c:
+            # Terminate all connections to the test database before dropping
+            c.execute(text(
+                f"SELECT pg_terminate_backend(pg_stat_activity.pid) "
+                f"FROM pg_stat_activity "
+                f"WHERE pg_stat_activity.datname = '{mig_dbname}' "
+                f"AND pid <> pg_backend_pid()"
+            ))
             c.execute(text(f'DROP DATABASE IF EXISTS "{mig_dbname}"'))
         admin.dispose()
