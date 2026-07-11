@@ -635,7 +635,7 @@ async def capa_d3_two_shipment_batches_report(db: AsyncSession, capa_d3_setup, m
 
     iqc = IqcInspection(
         inspection_id=uuid.uuid4(),
-        inspection_no=inspection_no,
+        inspection_no="IQC-001",
         supplier_id=supplier.supplier_id,
         part_no="M1",
         lot_no="L1",
