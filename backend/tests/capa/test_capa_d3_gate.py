@@ -236,8 +236,12 @@ async def capa_d3_superseded_report(db, capa_d3_imported, superseded_run):
     report1 = await _current_report_for_run(db, run1.run_id)
     if report1:
         report1.is_current = False
+
+    # Demote run2 first to avoid transient violation of the partial unique index
+    # on (capa_id) where is_current=true.
     if run2:
         run2.is_current = False
+        await db.flush()
     run1.is_current = True
     await db.flush()
     return capa, user
