@@ -21,6 +21,7 @@ from app.models.capa_d3 import (
     CapaD3AdviceGeneration,
     CapaD3AiAdvice,
     CapaD3Execution,
+    CapaD3AdviceAdoption,
 )
 from app.models.capa import CAPAEightD
 from app.models.audit import AuditLog
@@ -1759,3 +1760,150 @@ async def generate_advice(db, capa_id, report_id, user, req):
 
     phase2 = await _advice_phase2_llm(db, gen_id, report, report_id, client)
     return await _advice_phase3_cas(db, capa_id, report_id, gen_id, attempt_token, phase2, user)
+
+
+# ===== Advice Adoption Service (Task 9) =====
+
+
+async def _current_advice_generation_by_report(db, report_id):
+    """Return the current advice_generation for a report, or None."""
+    return await db.scalar(
+        select(CapaD3AdviceGeneration).where(
+            CapaD3AdviceGeneration.report_id == report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+
+
+async def _capa_factory(db, capa_id):
+    """Return the factory_id for a CAPA."""
+    capa = await db.get(CAPAEightD, capa_id)
+    if capa is None:
+        raise LookupError("CAPA 不存在")
+    return capa.factory_id
+
+
+async def adopt_advice(db, capa_id, advice_id, decision, adopted_text, user):
+    """Adopt or reject an advice item.
+
+    Args:
+        db: Database session
+        capa_id: CAPA report_id
+        advice_id: Advice ID to adopt/reject
+        decision: "adopted" or "rejected"
+        adopted_text: Text for adopted decision (required for adopted, must be None for rejected)
+        user: User making the decision
+
+    Returns:
+        dict with adoption_id
+
+    Raises:
+        LookupError: If advice/CAPA chain is broken or cross-factory
+        ValueError: If advice is not from current generation
+        IntegrityError: If rejected decision has non-null adopted_text (CHECK constraint)
+    """
+    # Check constraint: rejected requires NULL adopted_text
+    if decision == "rejected" and adopted_text is not None:
+        # Raise IntegrityError to match DB-level CHECK constraint
+        from sqlalchemy.exc import IntegrityError
+
+        raise IntegrityError(
+            "CHECK constraint violated: decision='rejected' requires adopted_text IS NULL",
+            {},
+            None,
+        )
+
+    # Link-chain validation: advice → generation → report → run → capa
+    advice = await db.get(CapaD3AiAdvice, advice_id)
+    if advice is None:
+        raise LookupError("建议不存在")
+
+    gen = await db.get(CapaD3AdviceGeneration, advice.generation_id)
+    if gen is None:
+        raise LookupError("建议 generation 不存在")
+
+    report = await db.get(CapaD3ImpactReport, gen.report_id)
+    if report is None:
+        raise LookupError("报告不存在")
+
+    run = await db.get(CapaD3ImportRun, report.run_id)
+    if run is None or run.capa_id != capa_id:
+        raise LookupError("建议不属于该 CAPA")
+
+    # Factory consistency
+    capa_factory = await _capa_factory(db, capa_id)
+    if advice.factory_id != capa_factory:
+        raise LookupError("建议跨工厂")
+
+    # Generation validation
+    current_gen = await _current_advice_generation_by_report(db, report.report_id)
+    if current_gen is None or advice.generation_id != current_gen.generation_id:
+        raise ValueError("建议不属于当前 generation")
+
+    # Check for existing adoption
+    existing = await db.scalar(
+        select(CapaD3AdviceAdoption).where(
+            CapaD3AdviceAdoption.advice_id == advice_id
+        )
+    )
+
+    if existing is None:
+        # New adoption
+        adoption = CapaD3AdviceAdoption(
+            adoption_id=uuid.uuid4(),
+            advice_id=advice_id,
+            factory_id=advice.factory_id,
+            decision=decision,
+            adopted_text=adopted_text,
+            advice_type=advice.advice_type,
+            source_provenance=advice.source_provenance,
+            decided_by=user.user_id,
+            decided_at=datetime.now(timezone.utc),
+        )
+        db.add(adoption)
+        db.add(
+            AuditLog(
+                table_name="capa_eightd",
+                record_id=capa_id,
+                action="D3_ADVICE_ADOPTED"
+                if decision == "adopted"
+                else "D3_ADVICE_REJECTED",
+                changed_fields={
+                    "advice_id": str(advice_id),
+                    "decision": decision,
+                    "adopted_text": adopted_text,
+                },
+                operated_by=user.user_id,
+                operated_at=datetime.now(timezone.utc),
+            )
+        )
+        await db.flush()
+        return {"adoption_id": str(adoption.adoption_id)}
+    elif existing.decision == decision and existing.adopted_text == adopted_text:
+        # Idempotent: same decision and text
+        return {"adoption_id": str(existing.adoption_id)}
+    else:
+        # Update existing adoption
+        old_decision, old_text = existing.decision, existing.adopted_text
+        existing.decision = decision
+        existing.adopted_text = adopted_text
+        existing.decided_by = user.user_id
+        existing.decided_at = datetime.now(timezone.utc)
+        db.add(
+            AuditLog(
+                table_name="capa_eightd",
+                record_id=capa_id,
+                action="D3_ADVICE_DECISION_CHANGED",
+                changed_fields={
+                    "advice_id": str(advice_id),
+                    "old_decision": old_decision,
+                    "new_decision": decision,
+                    "old_adopted_text": old_text,
+                    "new_adopted_text": adopted_text,
+                },
+                operated_by=user.user_id,
+                operated_at=datetime.now(timezone.utc),
+            )
+        )
+        await db.flush()
+        return {"adoption_id": str(existing.adoption_id)}

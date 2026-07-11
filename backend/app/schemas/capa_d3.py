@@ -133,3 +133,27 @@ class D3AdviceRequest(BaseModel):
     """Request body for POST /d3/advice (empty - no parameters needed)."""
 
     pass
+
+
+class D3DecisionRequest(BaseModel):
+    """Request body for POST /d3/advice/{advice_id}/decision."""
+
+    decision: Literal["adopted", "rejected"]
+    adopted_text: str | None = None
+
+
+class D3AdoptionResponse(BaseModel):
+    """Response item for GET /d3/adoptions."""
+
+    adoption_id: uuid.UUID
+    advice_id: uuid.UUID
+    factory_id: uuid.UUID
+    decision: str
+    adopted_text: str | None
+    advice_type: str
+    source_provenance: list
+    decided_by: uuid.UUID
+    decided_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

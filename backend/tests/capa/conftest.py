@@ -145,7 +145,7 @@ async def capa_d3_setup(db: AsyncSession):
     return capa, user
 
 
-async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id: uuid.UUID, arrival_status: str = "signed"):
+async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id: uuid.UUID, arrival_status: str = "signed", customer_code: str = "C1", supplier_no: str = "SUP-001", inspection_no: str = "IQC-001", ic_code: str = "IC-001"):
     """Seed the 4 source tables for a D3 import."""
     # ERP connection for inventory
     erp_conn = ERPConnection(
@@ -176,7 +176,7 @@ async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id:
     # Customer
     customer = Customer(
         customer_id=uuid.uuid4(),
-        customer_code="C1",
+        customer_code=customer_code,
         name="Acme",
         segment="key",
         factory_id=factory_id,
@@ -190,7 +190,7 @@ async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id:
         connection_id=erp_conn.connection_id,
         external_id="SH001",
         shipment_number="SH001",
-        customer_code="C1",
+        customer_code=customer_code,
         material_code="M1",
         lot_no="L1",
         quantity=30,
@@ -203,7 +203,7 @@ async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id:
     # Supplier + IQC inspection
     supplier = Supplier(
         supplier_id=uuid.uuid4(),
-        supplier_no="SUP-001",
+        supplier_no=supplier_no,
         factory_id=factory_id,
         name="Test Supplier",
         short_name="TS",
@@ -214,7 +214,7 @@ async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id:
 
     iqc = IqcInspection(
         inspection_id=uuid.uuid4(),
-        inspection_no="IQC-001",
+        inspection_no=inspection_no,
         supplier_id=supplier.supplier_id,
         part_no="M1",
         lot_no="L1",
@@ -230,7 +230,7 @@ async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id:
     # Inspection characteristic + SPC alarm
     ic = InspectionCharacteristic(
         ic_id=uuid.uuid4(),
-        ic_code="IC-001",
+        ic_code=ic_code,
         product_line="DC-DC-100",
         factory_id=factory_id,
         process_name="Assy",
@@ -635,7 +635,7 @@ async def capa_d3_two_shipment_batches_report(db: AsyncSession, capa_d3_setup, m
 
     iqc = IqcInspection(
         inspection_id=uuid.uuid4(),
-        inspection_no="IQC-001",
+        inspection_no=inspection_no,
         supplier_id=supplier.supplier_id,
         part_no="M1",
         lot_no="L1",

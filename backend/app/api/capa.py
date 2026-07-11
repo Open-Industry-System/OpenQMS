@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -39,6 +40,8 @@ from app.schemas.capa_d3 import (
     D3AdviceRequest,
     D3AdviceResponse,
     D3AdviceRunningResponse,
+    D3AdoptionResponse,
+    D3DecisionRequest,
     D3ImportRequest,
     D3ImportResponse,
     D3ReportResponse,
@@ -1309,3 +1312,108 @@ async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) 
         )
 
     return D3AdviceResponse(advice=items)
+
+
+# ===== D3 Advice Adoption endpoints (US-E2E-01.1 Task 9) =====
+
+
+@router.post("/{report_id}/d3/advice/{advice_id}/decision")
+async def d3_decision_advice_ep(
+    report_id: uuid.UUID,
+    advice_id: uuid.UUID,
+    req: D3DecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /d3/advice/{advice_id}/decision: Adopt or reject an advice item."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    try:
+        result = await capa_d3_containment_service.adopt_advice(
+            db, report_id, advice_id, req.decision, req.adopted_text, scope.user
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        # CHECK constraint: rejected requires NULL adopted_text
+        raise HTTPException(
+            status_code=400, detail="rejected decision requires adopted_text to be null"
+        )
+
+    await db.commit()
+    return {"adoption_id": result["adoption_id"]}
+
+
+@router.get("/{report_id}/d3/adoptions", response_model=list[D3AdoptionResponse])
+async def d3_list_adoptions_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /d3/adoptions: Return list of adoptions for the current generation."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    # Find current run → current report → current generation
+    current_run = await db.scalar(
+        select(CapaD3ImportRun).where(
+            CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True
+        )
+    )
+    if current_run is None:
+        return []
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        return []
+
+    current_gen = await db.scalar(
+        select(CapaD3AdviceGeneration).where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+    if current_gen is None:
+        return []
+
+    # Get advice IDs for this generation
+    advice_rows = (
+        await db.execute(
+            select(CapaD3AiAdvice.advice_id).where(
+                CapaD3AiAdvice.generation_id == current_gen.generation_id
+            )
+        )
+    ).scalars().all()
+
+    if not advice_rows:
+        return []
+
+    # Get adoptions for these advice IDs
+    adoptions = (
+        await db.execute(
+            select(CapaD3AdviceAdoption).where(
+                CapaD3AdviceAdoption.advice_id.in_(advice_rows)
+            )
+        )
+    ).scalars().all()
+
+    return [D3AdoptionResponse.model_validate(a) for a in adoptions]
