@@ -9,6 +9,7 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
 from app.services.embedding_outbox import enqueue_embedding
 from app.services.product_line_service import validate_product_line
+from app.services.capa_d3_containment_service import _d3_to_d4_gate
 from app.state_machines.eightd_state import EightDState, _linear_next, can_transition, capa_open_clause
 
 EMBEDDING_FIELDS = {"d2_description", "d4_root_cause", "d5_correction", "d7_prevention"}
@@ -424,7 +425,10 @@ async def advance_capa(
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D7_PREVENTION:
         if not req.reject_reason or not req.reject_reason.strip():
             raise ValueError("驳回需填写理由")
+    elif current == EightDState.D3_INTERIM and target == EightDState.D4_ROOT_CAUSE:
+        await _d3_to_d4_gate(db, capa)
     elif current == EightDState.D4_ROOT_CAUSE and target == EightDState.D5_CORRECTION:
+        # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，
         # 闸口绑定"当前"d4_root_cause：必须有已验证记录的 root_cause_text 与当前 d4_root_cause（空白归一化后）一致，
         # 防 d4_root_cause 被改后用陈旧验证记录放行
         current_rc = (capa.d4_root_cause or "").strip()

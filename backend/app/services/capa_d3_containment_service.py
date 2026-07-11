@@ -11,10 +11,16 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select, and_, or_, update, text
+from sqlalchemy import select, and_, or_, update, text, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.capa_d3 import CapaD3ImportRun, CapaD3ContainmentSnapshot, CapaD3ImpactReport
+from app.models.capa_d3 import (
+    CapaD3ImportRun,
+    CapaD3ContainmentSnapshot,
+    CapaD3ImpactReport,
+    CapaD3AdviceGeneration,
+    CapaD3Execution,
+)
 from app.models.capa import CAPAEightD
 from app.models.audit import AuditLog
 from app.services.agent import provider_adapter
@@ -250,6 +256,87 @@ def _compute_risk_floor(customer_impact: list[dict], analysis_context: dict) -> 
 
     # Default to general
     return (version_mappings.get("general", "low"), None)
+
+
+# ===== D3→D4 fail-closed gate (Task 5) =====
+
+
+async def _current_advice_generation(db, report_id):
+    """Return the current advice_generation for a report, or None."""
+    return await db.scalar(
+        select(CapaD3AdviceGeneration).where(
+            CapaD3AdviceGeneration.report_id == report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+
+
+async def _d3_to_d4_gate(db, capa):
+    """Fail-closed gate: require current run, 4 snapshot types, done report, valid execution."""
+    # 1. Current import run for this CAPA (partial UQ guarantees at most one)
+    run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(
+            CapaD3ImportRun.capa_id == capa.report_id,
+            CapaD3ImportRun.is_current == True,
+        )
+        .with_for_update()
+    )
+    if run is None:
+        raise ValueError("需先导入遏制数据")
+
+    # 2. Factory consistency (defensive; FK normally enforces this)
+    if run.factory_id != capa.factory_id:
+        raise ValueError("工厂不一致")
+
+    # 3. All 4 snapshot types must be present
+    snapshots = (
+        await db.execute(
+            select(CapaD3ContainmentSnapshot).where(
+                CapaD3ContainmentSnapshot.run_id == run.run_id
+            )
+        )
+    ).scalars().all()
+    present_types = {s.snapshot_type for s in snapshots}
+    if present_types != {"inventory", "shipment", "iqc", "spc"}:
+        raise ValueError("需 4 类数据齐全")
+
+    # 4. Current impact report must be done
+    report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if report is None or report.status != "done":
+        raise ValueError("需报告已生成")
+
+    # 5. Current advice_generation (nullable; if never generated, only manual execution counts)
+    current_gen = await _current_advice_generation(db, report.report_id)
+
+    # 6. At least one valid execution: manual OR adopted from the current generation
+    source_filters = [CapaD3Execution.source == "manual"]
+    if current_gen is not None:
+        source_filters.append(
+            and_(
+                CapaD3Execution.source == "adopted",
+                CapaD3Execution.generation_id == current_gen.generation_id,
+            )
+        )
+
+    valid_count = await db.scalar(
+        select(func.count())
+        .select_from(CapaD3Execution)
+        .where(
+            and_(
+                CapaD3Execution.report_id == report.report_id,
+                CapaD3Execution.result_status.in_(["completed", "in_progress"]),
+                or_(*source_filters),
+            )
+        )
+    )
+    if not valid_count:
+        raise ValueError("需记录遏制执行结果")
 
 
 # ===== Report Generation Service (Task 4) =====
