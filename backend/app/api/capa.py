@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaPptExport
+from app.models.capa_d3 import CapaD3ContainmentSnapshot, CapaD3ImpactReport, CapaD3ImportRun
 from app.models.fmea import FMEADocument
 from app.schemas.capa import (
     AdvanceRequest,
@@ -25,6 +27,16 @@ from app.schemas.capa import (
     D4RecommendationResponse,
     D5RecommendationResponse,
 )
+from app.schemas.capa_d3 import (
+    D3AdviceRequest,
+    D3AdviceResponse,
+    D3ImportRequest,
+    D3ImportResponse,
+    D3ReportResponse,
+    D3ReportRunningResponse,
+    D3RunResponse,
+    D3SnapshotResponse,
+)
 from app.schemas.capa_draft import DraftRequest, DraftResponse
 from app.schemas.capa_ppt import PptExportDetailResponse
 from app.schemas.capa_verification import (
@@ -34,6 +46,7 @@ from app.schemas.capa_verification import (
 )
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.schemas.recommendation_stage import StageRunSchema
+from app.services import capa_d3_containment_service
 from app.services import capa_d7_action_service
 from app.services import capa_ppt_review_service, capa_ppt_service, capa_service
 from app.services import capa_verification_service
@@ -912,3 +925,194 @@ async def get_ppt_export(
         version=export.version, review_status=export.review_status,
         review_rounds=export.review_rounds, review_report=export.review_report,
     )
+
+
+# ===== D3 Containment endpoints (US-E2E-01.1 Task 6) =====
+
+
+def _d3_check_scope(entity, scope: RequestScope):
+    """Wrap factory/product-line checks to raise 404 (information hiding)."""
+    try:
+        check_factory_access(entity.factory_id, scope)
+        check_product_line_access(getattr(entity, "product_line_code", None), scope)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="8D report not found")
+
+
+def _assert_d3_stage(capa: CAPAEightD):
+    if capa.status != EightDState.D3_INTERIM.value:
+        raise HTTPException(status_code=400, detail="仅 D3 阶段可操作")
+
+
+@router.post("/{report_id}/d3/import", response_model=D3ImportResponse)
+async def d3_import_ep(
+    report_id: uuid.UUID, req: D3ImportRequest,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+    try:
+        result = await capa_d3_containment_service.import_containment_data(
+            db, capa.report_id, scope.user, req.model_dump()
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return D3ImportResponse(**result)
+
+
+@router.get("/{report_id}/d3/runs", response_model=list[D3RunResponse])
+async def d3_list_runs_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    result = await db.execute(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id)
+        .order_by(CapaD3ImportRun.created_at)
+    )
+    return [D3RunResponse.model_validate(r) for r in result.scalars().all()]
+
+
+@router.get("/{report_id}/d3/snapshots", response_model=list[D3SnapshotResponse])
+async def d3_list_snapshots_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    current_run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
+    )
+    if current_run is None:
+        return []
+    result = await db.execute(
+        select(CapaD3ContainmentSnapshot)
+        .where(CapaD3ContainmentSnapshot.run_id == current_run.run_id)
+        .order_by(CapaD3ContainmentSnapshot.created_at)
+    )
+    return [D3SnapshotResponse.model_validate(s) for s in result.scalars().all()]
+
+
+@router.get("/{report_id}/d3/report", response_model=D3ReportResponse)
+async def d3_get_report_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    current_run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
+    )
+    if current_run is None:
+        raise HTTPException(status_code=404, detail="当前导入运行不存在")
+    report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if report is None:
+        raise HTTPException(status_code=404, detail="D3 影响报告不存在")
+    return D3ReportResponse.model_validate(report)
+
+
+@router.post("/{report_id}/d3/report")
+async def d3_generate_report_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    current_run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
+    )
+    if current_run is None:
+        raise HTTPException(status_code=400, detail="需先导入遏制数据")
+
+    # 1. Already running -> 202
+    running_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.status == "running",
+        )
+    )
+    if running_report is not None:
+        retry_after = capa_d3_containment_service.RETRY_AFTER_SECONDS
+        return JSONResponse(
+            status_code=202,
+            content={"report_id": str(running_report.report_id), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # 2. Current report done/failed/superseded -> 200
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is not None:
+        return D3ReportResponse.model_validate(current_report)
+
+    # 3. No report yet -> generate
+    result = await capa_d3_containment_service.generate_impact_report(
+        db, current_run.run_id, scope.user
+    )
+    if result["status"] == "blocked":
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "message": "LLM 凭证未配置，报告生成被阻断"},
+        )
+    if result["status"] == "running":
+        retry_after = result.get("retry_after", capa_d3_containment_service.RETRY_AFTER_SECONDS)
+        return JSONResponse(
+            status_code=202,
+            content={"report_id": str(result["report_id"]), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # done / failed / superseded -> return the report row
+    report_id_out = result.get("report_id")
+    if report_id_out:
+        report = await db.get(CapaD3ImpactReport, uuid.UUID(report_id_out))
+    else:
+        report = await db.scalar(
+            select(CapaD3ImpactReport)
+            .where(CapaD3ImpactReport.run_id == current_run.run_id)
+            .order_by(CapaD3ImpactReport.created_at.desc())
+            .limit(1)
+        )
+    if report is None:
+        raise HTTPException(status_code=404, detail="D3 影响报告不存在")
+    return D3ReportResponse.model_validate(report)
