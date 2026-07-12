@@ -162,7 +162,7 @@ describe("CAPADetailPage D3ContainmentPanel integration", () => {
     ]);
     vi.mocked(capaApi.getD3Snapshots).mockResolvedValue([]);
     vi.mocked(capaApi.getD3Report).mockResolvedValue(null);
-    vi.mocked(capaApi.getD3Advice).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Advice).mockResolvedValue({ advice: [] });
     vi.mocked(capaApi.getD4Recommendations).mockResolvedValue({ items: [], stages: [] });
 
     renderPage();

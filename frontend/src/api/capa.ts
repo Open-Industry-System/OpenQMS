@@ -179,8 +179,8 @@ export async function getD3Runs(capaId: string): Promise<D3ImportRun[]> {
   return resp.data;
 }
 
-export async function getD3Snapshots(runId: string): Promise<D3ContainmentSnapshot[]> {
-  const resp = await client.get(`/capa/${runId}/d3/snapshots`, { params: { run_id: runId } });
+export async function getD3Snapshots(capaId: string): Promise<D3ContainmentSnapshot[]> {
+  const resp = await client.get(`/capa/${capaId}/d3/snapshots`);
   return resp.data;
 }
 
@@ -192,21 +192,21 @@ export async function generateD3Report(
   return resp.data;
 }
 
-export async function getD3Report(runId: string): Promise<D3ImpactReport | null> {
-  const resp = await client.get(`/capa/${runId}/d3/report`, { params: { run_id: runId } });
+export async function getD3Report(capaId: string): Promise<D3ImpactReport | null> {
+  const resp = await client.get(`/capa/${capaId}/d3/report`);
   return resp.data;
 }
 
 export async function generateD3Advice(
   capaId: string,
   req: D3GenerateAdviceRequest
-): Promise<{ artifact_id: string; status: string }> {
+): Promise<{ report_id: string; status: string }> {
   const resp = await client.post(`/capa/${capaId}/d3/advice`, req);
   return resp.data;
 }
 
-export async function getD3Advice(runId: string): Promise<D3AiAdvice[]> {
-  const resp = await client.get(`/capa/${runId}/d3/advice`, { params: { run_id: runId } });
+export async function getD3Advice(capaId: string): Promise<{ advice: D3AiAdvice[] }> {
+  const resp = await client.get(`/capa/${capaId}/d3/advice`);
   return resp.data;
 }
 

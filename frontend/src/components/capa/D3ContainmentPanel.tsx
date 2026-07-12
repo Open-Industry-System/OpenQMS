@@ -1,11 +1,11 @@
 import { useEffect, useState, useMemo } from "react";
 import {
-  Card, Button, Space, Tag, List, Typography, Empty, Spin, App, Alert,
-  Modal, Form, Input, Select, Divider, Switch, message,
+  Card, Button, Space, Tag, List, Typography, Spin, App, Alert,
+  Modal, Form, Input, Select, message,
 } from "antd";
 import {
   ImportOutlined, ReloadOutlined, CheckOutlined, CloseOutlined,
-  PlusOutlined, EditOutlined,
+  PlusOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
@@ -36,6 +36,8 @@ const adviceTypeColors: Record<D3AdviceType, string> = {
   alternative: "green",
 };
 
+type ModalMode = "adopt" | "reject" | "execution" | null;
+
 export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanelProps) {
   const { t } = useTranslation("capa");
   const { modal } = App.useApp();
@@ -52,8 +54,13 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   const [generatingReport, setGeneratingReport] = useState(false);
   const [generatingAdvice, setGeneratingAdvice] = useState(false);
 
-  // Show import button only when canEdit and status is D3_INTERIM
-  const showImportButton = canEdit && capa.status === "D3_INTERIM";
+  // Controlled modal state (replaces document.getElementById anti-pattern)
+  const [modalMode, setModalMode] = useState<ModalMode>(null);
+  const [activeAdvice, setActiveAdvice] = useState<D3AiAdvice | null>(null);
+  const [adoptedText, setAdoptedText] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+  const [executionMeasure, setExecutionMeasure] = useState("");
+  const [executionEvidenceUrl, setExecutionEvidenceUrl] = useState("");
 
   // Current run is the one with is_current=true, or selected from historical runs
   const currentRun = useMemo(() => {
@@ -69,6 +76,9 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   // For historical runs, disable all write buttons
   const isReadOnly = !currentRun?.is_current || !canEdit;
 
+  // Show import button when canEdit, status is D3_INTERIM, and not viewing a historical run
+  const showImportButton = canEdit && capa.status === "D3_INTERIM" && (!currentRun || (!!currentRun.is_current && !selectedRunId));
+
   useEffect(() => {
     if (capa.report_id) {
       loadRuns();
@@ -80,9 +90,9 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
 
   useEffect(() => {
     if (currentRun?.run_id) {
-      loadSnapshots(currentRun.run_id);
-      loadReport(currentRun.run_id);
-      loadAdvice(currentRun.run_id);
+      loadSnapshots();
+      loadReport();
+      loadAdvice();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRun?.run_id]);
@@ -99,28 +109,28 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     }
   };
 
-  const loadSnapshots = async (runId: string) => {
+  const loadSnapshots = async () => {
     try {
-      const data = await getD3Snapshots(runId);
+      const data = await getD3Snapshots(capa.report_id);
       setSnapshots(data);
     } catch {
       message.error(t("d3.loadSnapshotsFailed", "加载快照失败"));
     }
   };
 
-  const loadReport = async (runId: string) => {
+  const loadReport = async () => {
     try {
-      const data = await getD3Report(runId);
+      const data = await getD3Report(capa.report_id);
       setReport(data);
     } catch {
       message.error(t("d3.loadReportFailed", "加载报告失败"));
     }
   };
 
-  const loadAdvice = async (runId: string) => {
+  const loadAdvice = async () => {
     try {
-      const data = await getD3Advice(runId);
-      setAdvice(data);
+      const resp = await getD3Advice(capa.report_id);
+      setAdvice(resp.advice ?? []);
     } catch {
       message.error(t("d3.loadAdviceFailed", "加载建议失败"));
     }
@@ -163,7 +173,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       await generateD3Report(capa.report_id, { run_id: currentRun.run_id });
       message.success(t("d3.reportGenerated", "报告生成中"));
-      await loadReport(currentRun.run_id);
+      await loadReport();
     } catch {
       message.error(t("d3.reportGenerateFailed", "报告生成失败"));
     } finally {
@@ -177,7 +187,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       await generateD3Advice(capa.report_id, { run_id: currentRun.run_id });
       message.success(t("d3.adviceGenerated", "建议生成中"));
-      await loadAdvice(currentRun.run_id);
+      await loadAdvice();
     } catch {
       message.error(t("d3.adviceGenerateFailed", "建议生成失败"));
     } finally {
@@ -185,110 +195,79 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     }
   };
 
-  const handleAcceptAdvice = (item: D3AiAdvice) => {
-    modal.confirm({
-      title: t("d3.acceptAdviceTitle", "采纳建议"),
-      content: (
-        <Form layout="vertical">
-          <Form.Item label={t("d3.adoptedTextLabel", "采纳文本")}>
-            <TextArea
-              id="d3-adopted-text"
-              rows={4}
-              defaultValue={item.advice_text}
-            />
-          </Form.Item>
-        </Form>
-      ),
-      onOk: async () => {
-        const textarea = document.getElementById("d3-adopted-text") as HTMLTextAreaElement;
-        const adoptedText = textarea?.value || item.advice_text;
-        try {
-          await decideD3Advice(capa.report_id, item.advice_id, {
-            decision: "accept",
-            adopted_text: adoptedText,
-          });
-          message.success(t("d3.acceptSuccess", "已采纳"));
-          await loadAdoptions();
-          await loadAdvice(currentRun!.run_id);
-        } catch {
-          message.error(t("d3.acceptFailed", "采纳失败"));
-        }
-      },
-    });
+  const openAdoptModal = (item: D3AiAdvice) => {
+    setActiveAdvice(item);
+    setAdoptedText(item.advice_text);
+    setModalMode("adopt");
   };
 
-  const handleRejectAdvice = async (item: D3AiAdvice) => {
-    modal.confirm({
-      title: t("d3.rejectAdviceTitle", "拒绝建议"),
-      content: (
-        <Form layout="vertical">
-          <Form.Item label={t("d3.rejectReasonLabel", "拒绝理由")}>
-            <TextArea
-              id="d3-reject-reason"
-              rows={3}
-            />
-          </Form.Item>
-        </Form>
-      ),
-      onOk: async () => {
-        const textarea = document.getElementById("d3-reject-reason") as HTMLTextAreaElement;
-        const reason = textarea?.value || "";
-        try {
-          await decideD3Advice(capa.report_id, item.advice_id, {
-            decision: "reject",
-            rejection_reason: reason,
-          });
-          message.success(t("d3.rejectSuccess", "已拒绝"));
-          await loadAdvice(currentRun!.run_id);
-        } catch {
-          message.error(t("d3.rejectFailed", "拒绝失败"));
-        }
-      },
-    });
+  const openRejectModal = (item: D3AiAdvice) => {
+    setActiveAdvice(item);
+    setRejectReason("");
+    setModalMode("reject");
   };
 
-  const handleAddExecution = () => {
-    modal.confirm({
-      title: t("d3.addExecutionTitle", "添加执行记录"),
-      content: (
-        <Form layout="vertical">
-          <Form.Item label={t("d3.executionMeasureLabel", "措施")}>
-            <TextArea
-              id="d3-execution-measure"
-              rows={3}
-              data-e2e="d3-execution-measure"
-            />
-          </Form.Item>
-          <Form.Item label={t("d3.evidenceUrlLabel", "证据 URL")}>
-            <Input
-              id="d3-execution-evidence-url"
-              data-e2e="d3-execution-evidence-url"
-            />
-          </Form.Item>
-        </Form>
-      ),
-      okButtonProps: { "data-e2e": "d3-execution-save" },
-      onOk: async () => {
-        const measureTextarea = document.getElementById("d3-execution-measure") as HTMLTextAreaElement;
-        const evidenceInput = document.getElementById("d3-execution-evidence-url") as HTMLInputElement;
-        const measure = measureTextarea?.value || "";
-        const evidenceUrl = evidenceInput?.value || "";
-        if (!measure.trim()) {
-          message.warning(t("d3.measureRequired", "请填写措施"));
-          return;
-        }
-        try {
-          await recordD3Execution(capa.report_id, {
-            measure,
-            evidence_url: evidenceUrl,
-          });
-          message.success(t("d3.executionAdded", "执行记录已添加"));
-          await loadExecutions();
-        } catch {
-          message.error(t("d3.executionAddFailed", "添加执行记录失败"));
-        }
-      },
-    });
+  const openExecutionModal = () => {
+    setExecutionMeasure("");
+    setExecutionEvidenceUrl("");
+    setModalMode("execution");
+  };
+
+  const closeModal = () => {
+    setModalMode(null);
+    setActiveAdvice(null);
+  };
+
+  const handleAdoptOk = async () => {
+    if (!activeAdvice) return;
+    try {
+      await decideD3Advice(capa.report_id, activeAdvice.advice_id, {
+        decision: "adopted",
+        adopted_text: adoptedText,
+      });
+      message.success(t("d3.acceptSuccess", "已采纳"));
+      closeModal();
+      await loadAdoptions();
+      await loadAdvice();
+    } catch {
+      message.error(t("d3.acceptFailed", "采纳失败"));
+    }
+  };
+
+  const handleRejectOk = async () => {
+    if (!activeAdvice) return;
+    try {
+      await decideD3Advice(capa.report_id, activeAdvice.advice_id, {
+        decision: "rejected",
+        adopted_text: null,
+      });
+      message.success(t("d3.rejectSuccess", "已拒绝"));
+      closeModal();
+      await loadAdvice();
+    } catch {
+      message.error(t("d3.rejectFailed", "拒绝失败"));
+    }
+  };
+
+  const handleExecutionOk = async () => {
+    if (!executionMeasure.trim()) {
+      message.warning(t("d3.measureRequired", "请填写措施"));
+      return;
+    }
+    try {
+      await recordD3Execution(capa.report_id, {
+        source: "manual",
+        measure_text: executionMeasure,
+        evidence_refs: executionEvidenceUrl.trim()
+          ? [{ type: "url", url: executionEvidenceUrl.trim() }]
+          : [],
+      });
+      message.success(t("d3.executionAdded", "执行记录已添加"));
+      closeModal();
+      await loadExecutions();
+    } catch {
+      message.error(t("d3.executionAddFailed", "添加执行记录失败"));
+    }
   };
 
   // Group snapshots by type
@@ -318,34 +297,17 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           type="error"
           showIcon
           message={t("d3.runFailed", "代次失败")}
-          description={currentRun.error_message}
+          description={report?.error || currentRun.status}
           style={{ marginBottom: 16 }}
         />
       );
     }
-    if (currentRun.status === "running") {
+    if (currentRun.status === "importing") {
       return (
         <Alert
           type="info"
           showIcon
           message={t("d3.runRunning", "正在运行")}
-          style={{ marginBottom: 16 }}
-        />
-      );
-    }
-    if (currentRun.status === "superseded") {
-      return (
-        <Alert
-          type="warning"
-          showIcon
-          message={t("d3.runSuperseded", "已被新代次取代")}
-          action={
-            canEdit && (
-              <Button size="small" icon={<ReloadOutlined />} onClick={handleImport}>
-                {t("d3.refresh", "刷新")}
-              </Button>
-            )
-          }
           style={{ marginBottom: 16 }}
         />
       );
@@ -409,8 +371,8 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                 dataSource={snapshotsByType[type]}
                 renderItem={(s) => (
                   <List.Item>
-                    <Text>{s.record_key}</Text>
-                    <Tag>{s.source_type}</Tag>
+                    <Text>{t("d3.recordCount", "记录数")}: {s.record_count}</Text>
+                    <Tag>{s.snapshot_type}</Tag>
                   </List.Item>
                 )}
               />
@@ -423,25 +385,15 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       {report && (
         <Card size="small" title={t("d3.reportTitle", "影响报告")} style={{ marginBottom: 16 }}>
           <Space direction="vertical" style={{ width: "100%" }}>
-            {report.summary && <Text>{report.summary}</Text>}
-            {report.inventory_impact && (
+            {report.risk_level && (
               <Text>
-                {t("d3.inventoryImpact", "库存影响")}: {report.inventory_impact.affected_qty} 受影响
+                {t("d3.riskLevel", "风险等级")}: {report.risk_level} ({t("d3.riskFloor", "底线")}: {report.risk_floor})
               </Text>
             )}
-            {report.shipment_impact && (
+            {report.risk_explanation && <Text>{report.risk_explanation}</Text>}
+            {!!report.customer_impact?.length && (
               <Text>
-                {t("d3.shipmentImpact", "发货影响")}: {report.shipment_impact.affected_customers} 客户
-              </Text>
-            )}
-            {report.iqc_impact && (
-              <Text>
-                {t("d3.iqcImpact", "IQC 影响")}: {report.iqc_impact.affected_batches} 批次
-              </Text>
-            )}
-            {report.spc_impact && (
-              <Text>
-                {t("d3.spcImpact", "SPC 影响")}: {report.spc_impact.affected_charts} 图表
+                {t("d3.customerImpact", "客户影响")}: {report.customer_impact.length} 条
               </Text>
             )}
           </Space>
@@ -466,14 +418,14 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             renderItem={(item) => (
               <List.Item
                 actions={
-                  !isReadOnly && item.status === "pending"
+                  !isReadOnly && !item.adoption_status
                     ? [
                         <Button
                           key="accept"
                           type="link"
                           size="small"
                           icon={<CheckOutlined />}
-                          onClick={() => handleAcceptAdvice(item)}
+                          onClick={() => openAdoptModal(item)}
                         >
                           {t("d3.accept", "采纳")}
                         </Button>,
@@ -483,7 +435,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                           size="small"
                           danger
                           icon={<CloseOutlined />}
-                          onClick={() => handleRejectAdvice(item)}
+                          onClick={() => openRejectModal(item)}
                         >
                           {t("d3.reject", "拒绝")}
                         </Button>,
@@ -503,9 +455,9 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                   description={
                     <Space>
                       <Text type="secondary" data-e2e="d3-advice-provenance">
-                        {item.provenance.record_key} ({item.provenance.source_type})
+                        {item.source_provenance?.map(p => p.record_key).join(", ") || "-"}
                       </Text>
-                      <Tag>{item.status}</Tag>
+                      {item.adoption_status && <Tag>{item.adoption_status}</Tag>}
                     </Space>
                   }
                 />
@@ -541,7 +493,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                       {item.adopted_text}
                     </Space>
                   }
-                  description={item.adopted_at}
+                  description={item.decided_at}
                 />
               </List.Item>
             )}
@@ -556,12 +508,12 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           renderItem={(item) => (
             <List.Item>
               <List.Item.Meta
-                title={item.measure}
+                title={item.measure_text}
                 description={
                   <Space>
-                    <Text type="secondary">{item.executed_at}</Text>
-                    {item.evidence_url && (
-                      <Button type="link" size="small" href={item.evidence_url} target="_blank">
+                    <Text type="secondary">{item.result_status}</Text>
+                    {item.evidence_refs?.[0] && (
+                      <Button type="link" size="small" href={String(item.evidence_refs[0].url || "")} target="_blank">
                         {t("d3.evidenceLink", "证据")}
                       </Button>
                     )}
@@ -575,7 +527,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            onClick={handleAddExecution}
+            onClick={openExecutionModal}
             data-e2e="d3-execution-add"
             style={{ marginTop: 8 }}
           >
@@ -583,6 +535,75 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           </Button>
         )}
       </Card>
+
+      {/* Adopt Modal */}
+      <Modal
+        open={modalMode === "adopt"}
+        title={t("d3.acceptAdviceTitle", "采纳建议")}
+        onCancel={closeModal}
+        onOk={handleAdoptOk}
+        okText={t("d3.accept", "采纳")}
+      >
+        <Form layout="vertical">
+          <Form.Item label={t("d3.adoptedTextLabel", "采纳文本")}>
+            <TextArea
+              rows={4}
+              value={adoptedText}
+              onChange={(e) => setAdoptedText(e.target.value)}
+              data-e2e="d3-adopted-text"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Reject Modal */}
+      <Modal
+        open={modalMode === "reject"}
+        title={t("d3.rejectAdviceTitle", "拒绝建议")}
+        onCancel={closeModal}
+        onOk={handleRejectOk}
+        okText={t("d3.reject", "拒绝")}
+        okButtonProps={{ danger: true }}
+      >
+        <Form layout="vertical">
+          <Form.Item label={t("d3.rejectReasonLabel", "拒绝理由")}>
+            <TextArea
+              rows={3}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              data-e2e="d3-reject-reason"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Execution Modal */}
+      <Modal
+        open={modalMode === "execution"}
+        title={t("d3.addExecutionTitle", "添加执行记录")}
+        onCancel={closeModal}
+        onOk={handleExecutionOk}
+        okText={t("d3.addExecution", "添加")}
+        okButtonProps={{ "data-e2e": "d3-execution-save" }}
+      >
+        <Form layout="vertical">
+          <Form.Item label={t("d3.executionMeasureLabel", "措施")}>
+            <TextArea
+              rows={3}
+              value={executionMeasure}
+              onChange={(e) => setExecutionMeasure(e.target.value)}
+              data-e2e="d3-execution-measure"
+            />
+          </Form.Item>
+          <Form.Item label={t("d3.evidenceUrlLabel", "证据 URL")}>
+            <Input
+              value={executionEvidenceUrl}
+              onChange={(e) => setExecutionEvidenceUrl(e.target.value)}
+              data-e2e="d3-execution-evidence-url"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Card>
   );
 }

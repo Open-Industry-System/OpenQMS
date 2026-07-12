@@ -1936,81 +1936,102 @@ export interface D7AutoFillResponse {
 export interface D3ImportRun {
   run_id: string;
   capa_id: string;
-  status: "running" | "done" | "failed" | "superseded";
+  factory_id: string;
+  status: "importing" | "completed" | "failed";
   is_current: boolean;
-  created_at: string;
+  imported_types: string[];
+  analysis_context: Record<string, unknown>;
+  started_at: string;
   completed_at: string | null;
-  error_message: string | null;
+  created_at: string;
+}
+
+export interface D3ProvenanceEntry {
+  source_type: string;
+  snapshot_id: string | null;
+  record_key: string;
+  stage: string;
 }
 
 export interface D3ContainmentSnapshot {
   snapshot_id: string;
   run_id: string;
+  factory_id: string;
   snapshot_type: "inventory" | "shipment" | "iqc" | "spc";
-  record_key: string;
-  source_type: string;
-  source_table: string;
-  captured_at: string;
-  data: Record<string, unknown>;
+  payload: Record<string, unknown>[];
+  record_count: number;
+  imported_at: string;
+  created_at: string;
 }
 
 export interface D3ImpactReport {
   report_id: string;
   run_id: string;
-  artifact_id: string;
-  status: "pending" | "running" | "done" | "failed";
-  generated_at: string | null;
-  summary: string | null;
-  inventory_impact: { affected_qty: number; isolated_qty: number; location: string } | null;
-  shipment_impact: { affected_customers: number; affected_qty: number; shipment_count: number } | null;
-  iqc_impact: { affected_batches: number; rejected_batches: number; total_qty: number } | null;
-  spc_impact: { affected_charts: number; out_of_control_points: number } | null;
-  retry_after: number | null;
+  factory_id: string;
+  is_current: boolean;
+  status: "running" | "done" | "failed" | "superseded";
+  risk_level: "high" | "medium" | "low" | null;
+  risk_floor: "high" | "medium" | "low" | null;
+  risk_explanation: string | null;
+  batches: Record<string, unknown>[] | null;
+  impact_qty: Record<string, unknown> | Record<string, unknown>[] | null;
+  customer_impact: Record<string, unknown>[] | null;
+  time_window: Record<string, unknown> | null;
+  llm_available: boolean;
+  model: string | null;
+  stage_runs: Record<string, unknown>[] | null;
+  prompt_stats: Record<string, unknown> | null;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+  generated_by: string;
+  generated_at: string;
+  created_at: string;
 }
 
 export type D3AdviceType = "recall" | "isolate" | "notify_customer" | "strict_inspection" | "alternative";
 
 export interface D3AiAdvice {
   advice_id: string;
-  run_id: string;
-  artifact_id: string;
+  generation_id: string;
+  factory_id: string;
   advice_type: D3AdviceType;
   advice_text: string;
-  provenance: {
-    snapshot_id: string;
-    record_key: string;
-    source_type: string;
-  };
-  status: "pending" | "accepted" | "rejected";
-  rejection_reason: string | null;
+  source_provenance: D3ProvenanceEntry[];
+  llm_available: boolean;
+  generated_by: string;
+  generated_at: string;
   created_at: string;
+  adoption_status?: "adopted" | "rejected" | null;
 }
 
 export interface D3AdviceAdoption {
   adoption_id: string;
-  capa_id: string;
   advice_id: string;
-  run_id: string;
+  factory_id: string;
+  decision: "adopted" | "rejected";
+  adopted_text: string | null;
   advice_type: D3AdviceType;
-  adopted_text: string;
-  adopted_at: string;
-  adopted_by: string;
+  source_provenance: D3ProvenanceEntry[];
+  decided_by: string;
+  decided_at: string;
+  created_at: string;
 }
 
 export interface D3Execution {
   execution_id: string;
-  capa_id: string;
-  run_id: string;
-  measure: string;
-  evidence_url: string | null;
-  executed_at: string;
-  executed_by: string;
+  source: "manual" | "adopted";
+  advice_id: string | null;
+  generation_id: string | null;
+  result_status: "completed" | "in_progress" | "pending" | "failed";
+  measure_text: string | null;
+  evidence_refs: Record<string, unknown>[];
 }
 
 // D3 Request Types
 
 export interface D3ImportRequest {
-  customer_segment?: string;
+  snapshot_types?: string[];
 }
 
 export interface D3GenerateReportRequest {
@@ -2022,17 +2043,20 @@ export interface D3GenerateAdviceRequest {
 }
 
 export interface D3DecideAdviceRequest {
-  decision: "accept" | "reject";
-  adopted_text?: string;
-  rejection_reason?: string;
+  decision: "adopted" | "rejected";
+  adopted_text?: string | null;
 }
 
 export interface D3ExecutionCreate {
-  measure: string;
-  evidence_url?: string;
+  source: "manual" | "adopted";
+  advice_id?: string | null;
+  measure_text: string;
+  result_status?: "completed" | "in_progress" | "pending" | "failed";
+  evidence_refs?: Record<string, unknown>[];
 }
 
 export interface D3ExecutionUpdate {
-  measure?: string;
-  evidence_url?: string;
+  result_status?: "completed" | "in_progress" | "pending" | "failed" | null;
+  measure_text?: string | null;
+  evidence_refs?: Record<string, unknown>[] | null;
 }
