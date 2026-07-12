@@ -219,6 +219,52 @@ async def test_get_snapshots_current_run(client, capa_d3_imported):
     }
 
 
+async def test_get_snapshots_by_run_id_queries_specific_run(client, capa_d3_imported, db):
+    """GET /d3/snapshots?run_id=<id> returns that run's snapshots (historical run support)."""
+    from app.models.capa_d3 import CapaD3ImportRun
+
+    capa, current_run = capa_d3_imported
+    # Fetch the current run's run_id from DB
+    run = await db.scalar(
+        select(CapaD3ImportRun).where(
+            CapaD3ImportRun.capa_id == capa.report_id,
+            CapaD3ImportRun.is_current == True,
+        )
+    )
+    resp = await client.get(
+        f"/api/capa/{capa.report_id}/d3/snapshots", params={"run_id": str(run.run_id)}
+    )
+    assert resp.status_code == 200
+    types = {s["snapshot_type"] for s in resp.json()}
+    assert types == {"inventory", "shipment", "iqc", "spc"}
+
+
+async def test_get_snapshots_cross_capa_run_id_404(client, capa_d3_imported, db):
+    """run_id belonging to another CAPA returns empty (not leaked)."""
+    from app.models.capa import CAPAEightD
+
+    capa, _ = capa_d3_imported
+    other_capa = CAPAEightD(
+        report_id=uuid.uuid4(),
+        document_no="CAPA-OTHER",
+        title="Other",
+        product_line_code="DC-DC-100",
+        factory_id=capa.factory_id,
+        status="D3_INTERIM",
+        severity="serious",
+    )
+    db.add(other_capa)
+    await db.flush()
+    # Use a random UUID that doesn't belong to this capa
+    fake_run_id = uuid.uuid4()
+    resp = await client.get(
+        f"/api/capa/{capa.report_id}/d3/snapshots", params={"run_id": str(fake_run_id)}
+    )
+    # run_id not found for this capa → empty list (no leak)
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 async def test_report_post_no_creds_422_blocked(client, capa_d3_imported, no_creds):
     capa, _ = capa_d3_imported
     resp = await client.post(f"/api/capa/{capa.report_id}/d3/report")

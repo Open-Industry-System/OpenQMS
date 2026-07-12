@@ -1001,9 +1001,29 @@ async def d3_list_runs_ep(
     return [D3RunResponse.model_validate(r) for r in result.scalars().all()]
 
 
+async def _resolve_d3_run(
+    db: AsyncSession, capa_id: uuid.UUID, run_id: uuid.UUID | None
+) -> CapaD3ImportRun | None:
+    """Resolve the run to query: if run_id given, that specific run (must belong to capa);
+    else the current run. Returns None if not found."""
+    if run_id is not None:
+        return await db.scalar(
+            select(CapaD3ImportRun).where(
+                CapaD3ImportRun.run_id == run_id,
+                CapaD3ImportRun.capa_id == capa_id,
+            )
+        )
+    return await db.scalar(
+        select(CapaD3ImportRun).where(
+            CapaD3ImportRun.capa_id == capa_id, CapaD3ImportRun.is_current == True
+        )
+    )
+
+
 @router.get("/{report_id}/d3/snapshots", response_model=list[D3SnapshotResponse])
 async def d3_list_snapshots_ep(
     report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
@@ -1012,15 +1032,12 @@ async def d3_list_snapshots_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     _d3_check_scope(capa, scope)
-    current_run = await db.scalar(
-        select(CapaD3ImportRun)
-        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
-    )
-    if current_run is None:
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
         return []
     result = await db.execute(
         select(CapaD3ContainmentSnapshot)
-        .where(CapaD3ContainmentSnapshot.run_id == current_run.run_id)
+        .where(CapaD3ContainmentSnapshot.run_id == target_run.run_id)
         .order_by(CapaD3ContainmentSnapshot.created_at)
     )
     return [D3SnapshotResponse.model_validate(s) for s in result.scalars().all()]
@@ -1029,6 +1046,7 @@ async def d3_list_snapshots_ep(
 @router.get("/{report_id}/d3/report", response_model=D3ReportResponse)
 async def d3_get_report_ep(
     report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
@@ -1037,16 +1055,15 @@ async def d3_get_report_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     _d3_check_scope(capa, scope)
-    current_run = await db.scalar(
-        select(CapaD3ImportRun)
-        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
-    )
-    if current_run is None:
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
         raise HTTPException(status_code=404, detail="当前导入运行不存在")
+    # For a specific (historical) run, return its is_current report if any; for current run,
+    # return the is_current report (done). Historical runs may have failed reports too.
     report = await db.scalar(
         select(CapaD3ImpactReport)
         .where(
-            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.run_id == target_run.run_id,
             CapaD3ImpactReport.is_current == True,
         )
     )
@@ -1230,9 +1247,11 @@ async def d3_generate_advice_ep(
 @router.get("/{report_id}/d3/advice", response_model=D3AdviceResponse)
 async def d3_get_advice_ep(
     report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
 ):
-    """GET /d3/advice: Return current generation's advice list with provenance and adoption status."""
+    """GET /d3/advice: Return current generation's advice list with provenance and adoption status.
+    Optional run_id queries a specific (historical) run's report/generation."""
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     capa = await capa_service.get_capa(db, report_id)
@@ -1240,25 +1259,21 @@ async def d3_get_advice_ep(
         raise HTTPException(status_code=404, detail="8D report not found")
     _d3_check_scope(capa, scope)
 
-    # Find current report
-    current_run = await db.scalar(
-        select(CapaD3ImportRun)
-        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
-    )
-    if current_run is None:
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
         return D3AdviceResponse(advice=[])
 
     current_report = await db.scalar(
         select(CapaD3ImpactReport)
         .where(
-            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.run_id == target_run.run_id,
             CapaD3ImpactReport.is_current == True,
         )
     )
     if current_report is None:
         return D3AdviceResponse(advice=[])
 
-    # Find current generation
+    # Find current generation (for current run) or the is_current generation of this report
     current_gen = await db.scalar(
         select(CapaD3AdviceGeneration)
         .where(
@@ -1514,10 +1529,12 @@ async def d3_update_execution_ep(
 @router.get("/{report_id}/d3/executions", response_model=list[D3ExecutionResponse])
 async def d3_list_executions_ep(
     report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    """GET /d3/executions: List executions for current report."""
+    """GET /d3/executions: List executions for current report.
+    Optional run_id queries a specific (historical) run's report executions."""
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
 
@@ -1526,18 +1543,13 @@ async def d3_list_executions_ep(
         raise HTTPException(status_code=404, detail="8D report not found")
     _d3_check_scope(capa, scope)
 
-    # Find current report
-    current_run = await db.scalar(
-        select(CapaD3ImportRun).where(
-            CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True
-        )
-    )
-    if current_run is None:
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
         return []
 
     current_report = await db.scalar(
         select(CapaD3ImpactReport).where(
-            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.run_id == target_run.run_id,
             CapaD3ImpactReport.is_current == True,
         )
     )
