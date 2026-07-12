@@ -280,6 +280,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 ### P1 — 新建/收尾
 
 - [ ] **01.1 D3 遏制全链路新建** — 4 类数据导入（在途/库存、发货/物流、IQC、SPC 判异）+ 受影响范围分析报告（5 项）+ AI 遏制建议（带 provenance）；ERP 数据模型（`ERPInventoryBalance`/`ERPShipment`）+ `capa_draft` 的 containment_actions 可复用；补 D3→D4 闸口（`advance_capa` 当前不检查 d3_interim 非空）
+  - **Task 12 E2E seed 扩展** ✅：D3 源数据 7 表 upsert + 7 独立 CAPA + 幂等 + E2E_MODE 守卫测试（`backend/app/seed_e2e.py` / `seed_e2e_constants.py` / `tests/e2e/test_seed_e2e_d3.py`）；附 `shipment_records.factory_id` 迁移补齐 schema drift
 - [ ] **01.4 8D↔FMEA 双向收尾** — 反查基础已有（`GET /api/capa/by-fmea-node` + `get_capas_by_fmea_node` + 前端 `RelatedCAPAList`），补 Prevention 节点覆盖 + 反查审计
 - [ ] **01.5 8D→SCAR 触发新建** — `SupplierSCAR.capa_ref_id` 外键已就绪，补 8D 侧触发入口 + 单号回写读取 + 状态同步 + 审计
 - [ ] **01.6 8D→供应商风险新建** — `SupplierRiskAlert.linked_capa_id` 外键已就绪，补 8D 侧触发写入（severity/disposition/repeat）+ 评级变化回显 + 审计
