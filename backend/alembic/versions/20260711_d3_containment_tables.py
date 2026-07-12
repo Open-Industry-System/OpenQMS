@@ -163,6 +163,8 @@ def upgrade() -> None:
         sa.CheckConstraint("status != 'done' OR advice_count > 0", name="chk_d3_gen_done_has_advice"),
         sa.CheckConstraint("status != 'done' OR llm_available = true", name="chk_d3_gen_done_has_llm"),
         sa.UniqueConstraint("generation_id", "factory_id", name="uq_d3_gen_factory"),
+        # Unique constraint for composite FK target (execution references this 3-tuple)
+        sa.UniqueConstraint("generation_id", "report_id", "factory_id", name="uq_d3_generation_report"),
         sa.ForeignKeyConstraint(
             ["report_id", "factory_id"],
             ["capa_d3_impact_report.report_id", "capa_d3_impact_report.factory_id"],
@@ -256,15 +258,19 @@ def upgrade() -> None:
             ["capa_d3_impact_report.report_id", "capa_d3_impact_report.factory_id"],
             ondelete="RESTRICT", name="fk_d3_exec_report_factory"
         ),
+        # Composite FK: (generation_id, report_id, factory_id) references advice_generation
+        # MATCH SIMPLE: only enforced when all 3 columns non-null (manual execution has generation_id=NULL)
         sa.ForeignKeyConstraint(
-            ["generation_id", "factory_id"],
-            ["capa_d3_advice_generation.generation_id", "capa_d3_advice_generation.factory_id"],
-            ondelete="RESTRICT", name="fk_d3_exec_gen_factory"
+            ["generation_id", "report_id", "factory_id"],
+            ["capa_d3_advice_generation.generation_id", "capa_d3_advice_generation.report_id", "capa_d3_advice_generation.factory_id"],
+            ondelete="RESTRICT", name="fk_d3_exec_gen_report_factory"
         ),
+        # Composite FK: (advice_id, generation_id, factory_id) references ai_advice
+        # MATCH SIMPLE: only enforced when all 3 columns non-null (manual execution has advice_id=NULL)
         sa.ForeignKeyConstraint(
-            ["advice_id", "factory_id"],
-            ["capa_d3_ai_advice.advice_id", "capa_d3_ai_advice.factory_id"],
-            ondelete="RESTRICT", name="fk_d3_exec_advice_factory"
+            ["advice_id", "generation_id", "factory_id"],
+            ["capa_d3_ai_advice.advice_id", "capa_d3_ai_advice.generation_id", "capa_d3_ai_advice.factory_id"],
+            ondelete="RESTRICT", name="fk_d3_exec_advice_gen_factory"
         ),
     )
     op.create_index("ix_d3_exec_report", "capa_d3_execution", ["report_id"])

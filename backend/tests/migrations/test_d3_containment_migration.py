@@ -369,6 +369,95 @@ def test_execution_check_manual_requires_null_advice(mig_db_url, capa_e2e_with_d
     engine.dispose()
 
 
+def test_execution_composite_fk_rejects_cross_report_generation(mig_db_url, capa_e2e_with_advice_and_user):
+    """P0: Composite FK (generation_id, report_id, factory_id) rejects execution whose
+    generation belongs to report_A but execution.report_id is report_B (same factory)."""
+    advice_id, factory_id, user_id = capa_e2e_with_advice_and_user
+    command.upgrade(_cfg(mig_db_url), "head")
+
+    engine = create_engine(_sync_url(mig_db_url))
+
+    # Fetch the original report_id + run_id from the existing generation
+    with engine.connect() as c:
+        gen_row = c.execute(text(
+            "SELECT g.generation_id, g.report_id, r.run_id "
+            "FROM capa_d3_advice_generation g "
+            "JOIN capa_d3_impact_report r ON g.report_id = r.report_id LIMIT 1"
+        )).fetchone()
+    gen_id = gen_row[0]
+    orig_report_id = gen_row[1]
+    run_id = gen_row[2]
+
+    # Create a SECOND done report in the same run/factory (different report_id)
+    second_report_id = uuid.uuid4()
+    with engine.begin() as c:
+        c.execute(text(
+            "INSERT INTO capa_d3_impact_report (report_id, run_id, factory_id, is_current, status, "
+            "attempt_token, batches, impact_qty, customer_impact, time_window, risk_level, risk_floor, "
+            "risk_explanation, llm_available, generated_by, started_at, completed_at, created_at) "
+            "VALUES (:rid, :run_id, :fid, false, 'done', gen_random_uuid(), '[]'::jsonb, '[]'::jsonb, "
+            "'[]'::jsonb, '{}'::jsonb, 'high', 'high', 'x', true, :uid, now(), now(), now())"
+        ), {"rid": second_report_id, "run_id": run_id, "fid": factory_id, "uid": user_id})
+
+    assert orig_report_id != second_report_id
+
+    # Execution with generation from report_A but report_id = report_B → composite FK violation
+    with pytest.raises(IntegrityError):
+        with engine.begin() as c:
+            c.execute(text(
+                "INSERT INTO capa_d3_execution (execution_id, report_id, factory_id, advice_id, "
+                "generation_id, source, measure_text, result_status, evidence_refs, "
+                "executed_by, executed_at, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), :second_rep, :fac, :adv, :gen, 'adopted', 't', "
+                "'in_progress', '[]'::jsonb, :uid, now(), now(), now())"
+            ), {"second_rep": second_report_id, "fac": factory_id, "adv": advice_id,
+                "gen": gen_id, "uid": user_id})
+
+    engine.dispose()
+
+
+def test_execution_composite_fk_rejects_cross_generation_advice(mig_db_url, capa_e2e_with_advice_and_user):
+    """P0: Composite FK (advice_id, generation_id, factory_id) rejects execution whose
+    advice belongs to generation_A but execution.generation_id is generation_B (same factory)."""
+    advice_id, factory_id, user_id = capa_e2e_with_advice_and_user
+    command.upgrade(_cfg(mig_db_url), "head")
+
+    engine = create_engine(_sync_url(mig_db_url))
+
+    # Fetch original report_id + generation_id
+    with engine.connect() as c:
+        gen_row = c.execute(text(
+            "SELECT generation_id, report_id FROM capa_d3_advice_generation LIMIT 1"
+        )).fetchone()
+    orig_gen_id = gen_row[0]
+    orig_report_id = gen_row[1]
+
+    # Create a SECOND advice_generation (same report, different generation_id)
+    second_gen_id = uuid.uuid4()
+    with engine.begin() as c:
+        c.execute(text(
+            "INSERT INTO capa_d3_advice_generation (generation_id, report_id, factory_id, is_current, "
+            "advice_count, rejected_advice_count, stage_runs, status, attempt_token, llm_available, "
+            "generated_by, started_at, completed_at, created_at) "
+            "VALUES (:gid, :rid, :fid, false, 1, 0, '[]'::jsonb, 'done', gen_random_uuid(), true, "
+            ":uid, now(), now(), now())"
+        ), {"gid": second_gen_id, "rid": orig_report_id, "fid": factory_id, "uid": user_id})
+
+    # Execution with advice from gen_A but generation_id = gen_B → composite FK violation
+    with pytest.raises(IntegrityError):
+        with engine.begin() as c:
+            c.execute(text(
+                "INSERT INTO capa_d3_execution (execution_id, report_id, factory_id, advice_id, "
+                "generation_id, source, measure_text, result_status, evidence_refs, "
+                "executed_by, executed_at, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), :rep, :fac, :adv, :second_gen, 'adopted', 't', "
+                "'in_progress', '[]'::jsonb, :uid, now(), now(), now())"
+            ), {"rep": orig_report_id, "fac": factory_id, "adv": advice_id,
+                "second_gen": second_gen_id, "uid": user_id})
+
+    engine.dispose()
+
+
 # ===== Adoption Tests =====
 
 
