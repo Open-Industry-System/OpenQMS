@@ -122,7 +122,7 @@ async def db_capa(db: AsyncSession, db_factory: Factory) -> CAPAEightD:
 
 
 async def test_import_creates_run_with_4_snapshots(
-    db: AsyncSession, db_user: User, db_factory: Factory, db_capa: CAPAEightD
+    db: AsyncSession, db_user: User, db_factory: Factory, db_capa: CAPAEightD, audit_reader
 ):
     """Import creates a run with 4 snapshots (empty payload for missing sources)."""
     result = await import_containment_data(db, db_capa.report_id, db_user, {})
@@ -143,6 +143,12 @@ async def test_import_creates_run_with_4_snapshots(
         "capa_severity": "serious",
         "risk_mapping_version": CURRENT_RISK_MAPPING_VERSION,
     }
+
+    # Verify D3_DATA_IMPORTED audit is written before Transaction B
+    audit_fields = await audit_reader(db_capa.report_id, "D3_DATA_IMPORTED")
+    assert audit_fields["run_id"] == result["run_id"]
+    assert audit_fields["snapshot_count"] == len(result["snapshots"])
+    assert "report_status" in audit_fields
 
 
 async def test_new_run_demotes_old_current(

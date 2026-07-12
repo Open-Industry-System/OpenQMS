@@ -1,6 +1,6 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-10
+**更新日期**: 2026-07-12
 **当前分支**: `feature/us-e2e-01-spec-a`
 **最近合并**: `8ccb29c5` B3: D4 验证结论驱动 + 双行锁 retry_count 递增 + 审计重命名；B1 `conclusion`/`d4_retry_count` + B2 schema 已就绪；**B7 e2e 断言已补**（`capa-story-closed-loop.spec.ts` D4 method/conclusion/retry_count，含 threshold warning toast）
 
@@ -261,7 +261,7 @@
 | 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 | US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
-| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.3 状态机细化切片已交付；method 枚举+回退计数器切片待启动） | — |
+| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1 D3 遏制已实现态 v4；01.4 8D↔FMEA 双向收尾待启动） | — |
 | US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
 | 01.10 PPT 输出 | ✅ 已落地（PPT generator + sub-agent 3-round review + admin review-skill management + frontend） | `feature/us-e2e-01-spec-a` |
 
@@ -279,7 +279,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 - [x] **01.3 D4 验证 method 枚举 + 回退计数器切片** — `CapaRootCauseVerification.method` 自由文本→枚举（measurement/observation/reproduction）+ CHECK 约束 + 迁移测试；`conclusion`（pending/passed/failed）+ `d4_retry_count` 回退计数器 + 双行锁递增 + 审计 `D4_VERIFICATION_PASSED`/`D4_VERIFICATION_FAILED`；服务层 `create_verification`/`update_verification` 结论驱动，`is_verified` 派生；同记录并发仅 +1，跨记录并发 +2（commit `8ccb29c5`）
 ### P1 — 新建/收尾
 
-- [ ] **01.1 D3 遏制全链路新建** — 4 类数据导入（在途/库存、发货/物流、IQC、SPC 判异）+ 受影响范围分析报告（5 项）+ AI 遏制建议（带 provenance）；ERP 数据模型（`ERPInventoryBalance`/`ERPShipment`）+ `capa_draft` 的 containment_actions 可复用；补 D3→D4 闸口（`advance_capa` 当前不检查 d3_interim 非空）
+- [x] **01.1 D3 遏制全链路新建** — 4 类数据导入（在途/库存、发货/物流、IQC、SPC 判异）+ 受影响范围分析报告（5 项）+ AI 遏制建议（带 provenance）；ERP 数据模型（`ERPInventoryBalance`/`ERPShipment`）+ `capa_draft` 的 containment_actions 可复用；补 D3→D4 闸口（`advance_capa` 当前不检查 d3_interim 非空）。**实现态 v4（2026-07-12）**
   - **Task 12 E2E seed 扩展** ✅：D3 源数据 7 表 upsert + 7 独立 CAPA + 幂等 + E2E_MODE 守卫测试（`backend/app/seed_e2e.py` / `seed_e2e_constants.py` / `tests/e2e/test_seed_e2e_d3.py`）；附 `shipment_records.factory_id` 迁移补齐 schema drift
 - [ ] **01.4 8D↔FMEA 双向收尾** — 反查基础已有（`GET /api/capa/by-fmea-node` + `get_capas_by_fmea_node` + 前端 `RelatedCAPAList`），补 Prevention 节点覆盖 + 反查审计
 - [ ] **01.5 8D→SCAR 触发新建** — `SupplierSCAR.capa_ref_id` 外键已就绪，补 8D 侧触发入口 + 单号回写读取 + 状态同步 + 审计

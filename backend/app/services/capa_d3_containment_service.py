@@ -841,8 +841,25 @@ async def import_containment_data(
         spc_records=spc_records,
     )
 
+    # Transaction A success: audit D3_DATA_IMPORTED before Transaction B
+    report_status = "pending"
+    db.add(
+        AuditLog(
+            table_name="capa_eightd",
+            record_id=capa_id,
+            action="D3_DATA_IMPORTED",
+            changed_fields={
+                "run_id": str(run.run_id),
+                "snapshot_count": len(snapshots),
+                "report_status": report_status,
+            },
+            operated_by=user.user_id,
+            operated_at=datetime.now(timezone.utc),
+        )
+    )
+    await db.commit()
+
     # Transaction B: generate impact report (isolated from Transaction A)
-    report_status = "failed"
     report_id = None
     report_error = None
     try:
