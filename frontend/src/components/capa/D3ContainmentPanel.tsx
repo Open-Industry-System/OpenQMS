@@ -123,8 +123,13 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       const data = await getD3Report(capa.report_id);
       setReport(data);
-    } catch {
-      message.error(t("d3.loadReportFailed", "加载报告失败"));
+    } catch (e: any) {
+      // 404 = no current report (failed/never generated) — silent, show generate/retry UI
+      if (e?.response?.status === 404) {
+        setReport(null);
+      } else {
+        message.error(t("d3.loadReportFailed", "加载报告失败"));
+      }
     }
   };
 
@@ -394,33 +399,51 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       )}
 
       {/* Impact Report */}
-      {report && (
-        <Card size="small" title={t("d3.reportTitle", "影响报告")} style={{ marginBottom: 16 }}>
-          <Space direction="vertical" style={{ width: "100%" }}>
-            {report.risk_level && (
-              <Text>
-                {t("d3.riskLevel", "风险等级")}: {report.risk_level} ({t("d3.riskFloor", "底线")}: {report.risk_floor})
-              </Text>
-            )}
-            {report.risk_explanation && <Text>{report.risk_explanation}</Text>}
-            {!!report.customer_impact?.length && (
-              <Text>
-                {t("d3.customerImpact", "客户影响")}: {report.customer_impact.length} 条
-              </Text>
-            )}
-          </Space>
-          {!isReadOnly && report.status !== "running" && (
-            <Button
-              size="small"
-              loading={generatingReport}
-              onClick={handleGenerateReport}
-              style={{ marginTop: 8 }}
-            >
-              {t("d3.generateReport", "生成报告")}
-            </Button>
+      <Card size="small" title={t("d3.reportTitle", "影响报告")} style={{ marginBottom: 16 }}>
+        <Space direction="vertical" style={{ width: "100%" }}>
+          {report ? (
+            <>
+              {report.risk_level && (
+                <Text>
+                  {t("d3.riskLevel", "风险等级")}: {report.risk_level} ({t("d3.riskFloor", "底线")}: {report.risk_floor})
+                </Text>
+              )}
+              {report.risk_explanation && <Text>{report.risk_explanation}</Text>}
+              {!!report.customer_impact?.length && (
+                <Text>
+                  {t("d3.customerImpact", "客户影响")}: {report.customer_impact.length} 条
+                </Text>
+              )}
+              {report.status === "failed" && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message={t("d3.reportFailed", "报告生成失败")}
+                  description={report.error || t("d3.reportFailedHint", "可点击下方按钮重试")}
+                  style={{ marginTop: 8 }}
+                />
+              )}
+            </>
+          ) : (
+            <Text type="secondary">
+              {t("d3.noReport", "尚未生成报告，或上次生成失败。点击下方按钮生成/重试。")}
+            </Text>
           )}
-        </Card>
-      )}
+        </Space>
+        {!isReadOnly && (!report || report.status !== "running") && (
+          <Button
+            size="small"
+            loading={generatingReport}
+            onClick={handleGenerateReport}
+            style={{ marginTop: 8 }}
+            data-e2e="d3-generate-report"
+          >
+            {report?.status === "failed"
+              ? t("d3.retryReport", "重试生成报告")
+              : t("d3.generateReport", "生成报告")}
+          </Button>
+        )}
+      </Card>
 
       {/* AI Advice */}
       {(advice.length > 0 || adviceError) && (
