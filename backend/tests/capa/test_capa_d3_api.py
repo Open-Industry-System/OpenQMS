@@ -610,6 +610,25 @@ async def test_adoptions_get_returns_adopted(client, capa_d3_with_adopted):
     assert any(a["decision"] == "adopted" for a in data), f"No adopted decision in response: {data}"
 
 
+async def test_adoptions_get_by_run_id(client, capa_d3_with_adopted, db):
+    """GET /d3/adoptions?run_id=<current> returns adoptions for that run."""
+    capa, _ = capa_d3_with_adopted
+    from app.models.capa_d3 import CapaD3ImportRun
+
+    run = await db.scalar(
+        select(CapaD3ImportRun).where(
+            CapaD3ImportRun.capa_id == capa.report_id,
+            CapaD3ImportRun.is_current == True,
+        )
+    )
+    resp = await client.get(
+        f"/api/capa/{capa.report_id}/d3/adoptions",
+        params={"run_id": str(run.run_id)},
+    )
+    assert resp.status_code == 200
+    assert any(a["decision"] == "adopted" for a in resp.json())
+
+
 # ===== D3 Execution endpoints (US-E2E-01.1 Task 10) =====
 
 

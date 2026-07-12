@@ -63,13 +63,16 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   const [executionMeasure, setExecutionMeasure] = useState("");
   const [executionEvidenceUrl, setExecutionEvidenceUrl] = useState("");
 
-  // Current run is the one with is_current=true, or selected from historical runs
+  // The true current run (is_current=true), never changes with dropdown selection
+  const actualCurrentRun = useMemo(() => runs.find(r => r.is_current), [runs]);
+
+  // Current run is the selected historical run, or the actual current run
   const currentRun = useMemo(() => {
     if (selectedRunId) {
       return runs.find(r => r.run_id === selectedRunId);
     }
-    return runs.find(r => r.is_current);
-  }, [runs, selectedRunId]);
+    return actualCurrentRun;
+  }, [runs, selectedRunId, actualCurrentRun]);
 
   // Historical runs are those with is_current=false
   const historicalRuns = useMemo(() => runs.filter(r => !r.is_current), [runs]);
@@ -77,8 +80,8 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   // For historical runs, disable all write buttons
   const isReadOnly = !currentRun?.is_current || !canEdit;
 
-  // Show import button when canEdit, status is D3_INTERIM, and not viewing a historical run
-  const showImportButton = canEdit && capa.status === "D3_INTERIM" && (!currentRun || (!!currentRun.is_current && !selectedRunId));
+  // Show import button when canEdit, status is D3_INTERIM, and viewing the current run
+  const showImportButton = canEdit && capa.status === "D3_INTERIM" && (!selectedRunId);
 
   useEffect(() => {
     if (capa.report_id) {
@@ -94,6 +97,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       loadReport(currentRun.run_id);
       loadAdvice(currentRun.run_id);
       loadExecutions(currentRun.run_id);
+      loadAdoptions(currentRun.run_id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRun?.run_id]);
@@ -143,9 +147,9 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     }
   };
 
-  const loadAdoptions = async () => {
+  const loadAdoptions = async (runId?: string) => {
     try {
-      const data = await getD3Adoptions(capa.report_id);
+      const data = await getD3Adoptions(capa.report_id, runId);
       setAdoptions(data);
     } catch {
       message.error(t("d3.loadAdoptionsFailed", "加载采纳记录失败"));
@@ -358,10 +362,16 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           <Text strong>{t("d3.selectRun", "选择代次")}</Text>
           <Select
             style={{ width: 200 }}
-            value={selectedRunId || currentRun?.run_id}
-            onChange={(val) => setSelectedRunId(val)}
+            value={selectedRunId || actualCurrentRun?.run_id}
+            onChange={(val) => {
+              if (val === actualCurrentRun?.run_id) {
+                setSelectedRunId(null);
+              } else {
+                setSelectedRunId(val);
+              }
+            }}
             options={[
-              { value: currentRun?.run_id, label: t("d3.currentRun", "当前代次") },
+              { value: actualCurrentRun?.run_id, label: t("d3.currentRun", "当前代次") },
               ...historicalRuns.map(r => ({
                 value: r.run_id,
                 label: `${t("d3.runLabel", "代次")} ${r.created_at}`,
@@ -430,7 +440,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             </Text>
           )}
         </Space>
-        {!isReadOnly && (!report || report.status !== "running") && (
+        {!isReadOnly && (!report || report.status === "failed") && (
           <Button
             size="small"
             loading={generatingReport}
@@ -446,81 +456,80 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       </Card>
 
       {/* AI Advice */}
-      {(advice.length > 0 || adviceError) && (
-        <Card size="small" title={t("d3.adviceTitle", "AI 建议")} style={{ marginBottom: 16 }}>
-          {adviceError && (
-            <Alert
-              type="error"
-              showIcon
-              message={t("d3.adviceFailed", "建议生成失败")}
-              description={adviceError}
-              style={{ marginBottom: 12 }}
-              data-e2e="d3-advice-failed-banner"
-            />
-          )}
-          <List
-            dataSource={advice}
-            renderItem={(item) => (
-              <List.Item
-                actions={
-                  !isReadOnly && !item.adoption_status
-                    ? [
-                        <Button
-                          key="accept"
-                          type="link"
-                          size="small"
-                          icon={<CheckOutlined />}
-                          onClick={() => openAdoptModal(item)}
-                        >
-                          {t("d3.accept", "采纳")}
-                        </Button>,
-                        <Button
-                          key="reject"
-                          type="link"
-                          size="small"
-                          danger
-                          icon={<CloseOutlined />}
-                          onClick={() => openRejectModal(item)}
-                        >
-                          {t("d3.reject", "拒绝")}
-                        </Button>,
-                      ]
-                    : undefined
-                }
-              >
-                <List.Item.Meta
-                  title={
-                    <Space>
-                      <Tag color={adviceTypeColors[item.advice_type]} data-e2e={`d3-advice-type-${item.advice_type}`}>
-                        {t(`d3.adviceType.${item.advice_type}`, item.advice_type)}
-                      </Tag>
-                      {item.advice_text}
-                    </Space>
-                  }
-                  description={
-                    <Space>
-                      <Text type="secondary" data-e2e="d3-advice-provenance">
-                        {item.source_provenance?.map(p => p.record_key).join(", ") || "-"}
-                      </Text>
-                      {item.adoption_status && <Tag>{item.adoption_status}</Tag>}
-                    </Space>
-                  }
-                />
-              </List.Item>
-            )}
+      <Card size="small" title={t("d3.adviceTitle", "AI 建议")} style={{ marginBottom: 16 }} data-e2e="d3-advice-card">
+        {adviceError && (
+          <Alert
+            type="error"
+            showIcon
+            message={t("d3.adviceFailed", "建议生成失败")}
+            description={adviceError}
+            style={{ marginBottom: 12 }}
+            data-e2e="d3-advice-failed-banner"
           />
-          {!isReadOnly && (
-            <Button
-              size="small"
-              loading={generatingAdvice}
-              onClick={handleGenerateAdvice}
-              style={{ marginTop: 8 }}
+        )}
+        <List
+          dataSource={advice}
+          renderItem={(item) => (
+            <List.Item
+              actions={
+                !isReadOnly && !item.adoption_status
+                  ? [
+                      <Button
+                        key="accept"
+                        type="link"
+                        size="small"
+                        icon={<CheckOutlined />}
+                        onClick={() => openAdoptModal(item)}
+                      >
+                        {t("d3.accept", "采纳")}
+                      </Button>,
+                      <Button
+                        key="reject"
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<CloseOutlined />}
+                        onClick={() => openRejectModal(item)}
+                      >
+                        {t("d3.reject", "拒绝")}
+                      </Button>,
+                    ]
+                  : undefined
+              }
             >
-              {t("d3.generateAdvice", "生成建议")}
-            </Button>
+              <List.Item.Meta
+                title={
+                  <Space>
+                    <Tag color={adviceTypeColors[item.advice_type]} data-e2e={`d3-advice-type-${item.advice_type}`}>
+                      {t(`d3.adviceType.${item.advice_type}`, item.advice_type)}
+                    </Tag>
+                    {item.advice_text}
+                  </Space>
+                }
+                description={
+                  <Space>
+                    <Text type="secondary" data-e2e="d3-advice-provenance">
+                      {item.source_provenance?.map(p => p.record_key).join(", ") || "-"}
+                    </Text>
+                    {item.adoption_status && <Tag>{item.adoption_status}</Tag>}
+                  </Space>
+                }
+              />
+            </List.Item>
           )}
-        </Card>
-      )}
+        />
+        {!isReadOnly && (advice.length === 0 || adviceError) && (
+          <Button
+            size="small"
+            loading={generatingAdvice}
+            onClick={handleGenerateAdvice}
+            style={{ marginTop: 8 }}
+            data-e2e="d3-generate-advice"
+          >
+            {adviceError ? t("d3.retryAdvice", "重试生成建议") : t("d3.generateAdvice", "生成建议")}
+          </Button>
+        )}
+      </Card>
 
       {/* Adoption List */}
       {adoptions.length > 0 && (

@@ -804,44 +804,49 @@ async def _running_report(db, run_id):
 async def _recover_stale_report(db, run_id, capa_id=None, user_id=None):
     """CAS any stale running report for this run to failed."""
     cutoff = datetime.now(timezone.utc) - (STALE_THRESHOLD * 2)
-    stale_report = await db.scalar(
-        select(CapaD3ImpactReport).where(
+    stale_runs = [
+        {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
+    ]
+    now = datetime.now(timezone.utc)
+    res = await db.execute(
+        update(CapaD3ImpactReport)
+        .where(
             CapaD3ImpactReport.run_id == run_id,
             CapaD3ImpactReport.status == "running",
             CapaD3ImpactReport.started_at < cutoff,
         )
-    )
-    if stale_report is None:
-        return
-
-    stale_runs = [
-        {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
-    ]
-    res = await db.execute(
-        update(CapaD3ImpactReport)
-        .where(CapaD3ImpactReport.report_id == stale_report.report_id)
         .values(
             status="failed",
             error="stale",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=now,
             stage_runs=stale_runs,
         )
     )
     if res.rowcount > 0 and capa_id is not None and user_id is not None:
-        db.add(
-            AuditLog(
-                table_name="capa_eightd",
-                record_id=capa_id,
-                action="D3_REPORT_GENERATED",
-                changed_fields={
-                    "report_id": str(stale_report.report_id),
-                    "status": "failed",
-                    "error": "stale",
-                },
-                operated_by=user_id,
-                operated_at=datetime.now(timezone.utc),
+        failed = await db.scalar(
+            select(CapaD3ImpactReport)
+            .where(
+                CapaD3ImpactReport.run_id == run_id,
+                CapaD3ImpactReport.status == "failed",
+                CapaD3ImpactReport.error == "stale",
             )
+            .order_by(CapaD3ImpactReport.completed_at.desc())
         )
+        if failed:
+            db.add(
+                AuditLog(
+                    table_name="capa_eightd",
+                    record_id=capa_id,
+                    action="D3_REPORT_GENERATED",
+                    changed_fields={
+                        "report_id": str(failed.report_id),
+                        "status": "failed",
+                        "error": "stale",
+                    },
+                    operated_by=user_id,
+                    operated_at=now,
+                )
+            )
 
 
 def _max_risk(llm_risk, floor):
@@ -1075,10 +1080,7 @@ async def _query_iqc(
             and_(
                 IqcInspection.factory_id == factory_id,
                 IqcInspection.linked_capa_id.is_(None),
-                or_(
-                    IqcInspection.product_line_code == product_line_code,
-                    IqcInspection.product_line_code.is_(None),
-                ),
+                IqcInspection.product_line_code == product_line_code,
             )
         )
     )
@@ -1290,44 +1292,49 @@ async def _running_advice_generation(db, report_id):
 async def _recover_stale_advice_generation(db, report_id, capa_id=None, user_id=None):
     """CAS any stale running advice generation for this report to failed."""
     cutoff = datetime.now(timezone.utc) - (STALE_THRESHOLD * 2)
-    stale_gen = await db.scalar(
-        select(CapaD3AdviceGeneration).where(
+    stale_runs = [
+        {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
+    ]
+    now = datetime.now(timezone.utc)
+    res = await db.execute(
+        update(CapaD3AdviceGeneration)
+        .where(
             CapaD3AdviceGeneration.report_id == report_id,
             CapaD3AdviceGeneration.status == "running",
             CapaD3AdviceGeneration.started_at < cutoff,
         )
-    )
-    if stale_gen is None:
-        return
-
-    stale_runs = [
-        {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
-    ]
-    res = await db.execute(
-        update(CapaD3AdviceGeneration)
-        .where(CapaD3AdviceGeneration.generation_id == stale_gen.generation_id)
         .values(
             status="failed",
             error="stale",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=now,
             stage_runs=stale_runs,
         )
     )
     if res.rowcount > 0 and capa_id is not None and user_id is not None:
-        db.add(
-            AuditLog(
-                table_name="capa_eightd",
-                record_id=capa_id,
-                action="D3_AI_ADVICE_GENERATED",
-                changed_fields={
-                    "generation_id": str(stale_gen.generation_id),
-                    "status": "failed",
-                    "error": "stale",
-                },
-                operated_by=user_id,
-                operated_at=datetime.now(timezone.utc),
+        failed = await db.scalar(
+            select(CapaD3AdviceGeneration)
+            .where(
+                CapaD3AdviceGeneration.report_id == report_id,
+                CapaD3AdviceGeneration.status == "failed",
+                CapaD3AdviceGeneration.error == "stale",
             )
+            .order_by(CapaD3AdviceGeneration.completed_at.desc())
         )
+        if failed:
+            db.add(
+                AuditLog(
+                    table_name="capa_eightd",
+                    record_id=capa_id,
+                    action="D3_AI_ADVICE_GENERATED",
+                    changed_fields={
+                        "generation_id": str(failed.generation_id),
+                        "status": "failed",
+                        "error": "stale",
+                    },
+                    operated_by=user_id,
+                    operated_at=now,
+                )
+            )
 
 
 def _build_advice_prompt(report_batches, snapshots, name_to_alias, customer_impact=None, impact_qty=None, time_window=None, risk_floor=None):

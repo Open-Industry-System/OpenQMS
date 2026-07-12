@@ -1378,10 +1378,11 @@ async def d3_decision_advice_ep(
 @router.get("/{report_id}/d3/adoptions", response_model=list[D3AdoptionResponse])
 async def d3_list_adoptions_ep(
     report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    """GET /d3/adoptions: Return list of adoptions for the current generation."""
+    """GET /d3/adoptions: Return list of adoptions for the selected run's generation."""
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
 
@@ -1390,18 +1391,13 @@ async def d3_list_adoptions_ep(
         raise HTTPException(status_code=404, detail="8D report not found")
     _d3_check_scope(capa, scope)
 
-    # Find current run → current report → current generation
-    current_run = await db.scalar(
-        select(CapaD3ImportRun).where(
-            CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True
-        )
-    )
-    if current_run is None:
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
         return []
 
     current_report = await db.scalar(
         select(CapaD3ImpactReport).where(
-            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.run_id == target_run.run_id,
             CapaD3ImpactReport.is_current == True,
         )
     )

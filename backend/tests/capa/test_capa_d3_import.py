@@ -235,6 +235,7 @@ async def test_iqc_query_filters_by_factory(
         defect_qty=0,
         inspection_result="pass",
         factory_id=db_factory.id,
+        product_line_code=db_capa.product_line_code,
     )
     db.add(iqc_self)
 
@@ -326,12 +327,28 @@ async def test_iqc_query_filters_by_product_line(
     db.add(iqc_other_line)
     await db.commit()
 
+    iqc_null_line = IqcInspection(
+        inspection_id=uuid.uuid4(),
+        inspection_no="IQC-NULL-LINE",
+        supplier_id=supplier.supplier_id,
+        part_no="M3",
+        lot_no="L3",
+        lot_qty=30,
+        defect_qty=3,
+        inspection_result="reject",
+        factory_id=db_factory.id,
+        product_line_code=None,
+    )
+    db.add(iqc_null_line)
+    await db.commit()
+
     result = await import_containment_data(db, db_capa.report_id, db_user, {})
     iqc_snap = next(s for s in result["snapshots"] if s["snapshot_type"] == "iqc")
     snap = await db.get(CapaD3ContainmentSnapshot, uuid.UUID(iqc_snap["snapshot_id"]))
     inspection_nos = {rec.get("inspection_no") for rec in snap.payload}
     assert "IQC-SAME-LINE" in inspection_nos
     assert "IQC-OTHER-LINE" not in inspection_nos
+    assert "IQC-NULL-LINE" not in inspection_nos
 
 
 async def test_new_run_demotes_old_current(

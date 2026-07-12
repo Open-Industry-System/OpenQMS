@@ -223,6 +223,7 @@ async def _seed_d3_source_data(db: AsyncSession, factory_id: uuid.UUID, user_id:
         defect_description="scratch",
         inspection_result="reject",
         factory_id=factory_id,
+        product_line_code="DC-DC-100",
     )
     db.add(iqc)
     await db.flush()

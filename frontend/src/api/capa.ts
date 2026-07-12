@@ -222,8 +222,9 @@ export async function decideD3Advice(
   return resp.data;
 }
 
-export async function getD3Adoptions(capaId: string): Promise<D3AdviceAdoption[]> {
-  const resp = await client.get(`/capa/${capaId}/d3/adoptions`);
+export async function getD3Adoptions(capaId: string, runId?: string): Promise<D3AdviceAdoption[]> {
+  const params = runId ? { run_id: runId } : {};
+  const resp = await client.get(`/capa/${capaId}/d3/adoptions`, { params });
   return resp.data;
 }
 
