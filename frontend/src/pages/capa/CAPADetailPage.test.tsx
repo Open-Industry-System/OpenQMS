@@ -25,6 +25,11 @@ vi.mock("../../api/fmea", () => ({
   listFMEAs: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
+// Mock D4VerificationCard to avoid rendering issues
+vi.mock("../../components/capa/D4VerificationCard", () => ({
+  default: () => null,
+}));
+
 const mockCapa = {
   report_id: "test-report-id",
   title: "Test CAPA Report",
@@ -56,10 +61,134 @@ function renderPage() {
   );
 }
 
+describe("CAPADetailPage D3ContainmentPanel integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(capaApi.getD3Runs).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Adoptions).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Executions).mockResolvedValue([]);
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
+      ai_draft_enabled: false,
+      llm_provider: null,
+    });
+    vi.mocked(capaApi.getD4Recommendations).mockResolvedValue({ items: [], stages: [] });
+  });
+
+  it("renders D3ContainmentPanel at D3_INTERIM", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const d3Capa = { ...mockCapa, status: "D3_INTERIM", d3_interim: "test content" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(d3Capa as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /导入/ })).toBeInTheDocument();
+    });
+  });
+
+  it("does not render D3ContainmentPanel at D4_ROOT_CAUSE", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const d4Capa = { ...mockCapa, status: "D4_ROOT_CAUSE", d4_root_cause: "root cause" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(d4Capa as any);
+
+    renderPage();
+
+    // Wait for the page to render - the title should be visible
+    await waitFor(() => {
+      expect(screen.getAllByText("8D-2026-001").length).toBeGreaterThan(0);
+    });
+    // D3 panel should NOT be rendered for D4 status
+    expect(screen.queryByRole("button", { name: /导入/ })).not.toBeInTheDocument();
+  });
+
+  it("viewer detail page hides d3 write buttons", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "viewer",
+        role_key: "viewer",
+        permissions: { capa: 1 },
+      } as any,
+      token: "test-token",
+    });
+
+    const d3Capa = { ...mockCapa, status: "D3_INTERIM", d3_interim: "test content" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(d3Capa as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("D3 临时遏制措施")).toBeInTheDocument();
+    });
+    // Viewer should NOT see the import button (canEdit=false)
+    expect(screen.queryByRole("button", { name: /导入/ })).not.toBeInTheDocument();
+  });
+
+  it("historical d3 run read-only in detail page", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const d3Capa = { ...mockCapa, status: "D3_INTERIM", d3_interim: "test content" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(d3Capa as any);
+    vi.mocked(capaApi.getD3Runs).mockResolvedValue([
+      { run_id: "run-1", is_current: false, status: "done" } as any,
+      { run_id: "run-2", is_current: true, status: "done" } as any,
+    ]);
+    vi.mocked(capaApi.getD3Snapshots).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Report).mockResolvedValue(null);
+    vi.mocked(capaApi.getD3Advice).mockResolvedValue([]);
+    vi.mocked(capaApi.getD4Recommendations).mockResolvedValue({ items: [], stages: [] });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /导入/ })).toBeInTheDocument();
+    });
+    // Historical runs selector should appear when multiple runs exist
+    // The selector text appears in the D3ContainmentPanel component
+    await waitFor(() => {
+      expect(screen.getAllByText(/选择代次|当前代次/).length).toBeGreaterThan(0);
+    });
+  });
+});
+
 describe("CAPADetailPage AI draft integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
+      ai_draft_enabled: false,
+      llm_provider: null,
+    });
+    vi.mocked(capaApi.getD3Runs).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Adoptions).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Executions).mockResolvedValue([]);
   });
 
   it("shows AI draft button when enabled and user has edit permission", async () => {
@@ -269,4 +398,3 @@ describe("CAPADetailPage 生成PPT button visibility", () => {
     expect(screen.queryByRole("button", { name: /Generate PPT|生成 PPT/ })).not.toBeInTheDocument();
   });
 });
-

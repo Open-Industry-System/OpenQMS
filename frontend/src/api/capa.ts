@@ -1,6 +1,13 @@
 import client from "./client";
 import { message } from "antd";
-import type { CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse, D5RecommendationResponse, AdoptRequest, AdoptResponse, Verification, VerificationCreate, VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse, StageRun } from "../types";
+import type {
+  CAPAReport, CAPAListResponse, D7RecommendationResponse, D4RecommendationResponse,
+  D5RecommendationResponse, AdoptRequest, AdoptResponse, Verification, VerificationCreate,
+  VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse,
+  StageRun, D3ImportRun, D3ContainmentSnapshot, D3ImpactReport, D3AiAdvice, D3AdviceAdoption,
+  D3Execution, D3ImportRequest, D3GenerateReportRequest, D3GenerateAdviceRequest,
+  D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate,
+} from "../types";
 
 export class RecommendationBlockedError extends Error {
   detail: { blocked: true; reason: string; stages: StageRun[] };
@@ -155,4 +162,86 @@ export async function getPptExportReviewReport(
 ): Promise<{ reviewReport: any }> {
   const resp = await client.get(`/capa/${reportId}/ppt-exports/${exportId}`);
   return { reviewReport: resp.data.review_report };
+}
+
+// ─── D3 Containment APIs ──────────────────────────────────────────────────────
+
+export async function importD3Containment(
+  capaId: string,
+  req?: D3ImportRequest
+): Promise<D3ImportRun> {
+  const resp = await client.post(`/capa/${capaId}/d3/import`, req || {});
+  return resp.data;
+}
+
+export async function getD3Runs(capaId: string): Promise<D3ImportRun[]> {
+  const resp = await client.get(`/capa/${capaId}/d3/runs`);
+  return resp.data;
+}
+
+export async function getD3Snapshots(runId: string): Promise<D3ContainmentSnapshot[]> {
+  const resp = await client.get(`/capa/${runId}/d3/snapshots`, { params: { run_id: runId } });
+  return resp.data;
+}
+
+export async function generateD3Report(
+  capaId: string,
+  req: D3GenerateReportRequest
+): Promise<D3ImpactReport> {
+  const resp = await client.post(`/capa/${capaId}/d3/report`, req);
+  return resp.data;
+}
+
+export async function getD3Report(runId: string): Promise<D3ImpactReport | null> {
+  const resp = await client.get(`/capa/${runId}/d3/report`, { params: { run_id: runId } });
+  return resp.data;
+}
+
+export async function generateD3Advice(
+  capaId: string,
+  req: D3GenerateAdviceRequest
+): Promise<{ artifact_id: string; status: string }> {
+  const resp = await client.post(`/capa/${capaId}/d3/advice`, req);
+  return resp.data;
+}
+
+export async function getD3Advice(runId: string): Promise<D3AiAdvice[]> {
+  const resp = await client.get(`/capa/${runId}/d3/advice`, { params: { run_id: runId } });
+  return resp.data;
+}
+
+export async function decideD3Advice(
+  capaId: string,
+  adviceId: string,
+  req: D3DecideAdviceRequest
+): Promise<D3AdviceAdoption> {
+  const resp = await client.post(`/capa/${capaId}/d3/advice/${adviceId}/decide`, req);
+  return resp.data;
+}
+
+export async function getD3Adoptions(capaId: string): Promise<D3AdviceAdoption[]> {
+  const resp = await client.get(`/capa/${capaId}/d3/adoptions`);
+  return resp.data;
+}
+
+export async function recordD3Execution(
+  capaId: string,
+  req: D3ExecutionCreate
+): Promise<D3Execution> {
+  const resp = await client.post(`/capa/${capaId}/d3/executions`, req);
+  return resp.data;
+}
+
+export async function updateD3Execution(
+  capaId: string,
+  executionId: string,
+  req: D3ExecutionUpdate
+): Promise<D3Execution> {
+  const resp = await client.patch(`/capa/${capaId}/d3/executions/${executionId}`, req);
+  return resp.data;
+}
+
+export async function getD3Executions(capaId: string): Promise<D3Execution[]> {
+  const resp = await client.get(`/capa/${capaId}/d3/executions`);
+  return resp.data;
 }

@@ -1930,3 +1930,109 @@ export interface D7AutoFillResponse {
   prevention_control_name_after: string;
   is_new_control: boolean;
 }
+
+// ─── D3 Containment Types ──────────────────────────────────────────────────────
+
+export interface D3ImportRun {
+  run_id: string;
+  capa_id: string;
+  status: "running" | "done" | "failed" | "superseded";
+  is_current: boolean;
+  created_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+export interface D3ContainmentSnapshot {
+  snapshot_id: string;
+  run_id: string;
+  snapshot_type: "inventory" | "shipment" | "iqc" | "spc";
+  record_key: string;
+  source_type: string;
+  source_table: string;
+  captured_at: string;
+  data: Record<string, unknown>;
+}
+
+export interface D3ImpactReport {
+  report_id: string;
+  run_id: string;
+  artifact_id: string;
+  status: "pending" | "running" | "done" | "failed";
+  generated_at: string | null;
+  summary: string | null;
+  inventory_impact: { affected_qty: number; isolated_qty: number; location: string } | null;
+  shipment_impact: { affected_customers: number; affected_qty: number; shipment_count: number } | null;
+  iqc_impact: { affected_batches: number; rejected_batches: number; total_qty: number } | null;
+  spc_impact: { affected_charts: number; out_of_control_points: number } | null;
+  retry_after: number | null;
+}
+
+export type D3AdviceType = "recall" | "isolate" | "notify_customer" | "strict_inspection" | "alternative";
+
+export interface D3AiAdvice {
+  advice_id: string;
+  run_id: string;
+  artifact_id: string;
+  advice_type: D3AdviceType;
+  advice_text: string;
+  provenance: {
+    snapshot_id: string;
+    record_key: string;
+    source_type: string;
+  };
+  status: "pending" | "accepted" | "rejected";
+  rejection_reason: string | null;
+  created_at: string;
+}
+
+export interface D3AdviceAdoption {
+  adoption_id: string;
+  capa_id: string;
+  advice_id: string;
+  run_id: string;
+  advice_type: D3AdviceType;
+  adopted_text: string;
+  adopted_at: string;
+  adopted_by: string;
+}
+
+export interface D3Execution {
+  execution_id: string;
+  capa_id: string;
+  run_id: string;
+  measure: string;
+  evidence_url: string | null;
+  executed_at: string;
+  executed_by: string;
+}
+
+// D3 Request Types
+
+export interface D3ImportRequest {
+  customer_segment?: string;
+}
+
+export interface D3GenerateReportRequest {
+  run_id: string;
+}
+
+export interface D3GenerateAdviceRequest {
+  run_id: string;
+}
+
+export interface D3DecideAdviceRequest {
+  decision: "accept" | "reject";
+  adopted_text?: string;
+  rejection_reason?: string;
+}
+
+export interface D3ExecutionCreate {
+  measure: string;
+  evidence_url?: string;
+}
+
+export interface D3ExecutionUpdate {
+  measure?: string;
+  evidence_url?: string;
+}

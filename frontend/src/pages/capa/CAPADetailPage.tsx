@@ -15,6 +15,7 @@ import D4RecPanel from "../../components/capa/D4RecPanel";
 import D4VerificationCard from "../../components/capa/D4VerificationCard";
 import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
+import D3ContainmentPanel from "../../components/capa/D3ContainmentPanel";
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
@@ -613,17 +614,20 @@ export default function CAPADetailPage() {
             )}
 
             {capa.status === "D3_INTERIM" && (
-              <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d3", t("fields.d3Label", "临时遏制措施"))}>
-                  <TextArea
-                    rows={4}
-                    disabled={!canEdit('capa')}
-                    value={localData.d3_interim || ""}
-                    onChange={(e) => setLocalData({ ...localData, d3_interim: e.target.value })}
-                    onBlur={() => handleUpdate("d3_interim", localData.d3_interim)}
-                  />
-                </Form.Item>
-              </Form>
+              <>
+                <D3ContainmentPanel capa={capa} canEdit={canEdit('capa')} />
+                <Form layout="vertical">
+                  <Form.Item label={renderLabelWithDraft("d3", t("fields.d3Label", "临时遏制措施"))}>
+                    <TextArea
+                      rows={4}
+                      disabled={!canEdit('capa')}
+                      value={localData.d3_interim || ""}
+                      onChange={(e) => setLocalData({ ...localData, d3_interim: e.target.value })}
+                      onBlur={() => handleUpdate("d3_interim", localData.d3_interim)}
+                    />
+                  </Form.Item>
+                </Form>
+              </>
             )}
 
             {capa.status === "D4_ROOT_CAUSE" && (
