@@ -6,7 +6,7 @@ import type {
   VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse,
   StageRun, D3ImportRun, D3ContainmentSnapshot, D3ImpactReport, D3AiAdvice, D3AdviceAdoption,
   D3Execution, D3ImportRequest, D3GenerateReportRequest, D3GenerateAdviceRequest,
-  D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate,
+  D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate, D3AdviceResponse,
 } from "../types";
 
 export class RecommendationBlockedError extends Error {
@@ -205,7 +205,7 @@ export async function generateD3Advice(
   return resp.data;
 }
 
-export async function getD3Advice(capaId: string): Promise<{ advice: D3AiAdvice[] }> {
+export async function getD3Advice(capaId: string): Promise<D3AdviceResponse> {
   const resp = await client.get(`/capa/${capaId}/d3/advice`);
   return resp.data;
 }
@@ -215,7 +215,7 @@ export async function decideD3Advice(
   adviceId: string,
   req: D3DecideAdviceRequest
 ): Promise<D3AdviceAdoption> {
-  const resp = await client.post(`/capa/${capaId}/d3/advice/${adviceId}/decide`, req);
+  const resp = await client.post(`/capa/${capaId}/d3/advice/${adviceId}/decision`, req);
   return resp.data;
 }
 
@@ -228,7 +228,7 @@ export async function recordD3Execution(
   capaId: string,
   req: D3ExecutionCreate
 ): Promise<D3Execution> {
-  const resp = await client.post(`/capa/${capaId}/d3/executions`, req);
+  const resp = await client.post(`/capa/${capaId}/d3/execution`, req);
   return resp.data;
 }
 
@@ -237,7 +237,7 @@ export async function updateD3Execution(
   executionId: string,
   req: D3ExecutionUpdate
 ): Promise<D3Execution> {
-  const resp = await client.patch(`/capa/${capaId}/d3/executions/${executionId}`, req);
+  const resp = await client.patch(`/capa/${capaId}/d3/execution/${executionId}`, req);
   return resp.data;
 }
 
