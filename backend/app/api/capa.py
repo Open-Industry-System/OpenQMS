@@ -1214,15 +1214,17 @@ async def d3_generate_advice_ep(
             headers={"Retry-After": str(retry_after)},
         )
 
-    # done / failed -> return advice list or empty
+    # done / failed -> return advice list (done) or failed status
     gen_id = result.get("generation_id")
     if gen_id:
         gen = await db.get(CapaD3AdviceGeneration, uuid.UUID(str(gen_id)))
         if gen and gen.status == "done":
             return await _build_advice_response(db, gen)
+        if gen and gen.status == "failed":
+            return D3AdviceResponse(advice=[], status="failed", error=gen.error)
 
-    # failed generation -> return empty list
-    return D3AdviceResponse(advice=[])
+    # failed generation without a retrievable gen row
+    return D3AdviceResponse(advice=[], status="failed", error=result.get("error"))
 
 
 @router.get("/{report_id}/d3/advice", response_model=D3AdviceResponse)
@@ -1315,7 +1317,7 @@ async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) 
             )
         )
 
-    return D3AdviceResponse(advice=items)
+    return D3AdviceResponse(advice=items, status="done")
 
 
 # ===== D3 Advice Adoption endpoints (US-E2E-01.1 Task 9) =====

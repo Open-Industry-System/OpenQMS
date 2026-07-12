@@ -124,9 +124,17 @@ class D3AdviceRunningResponse(BaseModel):
 
 
 class D3AdviceResponse(BaseModel):
-    """Response body for POST/GET /d3/advice."""
+    """Response body for POST/GET /d3/advice.
+
+    `status` distinguishes a successful "done" generation (advice may be empty
+    if the LLM returned no usable items) from a "failed" generation (LLM error,
+    schema mismatch, or all-provenance-mapping-failed). `error` carries the
+    failure code when status is "failed".
+    """
 
     advice: list[D3AdviceItem]
+    status: Literal["done", "failed"] = "done"
+    error: str | None = None
 
 
 class D3AdviceRequest(BaseModel):

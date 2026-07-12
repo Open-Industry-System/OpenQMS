@@ -13,7 +13,7 @@ import {
   generateD3Report, getD3Report,
   generateD3Advice, getD3Advice,
   decideD3Advice, getD3Adoptions,
-  recordD3Execution, getD3Executions,
+  recordD3Execution, updateD3Execution, getD3Executions,
 } from "../../api/capa";
 import type {
   CAPAReport, D3ImportRun, D3ContainmentSnapshot, D3ImpactReport,
@@ -47,6 +47,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   const [snapshots, setSnapshots] = useState<D3ContainmentSnapshot[]>([]);
   const [report, setReport] = useState<D3ImpactReport | null>(null);
   const [advice, setAdvice] = useState<D3AiAdvice[]>([]);
+  const [adviceError, setAdviceError] = useState<string | null>(null);
   const [adoptions, setAdoptions] = useState<D3AdviceAdoption[]>([]);
   const [executions, setExecutions] = useState<D3Execution[]>([]);
   const [loading, setLoading] = useState(false);
@@ -131,6 +132,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       const resp = await getD3Advice(capa.report_id);
       setAdvice(resp.advice ?? []);
+      setAdviceError(resp.status === "failed" ? (resp.error || "failed") : null);
     } catch {
       message.error(t("d3.loadAdviceFailed", "加载建议失败"));
     }
@@ -267,6 +269,16 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       await loadExecutions();
     } catch {
       message.error(t("d3.executionAddFailed", "添加执行记录失败"));
+    }
+  };
+
+  const handleExecutionStatusChange = async (item: D3Execution, nextStatus: D3Execution["result_status"]) => {
+    if (nextStatus === item.result_status) return;
+    try {
+      await updateD3Execution(capa.report_id, item.execution_id, { result_status: nextStatus });
+      await loadExecutions();
+    } catch {
+      message.error(t("d3.executionUpdateFailed", "更新执行记录失败"));
     }
   };
 
@@ -411,8 +423,18 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       )}
 
       {/* AI Advice */}
-      {advice.length > 0 && (
+      {(advice.length > 0 || adviceError) && (
         <Card size="small" title={t("d3.adviceTitle", "AI 建议")} style={{ marginBottom: 16 }}>
+          {adviceError && (
+            <Alert
+              type="error"
+              showIcon
+              message={t("d3.adviceFailed", "建议生成失败")}
+              description={adviceError}
+              style={{ marginBottom: 12 }}
+              data-e2e="d3-advice-failed-banner"
+            />
+          )}
           <List
             dataSource={advice}
             renderItem={(item) => (
@@ -516,6 +538,21 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                       <Button type="link" size="small" href={String(item.evidence_refs[0].url || "")} target="_blank">
                         {t("d3.evidenceLink", "证据")}
                       </Button>
+                    )}
+                    {!isReadOnly && (
+                      <Select
+                        size="small"
+                        value={item.result_status}
+                        onChange={(val) => handleExecutionStatusChange(item, val)}
+                        style={{ width: 120 }}
+                        data-e2e="d3-execution-status-change"
+                        options={[
+                          { value: "in_progress", label: t("d3.status.in_progress", "进行中") },
+                          { value: "completed", label: t("d3.status.completed", "已完成") },
+                          { value: "pending", label: t("d3.status.pending", "待处理") },
+                          { value: "failed", label: t("d3.status.failed", "失败") },
+                        ]}
+                      />
                     )}
                   </Space>
                 }

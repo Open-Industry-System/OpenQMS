@@ -2018,6 +2018,12 @@ export interface D3AdviceAdoption {
   created_at: string;
 }
 
+export interface D3AdviceResponse {
+  advice: D3AiAdvice[];
+  status?: "done" | "failed";
+  error?: string | null;
+}
+
 export interface D3Execution {
   execution_id: string;
   source: "manual" | "adopted";

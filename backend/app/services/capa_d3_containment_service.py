@@ -42,6 +42,30 @@ if TYPE_CHECKING:
 VALID_ARRIVAL_STATUSES = {"signed", "in_transit", "pending", "unknown"}
 
 
+# Chinese/English CAPA severity → RISK_MAPPINGS English key.
+# UI creates CAPAs with Chinese severities (致命/严重/一般/轻微); RISK_MAPPINGS only
+# has English keys, so we normalize before freezing into analysis_context.
+# 轻微 ("minor") has no RISK_MAPPINGS entry; fall back to "general" so the
+# conservative floor still applies instead of silently degrading to "low".
+SEVERITY_TO_ENGLISH: dict[str, str] = {
+    "致命": "fatal",
+    "严重": "serious",
+    "一般": "general",
+    "轻微": "general",
+    "critical": "critical",
+    "fatal": "fatal",
+    "serious": "serious",
+    "general": "general",
+}
+
+
+def _normalize_severity(severity: str | None) -> str:
+    """Normalize a CAPA severity (Chinese or English) to a RISK_MAPPINGS key."""
+    if not severity:
+        return "general"
+    return SEVERITY_TO_ENGLISH.get(severity, severity)
+
+
 # ===== Deterministic Calculation Functions (Task 3) =====
 
 def _norm(v: str | None) -> str:
@@ -819,8 +843,18 @@ async def import_containment_data(
     if not capa:
         raise ValueError(f"CAPA {capa_id} not found")
 
+    # Serialize concurrent imports: lock the CAPA row so two parallel imports
+    # don't both demote the old current run and then collide on the partial
+    # UQ uq_d3_run_current. The second import waits, then sees the new current
+    # run and demotes it cleanly.
+    await db.execute(
+        text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"),
+        {"cid": capa_id},
+    )
+
     factory_id = capa.factory_id
     product_line_code = capa.product_line_code
+    capa_severity = _normalize_severity(capa.severity)
 
     # Query 4 data sources
     inventory_records = await _query_inventory(db, factory_id, product_line_code)
@@ -834,15 +868,20 @@ async def import_containment_data(
         capa_id=capa_id,
         factory_id=factory_id,
         user_id=user.user_id,
-        capa_severity=capa.severity,
+        capa_severity=capa_severity,
         inventory_records=inventory_records,
         shipment_records=shipment_records,
         iqc_records=iqc_records,
         spc_records=spc_records,
     )
 
-    # Transaction A success: audit D3_DATA_IMPORTED before Transaction B
-    report_status = "pending"
+    # Transaction A success: audit D3_DATA_IMPORTED before Transaction B.
+    # Per spec §8: record snapshot_types + record_counts (per type). We do
+    # NOT write report_status here because it is "pending" until Transaction B
+    # completes; writing a stale "pending" would be inaccurate if Transaction
+    # B later succeeds or fails.
+    snapshot_types = [s.snapshot_type for s in snapshots]
+    record_counts = {s.snapshot_type: s.record_count for s in snapshots}
     db.add(
         AuditLog(
             table_name="capa_eightd",
@@ -850,8 +889,8 @@ async def import_containment_data(
             action="D3_DATA_IMPORTED",
             changed_fields={
                 "run_id": str(run.run_id),
-                "snapshot_count": len(snapshots),
-                "report_status": report_status,
+                "snapshot_types": snapshot_types,
+                "record_counts": record_counts,
             },
             operated_by=user.user_id,
             operated_at=datetime.now(timezone.utc),
@@ -989,9 +1028,20 @@ async def _query_shipment(
 async def _query_iqc(
     db: AsyncSession, factory_id: uuid.UUID, product_line_code: str
 ) -> list[dict]:
-    """Query IQC inspection records for the factory + product line."""
+    """Query IQC inspection records for the factory + product line.
+
+    Filters by factory_id to prevent cross-factory IQC data leakage. The
+    product_line_code filter is intentionally NOT applied: IqcInspection.product_line_code
+    is nullable and not always populated, so filtering on it would silently drop
+    legitimate records. Factory isolation is the security boundary.
+    """
     result = await db.execute(
-        select(IqcInspection).where(IqcInspection.linked_capa_id.is_(None))
+        select(IqcInspection).where(
+            and_(
+                IqcInspection.factory_id == factory_id,
+                IqcInspection.linked_capa_id.is_(None),
+            )
+        )
     )
     inspections = result.scalars().all()
 
@@ -1220,8 +1270,14 @@ async def _recover_stale_advice_generation(db, report_id):
     )
 
 
-def _build_advice_prompt(report_batches, snapshots, name_to_alias):
-    """Build a prompt with anonymized customer names and deterministic facts."""
+def _build_advice_prompt(report_batches, snapshots, name_to_alias, customer_impact=None, impact_qty=None, time_window=None, risk_floor=None):
+    """Build a prompt with anonymized customer names and deterministic facts.
+
+    Per spec §4.3, the prompt must contain the 5 deterministic report facts:
+    batches, customer_impact, impact_qty, time_window, risk_floor. Customer
+    names are anonymized to customer_0X so the LLM references aliases, and
+    `_restore_customer_names` (in the caller) maps them back to real names.
+    """
     system_block = (
         "你是一位资深质量遏制专家。请根据以下确定性事实，给出遏制措施建议。"
         "请只输出 JSON，格式为："
@@ -1230,11 +1286,10 @@ def _build_advice_prompt(report_batches, snapshots, name_to_alias):
         '"provenance_sources_hint": ["shipment", "inventory", "iqc", "spc", "report"]}]}'
     )
 
-    # Anonymize customer names in batch data
+    # Anonymize customer names in batch source_refs (no-op if no customer_name)
     anonymized_batches = []
     for batch in report_batches:
         b = dict(batch)
-        # Anonymize customer names in source_refs if present
         if "source_refs" in b:
             b["source_refs"] = [
                 {**ref, "customer_name": name_to_alias.get(ref.get("customer_name", ""), ref.get("customer_name", ""))}
@@ -1242,8 +1297,21 @@ def _build_advice_prompt(report_batches, snapshots, name_to_alias):
             ]
         anonymized_batches.append(b)
 
+    # Anonymize customer names in customer_impact list
+    anonymized_customer_impact = []
+    for idx, ci in enumerate(customer_impact or [], start=1):
+        if not isinstance(ci, dict):
+            continue
+        anon = dict(ci)
+        anon["customer_name"] = name_to_alias.get(ci.get("customer_name", ""), f"customer_{idx:02d}")
+        anonymized_customer_impact.append(anon)
+
     user_data_block = f"""【确定性事实】
 批次汇总：{anonymized_batches}
+客户影响：{anonymized_customer_impact}
+影响数量：{impact_qty}
+时间窗口：{time_window}
+风险底线：{risk_floor}
 
 请在建议文本中直接使用上述客户代号（customer_01 等），不要编造客户名称。"""
 
@@ -1423,7 +1491,15 @@ async def _advice_phase2_llm(db, gen_id, report, report_id, client):
 
     await db.commit()
 
-    prompt = _build_advice_prompt(report_batches, snapshots, name_to_alias)
+    prompt = _build_advice_prompt(
+        report_batches,
+        snapshots,
+        name_to_alias,
+        customer_impact=customer_impact,
+        impact_qty=list(report.impact_qty or []),
+        time_window=dict(report.time_window or {}),
+        risk_floor=report.risk_floor,
+    )
 
     try:
         llm_result = await provider_adapter.complete_json(client, prompt, ADVICE_RESPONSE_SCHEMA)

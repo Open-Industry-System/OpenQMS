@@ -144,11 +144,139 @@ async def test_import_creates_run_with_4_snapshots(
         "risk_mapping_version": CURRENT_RISK_MAPPING_VERSION,
     }
 
-    # Verify D3_DATA_IMPORTED audit is written before Transaction B
+    # Verify D3_DATA_IMPORTED audit is written before Transaction B (spec §8)
     audit_fields = await audit_reader(db_capa.report_id, "D3_DATA_IMPORTED")
     assert audit_fields["run_id"] == result["run_id"]
-    assert audit_fields["snapshot_count"] == len(result["snapshots"])
-    assert "report_status" in audit_fields
+    assert audit_fields["snapshot_types"] == ["inventory", "shipment", "iqc", "spc"]
+    assert audit_fields["record_counts"] == {
+        s["snapshot_type"]: s["record_count"] for s in result["snapshots"]
+    }
+    assert "report_status" not in audit_fields
+    assert "snapshot_count" not in audit_fields
+
+
+async def test_import_normalizes_chinese_severity_to_english(
+    db: AsyncSession, db_user: User, db_factory: Factory, audit_reader
+):
+    """A Chinese-severity CAPA freezes the English key into analysis_context.
+
+    RISK_MAPPINGS only has English keys; without normalization, 致命/严重/一般/轻微
+    would all fall back to "low" and silently defeat the conservative risk floor.
+    """
+    capa = CAPAEightD(
+        report_id=uuid.uuid4(),
+        document_no="CAPA-D3-ZH",
+        title="D3 Chinese severity CAPA",
+        product_line_code="DC-DC-100",
+        factory_id=db_factory.id,
+        status="D3_INTERIM",
+        severity="致命",
+    )
+    db.add(capa)
+    await db.commit()
+    await db.refresh(capa)
+
+    result = await import_containment_data(db, capa.report_id, db_user, {})
+    run = await db.get(CapaD3ImportRun, uuid.UUID(result["run_id"]))
+    assert run.analysis_context["capa_severity"] == "fatal"
+
+
+@pytest.mark.parametrize(
+    "zh, en",
+    [("致命", "fatal"), ("严重", "serious"), ("一般", "general"), ("轻微", "general")],
+)
+async def test_import_severity_normalization_matrix(
+    db: AsyncSession, db_user: User, db_factory: Factory, zh: str, en: str
+):
+    """All four Chinese severities normalize to a RISK_MAPPINGS key."""
+    capa = CAPAEightD(
+        report_id=uuid.uuid4(),
+        document_no=f"CAPA-D3-ZH-{zh}",
+        title="D3 Chinese severity CAPA",
+        product_line_code="DC-DC-100",
+        factory_id=db_factory.id,
+        status="D3_INTERIM",
+        severity=zh,
+    )
+    db.add(capa)
+    await db.commit()
+    await db.refresh(capa)
+
+    result = await import_containment_data(db, capa.report_id, db_user, {})
+    run = await db.get(CapaD3ImportRun, uuid.UUID(result["run_id"]))
+    assert run.analysis_context["capa_severity"] == en
+
+
+async def test_iqc_query_filters_by_factory(
+    db: AsyncSession, db_user: User, db_factory: Factory, db_capa: CAPAEightD
+):
+    """IQC snapshot excludes inspections from other factories (cross-factory leak)."""
+    from app.models.supplier import Supplier
+    from app.models.iqc_inspection import IqcInspection
+
+    # Supplier in the CAPA's factory
+    sup_self = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no="SUP-SELF",
+        factory_id=db_factory.id,
+        name="Self Supplier",
+        short_name="SS",
+        created_by=db_user.user_id,
+    )
+    db.add(sup_self)
+    await db.flush()
+    iqc_self = IqcInspection(
+        inspection_id=uuid.uuid4(),
+        inspection_no="IQC-SELF",
+        supplier_id=sup_self.supplier_id,
+        part_no="M1",
+        lot_no="L1",
+        lot_qty=10,
+        defect_qty=0,
+        inspection_result="pass",
+        factory_id=db_factory.id,
+    )
+    db.add(iqc_self)
+
+    # Second factory + its supplier + IQC inspection
+    other_factory = Factory(
+        id=uuid.uuid4(),
+        code="FAC-OTHER",
+        name="Other Factory",
+        is_active=True,
+    )
+    db.add(other_factory)
+    await db.flush()
+    sup_other = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no="SUP-OTHER",
+        factory_id=other_factory.id,
+        name="Other Supplier",
+        short_name="OS",
+        created_by=db_user.user_id,
+    )
+    db.add(sup_other)
+    await db.flush()
+    iqc_other = IqcInspection(
+        inspection_id=uuid.uuid4(),
+        inspection_no="IQC-OTHER",
+        supplier_id=sup_other.supplier_id,
+        part_no="M2",
+        lot_no="L2",
+        lot_qty=20,
+        defect_qty=5,
+        inspection_result="reject",
+        factory_id=other_factory.id,
+    )
+    db.add(iqc_other)
+    await db.commit()
+
+    result = await import_containment_data(db, db_capa.report_id, db_user, {})
+    iqc_snap = next(s for s in result["snapshots"] if s["snapshot_type"] == "iqc")
+    snap = await db.get(CapaD3ContainmentSnapshot, uuid.UUID(iqc_snap["snapshot_id"]))
+    inspection_nos = {rec.get("inspection_no") for rec in snap.payload}
+    assert "IQC-SELF" in inspection_nos
+    assert "IQC-OTHER" not in inspection_nos
 
 
 async def test_new_run_demotes_old_current(
