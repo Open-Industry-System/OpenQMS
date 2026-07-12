@@ -1,4 +1,5 @@
-import basePlaywright, { test as base, Page, APIRequestContext } from '@playwright/test';
+import { test as base, Page, APIRequestContext } from '@playwright/test';
+import * as playwright from 'playwright';
 import { readFileSync } from 'fs';
 import path from 'path';
 // 复用现有认证 fixture（loginAs 读 seed-state 真实密码）+ API helpers
@@ -82,7 +83,7 @@ export { loginAs };
 // re-export 供 spec 直接 import（避免 spec 重复 import 多个文件）
 export { loginForToken, E2E_API_BASE_URL } from '../helpers/api-client';
 export { accountPassword } from './seed-state';
-export const playwright = basePlaywright;
+export { playwright };
 
 // goToCapa 用 UUID 直接访问（路由 /capa/:id 是 UUID，无 document_no 重定向契约）
 export async function goToCapa(page: Page, capaId: string): Promise<void> {
