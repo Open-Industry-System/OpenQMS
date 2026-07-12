@@ -409,8 +409,16 @@ def _build_report_prompt(batches, impact_qty, customer_impact, time_window, anal
 
 请在风险解释中直接使用上述客户代号（customer_01 等），不要编造客户名称。"""
 
-    prompt = system_block + "\n\n" + user_data_block
-    return prompt
+    # SAFETY_TRAILER is always appended; if the prompt is too long, truncate
+    # the user data block while preserving the system block and safety trailer.
+    prompt = system_block + "\n\n" + user_data_block + SAFETY_TRAILER
+    original_total = len(prompt)
+    if original_total > MAX_PROMPT_CHARS:
+        allowed_user_len = MAX_PROMPT_CHARS - len(system_block) - len("\n\n") - len(SAFETY_TRAILER)
+        if allowed_user_len < 0:
+            allowed_user_len = 0
+        prompt = system_block + "\n\n" + user_data_block[:allowed_user_len] + SAFETY_TRAILER
+    return prompt, original_total
 
 
 def _restore_customer_names(explanation: str, alias_map: dict[str, str]) -> str:
@@ -436,7 +444,7 @@ async def _report_phase1_create_running(db, run_id, user):
         {"cid": run.capa_id},
     )
 
-    await _recover_stale_report(db, run_id)
+    await _recover_stale_report(db, run_id, capa_id=run.capa_id, user_id=user.user_id)
 
     existing = await _running_report(db, run_id)
     if existing:
@@ -520,41 +528,47 @@ async def _report_phase2_llm(db, report_id, run, client):
             "time_window": time_window,
         }
 
-    prompt = _build_report_prompt(
+    prompt, original_total = _build_report_prompt(
         batches, impact_qty, customer_impact, time_window, analysis_context
     )
     prompt_stats = {
-        "truncated": len(prompt) > MAX_PROMPT_CHARS,
-        "original_total": len(prompt),
+        "truncated": original_total > MAX_PROMPT_CHARS,
+        "original_total": original_total,
     }
-    if prompt_stats["truncated"]:
-        prompt = prompt[:MAX_PROMPT_CHARS] + SAFETY_TRAILER
-
-    try:
-        llm_result = await provider_adapter.complete_json(client, prompt, REPORT_RESPONSE_SCHEMA)
-    except Exception as e:
-        return {
-            "outcome": "llm_failed",
-            "error": "llm_failed",
-            "stage_runs": [{"stage": "llm", "error": str(e)}],
-        }
 
     RISK_ENUMS = {"high", "medium", "low"}
-    if (
-        not isinstance(llm_result, dict)
-        or llm_result.get("risk_level") not in RISK_ENUMS
-        or not isinstance(llm_result.get("risk_explanation"), str)
-        or not llm_result.get("risk_explanation", "").strip()
-    ):
+
+    def _valid_report_result(result):
+        return (
+            isinstance(result, dict)
+            and result.get("risk_level") in RISK_ENUMS
+            and isinstance(result.get("risk_explanation"), str)
+            and result.get("risk_explanation", "").strip()
+        )
+
+    llm_result = None
+    last_schema_error = None
+    for attempt in range(2):
+        try:
+            llm_result = await provider_adapter.complete_json(client, prompt, REPORT_RESPONSE_SCHEMA)
+        except Exception as e:
+            return {
+                "outcome": "llm_failed",
+                "error": "llm_failed",
+                "stage_runs": [{"stage": "llm", "error": str(e)}],
+            }
+        if _valid_report_result(llm_result):
+            break
+        last_schema_error = {
+            "stage": "schema",
+            "error": "expected {risk_level∈{high,medium,low}, risk_explanation:non-empty str}",
+            "attempt": attempt + 1,
+        }
+    else:
         return {
             "outcome": "schema_failed",
             "error": "schema_failed",
-            "stage_runs": [
-                {
-                    "stage": "schema",
-                    "error": "expected {risk_level∈{high,medium,low}, risk_explanation:non-empty str}",
-                }
-            ],
+            "stage_runs": [last_schema_error],
         }
 
     llm_risk = llm_result.get("risk_level", "medium")
@@ -787,18 +801,25 @@ async def _running_report(db, run_id):
     )
 
 
-async def _recover_stale_report(db, run_id):
+async def _recover_stale_report(db, run_id, capa_id=None, user_id=None):
     """CAS any stale running report for this run to failed."""
+    cutoff = datetime.now(timezone.utc) - (STALE_THRESHOLD * 2)
+    stale_report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == run_id,
+            CapaD3ImpactReport.status == "running",
+            CapaD3ImpactReport.started_at < cutoff,
+        )
+    )
+    if stale_report is None:
+        return
+
     stale_runs = [
         {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
     ]
-    await db.execute(
+    res = await db.execute(
         update(CapaD3ImpactReport)
-        .where(
-            CapaD3ImpactReport.run_id == run_id,
-            CapaD3ImpactReport.status == "running",
-            CapaD3ImpactReport.started_at < datetime.now(timezone.utc) - (STALE_THRESHOLD * 2),
-        )
+        .where(CapaD3ImpactReport.report_id == stale_report.report_id)
         .values(
             status="failed",
             error="stale",
@@ -806,6 +827,21 @@ async def _recover_stale_report(db, run_id):
             stage_runs=stale_runs,
         )
     )
+    if res.rowcount > 0 and capa_id is not None and user_id is not None:
+        db.add(
+            AuditLog(
+                table_name="capa_eightd",
+                record_id=capa_id,
+                action="D3_REPORT_GENERATED",
+                changed_fields={
+                    "report_id": str(stale_report.report_id),
+                    "status": "failed",
+                    "error": "stale",
+                },
+                operated_by=user_id,
+                operated_at=datetime.now(timezone.utc),
+            )
+        )
 
 
 def _max_risk(llm_risk, floor):
@@ -1030,16 +1066,19 @@ async def _query_iqc(
 ) -> list[dict]:
     """Query IQC inspection records for the factory + product line.
 
-    Filters by factory_id to prevent cross-factory IQC data leakage. The
-    product_line_code filter is intentionally NOT applied: IqcInspection.product_line_code
-    is nullable and not always populated, so filtering on it would silently drop
-    legitimate records. Factory isolation is the security boundary.
+    Filters by factory_id and product_line_code. product_line_code is nullable,
+    so records with NULL product_line_code (legacy data) are included while
+    records from other product lines are excluded.
     """
     result = await db.execute(
         select(IqcInspection).where(
             and_(
                 IqcInspection.factory_id == factory_id,
                 IqcInspection.linked_capa_id.is_(None),
+                or_(
+                    IqcInspection.product_line_code == product_line_code,
+                    IqcInspection.product_line_code.is_(None),
+                ),
             )
         )
     )
@@ -1248,19 +1287,25 @@ async def _running_advice_generation(db, report_id):
     )
 
 
-async def _recover_stale_advice_generation(db, report_id):
+async def _recover_stale_advice_generation(db, report_id, capa_id=None, user_id=None):
     """CAS any stale running advice generation for this report to failed."""
-    stale_runs = [
-        {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
-    ]
     cutoff = datetime.now(timezone.utc) - (STALE_THRESHOLD * 2)
-    await db.execute(
-        update(CapaD3AdviceGeneration)
-        .where(
+    stale_gen = await db.scalar(
+        select(CapaD3AdviceGeneration).where(
             CapaD3AdviceGeneration.report_id == report_id,
             CapaD3AdviceGeneration.status == "running",
             CapaD3AdviceGeneration.started_at < cutoff,
         )
+    )
+    if stale_gen is None:
+        return
+
+    stale_runs = [
+        {"stage": "stale_recovery", "error": "started_at exceeded 2x threshold"}
+    ]
+    res = await db.execute(
+        update(CapaD3AdviceGeneration)
+        .where(CapaD3AdviceGeneration.generation_id == stale_gen.generation_id)
         .values(
             status="failed",
             error="stale",
@@ -1268,6 +1313,21 @@ async def _recover_stale_advice_generation(db, report_id):
             stage_runs=stale_runs,
         )
     )
+    if res.rowcount > 0 and capa_id is not None and user_id is not None:
+        db.add(
+            AuditLog(
+                table_name="capa_eightd",
+                record_id=capa_id,
+                action="D3_AI_ADVICE_GENERATED",
+                changed_fields={
+                    "generation_id": str(stale_gen.generation_id),
+                    "status": "failed",
+                    "error": "stale",
+                },
+                operated_by=user_id,
+                operated_at=datetime.now(timezone.utc),
+            )
+        )
 
 
 def _build_advice_prompt(report_batches, snapshots, name_to_alias, customer_impact=None, impact_qty=None, time_window=None, risk_floor=None):
@@ -1315,10 +1375,16 @@ def _build_advice_prompt(report_batches, snapshots, name_to_alias, customer_impa
 
 请在建议文本中直接使用上述客户代号（customer_01 等），不要编造客户名称。"""
 
-    prompt = system_block + "\n\n" + user_data_block
-    if len(prompt) > MAX_PROMPT_CHARS:
-        prompt = prompt[:MAX_PROMPT_CHARS] + SAFETY_TRAILER
-    return prompt
+    # SAFETY_TRAILER is always appended; if the prompt is too long, truncate
+    # the user data block while preserving the system block and safety trailer.
+    prompt = system_block + "\n\n" + user_data_block + SAFETY_TRAILER
+    original_total = len(prompt)
+    if original_total > MAX_PROMPT_CHARS:
+        allowed_user_len = MAX_PROMPT_CHARS - len(system_block) - len("\n\n") - len(SAFETY_TRAILER)
+        if allowed_user_len < 0:
+            allowed_user_len = 0
+        prompt = system_block + "\n\n" + user_data_block[:allowed_user_len] + SAFETY_TRAILER
+    return prompt, original_total
 
 
 def _map_provenance(advice_type: str, target_batch_refs: list | None, report_batches: list, snapshots: list, report_id: str) -> list:
@@ -1416,7 +1482,7 @@ async def _advice_phase1_create_running(db, capa_id, report_id, user):
     if run is None or run.capa_id != capa_id:
         return {"status": "failed", "error": "capa_mismatch"}, None
 
-    await _recover_stale_advice_generation(db, report_id)
+    await _recover_stale_advice_generation(db, report_id, capa_id=capa_id, user_id=user.user_id)
 
     existing = await _running_advice_generation(db, report_id)
     if existing:
@@ -1491,7 +1557,7 @@ async def _advice_phase2_llm(db, gen_id, report, report_id, client):
 
     await db.commit()
 
-    prompt = _build_advice_prompt(
+    prompt, _ = _build_advice_prompt(
         report_batches,
         snapshots,
         name_to_alias,

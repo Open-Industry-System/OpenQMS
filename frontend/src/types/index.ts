@@ -1993,15 +1993,10 @@ export type D3AdviceType = "recall" | "isolate" | "notify_customer" | "strict_in
 
 export interface D3AiAdvice {
   advice_id: string;
-  generation_id: string;
-  factory_id: string;
   advice_type: D3AdviceType;
   advice_text: string;
   source_provenance: D3ProvenanceEntry[];
-  llm_available: boolean;
-  generated_by: string;
-  generated_at: string;
-  created_at: string;
+  target_batch_refs: string[] | null;
   adoption_status?: "adopted" | "rejected" | null;
 }
 

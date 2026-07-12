@@ -279,6 +279,61 @@ async def test_iqc_query_filters_by_factory(
     assert "IQC-OTHER" not in inspection_nos
 
 
+async def test_iqc_query_filters_by_product_line(
+    db: AsyncSession, db_user: User, db_factory: Factory, db_capa: CAPAEightD
+):
+    """IQC snapshot excludes inspections from other product lines in the same factory."""
+    from app.models.supplier import Supplier
+    from app.models.iqc_inspection import IqcInspection
+
+    supplier = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no="SUP-PL",
+        factory_id=db_factory.id,
+        name="PL Supplier",
+        short_name="PLS",
+        created_by=db_user.user_id,
+    )
+    db.add(supplier)
+    await db.flush()
+
+    iqc_same_line = IqcInspection(
+        inspection_id=uuid.uuid4(),
+        inspection_no="IQC-SAME-LINE",
+        supplier_id=supplier.supplier_id,
+        part_no="M1",
+        lot_no="L1",
+        lot_qty=10,
+        defect_qty=0,
+        inspection_result="pass",
+        factory_id=db_factory.id,
+        product_line_code=db_capa.product_line_code,
+    )
+    db.add(iqc_same_line)
+
+    iqc_other_line = IqcInspection(
+        inspection_id=uuid.uuid4(),
+        inspection_no="IQC-OTHER-LINE",
+        supplier_id=supplier.supplier_id,
+        part_no="M2",
+        lot_no="L2",
+        lot_qty=20,
+        defect_qty=5,
+        inspection_result="reject",
+        factory_id=db_factory.id,
+        product_line_code="DC-DC-200",
+    )
+    db.add(iqc_other_line)
+    await db.commit()
+
+    result = await import_containment_data(db, db_capa.report_id, db_user, {})
+    iqc_snap = next(s for s in result["snapshots"] if s["snapshot_type"] == "iqc")
+    snap = await db.get(CapaD3ContainmentSnapshot, uuid.UUID(iqc_snap["snapshot_id"]))
+    inspection_nos = {rec.get("inspection_no") for rec in snap.payload}
+    assert "IQC-SAME-LINE" in inspection_nos
+    assert "IQC-OTHER-LINE" not in inspection_nos
+
+
 async def test_new_run_demotes_old_current(
     db: AsyncSession, db_user: User, db_factory: Factory, db_capa: CAPAEightD
 ):

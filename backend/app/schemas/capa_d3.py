@@ -113,6 +113,7 @@ class D3AdviceItem(BaseModel):
     advice_type: str  # recall, isolate, notify_customer, strict_inspection, alternative
     advice_text: str
     source_provenance: list[ProvenanceEntry]
+    target_batch_refs: list[str] | None = None
     adoption_status: str | None = None  # From capa_d3_advice_adoption if exists
 
 

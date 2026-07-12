@@ -1313,6 +1313,7 @@ async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) 
                 advice_type=a.advice_type,
                 advice_text=a.advice_text,
                 source_provenance=provenance,
+                target_batch_refs=a.target_batch_refs,
                 adoption_status=adoptions.get(a.advice_id),
             )
         )

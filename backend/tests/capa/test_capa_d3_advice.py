@@ -354,3 +354,16 @@ async def test_stale_recovery_cas_running_to_failed(db, capa_d3_done_report, sta
     assert running is None
     failed = await _failed_advice_generation(db, report.report_id)
     assert failed.error == "stale" and failed.completed_at
+
+
+@pytest.mark.asyncio
+async def test_stale_advice_recovery_writes_audit_event(
+    db, capa_d3_done_report, stale_running_generation, audit_reader
+):
+    capa, report, run, user = capa_d3_done_report
+    await _recover_stale_advice_generation(db, report.report_id, capa.report_id, user.user_id)
+    await db.commit()
+    audited = await audit_reader(capa.report_id, "D3_AI_ADVICE_GENERATED")
+    assert audited["generation_id"] == str(stale_running_generation.generation_id)
+    assert audited["status"] == "failed"
+    assert audited["error"] == "stale"

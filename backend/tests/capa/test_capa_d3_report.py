@@ -267,6 +267,31 @@ async def test_schema_failed_writes_stage_runs_error_code(db, capa_d3_imported, 
 
 
 @pytest.mark.asyncio
+async def test_schema_failed_retries_once_before_failing(db, capa_d3_imported, llm_bad_schema):
+    capa, run, user = capa_d3_imported
+    llm_bad_schema.side_effect = [
+        {"risk_level": "invalid", "risk_explanation": ""},
+        {"risk_level": "medium", "risk_explanation": "ok"},
+    ]
+    r = await generate_impact_report(db, run.run_id, user)
+    assert r["status"] == "done"
+    report = await db.get(CapaD3ImpactReport, r["report_id"])
+    assert report.status == "done" and report.error is None
+    assert llm_bad_schema.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_schema_failed_both_attempts(db, capa_d3_imported, llm_bad_schema):
+    capa, run, user = capa_d3_imported
+    llm_bad_schema.return_value = {"risk_level": "invalid", "risk_explanation": ""}
+    r = await generate_impact_report(db, run.run_id, user)
+    assert r["status"] == "failed"
+    report = await db.get(CapaD3ImpactReport, r["report_id"])
+    assert report.error == "schema_failed" and report.completed_at
+    assert llm_bad_schema.call_count == 2
+
+
+@pytest.mark.asyncio
 async def test_superseded_writes_error_code_no_current_switch(db, capa_d3_imported, llm_mock, superseded_run):
     capa, run, user = capa_d3_imported
     llm_mock.return_value = {"risk_level": "medium", "risk_explanation": "ok"}
@@ -294,6 +319,19 @@ async def test_stale_recovery_cas_running_to_failed(db, capa_d3_imported, stale_
     assert report is None
     failed = await _failed_report(db, run.run_id)
     assert failed.error == "stale" and failed.completed_at
+
+
+@pytest.mark.asyncio
+async def test_stale_recovery_writes_audit_event(
+    db, capa_d3_imported, stale_running_report, audit_reader
+):
+    capa, run, user = capa_d3_imported
+    await _recover_stale_report(db, run.run_id, capa.report_id, user.user_id)
+    await db.commit()
+    audited = await audit_reader(capa.report_id, "D3_REPORT_GENERATED")
+    assert audited["report_id"] == str(stale_running_report.report_id)
+    assert audited["status"] == "failed"
+    assert audited["error"] == "stale"
 
 
 @pytest.mark.asyncio
