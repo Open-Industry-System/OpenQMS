@@ -32,6 +32,11 @@ from app.models.capa_d3 import (
     CapaD3AdviceAdoption,
     CapaD3Execution,
 )
+from app.models.capa_doc_gate import (
+    CapaDocgAnalysis,
+    CapaDocgAudit,
+    CapaDocgDecision,
+)
 from app.models.capa_lesson import CapaLessonLearned
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
@@ -127,7 +132,7 @@ __all__ = [
     "User", "FMEADocument", "CAPAEightD", "CapaLessonLearned", "AuditLog",
     "CapaD3ImportRun", "CapaD3ContainmentSnapshot", "CapaD3ImpactReport",
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
-    "CapaD3Execution",
+    "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
     "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
