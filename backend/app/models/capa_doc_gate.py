@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.schema import Index
@@ -14,6 +14,7 @@ class CapaDocgAnalysis(Base):
     __tablename__ = "capa_docg_analysis"
     __table_args__ = (
         UniqueConstraint("capa_id", "factory_id", name="uq_docg_analysis_capa_factory"),
+        UniqueConstraint("analysis_id", "factory_id", name="uq_docg_analysis_factory"),
         CheckConstraint("status IN ('running','done','failed')", name="chk_docg_analysis_status"),
         CheckConstraint(
             "(status='running' AND is_current=false AND completed_at IS NULL) "
@@ -28,6 +29,12 @@ class CapaDocgAnalysis(Base):
         ),
         Index("uq_docg_analysis_current", "capa_id", unique=True, postgresql_where=text("is_current = true")),
         Index("uq_docg_analysis_running", "capa_id", unique=True, postgresql_where=text("status = 'running'")),
+        ForeignKeyConstraint(
+            ["capa_id", "factory_id"],
+            ["capa_eightd.report_id", "capa_eightd.factory_id"],
+            ondelete="RESTRICT",
+            name="fk_docg_analysis_capa_factory",
+        ),
     )
     analysis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="RESTRICT"), nullable=False)
@@ -54,10 +61,16 @@ class CapaDocgAudit(Base):
         CheckConstraint("doc_type IN ('control_plan','fmea','sop','inspection_sop','other')", name="chk_docg_audit_doctype"),
         CheckConstraint("status IN ('passed','pending_update','incomplete')", name="chk_docg_audit_status"),
         UniqueConstraint("audit_run_id", "doc_type", "doc_id", name="uq_docg_audit_run_doc"),
+        ForeignKeyConstraint(
+            ["analysis_id", "factory_id"],
+            ["capa_docg_analysis.analysis_id", "capa_docg_analysis.factory_id"],
+            ondelete="RESTRICT",
+            name="fk_docg_audit_analysis_factory",
+        ),
     )
     audit_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     analysis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_docg_analysis.analysis_id", ondelete="RESTRICT"), nullable=False)
-    audit_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, default=uuid.uuid4)
+    audit_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, default=uuid.uuid4, server_default=text("gen_random_uuid()"))
     factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
     doc_type: Mapped[str] = mapped_column(String(16), nullable=False)
     doc_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
@@ -66,7 +79,7 @@ class CapaDocgAudit(Base):
     version_before: Mapped[dict | None] = mapped_column(JSONB)
     version_after: Mapped[dict | None] = mapped_column(JSONB)
     version_bump: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    coverage: Mapped[list] = mapped_column(JSONB, default=list)
+    coverage: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
     covered_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     audited_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False)
@@ -84,6 +97,12 @@ class CapaDocgDecision(Base):
             name="chk_docg_decision_defer",
         ),
         UniqueConstraint("analysis_id", "revision", name="uq_docg_decision_analysis_revision"),
+        ForeignKeyConstraint(
+            ["analysis_id", "factory_id"],
+            ["capa_docg_analysis.analysis_id", "capa_docg_analysis.factory_id"],
+            ondelete="RESTRICT",
+            name="fk_docg_decision_analysis_factory",
+        ),
     )
     decision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     analysis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_docg_analysis.analysis_id", ondelete="RESTRICT"), nullable=False)
@@ -92,7 +111,7 @@ class CapaDocgDecision(Base):
     factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
     decision: Mapped[str] = mapped_column(String(10), nullable=False)
     no_affected_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    version_snapshot: Mapped[list] = mapped_column(JSONB, default=list)
+    version_snapshot: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'"))
     defer_reason: Mapped[str | None] = mapped_column(Text)
     defer_owner: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
     defer_deadline: Mapped[date | None] = mapped_column(Date)

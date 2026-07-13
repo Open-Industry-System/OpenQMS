@@ -41,6 +41,13 @@ def upgrade() -> None:
         sa.Column("generated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.UniqueConstraint("capa_id", "factory_id", name="uq_docg_analysis_capa_factory"),
+        sa.UniqueConstraint("analysis_id", "factory_id", name="uq_docg_analysis_factory"),
+        sa.ForeignKeyConstraint(
+            ["capa_id", "factory_id"],
+            ["capa_eightd.report_id", "capa_eightd.factory_id"],
+            ondelete="RESTRICT",
+            name="fk_docg_analysis_capa_factory",
+        ),
         sa.CheckConstraint("status IN ('running','done','failed')", name="chk_docg_analysis_status"),
         sa.CheckConstraint(
             "(status='running' AND is_current=false AND completed_at IS NULL) "
@@ -63,7 +70,7 @@ def upgrade() -> None:
         "capa_docg_audit",
         sa.Column("audit_id", UUID(as_uuid=True), primary_key=True),
         sa.Column("analysis_id", UUID(as_uuid=True), sa.ForeignKey("capa_docg_analysis.analysis_id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("audit_run_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("audit_run_id", UUID(as_uuid=True), nullable=False, server_default=sa.text("gen_random_uuid()")),
         sa.Column("factory_id", UUID(as_uuid=True), sa.ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("doc_type", sa.String(16), nullable=False),
         sa.Column("doc_id", UUID(as_uuid=True), nullable=False),
@@ -72,7 +79,7 @@ def upgrade() -> None:
         sa.Column("version_before", JSONB),
         sa.Column("version_after", JSONB),
         sa.Column("version_bump", sa.Boolean, nullable=False, server_default=sa.text("false")),
-        sa.Column("coverage", JSONB, server_default=sa.text("'[]'")),
+        sa.Column("coverage", JSONB, nullable=False, server_default=sa.text("'[]'")),
         sa.Column("covered_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("total_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("audited_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False),
@@ -81,6 +88,12 @@ def upgrade() -> None:
         sa.CheckConstraint("doc_type IN ('control_plan','fmea','sop','inspection_sop','other')", name="chk_docg_audit_doctype"),
         sa.CheckConstraint("status IN ('passed','pending_update','incomplete')", name="chk_docg_audit_status"),
         sa.UniqueConstraint("audit_run_id", "doc_type", "doc_id", name="uq_docg_audit_run_doc"),
+        sa.ForeignKeyConstraint(
+            ["analysis_id", "factory_id"],
+            ["capa_docg_analysis.analysis_id", "capa_docg_analysis.factory_id"],
+            ondelete="RESTRICT",
+            name="fk_docg_audit_analysis_factory",
+        ),
     )
 
     op.create_table(
@@ -92,7 +105,7 @@ def upgrade() -> None:
         sa.Column("factory_id", UUID(as_uuid=True), sa.ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("decision", sa.String(10), nullable=False),
         sa.Column("no_affected_confirmed", sa.Boolean, nullable=False, server_default=sa.text("false")),
-        sa.Column("version_snapshot", JSONB, server_default=sa.text("'[]'")),
+        sa.Column("version_snapshot", JSONB, nullable=False, server_default=sa.text("'[]'")),
         sa.Column("defer_reason", sa.Text),
         sa.Column("defer_owner", UUID(as_uuid=True), sa.ForeignKey("users.user_id")),
         sa.Column("defer_deadline", sa.Date),
@@ -106,6 +119,12 @@ def upgrade() -> None:
             name="chk_docg_decision_defer",
         ),
         sa.UniqueConstraint("analysis_id", "revision", name="uq_docg_decision_analysis_revision"),
+        sa.ForeignKeyConstraint(
+            ["analysis_id", "factory_id"],
+            ["capa_docg_analysis.analysis_id", "capa_docg_analysis.factory_id"],
+            ondelete="RESTRICT",
+            name="fk_docg_decision_analysis_factory",
+        ),
     )
 
 

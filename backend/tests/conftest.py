@@ -30,6 +30,60 @@ from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
 from app.models.user import User
 
+
+# ── Shared migration-test helpers ───────────────────────────────────────────
+# These live in the top-level conftest so tests/migrations/ and tests/capa/
+# can both reuse the one-shot empty-DB fixture.
+
+def _parse_pg(url: str) -> dict:
+    from urllib.parse import urlparse
+
+    p = urlparse(url.replace("postgresql+asyncpg://", "postgresql://"))
+    return {
+        "host": p.hostname,
+        "port": p.port or 5432,
+        "user": p.username,
+        "password": p.password,
+        "dbname": p.path.lstrip("/"),
+    }
+
+
+@pytest.fixture
+def mig_db_url(monkeypatch):
+    """Create one-shot PG db (no migrations applied), return async URL. Teardown drops it."""
+    from sqlalchemy import create_engine, text
+
+    pg = _parse_pg(_test_db_url)
+    mig_dbname = f"qms_migtest_{uuid.uuid4().hex}"
+    admin = create_engine(
+        f"postgresql+psycopg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/postgres",
+        isolation_level="AUTOCOMMIT",
+    )
+    with admin.connect() as c:
+        c.execute(text(f'CREATE DATABASE "{mig_dbname}"'))
+    admin.dispose()
+
+    mig_url = f"postgresql+asyncpg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/{mig_dbname}"
+    monkeypatch.setenv("DATABASE_URL", mig_url)
+    try:
+        yield mig_url
+    finally:
+        admin = create_engine(
+            f"postgresql+psycopg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/postgres",
+            isolation_level="AUTOCOMMIT",
+        )
+        with admin.connect() as c:
+            # Terminate all connections to the test database before dropping
+            c.execute(text(
+                f"SELECT pg_terminate_backend(pg_stat_activity.pid) "
+                f"FROM pg_stat_activity "
+                f"WHERE pg_stat_activity.datname = '{mig_dbname}' "
+                f"AND pid <> pg_backend_pid()"
+            ))
+            c.execute(text(f'DROP DATABASE IF EXISTS "{mig_dbname}"'))
+        admin.dispose()
+
+
 # ── Database availability check ──────────────────────────────────────────────
 
 _db_available: bool | None = None
