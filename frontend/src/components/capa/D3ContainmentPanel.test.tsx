@@ -123,7 +123,7 @@ const renderPanel = (props = {}) =>
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getD3Runs).mockResolvedValue(mockRuns);
-  // Use failed report so the generate button is visible (done is terminal → button hidden)
+  // Use failed report so the report retry button is visible (done → regenerate)
   vi.mocked(getD3Report).mockResolvedValue(mockFailedReport);
   vi.mocked(getD3Advice).mockResolvedValue(mockEmptyAdvice);
   vi.mocked(getD3Adoptions).mockResolvedValue([]);
@@ -205,8 +205,9 @@ describe("D3ContainmentPanel", () => {
     expect(screen.getByTestId("d3-generate-report")).toHaveTextContent("重试生成报告");
   });
 
-  it("shows regenerate-advice button when advice exists (done is not terminal)", async () => {
-    // advice list present (done generation) → regenerate button visible
+  it("shows regenerate-advice button when advice exists and report is done (not terminal)", async () => {
+    // advice list present (done generation) + done report → regenerate button enabled
+    vi.mocked(getD3Report).mockResolvedValue(mockDoneReport);
     vi.mocked(getD3Advice).mockResolvedValue({
       advice: [
         {
@@ -221,7 +222,45 @@ describe("D3ContainmentPanel", () => {
     });
     renderPanel();
 
-    await waitFor(() => expect(screen.getByTestId("d3-generate-advice")).toBeInTheDocument());
-    expect(screen.getByTestId("d3-generate-advice")).toHaveTextContent("重新生成建议");
+    const btn = await waitFor(() => screen.getByTestId("d3-generate-advice"));
+    expect(btn).toHaveTextContent("重新生成建议");
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("disables advice generate button when report is not done and shows hint", async () => {
+    // failed report → advice button disabled + hint visible (no generic failure on click)
+    vi.mocked(getD3Report).mockResolvedValue(mockFailedReport);
+    renderPanel();
+
+    const btn = await waitFor(() => screen.getByTestId("d3-generate-advice"));
+    expect(btn).toBeDisabled();
+    expect(screen.getByTestId("d3-advice-needs-report-hint")).toBeInTheDocument();
+  });
+
+  it("shows superseded banner when current report is superseded (no current, fallback body)", async () => {
+    // First attempt superseded (no current) → fallback body status=failed error=superseded
+    const supersededReport: D3ImpactReport = {
+      ...mockFailedReport,
+      error: "superseded",
+    };
+    vi.mocked(getD3Report).mockResolvedValue(supersededReport);
+    renderPanel();
+
+    const banner = await waitFor(() => screen.getByTestId("d3-report-failed-banner"));
+    // superseded → warning-type banner with superseded message (not generic failure)
+    expect(banner).toHaveTextContent("已被 newer 代次取代");
+  });
+
+  it("shows superseded attempt banner when current done report has a newer superseded retry", async () => {
+    const doneWithSupersededAttempt: D3ImpactReport = {
+      ...mockDoneReport,
+      latest_attempt_status: "superseded",
+      latest_attempt_error: "superseded",
+    };
+    vi.mocked(getD3Report).mockResolvedValue(doneWithSupersededAttempt);
+    renderPanel();
+
+    const banner = await waitFor(() => screen.getByTestId("d3-report-attempt-banner"));
+    expect(banner).toHaveTextContent("已被 newer 代次取代");
   });
 });

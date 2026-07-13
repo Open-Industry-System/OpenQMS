@@ -36,6 +36,16 @@ const adviceTypeColors: Record<D3AdviceType, string> = {
   alternative: "green",
 };
 
+// Map a stable backend error code to a localized, user-facing banner title.
+// `superseded` = the run/report/generation was overtaken by a newer import (not a
+// plain LLM failure) — distinct message so the user knows to refresh, not just retry.
+function d3ErrorTitle(t: (k: string, d: string) => string, code: string | null | undefined): string {
+  if (code === "superseded") return t("d3.superseded", "已被 newer 代次取代，请刷新");
+  if (code === "blocked") return t("d3.blocked", "LLM 凭证未配置，生成被阻断");
+  if (code === "stale") return t("d3.stale", "上次生成超时，请重试");
+  return t("d3.reportFailed", "生成失败");
+}
+
 type ModalMode = "adopt" | "reject" | "execution" | null;
 
 export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanelProps) {
@@ -131,9 +141,11 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       const data = await getD3Report(capa.report_id, runId);
       setReport(data);
+      // A newer non-current attempt (failed or superseded) exists alongside the
+      // still-valid current report. Surface it as a non-blocking retry banner.
       setReportAttemptError(
-        data && data.latest_attempt_status === "failed"
-          ? data.latest_attempt_error || "failed"
+        data && (data.latest_attempt_status === "failed" || data.latest_attempt_status === "superseded")
+          ? data.latest_attempt_error || data.latest_attempt_status
           : null,
       );
     } catch (e: any) {
@@ -212,6 +224,13 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
 
   const handleGenerateAdvice = async () => {
     if (!currentRun) return;
+    // Advice generation requires a valid current done report (backend /d3/advice
+    // reads the current report). Gate here so the user gets a clear hint instead of
+    // a generic "建议生成失败" from the backend's "需先生成影响报告" check.
+    if (!report || report.status !== "done") {
+      message.warning(t("d3.adviceNeedsReport", "需先生成影响报告才能生成建议"));
+      return;
+    }
     setGeneratingAdvice(true);
     try {
       await generateD3Advice(capa.report_id, { run_id: currentRun.run_id });
@@ -442,20 +461,25 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                   {t("d3.customerImpact", "客户影响")}: {report.customer_impact.length} 条
                 </Text>
               )}
-              {report.status === "failed" && (
+              {(report.status === "failed" || report.status === "superseded") && (
                 <Alert
-                  type="error"
+                  type={report.error === "superseded" ? "warning" : "error"}
                   showIcon
-                  message={t("d3.reportFailed", "报告生成失败")}
-                  description={report.error || t("d3.reportFailedHint", "可点击下方按钮重试")}
+                  message={d3ErrorTitle(t, report.error)}
+                  description={
+                    report.error === "superseded"
+                      ? t("d3.supersededHint", "当前 run 已被新导入取代，请切换或重新导入后重试")
+                      : report.error || t("d3.reportFailedHint", "可点击下方按钮重试")
+                  }
                   style={{ marginTop: 8 }}
+                  data-e2e="d3-report-failed-banner"
                 />
               )}
               {reportAttemptError && report.status === "done" && (
                 <Alert
                   type="warning"
                   showIcon
-                  message={t("d3.reportRetryFailed", "最近一次重试失败")}
+                  message={d3ErrorTitle(t, reportAttemptError)}
                   description={reportAttemptError}
                   style={{ marginTop: 8 }}
                   data-e2e="d3-report-attempt-banner"
@@ -491,7 +515,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           <Alert
             type="error"
             showIcon
-            message={t("d3.adviceFailed", "建议生成失败")}
+            message={d3ErrorTitle(t, adviceError)}
             description={adviceError}
             style={{ marginBottom: 12 }}
             data-e2e="d3-advice-failed-banner"
@@ -501,7 +525,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           <Alert
             type="warning"
             showIcon
-            message={t("d3.adviceRetryFailed", "最近一次重试失败")}
+            message={d3ErrorTitle(t, adviceAttemptError)}
             description={adviceAttemptError}
             style={{ marginBottom: 12 }}
             data-e2e="d3-advice-attempt-banner"
@@ -559,19 +583,27 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           )}
         />
         {!isReadOnly && (
-          <Button
-            size="small"
-            loading={generatingAdvice}
-            onClick={handleGenerateAdvice}
-            style={{ marginTop: 8 }}
-            data-e2e="d3-generate-advice"
-          >
-            {adviceError
-              ? t("d3.retryAdvice", "重试生成建议")
-              : advice.length === 0
-                ? t("d3.generateAdvice", "生成建议")
-                : t("d3.regenerateAdvice", "重新生成建议")}
-          </Button>
+          <>
+            <Button
+              size="small"
+              loading={generatingAdvice}
+              onClick={handleGenerateAdvice}
+              disabled={!report || report.status !== "done"}
+              style={{ marginTop: 8 }}
+              data-e2e="d3-generate-advice"
+            >
+              {adviceError
+                ? t("d3.retryAdvice", "重试生成建议")
+                : advice.length === 0
+                  ? t("d3.generateAdvice", "生成建议")
+                  : t("d3.regenerateAdvice", "重新生成建议")}
+            </Button>
+            {(!report || report.status !== "done") && (
+              <Text type="secondary" style={{ marginLeft: 8 }} data-e2e="d3-advice-needs-report-hint">
+                {t("d3.adviceNeedsReport", "需先生成影响报告才能生成建议")}
+              </Text>
+            )}
+          </>
         )}
       </Card>
 
