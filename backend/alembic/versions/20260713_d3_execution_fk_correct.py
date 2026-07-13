@@ -37,6 +37,7 @@ def _exec_if_not_exists(table: str, constraint: str, ddl: str) -> None:
                     SELECT 1 FROM information_schema.table_constraints
                     WHERE constraint_name = '{constraint}'
                       AND table_name = '{table}'
+                      AND constraint_schema = current_schema()
                 ) THEN
                     {ddl};
                 END IF;

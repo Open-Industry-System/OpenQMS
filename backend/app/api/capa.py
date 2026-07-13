@@ -1058,14 +1058,14 @@ async def d3_get_report_ep(
     target_run = await _resolve_d3_run(db, report_id, run_id)
     if target_run is None:
         raise HTTPException(status_code=404, detail="当前导入运行不存在")
-    # For a specific (historical) run, return its is_current report if any; for current run,
-    # return the is_current report (done). Historical runs may have failed reports too.
+    # Return the LATEST report for this run (by created_at), regardless of is_current.
+    # A failed/superseded report is is_current=false but must still be readable so the
+    # UI can surface the error + retry. Done reports are is_current=true.
     report = await db.scalar(
         select(CapaD3ImpactReport)
-        .where(
-            CapaD3ImpactReport.run_id == target_run.run_id,
-            CapaD3ImpactReport.is_current == True,
-        )
+        .where(CapaD3ImpactReport.run_id == target_run.run_id)
+        .order_by(CapaD3ImpactReport.created_at.desc())
+        .limit(1)
     )
     if report is None:
         raise HTTPException(status_code=404, detail="D3 影响报告不存在")
@@ -1108,18 +1108,10 @@ async def d3_generate_report_ep(
             headers={"Retry-After": str(retry_after)},
         )
 
-    # 2. Current report done/failed/superseded -> 200
-    current_report = await db.scalar(
-        select(CapaD3ImpactReport)
-        .where(
-            CapaD3ImpactReport.run_id == current_run.run_id,
-            CapaD3ImpactReport.is_current == True,
-        )
-    )
-    if current_report is not None:
-        return D3ReportResponse.model_validate(current_report)
-
-    # 3. No report yet -> generate
+    # 2. POST = manual regeneration (per spec §7: "手动重生成当前 run 报告（重试）").
+    #    Any existing done/failed/superseded report is demoted (is_current=false) by the
+    #    service's 4-step promotion when the new report succeeds. Running → 202 (above).
+    #    No early-return of the existing done report.
     result = await capa_d3_containment_service.generate_impact_report(
         db, current_run.run_id, scope.user
     )
@@ -1203,18 +1195,10 @@ async def d3_generate_advice_ep(
             headers={"Retry-After": str(retry_after)},
         )
 
-    # 2. Current generation done -> return advice list
-    current_gen = await db.scalar(
-        select(CapaD3AdviceGeneration)
-        .where(
-            CapaD3AdviceGeneration.report_id == current_report.report_id,
-            CapaD3AdviceGeneration.is_current == True,
-        )
-    )
-    if current_gen is not None and current_gen.status == "done":
-        return await _build_advice_response(db, current_gen)
-
-    # 3. No generation yet -> generate
+    # 2. POST = manual regeneration (per spec §7: "手动重生成当前 run 建议（重试）").
+    #    Any existing done/failed generation is demoted by the service's 5-step
+    #    promotion when the new generation succeeds. Running → 202 (above).
+    #    No early-return of the existing done generation.
     result = await capa_d3_containment_service.generate_advice(
         db, capa.report_id, current_report.report_id, scope.user, None
     )
@@ -1273,18 +1257,19 @@ async def d3_get_advice_ep(
     if current_report is None:
         return D3AdviceResponse(advice=[])
 
-    # Find current generation (for current run) or the is_current generation of this report
-    current_gen = await db.scalar(
+    # Return the LATEST generation for this report (by created_at), regardless of is_current.
+    # A failed generation is is_current=false but must be readable so the UI can surface
+    # the error + retry. Done generations are is_current=true with advice rows.
+    latest_gen = await db.scalar(
         select(CapaD3AdviceGeneration)
-        .where(
-            CapaD3AdviceGeneration.report_id == current_report.report_id,
-            CapaD3AdviceGeneration.is_current == True,
-        )
+        .where(CapaD3AdviceGeneration.report_id == current_report.report_id)
+        .order_by(CapaD3AdviceGeneration.created_at.desc())
+        .limit(1)
     )
-    if current_gen is None:
+    if latest_gen is None:
         return D3AdviceResponse(advice=[])
 
-    return await _build_advice_response(db, current_gen)
+    return await _build_advice_response(db, latest_gen)
 
 
 async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) -> D3AdviceResponse:
@@ -1333,7 +1318,11 @@ async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) 
             )
         )
 
-    return D3AdviceResponse(advice=items, status="done")
+    return D3AdviceResponse(
+        advice=items,
+        status=gen.status if gen.status in ("done", "failed") else "done",
+        error=gen.error if gen.status == "failed" else None,
+    )
 
 
 # ===== D3 Advice Adoption endpoints (US-E2E-01.1 Task 9) =====
