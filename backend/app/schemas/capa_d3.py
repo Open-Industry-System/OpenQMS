@@ -87,6 +87,13 @@ class D3ReportResponse(BaseModel):
     completed_at: datetime | None
     created_at: datetime
 
+    # When the body is the current (done) artifact but a newer failed/superseded
+    # attempt exists (is_current=false), these carry that attempt's status/error so
+    # the UI can surface "最近一次重试失败" without losing the still-valid current data.
+    # Populated by the GET endpoint; None when there is no newer failed attempt.
+    latest_attempt_status: Literal["done", "failed", "superseded"] | None = None
+    latest_attempt_error: str | None = None
+
     model_config = {"from_attributes": True}
 
 
@@ -136,6 +143,11 @@ class D3AdviceResponse(BaseModel):
     advice: list[D3AdviceItem]
     status: Literal["done", "failed"] = "done"
     error: str | None = None
+    # When `status` reflects the current (done) generation but a newer failed
+    # attempt exists (is_current=false), these carry that attempt's status/error so
+    # the UI can surface "最近一次重试失败" without losing the still-valid current advice.
+    latest_attempt_status: Literal["done", "failed"] | None = None
+    latest_attempt_error: str | None = None
 
 
 class D3AdviceRequest(BaseModel):

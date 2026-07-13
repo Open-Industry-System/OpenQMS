@@ -1987,6 +1987,10 @@ export interface D3ImpactReport {
   generated_by: string;
   generated_at: string;
   created_at: string;
+  // Populated by GET when a newer failed/superseded attempt exists alongside the
+  // still-valid current report, so the UI can show a "最近一次重试失败" banner.
+  latest_attempt_status?: "done" | "failed" | "superseded" | null;
+  latest_attempt_error?: string | null;
 }
 
 export type D3AdviceType = "recall" | "isolate" | "notify_customer" | "strict_inspection" | "alternative";
@@ -2017,6 +2021,10 @@ export interface D3AdviceResponse {
   advice: D3AiAdvice[];
   status?: "done" | "failed";
   error?: string | null;
+  // Populated by GET when a newer failed attempt exists alongside the still-valid
+  // current generation, so the UI can show a "最近一次重试失败" banner.
+  latest_attempt_status?: "done" | "failed" | null;
+  latest_attempt_error?: string | null;
 }
 
 export interface D3Execution {

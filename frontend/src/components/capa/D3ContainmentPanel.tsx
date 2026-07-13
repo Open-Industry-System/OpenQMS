@@ -48,6 +48,10 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   const [report, setReport] = useState<D3ImpactReport | null>(null);
   const [advice, setAdvice] = useState<D3AiAdvice[]>([]);
   const [adviceError, setAdviceError] = useState<string | null>(null);
+  // "最近一次重试失败" — populated only when a newer failed attempt exists alongside
+  // the still-valid current report/advice (GET latest_attempt_*). Non-blocking banner.
+  const [reportAttemptError, setReportAttemptError] = useState<string | null>(null);
+  const [adviceAttemptError, setAdviceAttemptError] = useState<string | null>(null);
   const [adoptions, setAdoptions] = useState<D3AdviceAdoption[]>([]);
   const [executions, setExecutions] = useState<D3Execution[]>([]);
   const [loading, setLoading] = useState(false);
@@ -127,10 +131,16 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       const data = await getD3Report(capa.report_id, runId);
       setReport(data);
+      setReportAttemptError(
+        data && data.latest_attempt_status === "failed"
+          ? data.latest_attempt_error || "failed"
+          : null,
+      );
     } catch (e: any) {
-      // 404 = no current report (failed/never generated) — silent, show generate/retry UI
+      // 404 = no report at all (never generated) — silent, show generate UI
       if (e?.response?.status === 404) {
         setReport(null);
+        setReportAttemptError(null);
       } else {
         message.error(t("d3.loadReportFailed", "加载报告失败"));
       }
@@ -141,7 +151,15 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       const resp = await getD3Advice(capa.report_id, runId);
       setAdvice(resp.advice ?? []);
+      // adviceError = the *current* generation failed (blocking, shows retry replacing advice).
+      // adviceAttemptError = a newer failed retry alongside a still-valid current generation
+      // (non-blocking banner, advice list stays visible).
       setAdviceError(resp.status === "failed" ? (resp.error || "failed") : null);
+      setAdviceAttemptError(
+        resp.latest_attempt_status === "failed"
+          ? resp.latest_attempt_error || "failed"
+          : null,
+      );
     } catch {
       message.error(t("d3.loadAdviceFailed", "加载建议失败"));
     }
@@ -433,6 +451,16 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                   style={{ marginTop: 8 }}
                 />
               )}
+              {reportAttemptError && report.status === "done" && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={t("d3.reportRetryFailed", "最近一次重试失败")}
+                  description={reportAttemptError}
+                  style={{ marginTop: 8 }}
+                  data-e2e="d3-report-attempt-banner"
+                />
+              )}
             </>
           ) : (
             <Text type="secondary">
@@ -440,7 +468,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             </Text>
           )}
         </Space>
-        {!isReadOnly && (!report || report.status === "failed") && (
+        {!isReadOnly && (!report || report.status !== "running") && (
           <Button
             size="small"
             loading={generatingReport}
@@ -448,9 +476,11 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             style={{ marginTop: 8 }}
             data-e2e="d3-generate-report"
           >
-            {report?.status === "failed"
-              ? t("d3.retryReport", "重试生成报告")
-              : t("d3.generateReport", "生成报告")}
+            {!report
+              ? t("d3.generateReport", "生成报告")
+              : report.status === "failed"
+                ? t("d3.retryReport", "重试生成报告")
+                : t("d3.regenerateReport", "重新生成")}
           </Button>
         )}
       </Card>
@@ -465,6 +495,16 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             description={adviceError}
             style={{ marginBottom: 12 }}
             data-e2e="d3-advice-failed-banner"
+          />
+        )}
+        {adviceAttemptError && !adviceError && advice.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={t("d3.adviceRetryFailed", "最近一次重试失败")}
+            description={adviceAttemptError}
+            style={{ marginBottom: 12 }}
+            data-e2e="d3-advice-attempt-banner"
           />
         )}
         <List
@@ -518,7 +558,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             </List.Item>
           )}
         />
-        {!isReadOnly && (advice.length === 0 || adviceError) && (
+        {!isReadOnly && (
           <Button
             size="small"
             loading={generatingAdvice}
@@ -526,7 +566,11 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             style={{ marginTop: 8 }}
             data-e2e="d3-generate-advice"
           >
-            {adviceError ? t("d3.retryAdvice", "重试生成建议") : t("d3.generateAdvice", "生成建议")}
+            {adviceError
+              ? t("d3.retryAdvice", "重试生成建议")
+              : advice.length === 0
+                ? t("d3.generateAdvice", "生成建议")
+                : t("d3.regenerateAdvice", "重新生成建议")}
           </Button>
         )}
       </Card>

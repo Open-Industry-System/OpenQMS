@@ -1058,18 +1058,40 @@ async def d3_get_report_ep(
     target_run = await _resolve_d3_run(db, report_id, run_id)
     if target_run is None:
         raise HTTPException(status_code=404, detail="当前导入运行不存在")
-    # Return the LATEST report for this run (by created_at), regardless of is_current.
-    # A failed/superseded report is is_current=false but must still be readable so the
-    # UI can surface the error + retry. Done reports are is_current=true.
-    report = await db.scalar(
+    # Spec §7: GET returns the "当前代报告" = the is_current=true report (what the
+    # D3→D4 gate also reads). A failed/superseded retry does NOT switch current
+    # (spec §4.3), so the still-valid current report stays visible. When no current
+    # exists yet (first attempt failed before any success), fall back to the latest
+    # attempt so the UI can surface the failure + retry.
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == target_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    latest_attempt = await db.scalar(
         select(CapaD3ImpactReport)
         .where(CapaD3ImpactReport.run_id == target_run.run_id)
         .order_by(CapaD3ImpactReport.created_at.desc())
         .limit(1)
     )
+    report = current_report or latest_attempt
     if report is None:
         raise HTTPException(status_code=404, detail="D3 影响报告不存在")
-    return D3ReportResponse.model_validate(report)
+    resp = D3ReportResponse.model_validate(report)
+    # If the current (valid) report differs from the newest attempt and that
+    # newest attempt failed/superseded, surface it so the UI shows a retry banner
+    # without hiding the still-valid current data.
+    if (
+        current_report is not None
+        and latest_attempt is not None
+        and latest_attempt.report_id != current_report.report_id
+        and latest_attempt.status in ("failed", "superseded")
+    ):
+        resp.latest_attempt_status = latest_attempt.status
+        resp.latest_attempt_error = latest_attempt.error
+    return resp
 
 
 @router.post("/{report_id}/d3/report")
@@ -1257,19 +1279,41 @@ async def d3_get_advice_ep(
     if current_report is None:
         return D3AdviceResponse(advice=[])
 
-    # Return the LATEST generation for this report (by created_at), regardless of is_current.
-    # A failed generation is is_current=false but must be readable so the UI can surface
-    # the error + retry. Done generations are is_current=true with advice rows.
+    # Spec §7: GET returns the "当前 advice generation" = the is_current=true
+    # generation (what the D3→D4 gate also reads). A failed retry does NOT switch
+    # current (spec §4.4), so the still-valid current advice stays visible. When no
+    # current exists yet (first attempt failed before any success), fall back to the
+    # latest attempt so the UI can surface the failure + retry.
+    current_gen = await db.scalar(
+        select(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
     latest_gen = await db.scalar(
         select(CapaD3AdviceGeneration)
         .where(CapaD3AdviceGeneration.report_id == current_report.report_id)
         .order_by(CapaD3AdviceGeneration.created_at.desc())
         .limit(1)
     )
-    if latest_gen is None:
+    gen = current_gen or latest_gen
+    if gen is None:
         return D3AdviceResponse(advice=[])
 
-    return await _build_advice_response(db, latest_gen)
+    resp = await _build_advice_response(db, gen)
+    # If the current (valid) generation differs from the newest attempt and that
+    # newest attempt failed, surface it so the UI shows a retry banner without
+    # hiding the still-valid current advice.
+    if (
+        current_gen is not None
+        and latest_gen is not None
+        and latest_gen.generation_id != current_gen.generation_id
+        and latest_gen.status == "failed"
+    ):
+        resp.latest_attempt_status = "failed"
+        resp.latest_attempt_error = latest_gen.error
+    return resp
 
 
 async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) -> D3AdviceResponse:

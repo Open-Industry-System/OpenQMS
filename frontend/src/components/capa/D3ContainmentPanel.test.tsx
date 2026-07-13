@@ -177,23 +177,51 @@ describe("D3ContainmentPanel", () => {
     expect(screen.getByTestId("d3-generate-advice")).toHaveTextContent("重试生成建议");
   });
 
-  it("hides report generate button when report is done and shows retry when failed", async () => {
-    // done report → generate button hidden (terminal)
-    vi.mocked(getD3Report).mockResolvedValue(mockDoneReport);
+  it("shows regenerate button when report is done, retry when failed, and attempt banner on newer failed retry", async () => {
+    // done report → regenerate button visible (done is NOT terminal; POST regenerates)
+    const doneWithFailedAttempt: D3ImpactReport = {
+      ...mockDoneReport,
+      latest_attempt_status: "failed",
+      latest_attempt_error: "llm_failed",
+    };
+    vi.mocked(getD3Report).mockResolvedValue(doneWithFailedAttempt);
     renderPanel();
 
-    await waitFor(() => expect(screen.queryByTestId("d3-generate-report")).not.toBeInTheDocument());
+    const btn = await waitFor(() => screen.getByTestId("d3-generate-report"));
+    expect(btn).toHaveTextContent("重新生成");
+    // newer failed retry alongside the still-valid done report → warning banner
+    expect(screen.getByTestId("d3-report-attempt-banner")).toBeInTheDocument();
 
-    // failed report → retry button visible (after switching historical→current to reload)
+    // failed report (no current, first failure) → retry button visible
     vi.mocked(getD3Report).mockResolvedValue(mockFailedReport);
     const selector = screen.getByRole("combobox");
     fireEvent.mouseDown(selector);
     fireEvent.click(screen.getByText(/代次.*2026-07-11/));
-    // historical is read-only → still hidden; switch back to current
+    // historical is read-only → button hidden; switch back to current to reload
     fireEvent.mouseDown(selector);
     fireEvent.click(screen.getByText("当前代次"));
 
     await waitFor(() => expect(screen.getByTestId("d3-generate-report")).toBeInTheDocument());
     expect(screen.getByTestId("d3-generate-report")).toHaveTextContent("重试生成报告");
+  });
+
+  it("shows regenerate-advice button when advice exists (done is not terminal)", async () => {
+    // advice list present (done generation) → regenerate button visible
+    vi.mocked(getD3Advice).mockResolvedValue({
+      advice: [
+        {
+          advice_id: "a1",
+          advice_type: "isolate",
+          advice_text: "隔离库存",
+          source_provenance: [{ source_type: "inventory", snapshot_id: null, record_key: "INV-1", stage: "llm_advice" }],
+          target_batch_refs: null,
+        },
+      ],
+      status: "done",
+    });
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByTestId("d3-generate-advice")).toBeInTheDocument());
+    expect(screen.getByTestId("d3-generate-advice")).toHaveTextContent("重新生成建议");
   });
 });

@@ -301,15 +301,67 @@ async def test_report_post_after_done_regenerates_new_report(client, capa_d3_don
     assert new_id != str(old_report_id), "POST must regenerate, not return the old done report"
 
 
-async def test_report_get_reads_failed_report(client, db, capa_d3_done_report):
-    """P1#2: GET /d3/report returns the latest report incl. failed (is_current=false),
-    so the UI can surface the error + retry. Not just is_current=true."""
+async def test_report_get_coexistence_current_done_and_newer_failed(
+    client, db, capa_d3_done_report
+):
+    """P1#2 (key state): old current done report + newer failed non-current report coexist.
+    GET must return the STILL-VALID current done report (gate reads it too), with
+    latest_attempt_status=failed + latest_attempt_error so the UI shows a retry banner
+    without hiding the current data."""
+    from app.models.capa_d3 import CapaD3ImpactReport
+    from datetime import datetime, timezone, timedelta
+
+    capa, report, run, user = capa_d3_done_report
+    # The fixture's `report` is the current done report. Add a newer failed non-current
+    # report for the same run (created_at strictly after, so it sorts first by desc).
+    newer_failed = CapaD3ImpactReport(
+        report_id=uuid.uuid4(),
+        run_id=run.run_id,
+        factory_id=capa.factory_id,
+        is_current=False,
+        batches=None,
+        impact_qty=None,
+        customer_impact=None,
+        time_window=None,
+        risk_level=None,
+        risk_floor=None,
+        risk_explanation=None,
+        status="failed",
+        attempt_token=uuid.uuid4(),
+        stage_runs=[],
+        prompt_stats=None,
+        error="llm_failed",
+        completed_at=datetime.now(timezone.utc),
+        llm_available=True,
+        model="test-model",
+        generated_by=user.user_id,
+        created_at=datetime.now(timezone.utc) + timedelta(seconds=5),
+    )
+    db.add(newer_failed)
+    await db.commit()
+
+    resp = await client.get(f"/api/capa/{capa.report_id}/d3/report")
+    assert resp.status_code == 200
+    body = resp.json()
+    # Body is the STILL-VALID current done report, NOT the newer failed one.
+    assert body["report_id"] == str(report.report_id)
+    assert body["status"] == "done"
+    # And the newer failed attempt is surfaced separately.
+    assert body["latest_attempt_status"] == "failed"
+    assert body["latest_attempt_error"] == "llm_failed"
+
+
+async def test_report_get_first_failure_no_current_returns_failed(
+    client, db, capa_d3_done_report
+):
+    """P1#2 (fallback): when no current exists (first attempt failed before any success),
+    GET falls back to the latest (failed) attempt so the UI can surface the error + retry."""
     from app.models.capa_d3 import CapaD3ImpactReport
     from sqlalchemy import update as sa_update
     from datetime import datetime, timezone
 
     capa, report, run, user = capa_d3_done_report
-    # Demote + fail the done report (simulate a failed regeneration leaving no current)
+    # Demote + fail the done report (simulate a failed first attempt, no current left)
     await db.execute(
         sa_update(CapaD3ImpactReport)
         .where(CapaD3ImpactReport.report_id == report.report_id)
@@ -322,6 +374,7 @@ async def test_report_get_reads_failed_report(client, db, capa_d3_done_report):
     body = resp.json()
     assert body["status"] == "failed"
     assert body["error"] == "llm_failed"
+    assert body["latest_attempt_status"] is None
 
 
 async def test_report_get_current(client, capa_d3_done_report):
@@ -479,16 +532,80 @@ async def test_advice_post_after_done_regenerates_new_generation(
     assert new_gen.generation_id != old_gen_id, "POST must regenerate, not return the old done generation"
 
 
-async def test_advice_get_reads_failed_generation(client, db, capa_d3_done_report):
-    """P1#2: GET /d3/advice returns the latest generation incl. failed (is_current=false),
-    so the UI can surface the error + retry. Not just is_current=true."""
+async def test_advice_get_coexistence_current_done_and_newer_failed(
+    client, db, capa_d3_done_report, llm_mock
+):
+    """P1#2 (key state): old current done generation + newer failed non-current generation
+    coexist. GET must return the STILL-VALID current done generation's advice (gate reads
+    it too), with latest_attempt_status=failed + latest_attempt_error so the UI shows a
+    retry banner without hiding the current advice."""
     from app.models.capa_d3 import CapaD3AdviceGeneration
-    from sqlalchemy import update as sa_update
+    from datetime import datetime, timezone, timedelta
+
+    capa, report, run, user = capa_d3_done_report
+    # 1. Establish a current done generation via POST (LLM returns valid advice).
+    llm_mock.return_value = {
+        "advice": [
+            {
+                "advice_type": "strict_inspection",
+                "advice_text": "加强检验",
+                "target_batch_refs": None,
+                "provenance_sources_hint": ["iqc"],
+            }
+        ]
+    }
+    resp1 = await client.post(f"/api/capa/{capa.report_id}/d3/advice")
+    assert resp1.status_code == 200
+    current_gen = await db.scalar(
+        select(CapaD3AdviceGeneration).where(
+            CapaD3AdviceGeneration.report_id == report.report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+    assert current_gen is not None and current_gen.status == "done"
+
+    # 2. Add a newer failed non-current generation for the same report.
+    newer_failed = CapaD3AdviceGeneration(
+        generation_id=uuid.uuid4(),
+        report_id=report.report_id,
+        factory_id=capa.factory_id,
+        is_current=False,
+        advice_count=0,
+        rejected_advice_count=0,
+        stage_runs=[],
+        llm_available=True,
+        model="test-model",
+        status="failed",
+        error="llm_failed",
+        attempt_token=uuid.uuid4(),
+        generated_by=user.user_id,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc) + timedelta(seconds=5),
+    )
+    db.add(newer_failed)
+    await db.commit()
+
+    # 3. GET returns the current done generation's advice, NOT the newer failed one.
+    resp = await client.get(f"/api/capa/{capa.report_id}/d3/advice")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "done"
+    assert len(body["advice"]) >= 1, "current done advice must stay visible"
+    # And the newer failed attempt is surfaced separately.
+    assert body["latest_attempt_status"] == "failed"
+    assert body["latest_attempt_error"] == "llm_failed"
+
+
+async def test_advice_get_first_failure_no_current_returns_failed(
+    client, db, capa_d3_done_report
+):
+    """P1#2 (fallback): when no current generation exists (first attempt failed before any
+    success), GET falls back to the latest (failed) attempt so the UI can retry."""
+    from app.models.capa_d3 import CapaD3AdviceGeneration
     from datetime import datetime, timezone
 
     capa, report, run, user = capa_d3_done_report
-    # Insert a failed generation for this report (is_current=false), newer than the
-    # done generation so it sorts first by created_at.
     failed_gen = CapaD3AdviceGeneration(
         generation_id=uuid.uuid4(),
         report_id=report.report_id,
@@ -514,6 +631,7 @@ async def test_advice_get_reads_failed_generation(client, db, capa_d3_done_repor
     body = resp.json()
     assert body["status"] == "failed"
     assert body["error"] == "llm_failed"
+    assert body["latest_attempt_status"] is None
 
 
 async def test_advice_post_cross_capa_404(client, two_capas_done_report):
