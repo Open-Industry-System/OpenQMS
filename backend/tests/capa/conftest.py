@@ -20,6 +20,7 @@ from app.models.capa_d3 import (
     CapaD3ContainmentSnapshot,
     CapaD3AdviceGeneration,
 )
+from app.models.capa_doc_gate import CapaDocgAnalysis
 from app.models.customer_quality import Customer
 from app.models.erp import ERPConnection, ERPInventoryBalance, ERPShipment
 from app.models.factory import Factory
@@ -812,3 +813,84 @@ async def docg_llm_mock(monkeypatch):
     mock = AsyncMock()
     monkeypatch.setattr(provider_adapter, "complete_json", mock)
     return mock
+
+
+# ===== Doc-gate run_audit fixtures (Task 3) =====
+
+
+def _pg_jsonb_hash(snapshot):
+    import hashlib, json
+    # PG JSONB::text uses compact separators + sorted keys (matches compute_snapshot_hash).
+    return hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+async def _make_done_analysis(db, capa, user, affected_docs):
+    """Insert a done/is_current analysis row directly (bypass LLM)."""
+    from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+    candidates = await _build_allowlist(db, capa)
+    analysis = CapaDocgAnalysis(
+        analysis_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=capa.factory_id,
+        is_current=True, status="done", affected_docs=affected_docs,
+        analysis_input_hash=_compute_input_hash(capa, candidates),
+        llm_available=True, model="test", completed_at=datetime.now(timezone.utc),
+        generated_by=user.user_id,
+    )
+    db.add(analysis)
+    await db.flush()
+    return analysis
+
+
+@pytest_asyncio.fixture
+async def capa_with_done_analysis_no_bump(db, capa_d8_gate_with_docs):
+    """CAPA + done analysis referencing the FMEA (modify node-1), but no new version after capa."""
+    capa, user = capa_d8_gate_with_docs
+    affected = [{
+        "doc_type": "fmea", "doc_id": str(capa.fmea_ref_id), "doc_name": "DocGate FMEA",
+        "baseline_version_id": None, "baseline_version": None,
+        "key_points": [{"target_kind": "fmea_node", "expected_action": "modify",
+                        "field": "prevention_control", "target_key": "node-1"}],
+        "update_suggestion": "更新预防控制",
+    }]
+    await _make_done_analysis(db, capa, user, affected)
+    return capa, user
+
+
+@pytest_asyncio.fixture
+async def capa_with_done_analysis_and_bumped_doc(db, capa_d8_gate_with_docs):
+    """CAPA + done analysis + a NEW FMEA version (created after capa) that modifies node-1."""
+    from sqlalchemy import text as _text
+    from app.models.fmea import FMEADocument
+    from app.models.fmea_version import FMEAVersion
+    from app.services.version_service import get_latest_fmea_version
+    capa, user = capa_d8_gate_with_docs
+    fmea = await db.get(FMEADocument, capa.fmea_ref_id)
+    # Baseline v1.0 (created before capa) — fetch its hash to populate affected_docs.baseline_version
+    baseline_ver = await get_latest_fmea_version(db, fmea.fmea_id)
+    baseline_version = {"major": baseline_ver.major_no, "minor": baseline_ver.minor_no, "sha256": baseline_ver.sha256_hash}
+    # New v1.1 (after capa) modifying node-1
+    new_snapshot = {"nodes": [{"id": "node-1", "type": "ProcessStep", "name": "step1", "prevention_control": "new-control"}], "edges": []}
+    fmea.graph_data = new_snapshot
+    vid = uuid.uuid4()
+    import json as _json
+    await db.execute(_text(
+        "INSERT INTO fmea_versions (version_id, fmea_id, factory_id, major_no, minor_no, snapshot, sha256_hash, change_summary, change_type, created_by, created_at) "
+        "VALUES (:vid, :fid, :fact, 1, 1, CAST(:snap AS JSONB), encode(digest(CAST(:snap AS JSONB)::text, 'sha256'), 'hex'), 'updated', 'minor', :uid, NOW())"
+    ), {"vid": vid, "fid": fmea.fmea_id, "fact": capa.factory_id, "snap": _json.dumps(new_snapshot), "uid": user.user_id})
+    await db.flush()
+    affected = [{
+        "doc_type": "fmea", "doc_id": str(capa.fmea_ref_id), "doc_name": "DocGate FMEA",
+        "baseline_version_id": str(baseline_ver.version_id), "baseline_version": baseline_version,
+        "key_points": [{"target_kind": "fmea_node", "expected_action": "modify",
+                        "field": "prevention_control", "target_key": "node-1"}],
+        "update_suggestion": "更新预防控制",
+    }]
+    await _make_done_analysis(db, capa, user, affected)
+    return capa, user
+
+
+@pytest_asyncio.fixture
+async def capa_with_empty_done_analysis(db, capa_d8_gate_with_docs):
+    """CAPA + done analysis with empty affected_docs (for confirm_no_affected path)."""
+    capa, user = capa_d8_gate_with_docs
+    await _make_done_analysis(db, capa, user, [])
+    return capa, user

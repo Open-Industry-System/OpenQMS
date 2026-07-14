@@ -190,6 +190,25 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
 # Helpers: allowlist, hash, prompt, validation
 # ---------------------------------------------------------------------------
 
+async def _get_baseline_version(db: AsyncSession, doc_id: uuid.UUID, capa_created_at, doc_type: str):
+    """Baseline = last version with created_at <= capa.created_at (NOT the overall latest).
+    Deterministic tiebreak: created_at DESC, major_no DESC, minor_no DESC, version_id DESC.
+    Returns None if no version exists at/before capa creation (new document after CAPA)."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.models.fmea_version import FMEAVersion
+    model = ControlPlanVersion if doc_type == "control_plan" else FMEAVersion
+    parent_col = model.cp_id if doc_type == "control_plan" else model.fmea_id
+    result = await db.execute(
+        select(model).where(
+            parent_col == doc_id,
+            model.created_at <= capa_created_at,
+        ).order_by(
+            model.created_at.desc(), model.major_no.desc(), model.minor_no.desc(), model.version_id.desc()
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def _build_allowlist(db: AsyncSession, capa: CAPAEightD) -> list[dict]:
     """Build doc candidates filtered by factory_id + product_line_code.
     Each entry: {doc_type, doc_id, doc_name, baseline_version_id, baseline_version, existing_targets, add_anchors}.
@@ -211,7 +230,7 @@ async def _build_allowlist(db: AsyncSession, capa: CAPAEightD) -> list[dict]:
         )
     )
     for cp in cp_result.scalars().all():
-        baseline = await get_latest_cp_version(db, cp.cp_id)
+        baseline = await _get_baseline_version(db, cp.cp_id, capa.created_at, "control_plan")
         cand = _cand_from_cp(cp, baseline)
         candidates.append(cand)
 
@@ -223,7 +242,7 @@ async def _build_allowlist(db: AsyncSession, capa: CAPAEightD) -> list[dict]:
         )
     )
     for fmea in fmea_result.scalars().all():
-        baseline = await get_latest_fmea_version(db, fmea.fmea_id)
+        baseline = await _get_baseline_version(db, fmea.fmea_id, capa.created_at, "fmea")
         cand = _cand_from_fmea(fmea, baseline)
         candidates.append(cand)
 
@@ -465,3 +484,189 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
             if (a["parent_node_id"], a["node_type"]) not in allowed_parents:
                 return "add_anchor 不在 allowlist"
     return None
+
+# ---------------------------------------------------------------------------
+# run_audit: synchronous DB-query audit (no LLM) — Task 3
+# ---------------------------------------------------------------------------
+
+from app.services.diff_engine import diff_fmea_graphs, diff_cp_items, diff_cp_headers
+
+
+async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
+    """Audit each affected doc's version bump + key-point coverage. Insert audit + decision rows."""
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+        )
+    )
+    if analysis is None or analysis.status != "done":
+        raise ValueError("未生成有效影响分析")
+    # C9 precheck
+    candidates = await _build_allowlist(db, capa)
+    cur_hash = _compute_input_hash(capa, candidates)
+    if cur_hash != analysis.analysis_input_hash:
+        raise ValueError("分析输入已变更，请重新生成影响分析")
+    if not analysis.affected_docs:
+        raise ValueError("空影响清单须人工确认，不可运行自动审核")
+    audit_run_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    audits = []
+    all_passed = True
+    version_snapshot = []
+    for doc in analysis.affected_docs:
+        audit_row = await _audit_one_doc(db, capa, doc, audit_run_id, user_id, now)
+        audits.append(audit_row)
+        if audit_row["status"] != "passed":
+            all_passed = False
+        else:
+            version_snapshot.append({
+                "doc_type": doc["doc_type"], "doc_id": doc["doc_id"],
+                "version_after_id": audit_row["version_after"]["version_id"] if audit_row["version_after"] else None,
+                "sha256": audit_row["version_after"]["sha256"] if audit_row["version_after"] else None,
+            })
+    # Insert audit rows
+    for a in audits:
+        db.add(CapaDocgAudit(
+            analysis_id=analysis.analysis_id, audit_run_id=audit_run_id, factory_id=capa.factory_id,
+            doc_type=a["doc_type"], doc_id=a["doc_id"], doc_name=a["doc_name"], status=a["status"],
+            version_before=a["version_before"], version_after=a["version_after"], version_bump=a["version_bump"],
+            coverage=a["coverage"], covered_count=a["covered_count"], total_count=a["total_count"],
+            audited_by=user_id, audited_at=now,
+        ))
+    # Insert decision (revision locked)
+    decision = "passed" if all_passed else "blocked"
+    await _insert_decision(db, analysis.analysis_id, capa.factory_id, decision, user_id, now,
+                          audit_run_id if all_passed else None, version_snapshot if all_passed else [])
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id,
+        action="DOC_UPDATE_AUDITED" if all_passed else "DOC_GATE_BLOCKED",
+        changed_fields={"per_doc_status": [{"doc_type": a["doc_type"], "status": a["status"]} for a in audits], "audit_run_id": str(audit_run_id)},
+        operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+    ))
+    await db.commit()
+    return {"decision": decision, "audits": audits, "audit_run_id": str(audit_run_id)}
+
+
+async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, audit_run_id, version_snapshot):
+    """Lock analysis row, read max revision, insert revision+1 (UQ (analysis_id, revision) guards concurrency)."""
+    await db.execute(text("SELECT 1 FROM capa_docg_analysis WHERE analysis_id=:aid FOR UPDATE"), {"aid": analysis_id})
+    max_rev = await db.scalar(
+        select(CapaDocgDecision.revision).where(CapaDocgDecision.analysis_id == analysis_id)
+        .order_by(CapaDocgDecision.revision.desc()).limit(1)
+    )
+    db.add(CapaDocgDecision(
+        analysis_id=analysis_id, audit_run_id=audit_run_id, revision=(max_rev or -1) + 1,
+        factory_id=factory_id, decision=decision, version_snapshot=version_snapshot,
+        decided_by=user_id, decided_at=now,
+    ))
+
+
+async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
+    doc_type = doc["doc_type"]
+    doc_id = uuid.UUID(str(doc["doc_id"]))
+    baseline_meta = doc.get("baseline_version")
+    baseline_version_id = doc.get("baseline_version_id")
+    # Re-fetch baseline version snapshot from DB (affected_docs only stores meta {major,minor,sha256})
+    baseline_snapshot = None
+    if baseline_version_id:
+        from app.models.control_plan_version import ControlPlanVersion
+        from app.models.fmea_version import FMEAVersion
+        bvid = uuid.UUID(str(baseline_version_id))
+        if doc_type == "control_plan":
+            bver = await db.get(ControlPlanVersion, bvid)
+            baseline_snapshot = bver.header_snapshot if bver else None
+        else:
+            bver = await db.get(FMEAVersion, bvid)
+            baseline_snapshot = bver.snapshot if bver else None
+    # Latest version (factory filter applied inside get_latest_* by doc_id; doc_id trusted via allowlist)
+    if doc_type == "control_plan":
+        latest = await get_latest_cp_version(db, doc_id)
+    else:
+        latest = await get_latest_fmea_version(db, doc_id)
+    version_after = None
+    version_bump = False
+    if latest and latest.created_at > capa.created_at:
+        version_after = {"version_id": str(latest.version_id), "major": latest.major_no, "minor": latest.minor_no, "sha256": latest.sha256_hash, "updated_at": latest.created_at.isoformat()}
+        if baseline_meta is None or baseline_meta.get("sha256") != latest.sha256_hash:
+            version_bump = True
+    version_before = None
+    if baseline_meta:
+        version_before = {"version_id": baseline_version_id, "major": baseline_meta["major"], "minor": baseline_meta["minor"], "sha256": baseline_meta["sha256"]}
+    coverage = []
+    covered = 0
+    total = len(doc["key_points"])
+    if version_bump and version_after:
+        diff = _compute_diff(doc_type, baseline_snapshot, latest)
+        for kp in doc["key_points"]:
+            hit = _match_key_point(kp, diff, latest, doc_type)
+            coverage.append({"key_point": kp, "covered": hit, "evidence": ""})
+            if hit:
+                covered += 1
+    else:
+        for kp in doc["key_points"]:
+            coverage.append({"key_point": kp, "covered": False, "evidence": ""})
+    status = "passed" if (version_bump and covered == total) else ("incomplete" if version_bump else "pending_update")
+    return {"doc_type": doc_type, "doc_id": doc_id, "doc_name": doc["doc_name"], "status": status,
+            "version_before": version_before, "version_after": version_after, "version_bump": version_bump,
+            "coverage": coverage, "covered_count": covered, "total_count": total}
+
+
+def _compute_diff(doc_type, baseline_snapshot, latest):
+    if doc_type == "control_plan":
+        v1_items = (baseline_snapshot or {}).get("items", []) if isinstance(baseline_snapshot, dict) else []
+        v2_items = (latest.items_snapshot.get("items", []) if isinstance(latest.items_snapshot, dict) else (latest.items_snapshot or []))
+        v1_header = (baseline_snapshot or {}).get("header", {}) if isinstance(baseline_snapshot, dict) else {}
+        v2_header = latest.header_snapshot or {}
+        return {"items": diff_cp_items(v1_items, v2_items), "headers": diff_cp_headers(v1_header, v2_header)}
+    else:
+        v1 = baseline_snapshot if isinstance(baseline_snapshot, dict) else {"nodes": [], "edges": []}
+        v2 = latest.snapshot or {"nodes": [], "edges": []}
+        return diff_fmea_graphs(v1, v2)
+
+
+def _build_parent_map(snapshot: dict) -> dict:
+    """target_id -> [source_ids] from snapshot edges."""
+    parent_map = {}
+    for e in (snapshot or {}).get("edges", []):
+        src = e.get("source"); tgt = e.get("target")
+        if src and tgt:
+            parent_map.setdefault(tgt, []).append(src)
+    return parent_map
+
+
+def _match_key_point(kp, diff, latest, doc_type):
+    action = kp["expected_action"]
+    kind = kp.get("target_kind")
+    if kind == "document":
+        return True  # baseline=NULL+add, version_bump already True
+    if doc_type == "control_plan":
+        items_diff = diff["items"]
+        if action == "modify":
+            return any(i.get("item_id") == kp["target_key"] for i in items_diff["modified_items"])
+        if action == "delete":
+            return any(i.get("item_id") == kp["target_key"] for i in items_diff["deleted_items"])
+        if action == "add":
+            a = kp["add_anchor"]
+            bk = str(a["business_key"]).strip().lower()
+            return any(
+                str(i.get("source_fmea_node_id", "")).strip().lower() == str(a["parent_node_id"]).strip().lower()
+                and str(i.get("product_characteristic", "")).strip().lower() == bk
+                for i in items_diff["added_items"]
+            )
+    else:  # fmea
+        g_diff = diff
+        if action == "modify":
+            return any(n.get("node_id") == kp["target_key"] for n in g_diff["modified_nodes"])
+        if action == "delete":
+            return any(n.get("id") == kp["target_key"] for n in g_diff["deleted_nodes"])
+        if action == "add":
+            a = kp["add_anchor"]
+            bk = str(a["business_key"]).strip().lower()
+            parent_map = _build_parent_map(latest.snapshot)
+            return any(
+                a["parent_node_id"] in parent_map.get(n["id"], [])
+                and n.get("type") == a["node_type"]
+                and str(n.get("name", "")).strip().lower() == bk
+                for n in g_diff["added_nodes"]
+            )
+    return False
