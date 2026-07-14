@@ -349,6 +349,45 @@ export default function DocGatePanel({
                 rowKey={(r) => `${r.doc_type}-${r.doc_id}`}
                 dataSource={audits}
                 data-e2e="doc-gate-audit-table"
+                expandable={{
+                  expandedRowRender: (r: DocGateAuditRow) => (
+                    <div data-e2e={`doc-gate-coverage-${r.doc_id}`}>
+                      {(r.coverage || []).map((raw, i) => {
+                        const c = raw as {
+                          covered?: boolean;
+                          evidence?: string;
+                          key_point?: {
+                            expected_action?: string;
+                            target_kind?: string;
+                            target_key?: string;
+                            field?: string;
+                            add_anchor?: {
+                              parent_node_id?: string;
+                              node_type?: string;
+                              business_key?: string;
+                            };
+                          };
+                        };
+                        const kp = c.key_point || {};
+                        const label = kp.target_key
+                          ? `${kp.expected_action}/${kp.target_kind}/${kp.target_key}${kp.field ? `:${kp.field}` : ""}`
+                          : kp.add_anchor
+                            ? `add/${kp.target_kind}/${kp.add_anchor.parent_node_id}/${kp.add_anchor.node_type}/${kp.add_anchor.business_key}`
+                            : `${kp.expected_action}/${kp.target_kind}`;
+                        return (
+                          <div key={i}>
+                            <Tag color={c.covered ? "success" : "error"}>
+                              {c.covered ? "covered" : "miss"}
+                            </Tag>{" "}
+                            {label}
+                            {c.evidence ? ` — ${c.evidence}` : ""}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ),
+                  rowExpandable: (r) => (r.coverage?.length ?? 0) > 0,
+                }}
                 columns={[
                   { title: t("docGate.colName", "名称"), dataIndex: "doc_name" },
                   {
@@ -359,6 +398,16 @@ export default function DocGatePanel({
                         {s}
                       </Tag>
                     ),
+                  },
+                  {
+                    title: t("docGate.colVersion", "版本"),
+                    render: (_: unknown, r: DocGateAuditRow) => {
+                      const before = r.version_before as { major?: number; minor?: number } | null | undefined;
+                      const after = r.version_after as { major?: number; minor?: number } | null | undefined;
+                      const b = before && before.major != null ? `v${before.major}.${before.minor}` : "—";
+                      const a = after && after.major != null ? `v${after.major}.${after.minor}` : "—";
+                      return `${b} → ${a}`;
+                    },
                   },
                   {
                     title: t("docGate.colCoverage", "覆盖"),

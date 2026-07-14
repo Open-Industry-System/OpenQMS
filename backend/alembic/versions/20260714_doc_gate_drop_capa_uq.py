@@ -30,11 +30,20 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Re-adding the constraint could fail if duplicate (capa_id, factory_id)
-    # rows already exist (which is the valid retry/regeneration case).
-    # Only re-add in a clean state; otherwise leave as-is.
-    op.create_unique_constraint(
-        "uq_docg_analysis_capa_factory",
-        "capa_docg_analysis",
-        ["capa_id", "factory_id"],
+    # Only re-add if no duplicate (capa_id, factory_id) rows exist (valid
+    # retry/regeneration history would make the constraint unsatisfiable).
+    # IF NOT EXISTS-style guard via DO block.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM capa_docg_analysis
+                GROUP BY capa_id, factory_id HAVING COUNT(*) > 1
+            ) THEN
+                ALTER TABLE capa_docg_analysis
+                ADD CONSTRAINT uq_docg_analysis_capa_factory UNIQUE (capa_id, factory_id);
+            END IF;
+        END $$;
+        """
     )

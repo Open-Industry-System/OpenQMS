@@ -166,8 +166,16 @@ def test_compute_input_hash_handles_none_baseline():
 # ---------------------------------------------------------------------------
 
 
-def test_match_key_point_cp_modify_uses_item_id_and_field():
-    """CP modify: target_key is item_id; field must appear in changes."""
+class _FakeLatestCP:
+    def __init__(self, items):
+        self.items_snapshot = {"items": items}
+
+
+def test_match_key_point_cp_modify_uses_source_fmea_node_id_and_field():
+    """CP modify: target_key is source_fmea_node_id (spec); field must appear in changes."""
+    latest = _FakeLatestCP([
+        {"item_id": "item-1", "source_fmea_node_id": "node-5", "control_method": "b"},
+    ])
     diff = {
         "items": {
             "modified_items": [
@@ -178,32 +186,102 @@ def test_match_key_point_cp_modify_uses_item_id_and_field():
         },
         "headers": [],
     }
-    # Correct item + correct field → covered
     kp = {"expected_action": "modify", "target_kind": "cp_item",
-          "field": "control_method", "target_key": "item-1"}
-    assert _match_key_point(kp, diff, latest=None, doc_type="control_plan") is True
-    # Correct item + wrong field → not covered
+          "field": "control_method", "target_key": "node-5"}
+    assert _match_key_point(kp, diff, latest=latest, doc_type="control_plan") is True
+    # Correct source + wrong field → not covered
     kp_wrong = {**kp, "field": "reaction_plan"}
-    assert _match_key_point(kp_wrong, diff, latest=None, doc_type="control_plan") is False
-    # Wrong item_id → not covered
-    kp_wrong_id = {**kp, "target_key": "item-2"}
-    assert _match_key_point(kp_wrong_id, diff, latest=None, doc_type="control_plan") is False
+    assert _match_key_point(kp_wrong, diff, latest=latest, doc_type="control_plan") is False
+    # Wrong source_fmea_node_id → not covered
+    kp_wrong_id = {**kp, "target_key": "node-x"}
+    assert _match_key_point(kp_wrong_id, diff, latest=latest, doc_type="control_plan") is False
 
 
-def test_match_key_point_cp_delete_uses_item_id():
-    """CP delete: target_key is item_id; no field check needed."""
+def test_match_key_point_cp_delete_uses_source_fmea_node_id():
+    """CP delete: target_key is source_fmea_node_id; deleted_items carry full baseline dict."""
     diff = {
         "items": {
             "modified_items": [],
             "added_items": [],
-            "deleted_items": [{"item_id": "item-1"}],
+            "deleted_items": [{"item_id": "item-1", "source_fmea_node_id": "node-5"}],
         },
         "headers": [],
     }
-    kp = {"expected_action": "delete", "target_kind": "cp_item", "target_key": "item-1"}
+    kp = {"expected_action": "delete", "target_kind": "cp_item", "target_key": "node-5"}
     assert _match_key_point(kp, diff, latest=None, doc_type="control_plan") is True
-    kp_miss = {**kp, "target_key": "item-x"}
+    kp_miss = {**kp, "target_key": "node-x"}
     assert _match_key_point(kp_miss, diff, latest=None, doc_type="control_plan") is False
+
+
+def test_document_kind_rejects_non_add_and_existing_baseline():
+    """document target_kind only valid for baseline=NULL + add (gate bypass fix)."""
+    cand_existing = {
+        "doc_type": "fmea",
+        "existing_targets": [{"target_kind": "fmea_node", "target_key": "node-1",
+                             "allowed_fields": ["prevention_control"]}],
+        "add_anchors": [],
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+    }
+    # document/delete on existing FMEA → reject
+    err = _validate_key_point(
+        {"expected_action": "delete", "target_kind": "document", "target_key": "any"},
+        cand_existing,
+    )
+    assert err is not None
+    # document/add on existing baseline → reject
+    err2 = _validate_key_point(
+        {"expected_action": "add", "target_kind": "document"},
+        cand_existing,
+    )
+    assert err2 is not None and "baseline" in err2
+    # document/add on new doc (baseline=None) → ok
+    cand_new = {**cand_existing, "baseline_version": None, "existing_targets": []}
+    assert _validate_key_point(
+        {"expected_action": "add", "target_kind": "document"}, cand_new
+    ) is None
+
+
+def test_match_document_only_covers_add():
+    """Defensive: document/delete must not auto-pass even if it reaches match."""
+    assert _match_key_point(
+        {"expected_action": "add", "target_kind": "document"}, {}, None, "fmea"
+    ) is True
+    assert _match_key_point(
+        {"expected_action": "delete", "target_kind": "document", "target_key": "x"},
+        {}, None, "fmea",
+    ) is False
+
+
+def test_validate_rejects_duplicate_docs_and_delete_unknown_target():
+    cand = {
+        "doc_type": "fmea", "doc_id": "d1", "doc_name": "F",
+        "baseline_version_id": "v1",
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+        "existing_targets": [{"target_kind": "fmea_node", "target_key": "node-1",
+                             "allowed_fields": ["prevention_control"]}],
+        "add_anchors": [],
+    }
+    # delete unknown target_key
+    err = _validate_key_point(
+        {"expected_action": "delete", "target_kind": "fmea_node", "target_key": "nope"},
+        cand,
+    )
+    assert err is not None and "allowlist" in err
+    # duplicate docs
+    phase2 = {
+        "affected_docs": [
+            {"doc_id": "d1", "key_points": [
+                {"expected_action": "modify", "target_kind": "fmea_node",
+                 "field": "prevention_control", "target_key": "node-1"}
+            ], "update_suggestion": "s"},
+            {"doc_id": "d1", "key_points": [
+                {"expected_action": "modify", "target_kind": "fmea_node",
+                 "field": "prevention_control", "target_key": "node-1"}
+            ], "update_suggestion": "s2"},
+        ]
+    }
+    r = _validate_and_backfill(phase2, [cand])
+    assert isinstance(r, str) and "重复" in r
 
 
 # ---------------------------------------------------------------------------

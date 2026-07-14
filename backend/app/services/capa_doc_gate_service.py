@@ -81,12 +81,18 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
     try:
         client = await provider_adapter.build_client(db)
     except ProviderNotConfiguredError:
+        now = datetime.now(timezone.utc)
         failed = CapaDocgAnalysis(
             analysis_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=capa.factory_id,
             is_current=False, status="failed", error="LLM 未配置", llm_available=False,
-            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+            completed_at=now, generated_by=user_id,
         )
         db.add(failed)
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
+            changed_fields={"status": "failed", "error": "LLM 未配置", "llm_available": False},
+            operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+        ))
         await db.commit()
         raise ValueError("BLOCKED: 无 LLM 凭证")
     # Create running
@@ -158,19 +164,22 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
     candidates = await _build_allowlist(db, capa)
     cur_hash = _compute_input_hash(capa, candidates)
     if cur_hash != phase2["_input_hash"]:
-        await db.execute(
+        res = await db.execute(
             update(CapaDocgAnalysis)
             .where(CapaDocgAnalysis.analysis_id == analysis_id,
                    CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
             .values(status="failed", error="input_changed", completed_at=now)
         )
-        db.add(AuditLog(
-            table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
-            changed_fields={"status": "failed", "error": "input_changed", "llm_available": True},
-            operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
-        ))
+        if res.rowcount > 0:
+            db.add(AuditLog(
+                table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
+                changed_fields={"status": "failed", "error": "input_changed", "llm_available": True},
+                operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+            ))
+            await db.commit()
+            return {"status": "failed", "error": "input_changed"}
         await db.commit()
-        return {"status": "failed", "error": "input_changed"}
+        return {"status": "superseded"}
     # Validate LLM output (C7 + vacuous pass + allowlist + discriminant union)
     affected = _validate_and_backfill(phase2, candidates)
     if isinstance(affected, str):  # error
@@ -288,11 +297,12 @@ def _cand_from_cp(cp, baseline) -> dict:
         cand["baseline_version_id"] = str(baseline.version_id)
         items = baseline.items_snapshot.get("items", []) if isinstance(baseline.items_snapshot, dict) else baseline.items_snapshot or []
         cand["baseline_version"] = {"major": baseline.major_no, "minor": baseline.minor_no, "sha256": baseline.sha256_hash}
-        # target_key uses item_id to match diff_engine's modified_items/deleted_items keying
-        # (review P1#4: was source_fmea_node_id which diff doesn't key on).
+        # Spec: CP target_key = source_fmea_node_id (stable business key; item_id is
+        # rebuild-unstable). Match at audit time by source_fmea_node_id on the item.
         cand["existing_targets"] = [
-            {"target_kind": "cp_item", "target_key": i.get("item_id", ""), "allowed_fields": ["control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency"]}
-            for i in items if i.get("item_id")
+            {"target_kind": "cp_item", "target_key": i.get("source_fmea_node_id", ""),
+             "allowed_fields": ["control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency"]}
+            for i in items if i.get("source_fmea_node_id")
         ]
         # add_anchors from FMEA node IDs referenced by existing CP items
         known_fmea_ids = list({i.get("source_fmea_node_id", "") for i in items if i.get("source_fmea_node_id")})
@@ -452,15 +462,18 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
     raw_docs = phase2.get("affected_docs")
     if not isinstance(raw_docs, list):
         return "LLM 输出缺 affected_docs"
-    # Empty list is valid — returns [] (done with empty; engineer must confirm_no_affected)
     if not raw_docs:
         return []
     cand_by_id = {str(c["doc_id"]): c for c in candidates}
+    seen_doc_ids: set[str] = set()
     out = []
     for d in raw_docs:
         doc_id = str(d.get("doc_id", ""))
         if doc_id not in cand_by_id:
             return f"LLM 输出非法 doc_id: {doc_id}"
+        if doc_id in seen_doc_ids:
+            return f"重复 affected document: {doc_id}"
+        seen_doc_ids.add(doc_id)
         cand = cand_by_id[doc_id]
         kps = d.get("key_points", [])
         if not kps:
@@ -468,10 +481,22 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
         suggestion = d.get("update_suggestion")
         if not suggestion or not str(suggestion).strip():
             return "update_suggestion 为空"
+        seen_kps: set[str] = set()
         for kp in kps:
             err = _validate_key_point(kp, cand)
             if err:
                 return err
+            # Dedup key: action+kind+target_key or action+kind+add_anchor triple
+            if kp.get("expected_action") == "add" and kp.get("add_anchor"):
+                a = kp["add_anchor"]
+                ksig = f"add|{kp.get('target_kind')}|{a.get('parent_node_id')}|{a.get('node_type')}|{str(a.get('business_key','')).strip().lower()}"
+            elif kp.get("target_kind") == "document":
+                ksig = f"document|add"
+            else:
+                ksig = f"{kp.get('expected_action')}|{kp.get('target_kind')}|{kp.get('target_key')}|{kp.get('field','')}"
+            if ksig in seen_kps:
+                return f"重复 key_point: {ksig}"
+            seen_kps.add(ksig)
         out.append({
             "doc_type": cand["doc_type"], "doc_id": cand["doc_id"], "doc_name": cand["doc_name"],
             "baseline_version_id": str(cand["baseline_version_id"]) if cand.get("baseline_version_id") else None,
@@ -488,48 +513,54 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
     kind = kp.get("target_kind")
     if kind not in ("fmea_node", "cp_item", "document"):
         return f"非法 target_kind: {kind}"
-    if kind == "document" and cand["doc_type"] != "fmea":
-        return f"document target_kind 仅用于 fmea"
-    if kind != "document" and not (
+    # document discriminant: ONLY baseline=NULL + expected_action=add (spec C7 / round5 P1#1)
+    if kind == "document":
+        if cand["doc_type"] != "fmea":
+            return "document target_kind 仅用于 fmea"
+        if action != "add":
+            return "document 仅允许 expected_action=add"
+        if cand.get("baseline_version") is not None:
+            return "document add 仅允许 baseline=NULL"
+        if ("target_key" in kp and kp["target_key"]) or ("add_anchor" in kp and kp["add_anchor"]):
+            return "document add 不得带 target_key/add_anchor"
+        return None
+    if not (
         (kind == "cp_item" and cand["doc_type"] == "control_plan")
         or (kind == "fmea_node" and cand["doc_type"] == "fmea")
     ):
-        return f"doc_type/target_kind 错配"
+        return "doc_type/target_kind 错配"
     has_target = "target_key" in kp and kp["target_key"]
     has_anchor = "add_anchor" in kp and kp["add_anchor"]
     if has_target and has_anchor:
         return "target_key 与 add_anchor 互斥"
     if action in ("modify", "delete") and not has_target:
         return f"{action} 须 target_key"
-    # Field-level allowlist for modify (review P0#2): the requested field must be
-    # in the allowed_fields of the matched existing_target. delete needs no field.
-    if action == "modify":
-        field = kp.get("field")
-        if not field or not str(field).strip():
-            return "modify 须 field"
-        allowed_fields = set()
-        for t in cand.get("existing_targets", []):
-            if t["target_key"] == kp["target_key"]:
-                allowed_fields.update(t.get("allowed_fields", []))
-        if not allowed_fields:
+    if action in ("modify", "delete"):
+        # target_key must be in existing_targets (modify AND delete)
+        existing_keys = {t["target_key"] for t in cand.get("existing_targets", [])}
+        if kp["target_key"] not in existing_keys:
             return f"target_key 不在 allowlist: {kp['target_key']}"
-        if str(field) not in allowed_fields:
-            return f"field '{field}' 不在允许字段: {sorted(allowed_fields)}"
+        if action == "modify":
+            field = kp.get("field")
+            if not field or not str(field).strip():
+                return "modify 须 field"
+            allowed_fields = set()
+            for t in cand.get("existing_targets", []):
+                if t["target_key"] == kp["target_key"]:
+                    allowed_fields.update(t.get("allowed_fields", []))
+            if str(field) not in allowed_fields:
+                return f"field '{field}' 不在允许字段: {sorted(allowed_fields)}"
     if action == "add":
-        if kind == "document":
-            if cand.get("baseline_version") is not None:
-                return "document add 仅允许 baseline=NULL"
-        else:
-            if not has_anchor:
-                return "add 须 add_anchor"
-            a = kp["add_anchor"]
-            if not a.get("parent_node_id") or not a.get("node_type") or not str(a.get("business_key", "")).strip():
-                return "add_anchor 三字段须非空"
-            if a["node_type"] not in _ALLOWED_NODE_TYPES:
-                return f"非法 node_type: {a['node_type']}"
-            allowed_parents = {(x["parent_node_id"], x["node_type"]) for x in cand.get("add_anchors", [])}
-            if (a["parent_node_id"], a["node_type"]) not in allowed_parents:
-                return "add_anchor 不在 allowlist"
+        if not has_anchor:
+            return "add 须 add_anchor"
+        a = kp["add_anchor"]
+        if not a.get("parent_node_id") or not a.get("node_type") or not str(a.get("business_key", "")).strip():
+            return "add_anchor 三字段须非空"
+        if a["node_type"] not in _ALLOWED_NODE_TYPES:
+            return f"非法 node_type: {a['node_type']}"
+        allowed_parents = {(x["parent_node_id"], x["node_type"]) for x in cand.get("add_anchors", [])}
+        if (a["parent_node_id"], a["node_type"]) not in allowed_parents:
+            return "add_anchor 不在 allowlist"
     return None
 
 # ---------------------------------------------------------------------------
@@ -601,9 +632,16 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
             operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
         ))
     else:
+        pending = [a["doc_id"] for a in audits if a["status"] == "pending_update"]
+        incomplete = [a["doc_id"] for a in audits if a["status"] == "incomplete"]
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_BLOCKED",
-            changed_fields={"audit_run_id": str(audit_run_id), "per_doc_status": [{"doc_type": a["doc_type"], "status": a["status"]} for a in audits]},
+            changed_fields={
+                "audit_run_id": str(audit_run_id),
+                "per_doc_status": [{"doc_type": a["doc_type"], "status": a["status"]} for a in audits],
+                "pending_docs": [str(x) for x in pending],
+                "incomplete_docs": [str(x) for x in incomplete],
+            },
             operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
         ))
     await db.commit()
@@ -712,23 +750,41 @@ def _match_key_point(kp, diff, latest, doc_type):
     """Return True if the key_point is covered by the version diff.
 
     For modify: the target node/item must be modified AND the change set must
-    include the requested `field` (review P0#2: identity-only match let a wrong-
-    field change count as coverage). delete/add need no field check.
+    include the requested `field`. delete/add need no field check.
+    document: only baseline=NULL+add is valid (validated upstream); covered by
+    version_bump alone — re-check action defensively here.
     """
     action = kp["expected_action"]
     kind = kp.get("target_kind")
     if kind == "document":
-        return True  # baseline=NULL+add, version_bump already True
+        # Defensive: only add is covered by version_bump; delete/modify should
+        # never reach here (rejected by _validate_key_point).
+        return action == "add"
     if doc_type == "control_plan":
         items_diff = diff["items"]
+        # Spec: CP target_key = source_fmea_node_id. modified_items only carry
+        # item_id+changes, so resolve source via latest items_snapshot.
+        latest_items = []
+        if latest is not None:
+            snap = getattr(latest, "items_snapshot", None) or {}
+            latest_items = snap.get("items", []) if isinstance(snap, dict) else (snap or [])
+        id_to_src = {
+            str(i.get("item_id", "")): str(i.get("source_fmea_node_id", ""))
+            for i in latest_items if i.get("item_id")
+        }
         if action == "modify":
             field = kp.get("field")
             return any(
-                i.get("item_id") == kp["target_key"] and any(c.get("field") == field for c in i.get("changes", []))
+                id_to_src.get(str(i.get("item_id", ""))) == str(kp["target_key"])
+                and any(c.get("field") == field for c in i.get("changes", []))
                 for i in items_diff["modified_items"]
             )
         if action == "delete":
-            return any(i.get("item_id") == kp["target_key"] for i in items_diff["deleted_items"])
+            # deleted_items are full baseline item dicts (include source_fmea_node_id)
+            return any(
+                str(i.get("source_fmea_node_id", "")) == str(kp["target_key"])
+                for i in items_diff["deleted_items"]
+            )
         if action == "add":
             a = kp["add_anchor"]
             bk = str(a["business_key"]).strip().lower()
@@ -767,11 +823,10 @@ def _match_key_point(kp, diff, latest, doc_type):
 async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id: uuid.UUID, deadline, user_id: uuid.UUID) -> dict:
     """Record a deferred decision (still blocks the gate — C5). Owner validated against capa factory.
 
-    Factory authorization (review P1#7): the previous check only rejected a
-    non-NULL mismatching factory_id — a NULL-factory user with no UserFactory
-    association was wrongly accepted. Now mirrors resolve_factory_scope: accept
-    same-factory users, group-admin bypass (bypass_row_level_security), or
-    users with a UserFactory row for this factory; reject others.
+    Factory authorization: accept if primary factory matches OR UserFactory
+    association includes capa.factory_id. bypass_row_level_security only bypasses
+    product-line filtering, NOT factory scope (factory_scope.py docstring) — do
+    not treat it as group-admin cross-factory access.
     """
     if not reason or not str(reason).strip():
         raise ValueError("defer reason 必填")
@@ -780,16 +835,10 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
     owner = await db.get(User, owner_id)
     if owner is None or not owner.is_active:
         raise ValueError("defer_owner 不存在或未激活")
-    if owner.factory_id == capa.factory_id:
-        pass  # primary factory match
-    elif owner.factory_id is not None:
-        raise ValueError("defer_owner 不属于当前工厂")
-    else:  # NULL factory — group admin or multi-factory association
-        bypass = getattr(getattr(owner, "role_definition", None), "bypass_row_level_security", False)
-        if not bypass:
-            user_fids = await get_user_factory_ids(owner, db)
-            if capa.factory_id not in user_fids:
-                raise ValueError("defer_owner 无当前工厂授权")
+    if owner.factory_id != capa.factory_id:
+        user_fids = await get_user_factory_ids(owner, db)
+        if capa.factory_id not in user_fids:
+            raise ValueError("defer_owner 无当前工厂授权")
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
@@ -834,7 +883,8 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
                           no_affected_confirmed=True)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_PASSED",
-        changed_fields={"reason": "空清单人工确认"}, operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+        changed_fields={"reason": "空清单人工确认", "no_affected_confirmed": True, "doc_count": 0},
+        operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
     ))
     await db.commit()
     return {"decision": "passed", "no_affected_confirmed": True}
