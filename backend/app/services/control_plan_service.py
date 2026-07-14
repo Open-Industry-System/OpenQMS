@@ -237,41 +237,51 @@ async def update_control_plan(
 
         if items_changed:
             # Preserve item_id for existing rows so doc-gate target_key stays stable.
-            # Only truly new items (missing/unknown/temp id) get a fresh UUID.
+            # Only missing / temp-* ids get a fresh UUID. Strict validation:
+            # - duplicate item_id in request → 400
+            # - well-formed UUID not belonging to this CP → 400 (never silent re-key)
             existing_by_id = {str(i.item_id): i for i in existing_items}
+            seen_req_ids: set[str] = set()
             keep_ids: set[str] = set()
+            created = 0
             for idx, item_data in enumerate(data.items):
                 raw_id = getattr(item_data, "item_id", None)
-                reuse_id: uuid.UUID | None = None
-                if raw_id is not None:
-                    sid = str(raw_id).strip()
-                    # Accept only real UUIDs that belong to this CP (reject temp-… client ids)
+                reuse_key: str | None = None
+                if raw_id is not None and str(raw_id).strip():
                     try:
-                        cand = uuid.UUID(sid)
+                        cand = uuid.UUID(str(raw_id).strip())
                     except (ValueError, AttributeError, TypeError):
-                        cand = None
-                    if cand is not None and sid in existing_by_id:
-                        reuse_id = cand
-                        keep_ids.add(sid)
-                        # In-place update of existing row
-                        old = existing_by_id[sid]
-                        old.step_no = item_data.step_no
-                        old.process_name = item_data.process_name
-                        old.equipment = item_data.equipment
-                        old.characteristic_no = item_data.characteristic_no
-                        old.product_characteristic = item_data.product_characteristic
-                        old.process_characteristic = item_data.process_characteristic
-                        old.special_class = item_data.special_class
-                        old.specification_tolerance = item_data.specification_tolerance
-                        old.evaluation_method = item_data.evaluation_method
-                        old.sample_size = item_data.sample_size
-                        old.sample_frequency = item_data.sample_frequency
-                        old.control_method = item_data.control_method
-                        old.reaction_plan = item_data.reaction_plan
-                        old.source_fmea_node_id = item_data.source_fmea_node_id
-                        old.sort_order = idx
-                        continue
-                # New item
+                        cand = None  # temp-* or garbage → treat as new
+                    if cand is not None:
+                        sid = str(cand)  # canonical form
+                        if sid in seen_req_ids:
+                            raise ValueError(f"重复 item_id: {sid}")
+                        seen_req_ids.add(sid)
+                        if sid not in existing_by_id:
+                            raise ValueError(
+                                f"item_id 不属于当前控制计划: {sid}"
+                            )
+                        reuse_key = sid
+                if reuse_key is not None:
+                    keep_ids.add(reuse_key)
+                    old = existing_by_id[reuse_key]
+                    old.step_no = item_data.step_no
+                    old.process_name = item_data.process_name
+                    old.equipment = item_data.equipment
+                    old.characteristic_no = item_data.characteristic_no
+                    old.product_characteristic = item_data.product_characteristic
+                    old.process_characteristic = item_data.process_characteristic
+                    old.special_class = item_data.special_class
+                    old.specification_tolerance = item_data.specification_tolerance
+                    old.evaluation_method = item_data.evaluation_method
+                    old.sample_size = item_data.sample_size
+                    old.sample_frequency = item_data.sample_frequency
+                    old.control_method = item_data.control_method
+                    old.reaction_plan = item_data.reaction_plan
+                    old.source_fmea_node_id = item_data.source_fmea_node_id
+                    old.sort_order = idx
+                    continue
+                # New item (no id, temp-*, or non-UUID)
                 db.add(ControlPlanItem(
                     item_id=uuid.uuid4(),
                     cp_id=cp.cp_id,
@@ -292,12 +302,18 @@ async def update_control_plan(
                     source_fmea_node_id=item_data.source_fmea_node_id,
                     sort_order=idx,
                 ))
+                created += 1
             # Delete items not present in the request
+            deleted = 0
             for sid, old in existing_by_id.items():
                 if sid not in keep_ids:
                     await db.delete(old)
+                    deleted += 1
 
-            changed_fields["items_count"] = len(data.items)
+            changed_fields["items_count"] = len(keep_ids) + created
+            changed_fields["items_updated"] = len(keep_ids)
+            changed_fields["items_created"] = created
+            changed_fields["items_deleted"] = deleted
 
     if changed_fields:
         cp.lock_version += 1  # 只在有实际变更时递增乐观锁版本

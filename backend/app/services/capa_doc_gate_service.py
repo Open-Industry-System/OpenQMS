@@ -802,25 +802,17 @@ async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
 
 
 def _diff_cp_items_for_gate(v1_items: list[dict], v2_items: list[dict]) -> dict:
-    """CP diff for doc-gate: item_id primary + soft rebuild reconciliation.
+    """CP diff for doc-gate: item_id is the sole identity (contract v2).
 
-    1. Pair by item_id → modified/unchanged (product/process field changes stay
-       as modify, not delete+add).
-    2. Remaining unpaired items: soft-pair by fingerprint source|product|process
-       ONLY when the fingerprint is unique on both sides (1:1). Multi-match or
-       empty fingerprint left as true delete+add (cannot safely reconcile).
-    3. Rest → deleted (v1 only) / added (v2 only).
+    Pair strictly by item_id. No fingerprint soft-pair: delete+add of different
+    item_ids is a real identity change (CP save now preserves item_id).
     """
     v1_by_id = {_cp_item_id(i): i for i in v1_items if _cp_item_id(i)}
     v2_by_id = {_cp_item_id(i): i for i in v2_items if _cp_item_id(i)}
     shared_ids = set(v1_by_id) & set(v2_by_id)
-    paired_v1: set[str] = set()
-    paired_v2: set[str] = set()
     modified = []
     for iid in sorted(shared_ids):
         old, new = v1_by_id[iid], v2_by_id[iid]
-        paired_v1.add(iid)
-        paired_v2.add(iid)
         changes = []
         for key in sorted((set(old) | set(new)) - {"item_id"}):
             if old.get(key) != new.get(key):
@@ -832,44 +824,8 @@ def _diff_cp_items_for_gate(v1_items: list[dict], v2_items: list[dict]) -> dict:
                 "changes": changes,
                 "new_item": new,
             })
-    # Soft-pair remaining by unique fingerprint
-    rem_v1 = [v1_by_id[i] for i in v1_by_id if i not in paired_v1]
-    rem_v2 = [v2_by_id[i] for i in v2_by_id if i not in paired_v2]
-    from collections import defaultdict
-    fp1: dict[str, list] = defaultdict(list)
-    fp2: dict[str, list] = defaultdict(list)
-    for i in rem_v1:
-        k = _cp_biz_key(i)
-        if k:
-            fp1[k].append(i)
-    for i in rem_v2:
-        k = _cp_biz_key(i)
-        if k:
-            fp2[k].append(i)
-    soft_v1: set[str] = set()
-    soft_v2: set[str] = set()
-    for k in sorted(set(fp1) & set(fp2)):
-        if len(fp1[k]) == 1 and len(fp2[k]) == 1:
-            old, new = fp1[k][0], fp2[k][0]
-            soft_v1.add(_cp_item_id(old))
-            soft_v2.add(_cp_item_id(new))
-            changes = []
-            for key in sorted((set(old) | set(new)) - {"item_id"}):
-                if old.get(key) != new.get(key):
-                    changes.append({"field": key, "old": old.get(key), "new": new.get(key)})
-            if changes:
-                # Rebuild: treat as modify of the BASELINE item_id (target_key)
-                modified.append({
-                    "item_id": _cp_item_id(old),  # baseline id = target_key
-                    "source_fmea_node_id": new.get("source_fmea_node_id"),
-                    "changes": changes,
-                    "new_item": new,
-                    "rebuilt_from": _cp_item_id(old),
-                    "rebuilt_to": _cp_item_id(new),
-                })
-            # even if no field change, still paired (not delete+add)
-    deleted = [v1_by_id[i] for i in sorted(set(v1_by_id) - paired_v1 - soft_v1)]
-    added = [v2_by_id[i] for i in sorted(set(v2_by_id) - paired_v2 - soft_v2)]
+    deleted = [v1_by_id[i] for i in sorted(set(v1_by_id) - shared_ids)]
+    added = [v2_by_id[i] for i in sorted(set(v2_by_id) - shared_ids)]
     return {"added_items": added, "deleted_items": deleted, "modified_items": modified}
 
 

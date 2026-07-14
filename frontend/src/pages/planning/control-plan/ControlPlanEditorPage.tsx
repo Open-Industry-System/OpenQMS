@@ -287,8 +287,12 @@ export default function ControlPlanEditorPage() {
             ...saveData,
             lock_version: cp!.lock_version,
           });
+          // Sync server-assigned item_ids (temp-* → real UUID) so subsequent
+          // saves preserve identity for doc-gate target_key stability.
+          const serverItems = updated.items || [];
           setCp(updated);
-          baseItemsRef.current = JSON.parse(JSON.stringify(items));
+          setItems(serverItems);
+          baseItemsRef.current = JSON.parse(JSON.stringify(serverItems));
           message.success(tc("messages.saveSuccess"));
         } catch (e: unknown) {
           const err = e as { response?: { status?: number; data?: { detail?: string | object } } };
@@ -352,8 +356,10 @@ export default function ControlPlanEditorPage() {
         lock_version: cp.lock_version,
         confirmed_latest_lock_version: conflictInfo.latest_lock_version,
       });
+      const serverItems = updated.items || [];
       setCp(updated);
-      baseItemsRef.current = JSON.parse(JSON.stringify(items));
+      setItems(serverItems);
+      baseItemsRef.current = JSON.parse(JSON.stringify(serverItems));
       setConflictVisible(false);
       message.success(t("conflict.forceSaveSuccess"));
     } catch (e: unknown) {

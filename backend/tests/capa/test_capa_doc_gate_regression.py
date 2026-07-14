@@ -187,8 +187,8 @@ def test_cp_item_id_primary_modify_product_char_stays_modify():
     assert _match_key_point(kp_del, {"items": d}, latest=None, doc_type="control_plan") is False
 
 
-def test_cp_rebuild_soft_pair_unique_fingerprint():
-    """item_id rebuild with unique fingerprint soft-pairs as modify of baseline id."""
+def test_cp_rebuild_different_item_id_is_delete_and_add():
+    """Different item_ids with same fingerprint are NOT soft-paired (strict item_id)."""
     from app.services.capa_doc_gate_service import _diff_cp_items_for_gate, _match_key_point
     v1 = [{"item_id": "old-id", "source_fmea_node_id": "node-5",
            "product_characteristic": "char-a", "process_characteristic": "",
@@ -197,17 +197,21 @@ def test_cp_rebuild_soft_pair_unique_fingerprint():
            "product_characteristic": "char-a", "process_characteristic": "",
            "control_method": "B"}]
     d = _diff_cp_items_for_gate(v1, v2)
-    assert d["deleted_items"] == []
-    assert d["added_items"] == []
-    assert len(d["modified_items"]) == 1
-    assert d["modified_items"][0]["item_id"] == "old-id"  # baseline id = target_key
+    assert len(d["deleted_items"]) == 1
+    assert len(d["added_items"]) == 1
+    assert d["modified_items"] == []
+    # modify of old-id not covered
     kp = {"expected_action": "modify", "target_kind": "cp_item",
           "field": "control_method", "target_key": "old-id"}
-    assert _match_key_point(kp, {"items": d}, latest=None, doc_type="control_plan") is True
+    assert _match_key_point(kp, {"items": d}, latest=None, doc_type="control_plan") is False
+    # delete of old-id is covered
+    kp_del = {"expected_action": "delete", "target_kind": "cp_item",
+              "field": "control_method", "target_key": "old-id"}
+    assert _match_key_point(kp_del, {"items": d}, latest=None, doc_type="control_plan") is True
 
 
 def test_cp_sibling_empty_fingerprint_not_soft_paired():
-    """Multiple empty product/process under same source: no soft pair (true delete+add)."""
+    """Multiple empty product/process under same source with different ids: pure delete+add."""
     from app.services.capa_doc_gate_service import _diff_cp_items_for_gate
     a = {"item_id": "ia", "source_fmea_node_id": "step-1",
          "product_characteristic": "", "process_characteristic": "", "control_method": "A"}
@@ -215,9 +219,7 @@ def test_cp_sibling_empty_fingerprint_not_soft_paired():
          "product_characteristic": "", "process_characteristic": "", "control_method": "B"}
     a2 = {"item_id": "ia2", "source_fmea_node_id": "step-1",
           "product_characteristic": "", "process_characteristic": "", "control_method": "A"}
-    # rebuild both with new ids — fingerprint not unique → no soft pair
     d = _diff_cp_items_for_gate([a, b], [a2])
-    # cannot safely reconcile: both v1 deleted, a2 added
     assert len(d["deleted_items"]) == 2
     assert len(d["added_items"]) == 1
     assert d["modified_items"] == []
