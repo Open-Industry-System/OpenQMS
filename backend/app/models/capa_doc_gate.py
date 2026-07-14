@@ -13,7 +13,8 @@ from app.database import Base
 class CapaDocgAnalysis(Base):
     __tablename__ = "capa_docg_analysis"
     __table_args__ = (
-        UniqueConstraint("capa_id", "factory_id", name="uq_docg_analysis_capa_factory"),
+        # NOTE: full UNIQUE(capa_id, factory_id) removed (终审第七轮 P0#1) — it blocked
+        # retry/regeneration. Concurrency is guarded by partial-UQs below (is_current / running).
         UniqueConstraint("analysis_id", "factory_id", name="uq_docg_analysis_factory"),
         CheckConstraint("status IN ('running','done','failed')", name="chk_docg_analysis_status"),
         CheckConstraint(

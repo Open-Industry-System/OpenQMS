@@ -40,7 +40,6 @@ def upgrade() -> None:
         sa.Column("generated_by", UUID(as_uuid=True), sa.ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False),
         sa.Column("generated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.UniqueConstraint("capa_id", "factory_id", name="uq_docg_analysis_capa_factory"),
         sa.UniqueConstraint("analysis_id", "factory_id", name="uq_docg_analysis_factory"),
         sa.ForeignKeyConstraint(
             ["capa_id", "factory_id"],

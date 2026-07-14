@@ -8,6 +8,7 @@ from app.models.fmea import FMEADocument
 from app.schemas.capa import AdvanceRequest
 from app.schemas.capa_verification import D7NodeActionCreate
 from app.services.capa_d7_action_service import record_d7_action
+from app.services.capa_doc_gate_service import confirm_no_affected
 from app.services.capa_service import advance_capa
 
 pytestmark = pytest.mark.requires_db
@@ -68,6 +69,13 @@ async def test_full_flow_d7_to_d8_closure(db, default_factory, admin_user):
     await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D8_GATE_PENDING"))
     await db.refresh(capa); assert capa.status == "D8_GATE_PENDING"
 
+    # D8 doc gate requires a passed decision before advancing (US-E2E-01.7).
+    # Use the empty-affected_docs path: generate a done/empty analysis (no LLM in
+    # this non-AI test) and confirm_no_affected -> decision=passed.
+    from tests.capa.conftest import _make_done_analysis
+    await _make_done_analysis(db, capa, admin_user, [])
+    await confirm_no_affected(db, capa, admin_user.user_id)
+
     await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D8_APPROVAL_PENDING"))
     await db.refresh(capa); assert capa.status == "D8_APPROVAL_PENDING"
 
@@ -87,6 +95,10 @@ async def test_reject_requires_reason(db, default_factory, admin_user):
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
     await _to_d7_completed(db, capa, fmea, admin_user)
     await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D8_GATE_PENDING"))
+    # D8 doc gate requires a passed decision (US-E2E-01.7). Empty-affected path:
+    from tests.capa.conftest import _make_done_analysis
+    await _make_done_analysis(db, capa, admin_user, [])
+    await confirm_no_affected(db, capa, admin_user.user_id)
     await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D8_APPROVAL_PENDING"))
     await db.refresh(capa)
 

@@ -119,7 +119,7 @@ def test_analysis_current_partial_uq(mig_db_url):
     with engine.begin() as c:
         c.execute(text(base), {"cid": capa_id, "fid": factory_id, "uid": user_id})
 
-    with pytest.raises(IntegrityError, match="uq_docg_analysis"):
+    with pytest.raises(IntegrityError, match="uq_docg_analysis_current"):
         with engine.begin() as c:
             c.execute(text(base), {"cid": capa_id, "fid": factory_id, "uid": user_id})
 

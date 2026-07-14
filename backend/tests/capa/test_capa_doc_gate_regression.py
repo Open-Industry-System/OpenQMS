@@ -1,0 +1,289 @@
+"""Regression tests for 终审第七轮 findings (US-E2E-01.7).
+
+Covers the four paths the reviewer called out as untested:
+1. regenerate (P0#1) — same CAPA can generate twice; old row is demoted
+2. wrong-field update does not count as coverage (P0#2)
+3. no-baseline new document does not crash _compute_input_hash (P0#3)
+4. CP modify/delete coverage uses item_id + field (P1#4)
+Plus empty-list LLM → done → confirm_no_affected (P1#5).
+"""
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import datetime, timezone, timedelta
+
+import pytest
+from sqlalchemy import select, text
+
+from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+from app.services import capa_doc_gate_service
+from app.services.capa_doc_gate_service import (
+    _build_allowlist,
+    _compute_input_hash,
+    _match_key_point,
+    _validate_and_backfill,
+    _validate_key_point,
+)
+
+
+# ---------------------------------------------------------------------------
+# P0#1: regenerate does not hit UNIQUE(capa_id, factory_id)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_regenerate_succeeds_without_unique_violation(db, capa_d8_gate_with_docs, docg_llm_mock):
+    """Same CAPA can generate twice. Old row is demoted (is_current=false); new is current."""
+    capa, user = capa_d8_gate_with_docs
+    docg_llm_mock.return_value = {
+        "affected_docs": [
+            {
+                "doc_id": str(capa.fmea_ref_id),
+                "key_points": [
+                    {
+                        "target_kind": "fmea_node",
+                        "expected_action": "modify",
+                        "field": "prevention_control",
+                        "target_key": "node-1",
+                    }
+                ],
+                "update_suggestion": "建议更新预防控制",
+            }
+        ]
+    }
+    r1 = await capa_doc_gate_service.generate_impact_analysis(db, capa, user.user_id)
+    assert r1["status"] == "done"
+    r2 = await capa_doc_gate_service.generate_impact_analysis(db, capa, user.user_id)
+    assert r2["status"] == "done"
+    # Exactly one is_current
+    currents = (await db.execute(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+        )
+    )).scalars().all()
+    assert len(currents) == 1
+    assert str(currents[0].analysis_id) == r2["analysis_id"]
+    # Old row still present (history retained)
+    all_rows = (await db.execute(
+        select(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id == capa.report_id)
+    )).scalars().all()
+    assert len(all_rows) == 2
+    demoted = [r for r in all_rows if not r.is_current]
+    assert len(demoted) == 1
+    assert demoted[0].status == "done"  # demoted, not deleted
+
+
+# ---------------------------------------------------------------------------
+# P0#2: field-level coverage — wrong field does not cover
+# ---------------------------------------------------------------------------
+
+
+def test_match_key_point_requires_field_in_changes():
+    """modify requires the requested field to appear in the diff changes, not just node identity."""
+    # Diff has node-1 modified on description (wrong field)
+    diff = {
+        "modified_nodes": [
+            {"node_id": "node-1", "changes": [{"field": "description", "old": "a", "new": "b"}], "impact_chain": []}
+        ],
+        "added_nodes": [],
+        "deleted_nodes": [],
+    }
+    kp = {"expected_action": "modify", "target_kind": "fmea_node",
+          "field": "prevention_control", "target_key": "node-1"}
+    assert _match_key_point(kp, diff, latest=None, doc_type="fmea") is False
+
+    # Same node, correct field → covered
+    diff["modified_nodes"][0]["changes"] = [{"field": "prevention_control", "old": "a", "new": "b"}]
+    assert _match_key_point(kp, diff, latest=None, doc_type="fmea") is True
+
+
+def test_validate_key_point_rejects_field_outside_allowlist():
+    """modify with a field not in existing_targets.allowed_fields → validation error."""
+    cand = {
+        "doc_type": "fmea",
+        "existing_targets": [
+            {"target_kind": "fmea_node", "target_key": "node-1",
+             "allowed_fields": ["prevention_control", "detection_control", "name"]}
+        ],
+        "add_anchors": [],
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+    }
+    kp = {"expected_action": "modify", "target_kind": "fmea_node",
+          "field": "description", "target_key": "node-1"}
+    err = _validate_key_point(kp, cand)
+    assert err is not None
+    assert "field" in err
+
+
+def test_validate_key_point_rejects_unknown_target_key():
+    """modify of a target_key not in existing_targets → validation error."""
+    cand = {
+        "doc_type": "fmea",
+        "existing_targets": [
+            {"target_kind": "fmea_node", "target_key": "node-1",
+             "allowed_fields": ["prevention_control"]}
+        ],
+        "add_anchors": [],
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+    }
+    kp = {"expected_action": "modify", "target_kind": "fmea_node",
+          "field": "prevention_control", "target_key": "node-unknown"}
+    err = _validate_key_point(kp, cand)
+    assert err is not None
+    assert "target_key" in err
+
+
+# ---------------------------------------------------------------------------
+# P0#3: no-baseline new document does not crash _compute_input_hash
+# ---------------------------------------------------------------------------
+
+
+def test_compute_input_hash_handles_none_baseline():
+    """baseline_version=None (new document after CAPA) must not AttributeError."""
+    class FakeCapa:
+        factory_id = uuid.uuid4()
+        product_line_code = "DC-DC-100"
+        d4_root_cause = "rc"
+        d5_correction = "c"
+        d7_prevention = "p"
+        severity = "serious"
+        fmea_ref_id = None
+        fmea_node_id = None
+
+    candidates = [
+        {"doc_type": "fmea", "doc_id": str(uuid.uuid4()),
+         "baseline_version_id": None, "baseline_version": None},
+        {"doc_type": "control_plan", "doc_id": str(uuid.uuid4()),
+         "baseline_version_id": None, "baseline_version": None},
+    ]
+    h = _compute_input_hash(FakeCapa(), candidates)
+    assert isinstance(h, str) and len(h) == 64
+
+
+# ---------------------------------------------------------------------------
+# P1#4: CP modify matches on item_id + field (not source_fmea_node_id alone)
+# ---------------------------------------------------------------------------
+
+
+def test_match_key_point_cp_modify_uses_item_id_and_field():
+    """CP modify: target_key is item_id; field must appear in changes."""
+    diff = {
+        "items": {
+            "modified_items": [
+                {"item_id": "item-1", "changes": [{"field": "control_method", "old": "a", "new": "b"}]}
+            ],
+            "added_items": [],
+            "deleted_items": [],
+        },
+        "headers": [],
+    }
+    # Correct item + correct field → covered
+    kp = {"expected_action": "modify", "target_kind": "cp_item",
+          "field": "control_method", "target_key": "item-1"}
+    assert _match_key_point(kp, diff, latest=None, doc_type="control_plan") is True
+    # Correct item + wrong field → not covered
+    kp_wrong = {**kp, "field": "reaction_plan"}
+    assert _match_key_point(kp_wrong, diff, latest=None, doc_type="control_plan") is False
+    # Wrong item_id → not covered
+    kp_wrong_id = {**kp, "target_key": "item-2"}
+    assert _match_key_point(kp_wrong_id, diff, latest=None, doc_type="control_plan") is False
+
+
+def test_match_key_point_cp_delete_uses_item_id():
+    """CP delete: target_key is item_id; no field check needed."""
+    diff = {
+        "items": {
+            "modified_items": [],
+            "added_items": [],
+            "deleted_items": [{"item_id": "item-1"}],
+        },
+        "headers": [],
+    }
+    kp = {"expected_action": "delete", "target_kind": "cp_item", "target_key": "item-1"}
+    assert _match_key_point(kp, diff, latest=None, doc_type="control_plan") is True
+    kp_miss = {**kp, "target_key": "item-x"}
+    assert _match_key_point(kp_miss, diff, latest=None, doc_type="control_plan") is False
+
+
+# ---------------------------------------------------------------------------
+# P1#5: empty affected_docs from LLM → done (not failed); confirm_no_affected path
+# ---------------------------------------------------------------------------
+
+
+def test_validate_and_backfill_accepts_empty_list():
+    """LLM returning [] is a valid done state (spec C4), not a validation error."""
+    result = _validate_and_backfill({"affected_docs": []}, candidates=[])
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_empty_llm_output_produces_done_analysis(db, capa_d8_gate_with_docs, docg_llm_mock):
+    """LLM returns affected_docs=[] → analysis done with empty list → confirm_no_affected → passed."""
+    capa, user = capa_d8_gate_with_docs
+    docg_llm_mock.return_value = {"affected_docs": []}
+    result = await capa_doc_gate_service.generate_impact_analysis(db, capa, user.user_id)
+    assert result["status"] == "done"
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(CapaDocgAnalysis.is_current == True)
+    )
+    assert analysis is not None
+    assert analysis.status == "done"
+    assert analysis.affected_docs == []
+    # confirm_no_affected now reachable
+    conf = await capa_doc_gate_service.confirm_no_affected(db, capa, user.user_id)
+    assert conf["decision"] == "passed"
+    assert conf["no_affected_confirmed"] is True
+
+
+# ---------------------------------------------------------------------------
+# P0#2 end-to-end: wrong-field bump → audit incomplete (not passed)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_wrong_field_bump_does_not_pass_audit(db, capa_d8_gate_with_docs):
+    """Analysis requires prevention_control change; bump only changes description → incomplete/blocked."""
+    from app.models.fmea import FMEADocument
+    from app.services.version_service import get_latest_fmea_version
+    from tests.capa.conftest import _make_done_analysis
+
+    capa, user = capa_d8_gate_with_docs
+    fmea = await db.get(FMEADocument, capa.fmea_ref_id)
+    baseline_ver = await get_latest_fmea_version(db, fmea.fmea_id)
+    baseline_version = {"major": baseline_ver.major_no, "minor": baseline_ver.minor_no, "sha256": baseline_ver.sha256_hash}
+
+    # Bump that only changes description (NOT prevention_control)
+    wrong_snap = {
+        "nodes": [{"id": "node-1", "type": "ProcessStep", "name": "step1", "description": "changed-desc"}],
+        "edges": [],
+    }
+    fmea.graph_data = wrong_snap
+    await db.execute(text(
+        "INSERT INTO fmea_versions (version_id, fmea_id, factory_id, major_no, minor_no, "
+        "snapshot, sha256_hash, change_summary, change_type, created_by, created_at) "
+        "VALUES (:vid, :fid, :fact, 1, 1, CAST(:snap AS JSONB), "
+        "encode(digest(CAST(:snap AS JSONB)::text, 'sha256'), 'hex'), "
+        "'wrong-field', 'minor', :uid, NOW())"
+    ), {
+        "vid": uuid.uuid4(), "fid": fmea.fmea_id, "fact": capa.factory_id,
+        "snap": json.dumps(wrong_snap), "uid": user.user_id,
+    })
+    await db.flush()
+
+    affected = [{
+        "doc_type": "fmea", "doc_id": str(capa.fmea_ref_id), "doc_name": "DocGate FMEA",
+        "baseline_version_id": str(baseline_ver.version_id), "baseline_version": baseline_version,
+        "key_points": [{"target_kind": "fmea_node", "expected_action": "modify",
+                        "field": "prevention_control", "target_key": "node-1"}],
+        "update_suggestion": "更新预防控制",
+    }]
+    await _make_done_analysis(db, capa, user, affected)
+
+    result = await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    assert result["decision"] == "blocked"
+    # Coverage for the key_point is False (wrong field)
+    assert any(
+        a["status"] == "incomplete" and a["covered_count"] == 0
+        for a in result["audits"]
+    )

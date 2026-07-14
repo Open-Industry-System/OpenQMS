@@ -28,6 +28,8 @@ from app.models.role import RoleDefinition, RolePermission
 from app.models.user import User
 from app.schemas.capa import AdvanceRequest
 from app.services.capa_service import advance_capa, get_capa
+from app.services.capa_doc_gate_service import confirm_no_affected
+from tests.capa.conftest import _make_done_analysis
 from app.services.version_service import rollback_fmea
 from app.api.capa import require_advance_permission
 
@@ -171,6 +173,26 @@ async def _cleanup_toctou(s: AsyncSession, capa_id: uuid.UUID, user_id: uuid.UUI
     await s.execute(delete(AuditLog).where(
         (AuditLog.record_id == capa_id) | (AuditLog.operated_by == user_id)
     ))
+    # doc-gate rows (composite FK capa_docg_* → capa_eightd) before capa delete.
+    # Delete for ALL capas by this user (leftovers from prior failed runs included),
+    # not just capa_id — else a stale analysis on another capa blocks the bulk delete.
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
+    await s.execute(text(
+        "DELETE FROM capa_docg_decision WHERE analysis_id IN "
+        "(SELECT a.analysis_id FROM capa_docg_analysis a "
+        "JOIN capa_eightd c ON a.capa_id = c.report_id AND a.factory_id = c.factory_id "
+        "WHERE c.created_by = :uid)"
+    ), {"uid": user_id})
+    await s.execute(text(
+        "DELETE FROM capa_docg_audit WHERE analysis_id IN "
+        "(SELECT a.analysis_id FROM capa_docg_analysis a "
+        "JOIN capa_eightd c ON a.capa_id = c.report_id AND a.factory_id = c.factory_id "
+        "WHERE c.created_by = :uid)"
+    ), {"uid": user_id})
+    await s.execute(text(
+        "DELETE FROM capa_docg_analysis WHERE capa_id IN "
+        "(SELECT report_id FROM capa_eightd WHERE created_by = :uid)"
+    ), {"uid": user_id})
     await s.execute(delete(CAPAEightD).where(CAPAEightD.created_by == user_id))  # all capas by this user (incl. leftovers from prior failed runs)
     await s.execute(delete(User).where(User.user_id == user_id))
     await s.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
@@ -206,9 +228,12 @@ async def test_toctou_edit_user_cannot_approve_after_concurrent_advance():
             capa_a = await get_capa(db_a, capa_id)
             assert capa_a.status == "D8_GATE_PENDING"  # stale baseline
 
-            # Session B (concurrent approver): advance → D8_APPROVAL_PENDING + commit
+            # Session B (concurrent approver): satisfy D8 doc gate, then advance → D8_APPROVAL_PENDING + commit
             async with _test_session_factory() as db_b:
                 capa_b = await get_capa(db_b, capa_id)
+                # US-E2E-01.7 doc gate: need a passed decision before D8_GATE_PENDING→D8_APPROVAL_PENDING.
+                await _make_done_analysis(db_b, capa_b, edit_user, [])
+                await confirm_no_affected(db_b, capa_b, edit_user.user_id)
                 await advance_capa(db_b, capa_b, edit_user.user_id,
                                    AdvanceRequest(target_state="D8_APPROVAL_PENDING"))
                 await db_b.commit()

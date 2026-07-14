@@ -106,8 +106,19 @@ test.describe("doc-gate D8 document update gate", () => {
     expect(["done", "failed"]).toContain(impactBody.status);
 
     if (impactBody.status !== "done") {
-      test.skip(true, `Impact analysis failed: ${impactBody.error || "unknown"}`);
-      return;
+      // Distinguish expected skips from real regressions (review test-quality #2):
+      // - "LLM 未配置" / "BLOCKED" = no LLM creds in this env → expected skip.
+      // - Any other failure (LLM returned garbage, validate error, input_changed)
+      //   is a real product defect → surface as a test failure, not a silent skip.
+      const err = String(impactBody.error || "");
+      const noCreds = err.includes("LLM 未配置") || err.includes("BLOCKED");
+      if (noCreds) {
+        test.skip(true, `Impact analysis skipped (no LLM credentials): ${err}`);
+        return;
+      }
+      throw new Error(
+        `Impact analysis failed unexpectedly (not a no-creds skip): ${err || "unknown"}`
+      );
     }
 
     const affected = impactBody.affected_docs || [];

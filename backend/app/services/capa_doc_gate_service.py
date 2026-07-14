@@ -140,11 +140,22 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
                    CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
             .values(status="failed", error=phase2["llm_error"], completed_at=now)
         )
+        if res.rowcount > 0:
+            db.add(AuditLog(
+                table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
+                changed_fields={"status": "failed", "error": phase2["llm_error"], "llm_available": True},
+                operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+            ))
+            await db.commit()
+            return {"status": "failed"}
         await db.commit()
-        return {"status": "failed"} if res.rowcount > 0 else {"status": "superseded"}
-    # Re-lock + C9 recheck
+        return {"status": "superseded"}
+    # Re-lock + refresh capa + rebuild candidates (review P1#6: phase2's capa/candidates
+    # are stale — captured before the LLM call. Must re-read to detect input changes
+    # made during the LLM window.)
     await db.execute(text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"), {"cid": capa.report_id})
-    candidates = phase2["_candidates"]
+    await db.refresh(capa)
+    candidates = await _build_allowlist(db, capa)
     cur_hash = _compute_input_hash(capa, candidates)
     if cur_hash != phase2["_input_hash"]:
         await db.execute(
@@ -153,6 +164,11 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
                    CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
             .values(status="failed", error="input_changed", completed_at=now)
         )
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
+            changed_fields={"status": "failed", "error": "input_changed", "llm_available": True},
+            operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+        ))
         await db.commit()
         return {"status": "failed", "error": "input_changed"}
     # Validate LLM output (C7 + vacuous pass + allowlist + discriminant union)
@@ -164,8 +180,16 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
                    CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
             .values(status="failed", error=affected, completed_at=now)
         )
+        if res.rowcount > 0:
+            db.add(AuditLog(
+                table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
+                changed_fields={"status": "failed", "error": affected, "llm_available": True},
+                operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+            ))
+            await db.commit()
+            return {"status": "failed"}
         await db.commit()
-        return {"status": "failed"} if res.rowcount > 0 else {"status": "superseded"}
+        return {"status": "superseded"}
     # CAS promote to done
     res = await db.execute(
         update(CapaDocgAnalysis)
@@ -264,9 +288,11 @@ def _cand_from_cp(cp, baseline) -> dict:
         cand["baseline_version_id"] = str(baseline.version_id)
         items = baseline.items_snapshot.get("items", []) if isinstance(baseline.items_snapshot, dict) else baseline.items_snapshot or []
         cand["baseline_version"] = {"major": baseline.major_no, "minor": baseline.minor_no, "sha256": baseline.sha256_hash}
+        # target_key uses item_id to match diff_engine's modified_items/deleted_items keying
+        # (review P1#4: was source_fmea_node_id which diff doesn't key on).
         cand["existing_targets"] = [
-            {"target_kind": "cp_item", "target_key": i.get("source_fmea_node_id", ""), "allowed_fields": ["control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency"]}
-            for i in items if i.get("source_fmea_node_id")
+            {"target_kind": "cp_item", "target_key": i.get("item_id", ""), "allowed_fields": ["control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency"]}
+            for i in items if i.get("item_id")
         ]
         # add_anchors from FMEA node IDs referenced by existing CP items
         known_fmea_ids = list({i.get("source_fmea_node_id", "") for i in items if i.get("source_fmea_node_id")})
@@ -320,7 +346,8 @@ def _compute_input_hash(capa: CAPAEightD, candidates: list[dict]) -> str:
         "fmea_ref_id": str(capa.fmea_ref_id) if capa.fmea_ref_id else "",
         "fmea_node_id": capa.fmea_node_id or "",
         "candidates": sorted(
-            (c["doc_type"], c["doc_id"], c.get("baseline_version_id") or "", c.get("baseline_version", {}).get("sha256", ""))
+            (c["doc_type"], c["doc_id"], c.get("baseline_version_id") or "",
+             (c.get("baseline_version") or {}).get("sha256", ""))
             for c in candidates
         ),
     }
@@ -416,12 +443,18 @@ _RESPONSE_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] | str:
-    """Validate LLM output; backfill doc_id/name/baseline from allowlist. Return affected_docs or error str."""
+    """Validate LLM output; backfill doc_id/name/baseline from allowlist. Return affected_docs or error str.
+
+    Empty affected_docs is a VALID done state (spec C4): the LLM concluded no
+    documents need updating; the engineer must then call confirm_no_affected.
+    The vacuous-pass guard (per-doc key_points >= 1) only applies to non-empty lists.
+    """
     raw_docs = phase2.get("affected_docs")
     if not isinstance(raw_docs, list):
         return "LLM 输出缺 affected_docs"
+    # Empty list is valid — returns [] (done with empty; engineer must confirm_no_affected)
     if not raw_docs:
-        return "affected_docs 为空"
+        return []
     cand_by_id = {str(c["doc_id"]): c for c in candidates}
     out = []
     for d in raw_docs:
@@ -468,6 +501,20 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
         return "target_key 与 add_anchor 互斥"
     if action in ("modify", "delete") and not has_target:
         return f"{action} 须 target_key"
+    # Field-level allowlist for modify (review P0#2): the requested field must be
+    # in the allowed_fields of the matched existing_target. delete needs no field.
+    if action == "modify":
+        field = kp.get("field")
+        if not field or not str(field).strip():
+            return "modify 须 field"
+        allowed_fields = set()
+        for t in cand.get("existing_targets", []):
+            if t["target_key"] == kp["target_key"]:
+                allowed_fields.update(t.get("allowed_fields", []))
+        if not allowed_fields:
+            return f"target_key 不在 allowlist: {kp['target_key']}"
+        if str(field) not in allowed_fields:
+            return f"field '{field}' 不在允许字段: {sorted(allowed_fields)}"
     if action == "add":
         if kind == "document":
             if cand.get("baseline_version") is not None:
@@ -533,16 +580,32 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
             coverage=a["coverage"], covered_count=a["covered_count"], total_count=a["total_count"],
             audited_by=user_id, audited_at=now,
         ))
-    # Insert decision (revision locked)
+    # Insert decision (revision locked). audit_run_id is set for BOTH passed and
+    # blocked (review P1#8: blocked needs the batch link for traceability).
     decision = "passed" if all_passed else "blocked"
     await _insert_decision(db, analysis.analysis_id, capa.factory_id, decision, user_id, now,
-                          audit_run_id if all_passed else None, version_snapshot if all_passed else [])
+                          audit_run_id, version_snapshot if all_passed else [])
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
-        action="DOC_UPDATE_AUDITED" if all_passed else "DOC_GATE_BLOCKED",
-        changed_fields={"per_doc_status": [{"doc_type": a["doc_type"], "status": a["status"]} for a in audits], "audit_run_id": str(audit_run_id)},
+        action="DOC_UPDATE_AUDITED",
+        changed_fields={"per_doc_status": [{"doc_type": a["doc_type"], "status": a["status"]} for a in audits], "audit_run_id": str(audit_run_id), "decision": decision},
         operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
     ))
+    if all_passed:
+        # review P1#8: emit the gate-passed event so the audit chain has an
+        # explicit terminal marker (DOC_UPDATE_AUDITED = batch record,
+        # DOC_GATE_PASSED = gate decision).
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_PASSED",
+            changed_fields={"audit_run_id": str(audit_run_id), "doc_count": len(audits)},
+            operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+        ))
+    else:
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_BLOCKED",
+            changed_fields={"audit_run_id": str(audit_run_id), "per_doc_status": [{"doc_type": a["doc_type"], "status": a["status"]} for a in audits]},
+            operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+        ))
     await db.commit()
     return {"decision": decision, "audits": audits, "audit_run_id": str(audit_run_id)}
 
@@ -579,7 +642,13 @@ async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
         bvid = uuid.UUID(str(baseline_version_id))
         if doc_type == "control_plan":
             bver = await db.get(ControlPlanVersion, bvid)
-            baseline_snapshot = bver.header_snapshot if bver else None
+            # Store full CP snapshot {header, items} — _compute_diff reads both
+            # (review P1#4: was header_snapshot only → baseline items always empty)
+            if bver is not None:
+                baseline_snapshot = {
+                    "header": bver.header_snapshot or {},
+                    "items": (bver.items_snapshot.get("items", []) if isinstance(bver.items_snapshot, dict) else (bver.items_snapshot or [])),
+                }
         else:
             bver = await db.get(FMEAVersion, bvid)
             baseline_snapshot = bver.snapshot if bver else None
@@ -640,6 +709,12 @@ def _build_parent_map(snapshot: dict) -> dict:
 
 
 def _match_key_point(kp, diff, latest, doc_type):
+    """Return True if the key_point is covered by the version diff.
+
+    For modify: the target node/item must be modified AND the change set must
+    include the requested `field` (review P0#2: identity-only match let a wrong-
+    field change count as coverage). delete/add need no field check.
+    """
     action = kp["expected_action"]
     kind = kp.get("target_kind")
     if kind == "document":
@@ -647,7 +722,11 @@ def _match_key_point(kp, diff, latest, doc_type):
     if doc_type == "control_plan":
         items_diff = diff["items"]
         if action == "modify":
-            return any(i.get("item_id") == kp["target_key"] for i in items_diff["modified_items"])
+            field = kp.get("field")
+            return any(
+                i.get("item_id") == kp["target_key"] and any(c.get("field") == field for c in i.get("changes", []))
+                for i in items_diff["modified_items"]
+            )
         if action == "delete":
             return any(i.get("item_id") == kp["target_key"] for i in items_diff["deleted_items"])
         if action == "add":
@@ -661,7 +740,11 @@ def _match_key_point(kp, diff, latest, doc_type):
     else:  # fmea
         g_diff = diff
         if action == "modify":
-            return any(n.get("node_id") == kp["target_key"] for n in g_diff["modified_nodes"])
+            field = kp.get("field")
+            return any(
+                n.get("node_id") == kp["target_key"] and any(c.get("field") == field for c in n.get("changes", []))
+                for n in g_diff["modified_nodes"]
+            )
         if action == "delete":
             return any(n.get("id") == kp["target_key"] for n in g_diff["deleted_nodes"])
         if action == "add":
@@ -682,15 +765,31 @@ def _match_key_point(kp, diff, latest, doc_type):
 # ---------------------------------------------------------------------------
 
 async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id: uuid.UUID, deadline, user_id: uuid.UUID) -> dict:
-    """Record a deferred decision (still blocks the gate — C5). Owner validated against capa factory."""
+    """Record a deferred decision (still blocks the gate — C5). Owner validated against capa factory.
+
+    Factory authorization (review P1#7): the previous check only rejected a
+    non-NULL mismatching factory_id — a NULL-factory user with no UserFactory
+    association was wrongly accepted. Now mirrors resolve_factory_scope: accept
+    same-factory users, group-admin bypass (bypass_row_level_security), or
+    users with a UserFactory row for this factory; reject others.
+    """
     if not reason or not str(reason).strip():
         raise ValueError("defer reason 必填")
     from app.models.user import User
+    from app.core.factory_scope import get_user_factory_ids
     owner = await db.get(User, owner_id)
     if owner is None or not owner.is_active:
         raise ValueError("defer_owner 不存在或未激活")
-    if owner.factory_id is not None and owner.factory_id != capa.factory_id:
+    if owner.factory_id == capa.factory_id:
+        pass  # primary factory match
+    elif owner.factory_id is not None:
         raise ValueError("defer_owner 不属于当前工厂")
+    else:  # NULL factory — group admin or multi-factory association
+        bypass = getattr(getattr(owner, "role_definition", None), "bypass_row_level_security", False)
+        if not bypass:
+            user_fids = await get_user_factory_ids(owner, db)
+            if capa.factory_id not in user_fids:
+                raise ValueError("defer_owner 无当前工厂授权")
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
