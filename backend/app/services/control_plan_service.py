@@ -236,13 +236,46 @@ async def update_control_plan(
                     break
 
         if items_changed:
-            for item in existing_items:
-                await db.delete(item)
-
+            # Preserve item_id for existing rows so doc-gate target_key stays stable.
+            # Only truly new items (missing/unknown/temp id) get a fresh UUID.
+            existing_by_id = {str(i.item_id): i for i in existing_items}
+            keep_ids: set[str] = set()
             for idx, item_data in enumerate(data.items):
-                new_item = ControlPlanItem(
+                raw_id = getattr(item_data, "item_id", None)
+                reuse_id: uuid.UUID | None = None
+                if raw_id is not None:
+                    sid = str(raw_id).strip()
+                    # Accept only real UUIDs that belong to this CP (reject temp-… client ids)
+                    try:
+                        cand = uuid.UUID(sid)
+                    except (ValueError, AttributeError, TypeError):
+                        cand = None
+                    if cand is not None and sid in existing_by_id:
+                        reuse_id = cand
+                        keep_ids.add(sid)
+                        # In-place update of existing row
+                        old = existing_by_id[sid]
+                        old.step_no = item_data.step_no
+                        old.process_name = item_data.process_name
+                        old.equipment = item_data.equipment
+                        old.characteristic_no = item_data.characteristic_no
+                        old.product_characteristic = item_data.product_characteristic
+                        old.process_characteristic = item_data.process_characteristic
+                        old.special_class = item_data.special_class
+                        old.specification_tolerance = item_data.specification_tolerance
+                        old.evaluation_method = item_data.evaluation_method
+                        old.sample_size = item_data.sample_size
+                        old.sample_frequency = item_data.sample_frequency
+                        old.control_method = item_data.control_method
+                        old.reaction_plan = item_data.reaction_plan
+                        old.source_fmea_node_id = item_data.source_fmea_node_id
+                        old.sort_order = idx
+                        continue
+                # New item
+                db.add(ControlPlanItem(
                     item_id=uuid.uuid4(),
                     cp_id=cp.cp_id,
+                    factory_id=cp.factory_id,
                     step_no=item_data.step_no,
                     process_name=item_data.process_name,
                     equipment=item_data.equipment,
@@ -258,8 +291,11 @@ async def update_control_plan(
                     reaction_plan=item_data.reaction_plan,
                     source_fmea_node_id=item_data.source_fmea_node_id,
                     sort_order=idx,
-                )
-                db.add(new_item)
+                ))
+            # Delete items not present in the request
+            for sid, old in existing_by_id.items():
+                if sid not in keep_ids:
+                    await db.delete(old)
 
             changed_fields["items_count"] = len(data.items)
 

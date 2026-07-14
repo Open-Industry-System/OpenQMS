@@ -385,11 +385,19 @@ def _cand_from_fmea(fmea, baseline) -> dict:
     return cand
 
 
+# Bump when target_key / allowlist contract changes so old current analyses
+# fail C9 and must be regenerated (no silent miss on re-audit).
+DOC_GATE_CONTRACT_VERSION = 2
+
+
 def _compute_input_hash(capa: CAPAEightD, candidates: list[dict]) -> str:
     """C9 hash: capa semantic input + candidate identity set (doc_type, doc_id) + baseline.
     MUST NOT include latest version (review P0#1 third round).
+    Includes DOC_GATE_CONTRACT_VERSION so target-key contract upgrades invalidate
+    stale current analyses (e.g. source_fmea_node_id → item_id).
     """
     payload = {
+        "contract_version": DOC_GATE_CONTRACT_VERSION,
         "factory_id": str(capa.factory_id),
         "product_line_code": capa.product_line_code,
         "d4_root_cause": capa.d4_root_cause or "",
