@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-12
+**更新日期**: 2026-07-14
 **当前分支**: `feature/us-e2e-01-spec-a`
-**最近合并**: `8ccb29c5` B3: D4 验证结论驱动 + 双行锁 retry_count 递增 + 审计重命名；B1 `conclusion`/`d4_retry_count` + B2 schema 已就绪；**B7 e2e 断言已补**（`capa-story-closed-loop.spec.ts` D4 method/conclusion/retry_count，含 threshold warning toast）
+**最近提交**: US-E2E-01.7 D8 文档更新审核门禁 9 任务落地（迁移+ORM / 三阶段 LLM 分析 / run_audit / defer&confirm / gate+7 路由 / 新鲜度并发测试 / DocGatePanel / E2E seed+spec / 文档）
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
@@ -261,7 +261,7 @@
 | 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 | US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
-| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1 D3 遏制已实现态 v4；01.4 8D↔FMEA 双向收尾待启动） | — |
+| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1 D3 遏制 v4；**01.7 文档门禁已落地**；01.4 8D↔FMEA 双向收尾待启动） | — |
 | US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
 | 01.10 PPT 输出 | ✅ 已落地（PPT generator + sub-agent 3-round review + admin review-skill management + frontend） | `feature/us-e2e-01-spec-a` |
 
@@ -287,7 +287,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 
 ### P2 — 新建/收尾
 
-- [ ] **01.7 D8 文档更新门禁新建** — 文档影响分析（CP/FMEA/SOP）+ 自动审核（版本 bump + 覆盖）+ 门禁阻断（扩展现有 `_d7_to_d8_gate` 或新增 D8_GATE_PENDING 状态）；延期=记录待办但阻断关闭；`control_plan_version`/`fmea_version` 可复用
+- [x] **01.7 D8 文档更新门禁新建** — 3 表 `capa_docg_*` + `generate_impact_analysis` 三阶段（BLOCKED/stale/CAS/C9）+ `run_audit`（diff_engine 版本间 diff + 关键点覆盖 + 空清单守卫）+ `record_defer`/`confirm_no_affected` + `_d8_doc_gate_gate`（C8/C9，defer 仍阻断）+ 7 路由 + `DocGatePanel`（全局推进排除 D8_GATE_PENDING）+ E2E seed `8D-E2E-DOCGATE-001` + `capa-story-doc-gate.spec.ts`；窄范围只审 CP/FMEA（C1）。plan: `docs/superpowers/plans/2026-07-13-us-e2e-01.7-doc-update-gate.md`
 - [ ] **01.8 知识库沉淀收尾** — D7/D8 lessons 抽取已有（`capa_lessons_learned`），补结构化 8 字段沉淀 + 时机改为 D8 关闭后全报告 + 按产品检索入口
 
 ### P3 — 新建

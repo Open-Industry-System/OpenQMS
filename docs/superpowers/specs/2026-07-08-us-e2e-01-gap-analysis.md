@@ -15,7 +15,7 @@
 | 01.4 8D↔FMEA 双向 | false | ⚠️ 部分实现 | 双向反查基础已有（GET /api/capa/by-fmea-node + get_capas_by_fmea_node + 前端 RelatedCAPAList），但只查 fmea_ref_id/fmea_node_id，需确认覆盖 D7 node-action Prevention 节点 + 审计 |
 | 01.5 8D→SCAR 触发 | false | ❌ 未实现 | SupplierSCAR.capa_ref_id 外键已就绪；8D 侧触发入口+状态同步缺失 |
 | 01.6 8D→供应商风险 | false | ❌ 未实现 | SupplierRiskAlert.linked_capa_id 外键已就绪；8D 触发写入入口缺失 |
-| 01.7 D8 文档更新门禁 | true | ❌ 未实现 | 现有 D7→D8 闸口只查 node-action 完整性，无文档更新审核；CP/FMEA 版本模型可复用 |
+| 01.7 D8 文档更新门禁 | true | ✅ 已实现 | 3 表 capa_docg_* + 三阶段 LLM 影响分析 + run_audit 版本 diff/关键点覆盖 + defer/confirm + `_d8_doc_gate_gate` C8/C9 + DocGatePanel + E2E（2026-07-14） |
 | 01.8 知识库沉淀 | true | ⚠️ 部分实现 | D7/D8 lessons 抽取已有（capa_lessons_learned）；非结构化 8 字段沉淀、时机非 D8 关闭后全报告 |
 | 01.9 横向扩散预警 | true | ❌ 未实现 | 同类产品 KB 检索有（recommendation_sources_extra）；横向扩散检查+通知完全缺失 |
 | 01.10 PPT 输出 | false | ✅ 已实现 | capa_ppt_export 表 + agent_review_skill 表 + COALESCE 索引 + seed；capa_ppt_service（generate_content + render_pptx + validate）；capa_ppt_review_service（3 轮 LLM 闭环 + skip）；admin review-skill CRUD API；PPT 导出 API（POST + GET + X-PPT-Export-Id header + 权限/状态门控）；前端 generatePpt 按钮 + review report Modal + admin ReviewSkillsPage + i18n |
@@ -24,7 +24,7 @@
 - **大部分已实现**：01.2（12 源编排器已就绪，但 LLM 降级/持久化有 gap）
 - **部分实现**：01.3、01.4、01.8
 - **数据模型就绪、链路缺失**：01.5（SCAR.capa_ref_id）、01.6（RiskAlert.linked_capa_id）——外键都在，只缺 8D 侧触发
-- **完全缺失**：01.1（D3 遏制全链路）、01.7（文档门禁）、01.9（横向扩散）
+- **完全缺失**：01.9（横向扩散）；（01.1 / 01.7 已在后续切片落地，见各节状态）
 
 **数据模型基础设施齐全**：ERP（库存/发货）、SCAR（capa_ref_id）、供应商风险（linked_capa_id）、控制计划版本、FMEA 版本、lessons 表均存在，新建子故事可复用，不需从零建表。
 
@@ -122,14 +122,14 @@
 
 | 验收标准 | 状态 | 现有实现 | gap |
 |---|---|---|---|
-| 文档影响分析（识别受影响文档清单） | ❌ | 无 | 缺失 |
-| 受影响文档类型（CP/FMEA/SOP） | ⚠️ | `control_plan` + `control_plan_version`、`fmea_version` 版本模型存在；SOP 模型待核 | 版本数据模型有基础，无影响分析逻辑 |
-| 文档更新审核（版本 bump + 覆盖） | ❌ | 无 | 缺失 |
-| D8 门禁阻断（未通过不可关闭） | ❌ | 现有 D7→D8 闸口（capa_service.py:388 `_d7_to_d8_gate`）只查 node-action 完整性 + recommendation_hash，无文档审核 | 缺失（需扩展闸口或新增门禁阶段） |
-| 延期处理（记录待办但阻断） | ❌ | 无 | 缺失 |
-| 审核报告 | ❌ | 无 | 缺失 |
+| 文档影响分析（识别受影响文档清单） | ✅ | `generate_impact_analysis` 三阶段 + allowlist（factory+product_line CP/FMEA） | — |
+| 受影响文档类型（CP/FMEA/SOP） | ⚠️ | 设计 C1 窄范围只产出 control_plan + fmea；SOP 无实体，枚举保留不产出 | 与故事「≥3 类」偏差，见设计契约修订 |
+| 文档更新审核（版本 bump + 覆盖） | ✅ | `run_audit` + `diff_engine.diff_fmea_graphs`/`diff_cp_items` + key_point 覆盖 | — |
+| D8 门禁阻断（未通过不可关闭） | ✅ | `_d8_doc_gate_gate` on `D8_GATE_PENDING→D8_APPROVAL_PENDING` + C8/C9 | — |
+| 延期处理（记录待办但阻断） | ✅ | `record_defer` → decision=deferred，gate 仍 raise | — |
+| 审核报告 | ✅ | `capa_docg_audit` 行 + GET /doc-gate/audit | — |
 
-**01.7 gap**：完全未实现。现有 D7→D8 闸口需扩展为"node-action 完整性 + 文档更新审核"两段，或新增 D8_GATE_PENDING 状态承载门禁。版本数据模型（control_plan_version/fmea_version）可复用。
+**01.7 gap（2026-07-14 更新）**：实现完成。表 `capa_docg_*`、服务、7 路由、`DocGatePanel`、E2E seed `8D-E2E-DOCGATE-001` + `capa-story-doc-gate.spec.ts`。已知 follow-up：全链路 `capa-story-closed-loop` 仍按旧 7 跳断言（未覆盖 D7_COMPLETED/D8_GATE/D8_APPROVAL 细化路径），需另切片对齐 01.3+01.7 状态机。
 
 ---
 
@@ -183,7 +183,7 @@
 | P1 | 01.4（FMEA 双向）收尾 | 反查 API 已有，补 Prevention 节点覆盖 + 审计（工作量小） |
 | P1 | 01.5（SCAR 触发）新建 | capa_ref_id 外键已就绪，只缺 8D 侧触发入口（工作量小） |
 | P1 | 01.6（供应商风险）新建 | linked_capa_id 外键已就绪，只缺 8D 侧触发写入（工作量小） |
-| P2 | 01.7（D8 文档门禁）新建 | 完全缺失，需扩展 D7→D8 闸口 + 新增 D8_GATE_PENDING 状态；版本模型可复用 |
+| P2 | 01.7（D8 文档门禁）新建 | ✅ 已落地（2026-07-14）：capa_docg_* + 三阶段分析 + run_audit + gate C8/C9 + DocGatePanel + E2E |
 | P2 | 01.8（知识沉淀）收尾 | lessons 已有，补结构化 8 字段 + 按产品检索入口 |
 | P3 | 01.9（横向扩散）新建 | 完全缺失，同类型产品 KB 检索可复用 |
 | ~~P3 | 01.10（PPT）新建 | 完全缺失，需引入 PPT 生成依赖~~ |

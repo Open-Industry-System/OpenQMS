@@ -93,3 +93,22 @@ D8 关闭审批前，系统自动化审核相关文档的更新情况：
 
 - 延期处理的到期跟踪与升级为后续迭代。
 - 文档更新内容的质量自动评审为后续迭代。
+
+---
+
+## 实现注记（2026-07-14，不改版本号）
+
+**设计 / 计划**：
+- Spec：`docs/superpowers/specs/2026-07-13-us-e2e-01.7-doc-update-gate-design.md`（6 轮终审）
+- Plan：`docs/superpowers/plans/2026-07-13-us-e2e-01.7-doc-update-gate.md`（9 TDD 任务）
+
+**落地摘要**（相对故事定稿 v1 的契约修订见设计文档「契约修订」表）：
+- 3 表 `capa_docg_{analysis,audit,decision}` + 迁移 `20260713_doc_gate`
+- 服务 `capa_doc_gate_service.py`：`generate_impact_analysis`（三阶段 + CAS）/ `run_audit`（diff_engine 版本间 diff + 关键点覆盖）/ `record_defer` / `confirm_no_affected` / `get_latest_analysis`
+- `advance_capa` 边 `D8_GATE_PENDING→D8_APPROVAL_PENDING` 接入 `_d8_doc_gate_gate`（C8 版本新鲜度 + C9 输入指纹，defer 仍阻断）
+- 7 路由 `/api/capa/{id}/doc-gate/*`；无 LLM → 422 `detail.blocked`
+- 前端 `DocGatePanel` + 全局推进按钮排除 `D8_GATE_PENDING` + i18n
+- 窄范围：只审 control_plan + fmea（C1）；空清单须人工确认（C4）
+- E2E：seed `8D-E2E-DOCGATE-001` + `frontend/e2e/specs/m1-core/capa-story-doc-gate.spec.ts`
+
+**测试**：`tests/capa/test_capa_doc_gate*.py` + `test_doc_gate_migration.py`；前端 vitest `DocGatePanel.test.tsx`。
