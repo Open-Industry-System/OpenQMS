@@ -152,7 +152,10 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
         if res.rowcount > 0:
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
-                changed_fields={"status": "failed", "error": phase2["llm_error"], "llm_available": True},
+                changed_fields={
+                    "status": "failed", "error": phase2["llm_error"],
+                    "llm_available": True, "affected_doc_count": 0,
+                },
                 operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
             ))
             await db.commit()
@@ -176,7 +179,10 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
         if res.rowcount > 0:
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
-                changed_fields={"status": "failed", "error": "input_changed", "llm_available": True},
+                changed_fields={
+                    "status": "failed", "error": "input_changed",
+                    "llm_available": True, "affected_doc_count": 0,
+                },
                 operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
             ))
             await db.commit()
@@ -195,7 +201,10 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
         if res.rowcount > 0:
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
-                changed_fields={"status": "failed", "error": affected, "llm_available": True},
+                changed_fields={
+                    "status": "failed", "error": affected,
+                    "llm_available": True, "affected_doc_count": 0,
+                },
                 operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
             ))
             await db.commit()
@@ -225,6 +234,20 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
 # ---------------------------------------------------------------------------
 # Helpers: allowlist, hash, prompt, validation
 # ---------------------------------------------------------------------------
+
+def _cp_biz_key(item: dict) -> str:
+    """Stable CP item key: source|product_characteristic|process_characteristic.
+
+    source_fmea_node_id alone is NOT unique — one FMEA step may spawn many CP
+    items (control_plan_service creates one item per step function / WEF).
+    """
+    src = str(item.get("source_fmea_node_id") or "").strip()
+    if not src:
+        return ""
+    prod = str(item.get("product_characteristic") or "").strip().lower()
+    proc = str(item.get("process_characteristic") or "").strip().lower()
+    return f"{src}|{prod}|{proc}"
+
 
 async def _get_baseline_version(db: AsyncSession, doc_id: uuid.UUID, capa_created_at, doc_type: str):
     """Baseline = last version with created_at <= capa.created_at (NOT the overall latest).
@@ -300,18 +323,24 @@ def _cand_from_cp(cp, baseline) -> dict:
         cand["baseline_version_id"] = str(baseline.version_id)
         items = baseline.items_snapshot.get("items", []) if isinstance(baseline.items_snapshot, dict) else baseline.items_snapshot or []
         cand["baseline_version"] = {"major": baseline.major_no, "minor": baseline.minor_no, "sha256": baseline.sha256_hash}
-        # Spec: CP target_key = source_fmea_node_id (stable business key; item_id is
-        # rebuild-unstable). Match at audit time by source_fmea_node_id on the item.
+        # Composite business key: source_fmea_node_id|product_char|process_char
+        # (one FMEA step may spawn many CP items — source alone is not unique)
         cand["existing_targets"] = [
-            {"target_kind": "cp_item", "target_key": i.get("source_fmea_node_id", ""),
-             "allowed_fields": ["control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency"]}
-            for i in items if i.get("source_fmea_node_id")
+            {
+                "target_kind": "cp_item",
+                "target_key": _cp_biz_key(i),
+                "allowed_fields": [
+                    "control_method", "reaction_plan", "special_class",
+                    "sample_size", "sample_frequency",
+                    "product_characteristic", "process_characteristic",
+                ],
+            }
+            for i in items if _cp_biz_key(i)
         ]
-        # add_anchors from FMEA node IDs referenced by existing CP items
-        known_fmea_ids = list({i.get("source_fmea_node_id", "") for i in items if i.get("source_fmea_node_id")})
+        known_fmea_ids = list({str(i.get("source_fmea_node_id", "")).strip() for i in items if i.get("source_fmea_node_id")})
         cand["add_anchors"] = [
             {"parent_node_id": nid, "node_type": "FailureMode"}
-            for nid in known_fmea_ids
+            for nid in known_fmea_ids if nid
         ]
     return cand
 
@@ -375,9 +404,13 @@ def _build_prompt(capa: CAPAEightD, candidates: list[dict]) -> str:
         if c.get("baseline_version"):
             line += f" (v{c['baseline_version']['major']}.{c['baseline_version']['minor']}, hash={c['baseline_version']['sha256'][:8]})"
         else:
-            line += " (new document, no baseline)"
+            line += " (new document, no baseline — use target_kind=document + expected_action=add)"
         if c.get("existing_targets"):
-            line += f" existing: {[t['target_key'] for t in c['existing_targets']]}"
+            targets = [
+                f"{t['target_key']}(fields={t.get('allowed_fields', [])})"
+                for t in c["existing_targets"]
+            ]
+            line += f" existing: {targets}"
         if c.get("add_anchors"):
             unique = list({(a['parent_node_id'], a['node_type']) for a in c['add_anchors']})
             line += f" can-add-under: {[f'{p}/{t}' for p,t in unique]}"
@@ -402,16 +435,17 @@ def _build_prompt(capa: CAPAEightD, candidates: list[dict]) -> str:
 - key_points: 关键更新点列表，每项含：
   - target_kind: "fmea_node" | "cp_item" | "document"
   - expected_action: "add" | "modify" | "delete"
-  - field: 字段名
-  - 对于 modify/delete: target_key (现存节点/项标识)
+  - field: 字段名（必须来自 existing 的 allowed fields；add 时也须声明目标字段）
+  - 对于 modify/delete: target_key（必须等于 existing 中的完整 target_key；CP 为 source|product_char|process_char 复合键）
   - 对于 add: add_anchor = {{parent_node_id, node_type, business_key}}
 - update_suggestion: 更新建议文本
 
 约束：
 - key_points 每项不可为空
 - doc_id 仅从上方清单选择
+- field 必须在该 target 的 allowed fields 内
 - 新增项必须用 add_anchor 表达，不得编造不存在的 node_id
-- document target_kind 仅用于 baseline 为空的新文档"""
+- document target_kind 仅用于 baseline 为空的新文档（FMEA 或 CP），expected_action 必须为 add"""
 
 
 _RESPONSE_SCHEMA = {
@@ -471,6 +505,8 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
     seen_doc_ids: set[str] = set()
     out = []
     for d in raw_docs:
+        if not isinstance(d, dict):
+            return "affected_docs 项必须为对象"
         doc_id = str(d.get("doc_id", ""))
         if doc_id not in cand_by_id:
             return f"LLM 输出非法 doc_id: {doc_id}"
@@ -479,6 +515,8 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
         seen_doc_ids.add(doc_id)
         cand = cand_by_id[doc_id]
         kps = d.get("key_points", [])
+        if not isinstance(kps, list):
+            return "key_points 必须为数组"
         if not kps:
             return "doc key_points 为空（vacuous pass）"
         suggestion = d.get("update_suggestion")
@@ -486,13 +524,15 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
             return "update_suggestion 为空"
         seen_kps: set[str] = set()
         for kp in kps:
+            if not isinstance(kp, dict):
+                return "key_point 必须为对象"
             err = _validate_key_point(kp, cand)
             if err:
                 return err
             # Dedup key: action+kind+target_key or action+kind+add_anchor triple
             if kp.get("expected_action") == "add" and kp.get("add_anchor"):
-                a = kp["add_anchor"]
-                ksig = f"add|{kp.get('target_kind')}|{a.get('parent_node_id')}|{a.get('node_type')}|{str(a.get('business_key','')).strip().lower()}"
+                a = kp["add_anchor"] if isinstance(kp.get("add_anchor"), dict) else {}
+                ksig = f"add|{kp.get('target_kind')}|{a.get('parent_node_id')}|{a.get('node_type')}|{str(a.get('business_key','')).strip().lower()}|{kp.get('field','')}"
             elif kp.get("target_kind") == "document":
                 ksig = f"document|add"
             else:
@@ -510,7 +550,10 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
 
 
 # Fields that may be required on add for each doc kind (field must be non-empty on new item/node)
-_CP_ADD_FIELDS = {"control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency", "product_characteristic"}
+_CP_ADD_FIELDS = {
+    "control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency",
+    "product_characteristic", "process_characteristic",
+}
 _FMEA_ADD_FIELDS = {"prevention_control", "detection_control", "name"}
 
 
@@ -524,10 +567,10 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
     # Presence (not truthiness) for discriminant mutual exclusion
     has_target_key = "target_key" in kp
     has_add_anchor = "add_anchor" in kp
-    # document discriminant: ONLY baseline=NULL + expected_action=add (spec C7 / round5 P1#1)
+    # document: baseline=NULL + add only; allowed for FMEA and CP (new docs after CAPA)
     if kind == "document":
-        if cand["doc_type"] != "fmea":
-            return "document target_kind 仅用于 fmea"
+        if cand["doc_type"] not in ("fmea", "control_plan"):
+            return "document target_kind 仅用于 fmea/control_plan"
         if action != "add":
             return "document 仅允许 expected_action=add"
         if cand.get("baseline_version") is not None:
@@ -545,20 +588,15 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
     if action in ("modify", "delete"):
         if not has_target_key or not str(kp.get("target_key") or "").strip():
             return f"{action} 须 target_key"
-        existing_keys = {t["target_key"] for t in cand.get("existing_targets", [])}
-        if kp["target_key"] not in existing_keys:
+        existing = {t["target_key"]: t for t in cand.get("existing_targets", [])}
+        if kp["target_key"] not in existing:
             return f"target_key 不在 allowlist: {kp['target_key']}"
-        # 四字段齐全：modify/delete 均须 field（delete 用于审计轨迹；匹配不依赖 field 值）
         field = kp.get("field")
         if not field or not str(field).strip():
             return f"{action} 须 field"
-        if action == "modify":
-            allowed_fields = set()
-            for t in cand.get("existing_targets", []):
-                if t["target_key"] == kp["target_key"]:
-                    allowed_fields.update(t.get("allowed_fields", []))
-            if str(field) not in allowed_fields:
-                return f"field '{field}' 不在允许字段: {sorted(allowed_fields)}"
+        allowed_fields = set(existing[kp["target_key"]].get("allowed_fields", []))
+        if str(field) not in allowed_fields:
+            return f"field '{field}' 不在允许字段: {sorted(allowed_fields)}"
     if action == "add":
         if not has_add_anchor or not isinstance(kp.get("add_anchor"), dict) or not kp["add_anchor"]:
             return "add 须 add_anchor"
@@ -572,7 +610,6 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
         allowed_parents = {(x["parent_node_id"], x["node_type"]) for x in cand.get("add_anchors", [])}
         if (a["parent_node_id"], a["node_type"]) not in allowed_parents:
             return "add_anchor 不在 allowlist"
-        # add must declare the field that should be populated on the new item/node
         field = kp.get("field")
         if not field or not str(field).strip():
             return "add 须 field"
@@ -746,18 +783,17 @@ async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
 
 
 def _diff_cp_items_by_source(v1_items: list[dict], v2_items: list[dict]) -> dict:
-    """CP diff keyed by source_fmea_node_id (doc-gate stable business key).
+    """CP diff keyed by composite business key (source|product_char|process_char).
 
-    ``diff_cp_items`` keys by item_id, so an item rebuild (old-id/node-5 →
-    new-id/node-5) yields false delete+add. Doc-gate must treat the same
-    source_fmea_node_id as the same business item: delete only when the source
-    is absent from v2; add only when the source is new in v2.
+    One FMEA step may spawn many CP items, so source_fmea_node_id alone is not
+    unique. item_id is rebuild-unstable. Composite key keeps item identity
+    across rebuilds while distinguishing sibling items under the same source.
     """
-    def _src(i: dict) -> str:
-        return str(i.get("source_fmea_node_id") or "").strip()
+    def _key(i: dict) -> str:
+        return _cp_biz_key(i)
 
-    v1_map = {_src(i): i for i in v1_items if _src(i)}
-    v2_map = {_src(i): i for i in v2_items if _src(i)}
+    v1_map = {_key(i): i for i in v1_items if _key(i)}
+    v2_map = {_key(i): i for i in v2_items if _key(i)}
     v1_ids, v2_ids = set(v1_map), set(v2_map)
     added = [v2_map[s] for s in sorted(v2_ids - v1_ids)]
     deleted = [v1_map[s] for s in sorted(v1_ids - v2_ids)]
@@ -765,12 +801,14 @@ def _diff_cp_items_by_source(v1_items: list[dict], v2_items: list[dict]) -> dict
     for s in sorted(v1_ids & v2_ids):
         old, new = v1_map[s], v2_map[s]
         changes = []
-        for key in sorted((set(old) | set(new)) - {"item_id", "source_fmea_node_id"}):
+        skip = {"item_id", "source_fmea_node_id", "product_characteristic", "process_characteristic"}
+        for key in sorted((set(old) | set(new)) - skip):
             if old.get(key) != new.get(key):
                 changes.append({"field": key, "old": old.get(key), "new": new.get(key)})
         if changes:
             modified.append({
-                "source_fmea_node_id": s,
+                "biz_key": s,
+                "source_fmea_node_id": new.get("source_fmea_node_id"),
                 "item_id": new.get("item_id"),
                 "changes": changes,
                 "new_item": new,
@@ -814,9 +852,8 @@ def _field_nonempty(obj: dict, field: str) -> bool:
 def _match_key_point(kp, diff, latest, doc_type):
     """Return True if the key_point is covered by the version diff.
 
-    CP items are matched by source_fmea_node_id via _diff_cp_items_by_source
-    (item_id rebuild must NOT count as delete). add requires the declared
-    field to be non-empty on the new item/node.
+    CP items matched by composite biz key (source|product_char|process_char).
+    add requires the declared field to be non-empty on the new item/node.
     """
     action = kp["expected_action"]
     kind = kp.get("target_kind")
@@ -827,22 +864,22 @@ def _match_key_point(kp, diff, latest, doc_type):
         if action == "modify":
             field = kp.get("field")
             return any(
-                str(i.get("source_fmea_node_id", "")) == str(kp["target_key"])
+                str(i.get("biz_key") or _cp_biz_key(i.get("new_item") or i)) == str(kp["target_key"])
                 and any(c.get("field") == field for c in i.get("changes", []))
                 for i in items_diff["modified_items"]
             )
         if action == "delete":
-            return any(
-                str(i.get("source_fmea_node_id", "")) == str(kp["target_key"])
-                for i in items_diff["deleted_items"]
-            )
+            return any(_cp_biz_key(i) == str(kp["target_key"]) for i in items_diff["deleted_items"])
         if action == "add":
             a = kp["add_anchor"]
             field = kp.get("field")
             bk = str(a["business_key"]).strip().lower()
             return any(
                 str(i.get("source_fmea_node_id", "")).strip().lower() == str(a["parent_node_id"]).strip().lower()
-                and str(i.get("product_characteristic", "")).strip().lower() == bk
+                and (
+                    str(i.get("product_characteristic", "")).strip().lower() == bk
+                    or str(i.get("process_characteristic", "")).strip().lower() == bk
+                )
                 and _field_nonempty(i, field)
                 for i in items_diff["added_items"]
             )

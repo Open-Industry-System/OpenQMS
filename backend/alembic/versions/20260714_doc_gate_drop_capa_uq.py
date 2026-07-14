@@ -30,11 +30,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Irreversible once retry/regeneration history exists: re-adding the full UQ
-    # would either fail on duplicates or leave schema/revision inconsistent if
-    # we skip. Raise so operators must handle data before rolling back.
-    raise NotImplementedError(
-        "20260714_doc_gate_drop_capa_uq is irreversible: retry history may "
-        "contain multiple rows per (capa_id, factory_id). Clean those rows "
-        "manually before re-adding uq_docg_analysis_capa_factory."
+    # Safe path: no multi-row history → restore UQ.
+    # Unsafe path: retry history exists → abort (do not leave revision/schema drift).
+    from alembic import op
+    conn = op.get_bind()
+    n = conn.exec_driver_sql(
+        "SELECT COUNT(*) FROM ("
+        "  SELECT 1 FROM capa_docg_analysis GROUP BY capa_id, factory_id HAVING COUNT(*) > 1"
+        ") d"
+    ).scalar()
+    if n and int(n) > 0:
+        raise RuntimeError(
+            "Cannot downgrade 20260714_doc_gate_drop_capa_uq: "
+            f"{n} (capa_id, factory_id) groups have multiple analysis rows "
+            "(retry history). Clean them before restoring uq_docg_analysis_capa_factory."
+        )
+    op.create_unique_constraint(
+        "uq_docg_analysis_capa_factory",
+        "capa_docg_analysis",
+        ["capa_id", "factory_id"],
     )
