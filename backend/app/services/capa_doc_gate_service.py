@@ -127,6 +127,10 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
         raw = await provider_adapter.complete_json(pc, prompt, _RESPONSE_SCHEMA)
     except Exception as e:
         return {"llm_error": str(e)}
+    # complete_json may return non-dict (array/null) if provider ignores schema —
+    # convert to llm_error so phase3 CAS marks failed instead of leaving running.
+    if not isinstance(raw, dict):
+        return {"llm_error": f"LLM 输出非对象: {type(raw).__name__}"}
     raw["model"] = getattr(pc, "model", "unknown")
     raw["_input_hash"] = input_hash
     raw["_candidates"] = candidates
@@ -236,10 +240,12 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
 # ---------------------------------------------------------------------------
 
 def _cp_biz_key(item: dict) -> str:
-    """Stable CP item key: source|product_characteristic|process_characteristic.
+    """Soft fingerprint for CP rebuild reconciliation only (NOT target_key).
 
-    source_fmea_node_id alone is NOT unique — one FMEA step may spawn many CP
-    items (control_plan_service creates one item per step function / WEF).
+    target_key for existing CP items is item_id (unique, immutable within a
+    version). This fingerprint (source|product|process) is used only to pair
+    unpaired items when item_id was rebuilt across versions. Not unique when
+    product/process are empty — multi-match is left unmatched (delete+add).
     """
     src = str(item.get("source_fmea_node_id") or "").strip()
     if not src:
@@ -247,6 +253,10 @@ def _cp_biz_key(item: dict) -> str:
     prod = str(item.get("product_characteristic") or "").strip().lower()
     proc = str(item.get("process_characteristic") or "").strip().lower()
     return f"{src}|{prod}|{proc}"
+
+
+def _cp_item_id(item: dict) -> str:
+    return str(item.get("item_id") or "").strip()
 
 
 async def _get_baseline_version(db: AsyncSession, doc_id: uuid.UUID, capa_created_at, doc_type: str):
@@ -323,19 +333,20 @@ def _cand_from_cp(cp, baseline) -> dict:
         cand["baseline_version_id"] = str(baseline.version_id)
         items = baseline.items_snapshot.get("items", []) if isinstance(baseline.items_snapshot, dict) else baseline.items_snapshot or []
         cand["baseline_version"] = {"major": baseline.major_no, "minor": baseline.minor_no, "sha256": baseline.sha256_hash}
-        # Composite business key: source_fmea_node_id|product_char|process_char
-        # (one FMEA step may spawn many CP items — source alone is not unique)
+        # Composite business key: item_id is the stable unique target_key for
+        # existing CP items (immutable within a version snapshot). product/process
+        # may be modified; rebuild reconciliation uses soft fingerprint separately.
         cand["existing_targets"] = [
             {
                 "target_kind": "cp_item",
-                "target_key": _cp_biz_key(i),
+                "target_key": _cp_item_id(i),
                 "allowed_fields": [
                     "control_method", "reaction_plan", "special_class",
                     "sample_size", "sample_frequency",
                     "product_characteristic", "process_characteristic",
                 ],
             }
-            for i in items if _cp_biz_key(i)
+            for i in items if _cp_item_id(i)
         ]
         known_fmea_ids = list({str(i.get("source_fmea_node_id", "")).strip() for i in items if i.get("source_fmea_node_id")})
         cand["add_anchors"] = [
@@ -436,7 +447,7 @@ def _build_prompt(capa: CAPAEightD, candidates: list[dict]) -> str:
   - target_kind: "fmea_node" | "cp_item" | "document"
   - expected_action: "add" | "modify" | "delete"
   - field: 字段名（必须来自 existing 的 allowed fields；add 时也须声明目标字段）
-  - 对于 modify/delete: target_key（必须等于 existing 中的完整 target_key；CP 为 source|product_char|process_char 复合键）
+  - 对于 modify/delete: target_key（必须等于 existing 中的完整 target_key；CP 为 item_id；FMEA 为 node_id）
   - 对于 add: add_anchor = {{parent_node_id, node_type, business_key}}
 - update_suggestion: 更新建议文本
 
@@ -782,37 +793,75 @@ async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
             "coverage": coverage, "covered_count": covered, "total_count": total}
 
 
-def _diff_cp_items_by_source(v1_items: list[dict], v2_items: list[dict]) -> dict:
-    """CP diff keyed by composite business key (source|product_char|process_char).
+def _diff_cp_items_for_gate(v1_items: list[dict], v2_items: list[dict]) -> dict:
+    """CP diff for doc-gate: item_id primary + soft rebuild reconciliation.
 
-    One FMEA step may spawn many CP items, so source_fmea_node_id alone is not
-    unique. item_id is rebuild-unstable. Composite key keeps item identity
-    across rebuilds while distinguishing sibling items under the same source.
+    1. Pair by item_id → modified/unchanged (product/process field changes stay
+       as modify, not delete+add).
+    2. Remaining unpaired items: soft-pair by fingerprint source|product|process
+       ONLY when the fingerprint is unique on both sides (1:1). Multi-match or
+       empty fingerprint left as true delete+add (cannot safely reconcile).
+    3. Rest → deleted (v1 only) / added (v2 only).
     """
-    def _key(i: dict) -> str:
-        return _cp_biz_key(i)
-
-    v1_map = {_key(i): i for i in v1_items if _key(i)}
-    v2_map = {_key(i): i for i in v2_items if _key(i)}
-    v1_ids, v2_ids = set(v1_map), set(v2_map)
-    added = [v2_map[s] for s in sorted(v2_ids - v1_ids)]
-    deleted = [v1_map[s] for s in sorted(v1_ids - v2_ids)]
+    v1_by_id = {_cp_item_id(i): i for i in v1_items if _cp_item_id(i)}
+    v2_by_id = {_cp_item_id(i): i for i in v2_items if _cp_item_id(i)}
+    shared_ids = set(v1_by_id) & set(v2_by_id)
+    paired_v1: set[str] = set()
+    paired_v2: set[str] = set()
     modified = []
-    for s in sorted(v1_ids & v2_ids):
-        old, new = v1_map[s], v2_map[s]
+    for iid in sorted(shared_ids):
+        old, new = v1_by_id[iid], v2_by_id[iid]
+        paired_v1.add(iid)
+        paired_v2.add(iid)
         changes = []
-        skip = {"item_id", "source_fmea_node_id", "product_characteristic", "process_characteristic"}
-        for key in sorted((set(old) | set(new)) - skip):
+        for key in sorted((set(old) | set(new)) - {"item_id"}):
             if old.get(key) != new.get(key):
                 changes.append({"field": key, "old": old.get(key), "new": new.get(key)})
         if changes:
             modified.append({
-                "biz_key": s,
+                "item_id": iid,
                 "source_fmea_node_id": new.get("source_fmea_node_id"),
-                "item_id": new.get("item_id"),
                 "changes": changes,
                 "new_item": new,
             })
+    # Soft-pair remaining by unique fingerprint
+    rem_v1 = [v1_by_id[i] for i in v1_by_id if i not in paired_v1]
+    rem_v2 = [v2_by_id[i] for i in v2_by_id if i not in paired_v2]
+    from collections import defaultdict
+    fp1: dict[str, list] = defaultdict(list)
+    fp2: dict[str, list] = defaultdict(list)
+    for i in rem_v1:
+        k = _cp_biz_key(i)
+        if k:
+            fp1[k].append(i)
+    for i in rem_v2:
+        k = _cp_biz_key(i)
+        if k:
+            fp2[k].append(i)
+    soft_v1: set[str] = set()
+    soft_v2: set[str] = set()
+    for k in sorted(set(fp1) & set(fp2)):
+        if len(fp1[k]) == 1 and len(fp2[k]) == 1:
+            old, new = fp1[k][0], fp2[k][0]
+            soft_v1.add(_cp_item_id(old))
+            soft_v2.add(_cp_item_id(new))
+            changes = []
+            for key in sorted((set(old) | set(new)) - {"item_id"}):
+                if old.get(key) != new.get(key):
+                    changes.append({"field": key, "old": old.get(key), "new": new.get(key)})
+            if changes:
+                # Rebuild: treat as modify of the BASELINE item_id (target_key)
+                modified.append({
+                    "item_id": _cp_item_id(old),  # baseline id = target_key
+                    "source_fmea_node_id": new.get("source_fmea_node_id"),
+                    "changes": changes,
+                    "new_item": new,
+                    "rebuilt_from": _cp_item_id(old),
+                    "rebuilt_to": _cp_item_id(new),
+                })
+            # even if no field change, still paired (not delete+add)
+    deleted = [v1_by_id[i] for i in sorted(set(v1_by_id) - paired_v1 - soft_v1)]
+    added = [v2_by_id[i] for i in sorted(set(v2_by_id) - paired_v2 - soft_v2)]
     return {"added_items": added, "deleted_items": deleted, "modified_items": modified}
 
 
@@ -822,8 +871,7 @@ def _compute_diff(doc_type, baseline_snapshot, latest):
         v2_items = (latest.items_snapshot.get("items", []) if isinstance(latest.items_snapshot, dict) else (latest.items_snapshot or []))
         v1_header = (baseline_snapshot or {}).get("header", {}) if isinstance(baseline_snapshot, dict) else {}
         v2_header = latest.header_snapshot or {}
-        # Doc-gate uses source-keyed CP diff (not item_id-keyed diff_cp_items)
-        return {"items": _diff_cp_items_by_source(v1_items, v2_items), "headers": diff_cp_headers(v1_header, v2_header)}
+        return {"items": _diff_cp_items_for_gate(v1_items, v2_items), "headers": diff_cp_headers(v1_header, v2_header)}
     else:
         v1 = baseline_snapshot if isinstance(baseline_snapshot, dict) else {"nodes": [], "edges": []}
         v2 = latest.snapshot or {"nodes": [], "edges": []}
@@ -852,8 +900,9 @@ def _field_nonempty(obj: dict, field: str) -> bool:
 def _match_key_point(kp, diff, latest, doc_type):
     """Return True if the key_point is covered by the version diff.
 
-    CP items matched by composite biz key (source|product_char|process_char).
-    add requires the declared field to be non-empty on the new item/node.
+    CP: target_key = item_id (baseline). Rebuild soft-pairs keep baseline item_id
+    on modified_items so modify still matches. delete matches deleted_items by
+    item_id. add still uses parent_node_id + business_key + non-empty field.
     """
     action = kp["expected_action"]
     kind = kp.get("target_kind")
@@ -864,12 +913,12 @@ def _match_key_point(kp, diff, latest, doc_type):
         if action == "modify":
             field = kp.get("field")
             return any(
-                str(i.get("biz_key") or _cp_biz_key(i.get("new_item") or i)) == str(kp["target_key"])
+                str(i.get("item_id", "")) == str(kp["target_key"])
                 and any(c.get("field") == field for c in i.get("changes", []))
                 for i in items_diff["modified_items"]
             )
         if action == "delete":
-            return any(_cp_biz_key(i) == str(kp["target_key"]) for i in items_diff["deleted_items"])
+            return any(str(i.get("item_id", "")) == str(kp["target_key"]) for i in items_diff["deleted_items"])
         if action == "add":
             a = kp["add_anchor"]
             field = kp.get("field")
