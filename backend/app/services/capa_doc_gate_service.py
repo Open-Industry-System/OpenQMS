@@ -90,7 +90,10 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
         db.add(failed)
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
-            changed_fields={"status": "failed", "error": "LLM 未配置", "llm_available": False},
+            changed_fields={
+                "status": "failed", "error": "LLM 未配置",
+                "llm_available": False, "affected_doc_count": 0,
+            },
             operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
         ))
         await db.commit()
@@ -506,6 +509,11 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
     return out
 
 
+# Fields that may be required on add for each doc kind (field must be non-empty on new item/node)
+_CP_ADD_FIELDS = {"control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency", "product_characteristic"}
+_FMEA_ADD_FIELDS = {"prevention_control", "detection_control", "name"}
+
+
 def _validate_key_point(kp: dict, cand: dict) -> str | None:
     action = kp.get("expected_action")
     if action not in ("add", "modify", "delete"):
@@ -513,6 +521,9 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
     kind = kp.get("target_kind")
     if kind not in ("fmea_node", "cp_item", "document"):
         return f"非法 target_kind: {kind}"
+    # Presence (not truthiness) for discriminant mutual exclusion
+    has_target_key = "target_key" in kp
+    has_add_anchor = "add_anchor" in kp
     # document discriminant: ONLY baseline=NULL + expected_action=add (spec C7 / round5 P1#1)
     if kind == "document":
         if cand["doc_type"] != "fmea":
@@ -521,7 +532,7 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
             return "document 仅允许 expected_action=add"
         if cand.get("baseline_version") is not None:
             return "document add 仅允许 baseline=NULL"
-        if ("target_key" in kp and kp["target_key"]) or ("add_anchor" in kp and kp["add_anchor"]):
+        if has_target_key or has_add_anchor:
             return "document add 不得带 target_key/add_anchor"
         return None
     if not (
@@ -529,21 +540,19 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
         or (kind == "fmea_node" and cand["doc_type"] == "fmea")
     ):
         return "doc_type/target_kind 错配"
-    has_target = "target_key" in kp and kp["target_key"]
-    has_anchor = "add_anchor" in kp and kp["add_anchor"]
-    if has_target and has_anchor:
+    if has_target_key and has_add_anchor:
         return "target_key 与 add_anchor 互斥"
-    if action in ("modify", "delete") and not has_target:
-        return f"{action} 须 target_key"
     if action in ("modify", "delete"):
-        # target_key must be in existing_targets (modify AND delete)
+        if not has_target_key or not str(kp.get("target_key") or "").strip():
+            return f"{action} 须 target_key"
         existing_keys = {t["target_key"] for t in cand.get("existing_targets", [])}
         if kp["target_key"] not in existing_keys:
             return f"target_key 不在 allowlist: {kp['target_key']}"
+        # 四字段齐全：modify/delete 均须 field（delete 用于审计轨迹；匹配不依赖 field 值）
+        field = kp.get("field")
+        if not field or not str(field).strip():
+            return f"{action} 须 field"
         if action == "modify":
-            field = kp.get("field")
-            if not field or not str(field).strip():
-                return "modify 须 field"
             allowed_fields = set()
             for t in cand.get("existing_targets", []):
                 if t["target_key"] == kp["target_key"]:
@@ -551,8 +560,10 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
             if str(field) not in allowed_fields:
                 return f"field '{field}' 不在允许字段: {sorted(allowed_fields)}"
     if action == "add":
-        if not has_anchor:
+        if not has_add_anchor or not isinstance(kp.get("add_anchor"), dict) or not kp["add_anchor"]:
             return "add 须 add_anchor"
+        if has_target_key:
+            return "add 不得带 target_key"
         a = kp["add_anchor"]
         if not a.get("parent_node_id") or not a.get("node_type") or not str(a.get("business_key", "")).strip():
             return "add_anchor 三字段须非空"
@@ -561,13 +572,20 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
         allowed_parents = {(x["parent_node_id"], x["node_type"]) for x in cand.get("add_anchors", [])}
         if (a["parent_node_id"], a["node_type"]) not in allowed_parents:
             return "add_anchor 不在 allowlist"
+        # add must declare the field that should be populated on the new item/node
+        field = kp.get("field")
+        if not field or not str(field).strip():
+            return "add 须 field"
+        allowed = _CP_ADD_FIELDS if kind == "cp_item" else _FMEA_ADD_FIELDS
+        if str(field) not in allowed:
+            return f"add field '{field}' 不在允许字段: {sorted(allowed)}"
     return None
 
 # ---------------------------------------------------------------------------
 # run_audit: synchronous DB-query audit (no LLM) — Task 3
 # ---------------------------------------------------------------------------
 
-from app.services.diff_engine import diff_fmea_graphs, diff_cp_items, diff_cp_headers
+from app.services.diff_engine import diff_fmea_graphs, diff_cp_headers
 
 
 async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
@@ -628,7 +646,11 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
         # DOC_GATE_PASSED = gate decision).
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_PASSED",
-            changed_fields={"audit_run_id": str(audit_run_id), "doc_count": len(audits)},
+            changed_fields={
+                "audit_run_id": str(audit_run_id),
+                "doc_count": len(audits),
+                "no_affected_confirmed": False,
+            },
             operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
         ))
     else:
@@ -723,13 +745,47 @@ async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
             "coverage": coverage, "covered_count": covered, "total_count": total}
 
 
+def _diff_cp_items_by_source(v1_items: list[dict], v2_items: list[dict]) -> dict:
+    """CP diff keyed by source_fmea_node_id (doc-gate stable business key).
+
+    ``diff_cp_items`` keys by item_id, so an item rebuild (old-id/node-5 →
+    new-id/node-5) yields false delete+add. Doc-gate must treat the same
+    source_fmea_node_id as the same business item: delete only when the source
+    is absent from v2; add only when the source is new in v2.
+    """
+    def _src(i: dict) -> str:
+        return str(i.get("source_fmea_node_id") or "").strip()
+
+    v1_map = {_src(i): i for i in v1_items if _src(i)}
+    v2_map = {_src(i): i for i in v2_items if _src(i)}
+    v1_ids, v2_ids = set(v1_map), set(v2_map)
+    added = [v2_map[s] for s in sorted(v2_ids - v1_ids)]
+    deleted = [v1_map[s] for s in sorted(v1_ids - v2_ids)]
+    modified = []
+    for s in sorted(v1_ids & v2_ids):
+        old, new = v1_map[s], v2_map[s]
+        changes = []
+        for key in sorted((set(old) | set(new)) - {"item_id", "source_fmea_node_id"}):
+            if old.get(key) != new.get(key):
+                changes.append({"field": key, "old": old.get(key), "new": new.get(key)})
+        if changes:
+            modified.append({
+                "source_fmea_node_id": s,
+                "item_id": new.get("item_id"),
+                "changes": changes,
+                "new_item": new,
+            })
+    return {"added_items": added, "deleted_items": deleted, "modified_items": modified}
+
+
 def _compute_diff(doc_type, baseline_snapshot, latest):
     if doc_type == "control_plan":
         v1_items = (baseline_snapshot or {}).get("items", []) if isinstance(baseline_snapshot, dict) else []
         v2_items = (latest.items_snapshot.get("items", []) if isinstance(latest.items_snapshot, dict) else (latest.items_snapshot or []))
         v1_header = (baseline_snapshot or {}).get("header", {}) if isinstance(baseline_snapshot, dict) else {}
         v2_header = latest.header_snapshot or {}
-        return {"items": diff_cp_items(v1_items, v2_items), "headers": diff_cp_headers(v1_header, v2_header)}
+        # Doc-gate uses source-keyed CP diff (not item_id-keyed diff_cp_items)
+        return {"items": _diff_cp_items_by_source(v1_items, v2_items), "headers": diff_cp_headers(v1_header, v2_header)}
     else:
         v1 = baseline_snapshot if isinstance(baseline_snapshot, dict) else {"nodes": [], "edges": []}
         v2 = latest.snapshot or {"nodes": [], "edges": []}
@@ -746,51 +802,48 @@ def _build_parent_map(snapshot: dict) -> dict:
     return parent_map
 
 
+def _field_nonempty(obj: dict, field: str) -> bool:
+    val = obj.get(field)
+    if val is None:
+        return False
+    if isinstance(val, str):
+        return bool(val.strip())
+    return True
+
+
 def _match_key_point(kp, diff, latest, doc_type):
     """Return True if the key_point is covered by the version diff.
 
-    For modify: the target node/item must be modified AND the change set must
-    include the requested `field`. delete/add need no field check.
-    document: only baseline=NULL+add is valid (validated upstream); covered by
-    version_bump alone — re-check action defensively here.
+    CP items are matched by source_fmea_node_id via _diff_cp_items_by_source
+    (item_id rebuild must NOT count as delete). add requires the declared
+    field to be non-empty on the new item/node.
     """
     action = kp["expected_action"]
     kind = kp.get("target_kind")
     if kind == "document":
-        # Defensive: only add is covered by version_bump; delete/modify should
-        # never reach here (rejected by _validate_key_point).
         return action == "add"
     if doc_type == "control_plan":
         items_diff = diff["items"]
-        # Spec: CP target_key = source_fmea_node_id. modified_items only carry
-        # item_id+changes, so resolve source via latest items_snapshot.
-        latest_items = []
-        if latest is not None:
-            snap = getattr(latest, "items_snapshot", None) or {}
-            latest_items = snap.get("items", []) if isinstance(snap, dict) else (snap or [])
-        id_to_src = {
-            str(i.get("item_id", "")): str(i.get("source_fmea_node_id", ""))
-            for i in latest_items if i.get("item_id")
-        }
         if action == "modify":
             field = kp.get("field")
             return any(
-                id_to_src.get(str(i.get("item_id", ""))) == str(kp["target_key"])
+                str(i.get("source_fmea_node_id", "")) == str(kp["target_key"])
                 and any(c.get("field") == field for c in i.get("changes", []))
                 for i in items_diff["modified_items"]
             )
         if action == "delete":
-            # deleted_items are full baseline item dicts (include source_fmea_node_id)
             return any(
                 str(i.get("source_fmea_node_id", "")) == str(kp["target_key"])
                 for i in items_diff["deleted_items"]
             )
         if action == "add":
             a = kp["add_anchor"]
+            field = kp.get("field")
             bk = str(a["business_key"]).strip().lower()
             return any(
                 str(i.get("source_fmea_node_id", "")).strip().lower() == str(a["parent_node_id"]).strip().lower()
                 and str(i.get("product_characteristic", "")).strip().lower() == bk
+                and _field_nonempty(i, field)
                 for i in items_diff["added_items"]
             )
     else:  # fmea
@@ -805,12 +858,14 @@ def _match_key_point(kp, diff, latest, doc_type):
             return any(n.get("id") == kp["target_key"] for n in g_diff["deleted_nodes"])
         if action == "add":
             a = kp["add_anchor"]
+            field = kp.get("field")
             bk = str(a["business_key"]).strip().lower()
             parent_map = _build_parent_map(latest.snapshot)
             return any(
                 a["parent_node_id"] in parent_map.get(n["id"], [])
                 and n.get("type") == a["node_type"]
                 and str(n.get("name", "")).strip().lower() == bk
+                and _field_nonempty(n, field)
                 for n in g_diff["added_nodes"]
             )
     return False

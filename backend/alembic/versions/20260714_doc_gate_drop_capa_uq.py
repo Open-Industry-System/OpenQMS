@@ -30,20 +30,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Only re-add if no duplicate (capa_id, factory_id) rows exist (valid
-    # retry/regeneration history would make the constraint unsatisfiable).
-    # IF NOT EXISTS-style guard via DO block.
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM capa_docg_analysis
-                GROUP BY capa_id, factory_id HAVING COUNT(*) > 1
-            ) THEN
-                ALTER TABLE capa_docg_analysis
-                ADD CONSTRAINT uq_docg_analysis_capa_factory UNIQUE (capa_id, factory_id);
-            END IF;
-        END $$;
-        """
+    # Irreversible once retry/regeneration history exists: re-adding the full UQ
+    # would either fail on duplicates or leave schema/revision inconsistent if
+    # we skip. Raise so operators must handle data before rolling back.
+    raise NotImplementedError(
+        "20260714_doc_gate_drop_capa_uq is irreversible: retry history may "
+        "contain multiple rows per (capa_id, factory_id). Clean those rows "
+        "manually before re-adding uq_docg_analysis_capa_factory."
     )

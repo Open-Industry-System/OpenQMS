@@ -166,20 +166,104 @@ def test_compute_input_hash_handles_none_baseline():
 # ---------------------------------------------------------------------------
 
 
-class _FakeLatestCP:
-    def __init__(self, items):
-        self.items_snapshot = {"items": items}
+def test_cp_item_rebuild_same_source_is_not_delete():
+    """old-id/node-5 → new-id/node-5 must NOT count as delete covered (source-keyed diff)."""
+    from app.services.capa_doc_gate_service import _diff_cp_items_by_source, _match_key_point
+    v1 = [{"item_id": "old-id", "source_fmea_node_id": "node-5", "control_method": "A"}]
+    v2 = [{"item_id": "new-id", "source_fmea_node_id": "node-5", "control_method": "A"}]
+    d = _diff_cp_items_by_source(v1, v2)
+    assert d["deleted_items"] == []
+    assert d["added_items"] == []
+    assert d["modified_items"] == []
+    kp = {"expected_action": "delete", "target_kind": "cp_item",
+          "field": "control_method", "target_key": "node-5"}
+    assert _match_key_point(kp, {"items": d}, latest=None, doc_type="control_plan") is False
+
+
+def test_cp_modify_after_item_id_rebuild_still_matches_by_source():
+    """Same source, item_id rebuild + field change → modify covered."""
+    from app.services.capa_doc_gate_service import _diff_cp_items_by_source, _match_key_point
+    v1 = [{"item_id": "old-id", "source_fmea_node_id": "node-5", "control_method": "A"}]
+    v2 = [{"item_id": "new-id", "source_fmea_node_id": "node-5", "control_method": "B"}]
+    d = _diff_cp_items_by_source(v1, v2)
+    assert len(d["modified_items"]) == 1
+    assert d["modified_items"][0]["source_fmea_node_id"] == "node-5"
+    kp = {"expected_action": "modify", "target_kind": "cp_item",
+          "field": "control_method", "target_key": "node-5"}
+    assert _match_key_point(kp, {"items": d}, latest=None, doc_type="control_plan") is True
+
+
+def test_add_requires_field_and_nonempty_value():
+    """add without field fails validation; empty control_method does not cover."""
+    from app.services.capa_doc_gate_service import _validate_key_point, _match_key_point
+    cand = {
+        "doc_type": "control_plan",
+        "existing_targets": [],
+        "add_anchors": [{"parent_node_id": "node-5", "node_type": "FailureMode"}],
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+    }
+    kp_nofield = {
+        "expected_action": "add", "target_kind": "cp_item",
+        "add_anchor": {"parent_node_id": "node-5", "node_type": "FailureMode",
+                       "business_key": "char-a"},
+    }
+    err = _validate_key_point(kp_nofield, cand)
+    assert err is not None and "field" in err
+
+    kp = {**kp_nofield, "field": "control_method"}
+    assert _validate_key_point(kp, cand) is None
+
+    # empty control_method on added item → not covered
+    diff_empty = {
+        "items": {
+            "added_items": [{
+                "item_id": "i1", "source_fmea_node_id": "node-5",
+                "product_characteristic": "char-a", "control_method": "",
+            }],
+            "deleted_items": [], "modified_items": [],
+        }
+    }
+    assert _match_key_point(kp, diff_empty, latest=None, doc_type="control_plan") is False
+    # non-empty → covered
+    diff_ok = {
+        "items": {
+            "added_items": [{
+                "item_id": "i1", "source_fmea_node_id": "node-5",
+                "product_characteristic": "char-a", "control_method": "SPC",
+            }],
+            "deleted_items": [], "modified_items": [],
+        }
+    }
+    assert _match_key_point(kp, diff_ok, latest=None, doc_type="control_plan") is True
+
+
+def test_discriminant_presence_not_truthiness():
+    """Empty target_key / empty add_anchor still count as 'present' for mutual exclusion."""
+    from app.services.capa_doc_gate_service import _validate_key_point
+    cand = {
+        "doc_type": "fmea",
+        "existing_targets": [{"target_kind": "fmea_node", "target_key": "node-1",
+                             "allowed_fields": ["prevention_control"]}],
+        "add_anchors": [{"parent_node_id": "node-1", "node_type": "FailureMode"}],
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+    }
+    # both keys present (even empty) → mutual exclusion error
+    err = _validate_key_point(
+        {"expected_action": "modify", "target_kind": "fmea_node",
+         "target_key": "", "add_anchor": {}, "field": "prevention_control"},
+        cand,
+    )
+    assert err is not None and "互斥" in err
 
 
 def test_match_key_point_cp_modify_uses_source_fmea_node_id_and_field():
-    """CP modify: target_key is source_fmea_node_id (spec); field must appear in changes."""
-    latest = _FakeLatestCP([
-        {"item_id": "item-1", "source_fmea_node_id": "node-5", "control_method": "b"},
-    ])
+    """CP modify: target_key is source_fmea_node_id; field must appear in changes."""
+    from app.services.capa_doc_gate_service import _match_key_point
     diff = {
         "items": {
             "modified_items": [
-                {"item_id": "item-1", "changes": [{"field": "control_method", "old": "a", "new": "b"}]}
+                {"source_fmea_node_id": "node-5", "item_id": "item-1",
+                 "changes": [{"field": "control_method", "old": "a", "new": "b"}]}
             ],
             "added_items": [],
             "deleted_items": [],
@@ -188,17 +272,16 @@ def test_match_key_point_cp_modify_uses_source_fmea_node_id_and_field():
     }
     kp = {"expected_action": "modify", "target_kind": "cp_item",
           "field": "control_method", "target_key": "node-5"}
-    assert _match_key_point(kp, diff, latest=latest, doc_type="control_plan") is True
-    # Correct source + wrong field → not covered
+    assert _match_key_point(kp, diff, latest=None, doc_type="control_plan") is True
     kp_wrong = {**kp, "field": "reaction_plan"}
-    assert _match_key_point(kp_wrong, diff, latest=latest, doc_type="control_plan") is False
-    # Wrong source_fmea_node_id → not covered
+    assert _match_key_point(kp_wrong, diff, latest=None, doc_type="control_plan") is False
     kp_wrong_id = {**kp, "target_key": "node-x"}
-    assert _match_key_point(kp_wrong_id, diff, latest=latest, doc_type="control_plan") is False
+    assert _match_key_point(kp_wrong_id, diff, latest=None, doc_type="control_plan") is False
 
 
 def test_match_key_point_cp_delete_uses_source_fmea_node_id():
-    """CP delete: target_key is source_fmea_node_id; deleted_items carry full baseline dict."""
+    """CP delete: target_key is source_fmea_node_id; only absent source is deleted."""
+    from app.services.capa_doc_gate_service import _match_key_point
     diff = {
         "items": {
             "modified_items": [],
@@ -207,7 +290,8 @@ def test_match_key_point_cp_delete_uses_source_fmea_node_id():
         },
         "headers": [],
     }
-    kp = {"expected_action": "delete", "target_kind": "cp_item", "target_key": "node-5"}
+    kp = {"expected_action": "delete", "target_kind": "cp_item",
+          "field": "control_method", "target_key": "node-5"}
     assert _match_key_point(kp, diff, latest=None, doc_type="control_plan") is True
     kp_miss = {**kp, "target_key": "node-x"}
     assert _match_key_point(kp_miss, diff, latest=None, doc_type="control_plan") is False
