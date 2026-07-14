@@ -19,6 +19,7 @@ from app.schemas.capa_d3 import D3AdviceRequest, D3ImportRequest
 from app.seed_e2e_constants import (
     D3_E2E_CUSTOMER_CODE, D3_E2E_CUSTOMER_SEGMENT, D3_E2E_ERP_CONNECTION_NAME,
     D3_E2E_LOT_NO, D3_E2E_MATERIAL_CODE, D3_E2E_PRODUCT_LINE, D3_E2E_SUPPLIER_NO,
+    DOCGATE_E2E_CAPA_DOC_NO, DOCGATE_E2E_FMEA_DOC_NO,
     E2E_ACCOUNTS, E2E_FACTORY_DC100, E2E_FACTORY_SH, E2E_PRODUCT_LINE, E2E_PRODUCT_LINE_DEFAULT,
 )
 
@@ -27,6 +28,9 @@ FACT_DC100_ID = uuid.UUID("00000000-0000-0000-0000-000000e20001")
 FACT_SH_ID = uuid.UUID("00000000-0000-0000-0000-000000e20002")
 PFMEA_E2E_ID = uuid.UUID("00000000-0000-0000-0000-000000e20100")
 CAPA_E2E_ID = uuid.UUID("00000000-0000-0000-0000-000000e20200")
+DOCGATE_FMEA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20170")
+DOCGATE_CAPA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20270")
+DOCGATE_FMEA_VER_ID = uuid.UUID("00000000-0000-0000-0000-000000e20171")
 
 
 async def _seed_factories(db) -> dict:
@@ -422,12 +426,115 @@ async def _seed_d3_test_capas(db):
                     f"D3 seed advice failed: {doc_no} status={gen_r['status']} error={gen_r.get('error')}")
 
 
+async def _seed_doc_gate_capa(db, factory_ids):
+    """Seed CAPA at D8_GATE_PENDING + FMEA with baseline version (US-E2E-01.7).
+
+    Idempotent: upserts CAPA status to D8_GATE_PENDING and clears prior docg rows
+    so re-seed starts from a clean gate state.
+    """
+    import json
+    from datetime import timedelta
+    from sqlalchemy import text as sa_text
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
+    from app.models.fmea import FMEADocument
+    from app.models.fmea_version import FMEAVersion
+    from app.state_machines.eightd_state import EightDState
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+    factory_id = factory_ids[E2E_FACTORY_DC100["code"]]
+    product_line = E2E_PRODUCT_LINE["code"]
+    snapshot = {
+        "nodes": [{"id": "node-1", "type": "ProcessStep", "name": "焊接"}],
+        "edges": [],
+    }
+
+    fmea = (await db.execute(
+        select(FMEADocument).where(FMEADocument.document_no == DOCGATE_E2E_FMEA_DOC_NO)
+    )).scalar_one_or_none()
+    if not fmea:
+        fmea = FMEADocument(
+            fmea_id=DOCGATE_FMEA_ID,
+            document_no=DOCGATE_E2E_FMEA_DOC_NO,
+            title="E2E DocGate PFMEA",
+            fmea_type="PFMEA",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status="approved",
+            graph_data=snapshot,
+            created_by=admin.user_id,
+        )
+        db.add(fmea)
+        await db.flush()
+    else:
+        fmea.graph_data = snapshot
+        fmea.status = "approved"
+
+    ver = (await db.execute(
+        select(FMEAVersion).where(FMEAVersion.version_id == DOCGATE_FMEA_VER_ID)
+    )).scalar_one_or_none()
+    if not ver:
+        # Bypass version immutability trigger via direct insert
+        await db.execute(sa_text(
+            "INSERT INTO fmea_versions (version_id, fmea_id, factory_id, major_no, minor_no, "
+            "snapshot, sha256_hash, change_summary, change_type, created_by, created_at) "
+            "VALUES (:vid, :fid, :fact, 1, 0, CAST(:snap AS JSONB), "
+            "encode(digest(CAST(:snap AS JSONB)::text, 'sha256'), 'hex'), "
+            "'e2e baseline', 'approve', :uid, NOW() - interval '2 days')"
+        ), {
+            "vid": DOCGATE_FMEA_VER_ID, "fid": fmea.fmea_id, "fact": factory_id,
+            "snap": json.dumps(snapshot), "uid": admin.user_id,
+        })
+        await db.flush()
+
+    capa = (await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == DOCGATE_E2E_CAPA_DOC_NO)
+    )).scalar_one_or_none()
+    if not capa:
+        capa = CAPAEightD(
+            report_id=DOCGATE_CAPA_ID,
+            document_no=DOCGATE_E2E_CAPA_DOC_NO,
+            title="E2E DocGate 8D",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status=EightDState.D8_GATE_PENDING.value,
+            severity="serious",
+            d4_root_cause="定位销磨损导致孔径超差",
+            d5_correction="更换定位销并校准夹具",
+            d7_prevention="将定位销磨损检测纳入首件检验",
+            fmea_ref_id=fmea.fmea_id,
+            created_by=admin.user_id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        db.add(capa)
+        await db.flush()
+    else:
+        # Reset status + clear prior doc-gate chain for idempotent re-seed
+        analysis_ids = [r[0] for r in (await db.execute(
+            select(CapaDocgAnalysis.analysis_id).where(CapaDocgAnalysis.capa_id == capa.report_id)
+        )).all()]
+        if analysis_ids:
+            await db.execute(delete(CapaDocgDecision).where(
+                CapaDocgDecision.analysis_id.in_(analysis_ids)))
+            await db.execute(delete(CapaDocgAudit).where(
+                CapaDocgAudit.analysis_id.in_(analysis_ids)))
+            await db.execute(delete(CapaDocgAnalysis).where(
+                CapaDocgAnalysis.analysis_id.in_(analysis_ids)))
+        capa.status = EightDState.D8_GATE_PENDING.value
+        capa.fmea_ref_id = fmea.fmea_id
+        capa.d4_root_cause = "定位销磨损导致孔径超差"
+        capa.d5_correction = "更换定位销并校准夹具"
+        capa.d7_prevention = "将定位销磨损检测纳入首件检验"
+        await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
         await _seed_product_line(db, factory_ids)
         await _seed_accounts(db, factory_ids)
         await _seed_known_docs(db, factory_ids)
+        await _seed_doc_gate_capa(db, factory_ids)
         await db.commit()
         await _seed_d3_test_capas(db)
         await db.commit()

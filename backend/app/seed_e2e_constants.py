@@ -16,9 +16,13 @@ E2E_ACCOUNTS = [
 
 # Known seed doc numbers (use -E2E- infix). Write flows must NOT reuse these.
 E2E_KNOWN_DOCS = {
-    "pfmea": ["PFMEA-E2E-001"],
-    "capa": ["8D-E2E-001"],
+    "pfmea": ["PFMEA-E2E-001", "PFMEA-E2E-DOCGATE-001"],
+    "capa": ["8D-E2E-001", "8D-E2E-DOCGATE-001"],
 }
+
+# US-E2E-01.7 D8 doc update gate seed
+DOCGATE_E2E_CAPA_DOC_NO = "8D-E2E-DOCGATE-001"
+DOCGATE_E2E_FMEA_DOC_NO = "PFMEA-E2E-DOCGATE-001"
 
 # D3 E2E source data constants (shared by seed_e2e.py and tests)
 D3_E2E_PRODUCT_LINE = "DC-DC-100-E2E"
