@@ -73,3 +73,88 @@ async def test_generate_rejects_empty_key_points(db, capa_d8_gate_with_docs, doc
         select(CapaDocgAnalysis).where(CapaDocgAnalysis.status == "failed")
     )
     assert "key_points" in (analysis.error or "")
+
+
+@pytest.mark.asyncio
+async def test_record_defer_inserts_deferred_decision(db, capa_with_done_analysis_no_bump):
+    """record_defer on a blocked decision -> inserts deferred decision (still blocks gate)."""
+    from app.models.capa_doc_gate import CapaDocgDecision
+    capa, user = capa_with_done_analysis_no_bump
+    # First run_audit to get a blocked decision (no bump)
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    result = await capa_doc_gate_service.record_defer(
+        db, capa, "等待 SOP 更新", user.user_id, "2026-08-01", user.user_id
+    )
+    assert result["decision"] == "deferred"
+    from sqlalchemy import select
+    decisions = (await db.execute(select(CapaDocgDecision).order_by(CapaDocgDecision.revision.desc()))).scalars().all()
+    assert decisions[0].decision == "deferred"
+    assert decisions[0].defer_reason == "等待 SOP 更新"
+
+
+@pytest.mark.asyncio
+async def test_record_defer_owner_not_in_factory_raises(db, capa_with_done_analysis_no_bump, viewer_user):
+    """defer_owner belonging to a different factory -> raise."""
+    capa, user = capa_with_done_analysis_no_bump
+    # viewer_user has a different factory (NULL or other) — use admin_user which has factory_id set
+    from app.models.user import User
+    # Create an owner in a different factory
+    from app.models.factory import Factory
+    other_factory = Factory(id=uuid.uuid4(), code="FAC-OTHER", name="Other", is_active=True)
+    db.add(other_factory)
+    await db.flush()
+    other_user = User(
+        user_id=uuid.uuid4(), username="other_owner", display_name="Other",
+        email="o@e.com", password_hash="h", role_id=user.role_id,
+        legacy_role="quality_engineer", is_active=True, factory_id=other_factory.id,
+    )
+    db.add(other_user)
+    await db.flush()
+    with pytest.raises(ValueError, match="owner"):
+        await capa_doc_gate_service.record_defer(
+            db, capa, "r", other_user.user_id, "2026-08-01", user.user_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_confirm_no_affected_passes_empty_list(db, capa_with_empty_done_analysis):
+    """Empty affected_docs + confirm_no_affected -> decision=passed, no_affected_confirmed=True."""
+    from app.models.capa_doc_gate import CapaDocgDecision
+    from sqlalchemy import select
+    capa, user = capa_with_empty_done_analysis
+    result = await capa_doc_gate_service.confirm_no_affected(db, capa, user.user_id)
+    assert result["decision"] == "passed"
+    assert result["no_affected_confirmed"] is True
+    dec = (await db.execute(select(CapaDocgDecision))).scalar_one()
+    assert dec.no_affected_confirmed is True
+
+
+@pytest.mark.asyncio
+async def test_confirm_no_affected_rejects_non_empty(db, capa_with_done_analysis_no_bump):
+    """confirm_no_affected on a non-empty affected_docs -> raise."""
+    capa, user = capa_with_done_analysis_no_bump
+    with pytest.raises(ValueError, match="仅空清单可确认"):
+        await capa_doc_gate_service.confirm_no_affected(db, capa, user.user_id)
+
+
+@pytest.mark.asyncio
+async def test_get_latest_analysis_returns_failed(db, capa_d8_gate):
+    """get_latest_analysis returns the latest analysis incl failed status."""
+    capa, user = capa_d8_gate
+    # No analysis yet
+    assert await capa_doc_gate_service.get_latest_analysis(db, capa) is None
+    # Insert a failed analysis (not is_current)
+    from datetime import datetime, timezone
+    failed = CapaDocgAnalysis(
+        analysis_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=capa.factory_id,
+        is_current=False, status="failed", error="LLM 未配置", llm_available=False,
+        completed_at=datetime.now(timezone.utc),
+        generated_by=user.user_id,
+    )
+    db.add(failed)
+    await db.flush()
+    result = await capa_doc_gate_service.get_latest_analysis(db, capa)
+    assert result is not None
+    assert result["status"] == "failed"
+    assert result["is_current"] is False
+    assert result["error"] == "LLM 未配置"

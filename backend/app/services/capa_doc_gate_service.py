@@ -547,16 +547,21 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
     return {"decision": decision, "audits": audits, "audit_run_id": str(audit_run_id)}
 
 
-async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, audit_run_id, version_snapshot):
-    """Lock analysis row, read max revision, insert revision+1 (UQ (analysis_id, revision) guards concurrency)."""
+async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, audit_run_id, version_snapshot,
+                          defer_reason=None, defer_owner=None, defer_deadline=None, no_affected_confirmed=False):
+    """Lock analysis row, read max revision, insert revision+1 (UQ (analysis_id, revision) guards concurrency).
+    defer fields + no_affected_confirmed passed at insert time (CHECK requires defer fields present for deferred)."""
     await db.execute(text("SELECT 1 FROM capa_docg_analysis WHERE analysis_id=:aid FOR UPDATE"), {"aid": analysis_id})
     max_rev = await db.scalar(
         select(CapaDocgDecision.revision).where(CapaDocgDecision.analysis_id == analysis_id)
         .order_by(CapaDocgDecision.revision.desc()).limit(1)
     )
     db.add(CapaDocgDecision(
-        analysis_id=analysis_id, audit_run_id=audit_run_id, revision=(max_rev or -1) + 1,
+        analysis_id=analysis_id, audit_run_id=audit_run_id,
+        revision=(max_rev if max_rev is not None else -1) + 1,
         factory_id=factory_id, decision=decision, version_snapshot=version_snapshot,
+        defer_reason=defer_reason, defer_owner=defer_owner, defer_deadline=defer_deadline,
+        no_affected_confirmed=no_affected_confirmed,
         decided_by=user_id, decided_at=now,
     ))
 
@@ -670,3 +675,67 @@ def _match_key_point(kp, diff, latest, doc_type):
                 for n in g_diff["added_nodes"]
             )
     return False
+
+
+# ---------------------------------------------------------------------------
+# record_defer + confirm_no_affected (Task 4)
+# ---------------------------------------------------------------------------
+
+async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id: uuid.UUID, deadline, user_id: uuid.UUID) -> dict:
+    """Record a deferred decision (still blocks the gate — C5). Owner validated against capa factory."""
+    if not reason or not str(reason).strip():
+        raise ValueError("defer reason 必填")
+    from app.models.user import User
+    owner = await db.get(User, owner_id)
+    if owner is None or not owner.is_active:
+        raise ValueError("defer_owner 不存在或未激活")
+    if owner.factory_id is not None and owner.factory_id != capa.factory_id:
+        raise ValueError("defer_owner 不属于当前工厂")
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+        )
+    )
+    if analysis is None:
+        raise ValueError("未生成影响分析")
+    # C9 precheck
+    candidates = await _build_allowlist(db, capa)
+    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
+        raise ValueError("分析输入已变更，请重新生成影响分析")
+    from datetime import date as date_cls
+    dl = deadline if isinstance(deadline, date_cls) else date_cls.fromisoformat(str(deadline))
+    now = datetime.now(timezone.utc)
+    await _insert_decision(db, analysis.analysis_id, capa.factory_id, "deferred", user_id, now, None, [],
+                          defer_reason=reason, defer_owner=owner_id, defer_deadline=dl)
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_DEFERRED",
+        changed_fields={"reason": reason, "owner": str(owner_id), "deadline": str(dl)},
+        operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+    ))
+    await db.commit()
+    return {"decision": "deferred"}
+
+
+async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
+    """Engineer confirms an empty affected_docs list is correct -> decision=passed (no_affected_confirmed)."""
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+        )
+    )
+    if analysis is None or analysis.status != "done":
+        raise ValueError("未生成有效影响分析")
+    candidates = await _build_allowlist(db, capa)
+    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
+        raise ValueError("分析输入已变更，请重新生成影响分析")
+    if analysis.affected_docs:
+        raise ValueError("仅空清单可确认")
+    now = datetime.now(timezone.utc)
+    await _insert_decision(db, analysis.analysis_id, capa.factory_id, "passed", user_id, now, None, [],
+                          no_affected_confirmed=True)
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_PASSED",
+        changed_fields={"reason": "空清单人工确认"}, operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+    ))
+    await db.commit()
+    return {"decision": "passed", "no_affected_confirmed": True}
