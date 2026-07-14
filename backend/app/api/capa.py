@@ -63,8 +63,10 @@ from app.schemas.capa_verification import (
 )
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.schemas.recommendation_stage import StageRunSchema
+from app.schemas.capa_doc_gate import DeferRequest, DocGateDecisionResponse
 from app.services import capa_d3_containment_service
 from app.services import capa_d7_action_service
+from app.services import capa_doc_gate_service
 from app.services import capa_ppt_review_service, capa_ppt_service, capa_service
 from app.services import capa_verification_service
 from app.services.capa_d7_action_service import ConflictError
@@ -1594,3 +1596,216 @@ async def d3_list_executions_ep(
     ).scalars().all()
 
     return [D3ExecutionResponse.model_validate(e) for e in executions]
+
+
+# ===== D8 Doc Update Gate endpoints (US-E2E-01.7 Task 5) =====
+
+
+def _assert_d8_gate_stage(capa: CAPAEightD):
+    if capa.status != EightDState.D8_GATE_PENDING.value:
+        raise HTTPException(status_code=400, detail="仅 D8_GATE_PENDING 阶段可操作")
+
+
+async def _load_capa_for_doc_gate(
+    report_id: uuid.UUID, db: AsyncSession, scope: RequestScope, min_level: PermissionLevel
+) -> CAPAEightD:
+    if await get_user_permission(scope.user, Module.CAPA, db) < min_level:
+        raise HTTPException(
+            status_code=403,
+            detail=f"需要 capa 模块的 {min_level.name} 权限",
+        )
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    return capa
+
+
+@router.post("/{report_id}/doc-gate/impact")
+async def doc_gate_impact_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/impact: generate LLM impact analysis (explicit, not in advance)."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.generate_impact_analysis(
+            db, capa, scope.user.user_id
+        )
+    except ValueError as e:
+        if "BLOCKED" in str(e):
+            raise HTTPException(
+                status_code=422, detail={"blocked": True, "message": str(e)}
+            )
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.get("/{report_id}/doc-gate/impact")
+async def doc_gate_get_impact_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /doc-gate/impact: latest analysis (incl failed)."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
+    result = await capa_doc_gate_service.get_latest_analysis(db, capa)
+    if result is None:
+        raise HTTPException(status_code=404, detail="尚未生成影响分析")
+    return result
+
+
+@router.post("/{report_id}/doc-gate/audit")
+async def doc_gate_audit_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/audit: run version-diff + key-point coverage audit."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Serialize UUID fields for JSON
+    for a in result.get("audits", []):
+        if "doc_id" in a and a["doc_id"] is not None:
+            a["doc_id"] = str(a["doc_id"])
+    return result
+
+
+@router.get("/{report_id}/doc-gate/audit")
+async def doc_gate_get_audit_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /doc-gate/audit: latest audit_run rows for current analysis."""
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit
+
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,
+        )
+    )
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="尚未生成影响分析")
+    # Latest audit_run_id by audited_at
+    latest_run = await db.scalar(
+        select(CapaDocgAudit.audit_run_id)
+        .where(CapaDocgAudit.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgAudit.audited_at.desc())
+        .limit(1)
+    )
+    if latest_run is None:
+        return {"audit_run_id": None, "audits": []}
+    rows = (
+        await db.execute(
+            select(CapaDocgAudit).where(
+                CapaDocgAudit.analysis_id == analysis.analysis_id,
+                CapaDocgAudit.audit_run_id == latest_run,
+            )
+        )
+    ).scalars().all()
+    return {
+        "audit_run_id": str(latest_run),
+        "audits": [
+            {
+                "doc_type": r.doc_type,
+                "doc_id": str(r.doc_id),
+                "doc_name": r.doc_name,
+                "status": r.status,
+                "version_bump": r.version_bump,
+                "covered_count": r.covered_count,
+                "total_count": r.total_count,
+                "coverage": r.coverage,
+                "version_before": r.version_before,
+                "version_after": r.version_after,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.post("/{report_id}/doc-gate/defer")
+async def doc_gate_defer_ep(
+    report_id: uuid.UUID,
+    body: DeferRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/defer: record deferred decision (still blocks gate)."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        owner_id = uuid.UUID(body.owner_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="owner_id 非法")
+    try:
+        result = await capa_doc_gate_service.record_defer(
+            db, capa, body.reason, owner_id, body.deadline, scope.user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.post("/{report_id}/doc-gate/confirm-no-affected")
+async def doc_gate_confirm_no_affected_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/confirm-no-affected: engineer confirms empty affected_docs."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.confirm_no_affected(
+            db, capa, scope.user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.get("/{report_id}/doc-gate/decision", response_model=DocGateDecisionResponse)
+async def doc_gate_get_decision_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /doc-gate/decision: latest decision for current analysis."""
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,
+        )
+    )
+    if analysis is None:
+        return DocGateDecisionResponse(decision=None)
+    dec = await db.scalar(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc())
+        .limit(1)
+    )
+    if dec is None:
+        return DocGateDecisionResponse(decision=None)
+    return DocGateDecisionResponse(
+        decision=dec.decision,
+        no_affected_confirmed=dec.no_affected_confirmed,
+        version_snapshot=dec.version_snapshot or [],
+        revision=dec.revision,
+        defer_reason=dec.defer_reason,
+        defer_owner=str(dec.defer_owner) if dec.defer_owner else None,
+        defer_deadline=str(dec.defer_deadline) if dec.defer_deadline else None,
+        decided_at=dec.decided_at.isoformat() if dec.decided_at else None,
+    )

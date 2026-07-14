@@ -368,6 +368,46 @@ async def _d7_completion_gate(db: AsyncSession, capa) -> None:
         )
 
 
+async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
+    """D8_GATE_PENDING→D8_APPROVAL_PENDING: require latest decision=passed + C8/C9 freshness."""
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+    from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+    from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
+
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+        )
+    )
+    if analysis is None:
+        raise ValueError("请先生成文档影响分析")
+    candidates = await _build_allowlist(db, capa)
+    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
+        raise ValueError("分析输入已变更，请重新生成影响分析")
+    decision = await db.scalar(
+        select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc()).limit(1)
+    )
+    if decision is None:
+        raise ValueError("请先运行文档审核")
+    if decision.decision != "passed":
+        raise ValueError(f"文档门禁未通过：{decision.decision}")
+    # C8 version freshness — re-check each snapshot against current latest
+    for snap in (decision.version_snapshot or []):
+        doc_type = snap.get("doc_type")
+        doc_id = uuid.UUID(str(snap["doc_id"]))
+        if doc_type == "control_plan":
+            latest = await get_latest_cp_version(db, doc_id)
+        else:
+            latest = await get_latest_fmea_version(db, doc_id)
+        if (
+            latest is None
+            or str(latest.version_id) != snap.get("version_after_id")
+            or latest.sha256_hash != snap.get("sha256")
+        ):
+            raise ValueError("文档已变更，请重新审核")
+
+
 async def advance_capa(
     db: AsyncSession,
     capa: CAPAEightD,
@@ -419,7 +459,7 @@ async def advance_capa(
         except Exception as e:
             raise ValueError("D7 lessons 抽取失败，不可推进，请重试") from e
     elif current == EightDState.D8_GATE_PENDING and target == EightDState.D8_APPROVAL_PENDING:
-        pass  # 01.7 接入文档门禁；本切片直通
+        await _d8_doc_gate_gate(db, capa)
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
         pass  # 权限由 require_advance_permission 强制；闸口即「审批」
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D7_PREVENTION:
