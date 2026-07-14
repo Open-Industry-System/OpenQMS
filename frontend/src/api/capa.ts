@@ -250,3 +250,95 @@ export async function getD3Executions(capaId: string, runId?: string): Promise<D
   const resp = await client.get(`/capa/${capaId}/d3/executions`, { params });
   return resp.data;
 }
+
+// ─── D8 Doc Update Gate APIs (US-E2E-01.7) ────────────────────────────────────
+
+export interface DocGateAnalysis {
+  analysis_id?: string;
+  status: "running" | "done" | "failed" | string;
+  affected_docs?: DocGateAffectedDoc[] | null;
+  error?: string | null;
+  is_current?: boolean;
+}
+
+export interface DocGateAffectedDoc {
+  doc_type: string;
+  doc_id: string;
+  doc_name: string;
+  baseline_version_id?: string | null;
+  baseline_version?: { major?: number; minor?: number; sha256?: string } | null;
+  key_points: Array<Record<string, unknown>>;
+  update_suggestion: string;
+}
+
+export interface DocGateAuditRow {
+  doc_type: string;
+  doc_id: string;
+  doc_name: string;
+  status: "passed" | "pending_update" | "incomplete" | string;
+  version_bump: boolean;
+  covered_count: number;
+  total_count: number;
+  coverage?: Array<Record<string, unknown>>;
+  version_before?: Record<string, unknown> | null;
+  version_after?: Record<string, unknown> | null;
+}
+
+export interface DocGateDecision {
+  decision: "passed" | "blocked" | "deferred" | null;
+  no_affected_confirmed?: boolean;
+  version_snapshot?: Array<Record<string, unknown>>;
+  revision?: number | null;
+  defer_reason?: string | null;
+  defer_owner?: string | null;
+  defer_deadline?: string | null;
+  decided_at?: string | null;
+}
+
+export async function docGateImpact(capaId: string): Promise<DocGateAnalysis> {
+  const resp = await client.post(`/capa/${capaId}/doc-gate/impact`);
+  return resp.data;
+}
+
+export async function getDocGateImpact(capaId: string): Promise<DocGateAnalysis> {
+  const resp = await client.get(`/capa/${capaId}/doc-gate/impact`);
+  return resp.data;
+}
+
+export async function runDocGateAudit(capaId: string): Promise<{
+  decision: string;
+  audits: DocGateAuditRow[];
+  audit_run_id: string;
+}> {
+  const resp = await client.post(`/capa/${capaId}/doc-gate/audit`);
+  return resp.data;
+}
+
+export async function getDocGateAudit(capaId: string): Promise<{
+  audit_run_id: string | null;
+  audits: DocGateAuditRow[];
+}> {
+  const resp = await client.get(`/capa/${capaId}/doc-gate/audit`);
+  return resp.data;
+}
+
+export async function recordDocGateDefer(
+  capaId: string,
+  payload: { reason: string; owner_id: string; deadline: string },
+): Promise<{ decision: string }> {
+  const resp = await client.post(`/capa/${capaId}/doc-gate/defer`, payload);
+  return resp.data;
+}
+
+export async function confirmNoAffected(capaId: string): Promise<{
+  decision: string;
+  no_affected_confirmed: boolean;
+}> {
+  const resp = await client.post(`/capa/${capaId}/doc-gate/confirm-no-affected`);
+  return resp.data;
+}
+
+export async function getDocGateDecision(capaId: string): Promise<DocGateDecision> {
+  const resp = await client.get(`/capa/${capaId}/doc-gate/decision`);
+  return resp.data;
+}

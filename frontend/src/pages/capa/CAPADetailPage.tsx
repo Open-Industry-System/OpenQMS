@@ -16,6 +16,7 @@ import D4VerificationCard from "../../components/capa/D4VerificationCard";
 import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import D3ContainmentPanel from "../../components/capa/D3ContainmentPanel";
+import DocGatePanel from "../../components/capa/DocGatePanel";
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
@@ -489,7 +490,7 @@ export default function CAPADetailPage() {
               {t("reject.archive", "归档")}
             </Button>
           )}
-          {!["D8_APPROVAL_PENDING", "D8_CLOSURE"].includes(capa.status) && (
+          {!["D8_GATE_PENDING", "D8_APPROVAL_PENDING", "D8_CLOSURE"].includes(capa.status) && (
             <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance} data-e2e="capa-advance">
               {t("actions.advance", "推进下一步")}
             </Button>
@@ -718,6 +719,14 @@ export default function CAPADetailPage() {
                   }}
                 />
               </>
+            )}
+
+            {capa.status === "D8_GATE_PENDING" && (
+              <DocGatePanel
+                capaId={id!}
+                canEdit={canEdit("capa")}
+                onAdvanced={() => refreshCapa()}
+              />
             )}
 
             {capa.status === "D8_CLOSURE" && (
