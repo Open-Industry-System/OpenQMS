@@ -718,3 +718,97 @@ async def stale_running_generation(db: AsyncSession, capa_d3_done_report):
     db.add(gen)
     await db.flush()
     return gen
+
+
+# ===== Doc Gate fixtures (US-E2E-01.7) =====
+
+
+@pytest_asyncio.fixture
+async def capa_d8_gate(db: AsyncSession):
+    """Create a CAPA in D8_GATE_PENDING status with factory + user (no docs)."""
+    from app.models.factory import Factory
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    factory = Factory(
+        id=uuid.uuid4(), code="FAC-DOCG", name="DocGate Test Factory", is_active=True,
+    )
+    db.add(factory)
+    await db.flush()
+    role = RoleDefinition(
+        id=uuid.uuid4(), role_key="test_role_docg", name_zh="测试角色",
+        name_en="Test Role DocGate", description="Test role for doc-gate tests",
+        is_system=False, is_editable=True, is_active=True,
+    )
+    db.add(role)
+    await db.flush()
+    user = User(
+        user_id=uuid.uuid4(), username="test_docg_user", display_name="Test DocGate User",
+        email="docg@example.com", password_hash="test_hash", role_id=role.id,
+        legacy_role="quality_engineer", is_active=True, factory_id=factory.id,
+    )
+    db.add(user)
+    await db.flush()
+    capa = CAPAEightD(
+        report_id=uuid.uuid4(), document_no="CAPA-DOCG-001", title="DocGate Test CAPA",
+        product_line_code="DC-DC-100", factory_id=factory.id, status="D8_GATE_PENDING",
+        severity="serious", d4_root_cause="测试根因", d5_correction="永久措施",
+        d7_prevention="预防复发", created_by=user.user_id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+    db.add(capa)
+    await db.flush()
+    await db.refresh(capa)
+    return capa, user
+
+
+@pytest_asyncio.fixture
+async def capa_d8_gate_with_docs(db: AsyncSession, capa_d8_gate):
+    """CAPA at D8_GATE_PENDING with a CP + FMEA (each with a baseline version)."""
+    from app.models.fmea import FMEADocument
+    from app.models.fmea_version import FMEAVersion
+    capa, user = capa_d8_gate
+    snapshot = {"nodes": [{"id": "node-1", "type": "ProcessStep", "name": "step1"}], "edges": []}
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no="PFMEA-DOCG-001", title="DocGate FMEA",
+        fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=capa.factory_id,
+        status="approved", graph_data=snapshot,
+        created_by=user.user_id,
+    )
+    db.add(fmea)
+    await db.flush()
+    # Compute hash matching PG trigger (migration 020): encode(digest(snapshot::text,'sha256'),'hex')
+    import json as _json
+    import hashlib as _hashlib
+    def _pg_jsonb_hash(snap):
+        return _hashlib.sha256(_json.dumps(snap, sort_keys=True).encode("utf-8")).hexdigest()
+    fmea_ver = FMEAVersion(
+        version_id=uuid.uuid4(), fmea_id=fmea.fmea_id, factory_id=capa.factory_id,
+        major_no=1, minor_no=0, snapshot=snapshot,
+        sha256_hash=_pg_jsonb_hash(snapshot),
+        change_type="approve", change_summary="initial", created_by=user.user_id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=2),
+    )
+    db.add(fmea_ver)
+    capa.fmea_ref_id = fmea.fmea_id
+    await db.flush()
+    return capa, user
+
+
+@pytest_asyncio.fixture
+async def docg_no_creds(monkeypatch):
+    """Patch provider_adapter.build_client to raise ProviderNotConfiguredError."""
+    async def _raise(*args, **kwargs):
+        raise ProviderNotConfiguredError("no cfg")
+    monkeypatch.setattr(provider_adapter, "build_client", _raise)
+    return _raise
+
+
+@pytest_asyncio.fixture
+async def docg_llm_mock(monkeypatch):
+    """Patch provider_adapter build_client + complete_json with mutable AsyncMocks."""
+    async def _build_client(db):
+        return type("FakeClient", (), {"model": "test-model"})()
+    monkeypatch.setattr(provider_adapter, "build_client", _build_client)
+    mock = AsyncMock()
+    monkeypatch.setattr(provider_adapter, "complete_json", mock)
+    return mock

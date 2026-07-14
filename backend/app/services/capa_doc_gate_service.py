@@ -1,0 +1,467 @@
+"""US-E2E-01.7 D8 doc update gate service. Mirrors capa_d3_containment_service three-phase pattern."""
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import uuid
+from datetime import datetime, timezone, timedelta
+
+from sqlalchemy import select, update, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
+from app.models.capa import CAPAEightD
+from app.models.audit import AuditLog
+from app.services.agent import provider_adapter
+from app.services.agent.provider_adapter import ProviderClient, ProviderNotConfiguredError
+from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
+
+logger = logging.getLogger(__name__)
+STALE_THRESHOLD_SECONDS = 300  # 5 min; running older than 2x = stale
+RETRY_AFTER_SECONDS = 2
+_ALLOWED_NODE_TYPES = {"FailureMode", "FailureEffect", "FailureCause", "ProcessStep", "Function", "WorkElement"}
+
+
+async def generate_impact_analysis(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
+    """Three-phase: phase1 lock+demote+stale-recovery+running+commit; phase2 LLM; phase3 CAS."""
+    p1 = await _phase1_create_running(db, capa, user_id)
+    if p1["status"] in ("blocked", "failed", "running", "superseded"):
+        return p1
+    phase2 = await _phase2_llm(db, capa, p1)
+    return await _phase3_cas(db, capa, p1, phase2, user_id)
+
+
+async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD) -> dict | None:
+    """Return latest analysis (incl failed) for this capa. ORDER BY created_at DESC, analysis_id DESC."""
+    row = await db.scalar(
+        select(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id == capa.report_id)
+        .order_by(CapaDocgAnalysis.created_at.desc(), CapaDocgAnalysis.analysis_id.desc()).limit(1)
+    )
+    if row is None:
+        return None
+    return {"analysis_id": str(row.analysis_id), "status": row.status, "affected_docs": row.affected_docs,
+            "error": row.error, "is_current": row.is_current}
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: lock + demote old current + stale recovery + credential check + running + commit
+# ---------------------------------------------------------------------------
+
+async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
+    # Lock capa row
+    await db.execute(
+        text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"),
+        {"cid": capa.report_id},
+    )
+    # Demote old current (fail-closed: before credential check)
+    await db.execute(
+        update(CapaDocgAnalysis)
+        .where(CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True)
+        .values(is_current=False)
+    )
+    # Stale recovery: CAS running older than 2x threshold -> failed
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_THRESHOLD_SECONDS * 2)
+    await db.execute(
+        update(CapaDocgAnalysis)
+        .where(CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.status == "running",
+               CapaDocgAnalysis.started_at < cutoff)
+        .values(status="failed", error="stale", completed_at=datetime.now(timezone.utc))
+    )
+    # Existing running -> return retry_after
+    existing = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.status == "running"
+        )
+    )
+    if existing:
+        return {"status": "running", "analysis_id": str(existing.analysis_id),
+                "retry_after": RETRY_AFTER_SECONDS}
+    # Credential check
+    try:
+        client = await provider_adapter.build_client(db)
+    except ProviderNotConfiguredError:
+        failed = CapaDocgAnalysis(
+            analysis_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=capa.factory_id,
+            is_current=False, status="failed", error="LLM 未配置", llm_available=False,
+            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+        )
+        db.add(failed)
+        await db.commit()
+        raise ValueError("BLOCKED: 无 LLM 凭证")
+    # Create running
+    attempt_token = uuid.uuid4()
+    analysis = CapaDocgAnalysis(
+        analysis_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=capa.factory_id,
+        is_current=False, status="running", attempt_token=attempt_token,
+        llm_available=False, generated_by=user_id,
+    )
+    db.add(analysis)
+    await db.flush()
+    await db.commit()
+    return {"status": "phase1_done", "analysis_id": str(analysis.analysis_id),
+            "attempt_token": attempt_token, "client": client}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: query candidates + pure dict + commit read txn + LLM (no txn)
+# ---------------------------------------------------------------------------
+
+async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
+    candidates = await _build_allowlist(db, capa)
+    input_hash = _compute_input_hash(capa, candidates)
+    prompt = _build_prompt(capa, candidates)
+    # Commit any autobegun read txn before calling LLM
+    await db.commit()
+    pc = p1["client"]
+    try:
+        raw = await provider_adapter.complete_json(pc, prompt, _RESPONSE_SCHEMA)
+    except Exception as e:
+        return {"llm_error": str(e)}
+    raw["model"] = getattr(pc, "model", "unknown")
+    raw["_input_hash"] = input_hash
+    raw["_candidates"] = candidates
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: re-lock + C9 recheck + validate + unified CAS
+# ---------------------------------------------------------------------------
+
+async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict, user_id: uuid.UUID) -> dict:
+    analysis_id = uuid.UUID(p1["analysis_id"])
+    attempt_token = p1["attempt_token"]
+    now = datetime.now(timezone.utc)
+    # LLM error -> CAS failed
+    if "llm_error" in phase2:
+        res = await db.execute(
+            update(CapaDocgAnalysis)
+            .where(CapaDocgAnalysis.analysis_id == analysis_id,
+                   CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
+            .values(status="failed", error=phase2["llm_error"], completed_at=now)
+        )
+        await db.commit()
+        return {"status": "failed"} if res.rowcount > 0 else {"status": "superseded"}
+    # Re-lock + C9 recheck
+    await db.execute(text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"), {"cid": capa.report_id})
+    candidates = phase2["_candidates"]
+    cur_hash = _compute_input_hash(capa, candidates)
+    if cur_hash != phase2["_input_hash"]:
+        await db.execute(
+            update(CapaDocgAnalysis)
+            .where(CapaDocgAnalysis.analysis_id == analysis_id,
+                   CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
+            .values(status="failed", error="input_changed", completed_at=now)
+        )
+        await db.commit()
+        return {"status": "failed", "error": "input_changed"}
+    # Validate LLM output (C7 + vacuous pass + allowlist + discriminant union)
+    affected = _validate_and_backfill(phase2, candidates)
+    if isinstance(affected, str):  # error
+        res = await db.execute(
+            update(CapaDocgAnalysis)
+            .where(CapaDocgAnalysis.analysis_id == analysis_id,
+                   CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
+            .values(status="failed", error=affected, completed_at=now)
+        )
+        await db.commit()
+        return {"status": "failed"} if res.rowcount > 0 else {"status": "superseded"}
+    # CAS promote to done
+    res = await db.execute(
+        update(CapaDocgAnalysis)
+        .where(CapaDocgAnalysis.analysis_id == analysis_id,
+               CapaDocgAnalysis.attempt_token == attempt_token, CapaDocgAnalysis.status == "running")
+        .values(status="done", is_current=True, affected_docs=affected,
+                analysis_input_hash=phase2["_input_hash"], llm_available=True,
+                model=phase2.get("model"), completed_at=now)
+    )
+    if res.rowcount == 0:
+        return {"status": "superseded"}
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
+        changed_fields={"affected_doc_count": len(affected), "llm_available": True, "status": "done"},
+        operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+    ))
+    await db.commit()
+    return {"status": "done", "analysis_id": str(analysis_id)}
+
+
+# ---------------------------------------------------------------------------
+# Helpers: allowlist, hash, prompt, validation
+# ---------------------------------------------------------------------------
+
+async def _build_allowlist(db: AsyncSession, capa: CAPAEightD) -> list[dict]:
+    """Build doc candidates filtered by factory_id + product_line_code.
+    Each entry: {doc_type, doc_id, doc_name, baseline_version_id, baseline_version, existing_targets, add_anchors}.
+    """
+    from app.models.fmea import FMEADocument
+    from app.models.control_plan import ControlPlan
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.models.fmea_version import FMEAVersion
+
+    candidates = []
+    pl = capa.product_line_code
+    fid = capa.factory_id
+
+    # CP candidates
+    cp_result = await db.execute(
+        select(ControlPlan).where(
+            ControlPlan.factory_id == fid,
+            ControlPlan.product_line_code == pl,
+        )
+    )
+    for cp in cp_result.scalars().all():
+        baseline = await get_latest_cp_version(db, cp.cp_id)
+        cand = _cand_from_cp(cp, baseline)
+        candidates.append(cand)
+
+    # FMEA candidates
+    fmea_result = await db.execute(
+        select(FMEADocument).where(
+            FMEADocument.factory_id == fid,
+            FMEADocument.product_line_code == pl,
+        )
+    )
+    for fmea in fmea_result.scalars().all():
+        baseline = await get_latest_fmea_version(db, fmea.fmea_id)
+        cand = _cand_from_fmea(fmea, baseline)
+        candidates.append(cand)
+
+    return candidates
+
+
+def _cand_from_cp(cp, baseline) -> dict:
+    cp_id = cp.cp_id if hasattr(cp, 'cp_id') else uuid.uuid4()
+    cand = {
+        "doc_type": "control_plan",
+        "doc_id": str(cp_id),
+        "doc_name": getattr(cp, "title", "CP"),
+        "baseline_version_id": None,
+        "baseline_version": None,
+        "existing_targets": [],
+        "add_anchors": [],
+    }
+    if baseline is not None:
+        cand["baseline_version_id"] = str(baseline.version_id)
+        items = baseline.items_snapshot.get("items", []) if isinstance(baseline.items_snapshot, dict) else baseline.items_snapshot or []
+        cand["baseline_version"] = {"major": baseline.major_no, "minor": baseline.minor_no, "sha256": baseline.sha256_hash}
+        cand["existing_targets"] = [
+            {"target_kind": "cp_item", "target_key": i.get("source_fmea_node_id", ""), "allowed_fields": ["control_method", "reaction_plan", "special_class", "sample_size", "sample_frequency"]}
+            for i in items if i.get("source_fmea_node_id")
+        ]
+        # add_anchors from FMEA node IDs referenced by existing CP items
+        known_fmea_ids = list({i.get("source_fmea_node_id", "") for i in items if i.get("source_fmea_node_id")})
+        cand["add_anchors"] = [
+            {"parent_node_id": nid, "node_type": "FailureMode"}
+            for nid in known_fmea_ids
+        ]
+    return cand
+
+
+def _cand_from_fmea(fmea, baseline) -> dict:
+    fid = fmea.fmea_id if hasattr(fmea, 'fmea_id') else uuid.uuid4()
+    cand = {
+        "doc_type": "fmea",
+        "doc_id": str(fid),
+        "doc_name": getattr(fmea, "title", "FMEA"),
+        "baseline_version_id": None,
+        "baseline_version": None,
+        "existing_targets": [],
+        "add_anchors": [],
+    }
+    if baseline is not None:
+        cand["baseline_version_id"] = str(baseline.version_id)
+        snapshot = baseline.snapshot or {}
+        nodes = snapshot.get("nodes", [])
+        edges = snapshot.get("edges", [])
+        cand["baseline_version"] = {"major": baseline.major_no, "minor": baseline.minor_no, "sha256": baseline.sha256_hash}
+        cand["existing_targets"] = [
+            {"target_kind": "fmea_node", "target_key": n["id"], "allowed_fields": ["prevention_control", "detection_control", "name"]}
+            for n in nodes if "id" in n
+        ]
+        # add_anchors: existing node IDs as valid parents
+        existing_ids = [n["id"] for n in nodes if "id" in n]
+        for nid in existing_ids:
+            for nt in ("FailureMode", "FailureEffect", "FailureCause"):
+                cand["add_anchors"].append({"parent_node_id": nid, "node_type": nt})
+    return cand
+
+
+def _compute_input_hash(capa: CAPAEightD, candidates: list[dict]) -> str:
+    """C9 hash: capa semantic input + candidate identity set (doc_type, doc_id) + baseline.
+    MUST NOT include latest version (review P0#1 third round).
+    """
+    payload = {
+        "factory_id": str(capa.factory_id),
+        "product_line_code": capa.product_line_code,
+        "d4_root_cause": capa.d4_root_cause or "",
+        "d5_correction": capa.d5_correction or "",
+        "d7_prevention": capa.d7_prevention or "",
+        "severity": capa.severity or "",
+        "fmea_ref_id": str(capa.fmea_ref_id) if capa.fmea_ref_id else "",
+        "fmea_node_id": capa.fmea_node_id or "",
+        "candidates": sorted(
+            (c["doc_type"], c["doc_id"], c.get("baseline_version_id") or "", c.get("baseline_version", {}).get("sha256", ""))
+            for c in candidates
+        ),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _build_prompt(capa: CAPAEightD, candidates: list[dict]) -> str:
+    """Build LLM prompt with doc allowlist + per-doc target allowlist + add_anchors."""
+    doc_lines = []
+    for c in candidates:
+        line = f"- {c['doc_type']} id={c['doc_id']} name={c['doc_name']}"
+        if c.get("baseline_version"):
+            line += f" (v{c['baseline_version']['major']}.{c['baseline_version']['minor']}, hash={c['baseline_version']['sha256'][:8]})"
+        else:
+            line += " (new document, no baseline)"
+        if c.get("existing_targets"):
+            line += f" existing: {[t['target_key'] for t in c['existing_targets']]}"
+        if c.get("add_anchors"):
+            unique = list({(a['parent_node_id'], a['node_type']) for a in c['add_anchors']})
+            line += f" can-add-under: {[f'{p}/{t}' for p,t in unique]}"
+        doc_lines.append(line)
+
+    return f"""你是一个质量工程师的文档影响分析助手。
+请根据以下 8D 报告内容，分析哪些受控文档（控制计划 CP、FMEA）需要更新。
+
+8D 信息：
+- 产品线: {capa.product_line_code}
+- 根因: {capa.d4_root_cause or '（未填写）'}
+- 永久措施: {capa.d5_correction or '（未填写）'}
+- 预防复发: {capa.d7_prevention or '（未填写）'}
+- 严重度: {capa.severity}
+- 关联 FMEA: {capa.fmea_ref_id or '（无）'}
+
+可影响的文档（仅从以下清单选择）：
+{chr(10).join(doc_lines)}
+
+请以 JSON 格式输出 affected_docs 列表，每项含：
+- doc_id: 从上面清单中选择的文档 ID
+- key_points: 关键更新点列表，每项含：
+  - target_kind: "fmea_node" | "cp_item" | "document"
+  - expected_action: "add" | "modify" | "delete"
+  - field: 字段名
+  - 对于 modify/delete: target_key (现存节点/项标识)
+  - 对于 add: add_anchor = {{parent_node_id, node_type, business_key}}
+- update_suggestion: 更新建议文本
+
+约束：
+- key_points 每项不可为空
+- doc_id 仅从上方清单选择
+- 新增项必须用 add_anchor 表达，不得编造不存在的 node_id
+- document target_kind 仅用于 baseline 为空的新文档"""
+
+
+_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "affected_docs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "doc_id": {"type": "string"},
+                    "key_points": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "target_kind": {"type": "string"},
+                                "expected_action": {"type": "string"},
+                                "field": {"type": "string"},
+                                "target_key": {"type": "string"},
+                                "add_anchor": {
+                                    "type": "object",
+                                    "properties": {
+                                        "parent_node_id": {"type": "string"},
+                                        "node_type": {"type": "string"},
+                                        "business_key": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    "update_suggestion": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Validation: allowlist + vacuous pass + discriminant union
+# ---------------------------------------------------------------------------
+
+def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] | str:
+    """Validate LLM output; backfill doc_id/name/baseline from allowlist. Return affected_docs or error str."""
+    raw_docs = phase2.get("affected_docs")
+    if not isinstance(raw_docs, list):
+        return "LLM 输出缺 affected_docs"
+    if not raw_docs:
+        return "affected_docs 为空"
+    cand_by_id = {str(c["doc_id"]): c for c in candidates}
+    out = []
+    for d in raw_docs:
+        doc_id = str(d.get("doc_id", ""))
+        if doc_id not in cand_by_id:
+            return f"LLM 输出非法 doc_id: {doc_id}"
+        cand = cand_by_id[doc_id]
+        kps = d.get("key_points", [])
+        if not kps:
+            return "doc key_points 为空（vacuous pass）"
+        suggestion = d.get("update_suggestion")
+        if not suggestion or not str(suggestion).strip():
+            return "update_suggestion 为空"
+        for kp in kps:
+            err = _validate_key_point(kp, cand)
+            if err:
+                return err
+        out.append({
+            "doc_type": cand["doc_type"], "doc_id": cand["doc_id"], "doc_name": cand["doc_name"],
+            "baseline_version_id": str(cand["baseline_version_id"]) if cand.get("baseline_version_id") else None,
+            "baseline_version": cand.get("baseline_version"),
+            "key_points": kps, "update_suggestion": suggestion,
+        })
+    return out
+
+
+def _validate_key_point(kp: dict, cand: dict) -> str | None:
+    action = kp.get("expected_action")
+    if action not in ("add", "modify", "delete"):
+        return f"非法 expected_action: {action}"
+    kind = kp.get("target_kind")
+    if kind not in ("fmea_node", "cp_item", "document"):
+        return f"非法 target_kind: {kind}"
+    if kind == "document" and cand["doc_type"] != "fmea":
+        return f"document target_kind 仅用于 fmea"
+    if kind != "document" and not (
+        (kind == "cp_item" and cand["doc_type"] == "control_plan")
+        or (kind == "fmea_node" and cand["doc_type"] == "fmea")
+    ):
+        return f"doc_type/target_kind 错配"
+    has_target = "target_key" in kp and kp["target_key"]
+    has_anchor = "add_anchor" in kp and kp["add_anchor"]
+    if has_target and has_anchor:
+        return "target_key 与 add_anchor 互斥"
+    if action in ("modify", "delete") and not has_target:
+        return f"{action} 须 target_key"
+    if action == "add":
+        if kind == "document":
+            if cand.get("baseline_version") is not None:
+                return "document add 仅允许 baseline=NULL"
+        else:
+            if not has_anchor:
+                return "add 须 add_anchor"
+            a = kp["add_anchor"]
+            if not a.get("parent_node_id") or not a.get("node_type") or not str(a.get("business_key", "")).strip():
+                return "add_anchor 三字段须非空"
+            if a["node_type"] not in _ALLOWED_NODE_TYPES:
+                return f"非法 node_type: {a['node_type']}"
+            allowed_parents = {(x["parent_node_id"], x["node_type"]) for x in cand.get("add_anchors", [])}
+            if (a["parent_node_id"], a["node_type"]) not in allowed_parents:
+                return "add_anchor 不在 allowlist"
+    return None
