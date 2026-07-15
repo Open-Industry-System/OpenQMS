@@ -1,15 +1,15 @@
-"""FMEA linkage reverse-lookup indexes + widen audit_logs.action (US-E2E-01.4)
+"""FMEA linkage reverse-lookup indexes (US-E2E-01.4)
 
 Revision ID: 20260715_fmea_linkage_indexes
 Revises: 20260714_doc_gate_drop_capa_uq
 Create Date: 2026-07-15
 
 Adds partial/expression indexes for the three reverse-lookup sources (header
-fmea_ref_id, D7 fmea_id+action, D4 source_ref JSONB paths) and widens
-audit_logs.action to VARCHAR(32) to fit D4_VERIFICATION_UPDATED (23) and
-FMEA_LINKAGE_CREATED (20).
+fmea_ref_id, D7 fmea_id+action, D4 source_ref JSONB paths).
+
+Note: audit_logs.action is already VARCHAR(50) via 20260710_widen_audit_action
+(model String(50)); this revision must not re-narrow/re-widen that column.
 """
-import sqlalchemy as sa
 from alembic import op
 
 revision = "20260715_fmea_linkage_indexes"
@@ -19,12 +19,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Widen audit action (was 20 after 20260710_widen_audit_action).
-    op.alter_column("audit_logs", "action",
-                     type_=sa.VARCHAR(32),
-                     existing_type=sa.VARCHAR(20),
-                     nullable=True)
-
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_capa_eightd_fmea_ref_id "
         "ON capa_eightd (fmea_ref_id) WHERE fmea_ref_id IS NOT NULL"
@@ -55,7 +49,3 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_capa_d7_fmea_action")
     op.execute("DROP INDEX IF EXISTS ix_capa_eightd_factory_fmea")
     op.execute("DROP INDEX IF EXISTS ix_capa_eightd_fmea_ref_id")
-    op.alter_column("audit_logs", "action",
-                     type_=sa.VARCHAR(20),
-                     existing_type=sa.VARCHAR(32),
-                     nullable=True)
