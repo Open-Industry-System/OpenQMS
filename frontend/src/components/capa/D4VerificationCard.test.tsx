@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 configure({ testIdAttribute: "data-e2e" });
 afterAll(() => configure({ testIdAttribute: "data-testid" }));
 import { App, ConfigProvider } from "antd";
+import { MemoryRouter } from "react-router-dom";
 import D4VerificationCard from "./D4VerificationCard";
 
 vi.mock("../../api/capa", () => ({
@@ -15,7 +16,9 @@ vi.mock("../../api/capa", () => ({
 import { listVerifications, createVerification, updateVerification } from "../../api/capa";
 
 const renderCard = (props = {}) => render(
-  <ConfigProvider><App><D4VerificationCard capaId="c1" canEdit={true} currentRootCause="rc" {...props} /></App></ConfigProvider>
+  <MemoryRouter>
+    <ConfigProvider><App><D4VerificationCard capaId="c1" canEdit={true} currentRootCause="rc" fmeaRefId={null} {...props} /></App></ConfigProvider>
+  </MemoryRouter>
 );
 
 beforeEach(() => vi.clearAllMocks());
@@ -40,6 +43,7 @@ describe("D4VerificationCard", () => {
       result: "ok",
       conclusion: "passed",
       evidence_attachments: [],
+      source_ref: null,
     }));
   });
 
@@ -112,6 +116,7 @@ describe("D4VerificationCard", () => {
       result: undefined,
       conclusion: "pending",
       evidence_attachments: [],
+      source_ref: null,
     }));
   });
 

@@ -269,6 +269,7 @@ export default function FMEAEditorPage() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selectedFunctionId, setSelectedFunctionId] = useState<string | null>(null);
+  const [activeRelatedNodeId, setActiveRelatedNodeId] = useState<string | null>(null);
   const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [addNodeParent, setAddNodeParent] = useState<GraphNode | null>(null);
   const [addNodeAction, setAddNodeAction] = useState<StructureChildAction | null>(null);
@@ -467,6 +468,7 @@ export default function FMEAEditorPage() {
         snap.edges as unknown as Array<Record<string, unknown>>,
       );
       setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
       setSelectedStructureNode(null);
       setSelectedGraphNode(null);
       setDrawerVisible(false);
@@ -494,6 +496,7 @@ export default function FMEAEditorPage() {
       };
       graphDataRef.current = null;
       setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
       setSelectedStructureNode(null);
       setSelectedGraphNode(null);
       setDrawerVisible(false);
@@ -769,15 +772,18 @@ export default function FMEAEditorPage() {
     }
   }, [outerTab, loadGraphData]);
 
-  // 响应 URL ?tab=graph&highlightNode=... 参数
+  // 响应 URL ?tab=graph|related-capa&highlightNode=... 参数
   useEffect(() => {
     const tabParam = searchParams.get("tab");
     const highlightParam = searchParams.get("highlightNode");
-    if (tabParam === "graph") {
-      setOuterTab("graph");
-      if (highlightParam) {
+    if (tabParam === "graph" || tabParam === "related-capa") {
+      setOuterTab(tabParam);
+      if (tabParam === "graph" && highlightParam) {
         setPendingHighlightNode(highlightParam);
       }
+    }
+    if (highlightParam) {
+      setActiveRelatedNodeId(highlightParam);
     }
   }, [searchParams]);
 
@@ -846,6 +852,7 @@ export default function FMEAEditorPage() {
       setEdges((prev) => [...prev, edge]);
       if (addNodeAction.kind === "function") {
         setSelectedFunctionId(node.id);
+        setActiveRelatedNodeId(node.id);
       }
       setAddNodeOpen(false);
     }).catch(() => { /* validation message shown by Form */ });
@@ -875,7 +882,10 @@ export default function FMEAEditorPage() {
     const { nodes: nextNodes, edges: nextEdges } = deleteSubtree(nodes, edges, node.id);
     setNodes(nextNodes);
     setEdges(nextEdges);
-    if (selectedFunctionId === node.id) setSelectedFunctionId(null);
+    if (selectedFunctionId === node.id) {
+      setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
+    }
   }, [nodes, edges, selectedFunctionId]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -1679,7 +1689,10 @@ export default function FMEAEditorPage() {
                       isSelected={isSelected}
                       dragState={dragState}
                       canDragSortStructure={canDragSortStructure}
-                      onSelect={setSelectedFunctionId}
+                      onSelect={(id) => {
+                        setSelectedFunctionId(id);
+                        setActiveRelatedNodeId(id);
+                      }}
                       onRename={(id, field, value) => updateNode(id, field, value)}
                       onAddChild={openAddNode}
                       onDelete={deleteSubtreeNode}
@@ -1880,6 +1893,7 @@ export default function FMEAEditorPage() {
                     onNodeClick={(node) => {
                       setSelectedGraphNode(node);
                       setDrawerVisible(true);
+                      setActiveRelatedNodeId(node.id);
                     }}
                     onNodeContextMenu={(node, evt) => {
                       setContextMenuNode(node);
@@ -1917,7 +1931,11 @@ export default function FMEAEditorPage() {
             <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 16 }}>
               <GraphLegend fmeaType={fmeaType} />
               {highlightNodes.length > 0 && (
-                <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
+                <Button
+                  data-e2e="fmea-highlight-active"
+                  data-highlight-node={highlightNodes[0]}
+                  onClick={() => { setHighlightNodes([]); setDimOthers(false); setActiveRelatedNodeId(null); }}
+                >
                   {t("graph.clearHighlight")}
                 </Button>
               )}
@@ -1988,16 +2006,7 @@ export default function FMEAEditorPage() {
           </Modal>
         </>},
         { key: "related-capa", label: t("tabs.relatedCapa"), children: <>
-          {selectedFunctionId ? (
-            <RelatedCAPAList
-              fmeaId={fmea!.fmea_id}
-              fmeaNodeId={selectedFunctionId}
-            />
-          ) : (
-            <Typography.Text type="secondary">
-              {t("messages.selectFailureModeFirst")}
-            </Typography.Text>
-          )}
+          <RelatedCAPAList fmeaId={fmea!.fmea_id} fmeaNodeId={activeRelatedNodeId ?? undefined} />
         </>},
         { key: "history", label: <span data-e2e="fmea-version-snapshot"><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
           <VersionHistoryTab

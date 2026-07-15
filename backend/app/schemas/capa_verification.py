@@ -43,6 +43,7 @@ class VerificationUpdate(BaseModel):
     result: str | None = None
     conclusion: Literal["pending", "passed", "failed"] | None = None
     evidence_attachments: list[dict] | None = None
+    source_ref: dict | None = None
 
 
 class VerificationResponse(BaseModel):

@@ -12,7 +12,7 @@
 | 01.1 D3 遏制 | true | ❌ 基本未实现 | 无数据导入流程、无受影响范围分析、无 AI 遏制建议（仅 D3 文本草稿）；D3→D4 无闸口（advance_capa 不检查 d3_interim 非空）；ERP 数据模型可复用 |
 | 01.2 12 源推荐 | true | ⚠️ 大部分已实现 | 12 阶段编排器 + 全源接入已就绪（Spec B 已交付）；但 LLM 未配置时静默放行（pc=None 返回 attempted=0，非 BLOCKED）、stage_runs 未结构化持久化（RecommendationCache 仅 suggestions JSONB）、前端面板/AP-S-O-D 待核 |
 | 01.3 D4 验证+D7+审批壳 | true | ✅ 状态机切片已交付 | 状态机细化切片已交付（D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING + 驳回 + node-action.status=pending + edge 权限 + 冻结守卫）；method 枚举/回退计数器/FMEA 反查仍待后续切片 |
-| 01.4 8D↔FMEA 双向 | false | ⚠️ 部分实现 | 双向反查基础已有（GET /api/capa/by-fmea-node + get_capas_by_fmea_node + 前端 RelatedCAPAList），但只查 fmea_ref_id/fmea_node_id，需确认覆盖 D7 node-action Prevention 节点 + 审计 |
+| 01.4 8D↔FMEA 双向 | false | ✅ 已实现 | 三源反查（header/D4 source_ref/D7 confirmed|auto_filled，含 Prevention）+ factory/effective 过滤 + FMEA 可见性 404 + FMEA_LINKAGE_CREATED + D4 Cause 选择器 + deep-link + indexes + E2E（US-E2E-01.4 已落地，见 git log） |
 | 01.5 8D→SCAR 触发 | false | ❌ 未实现 | SupplierSCAR.capa_ref_id 外键已就绪；8D 侧触发入口+状态同步缺失 |
 | 01.6 8D→供应商风险 | false | ❌ 未实现 | SupplierRiskAlert.linked_capa_id 外键已就绪；8D 触发写入入口缺失 |
 | 01.7 D8 文档更新门禁 | true | ✅ 已实现 | 3 表 capa_docg_* + 三阶段 LLM 影响分析 + run_audit 版本 diff/关键点覆盖 + defer/confirm + `_d8_doc_gate_gate` C8/C9 + DocGatePanel + E2E（2026-07-14） |
@@ -22,7 +22,7 @@
 
 **结论**：
 - **大部分已实现**：01.2（12 源编排器已就绪，但 LLM 降级/持久化有 gap）
-- **部分实现**：01.3、01.4、01.8
+- **部分实现**：01.3、01.8
 - **数据模型就绪、链路缺失**：01.5（SCAR.capa_ref_id）、01.6（RiskAlert.linked_capa_id）——外键都在，只缺 8D 侧触发
 - **完全缺失**：01.9（横向扩散）；（01.1 / 01.7 已在后续切片落地，见各节状态）
 
@@ -72,11 +72,11 @@
 | 回退循环 + 计数器 | ❌ | 无 retry_count 字段、无回退循环计数 | 缺失 |
 | 阈值提示"建议升级" | ❌ | 无 | 缺失 |
 | D7 node-action 结构化落库（pending） | ✅ | `CapaD7NodeAction.status` 列已加（default `pending`，另支持 confirmed/skipped/auto_filled），迁移 `20260707_d7_node_action_nullable_fmea.py` 已落地；前端 D7 面板支持采纳并落库 | 状态机细化切片已交付；pending→已执行/已验证流转归后续切片 |
-| 8D D7 ↔ FMEA 双向追溯 | ⚠️ | node-action 有 fmea_id + fmea_node_id；FMEA 反查基础已有（见 01.4：by-fmea-node API + RelatedCAPAList），但未覆盖 D7 node-action Prevention 节点，反查审计缺失 | gap：反查未覆盖 Prevention 节点；反查审计缺失（见 01.4） |
+| 8D D7 ↔ FMEA 双向追溯 | ✅ | 01.4 已落地：三源反查覆盖 D7 Prevention + FMEA_LINKAGE_CREATED 审计（见 01.4） | 无（US-E2E-01.4 已落地，见 git log） |
 | 审批壳（权限/待审批/审计/驳回） | ✅ | 状态机已细化：`D7_PREVENTION → D7_COMPLETED → D8_GATE_PENDING → D8_APPROVAL_PENDING → D8_CLOSURE`；驳回边 `D8_APPROVAL_PENDING → D7_PREVENTION`；edge 权限上 D8_APPROVAL_PENDING→D8_CLOSURE/→D7_PREVENTION、D8_CLOSURE→ARCHIVED 需 APPROVE，其余推进需 EDIT；`advance_capa` 改为 `target_state` 驱动并写 TRANSITION 审计 | 状态机细化切片已交付 |
 | 审批记录写审计 | ✅ | TRANSITION 审计 | 无 |
 
-**01.3 gap**：状态机细化切片已交付。剩余 gap：(1) method 非枚举（自由文本）；(2) 无回退循环计数器；(3) FMEA 反查 Prevention 节点覆盖 + 反查审计（依赖 01.4 切片）。
+**01.3 gap**：状态机细化切片已交付。剩余 gap：(1) method 非枚举（自由文本）；(2) 无回退循环计数器。FMEA 反查 Prevention 节点覆盖 + 反查审计已由 01.4 落地。
 
 ---
 
@@ -84,12 +84,12 @@
 
 | 验收标准 | 状态 | 现有实现 | gap |
 |---|---|---|---|
-| 8D→FMEA 根因关联（Cause 节点） | ⚠️ | `CAPAEightD.fmea_ref_id` + `fmea_node_id`（capa.py:36）；D4 根因关联 FMEA Cause 待核 | D4 根因→FMEA Cause 关联待核 |
-| 8D→FMEA node-action 关联（Prevention 节点） | ✅ | `CapaD7NodeAction.fmea_id` + `failure_cause_node_id` + `prevention_control_node_id` | 无 |
-| FMEA→8D 反查入口 | ⚠️ | 已有 `GET /api/capa/by-fmea-node/{fmea_id}`（capa.py:103）+ `get_capas_by_fmea_node()`（capa_service.py:796）+ 前端 `RelatedCAPAList.tsx` | gap：反查只查 `CAPAEightD.fmea_ref_id`/`fmea_node_id`，需确认是否覆盖 D7 node-action 的 Prevention 节点；反查审计待核 |
-| 关联审计 | ⚠️ | node-action 创建有审计；FMEA 反查无审计 | FMEA 反查审计缺失 |
+| 8D→FMEA 根因关联（Cause 节点） | ✅ | D4 `source_ref={fmea_id,cause_node_id}` + 同厂同 PL 校验 + Cause 选择器 | 无（US-E2E-01.4 已落地，见 git log） |
+| 8D→FMEA node-action 关联（Prevention 节点） | ✅ | D7 confirmed/auto_filled 落 `prevention_control_node_id` + fingerprint 纳入 | 无（US-E2E-01.4 已落地，见 git log） |
+| FMEA→8D 反查入口 | ✅ | 三源 `get_capas_by_fmea_node`（header/D4/D7）+ factory/effective 过滤 + FMEA 可见性 404 + `link_sources` + `RelatedCAPAList` | 无（US-E2E-01.4 已落地，见 git log） |
+| 关联审计 | ✅ | `FMEA_LINKAGE_CREATED`（source=header/d4_cause/d7_*）写入路径 + E2E 断言 | 无（US-E2E-01.4 已落地，见 git log） |
 
-**01.4 gap**：双向反查基础已有（by-fmea-node API + RelatedCAPAList）。gap：反查只查 `fmea_ref_id`/`fmea_node_id`，需确认覆盖 D7 node-action 的 Prevention 节点（prevention_control_node_id）；反查审计缺失。工作量小。
+**01.4 gap**：已收口。三源反查 + 同厂同 PL + D4 Cause + D7 Prevention 持久化 + `FMEA_LINKAGE_CREATED` + deep-link/`activeRelatedNodeId` + reverse-lookup indexes + E2E `capa-story-fmea-linkage`。spec: `docs/superpowers/specs/2026-07-14-us-e2e-01.4-fmea-linkage-design.md`；plan: `docs/superpowers/plans/2026-07-15-us-e2e-01.4-fmea-linkage.md`。
 
 ---
 
@@ -180,7 +180,7 @@
 | P0 | 01.2（12 源）收尾 | 编排器已就绪，但 LLM 未配置静默降级（应判 BLOCKED）+ stage_runs 未持久化是硬 gap；前端面板/AP-S-O-D 待核 |
 | P0 | 01.3（D4 验证 + D7 + 审批壳）收尾 | method 枚举 + 回退计数器 + 状态机细化（D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING/驳回）+ node-action 加 status 字段 |
 | P1 | 01.1（D3 遏制）新建 | 业务流程最靠前，完全缺失，含 D3→D4 闸口补齐；ERP 数据模型 + capa_draft 结构可复用 |
-| P1 | 01.4（FMEA 双向）收尾 | 反查 API 已有，补 Prevention 节点覆盖 + 审计（工作量小） |
+| P1 | 01.4（FMEA 双向）收尾 | ✅ 已落地（2026-07-15）：三源反查 + factory isolation + D4 Cause + D7 Prevention + FMEA_LINKAGE_CREATED + deep-link + E2E |
 | P1 | 01.5（SCAR 触发）新建 | capa_ref_id 外键已就绪，只缺 8D 侧触发入口（工作量小） |
 | P1 | 01.6（供应商风险）新建 | linked_capa_id 外键已就绪，只缺 8D 侧触发写入（工作量小） |
 | P2 | 01.7（D8 文档门禁）新建 | ✅ 已落地（2026-07-14）：capa_docg_* + 三阶段分析 + run_audit + gate C8/C9 + DocGatePanel + E2E |
@@ -192,7 +192,7 @@
 
 1. **01.2 编排器已实现但 LLM 降级有硬 gap**：Spec B 已交付 12 源全接入 + 编排器，但 `llm_fusion_layer.py:34` 在 provider 未配置时 `pc is None` 返回 `attempted=0` 静默放行（非故事要求的 BLOCKED），且 RecommendationCache 无 stage_runs 字段（编排执行过程未结构化持久化）。
 2. **01.5/01.6 数据模型已就绪**：SupplierSCAR.capa_ref_id、SupplierRiskAlert.linked_capa_id 外键都在，只缺 8D 侧触发入口——工作量比预期小。
-3. **01.4 反查基础已有**：GET /api/capa/by-fmea-node + RelatedCAPAList 已存在，只查 fmea_ref_id/fmea_node_id，需补 Prevention 节点覆盖 + 审计。
+3. **01.4 反查基础已有 → 已收口**（2026-07-15）：三源反查（header/D4 source_ref/D7 confirmed|auto_filled 含 Prevention）+ factory/effective + FMEA 可见性 404 + FMEA_LINKAGE_CREATED + deep-link + E2E。
 4. **01.3 node-action 无 status 字段**：CapaD7NodeAction 只有 action=confirmed/skipped，故事要求的 pending/已执行/已验证状态不存在，需加字段 + 迁移。
 5. **01.3 状态机 D7→D8 直连**：eightd_state.py D7_PREVENTION→D8_CLOSURE 无中间状态、无驳回回退，故事要求的 D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING 全部缺失。
 6. **01.1 D3→D4 无闸口**：advance_capa 只对 D4→D5、D7→D8 加闸口，D3→D4 不检查 d3_interim 非空。

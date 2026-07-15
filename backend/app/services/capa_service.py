@@ -348,6 +348,8 @@ async def _d7_completion_gate(db: AsyncSession, capa) -> None:
             failure_mode_name=rec["failure_mode_name"],
             failure_cause_name=rec["failure_cause_name"],
             match_reason=rec["match_reason"],
+            prevention_control_node_id=rec.get("prevention_control_node_id"),
+            prevention_control_name=rec.get("prevention_control_name"),
         )
         cause_norm = rec["failure_cause_node_id"] or ""
         matched = await db.scalar(
@@ -561,13 +563,24 @@ async def link_fmea(
     user_id: uuid.UUID,
     fmea_node_id: str | None = None,
 ) -> CAPAEightD:
+    from app.models.fmea import FMEADocument
+
+    # Lock the CAPA row so concurrent identical links don't both read old and both write LINKAGE.
+    await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
+    await db.refresh(capa)
     old_fmea_ref_id = capa.fmea_ref_id
     old_fmea_node_id = capa.fmea_node_id
+    fmea = await db.get(FMEADocument, fmea_ref_id)
+    if fmea is None:
+        raise LookupError("目标 FMEA 不存在")
+    if fmea.factory_id != capa.factory_id:
+        raise PermissionError("目标 FMEA 跨工厂")
+    if fmea.product_line_code != capa.product_line_code:
+        raise PermissionError("目标 FMEA 跨产品线")
     capa.fmea_ref_id = fmea_ref_id
     capa.fmea_node_id = fmea_node_id
 
-    # Audit log
-    audit_log = AuditLog(
+    db.add(AuditLog(
         table_name="capa_eightd",
         record_id=capa.report_id,
         action="LINK_FMEA",
@@ -578,9 +591,23 @@ async def link_fmea(
             "new_fmea_node_id": fmea_node_id,
         },
         operated_by=user_id,
-    )
-    db.add(audit_log)
-
+        factory_id=capa.factory_id,
+    ))
+    ref_changed = old_fmea_ref_id != fmea_ref_id
+    node_changed = (old_fmea_node_id or None) != (fmea_node_id or None)
+    if ref_changed or node_changed:
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id,
+            action="FMEA_LINKAGE_CREATED",
+            changed_fields={
+                "capa_id": str(capa.report_id),
+                "fmea_id": str(fmea_ref_id),
+                "node_id": fmea_node_id,
+                "direction": "8d_to_fmea",
+                "source": "header",
+            },
+            operated_by=user_id, factory_id=capa.factory_id,
+        ))
     await db.commit()
     await db.refresh(capa)
     return capa
@@ -863,20 +890,104 @@ def _d7_rule_engine_fallback(capa_data: dict) -> list[dict]:
     return recs
 
 
+LINK_SOURCES_ORDER = ["d4_cause", "d7_failure_cause", "d7_failure_mode", "d7_prevention", "header"]
+
+
 async def get_capas_by_fmea_node(
-    db: AsyncSession, fmea_id: str, fmea_node_id: str | None = None
+    db: AsyncSession,
+    fmea_id: str,
+    fmea_node_id: str | None = None,
+    *,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
+    effective_factory_id: uuid.UUID | None = None,
 ) -> list[dict]:
-    q = select(CAPAEightD).where(CAPAEightD.fmea_ref_id == fmea_id)
+    """Three-source reverse lookup: header + D7(adopted) + D4(source_ref).
+
+    Factory filtering: effective_factory_id (==) if set, else IN accessible_factory_ids,
+    else (None = group admin, no effective) no factory predicate.
+    """
+    from app.models.capa import CapaD7NodeAction, CapaRootCauseVerification
+
+    def _factory_predicate(model):
+        if effective_factory_id is not None:
+            return model.factory_id == effective_factory_id
+        if accessible_factory_ids is not None:
+            if not accessible_factory_ids:
+                return model.factory_id == uuid.UUID(int=0)  # impossible → empty
+            return model.factory_id.in_(accessible_factory_ids)
+        return None  # no predicate
+
+    sources_by_capa: dict[uuid.UUID, set[str]] = {}
+
+    def _add(capa_id, *sources):
+        sources_by_capa.setdefault(capa_id, set()).update(sources)
+
+    # 1. header
+    hq = select(CAPAEightD).where(CAPAEightD.fmea_ref_id == fmea_id)
     if fmea_node_id:
-        q = q.where(CAPAEightD.fmea_node_id == fmea_node_id)
-    result = await db.execute(q)
-    return [
-        {
+        hq = hq.where(CAPAEightD.fmea_node_id == fmea_node_id)
+    fp = _factory_predicate(CAPAEightD)
+    if fp is not None:
+        hq = hq.where(fp)
+    for c in (await db.execute(hq)).scalars().all():
+        _add(c.report_id, "header")
+
+    # 2. D7 (confirmed / auto_filled only)
+    # Reverse-lookup is multi-source union (design §5.1): with fmea_node_id,
+    # OR-match FM/cause/prevention and contribute each hit tag; without node,
+    # contribute all non-null d7_* sources. Write-path LINKAGE remains
+    # primary-only via _linkage_node_for_rec (prevention → cause → mode).
+    dq = select(CapaD7NodeAction).where(
+        CapaD7NodeAction.fmea_id == fmea_id,
+        CapaD7NodeAction.action.in_(["confirmed", "auto_filled"]),
+    )
+    fpd = _factory_predicate(CapaD7NodeAction)
+    if fpd is not None:
+        dq = dq.where(fpd)
+    for a in (await db.execute(dq)).scalars().all():
+        hits: list[str] = []
+        if a.prevention_control_node_id and (
+            fmea_node_id is None or a.prevention_control_node_id == fmea_node_id
+        ):
+            hits.append("d7_prevention")
+        if a.failure_cause_node_id and (
+            fmea_node_id is None or a.failure_cause_node_id == fmea_node_id
+        ):
+            hits.append("d7_failure_cause")
+        if a.failure_mode_node_id and (
+            fmea_node_id is None or a.failure_mode_node_id == fmea_node_id
+        ):
+            hits.append("d7_failure_mode")
+        if hits:
+            _add(a.capa_id, *hits)
+
+    # 3. D4 source_ref
+    vq = select(CapaRootCauseVerification, CAPAEightD).join(
+        CAPAEightD, CAPAEightD.report_id == CapaRootCauseVerification.capa_id
+    ).where(CapaRootCauseVerification.source_ref["fmea_id"].astext == fmea_id)
+    fpv = _factory_predicate(CAPAEightD)
+    if fpv is not None:
+        vq = vq.where(fpv)
+    if fmea_node_id:
+        vq = vq.where(CapaRootCauseVerification.source_ref["cause_node_id"].astext == fmea_node_id)
+    for v, c in (await db.execute(vq)).all():
+        _add(c.report_id, "d4_cause")
+
+    if not sources_by_capa:
+        return []
+
+    capa_ids = list(sources_by_capa.keys())
+    capas = (await db.execute(select(CAPAEightD).where(CAPAEightD.report_id.in_(capa_ids)))).scalars().all()
+    rows = []
+    for c in capas:
+        ordered = [s for s in LINK_SOURCES_ORDER if s in sources_by_capa[c.report_id]]
+        rows.append({
             "report_id": str(c.report_id),
             "document_no": c.document_no,
             "title": c.title,
             "status": c.status,
             "product_line_code": c.product_line_code,
-        }
-        for c in result.scalars().all()
-    ]
+            "link_sources": ordered,
+        })
+    rows.sort(key=lambda r: r["document_no"])
+    return rows

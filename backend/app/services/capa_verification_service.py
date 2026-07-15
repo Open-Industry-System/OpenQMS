@@ -1,14 +1,71 @@
+import uuid
+
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaAIAdoption, CapaRootCauseVerification
+from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services import capa_service
 from app.services.embedding_outbox import enqueue_embedding
 
 FIELD_MAP = {"d4": "d4_root_cause", "d5": "d5_correction"}
+
+_LINKAGE_SOURCE_D4 = "d4_cause"
+
+
+def _linkage_audit(capa, fmea_id, node_id, source, user_id) -> AuditLog:
+    return AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id,
+        action="FMEA_LINKAGE_CREATED",
+        changed_fields={
+            "capa_id": str(capa.report_id),
+            "fmea_id": str(fmea_id),
+            "node_id": node_id,
+            "direction": "8d_to_fmea",
+            "source": source,
+        },
+        operated_by=user_id, factory_id=capa.factory_id,
+    )
+
+
+async def _normalize_and_validate_source_ref(db: AsyncSession, capa, source_ref):
+    """Normalize+validate D4 source_ref. Returns normalized dict or None.
+
+    Rules (spec §4.1): only {fmea_id, cause_node_id}; fmea_id must equal capa's linked FMEA;
+    same factory + product line; cause_node must be type=FailureCause in the FMEA graph.
+    Raises ValueError (400) on shape/type violations, PermissionError (403) on cross-factory/PL.
+    """
+    if source_ref is None:
+        return None
+    if not isinstance(source_ref, dict):
+        raise ValueError("source_ref 必须为对象")
+    if set(source_ref.keys()) != {"fmea_id", "cause_node_id"}:
+        raise ValueError("source_ref 只允许 fmea_id 与 cause_node_id")
+    if capa.fmea_ref_id is None:
+        raise ValueError("须先关联 FMEA")
+    try:
+        req_fmea = uuid.UUID(str(source_ref["fmea_id"]))
+    except (ValueError, TypeError):
+        raise ValueError("source_ref.fmea_id 非合法 UUID")
+    if req_fmea != capa.fmea_ref_id:
+        raise ValueError("source_ref.fmea_id 须等于已关联 FMEA")
+    cause_node_id = str(source_ref["cause_node_id"]).strip()
+    if not cause_node_id:
+        raise ValueError("cause_node_id 不能为空")
+    fmea = await db.get(FMEADocument, capa.fmea_ref_id)
+    if fmea is None:
+        raise LookupError("目标 FMEA 不存在")
+    if fmea.factory_id != capa.factory_id:
+        raise PermissionError("目标 FMEA 跨工厂")
+    if fmea.product_line_code != capa.product_line_code:
+        raise PermissionError("目标 FMEA 跨产品线")
+    nodes = (fmea.graph_data or {}).get("nodes", [])
+    if not any(n.get("id") == cause_node_id and n.get("type") == "FailureCause" for n in nodes):
+        raise ValueError("cause_node_id 不存在于 FMEA 图或非 FailureCause")
+    return {"fmea_id": str(capa.fmea_ref_id), "cause_node_id": cause_node_id}
 
 
 def _assert_verified_has_details(method, result, evidence) -> None:
@@ -90,11 +147,16 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     is_verified = (conclusion == "passed")
     if is_verified:
         _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
+    normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
+    # Pre-generate PK so pending UPDATED audit can reference verification_id
+    # before commit (model default would only fire on flush otherwise).
+    vid = uuid.uuid4()
     rec = CapaRootCauseVerification(
+        verification_id=vid,
         capa_id=capa.report_id, factory_id=capa.factory_id,
         root_cause_text=req.root_cause_text, method=req.method, result=req.result,
         is_verified=is_verified, conclusion=conclusion,
-        evidence_attachments=req.evidence_attachments, source_ref=req.source_ref,
+        evidence_attachments=req.evidence_attachments, source_ref=normalized_ref,
         verified_by=user.user_id if is_verified else None,
         verified_at=func.now() if is_verified else None,
         # clock_timestamp() (per-statement wall-clock) not now() (constant within txn):
@@ -103,11 +165,14 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         created_at=func.clock_timestamp(),
     )
     db.add(rec)
+    source_changed = normalized_ref is not None
     if conclusion == "passed":
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_PASSED",
-            changed_fields={"root_cause_text": req.root_cause_text, "method": req.method},
+            changed_fields={"verification_id": str(vid),
+                            "root_cause_text": req.root_cause_text, "method": req.method,
+                            "source_ref": normalized_ref},
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
     elif conclusion == "failed":
@@ -119,11 +184,24 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
-            changed_fields={"root_cause_text": req.root_cause_text, "method": req.method,
-                            "retry_count": capa.d4_retry_count},
+            changed_fields={"verification_id": str(vid),
+                            "root_cause_text": req.root_cause_text, "method": req.method,
+                            "retry_count": capa.d4_retry_count, "source_ref": normalized_ref},
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
-    # pending：不写结论审计
+    else:
+        # pending: source_ref change (establish) must be audited
+        if source_changed:
+            db.add(AuditLog(
+                table_name="capa_eightd", record_id=capa.report_id,
+                action="D4_VERIFICATION_UPDATED",
+                changed_fields={"verification_id": str(vid), "source_ref": normalized_ref,
+                                "old_source_ref": None},
+                operated_by=user.user_id, factory_id=capa.factory_id,
+            ))
+    if source_changed:
+        db.add(_linkage_audit(capa, capa.fmea_ref_id, normalized_ref["cause_node_id"],
+                              _LINKAGE_SOURCE_D4, user.user_id))
     await db.commit()
     await db.refresh(rec)
     return rec
@@ -157,6 +235,13 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     if "evidence_attachments" in updates:
         # 列为 NOT NULL（默认 []）：显式 null 视为清空到 []，避免 IntegrityError/500
         rec.evidence_attachments = updates["evidence_attachments"] or []
+    old_source_ref = rec.source_ref
+    source_ref_changed = False
+    if "source_ref" in updates:
+        new_ref = await _normalize_and_validate_source_ref(db, capa, updates["source_ref"])
+        if new_ref != old_source_ref:
+            rec.source_ref = new_ref
+            source_ref_changed = True
     if "conclusion" in updates and updates["conclusion"] is not None:
         rec.conclusion = updates["conclusion"]
     # is_verified 派生
@@ -170,28 +255,62 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     if rec.is_verified:
         _assert_verified_has_details(rec.method, rec.result, rec.evidence_attachments)
     # conclusion→failed 跃迁递增 retry_count（仅跃迁，防重复计；锁 capa 行防跨记录丢计数）
+    conclusion_transitioned = False
     if old_conclusion != "failed" and rec.conclusion == "failed":
         # 锁后必须 refresh capa 读最新 retry_count；不同 verification 并发失败时
         # 各 session 的 capa 可能缓存旧 retry_count=0，不 refresh 会丢失跨记录计数
         await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
         await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
+        passed_fields = {
+            "verification_id": str(vid),
+            "method": rec.method,
+            "root_cause_text": rec.root_cause_text,
+            "retry_count": capa.d4_retry_count,
+            "source_ref": rec.source_ref,
+        }
+        # Spec §5.2: conclusion transition event carries final source_ref and
+        # old_source_ref when Cause also changed in the same PATCH.
+        if source_ref_changed:
+            passed_fields["old_source_ref"] = old_source_ref
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
-            changed_fields={"verification_id": str(vid), "method": rec.method,
-                            "root_cause_text": rec.root_cause_text,
-                            "retry_count": capa.d4_retry_count},
+            changed_fields=passed_fields,
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
+        conclusion_transitioned = True
     elif old_conclusion != "passed" and rec.conclusion == "passed":
+        passed_fields = {
+            "verification_id": str(vid),
+            "method": rec.method,
+            "root_cause_text": rec.root_cause_text,
+            "source_ref": rec.source_ref,
+        }
+        if source_ref_changed:
+            passed_fields["old_source_ref"] = old_source_ref
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_PASSED",
-            changed_fields={"verification_id": str(vid), "method": rec.method,
-                            "root_cause_text": rec.root_cause_text},
+            changed_fields=passed_fields,
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
+        conclusion_transitioned = True
+    if source_ref_changed:
+        # UPDATED only when there is no conclusion transition (design §5.2):
+        # simultaneous conclusion+Cause is carried on PASSED/FAILED alone.
+        if not conclusion_transitioned:
+            db.add(AuditLog(
+                table_name="capa_eightd", record_id=capa.report_id,
+                action="D4_VERIFICATION_UPDATED",
+                changed_fields={"verification_id": str(vid), "source_ref": rec.source_ref,
+                                "old_source_ref": old_source_ref},
+                operated_by=user.user_id, factory_id=capa.factory_id,
+            ))
+        # LINKAGE only on establish/change (not clear). cleared → rec.source_ref is None.
+        if rec.source_ref is not None:
+            db.add(_linkage_audit(capa, capa.fmea_ref_id, rec.source_ref["cause_node_id"],
+                                  _LINKAGE_SOURCE_D4, user.user_id))
     await db.commit()
     await db.refresh(rec)
     return rec

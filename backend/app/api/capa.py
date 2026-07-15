@@ -148,10 +148,24 @@ async def get_capas_by_fmea_node(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    level = await get_user_permission(scope.user, Module.CAPA, db)
-    if level < PermissionLevel.VIEW:
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
-    capas = await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
+
+    # FMEA visibility: never leak existence. Build a factory-scoped query; missing → 404.
+    fq = select(FMEADocument).where(FMEADocument.fmea_id == fmea_id)
+    if scope.factory_scope.accessible_factory_ids is not None:
+        fq = fq.where(FMEADocument.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+    if scope.effective_factory_id is not None:
+        fq = fq.where(FMEADocument.factory_id == scope.effective_factory_id)
+    fmea = (await db.execute(fq)).scalar_one_or_none()
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在或不可见")
+
+    capas = await capa_service.get_capas_by_fmea_node(
+        db, fmea_id, fmea_node_id,
+        accessible_factory_ids=scope.factory_scope.accessible_factory_ids,
+        effective_factory_id=scope.effective_factory_id,
+    )
     # Filter by product line access
     if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
         capas = [c for c in capas if c.get("product_line_code") in scope.pl_scope.codes]
@@ -300,15 +314,13 @@ async def link_fmea(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
-
-    # Validate target FMEA exists and user can access its factory
-    target_fmea = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
-    target_fmea = target_fmea.scalar_one_or_none()
-    if target_fmea is None:
+    check_product_line_access(capa.product_line_code, scope)
+    try:
+        capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
+    except LookupError:
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
-    check_factory_access(target_fmea.factory_id, scope)
-
-    capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     return CAPAResponse.model_validate(capa)
 
 
@@ -734,6 +746,10 @@ async def create_verification_ep(
     check_product_line_access(capa.product_line_code, scope)
     try:
         rec = await capa_verification_service.create_verification(db, capa, req, scope.user)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return VerificationResponse.model_validate(rec)
@@ -773,6 +789,8 @@ async def update_verification_ep(
         rec = await capa_verification_service.update_verification(db, capa, vid, req, scope.user)
     except LookupError:
         raise HTTPException(status_code=404, detail="verification not found")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return VerificationResponse.model_validate(rec)

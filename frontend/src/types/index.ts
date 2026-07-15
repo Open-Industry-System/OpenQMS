@@ -164,6 +164,16 @@ export interface CAPAReport {
 
 export type CAPAListResponse = PaginatedResponse<CAPAReport>;
 
+export interface RelatedCAPAItem {
+  report_id: string;
+  document_no: string;
+  title: string;
+  status: string;
+  product_line_code?: string;
+  link_sources?: string[];
+}
+
+
 export interface ReviewSkill {
   skill_id: string;
   tenant_schema: string | null;
@@ -1894,6 +1904,7 @@ export interface VerificationUpdate {
   result?: string;
   conclusion?: VerificationConclusion;
   evidence_attachments?: Record<string, unknown>[];
+  source_ref?: Record<string, unknown> | null;
 }
 export interface D7NodeAction {
   action_id: string;

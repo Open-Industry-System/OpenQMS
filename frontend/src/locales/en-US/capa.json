@@ -169,7 +169,10 @@
     "adoptFailed": "Adopt failed",
     "blocked": {
       "banner": "AI recommendations unavailable — LLM credentials not configured. Please contact admin to configure /admin/ai-config"
-    }
+    },
+    "cause": "FMEA Cause",
+    "selectCause": "Select failure cause",
+    "linkFmeaFirst": "Link an FMEA first"
   },
   "d5": {
     "title": "D5 Corrective Action Recommendations",
@@ -286,7 +289,8 @@
     }
   },
   "relatedCapa": {
-    "title": "Related CAPA"
+    "title": "Related CAPA",
+    "empty": "No related 8D"
   },
   "verification": {
     "method": {
@@ -378,5 +382,12 @@
     "colStatus": "Status",
     "colCoverage": "Coverage",
     "colBump": "Version bump"
+  },
+  "sources": {
+    "header": "Document Link",
+    "d4_cause": "D4 Root Cause",
+    "d7_failure_mode": "D7 Failure Mode",
+    "d7_failure_cause": "D7 Failure Cause",
+    "d7_prevention": "D7 Prevention Control"
   }
 }

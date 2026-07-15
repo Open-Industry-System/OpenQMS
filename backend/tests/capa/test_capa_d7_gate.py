@@ -257,6 +257,8 @@ async def test_d7_action_records_recommendation_hash(db, default_factory, admin_
         failure_mode_name=rec["failure_mode_name"],
         failure_cause_name=rec["failure_cause_name"],
         match_reason=rec["match_reason"],
+        prevention_control_node_id=rec.get("prevention_control_node_id"),
+        prevention_control_name=rec.get("prevention_control_name"),
     )
     assert action.recommendation_hash == expected
     # 闸口用同一 helper、同一输入 → hash 相等（R11 单源）
@@ -282,6 +284,8 @@ async def test_d7_auto_fill_records_recommendation_hash(db, default_factory, adm
         failure_mode_name=rec["failure_mode_name"],
         failure_cause_name=rec["failure_cause_name"],
         match_reason=rec["match_reason"],
+        prevention_control_node_id=rec.get("prevention_control_node_id"),
+        prevention_control_name=rec.get("prevention_control_name"),
     )
     assert action.recommendation_hash == expected
 
