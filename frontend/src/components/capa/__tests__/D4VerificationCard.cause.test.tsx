@@ -8,6 +8,12 @@ import D4VerificationCard from "../D4VerificationCard";
 configure({ testIdAttribute: "data-e2e" });
 afterAll(() => configure({ testIdAttribute: "data-testid" }));
 
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 vi.mock("../../../api/capa", () => ({
   listVerifications: vi.fn(),
   createVerification: vi.fn(),
@@ -116,5 +122,30 @@ describe("D4VerificationCard cause selector", () => {
     ]);
     renderCard({ fmeaRefId: "f1" });
     await waitFor(() => expect(screen.getByTestId("d4-cause-link")).toBeInTheDocument());
+  });
+
+  it("uses source_ref.fmea_id for deep-link when fmeaRefId is null", async () => {
+    (listVerifications as any).mockResolvedValue([
+      {
+        verification_id: "v1",
+        capa_id: "c1",
+        root_cause_text: "rc",
+        method: "measurement",
+        result: "r",
+        conclusion: "passed",
+        evidence_attachments: [],
+        source_ref: { fmea_id: "f-from-source", cause_node_id: "cause-1" },
+        verified_by: "u",
+        verified_at: "2026-07-03",
+        created_at: "2026-07-03",
+      },
+    ]);
+
+    renderCard({ fmeaRefId: null });
+    const link = await screen.findByTestId("d4-cause-link");
+    fireEvent.click(link);
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/fmea/f-from-source?tab=graph&highlightNode=cause-1"
+    );
   });
 });

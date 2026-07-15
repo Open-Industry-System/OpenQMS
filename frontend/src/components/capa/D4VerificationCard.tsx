@@ -104,10 +104,12 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
         <Empty description={t("d4.noVerification")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
         <List size="small" dataSource={items} renderItem={(rec, i) => {
-          const causeNodeId =
+          const sourceRef =
             rec.source_ref && typeof rec.source_ref === "object"
-              ? (rec.source_ref as { cause_node_id?: string }).cause_node_id
+              ? (rec.source_ref as { fmea_id?: string; cause_node_id?: string })
               : undefined;
+          const causeNodeId = sourceRef?.cause_node_id;
+          const causeFmeaId = sourceRef?.fmea_id ?? fmeaRefId;
           return (
             <List.Item data-e2e={`verification-item-${i}`}>
               <Space direction="vertical" size={2} style={{ width: "100%" }}>
@@ -119,13 +121,13 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
                       : `⏳ ${t("verification.conclusion.draft")}`}
                   </Tag>
                   <span>{rec.root_cause_text}</span>
-                  {causeNodeId && (
+                  {causeNodeId && causeFmeaId && (
                     <Tag
                       color="blue"
                       data-e2e="d4-cause-link"
                       style={{ cursor: "pointer" }}
                       onClick={() =>
-                        navigate(`/fmea/${fmeaRefId}?tab=graph&highlightNode=${causeNodeId}`)
+                        navigate(`/fmea/${causeFmeaId}?tab=graph&highlightNode=${causeNodeId}`)
                       }
                     >
                       {t("d4.cause", "FMEA Cause")}

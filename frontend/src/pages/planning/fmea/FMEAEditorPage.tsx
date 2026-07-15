@@ -468,6 +468,7 @@ export default function FMEAEditorPage() {
         snap.edges as unknown as Array<Record<string, unknown>>,
       );
       setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
       setSelectedStructureNode(null);
       setSelectedGraphNode(null);
       setDrawerVisible(false);
@@ -495,6 +496,7 @@ export default function FMEAEditorPage() {
       };
       graphDataRef.current = null;
       setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
       setSelectedStructureNode(null);
       setSelectedGraphNode(null);
       setDrawerVisible(false);
@@ -880,7 +882,10 @@ export default function FMEAEditorPage() {
     const { nodes: nextNodes, edges: nextEdges } = deleteSubtree(nodes, edges, node.id);
     setNodes(nextNodes);
     setEdges(nextEdges);
-    if (selectedFunctionId === node.id) setSelectedFunctionId(null);
+    if (selectedFunctionId === node.id) {
+      setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
+    }
   }, [nodes, edges, selectedFunctionId]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
