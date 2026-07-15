@@ -127,12 +127,25 @@ async def test_update_clear_cause_writes_updated_no_linkage(db, default_factory,
         source_ref={"fmea_id": str(fmea.fmea_id), "cause_node_id": "cause-1"},
     ), admin_user)
     vid = rec.verification_id  # capture before any session mutation
+
+    def _d4_cause_linkages(audits):
+        return [
+            a for a in audits
+            if a.action == "FMEA_LINKAGE_CREATED" and a.changed_fields.get("source") == "d4_cause"
+        ]
+
+    before_audits = (await db.execute(select(AuditLog).where(AuditLog.record_id == capa.report_id))).scalars().all()
+    before_linkages = len(_d4_cause_linkages(before_audits))
+    before_updated = sum(1 for a in before_audits if a.action == "D4_VERIFICATION_UPDATED")
+
     await update_verification(db, capa, vid, VerificationUpdate(source_ref=None), admin_user)
-    audits = (await db.execute(select(AuditLog).where(AuditLog.record_id == capa.report_id))).scalars().all()
-    updated = [a for a in audits if a.action == "D4_VERIFICATION_UPDATED"]
-    assert len(updated) >= 2  # one for create, one for clear
-    assert not any(a.action == "FMEA_LINKAGE_CREATED" and a.changed_fields.get("source") == "d4_cause"
-                   for a in audits if a == updated[-1])
+
+    after_audits = (await db.execute(select(AuditLog).where(AuditLog.record_id == capa.report_id))).scalars().all()
+    after_linkages = len(_d4_cause_linkages(after_audits))
+    after_updated = sum(1 for a in after_audits if a.action == "D4_VERIFICATION_UPDATED")
+
+    assert after_updated == before_updated + 1  # clear writes UPDATED
+    assert after_linkages == before_linkages  # clear must not write new LINKAGE
 
 
 @pytest.mark.asyncio
