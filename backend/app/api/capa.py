@@ -148,10 +148,24 @@ async def get_capas_by_fmea_node(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    level = await get_user_permission(scope.user, Module.CAPA, db)
-    if level < PermissionLevel.VIEW:
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
-    capas = await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
+
+    # FMEA visibility: never leak existence. Build a factory-scoped query; missing → 404.
+    fq = select(FMEADocument).where(FMEADocument.fmea_id == fmea_id)
+    if scope.factory_scope.accessible_factory_ids is not None:
+        fq = fq.where(FMEADocument.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+    if scope.effective_factory_id is not None:
+        fq = fq.where(FMEADocument.factory_id == scope.effective_factory_id)
+    fmea = (await db.execute(fq)).scalar_one_or_none()
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在或不可见")
+
+    capas = await capa_service.get_capas_by_fmea_node(
+        db, fmea_id, fmea_node_id,
+        accessible_factory_ids=scope.factory_scope.accessible_factory_ids,
+        effective_factory_id=scope.effective_factory_id,
+    )
     # Filter by product line access
     if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
         capas = [c for c in capas if c.get("product_line_code") in scope.pl_scope.codes]
