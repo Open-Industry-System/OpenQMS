@@ -1826,6 +1826,7 @@ async def doc_gate_get_decision_ep(
         defer_owner=str(dec.defer_owner) if dec.defer_owner else None,
         defer_deadline=str(dec.defer_deadline) if dec.defer_deadline else None,
         waiver_reason=dec.waiver_reason,
+        waiver_items=dec.waiver_items,
         decided_at=dec.decided_at.isoformat() if dec.decided_at else None,
     )
 
@@ -1837,18 +1838,21 @@ async def doc_gate_waiver_ep(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    """POST /doc-gate/waiver: manager-authorized waiver forcing gate passed.
+    """POST /doc-gate/waiver: manager-authorized structured waiver for blocked_modify.
 
-    For blocked_modify lineage breaks where the only remediation is re-authoring
-    the CP under a new CAPA (state machine forbids archiving D8_GATE_PENDING
-    directly). Requires APPROVE permission on the capa module. Audited via
-    DOC_GATE_WAIVER + decision row (waiver_reason).
+    Only waives exact CP modify keypoints that the latest blocked audit left
+    uncovered AND that are still absent from the live latest CP version. Other
+    docs remain under C8. Requires APPROVE. Audited via DOC_GATE_WAIVER.
     """
     capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.APPROVE)
     _assert_d8_gate_stage(capa)
     try:
         result = await capa_doc_gate_service.record_gate_waiver(
-            db, capa, body.reason, scope.user.user_id
+            db,
+            capa,
+            body.reason,
+            [item.model_dump() for item in body.items],
+            scope.user.user_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

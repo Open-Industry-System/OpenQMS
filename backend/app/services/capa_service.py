@@ -371,14 +371,19 @@ async def _d7_completion_gate(db: AsyncSession, capa) -> None:
 
 
 async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
-    """D8_GATE_PENDING→D8_APPROVAL_PENDING: require latest decision=passed + C8/C9 freshness."""
+    """D8_GATE_PENDING→D8_APPROVAL_PENDING: require latest decision=passed + C8/C9 freshness.
+
+    Structured waiver: if decision.waiver_items is set, C8 still verifies every
+    non-waived doc in version_snapshot. Waived docs are intentionally omitted
+    from the snapshot by record_gate_waiver.
+    """
     from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
     from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
     from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
 
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
-            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True  # noqa: E712
         )
     )
     if analysis is None:
@@ -394,7 +399,9 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
         raise ValueError("请先运行文档审核")
     if decision.decision != "passed":
         raise ValueError(f"文档门禁未通过：{decision.decision}")
-    # C8 version freshness — re-check each snapshot against current latest
+    # C8 version freshness — re-check each snapshot against current latest.
+    # Structured waiver omits waived docs from version_snapshot, so only
+    # non-waived docs are re-verified here.
     for snap in (decision.version_snapshot or []):
         doc_type = snap.get("doc_type")
         doc_id = uuid.UUID(str(snap["doc_id"]))
@@ -408,6 +415,26 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
             or latest.sha256_hash != snap.get("sha256")
         ):
             raise ValueError("文档已变更，请重新审核")
+    # If this is a structured waiver, reconfirm each waived target_key is still
+    # absent from latest (fail-closed if CP was re-authored to restore ids).
+    for item in (decision.waiver_items or []):
+        if not isinstance(item, dict) or item.get("doc_type") != "control_plan":
+            continue
+        try:
+            cp_id = uuid.UUID(str(item["doc_id"]))
+        except (ValueError, TypeError, KeyError):
+            raise ValueError("waiver_items 非法，请重新豁免")
+        tk = str(item.get("target_key") or "").strip()
+        if not tk:
+            raise ValueError("waiver_items 缺 target_key，请重新豁免")
+        latest = await get_latest_cp_version(db, cp_id)
+        if latest is None:
+            raise ValueError("文档已变更，请重新审核")
+        from app.services.capa_doc_gate_preflight import _item_ids_from_snapshot
+        if tk in _item_ids_from_snapshot(latest.items_snapshot):
+            raise ValueError(
+                f"已豁免的 target_key={tk} 现已出现在 latest CP，请重新审核"
+            )
 
 
 async def advance_capa(

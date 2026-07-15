@@ -253,10 +253,10 @@ async def test_verify_fmea_version_accepts_legacy_compact_hash(db, capa_d8_gate)
 
 
 @pytest.mark.asyncio
-async def test_hash_backfill_demotes_stale_current_analysis(db, capa_with_done_analysis_and_bumped_doc):
-    """When a version row's hash no longer matches the embedded baseline hash in
-    a current analysis, the demote logic (run by the backfill migration) must set
-    is_current=false so the gate fails closed until regeneration."""
+async def test_hash_backfill_demotes_all_current_analyses(db, capa_with_done_analysis_and_bumped_doc):
+    """Hash backfill demotes EVERY current analysis (full C9 fail-closed), not only
+    those whose affected_docs baseline hash mismatches. Empty lists / unselected
+    candidates still embed hashes in analysis_input_hash."""
     from app.models.capa_doc_gate import CapaDocgAnalysis
     from sqlalchemy import text as _text
     capa, user = capa_with_done_analysis_and_bumped_doc
@@ -266,41 +266,17 @@ async def test_hash_backfill_demotes_stale_current_analysis(db, capa_with_done_a
         )
     )).scalar_one()
     assert analysis.is_current is True
-    # Simulate pre-backfill mismatch: rewrite the FMEA version row hash to a
-    # different value so embedded baseline sha != version row hash.
-    embedded = None
-    bvid = None
-    for d in analysis.affected_docs:
-        bv = d.get("baseline_version")
-        if bv and bv.get("sha256"):
-            embedded = bv["sha256"]
-            bvid = d.get("baseline_version_id")
-            break
-    assert embedded is not None and bvid is not None
-    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER trg_fmea_version_no_update"))
-    await db.execute(_text(
-        "UPDATE fmea_versions SET sha256_hash='pre_backfill_mismatch_value' "
-        "WHERE version_id=:vid"
-    ), {"vid": bvid})
-    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER trg_fmea_version_no_update"))
-    # Run the same demote logic the migration uses
+    # Migration demote is unconditional for is_current=true
     await db.execute(_text("""
-        UPDATE capa_docg_analysis a
-        SET is_current = false
-        WHERE a.is_current = true
-          AND EXISTS (
-            SELECT 1 FROM jsonb_array_elements(a.affected_docs) AS d
-            WHERE (d->>'doc_type') = 'fmea'
-              AND d->'baseline_version'->>'sha256' IS NOT NULL
-              AND d->'baseline_version'->>'sha256' <> (
-                SELECT v.sha256_hash FROM fmea_versions v
-                WHERE v.version_id::text = d->>'baseline_version_id'
-              )
-          )
+        UPDATE capa_docg_analysis
+        SET is_current = false,
+            error = COALESCE(error || ' | ', '') || 'demoted by hash backfill migration (C9 full demote)'
+        WHERE is_current = true
     """))
     await db.flush()
     await db.refresh(analysis)
     assert analysis.is_current is False
+    assert "demoted by hash backfill" in (analysis.error or "")
 
 
 @pytest.mark.asyncio

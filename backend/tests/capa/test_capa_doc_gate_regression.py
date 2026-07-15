@@ -263,34 +263,59 @@ def test_cp_sibling_items_same_source_delete_one():
 
 
 @pytest.mark.asyncio
-async def test_record_gate_waiver_inserts_passed_decision_with_reason(db, capa_with_done_analysis_no_bump):
-    """Waiver flips blocked→passed + waiver_reason + DOC_GATEWIRE audit."""
+async def test_record_gate_waiver_inserts_passed_with_items(db, capa_with_cp_blocked_modify):
+    """Structured waiver flips blocked→passed + waiver_items + DOC_GATE_WAIVER audit."""
     from app.models.capa_doc_gate import CapaDocgDecision
     from app.services import capa_doc_gate_service
-    capa, user = capa_with_done_analysis_no_bump
-    # Must run audit first — waiver requires a blocked decision to flip
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
     await capa_doc_gate_service.run_audit(db, capa, user.user_id)
     result = await capa_doc_gate_service.record_gate_waiver(
-        db, capa, "lineage break accepted: delete+add intentional", user.user_id
+        db, capa, "lineage break accepted: delete+add intentional",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
     )
     assert result["decision"] == "passed"
     assert "lineage break" in result["waiver_reason"]
+    assert result["waiver_items"][0]["target_key"] == tk
     dec = (await db.execute(
         select(CapaDocgDecision).order_by(CapaDocgDecision.revision.desc())
     )).scalars().first()
     assert dec.decision == "passed"
     assert dec.waiver_reason is not None
+    assert dec.waiver_items and dec.waiver_items[0]["target_key"] == tk
     assert dec.no_affected_confirmed is False
     audits = (await db.execute(select(AuditLog).where(AuditLog.action == "DOC_GATE_WAIVER"))).scalars().all()
     assert len(audits) == 1
 
 
 @pytest.mark.asyncio
-async def test_record_gate_waiver_requires_reason(db, capa_with_done_analysis_no_bump):
+async def test_record_gate_waiver_rejects_no_bump(db, capa_with_done_analysis_no_bump):
+    """Ordinary pending_update (FMEA no bump) cannot be waived with fabricated items."""
     from app.services import capa_doc_gate_service
     capa, user = capa_with_done_analysis_no_bump
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    with pytest.raises(ValueError, match="不在 blocked audit"):
+        await capa_doc_gate_service.record_gate_waiver(
+            db, capa, "bypass attempt",
+            [{"doc_type": "control_plan", "doc_id": str(uuid.uuid4()),
+              "target_key": "x", "field": "control_method"}],
+            user.user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_record_gate_waiver_requires_reason(db, capa_with_cp_blocked_modify):
+    from app.services import capa_doc_gate_service
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
     with pytest.raises(ValueError, match="waiver reason 必填"):
-        await capa_doc_gate_service.record_gate_waiver(db, capa, "  ", user.user_id)
+        await capa_doc_gate_service.record_gate_waiver(
+            db, capa, "  ",
+            [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+              "target_key": tk, "field": field}],
+            user.user_id,
+        )
 
 
 @pytest.mark.asyncio
@@ -299,19 +324,59 @@ async def test_record_gate_waiver_requires_analysis(db, capa_d8_gate):
     from app.services import capa_doc_gate_service
     capa, user = capa_d8_gate
     with pytest.raises(ValueError, match="未生成影响分析"):
-        await capa_doc_gate_service.record_gate_waiver(db, capa, "r", user.user_id)
+        await capa_doc_gate_service.record_gate_waiver(
+            db, capa, "r",
+            [{"doc_type": "control_plan", "doc_id": str(uuid.uuid4()),
+              "target_key": "x", "field": "control_method"}],
+            user.user_id,
+        )
 
 
 @pytest.mark.asyncio
-async def test_waiver_passed_decision_unblocks_gate(db, capa_with_done_analysis_no_bump):
-    """After waiver (blocked→passed), _d8_doc_gate_gate must not raise."""
+async def test_waiver_passed_decision_unblocks_gate(db, capa_with_cp_blocked_modify):
+    """After structured waiver, _d8_doc_gate_gate must not raise."""
     from app.services import capa_doc_gate_service, capa_service
-    capa, user = capa_with_done_analysis_no_bump
-    await capa_doc_gate_service.run_audit(db, capa, user.user_id)  # creates blocked decision
-    await capa_doc_gate_service.record_gate_waiver(db, capa, "accepted", user.user_id)
-    # Gate should now pass C9 (no input change) + decision=passed. C8 has no
-    # version_snapshot (waiver), so gate reaches the decision check and passes.
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
     await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
+async def test_preflight_exact_waiver_suppresses_only_matched_key(
+    db, capa_with_cp_blocked_modify,
+):
+    """Preflight consumes only exact (doc, target_key, field) from LATEST waiver."""
+    from app.services import capa_doc_gate_service
+    from app.services.capa_doc_gate_preflight import scan_tenant_breaks
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    # Before waiver: break reported
+    breaks = await scan_tenant_breaks(db, "public")
+    assert any(
+        b["kind"] == "blocked_modify"
+        and b["blocked_modify_target_key"] == tk
+        and b["cp_id"] == str(cp.cp_id)
+        for b in breaks
+    )
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    breaks2 = await scan_tenant_breaks(db, "public")
+    assert not any(
+        b["kind"] == "blocked_modify"
+        and b["blocked_modify_target_key"] == tk
+        and b["cp_id"] == str(cp.cp_id)
+        for b in breaks2
+    )
 
 
 @pytest.mark.asyncio

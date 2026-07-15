@@ -33,39 +33,50 @@ cp .env.example .env
 
 > ⚠️ `SECRET_KEY` 在生产环境必须替换为随机长字符串，否则存在安全风险。
 
-### 1.3 启动服务
+### 1.3 强制发布入口（migrate → preflight → rollout）
+
+发布到任何非本地环境时，**只允许**走以下顺序。禁止 `compose up` 后跳过
+preflight 直接放流量。
+
+```bash
+# 1) 启动/滚动基础服务（镜像构建、健康检查）
+docker compose up -d
+docker compose ps   # 等 db / neo4j healthy
+
+# 2) 迁移到 head（含 20260715_waiver_items 等门禁 schema）
+docker compose exec backend alembic upgrade head
+
+# 3) 代码一致性 + 目标库 D8 门禁 preflight（exit 1 = 禁止放行）
+#    DATABASE_URL 必须指向【本环境真实库】，不可用测试库冒充
+make deploy-check
+
+# 4) （仅首次/演示）导入 seed；生产跳过
+# docker compose exec backend python -m app.seed
+```
+
+`make deploy-check` = `make check`（pytest + tsc + build）+ `make doc-gate-preflight`。
+preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
+key_point（baseline item_id 在 latest 中消失），exit 1 阻止部署。
+
+**处置（结构化 waiver，非泛化旁路）**：
+1. 优先：用 item_id 保留路径重新保存 CP → 降级并重新生成 analysis → 重跑 audit；
+2. 若确认 delete+add 为有意断链：`POST /capa/{id}/doc-gate/waiver`
+   ```json
+   {"reason":"...", "items":[{"doc_type":"control_plan","doc_id":"...","target_key":"...","field":"..."}]}
+   ```
+   需 APPROVE；服务端校验 audit 未覆盖 + live latest 仍缺该 target_key；
+   仅这些 keypoint 豁免，其他文档继续走 C8。
+
+单元 CI 只跑 `make check`，**不含**数据 preflight。详见
+`backend/app/services/capa_doc_gate_preflight.py`。
+
+### 1.4 本地/首次初始化（开发）
 
 ```bash
 docker compose up -d
-```
-
-首次启动会自动构建前后端镜像。查看服务状态：
-
-```bash
-docker compose ps
-```
-
-等待 `db` 和 `neo4j` 容器变为 `healthy`（约 15–30 秒）。
-
-### 1.4 初始化数据库
-
-```bash
-# 运行数据库迁移
 docker compose exec backend alembic upgrade head
-
-# 导入演示数据（含用户、FMEA、CAPA、供应商等）
 docker compose exec backend python -m app.seed
 ```
-
-> ⚠️ **D8 文档门禁部署前置检查（US-E2E-01.7）**：每次发布到生产前，**必须**对目标
-> 数据库运行 `make deploy-check`（= `make check` + `make doc-gate-preflight`）。
-> preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
-> key_point（baseline item_id 在 latest 版本中已消失），exit 1 阻止部署。
-> 处置：重新用 item_id 保留路径保存 CP 后重新生成 analysis，或对接受的 delete+add
-> 用 `POST /capa/{id}/doc-gate/waiver`（需 APPROVE 权限、留痕）放行。详见
-> `backend/app/services/capa_doc_gate_preflight.py` 与 §门禁处置。
-> 单元 CI 只跑 `make check`（pytest + tsc + build），**不**含数据 preflight；
-> preflight 必须针对**目标环境的 DATABASE_URL**运行，不能用测试库冒充。
 
 ### 1.5 访问
 

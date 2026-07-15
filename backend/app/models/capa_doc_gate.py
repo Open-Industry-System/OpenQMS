@@ -101,6 +101,12 @@ class CapaDocgDecision(Base):
             "waiver_reason IS NULL OR (decision='passed' AND no_affected_confirmed=false)",
             name="chk_docg_waiver_only_passed",
         ),
+        CheckConstraint(
+            "waiver_reason IS NULL OR ("
+            "waiver_items IS NOT NULL AND jsonb_typeof(waiver_items)='array' "
+            "AND jsonb_array_length(waiver_items) > 0)",
+            name="chk_docg_waiver_items",
+        ),
         UniqueConstraint("analysis_id", "revision", name="uq_docg_decision_analysis_revision"),
         ForeignKeyConstraint(
             ["analysis_id", "factory_id"],
@@ -121,6 +127,7 @@ class CapaDocgDecision(Base):
     defer_owner: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
     defer_deadline: Mapped[date | None] = mapped_column(Date)
     waiver_reason: Mapped[str | None] = mapped_column(Text)
+    waiver_items: Mapped[list | None] = mapped_column(JSONB)
     decided_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

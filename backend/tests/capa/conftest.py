@@ -894,3 +894,87 @@ async def capa_with_empty_done_analysis(db, capa_d8_gate_with_docs):
     capa, user = capa_d8_gate_with_docs
     await _make_done_analysis(db, capa, user, [])
     return capa, user
+
+
+@pytest_asyncio.fixture
+async def capa_with_cp_blocked_modify(db, capa_d8_gate):
+    """CAPA at D8_GATE_PENDING + done analysis with CP modify target_key absent from latest.
+
+    Baseline CP version has item_id='old-item'; latest has 'new-item' only →
+    audit yields blocked (pending_update / uncovered modify). Used by structured
+    waiver tests that require a real blocked_modify lineage break.
+    """
+    from datetime import timedelta
+    from app.models.control_plan import ControlPlan
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services.version_service import compute_pg_jsonb_hash
+
+    capa, user = capa_d8_gate
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-WAIV-{uuid.uuid4().hex[:6]}",
+        title="waiver cp",
+        product_line_code=capa.product_line_code,
+        factory_id=capa.factory_id,
+        status="approved",
+        created_by=user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+
+    async def _ins(items, major, minor, created_at):
+        header = {}
+        combined = {"header": header, "items": items}
+        sha = await compute_pg_jsonb_hash(db, combined)
+        ver = ControlPlanVersion(
+            version_id=uuid.uuid4(),
+            cp_id=cp.cp_id,
+            factory_id=capa.factory_id,
+            major_no=major,
+            minor_no=minor,
+            header_snapshot=header,
+            items_snapshot=items,
+            sha256_hash=sha,
+            change_type="approve" if major == 1 and minor == 0 else "minor",
+            change_summary="seed",
+            created_by=user.user_id,
+            created_at=created_at,
+        )
+        db.add(ver)
+        await db.flush()
+        return ver
+
+    baseline_items = [{
+        "item_id": "old-item",
+        "source_fmea_node_id": "s1",
+        "product_characteristic": "x",
+        "control_method": "m-old",
+    }]
+    bver = await _ins(
+        baseline_items, 1, 0,
+        capa.created_at - timedelta(days=2),
+    )
+    # Latest rebuild: old-item gone, new-item present
+    await _ins(
+        [{"item_id": "new-item", "source_fmea_node_id": "s1",
+          "product_characteristic": "x", "control_method": "m-new"}],
+        1, 1, datetime.now(timezone.utc),
+    )
+    affected = [{
+        "doc_type": "control_plan",
+        "doc_id": str(cp.cp_id),
+        "doc_name": cp.document_no,
+        "baseline_version_id": str(bver.version_id),
+        "baseline_version": {
+            "major": bver.major_no, "minor": bver.minor_no, "sha256": bver.sha256_hash,
+        },
+        "key_points": [{
+            "target_kind": "cp_item",
+            "expected_action": "modify",
+            "field": "control_method",
+            "target_key": "old-item",
+        }],
+        "update_suggestion": "保留 item_id 后改 control_method",
+    }]
+    await _make_done_analysis(db, capa, user, affected)
+    return capa, user, cp, "old-item", "control_method"

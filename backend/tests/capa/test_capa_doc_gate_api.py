@@ -206,53 +206,104 @@ async def test_api_wrong_stage_rejected(admin_client, db, admin_user, default_fa
 
 
 @pytest.mark.asyncio
-async def test_api_waiver_passes_gate(admin_client, capa_with_done_analysis_no_bump):
-    """POST /doc-gate/waiver flips blocked→passed → advance succeeds."""
+async def test_api_waiver_rejects_plain_no_bump(admin_client, capa_with_done_analysis_no_bump):
+    """Ordinary pending_update (no bump) cannot be waived — only blocked_modify."""
     capa, _ = capa_with_done_analysis_no_bump
-    # Run audit first (must be blocked for waiver to apply)
     await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
+    # Even with a fabricated item, server rejects because no uncovered CP modify exists
     resp = await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
-        json={"reason": "lineage break: delete+add intentional"},
+        json={
+            "reason": "try to bypass no-bump",
+            "items": [{
+                "doc_type": "control_plan",
+                "doc_id": str(uuid.uuid4()),
+                "target_key": "x",
+                "field": "control_method",
+            }],
+        },
     )
-    assert resp.status_code == 200
-    assert resp.json()["decision"] == "passed"
-    # advance should now pass the doc gate
+    assert resp.status_code == 400
+    # advance must still be blocked
     adv = await admin_client.post(
         f"/api/capa/{capa.report_id}/advance",
         json={"target_state": "D8_APPROVAL_PENDING"},
     )
-    assert adv.status_code == 200
+    assert adv.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_api_waiver_rejects_without_audit(admin_client, capa_with_done_analysis_no_bump):
-    """Waiver before running audit → 400 (no blocked decision to flip)."""
-    capa, _ = capa_with_done_analysis_no_bump
+async def test_api_waiver_passes_for_blocked_modify(admin_client, capa_with_cp_blocked_modify):
+    """Structured waiver of exact CP blocked_modify → advance succeeds."""
+    capa, _, cp, tk, field = capa_with_cp_blocked_modify
+    await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
     resp = await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
-        json={"reason": "jumping the gun"},
+        json={
+            "reason": "lineage break: delete+add intentional",
+            "items": [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["decision"] == "passed"
+    assert body["waiver_items"]
+    assert body["waiver_items"][0]["target_key"] == tk
+    adv = await admin_client.post(
+        f"/api/capa/{capa.report_id}/advance",
+        json={"target_state": "D8_APPROVAL_PENDING"},
+    )
+    assert adv.status_code == 200, adv.text
+
+
+@pytest.mark.asyncio
+async def test_api_waiver_rejects_without_audit(admin_client, capa_with_cp_blocked_modify):
+    """Waiver before running audit → 400."""
+    capa, _, cp, tk, field = capa_with_cp_blocked_modify
+    resp = await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/waiver",
+        json={
+            "reason": "jumping the gun",
+            "items": [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+        },
     )
     assert resp.status_code == 400
     assert "请先运行文档审核" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_api_waiver_rejects_missing_reason(admin_client, capa_with_done_analysis_no_bump):
-    capa, _ = capa_with_done_analysis_no_bump
-    # audit first so the reason check is the rejection (not "no audit")
+async def test_api_waiver_rejects_missing_reason(admin_client, capa_with_cp_blocked_modify):
+    capa, _, cp, tk, field = capa_with_cp_blocked_modify
     await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
     resp = await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
-        json={"reason": "   "},
+        json={
+            "reason": "   ",
+            "items": [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+        },
     )
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_api_waiver_rejects_on_deferred(admin_client, capa_with_done_analysis_no_bump):
+async def test_api_waiver_rejects_on_deferred(admin_client, capa_with_cp_blocked_modify):
     """waiver on a deferred analysis → 400 (only blocked can be waived)."""
-    capa, user = capa_with_done_analysis_no_bump
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
     await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
     await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/defer",
@@ -260,23 +311,52 @@ async def test_api_waiver_rejects_on_deferred(admin_client, capa_with_done_analy
     )
     resp = await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
-        json={"reason": "try to waiver deferred"},
+        json={
+            "reason": "try to waiver deferred",
+            "items": [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+        },
     )
     assert resp.status_code == 400
     assert "deferred" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_api_decision_includes_waiver_reason(admin_client, capa_with_done_analysis_no_bump):
-    capa, _ = capa_with_done_analysis_no_bump
+async def test_api_decision_includes_waiver_items(admin_client, capa_with_cp_blocked_modify):
+    capa, _, cp, tk, field = capa_with_cp_blocked_modify
     await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
     await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
-        json={"reason": "accepted break"},
+        json={
+            "reason": "accepted break",
+            "items": [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+        },
     )
     dec = await admin_client.get(f"/api/capa/{capa.report_id}/doc-gate/decision")
     body = dec.json()
     assert body["decision"] == "passed"
     assert body["waiver_reason"] == "accepted break"
+    assert body["waiver_items"]
+    assert body["waiver_items"][0]["target_key"] == tk
+    assert body["waiver_items"][0]["field"] == field
 
 
+@pytest.mark.asyncio
+async def test_api_waiver_rejects_missing_items(admin_client, capa_with_cp_blocked_modify):
+    """items required by schema — empty list rejected with 422."""
+    capa, _, _, _, _ = capa_with_cp_blocked_modify
+    await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
+    resp = await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/waiver",
+        json={"reason": "no items", "items": []},
+    )
+    assert resp.status_code == 422

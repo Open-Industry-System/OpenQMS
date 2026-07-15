@@ -654,12 +654,13 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
         audits.append(audit_row)
         if audit_row["status"] != "passed":
             all_passed = False
-        else:
-            version_snapshot.append({
-                "doc_type": doc["doc_type"], "doc_id": doc["doc_id"],
-                "version_after_id": audit_row["version_after"]["version_id"] if audit_row["version_after"] else None,
-                "sha256": audit_row["version_after"]["sha256"] if audit_row["version_after"] else None,
-            })
+        # Store version snapshot for ALL docs (even when blocked) so
+        # C8 can re-verify non-waived docs after waiver.
+        version_snapshot.append({
+            "doc_type": doc["doc_type"], "doc_id": doc["doc_id"],
+            "version_after_id": audit_row["version_after"]["version_id"] if audit_row["version_after"] else None,
+            "sha256": audit_row["version_after"]["sha256"] if audit_row["version_after"] else None,
+        })
     # Insert audit rows
     for a in audits:
         db.add(CapaDocgAudit(
@@ -673,7 +674,7 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
     # blocked (review P1#8: blocked needs the batch link for traceability).
     decision = "passed" if all_passed else "blocked"
     await _insert_decision(db, analysis.analysis_id, capa.factory_id, decision, user_id, now,
-                          audit_run_id, version_snapshot if all_passed else [])
+                          audit_run_id, version_snapshot)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id,
         action="DOC_UPDATE_AUDITED",
@@ -712,10 +713,10 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
 
 async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, audit_run_id, version_snapshot,
                           defer_reason=None, defer_owner=None, defer_deadline=None, no_affected_confirmed=False,
-                          waiver_reason=None):
+                          waiver_reason=None, waiver_items=None):
     """Lock analysis row, read max revision, insert revision+1 (UQ (analysis_id, revision) guards concurrency).
-    defer fields + no_affected_confirmed + waiver_reason passed at insert time (CHECK requires defer fields
-    present for deferred; waiver only on passed)."""
+    defer fields + no_affected_confirmed + waiver_reason/items passed at insert time
+    (CHECK requires defer fields for deferred; waiver only on passed with non-empty items)."""
     await db.execute(text("SELECT 1 FROM capa_docg_analysis WHERE analysis_id=:aid FOR UPDATE"), {"aid": analysis_id})
     max_rev = await db.scalar(
         select(CapaDocgDecision.revision).where(CapaDocgDecision.analysis_id == analysis_id)
@@ -726,7 +727,8 @@ async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, 
         revision=(max_rev if max_rev is not None else -1) + 1,
         factory_id=factory_id, decision=decision, version_snapshot=version_snapshot,
         defer_reason=defer_reason, defer_owner=defer_owner, defer_deadline=defer_deadline,
-        no_affected_confirmed=no_affected_confirmed, waiver_reason=waiver_reason,
+        no_affected_confirmed=no_affected_confirmed,
+        waiver_reason=waiver_reason, waiver_items=waiver_items,
         decided_by=user_id, decided_at=now,
     ))
 
@@ -985,26 +987,43 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
 
 
 async def record_gate_waiver(
-    db: AsyncSession, capa: CAPAEightD, reason: str, user_id: uuid.UUID
+    db: AsyncSession,
+    capa: CAPAEightD,
+    reason: str,
+    items: list[dict],
+    user_id: uuid.UUID,
 ) -> dict:
-    """Flip the latest blocked audit decision to passed with a recorded reason.
+    """Waive exact blocked_modify CP keypoints after a blocked audit.
 
-    For blocked_modify lineage breaks where the only remediation is re-authoring
-    the CP under a new CAPA.  This is NOT an unconditional gate bypass — it
-    REQUIRES a prior blocked decision from run_audit(): the engineer must have
-    generated an analysis AND run the audit, which the waiver then overrules.
+    Scope is narrow and server-validated:
+    - Requires current analysis + latest decision=blocked (from run_audit).
+    - Each item must be control_plan / cp_item / modify, present in the analysis,
+      uncovered in the blocked audit, and still absent from the live latest CP.
+    - Only those items are recorded in waiver_items. Other docs remain subject to
+      C8 via version_snapshot (which is now stored for blocked audits too).
+    - TOCTOU: analysis row is locked before re-reading the latest decision.
 
     Caller must require APPROVE permission on the capa module (enforced in API).
     """
     if not reason or not str(reason).strip():
         raise ValueError("waiver reason 必填")
+    if not items:
+        raise ValueError("waiver items 必填（至少一个 blocked_modify keypoint）")
+
+    # Phase A: locate current analysis (no lock yet — may 404 early)
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
-            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True  # noqa: E712
         )
     )
-    if analysis is None:
+    if analysis is None or analysis.status != "done":
         raise ValueError("未生成影响分析")
+
+    # Phase B: lock analysis, then re-read latest decision under the lock (TOCTOU)
+    await db.execute(
+        text("SELECT 1 FROM capa_docg_analysis WHERE analysis_id=:aid FOR UPDATE"),
+        {"aid": analysis.analysis_id},
+    )
     latest_decision = await db.scalar(
         select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
         .order_by(CapaDocgDecision.revision.desc()).limit(1)
@@ -1013,14 +1032,108 @@ async def record_gate_waiver(
         raise ValueError("请先运行文档审核")
     if latest_decision.decision != "blocked":
         raise ValueError(f"当前决策状态为 {latest_decision.decision}，只能豁免已阻塞的审核")
+    if latest_decision.audit_run_id is None:
+        raise ValueError("blocked 决策缺少 audit_run_id，请重新运行文档审核")
+
+    # Load audit rows for this blocked run — needed to confirm each item was uncovered
+    audits = (await db.execute(
+        select(CapaDocgAudit).where(
+            CapaDocgAudit.analysis_id == analysis.analysis_id,
+            CapaDocgAudit.audit_run_id == latest_decision.audit_run_id,
+        )
+    )).scalars().all()
+    if not audits:
+        raise ValueError("找不到对应审核批次，请重新运行文档审核")
+
+    # Index uncovered modify/cp_item keypoints from the audit coverage
+    uncovered: dict[tuple[str, str, str, str], dict] = {}
+    for a in audits:
+        if a.doc_type != "control_plan":
+            continue
+        for cov in (a.coverage or []):
+            if not isinstance(cov, dict) or cov.get("covered"):
+                continue
+            kp = cov.get("key_point") or {}
+            if (
+                kp.get("expected_action") != "modify"
+                or kp.get("target_kind") != "cp_item"
+            ):
+                continue
+            tk = str(kp.get("target_key") or "").strip()
+            field = str(kp.get("field") or "").strip()
+            if not tk or not field:
+                continue
+            key = ("control_plan", str(a.doc_id), tk, field)
+            uncovered[key] = {
+                "doc_type": "control_plan",
+                "doc_id": str(a.doc_id),
+                "target_key": tk,
+                "field": field,
+            }
+
+    # Validate each requested item against audit + live latest CP
+    validated: list[dict] = []
+    seen_req: set[tuple[str, str, str, str]] = set()
+    for raw in items:
+        doc_type = str(raw.get("doc_type") or "").strip()
+        doc_id_s = str(raw.get("doc_id") or "").strip()
+        tk = str(raw.get("target_key") or "").strip()
+        field = str(raw.get("field") or "").strip()
+        if doc_type != "control_plan":
+            raise ValueError("仅允许豁免 control_plan 的 blocked_modify")
+        if not doc_id_s or not tk or not field:
+            raise ValueError("waiver item 缺 doc_id/target_key/field")
+        try:
+            doc_uuid = uuid.UUID(doc_id_s)
+        except (ValueError, TypeError):
+            raise ValueError(f"非法 doc_id: {doc_id_s}")
+        key = ("control_plan", str(doc_uuid), tk, field)
+        if key in seen_req:
+            raise ValueError(f"重复 waiver item: {tk}/{field}")
+        seen_req.add(key)
+        if key not in uncovered:
+            raise ValueError(
+                f"keypoint 不在 blocked audit 的未覆盖 modify 集合中: "
+                f"doc={doc_uuid} target_key={tk} field={field}"
+            )
+        # Live reconfirm: target_key must still be absent from latest CP
+        latest_ver = await get_latest_cp_version(db, doc_uuid)
+        if latest_ver is None:
+            raise ValueError(f"CP {doc_uuid} 无 latest 版本，无法确认断链")
+        from app.services.capa_doc_gate_preflight import _item_ids_from_snapshot
+        latest_ids = _item_ids_from_snapshot(latest_ver.items_snapshot)
+        if tk in latest_ids:
+            raise ValueError(
+                f"target_key={tk} 已存在于 latest 版本，不是 blocked_modify 断链；"
+                f"请重新审核或修正 CP"
+            )
+        validated.append({
+            "doc_type": "control_plan",
+            "doc_id": str(doc_uuid),
+            "target_key": tk,
+            "field": field,
+            "latest_version_id": str(latest_ver.version_id),
+            "latest_sha256": latest_ver.sha256_hash,
+            "audit_run_id": str(latest_decision.audit_run_id),
+        })
+
+    # Build C8 version_snapshot: keep non-waived docs from the blocked decision.
+    # Waived docs are omitted from C8 freshness (they cannot pass coverage).
+    waived_doc_ids = {v["doc_id"] for v in validated}
+    c8_snapshot = [
+        s for s in (latest_decision.version_snapshot or [])
+        if str(s.get("doc_id")) not in waived_doc_ids
+        and s.get("version_after_id")  # only verify docs that had a version
+    ]
+
     now = datetime.now(timezone.utc)
-    # Carry forward the blocked audit's version_snapshot (empty for blocked —
-    # preserved so the gate sees the original audit context).  audit_run_id
-    # links back to the same batch for traceability.
+    # _insert_decision re-locks; already held, re-lock is fine (same txn)
     await _insert_decision(
         db, analysis.analysis_id, capa.factory_id, "passed", user_id, now,
-        latest_decision.audit_run_id, latest_decision.version_snapshot or [],
-        no_affected_confirmed=False, waiver_reason=reason,
+        latest_decision.audit_run_id, c8_snapshot,
+        no_affected_confirmed=False,
+        waiver_reason=reason,
+        waiver_items=validated,
     )
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_WAIVER",
@@ -1028,9 +1141,15 @@ async def record_gate_waiver(
             "reason": reason,
             "decision_from": "blocked",
             "decision_to": "passed",
-            "audit_run_id": str(latest_decision.audit_run_id) if latest_decision.audit_run_id else None,
+            "audit_run_id": str(latest_decision.audit_run_id),
+            "waiver_items": validated,
         },
         operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
     ))
     await db.commit()
-    return {"decision": "passed", "waiver_reason": reason, "audit_run_id": str(latest_decision.audit_run_id) if latest_decision.audit_run_id else None}
+    return {
+        "decision": "passed",
+        "waiver_reason": reason,
+        "waiver_items": validated,
+        "audit_run_id": str(latest_decision.audit_run_id),
+    }

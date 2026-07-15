@@ -112,27 +112,50 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             CapaDocgAnalysis.capa_id.in_(capa_ids),
         )
     )).scalars().all()
-    # Load analytics have an accepted waiver — waived analyses are not blocked
+    # Latest decision per analysis — only its waiver_items (if any) can suppress
+    # exact (doc_id, target_key, field) matches. Historical waivers do NOT apply.
     analysis_ids = [a.analysis_id for a in analyses]
-    waived_ids: set[uuid.UUID] = set()
+    waived_keys: set[tuple[str, str, str, str]] = set()  # (analysis_id, doc_id, tk, field)
     if analysis_ids:
-        waiver_rows = (await db.execute(
-            select(CapaDocgDecision.analysis_id).where(
-                CapaDocgDecision.analysis_id.in_(analysis_ids),
-                CapaDocgDecision.waiver_reason.isnot(None),
+        # For each analysis, pick the latest decision by revision; if it has
+        # waiver_items, index them. A prior waiver followed by a new blocked
+        # audit must NOT hide the new breaks.
+        from sqlalchemy import func as sa_func
+        latest_rev = (
+            select(
+                CapaDocgDecision.analysis_id,
+                sa_func.max(CapaDocgDecision.revision).label("max_rev"),
+            )
+            .where(CapaDocgDecision.analysis_id.in_(analysis_ids))
+            .group_by(CapaDocgDecision.analysis_id)
+            .subquery()
+        )
+        latest_decs = (await db.execute(
+            select(CapaDocgDecision).join(
+                latest_rev,
+                (CapaDocgDecision.analysis_id == latest_rev.c.analysis_id)
+                & (CapaDocgDecision.revision == latest_rev.c.max_rev),
             )
         )).scalars().all()
-        waived_ids = set(waiver_rows)
+        for dec in latest_decs:
+            if not dec.waiver_items or not dec.waiver_reason:
+                continue
+            for it in dec.waiver_items:
+                if not isinstance(it, dict):
+                    continue
+                if it.get("doc_type") != "control_plan":
+                    continue
+                tk = str(it.get("target_key") or "").strip()
+                field = str(it.get("field") or "").strip()
+                doc_id = str(it.get("doc_id") or "").strip()
+                if tk and field and doc_id:
+                    waived_keys.add((str(dec.analysis_id), doc_id, tk, field))
     analyzed_capa_ids: set[uuid.UUID] = set()
     for analysis in analyses:
         capa = capa_by_id.get(analysis.capa_id)
         if capa is None:
             continue
         analyzed_capa_ids.add(capa.report_id)
-        # Waived analyses: their blocked_modify key_points were accepted by a
-        # manager-approved waiver — do not report them (preflight consumes waiver).
-        if analysis.analysis_id in waived_ids:
-            continue
         if not analysis.affected_docs:
             continue
         for doc in analysis.affected_docs:
@@ -152,7 +175,13 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                 if kp.get("expected_action") != "modify" or kp.get("target_kind") != "cp_item":
                     continue
                 tk = str(kp.get("target_key") or "").strip()
-                if tk and tk not in latest_ids:
+                field = str(kp.get("field") or "").strip()
+                if not tk:
+                    continue
+                if tk not in latest_ids:
+                    # Exact-match only: latest decision's waiver_items
+                    if (str(analysis.analysis_id), str(cp_id), tk, field) in waived_keys:
+                        continue
                     breaks.append({
                         "kind": "blocked_modify",
                         "tenant_schema": tenant_schema,
@@ -162,7 +191,7 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                         "cp_id": str(cp_id),
                         "latest_version_id": str(latest_ver.version_id),
                         "blocked_modify_target_key": tk,
-                        "blocked_field": kp.get("field"),
+                        "blocked_field": field or kp.get("field"),
                     })
 
     for capa in open_capas:
@@ -226,8 +255,15 @@ async def run_preflight(json_output: bool = False, strict_potential: bool = Fals
                     print("      Executable remediation (re-analysis alone NEVER changes CAPA-time baseline):")
                     print("        (a) Re-author CP (item_id-preserving) + demote & regenerate analysis")
                     print("            so the new current analysis references continuing ids.")
-                    print("        (b) Manager waiver: POST /capa/{id}/doc-gate/waiver {reason}")
-                    print("            (APPROVE permission; audited; forces gate passed).")
+                    print("        (b) Structured manager waiver (APPROVE; audited; exact keypoint only):")
+                    print("            POST /capa/{id}/doc-gate/waiver")
+                    _payload = (
+                        '{"reason":"...", "items":[{"doc_type":"control_plan",'
+                        '"doc_id":"%s","target_key":"%s","field":"%s"}]}'
+                        % (b["cp_id"], b["blocked_modify_target_key"], b["blocked_field"])
+                    )
+                    print("            " + _payload)
+                    print("            Server reconfirms live absence + audit coverage; other docs stay under C8.")
                     print("        State machine forbids archiving D8_GATE_PENDING directly.")
             if potential:
                 print(f"doc-gate CP lineage preflight: {len(potential)} POTENTIAL disconnect(s) "
