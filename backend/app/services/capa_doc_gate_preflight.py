@@ -113,13 +113,14 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
         )
     )).scalars().all()
     # Latest decision per analysis — only its waiver_items (if any) can suppress
-    # exact (doc_id, target_key, field) matches. Historical waivers do NOT apply.
+    # exact (doc_id, target_key, field) matches AND only when the bound
+    # latest_version_id/sha256 still equals the live CP version. Stale waivers
+    # (CP re-authored after waiver) must NOT hide breaks. Historical decisions
+    # (non-latest revision) never apply.
     analysis_ids = [a.analysis_id for a in analyses]
-    waived_keys: set[tuple[str, str, str, str]] = set()  # (analysis_id, doc_id, tk, field)
+    # key -> (bound_version_id, bound_sha256)
+    waived_keys: dict[tuple[str, str, str, str], tuple[str, str]] = {}
     if analysis_ids:
-        # For each analysis, pick the latest decision by revision; if it has
-        # waiver_items, index them. A prior waiver followed by a new blocked
-        # audit must NOT hide the new breaks.
         from sqlalchemy import func as sa_func
         latest_rev = (
             select(
@@ -140,6 +141,9 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
         for dec in latest_decs:
             if not dec.waiver_items or not dec.waiver_reason:
                 continue
+            # Only a passed decision with items can suppress.
+            if dec.decision != "passed":
+                continue
             for it in dec.waiver_items:
                 if not isinstance(it, dict):
                     continue
@@ -148,8 +152,12 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                 tk = str(it.get("target_key") or "").strip()
                 field = str(it.get("field") or "").strip()
                 doc_id = str(it.get("doc_id") or "").strip()
-                if tk and field and doc_id:
-                    waived_keys.add((str(dec.analysis_id), doc_id, tk, field))
+                bound_vid = str(it.get("latest_version_id") or "").strip()
+                bound_sha = str(it.get("latest_sha256") or "").strip()
+                if tk and field and doc_id and bound_vid and bound_sha:
+                    waived_keys[(str(dec.analysis_id), doc_id, tk, field)] = (
+                        bound_vid, bound_sha,
+                    )
     analyzed_capa_ids: set[uuid.UUID] = set()
     for analysis in analyses:
         capa = capa_by_id.get(analysis.capa_id)
@@ -179,9 +187,17 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                 if not tk:
                     continue
                 if tk not in latest_ids:
-                    # Exact-match only: latest decision's waiver_items
-                    if (str(analysis.analysis_id), str(cp_id), tk, field) in waived_keys:
-                        continue
+                    # Exact-match + version binding: only suppress when the
+                    # waiver's bound version_id/sha still equals live latest.
+                    wkey = (str(analysis.analysis_id), str(cp_id), tk, field)
+                    bound = waived_keys.get(wkey)
+                    if bound is not None:
+                        bound_vid, bound_sha = bound
+                        if (
+                            str(latest_ver.version_id) == bound_vid
+                            and latest_ver.sha256_hash == bound_sha
+                        ):
+                            continue
                     breaks.append({
                         "kind": "blocked_modify",
                         "tenant_schema": tenant_schema,

@@ -295,7 +295,7 @@ async def test_record_gate_waiver_rejects_no_bump(db, capa_with_done_analysis_no
     from app.services import capa_doc_gate_service
     capa, user = capa_with_done_analysis_no_bump
     await capa_doc_gate_service.run_audit(db, capa, user.user_id)
-    with pytest.raises(ValueError, match="不在 blocked audit"):
+    with pytest.raises(ValueError, match="无 blocked_modify|不在 blocked audit"):
         await capa_doc_gate_service.record_gate_waiver(
             db, capa, "bypass attempt",
             [{"doc_type": "control_plan", "doc_id": str(uuid.uuid4()),
@@ -376,6 +376,191 @@ async def test_preflight_exact_waiver_suppresses_only_matched_key(
         and b["blocked_modify_target_key"] == tk
         and b["cp_id"] == str(cp.cp_id)
         for b in breaks2
+    )
+
+
+@pytest.mark.asyncio
+async def test_partial_waiver_rejects_residual_keypoint(db, capa_with_cp_blocked_modify):
+    """Waiving 1 of 2 blocked_modify keypoints in the same batch must fail."""
+    from app.models.capa_doc_gate import CapaDocgAnalysis
+    from app.services import capa_doc_gate_service
+    from app.services.version_service import compute_pg_jsonb_hash
+    from app.models.control_plan_version import ControlPlanVersion
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    # Expand analysis to two modify keypoints; re-seed latest still missing both.
+    analysis = (await db.execute(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,  # noqa: E712
+        )
+    )).scalar_one()
+    docs = list(analysis.affected_docs or [])
+    docs[0] = dict(docs[0])
+    docs[0]["key_points"] = [
+        {"target_kind": "cp_item", "expected_action": "modify",
+         "field": field, "target_key": tk},
+        {"target_kind": "cp_item", "expected_action": "modify",
+         "field": field, "target_key": "old-item-b"},
+    ]
+    analysis.affected_docs = docs
+    # Ensure baseline has old-item-b so audit treats it as uncovered modify
+    # (latest already only has new-item). Add old-item-b only to baseline snapshot
+    # by inserting a new baseline-looking version? Simpler: the coverage loop uses
+    # key_points from analysis regardless of baseline membership — uncovered if
+    # not matched in diff. For modify, match requires item in modified_items;
+    # absent from both sides → not covered. Good.
+    await db.flush()
+
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    with pytest.raises(ValueError, match="局部豁免被拒绝|未列入 items"):
+        await capa_doc_gate_service.record_gate_waiver(
+            db, capa, "only one",
+            [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+              "target_key": tk, "field": field}],
+            user.user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_waiver_rejects_when_fmea_residual_present(db, capa_with_cp_blocked_modify):
+    """CP blocked_modify waiver cannot pass a batch that also has FMEA residual."""
+    from datetime import timedelta
+    from app.models.capa_doc_gate import CapaDocgAnalysis
+    from app.models.fmea import FMEADocument
+    from app.models.fmea_version import FMEAVersion
+    from app.services import capa_doc_gate_service
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    # Attach a same-factory FMEA with baseline only (no post-capa bump).
+    snapshot = {"nodes": [{"id": "node-1", "type": "ProcessStep", "name": "step1"}], "edges": []}
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-WAIV-{uuid.uuid4().hex[:6]}",
+        title="waiver residual FMEA", fmea_type="PFMEA",
+        product_line_code=capa.product_line_code, factory_id=capa.factory_id,
+        status="approved", graph_data=snapshot, created_by=user.user_id,
+    )
+    db.add(fmea)
+    await db.flush()
+    import hashlib
+    import json as _json
+    bsha = hashlib.sha256(
+        _json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    bver = FMEAVersion(
+        version_id=uuid.uuid4(), fmea_id=fmea.fmea_id, factory_id=capa.factory_id,
+        major_no=1, minor_no=0, snapshot=snapshot, sha256_hash=bsha,
+        change_type="approve", change_summary="initial", created_by=user.user_id,
+        created_at=capa.created_at - timedelta(days=2),
+    )
+    db.add(bver)
+    await db.flush()
+
+    analysis = (await db.execute(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,  # noqa: E712
+        )
+    )).scalar_one()
+    fmea_doc = {
+        "doc_type": "fmea", "doc_id": str(fmea.fmea_id), "doc_name": fmea.document_no,
+        "baseline_version_id": str(bver.version_id),
+        "baseline_version": {"major": 1, "minor": 0, "sha256": bsha},
+        "key_points": [{"target_kind": "fmea_node", "expected_action": "modify",
+                        "field": "prevention_control", "target_key": "node-1"}],
+        "update_suggestion": "更新预防控制",
+    }
+    analysis.affected_docs = list(analysis.affected_docs or []) + [fmea_doc]
+    # Adding the FMEA changed the allowlist -> recompute input hash so run_audit
+    # does not reject with "分析输入已变更".
+    from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+    analysis.analysis_input_hash = _compute_input_hash(capa, await _build_allowlist(db, capa))
+    await db.flush()
+
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    with pytest.raises(ValueError, match="不可豁免的阻塞项"):
+        await capa_doc_gate_service.record_gate_waiver(
+            db, capa, "try partial",
+            [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+              "target_key": tk, "field": field}],
+            user.user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_waiver_version_bump_invalidates_gate(db, capa_with_cp_blocked_modify):
+    """After structured waiver, a new CP version must fail C8 / version binding."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services import capa_doc_gate_service, capa_service
+    from app.services.version_service import compute_pg_jsonb_hash
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    # Gate passes at the bound version
+    await capa_service._d8_doc_gate_gate(db, capa)
+
+    # Author a newer CP version that still lacks the waived target_key
+    items = [{"item_id": "new-item-2", "source_fmea_node_id": "s1",
+              "product_characteristic": "x", "control_method": "m-newer"}]
+    header = {}
+    sha = await compute_pg_jsonb_hash(db, {"header": header, "items": items})
+    db.add(ControlPlanVersion(
+        version_id=uuid.uuid4(), cp_id=cp.cp_id, factory_id=capa.factory_id,
+        major_no=1, minor_no=2, header_snapshot=header, items_snapshot=items,
+        sha256_hash=sha, change_type="minor", change_summary="post-waiver bump",
+        created_by=user.user_id, created_at=datetime.now(timezone.utc),
+    ))
+    await db.flush()
+
+    with pytest.raises(ValueError, match="文档已变更|版本已变更"):
+        await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
+async def test_preflight_stale_waiver_version_no_longer_suppresses(
+    db, capa_with_cp_blocked_modify,
+):
+    """Preflight must re-report break when CP version drifts after waiver."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services import capa_doc_gate_service
+    from app.services.capa_doc_gate_preflight import scan_tenant_breaks
+    from app.services.version_service import compute_pg_jsonb_hash
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    assert not any(
+        b["kind"] == "blocked_modify" and b["cp_id"] == str(cp.cp_id)
+        for b in await scan_tenant_breaks(db, "public")
+    )
+    items = [{"item_id": "new-item-2", "source_fmea_node_id": "s1",
+              "product_characteristic": "x", "control_method": "m-newer"}]
+    header = {}
+    sha = await compute_pg_jsonb_hash(db, {"header": header, "items": items})
+    db.add(ControlPlanVersion(
+        version_id=uuid.uuid4(), cp_id=cp.cp_id, factory_id=capa.factory_id,
+        major_no=1, minor_no=2, header_snapshot=header, items_snapshot=items,
+        sha256_hash=sha, change_type="minor", change_summary="post-waiver",
+        created_by=user.user_id, created_at=datetime.now(timezone.utc),
+    ))
+    await db.flush()
+    breaks = await scan_tenant_breaks(db, "public")
+    assert any(
+        b["kind"] == "blocked_modify"
+        and b["blocked_modify_target_key"] == tk
+        and b["cp_id"] == str(cp.cp_id)
+        for b in breaks
     )
 
 

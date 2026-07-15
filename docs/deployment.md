@@ -33,25 +33,27 @@ cp .env.example .env
 
 > ⚠️ `SECRET_KEY` 在生产环境必须替换为随机长字符串，否则存在安全风险。
 
-### 1.3 强制发布入口（migrate → preflight → rollout）
+### 1.3 强制发布入口（migrate → preflight → 再放行 app）
 
-发布到任何非本地环境时，**只允许**走以下顺序。禁止 `compose up` 后跳过
-preflight 直接放流量。
+发布到任何非本地环境时，**只允许** `make deploy-release`。禁止先
+`docker compose up` 启动 backend/frontend 再补迁移/preflight——那会让新代码
+在旧 schema / 未清门禁的库上接流量。
 
 ```bash
-# 1) 启动/滚动基础服务（镜像构建、健康检查）
-docker compose up -d
-docker compose ps   # 等 db / neo4j healthy
+# 0) 仅启动基础设施（db/redis/neo4j），不要 up backend/frontend
+docker compose up -d db redis neo4j
+docker compose ps   # 等 healthy
 
-# 2) 迁移到 head（含 20260715_waiver_items 等门禁 schema）
-docker compose exec backend alembic upgrade head
+# 1) 强制顺序：migrate → check + doc-gate preflight
+#    DATABASE_URL 必须指向【本环境真实库】
+export DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms
+make deploy-release
+# = make deploy-migrate  (alembic upgrade head)
+# + make deploy-check    (pytest/tsc/build + doc-gate-preflight)
 
-# 3) 代码一致性 + 目标库 D8 门禁 preflight（exit 1 = 禁止放行）
-#    DATABASE_URL 必须指向【本环境真实库】，不可用测试库冒充
-make deploy-check
-
-# 4) （仅首次/演示）导入 seed；生产跳过
-# docker compose exec backend python -m app.seed
+# 2) 仅在 deploy-release exit 0 后，再滚动应用
+docker compose up -d backend frontend
+# （仅首次/演示）docker compose exec backend python -m app.seed
 ```
 
 `make deploy-check` = `make check`（pytest + tsc + build）+ `make doc-gate-preflight`。
@@ -64,8 +66,9 @@ key_point（baseline item_id 在 latest 中消失），exit 1 阻止部署。
    ```json
    {"reason":"...", "items":[{"doc_type":"control_plan","doc_id":"...","target_key":"...","field":"..."}]}
    ```
-   需 APPROVE；服务端校验 audit 未覆盖 + live latest 仍缺该 target_key；
-   仅这些 keypoint 豁免，其他文档继续走 C8。
+   需 APPROVE；服务端要求**同批次全部阻塞项**均被 items 覆盖（不可豁免的
+   FMEA/pending_update/incomplete 会拒绝整单）；校验 live latest 仍缺 target_key
+   并绑定 `latest_version_id/sha256`——后续 CP 版本漂移会让 C8/preflight 失效。
 
 单元 CI 只跑 `make check`，**不含**数据 preflight。详见
 `backend/app/services/capa_doc_gate_preflight.py`。

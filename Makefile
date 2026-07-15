@@ -22,7 +22,8 @@ PYTEST_IGNORES    := --ignore=tests/test_graph_sync_worker.py --ignore=tests/tes
 # Resolve to an ABSOLUTE path so it stays valid after the target's `cd $(BACKEND_DIR)`.
 PYTEST ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest"; else echo pytest; fi)
 
-.PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend doc-gate-preflight deploy-check
+.PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend \
+	doc-gate-preflight deploy-check deploy-migrate deploy-release
 
 help:
 	@echo "Targets:"
@@ -31,6 +32,8 @@ help:
 	@echo "  check-frontend     — frontend tsc --noEmit + vite build"
 	@echo "  doc-gate-preflight — D8 doc-gate CP lineage scan on DATABASE_URL (exit 1 = blocked_modify)"
 	@echo "  deploy-check       — check + doc-gate-preflight (release gate; TARGET DB via DATABASE_URL)"
+	@echo "  deploy-migrate     — alembic upgrade head on DATABASE_URL (infra only; no app traffic)"
+	@echo "  deploy-release     — FORCED order: deploy-migrate → deploy-check (then roll app)"
 	@echo ""
 	@echo "Subtargets:"
 	@echo "  check-frontend-tsc    — tsc --noEmit only"
@@ -58,6 +61,20 @@ doc-gate-preflight:
 
 # Full release gate: code checks + data preflight on DATABASE_URL.
 deploy-check: check doc-gate-preflight
+
+# Schema migrate ONLY (no app containers that serve traffic).
+# Use against a reachable DATABASE_URL; for docker, start db first, then:
+#   docker compose up -d db redis neo4j
+#   DATABASE_URL=... make deploy-migrate
+deploy-migrate:
+	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) DATABASE_URL=$${DATABASE_URL:?DATABASE_URL required} \
+		$(PYTHON_BIN) -m alembic upgrade head
+
+# Forced release entry: migrate → code+preflight. App/image rollout is OUTSIDE
+# this target and must only happen after it exits 0. Never `compose up` app
+# services before this succeeds.
+deploy-release: deploy-migrate deploy-check
+	@echo "deploy-release OK — safe to roll app containers/images now"
 
 check-frontend-tsc:
 	cd $(FRONTEND_DIR) && npx tsc --noEmit

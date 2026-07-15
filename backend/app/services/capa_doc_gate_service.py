@@ -986,6 +986,15 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
     return {"decision": "passed", "no_affected_confirmed": True}
 
 
+def _is_waivable_blocked_modify(doc_type: str, kp: dict) -> bool:
+    """Only CP item modify keypoints may be waived (lineage break case)."""
+    if doc_type != "control_plan":
+        return False
+    if kp.get("expected_action") != "modify" or kp.get("target_kind") != "cp_item":
+        return False
+    return bool(str(kp.get("target_key") or "").strip() and str(kp.get("field") or "").strip())
+
+
 async def record_gate_waiver(
     db: AsyncSession,
     capa: CAPAEightD,
@@ -995,12 +1004,17 @@ async def record_gate_waiver(
 ) -> dict:
     """Waive exact blocked_modify CP keypoints after a blocked audit.
 
-    Scope is narrow and server-validated:
+    Fail-closed rules:
     - Requires current analysis + latest decision=blocked (from run_audit).
-    - Each item must be control_plan / cp_item / modify, present in the analysis,
-      uncovered in the blocked audit, and still absent from the live latest CP.
-    - Only those items are recorded in waiver_items. Other docs remain subject to
-      C8 via version_snapshot (which is now stored for blocked audits too).
+    - Each item must be control_plan / cp_item / modify, uncovered in the blocked
+      audit, and still absent from the live latest CP.
+    - Residual completeness: EVERY uncovered keypoint in the audit batch must be
+      either covered already or listed in items. Non-waivable residuals
+      (FMEA / pending_update no-bump / incomplete add-delete / other fields)
+      reject the whole waiver — a partial local waiver cannot pass the batch.
+    - C8 version_snapshot keeps ALL docs (including waived ones), bound to the
+      live version at waiver time. Gate re-checks version_id+sha256 AND that
+      each waived target_key is still absent.
     - TOCTOU: analysis row is locked before re-reading the latest decision.
 
     Caller must require APPROVE permission on the capa module (enforced in API).
@@ -1035,7 +1049,7 @@ async def record_gate_waiver(
     if latest_decision.audit_run_id is None:
         raise ValueError("blocked 决策缺少 audit_run_id，请重新运行文档审核")
 
-    # Load audit rows for this blocked run — needed to confirm each item was uncovered
+    # Load audit rows for this blocked run
     audits = (await db.execute(
         select(CapaDocgAudit).where(
             CapaDocgAudit.analysis_id == analysis.analysis_id,
@@ -1045,33 +1059,40 @@ async def record_gate_waiver(
     if not audits:
         raise ValueError("找不到对应审核批次，请重新运行文档审核")
 
-    # Index uncovered modify/cp_item keypoints from the audit coverage
-    uncovered: dict[tuple[str, str, str, str], dict] = {}
+    # Index ALL uncovered keypoints in the batch; waivable subset is blocked_modify only.
+    all_uncovered: list[dict] = []
+    waivable: dict[tuple[str, str, str, str], dict] = {}
     for a in audits:
-        if a.doc_type != "control_plan":
+        if a.status == "passed":
             continue
         for cov in (a.coverage or []):
             if not isinstance(cov, dict) or cov.get("covered"):
                 continue
             kp = cov.get("key_point") or {}
-            if (
-                kp.get("expected_action") != "modify"
-                or kp.get("target_kind") != "cp_item"
-            ):
+            if not isinstance(kp, dict):
                 continue
-            tk = str(kp.get("target_key") or "").strip()
-            field = str(kp.get("field") or "").strip()
-            if not tk or not field:
-                continue
-            key = ("control_plan", str(a.doc_id), tk, field)
-            uncovered[key] = {
-                "doc_type": "control_plan",
+            entry = {
+                "doc_type": a.doc_type,
                 "doc_id": str(a.doc_id),
-                "target_key": tk,
-                "field": field,
+                "target_key": str(kp.get("target_key") or "").strip(),
+                "field": str(kp.get("field") or "").strip(),
+                "expected_action": kp.get("expected_action"),
+                "target_kind": kp.get("target_kind"),
+                "audit_status": a.status,
             }
+            all_uncovered.append(entry)
+            if _is_waivable_blocked_modify(a.doc_type, kp):
+                key = ("control_plan", str(a.doc_id), entry["target_key"], entry["field"])
+                waivable[key] = entry
 
-    # Validate each requested item against audit + live latest CP
+    if not waivable:
+        raise ValueError(
+            "本批次无 blocked_modify（CP item_id 断链）可豁免项；"
+            "pending_update/incomplete/add/delete/FMEA 须先修正文档后重审"
+        )
+
+    # Validate each requested item against waivable set + live latest CP
+    from app.services.capa_doc_gate_preflight import _item_ids_from_snapshot
     validated: list[dict] = []
     seen_req: set[tuple[str, str, str, str]] = set()
     for raw in items:
@@ -1091,16 +1112,14 @@ async def record_gate_waiver(
         if key in seen_req:
             raise ValueError(f"重复 waiver item: {tk}/{field}")
         seen_req.add(key)
-        if key not in uncovered:
+        if key not in waivable:
             raise ValueError(
                 f"keypoint 不在 blocked audit 的未覆盖 modify 集合中: "
                 f"doc={doc_uuid} target_key={tk} field={field}"
             )
-        # Live reconfirm: target_key must still be absent from latest CP
         latest_ver = await get_latest_cp_version(db, doc_uuid)
         if latest_ver is None:
             raise ValueError(f"CP {doc_uuid} 无 latest 版本，无法确认断链")
-        from app.services.capa_doc_gate_preflight import _item_ids_from_snapshot
         latest_ids = _item_ids_from_snapshot(latest_ver.items_snapshot)
         if tk in latest_ids:
             raise ValueError(
@@ -1117,17 +1136,80 @@ async def record_gate_waiver(
             "audit_run_id": str(latest_decision.audit_run_id),
         })
 
-    # Build C8 version_snapshot: keep non-waived docs from the blocked decision.
-    # Waived docs are omitted from C8 freshness (they cannot pass coverage).
-    waived_doc_ids = {v["doc_id"] for v in validated}
-    c8_snapshot = [
-        s for s in (latest_decision.version_snapshot or [])
-        if str(s.get("doc_id")) not in waived_doc_ids
-        and s.get("version_after_id")  # only verify docs that had a version
-    ]
+    validated_keys = {
+        ("control_plan", v["doc_id"], v["target_key"], v["field"]) for v in validated
+    }
+
+    # Residual completeness: every uncovered keypoint must be waived (and waivable).
+    residual_non_waivable = []
+    residual_unwaived = []
+    for u in all_uncovered:
+        if _is_waivable_blocked_modify(u["doc_type"], u):
+            key = ("control_plan", u["doc_id"], u["target_key"], u["field"])
+            if key not in validated_keys:
+                residual_unwaived.append(u)
+        else:
+            residual_non_waivable.append(u)
+    if residual_non_waivable:
+        sample = residual_non_waivable[0]
+        raise ValueError(
+            "仍有不可豁免的阻塞项（须先修正文档后重审）: "
+            f"doc_type={sample['doc_type']} doc_id={sample['doc_id']} "
+            f"action={sample.get('expected_action')} status={sample.get('audit_status')} "
+            f"(共 {len(residual_non_waivable)} 项)"
+        )
+    if residual_unwaived:
+        sample = residual_unwaived[0]
+        raise ValueError(
+            "局部豁免被拒绝：同批次仍有未覆盖的 blocked_modify 未列入 items: "
+            f"doc_id={sample['doc_id']} target_key={sample['target_key']} "
+            f"field={sample['field']} (共 {len(residual_unwaived)} 项)"
+        )
+    # Request must not be a strict subset of waivable — already enforced by residual_unwaived.
+    # Also reject extra-only: every validated key is in waivable (checked above).
+
+    # C8 version_snapshot: keep ALL docs. Bind each to audit version_after when
+    # present; for waived docs with no version_after (shouldn't happen if residual
+    # empty + waivable required bump? pending_update can still have post-capa
+    # versions without content coverage — bind to live version at waiver time).
+    waived_by_doc: dict[str, list[dict]] = {}
+    for v in validated:
+        waived_by_doc.setdefault(v["doc_id"], []).append(v)
+
+    c8_snapshot: list[dict] = []
+    for a in audits:
+        doc_id = str(a.doc_id)
+        va = a.version_after if isinstance(a.version_after, dict) else None
+        if va and va.get("version_id"):
+            # Prefer the live bound version for waived docs so C8 tracks the
+            # exact version the manager accepted (may equal audit version_after).
+            if doc_id in waived_by_doc:
+                bound = waived_by_doc[doc_id][0]
+                c8_snapshot.append({
+                    "doc_type": a.doc_type,
+                    "doc_id": doc_id,
+                    "version_after_id": bound["latest_version_id"],
+                    "sha256": bound["latest_sha256"],
+                })
+            else:
+                c8_snapshot.append({
+                    "doc_type": a.doc_type,
+                    "doc_id": doc_id,
+                    "version_after_id": va["version_id"],
+                    "sha256": va.get("sha256"),
+                })
+        elif doc_id in waived_by_doc:
+            bound = waived_by_doc[doc_id][0]
+            c8_snapshot.append({
+                "doc_type": a.doc_type,
+                "doc_id": doc_id,
+                "version_after_id": bound["latest_version_id"],
+                "sha256": bound["latest_sha256"],
+            })
+        # else: status=passed with no version is impossible for non-empty kps;
+        # residual check already rejected non-passed docs without resolution.
 
     now = datetime.now(timezone.utc)
-    # _insert_decision re-locks; already held, re-lock is fine (same txn)
     await _insert_decision(
         db, analysis.analysis_id, capa.factory_id, "passed", user_id, now,
         latest_decision.audit_run_id, c8_snapshot,

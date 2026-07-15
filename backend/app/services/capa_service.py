@@ -373,9 +373,10 @@ async def _d7_completion_gate(db: AsyncSession, capa) -> None:
 async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
     """D8_GATE_PENDING→D8_APPROVAL_PENDING: require latest decision=passed + C8/C9 freshness.
 
-    Structured waiver: if decision.waiver_items is set, C8 still verifies every
-    non-waived doc in version_snapshot. Waived docs are intentionally omitted
-    from the snapshot by record_gate_waiver.
+    Structured waiver: version_snapshot still lists every audited doc (including
+    waived ones), bound to the version accepted at waiver time. C8 re-checks
+    version_id + sha256 for every snap. For waived keypoints, also reconfirm
+    target_key is still absent from that bound latest CP.
     """
     from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
     from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
@@ -400,8 +401,6 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
     if decision.decision != "passed":
         raise ValueError(f"文档门禁未通过：{decision.decision}")
     # C8 version freshness — re-check each snapshot against current latest.
-    # Structured waiver omits waived docs from version_snapshot, so only
-    # non-waived docs are re-verified here.
     for snap in (decision.version_snapshot or []):
         doc_type = snap.get("doc_type")
         doc_id = uuid.UUID(str(snap["doc_id"]))
@@ -415,8 +414,8 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
             or latest.sha256_hash != snap.get("sha256")
         ):
             raise ValueError("文档已变更，请重新审核")
-    # If this is a structured waiver, reconfirm each waived target_key is still
-    # absent from latest (fail-closed if CP was re-authored to restore ids).
+    # Structured waiver: reconfirm each waived target_key is still absent AND
+    # the bound version_id/sha256 still matches latest (belt + suspenders with C8).
     for item in (decision.waiver_items or []):
         if not isinstance(item, dict) or item.get("doc_type") != "control_plan":
             continue
@@ -427,9 +426,17 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
         tk = str(item.get("target_key") or "").strip()
         if not tk:
             raise ValueError("waiver_items 缺 target_key，请重新豁免")
+        bound_vid = str(item.get("latest_version_id") or "").strip()
+        bound_sha = str(item.get("latest_sha256") or "").strip()
+        if not bound_vid or not bound_sha:
+            raise ValueError("waiver_items 缺版本绑定，请重新豁免")
         latest = await get_latest_cp_version(db, cp_id)
         if latest is None:
             raise ValueError("文档已变更，请重新审核")
+        if str(latest.version_id) != bound_vid or latest.sha256_hash != bound_sha:
+            raise ValueError(
+                f"已豁免文档版本已变更（target_key={tk}），请重新审核"
+            )
         from app.services.capa_doc_gate_preflight import _item_ids_from_snapshot
         if tk in _item_ids_from_snapshot(latest.items_snapshot):
             raise ValueError(

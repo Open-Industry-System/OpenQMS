@@ -149,3 +149,61 @@ def test_analysis_done_completeness_check(mig_db_url):
             c.execute(text(stmt), {"cid": capa_id, "fid": factory_id, "uid": user_id})
 
     engine.dispose()
+
+
+def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
+    """Legacy waiver_reason without items is demoted to blocked before CHECK.
+
+    Simulates a Round-21/22 row: upgrade to just-before waiver_items, insert a
+    passed decision with waiver_reason and NULL items, then upgrade head.
+    """
+    # Stop just before waiver_items so the column does not exist yet.
+    command.upgrade(_cfg(mig_db_url), "20260715_fmea_linkage_indexes")
+
+    engine = create_engine(_sync_url(mig_db_url))
+    capa_id = uuid.uuid4()
+    factory_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    _bootstrap_capa(engine, capa_id, factory_id, user_id)
+    analysis_id = uuid.uuid4()
+    with engine.begin() as c:
+        c.execute(text(
+            "INSERT INTO capa_docg_analysis (analysis_id, capa_id, factory_id, is_current, status, "
+            "affected_docs, analysis_input_hash, llm_available, attempt_token, started_at, "
+            "completed_at, generated_by, generated_at, created_at) VALUES "
+            "(:aid, :cid, :fid, true, 'done', '[]'::jsonb, 'hash', true, "
+            "gen_random_uuid(), now(), now(), :uid, now(), now())"
+        ), {"aid": analysis_id, "cid": capa_id, "fid": factory_id, "uid": user_id})
+        # Pre-items schema: waiver_reason set, no waiver_items column yet.
+        c.execute(text(
+            "INSERT INTO capa_docg_decision (decision_id, analysis_id, revision, factory_id, "
+            "decision, no_affected_confirmed, version_snapshot, waiver_reason, "
+            "decided_by, decided_at, created_at) VALUES "
+            "(gen_random_uuid(), :aid, 0, :fid, 'passed', false, '[]'::jsonb, "
+            "'legacy unstructured waiver', :uid, now(), now())"
+        ), {"aid": analysis_id, "fid": factory_id, "uid": user_id})
+    engine.dispose()
+
+    # Upgrade through waiver_items — must not fail CHECK; legacy row demoted.
+    command.upgrade(_cfg(mig_db_url), "head")
+
+    engine = create_engine(_sync_url(mig_db_url))
+    with engine.connect() as c:
+        row = c.execute(text(
+            "SELECT decision, waiver_reason, waiver_items "
+            "FROM capa_docg_decision WHERE analysis_id = :aid"
+        ), {"aid": analysis_id}).one()
+        assert row[0] == "blocked"
+        assert row[1] is None
+        assert row[2] is None
+        # CHECK rejects new unstructured waivers
+        with pytest.raises(IntegrityError):
+            with engine.begin() as c2:
+                c2.execute(text(
+                    "INSERT INTO capa_docg_decision (decision_id, analysis_id, revision, factory_id, "
+                    "decision, no_affected_confirmed, version_snapshot, waiver_reason, "
+                    "waiver_items, decided_by, decided_at, created_at) VALUES "
+                    "(gen_random_uuid(), :aid, 1, :fid, 'passed', false, '[]'::jsonb, "
+                    "'no items', NULL, :uid, now(), now())"
+                ), {"aid": analysis_id, "fid": factory_id, "uid": user_id})
+    engine.dispose()
