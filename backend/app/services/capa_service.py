@@ -890,20 +890,98 @@ def _d7_rule_engine_fallback(capa_data: dict) -> list[dict]:
     return recs
 
 
+LINK_SOURCES_ORDER = ["d4_cause", "d7_failure_cause", "d7_failure_mode", "d7_prevention", "header"]
+
+
 async def get_capas_by_fmea_node(
-    db: AsyncSession, fmea_id: str, fmea_node_id: str | None = None
+    db: AsyncSession,
+    fmea_id: str,
+    fmea_node_id: str | None = None,
+    *,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
+    effective_factory_id: uuid.UUID | None = None,
 ) -> list[dict]:
-    q = select(CAPAEightD).where(CAPAEightD.fmea_ref_id == fmea_id)
+    """Three-source reverse lookup: header + D7(adopted) + D4(source_ref).
+
+    Factory filtering: effective_factory_id (==) if set, else IN accessible_factory_ids,
+    else (None = group admin, no effective) no factory predicate.
+    """
+    from app.models.capa import CapaD7NodeAction, CapaRootCauseVerification
+
+    def _factory_predicate(model):
+        if effective_factory_id is not None:
+            return model.factory_id == effective_factory_id
+        if accessible_factory_ids is not None:
+            if not accessible_factory_ids:
+                return model.factory_id == uuid.UUID(int=0)  # impossible → empty
+            return model.factory_id.in_(accessible_factory_ids)
+        return None  # no predicate
+
+    sources_by_capa: dict[uuid.UUID, set[str]] = {}
+
+    def _add(capa_id, *sources):
+        sources_by_capa.setdefault(capa_id, set()).update(sources)
+
+    # 1. header
+    hq = select(CAPAEightD).where(CAPAEightD.fmea_ref_id == fmea_id)
     if fmea_node_id:
-        q = q.where(CAPAEightD.fmea_node_id == fmea_node_id)
-    result = await db.execute(q)
-    return [
-        {
+        hq = hq.where(CAPAEightD.fmea_node_id == fmea_node_id)
+    fp = _factory_predicate(CAPAEightD)
+    if fp is not None:
+        hq = hq.where(fp)
+    for c in (await db.execute(hq)).scalars().all():
+        _add(c.report_id, "header")
+
+    # 2. D7 (confirmed / auto_filled only)
+    # One primary source per action — prevention → cause → mode
+    # (matches write-path _linkage_node_for_rec). Node filter matches only
+    # when fmea_node_id equals that primary node.
+    dq = select(CapaD7NodeAction).where(
+        CapaD7NodeAction.fmea_id == fmea_id,
+        CapaD7NodeAction.action.in_(["confirmed", "auto_filled"]),
+    )
+    fpd = _factory_predicate(CapaD7NodeAction)
+    if fpd is not None:
+        dq = dq.where(fpd)
+    for a in (await db.execute(dq)).scalars().all():
+        if a.prevention_control_node_id:
+            primary_node, primary_src = a.prevention_control_node_id, "d7_prevention"
+        elif a.failure_cause_node_id:
+            primary_node, primary_src = a.failure_cause_node_id, "d7_failure_cause"
+        elif a.failure_mode_node_id:
+            primary_node, primary_src = a.failure_mode_node_id, "d7_failure_mode"
+        else:
+            continue
+        if fmea_node_id is None or primary_node == fmea_node_id:
+            _add(a.capa_id, primary_src)
+
+    # 3. D4 source_ref
+    vq = select(CapaRootCauseVerification, CAPAEightD).join(
+        CAPAEightD, CAPAEightD.report_id == CapaRootCauseVerification.capa_id
+    ).where(CapaRootCauseVerification.source_ref["fmea_id"].astext == fmea_id)
+    fpv = _factory_predicate(CAPAEightD)
+    if fpv is not None:
+        vq = vq.where(fpv)
+    if fmea_node_id:
+        vq = vq.where(CapaRootCauseVerification.source_ref["cause_node_id"].astext == fmea_node_id)
+    for v, c in (await db.execute(vq)).all():
+        _add(c.report_id, "d4_cause")
+
+    if not sources_by_capa:
+        return []
+
+    capa_ids = list(sources_by_capa.keys())
+    capas = (await db.execute(select(CAPAEightD).where(CAPAEightD.report_id.in_(capa_ids)))).scalars().all()
+    rows = []
+    for c in capas:
+        ordered = [s for s in LINK_SOURCES_ORDER if s in sources_by_capa[c.report_id]]
+        rows.append({
             "report_id": str(c.report_id),
             "document_no": c.document_no,
             "title": c.title,
             "status": c.status,
             "product_line_code": c.product_line_code,
-        }
-        for c in result.scalars().all()
-    ]
+            "link_sources": ordered,
+        })
+    rows.sort(key=lambda r: r["document_no"])
+    return rows
