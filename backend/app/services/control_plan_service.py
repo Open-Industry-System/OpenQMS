@@ -215,25 +215,30 @@ async def update_control_plan(
         # duplicate / foreign / garbage IDs cannot bypass checks via
         # items_changed == false. Only empty or temp-* may mean "new".
         resolved: list[tuple[object, str | None]] = []  # (item_data, reuse_key|None)
-        seen_req_ids: set[str] = set()
+        seen_uuid_ids: set[str] = set()  # canonical UUID form (catches case/brace/hex variants)
+        seen_temp_ids: set[str] = set()  # raw temp-* string form
         for item_data in data.items:
             raw_id = getattr(item_data, "item_id", None)
             raw_s = str(raw_id).strip() if raw_id is not None else ""
             if not raw_s:
                 resolved.append((item_data, None))
                 continue
-            # All non-empty ids participate in duplicate detection (incl. temp-*).
-            if raw_s in seen_req_ids:
-                raise ValueError(f"重复 item_id: {raw_s}")
-            seen_req_ids.add(raw_s)
             if raw_s.lower().startswith("temp-"):
+                if raw_s in seen_temp_ids:
+                    raise ValueError(f"重复 item_id: {raw_s}")
+                seen_temp_ids.add(raw_s)
                 resolved.append((item_data, None))
                 continue
+            # Canonicalize UUID BEFORE dedup so different text forms of the same
+            # UUID (case/braces/no-dashes) cannot bypass duplicate detection.
             try:
                 cand = uuid.UUID(raw_s)
             except (ValueError, AttributeError, TypeError) as e:
                 raise ValueError(f"非法 item_id（须为空、temp-* 或本 CP 的 UUID）: {raw_s}") from e
             sid = str(cand)
+            if sid in seen_uuid_ids:
+                raise ValueError(f"重复 item_id: {sid}")
+            seen_uuid_ids.add(sid)
             if sid not in existing_by_id:
                 raise ValueError(f"item_id 不属于当前控制计划: {sid}")
             resolved.append((item_data, sid))
