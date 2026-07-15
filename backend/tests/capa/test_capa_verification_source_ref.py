@@ -102,6 +102,10 @@ async def test_create_pending_with_cause_writes_updated_and_linkage(db, default_
     actions = {a.action for a in audits}
     assert "D4_VERIFICATION_UPDATED" in actions
     assert "FMEA_LINKAGE_CREATED" in actions
+    updated = next(a for a in audits if a.action == "D4_VERIFICATION_UPDATED")
+    assert updated.changed_fields.get("verification_id") == str(rec.verification_id)
+    assert updated.changed_fields.get("source_ref") == rec.source_ref
+    assert updated.changed_fields.get("old_source_ref") is None
 
 
 @pytest.mark.asyncio
@@ -182,6 +186,60 @@ async def test_update_change_cause_writes_linkage(db, default_factory, admin_use
     audits = (await db.execute(select(AuditLog).where(AuditLog.record_id == capa.report_id))).scalars().all()
     linkages = [a for a in audits if a.action == "FMEA_LINKAGE_CREATED" and a.changed_fields.get("source") == "d4_cause"]
     assert len(linkages) == 2  # create + change
+
+
+@pytest.mark.asyncio
+async def test_update_conclusion_and_cause_carries_old_source_ref_no_updated(
+    db, default_factory, admin_user,
+):
+    """Simultaneous conclusion transition + Cause change: PASSED carries
+    source_ref/old_source_ref; no separate D4_VERIFICATION_UPDATED (spec §5.2)."""
+    fmea = await _make_fmea_with_cause(db, default_factory.id, admin_user.user_id, cause_id="cause-a")
+    fmea.graph_data["nodes"].append({"id": "cause-b", "type": "FailureCause", "name": "b"})
+    fmea.graph_data["edges"].append({"source": "cause-b", "target": "fm-1", "type": "CAUSE_OF"})
+    await db.flush()
+    capa = await _make_capa_linked(db, default_factory.id, admin_user.user_id, fmea.fmea_id)
+    rec = await create_verification(db, capa, VerificationCreate(
+        root_cause_text="根因", conclusion="pending", method="measurement", result="ok",
+        source_ref={"fmea_id": str(fmea.fmea_id), "cause_node_id": "cause-a"},
+    ), admin_user)
+    old_ref = rec.source_ref
+    vid = rec.verification_id
+
+    before_audits = (await db.execute(select(AuditLog).where(AuditLog.record_id == capa.report_id))).scalars().all()
+    before_updated = sum(1 for a in before_audits if a.action == "D4_VERIFICATION_UPDATED")
+    before_passed = sum(1 for a in before_audits if a.action == "D4_VERIFICATION_PASSED")
+    before_linkages = sum(
+        1 for a in before_audits
+        if a.action == "FMEA_LINKAGE_CREATED" and a.changed_fields.get("source") == "d4_cause"
+    )
+
+    await update_verification(
+        db, capa, vid,
+        VerificationUpdate(
+            conclusion="passed",
+            source_ref={"fmea_id": str(fmea.fmea_id), "cause_node_id": "cause-b"},
+        ),
+        admin_user,
+    )
+
+    after_audits = (await db.execute(select(AuditLog).where(AuditLog.record_id == capa.report_id))).scalars().all()
+    after_updated = sum(1 for a in after_audits if a.action == "D4_VERIFICATION_UPDATED")
+    after_passed = sum(1 for a in after_audits if a.action == "D4_VERIFICATION_PASSED")
+    after_linkages = sum(
+        1 for a in after_audits
+        if a.action == "FMEA_LINKAGE_CREATED" and a.changed_fields.get("source") == "d4_cause"
+    )
+
+    assert after_passed == before_passed + 1
+    assert after_updated == before_updated  # no extra UPDATED on simultaneous transition
+    assert after_linkages == before_linkages + 1  # establish/change still writes LINKAGE
+    passed = next(a for a in after_audits if a.action == "D4_VERIFICATION_PASSED")
+    assert passed.changed_fields.get("source_ref") == {
+        "fmea_id": str(fmea.fmea_id), "cause_node_id": "cause-b",
+    }
+    assert passed.changed_fields.get("old_source_ref") == old_ref
+    assert passed.changed_fields.get("verification_id") == str(vid)
 
 
 @pytest.mark.asyncio

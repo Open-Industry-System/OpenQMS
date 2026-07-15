@@ -31,6 +31,9 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
   const [form] = Form.useForm();
   const [causeOptions, setCauseOptions] = useState<CauseOption[]>([]);
   const [selectedCause, setSelectedCause] = useState<string | undefined>(undefined);
+  // Per-row Cause edit: verification_id currently being edited, value is node id or undefined (clear).
+  const [editingCauseVid, setEditingCauseVid] = useState<string | null>(null);
+  const [editCauseValue, setEditCauseValue] = useState<string | undefined>(undefined);
 
   const reload = async () => {
     setLoading(true);
@@ -98,6 +101,36 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
     }
   };
 
+  const startEditCause = (rec: Verification) => {
+    const sourceRef =
+      rec.source_ref && typeof rec.source_ref === "object"
+        ? (rec.source_ref as { cause_node_id?: string })
+        : undefined;
+    setEditingCauseVid(rec.verification_id);
+    setEditCauseValue(sourceRef?.cause_node_id);
+  };
+
+  const cancelEditCause = () => {
+    setEditingCauseVid(null);
+    setEditCauseValue(undefined);
+  };
+
+  const saveEditCause = async (rec: Verification) => {
+    // allowClear → undefined means clear Cause (source_ref: null).
+    const source_ref =
+      fmeaRefId && editCauseValue
+        ? { fmea_id: fmeaRefId, cause_node_id: editCauseValue }
+        : null;
+    try {
+      await updateVerification(capaId, rec.verification_id, { source_ref });
+      message.success(t("d4.verificationSaved"));
+      cancelEditCause();
+      reload();
+    } catch (e: any) {
+      message.error(e.response?.data?.detail?.[0]?.msg ?? t("d4.verificationFailed"));
+    }
+  };
+
   return (
     <Card size="small" title={t("d4.verificationTitle")} data-e2e="d4-verification-card" style={{ marginTop: 16 }}>
       {loading ? <Spin size="small" /> : items.length === 0 && !showForm ? (
@@ -110,10 +143,11 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
               : undefined;
           const causeNodeId = sourceRef?.cause_node_id;
           const causeFmeaId = sourceRef?.fmea_id ?? fmeaRefId;
+          const isEditingCause = editingCauseVid === rec.verification_id;
           return (
             <List.Item data-e2e={`verification-item-${i}`}>
               <Space direction="vertical" size={2} style={{ width: "100%" }}>
-                <Space>
+                <Space wrap>
                   <Tag data-e2e={`verification-conclusion-${i}`} color={
                     rec.conclusion === "passed" ? "green" : rec.conclusion === "failed" ? "red" : "default"}>
                     {rec.conclusion === "passed" ? `✅ ${t("verification.conclusion.passed")}`
@@ -121,7 +155,7 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
                       : `⏳ ${t("verification.conclusion.draft")}`}
                   </Tag>
                   <span>{rec.root_cause_text}</span>
-                  {causeNodeId && causeFmeaId && (
+                  {causeNodeId && causeFmeaId && !isEditingCause && (
                     <Tag
                       color="blue"
                       data-e2e="d4-cause-link"
@@ -146,6 +180,50 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
                     <Button size="small" data-e2e={`verify-fail-${i}`}
                       onClick={() => patchConclusion(rec, "failed")}>{t("verification.conclusion.failed")}</Button>
                   </Space>
+                )}
+                {canEdit && isEditingCause && (
+                  <Space data-e2e={`d4-cause-edit-${i}`} wrap>
+                    <Select
+                      size="small"
+                      style={{ minWidth: 180 }}
+                      allowClear
+                      placeholder={
+                        fmeaRefId
+                          ? t("d4.selectCause", "选择失效原因")
+                          : t("d4.linkFmeaFirst", "请先关联 FMEA")
+                      }
+                      disabled={!fmeaRefId}
+                      value={editCauseValue}
+                      onChange={(v) => setEditCauseValue(v)}
+                      data-e2e={`d4-cause-edit-select-${i}`}
+                    >
+                      {causeOptions.map((c) => (
+                        <Option key={c.id} value={c.id}>{c.name}</Option>
+                      ))}
+                    </Select>
+                    <Button size="small" type="primary" data-e2e={`d4-cause-save-${i}`}
+                      onClick={() => saveEditCause(rec)}>{t("d4.saveCause", "保存 Cause")}</Button>
+                    <Button size="small" data-e2e={`d4-cause-clear-${i}`}
+                      onClick={() => setEditCauseValue(undefined)}
+                      disabled={!editCauseValue}>
+                      {t("d4.clearCause", "清空")}
+                    </Button>
+                    <Button size="small" data-e2e={`d4-cause-cancel-${i}`}
+                      onClick={cancelEditCause}>{t("d4.cancel")}</Button>
+                  </Space>
+                )}
+                {canEdit && !isEditingCause && (
+                  <Button
+                    size="small"
+                    type="link"
+                    data-e2e={`d4-cause-edit-btn-${i}`}
+                    onClick={() => startEditCause(rec)}
+                    style={{ padding: 0, height: "auto" }}
+                  >
+                    {causeNodeId
+                      ? t("d4.editCause", "修改 Cause")
+                      : t("d4.setCause", "关联 Cause")}
+                  </Button>
                 )}
               </Space>
             </List.Item>

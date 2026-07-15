@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 
 REV = "20260715_fmea_linkage_indexes"
-PARENT = "20260714_doc_gate_drop_capa_uq"
+PARENT = "20260715_cp_version_trigger"
 
 
 def _cfg(mig_url: str) -> Config:

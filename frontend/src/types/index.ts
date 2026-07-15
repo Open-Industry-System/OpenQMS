@@ -1904,6 +1904,7 @@ export interface VerificationUpdate {
   result?: string;
   conclusion?: VerificationConclusion;
   evidence_attachments?: Record<string, unknown>[];
+  source_ref?: Record<string, unknown> | null;
 }
 export interface D7NodeAction {
   action_id: string;

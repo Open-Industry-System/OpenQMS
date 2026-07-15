@@ -148,7 +148,11 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     if is_verified:
         _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
     normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
+    # Pre-generate PK so pending UPDATED audit can reference verification_id
+    # before commit (model default would only fire on flush otherwise).
+    vid = uuid.uuid4()
     rec = CapaRootCauseVerification(
+        verification_id=vid,
         capa_id=capa.report_id, factory_id=capa.factory_id,
         root_cause_text=req.root_cause_text, method=req.method, result=req.result,
         is_verified=is_verified, conclusion=conclusion,
@@ -166,7 +170,8 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_PASSED",
-            changed_fields={"root_cause_text": req.root_cause_text, "method": req.method,
+            changed_fields={"verification_id": str(vid),
+                            "root_cause_text": req.root_cause_text, "method": req.method,
                             "source_ref": normalized_ref},
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
@@ -179,7 +184,8 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
-            changed_fields={"root_cause_text": req.root_cause_text, "method": req.method,
+            changed_fields={"verification_id": str(vid),
+                            "root_cause_text": req.root_cause_text, "method": req.method,
                             "retry_count": capa.d4_retry_count, "source_ref": normalized_ref},
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
@@ -189,7 +195,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id,
                 action="D4_VERIFICATION_UPDATED",
-                changed_fields={"verification_id": None, "source_ref": normalized_ref,
+                changed_fields={"verification_id": str(vid), "source_ref": normalized_ref,
                                 "old_source_ref": None},
                 operated_by=user.user_id, factory_id=capa.factory_id,
             ))
@@ -249,39 +255,58 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     if rec.is_verified:
         _assert_verified_has_details(rec.method, rec.result, rec.evidence_attachments)
     # conclusion→failed 跃迁递增 retry_count（仅跃迁，防重复计；锁 capa 行防跨记录丢计数）
+    conclusion_transitioned = False
     if old_conclusion != "failed" and rec.conclusion == "failed":
         # 锁后必须 refresh capa 读最新 retry_count；不同 verification 并发失败时
         # 各 session 的 capa 可能缓存旧 retry_count=0，不 refresh 会丢失跨记录计数
         await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
         await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
+        passed_fields = {
+            "verification_id": str(vid),
+            "method": rec.method,
+            "root_cause_text": rec.root_cause_text,
+            "retry_count": capa.d4_retry_count,
+            "source_ref": rec.source_ref,
+        }
+        # Spec §5.2: conclusion transition event carries final source_ref and
+        # old_source_ref when Cause also changed in the same PATCH.
+        if source_ref_changed:
+            passed_fields["old_source_ref"] = old_source_ref
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
-            changed_fields={"verification_id": str(vid), "method": rec.method,
-                            "root_cause_text": rec.root_cause_text,
-                            "retry_count": capa.d4_retry_count,
-                            "source_ref": rec.source_ref},
+            changed_fields=passed_fields,
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
+        conclusion_transitioned = True
     elif old_conclusion != "passed" and rec.conclusion == "passed":
+        passed_fields = {
+            "verification_id": str(vid),
+            "method": rec.method,
+            "root_cause_text": rec.root_cause_text,
+            "source_ref": rec.source_ref,
+        }
+        if source_ref_changed:
+            passed_fields["old_source_ref"] = old_source_ref
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_PASSED",
-            changed_fields={"verification_id": str(vid), "method": rec.method,
-                            "root_cause_text": rec.root_cause_text,
-                            "source_ref": rec.source_ref},
+            changed_fields=passed_fields,
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
+        conclusion_transitioned = True
     if source_ref_changed:
-        # Always write UPDATED for a source_ref field change (establish/change/clear).
-        db.add(AuditLog(
-            table_name="capa_eightd", record_id=capa.report_id,
-            action="D4_VERIFICATION_UPDATED",
-            changed_fields={"verification_id": str(vid), "source_ref": rec.source_ref,
-                            "old_source_ref": old_source_ref},
-            operated_by=user.user_id, factory_id=capa.factory_id,
-        ))
+        # UPDATED only when there is no conclusion transition (design §5.2):
+        # simultaneous conclusion+Cause is carried on PASSED/FAILED alone.
+        if not conclusion_transitioned:
+            db.add(AuditLog(
+                table_name="capa_eightd", record_id=capa.report_id,
+                action="D4_VERIFICATION_UPDATED",
+                changed_fields={"verification_id": str(vid), "source_ref": rec.source_ref,
+                                "old_source_ref": old_source_ref},
+                operated_by=user.user_id, factory_id=capa.factory_id,
+            ))
         # LINKAGE only on establish/change (not clear). cleared → rec.source_ref is None.
         if rec.source_ref is not None:
             db.add(_linkage_audit(capa, capa.fmea_ref_id, rec.source_ref["cause_node_id"],

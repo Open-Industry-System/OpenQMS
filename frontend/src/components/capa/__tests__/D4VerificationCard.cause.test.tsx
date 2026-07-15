@@ -23,7 +23,7 @@ vi.mock("../../../api/fmea", () => ({
   getFMEA: vi.fn(),
 }));
 
-import { listVerifications, createVerification } from "../../../api/capa";
+import { listVerifications, createVerification, updateVerification } from "../../../api/capa";
 import { getFMEA } from "../../../api/fmea";
 
 const renderCard = (props: Record<string, unknown> = {}) =>
@@ -146,6 +146,142 @@ describe("D4VerificationCard cause selector", () => {
     fireEvent.click(link);
     expect(mockNavigate).toHaveBeenCalledWith(
       "/fmea/f-from-source?tab=graph&highlightNode=cause-1"
+    );
+  });
+
+  it("allows editing Cause on an existing pending/passed/failed record", async () => {
+    const user = userEvent.setup();
+    (getFMEA as any).mockResolvedValue({
+      fmea_id: "f1",
+      graph_data: {
+        nodes: [
+          { id: "cause-1", type: "FailureCause", name: "Solder void" },
+          { id: "cause-2", type: "FailureCause", name: "Flux residue" },
+        ],
+        edges: [],
+      },
+    });
+    (listVerifications as any).mockResolvedValue([
+      {
+        verification_id: "v-pass",
+        capa_id: "c1",
+        root_cause_text: "rc",
+        method: "measurement",
+        result: "r",
+        conclusion: "passed",
+        evidence_attachments: [],
+        source_ref: { fmea_id: "f1", cause_node_id: "cause-1" },
+        verified_by: "u",
+        verified_at: "2026-07-03",
+        created_at: "2026-07-03",
+      },
+    ]);
+    (updateVerification as any).mockResolvedValue({ verification_id: "v-pass", conclusion: "passed" });
+
+    renderCard({ fmeaRefId: "f1" });
+    await waitFor(() => expect(screen.getByTestId("d4-cause-edit-btn-0")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d4-cause-edit-btn-0"));
+
+    await waitFor(() => expect(screen.getByTestId("d4-cause-edit-0")).toBeInTheDocument());
+    await waitFor(() => expect(getFMEA).toHaveBeenCalledWith("f1"));
+
+    const editSelect = screen.getByTestId("d4-cause-edit-select-0").querySelector(".ant-select-selector")!;
+    await user.click(editSelect);
+    await waitFor(() => expect(screen.getByText("Flux residue")).toBeInTheDocument());
+    await user.click(screen.getByText("Flux residue"));
+
+    fireEvent.click(screen.getByTestId("d4-cause-save-0"));
+
+    await waitFor(() =>
+      expect(updateVerification).toHaveBeenCalledWith(
+        "c1",
+        "v-pass",
+        { source_ref: { fmea_id: "f1", cause_node_id: "cause-2" } },
+      )
+    );
+  });
+
+  it("clears Cause on existing record when select is cleared", async () => {
+    (getFMEA as any).mockResolvedValue({
+      fmea_id: "f1",
+      graph_data: {
+        nodes: [{ id: "cause-1", type: "FailureCause", name: "Solder void" }],
+        edges: [],
+      },
+    });
+    (listVerifications as any).mockResolvedValue([
+      {
+        verification_id: "v-pending",
+        capa_id: "c1",
+        root_cause_text: "rc",
+        method: null,
+        result: null,
+        conclusion: "pending",
+        evidence_attachments: [],
+        source_ref: { fmea_id: "f1", cause_node_id: "cause-1" },
+        verified_by: null,
+        verified_at: null,
+        created_at: "2026-07-03",
+      },
+    ]);
+    (updateVerification as any).mockResolvedValue({ verification_id: "v-pending", conclusion: "pending" });
+
+    renderCard({ fmeaRefId: "f1" });
+    await waitFor(() => expect(screen.getByTestId("d4-cause-edit-btn-0")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d4-cause-edit-btn-0"));
+    await waitFor(() => expect(screen.getByTestId("d4-cause-edit-0")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("d4-cause-clear-0"));
+    fireEvent.click(screen.getByTestId("d4-cause-save-0"));
+
+    await waitFor(() =>
+      expect(updateVerification).toHaveBeenCalledWith("c1", "v-pending", { source_ref: null })
+    );
+  });
+
+  it("establishes Cause on existing record with no source_ref", async () => {
+    const user = userEvent.setup();
+    (getFMEA as any).mockResolvedValue({
+      fmea_id: "f1",
+      graph_data: {
+        nodes: [{ id: "cause-1", type: "FailureCause", name: "Solder void" }],
+        edges: [],
+      },
+    });
+    (listVerifications as any).mockResolvedValue([
+      {
+        verification_id: "v-no-cause",
+        capa_id: "c1",
+        root_cause_text: "rc",
+        method: "measurement",
+        result: "r",
+        conclusion: "failed",
+        evidence_attachments: [],
+        source_ref: null,
+        verified_by: null,
+        verified_at: null,
+        created_at: "2026-07-03",
+      },
+    ]);
+    (updateVerification as any).mockResolvedValue({ verification_id: "v-no-cause", conclusion: "failed" });
+
+    renderCard({ fmeaRefId: "f1" });
+    await waitFor(() => expect(screen.getByTestId("d4-cause-edit-btn-0")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d4-cause-edit-btn-0"));
+    await waitFor(() => expect(screen.getByTestId("d4-cause-edit-0")).toBeInTheDocument());
+
+    const editSelect = screen.getByTestId("d4-cause-edit-select-0").querySelector(".ant-select-selector")!;
+    await user.click(editSelect);
+    await waitFor(() => expect(screen.getByText("Solder void")).toBeInTheDocument());
+    await user.click(screen.getByText("Solder void"));
+    fireEvent.click(screen.getByTestId("d4-cause-save-0"));
+
+    await waitFor(() =>
+      expect(updateVerification).toHaveBeenCalledWith(
+        "c1",
+        "v-no-cause",
+        { source_ref: { fmea_id: "f1", cause_node_id: "cause-1" } },
+      )
     );
   });
 });
