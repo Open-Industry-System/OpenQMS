@@ -21,6 +21,9 @@ from app.seed_e2e_constants import (
     D3_E2E_LOT_NO, D3_E2E_MATERIAL_CODE, D3_E2E_PRODUCT_LINE, D3_E2E_SUPPLIER_NO,
     DOCGATE_E2E_CAPA_DOC_NO, DOCGATE_E2E_FMEA_DOC_NO,
     E2E_ACCOUNTS, E2E_FACTORY_DC100, E2E_FACTORY_SH, E2E_PRODUCT_LINE, E2E_PRODUCT_LINE_DEFAULT,
+    FMEA_LINK_E2E_CAPA_DOC_NO, FMEA_LINK_E2E_CAPA_SKIPPED_DOC_NO,
+    FMEA_LINK_E2E_CAUSE_NODE, FMEA_LINK_E2E_FMEA_DOC_NO,
+    FMEA_LINK_E2E_FM_NODE, FMEA_LINK_E2E_PC_NODE,
 )
 
 # Fixed UUIDs for idempotency
@@ -31,6 +34,12 @@ CAPA_E2E_ID = uuid.UUID("00000000-0000-0000-0000-000000e20200")
 DOCGATE_FMEA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20170")
 DOCGATE_CAPA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20270")
 DOCGATE_FMEA_VER_ID = uuid.UUID("00000000-0000-0000-0000-000000e20171")
+FMEA_LINK_FMEA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20140")
+FMEA_LINK_CAPA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20240")
+FMEA_LINK_CAPA_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20241")
+FMEA_LINK_VERIF_ID = uuid.UUID("00000000-0000-0000-0000-000000e20242")
+FMEA_LINK_D7_ID = uuid.UUID("00000000-0000-0000-0000-000000e20243")
+FMEA_LINK_D7_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20244")
 
 
 async def _seed_factories(db) -> dict:
@@ -528,6 +537,212 @@ async def _seed_doc_gate_capa(db, factory_ids):
         await db.flush()
 
 
+async def _seed_fmea_linkage(db, factory_ids):
+    """Seed PFMEA + two CAPAs for US-E2E-01.4 bidirectional linkage E2E.
+
+    - PFMEA-E2E-FMEA-LINK-001 with fm-1 / cause-link / pc-link graph
+    - 8D-E2E-FMEA-LINK-001 at D4_ROOT_CAUSE with header + D4 source_ref + D7 confirmed
+    - 8D-E2E-FMEA-LINK-002 with D7 skipped only (must not appear in reverse lookup)
+    - FMEA_LINKAGE_CREATED audits for header / d4_cause / d7_prevention on the first CAPA
+
+    Idempotent on document_no / fixed UUIDs. CASCADE children are deleted+recreated.
+    """
+    from app.models.audit import AuditLog
+    from app.models.capa import CAPAEightD, CapaD7NodeAction, CapaRootCauseVerification
+    from app.models.fmea import FMEADocument
+    from app.state_machines.eightd_state import EightDState
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+    factory_id = factory_ids[E2E_FACTORY_DC100["code"]]
+    product_line = E2E_PRODUCT_LINE["code"]
+    graph = {
+        "nodes": [
+            {"id": FMEA_LINK_E2E_FM_NODE, "type": "FailureMode", "name": "孔径超差"},
+            {"id": FMEA_LINK_E2E_CAUSE_NODE, "type": "FailureCause", "name": "定位销磨损"},
+            {"id": FMEA_LINK_E2E_PC_NODE, "type": "PreventionControl", "name": "定位销周检"},
+        ],
+        "edges": [
+            {
+                "source": FMEA_LINK_E2E_CAUSE_NODE,
+                "target": FMEA_LINK_E2E_FM_NODE,
+                "type": "CAUSE_OF",
+            },
+            {
+                "source": FMEA_LINK_E2E_CAUSE_NODE,
+                "target": FMEA_LINK_E2E_PC_NODE,
+                "type": "PREVENTED_BY",
+            },
+        ],
+    }
+    root_cause = "定位销磨损导致孔径超差（E2E FMEA 联动）"
+
+    fmea = (await db.execute(
+        select(FMEADocument).where(FMEADocument.document_no == FMEA_LINK_E2E_FMEA_DOC_NO)
+    )).scalar_one_or_none()
+    if not fmea:
+        fmea = FMEADocument(
+            fmea_id=FMEA_LINK_FMEA_ID,
+            document_no=FMEA_LINK_E2E_FMEA_DOC_NO,
+            title="E2E FMEA 联动 PFMEA",
+            fmea_type="PFMEA",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status="approved",
+            graph_data=graph,
+            created_by=admin.user_id,
+        )
+        db.add(fmea)
+        await db.flush()
+    else:
+        fmea.graph_data = graph
+        fmea.status = "approved"
+        fmea.product_line_code = product_line
+        fmea.factory_id = factory_id
+        await db.flush()
+
+    source_ref = {
+        "fmea_id": str(fmea.fmea_id),
+        "cause_node_id": FMEA_LINK_E2E_CAUSE_NODE,
+    }
+
+    capa = (await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == FMEA_LINK_E2E_CAPA_DOC_NO)
+    )).scalar_one_or_none()
+    if not capa:
+        capa = CAPAEightD(
+            report_id=FMEA_LINK_CAPA_ID,
+            document_no=FMEA_LINK_E2E_CAPA_DOC_NO,
+            title="E2E FMEA 联动 8D",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status=EightDState.D4_ROOT_CAUSE.value,
+            severity="serious",
+            d4_root_cause=root_cause,
+            d5_correction="更换定位销并校准夹具",
+            d7_prevention="将定位销磨损检测纳入首件检验",
+            fmea_ref_id=fmea.fmea_id,
+            fmea_node_id=FMEA_LINK_E2E_FM_NODE,
+            created_by=admin.user_id,
+        )
+        db.add(capa)
+        await db.flush()
+    else:
+        capa.status = EightDState.D4_ROOT_CAUSE.value
+        capa.d4_root_cause = root_cause
+        capa.d5_correction = "更换定位销并校准夹具"
+        capa.d7_prevention = "将定位销磨损检测纳入首件检验"
+        capa.fmea_ref_id = fmea.fmea_id
+        capa.fmea_node_id = FMEA_LINK_E2E_FM_NODE
+        capa.product_line_code = product_line
+        capa.factory_id = factory_id
+        await db.flush()
+
+    # Reset D4 verification / D7 actions for idempotent re-seed (CASCADE children)
+    await db.execute(delete(CapaRootCauseVerification).where(
+        CapaRootCauseVerification.capa_id == capa.report_id))
+    await db.execute(delete(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa.report_id))
+    await db.flush()
+
+    db.add(CapaRootCauseVerification(
+        verification_id=FMEA_LINK_VERIF_ID,
+        capa_id=capa.report_id,
+        factory_id=factory_id,
+        root_cause_text=root_cause,
+        method="measurement",
+        result="孔径实测超差，定位销磨损确认",
+        is_verified=True,
+        conclusion="passed",
+        source_ref=source_ref,
+        verified_by=admin.user_id,
+        verified_at=datetime.now(timezone.utc),
+    ))
+    db.add(CapaD7NodeAction(
+        action_id=FMEA_LINK_D7_ID,
+        capa_id=capa.report_id,
+        factory_id=factory_id,
+        action="confirmed",
+        fmea_id=fmea.fmea_id,
+        failure_mode_node_id=FMEA_LINK_E2E_FM_NODE,
+        failure_cause_node_id=FMEA_LINK_E2E_CAUSE_NODE,
+        match_source="linked",
+        prevention_control_node_id=FMEA_LINK_E2E_PC_NODE,
+        prevention_control_name_before="定位销周检",
+        prevention_control_name_after="定位销周检",
+        acted_by=admin.user_id,
+    ))
+    await db.flush()
+
+    # Skipped-only CAPA: must not reverse-lookup via D7
+    capa_skip = (await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == FMEA_LINK_E2E_CAPA_SKIPPED_DOC_NO)
+    )).scalar_one_or_none()
+    if not capa_skip:
+        capa_skip = CAPAEightD(
+            report_id=FMEA_LINK_CAPA_SKIPPED_ID,
+            document_no=FMEA_LINK_E2E_CAPA_SKIPPED_DOC_NO,
+            title="E2E FMEA 联动 8D（skipped 对照）",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status=EightDState.D7_PREVENTION.value,
+            severity="general",
+            d4_root_cause="对照根因（不反查）",
+            created_by=admin.user_id,
+        )
+        db.add(capa_skip)
+        await db.flush()
+    else:
+        capa_skip.status = EightDState.D7_PREVENTION.value
+        capa_skip.fmea_ref_id = None
+        capa_skip.fmea_node_id = None
+        capa_skip.product_line_code = product_line
+        capa_skip.factory_id = factory_id
+        await db.flush()
+
+    await db.execute(delete(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa_skip.report_id))
+    await db.flush()
+    db.add(CapaD7NodeAction(
+        action_id=FMEA_LINK_D7_SKIPPED_ID,
+        capa_id=capa_skip.report_id,
+        factory_id=factory_id,
+        action="skipped",
+        fmea_id=fmea.fmea_id,
+        failure_mode_node_id=FMEA_LINK_E2E_FM_NODE,
+        failure_cause_node_id=FMEA_LINK_E2E_CAUSE_NODE,
+        match_source="linked",
+        reason="E2E skipped control — must not reverse-link",
+        acted_by=admin.user_id,
+    ))
+    await db.flush()
+
+    # Seed FMEA_LINKAGE_CREATED audits (runtime path writes these; seed mirrors for E2E read)
+    await db.execute(delete(AuditLog).where(
+        AuditLog.record_id == capa.report_id,
+        AuditLog.action == "FMEA_LINKAGE_CREATED",
+    ))
+    for node_id, source in (
+        (FMEA_LINK_E2E_FM_NODE, "header"),
+        (FMEA_LINK_E2E_CAUSE_NODE, "d4_cause"),
+        (FMEA_LINK_E2E_PC_NODE, "d7_prevention"),
+    ):
+        db.add(AuditLog(
+            table_name="capa_eightd",
+            record_id=capa.report_id,
+            action="FMEA_LINKAGE_CREATED",
+            changed_fields={
+                "capa_id": str(capa.report_id),
+                "fmea_id": str(fmea.fmea_id),
+                "node_id": node_id,
+                "direction": "8d_to_fmea",
+                "source": source,
+            },
+            operated_by=admin.user_id,
+            factory_id=factory_id,
+        ))
+    await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
@@ -535,6 +750,7 @@ async def main():
         await _seed_accounts(db, factory_ids)
         await _seed_known_docs(db, factory_ids)
         await _seed_doc_gate_capa(db, factory_ids)
+        await _seed_fmea_linkage(db, factory_ids)
         await db.commit()
         await _seed_d3_test_capas(db)
         await db.commit()

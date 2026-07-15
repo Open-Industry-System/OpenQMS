@@ -772,13 +772,13 @@ export default function FMEAEditorPage() {
     }
   }, [outerTab, loadGraphData]);
 
-  // 响应 URL ?tab=graph&highlightNode=... 参数
+  // 响应 URL ?tab=graph|related-capa&highlightNode=... 参数
   useEffect(() => {
     const tabParam = searchParams.get("tab");
     const highlightParam = searchParams.get("highlightNode");
-    if (tabParam === "graph") {
-      setOuterTab("graph");
-      if (highlightParam) {
+    if (tabParam === "graph" || tabParam === "related-capa") {
+      setOuterTab(tabParam);
+      if (tabParam === "graph" && highlightParam) {
         setPendingHighlightNode(highlightParam);
       }
     }
@@ -1931,7 +1931,11 @@ export default function FMEAEditorPage() {
             <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 16 }}>
               <GraphLegend fmeaType={fmeaType} />
               {highlightNodes.length > 0 && (
-                <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
+                <Button
+                  data-e2e="fmea-highlight-active"
+                  data-highlight-node={highlightNodes[0]}
+                  onClick={() => { setHighlightNodes([]); setDimOthers(false); }}
+                >
                   {t("graph.clearHighlight")}
                 </Button>
               )}
