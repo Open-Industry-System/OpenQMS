@@ -285,6 +285,7 @@ async def create_cp_version(
     version = ControlPlanVersion(
         version_id=uuid.uuid4(),
         cp_id=cp.cp_id,
+        factory_id=cp.factory_id,
         major_no=major_no,
         minor_no=minor_no,
         header_snapshot=header_snapshot,

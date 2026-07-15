@@ -1,9 +1,9 @@
 """Tests for capa_doc_gate_preflight (US-E2E-01.7).
 
 Covers: open-CAPA scope, modify-vs-delete precision, shared-id partial break,
-terminal-CAPA skip. CP versions inserted via raw SQL (sha256_hash=NULL skips
-the verify_version_hash trigger which expects a `snapshot` column absent on
-control_plan_versions).
+terminal-CAPA skip, no-analysis potential disconnect. CP versions use app
+compute_snapshot_hash (compact JSON) matching the fixed trigger (hash required,
+no PG jsonb::text re-verify).
 """
 from __future__ import annotations
 
@@ -45,22 +45,28 @@ async def _seed_cp_with_version(db, factory_id, user_id, item_ids, created_at):
 
 async def _insert_cp_version(db, cp_id, factory_id, user_id, major, minor, items, created_at=None,
                              change_type="minor", change_summary="rebuild"):
-    """Insert a CP version with a hash matching the verify_version_hash trigger
-    (jsonb_build_object combined ::text, PG default separators)."""
-    items_json = json.dumps(items)
-    await db.execute(text(
-        "INSERT INTO control_plan_versions (version_id, cp_id, factory_id, major_no, minor_no, "
-        "header_snapshot, items_snapshot, sha256_hash, change_type, change_summary, "
-        "created_by, created_at) VALUES ("
-        ":vid, :cp, :fact, :major, :minor, '{}'::jsonb, CAST(:items AS JSONB), "
-        "encode(digest(jsonb_build_object('header','{}'::jsonb,'items',CAST(:items AS JSONB))::text,'sha256'),'hex'), "
-        ":ctype, :csum, :uid, COALESCE(:ca, NOW()))"
-    ), {
-        "vid": uuid.uuid4(), "cp": cp_id, "fact": factory_id, "major": major, "minor": minor,
-        "items": items_json, "ctype": change_type, "csum": change_summary,
-        "uid": user_id, "ca": created_at,
-    })
+    """Insert a CP version the same way production does: app compact-hash + ORM fields."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services.version_service import compute_snapshot_hash
+    header = {}
+    combined = {"header": header, "items": items}
+    ver = ControlPlanVersion(
+        version_id=uuid.uuid4(),
+        cp_id=cp_id,
+        factory_id=factory_id,
+        major_no=major,
+        minor_no=minor,
+        header_snapshot=header,
+        items_snapshot=items,  # create_cp_version stores the list, not {"items":...}
+        sha256_hash=compute_snapshot_hash(combined),
+        change_type=change_type,
+        change_summary=change_summary,
+        created_by=user_id,
+        created_at=created_at or datetime.now(timezone.utc),
+    )
+    db.add(ver)
     await db.flush()
+    return ver.version_id
 
 
 async def _add_cp_version(db, cp_id, factory_id, user_id, item_ids, major, minor):
@@ -161,4 +167,49 @@ async def test_preflight_skips_terminal_capa(db, capa_d8_gate):
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
     breaks = await scan_tenant_breaks(db, "public")
     assert breaks == []
+
+
+@pytest.mark.asyncio
+async def test_preflight_no_analysis_reports_potential_disconnect(db, capa_d8_gate):
+    """Open CAPA without analysis: baseline/latest zero item_id overlap → potential_disconnect."""
+    capa, user = capa_d8_gate
+    # No analysis for this capa. Seed a CP whose baseline ids share none with latest.
+    cp, ver = await _seed_cp_with_version(
+        db, capa.factory_id, user.user_id,
+        ["old-id"], capa.created_at - timedelta(days=2),
+    )
+    await _add_cp_version(db, cp.cp_id, capa.factory_id, user.user_id, ["new-id"], 1, 1)
+    breaks = await scan_tenant_breaks(db, "public")
+    assert any(
+        b["kind"] == "potential_disconnect" and b["cp_id"] == str(cp.cp_id)
+        for b in breaks
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_cp_version_production_path_ok(db, capa_d8_gate):
+    """Regression: create_cp_version must succeed after trigger fix (app compact hash)."""
+    from app.services.version_service import create_cp_version
+    from app.models.control_plan import ControlPlanItem
+    capa, user = capa_d8_gate
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-PROD-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=capa.factory_id,
+        status="draft",
+        created_by=user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+    db.add(ControlPlanItem(
+        item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
+        product_characteristic="A", control_method="m",
+        source_fmea_node_id="s", sort_order=0, factory_id=capa.factory_id,
+    ))
+    await db.flush()
+    ver = await create_cp_version(db, cp, "approve", "ok", user.user_id)
+    assert ver.sha256_hash
+    assert ver.major_no == 1
 

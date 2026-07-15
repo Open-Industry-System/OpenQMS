@@ -35,7 +35,8 @@ help:
 	@echo "  check-frontend-tsc    — tsc --noEmit only"
 	@echo "  check-frontend-build  — vite build only"
 
-check: check-backend check-frontend
+# doc-gate-preflight is part of the release gate (US-E2E-01.7): exit 1 blocks deploy.
+check: check-backend check-frontend doc-gate-preflight
 
 check-backend:
 	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTEST) tests/ -v $(PYTEST_IGNORES)
