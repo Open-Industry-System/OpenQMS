@@ -196,15 +196,20 @@ async def get_fmea_version(
 
 
 async def verify_fmea_version(db: AsyncSession, version_id: uuid.UUID) -> bool:
-    """Verify the SHA-256 hash of a stored FMEA version snapshot (PG jsonb::text)."""
+    """Verify stored FMEA version hash (accepts PG jsonb::text or legacy compact JSON)."""
     result = await db.execute(
         select(FMEAVersion).where(FMEAVersion.version_id == version_id)
     )
     version = result.scalar_one_or_none()
     if version is None:
         raise ValueError(f"FMEA version {version_id} not found.")
-    expected = await compute_pg_jsonb_hash(db, version.snapshot)
-    return expected == version.sha256_hash
+    if not version.sha256_hash:
+        return False
+    pg_hash = await compute_pg_jsonb_hash(db, version.snapshot)
+    if version.sha256_hash == pg_hash:
+        return True
+    # Historical rows written with compact JSON before PG-aligned trigger
+    return version.sha256_hash == compute_snapshot_hash(version.snapshot)
 
 
 # ---------------------------------------------------------------------------
@@ -384,16 +389,21 @@ async def get_cp_version(
 
 
 async def verify_cp_version(db: AsyncSession, version_id: uuid.UUID) -> bool:
-    """Verify the SHA-256 hash of a stored CP version snapshot (PG jsonb::text)."""
+    """Verify stored CP version hash (accepts PG jsonb::text or legacy compact JSON)."""
     result = await db.execute(
         select(ControlPlanVersion).where(ControlPlanVersion.version_id == version_id)
     )
     version = result.scalar_one_or_none()
     if version is None:
         raise ValueError(f"Control Plan version {version_id} not found.")
+    if not version.sha256_hash:
+        return False
     combined = {"header": version.header_snapshot, "items": version.items_snapshot}
-    expected = await compute_pg_jsonb_hash(db, combined)
-    return expected == version.sha256_hash
+    pg_hash = await compute_pg_jsonb_hash(db, combined)
+    if version.sha256_hash == pg_hash:
+        return True
+    # Historical rows written with compact JSON before PG-aligned trigger
+    return version.sha256_hash == compute_snapshot_hash(combined)
 
 
 # ---------------------------------------------------------------------------

@@ -22,22 +22,21 @@ PYTEST_IGNORES    := --ignore=tests/test_graph_sync_worker.py --ignore=tests/tes
 # Resolve to an ABSOLUTE path so it stays valid after the target's `cd $(BACKEND_DIR)`.
 PYTEST ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest"; else echo pytest; fi)
 
-.PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend doc-gate-preflight
+.PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend doc-gate-preflight deploy-check
 
 help:
 	@echo "Targets:"
-	@echo "  check            — run all consistency checks (backend pytest + frontend tsc + frontend build)"
-	@echo "  check-backend    — backend pytest suite (needs Postgres)"
-	@echo "  check-frontend   — frontend tsc --noEmit + vite build"
-	@echo "  doc-gate-preflight — scan D8 doc-gate CP item_id lineage breaks (exit 1 blocks deploy)"
+	@echo "  check              — code consistency (pytest + tsc + build); no deploy-DB preflight"
+	@echo "  check-backend      — backend pytest suite (needs Postgres)"
+	@echo "  check-frontend     — frontend tsc --noEmit + vite build"
+	@echo "  doc-gate-preflight — D8 doc-gate CP lineage scan on DATABASE_URL (exit 1 = blocked_modify)"
+	@echo "  deploy-check       — check + doc-gate-preflight (release gate; TARGET DB via DATABASE_URL)"
 	@echo ""
 	@echo "Subtargets:"
 	@echo "  check-frontend-tsc    — tsc --noEmit only"
 	@echo "  check-frontend-build  — vite build only"
 
-# check = code consistency only (pytest + tsc + build). Data preflight is
-# separate: make doc-gate-preflight (run against the TARGET deploy DB, not
-# the test DB — it uses DATABASE_URL / app.database, not TEST_DATABASE_URL).
+# check = code consistency only (pytest + tsc + build). Does NOT hit deploy DB.
 check: check-backend check-frontend
 
 check-backend:
@@ -45,12 +44,20 @@ check-backend:
 
 check-frontend: check-frontend-tsc check-frontend-build
 
-# ── D8 doc-gate CP lineage preflight (US-E2E-01.7) ──────────────────────────
-# Run against the TARGET environment DB (DATABASE_URL), not the test DB.
-# Exit 1 = blocked modify key_points or potential baseline/latest disconnects.
-# Wire this into the deploy/release pipeline (not `make check` / unit CI).
+# ── Deploy gate (TARGET DB via DATABASE_URL — not TEST_DATABASE_URL) ─────────
+# Release/deploy pipelines MUST run `make deploy-check` against the environment
+# being released. Unit CI runs `make check` only (no data preflight).
+#
+# doc-gate-preflight exit 1 = blocked_modify (gate cannot pass for those CAPAs).
+# potential_disconnect is WARN (exit 0) unless PREFLIGHT_STRICT_POTENTIAL=1.
+PYTHON_BIN ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi)
+PREFLIGHT_STRICT_POTENTIAL ?= 0
+
 doc-gate-preflight:
-	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi) -m app.services.capa_doc_gate_preflight
+	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTHON_BIN) -m app.services.capa_doc_gate_preflight $(if $(filter 1,$(PREFLIGHT_STRICT_POTENTIAL)),--strict-potential,)
+
+# Full release gate: code checks + data preflight on DATABASE_URL.
+deploy-check: check doc-gate-preflight
 
 check-frontend-tsc:
 	cd $(FRONTEND_DIR) && npx tsc --noEmit

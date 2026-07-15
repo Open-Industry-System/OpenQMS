@@ -5,22 +5,37 @@ delete coverage.
 
 Two scan modes (both over open CAPAs only, all active tenant schemas):
 
-1. **With current analysis** — for each cp_item modify key_point, check that
-   target_key exists in the latest CP version (via get_latest_cp_version).
-   delete targets that disappeared are NOT reported (expected outcome).
+1. **With current analysis** (exit 1 if any) — each cp_item *modify* key_point
+   whose target_key is absent from the latest CP version (get_latest_cp_version).
+   delete targets that disappeared are NOT reported.
 
-2. **Without analysis (pre-generation)** — for each open CAPA, scan candidate
-   CPs (same factory_id + product_line_code). If the CAPA-time baseline version
-   (created_at <= capa.created_at) has a non-empty item_id set with ZERO
-   overlap against latest, report a potential break (any future modify on
-   those baseline ids would fail).
+2. **Without analysis** (exit 0 WARN unless --strict-potential) — candidate CPs
+   (same factory + product line) where baseline (created_at <= capa.created_at)
+   item_ids share ZERO overlap with latest. Advisory: gate not yet blocked.
 
-Exit code: 1 if any break found (blocks `make check` / deploy), 0 otherwise.
+Exit codes:
+  0 — no blocked_modify (potential_disconnect alone is warning unless --strict-potential)
+  1 — one or more blocked_modify (or potential when --strict-potential)
+
+Deploy: run against TARGET DB (DATABASE_URL), not TEST_DATABASE_URL.
+  make doc-gate-preflight
+  make deploy-check   # check + preflight (release gate)
+
+Remediation (executable — re-analysis alone never changes CAPA-time baseline):
+  blocked_modify:
+    (a) Close/archive this CAPA; open a NEW CAPA after CP is saved with
+        item_id-preserving path so the new CAPA freezes current ids as baseline.
+    (b) Demote current analysis and re-generate only if the new analysis no
+        longer requires modify of disconnected ids (empty list + confirm_no_affected,
+        or only add/delete/document key_points).
+    (c) Ops waiver outside this tool (no automated waiver table yet).
+  potential_disconnect:
+    Same (a)/(b) before this CAPA reaches D8 with modify key_points on those ids.
 
 Usage:
     python -m app.services.capa_doc_gate_preflight
     python -m app.services.capa_doc_gate_preflight --json
-    make doc-gate-preflight
+    python -m app.services.capa_doc_gate_preflight --strict-potential
 """
 from __future__ import annotations
 
@@ -85,7 +100,6 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
     capa_by_id = {c.report_id: c for c in open_capas}
     capa_ids = set(capa_by_id)
 
-    # Mode 1: current analyses — precise modify key_point checks
     analyses = (await db.execute(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.is_current == True,  # noqa: E712
@@ -130,7 +144,6 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                         "blocked_field": kp.get("field"),
                     })
 
-    # Mode 2: open CAPAs without current analysis — candidate CP full disconnect
     for capa in open_capas:
         if capa.report_id in analyzed_capa_ids:
             continue
@@ -163,45 +176,67 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
     return breaks
 
 
-async def run_preflight(json_output: bool = False) -> int:
+async def run_preflight(json_output: bool = False, strict_potential: bool = False) -> int:
     all_breaks: list[dict] = []
     async for tenant, db in run_for_each_tenant():
         all_breaks.extend(await scan_tenant_breaks(db, tenant.schema_name))
+    blocked = [b for b in all_breaks if b["kind"] == "blocked_modify"]
+    potential = [b for b in all_breaks if b["kind"] == "potential_disconnect"]
+
     if json_output:
-        print(json.dumps({"breaks": all_breaks, "count": len(all_breaks)},
-                         ensure_ascii=False, indent=2))
-    elif not all_breaks:
-        print("doc-gate CP lineage preflight: CLEAN (0 breaks)")
+        print(json.dumps({
+            "breaks": all_breaks,
+            "blocked_modify_count": len(blocked),
+            "potential_disconnect_count": len(potential),
+            "exit_blocks": bool(blocked) or (strict_potential and bool(potential)),
+        }, ensure_ascii=False, indent=2))
     else:
-        print(f"doc-gate CP lineage preflight: {len(all_breaks)} break(s) — "
-              "deployment blocked, manual remediation required:")
-        for b in all_breaks:
-            if b["kind"] == "blocked_modify":
-                print(f"  - [{b['tenant_schema']}] CAPA {b['capa_document_no']} "
-                      f"({b['capa_id']}, {b['capa_status']})")
-                print(f"      CP {b['cp_id']}: modify target_key={b['blocked_modify_target_key']} "
-                      f"field={b['blocked_field']} absent from latest v{b['latest_version_id']}")
-                print("      → cannot pass doc-gate. Options: (1) demote current analysis and "
-                      "re-author CP under the item_id-preserving save path so a NEW baseline "
-                      "version is frozen at re-analysis time; (2) file a waiver for this CAPA "
-                      "if the break is intentional delete+add. Re-analysis alone does NOT help "
-                      "if the CAPA creation-time baseline still has the old ids.")
-            else:
-                print(f"  - [{b['tenant_schema']}] CAPA {b['capa_document_no']} "
-                      f"({b['capa_id']}, {b['capa_status']}) [no analysis yet]")
-                print(f"      CP {b['cp_id']}: baseline item_ids share NONE with latest "
-                      f"(baseline={b['baseline_version_id']}, latest={b['latest_version_id']})")
-                print("      → any future modify key_point on baseline ids will fail. "
-                      "Options: re-author the CP (item_id-preserving) before CAPA reaches "
-                      "D8, or plan to only use delete/add/document key_points for this CAPA.")
-    return 1 if all_breaks else 0
+        if not all_breaks:
+            print("doc-gate CP lineage preflight: CLEAN (0 breaks)")
+        else:
+            if blocked:
+                print(f"doc-gate CP lineage preflight: {len(blocked)} BLOCKED modify key_point(s) "
+                      f"(exit 1 — deploy must not proceed):")
+                for b in blocked:
+                    print(f"  - [{b['tenant_schema']}] CAPA {b['capa_document_no']} "
+                          f"({b['capa_id']}, {b['capa_status']})")
+                    print(f"      CP {b['cp_id']}: modify target_key={b['blocked_modify_target_key']} "
+                          f"field={b['blocked_field']} absent from latest v{b['latest_version_id']}")
+                    print("      Executable remediation (re-analysis alone NEVER changes CAPA-time baseline):")
+                    print("        (a) Archive this CAPA; open a NEW CAPA after CP is saved with")
+                    print("            item_id-preserving path so the new CAPA freezes current ids.")
+                    print("        (b) Demote current analysis and re-generate only if the new analysis")
+                    print("            no longer needs modify of disconnected ids (empty+confirm, or")
+                    print("            only add/delete/document key_points).")
+                    print("        (c) Ops waiver outside this tool (no automated waiver table).")
+            if potential:
+                print(f"doc-gate CP lineage preflight: {len(potential)} POTENTIAL disconnect(s) "
+                      f"(WARN only; exit 0 unless --strict-potential):")
+                for b in potential:
+                    print(f"  - [{b['tenant_schema']}] CAPA {b['capa_document_no']} "
+                          f"({b['capa_id']}, {b['capa_status']}) [no analysis yet]")
+                    print(f"      CP {b['cp_id']}: baseline item_ids share NONE with latest "
+                          f"(baseline={b['baseline_version_id']}, latest={b['latest_version_id']})")
+                    print("      Before D8: re-author CP (item_id-preserving) so future analysis")
+                    print("      freezes continuing ids, or plan only delete/add/document key_points.")
+
+    if blocked:
+        return 1
+    if strict_potential and potential:
+        return 1
+    return 0
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="US-E2E-01.7 doc-gate CP lineage preflight")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
+    p.add_argument(
+        "--strict-potential",
+        action="store_true",
+        help="exit 1 also when potential_disconnect warnings exist",
+    )
     args = p.parse_args()
-    rc = asyncio.run(run_preflight(json_output=args.json))
+    rc = asyncio.run(run_preflight(json_output=args.json, strict_potential=args.strict_potential))
     sys.exit(rc)
 
 

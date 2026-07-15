@@ -217,10 +217,10 @@ async def test_create_cp_version_production_path_ok(db, capa_d8_gate):
 
 
 @pytest.mark.asyncio
-async def test_cp_version_trigger_rejects_empty_hash_and_binds_content(db, capa_d8_gate):
-    """Trigger overwrites sha256_hash from content — forged/empty values cannot stick."""
+async def test_cp_version_trigger_binds_content_and_verify_accepts_pg_hash(db, capa_d8_gate):
+    """Trigger overwrites sha256_hash from content; verify accepts PG digest."""
     from app.models.control_plan_version import ControlPlanVersion
-    from app.services.version_service import compute_pg_jsonb_hash
+    from app.services.version_service import compute_pg_jsonb_hash, verify_cp_version
     capa, user = capa_d8_gate
     cp = ControlPlan(
         cp_id=uuid.uuid4(),
@@ -235,11 +235,10 @@ async def test_cp_version_trigger_rejects_empty_hash_and_binds_content(db, capa_
     await db.flush()
     header = {"title": "t"}
     items = [{"item_id": "i1", "control_method": "m"}]
-    # Insert with deliberately wrong hash — trigger must overwrite with content digest
     ver = ControlPlanVersion(
         version_id=uuid.uuid4(), cp_id=cp.cp_id, factory_id=capa.factory_id,
         major_no=1, minor_no=0, header_snapshot=header, items_snapshot=items,
-        sha256_hash="x" * 64,  # forged
+        sha256_hash="x" * 64,  # forged — trigger must overwrite
         change_type="approve", change_summary="forge", created_by=user.user_id,
         created_at=datetime.now(timezone.utc),
     )
@@ -249,4 +248,46 @@ async def test_cp_version_trigger_rejects_empty_hash_and_binds_content(db, capa_
     expected = await compute_pg_jsonb_hash(db, {"header": header, "items": items})
     assert ver.sha256_hash == expected
     assert ver.sha256_hash != "x" * 64
+    assert await verify_cp_version(db, ver.version_id) is True
+
+
+@pytest.mark.asyncio
+async def test_verify_cp_version_accepts_legacy_compact_hash(db, capa_d8_gate):
+    """Historical compact-JSON hashes must still verify (dual-algorithm)."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services.version_service import compute_snapshot_hash, verify_cp_version
+    from sqlalchemy import text as _text
+    capa, user = capa_d8_gate
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-LEG-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=capa.factory_id,
+        status="draft",
+        created_by=user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+    header = {"title": "legacy"}
+    items = [{"item_id": "i1", "control_method": "m"}]
+    # Insert via trigger (gets PG hash), then rewrite to compact hash with immutability off
+    ver = ControlPlanVersion(
+        version_id=uuid.uuid4(), cp_id=cp.cp_id, factory_id=capa.factory_id,
+        major_no=1, minor_no=0, header_snapshot=header, items_snapshot=items,
+        sha256_hash="placeholder",
+        change_type="approve", change_summary="legacy", created_by=user.user_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ver)
+    await db.flush()
+    compact = compute_snapshot_hash({"header": header, "items": items})
+    await db.execute(_text("ALTER TABLE control_plan_versions DISABLE TRIGGER trg_cp_version_no_update"))
+    await db.execute(_text(
+        "UPDATE control_plan_versions SET sha256_hash=:h WHERE version_id=:vid"
+    ), {"h": compact, "vid": ver.version_id})
+    await db.execute(_text("ALTER TABLE control_plan_versions ENABLE TRIGGER trg_cp_version_no_update"))
+    await db.refresh(ver)
+    assert ver.sha256_hash == compact
+    assert await verify_cp_version(db, ver.version_id) is True
 
