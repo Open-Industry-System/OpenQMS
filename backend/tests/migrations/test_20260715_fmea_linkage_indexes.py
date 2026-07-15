@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 
 REV = "20260715_fmea_linkage_indexes"
-PARENT = "20260715_version_hash_backfill"
+PARENT = "20260715_fix_waiver_check"
 
 
 def _cfg(mig_url: str) -> Config:
