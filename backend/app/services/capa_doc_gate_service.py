@@ -239,20 +239,6 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
 # Helpers: allowlist, hash, prompt, validation
 # ---------------------------------------------------------------------------
 
-def _cp_legacy_fp(item: dict) -> str:
-    """Fingerprint for FULL-REBUILD legacy remap only (NOT target_key).
-
-    Used solely when baseline and version_after share zero item_ids (old
-    whole-table UUID rebuild). Requires 1:1 unique fingerprints on both sides.
-    """
-    src = str(item.get("source_fmea_node_id") or "").strip()
-    if not src:
-        return ""
-    prod = str(item.get("product_characteristic") or "").strip().lower()
-    proc = str(item.get("process_characteristic") or "").strip().lower()
-    return f"{src}|{prod}|{proc}"
-
-
 def _cp_item_id(item: dict) -> str:
     return str(item.get("item_id") or "").strip()
 
@@ -800,12 +786,14 @@ async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
 
 
 def _diff_cp_items_for_gate(v1_items: list[dict], v2_items: list[dict]) -> dict:
-    """CP diff for doc-gate: item_id primary identity (contract v2).
+    """CP diff for doc-gate: item_id is the sole identity (contract v2).
 
-    1. Pair by item_id (normal path after CP save preserves IDs).
-    2. Legacy full-rebuild only: if ZERO shared item_ids and both sides non-empty,
-       attempt 1:1 fingerprint remap (source|product|process) when every fp is
-       unique on both sides. Partial delete+add never uses this path.
+    Pair strictly by item_id. Content-shape fingerprint remap is intentionally
+    NOT used: delete-all + recreate with the same source/product/process would
+    look identical to a historical whole-table UUID rebuild, and product/process
+    themselves are mutable fields so fingerprints miss real rebuilds that also
+    edited those fields. Historical identity breaks require re-analysis after
+    CP re-save (item_id preserved) or DOC_GATE_CONTRACT_VERSION invalidation.
     """
     v1_by_id = {_cp_item_id(i): i for i in v1_items if _cp_item_id(i)}
     v2_by_id = {_cp_item_id(i): i for i in v2_items if _cp_item_id(i)}
@@ -824,47 +812,8 @@ def _diff_cp_items_for_gate(v1_items: list[dict], v2_items: list[dict]) -> dict:
                 "changes": changes,
                 "new_item": new,
             })
-    rem_v1_ids = set(v1_by_id) - shared_ids
-    rem_v2_ids = set(v2_by_id) - shared_ids
-    # Legacy: whole-table UUID rebuild (no overlapping ids)
-    if not shared_ids and rem_v1_ids and rem_v2_ids:
-        from collections import defaultdict
-        fp1: dict[str, list] = defaultdict(list)
-        fp2: dict[str, list] = defaultdict(list)
-        for iid in rem_v1_ids:
-            k = _cp_legacy_fp(v1_by_id[iid])
-            if k:
-                fp1[k].append(v1_by_id[iid])
-        for iid in rem_v2_ids:
-            k = _cp_legacy_fp(v2_by_id[iid])
-            if k:
-                fp2[k].append(v2_by_id[iid])
-        # Only remap when every fingerprint is unique 1:1 and covers all remaining
-        if (
-            fp1 and fp2
-            and set(fp1) == set(fp2)
-            and all(len(fp1[k]) == 1 and len(fp2[k]) == 1 for k in fp1)
-            and sum(len(v) for v in fp1.values()) == len(rem_v1_ids)
-            and sum(len(v) for v in fp2.values()) == len(rem_v2_ids)
-        ):
-            for k in sorted(fp1):
-                old, new = fp1[k][0], fp2[k][0]
-                rem_v1_ids.discard(_cp_item_id(old))
-                rem_v2_ids.discard(_cp_item_id(new))
-                changes = []
-                for key in sorted((set(old) | set(new)) - {"item_id"}):
-                    if old.get(key) != new.get(key):
-                        changes.append({"field": key, "old": old.get(key), "new": new.get(key)})
-                if changes:
-                    modified.append({
-                        "item_id": _cp_item_id(old),  # baseline id = target_key
-                        "source_fmea_node_id": new.get("source_fmea_node_id"),
-                        "changes": changes,
-                        "new_item": new,
-                        "legacy_rebuild": True,
-                    })
-    deleted = [v1_by_id[i] for i in sorted(rem_v1_ids)]
-    added = [v2_by_id[i] for i in sorted(rem_v2_ids)]
+    deleted = [v1_by_id[i] for i in sorted(set(v1_by_id) - shared_ids)]
+    added = [v2_by_id[i] for i in sorted(set(v2_by_id) - shared_ids)]
     return {"added_items": added, "deleted_items": deleted, "modified_items": modified}
 
 
@@ -903,9 +852,8 @@ def _field_nonempty(obj: dict, field: str) -> bool:
 def _match_key_point(kp, diff, latest, doc_type):
     """Return True if the key_point is covered by the version diff.
 
-    CP: target_key = item_id (baseline). Legacy full-rebuild remap (zero shared
-    ids + unique fingerprints) keeps baseline item_id on modified_items.
-    delete matches deleted_items by item_id. add uses parent+business_key+field.
+    CP: target_key = item_id (baseline). modify/delete match strictly by item_id.
+    add uses parent+business_key+non-empty field.
     """
     action = kp["expected_action"]
     kind = kp.get("target_kind")

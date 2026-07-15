@@ -181,6 +181,30 @@ async def test_update_temp_id_creates_new(db, default_factory, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_update_rejects_duplicate_temp_id(db, default_factory, admin_user):
+    """Two identical temp-* ids must be rejected (duplicate detection covers temp-*)."""
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-DUPTEMP-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        status="draft",
+        created_by=admin_user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+    data = ControlPlanUpdate(items=[
+        ControlPlanItemCreate(item_id="temp-x", step_no="10", product_characteristic="A",
+                              control_method="m", source_fmea_node_id="s"),
+        ControlPlanItemCreate(item_id="temp-x", step_no="20", product_characteristic="B",
+                              control_method="m", source_fmea_node_id="s2"),
+    ])
+    with pytest.raises(ValueError, match="重复 item_id"):
+        await update_control_plan(db, cp, data, admin_user.user_id)
+
+
+@pytest.mark.asyncio
 async def test_update_rejects_garbage_id_even_when_content_unchanged(db, default_factory, admin_user):
     """ID validation runs even if field content matches existing (no items_changed bypass)."""
     cp = ControlPlan(

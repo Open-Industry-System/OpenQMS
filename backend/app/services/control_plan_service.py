@@ -222,6 +222,10 @@ async def update_control_plan(
             if not raw_s:
                 resolved.append((item_data, None))
                 continue
+            # All non-empty ids participate in duplicate detection (incl. temp-*).
+            if raw_s in seen_req_ids:
+                raise ValueError(f"重复 item_id: {raw_s}")
+            seen_req_ids.add(raw_s)
             if raw_s.lower().startswith("temp-"):
                 resolved.append((item_data, None))
                 continue
@@ -230,9 +234,6 @@ async def update_control_plan(
             except (ValueError, AttributeError, TypeError) as e:
                 raise ValueError(f"非法 item_id（须为空、temp-* 或本 CP 的 UUID）: {raw_s}") from e
             sid = str(cand)
-            if sid in seen_req_ids:
-                raise ValueError(f"重复 item_id: {sid}")
-            seen_req_ids.add(sid)
             if sid not in existing_by_id:
                 raise ValueError(f"item_id 不属于当前控制计划: {sid}")
             resolved.append((item_data, sid))
