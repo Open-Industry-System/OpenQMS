@@ -169,7 +169,10 @@
     "adoptFailed": "采纳失败",
     "blocked": {
       "banner": "AI 推荐不可用——未配置 LLM 凭证。请联系管理员配置 /admin/ai-config"
-    }
+    },
+    "cause": "FMEA Cause",
+    "selectCause": "选择失效原因",
+    "linkFmeaFirst": "请先关联 FMEA"
   },
   "d5": {
     "title": "D5 纠正措施推荐",
@@ -286,7 +289,8 @@
     }
   },
   "relatedCapa": {
-    "title": "关联 CAPA"
+    "title": "关联 CAPA",
+    "empty": "无关联 8D"
   },
   "verification": {
     "method": {
@@ -378,5 +382,12 @@
     "colStatus": "状态",
     "colCoverage": "覆盖",
     "colBump": "版本变更"
+  },
+  "sources": {
+    "header": "文档关联",
+    "d4_cause": "D4 根因",
+    "d7_failure_mode": "D7 失效模式",
+    "d7_failure_cause": "D7 失效原因",
+    "d7_prevention": "D7 预防控制"
   }
 }

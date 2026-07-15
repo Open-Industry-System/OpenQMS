@@ -641,7 +641,7 @@ export default function CAPADetailPage() {
                   }}
                   onAdopted={() => refreshCapa()}
                 />
-                <D4VerificationCard capaId={id!} canEdit={canEdit('capa')} currentRootCause={localData.d4_root_cause} />
+                <D4VerificationCard capaId={id!} canEdit={canEdit('capa')} currentRootCause={localData.d4_root_cause} fmeaRefId={capa.fmea_ref_id ?? null} />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label", "根因分析 (5Why / 鱼骨图)"))}>
                     <TextArea

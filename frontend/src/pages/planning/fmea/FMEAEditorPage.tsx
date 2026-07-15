@@ -269,6 +269,7 @@ export default function FMEAEditorPage() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selectedFunctionId, setSelectedFunctionId] = useState<string | null>(null);
+  const [activeRelatedNodeId, setActiveRelatedNodeId] = useState<string | null>(null);
   const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [addNodeParent, setAddNodeParent] = useState<GraphNode | null>(null);
   const [addNodeAction, setAddNodeAction] = useState<StructureChildAction | null>(null);
@@ -779,6 +780,9 @@ export default function FMEAEditorPage() {
         setPendingHighlightNode(highlightParam);
       }
     }
+    if (highlightParam) {
+      setActiveRelatedNodeId(highlightParam);
+    }
   }, [searchParams]);
 
   // 如果图谱数据已缓存，直接应用待高亮节点
@@ -846,6 +850,7 @@ export default function FMEAEditorPage() {
       setEdges((prev) => [...prev, edge]);
       if (addNodeAction.kind === "function") {
         setSelectedFunctionId(node.id);
+        setActiveRelatedNodeId(node.id);
       }
       setAddNodeOpen(false);
     }).catch(() => { /* validation message shown by Form */ });
@@ -1679,7 +1684,10 @@ export default function FMEAEditorPage() {
                       isSelected={isSelected}
                       dragState={dragState}
                       canDragSortStructure={canDragSortStructure}
-                      onSelect={setSelectedFunctionId}
+                      onSelect={(id) => {
+                        setSelectedFunctionId(id);
+                        setActiveRelatedNodeId(id);
+                      }}
                       onRename={(id, field, value) => updateNode(id, field, value)}
                       onAddChild={openAddNode}
                       onDelete={deleteSubtreeNode}
@@ -1880,6 +1888,7 @@ export default function FMEAEditorPage() {
                     onNodeClick={(node) => {
                       setSelectedGraphNode(node);
                       setDrawerVisible(true);
+                      setActiveRelatedNodeId(node.id);
                     }}
                     onNodeContextMenu={(node, evt) => {
                       setContextMenuNode(node);
@@ -1988,16 +1997,7 @@ export default function FMEAEditorPage() {
           </Modal>
         </>},
         { key: "related-capa", label: t("tabs.relatedCapa"), children: <>
-          {selectedFunctionId ? (
-            <RelatedCAPAList
-              fmeaId={fmea!.fmea_id}
-              fmeaNodeId={selectedFunctionId}
-            />
-          ) : (
-            <Typography.Text type="secondary">
-              {t("messages.selectFailureModeFirst")}
-            </Typography.Text>
-          )}
+          <RelatedCAPAList fmeaId={fmea!.fmea_id} fmeaNodeId={activeRelatedNodeId ?? undefined} />
         </>},
         { key: "history", label: <span data-e2e="fmea-version-snapshot"><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
           <VersionHistoryTab
