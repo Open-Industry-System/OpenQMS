@@ -1,7 +1,7 @@
 """FMEA linkage reverse-lookup indexes (US-E2E-01.4)
 
 Revision ID: 20260715_fmea_linkage_indexes
-Revises: 20260715_cp_version_trigger
+Revises: 20260715_version_hash_backfill
 Create Date: 2026-07-15
 
 Adds partial/expression indexes for the three reverse-lookup sources (header
@@ -10,13 +10,13 @@ fmea_ref_id, D7 fmea_id+action, D4 source_ref JSONB paths).
 Note: audit_logs.action is already VARCHAR(50) via 20260710_widen_audit_action
 (model String(50)); this revision must not re-narrow/re-widen that column.
 
-down_revision chains after 20260715_cp_version_trigger (parent branch head)
-so merge into feature/us-e2e-01-spec-a does not create dual alembic heads.
+down_revision chains after 20260715_version_hash_backfill (parent branch head)
+so merge into feature/us-e2e-01-spec-a keeps a single alembic head.
 """
 from alembic import op
 
 revision = "20260715_fmea_linkage_indexes"
-down_revision = "20260715_cp_version_trigger"
+down_revision = "20260715_version_hash_backfill"
 branch_labels = None
 depends_on = None
 
