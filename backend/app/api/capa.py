@@ -734,6 +734,10 @@ async def create_verification_ep(
     check_product_line_access(capa.product_line_code, scope)
     try:
         rec = await capa_verification_service.create_verification(db, capa, req, scope.user)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return VerificationResponse.model_validate(rec)
@@ -773,6 +777,8 @@ async def update_verification_ep(
         rec = await capa_verification_service.update_verification(db, capa, vid, req, scope.user)
     except LookupError:
         raise HTTPException(status_code=404, detail="verification not found")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return VerificationResponse.model_validate(rec)
