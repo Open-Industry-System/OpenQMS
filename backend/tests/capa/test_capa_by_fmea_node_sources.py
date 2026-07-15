@@ -79,10 +79,16 @@ async def test_header_only(db, default_factory, admin_user):
 async def test_d7_prevention_only(db, default_factory, admin_user):
     fmea = await _mk_fmea(db, default_factory.id, admin_user.user_id)
     capa = await _mk_capa(db, default_factory.id, admin_user.user_id)
-    await _mk_d7_confirmed(db, capa, fmea, admin_user.user_id)
+    # FM is NOT NULL; no cause → multi-source yields mode + prevention
+    db.add(CapaD7NodeAction(
+        capa_id=capa.report_id, factory_id=capa.factory_id, action="confirmed",
+        fmea_id=fmea.fmea_id, failure_mode_node_id="fm-1",
+        failure_cause_node_id=None, prevention_control_node_id="pc-1",
+        match_source="linked", acted_by=admin_user.user_id,
+    )); await db.flush()
     res = await get_capas_by_fmea_node(db, str(fmea.fmea_id), None,
                                         accessible_factory_ids=[default_factory.id])
-    assert res[0]["link_sources"] == ["d7_prevention"]
+    assert res[0]["link_sources"] == ["d7_failure_mode", "d7_prevention"]
 
 
 @pytest.mark.asyncio
@@ -115,7 +121,10 @@ async def test_three_sources_merged_one_row(db, default_factory, admin_user):
     res = await get_capas_by_fmea_node(db, str(fmea.fmea_id), None,
                                         accessible_factory_ids=[default_factory.id])
     assert len(res) == 1
-    assert res[0]["link_sources"] == ["d4_cause", "d7_prevention", "header"]
+    # D7 multi-source union: confirmed action with fm/c/pc contributes all three tags
+    assert res[0]["link_sources"] == [
+        "d4_cause", "d7_failure_cause", "d7_failure_mode", "d7_prevention", "header",
+    ]
 
 
 @pytest.mark.asyncio
@@ -124,15 +133,20 @@ async def test_node_filter(db, default_factory, admin_user):
     capa = await _mk_capa(db, default_factory.id, admin_user.user_id)
     capa.fmea_ref_id = fmea.fmea_id; capa.fmea_node_id = "fm-1"; await db.flush()
     await _mk_d7_confirmed(db, capa, fmea, admin_user.user_id)
-    # node filter matches pc-1 → only D7 prevention source
+    # node filter matches pc-1 → D7 prevention source
     res = await get_capas_by_fmea_node(db, str(fmea.fmea_id), "pc-1",
                                         accessible_factory_ids=[default_factory.id])
     assert len(res) == 1
     assert res[0]["link_sources"] == ["d7_prevention"]
-    # node filter matches header node → only header
+    # node filter matches cause → D7 failure_cause
+    res_cause = await get_capas_by_fmea_node(db, str(fmea.fmea_id), "c-1",
+                                               accessible_factory_ids=[default_factory.id])
+    assert len(res_cause) == 1
+    assert "d7_failure_cause" in res_cause[0]["link_sources"]
+    # node filter matches fm-1 → header + d7_failure_mode (both match)
     res2 = await get_capas_by_fmea_node(db, str(fmea.fmea_id), "fm-1",
                                          accessible_factory_ids=[default_factory.id])
-    assert res2[0]["link_sources"] == ["header"]
+    assert res2[0]["link_sources"] == ["d7_failure_mode", "header"]
 
 
 @pytest.mark.asyncio

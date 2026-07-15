@@ -6,6 +6,12 @@ import { App, ConfigProvider } from "antd";
 import { MemoryRouter } from "react-router-dom";
 import D7RecPanel from "./D7RecPanel";
 
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useNavigate: () => mockNavigate };
+});
+
 vi.mock("../../api/capa", () => ({
   getD7Recommendations: vi.fn().mockResolvedValue({ recommendations: [
     { fmea_id: "f1", fmea_document_no: "PFMEA-1", failure_mode_node_id: "fm1", failure_mode_name: "虚焊",
@@ -18,7 +24,7 @@ vi.mock("../../api/capa", () => ({
   autoFillD7: vi.fn().mockResolvedValue({ action_id: "a2", prevention_control_node_id: "ctrl", prevention_control_name_after: "监控", is_new_control: true }),
 }));
 
-import { recordD7Action, autoFillD7, listD7Actions } from "../../api/capa";
+import { getD7Recommendations, recordD7Action, autoFillD7, listD7Actions } from "../../api/capa";
 
 const renderPanel = (props = {}) => render(
   <ConfigProvider><App><MemoryRouter>
@@ -58,5 +64,27 @@ describe("D7RecPanel", () => {
   it("reloads actions on mount (persistence)", async () => {
     renderPanel();
     await waitFor(() => expect(listD7Actions).toHaveBeenCalledWith("c1"));
+  });
+
+  it("deep-links to FMEA graph preferring prevention → cause → mode", async () => {
+    renderPanel();
+    await waitFor(() => expect(screen.getByTestId("d7-node-action-0")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d7-jump"));
+    expect(mockNavigate).toHaveBeenCalledWith("/fmea/f1?tab=graph&highlightNode=c1");
+
+    mockNavigate.mockClear();
+    vi.mocked(getD7Recommendations).mockResolvedValueOnce({
+      recommendations: [{
+        fmea_id: "f1", fmea_document_no: "PFMEA-1", failure_mode_node_id: "fm1", failure_mode_name: "虚焊",
+        failure_cause_node_id: "c1", failure_cause_name: "参数偏移",
+        prevention_control_node_id: "pc1", prevention_control_name: "防错夹具",
+        match_source: "linked", match_reason: "r", related_d4_keywords: [], suggested_prevention: null,
+      }],
+    });
+    renderPanel();
+    await waitFor(() => expect(screen.getAllByTestId("d7-node-action-0").length).toBeGreaterThan(0));
+    const jumps = screen.getAllByTestId("d7-jump");
+    fireEvent.click(jumps[jumps.length - 1]);
+    expect(mockNavigate).toHaveBeenCalledWith("/fmea/f1?tab=graph&highlightNode=pc1");
   });
 });

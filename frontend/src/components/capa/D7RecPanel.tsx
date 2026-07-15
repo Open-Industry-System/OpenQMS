@@ -109,7 +109,14 @@ export default function D7RecPanel({
 
   const handleJump = (rec: D7Recommendation) => {
     if (!rec.fmea_id) return;
-    navigate(`/fmea/${rec.fmea_id}?node=${rec.failure_mode_node_id}`);
+    const nodeId =
+      rec.prevention_control_node_id ||
+      rec.failure_cause_node_id ||
+      rec.failure_mode_node_id;
+    const url = nodeId
+      ? `/fmea/${rec.fmea_id}?tab=graph&highlightNode=${nodeId}`
+      : `/fmea/${rec.fmea_id}`;
+    navigate(url);
   };
 
   if (loading) return <Spin size="small" />;
@@ -136,6 +143,7 @@ export default function D7RecPanel({
             size="small"
             icon={<LinkOutlined />}
             disabled={!rec.fmea_id}
+            data-e2e="d7-jump"
             onClick={() => handleJump(rec)}
           >
             {t("d7.jump")}

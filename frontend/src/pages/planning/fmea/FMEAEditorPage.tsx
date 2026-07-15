@@ -1934,7 +1934,7 @@ export default function FMEAEditorPage() {
                 <Button
                   data-e2e="fmea-highlight-active"
                   data-highlight-node={highlightNodes[0]}
-                  onClick={() => { setHighlightNodes([]); setDimOthers(false); }}
+                  onClick={() => { setHighlightNodes([]); setDimOthers(false); setActiveRelatedNodeId(null); }}
                 >
                   {t("graph.clearHighlight")}
                 </Button>

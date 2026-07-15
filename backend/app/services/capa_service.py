@@ -933,9 +933,10 @@ async def get_capas_by_fmea_node(
         _add(c.report_id, "header")
 
     # 2. D7 (confirmed / auto_filled only)
-    # One primary source per action — prevention → cause → mode
-    # (matches write-path _linkage_node_for_rec). Node filter matches only
-    # when fmea_node_id equals that primary node.
+    # Reverse-lookup is multi-source union (design §5.1): with fmea_node_id,
+    # OR-match FM/cause/prevention and contribute each hit tag; without node,
+    # contribute all non-null d7_* sources. Write-path LINKAGE remains
+    # primary-only via _linkage_node_for_rec (prevention → cause → mode).
     dq = select(CapaD7NodeAction).where(
         CapaD7NodeAction.fmea_id == fmea_id,
         CapaD7NodeAction.action.in_(["confirmed", "auto_filled"]),
@@ -944,16 +945,21 @@ async def get_capas_by_fmea_node(
     if fpd is not None:
         dq = dq.where(fpd)
     for a in (await db.execute(dq)).scalars().all():
-        if a.prevention_control_node_id:
-            primary_node, primary_src = a.prevention_control_node_id, "d7_prevention"
-        elif a.failure_cause_node_id:
-            primary_node, primary_src = a.failure_cause_node_id, "d7_failure_cause"
-        elif a.failure_mode_node_id:
-            primary_node, primary_src = a.failure_mode_node_id, "d7_failure_mode"
-        else:
-            continue
-        if fmea_node_id is None or primary_node == fmea_node_id:
-            _add(a.capa_id, primary_src)
+        hits: list[str] = []
+        if a.prevention_control_node_id and (
+            fmea_node_id is None or a.prevention_control_node_id == fmea_node_id
+        ):
+            hits.append("d7_prevention")
+        if a.failure_cause_node_id and (
+            fmea_node_id is None or a.failure_cause_node_id == fmea_node_id
+        ):
+            hits.append("d7_failure_cause")
+        if a.failure_mode_node_id and (
+            fmea_node_id is None or a.failure_mode_node_id == fmea_node_id
+        ):
+            hits.append("d7_failure_mode")
+        if hits:
+            _add(a.capa_id, *hits)
 
     # 3. D4 source_ref
     vq = select(CapaRootCauseVerification, CAPAEightD).join(
