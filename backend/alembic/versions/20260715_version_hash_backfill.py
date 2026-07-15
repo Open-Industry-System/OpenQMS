@@ -96,6 +96,45 @@ def upgrade() -> None:
           )
     """)
 
+    # Demote current analyses whose passed decision snapshot hashes are now stale
+    # (C8 freshness check will reject the decision, so fail-close via demote).
+    op.execute("""
+        UPDATE capa_docg_analysis a
+        SET is_current = false,
+            error = COALESCE(error || ' | ', '') || 'demoted by hash backfill migration (decision snapshot stale)'
+        WHERE a.is_current = true
+          AND EXISTS (
+            SELECT 1 FROM capa_docg_decision dec
+            CROSS JOIN jsonb_array_elements(dec.version_snapshot) AS snap
+            WHERE dec.analysis_id = a.analysis_id
+              AND (snap->>'doc_type') = 'control_plan'
+              AND snap->>'sha256' IS NOT NULL
+              AND snap->>'version_after_id' IS NOT NULL
+              AND snap->>'sha256' <> (
+                  SELECT v.sha256_hash FROM control_plan_versions v
+                  WHERE v.version_id::text = snap->>'version_after_id'
+              )
+          )
+    """)
+    op.execute("""
+        UPDATE capa_docg_analysis a
+        SET is_current = false,
+            error = COALESCE(error || ' | ', '') || 'demoted by hash backfill migration (decision snapshot stale)'
+        WHERE a.is_current = true
+          AND EXISTS (
+            SELECT 1 FROM capa_docg_decision dec
+            CROSS JOIN jsonb_array_elements(dec.version_snapshot) AS snap
+            WHERE dec.analysis_id = a.analysis_id
+              AND (snap->>'doc_type') = 'fmea'
+              AND snap->>'sha256' IS NOT NULL
+              AND snap->>'version_after_id' IS NOT NULL
+              AND snap->>'sha256' <> (
+                SELECT v.sha256_hash FROM fmea_versions v
+                WHERE v.version_id::text = snap->>'version_after_id'
+            )
+          )
+    """)
+
 
 def downgrade() -> None:
     # Irreversible: compact hashes are not retained, so the app cannot safely

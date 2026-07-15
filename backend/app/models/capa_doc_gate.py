@@ -98,7 +98,7 @@ class CapaDocgDecision(Base):
             name="chk_docg_decision_defer",
         ),
         CheckConstraint(
-            "decision!='passed' OR waiver_reason IS NULL OR no_affected_confirmed=false",
+            "waiver_reason IS NULL OR (decision='passed' AND no_affected_confirmed=false)",
             name="chk_docg_waiver_only_passed",
         ),
         UniqueConstraint("analysis_id", "revision", name="uq_docg_decision_analysis_revision"),

@@ -56,7 +56,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import run_for_each_tenant
 from app.models.capa import CAPAEightD
-from app.models.capa_doc_gate import CapaDocgAnalysis
+from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
 from app.models.control_plan import ControlPlan
 from app.models.control_plan_version import ControlPlanVersion
 from app.services.version_service import get_latest_cp_version
@@ -112,12 +112,27 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             CapaDocgAnalysis.capa_id.in_(capa_ids),
         )
     )).scalars().all()
+    # Load analytics have an accepted waiver — waived analyses are not blocked
+    analysis_ids = [a.analysis_id for a in analyses]
+    waived_ids: set[uuid.UUID] = set()
+    if analysis_ids:
+        waiver_rows = (await db.execute(
+            select(CapaDocgDecision.analysis_id).where(
+                CapaDocgDecision.analysis_id.in_(analysis_ids),
+                CapaDocgDecision.waiver_reason.isnot(None),
+            )
+        )).scalars().all()
+        waived_ids = set(waiver_rows)
     analyzed_capa_ids: set[uuid.UUID] = set()
     for analysis in analyses:
         capa = capa_by_id.get(analysis.capa_id)
         if capa is None:
             continue
         analyzed_capa_ids.add(capa.report_id)
+        # Waived analyses: their blocked_modify key_points were accepted by a
+        # manager-approved waiver — do not report them (preflight consumes waiver).
+        if analysis.analysis_id in waived_ids:
+            continue
         if not analysis.affected_docs:
             continue
         for doc in analysis.affected_docs:

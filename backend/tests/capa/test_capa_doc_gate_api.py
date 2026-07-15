@@ -207,8 +207,10 @@ async def test_api_wrong_stage_rejected(admin_client, db, admin_user, default_fa
 
 @pytest.mark.asyncio
 async def test_api_waiver_passes_gate(admin_client, capa_with_done_analysis_no_bump):
-    """POST /doc-gate/waiver forces decision=passed → advance succeeds."""
+    """POST /doc-gate/waiver flips blocked→passed → advance succeeds."""
     capa, _ = capa_with_done_analysis_no_bump
+    # Run audit first (must be blocked for waiver to apply)
+    await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
     resp = await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
         json={"reason": "lineage break: delete+add intentional"},
@@ -224,8 +226,22 @@ async def test_api_waiver_passes_gate(admin_client, capa_with_done_analysis_no_b
 
 
 @pytest.mark.asyncio
+async def test_api_waiver_rejects_without_audit(admin_client, capa_with_done_analysis_no_bump):
+    """Waiver before running audit → 400 (no blocked decision to flip)."""
+    capa, _ = capa_with_done_analysis_no_bump
+    resp = await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/waiver",
+        json={"reason": "jumping the gun"},
+    )
+    assert resp.status_code == 400
+    assert "请先运行文档审核" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_api_waiver_rejects_missing_reason(admin_client, capa_with_done_analysis_no_bump):
     capa, _ = capa_with_done_analysis_no_bump
+    # audit first so the reason check is the rejection (not "no audit")
+    await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
     resp = await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
         json={"reason": "   "},
@@ -234,8 +250,26 @@ async def test_api_waiver_rejects_missing_reason(admin_client, capa_with_done_an
 
 
 @pytest.mark.asyncio
+async def test_api_waiver_rejects_on_deferred(admin_client, capa_with_done_analysis_no_bump):
+    """waiver on a deferred analysis → 400 (only blocked can be waived)."""
+    capa, user = capa_with_done_analysis_no_bump
+    await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
+    await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/defer",
+        json={"reason": "等待更新", "owner_id": str(user.user_id), "deadline": "2026-08-01"},
+    )
+    resp = await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/waiver",
+        json={"reason": "try to waiver deferred"},
+    )
+    assert resp.status_code == 400
+    assert "deferred" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_api_decision_includes_waiver_reason(admin_client, capa_with_done_analysis_no_bump):
     capa, _ = capa_with_done_analysis_no_bump
+    await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/audit")
     await admin_client.post(
         f"/api/capa/{capa.report_id}/doc-gate/waiver",
         json={"reason": "accepted break"},
@@ -244,3 +278,5 @@ async def test_api_decision_includes_waiver_reason(admin_client, capa_with_done_
     body = dec.json()
     assert body["decision"] == "passed"
     assert body["waiver_reason"] == "accepted break"
+
+

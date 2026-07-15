@@ -987,13 +987,12 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
 async def record_gate_waiver(
     db: AsyncSession, capa: CAPAEightD, reason: str, user_id: uuid.UUID
 ) -> dict:
-    """Record a waiver decision that forces the gate to passed.
+    """Flip the latest blocked audit decision to passed with a recorded reason.
 
     For blocked_modify lineage breaks where the only remediation is re-authoring
-    the CP under a new CAPA (state machine forbids archiving D8_GATE_PENDING
-    directly). This is the controlled, audited alternative to "ops waiver outside
-    the tool": a manager-authorized decision row that marks the gate passed with
-    a recorded reason, so the CAPA can advance to D8_APPROVAL_PENDING.
+    the CP under a new CAPA.  This is NOT an unconditional gate bypass — it
+    REQUIRES a prior blocked decision from run_audit(): the engineer must have
+    generated an analysis AND run the audit, which the waiver then overrules.
 
     Caller must require APPROVE permission on the capa module (enforced in API).
     """
@@ -1006,15 +1005,32 @@ async def record_gate_waiver(
     )
     if analysis is None:
         raise ValueError("未生成影响分析")
+    latest_decision = await db.scalar(
+        select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc()).limit(1)
+    )
+    if latest_decision is None:
+        raise ValueError("请先运行文档审核")
+    if latest_decision.decision != "blocked":
+        raise ValueError(f"当前决策状态为 {latest_decision.decision}，只能豁免已阻塞的审核")
     now = datetime.now(timezone.utc)
+    # Carry forward the blocked audit's version_snapshot (empty for blocked —
+    # preserved so the gate sees the original audit context).  audit_run_id
+    # links back to the same batch for traceability.
     await _insert_decision(
-        db, analysis.analysis_id, capa.factory_id, "passed", user_id, now, None, [],
+        db, analysis.analysis_id, capa.factory_id, "passed", user_id, now,
+        latest_decision.audit_run_id, latest_decision.version_snapshot or [],
         no_affected_confirmed=False, waiver_reason=reason,
     )
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_WAIVER",
-        changed_fields={"reason": reason, "decision": "passed", "waived": True},
+        changed_fields={
+            "reason": reason,
+            "decision_from": "blocked",
+            "decision_to": "passed",
+            "audit_run_id": str(latest_decision.audit_run_id) if latest_decision.audit_run_id else None,
+        },
         operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
     ))
     await db.commit()
-    return {"decision": "passed", "waiver_reason": reason}
+    return {"decision": "passed", "waiver_reason": reason, "audit_run_id": str(latest_decision.audit_run_id) if latest_decision.audit_run_id else None}

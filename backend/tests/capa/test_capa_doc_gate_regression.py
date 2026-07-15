@@ -264,10 +264,12 @@ def test_cp_sibling_items_same_source_delete_one():
 
 @pytest.mark.asyncio
 async def test_record_gate_waiver_inserts_passed_decision_with_reason(db, capa_with_done_analysis_no_bump):
-    """Waiver forces passed decision + waiver_reason + DOC_GATE_WAIVER audit."""
+    """Waiver flips blocked→passed + waiver_reason + DOC_GATEWIRE audit."""
     from app.models.capa_doc_gate import CapaDocgDecision
     from app.services import capa_doc_gate_service
     capa, user = capa_with_done_analysis_no_bump
+    # Must run audit first — waiver requires a blocked decision to flip
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
     result = await capa_doc_gate_service.record_gate_waiver(
         db, capa, "lineage break accepted: delete+add intentional", user.user_id
     )
@@ -302,9 +304,10 @@ async def test_record_gate_waiver_requires_analysis(db, capa_d8_gate):
 
 @pytest.mark.asyncio
 async def test_waiver_passed_decision_unblocks_gate(db, capa_with_done_analysis_no_bump):
-    """After waiver, _d8_doc_gate_gate must not raise (decision=passed)."""
+    """After waiver (blocked→passed), _d8_doc_gate_gate must not raise."""
     from app.services import capa_doc_gate_service, capa_service
     capa, user = capa_with_done_analysis_no_bump
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)  # creates blocked decision
     await capa_doc_gate_service.record_gate_waiver(db, capa, "accepted", user.user_id)
     # Gate should now pass C9 (no input change) + decision=passed. C8 has no
     # version_snapshot (waiver), so gate reaches the decision check and passes.
