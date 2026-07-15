@@ -16,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 import pytest
 from sqlalchemy import select, text
 
+from app.models.audit import AuditLog
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
 from app.services import capa_doc_gate_service
 from app.services.capa_doc_gate_service import (
@@ -259,6 +260,55 @@ def test_cp_sibling_items_same_source_delete_one():
     kp = {"expected_action": "delete", "target_kind": "cp_item",
           "field": "control_method", "target_key": "ia"}
     assert _match_key_point(kp, {"items": d}, latest=None, doc_type="control_plan") is True
+
+
+@pytest.mark.asyncio
+async def test_record_gate_waiver_inserts_passed_decision_with_reason(db, capa_with_done_analysis_no_bump):
+    """Waiver forces passed decision + waiver_reason + DOC_GATE_WAIVER audit."""
+    from app.models.capa_doc_gate import CapaDocgDecision
+    from app.services import capa_doc_gate_service
+    capa, user = capa_with_done_analysis_no_bump
+    result = await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "lineage break accepted: delete+add intentional", user.user_id
+    )
+    assert result["decision"] == "passed"
+    assert "lineage break" in result["waiver_reason"]
+    dec = (await db.execute(
+        select(CapaDocgDecision).order_by(CapaDocgDecision.revision.desc())
+    )).scalars().first()
+    assert dec.decision == "passed"
+    assert dec.waiver_reason is not None
+    assert dec.no_affected_confirmed is False
+    audits = (await db.execute(select(AuditLog).where(AuditLog.action == "DOC_GATE_WAIVER"))).scalars().all()
+    assert len(audits) == 1
+
+
+@pytest.mark.asyncio
+async def test_record_gate_waiver_requires_reason(db, capa_with_done_analysis_no_bump):
+    from app.services import capa_doc_gate_service
+    capa, user = capa_with_done_analysis_no_bump
+    with pytest.raises(ValueError, match="waiver reason 必填"):
+        await capa_doc_gate_service.record_gate_waiver(db, capa, "  ", user.user_id)
+
+
+@pytest.mark.asyncio
+async def test_record_gate_waiver_requires_analysis(db, capa_d8_gate):
+    """No current analysis → raise (cannot waive a non-existent gate)."""
+    from app.services import capa_doc_gate_service
+    capa, user = capa_d8_gate
+    with pytest.raises(ValueError, match="未生成影响分析"):
+        await capa_doc_gate_service.record_gate_waiver(db, capa, "r", user.user_id)
+
+
+@pytest.mark.asyncio
+async def test_waiver_passed_decision_unblocks_gate(db, capa_with_done_analysis_no_bump):
+    """After waiver, _d8_doc_gate_gate must not raise (decision=passed)."""
+    from app.services import capa_doc_gate_service, capa_service
+    capa, user = capa_with_done_analysis_no_bump
+    await capa_doc_gate_service.record_gate_waiver(db, capa, "accepted", user.user_id)
+    # Gate should now pass C9 (no input change) + decision=passed. C8 has no
+    # version_snapshot (waiver), so gate reaches the decision check and passes.
+    await capa_service._d8_doc_gate_gate(db, capa)
 
 
 @pytest.mark.asyncio

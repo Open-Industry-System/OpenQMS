@@ -63,7 +63,7 @@ from app.schemas.capa_verification import (
 )
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.schemas.recommendation_stage import StageRunSchema
-from app.schemas.capa_doc_gate import DeferRequest, DocGateDecisionResponse
+from app.schemas.capa_doc_gate import DeferRequest, DocGateDecisionResponse, WaiverRequest
 from app.services import capa_d3_containment_service
 from app.services import capa_d7_action_service
 from app.services import capa_doc_gate_service
@@ -1807,5 +1807,31 @@ async def doc_gate_get_decision_ep(
         defer_reason=dec.defer_reason,
         defer_owner=str(dec.defer_owner) if dec.defer_owner else None,
         defer_deadline=str(dec.defer_deadline) if dec.defer_deadline else None,
+        waiver_reason=dec.waiver_reason,
         decided_at=dec.decided_at.isoformat() if dec.decided_at else None,
     )
+
+
+@router.post("/{report_id}/doc-gate/waiver")
+async def doc_gate_waiver_ep(
+    report_id: uuid.UUID,
+    body: WaiverRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/waiver: manager-authorized waiver forcing gate passed.
+
+    For blocked_modify lineage breaks where the only remediation is re-authoring
+    the CP under a new CAPA (state machine forbids archiving D8_GATE_PENDING
+    directly). Requires APPROVE permission on the capa module. Audited via
+    DOC_GATE_WAIVER + decision row (waiver_reason).
+    """
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.APPROVE)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.record_gate_waiver(
+            db, capa, body.reason, scope.user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result

@@ -23,14 +23,20 @@ Deploy: run against TARGET DB (DATABASE_URL), not TEST_DATABASE_URL.
 
 Remediation (executable — re-analysis alone never changes CAPA-time baseline):
   blocked_modify:
-    (a) Close/archive this CAPA; open a NEW CAPA after CP is saved with
-        item_id-preserving path so the new CAPA freezes current ids as baseline.
-    (b) Demote current analysis and re-generate only if the new analysis no
-        longer requires modify of disconnected ids (empty list + confirm_no_affected,
-        or only add/delete/document key_points).
-    (c) Ops waiver outside this tool (no automated waiver table yet).
+    (a) Re-author the CP under the item_id-preserving save path, then demote the
+        current analysis and regenerate so a NEW current analysis references
+        continuing ids. (Note: baseline is frozen at capa.created_at — only NEW
+        CAPAs created after the CP re-save get a clean baseline; for an existing
+        blocked CAPA use (b).)
+    (b) Manager-authorized waiver: POST /capa/{id}/doc-gate/waiver {reason}.
+        Requires APPROVE permission on the capa module. Audited (DOC_GATE_WAIVER
+        + decision row with waiver_reason) and forces decision=passed so the
+        CAPA can advance to D8_APPROVAL_PENDING. Use when the break is an
+        intentional delete+add that the team accepts.
+    The state machine forbids archiving D8_GATE_PENDING directly, so (a)/(b)
+    are the only on-rails paths — do NOT attempt to close the CAPA to clear it.
   potential_disconnect:
-    Same (a)/(b) before this CAPA reaches D8 with modify key_points on those ids.
+    (a)/(b) before this CAPA reaches D8 with modify key_points on those ids.
 
 Usage:
     python -m app.services.capa_doc_gate_preflight
@@ -203,12 +209,11 @@ async def run_preflight(json_output: bool = False, strict_potential: bool = Fals
                     print(f"      CP {b['cp_id']}: modify target_key={b['blocked_modify_target_key']} "
                           f"field={b['blocked_field']} absent from latest v{b['latest_version_id']}")
                     print("      Executable remediation (re-analysis alone NEVER changes CAPA-time baseline):")
-                    print("        (a) Archive this CAPA; open a NEW CAPA after CP is saved with")
-                    print("            item_id-preserving path so the new CAPA freezes current ids.")
-                    print("        (b) Demote current analysis and re-generate only if the new analysis")
-                    print("            no longer needs modify of disconnected ids (empty+confirm, or")
-                    print("            only add/delete/document key_points).")
-                    print("        (c) Ops waiver outside this tool (no automated waiver table).")
+                    print("        (a) Re-author CP (item_id-preserving) + demote & regenerate analysis")
+                    print("            so the new current analysis references continuing ids.")
+                    print("        (b) Manager waiver: POST /capa/{id}/doc-gate/waiver {reason}")
+                    print("            (APPROVE permission; audited; forces gate passed).")
+                    print("        State machine forbids archiving D8_GATE_PENDING directly.")
             if potential:
                 print(f"doc-gate CP lineage preflight: {len(potential)} POTENTIAL disconnect(s) "
                       f"(WARN only; exit 0 unless --strict-potential):")

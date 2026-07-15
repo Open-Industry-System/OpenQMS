@@ -203,3 +203,44 @@ async def test_api_wrong_stage_rejected(admin_client, db, admin_user, default_fa
     resp = await admin_client.post(f"/api/capa/{capa.report_id}/doc-gate/impact")
     assert resp.status_code == 400
     assert "D8_GATE_PENDING" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_api_waiver_passes_gate(admin_client, capa_with_done_analysis_no_bump):
+    """POST /doc-gate/waiver forces decision=passed → advance succeeds."""
+    capa, _ = capa_with_done_analysis_no_bump
+    resp = await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/waiver",
+        json={"reason": "lineage break: delete+add intentional"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["decision"] == "passed"
+    # advance should now pass the doc gate
+    adv = await admin_client.post(
+        f"/api/capa/{capa.report_id}/advance",
+        json={"target_state": "D8_APPROVAL_PENDING"},
+    )
+    assert adv.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_api_waiver_rejects_missing_reason(admin_client, capa_with_done_analysis_no_bump):
+    capa, _ = capa_with_done_analysis_no_bump
+    resp = await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/waiver",
+        json={"reason": "   "},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_api_decision_includes_waiver_reason(admin_client, capa_with_done_analysis_no_bump):
+    capa, _ = capa_with_done_analysis_no_bump
+    await admin_client.post(
+        f"/api/capa/{capa.report_id}/doc-gate/waiver",
+        json={"reason": "accepted break"},
+    )
+    dec = await admin_client.get(f"/api/capa/{capa.report_id}/doc-gate/decision")
+    body = dec.json()
+    assert body["decision"] == "passed"
+    assert body["waiver_reason"] == "accepted break"

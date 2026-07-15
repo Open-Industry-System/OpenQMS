@@ -217,6 +217,93 @@ async def test_create_cp_version_production_path_ok(db, capa_d8_gate):
 
 
 @pytest.mark.asyncio
+async def test_verify_fmea_version_accepts_legacy_compact_hash(db, capa_d8_gate):
+    """FMEA historical compact-JSON hashes must still verify (dual-algorithm)."""
+    from app.models.fmea import FMEADocument
+    from app.models.fmea_version import FMEAVersion
+    from app.services.version_service import compute_snapshot_hash, verify_fmea_version
+    from sqlalchemy import text as _text
+    capa, user = capa_d8_gate
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-LEG-{uuid.uuid4().hex[:6]}",
+        title="t", fmea_type="PFMEA", product_line_code="DC-DC-100",
+        factory_id=capa.factory_id, status="approved",
+        created_by=user.user_id, graph_data={"nodes": [], "edges": []},
+    )
+    db.add(fmea)
+    await db.flush()
+    snap = {"nodes": [{"id": "n1"}], "edges": []}
+    ver = FMEAVersion(
+        version_id=uuid.uuid4(), fmea_id=fmea.fmea_id, factory_id=capa.factory_id,
+        major_no=1, minor_no=0, snapshot=snap, sha256_hash="placeholder",
+        change_type="approve", change_summary="legacy", created_by=user.user_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ver)
+    await db.flush()
+    compact = compute_snapshot_hash(snap)
+    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER trg_fmea_version_no_update"))
+    await db.execute(_text(
+        "UPDATE fmea_versions SET sha256_hash=:h WHERE version_id=:vid"
+    ), {"h": compact, "vid": ver.version_id})
+    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER trg_fmea_version_no_update"))
+    await db.refresh(ver)
+    assert ver.sha256_hash == compact
+    assert await verify_fmea_version(db, ver.version_id) is True
+
+
+@pytest.mark.asyncio
+async def test_hash_backfill_demotes_stale_current_analysis(db, capa_with_done_analysis_and_bumped_doc):
+    """When a version row's hash no longer matches the embedded baseline hash in
+    a current analysis, the demote logic (run by the backfill migration) must set
+    is_current=false so the gate fails closed until regeneration."""
+    from app.models.capa_doc_gate import CapaDocgAnalysis
+    from sqlalchemy import text as _text
+    capa, user = capa_with_done_analysis_and_bumped_doc
+    analysis = (await db.execute(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True  # noqa: E712
+        )
+    )).scalar_one()
+    assert analysis.is_current is True
+    # Simulate pre-backfill mismatch: rewrite the FMEA version row hash to a
+    # different value so embedded baseline sha != version row hash.
+    embedded = None
+    bvid = None
+    for d in analysis.affected_docs:
+        bv = d.get("baseline_version")
+        if bv and bv.get("sha256"):
+            embedded = bv["sha256"]
+            bvid = d.get("baseline_version_id")
+            break
+    assert embedded is not None and bvid is not None
+    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER trg_fmea_version_no_update"))
+    await db.execute(_text(
+        "UPDATE fmea_versions SET sha256_hash='pre_backfill_mismatch_value' "
+        "WHERE version_id=:vid"
+    ), {"vid": bvid})
+    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER trg_fmea_version_no_update"))
+    # Run the same demote logic the migration uses
+    await db.execute(_text("""
+        UPDATE capa_docg_analysis a
+        SET is_current = false
+        WHERE a.is_current = true
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements(a.affected_docs) AS d
+            WHERE (d->>'doc_type') = 'fmea'
+              AND d->'baseline_version'->>'sha256' IS NOT NULL
+              AND d->'baseline_version'->>'sha256' <> (
+                SELECT v.sha256_hash FROM fmea_versions v
+                WHERE v.version_id::text = d->>'baseline_version_id'
+              )
+          )
+    """))
+    await db.flush()
+    await db.refresh(analysis)
+    assert analysis.is_current is False
+
+
+@pytest.mark.asyncio
 async def test_cp_version_trigger_binds_content_and_verify_accepts_pg_hash(db, capa_d8_gate):
     """Trigger overwrites sha256_hash from content; verify accepts PG digest."""
     from app.models.control_plan_version import ControlPlanVersion

@@ -57,6 +57,16 @@ docker compose exec backend alembic upgrade head
 docker compose exec backend python -m app.seed
 ```
 
+> ⚠️ **D8 文档门禁部署前置检查（US-E2E-01.7）**：每次发布到生产前，**必须**对目标
+> 数据库运行 `make deploy-check`（= `make check` + `make doc-gate-preflight`）。
+> preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
+> key_point（baseline item_id 在 latest 版本中已消失），exit 1 阻止部署。
+> 处置：重新用 item_id 保留路径保存 CP 后重新生成 analysis，或对接受的 delete+add
+> 用 `POST /capa/{id}/doc-gate/waiver`（需 APPROVE 权限、留痕）放行。详见
+> `backend/app/services/capa_doc_gate_preflight.py` 与 §门禁处置。
+> 单元 CI 只跑 `make check`（pytest + tsc + build），**不**含数据 preflight；
+> preflight 必须针对**目标环境的 DATABASE_URL**运行，不能用测试库冒充。
+
 ### 1.5 访问
 
 | 服务 | 地址 |

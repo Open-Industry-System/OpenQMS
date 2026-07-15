@@ -711,9 +711,11 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
 
 
 async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, audit_run_id, version_snapshot,
-                          defer_reason=None, defer_owner=None, defer_deadline=None, no_affected_confirmed=False):
+                          defer_reason=None, defer_owner=None, defer_deadline=None, no_affected_confirmed=False,
+                          waiver_reason=None):
     """Lock analysis row, read max revision, insert revision+1 (UQ (analysis_id, revision) guards concurrency).
-    defer fields + no_affected_confirmed passed at insert time (CHECK requires defer fields present for deferred)."""
+    defer fields + no_affected_confirmed + waiver_reason passed at insert time (CHECK requires defer fields
+    present for deferred; waiver only on passed)."""
     await db.execute(text("SELECT 1 FROM capa_docg_analysis WHERE analysis_id=:aid FOR UPDATE"), {"aid": analysis_id})
     max_rev = await db.scalar(
         select(CapaDocgDecision.revision).where(CapaDocgDecision.analysis_id == analysis_id)
@@ -724,7 +726,7 @@ async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, 
         revision=(max_rev if max_rev is not None else -1) + 1,
         factory_id=factory_id, decision=decision, version_snapshot=version_snapshot,
         defer_reason=defer_reason, defer_owner=defer_owner, defer_deadline=defer_deadline,
-        no_affected_confirmed=no_affected_confirmed,
+        no_affected_confirmed=no_affected_confirmed, waiver_reason=waiver_reason,
         decided_by=user_id, decided_at=now,
     ))
 
@@ -980,3 +982,39 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
     ))
     await db.commit()
     return {"decision": "passed", "no_affected_confirmed": True}
+
+
+async def record_gate_waiver(
+    db: AsyncSession, capa: CAPAEightD, reason: str, user_id: uuid.UUID
+) -> dict:
+    """Record a waiver decision that forces the gate to passed.
+
+    For blocked_modify lineage breaks where the only remediation is re-authoring
+    the CP under a new CAPA (state machine forbids archiving D8_GATE_PENDING
+    directly). This is the controlled, audited alternative to "ops waiver outside
+    the tool": a manager-authorized decision row that marks the gate passed with
+    a recorded reason, so the CAPA can advance to D8_APPROVAL_PENDING.
+
+    Caller must require APPROVE permission on the capa module (enforced in API).
+    """
+    if not reason or not str(reason).strip():
+        raise ValueError("waiver reason 必填")
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
+        )
+    )
+    if analysis is None:
+        raise ValueError("未生成影响分析")
+    now = datetime.now(timezone.utc)
+    await _insert_decision(
+        db, analysis.analysis_id, capa.factory_id, "passed", user_id, now, None, [],
+        no_affected_confirmed=False, waiver_reason=reason,
+    )
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_WAIVER",
+        changed_fields={"reason": reason, "decision": "passed", "waived": True},
+        operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
+    ))
+    await db.commit()
+    return {"decision": "passed", "waiver_reason": reason}

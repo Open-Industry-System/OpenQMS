@@ -97,6 +97,10 @@ class CapaDocgDecision(Base):
             "OR (decision IN ('passed','blocked') AND defer_reason IS NULL AND defer_owner IS NULL AND defer_deadline IS NULL)",
             name="chk_docg_decision_defer",
         ),
+        CheckConstraint(
+            "decision!='passed' OR waiver_reason IS NULL OR no_affected_confirmed=false",
+            name="chk_docg_waiver_only_passed",
+        ),
         UniqueConstraint("analysis_id", "revision", name="uq_docg_decision_analysis_revision"),
         ForeignKeyConstraint(
             ["analysis_id", "factory_id"],
@@ -116,6 +120,7 @@ class CapaDocgDecision(Base):
     defer_reason: Mapped[str | None] = mapped_column(Text)
     defer_owner: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
     defer_deadline: Mapped[date | None] = mapped_column(Date)
+    waiver_reason: Mapped[str | None] = mapped_column(Text)
     decided_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="RESTRICT"), nullable=False)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

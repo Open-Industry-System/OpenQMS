@@ -10,6 +10,10 @@ class DeferRequest(BaseModel):
     deadline: str  # ISO date YYYY-MM-DD
 
 
+class WaiverRequest(BaseModel):
+    reason: str = Field(..., min_length=1)
+
+
 class DocGateDecisionResponse(BaseModel):
     decision: str | None = None
     no_affected_confirmed: bool = False
@@ -18,4 +22,5 @@ class DocGateDecisionResponse(BaseModel):
     defer_reason: str | None = None
     defer_owner: str | None = None
     defer_deadline: str | None = None
+    waiver_reason: str | None = None
     decided_at: str | None = None
