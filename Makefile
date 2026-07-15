@@ -35,8 +35,10 @@ help:
 	@echo "  check-frontend-tsc    — tsc --noEmit only"
 	@echo "  check-frontend-build  — vite build only"
 
-# doc-gate-preflight is part of the release gate (US-E2E-01.7): exit 1 blocks deploy.
-check: check-backend check-frontend doc-gate-preflight
+# check = code consistency only (pytest + tsc + build). Data preflight is
+# separate: make doc-gate-preflight (run against the TARGET deploy DB, not
+# the test DB — it uses DATABASE_URL / app.database, not TEST_DATABASE_URL).
+check: check-backend check-frontend
 
 check-backend:
 	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTEST) tests/ -v $(PYTEST_IGNORES)
@@ -44,10 +46,9 @@ check-backend:
 check-frontend: check-frontend-tsc check-frontend-build
 
 # ── D8 doc-gate CP lineage preflight (US-E2E-01.7) ──────────────────────────
-# Scans all open CAPAs across tenants for cp_item modify key_points whose
-# target_key (item_id) is absent from the latest CP version snapshot. Such
-# pairs can never pass the doc-gate modify check. Exit 1 blocks deployment.
-# Run before deploy / release cuts. Needs DB reachable via DATABASE_URL.
+# Run against the TARGET environment DB (DATABASE_URL), not the test DB.
+# Exit 1 = blocked modify key_points or potential baseline/latest disconnects.
+# Wire this into the deploy/release pipeline (not `make check` / unit CI).
 doc-gate-preflight:
 	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi) -m app.services.capa_doc_gate_preflight
 

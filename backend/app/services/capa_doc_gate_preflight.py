@@ -181,16 +181,19 @@ async def run_preflight(json_output: bool = False) -> int:
                       f"({b['capa_id']}, {b['capa_status']})")
                 print(f"      CP {b['cp_id']}: modify target_key={b['blocked_modify_target_key']} "
                       f"field={b['blocked_field']} absent from latest v{b['latest_version_id']}")
-                print("      → cannot pass doc-gate. Demote/delete the stale current analysis; "
-                      "re-author CP under the item_id-preserving save path, then regenerate analysis.")
+                print("      → cannot pass doc-gate. Options: (1) demote current analysis and "
+                      "re-author CP under the item_id-preserving save path so a NEW baseline "
+                      "version is frozen at re-analysis time; (2) file a waiver for this CAPA "
+                      "if the break is intentional delete+add. Re-analysis alone does NOT help "
+                      "if the CAPA creation-time baseline still has the old ids.")
             else:
                 print(f"  - [{b['tenant_schema']}] CAPA {b['capa_document_no']} "
                       f"({b['capa_id']}, {b['capa_status']}) [no analysis yet]")
                 print(f"      CP {b['cp_id']}: baseline item_ids share NONE with latest "
                       f"(baseline={b['baseline_version_id']}, latest={b['latest_version_id']})")
                 print("      → any future modify key_point on baseline ids will fail. "
-                      "Re-save CP (item_id-preserving) so a new latest version continues "
-                      "current ids, or accept that only delete/add/document paths can pass.")
+                      "Options: re-author the CP (item_id-preserving) before CAPA reaches "
+                      "D8, or plan to only use delete/add/document key_points for this CAPA.")
     return 1 if all_breaks else 0
 
 

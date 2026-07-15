@@ -9,7 +9,7 @@ import hashlib
 import json
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
@@ -25,21 +25,36 @@ from app.state_machines.eightd_state import capa_open_clause
 # ---------------------------------------------------------------------------
 
 def _canonical_json(data: dict | list) -> str:
-    """Produce a deterministic JSON string for hashing.
+    """Legacy compact JSON (kept for non-DB callers / tests).
 
-    Sorts keys, uses ensure_ascii=False for Chinese text, and strips
-    trailing whitespace to avoid platform-dependent differences.
+    Version-table integrity uses compute_pg_jsonb_hash (matches the
+    verify_version_hash trigger: encode(digest(jsonb::text,'sha256'),'hex')).
     """
     return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def compute_snapshot_hash(snapshot: dict | list) -> str:
-    """Return hex SHA-256 digest of *snapshot*."""
+    """Legacy compact-JSON hash. Prefer compute_pg_jsonb_hash for version rows."""
     return hashlib.sha256(_canonical_json(snapshot).encode("utf-8")).hexdigest()
 
 
+async def compute_pg_jsonb_hash(db: AsyncSession, payload: dict | list) -> str:
+    """SHA-256 of PostgreSQL jsonb::text — matches verify_version_hash trigger.
+
+    Trigger sets sha256_hash = encode(digest(payload::text, 'sha256'), 'hex')
+    where payload is NEW.snapshot (FMEA) or jsonb_build_object('header',...,'items',...)
+    (CP). App must use the same digest so pre-insert values and post-insert
+    verification agree.
+    """
+    result = await db.execute(
+        text("SELECT encode(digest(CAST(:p AS JSONB)::text, 'sha256'), 'hex')"),
+        {"p": json.dumps(payload, ensure_ascii=False)},
+    )
+    return result.scalar_one()
+
+
 def verify_snapshot_hash(snapshot: dict | list, stored_hash: str) -> bool:
-    """Return True when the snapshot matches the stored SHA-256 hash."""
+    """Legacy compact-JSON verify. Version rows should use verify_version_row_hash."""
     return compute_snapshot_hash(snapshot) == stored_hash
 
 
@@ -82,7 +97,8 @@ async def _create_fmea_version_no_commit(
         minor_no += 1
 
     snapshot = fmea.graph_data
-    sha256_hash = compute_snapshot_hash(snapshot)
+    # Content-bound hash via PG jsonb::text (matches verify_version_hash trigger)
+    sha256_hash = await compute_pg_jsonb_hash(db, snapshot)
 
     version = FMEAVersion(
         version_id=uuid.uuid4(),
@@ -180,14 +196,15 @@ async def get_fmea_version(
 
 
 async def verify_fmea_version(db: AsyncSession, version_id: uuid.UUID) -> bool:
-    """Verify the SHA-256 hash of a stored FMEA version snapshot."""
+    """Verify the SHA-256 hash of a stored FMEA version snapshot (PG jsonb::text)."""
     result = await db.execute(
         select(FMEAVersion).where(FMEAVersion.version_id == version_id)
     )
     version = result.scalar_one_or_none()
     if version is None:
         raise ValueError(f"FMEA version {version_id} not found.")
-    return verify_snapshot_hash(version.snapshot, version.sha256_hash)
+    expected = await compute_pg_jsonb_hash(db, version.snapshot)
+    return expected == version.sha256_hash
 
 
 # ---------------------------------------------------------------------------
@@ -278,9 +295,9 @@ async def create_cp_version(
             "sort_order": item.sort_order,
         })
 
-    # Compute hash over combined data
+    # Content-bound hash via PG jsonb::text (matches verify_version_hash trigger)
     combined = {"header": header_snapshot, "items": items_snapshot}
-    sha256_hash = compute_snapshot_hash(combined)
+    sha256_hash = await compute_pg_jsonb_hash(db, combined)
 
     version = ControlPlanVersion(
         version_id=uuid.uuid4(),
@@ -367,7 +384,7 @@ async def get_cp_version(
 
 
 async def verify_cp_version(db: AsyncSession, version_id: uuid.UUID) -> bool:
-    """Verify the SHA-256 hash of a stored CP version snapshot."""
+    """Verify the SHA-256 hash of a stored CP version snapshot (PG jsonb::text)."""
     result = await db.execute(
         select(ControlPlanVersion).where(ControlPlanVersion.version_id == version_id)
     )
@@ -375,7 +392,8 @@ async def verify_cp_version(db: AsyncSession, version_id: uuid.UUID) -> bool:
     if version is None:
         raise ValueError(f"Control Plan version {version_id} not found.")
     combined = {"header": version.header_snapshot, "items": version.items_snapshot}
-    return verify_snapshot_hash(combined, version.sha256_hash)
+    expected = await compute_pg_jsonb_hash(db, combined)
+    return expected == version.sha256_hash
 
 
 # ---------------------------------------------------------------------------

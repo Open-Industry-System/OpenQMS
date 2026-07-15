@@ -45,11 +45,12 @@ async def _seed_cp_with_version(db, factory_id, user_id, item_ids, created_at):
 
 async def _insert_cp_version(db, cp_id, factory_id, user_id, major, minor, items, created_at=None,
                              change_type="minor", change_summary="rebuild"):
-    """Insert a CP version the same way production does: app compact-hash + ORM fields."""
+    """Insert a CP version via production path: PG jsonb::text hash + ORM."""
     from app.models.control_plan_version import ControlPlanVersion
-    from app.services.version_service import compute_snapshot_hash
+    from app.services.version_service import compute_pg_jsonb_hash
     header = {}
     combined = {"header": header, "items": items}
+    sha = await compute_pg_jsonb_hash(db, combined)
     ver = ControlPlanVersion(
         version_id=uuid.uuid4(),
         cp_id=cp_id,
@@ -57,8 +58,8 @@ async def _insert_cp_version(db, cp_id, factory_id, user_id, major, minor, items
         major_no=major,
         minor_no=minor,
         header_snapshot=header,
-        items_snapshot=items,  # create_cp_version stores the list, not {"items":...}
-        sha256_hash=compute_snapshot_hash(combined),
+        items_snapshot=items,
+        sha256_hash=sha,
         change_type=change_type,
         change_summary=change_summary,
         created_by=user_id,
@@ -188,8 +189,8 @@ async def test_preflight_no_analysis_reports_potential_disconnect(db, capa_d8_ga
 
 @pytest.mark.asyncio
 async def test_create_cp_version_production_path_ok(db, capa_d8_gate):
-    """Regression: create_cp_version must succeed after trigger fix (app compact hash)."""
-    from app.services.version_service import create_cp_version
+    """Regression: create_cp_version must succeed after trigger fix (PG jsonb hash)."""
+    from app.services.version_service import create_cp_version, verify_cp_version
     from app.models.control_plan import ControlPlanItem
     capa, user = capa_d8_gate
     cp = ControlPlan(
@@ -212,4 +213,40 @@ async def test_create_cp_version_production_path_ok(db, capa_d8_gate):
     ver = await create_cp_version(db, cp, "approve", "ok", user.user_id)
     assert ver.sha256_hash
     assert ver.major_no == 1
+    assert await verify_cp_version(db, ver.version_id) is True
+
+
+@pytest.mark.asyncio
+async def test_cp_version_trigger_rejects_empty_hash_and_binds_content(db, capa_d8_gate):
+    """Trigger overwrites sha256_hash from content — forged/empty values cannot stick."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services.version_service import compute_pg_jsonb_hash
+    capa, user = capa_d8_gate
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-HASH-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=capa.factory_id,
+        status="draft",
+        created_by=user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+    header = {"title": "t"}
+    items = [{"item_id": "i1", "control_method": "m"}]
+    # Insert with deliberately wrong hash — trigger must overwrite with content digest
+    ver = ControlPlanVersion(
+        version_id=uuid.uuid4(), cp_id=cp.cp_id, factory_id=capa.factory_id,
+        major_no=1, minor_no=0, header_snapshot=header, items_snapshot=items,
+        sha256_hash="x" * 64,  # forged
+        change_type="approve", change_summary="forge", created_by=user.user_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ver)
+    await db.flush()
+    await db.refresh(ver)
+    expected = await compute_pg_jsonb_hash(db, {"header": header, "items": items})
+    assert ver.sha256_hash == expected
+    assert ver.sha256_hash != "x" * 64
 
