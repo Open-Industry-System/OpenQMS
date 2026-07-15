@@ -204,15 +204,46 @@ async def update_control_plan(
 
     # Handle items replacement if provided
     if data.items is not None:
-        # Check if items actually changed before replacing
+        import json
         items_result = await db.execute(
             select(ControlPlanItem).where(ControlPlanItem.cp_id == cp.cp_id)
         )
         existing_items = list(items_result.scalars().all())
+        existing_by_id = {str(i.item_id): i for i in existing_items}
+
+        # Always validate IDs first (even when content looks unchanged) so
+        # duplicate / foreign / garbage IDs cannot bypass checks via
+        # items_changed == false. Only empty or temp-* may mean "new".
+        resolved: list[tuple[object, str | None]] = []  # (item_data, reuse_key|None)
+        seen_req_ids: set[str] = set()
+        for item_data in data.items:
+            raw_id = getattr(item_data, "item_id", None)
+            raw_s = str(raw_id).strip() if raw_id is not None else ""
+            if not raw_s:
+                resolved.append((item_data, None))
+                continue
+            if raw_s.lower().startswith("temp-"):
+                resolved.append((item_data, None))
+                continue
+            try:
+                cand = uuid.UUID(raw_s)
+            except (ValueError, AttributeError, TypeError) as e:
+                raise ValueError(f"非法 item_id（须为空、temp-* 或本 CP 的 UUID）: {raw_s}") from e
+            sid = str(cand)
+            if sid in seen_req_ids:
+                raise ValueError(f"重复 item_id: {sid}")
+            seen_req_ids.add(sid)
+            if sid not in existing_by_id:
+                raise ValueError(f"item_id 不属于当前控制计划: {sid}")
+            resolved.append((item_data, sid))
+
+        # Detect content + identity change (include item_id so temp→new is not skipped)
         items_changed = len(existing_items) != len(data.items)
         if not items_changed:
-            import json
-            for old, new in zip(existing_items, data.items, strict=False):
+            for old, (new, reuse_key) in zip(existing_items, resolved, strict=False):
+                if reuse_key != str(old.item_id):
+                    items_changed = True
+                    break
                 old_dict = {
                     k: getattr(old, k) for k in [
                         "step_no", "process_name", "equipment", "characteristic_no",
@@ -231,37 +262,14 @@ async def update_control_plan(
                         "source_fmea_node_id", "sort_order",
                     ]
                 }
-                if json.dumps(old_dict, sort_keys=True) != json.dumps(new_dict, sort_keys=True):
+                if json.dumps(old_dict, sort_keys=True, default=str) != json.dumps(new_dict, sort_keys=True, default=str):
                     items_changed = True
                     break
 
         if items_changed:
-            # Preserve item_id for existing rows so doc-gate target_key stays stable.
-            # Only missing / temp-* ids get a fresh UUID. Strict validation:
-            # - duplicate item_id in request → 400
-            # - well-formed UUID not belonging to this CP → 400 (never silent re-key)
-            existing_by_id = {str(i.item_id): i for i in existing_items}
-            seen_req_ids: set[str] = set()
             keep_ids: set[str] = set()
             created = 0
-            for idx, item_data in enumerate(data.items):
-                raw_id = getattr(item_data, "item_id", None)
-                reuse_key: str | None = None
-                if raw_id is not None and str(raw_id).strip():
-                    try:
-                        cand = uuid.UUID(str(raw_id).strip())
-                    except (ValueError, AttributeError, TypeError):
-                        cand = None  # temp-* or garbage → treat as new
-                    if cand is not None:
-                        sid = str(cand)  # canonical form
-                        if sid in seen_req_ids:
-                            raise ValueError(f"重复 item_id: {sid}")
-                        seen_req_ids.add(sid)
-                        if sid not in existing_by_id:
-                            raise ValueError(
-                                f"item_id 不属于当前控制计划: {sid}"
-                            )
-                        reuse_key = sid
+            for idx, (item_data, reuse_key) in enumerate(resolved):
                 if reuse_key is not None:
                     keep_ids.add(reuse_key)
                     old = existing_by_id[reuse_key]
@@ -281,7 +289,6 @@ async def update_control_plan(
                     old.source_fmea_node_id = item_data.source_fmea_node_id
                     old.sort_order = idx
                     continue
-                # New item (no id, temp-*, or non-UUID)
                 db.add(ControlPlanItem(
                     item_id=uuid.uuid4(),
                     cp_id=cp.cp_id,
@@ -303,7 +310,6 @@ async def update_control_plan(
                     sort_order=idx,
                 ))
                 created += 1
-            # Delete items not present in the request
             deleted = 0
             for sid, old in existing_by_id.items():
                 if sid not in keep_ids:

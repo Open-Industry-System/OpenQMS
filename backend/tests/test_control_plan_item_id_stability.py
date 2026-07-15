@@ -178,3 +178,62 @@ async def test_update_temp_id_creates_new(db, default_factory, admin_user):
     )).scalars().all()
     assert len(items) == 1
     assert str(items[0].item_id) != "temp-abc123"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_garbage_id_even_when_content_unchanged(db, default_factory, admin_user):
+    """ID validation runs even if field content matches existing (no items_changed bypass)."""
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-GARB-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        status="draft",
+        created_by=admin_user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+    iid = uuid.uuid4()
+    db.add(ControlPlanItem(
+        item_id=iid, cp_id=cp.cp_id, step_no="10",
+        product_characteristic="A", control_method="m",
+        source_fmea_node_id="s", sort_order=0, factory_id=default_factory.id,
+    ))
+    await db.flush()
+    data = ControlPlanUpdate(items=[
+        ControlPlanItemCreate(item_id="typo-not-uuid", step_no="10", product_characteristic="A",
+                              control_method="m", source_fmea_node_id="s"),
+    ])
+    with pytest.raises(ValueError, match="非法 item_id"):
+        await update_control_plan(db, cp, data, admin_user.user_id)
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_foreign_id_same_content_count(db, default_factory, admin_user):
+    """Foreign UUID with same field content still rejected (no change-bypass)."""
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-FOR2-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        status="draft",
+        created_by=admin_user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+    iid = uuid.uuid4()
+    db.add(ControlPlanItem(
+        item_id=iid, cp_id=cp.cp_id, step_no="10",
+        product_characteristic="A", control_method="m",
+        source_fmea_node_id="s", sort_order=0, factory_id=default_factory.id,
+    ))
+    await db.flush()
+    foreign = uuid.uuid4()
+    data = ControlPlanUpdate(items=[
+        ControlPlanItemCreate(item_id=str(foreign), step_no="10", product_characteristic="A",
+                              control_method="m", source_fmea_node_id="s"),
+    ])
+    with pytest.raises(ValueError, match="不属于当前控制计划"):
+        await update_control_plan(db, cp, data, admin_user.user_id)
