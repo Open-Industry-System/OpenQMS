@@ -22,13 +22,14 @@ PYTEST_IGNORES    := --ignore=tests/test_graph_sync_worker.py --ignore=tests/tes
 # Resolve to an ABSOLUTE path so it stays valid after the target's `cd $(BACKEND_DIR)`.
 PYTEST ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest"; else echo pytest; fi)
 
-.PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend
+.PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend doc-gate-preflight
 
 help:
 	@echo "Targets:"
 	@echo "  check            — run all consistency checks (backend pytest + frontend tsc + frontend build)"
 	@echo "  check-backend    — backend pytest suite (needs Postgres)"
 	@echo "  check-frontend   — frontend tsc --noEmit + vite build"
+	@echo "  doc-gate-preflight — scan D8 doc-gate CP item_id lineage breaks (exit 1 blocks deploy)"
 	@echo ""
 	@echo "Subtargets:"
 	@echo "  check-frontend-tsc    — tsc --noEmit only"
@@ -40,6 +41,14 @@ check-backend:
 	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTEST) tests/ -v $(PYTEST_IGNORES)
 
 check-frontend: check-frontend-tsc check-frontend-build
+
+# ── D8 doc-gate CP lineage preflight (US-E2E-01.7) ──────────────────────────
+# Scans all open CAPAs across tenants for cp_item modify key_points whose
+# target_key (item_id) is absent from the latest CP version snapshot. Such
+# pairs can never pass the doc-gate modify check. Exit 1 blocks deployment.
+# Run before deploy / release cuts. Needs DB reachable via DATABASE_URL.
+doc-gate-preflight:
+	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi) -m app.services.capa_doc_gate_preflight
 
 check-frontend-tsc:
 	cd $(FRONTEND_DIR) && npx tsc --noEmit

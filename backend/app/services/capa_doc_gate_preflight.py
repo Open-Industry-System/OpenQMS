@@ -1,19 +1,20 @@
-"""Preflight scan: detect CP item_id lineage breaks that block the D8 doc-gate.
+"""Preflight: detect CP item_id lineage breaks that block the D8 doc-gate.
 
 US-E2E-01.7 contract v2 uses item_id as the stable target_key for CP modify/
-delete coverage. Historical CP versions created by the old whole-table UUID
-rebuild logic have no item_id continuity with later versions, so a CAPA whose
-baseline is such an old version can never satisfy a modify key_point against
-the current latest (the baseline id is absent from the latest snapshot).
+delete coverage. A CAPA whose current analysis has a `modify` key_point whose
+target_key (item_id) is absent from the latest CP version snapshot can never
+satisfy that key_point — the gate will block indefinitely. Historical whole-
+table UUID rebuild produced exactly such breaks.
 
-This module scans all current CAPA doc-gate analyses + baseline CP versions
-and reports any (capa, doc) pair where baseline item_ids are entirely absent
-from the latest version. Such pairs require manual remediation BEFORE the
-contract-v2 doc-gate is usable for that CAPA (re-run audit will always block).
+This scan reports ONLY genuinely blocked modify key_points (not delete — a
+delete target disappearing is the expected outcome, not a break). It iterates
+all open (non-D8_CLOSURE/ARCHIVED) CAPAs across all active tenant schemas.
+
+Exit code: 1 if any break found (blocks deployment), 0 otherwise.
 
 Usage:
-    python -m app.services.capa_doc_gate_preflight                # exit 0 clean / 1 breaks
-    python -m app.services.capa_doc_gate_preflight --json          # machine-readable
+    python -m app.services.capa_doc_gate_preflight            # human-readable
+    python -m app.services.capa_doc_gate_preflight --json      # machine-readable
 """
 from __future__ import annotations
 
@@ -23,13 +24,14 @@ import json
 import sys
 import uuid
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import run_for_each_tenant
 from app.models.capa import CAPAEightD
 from app.models.capa_doc_gate import CapaDocgAnalysis
 from app.models.control_plan_version import ControlPlanVersion
+from app.state_machines.eightd_state import is_capa_open_value
 
 
 async def _latest_cp_version(db: AsyncSession, cp_id: uuid.UUID):
@@ -47,22 +49,42 @@ async def _latest_cp_version(db: AsyncSession, cp_id: uuid.UUID):
     return result.scalar_one_or_none()
 
 
-async def scan_cp_lineage_breaks(db: AsyncSession) -> list[dict]:
-    """Return list of {capa_id, capa_document_no, cp_id, baseline_ids, latest_ids}.
+def _latest_item_ids(latest_ver) -> set[str]:
+    if latest_ver is None:
+        return set()
+    snap = latest_ver.items_snapshot
+    items = snap.get("items", []) if isinstance(snap, dict) else (snap or [])
+    return {str(i.get("item_id")) for i in items if i.get("item_id")}
 
-    A break = baseline CP version item_ids have ZERO overlap with latest version
-    item_ids (both non-empty). Such CAPAs cannot pass a CP modify key_point.
+
+async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]:
+    """Report blocked modify key_points for open CAPAs in this tenant.
+
+    A break = current analysis has a cp_item modify key_point whose
+    target_key (item_id) is NOT in the latest CP version snapshot. delete
+    key_points whose target disappeared are NOT reported (expected outcome).
     """
     breaks: list[dict] = []
-    # Find current analyses that include a control_plan affected doc
-    analyses = (await db.execute(
-        select(CapaDocgAnalysis).where(CapaDocgAnalysis.is_current == True)
+    # Open CAPAs only (D1–D8_APPROVAL_PENDING); terminal CAPAs skipped.
+    open_capas = (await db.execute(
+        select(CAPAEightD)
     )).scalars().all()
+    open_capas = [c for c in open_capas if is_capa_open_value(c.status)]
+    capa_ids = {c.report_id for c in open_capas}
+    if not capa_ids:
+        return breaks
+    analyses = (await db.execute(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.is_current == True,
+            CapaDocgAnalysis.capa_id.in_(capa_ids),
+        )
+    )).scalars().all()
+    capa_by_id = {c.report_id: c for c in open_capas}
     for analysis in analyses:
-        if not analysis.affected_docs:
-            continue
-        capa = await db.get(CAPAEightD, analysis.capa_id)
+        capa = capa_by_id.get(analysis.capa_id)
         if capa is None:
+            continue
+        if not analysis.affected_docs:
             continue
         for doc in analysis.affected_docs:
             if doc.get("doc_type") != "control_plan":
@@ -71,49 +93,54 @@ async def scan_cp_lineage_breaks(db: AsyncSession) -> list[dict]:
                 cp_id = uuid.UUID(str(doc["doc_id"]))
             except (ValueError, TypeError):
                 continue
-            baseline_ver_id = doc.get("baseline_version_id")
-            if not baseline_ver_id:
-                continue  # new doc, no baseline to break
-            baseline_ver = await db.get(ControlPlanVersion, uuid.UUID(str(baseline_ver_id)))
             latest_ver = await _latest_cp_version(db, cp_id)
-            if baseline_ver is None or latest_ver is None:
+            if latest_ver is None:
+                # No version yet — modify cannot be covered but this is a data
+                # gap, not an item_id lineage break. Skip.
                 continue
-            b_snap = baseline_ver.items_snapshot
-            b_items = b_snap.get("items", []) if isinstance(b_snap, dict) else (b_snap or [])
-            l_snap = latest_ver.items_snapshot
-            l_items = l_snap.get("items", []) if isinstance(l_snap, dict) else (l_snap or [])
-            b_ids = {str(i.get("item_id")) for i in b_items if i.get("item_id")}
-            l_ids = {str(i.get("item_id")) for i in l_items if i.get("item_id")}
-            if b_ids and l_ids and not (b_ids & l_ids):
-                breaks.append({
-                    "capa_id": str(capa.report_id),
-                    "capa_document_no": capa.document_no,
-                    "cp_id": str(cp_id),
-                    "baseline_version_id": str(baseline_ver.version_id),
-                    "latest_version_id": str(latest_ver.version_id),
-                    "baseline_item_ids": sorted(b_ids),
-                    "latest_item_ids": sorted(l_ids),
-                })
+            latest_ids = _latest_item_ids(latest_ver)
+            for kp in doc.get("key_points", []):
+                if kp.get("expected_action") != "modify":
+                    continue
+                if kp.get("target_kind") != "cp_item":
+                    continue
+                tk = str(kp.get("target_key") or "")
+                if tk and tk not in latest_ids:
+                    breaks.append({
+                        "tenant_schema": tenant_schema,
+                        "capa_id": str(capa.report_id),
+                        "capa_document_no": capa.document_no,
+                        "capa_status": capa.status,
+                        "cp_id": str(cp_id),
+                        "latest_version_id": str(latest_ver.version_id),
+                        "blocked_modify_target_key": tk,
+                        "blocked_field": kp.get("field"),
+                    })
     return breaks
 
 
 async def run_preflight(json_output: bool = False) -> int:
-    async with async_session() as db:
-        breaks = await scan_cp_lineage_breaks(db)
+    all_breaks: list[dict] = []
+    async for tenant, db in run_for_each_tenant():
+        all_breaks.extend(await scan_tenant_breaks(db, tenant.schema_name))
     if json_output:
-        print(json.dumps({"breaks": breaks, "count": len(breaks)}, ensure_ascii=False, indent=2))
+        print(json.dumps({"breaks": all_breaks, "count": len(all_breaks)},
+                         ensure_ascii=False, indent=2))
+    elif not all_breaks:
+        print("doc-gate CP lineage preflight: CLEAN (0 blocked modify key_points)")
     else:
-        if not breaks:
-            print("doc-gate CP lineage preflight: CLEAN (0 breaks)")
-        else:
-            print(f"doc-gate CP lineage preflight: {len(breaks)} BREAK(S) — manual remediation required:")
-            for b in breaks:
-                print(f"  - CAPA {b['capa_document_no']} ({b['capa_id']})")
-                print(f"      CP {b['cp_id']}: baseline v{b['baseline_version_id']} ids "
-                      f"{b['baseline_item_ids']} share NONE with latest v{b['latest_version_id']} ids")
-                print(f"      → regenerate doc-gate analysis after confirming CP identity; "
-                      f"old baseline modify key_points cannot be satisfied")
-    return 1 if breaks else 0
+        print(f"doc-gate CP lineage preflight: {len(all_breaks)} BLOCKED modify key_point(s) — "
+              "deployment blocked, manual remediation required:")
+        for b in all_breaks:
+            print(f"  - tenant={b['tenant_schema']} CAPA {b['capa_document_no']} "
+                  f"({b['capa_id']}, status={b['capa_status']})")
+            print(f"      CP {b['cp_id']} latest v{b['latest_version_id']}: "
+                  f"modify target_key={b['blocked_modify_target_key']} "
+                  f"field={b['blocked_field']} absent from latest snapshot")
+            print(f"      → this CAPA cannot pass the doc-gate modify check. "
+                  f"Re-create the analysis AFTER confirming the CP item_id is "
+                  f"preserved going forward (delete the stale current analysis).")
+    return 1 if all_breaks else 0
 
 
 def main() -> None:
