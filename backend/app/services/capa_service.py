@@ -348,6 +348,8 @@ async def _d7_completion_gate(db: AsyncSession, capa) -> None:
             failure_mode_name=rec["failure_mode_name"],
             failure_cause_name=rec["failure_cause_name"],
             match_reason=rec["match_reason"],
+            prevention_control_node_id=rec.get("prevention_control_node_id"),
+            prevention_control_name=rec.get("prevention_control_name"),
         )
         cause_norm = rec["failure_cause_node_id"] or ""
         matched = await db.scalar(

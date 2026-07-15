@@ -22,12 +22,15 @@ def recommendation_fingerprint(
     failure_mode_name,
     failure_cause_name,
     match_reason,
+    prevention_control_node_id,
+    prevention_control_name,
 ) -> str:
     # Canonical content hash (R11): record + gate 调同一函数，byte-identical 输入 → 相同输出。
-    # node_id 稳定 + name/reason 内容指纹：FMEA 节点改名/推荐内容变 → hash 变 → 旧动作 stale。
+    # node_id 稳定 + name/reason/prevention 内容指纹：FMEA 节点改名/推荐内容变/prevention 变 → hash 变 → stale。
     raw = (
         f"{fmea_id}|{failure_mode_node_id}|{failure_cause_node_id or ''}|"
-        f"{failure_mode_name}|{failure_cause_name or ''}|{match_reason}"
+        f"{failure_mode_name}|{failure_cause_name or ''}|{match_reason}|"
+        f"{prevention_control_node_id or ''}|{prevention_control_name or ''}"
     )
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
@@ -79,6 +82,42 @@ def _hash_for_rec(rec) -> str:
         failure_mode_name=rec["failure_mode_name"],
         failure_cause_name=rec["failure_cause_name"],
         match_reason=rec["match_reason"],
+        prevention_control_node_id=rec.get("prevention_control_node_id"),
+        prevention_control_name=rec.get("prevention_control_name"),
+    )
+
+
+def _prevention_fields_from_rec(rec):
+    """Copy canonical Prevention fields for an action row (confirmed/skipped)."""
+    return {
+        "prevention_control_node_id": rec.get("prevention_control_node_id"),
+        "prevention_control_name_before": rec.get("prevention_control_name"),
+        "prevention_control_name_after": rec.get("prevention_control_name"),  # confirmed/skipped: before==after
+    }
+
+
+def _linkage_node_for_rec(rec):
+    """Fallback node_id/source for LINKAGE: prevention → cause → mode (first non-null)."""
+    if rec.get("prevention_control_node_id"):
+        return rec["prevention_control_node_id"], "d7_prevention"
+    if rec.get("failure_cause_node_id"):
+        return rec["failure_cause_node_id"], "d7_failure_cause"
+    return rec["failure_mode_node_id"], "d7_failure_mode"
+
+
+def _d7_linkage_audit(capa, rec, user_id) -> AuditLog:
+    node_id, source = _linkage_node_for_rec(rec)
+    return AuditLog(
+        table_name="capa_eightd", record_id=capa.report_id,
+        action="FMEA_LINKAGE_CREATED",
+        changed_fields={
+            "capa_id": str(capa.report_id),
+            "fmea_id": str(rec["fmea_id"]),
+            "node_id": node_id,
+            "direction": "8d_to_fmea",
+            "source": source,
+        },
+        operated_by=user_id, factory_id=capa.factory_id,
     )
 
 
@@ -145,6 +184,10 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
             # 幂等：同 action + reason 不变，但仍刷新 recommendation_hash——
             # 若 FMEA 节点改名/推荐内容变，重新确认应让 hash 与当前 rec 保持一致，避免 stale 锁死。
             existing.recommendation_hash = rec_hash
+            pv = _prevention_fields_from_rec(rec)
+            existing.prevention_control_node_id = pv["prevention_control_node_id"]
+            existing.prevention_control_name_before = pv["prevention_control_name_before"]
+            existing.prevention_control_name_after = pv["prevention_control_name_after"]
             await db.commit()
             await db.refresh(existing)
             return existing
@@ -155,6 +198,10 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         existing.recommendation_hash = rec_hash
         existing.acted_by = user.user_id
         existing.acted_at = func.now()
+        pv = _prevention_fields_from_rec(rec)
+        existing.prevention_control_node_id = pv["prevention_control_node_id"]
+        existing.prevention_control_name_before = pv["prevention_control_name_before"]
+        existing.prevention_control_name_after = pv["prevention_control_name_after"]
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D7_ACTION_CHANGED",
@@ -167,9 +214,12 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
             },
             operated_by=user.user_id, factory_id=capa.factory_id,
         ))
+        if old_action == "skipped" and req.action == "confirmed" and req.fmea_id is not None:
+            db.add(_d7_linkage_audit(capa, rec, user.user_id))
         await db.commit()
         await db.refresh(existing)
         return existing
+    pv = _prevention_fields_from_rec(rec)
     rec_row = CapaD7NodeAction(
         capa_id=capa.report_id, factory_id=capa.factory_id,
         action=req.action, fmea_id=req.fmea_id,
@@ -177,6 +227,9 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         failure_cause_node_id=req.failure_cause_node_id,
         match_source=req.match_source, reason=req.reason, acted_by=user.user_id,
         recommendation_hash=rec_hash,
+        prevention_control_node_id=pv["prevention_control_node_id"],
+        prevention_control_name_before=pv["prevention_control_name_before"],
+        prevention_control_name_after=pv["prevention_control_name_after"],
     )
     db.add(rec_row)
     db.add(AuditLog(
@@ -190,6 +243,8 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         },
         operated_by=user.user_id, factory_id=capa.factory_id,
     ))
+    if req.fmea_id is not None and req.action == "confirmed":
+        db.add(_d7_linkage_audit(capa, rec, user.user_id))
     capa_id = capa.report_id  # 捕获标量，供 rollback（expire capa）后的重试查询使用
     try:
         await db.commit()
@@ -268,7 +323,6 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     )
     if rec_match is None:
         raise ValueError("D7 推荐 key 不存在于当前推荐集")
-    rec_hash = _hash_for_rec(rec_match)
     graph = copy.deepcopy(fmea.graph_data or {"nodes": [], "edges": []})
     ctrl_node = None
     name_before = None
@@ -294,6 +348,15 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
         ctrl_node["name"] = capa.d5_correction
     # 复用 FMEA 全部副作用（lock_version++/outbox/cache/embedding），不 commit
     await _apply_fmea_update(db, fmea, title=None, graph_data=graph, user_id=user.user_id)
+    # Post-mutation hash: prevention now exists/renamed in ctrl_node. Gate recomputes from
+    # the mutated FMEA, so the stored hash must reflect the post-mutation prevention value
+    # (otherwise the just-auto-filled action is immediately stale and D7 can't advance).
+    post_rec = {
+        **rec_match,
+        "prevention_control_node_id": ctrl_node["id"],
+        "prevention_control_name": ctrl_node["name"],
+    }
+    rec_hash = _hash_for_rec(post_rec)
 
     if existing is not None:
         # existing.action in {confirmed, skipped} → 升级为 auto_filled（auto_filled 已在上方提前 409）
@@ -337,6 +400,13 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
         },
         operated_by=user.user_id, factory_id=capa.factory_id,
     ))
+    if req.fmea_id is not None:
+        db.add(_d7_linkage_audit(capa, {
+            "fmea_id": req.fmea_id,
+            "prevention_control_node_id": ctrl_node["id"],
+            "failure_cause_node_id": req.failure_cause_node_id,
+            "failure_mode_node_id": req.failure_mode_node_id,
+        }, user.user_id))
     try:
         await db.commit()
     except IntegrityError:
