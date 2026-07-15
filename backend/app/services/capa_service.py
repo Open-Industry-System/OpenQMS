@@ -561,13 +561,24 @@ async def link_fmea(
     user_id: uuid.UUID,
     fmea_node_id: str | None = None,
 ) -> CAPAEightD:
+    from app.models.fmea import FMEADocument
+
+    # Lock the CAPA row so concurrent identical links don't both read old and both write LINKAGE.
+    await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
+    await db.refresh(capa)
     old_fmea_ref_id = capa.fmea_ref_id
     old_fmea_node_id = capa.fmea_node_id
+    fmea = await db.get(FMEADocument, fmea_ref_id)
+    if fmea is None:
+        raise LookupError("目标 FMEA 不存在")
+    if fmea.factory_id != capa.factory_id:
+        raise PermissionError("目标 FMEA 跨工厂")
+    if fmea.product_line_code != capa.product_line_code:
+        raise PermissionError("目标 FMEA 跨产品线")
     capa.fmea_ref_id = fmea_ref_id
     capa.fmea_node_id = fmea_node_id
 
-    # Audit log
-    audit_log = AuditLog(
+    db.add(AuditLog(
         table_name="capa_eightd",
         record_id=capa.report_id,
         action="LINK_FMEA",
@@ -578,9 +589,23 @@ async def link_fmea(
             "new_fmea_node_id": fmea_node_id,
         },
         operated_by=user_id,
-    )
-    db.add(audit_log)
-
+        factory_id=capa.factory_id,
+    ))
+    ref_changed = old_fmea_ref_id != fmea_ref_id
+    node_changed = (old_fmea_node_id or None) != (fmea_node_id or None)
+    if ref_changed or node_changed:
+        db.add(AuditLog(
+            table_name="capa_eightd", record_id=capa.report_id,
+            action="FMEA_LINKAGE_CREATED",
+            changed_fields={
+                "capa_id": str(capa.report_id),
+                "fmea_id": str(fmea_ref_id),
+                "node_id": fmea_node_id,
+                "direction": "8d_to_fmea",
+                "source": "header",
+            },
+            operated_by=user_id, factory_id=capa.factory_id,
+        ))
     await db.commit()
     await db.refresh(capa)
     return capa

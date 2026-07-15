@@ -300,15 +300,13 @@ async def link_fmea(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
-
-    # Validate target FMEA exists and user can access its factory
-    target_fmea = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
-    target_fmea = target_fmea.scalar_one_or_none()
-    if target_fmea is None:
+    check_product_line_access(capa.product_line_code, scope)
+    try:
+        capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
+    except LookupError:
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
-    check_factory_access(target_fmea.factory_id, scope)
-
-    capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     return CAPAResponse.model_validate(capa)
 
 
