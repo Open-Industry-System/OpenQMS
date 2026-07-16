@@ -410,5 +410,21 @@
     "d7_failure_mode": "D7 Failure Mode",
     "d7_failure_cause": "D7 Failure Cause",
     "d7_prevention": "D7 Prevention Control"
+  },
+  "knowledge": {
+    "title": "Knowledge Sink",
+    "summary": "Lesson summary",
+    "summaryEmpty": "(No summary yet)",
+    "embeddingStatus": "Embedding status",
+    "embeddingPending": "Embedding pending",
+    "embeddingReady": "Embedding ready",
+    "embeddingFailed": "Embedding failed",
+    "tags": "Tags",
+    "missing": "No knowledge entry yet",
+    "resink": "Resink",
+    "resinkSuccess": "Knowledge resunk successfully",
+    "resinkFailed": "Resink failed",
+    "sinkBlocked": "Knowledge sink blocked: LLM is not configured. Set credentials in AI Config.",
+    "sinkFailed": "Knowledge sink failed; retry close or resink"
   }
 }

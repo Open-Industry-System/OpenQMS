@@ -8,7 +8,8 @@ vi.mock("./client", () => ({
 
 import {
   adoptRecommendation, listVerifications, createVerification, updateVerification,
-  recordD7Action, listD7Actions, autoFillD7, advanceCAPA,
+  recordD7Action, listD7Actions, autoFillD7, advanceCAPA, sinkKnowledge,
+  parseKnowledgeSinkError, formatCapaAdvanceError,
 } from "./capa";
 
 beforeEach(() => vi.clearAllMocks());
@@ -44,6 +45,63 @@ describe("capa verification/d7 api", () => {
     expect(client.post).toHaveBeenCalledWith("/capa/c1/d7-auto-fill",
       { fmea_id: "f1", failure_mode_node_id: "fm", failure_cause_node_id: "c", match_source: "linked" });
     expect(r.is_new_control).toBe(true);
+  });
+});
+
+describe("capa knowledge sink api", () => {
+  it("sinkKnowledge posts to sink-knowledge", async () => {
+    (client.post as any).mockResolvedValue({
+      data: {
+        entry_id: "e1",
+        source_type: "capa",
+        source_id: "c1",
+        document_no: "8D-2026-001",
+        title: "t",
+        embedding_status: "pending",
+      },
+    });
+    const r = await sinkKnowledge("c1");
+    expect(client.post).toHaveBeenCalledWith("/capa/c1/sink-knowledge");
+    expect(r.embedding_status).toBe("pending");
+  });
+
+  it("parseKnowledgeSinkError maps blocked vs failed 422 detail.outcome", () => {
+    const blocked = parseKnowledgeSinkError({
+      response: {
+        status: 422,
+        data: { detail: { outcome: "blocked", reason: "llm_unavailable", message: "no llm" } },
+      },
+    });
+    expect(blocked?.outcome).toBe("blocked");
+    expect(blocked?.message).toBe("no llm");
+
+    const failed = parseKnowledgeSinkError({
+      response: {
+        status: 422,
+        data: { detail: { outcome: "failed", reason: "llm_failed", message: "timeout" } },
+      },
+    });
+    expect(failed?.outcome).toBe("failed");
+
+    expect(parseKnowledgeSinkError({ response: { data: { detail: "plain" } } })).toBeNull();
+  });
+
+  it("formatCapaAdvanceError uses outcome-specific labels", () => {
+    const blockedMsg = formatCapaAdvanceError(
+      { response: { data: { detail: { outcome: "blocked", message: "x" } } } },
+      "fallback",
+      { blocked: "BLOCKED", failed: "FAILED" },
+    );
+    expect(blockedMsg).toContain("BLOCKED");
+    expect(blockedMsg).toContain("x");
+
+    const failedMsg = formatCapaAdvanceError(
+      { response: { data: { detail: { outcome: "failed", message: "y" } } } },
+      "fallback",
+      { blocked: "BLOCKED", failed: "FAILED" },
+    );
+    expect(failedMsg).toContain("FAILED");
+    expect(failedMsg).toContain("y");
   });
 });
 

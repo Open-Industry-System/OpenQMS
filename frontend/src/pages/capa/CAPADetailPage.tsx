@@ -1,13 +1,17 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
-  Button, Space, Tag, Typography, Steps, Form, Input,
+  Alert, Button, Space, Tag, Typography, Steps, Form, Input,
   Select, App, Spin, Empty, Row, Col, Table, Divider, Modal, DatePicker,
 } from "antd";
-import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, CheckOutlined, FilePptOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, CheckOutlined, FilePptOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
-import { getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport, triggerScar } from "../../api/capa";
+import {
+  getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport,
+  triggerScar, sinkKnowledge, formatCapaAdvanceError,
+} from "../../api/capa";
+import { findCapaKnowledgeEntry } from "../../api/knowledge";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
 import { listSuppliers } from "../../api/supplier";
@@ -21,7 +25,10 @@ import DocGatePanel from "../../components/capa/DocGatePanel";
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
-import type { CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse, Supplier } from "../../types";
+import type {
+  CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse, Supplier,
+  KnowledgeEntrySummary,
+} from "../../types";
 import LessonsLearnedModal from "../../components/lessons/LessonsLearnedModal";
 import { getCAPALessons } from "../../api/lessonsLearned";
 import axios from "axios";
@@ -85,6 +92,11 @@ export default function CAPADetailPage() {
 
   const [pptLoading, setPptLoading] = useState(false);
   const [reviewReport, setReviewReport] = useState<any>(null);
+
+  const [knowledgeEntry, setKnowledgeEntry] = useState<KnowledgeEntrySummary | null>(null);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [knowledgeResinking, setKnowledgeResinking] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
 
   const stepItems = useMemo(() => {
     const subLabelKey = capa?.status ? stepSubLabelKey[capa.status] : undefined;
@@ -224,6 +236,99 @@ export default function CAPADetailPage() {
     }
   }, [capa]);
 
+  const isKnowledgeStatus =
+    capa?.status === "D8_CLOSURE" || capa?.status === "ARCHIVED";
+
+  const loadKnowledgeEntry = async (report: CAPAReport) => {
+    if (!report.report_id) return;
+    setKnowledgeLoading(true);
+    try {
+      const entry = await findCapaKnowledgeEntry(report.report_id, {
+        document_no: report.document_no,
+        product_line_code: report.product_line_code,
+      });
+      setKnowledgeEntry(entry);
+    } catch {
+      setKnowledgeEntry(null);
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!capa || !isKnowledgeStatus) {
+      setKnowledgeEntry(null);
+      setKnowledgeError(null);
+      return;
+    }
+    void loadKnowledgeEntry(capa);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capa?.report_id, capa?.status]);
+
+  const sinkErrorLabels = {
+    blocked: t("knowledge.sinkBlocked", "知识库沉淀被阻断：LLM 未配置，请在 AI 配置中设置凭证"),
+    failed: t("knowledge.sinkFailed", "知识库沉淀失败，可重试关闭或重新沉淀"),
+  };
+
+  const handleResinkKnowledge = async () => {
+    if (!id) return;
+    setKnowledgeResinking(true);
+    setKnowledgeError(null);
+    try {
+      const result = await sinkKnowledge(id);
+      message.success(t("knowledge.resinkSuccess", "知识库已重新沉淀"));
+      setKnowledgeEntry((prev) =>
+        prev
+          ? {
+              ...prev,
+              entry_id: result.entry_id,
+              document_no: result.document_no,
+              title: result.title,
+              embedding_status: result.embedding_status,
+            }
+          : {
+              entry_id: result.entry_id,
+              source_type: result.source_type,
+              source_id: result.source_id,
+              document_no: result.document_no,
+              title: result.title,
+              severity: capa?.severity ?? null,
+              product_line_code: capa?.product_line_code ?? "",
+              factory_id: "",
+              status: "active",
+              embedding_status: result.embedding_status,
+              embedding_id: null,
+              lesson_summary: null,
+              tags: [],
+              created_at: new Date().toISOString(),
+            },
+      );
+      if (capa) await loadKnowledgeEntry(capa);
+    } catch (e: unknown) {
+      const msg = formatCapaAdvanceError(
+        e,
+        t("knowledge.resinkFailed", "重新沉淀失败"),
+        sinkErrorLabels,
+      );
+      setKnowledgeError(msg);
+      message.error(msg);
+    } finally {
+      setKnowledgeResinking(false);
+    }
+  };
+
+  const embeddingStatusColor = (status: string | undefined): string => {
+    if (status === "ready") return "success";
+    if (status === "failed") return "error";
+    return "processing";
+  };
+
+  const embeddingStatusLabel = (status: string | undefined): string => {
+    if (status === "ready") return t("knowledge.embeddingReady", "向量就绪");
+    if (status === "failed") return t("knowledge.embeddingFailed", "向量失败");
+    return t("knowledge.embeddingPending", "向量处理中");
+  };
+
   const currentStep = capa ? (stepIndex[capa.status] ?? 0) : 0;
 
   const handleUpdate = async (field: string, value: unknown, throwOnError = false) => {
@@ -338,6 +443,12 @@ export default function CAPADetailPage() {
     );
   };
 
+  const reportAdvanceError = (e: unknown) => {
+    message.error(
+      formatCapaAdvanceError(e, t("messages.advanceFailed", "推进失败"), sinkErrorLabels),
+    );
+  };
+
   const handleAdvance = async () => {
     if (!id) return;
     // D7_PREVENTION 未全确认 → skip 对话框
@@ -357,8 +468,7 @@ export default function CAPADetailPage() {
       setCapa(updated);
       message.success(t("messages.advanceSuccess", "已推进到下一步"));
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+      reportAdvanceError(e);
     }
   };
 
@@ -383,8 +493,7 @@ export default function CAPADetailPage() {
       setD7SkipReasons({});
       setD7UnconfirmedItems([]);
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+      reportAdvanceError(e);
     }
   };
 
@@ -395,8 +504,7 @@ export default function CAPADetailPage() {
       setCapa(updated);
       message.success(t("messages.approveSuccess", "已审批关闭"));
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+      reportAdvanceError(e);
     }
   };
 
@@ -407,8 +515,7 @@ export default function CAPADetailPage() {
       setCapa(updated);
       message.success(t("messages.archiveSuccess", "已归档"));
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+      reportAdvanceError(e);
     }
   };
 
@@ -421,8 +528,7 @@ export default function CAPADetailPage() {
       setRejectReason("");
       message.success(t("messages.rejectSuccess", "已驳回"));
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } };
-      message.error(err?.response?.data?.detail || t("messages.advanceFailed", "推进失败"));
+      reportAdvanceError(e);
     }
   };
 
@@ -833,6 +939,87 @@ export default function CAPADetailPage() {
             </p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt", "创建时间")}:</Text> {formatDateTime(capa.created_at)}</p>
           </DataCard>
+
+          {isKnowledgeStatus && (
+            <div data-e2e="capa-knowledge-card" style={{ marginTop: 16 }}>
+              <DataCard title={t("knowledge.title", "知识库沉淀")}>
+                {knowledgeError && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message={knowledgeError}
+                    data-e2e="capa-knowledge-error"
+                  />
+                )}
+                {knowledgeLoading ? (
+                  <Spin size="small" />
+                ) : knowledgeEntry ? (
+                  <div data-e2e="capa-knowledge-entry">
+                    <p>
+                      <Text strong style={{ color: "var(--qf-text-secondary)" }}>
+                        {t("knowledge.summary", "经验摘要")}:
+                      </Text>{" "}
+                      {knowledgeEntry.lesson_summary || t("knowledge.summaryEmpty", "（暂无摘要）")}
+                    </p>
+                    <p>
+                      <Text strong style={{ color: "var(--qf-text-secondary)" }}>
+                        {t("knowledge.embeddingStatus", "向量状态")}:
+                      </Text>{" "}
+                      <Tag
+                        color={embeddingStatusColor(knowledgeEntry.embedding_status)}
+                        data-e2e="capa-knowledge-embedding-status"
+                      >
+                        {embeddingStatusLabel(knowledgeEntry.embedding_status)}
+                      </Tag>
+                    </p>
+                    {knowledgeEntry.tags?.length > 0 && (
+                      <p>
+                        <Text strong style={{ color: "var(--qf-text-secondary)" }}>
+                          {t("knowledge.tags", "标签")}:
+                        </Text>{" "}
+                        {knowledgeEntry.tags.map((tag) => (
+                          <Tag key={tag}>{tag}</Tag>
+                        ))}
+                      </p>
+                    )}
+                    {canEdit("capa") && (
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        loading={knowledgeResinking}
+                        onClick={handleResinkKnowledge}
+                        data-e2e="capa-knowledge-resink"
+                      >
+                        {t("knowledge.resink", "重新沉淀")}
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div data-e2e="capa-knowledge-missing">
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={t("knowledge.missing", "尚未沉淀知识条目")}
+                    />
+                    {canEdit("capa") && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<ReloadOutlined />}
+                        loading={knowledgeResinking}
+                        onClick={handleResinkKnowledge}
+                        data-e2e="capa-knowledge-resink"
+                      >
+                        {t("knowledge.resink", "重新沉淀")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </DataCard>
+            </div>
+          )}
 
           {linkModal && canEdit('capa') && (
             <DataCard title={t("fmea.selectTitle", "选择关联的 FMEA")} style={{ marginTop: 16 }}>

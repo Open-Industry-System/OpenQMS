@@ -7,6 +7,7 @@ import type {
   StageRun, D3ImportRun, D3ContainmentSnapshot, D3ImpactReport, D3AiAdvice, D3AdviceAdoption,
   D3Execution, D3ImportRequest, D3GenerateReportRequest, D3GenerateAdviceRequest,
   D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate, D3AdviceResponse, SupplierSCAR,
+  SinkKnowledgeResponse, KnowledgeSinkOutcomeDetail,
 } from "../types";
 
 export class RecommendationBlockedError extends Error {
@@ -79,6 +80,48 @@ export async function advanceCAPA(id: string, req: AdvanceRequest = {}): Promise
   const r = (await client.post(`/capa/${id}/advance`, req)).data as CAPAAdvanceResponse;
   if (r.warning) message.warning(r.warning);
   return r.capa;
+}
+
+/** Manual knowledge resink for D8_CLOSURE / ARCHIVED CAPA (US-E2E-01.8). */
+export async function sinkKnowledge(capaId: string): Promise<SinkKnowledgeResponse> {
+  const resp = await client.post(`/capa/${capaId}/sink-knowledge`);
+  return resp.data;
+}
+
+/** Parse 422 knowledge-sink contract: detail.outcome blocked|failed. */
+export function parseKnowledgeSinkError(err: unknown): KnowledgeSinkOutcomeDetail | null {
+  const detail = (err as { response?: { status?: number; data?: { detail?: unknown } } })
+    ?.response?.data?.detail;
+  if (
+    detail &&
+    typeof detail === "object" &&
+    detail !== null &&
+    "outcome" in detail &&
+    ((detail as KnowledgeSinkOutcomeDetail).outcome === "blocked" ||
+      (detail as KnowledgeSinkOutcomeDetail).outcome === "failed")
+  ) {
+    return detail as KnowledgeSinkOutcomeDetail;
+  }
+  return null;
+}
+
+/** Human-readable advance/resink error; prefers knowledge-sink outcome messaging. */
+export function formatCapaAdvanceError(
+  err: unknown,
+  fallback: string,
+  labels?: { blocked?: string; failed?: string },
+): string {
+  const sink = parseKnowledgeSinkError(err);
+  if (sink) {
+    const base =
+      sink.outcome === "blocked"
+        ? labels?.blocked || "知识库沉淀被阻断：LLM 未配置"
+        : labels?.failed || "知识库沉淀失败，可重试";
+    return sink.message ? `${base}：${sink.message}` : base;
+  }
+  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  return fallback;
 }
 
 export async function getD7Recommendations(id: string): Promise<D7RecommendationResponse> {

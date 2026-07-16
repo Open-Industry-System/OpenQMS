@@ -181,6 +181,52 @@ export interface RelatedCAPAItem {
   link_sources?: string[];
 }
 
+/** Knowledge sink embedding lifecycle (US-E2E-01.8). */
+export type KnowledgeEmbeddingStatus = "pending" | "ready" | "failed";
+
+export interface KnowledgeEntrySummary {
+  entry_id: string;
+  source_type: string;
+  source_id: string;
+  document_no: string;
+  title: string;
+  severity: string | null;
+  product_line_code: string;
+  factory_id: string;
+  status: string;
+  embedding_status: KnowledgeEmbeddingStatus | string;
+  embedding_id: string | null;
+  lesson_summary: string | null;
+  tags: string[];
+  created_at: string;
+}
+
+export interface KnowledgeEntryDetail extends KnowledgeEntrySummary {
+  fields: Record<string, unknown>;
+  content_hash?: string | null;
+  llm_status?: string | null;
+  updated_at?: string | null;
+}
+
+export type KnowledgeEntryListResponse = PaginatedResponse<KnowledgeEntrySummary>;
+
+export interface SinkKnowledgeResponse {
+  entry_id: string;
+  source_type: string;
+  source_id: string;
+  document_no: string;
+  title: string;
+  embedding_status: KnowledgeEmbeddingStatus | string;
+  content_hash?: string | null;
+  llm_status?: string | null;
+}
+
+export interface KnowledgeSinkOutcomeDetail {
+  outcome: "blocked" | "failed";
+  reason?: string;
+  message?: string;
+}
+
 
 export interface ReviewSkill {
   skill_id: string;

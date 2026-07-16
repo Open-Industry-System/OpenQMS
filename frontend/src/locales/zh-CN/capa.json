@@ -410,5 +410,21 @@
     "d7_failure_mode": "D7 失效模式",
     "d7_failure_cause": "D7 失效原因",
     "d7_prevention": "D7 预防控制"
+  },
+  "knowledge": {
+    "title": "知识库沉淀",
+    "summary": "经验摘要",
+    "summaryEmpty": "（暂无摘要）",
+    "embeddingStatus": "向量状态",
+    "embeddingPending": "向量处理中",
+    "embeddingReady": "向量就绪",
+    "embeddingFailed": "向量失败",
+    "tags": "标签",
+    "missing": "尚未沉淀知识条目",
+    "resink": "重新沉淀",
+    "resinkSuccess": "知识库已重新沉淀",
+    "resinkFailed": "重新沉淀失败",
+    "sinkBlocked": "知识库沉淀被阻断：LLM 未配置，请在 AI 配置中设置凭证",
+    "sinkFailed": "知识库沉淀失败，可重试关闭或重新沉淀"
   }
 }

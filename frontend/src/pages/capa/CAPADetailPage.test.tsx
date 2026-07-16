@@ -5,6 +5,7 @@ import { App } from "antd";
 import { useAuthStore } from "../../store/authStore";
 import * as capaApi from "../../api/capa";
 import * as draftApi from "../../api/capaDraft";
+import * as knowledgeApi from "../../api/knowledge";
 import CAPADetailPage from "./CAPADetailPage";
 
 configure({ testIdAttribute: "data-e2e" });
@@ -22,8 +23,34 @@ vi.mock("react-router-dom", async () => {
 });
 
 // Mock APIs
-vi.mock("../../api/capa");
+vi.mock("../../api/capa", async () => {
+  const actual = await vi.importActual<typeof import("../../api/capa")>("../../api/capa");
+  return {
+    ...actual,
+    getCAPA: vi.fn(),
+    updateCAPA: vi.fn(),
+    advanceCAPA: vi.fn(),
+    linkFMEA: vi.fn(),
+    generatePpt: vi.fn(),
+    getPptExportReviewReport: vi.fn(),
+    triggerScar: vi.fn(),
+    sinkKnowledge: vi.fn(),
+    getD3Runs: vi.fn(),
+    getD3Adoptions: vi.fn(),
+    getD3Executions: vi.fn(),
+    getD3Snapshots: vi.fn(),
+    getD3Report: vi.fn(),
+    getD3Advice: vi.fn(),
+    getD4Recommendations: vi.fn(),
+    importD3Containment: vi.fn(),
+  };
+});
 vi.mock("../../api/capaDraft");
+vi.mock("../../api/knowledge", () => ({
+  findCapaKnowledgeEntry: vi.fn().mockResolvedValue(null),
+  listKnowledgeEntries: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 }),
+  getKnowledgeEntry: vi.fn(),
+}));
 vi.mock("../../api/fmea", () => ({
   listFMEAs: vi.fn().mockResolvedValue({ items: [] }),
 }));
@@ -584,3 +611,165 @@ describe("CAPADetailPage trigger SCAR", () => {
     expect(capaApi.getCAPA).toHaveBeenCalled();
   });
 });
+
+describe("CAPADetailPage knowledge sink card", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
+      ai_draft_enabled: false,
+      llm_provider: null,
+    });
+    vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mockResolvedValue(null);
+  });
+
+  it("shows knowledge card with entry summary and embedding badge on D8_CLOSURE", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D8_CLOSURE",
+      d8_closure: "closed",
+    } as any);
+    vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mockResolvedValue({
+      entry_id: "e1",
+      source_type: "capa",
+      source_id: "test-report-id",
+      document_no: "8D-2026-001",
+      title: "Test CAPA Report",
+      severity: "fatal",
+      product_line_code: "DC-DC-100",
+      factory_id: "f1",
+      status: "active",
+      embedding_status: "ready",
+      embedding_id: "emb-1",
+      lesson_summary: "Lesson learned about torque",
+      tags: ["torque", "assembly"],
+      created_at: "2026-01-01T00:00:00Z",
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-knowledge-card")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("capa-knowledge-entry")).toBeInTheDocument();
+    expect(screen.getByText("Lesson learned about torque")).toBeInTheDocument();
+    expect(screen.getByTestId("capa-knowledge-embedding-status")).toHaveTextContent(
+      /向量就绪|Embedding ready/,
+    );
+    expect(screen.getByTestId("capa-knowledge-resink")).toBeInTheDocument();
+  });
+
+  it("shows missing entry warning and resink on ARCHIVED", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "ARCHIVED",
+    } as any);
+    vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mockResolvedValue(null);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-knowledge-missing")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("capa-knowledge-resink")).toBeInTheDocument();
+  });
+
+  it("approve uses formatCapaAdvanceError for 422 blocked outcome", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "manager",
+        role_key: "manager",
+        permissions: { capa: 4 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D8_APPROVAL_PENDING",
+    } as any);
+    const err = {
+      response: {
+        status: 422,
+        data: {
+          detail: {
+            outcome: "blocked",
+            reason: "llm_unavailable",
+            message: "LLM not configured",
+          },
+        },
+      },
+    };
+    vi.mocked(capaApi.advanceCAPA).mockRejectedValue(err);
+
+    renderPage();
+
+    const approveBtn = await screen.findByTestId("capa-approve");
+    fireEvent.click(approveBtn);
+
+    await waitFor(() => {
+      expect(capaApi.advanceCAPA).toHaveBeenCalledWith("test-report-id", {
+        target_state: "D8_CLOSURE",
+      });
+    });
+    // Real formatter should map blocked outcome
+    expect(capaApi.formatCapaAdvanceError(err, "fallback")).toMatch(/blocked|阻断|LLM/i);
+  });
+
+  it("resink shows failed outcome error banner", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D8_CLOSURE",
+      d8_closure: "closed",
+    } as any);
+    vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mockResolvedValue(null);
+    vi.mocked(capaApi.sinkKnowledge).mockRejectedValue({
+      response: {
+        status: 422,
+        data: {
+          detail: { outcome: "failed", reason: "llm_failed", message: "timeout" },
+        },
+      },
+    });
+
+    renderPage();
+
+    const resinkBtn = await screen.findByTestId("capa-knowledge-resink");
+    fireEvent.click(resinkBtn);
+
+    await waitFor(() => {
+      expect(capaApi.sinkKnowledge).toHaveBeenCalledWith("test-report-id");
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-knowledge-error")).toHaveTextContent(/沉淀失败|timeout|failed|重试/i);
+    });
+  });
+});
+
