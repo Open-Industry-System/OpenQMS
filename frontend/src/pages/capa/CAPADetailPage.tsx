@@ -7,7 +7,7 @@ import {
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, CheckOutlined, FilePptOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
-import { getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport, triggerScar } from "../../api/capa";
+import { getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport, triggerScar, confirmRepeat } from "../../api/capa";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
 import { listSuppliers } from "../../api/supplier";
@@ -18,6 +18,7 @@ import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import D3ContainmentPanel from "../../components/capa/D3ContainmentPanel";
 import DocGatePanel from "../../components/capa/DocGatePanel";
+import SupplierRiskInputCard from "../../components/capa/SupplierRiskInputCard";
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
@@ -831,6 +832,29 @@ export default function CAPADetailPage() {
                 t("detail.notLinked", "未关联")
               )}
             </p>
+            {capa.supplier_risk_input && (
+              <div style={{ marginBottom: 12 }}>
+                <p style={{ marginBottom: 4 }}>
+                  <Text strong style={{ color: "var(--qf-text-secondary)" }}>
+                    {t("riskInput.related", "供应商风险输入")}:
+                  </Text>
+                </p>
+                <SupplierRiskInputCard
+                  input={capa.supplier_risk_input}
+                  canEdit={canEdit("capa") && canEdit("supplier_risk")}
+                  onConfirm={async (confirmed) => {
+                    if (!id) return;
+                    try {
+                      await confirmRepeat(id, confirmed);
+                      await refreshCapa();
+                      message.success(t("riskInput.confirmSuccess", "复发确认已保存"));
+                    } catch {
+                      message.error(t("riskInput.confirmFailed", "复发确认失败"));
+                    }
+                  }}
+                />
+              </div>
+            )}
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt", "创建时间")}:</Text> {formatDateTime(capa.created_at)}</p>
           </DataCard>
 

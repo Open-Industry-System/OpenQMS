@@ -189,6 +189,104 @@ describe("CAPADetailPage D3ContainmentPanel integration", () => {
   });
 });
 
+describe("CAPADetailPage supplier risk input", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
+      ai_draft_enabled: false,
+      llm_provider: null,
+    });
+    vi.mocked(capaApi.getD3Runs).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Adoptions).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Executions).mockResolvedValue([]);
+    vi.mocked(capaApi.getD4Recommendations).mockResolvedValue({ items: [], stages: [] });
+    vi.mocked(capaApi.getD7Recommendations).mockResolvedValue({ recommendations: [] } as any);
+    vi.mocked(capaApi.getDocGateImpact).mockResolvedValue({ status: "done", affected_docs: [] } as any);
+    vi.mocked(capaApi.getDocGateAudit).mockResolvedValue({ audit_run_id: null, audits: [] } as any);
+    vi.mocked(capaApi.getDocGateDecision).mockResolvedValue({ decision: null } as any);
+  });
+
+  it("renders SupplierRiskInputCard and confirms repeat", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3, supplier_risk: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const riskInput = {
+      input_id: "i1",
+      status: "processed",
+      repeat_suggested: true,
+      repeat_detection_status: "matched",
+      repeat_confirmed: null,
+      matched_capa_nos: ["8D-2025-001"],
+      evaluated_risk_level: "high",
+      evaluated_risk_score: 80,
+      linked_alert: null,
+    };
+    const capaWithRisk = {
+      ...mockCapa,
+      status: "D7_COMPLETED",
+      supplier_risk_input: riskInput,
+    };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(capaWithRisk as any);
+    vi.mocked(capaApi.confirmRepeat).mockResolvedValue({
+      ...capaWithRisk,
+      supplier_risk_input: { ...riskInput, repeat_confirmed: true },
+    } as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("supplier-risk-input-card")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("supplier-risk-confirm-yes"));
+    await waitFor(() => {
+      expect(capaApi.confirmRepeat).toHaveBeenCalledWith("test-report-id", true);
+    });
+  });
+
+  it("hides confirm buttons without supplier_risk edit permission", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D7_COMPLETED",
+      supplier_risk_input: {
+        input_id: "i1",
+        status: "processed",
+        repeat_suggested: true,
+        repeat_detection_status: "matched",
+        repeat_confirmed: null,
+        matched_capa_nos: ["8D-2025-001"],
+        evaluated_risk_level: "high",
+        evaluated_risk_score: 80,
+        linked_alert: null,
+      },
+    } as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("supplier-risk-input-card")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("supplier-risk-confirm-yes")).not.toBeInTheDocument();
+  });
+});
+
 describe("CAPADetailPage AI draft integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();

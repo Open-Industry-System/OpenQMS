@@ -95,6 +95,24 @@
     "notLinked": "未关联",
     "linkedFMEA": "已关联 FMEA"
   },
+  "riskInput": {
+    "related": "供应商风险输入",
+    "matched": "系统判定曾复发（关联: {{nos}}），请确认。",
+    "notMatched": "系统未发现复发记录，请最终确认。",
+    "unavailable": "未关联 FMEA，无法自动判定，请人工确认是否复发。",
+    "confirmYes": "是，属复发",
+    "confirmNo": "否，非复发",
+    "confirmedRecurrence": "已确认：复发",
+    "confirmedNoRecurrence": "已确认：非复发",
+    "confirmSuccess": "复发确认已保存",
+    "confirmFailed": "复发确认失败",
+    "status": {
+      "pending": "评估中",
+      "processing": "评估中",
+      "processed": "已评估",
+      "error": "评估失败"
+    }
+  },
   "scar": {
     "modalTitle": "从 8D 发起 SCAR",
     "supplier": "供应商",

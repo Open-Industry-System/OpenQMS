@@ -95,6 +95,24 @@
     "notLinked": "Not linked",
     "linkedFMEA": "Linked FMEA"
   },
+  "riskInput": {
+    "related": "Supplier risk input",
+    "matched": "System detected recurrence (related: {{nos}}). Please confirm.",
+    "notMatched": "System found no recurrence history. Please confirm.",
+    "unavailable": "No linked FMEA; automatic detection unavailable. Please confirm manually.",
+    "confirmYes": "Yes, recurrence",
+    "confirmNo": "No, not recurrence",
+    "confirmedRecurrence": "Confirmed: recurrence",
+    "confirmedNoRecurrence": "Confirmed: not recurrence",
+    "confirmSuccess": "Recurrence confirmation saved",
+    "confirmFailed": "Failed to confirm recurrence",
+    "status": {
+      "pending": "Evaluating",
+      "processing": "Evaluating",
+      "processed": "Evaluated",
+      "error": "Evaluation failed"
+    }
+  },
   "scar": {
     "modalTitle": "Trigger SCAR from 8D",
     "supplier": "Supplier",

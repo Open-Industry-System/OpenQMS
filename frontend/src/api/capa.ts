@@ -48,6 +48,16 @@ export async function triggerScar(
   return resp.data;
 }
 
+export async function confirmRepeat(
+  reportId: string,
+  repeatConfirmed: boolean,
+): Promise<CAPAReport> {
+  const resp = await client.post(`/capa/${reportId}/confirm-repeat`, {
+    repeat_confirmed: repeatConfirmed,
+  });
+  return resp.data;
+}
+
 export async function createCAPA(data: {
   title: string;
   document_no: string;
