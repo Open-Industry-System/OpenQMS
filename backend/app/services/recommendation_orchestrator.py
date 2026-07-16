@@ -27,6 +27,8 @@ from app.services.recommendation_sources import (
 )
 from app.services.recommendation_sources_extra import (
     IQCSource,
+    KnowledgeAuditError,
+    KnowledgeEntrySource,
     LessonsLearnedSource,
     MESSource,
     SameTypeProductKBSource,
@@ -62,7 +64,9 @@ STAGE_PLAN: list[StageSpec] = [
     StageSpec(2,  "本产品 FMEA 检索",   "fmea_graph",      "both"),   # D5: derived（下方 executes_after）
     StageSpec(3,  "全局知识库 RAG 检索", "semantic_search", "both", extra_sources_d4=["historical_capa"]),
     StageSpec(4,  "同类型产品 KB 检索",  "same_type_product_kb", "both"),
-    StageSpec(5,  "经验教训库检索",     "lessons_learned", "both", extra_sources_d5=["historical_capa_measure"]),
+    StageSpec(5,  "经验教训库检索",     "lessons_learned", "both",
+              extra_sources_d4=["knowledge_entry"],
+              extra_sources_d5=["historical_capa_measure", "knowledge_entry"]),
     StageSpec(6,  "SPC 异常关联检索",   "spc_anomaly",     "d4"),
     StageSpec(7,  "MES 设备/过程检索",  "mes",             "d4"),
     StageSpec(8,  "IQC 来料检索",       "iqc",             "d4"),
@@ -85,7 +89,10 @@ class RecommendationOrchestrator:
         # 协议校验改为 per-stage 运行时（_exec_recall_stage 内，违规 → 该 stage error，其余 stage + 12 阶段响应照常）。
         # 启动/CI 应另跑 `validate_all_new_sources()` lint（见下）提前发现配置错误。
 
-    NEW_SOURCE_KINDS = frozenset({"spc_anomaly", "iqc", "supplier_history", "mes", "same_type_product_kb", "lessons_learned"})
+    NEW_SOURCE_KINDS = frozenset({
+        "spc_anomaly", "iqc", "supplier_history", "mes",
+        "same_type_product_kb", "lessons_learned", "knowledge_entry",
+    })
 
     def _build_sources(self):
         # Task 3: only the 6 existing sources. New sources (same_type_product_kb,
@@ -108,6 +115,7 @@ class RecommendationOrchestrator:
             "supplier_history": SupplierHistorySource(self.db, self.embedding),
             "same_type_product_kb": SameTypeProductKBSource(self.db, self.embedding),
             "lessons_learned": LessonsLearnedSource(self.db, self.embedding),
+            "knowledge_entry": KnowledgeEntrySource(self.db, self.embedding),
         }
 
     def _check_source_protocol(self, spec, source, kind=None) -> str | None:
@@ -277,6 +285,8 @@ class RecommendationOrchestrator:
                 if candidates:
                     per_source_summary.append(f"{kind}: {len(candidates)}")
             except Exception as e:
+                if isinstance(e, KnowledgeAuditError):
+                    raise
                 logger.warning(f"Stage {spec.index} {spec.name} source {kind} failed: {e}")
                 if kind == primary:
                     primary_errors.append(f"{kind}: {str(e)[:100]}")
@@ -324,7 +334,7 @@ class RecommendationOrchestrator:
         if "fmea_graph" in kinds and context.stage == "d4" and not context.linked_fmea:
             return "未关联 FMEA"
         embedding_dependent = {"semantic_search", "same_type_product_kb", "lessons_learned",
-                               "historical_capa", "historical_capa_measure"}
+                               "historical_capa", "historical_capa_measure", "knowledge_entry"}
         if self.embedding is None and any(k in embedding_dependent for k in kinds):
             return "未配置 embedding"
         return None

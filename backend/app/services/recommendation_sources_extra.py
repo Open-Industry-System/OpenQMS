@@ -1,11 +1,14 @@
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import distinct, func, select, text
 
+from app.models.audit import AuditLog
 from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
+from app.models.knowledge_entry import KnowledgeEntry
 from app.models.mes import MESEquipmentStatus, MESScrapRecord
 from app.models.product_line import ProductLine
 from app.models.spc import InspectionCharacteristic, SPCAlarm
@@ -17,6 +20,10 @@ from app.services.embedding_provider import EmbeddingProvider
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 
 logger = logging.getLogger(__name__)
+
+
+class KnowledgeAuditError(Exception):
+    """Raised when KNOWLEDGE_RETRIEVED audit write fails; must fail the request."""
 
 
 class SPCAnomalySource:
@@ -690,4 +697,158 @@ class LessonsLearnedSource:
                     },
                 )
             )
+        return candidates
+
+
+class KnowledgeEntrySource:
+    """知识库条目语义召回：factory + 当前产品线 + ready embedding；命中写 KNOWLEDGE_RETRIEVED。"""
+
+    name = "knowledge_entry"
+
+    def __init__(self, db, embedding_provider: EmbeddingProvider | None):
+        self.db = db
+        self.embedding = embedding_provider
+
+    async def should_skip(self, context: RecommendationContext) -> str | None:
+        if self.embedding is None:
+            return "未配置 embedding"
+        fid = context.factory_id
+        if not fid:
+            return "无知识库数据"
+        if context.user_product_lines == []:
+            return "无产品线权限"
+        pl = context.capa_data.get("product_line_code")
+        if not pl:
+            return "无知识库数据"
+        cnt = await self.db.scalar(
+            select(func.count())
+            .select_from(KnowledgeEntry)
+            .where(
+                KnowledgeEntry.factory_id == fid,
+                KnowledgeEntry.product_line_code == pl,
+                KnowledgeEntry.status == "active",
+                KnowledgeEntry.embedding_status == "ready",
+            )
+        )
+        return "无知识库 ready 条目" if cnt == 0 else None
+
+    async def retrieve(self, context: RecommendationContext) -> list[RecommendationCandidate]:
+        if not self.embedding:
+            return []
+        if context.user_product_lines == []:
+            return []
+        fid = context.factory_id
+        if not fid:
+            return []
+
+        pl = context.capa_data.get("product_line_code")
+        if not pl:
+            return []
+        user_pls = context.user_product_lines
+        if user_pls is not None and pl not in user_pls:
+            return []
+
+        if context.stage == "d4":
+            query_text = context.capa_data.get("d2_description", "")
+        else:
+            query_text = context.capa_data.get("d4_root_cause", "")
+            if not query_text:
+                query_text = context.capa_data.get("d2_description", "")
+        if not query_text or not str(query_text).strip():
+            return []
+
+        query_vector = await self.embedding.embed([query_text])
+        if not query_vector:
+            return []
+
+        vec_str = "[" + ",".join(str(v) for v in query_vector[0]) + "]"
+        params: dict[str, Any] = {
+            "query_vector": vec_str,
+            "factory_id": fid,
+            "pl": pl,
+            "limit": 20,
+        }
+
+        # Mirror LessonsLearnedSource: de + entry factory_id; current CAPA PL only.
+        stmt = text(
+            """
+            SELECT de.id AS embedding_id,
+                   de.entity_id AS entry_id,
+                   de.chunk_text,
+                   1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
+                   entry.document_no,
+                   entry.source_id,
+                   entry.fields,
+                   entry.embedding_text,
+                   entry.product_line_code
+            FROM document_embeddings de
+            JOIN knowledge_entries entry ON de.entity_id = entry.entry_id
+            WHERE de.entity_type = 'knowledge_entry'
+              AND de.factory_id = :factory_id
+              AND entry.factory_id = :factory_id
+              AND entry.product_line_code = :pl
+              AND entry.status = 'active'
+              AND entry.embedding_status = 'ready'
+              AND de.product_line_code = :pl
+            ORDER BY de.embedding <=> CAST(:query_vector AS vector)
+            LIMIT :limit
+            """
+        )
+
+        rows = await self.db.execute(stmt, params)
+        candidates: list[RecommendationCandidate] = []
+        entry_ids: list[str] = []
+        for row in rows.fetchall():
+            fields = row.fields or {}
+            summary = fields.get("lesson_summary") if isinstance(fields, dict) else None
+            content = (summary or row.embedding_text or row.chunk_text or "")[:500]
+            similarity = float(row.similarity)
+            confidence = min(similarity * 0.8, 0.8)
+            entry_id_str = str(row.entry_id)
+            entry_ids.append(entry_id_str)
+            candidates.append(
+                RecommendationCandidate(
+                    source="knowledge_entry",
+                    content=content,
+                    category=None,
+                    confidence=confidence,
+                    match_reason="知识库条目相似命中",
+                    metadata={
+                        "entry_id": entry_id_str,
+                        "document_no": row.document_no,
+                        "capa_id": str(row.source_id),
+                        "embedding_id": str(row.embedding_id),
+                        "product_line_code": row.product_line_code,
+                        "factory_id": str(fid),
+                    },
+                )
+            )
+
+        if candidates:
+            report_id_raw = context.capa_data.get("report_id")
+            if not report_id_raw:
+                raise KnowledgeAuditError("capa_data.report_id required for KNOWLEDGE_RETRIEVED")
+            try:
+                record_id = uuid.UUID(str(report_id_raw))
+            except (TypeError, ValueError) as e:
+                raise KnowledgeAuditError(f"invalid capa_data.report_id: {report_id_raw}") from e
+            try:
+                self.db.add(
+                    AuditLog(
+                        table_name="capa_eightd",
+                        record_id=record_id,
+                        action="KNOWLEDGE_RETRIEVED",
+                        factory_id=fid,
+                        operated_by=None,
+                        changed_fields={
+                            "entry_ids": entry_ids,
+                            "product_line_code": pl,
+                            "hit_count": len(candidates),
+                            "stage": 5,
+                        },
+                    )
+                )
+            except Exception as e:
+                raise KnowledgeAuditError(f"KNOWLEDGE_RETRIEVED audit failed: {e}") from e
+
         return candidates

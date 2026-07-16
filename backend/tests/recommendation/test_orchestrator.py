@@ -216,6 +216,8 @@ async def test_d5_stage5_runs_historical_capa_measure():
 
     orch._sources["lessons_learned"] = _async_stub_source(ll_cand)
     orch._sources["historical_capa_measure"] = _async_stub_source(hist_cand)
+    # knowledge_entry is also stage-5 extra; stub empty so MagicMock db is not hit
+    orch._sources["knowledge_entry"] = _async_stub_source()
 
     result = await orch.run(_ctx(stage="d5"), user=MagicMock(user_id="u"), report_id="r", factory_id="f", tenant_schema="t")
     s5 = next(s for s in result.stages if s.index == 5)
