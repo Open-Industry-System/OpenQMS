@@ -9,6 +9,7 @@ from sqlalchemy import select, text
 
 from app.models.document_embedding import DocumentEmbedding
 from app.models.fmea import FMEADocument
+from app.models.product_line import ProductLine
 from app.services.fmea_service import delete_fmea, get_fmea
 
 import app.models  # noqa: F401 — register all FK-referenced tables
@@ -20,6 +21,10 @@ def _pl_code() -> str:
 
 async def _seed_doc(db, factory_id, user_id, pl=None):
     pl = pl or _pl_code()
+    product_line = await db.get(ProductLine, pl)
+    if product_line is None:
+        db.add(ProductLine(code=pl, name=f"Test {pl}", factory_id=factory_id))
+        await db.flush()
     doc = FMEADocument(
         fmea_id=uuid.uuid4(),
         document_no=f"PFMEA-{uuid.uuid4().hex[:8]}",

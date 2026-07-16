@@ -43,12 +43,15 @@ def test_preflight_reuses_public_item_snapshot_parser():
     ) == {"item-1"}
 
 
-async def _seed_cp_with_version(db, factory_id, user_id, item_ids, created_at):
+async def _seed_cp_with_version(
+    db, factory_id, user_id, item_ids, created_at,
+    product_line_code="DC-DC-100",
+):
     cp = ControlPlan(
         cp_id=uuid.uuid4(),
         document_no=f"CP-PRE-{uuid.uuid4().hex[:6]}",
         title="t",
-        product_line_code="DC-DC-100",
+        product_line_code=product_line_code,
         factory_id=factory_id,
         status="approved",
         created_by=user_id,
@@ -130,6 +133,7 @@ async def test_preflight_reports_modify_target_absent_from_latest(db, capa_d8_ga
     cp, ver = await _seed_cp_with_version(
         db, capa.factory_id, user.user_id,
         ["old-id"], capa.created_at - timedelta(days=2),
+        capa.product_line_code,
     )
     await _add_cp_version(db, cp.cp_id, capa.factory_id, user.user_id, ["new-id"], 1, 1)
     kps = [{"target_kind": "cp_item", "expected_action": "modify",
@@ -146,6 +150,7 @@ async def test_preflight_does_not_report_delete_target_absent(db, capa_d8_gate):
     cp, ver = await _seed_cp_with_version(
         db, capa.factory_id, user.user_id,
         ["old-id"], capa.created_at - timedelta(days=2),
+        capa.product_line_code,
     )
     await _add_cp_version(db, cp.cp_id, capa.factory_id, user.user_id, [], 1, 1)
     kps = [{"target_kind": "cp_item", "expected_action": "delete",
@@ -162,6 +167,7 @@ async def test_preflight_partial_shared_id_reports_only_blocked_modify(db, capa_
     cp, ver = await _seed_cp_with_version(
         db, capa.factory_id, user.user_id,
         ["A", "B"], capa.created_at - timedelta(days=2),
+        capa.product_line_code,
     )
     await _add_cp_version(db, cp.cp_id, capa.factory_id, user.user_id, ["A", "C"], 1, 1)
     kps = [
@@ -184,6 +190,7 @@ async def test_preflight_skips_terminal_capa(db, capa_d8_gate):
     cp, ver = await _seed_cp_with_version(
         db, capa.factory_id, user.user_id,
         ["old-id"], capa.created_at - timedelta(days=2),
+        capa.product_line_code,
     )
     await _add_cp_version(db, cp.cp_id, capa.factory_id, user.user_id, ["new-id"], 1, 1)
     kps = [{"target_kind": "cp_item", "expected_action": "modify",
@@ -201,6 +208,7 @@ async def test_preflight_no_analysis_reports_potential_disconnect(db, capa_d8_ga
     cp, ver = await _seed_cp_with_version(
         db, capa.factory_id, user.user_id,
         ["old-id"], capa.created_at - timedelta(days=2),
+        capa.product_line_code,
     )
     await _add_cp_version(db, cp.cp_id, capa.factory_id, user.user_id, ["new-id"], 1, 1)
     breaks = await scan_tenant_breaks(db, "public")

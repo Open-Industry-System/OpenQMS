@@ -728,6 +728,7 @@ async def stale_running_generation(db: AsyncSession, capa_d3_done_report):
 async def capa_d8_gate(db: AsyncSession):
     """Create a CAPA in D8_GATE_PENDING status with factory + user (no docs)."""
     from app.models.factory import Factory
+    from app.models.product_line import ProductLine
     from app.models.role import RoleDefinition
     from app.models.user import User
     factory = Factory(
@@ -749,9 +750,14 @@ async def capa_d8_gate(db: AsyncSession):
     )
     db.add(user)
     await db.flush()
+    product_line_code = f"DG{uuid.uuid4().hex[:8]}"
+    db.add(ProductLine(
+        code=product_line_code, name="DocGate Test Line", factory_id=factory.id,
+    ))
+    await db.flush()
     capa = CAPAEightD(
         report_id=uuid.uuid4(), document_no="CAPA-DOCG-001", title="DocGate Test CAPA",
-        product_line_code="DC-DC-100", factory_id=factory.id, status="D8_GATE_PENDING",
+        product_line_code=product_line_code, factory_id=factory.id, status="D8_GATE_PENDING",
         severity="serious", d4_root_cause="测试根因", d5_correction="永久措施",
         d7_prevention="预防复发", created_by=user.user_id,
         created_at=datetime.now(timezone.utc) - timedelta(days=1),
@@ -771,7 +777,8 @@ async def capa_d8_gate_with_docs(db: AsyncSession, capa_d8_gate):
     snapshot = {"nodes": [{"id": "node-1", "type": "ProcessStep", "name": "step1"}], "edges": []}
     fmea = FMEADocument(
         fmea_id=uuid.uuid4(), document_no="PFMEA-DOCG-001", title="DocGate FMEA",
-        fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=capa.factory_id,
+        fmea_type="PFMEA", product_line_code=capa.product_line_code,
+        factory_id=capa.factory_id,
         status="approved", graph_data=snapshot,
         created_by=user.user_id,
     )

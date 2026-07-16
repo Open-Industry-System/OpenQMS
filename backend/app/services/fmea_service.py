@@ -15,7 +15,7 @@ from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.models.spc import SPCAlarm
 from app.models.special_characteristic import SpecialCharacteristic
 from app.services.embedding_outbox import delete_embeddings_for_entity, enqueue_embedding
-from app.services.product_line_service import validate_product_line
+from app.services.product_line_service import lock_candidate_scopes, validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
 from app.state_machines.fmea_state import FMEAState, can_transition
 
@@ -114,6 +114,7 @@ async def create_fmea(
     product_line_code: str = "DC-DC-100",
     factory_id: uuid.UUID | None = None,
 ) -> FMEADocument:
+    await lock_candidate_scopes(db, [(factory_id, product_line_code)])
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
     existing_result = await db.execute(
@@ -204,6 +205,15 @@ async def _apply_fmea_update(
     confirmed_latest_lock_version: int | None = None,
 ) -> FMEADocument:
     """无提交核心：执行 update_fmea 的全部副作用但不 commit/refresh，供 auto_fill_d7 单事务复用。"""
+    observed_product_line = fmea.product_line_code
+    if (
+        product_line_code is not None
+        and product_line_code != observed_product_line
+    ):
+        await lock_candidate_scopes(db, [
+            (fmea.factory_id, observed_product_line),
+            (fmea.factory_id, product_line_code),
+        ])
     result = await db.execute(
         select(FMEADocument)
         .where(FMEADocument.fmea_id == fmea.fmea_id)
@@ -211,6 +221,12 @@ async def _apply_fmea_update(
         .execution_options(populate_existing=True)
     )
     fresh = result.scalar_one()
+    if (
+        product_line_code is not None
+        and product_line_code != observed_product_line
+        and fresh.product_line_code != observed_product_line
+    ):
+        raise ValueError("product_line_changed_again")
 
     if confirmed_latest_lock_version is not None:
         if fresh.lock_version != confirmed_latest_lock_version:
@@ -287,6 +303,24 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     fmea = await get_fmea(db, fmea_id)
     if fmea is None:
         raise ValueError("FMEA not found")
+    observed_product_line = fmea.product_line_code
+    await lock_candidate_scopes(
+        db, [(fmea.factory_id, observed_product_line)]
+    )
+    fresh = await db.scalar(
+        select(FMEADocument)
+        .where(FMEADocument.fmea_id == fmea_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if fresh is None:
+        raise ValueError("FMEA not found")
+    if (
+        fresh.factory_id != fmea.factory_id
+        or fresh.product_line_code != observed_product_line
+    ):
+        raise ValueError("product_line_changed_again")
+    fmea = fresh
     # Audit log for deletion
     audit_log = AuditLog(
         table_name="fmea_documents",

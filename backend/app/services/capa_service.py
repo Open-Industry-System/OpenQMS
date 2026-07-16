@@ -380,6 +380,7 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
     """
     from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
     from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+    from app.services.product_line_service import lock_candidate_scopes
     from app.services.version_service import (
         get_latest_cp_version,
         get_latest_fmea_version,
@@ -404,6 +405,12 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
     )
     if analysis is None:
         raise ValueError("影响分析已失效，请重新生成影响分析")
+
+    # Lock the candidate-set predicate before any document parent. Candidate
+    # writers acquire this same ProductLine row before their document row.
+    await lock_candidate_scopes(
+        db, [(capa.factory_id, capa.product_line_code)]
+    )
 
     # Preserve the gate's C9-first contract even when no audit decision exists.
     # This is repeated after every version-parent lock is acquired below because
