@@ -380,7 +380,12 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
     """
     from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
     from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
-    from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
+    from app.services.product_line_service import lock_candidate_scopes
+    from app.services.version_service import (
+        get_latest_cp_version,
+        get_latest_fmea_version,
+        lock_version_parents_in_order,
+    )
 
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
@@ -389,17 +394,92 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
     )
     if analysis is None:
         raise ValueError("请先生成文档影响分析")
+    # Serialize with every decision writer (_insert_decision uses the same row
+    # lock). The caller transaction retains this and all version-parent locks
+    # through the D8 transition commit.
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis)
+        .where(CapaDocgAnalysis.analysis_id == analysis.analysis_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if analysis is None:
+        raise ValueError("影响分析已失效，请重新生成影响分析")
+
+    # Lock the candidate-set predicate before any document parent. Candidate
+    # writers acquire this same ProductLine row before their document row.
+    await lock_candidate_scopes(
+        db, [(capa.factory_id, capa.product_line_code)]
+    )
+
+    # Preserve the gate's C9-first contract even when no audit decision exists.
+    # This is repeated after every version-parent lock is acquired below because
+    # only the later check participates in the concurrency guarantee.
+    candidates = await _build_allowlist(db, capa)
+    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
+        raise ValueError("分析输入已变更，请重新生成影响分析")
+
+    candidate_decision = await db.scalar(
+        select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc()).limit(1)
+    )
+    if candidate_decision is None:
+        raise ValueError("请先运行文档审核")
+    candidate_identity = (
+        candidate_decision.decision_id,
+        candidate_decision.revision,
+    )
+
+    snapshot = candidate_decision.version_snapshot
+    if not isinstance(snapshot, list):
+        raise ValueError("文档审核版本快照非法，请重新运行审核")
+    parent_identities: list[tuple[str, uuid.UUID]] = []
+    for snap in snapshot:
+        if not isinstance(snap, dict) or snap.get("doc_type") not in {
+            "control_plan", "fmea",
+        }:
+            raise ValueError("文档审核版本快照非法，请重新运行审核")
+        try:
+            parent_identities.append(
+                (snap["doc_type"], uuid.UUID(str(snap["doc_id"])))
+            )
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("文档审核版本快照非法，请重新运行审核") from exc
+    if len(set(parent_identities)) != len(parent_identities):
+        raise ValueError("文档审核版本快照非法，请重新运行审核")
+
+    # Version writers lock the same parent rows before reading/inserting latest.
+    # Sorted acquisition prevents CP/FMEA multi-document lock-order deadlocks.
+    await lock_version_parents_in_order(db, parent_identities)
+
+    # Reconfirm every mutable gate input only after all document locks are held.
+    current_analysis_id = await db.scalar(
+        select(CapaDocgAnalysis.analysis_id).where(
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,  # noqa: E712
+        )
+    )
+    if current_analysis_id != analysis.analysis_id:
+        raise ValueError("影响分析已失效，请重新生成影响分析")
     candidates = await _build_allowlist(db, capa)
     if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
         raise ValueError("分析输入已变更，请重新生成影响分析")
     decision = await db.scalar(
-        select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
-        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc()).limit(1)
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc())
+        .limit(1)
+        .execution_options(populate_existing=True)
     )
-    if decision is None:
-        raise ValueError("请先运行文档审核")
+    if decision is None or (decision.decision_id, decision.revision) != candidate_identity:
+        raise ValueError("最新文档门禁决策已变更，请重新校验")
     if decision.decision != "passed":
         raise ValueError(f"文档门禁未通过：{decision.decision}")
+    if decision.waiver_reason is not None or decision.waiver_items is not None:
+        from app.services.capa_doc_gate_waiver import validate_persisted_waiver
+        await validate_persisted_waiver(
+            db, analysis, decision, lock_version_parents=False
+        )
     # C8 version freshness — re-check each snapshot against current latest.
     for snap in (decision.version_snapshot or []):
         doc_type = snap.get("doc_type")
@@ -414,34 +494,6 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
             or latest.sha256_hash != snap.get("sha256")
         ):
             raise ValueError("文档已变更，请重新审核")
-    # Structured waiver: reconfirm each waived target_key is still absent AND
-    # the bound version_id/sha256 still matches latest (belt + suspenders with C8).
-    for item in (decision.waiver_items or []):
-        if not isinstance(item, dict) or item.get("doc_type") != "control_plan":
-            continue
-        try:
-            cp_id = uuid.UUID(str(item["doc_id"]))
-        except (ValueError, TypeError, KeyError):
-            raise ValueError("waiver_items 非法，请重新豁免")
-        tk = str(item.get("target_key") or "").strip()
-        if not tk:
-            raise ValueError("waiver_items 缺 target_key，请重新豁免")
-        bound_vid = str(item.get("latest_version_id") or "").strip()
-        bound_sha = str(item.get("latest_sha256") or "").strip()
-        if not bound_vid or not bound_sha:
-            raise ValueError("waiver_items 缺版本绑定，请重新豁免")
-        latest = await get_latest_cp_version(db, cp_id)
-        if latest is None:
-            raise ValueError("文档已变更，请重新审核")
-        if str(latest.version_id) != bound_vid or latest.sha256_hash != bound_sha:
-            raise ValueError(
-                f"已豁免文档版本已变更（target_key={tk}），请重新审核"
-            )
-        from app.services.capa_doc_gate_preflight import _item_ids_from_snapshot
-        if tk in _item_ids_from_snapshot(latest.items_snapshot):
-            raise ValueError(
-                f"已豁免的 target_key={tk} 现已出现在 latest CP，请重新审核"
-            )
 
 
 async def advance_capa(

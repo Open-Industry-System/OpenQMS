@@ -33,7 +33,7 @@ cp .env.example .env
 
 > ⚠️ `SECRET_KEY` 在生产环境必须替换为随机长字符串，否则存在安全风险。
 
-### 1.3 强制发布入口（migrate → preflight → 再放行 app）
+### 1.3 强制发布入口（migrate → check → preflight → rollout）
 
 发布到任何非本地环境时，**只允许** `make deploy-release`。禁止先
 `docker compose up` 启动 backend/frontend 再补迁移/preflight——那会让新代码
@@ -44,21 +44,32 @@ cp .env.example .env
 docker compose up -d db redis neo4j
 docker compose ps   # 等 healthy
 
-# 1) 强制顺序：migrate → check + doc-gate preflight
-#    DATABASE_URL 必须指向【本环境真实库】
-export DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms
-make deploy-release
-# = make deploy-migrate  (alembic upgrade head)
-# + make deploy-check    (pytest/tsc/build + doc-gate-preflight)
+# 1) 唯一非本地发布入口。DATABASE_URL 必须指向【本环境真实库】；
+#    TEST_DATABASE_URL 必须指向不同的测试库。
+#    ROLLOUT_CMD 是受信任的运维命令，仅在前三步全部成功后同步执行。
+DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms \
+  TEST_DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms_test \
+  ROLLOUT_CMD='docker compose up -d backend frontend' \
+  make deploy-release
+# 内部严格串行执行：alembic upgrade head → pytest/tsc/build →
+# doc-gate preflight → rollout。任一步失败都会立即终止后续步骤。
 
-# 2) 仅在 deploy-release exit 0 后，再滚动应用
-docker compose up -d backend frontend
 # （仅首次/演示）docker compose exec backend python -m app.seed
 ```
 
-`make deploy-check` = `make check`（pytest + tsc + build）+ `make doc-gate-preflight`。
+`make deploy-release` 包含 rollout 且全程串行；成功信息只会在 rollout 完成后输出。
+启动前会拒绝缺失的 `TEST_DATABASE_URL`。数据库身份 guard 会先规范化两个 DSN
+（忽略 async/sync driver 差异、loopback 别名与 query 顺序），再用只读 psycopg
+连接核对 server address/port、database name 与 database OID；任一层确认同库或无法
+可靠取得 live identity 都会在迁移前 fail closed。该 guard 没有命令覆盖开关，不能跳过。
+guard 仅从环境读取两个 DSN，不会把含密码的连接串放入子进程命令行。
+迁移、preflight 与 rollout 仅收到目标库 `DATABASE_URL`（且不暴露
+`TEST_DATABASE_URL`）；check 同时将 `DATABASE_URL` 和 `TEST_DATABASE_URL` 指向测试库。
+危险的组合目标 `deploy-check` 已移除。独立诊断应分别运行 `make check`，以及对目标库
+运行 `make doc-gate-preflight`，不得把两者作为可并行的发布入口。
 preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
-key_point（baseline item_id 在 latest 中消失），exit 1 阻止部署。
+key_point（baseline item_id 在 latest 中消失）、`stale_analysis` 或
+`invalid_waiver`，exit 1 阻止部署。
 
 **处置（结构化 waiver，非泛化旁路）**：
 1. 优先：用 item_id 保留路径重新保存 CP → 降级并重新生成 analysis → 重跑 audit；

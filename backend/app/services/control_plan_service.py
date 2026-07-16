@@ -12,7 +12,7 @@ from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
 from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, ImportFromFMEARequest
 from app.services.cp_validation.engine import CPValidationEngine
-from app.services.product_line_service import validate_product_line
+from app.services.product_line_service import lock_candidate_scopes, validate_product_line
 from app.services.version_service import create_cp_version
 
 
@@ -60,6 +60,7 @@ async def create_control_plan(
     db: AsyncSession, data: ControlPlanCreate, user_id: uuid.UUID, *, factory_id: uuid.UUID | None = None
 ) -> ControlPlan:
     """Create a new ControlPlan. Use provided document_no if given, else auto-generate."""
+    await lock_candidate_scopes(db, [(factory_id, data.product_line_code)])
     await validate_product_line(db, data.product_line_code)
     document_no = data.document_no if data.document_no else await generate_document_no(db)
 
@@ -161,6 +162,14 @@ async def update_control_plan(
     lock_version = data.lock_version
     confirmed_latest_lock_version = data.confirmed_latest_lock_version
 
+    requested_product_line = data.product_line_code
+    observed_product_line = cp.product_line_code
+    if requested_product_line is not None:
+        await lock_candidate_scopes(db, [
+            (cp.factory_id, observed_product_line),
+            (cp.factory_id, requested_product_line),
+        ])
+
     # 原子乐观锁校验：强制刷新 + SELECT ... FOR UPDATE
     result = await db.execute(
         select(ControlPlan)
@@ -169,6 +178,11 @@ async def update_control_plan(
         .execution_options(populate_existing=True)
     )
     fresh = result.scalar_one()
+    if (
+        requested_product_line is not None
+        and fresh.product_line_code != observed_product_line
+    ):
+        raise ValueError("product_line_changed_again")
 
     if confirmed_latest_lock_version is not None:
         if fresh.lock_version != confirmed_latest_lock_version:
@@ -365,8 +379,26 @@ async def delete_control_plan(
     db: AsyncSession, cp: ControlPlan, user_id: uuid.UUID
 ) -> None:
     """Delete a control plan and log the action."""
-    cp_id = cp.cp_id
-    await db.delete(cp)
+    observed_product_line = cp.product_line_code
+    await lock_candidate_scopes(
+        db, [(cp.factory_id, observed_product_line)]
+    )
+    fresh = await db.scalar(
+        select(ControlPlan)
+        .where(ControlPlan.cp_id == cp.cp_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if fresh is None:
+        raise ValueError("Control plan not found")
+    if (
+        fresh.factory_id != cp.factory_id
+        or fresh.product_line_code != observed_product_line
+    ):
+        raise ValueError("product_line_changed_again")
+
+    cp_id = fresh.cp_id
+    await db.delete(fresh)
 
     await create_audit_log(
         db,
@@ -374,7 +406,7 @@ async def delete_control_plan(
         action="DELETE",
         target_type="control_plans",
         target_id=cp_id,
-        detail={"document_no": cp.document_no, "title": cp.title},
+        detail={"document_no": fresh.document_no, "title": fresh.title},
     )
 
     await db.commit()

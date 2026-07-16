@@ -9,6 +9,7 @@ Plus empty-list LLM → done → confirm_no_affected (P1#5).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -290,6 +291,859 @@ async def test_record_gate_waiver_inserts_passed_with_items(db, capa_with_cp_blo
 
 
 @pytest.mark.asyncio
+async def test_waiver_rejects_version_created_after_audit(db, capa_with_cp_blocked_modify):
+    """Waiver must bind to the audited version, not a later still-broken version."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services.version_service import compute_pg_jsonb_hash
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+
+    items = [{
+        "item_id": "post-audit-item",
+        "source_fmea_node_id": "s1",
+        "product_characteristic": "x",
+        "control_method": "m-post-audit",
+    }]
+    header = {}
+    sha = await compute_pg_jsonb_hash(db, {"header": header, "items": items})
+    db.add(ControlPlanVersion(
+        version_id=uuid.uuid4(),
+        cp_id=cp.cp_id,
+        factory_id=capa.factory_id,
+        major_no=1,
+        minor_no=2,
+        header_snapshot=header,
+        items_snapshot=items,
+        sha256_hash=sha,
+        change_type="minor",
+        change_summary="created after blocked audit",
+        created_by=user.user_id,
+        created_at=datetime.now(timezone.utc),
+    ))
+    await db.flush()
+
+    with pytest.raises(ValueError, match="审核后文档已变更"):
+        await capa_doc_gate_service.record_gate_waiver(
+            db,
+            capa,
+            "accept audited lineage break",
+            [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+            user.user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_waiver_rejects_truncated_audit_coverage(db, capa_with_cp_blocked_modify):
+    """A truncated audit batch cannot hide an uncovered analysis keypoint."""
+    from app.models.capa_doc_gate import CapaDocgAudit
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    audit_result = await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    audit = (await db.execute(
+        select(CapaDocgAudit).where(
+            CapaDocgAudit.audit_run_id == uuid.UUID(audit_result["audit_run_id"])
+        )
+    )).scalar_one()
+    audit.coverage = []
+    await db.flush()
+
+    with pytest.raises(ValueError, match="审核覆盖明细不完整"):
+        await capa_doc_gate_service.record_gate_waiver(
+            db,
+            capa,
+            "must not waive truncated evidence",
+            [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+            user.user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_version_creation_waits_for_waiver_decision_commit(sessionmaker):
+    """Production CP version creation cannot slip validation→decision commit."""
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
+    from app.models.control_plan import ControlPlan
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.models.factory import Factory
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.services.capa_doc_gate_waiver import prepare_structured_waiver
+    from app.services.version_service import compute_pg_jsonb_hash, create_cp_version
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    capa_id, cp_id, analysis_id, audit_run_id = (
+        uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    )
+    baseline_id, audited_id = uuid.uuid4(), uuid.uuid4()
+    baseline_items = [{"item_id": "old-item", "control_method": "old"}]
+    audited_items = [{"item_id": "new-item", "control_method": "new"}]
+    key_point = {
+        "target_kind": "cp_item", "expected_action": "modify",
+        "field": "control_method", "target_key": "old-item",
+    }
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(id=factory_id, code=f"W{suffix}", name="Waiver lock factory"))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"waiver_lock_{suffix}", name_zh="豁免锁",
+            name_en="Waiver lock", is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        seed.add(User(
+            user_id=user_id, username=f"waiver_lock_{suffix}",
+            display_name="Waiver lock", email=f"{suffix}@example.com",
+            password_hash="test", role_id=role_id, legacy_role="quality_engineer",
+            is_active=True, factory_id=factory_id,
+        ))
+        await seed.flush()
+        seed.add(CAPAEightD(
+            report_id=capa_id, document_no=f"CAPA-LOCK-{suffix}", title="lock",
+            product_line_code="LOCK-LINE", factory_id=factory_id,
+            status="D8_GATE_PENDING", severity="serious", created_by=user_id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        ))
+        seed.add(ControlPlan(
+            cp_id=cp_id, document_no=f"CP-LOCK-{suffix}", title="lock",
+            product_line_code="LOCK-LINE", factory_id=factory_id,
+            status="approved", created_by=user_id,
+        ))
+        await seed.flush()
+        baseline_sha = await compute_pg_jsonb_hash(
+            seed, {"header": {}, "items": baseline_items}
+        )
+        audited_sha = await compute_pg_jsonb_hash(
+            seed, {"header": {}, "items": audited_items}
+        )
+        seed.add_all([
+            ControlPlanVersion(
+                version_id=baseline_id, cp_id=cp_id, factory_id=factory_id,
+                major_no=1, minor_no=0, header_snapshot={}, items_snapshot=baseline_items,
+                sha256_hash=baseline_sha, change_type="approve", created_by=user_id,
+                created_at=datetime.now(timezone.utc) - timedelta(days=2),
+            ),
+            ControlPlanVersion(
+                version_id=audited_id, cp_id=cp_id, factory_id=factory_id,
+                major_no=1, minor_no=1, header_snapshot={}, items_snapshot=audited_items,
+                sha256_hash=audited_sha, change_type="minor", created_by=user_id,
+                created_at=datetime.now(timezone.utc),
+            ),
+        ])
+        affected_docs = [{
+            "doc_type": "control_plan", "doc_id": str(cp_id), "doc_name": "lock",
+            "baseline_version_id": str(baseline_id),
+            "baseline_version": {"major": 1, "minor": 0, "sha256": baseline_sha},
+            "key_points": [key_point], "update_suggestion": "lock",
+        }]
+        seed.add(CapaDocgAnalysis(
+            analysis_id=analysis_id, capa_id=capa_id, factory_id=factory_id,
+            is_current=True, status="done", affected_docs=affected_docs,
+            analysis_input_hash="a" * 64, llm_available=True,
+            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+        ))
+        await seed.flush()
+        seed.add(CapaDocgAudit(
+            analysis_id=analysis_id, audit_run_id=audit_run_id, factory_id=factory_id,
+            doc_type="control_plan", doc_id=cp_id, doc_name="lock", status="incomplete",
+            version_before={"version_id": str(baseline_id), "sha256": baseline_sha},
+            version_after={"version_id": str(audited_id), "sha256": audited_sha},
+            version_bump=True,
+            coverage=[{"key_point": key_point, "covered": False, "evidence": ""}],
+            covered_count=0, total_count=1, audited_by=user_id,
+        ))
+        seed.add(CapaDocgDecision(
+            analysis_id=analysis_id, audit_run_id=audit_run_id, revision=0,
+            factory_id=factory_id, decision="blocked", version_snapshot=[],
+            decided_by=user_id,
+        ))
+        await seed.commit()
+
+    writer_task = None
+    try:
+        async with sessionmaker() as waiver_session:
+            analysis = await waiver_session.get(CapaDocgAnalysis, analysis_id)
+            validated, snapshot = await prepare_structured_waiver(
+                waiver_session,
+                analysis,
+                audit_run_id,
+                [{
+                    "doc_type": "control_plan", "doc_id": str(cp_id),
+                    "target_key": "old-item", "field": "control_method",
+                }],
+            )
+
+            async def _write_version():
+                async with sessionmaker() as writer:
+                    cp = await writer.get(ControlPlan, cp_id)
+                    return await create_cp_version(
+                        writer, cp, "minor", "concurrent writer", user_id
+                    )
+
+            writer_task = asyncio.create_task(_write_version())
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.2)
+
+            await capa_doc_gate_service._insert_decision(
+                waiver_session, analysis_id, factory_id, "passed", user_id,
+                datetime.now(timezone.utc), audit_run_id, snapshot,
+                waiver_reason="accepted", waiver_items=validated,
+            )
+            await waiver_session.commit()
+
+        created = await asyncio.wait_for(writer_task, timeout=2)
+        assert created.minor_no == 2
+    finally:
+        if writer_task is not None and not writer_task.done():
+            writer_task.cancel()
+            await asyncio.gather(writer_task, return_exceptions=True)
+        async with sessionmaker() as cleanup:
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions DISABLE TRIGGER trg_cp_version_no_update"
+            ))
+            for statement in (
+                "DELETE FROM audit_logs WHERE operated_by=:uid",
+                "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_audit WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
+                "DELETE FROM control_plans WHERE cp_id=:cpid",
+                "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "uid": user_id, "aid": analysis_id, "cpid": cp_id,
+                    "cid": capa_id, "rid": role_id, "fid": factory_id,
+                })
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions ENABLE TRIGGER trg_cp_version_no_update"
+            ))
+            await cleanup.commit()
+
+
+@pytest.mark.asyncio
+async def test_gate_waits_for_concurrent_latest_decision_writer(sessionmaker):
+    """Gate must lock analysis, then observe a concurrent newer blocked decision."""
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.services import capa_service
+    from app.services.capa_doc_gate_service import _compute_input_hash
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    capa_id, analysis_id = uuid.uuid4(), uuid.uuid4()
+    product_line_code = f"DL{suffix[:8]}"
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(id=factory_id, code=f"D{suffix}", name="Decision lock factory"))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"decision_lock_{suffix}", name_zh="决策锁",
+            name_en="Decision lock", is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        seed.add(User(
+            user_id=user_id, username=f"decision_lock_{suffix}",
+            display_name="Decision lock", email=f"decision-{suffix}@example.com",
+            password_hash="test", role_id=role_id, legacy_role="quality_engineer",
+            is_active=True, factory_id=factory_id,
+        ))
+        seed.add(ProductLine(
+            code=product_line_code, name="Decision lock line", factory_id=factory_id,
+        ))
+        await seed.flush()
+        capa = CAPAEightD(
+            report_id=capa_id, document_no=f"CAPA-DEC-{suffix}", title="decision lock",
+            product_line_code=product_line_code, factory_id=factory_id,
+            status="D8_GATE_PENDING", severity="serious", created_by=user_id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        seed.add(capa)
+        await seed.flush()
+        seed.add(CapaDocgAnalysis(
+            analysis_id=analysis_id, capa_id=capa_id, factory_id=factory_id,
+            is_current=True, status="done", affected_docs=[],
+            analysis_input_hash=_compute_input_hash(capa, []), llm_available=True,
+            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+        ))
+        await seed.flush()
+        seed.add(CapaDocgDecision(
+            analysis_id=analysis_id, revision=0, factory_id=factory_id,
+            decision="passed", no_affected_confirmed=True, version_snapshot=[],
+            decided_by=user_id,
+        ))
+        await seed.commit()
+
+    gate_task = None
+    try:
+        async with sessionmaker() as writer:
+            await capa_doc_gate_service._insert_decision(
+                writer, analysis_id, factory_id, "blocked", user_id,
+                datetime.now(timezone.utc), None, [],
+            )
+            await writer.flush()
+
+            async def _run_gate():
+                async with sessionmaker() as gate_session:
+                    gate_capa = await gate_session.get(CAPAEightD, capa_id)
+                    return await capa_service._d8_doc_gate_gate(gate_session, gate_capa)
+
+            gate_task = asyncio.create_task(_run_gate())
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(gate_task), timeout=0.2)
+            await writer.commit()
+
+        with pytest.raises(ValueError, match="文档门禁未通过：blocked"):
+            await asyncio.wait_for(gate_task, timeout=2)
+    finally:
+        if gate_task is not None and not gate_task.done():
+            gate_task.cancel()
+            await asyncio.gather(gate_task, return_exceptions=True)
+        async with sessionmaker() as cleanup:
+            for statement in (
+                "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM product_lines WHERE code=:plcode",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "aid": analysis_id, "cid": capa_id, "uid": user_id,
+                    "rid": role_id, "fid": factory_id,
+                    "plcode": product_line_code,
+                })
+            await cleanup.commit()
+
+
+@pytest.mark.asyncio
+async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
+    sessionmaker, monkeypatch,
+):
+    """A normal passed audit holds every snapshotted parent through advance commit."""
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
+    from app.models.control_plan import ControlPlan
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.schemas.capa import AdvanceRequest
+    from app.services import capa_service, version_service
+    from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+    from app.services.version_service import compute_pg_jsonb_hash, create_cp_version
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    capa_id, cp_id, analysis_id, audit_run_id = (
+        uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    )
+    baseline_id, audited_id = uuid.uuid4(), uuid.uuid4()
+    created_at = datetime.now(timezone.utc) - timedelta(days=1)
+    baseline_items = [{"item_id": "item-1", "control_method": "old"}]
+    audited_items = [{"item_id": "item-1", "control_method": "audited"}]
+    key_point = {
+        "target_kind": "cp_item", "expected_action": "modify",
+        "field": "control_method", "target_key": "item-1",
+    }
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(id=factory_id, code=f"G{suffix}", name="Gate lock factory"))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"gate_lock_{suffix}", name_zh="门禁锁",
+            name_en="Gate lock", is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        seed.add(User(
+            user_id=user_id, username=f"gate_lock_{suffix}",
+            display_name="Gate lock", email=f"gate-{suffix}@example.com",
+            password_hash="test", role_id=role_id, legacy_role="quality_engineer",
+            is_active=True, factory_id=factory_id,
+        ))
+        seed.add(ProductLine(
+            code=f"GL{suffix[:8]}", name="Gate lock line", factory_id=factory_id,
+        ))
+        await seed.flush()
+        capa = CAPAEightD(
+            report_id=capa_id, document_no=f"CAPA-GATE-{suffix}", title="gate lock",
+            product_line_code=f"GL{suffix[:8]}", factory_id=factory_id,
+            status="D8_GATE_PENDING", severity="serious", created_by=user_id,
+            created_at=created_at,
+        )
+        seed.add(capa)
+        seed.add(ControlPlan(
+            cp_id=cp_id, document_no=f"CP-GATE-{suffix}", title="gate lock",
+            product_line_code=f"GL{suffix[:8]}", factory_id=factory_id,
+            status="approved", created_by=user_id,
+        ))
+        await seed.flush()
+        baseline_sha = await compute_pg_jsonb_hash(
+            seed, {"header": {}, "items": baseline_items}
+        )
+        audited_sha = await compute_pg_jsonb_hash(
+            seed, {"header": {}, "items": audited_items}
+        )
+        seed.add_all([
+            ControlPlanVersion(
+                version_id=baseline_id, cp_id=cp_id, factory_id=factory_id,
+                major_no=1, minor_no=0, header_snapshot={}, items_snapshot=baseline_items,
+                sha256_hash=baseline_sha, change_type="approve", created_by=user_id,
+                created_at=created_at - timedelta(days=1),
+            ),
+            ControlPlanVersion(
+                version_id=audited_id, cp_id=cp_id, factory_id=factory_id,
+                major_no=1, minor_no=1, header_snapshot={}, items_snapshot=audited_items,
+                sha256_hash=audited_sha, change_type="minor", created_by=user_id,
+                created_at=created_at + timedelta(hours=1),
+            ),
+        ])
+        await seed.flush()
+        affected_docs = [{
+            "doc_type": "control_plan", "doc_id": str(cp_id), "doc_name": "gate lock",
+            "baseline_version_id": str(baseline_id),
+            "baseline_version": {"major": 1, "minor": 0, "sha256": baseline_sha},
+            "key_points": [key_point], "update_suggestion": "update control method",
+        }]
+        candidates = await _build_allowlist(seed, capa)
+        seed.add(CapaDocgAnalysis(
+            analysis_id=analysis_id, capa_id=capa_id, factory_id=factory_id,
+            is_current=True, status="done", affected_docs=affected_docs,
+            analysis_input_hash=_compute_input_hash(capa, candidates), llm_available=True,
+            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+        ))
+        await seed.flush()
+        seed.add(CapaDocgAudit(
+            analysis_id=analysis_id, audit_run_id=audit_run_id, factory_id=factory_id,
+            doc_type="control_plan", doc_id=cp_id, doc_name="gate lock", status="passed",
+            version_before={"version_id": str(baseline_id), "sha256": baseline_sha},
+            version_after={"version_id": str(audited_id), "sha256": audited_sha},
+            version_bump=True,
+            coverage=[{"key_point": key_point, "covered": True, "evidence": "v1.1"}],
+            covered_count=1, total_count=1, audited_by=user_id,
+        ))
+        seed.add(CapaDocgDecision(
+            analysis_id=analysis_id, audit_run_id=audit_run_id, revision=0,
+            factory_id=factory_id, decision="passed",
+            version_snapshot=[{
+                "doc_type": "control_plan", "doc_id": str(cp_id),
+                "version_after_id": str(audited_id), "sha256": audited_sha,
+            }],
+            decided_by=user_id,
+        ))
+        await seed.commit()
+
+    gate_checked = asyncio.Event()
+    allow_transition_commit = asyncio.Event()
+    writer_reached_parent_lock = asyncio.Event()
+    original_gate = capa_service._d8_doc_gate_gate
+    original_parent_lock = version_service.lock_version_parent
+
+    async def _pause_after_gate(db, capa):
+        await original_gate(db, capa)
+        gate_checked.set()
+        await allow_transition_commit.wait()
+
+    async def _observe_parent_lock(db, doc_type, doc_id):
+        if gate_checked.is_set():
+            writer_reached_parent_lock.set()
+        await original_parent_lock(db, doc_type, doc_id)
+
+    monkeypatch.setattr(capa_service, "_d8_doc_gate_gate", _pause_after_gate)
+    monkeypatch.setattr(version_service, "lock_version_parent", _observe_parent_lock)
+    gate_task = writer_task = None
+    try:
+        async def _advance():
+            async with sessionmaker() as gate_session:
+                gate_capa = await gate_session.get(CAPAEightD, capa_id)
+                return await capa_service.advance_capa(
+                    gate_session, gate_capa, user_id,
+                    AdvanceRequest(target_state="D8_APPROVAL_PENDING"),
+                )
+
+        async def _write_version():
+            async with sessionmaker() as writer:
+                cp = await writer.get(ControlPlan, cp_id)
+                return await create_cp_version(
+                    writer, cp, "minor", "concurrent after gate", user_id
+                )
+
+        gate_task = asyncio.create_task(_advance())
+        await asyncio.wait_for(gate_checked.wait(), timeout=2)
+        writer_task = asyncio.create_task(_write_version())
+        await asyncio.wait_for(writer_reached_parent_lock.wait(), timeout=2)
+        await asyncio.sleep(0)
+        assert writer_task.done() is False
+        allow_transition_commit.set()
+        advanced = await asyncio.wait_for(gate_task, timeout=2)
+        created = await asyncio.wait_for(writer_task, timeout=2)
+
+        assert advanced.status == "D8_APPROVAL_PENDING"
+        assert created.minor_no == 2
+    finally:
+        allow_transition_commit.set()
+        for task in (gate_task, writer_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(task for task in (gate_task, writer_task) if task is not None),
+            return_exceptions=True,
+        )
+        async with sessionmaker() as cleanup:
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions DISABLE TRIGGER trg_cp_version_no_update"
+            ))
+            for statement in (
+                "DELETE FROM audit_logs WHERE operated_by=:uid",
+                "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_audit WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
+                "DELETE FROM control_plans WHERE cp_id=:cpid",
+                "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM product_lines WHERE code=:plcode",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "uid": user_id, "aid": analysis_id, "cpid": cp_id,
+                    "cid": capa_id, "rid": role_id, "fid": factory_id,
+                    "plcode": f"GL{suffix[:8]}",
+                })
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions ENABLE TRIGGER trg_cp_version_no_update"
+            ))
+            await cleanup.commit()
+
+
+@pytest.mark.asyncio
+async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
+    sessionmaker, monkeypatch,
+):
+    """A new in-scope CP cannot cross the gate's final C9 before advance commits."""
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.schemas.capa import AdvanceRequest
+    from app.schemas.control_plan import ControlPlanCreate
+    from app.services import capa_service, control_plan_service, product_line_service
+    from app.services.capa_doc_gate_service import _compute_input_hash
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    capa_id, analysis_id = uuid.uuid4(), uuid.uuid4()
+    product_line_code = f"GL{suffix[:8]}"
+    cp_document_no = f"CP-SCOPE-{suffix}"
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(id=factory_id, code=f"S{suffix}", name="Scope lock factory"))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"scope_lock_{suffix}", name_zh="候选锁",
+            name_en="Scope lock", is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        seed.add(User(
+            user_id=user_id, username=f"scope_lock_{suffix}",
+            display_name="Scope lock", email=f"scope-{suffix}@example.com",
+            password_hash="test", role_id=role_id, legacy_role="quality_engineer",
+            is_active=True, factory_id=factory_id,
+        ))
+        seed.add(ProductLine(
+            code=product_line_code, name="Scope lock line", factory_id=factory_id,
+        ))
+        await seed.flush()
+        capa = CAPAEightD(
+            report_id=capa_id, document_no=f"CAPA-SCOPE-{suffix}", title="scope lock",
+            product_line_code=product_line_code, factory_id=factory_id,
+            status="D8_GATE_PENDING", severity="serious", created_by=user_id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        seed.add(capa)
+        await seed.flush()
+        seed.add(CapaDocgAnalysis(
+            analysis_id=analysis_id, capa_id=capa_id, factory_id=factory_id,
+            is_current=True, status="done", affected_docs=[],
+            analysis_input_hash=_compute_input_hash(capa, []), llm_available=True,
+            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+        ))
+        await seed.flush()
+        seed.add(CapaDocgDecision(
+            analysis_id=analysis_id, revision=0, factory_id=factory_id,
+            decision="passed", no_affected_confirmed=True, version_snapshot=[],
+            decided_by=user_id,
+        ))
+        await seed.commit()
+
+    gate_checked = asyncio.Event()
+    allow_transition_commit = asyncio.Event()
+    writer_reached_scope_lock = asyncio.Event()
+    original_gate = capa_service._d8_doc_gate_gate
+    real_scope_lock = getattr(product_line_service, "lock_candidate_scopes", None)
+
+    async def _pause_after_gate(db, capa):
+        await original_gate(db, capa)
+        gate_checked.set()
+        await allow_transition_commit.wait()
+
+    async def _observe_writer_scope_lock(db, scopes):
+        writer_reached_scope_lock.set()
+        if real_scope_lock is not None:
+            await real_scope_lock(db, scopes)
+
+    monkeypatch.setattr(capa_service, "_d8_doc_gate_gate", _pause_after_gate)
+    monkeypatch.setattr(
+        control_plan_service, "lock_candidate_scopes",
+        _observe_writer_scope_lock, raising=False,
+    )
+    gate_task = writer_task = None
+    try:
+        async def _advance():
+            async with sessionmaker() as gate_session:
+                gate_capa = await gate_session.get(CAPAEightD, capa_id)
+                return await capa_service.advance_capa(
+                    gate_session, gate_capa, user_id,
+                    AdvanceRequest(target_state="D8_APPROVAL_PENDING"),
+                )
+
+        async def _create_matching_cp():
+            async with sessionmaker() as writer:
+                return await control_plan_service.create_control_plan(
+                    writer,
+                    ControlPlanCreate(
+                        title="concurrent candidate", document_no=cp_document_no,
+                        product_line_code=product_line_code,
+                    ),
+                    user_id,
+                    factory_id=factory_id,
+                )
+
+        gate_task = asyncio.create_task(_advance())
+        await asyncio.wait_for(gate_checked.wait(), timeout=2)
+        writer_task = asyncio.create_task(_create_matching_cp())
+        await asyncio.wait_for(writer_reached_scope_lock.wait(), timeout=2)
+        await asyncio.sleep(0)
+        assert writer_task.done() is False
+
+        allow_transition_commit.set()
+        advanced = await asyncio.wait_for(gate_task, timeout=2)
+        created = await asyncio.wait_for(writer_task, timeout=2)
+        assert advanced.status == "D8_APPROVAL_PENDING"
+        assert created.document_no == cp_document_no
+    finally:
+        allow_transition_commit.set()
+        for task in (gate_task, writer_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(task for task in (gate_task, writer_task) if task is not None),
+            return_exceptions=True,
+        )
+        async with sessionmaker() as cleanup:
+            for statement in (
+                "DELETE FROM audit_logs WHERE operated_by=:uid",
+                "DELETE FROM control_plans WHERE document_no=:cpdoc",
+                "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM product_lines WHERE code=:plcode",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "uid": user_id, "cpdoc": cp_document_no, "aid": analysis_id,
+                    "cid": capa_id, "plcode": product_line_code,
+                    "rid": role_id, "fid": factory_id,
+                })
+            await cleanup.commit()
+
+
+@pytest.mark.asyncio
+async def test_control_plan_move_into_candidate_scope_waits_for_scope_lock(
+    sessionmaker, monkeypatch,
+):
+    """Moving a CP into a locked candidate scope waits before its CP row lock."""
+    from app.models.control_plan import ControlPlan
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.schemas.control_plan import ControlPlanUpdate
+    from app.services import control_plan_service, product_line_service
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id, cp_id = (
+        uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    )
+    old_scope = f"OLD{suffix[:7]}"
+    candidate_scope = f"NEW{suffix[:7]}"
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(id=factory_id, code=f"M{suffix}", name="Move lock factory"))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"move_lock_{suffix}", name_zh="调入锁",
+            name_en="Move lock", is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        seed.add(User(
+            user_id=user_id, username=f"move_lock_{suffix}", display_name="Move lock",
+            email=f"move-{suffix}@example.com", password_hash="test", role_id=role_id,
+            legacy_role="quality_engineer", is_active=True, factory_id=factory_id,
+        ))
+        seed.add_all([
+            ProductLine(code=old_scope, name="Old scope", factory_id=factory_id),
+            ProductLine(code=candidate_scope, name="Candidate scope", factory_id=factory_id),
+        ])
+        await seed.flush()
+        seed.add(ControlPlan(
+            cp_id=cp_id, document_no=f"CP-MOVE-{suffix}", title="move scope",
+            product_line_code=old_scope, factory_id=factory_id, status="draft",
+            created_by=user_id, updated_by=user_id,
+        ))
+        await seed.commit()
+
+    writer_reached_scope_lock = asyncio.Event()
+    real_scope_lock = product_line_service.lock_candidate_scopes
+
+    async def _observe_writer_scope_lock(db, scopes):
+        writer_reached_scope_lock.set()
+        await real_scope_lock(db, scopes)
+
+    monkeypatch.setattr(
+        control_plan_service, "lock_candidate_scopes",
+        _observe_writer_scope_lock, raising=False,
+    )
+    writer_task = None
+    try:
+        async with sessionmaker() as gate_session:
+            await real_scope_lock(
+                gate_session, [(factory_id, candidate_scope)]
+            )
+
+            async def _move_into_scope():
+                async with sessionmaker() as writer:
+                    cp = await writer.get(ControlPlan, cp_id)
+                    return await control_plan_service.update_control_plan(
+                        writer, cp,
+                        ControlPlanUpdate(product_line_code=candidate_scope),
+                        user_id,
+                    )
+
+            writer_task = asyncio.create_task(_move_into_scope())
+            await asyncio.wait_for(writer_reached_scope_lock.wait(), timeout=2)
+            await asyncio.sleep(0)
+            assert writer_task.done() is False
+            await gate_session.commit()
+
+        updated = await asyncio.wait_for(writer_task, timeout=2)
+        assert updated.product_line_code == candidate_scope
+    finally:
+        if writer_task is not None and not writer_task.done():
+            writer_task.cancel()
+            await asyncio.gather(writer_task, return_exceptions=True)
+        async with sessionmaker() as cleanup:
+            for statement in (
+                "DELETE FROM audit_logs WHERE operated_by=:uid",
+                "DELETE FROM control_plans WHERE cp_id=:cpid",
+                "DELETE FROM product_lines WHERE code IN (:oldscope, :newscope)",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "uid": user_id, "cpid": cp_id, "oldscope": old_scope,
+                    "newscope": candidate_scope, "rid": role_id, "fid": factory_id,
+                })
+            await cleanup.commit()
+
+
+@pytest.mark.asyncio
+async def test_candidate_set_mutators_share_old_and_new_scope_locks(
+    db, default_factory, admin_user, monkeypatch,
+):
+    """CP delete and FMEA create/move/delete all serialize candidate membership."""
+    from app.models.control_plan import ControlPlan
+    from app.models.product_line import ProductLine
+    from app.services import control_plan_service, fmea_service
+
+    suffix = uuid.uuid4().hex[:10]
+    old_scope = "DC-DC-100"
+    new_scope = f"FM{suffix[:8]}"
+    db.add(ProductLine(
+        code=new_scope, name="FMEA moved scope", factory_id=default_factory.id,
+    ))
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(), document_no=f"CP-DELETE-{suffix}", title="delete scope",
+        product_line_code=old_scope, factory_id=default_factory.id, status="draft",
+        created_by=admin_user.user_id, updated_by=admin_user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+
+    calls: list[tuple[tuple[uuid.UUID, str], ...]] = []
+
+    async def _record_scope_lock(_db, scopes):
+        calls.append(tuple(
+            (uuid.UUID(str(factory_id)), product_line_code)
+            for factory_id, product_line_code in scopes
+        ))
+
+    monkeypatch.setattr(
+        control_plan_service, "lock_candidate_scopes", _record_scope_lock,
+    )
+    monkeypatch.setattr(
+        fmea_service, "lock_candidate_scopes", _record_scope_lock, raising=False,
+    )
+
+    await control_plan_service.delete_control_plan(db, cp, admin_user.user_id)
+    fmea = await fmea_service.create_fmea(
+        db, "scope fmea", f"PFMEA-SCOPE-{suffix}", "PFMEA",
+        admin_user.user_id, product_line_code=old_scope,
+        factory_id=default_factory.id,
+    )
+    await fmea_service.update_fmea(
+        db, fmea, title=None, graph_data=None, user_id=admin_user.user_id,
+        product_line_code=new_scope,
+    )
+    await fmea_service.delete_fmea(db, fmea.fmea_id, admin_user.user_id)
+
+    assert calls == [
+        ((default_factory.id, old_scope),),
+        ((default_factory.id, old_scope),),
+        ((default_factory.id, old_scope), (default_factory.id, new_scope)),
+        ((default_factory.id, new_scope),),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_candidate_scope_lock_fails_closed_without_factory(db):
+    from app.services.product_line_service import lock_candidate_scopes
+
+    with pytest.raises(ValueError, match="Invalid candidate scope"):
+        await lock_candidate_scopes(db, [(None, "DC-DC-100")])
+
+
+@pytest.mark.asyncio
 async def test_record_gate_waiver_rejects_no_bump(db, capa_with_done_analysis_no_bump):
     """Ordinary pending_update (FMEA no bump) cannot be waived with fabricated items."""
     from app.services import capa_doc_gate_service
@@ -345,6 +1199,103 @@ async def test_waiver_passed_decision_unblocks_gate(db, capa_with_cp_blocked_mod
         user.user_id,
     )
     await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
+async def test_gate_rejects_malformed_persisted_waiver_item(
+    db, capa_with_cp_blocked_modify,
+):
+    """Persisted malformed waiver items must fail closed, never be skipped."""
+    from app.services import capa_service
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    decision = (await db.execute(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == select(CapaDocgAnalysis.analysis_id)
+               .where(CapaDocgAnalysis.capa_id == capa.report_id)
+               .scalar_subquery())
+        .order_by(CapaDocgDecision.revision.desc())
+    )).scalars().first()
+    decision.waiver_items = [{}]
+    await db.flush()
+
+    with pytest.raises(ValueError, match="waiver_items 非法"):
+        await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
+async def test_gate_rejects_persisted_waiver_item_from_other_audit_run(
+    db, capa_with_cp_blocked_modify,
+):
+    """Every persisted waiver item must bind to the decision's exact audit run."""
+    from app.services import capa_service
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    decision = (await db.execute(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == select(CapaDocgAnalysis.analysis_id)
+               .where(CapaDocgAnalysis.capa_id == capa.report_id)
+               .scalar_subquery())
+        .order_by(CapaDocgDecision.revision.desc())
+    )).scalars().first()
+    tampered = dict(decision.waiver_items[0])
+    tampered["audit_run_id"] = str(uuid.uuid4())
+    decision.waiver_items = [tampered]
+    await db.flush()
+
+    with pytest.raises(ValueError, match="waiver_items 非法"):
+        await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
+async def test_gate_rejects_persisted_waiver_with_missing_audit_batch(
+    db, capa_with_cp_blocked_modify,
+):
+    """A passed waiver cannot survive deletion of its supporting audit batch."""
+    from app.models.capa_doc_gate import CapaDocgAudit
+    from app.services import capa_service
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    decision = (await db.execute(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == select(CapaDocgAnalysis.analysis_id)
+               .where(CapaDocgAnalysis.capa_id == capa.report_id)
+               .scalar_subquery())
+        .order_by(CapaDocgDecision.revision.desc())
+    )).scalars().first()
+    audits = (await db.execute(
+        select(CapaDocgAudit).where(
+            CapaDocgAudit.analysis_id == decision.analysis_id,
+            CapaDocgAudit.audit_run_id == decision.audit_run_id,
+        )
+    )).scalars().all()
+    for audit in audits:
+        await db.delete(audit)
+    await db.flush()
+
+    with pytest.raises(ValueError, match="waiver audit 不完整"):
+        await capa_service._d8_doc_gate_gate(db, capa)
 
 
 @pytest.mark.asyncio
