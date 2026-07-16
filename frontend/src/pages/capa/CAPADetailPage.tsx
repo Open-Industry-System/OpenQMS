@@ -2,14 +2,15 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   Button, Space, Tag, Typography, Steps, Form, Input,
-  Select, App, Spin, Empty, Row, Col, Table, Divider, Modal,
+  Select, App, Spin, Empty, Row, Col, Table, Divider, Modal, DatePicker,
 } from "antd";
 import { ArrowLeftOutlined, ArrowRightOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, UndoOutlined, CheckOutlined, FilePptOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
-import { getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport } from "../../api/capa";
+import { getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport, triggerScar } from "../../api/capa";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
+import { listSuppliers } from "../../api/supplier";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import D4RecPanel from "../../components/capa/D4RecPanel";
 import D4VerificationCard from "../../components/capa/D4VerificationCard";
@@ -20,7 +21,7 @@ import DocGatePanel from "../../components/capa/DocGatePanel";
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
-import type { CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse } from "../../types";
+import type { CAPAReport, FMEADocument, DraftFormat, LessonsLearnedResponse, Supplier } from "../../types";
 import LessonsLearnedModal from "../../components/lessons/LessonsLearnedModal";
 import { getCAPALessons } from "../../api/lessonsLearned";
 import axios from "axios";
@@ -64,6 +65,10 @@ export default function CAPADetailPage() {
   const [_saving, setSaving] = useState(false);
   const [fmeas, setFmeas] = useState<FMEADocument[]>([]);
   const [linkModal, setLinkModal] = useState(false);
+  const [scarModalOpen, setScarModalOpen] = useState(false);
+  const [scarSubmitting, setScarSubmitting] = useState(false);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [scarForm] = Form.useForm();
 
   const _user = useAuthStore((s) => s.user);
   const { canEdit, canApprove, canCreate } = usePermission();
@@ -457,6 +462,58 @@ export default function CAPADetailPage() {
     } catch { message.error(t("messages.linkFMEAFailed", "关联失败")); }
   };
 
+  const buildScarDescriptionPrefill = (report: CAPAReport) => {
+    const parts = [`${report.document_no} ${report.title}`.trim()];
+    if (report.d2_description) parts.push(`[问题描述] ${report.d2_description}`);
+    if (report.d4_root_cause) parts.push(`[根因] ${report.d4_root_cause}`);
+    return parts.join("\n");
+  };
+
+  const openScarModal = async () => {
+    if (!capa) return;
+    scarForm.setFieldsValue({
+      supplier_id: undefined,
+      description: buildScarDescriptionPrefill(capa),
+      requested_action: undefined,
+      due_date: undefined,
+      affected_batches: capa.d3_affected_lots || [],
+    });
+    setScarModalOpen(true);
+    try {
+      const res = await listSuppliers({ page_size: 20 });
+      setSuppliers(res.items);
+    } catch {
+      // keep empty list; user can still search
+    }
+  };
+
+  const handleTriggerScar = async () => {
+    if (!id) return;
+    try {
+      const values = await scarForm.validateFields();
+      setScarSubmitting(true);
+      await triggerScar(id, {
+        supplier_id: values.supplier_id,
+        description: values.description || undefined,
+        requested_action: values.requested_action || undefined,
+        due_date: values.due_date
+          ? (values.due_date as { format: (f: string) => string }).format("YYYY-MM-DD")
+          : undefined,
+        affected_batches: values.affected_batches || [],
+      });
+      const updated = await getCAPA(id);
+      setCapa(updated);
+      setScarModalOpen(false);
+      scarForm.resetFields();
+      message.success(t("messages.triggerScarSuccess", "SCAR 发起成功"));
+    } catch (err: any) {
+      if (err?.errorFields) return; // form validation
+      message.error(t("messages.triggerScarFailed", "SCAR 发起失败"));
+    } finally {
+      setScarSubmitting(false);
+    }
+  };
+
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
   if (!capa) return <Empty description={t("messages.capaNotFound", "8D 报告未找到")} />;
 
@@ -754,6 +811,25 @@ export default function CAPADetailPage() {
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.severity", "严重等级")}:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.dueDate", "期限")}:</Text> {capa.due_date || t("detail.notSet", "未设定")}</p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedFMEA", "关联 FMEA")}:</Text> {capa.fmea_ref_id || t("detail.notLinked", "未关联")}</p>
+            <p>
+              <Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedSCAR", "关联 SCAR")}:</Text>{" "}
+              {capa.linked_scar ? (
+                <a
+                  data-e2e="capa-linked-scar"
+                  onClick={() => navigate(`/scars/${capa.linked_scar!.scar_id}`)}
+                  style={{ cursor: "pointer" }}
+                >
+                  {capa.linked_scar.scar_no} <Tag>{capa.linked_scar.status}</Tag>
+                </a>
+              ) : canEdit("capa") &&
+                !["D1_TEAM", "D2_DESCRIPTION", "ARCHIVED"].includes(capa.status) ? (
+                <Button data-e2e="capa-trigger-scar" size="small" onClick={openScarModal}>
+                  {t("actions.triggerScar", "发起 SCAR")}
+                </Button>
+              ) : (
+                t("detail.notLinked", "未关联")
+              )}
+            </p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt", "创建时间")}:</Text> {formatDateTime(capa.created_at)}</p>
           </DataCard>
 
@@ -823,6 +899,64 @@ export default function CAPADetailPage() {
           rows={4}
           data-e2e="capa-reject-reason"
         />
+      </Modal>
+
+      <Modal
+        title={t("scar.modalTitle", "从 8D 发起 SCAR")}
+        open={scarModalOpen}
+        onCancel={() => {
+          setScarModalOpen(false);
+          scarForm.resetFields();
+        }}
+        onOk={handleTriggerScar}
+        confirmLoading={scarSubmitting}
+        okText={t("actions.triggerScar", "发起 SCAR")}
+        cancelText={tc("actions.cancel", "取消")}
+        destroyOnHidden
+        width={640}
+      >
+        <Form form={scarForm} layout="vertical">
+          <Form.Item
+            name="supplier_id"
+            label={t("scar.supplier", "供应商")}
+            rules={[{ required: true, message: t("scar.supplierRequired", "请选择供应商") }]}
+          >
+            <Select
+              showSearch
+              filterOption={false}
+              placeholder={t("scar.supplier", "供应商")}
+              onSearch={async (search) => {
+                const res = await listSuppliers({ search, page_size: 20 });
+                setSuppliers(res.items);
+              }}
+              options={suppliers.map((s) => ({
+                value: s.supplier_id,
+                label: `${s.supplier_no} - ${s.name}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="description"
+            label={t("scar.description", "问题描述")}
+            rules={[{ required: true, message: t("scar.descriptionRequired", "请输入问题描述") }]}
+          >
+            <TextArea rows={5} />
+          </Form.Item>
+          <Form.Item name="requested_action" label={t("scar.requestedAction", "要求措施")}>
+            <TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="due_date" label={t("scar.dueDate", "到期日")}>
+            <DatePicker style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="affected_batches" label={t("scar.affectedBatches", "受影响批次")}>
+            <Select
+              mode="tags"
+              tokenSeparators={[",", "\n"]}
+              placeholder={t("scar.affectedBatchesPlaceholder", "输入批次号后回车添加")}
+              open={false}
+            />
+          </Form.Item>
+        </Form>
       </Modal>
 
       <Modal

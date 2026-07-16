@@ -9,7 +9,8 @@
     "undoChange": "撤销修改",
     "addMember": "添加成员",
     "handle": "处理",
-    "viewDetail": "查看详情"
+    "viewDetail": "查看详情",
+    "triggerScar": "发起 SCAR"
   },
   "reject": {
     "title": "驳回 8D",
@@ -76,14 +77,34 @@
     "reportArchived": "报告已归档",
     "undoSuccess": "已撤销 AI 修改",
     "searchTimeout": "检索超时，请稍后在编辑过程中使用推荐功能",
-    "searchFailed": "检索经验教训失败"
+    "searchFailed": "检索经验教训失败",
+    "triggerScarSuccess": "SCAR 发起成功",
+    "triggerScarFailed": "SCAR 发起失败"
   },
   "detail": {
     "currentStepDetails": "当前步骤详情",
     "reportInfo": "报告信息",
+    "documentNo": "编号",
+    "status": "状态",
+    "severity": "严重等级",
+    "dueDate": "期限",
+    "relatedFMEA": "关联 FMEA",
+    "relatedSCAR": "关联 SCAR",
+    "createdAt": "创建时间",
     "notSet": "未设定",
     "notLinked": "未关联",
     "linkedFMEA": "已关联 FMEA"
+  },
+  "scar": {
+    "modalTitle": "从 8D 发起 SCAR",
+    "supplier": "供应商",
+    "supplierRequired": "请选择供应商",
+    "description": "问题描述",
+    "descriptionRequired": "请输入问题描述",
+    "requestedAction": "要求措施",
+    "dueDate": "到期日",
+    "affectedBatches": "受影响批次",
+    "affectedBatchesPlaceholder": "输入批次号后回车添加"
   },
   "team": {
     "name": "成员姓名",

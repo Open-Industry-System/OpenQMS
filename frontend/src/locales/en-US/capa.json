@@ -9,7 +9,8 @@
     "undoChange": "Undo Change",
     "addMember": "Add Member",
     "handle": "Process",
-    "viewDetail": "View Detail"
+    "viewDetail": "View Detail",
+    "triggerScar": "Trigger SCAR"
   },
   "reject": {
     "title": "Reject 8D",
@@ -76,14 +77,34 @@
     "reportArchived": "Report archived",
     "undoSuccess": "AI change undone",
     "searchTimeout": "Search timeout, please use the recommendation feature later during editing",
-    "searchFailed": "Failed to search lessons learned"
+    "searchFailed": "Failed to search lessons learned",
+    "triggerScarSuccess": "SCAR triggered successfully",
+    "triggerScarFailed": "Failed to trigger SCAR"
   },
   "detail": {
     "currentStepDetails": "Current Step Details",
     "reportInfo": "Report Info",
+    "documentNo": "Document No.",
+    "status": "Status",
+    "severity": "Severity",
+    "dueDate": "Due Date",
+    "relatedFMEA": "Related FMEA",
+    "relatedSCAR": "Related SCAR",
+    "createdAt": "Created At",
     "notSet": "Not set",
     "notLinked": "Not linked",
     "linkedFMEA": "Linked FMEA"
+  },
+  "scar": {
+    "modalTitle": "Trigger SCAR from 8D",
+    "supplier": "Supplier",
+    "supplierRequired": "Please select a supplier",
+    "description": "Description",
+    "descriptionRequired": "Please enter a description",
+    "requestedAction": "Requested Action",
+    "dueDate": "Due Date",
+    "affectedBatches": "Affected Batches",
+    "affectedBatchesPlaceholder": "Type lot no. and press Enter"
   },
   "team": {
     "name": "Member Name",

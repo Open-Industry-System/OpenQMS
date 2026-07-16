@@ -1,11 +1,14 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "antd";
 import { useAuthStore } from "../../store/authStore";
 import * as capaApi from "../../api/capa";
 import * as draftApi from "../../api/capaDraft";
 import CAPADetailPage from "./CAPADetailPage";
+
+configure({ testIdAttribute: "data-e2e" });
+afterAll(() => configure({ testIdAttribute: "data-testid" }));
 
 // Mock react-router-dom params
 const mockNavigate = vi.fn();
@@ -23,6 +26,14 @@ vi.mock("../../api/capa");
 vi.mock("../../api/capaDraft");
 vi.mock("../../api/fmea", () => ({
   listFMEAs: vi.fn().mockResolvedValue({ items: [] }),
+}));
+vi.mock("../../api/supplier", () => ({
+  listSuppliers: vi.fn().mockResolvedValue({
+    items: [{ supplier_id: "sup-1", supplier_no: "S-001", name: "Acme" }],
+    total: 1,
+    page: 1,
+    page_size: 20,
+  }),
 }));
 
 // Mock D4VerificationCard to avoid rendering issues
@@ -396,5 +407,180 @@ describe("CAPADetailPage 生成PPT button visibility", () => {
       expect(screen.getByText(/5W2H Problem Description/)).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: /Generate PPT|生成 PPT/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("CAPADetailPage trigger SCAR", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
+      ai_draft_enabled: false,
+      llm_provider: null,
+    });
+    vi.mocked(capaApi.getD3Runs).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Adoptions).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Executions).mockResolvedValue([]);
+  });
+
+  it("shows trigger button at D3 with edit permission and no linked SCAR", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const d3Capa = {
+      ...mockCapa,
+      status: "D3_INTERIM",
+      d3_interim: "test content",
+      linked_scar: null,
+      d3_affected_lots: ["LOT-A", "LOT-B"],
+    };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(d3Capa as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-trigger-scar")).toBeInTheDocument();
+    });
+  });
+
+  it("hides trigger button at D1 / with linked SCAR / without edit permission", async () => {
+    // D1_TEAM blocks trigger
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D1_TEAM",
+      linked_scar: null,
+    } as any);
+    const { unmount } = renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("8D-2026-001").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByTestId("capa-trigger-scar")).not.toBeInTheDocument();
+    unmount();
+
+    // linked_scar present hides button
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D3_INTERIM",
+      d3_interim: "x",
+      linked_scar: {
+        scar_id: "scar-1",
+        scar_no: "SCAR-260701-001",
+        status: "open",
+        supplier_id: "sup-1",
+      },
+    } as any);
+    const { unmount: unmount2 } = renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-linked-scar")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("capa-trigger-scar")).not.toBeInTheDocument();
+    unmount2();
+
+    // viewer cannot edit
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "viewer",
+        role_key: "viewer",
+        permissions: { capa: 1 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D3_INTERIM",
+      d3_interim: "x",
+      linked_scar: null,
+    } as any);
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("8D-2026-001").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByTestId("capa-trigger-scar")).not.toBeInTheDocument();
+  });
+
+  it("submit calls triggerScar with supplier_id and affected_batches", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const d3Capa = {
+      ...mockCapa,
+      status: "D3_INTERIM",
+      d3_interim: "test content",
+      d2_description: "problem",
+      d4_root_cause: "root",
+      linked_scar: null,
+      d3_affected_lots: ["LOT-A", "LOT-B"],
+    };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(d3Capa as any);
+    vi.mocked(capaApi.triggerScar).mockResolvedValue({
+      scar_id: "scar-new",
+      scar_no: "SCAR-260701-002",
+      supplier_id: "sup-1",
+      status: "open",
+    } as any);
+
+    renderPage();
+
+    const triggerBtn = await screen.findByTestId("capa-trigger-scar");
+    fireEvent.click(triggerBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/从 8D 发起 SCAR|Trigger SCAR from 8D/)).toBeInTheDocument();
+    });
+
+    // Select supplier option (supplier_id, not affected_batches)
+    const supplierSelect = document.getElementById("supplier_id") as HTMLElement;
+    fireEvent.mouseDown(supplierSelect);
+    const option = await screen.findByText(/S-001 - Acme/);
+    fireEvent.click(option);
+
+    // Submit modal
+    const okButtons = screen.getAllByRole("button", { name: /发起 SCAR|Trigger SCAR/ });
+    const submitBtn = okButtons[okButtons.length - 1];
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(capaApi.triggerScar).toHaveBeenCalledWith(
+        "test-report-id",
+        expect.objectContaining({
+          supplier_id: "sup-1",
+          affected_batches: ["LOT-A", "LOT-B"],
+        }),
+      );
+    });
+    expect(capaApi.getCAPA).toHaveBeenCalled();
   });
 });

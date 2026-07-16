@@ -160,6 +160,14 @@ export interface CAPAReport {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  scar_ref_id?: string | null;
+  linked_scar?: {
+    scar_id: string;
+    scar_no: string;
+    status: string;
+    supplier_id: string;
+  } | null;
+  d3_affected_lots?: string[];
 }
 
 export type CAPAListResponse = PaginatedResponse<CAPAReport>;
@@ -829,7 +837,7 @@ export interface SupplierSCAR {
   supplier_id: string;
   supplier_name?: string;
   supplier_no?: string;
-  source_type: 'iqc' | 'complaint' | 'rma' | 'manual';
+  source_type: 'iqc' | 'complaint' | 'rma' | 'manual' | 'capa';
   source_id?: string;
   description: string;
   product_line_code?: string;

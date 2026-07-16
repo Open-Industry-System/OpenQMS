@@ -6,7 +6,7 @@ import type {
   VerificationUpdate, D7NodeAction, D7NodeActionCreate, D7AutoFillRequest, D7AutoFillResponse,
   StageRun, D3ImportRun, D3ContainmentSnapshot, D3ImpactReport, D3AiAdvice, D3AdviceAdoption,
   D3Execution, D3ImportRequest, D3GenerateReportRequest, D3GenerateAdviceRequest,
-  D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate, D3AdviceResponse,
+  D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate, D3AdviceResponse, SupplierSCAR,
 } from "../types";
 
 export class RecommendationBlockedError extends Error {
@@ -31,6 +31,20 @@ export async function listCAPAs(params: {
 
 export async function getCAPA(id: string): Promise<CAPAReport> {
   const resp = await client.get(`/capa/${id}`);
+  return resp.data;
+}
+
+export async function triggerScar(
+  id: string,
+  body: {
+    supplier_id: string;
+    description?: string;
+    requested_action?: string;
+    due_date?: string | null;
+    affected_batches?: string[];
+  },
+): Promise<SupplierSCAR> {
+  const resp = await client.post(`/capa/${id}/trigger-scar`, body);
   return resp.data;
 }
 
