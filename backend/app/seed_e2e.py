@@ -25,6 +25,9 @@ from app.seed_e2e_constants import (
     FMEA_LINK_E2E_CAUSE_NODE, FMEA_LINK_E2E_FMEA_DOC_NO,
     FMEA_LINK_E2E_FM_NODE, FMEA_LINK_E2E_PC_NODE,
     SCAR_TRIGGER_E2E_CAPA_DOC_NO, SCAR_TRIGGER_E2E_CAPA_ID, SCAR_TRIGGER_E2E_LOT_NO,
+    SUPPLIER_RISK_E2E_CAPA_DOC_NO, SUPPLIER_RISK_E2E_CAPA_ID,
+    SUPPLIER_RISK_E2E_D7_ACTION_ID, SUPPLIER_RISK_E2E_HIST_CAPA_DOC_NO,
+    SUPPLIER_RISK_E2E_HIST_CAPA_ID,
 )
 
 # Fixed UUIDs for idempotency
@@ -44,6 +47,9 @@ FMEA_LINK_D7_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20244")
 SCAR_TRIGGER_CAPA_ID = uuid.UUID(SCAR_TRIGGER_E2E_CAPA_ID)
 SCAR_TRIGGER_RUN_ID = uuid.UUID("a0000005-0001-4000-8000-000000000002")
 SCAR_TRIGGER_REPORT_ID = uuid.UUID("a0000005-0001-4000-8000-000000000003")
+SUPPLIER_RISK_CAPA_ID = uuid.UUID(SUPPLIER_RISK_E2E_CAPA_ID)
+SUPPLIER_RISK_HIST_CAPA_ID = uuid.UUID(SUPPLIER_RISK_E2E_HIST_CAPA_ID)
+SUPPLIER_RISK_D7_ACTION_ID = uuid.UUID(SUPPLIER_RISK_E2E_D7_ACTION_ID)
 
 
 async def _seed_factories(db) -> dict:
@@ -863,6 +869,201 @@ async def _seed_scar_trigger(db, factory_ids):
     await db.flush()
 
 
+async def _seed_supplier_risk_input(db, factory_ids):
+    """Seed CAPA at D7_PREVENTION for US-E2E-01.6 supplier risk input E2E.
+
+    - 8D-E2E-RISK-001 at D7_PREVENTION with supplier_id + fmea linkage + D7 action
+    - 8D-E2E-RISK-HIST-001 ARCHIVED sibling (same supplier + PL + fmea_node_id)
+      so advance detects matched repeat
+    - R11/default supplier risk configs (seed_supplier_risk_configs)
+    - Clears any prior supplier_risk_capa_inputs for the active CAPA (idempotent)
+
+    Reuses D3-SUP-E2E-001 and PFMEA-E2E-FMEA-LINK-001 graph nodes.
+    """
+    from app.models.capa import CAPAEightD, CapaD7NodeAction
+    from app.models.fmea import FMEADocument
+    from app.models.supplier import Supplier
+    from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+    from app.seed import seed_supplier_risk_configs
+    from app.services.capa_d7_action_service import recommendation_fingerprint
+    from app.state_machines.eightd_state import EightDState
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+    factory_id = factory_ids[E2E_FACTORY_DC100["code"]]
+    product_line = E2E_PRODUCT_LINE["code"]
+    root_cause = "定位销磨损导致孔径超差（E2E 供应商风险）"
+    prevention = "将定位销磨损检测纳入来料首件检验（E2E 供应商风险）"
+
+    # R11 configs are required for evaluate_supplier_risk_in_tx (worker + confirm-repeat).
+    await seed_supplier_risk_configs(db, factory_id)
+
+    await _seed_d3_sources(db, factory_id, admin.user_id)
+    supplier = (
+        await db.execute(
+            select(Supplier).where(
+                Supplier.factory_id == factory_id,
+                Supplier.supplier_no == D3_E2E_SUPPLIER_NO,
+            )
+        )
+    ).scalar_one()
+
+    fmea = (
+        await db.execute(
+            select(FMEADocument).where(FMEADocument.document_no == FMEA_LINK_E2E_FMEA_DOC_NO)
+        )
+    ).scalar_one_or_none()
+    if fmea is None:
+        # _seed_fmea_linkage should have run first; create minimal graph if not.
+        graph = {
+            "nodes": [
+                {"id": FMEA_LINK_E2E_FM_NODE, "type": "FailureMode", "name": "孔径超差"},
+                {"id": FMEA_LINK_E2E_CAUSE_NODE, "type": "FailureCause", "name": "定位销磨损"},
+                {"id": FMEA_LINK_E2E_PC_NODE, "type": "PreventionControl", "name": "定位销周检"},
+            ],
+            "edges": [
+                {
+                    "source": FMEA_LINK_E2E_CAUSE_NODE,
+                    "target": FMEA_LINK_E2E_FM_NODE,
+                    "type": "CAUSE_OF",
+                },
+                {
+                    "source": FMEA_LINK_E2E_CAUSE_NODE,
+                    "target": FMEA_LINK_E2E_PC_NODE,
+                    "type": "PREVENTED_BY",
+                },
+            ],
+        }
+        fmea = FMEADocument(
+            fmea_id=FMEA_LINK_FMEA_ID,
+            document_no=FMEA_LINK_E2E_FMEA_DOC_NO,
+            title="E2E FMEA 联动 PFMEA",
+            fmea_type="PFMEA",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status="approved",
+            graph_data=graph,
+            created_by=admin.user_id,
+        )
+        db.add(fmea)
+        await db.flush()
+
+    # Historical ARCHIVED CAPA — same supplier + PL + fmea_node for matched repeat.
+    hist = (
+        await db.execute(
+            select(CAPAEightD).where(CAPAEightD.document_no == SUPPLIER_RISK_E2E_HIST_CAPA_DOC_NO)
+        )
+    ).scalar_one_or_none()
+    if hist is None:
+        hist = CAPAEightD(
+            report_id=SUPPLIER_RISK_HIST_CAPA_ID,
+            document_no=SUPPLIER_RISK_E2E_HIST_CAPA_DOC_NO,
+            title="E2E 供应商风险 8D（历史归档）",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status=EightDState.ARCHIVED.value,
+            severity="serious",
+            d4_root_cause="历史根因：定位销磨损",
+            d7_prevention="历史预防措施",
+            fmea_ref_id=fmea.fmea_id,
+            fmea_node_id=FMEA_LINK_E2E_FM_NODE,
+            supplier_id=supplier.supplier_id,
+            created_by=admin.user_id,
+        )
+        db.add(hist)
+        await db.flush()
+    else:
+        hist.status = EightDState.ARCHIVED.value
+        hist.product_line_code = product_line
+        hist.factory_id = factory_id
+        hist.fmea_ref_id = fmea.fmea_id
+        hist.fmea_node_id = FMEA_LINK_E2E_FM_NODE
+        hist.supplier_id = supplier.supplier_id
+        hist.severity = "serious"
+        await db.flush()
+
+    # Active CAPA at D7_PREVENTION ready to advance → D7_COMPLETED.
+    capa = (
+        await db.execute(
+            select(CAPAEightD).where(CAPAEightD.document_no == SUPPLIER_RISK_E2E_CAPA_DOC_NO)
+        )
+    ).scalar_one_or_none()
+    if capa is None:
+        capa = CAPAEightD(
+            report_id=SUPPLIER_RISK_CAPA_ID,
+            document_no=SUPPLIER_RISK_E2E_CAPA_DOC_NO,
+            title="E2E 8D→供应商风险输入",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status=EightDState.D7_PREVENTION.value,
+            severity="serious",
+            d2_description="来料不良涉及供应商，需写入供应商风险输入",
+            d4_root_cause=root_cause,
+            d5_correction="更换定位销并校准夹具",
+            d6_verification="措施已验证有效",
+            d7_prevention=prevention,
+            fmea_ref_id=fmea.fmea_id,
+            fmea_node_id=FMEA_LINK_E2E_FM_NODE,
+            supplier_id=supplier.supplier_id,
+            created_by=admin.user_id,
+        )
+        db.add(capa)
+        await db.flush()
+    else:
+        capa.status = EightDState.D7_PREVENTION.value
+        capa.title = "E2E 8D→供应商风险输入"
+        capa.product_line_code = product_line
+        capa.factory_id = factory_id
+        capa.severity = "serious"
+        capa.d2_description = "来料不良涉及供应商，需写入供应商风险输入"
+        capa.d4_root_cause = root_cause
+        capa.d5_correction = "更换定位销并校准夹具"
+        capa.d6_verification = "措施已验证有效"
+        capa.d7_prevention = prevention
+        capa.fmea_ref_id = fmea.fmea_id
+        capa.fmea_node_id = FMEA_LINK_E2E_FM_NODE
+        capa.supplier_id = supplier.supplier_id
+        await db.flush()
+
+    # Clear prior risk inputs so re-seed leaves a clean pending path after advance.
+    await db.execute(
+        delete(SupplierRiskCapaInput).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+    )
+    await db.execute(
+        delete(CapaD7NodeAction).where(CapaD7NodeAction.capa_id == capa.report_id)
+    )
+    await db.flush()
+
+    # Canonical hash must match get_d7_recommendations linked rec for gate pass.
+    rec_hash = recommendation_fingerprint(
+        fmea_id=fmea.fmea_id,
+        failure_mode_node_id=FMEA_LINK_E2E_FM_NODE,
+        failure_cause_node_id=FMEA_LINK_E2E_CAUSE_NODE,
+        failure_mode_name="孔径超差",
+        failure_cause_name="定位销磨损",
+        match_reason="关联FMEA失效模式",
+        prevention_control_node_id=FMEA_LINK_E2E_PC_NODE,
+        prevention_control_name="定位销周检",
+    )
+    db.add(
+        CapaD7NodeAction(
+            action_id=SUPPLIER_RISK_D7_ACTION_ID,
+            capa_id=capa.report_id,
+            factory_id=factory_id,
+            action="confirmed",
+            fmea_id=fmea.fmea_id,
+            failure_mode_node_id=FMEA_LINK_E2E_FM_NODE,
+            failure_cause_node_id=FMEA_LINK_E2E_CAUSE_NODE,
+            match_source="linked",
+            prevention_control_node_id=FMEA_LINK_E2E_PC_NODE,
+            prevention_control_name_before="定位销周检",
+            prevention_control_name_after="定位销周检",
+            recommendation_hash=rec_hash,
+            acted_by=admin.user_id,
+        )
+    )
+    await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
@@ -874,6 +1075,7 @@ async def main():
         await db.commit()
         await _seed_d3_test_capas(db)
         await _seed_scar_trigger(db, factory_ids)
+        await _seed_supplier_risk_input(db, factory_ids)
         await db.commit()
     print("E2E seed complete.")
 
