@@ -23,7 +23,7 @@ PYTEST_IGNORES    := --ignore=tests/test_graph_sync_worker.py --ignore=tests/tes
 PYTEST ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest"; else echo pytest; fi)
 
 .PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend \
-	doc-gate-preflight deploy-check deploy-migrate deploy-release
+	doc-gate-preflight deploy-migrate deploy-release
 
 help:
 	@echo "Targets:"
@@ -31,7 +31,6 @@ help:
 	@echo "  check-backend      — backend pytest suite (needs Postgres)"
 	@echo "  check-frontend     — frontend tsc --noEmit + vite build"
 	@echo "  doc-gate-preflight — D8 doc-gate CP lineage scan (exit 1 = blocked_modify/stale_analysis/invalid_waiver)"
-	@echo "  deploy-check       — check + doc-gate-preflight (release gate; TARGET DB via DATABASE_URL)"
 	@echo "  deploy-migrate     — alembic upgrade head on DATABASE_URL (infra only; no app traffic)"
 	@echo "  deploy-release     — SERIAL release (requires distinct DATABASE_URL, TEST_DATABASE_URL, ROLLOUT_CMD)"
 	@echo ""
@@ -50,8 +49,8 @@ check-frontend: check-frontend-tsc check-frontend-build
 # ── Deploy gate ────────────────────────────────────────────────────────
 # Release/deploy pipelines MUST use `make deploy-release` against the environment
 # being released. It routes check to TEST_DATABASE_URL and migration, preflight,
-# and rollout to DATABASE_URL. `deploy-check` remains a standalone diagnostic
-# gate. Unit CI runs `make check` only (no data preflight or rollout).
+# and rollout to DATABASE_URL. Diagnose with `check` and `doc-gate-preflight`
+# separately. Unit CI runs `make check` only (no data preflight or rollout).
 #
 # doc-gate-preflight exit 1 = blocked_modify, stale_analysis, or invalid_waiver.
 # potential_disconnect is WARN (exit 0) unless PREFLIGHT_STRICT_POTENTIAL=1.
@@ -60,9 +59,6 @@ PREFLIGHT_STRICT_POTENTIAL ?= 0
 
 doc-gate-preflight:
 	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTHON_BIN) -m app.services.capa_doc_gate_preflight $(if $(filter 1,$(PREFLIGHT_STRICT_POTENTIAL)),--strict-potential,)
-
-# Full release gate: code checks + data preflight on DATABASE_URL.
-deploy-check: check doc-gate-preflight
 
 # Schema migrate ONLY (no app containers that serve traffic).
 # Use against a reachable DATABASE_URL; for docker, start db first, then:

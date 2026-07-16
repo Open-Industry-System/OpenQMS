@@ -32,6 +32,7 @@ def test_release_script_runs_all_steps_in_exact_serial_order(tmp_path):
         **os.environ,
         "DATABASE_URL": TARGET_URL,
         "TEST_DATABASE_URL": TEST_URL,
+        "TEST_DATABASE_GUARD_CMD": _capture_env_command(log, "guard"),
         "MIGRATE_CMD": _capture_env_command(log, "migrate"),
         "CHECK_CMD": _capture_env_command(log, "check"),
         "PREFLIGHT_CMD": _capture_env_command(log, "preflight"),
@@ -44,6 +45,7 @@ def test_release_script_runs_all_steps_in_exact_serial_order(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert log.read_text().splitlines() == [
+        f"guard|{TARGET_URL}|{TEST_URL}",
         f"migrate|{TARGET_URL}|unset",
         f"check|{TEST_URL}|{TEST_URL}",
         f"preflight|{TARGET_URL}|unset",
@@ -65,6 +67,7 @@ def test_release_script_requires_inputs_before_migration(tmp_path, missing_name,
         **os.environ,
         "DATABASE_URL": TARGET_URL,
         "TEST_DATABASE_URL": TEST_URL,
+        "TEST_DATABASE_GUARD_CMD": "true",
         "MIGRATE_CMD": _append_command(log, "migrate"),
         "CHECK_CMD": _append_command(log, "check"),
         "PREFLIGHT_CMD": _append_command(log, "preflight"),
@@ -81,24 +84,37 @@ def test_release_script_requires_inputs_before_migration(tmp_path, missing_name,
     assert not log.exists() or log.read_text() == ""
 
 
-def test_release_script_rejects_test_database_equal_to_target(tmp_path):
+@pytest.mark.parametrize(
+    ("target_url", "test_url"),
+    [
+        (TARGET_URL, TARGET_URL),
+        (
+            "postgresql+asyncpg://qms@localhost/openqms?b=2&a=1",
+            "postgresql+psycopg://qms@127.0.0.1:5432/openqms?a=1&b=2",
+        ),
+    ],
+)
+def test_release_script_rejects_equivalent_databases_before_migration(
+    tmp_path, target_url, test_url,
+):
     log = tmp_path / "release.log"
     env = {
         **os.environ,
-        "DATABASE_URL": TARGET_URL,
-        "TEST_DATABASE_URL": TARGET_URL,
+        "DATABASE_URL": target_url,
+        "TEST_DATABASE_URL": test_url,
         "MIGRATE_CMD": _append_command(log, "migrate"),
         "CHECK_CMD": _append_command(log, "check"),
         "PREFLIGHT_CMD": _append_command(log, "preflight"),
         "ROLLOUT_CMD": _append_command(log, "rollout"),
     }
+    env.pop("TEST_DATABASE_GUARD_CMD", None)
 
     result = subprocess.run(
         [str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True,
     )
 
     assert result.returncode != 0
-    assert "TEST_DATABASE_URL must differ from DATABASE_URL" in result.stderr
+    assert "same canonical database" in result.stderr
     assert not log.exists() or log.read_text() == ""
 
 
@@ -112,6 +128,7 @@ def test_release_script_stops_on_failed_pipeline(tmp_path, failed_step):
         **os.environ,
         "DATABASE_URL": TARGET_URL,
         "TEST_DATABASE_URL": TEST_URL,
+        "TEST_DATABASE_GUARD_CMD": "true",
         "MIGRATE_CMD": commands["migrate"],
         "CHECK_CMD": commands["check"],
         "PREFLIGHT_CMD": commands["preflight"],
@@ -125,6 +142,28 @@ def test_release_script_stops_on_failed_pipeline(tmp_path, failed_step):
     failed_index = names.index(failed_step)
     assert result.returncode != 0
     assert log.read_text().splitlines() == names[:failed_index + 1]
+    assert "deploy-release OK" not in result.stdout
+
+
+def test_release_script_stops_when_database_guard_pipeline_fails(tmp_path):
+    log = tmp_path / "release.log"
+    env = {
+        **os.environ,
+        "DATABASE_URL": TARGET_URL,
+        "TEST_DATABASE_URL": TEST_URL,
+        "TEST_DATABASE_GUARD_CMD": _append_command(log, "guard") + "; false | true",
+        "MIGRATE_CMD": _append_command(log, "migrate"),
+        "CHECK_CMD": _append_command(log, "check"),
+        "PREFLIGHT_CMD": _append_command(log, "preflight"),
+        "ROLLOUT_CMD": _append_command(log, "rollout"),
+    }
+
+    result = subprocess.run(
+        [str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert log.read_text().splitlines() == ["guard"]
     assert "deploy-release OK" not in result.stdout
 
 
@@ -145,3 +184,18 @@ def test_make_deploy_release_has_one_serial_script_invocation():
     assert "alembic upgrade head" not in result.stdout
     assert "pytest" not in result.stdout
     assert "app.services.capa_doc_gate_preflight" not in result.stdout
+
+
+def test_unsafe_combined_deploy_check_target_is_removed():
+    help_result = subprocess.run(
+        ["make", "help"], cwd=ROOT, text=True, capture_output=True,
+    )
+    target_result = subprocess.run(
+        ["make", "-n", "deploy-check"], cwd=ROOT, text=True, capture_output=True,
+    )
+
+    assert help_result.returncode == 0, help_result.stderr
+    assert "deploy-check" not in help_result.stdout
+    assert target_result.returncode != 0
+    assert "No rule to make target" in target_result.stderr
+    assert "deploy-check" in target_result.stderr

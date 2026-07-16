@@ -58,11 +58,15 @@ DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms \
 ```
 
 `make deploy-release` 包含 rollout 且全程串行；成功信息只会在 rollout 完成后输出。
-启动前会拒绝缺失的 `TEST_DATABASE_URL`，也会拒绝它与 `DATABASE_URL` 完全相同。
+启动前会拒绝缺失的 `TEST_DATABASE_URL`。数据库身份 guard 会先规范化两个 DSN
+（忽略 async/sync driver 差异、loopback 别名与 query 顺序），再用只读 psycopg
+连接核对 server address/port、database name 与 database OID；任一层确认同库或无法
+可靠取得 live identity 都会在迁移前 fail closed。
 迁移、preflight 与 rollout 仅收到目标库 `DATABASE_URL`（且不暴露
 `TEST_DATABASE_URL`）；check 同时将 `DATABASE_URL` 和 `TEST_DATABASE_URL` 指向测试库。
-`make deploy-check` 仍可独立用于诊断：它等于 `make check`（pytest + tsc + build）+
-`make doc-gate-preflight`。
+`TEST_DATABASE_GUARD_CMD` 仅供自动化测试注入受信任 stub；生产发布不得覆盖。
+危险的组合目标 `deploy-check` 已移除。独立诊断应分别运行 `make check`，以及对目标库
+运行 `make doc-gate-preflight`，不得把两者作为可并行的发布入口。
 preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
 key_point（baseline item_id 在 latest 中消失）、`stale_analysis` 或
 `invalid_waiver`，exit 1 阻止部署。

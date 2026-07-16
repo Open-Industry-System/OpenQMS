@@ -15,11 +15,6 @@ if [[ -z "${ROLLOUT_CMD:-}" ]]; then
     echo "deploy-release: ROLLOUT_CMD is required" >&2
     exit 2
 fi
-if [[ "$TEST_DATABASE_URL" == "$DATABASE_URL" ]]; then
-    echo "deploy-release: TEST_DATABASE_URL must differ from DATABASE_URL" >&2
-    exit 2
-fi
-
 TARGET_DATABASE_URL="$DATABASE_URL"
 
 if [[ -x "$REPO_ROOT/backend/.venv/bin/python" ]]; then
@@ -30,6 +25,9 @@ fi
 export REPO_ROOT PYTHON_BIN
 export PYTEST_SECRET_KEY="${PYTEST_SECRET_KEY:-test-secret-key-for-ci-only}"
 
+if [[ -z "${TEST_DATABASE_GUARD_CMD:-}" ]]; then
+    TEST_DATABASE_GUARD_CMD='"$PYTHON_BIN" "$REPO_ROOT/scripts/check-distinct-databases.py" "$DATABASE_URL" "$TEST_DATABASE_URL"'
+fi
 if [[ -z "${MIGRATE_CMD:-}" ]]; then
     MIGRATE_CMD='cd "$REPO_ROOT/backend" && SECRET_KEY="$PYTEST_SECRET_KEY" "$PYTHON_BIN" -m alembic upgrade head'
 fi
@@ -39,6 +37,15 @@ fi
 if [[ -z "${PREFLIGHT_CMD:-}" ]]; then
     PREFLIGHT_CMD='make -C "$REPO_ROOT" doc-gate-preflight'
 fi
+
+run_database_guard() {
+    echo "deploy-release: starting database identity guard"
+    # TEST_DATABASE_GUARD_CMD is a trusted, test-only override. Production uses
+    # the default canonical + live identity check above.
+    env DATABASE_URL="$TARGET_DATABASE_URL" TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+        /bin/bash -euo pipefail -c "$TEST_DATABASE_GUARD_CMD"
+    echo "deploy-release: completed database identity guard"
+}
 
 run_step() {
     local step_name="$1"
@@ -59,6 +66,7 @@ run_step() {
 }
 
 cd "$REPO_ROOT"
+run_database_guard
 run_step "migrate" "$MIGRATE_CMD" "target"
 run_step "check" "$CHECK_CMD" "test"
 run_step "preflight" "$PREFLIGHT_CMD" "target"
