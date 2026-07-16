@@ -25,9 +25,6 @@ fi
 export REPO_ROOT PYTHON_BIN
 export PYTEST_SECRET_KEY="${PYTEST_SECRET_KEY:-test-secret-key-for-ci-only}"
 
-if [[ -z "${TEST_DATABASE_GUARD_CMD:-}" ]]; then
-    TEST_DATABASE_GUARD_CMD='"$PYTHON_BIN" "$REPO_ROOT/scripts/check-distinct-databases.py" "$DATABASE_URL" "$TEST_DATABASE_URL"'
-fi
 if [[ -z "${MIGRATE_CMD:-}" ]]; then
     MIGRATE_CMD='cd "$REPO_ROOT/backend" && SECRET_KEY="$PYTEST_SECRET_KEY" "$PYTHON_BIN" -m alembic upgrade head'
 fi
@@ -40,10 +37,8 @@ fi
 
 run_database_guard() {
     echo "deploy-release: starting database identity guard"
-    # TEST_DATABASE_GUARD_CMD is a trusted, test-only override. Production uses
-    # the default canonical + live identity check above.
-    env DATABASE_URL="$TARGET_DATABASE_URL" TEST_DATABASE_URL="$TEST_DATABASE_URL" \
-        /bin/bash -euo pipefail -c "$TEST_DATABASE_GUARD_CMD"
+    "$PYTHON_BIN" "$REPO_ROOT/scripts/check-distinct-databases.py" \
+        "$TARGET_DATABASE_URL" "$TEST_DATABASE_URL"
     echo "deploy-release: completed database identity guard"
 }
 

@@ -11,8 +11,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "deploy-release.sh"
-TARGET_URL = "postgresql+asyncpg://release-target/example"
-TEST_URL = "postgresql+asyncpg://release-test/example"
+TARGET_URL = "postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms"
+DRY_RUN_TEST_URL = "postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test"
 
 
 def _append_command(log: Path, name: str) -> str:
@@ -26,13 +26,12 @@ def _capture_env_command(log: Path, name: str) -> str:
     )
 
 
-def test_release_script_runs_all_steps_in_exact_serial_order(tmp_path):
+def test_release_script_runs_all_steps_in_exact_serial_order(tmp_path, mig_db_url):
     log = tmp_path / "release.log"
     env = {
         **os.environ,
         "DATABASE_URL": TARGET_URL,
-        "TEST_DATABASE_URL": TEST_URL,
-        "TEST_DATABASE_GUARD_CMD": _capture_env_command(log, "guard"),
+        "TEST_DATABASE_URL": mig_db_url,
         "MIGRATE_CMD": _capture_env_command(log, "migrate"),
         "CHECK_CMD": _capture_env_command(log, "check"),
         "PREFLIGHT_CMD": _capture_env_command(log, "preflight"),
@@ -45,9 +44,8 @@ def test_release_script_runs_all_steps_in_exact_serial_order(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert log.read_text().splitlines() == [
-        f"guard|{TARGET_URL}|{TEST_URL}",
         f"migrate|{TARGET_URL}|unset",
-        f"check|{TEST_URL}|{TEST_URL}",
+        f"check|{mig_db_url}|{mig_db_url}",
         f"preflight|{TARGET_URL}|unset",
         f"rollout|{TARGET_URL}|unset",
     ]
@@ -66,8 +64,7 @@ def test_release_script_requires_inputs_before_migration(tmp_path, missing_name,
     env = {
         **os.environ,
         "DATABASE_URL": TARGET_URL,
-        "TEST_DATABASE_URL": TEST_URL,
-        "TEST_DATABASE_GUARD_CMD": "true",
+        "TEST_DATABASE_URL": DRY_RUN_TEST_URL,
         "MIGRATE_CMD": _append_command(log, "migrate"),
         "CHECK_CMD": _append_command(log, "check"),
         "PREFLIGHT_CMD": _append_command(log, "preflight"),
@@ -107,7 +104,29 @@ def test_release_script_rejects_equivalent_databases_before_migration(
         "PREFLIGHT_CMD": _append_command(log, "preflight"),
         "ROLLOUT_CMD": _append_command(log, "rollout"),
     }
-    env.pop("TEST_DATABASE_GUARD_CMD", None)
+    result = subprocess.run(
+        [str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "same canonical database" in result.stderr
+    assert not log.exists() or log.read_text() == ""
+
+
+def test_legacy_guard_override_cannot_bypass_identical_database_rejection(
+    tmp_path,
+):
+    log = tmp_path / "release.log"
+    env = {
+        **os.environ,
+        "DATABASE_URL": TARGET_URL,
+        "TEST_DATABASE_URL": TARGET_URL,
+        "TEST_DATABASE_GUARD_CMD": "true",
+        "MIGRATE_CMD": _append_command(log, "migrate"),
+        "CHECK_CMD": _append_command(log, "check"),
+        "PREFLIGHT_CMD": _append_command(log, "preflight"),
+        "ROLLOUT_CMD": _append_command(log, "rollout"),
+    }
 
     result = subprocess.run(
         [str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True,
@@ -119,7 +138,7 @@ def test_release_script_rejects_equivalent_databases_before_migration(
 
 
 @pytest.mark.parametrize("failed_step", ["migrate", "check", "preflight", "rollout"])
-def test_release_script_stops_on_failed_pipeline(tmp_path, failed_step):
+def test_release_script_stops_on_failed_pipeline(tmp_path, mig_db_url, failed_step):
     log = tmp_path / "release.log"
     names = ["migrate", "check", "preflight", "rollout"]
     commands = {name: _append_command(log, name) for name in names}
@@ -127,8 +146,7 @@ def test_release_script_stops_on_failed_pipeline(tmp_path, failed_step):
     env = {
         **os.environ,
         "DATABASE_URL": TARGET_URL,
-        "TEST_DATABASE_URL": TEST_URL,
-        "TEST_DATABASE_GUARD_CMD": "true",
+        "TEST_DATABASE_URL": mig_db_url,
         "MIGRATE_CMD": commands["migrate"],
         "CHECK_CMD": commands["check"],
         "PREFLIGHT_CMD": commands["preflight"],
@@ -145,33 +163,11 @@ def test_release_script_stops_on_failed_pipeline(tmp_path, failed_step):
     assert "deploy-release OK" not in result.stdout
 
 
-def test_release_script_stops_when_database_guard_pipeline_fails(tmp_path):
-    log = tmp_path / "release.log"
-    env = {
-        **os.environ,
-        "DATABASE_URL": TARGET_URL,
-        "TEST_DATABASE_URL": TEST_URL,
-        "TEST_DATABASE_GUARD_CMD": _append_command(log, "guard") + "; false | true",
-        "MIGRATE_CMD": _append_command(log, "migrate"),
-        "CHECK_CMD": _append_command(log, "check"),
-        "PREFLIGHT_CMD": _append_command(log, "preflight"),
-        "ROLLOUT_CMD": _append_command(log, "rollout"),
-    }
-
-    result = subprocess.run(
-        [str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True,
-    )
-
-    assert result.returncode != 0
-    assert log.read_text().splitlines() == ["guard"]
-    assert "deploy-release OK" not in result.stdout
-
-
 def test_make_deploy_release_has_one_serial_script_invocation():
     env = {
         **os.environ,
         "DATABASE_URL": TARGET_URL,
-        "TEST_DATABASE_URL": TEST_URL,
+        "TEST_DATABASE_URL": DRY_RUN_TEST_URL,
         "ROLLOUT_CMD": "true",
     }
     result = subprocess.run(
