@@ -334,6 +334,10 @@ D3_CAPA_NEED_ADVICE = [
     "8D-E2E-D3-007",
 ]
 
+# Docs allowed to hard-delete D3 generation chains on re-seed (D3 fixtures + 01.5 SCAR).
+# Keep SCAR out of D3_CAPA_INITIAL_STATUS so the D3 status/report loop does not own it.
+D3_E2E_RESET_ALLOWLIST = frozenset(D3_CAPA_INITIAL_STATUS) | {SCAR_TRIGGER_E2E_CAPA_DOC_NO}
+
 
 async def _reset_d3_chain(db, document_no, capa_id):
     """Reset D3 generation chain for an allowlisted E2E CAPA.
@@ -343,7 +347,7 @@ async def _reset_d3_chain(db, document_no, capa_id):
     """
     if not settings.E2E_MODE or settings.TENANT_MODE == "production":
         raise RuntimeError("D3 E2E reset requires E2E_MODE and non-production tenant mode")
-    if document_no not in D3_CAPA_INITIAL_STATUS:
+    if document_no not in D3_E2E_RESET_ALLOWLIST:
         raise ValueError(f"D3 E2E reset document not allowlisted: {document_no}")
 
     run_ids = [r[0] for r in (await db.execute(select(CapaD3ImportRun.run_id).where(

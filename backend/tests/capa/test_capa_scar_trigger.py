@@ -396,6 +396,59 @@ async def test_get_capa_linked_scar_and_d3_lots(
 
 
 @pytest.mark.asyncio
+async def test_trigger_body_description_still_appends_lots(
+    engineer_client, db, default_factory, admin_user
+):
+    """FE always sends description; lots must still land in SCAR description."""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    await _make_d3_current_with_lot(db, capa, admin_user.user_id, "LOT-E2E-SCAR-001")
+
+    resp = await engineer_client.post(
+        f"/api/capa/{capa.report_id}/trigger-scar",
+        json={
+            "supplier_id": str(supplier.supplier_id),
+            "description": f"{capa.document_no} {capa.title}\n[问题描述] {capa.d2_description}",
+            "affected_batches": ["LOT-E2E-SCAR-001"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "LOT-E2E-SCAR-001" in body["description"]
+    assert "受影响批次" in body["description"]
+    # Prefill that already includes the lot line is not double-appended
+    assert body["description"].count("受影响批次") == 1
+
+
+@pytest.mark.asyncio
+async def test_update_capa_keeps_linked_scar_projection(
+    engineer_client, db, default_factory, admin_user
+):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    await _make_d3_current_with_lot(db, capa, admin_user.user_id, "LOT-E2E-SCAR-001")
+
+    trig = await engineer_client.post(
+        f"/api/capa/{capa.report_id}/trigger-scar",
+        json={"supplier_id": str(supplier.supplier_id)},
+    )
+    assert trig.status_code == 200, trig.text
+    scar_id = trig.json()["scar_id"]
+
+    put = await engineer_client.put(
+        f"/api/capa/{capa.report_id}",
+        json={"d3_interim": "updated interim after scar link"},
+    )
+    assert put.status_code == 200, put.text
+    body = put.json()
+    assert body["linked_scar"] is not None
+    assert body["linked_scar"]["scar_id"] == scar_id
+    assert body["linked_scar"]["status"] == "open"
+    assert body["d3_affected_lots"] == ["LOT-E2E-SCAR-001"]
+    assert body["d3_interim"] == "updated interim after scar link"
+
+
+@pytest.mark.asyncio
 async def test_public_scar_create_rejects_source_type_capa_422(
     engineer_client, db, default_factory, admin_user
 ):

@@ -317,7 +317,7 @@ async def update_capa(
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return CAPAResponse.model_validate(capa)
+    return await _capa_response_with_projections(db, capa)
 
 
 async def require_advance_permission(
@@ -378,7 +378,10 @@ async def advance_capa(
     warning = None
     if from_status == EightDState.D4_ROOT_CAUSE.value and (capa.d4_retry_count or 0) >= D4_RETRY_THRESHOLD:
         warning = "建议升级处理（D4 验证已回退 {} 次）".format(capa.d4_retry_count)
-    return CAPAAdvanceResponse(capa=CAPAResponse.model_validate(capa), warning=warning)
+    return CAPAAdvanceResponse(
+        capa=await _capa_response_with_projections(db, capa),
+        warning=warning,
+    )
 
 
 @router.post("/{report_id}/link-fmea", response_model=CAPAResponse)
@@ -404,7 +407,7 @@ async def link_fmea(
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
-    return CAPAResponse.model_validate(capa)
+    return await _capa_response_with_projections(db, capa)
 
 
 @router.get("/{report_id}/related-fmea")

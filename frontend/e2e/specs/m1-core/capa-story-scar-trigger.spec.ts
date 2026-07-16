@@ -96,8 +96,10 @@ test.describe("US-E2E-01.5 8D→SCAR 触发", () => {
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible();
 
-    // Select D3 E2E supplier in Ant Select
-    await dialog.locator(".ant-select-selector").first().click();
+    // Select D3 E2E supplier (search so it is not limited to first page of options)
+    const supplierSelect = dialog.locator(".ant-select").first();
+    await supplierSelect.locator(".ant-select-selector").click();
+    await supplierSelect.locator("input").fill(SUPPLIER_NO);
     await page
       .locator(".ant-select-dropdown:visible .ant-select-item-option")
       .filter({ hasText: SUPPLIER_NO })

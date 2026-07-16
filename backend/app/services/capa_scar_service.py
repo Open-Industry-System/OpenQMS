@@ -78,16 +78,26 @@ def build_scar_description(
     body_description: str | None,
     lots: list[str],
 ) -> str:
-    if body_description:
-        return body_description[:_DESC_MAX]
-    parts = [f"{capa.document_no} {capa.title}".strip()]
-    if capa.d2_description:
-        parts.append(f"[问题描述] {capa.d2_description}")
-    if capa.d4_root_cause:
-        parts.append(f"[根因] {capa.d4_root_cause}")
+    """Build SCAR description; always append D3 lots when present.
+
+    Body description (UI prefill / override) is the narrative base. Affected lots
+    are still appended unless already present, so FE submit with description does
+    not drop the durable lot surface (design §4.3 / E2E acceptance).
+    """
+    if body_description and body_description.strip():
+        text = body_description.strip()
+    else:
+        parts = [f"{capa.document_no} {capa.title}".strip()]
+        if capa.d2_description:
+            parts.append(f"[问题描述] {capa.d2_description}")
+        if capa.d4_root_cause:
+            parts.append(f"[根因] {capa.d4_root_cause}")
+        text = "\n".join(parts)
     if lots:
-        parts.append("受影响批次: " + ", ".join(lots))
-    return "\n".join(parts)[:_DESC_MAX]
+        lot_line = "受影响批次: " + ", ".join(lots)
+        if "受影响批次" not in text and not all(lot in text for lot in lots):
+            text = f"{text}\n{lot_line}" if text else lot_line
+    return text[:_DESC_MAX]
 
 
 async def trigger_scar_from_capa(
