@@ -5,6 +5,7 @@ Follows D3 migration test conventions (tests/conftest.py: mig_db_url fixture).
 import json
 import uuid
 from argparse import Namespace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from alembic import command
@@ -160,6 +161,9 @@ def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
     engine = create_engine(_sync_url(mig_db_url))
     capa_id, factory_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     analysis_id, decision_id, audit_run_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    blocked_decision_id = uuid.uuid4()
+    waiver_decided_at = datetime.now(timezone.utc)
+    blocked_decided_at = waiver_decided_at - timedelta(seconds=30)
     _bootstrap_capa(engine, capa_id, factory_id, user_id)
     with engine.begin() as c:
         c.execute(text(
@@ -171,16 +175,23 @@ def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
         c.execute(text(
             "INSERT INTO capa_docg_decision (decision_id,analysis_id,audit_run_id,revision,factory_id,"
             "decision,no_affected_confirmed,version_snapshot,waiver_reason,decided_by,decided_at,created_at) "
-            "VALUES (:did,:aid,:run,0,:fid,'passed',false,CAST(:snap AS jsonb),:reason,:uid,now(),now())"
+            "VALUES (:did,:aid,:run,0,:fid,'blocked',false,'[]'::jsonb,NULL,:uid,:decided_at,:decided_at)"
+        ), {"did": blocked_decision_id, "aid": analysis_id, "run": audit_run_id,
+             "fid": factory_id, "uid": user_id, "decided_at": blocked_decided_at})
+        c.execute(text(
+            "INSERT INTO capa_docg_decision (decision_id,analysis_id,audit_run_id,revision,factory_id,"
+            "decision,no_affected_confirmed,version_snapshot,waiver_reason,decided_by,decided_at,created_at) "
+            "VALUES (:did,:aid,:run,1,:fid,'passed',false,CAST(:snap AS jsonb),:reason,:uid,:decided_at,:decided_at)"
         ), {"did": decision_id, "aid": analysis_id, "run": audit_run_id, "fid": factory_id,
-             "snap": json.dumps([{"legacy": True}]), "reason": "legacy unstructured waiver", "uid": user_id})
+             "snap": json.dumps([{"legacy": True}]), "reason": "legacy unstructured waiver",
+             "uid": user_id, "decided_at": waiver_decided_at})
         c.execute(text(
             "INSERT INTO audit_logs (log_id,table_name,record_id,action,changed_fields,operated_by,factory_id,operated_at) "
-            "VALUES (gen_random_uuid(),'capa_eightd',:cid,'DOC_GATE_WAIVER',CAST(:fields AS jsonb),:uid,:fid,now())"
+            "VALUES (gen_random_uuid(),'capa_eightd',:cid,'DOC_GATE_WAIVER',CAST(:fields AS jsonb),:uid,:fid,:operated_at)"
         ), {"cid": capa_id, "uid": user_id, "fid": factory_id, "fields": json.dumps({
             "reason": "legacy unstructured waiver", "decision_from": "blocked",
             "decision_to": "passed", "audit_run_id": str(audit_run_id),
-        })})
+        }), "operated_at": waiver_decided_at})
     engine.dispose()
     command.upgrade(cfg, "head")
     engine = create_engine(_sync_url(mig_db_url))
@@ -189,7 +200,12 @@ def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
         assert row == ("blocked", None, None)
         error = c.execute(text("SELECT error FROM capa_docg_analysis WHERE analysis_id=:aid"), {"aid": analysis_id}).scalar_one()
         assert "ROUND25_WAIVER_INVALIDATED" in error
-        event = c.execute(text("SELECT table_name,record_id,changed_fields FROM audit_logs WHERE action='DOC_GATE_WAIVER_INVALIDATED'" )).one()
+        events = c.execute(text(
+            "SELECT table_name,record_id,changed_fields FROM audit_logs "
+            "WHERE action='DOC_GATE_WAIVER_INVALIDATED'"
+        )).all()
+        assert len(events) == 1
+        event = events[0]
         assert event.table_name == "capa_eightd"
         assert event.record_id == capa_id
         assert event.changed_fields["decision_id"] == str(decision_id)
@@ -197,12 +213,13 @@ def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
         assert event.changed_fields["waiver_reason"] == "legacy unstructured waiver"
         assert event.changed_fields["old_decision"] == "passed"
         assert event.changed_fields["evidence_source"] == "historical_doc_gate_waiver_event"
+        assert event.changed_fields["decision_id"] != str(blocked_decision_id)
         with pytest.raises(IntegrityError):
             with engine.begin() as c2:
                 c2.execute(text(
                     "INSERT INTO capa_docg_decision (decision_id,analysis_id,revision,factory_id,decision,"
                     "no_affected_confirmed,version_snapshot,waiver_reason,waiver_items,decided_by,decided_at,created_at) "
-                    "VALUES (gen_random_uuid(),:aid,1,:fid,'passed',false,'[]'::jsonb,'no items',NULL,:uid,now(),now())"
+                    "VALUES (gen_random_uuid(),:aid,2,:fid,'passed',false,'[]'::jsonb,'no items',NULL,:uid,now(),now())"
                 ), {"aid": analysis_id, "fid": factory_id, "uid": user_id})
     engine.dispose()
 

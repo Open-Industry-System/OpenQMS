@@ -78,8 +78,7 @@ def upgrade() -> None:
                   AND l.operated_by = d.decided_by
                   AND d.audit_run_id IS NOT NULL
                   AND l.changed_fields->>'audit_run_id' = d.audit_run_id::text
-                  AND l.operated_at BETWEEN d.decided_at - interval '5 minutes'
-                                        AND d.decided_at + interval '5 minutes'
+                  AND l.operated_at = d.decided_at
                 ORDER BY l.operated_at DESC, l.log_id DESC
                 LIMIT 1
             ) AS legacy ON true
