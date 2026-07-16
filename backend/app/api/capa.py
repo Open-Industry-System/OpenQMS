@@ -32,10 +32,13 @@ from app.schemas.capa import (
     CAPACreate,
     CAPAListResponse,
     CAPAResponse,
+    CAPATriggerScarRequest,
     CAPAUpdate,
     D4RecommendationResponse,
     D5RecommendationResponse,
+    LinkedScarSchema,
 )
+from app.schemas import scar as scar_schemas
 from app.schemas.capa_d3 import (
     D3AdviceItem,
     D3AdviceRequest,
@@ -68,7 +71,9 @@ from app.services import capa_d3_containment_service
 from app.services import capa_d7_action_service
 from app.services import capa_doc_gate_service
 from app.services import capa_ppt_review_service, capa_ppt_service, capa_service
+from app.services import capa_scar_service
 from app.services import capa_verification_service
+from app.models.supplier import SupplierSCAR
 from app.services.capa_d7_action_service import ConflictError
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
@@ -199,6 +204,55 @@ async def capa_capabilities(
     }
 
 
+async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) -> CAPAResponse:
+    """Build CAPAResponse with scar_ref_id / linked_scar / d3_affected_lots projections."""
+    resp = CAPAResponse.model_validate(capa)
+    linked = None
+    if capa.scar_ref_id is not None:
+        scar = await db.get(SupplierSCAR, capa.scar_ref_id)
+        if scar is not None:
+            linked = LinkedScarSchema(
+                scar_id=scar.scar_id,
+                scar_no=scar.scar_no,
+                status=scar.status,
+                supplier_id=scar.supplier_id,
+            )
+    lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id)
+    return resp.model_copy(
+        update={
+            "scar_ref_id": capa.scar_ref_id,
+            "linked_scar": linked,
+            "d3_affected_lots": lots,
+        }
+    )
+
+
+def _scar_to_response(s) -> scar_schemas.SCARResponse:
+    """Map SupplierSCAR (with optional supplier relationship) to SCARResponse."""
+    return scar_schemas.SCARResponse(
+        scar_id=s.scar_id,
+        scar_no=s.scar_no,
+        supplier_id=s.supplier_id,
+        supplier_name=s.supplier.name if getattr(s, "supplier", None) else None,
+        supplier_no=s.supplier.supplier_no if getattr(s, "supplier", None) else None,
+        source_type=s.source_type,
+        source_id=s.source_id,
+        description=s.description,
+        product_line_code=s.product_line_code,
+        requested_action=s.requested_action,
+        supplier_response=s.supplier_response,
+        status=s.status,
+        capa_ref_id=s.capa_ref_id,
+        resolution_summary=s.resolution_summary,
+        issued_by=s.issued_by,
+        issued_date=s.issued_date,
+        due_date=s.due_date,
+        closed_date=s.closed_date,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
+    )
+
+
 @router.get("/{report_id}", response_model=CAPAResponse)
 async def get_capa(
     report_id: uuid.UUID,
@@ -212,7 +266,36 @@ async def get_capa(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
-    return CAPAResponse.model_validate(capa)
+    return await _capa_response_with_projections(db, capa)
+
+
+@router.post("/{report_id}/trigger-scar", response_model=scar_schemas.SCARResponse)
+async def trigger_scar(
+    report_id: uuid.UUID,
+    body: CAPATriggerScarRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    try:
+        scar = await capa_scar_service.trigger_scar_from_capa(
+            db,
+            report_id,
+            supplier_id=body.supplier_id,
+            user_id=scope.user.user_id,
+            scope=scope,
+            description=body.description,
+            requested_action=body.requested_action,
+            due_date=body.due_date,
+            affected_batches=body.affected_batches,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _scar_to_response(scar)
 
 
 @router.put("/{report_id}", response_model=CAPAResponse)

@@ -32,6 +32,21 @@ class CAPAUpdate(BaseModel):
     product_line_code: str | None = None
 
 
+class CAPATriggerScarRequest(BaseModel):
+    supplier_id: uuid.UUID
+    description: str | None = None
+    requested_action: str | None = None
+    due_date: date | None = None
+    affected_batches: list[str] | None = None  # None = use D3; [] = clear
+
+
+class LinkedScarSchema(BaseModel):
+    scar_id: uuid.UUID
+    scar_no: str
+    status: str
+    supplier_id: uuid.UUID
+
+
 class CAPAResponse(BaseModel):
     report_id: uuid.UUID
     document_no: str
@@ -54,6 +69,9 @@ class CAPAResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     d4_retry_count: int = 0  # P1-3: D4 验证回退计数，API/e2e 可观察
+    scar_ref_id: uuid.UUID | None = None
+    linked_scar: LinkedScarSchema | None = None
+    d3_affected_lots: list[str] = []
 
     model_config = {"from_attributes": True}
 
