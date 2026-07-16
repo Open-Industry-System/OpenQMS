@@ -30,10 +30,10 @@ help:
 	@echo "  check              — code consistency (pytest + tsc + build); no deploy-DB preflight"
 	@echo "  check-backend      — backend pytest suite (needs Postgres)"
 	@echo "  check-frontend     — frontend tsc --noEmit + vite build"
-	@echo "  doc-gate-preflight — D8 doc-gate CP lineage scan on DATABASE_URL (exit 1 = blocked_modify)"
+	@echo "  doc-gate-preflight — D8 doc-gate CP lineage scan (exit 1 = blocked_modify/stale_analysis/invalid_waiver)"
 	@echo "  deploy-check       — check + doc-gate-preflight (release gate; TARGET DB via DATABASE_URL)"
 	@echo "  deploy-migrate     — alembic upgrade head on DATABASE_URL (infra only; no app traffic)"
-	@echo "  deploy-release     — SERIAL release: migrate → check → preflight → rollout (requires ROLLOUT_CMD)"
+	@echo "  deploy-release     — SERIAL release (requires distinct DATABASE_URL, TEST_DATABASE_URL, ROLLOUT_CMD)"
 	@echo ""
 	@echo "Subtargets:"
 	@echo "  check-frontend-tsc    — tsc --noEmit only"
@@ -47,12 +47,13 @@ check-backend:
 
 check-frontend: check-frontend-tsc check-frontend-build
 
-# ── Deploy gate (TARGET DB via DATABASE_URL — not TEST_DATABASE_URL) ─────────
+# ── Deploy gate ────────────────────────────────────────────────────────
 # Release/deploy pipelines MUST use `make deploy-release` against the environment
-# being released. `deploy-check` remains a standalone diagnostic gate. Unit CI
-# runs `make check` only (no data preflight or rollout).
+# being released. It routes check to TEST_DATABASE_URL and migration, preflight,
+# and rollout to DATABASE_URL. `deploy-check` remains a standalone diagnostic
+# gate. Unit CI runs `make check` only (no data preflight or rollout).
 #
-# doc-gate-preflight exit 1 = blocked_modify (gate cannot pass for those CAPAs).
+# doc-gate-preflight exit 1 = blocked_modify, stale_analysis, or invalid_waiver.
 # potential_disconnect is WARN (exit 0) unless PREFLIGHT_STRICT_POTENTIAL=1.
 PYTHON_BIN ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi)
 PREFLIGHT_STRICT_POTENTIAL ?= 0

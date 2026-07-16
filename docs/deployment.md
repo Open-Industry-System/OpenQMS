@@ -45,8 +45,10 @@ docker compose up -d db redis neo4j
 docker compose ps   # 等 healthy
 
 # 1) 唯一非本地发布入口。DATABASE_URL 必须指向【本环境真实库】；
+#    TEST_DATABASE_URL 必须指向不同的测试库。
 #    ROLLOUT_CMD 是受信任的运维命令，仅在前三步全部成功后同步执行。
 DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms \
+  TEST_DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms_test \
   ROLLOUT_CMD='docker compose up -d backend frontend' \
   make deploy-release
 # 内部严格串行执行：alembic upgrade head → pytest/tsc/build →
@@ -56,10 +58,14 @@ DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms \
 ```
 
 `make deploy-release` 包含 rollout 且全程串行；成功信息只会在 rollout 完成后输出。
+启动前会拒绝缺失的 `TEST_DATABASE_URL`，也会拒绝它与 `DATABASE_URL` 完全相同。
+迁移、preflight 与 rollout 仅收到目标库 `DATABASE_URL`（且不暴露
+`TEST_DATABASE_URL`）；check 同时将 `DATABASE_URL` 和 `TEST_DATABASE_URL` 指向测试库。
 `make deploy-check` 仍可独立用于诊断：它等于 `make check`（pytest + tsc + build）+
 `make doc-gate-preflight`。
 preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
-key_point（baseline item_id 在 latest 中消失），exit 1 阻止部署。
+key_point（baseline item_id 在 latest 中消失）、`stale_analysis` 或
+`invalid_waiver`，exit 1 阻止部署。
 
 **处置（结构化 waiver，非泛化旁路）**：
 1. 优先：用 item_id 保留路径重新保存 CP → 降级并重新生成 analysis → 重跑 audit；
