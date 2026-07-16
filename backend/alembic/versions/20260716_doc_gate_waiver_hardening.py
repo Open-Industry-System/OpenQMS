@@ -57,7 +57,16 @@ def upgrade() -> None:
                         THEN d.decision
                     ELSE COALESCE(legacy.changed_fields->>'decision_to', d.decision)
                 END AS old_decision,
-                d.version_snapshot AS old_version_snapshot,
+                CASE
+                    WHEN d.waiver_reason IS NOT NULL OR d.waiver_items IS NOT NULL
+                        THEN d.version_snapshot
+                    ELSE NULL::jsonb
+                END AS old_version_snapshot,
+                CASE
+                    WHEN d.waiver_reason IS NOT NULL OR d.waiver_items IS NOT NULL
+                        THEN NULL
+                    ELSE 'cleared_by_20260715_waiver_items_before_round25'
+                END AS old_version_snapshot_unavailable_reason,
                 d.no_affected_confirmed AS old_no_affected_confirmed,
                 CASE
                     WHEN d.waiver_reason IS NOT NULL OR d.waiver_items IS NOT NULL
@@ -82,15 +91,26 @@ def upgrade() -> None:
                 ORDER BY l.operated_at DESC, l.log_id DESC
                 LIMIT 1
             ) AS legacy ON true
-            WHERE d.waiver_reason IS NOT NULL
-               OR d.waiver_items IS NOT NULL
-               OR (
+            WHERE (
+                    d.waiver_reason IS NOT NULL
+                    OR d.waiver_items IS NOT NULL
+                    OR (
                     d.decision = 'blocked'
                     AND d.waiver_reason IS NULL
                     AND d.waiver_items IS NULL
                     AND d.version_snapshot = '[]'::jsonb
                     AND legacy.changed_fields IS NOT NULL
+                    )
                )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM audit_logs AS prior
+                  WHERE prior.action = '{_ACTION}'
+                    AND prior.table_name = 'capa_eightd'
+                    AND prior.record_id = a.capa_id
+                    AND prior.factory_id = d.factory_id
+                    AND prior.changed_fields->>'decision_id' = d.decision_id::text
+              )
         )
         INSERT INTO audit_logs (
             log_id,
@@ -116,6 +136,8 @@ def upgrade() -> None:
                 'waiver_items', c.old_waiver_items,
                 'old_decision', c.old_decision,
                 'old_version_snapshot', c.old_version_snapshot,
+                'old_version_snapshot_unavailable_reason',
+                    c.old_version_snapshot_unavailable_reason,
                 'old_no_affected_confirmed', c.old_no_affected_confirmed,
                 'evidence_source', c.evidence_source,
                 'invalidation_reason', 'Round25 waiver contract hardening'
@@ -153,6 +175,7 @@ def upgrade() -> None:
             ELSE a.error || E'\\n' || '{_ANALYSIS_MARKER}'
         END
         WHERE a.is_current = true
+          AND strpos(COALESCE(a.error, ''), '[ROUND25_WAIVER_INVALIDATED]') = 0
           AND EXISTS (
               SELECT 1
               FROM audit_logs AS l

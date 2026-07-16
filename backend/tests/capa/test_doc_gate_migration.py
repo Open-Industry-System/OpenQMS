@@ -213,6 +213,10 @@ def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
         assert event.changed_fields["waiver_reason"] == "legacy unstructured waiver"
         assert event.changed_fields["old_decision"] == "passed"
         assert event.changed_fields["evidence_source"] == "historical_doc_gate_waiver_event"
+        assert event.changed_fields["old_version_snapshot"] is None
+        assert event.changed_fields["old_version_snapshot_unavailable_reason"] == (
+            "cleared_by_20260715_waiver_items_before_round25"
+        )
         assert event.changed_fields["decision_id"] != str(blocked_decision_id)
         with pytest.raises(IntegrityError):
             with engine.begin() as c2:
@@ -222,6 +226,24 @@ def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
                     "VALUES (gen_random_uuid(),:aid,2,:fid,'passed',false,'[]'::jsonb,'no items',NULL,:uid,now(),now())"
                 ), {"aid": analysis_id, "fid": factory_id, "uid": user_id})
     engine.dispose()
+
+    command.downgrade(cfg, "20260715_waiver_items")
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(_sync_url(mig_db_url))
+    with engine.connect() as c:
+        event_count = c.execute(text(
+            "SELECT count(*) FROM audit_logs "
+            "WHERE action='DOC_GATE_WAIVER_INVALIDATED' "
+            "AND changed_fields->>'decision_id'=:decision_id"
+        ), {"decision_id": str(decision_id)}).scalar_one()
+        error = c.execute(text(
+            "SELECT error FROM capa_docg_analysis WHERE analysis_id=:aid"
+        ), {"aid": analysis_id}).scalar_one()
+    engine.dispose()
+
+    assert event_count == 1
+    assert error.count("[ROUND25_WAIVER_INVALIDATED]") == 1
 
 
 def test_round25_upgrade_invalidates_all_existing_structured_waivers(mig_db_url):
