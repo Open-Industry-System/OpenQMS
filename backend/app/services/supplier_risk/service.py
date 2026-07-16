@@ -1,6 +1,6 @@
 """Main service: evaluate supplier risk, handle alerts, create SCAR/CAPA from alerts."""
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -10,9 +10,88 @@ from app.models.capa import CAPAEightD
 from app.models.iqc_inspection import IqcInspection
 from app.models.supplier import Supplier, SupplierCertification, SupplierEvaluation, SupplierSCAR
 from app.models.supplier_risk import SupplierRiskAlert
+from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 from app.services.supplier_risk.config import get_effective_configs, get_effective_configs_batch
+from app.services.supplier_risk.exceptions import SupplierRiskConfigurationError
 from app.services.supplier_risk.rule_engine import SupplierRiskInput, run_all_rules
 from app.services.supplier_risk.scorer import calculate_risk_score
+
+CAPA_INPUT_WINDOW_DAYS = 90
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize datetimes for window comparisons (treat naive as UTC)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def evaluate_supplier_risk_in_tx(
+    db: AsyncSession,
+    supplier_id: uuid.UUID,
+    product_line_code: Optional[str] = None,
+    *,
+    force_update: bool = False,
+    trigger_input: Optional[SupplierRiskCapaInput] = None,
+):
+    """事务内核心：不 commit。消费者与 confirm 共用。"""
+    supplier = await db.get(Supplier, supplier_id)
+    if not supplier:
+        raise ValueError("供应商不存在")
+
+    configs = await get_effective_configs(db, product_line_code, supplier_id)
+    if not configs:
+        raise ValueError("无有效的风险规则配置")
+
+    inspections = await _gather_inspections(db, supplier_id, product_line_code)
+    scars = await _gather_scars(db, supplier_id, product_line_code)
+    evaluations = await _gather_evaluations(db, supplier_id)
+    certifications = await _gather_certifications(db, supplier_id)
+    incidents = await _gather_capa_inputs(db, supplier_id, product_line_code)
+
+    # 显式注入 trigger_input（绕过 status 限制，但须仍在 90 天窗口内）
+    if trigger_input is not None:
+        incidents = [i for i in incidents if i.input_id != trigger_input.input_id]
+        cutoff = datetime.now(timezone.utc) - timedelta(days=CAPA_INPUT_WINDOW_DAYS)
+        if trigger_input.created_at is not None and _as_utc(trigger_input.created_at) >= cutoff:
+            incidents.append(trigger_input)
+
+    input_data = SupplierRiskInput(
+        supplier=supplier,
+        inspections=inspections,
+        scars=scars,
+        evaluations=evaluations,
+        certifications=certifications,
+        capa_incidents=incidents,
+    )
+    results, failed_ids = run_all_rules(input_data, configs)
+
+    # 强制契约：trigger_input 评估时必须实际产出 R11
+    if trigger_input is not None:
+        r11 = next((r for r in results if r.rule_id == "R11"), None)
+        if r11 is None:
+            raise SupplierRiskConfigurationError(
+                f"R11 not executed (missing/disabled/failed: r11_in_failed={'R11' in failed_ids})"
+            )
+
+    risk_score = calculate_risk_score(results, configs)
+    alert, event_type = await _upsert_alert(
+        db, supplier_id, product_line_code, risk_score, results, failed_ids,
+        factory_id=supplier.factory_id, force_update=force_update,
+    )
+
+    # 回填 trigger_input 快照
+    if trigger_input is not None and alert is not None:
+        trigger_input.evaluated_risk_level = alert.risk_level
+        trigger_input.evaluated_risk_score = alert.risk_score
+        trigger_input.evaluated_at = datetime.now(timezone.utc)
+        trigger_input.linked_alert_id = alert.alert_id
+    elif trigger_input is not None:
+        trigger_input.evaluated_risk_level = risk_score.risk_level
+        trigger_input.evaluated_risk_score = risk_score.risk_score
+        trigger_input.evaluated_at = datetime.now(timezone.utc)
+
+    return alert, risk_score, results, event_type
 
 
 async def evaluate_supplier_risk(
@@ -21,48 +100,16 @@ async def evaluate_supplier_risk(
     product_line_code: Optional[str] = None,
 ) -> dict:
     """Evaluate a single supplier's risk and upsert alert."""
-
-    # 1. Get supplier
-    supplier = await db.get(Supplier, supplier_id)
-    if not supplier:
-        raise ValueError("供应商不存在")
-
-    # 2. Get effective configs
-    configs = await get_effective_configs(db, product_line_code, supplier_id)
-    if not configs:
-        raise ValueError("无有效的风险规则配置")
-
-    # 3. Gather data
-    inspections = await _gather_inspections(db, supplier_id, product_line_code)
-    scars = await _gather_scars(db, supplier_id, product_line_code)
-    evaluations = await _gather_evaluations(db, supplier_id)
-    certifications = await _gather_certifications(db, supplier_id)
-
-    # 4. Build input and run rules
-    input_data = SupplierRiskInput(
-        supplier=supplier,
-        inspections=inspections,
-        scars=scars,
-        evaluations=evaluations,
-        certifications=certifications,
-    )
-    results, failed_ids = run_all_rules(input_data, configs)
-
-    # 5. Calculate score
-    risk_score = calculate_risk_score(results, configs)
-
-    # 6. Upsert alert (returns alert + event type)
-    alert, event_type = await _upsert_alert(
-        db, supplier_id, product_line_code, risk_score, results, failed_ids,
-        factory_id=supplier.factory_id,
+    alert, risk_score, results, event_type = await evaluate_supplier_risk_in_tx(
+        db, supplier_id, product_line_code,
     )
 
-    # 7. Commit so the alert is persisted before returning / notifying
+    # Commit so the alert is persisted before returning / notifying
     await db.commit()
     if alert:
         await db.refresh(alert)
 
-    # 8. Send notifications ONLY for new or escalated high-risk alerts (non-blocking)
+    # Send notifications ONLY for new or escalated high-risk alerts (non-blocking)
     if alert and event_type in ("new", "escalated") and alert.risk_level in ("high", "critical"):
         from app.services.supplier_risk.notifier import send_notifications
         try:
@@ -112,6 +159,7 @@ async def evaluate_all_suppliers(
     scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
     evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
     certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
+    capa_inputs_by_supplier = await _batch_gather_capa_inputs(db, supplier_ids, product_line_code)
 
     # Batch load effective configs for all suppliers in a single query
     configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
@@ -129,6 +177,7 @@ async def evaluate_all_suppliers(
                 scars=scars_by_supplier.get(supplier.supplier_id, []),
                 evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
                 certifications=certifications_by_supplier.get(supplier.supplier_id, []),
+                capa_incidents=capa_inputs_by_supplier.get(supplier.supplier_id, []),
             )
             rule_results, failed_ids = run_all_rules(input_data, configs)
             risk_score = calculate_risk_score(rule_results, configs)
@@ -199,6 +248,7 @@ async def calculate_all_supplier_scores(
     scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
     evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
     certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
+    capa_inputs_by_supplier = await _batch_gather_capa_inputs(db, supplier_ids, product_line_code)
     configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
 
     results = []
@@ -212,6 +262,7 @@ async def calculate_all_supplier_scores(
             scars=scars_by_supplier.get(supplier.supplier_id, []),
             evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
             certifications=certifications_by_supplier.get(supplier.supplier_id, []),
+            capa_incidents=capa_inputs_by_supplier.get(supplier.supplier_id, []),
         )
         rule_results, _ = run_all_rules(input_data, configs)
         risk_score = calculate_risk_score(rule_results, configs)
@@ -274,6 +325,21 @@ async def _gather_certifications(db, supplier_id):
     return list(result.scalars().all())
 
 
+async def _gather_capa_inputs(db: AsyncSession, supplier_id: uuid.UUID, product_line_code: Optional[str]):
+    """读该 supplier 的 processed/error capa inputs，90 天窗口。"""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CAPA_INPUT_WINDOW_DAYS)
+    query = select(SupplierRiskCapaInput).where(
+        SupplierRiskCapaInput.supplier_id == supplier_id,
+        SupplierRiskCapaInput.status.in_(("processed", "error")),
+        SupplierRiskCapaInput.created_at >= cutoff,
+    )
+    if product_line_code:
+        query = query.where(SupplierRiskCapaInput.product_line_code == product_line_code)
+    query = query.order_by(SupplierRiskCapaInput.created_at.desc(), SupplierRiskCapaInput.input_id.asc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
 # ── Batch gatherers (used by evaluate_all_suppliers) ───────────────────────────
 
 async def _batch_gather_inspections(db, supplier_ids, product_line_code):
@@ -325,16 +391,47 @@ async def _batch_gather_certifications(db, supplier_ids):
     return by_supplier
 
 
+async def _batch_gather_capa_inputs(db: AsyncSession, supplier_ids: list[uuid.UUID], product_line_code: Optional[str]):
+    """批量版：一次查询按 supplier 分组。"""
+    if not supplier_ids:
+        return {}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CAPA_INPUT_WINDOW_DAYS)
+    query = select(SupplierRiskCapaInput).where(
+        SupplierRiskCapaInput.supplier_id.in_(supplier_ids),
+        SupplierRiskCapaInput.status.in_(("processed", "error")),
+        SupplierRiskCapaInput.created_at >= cutoff,
+    )
+    if product_line_code:
+        query = query.where(SupplierRiskCapaInput.product_line_code == product_line_code)
+    query = query.order_by(SupplierRiskCapaInput.created_at.desc(), SupplierRiskCapaInput.input_id.asc())
+    result = await db.execute(query)
+    by_supplier: dict[uuid.UUID, list] = {}
+    for inp in result.scalars().all():
+        by_supplier.setdefault(inp.supplier_id, []).append(inp)
+    return by_supplier
+
+
 # ── Alert upsert with event type ───────────────────────────────────────────────
 
-async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results, failed_ids, *, factory_id=None):
+async def _upsert_alert(
+    db,
+    supplier_id,
+    product_line_code,
+    risk_score,
+    results,
+    failed_ids,
+    *,
+    factory_id=None,
+    force_update: bool = False,
+):
     """Upsert alert: dedup by (supplier_id, product_line_code, snapshot_date).
 
     Returns (alert, event_type) where event_type is:
     - "new": newly created alert
-    - "escalated": existing alert risk level increased
+    - "escalated": existing alert risk level increased (force_update=False)
+    - "updated": existing alert overwritten (force_update=True)
     - "unchanged": existing alert, same or lower level (or newly low)
-    - None: no alert created (low risk, no existing)
+    - None: no alert created (low risk, no existing, force_update=False)
     """
     today = date.today()
 
@@ -358,27 +455,28 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
         for r in results
     ]
 
-    # Don't create alerts for low-risk suppliers
+    # Don't create alerts for low-risk suppliers unless force_update
     if risk_score.risk_level == "low" and not existing:
-        return None, None
+        if not force_update:
+            return None, None
 
     if existing:
-        # Check if risk level escalated
         level_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-        if level_order.get(risk_score.risk_level, 0) > level_order.get(existing.risk_level, 0):
+        if force_update or level_order.get(risk_score.risk_level, 0) > level_order.get(existing.risk_level, 0):
             existing.risk_level = risk_score.risk_level
             existing.risk_score = risk_score.risk_score
             existing.quality_score = risk_score.quality_score
             existing.delivery_score = risk_score.delivery_score
             existing.compliance_score = risk_score.compliance_score
             existing.rule_results = rule_results_data
-            existing.alert_type = "escalated"
+            if not force_update:
+                existing.alert_type = "escalated"
             await db.flush()
-            return existing, "escalated"
+            return existing, "updated" if force_update else "escalated"
         # If same or lower level, skip update
         return existing, "unchanged"
 
-    # Create new alert
+    # Create new alert (force_update may create low-risk routine alerts)
     alert = SupplierRiskAlert(
         supplier_id=supplier_id,
         factory_id=factory_id,
@@ -388,7 +486,7 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
         delivery_score=risk_score.delivery_score,
         compliance_score=risk_score.compliance_score,
         rule_results=rule_results_data,
-        alert_type="initial",
+        alert_type="routine" if force_update else "initial",
         status="open",
         snapshot_date=today,
         product_line_code=product_line_code,
