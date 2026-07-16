@@ -392,6 +392,16 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
     candidates = await _build_allowlist(db, capa)
     if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
         raise ValueError("分析输入已变更，请重新生成影响分析")
+    # Serialize with every decision writer (_insert_decision uses the same row
+    # lock), then re-read latest under the lock. The caller transaction holds
+    # this through the D8 transition commit.
+    locked_analysis_id = await db.scalar(
+        select(CapaDocgAnalysis.analysis_id)
+        .where(CapaDocgAnalysis.analysis_id == analysis.analysis_id)
+        .with_for_update()
+    )
+    if locked_analysis_id is None:
+        raise ValueError("影响分析已失效，请重新生成影响分析")
     decision = await db.scalar(
         select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
         .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc()).limit(1)

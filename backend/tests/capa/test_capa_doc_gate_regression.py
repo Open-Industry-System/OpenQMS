@@ -534,6 +534,98 @@ async def test_version_creation_waits_for_waiver_decision_commit(sessionmaker):
 
 
 @pytest.mark.asyncio
+async def test_gate_waits_for_concurrent_latest_decision_writer(sessionmaker):
+    """Gate must lock analysis, then observe a concurrent newer blocked decision."""
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+    from app.models.factory import Factory
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.services import capa_service
+    from app.services.capa_doc_gate_service import _compute_input_hash
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    capa_id, analysis_id = uuid.uuid4(), uuid.uuid4()
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(id=factory_id, code=f"D{suffix}", name="Decision lock factory"))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"decision_lock_{suffix}", name_zh="决策锁",
+            name_en="Decision lock", is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        seed.add(User(
+            user_id=user_id, username=f"decision_lock_{suffix}",
+            display_name="Decision lock", email=f"decision-{suffix}@example.com",
+            password_hash="test", role_id=role_id, legacy_role="quality_engineer",
+            is_active=True, factory_id=factory_id,
+        ))
+        await seed.flush()
+        capa = CAPAEightD(
+            report_id=capa_id, document_no=f"CAPA-DEC-{suffix}", title="decision lock",
+            product_line_code="NO-DOC-LINE", factory_id=factory_id,
+            status="D8_GATE_PENDING", severity="serious", created_by=user_id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        seed.add(capa)
+        await seed.flush()
+        seed.add(CapaDocgAnalysis(
+            analysis_id=analysis_id, capa_id=capa_id, factory_id=factory_id,
+            is_current=True, status="done", affected_docs=[],
+            analysis_input_hash=_compute_input_hash(capa, []), llm_available=True,
+            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+        ))
+        await seed.flush()
+        seed.add(CapaDocgDecision(
+            analysis_id=analysis_id, revision=0, factory_id=factory_id,
+            decision="passed", no_affected_confirmed=True, version_snapshot=[],
+            decided_by=user_id,
+        ))
+        await seed.commit()
+
+    gate_task = None
+    try:
+        async with sessionmaker() as writer:
+            await capa_doc_gate_service._insert_decision(
+                writer, analysis_id, factory_id, "blocked", user_id,
+                datetime.now(timezone.utc), None, [],
+            )
+            await writer.flush()
+
+            async def _run_gate():
+                async with sessionmaker() as gate_session:
+                    gate_capa = await gate_session.get(CAPAEightD, capa_id)
+                    return await capa_service._d8_doc_gate_gate(gate_session, gate_capa)
+
+            gate_task = asyncio.create_task(_run_gate())
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(gate_task), timeout=0.2)
+            await writer.commit()
+
+        with pytest.raises(ValueError, match="文档门禁未通过：blocked"):
+            await asyncio.wait_for(gate_task, timeout=2)
+    finally:
+        if gate_task is not None and not gate_task.done():
+            gate_task.cancel()
+            await asyncio.gather(gate_task, return_exceptions=True)
+        async with sessionmaker() as cleanup:
+            for statement in (
+                "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "aid": analysis_id, "cid": capa_id, "uid": user_id,
+                    "rid": role_id, "fid": factory_id,
+                })
+            await cleanup.commit()
+
+
+@pytest.mark.asyncio
 async def test_record_gate_waiver_rejects_no_bump(db, capa_with_done_analysis_no_bump):
     """Ordinary pending_update (FMEA no bump) cannot be waived with fabricated items."""
     from app.services import capa_doc_gate_service
