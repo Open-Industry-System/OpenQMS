@@ -97,14 +97,30 @@ async def test_field_qe_cannot_archive(perm_client_builder, db, default_factory,
 
 
 @pytest.mark.asyncio
-async def test_manager_can_approve_d8_closure(perm_client_builder, db, default_factory, admin_user):
+async def test_manager_can_approve_d8_closure(
+    perm_client_builder, db, default_factory, admin_user, monkeypatch
+):
     """APPROVE(4) 可推进 D8_APPROVAL_PENDING→D8_CLOSURE。"""
+    from app.services.agent.provider_adapter import ProviderClient
+
+    async def _ok_client(db_):
+        return ProviderClient(provider="openai", client=object(), model="test-model")
+
+    async def _ok_json(pc, prompt, schema):
+        return {
+            "lesson_summary": "权限测试沉淀摘要",
+            "tags": ["权限", "关闭", "沉淀"],
+        }
+
+    monkeypatch.setattr("app.services.agent.provider_adapter.build_client", _ok_client)
+    monkeypatch.setattr("app.services.agent.provider_adapter.complete_json", _ok_json)
+
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "D8_APPROVAL_PENDING")
     ac = await perm_client_builder(capa_level=4)  # APPROVE
     async with ac:
         resp = await ac.post(f"/api/capa/{capa.report_id}/advance",
                              json={"target_state": "D8_CLOSURE"})
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
 
 
 @pytest.mark.asyncio

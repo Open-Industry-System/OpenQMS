@@ -60,7 +60,7 @@ async def test_linear_advance_d7_prevention_without_target_state_raises(db, defa
 
 
 @pytest.mark.asyncio
-async def test_full_flow_d7_to_d8_closure(db, default_factory, admin_user):
+async def test_full_flow_d7_to_d8_closure(db, default_factory, admin_user, monkeypatch):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
     await _to_d7_completed(db, capa, fmea, admin_user)
@@ -78,6 +78,21 @@ async def test_full_flow_d7_to_d8_closure(db, default_factory, admin_user):
 
     await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D8_APPROVAL_PENDING"))
     await db.refresh(capa); assert capa.status == "D8_APPROVAL_PENDING"
+
+    # US-E2E-01.8: D8 close requires knowledge sink LLM — mock for non-AI flow test
+    from app.services.agent.provider_adapter import ProviderClient
+
+    async def _ok_client(db_):
+        return ProviderClient(provider="openai", client=object(), model="test-model")
+
+    async def _ok_json(pc, prompt, schema):
+        return {
+            "lesson_summary": "流程测试沉淀摘要",
+            "tags": ["流程", "关闭", "沉淀"],
+        }
+
+    monkeypatch.setattr("app.services.agent.provider_adapter.build_client", _ok_client)
+    monkeypatch.setattr("app.services.agent.provider_adapter.complete_json", _ok_json)
 
     await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D8_CLOSURE"))
     await db.refresh(capa); assert capa.status == "D8_CLOSURE"

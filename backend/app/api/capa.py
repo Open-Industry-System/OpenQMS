@@ -381,11 +381,34 @@ async def advance_capa(
     db: AsyncSession = Depends(get_db),
     result: tuple[RequestScope, Any] = Depends(require_advance_permission),
 ):
+    from app.services.knowledge_sink_service import (
+        KnowledgeSinkBlockedError,
+        KnowledgeSinkFailedError,
+    )
+
     scope, capa = result
     from_status = capa.status
     try:
         capa = await capa_service.advance_capa(
             db, capa, scope.user.user_id, body or AdvanceRequest()
+        )
+    except KnowledgeSinkBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "blocked",
+                "reason": "llm_unavailable",
+                "message": str(e),
+            },
+        )
+    except KnowledgeSinkFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "failed",
+                "reason": "llm_failed",
+                "message": str(e),
+            },
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -969,6 +992,65 @@ async def d7_auto_fill_ep(
                               prevention_control_node_id=info["prevention_control_node_id"],
                               prevention_control_name_after=info["prevention_control_name_after"],
                               is_new_control=info["is_new_control"])
+
+
+@router.post("/{report_id}/sink-knowledge")
+async def sink_knowledge(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Manual knowledge resink for closed CAPA (D8_CLOSURE / ARCHIVED)."""
+    from app.services.knowledge_sink_service import (
+        KnowledgeSinkBlockedError,
+        KnowledgeSinkFailedError,
+        sink_capa_on_close,
+    )
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    if capa.status not in (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value):
+        raise HTTPException(
+            status_code=400,
+            detail="仅 D8_CLOSURE / ARCHIVED 状态可手动重沉淀",
+        )
+    try:
+        entry = await sink_capa_on_close(db, capa, scope.user.user_id, manual=True)
+        await db.commit()
+    except KnowledgeSinkBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "blocked",
+                "reason": "llm_unavailable",
+                "message": str(e),
+            },
+        )
+    except KnowledgeSinkFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "failed",
+                "reason": "llm_failed",
+                "message": str(e),
+            },
+        )
+    return {
+        "entry_id": str(entry.entry_id),
+        "source_type": entry.source_type,
+        "source_id": str(entry.source_id),
+        "document_no": entry.document_no,
+        "title": entry.title,
+        "embedding_status": entry.embedding_status,
+        "content_hash": entry.content_hash,
+        "llm_status": entry.llm_status,
+    }
 
 
 @router.post("/{report_id}/ppt-export")
