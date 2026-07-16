@@ -230,6 +230,25 @@ async def update_capa(
         if capa.scar_ref_id is not None and new_pl != capa.product_line_code:
             raise ValueError("已关联 SCAR，禁止单独修改产品线")
 
+    # US-E2E-01.6: supplier_id same-factory + D7+ lock
+    if "supplier_id" in update_data and update_data["supplier_id"] is not None:
+        from app.models.supplier import Supplier
+        new_supplier_id = update_data["supplier_id"]
+        sup = await db.get(Supplier, new_supplier_id)
+        if sup is None:
+            raise ValueError("供应商不存在")
+        if sup.factory_id != capa.factory_id:
+            raise ValueError("供应商与 8D 不属于同一工厂")
+        locked_states = {
+            EightDState.D7_COMPLETED.value,
+            EightDState.D8_GATE_PENDING.value,
+            EightDState.D8_APPROVAL_PENDING.value,
+            EightDState.D8_CLOSURE.value,
+            EightDState.ARCHIVED.value,
+        }
+        if capa.status in locked_states and capa.supplier_id != new_supplier_id:
+            raise ValueError("8D 已推进至 D7+，不可修改供应商")
+
     # US-E2E-01.3：冻结字段后端约束（防 direct API 修改）
     _FROZEN_FIELDS_BY_STATUS = {
         EightDState.D7_COMPLETED.value: {"d7_prevention"},

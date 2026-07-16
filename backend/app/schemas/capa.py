@@ -13,6 +13,7 @@ class CAPACreate(BaseModel):
     severity: str = "general"
     due_date: date | None = None
     product_line_code: str = "DC-DC-100"
+    supplier_id: uuid.UUID | None = None
 
 
 class CAPAUpdate(BaseModel):
@@ -30,6 +31,7 @@ class CAPAUpdate(BaseModel):
     fmea_ref_id: uuid.UUID | None = None
     fmea_node_id: str | None = None
     product_line_code: str | None = None
+    supplier_id: uuid.UUID | None = None
 
 
 class CAPATriggerScarRequest(BaseModel):
@@ -69,6 +71,7 @@ class CAPAResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     d4_retry_count: int = 0  # P1-3: D4 验证回退计数，API/e2e 可观察
+    supplier_id: uuid.UUID | None = None
     scar_ref_id: uuid.UUID | None = None
     linked_scar: LinkedScarSchema | None = None
     d3_affected_lots: list[str] = []
