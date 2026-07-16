@@ -206,10 +206,7 @@ async def _apply_fmea_update(
 ) -> FMEADocument:
     """无提交核心：执行 update_fmea 的全部副作用但不 commit/refresh，供 auto_fill_d7 单事务复用。"""
     observed_product_line = fmea.product_line_code
-    if (
-        product_line_code is not None
-        and product_line_code != observed_product_line
-    ):
+    if product_line_code is not None:
         await lock_candidate_scopes(db, [
             (fmea.factory_id, observed_product_line),
             (fmea.factory_id, product_line_code),
@@ -223,7 +220,6 @@ async def _apply_fmea_update(
     fresh = result.scalar_one()
     if (
         product_line_code is not None
-        and product_line_code != observed_product_line
         and fresh.product_line_code != observed_product_line
     ):
         raise ValueError("product_line_changed_again")

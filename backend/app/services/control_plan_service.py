@@ -164,10 +164,7 @@ async def update_control_plan(
 
     requested_product_line = data.product_line_code
     observed_product_line = cp.product_line_code
-    if (
-        requested_product_line is not None
-        and requested_product_line != observed_product_line
-    ):
+    if requested_product_line is not None:
         await lock_candidate_scopes(db, [
             (cp.factory_id, observed_product_line),
             (cp.factory_id, requested_product_line),
@@ -183,7 +180,6 @@ async def update_control_plan(
     fresh = result.scalar_one()
     if (
         requested_product_line is not None
-        and requested_product_line != observed_product_line
         and fresh.product_line_code != observed_product_line
     ):
         raise ValueError("product_line_changed_again")
