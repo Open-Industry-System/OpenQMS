@@ -290,6 +290,54 @@ async def test_record_gate_waiver_inserts_passed_with_items(db, capa_with_cp_blo
 
 
 @pytest.mark.asyncio
+async def test_waiver_rejects_version_created_after_audit(db, capa_with_cp_blocked_modify):
+    """Waiver must bind to the audited version, not a later still-broken version."""
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.services.version_service import compute_pg_jsonb_hash
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+
+    items = [{
+        "item_id": "post-audit-item",
+        "source_fmea_node_id": "s1",
+        "product_characteristic": "x",
+        "control_method": "m-post-audit",
+    }]
+    header = {}
+    sha = await compute_pg_jsonb_hash(db, {"header": header, "items": items})
+    db.add(ControlPlanVersion(
+        version_id=uuid.uuid4(),
+        cp_id=cp.cp_id,
+        factory_id=capa.factory_id,
+        major_no=1,
+        minor_no=2,
+        header_snapshot=header,
+        items_snapshot=items,
+        sha256_hash=sha,
+        change_type="minor",
+        change_summary="created after blocked audit",
+        created_by=user.user_id,
+        created_at=datetime.now(timezone.utc),
+    ))
+    await db.flush()
+
+    with pytest.raises(ValueError, match="审核后文档已变更"):
+        await capa_doc_gate_service.record_gate_waiver(
+            db,
+            capa,
+            "accept audited lineage break",
+            [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+            user.user_id,
+        )
+
+
+@pytest.mark.asyncio
 async def test_record_gate_waiver_rejects_no_bump(db, capa_with_done_analysis_no_bump):
     """Ordinary pending_update (FMEA no bump) cannot be waived with fabricated items."""
     from app.services import capa_doc_gate_service
