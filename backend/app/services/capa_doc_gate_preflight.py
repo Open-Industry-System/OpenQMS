@@ -94,6 +94,43 @@ async def _baseline_cp_version(db: AsyncSession, cp_id: uuid.UUID, capa_created_
     return result.scalar_one_or_none()
 
 
+async def _waiver_identity_drift_reason(
+    db: AsyncSession,
+    capa_id: uuid.UUID,
+    analysis: CapaDocgAnalysis,
+    decision: CapaDocgDecision,
+) -> str | None:
+    """Re-read waiver ownership immediately before preflight suppression."""
+    current_analysis_id = await db.scalar(
+        select(CapaDocgAnalysis.analysis_id)
+        .where(
+            CapaDocgAnalysis.capa_id == capa_id,
+            CapaDocgAnalysis.is_current == True,  # noqa: E712
+        )
+        .limit(1)
+    )
+    if current_analysis_id != analysis.analysis_id:
+        return (
+            "waiver analysis changed between validation and lineage scan: "
+            f"validated={analysis.analysis_id} current={current_analysis_id}"
+        )
+
+    latest_decision = (await db.execute(
+        select(CapaDocgDecision.decision_id, CapaDocgDecision.revision)
+        .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc())
+        .limit(1)
+    )).one_or_none()
+    validated_identity = (decision.decision_id, decision.revision)
+    if latest_decision is None or tuple(latest_decision) != validated_identity:
+        latest_identity = None if latest_decision is None else tuple(latest_decision)
+        return (
+            "waiver latest decision changed between validation and lineage scan: "
+            f"validated={validated_identity} latest={latest_identity}"
+        )
+    return None
+
+
 async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]:
     """Report blocked/potential CP item_id lineage breaks for open CAPAs."""
     breaks: list[dict] = []
@@ -194,6 +231,24 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             latest_ver = await get_latest_cp_version(db, cp_id)
             if latest_ver is None:
                 continue
+            if waived_keys:
+                identity_drift_reason = await _waiver_identity_drift_reason(
+                    db, capa.report_id, analysis, decision
+                )
+                if identity_drift_reason is not None:
+                    if not invalid_waiver_reported:
+                        breaks.append({
+                            "kind": "invalid_waiver",
+                            "tenant_schema": tenant_schema,
+                            "capa_id": str(capa.report_id),
+                            "capa_document_no": capa.document_no,
+                            "capa_status": capa.status,
+                            "analysis_id": str(analysis.analysis_id),
+                            "decision_id": str(decision.decision_id),
+                            "reason": identity_drift_reason,
+                        })
+                        invalid_waiver_reported = True
+                    waived_keys = {}
             drifted_binding = next((
                 bound
                 for (waived_doc_id, _target_key, _field), bound in waived_keys.items()

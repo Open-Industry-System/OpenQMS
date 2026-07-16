@@ -255,6 +255,150 @@ async def test_preflight_invalid_waiver_does_not_suppress_blocked_modify(
 
 
 @pytest.mark.asyncio
+async def test_preflight_rejects_waiver_replaced_after_validation(
+    sessionmaker, monkeypatch,
+):
+    """A newer decision committed by another session invalidates waiver N."""
+    from app.models.factory import Factory
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.services import capa_doc_gate_service, capa_doc_gate_waiver
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id, capa_id = (
+        uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    )
+    analysis_id = cp_id = None
+    target_key, field = "old-item", "control_method"
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(
+            id=factory_id, code=f"P{suffix}", name="Preflight decision race",
+        ))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"preflight_race_{suffix}",
+            name_zh="预检竞态", name_en="Preflight race",
+            is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        user = User(
+            user_id=user_id, username=f"preflight_race_{suffix}",
+            display_name="Preflight race",
+            email=f"preflight-{suffix}@example.com", password_hash="test",
+            role_id=role_id, legacy_role="quality_engineer",
+            is_active=True, factory_id=factory_id,
+        )
+        seed.add(user)
+        await seed.flush()
+        capa = CAPAEightD(
+            report_id=capa_id, document_no=f"CAPA-PREF-{suffix}",
+            title="preflight race", product_line_code="DC-DC-100",
+            factory_id=factory_id, status="D8_GATE_PENDING", severity="serious",
+            d4_root_cause="root", d5_correction="correction",
+            d7_prevention="prevention", created_by=user_id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        seed.add(capa)
+        await seed.flush()
+        cp, baseline_id = await _seed_cp_with_version(
+            seed, factory_id, user_id, [target_key],
+            capa.created_at - timedelta(days=2),
+        )
+        cp_id = cp.cp_id
+        await _add_cp_version(
+            seed, cp_id, factory_id, user_id, ["new-item"], 1, 1,
+        )
+        affected_docs = _affected(cp_id, baseline_id, [{
+            "target_kind": "cp_item", "expected_action": "modify",
+            "field": field, "target_key": target_key,
+        }])
+        analysis = await _make_analysis(
+            seed, capa, user_id, affected_docs, baseline_id,
+        )
+        analysis_id = analysis.analysis_id
+        await seed.commit()
+        await capa_doc_gate_service.run_audit(seed, capa, user_id)
+        await capa_doc_gate_service.record_gate_waiver(
+            seed, capa, "accepted",
+            [{"doc_type": "control_plan", "doc_id": str(cp_id),
+              "target_key": target_key, "field": field}],
+            user_id,
+        )
+        waiver_n = await seed.scalar(
+            select(CapaDocgDecision)
+            .where(CapaDocgDecision.analysis_id == analysis_id)
+            .order_by(CapaDocgDecision.revision.desc())
+            .limit(1)
+        )
+
+    validate = capa_doc_gate_waiver.validate_persisted_waiver
+
+    async def _commit_n_plus_one_after_validation(*args, **kwargs):
+        waived_keys = await validate(*args, **kwargs)
+        async with sessionmaker() as writer:
+            writer.add(CapaDocgDecision(
+                analysis_id=analysis_id,
+                revision=waiver_n.revision + 1,
+                factory_id=factory_id,
+                decision="blocked",
+                no_affected_confirmed=False,
+                version_snapshot=[],
+                decided_by=user_id,
+            ))
+            await writer.commit()
+        return waived_keys
+
+    monkeypatch.setattr(
+        capa_doc_gate_waiver,
+        "validate_persisted_waiver",
+        _commit_n_plus_one_after_validation,
+    )
+
+    try:
+        async with sessionmaker() as scanner:
+            breaks = await scan_tenant_breaks(scanner, "public")
+
+        assert sum(b["kind"] == "invalid_waiver" for b in breaks) == 1
+        assert any(
+            b["kind"] == "invalid_waiver"
+            and "latest decision changed" in b["reason"]
+            for b in breaks
+        )
+        assert any(
+            b["kind"] == "blocked_modify"
+            and b["blocked_modify_target_key"] == target_key
+            for b in breaks
+        )
+    finally:
+        async with sessionmaker() as cleanup:
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions "
+                "DISABLE TRIGGER trg_cp_version_no_update"
+            ))
+            for statement in (
+                "DELETE FROM audit_logs WHERE factory_id=:fid",
+                "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_audit WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
+                "DELETE FROM control_plans WHERE cp_id=:cpid",
+                "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "aid": analysis_id, "cpid": cp_id, "cid": capa_id,
+                    "uid": user_id, "rid": role_id, "fid": factory_id,
+                })
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions "
+                "ENABLE TRIGGER trg_cp_version_no_update"
+            ))
+            await cleanup.commit()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("v3_item_id", "expect_blocked"),
     [("newer-item", True), ("old-item", False)],
