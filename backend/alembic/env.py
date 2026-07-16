@@ -29,7 +29,6 @@ def do_run_migrations(connection: AsyncConnection, schema_name: str | None):
 
     if schema_override:
         # Tenant migration
-        connection.execute(text(set_search_path_sql(schema_override)))
         context.configure(
             connection=connection,
             target_metadata=TenantBase.metadata,
@@ -43,6 +42,14 @@ def do_run_migrations(connection: AsyncConnection, schema_name: str | None):
             version_table_schema="public",
         )
     with context.begin_transaction():
+        if schema_override:
+            # SET must be inside Alembic's transaction. Executing it before
+            # begin_transaction() autobegins an unmanaged SQLAlchemy transaction
+            # that is rolled back when the migration connection closes.
+            search_path_sql = set_search_path_sql(schema_override).replace(
+                "SET search_path", "SET LOCAL search_path", 1
+            )
+            connection.execute(text(search_path_sql))
         context.run_migrations()
 
 
