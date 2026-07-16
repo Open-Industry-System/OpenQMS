@@ -300,6 +300,30 @@ async def lifespan(app: FastAPI):
 
     risk_eval_task = asyncio.create_task(_risk_eval_loop())
 
+    # 01.6: supplier risk input outbox processor loop (every 30s)
+    async def _risk_input_outbox_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        from app.services.supplier_risk.risk_input_worker import (
+                            claim_batch,
+                            process_one,
+                            recover_stale_inputs,
+                        )
+
+                        await recover_stale_inputs(db)
+                        claimed = await claim_batch(db, 20)
+                        for c in claimed:
+                            await process_one(db, c)
+                    except Exception as e:
+                        logger.error("[risk_input_loop] error for tenant %s: %s", tenant.slug, e)
+            except Exception as e:
+                logger.error("[risk_input_loop] error: %s", e)
+
+    risk_input_task = asyncio.create_task(_risk_input_outbox_loop())
+
     # Start supply chain risk map snapshot scheduler (hourly)
     from app.services.supply_chain_risk_map.scheduler import snapshot_loop
 
@@ -366,6 +390,13 @@ async def lifespan(app: FastAPI):
     risk_eval_task.cancel()
     try:
         await risk_eval_task
+    except asyncio.CancelledError:
+        pass
+
+    # Cancel risk input outbox task
+    risk_input_task.cancel()
+    try:
+        await risk_input_task
     except asyncio.CancelledError:
         pass
 
