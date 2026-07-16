@@ -51,7 +51,8 @@ async def claim_batch(db: AsyncSession, batch_size: int) -> list[dict]:
                 LIMIT :batch_size
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, entity_type, entity_id, product_line_code, retry_count, max_attempts
+            RETURNING id, entity_type, entity_id, product_line_code, retry_count,
+                      max_attempts, content_hash
         """),
         {"batch_size": batch_size},
     )
@@ -141,6 +142,10 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
                     ("analysis_result", "analysis_result"),
                     ("corrective_action", "corrective_action"),
                 ]),
+                "knowledge_entry": (
+                    "knowledge_entries", "entry_id", "product_line_code", "document_no", "factory_id",
+                    [("embedding_text", "embedding_text")],
+                ),
             }
 
             if entity_type not in table_field_map:
@@ -150,12 +155,15 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
             # table_field_map constant — never user input.
             table_from, pk_expr, plc_expr, doc_no_expr, fid_expr, fields = table_field_map[entity_type]
             field_names = [f[0] for f in fields]
+            for_update = " FOR UPDATE" if entity_type == "knowledge_entry" else ""
             result = await db.execute(
                 text(f"""
                     SELECT {', '.join(field_names)}, {plc_expr} AS product_line_code,
                            {doc_no_expr} AS document_no, {fid_expr} AS factory_id
+                           {', content_hash' if entity_type == 'knowledge_entry' else ''}
                     FROM {table_from}
                     WHERE {pk_expr} = :entity_id
+                    {for_update}
                 """),
                 {"entity_id": entity_id},
             )
@@ -163,6 +171,14 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
             if not row:
                 continue
             row = row._mapping
+
+            # knowledge_entry: drop stale outbox events whose hash no longer matches.
+            if entity_type == "knowledge_entry":
+                event_hash = event.get("content_hash")
+                entry_hash = row.get("content_hash")
+                if event_hash and entry_hash and event_hash != entry_hash:
+                    # No chunk → batch success path completes the event without write.
+                    continue
 
             for field_name, _ in fields:
                 field_value = row.get(field_name)
@@ -189,10 +205,17 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
     Uses DELETE + INSERT because partial unique indexes can't be used in a single ON CONFLICT clause.
     """
     for chunk, vector in zip(chunks, vectors, strict=False):
-        # R9: capa_lesson upsert 前重查存在性，已删则丢弃（防 race / stale embedding）
+        # R9: capa_lesson / knowledge_entry upsert 前重查存在性，已删则丢弃（防 race / stale embedding）
         if chunk["entity_type"] == "capa_lesson":
             exists = await db.scalar(
                 text("SELECT 1 FROM capa_lessons_learned WHERE lesson_id = :id"),
+                {"id": chunk["entity_id"]},
+            )
+            if not exists:
+                continue
+        elif chunk["entity_type"] == "knowledge_entry":
+            exists = await db.scalar(
+                text("SELECT 1 FROM knowledge_entries WHERE entry_id = :id"),
                 {"id": chunk["entity_id"]},
             )
             if not exists:
@@ -230,7 +253,7 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
             )
 
         # Insert new embedding
-        await db.execute(
+        result = await db.execute(
             text("""
                 INSERT INTO document_embeddings
                     (entity_type, entity_id, node_id, entity_field, chunk_index,
@@ -239,6 +262,7 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
                     (:entity_type, :entity_id, :node_id, :entity_field, 0,
                      :chunk_text, CAST(:embedding AS vector), :product_line_code, :factory_id,
                      CAST(:metadata AS jsonb), :embedding_model)
+                RETURNING id
             """),
             {
                 "entity_type": chunk["entity_type"],
@@ -253,6 +277,18 @@ async def upsert_embeddings(db: AsyncSession, chunks: list[dict], vectors: list[
                 "embedding_model": model_name,
             },
         )
+        embedding_id = result.scalar()
+
+        # knowledge_entry success path: ready + embedding_id write-back
+        if chunk["entity_type"] == "knowledge_entry" and embedding_id is not None:
+            await db.execute(
+                text("""
+                    UPDATE knowledge_entries
+                    SET embedding_status = 'ready', embedding_id = :eid, updated_at = NOW()
+                    WHERE entry_id = :entry_id
+                """),
+                {"eid": embedding_id, "entry_id": chunk["entity_id"]},
+            )
     await db.commit()
 
 
@@ -268,7 +304,16 @@ async def mark_completed(db: AsyncSession, event_ids: list[str]):
     await db.commit()
 
 
-async def mark_failed(db: AsyncSession, event_id: str, error: str, retry_count: int, max_attempts: int):
+async def mark_failed(
+    db: AsyncSession,
+    event_id: str,
+    error: str,
+    retry_count: int,
+    max_attempts: int,
+    *,
+    entity_type: str | None = None,
+    entity_id=None,
+):
     """Mark an outbox event as failed, with exponential backoff or dead_letter."""
     if retry_count + 1 >= max_attempts:
         new_status = "dead_letter"
@@ -288,6 +333,20 @@ async def mark_failed(db: AsyncSession, event_id: str, error: str, retry_count: 
         """),
         {"id": event_id, "status": new_status, "next_attempt": next_attempt, "error": error},
     )
+    # dead_letter for knowledge_entry → entry.embedding_status=failed (keep active)
+    if (
+        new_status == "dead_letter"
+        and entity_type == "knowledge_entry"
+        and entity_id is not None
+    ):
+        await db.execute(
+            text("""
+                UPDATE knowledge_entries
+                SET embedding_status = 'failed', updated_at = NOW()
+                WHERE entry_id = :entry_id
+            """),
+            {"entry_id": entity_id},
+        )
     await db.commit()
 
 
@@ -324,7 +383,9 @@ async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
             try:
                 await mark_failed(
                     db, str(event["id"]), str(e),
-                    event.get("retry_count", 0), event.get("max_attempts", 5)
+                    event.get("retry_count", 0), event.get("max_attempts", 5),
+                    entity_type=event.get("entity_type"),
+                    entity_id=event.get("entity_id"),
                 )
             except Exception:
                 pass

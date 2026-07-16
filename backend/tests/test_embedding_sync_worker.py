@@ -69,17 +69,71 @@ class _FakeProvider:
         pass
 
 
-async def _seed_outbox(db, entity_type, entity_id, *, factory_id, product_line_code="DC-DC-100"):
+async def _seed_outbox(
+    db,
+    entity_type,
+    entity_id,
+    *,
+    factory_id,
+    product_line_code="DC-DC-100",
+    content_hash=None,
+    retry_count=0,
+    max_attempts=5,
+):
     """Insert a pending embedding_sync_outbox event directly."""
     await db.execute(
         text(
             "INSERT INTO embedding_sync_outbox "
-            "(id, entity_type, entity_id, product_line_code, factory_id, status, next_attempt_at) "
-            "VALUES (gen_random_uuid(), :et, :eid, :plc, :fid, 'pending', NOW())"
+            "(id, entity_type, entity_id, product_line_code, factory_id, status, "
+            " next_attempt_at, content_hash, retry_count, max_attempts) "
+            "VALUES (gen_random_uuid(), :et, :eid, :plc, :fid, 'pending', NOW(), "
+            " :ch, :rc, :ma)"
         ),
-        {"et": entity_type, "eid": entity_id, "plc": product_line_code, "fid": factory_id},
+        {
+            "et": entity_type,
+            "eid": entity_id,
+            "plc": product_line_code,
+            "fid": factory_id,
+            "ch": content_hash,
+            "rc": retry_count,
+            "ma": max_attempts,
+        },
     )
     await db.flush()
+
+
+async def _seed_knowledge_entry(
+    db,
+    *,
+    factory_id,
+    entry_id=None,
+    content_hash="h1" * 32,
+    embedding_text="lesson summary for knowledge entry embedding",
+    embedding_status="pending",
+):
+    from app.models.knowledge_entry import KnowledgeEntry
+
+    eid = entry_id or uuid.uuid4()
+    entry = KnowledgeEntry(
+        entry_id=eid,
+        source_type="capa",
+        source_id=uuid.uuid4(),
+        factory_id=factory_id,
+        product_line_code="DC-DC-100",
+        document_no=f"8D-KNOW-{uuid.uuid4().hex[:6]}",
+        title="knowledge entry title",
+        severity="一般",
+        fields={"lesson_summary": embedding_text, "tags": ["a", "b", "c"]},
+        status="active",
+        llm_status="done",
+        embedding_text=embedding_text,
+        content_hash=content_hash,
+        embedding_status=embedding_status,
+        embedding_id=None,
+    )
+    db.add(entry)
+    await db.flush()
+    return entry
 
 
 # ── capa_lesson 处理 ──────────────────────────────────────────────────────
@@ -262,3 +316,185 @@ async def test_worker_processes_capa_factory_id(vector_db, default_factory, admi
     )
     assert de is not None
     assert de.factory_id == default_factory.id
+
+
+# ── knowledge_entry (US-E2E-01.8 Task 2) ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_enqueue_persists_content_hash(db, default_factory):
+    from app.services.embedding_outbox import enqueue_embedding
+
+    eid = uuid.uuid4()
+    await enqueue_embedding(
+        db, "knowledge_entry", eid, "DC-DC-100", default_factory.id, content_hash="abc"
+    )
+    await db.commit()
+    row = await db.execute(
+        text("SELECT content_hash FROM embedding_sync_outbox WHERE entity_id=:e"),
+        {"e": eid},
+    )
+    assert row.scalar() == "abc"
+
+
+@pytest.mark.asyncio
+async def test_worker_ready_and_stale_hash(vector_db, default_factory, admin_user):
+    db, dim = vector_db
+    h1 = "a" * 64
+    h0 = "b" * 64
+    entry = await _seed_knowledge_entry(
+        db,
+        factory_id=default_factory.id,
+        content_hash=h1,
+        embedding_text="ready path knowledge text",
+    )
+    await _seed_outbox(
+        db,
+        "knowledge_entry",
+        entry.entry_id,
+        factory_id=default_factory.id,
+        content_hash=h1,
+    )
+
+    provider = _FakeProvider(dimensions=dim)
+    await process_batch_once(db, provider)
+
+    await db.refresh(entry)
+    assert entry.embedding_status == "ready"
+    assert entry.embedding_id is not None
+
+    de = await db.scalar(
+        select(DocumentEmbedding).where(
+            DocumentEmbedding.entity_type == "knowledge_entry",
+            DocumentEmbedding.entity_id == entry.entry_id,
+        )
+    )
+    assert de is not None
+    assert de.id == entry.embedding_id
+    assert de.chunk_text == "ready path knowledge text"
+    assert de.factory_id == default_factory.id
+    first_updated = de.updated_at
+
+    # Stale outbox: entry stays at H1, event carries H0 → complete without overwrite
+    await _seed_outbox(
+        db,
+        "knowledge_entry",
+        entry.entry_id,
+        factory_id=default_factory.id,
+        content_hash=h0,
+    )
+    await process_batch_once(db, provider)
+
+    await db.refresh(entry)
+    assert entry.embedding_status == "ready"
+    assert entry.embedding_id == de.id
+
+    de2 = await db.scalar(
+        select(DocumentEmbedding).where(
+            DocumentEmbedding.entity_type == "knowledge_entry",
+            DocumentEmbedding.entity_id == entry.entry_id,
+        )
+    )
+    assert de2 is not None
+    assert de2.id == de.id
+    assert de2.chunk_text == "ready path knowledge text"
+    assert de2.updated_at == first_updated
+
+    stale_status = await db.scalar(
+        text(
+            "SELECT status FROM embedding_sync_outbox "
+            "WHERE entity_id = :eid AND content_hash = :h"
+        ),
+        {"eid": entry.entry_id, "h": h0},
+    )
+    assert stale_status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_worker_dead_letter_marks_failed(vector_db, default_factory, admin_user):
+    db, dim = vector_db
+    h1 = "c" * 64
+    entry = await _seed_knowledge_entry(
+        db,
+        factory_id=default_factory.id,
+        content_hash=h1,
+        embedding_text="dead letter knowledge text",
+    )
+    await _seed_outbox(
+        db,
+        "knowledge_entry",
+        entry.entry_id,
+        factory_id=default_factory.id,
+        content_hash=h1,
+        retry_count=4,
+        max_attempts=5,
+    )
+
+    class _FailingProvider(_FakeProvider):
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("embed failed")
+
+    provider = _FailingProvider(dimensions=dim)
+    await process_batch_once(db, provider)
+
+    await db.refresh(entry)
+    assert entry.embedding_status == "failed"
+    assert entry.embedding_id is None
+
+    event = (
+        await db.execute(
+            text(
+                "SELECT status, retry_count, last_error FROM embedding_sync_outbox "
+                "WHERE entity_id = :eid"
+            ),
+            {"eid": entry.entry_id},
+        )
+    ).fetchone()
+    assert event is not None
+    assert event[0] == "dead_letter"
+    assert event[1] == 5
+    assert "embed failed" in (event[2] or "")
+
+
+@pytest.mark.asyncio
+async def test_worker_transient_fail_keeps_pending(vector_db, default_factory, admin_user):
+    db, dim = vector_db
+    h1 = "d" * 64
+    entry = await _seed_knowledge_entry(
+        db,
+        factory_id=default_factory.id,
+        content_hash=h1,
+        embedding_text="transient fail knowledge text",
+    )
+    await _seed_outbox(
+        db,
+        "knowledge_entry",
+        entry.entry_id,
+        factory_id=default_factory.id,
+        content_hash=h1,
+        retry_count=0,
+        max_attempts=5,
+    )
+
+    class _FailingProvider(_FakeProvider):
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("transient embed failed")
+
+    provider = _FailingProvider(dimensions=dim)
+    await process_batch_once(db, provider)
+
+    await db.refresh(entry)
+    assert entry.embedding_status == "pending"
+    assert entry.embedding_id is None
+
+    event = (
+        await db.execute(
+            text(
+                "SELECT status, retry_count FROM embedding_sync_outbox WHERE entity_id = :eid"
+            ),
+            {"eid": entry.entry_id},
+        )
+    ).fetchone()
+    assert event is not None
+    assert event[0] == "pending"
+    assert event[1] == 1
