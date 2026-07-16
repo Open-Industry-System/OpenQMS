@@ -12,7 +12,7 @@ from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDe
 from app.services.version_service import (
     get_latest_cp_version,
     get_latest_fmea_version,
-    lock_version_parent,
+    lock_version_parents_in_order,
 )
 
 
@@ -27,7 +27,8 @@ def _identity(doc_type, doc_id) -> tuple[str, str]:
     return kind, canonical_id
 
 
-def _item_ids(items_snapshot) -> set[str]:
+def item_ids_from_snapshot(items_snapshot) -> set[str]:
+    """Return stable item_id values from legacy-wrapped or list snapshots."""
     if isinstance(items_snapshot, dict):
         items = items_snapshot.get("items", [])
     elif isinstance(items_snapshot, list):
@@ -186,8 +187,7 @@ async def prepare_structured_waiver(
     # in deterministic order before any live latest read, then hold through the
     # caller's decision insert + commit.
     if lock_version_parents:
-        for doc_type, doc_id in sorted(set(audit_identities)):
-            await lock_version_parent(db, doc_type, uuid.UUID(doc_id))
+        await lock_version_parents_in_order(db, audit_identities)
 
     live_by_identity = {}
     c8_snapshot: list[dict] = []
@@ -218,7 +218,7 @@ async def prepare_structured_waiver(
     for key in requested:
         doc_type, doc_id, target_key, field = key
         live = live_by_identity[(doc_type, doc_id)]
-        if target_key in _item_ids(live.items_snapshot):
+        if target_key in item_ids_from_snapshot(live.items_snapshot):
             raise ValueError(
                 f"target_key={target_key} 已存在于 latest 版本，不是 blocked_modify 断链；"
                 "请重新审核或修正 CP"

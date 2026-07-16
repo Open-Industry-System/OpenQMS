@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Iterable
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,6 +71,22 @@ async def lock_version_parent(
         raise ValueError(f"Unsupported versioned document type: {doc_type}")
     if await db.scalar(stmt.with_for_update()) is None:
         raise ValueError(f"Version parent not found: {doc_type}/{doc_id}")
+
+
+async def lock_version_parents_in_order(
+    db: AsyncSession,
+    documents: Iterable[tuple[str, uuid.UUID | str]],
+) -> None:
+    """Lock a document set deterministically for cross-service serialization."""
+    try:
+        identities = {
+            (str(doc_type), uuid.UUID(str(doc_id)))
+            for doc_type, doc_id in documents
+        }
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("Invalid version parent identity") from exc
+    for doc_type, doc_id in sorted(identities, key=lambda row: (row[0], str(row[1]))):
+        await lock_version_parent(db, doc_type, doc_id)
 
 
 # ---------------------------------------------------------------------------

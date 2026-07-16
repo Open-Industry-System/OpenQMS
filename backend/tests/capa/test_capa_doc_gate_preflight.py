@@ -20,6 +20,29 @@ from app.models.control_plan import ControlPlan
 from app.services.capa_doc_gate_preflight import scan_tenant_breaks
 
 
+def test_preflight_docstring_uses_current_release_and_complete_waiver_shape():
+    from app.services import capa_doc_gate_preflight
+
+    doc = capa_doc_gate_preflight.__doc__ or ""
+    assert "make deploy-check" not in doc
+    assert "make deploy-release" in doc
+    assert "audit_run_id" in doc
+    assert "reason" in doc
+    assert "items" in doc
+
+
+def test_preflight_reuses_public_item_snapshot_parser():
+    from app.services import capa_doc_gate_preflight, capa_doc_gate_waiver
+
+    assert (
+        capa_doc_gate_preflight.item_ids_from_snapshot
+        is capa_doc_gate_waiver.item_ids_from_snapshot
+    )
+    assert capa_doc_gate_waiver.item_ids_from_snapshot(
+        {"items": [{"item_id": "item-1"}, {"missing": "ignored"}]}
+    ) == {"item-1"}
+
+
 async def _seed_cp_with_version(db, factory_id, user_id, item_ids, created_at):
     cp = ControlPlan(
         cp_id=uuid.uuid4(),

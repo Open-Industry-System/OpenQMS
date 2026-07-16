@@ -18,8 +18,8 @@ Exit codes:
   1 — blocked_modify, stale_analysis, invalid_waiver (or strict potential)
 
 Deploy: run against TARGET DB (DATABASE_URL), not TEST_DATABASE_URL.
-  make doc-gate-preflight
-  make deploy-check   # check + preflight (release gate)
+  make deploy-release       # sole serial non-local release entry
+  make doc-gate-preflight   # standalone target-DB diagnostic
 
 Remediation (executable — re-analysis alone never changes CAPA-time baseline):
   blocked_modify:
@@ -28,7 +28,14 @@ Remediation (executable — re-analysis alone never changes CAPA-time baseline):
         continuing ids. (Note: baseline is frozen at capa.created_at — only NEW
         CAPAs created after the CP re-save get a clean baseline; for an existing
         blocked CAPA use (b).)
-    (b) Manager-authorized waiver: POST /capa/{id}/doc-gate/waiver {reason}.
+    (b) Manager-authorized waiver: POST /capa/{id}/doc-gate/waiver with
+        {"reason":"intentional delete+add","items":[{"doc_type":"control_plan",
+        "doc_id":"<cp_uuid>","target_key":"<item_id>","field":"control_method"}]}.
+        The server binds it to the latest blocked audit and persists the complete
+        evidence shape {"audit_run_id":"<audit_uuid>","reason":"...","items":[
+        {"doc_type":"control_plan","doc_id":"<cp_uuid>","target_key":"<item_id>",
+        "field":"control_method","latest_version_id":"<version_uuid>",
+        "latest_sha256":"<sha256>","audit_run_id":"<audit_uuid>"}]}.
         Requires APPROVE permission on the capa module. Audited (DOC_GATE_WAIVER
         + decision row with waiver_reason) and forces decision=passed so the
         CAPA can advance to D8_APPROVAL_PENDING. Use when the break is an
@@ -59,20 +66,9 @@ from app.models.capa import CAPAEightD
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
 from app.models.control_plan import ControlPlan
 from app.models.control_plan_version import ControlPlanVersion
+from app.services.capa_doc_gate_waiver import item_ids_from_snapshot
 from app.services.version_service import get_latest_cp_version
 from app.state_machines.eightd_state import is_capa_open_value
-
-
-def _item_ids_from_snapshot(items_snapshot) -> set[str]:
-    if items_snapshot is None:
-        return set()
-    if isinstance(items_snapshot, dict):
-        items = items_snapshot.get("items", [])
-    elif isinstance(items_snapshot, list):
-        items = items_snapshot
-    else:
-        return set()
-    return {str(i.get("item_id")) for i in items if isinstance(i, dict) and i.get("item_id")}
 
 
 async def _baseline_cp_version(db: AsyncSession, cp_id: uuid.UUID, capa_created_at):
@@ -277,7 +273,7 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                     })
                     invalid_waiver_reported = True
                 waived_keys = {}
-            latest_ids = _item_ids_from_snapshot(latest_ver.items_snapshot)
+            latest_ids = item_ids_from_snapshot(latest_ver.items_snapshot)
             for kp in doc.get("key_points") or []:
                 if not isinstance(kp, dict):
                     continue
@@ -316,8 +312,8 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             latest = await get_latest_cp_version(db, cp.cp_id)
             if baseline is None or latest is None:
                 continue
-            b_ids = _item_ids_from_snapshot(baseline.items_snapshot)
-            l_ids = _item_ids_from_snapshot(latest.items_snapshot)
+            b_ids = item_ids_from_snapshot(baseline.items_snapshot)
+            l_ids = item_ids_from_snapshot(latest.items_snapshot)
             if b_ids and l_ids and not (b_ids & l_ids):
                 breaks.append({
                     "kind": "potential_disconnect",
