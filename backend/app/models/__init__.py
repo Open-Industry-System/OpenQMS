@@ -107,6 +107,7 @@ from app.models.supplier import (
     SupplierSCAR,
 )
 from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskConfig, SupplierRiskNotificationChannel
+from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 from app.models.supplier_shared_profile import SupplierSharedProfile
 from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 
@@ -200,6 +201,7 @@ __all__ = [
     "SupplierRiskAlert",
     "SupplierRiskConfig",
     "SupplierRiskNotificationChannel",
+    "SupplierRiskCapaInput",
     "SystemSetting",
     "Factory",
     "UserFactory",
