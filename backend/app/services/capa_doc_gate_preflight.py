@@ -194,6 +194,34 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             latest_ver = await get_latest_cp_version(db, cp_id)
             if latest_ver is None:
                 continue
+            drifted_binding = next((
+                bound
+                for (waived_doc_id, _target_key, _field), bound in waived_keys.items()
+                if waived_doc_id == str(cp_id)
+                and (
+                    str(latest_ver.version_id) != bound[0]
+                    or latest_ver.sha256_hash != bound[1]
+                )
+            ), None)
+            if drifted_binding is not None:
+                bound_version_id, bound_sha256 = drifted_binding
+                if not invalid_waiver_reported:
+                    breaks.append({
+                        "kind": "invalid_waiver",
+                        "tenant_schema": tenant_schema,
+                        "capa_id": str(capa.report_id),
+                        "capa_document_no": capa.document_no,
+                        "capa_status": capa.status,
+                        "analysis_id": str(analysis.analysis_id),
+                        "decision_id": str(decision.decision_id),
+                        "reason": (
+                            "waiver version drift between validation and lineage scan: "
+                            f"bound={bound_version_id}/{bound_sha256} "
+                            f"latest={latest_ver.version_id}/{latest_ver.sha256_hash}"
+                        ),
+                    })
+                    invalid_waiver_reported = True
+                waived_keys = {}
             latest_ids = _item_ids_from_snapshot(latest_ver.items_snapshot)
             for kp in doc.get("key_points") or []:
                 if not isinstance(kp, dict):
@@ -205,30 +233,8 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                 if not tk:
                     continue
                 if tk not in latest_ids:
-                    bound = waived_keys.get((str(cp_id), tk, field))
-                    if bound is not None:
-                        bound_version_id, bound_sha256 = bound
-                        if (
-                            str(latest_ver.version_id) == bound_version_id
-                            and latest_ver.sha256_hash == bound_sha256
-                        ):
-                            continue
-                        if not invalid_waiver_reported:
-                            breaks.append({
-                                "kind": "invalid_waiver",
-                                "tenant_schema": tenant_schema,
-                                "capa_id": str(capa.report_id),
-                                "capa_document_no": capa.document_no,
-                                "capa_status": capa.status,
-                                "analysis_id": str(analysis.analysis_id),
-                                "decision_id": str(decision.decision_id),
-                                "reason": (
-                                    "waiver version drift between validation and lineage scan: "
-                                    f"bound={bound_version_id}/{bound_sha256} "
-                                    f"latest={latest_ver.version_id}/{latest_ver.sha256_hash}"
-                                ),
-                            })
-                            invalid_waiver_reported = True
+                    if (str(cp_id), tk, field) in waived_keys:
+                        continue
                     breaks.append({
                         "kind": "blocked_modify",
                         "tenant_schema": tenant_schema,

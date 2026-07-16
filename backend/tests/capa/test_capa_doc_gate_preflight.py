@@ -255,10 +255,14 @@ async def test_preflight_invalid_waiver_does_not_suppress_blocked_modify(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("v3_item_id", "expect_blocked"),
+    [("newer-item", True), ("old-item", False)],
+)
 async def test_preflight_detects_version_drift_between_waiver_validation_and_scan(
-    db, capa_with_cp_blocked_modify, monkeypatch,
+    db, capa_with_cp_blocked_modify, monkeypatch, v3_item_id, expect_blocked,
 ):
-    """A waiver validated on V2 cannot suppress a missing key observed on V3."""
+    """A waiver validated on V2 is invalid once the lineage scan observes V3."""
     from types import SimpleNamespace
     from app.services import (
         capa_doc_gate_preflight,
@@ -279,7 +283,7 @@ async def test_preflight_detects_version_drift_between_waiver_validation_and_sca
     drifted_v3 = SimpleNamespace(
         version_id=uuid.uuid4(),
         sha256_hash="3" * 64,
-        items_snapshot=[{"item_id": "newer-item", "control_method": "m3"}],
+        items_snapshot=[{"item_id": v3_item_id, "control_method": "m3"}],
     )
 
     async def _validator_reads_v2(_db, _cp_id):
@@ -297,12 +301,13 @@ async def test_preflight_detects_version_drift_between_waiver_validation_and_sca
 
     breaks = await scan_tenant_breaks(db, "public")
     assert sum(b["kind"] == "invalid_waiver" for b in breaks) == 1
-    assert any(
+    has_blocked_modify = any(
         b["kind"] == "blocked_modify"
         and b["blocked_modify_target_key"] == target_key
         and b["latest_version_id"] == str(drifted_v3.version_id)
         for b in breaks
     )
+    assert has_blocked_modify is expect_blocked
 
 
 @pytest.mark.asyncio
