@@ -486,6 +486,46 @@ async def test_get_capa_wrong_pl_403(db, default_factory, admin_user):
 
 
 @pytest.mark.asyncio
+async def test_update_capa_target_pl_unauthorized_403(
+    db, default_factory, admin_user
+):
+    """User with PL-A access cannot move a CAPA to PL-B they lack (same factory)."""
+    from app.models.product_line import ProductLine
+
+    await _seed_perm(db, admin_user.role_id, "capa", 3)
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id, product_line_code="DC-DC-100"
+    )
+    # Ensure target PL exists in same factory
+    existing = await db.execute(
+        select(ProductLine).where(ProductLine.code == "DC-DC-200")
+    )
+    if existing.scalar_one_or_none() is None:
+        db.add(
+            ProductLine(
+                code="DC-DC-200", name="DC-DC-200", factory_id=default_factory.id
+            )
+        )
+        await db.flush()
+
+    # User has access to DC-DC-100 but NOT DC-DC-200
+    scope = _scope_for(
+        admin_user,
+        default_factory,
+        accessible_factory_ids=None,
+        pl_mode="EXPLICIT",
+        pl_codes=["DC-DC-100"],
+    )
+    async with _client_for(db, admin_user, scope) as ac:
+        resp = await ac.put(
+            f"/api/capa/{capa.report_id}",
+            json={"product_line_code": "DC-DC-200"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_update_linked_capa_product_line_forbidden(
     engineer_client, db, default_factory, admin_user
 ):
@@ -1064,7 +1104,41 @@ async def _committed_scar_trigger_fixtures(sessionmaker):
             "user_id": user.user_id,
             "supplier_id": supplier.supplier_id,
             "capa_id": capa.report_id,
+            "role_id": role.id,
         }
+
+
+async def _teardown_committed_fixtures(sessionmaker, fx, *, extra_scar_ids=None, extra_capa_ids=None):
+    """Delete committed rows in FK-safe order so concurrent tests don't pollute the shared DB."""
+    async with sessionmaker() as s:
+        from sqlalchemy import delete as sa_delete
+        from app.models.supplier import SupplierSCAR
+        from app.models.audit import AuditLog
+        # SCARs (cascade clears capa.scar_ref_id via SET NULL)
+        for sid in (extra_scar_ids or []):
+            await s.execute(sa_delete(SupplierSCAR).where(SupplierSCAR.scar_id == sid))
+        # CAPAs created by trigger may have scar_ref_id set — clear first
+        await s.execute(sa_delete(SupplierSCAR).where(SupplierSCAR.capa_ref_id == fx["capa_id"]))
+        for cid in (extra_capa_ids or []):
+            await s.execute(sa_delete(AuditLog).where(AuditLog.record_id == cid))
+            await s.execute(sa_delete(CAPAEightD).where(CAPAEightD.report_id == cid))
+        await s.execute(sa_delete(AuditLog).where(AuditLog.record_id == fx["capa_id"]))
+        await s.execute(sa_delete(CAPAEightD).where(CAPAEightD.report_id == fx["capa_id"]))
+        await s.execute(sa_delete(Supplier).where(Supplier.supplier_id == fx["supplier_id"]))
+        from app.models.role import UserProductLine, RolePermission
+        await s.execute(sa_delete(UserProductLine).where(UserProductLine.user_id == fx["user_id"]))
+        await s.execute(sa_delete(RolePermission).where(RolePermission.role_id == fx["role_id"]))
+        # audit_logs.operated_by references users — clear audits by this user first
+        await s.execute(sa_delete(AuditLog).where(AuditLog.operated_by == fx["user_id"]))
+        from app.models.user import User
+        await s.execute(sa_delete(User).where(User.user_id == fx["user_id"]))
+        from app.models.role import RoleDefinition
+        await s.execute(sa_delete(RoleDefinition).where(RoleDefinition.id == fx["role_id"]))
+        from app.models.product_line import ProductLine
+        await s.execute(sa_delete(ProductLine).where(ProductLine.code == fx["pl_code"]))
+        from app.models.factory import Factory
+        await s.execute(sa_delete(Factory).where(Factory.id == fx["factory_id"]))
+        await s.commit()
 
 
 @pytest.mark.asyncio
@@ -1105,6 +1179,15 @@ async def test_concurrent_trigger_one_succeeds_one_400(sessionmaker):
     await asyncio.gather(worker(), worker())
 
     assert sorted(results) == ["conflict", "ok"], f"expected one ok + one conflict, got {results}"
+
+    # Find the SCAR created by the winning trigger, then tear down all committed rows
+    created_scar_ids = []
+    async with sessionmaker() as s:
+        rows = (
+            await s.execute(select(SupplierSCAR).where(SupplierSCAR.capa_ref_id == fx["capa_id"]))
+        ).scalars().all()
+        created_scar_ids = [r.scar_id for r in rows]
+    await _teardown_committed_fixtures(sessionmaker, fx, extra_scar_ids=created_scar_ids)
 
 
 @pytest.mark.asyncio
@@ -1170,3 +1253,7 @@ async def test_concurrent_link_capa_one_succeeds_one_400(sessionmaker):
     await asyncio.gather(worker(fx["capa_id"]), worker(capa_b_id))
     assert "ok" in results and results.count("ok") == 1, f"expected exactly one ok, got {results}"
     assert all(r != "ok" and not r.startswith("error") for r in results if r != "ok"), f"non-conflict error leaked: {results}"
+
+    await _teardown_committed_fixtures(
+        sessionmaker, fx, extra_scar_ids=[scar_id], extra_capa_ids=[capa_b_id]
+    )

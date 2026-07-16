@@ -324,6 +324,10 @@ async def update_capa(
     if not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
     check_product_line_access(capa.product_line_code, scope)
+    # Target PL must be within caller's scope too (locked state)
+    new_pl = update_data.get("product_line_code")
+    if new_pl is not None and new_pl != capa.product_line_code:
+        check_product_line_access(new_pl, scope)
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:

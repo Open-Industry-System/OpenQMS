@@ -161,14 +161,13 @@ def test_partial_unique_rejects_duplicate_scar_ref_id(mig_db_url):
     with engine.connect() as conn:
         with conn.begin():
             capa_id, scar_id, fid1, fid2, uid = _setup_legacy_data(conn)
-            # Explicitly bind the first capa to scar_id (backfill may or may not have run
-            # depending on setup order; force it so the duplicate is unambiguous)
             conn.execute(sa.text(f"UPDATE capa_eightd SET scar_ref_id='{scar_id}' WHERE report_id='{capa_id}'"))
     engine.dispose()
 
+    from sqlalchemy.exc import IntegrityError
     import pytest
     engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
-    with pytest.raises(Exception):
+    with pytest.raises(IntegrityError) as exc_info:
         with engine.connect() as conn:
             with conn.begin():
                 capa2_id = str(uuid.uuid4())
@@ -176,6 +175,33 @@ def test_partial_unique_rejects_duplicate_scar_ref_id(mig_db_url):
                     "INSERT INTO capa_eightd (report_id, document_no, title, product_line_code, factory_id, status, severity, created_by, d1_team, scar_ref_id) "
                     f"VALUES ('{capa2_id}', 'C2', 'C2', 'PL1', '{fid1}', 'D3_INTERIM', 'serious', '{uid}', '[]', '{scar_id}')"
                 ))
+    assert "uq_capa_eightd_scar_ref_id" in str(exc_info.value.orig)
+    engine.dispose()
+
+
+def test_partial_unique_rejects_duplicate_capa_ref_id(mig_db_url):
+    """uq_supplier_scars_capa_ref_id partial unique rejects a 2nd non-null capa_ref_id."""
+    command.upgrade(_cfg(mig_db_url), REV)
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        with conn.begin():
+            capa_id, scar_id, fid1, fid2, uid = _setup_legacy_data(conn)
+            # Bind the existing SCAR to capa_id so the partial unique is populated
+            conn.execute(sa.text(f"UPDATE supplier_scars SET capa_ref_id='{capa_id}' WHERE scar_id='{scar_id}'"))
+    engine.dispose()
+
+    from sqlalchemy.exc import IntegrityError
+    import pytest
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with pytest.raises(IntegrityError) as exc_info:
+        with engine.connect() as conn:
+            with conn.begin():
+                scar2_id = str(uuid.uuid4())
+                conn.execute(sa.text(
+                    "INSERT INTO supplier_scars (scar_id, scar_no, factory_id, supplier_id, source_type, status, issued_by, product_line_code, capa_ref_id, description) "
+                    f"VALUES ('{scar2_id}', 'S2', '{fid1}', '{uid}', 'manual', 'open', '{uid}', 'PL1', '{capa_id}', 'desc2')"
+                ))
+    assert "uq_supplier_scars_capa_ref_id" in str(exc_info.value.orig)
     engine.dispose()
 
 
