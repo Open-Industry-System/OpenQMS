@@ -30,6 +30,7 @@ from app.api.gauge import router as gauge_router
 from app.api.graph import router as graph_router
 from app.api.group import router as group_router
 from app.api.iqc import router as iqc_router
+from app.api.knowledge import router as knowledge_router
 from app.api.management_review import router as management_review_router
 from app.api.mes import router as mes_router
 from app.api.msa import (
@@ -426,6 +427,7 @@ app.include_router(product_type_router)
 app.include_router(management_review_router)
 app.include_router(version_router)
 app.include_router(iqc_router)
+app.include_router(knowledge_router)
 app.include_router(customer_quality_router)
 app.include_router(scar_router)
 app.include_router(apqp_router)
