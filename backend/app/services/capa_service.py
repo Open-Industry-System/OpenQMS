@@ -336,6 +336,26 @@ async def _load_d7_gate_fmea_docs(db: AsyncSession, capa) -> list[dict]:
     ]
 
 
+async def _detect_repeat_capa(db: AsyncSession, capa) -> tuple[bool | None, str, list[str]]:
+    """返回 (repeat_suggested, detection_status, matched_capa_nos)。"""
+    if not capa.fmea_node_id:
+        return None, "unavailable", []
+    rows = (
+        await db.execute(
+            select(CAPAEightD).where(
+                CAPAEightD.supplier_id == capa.supplier_id,
+                CAPAEightD.product_line_code == capa.product_line_code,
+                CAPAEightD.fmea_node_id == capa.fmea_node_id,
+                CAPAEightD.status.in_((EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value)),
+                CAPAEightD.report_id != capa.report_id,
+            )
+        )
+    ).scalars().all()
+    if rows:
+        return True, "matched", [r.document_no for r in rows]
+    return False, "not_matched", []
+
+
 async def _d7_completion_gate(db: AsyncSession, capa) -> None:
     from app.models.capa import CapaD7NodeAction
     from app.models.fmea import FMEADocument
@@ -676,6 +696,49 @@ async def advance_capa(
                     "product_line_code": capa.product_line_code,
                 },
             )
+
+    # 01.6: D7_PREVENTION→D7_COMPLETED 时写供应商风险输入 outbox（pending）
+    if (
+        old_status == EightDState.D7_PREVENTION.value
+        and capa.status == EightDState.D7_COMPLETED.value
+        and capa.supplier_id is not None
+    ):
+        from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+
+        repeat_suggested, det_status, matched_nos = await _detect_repeat_capa(db, capa)
+        risk_input = SupplierRiskCapaInput(
+            capa_id=capa.report_id,
+            supplier_id=capa.supplier_id,
+            factory_id=capa.factory_id,
+            product_line_code=capa.product_line_code,
+            created_by=user_id,
+            severity=capa.severity,
+            disposition=capa.d7_prevention,
+            repeat_suggested=repeat_suggested,
+            repeat_detection_status=det_status,
+            repeat_confirmed=None,
+            matched_capa_nos=matched_nos,
+            status="pending",
+            attempt_count=0,
+            max_attempts=5,
+        )
+        db.add(risk_input)
+        db.add(AuditLog(
+            table_name="capa_eightd",
+            record_id=capa.report_id,
+            action="SUPPLIER_RISK_INPUT_QUEUED",
+            operated_by=user_id,
+            factory_id=capa.factory_id,
+            changed_fields={
+                "capa_id": str(capa.report_id),
+                "supplier_id": str(capa.supplier_id),
+                "severity": capa.severity,
+                "disposition": capa.d7_prevention or "",
+                "repeat_suggested": repeat_suggested,
+                "repeat_detection_status": det_status,
+                "matched_capa_nos": matched_nos,
+            },
+        ))
 
     await db.commit()  # existing commit includes outbox
     await db.refresh(capa)
