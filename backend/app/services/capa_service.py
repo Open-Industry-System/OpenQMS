@@ -207,9 +207,17 @@ async def update_capa(
     user_id: uuid.UUID,
 ) -> CAPAEightD:
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
-        await validate_product_line(db, update_data["product_line_code"])
-        # US-E2E-01.5: CAPA↔SCAR same-PL invariant — refuse unilateral PL move while linked
+        from app.models.product_line import ProductLine
         new_pl = update_data["product_line_code"]
+        pl_row = await db.scalar(select(ProductLine).where(ProductLine.code == new_pl))
+        if pl_row is None:
+            raise ValueError(f"产品线 '{new_pl}' 不存在")
+        if not pl_row.is_active:
+            raise ValueError(f"产品线 '{new_pl}' 已停用")
+        if pl_row.factory_id != capa.factory_id:
+            raise ValueError(f"产品线 '{new_pl}' 不属于当前工厂")
+
+        # US-E2E-01.5: CAPA↔SCAR same-PL invariant — refuse unilateral PL move while linked
         if capa.scar_ref_id is not None and new_pl != capa.product_line_code:
             raise ValueError("已关联 SCAR，禁止单独修改产品线")
 

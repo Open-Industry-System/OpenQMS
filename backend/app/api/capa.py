@@ -327,6 +327,9 @@ async def update_capa(
             .with_for_update()
             .execution_options(populate_existing=True)
         )
+        if not is_factory_visible(capa.factory_id, scope):
+            raise HTTPException(status_code=404, detail="8D report not found")
+        check_product_line_access(capa.product_line_code, scope)
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:
