@@ -24,6 +24,7 @@ from app.seed_e2e_constants import (
     FMEA_LINK_E2E_CAPA_DOC_NO, FMEA_LINK_E2E_CAPA_SKIPPED_DOC_NO,
     FMEA_LINK_E2E_CAUSE_NODE, FMEA_LINK_E2E_FMEA_DOC_NO,
     FMEA_LINK_E2E_FM_NODE, FMEA_LINK_E2E_PC_NODE,
+    SCAR_TRIGGER_E2E_CAPA_DOC_NO, SCAR_TRIGGER_E2E_CAPA_ID, SCAR_TRIGGER_E2E_LOT_NO,
 )
 
 # Fixed UUIDs for idempotency
@@ -40,6 +41,9 @@ FMEA_LINK_CAPA_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20241")
 FMEA_LINK_VERIF_ID = uuid.UUID("00000000-0000-0000-0000-000000e20242")
 FMEA_LINK_D7_ID = uuid.UUID("00000000-0000-0000-0000-000000e20243")
 FMEA_LINK_D7_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20244")
+SCAR_TRIGGER_CAPA_ID = uuid.UUID(SCAR_TRIGGER_E2E_CAPA_ID)
+SCAR_TRIGGER_RUN_ID = uuid.UUID("a0000005-0001-4000-8000-000000000002")
+SCAR_TRIGGER_REPORT_ID = uuid.UUID("a0000005-0001-4000-8000-000000000003")
 
 
 async def _seed_factories(db) -> dict:
@@ -743,6 +747,118 @@ async def _seed_fmea_linkage(db, factory_ids):
     await db.flush()
 
 
+async def _seed_scar_trigger(db, factory_ids):
+    """Seed CAPA at D3_INTERIM with current D3 impact report for SCAR trigger E2E.
+
+    Idempotent: upserts CAPA, clears prior scar link, resets D3 chain, and
+    inserts a completed current import run + done current impact report with
+    lot LOT-E2E-SCAR-001. Relies on D3 E2E supplier from _seed_d3_sources.
+    """
+    from app.models.capa import CAPAEightD
+    from app.models.capa_d3 import CapaD3ImpactReport, CapaD3ImportRun
+    from app.models.supplier import SupplierSCAR
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+    factory_id = factory_ids[E2E_FACTORY_DC100["code"]]
+    product_line = E2E_PRODUCT_LINE["code"]
+    now = datetime.now(timezone.utc)
+
+    # Ensure D3 supplier exists (same factory as this CAPA).
+    await _seed_d3_sources(db, factory_id, admin.user_id)
+
+    capa = (await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == SCAR_TRIGGER_E2E_CAPA_DOC_NO)
+    )).scalar_one_or_none()
+    if capa is None:
+        capa = CAPAEightD(
+            report_id=SCAR_TRIGGER_CAPA_ID,
+            document_no=SCAR_TRIGGER_E2E_CAPA_DOC_NO,
+            title="E2E 8D→SCAR 触发",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status="D3_INTERIM",
+            d2_description="来料外观不良，需向供应商发起 SCAR",
+            d3_interim="隔离批次并通知供应商",
+            d4_root_cause="供应商工艺偏移",
+            created_by=admin.user_id,
+        )
+        db.add(capa)
+        await db.flush()
+    else:
+        # Drop any previously linked SCAR so re-seed leaves trigger button visible.
+        if capa.scar_ref_id is not None:
+            linked_scar = await db.get(SupplierSCAR, capa.scar_ref_id)
+            capa.scar_ref_id = None
+            if linked_scar is not None and linked_scar.capa_ref_id == capa.report_id:
+                linked_scar.capa_ref_id = None
+                await db.flush()
+                await db.delete(linked_scar)
+                await db.flush()
+        await db.execute(
+            update(CAPAEightD)
+            .where(CAPAEightD.report_id == capa.report_id)
+            .values(
+                status="D3_INTERIM",
+                title="E2E 8D→SCAR 触发",
+                product_line_code=product_line,
+                factory_id=factory_id,
+                d2_description="来料外观不良，需向供应商发起 SCAR",
+                d3_interim="隔离批次并通知供应商",
+                d4_root_cause="供应商工艺偏移",
+                scar_ref_id=None,
+            )
+        )
+        await db.flush()
+        capa = (await db.execute(
+            select(CAPAEightD).where(CAPAEightD.document_no == SCAR_TRIGGER_E2E_CAPA_DOC_NO)
+        )).scalar_one()
+
+    await _reset_d3_chain(db, SCAR_TRIGGER_E2E_CAPA_DOC_NO, capa.report_id)
+
+    run = CapaD3ImportRun(
+        run_id=SCAR_TRIGGER_RUN_ID,
+        capa_id=capa.report_id,
+        factory_id=factory_id,
+        is_current=True,
+        status="completed",
+        imported_types=["inventory"],
+        analysis_context={"risk_mapping_version": "v1", "seed": "scar_trigger"},
+        started_at=now,
+        completed_at=now,
+        imported_by=admin.user_id,
+    )
+    db.add(run)
+    await db.flush()
+
+    report = CapaD3ImpactReport(
+        report_id=SCAR_TRIGGER_REPORT_ID,
+        run_id=run.run_id,
+        factory_id=factory_id,
+        is_current=True,
+        status="done",
+        attempt_token=uuid.uuid4(),
+        started_at=now,
+        completed_at=now,
+        generated_by=admin.user_id,
+        stage_runs=[],
+        prompt_stats={},
+        llm_available=True,
+        model="e2e-seed",
+        batches=[
+            {"material_code": "M1", "lot_no": SCAR_TRIGGER_E2E_LOT_NO},
+            {"material_code": "M2", "lot_no": ""},
+        ],
+        impact_qty={"inventory": 1},
+        customer_impact=[],
+        time_window={"start": None, "end": None},
+        risk_level="medium",
+        risk_floor="low",
+        risk_explanation="E2E SCAR trigger seed risk",
+    )
+    db.add(report)
+    await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
@@ -753,6 +869,7 @@ async def main():
         await _seed_fmea_linkage(db, factory_ids)
         await db.commit()
         await _seed_d3_test_capas(db)
+        await _seed_scar_trigger(db, factory_ids)
         await db.commit()
     print("E2E seed complete.")
 
