@@ -1157,9 +1157,20 @@ async def test_concurrent_trigger_one_succeeds_one_400(sessionmaker):
     )
 
     results: list = []
+    errors: list = []
+    created_scar_ids: list = []
+    ready_count = 0
+    both_ready = asyncio.Event()
 
     async def worker():
+        nonlocal ready_count
         async with sessionmaker() as s:
+            # Pre-load the capa row so both workers are ready to race before either commits
+            await s.get(CAPAEightD, fx["capa_id"])
+            ready_count += 1
+            if ready_count == 2:
+                both_ready.set()
+            await both_ready.wait()
             try:
                 await capa_scar_service.trigger_scar_from_capa(
                     s,
@@ -1169,25 +1180,27 @@ async def test_concurrent_trigger_one_succeeds_one_400(sessionmaker):
                     scope=scope,
                 )
                 results.append("ok")
-            except ValueError:
+            except ValueError as e:
                 await s.rollback()
+                errors.append(str(e))
                 results.append("conflict")
             except Exception:
                 await s.rollback()
                 results.append("error")
 
-    await asyncio.gather(worker(), worker())
+    try:
+        await asyncio.wait_for(asyncio.gather(worker(), worker()), timeout=30.0)
+        assert sorted(results) == ["conflict", "ok"], f"expected one ok + one conflict, got {results}"
+        # The conflict must be the 1:1 already-linked error, not an unrelated ValueError
+        assert any("已关联" in e for e in errors), f"conflict was not the 1:1 invariant: {errors}"
 
-    assert sorted(results) == ["conflict", "ok"], f"expected one ok + one conflict, got {results}"
-
-    # Find the SCAR created by the winning trigger, then tear down all committed rows
-    created_scar_ids = []
-    async with sessionmaker() as s:
-        rows = (
-            await s.execute(select(SupplierSCAR).where(SupplierSCAR.capa_ref_id == fx["capa_id"]))
-        ).scalars().all()
-        created_scar_ids = [r.scar_id for r in rows]
-    await _teardown_committed_fixtures(sessionmaker, fx, extra_scar_ids=created_scar_ids)
+        async with sessionmaker() as s:
+            rows = (
+                await s.execute(select(SupplierSCAR).where(SupplierSCAR.capa_ref_id == fx["capa_id"]))
+            ).scalars().all()
+            created_scar_ids.extend(r.scar_id for r in rows)
+    finally:
+        await _teardown_committed_fixtures(sessionmaker, fx, extra_scar_ids=created_scar_ids)
 
 
 @pytest.mark.asyncio
@@ -1198,7 +1211,6 @@ async def test_concurrent_link_capa_one_succeeds_one_400(sessionmaker):
     from app.core.factory_scope import FactoryScope, ProductLineScope
 
     fx = await _committed_scar_trigger_fixtures(sessionmaker)
-    # First, create a SCAR manually via a committed session, plus a second target CAPA
     async with sessionmaker() as s:
         scar = SupplierSCAR(
             scar_id=uuid.uuid4(),
@@ -1235,25 +1247,39 @@ async def test_concurrent_link_capa_one_succeeds_one_400(sessionmaker):
     )
 
     results: list = []
+    errors: list = []
+    ready_count = 0
+    both_ready = asyncio.Event()
 
     async def worker(target_capa_id):
+        nonlocal ready_count
         async with sessionmaker() as s:
             scar_obj = await s.get(SupplierSCAR, scar_id)
+            ready_count += 1
+            if ready_count == 2:
+                both_ready.set()
+            await both_ready.wait()
             try:
                 await scar_service.link_capa(s, scar_obj, target_capa_id, fx["user_id"], scope)
                 results.append("ok")
-            except ValueError:
+            except ValueError as e:
                 await s.rollback()
+                errors.append(str(e))
                 results.append("conflict")
             except Exception as e:
                 await s.rollback()
-                results.append(f"error:{type(e).__name__}")
+                errors.append(f"{type(e).__name__}:{e}")
+                results.append("error")
 
-    # Both try to bind the same SCAR to two different CAPAs — only one can win the 1:1
-    await asyncio.gather(worker(fx["capa_id"]), worker(capa_b_id))
-    assert "ok" in results and results.count("ok") == 1, f"expected exactly one ok, got {results}"
-    assert all(r != "ok" and not r.startswith("error") for r in results if r != "ok"), f"non-conflict error leaked: {results}"
-
-    await _teardown_committed_fixtures(
-        sessionmaker, fx, extra_scar_ids=[scar_id], extra_capa_ids=[capa_b_id]
-    )
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(worker(fx["capa_id"]), worker(capa_b_id)), timeout=30.0
+        )
+        assert results.count("ok") == 1, f"expected exactly one ok, got {results}"
+        assert all(r == "conflict" for r in results if r != "ok"), f"non-conflict error leaked: {results}"
+        # Conflict must be the 1:1 invariant, not an unrelated ValueError
+        assert any("已关联" in e or "1:1" in e for e in errors), f"conflict was not the 1:1 invariant: {errors}"
+    finally:
+        await _teardown_committed_fixtures(
+            sessionmaker, fx, extra_scar_ids=[scar_id], extra_capa_ids=[capa_b_id]
+        )
