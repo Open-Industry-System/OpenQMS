@@ -49,6 +49,24 @@ class LinkedScarSchema(BaseModel):
     supplier_id: uuid.UUID
 
 
+class ConfirmRepeatRequest(BaseModel):
+    repeat_confirmed: bool
+
+
+class SupplierRiskInputProjection(BaseModel):
+    input_id: uuid.UUID
+    status: str
+    repeat_suggested: bool | None
+    repeat_detection_status: str
+    repeat_confirmed: bool | None
+    matched_capa_nos: list[str]
+    evaluated_risk_level: str | None
+    evaluated_risk_score: float | None
+    linked_alert: dict | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class CAPAResponse(BaseModel):
     report_id: uuid.UUID
     document_no: str
@@ -75,6 +93,7 @@ class CAPAResponse(BaseModel):
     scar_ref_id: uuid.UUID | None = None
     linked_scar: LinkedScarSchema | None = None
     d3_affected_lots: list[str] = []
+    supplier_risk_input: SupplierRiskInputProjection | None = None
 
     model_config = {"from_attributes": True}
 
