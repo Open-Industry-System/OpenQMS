@@ -698,6 +698,7 @@ async def advance_capa(
             )
 
     # 01.6: D7_PREVENTION→D7_COMPLETED 时写供应商风险输入 outbox（pending）
+    # capa_id UNIQUE：D8 reject 后再次 D7_COMPLETED 必须幂等，不得因 side effect 回滚 advance。
     if (
         old_status == EightDState.D7_PREVENTION.value
         and capa.status == EightDState.D7_COMPLETED.value
@@ -705,40 +706,46 @@ async def advance_capa(
     ):
         from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 
-        repeat_suggested, det_status, matched_nos = await _detect_repeat_capa(db, capa)
-        risk_input = SupplierRiskCapaInput(
-            capa_id=capa.report_id,
-            supplier_id=capa.supplier_id,
-            factory_id=capa.factory_id,
-            product_line_code=capa.product_line_code,
-            created_by=user_id,
-            severity=capa.severity,
-            disposition=capa.d7_prevention,
-            repeat_suggested=repeat_suggested,
-            repeat_detection_status=det_status,
-            repeat_confirmed=None,
-            matched_capa_nos=matched_nos,
-            status="pending",
-            attempt_count=0,
-            max_attempts=5,
+        existing_input = await db.scalar(
+            select(SupplierRiskCapaInput.input_id).where(
+                SupplierRiskCapaInput.capa_id == capa.report_id
+            )
         )
-        db.add(risk_input)
-        db.add(AuditLog(
-            table_name="capa_eightd",
-            record_id=capa.report_id,
-            action="SUPPLIER_RISK_INPUT_QUEUED",
-            operated_by=user_id,
-            factory_id=capa.factory_id,
-            changed_fields={
-                "capa_id": str(capa.report_id),
-                "supplier_id": str(capa.supplier_id),
-                "severity": capa.severity,
-                "disposition": capa.d7_prevention or "",
-                "repeat_suggested": repeat_suggested,
-                "repeat_detection_status": det_status,
-                "matched_capa_nos": matched_nos,
-            },
-        ))
+        if existing_input is None:
+            repeat_suggested, det_status, matched_nos = await _detect_repeat_capa(db, capa)
+            risk_input = SupplierRiskCapaInput(
+                capa_id=capa.report_id,
+                supplier_id=capa.supplier_id,
+                factory_id=capa.factory_id,
+                product_line_code=capa.product_line_code,
+                created_by=user_id,
+                severity=capa.severity,
+                disposition=capa.d7_prevention,
+                repeat_suggested=repeat_suggested,
+                repeat_detection_status=det_status,
+                repeat_confirmed=None,
+                matched_capa_nos=matched_nos,
+                status="pending",
+                attempt_count=0,
+                max_attempts=5,
+            )
+            db.add(risk_input)
+            db.add(AuditLog(
+                table_name="capa_eightd",
+                record_id=capa.report_id,
+                action="SUPPLIER_RISK_INPUT_QUEUED",
+                operated_by=user_id,
+                factory_id=capa.factory_id,
+                changed_fields={
+                    "capa_id": str(capa.report_id),
+                    "supplier_id": str(capa.supplier_id),
+                    "severity": capa.severity,
+                    "disposition": capa.d7_prevention or "",
+                    "repeat_suggested": repeat_suggested,
+                    "repeat_detection_status": det_status,
+                    "matched_capa_nos": matched_nos,
+                },
+            ))
 
     await db.commit()  # existing commit includes outbox
     await db.refresh(capa)

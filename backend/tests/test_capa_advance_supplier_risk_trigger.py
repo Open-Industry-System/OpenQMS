@@ -240,3 +240,56 @@ async def test_advance_other_transitions_no_input(db, default_factory, admin_use
         )
     ).scalars().all()
     assert len(cnt) == 0
+
+
+@pytest.mark.asyncio
+async def test_d7_completed_reentry_is_idempotent(db, default_factory, admin_user):
+    """D8 reject 后再次 D7_COMPLETED：不二次 insert，不二次 QUEUED 审计。"""
+    sup = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id, supplier_id=sup.supplier_id
+    )
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id)
+    await _seed_d7_action(db, capa, fmea, admin_user)
+
+    await advance_capa(
+        db, capa, admin_user.user_id, AdvanceRequest(target_state=EightDState.D7_COMPLETED)
+    )
+    await db.refresh(capa)
+    assert capa.status == EightDState.D7_COMPLETED.value
+
+    first_inputs = (
+        await db.execute(
+            select(SupplierRiskCapaInput).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+        )
+    ).scalars().all()
+    assert len(first_inputs) == 1
+    first_input_id = first_inputs[0].input_id
+
+    # Simulate D8 reject path re-entry without full D8 setup.
+    capa.status = EightDState.D7_PREVENTION.value
+    await db.flush()
+
+    await advance_capa(
+        db, capa, admin_user.user_id, AdvanceRequest(target_state=EightDState.D7_COMPLETED)
+    )
+    await db.refresh(capa)
+    assert capa.status == EightDState.D7_COMPLETED.value
+
+    inputs = (
+        await db.execute(
+            select(SupplierRiskCapaInput).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+        )
+    ).scalars().all()
+    assert len(inputs) == 1
+    assert inputs[0].input_id == first_input_id
+
+    queued_logs = (
+        await db.execute(
+            select(AuditLog).where(
+                AuditLog.record_id == capa.report_id,
+                AuditLog.action == "SUPPLIER_RISK_INPUT_QUEUED",
+            )
+        )
+    ).scalars().all()
+    assert len(queued_logs) == 1
