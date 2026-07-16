@@ -33,7 +33,7 @@ help:
 	@echo "  doc-gate-preflight — D8 doc-gate CP lineage scan on DATABASE_URL (exit 1 = blocked_modify)"
 	@echo "  deploy-check       — check + doc-gate-preflight (release gate; TARGET DB via DATABASE_URL)"
 	@echo "  deploy-migrate     — alembic upgrade head on DATABASE_URL (infra only; no app traffic)"
-	@echo "  deploy-release     — FORCED order: deploy-migrate → deploy-check (then roll app)"
+	@echo "  deploy-release     — SERIAL release: migrate → check → preflight → rollout (requires ROLLOUT_CMD)"
 	@echo ""
 	@echo "Subtargets:"
 	@echo "  check-frontend-tsc    — tsc --noEmit only"
@@ -48,8 +48,9 @@ check-backend:
 check-frontend: check-frontend-tsc check-frontend-build
 
 # ── Deploy gate (TARGET DB via DATABASE_URL — not TEST_DATABASE_URL) ─────────
-# Release/deploy pipelines MUST run `make deploy-check` against the environment
-# being released. Unit CI runs `make check` only (no data preflight).
+# Release/deploy pipelines MUST use `make deploy-release` against the environment
+# being released. `deploy-check` remains a standalone diagnostic gate. Unit CI
+# runs `make check` only (no data preflight or rollout).
 #
 # doc-gate-preflight exit 1 = blocked_modify (gate cannot pass for those CAPAs).
 # potential_disconnect is WARN (exit 0) unless PREFLIGHT_STRICT_POTENTIAL=1.
@@ -70,11 +71,10 @@ deploy-migrate:
 	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) DATABASE_URL=$${DATABASE_URL:?DATABASE_URL required} \
 		$(PYTHON_BIN) -m alembic upgrade head
 
-# Forced release entry: migrate → code+preflight. App/image rollout is OUTSIDE
-# this target and must only happen after it exits 0. Never `compose up` app
-# services before this succeeds.
-deploy-release: deploy-migrate deploy-check
-	@echo "deploy-release OK — safe to roll app containers/images now"
+# Forced release entry. The script owns the entire synchronous sequence so
+# `make -j` cannot parallelize migration, gates, or rollout.
+deploy-release:
+	@./scripts/deploy-release.sh
 
 check-frontend-tsc:
 	cd $(FRONTEND_DIR) && npx tsc --noEmit

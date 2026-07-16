@@ -33,7 +33,7 @@ cp .env.example .env
 
 > ⚠️ `SECRET_KEY` 在生产环境必须替换为随机长字符串，否则存在安全风险。
 
-### 1.3 强制发布入口（migrate → preflight → 再放行 app）
+### 1.3 强制发布入口（migrate → check → preflight → rollout）
 
 发布到任何非本地环境时，**只允许** `make deploy-release`。禁止先
 `docker compose up` 启动 backend/frontend 再补迁移/preflight——那会让新代码
@@ -44,19 +44,20 @@ cp .env.example .env
 docker compose up -d db redis neo4j
 docker compose ps   # 等 healthy
 
-# 1) 强制顺序：migrate → check + doc-gate preflight
-#    DATABASE_URL 必须指向【本环境真实库】
-export DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms
-make deploy-release
-# = make deploy-migrate  (alembic upgrade head)
-# + make deploy-check    (pytest/tsc/build + doc-gate-preflight)
+# 1) 唯一非本地发布入口。DATABASE_URL 必须指向【本环境真实库】；
+#    ROLLOUT_CMD 是受信任的运维命令，仅在前三步全部成功后同步执行。
+DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms \
+  ROLLOUT_CMD='docker compose up -d backend frontend' \
+  make deploy-release
+# 内部严格串行执行：alembic upgrade head → pytest/tsc/build →
+# doc-gate preflight → rollout。任一步失败都会立即终止后续步骤。
 
-# 2) 仅在 deploy-release exit 0 后，再滚动应用
-docker compose up -d backend frontend
 # （仅首次/演示）docker compose exec backend python -m app.seed
 ```
 
-`make deploy-check` = `make check`（pytest + tsc + build）+ `make doc-gate-preflight`。
+`make deploy-release` 包含 rollout 且全程串行；成功信息只会在 rollout 完成后输出。
+`make deploy-check` 仍可独立用于诊断：它等于 `make check`（pytest + tsc + build）+
+`make doc-gate-preflight`。
 preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
 key_point（baseline item_id 在 latest 中消失），exit 1 阻止部署。
 
