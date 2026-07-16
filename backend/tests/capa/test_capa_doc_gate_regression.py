@@ -9,6 +9,7 @@ Plus empty-list LLM → done → confirm_no_affected (P1#5).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -335,6 +336,201 @@ async def test_waiver_rejects_version_created_after_audit(db, capa_with_cp_block
             }],
             user.user_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_waiver_rejects_truncated_audit_coverage(db, capa_with_cp_blocked_modify):
+    """A truncated audit batch cannot hide an uncovered analysis keypoint."""
+    from app.models.capa_doc_gate import CapaDocgAudit
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    audit_result = await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    audit = (await db.execute(
+        select(CapaDocgAudit).where(
+            CapaDocgAudit.audit_run_id == uuid.UUID(audit_result["audit_run_id"])
+        )
+    )).scalar_one()
+    audit.coverage = []
+    await db.flush()
+
+    with pytest.raises(ValueError, match="审核覆盖明细不完整"):
+        await capa_doc_gate_service.record_gate_waiver(
+            db,
+            capa,
+            "must not waive truncated evidence",
+            [{
+                "doc_type": "control_plan",
+                "doc_id": str(cp.cp_id),
+                "target_key": tk,
+                "field": field,
+            }],
+            user.user_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_version_creation_waits_for_waiver_decision_commit(sessionmaker):
+    """Production CP version creation cannot slip validation→decision commit."""
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
+    from app.models.control_plan import ControlPlan
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.models.factory import Factory
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.services.capa_doc_gate_waiver import prepare_structured_waiver
+    from app.services.version_service import compute_pg_jsonb_hash, create_cp_version
+
+    suffix = uuid.uuid4().hex[:10]
+    factory_id, role_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    capa_id, cp_id, analysis_id, audit_run_id = (
+        uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    )
+    baseline_id, audited_id = uuid.uuid4(), uuid.uuid4()
+    baseline_items = [{"item_id": "old-item", "control_method": "old"}]
+    audited_items = [{"item_id": "new-item", "control_method": "new"}]
+    key_point = {
+        "target_kind": "cp_item", "expected_action": "modify",
+        "field": "control_method", "target_key": "old-item",
+    }
+
+    async with sessionmaker() as seed:
+        seed.add(Factory(id=factory_id, code=f"W{suffix}", name="Waiver lock factory"))
+        seed.add(RoleDefinition(
+            id=role_id, role_key=f"waiver_lock_{suffix}", name_zh="豁免锁",
+            name_en="Waiver lock", is_system=False, is_editable=True, is_active=True,
+        ))
+        await seed.flush()
+        seed.add(User(
+            user_id=user_id, username=f"waiver_lock_{suffix}",
+            display_name="Waiver lock", email=f"{suffix}@example.com",
+            password_hash="test", role_id=role_id, legacy_role="quality_engineer",
+            is_active=True, factory_id=factory_id,
+        ))
+        await seed.flush()
+        seed.add(CAPAEightD(
+            report_id=capa_id, document_no=f"CAPA-LOCK-{suffix}", title="lock",
+            product_line_code="LOCK-LINE", factory_id=factory_id,
+            status="D8_GATE_PENDING", severity="serious", created_by=user_id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=1),
+        ))
+        seed.add(ControlPlan(
+            cp_id=cp_id, document_no=f"CP-LOCK-{suffix}", title="lock",
+            product_line_code="LOCK-LINE", factory_id=factory_id,
+            status="approved", created_by=user_id,
+        ))
+        await seed.flush()
+        baseline_sha = await compute_pg_jsonb_hash(
+            seed, {"header": {}, "items": baseline_items}
+        )
+        audited_sha = await compute_pg_jsonb_hash(
+            seed, {"header": {}, "items": audited_items}
+        )
+        seed.add_all([
+            ControlPlanVersion(
+                version_id=baseline_id, cp_id=cp_id, factory_id=factory_id,
+                major_no=1, minor_no=0, header_snapshot={}, items_snapshot=baseline_items,
+                sha256_hash=baseline_sha, change_type="approve", created_by=user_id,
+                created_at=datetime.now(timezone.utc) - timedelta(days=2),
+            ),
+            ControlPlanVersion(
+                version_id=audited_id, cp_id=cp_id, factory_id=factory_id,
+                major_no=1, minor_no=1, header_snapshot={}, items_snapshot=audited_items,
+                sha256_hash=audited_sha, change_type="minor", created_by=user_id,
+                created_at=datetime.now(timezone.utc),
+            ),
+        ])
+        affected_docs = [{
+            "doc_type": "control_plan", "doc_id": str(cp_id), "doc_name": "lock",
+            "baseline_version_id": str(baseline_id),
+            "baseline_version": {"major": 1, "minor": 0, "sha256": baseline_sha},
+            "key_points": [key_point], "update_suggestion": "lock",
+        }]
+        seed.add(CapaDocgAnalysis(
+            analysis_id=analysis_id, capa_id=capa_id, factory_id=factory_id,
+            is_current=True, status="done", affected_docs=affected_docs,
+            analysis_input_hash="a" * 64, llm_available=True,
+            completed_at=datetime.now(timezone.utc), generated_by=user_id,
+        ))
+        await seed.flush()
+        seed.add(CapaDocgAudit(
+            analysis_id=analysis_id, audit_run_id=audit_run_id, factory_id=factory_id,
+            doc_type="control_plan", doc_id=cp_id, doc_name="lock", status="incomplete",
+            version_before={"version_id": str(baseline_id), "sha256": baseline_sha},
+            version_after={"version_id": str(audited_id), "sha256": audited_sha},
+            version_bump=True,
+            coverage=[{"key_point": key_point, "covered": False, "evidence": ""}],
+            covered_count=0, total_count=1, audited_by=user_id,
+        ))
+        seed.add(CapaDocgDecision(
+            analysis_id=analysis_id, audit_run_id=audit_run_id, revision=0,
+            factory_id=factory_id, decision="blocked", version_snapshot=[],
+            decided_by=user_id,
+        ))
+        await seed.commit()
+
+    writer_task = None
+    try:
+        async with sessionmaker() as waiver_session:
+            analysis = await waiver_session.get(CapaDocgAnalysis, analysis_id)
+            validated, snapshot = await prepare_structured_waiver(
+                waiver_session,
+                analysis,
+                audit_run_id,
+                [{
+                    "doc_type": "control_plan", "doc_id": str(cp_id),
+                    "target_key": "old-item", "field": "control_method",
+                }],
+            )
+
+            async def _write_version():
+                async with sessionmaker() as writer:
+                    cp = await writer.get(ControlPlan, cp_id)
+                    return await create_cp_version(
+                        writer, cp, "minor", "concurrent writer", user_id
+                    )
+
+            writer_task = asyncio.create_task(_write_version())
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.2)
+
+            await capa_doc_gate_service._insert_decision(
+                waiver_session, analysis_id, factory_id, "passed", user_id,
+                datetime.now(timezone.utc), audit_run_id, snapshot,
+                waiver_reason="accepted", waiver_items=validated,
+            )
+            await waiver_session.commit()
+
+        created = await asyncio.wait_for(writer_task, timeout=2)
+        assert created.minor_no == 2
+    finally:
+        if writer_task is not None and not writer_task.done():
+            writer_task.cancel()
+            await asyncio.gather(writer_task, return_exceptions=True)
+        async with sessionmaker() as cleanup:
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions DISABLE TRIGGER trg_cp_version_no_update"
+            ))
+            for statement in (
+                "DELETE FROM audit_logs WHERE operated_by=:uid",
+                "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_audit WHERE analysis_id=:aid",
+                "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
+                "DELETE FROM control_plans WHERE cp_id=:cpid",
+                "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM users WHERE user_id=:uid",
+                "DELETE FROM role_definitions WHERE id=:rid",
+                "DELETE FROM factories WHERE id=:fid",
+            ):
+                await cleanup.execute(text(statement), {
+                    "uid": user_id, "aid": analysis_id, "cpid": cp_id,
+                    "cid": capa_id, "rid": role_id, "fid": factory_id,
+                })
+            await cleanup.execute(text(
+                "ALTER TABLE control_plan_versions ENABLE TRIGGER trg_cp_version_no_update"
+            ))
+            await cleanup.commit()
 
 
 @pytest.mark.asyncio

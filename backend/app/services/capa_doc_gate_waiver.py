@@ -1,13 +1,19 @@
 """Fail-closed validation for structured D8 document-gate waivers."""
 from __future__ import annotations
 
+from collections import Counter
+import json
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit
-from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
+from app.services.version_service import (
+    get_latest_cp_version,
+    get_latest_fmea_version,
+    lock_version_parent,
+)
 
 
 def _identity(doc_type, doc_id) -> tuple[str, str]:
@@ -55,10 +61,13 @@ async def prepare_structured_waiver(
     if not isinstance(analysis_docs, list) or not analysis_docs:
         raise ValueError("影响分析文档清单异常，请重新生成影响分析")
     analysis_identities: list[tuple[str, str]] = []
+    analysis_by_identity: dict[tuple[str, str], dict] = {}
     for doc in analysis_docs:
         if not isinstance(doc, dict):
             raise ValueError("影响分析文档清单异常，请重新生成影响分析")
-        analysis_identities.append(_identity(doc.get("doc_type"), doc.get("doc_id")))
+        identity = _identity(doc.get("doc_type"), doc.get("doc_id"))
+        analysis_identities.append(identity)
+        analysis_by_identity[identity] = doc
     audit_identities = [_identity(a.doc_type, a.doc_id) for a in audits]
     if (
         len(set(analysis_identities)) != len(analysis_identities)
@@ -74,6 +83,24 @@ async def prepare_structured_waiver(
         coverage = audit.coverage
         if not isinstance(coverage, list):
             raise ValueError("审核覆盖明细异常，请重新运行审核")
+        analysis_keypoints = analysis_by_identity[identity].get("key_points")
+        if not isinstance(analysis_keypoints, list):
+            raise ValueError("影响分析 key_points 异常，请重新生成影响分析")
+        if (
+            len(coverage) != audit.total_count
+            or audit.total_count != len(analysis_keypoints)
+            or audit.covered_count
+            != sum(1 for cov in coverage if isinstance(cov, dict) and cov.get("covered") is True)
+        ):
+            raise ValueError("审核覆盖明细不完整，请重新运行审核")
+        coverage_keypoints = [cov.get("key_point") for cov in coverage if isinstance(cov, dict)]
+        if (
+            len(coverage_keypoints) != len(coverage)
+            or any(not isinstance(kp, dict) for kp in coverage_keypoints)
+            or Counter(json.dumps(kp, sort_keys=True) for kp in coverage_keypoints)
+            != Counter(json.dumps(kp, sort_keys=True) for kp in analysis_keypoints)
+        ):
+            raise ValueError("审核覆盖 key_points 与影响分析不一致，请重新运行审核")
         for cov in coverage:
             if not isinstance(cov, dict) or not isinstance(cov.get("covered"), bool):
                 raise ValueError("审核覆盖明细异常，请重新运行审核")
@@ -152,6 +179,12 @@ async def prepare_structured_waiver(
             f"doc_id={doc_id} target_key={target_key} field={field} "
             f"(共 {len(missing)} 项)"
         )
+
+    # Shared serialization with production version writers. Acquire every parent
+    # in deterministic order before any live latest read, then hold through the
+    # caller's decision insert + commit.
+    for doc_type, doc_id in sorted(set(audit_identities)):
+        await lock_version_parent(db, doc_type, uuid.UUID(doc_id))
 
     live_by_identity = {}
     c8_snapshot: list[dict] = []

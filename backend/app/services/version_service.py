@@ -58,6 +58,20 @@ def verify_snapshot_hash(snapshot: dict | list, stored_hash: str) -> bool:
     return compute_snapshot_hash(snapshot) == stored_hash
 
 
+async def lock_version_parent(
+    db: AsyncSession, doc_type: str, doc_id: uuid.UUID
+) -> None:
+    """Serialize version creation and audit-bound waiver decisions per document."""
+    if doc_type == "control_plan":
+        stmt = select(ControlPlan.cp_id).where(ControlPlan.cp_id == doc_id)
+    elif doc_type == "fmea":
+        stmt = select(FMEADocument.fmea_id).where(FMEADocument.fmea_id == doc_id)
+    else:
+        raise ValueError(f"Unsupported versioned document type: {doc_type}")
+    if await db.scalar(stmt.with_for_update()) is None:
+        raise ValueError(f"Version parent not found: {doc_type}/{doc_id}")
+
+
 # ---------------------------------------------------------------------------
 # FMEA version helpers
 # ---------------------------------------------------------------------------
@@ -84,6 +98,7 @@ async def _create_fmea_version_no_commit(
 
     Callers must commit the session themselves.
     """
+    await lock_version_parent(db, "fmea", fmea.fmea_id)
     latest = await get_latest_fmea_version(db, fmea.fmea_id)
     if latest is None:
         major_no, minor_no = 0, 0
@@ -243,6 +258,7 @@ async def create_cp_version(
     * ``change_type == "approve"`` bumps major_no, resets minor_no to 0.
     * All other types bump minor_no.
     """
+    await lock_version_parent(db, "control_plan", cp.cp_id)
     latest = await get_latest_cp_version(db, cp.cp_id)
     if latest is None:
         major_no, minor_no = 0, 0

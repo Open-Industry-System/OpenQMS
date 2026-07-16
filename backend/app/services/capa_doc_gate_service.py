@@ -986,15 +986,6 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
     return {"decision": "passed", "no_affected_confirmed": True}
 
 
-def _is_waivable_blocked_modify(doc_type: str, kp: dict) -> bool:
-    """Only CP item modify keypoints may be waived (lineage break case)."""
-    if doc_type != "control_plan":
-        return False
-    if kp.get("expected_action") != "modify" or kp.get("target_kind") != "cp_item":
-        return False
-    return bool(str(kp.get("target_key") or "").strip() and str(kp.get("field") or "").strip())
-
-
 async def record_gate_waiver(
     db: AsyncSession,
     capa: CAPAEightD,
