@@ -162,6 +162,7 @@ async def _create_scar_without_commit(
     issued_by: uuid.UUID,
     product_line_code: str | None = None,
     factory_id: uuid.UUID | None = None,
+    capa_ref_id: uuid.UUID | None = None,
 ) -> SupplierSCAR:
     """Create SCAR without committing — caller must commit."""
     supplier = await db.get(Supplier, supplier_id)
@@ -185,6 +186,7 @@ async def _create_scar_without_commit(
             due_date=due_date,
             issued_by=issued_by,
             issued_date=date.today(),
+            capa_ref_id=capa_ref_id,
         )
         try:
             async with db.begin_nested():
