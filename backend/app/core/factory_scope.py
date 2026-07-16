@@ -438,6 +438,25 @@ def check_factory_access(factory_id: UUID, scope: "RequestScope"):
         )
 
 
+def is_factory_visible(factory_id: UUID | None, scope: "RequestScope") -> bool:
+    """Effective-factory-aware visibility for a single row.
+
+    Returns True if the row's factory is within the caller's view: effective
+    factory (when set) wins, else any accessible factory (GROUP ADMIN sees all).
+    Use this for row-level reads where invisible → 404 (per design), as opposed
+    to ``check_factory_access`` which is a 403 mutation guard on accessible set.
+    """
+    if factory_id is None:
+        return False
+    eff = scope.effective_factory_id
+    if eff is not None:
+        return factory_id == eff
+    accessible = scope.factory_scope.accessible_factory_ids
+    if accessible is None:
+        return True  # group admin
+    return factory_id in accessible
+
+
 def check_product_line_access(product_line_code: str | None, scope: "RequestScope"):
     """Verify the given product_line_code is within the user's product-line scope.
 

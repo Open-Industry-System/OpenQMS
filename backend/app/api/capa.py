@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import check_factory_access, check_product_line_access, is_factory_visible, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.core.tenant import tenant_schema
 from app.database import get_db
@@ -263,9 +263,8 @@ async def get_capa(
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
     return await _capa_response_with_projections(db, capa)
 
@@ -310,15 +309,24 @@ async def update_capa(
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
     update_data = req.model_dump(exclude_unset=True)
     # Changing PL must also be within caller's PL scope (when allowed by service)
     new_pl = update_data.get("product_line_code")
-    if new_pl is not None and new_pl != capa.product_line_code:
+    pl_change = new_pl is not None and new_pl != capa.product_line_code
+    if pl_change:
         check_product_line_access(new_pl, scope)
+    # P1 race: lock the CAPA row + refresh before checking linked-SCAR invariant,
+    # so a concurrent link_capa commit is observed before a PL move lands.
+    if pl_change:
+        await db.execute(
+            select(CAPAEightD)
+            .where(CAPAEightD.report_id == report_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:

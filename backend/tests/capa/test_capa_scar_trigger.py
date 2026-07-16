@@ -870,3 +870,130 @@ async def test_link_capa_target_already_bound_400(
     )
     assert resp.status_code == 400
     assert "已关联" in resp.json()["detail"]
+
+
+# ─── P1 round 3: effective-factory visibility + PL-change race ────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_capa_effective_factory_mismatch_404(
+    db, default_factory, admin_user
+):
+    """Multi-factory user with effective=A cannot GET CAPA at accessible B → 404."""
+    await _seed_perm(db, admin_user.role_id, "capa", 3)
+    factory_b = Factory(
+        id=uuid.uuid4(), code=f"FB-{uuid.uuid4().hex[:6]}", name="Factory B", is_active=True
+    )
+    db.add(factory_b)
+    await db.flush()
+    capa_b = await _make_capa(db, factory_b.id, admin_user.user_id)
+
+    scope = RequestScope(
+        factory_scope=FactoryScope(
+            accessible_factory_ids=[default_factory.id, factory_b.id],
+            default_factory_id=default_factory.id,
+        ),
+        effective_factory_id=default_factory.id,  # effective A, CAPA at B
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=admin_user,
+    )
+    async with _client_for(db, admin_user, scope) as ac:
+        resp = await ac.get(f"/api/capa/{capa_b.report_id}")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_capa_effective_factory_mismatch_404(
+    db, default_factory, admin_user
+):
+    """Multi-factory user with effective=A cannot PUT CAPA at accessible B → 404."""
+    await _seed_perm(db, admin_user.role_id, "capa", 3)
+    factory_b = Factory(
+        id=uuid.uuid4(), code=f"FB-{uuid.uuid4().hex[:6]}", name="Factory B", is_active=True
+    )
+    db.add(factory_b)
+    await db.flush()
+    capa_b = await _make_capa(db, factory_b.id, admin_user.user_id)
+
+    scope = RequestScope(
+        factory_scope=FactoryScope(
+            accessible_factory_ids=[default_factory.id, factory_b.id],
+            default_factory_id=default_factory.id,
+        ),
+        effective_factory_id=default_factory.id,
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=admin_user,
+    )
+    async with _client_for(db, admin_user, scope) as ac:
+        resp = await ac.put(
+            f"/api/capa/{capa_b.report_id}",
+            json={"d3_interim": "should not land"},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_pl_change_blocked_when_scar_linked(
+    engineer_client, db, default_factory, admin_user
+):
+    """PL move on a CAPA with a committed scar_ref_id is refused (race-safe path).
+
+    The route locks the CAPA row FOR UPDATE and refreshes before checking the
+    linked-SCAR invariant, so even a just-committed concurrent link is observed.
+    This covers the same code path as the cross-session race; a true two-session
+    deadlock-prone test is intentionally avoided to keep the suite hermetic.
+    """
+    from app.models.product_line import ProductLine
+
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    trig = await engineer_client.post(
+        f"/api/capa/{capa.report_id}/trigger-scar",
+        json={"supplier_id": str(supplier.supplier_id)},
+    )
+    assert trig.status_code == 200, trig.text
+
+    existing = await db.execute(
+        select(ProductLine).where(ProductLine.code == "DC-DC-200")
+    )
+    if existing.scalar_one_or_none() is None:
+        db.add(
+            ProductLine(
+                code="DC-DC-200", name="DC-DC-200", factory_id=default_factory.id
+            )
+        )
+        await db.flush()
+
+    put = await engineer_client.put(
+        f"/api/capa/{capa.report_id}",
+        json={"product_line_code": "DC-DC-200"},
+    )
+    assert put.status_code == 400, put.text
+    assert "已关联 SCAR" in put.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_lot_strip_preserves_prose_mentioning_batch(
+    engineer_client, db, default_factory, admin_user
+):
+    """User prose mentioning 受影响批次 in a sentence must survive lot-line stripping."""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+
+    resp = await engineer_client.post(
+        f"/api/capa/{capa.report_id}/trigger-scar",
+        json={
+            "supplier_id": str(supplier.supplier_id),
+            "description": "受影响批次分析结论：风险低，但需复测",
+            "affected_batches": ["LOT-NEW"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    desc = resp.json()["description"]
+    assert "受影响批次分析结论：风险低" in desc  # prose preserved
+    assert "LOT-NEW" in desc
+    # Single emitted lot line; prose line kept
+    assert desc.count("受影响批次:") == 1
+    assert "受影响批次分析结论" in desc

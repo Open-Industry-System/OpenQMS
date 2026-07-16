@@ -8,8 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import re
+
 from app.core.deps import RequestScope
-from app.core.factory_scope import check_product_line_access
+from app.core.factory_scope import is_factory_visible, check_product_line_access
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.capa_d3 import CapaD3ImpactReport, CapaD3ImportRun
@@ -18,22 +20,15 @@ from app.services import scar_service
 
 _BLOCKED_STATUSES = frozenset({"D1_TEAM", "D2_DESCRIPTION", "ARCHIVED"})
 _DESC_MAX = 8000  # soft cap; align with practical Text size
-
-
-def _factory_visible(factory_id: uuid.UUID, scope: RequestScope) -> bool:
-    if scope.effective_factory_id is not None:
-        return factory_id == scope.effective_factory_id
-    accessible = scope.factory_scope.accessible_factory_ids
-    if accessible is not None:
-        return factory_id in accessible
-    return True  # group admin
+# Match only the lot-summary line we emit; won't cull user prose mentioning 受影响批次
+_LOT_LINE_RE = re.compile(r"^[ \t]*受影响批次\s*[:：]", re.MULTILINE)
 
 
 async def load_capa_visible_or_404(
     db: AsyncSession, report_id: uuid.UUID, scope: RequestScope
 ) -> CAPAEightD:
     capa = await db.get(CAPAEightD, report_id)
-    if capa is None or not _factory_visible(capa.factory_id, scope):
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise LookupError("8D report not found")
     return capa
 
@@ -73,9 +68,15 @@ async def load_d3_affected_lots(db: AsyncSession, capa_id: uuid.UUID) -> list[st
 
 
 def _strip_lot_lines(text: str) -> str:
-    """Remove any pre-existing 受影响批次 lines so lots are owned by `lots` param."""
-    lines = [ln for ln in text.splitlines() if not ln.strip().startswith("受影响批次")]
-    return "\n".join(lines).strip()
+    """Remove pre-existing lot-summary lines so lots are owned by `lots` param.
+
+    Only matches lines of the form ``受影响批次: ...`` (the lot line we emit),
+    so user prose like ``受影响批次分析结论：风险低`` is preserved.
+    """
+    return "\n".join(
+        ln for ln in text.splitlines()
+        if not _LOT_LINE_RE.match(ln)
+    ).strip()
 
 
 def build_scar_description(
