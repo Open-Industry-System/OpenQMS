@@ -2,6 +2,7 @@
 
 Follows D3 migration test conventions (tests/conftest.py: mig_db_url fixture).
 """
+import json
 import uuid
 
 import pytest
@@ -206,4 +207,92 @@ def test_upgrade_invalidates_legacy_unstructured_waiver(mig_db_url):
                     "(gen_random_uuid(), :aid, 1, :fid, 'passed', false, '[]'::jsonb, "
                     "'no items', NULL, :uid, now(), now())"
                 ), {"aid": analysis_id, "fid": factory_id, "uid": user_id})
+    engine.dispose()
+
+
+def test_round25_upgrade_invalidates_all_existing_structured_waivers(mig_db_url):
+    """Old-head structured waivers are audited and invalidated fail-closed."""
+    cfg = _cfg(mig_db_url)
+    command.upgrade(cfg, "20260715_waiver_items")
+
+    engine = create_engine(_sync_url(mig_db_url))
+    capa_id, factory_id, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    analysis_id, decision_id = uuid.uuid4(), uuid.uuid4()
+    audit_id, audit_run_id, doc_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    _bootstrap_capa(engine, capa_id, factory_id, user_id)
+    waiver_items = [{
+        "doc_type": "control_plan",
+        "doc_id": str(doc_id),
+        "target_key": "old-item",
+        "field": "control_method",
+        "latest_version_id": str(uuid.uuid4()),
+        "latest_sha256": "a" * 64,
+        "audit_run_id": str(audit_run_id),
+    }]
+    version_snapshot = [{
+        "doc_type": "control_plan",
+        "doc_id": str(doc_id),
+        "version_after_id": waiver_items[0]["latest_version_id"],
+        "sha256": waiver_items[0]["latest_sha256"],
+    }]
+    with engine.begin() as c:
+        c.execute(text(
+            "INSERT INTO capa_docg_analysis (analysis_id, capa_id, factory_id, "
+            "is_current, status, affected_docs, analysis_input_hash, llm_available, "
+            "attempt_token, started_at, completed_at, generated_by, generated_at, created_at) "
+            "VALUES (:aid, :cid, :fid, true, 'done', '[]'::jsonb, 'hash', true, "
+            "gen_random_uuid(), now(), now(), :uid, now(), now())"
+        ), {"aid": analysis_id, "cid": capa_id, "fid": factory_id, "uid": user_id})
+        c.execute(text(
+            "INSERT INTO capa_docg_audit (audit_id, analysis_id, audit_run_id, factory_id, "
+            "doc_type, doc_id, doc_name, status, version_bump, coverage, covered_count, "
+            "total_count, audited_by, audited_at, created_at) VALUES "
+            "(:audit_id, :aid, :run_id, :fid, 'control_plan', :doc_id, 'CP', "
+            "'pending_update', false, '[]'::jsonb, 0, 1, :uid, now(), now())"
+        ), {
+            "audit_id": audit_id, "aid": analysis_id, "run_id": audit_run_id,
+            "fid": factory_id, "doc_id": doc_id, "uid": user_id,
+        })
+        c.execute(text(
+            "INSERT INTO capa_docg_decision (decision_id, analysis_id, audit_run_id, "
+            "revision, factory_id, decision, no_affected_confirmed, version_snapshot, "
+            "waiver_reason, waiver_items, decided_by, decided_at, created_at) VALUES "
+            "(:did, :aid, :run_id, 1, :fid, 'passed', false, CAST(:snapshot AS jsonb), "
+            "'Round23 accepted', CAST(:items AS jsonb), :uid, now(), now())"
+        ), {
+            "did": decision_id, "aid": analysis_id, "run_id": audit_run_id,
+            "fid": factory_id, "snapshot": json.dumps(version_snapshot),
+            "items": json.dumps(waiver_items), "uid": user_id,
+        })
+    engine.dispose()
+
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(_sync_url(mig_db_url))
+    with engine.connect() as c:
+        decision = c.execute(text(
+            "SELECT decision, waiver_reason, waiver_items, version_snapshot "
+            "FROM capa_docg_decision WHERE decision_id=:did"
+        ), {"did": decision_id}).one()
+        assert decision == ("blocked", None, None, [])
+
+        analysis_error = c.execute(text(
+            "SELECT error FROM capa_docg_analysis WHERE analysis_id=:aid"
+        ), {"aid": analysis_id}).scalar_one()
+        assert "ROUND25_WAIVER_INVALIDATED" in analysis_error
+
+        audit = c.execute(text(
+            "SELECT table_name, record_id, action, changed_fields, factory_id, operated_by "
+            "FROM audit_logs WHERE action='DOC_GATE_WAIVER_INVALIDATED'"
+        )).one()
+        assert audit.table_name == "capa_docg_decision"
+        assert audit.record_id == capa_id
+        assert audit.factory_id == factory_id
+        assert audit.operated_by == user_id
+        assert audit.changed_fields["analysis_id"] == str(analysis_id)
+        assert audit.changed_fields["decision_id"] == str(decision_id)
+        assert audit.changed_fields["revision"] == 1
+        assert audit.changed_fields["audit_run_id"] == str(audit_run_id)
+        assert audit.changed_fields["waiver_reason"] == "Round23 accepted"
+        assert audit.changed_fields["waiver_items"] == waiver_items
     engine.dispose()
