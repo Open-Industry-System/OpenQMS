@@ -16,13 +16,13 @@
 | 01.5 8D→SCAR 触发 | false | ✅ 已实现 | 1:1 CAPA↔SCAR + trigger-scar + linked_scar 投影 + SCAR_STATUS_SYNCED + FE Modal + E2E（US-E2E-01.5 已落地，见 git log） |
 | 01.6 8D→供应商风险 | false | ❌ 未实现 | SupplierRiskAlert.linked_capa_id 外键已就绪；8D 触发写入入口缺失 |
 | 01.7 D8 文档更新门禁 | true | ✅ 已实现 | 3 表 capa_docg_* + 三阶段 LLM 影响分析 + run_audit 版本 diff/关键点覆盖 + defer/confirm + `_d8_doc_gate_gate` C8/C9 + DocGatePanel + E2E（2026-07-14） |
-| 01.8 知识库沉淀 | true | ⚠️ 部分实现 | D7/D8 lessons 抽取已有（capa_lessons_learned）；非结构化 8 字段沉淀、时机非 D8 关闭后全报告 |
+| 01.8 知识库沉淀 | true | ✅ 已实现 | knowledge_entries + D8 关闭 fail-closed sink + list/detail + stage-5 KnowledgeEntrySource + FE card + E2E `8D-E2E-KNOW-001` |
 | 01.9 横向扩散预警 | true | ❌ 未实现 | 同类产品 KB 检索有（recommendation_sources_extra）；横向扩散检查+通知完全缺失 |
 | 01.10 PPT 输出 | false | ✅ 已实现 | capa_ppt_export 表 + agent_review_skill 表 + COALESCE 索引 + seed；capa_ppt_service（generate_content + render_pptx + validate）；capa_ppt_review_service（3 轮 LLM 闭环 + skip）；admin review-skill CRUD API；PPT 导出 API（POST + GET + X-PPT-Export-Id header + 权限/状态门控）；前端 generatePpt 按钮 + review report Modal + admin ReviewSkillsPage + i18n |
 
 **结论**：
 - **大部分已实现**：01.2（12 源编排器已就绪，但 LLM 降级/持久化有 gap）
-- **部分实现**：01.3、01.8
+- **部分实现**：01.3
 - **数据模型就绪、链路缺失**：01.6（RiskAlert.linked_capa_id）——外键在，只缺 8D 侧触发；（01.5 SCAR 链路已收口）
 - **完全缺失**：01.9（横向扩散）；（01.1 / 01.4 / 01.5 / 01.7 已在后续切片落地，见各节状态）
 
@@ -137,13 +137,13 @@
 
 | 验收标准 | 状态 | 现有实现 | gap |
 |---|---|---|---|
-| D8 关闭自动触发沉淀 | ⚠️ | D7→D8 时抽 d7 lessons（capa_service.py:397 `_extract_lessons(db,capa,"d7")`）；D8 保存时抽 d8 lessons（capa_lessons_service.py:71） | 时机是 D7→D8/D8 保存，非"D8 关闭后全报告沉淀" |
-| 结构化知识条目（8 字段） | ⚠️ | `capa_lessons_learned` 表有 lesson_text/category/source_d_step/tags，非故事要求的 8 字段结构 | 字段不全（非结构化 8 字段） |
-| 沉淀可被推荐源检索命中 | ⚠️ | lessons_learned source 已接入编排器 stage 5；有 enqueue_embedding | 闭环链路待核（新 8D 推荐命中本条沉淀） |
-| 按产品检索历史 8D | ❌ | 无按产品检索 8D 经验入口 | 缺失 |
-| 审计 | ✅ | LESSON_EXTRACTED 审计 | 无 |
+| D8 关闭自动触发沉淀 | ✅ | `advance_capa` D8_APPROVAL_PENDING→D8_CLOSURE 调 `sink_capa_on_close`（fail-closed）；无 LLM → 422 `outcome=blocked`；LLM 失败 → 422 `outcome=failed`；手动 `POST …/sink-knowledge` | — |
+| 结构化知识条目（8 字段） | ✅ | `knowledge_entries.fields`：d2/d3/d4_root_cause/d5/d7_node_action/linkage/closure + LLM `lesson_summary`/`tags`；`document_no` String(50)；`embedding_status` pending\|ready\|failed | — |
+| 沉淀可被推荐源检索命中 | ✅ | stage-5 `KnowledgeEntrySource`（factory+PL+ready embedding）；命中写 `KNOWLEDGE_RETRIEVED`（fail-closed `KnowledgeAuditError`） | embedding ready 依赖 embedding worker（e2e 可选） |
+| 按产品检索历史 8D | ✅ | `GET /api/knowledge/entries`（product_line_code / factory SQL 谓词；异己 factory → 403；详情不可见 → 404） | 独立知识列表页未做（可选；CAPA 卡片 + API 已覆盖） |
+| 审计 | ✅ | `KNOWLEDGE_SUNK` / `KNOWLEDGE_RETRIEVED` on `capa_eightd` | — |
 
-**01.8 gap**：知识沉淀部分有（D7/D8 lessons 抽取 + embedding）。gap：沉淀字段非结构化 8 字段、时机非 D8 关闭后全报告、按产品检索入口缺失。
+**01.8 状态（2026-07-16）**：已交付。表 `knowledge_entries` + outbox `content_hash` + worker 防陈旧；sink on D8 close + resink；list/detail API；FE CAPA knowledge card；E2E seed `8D-E2E-KNOW-001` + `capa-story-knowledge-sink.spec.ts`。与 `capa_lessons_learned` 写路径共存（不改 lessons）。
 
 ---
 
@@ -184,7 +184,7 @@
 | P1 | 01.5（SCAR 触发）新建 | ✅ 已落地（2026-07-16）：1:1 指针 + trigger-scar + linked_scar + SCAR_STATUS_SYNCED + FE + E2E |
 | P1 | 01.6（供应商风险）新建 | linked_capa_id 外键已就绪，只缺 8D 侧触发写入（工作量小） |
 | P2 | 01.7（D8 文档门禁）新建 | ✅ 已落地（2026-07-14）：capa_docg_* + 三阶段分析 + run_audit + gate C8/C9 + DocGatePanel + E2E |
-| P2 | 01.8（知识沉淀）收尾 | lessons 已有，补结构化 8 字段 + 按产品检索入口 |
+| P2 | 01.8（知识沉淀） | ✅ 已交付（knowledge_entries + sink + API + FE + E2E） |
 | P3 | 01.9（横向扩散）新建 | 完全缺失，同类型产品 KB 检索可复用 |
 | ~~P3 | 01.10（PPT）新建 | 完全缺失，需引入 PPT 生成依赖~~ |
 
@@ -196,7 +196,7 @@
 4. **01.3 node-action 无 status 字段**：CapaD7NodeAction 只有 action=confirmed/skipped，故事要求的 pending/已执行/已验证状态不存在，需加字段 + 迁移。
 5. **01.3 状态机 D7→D8 直连**：eightd_state.py D7_PREVENTION→D8_CLOSURE 无中间状态、无驳回回退，故事要求的 D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING 全部缺失。
 6. **01.1 D3→D4 无闸口**：advance_capa 只对 D4→D5、D7→D8 加闸口，D3→D4 不检查 d3_interim 非空。
-7. **01.8 知识沉淀已有基础**：D7/D8 lessons 抽取 + embedding 已有，但非结构化 8 字段、时机非 D8 关闭后全报告。
+7. **01.8 知识沉淀已交付**（2026-07-16）：`knowledge_entries` 结构化字段 + D8 关闭 fail-closed sink + list/detail + stage-5 命中 + FE card + E2E；`capa_lessons_learned` 仍共存。
 8. **数据模型基础设施齐全**：ERP（库存/发货）、SCAR（capa_ref_id）、供应商风险（linked_capa_id）、控制计划版本、FMEA 版本、lessons 表均存在，新建子故事可复用，不需从零建表。
 9. **01.3 method 是自由文本**：CapaRootCauseVerification.method 是 `str | None`，故事要求枚举（measurement/observation/reproduction），需改 schema + 可能迁移。
 10. **01.10 PPT 输出已实现**（2026-07-09）：capa_ppt_export 表 + agent_review_skill 表 + COALESCE 索引 + seed；capa_ppt_service（generate_content + render_pptx + validate）；capa_ppt_review_service（3 轮 LLM 闭环 + skip）；admin review-skill CRUD API；PPT 导出 API（POST + GET + X-PPT-Export-Id header + 权限/状态门控）；前端 generatePpt 按钮 + review report Modal + admin ReviewSkillsPage + i18n。经 7 轮 adversarial review 修复后落地。

@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
 **更新日期**: 2026-07-16
-**当前分支**: `feature/us-e2e-01-spec-a`（worktree `worktree-us-e2e-01.5-scar-trigger`）
-**最近提交**: 01.5 8D→SCAR 触发与回写已落地（migration+trigger+sync+FE+E2E seed/spec）；下一步 01.6
+**当前分支**: `worktree-us-e2e-01.8-knowledge-sink`（base `feature/us-e2e-01-spec-a`）
+**最近提交**: 01.8 知识库沉淀 Tasks 1–7 落地（migration+sink+API+source+FE+E2E seed/spec）；下一步 01.6 / 01.9
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
@@ -289,7 +289,9 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 ### P2 — 新建/收尾
 
 - [x] **01.7 D8 文档更新门禁新建** — 3 表 `capa_docg_*` + `generate_impact_analysis` 三阶段（BLOCKED/stale/CAS/C9）+ `run_audit`（diff_engine 版本间 diff + 关键点覆盖 + 空清单守卫）+ `record_defer`/`confirm_no_affected` + `_d8_doc_gate_gate`（C8/C9，defer 仍阻断）+ 7 路由 + `DocGatePanel`（全局推进排除 D8_GATE_PENDING）+ E2E seed `8D-E2E-DOCGATE-001` + `capa-story-doc-gate.spec.ts`；窄范围只审 CP/FMEA（C1）。plan: `docs/superpowers/plans/2026-07-13-us-e2e-01.7-doc-update-gate.md`。**终审第七轮修复**（3 P0 + 5 P1）：drop full UQ 允许重试、field 级覆盖判定、None baseline 不崩、CP item_id+完整 snapshot、空清单→done→confirm、phase3 refresh+rebuild candidates、defer owner 工厂校验、审计事件链补全；+10 回归测试 + advance-flow/TOCTOU gate 接入修复。**终审第 20–24 轮**：历史 hash 双算法 + backfill 全量 demote C9；preflight 可执行处置 + `make deploy-check` 强制入口；**structured waiver**（`waiver_items` 绑定 analysis/audit_run/doc_id/target_key/field + latest_version_id/hash；仅 server-confirmed blocked_modify；C8 仍核验非豁免文档；preflight 仅 latest decision 精确匹配；TOCTOU FOR UPDATE）；CHECK `chk_docg_waiver_items`；fixture `capa_with_cp_blocked_modify`。**第 24 轮**：residual completeness（同批次全部未覆盖 keypoint 须被 items 覆盖；不可豁免 FMEA/pending_update/incomplete 拒整单）；C8 version_snapshot 保留全部文档并绑定 latest_version_id/sha256，gate 重比版本+target_key 仍缺；preflight waived_keys 绑定版本，CP 漂移即复报；`20260715_waiver_items` 迁移先 UPDATE 失效遗留 reason-only waiver 再加 CHECK；`make deploy-release` 强制 migrate->check+preflight->再放行 app；+5 回归测试（partial/FMEA residual/version bump/stale waiver/legacy migration）。444 capa 绿。
-- [ ] **01.8 知识库沉淀收尾** — D7/D8 lessons 抽取已有（`capa_lessons_learned`），补结构化 8 字段沉淀 + 时机改为 D8 关闭后全报告 + 按产品检索入口
+- [x] **01.8 知识库沉淀收尾** — `knowledge_entries`（结构化 fields + document_no 50 + embedding_*）+ outbox `content_hash` + worker stale/dead_letter；`sink_capa_on_close` 挂 D8 close fail-closed（blocked/failed）+ 手动 resink；list/detail factory 403/404；stage-5 `KnowledgeEntrySource` + `KNOWLEDGE_SUNK`/`KNOWLEDGE_RETRIEVED`；FE CAPA knowledge card + outcome UX；E2E seed `8D-E2E-KNOW-001` + `capa-story-knowledge-sink.spec.ts`。spec: `docs/superpowers/specs/2026-07-16-us-e2e-01.8-knowledge-sink-design.md` v5；plan: `docs/superpowers/plans/2026-07-16-us-e2e-01.8-knowledge-sink.md`（worktree commits `5493d331`..本 task）
+  - 与 `capa_lessons_learned` 写路径共存（未改 lessons）。
+  - E2E：无 LLM → close 422 `outcome=blocked`；有 LLM → close + list/card + audit SUNK；embedding ready / recommend 命中依赖 embedding worker（可选，软断言）。
 
 ### P3 — 新建
 

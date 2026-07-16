@@ -5,7 +5,7 @@ import asyncio
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 
 from app.config import settings
 from app.core.security import hash_password
@@ -24,6 +24,7 @@ from app.seed_e2e_constants import (
     FMEA_LINK_E2E_CAPA_DOC_NO, FMEA_LINK_E2E_CAPA_SKIPPED_DOC_NO,
     FMEA_LINK_E2E_CAUSE_NODE, FMEA_LINK_E2E_FMEA_DOC_NO,
     FMEA_LINK_E2E_FM_NODE, FMEA_LINK_E2E_PC_NODE,
+    KNOWLEDGE_SINK_E2E_CAPA_DOC_NO, KNOWLEDGE_SINK_E2E_CAPA_ID,
     SCAR_TRIGGER_E2E_CAPA_DOC_NO, SCAR_TRIGGER_E2E_CAPA_ID, SCAR_TRIGGER_E2E_LOT_NO,
 )
 
@@ -44,6 +45,7 @@ FMEA_LINK_D7_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20244")
 SCAR_TRIGGER_CAPA_ID = uuid.UUID(SCAR_TRIGGER_E2E_CAPA_ID)
 SCAR_TRIGGER_RUN_ID = uuid.UUID("a0000005-0001-4000-8000-000000000002")
 SCAR_TRIGGER_REPORT_ID = uuid.UUID("a0000005-0001-4000-8000-000000000003")
+KNOWLEDGE_SINK_CAPA_ID = uuid.UUID(KNOWLEDGE_SINK_E2E_CAPA_ID)
 
 
 async def _seed_factories(db) -> dict:
@@ -863,6 +865,92 @@ async def _seed_scar_trigger(db, factory_ids):
     await db.flush()
 
 
+async def _seed_knowledge_sink(db, factory_ids):
+    """Seed CAPA at D8_APPROVAL_PENDING for US-E2E-01.8 knowledge sink E2E.
+
+    Idempotent: resets status and D-step fields so close can re-trigger sink.
+    Does not pre-create knowledge_entries (sink happens on D8 close via LLM).
+    """
+    from app.models.capa import CAPAEightD
+    from app.models.knowledge_entry import KnowledgeEntry
+    from app.state_machines.eightd_state import EightDState
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+    factory_id = factory_ids[E2E_FACTORY_DC100["code"]]
+    product_line = E2E_PRODUCT_LINE["code"]
+
+    capa = (await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == KNOWLEDGE_SINK_E2E_CAPA_DOC_NO)
+    )).scalar_one_or_none()
+
+    values = dict(
+        title="E2E 8D 知识库沉淀",
+        product_line_code=product_line,
+        factory_id=factory_id,
+        status=EightDState.D8_APPROVAL_PENDING.value,
+        severity="serious",
+        d2_description=(
+            "现场抽检一批 DC-DC-100-E2E 来料螺栓，发现 M8 螺栓孔径超差，"
+            "实测 8.12mm（上限 8.05mm）。"
+        ),
+        d3_interim="对该批螺栓 100% 复检隔离，超差件判退供应商。",
+        d4_root_cause="定位销磨损导致孔径超差",
+        d5_correction="更换定位销并校准夹具，建立定期磨损检测周期。",
+        d6_verification="更换后连续 3 批抽检孔径均合格，CPK 1.67。",
+        d7_prevention="将定位销磨损检测纳入首件检验 + 周保养点检表。",
+        d8_closure="8D 关闭：根因已验证，纠正与预防措施已落地并有效。",
+    )
+
+    if capa is None:
+        capa = CAPAEightD(
+            report_id=KNOWLEDGE_SINK_CAPA_ID,
+            document_no=KNOWLEDGE_SINK_E2E_CAPA_DOC_NO,
+            created_by=admin.user_id,
+            **values,
+        )
+        db.add(capa)
+        await db.flush()
+    else:
+        await db.execute(
+            update(CAPAEightD)
+            .where(CAPAEightD.report_id == capa.report_id)
+            .values(**values)
+        )
+        await db.flush()
+        capa = (await db.execute(
+            select(CAPAEightD).where(CAPAEightD.document_no == KNOWLEDGE_SINK_E2E_CAPA_DOC_NO)
+        )).scalar_one()
+
+    # Drop prior sink entry so re-seed starts clean (no CAPA FK; source_id is logical).
+    existing_entry = await db.scalar(
+        select(KnowledgeEntry).where(
+            KnowledgeEntry.source_type == "capa",
+            KnowledgeEntry.source_id == capa.report_id,
+        )
+    )
+    if existing_entry is not None:
+        await db.execute(
+            text(
+                """
+                UPDATE embedding_sync_outbox
+                SET status = 'cancelled'
+                WHERE entity_type = 'knowledge_entry'
+                  AND entity_id = :id
+                  AND status IN ('pending', 'processing')
+                """
+            ),
+            {"id": existing_entry.entry_id},
+        )
+        await db.execute(
+            text(
+                "DELETE FROM document_embeddings WHERE entity_type = 'knowledge_entry' AND entity_id = :id"
+            ),
+            {"id": existing_entry.entry_id},
+        )
+        await db.delete(existing_entry)
+        await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
@@ -874,6 +962,7 @@ async def main():
         await db.commit()
         await _seed_d3_test_capas(db)
         await _seed_scar_trigger(db, factory_ids)
+        await _seed_knowledge_sink(db, factory_ids)
         await db.commit()
     print("E2E seed complete.")
 
