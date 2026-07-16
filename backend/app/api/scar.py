@@ -211,17 +211,24 @@ async def link_capa(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    # Permission check
+    # SCAR CREATE + CAPA EDIT (writes capa.scar_ref_id)
     perm_level = await get_user_permission(scope.user, Module.SCAR, db)
     if perm_level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 scar 模块的 CREATE 权限")
+    capa_level = await get_user_permission(scope.user, Module.CAPA, db)
+    if capa_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
     scar = await scar_service.get_scar(db, scar_id)
     if not scar:
         raise HTTPException(404, "SCAR not found")
     _check_factory_access(scar, scope)
     try:
-        scar = await scar_service.link_capa(db, scar, req.capa_ref_id, scope.user.user_id)
+        scar = await scar_service.link_capa(
+            db, scar, req.capa_ref_id, scope.user.user_id, scope
+        )
         return _to_response(scar)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))

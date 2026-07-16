@@ -1,15 +1,20 @@
 import uuid
 from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.factory_scope import check_product_line_access
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.supplier import Supplier, SupplierSCAR
 from app.services.embedding_outbox import enqueue_embedding
+
+if TYPE_CHECKING:
+    from app.core.deps import RequestScope
 
 SCAR_TRANSITIONS = {
     "start":   ("open",         "in_progress"),
@@ -271,6 +276,24 @@ async def transition_scar(
         operated_by=user_id,
     ))
 
+    # Project SCAR status change onto linked CAPA audit trail (read-time linked_scar + this log)
+    if scar.capa_ref_id is not None:
+        db.add(AuditLog(
+            table_name="capa_eightd",
+            record_id=scar.capa_ref_id,
+            action="SCAR_STATUS_SYNCED",
+            operated_by=user_id,
+            factory_id=scar.factory_id,
+            changed_fields={
+                "capa_id": str(scar.capa_ref_id),
+                "scar_id": str(scar.scar_id),
+                "scar_no": scar.scar_no,
+                "scar_status": to_status,
+                "old_status": old_status,
+                "new_status": to_status,
+            },
+        ))
+
     # Close linked risk alerts
     if to_status == "closed":
         from sqlalchemy import update
@@ -292,19 +315,51 @@ async def link_capa(
     scar: SupplierSCAR,
     capa_ref_id: uuid.UUID,
     user_id: uuid.UUID,
+    scope: "RequestScope",
 ) -> SupplierSCAR:
-    capa = await db.get(CAPAEightD, capa_ref_id)
-    if not capa:
-        raise ValueError("CAPA 记录不存在")
+    """Bidirectional SCAR↔CAPA link with factory/PL/1:1 guards (US-E2E-01.5 §5.4)."""
+    from app.services.capa_scar_service import load_capa_visible_or_404
 
-    scar.capa_ref_id = capa_ref_id
+    # Source SCAR product-line (403). Factory visibility is enforced by the route.
+    check_product_line_access(scar.product_line_code, scope)
 
-    db.add(AuditLog(
-        table_name="supplier_scars",
-        record_id=scar.scar_id,
-        action="LINK_CAPA",
-        changed_fields={"capa_ref_id": str(capa_ref_id)},
-        operated_by=user_id,
-    ))
-    await db.commit()
+    # Target CAPA: factory invisible / missing → LookupError (route maps to 404)
+    capa = await load_capa_visible_or_404(db, capa_ref_id, scope)
+
+    if capa.factory_id != scar.factory_id:
+        raise ValueError("SCAR 与 CAPA 必须同厂")
+    if scar.product_line_code != capa.product_line_code:
+        raise ValueError("SCAR 与 CAPA 必须同产品线")
+
+    # Target CAPA product-line (403) — complements same-PL invariant above
+    check_product_line_access(capa.product_line_code, scope)
+
+    # Lock CAPA row for concurrent bind races; refresh identity map
+    result = await db.execute(
+        select(CAPAEightD)
+        .where(CAPAEightD.report_id == capa_ref_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    capa = result.scalar_one()
+
+    if capa.scar_ref_id is not None and capa.scar_ref_id != scar.scar_id:
+        raise ValueError("目标 8D 已关联其他 SCAR")
+    if scar.capa_ref_id is not None and scar.capa_ref_id != capa.report_id:
+        raise ValueError("SCAR 已关联其他 8D，禁止换绑")
+
+    try:
+        scar.capa_ref_id = capa.report_id
+        capa.scar_ref_id = scar.scar_id
+        db.add(AuditLog(
+            table_name="supplier_scars",
+            record_id=scar.scar_id,
+            action="LINK_CAPA",
+            changed_fields={"capa_ref_id": str(capa_ref_id)},
+            operated_by=user_id,
+        ))
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError("关联冲突：1:1 约束")
     return await get_scar(db, scar.scar_id)

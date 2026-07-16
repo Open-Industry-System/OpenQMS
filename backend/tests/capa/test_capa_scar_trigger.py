@@ -410,3 +410,313 @@ async def test_public_scar_create_rejects_source_type_capa_422(
         },
     )
     assert resp.status_code == 422
+
+
+# ─── Task 4: transition SCAR_STATUS_SYNCED + hardened link-capa ───────────────
+
+
+async def _make_scar(
+    db,
+    factory_id,
+    user_id,
+    supplier_id,
+    *,
+    product_line_code="DC-DC-100",
+    capa_ref_id=None,
+    status="open",
+    source_type="manual",
+):
+    scar = SupplierSCAR(
+        scar_id=uuid.uuid4(),
+        scar_no=f"SCAR-T4-{uuid.uuid4().hex[:6]}",
+        supplier_id=supplier_id,
+        factory_id=factory_id,
+        source_type=source_type,
+        description="task4 scar",
+        product_line_code=product_line_code,
+        status=status,
+        issued_by=user_id,
+        capa_ref_id=capa_ref_id,
+    )
+    db.add(scar)
+    await db.flush()
+    return scar
+
+
+@pytest.mark.asyncio
+async def test_transition_writes_scar_status_synced(db, default_factory, admin_user):
+    from app.services import scar_service
+
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        supplier.supplier_id,
+        capa_ref_id=capa.report_id,
+        status="open",
+    )
+    capa.scar_ref_id = scar.scar_id
+    await db.flush()
+
+    updated = await scar_service.transition_scar(
+        db, scar, "start", user_id=admin_user.user_id
+    )
+    assert updated.status == "in_progress"
+
+    audit = (
+        await db.execute(
+            select(AuditLog).where(
+                AuditLog.record_id == capa.report_id,
+                AuditLog.action == "SCAR_STATUS_SYNCED",
+            )
+        )
+    ).scalar_one()
+    assert audit.table_name == "capa_eightd"
+    assert audit.operated_by == admin_user.user_id
+    assert audit.factory_id == scar.factory_id
+    cf = audit.changed_fields
+    assert cf["scar_status"] == "in_progress"
+    assert cf["old_status"] == "open"
+    assert cf["new_status"] == "in_progress"
+    assert cf["capa_id"] == str(capa.report_id)
+    assert cf["scar_id"] == str(scar.scar_id)
+    assert isinstance(cf["capa_id"], str)
+    assert isinstance(cf["scar_id"], str)
+    assert cf["scar_no"] == scar.scar_no
+
+
+@pytest.mark.asyncio
+async def test_transition_without_capa_ref_no_sync_audit(db, default_factory, admin_user):
+    from app.services import scar_service
+
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        supplier.supplier_id,
+        capa_ref_id=None,
+        status="open",
+    )
+
+    await scar_service.transition_scar(db, scar, "start", user_id=admin_user.user_id)
+
+    rows = (
+        await db.execute(
+            select(AuditLog).where(AuditLog.action == "SCAR_STATUS_SYNCED")
+        )
+    ).scalars().all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_link_capa_bidirectional(engineer_client, db, default_factory, admin_user):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db, default_factory.id, admin_user.user_id, supplier.supplier_id
+    )
+
+    resp = await engineer_client.post(
+        f"/api/scars/{scar.scar_id}/link-capa",
+        json={"capa_ref_id": str(capa.report_id)},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["capa_ref_id"] == str(capa.report_id)
+
+    await db.refresh(capa)
+    await db.refresh(scar)
+    assert capa.scar_ref_id == scar.scar_id
+    assert scar.capa_ref_id == capa.report_id
+
+    audit = (
+        await db.execute(
+            select(AuditLog).where(
+                AuditLog.record_id == scar.scar_id,
+                AuditLog.action == "LINK_CAPA",
+            )
+        )
+    ).scalar_one()
+    assert audit.operated_by == admin_user.user_id
+    assert audit.changed_fields["capa_ref_id"] == str(capa.report_id)
+
+
+@pytest.mark.asyncio
+async def test_link_capa_cross_factory_404(engineer_client, db, default_factory, admin_user):
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db, default_factory.id, admin_user.user_id, supplier.supplier_id
+    )
+    other = Factory(
+        id=uuid.uuid4(), code=f"OF-{uuid.uuid4().hex[:6]}", name="Other", is_active=True
+    )
+    db.add(other)
+    await db.flush()
+    foreign_capa = await _make_capa(db, other.id, admin_user.user_id)
+
+    resp = await engineer_client.post(
+        f"/api/scars/{scar.scar_id}/link-capa",
+        json={"capa_ref_id": str(foreign_capa.report_id)},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_link_capa_cross_pl_400(engineer_client, db, default_factory, admin_user):
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id, product_line_code="OTHER-PL"
+    )
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        supplier.supplier_id,
+        product_line_code="DC-DC-100",
+    )
+
+    resp = await engineer_client.post(
+        f"/api/scars/{scar.scar_id}/link-capa",
+        json={"capa_ref_id": str(capa.report_id)},
+    )
+    assert resp.status_code == 400
+    assert "产品线" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_link_capa_scar_pl_denied_403(db, default_factory, admin_user):
+    await _seed_perm(db, admin_user.role_id, "capa", 3)
+    await _seed_perm(db, admin_user.role_id, "scar", 3)
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id, product_line_code="DC-DC-100"
+    )
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        supplier.supplier_id,
+        product_line_code="DC-DC-100",
+    )
+    scope = _scope_for(
+        admin_user,
+        default_factory,
+        accessible_factory_ids=None,
+        pl_mode="EXPLICIT",
+        pl_codes=["OTHER-PL"],
+    )
+    async with _client_for(db, admin_user, scope) as ac:
+        resp = await ac.post(
+            f"/api/scars/{scar.scar_id}/link-capa",
+            json={"capa_ref_id": str(capa.report_id)},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_link_capa_capa_pl_denied_403(db, default_factory, admin_user):
+    """Defense-in-depth: CAPA PL check rejects when operator lacks CAPA PL access.
+
+    Same-PL invariant means scar PL check usually fires first; assert 403 either way.
+    """
+    await _seed_perm(db, admin_user.role_id, "capa", 3)
+    await _seed_perm(db, admin_user.role_id, "scar", 3)
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id, product_line_code="DC-DC-100"
+    )
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        supplier.supplier_id,
+        product_line_code="DC-DC-100",
+    )
+    scope = _scope_for(
+        admin_user,
+        default_factory,
+        accessible_factory_ids=None,
+        pl_mode="EXPLICIT",
+        pl_codes=["OTHER-PL"],
+    )
+    async with _client_for(db, admin_user, scope) as ac:
+        resp = await ac.post(
+            f"/api/scars/{scar.scar_id}/link-capa",
+            json={"capa_ref_id": str(capa.report_id)},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_link_capa_scar_create_without_capa_edit_403(db, default_factory, admin_user):
+    await _seed_perm(db, admin_user.role_id, "scar", 3)  # CREATE
+    await _seed_perm(db, admin_user.role_id, "capa", 1)  # VIEW only
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db, default_factory.id, admin_user.user_id, supplier.supplier_id
+    )
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    async with _client_for(db, admin_user, scope) as ac:
+        resp = await ac.post(
+            f"/api/scars/{scar.scar_id}/link-capa",
+            json={"capa_ref_id": str(capa.report_id)},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
+    assert "capa" in resp.json()["detail"].lower() or "EDIT" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_link_capa_rebind_forbidden_400(engineer_client, db, default_factory, admin_user):
+    capa_a = await _make_capa(db, default_factory.id, admin_user.user_id)
+    capa_b = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar = await _make_scar(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        supplier.supplier_id,
+        capa_ref_id=capa_a.report_id,
+    )
+    capa_a.scar_ref_id = scar.scar_id
+    await db.flush()
+
+    resp = await engineer_client.post(
+        f"/api/scars/{scar.scar_id}/link-capa",
+        json={"capa_ref_id": str(capa_b.report_id)},
+    )
+    assert resp.status_code == 400
+    assert "换绑" in resp.json()["detail"] or "已关联" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_link_capa_target_already_bound_400(
+    engineer_client, db, default_factory, admin_user
+):
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    scar_a = await _make_scar(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        supplier.supplier_id,
+        capa_ref_id=capa.report_id,
+    )
+    capa.scar_ref_id = scar_a.scar_id
+    await db.flush()
+    scar_b = await _make_scar(
+        db, default_factory.id, admin_user.user_id, supplier.supplier_id
+    )
+
+    resp = await engineer_client.post(
+        f"/api/scars/{scar_b.scar_id}/link-capa",
+        json={"capa_ref_id": str(capa.report_id)},
+    )
+    assert resp.status_code == 400
+    assert "已关联" in resp.json()["detail"]
