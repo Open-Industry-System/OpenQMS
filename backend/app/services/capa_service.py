@@ -206,8 +206,29 @@ async def update_capa(
     update_data: dict,
     user_id: uuid.UUID,
 ) -> CAPAEightD:
+    # US-E2E-01.5: lock + refresh the row so the linked-SCAR invariant and PL
+    # checks below observe committed concurrent links/moves. Safety must not
+    # depend on a single API caller having locked first.
+    await db.execute(
+        select(CAPAEightD)
+        .where(CAPAEightD.report_id == capa.report_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
-        await validate_product_line(db, update_data["product_line_code"])
+        from app.models.product_line import ProductLine
+        new_pl = update_data["product_line_code"]
+        pl_row = await db.scalar(select(ProductLine).where(ProductLine.code == new_pl))
+        if pl_row is None:
+            raise ValueError(f"产品线 '{new_pl}' 不存在")
+        if not pl_row.is_active:
+            raise ValueError(f"产品线 '{new_pl}' 已停用")
+        if pl_row.factory_id != capa.factory_id:
+            raise ValueError(f"产品线 '{new_pl}' 不属于当前工厂")
+
+        # US-E2E-01.5: CAPA↔SCAR same-PL invariant — refuse unilateral PL move while linked
+        if capa.scar_ref_id is not None and new_pl != capa.product_line_code:
+            raise ValueError("已关联 SCAR，禁止单独修改产品线")
 
     # US-E2E-01.3：冻结字段后端约束（防 direct API 修改）
     _FROZEN_FIELDS_BY_STATUS = {

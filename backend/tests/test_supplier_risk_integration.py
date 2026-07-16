@@ -528,6 +528,49 @@ async def test_create_scar_without_commit_flushes_only(
 
 
 @pytest.mark.asyncio
+async def test_create_scar_without_commit_sets_capa_ref_id(
+    db, seed_supplier, admin_user, default_factory
+):
+    capa = CAPAEightD(
+        document_no=f"8D-SCAR-HELPER-{uuid.uuid4().hex[:8]}",
+        title="helper",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        status="D3_INTERIM",
+    )
+    db.add(capa)
+    await db.flush()
+
+    scar = await _create_scar_without_commit(
+        db,
+        supplier_id=seed_supplier.supplier_id,
+        source_type="capa",
+        source_id=capa.report_id,
+        description="from capa",
+        issued_by=admin_user.user_id,
+        product_line_code=capa.product_line_code,
+        factory_id=capa.factory_id,
+        capa_ref_id=capa.report_id,
+    )
+    assert scar.capa_ref_id == capa.report_id
+
+
+@pytest.mark.asyncio
+async def test_create_scar_without_commit_capa_ref_defaults_none(
+    db, seed_supplier, admin_user
+):
+    scar = await _create_scar_without_commit(
+        db,
+        supplier_id=seed_supplier.supplier_id,
+        source_type="risk_alert",
+        source_id=uuid.uuid4(),
+        description="no capa",
+        issued_by=admin_user.user_id,
+    )
+    assert scar.capa_ref_id is None
+
+
+@pytest.mark.asyncio
 async def test_create_capa_without_commit_flushes_only(
     db, admin_user, default_factory
 ):

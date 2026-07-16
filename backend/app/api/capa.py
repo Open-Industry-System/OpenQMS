@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import check_factory_access, check_product_line_access, is_factory_visible, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.core.tenant import tenant_schema
 from app.database import get_db
@@ -32,10 +32,13 @@ from app.schemas.capa import (
     CAPACreate,
     CAPAListResponse,
     CAPAResponse,
+    CAPATriggerScarRequest,
     CAPAUpdate,
     D4RecommendationResponse,
     D5RecommendationResponse,
+    LinkedScarSchema,
 )
+from app.schemas import scar as scar_schemas
 from app.schemas.capa_d3 import (
     D3AdviceItem,
     D3AdviceRequest,
@@ -68,7 +71,9 @@ from app.services import capa_d3_containment_service
 from app.services import capa_d7_action_service
 from app.services import capa_doc_gate_service
 from app.services import capa_ppt_review_service, capa_ppt_service, capa_service
+from app.services import capa_scar_service
 from app.services import capa_verification_service
+from app.models.supplier import SupplierSCAR
 from app.services.capa_d7_action_service import ConflictError
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
@@ -199,6 +204,55 @@ async def capa_capabilities(
     }
 
 
+async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) -> CAPAResponse:
+    """Build CAPAResponse with scar_ref_id / linked_scar / d3_affected_lots projections."""
+    resp = CAPAResponse.model_validate(capa)
+    linked = None
+    if capa.scar_ref_id is not None:
+        scar = await db.get(SupplierSCAR, capa.scar_ref_id)
+        if scar is not None:
+            linked = LinkedScarSchema(
+                scar_id=scar.scar_id,
+                scar_no=scar.scar_no,
+                status=scar.status,
+                supplier_id=scar.supplier_id,
+            )
+    lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id)
+    return resp.model_copy(
+        update={
+            "scar_ref_id": capa.scar_ref_id,
+            "linked_scar": linked,
+            "d3_affected_lots": lots,
+        }
+    )
+
+
+def _scar_to_response(s) -> scar_schemas.SCARResponse:
+    """Map SupplierSCAR (with optional supplier relationship) to SCARResponse."""
+    return scar_schemas.SCARResponse(
+        scar_id=s.scar_id,
+        scar_no=s.scar_no,
+        supplier_id=s.supplier_id,
+        supplier_name=s.supplier.name if getattr(s, "supplier", None) else None,
+        supplier_no=s.supplier.supplier_no if getattr(s, "supplier", None) else None,
+        source_type=s.source_type,
+        source_id=s.source_id,
+        description=s.description,
+        product_line_code=s.product_line_code,
+        requested_action=s.requested_action,
+        supplier_response=s.supplier_response,
+        status=s.status,
+        capa_ref_id=s.capa_ref_id,
+        resolution_summary=s.resolution_summary,
+        issued_by=s.issued_by,
+        issued_date=s.issued_date,
+        due_date=s.due_date,
+        closed_date=s.closed_date,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
+    )
+
+
 @router.get("/{report_id}", response_model=CAPAResponse)
 async def get_capa(
     report_id: uuid.UUID,
@@ -209,10 +263,39 @@ async def get_capa(
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
-    return CAPAResponse.model_validate(capa)
+    check_product_line_access(capa.product_line_code, scope)
+    return await _capa_response_with_projections(db, capa)
+
+
+@router.post("/{report_id}/trigger-scar", response_model=scar_schemas.SCARResponse)
+async def trigger_scar(
+    report_id: uuid.UUID,
+    body: CAPATriggerScarRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    try:
+        scar = await capa_scar_service.trigger_scar_from_capa(
+            db,
+            report_id,
+            supplier_id=body.supplier_id,
+            user_id=scope.user.user_id,
+            scope=scope,
+            description=body.description,
+            requested_action=body.requested_action,
+            due_date=body.due_date,
+            affected_batches=body.affected_batches,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _scar_to_response(scar)
 
 
 @router.put("/{report_id}", response_model=CAPAResponse)
@@ -226,15 +309,30 @@ async def update_capa(
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     update_data = req.model_dump(exclude_unset=True)
+    # Always lock + refresh before mutating: a concurrent PL move or link can
+    # change the row's scope/invariants between the pre-check above and commit.
+    await db.execute(
+        select(CAPAEightD)
+        .where(CAPAEightD.report_id == report_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+    # Target PL must be within caller's scope too (locked state)
+    new_pl = update_data.get("product_line_code")
+    if new_pl is not None and new_pl != capa.product_line_code:
+        check_product_line_access(new_pl, scope)
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return CAPAResponse.model_validate(capa)
+    return await _capa_response_with_projections(db, capa)
 
 
 async def require_advance_permission(
@@ -295,7 +393,10 @@ async def advance_capa(
     warning = None
     if from_status == EightDState.D4_ROOT_CAUSE.value and (capa.d4_retry_count or 0) >= D4_RETRY_THRESHOLD:
         warning = "建议升级处理（D4 验证已回退 {} 次）".format(capa.d4_retry_count)
-    return CAPAAdvanceResponse(capa=CAPAResponse.model_validate(capa), warning=warning)
+    return CAPAAdvanceResponse(
+        capa=await _capa_response_with_projections(db, capa),
+        warning=warning,
+    )
 
 
 @router.post("/{report_id}/link-fmea", response_model=CAPAResponse)
@@ -321,7 +422,7 @@ async def link_fmea(
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
-    return CAPAResponse.model_validate(capa)
+    return await _capa_response_with_projections(db, capa)
 
 
 @router.get("/{report_id}/related-fmea")

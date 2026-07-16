@@ -13,7 +13,7 @@
 | 01.2 12 源推荐 | true | ⚠️ 大部分已实现 | 12 阶段编排器 + 全源接入已就绪（Spec B 已交付）；但 LLM 未配置时静默放行（pc=None 返回 attempted=0，非 BLOCKED）、stage_runs 未结构化持久化（RecommendationCache 仅 suggestions JSONB）、前端面板/AP-S-O-D 待核 |
 | 01.3 D4 验证+D7+审批壳 | true | ✅ 状态机切片已交付 | 状态机细化切片已交付（D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING + 驳回 + node-action.status=pending + edge 权限 + 冻结守卫）；method 枚举/回退计数器/FMEA 反查仍待后续切片 |
 | 01.4 8D↔FMEA 双向 | false | ✅ 已实现 | 三源反查（header/D4 source_ref/D7 confirmed|auto_filled，含 Prevention）+ factory/effective 过滤 + FMEA 可见性 404 + FMEA_LINKAGE_CREATED + D4 Cause 选择器 + deep-link + indexes + E2E（US-E2E-01.4 已落地，见 git log） |
-| 01.5 8D→SCAR 触发 | false | ❌ 未实现 | SupplierSCAR.capa_ref_id 外键已就绪；8D 侧触发入口+状态同步缺失 |
+| 01.5 8D→SCAR 触发 | false | ✅ 已实现 | 1:1 CAPA↔SCAR + trigger-scar + linked_scar 投影 + SCAR_STATUS_SYNCED + FE Modal + E2E（US-E2E-01.5 已落地，见 git log） |
 | 01.6 8D→供应商风险 | false | ❌ 未实现 | SupplierRiskAlert.linked_capa_id 外键已就绪；8D 触发写入入口缺失 |
 | 01.7 D8 文档更新门禁 | true | ✅ 已实现 | 3 表 capa_docg_* + 三阶段 LLM 影响分析 + run_audit 版本 diff/关键点覆盖 + defer/confirm + `_d8_doc_gate_gate` C8/C9 + DocGatePanel + E2E（2026-07-14） |
 | 01.8 知识库沉淀 | true | ⚠️ 部分实现 | D7/D8 lessons 抽取已有（capa_lessons_learned）；非结构化 8 字段沉淀、时机非 D8 关闭后全报告 |
@@ -23,8 +23,8 @@
 **结论**：
 - **大部分已实现**：01.2（12 源编排器已就绪，但 LLM 降级/持久化有 gap）
 - **部分实现**：01.3、01.8
-- **数据模型就绪、链路缺失**：01.5（SCAR.capa_ref_id）、01.6（RiskAlert.linked_capa_id）——外键都在，只缺 8D 侧触发
-- **完全缺失**：01.9（横向扩散）；（01.1 / 01.7 已在后续切片落地，见各节状态）
+- **数据模型就绪、链路缺失**：01.6（RiskAlert.linked_capa_id）——外键在，只缺 8D 侧触发；（01.5 SCAR 链路已收口）
+- **完全缺失**：01.9（横向扩散）；（01.1 / 01.4 / 01.5 / 01.7 已在后续切片落地，见各节状态）
 
 **数据模型基础设施齐全**：ERP（库存/发货）、SCAR（capa_ref_id）、供应商风险（linked_capa_id）、控制计划版本、FMEA 版本、lessons 表均存在，新建子故事可复用，不需从零建表。
 
@@ -97,12 +97,12 @@
 
 | 验收标准 | 状态 | 现有实现 | gap |
 |---|---|---|---|
-| 一键发起 SCAR（携带 8D 上下文） | ❌ | `SupplierSCAR` 模型已有 `capa_ref_id` 外键（supplier.py，指向 capa_eightd）、`source_type`/`source_id` | 8D 侧无触发入口 |
-| SCAR 单号回写 8D | ❌ | capa_ref_id 已就绪（SCAR 侧指向 8D），但 8D 侧无 scar_ref_id 反向字段或读取 | 8D 侧读取 SCAR 关联缺失 |
-| SCAR 状态变更同步 8D | ❌ | 无同步机制 | 缺失 |
-| 关联审计 | ❌ | 无 | 缺失 |
+| 一键发起 SCAR（携带 8D 上下文） | ✅ | `POST /capa/{id}/trigger-scar` + `capa_scar_service.trigger_scar_from_capa`（body `supplier_id` 必填；D3+ 非 ARCHIVED；同厂同 PL；`source_type=capa` 仅专用触发；D3 lots→description/batches） | 无（US-E2E-01.5 已落地，见 git log） |
+| SCAR 单号回写 8D | ✅ | 双边指针 `capa.scar_ref_id` ↔ `scar.capa_ref_id` + partial unique + GET `linked_scar` 投影 | 无（US-E2E-01.5 已落地，见 git log） |
+| SCAR 状态变更同步 8D | ✅ | `transition_scar` 写 `SCAR_STATUS_SYNCED` 审计到 `capa_eightd`（CAPA 行不写状态；读时 join 状态） | 无（US-E2E-01.5 已落地，见 git log） |
+| 关联审计 | ✅ | `SCAR_TRIGGERED` / `SCAR_STATUS_SYNCED`（str UUIDs + operated_by/factory_id）+ E2E 断言 | 无（US-E2E-01.5 已落地，见 git log） |
 
-**01.5 gap**：数据模型已就绪（SupplierSCAR.capa_ref_id 外键）。8D 侧触发入口 + 单号回写读取 + 状态同步完全缺失。
+**01.5 gap**：已收口。1:1 CAPA↔SCAR + trigger-scar + `linked_scar`/`d3_affected_lots` + `SCAR_STATUS_SYNCED` + link-capa 硬化 + FE CAPADetail Modal + seed `8D-E2E-SCAR-001` + E2E `capa-story-scar-trigger`。spec: `docs/superpowers/specs/2026-07-15-us-e2e-01.5-scar-trigger-design.md`；plan: `docs/superpowers/plans/2026-07-16-us-e2e-01.5-scar-trigger.md`。
 
 ---
 
@@ -181,7 +181,7 @@
 | P0 | 01.3（D4 验证 + D7 + 审批壳）收尾 | method 枚举 + 回退计数器 + 状态机细化（D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING/驳回）+ node-action 加 status 字段 |
 | P1 | 01.1（D3 遏制）新建 | 业务流程最靠前，完全缺失，含 D3→D4 闸口补齐；ERP 数据模型 + capa_draft 结构可复用 |
 | P1 | 01.4（FMEA 双向）收尾 | ✅ 已落地（2026-07-15）：三源反查 + factory isolation + D4 Cause + D7 Prevention + FMEA_LINKAGE_CREATED + deep-link + E2E |
-| P1 | 01.5（SCAR 触发）新建 | capa_ref_id 外键已就绪，只缺 8D 侧触发入口（工作量小） |
+| P1 | 01.5（SCAR 触发）新建 | ✅ 已落地（2026-07-16）：1:1 指针 + trigger-scar + linked_scar + SCAR_STATUS_SYNCED + FE + E2E |
 | P1 | 01.6（供应商风险）新建 | linked_capa_id 外键已就绪，只缺 8D 侧触发写入（工作量小） |
 | P2 | 01.7（D8 文档门禁）新建 | ✅ 已落地（2026-07-14）：capa_docg_* + 三阶段分析 + run_audit + gate C8/C9 + DocGatePanel + E2E |
 | P2 | 01.8（知识沉淀）收尾 | lessons 已有，补结构化 8 字段 + 按产品检索入口 |
@@ -191,7 +191,7 @@
 ## 意外发现
 
 1. **01.2 编排器已实现但 LLM 降级有硬 gap**：Spec B 已交付 12 源全接入 + 编排器，但 `llm_fusion_layer.py:34` 在 provider 未配置时 `pc is None` 返回 `attempted=0` 静默放行（非故事要求的 BLOCKED），且 RecommendationCache 无 stage_runs 字段（编排执行过程未结构化持久化）。
-2. **01.5/01.6 数据模型已就绪**：SupplierSCAR.capa_ref_id、SupplierRiskAlert.linked_capa_id 外键都在，只缺 8D 侧触发入口——工作量比预期小。
+2. **01.5 已收口 / 01.6 数据模型仍就绪**：01.5 双边指针 + 触发/同步/审计/FE/E2E 已落地（2026-07-16）。01.6 `SupplierRiskAlert.linked_capa_id` 外键仍在，只缺 8D 侧触发写入。
 3. **01.4 反查基础已有 → 已收口**（2026-07-15）：三源反查（header/D4 source_ref/D7 confirmed|auto_filled 含 Prevention）+ factory/effective + FMEA 可见性 404 + FMEA_LINKAGE_CREATED + deep-link + E2E。
 4. **01.3 node-action 无 status 字段**：CapaD7NodeAction 只有 action=confirmed/skipped，故事要求的 pending/已执行/已验证状态不存在，需加字段 + 迁移。
 5. **01.3 状态机 D7→D8 直连**：eightd_state.py D7_PREVENTION→D8_CLOSURE 无中间状态、无驳回回退，故事要求的 D7_COMPLETED/D8_GATE_PENDING/D8_APPROVAL_PENDING 全部缺失。

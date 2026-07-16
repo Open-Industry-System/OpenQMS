@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-15
-**当前分支**: `feature/us-e2e-01-spec-a`
-**最近提交**: 01.7 终审第24轮 residual-complete waiver（同批次全豁免 + 版本绑定 C8/preflight + 遗留 waiver 迁移失效 + 强制发布入口）；下一步 01.5
+**更新日期**: 2026-07-16
+**当前分支**: `feature/us-e2e-01-spec-a`（worktree `worktree-us-e2e-01.5-scar-trigger`）
+**最近提交**: 01.5 8D→SCAR 触发与回写已落地（migration+trigger+sync+FE+E2E seed/spec）；下一步 01.6
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
@@ -261,7 +261,7 @@
 | 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 | US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
-| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1 D3 遏制 v4；**01.7 文档门禁已落地**；**01.4 8D↔FMEA 双向已落地**） | — |
+| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1 D3 遏制 v4；**01.7 文档门禁已落地**；**01.4 8D↔FMEA 双向已落地**；**01.5 8D→SCAR 触发已落地**） | — |
 | US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
 | 01.10 PPT 输出 | ✅ 已落地（PPT generator + sub-agent 3-round review + admin review-skill management + frontend） | `feature/us-e2e-01-spec-a` |
 
@@ -283,7 +283,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
   - **Task 12 E2E seed 扩展** ✅：D3 源数据 7 表 upsert + 7 独立 CAPA + 幂等 + E2E_MODE 守卫测试（`backend/app/seed_e2e.py` / `seed_e2e_constants.py` / `tests/e2e/test_seed_e2e_d3.py`）；附 `shipment_records.factory_id` 迁移补齐 schema drift
 - [x] **01.4 8D↔FMEA 双向收尾** — 三源反查（header / D4 `source_ref` / D7 confirmed|auto_filled，含 Prevention）+ 同厂同 PL 写不变量 + factory/effective 过滤 + FMEA 可见性 404 + D4 Cause 选择器 + D7 Prevention 持久化/fingerprint + `FMEA_LINKAGE_CREATED` + deep-link/`activeRelatedNodeId` + reverse-lookup indexes + E2E `capa-story-fmea-linkage`（4/4）。spec: `docs/superpowers/specs/2026-07-14-us-e2e-01.4-fmea-linkage-design.md`；plan: `docs/superpowers/plans/2026-07-15-us-e2e-01.4-fmea-linkage.md`
   - **Deploy note 01.4**: D7 `recommendation_hash` now includes prevention fields; in-flight D7 CAPAs with pre-change hashes may need re-confirm/skip before D7 completion gate passes.
-- [ ] **01.5 8D→SCAR 触发新建** — `SupplierSCAR.capa_ref_id` 外键已就绪，补 8D 侧触发入口 + 单号回写读取 + 状态同步 + 审计
+- [x] **01.5 8D→SCAR 触发新建** — 1:1 CAPA↔SCAR（`capa.scar_ref_id` + `scar.capa_ref_id` 双边 partial unique）+ `POST /capa/{id}/trigger-scar`（body `supplier_id` 必填，D3+ 非 ARCHIVED，同厂同 PL，FOR UPDATE + IntegrityError→400）+ GET `linked_scar`/`d3_affected_lots` 投影 + `SCAR_STATUS_SYNCED` 审计（CAPA 行不写状态）+ link-capa 硬化（SCAR CREATE + CAPA EDIT）+ FE CAPADetail 触发 Modal + seed `8D-E2E-SCAR-001` + E2E `capa-story-scar-trigger`。spec: `docs/superpowers/specs/2026-07-15-us-e2e-01.5-scar-trigger-design.md`；plan: `docs/superpowers/plans/2026-07-16-us-e2e-01.5-scar-trigger.md`（worktree commits `98f7e539`..`c5f4e970`）
 - [ ] **01.6 8D→供应商风险新建** — `SupplierRiskAlert.linked_capa_id` 外键已就绪，补 8D 侧触发写入（severity/disposition/repeat）+ 评级变化回显 + 审计
 
 ### P2 — 新建/收尾
