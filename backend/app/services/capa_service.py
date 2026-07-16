@@ -206,6 +206,15 @@ async def update_capa(
     update_data: dict,
     user_id: uuid.UUID,
 ) -> CAPAEightD:
+    # US-E2E-01.5: lock + refresh the row so the linked-SCAR invariant and PL
+    # checks below observe committed concurrent links/moves. Safety must not
+    # depend on a single API caller having locked first.
+    await db.execute(
+        select(CAPAEightD)
+        .where(CAPAEightD.report_id == capa.report_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         from app.models.product_line import ProductLine
         new_pl = update_data["product_line_code"]

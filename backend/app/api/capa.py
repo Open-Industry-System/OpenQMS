@@ -313,23 +313,17 @@ async def update_capa(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_product_line_access(capa.product_line_code, scope)
     update_data = req.model_dump(exclude_unset=True)
-    # Changing PL must also be within caller's PL scope (when allowed by service)
-    new_pl = update_data.get("product_line_code")
-    pl_change = new_pl is not None and new_pl != capa.product_line_code
-    if pl_change:
-        check_product_line_access(new_pl, scope)
-    # P1 race: lock the CAPA row + refresh before checking linked-SCAR invariant,
-    # so a concurrent link_capa commit is observed before a PL move lands.
-    if pl_change:
-        await db.execute(
-            select(CAPAEightD)
-            .where(CAPAEightD.report_id == report_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        if not is_factory_visible(capa.factory_id, scope):
-            raise HTTPException(status_code=404, detail="8D report not found")
-        check_product_line_access(capa.product_line_code, scope)
+    # Always lock + refresh before mutating: a concurrent PL move or link can
+    # change the row's scope/invariants between the pre-check above and commit.
+    await db.execute(
+        select(CAPAEightD)
+        .where(CAPAEightD.report_id == report_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:

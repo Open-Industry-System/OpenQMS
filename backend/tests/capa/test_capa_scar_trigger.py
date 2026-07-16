@@ -997,3 +997,176 @@ async def test_lot_strip_preserves_prose_mentioning_batch(
     # Single emitted lot line; prose line kept
     assert desc.count("受影响批次:") == 1
     assert "受影响批次分析结论" in desc
+
+
+# ─── P2: true two-session concurrency ─────────────────────────────────────────
+import asyncio
+
+
+async def _committed_scar_trigger_fixtures(sessionmaker):
+    """Create factory, PL, role, user, supplier, capa in a real-commit session."""
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition, RolePermission
+    from app.models.user import User
+    from app.core.permissions import Module, PermissionLevel
+
+    factory_id = uuid.uuid4()
+    pl_code = f"PL-ST-{factory_id.hex[:8]}"
+    async with sessionmaker() as s:
+        factory = Factory(id=factory_id, code=f"ST-{factory_id.hex[:8]}", name="ST Factory")
+        s.add(factory)
+        s.add(ProductLine(code=pl_code, name=pl_code, factory_id=factory.id))
+        role = RoleDefinition(
+            role_key=f"admin_st_{factory_id.hex[:8]}",
+            name_zh="ST Admin", name_en="ST Admin",
+            is_system=True, is_editable=False, bypass_row_level_security=True,
+            sort_order=1, is_active=True,
+        )
+        s.add(role)
+        await s.flush()
+        user = User(
+            user_id=uuid.uuid4(),
+            username=f"st-{factory_id.hex[:8]}",
+            password_hash="x",
+            factory_id=factory.id,
+            role_id=role.id,
+            legacy_role="admin",
+            is_active=True,
+        )
+        s.add(user)
+        await s.flush()
+        supplier = Supplier(
+            supplier_id=uuid.uuid4(),
+            supplier_no=f"SUP-ST-{factory_id.hex[:8]}",
+            factory_id=factory.id,
+            name="ST Supplier",
+            short_name="STS",
+            created_by=user.user_id,
+        )
+        s.add(supplier)
+        capa = CAPAEightD(
+            report_id=uuid.uuid4(),
+            document_no=f"8D-ST-{factory_id.hex[:8]}",
+            title="ST capa",
+            product_line_code=pl_code,
+            factory_id=factory.id,
+            created_by=user.user_id,
+            status="D3_INTERIM",
+            severity="serious",
+            d2_description="来料外观不良",
+        )
+        s.add(capa)
+        await s.commit()
+        return {
+            "factory_id": factory.id,
+            "pl_code": pl_code,
+            "user_id": user.user_id,
+            "supplier_id": supplier.supplier_id,
+            "capa_id": capa.report_id,
+        }
+
+
+@pytest.mark.asyncio
+async def test_concurrent_trigger_one_succeeds_one_400(sessionmaker):
+    """Two concurrent triggers on the same CAPA: exactly one succeeds, the other gets 400."""
+    from app.services import capa_scar_service
+    from app.core.deps import RequestScope
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+
+    fx = await _committed_scar_trigger_fixtures(sessionmaker)
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=fx["factory_id"]),
+        effective_factory_id=fx["factory_id"],
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=type("U", (), {"user_id": fx["user_id"], "role_definition": type("R", (), {"bypass_row_level_security": True})()})(),
+    )
+
+    results: list = []
+
+    async def worker():
+        async with sessionmaker() as s:
+            try:
+                await capa_scar_service.trigger_scar_from_capa(
+                    s,
+                    fx["capa_id"],
+                    supplier_id=fx["supplier_id"],
+                    user_id=fx["user_id"],
+                    scope=scope,
+                )
+                results.append("ok")
+            except ValueError:
+                await s.rollback()
+                results.append("conflict")
+            except Exception:
+                await s.rollback()
+                results.append("error")
+
+    await asyncio.gather(worker(), worker())
+
+    assert sorted(results) == ["conflict", "ok"], f"expected one ok + one conflict, got {results}"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_link_capa_one_succeeds_one_400(sessionmaker):
+    """Two concurrent link_capa binds on the same SCAR: exactly one 200, the other 400 (not 500)."""
+    from app.services import scar_service
+    from app.core.deps import RequestScope
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+
+    fx = await _committed_scar_trigger_fixtures(sessionmaker)
+    # First, create a SCAR manually via a committed session, plus a second target CAPA
+    async with sessionmaker() as s:
+        scar = SupplierSCAR(
+            scar_id=uuid.uuid4(),
+            scar_no=f"SCAR-LK-{uuid.uuid4().hex[:6]}",
+            supplier_id=fx["supplier_id"],
+            factory_id=fx["factory_id"],
+            source_type="manual",
+            description="link race scar",
+            product_line_code=fx["pl_code"],
+            status="open",
+            issued_by=fx["user_id"],
+        )
+        s.add(scar)
+        capa_b = CAPAEightD(
+            report_id=uuid.uuid4(),
+            document_no=f"8D-LKB-{uuid.uuid4().hex[:6]}",
+            title="link race capa b",
+            product_line_code=fx["pl_code"],
+            factory_id=fx["factory_id"],
+            created_by=fx["user_id"],
+            status="D3_INTERIM",
+            severity="serious",
+        )
+        s.add(capa_b)
+        await s.commit()
+        scar_id = scar.scar_id
+        capa_b_id = capa_b.report_id
+
+    scope = RequestScope(
+        factory_scope=FactoryScope(accessible_factory_ids=None, default_factory_id=fx["factory_id"]),
+        effective_factory_id=fx["factory_id"],
+        pl_scope=ProductLineScope(mode="ALL", codes=None),
+        user=type("U", (), {"user_id": fx["user_id"], "role_definition": type("R", (), {"bypass_row_level_security": True})()})(),
+    )
+
+    results: list = []
+
+    async def worker(target_capa_id):
+        async with sessionmaker() as s:
+            scar_obj = await s.get(SupplierSCAR, scar_id)
+            try:
+                await scar_service.link_capa(s, scar_obj, target_capa_id, fx["user_id"], scope)
+                results.append("ok")
+            except ValueError:
+                await s.rollback()
+                results.append("conflict")
+            except Exception as e:
+                await s.rollback()
+                results.append(f"error:{type(e).__name__}")
+
+    # Both try to bind the same SCAR to two different CAPAs — only one can win the 1:1
+    await asyncio.gather(worker(fx["capa_id"]), worker(capa_b_id))
+    assert "ok" in results and results.count("ok") == 1, f"expected exactly one ok, got {results}"
+    assert all(r != "ok" and not r.startswith("error") for r in results if r != "ok"), f"non-conflict error leaked: {results}"

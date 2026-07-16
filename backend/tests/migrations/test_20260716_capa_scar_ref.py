@@ -137,3 +137,94 @@ def test_upgrade_aborts_on_duplicate_capa_ref_id(mig_db_url):
 
     with pytest.raises(RuntimeError, match="duplicate capa_ref_id"):
         command.upgrade(_cfg(mig_db_url), REV)
+
+
+def test_fk_scar_ref_id_on_delete_set_null(mig_db_url):
+    """capa_eightd.scar_ref_id FK is ON DELETE SET NULL."""
+    command.upgrade(_cfg(mig_db_url), REV)
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        # confdeltype lives in pg_catalog (not information_schema)
+        fks = conn.execute(sa.text(
+            "SELECT confdeltype FROM pg_constraint "
+            "WHERE conname='fk_capa_eightd_scar_ref_id'"
+        )).scalar()
+        # 'n' = SET NULL in pg_constraint
+        assert fks == "n", f"expected SET NULL (n), got {fks}"
+    engine.dispose()
+
+
+def test_partial_unique_rejects_duplicate_scar_ref_id(mig_db_url):
+    """uq_capa_eightd_scar_ref_id partial unique rejects a 2nd non-null scar_ref_id."""
+    command.upgrade(_cfg(mig_db_url), REV)
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        with conn.begin():
+            capa_id, scar_id, fid1, fid2, uid = _setup_legacy_data(conn)
+            # Explicitly bind the first capa to scar_id (backfill may or may not have run
+            # depending on setup order; force it so the duplicate is unambiguous)
+            conn.execute(sa.text(f"UPDATE capa_eightd SET scar_ref_id='{scar_id}' WHERE report_id='{capa_id}'"))
+    engine.dispose()
+
+    import pytest
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with pytest.raises(Exception):
+        with engine.connect() as conn:
+            with conn.begin():
+                capa2_id = str(uuid.uuid4())
+                conn.execute(sa.text(
+                    "INSERT INTO capa_eightd (report_id, document_no, title, product_line_code, factory_id, status, severity, created_by, d1_team, scar_ref_id) "
+                    f"VALUES ('{capa2_id}', 'C2', 'C2', 'PL1', '{fid1}', 'D3_INTERIM', 'serious', '{uid}', '[]', '{scar_id}')"
+                ))
+    engine.dispose()
+
+
+def test_partial_unique_allows_multiple_nulls(mig_db_url):
+    """Partial unique allows multiple rows with scar_ref_id=NULL (the WHERE clause works)."""
+    command.upgrade(_cfg(mig_db_url), REV)
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        with conn.begin():
+            capa_id, scar_id, fid1, fid2, uid = _setup_legacy_data(conn)
+            # Insert two capas with NULL scar_ref_id — should NOT violate the partial unique
+            for i in range(2):
+                cid = str(uuid.uuid4())
+                conn.execute(sa.text(
+                    "INSERT INTO capa_eightd (report_id, document_no, title, product_line_code, factory_id, status, severity, created_by, d1_team) "
+                    f"VALUES ('{cid}', 'CN{i}', 'CN{i}', 'PL1', '{fid1}', 'D3_INTERIM', 'serious', '{uid}', '[]')"
+                ))
+    engine.dispose()
+
+
+def test_abort_leaves_state_unchanged(mig_db_url):
+    """A migration abort rolls back the revision: column/index absent, retryable."""
+    command.upgrade(_cfg(mig_db_url), PARENT)
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        with conn.begin():
+            capa_id, scar_id, fid1, fid2, uid = _setup_legacy_data(conn)
+            conn.execute(sa.text(f"UPDATE supplier_scars SET factory_id='{fid2}' WHERE scar_id='{scar_id}'"))
+    engine.dispose()
+
+    import pytest
+    with pytest.raises(RuntimeError):
+        command.upgrade(_cfg(mig_db_url), REV)
+
+    # After abort, the revision was NOT applied: scar_ref_id column absent
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        col = conn.execute(sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='capa_eightd' AND column_name='scar_ref_id'"
+        )).scalar()
+        assert col is None, "scar_ref_id column should be absent after abort"
+        assert _indexes(conn) == set()
+    engine.dispose()
+
+    # Retryable: fix the dirty data and upgrade succeeds
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        with conn.begin():
+            conn.execute(sa.text(f"UPDATE supplier_scars SET factory_id='{fid1}' WHERE scar_id='{scar_id}'"))
+    engine.dispose()
+    command.upgrade(_cfg(mig_db_url), REV)
