@@ -19,6 +19,7 @@ class SupplierRiskInput:
     scars: list[Any] = field(default_factory=list)
     evaluations: list[Any] = field(default_factory=list)
     certifications: list[Any] = field(default_factory=list)
+    capa_incidents: list[Any] = field(default_factory=list)  # 01.6
 
 
 @dataclass
@@ -357,6 +358,57 @@ def rule_r10_safety_defect(data: SupplierRiskInput, thresholds: dict) -> RuleRes
                       detail="未检测到安全缺陷", category="compliance", critical=False)
 
 
+# ── R11  CAPA 来料不良影响（severity + repeat 计分；disposition 仅追溯）──
+
+_SEVERITY_RANK = {"致命": 4, "严重": 3, "一般": 2, "轻微": 1, "general": 2, "critical": 4, "major": 3, "minor": 1}
+
+
+def rule_r11_capa_issue(data: SupplierRiskInput, thresholds: dict) -> RuleResult:
+    base_score: int = thresholds.get("base_score", 10)
+    severe_bonus: int = thresholds.get("severe_bonus", 10)
+    repeat_bonus: int = thresholds.get("repeat_bonus", 10)
+
+    incidents = data.capa_incidents
+    if not incidents:
+        return RuleResult(rule_id="R11", triggered=False, score=0,
+                          detail="无 CAPA 来料不良输入", category="quality", critical=False)
+
+    # 取最高严重度 incident（致命>严重>一般>轻微；同级 created_at DESC, input_id ASC 由调用方排序保证）
+    def _rank(i):
+        return _SEVERITY_RANK.get(getattr(i, "severity", ""), 2)
+    top = max(incidents, key=_rank)
+    rank = _rank(top)
+
+    repeat_confirmed = getattr(top, "repeat_confirmed", None)
+    repeat_suggested = getattr(top, "repeat_suggested", None)
+    if repeat_confirmed is not None:
+        repeat = repeat_confirmed
+        provisional = False
+    elif repeat_suggested is not None:
+        repeat = repeat_suggested
+        provisional = True
+    else:
+        repeat = False
+        provisional = False
+
+    score = float(base_score)
+    critical = rank >= 3  # 致命/严重
+    if critical:
+        score += severe_bonus
+    if repeat:
+        score += repeat_bonus
+    score = min(score, 100.0)
+
+    disp = getattr(top, "disposition", "") or ""
+    matched = getattr(top, "matched_capa_nos", []) or []
+    detail_parts = [f"严重度: {top.severity}", f"处置: {disp}"]
+    if matched:
+        detail_parts.append(f"关联历史: {', '.join(matched)}")
+    detail_parts.append(f"重复: {'是' if repeat else '否'}" + ("（待确认，provisional）" if provisional else ""))
+    return RuleResult(rule_id="R11", triggered=True, score=round(score, 2),
+                      detail="; ".join(detail_parts), category="quality", critical=critical)
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 
@@ -371,6 +423,7 @@ RULE_REGISTRY: list[tuple[str, object, str, int, bool]] = [
     ("R08", rule_r08_cert_expiry, "compliance", 8, False),
     ("R09", rule_r09_score_decline, "compliance", 8, False),
     ("R10", rule_r10_safety_defect, "compliance", 15, True),
+    ("R11", rule_r11_capa_issue, "quality", 1, False),
 ]
 
 _REGISTRY_MAP: dict[str, tuple[object, str, int, bool]] = {
