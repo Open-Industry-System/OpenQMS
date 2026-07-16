@@ -158,7 +158,8 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             })
             continue
 
-        waived_keys: set[tuple[str, str, str]] = set()
+        waived_keys: dict[tuple[str, str, str], tuple[str, str]] = {}
+        invalid_waiver_reported = False
         decision = latest_decision_by_analysis.get(analysis.analysis_id)
         if decision is not None and (
             decision.waiver_reason is not None or decision.waiver_items is not None
@@ -179,7 +180,8 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                     "decision_id": str(decision.decision_id),
                     "reason": str(exc),
                 })
-                waived_keys = set()
+                waived_keys = {}
+                invalid_waiver_reported = True
         if not analysis.affected_docs:
             continue
         for doc in analysis.affected_docs:
@@ -203,8 +205,30 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                 if not tk:
                     continue
                 if tk not in latest_ids:
-                    if (str(cp_id), tk, field) in waived_keys:
-                        continue
+                    bound = waived_keys.get((str(cp_id), tk, field))
+                    if bound is not None:
+                        bound_version_id, bound_sha256 = bound
+                        if (
+                            str(latest_ver.version_id) == bound_version_id
+                            and latest_ver.sha256_hash == bound_sha256
+                        ):
+                            continue
+                        if not invalid_waiver_reported:
+                            breaks.append({
+                                "kind": "invalid_waiver",
+                                "tenant_schema": tenant_schema,
+                                "capa_id": str(capa.report_id),
+                                "capa_document_no": capa.document_no,
+                                "capa_status": capa.status,
+                                "analysis_id": str(analysis.analysis_id),
+                                "decision_id": str(decision.decision_id),
+                                "reason": (
+                                    "waiver version drift between validation and lineage scan: "
+                                    f"bound={bound_version_id}/{bound_sha256} "
+                                    f"latest={latest_ver.version_id}/{latest_ver.sha256_hash}"
+                                ),
+                            })
+                            invalid_waiver_reported = True
                     breaks.append({
                         "kind": "blocked_modify",
                         "tenant_schema": tenant_schema,

@@ -249,7 +249,7 @@ async def validate_persisted_waiver(
     decision: CapaDocgDecision,
     *,
     lock_version_parents: bool = True,
-) -> set[tuple[str, str, str]]:
+) -> dict[tuple[str, str, str], tuple[str, str]]:
     """Strictly re-derive a waiver; caller guarantees ``decision`` is latest.
 
     Runtime callers hold the analysis row lock and retain parent locking. Read-only
@@ -307,6 +307,8 @@ async def validate_persisted_waiver(
     ):
         raise ValueError("waiver audit 不完整：version_snapshot 不一致")
     return {
-        (item["doc_id"], item["target_key"], item["field"])
+        (item["doc_id"], item["target_key"], item["field"]): (
+            item["latest_version_id"], item["latest_sha256"]
+        )
         for item in derived_items
     }

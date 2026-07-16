@@ -255,6 +255,57 @@ async def test_preflight_invalid_waiver_does_not_suppress_blocked_modify(
 
 
 @pytest.mark.asyncio
+async def test_preflight_detects_version_drift_between_waiver_validation_and_scan(
+    db, capa_with_cp_blocked_modify, monkeypatch,
+):
+    """A waiver validated on V2 cannot suppress a missing key observed on V3."""
+    from types import SimpleNamespace
+    from app.services import (
+        capa_doc_gate_preflight,
+        capa_doc_gate_service,
+        capa_doc_gate_waiver,
+    )
+    from app.services.version_service import get_latest_cp_version
+
+    capa, user, cp, target_key, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": target_key, "field": field}],
+        user.user_id,
+    )
+    audited_v2 = await get_latest_cp_version(db, cp.cp_id)
+    drifted_v3 = SimpleNamespace(
+        version_id=uuid.uuid4(),
+        sha256_hash="3" * 64,
+        items_snapshot=[{"item_id": "newer-item", "control_method": "m3"}],
+    )
+
+    async def _validator_reads_v2(_db, _cp_id):
+        return audited_v2
+
+    async def _lineage_scan_reads_v3(_db, _cp_id):
+        return drifted_v3
+
+    monkeypatch.setattr(
+        capa_doc_gate_waiver, "get_latest_cp_version", _validator_reads_v2
+    )
+    monkeypatch.setattr(
+        capa_doc_gate_preflight, "get_latest_cp_version", _lineage_scan_reads_v3
+    )
+
+    breaks = await scan_tenant_breaks(db, "public")
+    assert sum(b["kind"] == "invalid_waiver" for b in breaks) == 1
+    assert any(
+        b["kind"] == "blocked_modify"
+        and b["blocked_modify_target_key"] == target_key
+        and b["latest_version_id"] == str(drifted_v3.version_id)
+        for b in breaks
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_cp_version_production_path_ok(db, capa_d8_gate):
     """Regression: create_cp_version must succeed after trigger fix (PG jsonb hash)."""
     from app.services.version_service import create_cp_version, verify_cp_version
