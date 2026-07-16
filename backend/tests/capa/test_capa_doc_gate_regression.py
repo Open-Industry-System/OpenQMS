@@ -592,6 +592,97 @@ async def test_waiver_passed_decision_unblocks_gate(db, capa_with_cp_blocked_mod
 
 
 @pytest.mark.asyncio
+async def test_gate_rejects_malformed_persisted_waiver_item(
+    db, capa_with_cp_blocked_modify,
+):
+    """Persisted malformed waiver items must fail closed, never be skipped."""
+    from app.services import capa_service
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    decision = (await db.execute(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == select(CapaDocgAnalysis.analysis_id)
+               .where(CapaDocgAnalysis.capa_id == capa.report_id)
+               .scalar_subquery())
+        .order_by(CapaDocgDecision.revision.desc())
+    )).scalars().first()
+    decision.waiver_items = [{}]
+    await db.flush()
+
+    with pytest.raises(ValueError, match="waiver_items 非法"):
+        await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
+async def test_gate_rejects_persisted_waiver_item_from_other_audit_run(
+    db, capa_with_cp_blocked_modify,
+):
+    """Every persisted waiver item must bind to the decision's exact audit run."""
+    from app.services import capa_service
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    decision = (await db.execute(
+        select(CapaDocgDecision)
+        .order_by(CapaDocgDecision.revision.desc())
+    )).scalars().first()
+    tampered = dict(decision.waiver_items[0])
+    tampered["audit_run_id"] = str(uuid.uuid4())
+    decision.waiver_items = [tampered]
+    await db.flush()
+
+    with pytest.raises(ValueError, match="waiver_items 非法"):
+        await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
+async def test_gate_rejects_persisted_waiver_with_missing_audit_batch(
+    db, capa_with_cp_blocked_modify,
+):
+    """A passed waiver cannot survive deletion of its supporting audit batch."""
+    from app.models.capa_doc_gate import CapaDocgAudit
+    from app.services import capa_service
+
+    capa, user, cp, tk, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": tk, "field": field}],
+        user.user_id,
+    )
+    decision = (await db.execute(
+        select(CapaDocgDecision)
+        .order_by(CapaDocgDecision.revision.desc())
+    )).scalars().first()
+    audits = (await db.execute(
+        select(CapaDocgAudit).where(
+            CapaDocgAudit.analysis_id == decision.analysis_id,
+            CapaDocgAudit.audit_run_id == decision.audit_run_id,
+        )
+    )).scalars().all()
+    for audit in audits:
+        await db.delete(audit)
+    await db.flush()
+
+    with pytest.raises(ValueError, match="waiver audit 不完整"):
+        await capa_service._d8_doc_gate_gate(db, capa)
+
+
+@pytest.mark.asyncio
 async def test_preflight_exact_waiver_suppresses_only_matched_key(
     db, capa_with_cp_blocked_modify,
 ):

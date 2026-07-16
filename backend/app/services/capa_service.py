@@ -400,6 +400,9 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
         raise ValueError("请先运行文档审核")
     if decision.decision != "passed":
         raise ValueError(f"文档门禁未通过：{decision.decision}")
+    if decision.waiver_reason is not None or decision.waiver_items is not None:
+        from app.services.capa_doc_gate_waiver import validate_persisted_waiver
+        await validate_persisted_waiver(db, analysis, decision)
     # C8 version freshness — re-check each snapshot against current latest.
     for snap in (decision.version_snapshot or []):
         doc_type = snap.get("doc_type")
@@ -414,34 +417,6 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
             or latest.sha256_hash != snap.get("sha256")
         ):
             raise ValueError("文档已变更，请重新审核")
-    # Structured waiver: reconfirm each waived target_key is still absent AND
-    # the bound version_id/sha256 still matches latest (belt + suspenders with C8).
-    for item in (decision.waiver_items or []):
-        if not isinstance(item, dict) or item.get("doc_type") != "control_plan":
-            continue
-        try:
-            cp_id = uuid.UUID(str(item["doc_id"]))
-        except (ValueError, TypeError, KeyError):
-            raise ValueError("waiver_items 非法，请重新豁免")
-        tk = str(item.get("target_key") or "").strip()
-        if not tk:
-            raise ValueError("waiver_items 缺 target_key，请重新豁免")
-        bound_vid = str(item.get("latest_version_id") or "").strip()
-        bound_sha = str(item.get("latest_sha256") or "").strip()
-        if not bound_vid or not bound_sha:
-            raise ValueError("waiver_items 缺版本绑定，请重新豁免")
-        latest = await get_latest_cp_version(db, cp_id)
-        if latest is None:
-            raise ValueError("文档已变更，请重新审核")
-        if str(latest.version_id) != bound_vid or latest.sha256_hash != bound_sha:
-            raise ValueError(
-                f"已豁免文档版本已变更（target_key={tk}），请重新审核"
-            )
-        from app.services.capa_doc_gate_preflight import _item_ids_from_snapshot
-        if tk in _item_ids_from_snapshot(latest.items_snapshot):
-            raise ValueError(
-                f"已豁免的 target_key={tk} 现已出现在 latest CP，请重新审核"
-            )
 
 
 async def advance_capa(

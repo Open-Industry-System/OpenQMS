@@ -8,7 +8,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit
+from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
 from app.services.version_service import (
     get_latest_cp_version,
     get_latest_fmea_version,
@@ -227,3 +227,86 @@ async def prepare_structured_waiver(
             "audit_run_id": str(audit_run_id),
         })
     return enriched, c8_snapshot
+
+
+def _exact_json_rows(value, *, label: str) -> Counter:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{label} 非法")
+    if any(not isinstance(row, dict) for row in value):
+        raise ValueError(f"{label} 非法")
+    encoded = [json.dumps(row, sort_keys=True) for row in value]
+    if len(set(encoded)) != len(encoded):
+        raise ValueError(f"{label} 非法：存在重复项")
+    return Counter(encoded)
+
+
+async def validate_persisted_waiver(
+    db: AsyncSession,
+    analysis: CapaDocgAnalysis,
+    decision: CapaDocgDecision,
+) -> set[tuple[str, str, str]]:
+    """Re-derive and validate a persisted structured waiver, failing closed."""
+    latest = await db.scalar(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc())
+        .limit(1)
+    )
+    if (
+        latest is None
+        or latest.decision_id != decision.decision_id
+        or decision.decision != "passed"
+    ):
+        raise ValueError("waiver_items 非法：不是最新 passed decision")
+    if not isinstance(decision.waiver_reason, str) or not decision.waiver_reason.strip():
+        raise ValueError("waiver_items 非法：waiver_reason/items 必须同时存在")
+    if not isinstance(decision.waiver_items, list) or not decision.waiver_items:
+        raise ValueError("waiver_items 非法：waiver_reason/items 必须同时存在")
+    if decision.audit_run_id is None:
+        raise ValueError("waiver_items 非法：缺 audit_run_id")
+
+    decision_run_id = str(decision.audit_run_id)
+    required = {
+        "doc_type", "doc_id", "target_key", "field",
+        "latest_version_id", "latest_sha256", "audit_run_id",
+    }
+    for item in decision.waiver_items:
+        if not isinstance(item, dict) or set(item) != required:
+            raise ValueError("waiver_items 非法：字段不完整或含额外字段")
+        if item.get("doc_type") != "control_plan":
+            raise ValueError("waiver_items 非法：doc_type")
+        try:
+            uuid.UUID(str(item.get("doc_id")))
+            uuid.UUID(str(item.get("latest_version_id")))
+            item_run_id = str(uuid.UUID(str(item.get("audit_run_id"))))
+        except (TypeError, ValueError, AttributeError):
+            raise ValueError("waiver_items 非法：UUID")
+        if item_run_id != decision_run_id:
+            raise ValueError("waiver_items 非法：audit_run_id 不匹配")
+        if not all(
+            isinstance(item.get(key), str) and item[key].strip()
+            for key in ("target_key", "field", "latest_sha256")
+        ):
+            raise ValueError("waiver_items 非法：字段为空")
+
+    persisted_items = _exact_json_rows(decision.waiver_items, label="waiver_items")
+    try:
+        derived_items, derived_snapshot = await prepare_structured_waiver(
+            db, analysis, decision.audit_run_id, decision.waiver_items
+        )
+    except ValueError as exc:
+        raise ValueError(f"waiver audit 不完整：{exc}") from exc
+
+    if persisted_items != _exact_json_rows(derived_items, label="waiver_items"):
+        raise ValueError("waiver_items 非法：与 audit/live 推导结果不一致")
+    persisted_snapshot = _exact_json_rows(
+        decision.version_snapshot, label="waiver version_snapshot"
+    )
+    if persisted_snapshot != _exact_json_rows(
+        derived_snapshot, label="waiver version_snapshot"
+    ):
+        raise ValueError("waiver audit 不完整：version_snapshot 不一致")
+    return {
+        (item["doc_id"], item["target_key"], item["field"])
+        for item in derived_items
+    }
