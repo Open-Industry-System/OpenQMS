@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.models.capa import CAPAEightD
-from app.models.capa_doc_gate import CapaDocgAnalysis
+from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
 from app.models.control_plan import ControlPlan
 from app.services.capa_doc_gate_preflight import scan_tenant_breaks
 
@@ -188,6 +188,73 @@ async def test_preflight_no_analysis_reports_potential_disconnect(db, capa_d8_ga
 
 
 @pytest.mark.asyncio
+async def test_preflight_blocks_stale_analysis_before_consuming_waiver(
+    db, capa_with_cp_blocked_modify,
+):
+    """C9 semantic-input drift must block deploy even with a valid waiver."""
+    from app.services import capa_doc_gate_service
+
+    capa, user, cp, target_key, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": target_key, "field": field}],
+        user.user_id,
+    )
+    capa.d4_root_cause = "changed after analysis"
+    await db.flush()
+
+    breaks = await scan_tenant_breaks(db, "public")
+    assert any(
+        b["kind"] == "stale_analysis" and b["capa_id"] == str(capa.report_id)
+        for b in breaks
+    )
+
+
+@pytest.mark.asyncio
+async def test_preflight_invalid_waiver_does_not_suppress_blocked_modify(
+    db, capa_with_cp_blocked_modify,
+):
+    """Persisted waiver tampering must block deploy and expose the lineage break."""
+    from app.services import capa_doc_gate_service
+
+    capa, user, cp, target_key, field = capa_with_cp_blocked_modify
+    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
+    await capa_doc_gate_service.record_gate_waiver(
+        db, capa, "accepted",
+        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
+          "target_key": target_key, "field": field}],
+        user.user_id,
+    )
+    analysis = await db.scalar(select(CapaDocgAnalysis).where(
+        CapaDocgAnalysis.capa_id == capa.report_id,
+        CapaDocgAnalysis.is_current == True,  # noqa: E712
+    ))
+    decision = await db.scalar(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc())
+        .limit(1)
+    )
+    tampered = dict(decision.waiver_items[0])
+    tampered["audit_run_id"] = str(uuid.uuid4())
+    decision.waiver_items = [tampered]
+    await db.flush()
+
+    breaks = await scan_tenant_breaks(db, "public")
+    assert any(
+        b["kind"] == "invalid_waiver" and b["capa_id"] == str(capa.report_id)
+        for b in breaks
+    )
+    assert any(
+        b["kind"] == "blocked_modify"
+        and b["blocked_modify_target_key"] == target_key
+        for b in breaks
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_cp_version_production_path_ok(db, capa_d8_gate):
     """Regression: create_cp_version must succeed after trigger fix (PG jsonb hash)."""
     from app.services.version_service import create_cp_version, verify_cp_version
@@ -353,4 +420,3 @@ async def test_verify_cp_version_accepts_legacy_compact_hash(db, capa_d8_gate):
     await db.refresh(ver)
     assert ver.sha256_hash == compact
     assert await verify_cp_version(db, ver.version_id) is True
-

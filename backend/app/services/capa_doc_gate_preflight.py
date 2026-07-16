@@ -14,8 +14,8 @@ Two scan modes (both over open CAPAs only, all active tenant schemas):
    item_ids share ZERO overlap with latest. Advisory: gate not yet blocked.
 
 Exit codes:
-  0 — no blocked_modify (potential_disconnect alone is warning unless --strict-potential)
-  1 — one or more blocked_modify (or potential when --strict-potential)
+  0 — no blocking finding (potential_disconnect alone warns unless --strict-potential)
+  1 — blocked_modify, stale_analysis, invalid_waiver (or strict potential)
 
 Deploy: run against TARGET DB (DATABASE_URL), not TEST_DATABASE_URL.
   make doc-gate-preflight
@@ -112,14 +112,11 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             CapaDocgAnalysis.capa_id.in_(capa_ids),
         )
     )).scalars().all()
-    # Latest decision per analysis — only its waiver_items (if any) can suppress
-    # exact (doc_id, target_key, field) matches AND only when the bound
-    # latest_version_id/sha256 still equals the live CP version. Stale waivers
-    # (CP re-authored after waiver) must NOT hide breaks. Historical decisions
-    # (non-latest revision) never apply.
+    # Read latest revision per analysis once. The shared waiver validator trusts
+    # the caller's latest selection; unlike runtime gate this scanner takes no
+    # analysis/parent row locks across its multi-tenant read transaction.
     analysis_ids = [a.analysis_id for a in analyses]
-    # key -> (bound_version_id, bound_sha256)
-    waived_keys: dict[tuple[str, str, str, str], tuple[str, str]] = {}
+    latest_decision_by_analysis: dict[uuid.UUID, CapaDocgDecision] = {}
     if analysis_ids:
         from sqlalchemy import func as sa_func
         latest_rev = (
@@ -139,31 +136,50 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             )
         )).scalars().all()
         for dec in latest_decs:
-            if not dec.waiver_items or not dec.waiver_reason:
-                continue
-            # Only a passed decision with items can suppress.
-            if dec.decision != "passed":
-                continue
-            for it in dec.waiver_items:
-                if not isinstance(it, dict):
-                    continue
-                if it.get("doc_type") != "control_plan":
-                    continue
-                tk = str(it.get("target_key") or "").strip()
-                field = str(it.get("field") or "").strip()
-                doc_id = str(it.get("doc_id") or "").strip()
-                bound_vid = str(it.get("latest_version_id") or "").strip()
-                bound_sha = str(it.get("latest_sha256") or "").strip()
-                if tk and field and doc_id and bound_vid and bound_sha:
-                    waived_keys[(str(dec.analysis_id), doc_id, tk, field)] = (
-                        bound_vid, bound_sha,
-                    )
+            latest_decision_by_analysis[dec.analysis_id] = dec
     analyzed_capa_ids: set[uuid.UUID] = set()
     for analysis in analyses:
         capa = capa_by_id.get(analysis.capa_id)
         if capa is None:
             continue
         analyzed_capa_ids.add(capa.report_id)
+        from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+        candidates = await _build_allowlist(db, capa)
+        current_input_hash = _compute_input_hash(capa, candidates)
+        if current_input_hash != analysis.analysis_input_hash:
+            breaks.append({
+                "kind": "stale_analysis",
+                "tenant_schema": tenant_schema,
+                "capa_id": str(capa.report_id),
+                "capa_document_no": capa.document_no,
+                "capa_status": capa.status,
+                "analysis_id": str(analysis.analysis_id),
+                "reason": "C9 analysis_input_hash mismatch",
+            })
+            continue
+
+        waived_keys: set[tuple[str, str, str]] = set()
+        decision = latest_decision_by_analysis.get(analysis.analysis_id)
+        if decision is not None and (
+            decision.waiver_reason is not None or decision.waiver_items is not None
+        ):
+            from app.services.capa_doc_gate_waiver import validate_persisted_waiver
+            try:
+                waived_keys = await validate_persisted_waiver(
+                    db, analysis, decision, lock_version_parents=False
+                )
+            except ValueError as exc:
+                breaks.append({
+                    "kind": "invalid_waiver",
+                    "tenant_schema": tenant_schema,
+                    "capa_id": str(capa.report_id),
+                    "capa_document_no": capa.document_no,
+                    "capa_status": capa.status,
+                    "analysis_id": str(analysis.analysis_id),
+                    "decision_id": str(decision.decision_id),
+                    "reason": str(exc),
+                })
+                waived_keys = set()
         if not analysis.affected_docs:
             continue
         for doc in analysis.affected_docs:
@@ -187,17 +203,8 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
                 if not tk:
                     continue
                 if tk not in latest_ids:
-                    # Exact-match + version binding: only suppress when the
-                    # waiver's bound version_id/sha still equals live latest.
-                    wkey = (str(analysis.analysis_id), str(cp_id), tk, field)
-                    bound = waived_keys.get(wkey)
-                    if bound is not None:
-                        bound_vid, bound_sha = bound
-                        if (
-                            str(latest_ver.version_id) == bound_vid
-                            and latest_ver.sha256_hash == bound_sha
-                        ):
-                            continue
+                    if (str(cp_id), tk, field) in waived_keys:
+                        continue
                     breaks.append({
                         "kind": "blocked_modify",
                         "tenant_schema": tenant_schema,
@@ -247,14 +254,19 @@ async def run_preflight(json_output: bool = False, strict_potential: bool = Fals
     async for tenant, db in run_for_each_tenant():
         all_breaks.extend(await scan_tenant_breaks(db, tenant.schema_name))
     blocked = [b for b in all_breaks if b["kind"] == "blocked_modify"]
+    stale = [b for b in all_breaks if b["kind"] == "stale_analysis"]
+    invalid_waivers = [b for b in all_breaks if b["kind"] == "invalid_waiver"]
     potential = [b for b in all_breaks if b["kind"] == "potential_disconnect"]
+    blocking = blocked + stale + invalid_waivers
 
     if json_output:
         print(json.dumps({
             "breaks": all_breaks,
             "blocked_modify_count": len(blocked),
+            "stale_analysis_count": len(stale),
+            "invalid_waiver_count": len(invalid_waivers),
             "potential_disconnect_count": len(potential),
-            "exit_blocks": bool(blocked) or (strict_potential and bool(potential)),
+            "exit_blocks": bool(blocking) or (strict_potential and bool(potential)),
         }, ensure_ascii=False, indent=2))
     else:
         if not all_breaks:
@@ -281,6 +293,23 @@ async def run_preflight(json_output: bool = False, strict_potential: bool = Fals
                     print("            " + _payload)
                     print("            Server reconfirms live absence + audit coverage; other docs stay under C8.")
                     print("        State machine forbids archiving D8_GATE_PENDING directly.")
+            if stale:
+                print(f"doc-gate preflight: {len(stale)} STALE analysis finding(s) "
+                      "(exit 1 — deploy must not proceed):")
+                for b in stale:
+                    print(f"  - [{b['tenant_schema']}] CAPA {b['capa_document_no']} "
+                          f"({b['capa_id']}, {b['capa_status']}) analysis={b['analysis_id']}")
+                    print("      C9 semantic/candidate input changed. Regenerate impact analysis,")
+                    print("      rerun audit, and recreate any manager waiver before deploy.")
+            if invalid_waivers:
+                print(f"doc-gate preflight: {len(invalid_waivers)} INVALID waiver finding(s) "
+                      "(exit 1 — deploy must not proceed):")
+                for b in invalid_waivers:
+                    print(f"  - [{b['tenant_schema']}] CAPA {b['capa_document_no']} "
+                          f"({b['capa_id']}, {b['capa_status']}) decision={b['decision_id']}")
+                    print(f"      reason: {b['reason']}")
+                    print("      Rerun the document audit and create a fresh structured waiver;")
+                    print("      the invalid waiver suppresses no blocked_modify keys.")
             if potential:
                 print(f"doc-gate CP lineage preflight: {len(potential)} POTENTIAL disconnect(s) "
                       f"(WARN only; exit 0 unless --strict-potential):")
@@ -292,7 +321,7 @@ async def run_preflight(json_output: bool = False, strict_potential: bool = Fals
                     print("      Before D8: re-author CP (item_id-preserving) so future analysis")
                     print("      freezes continuing ids, or plan only delete/add/document key_points.")
 
-    if blocked:
+    if blocking:
         return 1
     if strict_potential and potential:
         return 1

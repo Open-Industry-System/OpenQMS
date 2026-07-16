@@ -46,6 +46,8 @@ async def prepare_structured_waiver(
     analysis: CapaDocgAnalysis,
     audit_run_id: uuid.UUID,
     raw_items: list[dict],
+    *,
+    lock_version_parents: bool = True,
 ) -> tuple[list[dict], list[dict]]:
     """Validate an exact blocked audit batch and return waiver items + C8 snapshot."""
     audits = (await db.execute(
@@ -183,8 +185,9 @@ async def prepare_structured_waiver(
     # Shared serialization with production version writers. Acquire every parent
     # in deterministic order before any live latest read, then hold through the
     # caller's decision insert + commit.
-    for doc_type, doc_id in sorted(set(audit_identities)):
-        await lock_version_parent(db, doc_type, uuid.UUID(doc_id))
+    if lock_version_parents:
+        for doc_type, doc_id in sorted(set(audit_identities)):
+            await lock_version_parent(db, doc_type, uuid.UUID(doc_id))
 
     live_by_identity = {}
     c8_snapshot: list[dict] = []
@@ -244,19 +247,15 @@ async def validate_persisted_waiver(
     db: AsyncSession,
     analysis: CapaDocgAnalysis,
     decision: CapaDocgDecision,
+    *,
+    lock_version_parents: bool = True,
 ) -> set[tuple[str, str, str]]:
-    """Re-derive and validate a persisted structured waiver, failing closed."""
-    latest = await db.scalar(
-        select(CapaDocgDecision)
-        .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
-        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc())
-        .limit(1)
-    )
-    if (
-        latest is None
-        or latest.decision_id != decision.decision_id
-        or decision.decision != "passed"
-    ):
+    """Strictly re-derive a waiver; caller guarantees ``decision`` is latest.
+
+    Runtime callers hold the analysis row lock and retain parent locking. Read-only
+    scanners pass ``lock_version_parents=False`` after selecting latest revisions.
+    """
+    if decision.analysis_id != analysis.analysis_id or decision.decision != "passed":
         raise ValueError("waiver_items 非法：不是最新 passed decision")
     if not isinstance(decision.waiver_reason, str) or not decision.waiver_reason.strip():
         raise ValueError("waiver_items 非法：waiver_reason/items 必须同时存在")
@@ -292,7 +291,8 @@ async def validate_persisted_waiver(
     persisted_items = _exact_json_rows(decision.waiver_items, label="waiver_items")
     try:
         derived_items, derived_snapshot = await prepare_structured_waiver(
-            db, analysis, decision.audit_run_id, decision.waiver_items
+            db, analysis, decision.audit_run_id, decision.waiver_items,
+            lock_version_parents=lock_version_parents,
         )
     except ValueError as exc:
         raise ValueError(f"waiver audit 不完整：{exc}") from exc
