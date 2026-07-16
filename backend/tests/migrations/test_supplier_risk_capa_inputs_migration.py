@@ -8,6 +8,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine
 
 REV = "20260716_supplier_risk_capa_inputs"
+HEAD = "20260716_seed_r11_config"
 MERGE = "20260716_merge_scar_and_doc_gate"
 
 
@@ -159,10 +160,10 @@ def test_upgrade_normalizes_empty_rule_results(mig_db_url):
 
 
 def test_single_alembic_head(mig_db_url):
-    """After merge + capa_inputs, alembic reports a single head."""
+    """After merge + capa_inputs + R11 seed, alembic reports a single head."""
     from alembic.script import ScriptDirectory
 
     cfg = _cfg(mig_db_url)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == [REV], f"expected single head {REV}, got {heads}"
+    assert heads == [HEAD], f"expected single head {HEAD}, got {heads}"
