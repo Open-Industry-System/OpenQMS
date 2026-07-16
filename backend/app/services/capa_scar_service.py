@@ -72,20 +72,27 @@ async def load_d3_affected_lots(db: AsyncSession, capa_id: uuid.UUID) -> list[st
     return lots
 
 
+def _strip_lot_lines(text: str) -> str:
+    """Remove any pre-existing 受影响批次 lines so lots are owned by `lots` param."""
+    lines = [ln for ln in text.splitlines() if not ln.strip().startswith("受影响批次")]
+    return "\n".join(lines).strip()
+
+
 def build_scar_description(
     capa: CAPAEightD,
     *,
     body_description: str | None,
     lots: list[str],
 ) -> str:
-    """Build SCAR description; always append D3 lots when present.
+    """Build SCAR description; lot line is derived solely from `lots`.
 
-    Body description (UI prefill / override) is the narrative base. Affected lots
-    are still appended unless already present, so FE submit with description does
-    not drop the durable lot surface (design §4.3 / E2E acceptance).
+    Body description is the narrative base (any embedded 受影响批次 lines are
+    stripped). Empty `lots` clears the lot surface (``affected_batches: []``);
+    non-empty always appends a single lot line. Lot line is reserved inside the
+    soft length cap so truncation cannot drop it.
     """
     if body_description and body_description.strip():
-        text = body_description.strip()
+        text = _strip_lot_lines(body_description.strip())
     else:
         parts = [f"{capa.document_no} {capa.title}".strip()]
         if capa.d2_description:
@@ -95,8 +102,11 @@ def build_scar_description(
         text = "\n".join(parts)
     if lots:
         lot_line = "受影响批次: " + ", ".join(lots)
-        if "受影响批次" not in text and not all(lot in text for lot in lots):
-            text = f"{text}\n{lot_line}" if text else lot_line
+        # Reserve room for lot line (+ newline) so soft cap cannot drop it
+        budget = max(0, _DESC_MAX - len(lot_line) - (1 if text else 0))
+        text = text[:budget]
+        text = f"{text}\n{lot_line}" if text else lot_line
+        return text[:_DESC_MAX]
     return text[:_DESC_MAX]
 
 
@@ -176,8 +186,11 @@ async def trigger_scar_from_capa(
             )
         )
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
-        raise ValueError("该 8D 已关联 SCAR")
+        err = str(getattr(e, "orig", e))
+        if "uq_capa_eightd_scar_ref_id" in err or "uq_supplier_scars_capa_ref_id" in err:
+            raise ValueError("该 8D 已关联 SCAR") from e
+        raise
 
     return await scar_service.get_scar(db, scar.scar_id)

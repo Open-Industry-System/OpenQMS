@@ -416,8 +416,25 @@ async def test_trigger_body_description_still_appends_lots(
     body = resp.json()
     assert "LOT-E2E-SCAR-001" in body["description"]
     assert "受影响批次" in body["description"]
-    # Prefill that already includes the lot line is not double-appended
+    # Lot line owned by affected_batches — single append, no double line
     assert body["description"].count("受影响批次") == 1
+
+    # Embedded stale lot lines in description are replaced by affected_batches
+    capa2 = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier2 = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    resp2 = await engineer_client.post(
+        f"/api/capa/{capa2.report_id}/trigger-scar",
+        json={
+            "supplier_id": str(supplier2.supplier_id),
+            "description": f"{capa2.document_no}\n受影响批次: OLD-LOT",
+            "affected_batches": ["NEW-LOT"],
+        },
+    )
+    assert resp2.status_code == 200, resp2.text
+    desc2 = resp2.json()["description"]
+    assert "NEW-LOT" in desc2
+    assert "OLD-LOT" not in desc2
+    assert desc2.count("受影响批次") == 1
 
 
 @pytest.mark.asyncio
@@ -446,6 +463,86 @@ async def test_update_capa_keeps_linked_scar_projection(
     assert body["linked_scar"]["status"] == "open"
     assert body["d3_affected_lots"] == ["LOT-E2E-SCAR-001"]
     assert body["d3_interim"] == "updated interim after scar link"
+
+
+@pytest.mark.asyncio
+async def test_get_capa_wrong_pl_403(db, default_factory, admin_user):
+    """GET detail enforces product-line isolation (same factory, wrong PL)."""
+    await _seed_perm(db, admin_user.role_id, "capa", 3)
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id, product_line_code="DC-DC-100"
+    )
+    scope = _scope_for(
+        admin_user,
+        default_factory,
+        accessible_factory_ids=None,
+        pl_mode="EXPLICIT",
+        pl_codes=["OTHER-PL"],
+    )
+    async with _client_for(db, admin_user, scope) as ac:
+        resp = await ac.get(f"/api/capa/{capa.report_id}")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_update_linked_capa_product_line_forbidden(
+    engineer_client, db, default_factory, admin_user
+):
+    from app.models.product_line import ProductLine
+
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    trig = await engineer_client.post(
+        f"/api/capa/{capa.report_id}/trigger-scar",
+        json={"supplier_id": str(supplier.supplier_id)},
+    )
+    assert trig.status_code == 200, trig.text
+
+    # Ensure target PL exists so failure is the scar-link guard, not missing PL
+    existing = await db.execute(
+        select(ProductLine).where(ProductLine.code == "DC-DC-200")
+    )
+    if existing.scalar_one_or_none() is None:
+        db.add(
+            ProductLine(
+                code="DC-DC-200", name="DC-DC-200", factory_id=default_factory.id
+            )
+        )
+        await db.flush()
+
+    put = await engineer_client.put(
+        f"/api/capa/{capa.report_id}",
+        json={"product_line_code": "DC-DC-200"},
+    )
+    assert put.status_code == 400, put.text
+    assert "已关联 SCAR" in put.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_trigger_empty_batches_clears_embedded_lots(
+    engineer_client, db, default_factory, admin_user
+):
+    """affected_batches=[] must clear lots even if description embeds old lot lines."""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
+
+    resp = await engineer_client.post(
+        f"/api/capa/{capa.report_id}/trigger-scar",
+        json={
+            "supplier_id": str(supplier.supplier_id),
+            "description": (
+                f"{capa.document_no} {capa.title}\n"
+                "受影响批次: LOT-SHOULD-CLEAR, LOT-OLD"
+            ),
+            "affected_batches": [],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "受影响批次" not in body["description"]
+    assert "LOT-SHOULD-CLEAR" not in body["description"]
+    assert "LOT-OLD" not in body["description"]
 
 
 @pytest.mark.asyncio

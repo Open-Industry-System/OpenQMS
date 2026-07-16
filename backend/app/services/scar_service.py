@@ -343,6 +343,13 @@ async def link_capa(
     )
     capa = result.scalar_one()
 
+    # Re-validate after lock (TOCTOU: concurrent CAPA PL/factory change)
+    if capa.factory_id != scar.factory_id:
+        raise ValueError("SCAR 与 CAPA 必须同厂")
+    if scar.product_line_code != capa.product_line_code:
+        raise ValueError("SCAR 与 CAPA 必须同产品线")
+    check_product_line_access(capa.product_line_code, scope)
+
     if capa.scar_ref_id is not None and capa.scar_ref_id != scar.scar_id:
         raise ValueError("目标 8D 已关联其他 SCAR")
     if scar.capa_ref_id is not None and scar.capa_ref_id != capa.report_id:
@@ -359,7 +366,10 @@ async def link_capa(
             operated_by=user_id,
         ))
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
-        raise ValueError("关联冲突：1:1 约束")
+        err = str(getattr(e, "orig", e))
+        if "uq_capa_eightd_scar_ref_id" in err or "uq_supplier_scars_capa_ref_id" in err:
+            raise ValueError("关联冲突：1:1 约束") from e
+        raise
     return await get_scar(db, scar.scar_id)

@@ -463,12 +463,10 @@ export default function CAPADetailPage() {
   };
 
   const buildScarDescriptionPrefill = (report: CAPAReport) => {
+    // Narrative only — lots live in affected_batches so [] = clear is honored server-side
     const parts = [`${report.document_no} ${report.title}`.trim()];
     if (report.d2_description) parts.push(`[问题描述] ${report.d2_description}`);
     if (report.d4_root_cause) parts.push(`[根因] ${report.d4_root_cause}`);
-    if (report.d3_affected_lots?.length) {
-      parts.push(`受影响批次: ${report.d3_affected_lots.join(", ")}`);
-    }
     return parts.join("\n");
   };
 

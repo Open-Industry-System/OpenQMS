@@ -266,6 +266,7 @@ async def get_capa(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     return await _capa_response_with_projections(db, capa)
 
 
@@ -312,7 +313,12 @@ async def update_capa(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     update_data = req.model_dump(exclude_unset=True)
+    # Changing PL must also be within caller's PL scope (when allowed by service)
+    new_pl = update_data.get("product_line_code")
+    if new_pl is not None and new_pl != capa.product_line_code:
+        check_product_line_access(new_pl, scope)
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:

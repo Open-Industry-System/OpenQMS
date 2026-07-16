@@ -208,6 +208,10 @@ async def update_capa(
 ) -> CAPAEightD:
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         await validate_product_line(db, update_data["product_line_code"])
+        # US-E2E-01.5: CAPA↔SCAR same-PL invariant — refuse unilateral PL move while linked
+        new_pl = update_data["product_line_code"]
+        if capa.scar_ref_id is not None and new_pl != capa.product_line_code:
+            raise ValueError("已关联 SCAR，禁止单独修改产品线")
 
     # US-E2E-01.3：冻结字段后端约束（防 direct API 修改）
     _FROZEN_FIELDS_BY_STATUS = {
