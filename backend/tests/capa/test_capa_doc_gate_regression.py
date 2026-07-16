@@ -729,6 +729,9 @@ async def test_gate_rejects_persisted_waiver_item_from_other_audit_run(
     )
     decision = (await db.execute(
         select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == select(CapaDocgAnalysis.analysis_id)
+               .where(CapaDocgAnalysis.capa_id == capa.report_id)
+               .scalar_subquery())
         .order_by(CapaDocgDecision.revision.desc())
     )).scalars().first()
     tampered = dict(decision.waiver_items[0])
@@ -758,6 +761,9 @@ async def test_gate_rejects_persisted_waiver_with_missing_audit_batch(
     )
     decision = (await db.execute(
         select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == select(CapaDocgAnalysis.analysis_id)
+               .where(CapaDocgAnalysis.capa_id == capa.report_id)
+               .scalar_subquery())
         .order_by(CapaDocgDecision.revision.desc())
     )).scalars().first()
     audits = (await db.execute(
