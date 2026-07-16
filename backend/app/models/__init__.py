@@ -45,6 +45,7 @@ from app.models.control_plan_version import ControlPlanVersion
 from app.models.cp_validation import CPValidationFinding, CPValidationOccurrence, CPValidationRun
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
+from app.models.knowledge_entry import KnowledgeEntry
 from app.models.erp import (
     ERPConnection,
     ERPCostRecord,
@@ -157,6 +158,7 @@ __all__ = [
     "RecommendationCache",
     "DocumentEmbedding",
     "EmbeddingSyncOutbox",
+    "KnowledgeEntry",
     "ChangeImpactAnalysis",
     "CollaborationSession",
     "UserDashboardLayout",
