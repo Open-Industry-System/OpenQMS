@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Callable
 
@@ -98,12 +99,19 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Verify that release target and test PostgreSQL URLs are distinct."
     )
-    parser.add_argument("target_url")
-    parser.add_argument("test_url")
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
+
+    target_url = os.environ.get("DATABASE_URL")
+    if not target_url:
+        print("database guard: DATABASE_URL is required", file=sys.stderr)
+        return 2
+    test_url = os.environ.get("TEST_DATABASE_URL")
+    if not test_url:
+        print("database guard: TEST_DATABASE_URL is required", file=sys.stderr)
+        return 2
 
     try:
-        require_distinct_databases(args.target_url, args.test_url)
+        require_distinct_databases(target_url, test_url)
     except DatabaseIdentityError as exc:
         print(f"database guard: {exc}", file=sys.stderr)
         return 2

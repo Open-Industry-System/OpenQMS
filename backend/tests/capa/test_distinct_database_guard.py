@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -117,17 +118,53 @@ def test_live_identity_uses_psycopg_and_a_read_only_transaction(monkeypatch):
 
 
 def test_guard_cli_rejects_canonical_match_without_connecting():
+    env = {
+        **os.environ,
+        "DATABASE_URL": "postgresql+asyncpg://qms@localhost/openqms?b=2&a=1",
+        "TEST_DATABASE_URL": (
+            "postgresql+psycopg://qms@127.0.0.1:5432/openqms?a=1&b=2"
+        ),
+    }
     result = subprocess.run(
-        [
-            sys.executable,
-            str(GUARD_PATH),
-            "postgresql+asyncpg://qms@localhost/openqms?b=2&a=1",
-            "postgresql+psycopg://qms@127.0.0.1:5432/openqms?a=1&b=2",
-        ],
+        [sys.executable, str(GUARD_PATH)],
         cwd=ROOT,
+        env=env,
         text=True,
         capture_output=True,
     )
 
     assert result.returncode != 0
     assert "same canonical database" in result.stderr
+
+
+@pytest.mark.parametrize("missing_name", ["DATABASE_URL", "TEST_DATABASE_URL"])
+def test_guard_cli_requires_database_environment(missing_name):
+    env = {
+        **os.environ,
+        "DATABASE_URL": "postgresql+asyncpg://qms@target/openqms",
+        "TEST_DATABASE_URL": "postgresql+asyncpg://qms@test/openqms",
+    }
+    env.pop(missing_name, None)
+
+    result = subprocess.run(
+        [sys.executable, str(GUARD_PATH)],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert f"{missing_name} is required" in result.stderr
+
+
+def test_guard_cli_rejects_positional_database_arguments():
+    result = subprocess.run(
+        [sys.executable, str(GUARD_PATH), "postgresql://credential-bearing-dsn"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "unrecognized arguments" in result.stderr

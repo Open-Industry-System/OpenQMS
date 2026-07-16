@@ -62,6 +62,7 @@ DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms \
 （忽略 async/sync driver 差异、loopback 别名与 query 顺序），再用只读 psycopg
 连接核对 server address/port、database name 与 database OID；任一层确认同库或无法
 可靠取得 live identity 都会在迁移前 fail closed。该 guard 没有命令覆盖开关，不能跳过。
+guard 仅从环境读取两个 DSN，不会把含密码的连接串放入子进程命令行。
 迁移、preflight 与 rollout 仅收到目标库 `DATABASE_URL`（且不暴露
 `TEST_DATABASE_URL`）；check 同时将 `DATABASE_URL` 和 `TEST_DATABASE_URL` 指向测试库。
 危险的组合目标 `deploy-check` 已移除。独立诊断应分别运行 `make check`，以及对目标库

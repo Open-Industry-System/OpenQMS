@@ -22,7 +22,7 @@ if [[ -x "$REPO_ROOT/backend/.venv/bin/python" ]]; then
 else
     PYTHON_BIN="python"
 fi
-export REPO_ROOT PYTHON_BIN
+export REPO_ROOT PYTHON_BIN DATABASE_URL TEST_DATABASE_URL
 export PYTEST_SECRET_KEY="${PYTEST_SECRET_KEY:-test-secret-key-for-ci-only}"
 
 if [[ -z "${MIGRATE_CMD:-}" ]]; then
@@ -37,8 +37,7 @@ fi
 
 run_database_guard() {
     echo "deploy-release: starting database identity guard"
-    "$PYTHON_BIN" "$REPO_ROOT/scripts/check-distinct-databases.py" \
-        "$TARGET_DATABASE_URL" "$TEST_DATABASE_URL"
+    "$PYTHON_BIN" "$REPO_ROOT/scripts/check-distinct-databases.py"
     echo "deploy-release: completed database identity guard"
 }
 

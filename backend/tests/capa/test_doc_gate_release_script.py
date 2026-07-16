@@ -39,10 +39,23 @@ def test_release_script_runs_all_steps_in_exact_serial_order(tmp_path, mig_db_ur
     }
 
     result = subprocess.run(
-        [str(SCRIPT)], cwd=ROOT, env=env, text=True, capture_output=True,
+        ["/bin/bash", "-x", str(SCRIPT)],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
     )
 
     assert result.returncode == 0, result.stderr
+    guard_trace = [
+        line
+        for line in result.stderr.splitlines()
+        if "scripts/check-distinct-databases.py" in line
+    ]
+    assert len(guard_trace) == 1
+    assert TARGET_URL not in guard_trace[0]
+    assert mig_db_url not in guard_trace[0]
+    assert guard_trace[0].endswith("scripts/check-distinct-databases.py")
     assert log.read_text().splitlines() == [
         f"migrate|{TARGET_URL}|unset",
         f"check|{mig_db_url}|{mig_db_url}",
