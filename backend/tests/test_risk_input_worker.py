@@ -372,3 +372,31 @@ async def test_recover_stale_resets_old_processing(db, input_factory):
     assert t.status == "error"
     assert t.locked_at is None
     assert t.claim_token is None
+
+
+@pytest.mark.asyncio
+async def test_claim_batch_serializes_same_supplier_pl(db, admin_user, default_factory, seed_supplier):
+    """同一 supplier+PL 的多个 pending 一次最多 claim 1 条；已有 processing 时不 claim 同组。"""
+    fid = default_factory.id
+    uid = admin_user.user_id
+    sid = seed_supplier.supplier_id
+    a = await _make_input(db, factory_id=fid, user_id=uid, supplier_id=sid, status="pending")
+    b = await _make_input(db, factory_id=fid, user_id=uid, supplier_id=sid, status="pending")
+    claimed = await claim_batch(db, 10)
+    await db.commit()
+    assert len(claimed) == 1
+    claimed_id = claimed[0]["input_id"]
+    assert claimed_id in {str(a.input_id), str(b.input_id)}
+
+    # Second claim while first is processing: same supplier+PL must be skipped
+    claimed2 = await claim_batch(db, 10)
+    await db.commit()
+    assert claimed2 == []
+
+    # Different supplier can still be claimed
+    other = await _make_supplier(db, fid, uid)
+    c = await _make_input(db, factory_id=fid, user_id=uid, supplier_id=other.supplier_id, status="pending")
+    claimed3 = await claim_batch(db, 10)
+    await db.commit()
+    assert len(claimed3) == 1
+    assert claimed3[0]["input_id"] == str(c.input_id)

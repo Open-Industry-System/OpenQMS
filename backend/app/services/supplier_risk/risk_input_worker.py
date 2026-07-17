@@ -49,8 +49,54 @@ async def recover_stale_inputs(db: AsyncSession) -> None:
 
 
 async def claim_batch(db: AsyncSession, batch_size: int) -> list[dict]:
-    """Claim pending risk inputs with FOR UPDATE SKIP LOCKED + claim_token."""
+    """Claim pending risk inputs with FOR UPDATE SKIP LOCKED + claim_token.
+
+    Serialization: claim at most one pending row per (supplier_id, product_line_code)
+    and skip suppliers that already have a ``processing`` row for that PL. Prevents
+    two workers from evaluating the same supplier+PL concurrently (incomplete
+    capa_incidents + daily alert overwrite races).
+    """
     token = uuid.uuid4()
+    # Step 1: lock candidate rows (SKIP LOCKED), then keep one per supplier+PL.
+    # Two-step so FOR UPDATE applies to real table rows (not a derived table).
+    # Cap scan width so we don't lock the whole pending queue.
+    scan_limit = max(batch_size * 20, batch_size)
+    locked = await db.execute(
+        text(
+            """
+            SELECT input_id, supplier_id, product_line_code, next_retry_at, created_at
+            FROM supplier_risk_capa_inputs i
+            WHERE status = 'pending'
+              AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+              AND NOT EXISTS (
+                  SELECT 1 FROM supplier_risk_capa_inputs p
+                  WHERE p.status = 'processing'
+                    AND p.supplier_id = i.supplier_id
+                    AND p.product_line_code IS NOT DISTINCT FROM i.product_line_code
+              )
+            ORDER BY next_retry_at NULLS FIRST, created_at ASC
+            LIMIT :scan_limit
+            FOR UPDATE SKIP LOCKED
+            """
+        ),
+        {"scan_limit": scan_limit},
+    )
+    rows = list(locked.fetchall())
+    # Dedup in Python: first row wins per (supplier_id, product_line_code)
+    seen: set[tuple] = set()
+    chosen: list = []
+    for r in rows:
+        key = (r.supplier_id, r.product_line_code)
+        if key in seen:
+            continue
+        seen.add(key)
+        chosen.append(r.input_id)
+        if len(chosen) >= batch_size:
+            break
+    if not chosen:
+        await db.commit()
+        return []
+
     result = await db.execute(
         text(
             """
@@ -59,19 +105,12 @@ async def claim_batch(db: AsyncSession, batch_size: int) -> list[dict]:
                 locked_at = NOW(),
                 attempt_count = attempt_count + 1,
                 claim_token = :token
-            WHERE input_id IN (
-                SELECT input_id FROM supplier_risk_capa_inputs
-                WHERE status = 'pending'
-                  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-                ORDER BY next_retry_at NULLS FIRST
-                LIMIT :batch_size
-                FOR UPDATE SKIP LOCKED
-            )
+            WHERE input_id = ANY(CAST(:ids AS uuid[]))
             RETURNING input_id, claim_token, capa_id, supplier_id,
                       product_line_code, status, attempt_count, max_attempts
             """
         ),
-        {"token": token, "batch_size": batch_size},
+        {"token": token, "ids": [str(i) for i in chosen]},
     )
     await db.commit()
     return [_row_to_claimed(row) for row in result.fetchall()]
@@ -125,6 +164,17 @@ async def process_one(db: AsyncSession, claimed: dict) -> None:
     # Raw claim UPDATE can leave a stale identity-map row (e.g. claim_token=None
     # while DB has the token). Refresh so success-path ORM writes are tracked.
     await db.refresh(input_obj)
+
+    # Transaction-scoped advisory lock: serialize all evals for this supplier+PL
+    # (covers races claim_batch cannot see, e.g. confirm-repeat concurrent).
+    await db.execute(
+        text(
+            "SELECT pg_advisory_xact_lock(hashtext(:key))"
+        ),
+        {
+            "key": f"{input_obj.supplier_id}:{input_obj.product_line_code or ''}",
+        },
+    )
 
     capa_id = input_obj.capa_id
     try:
