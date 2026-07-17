@@ -287,3 +287,43 @@ async def test_evaluate_in_tx_takes_advisory_lock(db, admin_user, default_factor
         "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
     ))).scalar()
     assert locks is not None and locks >= 1
+
+
+@pytest.mark.asyncio
+async def test_update_capa_clears_supplier_when_unlocked(db, admin_user, default_factory):
+    """Pre-D7, no risk input: supplier_id=null clears the association."""
+    sup = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id,
+        status="D4_ROOT_CAUSE", supplier_id=sup.supplier_id,
+    )
+    await update_capa(db, capa, {"supplier_id": None}, admin_user.user_id)
+    await db.refresh(capa)
+    assert capa.supplier_id is None
+
+
+@pytest.mark.asyncio
+async def test_update_capa_clear_supplier_blocked_when_input_exists(
+    db, admin_user, default_factory,
+):
+    """Cannot clear supplier once risk input exists."""
+    sup = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id,
+        status="D7_PREVENTION", supplier_id=sup.supplier_id,
+    )
+    db.add(SupplierRiskCapaInput(
+        input_id=uuid.uuid4(),
+        capa_id=capa.report_id,
+        supplier_id=sup.supplier_id,
+        factory_id=default_factory.id,
+        product_line_code="DC-DC-100",
+        created_by=admin_user.user_id,
+        severity="一般",
+        repeat_detection_status="not_matched",
+        matched_capa_nos=[],
+        status="pending",
+    ))
+    await db.flush()
+    with pytest.raises(ValueError, match="供应商风险输入"):
+        await update_capa(db, capa, {"supplier_id": None}, admin_user.user_id)

@@ -208,6 +208,10 @@ export default function CAPADetailPage() {
     getAIDraftCapabilities()
       .then((caps) => setAiDraftEnabled(caps.ai_draft_enabled))
       .catch(() => setAiDraftEnabled(false));
+    // Prefetch supplier options so readonly labels can resolve names
+    listCapaSupplierOptions({ page_size: 100 })
+      .then((res) => setSuppliers(res.items))
+      .catch(() => { /* leave empty; fall back to UUID */ });
   }, [id]);
 
   useEffect(() => {

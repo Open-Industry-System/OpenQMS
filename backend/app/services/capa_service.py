@@ -256,22 +256,17 @@ async def update_capa(
         if capa.scar_ref_id is not None and new_pl != capa.product_line_code:
             raise ValueError("已关联 SCAR，禁止单独修改产品线")
 
-    # US-E2E-01.6: supplier_id same-factory + D7+ lock
-    if "supplier_id" in update_data and update_data["supplier_id"] is not None:
+    # US-E2E-01.6: supplier_id same-factory + freeze once risk input / D7+
+    # Handle both set and clear (null). Generic setattr loop skips None, so clear
+    # is applied explicitly after validation.
+    supplier_clear_requested = False
+    if "supplier_id" in update_data:
         from app.models.supplier import Supplier
         from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
-        new_supplier_id = update_data["supplier_id"]
-        sup = await db.get(Supplier, new_supplier_id)
-        if sup is None:
-            raise ValueError("供应商不存在")
-        if sup.factory_id != capa.factory_id:
-            raise ValueError("供应商与 8D 不属于同一工厂")
-        # Freeze supplier once a risk input has been generated (covers D8 reject → D7_PREVENTION)
+        new_supplier_id = update_data["supplier_id"]  # may be None (clear)
         existing_input = await db.scalar(
             select(SupplierRiskCapaInput.input_id).where(SupplierRiskCapaInput.capa_id == capa.report_id)
         )
-        if existing_input is not None and capa.supplier_id != new_supplier_id:
-            raise ValueError("已生成供应商风险输入，不可修改供应商")
         locked_states = {
             EightDState.D7_COMPLETED.value,
             EightDState.D8_GATE_PENDING.value,
@@ -279,8 +274,24 @@ async def update_capa(
             EightDState.D8_CLOSURE.value,
             EightDState.ARCHIVED.value,
         }
-        if capa.status in locked_states and capa.supplier_id != new_supplier_id:
-            raise ValueError("8D 已推进至 D7+，不可修改供应商")
+        if new_supplier_id is not None:
+            sup = await db.get(Supplier, new_supplier_id)
+            if sup is None:
+                raise ValueError("供应商不存在")
+            if sup.factory_id != capa.factory_id:
+                raise ValueError("供应商与 8D 不属于同一工厂")
+            if existing_input is not None and capa.supplier_id != new_supplier_id:
+                raise ValueError("已生成供应商风险输入，不可修改供应商")
+            if capa.status in locked_states and capa.supplier_id != new_supplier_id:
+                raise ValueError("8D 已推进至 D7+，不可修改供应商")
+        else:
+            # Clear to null — only when no risk input and not D7+
+            if existing_input is not None and capa.supplier_id is not None:
+                raise ValueError("已生成供应商风险输入，不可修改供应商")
+            if capa.status in locked_states and capa.supplier_id is not None:
+                raise ValueError("8D 已推进至 D7+，不可修改供应商")
+            if capa.supplier_id is not None:
+                supplier_clear_requested = True
 
     # US-E2E-01.3：冻结字段后端约束（防 direct API 修改）
     _FROZEN_FIELDS_BY_STATUS = {
@@ -322,6 +333,12 @@ async def update_capa(
                 else:
                     changed_fields[key] = value
                 setattr(capa, key, value)
+
+    # Explicit clear for supplier_id=null (generic loop skips None)
+    if supplier_clear_requested:
+        old_sid = capa.supplier_id
+        capa.supplier_id = None
+        changed_fields["supplier_id"] = {"old": str(old_sid) if old_sid else None, "new": None}
 
     if changed_fields:
         audit_log = AuditLog(

@@ -159,11 +159,10 @@ async def evaluate_all_suppliers(
 ) -> list[dict]:
     """Evaluate all active suppliers.
 
-    Uses a batch strategy: one query per data type (IQC, SCAR, Evaluation,
-    Certification) to load all relevant records, then groups by supplier in
-    Python. Avoids the per-supplier N+1 query pattern.
+    Routes each supplier through ``evaluate_supplier_risk_in_tx`` so the shared
+    supplier+PL advisory lock serializes against worker / confirm-repeat.
+    Per-supplier commit keeps partial progress on failures.
     """
-    # Get all active suppliers
     result = await db.execute(
         select(Supplier).where(Supplier.status == "approved")
     )
@@ -171,39 +170,16 @@ async def evaluate_all_suppliers(
     if not suppliers:
         return []
 
-    supplier_ids = [s.supplier_id for s in suppliers]
-
-    # Batch load all data types in parallel-friendly queries
-    inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
-    scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
-    evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
-    certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
-    capa_inputs_by_supplier = await _batch_gather_capa_inputs(db, supplier_ids, product_line_code)
-
-    # Batch load effective configs for all suppliers in a single query
-    configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
-
     results = []
     for supplier in suppliers:
         try:
-            configs = configs_by_supplier.get(supplier.supplier_id)
+            # Probe configs first to skip suppliers with no rules without locking noise
+            configs = await get_effective_configs(db, product_line_code, supplier.supplier_id)
             if not configs:
                 continue
 
-            input_data = SupplierRiskInput(
-                supplier=supplier,
-                inspections=inspections_by_supplier.get(supplier.supplier_id, []),
-                scars=scars_by_supplier.get(supplier.supplier_id, []),
-                evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
-                certifications=certifications_by_supplier.get(supplier.supplier_id, []),
-                capa_incidents=capa_inputs_by_supplier.get(supplier.supplier_id, []),
-            )
-            rule_results, failed_ids = run_all_rules(input_data, configs)
-            risk_score = calculate_risk_score(rule_results, configs)
-
-            alert, event_type = await _upsert_alert(
-                db, supplier.supplier_id, product_line_code, risk_score, rule_results, failed_ids,
-                factory_id=supplier.factory_id,
+            alert, risk_score, rule_results, event_type = await evaluate_supplier_risk_in_tx(
+                db, supplier.supplier_id, product_line_code,
             )
 
             # Commit per supplier so partial failures don't lose all progress

@@ -137,24 +137,43 @@ async def list_capa_supplier_options(
     """Lightweight supplier picker for CAPA create/edit.
 
     Gated by CAPA CREATE (not Module.SUPPLIER VIEW) so CAPA operators can
-    associate a supplier without full supplier-module access. Scope-limited
-    to the effective factory.
+    associate a supplier without full supplier-module access.
+
+    Scope rules (fail closed):
+    - Prefer ``effective_factory_id``; if unset, require a single accessible
+      factory (multi-factory without selection → empty, no cross-factory leak).
+    - Apply product-line scope: NONE → empty; EXPLICIT → filter product_scope.
     """
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 CREATE 权限")
     from app.services import supplier_service
+
     factory_id = scope.effective_factory_id
     if factory_id is None:
-        # group admin without selected factory: resolve from first accessible if any
         accessible = scope.factory_scope.accessible_factory_ids
-        if accessible is not None and len(accessible) == 1:
-            factory_id = next(iter(accessible))
-        elif accessible is not None and not accessible:
+        if accessible is None:
+            # group admin, all factories: still require explicit selection to avoid
+            # tenant-wide dump from the CAPA picker
             return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        if len(accessible) == 1:
+            factory_id = next(iter(accessible))
+        else:
+            # multi-factory without effective selection → empty (no leak)
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    # Product-line scope
+    allowed_pls = None
+    pl_scope = scope.pl_scope
+    if pl_scope.mode == "NONE":
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+    if pl_scope.mode == "EXPLICIT" and pl_scope.codes:
+        allowed_pls = list(pl_scope.codes)
+
     items, total = await supplier_service.list_suppliers(
         db, page=page, page_size=page_size, search=search,
         factory_id=factory_id,
+        allowed_product_line_codes=allowed_pls,
     )
     return {
         "items": [
