@@ -313,6 +313,7 @@ async def mark_failed(
     *,
     entity_type: str | None = None,
     entity_id=None,
+    content_hash: str | None = None,
 ):
     """Mark an outbox event as failed, with exponential backoff or dead_letter."""
     if retry_count + 1 >= max_attempts:
@@ -333,20 +334,34 @@ async def mark_failed(
         """),
         {"id": event_id, "status": new_status, "next_attempt": next_attempt, "error": error},
     )
-    # dead_letter for knowledge_entry → entry.embedding_status=failed (keep active)
+    # dead_letter for knowledge_entry → entry.embedding_status=failed only when
+    # the event's content_hash still matches the entry (stale version events
+    # must not flip a newer resink to failed).
     if (
         new_status == "dead_letter"
         and entity_type == "knowledge_entry"
         and entity_id is not None
     ):
-        await db.execute(
-            text("""
-                UPDATE knowledge_entries
-                SET embedding_status = 'failed', updated_at = NOW()
-                WHERE entry_id = :entry_id
-            """),
-            {"entry_id": entity_id},
-        )
+        if content_hash:
+            await db.execute(
+                text("""
+                    UPDATE knowledge_entries
+                    SET embedding_status = 'failed', updated_at = NOW()
+                    WHERE entry_id = :entry_id
+                      AND content_hash = :content_hash
+                """),
+                {"entry_id": entity_id, "content_hash": content_hash},
+            )
+        else:
+            # Legacy outbox rows without content_hash: keep prior behaviour.
+            await db.execute(
+                text("""
+                    UPDATE knowledge_entries
+                    SET embedding_status = 'failed', updated_at = NOW()
+                    WHERE entry_id = :entry_id
+                """),
+                {"entry_id": entity_id},
+            )
     await db.commit()
 
 
@@ -386,6 +401,7 @@ async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
                     event.get("retry_count", 0), event.get("max_attempts", 5),
                     entity_type=event.get("entity_type"),
                     entity_id=event.get("entity_id"),
+                    content_hash=event.get("content_hash"),
                 )
             except Exception:
                 pass

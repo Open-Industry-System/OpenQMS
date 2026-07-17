@@ -18,7 +18,7 @@ from app.models.capa import CAPAEightD
 from app.models.capa_lesson import CapaLessonLearned
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.fmea import FMEADocument
-from app.services.embedding_sync_worker import process_batch_once
+from app.services.embedding_sync_worker import mark_failed, process_batch_once
 
 pytestmark = pytest.mark.requires_db
 
@@ -454,6 +454,67 @@ async def test_worker_dead_letter_marks_failed(vector_db, default_factory, admin
     assert event[0] == "dead_letter"
     assert event[1] == 5
     assert "embed failed" in (event[2] or "")
+
+
+@pytest.mark.asyncio
+async def test_worker_dead_letter_stale_hash_does_not_mark_failed(
+    vector_db, default_factory, admin_user
+):
+    """Old-hash dead_letter must not flip a newer resink entry to failed."""
+    db, _dim = vector_db
+    old_hash = ("e" * 64)
+    new_hash = ("f" * 64)
+    entry = await _seed_knowledge_entry(
+        db,
+        factory_id=default_factory.id,
+        content_hash=new_hash,  # entry already resunk to new content
+        embedding_text="newer content after resink",
+        embedding_status="pending",
+    )
+    event_id = uuid.uuid4()
+    await db.execute(
+        text(
+            "INSERT INTO embedding_sync_outbox "
+            "(id, entity_type, entity_id, product_line_code, factory_id, status, "
+            " next_attempt_at, content_hash, retry_count, max_attempts) "
+            "VALUES (:id, 'knowledge_entry', :eid, 'DC-DC-100', :fid, 'processing', "
+            " NOW(), :ch, 4, 5)"
+        ),
+        {
+            "id": event_id,
+            "eid": entry.entry_id,
+            "fid": default_factory.id,
+            "ch": old_hash,
+        },
+    )
+    await db.flush()
+
+    await mark_failed(
+        db,
+        str(event_id),
+        "stale event embed failed",
+        retry_count=4,
+        max_attempts=5,
+        entity_type="knowledge_entry",
+        entity_id=entry.entry_id,
+        content_hash=old_hash,
+    )
+
+    await db.refresh(entry)
+    # Entry stays pending — old-hash dead_letter must not flip newer entry
+    assert entry.embedding_status == "pending"
+    assert entry.content_hash == new_hash
+
+    event = (
+        await db.execute(
+            text(
+                "SELECT status FROM embedding_sync_outbox WHERE id = :id"
+            ),
+            {"id": event_id},
+        )
+    ).fetchone()
+    assert event is not None
+    assert event[0] == "dead_letter"
 
 
 @pytest.mark.asyncio
