@@ -43,6 +43,57 @@ def test_upgrade_raises_when_factories_missing(mig_db_url):
     engine.dispose()
 
 
+def test_upgrade_raises_when_knowledge_entries_already_exists(mig_db_url):
+    """Pre-existing knowledge_entries (even full-looking) must not be stamped.
+
+    No earlier formal revision creates this table; name-only / partial checks can
+    greenlight a malformed table. Fail-closed and leave alembic_version at PARENT.
+    """
+    import pytest
+
+    cfg = _cfg(mig_db_url)
+    command.upgrade(cfg, PARENT)
+    engine = _sync_engine(mig_db_url)
+    with engine.connect() as conn:
+        with conn.begin():
+            # Minimal pre-existing table — deliberately incomplete vs formal schema.
+            conn.execute(
+                sa.text(
+                    "CREATE TABLE knowledge_entries ("
+                    "entry_id UUID PRIMARY KEY, "
+                    "source_type VARCHAR(32), "
+                    "source_id UUID, "
+                    "factory_id UUID, "
+                    "content_hash VARCHAR(64), "
+                    "embedding_status VARCHAR(16), "
+                    "document_no VARCHAR(50), "
+                    "fields JSONB, "
+                    "llm_status VARCHAR(16)"
+                    ")"
+                )
+            )
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="already exists"):
+        command.upgrade(cfg, REV)
+
+    engine = _sync_engine(mig_db_url)
+    with engine.connect() as conn:
+        rev = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+        assert rev == PARENT
+        # Table still present (migration refused; did not drop user data).
+        assert (
+            conn.execute(
+                sa.text(
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_name='knowledge_entries'"
+                )
+            ).scalar()
+            == 1
+        )
+    engine.dispose()
+
+
 def test_knowledge_entries_table_and_outbox_hash(mig_db_url):
     cfg = _cfg(mig_db_url)
     command.upgrade(cfg, PARENT)
