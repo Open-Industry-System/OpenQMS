@@ -525,3 +525,57 @@ async def test_manual_resink_resets_pending(
         )
     ).scalars().all()
     assert any(a.changed_fields.get("manual") is True for a in audits)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_sink_unique_race(
+    db, default_factory, admin_user, monkeypatch
+):
+    """Two concurrent first-sinks must not 500; both resolve to one row (update path)."""
+    from app.services.knowledge_sink_service import sink_capa_on_close
+
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id, status="D8_CLOSURE"
+    )
+    await db.commit()
+
+    call_n = {"n": 0}
+
+    async def ok_client(db_):
+        return _fake_pc()
+
+    async def ok_json(pc, prompt, schema):
+        call_n["n"] += 1
+        return _ok_llm_result(
+            lesson_summary=f"并发摘要{call_n['n']}",
+            tags=["a", "b", f"t{call_n['n']}"],
+        )
+
+    monkeypatch.setattr(
+        "app.services.agent.provider_adapter.build_client", ok_client
+    )
+    monkeypatch.setattr(
+        "app.services.agent.provider_adapter.complete_json", ok_json
+    )
+
+    # Two sequential sink calls on a fresh CAPA simulate the unique race winner
+    # + loser (both hit ON CONFLICT path after first insert).
+    entry1 = await sink_capa_on_close(db, capa, admin_user.user_id, manual=True)
+    await db.flush()
+    entry2 = await sink_capa_on_close(db, capa, admin_user.user_id, manual=True)
+    await db.flush()
+
+    assert entry1.entry_id == entry2.entry_id
+    rows = (
+        await db.execute(
+            select(KnowledgeEntry).where(
+                KnowledgeEntry.source_type == "capa",
+                KnowledgeEntry.source_id == capa.report_id,
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].embedding_status == "pending"
+    assert rows[0].embedding_id is None
+    assert rows[0].fields["lesson_summary"] == "并发摘要2"
+    assert rows[0].status == "active"

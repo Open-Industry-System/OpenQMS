@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
@@ -351,17 +352,13 @@ async def sink_capa_on_close(
     content_hash = hashlib.sha256(embedding_text.encode()).hexdigest()
     now = datetime.now(UTC)
 
-    # 5. Upsert ON CONFLICT (source_type, source_id) — ORM path keeps identity map coherent
-    entry = await db.scalar(
-        select(KnowledgeEntry)
-        .where(
-            KnowledgeEntry.source_type == "capa",
-            KnowledgeEntry.source_id == capa.report_id,
-        )
-        .with_for_update()
-    )
-    if entry is None:
-        entry = KnowledgeEntry(
+    # 5. Atomic upsert ON CONFLICT (source_type, source_id).
+    # Do NOT overwrite status (keep active if already active; conflict path
+    # also leaves status untouched so concurrent first-sink races resolve to
+    # one row without SELECT-FOR-UPDATE races).
+    upsert_stmt = (
+        pg_insert(KnowledgeEntry)
+        .values(
             entry_id=entry_id,
             source_type="capa",
             source_id=capa.report_id,
@@ -377,23 +374,50 @@ async def sink_capa_on_close(
             content_hash=content_hash,
             embedding_status="pending",
             embedding_id=None,
+            created_at=now,
+            updated_at=now,
         )
-        db.add(entry)
-    else:
-        # Keep deterministic uuid5 entry_id stable across resinks
-        entry.factory_id = capa.factory_id
-        entry.product_line_code = capa.product_line_code
-        entry.document_no = capa.document_no
-        entry.title = capa.title
-        entry.severity = capa.severity
-        entry.fields = fields
-        entry.status = "active"
-        entry.llm_status = "done"
-        entry.embedding_text = embedding_text
-        entry.content_hash = content_hash
-        entry.embedding_status = "pending"
-        entry.embedding_id = None
-        entry.updated_at = now
+        .on_conflict_do_update(
+            constraint="uq_knowledge_entries_source",
+            set_={
+                "factory_id": capa.factory_id,
+                "product_line_code": capa.product_line_code,
+                "document_no": capa.document_no,
+                "title": capa.title,
+                "severity": capa.severity,
+                "fields": fields,
+                "llm_status": "done",
+                "embedding_text": embedding_text,
+                "content_hash": content_hash,
+                "embedding_status": "pending",
+                "embedding_id": None,
+                "updated_at": now,
+                # status intentionally omitted — leave active / do not flip
+            },
+        )
+        .returning(KnowledgeEntry.entry_id)
+    )
+    result = await db.execute(upsert_stmt)
+    returned_entry_id = result.scalar_one()
+    # Refresh only the knowledge entry (do NOT expire_all — that would
+    # invalidate `capa` and trigger async lazy-load MissingGreenlet).
+    entry = await db.get(
+        KnowledgeEntry, returned_entry_id, populate_existing=True
+    )
+    if entry is None:
+        # Fallback natural-key load if get misses (e.g. identity-map race)
+        entry = await db.scalar(
+            select(KnowledgeEntry)
+            .where(
+                KnowledgeEntry.source_type == "capa",
+                KnowledgeEntry.source_id == capa.report_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+    if entry is None:
+        raise KnowledgeSinkFailedError(
+            "知识库 upsert 后无法读取条目", reason="db_error"
+        )
     await db.flush()
 
     # Cancel pending outbox; leave processing for content_hash stale-drop
