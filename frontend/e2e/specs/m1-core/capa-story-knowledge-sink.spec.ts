@@ -159,10 +159,11 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
       { target_state: "D8_CLOSURE" },
       ok,
     );
-    // 422 blocked should not happen when LLM creds exist
+    // 422 blocked must hard-fail when LLM creds exist (not soft-skip).
     if (adv.status === 422 && adv.data?.detail?.outcome === "blocked") {
-      test.skip(true, `Close blocked despite e2e-env hasLLM: ${JSON.stringify(adv.data.detail)}`);
-      return;
+      throw new Error(
+        `Close blocked despite e2e-env hasLLM: ${JSON.stringify(adv.data.detail)}`,
+      );
     }
     if (adv.status === 422 && adv.data?.detail?.outcome === "failed") {
       // Real LLM failure is a product/env issue — surface, do not soft-pass.
@@ -232,6 +233,10 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
       probeItems.find((c) => c.status === "D4_ROOT_CAUSE");
     expect(probe, "need a D4 probe CAPA for recommend closed-loop").toBeTruthy();
 
+    // Capture freshness floor before recommend so historical RETRIEVED rows
+    // from prior runs cannot satisfy the audit assertion.
+    const beforeIso = new Date().toISOString();
+
     const rec = await engAc.get(`/capa/${probe!.report_id}/d4-fmea-recommendations`, ok);
     expect(rec.status, `recommend status: ${JSON.stringify(rec.data)}`).toBe(200);
     const body = rec.data;
@@ -260,7 +265,7 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
       )}`,
     ).toBe(true);
 
-    // Audit: KNOWLEDGE_RETRIEVED must exist for the probe CAPA
+    // Audit: KNOWLEDGE_RETRIEVED must be fresh for this recommend call
     const retrieved = await adminAc.get("/admin/logs/audit", {
       params: {
         table_name: "capa_eightd",
@@ -269,12 +274,15 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
         page_size: 200,
       },
     });
-    const rItems = (retrieved.data.items as any[]).filter(
-      (l) => l.record_id === probe!.report_id,
-    );
+    const rItems = (retrieved.data.items as any[]).filter((l) => {
+      if (l.record_id !== probe!.report_id) return false;
+      const operatedAt = l.operated_at as string | undefined;
+      if (!operatedAt) return false;
+      return operatedAt >= beforeIso;
+    });
     expect(
       rItems.length,
-      "expected KNOWLEDGE_RETRIEVED after knowledge_entry hit",
+      `expected fresh KNOWLEDGE_RETRIEVED after recommend (operated_at >= ${beforeIso})`,
     ).toBeGreaterThan(0);
     const entryIds = rItems.flatMap(
       (l) => (l.changed_fields?.entry_ids as string[] | undefined) || [],
