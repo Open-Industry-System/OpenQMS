@@ -244,42 +244,186 @@ async def test_worker_processes_fmea_node_factory_id(vector_db, default_factory,
 
 
 # ── mark_failed error path (regression: events must not be left in processing) ──
+#
+# These use real-commit sessions (sessionmaker). process_batch_once rolls back
+# on batch error before mark_failed; the flush-only ``db`` fixture would lose
+# the outbox row on that rollback.
+
+
+async def _committed_worker_fixtures(sessionmaker):
+    """Persist factory + user + capa for worker error-path tests that need real commits."""
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+
+    factory_id = uuid.uuid4()
+    pl_code = f"PL-W-{factory_id.hex[:8]}"
+    user_id = uuid.uuid4()
+    capa_id = uuid.uuid4()
+    role_id = uuid.uuid4()
+    async with sessionmaker() as s:
+        s.add(Factory(id=factory_id, code=f"W-{factory_id.hex[:8]}", name="Worker Factory"))
+        s.add(ProductLine(code=pl_code, name=pl_code, factory_id=factory_id))
+        s.add(
+            RoleDefinition(
+                id=role_id,
+                role_key=f"admin_w_{factory_id.hex[:8]}",
+                name_zh="W Admin",
+                name_en="W Admin",
+                is_system=True,
+                is_editable=False,
+                bypass_row_level_security=True,
+                sort_order=1,
+                is_active=True,
+            )
+        )
+        await s.flush()
+        s.add(
+            User(
+                user_id=user_id,
+                username=f"w-{factory_id.hex[:8]}",
+                password_hash="x",
+                factory_id=factory_id,
+                role_id=role_id,
+                legacy_role="admin",
+                is_active=True,
+            )
+        )
+        await s.flush()
+        s.add(
+            CAPAEightD(
+                report_id=capa_id,
+                document_no=f"8D-W-{factory_id.hex[:6]}",
+                title="t",
+                product_line_code=pl_code,
+                factory_id=factory_id,
+                created_by=user_id,
+                status="D8_CLOSURE",
+                d7_prevention="预防内容",
+            )
+        )
+        await s.commit()
+    return {
+        "factory_id": factory_id,
+        "pl_code": pl_code,
+        "user_id": user_id,
+        "capa_id": capa_id,
+        "role_id": role_id,
+    }
+
+
+async def _teardown_worker_fixtures(sessionmaker, fx, *, entry_ids=None):
+    from sqlalchemy import delete as sa_delete
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.models.knowledge_entry import KnowledgeEntry
+
+    async with sessionmaker() as s:
+        if entry_ids:
+            for eid in entry_ids:
+                await s.execute(
+                    text("DELETE FROM embedding_sync_outbox WHERE entity_id = :eid"),
+                    {"eid": eid},
+                )
+                await s.execute(
+                    text("DELETE FROM document_embeddings WHERE entity_id = :eid"),
+                    {"eid": eid},
+                )
+                await s.execute(
+                    sa_delete(KnowledgeEntry).where(KnowledgeEntry.entry_id == eid)
+                )
+        await s.execute(
+            text("DELETE FROM embedding_sync_outbox WHERE entity_id = :eid"),
+            {"eid": fx["capa_id"]},
+        )
+        await s.execute(sa_delete(CAPAEightD).where(CAPAEightD.report_id == fx["capa_id"]))
+        await s.execute(sa_delete(User).where(User.user_id == fx["user_id"]))
+        await s.execute(sa_delete(RoleDefinition).where(RoleDefinition.id == fx["role_id"]))
+        await s.execute(sa_delete(ProductLine).where(ProductLine.code == fx["pl_code"]))
+        await s.execute(sa_delete(Factory).where(Factory.id == fx["factory_id"]))
+        await s.commit()
 
 
 @pytest.mark.asyncio
-async def test_worker_mark_failed_on_embed_error(vector_db, default_factory, admin_user):
-    db, dim = vector_db
-    capa = CAPAEightD(
-        report_id=uuid.uuid4(),
-        document_no=f"8D-FAIL-{uuid.uuid4().hex[:6]}",
-        title="t",
-        product_line_code="DC-DC-100",
-        factory_id=default_factory.id,
-        created_by=admin_user.user_id,
-        status="D8_CLOSURE",
-        d7_prevention="预防内容",
-    )
-    db.add(capa)
-    await db.flush()
-    await _seed_outbox(db, "capa", capa.report_id, factory_id=default_factory.id)
+async def test_worker_mark_failed_on_embed_error(sessionmaker, vector_db):
+    _db, dim = vector_db
+    fx = await _committed_worker_fixtures(sessionmaker)
+    try:
+        async with sessionmaker() as db:
+            await _seed_outbox(
+                db, "capa", fx["capa_id"], factory_id=fx["factory_id"],
+                product_line_code=fx["pl_code"],
+            )
+            await db.commit()
 
-    class _FailingProvider(_FakeProvider):
-        async def embed(self, texts: list[str]) -> list[list[float]]:
-            raise RuntimeError("embed failed")
+            class _FailingProvider(_FakeProvider):
+                async def embed(self, texts: list[str]) -> list[list[float]]:
+                    raise RuntimeError("embed failed")
 
-    provider = _FailingProvider(dimensions=dim)
-    await process_batch_once(db, provider)
+            provider = _FailingProvider(dimensions=dim)
+            await process_batch_once(db, provider)
 
-    row = await db.execute(
-        text("SELECT status, retry_count, last_error FROM embedding_sync_outbox WHERE entity_id = :eid"),
-        {"eid": capa.report_id},
-    )
-    event = row.fetchone()
-    assert event is not None
-    assert event[0] != "processing"
-    assert event[1] == 1
-    assert event[2] is not None
-    assert "embed failed" in event[2]
+            row = await db.execute(
+                text(
+                    "SELECT status, retry_count, last_error FROM embedding_sync_outbox "
+                    "WHERE entity_id = :eid"
+                ),
+                {"eid": fx["capa_id"]},
+            )
+            event = row.fetchone()
+            assert event is not None
+            assert event[0] != "processing"
+            assert event[1] == 1
+            assert event[2] is not None
+            assert "embed failed" in event[2]
+    finally:
+        await _teardown_worker_fixtures(sessionmaker, fx)
+
+
+@pytest.mark.asyncio
+async def test_worker_rollback_then_mark_failed_after_aborted_tx(
+    sessionmaker, vector_db, monkeypatch
+):
+    """If embed path aborts the session mid-tx, mark_failed still leaves processing."""
+    from app.services import embedding_sync_worker as worker_mod
+
+    _db, dim = vector_db
+    fx = await _committed_worker_fixtures(sessionmaker)
+    try:
+        async with sessionmaker() as db:
+            await _seed_outbox(
+                db, "capa", fx["capa_id"], factory_id=fx["factory_id"],
+                product_line_code=fx["pl_code"],
+            )
+            await db.commit()
+
+            async def boom_upsert(db_, chunks, vectors, model_name):
+                # Force a statement error that aborts the current transaction so the
+                # except path must rollback before mark_failed can commit.
+                await db_.execute(text("SELECT 1 FROM __no_such_table_for_abort__"))
+
+            monkeypatch.setattr(worker_mod, "upsert_embeddings", boom_upsert)
+
+            provider = _FakeProvider(dimensions=dim)
+            await process_batch_once(db, provider)
+
+            row = await db.execute(
+                text(
+                    "SELECT status, retry_count, last_error FROM embedding_sync_outbox "
+                    "WHERE entity_id = :eid"
+                ),
+                {"eid": fx["capa_id"]},
+            )
+            event = row.fetchone()
+            assert event is not None
+            assert event[0] != "processing"
+            assert event[1] == 1
+            assert event[2] is not None
+    finally:
+        await _teardown_worker_fixtures(sessionmaker, fx)
 
 
 # ── R18: capa 通用路径回归 ────────────────────────────────────────────────
@@ -411,49 +555,79 @@ async def test_worker_ready_and_stale_hash(vector_db, default_factory, admin_use
 
 
 @pytest.mark.asyncio
-async def test_worker_dead_letter_marks_failed(vector_db, default_factory, admin_user):
-    db, dim = vector_db
+async def test_worker_dead_letter_marks_failed(sessionmaker, vector_db, default_factory):
+    _db, dim = vector_db
     h1 = "c" * 64
-    entry = await _seed_knowledge_entry(
-        db,
-        factory_id=default_factory.id,
-        content_hash=h1,
-        embedding_text="dead letter knowledge text",
-    )
-    await _seed_outbox(
-        db,
-        "knowledge_entry",
-        entry.entry_id,
-        factory_id=default_factory.id,
-        content_hash=h1,
-        retry_count=4,
-        max_attempts=5,
-    )
+    entry_id = uuid.uuid4()
+    # default_factory is flushed in the outer db fixture tx; ensure it exists
+    # for real-commit sessions by upserting the stable factory id.
+    from app.models.factory import Factory
 
-    class _FailingProvider(_FakeProvider):
-        async def embed(self, texts: list[str]) -> list[list[float]]:
-            raise RuntimeError("embed failed")
-
-    provider = _FailingProvider(dimensions=dim)
-    await process_batch_once(db, provider)
-
-    await db.refresh(entry)
-    assert entry.embedding_status == "failed"
-    assert entry.embedding_id is None
-
-    event = (
-        await db.execute(
-            text(
-                "SELECT status, retry_count, last_error FROM embedding_sync_outbox "
-                "WHERE entity_id = :eid"
-            ),
-            {"eid": entry.entry_id},
+    async with sessionmaker() as db:
+        existing = await db.get(Factory, default_factory.id)
+        if existing is None:
+            db.add(
+                Factory(
+                    id=default_factory.id,
+                    code=default_factory.code,
+                    name=default_factory.name,
+                )
+            )
+            await db.commit()
+        entry = await _seed_knowledge_entry(
+            db,
+            factory_id=default_factory.id,
+            entry_id=entry_id,
+            content_hash=h1,
+            embedding_text="dead letter knowledge text",
         )
-    ).fetchone()
-    assert event is not None
-    assert event[0] == "dead_letter"
-    assert event[1] == 5
-    assert "embed failed" in (event[2] or "")
+        await _seed_outbox(
+            db,
+            "knowledge_entry",
+            entry.entry_id,
+            factory_id=default_factory.id,
+            content_hash=h1,
+            retry_count=4,
+            max_attempts=5,
+        )
+        await db.commit()
+
+        class _FailingProvider(_FakeProvider):
+            async def embed(self, texts: list[str]) -> list[list[float]]:
+                raise RuntimeError("embed failed")
+
+        provider = _FailingProvider(dimensions=dim)
+        await process_batch_once(db, provider)
+
+        status = await db.scalar(
+            text("SELECT embedding_status FROM knowledge_entries WHERE entry_id = :eid"),
+            {"eid": entry_id},
+        )
+        assert status == "failed"
+
+        event = (
+            await db.execute(
+                text(
+                    "SELECT status, retry_count, last_error FROM embedding_sync_outbox "
+                    "WHERE entity_id = :eid"
+                ),
+                {"eid": entry_id},
+            )
+        ).fetchone()
+        assert event is not None
+        assert event[0] == "dead_letter"
+        assert event[1] == 5
+        assert "embed failed" in (event[2] or "")
+
+        await db.execute(
+            text("DELETE FROM embedding_sync_outbox WHERE entity_id = :eid"),
+            {"eid": entry_id},
+        )
+        await db.execute(
+            text("DELETE FROM knowledge_entries WHERE entry_id = :eid"),
+            {"eid": entry_id},
+        )
+        await db.commit()
 
 
 @pytest.mark.asyncio
@@ -518,44 +692,82 @@ async def test_worker_dead_letter_stale_hash_does_not_mark_failed(
 
 
 @pytest.mark.asyncio
-async def test_worker_transient_fail_keeps_pending(vector_db, default_factory, admin_user):
-    db, dim = vector_db
+async def test_worker_transient_fail_keeps_pending(
+    sessionmaker, vector_db, default_factory
+):
+    _db, dim = vector_db
     h1 = "d" * 64
-    entry = await _seed_knowledge_entry(
-        db,
-        factory_id=default_factory.id,
-        content_hash=h1,
-        embedding_text="transient fail knowledge text",
-    )
-    await _seed_outbox(
-        db,
-        "knowledge_entry",
-        entry.entry_id,
-        factory_id=default_factory.id,
-        content_hash=h1,
-        retry_count=0,
-        max_attempts=5,
-    )
+    entry_id = uuid.uuid4()
+    from app.models.factory import Factory
 
-    class _FailingProvider(_FakeProvider):
-        async def embed(self, texts: list[str]) -> list[list[float]]:
-            raise RuntimeError("transient embed failed")
-
-    provider = _FailingProvider(dimensions=dim)
-    await process_batch_once(db, provider)
-
-    await db.refresh(entry)
-    assert entry.embedding_status == "pending"
-    assert entry.embedding_id is None
-
-    event = (
-        await db.execute(
-            text(
-                "SELECT status, retry_count FROM embedding_sync_outbox WHERE entity_id = :eid"
-            ),
-            {"eid": entry.entry_id},
+    async with sessionmaker() as db:
+        existing = await db.get(Factory, default_factory.id)
+        if existing is None:
+            db.add(
+                Factory(
+                    id=default_factory.id,
+                    code=default_factory.code,
+                    name=default_factory.name,
+                )
+            )
+            await db.commit()
+        entry = await _seed_knowledge_entry(
+            db,
+            factory_id=default_factory.id,
+            entry_id=entry_id,
+            content_hash=h1,
+            embedding_text="transient fail knowledge text",
         )
-    ).fetchone()
-    assert event is not None
-    assert event[0] == "pending"
-    assert event[1] == 1
+        await _seed_outbox(
+            db,
+            "knowledge_entry",
+            entry.entry_id,
+            factory_id=default_factory.id,
+            content_hash=h1,
+            retry_count=0,
+            max_attempts=5,
+        )
+        await db.commit()
+
+        class _FailingProvider(_FakeProvider):
+            async def embed(self, texts: list[str]) -> list[list[float]]:
+                raise RuntimeError("transient embed failed")
+
+        provider = _FailingProvider(dimensions=dim)
+        await process_batch_once(db, provider)
+
+        status = await db.scalar(
+            text(
+                "SELECT embedding_status FROM knowledge_entries WHERE entry_id = :eid"
+            ),
+            {"eid": entry_id},
+        )
+        emb_id = await db.scalar(
+            text("SELECT embedding_id FROM knowledge_entries WHERE entry_id = :eid"),
+            {"eid": entry_id},
+        )
+        assert status == "pending"
+        assert emb_id is None
+
+        event = (
+            await db.execute(
+                text(
+                    "SELECT status, retry_count FROM embedding_sync_outbox "
+                    "WHERE entity_id = :eid"
+                ),
+                {"eid": entry_id},
+            )
+        ).fetchone()
+        assert event is not None
+        assert event[0] == "pending"
+        assert event[1] == 1
+
+        await db.execute(
+            text("DELETE FROM embedding_sync_outbox WHERE entity_id = :eid"),
+            {"eid": entry_id},
+        )
+        await db.execute(
+            text("DELETE FROM knowledge_entries WHERE entry_id = :eid"),
+            {"eid": entry_id},
+        )
+        await db.commit()

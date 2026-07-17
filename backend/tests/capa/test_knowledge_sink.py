@@ -16,6 +16,7 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaD7NodeAction, CapaRootCauseVerification
 from app.models.knowledge_entry import KnowledgeEntry
 from app.models.role import RolePermission
+from app.models.user import User
 from app.services.agent.provider_adapter import ProviderClient
 from tests.conftest import _scope_for
 
@@ -528,27 +529,97 @@ async def test_manual_resink_resets_pending(
 
 
 @pytest.mark.asyncio
-async def test_concurrent_first_sink_unique_race(
-    db, default_factory, admin_user, monkeypatch
-):
-    """Two concurrent first-sinks must not 500; both resolve to one row (update path)."""
-    from app.services.knowledge_sink_service import sink_capa_on_close
+async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
+    """Two concurrent first-sinks on separate sessions resolve to one row.
 
-    capa = await _make_capa(
-        db, default_factory.id, admin_user.user_id, status="D8_CLOSURE"
-    )
-    await db.commit()
+    Uses true asyncio.gather + two AsyncSessions (not sequential double-sink)
+    so the unique race is real; ON CONFLICT must absorb the loser without
+    unhandled IntegrityError.
+    """
+    import asyncio
+
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition, RolePermission
+    from app.core.permissions import Module
+    from app.services.knowledge_sink_service import sink_capa_on_close
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy import delete as sa_delete
+
+    factory_id = uuid.uuid4()
+    pl_code = f"PL-KNOW-{factory_id.hex[:8]}"
+    user_id = uuid.uuid4()
+    capa_id = uuid.uuid4()
+    role_id = uuid.uuid4()
+    doc_no = f"8D-KNOW-RACE-{factory_id.hex[:6]}"
+
+    async with sessionmaker() as s:
+        s.add(Factory(id=factory_id, code=f"F-{factory_id.hex[:8]}", name="Race Factory"))
+        s.add(ProductLine(code=pl_code, name=pl_code, factory_id=factory_id))
+        role = RoleDefinition(
+            id=role_id,
+            role_key=f"admin_know_{factory_id.hex[:8]}",
+            name_zh="系统管理员",
+            name_en="System Admin",
+            is_system=True,
+            is_editable=False,
+            bypass_row_level_security=True,
+            sort_order=1,
+            is_active=True,
+        )
+        s.add(role)
+        await s.flush()
+        s.add(
+            User(
+                user_id=user_id,
+                username=f"know_race_{factory_id.hex[:8]}",
+                display_name="Know Race",
+                password_hash="hashed",
+                role_id=role.id,
+                legacy_role="admin",
+                is_active=True,
+                factory_id=factory_id,
+            )
+        )
+        await s.flush()
+        for module in Module:
+            s.add(RolePermission(role_id=role.id, module=module.value, permission_level=5))
+        await s.flush()
+        s.add(
+            CAPAEightD(
+                report_id=capa_id,
+                document_no=doc_no,
+                title="并发沉淀竞态",
+                product_line_code=pl_code,
+                factory_id=factory_id,
+                created_by=user_id,
+                status="D8_CLOSURE",
+                severity="serious",
+                d1_team=[],
+                d2_description="问题描述",
+                d3_interim="临时围堵",
+                d4_root_cause="根因文本",
+                d5_correction="纠正措施",
+                d6_verification="已验证",
+                d7_prevention="预防措施兜底",
+                d8_closure="关闭说明",
+            )
+        )
+        await s.commit()
 
     call_n = {"n": 0}
+    call_lock = asyncio.Lock()
 
     async def ok_client(db_):
         return _fake_pc()
 
     async def ok_json(pc, prompt, schema):
-        call_n["n"] += 1
+        async with call_lock:
+            call_n["n"] += 1
+            n = call_n["n"]
         return _ok_llm_result(
-            lesson_summary=f"并发摘要{call_n['n']}",
-            tags=["a", "b", f"t{call_n['n']}"],
+            lesson_summary=f"并发摘要{n}",
+            tags=["a", "b", f"t{n}"],
         )
 
     monkeypatch.setattr(
@@ -558,24 +629,87 @@ async def test_concurrent_first_sink_unique_race(
         "app.services.agent.provider_adapter.complete_json", ok_json
     )
 
-    # Two sequential sink calls on a fresh CAPA simulate the unique race winner
-    # + loser (both hit ON CONFLICT path after first insert).
-    entry1 = await sink_capa_on_close(db, capa, admin_user.user_id, manual=True)
-    await db.flush()
-    entry2 = await sink_capa_on_close(db, capa, admin_user.user_id, manual=True)
-    await db.flush()
+    results: list = []
+    errors: list = []
+    ready_count = 0
+    both_ready = asyncio.Event()
 
-    assert entry1.entry_id == entry2.entry_id
-    rows = (
-        await db.execute(
-            select(KnowledgeEntry).where(
-                KnowledgeEntry.source_type == "capa",
-                KnowledgeEntry.source_id == capa.report_id,
-            )
+    async def worker():
+        nonlocal ready_count
+        async with sessionmaker() as s:
+            capa = await s.get(CAPAEightD, capa_id)
+            assert capa is not None
+            ready_count += 1
+            if ready_count == 2:
+                both_ready.set()
+            await both_ready.wait()
+            try:
+                entry = await sink_capa_on_close(s, capa, user_id, manual=True)
+                await s.commit()
+                results.append(("ok", entry.entry_id))
+            except IntegrityError as e:
+                await s.rollback()
+                errors.append(e)
+                results.append(("integrity", None))
+            except Exception as e:
+                await s.rollback()
+                errors.append(e)
+                results.append(("error", type(e).__name__))
+
+    try:
+        await asyncio.wait_for(asyncio.gather(worker(), worker()), timeout=30.0)
+
+        assert not any(r[0] == "integrity" for r in results), (
+            f"unhandled IntegrityError in concurrent sink: {errors}"
         )
-    ).scalars().all()
-    assert len(rows) == 1
-    assert rows[0].embedding_status == "pending"
-    assert rows[0].embedding_id is None
-    assert rows[0].fields["lesson_summary"] == "并发摘要2"
-    assert rows[0].status == "active"
+        assert not any(r[0] == "error" for r in results), (
+            f"unexpected sink errors: {results} / {errors}"
+        )
+        assert len(results) == 2
+        assert all(r[0] == "ok" for r in results)
+        assert results[0][1] == results[1][1]
+
+        async with sessionmaker() as s:
+            rows = (
+                await s.execute(
+                    select(KnowledgeEntry).where(
+                        KnowledgeEntry.source_type == "capa",
+                        KnowledgeEntry.source_id == capa_id,
+                    )
+                )
+            ).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].embedding_status == "pending"
+            assert rows[0].embedding_id is None
+            assert rows[0].status == "active"
+            assert rows[0].fields["lesson_summary"].startswith("并发摘要")
+    finally:
+        async with sessionmaker() as s:
+            entry_ids = (
+                await s.execute(
+                    select(KnowledgeEntry.entry_id).where(
+                        KnowledgeEntry.source_id == capa_id
+                    )
+                )
+            ).scalars().all()
+            for eid in entry_ids:
+                await s.execute(
+                    text("DELETE FROM embedding_sync_outbox WHERE entity_id = :eid"),
+                    {"eid": eid},
+                )
+                await s.execute(
+                    text("DELETE FROM document_embeddings WHERE entity_id = :eid"),
+                    {"eid": eid},
+                )
+            await s.execute(
+                sa_delete(KnowledgeEntry).where(KnowledgeEntry.source_id == capa_id)
+            )
+            await s.execute(sa_delete(AuditLog).where(AuditLog.record_id == capa_id))
+            await s.execute(sa_delete(AuditLog).where(AuditLog.operated_by == user_id))
+            await s.execute(sa_delete(CAPAEightD).where(CAPAEightD.report_id == capa_id))
+            await s.execute(sa_delete(RolePermission).where(RolePermission.role_id == role_id))
+            await s.execute(sa_delete(User).where(User.user_id == user_id))
+            await s.execute(sa_delete(RoleDefinition).where(RoleDefinition.id == role_id))
+            await s.execute(sa_delete(ProductLine).where(ProductLine.code == pl_code))
+            await s.execute(sa_delete(Factory).where(Factory.id == factory_id))
+            await s.commit()
