@@ -94,6 +94,60 @@ def test_upgrade_raises_when_knowledge_entries_already_exists(mig_db_url):
     engine.dispose()
 
 
+def test_upgrade_raises_when_outbox_content_hash_not_null(mig_db_url):
+    """Pre-existing content_hash NOT NULL must not stamp (enqueue inserts NULL).
+
+    Also assert transactional DDL: alembic_version stays at PARENT and no
+    knowledge_entries residue from a partial create.
+    """
+    import pytest
+
+    cfg = _cfg(mig_db_url)
+    command.upgrade(cfg, PARENT)
+    engine = _sync_engine(mig_db_url)
+    with engine.connect() as conn:
+        with conn.begin():
+            # Drop nullable column if present from earlier revs, add NOT NULL stand-in.
+            # PARENT chain may already have embedding_sync_outbox without content_hash.
+            has_col = conn.execute(
+                sa.text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name='embedding_sync_outbox' "
+                    "AND column_name='content_hash'"
+                )
+            ).scalar()
+            if has_col:
+                conn.execute(
+                    sa.text(
+                        "ALTER TABLE embedding_sync_outbox DROP COLUMN content_hash"
+                    )
+                )
+            conn.execute(
+                sa.text(
+                    "ALTER TABLE embedding_sync_outbox "
+                    "ADD COLUMN content_hash VARCHAR(64) NOT NULL DEFAULT ''"
+                )
+            )
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="NOT NULL"):
+        command.upgrade(cfg, REV)
+
+    engine = _sync_engine(mig_db_url)
+    with engine.connect() as conn:
+        rev = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+        assert rev == PARENT
+        # knowledge_entries must not remain if create was rolled back with the error.
+        ke = conn.execute(
+            sa.text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_name='knowledge_entries'"
+            )
+        ).scalar()
+        assert ke is None
+    engine.dispose()
+
+
 def test_knowledge_entries_table_and_outbox_hash(mig_db_url):
     cfg = _cfg(mig_db_url)
     command.upgrade(cfg, PARENT)

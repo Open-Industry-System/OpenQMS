@@ -115,7 +115,9 @@ def upgrade() -> None:
             sa.Column("content_hash", sa.String(64), nullable=True),
         )
     else:
-        # Fail-closed on wrong type (name-only pass would stamp a broken column).
+        # Fail-closed on wrong type / nullability (name-only pass would stamp a
+        # broken column). enqueue_embedding defaults content_hash=None and all
+        # non-knowledge_entry callers insert NULL — column must be nullable.
         col = outbox_cols["content_hash"]
         col_type = col["type"]
         # SQLAlchemy may report VARCHAR/String; accept string-like only.
@@ -130,6 +132,12 @@ def upgrade() -> None:
             raise RuntimeError(
                 "20260716_knowledge_entries: embedding_sync_outbox.content_hash "
                 f"length {length} < 64; refusing to stamp"
+            )
+        if col.get("nullable") is False:
+            raise RuntimeError(
+                "20260716_knowledge_entries: embedding_sync_outbox.content_hash "
+                "exists as NOT NULL; refusing to stamp (enqueue_embedding inserts NULL "
+                "for non-knowledge_entry entities)"
             )
 
 
