@@ -259,12 +259,19 @@ async def update_capa(
     # US-E2E-01.6: supplier_id same-factory + D7+ lock
     if "supplier_id" in update_data and update_data["supplier_id"] is not None:
         from app.models.supplier import Supplier
+        from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
         new_supplier_id = update_data["supplier_id"]
         sup = await db.get(Supplier, new_supplier_id)
         if sup is None:
             raise ValueError("供应商不存在")
         if sup.factory_id != capa.factory_id:
             raise ValueError("供应商与 8D 不属于同一工厂")
+        # Freeze supplier once a risk input has been generated (covers D8 reject → D7_PREVENTION)
+        existing_input = await db.scalar(
+            select(SupplierRiskCapaInput.input_id).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+        )
+        if existing_input is not None and capa.supplier_id != new_supplier_id:
+            raise ValueError("已生成供应商风险输入，不可修改供应商")
         locked_states = {
             EightDState.D7_COMPLETED.value,
             EightDState.D8_GATE_PENDING.value,

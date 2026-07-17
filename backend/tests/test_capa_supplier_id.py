@@ -46,6 +46,7 @@ def test_capa_response_includes_supplier_id():
 from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.supplier import Supplier
+from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 from app.services.capa_service import create_capa, update_capa
 
 
@@ -192,3 +193,61 @@ async def test_update_capa_allows_same_supplier_id_after_d7(db, default_factory,
     await update_capa(db, capa, {"supplier_id": sup.supplier_id}, admin_user.user_id)
     await db.refresh(capa)
     assert capa.supplier_id == sup.supplier_id
+
+
+@pytest.mark.requires_db
+@pytest.mark.asyncio
+async def test_update_capa_locks_supplier_id_when_risk_input_exists_at_d7_prevention(
+    db, default_factory, admin_user
+):
+    """D7_PREVENTION + existing SupplierRiskCapaInput → cannot change supplier_id."""
+    sup_a = await _make_supplier(db, default_factory.id, admin_user.user_id, supplier_no="SUP-A")
+    sup_b = await _make_supplier(db, default_factory.id, admin_user.user_id, supplier_no="SUP-B")
+    capa = await _make_capa(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        status="D7_PREVENTION",
+        supplier_id=sup_a.supplier_id,
+    )
+    db.add(
+        SupplierRiskCapaInput(
+            input_id=uuid.uuid4(),
+            capa_id=capa.report_id,
+            supplier_id=sup_a.supplier_id,
+            factory_id=default_factory.id,
+            product_line_code="DC-DC-100",
+            created_by=admin_user.user_id,
+            severity="严重",
+            disposition="退货",
+            repeat_suggested=True,
+            repeat_confirmed=True,
+            repeat_detection_status="matched",
+            matched_capa_nos=["8D-2025-001"],
+            status="pending",
+        )
+    )
+    await db.flush()
+
+    with pytest.raises(ValueError, match="已生成供应商风险输入"):
+        await update_capa(db, capa, {"supplier_id": sup_b.supplier_id}, admin_user.user_id)
+
+
+@pytest.mark.requires_db
+@pytest.mark.asyncio
+async def test_update_capa_allows_supplier_change_at_d7_prevention_without_risk_input(
+    db, default_factory, admin_user
+):
+    """D7_PREVENTION without risk input → same-factory supplier change allowed."""
+    sup_a = await _make_supplier(db, default_factory.id, admin_user.user_id, supplier_no="SUP-A2")
+    sup_b = await _make_supplier(db, default_factory.id, admin_user.user_id, supplier_no="SUP-B2")
+    capa = await _make_capa(
+        db,
+        default_factory.id,
+        admin_user.user_id,
+        status="D7_PREVENTION",
+        supplier_id=sup_a.supplier_id,
+    )
+    await update_capa(db, capa, {"supplier_id": sup_b.supplier_id}, admin_user.user_id)
+    await db.refresh(capa)
+    assert capa.supplier_id == sup_b.supplier_id
