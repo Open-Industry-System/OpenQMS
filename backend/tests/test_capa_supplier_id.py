@@ -1,10 +1,12 @@
-"""CAPA supplier_id schema + update lifecycle (US-E2E-01.6 §4.1 / §4.5)."""
+"""CAPA supplier_id schema + create/update lifecycle (US-E2E-01.6 §4.1 / §4.5)."""
 import uuid
 
 import pytest
 
 from app.schemas.capa import CAPACreate, CAPAResponse, CAPAUpdate
 
+
+# ── Schema tests ────────────────────────────────────────────────────
 
 def test_capa_create_accepts_supplier_id():
     sid = uuid.uuid4()
@@ -44,7 +46,7 @@ def test_capa_response_includes_supplier_id():
 from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.supplier import Supplier
-from app.services.capa_service import update_capa
+from app.services.capa_service import create_capa, update_capa
 
 
 async def _make_capa(db, factory_id, user_id, status="D4_ROOT_CAUSE", **extra):
@@ -76,6 +78,62 @@ async def _make_supplier(db, factory_id, user_id, *, supplier_no=None):
     db.add(supplier)
     await db.flush()
     return supplier
+
+
+@pytest.mark.requires_db
+@pytest.mark.asyncio
+async def test_create_capa_persists_supplier_id(db, default_factory, admin_user):
+    sup = await _make_supplier(db, default_factory.id, admin_user.user_id)
+    capa = await create_capa(
+        db,
+        title="t",
+        document_no=f"8D-CREATE-{uuid.uuid4().hex[:6]}",
+        severity="严重",
+        due_date=None,
+        user_id=admin_user.user_id,
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        supplier_id=sup.supplier_id,
+    )
+    assert capa.supplier_id == sup.supplier_id
+
+
+@pytest.mark.requires_db
+@pytest.mark.asyncio
+async def test_create_capa_rejects_cross_factory_supplier(db, default_factory, admin_user):
+    other = Factory(id=uuid.uuid4(), code=f"OF-{uuid.uuid4().hex[:6]}", name="Other")
+    db.add(other)
+    await db.flush()
+    other_supplier = await _make_supplier(db, other.id, admin_user.user_id)
+    with pytest.raises(ValueError, match="同一工厂"):
+        await create_capa(
+            db,
+            title="t",
+            document_no=f"8D-CREATE-{uuid.uuid4().hex[:6]}",
+            severity="严重",
+            due_date=None,
+            user_id=admin_user.user_id,
+            product_line_code="DC-DC-100",
+            factory_id=default_factory.id,
+            supplier_id=other_supplier.supplier_id,
+        )
+
+
+@pytest.mark.requires_db
+@pytest.mark.asyncio
+async def test_create_capa_rejects_missing_supplier(db, default_factory, admin_user):
+    with pytest.raises(ValueError, match="供应商不存在"):
+        await create_capa(
+            db,
+            title="t",
+            document_no=f"8D-CREATE-{uuid.uuid4().hex[:6]}",
+            severity="严重",
+            due_date=None,
+            user_id=admin_user.user_id,
+            product_line_code="DC-DC-100",
+            factory_id=default_factory.id,
+            supplier_id=uuid.uuid4(),
+        )
 
 
 @pytest.mark.requires_db

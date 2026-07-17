@@ -92,6 +92,7 @@ async def create_capa(
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
     factory_id: uuid.UUID | None = None,
+    supplier_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
@@ -100,6 +101,14 @@ async def create_capa(
     )
     if existing_result.scalar_one_or_none():
         raise ValueError(f"CAPA report number '{document_no}' already exists.")
+
+    if supplier_id is not None:
+        from app.models.supplier import Supplier
+        sup = await db.get(Supplier, supplier_id)
+        if sup is None:
+            raise ValueError("供应商不存在")
+        if sup.factory_id != factory_id:
+            raise ValueError("供应商与 8D 不属于同一工厂")
 
     report_id = uuid.uuid4()
     capa = CAPAEightD(
@@ -111,22 +120,26 @@ async def create_capa(
         product_line_code=product_line_code,
         created_by=user_id,
         factory_id=factory_id,
+        supplier_id=supplier_id,
     )
     db.add(capa)
 
     # Audit log
+    changed_fields = {
+        "title": title,
+        "document_no": document_no,
+        "severity": severity,
+        "due_date": str(due_date) if due_date else None,
+        "product_line_code": product_line_code,
+        "status": capa.status,
+    }
+    if supplier_id is not None:
+        changed_fields["supplier_id"] = str(supplier_id)
     audit_log = AuditLog(
         table_name="capa_eightd",
         record_id=report_id,
         action="CREATE",
-        changed_fields={
-            "title": title,
-            "document_no": document_no,
-            "severity": severity,
-            "due_date": str(due_date) if due_date else None,
-            "product_line_code": product_line_code,
-            "status": capa.status,
-        },
+        changed_fields=changed_fields,
         operated_by=user_id,
     )
     db.add(audit_log)
@@ -151,6 +164,7 @@ async def _create_capa_without_commit(
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
     factory_id: uuid.UUID | None = None,
+    supplier_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     """Create CAPA without committing — caller must commit."""
     await validate_product_line(db, product_line_code)
@@ -160,6 +174,14 @@ async def _create_capa_without_commit(
     )
     if existing_result.scalar_one_or_none():
         raise ValueError(f"CAPA report number '{document_no}' already exists.")
+
+    if supplier_id is not None:
+        from app.models.supplier import Supplier
+        sup = await db.get(Supplier, supplier_id)
+        if sup is None:
+            raise ValueError("供应商不存在")
+        if sup.factory_id != factory_id:
+            raise ValueError("供应商与 8D 不属于同一工厂")
 
     report_id = uuid.uuid4()
     capa = CAPAEightD(
@@ -171,22 +193,26 @@ async def _create_capa_without_commit(
         product_line_code=product_line_code,
         created_by=user_id,
         factory_id=factory_id,
+        supplier_id=supplier_id,
     )
     db.add(capa)
 
     # Audit log
+    changed_fields = {
+        "title": title,
+        "document_no": document_no,
+        "severity": severity,
+        "due_date": str(due_date) if due_date else None,
+        "product_line_code": product_line_code,
+        "status": capa.status,
+    }
+    if supplier_id is not None:
+        changed_fields["supplier_id"] = str(supplier_id)
     audit_log = AuditLog(
         table_name="capa_eightd",
         record_id=report_id,
         action="CREATE",
-        changed_fields={
-            "title": title,
-            "document_no": document_no,
-            "severity": severity,
-            "due_date": str(due_date) if due_date else None,
-            "product_line_code": product_line_code,
-            "status": capa.status,
-        },
+        changed_fields=changed_fields,
         operated_by=user_id,
     )
     db.add(audit_log)

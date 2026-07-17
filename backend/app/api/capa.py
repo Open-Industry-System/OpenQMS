@@ -141,6 +141,7 @@ async def create_capa(
         capa = await capa_service.create_capa(
             db, req.title, req.document_no, req.severity, req.due_date,
             scope.user.user_id, req.product_line_code, factory_id=factory_id,
+            supplier_id=req.supplier_id,
         )
         await validate_factory_invariant(capa, db)
     except ValueError as e:
