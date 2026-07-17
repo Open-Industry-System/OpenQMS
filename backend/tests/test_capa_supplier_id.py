@@ -334,7 +334,10 @@ async def test_evaluate_in_tx_lock_key_ignores_product_line(db, admin_user, defa
 
 @pytest.mark.asyncio
 async def test_evaluate_in_tx_uses_preloaded_without_re_gather(db, admin_user, default_factory, monkeypatch):
-    """Batch path preloaded= must skip per-supplier gather N+1."""
+    """Batch path preloaded= must skip per-supplier gather N+1 for stable inputs.
+
+    CAPA inputs are intentionally always re-queried under the lock.
+    """
     from app.services.supplier_risk import service as risk_service
     from app.models.supplier import Supplier
     from app.models.supplier_risk import SupplierRiskConfig
@@ -359,11 +362,18 @@ async def test_evaluate_in_tx_uses_preloaded_without_re_gather(db, admin_user, d
     async def boom(*_a, **_k):
         raise AssertionError("gather should not be called when preloaded")
 
+    capa_calls = {"n": 0}
+    real_gather_capa = risk_service._gather_capa_inputs
+
+    async def track_capa(*a, **k):
+        capa_calls["n"] += 1
+        return await real_gather_capa(*a, **k)
+
     monkeypatch.setattr(risk_service, "_gather_inspections", boom)
     monkeypatch.setattr(risk_service, "_gather_scars", boom)
     monkeypatch.setattr(risk_service, "_gather_evaluations", boom)
     monkeypatch.setattr(risk_service, "_gather_certifications", boom)
-    monkeypatch.setattr(risk_service, "_gather_capa_inputs", boom)
+    monkeypatch.setattr(risk_service, "_gather_capa_inputs", track_capa)
 
     alert, score, *_ = await risk_service.evaluate_supplier_risk_in_tx(
         db, sup.supplier_id, "DC-DC-100",
@@ -374,10 +384,125 @@ async def test_evaluate_in_tx_uses_preloaded_without_re_gather(db, admin_user, d
             "scars": [],
             "evaluations": [],
             "certifications": [],
-            "capa_incidents": [],
+            # stale CAPA snapshot must be ignored
+            "capa_incidents": ["stale-must-not-be-used"],
         },
     )
     assert score is not None
+    assert capa_calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_evaluate_in_tx_ignores_preloaded_capa_incidents(
+    db, admin_user, default_factory, monkeypatch,
+):
+    """Even if preloaded contains capa_incidents, under-lock re-query wins."""
+    from app.services.supplier_risk import service as risk_service
+    from app.models.supplier import Supplier
+    from app.models.supplier_risk import SupplierRiskConfig
+
+    sup = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-CAPA-{uuid.uuid4().hex[:6]}",
+        name="Capa Fresh Sup",
+        short_name="CFS",
+        factory_id=default_factory.id,
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    db.add(sup)
+    cfg = SupplierRiskConfig(
+        rule_id="R01", enabled=True, category="quality", weight=1.0,
+        thresholds={}, factory_id=default_factory.id, updated_by=admin_user.user_id,
+    )
+    db.add(cfg)
+    await db.flush()
+
+    sentinel = object()
+    called = {"n": 0}
+
+    async def fake_gather(db_, sid, pl):
+        called["n"] += 1
+        assert sid == sup.supplier_id
+        return [sentinel]
+
+    monkeypatch.setattr(risk_service, "_gather_capa_inputs", fake_gather)
+
+    # Capture incidents passed into run_all_rules
+    captured = {}
+    real_run = risk_service.run_all_rules
+
+    def wrap_run(input_data, configs):
+        captured["incidents"] = input_data.capa_incidents
+        return real_run(input_data, configs)
+
+    monkeypatch.setattr(risk_service, "run_all_rules", wrap_run)
+
+    await risk_service.evaluate_supplier_risk_in_tx(
+        db, sup.supplier_id, "DC-DC-100",
+        preloaded={
+            "supplier": sup,
+            "configs": [cfg],
+            "inspections": [],
+            "scars": [],
+            "evaluations": [],
+            "certifications": [],
+            "capa_incidents": ["stale"],
+        },
+    )
+    assert called["n"] == 1
+    assert captured["incidents"] == [sentinel]
+
+
+@pytest.mark.asyncio
+async def test_evaluate_all_continues_after_one_supplier_fails(
+    db, admin_user, default_factory, monkeypatch,
+):
+    """One supplier failure must not cascade-skip later suppliers (savepoint isolation)."""
+    from app.services.supplier_risk import service as risk_service
+    from app.models.supplier import Supplier
+    from app.models.supplier_risk import SupplierRiskConfig
+
+    bad = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-BAD-{uuid.uuid4().hex[:6]}",
+        name="Bad Sup",
+        short_name="BAD",
+        factory_id=default_factory.id,
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    good = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-GOOD-{uuid.uuid4().hex[:6]}",
+        name="Good Sup",
+        short_name="GOOD",
+        factory_id=default_factory.id,
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    db.add_all([bad, good])
+    # Global R01 so both resolve configs
+    db.add(SupplierRiskConfig(
+        rule_id="R01", enabled=True, category="quality", weight=1.0,
+        thresholds={}, factory_id=default_factory.id, product_line_code=None,
+        supplier_id=None, updated_by=admin_user.user_id,
+    ))
+    await db.flush()
+
+    real_eval = risk_service.evaluate_supplier_risk_in_tx
+
+    async def flaky(db_, supplier_id, product_line_code=None, **kwargs):
+        if supplier_id == bad.supplier_id:
+            raise RuntimeError("boom-for-bad-supplier")
+        return await real_eval(db_, supplier_id, product_line_code, **kwargs)
+
+    monkeypatch.setattr(risk_service, "evaluate_supplier_risk_in_tx", flaky)
+
+    results = await risk_service.evaluate_all_suppliers(db, product_line_code=None)
+    ids = {r["supplier_id"] for r in results}
+    assert good.supplier_id in ids
+    assert bad.supplier_id not in ids
 
 
 @pytest.mark.asyncio

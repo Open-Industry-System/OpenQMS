@@ -48,7 +48,11 @@ async def evaluate_supplier_risk_in_tx(
     cannot race and overwrite each other's daily alert.
 
     ``preloaded`` optional dict may include inspections/scars/evaluations/
-    certifications/capa_incidents/configs/supplier to avoid N+1 in batch paths.
+    certifications/configs/supplier to avoid N+1 in batch paths.
+
+    CAPA inputs are **always** re-queried under the lock (``preloaded`` cannot
+    supply them). Batch load happens before the lock; reusing that snapshot
+    would let a waiting rollup overwrite a fresher worker/confirm result.
     """
     from sqlalchemy import text as sa_text
 
@@ -81,9 +85,8 @@ async def evaluate_supplier_risk_in_tx(
     certifications = pre.get("certifications")
     if certifications is None:
         certifications = await _gather_certifications(db, supplier_id)
-    incidents = pre.get("capa_incidents")
-    if incidents is None:
-        incidents = await _gather_capa_inputs(db, supplier_id, product_line_code)
+    # Always under lock — never trust a pre-lock CAPA snapshot.
+    incidents = await _gather_capa_inputs(db, supplier_id, product_line_code)
 
     # 显式注入 trigger_input（绕过 status 限制，但须仍在 90 天窗口内）
     if trigger_input is not None:
@@ -178,10 +181,15 @@ async def evaluate_all_suppliers(
 ) -> list[dict]:
     """Evaluate all active suppliers.
 
-    Batch-loads IQC/SCAR/eval/cert/capa_inputs/configs once, then per supplier
-    calls ``evaluate_supplier_risk_in_tx`` with ``preloaded=`` so:
+    Batch-loads IQC/SCAR/eval/cert/configs once, then per supplier calls
+    ``evaluate_supplier_risk_in_tx`` with ``preloaded=`` so:
     - shared supplier-level advisory lock still serializes against worker/confirm
-    - N+1 config/data queries are avoided
+    - N+1 config/data queries are avoided for stable inputs
+    - CAPA inputs are intentionally NOT preloaded (re-queried under lock)
+
+    Each supplier runs in a SAVEPOINT so one failure does not expire the rest of
+    the batch session (full rollback would invalidate preloaded ORM rows and
+    cascade-skip remaining suppliers via MissingGreenlet).
     """
     result = await db.execute(
         select(Supplier).where(Supplier.status == "approved")
@@ -190,63 +198,80 @@ async def evaluate_all_suppliers(
     if not suppliers:
         return []
 
+    # Plain ids first — safe after any later rollback/expire.
     supplier_ids = [s.supplier_id for s in suppliers]
     inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
     scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
     evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
     certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
-    capa_inputs_by_supplier = await _batch_gather_capa_inputs(db, supplier_ids, product_line_code)
     configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
 
     results = []
     for supplier in suppliers:
+        supplier_id = supplier.supplier_id
+        configs = configs_by_supplier.get(supplier_id)
+        if not configs:
+            continue
+
         try:
-            configs = configs_by_supplier.get(supplier.supplier_id)
-            if not configs:
-                continue
+            async with db.begin_nested():
+                alert, risk_score, rule_results, event_type = await evaluate_supplier_risk_in_tx(
+                    db, supplier_id, product_line_code,
+                    preloaded={
+                        "supplier": supplier,
+                        "configs": configs,
+                        "inspections": inspections_by_supplier.get(supplier_id, []),
+                        "scars": scars_by_supplier.get(supplier_id, []),
+                        "evaluations": evaluations_by_supplier.get(supplier_id, []),
+                        "certifications": certifications_by_supplier.get(supplier_id, []),
+                    },
+                )
+                # Materialize plain values before savepoint ends / outer commit.
+                row = {
+                    "supplier_id": supplier_id,
+                    "risk_level": risk_score.risk_level,
+                    "risk_score": risk_score.risk_score,
+                    "quality_score": risk_score.quality_score,
+                    "delivery_score": risk_score.delivery_score,
+                    "compliance_score": risk_score.compliance_score,
+                    "rule_results": [
+                        {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
+                         "detail": r.detail, "category": r.category, "critical": r.critical}
+                        for r in rule_results
+                    ],
+                    "alert_id": alert.alert_id if alert else None,
+                    "_event_type": event_type,
+                    "_alert": alert,
+                }
+        except Exception:
+            # Nested savepoint auto-rolls back; do NOT full-session rollback
+            # (that would expire preloaded ORM for remaining suppliers).
+            continue
 
-            alert, risk_score, rule_results, event_type = await evaluate_supplier_risk_in_tx(
-                db, supplier.supplier_id, product_line_code,
-                preloaded={
-                    "supplier": supplier,
-                    "configs": configs,
-                    "inspections": inspections_by_supplier.get(supplier.supplier_id, []),
-                    "scars": scars_by_supplier.get(supplier.supplier_id, []),
-                    "evaluations": evaluations_by_supplier.get(supplier.supplier_id, []),
-                    "certifications": certifications_by_supplier.get(supplier.supplier_id, []),
-                    "capa_incidents": capa_inputs_by_supplier.get(supplier.supplier_id, []),
-                },
-            )
-
+        try:
             await db.commit()
-            if alert:
-                await db.refresh(alert)
-
-            if alert and event_type in ("new", "escalated") and alert.risk_level in ("high", "critical"):
-                from app.services.supplier_risk.notifier import send_notifications
-                try:
-                    await send_notifications(db, alert, product_line_code)
-                except Exception:
-                    logger = __import__("logging").getLogger(__name__)
-                    logger.exception("Notification failed for alert %s", alert.alert_id)
-
-            results.append({
-                "supplier_id": supplier.supplier_id,
-                "risk_level": risk_score.risk_level,
-                "risk_score": risk_score.risk_score,
-                "quality_score": risk_score.quality_score,
-                "delivery_score": risk_score.delivery_score,
-                "compliance_score": risk_score.compliance_score,
-                "rule_results": [
-                    {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
-                     "detail": r.detail, "category": r.category, "critical": r.critical}
-                    for r in rule_results
-                ],
-                "alert_id": alert.alert_id if alert else None,
-            })
         except Exception:
             await db.rollback()
             continue
+
+        alert = row.pop("_alert")
+        event_type = row.pop("_event_type")
+        if alert:
+            try:
+                await db.refresh(alert)
+                row["alert_id"] = alert.alert_id
+            except Exception:
+                pass
+
+        if alert and event_type in ("new", "escalated") and alert.risk_level in ("high", "critical"):
+            from app.services.supplier_risk.notifier import send_notifications
+            try:
+                await send_notifications(db, alert, product_line_code)
+            except Exception:
+                logger = __import__("logging").getLogger(__name__)
+                logger.exception("Notification failed for alert %s", alert.alert_id)
+
+        results.append(row)
 
     return results
 
