@@ -90,6 +90,8 @@ class CAPAResponse(BaseModel):
     updated_at: datetime
     d4_retry_count: int = 0  # P1-3: D4 验证回退计数，API/e2e 可观察
     supplier_id: uuid.UUID | None = None
+    supplier_no: str | None = None
+    supplier_name: str | None = None
     scar_ref_id: uuid.UUID | None = None
     linked_scar: LinkedScarSchema | None = None
     d3_affected_lots: list[str] = []

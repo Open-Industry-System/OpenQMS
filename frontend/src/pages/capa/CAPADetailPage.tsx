@@ -872,11 +872,16 @@ export default function CAPADetailPage() {
                 />
               ) : (
                 <span data-e2e="capa-supplier-readonly">
-                  {capa.supplier_id
-                    ? (suppliers.find((s) => s.supplier_id === capa.supplier_id)
-                        ? `${suppliers.find((s) => s.supplier_id === capa.supplier_id)!.supplier_no} - ${suppliers.find((s) => s.supplier_id === capa.supplier_id)!.name}`
-                        : capa.supplier_id)
-                    : t("detail.notLinked", "未关联")}
+                  {(() => {
+                    if (!capa.supplier_id) return t("detail.notLinked", "未关联");
+                    if (capa.supplier_no) {
+                      return capa.supplier_name
+                        ? `${capa.supplier_no} - ${capa.supplier_name}`
+                        : capa.supplier_no;
+                    }
+                    const s = suppliers.find((x) => x.supplier_id === capa.supplier_id);
+                    return s ? `${s.supplier_no} - ${s.name}` : capa.supplier_id;
+                  })()}
                   {(supplierLocked || !!capa.supplier_risk_input) && capa.supplier_id && (
                     <Tag style={{ marginLeft: 8 }}>{t("detail.supplierLocked", "已锁定")}</Tag>
                   )}

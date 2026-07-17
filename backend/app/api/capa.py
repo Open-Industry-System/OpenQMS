@@ -273,7 +273,7 @@ async def capa_capabilities(
 
 
 async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) -> CAPAResponse:
-    """Build CAPAResponse with scar / d3 lots / supplier_risk_input projections."""
+    """Build CAPAResponse with scar / d3 lots / supplier_risk_input / supplier label projections."""
     resp = CAPAResponse.model_validate(capa)
     linked = None
     if capa.scar_ref_id is not None:
@@ -286,6 +286,17 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
                 supplier_id=scar.supplier_id,
             )
     lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id)
+
+    supplier_no = None
+    supplier_name = None
+    if capa.supplier_id is not None:
+        from app.models.supplier import Supplier
+        sup = await db.get(Supplier, capa.supplier_id)
+        if sup is not None:
+            # Scope: only expose label if same factory (row already CAPA-scoped)
+            if sup.factory_id == capa.factory_id:
+                supplier_no = sup.supplier_no
+                supplier_name = sup.name
 
     supplier_risk_input = None
     from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
@@ -325,6 +336,8 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
             "linked_scar": linked,
             "d3_affected_lots": lots,
             "supplier_risk_input": supplier_risk_input,
+            "supplier_no": supplier_no,
+            "supplier_name": supplier_name,
         }
     )
 

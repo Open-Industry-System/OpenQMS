@@ -255,7 +255,7 @@ async def test_update_capa_allows_supplier_change_at_d7_prevention_without_risk_
 
 @pytest.mark.asyncio
 async def test_evaluate_in_tx_takes_advisory_lock(db, admin_user, default_factory):
-    """Shared evaluate path must take supplier+PL advisory lock (worker+confirm serialize)."""
+    """Shared evaluate path must take supplier-level advisory lock (worker+confirm+rollup)."""
     from app.services.supplier_risk.service import evaluate_supplier_risk_in_tx
     from app.models.supplier import Supplier
     from app.models.supplier_risk import SupplierRiskConfig
@@ -287,6 +287,97 @@ async def test_evaluate_in_tx_takes_advisory_lock(db, admin_user, default_factor
         "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
     ))).scalar()
     assert locks is not None and locks >= 1
+
+
+@pytest.mark.asyncio
+async def test_evaluate_in_tx_lock_key_ignores_product_line(db, admin_user, default_factory, monkeypatch):
+    """PL-scoped and rollup paths must share supplier-level lock key (not PL-scoped)."""
+    from app.services.supplier_risk import service as risk_service
+    from app.models.supplier import Supplier
+    from app.models.supplier_risk import SupplierRiskConfig
+
+    sup = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-LK-{uuid.uuid4().hex[:6]}",
+        name="Lock Key Sup",
+        short_name="LKS",
+        factory_id=default_factory.id,
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    db.add(sup)
+    db.add(SupplierRiskConfig(
+        rule_id="R01", enabled=True, category="quality", weight=1.0,
+        thresholds={}, factory_id=default_factory.id, updated_by=admin_user.user_id,
+    ))
+    await db.flush()
+
+    captured_keys: list[str] = []
+    real_execute = db.execute
+
+    async def capture_execute(stmt, params=None, **kwargs):
+        if params and isinstance(params, dict) and "key" in params:
+            captured_keys.append(params["key"])
+        return await real_execute(stmt, params, **kwargs)
+
+    monkeypatch.setattr(db, "execute", capture_execute)
+
+    await risk_service.evaluate_supplier_risk_in_tx(db, sup.supplier_id, "DC-DC-100")
+    await risk_service.evaluate_supplier_risk_in_tx(db, sup.supplier_id, None)
+
+    assert len(captured_keys) >= 2
+    expected = f"supplier-risk:{sup.supplier_id}"
+    assert captured_keys[0] == expected
+    assert captured_keys[1] == expected
+    assert captured_keys[0] == captured_keys[1]
+
+
+@pytest.mark.asyncio
+async def test_evaluate_in_tx_uses_preloaded_without_re_gather(db, admin_user, default_factory, monkeypatch):
+    """Batch path preloaded= must skip per-supplier gather N+1."""
+    from app.services.supplier_risk import service as risk_service
+    from app.models.supplier import Supplier
+    from app.models.supplier_risk import SupplierRiskConfig
+
+    sup = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-PRE-{uuid.uuid4().hex[:6]}",
+        name="Preload Sup",
+        short_name="PS",
+        factory_id=default_factory.id,
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    db.add(sup)
+    cfg = SupplierRiskConfig(
+        rule_id="R01", enabled=True, category="quality", weight=1.0,
+        thresholds={}, factory_id=default_factory.id, updated_by=admin_user.user_id,
+    )
+    db.add(cfg)
+    await db.flush()
+
+    async def boom(*_a, **_k):
+        raise AssertionError("gather should not be called when preloaded")
+
+    monkeypatch.setattr(risk_service, "_gather_inspections", boom)
+    monkeypatch.setattr(risk_service, "_gather_scars", boom)
+    monkeypatch.setattr(risk_service, "_gather_evaluations", boom)
+    monkeypatch.setattr(risk_service, "_gather_certifications", boom)
+    monkeypatch.setattr(risk_service, "_gather_capa_inputs", boom)
+
+    alert, score, *_ = await risk_service.evaluate_supplier_risk_in_tx(
+        db, sup.supplier_id, "DC-DC-100",
+        preloaded={
+            "supplier": sup,
+            "configs": [cfg],
+            "inspections": [],
+            "scars": [],
+            "evaluations": [],
+            "certifications": [],
+            "capa_incidents": [],
+        },
+    )
+    assert score is not None
 
 
 @pytest.mark.asyncio
@@ -327,3 +418,46 @@ async def test_update_capa_clear_supplier_blocked_when_input_exists(
     await db.flush()
     with pytest.raises(ValueError, match="供应商风险输入"):
         await update_capa(db, capa, {"supplier_id": None}, admin_user.user_id)
+
+
+@pytest.mark.asyncio
+async def test_get_capa_projects_supplier_no_and_name(
+    admin_client, db, admin_user, default_factory,
+):
+    """GET /capa/{id} projects supplier_no/name so locked UI is not a raw UUID."""
+    sup = await _make_supplier(
+        db, default_factory.id, admin_user.user_id, supplier_no="SUP-LABEL-01",
+    )
+    # _make_supplier may not set name uniquely; ensure known label
+    sup.name = "Label Supplier Co"
+    capa = await _make_capa(
+        db, default_factory.id, admin_user.user_id,
+        status="D7_COMPLETED", supplier_id=sup.supplier_id,
+    )
+    await db.flush()
+
+    resp = await admin_client.get(f"/api/capa/{capa.report_id}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["supplier_id"] == str(sup.supplier_id)
+    assert body["supplier_no"] == "SUP-LABEL-01"
+    assert body["supplier_name"] == "Label Supplier Co"
+
+
+def test_capa_response_schema_includes_supplier_labels():
+    sid = uuid.uuid4()
+    r = CAPAResponse.model_validate({
+        "report_id": uuid.uuid4(),
+        "document_no": "8D-T-LABEL",
+        "title": "t",
+        "product_line_code": "DC-DC-100",
+        "status": "D7_COMPLETED",
+        "severity": "general",
+        "created_at": "2026-01-01T00:00:00",
+        "updated_at": "2026-01-01T00:00:00",
+        "supplier_id": str(sid),
+        "supplier_no": "SUP-X",
+        "supplier_name": "X Co",
+    })
+    assert r.supplier_no == "SUP-X"
+    assert r.supplier_name == "X Co"

@@ -288,6 +288,50 @@ describe("CAPADetailPage supplier risk input", () => {
     });
     expect(screen.queryByTestId("supplier-risk-confirm-yes")).not.toBeInTheDocument();
   });
+
+  it("shows supplier_no/name from CAPA projection when locked (not raw UUID)", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const supplierId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D7_COMPLETED",
+      supplier_id: supplierId,
+      supplier_no: "SUP-LABEL-01",
+      supplier_name: "Label Supplier Co",
+      supplier_risk_input: {
+        input_id: "i1",
+        status: "processed",
+        repeat_suggested: false,
+        repeat_detection_status: "not_matched",
+        repeat_confirmed: null,
+        matched_capa_nos: [],
+        evaluated_risk_level: "medium",
+        evaluated_risk_score: 50,
+        linked_alert: null,
+      },
+    } as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-supplier-readonly")).toBeInTheDocument();
+    });
+    const label = screen.getByTestId("capa-supplier-readonly");
+    expect(label.textContent).toContain("SUP-LABEL-01");
+    expect(label.textContent).toContain("Label Supplier Co");
+    expect(label.textContent).not.toContain(supplierId);
+    // i18n may resolve to zh default or en "Locked"
+    expect(label.textContent).toMatch(/已锁定|Locked/);
+  });
 });
 
 describe("CAPADetailPage AI draft integration", () => {

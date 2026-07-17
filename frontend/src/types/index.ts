@@ -174,6 +174,8 @@ export interface CAPAReport {
   updated_at: string;
   scar_ref_id?: string | null;
   supplier_id?: string | null;
+  supplier_no?: string | null;
+  supplier_name?: string | null;
   linked_scar?: {
     scar_id: string;
     scar_no: string;

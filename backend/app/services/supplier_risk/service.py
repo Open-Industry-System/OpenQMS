@@ -37,34 +37,53 @@ async def evaluate_supplier_risk_in_tx(
     *,
     force_update: bool = False,
     trigger_input: Optional[SupplierRiskCapaInput] = None,
+    preloaded: Optional[dict] = None,
 ):
     """事务内核心：不 commit。消费者与 confirm 共用。
 
-    Serializes all writers for the same (supplier_id, product_line_code) via a
-    transaction-scoped advisory lock so worker / confirm-repeat / scheduled eval
-    cannot overwrite each other's daily alert with incomplete capa_incidents.
+    Serializes all writers for the same supplier via a **supplier-level**
+    transaction-scoped advisory lock (key ignores product_line_code) so that:
+    - PL-scoped worker/confirm (supplier:PL-A)
+    - daily rollup evaluate_all_suppliers(product_line_code=None) (supplier:)
+    cannot race and overwrite each other's daily alert.
+
+    ``preloaded`` optional dict may include inspections/scars/evaluations/
+    certifications/capa_incidents/configs/supplier to avoid N+1 in batch paths.
     """
     from sqlalchemy import text as sa_text
 
-    # Must run before any alert upsert; released on commit/rollback of this txn.
+    # Coarse supplier-level lock first (shared by all PL and rollup writers).
     await db.execute(
         sa_text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-        {"key": f"{supplier_id}:{product_line_code or ''}"},
+        {"key": f"supplier-risk:{supplier_id}"},
     )
 
-    supplier = await db.get(Supplier, supplier_id)
+    pre = preloaded or {}
+    supplier = pre.get("supplier") or await db.get(Supplier, supplier_id)
     if not supplier:
         raise ValueError("供应商不存在")
 
-    configs = await get_effective_configs(db, product_line_code, supplier_id)
+    configs = pre.get("configs")
+    if configs is None:
+        configs = await get_effective_configs(db, product_line_code, supplier_id)
     if not configs:
         raise ValueError("无有效的风险规则配置")
 
-    inspections = await _gather_inspections(db, supplier_id, product_line_code)
-    scars = await _gather_scars(db, supplier_id, product_line_code)
-    evaluations = await _gather_evaluations(db, supplier_id)
-    certifications = await _gather_certifications(db, supplier_id)
-    incidents = await _gather_capa_inputs(db, supplier_id, product_line_code)
+    inspections = pre.get("inspections")
+    if inspections is None:
+        inspections = await _gather_inspections(db, supplier_id, product_line_code)
+    scars = pre.get("scars")
+    if scars is None:
+        scars = await _gather_scars(db, supplier_id, product_line_code)
+    evaluations = pre.get("evaluations")
+    if evaluations is None:
+        evaluations = await _gather_evaluations(db, supplier_id)
+    certifications = pre.get("certifications")
+    if certifications is None:
+        certifications = await _gather_certifications(db, supplier_id)
+    incidents = pre.get("capa_incidents")
+    if incidents is None:
+        incidents = await _gather_capa_inputs(db, supplier_id, product_line_code)
 
     # 显式注入 trigger_input（绕过 status 限制，但须仍在 90 天窗口内）
     if trigger_input is not None:
@@ -159,9 +178,10 @@ async def evaluate_all_suppliers(
 ) -> list[dict]:
     """Evaluate all active suppliers.
 
-    Routes each supplier through ``evaluate_supplier_risk_in_tx`` so the shared
-    supplier+PL advisory lock serializes against worker / confirm-repeat.
-    Per-supplier commit keeps partial progress on failures.
+    Batch-loads IQC/SCAR/eval/cert/capa_inputs/configs once, then per supplier
+    calls ``evaluate_supplier_risk_in_tx`` with ``preloaded=`` so:
+    - shared supplier-level advisory lock still serializes against worker/confirm
+    - N+1 config/data queries are avoided
     """
     result = await db.execute(
         select(Supplier).where(Supplier.status == "approved")
@@ -170,19 +190,34 @@ async def evaluate_all_suppliers(
     if not suppliers:
         return []
 
+    supplier_ids = [s.supplier_id for s in suppliers]
+    inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
+    scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
+    evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
+    certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
+    capa_inputs_by_supplier = await _batch_gather_capa_inputs(db, supplier_ids, product_line_code)
+    configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
+
     results = []
     for supplier in suppliers:
         try:
-            # Probe configs first to skip suppliers with no rules without locking noise
-            configs = await get_effective_configs(db, product_line_code, supplier.supplier_id)
+            configs = configs_by_supplier.get(supplier.supplier_id)
             if not configs:
                 continue
 
             alert, risk_score, rule_results, event_type = await evaluate_supplier_risk_in_tx(
                 db, supplier.supplier_id, product_line_code,
+                preloaded={
+                    "supplier": supplier,
+                    "configs": configs,
+                    "inspections": inspections_by_supplier.get(supplier.supplier_id, []),
+                    "scars": scars_by_supplier.get(supplier.supplier_id, []),
+                    "evaluations": evaluations_by_supplier.get(supplier.supplier_id, []),
+                    "certifications": certifications_by_supplier.get(supplier.supplier_id, []),
+                    "capa_incidents": capa_inputs_by_supplier.get(supplier.supplier_id, []),
+                },
             )
 
-            # Commit per supplier so partial failures don't lose all progress
             await db.commit()
             if alert:
                 await db.refresh(alert)
@@ -210,7 +245,6 @@ async def evaluate_all_suppliers(
                 "alert_id": alert.alert_id if alert else None,
             })
         except Exception:
-            # Skip suppliers with config/data issues; rollback to avoid dirty session
             await db.rollback()
             continue
 
