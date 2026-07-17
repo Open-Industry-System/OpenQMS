@@ -185,39 +185,41 @@ async def _assemble_linkage(db: AsyncSession, capa: CAPAEightD) -> dict:
             seen.add(s)
             fmea_ids.append(s)
 
-    # Header link
+    # Header link (never fails the outer transaction)
     _add(capa.fmea_ref_id)
 
-    # D4 source_ref fmea_ids
+    # Optional collectors use nested savepoints so a query failure cannot abort
+    # the outer sink transaction.
     try:
-        verifs = (
-            await db.execute(
-                select(CapaRootCauseVerification).where(
-                    CapaRootCauseVerification.capa_id == capa.report_id,
-                    CapaRootCauseVerification.factory_id == capa.factory_id,
+        async with db.begin_nested():
+            verifs = (
+                await db.execute(
+                    select(CapaRootCauseVerification).where(
+                        CapaRootCauseVerification.capa_id == capa.report_id,
+                        CapaRootCauseVerification.factory_id == capa.factory_id,
+                    )
                 )
-            )
-        ).scalars().all()
-        for v in verifs:
-            ref = v.source_ref or {}
-            if isinstance(ref, dict) and ref.get("fmea_id"):
-                _add(ref["fmea_id"])
+            ).scalars().all()
+            for v in verifs:
+                ref = v.source_ref or {}
+                if isinstance(ref, dict) and ref.get("fmea_id"):
+                    _add(ref["fmea_id"])
     except Exception:
         logger.exception("D4 source_ref fmea collection failed")
 
-    # D7 node actions
     try:
-        d7_rows = (
-            await db.execute(
-                select(CapaD7NodeAction.fmea_id).where(
-                    CapaD7NodeAction.capa_id == capa.report_id,
-                    CapaD7NodeAction.factory_id == capa.factory_id,
-                    CapaD7NodeAction.fmea_id.is_not(None),
+        async with db.begin_nested():
+            d7_rows = (
+                await db.execute(
+                    select(CapaD7NodeAction.fmea_id).where(
+                        CapaD7NodeAction.capa_id == capa.report_id,
+                        CapaD7NodeAction.factory_id == capa.factory_id,
+                        CapaD7NodeAction.fmea_id.is_not(None),
+                    )
                 )
-            )
-        ).scalars().all()
-        for fid in d7_rows:
-            _add(fid)
+            ).scalars().all()
+            for fid in d7_rows:
+                _add(fid)
     except Exception:
         logger.exception("D7 fmea_id collection failed")
 
@@ -225,15 +227,16 @@ async def _assemble_linkage(db: AsyncSession, capa: CAPAEightD) -> dict:
 
     alert_ids: list[str] = []
     try:
-        alerts = (
-            await db.execute(
-                select(SupplierRiskAlert.alert_id).where(
-                    SupplierRiskAlert.linked_capa_id == capa.report_id,
-                    SupplierRiskAlert.factory_id == capa.factory_id,
+        async with db.begin_nested():
+            alerts = (
+                await db.execute(
+                    select(SupplierRiskAlert.alert_id).where(
+                        SupplierRiskAlert.linked_capa_id == capa.report_id,
+                        SupplierRiskAlert.factory_id == capa.factory_id,
+                    )
                 )
-            )
-        ).scalars().all()
-        alert_ids = [str(a) for a in alerts]
+            ).scalars().all()
+            alert_ids = [str(a) for a in alerts]
     except Exception:
         logger.exception("SupplierRiskAlert collection failed")
 
@@ -360,10 +363,10 @@ async def sink_capa_on_close(
     content_hash = hashlib.sha256(embedding_text.encode()).hexdigest()
     now = datetime.now(UTC)
 
-    # 5. Atomic upsert ON CONFLICT (source_type, source_id).
-    # Do NOT overwrite status (keep active if already active; conflict path
-    # also leaves status untouched so concurrent first-sink races resolve to
-    # one row without SELECT-FOR-UPDATE races).
+    # 5. Atomic upsert ON CONFLICT (entry_id PK).
+    # entry_id is deterministic (uuid5 of capa id), so concurrent first-sinks
+    # collide on PK first; arbitrating on source unique alone still raises
+    # knowledge_entries_pkey under race. Do NOT overwrite status.
     upsert_stmt = (
         pg_insert(KnowledgeEntry)
         .values(
@@ -386,7 +389,7 @@ async def sink_capa_on_close(
             updated_at=now,
         )
         .on_conflict_do_update(
-            constraint="uq_knowledge_entries_source",
+            index_elements=["entry_id"],
             set_={
                 "factory_id": capa.factory_id,
                 "product_line_code": capa.product_line_code,

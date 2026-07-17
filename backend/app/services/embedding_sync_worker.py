@@ -394,6 +394,14 @@ async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
         return events
     except Exception as e:
         logger.error(f"Batch error: {e}", exc_info=True)
+        # claim_batch already committed status=processing. Roll back any
+        # failed in-batch work (upsert mid-tx abort) so mark_failed can commit.
+        # Pure-Python failures (e.g. provider.embed) leave the session healthy;
+        # rollback is still safe when the claim was a real commit.
+        try:
+            await db.rollback()
+        except Exception:
+            logger.exception("Failed to rollback after batch error")
         for event in events:
             try:
                 await mark_failed(
@@ -404,7 +412,11 @@ async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
                     content_hash=event.get("content_hash"),
                 )
             except Exception:
-                pass
+                logger.error(
+                    "mark_failed failed for outbox event %s after batch error",
+                    event.get("id"),
+                    exc_info=True,
+                )
         return None
 
 
