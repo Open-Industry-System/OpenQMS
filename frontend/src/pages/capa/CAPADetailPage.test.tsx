@@ -27,14 +27,6 @@ vi.mock("../../api/capaDraft");
 vi.mock("../../api/fmea", () => ({
   listFMEAs: vi.fn().mockResolvedValue({ items: [] }),
 }));
-vi.mock("../../api/supplier", () => ({
-  listSuppliers: vi.fn().mockResolvedValue({
-    items: [{ supplier_id: "sup-1", supplier_no: "S-001", name: "Acme" }],
-    total: 1,
-    page: 1,
-    page_size: 20,
-  }),
-}));
 
 // Mock D4VerificationCard to avoid rendering issues
 vi.mock("../../components/capa/D4VerificationCard", () => ({
@@ -72,10 +64,20 @@ function renderPage() {
   );
 }
 
+function mockSupplierOptions() {
+  vi.mocked(capaApi.listCapaSupplierOptions).mockResolvedValue({
+    items: [{ supplier_id: "sup-1", supplier_no: "S-001", name: "Acme", status: "approved" }],
+    total: 1,
+    page: 1,
+    page_size: 50,
+  } as any);
+}
+
 describe("CAPADetailPage D3ContainmentPanel integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(capaApi.getD3Runs).mockResolvedValue([]);
     vi.mocked(capaApi.getD3Adoptions).mockResolvedValue([]);
     vi.mocked(capaApi.getD3Executions).mockResolvedValue([]);
@@ -193,6 +195,7 @@ describe("CAPADetailPage supplier risk input", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
       ai_draft_enabled: false,
       llm_provider: null,
@@ -291,6 +294,7 @@ describe("CAPADetailPage AI draft integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
       ai_draft_enabled: false,
       llm_provider: null,
@@ -457,6 +461,7 @@ describe("CAPADetailPage 生成PPT button visibility", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
       ai_draft_enabled: false,
       llm_provider: null,
@@ -512,6 +517,7 @@ describe("CAPADetailPage trigger SCAR", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
       ai_draft_enabled: false,
       llm_provider: null,

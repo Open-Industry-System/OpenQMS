@@ -38,7 +38,20 @@ async def evaluate_supplier_risk_in_tx(
     force_update: bool = False,
     trigger_input: Optional[SupplierRiskCapaInput] = None,
 ):
-    """事务内核心：不 commit。消费者与 confirm 共用。"""
+    """事务内核心：不 commit。消费者与 confirm 共用。
+
+    Serializes all writers for the same (supplier_id, product_line_code) via a
+    transaction-scoped advisory lock so worker / confirm-repeat / scheduled eval
+    cannot overwrite each other's daily alert with incomplete capa_incidents.
+    """
+    from sqlalchemy import text as sa_text
+
+    # Must run before any alert upsert; released on commit/rollback of this txn.
+    await db.execute(
+        sa_text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"{supplier_id}:{product_line_code or ''}"},
+    )
+
     supplier = await db.get(Supplier, supplier_id)
     if not supplier:
         raise ValueError("供应商不存在")

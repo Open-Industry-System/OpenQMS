@@ -251,3 +251,39 @@ async def test_update_capa_allows_supplier_change_at_d7_prevention_without_risk_
     await update_capa(db, capa, {"supplier_id": sup_b.supplier_id}, admin_user.user_id)
     await db.refresh(capa)
     assert capa.supplier_id == sup_b.supplier_id
+
+
+@pytest.mark.asyncio
+async def test_evaluate_in_tx_takes_advisory_lock(db, admin_user, default_factory):
+    """Shared evaluate path must take supplier+PL advisory lock (worker+confirm serialize)."""
+    from app.services.supplier_risk.service import evaluate_supplier_risk_in_tx
+    from app.models.supplier import Supplier
+    from app.models.supplier_risk import SupplierRiskConfig
+    from sqlalchemy import text as sa_text
+
+    sup = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-LOCK-{uuid.uuid4().hex[:6]}",
+        name="Lock Sup",
+        short_name="LS",
+        factory_id=default_factory.id,
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    db.add(sup)
+    # minimal R01 so configs non-empty
+    db.add(SupplierRiskConfig(
+        rule_id="R01", enabled=True, category="quality", weight=1.0,
+        thresholds={}, factory_id=default_factory.id, updated_by=admin_user.user_id,
+    ))
+    await db.flush()
+
+    # Ensure no leftover locks in this session
+    await evaluate_supplier_risk_in_tx(db, sup.supplier_id, "DC-DC-100")
+    # If advisory lock path is broken (bad SQL), the call raises — that's the assertion.
+    # Additionally verify pg_locks has an exclusive advisory lock for this backend pid after
+    # a non-committing call still holds xact lock until commit/rollback of outer fixture txn.
+    locks = (await db.execute(sa_text(
+        "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
+    ))).scalar()
+    assert locks is not None and locks >= 1

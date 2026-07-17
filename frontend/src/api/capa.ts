@@ -58,6 +58,20 @@ export async function confirmRepeat(
   return resp.data;
 }
 
+export async function listCapaSupplierOptions(params?: {
+  page?: number;
+  page_size?: number;
+  search?: string;
+}): Promise<{
+  items: Array<{ supplier_id: string; supplier_no: string; name: string; status: string }>;
+  total: number;
+  page: number;
+  page_size: number;
+}> {
+  const resp = await client.get("/capa/supplier-options", { params });
+  return resp.data;
+}
+
 export async function createCAPA(data: {
   title: string;
   document_no: string;

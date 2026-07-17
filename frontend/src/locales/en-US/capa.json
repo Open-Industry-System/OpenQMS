@@ -59,7 +59,10 @@
     "d5Label": "Permanent Corrective Action",
     "d6Label": "Effect Verification",
     "d7Label": "Prevent Recurrence",
-    "d8Label": "Closure Confirmation"
+    "d8Label": "Closure Confirmation",
+    "supplierLoadFailed": "Failed to load suppliers",
+    "supplier": "Supplier",
+    "supplierPlaceholder": "Select supplier"
   },
   "messages": {
     "createSuccess": "8D report created",
@@ -79,7 +82,9 @@
     "searchTimeout": "Search timeout, please use the recommendation feature later during editing",
     "searchFailed": "Failed to search lessons learned",
     "triggerScarSuccess": "SCAR triggered successfully",
-    "triggerScarFailed": "Failed to trigger SCAR"
+    "triggerScarFailed": "Failed to trigger SCAR",
+    "supplierSaved": "Supplier saved",
+    "supplierSaveFailed": "Failed to save supplier"
   },
   "detail": {
     "currentStepDetails": "Current Step Details",
@@ -93,7 +98,9 @@
     "createdAt": "Created At",
     "notSet": "Not set",
     "notLinked": "Not linked",
-    "linkedFMEA": "Linked FMEA"
+    "linkedFMEA": "Linked FMEA",
+    "supplier": "Supplier",
+    "supplierLocked": "Locked"
   },
   "riskInput": {
     "related": "Supplier risk input",

@@ -313,13 +313,15 @@ async def lifespan(app: FastAPI):
                                 SupplierRiskConfig.rule_id == "R11",
                                 SupplierRiskConfig.enabled.is_(True),
                                 SupplierRiskConfig.supplier_id.is_(None),
+                                SupplierRiskConfig.product_line_code.is_(None),
                             ).limit(1)
                         )
                     ).scalar_one_or_none()
                     if has_r11 is None:
                         logger.error(
                             "[risk_config] tenant %s has no enabled global R11 config "
-                            "(supplier_id IS NULL); CAPA-triggered risk eval will fail",
+                            "(supplier_id IS NULL AND product_line_code IS NULL); "
+                            "CAPA-triggered risk eval will fail until seed/config is fixed",
                             tenant.slug,
                         )
                 except Exception as e:

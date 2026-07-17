@@ -3,9 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Modal, Form, Input, Select, DatePicker, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { listCAPAs, createCAPA } from "../../api/capa";
-import { listSuppliers } from "../../api/supplier";
-import type { CAPAReport, Supplier } from "../../types";
+import { listCAPAs, createCAPA, listCapaSupplierOptions } from "../../api/capa";
+import type { CAPAReport } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
 import { formatDateTime } from "../../utils/dateTime";
@@ -52,7 +51,8 @@ export default function CAPAListPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<Array<{ supplier_id: string; supplier_no: string; name: string }>>([]);
+  const [supplierLoadError, setSupplierLoadError] = useState<string | null>(null);
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
@@ -60,10 +60,17 @@ export default function CAPAListPage() {
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    listSuppliers({ page_size: 1000 })
-      .then((res) => setSuppliers(res.items))
-      .catch(() => setSuppliers([]));
-  }, []);
+    // CAPA CREATE-gated picker (not Module.SUPPLIER VIEW) so CAPA operators can associate.
+    listCapaSupplierOptions({ page_size: 200 })
+      .then((res) => {
+        setSuppliers(res.items);
+        setSupplierLoadError(null);
+      })
+      .catch(() => {
+        setSuppliers([]);
+        setSupplierLoadError(t("fields.supplierLoadFailed", "供应商列表加载失败"));
+      });
+  }, [t]);
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -162,12 +169,21 @@ export default function CAPAListPage() {
           <Form.Item name="due_date" label={t("fields.dueDate", "完成期限")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item name="supplier_id" label={t("fields.supplier", "关联供应商")}>
+          <Form.Item
+            name="supplier_id"
+            label={t("fields.supplier", "关联供应商")}
+            extra={supplierLoadError || undefined}
+          >
             <Select
               allowClear
               showSearch
               optionFilterProp="label"
-              placeholder={t("fields.supplierPlaceholder", "请选择供应商")}
+              disabled={!!supplierLoadError}
+              placeholder={
+                supplierLoadError
+                  ? supplierLoadError
+                  : t("fields.supplierPlaceholder", "请选择供应商")
+              }
               options={suppliers.map((s) => ({ value: s.supplier_id, label: `${s.supplier_no} - ${s.name}` }))}
             />
           </Form.Item>

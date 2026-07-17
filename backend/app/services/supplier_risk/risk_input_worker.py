@@ -165,16 +165,8 @@ async def process_one(db: AsyncSession, claimed: dict) -> None:
     # while DB has the token). Refresh so success-path ORM writes are tracked.
     await db.refresh(input_obj)
 
-    # Transaction-scoped advisory lock: serialize all evals for this supplier+PL
-    # (covers races claim_batch cannot see, e.g. confirm-repeat concurrent).
-    await db.execute(
-        text(
-            "SELECT pg_advisory_xact_lock(hashtext(:key))"
-        ),
-        {
-            "key": f"{input_obj.supplier_id}:{input_obj.product_line_code or ''}",
-        },
-    )
+    # Supplier+PL serialization lives in evaluate_supplier_risk_in_tx (shared
+    # advisory lock with confirm-repeat / scheduled eval).
 
     capa_id = input_obj.capa_id
     try:

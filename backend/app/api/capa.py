@@ -126,6 +126,52 @@ async def list_capas(
     )
 
 
+@router.get("/supplier-options")
+async def list_capa_supplier_options(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Lightweight supplier picker for CAPA create/edit.
+
+    Gated by CAPA CREATE (not Module.SUPPLIER VIEW) so CAPA operators can
+    associate a supplier without full supplier-module access. Scope-limited
+    to the effective factory.
+    """
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 CREATE 权限")
+    from app.services import supplier_service
+    factory_id = scope.effective_factory_id
+    if factory_id is None:
+        # group admin without selected factory: resolve from first accessible if any
+        accessible = scope.factory_scope.accessible_factory_ids
+        if accessible is not None and len(accessible) == 1:
+            factory_id = next(iter(accessible))
+        elif accessible is not None and not accessible:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+    items, total = await supplier_service.list_suppliers(
+        db, page=page, page_size=page_size, search=search,
+        factory_id=factory_id,
+    )
+    return {
+        "items": [
+            {
+                "supplier_id": str(s.supplier_id),
+                "supplier_no": s.supplier_no,
+                "name": s.name,
+                "status": s.status,
+            }
+            for s in items
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 @router.post("", response_model=CAPAResponse, status_code=201)
 async def create_capa(
     req: CAPACreate,

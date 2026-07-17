@@ -59,7 +59,10 @@
     "d5Label": "永久纠正措施",
     "d6Label": "效果验证",
     "d7Label": "预防复发措施",
-    "d8Label": "关闭确认"
+    "d8Label": "关闭确认",
+    "supplierLoadFailed": "供应商列表加载失败",
+    "supplier": "关联供应商",
+    "supplierPlaceholder": "请选择供应商"
   },
   "messages": {
     "createSuccess": "8D 报告创建成功",
@@ -79,7 +82,9 @@
     "searchTimeout": "检索超时，请稍后在编辑过程中使用推荐功能",
     "searchFailed": "检索经验教训失败",
     "triggerScarSuccess": "SCAR 发起成功",
-    "triggerScarFailed": "SCAR 发起失败"
+    "triggerScarFailed": "SCAR 发起失败",
+    "supplierSaved": "供应商已保存",
+    "supplierSaveFailed": "供应商保存失败"
   },
   "detail": {
     "currentStepDetails": "当前步骤详情",
@@ -93,7 +98,9 @@
     "createdAt": "创建时间",
     "notSet": "未设定",
     "notLinked": "未关联",
-    "linkedFMEA": "已关联 FMEA"
+    "linkedFMEA": "已关联 FMEA",
+    "supplier": "关联供应商",
+    "supplierLocked": "已锁定"
   },
   "riskInput": {
     "related": "供应商风险输入",

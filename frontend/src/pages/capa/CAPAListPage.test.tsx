@@ -23,17 +23,6 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("../../api/capa");
-vi.mock("../../api/supplier", () => ({
-  listSuppliers: vi.fn().mockResolvedValue({
-    items: [
-      { supplier_id: "sup-1", supplier_no: "S-001", name: "Acme" },
-      { supplier_id: "sup-2", supplier_no: "S-002", name: "Bolt" },
-    ],
-    total: 2,
-    page: 1,
-    page_size: 20,
-  }),
-}));
 
 function renderPage() {
   return render(
@@ -50,6 +39,15 @@ describe("CAPAListPage create form supplier select", () => {
     vi.clearAllMocks();
     localStorage.clear();
     vi.mocked(capaApi.listCAPAs).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
+    vi.mocked(capaApi.listCapaSupplierOptions).mockResolvedValue({
+      items: [
+        { supplier_id: "sup-1", supplier_no: "S-001", name: "Acme", status: "approved" },
+        { supplier_id: "sup-2", supplier_no: "S-002", name: "Bolt", status: "approved" },
+      ],
+      total: 2,
+      page: 1,
+      page_size: 200,
+    });
     vi.mocked(capaApi.createCAPA).mockResolvedValue({
       report_id: "r-1",
       document_no: "8D-2026-001",
@@ -62,6 +60,7 @@ describe("CAPAListPage create form supplier select", () => {
         user_id: "u1",
         username: "engineer",
         role_key: "quality_engineer",
+        // CAPA CREATE only — picker must not require Module.SUPPLIER VIEW
         permissions: { capa: 3 },
         product_lines: [{ product_line_code: "DC-DC-100" }],
       } as any,
@@ -69,13 +68,14 @@ describe("CAPAListPage create form supplier select", () => {
     });
   });
 
-  it("renders optional supplier select", async () => {
+  it("renders optional supplier select via CAPA-gated options", async () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /新建/ }));
 
     await waitFor(() => {
       expect(screen.getByLabelText(/关联供应商/)).toBeInTheDocument();
     });
+    expect(capaApi.listCapaSupplierOptions).toHaveBeenCalled();
   });
 
   it("includes supplier_id in create request when selected", async () => {
@@ -84,21 +84,17 @@ describe("CAPAListPage create form supplier select", () => {
 
     await waitFor(() => expect(screen.getByLabelText(/关联供应商/)).toBeInTheDocument());
 
-    // document_no
     fireEvent.change(screen.getByPlaceholderText(/如 8D-2026-001/), {
       target: { value: "8D-2026-001" },
     });
-    // title
     fireEvent.change(screen.getByPlaceholderText(/如 焊接不良客诉/), {
       target: { value: "T" },
     });
 
-    // open supplier select and choose first option
     fireEvent.mouseDown(screen.getByLabelText(/关联供应商/));
     await waitFor(() => expect(screen.getByText("S-001 - Acme")).toBeInTheDocument());
     fireEvent.click(screen.getByText("S-001 - Acme"));
 
-    // submit modal
     fireEvent.click(screen.getByRole("button", { name: /OK|确 定|确定/ }));
 
     await waitFor(() => {
@@ -106,5 +102,14 @@ describe("CAPAListPage create form supplier select", () => {
         expect.objectContaining({ supplier_id: "sup-1" })
       );
     });
+  });
+
+  it("loads suppliers via CAPA-gated options (not /suppliers)", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(capaApi.listCapaSupplierOptions).toHaveBeenCalled();
+    });
+    // CAPA-only permission user still gets options (mock); no Module.SUPPLIER required
+    expect(useAuthStore.getState().user?.permissions).toEqual({ capa: 3 });
   });
 });
