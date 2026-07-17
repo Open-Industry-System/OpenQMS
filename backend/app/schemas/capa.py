@@ -117,7 +117,7 @@ class D4Recommendation(BaseModel):
     failure_mode_name: str | None = None
     fmea_document_no: str | None = None
     fmea_id: str | None = None
-    match_source: str  # "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "llm"
+    match_source: str  # "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "knowledge_entry" | "llm"
     match_reason: str
     related_d2_keywords: list[str] = []
     confidence: float = 0.5
@@ -125,6 +125,8 @@ class D4Recommendation(BaseModel):
     source_capa_id: str | None = None
     source_capa_document_no: str | None = None
     source_product_line_code: str | None = None
+    # --- 知识库条目来源标识 ---
+    source_knowledge_entry_id: str | None = None
     stage_index: int | None = None
     # --- AP / S/O/D provenance（FMEA 命中时来自 FailureMode 节点；规则引擎兜底仅 AP=M） ---
     ap: str | None = None
@@ -168,6 +170,8 @@ class D5GeneralSuggestion(BaseModel):
     match_source: str | None = None
     source_capa_id: str | None = None
     source_capa_document_no: str | None = None
+    # --- 知识库条目来源标识 ---
+    source_knowledge_entry_id: str | None = None
     stage_index: int | None = None
     # --- AP / S/O/D provenance ---
     ap: str | None = None

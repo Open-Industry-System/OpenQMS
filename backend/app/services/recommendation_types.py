@@ -68,6 +68,11 @@ class RecommendationCandidate:
             result["source_capa_id"] = self.metadata.get("historical_capa_id")
             result["source_capa_document_no"] = self.metadata.get("document_no")
             result["source_product_line_code"] = self.metadata.get("product_line_code")
+        # 知识库条目来源字段（可选）
+        if self.source == "knowledge_entry":
+            result["source_knowledge_entry_id"] = self.metadata.get("entry_id")
+            result["source_capa_document_no"] = self.metadata.get("document_no")
+            result["source_capa_id"] = self.metadata.get("capa_id")
         return result
 
     def to_d5_control_schema(self) -> dict[str, Any] | None:
@@ -110,6 +115,10 @@ class RecommendationCandidate:
         if self.source in ("historical_capa", "historical_capa_measure"):
             result["source_capa_id"] = self.metadata.get("historical_capa_id")
             result["source_capa_document_no"] = self.metadata.get("document_no")
+        if self.source == "knowledge_entry":
+            result["source_knowledge_entry_id"] = self.metadata.get("entry_id")
+            result["source_capa_document_no"] = self.metadata.get("document_no")
+            result["source_capa_id"] = self.metadata.get("capa_id")
         return result
 
 

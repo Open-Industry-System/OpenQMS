@@ -504,3 +504,33 @@ async def test_d4_stage5_runs_knowledge_entry_extra():
     markers = {c.metadata.get("marker") for c in result.items}
     assert "lessons_learned" in markers
     assert "knowledge_entry" in markers
+
+
+def test_knowledge_entry_candidate_serializes_entry_id():
+    """Candidate from KnowledgeEntrySource must emit entry_id via to_d4/to_d5 schemas."""
+    entry_id = str(uuid.uuid4())
+    capa_id = str(uuid.uuid4())
+    cand = RecommendationCandidate(
+        source="knowledge_entry",
+        content="知识条目摘要",
+        category=None,
+        confidence=0.72,
+        match_reason="知识库条目相似命中",
+        metadata={
+            "entry_id": entry_id,
+            "document_no": "8D-KE-SER",
+            "capa_id": capa_id,
+            "stage_index": 5,
+        },
+    )
+    d4 = cand.to_d4_schema()
+    assert d4["match_source"] == "knowledge_entry"
+    assert d4["source_knowledge_entry_id"] == entry_id
+    assert d4["source_capa_document_no"] == "8D-KE-SER"
+    assert d4["source_capa_id"] == capa_id
+
+    d5 = cand.to_d5_suggestion_schema()
+    assert d5["match_source"] == "knowledge_entry"
+    assert d5["source_knowledge_entry_id"] == entry_id
+    assert d5["source_capa_document_no"] == "8D-KE-SER"
+    assert d5["source_capa_id"] == capa_id
