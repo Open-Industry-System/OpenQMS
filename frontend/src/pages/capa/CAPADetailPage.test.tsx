@@ -771,5 +771,34 @@ describe("CAPADetailPage knowledge sink card", () => {
       expect(screen.getByTestId("capa-knowledge-error")).toHaveTextContent(/沉淀失败|timeout|failed|重试/i);
     });
   });
+
+  it("shows load error (not missing/resink) when knowledge list fails", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D8_CLOSURE",
+      d8_closure: "closed",
+    } as any);
+    vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mockRejectedValue({
+      response: { status: 500, data: { detail: "server error" } },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-knowledge-load-error")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("capa-knowledge-missing")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("capa-knowledge-resink")).not.toBeInTheDocument();
+    expect(screen.getByTestId("capa-knowledge-reload")).toBeInTheDocument();
+  });
 });
 

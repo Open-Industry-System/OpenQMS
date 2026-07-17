@@ -65,7 +65,9 @@ def _clip(value: str | None, max_chars: int = _FIELD_MAX_CHARS) -> str:
 
 async def _assemble_d3(db: AsyncSession, capa: CAPAEightD) -> str:
     base = capa.d3_interim or ""
-    # Optional: append current done D3 impact/report summary when present
+    # Optional D3 impact summary. On DB error, rollback + fail-closed so the
+    # session is not reused in a broken state (and sink does not silently drop
+    # linkage context that callers assume was assembled).
     try:
         run = await db.scalar(
             select(CapaD3ImportRun)
@@ -103,9 +105,15 @@ async def _assemble_d3(db: AsyncSession, capa: CAPAEightD) -> str:
         if base:
             return f"{base}\n受影响范围：{scope}"
         return f"受影响范围：{scope}"
-    except Exception:
-        logger.exception("D3 impact summary load failed; falling back to interim only")
-        return base
+    except Exception as e:
+        logger.exception("D3 impact summary load failed")
+        try:
+            await db.rollback()
+        except Exception:
+            logger.exception("rollback after D3 assemble failure also failed")
+        raise KnowledgeSinkFailedError(
+            f"D3 影响范围装载失败: {e}", reason="db_error"
+        ) from e
 
 
 async def _assemble_d4(db: AsyncSession, capa: CAPAEightD) -> str:

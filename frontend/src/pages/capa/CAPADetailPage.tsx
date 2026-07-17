@@ -97,6 +97,7 @@ export default function CAPADetailPage() {
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [knowledgeResinking, setKnowledgeResinking] = useState(false);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
+  const [knowledgeLoadError, setKnowledgeLoadError] = useState<string | null>(null);
 
   const stepItems = useMemo(() => {
     const subLabelKey = capa?.status ? stepSubLabelKey[capa.status] : undefined;
@@ -242,14 +243,31 @@ export default function CAPADetailPage() {
   const loadKnowledgeEntry = async (report: CAPAReport) => {
     if (!report.report_id) return;
     setKnowledgeLoading(true);
+    setKnowledgeLoadError(null);
     try {
       const entry = await findCapaKnowledgeEntry(report.report_id, {
         document_no: report.document_no,
         product_line_code: report.product_line_code,
       });
       setKnowledgeEntry(entry);
-    } catch {
+    } catch (e: unknown) {
+      // Distinguish load failure (network/403/500) from genuine absence.
+      // Absence is `null` from findCapaKnowledgeEntry (200 + no match).
       setKnowledgeEntry(null);
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 403) {
+        setKnowledgeLoadError(
+          t("knowledge.loadForbidden", "无权限查看知识库条目"),
+        );
+      } else if (status && status >= 500) {
+        setKnowledgeLoadError(
+          t("knowledge.loadServerError", "知识库加载失败，请稍后重试"),
+        );
+      } else {
+        setKnowledgeLoadError(
+          t("knowledge.loadFailed", "知识库加载失败，请稍后重试"),
+        );
+      }
     } finally {
       setKnowledgeLoading(false);
     }
@@ -259,6 +277,7 @@ export default function CAPADetailPage() {
     if (!capa || !isKnowledgeStatus) {
       setKnowledgeEntry(null);
       setKnowledgeError(null);
+      setKnowledgeLoadError(null);
       return;
     }
     void loadKnowledgeEntry(capa);
@@ -954,6 +973,24 @@ export default function CAPADetailPage() {
                 )}
                 {knowledgeLoading ? (
                   <Spin size="small" />
+                ) : knowledgeLoadError ? (
+                  <div data-e2e="capa-knowledge-load-error">
+                    <Alert
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={knowledgeLoadError}
+                    />
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={knowledgeLoading}
+                      onClick={() => capa && void loadKnowledgeEntry(capa)}
+                      data-e2e="capa-knowledge-reload"
+                    >
+                      {t("knowledge.reload", "重新加载")}
+                    </Button>
+                  </div>
                 ) : knowledgeEntry ? (
                   <div data-e2e="capa-knowledge-entry">
                     <p>
