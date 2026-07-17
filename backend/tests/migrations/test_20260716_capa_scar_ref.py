@@ -222,6 +222,25 @@ def test_partial_unique_allows_multiple_nulls(mig_db_url):
     engine.dispose()
 
 
+def test_upgrade_raises_when_prerequisite_tables_missing(mig_db_url):
+    """Missing capa_eightd must raise — never stamp incomplete schema."""
+    command.upgrade(_cfg(mig_db_url), PARENT)
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        with conn.begin():
+            conn.execute(sa.text("DROP TABLE IF EXISTS capa_eightd CASCADE"))
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="capa_eightd"):
+        command.upgrade(_cfg(mig_db_url), REV)
+
+    engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
+    with engine.connect() as conn:
+        rev = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+        assert rev == PARENT
+    engine.dispose()
+
+
 def test_abort_leaves_state_unchanged(mig_db_url):
     """A migration abort rolls back the revision: column/index absent, retryable."""
     command.upgrade(_cfg(mig_db_url), PARENT)

@@ -20,6 +20,29 @@ def _sync_engine(mig_url: str):
     return create_engine(mig_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
 
 
+def test_upgrade_raises_when_factories_missing(mig_db_url):
+    """Missing factories must raise — never stamp incomplete schema."""
+    import pytest
+
+    cfg = _cfg(mig_db_url)
+    command.upgrade(cfg, PARENT)
+    engine = _sync_engine(mig_db_url)
+    with engine.connect() as conn:
+        with conn.begin():
+            # Drop factories CASCADE may remove FKs; the migration must still fail closed.
+            conn.execute(sa.text("DROP TABLE IF EXISTS factories CASCADE"))
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="factories"):
+        command.upgrade(cfg, REV)
+
+    engine = _sync_engine(mig_db_url)
+    with engine.connect() as conn:
+        rev = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
+        assert rev == PARENT
+    engine.dispose()
+
+
 def test_knowledge_entries_table_and_outbox_hash(mig_db_url):
     cfg = _cfg(mig_db_url)
     command.upgrade(cfg, PARENT)

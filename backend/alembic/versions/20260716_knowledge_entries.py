@@ -4,12 +4,11 @@ Revision ID: 20260716_knowledge_entries
 Revises: 20260716_capa_scar_ref
 Create Date: 2026-07-16
 
-Guarded for schema-local / partial fixtures: if factories is absent, skip
-creating knowledge_entries (FK target missing). If embedding_sync_outbox is
-absent, skip the content_hash column add. Full public chain still applies both.
+Fail-closed: missing factories / embedding_sync_outbox raises so Alembic never
+stamps this revision on an incomplete schema. If knowledge_entries already
+exists, critical columns/constraints are verified rather than skipping wholesale.
 """
 from typing import Sequence, Union
-import logging
 
 from alembic import op
 import sqlalchemy as sa
@@ -21,7 +20,42 @@ down_revision: Union[str, None] = "20260716_capa_scar_ref"
 branch_labels = None
 depends_on = None
 
-logger = logging.getLogger("alembic.migration")
+_REQUIRED_KE_COLS = (
+    "entry_id",
+    "source_type",
+    "source_id",
+    "factory_id",
+    "content_hash",
+    "embedding_status",
+    "document_no",
+    "fields",
+    "llm_status",
+)
+_REQUIRED_KE_INDEXES = (
+    "uq_knowledge_entries_source",
+    "ix_knowledge_entries_factory_pl_status",
+    "ix_knowledge_entries_factory_pl_embedding_status",
+)
+
+
+def _verify_knowledge_entries(insp) -> None:
+    cols = {c["name"] for c in insp.get_columns("knowledge_entries")}
+    missing_cols = [c for c in _REQUIRED_KE_COLS if c not in cols]
+    indexes = {i["name"] for i in insp.get_indexes("knowledge_entries")}
+    # UniqueConstraint may appear as constraint and/or unique index name.
+    uqs = {u["name"] for u in insp.get_unique_constraints("knowledge_entries")}
+    present_names = indexes | uqs
+    missing_idx = [n for n in _REQUIRED_KE_INDEXES if n not in present_names]
+    if missing_cols or missing_idx:
+        parts = []
+        if missing_cols:
+            parts.append(f"columns={missing_cols}")
+        if missing_idx:
+            parts.append(f"indexes/constraints={missing_idx}")
+        raise RuntimeError(
+            "20260716_knowledge_entries: knowledge_entries exists but is incomplete: "
+            + "; ".join(parts)
+        )
 
 
 def upgrade() -> None:
@@ -29,14 +63,13 @@ def upgrade() -> None:
     insp = inspect(bind)
 
     if not insp.has_table("factories"):
-        logger.info(
-            "20260716_knowledge_entries: factories missing — skip knowledge_entries "
-            "create (schema-local path)"
+        raise RuntimeError(
+            "20260716_knowledge_entries requires table factories; "
+            "refusing to stamp incomplete schema"
         )
-    elif insp.has_table("knowledge_entries"):
-        logger.info(
-            "20260716_knowledge_entries: knowledge_entries already present — skip create"
-        )
+
+    if insp.has_table("knowledge_entries"):
+        _verify_knowledge_entries(insp)
     else:
         op.create_table(
             "knowledge_entries",
@@ -97,21 +130,19 @@ def upgrade() -> None:
             ["factory_id", "product_line_code", "embedding_status"],
         )
 
-    # Re-inspect after possible create; outbox column is independent.
+    # Outbox content_hash is required for the knowledge sink path.
     insp = inspect(bind)
     if not insp.has_table("embedding_sync_outbox"):
-        logger.info(
-            "20260716_knowledge_entries: embedding_sync_outbox missing — skip "
-            "content_hash column (schema-local path)"
+        raise RuntimeError(
+            "20260716_knowledge_entries requires table embedding_sync_outbox; "
+            "refusing to stamp incomplete schema"
         )
-        return
     outbox_cols = {c["name"] for c in insp.get_columns("embedding_sync_outbox")}
-    if "content_hash" in outbox_cols:
-        return
-    op.add_column(
-        "embedding_sync_outbox",
-        sa.Column("content_hash", sa.String(64), nullable=True),
-    )
+    if "content_hash" not in outbox_cols:
+        op.add_column(
+            "embedding_sync_outbox",
+            sa.Column("content_hash", sa.String(64), nullable=True),
+        )
 
 
 def downgrade() -> None:

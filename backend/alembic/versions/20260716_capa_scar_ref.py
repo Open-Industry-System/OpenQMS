@@ -4,12 +4,9 @@ Revision ID: 20260716_capa_scar_ref
 Revises: 20260715_waiver_items
 Create Date: 2026-07-16
 
-Guarded for schema-local / partial fixtures: if capa_eightd (or supplier_scars)
-is absent in the current schema, upgrade is a no-op so dual-branch upgrade to
-the knowledge/doc-gate merge tip can still stamp alembic_version.
+Fail-closed: missing capa_eightd / supplier_scars raises so Alembic never stamps
+this revision on an incomplete schema.
 """
-import logging
-
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
@@ -20,22 +17,16 @@ down_revision = "20260715_waiver_items"  # confirmed head on CAPA/doc-gate chain
 branch_labels = None
 depends_on = None
 
-logger = logging.getLogger("alembic.migration")
-
 
 def upgrade() -> None:
     bind = op.get_bind()
     insp = inspect(bind)
-    if not insp.has_table("capa_eightd"):
-        logger.info(
-            "20260716_capa_scar_ref: capa_eightd missing — no-op (schema-local path)"
+    missing = [t for t in ("capa_eightd", "supplier_scars") if not insp.has_table(t)]
+    if missing:
+        raise RuntimeError(
+            "20260716_capa_scar_ref requires tables "
+            f"{', '.join(missing)}; refusing to stamp incomplete schema"
         )
-        return
-    if not insp.has_table("supplier_scars"):
-        logger.info(
-            "20260716_capa_scar_ref: supplier_scars missing — no-op (schema-local path)"
-        )
-        return
 
     op.add_column(
         "capa_eightd",

@@ -342,7 +342,9 @@ def test_round25_upgrade_widens_schema_local_alembic_version(mig_db_url):
 
     cfg = _cfg(mig_db_url)
     cfg.cmd_opts = Namespace(x=[f"schema={schema}"])
-    command.upgrade(cfg, "head")
+    # Schema-local fixture only has doc-gate tables — upgrade only the
+    # doc-gate successor so scar/knowledge fail-closed migrations are not run.
+    command.upgrade(cfg, "20260716_doc_gate_waiver_hardening")
 
     engine = create_engine(_sync_url(mig_db_url))
     with engine.connect() as c:
@@ -356,8 +358,7 @@ def test_round25_upgrade_widens_schema_local_alembic_version(mig_db_url):
         ), {"schema": schema}).scalar_one()
     engine.dispose()
 
-    # Dual-branch successor of 20260715_waiver_items is the merge tip that
-    # joins knowledge_entries + doc_gate_waiver_hardening (scar/knowledge bodies
-    # no-op when CAPA tables are absent in this schema-local fixture).
-    assert revision == "20260717_merge_knowledge_and_doc_gate"
+    # Original intent: long revision stamp + version_num width on the
+    # doc-gate hardening successor (not the dual-branch merge tip).
+    assert revision == "20260716_doc_gate_waiver_hardening"
     assert max_length == 64
