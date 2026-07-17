@@ -356,5 +356,8 @@ def test_round25_upgrade_widens_schema_local_alembic_version(mig_db_url):
         ), {"schema": schema}).scalar_one()
     engine.dispose()
 
-    assert revision == "20260716_doc_gate_waiver_hardening"
+    # Dual-branch successor of 20260715_waiver_items is the merge tip that
+    # joins knowledge_entries + doc_gate_waiver_hardening (scar/knowledge bodies
+    # no-op when CAPA tables are absent in this schema-local fixture).
+    assert revision == "20260717_merge_knowledge_and_doc_gate"
     assert max_length == 64

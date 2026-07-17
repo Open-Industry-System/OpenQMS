@@ -3,11 +3,17 @@
 Revision ID: 20260716_knowledge_entries
 Revises: 20260716_capa_scar_ref
 Create Date: 2026-07-16
+
+Guarded for schema-local / partial fixtures: if factories is absent, skip
+creating knowledge_entries (FK target missing). If embedding_sync_outbox is
+absent, skip the content_hash column add. Full public chain still applies both.
 """
 from typing import Sequence, Union
+import logging
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
 revision: str = "20260716_knowledge_entries"
@@ -15,67 +21,93 @@ down_revision: Union[str, None] = "20260716_capa_scar_ref"
 branch_labels = None
 depends_on = None
 
+logger = logging.getLogger("alembic.migration")
+
 
 def upgrade() -> None:
-    op.create_table(
-        "knowledge_entries",
-        sa.Column("entry_id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("source_type", sa.String(32), nullable=False),
-        sa.Column("source_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column(
-            "factory_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("factories.id", ondelete="RESTRICT"),
-            nullable=False,
-        ),
-        sa.Column("product_line_code", sa.String(20), nullable=False),
-        sa.Column("document_no", sa.String(50), nullable=False),
-        sa.Column("title", sa.String(200), nullable=False),
-        sa.Column("severity", sa.String(20), nullable=True),
-        sa.Column("fields", postgresql.JSONB, nullable=False),
-        sa.Column("status", sa.String(16), nullable=False, server_default="active"),
-        sa.Column("llm_status", sa.String(16), nullable=False, server_default="done"),
-        sa.Column("embedding_text", sa.Text, nullable=False),
-        sa.Column("content_hash", sa.String(64), nullable=False),
-        sa.Column(
-            "embedding_status", sa.String(16), nullable=False, server_default="pending"
-        ),
-        sa.Column("embedding_id", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.UniqueConstraint(
-            "source_type", "source_id", name="uq_knowledge_entries_source"
-        ),
-        sa.CheckConstraint(
-            "status IN ('active', 'superseded')",
-            name="ck_knowledge_entries_status",
-        ),
-        sa.CheckConstraint(
-            "embedding_status IN ('pending', 'ready', 'failed')",
-            name="ck_knowledge_entries_embedding_status",
-        ),
-    )
-    op.create_index(
-        "ix_knowledge_entries_factory_pl_status",
-        "knowledge_entries",
-        ["factory_id", "product_line_code", "status"],
-    )
-    op.create_index(
-        "ix_knowledge_entries_factory_pl_embedding_status",
-        "knowledge_entries",
-        ["factory_id", "product_line_code", "embedding_status"],
-    )
+    bind = op.get_bind()
+    insp = inspect(bind)
 
+    if not insp.has_table("factories"):
+        logger.info(
+            "20260716_knowledge_entries: factories missing — skip knowledge_entries "
+            "create (schema-local path)"
+        )
+    elif insp.has_table("knowledge_entries"):
+        logger.info(
+            "20260716_knowledge_entries: knowledge_entries already present — skip create"
+        )
+    else:
+        op.create_table(
+            "knowledge_entries",
+            sa.Column("entry_id", postgresql.UUID(as_uuid=True), primary_key=True),
+            sa.Column("source_type", sa.String(32), nullable=False),
+            sa.Column("source_id", postgresql.UUID(as_uuid=True), nullable=False),
+            sa.Column(
+                "factory_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("factories.id", ondelete="RESTRICT"),
+                nullable=False,
+            ),
+            sa.Column("product_line_code", sa.String(20), nullable=False),
+            sa.Column("document_no", sa.String(50), nullable=False),
+            sa.Column("title", sa.String(200), nullable=False),
+            sa.Column("severity", sa.String(20), nullable=True),
+            sa.Column("fields", postgresql.JSONB, nullable=False),
+            sa.Column("status", sa.String(16), nullable=False, server_default="active"),
+            sa.Column("llm_status", sa.String(16), nullable=False, server_default="done"),
+            sa.Column("embedding_text", sa.Text, nullable=False),
+            sa.Column("content_hash", sa.String(64), nullable=False),
+            sa.Column(
+                "embedding_status", sa.String(16), nullable=False, server_default="pending"
+            ),
+            sa.Column("embedding_id", postgresql.UUID(as_uuid=True), nullable=True),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.UniqueConstraint(
+                "source_type", "source_id", name="uq_knowledge_entries_source"
+            ),
+            sa.CheckConstraint(
+                "status IN ('active', 'superseded')",
+                name="ck_knowledge_entries_status",
+            ),
+            sa.CheckConstraint(
+                "embedding_status IN ('pending', 'ready', 'failed')",
+                name="ck_knowledge_entries_embedding_status",
+            ),
+        )
+        op.create_index(
+            "ix_knowledge_entries_factory_pl_status",
+            "knowledge_entries",
+            ["factory_id", "product_line_code", "status"],
+        )
+        op.create_index(
+            "ix_knowledge_entries_factory_pl_embedding_status",
+            "knowledge_entries",
+            ["factory_id", "product_line_code", "embedding_status"],
+        )
+
+    # Re-inspect after possible create; outbox column is independent.
+    insp = inspect(bind)
+    if not insp.has_table("embedding_sync_outbox"):
+        logger.info(
+            "20260716_knowledge_entries: embedding_sync_outbox missing — skip "
+            "content_hash column (schema-local path)"
+        )
+        return
+    outbox_cols = {c["name"] for c in insp.get_columns("embedding_sync_outbox")}
+    if "content_hash" in outbox_cols:
+        return
     op.add_column(
         "embedding_sync_outbox",
         sa.Column("content_hash", sa.String(64), nullable=True),
@@ -83,13 +115,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("embedding_sync_outbox", "content_hash")
-    op.drop_index(
-        "ix_knowledge_entries_factory_pl_embedding_status",
-        table_name="knowledge_entries",
-    )
-    op.drop_index(
-        "ix_knowledge_entries_factory_pl_status",
-        table_name="knowledge_entries",
-    )
-    op.drop_table("knowledge_entries")
+    bind = op.get_bind()
+    insp = inspect(bind)
+    if insp.has_table("embedding_sync_outbox"):
+        outbox_cols = {c["name"] for c in insp.get_columns("embedding_sync_outbox")}
+        if "content_hash" in outbox_cols:
+            op.drop_column("embedding_sync_outbox", "content_hash")
+    if insp.has_table("knowledge_entries"):
+        indexes = {i["name"] for i in insp.get_indexes("knowledge_entries")}
+        if "ix_knowledge_entries_factory_pl_embedding_status" in indexes:
+            op.drop_index(
+                "ix_knowledge_entries_factory_pl_embedding_status",
+                table_name="knowledge_entries",
+            )
+        if "ix_knowledge_entries_factory_pl_status" in indexes:
+            op.drop_index(
+                "ix_knowledge_entries_factory_pl_status",
+                table_name="knowledge_entries",
+            )
+        op.drop_table("knowledge_entries")
