@@ -6,7 +6,7 @@ and returns a RuleResult. No DB access, no side effects.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 # ── Data structures ──────────────────────────────────────────────────
@@ -360,7 +360,34 @@ def rule_r10_safety_defect(data: SupplierRiskInput, thresholds: dict) -> RuleRes
 
 # ── R11  CAPA 来料不良影响（severity + repeat 计分；disposition 仅追溯）──
 
-_SEVERITY_RANK = {"致命": 4, "严重": 3, "一般": 2, "轻微": 1, "general": 2, "critical": 4, "major": 3, "minor": 1}
+_SEVERITY_RANK = {
+    "致命": 4, "严重": 3, "一般": 2, "轻微": 1,
+    "fatal": 4, "serious": 3, "general": 2,
+    "critical": 4, "major": 3, "minor": 1,
+}
+
+_CREATED_AT_MIN = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def capa_incident_sort_key(i) -> tuple:
+    """Deterministic CAPA incident ranking for R11 / inject re-sort.
+
+    Higher rank first, then newer created_at, then smaller input_id.
+    Use with ``max(..., key=capa_incident_sort_key)`` or
+    ``sorted(..., key=capa_incident_sort_key, reverse=True)``.
+    """
+    rank = _SEVERITY_RANK.get(getattr(i, "severity", ""), 2)
+    created = getattr(i, "created_at", None)
+    if created is None:
+        created_key = _CREATED_AT_MIN
+    elif created.tzinfo is None:
+        created_key = created.replace(tzinfo=timezone.utc)
+    else:
+        created_key = created
+    iid = getattr(i, "input_id", None)
+    # Invert input_id so max()/reverse sorted prefer smaller ids among ties.
+    iid_str = str(iid) if iid is not None else ""
+    return (rank, created_key, tuple(-ord(c) for c in iid_str))
 
 
 def rule_r11_capa_issue(data: SupplierRiskInput, thresholds: dict) -> RuleResult:
@@ -373,23 +400,19 @@ def rule_r11_capa_issue(data: SupplierRiskInput, thresholds: dict) -> RuleResult
         return RuleResult(rule_id="R11", triggered=False, score=0,
                           detail="无 CAPA 来料不良输入", category="quality", critical=False)
 
-    # 取最高严重度 incident（致命>严重>一般>轻微；同级 created_at DESC, input_id ASC 由调用方排序保证）
-    def _rank(i):
-        return _SEVERITY_RANK.get(getattr(i, "severity", ""), 2)
-    top = max(incidents, key=_rank)
-    rank = _rank(top)
+    # 最高严重度；同级取较新 created_at，再取较小 input_id（不依赖调用方排序）
+    top = max(incidents, key=capa_incident_sort_key)
+    rank = _SEVERITY_RANK.get(getattr(top, "severity", ""), 2)
 
     repeat_confirmed = getattr(top, "repeat_confirmed", None)
     repeat_suggested = getattr(top, "repeat_suggested", None)
     if repeat_confirmed is not None:
-        repeat = repeat_confirmed
+        repeat = bool(repeat_confirmed)
         provisional = False
-    elif repeat_suggested is not None:
-        repeat = repeat_suggested
-        provisional = True
     else:
-        repeat = False
-        provisional = False
+        # All inputs not yet human-confirmed are provisional (even if suggested is None).
+        repeat = bool(repeat_suggested) if repeat_suggested is not None else False
+        provisional = True
 
     score = float(base_score)
     critical = rank >= 3  # 致命/严重

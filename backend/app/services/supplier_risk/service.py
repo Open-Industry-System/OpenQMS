@@ -13,7 +13,11 @@ from app.models.supplier_risk import SupplierRiskAlert
 from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 from app.services.supplier_risk.config import get_effective_configs, get_effective_configs_batch
 from app.services.supplier_risk.exceptions import SupplierRiskConfigurationError
-from app.services.supplier_risk.rule_engine import SupplierRiskInput, run_all_rules
+from app.services.supplier_risk.rule_engine import (
+    SupplierRiskInput,
+    capa_incident_sort_key,
+    run_all_rules,
+)
 from app.services.supplier_risk.scorer import calculate_risk_score
 
 CAPA_INPUT_WINDOW_DAYS = 90
@@ -55,6 +59,8 @@ async def evaluate_supplier_risk_in_tx(
         cutoff = datetime.now(timezone.utc) - timedelta(days=CAPA_INPUT_WINDOW_DAYS)
         if trigger_input.created_at is not None and _as_utc(trigger_input.created_at) >= cutoff:
             incidents.append(trigger_input)
+        # inject 会破坏 gather 的 created_at DESC 序；重排使 R11 同级选择确定性
+        incidents = sorted(incidents, key=capa_incident_sort_key, reverse=True)
 
     input_data = SupplierRiskInput(
         supplier=supplier,
