@@ -300,6 +300,35 @@ async def lifespan(app: FastAPI):
 
     risk_eval_task = asyncio.create_task(_risk_eval_loop())
 
+    # 01.6: one-shot startup check — warn if no enabled global R11 config per tenant
+    async def _check_r11_config_startup():
+        try:
+            from app.models.supplier_risk import SupplierRiskConfig
+
+            async for tenant, db in run_for_each_tenant():
+                try:
+                    has_r11 = (
+                        await db.execute(
+                            select(SupplierRiskConfig.config_id).where(
+                                SupplierRiskConfig.rule_id == "R11",
+                                SupplierRiskConfig.enabled.is_(True),
+                                SupplierRiskConfig.supplier_id.is_(None),
+                            ).limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if has_r11 is None:
+                        logger.error(
+                            "[risk_config] tenant %s has no enabled global R11 config "
+                            "(supplier_id IS NULL); CAPA-triggered risk eval will fail",
+                            tenant.slug,
+                        )
+                except Exception as e:
+                    logger.error("[risk_config] R11 startup check failed for tenant %s: %s", tenant.slug, e)
+        except Exception as e:
+            logger.error("[risk_config] R11 startup check error: %s", e)
+
+    asyncio.create_task(_check_r11_config_startup())
+
     # 01.6: supplier risk input outbox processor loop (every 30s)
     async def _risk_input_outbox_loop():
         while True:
