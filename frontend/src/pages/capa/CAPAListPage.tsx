@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Modal, Form, Input, Select, DatePicker, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { listCAPAs, createCAPA } from "../../api/capa";
+import { listCAPAs, createCAPA, listCapaSupplierOptions } from "../../api/capa";
 import type { CAPAReport } from "../../types";
 import { useProductLineStore } from "../../store/productLineStore";
 import { usePermission } from "../../hooks/usePermission";
@@ -51,11 +51,47 @@ export default function CAPAListPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [suppliers, setSuppliers] = useState<Array<{ supplier_id: string; supplier_no: string; name: string }>>([]);
+  const [supplierLoadError, setSupplierLoadError] = useState<string | null>(null);
+  const supplierSearchSeq = useRef(0);
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
   const { canEdit } = usePermission();
   const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    // Prefetch first page so the dropdown is non-empty; further options load via remote search.
+    listCapaSupplierOptions({ page_size: 50 })
+      .then((res) => {
+        setSuppliers(res.items);
+        setSupplierLoadError(null);
+      })
+      .catch(() => {
+        setSuppliers([]);
+        setSupplierLoadError(t("fields.supplierLoadFailed", "供应商列表加载失败"));
+      });
+  }, [t]);
+
+  const searchSuppliers = async (q: string) => {
+    const seq = ++supplierSearchSeq.current;
+    try {
+      const res = await listCapaSupplierOptions({
+        page_size: 50,
+        search: q?.trim() || undefined,
+      });
+      // Drop stale responses (earlier request finished later).
+      if (seq !== supplierSearchSeq.current) return;
+      setSuppliers(res.items);
+      setSupplierLoadError(null);
+    } catch {
+      if (seq !== supplierSearchSeq.current) return;
+      // Keep existing options; surface error only if list is empty.
+      if (suppliers.length === 0) {
+        setSupplierLoadError(t("fields.supplierLoadFailed", "供应商列表加载失败"));
+      }
+    }
+  };
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -75,15 +111,17 @@ export default function CAPAListPage() {
   useEffect(() => { fetchData(1); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine, searchParams]);
 
-  const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs; problem_description?: string }) => {
+  const handleCreate = async (values: { title: string; document_no: string; severity: string; due_date?: dayjs.Dayjs; problem_description?: string; supplier_id?: string | null }) => {
     try {
-      const capa = await createCAPA({
+      const payload: Parameters<typeof createCAPA>[0] = {
         title: values.title,
         document_no: values.document_no,
         severity: values.severity,
         due_date: values.due_date?.format("YYYY-MM-DD"),
         product_line_code: productLine || undefined,
-      });
+        supplier_id: values.supplier_id || null,
+      };
+      const capa = await createCAPA(payload);
       message.success(tc("messages.operationSuccess", "8D 报告创建成功"));
       setModalOpen(false);
       form.resetFields();
@@ -151,6 +189,25 @@ export default function CAPAListPage() {
           </Form.Item>
           <Form.Item name="due_date" label={t("fields.dueDate", "完成期限")}>
             <DatePicker style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            name="supplier_id"
+            label={t("fields.supplier", "关联供应商")}
+            extra={supplierLoadError || undefined}
+          >
+            <Select
+              allowClear
+              showSearch
+              filterOption={false}
+              onSearch={searchSuppliers}
+              disabled={!!supplierLoadError}
+              placeholder={
+                supplierLoadError
+                  ? supplierLoadError
+                  : t("fields.supplierPlaceholder", "请选择供应商")
+              }
+              options={suppliers.map((s) => ({ value: s.supplier_id, label: `${s.supplier_no} - ${s.name}` }))}
+            />
           </Form.Item>
           <Form.Item name="problem_description" label={t("fields.problemDescription", "问题描述（可选）")}>
             <Input.TextArea rows={2} placeholder={t("fields.problemDescriptionPlaceholder", "简述问题现象（可选，用于智能推荐）")} />

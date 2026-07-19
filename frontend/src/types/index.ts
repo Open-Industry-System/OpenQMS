@@ -138,6 +138,19 @@ export interface PaginatedResponse<T> {
 
 export type FMEAListResponse = PaginatedResponse<FMEADocument>;
 
+export interface SupplierRiskInputProjection {
+  input_id: string;
+  status: "pending" | "processing" | "processed" | "error";
+  repeat_suggested: boolean | null;
+  repeat_detection_status: "matched" | "not_matched" | "unavailable";
+  repeat_confirmed: boolean | null;
+  matched_capa_nos: string[];
+  evaluated_risk_level: string | null;
+  evaluated_risk_score: number | null;
+  evaluated_at?: string | null;
+  linked_alert: { alert_id: string; risk_level: string } | null;
+}
+
 export interface CAPAReport {
   report_id: string;
   document_no: string;
@@ -161,12 +174,16 @@ export interface CAPAReport {
   created_at: string;
   updated_at: string;
   scar_ref_id?: string | null;
+  supplier_id?: string | null;
+  supplier_no?: string | null;
+  supplier_name?: string | null;
   linked_scar?: {
     scar_id: string;
     scar_no: string;
     status: string;
     supplier_id: string;
   } | null;
+  supplier_risk_input?: SupplierRiskInputProjection | null;
   d3_affected_lots?: string[];
 }
 

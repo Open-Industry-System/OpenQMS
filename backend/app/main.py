@@ -301,6 +301,61 @@ async def lifespan(app: FastAPI):
 
     risk_eval_task = asyncio.create_task(_risk_eval_loop())
 
+    # 01.6: one-shot startup check — warn if no enabled global R11 config per tenant
+    async def _check_r11_config_startup():
+        try:
+            from app.models.supplier_risk import SupplierRiskConfig
+
+            async for tenant, db in run_for_each_tenant():
+                try:
+                    has_r11 = (
+                        await db.execute(
+                            select(SupplierRiskConfig.config_id).where(
+                                SupplierRiskConfig.rule_id == "R11",
+                                SupplierRiskConfig.enabled.is_(True),
+                                SupplierRiskConfig.supplier_id.is_(None),
+                                SupplierRiskConfig.product_line_code.is_(None),
+                            ).limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if has_r11 is None:
+                        logger.error(
+                            "[risk_config] tenant %s has no enabled global R11 config "
+                            "(supplier_id IS NULL AND product_line_code IS NULL); "
+                            "CAPA-triggered risk eval will fail until seed/config is fixed",
+                            tenant.slug,
+                        )
+                except Exception as e:
+                    logger.error("[risk_config] R11 startup check failed for tenant %s: %s", tenant.slug, e)
+        except Exception as e:
+            logger.error("[risk_config] R11 startup check error: %s", e)
+
+    asyncio.create_task(_check_r11_config_startup())
+
+    # 01.6: supplier risk input outbox processor loop (every 30s)
+    async def _risk_input_outbox_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        from app.services.supplier_risk.risk_input_worker import (
+                            claim_batch,
+                            process_one,
+                            recover_stale_inputs,
+                        )
+
+                        await recover_stale_inputs(db)
+                        claimed = await claim_batch(db, 20)
+                        for c in claimed:
+                            await process_one(db, c)
+                    except Exception as e:
+                        logger.error("[risk_input_loop] error for tenant %s: %s", tenant.slug, e)
+            except Exception as e:
+                logger.error("[risk_input_loop] error: %s", e)
+
+    risk_input_task = asyncio.create_task(_risk_input_outbox_loop())
+
     # Start supply chain risk map snapshot scheduler (hourly)
     from app.services.supply_chain_risk_map.scheduler import snapshot_loop
 
@@ -367,6 +422,13 @@ async def lifespan(app: FastAPI):
     risk_eval_task.cancel()
     try:
         await risk_eval_task
+    except asyncio.CancelledError:
+        pass
+
+    # Cancel risk input outbox task
+    risk_input_task.cancel()
+    try:
+        await risk_input_task
     except asyncio.CancelledError:
         pass
 

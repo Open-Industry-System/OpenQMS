@@ -54,14 +54,6 @@ vi.mock("../../api/knowledge", () => ({
 vi.mock("../../api/fmea", () => ({
   listFMEAs: vi.fn().mockResolvedValue({ items: [] }),
 }));
-vi.mock("../../api/supplier", () => ({
-  listSuppliers: vi.fn().mockResolvedValue({
-    items: [{ supplier_id: "sup-1", supplier_no: "S-001", name: "Acme" }],
-    total: 1,
-    page: 1,
-    page_size: 20,
-  }),
-}));
 
 // Mock D4VerificationCard to avoid rendering issues
 vi.mock("../../components/capa/D4VerificationCard", () => ({
@@ -99,10 +91,20 @@ function renderPage() {
   );
 }
 
+function mockSupplierOptions() {
+  vi.mocked(capaApi.listCapaSupplierOptions).mockResolvedValue({
+    items: [{ supplier_id: "sup-1", supplier_no: "S-001", name: "Acme", status: "approved" }],
+    total: 1,
+    page: 1,
+    page_size: 50,
+  } as any);
+}
+
 describe("CAPADetailPage D3ContainmentPanel integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(capaApi.getD3Runs).mockResolvedValue([]);
     vi.mocked(capaApi.getD3Adoptions).mockResolvedValue([]);
     vi.mocked(capaApi.getD3Executions).mockResolvedValue([]);
@@ -216,10 +218,154 @@ describe("CAPADetailPage D3ContainmentPanel integration", () => {
   });
 });
 
+describe("CAPADetailPage supplier risk input", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    mockSupplierOptions();
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
+      ai_draft_enabled: false,
+      llm_provider: null,
+    });
+    vi.mocked(capaApi.getD3Runs).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Adoptions).mockResolvedValue([]);
+    vi.mocked(capaApi.getD3Executions).mockResolvedValue([]);
+    vi.mocked(capaApi.getD4Recommendations).mockResolvedValue({ items: [], stages: [] });
+    vi.mocked(capaApi.getD7Recommendations).mockResolvedValue({ recommendations: [] } as any);
+    vi.mocked(capaApi.getDocGateImpact).mockResolvedValue({ status: "done", affected_docs: [] } as any);
+    vi.mocked(capaApi.getDocGateAudit).mockResolvedValue({ audit_run_id: null, audits: [] } as any);
+    vi.mocked(capaApi.getDocGateDecision).mockResolvedValue({ decision: null } as any);
+  });
+
+  it("renders SupplierRiskInputCard and confirms repeat", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3, supplier_risk: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const riskInput = {
+      input_id: "i1",
+      status: "processed",
+      repeat_suggested: true,
+      repeat_detection_status: "matched",
+      repeat_confirmed: null,
+      matched_capa_nos: ["8D-2025-001"],
+      evaluated_risk_level: "high",
+      evaluated_risk_score: 80,
+      linked_alert: null,
+    };
+    const capaWithRisk = {
+      ...mockCapa,
+      status: "D7_COMPLETED",
+      supplier_risk_input: riskInput,
+    };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(capaWithRisk as any);
+    vi.mocked(capaApi.confirmRepeat).mockResolvedValue({
+      ...capaWithRisk,
+      supplier_risk_input: { ...riskInput, repeat_confirmed: true },
+    } as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("supplier-risk-input-card")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("supplier-risk-confirm-yes"));
+    await waitFor(() => {
+      expect(capaApi.confirmRepeat).toHaveBeenCalledWith("test-report-id", true);
+    });
+  });
+
+  it("hides confirm buttons without supplier_risk edit permission", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D7_COMPLETED",
+      supplier_risk_input: {
+        input_id: "i1",
+        status: "processed",
+        repeat_suggested: true,
+        repeat_detection_status: "matched",
+        repeat_confirmed: null,
+        matched_capa_nos: ["8D-2025-001"],
+        evaluated_risk_level: "high",
+        evaluated_risk_score: 80,
+        linked_alert: null,
+      },
+    } as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("supplier-risk-input-card")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("supplier-risk-confirm-yes")).not.toBeInTheDocument();
+  });
+
+  it("shows supplier_no/name from CAPA projection when locked (not raw UUID)", async () => {
+    useAuthStore.setState({
+      user: {
+        user_id: "u1",
+        username: "engineer",
+        role_key: "quality_engineer",
+        permissions: { capa: 3 },
+      } as any,
+      token: "test-token",
+    });
+
+    const supplierId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({
+      ...mockCapa,
+      status: "D7_COMPLETED",
+      supplier_id: supplierId,
+      supplier_no: "SUP-LABEL-01",
+      supplier_name: "Label Supplier Co",
+      supplier_risk_input: {
+        input_id: "i1",
+        status: "processed",
+        repeat_suggested: false,
+        repeat_detection_status: "not_matched",
+        repeat_confirmed: null,
+        matched_capa_nos: [],
+        evaluated_risk_level: "medium",
+        evaluated_risk_score: 50,
+        linked_alert: null,
+      },
+    } as any);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("capa-supplier-readonly")).toBeInTheDocument();
+    });
+    const label = screen.getByTestId("capa-supplier-readonly");
+    expect(label.textContent).toContain("SUP-LABEL-01");
+    expect(label.textContent).toContain("Label Supplier Co");
+    expect(label.textContent).not.toContain(supplierId);
+    // i18n may resolve to zh default or en "Locked"
+    expect(label.textContent).toMatch(/已锁定|Locked/);
+  });
+});
+
 describe("CAPADetailPage AI draft integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
       ai_draft_enabled: false,
       llm_provider: null,
@@ -386,6 +532,7 @@ describe("CAPADetailPage 生成PPT button visibility", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
       ai_draft_enabled: false,
       llm_provider: null,
@@ -441,6 +588,7 @@ describe("CAPADetailPage trigger SCAR", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    mockSupplierOptions();
     vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({
       ai_draft_enabled: false,
       llm_provider: null,

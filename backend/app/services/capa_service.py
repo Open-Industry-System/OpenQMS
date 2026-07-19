@@ -92,6 +92,7 @@ async def create_capa(
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
     factory_id: uuid.UUID | None = None,
+    supplier_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
@@ -100,6 +101,14 @@ async def create_capa(
     )
     if existing_result.scalar_one_or_none():
         raise ValueError(f"CAPA report number '{document_no}' already exists.")
+
+    if supplier_id is not None:
+        from app.models.supplier import Supplier
+        sup = await db.get(Supplier, supplier_id)
+        if sup is None:
+            raise ValueError("供应商不存在")
+        if sup.factory_id != factory_id:
+            raise ValueError("供应商与 8D 不属于同一工厂")
 
     report_id = uuid.uuid4()
     capa = CAPAEightD(
@@ -111,22 +120,26 @@ async def create_capa(
         product_line_code=product_line_code,
         created_by=user_id,
         factory_id=factory_id,
+        supplier_id=supplier_id,
     )
     db.add(capa)
 
     # Audit log
+    changed_fields = {
+        "title": title,
+        "document_no": document_no,
+        "severity": severity,
+        "due_date": str(due_date) if due_date else None,
+        "product_line_code": product_line_code,
+        "status": capa.status,
+    }
+    if supplier_id is not None:
+        changed_fields["supplier_id"] = str(supplier_id)
     audit_log = AuditLog(
         table_name="capa_eightd",
         record_id=report_id,
         action="CREATE",
-        changed_fields={
-            "title": title,
-            "document_no": document_no,
-            "severity": severity,
-            "due_date": str(due_date) if due_date else None,
-            "product_line_code": product_line_code,
-            "status": capa.status,
-        },
+        changed_fields=changed_fields,
         operated_by=user_id,
     )
     db.add(audit_log)
@@ -151,6 +164,7 @@ async def _create_capa_without_commit(
     user_id: uuid.UUID,
     product_line_code: str = "DC-DC-100",
     factory_id: uuid.UUID | None = None,
+    supplier_id: uuid.UUID | None = None,
 ) -> CAPAEightD:
     """Create CAPA without committing — caller must commit."""
     await validate_product_line(db, product_line_code)
@@ -160,6 +174,14 @@ async def _create_capa_without_commit(
     )
     if existing_result.scalar_one_or_none():
         raise ValueError(f"CAPA report number '{document_no}' already exists.")
+
+    if supplier_id is not None:
+        from app.models.supplier import Supplier
+        sup = await db.get(Supplier, supplier_id)
+        if sup is None:
+            raise ValueError("供应商不存在")
+        if sup.factory_id != factory_id:
+            raise ValueError("供应商与 8D 不属于同一工厂")
 
     report_id = uuid.uuid4()
     capa = CAPAEightD(
@@ -171,22 +193,26 @@ async def _create_capa_without_commit(
         product_line_code=product_line_code,
         created_by=user_id,
         factory_id=factory_id,
+        supplier_id=supplier_id,
     )
     db.add(capa)
 
     # Audit log
+    changed_fields = {
+        "title": title,
+        "document_no": document_no,
+        "severity": severity,
+        "due_date": str(due_date) if due_date else None,
+        "product_line_code": product_line_code,
+        "status": capa.status,
+    }
+    if supplier_id is not None:
+        changed_fields["supplier_id"] = str(supplier_id)
     audit_log = AuditLog(
         table_name="capa_eightd",
         record_id=report_id,
         action="CREATE",
-        changed_fields={
-            "title": title,
-            "document_no": document_no,
-            "severity": severity,
-            "due_date": str(due_date) if due_date else None,
-            "product_line_code": product_line_code,
-            "status": capa.status,
-        },
+        changed_fields=changed_fields,
         operated_by=user_id,
     )
     db.add(audit_log)
@@ -217,6 +243,7 @@ async def update_capa(
     )
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         from app.models.product_line import ProductLine
+        from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
         new_pl = update_data["product_line_code"]
         pl_row = await db.scalar(select(ProductLine).where(ProductLine.code == new_pl))
         if pl_row is None:
@@ -229,6 +256,63 @@ async def update_capa(
         # US-E2E-01.5: CAPA↔SCAR same-PL invariant — refuse unilateral PL move while linked
         if capa.scar_ref_id is not None and new_pl != capa.product_line_code:
             raise ValueError("已关联 SCAR，禁止单独修改产品线")
+
+        # US-E2E-01.6: freeze product_line once risk input exists or D7+
+        # (mirror supplier_id freeze — input.product_line_code must stay aligned).
+        if new_pl != capa.product_line_code:
+            existing_input = await db.scalar(
+                select(SupplierRiskCapaInput.input_id).where(
+                    SupplierRiskCapaInput.capa_id == capa.report_id
+                )
+            )
+            locked_states = {
+                EightDState.D7_COMPLETED.value,
+                EightDState.D8_GATE_PENDING.value,
+                EightDState.D8_APPROVAL_PENDING.value,
+                EightDState.D8_CLOSURE.value,
+                EightDState.ARCHIVED.value,
+            }
+            if existing_input is not None:
+                raise ValueError("已生成供应商风险输入，不可修改产品线")
+            if capa.status in locked_states:
+                raise ValueError("8D 已推进至 D7+，不可修改产品线")
+
+    # US-E2E-01.6: supplier_id same-factory + freeze once risk input / D7+
+    # Handle both set and clear (null). Generic setattr loop skips None, so clear
+    # is applied explicitly after validation.
+    supplier_clear_requested = False
+    if "supplier_id" in update_data:
+        from app.models.supplier import Supplier
+        from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+        new_supplier_id = update_data["supplier_id"]  # may be None (clear)
+        existing_input = await db.scalar(
+            select(SupplierRiskCapaInput.input_id).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+        )
+        locked_states = {
+            EightDState.D7_COMPLETED.value,
+            EightDState.D8_GATE_PENDING.value,
+            EightDState.D8_APPROVAL_PENDING.value,
+            EightDState.D8_CLOSURE.value,
+            EightDState.ARCHIVED.value,
+        }
+        if new_supplier_id is not None:
+            sup = await db.get(Supplier, new_supplier_id)
+            if sup is None:
+                raise ValueError("供应商不存在")
+            if sup.factory_id != capa.factory_id:
+                raise ValueError("供应商与 8D 不属于同一工厂")
+            if existing_input is not None and capa.supplier_id != new_supplier_id:
+                raise ValueError("已生成供应商风险输入，不可修改供应商")
+            if capa.status in locked_states and capa.supplier_id != new_supplier_id:
+                raise ValueError("8D 已推进至 D7+，不可修改供应商")
+        else:
+            # Clear to null — only when no risk input and not D7+
+            if existing_input is not None and capa.supplier_id is not None:
+                raise ValueError("已生成供应商风险输入，不可修改供应商")
+            if capa.status in locked_states and capa.supplier_id is not None:
+                raise ValueError("8D 已推进至 D7+，不可修改供应商")
+            if capa.supplier_id is not None:
+                supplier_clear_requested = True
 
     # US-E2E-01.3：冻结字段后端约束（防 direct API 修改）
     _FROZEN_FIELDS_BY_STATUS = {
@@ -270,6 +354,12 @@ async def update_capa(
                 else:
                     changed_fields[key] = value
                 setattr(capa, key, value)
+
+    # Explicit clear for supplier_id=null (generic loop skips None)
+    if supplier_clear_requested:
+        old_sid = capa.supplier_id
+        capa.supplier_id = None
+        changed_fields["supplier_id"] = {"old": str(old_sid) if old_sid else None, "new": None}
 
     if changed_fields:
         audit_log = AuditLog(
@@ -315,6 +405,26 @@ async def _load_d7_gate_fmea_docs(db: AsyncSession, capa) -> list[dict]:
         {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data}
         for f in result.scalars().all()
     ]
+
+
+async def _detect_repeat_capa(db: AsyncSession, capa) -> tuple[bool | None, str, list[str]]:
+    """返回 (repeat_suggested, detection_status, matched_capa_nos)。"""
+    if not capa.fmea_node_id:
+        return None, "unavailable", []
+    rows = (
+        await db.execute(
+            select(CAPAEightD).where(
+                CAPAEightD.supplier_id == capa.supplier_id,
+                CAPAEightD.product_line_code == capa.product_line_code,
+                CAPAEightD.fmea_node_id == capa.fmea_node_id,
+                CAPAEightD.status.in_((EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value)),
+                CAPAEightD.report_id != capa.report_id,
+            )
+        )
+    ).scalars().all()
+    if rows:
+        return True, "matched", [r.document_no for r in rows]
+    return False, "not_matched", []
 
 
 async def _d7_completion_gate(db: AsyncSession, capa) -> None:
@@ -659,6 +769,56 @@ async def advance_capa(
                     "product_line_code": capa.product_line_code,
                 },
             )
+
+    # 01.6: D7_PREVENTION→D7_COMPLETED 时写供应商风险输入 outbox（pending）
+    # capa_id UNIQUE：D8 reject 后再次 D7_COMPLETED 必须幂等，不得因 side effect 回滚 advance。
+    if (
+        old_status == EightDState.D7_PREVENTION.value
+        and capa.status == EightDState.D7_COMPLETED.value
+        and capa.supplier_id is not None
+    ):
+        from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+
+        existing_input = await db.scalar(
+            select(SupplierRiskCapaInput.input_id).where(
+                SupplierRiskCapaInput.capa_id == capa.report_id
+            )
+        )
+        if existing_input is None:
+            repeat_suggested, det_status, matched_nos = await _detect_repeat_capa(db, capa)
+            risk_input = SupplierRiskCapaInput(
+                capa_id=capa.report_id,
+                supplier_id=capa.supplier_id,
+                factory_id=capa.factory_id,
+                product_line_code=capa.product_line_code,
+                created_by=user_id,
+                severity=capa.severity,
+                disposition=capa.d7_prevention,
+                repeat_suggested=repeat_suggested,
+                repeat_detection_status=det_status,
+                repeat_confirmed=None,
+                matched_capa_nos=matched_nos,
+                status="pending",
+                attempt_count=0,
+                max_attempts=5,
+            )
+            db.add(risk_input)
+            db.add(AuditLog(
+                table_name="capa_eightd",
+                record_id=capa.report_id,
+                action="SUPPLIER_RISK_INPUT_QUEUED",
+                operated_by=user_id,
+                factory_id=capa.factory_id,
+                changed_fields={
+                    "capa_id": str(capa.report_id),
+                    "supplier_id": str(capa.supplier_id),
+                    "severity": capa.severity,
+                    "disposition": capa.d7_prevention or "",
+                    "repeat_suggested": repeat_suggested,
+                    "repeat_detection_status": det_status,
+                    "matched_capa_nos": matched_nos,
+                },
+            ))
 
     await db.commit()  # existing commit includes outbox
     await db.refresh(capa)

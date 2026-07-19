@@ -34,9 +34,11 @@ from app.schemas.capa import (
     CAPAResponse,
     CAPATriggerScarRequest,
     CAPAUpdate,
+    ConfirmRepeatRequest,
     D4RecommendationResponse,
     D5RecommendationResponse,
     LinkedScarSchema,
+    SupplierRiskInputProjection,
 )
 from app.schemas import scar as scar_schemas
 from app.schemas.capa_d3 import (
@@ -124,6 +126,71 @@ async def list_capas(
     )
 
 
+@router.get("/supplier-options")
+async def list_capa_supplier_options(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Lightweight supplier picker for CAPA create/edit.
+
+    Gated by CAPA CREATE (not Module.SUPPLIER VIEW) so CAPA operators can
+    associate a supplier without full supplier-module access.
+
+    Scope rules (fail closed):
+    - Prefer ``effective_factory_id``; if unset, require a single accessible
+      factory (multi-factory without selection → empty, no cross-factory leak).
+    - Apply product-line scope: NONE → empty; EXPLICIT → filter product_scope.
+    """
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 CREATE 权限")
+    from app.services import supplier_service
+
+    factory_id = scope.effective_factory_id
+    if factory_id is None:
+        accessible = scope.factory_scope.accessible_factory_ids
+        if accessible is None:
+            # group admin, all factories: still require explicit selection to avoid
+            # tenant-wide dump from the CAPA picker
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        if len(accessible) == 1:
+            factory_id = next(iter(accessible))
+        else:
+            # multi-factory without effective selection → empty (no leak)
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    # Product-line scope
+    allowed_pls = None
+    pl_scope = scope.pl_scope
+    if pl_scope.mode == "NONE":
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+    if pl_scope.mode == "EXPLICIT" and pl_scope.codes:
+        allowed_pls = list(pl_scope.codes)
+
+    items, total = await supplier_service.list_suppliers(
+        db, page=page, page_size=page_size, search=search,
+        factory_id=factory_id,
+        allowed_product_line_codes=allowed_pls,
+    )
+    return {
+        "items": [
+            {
+                "supplier_id": str(s.supplier_id),
+                "supplier_no": s.supplier_no,
+                "name": s.name,
+                "status": s.status,
+            }
+            for s in items
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 @router.post("", response_model=CAPAResponse, status_code=201)
 async def create_capa(
     req: CAPACreate,
@@ -139,6 +206,7 @@ async def create_capa(
         capa = await capa_service.create_capa(
             db, req.title, req.document_no, req.severity, req.due_date,
             scope.user.user_id, req.product_line_code, factory_id=factory_id,
+            supplier_id=req.supplier_id,
         )
         await validate_factory_invariant(capa, db)
     except ValueError as e:
@@ -205,7 +273,7 @@ async def capa_capabilities(
 
 
 async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) -> CAPAResponse:
-    """Build CAPAResponse with scar_ref_id / linked_scar / d3_affected_lots projections."""
+    """Build CAPAResponse with scar / d3 lots / supplier_risk_input / supplier label projections."""
     resp = CAPAResponse.model_validate(capa)
     linked = None
     if capa.scar_ref_id is not None:
@@ -218,11 +286,59 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
                 supplier_id=scar.supplier_id,
             )
     lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id)
+
+    supplier_no = None
+    supplier_name = None
+    if capa.supplier_id is not None:
+        from app.models.supplier import Supplier
+        sup = await db.get(Supplier, capa.supplier_id)
+        if sup is not None:
+            # Scope: only expose label if same factory (row already CAPA-scoped)
+            if sup.factory_id == capa.factory_id:
+                supplier_no = sup.supplier_no
+                supplier_name = sup.name
+
+    supplier_risk_input = None
+    from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+    from app.models.supplier_risk import SupplierRiskAlert
+
+    inp = (
+        await db.execute(
+            select(SupplierRiskCapaInput).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+        )
+    ).scalar_one_or_none()
+    if inp is not None:
+        linked_alert = None
+        if inp.linked_alert_id is not None:
+            alert = await db.get(SupplierRiskAlert, inp.linked_alert_id)
+            if alert is not None:
+                linked_alert = {
+                    "alert_id": str(alert.alert_id),
+                    "risk_level": alert.risk_level,
+                }
+            else:
+                linked_alert = {"alert_id": str(inp.linked_alert_id), "risk_level": None}
+        supplier_risk_input = SupplierRiskInputProjection(
+            input_id=inp.input_id,
+            status=inp.status,
+            repeat_suggested=inp.repeat_suggested,
+            repeat_detection_status=inp.repeat_detection_status,
+            repeat_confirmed=inp.repeat_confirmed,
+            matched_capa_nos=list(inp.matched_capa_nos or []),
+            evaluated_risk_level=inp.evaluated_risk_level,
+            evaluated_risk_score=inp.evaluated_risk_score,
+            evaluated_at=inp.evaluated_at,
+            linked_alert=linked_alert,
+        )
+
     return resp.model_copy(
         update={
             "scar_ref_id": capa.scar_ref_id,
             "linked_scar": linked,
             "d3_affected_lots": lots,
+            "supplier_risk_input": supplier_risk_input,
+            "supplier_no": supplier_no,
+            "supplier_name": supplier_name,
         }
     )
 
@@ -296,6 +412,90 @@ async def trigger_scar(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _scar_to_response(scar)
+
+
+@router.post("/{report_id}/confirm-repeat", response_model=CAPAResponse)
+async def confirm_repeat(
+    report_id: uuid.UUID,
+    body: ConfirmRepeatRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Confirm/deny supplier-risk repeat flag and re-evaluate risk in one transaction."""
+    capa_level = await get_user_permission(scope.user, Module.CAPA, db)
+    if capa_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    risk_level = await get_user_permission(scope.user, Module.SUPPLIER_RISK, db)
+    if risk_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要供应商风险模块的 EDIT 权限")
+
+    from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+    from app.services.supplier_risk.exceptions import SupplierRiskConfigurationError
+    from app.services.supplier_risk.service import evaluate_supplier_risk_in_tx
+
+    # Lock order: capa → input (design §5.4)
+    capa = (
+        await db.execute(
+            select(CAPAEightD)
+            .where(CAPAEightD.report_id == report_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+
+    inp = (
+        await db.execute(
+            select(SupplierRiskCapaInput)
+            .where(SupplierRiskCapaInput.capa_id == report_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if inp is None:
+        raise HTTPException(status_code=404, detail="无供应商风险输入记录")
+    if inp.status != "processed":
+        raise HTTPException(status_code=409, detail="风险输入尚未处理完成，无法确认")
+    if capa.supplier_id is None or inp.supplier_id != capa.supplier_id:
+        raise HTTPException(status_code=400, detail="输入记录与 8D 供应商不一致")
+
+    old_level = inp.evaluated_risk_level
+    inp.repeat_confirmed = body.repeat_confirmed
+    try:
+        alert, _score, _results, _event_type = await evaluate_supplier_risk_in_tx(
+            db,
+            inp.supplier_id,
+            inp.product_line_code,
+            force_update=True,
+            trigger_input=inp,
+        )
+    except SupplierRiskConfigurationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    new_level = inp.evaluated_risk_level
+    alert_id = inp.linked_alert_id or (alert.alert_id if alert is not None else None)
+    db.add(
+        AuditLog(
+            table_name="capa_eightd",
+            record_id=report_id,
+            action="SUPPLIER_RISK_CHANGED",
+            operated_by=scope.user.user_id,
+            factory_id=inp.factory_id,
+            changed_fields={
+                "old_level": old_level,
+                "new_level": new_level,
+                "repeat_confirmed": body.repeat_confirmed,
+                "alert_id": str(alert_id) if alert_id else None,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(capa)
+    return await _capa_response_with_projections(db, capa)
 
 
 @router.put("/{report_id}", response_model=CAPAResponse)

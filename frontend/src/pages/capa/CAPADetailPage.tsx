@@ -9,12 +9,11 @@ import { useTranslation } from "react-i18next";
 import { formatDateTime } from "../../utils/dateTime";
 import {
   getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport,
-  triggerScar, sinkKnowledge, formatCapaAdvanceError,
+  triggerScar, sinkKnowledge, formatCapaAdvanceError, confirmRepeat, listCapaSupplierOptions,
 } from "../../api/capa";
 import { findCapaKnowledgeEntry } from "../../api/knowledge";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
-import { listSuppliers } from "../../api/supplier";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import D4RecPanel from "../../components/capa/D4RecPanel";
 import D4VerificationCard from "../../components/capa/D4VerificationCard";
@@ -22,6 +21,7 @@ import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import D3ContainmentPanel from "../../components/capa/D3ContainmentPanel";
 import DocGatePanel from "../../components/capa/DocGatePanel";
+import SupplierRiskInputCard from "../../components/capa/SupplierRiskInputCard";
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
@@ -74,7 +74,9 @@ export default function CAPADetailPage() {
   const [linkModal, setLinkModal] = useState(false);
   const [scarModalOpen, setScarModalOpen] = useState(false);
   const [scarSubmitting, setScarSubmitting] = useState(false);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = useState<Array<{ supplier_id: string; supplier_no: string; name: string }>>([]);
+  const supplierSearchSeq = useRef(0);
+  const [supplierLocked, setSupplierLocked] = useState(false);
   const [scarForm] = Form.useForm();
 
   const _user = useAuthStore((s) => s.user);
@@ -220,6 +222,10 @@ export default function CAPADetailPage() {
     getAIDraftCapabilities()
       .then((caps) => setAiDraftEnabled(caps.ai_draft_enabled))
       .catch(() => setAiDraftEnabled(false));
+    // Prefetch supplier options so readonly labels can resolve names
+    listCapaSupplierOptions({ page_size: 50 })
+      .then((res) => setSuppliers(res.items))
+      .catch(() => { /* leave empty; fall back to UUID */ });
   }, [id]);
 
   useEffect(() => {
@@ -598,7 +604,7 @@ export default function CAPADetailPage() {
   const openScarModal = async () => {
     if (!capa) return;
     scarForm.setFieldsValue({
-      supplier_id: undefined,
+      supplier_id: capa.supplier_id || undefined,
       description: buildScarDescriptionPrefill(capa),
       requested_action: undefined,
       due_date: undefined,
@@ -606,10 +612,35 @@ export default function CAPADetailPage() {
     });
     setScarModalOpen(true);
     try {
-      const res = await listSuppliers({ page_size: 20 });
+      const res = await listCapaSupplierOptions({ page_size: 50 });
       setSuppliers(res.items);
     } catch {
       // keep empty list; user can still search
+    }
+  };
+
+  const supplierEditable =
+    canEdit("capa") &&
+    !["D7_COMPLETED", "D8_GATE_PENDING", "D8_APPROVAL_PENDING", "D8_CLOSURE", "ARCHIVED"].includes(
+      capa?.status ?? "",
+    ) &&
+    !supplierLocked &&
+    !capa?.supplier_risk_input;
+
+  const handleSupplierChange = async (supplierId: string | null) => {
+    if (!id) return;
+    try {
+      const updated = await updateCAPA(id, { supplier_id: supplierId });
+      setCapa(updated);
+      // If backend froze (input already exists), reflect lock for subsequent edits
+      if (updated.supplier_risk_input) setSupplierLocked(true);
+      message.success(t("messages.supplierSaved", "供应商已保存"));
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      if (typeof detail === "string" && detail.includes("供应商风险输入")) {
+        setSupplierLocked(true);
+      }
+      message.error(detail || t("messages.supplierSaveFailed", "供应商保存失败"));
     }
   };
 
@@ -937,6 +968,65 @@ export default function CAPADetailPage() {
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.severity", "严重等级")}:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.dueDate", "期限")}:</Text> {capa.due_date || t("detail.notSet", "未设定")}</p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedFMEA", "关联 FMEA")}:</Text> {capa.fmea_ref_id || t("detail.notLinked", "未关联")}</p>
+            <p data-e2e="capa-supplier-row">
+              <Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.supplier", "关联供应商")}:</Text>{" "}
+              {supplierEditable ? (
+                <Select
+                  data-e2e="capa-supplier-select"
+                  allowClear
+                  showSearch
+                  filterOption={false}
+                  style={{ minWidth: 220 }}
+                  size="small"
+                  placeholder={t("fields.supplierPlaceholder", "请选择供应商")}
+                  value={capa.supplier_id || undefined}
+                  onSearch={async (q) => {
+                    const seq = ++supplierSearchSeq.current;
+                    try {
+                      const res = await listCapaSupplierOptions({
+                        page_size: 50,
+                        search: q?.trim() || undefined,
+                      });
+                      if (seq !== supplierSearchSeq.current) return;
+                      setSuppliers(res.items);
+                    } catch {
+                      /* leave existing options */
+                    }
+                  }}
+                  onFocus={async () => {
+                    if (suppliers.length === 0) {
+                      try {
+                        const res = await listCapaSupplierOptions({ page_size: 50 });
+                        setSuppliers(res.items);
+                      } catch {
+                        /* leave empty */
+                      }
+                    }
+                  }}
+                  onChange={(val) => handleSupplierChange(val ?? null)}
+                  options={suppliers.map((s) => ({
+                    value: s.supplier_id,
+                    label: `${s.supplier_no} - ${s.name}`,
+                  }))}
+                />
+              ) : (
+                <span data-e2e="capa-supplier-readonly">
+                  {(() => {
+                    if (!capa.supplier_id) return t("detail.notLinked", "未关联");
+                    if (capa.supplier_no) {
+                      return capa.supplier_name
+                        ? `${capa.supplier_no} - ${capa.supplier_name}`
+                        : capa.supplier_no;
+                    }
+                    const s = suppliers.find((x) => x.supplier_id === capa.supplier_id);
+                    return s ? `${s.supplier_no} - ${s.name}` : capa.supplier_id;
+                  })()}
+                  {(supplierLocked || !!capa.supplier_risk_input) && capa.supplier_id && (
+                    <Tag style={{ marginLeft: 8 }}>{t("detail.supplierLocked", "已锁定")}</Tag>
+                  )}
+                </span>
+              )}
+            </p>
             <p>
               <Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedSCAR", "关联 SCAR")}:</Text>{" "}
               {capa.linked_scar ? (
@@ -956,6 +1046,29 @@ export default function CAPADetailPage() {
                 t("detail.notLinked", "未关联")
               )}
             </p>
+            {capa.supplier_risk_input && (
+              <div style={{ marginBottom: 12 }}>
+                <p style={{ marginBottom: 4 }}>
+                  <Text strong style={{ color: "var(--qf-text-secondary)" }}>
+                    {t("riskInput.related", "供应商风险输入")}:
+                  </Text>
+                </p>
+                <SupplierRiskInputCard
+                  input={capa.supplier_risk_input}
+                  canEdit={canEdit("capa") && canEdit("supplier_risk")}
+                  onConfirm={async (confirmed) => {
+                    if (!id) return;
+                    try {
+                      await confirmRepeat(id, confirmed);
+                      await refreshCapa();
+                      message.success(t("riskInput.confirmSuccess", "复发确认已保存"));
+                    } catch {
+                      message.error(t("riskInput.confirmFailed", "复发确认失败"));
+                    }
+                  }}
+                />
+              </div>
+            )}
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt", "创建时间")}:</Text> {formatDateTime(capa.created_at)}</p>
           </DataCard>
 
@@ -1151,7 +1264,7 @@ export default function CAPADetailPage() {
               filterOption={false}
               placeholder={t("scar.supplier", "供应商")}
               onSearch={async (search) => {
-                const res = await listSuppliers({ search, page_size: 20 });
+                const res = await listCapaSupplierOptions({ search, page_size: 20 });
                 setSuppliers(res.items);
               }}
               options={suppliers.map((s) => ({

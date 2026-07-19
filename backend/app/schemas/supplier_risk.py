@@ -25,7 +25,7 @@ class AlertResponse(BaseModel):
     quality_score: float
     delivery_score: float
     compliance_score: float
-    rule_results: dict
+    rule_results: list[dict]
     alert_type: str
     status: str
     handled_by: Optional[uuid.UUID]

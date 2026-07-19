@@ -49,12 +49,37 @@ export async function triggerScar(
   return resp.data;
 }
 
+export async function confirmRepeat(
+  reportId: string,
+  repeatConfirmed: boolean,
+): Promise<CAPAReport> {
+  const resp = await client.post(`/capa/${reportId}/confirm-repeat`, {
+    repeat_confirmed: repeatConfirmed,
+  });
+  return resp.data;
+}
+
+export async function listCapaSupplierOptions(params?: {
+  page?: number;
+  page_size?: number;
+  search?: string;
+}): Promise<{
+  items: Array<{ supplier_id: string; supplier_no: string; name: string; status: string }>;
+  total: number;
+  page: number;
+  page_size: number;
+}> {
+  const resp = await client.get("/capa/supplier-options", { params });
+  return resp.data;
+}
+
 export async function createCAPA(data: {
   title: string;
   document_no: string;
   severity: string;
   due_date?: string;
   product_line_code?: string;
+  supplier_id?: string | null;
 }): Promise<CAPAReport> {
   const resp = await client.post("/capa", data);
   return resp.data;
