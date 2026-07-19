@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Table, Button, Modal, Form, Input, Select, DatePicker, App } from "antd";
 import { PlusOutlined, FileTextOutlined } from "@ant-design/icons";
@@ -53,6 +53,7 @@ export default function CAPAListPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [suppliers, setSuppliers] = useState<Array<{ supplier_id: string; supplier_no: string; name: string }>>([]);
   const [supplierLoadError, setSupplierLoadError] = useState<string | null>(null);
+  const supplierSearchSeq = useRef(0);
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const productLine = useProductLineStore((s) => s.selected);
@@ -60,8 +61,8 @@ export default function CAPAListPage() {
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    // CAPA CREATE-gated picker (not Module.SUPPLIER VIEW) so CAPA operators can associate.
-    listCapaSupplierOptions({ page_size: 200 })
+    // Prefetch first page so the dropdown is non-empty; further options load via remote search.
+    listCapaSupplierOptions({ page_size: 50 })
       .then((res) => {
         setSuppliers(res.items);
         setSupplierLoadError(null);
@@ -71,6 +72,26 @@ export default function CAPAListPage() {
         setSupplierLoadError(t("fields.supplierLoadFailed", "供应商列表加载失败"));
       });
   }, [t]);
+
+  const searchSuppliers = async (q: string) => {
+    const seq = ++supplierSearchSeq.current;
+    try {
+      const res = await listCapaSupplierOptions({
+        page_size: 50,
+        search: q?.trim() || undefined,
+      });
+      // Drop stale responses (earlier request finished later).
+      if (seq !== supplierSearchSeq.current) return;
+      setSuppliers(res.items);
+      setSupplierLoadError(null);
+    } catch {
+      if (seq !== supplierSearchSeq.current) return;
+      // Keep existing options; surface error only if list is empty.
+      if (suppliers.length === 0) {
+        setSupplierLoadError(t("fields.supplierLoadFailed", "供应商列表加载失败"));
+      }
+    }
+  };
 
   const fetchData = (p: number = page) => {
     setLoading(true);
@@ -177,7 +198,8 @@ export default function CAPAListPage() {
             <Select
               allowClear
               showSearch
-              optionFilterProp="label"
+              filterOption={false}
+              onSearch={searchSuppliers}
               disabled={!!supplierLoadError}
               placeholder={
                 supplierLoadError

@@ -62,6 +62,7 @@ class SupplierRiskInputProjection(BaseModel):
     matched_capa_nos: list[str]
     evaluated_risk_level: str | None
     evaluated_risk_score: float | None
+    evaluated_at: datetime | None = None
     linked_alert: dict | None = None
 
     model_config = {"from_attributes": True}

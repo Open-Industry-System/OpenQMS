@@ -400,3 +400,61 @@ async def test_claim_batch_serializes_same_supplier_pl(db, admin_user, default_f
     await db.commit()
     assert len(claimed3) == 1
     assert claimed3[0]["input_id"] == str(c.input_id)
+
+
+
+@pytest.mark.asyncio
+async def test_process_one_commit_failure_rolls_back_then_retries(
+    db, pending_input_with_r11, monkeypatch,
+):
+    """If success-path commit() raises, must rollback before retry status UPDATE."""
+    import app.services.supplier_risk.risk_input_worker as worker_mod
+
+    inp, _supplier = pending_input_with_r11
+    claimed = await claim_batch(db, 10)
+    await db.commit()
+
+    real_commit = db.commit
+    real_execute = db.execute
+    order: list[str] = []
+    state = {"armed": False, "failed": False}
+
+    async def flaky_commit():
+        if state["armed"] and not state["failed"]:
+            state["failed"] = True
+            order.append("commit_fail")
+            raise RuntimeError("simulated success-path commit failure")
+        order.append("commit_ok")
+        return await real_commit()
+
+    async def track_rollback():
+        order.append("rollback")
+        return None  # do not destroy flush-only outer fixture
+
+    async def track_execute(stmt, params=None, **kwargs):
+        sql = str(getattr(stmt, "text", stmt))
+        if "SET status = :status" in sql and "last_error" in sql:
+            order.append("retry_update")
+        return await real_execute(stmt, params, **kwargs)
+
+    real_in_tx = worker_mod.evaluate_supplier_risk_in_tx
+
+    async def arming_eval(*a, **k):
+        result = await real_in_tx(*a, **k)
+        state["armed"] = True
+        return result
+
+    monkeypatch.setattr(worker_mod, "evaluate_supplier_risk_in_tx", arming_eval)
+    monkeypatch.setattr(db, "commit", flaky_commit)
+    monkeypatch.setattr(db, "rollback", track_rollback)
+    monkeypatch.setattr(db, "execute", track_execute)
+
+    await process_one(db, claimed[0])
+
+    assert "commit_fail" in order, f"success commit never failed; order={order}"
+    assert "rollback" in order, f"expected rollback after commit fail; order={order}"
+    assert "retry_update" in order, f"expected retry UPDATE; order={order}"
+    fail_i = order.index("commit_fail")
+    rb_i = order.index("rollback")
+    retry_i = order.index("retry_update")
+    assert fail_i < rb_i < retry_i, f"expected commit_fail → rollback → retry_update; order={order}"

@@ -31,7 +31,9 @@ type SupplierRiskProjection = {
   matched_capa_nos: string[];
   evaluated_risk_level: string | null;
   evaluated_risk_score: number | null;
+  evaluated_at?: string | null;
   repeat_confirmed: boolean | null;
+  linked_alert?: { alert_id: string; risk_level: string | null } | null;
 };
 
 async function resolveCapaId(): Promise<string> {
@@ -104,6 +106,8 @@ test.describe("US-E2E-01.6 8D→供应商风险输入", () => {
     expect(projection.matched_capa_nos.length).toBeGreaterThan(0);
     expect(projection.matched_capa_nos).toContain(HIST_CAPA_DOC);
     expect(projection.evaluated_risk_level).not.toBeNull();
+    expect(projection.evaluated_at, "worker must stamp evaluated_at").toBeTruthy();
+    const evaluatedAtBeforeConfirm = projection.evaluated_at;
 
     // admin audit: SUPPLIER_RISK_INPUT_SENT
     const adminPw = await accountPassword("admin");
@@ -126,18 +130,34 @@ test.describe("US-E2E-01.6 8D→供应商风险输入", () => {
     ).toBeGreaterThan(0);
     const sent = sentItems[0];
     expect(sent.changed_fields?.disposition).toBeDefined();
+    expect(sent.changed_fields?.severity, "SENT must include severity").toBeDefined();
     expect(sent.changed_fields?.risk_level).toBe(projection.evaluated_risk_level);
+    // alert_id may be null for low-risk, but key must be present in contract
+    expect(sent.changed_fields).toHaveProperty("alert_id");
 
     // manager confirm-repeat (needs CAPA EDIT + SUPPLIER_RISK EDIT; engineer is VIEW-only on risk)
     const mgrPw = await accountPassword("manager");
     const mgrToken = await loginForToken("manager", mgrPw);
     const mgrAc = await authedApi(mgrToken);
+    // pending/processing confirm must 409 — force status via direct check when already processed is N/A;
+    // after processed, double-confirm remains allowed (re-eval) but we assert evaluated_at advances.
     const confirm = await mgrAc.post(`/capa/${capaId}/confirm-repeat`, {
       repeat_confirmed: true,
     });
     expect(confirm.status).toBeLessThan(300);
     const after = confirm.data.supplier_risk_input as SupplierRiskProjection;
     expect(after.repeat_confirmed).toBe(true);
+    expect(after.evaluated_at, "confirm must re-stamp evaluated_at").toBeTruthy();
+    // evaluated_at should be >= pre-confirm stamp (string ISO comparable)
+    if (evaluatedAtBeforeConfirm && after.evaluated_at) {
+      expect(after.evaluated_at >= evaluatedAtBeforeConfirm).toBe(true);
+    }
+
+    // Idempotent re-confirm (already confirmed true) should still succeed (force re-eval path).
+    const confirm2 = await mgrAc.post(`/capa/${capaId}/confirm-repeat`, {
+      repeat_confirmed: true,
+    });
+    expect(confirm2.status).toBeLessThan(300);
 
     // SUPPLIER_RISK_CHANGED audit — fields present; do NOT assert old_level != new_level
     const changedLogs = await adminAc.get("/admin/logs/audit", {

@@ -414,12 +414,19 @@ def rule_r11_capa_issue(data: SupplierRiskInput, thresholds: dict) -> RuleResult
         repeat = bool(repeat_suggested) if repeat_suggested is not None else False
         provisional = True
 
-    score = float(base_score)
-    critical = rank >= 3  # 致命/严重
-    if critical:
-        score += severe_bonus
+    # Design §5.5: 致命/严重 → 高分, 一般 → 中, 轻微 → 低.
+    # base_score is the mid (一般) tier; severe adds a bonus; minor is half base.
+    if rank >= 3:  # 致命/严重
+        score = float(base_score) + float(severe_bonus)
+        critical = True
+    elif rank <= 1:  # 轻微
+        score = float(base_score) * 0.5
+        critical = False
+    else:  # 一般
+        score = float(base_score)
+        critical = False
     if repeat:
-        score += repeat_bonus
+        score += float(repeat_bonus)
     score = min(score, 100.0)
 
     disp = getattr(top, "disposition", "") or ""
@@ -428,6 +435,9 @@ def rule_r11_capa_issue(data: SupplierRiskInput, thresholds: dict) -> RuleResult
     if matched:
         detail_parts.append(f"关联历史: {', '.join(matched)}")
     detail_parts.append(f"重复: {'是' if repeat else '否'}" + ("（待确认，provisional）" if provisional else ""))
+    # Design: error-status historical inputs remain incidents but mark prior failure.
+    if getattr(top, "status", None) == "error":
+        detail_parts.append("曾失败")
     return RuleResult(rule_id="R11", triggered=True, score=round(score, 2),
                       detail="; ".join(detail_parts), category="quality", critical=critical)
 

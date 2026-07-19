@@ -132,11 +132,16 @@ async def process_one(db: AsyncSession, claimed: dict) -> None:
         )
     ).first()
     if row is None:
-        # token 不匹配 / 已被 recovery 重置 → 放弃
+        # token 不匹配 / 已被 recovery 重置 → 放弃。SELECT 已开事务，关闭以免
+        # idle-in-transaction 拖到批次结束。
+        if db.in_transaction():
+            await db.commit()
         return
 
     inp = row._mapping
     if inp["status"] != "processing":
+        # 释放 FOR UPDATE 行锁，不丢弃已提交的 claim 状态。
+        await db.commit()
         return
 
     attempt_count = int(inp["attempt_count"])
@@ -160,6 +165,7 @@ async def process_one(db: AsyncSession, claimed: dict) -> None:
     input_id = uuid.UUID(str(claimed["input_id"]))
     input_obj = await db.get(SupplierRiskCapaInput, input_id)
     if input_obj is None:
+        await db.commit()
         return
     # Raw claim UPDATE can leave a stale identity-map row (e.g. claim_token=None
     # while DB has the token). Refresh so success-path ORM writes are tracked.
@@ -169,6 +175,32 @@ async def process_one(db: AsyncSession, claimed: dict) -> None:
     # advisory lock with confirm-repeat / scheduled eval).
 
     capa_id = input_obj.capa_id
+
+    async def _write_retry_status(err: BaseException) -> None:
+        backoff = 2 ** min(attempt_count, 6)
+        is_terminal = attempt_count >= max_attempts
+        next_retry = None if is_terminal else datetime.now(timezone.utc) + timedelta(seconds=backoff)
+        await db.execute(
+            text(
+                """
+                UPDATE supplier_risk_capa_inputs
+                SET status = :status,
+                    last_error = :err,
+                    claim_token = NULL,
+                    locked_at = NULL,
+                    next_retry_at = :next_retry
+                WHERE input_id = :id
+                """
+            ),
+            {
+                "status": "error" if is_terminal else "pending",
+                "err": f"{type(err).__name__}: {err}"[:1000],
+                "next_retry": next_retry,
+                "id": claimed["input_id"],
+            },
+        )
+        await db.commit()
+
     try:
         # Savepoint so evaluate side-effects can be discarded without rolling
         # back the outer session (claim already committed; tests use flush-only
@@ -208,30 +240,23 @@ async def process_one(db: AsyncSession, claimed: dict) -> None:
                     },
                 )
             )
+    except Exception as e:
+        # Nested savepoint auto-rolled evaluate residue; root txn is clean.
+        # Design §5.2 retry path (no full-session rollback — would destroy
+        # outer claim/test fixtures that share this session).
+        logger.exception("process_one failed for input %s", claimed["input_id"])
+        await _write_retry_status(e)
+        return
+
+    # Commit success path separately so a commit failure gets unconditional
+    # rollback before the retry UPDATE (design §5.2 — never mix processed/SENT
+    # residue with pending/error status in one commit).
+    try:
         await db.commit()
     except Exception as e:
-        logger.exception("process_one failed for input %s", claimed["input_id"])
-        # Evaluate work rolled back via savepoint; write retry/error on outer txn.
-        backoff = 2 ** min(attempt_count, 6)
-        is_terminal = attempt_count >= max_attempts
-        next_retry = None if is_terminal else datetime.now(timezone.utc) + timedelta(seconds=backoff)
-        await db.execute(
-            text(
-                """
-                UPDATE supplier_risk_capa_inputs
-                SET status = :status,
-                    last_error = :err,
-                    claim_token = NULL,
-                    locked_at = NULL,
-                    next_retry_at = :next_retry
-                WHERE input_id = :id
-                """
-            ),
-            {
-                "status": "error" if is_terminal else "pending",
-                "err": f"{type(e).__name__}: {e}"[:1000],
-                "next_retry": next_retry,
-                "id": claimed["input_id"],
-            },
-        )
-        await db.commit()
+        logger.exception("process_one commit failed for input %s", claimed["input_id"])
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        await _write_retry_status(e)

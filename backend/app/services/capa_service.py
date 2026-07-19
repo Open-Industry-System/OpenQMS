@@ -243,6 +243,7 @@ async def update_capa(
     )
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         from app.models.product_line import ProductLine
+        from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
         new_pl = update_data["product_line_code"]
         pl_row = await db.scalar(select(ProductLine).where(ProductLine.code == new_pl))
         if pl_row is None:
@@ -255,6 +256,26 @@ async def update_capa(
         # US-E2E-01.5: CAPA↔SCAR same-PL invariant — refuse unilateral PL move while linked
         if capa.scar_ref_id is not None and new_pl != capa.product_line_code:
             raise ValueError("已关联 SCAR，禁止单独修改产品线")
+
+        # US-E2E-01.6: freeze product_line once risk input exists or D7+
+        # (mirror supplier_id freeze — input.product_line_code must stay aligned).
+        if new_pl != capa.product_line_code:
+            existing_input = await db.scalar(
+                select(SupplierRiskCapaInput.input_id).where(
+                    SupplierRiskCapaInput.capa_id == capa.report_id
+                )
+            )
+            locked_states = {
+                EightDState.D7_COMPLETED.value,
+                EightDState.D8_GATE_PENDING.value,
+                EightDState.D8_APPROVAL_PENDING.value,
+                EightDState.D8_CLOSURE.value,
+                EightDState.ARCHIVED.value,
+            }
+            if existing_input is not None:
+                raise ValueError("已生成供应商风险输入，不可修改产品线")
+            if capa.status in locked_states:
+                raise ValueError("8D 已推进至 D7+，不可修改产品线")
 
     # US-E2E-01.6: supplier_id same-factory + freeze once risk input / D7+
     # Handle both set and clear (null). Generic setattr loop skips None, so clear

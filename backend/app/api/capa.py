@@ -327,6 +327,7 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
             matched_capa_nos=list(inp.matched_capa_nos or []),
             evaluated_risk_level=inp.evaluated_risk_level,
             evaluated_risk_score=inp.evaluated_risk_score,
+            evaluated_at=inp.evaluated_at,
             linked_alert=linked_alert,
         )
 

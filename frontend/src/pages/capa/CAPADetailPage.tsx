@@ -68,6 +68,7 @@ export default function CAPADetailPage() {
   const [scarModalOpen, setScarModalOpen] = useState(false);
   const [scarSubmitting, setScarSubmitting] = useState(false);
   const [suppliers, setSuppliers] = useState<Array<{ supplier_id: string; supplier_no: string; name: string }>>([]);
+  const supplierSearchSeq = useRef(0);
   const [supplierLocked, setSupplierLocked] = useState(false);
   const [scarForm] = Form.useForm();
 
@@ -209,7 +210,7 @@ export default function CAPADetailPage() {
       .then((caps) => setAiDraftEnabled(caps.ai_draft_enabled))
       .catch(() => setAiDraftEnabled(false));
     // Prefetch supplier options so readonly labels can resolve names
-    listCapaSupplierOptions({ page_size: 100 })
+    listCapaSupplierOptions({ page_size: 50 })
       .then((res) => setSuppliers(res.items))
       .catch(() => { /* leave empty; fall back to UUID */ });
   }, [id]);
@@ -849,15 +850,28 @@ export default function CAPADetailPage() {
                   data-e2e="capa-supplier-select"
                   allowClear
                   showSearch
-                  optionFilterProp="label"
+                  filterOption={false}
                   style={{ minWidth: 220 }}
                   size="small"
                   placeholder={t("fields.supplierPlaceholder", "请选择供应商")}
                   value={capa.supplier_id || undefined}
+                  onSearch={async (q) => {
+                    const seq = ++supplierSearchSeq.current;
+                    try {
+                      const res = await listCapaSupplierOptions({
+                        page_size: 50,
+                        search: q?.trim() || undefined,
+                      });
+                      if (seq !== supplierSearchSeq.current) return;
+                      setSuppliers(res.items);
+                    } catch {
+                      /* leave existing options */
+                    }
+                  }}
                   onFocus={async () => {
                     if (suppliers.length === 0) {
                       try {
-                        const res = await listCapaSupplierOptions({ page_size: 100 });
+                        const res = await listCapaSupplierOptions({ page_size: 50 });
                         setSuppliers(res.items);
                       } catch {
                         /* leave empty */

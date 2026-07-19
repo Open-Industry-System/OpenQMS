@@ -13,7 +13,7 @@ const LEVEL_COLOR: Record<string, string> = {
   low: "default",
   medium: "orange",
   high: "red",
-  critical: "red",
+  critical: "#a8071a",
 };
 
 export default function SupplierRiskInputCard({ input, canEdit, onConfirm }: Props) {

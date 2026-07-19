@@ -147,6 +147,7 @@ export interface SupplierRiskInputProjection {
   matched_capa_nos: string[];
   evaluated_risk_level: string | null;
   evaluated_risk_score: number | null;
+  evaluated_at?: string | null;
   linked_alert: { alert_id: string; risk_level: string } | null;
 }
 

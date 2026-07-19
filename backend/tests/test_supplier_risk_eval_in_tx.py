@@ -384,3 +384,53 @@ async def test_in_tx_injects_trigger_input_into_incidents(
     assert any(r.rule_id == "R11" for r in results)
     assert score is not None
     _ = event_type
+
+
+# ─── R11 severity score tiers (design §5.5) ───────────────────────────────────
+
+
+def test_r11_severity_score_tiers():
+    """致命/严重 high, 一般 mid, 轻微 low — must be distinguishable."""
+    from types import SimpleNamespace
+    from app.services.supplier_risk.rule_engine import rule_r11_capa_issue, SupplierRiskInput
+
+    thresholds = {"base_score": 10, "severe_bonus": 10, "repeat_bonus": 0}
+
+    def _run(severity, status="processed"):
+        inc = SimpleNamespace(
+            severity=severity, disposition="", matched_capa_nos=[],
+            repeat_confirmed=False, repeat_suggested=None,
+            created_at=None, input_id="00000000-0000-0000-0000-000000000001",
+            status=status,
+        )
+        data = SupplierRiskInput(
+            supplier=SimpleNamespace(), inspections=[], scars=[],
+            evaluations=[], certifications=[], capa_incidents=[inc],
+        )
+        return rule_r11_capa_issue(data, thresholds)
+
+    fatal = _run("致命")
+    general = _run("一般")
+    minor = _run("轻微")
+    assert fatal.score > general.score > minor.score
+    assert fatal.critical is True
+    assert general.critical is False
+    assert minor.critical is False
+
+
+def test_r11_error_status_marks_detail():
+    from types import SimpleNamespace
+    from app.services.supplier_risk.rule_engine import rule_r11_capa_issue, SupplierRiskInput
+
+    inc = SimpleNamespace(
+        severity="一般", disposition="返工", matched_capa_nos=[],
+        repeat_confirmed=False, repeat_suggested=None,
+        created_at=None, input_id="00000000-0000-0000-0000-000000000002",
+        status="error",
+    )
+    data = SupplierRiskInput(
+        supplier=SimpleNamespace(), inspections=[], scars=[],
+        evaluations=[], certifications=[], capa_incidents=[inc],
+    )
+    r = rule_r11_capa_issue(data, {"base_score": 10, "severe_bonus": 10, "repeat_bonus": 0})
+    assert "曾失败" in r.detail
