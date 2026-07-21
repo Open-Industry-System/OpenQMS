@@ -37,6 +37,10 @@ from app.models.capa_doc_gate import (
     CapaDocgAudit,
     CapaDocgDecision,
 )
+from app.models.capa_lateral_diffusion import (
+    CapaLateralDiffusionCheck,
+    CapaLateralNotification,
+)
 from app.models.capa_lesson import CapaLessonLearned
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
@@ -135,6 +139,7 @@ __all__ = [
     "CapaD3ImportRun", "CapaD3ContainmentSnapshot", "CapaD3ImpactReport",
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
     "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
+    "CapaLateralDiffusionCheck", "CapaLateralNotification",
     "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
