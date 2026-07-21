@@ -29,6 +29,12 @@ from app.seed_e2e_constants import (
     SUPPLIER_RISK_E2E_D7_ACTION_ID, SUPPLIER_RISK_E2E_HIST_CAPA_DOC_NO,
     SUPPLIER_RISK_E2E_HIST_CAPA_ID,
     SCAR_TRIGGER_E2E_CAPA_DOC_NO, SCAR_TRIGGER_E2E_CAPA_ID, SCAR_TRIGGER_E2E_LOT_NO,
+    LATERAL_TYPE, LATERAL_PL_SRC, LATERAL_PL_A, LATERAL_PL_B, LATERAL_PL_C, LATERAL_PL_D,
+    LATERAL_FM, LATERAL_MATERIAL, LATERAL_CP_CHAR, LATERAL_SUPPLIER_NO,
+    LATERAL_E2E_CAPA_001, LATERAL_E2E_CAPA_002, LATERAL_E2E_CAPA_BLOCK, LATERAL_E2E_CAPA_EMPTY,
+    LATERAL_E2E_CAPA_001_ID, LATERAL_E2E_CAPA_002_ID, LATERAL_E2E_CAPA_BLOCK_ID,
+    LATERAL_E2E_CAPA_EMPTY_ID, LATERAL_E2E_FMEA_SRC, LATERAL_E2E_FMEA_B,
+    LATERAL_E2E_CP_SRC, LATERAL_E2E_CP_C,
 )
 
 # Fixed UUIDs for idempotency
@@ -1151,6 +1157,222 @@ async def _seed_supplier_risk_input(db, factory_ids):
     )
     await db.flush()
 
+
+async def _seed_lateral_diffusion(db, factory_ids):
+    """US-E2E-01.9: four CAPAs + shared PL/FMEA/CP/IQC fixtures for lateral diffusion."""
+    from app.models.capa import CAPAEightD
+    from app.models.capa_d3 import CapaD3ImpactReport, CapaD3ImportRun
+    from app.models.control_plan import ControlPlan, ControlPlanItem
+    from app.models.fmea import FMEADocument
+    from app.models.iqc_inspection import IqcInspection
+    from app.models.iqc_material import IqcMaterial
+    from app.models.product_line import ProductLine
+    from app.models.product_type import ProductType
+    from app.models.role import UserProductLine
+    from app.models.supplier import Supplier
+    from app.state_machines.eightd_state import EightDState
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+    engineer = (await db.execute(select(User).where(User.username == "engineer"))).scalar_one()
+    manager = (await db.execute(select(User).where(User.username == "manager"))).scalar_one()
+    factory_id = factory_ids[E2E_FACTORY_DC100["code"]]
+
+    # product type
+    if not await db.scalar(select(ProductType).where(ProductType.code == LATERAL_TYPE)):
+        db.add(ProductType(code=LATERAL_TYPE, name="Lateral E2E Type", is_active=True))
+        await db.flush()
+
+    # product lines
+    for code, ptype in [
+        (LATERAL_PL_SRC, LATERAL_TYPE),
+        (LATERAL_PL_A, LATERAL_TYPE),
+        (LATERAL_PL_B, "TYPE-LAT-B"),
+        (LATERAL_PL_C, "TYPE-LAT-C"),
+        (LATERAL_PL_D, "TYPE-LAT-D"),
+    ]:
+        if ptype != LATERAL_TYPE and not await db.scalar(select(ProductType).where(ProductType.code == ptype)):
+            db.add(ProductType(code=ptype, name=ptype, is_active=True))
+            await db.flush()
+        existing = await db.scalar(select(ProductLine).where(ProductLine.code == code))
+        if existing is None:
+            db.add(ProductLine(code=code, name=code, factory_id=factory_id, product_type_code=ptype, is_active=True))
+        else:
+            existing.product_type_code = ptype
+            existing.factory_id = factory_id
+            existing.is_active = True
+    await db.flush()
+
+    # recipients: engineer/manager on PL-A..D
+    for u in (engineer, manager):
+        for pl in (LATERAL_PL_A, LATERAL_PL_B, LATERAL_PL_C, LATERAL_PL_D):
+            exists = await db.scalar(
+                select(UserProductLine).where(
+                    UserProductLine.user_id == u.user_id,
+                    UserProductLine.product_line_code == pl,
+                )
+            )
+            if not exists:
+                db.add(UserProductLine(id=uuid.uuid4(), user_id=u.user_id, product_line_code=pl))
+    await db.flush()
+
+    # supplier
+    sup = await db.scalar(select(Supplier).where(Supplier.supplier_no == LATERAL_SUPPLIER_NO, Supplier.factory_id == factory_id))
+    if sup is None:
+        sup = Supplier(
+            supplier_id=uuid.uuid4(),
+            supplier_no=LATERAL_SUPPLIER_NO,
+            factory_id=factory_id,
+            name="Lateral E2E Supplier",
+            short_name="LAT-SUP",
+            created_by=admin.user_id,
+        )
+        db.add(sup)
+        await db.flush()
+
+    # FMEA src + B
+    async def _ensure_fmea(doc_no, pl, status="approved"):
+        f = await db.scalar(select(FMEADocument).where(FMEADocument.document_no == doc_no))
+        graph = {"nodes": [{"id": "fm-lat", "type": "FailureMode", "name": LATERAL_FM}], "edges": []}
+        if f is None:
+            f = FMEADocument(
+                fmea_id=uuid.uuid4(), document_no=doc_no, title=doc_no, fmea_type="PFMEA",
+                product_line_code=pl, factory_id=factory_id, status=status,
+                created_by=admin.user_id, graph_data=graph,
+            )
+            db.add(f)
+        else:
+            f.product_line_code = pl
+            f.status = status
+            f.graph_data = graph
+            f.factory_id = factory_id
+        await db.flush()
+        return f
+
+    fmea_src = await _ensure_fmea(LATERAL_E2E_FMEA_SRC, LATERAL_PL_SRC)
+    await _ensure_fmea(LATERAL_E2E_FMEA_B, LATERAL_PL_B)
+
+    # CP src + C
+    async def _ensure_cp(doc_no, pl):
+        cp = await db.scalar(select(ControlPlan).where(ControlPlan.document_no == doc_no))
+        if cp is None:
+            cp = ControlPlan(
+                cp_id=uuid.uuid4(), document_no=doc_no, title=doc_no,
+                product_line_code=pl, factory_id=factory_id, status="approved",
+                created_by=admin.user_id,
+            )
+            db.add(cp)
+            await db.flush()
+            db.add(ControlPlanItem(
+                item_id=uuid.uuid4(), cp_id=cp.cp_id, step_no="10",
+                characteristic_no=LATERAL_CP_CHAR, product_characteristic="lat-thick",
+                process_characteristic="lat-press", special_class="CC",
+                factory_id=factory_id, sort_order=0,
+            ))
+        else:
+            cp.product_line_code = pl
+            cp.status = "approved"
+            cp.factory_id = factory_id
+        await db.flush()
+        return cp
+
+    await _ensure_cp(LATERAL_E2E_CP_SRC, LATERAL_PL_SRC)
+    await _ensure_cp(LATERAL_E2E_CP_C, LATERAL_PL_C)
+
+    # IQC material + inspection on PL-D
+    mat = await db.scalar(select(IqcMaterial).where(IqcMaterial.part_no == LATERAL_MATERIAL))
+    if mat is None:
+        mat = IqcMaterial(
+            material_id=uuid.uuid4(), part_no=LATERAL_MATERIAL, part_name="Lat Mat",
+            product_line_code=LATERAL_PL_D, factory_id=factory_id, status="active",
+            created_by=admin.user_id,
+        )
+        db.add(mat)
+        await db.flush()
+    insp = await db.scalar(select(IqcInspection).where(IqcInspection.inspection_no == "IQC-E2E-LATERAL-001"))
+    if insp is None:
+        db.add(IqcInspection(
+            inspection_id=uuid.uuid4(), inspection_no="IQC-E2E-LATERAL-001",
+            supplier_id=sup.supplier_id, part_no=LATERAL_MATERIAL, material_id=mat.material_id,
+            product_line_code=LATERAL_PL_D, factory_id=factory_id,
+            inspection_result="accepted", status="completed",
+        ))
+        await db.flush()
+
+    # four CAPAs at D8_APPROVAL_PENDING
+    capa_specs = [
+        (LATERAL_E2E_CAPA_001, LATERAL_E2E_CAPA_001_ID, True, "E2E 横向扩散通知"),
+        (LATERAL_E2E_CAPA_002, LATERAL_E2E_CAPA_002_ID, True, "E2E 横向扩散跳过"),
+        (LATERAL_E2E_CAPA_BLOCK, LATERAL_E2E_CAPA_BLOCK_ID, True, "E2E 横向扩散阻塞"),
+        (LATERAL_E2E_CAPA_EMPTY, LATERAL_E2E_CAPA_EMPTY_ID, False, "E2E 横向扩散空命中"),
+    ]
+    for doc_no, cid, with_hits, title in capa_specs:
+        capa_id = uuid.UUID(cid)
+        capa = await db.scalar(select(CAPAEightD).where(CAPAEightD.document_no == doc_no))
+        pl = LATERAL_PL_SRC if with_hits else "DC-DC-100-E2E"
+        values = dict(
+            title=title,
+            product_line_code=pl,
+            factory_id=factory_id,
+            status=EightDState.D8_APPROVAL_PENDING.value,
+            severity="serious",
+            supplier_id=sup.supplier_id if with_hits else None,
+            fmea_ref_id=fmea_src.fmea_id if with_hits else None,
+            d2_description="横向扩散 E2E 问题描述",
+            d3_interim="临时围堵",
+            d4_root_cause="定位销磨损导致孔径超差",
+            d5_correction="更换定位销",
+            d6_verification="已验证",
+            d7_prevention="周检",
+            d8_closure="准备关闭",
+            d1_team=[],
+        )
+        if capa is None:
+            capa = CAPAEightD(report_id=capa_id, document_no=doc_no, created_by=admin.user_id, **values)
+            db.add(capa)
+            await db.flush()
+        else:
+            await db.execute(update(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).values(**values))
+            await db.flush()
+            capa = await db.scalar(select(CAPAEightD).where(CAPAEightD.document_no == doc_no))
+
+        if with_hits:
+            # D3 current done report with material batch
+            run = await db.scalar(
+                select(CapaD3ImportRun).where(
+                    CapaD3ImportRun.capa_id == capa.report_id,
+                    CapaD3ImportRun.is_current.is_(True),
+                )
+            )
+            if run is None:
+                run = CapaD3ImportRun(
+                    run_id=uuid.uuid4(), capa_id=capa.report_id, factory_id=factory_id,
+                    is_current=True, status="completed", imported_types=["iqc"],
+                    analysis_context={}, completed_at=datetime.now(timezone.utc),
+                    imported_by=admin.user_id,
+                )
+                db.add(run)
+                await db.flush()
+            rpt = await db.scalar(
+                select(CapaD3ImpactReport).where(
+                    CapaD3ImpactReport.run_id == run.run_id,
+                    CapaD3ImpactReport.is_current.is_(True),
+                )
+            )
+            if rpt is None:
+                db.add(CapaD3ImpactReport(
+                    report_id=uuid.uuid4(), run_id=run.run_id, factory_id=factory_id,
+                    is_current=True, status="done",
+                    batches=[{"material_code": LATERAL_MATERIAL, "lot_no": "LOT-LAT-1"}],
+                    impact_qty={"total": 1}, customer_impact=[],
+                    time_window={"start": "2026-01-01", "end": "2026-01-31"},
+                    risk_level="medium", risk_floor="low",
+                    risk_explanation="e2e lateral risk", llm_available=True,
+                    completed_at=datetime.now(timezone.utc), generated_by=admin.user_id,
+                    attempt_token=uuid.uuid4(),
+                ))
+                await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
@@ -1164,6 +1386,7 @@ async def main():
         await _seed_scar_trigger(db, factory_ids)
         await _seed_knowledge_sink(db, factory_ids)
         await _seed_supplier_risk_input(db, factory_ids)
+        await _seed_lateral_diffusion(db, factory_ids)
         await db.commit()
     print("E2E seed complete.")
 
