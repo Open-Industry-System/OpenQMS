@@ -451,5 +451,21 @@
     "resinkFailed": "Resink failed",
     "sinkBlocked": "Knowledge sink blocked: LLM is not configured. Set credentials in AI Config.",
     "sinkFailed": "Knowledge sink failed; retry close or resink"
+  },
+  "lateral": {
+    "title": "Lateral Diffusion Alert",
+    "hint": "Similar products may share the same root cause. Choose whether to notify product owners (covers all hit types).",
+    "notify": "Notify all",
+    "skip": "Do not notify",
+    "skipReason": "Reason required when not notifying",
+    "rerun": "Re-check",
+    "empty": "No similar products found",
+    "hitCount": "{{n}} product type(s) hit",
+    "notifications": "Notifications",
+    "truncated": "Truncated",
+    "decideSuccess": "Lateral diffusion decision saved",
+    "decideFailed": "Lateral diffusion decision failed",
+    "blocked": "Lateral diffusion blocked: LLM not configured",
+    "failed": "Lateral diffusion failed; retry"
   }
 }

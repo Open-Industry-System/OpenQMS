@@ -451,5 +451,21 @@
     "resinkFailed": "重新沉淀失败",
     "sinkBlocked": "知识库沉淀被阻断：LLM 未配置，请在 AI 配置中设置凭证",
     "sinkFailed": "知识库沉淀失败，可重试关闭或重新沉淀"
+  },
+  "lateral": {
+    "title": "横向扩散预警",
+    "hint": "检测到类似产品可能受同一根因影响。请选择是否通知相关产品负责人（一次覆盖全部命中类型）。",
+    "notify": "通知全部",
+    "skip": "不通知",
+    "skipReason": "不通知理由（选择不通知时必填）",
+    "rerun": "重新检查",
+    "empty": "未命中类似产品",
+    "hitCount": "命中类型 {{n}} 个",
+    "notifications": "通知记录",
+    "truncated": "已截断",
+    "decideSuccess": "横向扩散决策已保存",
+    "decideFailed": "横向扩散决策失败",
+    "blocked": "横向扩散被阻断：LLM 未配置",
+    "failed": "横向扩散失败，可重试"
   }
 }

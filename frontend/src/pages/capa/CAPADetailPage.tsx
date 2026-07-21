@@ -10,6 +10,7 @@ import { formatDateTime } from "../../utils/dateTime";
 import {
   getCAPA, updateCAPA, advanceCAPA, linkFMEA, generatePpt, getPptExportReviewReport,
   triggerScar, sinkKnowledge, formatCapaAdvanceError, confirmRepeat, listCapaSupplierOptions,
+  decideLateralDiffusion, rerunLateralDiffusion,
 } from "../../api/capa";
 import { findCapaKnowledgeEntry } from "../../api/knowledge";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
@@ -22,6 +23,8 @@ import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecP
 import D3ContainmentPanel from "../../components/capa/D3ContainmentPanel";
 import DocGatePanel from "../../components/capa/DocGatePanel";
 import SupplierRiskInputCard from "../../components/capa/SupplierRiskInputCard";
+import LateralDiffusionModal from "../../components/capa/LateralDiffusionModal";
+import LateralDiffusionCard from "../../components/capa/LateralDiffusionCard";
 import AIDraftButton from "../../components/capa/AIDraftButton";
 import AIDraftPreview from "../../components/capa/AIDraftPreview";
 import { useAIDraft } from "../../components/capa/useAIDraft";
@@ -100,6 +103,9 @@ export default function CAPADetailPage() {
   const [knowledgeResinking, setKnowledgeResinking] = useState(false);
   const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
   const [knowledgeLoadError, setKnowledgeLoadError] = useState<string | null>(null);
+  const [lateralModalOpen, setLateralModalOpen] = useState(false);
+  const [lateralLoading, setLateralLoading] = useState(false);
+  const [lateralRerunLoading, setLateralRerunLoading] = useState(false);
 
   const stepItems = useMemo(() => {
     const subLabelKey = capa?.status ? stepSubLabelKey[capa.status] : undefined;
@@ -245,6 +251,74 @@ export default function CAPADetailPage() {
 
   const isKnowledgeStatus =
     capa?.status === "D8_CLOSURE" || capa?.status === "ARCHIVED";
+
+  useEffect(() => {
+    const lat = capa?.lateral_diffusion;
+    if (
+      isKnowledgeStatus &&
+      lat &&
+      lat.status === "done" &&
+      (lat.similar_products?.length || 0) > 0 &&
+      lat.decision == null
+    ) {
+      setLateralModalOpen(true);
+    } else {
+      setLateralModalOpen(false);
+    }
+  }, [capa?.lateral_diffusion, capa?.status, isKnowledgeStatus]);
+
+  const handleLateralDecide = async (
+    decision: "notify" | "skip",
+    skipReason?: string,
+  ) => {
+    if (!id) return;
+    setLateralLoading(true);
+    try {
+      const proj = await decideLateralDiffusion(id, {
+        decision,
+        skip_reason: skipReason,
+      });
+      setCapa((prev) => (prev ? { ...prev, lateral_diffusion: proj } : prev));
+      setLateralModalOpen(false);
+      message.success(t("lateral.decideSuccess", "横向扩散决策已保存"));
+    } catch (e: unknown) {
+      message.error(
+        formatCapaAdvanceError(
+          e,
+          t("lateral.decideFailed", "横向扩散决策失败"),
+          {
+            blocked: t("lateral.blocked", "横向扩散被阻断：LLM 未配置"),
+            failed: t("lateral.failed", "横向扩散失败，可重试"),
+          },
+        ),
+      );
+    } finally {
+      setLateralLoading(false);
+    }
+  };
+
+  const handleLateralRerun = async () => {
+    if (!id) return;
+    setLateralRerunLoading(true);
+    try {
+      const proj = await rerunLateralDiffusion(id);
+      setCapa((prev) => (prev ? { ...prev, lateral_diffusion: proj } : prev));
+      message.success(t("lateral.rerun", "重新检查"));
+    } catch (e: unknown) {
+      message.error(
+        formatCapaAdvanceError(
+          e,
+          t("lateral.failed", "横向扩散失败，可重试"),
+          {
+            blocked: t("lateral.blocked", "横向扩散被阻断：LLM 未配置"),
+            failed: t("lateral.failed", "横向扩散失败，可重试"),
+          },
+        ),
+      );
+    } finally {
+      setLateralRerunLoading(false);
+    }
+  };
 
   const loadKnowledgeEntry = async (report: CAPAReport) => {
     if (!report.report_id) return;
@@ -1069,6 +1143,20 @@ export default function CAPADetailPage() {
                 />
               </div>
             )}
+            {capa.lateral_diffusion && (
+              <LateralDiffusionCard
+                projection={capa.lateral_diffusion}
+                canEdit={canEdit("capa")}
+                onRerun={handleLateralRerun}
+                rerunLoading={lateralRerunLoading}
+              />
+            )}
+            <LateralDiffusionModal
+              open={lateralModalOpen}
+              projection={capa.lateral_diffusion || null}
+              onDecide={handleLateralDecide}
+              loading={lateralLoading}
+            />
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt", "创建时间")}:</Text> {formatDateTime(capa.created_at)}</p>
           </DataCard>
 

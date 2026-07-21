@@ -185,9 +185,35 @@ export interface CAPAReport {
   } | null;
   supplier_risk_input?: SupplierRiskInputProjection | null;
   d3_affected_lots?: string[];
+  lateral_diffusion?: LateralDiffusionProjection | null;
 }
 
 export type CAPAListResponse = PaginatedResponse<CAPAReport>;
+
+/** Lateral diffusion projection after D8 close (US-E2E-01.9). */
+export interface LateralDiffusionProjection {
+  check_id: string;
+  status: "done" | "empty";
+  llm_status: "done" | "skipped";
+  truncated: boolean;
+  similar_products: Array<{
+    product_type_code: string;
+    product_type_name?: string;
+    hit_criteria: string[];
+    suggestion_direction: string | null;
+    product_lines: Array<{ code: string; factory_id: string; name?: string }>;
+    evidence?: Record<string, unknown[]>;
+  }>;
+  decision: "notified" | "skipped" | null;
+  notifications: Array<{
+    notification_id: string;
+    product_type_code: string;
+    product_line_code: string | null;
+    recipient_label: string;
+    decision: "notified" | "skipped";
+    status: "notified" | "pending" | "processed";
+  }>;
+}
 
 export interface RelatedCAPAItem {
   report_id: string;

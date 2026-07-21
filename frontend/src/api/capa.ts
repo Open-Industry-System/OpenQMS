@@ -130,12 +130,28 @@ export function parseKnowledgeSinkError(err: unknown): KnowledgeSinkOutcomeDetai
   return null;
 }
 
-/** Human-readable advance/resink error; prefers knowledge-sink outcome messaging. */
+/** Human-readable advance/resink error; prefers knowledge-sink / lateral outcome messaging. */
 export function formatCapaAdvanceError(
   err: unknown,
   fallback: string,
   labels?: { blocked?: string; failed?: string },
 ): string {
+  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (detail && typeof detail === "object" && detail !== null && "outcome" in detail) {
+    const o = detail as { outcome?: string; stage?: string; message?: string; reason?: string };
+    if (o.outcome === "blocked" || o.outcome === "failed") {
+      const isLateral = o.stage === "lateral_diffusion";
+      const base =
+        o.outcome === "blocked"
+          ? labels?.blocked ||
+            (isLateral
+              ? "横向扩散被阻断：LLM 未配置"
+              : "知识库沉淀被阻断：LLM 未配置")
+          : labels?.failed ||
+            (isLateral ? "横向扩散失败，可重试" : "知识库沉淀失败，可重试");
+      return o.message ? `${base}：${o.message}` : base;
+    }
+  }
   const sink = parseKnowledgeSinkError(err);
   if (sink) {
     const base =
@@ -144,9 +160,23 @@ export function formatCapaAdvanceError(
         : labels?.failed || "知识库沉淀失败，可重试";
     return sink.message ? `${base}：${sink.message}` : base;
   }
-  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
   if (typeof detail === "string" && detail) return detail;
   return fallback;
+}
+
+export async function decideLateralDiffusion(
+  id: string,
+  body: { decision: "notify" | "skip"; skip_reason?: string },
+): Promise<import("../types").LateralDiffusionProjection> {
+  const resp = await client.post(`/capa/${id}/lateral-diffusion/decide`, body);
+  return resp.data;
+}
+
+export async function rerunLateralDiffusion(
+  id: string,
+): Promise<import("../types").LateralDiffusionProjection> {
+  const resp = await client.post(`/capa/${id}/lateral-diffusion/rerun`);
+  return resp.data;
 }
 
 export async function getD7Recommendations(id: string): Promise<D7RecommendationResponse> {
