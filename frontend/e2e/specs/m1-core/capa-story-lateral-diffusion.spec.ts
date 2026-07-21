@@ -184,6 +184,9 @@ test.describe("capa-story-lateral-diffusion", () => {
       }
       const r = await managerAc.get(`/capa/${capa.report_id}`);
       expect(r.status).toBe(200);
+      expect(r.data.status).toBe("D8_CLOSURE");
+      expect(r.data.lateral_diffusion, "closed BLOCK CAPA must have lateral projection").toBeTruthy();
+      expect(r.data.lateral_diffusion.status).toBe("done");
       return;
     }
 
