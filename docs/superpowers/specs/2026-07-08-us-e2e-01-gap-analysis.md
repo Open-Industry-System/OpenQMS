@@ -17,7 +17,7 @@
 | 01.6 8D→供应商风险 | false | ❌ 未实现 | SupplierRiskAlert.linked_capa_id 外键已就绪；8D 触发写入入口缺失 |
 | 01.7 D8 文档更新门禁 | true | ✅ 已实现 | 3 表 capa_docg_* + 三阶段 LLM 影响分析 + run_audit 版本 diff/关键点覆盖 + defer/confirm + `_d8_doc_gate_gate` C8/C9 + DocGatePanel + E2E（2026-07-14） |
 | 01.8 知识库沉淀 | true | ✅ 已实现 | knowledge_entries + D8 关闭 fail-closed sink + list/detail + stage-5 KnowledgeEntrySource + FE card + E2E `8D-E2E-KNOW-001` |
-| 01.9 横向扩散预警 | true | ❌ 未实现 | 同类产品 KB 检索有（recommendation_sources_extra）；横向扩散检查+通知完全缺失 |
+| 01.9 横向扩散预警 | true | ✅ 已实现 | 表 `capa_lateral_diffusion_checks`/`capa_lateral_notifications`；`run_lateral_diffusion_check` 挂 D8 关闭钩子（01.8 之后 fail-closed）；4 依据并集匹配；decide/rerun + 投影；FE Modal/Card；E2E seed 001/002/BLOCK/EMPTY + story spec |
 | 01.10 PPT 输出 | false | ✅ 已实现 | capa_ppt_export 表 + agent_review_skill 表 + COALESCE 索引 + seed；capa_ppt_service（generate_content + render_pptx + validate）；capa_ppt_review_service（3 轮 LLM 闭环 + skip）；admin review-skill CRUD API；PPT 导出 API（POST + GET + X-PPT-Export-Id header + 权限/状态门控）；前端 generatePpt 按钮 + review report Modal + admin ReviewSkillsPage + i18n |
 
 **结论**：
@@ -151,12 +151,12 @@
 
 | 验收标准 | 状态 | 现有实现 | gap |
 |---|---|---|---|
-| 类似产品检查（4 依据并集） | ❌ | `recommendation_sources_extra.py` 有同类型产品 KB 检索（同 factory+product_type 跨 product_line）；但非"横向扩散检查"用途 | 检索逻辑可复用，但横向扩散检查+4 依据并集缺失 |
-| 通知提示 + 询问是否通知 | ❌ | 无 | 缺失 |
-| 通知状态可追踪 | ❌ | 无 | 缺失 |
-| 审计 | ❌ | 无 | 缺失 |
+| 类似产品检查（4 依据并集） | ✅ | `capa_lateral_diffusion_service.match_criteria`：same_product_type / shared_fmea_mode / shared_control_plan / same_supplier_material | — |
+| 通知提示 + 询问是否通知 | ✅ | FE `LateralDiffusionModal` + decide API full-set | — |
+| 通知状态可追踪 | ✅ | `capa_lateral_notifications` status notified/pending/processed | — |
+| 审计 | ✅ | `LATERAL_DIFFUSION_CHECKED` / `LATERAL_NOTIFICATION_SENT` / `LATERAL_NOTIFICATION_SKIPPED`（含 skip_reason） | — |
 
-**01.9 gap**：完全未实现。同类型产品 KB 检索逻辑（recommendation_sources_extra）可复用作 4 依据之一，但横向扩散检查 + 通知 + 状态追踪完全缺失。
+**01.9 状态**：已实现（design v5 / story v2）。锚点：迁移 `20260721_capa_lateral_diffusion`、服务 `capa_lateral_diffusion_service`、D8 关闭钩子（01.8 sink 之后）、API decide/rerun、投影 `lateral_diffusion`、FE Modal/Card、E2E seed 001/002/BLOCK/EMPTY + story spec。
 
 ---
 

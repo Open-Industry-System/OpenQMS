@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-16
+**更新日期**: 2026-07-21
 **当前分支**: `feature/us-e2e-01-spec-a`
-**最近提交**: 合并 01.6 供应商风险输入 + 01.8 知识库沉淀；下一步 01.9
+**最近提交**: 01.9 横向扩散预警与通知已落地（migration/ORM/match/LLM close hook/decide-rerun/FE/E2E）；下一步 01.10 或 verify skill 同步
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
@@ -261,7 +261,7 @@
 | 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 | US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
-| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1 D3 遏制 v4；**01.7 文档门禁已落地**；**01.4 8D↔FMEA 双向已落地**；**01.5 8D→SCAR 触发已落地**；**01.6 供应商风险输入已落地**） | — |
+| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1–01.9 已落地；待 01.10 PPT） | — |
 | US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
 | 01.10 PPT 输出 | ✅ 已落地（PPT generator + sub-agent 3-round review + admin review-skill management + frontend） | `feature/us-e2e-01-spec-a` |
 
@@ -296,7 +296,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 
 ### P3 — 新建
 
-- [ ] **01.9 横向扩散预警新建** — 4 依据并集类似产品检查（同 product_type/共享 FMEA 模式/共享控制计划/同供应商+物料）+ 通知提示 + 状态追踪；`recommendation_sources_extra` 同类型产品 KB 检索可复用
+- [x] **01.9 横向扩散预警新建** — 4 依据并集类似产品检查（同 product_type/共享 FMEA 模式/共享控制计划/同供应商+物料）+ 通知提示 + 状态追踪；D8 关闭 fail-closed 钩子；decide/rerun；FE Modal/Card；E2E seed+spec
 - [x] **01.10 PPT 输出新建** — D8 关闭后一键生成 8D 报告 PPT（D1-D8 + 封面 + 联动附录）；前端 `generatePpt` API + 生成按钮（`canCreate('capa')` L2 门控，D8_CLOSURE/ARCHIVED 可见）+ 审核报告 Modal + admin ReviewSkillsPage 已落地（commit `c78d774d`）
 
 ### 配套（非子故事）
