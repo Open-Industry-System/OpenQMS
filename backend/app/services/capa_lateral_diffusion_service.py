@@ -71,3 +71,276 @@ def aggregate_by_type(
     )
     out = out[:max_types]
     return out, truncated
+
+
+# ─── DB matching (Task 3) ───────────────────────────────────────────────────
+
+from dataclasses import dataclass  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+
+from app.models.capa import CAPAEightD, CapaD7NodeAction  # noqa: E402
+from app.models.product_line import ProductLine  # noqa: E402
+from app.models.fmea import FMEADocument  # noqa: E402
+from app.models.control_plan import ControlPlan, ControlPlanItem  # noqa: E402
+from app.models.iqc_inspection import IqcInspection  # noqa: E402
+from app.models.iqc_material import IqcMaterial  # noqa: E402
+from app.models.capa_d3 import CapaD3ImportRun, CapaD3ImpactReport  # noqa: E402
+
+APPROVED_FMEA_STATUSES = ("approved",)
+APPROVED_CP_STATUSES = ("approved",)
+
+
+@dataclass
+class SourceSnapshot:
+    source_pl: str
+    source_factory_id: str
+    source_type: str | None
+    source_supplier_id: str | None
+    fmea_mode_texts: set[str]
+    cp_keys: set[str]
+    material_codes: set[str]
+
+
+def _cp_item_key(it: ControlPlanItem) -> str:
+    return normalize(
+        "|".join(
+            filter(
+                None,
+                [
+                    it.characteristic_no,
+                    it.product_characteristic,
+                    it.process_characteristic,
+                    it.special_class,
+                ],
+            )
+        )
+    )
+
+
+async def build_source_snapshot(db, capa: CAPAEightD) -> SourceSnapshot:
+    src_pl_row = await db.scalar(
+        select(ProductLine).where(ProductLine.code == capa.product_line_code)
+    )
+    source_type = src_pl_row.product_type_code if src_pl_row else None
+
+    fmea_ids: set = set()
+    if capa.fmea_ref_id:
+        fmea_ids.add(capa.fmea_ref_id)
+    rows = await db.execute(
+        select(CapaD7NodeAction.fmea_id).where(
+            CapaD7NodeAction.capa_id == capa.report_id,
+            CapaD7NodeAction.action.in_(("confirmed", "auto_filled")),
+            CapaD7NodeAction.fmea_id.is_not(None),
+        )
+    )
+    for (fid,) in rows.all():
+        fmea_ids.add(fid)
+
+    fmea_mode_texts: set[str] = set()
+    if fmea_ids:
+        fmea_rows = await db.execute(
+            select(FMEADocument).where(FMEADocument.fmea_id.in_(list(fmea_ids)))
+        )
+        for fm in fmea_rows.scalars().all():
+            for n in (fm.graph_data or {}).get("nodes", []):
+                if n.get("type") in ("FailureMode", "FailureCause"):
+                    t = normalize(n.get("name"))
+                    if t:
+                        fmea_mode_texts.add(t)
+
+    cp_keys: set[str] = set()
+    cp_rows = await db.execute(
+        select(ControlPlanItem)
+        .join(ControlPlan, ControlPlan.cp_id == ControlPlanItem.cp_id)
+        .where(
+            ControlPlan.product_line_code == capa.product_line_code,
+            ControlPlan.status.in_(APPROVED_CP_STATUSES),
+        )
+    )
+    for it in cp_rows.scalars().all():
+        key = _cp_item_key(it)
+        if key:
+            cp_keys.add(key)
+
+    material_codes: set[str] = set()
+    run = await db.scalar(
+        select(CapaD3ImportRun).where(
+            CapaD3ImportRun.capa_id == capa.report_id,
+            CapaD3ImportRun.factory_id == capa.factory_id,
+            CapaD3ImportRun.is_current.is_(True),
+        )
+    )
+    if run:
+        rpt = await db.scalar(
+            select(CapaD3ImpactReport).where(
+                CapaD3ImpactReport.run_id == run.run_id,
+                CapaD3ImpactReport.is_current.is_(True),
+                CapaD3ImpactReport.status == "done",
+            )
+        )
+        if rpt and rpt.batches:
+            for b in rpt.batches:
+                m = normalize(b.get("material_code") if isinstance(b, dict) else None)
+                if m:
+                    material_codes.add(m)
+
+    return SourceSnapshot(
+        source_pl=capa.product_line_code,
+        source_factory_id=str(capa.factory_id),
+        source_type=source_type,
+        source_supplier_id=str(capa.supplier_id) if capa.supplier_id else None,
+        fmea_mode_texts=fmea_mode_texts,
+        cp_keys=cp_keys,
+        material_codes=material_codes,
+    )
+
+
+async def match_criteria(db, snap: SourceSnapshot) -> list[dict]:
+    hits: dict[str, dict] = {}
+
+    def _ensure(code, type_code, factory_id):
+        if code not in hits:
+            hits[code] = {
+                "product_line_code": code,
+                "product_type_code": type_code,
+                "factory_id": factory_id,
+                "hit_criteria": [],
+                "evidence": {},
+            }
+        return hits[code]
+
+    pl_rows = (
+        await db.execute(
+            select(ProductLine).where(
+                ProductLine.is_active.is_(True),
+                ProductLine.code != snap.source_pl,
+            )
+        )
+    ).scalars().all()
+    pl_by_code = {p.code: p for p in pl_rows}
+
+    # 依据 1: same product type
+    if snap.source_type:
+        for p in pl_rows:
+            if p.product_type_code == snap.source_type:
+                _ensure(p.code, p.product_type_code, str(p.factory_id))[
+                    "hit_criteria"
+                ].append("same_product_type")
+
+    # 依据 2: shared FMEA FailureMode/Cause name
+    if snap.fmea_mode_texts:
+        fm_rows = (
+            await db.execute(
+                select(FMEADocument).where(
+                    FMEADocument.status.in_(APPROVED_FMEA_STATUSES),
+                    FMEADocument.product_line_code != snap.source_pl,
+                )
+            )
+        ).scalars().all()
+        for fm in fm_rows:
+            for n in (fm.graph_data or {}).get("nodes", []):
+                if n.get("type") in ("FailureMode", "FailureCause"):
+                    t = normalize(n.get("name"))
+                    if t and t in snap.fmea_mode_texts:
+                        p = pl_by_code.get(fm.product_line_code)
+                        if p:
+                            h = _ensure(p.code, p.product_type_code, str(p.factory_id))
+                            if "shared_fmea_mode" not in h["hit_criteria"]:
+                                h["hit_criteria"].append("shared_fmea_mode")
+                            h["evidence"].setdefault("shared_fmea_mode", []).append(
+                                {
+                                    "fmea_id": str(fm.fmea_id),
+                                    "node_id": n.get("id"),
+                                    "node_type": n.get("type"),
+                                    "matched_text": t,
+                                }
+                            )
+
+    # 依据 3: shared control plan characteristic key
+    if snap.cp_keys:
+        cp_rows = (
+            await db.execute(
+                select(ControlPlanItem, ControlPlan).where(
+                    ControlPlan.cp_id == ControlPlanItem.cp_id,
+                    ControlPlan.status.in_(APPROVED_CP_STATUSES),
+                    ControlPlan.product_line_code != snap.source_pl,
+                )
+            )
+        ).all()
+        for it, cp in cp_rows:
+            key = _cp_item_key(it)
+            if key and key in snap.cp_keys:
+                p = pl_by_code.get(cp.product_line_code)
+                if p:
+                    h = _ensure(p.code, p.product_type_code, str(p.factory_id))
+                    if "shared_control_plan" not in h["hit_criteria"]:
+                        h["hit_criteria"].append("shared_control_plan")
+                    h["evidence"].setdefault("shared_control_plan", []).append(
+                        {"cp_id": str(cp.cp_id), "characteristic_keys": [key]}
+                    )
+
+    # 依据 4: same supplier + material (A ∪ B)
+    if snap.source_supplier_id and snap.material_codes:
+        from uuid import UUID as _UUID
+
+        try:
+            supplier_uuid = _UUID(snap.source_supplier_id)
+        except ValueError:
+            supplier_uuid = None
+        if supplier_uuid is not None:
+            insp_rows = (
+                await db.execute(
+                    select(IqcInspection).where(
+                        IqcInspection.supplier_id == supplier_uuid,
+                        IqcInspection.product_line_code.is_not(None),
+                        IqcInspection.product_line_code != snap.source_pl,
+                    )
+                )
+            ).scalars().all()
+            for ins in insp_rows:
+                m = normalize(ins.part_no)
+                if m and m in snap.material_codes:
+                    p = pl_by_code.get(ins.product_line_code)
+                    if p:
+                        h = _ensure(p.code, p.product_type_code, str(p.factory_id))
+                        if "same_supplier_material" not in h["hit_criteria"]:
+                            h["hit_criteria"].append("same_supplier_material")
+                        h["evidence"].setdefault("same_supplier_material", []).append(
+                            {
+                                "supplier_id": snap.source_supplier_id,
+                                "material_code": m,
+                            }
+                        )
+
+            mat_rows = (
+                await db.execute(
+                    select(IqcMaterial).where(
+                        IqcMaterial.status == "active",
+                        IqcMaterial.product_line_code != snap.source_pl,
+                    )
+                )
+            ).scalars().all()
+            for mat in mat_rows:
+                m = normalize(mat.part_no)
+                if not (m and m in snap.material_codes):
+                    continue
+                bound = await db.scalar(
+                    select(IqcInspection).where(
+                        IqcInspection.material_id == mat.material_id,
+                        IqcInspection.supplier_id == supplier_uuid,
+                    )
+                )
+                if bound:
+                    p = pl_by_code.get(mat.product_line_code)
+                    if p:
+                        h = _ensure(p.code, p.product_type_code, str(p.factory_id))
+                        if "same_supplier_material" not in h["hit_criteria"]:
+                            h["hit_criteria"].append("same_supplier_material")
+                        h["evidence"].setdefault("same_supplier_material", []).append(
+                            {
+                                "supplier_id": snap.source_supplier_id,
+                                "material_code": m,
+                            }
+                        )
+
+    return list(hits.values())
