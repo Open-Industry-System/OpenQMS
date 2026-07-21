@@ -332,12 +332,8 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
             linked_alert=linked_alert,
         )
 
-    lateral_diffusion = None
-    try:
-        from app.services.capa_lateral_diffusion_service import _build_projection
-        lateral_diffusion = await _build_projection(db, capa.report_id)
-    except Exception:
-        lateral_diffusion = None
+    from app.services.capa_lateral_diffusion_service import _build_projection
+    lateral_diffusion = await _build_projection(db, capa.report_id)
 
     return resp.model_copy(
         update={

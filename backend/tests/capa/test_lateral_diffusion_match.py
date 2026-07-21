@@ -91,6 +91,35 @@ def test_truncation():
     assert len(out[0]["product_lines"]) == 30
 
 
+def test_aggregate_merges_evidence_across_pls():
+    """Same evidence key from multiple PLs must not overwrite each other."""
+    hits = [
+        {
+            "product_line_code": "PL-A",
+            "product_type_code": "T",
+            "factory_id": "f1",
+            "hit_criteria": ["shared_fmea_mode"],
+            "evidence": {
+                "shared_fmea_mode": [{"fmea_id": "f1", "matched_text": "x"}],
+            },
+        },
+        {
+            "product_line_code": "PL-B",
+            "product_type_code": "T",
+            "factory_id": "f1",
+            "hit_criteria": ["shared_fmea_mode"],
+            "evidence": {
+                "shared_fmea_mode": [{"fmea_id": "f2", "matched_text": "x"}],
+            },
+        },
+    ]
+    out, _ = aggregate_by_type(hits)
+    ev = out[0]["evidence"]["shared_fmea_mode"]
+    assert len(ev) == 2
+    assert {e["fmea_id"] for e in ev} == {"f1", "f2"}
+    assert {e["product_line_code"] for e in ev} == {"PL-A", "PL-B"}
+
+
 # ─── DB matching helpers (Task 3) ───────────────────────────────────────────
 
 
@@ -424,6 +453,37 @@ async def test_criterion_4_via_iqc_material_binding(db):
     by_code = {h["product_line_code"]: h for h in hits}
     assert "PL-D-C4B" in by_code
     assert "same_supplier_material" in by_code["PL-D-C4B"]["hit_criteria"]
+
+
+@pytest.mark.asyncio
+async def test_d4_source_ref_fmea_included_in_snapshot(db):
+    """D4 verification source_ref.fmea_id must contribute FailureMode texts."""
+    from app.models.capa import CapaRootCauseVerification
+
+    factory, user = await _seed_base(db, "d4fm")
+    await _make_pl(db, "PL-SRC-D4FM", factory.id, product_type_code="TYPE-D4FM")
+    fmea = await _make_fmea(
+        db, factory.id, user.user_id, "PL-SRC-D4FM", "D4-Only FM Shared"
+    )
+    # CAPA has no header fmea_ref_id — only D4 source_ref
+    capa = await _make_capa(db, factory.id, user.user_id, "PL-SRC-D4FM", fmea_ref_id=None)
+    capa.d4_root_cause = "d4 root"
+    db.add(
+        CapaRootCauseVerification(
+            verification_id=uuid.uuid4(),
+            capa_id=capa.report_id,
+            factory_id=factory.id,
+            root_cause_text="d4 root",
+            conclusion="passed",
+            is_verified=True,
+            verified_by=user.user_id,
+            source_ref={"fmea_id": str(fmea.fmea_id), "node_id": "fm1"},
+        )
+    )
+    await db.flush()
+
+    snap = await build_source_snapshot(db, capa)
+    assert "d4-only fm shared" in snap.fmea_mode_texts
 
 
 @pytest.mark.asyncio

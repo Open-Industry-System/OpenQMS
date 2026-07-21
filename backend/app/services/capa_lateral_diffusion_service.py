@@ -55,6 +55,18 @@ def aggregate_by_type(
     for type_code in sorted(groups.keys()):
         full_pls = sorted(groups[type_code], key=lambda p: p["product_line_code"])
         pls = full_pls[:max_pls_per_type]
+        merged_evidence: dict[str, list] = {}
+        for p in pls:
+            for k, v in (p.get("evidence") or {}).items():
+                merged_evidence.setdefault(k, [])
+                # Preserve PL identity so multi-PL hits don't overwrite each other.
+                for item in v:
+                    if isinstance(item, dict) and "product_line_code" not in item:
+                        merged_evidence[k].append(
+                            {**item, "product_line_code": p["product_line_code"]}
+                        )
+                    else:
+                        merged_evidence[k].append(item)
         out.append({
             "product_type_code": type_code,
             "product_type_name": "未分类" if type_code == "unknown" else type_code,
@@ -63,7 +75,7 @@ def aggregate_by_type(
             "product_lines": [
                 {"code": p["product_line_code"], "factory_id": p["factory_id"]} for p in pls
             ],
-            "evidence": {k: v for p in pls for k, v in p["evidence"].items()},
+            "evidence": merged_evidence,
         })
 
     truncated = len(groups) > max_types or any(
@@ -78,7 +90,7 @@ def aggregate_by_type(
 from dataclasses import dataclass  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from app.models.capa import CAPAEightD, CapaD7NodeAction  # noqa: E402
+from app.models.capa import CAPAEightD, CapaD7NodeAction, CapaRootCauseVerification  # noqa: E402
 from app.models.product_line import ProductLine  # noqa: E402
 from app.models.fmea import FMEADocument  # noqa: E402
 from app.models.control_plan import ControlPlan, ControlPlanItem  # noqa: E402
@@ -126,6 +138,30 @@ async def build_source_snapshot(db, capa: CAPAEightD) -> SourceSnapshot:
     fmea_ids: set = set()
     if capa.fmea_ref_id:
         fmea_ids.add(capa.fmea_ref_id)
+
+    # D4 verification source_ref.fmea_id (same collection as knowledge_sink._assemble_linkage)
+    try:
+        async with db.begin_nested():
+            verifs = (
+                await db.execute(
+                    select(CapaRootCauseVerification).where(
+                        CapaRootCauseVerification.capa_id == capa.report_id,
+                        CapaRootCauseVerification.factory_id == capa.factory_id,
+                    )
+                )
+            ).scalars().all()
+            for v in verifs:
+                ref = v.source_ref or {}
+                if isinstance(ref, dict) and ref.get("fmea_id"):
+                    try:
+                        from uuid import UUID as _UUID
+                        fmea_ids.add(_UUID(str(ref["fmea_id"])))
+                    except (ValueError, TypeError, AttributeError):
+                        pass
+    except Exception:
+        # Optional collector: never fail the outer close transaction.
+        pass
+
     rows = await db.execute(
         select(CapaD7NodeAction.fmea_id).where(
             CapaD7NodeAction.capa_id == capa.report_id,
