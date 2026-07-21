@@ -69,6 +69,7 @@ from app.schemas.capa_verification import (
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.schemas.recommendation_stage import StageRunSchema
 from app.schemas.capa_doc_gate import DeferRequest, DocGateDecisionResponse, WaiverRequest
+from app.schemas.capa_lateral_diffusion import LateralDecisionRequest
 from app.services import capa_d3_containment_service
 from app.services import capa_d7_action_service
 from app.services import capa_doc_gate_service
@@ -331,6 +332,13 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
             linked_alert=linked_alert,
         )
 
+    lateral_diffusion = None
+    try:
+        from app.services.capa_lateral_diffusion_service import _build_projection
+        lateral_diffusion = await _build_projection(db, capa.report_id)
+    except Exception:
+        lateral_diffusion = None
+
     return resp.model_copy(
         update={
             "scar_ref_id": capa.scar_ref_id,
@@ -339,6 +347,7 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
             "supplier_risk_input": supplier_risk_input,
             "supplier_no": supplier_no,
             "supplier_name": supplier_name,
+            "lateral_diffusion": lateral_diffusion,
         }
     )
 
@@ -2262,3 +2271,87 @@ async def doc_gate_waiver_ep(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
+
+
+
+@router.post("/{report_id}/lateral-diffusion/decide")
+async def decide_lateral_route(
+    report_id: uuid.UUID,
+    req: LateralDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    from app.schemas.capa_lateral_diffusion import LateralDecisionRequest
+    from app.services.capa_lateral_diffusion_service import (
+        ConflictError as LateralConflictError,
+        decide_lateral,
+    )
+
+    # re-validate body type for runtime import order
+    if not isinstance(req, LateralDecisionRequest):
+        req = LateralDecisionRequest.model_validate(req)
+
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+
+    try:
+        out = await decide_lateral(db, report_id, req, scope.user.user_id)
+        await db.commit()
+        return out
+    except LateralConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg or "no lateral check" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        if "no similar products" in msg:
+            raise HTTPException(status_code=422, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+
+
+@router.post("/{report_id}/lateral-diffusion/rerun")
+async def rerun_lateral_route(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    from app.services.capa_lateral_diffusion_service import (
+        ConflictError as LateralConflictError,
+        LateralBlockedError,
+        LateralFailedError,
+        rerun_lateral,
+    )
+
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+
+    try:
+        out = await rerun_lateral(db, report_id, scope.user.user_id)
+        await db.commit()
+        return out
+    except LateralBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"outcome": "blocked", "stage": "lateral_diffusion", "message": str(e)},
+        )
+    except LateralFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"outcome": "failed", "stage": "lateral_diffusion", "message": str(e)},
+        )
+    except LateralConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

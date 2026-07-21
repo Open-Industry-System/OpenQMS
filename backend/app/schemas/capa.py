@@ -97,6 +97,7 @@ class CAPAResponse(BaseModel):
     linked_scar: LinkedScarSchema | None = None
     d3_affected_lots: list[str] = []
     supplier_risk_input: SupplierRiskInputProjection | None = None
+    lateral_diffusion: dict | None = None
 
     model_config = {"from_attributes": True}
 

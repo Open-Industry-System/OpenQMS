@@ -483,3 +483,296 @@ async def run_lateral_diffusion_check(db, capa, user_id) -> None:
             ),
         )
     )
+
+
+# ─── decide / rerun (Task 5) ────────────────────────────────────────────────
+
+from datetime import datetime, timezone
+from uuid import UUID as _UUID
+
+from sqlalchemy import exists
+from sqlalchemy.exc import IntegrityError
+
+from app.core.factory_scope import get_user_factory_ids
+from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.models.capa_lateral_diffusion import CapaLateralNotification
+from app.models.role import RoleDefinition, UserProductLine
+from app.models.user import User
+
+
+class ConflictError(RuntimeError):
+    """Already decided."""
+
+
+async def _lock_capa_and_check(db, capa_id):
+    capa = (
+        await db.execute(
+            select(CAPAEightD)
+            .where(CAPAEightD.report_id == capa_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if not capa:
+        raise ValueError("CAPA not found")
+    if capa.status not in ("D8_CLOSURE", "ARCHIVED"):
+        raise ValueError("CAPA must be D8_CLOSURE or ARCHIVED")
+    check = (
+        await db.execute(
+            select(CapaLateralDiffusionCheck)
+            .where(CapaLateralDiffusionCheck.capa_id == capa_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    return capa, check
+
+
+async def _user_can_receive(db, u: User, target_factory_id) -> bool:
+    if isinstance(target_factory_id, str):
+        try:
+            target_factory_id = _UUID(target_factory_id)
+        except ValueError:
+            return False
+    level = await get_user_permission(u, Module.GROUP, db)
+    if level >= PermissionLevel.ADMIN:
+        return True
+    fids = await get_user_factory_ids(u, db)
+    if fids:
+        return target_factory_id in fids
+    if u.factory_id is not None:
+        return u.factory_id == target_factory_id
+    return False
+
+
+async def _resolve_recipients(db, pl_code: str, factory_id) -> list[User]:
+    users = (
+        await db.execute(
+            select(User)
+            .join(UserProductLine, UserProductLine.user_id == User.user_id)
+            .join(RoleDefinition, RoleDefinition.id == User.role_id)
+            .where(
+                UserProductLine.product_line_code == pl_code,
+                User.is_active.is_(True),
+                RoleDefinition.role_key.in_(("field_qe", "planning_qe", "manager")),
+            )
+        )
+    ).scalars().all()
+    out = []
+    for u in users:
+        if await _user_can_receive(db, u, factory_id):
+            out.append(u)
+    return out
+
+
+def _make_notif(check, capa, sp, pl, user, decision, status, skip_reason, now, user_id, label=None):
+    factory_id = pl.get("factory_id")
+    if isinstance(factory_id, str):
+        try:
+            factory_id = _UUID(factory_id)
+        except ValueError:
+            factory_id = None
+    return CapaLateralNotification(
+        notification_id=_uuid.uuid4(),
+        check_id=check.check_id,
+        capa_id=capa.report_id,
+        product_type_code=sp["product_type_code"],
+        product_line_code=pl.get("code"),
+        factory_id=factory_id,
+        recipient_user_id=user.user_id if user else None,
+        recipient_label=label or (user.username if user else ""),
+        decision=decision,
+        status=status,
+        skip_reason=skip_reason,
+        payload={
+            "document_no": capa.document_no,
+            "title": capa.title,
+            "severity": capa.severity,
+            "d2_summary": (capa.d2_description or "")[:200],
+            "hit_criteria": sp.get("hit_criteria", []),
+            "suggestion_direction": sp.get("suggestion_direction"),
+            "source_capa_id": str(capa.report_id),
+            "product_type_code": sp["product_type_code"],
+        },
+        decided_by=user_id,
+        decided_at=now,
+    )
+
+
+async def _build_projection(db, capa_id) -> dict | None:
+    check = (
+        await db.execute(
+            select(CapaLateralDiffusionCheck).where(
+                CapaLateralDiffusionCheck.capa_id == capa_id
+            )
+        )
+    ).scalar_one_or_none()
+    if not check:
+        return None
+    notifs = (
+        await db.execute(
+            select(CapaLateralNotification)
+            .where(CapaLateralNotification.capa_id == capa_id)
+            .order_by(CapaLateralNotification.created_at)
+        )
+    ).scalars().all()
+    decision = None
+    if notifs:
+        decision = "notified" if any(n.decision == "notified" for n in notifs) else "skipped"
+    return {
+        "check_id": str(check.check_id),
+        "status": check.status,
+        "llm_status": check.llm_status,
+        "truncated": check.truncated,
+        "similar_products": check.similar_products or [],
+        "decision": decision,
+        "notifications": [
+            {
+                "notification_id": str(n.notification_id),
+                "product_type_code": n.product_type_code,
+                "product_line_code": n.product_line_code,
+                "recipient_label": n.recipient_label,
+                "decision": n.decision,
+                "status": n.status,
+            }
+            for n in notifs
+        ],
+    }
+
+
+async def decide_lateral(db, capa_id, req, user_id) -> dict:
+    capa, check = await _lock_capa_and_check(db, capa_id)
+    if check is None:
+        raise ValueError("no lateral check")
+    has_notif = (
+        await db.execute(
+            select(exists().where(CapaLateralNotification.check_id == check.check_id))
+        )
+    ).scalar()
+    if has_notif:
+        raise ConflictError("already decided")
+    if check.status == "empty":
+        raise ValueError("no similar products")
+
+    now = datetime.now(timezone.utc)
+    if req.decision == "notify":
+        notif_count = 0
+        for sp in check.similar_products or []:
+            for pl in sp.get("product_lines") or []:
+                recipients = await _resolve_recipients(db, pl["code"], pl["factory_id"])
+                if recipients:
+                    for u in recipients:
+                        db.add(
+                            _make_notif(
+                                check, capa, sp, pl, u, "notified", "notified", None, now, user_id
+                            )
+                        )
+                        notif_count += 1
+                else:
+                    db.add(
+                        _make_notif(
+                            check,
+                            capa,
+                            sp,
+                            pl,
+                            None,
+                            "notified",
+                            "pending",
+                            None,
+                            now,
+                            user_id,
+                            label="未找到负责人",
+                        )
+                    )
+                    notif_count += 1
+        db.add(
+            AuditLog(
+                table_name="capa_eightd",
+                record_id=capa_id,
+                action="LATERAL_NOTIFICATION_SENT",
+                changed_fields={
+                    "check_id": str(check.check_id),
+                    "decision": "notified",
+                    "product_type_codes": [
+                        s["product_type_code"] for s in (check.similar_products or [])
+                    ],
+                    "notification_count": notif_count,
+                },
+                operated_by=user_id,
+                factory_id=capa.factory_id,
+            )
+        )
+    else:  # skip
+        for sp in check.similar_products or []:
+            db.add(
+                CapaLateralNotification(
+                    notification_id=_uuid.uuid4(),
+                    check_id=check.check_id,
+                    capa_id=capa_id,
+                    product_type_code=sp["product_type_code"],
+                    product_line_code=None,
+                    factory_id=None,
+                    recipient_user_id=None,
+                    recipient_label="—",
+                    decision="skipped",
+                    status="processed",
+                    skip_reason=req.skip_reason,
+                    payload={},
+                    decided_by=user_id,
+                    decided_at=now,
+                )
+            )
+        db.add(
+            AuditLog(
+                table_name="capa_eightd",
+                record_id=capa_id,
+                action="LATERAL_NOTIFICATION_SKIPPED",
+                changed_fields={
+                    "check_id": str(check.check_id),
+                    "decision": "skipped",
+                    "skip_reason": req.skip_reason,
+                    "product_type_codes": [
+                        s["product_type_code"] for s in (check.similar_products or [])
+                    ],
+                    "notification_count": len(check.similar_products or []),
+                },
+                operated_by=user_id,
+                factory_id=capa.factory_id,
+            )
+        )
+    await db.flush()
+    return await _build_projection(db, capa_id)
+
+
+async def rerun_lateral(db, capa_id, user_id) -> dict:
+    capa, check = await _lock_capa_and_check(db, capa_id)
+    check_id = _check_id_for(capa_id)
+    if check is not None:
+        has_notif = (
+            await db.execute(
+                select(exists().where(CapaLateralNotification.check_id == check.check_id))
+            )
+        ).scalar()
+        if has_notif:
+            raise ConflictError("already decided")
+    if check is None:
+        try:
+            async with db.begin_nested():
+                db.add(
+                    CapaLateralDiffusionCheck(
+                        check_id=check_id,
+                        capa_id=capa_id,
+                        factory_id=capa.factory_id,
+                        source_product_line_code=capa.product_line_code,
+                        source_product_type_code=None,
+                        similar_products=[],
+                        status="done",
+                        llm_status="skipped",
+                        truncated=False,
+                    )
+                )
+                await db.flush()
+        except IntegrityError:
+            capa, check = await _lock_capa_and_check(db, capa_id)
+    await run_lateral_diffusion_check(db, capa, user_id)
+    await db.flush()
+    return await _build_projection(db, capa_id)
