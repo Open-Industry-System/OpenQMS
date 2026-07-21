@@ -73,8 +73,8 @@ D8 关闭后，系统自动检查是否有**类似产品**可能受同一根因/
 | 关键字段 | check.capa_id、check.similar_products[]（含 product_type_code、hit_criteria[]∈{same_product_type,shared_fmea_mode,shared_control_plan,same_supplier_material}、suggestion_direction、product_lines[]）；notification.product_type_code、notification.recipient_user_id/label、notification.status∈{notified,pending,processed}、notification.decision∈{notified,skipped}、notification.skip_reason |
 | 状态枚举 | notification.status∈{notified,pending,processed}；hit_criteria 4 值枚举 |
 | 审计事件 | `LATERAL_DIFFUSION_CHECKED`（含 similar_products count / hit_criteria_union）、`LATERAL_NOTIFICATION_SENT`、`LATERAL_NOTIFICATION_SKIPPED`（**含 skip_reason**） |
-| E2E seed 前置 | 8D 可走完 D8 关闭 + 知识沉淀；主 seed 同时具备四依据可命中数据；另有空命中 seed |
-| 通过条件 | 4 依据并集检查（E2E 关闭路径可见四值）+ 类似产品清单 + 通知提示 + 通知/不通知留痕 + 通知状态可查 + 审计 |
+| E2E seed 前置 | 至少两张等价四依据命中 CAPA（notify/skip 各一）+ 有命中 blocked 单 + 空命中单；共享 PL-A…D 主数据 |
+| 通过条件 | 4 依据并集检查（E2E 关闭路径可见四值）+ 类似产品清单 + 通知提示 + 通知/不通知留痕（独立单，互不 409）+ 通知状态可查 + 审计 |
 | 失败条件（FAILED） | 检查未触发；依据实现缺失导致并集不全；通知状态不可查；不通知未留痕；未审计；有命中时 LLM 失败 |
 | 阻塞条件（BLOCKED） | **有类似产品命中**且无 LLM 凭证 |
 
