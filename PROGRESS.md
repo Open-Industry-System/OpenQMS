@@ -2,7 +2,7 @@
 
 **更新日期**: 2026-07-21
 **当前分支**: `feature/us-e2e-01-spec-a`
-**最近提交**: 01.9 横向扩散预警与通知已落地（migration/ORM/match/LLM close hook/decide-rerun/FE/E2E）；下一步 01.10 或 verify skill 同步
+**最近提交**: 01.9 横向扩散已落地 + verify skill 同步完成（编排器 + 10 子 skill）
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
@@ -262,7 +262,7 @@
 | `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
 | US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
 | US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1–01.9 已落地；待 01.10 PPT） | — |
-| US-E2E-01 verify skill 同步 | 🟡 待同步（总 skill 重定义为编排器 + 10 子 skill） | — |
+| US-E2E-01 verify skill 同步 | ✅ 已完成（编排器 + 10 子 skill，依据 README v8.1 + 各子故事版本） | — |
 | 01.10 PPT 输出 | ✅ 已落地（PPT generator + sub-agent 3-round review + admin review-skill management + frontend） | `feature/us-e2e-01-spec-a` |
 
 ---
@@ -301,7 +301,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 
 ### 配套（非子故事）
 
-- [ ] **verify skill 同步** — `verify-capa-8d-closed-loop` 重定义为编排器（依据 README v8.1），端到端走查逻辑拆进 10 个子 skill（`verify-capa-8d-d3-containment` / `-recommendation-sources` / `-d4-d7-audit` / `-fmea-linkage` / `-scar-trigger` / `-supplier-risk-input` / `-doc-update-gate` / `-knowledge-sink` / `-lateral-diffusion` / `-ppt-output`），各顶部声明依据的子故事版本
+- [x] **verify skill 同步** — `verify-capa-8d-closed-loop` 重定义为编排器（依据 README v8.1），端到端走查逻辑拆进 10 个子 skill（`verify-capa-8d-d3-containment` / `-recommendation-sources` / `-d4-d7-audit` / `-fmea-linkage` / `-scar-trigger` / `-supplier-risk-input` / `-doc-update-gate` / `-knowledge-sink` / `-lateral-diffusion` / `-ppt-output`），各顶部声明依据的子故事版本
 - [ ] **gap analysis 维护** — 实现推进中若发现新 gap，回写 `docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`
 
 ### 关键约束
