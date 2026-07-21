@@ -344,3 +344,142 @@ async def match_criteria(db, snap: SourceSnapshot) -> list[dict]:
                         )
 
     return list(hits.values())
+
+
+# ─── close-path check + LLM (Task 4) ────────────────────────────────────────
+
+import json as _json
+import uuid as _uuid
+
+from app.models.audit import AuditLog
+from app.models.capa_lateral_diffusion import CapaLateralDiffusionCheck
+from app.services.agent.provider_adapter import (
+    ProviderNotConfiguredError,
+    build_client,
+    complete_json,
+)
+
+LATERAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "product_type_code": {"type": "string"},
+                    "suggestion_direction": {"type": "string"},
+                },
+                "required": ["product_type_code", "suggestion_direction"],
+            },
+        }
+    },
+    "required": ["items"],
+}
+
+
+class LateralBlockedError(RuntimeError):
+    """有命中但无 LLM 凭证。"""
+
+
+class LateralFailedError(RuntimeError):
+    """确定性匹配异常或 LLM 失败。"""
+
+
+def _check_id_for(capa_id) -> _uuid.UUID:
+    return _uuid.uuid5(_uuid.NAMESPACE_URL, f"lateral_check:capa:{capa_id}")
+
+
+def _build_prompt(capa, similar) -> str:
+    return (
+        f"8D 报告 {capa.document_no}（严重度 {capa.severity}）已关闭。\n"
+        f"D2: {capa.d2_description or ''}\nD4 根因: {capa.d4_root_cause or ''}\n"
+        f"命中类似产品类型:\n{_json.dumps([{'product_type_code': s['product_type_code'], 'hit_criteria': s['hit_criteria']} for s in similar], ensure_ascii=False)}\n"
+        "为每个 product_type_code 生成 suggestion_direction（建议相关产品负责人更新方向，中文，≤120字）。"
+    )
+
+
+async def run_lateral_diffusion_check(db, capa, user_id) -> None:
+    """D8 close-path fail-closed lateral check. Empty hits skip LLM; hits require LLM."""
+    try:
+        snap = await build_source_snapshot(db, capa)
+        hits = await match_criteria(db, snap)
+    except Exception as e:
+        raise LateralFailedError(f"lateral matching failed: {e}") from e
+
+    similar, truncated = aggregate_by_type(hits)
+    status = "done" if similar else "empty"
+
+    if similar:
+        try:
+            pc = await build_client(db)
+        except ProviderNotConfiguredError as e:
+            raise LateralBlockedError(f"LLM not configured: {e}") from e
+        try:
+            result = await complete_json(pc, _build_prompt(capa, similar), LATERAL_SCHEMA)
+        except Exception as e:
+            raise LateralFailedError(f"LLM call failed: {e}") from e
+        if not isinstance(result, dict):
+            raise LateralFailedError("LLM returned non-object")
+        by_type = {
+            it["product_type_code"]: it["suggestion_direction"]
+            for it in result.get("items", [])
+            if isinstance(it, dict) and "product_type_code" in it
+        }
+        missing = [
+            sp["product_type_code"] for sp in similar if sp["product_type_code"] not in by_type
+        ]
+        if missing:
+            raise LateralFailedError(f"LLM missing suggestions for: {missing}")
+        for sp in similar:
+            sp["suggestion_direction"] = by_type[sp["product_type_code"]]
+        llm_status = "done"
+    else:
+        llm_status = "skipped"
+
+    check_id = _check_id_for(capa.report_id)
+    existing = await db.get(CapaLateralDiffusionCheck, check_id)
+    if existing:
+        existing.source_product_line_code = snap.source_pl
+        existing.source_product_type_code = snap.source_type
+        existing.similar_products = similar
+        existing.status = status
+        existing.llm_status = llm_status
+        existing.truncated = truncated
+    else:
+        db.add(
+            CapaLateralDiffusionCheck(
+                check_id=check_id,
+                capa_id=capa.report_id,
+                factory_id=capa.factory_id,
+                source_product_line_code=snap.source_pl,
+                source_product_type_code=snap.source_type,
+                similar_products=similar,
+                status=status,
+                llm_status=llm_status,
+                truncated=truncated,
+            )
+        )
+
+    db.add(
+        AuditLog(
+            table_name="capa_eightd",
+            record_id=capa.report_id,
+            action="LATERAL_DIFFUSION_CHECKED",
+            changed_fields={
+                "check_id": str(check_id),
+                "similar_count": len(similar),
+                "status": status,
+                "truncated": truncated,
+                "product_type_codes": [sp["product_type_code"] for sp in similar],
+                "hit_criteria_union": sorted(
+                    {c for sp in similar for c in sp["hit_criteria"]}
+                ),
+            },
+            operated_by=user_id,
+            factory_id=capa.factory_id,
+            correlation_id=_uuid.uuid5(
+                _uuid.NAMESPACE_URL, f"lateral_check:{capa.report_id}"
+            ),
+        )
+    )

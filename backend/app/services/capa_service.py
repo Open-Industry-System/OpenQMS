@@ -680,9 +680,11 @@ async def advance_capa(
     elif current == EightDState.D8_GATE_PENDING and target == EightDState.D8_APPROVAL_PENDING:
         await _d8_doc_gate_gate(db, capa)
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
-        # 权限由 require_advance_permission 强制；关闭前 fail-closed 知识沉淀
+        # 权限由 require_advance_permission 强制；关闭前 fail-closed 知识沉淀 → 横向扩散
         from app.services.knowledge_sink_service import sink_capa_on_close
         await sink_capa_on_close(db, capa, user_id, manual=False)
+        from app.services.capa_lateral_diffusion_service import run_lateral_diffusion_check
+        await run_lateral_diffusion_check(db, capa, user_id)
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D7_PREVENTION:
         if not req.reject_reason or not req.reject_reason.strip():
             raise ValueError("驳回需填写理由")

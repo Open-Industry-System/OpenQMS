@@ -585,6 +585,10 @@ async def advance_capa(
         KnowledgeSinkBlockedError,
         KnowledgeSinkFailedError,
     )
+    from app.services.capa_lateral_diffusion_service import (
+        LateralBlockedError,
+        LateralFailedError,
+    )
 
     scope, capa = result
     from_status = capa.status
@@ -607,6 +611,24 @@ async def advance_capa(
             detail={
                 "outcome": "failed",
                 "reason": "llm_failed",
+                "message": str(e),
+            },
+        )
+    except LateralBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "blocked",
+                "stage": "lateral_diffusion",
+                "message": str(e),
+            },
+        )
+    except LateralFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "failed",
+                "stage": "lateral_diffusion",
                 "message": str(e),
             },
         )
