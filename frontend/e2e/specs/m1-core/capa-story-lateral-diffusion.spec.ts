@@ -1,70 +1,65 @@
 /**
  * US-E2E-01.9 lateral diffusion story spec.
  *
- * Deterministic assertions only. Tests FAIL (not skip) when the story's
- * core contract is broken. Seed/credential prerequisites are asserted, not
- * skipped, except for the close-chain LLM-unavailable case which is
- * environment-gated by the presence of LLM config.
+ * Deterministic assertions. Tests FAIL when the story contract is broken.
+ * Only the no-LLM close path is environment-gated (design: blocked, not failed).
+ *
+ * Seed: 8D-E2E-LATERAL-001/002/BLOCK/EMPTY at D8_APPROVAL_PENDING.
  */
 import { test, expect } from "@playwright/test";
+import { accountPassword } from "../../fixtures/seed-state";
+import { noLlmCreds } from "../../fixtures/d3-containment";
+import { loginForToken, authedApi } from "../../helpers/api-client";
 
-const BASE = process.env.E2E_API_BASE || "http://localhost:8000";
+const CAPA_001 = "8D-E2E-LATERAL-001";
+const CAPA_002 = "8D-E2E-LATERAL-002";
+const CAPA_BLOCK = "8D-E2E-LATERAL-BLOCK";
+const CAPA_EMPTY = "8D-E2E-LATERAL-EMPTY";
 
-async function login(request: any, username = "manager", password = "Manager@2026") {
-  const r = await request.post(`${BASE}/api/auth/login`, {
-    data: { username, password },
-  });
-  expect(r.ok()).toBeTruthy();
-  const body = await r.json();
-  return body.access_token as string;
-}
-
-async function findCapaByDoc(request: any, token: string, docNo: string) {
-  const r = await request.get(`${BASE}/api/capa?page=1&page_size=100`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  expect(r.ok()).toBeTruthy();
-  const body = await r.json();
-  const item = (body.items || []).find((c: any) => c.document_no === docNo);
-  if (!item) {
-    throw new Error(`seed CAPA ${docNo} not found — run seed_e2e first`);
-  }
+async function findCapa(ac: any, docNo: string) {
+  const r = await ac.get("/capa", { params: { page: 1, page_size: 100 } });
+  const item = (r.data.items || []).find((c: any) => c.document_no === docNo);
+  if (!item) throw new Error(`seed CAPA ${docNo} not found — run seed_e2e`);
   return item;
 }
 
-async function closeCapa(request: any, token: string, reportId: string) {
-  const adv = await request.post(`${BASE}/api/capa/${reportId}/advance`, {
-    headers: { Authorization: `Bearer ${token}` },
-    data: { target_state: "D8_CLOSURE" },
-  });
-  return adv;
+async function closeCapa(ac: any, reportId: string) {
+  return ac.post(`/capa/${reportId}/advance`, { target_state: "D8_CLOSURE" });
 }
 
 test.describe("capa-story-lateral-diffusion", () => {
-  test("001 close yields all four hit criteria union (API)", async ({ request }) => {
-    const token = await login(request);
-    const capa = await findCapaByDoc(request, token, "8D-E2E-LATERAL-001");
+  let managerAc: any;
+  let adminAc: any;
+  const llmMissing = noLlmCreds();
 
-    let detail;
+  test.beforeAll(async () => {
+    const managerPw = await accountPassword("manager");
+    const managerToken = await loginForToken("manager", managerPw);
+    managerAc = await authedApi(managerToken);
+    const adminPw = await accountPassword("admin");
+    const adminToken = await loginForToken("admin", adminPw);
+    adminAc = await authedApi(adminToken);
+  });
+
+  test("001 close yields all four hit criteria union", async () => {
+    const capa = await findCapa(managerAc, CAPA_001);
+
+    let detail: any;
     if (capa.status === "D8_APPROVAL_PENDING") {
-      const adv = await closeCapa(request, token, capa.report_id);
-      // Without LLM, close-chain is blocked; with LLM it must succeed.
-      if (adv.status() === 422) {
-        const body = await adv.json();
-        const outcome = body.detail?.outcome;
-        expect(outcome === "blocked" || outcome === "failed").toBeTruthy();
-        // Cannot proceed to union assertions without close; this is an
-        // environment gate, not a story failure.
+      if (llmMissing) {
+        // Design: no-LLM close must be 422 blocked (not failed, not 200)
+        const err = await closeCapa(managerAc, capa.report_id).catch((e: any) => e);
+        expect(err.response?.status, "no-LLM close must be 422").toBe(422);
+        const body = err.response?.data?.detail;
+        expect(body?.outcome, "no-LLM must be blocked, not failed").toBe("blocked");
         return;
       }
-      expect(adv.ok()).toBeTruthy();
-      detail = (await adv.json()).capa || (await adv.json());
+      const adv = await closeCapa(managerAc, capa.report_id);
+      expect(adv.status).toBe(200);
+      detail = adv.data.capa || adv.data;
     } else {
-      const r = await request.get(`${BASE}/api/capa/${capa.report_id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      expect(r.ok()).toBeTruthy();
-      detail = await r.json();
+      const r = await managerAc.get(`/capa/${capa.report_id}`);
+      detail = r.data;
     }
 
     const lat = detail.lateral_diffusion;
@@ -75,7 +70,6 @@ test.describe("capa-story-lateral-diffusion", () => {
     for (const sp of lat.similar_products || []) {
       for (const c of sp.hit_criteria || []) union.add(c);
     }
-    // Story requires all four criteria visible in one close path
     for (const need of [
       "same_product_type",
       "shared_fmea_mode",
@@ -86,141 +80,147 @@ test.describe("capa-story-lateral-diffusion", () => {
     }
   });
 
-  test("001 decide notify writes notifications + SENT audit", async ({ request }) => {
-    const token = await login(request);
-    const capa = await findCapaByDoc(request, token, "8D-E2E-LATERAL-001");
-    const r = await request.get(`${BASE}/api/capa/${capa.report_id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const detail = await r.json();
-    const lat = detail.lateral_diffusion;
-    if (!lat || lat.status !== "done") {
-      throw new Error("001 must have a done lateral check before notify");
+  test("001 decide notify writes notifications + SENT audit", async () => {
+    const capa = await findCapa(managerAc, CAPA_001);
+    const r = await managerAc.get(`/capa/${capa.report_id}`);
+    const lat = r.data.lateral_diffusion;
+
+    if (llmMissing && capa.status === "D8_APPROVAL_PENDING") {
+      // Cannot close without LLM; notify path unreachable
+      return;
     }
-    if (lat.decision) {
-      // Already decided: assert the recorded decision is consistent
-      expect(["notified", "skipped"]).toContain(lat.decision);
+    if (!lat || lat.status !== "done") {
+      throw new Error("001 must have a done lateral check");
+    }
+    if (lat.decision === "skipped") {
+      throw new Error("001 was previously skipped — notify test invalid");
+    }
+    if (lat.decision === "notified") {
+      // Already decided in prior run: verify audit exists
+      const logs = await adminAc.get("/admin/logs/audit", {
+        params: { table_name: "capa_eightd", action: "LATERAL_NOTIFICATION_SENT", page: 1, page_size: 200 },
+      });
+      const items = (logs.data.items || []).filter((l: any) => l.record_id === capa.report_id);
+      expect(items.length, "SENT audit must exist for decided 001").toBeGreaterThan(0);
       return;
     }
 
-    const d = await request.post(
-      `${BASE}/api/capa/${capa.report_id}/lateral-diffusion/decide`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        data: { decision: "notify" },
-      },
-    );
-    expect(d.ok()).toBeTruthy();
-    const body = await d.json();
-    expect(body.decision).toBe("notified");
-    expect((body.notifications || []).length).toBeGreaterThan(0);
+    const d = await managerAc.post(`/capa/${capa.report_id}/lateral-diffusion/decide`, {
+      decision: "notify",
+    });
+    expect(d.status).toBe(200);
+    expect(d.data.decision).toBe("notified");
+    expect((d.data.notifications || []).length).toBeGreaterThan(0);
+
+    // SENT audit
+    const logs = await adminAc.get("/admin/logs/audit", {
+      params: { table_name: "capa_eightd", action: "LATERAL_NOTIFICATION_SENT", page: 1, page_size: 200 },
+    });
+    const items = (logs.data.items || []).filter((l: any) => l.record_id === capa.report_id);
+    expect(items.length, "LATERAL_NOTIFICATION_SENT audit required").toBeGreaterThan(0);
   });
 
-  test("002 decide skip writes SKIPPED with skip_reason", async ({ request }) => {
-    const token = await login(request);
-    const capa = await findCapaByDoc(request, token, "8D-E2E-LATERAL-002");
+  test("002 decide skip writes SKIPPED with skip_reason + audit", async () => {
+    const capa = await findCapa(managerAc, CAPA_002);
 
     if (capa.status === "D8_APPROVAL_PENDING") {
-      const adv = await closeCapa(request, token, capa.report_id);
-      if (adv.status() === 422) {
-        const body = await adv.json();
-        expect(["blocked", "failed"]).toContain(body.detail?.outcome);
+      if (llmMissing) {
+        const err = await closeCapa(managerAc, capa.report_id).catch((e: any) => e);
+        expect(err.response?.status).toBe(422);
+        expect(err.response?.data?.detail?.outcome).toBe("blocked");
         return;
       }
-      expect(adv.ok()).toBeTruthy();
+      const adv = await closeCapa(managerAc, capa.report_id);
+      expect(adv.status).toBe(200);
     }
 
-    const detailR = await request.get(`${BASE}/api/capa/${capa.report_id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const detail = await detailR.json();
-    const lat = detail.lateral_diffusion;
+    const r = await managerAc.get(`/capa/${capa.report_id}`);
+    const lat = r.data.lateral_diffusion;
     if (!lat || lat.status !== "done") {
-      throw new Error("002 must have a done lateral check before skip");
+      throw new Error("002 must have a done lateral check");
     }
-    if (lat.decision) {
-      expect(["notified", "skipped"]).toContain(lat.decision);
+    if (lat.decision === "notified") {
+      throw new Error("002 was previously notified — skip test invalid");
+    }
+    if (lat.decision === "skipped") {
+      // Verify audit from prior run
+      const logs = await adminAc.get("/admin/logs/audit", {
+        params: { table_name: "capa_eightd", action: "LATERAL_NOTIFICATION_SKIPPED", page: 1, page_size: 200 },
+      });
+      const items = (logs.data.items || []).filter((l: any) => l.record_id === capa.report_id);
+      expect(items.length, "SKIPPED audit must exist for decided 002").toBeGreaterThan(0);
+      expect(items[0].changed_fields?.skip_reason).toBeTruthy();
       return;
     }
 
-    const d = await request.post(
-      `${BASE}/api/capa/${capa.report_id}/lateral-diffusion/decide`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        data: { decision: "skip", skip_reason: "E2E 不通知" },
-      },
-    );
-    expect(d.ok()).toBeTruthy();
-    const body = await d.json();
-    expect(body.decision).toBe("skipped");
-    // SKIPPED audit must include skip_reason
-    const audits = await request.get(
-      `${BASE}/api/audit-logs?record_id=${capa.report_id}&action=LATERAL_NOTIFICATION_SKIPPED`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    if (audits.ok()) {
-      const auditBody = await audits.json();
-      const items = auditBody.items || [];
-      if (items.length > 0) {
-        expect(items[0].changed_fields?.skip_reason).toBe("E2E 不通知");
-      }
-    }
+    const d = await managerAc.post(`/capa/${capa.report_id}/lateral-diffusion/decide`, {
+      decision: "skip",
+      skip_reason: "E2E 不通知",
+    });
+    expect(d.status).toBe(200);
+    expect(d.data.decision).toBe("skipped");
+
+    // SKIPPED audit with skip_reason
+    const logs = await adminAc.get("/admin/logs/audit", {
+      params: { table_name: "capa_eightd", action: "LATERAL_NOTIFICATION_SKIPPED", page: 1, page_size: 200 },
+    });
+    const items = (logs.data.items || []).filter((l: any) => l.record_id === capa.report_id);
+    expect(items.length, "LATERAL_NOTIFICATION_SKIPPED audit required").toBeGreaterThan(0);
+    expect(items[0].changed_fields?.skip_reason).toBe("E2E 不通知");
   });
 
-  test("EMPTY closes and reports empty lateral status", async ({ request }) => {
-    const token = await login(request);
-    const capa = await findCapaByDoc(request, token, "8D-E2E-LATERAL-EMPTY");
+  test("EMPTY closes and reports empty lateral status", async () => {
+    const capa = await findCapa(managerAc, CAPA_EMPTY);
 
     if (capa.status !== "D8_APPROVAL_PENDING") {
-      // Already closed: assert projection if present
-      const r = await request.get(`${BASE}/api/capa/${capa.report_id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const detail = await r.json();
-      if (detail.lateral_diffusion) {
-        expect(detail.lateral_diffusion.status).toBe("empty");
-      }
+      // Already closed: projection MUST exist and be empty
+      const r = await managerAc.get(`/capa/${capa.report_id}`);
+      const lat = r.data.lateral_diffusion;
+      expect(lat, "EMPTY CAPA must have lateral projection").toBeTruthy();
+      expect(lat.status).toBe("empty");
+      expect(lat.llm_status).toBe("skipped");
       return;
     }
 
-    const adv = await closeCapa(request, token, capa.report_id);
-    if (adv.status() === 422) {
-      // Close-chain blocked on 01.8 without LLM is acceptable environment gate
-      const body = await adv.json();
-      expect(["blocked", "failed"]).toContain(body.detail?.outcome);
+    if (llmMissing) {
+      // 01.8 sink may block without LLM; design says blocked
+      const err = await closeCapa(managerAc, capa.report_id).catch((e: any) => e);
+      expect(err.response?.status).toBe(422);
+      expect(err.response?.data?.detail?.outcome).toBe("blocked");
       return;
     }
-    expect(adv.ok()).toBeTruthy();
-    const capaBody = (await adv.json()).capa || (await adv.json());
-    expect(capaBody.lateral_diffusion, "EMPTY CAPA must have lateral projection").toBeTruthy();
-    expect(capaBody.lateral_diffusion.status).toBe("empty");
-    expect(capaBody.lateral_diffusion.llm_status).toBe("skipped");
+
+    const adv = await closeCapa(managerAc, capa.report_id);
+    expect(adv.status).toBe(200);
+    const body = adv.data.capa || adv.data;
+    expect(body.lateral_diffusion, "EMPTY CAPA must have lateral projection").toBeTruthy();
+    expect(body.lateral_diffusion.status).toBe("empty");
+    expect(body.lateral_diffusion.llm_status).toBe("skipped");
   });
 
-  test("BLOCK without LLM is 422 close-chain; with LLM closes", async ({ request }) => {
-    const token = await login(request);
-    const capa = await findCapaByDoc(request, token, "8D-E2E-LATERAL-BLOCK");
+  test("BLOCK without LLM is 422 blocked; with LLM closes", async () => {
+    const capa = await findCapa(managerAc, CAPA_BLOCK);
 
     if (capa.status !== "D8_APPROVAL_PENDING") {
-      // Already closed: story still satisfied if projection exists
-      const r = await request.get(`${BASE}/api/capa/${capa.report_id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      expect(r.ok()).toBeTruthy();
+      // Already closed: only valid if LLM was available
+      if (llmMissing) {
+        throw new Error("BLOCK CAPA closed without LLM — close-chain gate is broken");
+      }
+      const r = await managerAc.get(`/capa/${capa.report_id}`);
+      expect(r.status).toBe(200);
       return;
     }
 
-    const adv = await closeCapa(request, token, capa.report_id);
-    if (adv.status() === 422) {
-      const body = await adv.json();
-      // Must be a close-chain blocked/failed, not a 400/500
-      expect(["blocked", "failed"]).toContain(body.detail?.outcome);
-      expect(body.detail?.message).toBeTruthy();
+    const result = await closeCapa(managerAc, capa.report_id).catch((e: any) => e);
+    if (llmMissing) {
+      expect(result.response?.status, "no-LLM close must be 422").toBe(422);
+      const body = result.response?.data?.detail;
+      expect(body?.outcome).toBe("blocked");
+      expect(body?.message).toBeTruthy();
     } else {
-      // With LLM credentials the close must succeed
-      expect(adv.ok()).toBeTruthy();
-      const capaBody = (await adv.json()).capa || (await adv.json());
-      expect(capaBody.status).toBe("D8_CLOSURE");
+      expect(result.status).toBe(200);
+      const body = result.data.capa || result.data;
+      expect(body.status).toBe("D8_CLOSURE");
     }
   });
 });

@@ -150,3 +150,90 @@ async def test_decide_api_no_check_404(db):
     finally:
         app.dependency_overrides.clear()
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_advance_api_returns_422_blocked_lateral_stage(sessionmaker, monkeypatch):
+    """/advance must return 422 with outcome=blocked stage=lateral_diffusion
+    when sink succeeds but lateral LLM is unavailable."""
+    from app.models.capa import CAPAEightD
+    from app.models.factory import Factory
+    from app.models.product_line import ProductLine
+    from app.models.product_type import ProductType
+    from app.models.role import RoleDefinition
+    from app.models.user import User
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+
+    suffix = uuid.uuid4().hex[:8]
+    factory_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    capa_id = uuid.uuid4()
+    role_id = uuid.uuid4()
+
+    async with sessionmaker() as s:
+        s.add(Factory(id=factory_id, code=f"F-APIBLK-{suffix}", name="T", is_active=True))
+        await s.flush()
+        s.add(ProductType(code=f"T-APIBLK-{suffix}", name="T", is_active=True))
+        await s.flush()
+        s.add(ProductLine(code=f"P-APIBLK-{suffix}", name="T", factory_id=factory_id, product_type_code=f"T-APIBLK-{suffix}"))
+        # Second PL with same type so lateral check has hits and requires LLM
+        s.add(ProductLine(code=f"P-APIBLK2-{suffix}", name="T2", factory_id=factory_id, product_type_code=f"T-APIBLK-{suffix}"))
+        s.add(RoleDefinition(id=role_id, role_key=f"r-apiblk-{suffix}", name_zh="t", name_en="t", is_system=False, is_editable=True, is_active=True))
+        await s.flush()
+        s.add(User(user_id=user_id, username=f"u-apiblk-{suffix}", display_name="u", password_hash="x", role_id=role_id, legacy_role="viewer", is_active=True, factory_id=factory_id))
+        await s.flush()
+        s.add(CAPAEightD(
+            report_id=capa_id, document_no=f"8D-APIBLK-{suffix}", title="t",
+            product_line_code=f"P-APIBLK-{suffix}", factory_id=factory_id,
+            status="D8_APPROVAL_PENDING", severity="general", created_by=user_id,
+            d2_description="d2", d4_root_cause="d4", d5_correction="d5",
+            d6_verification="d6", d7_prevention="d7", d8_closure="d8", d1_team=[],
+        ))
+        await s.commit()
+
+    async def _noop_sink(db, capa, uid, manual=False):
+        return None
+
+    monkeypatch.setattr("app.services.knowledge_sink_service.sink_capa_on_close", _noop_sink)
+    monkeypatch.setattr(
+        "app.services.capa_lateral_diffusion_service.build_client",
+        AsyncMock(side_effect=ProviderNotConfiguredError("no cfg")),
+    )
+
+    # Override deps and call the real advance route
+    from app.core.deps import get_current_user, get_db, get_request_scope
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+    from app.core.deps import RequestScope
+
+    async def _override_db():
+        async with sessionmaker() as db:
+            yield db
+
+    async def _override_scope():
+        async with sessionmaker() as db:
+            user = await db.get(User, user_id)
+            return RequestScope(
+                user=user,
+                factory_scope=FactoryScope(accessible_factory_ids=[factory_id], default_factory_id=factory_id),
+                pl_scope=ProductLineScope(mode="ALL", codes=None),
+                effective_factory_id=factory_id,
+            )
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user] = lambda: None  # unused when scope override
+    app.dependency_overrides[get_request_scope] = _override_scope
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            from unittest.mock import patch as _patch
+            with _patch("app.api.capa.get_user_permission", new=AsyncMock(return_value=5)):
+                r = await client.post(
+                    f"/api/capa/{capa_id}/advance",
+                    json={"target_state": "D8_CLOSURE"},
+                )
+                assert r.status_code == 422, r.text
+                body = r.json()
+                assert body["detail"]["outcome"] == "blocked"
+                assert body["detail"]["stage"] == "lateral_diffusion"
+    finally:
+        app.dependency_overrides.clear()

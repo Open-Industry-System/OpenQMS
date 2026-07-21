@@ -140,27 +140,22 @@ async def build_source_snapshot(db, capa: CAPAEightD) -> SourceSnapshot:
         fmea_ids.add(capa.fmea_ref_id)
 
     # D4 verification source_ref.fmea_id (same collection as knowledge_sink._assemble_linkage)
-    try:
-        async with db.begin_nested():
-            verifs = (
-                await db.execute(
-                    select(CapaRootCauseVerification).where(
-                        CapaRootCauseVerification.capa_id == capa.report_id,
-                        CapaRootCauseVerification.factory_id == capa.factory_id,
-                    )
-                )
-            ).scalars().all()
-            for v in verifs:
-                ref = v.source_ref or {}
-                if isinstance(ref, dict) and ref.get("fmea_id"):
-                    try:
-                        from uuid import UUID as _UUID
-                        fmea_ids.add(_UUID(str(ref["fmea_id"])))
-                    except (ValueError, TypeError, AttributeError):
-                        pass
-    except Exception:
-        # Optional collector: never fail the outer close transaction.
-        pass
+    verifs = (
+        await db.execute(
+            select(CapaRootCauseVerification).where(
+                CapaRootCauseVerification.capa_id == capa.report_id,
+                CapaRootCauseVerification.factory_id == capa.factory_id,
+            )
+        )
+    ).scalars().all()
+    for v in verifs:
+        ref = v.source_ref or {}
+        if isinstance(ref, dict) and ref.get("fmea_id"):
+            try:
+                from uuid import UUID as _UUID
+                fmea_ids.add(_UUID(str(ref["fmea_id"])))
+            except (ValueError, TypeError, AttributeError):
+                pass
 
     rows = await db.execute(
         select(CapaD7NodeAction.fmea_id).where(
