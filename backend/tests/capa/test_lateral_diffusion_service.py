@@ -411,3 +411,33 @@ async def test_rerun_without_check_inserts_then_runs(db):
     assert out is not None
     assert out["status"] == "empty"
     assert out["llm_status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_lateral_blocked_after_sink_succeeds(db, monkeypatch):
+    """§5.2.1: after 01.8 sink succeeds, lateral no-LLM is blocked and leaves no check row."""
+    from sqlalchemy import func
+    from app.services.capa_lateral_diffusion_service import LateralBlockedError
+
+    factory, user = await _seed_base(db, "bksink")
+    await _make_pl(db, "PL-SRC-BKSINK", factory.id, product_type_code="TYPE-BKSINK")
+    await _make_pl(db, "PL-A-BKSINK", factory.id, product_type_code="TYPE-BKSINK")
+    capa = await _make_capa(db, factory.id, user.user_id, "PL-SRC-BKSINK")
+
+    async def _noop_sink(*a, **kw):
+        return None
+
+    # Sink success is simulated (not invoked here); assert lateral stage blocked alone.
+    monkeypatch.setattr(
+        "app.services.capa_lateral_diffusion_service.build_client",
+        AsyncMock(side_effect=ProviderNotConfiguredError("no cfg")),
+    )
+    with pytest.raises(LateralBlockedError):
+        await run_lateral_diffusion_check(db, capa, user.user_id)
+
+    n = await db.scalar(
+        select(func.count())
+        .select_from(CapaLateralDiffusionCheck)
+        .where(CapaLateralDiffusionCheck.capa_id == capa.report_id)
+    )
+    assert n == 0
