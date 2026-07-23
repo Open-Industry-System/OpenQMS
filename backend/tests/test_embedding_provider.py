@@ -15,6 +15,7 @@ class TestCreateEmbeddingProvider:
         """未配置 provider 时返回 None。"""
         mock_settings.EMBEDDING_PROVIDER = ""
         mock_settings.LLM_PROVIDER = ""
+        mock_settings.E2E_MODE = False
         assert create_embedding_provider() is None
 
     @patch("app.services.embedding_provider.app_settings")
@@ -23,6 +24,7 @@ class TestCreateEmbeddingProvider:
         mock_settings.EMBEDDING_PROVIDER = "ollama"
         mock_settings.EMBEDDING_MODEL = ""
         mock_settings.EMBEDDING_BASE_URL = "http://localhost:11434"
+        mock_settings.E2E_MODE = False
         provider = create_embedding_provider()
         assert isinstance(provider, OllamaEmbeddingProvider)
         assert provider.dimensions == 768  # nomic-embed-text default
@@ -32,7 +34,59 @@ class TestCreateEmbeddingProvider:
         """不支持的 provider 返回 None。"""
         mock_settings.EMBEDDING_PROVIDER = "unsupported"
         mock_settings.LLM_API_KEY = ""
+        mock_settings.E2E_MODE = False
         assert create_embedding_provider() is None
+
+    @patch("app.services.embedding_provider.app_settings")
+    def test_e2e_mode_uses_hash_provider_matching_table_dims(self, mock_settings):
+        """E2E_MODE + no explicit embedding provider → HashEmbeddingProvider @ table dims.
+
+        Regression US-E2E-01.8: empty embedding_provider fell back to ollama/nomic
+        (768d) while document_embeddings is 1536d → worker dimension mismatch /
+        never ready. E2E uses a deterministic in-process provider so outbox can
+        complete without external models.
+        """
+        from app.services.embedding_provider import HashEmbeddingProvider
+
+        mock_settings.EMBEDDING_PROVIDER = ""
+        mock_settings.embedding_provider = ""
+        mock_settings.LLM_PROVIDER = "ollama"  # would otherwise win and pick nomic 768
+        mock_settings.llm_provider = "ollama"
+        mock_settings.E2E_MODE = True
+        mock_settings.EMBEDDING_DIMENSIONS = 1536
+        mock_settings.embedding_dimensions = 1536
+        provider = create_embedding_provider()
+        assert isinstance(provider, HashEmbeddingProvider)
+        assert provider.dimensions == 1536
+
+    @patch("app.services.embedding_provider.app_settings")
+    def test_explicit_hash_provider(self, mock_settings):
+        from app.services.embedding_provider import HashEmbeddingProvider
+
+        mock_settings.EMBEDDING_PROVIDER = "hash"
+        mock_settings.embedding_provider = "hash"
+        mock_settings.EMBEDDING_DIMENSIONS = 1536
+        mock_settings.embedding_dimensions = 1536
+        mock_settings.E2E_MODE = False
+        provider = create_embedding_provider()
+        assert isinstance(provider, HashEmbeddingProvider)
+        assert provider.dimensions == 1536
+
+
+class TestHashEmbeddingProvider:
+    @pytest.mark.asyncio
+    async def test_deterministic_and_correct_dim(self):
+        from app.services.embedding_provider import HashEmbeddingProvider
+
+        p = HashEmbeddingProvider(dimensions=16)
+        a = await p.embed(["hello"])
+        b = await p.embed(["hello"])
+        c = await p.embed(["world"])
+        assert a == b
+        assert a != c
+        assert len(a[0]) == 16
+        # L2-normalized-ish: not all zeros
+        assert any(v != 0.0 for v in a[0])
 
 
 class TestOllamaDimensions:

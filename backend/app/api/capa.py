@@ -832,7 +832,8 @@ async def get_d4_fmea_recommendations(
         pc = await provider_adapter.build_client(db)
     except ProviderNotConfiguredError:
         pc = None
-    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider)
+    llm_timeout = getattr(request.app.state, "llm_timeout", None)
+    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider, llm_timeout=llm_timeout)
 
     context = RecommendationContext(
         capa_data={
@@ -926,7 +927,8 @@ async def get_d5_fmea_recommendations(
         pc = await provider_adapter.build_client(db)
     except ProviderNotConfiguredError:
         pc = None
-    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider)
+    llm_timeout = getattr(request.app.state, "llm_timeout", None)
+    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider, llm_timeout=llm_timeout)
 
     context = RecommendationContext(
         capa_data={

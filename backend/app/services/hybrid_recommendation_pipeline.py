@@ -24,11 +24,13 @@ logger = logging.getLogger(__name__)
 class HybridRecommendationPipeline:
     """8D D4/D5 全混合推荐管道（薄壳）：委托 RecommendationOrchestrator 执行 12 阶段流水线。"""
 
-    def __init__(self, db, pc, embedding_provider):
+    def __init__(self, db, pc, embedding_provider, llm_timeout: float | None = None):
         self.db = db
         self.pc = pc
         self.embedding = embedding_provider
-        self.orchestrator = RecommendationOrchestrator(db, pc, embedding_provider)
+        self.orchestrator = RecommendationOrchestrator(
+            db, pc, embedding_provider, llm_timeout=llm_timeout
+        )
 
     async def recommend(
         self,

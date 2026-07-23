@@ -19,7 +19,8 @@ from app.schemas.capa_d3 import D3AdviceRequest, D3ImportRequest
 from app.seed_e2e_constants import (
     D3_E2E_CUSTOMER_CODE, D3_E2E_CUSTOMER_SEGMENT, D3_E2E_ERP_CONNECTION_NAME,
     D3_E2E_LOT_NO, D3_E2E_MATERIAL_CODE, D3_E2E_PRODUCT_LINE, D3_E2E_SUPPLIER_NO,
-    DOCGATE_E2E_CAPA_DOC_NO, DOCGATE_E2E_FMEA_DOC_NO,
+    DOCGATE_E2E_CAPA_DOC_NO, DOCGATE_E2E_FMEA_DOC_NO, DOCGATE_E2E_CP_DOC_NO,
+    DOCGATE_E2E_CP_ID, DOCGATE_E2E_CP_ITEM_ID, DOCGATE_E2E_CP_VER_ID,
     E2E_ACCOUNTS, E2E_FACTORY_DC100, E2E_FACTORY_SH, E2E_PRODUCT_LINE, E2E_PRODUCT_LINE_DEFAULT,
     FMEA_LINK_E2E_CAPA_DOC_NO, FMEA_LINK_E2E_CAPA_SKIPPED_DOC_NO,
     FMEA_LINK_E2E_CAUSE_NODE, FMEA_LINK_E2E_FMEA_DOC_NO,
@@ -35,6 +36,8 @@ from app.seed_e2e_constants import (
     LATERAL_E2E_CAPA_001_ID, LATERAL_E2E_CAPA_002_ID, LATERAL_E2E_CAPA_BLOCK_ID,
     LATERAL_E2E_CAPA_EMPTY_ID, LATERAL_E2E_FMEA_SRC, LATERAL_E2E_FMEA_B,
     LATERAL_E2E_CP_SRC, LATERAL_E2E_CP_C,
+    D4_AUDIT_E2E_CAPA_DOC_NO, D4_AUDIT_E2E_CAPA_ID,
+    D4_AUDIT_E2E_APPROVAL_CAPA_DOC_NO, D4_AUDIT_E2E_APPROVAL_CAPA_ID,
 )
 
 # Fixed UUIDs for idempotency
@@ -45,6 +48,9 @@ CAPA_E2E_ID = uuid.UUID("00000000-0000-0000-0000-000000e20200")
 DOCGATE_FMEA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20170")
 DOCGATE_CAPA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20270")
 DOCGATE_FMEA_VER_ID = uuid.UUID("00000000-0000-0000-0000-000000e20171")
+DOCGATE_CP_ID = uuid.UUID(DOCGATE_E2E_CP_ID)
+DOCGATE_CP_ITEM_ID = uuid.UUID(DOCGATE_E2E_CP_ITEM_ID)
+DOCGATE_CP_VER_ID = uuid.UUID(DOCGATE_E2E_CP_VER_ID)
 FMEA_LINK_FMEA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20140")
 FMEA_LINK_CAPA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20240")
 FMEA_LINK_CAPA_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20241")
@@ -58,6 +64,9 @@ KNOWLEDGE_SINK_CAPA_ID = uuid.UUID(KNOWLEDGE_SINK_E2E_CAPA_ID)
 SUPPLIER_RISK_CAPA_ID = uuid.UUID(SUPPLIER_RISK_E2E_CAPA_ID)
 SUPPLIER_RISK_HIST_CAPA_ID = uuid.UUID(SUPPLIER_RISK_E2E_HIST_CAPA_ID)
 SUPPLIER_RISK_D7_ACTION_ID = uuid.UUID(SUPPLIER_RISK_E2E_D7_ACTION_ID)
+D4_AUDIT_CAPA_ID = uuid.UUID(D4_AUDIT_E2E_CAPA_ID)
+D4_AUDIT_APPROVAL_CAPA_ID = uuid.UUID(D4_AUDIT_E2E_APPROVAL_CAPA_ID)
+D4_AUDIT_D7_ID = uuid.UUID("a0000003-0001-4000-8000-000000000003")
 
 
 async def _seed_factories(db) -> dict:
@@ -504,19 +513,244 @@ async def _seed_doc_gate_capa(db, factory_ids):
     ver = (await db.execute(
         select(FMEAVersion).where(FMEAVersion.version_id == DOCGATE_FMEA_VER_ID)
     )).scalar_one_or_none()
-    if not ver:
-        # Bypass version immutability trigger via direct insert
-        await db.execute(sa_text(
-            "INSERT INTO fmea_versions (version_id, fmea_id, factory_id, major_no, minor_no, "
-            "snapshot, sha256_hash, change_summary, change_type, created_by, created_at) "
-            "VALUES (:vid, :fid, :fact, 1, 0, CAST(:snap AS JSONB), "
-            "encode(digest(CAST(:snap AS JSONB)::text, 'sha256'), 'hex'), "
-            "'e2e baseline', 'approve', :uid, NOW() - interval '2 days')"
-        ), {
-            "vid": DOCGATE_FMEA_VER_ID, "fid": fmea.fmea_id, "fact": factory_id,
-            "snap": json.dumps(snapshot), "uid": admin.user_id,
-        })
+    # fmea_versions has a BEFORE UPDATE OR DELETE trigger (prevent_version_tampering,
+    # alembic 020) that RAISEs. Disable it for this re-seed transaction, then re-enable.
+    # ALTER TABLE ... DISABLE/ENABLE TRIGGER is transactional in PG.
+    await db.execute(text(
+        'ALTER TABLE "fmea_versions" DISABLE TRIGGER "trg_fmea_version_no_update"'
+    ))
+    try:
+        # Idempotent re-seed: remove any FMEA versions beyond the baseline created by
+        # prior walks (doc-gate audit_run may create new versions). Keeping them would make
+        # the gate see a version bump (latest.created_at > capa.created_at) → false PASS/FAIL.
+        await db.execute(delete(FMEAVersion).where(
+            FMEAVersion.fmea_id == fmea.fmea_id,
+            FMEAVersion.version_id != DOCGATE_FMEA_VER_ID,
+        ))
+        if not ver:
+            # Bypass version immutability trigger via direct insert (trigger disabled above
+            # is for UPDATE/DELETE; INSERT goes through verify_version_hash, which the raw
+            # SQL INSERT with precomputed sha256 satisfies).
+            await db.execute(sa_text(
+                "INSERT INTO fmea_versions (version_id, fmea_id, factory_id, major_no, minor_no, "
+                "snapshot, sha256_hash, change_summary, change_type, created_by, created_at) "
+                "VALUES (:vid, :fid, :fact, 1, 0, CAST(:snap AS JSONB), "
+                "encode(digest(CAST(:snap AS JSONB)::text, 'sha256'), 'hex'), "
+                "'e2e baseline', 'approve', :uid, NOW() - interval '2 days')"
+            ), {
+                "vid": DOCGATE_FMEA_VER_ID, "fid": fmea.fmea_id, "fact": factory_id,
+                "snap": json.dumps(snapshot), "uid": admin.user_id,
+            })
+        else:
+            # Refresh baseline snapshot + factory_id so reseed restores full CANON
+            # (prior walks / cross-factory pollution must not leave wrong factory_id).
+            await db.execute(sa_text(
+                "UPDATE fmea_versions SET factory_id = :fact, "
+                "snapshot = CAST(:snap AS JSONB), "
+                "sha256_hash = encode(digest(CAST(:snap AS JSONB)::text, 'sha256'), 'hex'), "
+                "created_at = NOW() - interval '2 days' WHERE version_id = :vid"
+            ), {
+                "fact": factory_id,
+                "snap": json.dumps(snapshot),
+                "vid": DOCGATE_FMEA_VER_ID,
+            })
+        await db.execute(text(
+            'ALTER TABLE "fmea_versions" ENABLE TRIGGER "trg_fmea_version_no_update"'
+        ))
         await db.flush()
+    except Exception:
+        # Re-enable trigger before rollback so a retry starts clean; rollback reverts
+        # the disable + any deletes/updates. Do not swallow — re-raise after best-effort enable.
+        try:
+            await db.execute(text(
+                'ALTER TABLE "fmea_versions" ENABLE TRIGGER "trg_fmea_version_no_update"'
+            ))
+        except Exception:
+            pass
+        raise
+
+
+    # Same product-line ControlPlan + baseline version so allowlist can surface CP + FMEA.
+    # (01.9 CPs live on LATERAL_* product lines and are invisible to this CAPA's PL filter.)
+    from app.models.control_plan import ControlPlan, ControlPlanItem
+    from app.models.control_plan_version import ControlPlanVersion
+
+    # Canonical CP header fields (must match version_service.create_cp_version's
+    # header_snapshot shape so the baseline diff is empty vs a freshly-reseeded live CP).
+    CP_CANON = dict(
+        title="E2E DocGate CP",
+        status="draft",        # draft (not approved) so update_control_plan allows the
+                               # item edit needed for the passed path; approved CPs 400 on PUT.
+        phase="production",
+        fmea_ref_id=None,
+        part_no=None,
+        part_name=None,
+        contact_info=None,
+        drawing_rev=None,
+        org_factory=None,
+        core_group=None,
+    )
+    ITEM_CANON = dict(
+        step_no="10",
+        process_name="定位",
+        equipment=None,
+        characteristic_no="CP-DOC-001",
+        product_characteristic="孔径",
+        process_characteristic="定位销磨损检测",
+        special_class="CC",
+        specification_tolerance=None,
+        evaluation_method=None,
+        sample_size=None,
+        sample_frequency=None,
+        control_method="首件+巡检",
+        reaction_plan="隔离并换销",
+        source_fmea_node_id=None,
+        sort_order=0,
+    )
+
+    cp = (await db.execute(
+        select(ControlPlan).where(ControlPlan.document_no == DOCGATE_E2E_CP_DOC_NO)
+    )).scalar_one_or_none()
+    if not cp:
+        cp = ControlPlan(
+            cp_id=DOCGATE_CP_ID,
+            document_no=DOCGATE_E2E_CP_DOC_NO,
+            product_line_code=product_line,
+            factory_id=factory_id,
+            created_by=admin.user_id,
+            **CP_CANON,
+        )
+        db.add(cp)
+        await db.flush()
+        db.add(ControlPlanItem(
+            item_id=DOCGATE_CP_ITEM_ID,
+            cp_id=cp.cp_id,
+            factory_id=factory_id,
+            **ITEM_CANON,
+        ))
+        await db.flush()
+    else:
+        # Restore full canonical header so live CP == baseline snapshot (phase/fmea_ref_id/
+        # part_no etc. included — otherwise a prior walk's edits leave live header != baseline).
+        # Also clear approval residue: if a prior walk approved then something else reopened
+        # status alone, approved_by/approved_at would still be set while status=draft —
+        # that hybrid state confuses approve-path tests and UI.
+        cp.product_line_code = product_line
+        cp.factory_id = factory_id
+        cp.approved_by = None
+        cp.approved_at = None
+        for k, v in CP_CANON.items():
+            setattr(cp, k, v)
+        await db.flush()
+        # Remove any extra items a prior walk added — baseline has exactly one item, so extra
+        # items would show up as phantom "added" rows in the diff.
+        await db.execute(delete(ControlPlanItem).where(
+            ControlPlanItem.cp_id == cp.cp_id,
+            ControlPlanItem.item_id != DOCGATE_CP_ITEM_ID,
+        ))
+        item = (await db.execute(
+            select(ControlPlanItem).where(ControlPlanItem.item_id == DOCGATE_CP_ITEM_ID)
+        )).scalar_one_or_none()
+        if item is None:
+            db.add(ControlPlanItem(
+                item_id=DOCGATE_CP_ITEM_ID,
+                cp_id=cp.cp_id,
+                factory_id=factory_id,
+                **ITEM_CANON,
+            ))
+        else:
+            # Reset every field (equipment included — baseline fixes it to None) so the
+            # live item matches the baseline item snapshot exactly. Also re-pin factory_id
+            # in case a prior import/edit moved the item across factories.
+            item.factory_id = factory_id
+            for k, v in ITEM_CANON.items():
+                setattr(item, k, v)
+        await db.flush()
+
+    # CP baseline version (immutable table — disable trigger like FMEA path)
+    await db.execute(text(
+        'ALTER TABLE "control_plan_versions" DISABLE TRIGGER "trg_cp_version_no_update"'
+    ))
+    try:
+        await db.execute(delete(ControlPlanVersion).where(
+            ControlPlanVersion.cp_id == cp.cp_id,
+            ControlPlanVersion.version_id != DOCGATE_CP_VER_ID,
+        ))
+        # Build header_snapshot from the live cp fields (just reset to canonical) so the
+        # baseline exactly matches what create_cp_version would snapshot for this CP —
+        # includes fmea_ref_id + phase (which version_service includes; a hardcoded subset
+        # would make the header diff show spurious changes).
+        header_snapshot = {
+            "document_no": cp.document_no,
+            "title": cp.title,
+            "fmea_ref_id": str(cp.fmea_ref_id) if cp.fmea_ref_id else None,
+            "product_line_code": cp.product_line_code,
+            "status": cp.status,
+            "phase": cp.phase,
+            "part_no": cp.part_no,
+            "part_name": cp.part_name,
+            "contact_info": cp.contact_info,
+            "drawing_rev": cp.drawing_rev,
+            "org_factory": cp.org_factory,
+            "core_group": cp.core_group,
+        }
+        items_snapshot = [{
+            "item_id": str(DOCGATE_CP_ITEM_ID),
+            **{k: ITEM_CANON[k] for k in (
+                "step_no", "process_name", "equipment", "characteristic_no",
+                "product_characteristic", "process_characteristic", "special_class",
+                "specification_tolerance", "evaluation_method", "sample_size",
+                "sample_frequency", "control_method", "reaction_plan",
+                "source_fmea_node_id", "sort_order",
+            )},
+        }]
+        cp_ver = (await db.execute(
+            select(ControlPlanVersion).where(ControlPlanVersion.version_id == DOCGATE_CP_VER_ID)
+        )).scalar_one_or_none()
+        if not cp_ver:
+            # items_snapshot is a JSON array (version_service shape); hash over
+            # {"header": header, "items": items_list} (same as create_cp_version).
+            await db.execute(sa_text(
+                "INSERT INTO control_plan_versions (version_id, cp_id, factory_id, major_no, minor_no, "
+                "header_snapshot, items_snapshot, sha256_hash, change_summary, change_type, "
+                "created_by, created_at) "
+                "VALUES (:vid, :cid, :fact, 1, 0, CAST(:hdr AS JSONB), CAST(:items AS JSONB), "
+                "encode(digest(CAST(:combined AS JSONB)::text, 'sha256'), 'hex'), "
+                "'e2e baseline', 'approve', :uid, NOW() - interval '2 days')"
+            ), {
+                "vid": DOCGATE_CP_VER_ID, "cid": cp.cp_id, "fact": factory_id,
+                "hdr": __import__('json').dumps(header_snapshot),
+                "items": __import__('json').dumps(items_snapshot),
+                "combined": __import__('json').dumps({"header": header_snapshot, "items": items_snapshot}),
+                "uid": admin.user_id,
+            })
+        else:
+            await db.execute(sa_text(
+                "UPDATE control_plan_versions SET "
+                "factory_id = :fact, "
+                "header_snapshot = CAST(:hdr AS JSONB), "
+                "items_snapshot = CAST(:items AS JSONB), "
+                "sha256_hash = encode(digest(CAST(:combined AS JSONB)::text, 'sha256'), 'hex'), "
+                "created_at = NOW() - interval '2 days' WHERE version_id = :vid"
+            ), {
+                "fact": factory_id,
+                "hdr": __import__('json').dumps(header_snapshot),
+                "items": __import__('json').dumps(items_snapshot),
+                "combined": __import__('json').dumps({"header": header_snapshot, "items": items_snapshot}),
+                "vid": DOCGATE_CP_VER_ID,
+            })
+        await db.execute(text(
+            'ALTER TABLE "control_plan_versions" ENABLE TRIGGER "trg_cp_version_no_update"'
+        ))
+        await db.flush()
+    except Exception:
+        try:
+            await db.execute(text(
+                'ALTER TABLE "control_plan_versions" ENABLE TRIGGER "trg_cp_version_no_update"'
+            ))
+        except Exception:
+            pass
+        raise
 
     capa = (await db.execute(
         select(CAPAEightD).where(CAPAEightD.document_no == DOCGATE_E2E_CAPA_DOC_NO)
@@ -551,7 +785,16 @@ async def _seed_doc_gate_capa(db, factory_ids):
                 CapaDocgAudit.analysis_id.in_(analysis_ids)))
             await db.execute(delete(CapaDocgAnalysis).where(
                 CapaDocgAnalysis.analysis_id.in_(analysis_ids)))
+        # Clear AuditLog for this CAPA — prevents stale DOC_IMPACT_ANALYZED /
+        # DOC_UPDATE_AUDITED / DOC_GATE_PASSED / D8_APPROVED from prior walks causing false PASS.
+        from app.models.audit import AuditLog as _AuditLog
+        await db.execute(delete(_AuditLog).where(_AuditLog.record_id == capa.report_id))
         capa.status = EightDState.D8_GATE_PENDING.value
+        # Reset created_at so it stays newer than the baseline version (NOW()-2d).
+        # Without this, the fixed baseline (NOW()-2d each reseed) eventually drifts past the
+        # stale CAPA created_at (set only on first insert), breaking _get_baseline_version's
+        # `version.created_at <= capa.created_at` lookup (capa_doc_gate_service.py).
+        capa.created_at = datetime.now(timezone.utc) - timedelta(days=1)
         capa.fmea_ref_id = fmea.fmea_id
         capa.d4_root_cause = "定位销磨损导致孔径超差"
         capa.d5_correction = "更换定位销并校准夹具"
@@ -1373,6 +1616,117 @@ async def _seed_lateral_diffusion(db, factory_ids):
                 await db.flush()
 
 
+async def _seed_d4_audit(db, factory_ids):
+    """US-E2E-01.3: dedicated pre-gate CAPA + approval rejection CAPA.
+
+    - 8D-E2E-D4-001 at D4_ROOT_CAUSE — 01.3 pre-gate drives D4 verify → D7 action → D8_GATE_PENDING.
+      Links to PFMEA-E2E-FMEA-LINK-001 (created by _seed_fmea_linkage, runs before this).
+      No pre-existing D4 verifications or D7 node-actions — 01.3 walk creates them fresh.
+    - 8D-E2E-APPROVAL-001 at D8_APPROVAL_PENDING — 01.3 post-gate rejection path (approve path
+      uses 8D-E2E-DOCGATE-001 from 01.7). Not consumed by any other sub-story.
+
+    Idempotent on document_no / fixed UUIDs.
+    """
+    from app.models.audit import AuditLog
+    from app.models.capa import CAPAEightD, CapaD7NodeAction, CapaRootCauseVerification
+    from app.models.fmea import FMEADocument
+    from app.state_machines.eightd_state import EightDState
+
+    admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one()
+    factory_id = factory_ids[E2E_FACTORY_DC100["code"]]
+    product_line = E2E_PRODUCT_LINE["code"]
+
+    # Ensure FMEA exists (created by _seed_fmea_linkage; read back for fmea_id)
+    fmea = (await db.execute(
+        select(FMEADocument).where(FMEADocument.document_no == FMEA_LINK_E2E_FMEA_DOC_NO)
+    )).scalar_one_or_none()
+    if not fmea:
+        raise RuntimeError(
+            f"{FMEA_LINK_E2E_FMEA_DOC_NO} 不存在——_seed_d4_audit 必须在 _seed_fmea_linkage 之后运行"
+        )
+
+    root_cause = "定位销磨损导致孔径超差（E2E 01.3 验收）"
+
+    # ── 8D-E2E-D4-001: D4_ROOT_CAUSE for pre-gate ──
+    capa = (await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == D4_AUDIT_E2E_CAPA_DOC_NO)
+    )).scalar_one_or_none()
+    if not capa:
+        capa = CAPAEightD(
+            report_id=D4_AUDIT_CAPA_ID,
+            document_no=D4_AUDIT_E2E_CAPA_DOC_NO,
+            title="E2E 01.3 验收 8D（D4→gate）",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status=EightDState.D4_ROOT_CAUSE.value,
+            severity="serious",
+            d1_team=[{"name": "E2E 验证", "role": "质量工程师"}],
+            d2_description="孔径超差投诉（E2E 01.3 验收）",
+            d3_interim="隔离受影响批次",
+            d4_root_cause=root_cause,
+            d5_correction="更换定位销并校准夹具",
+            d6_verification="首件检验确认孔径合格",
+            d7_prevention="将定位销磨损检测纳入首件检验",
+            fmea_ref_id=fmea.fmea_id,
+            created_by=admin.user_id,
+        )
+        db.add(capa)
+        await db.flush()
+    else:
+        capa.status = EightDState.D4_ROOT_CAUSE.value
+        capa.d4_root_cause = root_cause
+        capa.d5_correction = "更换定位销并校准夹具"
+        capa.d6_verification = "首件检验确认孔径合格"
+        capa.d7_prevention = "将定位销磨损检测纳入首件检验"
+        capa.fmea_ref_id = fmea.fmea_id
+        capa.product_line_code = product_line
+        capa.factory_id = factory_id
+        await db.flush()
+
+    # Idempotent cleanup: remove any stale D4 verifications / D7 actions so 01.3 starts clean
+    await db.execute(delete(CapaRootCauseVerification).where(
+        CapaRootCauseVerification.capa_id == capa.report_id))
+    await db.execute(delete(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa.report_id))
+    await db.flush()
+
+    # Clean up stale audit records for both CAPAs (prevents false PASS from prior-walk residuals)
+    for _capa_id in [capa.report_id, D4_AUDIT_APPROVAL_CAPA_ID]:
+        await db.execute(delete(AuditLog).where(AuditLog.record_id == _capa_id))
+    await db.flush()
+
+    # ── 8D-E2E-APPROVAL-001: D8_APPROVAL_PENDING for post-gate rejection ──
+    capa_rej = (await db.execute(
+        select(CAPAEightD).where(CAPAEightD.document_no == D4_AUDIT_E2E_APPROVAL_CAPA_DOC_NO)
+    )).scalar_one_or_none()
+    if not capa_rej:
+        capa_rej = CAPAEightD(
+            report_id=D4_AUDIT_APPROVAL_CAPA_ID,
+            document_no=D4_AUDIT_E2E_APPROVAL_CAPA_DOC_NO,
+            title="E2E 01.3 审批驳回 8D",
+            product_line_code=product_line,
+            factory_id=factory_id,
+            status=EightDState.D8_APPROVAL_PENDING.value,
+            severity="general",
+            d1_team=[{"name": "E2E 审批人", "role": "质量经理"}],
+            d2_description="驳回验收 CAPA（E2E 01.3）",
+            d3_interim="临时措施已完成",
+            d4_root_cause="测试根因（审批驳回验收）",
+            d5_correction="测试纠正措施",
+            d6_verification="测试验证",
+            d7_prevention="测试预防措施",
+            d8_closure="待审批",
+            created_by=admin.user_id,
+        )
+        db.add(capa_rej)
+        await db.flush()
+    else:
+        capa_rej.status = EightDState.D8_APPROVAL_PENDING.value
+        capa_rej.product_line_code = product_line
+        capa_rej.factory_id = factory_id
+        await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
@@ -1381,6 +1735,7 @@ async def main():
         await _seed_known_docs(db, factory_ids)
         await _seed_doc_gate_capa(db, factory_ids)
         await _seed_fmea_linkage(db, factory_ids)
+        await _seed_d4_audit(db, factory_ids)
         await db.commit()
         await _seed_d3_test_capas(db)
         await _seed_scar_trigger(db, factory_ids)

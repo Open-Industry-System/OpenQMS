@@ -1,6 +1,6 @@
 ---
 name: verify-capa-8d-lateral-diffusion
-description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8D lateral diffusion alert (US-E2E-01.9) — four-criteria matching, LLM suggestion, notify/skip decision, notification tracking. Symptoms include checking lateral modal after D8 close, decide API, or LATERAL_DIFFUSION_CHECKED audit.
+description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8D lateral diffusion alert (US-E2E-01.9). Symptoms include checking lateral modal after D8 close, decide API, or LATERAL_DIFFUSION_CHECKED audit.
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/US-E2E-01.9-lateral-diffusion.md
@@ -40,12 +40,14 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 ## 走查剧本
 
+> 所有 seed CAPA 均处于 `D8_APPROVAL_PENDING`。关闭 = manager 点 `[data-e2e="capa-approve"]`（`capa-advance` 在该状态下不渲染）。
+
 ### A. 001 关闭 → 四依据并集
-- manager 登录 → 进 `8D-E2E-LATERAL-001` → `[data-e2e="capa-advance"]` 推进 D8→D8_CLOSURE。
+- manager 登录 → 进 `8D-E2E-LATERAL-001` → 点 `[data-e2e="capa-approve"]` 关闭（`D8_APPROVAL_PENDING`→`D8_CLOSURE`）。
 - 无 LLM → 422 `outcome=blocked`（fail-closed，关闭链阻断）。
 - 有 LLM → 200，`lateral_diffusion` 投影存在，`status=done`。
 - **断言**：`similar_products` 中 `hit_criteria` 并集含全部四值：`same_product_type`、`shared_fmea_mode`、`shared_control_plan`、`same_supplier_material`。
-- **审计**：`GET /api/admin/logs/audit?action=LATERAL_DIFFUSION_CHECKED&record_id={id}` ≥ 1，`changed_fields.hit_criteria_union` 含四值。
+- **审计**：`GET /api/admin/logs/audit?table_name=capa_eightd&action=LATERAL_DIFFUSION_CHECKED&start={t0_iso}&page_size=200`，客户端按 `record_id == {capa_id}` 和 `operated_at >= t0` 过滤后 ≥ 1，`changed_fields.hit_criteria_union` 含四值。（API 不接收 `record_id` 参数。）
 
 ### B. 001 弹窗 + notify
 - 关闭后前端自动弹出 `[data-e2e="lateral-diffusion-modal"]`（若 `decision=null`）。
@@ -55,16 +57,16 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 - **审计**：`LATERAL_NOTIFICATION_SENT` ≥ 1。
 
 ### C. 002 skip + 理由
-- 进 `8D-E2E-LATERAL-002` → 关闭（有 LLM）→ 弹窗 → 填 `[data-e2e="lateral-skip-reason"]`「无需扩散」→ 点 `[data-e2e="lateral-decide-skip"]`。
+- 进 `8D-E2E-LATERAL-002` → 点 `[data-e2e="capa-approve"]` 关闭（有 LLM）→ 弹窗 → 填 `[data-e2e="lateral-skip-reason"]`「无需扩散」→ 点 `[data-e2e="lateral-decide-skip"]`。
 - **断言**：`decision=skipped`；`LATERAL_NOTIFICATION_SKIPPED` 审计 `changed_fields.skip_reason` = 「无需扩散」。
 - 无理由时 skip 按钮 disabled。
 
 ### D. EMPTY 空命中
-- 进 `8D-E2E-LATERAL-EMPTY` → 关闭（有 LLM）→ 无弹窗（无命中）。
+- 进 `8D-E2E-LATERAL-EMPTY` → 点 `[data-e2e="capa-approve"]` 关闭（有 LLM）→ 无弹窗（无命中）。
 - **断言**：`lateral_diffusion.status=empty`，`llm_status=skipped`，`similar_products=[]`。
 
 ### E. BLOCK 无凭证
-- 无 LLM 环境：进 `8D-E2E-LATERAL-BLOCK` → 推进关闭 → 422 `outcome=blocked`。
+- 无 LLM 环境：进 `8D-E2E-LATERAL-BLOCK` → 点 `[data-e2e="capa-approve"]` 关闭 → 422 `outcome=blocked`。
 - **断言**：CAPA `status` 仍为 `D8_APPROVAL_PENDING`（回滚）；无 lateral check 行。
 
 ### F. rerun
@@ -73,7 +75,11 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 ## 缺陷分类
 
-PASS / PASS-NOTE / FAIL / MISSING。FAIL/MISSING 截图存 `docs/e2e/reports/US-E2E-01.9-<YYYY-MM-DD>/screenshots/`。
+PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。FAIL/MISSING 截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.9/screenshots/`。
+
+## 子报告输出
+
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.9/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
 
 ## 维护
 

@@ -1,6 +1,6 @@
 ---
 name: verify-capa-8d-ppt-output
-description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8D PPT export (US-E2E-01.10) — one-click generation, sub-agent review loop, admin review-skill management. Symptoms include checking PPT download, review report modal, or needs_review flag.
+description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8D PPT export (US-E2E-01.10). Symptoms include checking PPT download, review report modal, or needs_review flag.
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/US-E2E-01.10-ppt-output.md
@@ -12,7 +12,7 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 ## Overview
 
-走查 US-E2E-01.10 8D 报告 PPT 输出：D8_CLOSURE/ARCHIVED 后一键生成 PPT（D1-D8 + 封面 + 附录）→ sub-agent 3 轮审查（LLM 校正 → needs_review；纯 DB-faithful → passed）→ 审查报告 Modal → admin ReviewSkillsPage 配置审查标准。
+走查 US-E2E-01.10 8D 报告 PPT 输出：D8_CLOSURE/ARCHIVED 后一键生成 PPT（D1-D8 + 封面 + 附录）→ sub-agent 审查（最多 3 轮）→ 审查报告 Modal → admin ReviewSkillsPage。
 
 ## When to Use
 
@@ -22,40 +22,59 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 1. 故事版本一致（比对 `US-E2E-01.10-ppt-output.md` 顶部：定稿 v4（2026-07-09））。
 2. e2e 栈在跑。
-3. LLM 凭证齐（sub-agent 审查需 LLM；无凭证 → 跳过审查 + 提示「大模型未配置」，PPT 仍可生成）。
+3. LLM 凭证（审查需 LLM；AI_REQUIRED=false，PPT 生成本身不依赖 LLM）。无 LLM → `review_status=skipped`，PPT 生成断言照跑；sub-agent 审查回读步骤记 **`BLOCKED`**（前置缺 LLM），备注「审查因无 LLM 跳过」——**不**用 PASS-NOTE。
 4. seed-state 取 engineer/admin 账号。
-5. 有一个 D8_CLOSURE 或 ARCHIVED 的 CAPA（如 `8D-E2E-KNOW-001` 关闭后）。
+5. 有一个 `D8_CLOSURE` 或 `ARCHIVED` 的 CAPA（如关闭后的 `8D-E2E-KNOW-001`）。
+
+## selector 表
+
+| selector | 用途 |
+|---|---|
+| `[data-e2e="capa-ppt"]` | 生成 PPT 按钮（D8_CLOSURE/ARCHIVED 且 canCreate capa） |
+
+## API / 审计契约（禁止捏造）
+
+| 契约 | 实际 |
+|---|---|
+| 生成 | `POST /api/capa/{id}/ppt-export` → pptx 文件流 |
+| 响应头 | `X-PPT-Export-Id`、`X-PPT-Review-Status`、`X-PPT-Review-Rounds` |
+| 回读审查 | `GET /api/capa/{id}/ppt-exports/{export_id}`（禁止使用不存在的 ppt-review 路径） |
+| 审计 | `table_name=capa_eightd`，`action=PPT_GENERATED`，`record_id={capa_id}`，`changed_fields` 含 export_id/version/review_status/review_rounds |
+| 审查 skill 管理 | `GET/PUT /api/admin/review-skills`（本切片固定 name=`capa_ppt_review`） |
 
 ## 走查剧本
 
 ### A. 生成 PPT
-- engineer 登录 → 进 D8_CLOSURE CAPA → 点 `[data-e2e="capa-generate-ppt"]`（或对应按钮）。
-- **断言**：`POST /api/capa/{id}/ppt` 200，返回 PPT 文件流（`Content-Type: application/vnd.openxmlformats-officedocument.presentationml.presentation`）或生成任务 ID。
-- 无 LLM → PPT 仍生成，审查跳过，提示「大模型未配置」。
+- engineer 登录 → 进 D8_CLOSURE CAPA → 点 `[data-e2e="capa-ppt"]`。
+- **断言**：`POST /api/capa/{id}/ppt-export` 200，`Content-Type` 为 pptx；响应头含 `X-PPT-Export-Id` 与 `X-PPT-Review-Status` ∈ {`passed`, `needs_review`, `skipped`}。**禁止把 `failed` 当成成功状态**——`failed` 是故事 §92 的导出失败条件，出现即 `FAIL`，不是合法的 review_status 持久值。
+- 无 LLM → PPT 仍生成，`review_status=skipped`（审查跳过，不是 `failed`）。
 
-### B. Sub-agent 审查
-- 有 LLM → 生成后自动触发审查（3 轮上限）。
-- **断言**：`GET /api/capa/{id}/ppt-review` 返回审查报告，`status` ∈ {passed, needs_review, failed}。
-- 首轮即通过（无校正，内容 DB-faithful）→ `passed`。
-- LLM 校正采用的内容 → `needs_review` + 标注「需人工复核确认未编造数据」。
+### B. Sub-agent 审查回读
+- 取 `export_id` from `X-PPT-Export-Id`。
+- **断言**：`GET /api/capa/{id}/ppt-exports/{export_id}` 返回 `review_status`、`review_rounds`、`review_report`。
+- 首轮即通过（无校正，DB-faithful）→ `passed`；采用 LLM 校正 → `needs_review`。
 
 ### C. 审查报告 Modal
 - 前端弹出审查报告 Modal（或页面展示）。
-- **断言**：Modal 含各页/section 审查结果；`needs_review` 项高亮提示。
+- **断言**：含各页/section 审查结果；`needs_review` 项高亮。
 
 ### D. Admin ReviewSkillsPage
-- admin 登录 → 进 Review Skills 管理页。
-- **断言**：可创建/编辑/删除审查 skill（按租户隔离）；`GET /api/admin/review-skills` 返回列表。
+- admin 登录 → Review Skills 管理页。
+- **断言**：可 upsert `capa_ppt_review`；`GET /api/admin/review-skills` 返回列表。
 
 ### E. 内容忠实性
-- **断言**：PPT 内容（D1-D8 各字段）与 `GET /api/capa/{id}` 回读一致；无编造数据（结构校验 + 人工抽检）。
+- **断言**：PPT 内容与 `GET /api/capa/{id}` 回读一致；无编造数据（结构校验 + 人工抽检）。
 
 ### F. 审计
-- `GET /api/admin/logs/audit?table_name=capa_ppt_export&record_id={export_id}` 含 `PPT_EXPORT_GENERATED`（及 `PPT_REVIEW_DONE` 若审查运行）。
+- `GET /api/admin/logs/audit?table_name=capa_eightd&action=PPT_GENERATED&start={t0_iso}&page_size=200`，客户端按 `record_id == {capa_id}` 和 `operated_at >= t0` 过滤后 ≥ 1。（API 不接收 `record_id` 参数。）
 
 ## 缺陷分类
 
-PASS / PASS-NOTE / FAIL / MISSING。
+PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。
+
+## 子报告输出
+
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.10/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
 
 ## 维护
 

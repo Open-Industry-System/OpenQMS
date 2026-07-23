@@ -356,6 +356,39 @@ async def lifespan(app: FastAPI):
 
     risk_input_task = asyncio.create_task(_risk_input_outbox_loop())
 
+    # 01.8: embedding_sync_outbox processor (every 5s). Standalone module still
+    # supports `python -m app.services.embedding_sync_worker`; lifespan also
+    # runs it so single-process e2e / docker stacks complete knowledge sink
+    # embeddings without a second service.
+    async def _embedding_outbox_loop():
+        from app.services.embedding_sync_worker import (
+            POLL_INTERVAL,
+            process_batch_once,
+            recover_stale_events,
+        )
+
+        while True:
+            await asyncio.sleep(POLL_INTERVAL)
+            try:
+                provider = getattr(app.state, "embedding_provider", None)
+                if provider is None:
+                    # Provider may appear after admin AI config rebuild.
+                    continue
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        await recover_stale_events(db)
+                        await process_batch_once(db, provider)
+                    except Exception as e:
+                        logger.error(
+                            "[embedding_outbox] error for tenant %s: %s",
+                            tenant.slug,
+                            e,
+                        )
+            except Exception as e:
+                logger.error("[embedding_outbox] error: %s", e)
+
+    embedding_outbox_task = asyncio.create_task(_embedding_outbox_loop())
+
     # Start supply chain risk map snapshot scheduler (hourly)
     from app.services.supply_chain_risk_map.scheduler import snapshot_loop
 
@@ -429,6 +462,13 @@ async def lifespan(app: FastAPI):
     risk_input_task.cancel()
     try:
         await risk_input_task
+    except asyncio.CancelledError:
+        pass
+
+    # Cancel embedding outbox task
+    embedding_outbox_task.cancel()
+    try:
+        await embedding_outbox_task
     except asyncio.CancelledError:
         pass
 

@@ -23,9 +23,13 @@ class LLMOutcome:
 class LLMFusionLayer:
     """LLM 融合层：为候选生成推荐理由 + 候选不足时回退生成。"""
 
-    def __init__(self, pc, timeout: float = 2.0):
+    def __init__(self, pc, timeout: float | None = None):
+        # Default to configured LLM_TIMEOUT (not a hardcoded 2s). Stage-11 fusion
+        # with local models routinely exceeds 2s; US-E2E-01.2 saw attempted=2/failed=2.
+        from app.config import settings
+
         self.pc = pc
-        self.timeout = timeout
+        self.timeout = float(timeout if timeout is not None else settings.LLM_TIMEOUT)
 
     async def enrich(
         self,

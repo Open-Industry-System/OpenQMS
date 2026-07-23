@@ -177,10 +177,18 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     elif pc.provider == "local":
         import httpx
 
+        # Ollama supports format=json to constrain output to JSON (helps small
+        # models that otherwise emit prose → extract_json "Expecting value").
+        # US-E2E-01.7/01.9: without this, qwen2.5:3b often returns non-JSON.
         async with httpx.AsyncClient(base_url=pc.base_url, timeout=30) as client:
             resp = await client.post(
                 "/api/generate",
-                json={"model": pc.model, "prompt": prompt, "stream": False},
+                json={
+                    "model": pc.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                },
             )
         resp.raise_for_status()
         text = resp.json().get("response", "")

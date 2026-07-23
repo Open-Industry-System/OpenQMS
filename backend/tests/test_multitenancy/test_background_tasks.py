@@ -46,7 +46,10 @@ async def test_run_for_each_tenant_iterates_all_active_tenants():
     mock_session.execute.return_value = mock_result
 
     mock_sessionmaker = MagicMock(return_value=mock_session)
-    with patch("app.database.async_session", mock_sessionmaker):
+    # Multi-tenant path only — single mode never reads the tenants table.
+    with patch("app.database.settings") as mock_settings, \
+         patch("app.database.async_session", mock_sessionmaker):
+        mock_settings.TENANT_MODE = "dev"
         seen = []
         async for tenant, db in run_for_each_tenant():
             seen.append(tenant.slug)
@@ -86,7 +89,9 @@ async def test_run_for_each_tenant_resets_context_var_on_failure():
     mock_session.execute.return_value = mock_result
 
     mock_sessionmaker = MagicMock(return_value=mock_session)
-    with patch("app.database.async_session", mock_sessionmaker):
+    with patch("app.database.settings") as mock_settings, \
+         patch("app.database.async_session", mock_sessionmaker):
+        mock_settings.TENANT_MODE = "dev"
         seen = []
         gen = run_for_each_tenant()
         try:
@@ -102,6 +107,64 @@ async def test_run_for_each_tenant_resets_context_var_on_failure():
 
     # After properly closing the generator, ContextVar must be None (no leak)
     assert current_tenant_schema.get() is None
+
+
+@pytest.mark.asyncio
+async def test_run_for_each_tenant_single_mode_yields_public_when_empty():
+    """TENANT_MODE=single must yield one public session even when tenants table is empty.
+
+    Regression for US-E2E-01.6: risk_input outbox loop used run_for_each_tenant(),
+    which previously iterated zero rows in single-tenant e2e → pending forever.
+    """
+    from app.database import run_for_each_tenant
+
+    mock_session = _make_mock_session()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = []  # empty tenants
+    mock_session.execute.return_value = mock_result
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+
+    with patch("app.database.settings") as mock_settings, \
+         patch("app.database.async_session", mock_sessionmaker):
+        mock_settings.TENANT_MODE = "single"
+        seen = []
+        async for tenant, db in run_for_each_tenant():
+            seen.append((tenant.slug, tenant.schema_name, current_tenant_schema.get()))
+
+    assert current_tenant_schema.get() is None
+    assert seen == [("public", "public", None)]
+    # Single mode must not SET search_path (public is the default).
+    executed_sql = [
+        getattr(c.args[0], "text", "") for c in mock_session.execute.call_args_list
+    ]
+    assert not any("search_path" in sql and "tenant_" in sql for sql in executed_sql)
+
+
+@pytest.mark.asyncio
+async def test_run_for_each_tenant_single_mode_ignores_tenant_rows():
+    """In single mode, business data lives in public — do not iterate tenant schemas
+    even if the platform tenants table has active rows.
+    """
+    from app.database import run_for_each_tenant
+    from app.models.tenant import Tenant
+
+    mock_tenants = [
+        Tenant(id="t1", slug="acme", schema_name="tenant_acme", subdomain="acme", status="active"),
+    ]
+    mock_session = _make_mock_session()
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = mock_tenants
+    mock_session.execute.return_value = mock_result
+    mock_sessionmaker = MagicMock(return_value=mock_session)
+
+    with patch("app.database.settings") as mock_settings, \
+         patch("app.database.async_session", mock_sessionmaker):
+        mock_settings.TENANT_MODE = "single"
+        seen = []
+        async for tenant, db in run_for_each_tenant():
+            seen.append(tenant.slug)
+
+    assert seen == ["public"]
 
 
 @pytest.mark.asyncio

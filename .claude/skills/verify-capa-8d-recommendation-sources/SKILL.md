@@ -1,6 +1,6 @@
 ---
 name: verify-capa-8d-recommendation-sources
-description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8D AI recommendation 12-source orchestration (US-E2E-01.2) — DAG stages, provenance, execution verification. Symptoms include checking D4/D5 recommendation pipeline, 12-stage DAG, source labels, or recommendation adoption.
+description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8D AI recommendation 12-source orchestration (US-E2E-01.2). Symptoms include checking recommendation DAG stages, provenance tags, or blocked banner without LLM.
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/US-E2E-01.2-recommendation-12-sources.md
@@ -23,7 +23,7 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 1. 故事版本一致（比对 `US-E2E-01.2-recommendation-12-sources.md` 顶部）。
 2. e2e 栈在跑（`:5174`）。
-3. LLM 凭证齐（`.env.e2e` 四项）。
+3. LLM 凭证齐（**有效配置优先来自 DB `system_settings`，回退 `.env.e2e`**——不只读 env；用 `GET /api/admin/ai-config` 或 `POST /api/admin/ai-config/test` 校验；按 provider 判断必需项，AI_REQUIRED=true）。**无 LLM → 01.2 整体 `BLOCKED`**（12 阶段 DAG 的 LLM 融合排序 stage 11 不可降级为 skip；recommendation 链断即无法验收，不记 PASS/PASS-NOTE）。provider 必需项：`anthropic`/`claude` 需 `LLM_API_KEY`；`openai`/`deepseek`/`ark` 需 `LLM_API_KEY`；`local`/`ollama` 需 `LLM_BASE_URL`+`LLM_MODEL`。
 4. `GET /api/e2e/seed-state` 取账号。
 
 ## selector 表
@@ -63,12 +63,16 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 - 推进到 D5_CORRECTION → D5RecPanel 触发 → 同 12 阶段断言 → `GET /api/capa/{id}/d5-fmea-recommendations`。
 
 ### C. 采纳留痕
-- D4 点 `[data-e2e="d4-adopt"]` 采纳一条 → `GET /api/admin/logs/audit?action=ADOPT_RECOMMENDATION&record_id={id}` 含 `source`/`stage_index`/`operated_by`。
+- D4 点 `[data-e2e="d4-adopt"]` 采纳一条 → `GET /api/admin/logs/audit?action=ADOPT_RECOMMENDATION&start={t0_iso}&page_size=200` 客户端按 `record_id == {capa_id}` 和 `operated_at >= t0` 过滤，含 `source`/`stage_index`/`operated_by`。（API 不接收 `record_id` 参数。）
 - D5 同理。
 
 ## 缺陷分类
 
-PASS / PASS-NOTE / FAIL / MISSING。截图存 `docs/e2e/reports/US-E2E-01.2-<YYYY-MM-DD>/screenshots/`。
+PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.2/screenshots/`。
+
+## 子报告输出
+
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.2/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
 
 ## 维护
 

@@ -61,6 +61,14 @@ def test_extract_json_strips_code_fence():
     assert extract_json('{"b": 2}') == {"b": 2}
 
 
+def test_extract_json_tolerates_prose_wrapper():
+    """Small models often wrap JSON in prose; US-E2E-01.9 failed on bare prose."""
+    from app.services.agent.llm_json import extract_json
+
+    assert extract_json('Here is the result:\n{"ok": true}\nThanks') == {"ok": True}
+    assert extract_json("suggestions: [1, 2]") == [1, 2]
+
+
 @pytest.mark.asyncio
 async def test_complete_json_openai_success(monkeypatch):
     pc = ProviderClient(provider="openai", client=object(), model="m")
@@ -323,5 +331,10 @@ async def test_complete_json_local_success(monkeypatch):
     assert out == {"z": 3}
     mock_client.post.assert_awaited_once_with(
         "/api/generate",
-        json={"model": "llama3", "prompt": "prompt", "stream": False},
+        json={
+            "model": "llama3",
+            "prompt": "prompt",
+            "stream": False,
+            "format": "json",
+        },
     )

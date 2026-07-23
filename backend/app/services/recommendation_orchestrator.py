@@ -80,9 +80,10 @@ _D5_DERIVED = {2: "FMEAControlExpander"}   # index -> 派生处理器
 
 
 class RecommendationOrchestrator:
-    def __init__(self, db, pc, embedding_provider):
+    def __init__(self, db, pc, embedding_provider, llm_timeout: float | None = None):
         self.db = db; self.pc = pc; self.embedding = embedding_provider
-        self.fusion = FusionEngine(); self.llm_layer = LLMFusionLayer(pc)
+        self.fusion = FusionEngine()
+        self.llm_layer = LLMFusionLayer(pc, timeout=llm_timeout)
         self.d5_control_expander = FMEAControlExpander()   # D5 stage 2 派生处理器（决策 15）
         self._sources = self._build_sources()   # source_kind -> instance（D5 stage 2 不在此列，派生）
         # R10-修复：不在构造时 fail-fast 校验协议——避免单源配置错误导致所有 D4/D5 请求硬失败（含 D4-only 源本应 skipped 的 D5 请求）。

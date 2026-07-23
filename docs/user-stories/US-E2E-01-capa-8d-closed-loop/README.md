@@ -46,7 +46,7 @@ D8 关闭后知识沉淀 + 横向扩散预警 + 报告输出——
 | 01.4 | 8D ↔ FMEA 双向追溯 | `US-E2E-01.4-fmea-linkage.md` | 定稿 v1 | false |
 | 01.5 | 8D → SCAR 触发与回写 | `US-E2E-01.5-scar-trigger.md` | 定稿 v1 | false |
 | 01.6 | 8D → 供应商风险评级输入 | `US-E2E-01.6-supplier-risk-input.md` | 定稿 v1 | false |
-| 01.7 | D8 关闭前文档更新审核门禁 | `US-E2E-01.7-doc-update-gate.md` | 定稿 v1 | true |
+| 01.7 | D8 关闭前文档更新审核门禁（CP+FMEA；设计 C1） | `US-E2E-01.7-doc-update-gate.md` | 定稿 v2 | true |
 | 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | 定稿 v1 | true |
 | 01.9 | 横向扩散预警与通知 | `US-E2E-01.9-lateral-diffusion.md` | 定稿 v1 | true |
 | 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | 定稿 v2 | false |

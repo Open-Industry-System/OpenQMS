@@ -67,6 +67,25 @@ async def test_enrich_partial_fusion_ok_fallback_fail(monkeypatch):
 
 
 class TestLLMFusionLayer:
+    def test_default_timeout_uses_settings_not_hardcoded_two(self, monkeypatch):
+        """US-E2E-01.2 regression: stage-11 must not hardcode timeout=2.0.
+
+        Admin/e2e llm_timeout (often 15–30s) must flow through; a 2s default
+        aborts local models mid-fusion (attempted=2 succeeded=0 failed=2).
+        """
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "LLM_TIMEOUT", 30)
+        layer = LLMFusionLayer(pc=_PC())
+        assert layer.timeout == 30
+
+    def test_explicit_timeout_overrides_settings(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "LLM_TIMEOUT", 30)
+        layer = LLMFusionLayer(pc=_PC(), timeout=12)
+        assert layer.timeout == 12
+
     @pytest.mark.asyncio
     async def test_timeout_error_fallback(self, monkeypatch):
         """TimeoutError should be caught and fall back to original candidates."""
