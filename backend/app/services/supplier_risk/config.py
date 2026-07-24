@@ -21,7 +21,7 @@ async def get_effective_configs(
 ) -> list[SupplierRiskConfig]:
     """Get effective configs for a supplier+product_line, resolving priority layers."""
     results = []
-    for rule_id in [f"R{i:02d}" for i in range(1, 11)]:
+    for rule_id in [f"R{i:02d}" for i in range(1, 12)]:
         config = await _resolve_config(db, rule_id, product_line_code, supplier_id)
         if config:
             results.append(config)
@@ -95,7 +95,7 @@ async def get_effective_configs_batch(
         return candidates[0] if candidates else None
 
     output: dict[uuid.UUID, list[SupplierRiskConfig]] = {}
-    rule_ids = [f"R{i:02d}" for i in range(1, 11)]
+    rule_ids = [f"R{i:02d}" for i in range(1, 12)]
     for sid in supplier_ids:
         configs: list[SupplierRiskConfig] = []
         for rid in rule_ids:

@@ -6,7 +6,7 @@ import {
   type DragStartEvent, type DragOverEvent, type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  Button, Space, Tag, Typography, Input, Select, Table, Tabs,
+  Button, Space, Tag, Typography, Input, InputNumber, Select, Table, Tabs,
   Row, Col, App, Spin, Popconfirm, Empty, Tooltip, Alert,
   Divider, Modal, Radio, Form, Dropdown,
 } from "antd";
@@ -269,6 +269,7 @@ export default function FMEAEditorPage() {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [selectedFunctionId, setSelectedFunctionId] = useState<string | null>(null);
+  const [activeRelatedNodeId, setActiveRelatedNodeId] = useState<string | null>(null);
   const [addNodeOpen, setAddNodeOpen] = useState(false);
   const [addNodeParent, setAddNodeParent] = useState<GraphNode | null>(null);
   const [addNodeAction, setAddNodeAction] = useState<StructureChildAction | null>(null);
@@ -467,6 +468,7 @@ export default function FMEAEditorPage() {
         snap.edges as unknown as Array<Record<string, unknown>>,
       );
       setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
       setSelectedStructureNode(null);
       setSelectedGraphNode(null);
       setDrawerVisible(false);
@@ -494,6 +496,7 @@ export default function FMEAEditorPage() {
       };
       graphDataRef.current = null;
       setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
       setSelectedStructureNode(null);
       setSelectedGraphNode(null);
       setDrawerVisible(false);
@@ -769,15 +772,18 @@ export default function FMEAEditorPage() {
     }
   }, [outerTab, loadGraphData]);
 
-  // 响应 URL ?tab=graph&highlightNode=... 参数
+  // 响应 URL ?tab=graph|related-capa&highlightNode=... 参数
   useEffect(() => {
     const tabParam = searchParams.get("tab");
     const highlightParam = searchParams.get("highlightNode");
-    if (tabParam === "graph") {
-      setOuterTab("graph");
-      if (highlightParam) {
+    if (tabParam === "graph" || tabParam === "related-capa") {
+      setOuterTab(tabParam);
+      if (tabParam === "graph" && highlightParam) {
         setPendingHighlightNode(highlightParam);
       }
+    }
+    if (highlightParam) {
+      setActiveRelatedNodeId(highlightParam);
     }
   }, [searchParams]);
 
@@ -846,6 +852,7 @@ export default function FMEAEditorPage() {
       setEdges((prev) => [...prev, edge]);
       if (addNodeAction.kind === "function") {
         setSelectedFunctionId(node.id);
+        setActiveRelatedNodeId(node.id);
       }
       setAddNodeOpen(false);
     }).catch(() => { /* validation message shown by Form */ });
@@ -875,7 +882,10 @@ export default function FMEAEditorPage() {
     const { nodes: nextNodes, edges: nextEdges } = deleteSubtree(nodes, edges, node.id);
     setNodes(nextNodes);
     setEdges(nextEdges);
-    if (selectedFunctionId === node.id) setSelectedFunctionId(null);
+    if (selectedFunctionId === node.id) {
+      setSelectedFunctionId(null);
+      setActiveRelatedNodeId(null);
+    }
   }, [nodes, edges, selectedFunctionId]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -1054,18 +1064,21 @@ export default function FMEAEditorPage() {
         const s = getRowSeverity(row, nodeMap);
         return (
           <div>
-            <Input
+            <InputNumber
               min={1}
               max={10}
+              step={1}
+              precision={0}
+              controls={false}
               size="small"
               value={s || undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "severity", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => {
-                const v = Number(e.target.value) || 0;
-                row.failureEffectNodeIds.forEach((id) => updateNode(id, "severity", v));
+              onChange={(v) => {
+                const val = v ?? 0;
+                row.failureEffectNodeIds.forEach((id) => updateNode(id, "severity", val));
               }}
             />
             <ActiveUserIndicator activeUsers={activeUsers} rowKey={row.key} field="severity" />
@@ -1172,16 +1185,19 @@ export default function FMEAEditorPage() {
         const node = nodeMap.get(row.failureCauseNodeId);
         return (
           <div>
-            <Input
+            <InputNumber
               min={1}
               max={10}
+              step={1}
+              precision={0}
+              controls={false}
               size="small"
               value={node?.occurrence ?? undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "occurrence", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => updateNode(row.failureCauseNodeId!, "occurrence", Number(e.target.value) || 0)}
+              onChange={(v) => updateNode(row.failureCauseNodeId!, "occurrence", v ?? 0)}
             />
             <ActiveUserIndicator
               activeUsers={activeUsers}
@@ -1257,16 +1273,19 @@ export default function FMEAEditorPage() {
         const node = nodeMap.get(row.detectionControlIds[0]);
         return (
           <div>
-            <Input
+            <InputNumber
               min={1}
               max={10}
+              step={1}
+              precision={0}
+              controls={false}
               size="small"
               value={node?.detection ?? undefined}
               disabled={!canEdit('fmea')}
               style={{ width: 55, textAlign: "center" }}
               onFocus={() => startEditing({ row_key: row.key, field: "detection", node_id: row.failureModeNodeId })}
               onBlur={stopEditing}
-              onChange={(e) => updateNode(row.detectionControlIds[0], "detection", Number(e.target.value) || 0)}
+              onChange={(v) => updateNode(row.detectionControlIds[0], "detection", v ?? 0)}
             />
             <ActiveUserIndicator
               activeUsers={activeUsers}
@@ -1450,14 +1469,17 @@ export default function FMEAEditorPage() {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
-          <Input
+          <InputNumber
             min={1}
             max={10}
+            step={1}
+            precision={0}
+            controls={false}
             size="small"
             value={node?.revised_severity ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
-            onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_severity", Number(e.target.value) || 0)}
+            onChange={(v) => updateNode(row.recommendedActionIds[0], "revised_severity", v ?? 0)}
           />
         );
       },
@@ -1471,14 +1493,17 @@ export default function FMEAEditorPage() {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
-          <Input
+          <InputNumber
             min={1}
             max={10}
+            step={1}
+            precision={0}
+            controls={false}
             size="small"
             value={node?.revised_occurrence ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
-            onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_occurrence", Number(e.target.value) || 0)}
+            onChange={(v) => updateNode(row.recommendedActionIds[0], "revised_occurrence", v ?? 0)}
           />
         );
       },
@@ -1492,14 +1517,17 @@ export default function FMEAEditorPage() {
         if (row.recommendedActionIds.length === 0) return "-";
         const node = nodeMap.get(row.recommendedActionIds[0]);
         return (
-          <Input
+          <InputNumber
             min={1}
             max={10}
+            step={1}
+            precision={0}
+            controls={false}
             size="small"
             value={node?.revised_detection ?? undefined}
             disabled={!canEdit('fmea')}
             style={{ width: 48, textAlign: "center" }}
-            onChange={(e) => updateNode(row.recommendedActionIds[0], "revised_detection", Number(e.target.value) || 0)}
+            onChange={(v) => updateNode(row.recommendedActionIds[0], "revised_detection", v ?? 0)}
           />
         );
       },
@@ -1661,7 +1689,10 @@ export default function FMEAEditorPage() {
                       isSelected={isSelected}
                       dragState={dragState}
                       canDragSortStructure={canDragSortStructure}
-                      onSelect={setSelectedFunctionId}
+                      onSelect={(id) => {
+                        setSelectedFunctionId(id);
+                        setActiveRelatedNodeId(id);
+                      }}
                       onRename={(id, field, value) => updateNode(id, field, value)}
                       onAddChild={openAddNode}
                       onDelete={deleteSubtreeNode}
@@ -1862,6 +1893,7 @@ export default function FMEAEditorPage() {
                     onNodeClick={(node) => {
                       setSelectedGraphNode(node);
                       setDrawerVisible(true);
+                      setActiveRelatedNodeId(node.id);
                     }}
                     onNodeContextMenu={(node, evt) => {
                       setContextMenuNode(node);
@@ -1899,7 +1931,11 @@ export default function FMEAEditorPage() {
             <div style={{ width: 220, display: "flex", flexDirection: "column", gap: 16 }}>
               <GraphLegend fmeaType={fmeaType} />
               {highlightNodes.length > 0 && (
-                <Button onClick={() => { setHighlightNodes([]); setDimOthers(false); }}>
+                <Button
+                  data-e2e="fmea-highlight-active"
+                  data-highlight-node={highlightNodes[0]}
+                  onClick={() => { setHighlightNodes([]); setDimOthers(false); setActiveRelatedNodeId(null); }}
+                >
                   {t("graph.clearHighlight")}
                 </Button>
               )}
@@ -1970,16 +2006,7 @@ export default function FMEAEditorPage() {
           </Modal>
         </>},
         { key: "related-capa", label: t("tabs.relatedCapa"), children: <>
-          {selectedFunctionId ? (
-            <RelatedCAPAList
-              fmeaId={fmea!.fmea_id}
-              fmeaNodeId={selectedFunctionId}
-            />
-          ) : (
-            <Typography.Text type="secondary">
-              {t("messages.selectFailureModeFirst")}
-            </Typography.Text>
-          )}
+          <RelatedCAPAList fmeaId={fmea!.fmea_id} fmeaNodeId={activeRelatedNodeId ?? undefined} />
         </>},
         { key: "history", label: <span data-e2e="fmea-version-snapshot"><HistoryOutlined /> {t("tabs.versionHistory")}</span>, children: <>
           <VersionHistoryTab

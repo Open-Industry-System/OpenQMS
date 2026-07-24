@@ -48,6 +48,7 @@ class RecommendationCache(Base):
     doc_type: Mapped[str] = mapped_column(String(20), nullable=False, default="fmea")
     fmea_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     suggestions: Mapped[list[dict]] = mapped_column(JSONB, nullable=False)
+    stage_runs: Mapped[list] = mapped_column(JSONB, nullable=True)  # 12 行 StageRun 序列化（CAPA 回溯）
     source: Mapped[str] = mapped_column(String(100), nullable=False)
     llm_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

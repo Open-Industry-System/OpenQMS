@@ -23,9 +23,13 @@ class LLMOutcome:
 class LLMFusionLayer:
     """LLM 融合层：为候选生成推荐理由 + 候选不足时回退生成。"""
 
-    def __init__(self, pc, timeout: float = 2.0):
+    def __init__(self, pc, timeout: float | None = None):
+        # Default to configured LLM_TIMEOUT (not a hardcoded 2s). Stage-11 fusion
+        # with local models routinely exceeds 2s; US-E2E-01.2 saw attempted=2/failed=2.
+        from app.config import settings
+
         self.pc = pc
-        self.timeout = timeout
+        self.timeout = float(timeout if timeout is not None else settings.LLM_TIMEOUT)
 
     async def enrich(
         self,
@@ -40,34 +44,44 @@ class LLMFusionLayer:
         failed = 0
         enriched: list[RecommendationCandidate] = []
 
-        # 阶段 1：为候选生成推荐理由（一次批量 fusion 调用）
-        if candidates:
-            attempted += 1
-            try:
-                prompt = self._build_fusion_prompt(candidates, context)
-                result = await asyncio.wait_for(
-                    provider_adapter.complete_json(self.pc, prompt, {}),
-                    timeout=self.timeout,
-                )
-                enriched = self._merge_explanations(candidates, result)
-                succeeded += 1
-            except Exception as e:
-                logger.warning(f"LLM fusion failed: {e}")
-                enriched = list(candidates)
-                failed += 1
-        else:
-            enriched = []
+        try:
+            # 阶段 1：为候选生成推荐理由（一次批量 fusion 调用）
+            if candidates:
+                attempted += 1
+                try:
+                    prompt = self._build_fusion_prompt(candidates, context)
+                    result = await asyncio.wait_for(
+                        provider_adapter.complete_json(self.pc, prompt, {}),
+                        timeout=self.timeout,
+                    )
+                    enriched = self._merge_explanations(candidates, result)
+                    succeeded += 1
+                except Exception as e:
+                    logger.warning(f"LLM fusion failed: {e}")
+                    enriched = list(candidates)
+                    failed += 1
+            else:
+                enriched = []
 
-        # 阶段 2：候选不足时独立生成（一次 fallback 调用）
-        if len(enriched) < 3 and context is not None:
-            attempted += 1
-            try:
-                generated = await self._generate_fallback(context)
-                enriched.extend(generated)
-                succeeded += 1
-            except Exception as e:
-                logger.warning(f"LLM fallback generation failed: {e}")
-                failed += 1
+            # 阶段 2：候选不足时独立生成（一次 fallback 调用）
+            if len(enriched) < 3 and context is not None:
+                attempted += 1
+                try:
+                    generated = await self._generate_fallback(context)
+                    enriched.extend(generated)
+                    succeeded += 1
+                except Exception as e:
+                    logger.warning(f"LLM fallback generation failed: {e}")
+                    failed += 1
+        except Exception as e:
+            # R4-修复：enrich 硬化为 catch-all，任何未预期异常都不抛，返回带计数的 LLMOutcome
+            logger.warning(f"LLM enrich unexpected error (catch-all): {e}")
+            return LLMOutcome(
+                candidates=list(candidates),
+                attempted=attempted,
+                succeeded=succeeded,
+                failed=attempted - succeeded,
+            )
 
         return LLMOutcome(candidates=enriched, attempted=attempted,
                           succeeded=succeeded, failed=failed)

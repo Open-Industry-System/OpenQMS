@@ -31,13 +31,20 @@ guaranteed to match a UUID in_ lookup, and leaving rows does NOT block re-runs (
 seed keys on unique document_no). Cleaned by `make e2e-reset` (down -v)."""
 from app.models.fmea import FMEADocument
 from app.models.capa import CAPAEightD
+from app.models.capa_doc_gate import CapaDocgAnalysis
 
 # Parents: (model, pk_col, doc_no_col, [(child_model, child_fk_col), ...])
 # M0+M1: parents only — CASCADE handles version/recommendation-cache/change-impact children.
 # Add a child entry ONLY when a later module links a NO-ACTION-FK child to an E2E parent
 # (e.g. ControlPlan in M2, audit_finding in the audit module) — run that module's spec twice
 # to confirm; if parent delete fails with FK violation, add the child here.
+#
+# US-E2E-01.7: capa_docg_analysis has RESTRICT FK to capa_eightd. Audit/decision hang off
+# analysis (also RESTRICT). cleanup_test_data deletes CapaDocgAnalysis via capa_id, but
+# first removes nested audit/decision rows (see special-case in e2e.py).
 CLEANUP_PARENTS = [
     (FMEADocument, "fmea_id", "document_no", []),
-    (CAPAEightD, "report_id", "document_no", []),
+    (CAPAEightD, "report_id", "document_no", [
+        (CapaDocgAnalysis, "capa_id"),
+    ]),
 ]

@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Iterable
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,38 @@ from app.models.product_line import ProductLine
 
 # Sentinel for "field not provided" (distinct from None = "clear to null").
 UNSET = object()
+
+
+async def lock_candidate_scopes(
+    db: AsyncSession,
+    scopes: Iterable[tuple[uuid.UUID | str, str]],
+) -> None:
+    """Serialize candidate-set readers/writers on existing ProductLine rows."""
+    try:
+        identities = {
+            (uuid.UUID(str(factory_id)), str(product_line_code).strip())
+            for factory_id, product_line_code in scopes
+        }
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("Invalid candidate scope") from exc
+    if not identities or any(not code for _, code in identities):
+        raise ValueError("Invalid candidate scope")
+
+    for factory_id, product_line_code in sorted(
+        identities, key=lambda scope: (str(scope[0]), scope[1])
+    ):
+        product_line = await db.scalar(
+            select(ProductLine)
+            .where(
+                ProductLine.factory_id == factory_id,
+                ProductLine.code == product_line_code,
+            )
+            .with_for_update()
+        )
+        if product_line is None:
+            raise ValueError(
+                f"Candidate scope not found: {factory_id}/{product_line_code}"
+            )
 
 
 async def _validate_product_type_code(db: AsyncSession, product_type_code: str | None) -> str | None:

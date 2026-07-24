@@ -11,20 +11,26 @@ async def enqueue_embedding(
     entity_id: uuid.UUID,
     product_line_code: str | None = None,
     factory_id: uuid.UUID | None = None,
+    *,
+    content_hash: str | None = None,
 ) -> None:
     """Insert an embedding sync event into the outbox table."""
     if factory_id is None:
         raise ValueError("factory_id is required for embedding outbox events")
     await db.execute(
         text("""
-            INSERT INTO embedding_sync_outbox (id, entity_type, entity_id, product_line_code, factory_id)
-            VALUES (gen_random_uuid(), :entity_type, :entity_id, :product_line_code, :factory_id)
+            INSERT INTO embedding_sync_outbox
+                (id, entity_type, entity_id, product_line_code, factory_id, content_hash)
+            VALUES
+                (gen_random_uuid(), :entity_type, :entity_id, :product_line_code,
+                 :factory_id, :content_hash)
         """),
         {
             "entity_type": entity_type,
             "entity_id": entity_id,
             "product_line_code": product_line_code,
             "factory_id": factory_id,
+            "content_hash": content_hash,
         },
     )
 

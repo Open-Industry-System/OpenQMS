@@ -262,7 +262,7 @@ async def test_d4_route_passes_audit_ctx_and_commits(
     captured = {}
 
     class _FakePipeline:
-        def __init__(self, db_arg, pc, embedding_provider):
+        def __init__(self, db_arg, pc, embedding_provider, llm_timeout=None):
             captured["pc"] = pc
         async def recommend(self, context, *, user, report_id, factory_id, tenant_schema):
             captured["recommend_kwargs"] = {
@@ -317,7 +317,7 @@ async def test_d5_route_passes_audit_ctx_and_commits(
     captured = {}
 
     class _FakePipeline:
-        def __init__(self, db_arg, pc, embedding_provider):
+        def __init__(self, db_arg, pc, embedding_provider, llm_timeout=None):
             captured["pc"] = pc
         async def recommend(self, context, *, user, report_id, factory_id, tenant_schema):
             captured["recommend_kwargs"] = {

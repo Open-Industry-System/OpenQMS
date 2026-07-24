@@ -1,6 +1,6 @@
 # 8D / CAPA 模块 — 用户手册
 
-> 最后更新: 2026-06-13 | 适用版本: OpenQMS v1.0
+> 最后更新: 2026-07-09 | 适用版本: OpenQMS v1.0
 
 ---
 
@@ -292,6 +292,25 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
 
 - `d7_skip_reasons` 仅在 D7→D8 推进且存在未确认 FMEA 节点时使用
 - 每次推进自动生成 `TRANSITION` 类型审计日志，记录旧状态和新状态
+
+**响应体：**
+
+```json
+{
+  "capa": {
+    "report_id": "uuid",
+    "document_no": "8D-2026-001",
+    "title": "...",
+    "status": "D5_CORRECTION",
+    "d4_retry_count": 3,
+    "...": "..."
+  },
+  "warning": "建议升级处理（D4 验证已回退 3 次）"
+}
+```
+
+- `capa` 为推进后的 CAPA 报告（结构与 `GET /api/capa/{id}` 一致）
+- `warning` 仅当本次推进从 `D4_ROOT_CAUSE` 进入 `D5_CORRECTION` 且 `d4_retry_count >= 3` 时返回；其他情况为 `null`
 
 ---
 
@@ -585,12 +604,40 @@ SCAR 不是从 CAPA 模块发起的。需要进入供应商管理模块（`/scar
 | `d6_verification` | Text | 效果验证 |
 | `d7_prevention` | Text | 预防复发措施 |
 | `d8_closure` | Text | 关闭确认 |
+| `d4_retry_count` | Integer, NOT NULL DEFAULT `0` | D4 验证回退计数器 |
 | `fmea_ref_id` | UUID (FK, nullable) | 关联 FMEA 文档 |
 | `fmea_node_id` | String(36, nullable) | 关联 FMEA 失效节点 |
 | `due_date` | Date (nullable) | 到期日期 |
 | `created_by` | UUID (FK, nullable) | 创建人 |
 | `created_at` | DateTime(TZ) | 创建时间 |
 | `updated_at` | DateTime(TZ) | 更新时间 |
+
+### CapaRootCauseVerification 表 (`capa_root_cause_verification`)
+
+D4 根因验证记录表：每条记录对应一个候选根因的现场验证。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `verification_id` | UUID (PK) | 验证记录唯一标识 |
+| `capa_id` | UUID (FK) | 所属 8D 报告 (`capa_eightd.report_id`) |
+| `factory_id` | UUID (FK) | 所属工厂 |
+| `root_cause_text` | Text, NOT NULL | 绑定的根因文本 |
+| `method` | Text, nullable | 验证方法，仅允许 `measurement` / `observation` / `reproduction`（DB CHECK） |
+| `result` | Text, nullable | 验证结果说明 |
+| `is_verified` | Boolean, NOT NULL DEFAULT `false` | 是否通过验证（由 `conclusion` 派生保留） |
+| `conclusion` | String(20), NOT NULL DEFAULT `'pending'` | 验证结论：`pending` / `passed` / `failed`（DB CHECK） |
+| `evidence_attachments` | JSONB, NOT NULL DEFAULT `[]` | 证据附件列表 |
+| `source_ref` | JSONB, nullable | 来源引用（如关联推荐项） |
+| `verified_by` | UUID (FK, nullable) | 验证人 |
+| `verified_at` | DateTime(TZ, nullable) | 验证时间 |
+| `created_at` | DateTime(TZ) | 创建时间 |
+| `updated_at` | DateTime(TZ) | 更新时间 |
+
+**约束：**
+- `chk_verification_method`: `method IS NULL OR method IN ('measurement','observation','reproduction')`
+- `chk_verification_conclusion`: `conclusion IN ('pending','passed','failed')`
+
+---
 
 ### API 端点汇总
 

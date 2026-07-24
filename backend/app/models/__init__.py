@@ -12,6 +12,7 @@ from app.models.agent import (
     AgentSession,
     AgentToolCall,
 )
+from app.models.agent_review_skill import AgentReviewSkill
 from app.models.audit import AuditLog
 from app.models.login_audit_log import LoginAuditLog
 from app.models.system_log import SystemLog
@@ -19,7 +20,28 @@ from app.models.audit_finding import AuditFinding
 from app.models.audit_plan import AuditPlan
 from app.models.audit_program import AuditChecklistTemplate, AuditProgram, AuditProgramTargetFactory
 from app.models.bias import BiasMeasurement, BiasResult, BiasStudy
-from app.models.capa import CAPAEightD
+from app.models.capa import (
+    CAPAEightD, CapaAIAdoption, CapaD7NodeAction, CapaPptExport, CapaRootCauseVerification,
+)
+from app.models.capa_d3 import (
+    CapaD3ImportRun,
+    CapaD3ContainmentSnapshot,
+    CapaD3ImpactReport,
+    CapaD3AdviceGeneration,
+    CapaD3AiAdvice,
+    CapaD3AdviceAdoption,
+    CapaD3Execution,
+)
+from app.models.capa_doc_gate import (
+    CapaDocgAnalysis,
+    CapaDocgAudit,
+    CapaDocgDecision,
+)
+from app.models.capa_lateral_diffusion import (
+    CapaLateralDiffusionCheck,
+    CapaLateralNotification,
+)
+from app.models.capa_lesson import CapaLessonLearned
 from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
 from app.models.control_plan import ControlPlan, ControlPlanItem
@@ -27,6 +49,7 @@ from app.models.control_plan_version import ControlPlanVersion
 from app.models.cp_validation import CPValidationFinding, CPValidationOccurrence, CPValidationRun
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
+from app.models.knowledge_entry import KnowledgeEntry
 from app.models.erp import (
     ERPConnection,
     ERPCostRecord,
@@ -72,12 +95,14 @@ from app.models.mes import (
 )
 from app.models.platform_admin import PlatformAdminUser  # noqa: F401
 from app.models.product_line import ProductLine
+from app.models.product_type import ProductType  # noqa: F401 — register for drop_all/create_all
 from app.models.quality_goal import QualityGoal
 from app.models.recommendation_cache import RecommendationCache
 from app.models.reference_template import ReferenceTemplate  # noqa: F401
 from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.spc import ControlLimitSnapshot, InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm
 from app.models.special_characteristic import SpecialCharacteristic
+from app.models.special_characteristic_link import SpecialCharacteristicLink  # noqa: F401 — FK target for drop_all
 from app.models.stability import StabilityMeasurement, StabilityResult, StabilityStudy
 from app.models.system_setting import SystemSetting
 from app.models.supplier import (
@@ -89,6 +114,7 @@ from app.models.supplier import (
     SupplierSCAR,
 )
 from app.models.supplier_risk import SupplierRiskAlert, SupplierRiskConfig, SupplierRiskNotificationChannel
+from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 from app.models.supplier_shared_profile import SupplierSharedProfile
 from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 
@@ -111,7 +137,11 @@ from .plm import (
 )
 
 __all__ = [
-    "User", "FMEADocument", "CAPAEightD", "AuditLog",
+    "User", "FMEADocument", "CAPAEightD", "CapaLessonLearned", "AuditLog",
+    "CapaD3ImportRun", "CapaD3ContainmentSnapshot", "CapaD3ImpactReport",
+    "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
+    "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
+    "CapaLateralDiffusionCheck", "CapaLateralNotification",
     "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
@@ -136,6 +166,7 @@ __all__ = [
     "RecommendationCache",
     "DocumentEmbedding",
     "EmbeddingSyncOutbox",
+    "KnowledgeEntry",
     "ChangeImpactAnalysis",
     "CollaborationSession",
     "UserDashboardLayout",
@@ -179,6 +210,7 @@ __all__ = [
     "SupplierRiskAlert",
     "SupplierRiskConfig",
     "SupplierRiskNotificationChannel",
+    "SupplierRiskCapaInput",
     "SystemSetting",
     "Factory",
     "UserFactory",

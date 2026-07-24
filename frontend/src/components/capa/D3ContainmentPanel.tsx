@@ -1,0 +1,754 @@
+import { useEffect, useState, useMemo } from "react";
+import {
+  Card, Button, Space, Tag, List, Typography, Spin, App, Alert,
+  Modal, Form, Input, Select, message,
+} from "antd";
+import {
+  ImportOutlined, ReloadOutlined, CheckOutlined, CloseOutlined,
+  PlusOutlined,
+} from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
+import {
+  importD3Containment, getD3Runs, getD3Snapshots,
+  generateD3Report, getD3Report,
+  generateD3Advice, getD3Advice,
+  decideD3Advice, getD3Adoptions,
+  recordD3Execution, updateD3Execution, getD3Executions,
+} from "../../api/capa";
+import type {
+  CAPAReport, D3ImportRun, D3ContainmentSnapshot, D3ImpactReport,
+  D3AiAdvice, D3AdviceAdoption, D3Execution, D3AdviceType,
+} from "../../types";
+
+const { Text } = Typography;
+const { TextArea } = Input;
+
+interface D3ContainmentPanelProps {
+  capa: CAPAReport;
+  canEdit: boolean;
+}
+
+const adviceTypeColors: Record<D3AdviceType, string> = {
+  recall: "red",
+  isolate: "orange",
+  notify_customer: "blue",
+  strict_inspection: "purple",
+  alternative: "green",
+};
+
+// Map a stable backend error code to a localized, user-facing banner title.
+// `superseded` = the run/report/generation was overtaken by a newer import (not a
+// plain LLM failure) — distinct message so the user knows to refresh, not just retry.
+function d3ErrorTitle(t: (k: string, d: string) => string, code: string | null | undefined): string {
+  if (code === "superseded") return t("d3.superseded", "已被 newer 代次取代，请刷新");
+  if (code === "blocked") return t("d3.blocked", "LLM 凭证未配置，生成被阻断");
+  if (code === "stale") return t("d3.stale", "上次生成超时，请重试");
+  return t("d3.reportFailed", "生成失败");
+}
+
+type ModalMode = "adopt" | "reject" | "execution" | null;
+
+export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanelProps) {
+  const { t } = useTranslation("capa");
+  const { modal } = App.useApp();
+
+  const [runs, setRuns] = useState<D3ImportRun[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<D3ContainmentSnapshot[]>([]);
+  const [report, setReport] = useState<D3ImpactReport | null>(null);
+  const [advice, setAdvice] = useState<D3AiAdvice[]>([]);
+  const [adviceError, setAdviceError] = useState<string | null>(null);
+  // "最近一次重试失败" — populated only when a newer failed attempt exists alongside
+  // the still-valid current report/advice (GET latest_attempt_*). Non-blocking banner.
+  const [reportAttemptError, setReportAttemptError] = useState<string | null>(null);
+  const [adviceAttemptError, setAdviceAttemptError] = useState<string | null>(null);
+  const [adoptions, setAdoptions] = useState<D3AdviceAdoption[]>([]);
+  const [executions, setExecutions] = useState<D3Execution[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [generatingAdvice, setGeneratingAdvice] = useState(false);
+
+  // Controlled modal state (replaces document.getElementById anti-pattern)
+  const [modalMode, setModalMode] = useState<ModalMode>(null);
+  const [activeAdvice, setActiveAdvice] = useState<D3AiAdvice | null>(null);
+  const [adoptedText, setAdoptedText] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+  const [executionMeasure, setExecutionMeasure] = useState("");
+  const [executionEvidenceUrl, setExecutionEvidenceUrl] = useState("");
+
+  // The true current run (is_current=true), never changes with dropdown selection
+  const actualCurrentRun = useMemo(() => runs.find(r => r.is_current), [runs]);
+
+  // Current run is the selected historical run, or the actual current run
+  const currentRun = useMemo(() => {
+    if (selectedRunId) {
+      return runs.find(r => r.run_id === selectedRunId);
+    }
+    return actualCurrentRun;
+  }, [runs, selectedRunId, actualCurrentRun]);
+
+  // Historical runs are those with is_current=false
+  const historicalRuns = useMemo(() => runs.filter(r => !r.is_current), [runs]);
+
+  // For historical runs, disable all write buttons
+  const isReadOnly = !currentRun?.is_current || !canEdit;
+
+  // Show import button when canEdit, status is D3_INTERIM, and viewing the current run
+  const showImportButton = canEdit && capa.status === "D3_INTERIM" && (!selectedRunId);
+
+  useEffect(() => {
+    if (capa.report_id) {
+      loadRuns();
+      loadAdoptions();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capa.report_id]);
+
+  useEffect(() => {
+    if (currentRun?.run_id) {
+      loadSnapshots(currentRun.run_id);
+      loadReport(currentRun.run_id);
+      loadAdvice(currentRun.run_id);
+      loadExecutions(currentRun.run_id);
+      loadAdoptions(currentRun.run_id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentRun?.run_id]);
+
+  const loadRuns = async () => {
+    setLoading(true);
+    try {
+      const data = await getD3Runs(capa.report_id);
+      setRuns(data);
+    } catch {
+      message.error(t("d3.loadRunsFailed", "加载代次失败"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadSnapshots = async (runId?: string) => {
+    try {
+      const data = await getD3Snapshots(capa.report_id, runId);
+      setSnapshots(data);
+    } catch {
+      message.error(t("d3.loadSnapshotsFailed", "加载快照失败"));
+    }
+  };
+
+  const loadReport = async (runId?: string) => {
+    try {
+      const data = await getD3Report(capa.report_id, runId);
+      setReport(data);
+      // A newer non-current attempt (failed or superseded) exists alongside the
+      // still-valid current report. Surface it as a non-blocking retry banner.
+      setReportAttemptError(
+        data && (data.latest_attempt_status === "failed" || data.latest_attempt_status === "superseded")
+          ? data.latest_attempt_error || data.latest_attempt_status
+          : null,
+      );
+    } catch (e: any) {
+      // 404 = no report at all (never generated) — silent, show generate UI
+      if (e?.response?.status === 404) {
+        setReport(null);
+        setReportAttemptError(null);
+      } else {
+        message.error(t("d3.loadReportFailed", "加载报告失败"));
+      }
+    }
+  };
+
+  const loadAdvice = async (runId?: string) => {
+    try {
+      const resp = await getD3Advice(capa.report_id, runId);
+      setAdvice(resp.advice ?? []);
+      // adviceError = the *current* generation failed (blocking, shows retry replacing advice).
+      // adviceAttemptError = a newer failed retry alongside a still-valid current generation
+      // (non-blocking banner, advice list stays visible).
+      setAdviceError(resp.status === "failed" ? (resp.error || "failed") : null);
+      setAdviceAttemptError(
+        resp.latest_attempt_status === "failed"
+          ? resp.latest_attempt_error || "failed"
+          : null,
+      );
+    } catch {
+      message.error(t("d3.loadAdviceFailed", "加载建议失败"));
+    }
+  };
+
+  const loadAdoptions = async (runId?: string) => {
+    try {
+      const data = await getD3Adoptions(capa.report_id, runId);
+      setAdoptions(data);
+    } catch {
+      message.error(t("d3.loadAdoptionsFailed", "加载采纳记录失败"));
+    }
+  };
+
+  const loadExecutions = async (runId?: string) => {
+    try {
+      const data = await getD3Executions(capa.report_id, runId);
+      setExecutions(data);
+    } catch {
+      message.error(t("d3.loadExecutionsFailed", "加载执行记录失败"));
+    }
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    try {
+      await importD3Containment(capa.report_id);
+      message.success(t("d3.importSuccess", "导入成功"));
+      await loadRuns();
+    } catch {
+      message.error(t("d3.importFailed", "导入失败"));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleGenerateReport = async () => {
+    if (!currentRun) return;
+    setGeneratingReport(true);
+    try {
+      await generateD3Report(capa.report_id, { run_id: currentRun.run_id });
+      message.success(t("d3.reportGenerated", "报告生成中"));
+      await loadReport(currentRun?.run_id);
+    } catch {
+      message.error(t("d3.reportGenerateFailed", "报告生成失败"));
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const handleGenerateAdvice = async () => {
+    if (!currentRun) return;
+    // Advice generation requires a valid current done report (backend /d3/advice
+    // reads the current report). Gate here so the user gets a clear hint instead of
+    // a generic "建议生成失败" from the backend's "需先生成影响报告" check.
+    if (!report || report.status !== "done") {
+      message.warning(t("d3.adviceNeedsReport", "需先生成影响报告才能生成建议"));
+      return;
+    }
+    setGeneratingAdvice(true);
+    try {
+      await generateD3Advice(capa.report_id, { run_id: currentRun.run_id });
+      message.success(t("d3.adviceGenerated", "建议生成中"));
+      await loadAdvice(currentRun?.run_id);
+    } catch {
+      message.error(t("d3.adviceGenerateFailed", "建议生成失败"));
+    } finally {
+      setGeneratingAdvice(false);
+    }
+  };
+
+  const openAdoptModal = (item: D3AiAdvice) => {
+    setActiveAdvice(item);
+    setAdoptedText(item.advice_text);
+    setModalMode("adopt");
+  };
+
+  const openRejectModal = (item: D3AiAdvice) => {
+    setActiveAdvice(item);
+    setRejectReason("");
+    setModalMode("reject");
+  };
+
+  const openExecutionModal = () => {
+    setExecutionMeasure("");
+    setExecutionEvidenceUrl("");
+    setModalMode("execution");
+  };
+
+  const closeModal = () => {
+    setModalMode(null);
+    setActiveAdvice(null);
+  };
+
+  const handleAdoptOk = async () => {
+    if (!activeAdvice) return;
+    try {
+      await decideD3Advice(capa.report_id, activeAdvice.advice_id, {
+        decision: "adopted",
+        adopted_text: adoptedText,
+      });
+      message.success(t("d3.acceptSuccess", "已采纳"));
+      closeModal();
+      await loadAdoptions();
+      await loadAdvice(currentRun?.run_id);
+    } catch {
+      message.error(t("d3.acceptFailed", "采纳失败"));
+    }
+  };
+
+  const handleRejectOk = async () => {
+    if (!activeAdvice) return;
+    try {
+      await decideD3Advice(capa.report_id, activeAdvice.advice_id, {
+        decision: "rejected",
+        adopted_text: null,
+      });
+      message.success(t("d3.rejectSuccess", "已拒绝"));
+      closeModal();
+      await loadAdvice(currentRun?.run_id);
+    } catch {
+      message.error(t("d3.rejectFailed", "拒绝失败"));
+    }
+  };
+
+  const handleExecutionOk = async () => {
+    if (!executionMeasure.trim()) {
+      message.warning(t("d3.measureRequired", "请填写措施"));
+      return;
+    }
+    try {
+      await recordD3Execution(capa.report_id, {
+        source: "manual",
+        measure_text: executionMeasure,
+        evidence_refs: executionEvidenceUrl.trim()
+          ? [{ type: "url", url: executionEvidenceUrl.trim() }]
+          : [],
+      });
+      message.success(t("d3.executionAdded", "执行记录已添加"));
+      closeModal();
+      await loadExecutions(currentRun?.run_id);
+    } catch {
+      message.error(t("d3.executionAddFailed", "添加执行记录失败"));
+    }
+  };
+
+  const handleExecutionStatusChange = async (item: D3Execution, nextStatus: D3Execution["result_status"]) => {
+    if (nextStatus === item.result_status) return;
+    try {
+      await updateD3Execution(capa.report_id, item.execution_id, { result_status: nextStatus });
+      await loadExecutions(currentRun?.run_id);
+    } catch {
+      message.error(t("d3.executionUpdateFailed", "更新执行记录失败"));
+    }
+  };
+
+  // Group snapshots by type
+  const snapshotsByType = useMemo(() => {
+    const groups: Record<string, D3ContainmentSnapshot[]> = {
+      inventory: [],
+      shipment: [],
+      iqc: [],
+      spc: [],
+    };
+    snapshots.forEach(s => {
+      if (groups[s.snapshot_type]) {
+        groups[s.snapshot_type].push(s);
+      }
+    });
+    return groups;
+  }, [snapshots]);
+
+  if (loading) return <Spin size="small" />;
+
+  // Status banners
+  const renderStatusBanner = () => {
+    if (!currentRun) return null;
+    if (currentRun.status === "failed") {
+      return (
+        <Alert
+          type="error"
+          showIcon
+          message={t("d3.runFailed", "代次失败")}
+          description={report?.error || currentRun.status}
+          style={{ marginBottom: 16 }}
+        />
+      );
+    }
+    if (currentRun.status === "importing") {
+      return (
+        <Alert
+          type="info"
+          showIcon
+          message={t("d3.runRunning", "正在运行")}
+          style={{ marginBottom: 16 }}
+        />
+      );
+    }
+    return null;
+  };
+
+  return (
+    <Card
+      size="small"
+      title={t("d3.title", "D3 临时遏制措施")}
+      extra={
+        showImportButton && (
+          <Button
+            type="primary"
+            icon={<ImportOutlined />}
+            loading={importing}
+            onClick={handleImport}
+            data-e2e="d3-import-button"
+          >
+            {t("d3.import", "导入")}
+          </Button>
+        )
+      }
+    >
+      {renderStatusBanner()}
+
+      {/* Run switcher for historical runs */}
+      {historicalRuns.length > 0 && (
+        <Space style={{ marginBottom: 16 }}>
+          <Text strong>{t("d3.selectRun", "选择代次")}</Text>
+          <Select
+            style={{ width: 200 }}
+            value={selectedRunId || actualCurrentRun?.run_id}
+            onChange={(val) => {
+              if (val === actualCurrentRun?.run_id) {
+                setSelectedRunId(null);
+              } else {
+                setSelectedRunId(val);
+              }
+            }}
+            options={[
+              { value: actualCurrentRun?.run_id, label: t("d3.currentRun", "当前代次") },
+              ...historicalRuns.map(r => ({
+                value: r.run_id,
+                label: `${t("d3.runLabel", "代次")} ${r.created_at}`,
+              })),
+            ]}
+          />
+        </Space>
+      )}
+
+      {/* 4 Snapshot Cards */}
+      {(snapshots.length > 0) && (
+        <Space direction="vertical" style={{ width: "100%", marginBottom: 16 }}>
+          <Text strong>{t("d3.snapshotsTitle", "数据快照")}</Text>
+          {(["inventory", "shipment", "iqc", "spc"] as const).map(type => (
+            <Card
+              key={type}
+              size="small"
+              data-e2e={`d3-snapshot-card-${type}`}
+              style={{ background: "#fafafa" }}
+            >
+              <Text strong>{t(`d3.snapshotType.${type}`, type)}</Text>
+              <List
+                size="small"
+                dataSource={snapshotsByType[type]}
+                renderItem={(s) => (
+                  <List.Item>
+                    <Text>{t("d3.recordCount", "记录数")}: {s.record_count}</Text>
+                    <Tag>{s.snapshot_type}</Tag>
+                  </List.Item>
+                )}
+              />
+            </Card>
+          ))}
+        </Space>
+      )}
+
+      {/* Impact Report */}
+      <Card size="small" title={t("d3.reportTitle", "影响报告")} style={{ marginBottom: 16 }}>
+        <Space direction="vertical" style={{ width: "100%" }}>
+          {report ? (
+            <>
+              {report.risk_level && (
+                <Text>
+                  {t("d3.riskLevel", "风险等级")}: {report.risk_level} ({t("d3.riskFloor", "底线")}: {report.risk_floor})
+                </Text>
+              )}
+              {report.risk_explanation && <Text>{report.risk_explanation}</Text>}
+              {!!report.customer_impact?.length && (
+                <Text>
+                  {t("d3.customerImpact", "客户影响")}: {report.customer_impact.length} 条
+                </Text>
+              )}
+              {(report.status === "failed" || report.status === "superseded") && (
+                <Alert
+                  type={report.error === "superseded" ? "warning" : "error"}
+                  showIcon
+                  message={d3ErrorTitle(t, report.error)}
+                  description={
+                    report.error === "superseded"
+                      ? t("d3.supersededHint", "当前 run 已被新导入取代，请切换或重新导入后重试")
+                      : report.error || t("d3.reportFailedHint", "可点击下方按钮重试")
+                  }
+                  style={{ marginTop: 8 }}
+                  data-e2e="d3-report-failed-banner"
+                />
+              )}
+              {reportAttemptError && report.status === "done" && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={d3ErrorTitle(t, reportAttemptError)}
+                  description={reportAttemptError}
+                  style={{ marginTop: 8 }}
+                  data-e2e="d3-report-attempt-banner"
+                />
+              )}
+            </>
+          ) : (
+            <Text type="secondary">
+              {t("d3.noReport", "尚未生成报告，或上次生成失败。点击下方按钮生成/重试。")}
+            </Text>
+          )}
+        </Space>
+        {!isReadOnly && (!report || report.status !== "running") && (
+          <Button
+            size="small"
+            loading={generatingReport}
+            onClick={handleGenerateReport}
+            style={{ marginTop: 8 }}
+            data-e2e="d3-generate-report"
+          >
+            {!report
+              ? t("d3.generateReport", "生成报告")
+              : report.status === "failed"
+                ? t("d3.retryReport", "重试生成报告")
+                : t("d3.regenerateReport", "重新生成")}
+          </Button>
+        )}
+      </Card>
+
+      {/* AI Advice */}
+      <Card size="small" title={t("d3.adviceTitle", "AI 建议")} style={{ marginBottom: 16 }} data-e2e="d3-advice-card">
+        {adviceError && (
+          <Alert
+            type="error"
+            showIcon
+            message={d3ErrorTitle(t, adviceError)}
+            description={adviceError}
+            style={{ marginBottom: 12 }}
+            data-e2e="d3-advice-failed-banner"
+          />
+        )}
+        {adviceAttemptError && !adviceError && advice.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={d3ErrorTitle(t, adviceAttemptError)}
+            description={adviceAttemptError}
+            style={{ marginBottom: 12 }}
+            data-e2e="d3-advice-attempt-banner"
+          />
+        )}
+        <List
+          dataSource={advice}
+          renderItem={(item) => (
+            <List.Item
+              actions={
+                !isReadOnly && !item.adoption_status
+                  ? [
+                      <Button
+                        key="accept"
+                        type="link"
+                        size="small"
+                        icon={<CheckOutlined />}
+                        onClick={() => openAdoptModal(item)}
+                      >
+                        {t("d3.accept", "采纳")}
+                      </Button>,
+                      <Button
+                        key="reject"
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<CloseOutlined />}
+                        onClick={() => openRejectModal(item)}
+                      >
+                        {t("d3.reject", "拒绝")}
+                      </Button>,
+                    ]
+                  : undefined
+              }
+            >
+              <List.Item.Meta
+                title={
+                  <Space>
+                    <Tag color={adviceTypeColors[item.advice_type]} data-e2e={`d3-advice-type-${item.advice_type}`}>
+                      {t(`d3.adviceType.${item.advice_type}`, item.advice_type)}
+                    </Tag>
+                    {item.advice_text}
+                  </Space>
+                }
+                description={
+                  <Space>
+                    <Text type="secondary" data-e2e="d3-advice-provenance">
+                      {item.source_provenance?.map(p => p.record_key).join(", ") || "-"}
+                    </Text>
+                    {item.adoption_status && <Tag>{item.adoption_status}</Tag>}
+                  </Space>
+                }
+              />
+            </List.Item>
+          )}
+        />
+        {!isReadOnly && (
+          <>
+            <Button
+              size="small"
+              loading={generatingAdvice}
+              onClick={handleGenerateAdvice}
+              disabled={!report || report.status !== "done"}
+              style={{ marginTop: 8 }}
+              data-e2e="d3-generate-advice"
+            >
+              {adviceError
+                ? t("d3.retryAdvice", "重试生成建议")
+                : advice.length === 0
+                  ? t("d3.generateAdvice", "生成建议")
+                  : t("d3.regenerateAdvice", "重新生成建议")}
+            </Button>
+            {(!report || report.status !== "done") && (
+              <Text type="secondary" style={{ marginLeft: 8 }} data-e2e="d3-advice-needs-report-hint">
+                {t("d3.adviceNeedsReport", "需先生成影响报告才能生成建议")}
+              </Text>
+            )}
+          </>
+        )}
+      </Card>
+
+      {/* Adoption List */}
+      {adoptions.length > 0 && (
+        <Card size="small" title={t("d3.adoptionsTitle", "采纳记录")} style={{ marginBottom: 16 }} data-e2e="d3-adoption-list">
+          <List
+            dataSource={adoptions}
+            renderItem={(item) => (
+              <List.Item>
+                <List.Item.Meta
+                  title={
+                    <Space>
+                      <Tag color={adviceTypeColors[item.advice_type]}>
+                        {t(`d3.adviceType.${item.advice_type}`, item.advice_type)}
+                      </Tag>
+                      {item.adopted_text}
+                    </Space>
+                  }
+                  description={item.decided_at}
+                />
+              </List.Item>
+            )}
+          />
+        </Card>
+      )}
+
+      {/* Execution List */}
+      <Card size="small" title={t("d3.executionsTitle", "执行记录")} data-e2e="d3-execution-list">
+        <List
+          dataSource={executions}
+          renderItem={(item) => (
+            <List.Item>
+              <List.Item.Meta
+                title={item.measure_text}
+                description={
+                  <Space>
+                    <Text type="secondary">{item.result_status}</Text>
+                    {item.evidence_refs?.[0] && (
+                      <Button type="link" size="small" href={String(item.evidence_refs[0].url || "")} target="_blank">
+                        {t("d3.evidenceLink", "证据")}
+                      </Button>
+                    )}
+                    {!isReadOnly && (
+                      <Select
+                        size="small"
+                        value={item.result_status}
+                        onChange={(val) => handleExecutionStatusChange(item, val)}
+                        style={{ width: 120 }}
+                        data-e2e="d3-execution-status-change"
+                        options={[
+                          { value: "in_progress", label: t("d3.status.in_progress", "进行中") },
+                          { value: "completed", label: t("d3.status.completed", "已完成") },
+                          { value: "pending", label: t("d3.status.pending", "待处理") },
+                          { value: "failed", label: t("d3.status.failed", "失败") },
+                        ]}
+                      />
+                    )}
+                  </Space>
+                }
+              />
+            </List.Item>
+          )}
+        />
+        {!isReadOnly && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={openExecutionModal}
+            data-e2e="d3-execution-add"
+            style={{ marginTop: 8 }}
+          >
+            {t("d3.addExecution", "添加执行记录")}
+          </Button>
+        )}
+      </Card>
+
+      {/* Adopt Modal */}
+      <Modal
+        open={modalMode === "adopt"}
+        title={t("d3.acceptAdviceTitle", "采纳建议")}
+        onCancel={closeModal}
+        onOk={handleAdoptOk}
+        okText={t("d3.accept", "采纳")}
+      >
+        <Form layout="vertical">
+          <Form.Item label={t("d3.adoptedTextLabel", "采纳文本")}>
+            <TextArea
+              rows={4}
+              value={adoptedText}
+              onChange={(e) => setAdoptedText(e.target.value)}
+              data-e2e="d3-adopted-text"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Reject Modal */}
+      <Modal
+        open={modalMode === "reject"}
+        title={t("d3.rejectAdviceTitle", "拒绝建议")}
+        onCancel={closeModal}
+        onOk={handleRejectOk}
+        okText={t("d3.reject", "拒绝")}
+        okButtonProps={{ danger: true }}
+      >
+        <Form layout="vertical">
+          <Form.Item label={t("d3.rejectReasonLabel", "拒绝理由")}>
+            <TextArea
+              rows={3}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              data-e2e="d3-reject-reason"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Execution Modal */}
+      <Modal
+        open={modalMode === "execution"}
+        title={t("d3.addExecutionTitle", "添加执行记录")}
+        onCancel={closeModal}
+        onOk={handleExecutionOk}
+        okText={t("d3.addExecution", "添加")}
+        okButtonProps={{ "data-e2e": "d3-execution-save" }}
+      >
+        <Form layout="vertical">
+          <Form.Item label={t("d3.executionMeasureLabel", "措施")}>
+            <TextArea
+              rows={3}
+              value={executionMeasure}
+              onChange={(e) => setExecutionMeasure(e.target.value)}
+              data-e2e="d3-execution-measure"
+            />
+          </Form.Item>
+          <Form.Item label={t("d3.evidenceUrlLabel", "证据 URL")}>
+            <Input
+              value={executionEvidenceUrl}
+              onChange={(e) => setExecutionEvidenceUrl(e.target.value)}
+              data-e2e="d3-execution-evidence-url"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </Card>
+  );
+}

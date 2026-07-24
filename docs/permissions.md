@@ -200,3 +200,5 @@ if target_status == "approved" and user.role_definition.role_key not in ("admin"
 | 2026-06-13 | 前端自动 refresh token：存储 refresh_token，401 时自动尝试刷新，并发请求排队等待 |
 | 2026-06-13 | 登录速率限制：同一 IP 5 分钟内最多 10 次登录尝试，超限返回 429 |
 | 2026-06-13 | 认证审计日志：登录成功/失败/账户停用/注册/refresh 成功/失败均输出结构化日志 |
+
+> **US-E2E-01.1 D3 遏制（2026-07-12）**：D3 相关端点复用 `capa` 模块现有权限模型，未新增权限点或角色。

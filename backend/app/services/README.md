@@ -35,7 +35,8 @@ verb — one module per business concept:
   `graph_projection_service`. The outbox pattern: services enqueue,
   workers drain.
 - **Recommendation / AI fusion** — `recommendation_service`,
-  `hybrid_recommendation_pipeline`, `capa_recommendation_service`,
+  `hybrid_recommendation_pipeline`, `recommendation_orchestrator` (12-stage
+  DAG: recall → fusion → LLM → terminal), `capa_recommendation_service`,
   `capa_draft_service`, `llm_provider`, `llm_fusion_layer`,
   `ai_config_service`, plus the `recommendation_*.py` type/scope helpers.
 - **Subdirectories** (composite areas with their own internal structure):

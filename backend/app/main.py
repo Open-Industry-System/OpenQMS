@@ -10,6 +10,7 @@ from app.api import agent as agent_api
 from app.api.admin import ai_config as admin_ai_config_api
 from app.api.admin import logs as admin_logs_api
 from app.api.admin import permissions as admin_permissions_api
+from app.api.admin import review_skills as admin_review_skills_api
 from app.api.apqp import router as apqp_router
 from app.api.audit_finding import router as audit_finding_router
 from app.api.audit_plan import router as audit_plan_router
@@ -29,6 +30,7 @@ from app.api.gauge import router as gauge_router
 from app.api.graph import router as graph_router
 from app.api.group import router as group_router
 from app.api.iqc import router as iqc_router
+from app.api.knowledge import router as knowledge_router
 from app.api.management_review import router as management_review_router
 from app.api.mes import router as mes_router
 from app.api.msa import (
@@ -299,6 +301,94 @@ async def lifespan(app: FastAPI):
 
     risk_eval_task = asyncio.create_task(_risk_eval_loop())
 
+    # 01.6: one-shot startup check — warn if no enabled global R11 config per tenant
+    async def _check_r11_config_startup():
+        try:
+            from app.models.supplier_risk import SupplierRiskConfig
+
+            async for tenant, db in run_for_each_tenant():
+                try:
+                    has_r11 = (
+                        await db.execute(
+                            select(SupplierRiskConfig.config_id).where(
+                                SupplierRiskConfig.rule_id == "R11",
+                                SupplierRiskConfig.enabled.is_(True),
+                                SupplierRiskConfig.supplier_id.is_(None),
+                                SupplierRiskConfig.product_line_code.is_(None),
+                            ).limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if has_r11 is None:
+                        logger.error(
+                            "[risk_config] tenant %s has no enabled global R11 config "
+                            "(supplier_id IS NULL AND product_line_code IS NULL); "
+                            "CAPA-triggered risk eval will fail until seed/config is fixed",
+                            tenant.slug,
+                        )
+                except Exception as e:
+                    logger.error("[risk_config] R11 startup check failed for tenant %s: %s", tenant.slug, e)
+        except Exception as e:
+            logger.error("[risk_config] R11 startup check error: %s", e)
+
+    asyncio.create_task(_check_r11_config_startup())
+
+    # 01.6: supplier risk input outbox processor loop (every 30s)
+    async def _risk_input_outbox_loop():
+        while True:
+            await asyncio.sleep(30)
+            try:
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        from app.services.supplier_risk.risk_input_worker import (
+                            claim_batch,
+                            process_one,
+                            recover_stale_inputs,
+                        )
+
+                        await recover_stale_inputs(db)
+                        claimed = await claim_batch(db, 20)
+                        for c in claimed:
+                            await process_one(db, c)
+                    except Exception as e:
+                        logger.error("[risk_input_loop] error for tenant %s: %s", tenant.slug, e)
+            except Exception as e:
+                logger.error("[risk_input_loop] error: %s", e)
+
+    risk_input_task = asyncio.create_task(_risk_input_outbox_loop())
+
+    # 01.8: embedding_sync_outbox processor (every 5s). Standalone module still
+    # supports `python -m app.services.embedding_sync_worker`; lifespan also
+    # runs it so single-process e2e / docker stacks complete knowledge sink
+    # embeddings without a second service.
+    async def _embedding_outbox_loop():
+        from app.services.embedding_sync_worker import (
+            POLL_INTERVAL,
+            process_batch_once,
+            recover_stale_events,
+        )
+
+        while True:
+            await asyncio.sleep(POLL_INTERVAL)
+            try:
+                provider = getattr(app.state, "embedding_provider", None)
+                if provider is None:
+                    # Provider may appear after admin AI config rebuild.
+                    continue
+                async for tenant, db in run_for_each_tenant():
+                    try:
+                        await recover_stale_events(db)
+                        await process_batch_once(db, provider)
+                    except Exception as e:
+                        logger.error(
+                            "[embedding_outbox] error for tenant %s: %s",
+                            tenant.slug,
+                            e,
+                        )
+            except Exception as e:
+                logger.error("[embedding_outbox] error: %s", e)
+
+    embedding_outbox_task = asyncio.create_task(_embedding_outbox_loop())
+
     # Start supply chain risk map snapshot scheduler (hourly)
     from app.services.supply_chain_risk_map.scheduler import snapshot_loop
 
@@ -368,6 +458,20 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+    # Cancel risk input outbox task
+    risk_input_task.cancel()
+    try:
+        await risk_input_task
+    except asyncio.CancelledError:
+        pass
+
+    # Cancel embedding outbox task
+    embedding_outbox_task.cancel()
+    try:
+        await embedding_outbox_task
+    except asyncio.CancelledError:
+        pass
+
     # Cancel supply chain risk map snapshot task
     risk_map_snapshot_task.cancel()
     try:
@@ -425,6 +529,7 @@ app.include_router(product_type_router)
 app.include_router(management_review_router)
 app.include_router(version_router)
 app.include_router(iqc_router)
+app.include_router(knowledge_router)
 app.include_router(customer_quality_router)
 app.include_router(scar_router)
 app.include_router(apqp_router)
@@ -434,6 +539,7 @@ app.include_router(graph_router)
 app.include_router(admin_permissions_api.router)
 app.include_router(admin_ai_config_api.router)
 app.include_router(admin_logs_api.router)
+app.include_router(admin_review_skills_api.router)
 app.include_router(agent_api.router)
 app.include_router(search_router)
 app.include_router(change_impact_router)

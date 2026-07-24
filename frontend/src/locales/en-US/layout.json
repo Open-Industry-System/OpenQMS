@@ -59,7 +59,8 @@
     "productTypes": "Product Types",
     "productLines": "Product Lines",
     "users": "User Management",
-    "logs": "Log Management"
+    "logs": "Log Management",
+    "reviewSkills": "Review Skills"
   },
   "header": {
     "selectFactory": "Select Factory",

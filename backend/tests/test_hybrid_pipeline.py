@@ -1,8 +1,9 @@
-import uuid
 import hashlib
 import json
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from sqlalchemy import select
 
 from app.models.audit import AuditLog
@@ -10,8 +11,10 @@ from app.models.user import User
 from app.services.agent import audit as audit_mod
 from app.services.agent import provider_adapter
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline
-from app.services.recommendation_sources import SemanticSearchSource, HistoricalCAPAMeasureSource
-from app.services.recommendation_types import RecommendationContext, RecommendationCandidate
+from app.services.llm_fusion_layer import LLMOutcome
+from app.services.recommendation_orchestrator import RecommendationOrchestrator
+from app.services.recommendation_sources import HistoricalCAPASource, HistoricalCAPAMeasureSource, SemanticSearchSource
+from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 
 
 def _recommend_kwargs(user_id=None, report_id=None, factory_id=None):
@@ -37,13 +40,6 @@ class _PC:
 
 @pytest.mark.asyncio
 async def test_pipeline_writes_success_audit(db, default_factory, admin_user, monkeypatch):
-    async def _ok(pc, prompt, schema):
-        return [{"candidate_id": 0, "match_reason": "r"}]
-    async def _ok_client(db_arg):
-        return _PC()
-    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
-    monkeypatch.setattr(provider_adapter, "complete_json", _ok)
-
     class _NoEmbed:
         async def embed(self, text):
             return [0.0] * 8
@@ -51,17 +47,20 @@ async def test_pipeline_writes_success_audit(db, default_factory, admin_user, mo
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
-    # Force a 2-item fused list so fallback triggers and we exercise both stages.
+    pipeline._cache_capa_result = AsyncMock()
     two = [
         RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
                                 match_reason="r", metadata={}),
         RecommendationCandidate(source="rule", content="b", category=None, confidence=0.5,
                                 match_reason="r", metadata={}),
     ]
-    monkeypatch.setattr(pipeline.fusion, "merge", lambda candidates, ctx: two)
+
+    async def _enrich(candidates, context):
+        return LLMOutcome(candidates=two, attempted=2, succeeded=2, failed=0)
+    monkeypatch.setattr(pipeline.orchestrator.llm_layer, "enrich", _enrich)
 
     report_id = uuid.uuid4()
-    res = await pipeline.recommend(
+    await pipeline.recommend(
         _ctx("d4"), user=admin_user, report_id=report_id,
         factory_id=default_factory.id, tenant_schema="public",
     )
@@ -78,14 +77,6 @@ async def test_pipeline_writes_success_audit(db, default_factory, admin_user, mo
 
 @pytest.mark.asyncio
 async def test_pipeline_writes_partial_audit(db, default_factory, admin_user, monkeypatch):
-    calls = {"n": 0}
-    async def _partial(pc, prompt, schema):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            return [{"candidate_id": 0, "match_reason": "r"}]
-        raise RuntimeError("fallback boom")
-    monkeypatch.setattr(provider_adapter, "complete_json", _partial)
-
     class _NoEmbed:
         async def embed(self, text):
             return [0.0] * 8
@@ -93,13 +84,17 @@ async def test_pipeline_writes_partial_audit(db, default_factory, admin_user, mo
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
+    pipeline._cache_capa_result = AsyncMock()
     two = [
         RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
                                 match_reason="r", metadata={}),
         RecommendationCandidate(source="rule", content="b", category=None, confidence=0.5,
                                 match_reason="r", metadata={}),
     ]
-    monkeypatch.setattr(pipeline.fusion, "merge", lambda candidates, ctx: two)
+
+    async def _enrich(candidates, context):
+        return LLMOutcome(candidates=two, attempted=2, succeeded=1, failed=1)
+    monkeypatch.setattr(pipeline.orchestrator.llm_layer, "enrich", _enrich)
 
     report_id = uuid.uuid4()
     await pipeline.recommend(
@@ -117,10 +112,6 @@ async def test_pipeline_writes_partial_audit(db, default_factory, admin_user, mo
 
 @pytest.mark.asyncio
 async def test_pipeline_writes_llm_failed_audit(db, default_factory, admin_user, monkeypatch):
-    async def _boom(pc, prompt, schema):
-        raise RuntimeError("llm down")
-    monkeypatch.setattr(provider_adapter, "complete_json", _boom)
-
     class _NoEmbed:
         async def embed(self, text):
             return [0.0] * 8
@@ -128,13 +119,11 @@ async def test_pipeline_writes_llm_failed_audit(db, default_factory, admin_user,
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=_PC(), embedding_provider=_NoEmbed())
-    two = [
-        RecommendationCandidate(source="rule", content="a", category=None, confidence=0.5,
-                                match_reason="r", metadata={}),
-        RecommendationCandidate(source="rule", content="b", category=None, confidence=0.5,
-                                match_reason="r", metadata={}),
-    ]
-    monkeypatch.setattr(pipeline.fusion, "merge", lambda candidates, ctx: two)
+    pipeline._cache_capa_result = AsyncMock()
+
+    async def _enrich(candidates, context):
+        return LLMOutcome(candidates=[], attempted=2, succeeded=0, failed=2)
+    monkeypatch.setattr(pipeline.orchestrator.llm_layer, "enrich", _enrich)
 
     report_id = uuid.uuid4()
     await pipeline.recommend(
@@ -162,6 +151,7 @@ async def test_pipeline_no_audit_when_pc_none(db, default_factory, admin_user, m
             return []
 
     pipeline = HybridRecommendationPipeline(db=db, pc=None, embedding_provider=_NoEmbed())
+    pipeline._cache_capa_result = AsyncMock()
     report_id = uuid.uuid4()
     await pipeline.recommend(
         _ctx("d4"), user=admin_user, report_id=report_id,
@@ -184,9 +174,9 @@ class TestHybridRecommendationPipeline:
 
         pipeline = HybridRecommendationPipeline(mock_db, mock_llm, mock_embedding)
 
-        # Verify D4 sources are configured
-        assert len(pipeline.d4_sources) == 4
-        source_names = [s.name for s in pipeline.d4_sources]
+        # Verify orchestrator is wired and the key D4 sources are registered
+        assert isinstance(pipeline.orchestrator, RecommendationOrchestrator)
+        source_names = set(pipeline.orchestrator._sources)
         assert "fmea_graph" in source_names
         assert "semantic_search" in source_names
         assert "historical_capa" in source_names
@@ -200,15 +190,15 @@ class TestHybridRecommendationPipeline:
 
         pipeline = HybridRecommendationPipeline(mock_db, mock_llm, mock_embedding)
 
-        # Verify D5 sources are configured
-        assert len(pipeline.d5_sources) == 3
-        source_names = [s.name for s in pipeline.d5_sources]
+        # Verify orchestrator is wired and the key D5 sources are registered
+        assert isinstance(pipeline.orchestrator, RecommendationOrchestrator)
+        source_names = set(pipeline.orchestrator._sources)
         assert "semantic_search" in source_names
         assert "historical_capa_measure" in source_names
         assert "rule_engine_measure" in source_names
 
-        # Verify D5 Stage 2 expander exists
-        assert pipeline.d5_control_expander is not None
+        # Verify D5 Stage 2 expander exists on the orchestrator
+        assert pipeline.orchestrator.d5_control_expander is not None
 
     @pytest.mark.asyncio
     async def test_recommend_returns_recommendation_result(self, monkeypatch):
@@ -220,6 +210,7 @@ class TestHybridRecommendationPipeline:
         mock_embedding = AsyncMock()
 
         pipeline = HybridRecommendationPipeline(mock_db, mock_llm, mock_embedding)
+        pipeline._cache_capa_result = AsyncMock()
         ctx = RecommendationContext(
             capa_data={"d2_description": "焊接问题", "d4_root_cause": ""},
             user_product_lines=["DC-DC-100"],
@@ -243,6 +234,8 @@ class TestHybridRecommendationPipeline:
         mock_embedding = AsyncMock()
 
         pipeline = HybridRecommendationPipeline(mock_db, mock_llm, mock_embedding)
+        pipeline._cache_capa_result = AsyncMock()
+        semantic_source = pipeline.orchestrator._sources["semantic_search"]
 
         # Create a candidate with failure_cause_node_id
         cause_candidate = RecommendationCandidate(
@@ -258,9 +251,8 @@ class TestHybridRecommendationPipeline:
             },
         )
 
-        # Mock Stage 1 to return our cause candidate
-        with patch.object(pipeline.d5_sources[0], 'retrieve', return_value=[cause_candidate]):
-            with patch.object(pipeline.d5_control_expander, 'expand', return_value=[]) as mock_expand:
+        with patch.object(semantic_source, 'retrieve', return_value=[cause_candidate]):
+            with patch.object(pipeline.orchestrator.d5_control_expander, 'expand', return_value=[]) as mock_expand:
                 ctx = RecommendationContext(
                     capa_data={"d2_description": "焊接问题", "d4_root_cause": "参数偏移"},
                     user_product_lines=["DC-DC-100"],
@@ -277,6 +269,7 @@ class TestHybridRecommendationPipeline:
 class TestHybridPipelineEndToEnd:
     @pytest.mark.asyncio
     async def test_d4_historical_capa_schema_mapping(self):
+        """HistoricalCAPASource maps a DB row to a D4 schema with source_capa_document_no."""
         mock_db = MagicMock()
         mock_row = {
             "entity_id": uuid.uuid4(),
@@ -298,15 +291,16 @@ class TestHybridPipelineEndToEnd:
         mock_embedding = AsyncMock()
         mock_embedding.embed = AsyncMock(return_value=[[0.1] * 768])
 
-        pipeline = HybridRecommendationPipeline(mock_db, None, mock_embedding)
+        source = HistoricalCAPASource(mock_db, mock_embedding)
         ctx = RecommendationContext(
             capa_data={"d2_description": "焊接温度问题", "product_line_code": "DC-DC-100"},
             user_product_lines=["DC-DC-100"],
             stage="d4",
         )
 
-        result = await pipeline.recommend(ctx, **_recommend_kwargs())
-        historical = [c for c in result.items if c.source == "historical_capa"]
+        result = await source.retrieve(ctx)
+        assert len(result) >= 1
+        historical = [c for c in result if c.source == "historical_capa"]
         assert len(historical) >= 1
         schema = historical[0].to_d4_schema()
         assert schema["source_capa_document_no"] == "8D-2026-001"
@@ -344,8 +338,7 @@ class TestHybridPipelineEndToEnd:
     async def test_cross_product_line_semantic_search_resolved_by_doc_map(self):
         """SemanticSearchSource returns an FMEA node from a non-current but allowed product line;
         doc_map must resolve it because API preloads all allowed PLs."""
-        from unittest.mock import MagicMock, AsyncMock, call
-        import uuid
+        from unittest.mock import call
 
         # Mock DB returning a cross-PL FMEA node match
         mock_db = MagicMock()
@@ -392,9 +385,6 @@ class TestHybridPipelineEndToEnd:
     @pytest.mark.asyncio
     async def test_historical_capa_measure_sql_uses_vector_cast(self):
         """HistoricalCAPAMeasureSource._search SQL must contain CAST(:query_vector AS vector)."""
-        from unittest.mock import MagicMock, AsyncMock
-        import uuid
-
         mock_db = MagicMock()
         mock_mappings = MagicMock()
         mock_mappings.__iter__.return_value = iter([])

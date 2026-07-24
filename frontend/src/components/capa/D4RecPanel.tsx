@@ -1,50 +1,85 @@
 import { useEffect, useState } from "react";
-import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
+import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App, Alert } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getD4Recommendations } from "../../api/capa";
-import type { D4Recommendation } from "../../types";
+import { getD4Recommendations, adoptRecommendation, RecommendationBlockedError } from "../../api/capa";
+import RecommendationDAG from "./RecommendationDAG";
+import RiskTags from "./RiskTags";
+import type { D4Recommendation, StageRun } from "../../types";
 
 const { Text } = Typography;
 
 interface D4RecPanelProps {
   capaId: string;
-  onAdopt: (adoptedText: string) => void;
   canAdopt?: boolean;
+  beforeAdopt?: () => Promise<void>;
+  onAdopted?: () => void;
 }
 
-export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPanelProps) {
+export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdopted }: D4RecPanelProps) {
   const { t } = useTranslation("capa");
   const { message } = App.useApp();
   const [recommendations, setRecommendations] = useState<D4Recommendation[]>([]);
+  const [stages, setStages] = useState<StageRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLoading(true);
+    setBlocked(false);
     getD4Recommendations(capaId)
-      .then((res) => setRecommendations(res.items))
-      .catch(() => message.error(t("d4.loadFailed")))
+      .then((res) => {
+        setRecommendations(res.items);
+        setStages(res.stages ?? []);
+      })
+      .catch((err) => {
+        if (err instanceof RecommendationBlockedError) {
+          setBlocked(true);
+          setStages(err.detail.stages ?? []);
+        } else {
+          message.error(t("d4.loadFailed"));
+        }
+      })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;
-  if (recommendations.length === 0) {
+
+  if (blocked) {
     return (
-      <Empty
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={
-          <span>
-            {t("d4.empty")}
-            <br />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("d4.hint")}
-            </Text>
-          </span>
-        }
-      />
+      <Card
+        size="small"
+        title={<Space><SearchOutlined />{t("d4.title")}</Space>}
+        style={{ marginBottom: 16 }}
+        extra={<Text type="secondary" style={{ fontSize: 12 }}>{t("d4.subtitle")}</Text>}
+      >
+        <Alert
+          data-e2e="rec-blocked-banner"
+          type="warning"
+          showIcon
+          message={t("d4.blocked.banner")}
+        />
+        {stages.length > 0 && <RecommendationDAG stages={stages} />}
+      </Card>
     );
   }
+
+  const knownSources = [
+    "linked",
+    "fmea_graph",
+    "semantic_search",
+    "keyword",
+    "historical_capa",
+    "llm",
+    "rule",
+    "same_type_product_kb",
+    "lessons_learned",
+    "spc_anomaly",
+    "mes",
+    "iqc",
+    "supplier_history",
+  ];
 
   const groups = {
     linked: recommendations.filter(
@@ -56,7 +91,16 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
     historical: recommendations.filter((r) => r.match_source === "historical_capa"),
     llm: recommendations.filter((r) => r.match_source === "llm"),
     rule: recommendations.filter((r) => r.match_source === "rule"),
+    same_type_product_kb: recommendations.filter((r) => r.match_source === "same_type_product_kb"),
+    lessons_learned: recommendations.filter((r) => r.match_source === "lessons_learned"),
+    spc_anomaly: recommendations.filter((r) => r.match_source === "spc_anomaly"),
+    mes: recommendations.filter((r) => r.match_source === "mes"),
+    iqc: recommendations.filter((r) => r.match_source === "iqc"),
+    supplier_history: recommendations.filter((r) => r.match_source === "supplier_history"),
+    other: recommendations.filter((r) => !knownSources.includes(r.match_source)),
   };
+
+  const hasRecommendations = recommendations.length > 0;
 
   const renderGroup = (title: string, items: D4Recommendation[]) => {
     if (items.length === 0) return null;
@@ -78,9 +122,33 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
                     type="link"
                     size="small"
                     icon={<CheckOutlined />}
+                    data-e2e="d4-adopt"
                     disabled={!canAdopt}
                     title={!canAdopt ? t("d4.readonlyTooltip") : undefined}
-                    onClick={() => onAdopt(item.failure_cause_name)}
+                    onClick={async () => {
+                      try {
+                        await beforeAdopt?.();
+                        await adoptRecommendation(capaId, {
+                          d_step: "d4",
+                          adopted_text: item.failure_cause_name,
+                          source: item.match_source,
+                          stage_index: item.stage_index,
+                          item_ref: {
+                            failure_cause_node_id: item.failure_cause_node_id,
+                            fmea_id: item.fmea_id,
+                            failure_mode_node_id: item.failure_mode_node_id,
+                            // historical_capa 来源的节点 ID 为 null，靠 source_capa_id/document_no 区分，
+                            // 否则两条同根因文本的历史推荐会被后端 dedupe 误并
+                            source_capa_id: item.source_capa_id,
+                            source_capa_document_no: item.source_capa_document_no,
+                          },
+                        });
+                        message.success(t("d4.adopted"));
+                        onAdopted?.();
+                      } catch {
+                        message.error(t("d4.adoptFailed"));
+                      }
+                    }}
                   >
                     {t("d4.adopt")}
                   </Button>,
@@ -101,6 +169,20 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
                   title={item.failure_cause_name}
                   description={
                     <Space size={4} wrap>
+                      <Tag data-e2e={`rec-source-${item.match_source}`}>
+                        {t(`d4.sources.${item.match_source}`, { defaultValue: item.match_source })}
+                      </Tag>
+                      {item.stage_index != null && (
+                        <Tag data-e2e={`rec-item-stage-${item.stage_index}`}>
+                          {t("d4.stageLabel", { n: item.stage_index })}
+                        </Tag>
+                      )}
+                      <RiskTags
+                        ap={item.ap}
+                        severity={item.severity}
+                        occurrence={item.occurrence}
+                        detection={item.detection}
+                      />
                       {item.failure_mode_name && <Tag>{item.failure_mode_name}</Tag>}
                       {item.fmea_document_no && <Tag color="blue">{item.fmea_document_no}</Tag>}
                       {item.match_reason && <Tag color="default">{item.match_reason}</Tag>}
@@ -125,11 +207,37 @@ export default function D4RecPanel({ capaId, onAdopt, canAdopt = true }: D4RecPa
       style={{ marginBottom: 16 }}
       extra={<Text type="secondary" style={{ fontSize: 12 }}>{t("d4.subtitle")}</Text>}
     >
-      {renderGroup(t("d4.groups.linked"), groups.linked)}
-      {renderGroup(t("d4.groups.semantic"), groups.semantic)}
-      {renderGroup(t("d4.groups.historical"), groups.historical)}
-      {renderGroup(t("d4.groups.llm"), groups.llm)}
-      {renderGroup(t("d4.groups.rule"), groups.rule)}
+      {stages.length > 0 && <RecommendationDAG stages={stages} />}
+      {!hasRecommendations && (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <span>
+              {t("d4.empty")}
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t("d4.hint")}
+              </Text>
+            </span>
+          }
+        />
+      )}
+      {hasRecommendations && (
+        <>
+          {renderGroup(t("d4.groups.linked"), groups.linked)}
+          {renderGroup(t("d4.groups.semantic"), groups.semantic)}
+          {renderGroup(t("d4.groups.historical"), groups.historical)}
+          {renderGroup(t("d4.groups.llm"), groups.llm)}
+          {renderGroup(t("d4.groups.rule"), groups.rule)}
+          {renderGroup(t("d4.groups.same_type_product_kb"), groups.same_type_product_kb)}
+          {renderGroup(t("d4.groups.lessons_learned"), groups.lessons_learned)}
+          {renderGroup(t("d4.groups.spc_anomaly"), groups.spc_anomaly)}
+          {renderGroup(t("d4.groups.mes"), groups.mes)}
+          {renderGroup(t("d4.groups.iqc"), groups.iqc)}
+          {renderGroup(t("d4.groups.supplier_history"), groups.supplier_history)}
+          {renderGroup(t("d4.groups.other"), groups.other)}
+        </>
+      )}
     </Card>
   );
 }

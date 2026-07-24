@@ -74,6 +74,25 @@ async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20
                 continue
             # Delete children first by FK to parent PK.
             for child_model, fk_col in children:
+                # Nested RESTRICT children of capa_docg_analysis must go first.
+                if child_model is not None and getattr(child_model, "__tablename__", None) == "capa_docg_analysis":
+                    from app.models.capa_doc_gate import CapaDocgAudit, CapaDocgDecision
+                    analysis_ids = [
+                        r[0] for r in (
+                            await db.execute(
+                                select(child_model.analysis_id).where(
+                                    getattr(child_model, fk_col).in_(parent_ids)
+                                )
+                            )
+                        ).all()
+                    ]
+                    if analysis_ids:
+                        r1 = await db.execute(delete(CapaDocgDecision).where(
+                            CapaDocgDecision.analysis_id.in_(analysis_ids)))
+                        deleted["CapaDocgDecision"] = deleted.get("CapaDocgDecision", 0) + r1.rowcount
+                        r2 = await db.execute(delete(CapaDocgAudit).where(
+                            CapaDocgAudit.analysis_id.in_(analysis_ids)))
+                        deleted["CapaDocgAudit"] = deleted.get("CapaDocgAudit", 0) + r2.rowcount
                 fk = getattr(child_model, fk_col)
                 result = await db.execute(delete(child_model).where(fk.in_(parent_ids)))
                 deleted[f"{child_model.__name__}.{fk_col}"] = deleted.get(f"{child_model.__name__}.{fk_col}", 0) + result.rowcount

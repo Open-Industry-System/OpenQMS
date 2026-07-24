@@ -61,6 +61,14 @@ def test_extract_json_strips_code_fence():
     assert extract_json('{"b": 2}') == {"b": 2}
 
 
+def test_extract_json_tolerates_prose_wrapper():
+    """Small models often wrap JSON in prose; US-E2E-01.9 failed on bare prose."""
+    from app.services.agent.llm_json import extract_json
+
+    assert extract_json('Here is the result:\n{"ok": true}\nThanks') == {"ok": True}
+    assert extract_json("suggestions: [1, 2]") == [1, 2]
+
+
 @pytest.mark.asyncio
 async def test_complete_json_openai_success(monkeypatch):
     pc = ProviderClient(provider="openai", client=object(), model="m")
@@ -282,6 +290,28 @@ async def test_build_client_local_returns_base_url_and_no_client(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_client_ollama_aliases_local(monkeypatch):
+    """ollama provider is recognized and routed through the local (/api/generate) path,
+    so .env.e2e's LLM_PROVIDER=ollama no longer falls through to '未知 provider'."""
+    from app.schemas.ai_config import AIConfigOut
+
+    async def _cfg(db):
+        return AIConfigOut(llm_provider="ollama", llm_api_key="ollama", llm_model="kimi-k2",
+                           llm_base_url="http://127.0.0.1:11434", llm_timeout=30,
+                           capa_draft_llm_timeout=15, report_llm_timeout=10,
+                           embedding_provider="", embedding_api_key="",
+                           embedding_model="", embedding_base_url="", embedding_dimensions=1536,
+                           search_vector_weight=0.7, search_fulltext_weight=0.3)
+
+    monkeypatch.setattr(provider_adapter, "get_raw_ai_config", _cfg)
+    pc = await provider_adapter.build_client(object())
+    assert pc.provider == "local"
+    assert pc.client is None
+    assert pc.base_url == "http://127.0.0.1:11434"
+    assert pc.model == "kimi-k2"
+
+
+@pytest.mark.asyncio
 async def test_complete_json_local_success(monkeypatch):
     from unittest.mock import AsyncMock
 
@@ -301,5 +331,10 @@ async def test_complete_json_local_success(monkeypatch):
     assert out == {"z": 3}
     mock_client.post.assert_awaited_once_with(
         "/api/generate",
-        json={"model": "llama3", "prompt": "prompt", "stream": False},
+        json={
+            "model": "llama3",
+            "prompt": "prompt",
+            "stream": False,
+            "format": "json",
+        },
     )

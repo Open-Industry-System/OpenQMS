@@ -9,6 +9,7 @@ from app.models.audit_finding import AuditFinding
 from app.models.audit_plan import AuditPlan
 from app.models.audit_program import AuditProgram, AuditProgramTargetFactory
 from app.models.capa import CAPAEightD
+from app.state_machines.eightd_state import capa_open_clause
 from app.models.factory import Factory
 from app.models.fmea import FMEADocument
 from app.models.iqc_inspection import IqcInspection
@@ -66,7 +67,7 @@ async def get_group_dashboard(
     rows = await db.execute(
         select(CAPAEightD.factory_id, func.count(CAPAEightD.report_id))
         .where(CAPAEightD.factory_id.in_(factory_ids))
-        .where(CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]))
+        .where(capa_open_clause(CAPAEightD.status))
         .group_by(CAPAEightD.factory_id)
     )
     for fid, cnt in rows.all():
@@ -78,7 +79,7 @@ async def get_group_dashboard(
     rows = await db.execute(
         select(CAPAEightD.factory_id, func.count(CAPAEightD.report_id))
         .where(CAPAEightD.factory_id.in_(factory_ids))
-        .where(CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]))
+        .where(capa_open_clause(CAPAEightD.status))
         .where(CAPAEightD.due_date < today)
         .group_by(CAPAEightD.factory_id)
     )

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,6 +10,11 @@ from app.database import Base
 
 class CAPAEightD(Base):
     __tablename__ = "capa_eightd"
+    __table_args__ = (
+        # Composite unique required by child composite FKs (D3 run / doc-gate / etc.).
+        # Mirrors alembic 20260711_d3_containment_tables::uq_capa_factory.
+        UniqueConstraint("report_id", "factory_id", name="uq_capa_factory"),
+    )
 
     report_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -22,6 +27,7 @@ class CAPAEightD(Base):
     )
     status: Mapped[str] = mapped_column(String(20), default="D1_TEAM")
     severity: Mapped[str] = mapped_column(String(20), default="general")
+    d4_retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     d1_team: Mapped[dict] = mapped_column(JSONB, default=lambda: [])
     d2_description: Mapped[str | None] = mapped_column(Text)
     d3_interim: Mapped[str | None] = mapped_column(Text)
@@ -34,9 +40,105 @@ class CAPAEightD(Base):
         UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id")
     )
     fmea_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    scar_ref_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        # Name must match alembic 20260716_capa_scar_ref so drop_all can resolve
+        # the capa_eightd ↔ supplier_scars cycle.
+        ForeignKey("supplier_scars.scar_id", ondelete="SET NULL", name="fk_capa_eightd_scar_ref_id"),
+        nullable=True,
+    )
     due_date: Mapped[date | None] = mapped_column(Date)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.supplier_id", ondelete="RESTRICT"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class CapaRootCauseVerification(Base):
+    __tablename__ = "capa_root_cause_verification"
+    __table_args__ = (
+        CheckConstraint(
+            "method IS NULL OR method IN ('measurement','observation','reproduction')",
+            name="chk_verification_method",
+        ),
+        CheckConstraint(
+            "conclusion IN ('pending','passed','failed')",
+            name="chk_verification_conclusion",
+        ),
+        CheckConstraint(
+            "is_verified = (conclusion = 'passed')",
+            name="chk_verification_conclusion_is_verified",
+        ),
+    )
+    verification_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    root_cause_text: Mapped[str] = mapped_column(Text, nullable=False)
+    method: Mapped[str | None] = mapped_column(Text)
+    result: Mapped[str | None] = mapped_column(Text)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    conclusion: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    evidence_attachments: Mapped[list] = mapped_column(JSONB, default=lambda: [])
+    source_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    verified_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CapaAIAdoption(Base):
+    __tablename__ = "capa_ai_adoption"
+    adoption_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    d_step: Mapped[str] = mapped_column(String(8), nullable=False)
+    adopted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    stage_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    adopted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    adopted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CapaD7NodeAction(Base):
+    __tablename__ = "capa_d7_node_action"
+    action_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    # 可空：规则引擎兜底推荐无关联 FMEA（US-E2E-01 D7 兜底）
+    fmea_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id", ondelete="CASCADE"), nullable=True
+    )
+    failure_mode_node_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    failure_cause_node_id: Mapped[str | None] = mapped_column(String(128))
+    match_source: Mapped[str] = mapped_column(String(40), nullable=False)
+    prevention_control_node_id: Mapped[str | None] = mapped_column(String(128))
+    prevention_control_name_before: Mapped[str | None] = mapped_column(Text)
+    prevention_control_name_after: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    acted_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    acted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    recommendation_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # US-E2E-01.3：node-action 执行生命周期（pending→executed→verified）；本切片止于 pending
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+
+
+class CapaPptExport(Base):
+    __tablename__ = "capa_ppt_export"
+    export_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    capa_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="CASCADE"), nullable=False)
+    factory_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False)
+    tenant_schema: Mapped[str | None] = mapped_column(String(63))
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    generated_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    version: Mapped[str] = mapped_column(String(40), nullable=False)  # YYYYMMDDTHHMMSSZ
+    file_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 恒 None（不落盘）
+    review_status: Mapped[str] = mapped_column(String(20), default="skipped", nullable=False)
+    review_rounds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    review_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -6,7 +6,7 @@ and returns a RuleResult. No DB access, no side effects.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 # ── Data structures ──────────────────────────────────────────────────
@@ -19,6 +19,7 @@ class SupplierRiskInput:
     scars: list[Any] = field(default_factory=list)
     evaluations: list[Any] = field(default_factory=list)
     certifications: list[Any] = field(default_factory=list)
+    capa_incidents: list[Any] = field(default_factory=list)  # 01.6
 
 
 @dataclass
@@ -357,6 +358,90 @@ def rule_r10_safety_defect(data: SupplierRiskInput, thresholds: dict) -> RuleRes
                       detail="未检测到安全缺陷", category="compliance", critical=False)
 
 
+# ── R11  CAPA 来料不良影响（severity + repeat 计分；disposition 仅追溯）──
+
+_SEVERITY_RANK = {
+    "致命": 4, "严重": 3, "一般": 2, "轻微": 1,
+    "fatal": 4, "serious": 3, "general": 2,
+    "critical": 4, "major": 3, "minor": 1,
+}
+
+_CREATED_AT_MIN = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def capa_incident_sort_key(i) -> tuple:
+    """Deterministic CAPA incident ranking for R11 / inject re-sort.
+
+    Higher rank first, then newer created_at, then smaller input_id.
+    Use with ``max(..., key=capa_incident_sort_key)`` or
+    ``sorted(..., key=capa_incident_sort_key, reverse=True)``.
+    """
+    rank = _SEVERITY_RANK.get(getattr(i, "severity", ""), 2)
+    created = getattr(i, "created_at", None)
+    if created is None:
+        created_key = _CREATED_AT_MIN
+    elif created.tzinfo is None:
+        created_key = created.replace(tzinfo=timezone.utc)
+    else:
+        created_key = created
+    iid = getattr(i, "input_id", None)
+    # Invert input_id so max()/reverse sorted prefer smaller ids among ties.
+    iid_str = str(iid) if iid is not None else ""
+    return (rank, created_key, tuple(-ord(c) for c in iid_str))
+
+
+def rule_r11_capa_issue(data: SupplierRiskInput, thresholds: dict) -> RuleResult:
+    base_score: int = thresholds.get("base_score", 10)
+    severe_bonus: int = thresholds.get("severe_bonus", 10)
+    repeat_bonus: int = thresholds.get("repeat_bonus", 10)
+
+    incidents = data.capa_incidents
+    if not incidents:
+        return RuleResult(rule_id="R11", triggered=False, score=0,
+                          detail="无 CAPA 来料不良输入", category="quality", critical=False)
+
+    # 最高严重度；同级取较新 created_at，再取较小 input_id（不依赖调用方排序）
+    top = max(incidents, key=capa_incident_sort_key)
+    rank = _SEVERITY_RANK.get(getattr(top, "severity", ""), 2)
+
+    repeat_confirmed = getattr(top, "repeat_confirmed", None)
+    repeat_suggested = getattr(top, "repeat_suggested", None)
+    if repeat_confirmed is not None:
+        repeat = bool(repeat_confirmed)
+        provisional = False
+    else:
+        # All inputs not yet human-confirmed are provisional (even if suggested is None).
+        repeat = bool(repeat_suggested) if repeat_suggested is not None else False
+        provisional = True
+
+    # Design §5.5: 致命/严重 → 高分, 一般 → 中, 轻微 → 低.
+    # base_score is the mid (一般) tier; severe adds a bonus; minor is half base.
+    if rank >= 3:  # 致命/严重
+        score = float(base_score) + float(severe_bonus)
+        critical = True
+    elif rank <= 1:  # 轻微
+        score = float(base_score) * 0.5
+        critical = False
+    else:  # 一般
+        score = float(base_score)
+        critical = False
+    if repeat:
+        score += float(repeat_bonus)
+    score = min(score, 100.0)
+
+    disp = getattr(top, "disposition", "") or ""
+    matched = getattr(top, "matched_capa_nos", []) or []
+    detail_parts = [f"严重度: {top.severity}", f"处置: {disp}"]
+    if matched:
+        detail_parts.append(f"关联历史: {', '.join(matched)}")
+    detail_parts.append(f"重复: {'是' if repeat else '否'}" + ("（待确认，provisional）" if provisional else ""))
+    # Design: error-status historical inputs remain incidents but mark prior failure.
+    if getattr(top, "status", None) == "error":
+        detail_parts.append("曾失败")
+    return RuleResult(rule_id="R11", triggered=True, score=round(score, 2),
+                      detail="; ".join(detail_parts), category="quality", critical=critical)
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 
 
@@ -371,6 +456,7 @@ RULE_REGISTRY: list[tuple[str, object, str, int, bool]] = [
     ("R08", rule_r08_cert_expiry, "compliance", 8, False),
     ("R09", rule_r09_score_decline, "compliance", 8, False),
     ("R10", rule_r10_safety_defect, "compliance", 15, True),
+    ("R11", rule_r11_capa_issue, "quality", 1, False),
 ]
 
 _REGISTRY_MAP: dict[str, tuple[object, str, int, bool]] = {

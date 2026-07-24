@@ -9,8 +9,11 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.main import app
+from app.database import async_session
+from app.seed_e2e_constants import E2E_KNOWN_DOCS
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("E2E_MODE"),
@@ -35,9 +38,89 @@ async def test_seed_state_shape():
     # groupadmin spans both factories
     ga = next(a for a in data["accounts"] if a["username"] == "groupadmin")
     assert set(ga["factory_codes"]) == {"DC-FACT-E2E", "SH-FACT-E2E"}
-    assert data["known_docs"]["pfmea"] == ["PFMEA-E2E-001"]
-    assert data["known_docs"]["capa"] == ["8D-E2E-001"]
+    assert data["known_docs"] == E2E_KNOWN_DOCS
     assert "PFMEA-E2E-001" in data["used_doc_numbers"]
+
+
+@pytest.mark.asyncio
+async def test_seed_docs_actually_exist_in_db():
+    """Break the known_docs circularity: assert the critical seed docs REALLY exist in the
+    tables (not just declared in E2E_KNOWN_DOCS, which the endpoint mirrors verbatim).
+    Hardcoded doc numbers keep this check independent of the constant.
+
+    Also assert 01.7 doc-gate CP reseed hygiene (draft + no approval residue + single
+    fixed item_id + matching factory) when this test runs against an already-seeded
+    e2e DB (E2E_MODE=1). Full reseed-idempotency + baseline/hash alignment is covered
+    by tests/e2e/test_seed_e2e_docgate.py (runs under make check without E2E_MODE).
+    """
+    import uuid
+    from app.models.capa import CAPAEightD
+    from app.models.control_plan import ControlPlan, ControlPlanItem
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.models.fmea import FMEADocument
+    from app.seed_e2e_constants import (
+        DOCGATE_E2E_CP_ID,
+        DOCGATE_E2E_CP_ITEM_ID,
+        DOCGATE_E2E_CP_VER_ID,
+    )
+
+    DOCGATE_CP_ID = uuid.UUID(DOCGATE_E2E_CP_ID)
+    DOCGATE_CP_ITEM_ID = uuid.UUID(DOCGATE_E2E_CP_ITEM_ID)
+    DOCGATE_CP_VER_ID = uuid.UUID(DOCGATE_E2E_CP_VER_ID)
+
+    async with async_session() as db:
+        fmeas = {r[0] for r in (await db.execute(
+            select(FMEADocument.document_no).where(
+                FMEADocument.document_no.in_([
+                    "PFMEA-E2E-001", "PFMEA-E2E-DOCGATE-001", "PFMEA-E2E-FMEA-LINK-001",
+                ]))
+        )).all()}
+        cp = (await db.execute(
+            select(ControlPlan).where(ControlPlan.document_no == "CP-E2E-DOCGATE-001")
+        )).scalar_one_or_none()
+        capas = {r[0] for r in (await db.execute(
+            select(CAPAEightD.document_no).where(
+                CAPAEightD.document_no.in_([
+                    "8D-E2E-DOCGATE-001", "8D-E2E-FMEA-LINK-001", "8D-E2E-D4-001",
+                    "8D-E2E-APPROVAL-001", "8D-E2E-KNOW-001", "8D-E2E-RISK-001",
+                ]))
+        )).all()}
+
+        # 01.7 CP reseed contract (independent of E2E_KNOWN_DOCS)
+        assert cp is not None, "missing CP-E2E-DOCGATE-001"
+        assert cp.cp_id == DOCGATE_CP_ID
+        assert cp.status == "draft", f"docgate CP must be draft for PUT path, got {cp.status}"
+        assert cp.approved_by is None, "reseed must clear approved_by"
+        assert cp.approved_at is None, "reseed must clear approved_at"
+
+        items = list((await db.execute(
+            select(ControlPlanItem).where(ControlPlanItem.cp_id == cp.cp_id)
+        )).scalars().all())
+        assert len(items) == 1, f"docgate CP must have exactly 1 item, got {len(items)}"
+        assert items[0].item_id == DOCGATE_CP_ITEM_ID
+        assert items[0].factory_id == cp.factory_id, "item factory_id must match CP"
+        assert items[0].control_method == "首件+巡检", (
+            f"item not reset to ITEM_CANON: control_method={items[0].control_method}"
+        )
+
+        cp_ver = (await db.execute(
+            select(ControlPlanVersion).where(
+                ControlPlanVersion.version_id == DOCGATE_CP_VER_ID)
+        )).scalar_one_or_none()
+        assert cp_ver is not None, "missing docgate CP baseline version"
+        assert cp_ver.cp_id == cp.cp_id
+        # Baseline snapshot must pin the fixed item_id (doc-gate target_key stability)
+        snap_ids = {row.get("item_id") for row in (cp_ver.items_snapshot or [])}
+        assert snap_ids == {str(DOCGATE_CP_ITEM_ID)}, (
+            f"baseline items_snapshot item_ids={snap_ids}"
+        )
+
+    assert fmeas == {"PFMEA-E2E-001", "PFMEA-E2E-DOCGATE-001", "PFMEA-E2E-FMEA-LINK-001"}, (
+        f"missing FMEA seeds: {fmeas}")
+    assert {
+        "8D-E2E-DOCGATE-001", "8D-E2E-FMEA-LINK-001", "8D-E2E-D4-001",
+        "8D-E2E-APPROVAL-001", "8D-E2E-KNOW-001", "8D-E2E-RISK-001",
+    } <= capas, f"missing CAPA seeds: {capas}"
 
 
 @pytest.mark.asyncio

@@ -31,7 +31,7 @@ export default function RelatedFMEALink({
 
   const handleClick = () => {
     const url = fmeaNodeId
-      ? `/fmea/${fmea.fmea_id}?node=${fmeaNodeId}`
+      ? `/fmea/${fmea.fmea_id}?tab=graph&highlightNode=${fmeaNodeId}`
       : `/fmea/${fmea.fmea_id}`;
     navigate(url);
   };

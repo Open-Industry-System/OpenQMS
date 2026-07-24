@@ -51,11 +51,12 @@ async def build_client(db: AsyncSession) -> ProviderClient:
             client=AsyncAnthropic(api_key=cfg.llm_api_key),
             model=cfg.llm_model or "claude-sonnet-4-6-20250514",
         )
-    if provider == "local":
+    # "ollama" 走与 "local" 相同的原生 /api/generate 路径（OpenAI 兼容端点用 local 即可）
+    if provider in ("local", "ollama"):
         if not cfg.llm_base_url:
-            raise ProviderNotConfiguredError("local 需要 LLM_BASE_URL")
+            raise ProviderNotConfiguredError("local/ollama 需要 LLM_BASE_URL")
         if not cfg.llm_model:
-            raise ProviderNotConfiguredError("local 需要 LLM_MODEL")
+            raise ProviderNotConfiguredError("local/ollama 需要 LLM_MODEL")
         return ProviderClient(
             provider="local",
             client=None,
@@ -176,10 +177,18 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     elif pc.provider == "local":
         import httpx
 
+        # Ollama supports format=json to constrain output to JSON (helps small
+        # models that otherwise emit prose → extract_json "Expecting value").
+        # US-E2E-01.7/01.9: without this, qwen2.5:3b often returns non-JSON.
         async with httpx.AsyncClient(base_url=pc.base_url, timeout=30) as client:
             resp = await client.post(
                 "/api/generate",
-                json={"model": pc.model, "prompt": prompt, "stream": False},
+                json={
+                    "model": pc.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                },
             )
         resp.raise_for_status()
         text = resp.json().get("response", "")
