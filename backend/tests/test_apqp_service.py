@@ -24,30 +24,82 @@ from urllib.parse import urlparse
 _DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _isolate_test_db_url(shared_url: str) -> str:
+    """Create a throwaway Postgres DB for destructive drop_all/create_all fixtures.
+
+    Must not share TEST_DATABASE_URL with the rest of the suite — drop_all
+    removes migration-only columns (e.g. document_embeddings.embedding vector)
+    and migration seed rows (e.g. agent_review_skill).
+    """
+    import uuid
+    from urllib.parse import urlparse
+    from sqlalchemy import create_engine, text as sa_text
+
+    parsed = urlparse(shared_url.replace("postgresql+asyncpg://", "postgresql://"))
+    name = f"qms_apqp_iso_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(
+        f"postgresql+psycopg://{parsed.username}:{parsed.password or ''}"
+        f"@{parsed.hostname}:{parsed.port or 5432}/postgres",
+        isolation_level="AUTOCOMMIT",
+    )
+    with admin.connect() as conn:
+        conn.execute(sa_text(f'CREATE DATABASE "{name}"'))
+    admin.dispose()
+    return (
+        f"postgresql+asyncpg://{parsed.username}:{parsed.password or ''}"
+        f"@{parsed.hostname}:{parsed.port or 5432}/{name}"
+    )
+
+
+def _drop_isolate_db(url: str) -> None:
+    from urllib.parse import urlparse
+    from sqlalchemy import create_engine, text as sa_text
+
+    parsed = urlparse(url.replace("postgresql+asyncpg://", "postgresql://"))
+    admin = create_engine(
+        f"postgresql+psycopg://{parsed.username}:{parsed.password or ''}"
+        f"@{parsed.hostname}:{parsed.port or 5432}/postgres",
+        isolation_level="AUTOCOMMIT",
+    )
+    with admin.connect() as conn:
+        conn.execute(sa_text(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            f"WHERE datname = '{parsed.path.lstrip('/')}' AND pid <> pg_backend_pid()"
+        ))
+        conn.execute(sa_text(f'DROP DATABASE IF EXISTS "{parsed.path.lstrip("/")}"'))
+    admin.dispose()
+
+
+
+
 @pytest_asyncio.fixture(scope="function")
 async def db():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
+    shared = os.environ.get("TEST_DATABASE_URL")
+    if not shared:
         pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
-    db_name = urlparse(url).path.lstrip("/")
-    if "_test" not in db_name:
-        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
+    shared_name = urlparse(shared).path.lstrip("/")
+    if "_test" not in shared_name:
+        pytest.skip(f"Database '{shared_name}' does not contain '_test'; refusing to run destructive tests")
 
+    # Isolate: never drop_all the shared suite DB (migration schema + seeds).
+    url = _isolate_test_db_url(shared)
     engine = create_async_engine(url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(
-            Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
-        )
-        await conn.execute(
-            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
-        )
-        await conn.commit()
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with session_factory() as session:
-        yield session
-    await engine.dispose()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
+            )
+            await conn.execute(
+                ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
+            )
+            await conn.commit()
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
+        _drop_isolate_db(url)
 
 
 async def _make_user(db: AsyncSession, username: str, legacy_role: str = "admin") -> User:
