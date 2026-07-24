@@ -160,10 +160,14 @@ def test_upgrade_normalizes_empty_rule_results(mig_db_url):
 
 
 def test_single_alembic_head(mig_db_url):
-    """After merge + capa_inputs + R11 seed, alembic reports a single head."""
+    """After merge + capa_inputs + R11 seed + lateral diffusion, alembic reports a single head."""
     from alembic.script import ScriptDirectory
 
     cfg = _cfg(mig_db_url)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == [HEAD], f"expected single head {HEAD}, got {heads}"
+    # 20260721_capa_lateral_diffusion merges the knowledge/doc-gate and R11
+    # heads, so it is the current single head (not the older R11 config head).
+    assert heads == ["20260721_capa_lateral_diffusion"], (
+        f"expected single head 20260721_capa_lateral_diffusion, got {heads}"
+    )

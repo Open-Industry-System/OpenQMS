@@ -528,7 +528,14 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
 
     Empty affected_docs is a VALID done state (spec C4): the LLM concluded no
     documents need updating; the engineer must then call confirm_no_affected.
-    The vacuous-pass guard (per-doc key_points >= 1) only applies to non-empty lists.
+
+    Small-model tolerance policy:
+    - Unknown doc_id (after remap): skip the doc, keep going.
+    - Invalid/non-dict key_point: drop that key_point, keep the rest.
+    - A known doc whose key_points are ALL dropped/empty: this is a vacuous pass
+      — return an error string so the whole analysis is `failed` (the caller
+      then re-prompts / surfaces the problem). Dropping it silently would let
+      the gate pass on a doc the LLM named but described nothing about.
     """
     raw_docs = phase2.get("affected_docs")
     if not isinstance(raw_docs, list):
@@ -556,7 +563,8 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
         cand = cand_by_id[doc_id]
         kps = d.get("key_points", [])
         if not isinstance(kps, list):
-            continue
+            # Treat non-list key_points as vacuous for a known doc → fail.
+            return f"文档「{cand.get('doc_name') or cand['doc_id']}」key_points 须为列表"
         suggestion = d.get("update_suggestion")
         if not suggestion or not str(suggestion).strip():
             # Small models often leave this blank; default rather than fail whole analysis.
@@ -590,8 +598,9 @@ def _validate_and_backfill(phase2: dict, candidates: list[dict]) -> list[dict] |
             seen_kps.add(ksig)
             valid_kps.append(kp)
         if not valid_kps:
-            # All key_points invalid/empty — skip this doc (vacuous).
-            continue
+            # Known doc but zero usable key_points — vacuous pass; fail the
+            # whole analysis rather than silently dropping the doc.
+            return f"文档「{cand.get('doc_name') or cand['doc_id']}」缺少有效 key_points"
         out.append({
             "doc_type": cand["doc_type"], "doc_id": cand["doc_id"], "doc_name": cand["doc_name"],
             "baseline_version_id": str(cand["baseline_version_id"]) if cand.get("baseline_version_id") else None,

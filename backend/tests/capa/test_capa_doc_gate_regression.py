@@ -1725,8 +1725,9 @@ def test_delete_field_must_be_in_allowed_fields():
 def test_non_object_llm_output_returns_error_string():
     """Non-dict docs/key_points must not AttributeError.
 
-    Top-level non-dict doc → hard error string. Non-dict key_points are dropped
-    (small-model noise); vacuous docs yield empty affected list (valid done).
+    Top-level non-dict doc → hard error string. Non-list key_points on a known
+    doc → error string (vacuous-pass guard). Non-dict items inside a list are
+    dropped; if all are dropped the known doc fails the same guard.
     """
     cand = {
         "doc_type": "fmea", "doc_id": "d1", "doc_name": "F",
@@ -1735,12 +1736,18 @@ def test_non_object_llm_output_returns_error_string():
     }
     r1 = _validate_and_backfill({"affected_docs": [None]}, [cand])
     assert isinstance(r1, str) and "对象" in r1
+    # Non-list key_points on a known doc → error (not silent drop)
     r2 = _validate_and_backfill(
+        {"affected_docs": [{"doc_id": "d1", "key_points": "oops", "update_suggestion": "s"}]},
+        [cand],
+    )
+    assert isinstance(r2, str) and "key_points" in r2
+    # Known doc with all-non-dict key_point items → vacuous → error (key_points mentioned)
+    r3 = _validate_and_backfill(
         {"affected_docs": [{"doc_id": "d1", "key_points": [None], "update_suggestion": "s"}]},
         [cand],
     )
-    # non-dict kps skipped → no valid kps → doc dropped → empty list (C4-valid)
-    assert r2 == []
+    assert isinstance(r3, str) and "key_points" in r3
 
 
 def test_match_document_only_covers_add():
