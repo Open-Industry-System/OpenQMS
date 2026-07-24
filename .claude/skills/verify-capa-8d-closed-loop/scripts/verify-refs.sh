@@ -43,12 +43,27 @@ for dir in "${SKILL_DIRS[@]}"; do
     echo "FAIL: $skill missing '## 子报告输出' section (orchestrator contract)"
     status=1
   fi
+  if ! grep -q '^## UI 截图清单' "$skill"; then
+    echo "FAIL: $skill missing '## UI 截图清单' section (UI screenshot contract)"
+    status=1
+  fi
   # One walk = one dated folder: US-E2E-01-<date>/01.<n>/report.md
   if ! grep -qE 'docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01\.[0-9]+/report\.md' "$skill"; then
     echo "FAIL: $skill missing/incorrect report.md path (expected docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.<n>/report.md)"
     status=1
   fi
 done
+
+echo "== orchestrator UI contract =="
+orch=".claude/skills/verify-capa-8d-closed-loop/SKILL.md"
+if ! grep -q '^## UI 截图验证契约' "$orch"; then
+  echo "FAIL: $orch missing '## UI 截图验证契约' section"
+  status=1
+fi
+if ! grep -q 'browser_take_screenshot' "$orch"; then
+  echo "FAIL: $orch must require browser_take_screenshot"
+  status=1
+fi
 
 echo "== selectors =="
 while IFS= read -r sel; do

@@ -68,11 +68,24 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 ## 缺陷分类
 
-PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.2/screenshots/`。
+PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。UI 基线 + FAIL/MISSING 截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.2/screenshots/`。
+
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.2/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | D4 推荐 DAG（12 阶段） | `A-d4-dag.png` | `rec-dag-stage-1..12` 可见；stage11 done |
+| A | D4 推荐列表 + provenance | `A-d4-list.png` | 列表非空；`rec-source-*` / `rec-item-stage-*` 标签 |
+| B | D5 推荐 DAG + 列表 | `B-d5-panel.png` | 同 A 结构；无空白 |
+| C | 采纳后 D4/D5 字段回填区 | `C-adopted.png` | 采纳文案出现在字段/列表；无错误 toast |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
 
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.2/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.2/report.md`，用编排器契约模板。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。
 
 ## 维护
 

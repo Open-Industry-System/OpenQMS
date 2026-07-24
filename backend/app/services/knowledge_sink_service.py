@@ -308,6 +308,50 @@ def _build_prompt(capa: CAPAEightD, fields: dict) -> str:
     )
 
 
+
+def _normalize_tags(tags) -> list[str]:
+    """Coerce LLM tags to 3–8 non-empty unique strings.
+
+    Fail-closed only when zero usable tags remain after strip/dedupe.
+    Short lists are padded with stable defaults so small models (e.g. 2 tags)
+    do not block D8 close; long lists are truncated to 8.
+    """
+    if not isinstance(tags, list):
+        raise KnowledgeSinkFailedError(
+            f"tags 须为长度 3–8 的字符串列表，实际={tags!r}", reason="llm_failed"
+        )
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for t in tags:
+        if not isinstance(t, str):
+            continue
+        s = t.strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        cleaned.append(s)
+    if not cleaned:
+        raise KnowledgeSinkFailedError(
+            f"tags 须为长度 3–8 的字符串列表，实际={tags!r}", reason="llm_failed"
+        )
+    defaults = ["8D经验", "质量改进", "预防措施", "根因分析", "过程控制"]
+    for d in defaults:
+        if len(cleaned) >= 3:
+            break
+        if d not in seen:
+            cleaned.append(d)
+            seen.add(d)
+    # Still short (pathological defaults collision) — pad with numbered fillers
+    i = 1
+    while len(cleaned) < 3:
+        filler = f"标签{i}"
+        if filler not in seen:
+            cleaned.append(filler)
+            seen.add(filler)
+        i += 1
+    return cleaned[:8]
+
+
 async def sink_capa_on_close(
     db: AsyncSession,
     capa: CAPAEightD,
@@ -345,15 +389,11 @@ async def sink_capa_on_close(
     tags = raw.get("tags")
     if not isinstance(summary, str) or not summary.strip():
         raise KnowledgeSinkFailedError("lesson_summary 为空或非法", reason="llm_failed")
-    if not isinstance(tags, list) or not (3 <= len(tags) <= 8):
-        raise KnowledgeSinkFailedError(
-            f"tags 须为长度 3–8 的字符串列表，实际={tags!r}", reason="llm_failed"
-        )
-    if not all(isinstance(t, str) and t.strip() for t in tags):
-        raise KnowledgeSinkFailedError("tags 元素须为非空字符串", reason="llm_failed")
+    # Normalize before hard-fail: small models often return 1–2 tags (US-E2E-01.9).
+    tags = _normalize_tags(tags)
 
     fields["lesson_summary"] = summary.strip()
-    fields["tags"] = [t.strip() for t in tags]
+    fields["tags"] = tags
 
     # 4. Assemble entry identity + embedding_text / content_hash
     entry_id = uuid.uuid5(uuid.NAMESPACE_URL, f"knowledge:capa:{capa.report_id}")

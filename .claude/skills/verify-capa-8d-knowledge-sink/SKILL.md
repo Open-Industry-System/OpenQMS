@@ -71,9 +71,22 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。
 
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.8/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | 关闭后知识卡片 | `A-knowledge-card.png` | `capa-knowledge-card` + entry 摘要 |
+| B | embedding 状态 ready | `B-embedding-ready.png` | `capa-knowledge-embedding-status`=ready |
+| C | D4 推荐命中 knowledge 源（若可展示） | `C-recommend-hit.png` | provenance/源标签（API-only 可 N/A） |
+| D | 手动 resink 后卡片刷新 | `D-resink.png` | resink 按钮可用；卡片更新 |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
+
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.8/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.8/report.md`，用编排器契约模板。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。
 
 ## 维护
 

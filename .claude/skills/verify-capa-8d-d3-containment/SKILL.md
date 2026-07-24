@@ -78,11 +78,26 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 ## 缺陷分类
 
-PASS / FAIL / MISSING / BLOCKED（无 LLM → `BLOCKED`；内部 advice 行 `status=failed` 是无 LLM 下的预期行为，不是验收 FAIL；备注写说明，不用 PASS-NOTE）。FAIL/MISSING 截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.1/screenshots/`。
+PASS / FAIL / MISSING / BLOCKED（无 LLM → `BLOCKED`；内部 advice 行 `status=failed` 是无 LLM 下的预期行为，不是验收 FAIL；备注写说明，不用 PASS-NOTE）。UI 基线 + FAIL/MISSING 截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.1/screenshots/`。
+
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.1/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | CAPA 详情 `D3_INTERIM` 入口（状态 Tag + D3 区） | `A-entry.png` | 状态文案、D3 面板可见、无空白主区 |
+| B | 导入完成后（runs/snapshots 区或成功反馈） | `B-import-done.png` | 完成态可见；无红错 |
+| C | 影响报告 done（风险等级/批次） | `C-report-done.png` | risk_level、batches 有展示 |
+| D | AI 建议卡片列表 | `D-advice-list.png` | `[data-e2e=d3-advice-card]` ≥1；无永久 Spin |
+| E | 采纳弹窗 + 执行列表 | `E-adopt-exec.png` | Modal 可用；execution list ≥1 |
+| F | 推进后 `D4_ROOT_CAUSE` | `F-advanced-d4.png` | 状态 Tag 与 API 一致 |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
 
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.1/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.1/report.md`，用编排器契约模板。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。
 
 ## 维护
 

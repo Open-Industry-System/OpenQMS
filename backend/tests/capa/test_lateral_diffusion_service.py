@@ -151,7 +151,12 @@ async def test_hits_llm_success_writes_suggestions(db):
 
 
 @pytest.mark.asyncio
-async def test_hits_llm_missing_type_failed(db):
+async def test_hits_llm_missing_type_fills_fallback(db):
+    """Partial/empty LLM suggestions no longer fail-close; deterministic fill.
+
+    Small models often omit product types; D8 close must still succeed with
+    a fallback suggestion_direction per hit product type.
+    """
     factory, user = await _seed_base(db, "miss")
     await _make_pl(db, "PL-SRC-MISS", factory.id, product_type_code="TYPE-LAT-MISS")
     await _make_pl(db, "PL-A-MISS", factory.id, product_type_code="TYPE-LAT-MISS")
@@ -167,8 +172,19 @@ async def test_hits_llm_missing_type_failed(db):
             new=AsyncMock(return_value={"items": []}),
         ),
     ):
-        with pytest.raises(LateralFailedError, match="missing suggestions"):
-            await run_lateral_diffusion_check(db, capa, user.user_id)
+        await run_lateral_diffusion_check(db, capa, user.user_id)
+
+    check = await db.scalar(
+        select(CapaLateralDiffusionCheck).where(
+            CapaLateralDiffusionCheck.capa_id == capa.report_id
+        )
+    )
+    assert check is not None
+    assert check.status == "done"
+    # Every similar product has a non-empty suggestion_direction (LLM or fill)
+    assert len(check.similar_products or []) >= 1
+    for sp in check.similar_products or []:
+        assert sp.get("suggestion_direction")
 
 
 # ─── decide / rerun (Task 5) ────────────────────────────────────────────────
@@ -506,3 +522,17 @@ async def test_lateral_blocked_after_sink_succeeds(sessionmaker, monkeypatch):
             .where(KnowledgeEntry.source_id == capa_id)
         )
         assert sink_rows == 0
+
+
+def test_fill_missing_lateral_suggestions():
+    from app.services.capa_lateral_diffusion_service import _merge_llm_suggestions
+
+    similar = [
+        {"product_type_code": "TYPE-A", "hit_criteria": ["same_product_type"]},
+        {"product_type_code": "TYPE-B", "hit_criteria": ["shared_fmea_mode"]},
+    ]
+    by_type = {"TYPE-A": "请更新 FMEA 预防控制"}
+    merged = _merge_llm_suggestions(similar, by_type)
+    assert merged[0]["suggestion_direction"] == "请更新 FMEA 预防控制"
+    assert "TYPE-B" in merged[1]["suggestion_direction"] or len(merged[1]["suggestion_direction"]) > 0
+    assert all(sp.get("suggestion_direction") for sp in merged)

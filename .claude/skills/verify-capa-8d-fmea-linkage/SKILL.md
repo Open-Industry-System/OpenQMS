@@ -62,9 +62,22 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。
 
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.4/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | CAPA 详情 header FMEA 关联展示 | `A-capa-fmea-ref.png` | fmea 链接/编号可见 |
+| B | FMEA 详情「关联 CAPA」面板 | `B-fmea-reverse.png` | 列出 `8D-E2E-FMEA-LINK-001` |
+| C | D7 面板 linked 项 | `C-d7-linked.png` | linked 行展示 fm/cause |
+| D | skip 后 d7 动作列表 | `D-d7-skipped.png` | skipped 行 + reason 可见 |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
+
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.4/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.4/report.md`，用编排器契约模板。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。
 
 ## 维护
 

@@ -14,7 +14,7 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 
 US-E2E-01 已升级为 epic 合集 v8.1（10 个子故事）。本 skill 是**编排器**，不直接执行走查步骤，而是按顺序调用 10 个子 skill，汇总各子 skill 的验收报告，输出 epic 级总览。
 
-这是 acceptance walk（人可读验收报告），不是 Playwright spec——spec 写在 `frontend/e2e/specs/`。
+这是 acceptance walk（人可读验收报告），不是 Playwright spec——spec 写在 `frontend/e2e/specs/`。走查时**必须**用 Playwright MCP 对每个关键前端界面截图并做视觉检查（见「UI 截图验证契约」）；纯 API 冒烟不得把 UI 标 PASS。
 
 ## When to Use
 
@@ -91,7 +91,7 @@ US-E2E-01 已升级为 epic 合集 v8.1（10 个子故事）。本 skill 是**�
 docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/
   report.md                 ← epic 总览（仅编排器整跑时写；单子故事走查可省略）
   01.1/report.md            ← 子报告（相对路径 screenshots/ 指向同级目录）
-  01.1/screenshots/         ← 该子故事 FAIL/MISSING 截图
+  01.1/screenshots/         ← UI 基线截图（每步 PASS 也拍）+ FAIL/MISSING 证据
   01.2/report.md
   01.2/screenshots/
   …
@@ -130,6 +130,54 @@ docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/
 - ...
 ```
 
+## UI 截图验证契约（所有子 skill 强制）
+
+API 断言不能发现前端显示问题。每个子 skill 在浏览器走查时**必须**对剧本中的每个关键界面做截图 + 视觉检查。
+
+### 工具与落盘
+
+| 项 | 要求 |
+|---|---|
+| 驱动 | Playwright MCP：`browser_navigate` / `browser_snapshot`（交互）+ **`browser_take_screenshot`**（视觉） |
+| 路径 | `REPORT_ROOT/01.<n>/screenshots/<step>-<view>.png`（例：`A-entry.png`、`B-impact-done.png`） |
+| 范围 | **每步 PASS 也截**（基线证据），不只 FAIL。FAIL/MISSING 另存 `*-FAIL.png` 或在同名图备注 |
+| 视口 | 默认桌面 1280×800+；含 Modal 时截**含弹层的当前视口**；长列表可用 `fullPage` |
+| 命名 | kebab-case；与子 skill「UI 截图清单」表中的 `文件` 列一致 |
+
+### 视觉检查清单（每张图至少过一遍）
+
+任一条成立 → 该 UI 步骤 **FAIL**（备注写清现象 + 截图文件名）：
+
+1. **空白/骨架卡死**：主内容区长时间空白、Spin 不消失、本应有数据的列表/卡片为空且无空态文案
+2. **错位/溢出**：文字截断无省略、横向溢出、控件重叠、Modal 被裁切或不可关
+3. **文案/状态错误**：状态 Tag 与 API 回读不一致、中文 UI 出现未翻译 key、错误 toast/Alert 非预期出现
+4. **控件缺失或不可用**：selector 表中的 `[data-e2e=...]` 在 snapshot 中不可见，或该显示的按钮被隐藏/disabled（与角色/状态不符时）
+5. **加载/错误态泄漏**：控制台级红错横幅、`Network Error`、未捕获 exception 直接打在页面上
+6. **Modal/面板契约**：故事要求弹出的 Modal 未出现，或已 decide/关闭后仍残留遮罩
+
+**不**因「小模型中文文案略糙」记 FAIL；**要**因「组件没渲染 / 布局坏 / 状态与 API 矛盾」记 FAIL。
+
+### 子报告中的 UI 表（必填）
+
+每个子报告在步骤表之外增加：
+
+```markdown
+## UI 截图
+
+| 步骤 | 界面 | 文件 | 视觉结果 | 备注 |
+|---|---|---|---|---|
+| A | CAPA 详情入口 | screenshots/A-entry.png | PASS/FAIL | ... |
+```
+
+- 漏截规定界面 → 该 UI 行 **MISSING**（不是软跳过）。
+- 纯 API 子路径（无前端页面）可写 `N/A` + 备注「API-only」，**不得**整表省略。
+- 总览 `report.md` 缺陷汇总须包含各子 skill 的 UI FAIL 条目。
+
+### 与 API 断言的关系
+
+- API 断言与 UI 视觉**独立计分**：API PASS + UI FAIL → 子故事总体 **FAIL**。
+- 无浏览器环境（仅 API 脚本冒烟）→ 子故事 UI 表整表 **BLOCKED**，备注「无浏览器/Playwright MCP」；**不得**把 UI 标 PASS。
+
 ## 子报告契约（所有子 skill 必须遵守）
 
 每个 `verify-capa-8d-*` 子 skill 在其 SKILL.md 末尾必须有「## 子报告输出」节，按此模板产出 `REPORT_ROOT/01.<n>/report.md`：
@@ -146,11 +194,18 @@ docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/
 |---|---|---|---|
 | A. ... | ... | PASS/FAIL/MISSING/BLOCKED | ... |
 
+## UI 截图
+
+| 步骤 | 界面 | 文件 | 视觉结果 | 备注 |
+|---|---|---|---|---|
+| A | ... | screenshots/... | PASS/FAIL/MISSING/BLOCKED | ... |
+
 ## 总体结论
 PASS / FAIL / BLOCKED
 
 ## 缺陷清单
 - [FAIL] <步骤>：<期望> vs <实际>（截图：screenshots/xxx.png）
+- [FAIL][UI] <界面>：<现象>（截图：screenshots/xxx.png）
 ```
 
 **结果枚举**：
@@ -158,9 +213,11 @@ PASS / FAIL / BLOCKED
 | 层级 | 允许值 | 说明 |
 |---|---|---|
 | 步骤「结果」列 | `PASS` / `FAIL` / `MISSING` / `BLOCKED` | **禁止** `PASS-NOTE`。说明性限制（seed 预置、审查因无 LLM 跳过等）写在 **备注** 列；步骤结果仍用四态之一（断言成立→`PASS`+备注；前置缺→`BLOCKED`；实现缺→`FAIL`）。 |
-| 总体结论 | `PASS` / `FAIL` / `BLOCKED` | 任一步 FAIL → 总体 FAIL；仅有 BLOCKED 无 FAIL → BLOCKED；全 PASS → PASS。 |
+| UI「视觉结果」列 | 同上 | 见「UI 截图验证契约」。任一张规定截图 UI FAIL → 子故事总体 FAIL。 |
+| 总体结论 | `PASS` / `FAIL` / `BLOCKED` | 任一步（含 UI）FAIL → 总体 FAIL；仅有 BLOCKED 无 FAIL → BLOCKED；全 PASS → PASS。 |
 
 子 skill 没写「## 子报告输出」节 = 契约缺失，编排器聚合时会报 `MISSING`。
+子 skill 没写「## UI 截图清单」节 = UI 契约缺失，编排器聚合时该子故事 UI 记 `MISSING`。
 
 本编排器是 README 的单向派生。每次跑前：
 

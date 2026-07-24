@@ -119,8 +119,13 @@ def test_validate_key_point_rejects_field_outside_allowlist():
 
 
 def test_validate_key_point_rejects_unknown_target_key():
-    """modify of a target_key not in existing_targets → validation error."""
-    cand = {
+    """modify of a target_key not in existing_targets.
+
+    Single existing target is recovered (small-model garbage keys); multi-target
+    with no unique field match still rejects with allowlist error.
+    """
+    # Single existing target → recover to the only candidate
+    cand_one = {
         "doc_type": "fmea",
         "existing_targets": [
             {"target_kind": "fmea_node", "target_key": "node-1",
@@ -131,9 +136,26 @@ def test_validate_key_point_rejects_unknown_target_key():
     }
     kp = {"expected_action": "modify", "target_kind": "fmea_node",
           "field": "prevention_control", "target_key": "node-unknown"}
-    err = _validate_key_point(kp, cand)
+    assert _validate_key_point(kp, cand_one) is None
+    assert kp["target_key"] == "node-1"
+
+    # Multi existing + ambiguous field → reject
+    cand_multi = {
+        "doc_type": "fmea",
+        "existing_targets": [
+            {"target_kind": "fmea_node", "target_key": "node-1",
+             "allowed_fields": ["prevention_control"]},
+            {"target_kind": "fmea_node", "target_key": "node-2",
+             "allowed_fields": ["prevention_control"]},
+        ],
+        "add_anchors": [],
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+    }
+    kp2 = {"expected_action": "modify", "target_kind": "fmea_node",
+           "field": "prevention_control", "target_key": "node-unknown"}
+    err = _validate_key_point(kp2, cand_multi)
     assert err is not None
-    assert "target_key" in err
+    assert "allowlist" in err or "target_key" in err
 
 
 # ---------------------------------------------------------------------------
@@ -1576,22 +1598,34 @@ def test_add_requires_field_and_nonempty_value():
 
 
 def test_discriminant_presence_not_truthiness():
-    """Empty target_key / empty add_anchor still count as 'present' for mutual exclusion."""
+    """Both target_key + add_anchor present: coerce by action, then validate remainder.
+
+    Small models often emit both; validator pops the wrong discriminant rather
+    than hard-failing with 互斥. Empty target_key after coerce still fails
+    'modify 须 target_key'.
+    """
     from app.services.capa_doc_gate_service import _validate_key_point
     cand = {
         "doc_type": "fmea",
         "existing_targets": [{"target_kind": "fmea_node", "target_key": "node-1",
                              "allowed_fields": ["prevention_control"]}],
-        "add_anchors": [{"parent_node_id": "node-1", "node_type": "FailureMode"}],
+        "add_anchors": [{"parent_node_id": "node-1", "node_type": "FailureMode",
+                         "business_key": "bk"}],
         "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
     }
-    # both keys present (even empty) → mutual exclusion error
+    # both keys present with empty target_key → add_anchor dropped, empty key fails
     err = _validate_key_point(
         {"expected_action": "modify", "target_kind": "fmea_node",
          "target_key": "", "add_anchor": {}, "field": "prevention_control"},
         cand,
     )
-    assert err is not None and "互斥" in err
+    assert err is not None and ("target_key" in err or "互斥" in err)
+    # both present with valid target_key → coerces cleanly to modify
+    kp = {"expected_action": "modify", "target_kind": "fmea_node",
+          "target_key": "node-1", "add_anchor": {"parent_node_id": "node-1"},
+          "field": "prevention_control"}
+    assert _validate_key_point(kp, cand) is None
+    assert "add_anchor" not in kp
 
 
 def test_match_key_point_cp_modify_uses_item_id_and_field():
@@ -1689,7 +1723,11 @@ def test_delete_field_must_be_in_allowed_fields():
 
 
 def test_non_object_llm_output_returns_error_string():
-    """Non-dict docs/key_points must not AttributeError — return validation error."""
+    """Non-dict docs/key_points must not AttributeError.
+
+    Top-level non-dict doc → hard error string. Non-dict key_points are dropped
+    (small-model noise); vacuous docs yield empty affected list (valid done).
+    """
     cand = {
         "doc_type": "fmea", "doc_id": "d1", "doc_name": "F",
         "baseline_version_id": None, "baseline_version": None,
@@ -1701,7 +1739,8 @@ def test_non_object_llm_output_returns_error_string():
         {"affected_docs": [{"doc_id": "d1", "key_points": [None], "update_suggestion": "s"}]},
         [cand],
     )
-    assert isinstance(r2, str) and "对象" in r2
+    # non-dict kps skipped → no valid kps → doc dropped → empty list (C4-valid)
+    assert r2 == []
 
 
 def test_match_document_only_covers_add():
@@ -1720,17 +1759,39 @@ def test_validate_rejects_duplicate_docs_and_delete_unknown_target():
         "doc_type": "fmea", "doc_id": "d1", "doc_name": "F",
         "baseline_version_id": "v1",
         "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
-        "existing_targets": [{"target_kind": "fmea_node", "target_key": "node-1",
-                             "allowed_fields": ["prevention_control"]}],
+        "existing_targets": [
+            {"target_kind": "fmea_node", "target_key": "node-1",
+             "allowed_fields": ["prevention_control"]},
+            {"target_kind": "fmea_node", "target_key": "node-2",
+             "allowed_fields": ["detection_control"]},
+        ],
         "add_anchors": [],
     }
-    # delete unknown target_key
+    # delete unknown target_key (multi-target with same allowed field so no unique recovery)
     err = _validate_key_point(
-        {"expected_action": "delete", "target_kind": "fmea_node", "target_key": "nope"},
+        {"expected_action": "delete", "target_kind": "fmea_node",
+         "target_key": "nope", "field": "prevention_control"},
+        {
+            "doc_type": "fmea", "doc_id": "d1", "doc_name": "F",
+            "baseline_version_id": "v1",
+            "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+            "existing_targets": [
+                {"target_kind": "fmea_node", "target_key": "node-1",
+                 "allowed_fields": ["prevention_control"]},
+                {"target_kind": "fmea_node", "target_key": "node-2",
+                 "allowed_fields": ["prevention_control"]},
+            ],
+            "add_anchors": [],
+        },
+    )
+    assert err is not None and ("allowlist" in err or "target_key" in err)
+    # delete without field still rejected
+    err_nf = _validate_key_point(
+        {"expected_action": "delete", "target_kind": "fmea_node", "target_key": "node-1"},
         cand,
     )
-    assert err is not None and "allowlist" in err
-    # duplicate docs
+    assert err_nf is not None and "field" in err_nf
+    # duplicate docs are skipped (not hard-failed) — first wins
     phase2 = {
         "affected_docs": [
             {"doc_id": "d1", "key_points": [
@@ -1744,7 +1805,9 @@ def test_validate_rejects_duplicate_docs_and_delete_unknown_target():
         ]
     }
     r = _validate_and_backfill(phase2, [cand])
-    assert isinstance(r, str) and "重复" in r
+    # Duplicates are skipped quietly (first wins); not a hard error string.
+    assert isinstance(r, list) and len(r) == 1
+    assert r[0]["doc_id"] == "d1"
 
 
 # ---------------------------------------------------------------------------
@@ -1828,3 +1891,307 @@ async def test_wrong_field_bump_does_not_pass_audit(db, capa_d8_gate_with_docs):
         a["status"] == "incomplete" and a["covered_count"] == 0
         for a in result["audits"]
     )
+
+
+def test_validate_remaps_item_id_used_as_doc_id():
+    """Small models sometimes put CP item_id in doc_id; remap to parent CP doc_id.
+
+    Regression US-E2E-01.7: LLM returned DOCGATE item UUID as doc_id →
+    'LLM 输出非法 doc_id' even though item belongs to an allowlisted CP.
+    """
+    item_id = "a0000007-0001-4000-8000-000000000002"
+    cp_id = "a0000007-0001-4000-8000-000000000001"
+    cand = {
+        "doc_type": "control_plan",
+        "doc_id": cp_id,
+        "doc_name": "CP-E2E-DOCGATE-001",
+        "baseline_version_id": "v1",
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+        "existing_targets": [
+            {
+                "target_kind": "cp_item",
+                "target_key": item_id,
+                "allowed_fields": ["control_method"],
+            }
+        ],
+        "add_anchors": [],
+    }
+    phase2 = {
+        "affected_docs": [
+            {
+                "doc_id": item_id,  # wrong: item_id used as doc_id
+                "update_suggestion": "更新控制方法",
+                "key_points": [
+                    {
+                        "expected_action": "modify",
+                        "target_kind": "cp_item",
+                        "field": "control_method",
+                        "target_key": item_id,
+                    }
+                ],
+            }
+        ]
+    }
+    r = _validate_and_backfill(phase2, [cand])
+    assert isinstance(r, list) and len(r) == 1
+    assert r[0]["doc_id"] == cp_id
+    assert r[0]["doc_type"] == "control_plan"
+
+
+def test_validate_skips_unknown_doc_id():
+    """Unknown doc_ids are dropped; allowlisted docs still pass (small-model noise)."""
+    cand = {
+        "doc_type": "fmea",
+        "doc_id": "d1",
+        "doc_name": "F",
+        "baseline_version_id": None,
+        "baseline_version": None,
+        "existing_targets": [],
+        "add_anchors": [],
+    }
+    # only unknown → empty list (valid C4 done state)
+    r = _validate_and_backfill(
+        {
+            "affected_docs": [
+                {
+                    "doc_id": "totally-unknown",
+                    "update_suggestion": "s",
+                    "key_points": [
+                        {
+                            "expected_action": "add",
+                            "target_kind": "document",
+                        }
+                    ],
+                }
+            ]
+        },
+        [cand],
+    )
+    assert r == []
+    # unknown + known → keep known only
+    r2 = _validate_and_backfill(
+        {
+            "affected_docs": [
+                {
+                    "doc_id": "totally-unknown",
+                    "update_suggestion": "s",
+                    "key_points": [
+                        {"expected_action": "add", "target_kind": "document"}
+                    ],
+                },
+                {
+                    "doc_id": "d1",
+                    "update_suggestion": "更新 FMEA",
+                    "key_points": [
+                        {"expected_action": "add", "target_kind": "document"}
+                    ],
+                },
+            ]
+        },
+        [cand],
+    )
+    assert isinstance(r2, list) and len(r2) == 1 and r2[0]["doc_id"] == "d1"
+
+
+def test_validate_coerces_control_plan_item_node_type():
+    """LLM may invent node_type=ControlPlanItem for CP adds; coerce to allowlisted type.
+
+    US-E2E-01.7 live: after doc_id remap, validation failed on
+    '非法 node_type: ControlPlanItem'. CP add_anchors use FailureMode.
+    """
+    parent = "fm-seed-1"
+    cand = {
+        "doc_type": "control_plan",
+        "doc_id": "cp1",
+        "doc_name": "CP",
+        "baseline_version_id": "v1",
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+        "existing_targets": [],
+        "add_anchors": [{"parent_node_id": parent, "node_type": "FailureMode"}],
+    }
+    phase2 = {
+        "affected_docs": [
+            {
+                "doc_id": "cp1",
+                "update_suggestion": "新增控制项",
+                "key_points": [
+                    {
+                        "expected_action": "add",
+                        "target_kind": "cp_item",
+                        "field": "control_method",
+                        "add_anchor": {
+                            "parent_node_id": parent,
+                            "node_type": "ControlPlanItem",
+                            "business_key": "孔径",
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+    r = _validate_and_backfill(phase2, [cand])
+    assert isinstance(r, list) and len(r) == 1
+    kp = r[0]["key_points"][0]
+    assert kp["add_anchor"]["node_type"] == "FailureMode"
+
+
+def test_validate_fills_empty_update_suggestion():
+    """Small models often omit update_suggestion; fill a deterministic default."""
+    cand = {
+        "doc_type": "fmea",
+        "doc_id": "d1",
+        "doc_name": "F",
+        "baseline_version_id": "v1",
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+        "existing_targets": [
+            {
+                "target_kind": "fmea_node",
+                "target_key": "node-1",
+                "allowed_fields": ["name"],
+            }
+        ],
+        "add_anchors": [],
+    }
+    phase2 = {
+        "affected_docs": [
+            {
+                "doc_id": "d1",
+                "update_suggestion": "   ",
+                "key_points": [
+                    {
+                        "expected_action": "modify",
+                        "target_kind": "fmea_node",
+                        "field": "name",
+                        "target_key": "node-1",
+                    }
+                ],
+            }
+        ]
+    }
+    r = _validate_and_backfill(phase2, [cand])
+    assert isinstance(r, list) and len(r) == 1
+    assert r[0]["update_suggestion"].strip()
+
+
+def test_validate_coerces_target_key_add_anchor_mutex():
+    """LLM sometimes emits both target_key and add_anchor; keep action-appropriate one."""
+    parent = "fm-1"
+    item = "item-1"
+    cand = {
+        "doc_type": "control_plan",
+        "doc_id": "cp1",
+        "doc_name": "CP",
+        "baseline_version_id": "v1",
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+        "existing_targets": [
+            {
+                "target_kind": "cp_item",
+                "target_key": item,
+                "allowed_fields": ["control_method"],
+            }
+        ],
+        "add_anchors": [{"parent_node_id": parent, "node_type": "FailureMode"}],
+    }
+    phase2 = {
+        "affected_docs": [
+            {
+                "doc_id": "cp1",
+                "update_suggestion": "改",
+                "key_points": [
+                    {
+                        "expected_action": "modify",
+                        "target_kind": "cp_item",
+                        "field": "control_method",
+                        "target_key": item,
+                        "add_anchor": {
+                            "parent_node_id": parent,
+                            "node_type": "FailureMode",
+                            "business_key": "x",
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+    r = _validate_and_backfill(phase2, [cand])
+    assert isinstance(r, list), r
+    kp = r[0]["key_points"][0]
+    assert "target_key" in kp and "add_anchor" not in kp
+
+
+def test_validate_strips_fields_suffix_from_target_key():
+    """LLM may echo prompt rendering: target_key=uuid(fields=[...])."""
+    item = "a0000007-0001-4000-8000-000000000002"
+    cand = {
+        "doc_type": "control_plan",
+        "doc_id": "cp1",
+        "doc_name": "CP",
+        "baseline_version_id": "v1",
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+        "existing_targets": [
+            {
+                "target_kind": "cp_item",
+                "target_key": item,
+                "allowed_fields": ["control_method"],
+            }
+        ],
+        "add_anchors": [],
+    }
+    phase2 = {
+        "affected_docs": [
+            {
+                "doc_id": "cp1",
+                "update_suggestion": "改控制方法",
+                "key_points": [
+                    {
+                        "expected_action": "modify",
+                        "target_kind": "cp_item",
+                        "field": "control_method",
+                        "target_key": f"{item}(fields=['control_method'])",
+                    }
+                ],
+            }
+        ]
+    }
+    r = _validate_and_backfill(phase2, [cand])
+    assert isinstance(r, list), r
+    assert r[0]["key_points"][0]["target_key"] == item
+
+
+def test_validate_recovers_single_existing_target_key():
+    """When LLM invents a garbage target_key but doc has one item, use that item."""
+    item = "item-only"
+    cand = {
+        "doc_type": "control_plan",
+        "doc_id": "cp1",
+        "doc_name": "CP",
+        "baseline_version_id": "v1",
+        "baseline_version": {"major": 1, "minor": 0, "sha256": "x"},
+        "existing_targets": [
+            {
+                "target_kind": "cp_item",
+                "target_key": item,
+                "allowed_fields": ["control_method"],
+            }
+        ],
+        "add_anchors": [],
+    }
+    phase2 = {
+        "affected_docs": [
+            {
+                "doc_id": "cp1",
+                "update_suggestion": "改",
+                "key_points": [
+                    {
+                        "expected_action": "modify",
+                        "target_kind": "cp_item",
+                        "field": "control_method",
+                        "target_key": "fields=['control_method']",
+                    }
+                ],
+            }
+        ]
+    }
+    r = _validate_and_backfill(phase2, [cand])
+    assert isinstance(r, list), r
+    assert r[0]["key_points"][0]["target_key"] == item

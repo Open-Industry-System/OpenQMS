@@ -98,9 +98,25 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ### D. 审计
 - `TRANSITION`（D4→D5 等 engineer 边）；`D7_SKIP_CONFIRMATION`（若 skip）；`D8_APPROVED` / `D8_REJECTED`（manager）；`ADOPT_RECOMMENDATION`（若 D4 采纳）。
 
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.3/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | D4 验证新建表单 | `A-d4-verify-form.png` | method/result/evidence 控件可见 |
+| A | 验证通过后卡片 | `A-d4-verify-card.png` | conclusion=passed 展示 |
+| B | D7RecPanel（confirm/skip/auto-fill） | `B-d7-panel.png` | 推荐分组渲染；`d7-confirm`/`d7-skip` 可见 |
+| B | 推进到 `D8_GATE_PENDING` | `B-gate-pending.png` | 状态 Tag 正确 |
+| C-a | engineer 在 APPROVAL CAPA（无 approve 按钮） | `C-eng-no-approve.png` | `capa-approve` **不可见** |
+| C-b | 驳回后 `D7_PREVENTION` | `C-reject.png` | 状态回退；reject 反馈 |
+| C-c | 审批后 `D8_CLOSURE`（若 01.7 通过） | `C-approve-closed.png` | 状态 Tag=关闭；否则本行 BLOCKED |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
+
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.3/report.md`，用编排器契约模板。pre-gate / post-gate 分开列表；post-gate 内 (a)(b)(c) 分行，标注 (c) 是否因 01.7 BLOCKED/FAIL 而 BLOCKED。FAIL/MISSING 截图存 `screenshots/`。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.3/report.md`，用编排器契约模板。pre-gate / post-gate 分开列表；post-gate 内 (a)(b)(c) 分行，标注 (c) 是否因 01.7 BLOCKED/FAIL 而 BLOCKED。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。
 
 ## 缺陷分类
 

@@ -58,9 +58,22 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。
 
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.5/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | CAPA 触发 SCAR 入口/表单 | `A-trigger-form.png` | `capa-trigger-scar` 可见；表单可填 |
+| A | 触发成功后 CAPA 侧链接 | `A-linked-scar.png` | `capa-linked-scar` 展示 scar_no/status |
+| B | SCAR 详情双向 CAPA 链接 | `B-scar-detail.png` | capa_ref 可见 |
+| D | 状态回写后 CAPA `linked_scar` | `D-status-sync.png` | status 与 SCAR 一致 |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
+
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.5/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.5/report.md`，用编排器契约模板。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。
 
 ## 维护
 

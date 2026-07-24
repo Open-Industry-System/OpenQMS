@@ -713,3 +713,46 @@ async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
             await s.execute(sa_delete(ProductLine).where(ProductLine.code == pl_code))
             await s.execute(sa_delete(Factory).where(Factory.id == factory_id))
             await s.commit()
+
+
+# ---------------------------------------------------------------------------
+# tags normalize (US-E2E-01.9 close-path: small models often return 2 tags)
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_tags_pads_short_list():
+    from app.services.knowledge_sink_service import _normalize_tags
+
+    assert _normalize_tags(["E2E横向扩散", "销磨损"]) == [
+        "E2E横向扩散",
+        "销磨损",
+        "8D经验",
+    ]
+
+
+def test_normalize_tags_truncates_long_list():
+    from app.services.knowledge_sink_service import _normalize_tags
+
+    tags = [f"t{i}" for i in range(12)]
+    out = _normalize_tags(tags)
+    assert len(out) == 8
+    assert out == tags[:8]
+
+
+def test_normalize_tags_strips_and_dedupes():
+    from app.services.knowledge_sink_service import _normalize_tags
+
+    out = _normalize_tags([" 根因 ", "根因", "", "预防", None, "关闭"])
+    assert out == ["根因", "预防", "关闭"]
+
+
+def test_normalize_tags_rejects_non_list_or_empty():
+    from app.services.knowledge_sink_service import _normalize_tags, KnowledgeSinkFailedError
+    import pytest
+
+    with pytest.raises(KnowledgeSinkFailedError):
+        _normalize_tags("not-a-list")
+    with pytest.raises(KnowledgeSinkFailedError):
+        _normalize_tags([])
+    with pytest.raises(KnowledgeSinkFailedError):
+        _normalize_tags([None, "", "  "])

@@ -75,11 +75,26 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 ## 缺陷分类
 
-PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。FAIL/MISSING 截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.9/screenshots/`。
+PASS / FAIL / MISSING / BLOCKED（备注写说明；不用 PASS-NOTE）。UI 基线 + FAIL/MISSING 截图存 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.9/screenshots/`。
+
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.9/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | 001 关闭后横向扩散 Modal | `A-modal-hits.png` | `lateral-diffusion-modal`；四依据命中块 |
+| B | notify 后常驻卡片 + 通知列表 | `B-notified-card.png` | `lateral-diffusion-card` + notifications |
+| C | 002 skip 填理由 | `C-skip-reason.png` | skip-reason textarea；skip 按钮 |
+| C | skip 后卡片状态 | `C-skipped-card.png` | decision=skipped 展示 |
+| D | EMPTY 无弹窗详情 | `D-empty.png` | 无 modal；卡片 empty/无命中 |
+| F | rerun 后刷新 | `F-rerun.png` | 投影刷新反馈 |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
 
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.9/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.9/report.md`，用编排器契约模板。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。
 
 ## 维护
 

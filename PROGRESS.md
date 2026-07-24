@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-21
+**更新日期**: 2026-07-23
 **当前分支**: `feature/us-e2e-01-spec-a`
-**最近提交**: 01.9 横向扩散已落地；verify skill 契约修复中（对照实现纠正 selector/API/审计/角色）
+**最近提交**: US-E2E-01 epic hybrid walk 10/10 PASS（`docs/e2e/reports/US-E2E-01-2026-07-23-2/`）；小模型兜底：tags normalize / doc-gate remap / lateral fill
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 

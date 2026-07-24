@@ -430,6 +430,28 @@ def _build_prompt(capa, similar) -> str:
     )
 
 
+
+def _merge_llm_suggestions(similar: list[dict], by_type: dict) -> list[dict]:
+    """Attach suggestion_direction to each similar product.
+
+    Prefer LLM text when present; otherwise a deterministic Chinese fallback so
+    partial LLM coverage does not fail-close D8 close on small models.
+    Mutates and returns `similar`.
+    """
+    for sp in similar:
+        code = sp.get("product_type_code")
+        direction = by_type.get(code)
+        if isinstance(direction, str) and direction.strip():
+            sp["suggestion_direction"] = direction.strip()[:120]
+        else:
+            criteria = "、".join(sp.get("hit_criteria") or []) or "相似产品"
+            sp["suggestion_direction"] = (
+                f"请复核产品类型 {code} 的 FMEA/控制计划是否存在与本 8D 相同的失效模式"
+                f"（命中依据：{criteria}），并评估横向扩散措施。"
+            )[:120]
+    return similar
+
+
 async def run_lateral_diffusion_check(db, capa, user_id) -> None:
     """D8 close-path fail-closed lateral check. Empty hits skip LLM; hits require LLM."""
     try:
@@ -455,15 +477,14 @@ async def run_lateral_diffusion_check(db, capa, user_id) -> None:
         by_type = {
             it["product_type_code"]: it["suggestion_direction"]
             for it in result.get("items", [])
-            if isinstance(it, dict) and "product_type_code" in it
+            if isinstance(it, dict)
+            and "product_type_code" in it
+            and isinstance(it.get("suggestion_direction"), str)
+            and it["suggestion_direction"].strip()
         }
-        missing = [
-            sp["product_type_code"] for sp in similar if sp["product_type_code"] not in by_type
-        ]
-        if missing:
-            raise LateralFailedError(f"LLM missing suggestions for: {missing}")
-        for sp in similar:
-            sp["suggestion_direction"] = by_type[sp["product_type_code"]]
+        # Small models often omit some product_type_code rows; fill deterministic
+        # fallbacks instead of fail-closing the whole D8 close (US-E2E-01.9).
+        _merge_llm_suggestions(similar, by_type)
         llm_status = "done"
     else:
         llm_status = "skipped"

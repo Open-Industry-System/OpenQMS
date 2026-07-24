@@ -136,9 +136,24 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 - 01.3 post-gate **审批路径 (c)** 依赖 `8D-E2E-DOCGATE-001` 到达 `D8_APPROVAL_PENDING`。若 01.7 未推进到该状态，则 01.3 **(c) 审批** 标 `BLOCKED（前置 01.7 未通过）`；**权限 (a) 与驳回 (b)** 在 `8D-E2E-APPROVAL-001` 上**不依赖 01.7**，须继续验收。
 - 产品 bug（FMEA 不可写 prevention/detection_control；add_anchor 笛卡尔积/matcher 不验 canonical 父子与边 type）若导致无法 `decision=passed` → 整单仍 **FAIL（产品缺陷）**，与 SOP 无关。
 
+## UI 截图清单（强制）
+
+遵循编排器「UI 截图验证契约」。工具：`browser_take_screenshot` → `REPORT_ROOT/01.7/screenshots/`。
+
+| 步骤 | 界面 | 文件 | 必查 |
+|---|---|---|---|
+| A | `D8_GATE_PENDING` + 门禁面板 | `A-gate-panel.png` | `doc-gate-panel` 可见；全局 `capa-advance` **隐藏** |
+| B | 影响分析 done + 受影响文档列表 | `B-impact-done.png` | `doc-gate-affected-list` 含 CP/FMEA；status Tag=done |
+| C | 自动审核结果表 | `C-audit-table.png` | 每 doc status；decision 区 |
+| D-passed | decision=passed + 推进后状态 | `D-passed-advanced.png` | `D8_APPROVAL_PENDING` Tag |
+| D-blocked | decision=blocked 阻断态 | `D-blocked.png` | 不可推进提示（若走 blocked 路径） |
+| D-defer | 延期 Modal | `D-defer-modal.png` | reason/owner/deadline 字段（若走 defer） |
+
+每步 PASS 也截；视觉 FAIL 判据见编排器契约。子报告填「## UI 截图」表。
+
 ## 子报告输出
 
-写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.7/report.md`，用编排器契约模板。FAIL/MISSING 截图存 `screenshots/`。明确写出：验收范围 = CP+FMEA（v2）；FMEA 产品限制的 **action 范围**（modify/add 的 prevention|detection_control 不可写；delete 不受影响）；**add_anchor 笛卡尔积 + matcher 不验父子/边 type**（含 ProcessStep 父、CAUSE_OF 方向冲突等——不得写非法边换假 PASS）。
+写到 `docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/01.7/report.md`，用编排器契约模板。UI 基线 + FAIL/MISSING 截图存 `screenshots/`；子报告须含「## UI 截图」表。明确写出：验收范围 = CP+FMEA（v2）；FMEA 产品限制的 **action 范围**（modify/add 的 prevention|detection_control 不可写；delete 不受影响）；**add_anchor 笛卡尔积 + matcher 不验父子/边 type**（含 ProcessStep 父、CAUSE_OF 方向冲突等——不得写非法边换假 PASS）。
 
 ## 维护
 
