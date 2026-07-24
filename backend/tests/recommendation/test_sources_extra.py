@@ -562,7 +562,7 @@ def _make_equipment_status(
         external_id=external_id,
         equipment_code=equipment_code,
         equipment_name=equipment_name,
-        status="downtime",
+        status="down",
         recorded_at=datetime.now(timezone.utc),
         downtime_reason=downtime_reason,
         product_line_code="DC-DC-100",

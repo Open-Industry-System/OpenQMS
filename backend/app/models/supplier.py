@@ -209,7 +209,11 @@ class SupplierSCAR(Base):
     )
 
     capa_ref_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("capa_eightd.report_id", ondelete="SET NULL"), nullable=True
+        UUID(as_uuid=True),
+        # Name must match alembic 022_add_scar_capa_fields so drop_all can resolve
+        # the capa_eightd ↔ supplier_scars cycle.
+        ForeignKey("capa_eightd.report_id", ondelete="SET NULL", name="fk_supplier_scars_capa_ref_id"),
+        nullable=True,
     )
     resolution_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 

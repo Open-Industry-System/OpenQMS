@@ -308,7 +308,8 @@ class CapaD3AdviceGeneration(Base):
             "status != 'done' OR llm_available = true",
             name="chk_d3_generation_done_llm",
         ),
-        # Unique constraint for composite FK
+        # Unique constraints for composite FKs (mirror alembic 20260711_d3_containment_tables)
+        UniqueConstraint("generation_id", "factory_id", name="uq_d3_gen_factory"),
         UniqueConstraint(
             "generation_id", "report_id", "factory_id", name="uq_d3_generation_report"
         ),
@@ -371,9 +372,10 @@ class CapaD3AiAdvice(Base):
             "advice_type IN ('recall', 'isolate', 'notify_customer', 'strict_inspection', 'alternative')",
             name="chk_d3_advice_type",
         ),
-        # Unique constraint for composite FK (execution uses this)
+        # Unique constraints for composite FKs (mirror alembic 20260711_d3_containment_tables)
+        UniqueConstraint("advice_id", "factory_id", name="uq_d3_advice_factory"),
         UniqueConstraint(
-            "advice_id", "generation_id", "factory_id", name="uq_d3_advice_generation"
+            "advice_id", "generation_id", "factory_id", name="uq_d3_advice_gen_factory"
         ),
         # Composite FK: (generation_id, factory_id) references advice_generation
         ForeignKeyConstraint(

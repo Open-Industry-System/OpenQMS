@@ -13,12 +13,16 @@ WIDEN_PARENT = "20260709_conclusion_retrycount"
 
 
 def _cfg(mig_url: str) -> Config:
-    return Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    root = Path(__file__).resolve().parents[2]
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", mig_url)
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    return cfg
 
 
 def test_widen_audit_action_downgrade_blocked_with_long_action(mig_db_url):
     """升级后存在 action >20 chars 的审计行时，downgrade 必须显式拒绝。"""
-    command.upgrade(_cfg(mig_db_url), "head")
+    command.upgrade(_cfg(mig_db_url), WIDEN_REV)
 
     engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
     with engine.connect() as conn:
@@ -35,7 +39,7 @@ def test_widen_audit_action_downgrade_blocked_with_long_action(mig_db_url):
 
 def test_widen_audit_action_downgrade_succeeds_without_long_action(mig_db_url):
     """无长 action 行时 downgrade 可正常缩窄列。"""
-    command.upgrade(_cfg(mig_db_url), "head")
+    command.upgrade(_cfg(mig_db_url), WIDEN_REV)
 
     engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
     with engine.connect() as conn:

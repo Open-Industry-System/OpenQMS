@@ -126,11 +126,16 @@ class TestOllamaDimensionsFromConfig:
 
     def test_config_disagrees_with_model_is_ignored_and_warned(self, caplog):
         """配置维度与模型不符时：以模型维度为准（model-fixed），并告警。"""
-        with caplog.at_level("WARNING", logger="app.services.embedding_provider"):
+        import logging
+        caplog.set_level(logging.WARNING, logger="app.services.embedding_provider")
+        # Force the module logger to emit; CI may have raised the root level.
+        logging.getLogger("app.services.embedding_provider").setLevel(logging.WARNING)
+        with caplog.at_level(logging.WARNING, logger="app.services.embedding_provider"):
             provider = OllamaEmbeddingProvider(model="nomic-embed-text", dimensions=1024)
         # 模型固定输出 768，配置 1024 被忽略 —— 否则存储层的列/向量会错配
         assert provider.dimensions == 768
-        assert any("model-fixed" in r.message for r in caplog.records)
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("model-fixed" in m for m in msgs), msgs
 
     def test_factory_passes_dimensions_to_ollama(self):
         """工厂应把 EMBEDDING_DIMENSIONS 传给 OllamaEmbeddingProvider。"""

@@ -10,7 +10,11 @@ CHECK_REV = "20260710_verification_check"
 
 
 def _cfg(mig_url: str) -> Config:
-    return Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    root = Path(__file__).resolve().parents[2]
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", mig_url)
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    return cfg
 
 
 def _constraint_names(conn) -> set:
@@ -23,8 +27,12 @@ def _constraint_names(conn) -> set:
 
 
 def test_check_constraint_upgrade_downgrade(mig_db_url):
-    """head 含 conclusion-is_verified CHECK；downgrade 到 widen 后该 CHECK 被移除。"""
-    command.upgrade(_cfg(mig_db_url), "head")
+    """CHECK_REV 含 conclusion-is_verified CHECK；downgrade 到 widen 后该 CHECK 被移除。
+
+    Stops at CHECK_REV rather than head: later irreversible migrations
+    (e.g. 20260715_version_hash_backfill) refuse downgrade past them.
+    """
+    command.upgrade(_cfg(mig_db_url), CHECK_REV)
 
     engine = create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
     with engine.connect() as conn:

@@ -15,17 +15,19 @@ from app.core.permissions import PermissionLevel
 from app.main import app
 from app.models.capa import CAPAEightD
 from app.models.fmea import FMEADocument
+from app.models.product_line import ProductLine
 
 import app.models as _models  # noqa: F401 — register all FK-referenced tables
 
 
-def _make_doc(factory_id, user_id, status):
+def _make_doc(factory_id, user_id, status, product_line_code=None):
+    pl = product_line_code or ("T" + uuid.uuid4().hex[:12])
     return FMEADocument(
         fmea_id=uuid.uuid4(),
         document_no=f"PFMEA-{uuid.uuid4().hex[:8]}",
         title="to delete",
         fmea_type="PFMEA",
-        product_line_code="T" + uuid.uuid4().hex[:12],
+        product_line_code=pl,
         factory_id=factory_id,
         created_by=user_id,
         status=status,
@@ -33,15 +35,25 @@ def _make_doc(factory_id, user_id, status):
     )
 
 
+async def _ensure_pl(db, factory_id, product_line_code):
+    """delete_fmea locks ProductLine rows; seed the candidate scope first."""
+    existing = await db.get(ProductLine, product_line_code)
+    if existing is None:
+        db.add(ProductLine(code=product_line_code, name=f"Test {product_line_code}", factory_id=factory_id))
+        await db.flush()
+
+
 @pytest.mark.asyncio
 async def test_delete_rejects_non_deletable_allows_deletable(db, default_factory, admin_user):
     """approved/in_review/archived → 400; draft/rework → 204."""
+    pl_code = "T" + uuid.uuid4().hex[:12]
+    await _ensure_pl(db, default_factory.id, pl_code)
     statuses = {
-        "approved": _make_doc(default_factory.id, admin_user.user_id, "approved"),
-        "in_review": _make_doc(default_factory.id, admin_user.user_id, "in_review"),
-        "archived": _make_doc(default_factory.id, admin_user.user_id, "archived"),
-        "draft": _make_doc(default_factory.id, admin_user.user_id, "draft"),
-        "rework": _make_doc(default_factory.id, admin_user.user_id, "rework"),
+        "approved": _make_doc(default_factory.id, admin_user.user_id, "approved", pl_code),
+        "in_review": _make_doc(default_factory.id, admin_user.user_id, "in_review", pl_code),
+        "archived": _make_doc(default_factory.id, admin_user.user_id, "archived", pl_code),
+        "draft": _make_doc(default_factory.id, admin_user.user_id, "draft", pl_code),
+        "rework": _make_doc(default_factory.id, admin_user.user_id, "rework", pl_code),
     }
     db.add_all(list(statuses.values()))
     await db.flush()
@@ -77,7 +89,9 @@ async def test_delete_rejects_non_deletable_allows_deletable(db, default_factory
 async def test_delete_rework_with_linked_capa_nulls_ref(db, default_factory, admin_user):
     """A rework FMEA referenced by a CAPA's fmea_ref_id must delete cleanly
     (the service nulls the FK) rather than raise IntegrityError → 500."""
-    rework = _make_doc(default_factory.id, admin_user.user_id, "rework")
+    pl_code = "T" + uuid.uuid4().hex[:12]
+    await _ensure_pl(db, default_factory.id, pl_code)
+    rework = _make_doc(default_factory.id, admin_user.user_id, "rework", pl_code)
     db.add(rework)
     await db.flush()
     db.add(CAPAEightD(

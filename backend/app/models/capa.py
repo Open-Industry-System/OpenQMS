@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,6 +10,11 @@ from app.database import Base
 
 class CAPAEightD(Base):
     __tablename__ = "capa_eightd"
+    __table_args__ = (
+        # Composite unique required by child composite FKs (D3 run / doc-gate / etc.).
+        # Mirrors alembic 20260711_d3_containment_tables::uq_capa_factory.
+        UniqueConstraint("report_id", "factory_id", name="uq_capa_factory"),
+    )
 
     report_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -37,7 +42,9 @@ class CAPAEightD(Base):
     fmea_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     scar_ref_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("supplier_scars.scar_id", ondelete="SET NULL"),
+        # Name must match alembic 20260716_capa_scar_ref so drop_all can resolve
+        # the capa_eightd ↔ supplier_scars cycle.
+        ForeignKey("supplier_scars.scar_id", ondelete="SET NULL", name="fk_capa_eightd_scar_ref_id"),
         nullable=True,
     )
     due_date: Mapped[date | None] = mapped_column(Date)

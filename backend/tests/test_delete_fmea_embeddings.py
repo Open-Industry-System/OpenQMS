@@ -41,9 +41,13 @@ async def _seed_doc(db, factory_id, user_id, pl=None):
     return doc
 
 
-async def _seed_embedding(db, entity_id, factory_id):
+async def _seed_embedding(db, entity_id, factory_id, chunk_index: int = 0):
     """Insert a document_embeddings row for an fmea_node via raw SQL (the
-    embedding column is a pgvector type not mapped on the ORM model)."""
+    embedding column is a pgvector type not mapped on the ORM model).
+
+    chunk_index must be unique per (entity_type, entity_id, entity_field)
+    under idx_embedding_uniq_other (node_id IS NULL).
+    """
     dim_row = await db.execute(text(
         "SELECT atttypmod FROM pg_attribute "
         "WHERE attrelid='document_embeddings'::regclass AND attname='embedding'"
@@ -57,12 +61,18 @@ async def _seed_embedding(db, entity_id, factory_id):
         text("""
             INSERT INTO document_embeddings
                 (id, entity_type, entity_id, entity_field, chunk_text,
-                 embedding, factory_id, embedding_model)
+                 embedding, factory_id, embedding_model, chunk_index)
             VALUES
                 (:id, 'fmea_node', :entity_id, 'name', 'sample',
-                 CAST(:embedding AS vector), :factory_id, 'test-model')
+                 CAST(:embedding AS vector), :factory_id, 'test-model', :chunk_index)
         """),
-        {"id": emb_id, "entity_id": entity_id, "embedding": vector, "factory_id": factory_id},
+        {
+            "id": emb_id,
+            "entity_id": entity_id,
+            "embedding": vector,
+            "factory_id": factory_id,
+            "chunk_index": chunk_index,
+        },
     )
     await db.flush()
     return emb_id
@@ -70,8 +80,8 @@ async def _seed_embedding(db, entity_id, factory_id):
 
 async def test_delete_fmea_removes_orphan_embeddings(db, default_factory, admin_user):
     doc = await _seed_doc(db, default_factory.id, admin_user.user_id)
-    await _seed_embedding(db, doc.fmea_id, default_factory.id)
-    await _seed_embedding(db, doc.fmea_id, default_factory.id)
+    await _seed_embedding(db, doc.fmea_id, default_factory.id, chunk_index=0)
+    await _seed_embedding(db, doc.fmea_id, default_factory.id, chunk_index=1)
 
     rows = (await db.execute(
         select(DocumentEmbedding).where(DocumentEmbedding.entity_id == doc.fmea_id)

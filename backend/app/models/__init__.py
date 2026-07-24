@@ -95,12 +95,14 @@ from app.models.mes import (
 )
 from app.models.platform_admin import PlatformAdminUser  # noqa: F401
 from app.models.product_line import ProductLine
+from app.models.product_type import ProductType  # noqa: F401 — register for drop_all/create_all
 from app.models.quality_goal import QualityGoal
 from app.models.recommendation_cache import RecommendationCache
 from app.models.reference_template import ReferenceTemplate  # noqa: F401
 from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.spc import ControlLimitSnapshot, InspectionCharacteristic, SampleBatch, SampleValue, SPCAlarm
 from app.models.special_characteristic import SpecialCharacteristic
+from app.models.special_characteristic_link import SpecialCharacteristicLink  # noqa: F401 — FK target for drop_all
 from app.models.stability import StabilityMeasurement, StabilityResult, StabilityStudy
 from app.models.system_setting import SystemSetting
 from app.models.supplier import (
