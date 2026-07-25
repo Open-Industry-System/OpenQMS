@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.15：编辑器行级 CRUD + 图同步
 
 **状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v2）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-editor-row-crud`（待生成）
 **前置**: 02.7 或 02.14（向导已完成，或已有 draft FMEA）
 **AI_REQUIRED**: false（纯结构编辑，AI 推荐见 02.16）

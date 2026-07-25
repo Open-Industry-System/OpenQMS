@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.19：审核闭环（提交 + 审批 + 驳回）
 
 **状态**: 定稿 v3（2026-07-25），经代码评审修订（权限矩阵收口 + wizard_completed 后端门禁）
-**所属 epic**: US-E2E-02（README.md v2）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-approval-cycle`（待生成）
 **前置**: 02.7 或 02.14（向导完成，可提交评审）
 **AI_REQUIRED**: false

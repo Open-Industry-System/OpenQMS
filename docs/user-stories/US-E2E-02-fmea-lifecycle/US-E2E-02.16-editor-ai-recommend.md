@@ -59,8 +59,8 @@
 
 | 项 | 定义（跨 PFMEA/DFMEA） |
 |---|---|
-| 落库实体 | `RecommendationCache`（缓存）、`AuditLog`（采纳）、`RecommendResponse.source_executions`（新增字段） |
-| 关键字段 | RecommendResponse.{suggestions, source_executions, graph_match_count, effective_scope}；SuggestionItem.{name, confidence, source, source_document_no}；source_executions[].{source, status, hit_count, latency_ms} |
+| 落库实体 | `RecommendationCache`（缓存）、`AuditLog`（采纳）、`RecommendResponse.source_executions`/`context_execution`/`generation_execution`（三个新增响应字段） |
+| 关键字段 | RecommendResponse.{suggestions, source_executions, context_execution, generation_execution, graph_match_count, effective_scope}；SuggestionItem.{name, confidence, source, source_document_no}；source_executions[].{source, status, hit_count, latency_ms}；context_execution.{current_product_structure}；generation_execution.{llm} |
 | 边类型 | 无新增 |
 | AI 触发器 | `failure_mode`、`failure_effect`、`failure_cause`、`prevention_control`、`detection_control` |
 | AI 必查来源 | 3 required_retrievers（graph/semantic_search/lessons_learned）+ context_execution + generation_execution（缺任一→FAILED；#2/#3 当前未接入→FAILED） |
@@ -79,4 +79,4 @@
 
 ## 后续
 
-- 补齐 #2/#3 接入 + source_executions 字段 + 采纳元数据 API 后，本子故事转 PASS；与 02.4/02.5/02.6/02.11/02.12/02.13 向导内 AI 共享同一推荐管道。
+- 补齐 #2/#3 接入 + `source_executions`/`context_execution`/`generation_execution` 三个响应字段 + 采纳元数据 API 后，本子故事转 PASS；与 02.4/02.5/02.6/02.11/02.12/02.13 向导内 AI 共享同一推荐管道。

@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.2：PFMEA Step2 结构分析
 
 **状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v2）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-pfmea-step2-structure`（待生成）
 **前置**: 02.1（Step1 5T 范围已就绪）
 **AIAG-VDA 引用**: `Reference/FMEA.md` §3.2（过程 FMEA 步骤二：结构分析）

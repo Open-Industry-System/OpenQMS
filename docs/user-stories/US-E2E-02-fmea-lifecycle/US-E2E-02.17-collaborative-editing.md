@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.17：协同编辑 + 冲突检测
 
 **状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v2）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-collaborative-editing`（待生成）
 **前置**: 02.15（编辑器行已就绪）
 **AI_REQUIRED**: false

@@ -262,9 +262,9 @@ epic 级验收 = 各子故事验收的**合取**（全部子故事通过，epic 
 - **编辑器行模型**：一行 = FM×FC；多效应为 FM 级共享列表（非笛卡尔积）。
 - **字段契约**：wizardScope.{team,timeframe,tool,task,trend}；wizard_completed 在 wizardScope 内；FMEAVersion.{major_no,minor_no,snapshot,sha256_hash,change_type}；RecommendedAction 现有字段（name/responsible/due_date/status/action_taken/completion_date/revised_*）+ 新增落库字段（FailureCause.control_sufficiency_reason / FailureCause.risk_acceptance_reason / FailureCause.management_review_evidence）；4M = Man/Machine/Material/Environment（存储枚举，中文仅 UI）。
 - **CP 联动**：仅 PFMEA 关联时触发 CP sync_pending；DFMEA 审批只生成版本快照，不要求 CP。
-- **CP sync 交付语义**：**Durable outbox**（对齐现有两阶段实现，`fmea_service.py:378` 先 commit + `control_plan_service.py:665` 再 commit）——同事务只提交 APPROVED、版本快照、三条 AuditLog、outbox 记录；CP sync_pending 最终一致（outbox worker 重试、幂等、最终置位）。不采用"同事务"（需重构现有两阶段代码）。
+- **CP sync 交付语义**：**Durable outbox**（目标语义，需新增实现）——审批事务原子提交 APPROVED + 版本快照 + FMEA transition/version 审计 + CP outbox 记录（不写 CP 审计）；独立 worker 事务原子置位 CP.sync_pending + 写 `control_plans/UPDATE` 审计 + 标记 processed（幂等键去重，重试最终一致）。**不得复用 `GraphSyncOutbox`/`graph_sync_worker`**（面向 Neo4j 投影）——需新增独立 CP outbox 表/模型 + worker。现状是直接两阶段调用（`fmea_service.py:378` commit 后 `:381-383` 直接调 `mark_cp_sync_pending_on_fmea_approve`，后者 `control_plan_service.py:665` 再 commit），非 durable outbox → 验收标 `FAILED` 驱动补齐。
 - **AIAG-VDA Step5/6**：AP 是 S/O/D 组合的**查表结果**（`calculateAP` 查 `utils/fmea.ts` AP 表），非 S×O×D 乘积（乘积是 RPN）；Step6 行动触发：H=行动或记录现有控制充分；M=行动或记录风险接受理由；L=行动可选；S=9-10 且 AP=H/M 需管理层评审证据；Step7 门禁 = 所有 AP 已评估（行动已关闭或风险接受已记录）。
-- **RecommendedAction 状态**：选定 canonical 枚举 `{open, in_progress, completed}`（对齐现有 `schemas/fmea.py:36` 注释与前端）；AIAG-VDA 手册的 {planned, decided, not_implemented} 不在本 spec 采用。
+- **RecommendedAction 状态**：选定 canonical 枚举 `{open, in_progress, completed, not_executed}`（含第 4 态 `not_executed`，配理由门禁）；确定性 legacy 映射 `undecided→open, planned→in_progress, done→completed, notExecuted→not_executed, closed→completed`（见 02.6/02.13）。AIAG-VDA 手册的 {planned, decided, not_implemented} 不在本 spec 采用。
 - **Step3 功能树门禁**：每个纳入分析范围的结构节点都有功能节点（HAS_FUNCTION 边），而非仅"至少一个功能"。
 - **编辑器保存保留向导元数据**：编辑器保存 graph_data 时保留 wizardScope（含 wizard_completed），不覆盖非表格 metadata。
 - **verify skill**：README 声明的 19 子 skill + 1 总 skill **待生成**（本 epic 仅交付 user stories；skill 由后续走查时派生）。

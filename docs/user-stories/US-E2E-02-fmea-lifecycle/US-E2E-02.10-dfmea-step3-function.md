@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.10：DFMEA Step3 功能分析
 
 **状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v2）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-dfmea-step3-function`（待生成）
 **前置**: 02.9（Step2 结构树已就绪）
 **AIAG-VDA 引用**: `Reference/FMEA.md` §2.3（设计 FMEA 步骤三：功能分析）
