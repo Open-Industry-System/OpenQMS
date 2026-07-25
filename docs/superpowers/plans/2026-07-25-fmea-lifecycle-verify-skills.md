@@ -48,7 +48,7 @@ Reference material to read before writing (exact paths):
 
 **Interfaces:**
 - Consumes: `origin/main` E2E harness — `Makefile` (`e2e`, `e2e-up`, `e2e-seed`, `e2e-reset`), `docker-compose.e2e.yml`, `backend/app/seed_e2e.py`, `/api/e2e/seed-state` + `/api/e2e/cleanup` (registered only when `E2E_MODE=1`), `.env.e2e.example`.
-- Produces: a `fix/fmea-fixes` branch on which `make e2e-up && make e2e-seed` brings up the E2E stack and `curl -sf http://localhost:5174` + `curl -sf http://localhost:8000/api/e2e/seed-state` both succeed.
+- Produces: a `fix/fmea-fixes` branch on which `make e2e-up && make e2e-seed` brings up the E2E stack and `curl -sf http://localhost:5174` + `curl -sf http://localhost:8001/api/e2e/seed-state` both succeed.
 
 **Why this is first:** the verify skills drive the product through the E2E harness. `fix/fmea-fixes` predates that harness, so the skills cannot run until the branch has it. This is a branch-sync, not a feature change.
 
@@ -72,7 +72,7 @@ Expected: suite passes (or only pre-existing failures unrelated to the merge —
 - [ ] **Step 4: Smoke the E2E stack**
 
 Run: `cp .env.e2e.example .env.e2e` (fill LLM creds if absent), then `make e2e-up && make e2e-seed`
-Run: `curl -sf http://localhost:5174 >/dev/null && echo FRONTEND_OK; curl -sf http://localhost:8000/api/e2e/seed-state >/dev/null && echo SEEDSTATE_OK`
+Run: `curl -sf http://localhost:5174 >/dev/null && echo FRONTEND_OK; curl -sf http://localhost:8001/api/e2e/seed-state >/dev/null && echo SEEDSTATE_OK`
 Expected: `FRONTEND_OK` and `SEEDSTATE_OK`. If the stack can't come up in this environment, record it as a precondition note in the epic skill and proceed to skill authoring (skills are validated structurally in Task 2 even if a live walk must wait).
 
 - [ ] **Step 5: Commit**
@@ -192,7 +192,7 @@ git commit -m "feat(e2e): 19 verify-fmea-lifecycle sub-story skills (wizard×14,
 
 - [ ] **Step 1: Bring up the stack and confirm preconditions**
 
-Run: `make e2e-up && make e2e-seed`; `curl -sf http://localhost:5174`; `curl -sf http://localhost:8000/api/e2e/seed-state`
+Run: `make e2e-up && make e2e-seed`; `curl -sf http://localhost:5174`; `curl -sf http://localhost:8001/api/e2e/seed-state`
 Expected: all reachable; accounts retrieved. If LLM creds are absent, mark AI sub-stories BLOCKED and proceed with the non-AI ones.
 
 - [ ] **Step 2: Run the epic walk via the orchestrator skill**
