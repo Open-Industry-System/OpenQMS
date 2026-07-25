@@ -246,7 +246,7 @@ epic 级验收 = 各子故事验收的**合取**（全部子故事通过，epic 
 
 ## 维护
 
-- 任一子故事版本/日期变更，对应 `verify-fmea-lifecycle-{name}` 子 skill 须重新核对同步（更新顶部版本声明）。
+- 任一子故事版本/日期变更，对应该子故事的 `verify-fmea-lifecycle-<name>` 子 skill 须重新核对同步（更新顶部版本声明）。
 - README 版本变更，总 skill `verify-fmea-lifecycle` 须重新核对同步。
 - 子故事可独立迭代，无需 bumping epic 版本；仅当 epic 验收骨架、状态机、依赖关系或生命周期顺序变更时才 bumping README 版本。
 
