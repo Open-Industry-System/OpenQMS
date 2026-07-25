@@ -1,15 +1,15 @@
 # 子故事 US-E2E-02.17：协同编辑 + 冲突检测
 
-**状态**: 定稿 v1（2026-07-25）
-**所属 epic**: US-E2E-02（README.md v1）
-**关联 skill**: `verify-fmea-lifecycle-collaborative-editing`
+**状态**: 定稿 v2（2026-07-25），经代码评审修订
+**所属 epic**: US-E2E-02（README.md v2）
+**关联 skill**: `verify-fmea-lifecycle-collaborative-editing`（待生成）
 **前置**: 02.15（编辑器行已就绪）
 **AI_REQUIRED**: false
 
 ## 故事
 
-**作为** 前期策划质量工程师 / 设计质量工程师，**我想** 与同事同时编辑同一 FMEA 文档时，看到在线用户列表 + 行级编辑指示器，当他人先保存导致 `lock_version` 不一致时收到 409 冲突提示，可选择"用我的覆盖"或"放弃我的修改"，覆盖前预览三方 diff，
-**以便** 多人协同编辑不互相覆盖，冲突可感知、可决策、可安全解决。
+**作为** 前期策划质量工程师 / 设计质量工程师，**我想** 与同事同时编辑同一 FMEA 文档时，看到在线用户列表 + 行级编辑指示器，当他人先保存导致 `lock_version` 不一致时收到 409 冲突提示，可选择"用我的覆盖"或"放弃我的修改"，覆盖前预览三方 diff，且编辑保存与冲突覆盖均保留向导元数据（wizardScope），
+**以便** 多人协同编辑不互相覆盖，冲突可感知、可决策、可安全解决，且不丢失向导上下文。
 
 ## 背景 / 前置条件
 
@@ -26,7 +26,8 @@
    - "用我的覆盖"：带 `confirmed_latest_lock_version=N+1` 重试 → 若期间 A 又保存（N+2）→ `lock_version_changed_again` 再次 409；否则覆盖成功。
    - "放弃我的修改"：重新加载最新 graph_data。
 6. 覆盖前展示三方 diff 预览（A 的版本 / B 的版本 / 基线）。
-7. 覆盖写 `conflict_overwrite` 审计。
+7. 覆盖写 `FORCE_SAVE_OVERRIDE` 审计（AuditLog `action="FORCE_SAVE_OVERRIDE"`，Outbox `fmea.updated`）。
+8. **覆盖保留 wizardScope**（含 wizard_completed），不覆盖非表格 metadata。
 
 ## 业务规则 / 验收标准
 
@@ -39,23 +40,27 @@
 - 在线用户列表实时更新（短轮询）。
 - 行级编辑指示器：他人正在编辑的行高亮。
 
-### 安全覆盖
+### 安全覆盖 + 元数据保留
 - 覆盖前必须预览 diff（不可盲覆盖）。
-- 覆盖写 `conflict_overwrite` 审计（含 reason: "User confirmed overwrite after conflict detection"）。
+- 覆盖写 `FORCE_SAVE_OVERRIDE` 审计（含 reason: "User confirmed overwrite after conflict detection"）。
+- 编辑保存与冲突覆盖**保留 wizardScope**（含 wizard_completed），不覆盖非表格 graph metadata。
+
+### 可编辑状态
+- 仅 DRAFT、REWORK 可编辑图（编辑器 PUT）；IN_REVIEW、APPROVED、ARCHIVED 的 PUT 必须拒绝（见 02.19 权限矩阵）。
 
 ## 验收契约（字段级）
 
 | 项 | 定义（跨 PFMEA/DFMEA） |
 |---|---|
-| 落库实体 | `FMEADocument.lock_version`、`AuditLog`（conflict_overwrite） |
+| 落库实体 | `FMEADocument.lock_version`、`AuditLog`（FORCE_SAVE_OVERRIDE）、wizardScope（保留） |
 | 关键字段 | lock_version、confirmed_latest_lock_version |
 | 边类型 | 无 |
 | AI 触发器 | 无（AI_REQUIRED=false） |
-| 状态枚举 | FMEAState 不变（DRAFT） |
-| 审计事件 | `fmea.updated`、`conflict_overwrite`（含 reason） |
+| 状态枚举 | FMEAState ∈ {DRAFT, REWORK}（仅二者可编辑） |
+| 审计事件 | AuditLog `action="UPDATE"`（普通保存）、`action="FORCE_SAVE_OVERRIDE"`（冲突覆盖，Outbox `fmea.updated`） |
 | E2E seed 前置 | 02.15 编辑器 + 两个用户会话 |
-| 通过条件 | 409 冲突正确返回 + 双路径（覆盖/放弃）可用 + 二次冲突检测 + 三方 diff 预览 + 在线用户列表 + 行级指示器 + 覆盖审计 |
-| 失败条件（FAILED） | 冲突未检测（lock_version 不生效）；盲覆盖（无 diff 预览）；在线状态不更新；覆盖未审计 |
+| 通过条件 | 409 冲突正确返回 + 双路径（覆盖/放弃）可用 + 二次冲突检测 + 三方 diff 预览 + 在线用户列表 + 行级指示器 + 覆盖审计 + 保存/覆盖保留 wizardScope + 仅 DRAFT/REWORK 可编辑 |
+| 失败条件（FAILED） | 冲突未检测（lock_version 不生效）；盲覆盖（无 diff 预览）；在线状态不更新；覆盖未审计；保存/覆盖覆盖 wizardScope；IN_REVIEW/APPROVED 可编辑 |
 | 阻塞条件（BLOCKED） | 无（AI_REQUIRED=false） |
 
 ## 不在本子故事范围

@@ -1,8 +1,8 @@
 # 子故事 US-E2E-02.4：PFMEA Step4 失效分析
 
-**状态**: 定稿 v1（2026-07-25）
-**所属 epic**: US-E2E-02（README.md v1）
-**关联 skill**: `verify-fmea-lifecycle-pfmea-step4-failure`
+**状态**: 定稿 v2（2026-07-25），经代码评审修订
+**所属 epic**: US-E2E-02（README.md v2）
+**关联 skill**: `verify-fmea-lifecycle-pfmea-step4-failure`（待生成）
 **前置**: 02.3（Step3 功能树已就绪）
 **AIAG-VDA 引用**: `Reference/FMEA.md` §3.4（过程 FMEA 步骤四：失效分析）
 **AI_REQUIRED**: true（FM/FE/FC + PC/DC 含 AI 推荐）
@@ -20,10 +20,10 @@
 
 1. `planning_qe` 在 Step4 为每个功能节点录入失效链：
    - `FailureMode`（挂 `ProcessStepFunction`，`HAS_FAILURE_MODE` 边）
-   - `FailureEffect`（`EFFECT_OF` 边指向 FM）
-   - `FailureCause`（`CAUSE_OF` 边指向 FM，4M 上下文以工作要素为录入提示）
-   - `PreventionControl`（`PREVENTED_BY` 边指向 FC）
-   - `DetectionControl`（`DETECTED_BY` 边指向 FM/FC）
+   - `FailureEffect`（`EFFECT_OF` 边：FM → FE）
+   - `FailureCause`（`CAUSE_OF` 边：FC → FM，4M 上下文以工作要素为录入提示）
+   - `PreventionControl`（`PREVENTED_BY` 边：FC → PC）
+   - `DetectionControl`（`DETECTED_BY` 边：FC/FM → DC）
 2. FM/FE/FC 字段触发 AI 推荐（`failure_mode`/`failure_effect`/`failure_cause` trigger），查询全知识库后下拉展示。
 3. PC/DC 字段可触发 AI 推荐（`prevention_control`/`detection_control` trigger）。
 4. 采纳推荐或手工录入。
@@ -33,26 +33,23 @@
 ## 业务规则 / 验收标准
 
 ### 结构完整性
-- 失效链边齐全：FM←(`EFFECT_OF`)←FE；FM←(`CAUSE_OF`)←FC；FC←(`PREVENTED_BY`)←PC；FM/FC←(`DETECTED_BY`)←DC。
+- 失效链边方向正确（见 README "图结构契约" 节）：
+  - `<function node> ─HAS_FAILURE_MODE→ FM`
+  - `FM ─EFFECT_OF→ FE`
+  - `FC ─CAUSE_OF→ FM`
+  - `FC ─PREVENTED_BY→ PC`
+  - `FC/FM ─DETECTED_BY→ DC`
 - FM 挂 `ProcessStepFunction`（不挂 ProcessWorkElementFunction，对齐 2026-05-20 数据结构文档 §2.2）。
-- 多效应：1 个 FM 可有多个 FE，行按 (cause × effect) 扇出。
+- 多效应：1 FM × N FE → FM 级共享列表（`failureEffectNodeIds`），跨该 FM 的所有 cause 行共享（非 cause × effect 笛卡尔积，见 README "编辑器行模型" 节）。
 
 ### AI 推荐知识库查询契约（AI_REQUIRED=true）
-触发 `failure_mode`/`failure_effect`/`failure_cause`/`prevention_control`/`detection_control` 推荐时，后端必须查询 4 来源：
+触发 `failure_mode`/`failure_effect`/`failure_cause`/`prevention_control`/`detection_control` 推荐时，后端必须查询 4 来源，通过 `source_executions[]` 可观测（见 README "AI 推荐知识库查询契约" 节）。
 
-| # | 来源 | 查询内容 |
-|---|---|---|
-| 1 | 其他 FMEA 图节点 | 同产品线 FailureMode/Cause/Control 节点（`find_similar_nodes_advanced`） |
-| 2 | RAG 语义搜索（pgvector） | 跨 FMEA 失效节点向量相似 |
-| 3 | 经验教训库 | 历史 CAPA/失效经验 |
-| 4 | 当前产品结构 | process_step / function_description |
-
-- **来源可追溯**：每条推荐带 `source`；`source_document_no` 标注来源。
 - **缺口处理**：现状仅接 #1(keyword)+#4+LLM，**#2/#3 未接入** → 验收标 `FAILED`。
 
 ### 审计与落库
-- Step4 保存写 AuditLog。
-- AI 采纳写 `ADOPT_RECOMMENDATION`（含 trigger / source / adopted_text）。
+- Step4 保存写 AuditLog（`action="UPDATE"`，Outbox `fmea.updated`）。
+- AI 采纳写 `ADOPT_RECOMMENDATION`（`action="ADOPT_RECOMMENDATION"`，changed_fields 含 field_id/source/stage_index/adopted_text；当前无采纳元数据 API，见 README "AI 采纳审计契约" 节）。
 
 ## 验收契约（字段级）
 
@@ -60,14 +57,14 @@
 |---|---|
 | 落库实体 | `FailureMode`、`FailureEffect`、`FailureCause`、`PreventionControl`、`DetectionControl` |
 | 关键字段 | FM.name；FE.name；FC.name；PC.name；DC.name |
-| 边类型 | `HAS_FAILURE_MODE`、`EFFECT_OF`、`CAUSE_OF`、`PREVENTED_BY`、`DETECTED_BY` |
+| 边类型 | `HAS_FAILURE_MODE`（功能→FM）、`EFFECT_OF`（FM→FE）、`CAUSE_OF`（FC→FM）、`PREVENTED_BY`（FC→PC）、`DETECTED_BY`（FC/FM→DC） |
 | AI 触发器 | `failure_mode`、`failure_effect`、`failure_cause`、`prevention_control`、`detection_control` |
-| AI 必查来源 | #1+#2+#3+#4（缺任一→FAILED） |
+| AI 必查来源 | #1+#2+#3+#4（缺任一→FAILED；#2/#3 当前未接入→FAILED） |
 | 状态枚举 | FMEAState 不变（DRAFT） |
-| 审计事件 | `fmea.updated`、`ADOPT_RECOMMENDATION` |
+| 审计事件 | AuditLog `action="UPDATE"`（Outbox `fmea.updated`）、`action="ADOPT_RECOMMENDATION"` |
 | E2E seed 前置 | 02.3 功能树 |
-| 通过条件 | 失效链边齐全 + FM 挂 ProcessStepFunction + AI 查全 4 来源 + 推荐带 source + 采纳留痕 + 审计 |
-| 失败条件（FAILED） | 失效链断裂；FM 挂错层级；AI 未查 #2/#3；推荐无 source；未审计 |
+| 通过条件 | 失效链边方向正确 + FM 挂 ProcessStepFunction + 多效应为 FM 级共享 + AI 查全 4 来源（source_executions 可观测）+ 采纳留痕 + 审计 |
+| 失败条件（FAILED） | 失效链边方向反了；FM 挂错层级；多效应写成笛卡尔积；AI 未查 #2/#3（source_executions 缺）；推荐无 source；未审计 |
 | 阻塞条件（BLOCKED） | 无 LLM 凭证（AI_REQUIRED=true） |
 
 ## 不在本子故事范围
