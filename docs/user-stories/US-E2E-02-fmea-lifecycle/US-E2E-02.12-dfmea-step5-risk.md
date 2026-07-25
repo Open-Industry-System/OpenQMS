@@ -1,0 +1,68 @@
+# 子故事 US-E2E-02.12：DFMEA Step5 风险分析
+
+**状态**: 定稿 v1（2026-07-25）
+**所属 epic**: US-E2E-02（README.md v1）
+**关联 skill**: `verify-fmea-lifecycle-dfmea-step5-risk`
+**前置**: 02.11（Step4 失效链已就绪）
+**AIAG-VDA 引用**: `Reference/FMEA.md` §2.5（设计 FMEA 步骤五：风险分析）
+**AI_REQUIRED**: true（PC/DC 措施推荐）
+
+## 故事
+
+**作为** 设计质量工程师，**我想** 在向导 Step5 评分：单一严重度 S（DFMEA 无三段式，对齐 AIAG-VDA DFMEA）+ 频度 O（FailureCause.occurrence）+ 探测度 D（DetectionControl.detection），自动计算 AP（H/M/L），
+**以便** 量化每个设计失效链的风险等级，为优化（Step6）提供排序依据。
+
+## 背景 / 前置条件
+
+- Step4 失效链已落库。
+
+## 主流程
+
+1. `planning_qe` 在 Step5 为每行评分：
+   - FE 严重度 S：`severity`（1-10，单一值；DFMEA 无三段式）
+   - FC 频度 O：`occurrence`（1-10）
+   - DC 探测度 D：`detection`（1-10）
+2. 系统自动计算 AP（`utils/fmea.ts calculateAP`）。
+3. DFMEA 无 CC/SC 列（PFMEA 专有）。
+4. PC/DC 措施可触发 AI 推荐（`prevention_control`/`detection_control` trigger）。
+5. 保存草稿。
+6. 推进到 Step6。
+
+## 业务规则 / 验收标准
+
+### 结构完整性
+- S 字段 >0（单一 severity，无三段式）。
+- AP 自动计算正确。
+
+### AI 推荐知识库查询契约（AI_REQUIRED=true）
+触发 `prevention_control`/`detection_control` 推荐时，后端必须查询 4 来源（同 02.4）。
+
+- **缺口处理**：现状仅接图(keyword)+结构+LLM，**RAG/lessons 未接入** → 验收标 `FAILED`。
+
+### 审计与落库
+- Step5 保存写 AuditLog。
+- AI 采纳写 `ADOPT_RECOMMENDATION`。
+
+## 验收契约（字段级）
+
+| 项 | DFMEA 定义 |
+|---|---|
+| 落库实体 | `FailureEffect`（更新 severity）、`FailureCause`（更新 occurrence）、`DetectionControl`（更新 detection） |
+| 关键字段 | FE.severity（单一）；FC.occurrence；DC.detection；AP |
+| 边类型 | 无新增 |
+| AI 触发器 | `prevention_control`、`detection_control` |
+| AI 必查来源 | #1+#2+#3+#4（缺任一→FAILED） |
+| 状态枚举 | FMEAState 不变（DRAFT） |
+| 审计事件 | `fmea.updated`、`ADOPT_RECOMMENDATION` |
+| E2E seed 前置 | 02.11 失效链 |
+| 通过条件 | S>0 + AP 计算正确 + AI 查全 4 来源 + 采纳留痕 + 审计 |
+| 失败条件（FAILED） | S=0；AP 计算错误；AI 未查 #2/#3；未审计 |
+| 阻塞条件（BLOCKED） | 无 LLM 凭证 |
+
+## 不在本子故事范围
+
+- Step6 优化（见 02.13）。
+
+## 后续
+
+- 高 AP 行驱动 Step6 优化行动。
