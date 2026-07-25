@@ -1,0 +1,16 @@
+=== DB state at end of walk (post 02.19) ===
+The version snapshot bug created 2 stray fmea_versions rows with factory_id=NULL
+(from the viewer transition that succeeded due to missing EDIT permission check).
+The immutability trigger prevents cleanup; these will remain as evidence of the bug.
+              version_id              |               fmea_id                | change_type |              factory_id              |          created_at           
+--------------------------------------+--------------------------------------+-------------+--------------------------------------+-------------------------------
+ 00000000-0000-0000-0000-000000e20171 | 00000000-0000-0000-0000-000000e20170 | approve     | 00000000-0000-0000-0000-000000e20001 | 2026-07-23 14:30:21.359715+00
+ 722b8273-3b0b-4fb3-bc06-e2095753a12c | a2d0ae0e-0366-4910-8b27-f0f6f94add12 | submit      |                                      | 2026-07-25 17:25:30.038955+00
+(2 rows)
+
+               fmea_id                |  document_no   |  status   | approved_by | approved_at 
+--------------------------------------+----------------+-----------+-------------+-------------
+ a2d0ae0e-0366-4910-8b27-f0f6f94add12 | E2E-FMEA-P-001 | in_review |             | 
+ 85bc6d54-41da-4431-aa2b-2fdbcf451288 | E2E-FMEA-D-001 | draft     |             | 
+(2 rows)
+

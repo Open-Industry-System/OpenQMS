@@ -1,0 +1,7 @@
+=== POST /api/collaboration/heartbeat (correct fields) ===
+Internal Server Error
+HTTP 500
+
+=== GET /api/collaboration/online ===
+{"detail":"Not Found"}
+HTTP 404

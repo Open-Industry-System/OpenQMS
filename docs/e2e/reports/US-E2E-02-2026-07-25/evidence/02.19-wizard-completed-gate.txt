@@ -1,0 +1,10 @@
+=== J. REWORK -> IN_REVIEW with wizard_completed=false ===
+  HTTP 200 (spec requires 422 'rework_resubmit_requires_wizard_completed')
+  Gate MISSING — FAIL per spec
+
+  Current doc state:
+  document_no   |  status   | has_approver | has_approved_at | ws_completed 
+----------------+-----------+--------------+-----------------+--------------
+ E2E-FMEA-P-001 | in_review | t            | t               | false
+(1 row)
+

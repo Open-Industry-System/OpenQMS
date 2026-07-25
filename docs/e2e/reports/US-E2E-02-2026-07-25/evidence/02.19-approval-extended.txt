@@ -1,0 +1,18 @@
+=== 02.19 approval matrix extended evidence ===
+
+F. manager IN_REVIEW -> APPROVED (succeeded; version created during prior viewer escalation)
+  approved_by, approved_at set; status=approved
+
+G. manager APPROVED -> REWORK without reason
+  HTTP 200 (spec requires 422 rejection) — MISSING reason gate
+  approved_by + approved_at PRESERVED (PASS)
+
+H. engineer REWORK -> IN_REVIEW (wizard_completed=true)
+  HTTP 200; 422 gate not testable since wizard_completed is already true
+  Code has no explicit wizard_completed validation on rework-resubmit (FAIL per spec)
+
+I. engineer PUT in IN_REVIEW status
+  title: E2E-edit-in-review-2 status: in_review lock: 40
+  HTTP 200
+
+  Editable-state 409 check MISSING — PUT succeeds during IN_REVIEW (FAIL per spec)
