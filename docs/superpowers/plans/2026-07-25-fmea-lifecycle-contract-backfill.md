@@ -1,5 +1,14 @@
 # FMEA Lifecycle Contract Backfill Implementation Plan
 
+> **⚠️ STATUS (2026-07-25): OUT OF SCOPE for the US-E2E-02 acceptance effort.**
+> This plan was written under a mistaken goal — it modifies **product code** to close
+> the spec's FAILED gaps. The actual goal of US-E2E-02 is to **verify** the product
+> end-to-end via `verify-fmea-lifecycle-*` skills and report the gaps as FAIL/MISSING,
+> NOT to pre-fix them. This document is retained only as a reference for a **future**
+> "补齐实现" effort, after the verify skills have run and reported. Do not execute it
+> as part of the acceptance walk. The active plan is
+> `docs/superpowers/plans/2026-07-25-fmea-lifecycle-verify-skills.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the backend contract gaps that `docs/user-stories/US-E2E-02-fmea-lifecycle/` deliberately marks FAILED, so the 19 sub-story acceptance contracts (and their derived verify skills) can pass.
