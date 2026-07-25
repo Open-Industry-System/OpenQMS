@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.18：版本快照 + CP 联动
 
-**状态**: 定稿 v3（2026-07-25），经代码评审修订（审计实体/action 收口）
-**所属 epic**: US-E2E-02（README.md v2）
+**状态**: 定稿 v4（2026-07-25），经三轮代码评审修订（审计实体/action 收口 + CP sync = Durable outbox）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-version-snapshot-cp-sync`（待生成）
 **前置**: 02.15（编辑器保存已就绪）
 **AI_REQUIRED**: false
@@ -40,7 +40,11 @@
 ### CP 联动（仅 PFMEA）
 - 仅 PFMEA APPROVED（非 IN_REVIEW，非 DFMEA）触发 CP sync_pending。
 - sync_pending 置 true 后，CP 列表/详情可见"待同步"状态。
-- **原子性**：`mark_cp_sync_pending_on_fmea_approve` 需在 FMEA APPROVED 事务内完成（或 outbox/retry），避免 PFMEA 已 APPROVED 但 CP 标记失败。
+- **交付语义 = Durable outbox**（对齐现有两阶段实现，`fmea_service.py:378` 先 commit + `control_plan_service.py:665` 再 commit）：
+  - 同事务只提交 APPROVED、版本快照、三条 AuditLog、**outbox 记录**（`event_type=cp.sync_pending_set`）。
+  - CP sync_pending **最终一致**：outbox worker 消费该事件后重试、幂等、最终置 CP.sync_pending=true。
+  - **不采用"同事务"**（需重构现有两阶段代码为单事务）——本 spec 验收 Durable outbox 语义。
+  - E2E 验收：APPROVED 提交后立即查 outbox 记录存在；worker 消费后 CP.sync_pending 最终为 true（允许短暂延迟，需轮询/等待 worker）。
 
 ### 审计（三个独立 AuditLog 记录）
 
@@ -63,8 +67,8 @@
 | 状态枚举 | 触发时机：IN_REVIEW（submit）/ APPROVED（approve） |
 | 审计事件 | 三个独立 AuditLog：`fmea_documents`/`TRANSITION`（流转）+ `fmea_versions`/`CREATE`（快照）+ `control_plans`/`UPDATE`（CP sync，仅 PFMEA） |
 | E2E seed 前置 | 02.15 编辑器 + 关联 CP（PFMEA） |
-| 通过条件 | 提交/审批各生成快照（snapshot/major_no/minor_no/sha256_hash/change_type 完整）+ 差异对比可用 + PFMEA APPROVED 触发 CP sync_pending=true + CP 可见待同步 + DFMEA APPROVED 不触发 CP + 原子性（CP sync 在 APPROVED 事务内）+ 三个独立 AuditLog 记录（fmea_documents/TRANSITION + fmea_versions/CREATE + control_plans/UPDATE） |
-| 失败条件（FAILED） | 快照未生成或字段缺失（如缺 snapshot/major_no/minor_no/sha256_hash）；差异对比不可用；PFMEA APPROVED 未触发 CP sync；DFMEA APPROVED 误触发 CP；sync_pending 置位但 CP 不可见；原子性缺失（PFMEA APPROVED 但 CP 标记失败）；审计实体/action 写错（如版本创建写 TRANSITION 或 CP sync 未写独立 AuditLog）；未审计 |
+| 通过条件 | 提交/审批各生成快照（snapshot/major_no/minor_no/sha256_hash/change_type 完整）+ 差异对比可用 + PFMEA APPROVED 触发 CP sync_pending=true + CP 可见待同步 + DFMEA APPROVED 不触发 CP + CP sync = Durable outbox（同事务提交 outbox 记录，worker 重试/幂等/最终置位，非单事务同步）+ 三个独立 AuditLog 记录（fmea_documents/TRANSITION + fmea_versions/CREATE + control_plans/UPDATE） |
+| 失败条件（FAILED） | 快照未生成或字段缺失（如缺 snapshot/major_no/minor_no/sha256_hash）；差异对比不可用；PFMEA APPROVED 未触发 CP sync；DFMEA APPROVED 误触发 CP；sync_pending 置位但 CP 不可见；CP sync 非 Durable outbox（要求单事务同步即偏离现有实现）或 worker 不重试/不幂等/不最终置位；审计实体/action 写错（如版本创建写 TRANSITION 或 CP sync 未写独立 AuditLog）；未审计 |
 | 阻塞条件（BLOCKED） | 无（AI_REQUIRED=false） |
 
 ## 不在本子故事范围

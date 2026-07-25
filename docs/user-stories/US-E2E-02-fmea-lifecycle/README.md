@@ -1,7 +1,7 @@
 # Epic US-E2E-02：FMEA 生命周期（AIAG-VDA 七步法创建 + 编辑器编辑 + 审核闭环）
 
-**状态**: 定稿 v2（2026-07-25），经代码评审修订（8 项数据契约/图结构/审批权限/AI 可观测性修正）
-**前序版本**: v1（2026-07-25，见 git 历史）
+**状态**: 定稿 v3（2026-07-25），经三轮代码评审修订（数据契约/图结构/审批权限/AI 可观测性 + RecommendedAction 数据模型 + AI 契约同步 + 审批门禁 + 审计实体）
+**前序版本**: v2（2026-07-25，见 git 历史）、v1（2026-07-25，见 git 历史）
 **方法论来源**: `Reference/FMEA.md`（AIAG-VDA *FMEA手册* 第五版）§2(DFMEA)/§3(PFMEA) 七步法
 **关联**: 现有向导 `frontend/src/pages/planning/fmea/{DFMEA,PFMEA}WizardPage.tsx`；编辑器 `FMEAEditorPage.tsx`；审批 `POST /api/fmea/{id}/transition`
 **前序 epic**: US-E2E-01-capa-8d-closed-loop（8D 侧已建 FMEA 关联；本 epic 从 FMEA 侧验收创建→编辑→审批全生命周期）
@@ -99,7 +99,7 @@ FailureCause/FailureMode ─OPTIMIZED_BY→ RecommendedAction
 
 ## AI 推荐知识库查询契约（AI_REQUIRED=true 的子故事）
 
-**响应契约**（需在 `RecommendResponse` 增加 `source_executions[]` + `generation_execution`）：
+**响应契约**（需在 `RecommendResponse` 增加 `source_executions[]` + `context_execution` + `generation_execution`）：
 ```json
 {
   "suggestions": [...],
@@ -108,6 +108,7 @@ FailureCause/FailureMode ─OPTIMIZED_BY→ RecommendedAction
     {"source": "semantic_search", "status": "empty", "hit_count": 0, "latency_ms": 45},
     {"source": "lessons_learned", "status": "success", "hit_count": 2, "latency_ms": 23}
   ],
+  "context_execution": {"current_product_structure": "assembled"},
   "generation_execution": {"llm": "success"}
 }
 ```
@@ -122,16 +123,16 @@ FailureCause/FailureMode ─OPTIMIZED_BY→ RecommendedAction
 - **零命中 vs 未调用可区分**：`empty`（调用了但无结果）≠ `unavailable`（未调用）—— `source_executions` 是 E2E 区分二者的依据。
 - **source_document_no**：仅对具有来源文档的候选必填——`graph` / `semantic_search` / `lessons_learned`（若 lessons 候选有来源 CAPA/审核文档）；`rule`/`llm` 不强制。
 
-**4 来源**（后端查询顺序）：
+**3 来源 + 上下文组装 + 生成**（后端查询顺序）：
 
 | # | 来源 | 实现 | `source_executions` |
 |---|---|---|---|
 | 1 | 其他 FMEA 图节点 | `find_similar_nodes_advanced` | `graph` |
 | 2 | RAG 语义搜索 | `document_embeddings` pgvector（`SemanticSearchSource`） | `semantic_search` |
 | 3 | 经验教训库 | `LessonsLearnedService` | `lessons_learned` |
-| 4 | 当前产品结构 | `_assemble_context` | （context_execution，不计入） |
+| — | 当前产品结构 | `_assemble_context` | （`context_execution.current_product_structure`，不计入） |
 
-- **缺口处理**：现状 `RecommendationService` 仅接 #1(keyword)+#4+LLM，**#2/#3 未接入** → 相关子故事验收标 `FAILED`（驱动补齐）。
+- **缺口处理**：现状 `RecommendationService` 仅接 #1(keyword)+上下文组装+LLM，**#2/#3 未接入** → 相关子故事验收标 `FAILED`（驱动补齐）。
 
 ## AI 采纳审计契约（ADOPT_RECOMMENDATION）
 
@@ -229,7 +230,7 @@ epic 级验收 = 各子故事验收的**合取**（全部子故事通过，epic 
 - **状态机**：FMEA 按 DRAFT(向导/编辑器)→IN_REVIEW→APPROVED/REWORK 顺序流转，向导内 Step1-7 不可跳步；仅 DRAFT/REWORK 可编辑图。
 - **权限矩阵**：见"审批权限矩阵"节；IN_REVIEW/APPROVED/ARCHIVED 的 PUT 必须拒绝。
 - **AIAG-VDA 忠实度**：每步创建的节点/边类型与 `Reference/FMEA.md` §X.Y 定义一致（PFMEA=§3.x，DFMEA=§2.x），但**边词汇统一为共享 Process* 边**（DFMEA 语义名称由 `graphPresentation.ts` 映射）。
-- **AI 流程可视化与执行验证**（强制 LLM 凭证，AI_REQUIRED=true 的子故事：02.1/02.4/02.5/02.6/02.8/02.11/02.12/02.13/02.16）：响应含 `source_executions[]`，4 来源必须查询（允许 empty），缺任一 → `FAILED`；无 LLM 凭证 → `BLOCKED`。
+- **AI 流程可视化与执行验证**（强制 LLM 凭证，AI_REQUIRED=true 的子故事：02.1/02.4/02.5/02.6/02.8/02.11/02.12/02.13/02.16）：响应含 `source_executions[]`（3 required_retrievers: graph/semantic_search/lessons_learned）+ `context_execution.current_product_structure` + `generation_execution.llm`；3 required_retrievers 必须查询（允许 empty），缺任一或健康环境下为 unavailable/error → `FAILED`；无 LLM 凭证 → `BLOCKED`。
 - **审计轨迹**：AuditLog `action` 与 Outbox `event_type` 分离（见"AuditLog 与 Outbox 事件分离"节）；AI 采纳写 `ADOPT_RECOMMENDATION`（含采纳元数据）。
 - **数据落库**：节点/边/wizardScope/wizard_completed（在 wizardScope 内）/lock_version/version snapshot（`FMEAVersion.snapshot`）持久化正确；编辑器保存保留向导元数据（不覆盖 wizardScope）；CP 同步状态 `sync_pending` 在 FMEA approved（仅 PFMEA 关联时）置 true。
 
@@ -249,19 +250,19 @@ epic 级验收 = 各子故事验收的**合取**（全部子故事通过，epic 
 - README 版本变更，总 skill `verify-fmea-lifecycle` 须重新核对同步。
 - 子故事可独立迭代，无需 bumping epic 版本；仅当 epic 验收骨架、状态机、依赖关系或生命周期顺序变更时才 bumping README 版本。
 
-## 评审决议（v2，已定）
+## 评审决议（v3，已定）
 
 - **范围**：本 epic 覆盖 PFMEA + DFMEA（不含 FMEA-MSR）；生命周期 = 创建向导 + 编辑器编辑 + 审核闭环。
 - **子故事粒度**：向导按"类型 × 七步"拆 14 子故事（每文件单一业务结果 = AIAG-VDA 一步一类）；编辑器/审批跨类型通用，拆 5 子故事（不按类型重复，避免冗余）。
-- **AI 知识库查询契约**：AI_REQUIRED=true 的子故事，验收要求推荐前查询 4 来源（其他 FMEA 图 + RAG 语义 + 经验教训 + 产品结构），通过 `source_executions[]` 可观测（empty 允许，unavailable/error 带诊断降级）。现状 `RecommendationService` 仅接图(keyword)+结构+LLM，**RAG 语义搜索(#2)与经验教训库(#3)未接入**——本 epic 验收将此标为 `FAILED`，驱动补齐接入。
+- **AI 知识库查询契约**：AI_REQUIRED=true 的子故事，验收要求推荐前查询 3 个 required_retrievers（其他 FMEA 图 graph + RAG 语义 semantic_search + 经验教训 lessons_learned），通过 `source_executions[]` 可观测（empty 允许，unavailable/error 带诊断降级）；`context_execution.current_product_structure` 组装产品结构（不计入 source_executions），`generation_execution.llm` 生成。现状 `RecommendationService` 仅接图(keyword)+context+LLM，**RAG 语义搜索(#2)与经验教训库(#3)未接入**——本 epic 验收将此标为 `FAILED`，驱动补齐接入。
 - **AI 采纳审计**：保存 payload 携带采纳元数据，后端写 `ADOPT_RECOMMENDATION`（当前无此 API，验收为 `FAILED` 驱动补齐）。
 - **AI_REQUIRED 分布**：向导 Step1/4/5/6 + 编辑器 AI 推荐 = true（9 个）；向导 Step2/3/7 + 编辑器 CRUD/协同/版本/审批 = false（10 个）。
 - **审批角色**：当前用 `manager` 账号代表审批方；「设计负责人」独立角色改造另立。
 - **图结构**：共享 Process* 边词汇；DFMEA System/Subsystem/Component 为语义/UI 名称（`graphPresentation.ts` 映射）；不新增 HAS_SUBSYSTEM/HAS_COMPONENT 边（除非另立 schema migration）。
 - **编辑器行模型**：一行 = FM×FC；多效应为 FM 级共享列表（非笛卡尔积）。
-- **字段契约**：wizardScope.{team,timeframe,tool,task,trend}；wizard_completed 在 wizardScope 内；FMEAVersion.{major_no,minor_no,snapshot,sha256_hash,change_type}；RecommendedAction 现有字段（responsible/due_date/status/action_taken/completion_date/revised_*）；4M = Man/Machine/Material/Environment（存储枚举，中文仅 UI）。
+- **字段契约**：wizardScope.{team,timeframe,tool,task,trend}；wizard_completed 在 wizardScope 内；FMEAVersion.{major_no,minor_no,snapshot,sha256_hash,change_type}；RecommendedAction 现有字段（name/responsible/due_date/status/action_taken/completion_date/revised_*）+ 新增落库字段（FailureCause.control_sufficiency_reason / FailureCause.risk_acceptance_reason / FailureCause.management_review_evidence）；4M = Man/Machine/Material/Environment（存储枚举，中文仅 UI）。
 - **CP 联动**：仅 PFMEA 关联时触发 CP sync_pending；DFMEA 审批只生成版本快照，不要求 CP。
-- **CP sync 原子性**：`mark_cp_sync_pending_on_fmea_approve` 需在 FMEA APPROVED 事务内完成（或 outbox/retry），避免 FMEA 已 APPROVED 但 CP 标记失败。
+- **CP sync 交付语义**：**Durable outbox**（对齐现有两阶段实现，`fmea_service.py:378` 先 commit + `control_plan_service.py:665` 再 commit）——同事务只提交 APPROVED、版本快照、三条 AuditLog、outbox 记录；CP sync_pending 最终一致（outbox worker 重试、幂等、最终置位）。不采用"同事务"（需重构现有两阶段代码）。
 - **AIAG-VDA Step5/6**：AP 是 S/O/D 组合的**查表结果**（`calculateAP` 查 `utils/fmea.ts` AP 表），非 S×O×D 乘积（乘积是 RPN）；Step6 行动触发：H=行动或记录现有控制充分；M=行动或记录风险接受理由；L=行动可选；S=9-10 且 AP=H/M 需管理层评审证据；Step7 门禁 = 所有 AP 已评估（行动已关闭或风险接受已记录）。
 - **RecommendedAction 状态**：选定 canonical 枚举 `{open, in_progress, completed}`（对齐现有 `schemas/fmea.py:36` 注释与前端）；AIAG-VDA 手册的 {planned, decided, not_implemented} 不在本 spec 采用。
 - **Step3 功能树门禁**：每个纳入分析范围的结构节点都有功能节点（HAS_FUNCTION 边），而非仅"至少一个功能"。

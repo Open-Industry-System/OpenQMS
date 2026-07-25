@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.7：PFMEA Step7 结果文件化
 
-**状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v2）
+**状态**: 定稿 v3（2026-07-25），经三轮代码评审修订（Step7 门禁补 S=9-10 management_review_evidence）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-pfmea-step7-documentation`（待生成）
 **前置**: 02.1-02.6（前 6 步数据已就绪）
 **AIAG-VDA 引用**: `Reference/FMEA.md` §3.7（过程 FMEA 步骤七：结果文件化）
@@ -31,7 +31,8 @@
 
 ### 门禁（AIAG-VDA Step7）
 - 完成前：Step1-Step6 各项必填字段均非空（向导校验）。
-- **Step7 门禁 = 所有 AP=H/M 已评估**——所有 AP=H/M 的行，要么有 RecommendedAction（status=completed，且 action_taken/completion_date/revised_* 非空），要么有 control_sufficiency_reason（H）或 risk_acceptance_reason（M）非空（见 02.6 落库字段）。
+- **Step7 门禁 = 所有 AP=H/M 已评估**——所有 AP=H/M 的行，要么有 RecommendedAction（status=completed，且 action_taken/completion_date/revised_* 非空），要么有 `FailureCause.control_sufficiency_reason`（H）或 `risk_acceptance_reason`（M）非空（见 02.6 落库字段；placeholder 行回退到 FailureMode）。
+- **S=9-10 且 AP=H/M 时**：无论选择完成行动还是风险接受，`FailureCause.management_review_evidence` 都必须非空（见 02.6）。
 
 ### 审计与落库
 - Step7 完成写 AuditLog（`action="UPDATE"`，Outbox `fmea.updated`，含 wizardScope.wizard_completed=true）。
@@ -47,8 +48,8 @@
 | 状态枚举 | FMEAState 不变（DRAFT）；可提交 IN_REVIEW（见 02.19） |
 | 审计事件 | AuditLog `action="UPDATE"`（Outbox `fmea.updated`） |
 | E2E seed 前置 | 02.1-02.6 全部就绪 |
-| 通过条件 | wizardScope.wizard_completed=true + 汇总无空段 + 所有 AP 已评估 + 跳转编辑器 + 审计 |
-| 失败条件（FAILED） | wizard_completed 写在 graph_data 根级（非 wizardScope 内）；前序步骤有空段未拦截；AP 未评估即可通过；跳转失败；未审计 |
+| 通过条件 | wizardScope.wizard_completed=true + 汇总无空段 + 所有 AP 已评估 + S=9-10 且 AP=H/M 时 management_review_evidence 非空 + 跳转编辑器 + 审计 |
+| 失败条件（FAILED） | wizard_completed 写在 graph_data 根级（非 wizardScope 内）；前序步骤有空段未拦截；AP 未评估即可通过；S=9-10 且 AP=H/M 时 management_review_evidence 为空；跳转失败；未审计 |
 | 阻塞条件（BLOCKED） | 无（AI_REQUIRED=false） |
 
 ## 不在本子故事范围

@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.8：DFMEA Step1 策划与准备（5T 范围）
 
-**状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v2）
+**状态**: 定稿 v3（2026-07-25），经三轮代码评审修订（AI 契约同步为 3 required_retrievers）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-dfmea-step1-planning`（待生成）
 **前置**: 无（向导第一步）
 **AIAG-VDA 引用**: `Reference/FMEA.md` §2.1（设计 FMEA 步骤一：策划与准备）
@@ -31,9 +31,10 @@
 - `wizardScope` 元数据含 5T 字段：`team` / `timeframe` / `tool` / `task` / `trend`（**timeframe，非 timing**，对齐 `WizardScopeSchema`）。
 
 ### AI 推荐知识库查询契约（AI_REQUIRED=true）
-触发 `dfmea_tool`/`dfmea_trend` 推荐时，后端必须查询 4 来源，通过 `source_executions[]` 可观测（见 README "AI 推荐知识库查询契约" 节，查询 DFMEA 节点）。
+触发 `dfmea_tool`/`dfmea_trend` 推荐时，后端必须查询 3 个 required_retrievers（graph/semantic_search/lessons_learned），通过 `source_executions[]` 可观测；`context_execution.current_product_structure` 组装产品结构；`generation_execution.llm` 生成（见 README "AI 推荐知识库查询契约" 节，查询 DFMEA 节点）。
 
-- **缺口处理**：现状仅接图(keyword)+结构+LLM，**RAG/lessons 未接入** → 验收标 `FAILED`。
+- **E2E 健康环境断言**：健康环境（有 embedding + LLM 凭证）中，3 required_retrievers 必须为 `success | empty`；`unavailable | error` → FAILED。
+- **缺口处理**：现状仅接图(keyword)+context+LLM，**RAG/lessons 未接入** → 验收标 `FAILED`。
 
 ### 审计与落库
 - Step1 保存写 AuditLog（`action="UPDATE"`，Outbox `fmea.updated`）。
@@ -46,12 +47,12 @@
 | 落库实体 | `FMEADocument.graph_data.wizardScope` |
 | 关键字段 | wizardScope.{team, timeframe, tool, task, trend} |
 | AI 触发器 | `dfmea_tool`、`dfmea_trend` |
-| AI 必查来源 | #1+#2+#3+#4（缺任一→FAILED；#2/#3 当前未接入→FAILED） |
+| AI 必查来源 | 3 required_retrievers（graph/semantic_search/lessons_learned）+ context_execution + generation_execution（缺任一→FAILED；#2/#3 当前未接入→FAILED） |
 | 状态枚举 | FMEAState 不变（DRAFT） |
 | 审计事件 | AuditLog `action="UPDATE"`（Outbox `fmea.updated`）、`action="ADOPT_RECOMMENDATION"` |
 | E2E seed 前置 | DFMEA draft 文档 + 产品线 |
-| 通过条件 | wizardScope 5T 完整 + AI 查全 4 来源（source_executions 可观测）+ 推荐带 source + 采纳留痕 + 审计 |
-| 失败条件（FAILED） | 字段缺失或字段名错误（如 timing）；AI 未查 #2/#3；推荐无 source；未审计 |
+| 通过条件 | wizardScope 5T 完整 + AI 查全 3 required_retrievers（source_executions 可观测）+ 推荐带 source + 采纳留痕 + 审计 |
+| 失败条件（FAILED） | 字段缺失或字段名错误（如 timing）；AI 未查 #2/#3（或健康环境下为 unavailable/error）；推荐无 source；未审计 |
 | 阻塞条件（BLOCKED） | 无 LLM 凭证 |
 
 ## 不在本子故事范围

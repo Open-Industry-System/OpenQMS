@@ -1,7 +1,7 @@
 # 子故事 US-E2E-02.1：PFMEA Step1 策划与准备（5T 范围）
 
-**状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v2）
+**状态**: 定稿 v3（2026-07-25），经三轮代码评审修订（AI 契约同步为 3 required_retrievers）
+**所属 epic**: US-E2E-02（README.md v3）
 **关联 skill**: `verify-fmea-lifecycle-pfmea-step1-planning`（待生成）
 **前置**: 无（向导第一步）
 **AIAG-VDA 引用**: `Reference/FMEA.md` §3.1（过程 FMEA 步骤一：策划与准备）
@@ -32,17 +32,18 @@
 - 工具字段非空（AI 采纳或手工）；趋势字段非空。
 
 ### AI 推荐知识库查询契约（AI_REQUIRED=true）
-触发 `pfmea_tool`/`pfmea_trend` 推荐时，后端必须**先查询以下全部来源**，通过 `source_executions[]` 可观测（见 README "AI 推荐知识库查询契约" 节）：
+触发 `pfmea_tool`/`pfmea_trend` 推荐时，后端必须查询 3 个 required_retrievers（外部检索），通过 `source_executions[]` 可观测；`context_execution.current_product_structure` 组装产品结构（不计入 source_executions）；`generation_execution.llm` 生成（见 README "AI 推荐知识库查询契约" 节）：
 
 | # | 来源 | 查询内容 | `source_executions` 期望 |
 |---|---|---|---|
 | 1 | 其他 FMEA 图节点 | 同产品线/全局的 PFMEA `wizardScope.tool`/`trend` 历史 | `source=graph, status∈{success,empty}` |
-| 2 | RAG 语义搜索 | 跨 FMEA wizardScope 向量相似（pgvector） | `source=semantic_search, status∈{success,empty,unavailable}` |
-| 3 | 经验教训库 | 历史 PFMEA 经验教训 | `source=lessons_learned, status∈{success,empty,unavailable}` |
-| 4 | 当前产品结构 | product_line_code / fmea_title / task / team | （context assembly，不计入 source_executions） |
+| 2 | RAG 语义搜索 | 跨 FMEA wizardScope 向量相似（pgvector） | `source=semantic_search, status∈{success,empty}` |
+| 3 | 经验教训库 | 历史 PFMEA 经验教训 | `source=lessons_learned, status∈{success,empty}` |
+| — | 当前产品结构 | product_line_code / fmea_title / task / team | （`context_execution.current_product_structure`，不计入 source_executions） |
 
-- **来源可追溯**：每条推荐带 `source` ∈ {rule, graph, semantic_search, lessons_learned, llm}（需扩展 `schemas/recommendation.py`）；`source_document_no` 仅对 graph/semantic_search 必填。
-- **缺口处理**：现状 `RecommendationService` 仅接 #1(keyword)+#4+LLM，**#2/#3 未接入** → 本子故事验收标 `FAILED`（驱动补齐）。
+- **来源可追溯**：每条推荐带 `source` ∈ {rule, graph, semantic_search, lessons_learned, llm}（需扩展 `schemas/recommendation.py`）；`source_document_no` 仅对 graph/semantic_search/lessons_learned（有来源文档时）必填。
+- **E2E 健康环境断言**：健康环境（有 embedding + LLM 凭证）中，3 required_retrievers 必须为 `success | empty`；`unavailable | error` → FAILED。
+- **缺口处理**：现状 `RecommendationService` 仅接 #1(keyword)+context+LLM，**#2/#3 未接入** → 本子故事验收标 `FAILED`（驱动补齐）。
 
 ### 审计与落库
 - Step1 保存写 AuditLog（`action="UPDATE"`，Outbox `event_type="fmea.updated"`）。
@@ -56,12 +57,12 @@
 | 落库实体 | `FMEADocument.graph_data.wizardScope`（元数据，无新图节点） |
 | 关键字段 | wizardScope.{team, timeframe, tool, task, trend}（**timeframe，非 timing**） |
 | AI 触发器 | `pfmea_tool`、`pfmea_trend` |
-| AI 必查来源 | #1+#2+#3+#4（缺任一→FAILED；#2/#3 当前未接入→FAILED） |
+| AI 必查来源 | 3 required_retrievers（graph/semantic_search/lessons_learned）+ context_execution + generation_execution（缺任一→FAILED；#2/#3 当前未接入→FAILED） |
 | 状态枚举 | FMEAState 不变（DRAFT） |
 | 审计事件 | AuditLog `action="UPDATE"`（Outbox `fmea.updated`）、`action="ADOPT_RECOMMENDATION"` |
 | E2E seed 前置 | PFMEA draft 文档 + 产品线 DC-DC-100 |
-| 通过条件 | wizardScope 5T 完整 + AI 查全 4 来源（source_executions 可观测）+ 推荐带 source + 采纳留痕 + 审计 |
-| 失败条件（FAILED） | wizardScope 字段缺失或字段名错误（如 timing）；AI 未查 #2 RAG 或 #3 lessons（source_executions 缺 semantic_search/lessons_learned）；推荐无 source；未审计 |
+| 通过条件 | wizardScope 5T 完整 + AI 查全 3 required_retrievers（source_executions 可观测）+ 推荐带 source + 采纳留痕 + 审计 |
+| 失败条件（FAILED） | wizardScope 字段缺失或字段名错误（如 timing）；AI 未查 #2 RAG 或 #3 lessons（source_executions 缺 semantic_search/lessons_learned，或健康环境下为 unavailable/error）；推荐无 source；未审计 |
 | 阻塞条件（BLOCKED） | 无 LLM 凭证（AI_REQUIRED=true） |
 
 ## 不在本子故事范围
