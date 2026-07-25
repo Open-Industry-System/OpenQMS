@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
 from app.models.management_review import ManagementReview, ReviewOutput
+from app.state_machines.eightd_state import capa_open_clause
 
 
 def _parse_integrity_error(error: IntegrityError, operation: str) -> str:
@@ -363,7 +364,7 @@ async def _aggregate_data_package(
         capa_base = capa_base.where(CAPAEightD.product_line_code == product_line_code)
     total_capa = (await db.execute(capa_base)).scalar() or 0
     open_capa = (await db.execute(
-        capa_base.where(CAPAEightD.status.notin_(["D8_CLOSURE", "ARCHIVED"]))
+        capa_base.where(capa_open_clause(CAPAEightD.status))
     )).scalar() or 0
     closed_capa = total_capa - open_capa
     pkg["capa_stats"] = {

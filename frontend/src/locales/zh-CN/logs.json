@@ -1,0 +1,16 @@
+{
+  "title": "日志管理",
+  "tabs": { "audit": "审计日志", "login": "登录日志", "system": "系统日志" },
+  "filters": {
+    "table_name": "表名", "action": "动作", "operated_by": "操作人",
+    "username": "用户名", "result": "结果", "all": "全部", "success": "成功", "fail": "失败",
+    "level": "级别", "logger_name": "Logger", "timeRange": "时间范围", "search": "查询"
+  },
+  "columns": {
+    "operated_at": "时间", "occurred_at": "时间", "table_name": "表名", "action": "动作",
+    "operated_by": "操作人", "ip": "IP", "username": "用户名", "result": "结果",
+    "failure_reason": "失败原因", "level": "级别", "logger_name": "Logger", "message": "消息"
+  },
+  "expand": { "oldValues": "旧值", "newValues": "新值", "changedFields": "变更字段", "traceback": "堆栈" },
+  "error": { "load": "加载失败" }
+}

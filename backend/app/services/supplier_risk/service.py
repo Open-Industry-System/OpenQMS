@@ -1,6 +1,6 @@
 """Main service: evaluate supplier risk, handle alerts, create SCAR/CAPA from alerts."""
 import uuid
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -10,9 +10,129 @@ from app.models.capa import CAPAEightD
 from app.models.iqc_inspection import IqcInspection
 from app.models.supplier import Supplier, SupplierCertification, SupplierEvaluation, SupplierSCAR
 from app.models.supplier_risk import SupplierRiskAlert
+from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 from app.services.supplier_risk.config import get_effective_configs, get_effective_configs_batch
-from app.services.supplier_risk.rule_engine import SupplierRiskInput, run_all_rules
+from app.services.supplier_risk.exceptions import SupplierRiskConfigurationError
+from app.services.supplier_risk.rule_engine import (
+    SupplierRiskInput,
+    capa_incident_sort_key,
+    run_all_rules,
+)
 from app.services.supplier_risk.scorer import calculate_risk_score
+
+CAPA_INPUT_WINDOW_DAYS = 90
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize datetimes for window comparisons (treat naive as UTC)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def evaluate_supplier_risk_in_tx(
+    db: AsyncSession,
+    supplier_id: uuid.UUID,
+    product_line_code: Optional[str] = None,
+    *,
+    force_update: bool = False,
+    trigger_input: Optional[SupplierRiskCapaInput] = None,
+    preloaded: Optional[dict] = None,
+):
+    """事务内核心：不 commit。消费者与 confirm 共用。
+
+    Serializes all writers for the same supplier via a **supplier-level**
+    transaction-scoped advisory lock (key ignores product_line_code) so that:
+    - PL-scoped worker/confirm (supplier:PL-A)
+    - daily rollup evaluate_all_suppliers(product_line_code=None) (supplier:)
+    cannot race and overwrite each other's daily alert.
+
+    ``preloaded`` optional dict may include inspections/scars/evaluations/
+    certifications/configs/supplier to avoid N+1 in batch paths.
+
+    CAPA inputs are **always** re-queried under the lock (``preloaded`` cannot
+    supply them). Batch load happens before the lock; reusing that snapshot
+    would let a waiting rollup overwrite a fresher worker/confirm result.
+    """
+    from sqlalchemy import text as sa_text
+
+    # Coarse supplier-level lock first (shared by all PL and rollup writers).
+    await db.execute(
+        sa_text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"supplier-risk:{supplier_id}"},
+    )
+
+    pre = preloaded or {}
+    supplier = pre.get("supplier") or await db.get(Supplier, supplier_id)
+    if not supplier:
+        raise ValueError("供应商不存在")
+
+    configs = pre.get("configs")
+    if configs is None:
+        configs = await get_effective_configs(db, product_line_code, supplier_id)
+    if not configs:
+        raise ValueError("无有效的风险规则配置")
+
+    inspections = pre.get("inspections")
+    if inspections is None:
+        inspections = await _gather_inspections(db, supplier_id, product_line_code)
+    scars = pre.get("scars")
+    if scars is None:
+        scars = await _gather_scars(db, supplier_id, product_line_code)
+    evaluations = pre.get("evaluations")
+    if evaluations is None:
+        evaluations = await _gather_evaluations(db, supplier_id)
+    certifications = pre.get("certifications")
+    if certifications is None:
+        certifications = await _gather_certifications(db, supplier_id)
+    # Always under lock — never trust a pre-lock CAPA snapshot.
+    incidents = await _gather_capa_inputs(db, supplier_id, product_line_code)
+
+    # 显式注入 trigger_input（绕过 status 限制，但须仍在 90 天窗口内）
+    if trigger_input is not None:
+        incidents = [i for i in incidents if i.input_id != trigger_input.input_id]
+        cutoff = datetime.now(timezone.utc) - timedelta(days=CAPA_INPUT_WINDOW_DAYS)
+        if trigger_input.created_at is not None and _as_utc(trigger_input.created_at) >= cutoff:
+            incidents.append(trigger_input)
+        # inject 会破坏 gather 的 created_at DESC 序；重排使 R11 同级选择确定性
+        incidents = sorted(incidents, key=capa_incident_sort_key, reverse=True)
+
+    input_data = SupplierRiskInput(
+        supplier=supplier,
+        inspections=inspections,
+        scars=scars,
+        evaluations=evaluations,
+        certifications=certifications,
+        capa_incidents=incidents,
+    )
+    results, failed_ids = run_all_rules(input_data, configs)
+
+    # 强制契约：trigger_input 评估时必须实际产出 R11
+    if trigger_input is not None:
+        r11 = next((r for r in results if r.rule_id == "R11"), None)
+        if r11 is None:
+            raise SupplierRiskConfigurationError(
+                f"R11 not executed (missing/disabled/failed: r11_in_failed={'R11' in failed_ids})"
+            )
+
+    risk_score = calculate_risk_score(results, configs)
+    alert, event_type = await _upsert_alert(
+        db, supplier_id, product_line_code, risk_score, results, failed_ids,
+        factory_id=supplier.factory_id, force_update=force_update,
+    )
+
+    # 回填 trigger_input 快照
+    if trigger_input is not None and alert is not None:
+        trigger_input.evaluated_risk_level = alert.risk_level
+        trigger_input.evaluated_risk_score = alert.risk_score
+        trigger_input.evaluated_at = datetime.now(timezone.utc)
+        trigger_input.linked_alert_id = alert.alert_id
+    elif trigger_input is not None:
+        trigger_input.evaluated_risk_level = risk_score.risk_level
+        trigger_input.evaluated_risk_score = risk_score.risk_score
+        trigger_input.evaluated_at = datetime.now(timezone.utc)
+
+    return alert, risk_score, results, event_type
 
 
 async def evaluate_supplier_risk(
@@ -21,53 +141,27 @@ async def evaluate_supplier_risk(
     product_line_code: Optional[str] = None,
 ) -> dict:
     """Evaluate a single supplier's risk and upsert alert."""
-
-    # 1. Get supplier
-    supplier = await db.get(Supplier, supplier_id)
-    if not supplier:
-        raise ValueError("供应商不存在")
-
-    # 2. Get effective configs
-    configs = await get_effective_configs(db, product_line_code, supplier_id)
-    if not configs:
-        raise ValueError("无有效的风险规则配置")
-
-    # 3. Gather data
-    inspections = await _gather_inspections(db, supplier_id, product_line_code)
-    scars = await _gather_scars(db, supplier_id, product_line_code)
-    evaluations = await _gather_evaluations(db, supplier_id)
-    certifications = await _gather_certifications(db, supplier_id)
-
-    # 4. Build input and run rules
-    input_data = SupplierRiskInput(
-        supplier=supplier,
-        inspections=inspections,
-        scars=scars,
-        evaluations=evaluations,
-        certifications=certifications,
-    )
-    results, failed_ids = run_all_rules(input_data, configs)
-
-    # 5. Calculate score
-    risk_score = calculate_risk_score(results, configs)
-
-    # 6. Upsert alert (returns alert + event type)
-    alert, event_type = await _upsert_alert(
-        db, supplier_id, product_line_code, risk_score, results, failed_ids,
-        factory_id=supplier.factory_id,
+    alert, risk_score, results, event_type = await evaluate_supplier_risk_in_tx(
+        db, supplier_id, product_line_code,
     )
 
-    # 7. Commit so the alert is persisted before returning / notifying
+    # Commit so the alert is persisted before returning / notifying
     await db.commit()
     if alert:
         await db.refresh(alert)
 
-    # 8. Send notifications ONLY for new or escalated high-risk alerts (non-blocking)
+    # Send notifications ONLY for new or escalated high-risk alerts (non-blocking)
     if alert and event_type in ("new", "escalated") and alert.risk_level in ("high", "critical"):
         from app.services.supplier_risk.notifier import send_notifications
         try:
             await send_notifications(db, alert, product_line_code)
         except Exception:
+            # Notification must never leave a failed/open txn on the eval session.
+            if db.in_transaction():
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
             logger = __import__("logging").getLogger(__name__)
             logger.exception("Notification failed for alert %s", alert.alert_id)
 
@@ -87,88 +181,146 @@ async def evaluate_supplier_risk(
     }
 
 
+# Upper bound for tenant-wide batch loads (IQC/SCAR/eval/cert/configs per chunk).
+# CAPA inputs stay under-lock per supplier (freshness); only stable inputs chunk.
+EVALUATE_ALL_CHUNK_SIZE = 200
+
+
 async def evaluate_all_suppliers(
     db: AsyncSession,
     product_line_code: Optional[str] = None,
 ) -> list[dict]:
     """Evaluate all active suppliers.
 
-    Uses a batch strategy: one query per data type (IQC, SCAR, Evaluation,
-    Certification) to load all relevant records, then groups by supplier in
-    Python. Avoids the per-supplier N+1 query pattern.
+    Materializes plain supplier UUIDs up front, then processes fixed-size chunks
+    (``EVALUATE_ALL_CHUNK_SIZE``). Each chunk re-loads Supplier rows and batch-
+    loads IQC/SCAR/eval/cert/configs, then per supplier calls
+    ``evaluate_supplier_risk_in_tx`` with ``preloaded=`` so:
+    - shared supplier-level advisory lock still serializes against worker/confirm
+    - N+1 config/data queries are avoided for stable inputs
+    - CAPA inputs are intentionally NOT preloaded (re-queried under lock for
+      freshness against concurrent worker/confirm — see design-spec note)
+
+    Each supplier runs in a SAVEPOINT so one evaluation failure does not expire
+    the rest of the batch session. A real ``commit()`` failure still forces a
+    full-session ``rollback()`` which expires the identity map; remaining
+    suppliers in the chunk drop preloaded data and re-query. Subsequent chunks
+    re-load Supplier rows from plain IDs, so they never touch expired ORM.
+
+    Notifications are deferred until all commits finish, so webhook/SMTP I/O
+    never holds an evaluation transaction open.
     """
-    # Get all active suppliers
     result = await db.execute(
-        select(Supplier).where(Supplier.status == "approved")
+        select(Supplier.supplier_id)
+        .where(Supplier.status == "approved")
+        .order_by(Supplier.supplier_no.asc(), Supplier.supplier_id.asc())
     )
-    suppliers = list(result.scalars().all())
-    if not suppliers:
+    # Plain UUIDs only — a later commit-failure rollback expires every
+    # identity-map state; holding ORM rows across chunks would MissingGreenlet
+    # on ``s.supplier_id`` when entering the next chunk.
+    all_supplier_ids = list(result.scalars().all())
+    if not all_supplier_ids:
         return []
 
-    supplier_ids = [s.supplier_id for s in suppliers]
+    results: list[dict] = []
+    pending_notifications: list[tuple[uuid.UUID, Optional[str]]] = []
+    for chunk_start in range(0, len(all_supplier_ids), EVALUATE_ALL_CHUNK_SIZE):
+        supplier_ids = all_supplier_ids[chunk_start:chunk_start + EVALUATE_ALL_CHUNK_SIZE]
 
-    # Batch load all data types in parallel-friendly queries
-    inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
-    scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
-    evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
-    certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
+        # Re-load this chunk's Supplier rows (fresh after any prior rollback).
+        chunk_rows = (await db.execute(
+            select(Supplier).where(Supplier.supplier_id.in_(supplier_ids))
+        )).scalars().all()
+        suppliers_by_id = {s.supplier_id: s for s in chunk_rows}
 
-    # Batch load effective configs for all suppliers in a single query
-    configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
+        inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
+        scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
+        evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
+        certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
+        configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
+        use_preloaded = True
 
-    results = []
-    for supplier in suppliers:
-        try:
-            configs = configs_by_supplier.get(supplier.supplier_id)
-            if not configs:
+        for supplier_id in supplier_ids:
+            preloaded = None
+            if use_preloaded:
+                configs = configs_by_supplier.get(supplier_id)
+                if not configs:
+                    continue
+                supplier = suppliers_by_id.get(supplier_id)
+                if supplier is None:
+                    continue
+                preloaded = {
+                    "supplier": supplier,
+                    "configs": configs,
+                    "inspections": inspections_by_supplier.get(supplier_id, []),
+                    "scars": scars_by_supplier.get(supplier_id, []),
+                    "evaluations": evaluations_by_supplier.get(supplier_id, []),
+                    "certifications": certifications_by_supplier.get(supplier_id, []),
+                }
+
+            try:
+                async with db.begin_nested():
+                    alert, risk_score, rule_results, event_type = await evaluate_supplier_risk_in_tx(
+                        db, supplier_id, product_line_code,
+                        preloaded=preloaded,
+                    )
+                    # Materialize plain values before savepoint ends / outer commit.
+                    # Keep alert_id (not the ORM) so notifications can run after
+                    # the eval session is free of open work.
+                    row = {
+                        "supplier_id": supplier_id,
+                        "risk_level": risk_score.risk_level,
+                        "risk_score": risk_score.risk_score,
+                        "quality_score": risk_score.quality_score,
+                        "delivery_score": risk_score.delivery_score,
+                        "compliance_score": risk_score.compliance_score,
+                        "rule_results": [
+                            {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
+                             "detail": r.detail, "category": r.category, "critical": r.critical}
+                            for r in rule_results
+                        ],
+                        "alert_id": alert.alert_id if alert else None,
+                        "_event_type": event_type,
+                        "_notify": bool(
+                            alert and event_type in ("new", "escalated")
+                            and alert.risk_level in ("high", "critical")
+                        ),
+                    }
+            except Exception:
+                # Nested savepoint auto-rolls back; do NOT full-session rollback
+                # (that would expire preloaded ORM for remaining suppliers).
                 continue
 
-            input_data = SupplierRiskInput(
-                supplier=supplier,
-                inspections=inspections_by_supplier.get(supplier.supplier_id, []),
-                scars=scars_by_supplier.get(supplier.supplier_id, []),
-                evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
-                certifications=certifications_by_supplier.get(supplier.supplier_id, []),
-            )
-            rule_results, failed_ids = run_all_rules(input_data, configs)
-            risk_score = calculate_risk_score(rule_results, configs)
+            try:
+                await db.commit()
+            except Exception:
+                # Root rollback expires the whole identity map. Drop preloaded
+                # ORM and re-query for remaining suppliers in this chunk.
+                await db.rollback()
+                use_preloaded = False
+                continue
 
-            alert, event_type = await _upsert_alert(
-                db, supplier.supplier_id, product_line_code, risk_score, rule_results, failed_ids,
-                factory_id=supplier.factory_id,
-            )
+            if row.pop("_notify") and row["alert_id"] is not None:
+                pending_notifications.append((row["alert_id"], product_line_code))
 
-            # Commit per supplier so partial failures don't lose all progress
-            await db.commit()
-            if alert:
-                await db.refresh(alert)
+            results.append(row)
 
-            if alert and event_type in ("new", "escalated") and alert.risk_level in ("high", "critical"):
-                from app.services.supplier_risk.notifier import send_notifications
-                try:
-                    await send_notifications(db, alert, product_line_code)
-                except Exception:
-                    logger = __import__("logging").getLogger(__name__)
-                    logger.exception("Notification failed for alert %s", alert.alert_id)
-
-            results.append({
-                "supplier_id": supplier.supplier_id,
-                "risk_level": risk_score.risk_level,
-                "risk_score": risk_score.risk_score,
-                "quality_score": risk_score.quality_score,
-                "delivery_score": risk_score.delivery_score,
-                "compliance_score": risk_score.compliance_score,
-                "rule_results": [
-                    {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
-                     "detail": r.detail, "category": r.category, "critical": r.critical}
-                    for r in rule_results
-                ],
-                "alert_id": alert.alert_id if alert else None,
-            })
-        except Exception:
-            # Skip suppliers with config/data issues; rollback to avoid dirty session
-            await db.rollback()
-            continue
+    # Notifications run after all commits so webhook/SMTP I/O never holds an
+    # evaluation transaction open (and the final return is not mid-txn).
+    if pending_notifications:
+        from app.services.supplier_risk.notifier import send_notifications_by_alert_id
+        for alert_id, pl in pending_notifications:
+            try:
+                await send_notifications_by_alert_id(db, alert_id, pl)
+            except Exception:
+                # Isolate one failed notification so remaining alerts still dispatch.
+                if db.in_transaction():
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+                logger = __import__("logging").getLogger(__name__)
+                logger.exception("Notification failed for alert %s", alert_id)
 
     return results
 
@@ -185,51 +337,66 @@ async def calculate_all_supplier_scores(
     - Does NOT send notifications
     - Returns scores for every approved supplier (evaluate_all_suppliers scores
       the same set but only upserts alerts for those above threshold)
+
+    Loads supplier IDs up front, then reloads Supplier + inputs per chunk
+    (``EVALUATE_ALL_CHUNK_SIZE``) so tenant-wide IQC/SCAR/eval/cert/CAPA/config
+    data is never held unbounded in memory. CAPA inputs use the batch gatherer
+    here (read-only scoring path; no advisory lock / freshness race).
     """
     result = await db.execute(
-        select(Supplier).where(Supplier.status == "approved")
+        select(Supplier.supplier_id)
+        .where(Supplier.status == "approved")
+        .order_by(Supplier.supplier_no.asc(), Supplier.supplier_id.asc())
     )
-    suppliers = list(result.scalars().all())
-    if not suppliers:
+    all_supplier_ids = list(result.scalars().all())
+    if not all_supplier_ids:
         return []
 
-    supplier_ids = [s.supplier_id for s in suppliers]
-
-    inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
-    scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
-    evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
-    certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
-    configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
-
     results = []
-    for supplier in suppliers:
-        configs = configs_by_supplier.get(supplier.supplier_id)
-        if not configs:
-            continue
-        input_data = SupplierRiskInput(
-            supplier=supplier,
-            inspections=inspections_by_supplier.get(supplier.supplier_id, []),
-            scars=scars_by_supplier.get(supplier.supplier_id, []),
-            evaluations=evaluations_by_supplier.get(supplier.supplier_id, []),
-            certifications=certifications_by_supplier.get(supplier.supplier_id, []),
-        )
-        rule_results, _ = run_all_rules(input_data, configs)
-        risk_score = calculate_risk_score(rule_results, configs)
+    for chunk_start in range(0, len(all_supplier_ids), EVALUATE_ALL_CHUNK_SIZE):
+        supplier_ids = all_supplier_ids[chunk_start:chunk_start + EVALUATE_ALL_CHUNK_SIZE]
+        chunk_rows = (await db.execute(
+            select(Supplier).where(Supplier.supplier_id.in_(supplier_ids))
+        )).scalars().all()
+        suppliers_by_id = {s.supplier_id: s for s in chunk_rows}
 
-        results.append({
-            "supplier_id": supplier.supplier_id,
-            "supplier_name": supplier.name,
-            "risk_level": risk_score.risk_level,
-            "risk_score": risk_score.risk_score,
-            "quality_score": risk_score.quality_score,
-            "delivery_score": risk_score.delivery_score,
-            "compliance_score": risk_score.compliance_score,
-            "rule_results": [
-                {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
-                 "detail": r.detail, "category": r.category, "critical": r.critical}
-                for r in rule_results
-            ],
-        })
+        inspections_by_supplier = await _batch_gather_inspections(db, supplier_ids, product_line_code)
+        scars_by_supplier = await _batch_gather_scars(db, supplier_ids, product_line_code)
+        evaluations_by_supplier = await _batch_gather_evaluations(db, supplier_ids)
+        certifications_by_supplier = await _batch_gather_certifications(db, supplier_ids)
+        capa_inputs_by_supplier = await _batch_gather_capa_inputs(db, supplier_ids, product_line_code)
+        configs_by_supplier = await get_effective_configs_batch(db, supplier_ids, product_line_code)
+
+        for supplier_id in supplier_ids:
+            supplier = suppliers_by_id.get(supplier_id)
+            configs = configs_by_supplier.get(supplier_id)
+            if not supplier or not configs:
+                continue
+            input_data = SupplierRiskInput(
+                supplier=supplier,
+                inspections=inspections_by_supplier.get(supplier_id, []),
+                scars=scars_by_supplier.get(supplier_id, []),
+                evaluations=evaluations_by_supplier.get(supplier_id, []),
+                certifications=certifications_by_supplier.get(supplier_id, []),
+                capa_incidents=capa_inputs_by_supplier.get(supplier_id, []),
+            )
+            rule_results, _ = run_all_rules(input_data, configs)
+            risk_score = calculate_risk_score(rule_results, configs)
+
+            results.append({
+                "supplier_id": supplier.supplier_id,
+                "supplier_name": supplier.name,
+                "risk_level": risk_score.risk_level,
+                "risk_score": risk_score.risk_score,
+                "quality_score": risk_score.quality_score,
+                "delivery_score": risk_score.delivery_score,
+                "compliance_score": risk_score.compliance_score,
+                "rule_results": [
+                    {"rule_id": r.rule_id, "triggered": r.triggered, "score": r.score,
+                     "detail": r.detail, "category": r.category, "critical": r.critical}
+                    for r in rule_results
+                ],
+            })
     return results
 
 
@@ -271,6 +438,21 @@ async def _gather_certifications(db, supplier_id):
         select(SupplierCertification)
         .where(SupplierCertification.supplier_id == supplier_id)
     )
+    return list(result.scalars().all())
+
+
+async def _gather_capa_inputs(db: AsyncSession, supplier_id: uuid.UUID, product_line_code: Optional[str]):
+    """读该 supplier 的 processed/error capa inputs，90 天窗口。"""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CAPA_INPUT_WINDOW_DAYS)
+    query = select(SupplierRiskCapaInput).where(
+        SupplierRiskCapaInput.supplier_id == supplier_id,
+        SupplierRiskCapaInput.status.in_(("processed", "error")),
+        SupplierRiskCapaInput.created_at >= cutoff,
+    )
+    if product_line_code:
+        query = query.where(SupplierRiskCapaInput.product_line_code == product_line_code)
+    query = query.order_by(SupplierRiskCapaInput.created_at.desc(), SupplierRiskCapaInput.input_id.asc())
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
@@ -325,16 +507,47 @@ async def _batch_gather_certifications(db, supplier_ids):
     return by_supplier
 
 
+async def _batch_gather_capa_inputs(db: AsyncSession, supplier_ids: list[uuid.UUID], product_line_code: Optional[str]):
+    """批量版：一次查询按 supplier 分组。"""
+    if not supplier_ids:
+        return {}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CAPA_INPUT_WINDOW_DAYS)
+    query = select(SupplierRiskCapaInput).where(
+        SupplierRiskCapaInput.supplier_id.in_(supplier_ids),
+        SupplierRiskCapaInput.status.in_(("processed", "error")),
+        SupplierRiskCapaInput.created_at >= cutoff,
+    )
+    if product_line_code:
+        query = query.where(SupplierRiskCapaInput.product_line_code == product_line_code)
+    query = query.order_by(SupplierRiskCapaInput.created_at.desc(), SupplierRiskCapaInput.input_id.asc())
+    result = await db.execute(query)
+    by_supplier: dict[uuid.UUID, list] = {}
+    for inp in result.scalars().all():
+        by_supplier.setdefault(inp.supplier_id, []).append(inp)
+    return by_supplier
+
+
 # ── Alert upsert with event type ───────────────────────────────────────────────
 
-async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results, failed_ids, *, factory_id=None):
+async def _upsert_alert(
+    db,
+    supplier_id,
+    product_line_code,
+    risk_score,
+    results,
+    failed_ids,
+    *,
+    factory_id=None,
+    force_update: bool = False,
+):
     """Upsert alert: dedup by (supplier_id, product_line_code, snapshot_date).
 
     Returns (alert, event_type) where event_type is:
     - "new": newly created alert
-    - "escalated": existing alert risk level increased
+    - "escalated": existing alert risk level increased (force_update=False)
+    - "updated": existing alert overwritten (force_update=True)
     - "unchanged": existing alert, same or lower level (or newly low)
-    - None: no alert created (low risk, no existing)
+    - None: no alert created (low risk, no existing, force_update=False)
     """
     today = date.today()
 
@@ -358,27 +571,28 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
         for r in results
     ]
 
-    # Don't create alerts for low-risk suppliers
+    # Don't create alerts for low-risk suppliers unless force_update
     if risk_score.risk_level == "low" and not existing:
-        return None, None
+        if not force_update:
+            return None, None
 
     if existing:
-        # Check if risk level escalated
         level_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-        if level_order.get(risk_score.risk_level, 0) > level_order.get(existing.risk_level, 0):
+        if force_update or level_order.get(risk_score.risk_level, 0) > level_order.get(existing.risk_level, 0):
             existing.risk_level = risk_score.risk_level
             existing.risk_score = risk_score.risk_score
             existing.quality_score = risk_score.quality_score
             existing.delivery_score = risk_score.delivery_score
             existing.compliance_score = risk_score.compliance_score
             existing.rule_results = rule_results_data
-            existing.alert_type = "escalated"
+            if not force_update:
+                existing.alert_type = "escalated"
             await db.flush()
-            return existing, "escalated"
+            return existing, "updated" if force_update else "escalated"
         # If same or lower level, skip update
         return existing, "unchanged"
 
-    # Create new alert
+    # Create new alert (force_update may create low-risk routine alerts)
     alert = SupplierRiskAlert(
         supplier_id=supplier_id,
         factory_id=factory_id,
@@ -388,7 +602,7 @@ async def _upsert_alert(db, supplier_id, product_line_code, risk_score, results,
         delivery_score=risk_score.delivery_score,
         compliance_score=risk_score.compliance_score,
         rule_results=rule_results_data,
-        alert_type="initial",
+        alert_type="routine" if force_update else "initial",
         status="open",
         snapshot_date=today,
         product_line_code=product_line_code,
@@ -512,6 +726,7 @@ async def create_capa_from_alert(
         user_id=user_id,
         product_line_code=alert.product_line_code or "DC-DC-100",
         factory_id=alert.factory_id,
+        supplier_id=alert.supplier_id,
     )
 
     # Link alert to CAPA and update status

@@ -22,6 +22,25 @@ Touch only what must change. Don't improve adjacent code, comments, or formattin
 
 Run the relevant command (build, lint, test, or start the app) before declaring work done. "It should work" is not verification. If you can't verify, say so explicitly rather than claiming completion.
 
+### 5. Keep Docs in Sync With Code
+
+After changing `backend/app/`, `frontend/src/`, `docker-compose.yml`, or any `Dockerfile`, check whether `docs/`, `CLAUDE.md`, `README.md`, or a module `README.md` needs an update — and update it in the same change. CI enforces this on PRs: when code under those paths changes without a matching docs change, the `docs-check` job fails. If documentation truly doesn't need an update, add the `docs-not-needed` label to the PR with a one-line justification in the PR description.
+
+### 6. Session Workflow (clock-in / clock-out)
+
+**Clock-in (start of session)**
+
+1. Read `PROGRESS.md` for current status, blockers, and the "next steps" section
+2. Read `docs/DECISIONS.md` for accepted key decisions (avoid overturning them, avoid re-proposing already-rejected options)
+3. Run `make check` to confirm the repo is in a consistent state (backend tests + frontend `tsc --noEmit` + frontend build all green)
+4. Resume work from `PROGRESS.md`'s "next steps" section
+
+**Clock-out (end of session)**
+
+1. Update `PROGRESS.md`: tick off finished items, append new findings, refresh "next steps"
+2. Run `make check` again to confirm consistency
+3. Commit all completed work (one-line subject + body when needed)
+
 ---
 
 ## Project Overview
@@ -58,6 +77,15 @@ npm install && npm run dev                # Vite on :5173, proxies /api → :800
 npm run build                             # tsc --noEmit + vite build
 npm run lint                              # ESLint
 ```
+
+### E2E (manual, not in CI)
+
+```bash
+make e2e            # up + migrate + seed_e2e + playwright test
+make e2e-reset      # full down -v + up + seed (clean slate)
+make e2e TEST_ARGS="--grep m1-core"   # single module
+```
+Requires `.env.e2e` (copy from `.env.e2e.example`) for LLM credentials. See `docs/e2e.md`.
 
 ### Seed accounts
 
@@ -161,3 +189,14 @@ The JSONB graph is the most complex part of the system:
 - Redis configured but no caching logic implemented
 - Frontend bundle is 5.5MB — needs code splitting
 - Some Alembic migration numbers overlap; needs normalization
+
+## User Story ↔ Skill 同步规则
+
+每个 `verify-*` skill 是某条用户故事的**派生走查剧本**（单向派生）：
+
+- 源头：`docs/user-stories/US-<id>-<name>.md`（含「状态: 定稿 vX（日期）」）
+- 派生：`.claude/skills/verify-<name>/SKILL.md`（顶部声明依据的故事版本）
+
+**规则**：当用户故事的版本号或日期变更，对应 skill 剧本必须重新核对并同步，
+更新顶部版本声明后才能用于走查。agent 每次跑 `verify-*` skill 前先比对
+skill 内记的故事版本与用户故事顶部实际版本——不一致则停下、提示用户先同步。

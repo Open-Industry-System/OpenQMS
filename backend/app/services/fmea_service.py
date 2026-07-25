@@ -2,20 +2,20 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
-from app.models.capa import CAPAEightD
+from app.models.capa import CAPAEightD, CapaD7NodeAction
 from app.models.control_plan import ControlPlan
 from app.models.customer_quality import CustomerComplaint, RMARecord
 from app.models.fmea import FMEADocument
 from app.models.graph_sync_outbox import GraphSyncOutbox
-from app.models.special_characteristic import SpecialCharacteristic
 from app.models.spc import SPCAlarm
+from app.models.special_characteristic import SpecialCharacteristic
 from app.services.embedding_outbox import delete_embeddings_for_entity, enqueue_embedding
-from app.services.product_line_service import validate_product_line
+from app.services.product_line_service import lock_candidate_scopes, validate_product_line
 from app.services.version_service import _create_fmea_version_no_commit
 from app.state_machines.fmea_state import FMEAState, can_transition
 
@@ -27,6 +27,7 @@ async def list_fmeas(
     status: str | None = None,
     product_line: str | None = None,
     high_rpn: bool = False,
+    pending: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
     fmea_type: str | None = None,
@@ -38,6 +39,11 @@ async def list_fmeas(
     if status:
         query = query.where(FMEADocument.status == status)
         count_query = count_query.where(FMEADocument.status == status)
+
+    # 仪表盘「待办事项」下钻：草稿 + 评审中
+    if pending:
+        query = query.where(FMEADocument.status.in_(["draft", "in_review"]))
+        count_query = count_query.where(FMEADocument.status.in_(["draft", "in_review"]))
 
     if product_line:
         query = query.where(FMEADocument.product_line_code == product_line)
@@ -108,6 +114,7 @@ async def create_fmea(
     product_line_code: str = "DC-DC-100",
     factory_id: uuid.UUID | None = None,
 ) -> FMEADocument:
+    await lock_candidate_scopes(db, [(factory_id, product_line_code)])
     await validate_product_line(db, product_line_code)
     # Check if duplicate document_no exists
     existing_result = await db.execute(
@@ -179,15 +186,15 @@ async def create_fmea(
     await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code, fmea.factory_id)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
-        raise ValueError(f"FMEA document number '{document_no}' already exists.")
+        raise ValueError(f"FMEA document number '{document_no}' already exists.") from e
 
     await db.refresh(fmea)
     return fmea
 
 
-async def update_fmea(
+async def _apply_fmea_update(
     db: AsyncSession,
     fmea: FMEADocument,
     title: str | None,
@@ -197,7 +204,13 @@ async def update_fmea(
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
 ) -> FMEADocument:
-    # 原子乐观锁校验：强制刷新 + SELECT ... FOR UPDATE
+    """无提交核心：执行 update_fmea 的全部副作用但不 commit/refresh，供 auto_fill_d7 单事务复用。"""
+    observed_product_line = fmea.product_line_code
+    if product_line_code is not None:
+        await lock_candidate_scopes(db, [
+            (fmea.factory_id, observed_product_line),
+            (fmea.factory_id, product_line_code),
+        ])
     result = await db.execute(
         select(FMEADocument)
         .where(FMEADocument.fmea_id == fmea.fmea_id)
@@ -205,6 +218,11 @@ async def update_fmea(
         .execution_options(populate_existing=True)
     )
     fresh = result.scalar_one()
+    if (
+        product_line_code is not None
+        and fresh.product_line_code != observed_product_line
+    ):
+        raise ValueError("product_line_changed_again")
 
     if confirmed_latest_lock_version is not None:
         if fresh.lock_version != confirmed_latest_lock_version:
@@ -231,42 +249,47 @@ async def update_fmea(
     fmea.updated_by = user_id
 
     if changed_fields:
-        fmea.lock_version += 1  # 只在有实际变更时递增乐观锁版本
-        audit_log = AuditLog(
-            table_name="fmea_documents",
-            record_id=fmea.fmea_id,
-            action="UPDATE",
-            changed_fields=changed_fields,
-            operated_by=user_id,
-        )
-        db.add(audit_log)
-
-        # Outbox: enqueue Neo4j projection sync
+        fmea.lock_version += 1
+        db.add(AuditLog(
+            table_name="fmea_documents", record_id=fmea.fmea_id,
+            action="UPDATE", changed_fields=changed_fields, operated_by=user_id,
+            factory_id=fmea.factory_id,
+        ))
         db.add(GraphSyncOutbox(
-            aggregate_type="fmea",
-            aggregate_id=fmea.fmea_id,
+            aggregate_type="fmea", aggregate_id=fmea.fmea_id,
             event_type="fmea.updated",
             payload={"version": fmea.version, "product_line_code": fmea.product_line_code},
         ))
-
-        # 强制覆盖时记录审计日志
         if confirmed_latest_lock_version is not None:
-            force_audit = AuditLog(
-                table_name="fmea_documents",
-                record_id=fmea.fmea_id,
+            db.add(AuditLog(
+                table_name="fmea_documents", record_id=fmea.fmea_id,
                 action="FORCE_SAVE_OVERRIDE",
                 changed_fields={"reason": "User confirmed overwrite after conflict detection"},
-                operated_by=user_id,
-            )
-            db.add(force_audit)
-
-        # Invalidate recommendation cache when graph_data or product_line changes
+                operated_by=user_id, factory_id=fmea.factory_id,
+            ))
         if graph_data is not None or product_line_code is not None:
             from app.services.recommendation_service import RecommendationService, _NullGraphRepo
-            rec_service = RecommendationService(db=db, llm_provider=None, graph_repo=_NullGraphRepo())
+            rec_service = RecommendationService(db=db, graph_repo=_NullGraphRepo())
             await rec_service.invalidate_cache_for_fmea(fmea.fmea_id)
 
     await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code, fmea.factory_id)
+    return fmea
+
+
+async def update_fmea(
+    db: AsyncSession,
+    fmea: FMEADocument,
+    title: str | None,
+    graph_data: dict | None,
+    user_id: uuid.UUID,
+    product_line_code: str | None = None,
+    lock_version: int | None = None,
+    confirmed_latest_lock_version: int | None = None,
+) -> FMEADocument:
+    fmea = await _apply_fmea_update(
+        db, fmea, title, graph_data, user_id, product_line_code,
+        lock_version, confirmed_latest_lock_version,
+    )
     await db.commit()
     await db.refresh(fmea)
     return fmea
@@ -276,6 +299,24 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     fmea = await get_fmea(db, fmea_id)
     if fmea is None:
         raise ValueError("FMEA not found")
+    observed_product_line = fmea.product_line_code
+    await lock_candidate_scopes(
+        db, [(fmea.factory_id, observed_product_line)]
+    )
+    fresh = await db.scalar(
+        select(FMEADocument)
+        .where(FMEADocument.fmea_id == fmea_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if fresh is None:
+        raise ValueError("FMEA not found")
+    if (
+        fresh.factory_id != fmea.factory_id
+        or fresh.product_line_code != observed_product_line
+    ):
+        raise ValueError("product_line_changed_again")
+    fmea = fresh
     # Audit log for deletion
     audit_log = AuditLog(
         table_name="fmea_documents",
@@ -303,6 +344,13 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     # ControlPlan / CAPA / etc. doesn't raise IntegrityError. Mirrors the
     # ondelete=SET NULL already used by apqp.
     await _null_out_fmea_references(db, fmea_id)
+    # capa_d7_node_action.fmea_id is NOT NULL (ON DELETE CASCADE at DB level for
+    # fresh schemas), but also clean explicitly so deletion works on schemas
+    # where the constraint is still NO ACTION, and to mirror the app-level
+    # cleanup pattern above. D7 action state is meaningless once the FMEA is
+    # gone; the AuditLog D7_NODE_* / D7_AUTO_FILLED_FMEA entries still record
+    # what happened.
+    await db.execute(delete(CapaD7NodeAction).where(CapaD7NodeAction.fmea_id == fmea_id))
     await db.delete(fmea)
     await db.commit()
 

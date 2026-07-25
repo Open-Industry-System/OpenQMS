@@ -9,7 +9,16 @@
     "undoChange": "Undo Change",
     "addMember": "Add Member",
     "handle": "Process",
-    "viewDetail": "View Detail"
+    "viewDetail": "View Detail",
+    "triggerScar": "Trigger SCAR"
+  },
+  "reject": {
+    "title": "Reject 8D",
+    "reasonLabel": "Reject reason",
+    "reasonPlaceholder": "Please provide a reject reason (required)",
+    "confirm": "Reject",
+    "approve": "Approve & Close",
+    "archive": "Archive"
   },
   "status": {
     "D1_TEAM": "D1 Team Formation",
@@ -19,7 +28,10 @@
     "D5_CORRECTION": "D5 Permanent Corrective Action",
     "D6_VERIFICATION": "D6 Implementation Verification",
     "D7_PREVENTION": "D7 Prevent Recurrence",
+    "D7_COMPLETED": "D7 Completed",
     "D8_CLOSURE": "D8 Closure",
+    "D8_GATE_PENDING": "D8 Doc Gate",
+    "D8_APPROVAL_PENDING": "D8 Pending Approval",
     "ARCHIVED": "Archived"
   },
   "steps": {
@@ -47,12 +59,18 @@
     "d5Label": "Permanent Corrective Action",
     "d6Label": "Effect Verification",
     "d7Label": "Prevent Recurrence",
-    "d8Label": "Closure Confirmation"
+    "d8Label": "Closure Confirmation",
+    "supplierLoadFailed": "Failed to load suppliers",
+    "supplier": "Supplier",
+    "supplierPlaceholder": "Select supplier"
   },
   "messages": {
     "createSuccess": "8D report created",
     "saveFailed": "Save failed",
     "advanceSuccess": "Advanced to next step",
+    "approveSuccess": "Approved & closed",
+    "archiveSuccess": "Archived",
+    "rejectSuccess": "Rejected",
     "advanceFailed": "Advance failed",
     "linkFMEASuccess": "FMEA linked",
     "linkFMEAFailed": "Link failed",
@@ -62,14 +80,56 @@
     "reportArchived": "Report archived",
     "undoSuccess": "AI change undone",
     "searchTimeout": "Search timeout, please use the recommendation feature later during editing",
-    "searchFailed": "Failed to search lessons learned"
+    "searchFailed": "Failed to search lessons learned",
+    "triggerScarSuccess": "SCAR triggered successfully",
+    "triggerScarFailed": "Failed to trigger SCAR",
+    "supplierSaved": "Supplier saved",
+    "supplierSaveFailed": "Failed to save supplier"
   },
   "detail": {
     "currentStepDetails": "Current Step Details",
     "reportInfo": "Report Info",
+    "documentNo": "Document No.",
+    "status": "Status",
+    "severity": "Severity",
+    "dueDate": "Due Date",
+    "relatedFMEA": "Related FMEA",
+    "relatedSCAR": "Related SCAR",
+    "createdAt": "Created At",
     "notSet": "Not set",
     "notLinked": "Not linked",
-    "linkedFMEA": "Linked FMEA"
+    "linkedFMEA": "Linked FMEA",
+    "supplier": "Supplier",
+    "supplierLocked": "Locked"
+  },
+  "riskInput": {
+    "related": "Supplier risk input",
+    "matched": "System detected recurrence (related: {{nos}}). Please confirm.",
+    "notMatched": "System found no recurrence history. Please confirm.",
+    "unavailable": "No linked FMEA; automatic detection unavailable. Please confirm manually.",
+    "confirmYes": "Yes, recurrence",
+    "confirmNo": "No, not recurrence",
+    "confirmedRecurrence": "Confirmed: recurrence",
+    "confirmedNoRecurrence": "Confirmed: not recurrence",
+    "confirmSuccess": "Recurrence confirmation saved",
+    "confirmFailed": "Failed to confirm recurrence",
+    "status": {
+      "pending": "Evaluating",
+      "processing": "Evaluating",
+      "processed": "Evaluated",
+      "error": "Evaluation failed"
+    }
+  },
+  "scar": {
+    "modalTitle": "Trigger SCAR from 8D",
+    "supplier": "Supplier",
+    "supplierRequired": "Please select a supplier",
+    "description": "Description",
+    "descriptionRequired": "Please enter a description",
+    "requestedAction": "Requested Action",
+    "dueDate": "Due Date",
+    "affectedBatches": "Affected Batches",
+    "affectedBatchesPlaceholder": "Type lot no. and press Enter"
   },
   "team": {
     "name": "Member Name",
@@ -105,12 +165,60 @@
       "semantic": "Semantic Match",
       "historical": "Historical CAPA",
       "llm": "AI Suggestions",
-      "rule": "Rule Engine Suggestions"
+      "rule": "Rule Engine Suggestions",
+      "same_type_product_kb": "Same-Type Product KB",
+      "lessons_learned": "Lessons Learned",
+      "spc_anomaly": "SPC Anomaly",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "Supplier History",
+      "other": "Other"
     },
+    "sources": {
+      "linked": "Linked",
+      "fmea_graph": "FMEA Graph",
+      "semantic_search": "Semantic Match",
+      "keyword": "Keyword",
+      "historical_capa": "Historical CAPA",
+      "llm": "AI Suggestion",
+      "rule": "Rule Engine",
+      "same_type_product_kb": "Same-Type Product KB",
+      "lessons_learned": "Lessons Learned",
+      "spc_anomaly": "SPC Anomaly",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "Supplier History"
+    },
+    "stageLabel": "Stage {{n}}",
     "adopt": "Adopt",
     "skip": "Skip",
     "readonlyTooltip": "Read-only users cannot adopt",
-    "loadFailed": "Failed to load D4 recommendations"
+    "loadFailed": "Failed to load D4 recommendations",
+    "verificationTitle": "D4 On-site Root Cause Verification",
+    "noVerification": "No verification records",
+    "newVerification": "New Verification",
+    "rootCause": "Root Cause",
+    "method": "Verification Method",
+    "result": "Verification Result",
+    "evidence": "Evidence Attachments",
+    "addEvidence": "Add Evidence",
+    "isVerified": "Verified",
+    "verified": "Verified",
+    "notVerified": "Pending Verification",
+    "save": "Save",
+    "cancel": "Cancel",
+    "verificationSaved": "Verification record saved",
+    "verificationLoadFailed": "Failed to load verification records",
+    "verificationFailed": "Verification submission failed",
+    "needAtLeastOneDetail": "To pass verification, fill in at least one detail (method, result, or evidence)",
+    "adopted": "Adopted",
+    "adoptFailed": "Adopt failed",
+    "blocked": {
+      "banner": "AI recommendations unavailable — LLM credentials not configured. Please contact admin to configure /admin/ai-config"
+    },
+    "cause": "FMEA Cause",
+    "selectCause": "Select failure cause",
+    "linkFmeaFirst": "Link an FMEA first"
   },
   "d5": {
     "title": "D5 Corrective Action Recommendations",
@@ -124,11 +232,34 @@
       "预防措施": "Preventive",
       "纠正措施": "Corrective"
     },
+    "sources": {
+      "fmea_graph": "FMEA Graph",
+      "semantic_search": "Semantic Match",
+      "historical_capa": "Historical CAPA",
+      "historical_capa_measure": "Historical CAPA Measure",
+      "rule_engine": "Rule Engine",
+      "rule_engine_measure": "Rule Engine Measure",
+      "rule": "Rule Engine",
+      "llm": "AI Suggestion",
+      "graph": "Graph Similarity",
+      "same_type_product_kb": "Same-Type Product KB",
+      "lessons_learned": "Lessons Learned",
+      "spc_anomaly": "SPC Anomaly",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "Supplier History"
+    },
+    "stageLabel": "Stage {{n}}",
     "defaultBasis": "System recommendation",
     "loadFailed": "Failed to load D5 recommendations",
     "adopt": "Adopt",
     "skip": "Skip",
-    "readonlyTooltip": "Read-only users cannot adopt"
+    "readonlyTooltip": "Read-only users cannot adopt",
+    "adopted": "Adopted",
+    "adoptFailed": "Adopt failed",
+    "blocked": {
+      "banner": "AI recommendations unavailable — LLM credentials not configured. Please contact admin to configure /admin/ai-config"
+    }
   },
   "d7": {
     "title": "Prevent Recurrence Reminder",
@@ -158,7 +289,8 @@
     "skipReasonLabel": "To skip, please enter a reason (optional):",
     "skipReasonPlaceholder": "Skip reason (optional)",
     "skipReasonEmpty": "No reason provided",
-    "skipConfirm": "Confirm Skip and Advance"
+    "skipConfirm": "Confirm Skip and Advance",
+    "actionFailed": "Action save failed"
   },
   "draft": {
     "button": "AI Draft",
@@ -203,8 +335,137 @@
     }
   },
   "relatedCapa": {
-    "title": "Related CAPA"
+    "title": "Related CAPA",
+    "empty": "No related 8D"
+  },
+  "verification": {
+    "method": {
+      "measurement": "Measurement",
+      "observation": "Observation",
+      "reproduction": "Reproduction"
+    },
+    "conclusion": {
+      "passed": "Passed",
+      "failed": "Failed",
+      "draft": "Draft",
+      "saveDraft": "Save Draft"
+    }
+  },
+  "ppt": {
+    "generate": "Generate PPT",
+    "llmNotConfigured": "LLM not configured, auto-review skipped",
+    "needsReview": "Needs manual review after {rounds} rounds",
+    "generated": "PPT generated (review passed, {rounds} rounds)",
+    "generateFailed": "PPT generation failed",
+    "reviewReport": "Review report",
+    "issues": "Issues",
+    "suggestions": "Suggestions",
+    "needsReviewRuleIssues": "Content validation failed; manual review required (see review report)"
+  },
+  "dag": {
+    "title": "Recommendation Pipeline",
+    "stageNames": {
+      "1": "Context Collection",
+      "2": "This Product FMEA Search",
+      "3": "Global KB RAG",
+      "4": "Same-Type Product KB",
+      "5": "Lessons Learned",
+      "6": "SPC Anomaly Association",
+      "7": "MES Equipment / Process",
+      "8": "IQC Incoming",
+      "9": "Supplier History",
+      "10": "Rule Engine",
+      "11": "LLM Fusion Ranking",
+      "12": "Output Recommendation List"
+    },
+    "status": {
+      "done": "Done",
+      "skipped": "Skipped",
+      "error": "Error",
+      "running": "Running",
+      "pending": "Pending"
+    }
   },
   "subtitle": "Customer Complaint & Quality Issue Tracking",
-  "listTitle": "8D Report List"
+  "listTitle": "8D Report List",
+  "docGate": {
+    "title": "D8 Document Update Gate",
+    "noAnalysis": "Not analyzed",
+    "blocked": "LLM credentials not configured; impact analysis blocked",
+    "failed": "Impact analysis failed",
+    "generate": "Generate impact analysis",
+    "regenerate": "Regenerate impact analysis",
+    "generateDone": "Impact analysis generated",
+    "generateFailed": "Impact analysis failed",
+    "retryAfter": "Generation in progress; refresh shortly",
+    "affectedTitle": "Affected documents",
+    "emptyList": "Empty impact list — confirm no documents are affected",
+    "confirmEmpty": "Confirm no affected documents",
+    "confirmEmptyDone": "Confirmed empty impact list",
+    "runAudit": "Run document audit",
+    "auditPassed": "Audit passed",
+    "auditBlocked": "Audit blocked gate",
+    "defer": "Record deferral",
+    "deferTitle": "Record deferral (still blocks advance)",
+    "deferConfirm": "Confirm deferral",
+    "deferReason": "Deferral reason",
+    "deferReasonRequired": "Required",
+    "deferOwner": "Owner user_id",
+    "deferDeadline": "Deadline",
+    "deferDone": "Deferral recorded (gate still blocks)",
+    "deferInfo": "Deferred",
+    "decisionTitle": "Gate decision",
+    "noDecision": "No decision yet",
+    "emptyConfirmed": "Empty list confirmed",
+    "advance": "Advance to approval",
+    "advanceDone": "Advanced to approval",
+    "docChanged": "Document changed; re-run audit",
+    "inputChanged": "Analysis inputs changed; regenerate",
+    "colType": "Type",
+    "colName": "Name",
+    "colKeyPoints": "Key points",
+    "colSuggestion": "Update suggestion",
+    "colStatus": "Status",
+    "colCoverage": "Coverage",
+    "colBump": "Version bump"
+  },
+  "sources": {
+    "header": "Document Link",
+    "d4_cause": "D4 Root Cause",
+    "d7_failure_mode": "D7 Failure Mode",
+    "d7_failure_cause": "D7 Failure Cause",
+    "d7_prevention": "D7 Prevention Control"
+  },
+  "knowledge": {
+    "title": "Knowledge Sink",
+    "summary": "Lesson summary",
+    "summaryEmpty": "(No summary yet)",
+    "embeddingStatus": "Embedding status",
+    "embeddingPending": "Embedding pending",
+    "embeddingReady": "Embedding ready",
+    "embeddingFailed": "Embedding failed",
+    "tags": "Tags",
+    "missing": "No knowledge entry yet",
+    "resink": "Resink",
+    "resinkSuccess": "Knowledge resunk successfully",
+    "resinkFailed": "Resink failed",
+    "sinkBlocked": "Knowledge sink blocked: LLM is not configured. Set credentials in AI Config.",
+    "sinkFailed": "Knowledge sink failed; retry close or resink"
+  },
+  "lateral": {
+    "title": "Lateral Diffusion Alert",
+    "hint": "Similar products may share the same root cause. Choose whether to notify product owners (covers all hit types).",
+    "notify": "Notify all",
+    "skip": "Do not notify",
+    "skipReason": "Reason required when not notifying",
+    "rerun": "Re-check",
+    "empty": "No similar products found",
+    "hitCount": "{{n}} product type(s) hit",
+    "notifications": "Notifications",
+    "truncated": "Truncated",
+    "decideSuccess": "Lateral diffusion decision saved",
+    "decideFailed": "Lateral diffusion decision failed",
+    "blocked": "Lateral diffusion blocked: LLM not configured",
+    "failed": "Lateral diffusion failed; retry"
+  }
 }

@@ -1,8 +1,25 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
+
+
+def _fmea_risk(node: dict[str, Any] | None) -> dict[str, Any]:
+    """从 FMEA 图节点提取 AP / S / O / D（FMEA 命中推荐 provenance）。
+
+    FailureMode 节点携带 severity/occurrence/detection/ap。缺字段返回 None，不臆造。
+    规则引擎兜底候选不调用此函数（由调用方按默认 AP=M 处理）。
+    """
+    if not node:
+        return {"ap": None, "severity": None, "occurrence": None, "detection": None}
+    return {
+        "ap": node.get("ap"),
+        "severity": node.get("severity"),
+        "occurrence": node.get("occurrence"),
+        "detection": node.get("detection"),
+    }
 
 
 class FMEAGraphSource:
@@ -75,6 +92,7 @@ class FMEAGraphSource:
                         "fmea_document_no": linked_fmea.get("document_no"),
                         "fmea_id": str(linked_fmea["fmea_id"]),
                         "product_line_code": linked_fmea.get("product_line_code"),
+                        **_fmea_risk(fm_node),
                     },
                 ))
 
@@ -92,6 +110,7 @@ class FMEAGraphSource:
                         "fmea_document_no": linked_fmea.get("document_no"),
                         "fmea_id": str(linked_fmea["fmea_id"]),
                         "product_line_code": linked_fmea.get("product_line_code"),
+                        **_fmea_risk(fm_node),
                     },
                 ))
 
@@ -147,6 +166,12 @@ class SemanticSearchSource:
             pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
             params["product_line_codes"] = user_pls
 
+        # R17-修复：按 factory_id 收口，防跨工厂同 PL 串读（None 不加过滤，保持既有行为）
+        factory_filter = ""
+        if context.factory_id is not None:
+            factory_filter = "AND de.factory_id = :factory_id"
+            params["factory_id"] = context.factory_id
+
         # SQL-level node_type filter: only FailureCause / FailureMode are useful for D4/D5
         # Metadata JSONB stores node_type from embedding_sync_worker
         stmt = text(f"""
@@ -158,6 +183,7 @@ class SemanticSearchSource:
               AND (de.metadata->>'node_type' = 'FailureCause'
                    OR de.metadata->>'node_type' = 'FailureMode')
               {pl_filter}
+              {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
@@ -192,6 +218,7 @@ class SemanticSearchSource:
                 if node_type == "FailureCause":
                     fm_id = None
                     fm_name = None
+                    parent = None
                     for e in edges:
                         if e["source"] == node_id and e["type"] == "CAUSE_OF":
                             parent = node_map.get(e["target"])
@@ -213,6 +240,7 @@ class SemanticSearchSource:
                             "fmea_id": fmea_id,
                             "fmea_document_no": doc.get("document_no"),
                             "product_line_code": doc.get("product_line_code"),
+                            **_fmea_risk(parent),
                         },
                     ))
                 elif node_type == "FailureMode":
@@ -228,6 +256,7 @@ class SemanticSearchSource:
                             "fmea_id": fmea_id,
                             "fmea_document_no": doc.get("document_no"),
                             "product_line_code": doc.get("product_line_code"),
+                            **_fmea_risk(node),
                         },
                     ))
 
@@ -235,6 +264,7 @@ class SemanticSearchSource:
             elif context.stage == "d5" and node_type == "FailureCause":
                 fm_id = None
                 fm_name = None
+                parent = None
                 for e in edges:
                     if e["source"] == node_id and e["type"] == "CAUSE_OF":
                         parent = node_map.get(e["target"])
@@ -256,6 +286,7 @@ class SemanticSearchSource:
                         "fmea_id": fmea_id,
                         "fmea_document_no": doc.get("document_no"),
                         "product_line_code": doc.get("product_line_code"),
+                        **_fmea_risk(parent),
                     },
                 ))
 
@@ -300,10 +331,12 @@ class HistoricalCAPASource:
             # 优先搜索当前 CAPA 的产品线
             search_pls = [capa_pl]
 
-        results = await self._search(vec_str, search_pls, "d2_description", limit=5)
+        results = await self._search(vec_str, search_pls, "d2_description", limit=5,
+                                     factory_id=context.factory_id)
         if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
             # 当前产品线无结果，放宽到用户允许的所有产品线
-            results = await self._search(vec_str, user_pls, "d2_description", limit=5)
+            results = await self._search(vec_str, user_pls, "d2_description", limit=5,
+                                        factory_id=context.factory_id)
 
         return results
 
@@ -313,6 +346,7 @@ class HistoricalCAPASource:
         product_line_codes: list[str] | None,
         target_field: str,
         limit: int,
+        factory_id: uuid.UUID | None = None,
     ) -> list[RecommendationCandidate]:
         params: dict[str, Any] = {
             "query_vector": vec_str,
@@ -323,6 +357,12 @@ class HistoricalCAPASource:
         if product_line_codes is not None:
             pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
             params["product_line_codes"] = product_line_codes
+
+        # R17-修复：按 factory_id 收口，防跨工厂同 PL 串读（None 不加过滤，保持既有行为）
+        factory_filter = ""
+        if factory_id is not None:
+            factory_filter = "AND de.factory_id = :factory_id AND capa.factory_id = :factory_id"
+            params["factory_id"] = factory_id
 
         stmt = text(f"""
             SELECT de.entity_id, de.chunk_text,
@@ -335,6 +375,7 @@ class HistoricalCAPASource:
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
               {pl_filter}
+              {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
@@ -395,9 +436,11 @@ class HistoricalCAPAMeasureSource:
         if user_pls is not None and capa_pl and capa_pl in user_pls:
             search_pls = [capa_pl]
 
-        results = await self._search(vec_str, search_pls, "d4_root_cause", limit=5)
+        results = await self._search(vec_str, search_pls, "d4_root_cause", limit=5,
+                                     factory_id=context.factory_id)
         if not results and user_pls is not None and len(user_pls) > 1 and capa_pl in user_pls:
-            results = await self._search(vec_str, user_pls, "d4_root_cause", limit=5)
+            results = await self._search(vec_str, user_pls, "d4_root_cause", limit=5,
+                                        factory_id=context.factory_id)
 
         return results
 
@@ -407,6 +450,7 @@ class HistoricalCAPAMeasureSource:
         product_line_codes: list[str] | None,
         target_field: str,
         limit: int,
+        factory_id: uuid.UUID | None = None,
     ) -> list[RecommendationCandidate]:
         params: dict[str, Any] = {
             "query_vector": vec_str,
@@ -417,6 +461,12 @@ class HistoricalCAPAMeasureSource:
         if product_line_codes is not None:
             pl_filter = "AND de.product_line_code = ANY(:product_line_codes)"
             params["product_line_codes"] = product_line_codes
+
+        # R17-修复：按 factory_id 收口，防跨工厂同 PL 串读（None 不加过滤，保持既有行为）
+        factory_filter = ""
+        if factory_id is not None:
+            factory_filter = "AND de.factory_id = :factory_id AND capa.factory_id = :factory_id"
+            params["factory_id"] = factory_id
 
         stmt = text(f"""
             SELECT de.entity_id, de.chunk_text,
@@ -429,6 +479,7 @@ class HistoricalCAPAMeasureSource:
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
               {pl_filter}
+              {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
@@ -442,7 +493,7 @@ class HistoricalCAPAMeasureSource:
             if not d5:
                 continue
             candidates.append(RecommendationCandidate(
-                source="historical_capa",
+                source="historical_capa_measure",
                 content=d5,
                 category="纠正措施",
                 confidence=min(float(sim) * 0.85, 0.85),
@@ -481,7 +532,8 @@ class RuleEngineSource:
                 category=None,
                 confidence=s.confidence * 0.5,
                 match_reason="规则引擎推断",
-                metadata={"explanation": s.explanation},
+                # 规则引擎兜底无 FMEA 命中：AP 默认 M，S/O/D 留空（不臆造）
+                metadata={"explanation": s.explanation, "ap": "M"},
             ))
         return candidates
 
@@ -496,8 +548,9 @@ class RuleEngineMeasureSource:
 
         engine = RuleEngine()
 
-        # Try to get AP level from linked FMEA
+        # Try to get AP level (and S/O/D) from linked FMEA
         ap_level = None
+        risk: dict[str, Any] = {"ap": None, "severity": None, "occurrence": None, "detection": None}
         linked_fmea = context.linked_fmea
         target_node_id = context.capa_data.get("fmea_node_id")
         if linked_fmea and linked_fmea.get("graph_data"):
@@ -519,12 +572,15 @@ class RuleEngineMeasureSource:
                                     target_fm_id = e["target"]
                                     break
 
-            if target_fm_id and node_map.get(target_fm_id, {}).get("ap"):
-                ap_level = node_map[target_fm_id]["ap"]
+            target_fm = node_map.get(target_fm_id) if target_fm_id else None
+            if target_fm and target_fm.get("ap"):
+                ap_level = target_fm["ap"]
+                risk = _fmea_risk(target_fm)
             else:
                 for node in graph.get("nodes", []):
                     if node.get("type") == "FailureMode" and node.get("ap"):
                         ap_level = node["ap"]
+                        risk = _fmea_risk(node)
                         break
 
         failure_mode_text = context.capa_data.get("d2_description", "")
@@ -542,7 +598,13 @@ class RuleEngineMeasureSource:
                 category=cat,
                 confidence=s.confidence,
                 match_reason=f"AP={ap_level or 'M'} 规则建议",
-                metadata={"basis": f"AP={ap_level or 'M'}"},
+                metadata={
+                    "basis": f"AP={ap_level or 'M'}",
+                    "ap": ap_level or "M",
+                    "severity": risk.get("severity"),
+                    "occurrence": risk.get("occurrence"),
+                    "detection": risk.get("detection"),
+                },
             ))
         return candidates
 
@@ -585,6 +647,7 @@ class FMEAControlExpander:
             fm_id = cause_candidate.metadata.get("failure_mode_node_id")
             fm_name = cause_candidate.metadata.get("failure_mode_name")
             cause_name = cause_candidate.content
+            fm_risk = _fmea_risk(node_map.get(fm_id))
 
             # Path 1: Cause -> PREVENTED_BY -> PreventionControl
             for tgt, etype in forward_edges.get(cause_id, []):
@@ -609,6 +672,7 @@ class FMEAControlExpander:
                                     "control_type": "prevention",
                                     "fmea_id": fmea_id,
                                     "fmea_document_no": doc.get("document_no"),
+                                    **fm_risk,
                                 },
                             ))
 
@@ -635,6 +699,7 @@ class FMEAControlExpander:
                                     "control_type": "detection",
                                     "fmea_id": fmea_id,
                                     "fmea_document_no": doc.get("document_no"),
+                                    **fm_risk,
                                 },
                             ))
 
@@ -662,6 +727,7 @@ class FMEAControlExpander:
                                         "control_type": "detection",
                                         "fmea_id": fmea_id,
                                         "fmea_document_no": doc.get("document_no"),
+                                        **fm_risk,
                                     },
                                 ))
 

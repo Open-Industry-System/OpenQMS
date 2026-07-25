@@ -1,4 +1,6 @@
 import uuid
+from datetime import date
+
 import pytest
 from fastapi import status
 from httpx import AsyncClient, ASGITransport
@@ -194,3 +196,63 @@ async def test_final_report_rejects_regenerate():
     # A finalized report rejects regeneration with 400
     assert resp.status_code == status.HTTP_400_BAD_REQUEST
     app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_generate_route_passes_tenant_schema_no_llm_provider_no_route_commit(
+    admin_client, db, default_factory, admin_user, monkeypatch
+):
+    """POST /api/management-reviews/{id}/report/generate drops app.state.llm_provider,
+    passes tenant_schema to generate_report, and does not commit at route level
+    (service commits internally)."""
+    import app.api.management_review as mgmt_api
+
+    review = ManagementReview(
+        review_id=uuid.uuid4(),
+        doc_no="MR-ROUTE-001",
+        title="Route Test Review",
+        review_date=date(2026, 6, 11),
+        chair_person_id=admin_user.user_id,
+        created_by=admin_user.user_id,
+        factory_id=default_factory.id,
+        status="data_collected",
+        report_status="none",
+        data_package={"quality_goals": {"total": 1, "achieved": 1}},
+    )
+    db.add(review)
+    await db.flush()
+
+    captured = {}
+
+    async def _fake_generate(db, review, user, *, use_llm=True, report_llm_timeout=None, tenant_schema="public", **kwargs):
+        captured["kwargs"] = {
+            "use_llm": use_llm,
+            "report_llm_timeout": report_llm_timeout,
+            "tenant_schema": tenant_schema,
+            **kwargs,
+        }
+        review.report_status = "draft"
+        review.generated_report = _sample_report_content()
+        return review.generated_report
+
+    monkeypatch.setattr(mgmt_api.report_service, "generate_report", _fake_generate)
+
+    # Spy on db.commit so a deletion of the route-level await db.commit() is detectable.
+    real_commit = db.commit
+    commit_calls = []
+    async def _spy_commit():
+        commit_calls.append(True)
+        await real_commit()
+    monkeypatch.setattr(db, "commit", _spy_commit)
+
+    with patch("app.api.management_review.get_user_permission", new=AsyncMock(return_value=PermissionLevel.CREATE)):
+        resp = await admin_client.post(
+            f"/api/management-reviews/{review.review_id}/report/generate",
+            json={"use_llm": True},
+        )
+
+    assert resp.status_code == status.HTTP_200_OK
+    assert "tenant_schema" in captured["kwargs"]
+    assert captured["kwargs"]["tenant_schema"] == "public"
+    assert "llm_provider" not in captured["kwargs"]
+    assert len(commit_calls) == 0, "route must not commit; generate_report commits internally"

@@ -528,6 +528,49 @@ async def test_create_scar_without_commit_flushes_only(
 
 
 @pytest.mark.asyncio
+async def test_create_scar_without_commit_sets_capa_ref_id(
+    db, seed_supplier, admin_user, default_factory
+):
+    capa = CAPAEightD(
+        document_no=f"8D-SCAR-HELPER-{uuid.uuid4().hex[:8]}",
+        title="helper",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        status="D3_INTERIM",
+    )
+    db.add(capa)
+    await db.flush()
+
+    scar = await _create_scar_without_commit(
+        db,
+        supplier_id=seed_supplier.supplier_id,
+        source_type="capa",
+        source_id=capa.report_id,
+        description="from capa",
+        issued_by=admin_user.user_id,
+        product_line_code=capa.product_line_code,
+        factory_id=capa.factory_id,
+        capa_ref_id=capa.report_id,
+    )
+    assert scar.capa_ref_id == capa.report_id
+
+
+@pytest.mark.asyncio
+async def test_create_scar_without_commit_capa_ref_defaults_none(
+    db, seed_supplier, admin_user
+):
+    scar = await _create_scar_without_commit(
+        db,
+        supplier_id=seed_supplier.supplier_id,
+        source_type="risk_alert",
+        source_id=uuid.uuid4(),
+        description="no capa",
+        issued_by=admin_user.user_id,
+    )
+    assert scar.capa_ref_id is None
+
+
+@pytest.mark.asyncio
 async def test_create_capa_without_commit_flushes_only(
     db, admin_user, default_factory
 ):
@@ -629,3 +672,140 @@ async def test_webhook_ssrf_blocked_send_notifications(db, seed_open_alert, admi
     from app.services.supplier_risk.notifier import _send_webhook
     with pytest.raises(SSRFError):
         await _send_webhook(channel, seed_open_alert)
+
+
+# ─── Channel factory/supplier isolation + DNS SSRF ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_send_notifications_scopes_channels_by_factory(
+    db, seed_open_alert, admin_user, default_factory, monkeypatch,
+):
+    """Channels from another factory must not receive this alert's payload."""
+    from app.models.factory import Factory
+    from app.services.supplier_risk.notifier import send_notifications
+
+    other_factory = Factory(id=uuid.uuid4(), code=f"OF{uuid.uuid4().hex[:4]}", name="Other")
+    db.add(other_factory)
+    await db.flush()
+
+    same = SupplierRiskNotificationChannel(
+        channel_id=uuid.uuid4(),
+        channel_type="email",
+        config={"addresses": ["same@openqms.local"]},
+        min_risk_level="low",
+        enabled=True,
+        factory_id=default_factory.id,
+        created_by=admin_user.user_id,
+    )
+    other = SupplierRiskNotificationChannel(
+        channel_id=uuid.uuid4(),
+        channel_type="email",
+        config={"addresses": ["other@openqms.local"]},
+        min_risk_level="low",
+        enabled=True,
+        factory_id=other_factory.id,
+        created_by=admin_user.user_id,
+    )
+    db.add_all([same, other])
+    await db.flush()
+
+    sent = []
+
+    async def capture_email(channel, alert):
+        sent.append(channel.channel_id)
+
+    monkeypatch.setattr(
+        "app.services.supplier_risk.notifier._send_email", capture_email
+    )
+    await send_notifications(db, seed_open_alert, product_line_code=None)
+    assert same.channel_id in sent
+    assert other.channel_id not in sent
+
+
+@pytest.mark.asyncio
+async def test_send_notifications_scopes_supplier_channels(
+    db, seed_open_alert, seed_supplier, admin_user, default_factory, monkeypatch,
+):
+    """Supplier-scoped channel only fires for matching supplier_id."""
+    from app.models.supplier import Supplier
+    from app.services.supplier_risk.notifier import send_notifications
+
+    other = Supplier(
+        supplier_id=uuid.uuid4(),
+        supplier_no=f"SUP-OTHER-{uuid.uuid4().hex[:6]}",
+        name="Other Sup",
+        short_name="OS",
+        factory_id=default_factory.id,
+        status="approved",
+        created_by=admin_user.user_id,
+    )
+    db.add(other)
+    await db.flush()
+
+    match = SupplierRiskNotificationChannel(
+        channel_id=uuid.uuid4(),
+        channel_type="email",
+        config={"addresses": ["match@openqms.local"]},
+        min_risk_level="low",
+        enabled=True,
+        factory_id=default_factory.id,
+        supplier_id=seed_open_alert.supplier_id,
+        created_by=admin_user.user_id,
+    )
+    other_sup = SupplierRiskNotificationChannel(
+        channel_id=uuid.uuid4(),
+        channel_type="email",
+        config={"addresses": ["other-sup@openqms.local"]},
+        min_risk_level="low",
+        enabled=True,
+        factory_id=default_factory.id,
+        supplier_id=other.supplier_id,
+        created_by=admin_user.user_id,
+    )
+    db.add_all([match, other_sup])
+    await db.flush()
+
+    sent = []
+
+    async def capture_email(channel, alert):
+        sent.append(channel.channel_id)
+
+    monkeypatch.setattr(
+        "app.services.supplier_risk.notifier._send_email", capture_email
+    )
+    await send_notifications(db, seed_open_alert, product_line_code=None)
+    assert match.channel_id in sent
+    assert other_sup.channel_id not in sent
+
+
+def test_webhook_ssrf_blocks_hostname_resolving_to_private(monkeypatch):
+    """Hostname that resolves to loopback/private must be rejected."""
+    import socket
+    from app.services.supplier_risk.notifier import _is_private_url
+
+    def fake_getaddrinfo(host, port, *a, **k):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    assert _is_private_url("http://evil.example/webhook") is True
+
+
+
+def test_webhook_ssrf_allows_public_ip_literal():
+    from app.services.supplier_risk.notifier import _is_private_url
+    assert _is_private_url("https://8.8.8.8/hook") is False
+
+
+def test_safe_webhook_target_uses_resolved_ip(monkeypatch):
+    """Connect URL must use the pre-validated IP (no second DNS by HTTPX)."""
+    import socket
+    from app.services.supplier_risk.notifier import _safe_webhook_target
+
+    def fake_getaddrinfo(host, port, *a, **k):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    connect_url, headers = _safe_webhook_target("https://example.com/hook")
+    assert "93.184.216.34" in connect_url
+    assert headers.get("Host") == "example.com"

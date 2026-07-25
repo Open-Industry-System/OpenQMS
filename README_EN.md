@@ -150,6 +150,7 @@ Open **http://localhost:5173** in your browser and log in with one of the follow
 | [Permissions Reference](docs/en/permissions.md) | Full permission matrix |
 | [Development Guide](docs/en/development.md) | Development conventions, adding new modules |
 | [Roadmap](docs/ROADMAP.md) | Development plan and progress |
+| [Decision Log](docs/DECISIONS.md) | Key architecture decisions (ADRs) with context and consequences |
 
 ### Module Manuals
 

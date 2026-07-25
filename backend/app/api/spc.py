@@ -60,6 +60,7 @@ async def list_ics(
     page_size: int = Query(20, ge=1, le=1000),
     product_line: Optional[str] = None,
     process_name: Optional[str] = None,
+    abnormal: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -73,6 +74,7 @@ async def list_ics(
 
     items, total = await spc_service.list_inspection_characteristics(
         db, page=page, page_size=page_size, product_line=product_line, process_name=process_name,
+        abnormal=abnormal,
         factory_id=scope.effective_factory_id,
         allowed_product_line_codes=scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None,
     )

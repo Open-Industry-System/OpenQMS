@@ -1,5 +1,7 @@
 """Embedding provider abstraction for semantic search."""
+import hashlib
 import logging
+import math
 from typing import Protocol
 
 import httpx
@@ -17,6 +19,52 @@ class EmbeddingProvider(Protocol):
 
     @property
     def dimensions(self) -> int: ...
+
+
+class HashEmbeddingProvider:
+    """Deterministic in-process embeddings for E2E / offline.
+
+    Produces fixed-length L2-normalized vectors from text hashes so the
+    embedding_sync outbox can complete without an external model, and so the
+    reported dimensionality can match the document_embeddings column (default
+    1536) without pulling nomic-embed-text (768d).
+    """
+
+    def __init__(self, dimensions: int = 1536, model: str = "hash-embedding"):
+        if dimensions <= 0:
+            raise ValueError("dimensions must be positive")
+        self._dimensions = dimensions
+        self._model = model
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [self._one(t) for t in texts]
+
+    def _one(self, text: str) -> list[float]:
+        # Expand a SHA-256 stream into `dimensions` floats in [-1, 1], then L2-normalize.
+        out: list[float] = []
+        counter = 0
+        while len(out) < self._dimensions:
+            digest = hashlib.sha256(f"{counter}:{text}".encode("utf-8")).digest()
+            for i in range(0, len(digest), 4):
+                if len(out) >= self._dimensions:
+                    break
+                # signed 32-bit → [-1, 1]
+                n = int.from_bytes(digest[i : i + 4], "big", signed=False)
+                out.append((n / 0xFFFFFFFF) * 2.0 - 1.0)
+            counter += 1
+        norm = math.sqrt(sum(v * v for v in out)) or 1.0
+        return [v / norm for v in out]
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    async def aclose(self):
+        return None
 
 
 class OpenAIEmbeddingProvider:
@@ -108,12 +156,37 @@ def create_embedding_provider(config=None) -> EmbeddingProvider | None:
     `config` may be the global settings object or any object exposing the
     uppercase env attributes (EMBEDDING_PROVIDER, LLM_PROVIDER, LLM_API_KEY,
     EMBEDDING_MODEL, EMBEDDING_BASE_URL).
+
+    E2E_MODE: when embedding_provider is unset (or set to hash/e2e/deterministic),
+    return HashEmbeddingProvider sized to EMBEDDING_DIMENSIONS so the outbox can
+    complete against document_embeddings without an external model. Without this,
+    empty embedding_provider falls back to LLM_PROVIDER=ollama → nomic 768d while
+    the table is typically 1536d (US-E2E-01.8 BLOCKED).
     """
     cfg = config or app_settings
 
-    provider_name = getattr(cfg, "EMBEDDING_PROVIDER", "") or getattr(cfg, "embedding_provider", "")
-    if not provider_name:
-        provider_name = getattr(cfg, "LLM_PROVIDER", "") or getattr(cfg, "llm_provider", "")
+    def _str_attr(*names: str) -> str:
+        for name in names:
+            v = getattr(cfg, name, None)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        return ""
+
+    emb_explicit = _str_attr("EMBEDDING_PROVIDER", "embedding_provider")
+    e2e_mode = bool(getattr(app_settings, "E2E_MODE", False))
+    dim_cfg = getattr(cfg, "EMBEDDING_DIMENSIONS", 0) or getattr(cfg, "embedding_dimensions", 0)
+    dimensions = (
+        dim_cfg
+        if isinstance(dim_cfg, int) and dim_cfg > 0
+        else (getattr(app_settings, "EMBEDDING_DIMENSIONS", 1536) or 1536)
+    )
+
+    if emb_explicit in ("hash", "e2e", "deterministic") or (
+        e2e_mode and not emb_explicit
+    ):
+        return HashEmbeddingProvider(dimensions=int(dimensions))
+
+    provider_name = emb_explicit or _str_attr("LLM_PROVIDER", "llm_provider")
     if not provider_name:
         return None
 
@@ -130,19 +203,15 @@ def create_embedding_provider(config=None) -> EmbeddingProvider | None:
             getattr(cfg, "EMBEDDING_BASE_URL", "") or getattr(cfg, "embedding_base_url", "")
             or getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
         )
-        dimensions = (
-            getattr(cfg, "EMBEDDING_DIMENSIONS", 0) or getattr(cfg, "embedding_dimensions", 0) or 1536
-        )
-        return OpenAIEmbeddingProvider(api_key=api_key, model=model, base_url=base_url, dimensions=dimensions)
+        return OpenAIEmbeddingProvider(api_key=api_key, model=model, base_url=base_url, dimensions=int(dimensions))
 
     if provider_name == "ollama":
         model = getattr(cfg, "EMBEDDING_MODEL", "") or getattr(cfg, "embedding_model", "") or "nomic-embed-text"
         base_url = getattr(cfg, "EMBEDDING_BASE_URL", "") or getattr(cfg, "embedding_base_url", "")
-        dim_cfg = getattr(cfg, "EMBEDDING_DIMENSIONS", 0) or getattr(cfg, "embedding_dimensions", 0)
         # Guard against a non-int value (e.g. a mocked settings object) leaking
         # through; only an explicit positive int configures the dimension.
-        dimensions = dim_cfg if isinstance(dim_cfg, int) and dim_cfg > 0 else None
-        return OllamaEmbeddingProvider(base_url=base_url, model=model, dimensions=dimensions)
+        ollama_dims = dim_cfg if isinstance(dim_cfg, int) and dim_cfg > 0 else None
+        return OllamaEmbeddingProvider(base_url=base_url, model=model, dimensions=ollama_dims)
 
     logger.warning(f"Unsupported EMBEDDING_PROVIDER: {provider_name}")
     return None

@@ -16,7 +16,7 @@ import {
   ReloadOutlined,
   EyeOutlined,
 } from "@ant-design/icons";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermission } from "../../hooks/usePermission";
 import type { IqcInspection, IqcStats } from "../../types";
@@ -30,6 +30,7 @@ export default function IqcInspectionListPage() {
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { canEdit } = usePermission();
 
   const [inspections, setInspections] = useState<IqcInspection[]>([]);
@@ -47,7 +48,10 @@ export default function IqcInspectionListPage() {
     rejection_rate: 0,
   });
 
-  const [filterStatus, setFilterStatus] = useState<string | undefined>();
+  // 仪表盘「IQC 待检」下钻：从 ?status= 初始化（用户后续可改）
+  const [filterStatus, setFilterStatus] = useState<string | undefined>(
+    searchParams.get("status") ?? undefined
+  );
   const [filterResult, setFilterResult] = useState<string | undefined>();
   const [keyword, setKeyword] = useState("");
 

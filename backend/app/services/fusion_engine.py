@@ -9,6 +9,7 @@ class FusionEngine:
     SOURCE_PRIORITY = {
         "fmea_graph": 1.0,
         "historical_capa": 0.9,
+        "historical_capa_measure": 0.9,
         "semantic_search": 0.7,
         "llm": 0.6,
         "rule_engine": 0.5,

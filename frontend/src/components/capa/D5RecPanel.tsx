@@ -1,40 +1,69 @@
 import { useEffect, useState } from "react";
-import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse } from "antd";
+import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse, Alert } from "antd";
 import { CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getD5Recommendations } from "../../api/capa";
-import type { D5ExistingControl, D5GeneralSuggestion } from "../../types";
+import { getD5Recommendations, adoptRecommendation, RecommendationBlockedError } from "../../api/capa";
+import RecommendationDAG from "./RecommendationDAG";
+import RiskTags from "./RiskTags";
+import type { D5ExistingControl, D5GeneralSuggestion, StageRun } from "../../types";
 
 interface D5RecPanelProps {
   capaId: string;
-  onAdopt: (adoptedText: string) => void;
+  beforeAdopt?: () => Promise<void>;
+  onAdopted?: () => void;
   canAdopt?: boolean;
 }
 
-export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPanelProps) {
+export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = true }: D5RecPanelProps) {
   const { t } = useTranslation("capa");
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [controls, setControls] = useState<D5ExistingControl[]>([]);
   const [suggestions, setSuggestions] = useState<D5GeneralSuggestion[]>([]);
+  const [stages, setStages] = useState<StageRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLoading(true);
+    setBlocked(false);
     getD5Recommendations(capaId)
       .then((res) => {
         setControls(res.existing_controls);
         setSuggestions(res.general_suggestions);
+        setStages(res.stages ?? []);
       })
-      .catch(() => message.error(t("d5.loadFailed")))
+      .catch((err) => {
+        if (err instanceof RecommendationBlockedError) {
+          setBlocked(true);
+          setStages(err.detail.stages ?? []);
+        } else {
+          message.error(t("d5.loadFailed"));
+        }
+      })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capaId]);
 
   if (loading) return <Spin size="small" />;
-  if (controls.length === 0 && suggestions.length === 0) {
-    return <Empty description={tc("empty.data")} image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+
+  if (blocked) {
+    return (
+      <Card
+        size="small"
+        title={<Space><SafetyOutlined />{t("d5.title")}</Space>}
+        style={{ marginBottom: 16 }}
+      >
+        <Alert
+          data-e2e="rec-blocked-banner"
+          type="warning"
+          showIcon
+          message={t("d5.blocked.banner")}
+        />
+        {stages.length > 0 && <RecommendationDAG stages={stages} />}
+      </Card>
+    );
   }
 
   const renderControl = (item: D5ExistingControl) => {
@@ -49,9 +78,26 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
             type="link"
             size="small"
             icon={<CheckOutlined />}
+            data-e2e="d5-adopt-control"
             disabled={!canAdopt}
             title={!canAdopt ? t("d5.readonlyTooltip") : undefined}
-            onClick={() => onAdopt(item.control_name)}
+            onClick={async () => {
+              try {
+                await beforeAdopt?.();
+                await adoptRecommendation(capaId, {
+                  d_step: "d5",
+                  adopted_text: item.control_name,
+                  source: item.match_source || "rule",
+                  stage_index: item.stage_index,
+                  item_ref: {
+                    control_node_id: item.control_node_id,
+                    failure_cause_node_id: item.failure_cause_node_id,
+                    fmea_id: item.fmea_id,
+                  },
+                });
+                message.success(t("d5.adopted")); onAdopted?.();
+              } catch { message.error(t("d5.adoptFailed")); }
+            }}
           >
             {t("d5.adopt")}
           </Button>,
@@ -79,6 +125,20 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
           }
           description={
             <Space size={4} wrap>
+              <Tag data-e2e={`rec-source-${item.match_source}`}>
+                {t(`d5.sources.${item.match_source}`, { defaultValue: item.match_source })}
+              </Tag>
+              {item.stage_index != null && (
+                <Tag data-e2e={`rec-item-stage-${item.stage_index}`}>
+                  {t("d5.stageLabel", { n: item.stage_index })}
+                </Tag>
+              )}
+              <RiskTags
+                ap={item.ap}
+                severity={item.severity}
+                occurrence={item.occurrence}
+                detection={item.detection}
+              />
               {item.failure_cause_name && <Tag>{item.failure_cause_name}</Tag>}
               {item.failure_mode_name && <Tag>{item.failure_mode_name}</Tag>}
               {item.fmea_document_no && <Tag color="blue">{item.fmea_document_no}</Tag>}
@@ -102,9 +162,29 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
             type="link"
             size="small"
             icon={<CheckOutlined />}
+            data-e2e="d5-adopt-suggestion"
             disabled={!canAdopt}
             title={!canAdopt ? t("d5.readonlyTooltip") : undefined}
-            onClick={() => onAdopt(item.content)}
+            onClick={async () => {
+              try {
+                await beforeAdopt?.();
+                await adoptRecommendation(capaId, {
+                  d_step: "d5",
+                  adopted_text: item.content,
+                  source: item.match_source || "rule",
+                  stage_index: item.stage_index,
+                  // 含 provenance：不同来源（historical_capa 的 source_capa_id / category / basis）
+                  // 的同文本建议各有独立 item_ref，避免被后端 dedupe 误并
+                  item_ref: {
+                    source_capa_id: item.source_capa_id,
+                    source_capa_document_no: item.source_capa_document_no,
+                    category: item.category,
+                    basis: item.basis,
+                  },
+                });
+                message.success(t("d5.adopted")); onAdopted?.();
+              } catch { message.error(t("d5.adoptFailed")); }
+            }}
           >
             {t("d5.adopt")}
           </Button>,
@@ -124,7 +204,21 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
         <List.Item.Meta
           title={item.content}
           description={
-            <Space size={4}>
+            <Space size={4} wrap>
+              <Tag data-e2e={`rec-source-${item.match_source}`}>
+                {t(`d5.sources.${item.match_source}`, { defaultValue: item.match_source })}
+              </Tag>
+              {item.stage_index != null && (
+                <Tag data-e2e={`rec-item-stage-${item.stage_index}`}>
+                  {t("d5.stageLabel", { n: item.stage_index })}
+                </Tag>
+              )}
+              <RiskTags
+                ap={item.ap}
+                severity={item.severity}
+                occurrence={item.occurrence}
+                detection={item.detection}
+              />
               <Tag color="blue">
                 {categoryLabel}
               </Tag>
@@ -166,13 +260,17 @@ export default function D5RecPanel({ capaId, onAdopt, canAdopt = true }: D5RecPa
     });
   }
 
+  const hasItems = collapseItems.length > 0;
+
   return (
     <Card
       size="small"
       title={<Space><SafetyOutlined />{t("d5.title")}</Space>}
       style={{ marginBottom: 16 }}
     >
-      <Collapse defaultActiveKey={["controls", "suggestions"]} items={collapseItems} />
+      {stages.length > 0 && <RecommendationDAG stages={stages} />}
+      {!hasItems && <Empty description={tc("empty.data")} image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+      {hasItems && <Collapse defaultActiveKey={["controls", "suggestions"]} items={collapseItems} />}
     </Card>
   );
 }

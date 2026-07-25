@@ -54,8 +54,11 @@ async def get_quality_dashboard(
     batch_acceptance_rate = acc_row.accepted / acc_row.total if acc_row.total > 0 else 0.0
 
     # Open SCAR count
+    open_scar_where = [SupplierSCAR.status != "closed"]
+    if factory_id is not None:
+        open_scar_where.append(SupplierSCAR.factory_id == factory_id)
     open_scar_count = await db.scalar(
-        select(func.count()).select_from(SupplierSCAR).where(SupplierSCAR.status != "closed")
+        select(func.count()).select_from(SupplierSCAR).where(*open_scar_where)
     ) or 0
 
     # Total suppliers
@@ -242,6 +245,8 @@ async def get_supplier_quality_detail(
         IqcInspection.inspection_date >= start_date,
         IqcInspection.inspection_date <= end_date,
     ]
+    if factory_id is not None and hasattr(IqcInspection, "factory_id"):
+        iqc_filter.append(IqcInspection.factory_id == factory_id)
 
     ppm_result = await db.execute(
         select(
@@ -263,23 +268,33 @@ async def get_supplier_quality_detail(
     accepted_count = acc_row[1]
     batch_acceptance_rate = accepted_count / total_inspections if total_inspections > 0 else 0.0
 
+    scar_where = [SupplierSCAR.supplier_id == supplier_id]
+    if factory_id is not None:
+        scar_where.append(SupplierSCAR.factory_id == factory_id)
     scar_count = await db.scalar(
-        select(func.count()).select_from(SupplierSCAR)
-        .where(SupplierSCAR.supplier_id == supplier_id)
+        select(func.count()).select_from(SupplierSCAR).where(*scar_where)
     ) or 0
 
+    open_scar_where = [
+        SupplierSCAR.supplier_id == supplier_id,
+        SupplierSCAR.status != "closed",
+    ]
+    if factory_id is not None:
+        open_scar_where.append(SupplierSCAR.factory_id == factory_id)
     open_scar_count = await db.scalar(
-        select(func.count()).select_from(SupplierSCAR)
-        .where(SupplierSCAR.supplier_id == supplier_id, SupplierSCAR.status != "closed")
+        select(func.count()).select_from(SupplierSCAR).where(*open_scar_where)
     ) or 0
 
     trend_result = await db.execute(
         select(
-            func.extract("year", IqcInspection.inspection_date),
-            func.extract("month", IqcInspection.inspection_date),
+            func.extract("year", IqcInspection.inspection_date).label("year"),
+            func.extract("month", IqcInspection.inspection_date).label("month"),
             func.coalesce(func.sum(IqcInspection.defect_qty), 0),
             func.coalesce(func.sum(IqcInspection.lot_qty), 0),
-        ).where(*iqc_filter).group_by("year", "month").order_by("year", "month")
+        )
+        .where(*iqc_filter)
+        .group_by("year", "month")
+        .order_by("year", "month")
     )
     ppm_trend = [
         {
@@ -291,11 +306,14 @@ async def get_supplier_quality_detail(
 
     acc_trend_result = await db.execute(
         select(
-            func.extract("year", IqcInspection.inspection_date),
-            func.extract("month", IqcInspection.inspection_date),
+            func.extract("year", IqcInspection.inspection_date).label("year"),
+            func.extract("month", IqcInspection.inspection_date).label("month"),
             func.count(),
             func.count(case((IqcInspection.inspection_result == "accepted", 1))),
-        ).where(*iqc_filter).group_by("year", "month").order_by("year", "month")
+        )
+        .where(*iqc_filter)
+        .group_by("year", "month")
+        .order_by("year", "month")
     )
     acceptance_trend = [
         {

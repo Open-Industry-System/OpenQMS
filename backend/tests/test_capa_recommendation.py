@@ -1,6 +1,8 @@
 # backend/tests/test_capa_recommendation.py
 import uuid
 import pytest
+from app.models.capa import CAPAEightD
+from app.services.agent import provider_adapter
 from app.services.capa_recommendation_service import (
     get_d4_recommendations,
     get_d5_recommendations,
@@ -247,3 +249,113 @@ def test_d5_fm_level_detection_without_cause():
     assert len(det) >= 1
     assert det[0]["control_name"] == "气密性检测"
     assert det[0]["failure_cause_node_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_d4_route_passes_audit_ctx_and_commits(
+    admin_client, db, default_factory, admin_user, monkeypatch
+):
+    """D4 route resolves pc via build_client, passes user/report_id/factory_id/
+    tenant_schema to pipeline.recommend, and awaits db.commit()."""
+    import app.api.capa as capa_api
+
+    captured = {}
+
+    class _FakePipeline:
+        def __init__(self, db_arg, pc, embedding_provider, llm_timeout=None):
+            captured["pc"] = pc
+        async def recommend(self, context, *, user, report_id, factory_id, tenant_schema):
+            captured["recommend_kwargs"] = {
+                "user": user, "report_id": report_id,
+                "factory_id": factory_id, "tenant_schema": tenant_schema,
+            }
+            from app.services.recommendation_types import RecommendationResult
+            return RecommendationResult(items=[])
+
+    monkeypatch.setattr(capa_api, "HybridRecommendationPipeline", _FakePipeline)
+
+    class _PC:
+        model = "test-model"
+    async def _ok_client(db_arg):
+        return _PC()
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+
+    real_commit = db.commit
+    commit_calls = []
+    async def _spy_commit():
+        commit_calls.append(True)
+        await real_commit()
+    monkeypatch.setattr(db, "commit", _spy_commit)
+
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-901", title="t",
+                      factory_id=default_factory.id, product_line_code="DC-DC-100",
+                      status="D2_DESCRIPTION")
+    db.add(capa)
+    await db.commit()
+    commit_calls.clear()  # only count commits made by the route under test
+
+    # Ensure app state attributes that lifespan normally sets exist.
+    from app.main import app
+    app.state.embedding_provider = None
+
+    resp = await admin_client.get(f"/api/capa/{capa.report_id}/d4-fmea-recommendations")
+    assert resp.status_code == 200, resp.text
+    assert captured["recommend_kwargs"]["tenant_schema"] == "public"
+    assert captured["recommend_kwargs"]["factory_id"] == default_factory.id
+    assert captured["pc"] is not None
+    assert len(commit_calls) >= 1, "route must await db.commit() (audit row depends on it)"
+
+
+@pytest.mark.asyncio
+async def test_d5_route_passes_audit_ctx_and_commits(
+    admin_client, db, default_factory, admin_user, monkeypatch
+):
+    """D5 route resolves pc via build_client, passes user/report_id/factory_id/
+    tenant_schema to pipeline.recommend, and awaits db.commit()."""
+    import app.api.capa as capa_api
+
+    captured = {}
+
+    class _FakePipeline:
+        def __init__(self, db_arg, pc, embedding_provider, llm_timeout=None):
+            captured["pc"] = pc
+        async def recommend(self, context, *, user, report_id, factory_id, tenant_schema):
+            captured["recommend_kwargs"] = {
+                "user": user, "report_id": report_id,
+                "factory_id": factory_id, "tenant_schema": tenant_schema,
+            }
+            from app.services.recommendation_types import RecommendationResult
+            return RecommendationResult(items=[])
+
+    monkeypatch.setattr(capa_api, "HybridRecommendationPipeline", _FakePipeline)
+
+    class _PC:
+        model = "test-model"
+    async def _ok_client(db_arg):
+        return _PC()
+    monkeypatch.setattr(provider_adapter, "build_client", _ok_client)
+
+    real_commit = db.commit
+    commit_calls = []
+    async def _spy_commit():
+        commit_calls.append(True)
+        await real_commit()
+    monkeypatch.setattr(db, "commit", _spy_commit)
+
+    capa = CAPAEightD(report_id=uuid.uuid4(), document_no="8D-2026-902", title="t",
+                      factory_id=default_factory.id, product_line_code="DC-DC-100",
+                      status="D4_ROOT_CAUSE")
+    db.add(capa)
+    await db.commit()
+    commit_calls.clear()  # only count commits made by the route under test
+
+    # Ensure app state attributes that lifespan normally sets exist.
+    from app.main import app
+    app.state.embedding_provider = None
+
+    resp = await admin_client.get(f"/api/capa/{capa.report_id}/d5-fmea-recommendations")
+    assert resp.status_code == 200, resp.text
+    assert captured["recommend_kwargs"]["tenant_schema"] == "public"
+    assert captured["recommend_kwargs"]["factory_id"] == default_factory.id
+    assert captured["pc"] is not None
+    assert len(commit_calls) >= 1, "route must await db.commit() (audit row depends on it)"

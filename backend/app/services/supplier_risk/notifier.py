@@ -71,7 +71,45 @@ def decrypt_secret(token: str) -> str:
         return token
 
 
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Allow only global unicast addresses (whitelist). Blocks private, loopback,
+    link-local, reserved, multicast, CGNAT, unspecified, etc."""
+    return not bool(getattr(ip, "is_global", False))
+
+
+def _resolve_public_ip(hostname: str) -> str | None:
+    """Resolve hostname and return first global IP, or None if none / all blocked.
+
+    Used both for SSRF pre-check and for the actual HTTP connect so the
+    validated address is the one contacted (closes DNS-rebinding TOCTOU).
+    """
+    import socket
+
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return None
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        try:
+            resolved = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if not _is_blocked_ip(resolved):
+            return str(resolved)
+    return None
+
+
 def _is_private_url(url: str) -> bool:
+    """Reject non-global targets, including hostnames that resolve to them.
+
+    Literal IP check first; then DNS resolution so ``evil.example`` → 127.0.0.1
+    cannot bypass SSRF filtering. Resolution failure is treated as blocked
+    (fail-closed). Prefer ``_safe_webhook_target`` for actual POSTs so the
+    connect uses the same resolved IP (no second DNS lookup / rebinding).
+    """
     parsed = urlparse(url)
     hostname = parsed.hostname
     if not hostname:
@@ -81,12 +119,49 @@ def _is_private_url(url: str) -> bool:
         return True
     try:
         ip = ipaddress.ip_address(hostname)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            return True
+        return _is_blocked_ip(ip)
     except ValueError:
-        # hostname is not an IP address; not private by IP check
         pass
-    return False
+    return _resolve_public_ip(hostname) is None
+
+
+def _safe_webhook_target(url: str) -> tuple[str, dict]:
+    """Return (connect_url, headers) using a single DNS resolution.
+
+    Connects to the validated IP while preserving Host header so the origin
+    server still sees the original hostname. Prevents DNS rebinding TOCTOU
+    between check and HTTPX's own resolve.
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFError(f"Webhook URL missing hostname: {url}")
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if _is_blocked_ip(ip):
+            raise SSRFError(f"Webhook URL points to non-global address: {url}")
+        return url, {}
+    except ValueError:
+        pass
+    if hostname.lower() == "localhost":
+        raise SSRFError(f"Webhook URL points to private address: {url}")
+    resolved = _resolve_public_ip(hostname)
+    if resolved is None:
+        raise SSRFError(f"Webhook URL resolves to non-global address: {url}")
+    # Rebuild netloc with IP; keep original port if present.
+    port = parsed.port
+    netloc = f"[{resolved}]:{port}" if ":" in resolved and port else (
+        f"{resolved}:{port}" if port else resolved
+    )
+    # Preserve userinfo if any (rare for webhooks).
+    if parsed.username:
+        auth = parsed.username
+        if parsed.password:
+            auth = f"{auth}:{parsed.password}"
+        netloc = f"{auth}@{netloc}"
+    connect_url = parsed._replace(netloc=netloc).geturl()
+    host_header = hostname if parsed.port is None else f"{hostname}:{parsed.port}"
+    return connect_url, {"Host": host_header}
 
 
 def _sign_payload(secret: str, payload: bytes) -> str:
@@ -161,8 +236,9 @@ async def _send_webhook(channel: SupplierRiskNotificationChannel, alert: Supplie
     if not url:
         return
 
-    if _is_private_url(url):
-        raise SSRFError(f"Webhook URL points to private address: {url}")
+    # Resolve once → connect to validated IP (Host header keeps original name).
+    # Closes DNS-rebinding window between check and HTTPX's own lookup.
+    connect_url, host_headers = _safe_webhook_target(url)
 
     secret = decrypt_secret(config.get("secret_encrypted", ""))
     payload = json.dumps(_alert_to_dict(alert), ensure_ascii=False).encode()
@@ -171,16 +247,19 @@ async def _send_webhook(channel: SupplierRiskNotificationChannel, alert: Supplie
     headers = {
         "Content-Type": "application/json",
         "X-Signature": signature,
+        **host_headers,
     }
 
     last_error = None
     for attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(url, content=payload, headers=headers)
+                response = await client.post(connect_url, content=payload, headers=headers)
                 response.raise_for_status()
             logger.info("Sent webhook notification for alert %s", alert.alert_id)
             return
+        except SSRFError:
+            raise
         except Exception as e:
             last_error = e
             logger.warning("Webhook attempt %d failed for alert %s: %s", attempt + 1, alert.alert_id, e)
@@ -199,6 +278,41 @@ def sanitize_channel_config(config: dict) -> dict:
     return safe
 
 
+async def send_notifications_by_alert_id(
+    db: AsyncSession,
+    alert_id,
+    product_line_code: Optional[str] = None,
+) -> None:
+    """Load alert by id then dispatch. Used by batch eval so callers never pass a live ORM.
+
+    Always leaves the session without an open transaction (missing alert, success,
+    or failure) so one notification error cannot poison the rest of the batch.
+    """
+    try:
+        alert = await db.get(SupplierRiskAlert, alert_id)
+        if alert is None:
+            logger.warning("Notification skipped: alert %s not found", alert_id)
+            return
+        await send_notifications(db, alert, product_line_code)
+    except Exception:
+        if db.in_transaction():
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+        raise
+    finally:
+        # Close any leftover read txn (e.g. missing-alert path after db.get).
+        if db.in_transaction():
+            try:
+                await db.commit()
+            except Exception:
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+
+
 async def send_notifications(
     db: AsyncSession,
     alert: SupplierRiskAlert,
@@ -210,16 +324,59 @@ async def send_notifications(
     - enabled is True
     - channel's min_risk_level <= alert.risk_level
     - channel matches product_line_code or global
+
+    Channel rows are loaded first; the read transaction is closed before any
+    webhook/SMTP network I/O so the eval session is never held open for seconds.
     """
     level_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
     alert_level = level_order.get(alert.risk_level, 0)
 
-    query = select(SupplierRiskNotificationChannel).where(
-        SupplierRiskNotificationChannel.enabled.is_(True)
+    # Touch alert scalars while the session is live (needed after commit below
+    # only if expire_on_commit were True; still cheap insurance).
+    _ = (
+        alert.alert_id, alert.supplier_id, alert.risk_level, alert.risk_score,
+        alert.quality_score, alert.delivery_score, alert.compliance_score,
+        alert.status, alert.snapshot_date, alert.product_line_code, alert.created_at,
     )
 
-    result = await db.execute(query)
-    channels = list(result.scalars().all())
+    try:
+        # Scope channels to the alert's factory; supplier-scoped channels only
+        # match the same supplier (NULL supplier_id = factory-wide channel).
+        query = select(SupplierRiskNotificationChannel).where(
+            SupplierRiskNotificationChannel.enabled.is_(True),
+            SupplierRiskNotificationChannel.factory_id == alert.factory_id,
+        )
+        if alert.supplier_id is not None:
+            from sqlalchemy import or_
+            query = query.where(
+                or_(
+                    SupplierRiskNotificationChannel.supplier_id.is_(None),
+                    SupplierRiskNotificationChannel.supplier_id == alert.supplier_id,
+                )
+            )
+        else:
+            query = query.where(SupplierRiskNotificationChannel.supplier_id.is_(None))
+
+        result = await db.execute(query)
+        channels = list(result.scalars().all())
+        # Force-load channel attrs before closing the txn.
+        for channel in channels:
+            _ = (
+                channel.channel_id, channel.channel_type, channel.min_risk_level,
+                channel.product_line_code, channel.config,
+                channel.factory_id, channel.supplier_id,
+            )
+        # End the read transaction before network I/O (webhook timeout up to ~10s).
+        # Commit is inside the same try so a failed commit is rolled back below.
+        if db.in_transaction():
+            await db.commit()
+    except Exception:
+        if db.in_transaction():
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+        raise
 
     for channel in channels:
         channel_level = level_order.get(channel.min_risk_level, 0)

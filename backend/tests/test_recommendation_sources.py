@@ -64,6 +64,34 @@ class TestFMEAGraphSource:
         results = await source.retrieve(ctx)
         assert results == []
 
+    @pytest.mark.asyncio
+    async def test_linked_fmea_carries_risk_provenance(self):
+        """FMEA 命中候选携带 FailureMode 节点的 AP/S/O/D 进入 metadata。"""
+        source = FMEAGraphSource()
+        fmea_id = uuid.uuid4()
+        fm_id = str(uuid.uuid4())
+        cause_id = str(uuid.uuid4())
+        graph = {
+            "nodes": [
+                {"id": fm_id, "type": "FailureMode", "name": "螺栓尺寸超差",
+                 "severity": 9, "occurrence": 4, "detection": 6, "ap": "H"},
+                {"id": cause_id, "type": "FailureCause", "name": "螺栓老化"},
+            ],
+            "edges": [{"source": cause_id, "target": fm_id, "type": "CAUSE_OF"}],
+        }
+        ctx = RecommendationContext(
+            capa_data={"fmea_ref_id": fmea_id, "fmea_node_id": fm_id, "d2_description": ""},
+            user_product_lines=None, stage="d4",
+            linked_fmea={"fmea_id": fmea_id, "document_no": "PFMEA-001", "graph_data": graph},
+        )
+        results = await source.retrieve(ctx)
+        assert len(results) == 1
+        risk = results[0].metadata
+        assert risk["ap"] == "H"
+        assert risk["severity"] == 9
+        assert risk["occurrence"] == 4
+        assert risk["detection"] == 6
+
 
 class TestHistoricalCAPASource:
     @pytest.mark.asyncio

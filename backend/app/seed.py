@@ -129,14 +129,25 @@ SAMPLE_DFMEA_GRAPH = {
 }
 
 
-async def seed_supplier_risk_configs(db):
+async def seed_supplier_risk_configs(db, factory_id):
     """Seed default supplier risk rule configs if not present."""
     from sqlalchemy import select
 
+    from app.models.role import RoleDefinition
     from app.models.supplier_risk import SupplierRiskConfig
     from app.models.user import User
 
     admin = (await db.execute(select(User).where(User.username == "admin"))).scalar_one_or_none()
+    if not admin:
+        # Tests (and some envs) create admin-role users with non-"admin" usernames.
+        admin = (
+            await db.execute(
+                select(User)
+                .join(RoleDefinition, User.role_id == RoleDefinition.id)
+                .where(RoleDefinition.role_key == "admin")
+                .limit(1)
+            )
+        ).scalar_one_or_none()
     if not admin:
         return
 
@@ -161,6 +172,8 @@ async def seed_supplier_risk_configs(db):
          "thresholds": {"score_decline_limit": 15}},
         {"rule_id": "R10", "enabled": True, "category": "compliance", "weight": 15.0,
          "thresholds": {"keywords": ["安全", "安全特性", "safety"]}},
+        {"rule_id": "R11", "enabled": True, "category": "quality", "weight": 1.0,
+         "thresholds": {"base_score": 10, "severe_bonus": 10, "repeat_bonus": 10}},
     ]
 
     for cfg in DEFAULT_CONFIGS:
@@ -178,6 +191,7 @@ async def seed_supplier_risk_configs(db):
                 category=cfg["category"],
                 weight=cfg["weight"],
                 thresholds=cfg["thresholds"],
+                factory_id=factory_id,
                 updated_by=admin.user_id,
             ))
     await db.commit()
@@ -2358,7 +2372,7 @@ async def seed():
         await seed_all_permissions(db)
 
         # ─── Supplier risk default configs ───
-        await seed_supplier_risk_configs(db)
+        await seed_supplier_risk_configs(db, default_factory.id)
 
         # ─── Supply chain risk map snapshots ───
         await seed_supply_chain_risk_snapshots(db)

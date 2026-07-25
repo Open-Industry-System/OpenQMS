@@ -51,6 +51,8 @@ export default function FMEAListPage() {
   const filterType = rawType === "PFMEA" || rawType === "DFMEA" ? rawType : null;
   const filterHighRpn = searchParams.get("high_rpn") === "true"
     || searchParams.get("risk") === "high";
+  // 仪表盘「待办事项」下钻：草稿 + 评审中（与 status 互斥，用户手动改状态时清除）
+  const filterPending = searchParams.get("pending") === "true";
   const filterSearch = searchParams.get("search");
 
   // 外部 URL 变化（初始化/后退/重置）时同步本地搜索框。
@@ -71,6 +73,7 @@ export default function FMEAListPage() {
       status: filterStatus || undefined,
       fmea_type: filterType || undefined,
       high_rpn: filterHighRpn || undefined,
+      pending: filterPending || undefined,
       search: filterSearch || undefined,
     })
       .then((res) => {
@@ -94,7 +97,7 @@ export default function FMEAListPage() {
     setPage(1);
   };
 
-  const onStatusChange = (v: string | null) => updateFilters({ status: v ?? null });
+  const onStatusChange = (v: string | null) => updateFilters({ status: v ?? null, pending: null });
   const onTypeChange = (v: string | null) => updateFilters({ type: v ?? null });
   const onHighRpnChange = (checked: boolean) => updateFilters({ high_rpn: checked ? "true" : null });
   const onSearch = (value: string) => updateFilters({ search: value.trim() || null });
@@ -105,6 +108,7 @@ export default function FMEAListPage() {
     params.delete("type");
     params.delete("search");
     params.delete("high_rpn");
+    params.delete("pending");
     params.delete("risk");
     params.delete("pending_approval");
     setSearchParams(params, { replace: true });
@@ -206,7 +210,7 @@ export default function FMEAListPage() {
         const canDelete = canEdit('fmea') && (record.status === "draft" || record.status === "rework");
         return (
           <>
-            <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(targetPath)}>
+            <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(targetPath)} data-e2e="fmea-open">
               {canEdit('fmea') ? tc("actions.edit") : tc("actions.view")}
             </Button>
             {canDelete && (
@@ -227,7 +231,7 @@ export default function FMEAListPage() {
   ];
 
   const actions = canEdit('fmea') ? (
-    <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} data-e2e="fmea-create">
       {t("list.newFMEA")}
     </Button>
   ) : null;
@@ -284,6 +288,9 @@ export default function FMEAListPage() {
         dataSource={data}
         rowKey="fmea_id"
         loading={loading}
+        onRow={(record) => ({
+          'data-e2e': `row-${record.document_no}`,
+        } as any)}
         pagination={{
           current: page,
           total,

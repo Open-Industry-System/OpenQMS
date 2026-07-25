@@ -95,12 +95,35 @@ async def get_tenant_aware_session():
 
 
 async def run_for_each_tenant():
-    """Iterate over all active tenants, setting search_path for each.
+    """Iterate tenant DB sessions for background workers.
+
     Usage:
         async for tenant, db in run_for_each_tenant():
             await SomeService.do_work(db)
+
+    TENANT_MODE=single (default / e2e): business tables live in ``public`` and
+    the ``tenants`` registry is typically empty. Yield one public session so
+    lifespan loops (risk_input outbox, MES, etc.) still run — otherwise they
+    iterate zero rows and work sits pending forever (US-E2E-01.6 regression).
+
+    Multi-tenant modes: yield one session per active tenant with search_path
+    set to that tenant's schema.
     """
+    from types import SimpleNamespace
+
     from app.models.tenant import Tenant  # lazy import to avoid circular
+
+    if settings.TENANT_MODE == "single":
+        # Sentinel exposes .slug / .schema_name for logger.format callers in main.py.
+        public_tenant = SimpleNamespace(slug="public", schema_name="public", status="active")
+        async with async_session() as db:
+            try:
+                yield public_tenant, db
+            finally:
+                if db.in_transaction():
+                    await db.rollback()
+                await db.close()
+        return
 
     async with async_session() as session:
         await session.execute(text('SET search_path TO "public"'))

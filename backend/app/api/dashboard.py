@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
 from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.core.tenant import tenant_schema
 from app.database import get_db
 from app.models.user_dashboard_layout import UserDashboardLayout
 from app.schemas import dashboard_layout as layout_schemas
@@ -278,7 +279,6 @@ async def get_widgets(
     return layout_schemas.DashboardWidgetsResponse(**data)
 
 
-from fastapi import Request
 from pydantic import BaseModel
 
 from app.services.quality_trend_service import (
@@ -320,13 +320,13 @@ async def interpret_quality_trend(
 
     scope_description = build_scope_description(filter_codes or None)
     scope_hash = await build_scope_hash(filter_codes)
-    llm_provider = getattr(request.app.state, "llm_provider", None)
 
     try:
         return await interpret_quality_trend_service(
             db=db,
             user_id=str(scope.user.user_id),
-            llm_provider=llm_provider,
+            factory_id=scope.effective_factory_id,
+            tenant_schema=tenant_schema(request),
             filter_codes=filter_codes,
             allowed_modules=quality_trend_allowed_modules,
             scope_description=scope_description,

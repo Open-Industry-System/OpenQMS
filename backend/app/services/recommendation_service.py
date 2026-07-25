@@ -23,7 +23,8 @@ from app.schemas.recommendation import (
     SuggestionItem,
     SuggestionList,
 )
-from app.services.llm_provider import LLMProvider
+from app.services.agent import provider_adapter
+from app.services.agent.provider_adapter import ProviderNotConfiguredError
 
 logger = logging.getLogger(__name__)
 
@@ -552,19 +553,25 @@ D: 焊后100% X射线探伤 / 焊缝气密性在线检测
 # ---------------------------------------------------------------------------
 
 class RecommendationService:
-    def __init__(self, db: AsyncSession, llm_provider: LLMProvider | None, graph_repo: FMEAGraphRepository, llm_timeout: int | None = None):
+    def __init__(self, db: AsyncSession, graph_repo: FMEAGraphRepository, llm_timeout: int | None = None):
         self.db = db
-        self.llm = llm_provider
         self.graph_repo = graph_repo
         self.rules = RuleEngine()
         # FMEA prompts on OpenAI-compatible gateways can take ~9s; keep a
         # safe lower bound so configured providers don't look unavailable.
         self.llm_timeout = max(llm_timeout or settings.LLM_TIMEOUT, 15)
 
-    async def recommend(self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User, request_scope: RequestScope) -> RecommendResponse:
+    async def recommend(
+        self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User,
+        request_scope: RequestScope, tenant_schema: str,
+    ) -> RecommendResponse:
         from app.core.permissions import Module, PermissionLevel, get_user_permission
 
         fmea = await self._get_fmea_or_404(fmea_id)
+        try:
+            pc = await provider_adapter.build_client(self.db)
+        except ProviderNotConfiguredError:
+            pc = None
 
         # 权限检查 + scope 强制降级
         requested_scope = getattr(request, "scope", "global")
@@ -585,11 +592,11 @@ class RecommendationService:
             "include_graph": include_graph,
         })
         cache_result = await self._get_cached(
-            fmea_id, request.trigger_type, context_hash, effective_scope
+            fmea_id, request.trigger_type, context_hash, effective_scope, pc is not None
         )
         if cache_result:
             cached_response, cached_with_llm = cache_result
-            if self.llm is not None and not cached_with_llm:
+            if pc is not None and not cached_with_llm:
                 pass  # fall through to re-evaluate with LLM
             else:
                 return cached_response
@@ -621,13 +628,14 @@ class RecommendationService:
 
         # 5. Determine if LLM is needed
         need_llm = self._need_llm(
-            llm_available=self.llm is not None,
+            llm_available=pc is not None,
             has_specific=any(s.confidence >= 0.6 for s in all_suggestions),
             suggestion_count=len(all_suggestions),
             rule_quality=rule_result.quality,
         )
 
         if need_llm:
+            llm_status = "llm_failed"  # default; overwritten on success
             try:
                 import asyncio
                 llm_context = await self._assemble_context(fmea, request)
@@ -638,7 +646,7 @@ class RecommendationService:
                     ]
                 prompt = self._build_prompt(request.trigger_type, llm_context)
                 llm_result = await asyncio.wait_for(
-                    self.llm.complete(prompt, {}),
+                    provider_adapter.complete_json(pc, prompt, {}),
                     timeout=self.llm_timeout,
                 )
                 validated = SuggestionList.model_validate(llm_result)
@@ -650,9 +658,21 @@ class RecommendationService:
                 ]
                 all_suggestions = self._merge_and_deduplicate(all_suggestions, llm_items)
                 source = "graph_enriched" if graph_suggestions else "hybrid"
+                llm_status = "success"
             except Exception as e:
                 source = "graph" if graph_suggestions else "rule_fallback"
                 logger.warning("LLM failed, using rule+graph results: %s: %r", type(e).__name__, e)
+            # Audit sits OUTSIDE the try/except so audit errors never masquerade
+            # as LLM failures. Wrap in its own guard so an audit hiccup never
+            # breaks the recommend response (audit is observability, not business logic).
+            try:
+                await self._write_recommend_audit(
+                    fmea_id, request.trigger_type, context_hash,
+                    user, fmea.factory_id, tenant_schema,
+                    status=llm_status, source=source, suggestion_count=len(all_suggestions),
+                )
+            except Exception as audit_err:
+                logger.warning("recommend audit write failed: %s: %r", type(audit_err).__name__, audit_err)
         else:
             source = "graph" if graph_suggestions else "rule"
 
@@ -660,13 +680,13 @@ class RecommendationService:
             suggestions=all_suggestions[:10],
             source=source,
             cached=False,
-            llm_available=self.llm is not None,
+            llm_available=pc is not None,
             graph_match_count=len(graph_suggestions),
             effective_scope=effective_scope,
         )
 
         if source != "rule_fallback":
-            await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response)
+            await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response, pc is not None)
         return response
 
     # -- Graph similarity methods --
@@ -880,8 +900,41 @@ class RecommendationService:
         raw = json.dumps(context, sort_keys=True, ensure_ascii=False)
         return hashlib.sha256(raw.encode()).hexdigest()
 
+    async def _write_recommend_audit(
+        self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str,
+        user: User, factory_id: _uuid.UUID, tenant_schema: str,
+        status: str, source: str, suggestion_count: int,
+    ) -> None:
+        """Write an llm_recommend audit row (two-state: success / llm_failed).
+
+        Only called on the need_llm=True path. Unconfigured (pc is None) is NOT
+        audited — it silently rule-degrades. write_audit_raw flushes only; the
+        route's await db.commit() is the single commit point.
+        """
+        from app.services.agent import audit as agent_audit
+        correlation_id = _uuid.uuid5(
+            _uuid.NAMESPACE_URL, f"fmea_recommend:{fmea_id}:{trigger_type}:{context_hash}"
+        )
+        await agent_audit.write_audit_raw(
+            self.db,
+            user_id=user.user_id,
+            factory_id=factory_id,
+            tenant_schema=tenant_schema,
+            table_name="fmea_documents",
+            record_id=fmea_id,
+            action="llm_recommend",
+            correlation_id=correlation_id,
+            new_values={
+                "status": status,
+                "trigger_type": trigger_type,
+                "source": source,
+                "suggestion_count": suggestion_count,
+            },
+        )
+
     async def _get_cached(
-        self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str, effective_scope: str
+        self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str,
+        effective_scope: str, llm_available: bool,
     ) -> tuple[RecommendResponse, bool] | None:
         stmt = (
             select(RecommendationCache)
@@ -899,7 +952,7 @@ class RecommendationService:
                 suggestions=suggestions,
                 source=row.source,
                 cached=True,
-                llm_available=self.llm is not None,
+                llm_available=llm_available,
                 graph_match_count=graph_count,
                 effective_scope=effective_scope,
             )
@@ -908,7 +961,7 @@ class RecommendationService:
 
     async def _cache_result(
         self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str,
-        fmea: FMEADocument, response: RecommendResponse,
+        fmea: FMEADocument, response: RecommendResponse, llm_available: bool,
     ) -> None:
         stmt = (
             pg_insert(RecommendationCache)
@@ -922,7 +975,7 @@ class RecommendationService:
                 expires_at=func.now() + text("INTERVAL '24 hours'"),
                 suggestions=[s.model_dump() for s in response.suggestions],
                 source=response.source,
-                llm_available=self.llm is not None,
+                llm_available=llm_available,
             )
             .on_conflict_do_update(
                 index_elements=["fmea_id", "trigger_type", "context_hash"],
@@ -930,7 +983,7 @@ class RecommendationService:
                 set_={
                     "suggestions": [s.model_dump() for s in response.suggestions],
                     "source": response.source,
-                    "llm_available": self.llm is not None,
+                    "llm_available": llm_available,
                     "product_line_code": fmea.product_line_code,
                     "fmea_type": fmea.fmea_type,
                     "created_at": func.now(),

@@ -1,0 +1,44 @@
+# E2E override. Use with: -f docker-compose.yml -f docker-compose.e2e.yml --profile e2e -p openqms-e2e
+# Ports use !override to REPLACE (not append) base ports so the dev stack can run simultaneously.
+services:
+  db:
+    ports: !override
+      - "5433:5432"
+    volumes:
+      - pgdata_e2e:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: qms_e2e
+
+  redis:
+    ports: !reset []
+
+  backend:
+    ports: !override
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms_e2e
+      REDIS_URL: redis://redis:6379/0
+      E2E_MODE: "1"
+      TENANT_MODE: single
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-30}
+
+  frontend:
+    ports: !override
+      - "5174:5173"
+    environment:
+      BACKEND_URL: http://backend:8000
+
+  # Prevent the AI infra services from starting under the e2e profile.
+  neo4j:
+    profiles: ["ai-infra"]
+  graph-worker:
+    profiles: ["ai-infra"]
+  ollama:
+    profiles: ["ai-infra"]
+
+volumes:
+  pgdata_e2e:

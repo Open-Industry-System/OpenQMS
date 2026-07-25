@@ -3,6 +3,9 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
+from app.schemas.recommendation_stage import StageRunSchema
+from app.state_machines.eightd_state import EightDState
+
 
 class CAPACreate(BaseModel):
     title: str
@@ -10,6 +13,7 @@ class CAPACreate(BaseModel):
     severity: str = "general"
     due_date: date | None = None
     product_line_code: str = "DC-DC-100"
+    supplier_id: uuid.UUID | None = None
 
 
 class CAPAUpdate(BaseModel):
@@ -27,6 +31,41 @@ class CAPAUpdate(BaseModel):
     fmea_ref_id: uuid.UUID | None = None
     fmea_node_id: str | None = None
     product_line_code: str | None = None
+    supplier_id: uuid.UUID | None = None
+
+
+class CAPATriggerScarRequest(BaseModel):
+    supplier_id: uuid.UUID
+    description: str | None = None
+    requested_action: str | None = None
+    due_date: date | None = None
+    affected_batches: list[str] | None = None  # None = use D3; [] = clear
+
+
+class LinkedScarSchema(BaseModel):
+    scar_id: uuid.UUID
+    scar_no: str
+    status: str
+    supplier_id: uuid.UUID
+
+
+class ConfirmRepeatRequest(BaseModel):
+    repeat_confirmed: bool
+
+
+class SupplierRiskInputProjection(BaseModel):
+    input_id: uuid.UUID
+    status: str
+    repeat_suggested: bool | None
+    repeat_detection_status: str
+    repeat_confirmed: bool | None
+    matched_capa_nos: list[str]
+    evaluated_risk_level: str | None
+    evaluated_risk_score: float | None
+    evaluated_at: datetime | None = None
+    linked_alert: dict | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class CAPAResponse(BaseModel):
@@ -50,6 +89,22 @@ class CAPAResponse(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+    d4_retry_count: int = 0  # P1-3: D4 验证回退计数，API/e2e 可观察
+    supplier_id: uuid.UUID | None = None
+    supplier_no: str | None = None
+    supplier_name: str | None = None
+    scar_ref_id: uuid.UUID | None = None
+    linked_scar: LinkedScarSchema | None = None
+    d3_affected_lots: list[str] = []
+    supplier_risk_input: SupplierRiskInputProjection | None = None
+    lateral_diffusion: dict | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CAPAAdvanceResponse(BaseModel):
+    capa: CAPAResponse
+    warning: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -62,15 +117,15 @@ class CAPAListResponse(BaseModel):
 
 
 class D7Recommendation(BaseModel):
-    fmea_id: uuid.UUID
-    fmea_document_no: str
-    failure_mode_node_id: str
-    failure_mode_name: str
+    fmea_id: uuid.UUID | None = None
+    fmea_document_no: str | None = None
+    failure_mode_node_id: str  # FMEA 命中为节点 id；规则引擎兜底为合成 key（rule:<hash>）
+    failure_mode_name: str | None = None
     failure_cause_node_id: str | None = None
     failure_cause_name: str | None = None
     prevention_control_node_id: str | None = None
     prevention_control_name: str | None = None
-    match_source: str  # "linked" | "keyword"
+    match_source: str  # "linked" | "keyword" | "rule"
     match_reason: str
     related_d4_keywords: list[str] = []
     suggested_prevention: str | None = None
@@ -88,7 +143,7 @@ class D4Recommendation(BaseModel):
     failure_mode_name: str | None = None
     fmea_document_no: str | None = None
     fmea_id: str | None = None
-    match_source: str  # "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "llm"
+    match_source: str  # "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "knowledge_entry" | "llm"
     match_reason: str
     related_d2_keywords: list[str] = []
     confidence: float = 0.5
@@ -96,10 +151,19 @@ class D4Recommendation(BaseModel):
     source_capa_id: str | None = None
     source_capa_document_no: str | None = None
     source_product_line_code: str | None = None
+    # --- 知识库条目来源标识 ---
+    source_knowledge_entry_id: str | None = None
+    stage_index: int | None = None
+    # --- AP / S/O/D provenance（FMEA 命中时来自 FailureMode 节点；规则引擎兜底仅 AP=M） ---
+    ap: str | None = None
+    severity: int | None = None
+    occurrence: int | None = None
+    detection: int | None = None
 
 
 class D4RecommendationResponse(BaseModel):
     items: list[D4Recommendation]
+    stages: list[StageRunSchema] = []
 
 
 class D5ExistingControl(BaseModel):
@@ -114,6 +178,12 @@ class D5ExistingControl(BaseModel):
     match_reason: str
     fmea_id: str | None = None
     fmea_document_no: str | None = None
+    stage_index: int | None = None
+    # --- AP / S/O/D provenance ---
+    ap: str | None = None
+    severity: int | None = None
+    occurrence: int | None = None
+    detection: int | None = None
 
 
 class D5GeneralSuggestion(BaseModel):
@@ -126,12 +196,23 @@ class D5GeneralSuggestion(BaseModel):
     match_source: str | None = None
     source_capa_id: str | None = None
     source_capa_document_no: str | None = None
+    # --- 知识库条目来源标识 ---
+    source_knowledge_entry_id: str | None = None
+    stage_index: int | None = None
+    # --- AP / S/O/D provenance ---
+    ap: str | None = None
+    severity: int | None = None
+    occurrence: int | None = None
+    detection: int | None = None
 
 
 class D5RecommendationResponse(BaseModel):
     existing_controls: list[D5ExistingControl]
     general_suggestions: list[D5GeneralSuggestion]
+    stages: list[StageRunSchema] = []
 
 
 class AdvanceRequest(BaseModel):
-    d7_skip_reasons: list[dict] | None = None
+    target_state: EightDState | None = None   # 显式；None = 线性 next（D1→D6→D7_PREVENTION、D8→ARCHIVED）
+    reject_reason: str | None = None          # target=D7_PREVENTION（自 D8_APPROVAL_PENDING）时必填
+    d7_skip_reasons: list[dict] | None = None  # 不变

@@ -89,7 +89,7 @@ async def test_semantic_search_filters_by_product_type(db, default_factory):
 
     user = await _admin_user_with_permissions(db, default_factory)
 
-    service = SearchService(db=db, llm_provider=None, embedding_provider=None)
+    service = SearchService(db=db, embedding_provider=None)
     real_execute = service.db.execute
 
     # Fake search result rows: two POWER rows and one MOTOR row
@@ -187,7 +187,7 @@ async def test_semantic_search_mismatched_pl_and_type_returns_empty(db, default_
     await db.flush()
 
     user = await _admin_user_with_permissions(db, default_factory)
-    service = SearchService(db=db, llm_provider=None, embedding_provider=None)
+    service = SearchService(db=db, embedding_provider=None)
     real_execute = service.db.execute
 
     class FakeScalarRow:
@@ -242,7 +242,7 @@ async def test_semantic_search_product_type_excludes_inactive_pl(db, default_fac
     await db.flush()
 
     user = await _admin_user_with_permissions(db, default_factory)
-    service = SearchService(db=db, llm_provider=None, embedding_provider=None)
+    service = SearchService(db=db, embedding_provider=None)
     real_execute = service.db.execute
 
     captured: dict = {}

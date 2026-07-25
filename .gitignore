@@ -5,6 +5,7 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.venv312/
 
 # ── Node.js ──────────────────────────────────────────────────────────────────
 node_modules/
@@ -27,6 +28,7 @@ pgdata/
 
 # ── Tool-specific (Claude Code, CodeGraph, Playwright, etc.) ─────────────────
 .claude/
+!.claude/skills/
 .codegraph/
 .agents/
 .superpowers/
@@ -39,3 +41,8 @@ skills-lock.json
 prototypes/
 Reference/
 TEST_REPORT.md
+
+# Playwright E2E artifacts (session tokens + test results)
+frontend/e2e/.storage-state/
+frontend/test-results/
+docs/e2e/reports/*

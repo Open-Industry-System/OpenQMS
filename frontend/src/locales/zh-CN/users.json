@@ -1,0 +1,38 @@
+{
+  "title": "用户管理",
+  "create": "新建用户",
+  "edit": "编辑",
+  "deactivate": "停用",
+  "activate": "启用",
+  "delete": "删除",
+  "resetPassword": "重置密码",
+  "editModalTitle": "编辑用户",
+  "noDefaultFactory": "无",
+  "passwordHint": "留空则不修改；至少 8 位，含大小写字母、数字和特殊字符",
+  "confirmDeleteTitle": "删除用户",
+  "confirmDeleteContent": "硬删除不可恢复。若该用户存在关联业务记录，删除将失败，建议改用停用。",
+  "cannotDeactivateSelf": "不能停用自己的账号",
+  "cannotDeleteSelf": "不能删除自己的账号",
+  "actions": "操作",
+  "fields": {
+    "username": "用户名",
+    "password": "密码",
+    "display_name": "显示名",
+    "email": "邮箱",
+    "role_key": "角色",
+    "is_active": "状态",
+    "factories": "可访问工厂",
+    "defaultFactory": "默认工厂"
+  },
+  "createModalTitle": "新建用户",
+  "messages": {
+    "created": "用户已创建",
+    "createFailed": "创建失败",
+    "updated": "用户已更新",
+    "updateFailed": "更新失败",
+    "deleted": "用户已删除",
+    "deleteFailed": "删除失败"
+  },
+  "active": "启用",
+  "inactive": "停用"
+}

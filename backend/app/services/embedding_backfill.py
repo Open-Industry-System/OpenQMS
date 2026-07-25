@@ -14,12 +14,16 @@ from app.services.embedding_outbox import enqueue_embedding
 
 logger = logging.getLogger(__name__)
 
-ENTITY_TYPES = ["fmea_node", "capa", "audit_finding", "complaint", "scar", "rma"]
+ENTITY_TYPES = [
+    "fmea_node", "capa", "capa_lesson", "audit_finding", "complaint", "scar", "rma",
+    "knowledge_entry",
+]
 
 ENTITY_TABLE_MAP = {
     # (from_clause, pk_expr, plc_expr, factory_id_expr)
     "fmea_node": ("fmea_documents", "fmea_id", "product_line_code", "factory_id"),
     "capa": ("capa_eightd", "report_id", "product_line_code", "factory_id"),
+    "capa_lesson": ("capa_lessons_learned", "lesson_id", "product_line_code", "factory_id"),
     "audit_finding": (
         "audit_findings",
         "finding_id",
@@ -29,6 +33,7 @@ ENTITY_TABLE_MAP = {
     "complaint": ("customer_complaints", "complaint_id", "product_line_code", "factory_id"),
     "scar": ("supplier_scars", "scar_id", "product_line_code", "factory_id"),
     "rma": ("rma_records", "rma_id", "product_line_code", "factory_id"),
+    "knowledge_entry": ("knowledge_entries", "entry_id", "product_line_code", "factory_id"),
 }
 
 
@@ -41,11 +46,12 @@ async def backfill_entity_type(
     # SECURITY: {pk_expr}, {plc_expr}, {fid_expr}, {from_clause} are interpolated
     # from the hardcoded ENTITY_TABLE_MAP constant above — never user input.
     from_clause, pk_expr, plc_expr, fid_expr = ENTITY_TABLE_MAP[entity_type]
+    hash_select = ", content_hash" if entity_type == "knowledge_entry" else ""
 
     result = await db.execute(
         text(
             f"SELECT {pk_expr} AS entity_id, {plc_expr} AS product_line_code, "
-            f"{fid_expr} AS factory_id FROM {from_clause}"
+            f"{fid_expr} AS factory_id{hash_select} FROM {from_clause}"
         )
     )
     rows = result.fetchall()
@@ -58,6 +64,7 @@ async def backfill_entity_type(
             await enqueue_embedding(
                 db, entity_type, row["entity_id"],
                 row["product_line_code"], row["factory_id"],
+                content_hash=row["content_hash"] if entity_type == "knowledge_entry" else None,
             )
         await db.commit()
         total += len(batch)

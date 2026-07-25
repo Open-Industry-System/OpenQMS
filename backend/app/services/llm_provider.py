@@ -4,27 +4,10 @@ import logging
 from typing import Protocol
 
 from app.config import settings as app_settings
+from app.services.agent.llm_json import MAX_RESPONSE_BYTES
+from app.services.agent.llm_json import extract_json as _extract_json
 
 logger = logging.getLogger(__name__)
-
-MAX_RESPONSE_BYTES = 10_240  # 10KB
-
-
-def _extract_json(text: str) -> dict:
-    """Parse JSON from an LLM response, tolerating ```json code fences.
-
-    Used when a model returns JSON without response_format enforcement (the
-    prompt already requests JSON); some models wrap output in fences.
-    """
-    text = (text or "").strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    return json.loads(text)
 
 
 class LLMProvider(Protocol):
@@ -119,7 +102,7 @@ def create_llm_provider(config=None) -> LLMProvider | None:
         return None
 
     api_key = getattr(cfg, "LLM_API_KEY", "") or getattr(cfg, "llm_api_key", "")
-    if not api_key and provider_name != "local":
+    if not api_key and provider_name not in ("local", "ollama"):
         logger.warning("LLM_PROVIDER=%s requires LLM_API_KEY, falling back to rule-only mode", provider_name)
         return None
 
@@ -131,13 +114,13 @@ def create_llm_provider(config=None) -> LLMProvider | None:
         elif provider_name == "openai":
             base_url = getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
             return OpenAIProvider(api_key=api_key, model=model or "gpt-4o", base_url=base_url)
-        elif provider_name == "local":
+        elif provider_name in ("local", "ollama"):
             base_url = getattr(cfg, "LLM_BASE_URL", "") or getattr(cfg, "llm_base_url", "")
             if not base_url:
-                logger.warning("LLM_PROVIDER=local requires LLM_BASE_URL, falling back to rule-only mode")
+                logger.warning("LLM_PROVIDER=%s requires LLM_BASE_URL, falling back to rule-only mode", provider_name)
                 return None
             if not model:
-                logger.warning("LLM_PROVIDER=local requires LLM_MODEL, falling back to rule-only mode")
+                logger.warning("LLM_PROVIDER=%s requires LLM_MODEL, falling back to rule-only mode", provider_name)
                 return None
             return LocalProvider(base_url=base_url, model=model)
         else:

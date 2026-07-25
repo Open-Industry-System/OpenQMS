@@ -9,7 +9,16 @@
     "undoChange": "撤销修改",
     "addMember": "添加成员",
     "handle": "处理",
-    "viewDetail": "查看详情"
+    "viewDetail": "查看详情",
+    "triggerScar": "发起 SCAR"
+  },
+  "reject": {
+    "title": "驳回 8D",
+    "reasonLabel": "驳回原因",
+    "reasonPlaceholder": "请填写驳回理由（必填）",
+    "confirm": "驳回",
+    "approve": "审批关闭",
+    "archive": "归档"
   },
   "status": {
     "D1_TEAM": "D1 团队组建",
@@ -19,7 +28,10 @@
     "D5_CORRECTION": "D5 永久措施",
     "D6_VERIFICATION": "D6 实施验证",
     "D7_PREVENTION": "D7 预防复发",
+    "D7_COMPLETED": "D7 已完成",
     "D8_CLOSURE": "D8 关闭",
+    "D8_GATE_PENDING": "D8 文档门禁",
+    "D8_APPROVAL_PENDING": "D8 待审批",
     "ARCHIVED": "已归档"
   },
   "steps": {
@@ -47,12 +59,18 @@
     "d5Label": "永久纠正措施",
     "d6Label": "效果验证",
     "d7Label": "预防复发措施",
-    "d8Label": "关闭确认"
+    "d8Label": "关闭确认",
+    "supplierLoadFailed": "供应商列表加载失败",
+    "supplier": "关联供应商",
+    "supplierPlaceholder": "请选择供应商"
   },
   "messages": {
     "createSuccess": "8D 报告创建成功",
     "saveFailed": "保存失败",
     "advanceSuccess": "已推进到下一步",
+    "approveSuccess": "已审批关闭",
+    "archiveSuccess": "已归档",
+    "rejectSuccess": "已驳回",
     "advanceFailed": "推进失败",
     "linkFMEASuccess": "已关联 FMEA",
     "linkFMEAFailed": "关联失败",
@@ -62,14 +80,56 @@
     "reportArchived": "报告已归档",
     "undoSuccess": "已撤销 AI 修改",
     "searchTimeout": "检索超时，请稍后在编辑过程中使用推荐功能",
-    "searchFailed": "检索经验教训失败"
+    "searchFailed": "检索经验教训失败",
+    "triggerScarSuccess": "SCAR 发起成功",
+    "triggerScarFailed": "SCAR 发起失败",
+    "supplierSaved": "供应商已保存",
+    "supplierSaveFailed": "供应商保存失败"
   },
   "detail": {
     "currentStepDetails": "当前步骤详情",
     "reportInfo": "报告信息",
+    "documentNo": "编号",
+    "status": "状态",
+    "severity": "严重等级",
+    "dueDate": "期限",
+    "relatedFMEA": "关联 FMEA",
+    "relatedSCAR": "关联 SCAR",
+    "createdAt": "创建时间",
     "notSet": "未设定",
     "notLinked": "未关联",
-    "linkedFMEA": "已关联 FMEA"
+    "linkedFMEA": "已关联 FMEA",
+    "supplier": "关联供应商",
+    "supplierLocked": "已锁定"
+  },
+  "riskInput": {
+    "related": "供应商风险输入",
+    "matched": "系统判定曾复发（关联: {{nos}}），请确认。",
+    "notMatched": "系统未发现复发记录，请最终确认。",
+    "unavailable": "未关联 FMEA，无法自动判定，请人工确认是否复发。",
+    "confirmYes": "是，属复发",
+    "confirmNo": "否，非复发",
+    "confirmedRecurrence": "已确认：复发",
+    "confirmedNoRecurrence": "已确认：非复发",
+    "confirmSuccess": "复发确认已保存",
+    "confirmFailed": "复发确认失败",
+    "status": {
+      "pending": "评估中",
+      "processing": "评估中",
+      "processed": "已评估",
+      "error": "评估失败"
+    }
+  },
+  "scar": {
+    "modalTitle": "从 8D 发起 SCAR",
+    "supplier": "供应商",
+    "supplierRequired": "请选择供应商",
+    "description": "问题描述",
+    "descriptionRequired": "请输入问题描述",
+    "requestedAction": "要求措施",
+    "dueDate": "到期日",
+    "affectedBatches": "受影响批次",
+    "affectedBatchesPlaceholder": "输入批次号后回车添加"
   },
   "team": {
     "name": "成员姓名",
@@ -105,12 +165,60 @@
       "semantic": "语义匹配",
       "historical": "历史 CAPA",
       "llm": "智能建议",
-      "rule": "规则引擎建议"
+      "rule": "规则引擎建议",
+      "same_type_product_kb": "同类型产品 KB",
+      "lessons_learned": "经验教训",
+      "spc_anomaly": "SPC 异常",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "供货历史",
+      "other": "其他"
     },
+    "sources": {
+      "linked": "已关联",
+      "fmea_graph": "FMEA 图",
+      "semantic_search": "语义匹配",
+      "keyword": "关键词",
+      "historical_capa": "历史 CAPA",
+      "llm": "智能建议",
+      "rule": "规则引擎",
+      "same_type_product_kb": "同类型产品 KB",
+      "lessons_learned": "经验教训",
+      "spc_anomaly": "SPC 异常",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "供货历史"
+    },
+    "stageLabel": "阶段 {{n}}",
     "adopt": "采纳",
     "skip": "跳过",
     "readonlyTooltip": "只读用户无法采纳",
-    "loadFailed": "加载 D4 推荐失败"
+    "loadFailed": "加载 D4 推荐失败",
+    "verificationTitle": "D4 现场根因验证",
+    "noVerification": "暂无验证记录",
+    "newVerification": "新增验证",
+    "rootCause": "根因",
+    "method": "验证方法",
+    "result": "验证结果",
+    "evidence": "证据附件",
+    "addEvidence": "添加证据",
+    "isVerified": "已验证",
+    "verified": "已验证",
+    "notVerified": "待验证",
+    "save": "保存",
+    "cancel": "取消",
+    "verificationSaved": "验证记录已保存",
+    "verificationLoadFailed": "验证记录加载失败",
+    "verificationFailed": "验证提交失败",
+    "needAtLeastOneDetail": "通过验证时至少填写一项验证细节（方法、结果或证据）",
+    "adopted": "已采纳",
+    "adoptFailed": "采纳失败",
+    "blocked": {
+      "banner": "AI 推荐不可用——未配置 LLM 凭证。请联系管理员配置 /admin/ai-config"
+    },
+    "cause": "FMEA Cause",
+    "selectCause": "选择失效原因",
+    "linkFmeaFirst": "请先关联 FMEA"
   },
   "d5": {
     "title": "D5 纠正措施推荐",
@@ -124,11 +232,34 @@
       "预防措施": "预防措施",
       "纠正措施": "纠正措施"
     },
+    "sources": {
+      "fmea_graph": "FMEA 图",
+      "semantic_search": "语义匹配",
+      "historical_capa": "历史 CAPA",
+      "historical_capa_measure": "历史 CAPA 措施",
+      "rule_engine": "规则引擎",
+      "rule_engine_measure": "规则引擎措施",
+      "rule": "规则引擎",
+      "llm": "智能建议",
+      "graph": "图相似匹配",
+      "same_type_product_kb": "同类型产品 KB",
+      "lessons_learned": "经验教训",
+      "spc_anomaly": "SPC 异常",
+      "mes": "MES",
+      "iqc": "IQC",
+      "supplier_history": "供货历史"
+    },
+    "stageLabel": "阶段 {{n}}",
     "defaultBasis": "系统推荐",
     "loadFailed": "加载 D5 推荐失败",
     "adopt": "采纳",
     "skip": "跳过",
-    "readonlyTooltip": "只读用户无法采纳"
+    "readonlyTooltip": "只读用户无法采纳",
+    "adopted": "已采纳",
+    "adoptFailed": "采纳失败",
+    "blocked": {
+      "banner": "AI 推荐不可用——未配置 LLM 凭证。请联系管理员配置 /admin/ai-config"
+    }
   },
   "d7": {
     "title": "预防复发提示",
@@ -158,7 +289,8 @@
     "skipReasonLabel": "如需跳过，请填写理由（可选）：",
     "skipReasonPlaceholder": "跳过理由（可选）",
     "skipReasonEmpty": "未填写理由",
-    "skipConfirm": "确认跳过并推进"
+    "skipConfirm": "确认跳过并推进",
+    "actionFailed": "动作保存失败"
   },
   "draft": {
     "button": "AI 草拟",
@@ -203,8 +335,137 @@
     }
   },
   "relatedCapa": {
-    "title": "关联 CAPA"
+    "title": "关联 CAPA",
+    "empty": "无关联 8D"
+  },
+  "verification": {
+    "method": {
+      "measurement": "测量",
+      "observation": "观察",
+      "reproduction": "复现"
+    },
+    "conclusion": {
+      "passed": "通过",
+      "failed": "不通过",
+      "draft": "草稿",
+      "saveDraft": "保存草稿"
+    }
+  },
+  "ppt": {
+    "generate": "生成 PPT",
+    "llmNotConfigured": "大模型未配置，已跳过自动审核",
+    "needsReview": "经 {rounds} 轮审核仍需人工复核",
+    "generated": "PPT 已生成（审核通过，{rounds} 轮）",
+    "generateFailed": "PPT 生成失败",
+    "reviewReport": "审查报告",
+    "issues": "问题",
+    "suggestions": "建议",
+    "needsReviewRuleIssues": "内容校验未通过，需人工复核（见审查报告）"
+  },
+  "dag": {
+    "title": "推荐生成链路",
+    "stageNames": {
+      "1": "上下文采集",
+      "2": "本产品 FMEA 检索",
+      "3": "全局知识库 RAG",
+      "4": "同类型产品 KB",
+      "5": "经验教训库",
+      "6": "SPC 异常关联",
+      "7": "MES 设备/过程",
+      "8": "IQC 来料",
+      "9": "供货历史",
+      "10": "规则启发",
+      "11": "LLM 融合排序",
+      "12": "输出推荐列表"
+    },
+    "status": {
+      "done": "完成",
+      "skipped": "跳过",
+      "error": "错误",
+      "running": "进行中",
+      "pending": "待定"
+    }
   },
   "subtitle": "客诉与质量问题闭环追踪",
-  "listTitle": "8D 报告列表"
+  "listTitle": "8D 报告列表",
+  "docGate": {
+    "title": "D8 文档更新审核门禁",
+    "noAnalysis": "未分析",
+    "blocked": "LLM 凭证未配置，影响分析被阻断",
+    "failed": "影响分析失败",
+    "generate": "生成影响分析",
+    "regenerate": "重新生成影响分析",
+    "generateDone": "影响分析已生成",
+    "generateFailed": "影响分析失败",
+    "retryAfter": "生成进行中，请稍后刷新",
+    "affectedTitle": "受影响文档",
+    "emptyList": "影响清单为空，请确认确实无受影响文档",
+    "confirmEmpty": "确认无受影响文档",
+    "confirmEmptyDone": "已确认无受影响文档",
+    "runAudit": "运行文档审核",
+    "auditPassed": "审核通过",
+    "auditBlocked": "审核未通过，门禁阻断",
+    "defer": "记录延期",
+    "deferTitle": "记录延期（仍阻断推进）",
+    "deferConfirm": "确认延期",
+    "deferReason": "延期原因",
+    "deferReasonRequired": "必填",
+    "deferOwner": "负责人 user_id",
+    "deferDeadline": "截止日期",
+    "deferDone": "已记录延期（门禁仍阻断）",
+    "deferInfo": "延期",
+    "decisionTitle": "门禁决策",
+    "noDecision": "尚未决策",
+    "emptyConfirmed": "空清单已确认",
+    "advance": "推进到审批",
+    "advanceDone": "已推进到审批",
+    "docChanged": "文档已变更，请重新审核",
+    "inputChanged": "分析输入已变更，请重新生成",
+    "colType": "类型",
+    "colName": "名称",
+    "colKeyPoints": "关键点",
+    "colSuggestion": "更新建议",
+    "colStatus": "状态",
+    "colCoverage": "覆盖",
+    "colBump": "版本变更"
+  },
+  "sources": {
+    "header": "文档关联",
+    "d4_cause": "D4 根因",
+    "d7_failure_mode": "D7 失效模式",
+    "d7_failure_cause": "D7 失效原因",
+    "d7_prevention": "D7 预防控制"
+  },
+  "knowledge": {
+    "title": "知识库沉淀",
+    "summary": "经验摘要",
+    "summaryEmpty": "（暂无摘要）",
+    "embeddingStatus": "向量状态",
+    "embeddingPending": "向量处理中",
+    "embeddingReady": "向量就绪",
+    "embeddingFailed": "向量失败",
+    "tags": "标签",
+    "missing": "尚未沉淀知识条目",
+    "resink": "重新沉淀",
+    "resinkSuccess": "知识库已重新沉淀",
+    "resinkFailed": "重新沉淀失败",
+    "sinkBlocked": "知识库沉淀被阻断：LLM 未配置，请在 AI 配置中设置凭证",
+    "sinkFailed": "知识库沉淀失败，可重试关闭或重新沉淀"
+  },
+  "lateral": {
+    "title": "横向扩散预警",
+    "hint": "检测到类似产品可能受同一根因影响。请选择是否通知相关产品负责人（一次覆盖全部命中类型）。",
+    "notify": "通知全部",
+    "skip": "不通知",
+    "skipReason": "不通知理由（选择不通知时必填）",
+    "rerun": "重新检查",
+    "empty": "未命中类似产品",
+    "hitCount": "命中类型 {{n}} 个",
+    "notifications": "通知记录",
+    "truncated": "已截断",
+    "decideSuccess": "横向扩散决策已保存",
+    "decideFailed": "横向扩散决策失败",
+    "blocked": "横向扩散被阻断：LLM 未配置",
+    "failed": "横向扩散失败，可重试"
+  }
 }

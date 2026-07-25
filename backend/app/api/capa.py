@@ -1,34 +1,93 @@
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import check_factory_access, check_product_line_access, is_factory_visible, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
+from app.core.tenant import tenant_schema
 from app.database import get_db
-from app.models.capa import CAPAEightD
+from app.models.audit import AuditLog
+from app.models.capa import CAPAEightD, CapaPptExport
+from app.models.capa_d3 import (
+    CapaD3AdviceAdoption,
+    CapaD3AdviceGeneration,
+    CapaD3AiAdvice,
+    CapaD3ContainmentSnapshot,
+    CapaD3Execution,
+    CapaD3ImpactReport,
+    CapaD3ImportRun,
+)
 from app.models.fmea import FMEADocument
 from app.schemas.capa import (
     AdvanceRequest,
+    CAPAAdvanceResponse,
     CAPACreate,
     CAPAListResponse,
     CAPAResponse,
+    CAPATriggerScarRequest,
     CAPAUpdate,
+    ConfirmRepeatRequest,
     D4RecommendationResponse,
     D5RecommendationResponse,
+    LinkedScarSchema,
+    SupplierRiskInputProjection,
+)
+from app.schemas import scar as scar_schemas
+from app.schemas.capa_d3 import (
+    D3AdviceItem,
+    D3AdviceRequest,
+    D3AdviceResponse,
+    D3AdviceRunningResponse,
+    D3AdoptionResponse,
+    D3DecisionRequest,
+    D3ExecutionRequest,
+    D3ExecutionResponse,
+    D3ExecutionUpdateRequest,
+    D3ImportRequest,
+    D3ImportResponse,
+    D3ReportResponse,
+    D3ReportRunningResponse,
+    D3RunResponse,
+    D3SnapshotResponse,
+    ProvenanceEntry,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.capa_ppt import PptExportDetailResponse
+from app.schemas.capa_verification import (
+    AdoptRequest, AdoptResponse, D7AutoFillRequest, D7AutoFillResponse,
+    D7NodeActionCreate, D7NodeActionResponse,
+    VerificationCreate, VerificationResponse, VerificationUpdate,
+)
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
-from app.services import capa_service
+from app.schemas.recommendation_stage import StageRunSchema
+from app.schemas.capa_doc_gate import DeferRequest, DocGateDecisionResponse, WaiverRequest
+from app.schemas.capa_lateral_diffusion import LateralDecisionRequest
+from app.services import capa_d3_containment_service
+from app.services import capa_d7_action_service
+from app.services import capa_doc_gate_service
+from app.services import capa_ppt_review_service, capa_ppt_service, capa_service
+from app.services import capa_scar_service
+from app.services import capa_verification_service
+from app.models.supplier import SupplierSCAR
+from app.services.capa_d7_action_service import ConflictError
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
+from app.services.agent import provider_adapter
+from app.state_machines.eightd_state import EightDState, _linear_next_safe
+from app.utils.pptx import pptx_response
 
 router = APIRouter(prefix="/api/capa", tags=["capa"])
+
+D4_RETRY_THRESHOLD = 3
 
 
 @router.get("", response_model=CAPAListResponse)
@@ -68,6 +127,71 @@ async def list_capas(
     )
 
 
+@router.get("/supplier-options")
+async def list_capa_supplier_options(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Lightweight supplier picker for CAPA create/edit.
+
+    Gated by CAPA CREATE (not Module.SUPPLIER VIEW) so CAPA operators can
+    associate a supplier without full supplier-module access.
+
+    Scope rules (fail closed):
+    - Prefer ``effective_factory_id``; if unset, require a single accessible
+      factory (multi-factory without selection → empty, no cross-factory leak).
+    - Apply product-line scope: NONE → empty; EXPLICIT → filter product_scope.
+    """
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.CREATE:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 CREATE 权限")
+    from app.services import supplier_service
+
+    factory_id = scope.effective_factory_id
+    if factory_id is None:
+        accessible = scope.factory_scope.accessible_factory_ids
+        if accessible is None:
+            # group admin, all factories: still require explicit selection to avoid
+            # tenant-wide dump from the CAPA picker
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+        if len(accessible) == 1:
+            factory_id = next(iter(accessible))
+        else:
+            # multi-factory without effective selection → empty (no leak)
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
+
+    # Product-line scope
+    allowed_pls = None
+    pl_scope = scope.pl_scope
+    if pl_scope.mode == "NONE":
+        return {"items": [], "total": 0, "page": page, "page_size": page_size}
+    if pl_scope.mode == "EXPLICIT" and pl_scope.codes:
+        allowed_pls = list(pl_scope.codes)
+
+    items, total = await supplier_service.list_suppliers(
+        db, page=page, page_size=page_size, search=search,
+        factory_id=factory_id,
+        allowed_product_line_codes=allowed_pls,
+    )
+    return {
+        "items": [
+            {
+                "supplier_id": str(s.supplier_id),
+                "supplier_no": s.supplier_no,
+                "name": s.name,
+                "status": s.status,
+            }
+            for s in items
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 @router.post("", response_model=CAPAResponse, status_code=201)
 async def create_capa(
     req: CAPACreate,
@@ -83,6 +207,7 @@ async def create_capa(
         capa = await capa_service.create_capa(
             db, req.title, req.document_no, req.severity, req.due_date,
             scope.user.user_id, req.product_line_code, factory_id=factory_id,
+            supplier_id=req.supplier_id,
         )
         await validate_factory_invariant(capa, db)
     except ValueError as e:
@@ -97,10 +222,24 @@ async def get_capas_by_fmea_node(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    level = await get_user_permission(scope.user, Module.CAPA, db)
-    if level < PermissionLevel.VIEW:
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
-    capas = await capa_service.get_capas_by_fmea_node(db, fmea_id, fmea_node_id)
+
+    # FMEA visibility: never leak existence. Build a factory-scoped query; missing → 404.
+    fq = select(FMEADocument).where(FMEADocument.fmea_id == fmea_id)
+    if scope.factory_scope.accessible_factory_ids is not None:
+        fq = fq.where(FMEADocument.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+    if scope.effective_factory_id is not None:
+        fq = fq.where(FMEADocument.factory_id == scope.effective_factory_id)
+    fmea = (await db.execute(fq)).scalar_one_or_none()
+    if fmea is None:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在或不可见")
+
+    capas = await capa_service.get_capas_by_fmea_node(
+        db, fmea_id, fmea_node_id,
+        accessible_factory_ids=scope.factory_scope.accessible_factory_ids,
+        effective_factory_id=scope.effective_factory_id,
+    )
     # Filter by product line access
     if scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
         capas = [c for c in capas if c.get("product_line_code") in scope.pl_scope.codes]
@@ -119,11 +258,120 @@ async def capa_capabilities(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
-    llm_provider = getattr(request.app.state, "llm_provider", None)
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+    try:
+        pc = await provider_adapter.build_client(db)
+        ai_draft_enabled = True
+        llm_provider_name = pc.model or settings.LLM_MODEL or None
+    except ProviderNotConfiguredError:
+        ai_draft_enabled = False
+        llm_provider_name = None
     return {
-        "ai_draft_enabled": llm_provider is not None,
-        "llm_provider": getattr(llm_provider, "model", None) or settings.LLM_PROVIDER or None,
+        "ai_draft_enabled": ai_draft_enabled,
+        "llm_provider": llm_provider_name,
     }
+
+
+async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) -> CAPAResponse:
+    """Build CAPAResponse with scar / d3 lots / supplier_risk_input / supplier label projections."""
+    resp = CAPAResponse.model_validate(capa)
+    linked = None
+    if capa.scar_ref_id is not None:
+        scar = await db.get(SupplierSCAR, capa.scar_ref_id)
+        if scar is not None:
+            linked = LinkedScarSchema(
+                scar_id=scar.scar_id,
+                scar_no=scar.scar_no,
+                status=scar.status,
+                supplier_id=scar.supplier_id,
+            )
+    lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id)
+
+    supplier_no = None
+    supplier_name = None
+    if capa.supplier_id is not None:
+        from app.models.supplier import Supplier
+        sup = await db.get(Supplier, capa.supplier_id)
+        if sup is not None:
+            # Scope: only expose label if same factory (row already CAPA-scoped)
+            if sup.factory_id == capa.factory_id:
+                supplier_no = sup.supplier_no
+                supplier_name = sup.name
+
+    supplier_risk_input = None
+    from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+    from app.models.supplier_risk import SupplierRiskAlert
+
+    inp = (
+        await db.execute(
+            select(SupplierRiskCapaInput).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+        )
+    ).scalar_one_or_none()
+    if inp is not None:
+        linked_alert = None
+        if inp.linked_alert_id is not None:
+            alert = await db.get(SupplierRiskAlert, inp.linked_alert_id)
+            if alert is not None:
+                linked_alert = {
+                    "alert_id": str(alert.alert_id),
+                    "risk_level": alert.risk_level,
+                }
+            else:
+                linked_alert = {"alert_id": str(inp.linked_alert_id), "risk_level": None}
+        supplier_risk_input = SupplierRiskInputProjection(
+            input_id=inp.input_id,
+            status=inp.status,
+            repeat_suggested=inp.repeat_suggested,
+            repeat_detection_status=inp.repeat_detection_status,
+            repeat_confirmed=inp.repeat_confirmed,
+            matched_capa_nos=list(inp.matched_capa_nos or []),
+            evaluated_risk_level=inp.evaluated_risk_level,
+            evaluated_risk_score=inp.evaluated_risk_score,
+            evaluated_at=inp.evaluated_at,
+            linked_alert=linked_alert,
+        )
+
+    from app.services.capa_lateral_diffusion_service import _build_projection
+    lateral_diffusion = await _build_projection(db, capa.report_id)
+
+    return resp.model_copy(
+        update={
+            "scar_ref_id": capa.scar_ref_id,
+            "linked_scar": linked,
+            "d3_affected_lots": lots,
+            "supplier_risk_input": supplier_risk_input,
+            "supplier_no": supplier_no,
+            "supplier_name": supplier_name,
+            "lateral_diffusion": lateral_diffusion,
+        }
+    )
+
+
+def _scar_to_response(s) -> scar_schemas.SCARResponse:
+    """Map SupplierSCAR (with optional supplier relationship) to SCARResponse."""
+    return scar_schemas.SCARResponse(
+        scar_id=s.scar_id,
+        scar_no=s.scar_no,
+        supplier_id=s.supplier_id,
+        supplier_name=s.supplier.name if getattr(s, "supplier", None) else None,
+        supplier_no=s.supplier.supplier_no if getattr(s, "supplier", None) else None,
+        source_type=s.source_type,
+        source_id=s.source_id,
+        description=s.description,
+        product_line_code=s.product_line_code,
+        requested_action=s.requested_action,
+        supplier_response=s.supplier_response,
+        status=s.status,
+        capa_ref_id=s.capa_ref_id,
+        resolution_summary=s.resolution_summary,
+        issued_by=s.issued_by,
+        issued_date=s.issued_date,
+        due_date=s.due_date,
+        closed_date=s.closed_date,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
+    )
 
 
 @router.get("/{report_id}", response_model=CAPAResponse)
@@ -136,10 +384,123 @@ async def get_capa(
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
     capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
-    return CAPAResponse.model_validate(capa)
+    check_product_line_access(capa.product_line_code, scope)
+    return await _capa_response_with_projections(db, capa)
+
+
+@router.post("/{report_id}/trigger-scar", response_model=scar_schemas.SCARResponse)
+async def trigger_scar(
+    report_id: uuid.UUID,
+    body: CAPATriggerScarRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    try:
+        scar = await capa_scar_service.trigger_scar_from_capa(
+            db,
+            report_id,
+            supplier_id=body.supplier_id,
+            user_id=scope.user.user_id,
+            scope=scope,
+            description=body.description,
+            requested_action=body.requested_action,
+            due_date=body.due_date,
+            affected_batches=body.affected_batches,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _scar_to_response(scar)
+
+
+@router.post("/{report_id}/confirm-repeat", response_model=CAPAResponse)
+async def confirm_repeat(
+    report_id: uuid.UUID,
+    body: ConfirmRepeatRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Confirm/deny supplier-risk repeat flag and re-evaluate risk in one transaction."""
+    capa_level = await get_user_permission(scope.user, Module.CAPA, db)
+    if capa_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    risk_level = await get_user_permission(scope.user, Module.SUPPLIER_RISK, db)
+    if risk_level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要供应商风险模块的 EDIT 权限")
+
+    from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
+    from app.services.supplier_risk.exceptions import SupplierRiskConfigurationError
+    from app.services.supplier_risk.service import evaluate_supplier_risk_in_tx
+
+    # Lock order: capa → input (design §5.4)
+    capa = (
+        await db.execute(
+            select(CAPAEightD)
+            .where(CAPAEightD.report_id == report_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+
+    inp = (
+        await db.execute(
+            select(SupplierRiskCapaInput)
+            .where(SupplierRiskCapaInput.capa_id == report_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if inp is None:
+        raise HTTPException(status_code=404, detail="无供应商风险输入记录")
+    if inp.status != "processed":
+        raise HTTPException(status_code=409, detail="风险输入尚未处理完成，无法确认")
+    if capa.supplier_id is None or inp.supplier_id != capa.supplier_id:
+        raise HTTPException(status_code=400, detail="输入记录与 8D 供应商不一致")
+
+    old_level = inp.evaluated_risk_level
+    inp.repeat_confirmed = body.repeat_confirmed
+    try:
+        alert, _score, _results, _event_type = await evaluate_supplier_risk_in_tx(
+            db,
+            inp.supplier_id,
+            inp.product_line_code,
+            force_update=True,
+            trigger_input=inp,
+        )
+    except SupplierRiskConfigurationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    new_level = inp.evaluated_risk_level
+    alert_id = inp.linked_alert_id or (alert.alert_id if alert is not None else None)
+    db.add(
+        AuditLog(
+            table_name="capa_eightd",
+            record_id=report_id,
+            action="SUPPLIER_RISK_CHANGED",
+            operated_by=scope.user.user_id,
+            factory_id=inp.factory_id,
+            changed_fields={
+                "old_level": old_level,
+                "new_level": new_level,
+                "repeat_confirmed": body.repeat_confirmed,
+                "alert_id": str(alert_id) if alert_id else None,
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(capa)
+    return await _capa_response_with_projections(db, capa)
 
 
 @router.put("/{report_id}", response_model=CAPAResponse)
@@ -153,16 +514,35 @@ async def update_capa(
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
     update_data = req.model_dump(exclude_unset=True)
-    capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
-    return CAPAResponse.model_validate(capa)
+    # Always lock + refresh before mutating: a concurrent PL move or link can
+    # change the row's scope/invariants between the pre-check above and commit.
+    await db.execute(
+        select(CAPAEightD)
+        .where(CAPAEightD.report_id == report_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+    # Target PL must be within caller's scope too (locked state)
+    new_pl = update_data.get("product_line_code")
+    if new_pl is not None and new_pl != capa.product_line_code:
+        check_product_line_access(new_pl, scope)
+    try:
+        capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await _capa_response_with_projections(db, capa)
 
 
-async def require_close_permission(
+async def require_advance_permission(
     report_id: uuid.UUID,
+    body: AdvanceRequest | None = None,
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ) -> tuple[RequestScope, Any]:
@@ -170,27 +550,103 @@ async def require_close_permission(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
-    if capa.status in ["D7_PREVENTION", "D8_CLOSURE"]:
+    # P1 TOCTOU：锁 capa 行 FOR UPDATE + 刷新状态，再做边权限校验，确保授权与状态迁移基于
+    # 同一份锁定状态。否则「锁前按 D8_GATE_PENDING 判 EDIT 放行 → 并发推进到 D8_APPROVAL_PENDING
+    # → 锁后 (D8_APPROVAL_PENDING→D8_CLOSURE) 变合法 APPROVE 边」会让 EDIT 用户越权完成审批。
+    # 锁在同一请求 session 上持有至 advance_capa（后者再锁为 no-op，并保护绕过依赖的直接调用方）。
+    await db.execute(
+        select(CAPAEightD).where(CAPAEightD.report_id == report_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    target = body.target_state if body else None
+    # target_state=None（线性 advance）时算出实际 target，否则归档边 (D8_CLOSURE→ARCHIVED)
+    # 因 target=None 不命中 approve_edges，会误落 EDIT 分支放行 field_qe 归档。
+    target = target or _linear_next_safe(capa.status)
+    # APPROVE 边：审批 / 驳回 / 归档（capa.status 此时为锁后刷新值，与 advance_capa 迁移同一状态）
+    approve_edges = (
+        (EightDState.D8_APPROVAL_PENDING.value, EightDState.D8_CLOSURE.value),
+        (EightDState.D8_APPROVAL_PENDING.value, EightDState.D7_PREVENTION.value),
+        (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value),
+    )
+    if (capa.status, target.value if target else None) in approve_edges:
         level = await get_user_permission(scope.user, Module.CAPA, db)
         if level < PermissionLevel.APPROVE:
             raise HTTPException(status_code=403, detail="审批权限不足")
+    else:
+        level = await get_user_permission(scope.user, Module.CAPA, db)
+        if level < PermissionLevel.EDIT:
+            raise HTTPException(status_code=403, detail="编辑权限不足")
     return scope, capa
 
 
-@router.post("/{report_id}/advance", response_model=CAPAResponse)
+@router.post("/{report_id}/advance", response_model=CAPAAdvanceResponse)
 async def advance_capa(
     report_id: uuid.UUID,
     body: AdvanceRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    result: tuple[RequestScope, Any] = Depends(require_close_permission),
+    result: tuple[RequestScope, Any] = Depends(require_advance_permission),
 ):
+    from app.services.knowledge_sink_service import (
+        KnowledgeSinkBlockedError,
+        KnowledgeSinkFailedError,
+    )
+    from app.services.capa_lateral_diffusion_service import (
+        LateralBlockedError,
+        LateralFailedError,
+    )
+
     scope, capa = result
-    skip_reasons = body.d7_skip_reasons if body else None
+    from_status = capa.status
     try:
-        capa = await capa_service.advance_capa(db, capa, scope.user.user_id, skip_reasons)
+        capa = await capa_service.advance_capa(
+            db, capa, scope.user.user_id, body or AdvanceRequest()
+        )
+    except KnowledgeSinkBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "blocked",
+                "reason": "llm_unavailable",
+                "message": str(e),
+            },
+        )
+    except KnowledgeSinkFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "failed",
+                "reason": "llm_failed",
+                "message": str(e),
+            },
+        )
+    except LateralBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "blocked",
+                "stage": "lateral_diffusion",
+                "message": str(e),
+            },
+        )
+    except LateralFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "failed",
+                "stage": "lateral_diffusion",
+                "message": str(e),
+            },
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return CAPAResponse.model_validate(capa)
+    await db.commit()
+    warning = None
+    if from_status == EightDState.D4_ROOT_CAUSE.value and (capa.d4_retry_count or 0) >= D4_RETRY_THRESHOLD:
+        warning = "建议升级处理（D4 验证已回退 {} 次）".format(capa.d4_retry_count)
+    return CAPAAdvanceResponse(
+        capa=await _capa_response_with_projections(db, capa),
+        warning=warning,
+    )
 
 
 @router.post("/{report_id}/link-fmea", response_model=CAPAResponse)
@@ -209,16 +665,14 @@ async def link_fmea(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
-
-    # Validate target FMEA exists and user can access its factory
-    target_fmea = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
-    target_fmea = target_fmea.scalar_one_or_none()
-    if target_fmea is None:
+    check_product_line_access(capa.product_line_code, scope)
+    try:
+        capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
+    except LookupError:
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
-    check_factory_access(target_fmea.factory_id, scope)
-
-    capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
-    return CAPAResponse.model_validate(capa)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return await _capa_response_with_projections(db, capa)
 
 
 @router.get("/{report_id}/related-fmea")
@@ -371,9 +825,15 @@ async def get_d4_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = request.app.state.llm_provider
     embedding_provider = request.app.state.embedding_provider
-    pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+    try:
+        pc = await provider_adapter.build_client(db)
+    except ProviderNotConfiguredError:
+        pc = None
+    llm_timeout = getattr(request.app.state, "llm_timeout", None)
+    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider, llm_timeout=llm_timeout)
 
     context = RecommendationContext(
         capa_data={
@@ -382,15 +842,33 @@ async def get_d4_fmea_recommendations(
             "fmea_ref_id": capa.fmea_ref_id,
             "fmea_node_id": capa.fmea_node_id,
             "product_line_code": capa.product_line_code,
+            "report_id": capa.report_id,
         },
         user_product_lines=allowed_pls,
         stage="d4",
+        factory_id=capa.factory_id,   # R13-修复：源查询按 factory_id 隔离
         fmea_docs=fmea_docs,
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(context)
-    return {"items": [c.to_d4_schema() for c in result.items]}
+    result = await pipeline.recommend(
+        context,
+        user=scope.user,
+        report_id=report_id,
+        factory_id=capa.factory_id,
+        tenant_schema=tenant_schema(request),
+    )
+    await db.commit()
+    if result.blocked:
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "reason": "LLM credentials not configured",
+                    "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages]},
+        )
+    return {
+        "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages],
+        "items": [c.to_d4_schema() for c in result.items],
+    }
 
 
 @router.get("/{report_id}/d5-fmea-recommendations", response_model=D5RecommendationResponse)
@@ -442,9 +920,15 @@ async def get_d5_fmea_recommendations(
                 linked_fmea = doc
                 break
 
-    llm_provider = request.app.state.llm_provider
     embedding_provider = request.app.state.embedding_provider
-    pipeline = HybridRecommendationPipeline(db, llm_provider, embedding_provider)
+    from app.services.agent import provider_adapter
+    from app.services.agent.provider_adapter import ProviderNotConfiguredError
+    try:
+        pc = await provider_adapter.build_client(db)
+    except ProviderNotConfiguredError:
+        pc = None
+    llm_timeout = getattr(request.app.state, "llm_timeout", None)
+    pipeline = HybridRecommendationPipeline(db, pc, embedding_provider, llm_timeout=llm_timeout)
 
     context = RecommendationContext(
         capa_data={
@@ -453,14 +937,29 @@ async def get_d5_fmea_recommendations(
             "fmea_ref_id": capa.fmea_ref_id,
             "fmea_node_id": capa.fmea_node_id,
             "product_line_code": capa.product_line_code,
+            "report_id": capa.report_id,
         },
         user_product_lines=allowed_pls,
         stage="d5",
+        factory_id=capa.factory_id,   # R13-修复：源查询按 factory_id 隔离
         fmea_docs=fmea_docs,
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(context)
+    result = await pipeline.recommend(
+        context,
+        user=scope.user,
+        report_id=report_id,
+        factory_id=capa.factory_id,
+        tenant_schema=tenant_schema(request),
+    )
+    await db.commit()
+    if result.blocked:
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "reason": "LLM credentials not configured",
+                    "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages]},
+        )
 
     existing_controls = []
     general_suggestions = []
@@ -472,6 +971,7 @@ async def get_d5_fmea_recommendations(
             general_suggestions.append(c.to_d5_suggestion_schema())
 
     return {
+        "stages": [StageRunSchema(**s.__dict__).model_dump() for s in result.stages],
         "existing_controls": existing_controls,
         "general_suggestions": general_suggestions,
     }
@@ -505,6 +1005,10 @@ async def draft_capabilities(
         "D6_VERIFICATION": ["d6"],
         "D7_PREVENTION": ["d7"],
         "D8_CLOSURE": ["d8"],
+        # 新壳状态：无可用编辑步骤（D7 已冻结、D8 待审批冻结）
+        "D7_COMPLETED": [],
+        "D8_GATE_PENDING": [],
+        "D8_APPROVAL_PENDING": [],
     }
 
     return {
@@ -561,3 +1065,1291 @@ async def get_capa_lessons(
     )
     await db.commit()
     return result
+
+
+@router.post("/{report_id}/adopt-recommendation", response_model=AdoptResponse)
+async def adopt_recommendation_ep(
+    report_id: uuid.UUID, req: AdoptRequest,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
+    return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
+
+
+@router.post("/{report_id}/root-cause-verifications", response_model=VerificationResponse)
+async def create_verification_ep(
+    report_id: uuid.UUID, req: VerificationCreate,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    try:
+        rec = await capa_verification_service.create_verification(db, capa, req, scope.user)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return VerificationResponse.model_validate(rec)
+
+
+@router.get("/{report_id}/root-cause-verifications", response_model=list[VerificationResponse])
+async def list_verifications_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    items = await capa_verification_service.list_verifications(db, capa)
+    return [VerificationResponse.model_validate(i) for i in items]
+
+
+@router.patch("/{report_id}/root-cause-verifications/{vid}", response_model=VerificationResponse)
+async def update_verification_ep(
+    report_id: uuid.UUID, vid: uuid.UUID, req: VerificationUpdate,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    try:
+        rec = await capa_verification_service.update_verification(db, capa, vid, req, scope.user)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="verification not found")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return VerificationResponse.model_validate(rec)
+
+
+@router.post("/{report_id}/d7-node-actions", response_model=D7NodeActionResponse)
+async def d7_record_action_ep(
+    report_id: uuid.UUID, req: D7NodeActionCreate,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    try:
+        rec = await capa_d7_action_service.record_d7_action(db, capa, req, scope.user)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="目标 FMEA 跨工厂")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return D7NodeActionResponse.model_validate(rec)
+
+
+@router.get("/{report_id}/d7-node-actions", response_model=list[D7NodeActionResponse])
+async def d7_list_actions_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    # D7 action 行含 fmea_id/node_id/control 状态，属 FMEA 衍生数据——读也要 FMEA VIEW（与 POST 对齐，防 CAPA-only 用户绕过 FMEA 权限读 D7 元数据）
+    if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    items = await capa_d7_action_service.list_d7_actions(db, capa)
+    return [D7NodeActionResponse.model_validate(i) for i in items]
+
+
+@router.post("/{report_id}/d7-auto-fill", response_model=D7AutoFillResponse)
+async def d7_auto_fill_ep(
+    report_id: uuid.UUID, req: D7AutoFillRequest,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    try:
+        rec, info = await capa_d7_action_service.auto_fill_d7(db, capa, req, scope.user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except LookupError:
+        raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="目标 FMEA 跨工厂")
+    except ConflictError:
+        raise HTTPException(status_code=409, detail="已自动回填")
+    return D7AutoFillResponse(action_id=rec.action_id,
+                              prevention_control_node_id=info["prevention_control_node_id"],
+                              prevention_control_name_after=info["prevention_control_name_after"],
+                              is_new_control=info["is_new_control"])
+
+
+@router.post("/{report_id}/sink-knowledge")
+async def sink_knowledge(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Manual knowledge resink for closed CAPA (D8_CLOSURE / ARCHIVED)."""
+    from app.services.knowledge_sink_service import (
+        KnowledgeSinkBlockedError,
+        KnowledgeSinkFailedError,
+        sink_capa_on_close,
+    )
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_factory_access(capa.factory_id, scope)
+    check_product_line_access(capa.product_line_code, scope)
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    if capa.status not in (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value):
+        raise HTTPException(
+            status_code=400,
+            detail="仅 D8_CLOSURE / ARCHIVED 状态可手动重沉淀",
+        )
+    try:
+        entry = await sink_capa_on_close(db, capa, scope.user.user_id, manual=True)
+        await db.commit()
+    except KnowledgeSinkBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "blocked",
+                "reason": "llm_unavailable",
+                "message": str(e),
+            },
+        )
+    except KnowledgeSinkFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "outcome": "failed",
+                "reason": "llm_failed",
+                "message": str(e),
+            },
+        )
+    return {
+        "entry_id": str(entry.entry_id),
+        "source_type": entry.source_type,
+        "source_id": str(entry.source_id),
+        "document_no": entry.document_no,
+        "title": entry.title,
+        "embedding_status": entry.embedding_status,
+        "content_hash": entry.content_hash,
+        "llm_status": entry.llm_status,
+    }
+
+
+@router.post("/{report_id}/ppt-export")
+async def export_ppt(
+    report_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(404, "CAPA 不存在")
+    check_factory_access(capa.factory_id, scope)
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.CREATE:  # engineer+（L2=CREATE，seed quality_engineer capa=2）
+        raise HTTPException(403, "生成权限不足（需 engineer+）")
+    if capa.status not in (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value):
+        raise HTTPException(400, "8D 未关闭，不可生成 PPT")
+
+    # 预生成 export 元数据
+    export_id = uuid.uuid4()
+    generated_at = datetime.now(UTC)
+    version = generated_at.strftime("%Y%m%dT%H%M%SZ")
+    tenant = tenant_schema(request)
+
+    # 解析 LLM provider client（None = 未配置）
+    try:
+        pc = await provider_adapter.build_client(db)
+    except provider_adapter.ProviderNotConfiguredError:
+        pc = None
+
+    # 审查闭环 + 渲染：审查闭环异常（非 LLM 缺失）/ 渲染失败均属故事 §92 FAILED 条件 → 500，不落 export
+    try:
+        content, review = await capa_ppt_review_service.review_and_correct(
+            db, report_id, pc, tenant,
+        )
+        # 最终渲染一次（审查后 review_status 已知）
+        meta = capa_ppt_service.ExportMeta(
+            export_id=export_id, version=version,
+            generated_at=generated_at, generated_by=scope.user.user_id,
+        )
+        pptx_bytes = capa_ppt_service.render_pptx(content, meta, review.status, review.rounds)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception:
+        raise HTTPException(500, "PPT 生成失败（审查闭环异常或渲染失败）")
+
+    # 写 capa_ppt_export + PPT_GENERATED 审计
+    export = CapaPptExport(
+        export_id=export_id, capa_id=report_id, factory_id=capa.factory_id,
+        tenant_schema=tenant, generated_at=generated_at, generated_by=scope.user.user_id,
+        version=version, file_url=None,
+        review_status=review.status, review_rounds=review.rounds, review_report=review.report,
+    )
+    db.add(export)
+    db.add(AuditLog(
+        table_name="capa_eightd", record_id=report_id, action="PPT_GENERATED",
+        changed_fields={"export_id": str(export_id), "version": version,
+                        "review_status": review.status, "review_rounds": review.rounds},
+        operated_by=scope.user.user_id, factory_id=capa.factory_id, tenant_schema=tenant,
+    ))
+    await db.commit()
+
+    headers = {
+        "X-PPT-Review-Status": review.status,
+        "X-PPT-Review-Rounds": str(review.rounds),
+        "X-PPT-Export-Id": str(export_id),
+    }
+    return pptx_response(pptx_bytes, f"8D_{capa.document_no}_{version}.pptx", headers)
+
+
+@router.get("/{report_id}/ppt-exports/{export_id}", response_model=PptExportDetailResponse)
+async def get_ppt_export(
+    report_id: uuid.UUID,
+    export_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(404, "CAPA 不存在")
+    check_factory_access(capa.factory_id, scope)
+    export = await capa_ppt_service.get_export(db, export_id, report_id)
+    if export is None:
+        raise HTTPException(404, "PPT 生成记录不存在")
+    return PptExportDetailResponse(
+        export_id=str(export.export_id), capa_id=str(export.capa_id),
+        generated_at=export.generated_at, generated_by=str(export.generated_by),
+        version=export.version, review_status=export.review_status,
+        review_rounds=export.review_rounds, review_report=export.review_report,
+    )
+
+
+# ===== D3 Containment endpoints (US-E2E-01.1 Task 6) =====
+
+
+def _d3_check_scope(entity, scope: RequestScope):
+    """Wrap factory/product-line checks to raise 404 (information hiding)."""
+    try:
+        check_factory_access(entity.factory_id, scope)
+        check_product_line_access(getattr(entity, "product_line_code", None), scope)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="8D report not found")
+
+
+def _assert_d3_stage(capa: CAPAEightD):
+    if capa.status != EightDState.D3_INTERIM.value:
+        raise HTTPException(status_code=400, detail="仅 D3 阶段可操作")
+
+
+@router.post("/{report_id}/d3/import", response_model=D3ImportResponse)
+async def d3_import_ep(
+    report_id: uuid.UUID, req: D3ImportRequest,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+    try:
+        result = await capa_d3_containment_service.import_containment_data(
+            db, capa.report_id, scope.user, req.model_dump()
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return D3ImportResponse(**result)
+
+
+@router.get("/{report_id}/d3/runs", response_model=list[D3RunResponse])
+async def d3_list_runs_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    result = await db.execute(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id)
+        .order_by(CapaD3ImportRun.created_at)
+    )
+    return [D3RunResponse.model_validate(r) for r in result.scalars().all()]
+
+
+async def _resolve_d3_run(
+    db: AsyncSession, capa_id: uuid.UUID, run_id: uuid.UUID | None
+) -> CapaD3ImportRun | None:
+    """Resolve the run to query: if run_id given, that specific run (must belong to capa);
+    else the current run. Returns None if not found."""
+    if run_id is not None:
+        return await db.scalar(
+            select(CapaD3ImportRun).where(
+                CapaD3ImportRun.run_id == run_id,
+                CapaD3ImportRun.capa_id == capa_id,
+            )
+        )
+    return await db.scalar(
+        select(CapaD3ImportRun).where(
+            CapaD3ImportRun.capa_id == capa_id, CapaD3ImportRun.is_current == True
+        )
+    )
+
+
+@router.get("/{report_id}/d3/snapshots", response_model=list[D3SnapshotResponse])
+async def d3_list_snapshots_ep(
+    report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
+        return []
+    result = await db.execute(
+        select(CapaD3ContainmentSnapshot)
+        .where(CapaD3ContainmentSnapshot.run_id == target_run.run_id)
+        .order_by(CapaD3ContainmentSnapshot.created_at)
+    )
+    return [D3SnapshotResponse.model_validate(s) for s in result.scalars().all()]
+
+
+@router.get("/{report_id}/d3/report", response_model=D3ReportResponse)
+async def d3_get_report_ep(
+    report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
+        raise HTTPException(status_code=404, detail="当前导入运行不存在")
+    # Spec §7: GET returns the "当前代报告" = the is_current=true report (what the
+    # D3→D4 gate also reads). A failed/superseded retry does NOT switch current
+    # (spec §4.3), so the still-valid current report stays visible. When no current
+    # exists yet (first attempt failed before any success), fall back to the latest
+    # attempt so the UI can surface the failure + retry.
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == target_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    latest_attempt = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(CapaD3ImpactReport.run_id == target_run.run_id)
+        .order_by(CapaD3ImpactReport.created_at.desc())
+        .limit(1)
+    )
+    report = current_report or latest_attempt
+    if report is None:
+        raise HTTPException(status_code=404, detail="D3 影响报告不存在")
+    resp = D3ReportResponse.model_validate(report)
+    # If the current (valid) report differs from the newest attempt and that
+    # newest attempt failed/superseded, surface it so the UI shows a retry banner
+    # without hiding the still-valid current data.
+    if (
+        current_report is not None
+        and latest_attempt is not None
+        and latest_attempt.report_id != current_report.report_id
+        and latest_attempt.status in ("failed", "superseded")
+    ):
+        resp.latest_attempt_status = latest_attempt.status
+        resp.latest_attempt_error = latest_attempt.error
+    return resp
+
+
+@router.post("/{report_id}/d3/report")
+async def d3_generate_report_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    current_run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
+    )
+    if current_run is None:
+        raise HTTPException(status_code=400, detail="需先导入遏制数据")
+
+    # 1. Already running -> 202
+    running_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.status == "running",
+        )
+    )
+    if running_report is not None:
+        retry_after = capa_d3_containment_service.RETRY_AFTER_SECONDS
+        return JSONResponse(
+            status_code=202,
+            content={"report_id": str(running_report.report_id), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # 2. POST = manual regeneration (per spec §7: "手动重生成当前 run 报告（重试）").
+    #    Any existing done/failed/superseded report is demoted (is_current=false) by the
+    #    service's 4-step promotion when the new report succeeds. Running → 202 (above).
+    #    No early-return of the existing done report.
+    result = await capa_d3_containment_service.generate_impact_report(
+        db, current_run.run_id, scope.user
+    )
+    if result["status"] == "blocked":
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "message": "LLM 凭证未配置，报告生成被阻断"},
+        )
+    if result["status"] == "running":
+        retry_after = result.get("retry_after", capa_d3_containment_service.RETRY_AFTER_SECONDS)
+        return JSONResponse(
+            status_code=202,
+            content={"report_id": str(result["report_id"]), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # done / failed / superseded -> return the report row
+    report_id_out = result.get("report_id")
+    if report_id_out:
+        report = await db.get(CapaD3ImpactReport, uuid.UUID(report_id_out))
+    else:
+        report = await db.scalar(
+            select(CapaD3ImpactReport)
+            .where(CapaD3ImpactReport.run_id == current_run.run_id)
+            .order_by(CapaD3ImpactReport.created_at.desc())
+            .limit(1)
+        )
+    if report is None:
+        raise HTTPException(status_code=404, detail="D3 影响报告不存在")
+    return D3ReportResponse.model_validate(report)
+"""D3 Advice endpoint implementation to append to capa.py"""
+
+# ===== D3 Advice endpoints (US-E2E-01.1 Task 8) =====
+
+
+@router.post("/{report_id}/d3/advice")
+async def d3_generate_advice_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /d3/advice: Generate AI advice for a CAPA's current impact report."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    # Find current run -> current report
+    current_run = await db.scalar(
+        select(CapaD3ImportRun)
+        .where(CapaD3ImportRun.capa_id == report_id, CapaD3ImportRun.is_current == True)
+    )
+    if current_run is None:
+        raise HTTPException(status_code=400, detail="需先导入遏制数据")
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == current_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        raise HTTPException(status_code=400, detail="需先生成影响报告")
+
+    # 1. Already running -> 202
+    running_gen = await db.scalar(
+        select(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.status == "running",
+        )
+    )
+    if running_gen is not None:
+        retry_after = capa_d3_containment_service.RETRY_AFTER_SECONDS
+        return JSONResponse(
+            status_code=202,
+            content={"generation_id": str(running_gen.generation_id), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # 2. POST = manual regeneration (per spec §7: "手动重生成当前 run 建议（重试）").
+    #    Any existing done/failed generation is demoted by the service's 5-step
+    #    promotion when the new generation succeeds. Running → 202 (above).
+    #    No early-return of the existing done generation.
+    result = await capa_d3_containment_service.generate_advice(
+        db, capa.report_id, current_report.report_id, scope.user, None
+    )
+    if result["status"] == "blocked":
+        raise HTTPException(
+            status_code=422,
+            detail={"blocked": True, "message": "LLM 凭证未配置，建议生成被阻断"},
+        )
+    if result["status"] == "running":
+        retry_after = result.get("retry_after", capa_d3_containment_service.RETRY_AFTER_SECONDS)
+        return JSONResponse(
+            status_code=202,
+            content={"generation_id": str(result["generation_id"]), "status": "running"},
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # done / failed -> return advice list (done) or failed status
+    gen_id = result.get("generation_id")
+    if gen_id:
+        gen = await db.get(CapaD3AdviceGeneration, uuid.UUID(str(gen_id)))
+        if gen and gen.status == "done":
+            return await _build_advice_response(db, gen)
+        if gen and gen.status == "failed":
+            return D3AdviceResponse(advice=[], status="failed", error=gen.error)
+
+    # failed generation without a retrievable gen row
+    return D3AdviceResponse(advice=[], status="failed", error=result.get("error"))
+
+
+@router.get("/{report_id}/d3/advice", response_model=D3AdviceResponse)
+async def d3_get_advice_ep(
+    report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /d3/advice: Return current generation's advice list with provenance and adoption status.
+    Optional run_id queries a specific (historical) run's report/generation."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
+        return D3AdviceResponse(advice=[])
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport)
+        .where(
+            CapaD3ImpactReport.run_id == target_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        return D3AdviceResponse(advice=[])
+
+    # Spec §7: GET returns the "当前 advice generation" = the is_current=true
+    # generation (what the D3→D4 gate also reads). A failed retry does NOT switch
+    # current (spec §4.4), so the still-valid current advice stays visible. When no
+    # current exists yet (first attempt failed before any success), fall back to the
+    # latest attempt so the UI can surface the failure + retry.
+    current_gen = await db.scalar(
+        select(CapaD3AdviceGeneration)
+        .where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+    latest_gen = await db.scalar(
+        select(CapaD3AdviceGeneration)
+        .where(CapaD3AdviceGeneration.report_id == current_report.report_id)
+        .order_by(CapaD3AdviceGeneration.created_at.desc())
+        .limit(1)
+    )
+    gen = current_gen or latest_gen
+    if gen is None:
+        return D3AdviceResponse(advice=[])
+
+    resp = await _build_advice_response(db, gen)
+    # If the current (valid) generation differs from the newest attempt and that
+    # newest attempt failed, surface it so the UI shows a retry banner without
+    # hiding the still-valid current advice.
+    if (
+        current_gen is not None
+        and latest_gen is not None
+        and latest_gen.generation_id != current_gen.generation_id
+        and latest_gen.status == "failed"
+    ):
+        resp.latest_attempt_status = "failed"
+        resp.latest_attempt_error = latest_gen.error
+    return resp
+
+
+async def _build_advice_response(db: AsyncSession, gen: CapaD3AdviceGeneration) -> D3AdviceResponse:
+    """Build D3AdviceResponse from a current advice generation."""
+    advice_rows = (
+        await db.execute(
+            select(CapaD3AiAdvice).where(
+                CapaD3AiAdvice.generation_id == gen.generation_id
+            )
+        )
+    ).scalars().all()
+
+    # Fetch adoption status for each advice
+    advice_ids = [a.advice_id for a in advice_rows]
+    adoptions = {}
+    if advice_ids:
+        adoption_rows = (
+            await db.execute(
+                select(CapaD3AdviceAdoption).where(
+                    CapaD3AdviceAdoption.advice_id.in_(advice_ids)
+                )
+            )
+        ).scalars().all()
+        for ad in adoption_rows:
+            adoptions[ad.advice_id] = ad.decision
+
+    items = []
+    for a in advice_rows:
+        provenance = [
+            ProvenanceEntry(
+                source_type=p["source_type"],
+                snapshot_id=uuid.UUID(p["snapshot_id"]) if p.get("snapshot_id") else None,
+                record_key=p["record_key"],
+                stage=p.get("stage", "llm_advice"),
+            )
+            for p in (a.source_provenance or [])
+        ]
+        items.append(
+            D3AdviceItem(
+                advice_id=a.advice_id,
+                advice_type=a.advice_type,
+                advice_text=a.advice_text,
+                source_provenance=provenance,
+                target_batch_refs=a.target_batch_refs,
+                adoption_status=adoptions.get(a.advice_id),
+            )
+        )
+
+    return D3AdviceResponse(
+        advice=items,
+        status=gen.status if gen.status in ("done", "failed") else "done",
+        error=gen.error if gen.status == "failed" else None,
+    )
+
+
+# ===== D3 Advice Adoption endpoints (US-E2E-01.1 Task 9) =====
+
+
+@router.post("/{report_id}/d3/advice/{advice_id}/decision")
+async def d3_decision_advice_ep(
+    report_id: uuid.UUID,
+    advice_id: uuid.UUID,
+    req: D3DecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /d3/advice/{advice_id}/decision: Adopt or reject an advice item."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    try:
+        result = await capa_d3_containment_service.adopt_advice(
+            db, report_id, advice_id, req.decision, req.adopted_text, scope.user
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        # CHECK constraint: rejected requires NULL adopted_text
+        raise HTTPException(
+            status_code=400, detail="rejected decision requires adopted_text to be null"
+        )
+
+    await db.commit()
+    return {"adoption_id": result["adoption_id"]}
+
+
+@router.get("/{report_id}/d3/adoptions", response_model=list[D3AdoptionResponse])
+async def d3_list_adoptions_ep(
+    report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /d3/adoptions: Return list of adoptions for the selected run's generation."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
+        return []
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == target_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        return []
+
+    current_gen = await db.scalar(
+        select(CapaD3AdviceGeneration).where(
+            CapaD3AdviceGeneration.report_id == current_report.report_id,
+            CapaD3AdviceGeneration.is_current == True,
+        )
+    )
+    if current_gen is None:
+        return []
+
+    # Get advice IDs for this generation
+    advice_rows = (
+        await db.execute(
+            select(CapaD3AiAdvice.advice_id).where(
+                CapaD3AiAdvice.generation_id == current_gen.generation_id
+            )
+        )
+    ).scalars().all()
+
+    if not advice_rows:
+        return []
+
+    # Get adoptions for these advice IDs
+    adoptions = (
+        await db.execute(
+            select(CapaD3AdviceAdoption).where(
+                CapaD3AdviceAdoption.advice_id.in_(advice_rows)
+            )
+        )
+    ).scalars().all()
+
+    return [D3AdoptionResponse.model_validate(a) for a in adoptions]
+
+
+# ===== D3 Execution endpoints (US-E2E-01.1 Task 10) =====
+
+
+@router.post("/{report_id}/d3/execution")
+async def d3_record_execution_ep(
+    report_id: uuid.UUID,
+    req: D3ExecutionRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /d3/execution: Record a containment execution.
+
+    Note: Uses report_id as both CAPA ID and URL parameter.
+    """
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    _assert_d3_stage(capa)
+
+    try:
+        # Find current report
+        current_run = await db.scalar(
+            select(CapaD3ImportRun).where(
+                CapaD3ImportRun.capa_id == capa.report_id, CapaD3ImportRun.is_current == True
+            )
+        )
+        if current_run is None:
+            raise HTTPException(status_code=400, detail="需先导入遏制数据")
+
+        current_report = await db.scalar(
+            select(CapaD3ImpactReport).where(
+                CapaD3ImpactReport.run_id == current_run.run_id,
+                CapaD3ImpactReport.is_current == True,
+            )
+        )
+        if current_report is None:
+            raise HTTPException(status_code=400, detail="需先生成影响报告")
+
+        # First param is capa_id, second is report_id
+        result = await capa_d3_containment_service.record_execution(
+            db, capa.report_id, current_report.report_id, scope.user, req.model_dump()
+        )
+        # Re-fetch to get full data
+        execution = await db.get(CapaD3Execution, uuid.UUID(result["execution_id"]))
+        await db.commit()
+        return D3ExecutionResponse.model_validate(execution)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.patch("/{report_id}/d3/execution/{execution_id}")
+async def d3_update_execution_ep(
+    report_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    req: D3ExecutionUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """PATCH /d3/execution/{id}: Update execution status/text/evidence."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    try:
+        result = await capa_d3_containment_service.update_execution(
+            db, report_id, execution_id, scope.user, req.model_dump(exclude_unset=True)
+        )
+        await db.commit()
+        execution = await db.get(CapaD3Execution, execution_id)
+        return D3ExecutionResponse.model_validate(execution)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+@router.get("/{report_id}/d3/executions", response_model=list[D3ExecutionResponse])
+async def d3_list_executions_ep(
+    report_id: uuid.UUID,
+    run_id: uuid.UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /d3/executions: List executions for current report.
+    Optional run_id queries a specific (historical) run's report executions."""
+    if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+
+    target_run = await _resolve_d3_run(db, report_id, run_id)
+    if target_run is None:
+        return []
+
+    current_report = await db.scalar(
+        select(CapaD3ImpactReport).where(
+            CapaD3ImpactReport.run_id == target_run.run_id,
+            CapaD3ImpactReport.is_current == True,
+        )
+    )
+    if current_report is None:
+        return []
+
+    executions = (
+        await db.execute(
+            select(CapaD3Execution)
+            .where(CapaD3Execution.report_id == current_report.report_id)
+            .order_by(CapaD3Execution.created_at)
+        )
+    ).scalars().all()
+
+    return [D3ExecutionResponse.model_validate(e) for e in executions]
+
+
+# ===== D8 Doc Update Gate endpoints (US-E2E-01.7 Task 5) =====
+
+
+def _assert_d8_gate_stage(capa: CAPAEightD):
+    if capa.status != EightDState.D8_GATE_PENDING.value:
+        raise HTTPException(status_code=400, detail="仅 D8_GATE_PENDING 阶段可操作")
+
+
+async def _load_capa_for_doc_gate(
+    report_id: uuid.UUID, db: AsyncSession, scope: RequestScope, min_level: PermissionLevel
+) -> CAPAEightD:
+    if await get_user_permission(scope.user, Module.CAPA, db) < min_level:
+        raise HTTPException(
+            status_code=403,
+            detail=f"需要 capa 模块的 {min_level.name} 权限",
+        )
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    _d3_check_scope(capa, scope)
+    return capa
+
+
+@router.post("/{report_id}/doc-gate/impact")
+async def doc_gate_impact_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/impact: generate LLM impact analysis (explicit, not in advance)."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.generate_impact_analysis(
+            db, capa, scope.user.user_id
+        )
+    except ValueError as e:
+        if "BLOCKED" in str(e):
+            raise HTTPException(
+                status_code=422, detail={"blocked": True, "message": str(e)}
+            )
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.get("/{report_id}/doc-gate/impact")
+async def doc_gate_get_impact_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /doc-gate/impact: latest analysis (incl failed)."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
+    result = await capa_doc_gate_service.get_latest_analysis(db, capa)
+    if result is None:
+        raise HTTPException(status_code=404, detail="尚未生成影响分析")
+    return result
+
+
+@router.post("/{report_id}/doc-gate/audit")
+async def doc_gate_audit_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/audit: run version-diff + key-point coverage audit."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Serialize UUID fields for JSON
+    for a in result.get("audits", []):
+        if "doc_id" in a and a["doc_id"] is not None:
+            a["doc_id"] = str(a["doc_id"])
+    return result
+
+
+@router.get("/{report_id}/doc-gate/audit")
+async def doc_gate_get_audit_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /doc-gate/audit: latest audit_run rows for current analysis."""
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit
+
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,
+        )
+    )
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="尚未生成影响分析")
+    # Latest audit_run_id by audited_at
+    latest_run = await db.scalar(
+        select(CapaDocgAudit.audit_run_id)
+        .where(CapaDocgAudit.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgAudit.audited_at.desc())
+        .limit(1)
+    )
+    if latest_run is None:
+        return {"audit_run_id": None, "audits": []}
+    rows = (
+        await db.execute(
+            select(CapaDocgAudit).where(
+                CapaDocgAudit.analysis_id == analysis.analysis_id,
+                CapaDocgAudit.audit_run_id == latest_run,
+            )
+        )
+    ).scalars().all()
+    return {
+        "audit_run_id": str(latest_run),
+        "audits": [
+            {
+                "doc_type": r.doc_type,
+                "doc_id": str(r.doc_id),
+                "doc_name": r.doc_name,
+                "status": r.status,
+                "version_bump": r.version_bump,
+                "covered_count": r.covered_count,
+                "total_count": r.total_count,
+                "coverage": r.coverage,
+                "version_before": r.version_before,
+                "version_after": r.version_after,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.post("/{report_id}/doc-gate/defer")
+async def doc_gate_defer_ep(
+    report_id: uuid.UUID,
+    body: DeferRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/defer: record deferred decision (still blocks gate)."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        owner_id = uuid.UUID(body.owner_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="owner_id 非法")
+    try:
+        result = await capa_doc_gate_service.record_defer(
+            db, capa, body.reason, owner_id, body.deadline, scope.user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.post("/{report_id}/doc-gate/confirm-no-affected")
+async def doc_gate_confirm_no_affected_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/confirm-no-affected: engineer confirms empty affected_docs."""
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.confirm_no_affected(
+            db, capa, scope.user.user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.get("/{report_id}/doc-gate/decision", response_model=DocGateDecisionResponse)
+async def doc_gate_get_decision_ep(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """GET /doc-gate/decision: latest decision for current analysis."""
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,
+        )
+    )
+    if analysis is None:
+        return DocGateDecisionResponse(decision=None)
+    dec = await db.scalar(
+        select(CapaDocgDecision)
+        .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
+        .order_by(CapaDocgDecision.revision.desc(), CapaDocgDecision.decided_at.desc())
+        .limit(1)
+    )
+    if dec is None:
+        return DocGateDecisionResponse(decision=None)
+    return DocGateDecisionResponse(
+        decision=dec.decision,
+        no_affected_confirmed=dec.no_affected_confirmed,
+        version_snapshot=dec.version_snapshot or [],
+        revision=dec.revision,
+        defer_reason=dec.defer_reason,
+        defer_owner=str(dec.defer_owner) if dec.defer_owner else None,
+        defer_deadline=str(dec.defer_deadline) if dec.defer_deadline else None,
+        waiver_reason=dec.waiver_reason,
+        waiver_items=dec.waiver_items,
+        decided_at=dec.decided_at.isoformat() if dec.decided_at else None,
+    )
+
+
+@router.post("/{report_id}/doc-gate/waiver")
+async def doc_gate_waiver_ep(
+    report_id: uuid.UUID,
+    body: WaiverRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """POST /doc-gate/waiver: manager-authorized structured waiver for blocked_modify.
+
+    Only waives exact CP modify keypoints that the latest blocked audit left
+    uncovered AND that are still absent from the live latest CP version. Other
+    docs remain under C8. Requires APPROVE. Audited via DOC_GATE_WAIVER.
+    """
+    capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.APPROVE)
+    _assert_d8_gate_stage(capa)
+    try:
+        result = await capa_doc_gate_service.record_gate_waiver(
+            db,
+            capa,
+            body.reason,
+            [item.model_dump() for item in body.items],
+            scope.user.user_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+
+@router.post("/{report_id}/lateral-diffusion/decide")
+async def decide_lateral_route(
+    report_id: uuid.UUID,
+    req: LateralDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    from app.schemas.capa_lateral_diffusion import LateralDecisionRequest
+    from app.services.capa_lateral_diffusion_service import (
+        ConflictError as LateralConflictError,
+        decide_lateral,
+    )
+
+    # re-validate body type for runtime import order
+    if not isinstance(req, LateralDecisionRequest):
+        req = LateralDecisionRequest.model_validate(req)
+
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+
+    try:
+        out = await decide_lateral(db, report_id, req, scope.user.user_id)
+        await db.commit()
+        return out
+    except LateralConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg or "no lateral check" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        if "no similar products" in msg:
+            raise HTTPException(status_code=422, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+
+
+@router.post("/{report_id}/lateral-diffusion/rerun")
+async def rerun_lateral_route(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    from app.services.capa_lateral_diffusion_service import (
+        ConflictError as LateralConflictError,
+        LateralBlockedError,
+        LateralFailedError,
+        rerun_lateral,
+    )
+
+    level = await get_user_permission(scope.user, Module.CAPA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+
+    capa = await capa_service.get_capa(db, report_id)
+    if capa is None or not is_factory_visible(capa.factory_id, scope):
+        raise HTTPException(status_code=404, detail="8D report not found")
+    check_product_line_access(capa.product_line_code, scope)
+
+    try:
+        out = await rerun_lateral(db, report_id, scope.user.user_id)
+        await db.commit()
+        return out
+    except LateralBlockedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"outcome": "blocked", "stage": "lateral_diffusion", "message": str(e)},
+        )
+    except LateralFailedError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"outcome": "failed", "stage": "lateral_diffusion", "message": str(e)},
+        )
+    except LateralConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

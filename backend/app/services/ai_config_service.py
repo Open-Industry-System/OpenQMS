@@ -94,6 +94,24 @@ async def get_ai_config(db: AsyncSession) -> AIConfigOut:
     return AIConfigOut(**values)
 
 
+async def get_raw_ai_config(db: AsyncSession) -> AIConfigOut:
+    """Like get_ai_config but returns the REAL api keys (backend-internal use only).
+
+    Never return this to the frontend. Used by provider_adapter to construct
+    openai/anthropic clients with the actual credential.
+    """
+    result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(AI_CONFIG_KEYS)))
+    rows = {row.key: row.value for row in result.scalars().all()}
+    values: dict[str, Any] = {}
+    for key in AI_CONFIG_KEYS:
+        raw = rows.get(key)
+        coerced = _coerce(key, raw)
+        if coerced is None or coerced == "":
+            coerced = _env_default(key)
+        values[key] = coerced
+    return AIConfigOut(**values)  # NO masking here
+
+
 async def update_ai_config(
     db: AsyncSession,
     update: AIConfigUpdate,

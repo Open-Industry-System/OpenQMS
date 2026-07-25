@@ -26,7 +26,10 @@ class ControlPlanItemBase(BaseModel):
 
 
 class ControlPlanItemCreate(ControlPlanItemBase):
-    pass
+    # Optional: when present and matches an existing item under this CP,
+    # update_control_plan reuses the UUID instead of regenerating (doc-gate
+    # target_key stability). Temp client ids (e.g. "temp-…") are ignored.
+    item_id: uuid.UUID | str | None = None
 
 
 class ControlPlanItemUpdate(ControlPlanItemBase):

@@ -58,6 +58,7 @@ const MENU_KEYS = [
   "/plm/dashboard", "/plm/connections", "/plm/parts", "/plm/change-orders",
   "/erp", "/erp/connections", "/erp/master-data", "/erp/supply-chain", "/erp/commercial", "/erp/traceability",
   "/group/dashboard", "/group/comparison", "/group/suppliers", "/group/audits", "/group/factories",
+  "/admin/ai-config", "/admin/product-types", "/admin/product-lines", "/admin/users", "/admin/logs", "/admin/review-skills",
 ];
 
 const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
@@ -107,6 +108,12 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/group/suppliers": ["grp:group"],
   "/group/audits": ["grp:group"],
   "/group/factories": ["grp:group"],
+  "/admin/ai-config": ["grp:admin"],
+  "/admin/product-types": ["grp:admin"],
+  "/admin/product-lines": ["grp:admin"],
+  "/admin/users": ["grp:admin"],
+  "/admin/logs": ["grp:admin"],
+  "/admin/review-skills": ["grp:admin"],
 };
 
 interface MenuItem {
@@ -122,6 +129,11 @@ interface MenuItem {
 function stripModuleField(items: MenuItem[]): MenuProps["items"] {
   return items.map(({ module: _m, ...rest }) => ({
     ...rest,
+    label: (
+      <span data-e2e={`menu-${rest.key.replace(/^\//, "").replace(/\//g, "-")}`}>
+        {rest.label}
+      </span>
+    ),
     ...(rest.children ? { children: stripModuleField(rest.children) } : {}),
   }));
 }
@@ -269,6 +281,9 @@ function useMenuItems(): MenuItem[] {
           { key: "/admin/ai-config", icon: <SettingOutlined />, label: t("menu.aiConfig"), adminOnly: true },
           { key: "/admin/product-types", icon: <AppstoreOutlined />, label: t("menu.productTypes"), adminOnly: true },
           { key: "/admin/product-lines", icon: <ProfileOutlined />, label: t("menu.productLines"), adminOnly: true },
+          { key: "/admin/users", icon: <UserOutlined />, label: t("menu.users"), adminOnly: true },
+          { key: "/admin/logs", icon: <FileTextOutlined />, label: t("menu.logs"), adminOnly: true },
+          { key: "/admin/review-skills", icon: <AuditOutlined />, label: t("menu.reviewSkills"), adminOnly: true },
         ],
       },
     ],
@@ -448,6 +463,7 @@ export default function AppLayout() {
           <Space size="middle">
             {showFactorySwitcher && (
               <Select
+                data-e2e="factory-switcher"
                 style={{ width: 200 }}
                 value={currentFactoryId || undefined}
                 placeholder={t("header.selectFactory")}

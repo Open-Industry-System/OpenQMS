@@ -20,9 +20,8 @@ def _get_search_service(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> SearchService:
-    llm_provider = getattr(request.app.state, "llm_provider", None)
     embedding_provider = getattr(request.app.state, "embedding_provider", None)
-    return SearchService(db=db, llm_provider=llm_provider, embedding_provider=embedding_provider)
+    return SearchService(db=db, embedding_provider=embedding_provider)
 
 
 @router.get("/semantic", response_model=SemanticSearchResponse)
@@ -66,15 +65,19 @@ async def ask_question(
     level = await get_user_permission(user, Module.KNOWLEDGE_GRAPH, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 knowledge_graph 模块的 VIEW 权限")
-    if not service.llm and not service.embedding:
-        raise HTTPException(status_code=503, detail="搜索服务未配置（无 embedding 或 LLM provider）")
-    return await service.ask(
+    if not service.embedding:
+        raise HTTPException(status_code=503, detail="搜索服务未配置（无 embedding provider）")
+    from app.core.tenant import tenant_schema
+    res = await service.ask(
         question=body.question,
         user=user,
+        tenant_schema=tenant_schema(request),
         product_line_code=body.product_line_code,
         product_type_code=body.product_type_code,
         max_context_chunks=body.max_context_chunks,
     )
+    await db.commit()
+    return res
 
 
 @router.post("/reindex", response_model=ReindexResponse)

@@ -57,7 +57,10 @@
     "admin": "System Admin",
     "aiConfig": "AI Model Config",
     "productTypes": "Product Types",
-    "productLines": "Product Lines"
+    "productLines": "Product Lines",
+    "users": "User Management",
+    "logs": "Log Management",
+    "reviewSkills": "Review Skills"
   },
   "header": {
     "selectFactory": "Select Factory",

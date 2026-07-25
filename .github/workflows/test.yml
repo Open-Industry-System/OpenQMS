@@ -62,6 +62,18 @@ jobs:
           cd backend
           PYTHONPATH=. pytest tests/ -v --ignore=tests/test_graph_sync_worker.py --ignore=tests/test_graph_projection.py
 
+      - name: D8 doc-gate preflight (against migrated test DB)
+        # Runs the doc-gate CP lineage preflight against the CI test DB. This
+        # catches schema/contract regressions; a CLEAN test DB should report 0
+        # breaks. Real deploy gating must run `make doc-gate-preflight` against
+        # the TARGET DATABASE_URL (see docs/deployment.md §1.4).
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test
+        run: |
+          cd backend
+          PYTHONPATH=. python -m app.services.capa_doc_gate_preflight
+
       - name: Run engine import checks
         env:
           SECRET_KEY: test-secret-key-for-ci-only
@@ -110,3 +122,44 @@ jobs:
         run: |
           cd frontend
           npm run build
+
+  docs-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify docs updated alongside code changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+
+          if echo "$LABELS" | grep -q '"docs-not-needed"'; then
+            echo "PR has 'docs-not-needed' label — skipping docs check."
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo "---"
+
+          CODE=$(echo "$CHANGED" | grep -E '^(backend/app/|frontend/src/|docker-compose\.ya?ml$|(^|.*/)Dockerfile($|\..*))' || true)
+          DOCS=$(echo "$CHANGED" | grep -E '^(docs/|CLAUDE\.md$|README\.md$|.*/README\.md$)' || true)
+
+          if [ -n "$CODE" ] && [ -z "$DOCS" ]; then
+            echo "::error::Code changed under backend/app/, frontend/src/, docker-compose.yml, or Dockerfile, but no documentation was updated."
+            echo "::error::Update one of: docs/**, CLAUDE.md, README.md, or any module README.md."
+            echo "::error::If documentation truly does not need an update, add the 'docs-not-needed' label to this PR."
+            echo ""
+            echo "Code changes detected:"
+            echo "$CODE"
+            exit 1
+          fi
+
+          echo "Docs check passed."

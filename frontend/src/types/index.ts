@@ -12,6 +12,12 @@ export interface Factory {
   is_active: boolean;
 }
 
+export interface AssignableRoleOption {
+  role_key: string;
+  name_zh: string;
+  name_en: string;
+}
+
 export interface FactoryScope {
   accessible_factory_ids: string[] | null;  // null = all factories
   default_factory_id: string | null;
@@ -132,6 +138,19 @@ export interface PaginatedResponse<T> {
 
 export type FMEAListResponse = PaginatedResponse<FMEADocument>;
 
+export interface SupplierRiskInputProjection {
+  input_id: string;
+  status: "pending" | "processing" | "processed" | "error";
+  repeat_suggested: boolean | null;
+  repeat_detection_status: "matched" | "not_matched" | "unavailable";
+  repeat_confirmed: boolean | null;
+  matched_capa_nos: string[];
+  evaluated_risk_level: string | null;
+  evaluated_risk_score: number | null;
+  evaluated_at?: string | null;
+  linked_alert: { alert_id: string; risk_level: string } | null;
+}
+
 export interface CAPAReport {
   report_id: string;
   document_no: string;
@@ -150,12 +169,116 @@ export interface CAPAReport {
   fmea_ref_id: string | null;
   fmea_node_id: string | null;
   due_date: string | null;
+  d4_retry_count: number;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  scar_ref_id?: string | null;
+  supplier_id?: string | null;
+  supplier_no?: string | null;
+  supplier_name?: string | null;
+  linked_scar?: {
+    scar_id: string;
+    scar_no: string;
+    status: string;
+    supplier_id: string;
+  } | null;
+  supplier_risk_input?: SupplierRiskInputProjection | null;
+  d3_affected_lots?: string[];
+  lateral_diffusion?: LateralDiffusionProjection | null;
 }
 
 export type CAPAListResponse = PaginatedResponse<CAPAReport>;
+
+/** Lateral diffusion projection after D8 close (US-E2E-01.9). */
+export interface LateralDiffusionProjection {
+  check_id: string;
+  status: "done" | "empty";
+  llm_status: "done" | "skipped";
+  truncated: boolean;
+  similar_products: Array<{
+    product_type_code: string;
+    product_type_name?: string;
+    hit_criteria: string[];
+    suggestion_direction: string | null;
+    product_lines: Array<{ code: string; factory_id: string; name?: string }>;
+    evidence?: Record<string, unknown[]>;
+  }>;
+  decision: "notified" | "skipped" | null;
+  notifications: Array<{
+    notification_id: string;
+    product_type_code: string;
+    product_line_code: string | null;
+    recipient_label: string;
+    decision: "notified" | "skipped";
+    status: "notified" | "pending" | "processed";
+  }>;
+}
+
+export interface RelatedCAPAItem {
+  report_id: string;
+  document_no: string;
+  title: string;
+  status: string;
+  product_line_code?: string;
+  link_sources?: string[];
+}
+
+/** Knowledge sink embedding lifecycle (US-E2E-01.8). */
+export type KnowledgeEmbeddingStatus = "pending" | "ready" | "failed";
+
+export interface KnowledgeEntrySummary {
+  entry_id: string;
+  source_type: string;
+  source_id: string;
+  document_no: string;
+  title: string;
+  severity: string | null;
+  product_line_code: string;
+  factory_id: string;
+  status: string;
+  embedding_status: KnowledgeEmbeddingStatus | string;
+  embedding_id: string | null;
+  lesson_summary: string | null;
+  tags: string[];
+  created_at: string;
+}
+
+export interface KnowledgeEntryDetail extends KnowledgeEntrySummary {
+  fields: Record<string, unknown>;
+  content_hash?: string | null;
+  llm_status?: string | null;
+  updated_at?: string | null;
+}
+
+export type KnowledgeEntryListResponse = PaginatedResponse<KnowledgeEntrySummary>;
+
+export interface SinkKnowledgeResponse {
+  entry_id: string;
+  source_type: string;
+  source_id: string;
+  document_no: string;
+  title: string;
+  embedding_status: KnowledgeEmbeddingStatus | string;
+  content_hash?: string | null;
+  llm_status?: string | null;
+}
+
+export interface KnowledgeSinkOutcomeDetail {
+  outcome: "blocked" | "failed";
+  reason?: string;
+  message?: string;
+}
+
+
+export interface ReviewSkill {
+  skill_id: string;
+  tenant_schema: string | null;
+  name: string;
+  content: string;
+  version: number;
+  is_active: boolean;
+}
 
 export interface DashboardData {
   kpi: {
@@ -803,7 +926,7 @@ export interface SupplierSCAR {
   supplier_id: string;
   supplier_name?: string;
   supplier_no?: string;
-  source_type: 'iqc' | 'complaint' | 'rma' | 'manual';
+  source_type: 'iqc' | 'complaint' | 'rma' | 'manual' | 'capa';
   source_id?: string;
   description: string;
   product_line_code?: string;
@@ -1364,15 +1487,15 @@ export interface ShipmentRecord {
 // ─── D7 Prevention Recurrence ───
 
 export interface D7Recommendation {
-  fmea_id: string;
-  fmea_document_no: string;
+  fmea_id: string | null;
+  fmea_document_no: string | null;
   failure_mode_node_id: string;
-  failure_mode_name: string;
+  failure_mode_name: string | null;
   failure_cause_node_id: string | null;
   failure_cause_name: string | null;
   prevention_control_node_id: string | null;
   prevention_control_name: string | null;
-  match_source: "linked" | "keyword";
+  match_source: "linked" | "keyword" | "rule";
   match_reason: string;
   related_d4_keywords: string[];
   suggested_prevention: string | null;
@@ -1383,6 +1506,7 @@ export interface D7RecommendationResponse {
 }
 
 export interface D4Recommendation {
+  stage_index?: number | null;
   failure_cause_node_id: string | null;
   failure_cause_name: string;
   failure_cause_desc: string | null;
@@ -1390,20 +1514,52 @@ export interface D4Recommendation {
   failure_mode_name: string | null;
   fmea_document_no: string | null;
   fmea_id: string | null;
-  match_source: "linked" | "keyword" | "rule" | "fmea_graph" | "semantic_search" | "historical_capa" | "llm";
+  match_source:
+    | "linked"
+    | "keyword"
+    | "rule"
+    | "fmea_graph"
+    | "semantic_search"
+    | "historical_capa"
+    | "llm"
+    | "same_type_product_kb"
+    | "lessons_learned"
+    | "spc_anomaly"
+    | "mes"
+    | "iqc"
+    | "supplier_history";
   match_reason: string;
   related_d2_keywords: string[];
   confidence: number;
   source_capa_id: string | null;
   source_capa_document_no: string | null;
   source_product_line_code: string | null;
+  ap?: string | null;
+  severity?: number | null;
+  occurrence?: number | null;
+  detection?: number | null;
+}
+
+export interface StageRun {
+  index: number;
+  name: string;
+  source: string;
+  status: "pending" | "running" | "done" | "skipped" | "error" | "blocked";
+  hit_count: number;
+  summary: string;
+  error?: string | null;
+  llm_attempted?: number | null;
+  llm_succeeded?: number | null;
+  llm_failed?: number | null;
 }
 
 export interface D4RecommendationResponse {
+  stages: StageRun[];
   items: D4Recommendation[];
 }
 
 export interface D5ExistingControl {
+  stage_index?: number | null;
   failure_mode_node_id: string | null;
   failure_mode_name: string | null;
   failure_cause_node_id: string | null;
@@ -1415,9 +1571,14 @@ export interface D5ExistingControl {
   match_reason: string;
   fmea_id: string | null;
   fmea_document_no: string | null;
+  ap?: string | null;
+  severity?: number | null;
+  occurrence?: number | null;
+  detection?: number | null;
 }
 
 export interface D5GeneralSuggestion {
+  stage_index?: number | null;
   content: string;
   category: string;
   basis: string;
@@ -1426,9 +1587,14 @@ export interface D5GeneralSuggestion {
   match_source: string | null;
   source_capa_id: string | null;
   source_capa_document_no: string | null;
+  ap?: string | null;
+  severity?: number | null;
+  occurrence?: number | null;
+  detection?: number | null;
 }
 
 export interface D5RecommendationResponse {
+  stages: StageRun[];
   existing_controls: D5ExistingControl[];
   general_suggestions: D5GeneralSuggestion[];
 }
@@ -1730,4 +1896,284 @@ export interface ComparisonResponse {
 export interface SnapshotGenerateResponse {
   snapshot_count: number;
   period: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  password: string;
+  display_name?: string | null;
+  email?: string | null;
+  role_key: string;
+}
+
+export interface UserUpdateRequest {
+  display_name?: string | null;
+  email?: string | null;
+  role_key?: string | null;
+  is_active?: boolean | null;
+  password?: string | null;
+  default_factory_id?: string | null;
+  factory_ids?: string[] | null;
+}
+
+export interface RoleOption {
+  id: string;
+  role_key: string;
+  name_zh: string;
+  name_en: string;
+  is_system: boolean;
+  is_editable: boolean;
+}
+
+export interface AuditLogItem {
+  log_id: string;
+  table_name: string;
+  record_id: string;
+  action: string;
+  operated_by: string | null;
+  ip_address: string | null;
+  operated_at: string | null;
+  changed_fields: Record<string, unknown> | null;
+  old_values: Record<string, unknown> | null;
+  new_values: Record<string, unknown> | null;
+}
+
+export interface LoginLogItem {
+  log_id: string;
+  username: string;
+  user_id: string | null;
+  success: boolean;
+  failure_reason: string | null;
+  ip_address: string | null;
+  occurred_at: string | null;
+}
+
+export interface SystemLogItem {
+  log_id: string;
+  logger_name: string;
+  level: string;
+  message: string;
+  module: string | null;
+  traceback: string | null;
+  occurred_at: string | null;
+}
+
+// --- CAPA D4 verification / adoption / D7 node actions (Spec A) ---
+export interface AdoptRequest {
+  d_step: "d4" | "d5";
+  adopted_text: string;
+  source: string;
+  stage_index?: number | null;
+  item_ref?: Record<string, unknown> | null;
+}
+export interface AdoptResponse {
+  adoption_id: string;
+  d_step: string;
+  field_value: string;
+}
+export type VerificationMethod = "measurement" | "observation" | "reproduction";
+export type VerificationConclusion = "pending" | "passed" | "failed";
+
+export interface Verification {
+  verification_id: string;
+  capa_id: string;
+  root_cause_text: string;
+  method: VerificationMethod | null;
+  result: string | null;
+  is_verified: boolean;
+  conclusion: VerificationConclusion;
+  evidence_attachments: Record<string, unknown>[];
+  source_ref: Record<string, unknown> | null;
+  verified_by: string | null;
+  verified_at: string | null;
+  created_at: string;
+}
+export interface VerificationCreate {
+  root_cause_text: string;
+  method?: VerificationMethod;
+  result?: string;
+  conclusion?: VerificationConclusion;
+  evidence_attachments?: Record<string, unknown>[];
+  source_ref?: Record<string, unknown> | null;
+}
+export interface VerificationUpdate {
+  method?: VerificationMethod;
+  result?: string;
+  conclusion?: VerificationConclusion;
+  evidence_attachments?: Record<string, unknown>[];
+  source_ref?: Record<string, unknown> | null;
+}
+export interface D7NodeAction {
+  action_id: string;
+  capa_id: string;
+  action: "confirmed" | "skipped" | "auto_filled";
+  fmea_id: string | null;
+  failure_mode_node_id: string;
+  failure_cause_node_id: string | null;
+  match_source: string;
+  prevention_control_node_id: string | null;
+  prevention_control_name_before: string | null;
+  prevention_control_name_after: string | null;
+  reason: string | null;
+  acted_by: string;
+  acted_at: string;
+}
+export interface D7NodeActionCreate {
+  action: "confirmed" | "skipped";
+  fmea_id: string | null;
+  failure_mode_node_id: string;
+  failure_cause_node_id?: string | null;
+  match_source: string;
+  reason?: string | null;
+}
+export interface D7AutoFillRequest {
+  fmea_id: string | null;
+  failure_mode_node_id: string;
+  failure_cause_node_id: string;
+  match_source: string;
+}
+export interface D7AutoFillResponse {
+  action_id: string;
+  prevention_control_node_id: string;
+  prevention_control_name_after: string;
+  is_new_control: boolean;
+}
+
+// ─── D3 Containment Types ──────────────────────────────────────────────────────
+
+export interface D3ImportRun {
+  run_id: string;
+  capa_id: string;
+  factory_id: string;
+  status: "importing" | "completed" | "failed";
+  is_current: boolean;
+  imported_types: string[];
+  analysis_context: Record<string, unknown>;
+  started_at: string;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface D3ProvenanceEntry {
+  source_type: string;
+  snapshot_id: string | null;
+  record_key: string;
+  stage: string;
+}
+
+export interface D3ContainmentSnapshot {
+  snapshot_id: string;
+  run_id: string;
+  factory_id: string;
+  snapshot_type: "inventory" | "shipment" | "iqc" | "spc";
+  payload: Record<string, unknown>[];
+  record_count: number;
+  imported_at: string;
+  created_at: string;
+}
+
+export interface D3ImpactReport {
+  report_id: string;
+  run_id: string;
+  factory_id: string;
+  is_current: boolean;
+  status: "running" | "done" | "failed" | "superseded";
+  risk_level: "high" | "medium" | "low" | null;
+  risk_floor: "high" | "medium" | "low" | null;
+  risk_explanation: string | null;
+  batches: Record<string, unknown>[] | null;
+  impact_qty: Record<string, unknown> | Record<string, unknown>[] | null;
+  customer_impact: Record<string, unknown>[] | null;
+  time_window: Record<string, unknown> | null;
+  llm_available: boolean;
+  model: string | null;
+  stage_runs: Record<string, unknown>[] | null;
+  prompt_stats: Record<string, unknown> | null;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+  generated_by: string;
+  generated_at: string;
+  created_at: string;
+  // Populated by GET when a newer failed/superseded attempt exists alongside the
+  // still-valid current report, so the UI can show a "最近一次重试失败" banner.
+  latest_attempt_status?: "done" | "failed" | "superseded" | null;
+  latest_attempt_error?: string | null;
+}
+
+export type D3AdviceType = "recall" | "isolate" | "notify_customer" | "strict_inspection" | "alternative";
+
+export interface D3AiAdvice {
+  advice_id: string;
+  advice_type: D3AdviceType;
+  advice_text: string;
+  source_provenance: D3ProvenanceEntry[];
+  target_batch_refs: string[] | null;
+  adoption_status?: "adopted" | "rejected" | null;
+}
+
+export interface D3AdviceAdoption {
+  adoption_id: string;
+  advice_id: string;
+  factory_id: string;
+  decision: "adopted" | "rejected";
+  adopted_text: string | null;
+  advice_type: D3AdviceType;
+  source_provenance: D3ProvenanceEntry[];
+  decided_by: string;
+  decided_at: string;
+  created_at: string;
+}
+
+export interface D3AdviceResponse {
+  advice: D3AiAdvice[];
+  status?: "done" | "failed";
+  error?: string | null;
+  // Populated by GET when a newer failed attempt exists alongside the still-valid
+  // current generation, so the UI can show a "最近一次重试失败" banner.
+  latest_attempt_status?: "done" | "failed" | null;
+  latest_attempt_error?: string | null;
+}
+
+export interface D3Execution {
+  execution_id: string;
+  source: "manual" | "adopted";
+  advice_id: string | null;
+  generation_id: string | null;
+  result_status: "completed" | "in_progress" | "pending" | "failed";
+  measure_text: string | null;
+  evidence_refs: Record<string, unknown>[];
+}
+
+// D3 Request Types
+
+export interface D3ImportRequest {
+  snapshot_types?: string[];
+}
+
+export interface D3GenerateReportRequest {
+  run_id: string;
+}
+
+export interface D3GenerateAdviceRequest {
+  run_id: string;
+}
+
+export interface D3DecideAdviceRequest {
+  decision: "adopted" | "rejected";
+  adopted_text?: string | null;
+}
+
+export interface D3ExecutionCreate {
+  source: "manual" | "adopted";
+  advice_id?: string | null;
+  measure_text: string;
+  result_status?: "completed" | "in_progress" | "pending" | "failed";
+  evidence_refs?: Record<string, unknown>[];
+}
+
+export interface D3ExecutionUpdate {
+  result_status?: "completed" | "in_progress" | "pending" | "failed" | null;
+  measure_text?: string | null;
+  evidence_refs?: Record<string, unknown>[] | null;
 }
