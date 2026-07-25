@@ -1,6 +1,6 @@
 # 子故事 US-E2E-02.18：版本快照 + CP 联动
 
-**状态**: 定稿 v2（2026-07-25），经代码评审修订
+**状态**: 定稿 v3（2026-07-25），经代码评审修订（审计实体/action 收口）
 **所属 epic**: US-E2E-02（README.md v2）
 **关联 skill**: `verify-fmea-lifecycle-version-snapshot-cp-sync`（待生成）
 **前置**: 02.15（编辑器保存已就绪）
@@ -27,7 +27,7 @@
    - 选择两个版本做差异对比（高亮新增/删除/修改的节点）。
 3. **CP 联动（仅 PFMEA）**：
    - PFMEA APPROVED → `mark_cp_sync_pending_on_fmea_approve(fmea_id, version_id)` → 关联 CP 的 `sync_pending=true`。
-   - DFMEA APPROVED → 只生成版本快照，**不要求 CP**（见 README "评审决议" 节）。
+   - DFMEA APPROVED → 只生成版本快照，**不要求 CP**。
    - CP 列表/详情显示"待同步"标识，提示用户基于新 PFMEA 版本更新控制计划。
 
 ## 业务规则 / 验收标准
@@ -42,9 +42,15 @@
 - sync_pending 置 true 后，CP 列表/详情可见"待同步"状态。
 - **原子性**：`mark_cp_sync_pending_on_fmea_approve` 需在 FMEA APPROVED 事务内完成（或 outbox/retry），避免 PFMEA 已 APPROVED 但 CP 标记失败。
 
-### 审计与落库
-- 版本快照创建写 AuditLog（`action="TRANSITION"`，Outbox `fmea.version_created`）。
-- CP sync_pending 置位写 AuditLog（Outbox `cp.sync_pending_set`）。
+### 审计（三个独立 AuditLog 记录）
+
+| 操作 | `table_name` | `action` | Outbox `event_type` | `changed_fields` |
+|---|---|---|---|---|
+| FMEA 状态流转（提交/审批） | `fmea_documents` | `TRANSITION` | `fmea.submitted` / `fmea.approved` | old_status / new_status |
+| FMEA 版本创建 | `fmea_versions` | `CREATE` | `fmea.version_created` | fmea_id / version / change_type / change_summary |
+| CP sync_pending 置位 | `control_plans` | `UPDATE` | `cp.sync_pending_set` | sync_pending / source_fmea_version_id |
+
+- **当前实现缺口**：CP sync_pending 置位未写独立 AuditLog（`mark_cp_sync_pending_on_fmea_approve` 直接改 CP.sync_pending，未审计）——本子故事验收此契约为 `FAILED`（驱动补齐）。
 
 ## 验收契约（字段级）
 
@@ -55,10 +61,10 @@
 | 边类型 | 无 |
 | AI 触发器 | 无（AI_REQUIRED=false） |
 | 状态枚举 | 触发时机：IN_REVIEW（submit）/ APPROVED（approve） |
-| 审计事件 | AuditLog `action="TRANSITION"`（Outbox `fmea.version_created`、`cp.sync_pending_set`） |
+| 审计事件 | 三个独立 AuditLog：`fmea_documents`/`TRANSITION`（流转）+ `fmea_versions`/`CREATE`（快照）+ `control_plans`/`UPDATE`（CP sync，仅 PFMEA） |
 | E2E seed 前置 | 02.15 编辑器 + 关联 CP（PFMEA） |
-| 通过条件 | 提交/审批各生成快照（snapshot/major_no/minor_no/sha256_hash/change_type 完整）+ 差异对比可用 + PFMEA APPROVED 触发 CP sync_pending=true + CP 可见待同步 + DFMEA APPROVED 不触发 CP + 原子性（CP sync 在 APPROVED 事务内）+ 审计 |
-| 失败条件（FAILED） | 快照未生成或字段缺失（如缺 snapshot/major_no/minor_no/sha256_hash）；差异对比不可用；PFMEA APPROVED 未触发 CP sync；DFMEA APPROVED 误触发 CP；sync_pending 置位但 CP 不可见；原子性缺失（PFMEA APPROVED 但 CP 标记失败）；未审计 |
+| 通过条件 | 提交/审批各生成快照（snapshot/major_no/minor_no/sha256_hash/change_type 完整）+ 差异对比可用 + PFMEA APPROVED 触发 CP sync_pending=true + CP 可见待同步 + DFMEA APPROVED 不触发 CP + 原子性（CP sync 在 APPROVED 事务内）+ 三个独立 AuditLog 记录（fmea_documents/TRANSITION + fmea_versions/CREATE + control_plans/UPDATE） |
+| 失败条件（FAILED） | 快照未生成或字段缺失（如缺 snapshot/major_no/minor_no/sha256_hash）；差异对比不可用；PFMEA APPROVED 未触发 CP sync；DFMEA APPROVED 误触发 CP；sync_pending 置位但 CP 不可见；原子性缺失（PFMEA APPROVED 但 CP 标记失败）；审计实体/action 写错（如版本创建写 TRANSITION 或 CP sync 未写独立 AuditLog）；未审计 |
 | 阻塞条件（BLOCKED） | 无（AI_REQUIRED=false） |
 
 ## 不在本子故事范围

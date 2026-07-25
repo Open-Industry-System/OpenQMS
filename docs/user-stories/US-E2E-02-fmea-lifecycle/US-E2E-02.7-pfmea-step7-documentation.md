@@ -31,7 +31,7 @@
 
 ### 门禁（AIAG-VDA Step7）
 - 完成前：Step1-Step6 各项必填字段均非空（向导校验）。
-- **Step7 门禁 = 所有 AP 已评估**（行动已关闭或风险接受已记录），而非仅"所有汇总段非空"（见 README "评审决议" 节）。
+- **Step7 门禁 = 所有 AP=H/M 已评估**——所有 AP=H/M 的行，要么有 RecommendedAction（status=completed，且 action_taken/completion_date/revised_* 非空），要么有 control_sufficiency_reason（H）或 risk_acceptance_reason（M）非空（见 02.6 落库字段）。
 
 ### 审计与落库
 - Step7 完成写 AuditLog（`action="UPDATE"`，Outbox `fmea.updated`，含 wizardScope.wizard_completed=true）。

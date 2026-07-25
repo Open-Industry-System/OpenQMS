@@ -45,16 +45,18 @@ Step7 结果文件化(汇总评审 + 完成 + 跳转编辑器)——
 
 | 流转 | 权限 | 说明 |
 |---|---|---|
-| DRAFT/REWORK → IN_REVIEW | EDIT | 提交评审；前端须校验 `wizardScope.wizard_completed=true` |
+| DRAFT/REWORK → IN_REVIEW | EDIT | 提交评审；**后端强制校验** `wizardScope.wizard_completed=true`（前端仅用于提前提示，可绕过 API 调用） |
 | IN_REVIEW → APPROVED | APPROVE | 审批通过；置 approved_by/at + 生成 approve 快照 + 触发 CP sync（仅 PFMEA 关联时） |
 | IN_REVIEW → REWORK | APPROVE | 驳回；必须携带非空 reason |
-| REWORK → IN_REVIEW | EDIT | 重提 |
+| REWORK → IN_REVIEW | EDIT | 重提；后端同样强制校验 wizard_completed |
 | APPROVED → REWORK | APPROVE | 已批准后返工 |
-| 不可跳步 | — | DRAFT 不可直接 APPROVED |
+| 不可跳步 | — | DRAFT 不可直接 APPROVED（**状态机已阻止**，`fmea_state.py:18`） |
 | 可编辑图 | EDIT | 仅 DRAFT、REWORK；IN_REVIEW/APPROVED/ARCHIVED 的 PUT 必须拒绝 |
 
-- **当前实现缺口**：`require_approve_permission` 仅对 `target_status=="approved"` 检查审批权限（`api/fmea.py:192`），未对 IN_REVIEW→REWORK / APPROVED→REWORK 检查；可编辑状态校验（IN_REVIEW/APPROVED 拒绝 PUT）亦未实现。本子故事（02.19）验收此矩阵为 `FAILED`（驱动补齐）。
-- **APPROVED→REWORK 后**：approved_by/approved_at **保留历史**（不清空），便于追溯；当前未实现 APPROVED→REWORK，另立验收。
+- **状态机支持情况**：APPROVED→REWORK **已支持**（`fmea_state.py:20` `APPROVED: [REWORK, ARCHIVED]`）；DRAFT→APPROVED **已阻止**（`fmea_state.py:18` `DRAFT: [IN_REVIEW, ARCHIVED]`）。
+- **真正缺的实现缺口**：① 权限校验（`require_approve_permission` 仅对 `target_status=="approved"` 检查 APPROVE，见 `api/fmea.py:192`；IN_REVIEW→REWORK / APPROVED→REWORK / REWORK→IN_REVIEW 未检查权限）；② 非空 reason 校验（驳回时）；③ 可编辑状态门禁（IN_REVIEW/APPROVED 拒绝 PUT）；④ wizard_completed 后端强制校验（提交/重提时）。
+- **wizard_completed 门禁契约**：后端在 `DRAFT/REWORK→IN_REVIEW` 时强制校验 `wizardScope.wizard_completed=true`；缺失或 false 返回 **422 Unprocessable Entity**（带明确 detail，如 "向导未完成，不能提交评审"）；E2E 直接调用 `POST /api/fmea/{id}/transition` 验证无法绕过前端。
+- **APPROVED→REWORK 后**：approved_by/approved_at **保留历史**（不清空），便于追溯。
 
 ## 图结构契约（共享边词汇，跨 PFMEA/DFMEA）
 
@@ -97,34 +99,37 @@ FailureCause/FailureMode ─OPTIMIZED_BY→ RecommendedAction
 
 ## AI 推荐知识库查询契约（AI_REQUIRED=true 的子故事）
 
-**响应契约**（需在 `RecommendResponse` 增加 `source_executions[]`）：
+**响应契约**（需在 `RecommendResponse` 增加 `source_executions[]` + `generation_execution`）：
 ```json
 {
   "suggestions": [...],
   "source_executions": [
-    {"source": "rule", "status": "success", "hit_count": 3, "latency_ms": 1},
-    {"source": "graph", "status": "empty", "hit_count": 0, "latency_ms": 12},
-    {"source": "semantic_search", "status": "unavailable", "hit_count": 0, "latency_ms": 0},
-    {"source": "lessons_learned", "status": "success", "hit_count": 2, "latency_ms": 45}
-  ]
+    {"source": "graph", "status": "success", "hit_count": 3, "latency_ms": 12},
+    {"source": "semantic_search", "status": "empty", "hit_count": 0, "latency_ms": 45},
+    {"source": "lessons_learned", "status": "success", "hit_count": 2, "latency_ms": 23}
+  ],
+  "generation_execution": {"llm": "success"}
 }
 ```
 
-- **`source` 枚举**：`schemas/recommendation.py` 的 `SuggestionItem.source` 需扩展为 {rule, graph, semantic_search, lessons_learned, llm}（当前仅 {rule, graph, llm}）。
+- **`required_retrievers`**（外部检索，必须出现在 `source_executions`）：`graph` / `semantic_search` / `lessons_learned`。
+- **`context_execution`**（内部组装，不计入 `source_executions`）：`current_product_structure`（assembled | unavailable）——`process_step`/`function_description` 是 `_assemble_context` 的产物，作为 LLM prompt 输入，非外部检索命中。
+- **`generation_execution`**：`llm`（success | unavailable | error）。
+- **`rule` 不计入 required_retrievers**：`rule` 是本地规则表（同步，~1ms），非外部检索；`rule` 可出现在 `source_executions` 作为附加诊断，但不作为"必查"验收项。
 - **`status` 枚举**：`success | empty | unavailable | error`。
-- **"必查"定义**：适配器必须被调用，允许合法零命中（`status=empty`）；`unavailable`（无 embedding 凭证）与 `error`（调用失败）需明确运行时行为——**本 spec 定为带诊断降级**（返回 200 + `source_executions` 标注 unavailable/error，不整体失败），由 E2E 断言诊断可见。
+- **"必查"定义**：`required_retrievers` 的 3 个适配器必须被调用，允许合法零命中（`status=empty`）；`unavailable`（无 embedding 凭证）与 `error`（调用失败）需明确运行时行为——**本 spec 定为带诊断降级**（返回 200 + `source_executions` 标注 unavailable/error，不整体失败）。
+- **E2E 健康环境断言**：在健康 E2E 环境（有 embedding 凭证 + LLM 凭证）中，`graph`/`semantic_search`/`lessons_learned` 必须为 `success | empty`；`unavailable | error` 虽可在生产运行时降级返回 200，但 **E2E 应判 FAILED**（防止"适配器永远 unavailable"也通过验收）。
 - **零命中 vs 未调用可区分**：`empty`（调用了但无结果）≠ `unavailable`（未调用）—— `source_executions` 是 E2E 区分二者的依据。
-- **产品结构不属于外部检索**：`process_step`/`function_description` 是 context assembly（`_assemble_context`），不是外部检索命中，不计入 `source_executions`（仅作为 LLM prompt 输入）。
-- **source_document_no**：仅对具有来源文档的候选（graph/semantic_search）必填；rule/LLM 不强制（`schemas/recommendation.py:18` 的 `source_fmea_id` 等仅 source=graph 时填充）。
+- **source_document_no**：仅对具有来源文档的候选必填——`graph` / `semantic_search` / `lessons_learned`（若 lessons 候选有来源 CAPA/审核文档）；`rule`/`llm` 不强制。
 
 **4 来源**（后端查询顺序）：
 
-| # | 来源 | 实现 | 是否外部检索 |
+| # | 来源 | 实现 | `source_executions` |
 |---|---|---|---|
-| 1 | 其他 FMEA 图节点 | `find_similar_nodes_advanced` | 是（keyword 匹配） |
-| 2 | RAG 语义搜索 | `document_embeddings` pgvector（`SemanticSearchSource`） | 是（向量相似） |
-| 3 | 经验教训库 | `LessonsLearnedService` | 是 |
-| 4 | 当前产品结构 | `_assemble_context` | 否（context assembly） |
+| 1 | 其他 FMEA 图节点 | `find_similar_nodes_advanced` | `graph` |
+| 2 | RAG 语义搜索 | `document_embeddings` pgvector（`SemanticSearchSource`） | `semantic_search` |
+| 3 | 经验教训库 | `LessonsLearnedService` | `lessons_learned` |
+| 4 | 当前产品结构 | `_assemble_context` | （context_execution，不计入） |
 
 - **缺口处理**：现状 `RecommendationService` 仅接 #1(keyword)+#4+LLM，**#2/#3 未接入** → 相关子故事验收标 `FAILED`（驱动补齐）。
 
@@ -132,10 +137,21 @@ FailureCause/FailureMode ─OPTIMIZED_BY→ RecommendedAction
 
 当前无"下拉采纳 vs 手工输入"的区分 API。本子故事（02.4/02.16 等 AI_REQUIRED=true）验收以下契约：
 
-- **保存请求携带采纳元数据**：编辑器/向导保存 graph_data 时，凡采纳 AI 推荐的字段，须在保存 payload 中携带 `{field_id, recommendation_id, source, stage_index, adopted_text}`。
-- **后端审计**：保存时解析采纳元数据，写 `ADOPT_RECOMMENDATION` AuditLog（`action="ADOPT_RECOMMENDATION"`，changed_fields 含 field_id/source/stage_index/adopted_text）。
-- **区分采纳 vs 手工**：有采纳元数据 → `ADOPT_RECOMMENDATION`；无 → 普通 `UPDATE`。
-- **当前实现缺口**：`RecommendationService` 返回的 `SuggestionItem` 无 `recommendation_id`；保存 payload 无采纳元数据字段。本子故事验收此契约为 `FAILED`（驱动补齐）。
+- **采纳 payload 位置**：`FMEAUpdate.adoptions: list[RecommendationAdoption]`（**独立于 graph_data**，不混入节点字段）。
+- **`RecommendationAdoption` schema**：
+  ```json
+  {
+    "field_id": "fm_node_123",
+    "recommendation_id": "rec_abc456",
+    "source": "graph",
+    "stage_index": 2,
+    "adopted_text": "焊接电流不足"
+  }
+  ```
+- **幂等性**：`recommendation_id` 幂等——重复保存相同 `recommendation_id` 不得重复写审计（后端按 `recommendation_id` 去重）。
+- **后端审计**：保存时解析 `adoptions`，写 `ADOPT_RECOMMENDATION` AuditLog（`action="ADOPT_RECOMMENDATION"`，changed_fields 含 field_id/recommendation_id/source/stage_index/adopted_text）。
+- **区分采纳 vs 手工**：有 `adoptions` 条目 → `ADOPT_RECOMMENDATION`；无 → 普通 `UPDATE`。
+- **当前实现缺口**：`RecommendationService` 返回的 `SuggestionItem` 无 `recommendation_id`；`FMEAUpdate` 无 `adoptions` 字段。本子故事验收此契约为 `FAILED`（驱动补齐）。
 
 ## AuditLog 与 Outbox 事件分离
 
