@@ -42,7 +42,12 @@ description: Use when asked to verify / walk through / 验收 / 走查 OpenQMS �
 
 ## selector 表
 
-参照 02.7（结构一致，仅渲染器在 `DFMEAWizardPage.tsx`）。
+| selector | 读取方式 | 用途 |
+|---|---|---|
+| Step7 汇总 Card | `renderStep6`（`DFMEAWizardPage.tsx`） | 显示 structCount/funcCount/fmCount/nodes/edges |
+| 「完成」按钮 | `t('wizard.page.finish')`（`DFMEAWizardPage.tsx`） | 触发 wizard_completed=true + 跳转 |
+| 「上一步」 | `t('wizard.page.prevStep')` | 返回 Step6 |
+| completionWarning | `t('wizard.page.completionWarning')` | 各 Step 未完成警告 |
 
 ## 走查剧本
 

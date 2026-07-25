@@ -77,9 +77,15 @@ description: Use when asked to verify / walk through / 验收 / 走查 OpenQMS �
 
 ### E. AI 触发 + 3 required_retrievers 断言
 
-5. **做**：在 PC/DC 字段触发 AI → 抓响应。
-   - **期望**：3 required_retrievers 可观测。
-   - **当前预期 FAIL/MISSING**：同 02.4。
+5. **做**：在 PC/DC 字段触发 AI（`prevention_control` / `detection_control` trigger）→ 抓 `POST /api/fmea/{id}/recommend` 响应。
+   - **期望**：响应含 `suggestions` + `source_executions` + `context_execution` + `generation_execution`。
+   - **断言（AI 契约，关键）**：
+     - `source_executions` 含 3 条目：`graph` / `semantic_search` / `lessons_learned`（required_retrievers；`rule` **不是** required_retriever），每条 `status ∈ {success, empty, unavailable, error}`；健康环境 E2E 下每条必须为 `success | empty`，否则 FAIL；
+     - `context_execution.current_product_structure ∈ {assembled, unavailable}`；
+     - `generation_execution.llm ∈ {success, unavailable, error}`；
+     - 每条 suggestion 的 `source ∈ {rule, graph, semantic_search, lessons_learned, llm}`；
+     - 上述任一字段缺失 → FAIL/MISSING。
+   - **当前预期 FAIL/MISSING**：RecommendResponse 未扩展 `source_executions`/`context_execution`/`generation_execution`；RecommendationService 未接 semantic_search/lessons_learned；SuggestionItem 未扩展 `source`/`recommendation_id`。
 
 ### F. 保存 + 落库断言
 
