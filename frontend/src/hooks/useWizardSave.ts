@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { message } from 'antd';
-import { updateFMEA } from '../api/fmea';
+import { updateFMEA, type RecommendationAdoption } from '../api/fmea';
 import type { GraphData } from '../types';
 
 interface UseWizardSaveOptions {
@@ -66,6 +66,7 @@ export function useWizardSave({ fmeaId, onConflict }: UseWizardSaveOptions) {
     graphData: GraphData,
     title?: string,
     dataHash?: string,
+    adoptions?: RecommendationAdoption[],
   ): Promise<boolean> => {
     // Reject immediately once a conflict is latched — the page must resolve it
     // (reload / discard) before any further save is allowed.
@@ -79,6 +80,7 @@ export function useWizardSave({ fmeaId, onConflict }: UseWizardSaveOptions) {
           ...(title ? { title } : {}),
           graph_data: graphData,
           lock_version: lockVersionRef.current,
+          ...(adoptions && adoptions.length ? { adoptions } : {}),
         });
         lockVersionRef.current = resp.lock_version ?? resp.version;
         if (dataHash) lastSavedHashRef.current = dataHash;
@@ -120,14 +122,14 @@ export function useWizardSave({ fmeaId, onConflict }: UseWizardSaveOptions) {
   }, [fmeaId, onConflict, safeSetStatus]);
 
   /** Debounced save: 500ms delay, cancels previous timer. Returns void (fire-and-forget). */
-  const debouncedSave = useCallback((graphData: GraphData, title?: string, dataHash?: string) => {
+  const debouncedSave = useCallback((graphData: GraphData, title?: string, dataHash?: string, adoptions?: RecommendationAdoption[]) => {
     if (conflictLatchedRef.current) return;
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
     debounceTimerRef.current = setTimeout(() => {
       debounceTimerRef.current = null;
-      enqueueSave(graphData, title, dataHash);
+      enqueueSave(graphData, title, dataHash, adoptions);
     }, 500);
   }, [enqueueSave]);
 
@@ -136,12 +138,13 @@ export function useWizardSave({ fmeaId, onConflict }: UseWizardSaveOptions) {
     graphData: GraphData,
     title?: string,
     dataHash?: string,
+    adoptions?: RecommendationAdoption[],
   ): Promise<boolean> => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
       debounceTimerRef.current = null;
     }
-    return await enqueueSave(graphData, title, dataHash);
+    return await enqueueSave(graphData, title, dataHash, adoptions);
   }, [enqueueSave]);
 
   return {
