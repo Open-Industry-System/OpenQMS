@@ -4,7 +4,7 @@ import { Button, Space, Modal, Spin, Typography, message, Input, Card, Tag, Empt
 import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined, BulbOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
-import { getFMEA, deleteFMEA } from '../../../api/fmea';
+import { getFMEA, deleteFMEA, type RecommendationAdoption } from '../../../api/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
@@ -86,6 +86,27 @@ export default function DFMEAWizardPage() {
     fmeaId: fmeaId!,
     onConflict: () => setConflictOpen(true),
   });
+
+  // AI suggestion adoptions accumulated since the last successful save; sent
+  // whole (last-write-wins per recommendation_id at the backend) on each save.
+  const adoptionsRef = useRef<RecommendationAdoption[]>([]);
+
+  // Record a SmartSuggestionDropdown adoption. Skips empty recommendation_id
+  // (backend audits by recommendation_id); dedupes by replacing same-id entry.
+  const recordAdoption = useCallback((nodeId: string, s: { recommendation_id?: string; source: string; name: string }) => {
+    if (!s.recommendation_id) return;
+    const entry: RecommendationAdoption = {
+      field_id: nodeId,
+      recommendation_id: s.recommendation_id,
+      source: s.source,
+      stage_index: 0,
+      adopted_text: s.name,
+    };
+    adoptionsRef.current = [
+      ...adoptionsRef.current.filter((a) => a.recommendation_id !== entry.recommendation_id),
+      entry,
+    ];
+  }, []);
   const toolStructureMap = t('wizard.scope.toolStructureMap', { returnObjects: true }) as Record<string, string>;
   const selectedTools = parseScopeTokens(wizardScope.tool || '');
   const validation = useWizardValidation(nodes, edges, selectedTools, toolStructureMap);
@@ -139,7 +160,7 @@ export default function DFMEAWizardPage() {
       // user is not silently dropped despite the backend not being fixed.
       if (changed) {
         const normalizedHash = computeHash(normNodes, normEdges, loadedScope);
-        immediateSave({ nodes: normNodes, edges: normEdges, wizardScope: loadedScope }, doc.title, normalizedHash);
+        immediateSave({ nodes: normNodes, edges: normEdges, wizardScope: loadedScope }, doc.title, normalizedHash, adoptionsRef.current);
       }
     }).catch((err: unknown) => {
       const e = err as { response?: { data?: { detail?: string } } };
@@ -168,7 +189,7 @@ export default function DFMEAWizardPage() {
     if (newScope !== undefined) setWizardScope(newScope);
     // Compute hash at enqueue time — NOT at save-success time
     const hash = computeHash(newNodes, newEdges, newScope ?? wizardScope);
-    debouncedSave({ nodes: newNodes, edges: newEdges, wizardScope: newScope ?? wizardScope }, fmea?.title, hash);
+    debouncedSave({ nodes: newNodes, edges: newEdges, wizardScope: newScope ?? wizardScope }, fmea?.title, hash, adoptionsRef.current);
   }, [debouncedSave, wizardScope, fmea?.title]);
 
   const goToStep = useCallback((step: number) => {
@@ -178,7 +199,7 @@ export default function DFMEAWizardPage() {
   const handleFinish = async () => {
     const completedScope = { ...wizardScope, wizard_completed: true };
     const hash = computeHash(nodes, edges, completedScope);
-    const success = await immediateSave({ nodes, edges, wizardScope: completedScope }, fmea?.title, hash);
+    const success = await immediateSave({ nodes, edges, wizardScope: completedScope }, fmea?.title, hash, adoptionsRef.current);
     if (!success) {
       // Save hook already surfaced the underlying error (conflict modal or
       // error toast). Don't navigate — the finish did not persist.
@@ -187,6 +208,9 @@ export default function DFMEAWizardPage() {
       }
       return;
     }
+    // Save succeeded — the adoptions just sent are now persisted at the backend,
+    // so drop them from the accumulator (last-write-wins whole-set semantics).
+    adoptionsRef.current = [];
     navigate(`/fmea/${fmeaId}`);
   };
 
@@ -543,7 +567,7 @@ export default function DFMEAWizardPage() {
                           fmeaId={fmeaId!}
                           value={fmNode.name}
                           onChange={(val) => handleUpdateNodeField(fmNode.id, 'name', val)}
-                          onSelect={(s) => handleUpdateNodeField(fmNode.id, 'name', s.name)}
+                          onSelect={(s) => { recordAdoption(fmNode.id, s); handleUpdateNodeField(fmNode.id, 'name', s.name); }}
                         />
                       </div>
                       {effectNode && (
@@ -555,7 +579,7 @@ export default function DFMEAWizardPage() {
                             fmeaId={fmeaId!}
                             value={effectNode.name}
                             onChange={(val) => handleUpdateNodeField(effectNode.id, 'name', val)}
-                            onSelect={(s) => handleUpdateNodeField(effectNode.id, 'name', s.name)}
+                            onSelect={(s) => { recordAdoption(effectNode.id, s); handleUpdateNodeField(effectNode.id, 'name', s.name); }}
                           />
                         </div>
                       )}
@@ -573,7 +597,7 @@ export default function DFMEAWizardPage() {
                               fmeaId={fmeaId!}
                               value={causeNode.name}
                               onChange={(val) => handleUpdateNodeField(causeNode.id, 'name', val)}
-                              onSelect={(s) => handleUpdateNodeField(causeNode.id, 'name', s.name)}
+                              onSelect={(s) => { recordAdoption(causeNode.id, s); handleUpdateNodeField(causeNode.id, 'name', s.name); }}
                             />
                             <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.preventionControl')}</div>
                             <SmartSuggestionDropdown
@@ -582,7 +606,7 @@ export default function DFMEAWizardPage() {
                               fmeaId={fmeaId!}
                               value={pcName}
                               onChange={(val) => handleUpdateControl(causeNode.id, 'prevention', val)}
-                              onSelect={(s) => handleUpdateControl(causeNode.id, 'prevention', s.name)}
+                              onSelect={(s) => { recordAdoption(causeNode.id, s); handleUpdateControl(causeNode.id, 'prevention', s.name); }}
                             />
                             <div style={{ fontSize: 12, marginBottom: 2, marginTop: 4 }}>{t('wizard.failure.detectionControl')}</div>
                             <SmartSuggestionDropdown
@@ -591,7 +615,7 @@ export default function DFMEAWizardPage() {
                               fmeaId={fmeaId!}
                               value={dcName}
                               onChange={(val) => handleUpdateControl(causeNode.id, 'detection', val)}
-                              onSelect={(s) => handleUpdateControl(causeNode.id, 'detection', s.name)}
+                              onSelect={(s) => { recordAdoption(causeNode.id, s); handleUpdateControl(causeNode.id, 'detection', s.name); }}
                             />
                           </div>
                         );
@@ -874,7 +898,7 @@ export default function DFMEAWizardPage() {
           <Button onClick={handleBackToList} icon={<ArrowLeftOutlined />}>{t('wizard.page.backToList')}</Button>
           <Button type="primary" onClick={() => {
             const hash = computeHash(nodes, edges, wizardScope);
-            immediateSave({ nodes, edges, wizardScope }, fmea?.title, hash);
+            immediateSave({ nodes, edges, wizardScope }, fmea?.title, hash, adoptionsRef.current);
           }} loading={saveStatus === 'saving'}>
             {t('wizard.page.saveDraft')}
           </Button>
