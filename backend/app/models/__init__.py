@@ -46,6 +46,7 @@ from app.models.change_impact import ChangeImpactAnalysis
 from app.models.collaboration_session import CollaborationSession
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.control_plan_version import ControlPlanVersion
+from app.models.cp_sync_outbox import CPSyncOutbox  # noqa: F401
 from app.models.cp_validation import CPValidationFinding, CPValidationOccurrence, CPValidationRun
 from app.models.customer_quality import Customer, CustomerComplaint, RMARecord
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
