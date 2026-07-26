@@ -63,7 +63,7 @@ export default function ScopeTagField({
         trigger_type: triggerType,
         context,
         scope,
-        include_graph: false,
+        include_graph: true,
       });
       const names = res.suggestions.map((s: Suggestion) => s.name).filter(Boolean);
       // 用 valueRef 取最新已选集合，避免请求返回前用户改动造成的 stale tokenSet
