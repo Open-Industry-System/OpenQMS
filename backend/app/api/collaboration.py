@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import get_current_user
@@ -18,6 +18,12 @@ async def heartbeat(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    try:
+        factory_id = await collaboration_service.resolve_document_factory_id(
+            db, req.document_type, req.document_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     await collaboration_service.upsert_session(
         db,
         document_type=req.document_type,
@@ -26,6 +32,7 @@ async def heartbeat(
         user_name=user.display_name or user.username,
         action=req.action,
         editing_area=req.editing_area.model_dump() if req.editing_area else None,
+        factory_id=factory_id,
     )
 
 
