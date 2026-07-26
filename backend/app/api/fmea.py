@@ -192,10 +192,11 @@ async def require_approve_permission(
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ) -> RequestScope:
-    if req.target_status == "approved":
-        level = await get_user_permission(scope.user, Module.FMEA, db)
-        if level < PermissionLevel.APPROVE:
-            raise HTTPException(status_code=403, detail="审批权限不足")
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+    if req.target_status == "approved" and level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="审批权限不足")
     return scope
 
 
