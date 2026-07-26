@@ -3,8 +3,9 @@ import client from "./client";
 export interface Suggestion {
   name: string;
   confidence: number;
-  source: "rule" | "graph" | "llm";
+  source: "rule" | "graph" | "semantic_search" | "lessons_learned" | "llm";
   explanation: string;
+  recommendation_id?: string;
   source_fmea_id?: string;
   source_document_no?: string;
   source_product_line_code?: string;
