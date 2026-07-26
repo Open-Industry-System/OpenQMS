@@ -122,6 +122,8 @@ from app.schemas.recommendation import RecommendRequest
 class _StubFmea:
     def __init__(self):
         self.id = _uuid.uuid4()
+        # Real FMEADocument PK is `fmea_id`; recommend() passes it to run_retrievers.
+        self.fmea_id = self.id
         self.product_line_code = "DC-DC-100"
         self.fmea_type = "DFMEA"
         self.title = "DC-DC转换器设计FMEA"

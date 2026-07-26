@@ -322,7 +322,8 @@ async def recommend(
         )
 
     llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
-    service = RecommendationService(db=db, graph_repo=graph_repo, llm_timeout=llm_timeout)
+    embedding = getattr(fastapi_request.app.state, "embedding_provider", None)
+    service = RecommendationService(db=db, graph_repo=graph_repo, llm_timeout=llm_timeout, embedding=embedding)
     result = await service.recommend(
         fmea_id, request, scope.user, scope, tenant_schema=tenant_schema(fastapi_request),
     )

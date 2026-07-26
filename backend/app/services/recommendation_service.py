@@ -553,10 +553,12 @@ D: 焊后100% X射线探伤 / 焊缝气密性在线检测
 # ---------------------------------------------------------------------------
 
 class RecommendationService:
-    def __init__(self, db: AsyncSession, graph_repo: FMEAGraphRepository, llm_timeout: int | None = None):
+    def __init__(self, db: AsyncSession, graph_repo: FMEAGraphRepository,
+                 llm_timeout: int | None = None, embedding: object | None = None):
         self.db = db
         self.graph_repo = graph_repo
         self.rules = RuleEngine()
+        self.embedding = embedding
         # FMEA prompts on OpenAI-compatible gateways can take ~9s; keep a
         # safe lower bound so configured providers don't look unavailable.
         self.llm_timeout = max(llm_timeout or settings.LLM_TIMEOUT, 15)
@@ -599,6 +601,8 @@ class RecommendationService:
             if pc is not None and not cached_with_llm:
                 pass  # fall through to re-evaluate with LLM
             else:
+                # Cached RecommendResponse predates source_executions/context_execution/
+                # generation_execution; schema defaults ([]) keep the contract intact.
                 return cached_response
 
         # 2. Rule engine（sync, ~1ms）
@@ -626,6 +630,41 @@ class RecommendationService:
         # 4. Merge & deduplicate
         all_suggestions = self._merge_and_deduplicate(rule_suggestions, graph_suggestions)
 
+        # 4b. Required-retriever observability + external knowledge retrievers.
+        # The graph row is built here; semantic_search + lessons_learned rows come
+        # from run_retrievers (P1.3). Never raises — degradations are status rows.
+        from app.schemas.recommendation import (
+            ContextExecution, GenerationExecution, SourceExecution,
+            compute_recommendation_id,
+        )
+        from app.services.retriever_executions import run_retrievers
+
+        anchor = (
+            request.context.get("function_description")
+            or request.context.get("input_text")
+            or request.context.get("failure_mode")
+            or ""
+        )
+
+        source_executions: list[SourceExecution] = []
+        if include_graph:
+            source_executions.append(SourceExecution(
+                source="graph",
+                status="success" if graph_suggestions else "empty",
+                hit_count=len(graph_suggestions),
+            ))
+        else:
+            source_executions.append(SourceExecution(source="graph", status="unavailable"))
+
+        retriever_execs, retriever_items = await run_retrievers(
+            self.db, self.embedding,
+            query_text=anchor, user_product_lines=product_line_codes,
+            fmea_id=fmea.fmea_id, fmea_type=fmea.fmea_type,
+            product_line_code=fmea.product_line_code, user=user,
+        )
+        source_executions.extend(retriever_execs)
+        all_suggestions = self._merge_and_deduplicate(all_suggestions, retriever_items)
+
         # 5. Determine if LLM is needed
         need_llm = self._need_llm(
             llm_available=pc is not None,
@@ -634,11 +673,17 @@ class RecommendationService:
             rule_quality=rule_result.quality,
         )
 
+        generation_execution = GenerationExecution(
+            llm="unavailable" if pc is None else "success"
+        )
+        context_execution = ContextExecution(current_product_structure="assembled")
+
         if need_llm:
             llm_status = "llm_failed"  # default; overwritten on success
             try:
                 import asyncio
                 llm_context = await self._assemble_context(fmea, request)
+                context_execution.current_product_structure = "assembled" if llm_context else "unavailable"
                 if graph_suggestions:
                     llm_context["similar_history"] = [
                         {"name": s.name, "from": s.source_document_no}
@@ -661,6 +706,7 @@ class RecommendationService:
                 llm_status = "success"
             except Exception as e:
                 source = "graph" if graph_suggestions else "rule_fallback"
+                generation_execution.llm = "error"
                 logger.warning("LLM failed, using rule+graph results: %s: %r", type(e).__name__, e)
             # Audit sits OUTSIDE the try/except so audit errors never masquerade
             # as LLM failures. Wrap in its own guard so an audit hiccup never
@@ -676,6 +722,14 @@ class RecommendationService:
         else:
             source = "graph" if graph_suggestions else "rule"
 
+        # Stamp a deterministic content-hash recommendation_id on every suggestion
+        # (adoption-audit dedupe key; suggestions are transient, not persisted).
+        for s in all_suggestions:
+            if not s.recommendation_id:
+                s.recommendation_id = compute_recommendation_id(
+                    request.trigger_type, anchor, s.name, s.source,
+                )
+
         response = RecommendResponse(
             suggestions=all_suggestions[:10],
             source=source,
@@ -683,6 +737,9 @@ class RecommendationService:
             llm_available=pc is not None,
             graph_match_count=len(graph_suggestions),
             effective_scope=effective_scope,
+            source_executions=source_executions,
+            context_execution=context_execution,
+            generation_execution=generation_execution,
         )
 
         if source != "rule_fallback":
