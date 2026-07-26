@@ -430,12 +430,16 @@ async def transition_fmea(
         payload={"version": fmea.version, "product_line_code": fmea.product_line_code, "status": target_status},
     ))
 
-    await db.commit()
+    if target == FMEAState.APPROVED and version is not None:
+        from app.models.cp_sync_outbox import CPSyncOutbox
+        db.add(CPSyncOutbox(
+            fmea_id=fmea.fmea_id,
+            fmea_version_id=version.version_id,
+            event_type="cp.sync_pending_set",
+            payload={"user_id": str(user_id)},
+        ))
 
-    # Trigger CP sync when FMEA is approved
-    if target == FMEAState.APPROVED and version:
-        from app.services.control_plan_service import mark_cp_sync_pending_on_fmea_approve
-        await mark_cp_sync_pending_on_fmea_approve(db, fmea.fmea_id, version.version_id)
+    await db.commit()
 
     await db.refresh(fmea)
     return fmea

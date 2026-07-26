@@ -742,26 +742,6 @@ async def check_stale_items(
     return stale_items
 
 
-async def mark_cp_sync_pending_on_fmea_approve(
-    db: AsyncSession, fmea_id: uuid.UUID, fmea_version_id: uuid.UUID
-) -> list[ControlPlan]:
-    """Mark all linked CPs as sync pending when FMEA is approved.
-
-    NOTE: All FMEA-CP sync logic is consolidated in version_service.py's
-    build_sync_preview and apply_sync_preview. Do NOT create separate sync
-    functions here to avoid architectural redundancy.
-    """
-    result = await db.execute(
-        select(ControlPlan).where(ControlPlan.fmea_ref_id == fmea_id)
-    )
-    cps = list(result.scalars().all())
-    for cp in cps:
-        if cp.source_fmea_version_id != fmea_version_id:
-            cp.sync_pending = True
-    await db.commit()
-    return cps
-
-
 async def apply_cp_sync_pending(db: AsyncSession, outbox, user_id: uuid.UUID) -> int:
     """Idempotently mark linked CPs sync_pending + audit each flip.
 
