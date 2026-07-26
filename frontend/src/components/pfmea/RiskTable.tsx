@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Table, InputNumber, Popover, Tag, Tooltip } from 'antd';
 import type { GraphNode, GraphEdge } from '../../types';
@@ -68,11 +69,7 @@ export default function RiskTable({ nodes, edges, fmeaId, onChange }: RiskTableP
               }} /></label>
           </div>
         );
-        return (
-          <Popover content={content} title={t('wizard.risk.severityDialog')} trigger="click">
-            <ButtonLike value={fe?.severity ?? 0} />
-          </Popover>
-        );
+        return <SeverityCell fe={fe} title={t('wizard.risk.severityDialog')} content={content} />;
       },
     },
     { title: t('wizard.failure.failureMode'), key: 'fm', render: (_: unknown, row: FMEARow) => nodeMap.get(row.failureModeNodeId)?.name },
@@ -124,12 +121,31 @@ export default function RiskTable({ nodes, edges, fmeaId, onChange }: RiskTableP
   return <Table rowKey="key" dataSource={rows} columns={columns as any} pagination={false} size="small" bordered />;
 }
 
-function ButtonLike({ value }: { value: number }) {
+function SeverityCell({ fe, title, content }: {
+  fe: GraphNode | undefined;
+  title: React.ReactNode;
+  content: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      content={content}
+      title={title}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <ButtonLike value={fe?.severity ?? 0} onClick={() => setOpen((v) => !v)} />
+    </Popover>
+  );
+}
+
+function ButtonLike({ value, onClick }: { value: number; onClick?: () => void }) {
   return (
     <a
       role="button"
       tabIndex={0}
       aria-label={typeof value === 'number' && value > 0 ? `severity ${value}` : 'severity unrated'}
+      onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
