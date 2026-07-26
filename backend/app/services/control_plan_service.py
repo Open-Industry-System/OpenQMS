@@ -762,6 +762,35 @@ async def mark_cp_sync_pending_on_fmea_approve(
     return cps
 
 
+async def apply_cp_sync_pending(db: AsyncSession, outbox, user_id: uuid.UUID) -> int:
+    """Idempotently mark linked CPs sync_pending + audit each flip.
+
+    Only flips CPs currently sync_pending=False; already-pending CPs are skipped
+    (no duplicate audit), giving idempotency per (outbox_id, cp_id). Does NOT
+    commit — the worker commits atomically with the outbox status."""
+    from app.models.audit import AuditLog
+    result = await db.execute(
+        select(ControlPlan).where(
+            ControlPlan.fmea_ref_id == outbox.fmea_id,
+            ControlPlan.sync_pending == False,  # noqa: E712
+        )
+    )
+    cps = list(result.scalars().all())
+    for cp in cps:
+        cp.sync_pending = True
+        db.add(AuditLog(
+            table_name="control_plans",
+            record_id=cp.cp_id,
+            action="UPDATE",
+            changed_fields={
+                "sync_pending": "false->true",
+                "trigger_fmea_version_id": str(outbox.fmea_version_id),
+            },
+            operated_by=user_id,
+        ))
+    return len(cps)
+
+
 # ─── CSR Sync ───
 
 async def sync_csr_to_control_plan(
