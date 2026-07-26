@@ -20,6 +20,7 @@
 | 02.5 | PFMEA Step5 risk analysis | **PASS** |
 | 02.6 | PFMEA Step6 optimization | **PASS-NOTE** (status-normalizer not wired — follow-up) |
 | 02.7 | PFMEA Step7 documentation | **PASS** |
+| 02.8 | DFMEA Step1 planning | **PASS** |
 
 ---
 
@@ -103,6 +104,17 @@
 - UPDATE 审计：OK（完成保存 1 条 UPDATE，changed_fields 含 graph_data）
 - 控制台断言：PASS-NOTE — 完成跳转时 Vite HMR 动态导入 FMEAEditorPage 失败（长会话 HMR 已知小问题，reload 即恢复，非 Option X 缺陷）；其余既有噪声。
 - 证据：evidence/02.7-documentation.json, screenshots/02.7-documentation.png
+
+### 02.8 DFMEA Step1 策划与准备 — PASS
+
+- wizardScope 5T：OK（team/timeframe/tool/task/trend 全非空；timeframe 字段名正确，非 timing）
+- System 节点注入：OK（DFMEA 创建后 graph_data.nodes 含初始 System 节点）
+- AI 3 required_retrievers（dfmea_tool + dfmea_trend）：OK（两触发器均 graph=empty, semantic_search=empty, lessons_learned=empty — 新 DFMEA 无历史符合预期；ctx=assembled, llm=success, sources={llm}, content-hash rec_ids）
+- ADOPT_RECOMMENDATION：OK（采纳 tool「边界图」→ changed_fields={source:llm, field_id:wizardScope.tool, recommendation_id:rec_a6ba763508e4, adopted_text:边界图}）
+- UPDATE 审计：OK
+- 控制台断言：PASS（reload 后 0 error）
+- 证据：evidence/02.8-recommend-dfmea_tool.json, evidence/02.8-recommend-dfmea_trend.json, screenshots/02.8-dfmea-step1.png
+- **注**：DFMEA-E2E-001 走查前不存在，通过 `POST /api/fmea` 创建（fmea_type=DFMEA, product_line_code=DC-DC-100-E2E），id c3c8cc3b-70b8-44cc-8453-d3635a843eaa。
 
 ## 尚未走查
 
