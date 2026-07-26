@@ -1,0 +1,49 @@
+{
+  "function_nodes": [
+    {
+      "type": "ProcessItemFunction",
+      "name": "提供稳定 12V 输出",
+      "classification": null,
+      "specification": null
+    },
+    {
+      "type": "ProcessStepFunction",
+      "name": "精确贴装 IC 至焊盘",
+      "classification": "CC",
+      "specification": "偏移度 <= 0.05mm"
+    },
+    {
+      "type": "ProcessWorkElementFunction",
+      "name": "按规程操作贴片机",
+      "classification": "SC",
+      "specification": null
+    }
+  ],
+  "function_edges": [
+    {
+      "type": "HAS_FUNCTION",
+      "source": "we4210428-18b7-41c8-8b8d-4717191bd9c4_processitem",
+      "target": "w17beca96-0bb4-46df-bfcd-94dd752e6e37_func"
+    },
+    {
+      "type": "HAS_FUNCTION",
+      "source": "w58ff7e63-0355-443c-8a07-48a8076339ef_processstep",
+      "target": "w7e3e9918-30ae-49c9-8bd4-dee5a7b6eb56_func"
+    },
+    {
+      "type": "FUNCTION_MAPPED_TO",
+      "source": "w17beca96-0bb4-46df-bfcd-94dd752e6e37_func",
+      "target": "w7e3e9918-30ae-49c9-8bd4-dee5a7b6eb56_func"
+    },
+    {
+      "type": "HAS_FUNCTION",
+      "source": "w5696ea5a-0eef-4f20-a744-f7ba5ab721bc_processworkelement",
+      "target": "w379a1c2b-4465-4ae4-be13-50c9963f7f5a_func"
+    },
+    {
+      "type": "FUNCTION_MAPPED_TO",
+      "source": "w7e3e9918-30ae-49c9-8bd4-dee5a7b6eb56_func",
+      "target": "w379a1c2b-4465-4ae4-be13-50c9963f7f5a_func"
+    }
+  ]
+}

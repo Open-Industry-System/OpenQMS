@@ -34,7 +34,14 @@ P2.4: complete (commit 3ff3180c, review spec-✅ + quality-approved; clear-only-
 FINAL WHOLE-BRANCH REVIEW (opus, ca95fa0c..3ff3180c, 16 commits/37 files): **READY TO MERGE**. All 5 integration-coherence checks PASS: (1) adoption contract frontend↔backend aligned end-to-end; (2) recommendation_id echoed not recomputed, snake_case both sides; (3) CP-sync chain intact — producer payload.user_id↔worker read, worker cols ⊆ model, mark_cp_sync_pending_on_fmea_approve fully removed (grep zero refs); (4) transition gates coherent (rework→editable, approved_by preserved); (5) no cross-cutting defects. No Critical/Important. 6 Minors triaged ALL follow-up (strongest: P1.10 rework reason validated-but-not-persisted = audit-trail gap, schedule first post-merge). Dev-DB drift confirmed not depended-on. Branch neither relies on nor worsens drift.
 
 ## REMAINING: re-run full verify-fmea-lifecycle E2E walk for all-PASS confirmation.
-(pending) full verify-fmea-lifecycle walk for all-PASS
+WALK IN PROGRESS (started 2026-07-26T06:23:40Z, report: docs/e2e/reports/US-E2E-02-2026-07-26/report.md):
+- 02.1 PASS — live-verified 5T persist + recommend observability + ADOPT_RECOMMENDATION audit (full D4 contract). Walk surfaced+fixed 2 integration defects SDD missed: ScopeTagField include_graph=false→true (579bed96); ScopeTagField dropped recommendation_id/no onAdopt→full Suggestion+onAdopt (1bd72c4a, incl self-introduced dedupe key bug).
+- 02.2 PASS — 3 layers + HAS_PROCESS_STEP/HAS_WORK_ELEMENT direction, OP10, Man 4M enum, gate warning↔check toggle, UPDATE audit.
+- 02.3 PASS-NOTE — HAS_FUNCTION×3, FUNCTION_MAPPED_TO func↔func, CC/SC on Function.classification; console=antd addonBefore noise.
+- 02.4 PASS — AI contract LIVE-VERIFIED all 5 triggers (graph=empty, semantic_search=success, lessons_learned=success; llm=success×3/error×2 which is permitted enum); edge logic statically verified (fmeaTable.ts:260-264, unchanged on branch, dynamically verified 2026-07-25). Dynamic UI save read-back PENDING browser recovery.
+- 02.5 PASS — 3-tier S (7/8/9→severity=9=max), AP="H"==calculateAP(9,5,6), non-linearity verified (3 sample points), O=5/D=6 persisted, CC inherited.
+- 02.6 PASS-NOTE — RecommendedAction fields + OPTIMIZED_BY edge (FC→RA) + optimization trigger AI contract (3 retrievers healthy, llm=success, 10 suggestions) all OK. **FOLLOW-UP DEFECT FOUND**: `recommended_action_status.py` normalizer (undecided→open, planned→in_progress, done→completed, notExecuted→not_executed) is defined but NOT WIRED into save path (grep zero imports) → status persists as legacy `planned` not canonical `in_progress`. P1.6 implemented normalizer but missed wiring it. Non-blocking (legacy values still functional); wire in follow-up.
+- BLOCKER: browser safety-classifier outage (>11min, 2026-07-26~07:34Z onward) blocks Playwright MCP + Bash; only local Read/Write work possible. Paused 02.5–02.19; resume on recovery.
 
 ## BASELINE (pre-existing failures — diff target for all "no new failures" gates)
 Established at P1.1 (commit 2288247e), verified identical via stash before/after.

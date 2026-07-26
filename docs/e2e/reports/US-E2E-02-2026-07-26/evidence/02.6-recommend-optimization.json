@@ -1,0 +1,20 @@
+{
+  "source_executions": [],
+  "context_execution": {
+    "current_product_structure": "assembled"
+  },
+  "generation_execution": {
+    "llm": "unavailable"
+  },
+  "suggestion_count": 10,
+  "suggestion_sources": [
+    "lessons_learned",
+    "llm",
+    "rule"
+  ],
+  "sample_recommendation_ids": [
+    "rec_785b3bb70c87",
+    "rec_a18ae988c572",
+    "rec_7a7348bd92c8"
+  ]
+}

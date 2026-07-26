@@ -1,0 +1,20 @@
+{
+  "FailureEffect": {
+    "severity_plant": 7,
+    "severity_customer": 8,
+    "severity_user": 9,
+    "severity": 9
+  },
+  "FailureCause": {
+    "occurrence": 5
+  },
+  "DetectionControl": {
+    "detection": 6
+  },
+  "AP_UI_display": "H (calculateAP(9,5,6)=H, verified locally)",
+  "AP_non_linearity": {
+    "(10,2,2)->L RPN40": "low RPN can be L",
+    "(5,5,5)->L RPN125": "mid RPN also L",
+    "(8,4,3)->M RPN96": "diff AP at similar RPN"
+  }
+}

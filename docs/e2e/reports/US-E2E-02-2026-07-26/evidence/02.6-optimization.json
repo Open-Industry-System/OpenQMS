@@ -1,0 +1,41 @@
+{
+  "RecommendedAction": [
+    {
+      "ap": null,
+      "id": "w07b455a9-2853-4010-8a15-a35a65dd1ffa_ra",
+      "name": "增加 AOI 复检工位",
+      "type": "RecommendedAction",
+      "status": "planned",
+      "due_date": null,
+      "severity": 0,
+      "detection": 0,
+      "occurrence": 0,
+      "revised_ap": null,
+      "requirement": null,
+      "responsible": "张工",
+      "action_taken": null,
+      "severity_user": null,
+      "specification": null,
+      "classification": null,
+      "process_number": null,
+      "severity_plant": null,
+      "completion_date": null,
+      "revised_severity": 0,
+      "revised_detection": 0,
+      "severity_customer": null,
+      "revised_occurrence": 0,
+      "risk_acceptance_reason": null,
+      "recommended_action_status": null,
+      "control_sufficiency_reason": null,
+      "management_review_evidence": null
+    }
+  ],
+  "OPTIMIZED_BY_edges": [
+    {
+      "type": "OPTIMIZED_BY",
+      "src_type": "FailureCause",
+      "tgt_type": "RecommendedAction"
+    }
+  ],
+  "DEFECT_status_not_normalized": "status persisted as legacy \"planned\" not canonical \"in_progress\" — normalizer exists in recommended_action_status.py but is not wired into save path"
+}
