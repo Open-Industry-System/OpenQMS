@@ -568,7 +568,7 @@ export default function FMEAEditorPage() {
     try {
       const updated = await updateFMEA(id, {
         title: fmea.title,
-        graph_data: { nodes, edges },
+        graph_data: { nodes, edges, wizardScope: fmea.graph_data?.wizardScope },
         lock_version: fmea.lock_version,
       });
       setFmea(updated);
@@ -630,7 +630,7 @@ export default function FMEAEditorPage() {
     try {
       const updated = await updateFMEA(id, {
         title: fmea.title,
-        graph_data: { nodes, edges },
+        graph_data: { nodes, edges, wizardScope: fmea.graph_data?.wizardScope },
         lock_version: fmea.lock_version,
         confirmed_latest_lock_version: conflictInfo.latest_lock_version,
       });

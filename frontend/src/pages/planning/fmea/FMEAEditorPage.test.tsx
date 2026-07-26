@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { App } from "antd";
 import FMEAEditorPage from "./FMEAEditorPage";
@@ -144,10 +144,11 @@ vi.mock("../../../components/collaboration", () => ({
   ConflictResolutionModal: () => null,
 }));
 vi.mock("../../../components/design", () => ({
-  PageShell: ({ children, title, extra }: { children: React.ReactNode; title?: React.ReactNode; extra?: React.ReactNode }) => (
+  PageShell: ({ children, title, extra, actions }: { children: React.ReactNode; title?: React.ReactNode; extra?: React.ReactNode; actions?: React.ReactNode }) => (
     <div>
       <h1>{title}</h1>
       <div>{extra}</div>
+      <div>{actions}</div>
       {children}
     </div>
   ),
@@ -308,5 +309,33 @@ describe("FMEAEditorPage Class column", () => {
     });
     // And the Select's CC option is selectable (Filter Code still editable on FailureMode).
     expect(screen.getAllByText("CC").length).toBeGreaterThan(0);
+  });
+
+  it("save preserves wizardScope in graph_data payload (N4)", async () => {
+    // Doc completed the wizard → its graph_data carries wizardScope with 5T fields.
+    const wizardScope = {
+      wizard_completed: true,
+      team: "质量小组",
+      timeframe: "2026-Q3",
+      tool: "SMT 产线",
+      task: "贴装工艺",
+      trend: "无",
+    };
+    const doc = makeDoc("PFMEA", "CC", "");
+    doc.graph_data = { ...doc.graph_data, wizardScope };
+    mocks.getFMEA.mockResolvedValue(doc);
+    mocks.updateFMEA.mockResolvedValue(doc);
+    renderEditor();
+    await waitFor(() => expect(mocks.getFMEA).toHaveBeenCalled());
+    // Wait for editor table to render before saving.
+    await waitFor(() => expect(screen.getAllByText("CC").length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: /actions\.save/i }));
+
+    await waitFor(() => expect(mocks.updateFMEA).toHaveBeenCalled());
+    const [, payload] = mocks.updateFMEA.mock.calls[0];
+    expect(payload.graph_data.wizardScope).toEqual(wizardScope);
+    expect(payload.graph_data.nodes).toBeDefined();
+    expect(payload.graph_data.edges).toBeDefined();
   });
 });

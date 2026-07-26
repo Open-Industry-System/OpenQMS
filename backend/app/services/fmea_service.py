@@ -236,6 +236,9 @@ async def _apply_fmea_update(
         changed_fields["title"] = title
         fmea.title = title
     if graph_data is not None:
+        existing_scope = (fmea.graph_data or {}).get("wizardScope")
+        if existing_scope is not None and graph_data.get("wizardScope") is None:
+            raise ValueError("wizard_scope_required")
         import json
         old_graph = json.dumps(fmea.graph_data, sort_keys=True) if fmea.graph_data else ""
         new_graph = json.dumps(graph_data, sort_keys=True)

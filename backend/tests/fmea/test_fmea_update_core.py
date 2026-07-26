@@ -43,3 +43,20 @@ async def test_apply_fmea_update_does_not_commit(db, default_factory, admin_user
     await db.flush()
     outbox = (await db.execute(select(GraphSyncOutbox).where(GraphSyncOutbox.aggregate_id == fmea.fmea_id))).scalars().all()
     assert len(outbox) >= 1   # 副作用已 add 到 session，但函数未 commit
+
+
+@pytest.mark.asyncio
+async def test_update_cannot_drop_wizard_scope(db, default_factory, admin_user):
+    """N4：已带 wizardScope 的文档，更新时 incoming graph_data 丢掉 wizardScope 必须被拒绝。"""
+    graph = {
+        "nodes": [{"id": "n1", "type": "FailureMode", "name": "x"}],
+        "edges": [],
+        "wizardScope": {"wizard_completed": True},
+    }
+    fmea = await _make_fmea(db, default_factory.id, admin_user.user_id, graph=graph)
+    with pytest.raises(ValueError):
+        await update_fmea(
+            db, fmea, title=None,
+            graph_data={"nodes": [], "edges": []},  # wizardScope dropped
+            user_id=admin_user.user_id,
+        )
