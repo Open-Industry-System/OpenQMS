@@ -139,6 +139,14 @@ description: Use when asked to verify / walk through / 验收 / 走查 OpenQMS �
 | **MISSING** | RecommendResponse 缺字段；无 adoptions API；SuggestionItem 无 source/recommendation_id |
 | **BLOCKED** | LLM 凭证缺 |
 
+### 浏览器控制台断言（收尾必做）
+
+走查剧本全部步骤完成后、返回判定前，执行一次控制台检查（判定规则见总 skill `.claude/skills/verify-fmea-lifecycle/SKILL.md`「缺陷分类 → 浏览器控制台断言」）：
+
+- **做**：`browser_console_messages(level="error")`。
+- **期望**：无 error 级消息。
+- **断言**：无 error → 通过；有与本子故事相关的 error → 本故事判 **FAIL**（error 文本记入缺陷清单 + 截图）；仅有无关噪声 error → **PASS-NOTE** 并附文本。多标签/多账号走查对每个标签页分别检查。
+
 ## 报告片段
 
 ```markdown

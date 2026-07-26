@@ -109,7 +109,7 @@ E2E 必须直接调用 `POST /api/fmea/{id}/transition`（绕过前端）验证�
 
 1. **前置核对**：执行「前置」4 项。任一项不过 → 停下（版本不符）或将受影响子故事记 BLOCKED（LLM 凭证缺），不跑受影响部分。
 2. **启动**：`browser_navigate("http://localhost:5174")`；`GET http://localhost:8001/api/e2e/seed-state` 拿账号密码；记录走查开始 ISO 时间（审计查询的 `start` 窗口用）；创建报告文件夹（见「报告模板」）。
-3. **依次调用子 skill**：按「子 skill 索引」顺序 1→19，对每个子故事调用其 `verify-fmea-lifecycle-*` 子 skill。每个子 skill 负责该故事的 selector 级走查、回读 API 断言、审计断言，并返回一个判定 + 证据（截图/回读 JSON）。
+3. **依次调用子 skill**：按「子 skill 索引」顺序 1→19，对每个子故事调用其 `verify-fmea-lifecycle-*` 子 skill。每个子 skill 负责该故事的 selector 级走查、回读 API 断言、审计断言，并返回一个判定 + 证据（截图/回读 JSON）。每个子 skill 收尾时必须执行「浏览器控制台断言」（见「缺陷分类」节），把 error 级控制台消息纳入判定。
 4. **收集判定**：每子故事跑完记录一行（子故事 / 期望 / 断言结果 / 标签）。某子故事 FAIL/MISSING **不阻断**后续子故事（除非其前置依赖使后续无法执行——如 02.15 FAIL 导致 02.16–02.18 无编辑器可用，此时后续记 BLOCKED 并注明原因）。
 5. **epic 聚合**：epic PASS = 19 个子故事全部 PASS/PASS-NOTE（合取）。任一 FAIL/MISSING → epic「有缺陷」；任一 BLOCKED → epic 整体 BLOCKED（或部分 BLOCKED，注明哪几项）。
 6. **收尾**：admin token（seed-state 取密码 → `POST /api/auth/login`）→ `POST http://localhost:8001/api/e2e/cleanup?prefix=<本次走查前缀>`（只删本前缀走查记录，不删 seed）；关浏览器；写报告。
@@ -156,6 +156,19 @@ E2E 必须直接调用 `POST /api/fmea/{id}/transition`（绕过前端）验证�
 **当作已实现去测**：找不到 selector / 面板没渲染 / 字段不在响应 → 直接判 MISSING，**不**自行脑补「这功能可能还没做所以跳过」。
 
 每个 FAIL/MISSING 用浏览器 MCP 截图存到本走查文件夹的 `screenshots/` 子目录。
+
+### 浏览器控制台断言（所有子故事共用）
+
+前端运行时错误经常「UI 表面没崩、但后台已抛异常」——选择器断言抓不到。故**每个子 skill 在其走查剧本结尾（收尾、返回判定前）必须执行一次控制台检查**：
+
+- **做**：`browser_console_messages(level="error")`，读取本标签页当前累计的 error 级控制台消息。
+- **期望**：无 error 级消息。
+- **断言**：
+  - 无 error → 通过，不单独打标签。
+  - 有 error 且与本子故事功能相关（组件渲染异常、未捕获 Promise reject、资源 404 阻塞交互等）→ 该子故事判 **FAIL**，把 error 文本记入报告「缺陷清单」并截图。
+  - 有 error 但与本子故事无关（浏览器扩展、第三方埋点、favicon 404 等噪声）→ 记 **PASS-NOTE** 并附 error 文本说明。
+- 拿不准相关性时**从严**：与本子故事相关的 error 判 FAIL，不自行脑补「可能无害」。
+- 多标签/多账号走查（如 02.17 协同）对每个标签页分别检查。
 
 ## 报告模板
 
