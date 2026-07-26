@@ -290,6 +290,7 @@ export default function DFMEAWizardPage() {
             triggerType="dfmea_tool"
             fmeaId={fmeaId!}
             context={{ fmea_title: fmea?.title, product_line_code: fmea?.product_line_code ?? '', task: wizardScope.task || '', team: wizardScope.team || '' }}
+            onAdopt={(s) => recordAdoption('wizardScope.tool', s)}
           />
         </Field>
         <Field label={t('wizard.scope.task')}>
@@ -303,6 +304,7 @@ export default function DFMEAWizardPage() {
             triggerType="dfmea_trend"
             fmeaId={fmeaId!}
             context={{ fmea_title: fmea?.title, product_line_code: fmea?.product_line_code ?? '', task: wizardScope.task || '', team: wizardScope.team || '' }}
+            onAdopt={(s) => recordAdoption('wizardScope.trend', s)}
           />
         </Field>
       </div>
