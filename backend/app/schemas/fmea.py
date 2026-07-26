@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -7,6 +8,17 @@ from pydantic import BaseModel, Field, field_validator
 # SystemFunction = "SystemFunction"
 # SubsystemFunction = "SubsystemFunction"
 # ComponentFunction = "ComponentFunction"
+
+RecommendedActionStatus = Literal["open", "in_progress", "completed", "not_executed"]
+
+
+class RecommendationAdoption(BaseModel):
+    field_id: str
+    recommendation_id: str
+    source: str
+    stage_index: int
+    adopted_text: str
+
 
 class GraphNodeSchema(BaseModel):
     id: str
@@ -42,6 +54,13 @@ class GraphNodeSchema(BaseModel):
     revised_detection: int = Field(default=0, ge=0, le=10)   # 改进后探测度 (1-10)
     ap: str | None = None                                    # 初始措施优先级 (H / M / L)
     revised_ap: str | None = None                            # 改进后的措施优先级 (H / M / L)
+
+    # Step 6 风险处置理由（挂 FailureCause；placeholder 行回退到 FailureMode）
+    control_sufficiency_reason: str | None = None
+    risk_acceptance_reason: str | None = None
+    management_review_evidence: str | None = None
+    # RecommendedAction canonical 状态（与 legacy `status` 并存，迁移期）
+    recommended_action_status: RecommendedActionStatus | None = None
 
     @field_validator("ap")
     @classmethod
@@ -96,6 +115,7 @@ class FMEAUpdate(BaseModel):
     product_line_code: str | None = None
     lock_version: int | None = None
     confirmed_latest_lock_version: int | None = None
+    adoptions: list[RecommendationAdoption] | None = None
 
 
 class FMEAResponse(BaseModel):
@@ -126,3 +146,4 @@ class FMEAListResponse(BaseModel):
 
 class TransitionRequest(BaseModel):
     target_status: str
+    reason: str | None = None
