@@ -20,6 +20,7 @@ async def write_adoption_audits(
         select(AuditLog.changed_fields["recommendation_id"].astext).where(
             AuditLog.table_name == "fmea_documents",
             AuditLog.action == "ADOPT_RECOMMENDATION",
+            AuditLog.record_id == fmea_id,
         )
     )).scalars().all()
     seen = set(existing)

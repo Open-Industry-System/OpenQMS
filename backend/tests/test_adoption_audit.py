@@ -51,3 +51,18 @@ async def test_idempotent_by_recommendation_id(db, default_factory, admin_user):
     rows = (await db.execute(select(AuditLog).where(
         AuditLog.action == "ADOPT_RECOMMENDATION"))).scalars().all()
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_same_recommendation_id_audits_per_fmea(db, default_factory, admin_user):
+    fmea1 = await _mk(db, default_factory.id)
+    fmea2 = await _mk(db, default_factory.id)
+    n1 = await write_adoption_audits(db, fmea1.fmea_id, [_a("r1")], admin_user.user_id)
+    await db.commit()
+    n2 = await write_adoption_audits(db, fmea2.fmea_id, [_a("r1")], admin_user.user_id)
+    await db.commit()
+    assert n1 == 1
+    assert n2 == 1
+    rows = (await db.execute(select(AuditLog).where(
+        AuditLog.action == "ADOPT_RECOMMENDATION"))).scalars().all()
+    assert len(rows) == 2
