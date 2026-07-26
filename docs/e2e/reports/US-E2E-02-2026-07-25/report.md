@@ -145,6 +145,8 @@ if target == FMEAState.APPROVED and version:
 | N6 | RiskTable severity Popover 点击不展开 | 中 | screenshots/02.5-severity-popover.png；触发方式（role button / 鼠标事件 / 键盘）均无法展开 .ant-popover |
 | N7 | 编辑器表格 buildRows 在某些状态下渲染空（"No data"） | 中 | screenshots/02.15-editor-table-no-data.png；在 wizardScope 被 N4 清空后表格无法从 graph_data 重建行 |
 
+- **N3 澄清（2026-07-26）**: `/api/collaboration/online` 非产品/规格端点——走查探测了错误 URL。真实在线状态端点为 `GET /api/collaboration/{document_type}/{document_id}/active-users`（`api/collaboration.py:47`，由 `useCollaboration.ts` 消费）。02.17 规格为行为式（"在线用户列表 + 短轮询"），未指名 `/online`。真正的在线功能缺陷是 N2（heartbeat 500），已由 N2 修复任务修复；N3 无需产品改动。
+
 ### 截图
 
 - `screenshots/02.1-step1-filled.png` — PFMEA Step1 5T 填写完成
