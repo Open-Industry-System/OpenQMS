@@ -82,6 +82,20 @@ describe('RiskTable', () => {
     expect(await screen.findByText('三段式严重度评分')).toBeInTheDocument();
     expect(await screen.findByText('本厂严重度')).toBeInTheDocument();
   });
+
+  it('does NOT open the severity popover on hover (click-only)', async () => {
+    const user = userEvent.setup();
+    const { nodes, edges } = baseRow();
+    render(<RiskTable nodes={nodes} edges={edges} fmeaId="f1" onChange={() => {}} />, { wrapper: I18nTestWrapper });
+    const severityButton = screen.getByRole('button', { name: /severity/i });
+    await user.hover(severityButton);
+    // give rc-trigger's hover delay a chance to fire — must still NOT open
+    await new Promise((r) => setTimeout(r, 250));
+    expect(screen.queryByText('三段式严重度评分')).not.toBeInTheDocument();
+    // click still opens it
+    await user.click(severityButton);
+    expect(await screen.findByText('三段式严重度评分')).toBeInTheDocument();
+  });
   describe('computeSeverity', () => {
     it('returns the max of the three sub-fields', () => {
       expect(computeSeverity(4, 8, 8)).toBe(8);

@@ -131,21 +131,22 @@ function SeverityCell({ fe, title, content }: {
     <Popover
       content={content}
       title={title}
+      trigger="click"
       open={open}
       onOpenChange={setOpen}
     >
-      <ButtonLike value={fe?.severity ?? 0} onClick={() => setOpen((v) => !v)} />
+      <ButtonLike value={fe?.severity ?? 0} />
     </Popover>
   );
 }
 
-function ButtonLike({ value, onClick }: { value: number; onClick?: () => void }) {
+function ButtonLike({ value, ...rest }: { value: number } & React.HTMLAttributes<HTMLAnchorElement>) {
   return (
     <a
       role="button"
       tabIndex={0}
       aria-label={typeof value === 'number' && value > 0 ? `severity ${value}` : 'severity unrated'}
-      onClick={onClick}
+      {...rest}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
