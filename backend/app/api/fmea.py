@@ -127,6 +127,8 @@ async def update_fmea(
     if scope.factory_scope.accessible_factory_ids is not None:
         if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
             raise HTTPException(status_code=404, detail="FMEA not found")
+    if fmea.status not in ("draft", "rework"):
+        raise HTTPException(status_code=409, detail="当前状态不可编辑（仅草稿/返工可编辑）")
     graph_dict = req.graph_data.model_dump() if req.graph_data else None
     try:
         fmea = await fmea_service.update_fmea(
@@ -188,7 +190,7 @@ async def delete_fmea(
     await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id)
 
 
-async def require_approve_permission(
+async def require_transition_permission(
     req: TransitionRequest,
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
@@ -196,8 +198,10 @@ async def require_approve_permission(
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
-    if req.target_status == "approved" and level < PermissionLevel.APPROVE:
+    if req.target_status in ("approved", "rework") and level < PermissionLevel.APPROVE:
         raise HTTPException(status_code=403, detail="审批权限不足")
+    if req.target_status == "rework" and not (req.reason and req.reason.strip()):
+        raise HTTPException(status_code=422, detail="驳回必须携带非空 reason")
     return scope
 
 
@@ -206,12 +210,16 @@ async def transition_fmea(
     fmea_id: uuid.UUID,
     req: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    scope: RequestScope = Depends(require_approve_permission),
+    scope: RequestScope = Depends(require_transition_permission),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
     check_factory_access(fmea.factory_id, scope)
+    if req.target_status == "in_review":
+        wizard_scope = (fmea.graph_data or {}).get("wizardScope") or {}
+        if wizard_scope.get("wizard_completed") is not True:
+            raise HTTPException(status_code=422, detail="向导未完成，不能提交评审")
     try:
         fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id)
     except ValueError as e:

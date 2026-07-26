@@ -25,7 +25,10 @@ async def _make_fmea(db, factory_id, user_id, status):
     fmea = FMEADocument(
         fmea_id=uuid.uuid4(), document_no=f"PFMEA-N5-{uuid.uuid4().hex[:6]}", title="t",
         fmea_type="PFMEA", product_line_code="DC-DC-100", factory_id=factory_id,
-        status=status, created_by=user_id, graph_data={"nodes": [], "edges": []},
+        status=status, created_by=user_id,
+        # P1.10 起 draft→in_review 需 wizardScope.wizard_completed==true（422 门禁），
+        # 这里置 True 以满足提交前提（不影响 VIEW/EDIT/APPROVE 权限断言）。
+        graph_data={"nodes": [], "edges": [], "wizardScope": {"wizard_completed": True}},
     )
     db.add(fmea); await db.flush()
     return fmea
