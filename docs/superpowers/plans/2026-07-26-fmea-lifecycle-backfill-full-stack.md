@@ -855,7 +855,7 @@ git commit -m "feat(fmea): adoption audit service (ADOPT_RECOMMENDATION, idempot
   - `update_fmea(..., adoptions: list | None = None)` — trailing kwarg; when non-empty, calls `write_adoption_audits(db, fmea.fmea_id, adoptions, user_id)` inside the same transaction before commit.
   - PUT route forwards `req.adoptions`.
 
-> **Note:** `update_fmea`'s real signature is a wrapper over `_apply_fmea_update` (`fmea_service.py:196`). Read the public `update_fmea` first, add the `adoptions` kwarg there, and call `write_adoption_audits` in the same function that calls `db.commit()` so the audit is atomic with the update.
+> **Note:** the public `update_fmea` is at `fmea_service.py:282` — a thin wrapper that calls `_apply_fmea_update(...)` then `await db.commit()` at `:296` and `db.refresh(fmea)`. Add the `adoptions: list | None = None` trailing kwarg to **this** signature (`:282-291`), and insert the `write_adoption_audits` call between `_apply_fmea_update(...)` and `await db.commit()` so the audit is atomic with the update. The existing route call uses keyword args and existing tests call positionally — a trailing kwarg breaks neither.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -934,12 +934,17 @@ def normalize_action_status(value: str | None) -> str | None:
     return _LEGACY_MAP.get(value)
 ```
 
-In the public `update_fmea` (in `fmea_service.py`), add `adoptions: list | None = None` to the signature and, immediately before its `await db.commit()`:
+In the public `update_fmea` (`fmea_service.py:282`), add `adoptions: list | None = None` to the signature (`:282-291`) and insert the audit call between `_apply_fmea_update(...)` and `await db.commit()` (`:296`):
 
 ```python
+    fmea = await _apply_fmea_update(
+        db, fmea, title, graph_data, user_id, product_line_code,
+        lock_version, confirmed_latest_lock_version,
+    )
     if adoptions:
         from app.services.adoption_audit import write_adoption_audits
         await write_adoption_audits(db, fmea.fmea_id, adoptions, user_id)
+    await db.commit()
 ```
 
 In `api/fmea.py` `update_fmea` route (`:132-136`), pass `req.adoptions` through:
