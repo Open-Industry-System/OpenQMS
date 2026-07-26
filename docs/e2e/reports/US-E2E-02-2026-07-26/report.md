@@ -21,6 +21,7 @@
 | 02.6 | PFMEA Step6 optimization | **PASS-NOTE** (status-normalizer not wired — follow-up) |
 | 02.7 | PFMEA Step7 documentation | **PASS** |
 | 02.8 | DFMEA Step1 planning | **PASS** |
+| 02.9 | DFMEA Step2 structure | **PASS** |
 
 ---
 
@@ -115,6 +116,16 @@
 - 控制台断言：PASS（reload 后 0 error）
 - 证据：evidence/02.8-recommend-dfmea_tool.json, evidence/02.8-recommend-dfmea_trend.json, screenshots/02.8-dfmea-step1.png
 - **注**：DFMEA-E2E-001 走查前不存在，通过 `POST /api/fmea` 创建（fmea_type=DFMEA, product_line_code=DC-DC-100-E2E），id c3c8cc3b-70b8-44cc-8453-d3635a843eaa。
+- **i18n 缺口（follow-up）**：Tool/Trend 字段紫色 AI 建议标签显示中文，因 `recommendation_service.py:464` 的 `PROMPT_TEMPLATES["dfmea_tool"]` 等是中文写死的（"你是资深DFMEA工程师…示例: 边界图"），LLM 无论 UI 语言都返回中文名。i18n 预设（灰色 "+ Boundary Diagram"）已正确英文化。属 Option X 范围外的既有 prompt 国际化缺口。
+
+### 02.9 DFMEA Step2 结构分析 — PASS
+
+- 三层结构：OK（System: DC-DC 转换器系统 → Subsystem: 功率变换子系统 → Component: 变压器 T1）
+- 共享边词汇：OK（System→Subsystem 用 `HAS_PROCESS_STEP`；Subsystem→Component 用 `HAS_WORK_ELEMENT`；**无** HAS_SUBSYSTEM/HAS_COMPONENT 禁用边）
+- 与 PFMEA Step2 边类型完全一致（按 `graphPresentation.ts:239-240` 映射）
+- UPDATE 审计：OK
+- 控制台断言：PASS（0 error）
+- 证据：evidence/02.9-dfmea-structure.json, screenshots/02.9-dfmea-structure.png
 
 ## 尚未走查
 
