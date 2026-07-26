@@ -16,7 +16,7 @@ import {
   HistoryOutlined, RadarChartOutlined, HolderOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getFMEA, updateFMEA, transitionFMEA } from "../../../api/fmea";
+import { getFMEA, updateFMEA, transitionFMEA, type RecommendationAdoption } from "../../../api/fmea";
 import { formatFMEAError } from "../../../utils/fmeaError";
 import { getFMEAVersion } from "../../../api/version";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
@@ -372,6 +372,27 @@ export default function FMEAEditorPage() {
   // Base snapshot for three-way diff
   const baseGraphRef = useRef<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
 
+  // AI suggestion adoptions accumulated since the last successful save; sent
+  // whole (last-write-wins per recommendation_id at the backend) on each save.
+  const adoptionsRef = useRef<RecommendationAdoption[]>([]);
+
+  // Record a SmartSuggestionDropdown adoption. Skips empty recommendation_id
+  // (backend audits by recommendation_id); dedupes by replacing same-id entry.
+  const recordAdoption = useCallback((nodeId: string, s: { recommendation_id?: string; source: string; name: string }) => {
+    if (!s.recommendation_id) return;
+    const entry: RecommendationAdoption = {
+      field_id: nodeId,
+      recommendation_id: s.recommendation_id,
+      source: s.source,
+      stage_index: 0,
+      adopted_text: s.name,
+    };
+    adoptionsRef.current = [
+      ...adoptionsRef.current.filter((a) => a.recommendation_id !== entry.recommendation_id),
+      entry,
+    ];
+  }, []);
+
   // Conflict resolution state
   const [conflictVisible, setConflictVisible] = useState(false);
   const [conflictInfo, setConflictInfo] = useState<ConflictInfo | null>(null);
@@ -570,8 +591,10 @@ export default function FMEAEditorPage() {
         title: fmea.title,
         graph_data: { nodes, edges, wizardScope: fmea.graph_data?.wizardScope },
         lock_version: fmea.lock_version,
+        ...(adoptionsRef.current.length ? { adoptions: adoptionsRef.current } : {}),
       });
       setFmea(updated);
+      adoptionsRef.current = [];
       // Update base snapshot after successful save
       baseGraphRef.current = {
         nodes: JSON.parse(JSON.stringify(nodes)),
@@ -633,8 +656,10 @@ export default function FMEAEditorPage() {
         graph_data: { nodes, edges, wizardScope: fmea.graph_data?.wizardScope },
         lock_version: fmea.lock_version,
         confirmed_latest_lock_version: conflictInfo.latest_lock_version,
+        ...(adoptionsRef.current.length ? { adoptions: adoptionsRef.current } : {}),
       });
       setFmea(updated);
+      adoptionsRef.current = [];
       baseGraphRef.current = {
         nodes: JSON.parse(JSON.stringify(nodes)),
         edges: JSON.parse(JSON.stringify(edges)),
@@ -1008,7 +1033,7 @@ export default function FMEAEditorPage() {
                 fmeaId={fmeaId}
                 value={node?.name || ""}
                 onChange={(val) => updateNode(row.failureModeNodeId, "name", val)}
-                onSelect={(s) => updateNode(row.failureModeNodeId, "name", s.name)}
+                onSelect={(s) => { recordAdoption(row.failureModeNodeId, s); updateNode(row.failureModeNodeId, "name", s.name); }}
                 disabled={!canEdit('fmea')}
               />
               {canEdit('fmea') && (
@@ -1149,7 +1174,7 @@ export default function FMEAEditorPage() {
                   fmeaId={fmeaId}
                   value={node?.name || ""}
                   onChange={(val) => updateNode(row.failureCauseNodeId!, "name", val)}
-                  onSelect={(s) => updateNode(row.failureCauseNodeId!, "name", s.name)}
+                  onSelect={(s) => { recordAdoption(row.failureCauseNodeId!, s); updateNode(row.failureCauseNodeId!, "name", s.name); }}
                   disabled={!canEdit('fmea')}
                 />
                 {canEdit('fmea') && (
@@ -1230,7 +1255,7 @@ export default function FMEAEditorPage() {
             fmeaId={fmeaId}
             value={node?.name || ""}
             onChange={(val) => updateNode(nodeId, "name", val)}
-            onSelect={(s) => updateNode(nodeId, "name", s.name)}
+            onSelect={(s) => { recordAdoption(nodeId, s); updateNode(nodeId, "name", s.name); }}
             disabled={!canEdit('fmea')}
           />
         );
@@ -1257,7 +1282,7 @@ export default function FMEAEditorPage() {
             fmeaId={fmeaId}
             value={node?.name || ""}
             onChange={(val) => updateNode(nodeId, "name", val)}
-            onSelect={(s) => updateNode(nodeId, "name", s.name)}
+            onSelect={(s) => { recordAdoption(nodeId, s); updateNode(nodeId, "name", s.name); }}
             disabled={!canEdit('fmea')}
           />
         );
@@ -1409,7 +1434,7 @@ export default function FMEAEditorPage() {
             fmeaId={fmeaId}
             value={node?.name || ""}
             onChange={(val) => updateNode(nodeId, "name", val)}
-            onSelect={(s) => updateNode(nodeId, "name", s.name)}
+            onSelect={(s) => { recordAdoption(nodeId, s); updateNode(nodeId, "name", s.name); }}
             disabled={!canEdit('fmea')}
           />
         );
