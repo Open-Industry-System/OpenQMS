@@ -288,11 +288,15 @@ async def update_fmea(
     product_line_code: str | None = None,
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
+    adoptions: list | None = None,
 ) -> FMEADocument:
     fmea = await _apply_fmea_update(
         db, fmea, title, graph_data, user_id, product_line_code,
         lock_version, confirmed_latest_lock_version,
     )
+    if adoptions:
+        from app.services.adoption_audit import write_adoption_audits
+        await write_adoption_audits(db, fmea.fmea_id, adoptions, user_id)
     await db.commit()
     await db.refresh(fmea)
     return fmea

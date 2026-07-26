@@ -133,6 +133,7 @@ async def update_fmea(
             db, fmea, req.title, graph_dict, scope.user.user_id, req.product_line_code,
             lock_version=req.lock_version,
             confirmed_latest_lock_version=req.confirmed_latest_lock_version,
+            adoptions=req.adoptions,
         )
     except ValueError as e:
         error_msg = str(e)
