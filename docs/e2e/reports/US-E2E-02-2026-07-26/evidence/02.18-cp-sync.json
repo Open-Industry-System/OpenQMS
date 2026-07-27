@@ -1,0 +1,47 @@
+{
+  "test_A_submit_snapshot": {
+    "change_type": "submit",
+    "major_no": 0,
+    "minor_no": 1,
+    "sha256_hash_present": true,
+    "verdict": "PASS"
+  },
+  "test_B_approve_snapshot": {
+    "change_type": "approve",
+    "major_no": 1,
+    "minor_no": 0,
+    "sha256_hash_present": true,
+    "verdict": "PASS"
+  },
+  "test_C_cp_sync_outbox": {
+    "table": "cp_sync_outbox",
+    "event_type": "cp.sync_pending_set",
+    "status": "completed",
+    "processed_at_nonempty": true,
+    "verdict": "PASS"
+  },
+  "test_C_cp_audit_changed_fields": {
+    "sync_pending": "false->true",
+    "trigger_fmea_version_id": "fe58cc8e-2eba-4a96-bdf1-4c5a8e5646fd",
+    "source_fmea_version_id_absent": true,
+    "verdict": "PASS"
+  },
+  "test_C_no_GraphSyncOutbox_reuse": "cp_sync_outbox is independent table (verified schema), not GraphSyncOutbox",
+  "test_D_idempotency": {
+    "outbox_count_after_reapprove": 2,
+    "different_fmea_version_ids": [
+      "fe58cc8e-2eba-4a96-bdf1-4c5a8e5646fd",
+      "5694669c-16fd-4e39-82be-f6b65a92545d"
+    ],
+    "cp_sync_pending_UPDATE_audits": 1,
+    "already_pending_not_reaudited": true,
+    "verdict": "PASS"
+  },
+  "test_C_dfmea_no_cp_trigger_FIX": {
+    "before_fix": "DFMEA approval enqueued cp_sync_outbox row (BUG: missing fmea_type==PFMEA guard)",
+    "after_fix": "DFMEA re-approve → 0 outbox rows",
+    "fix": "fmea_service.py:433 added fmea.fmea_type == \"PFMEA\" guard",
+    "verdict": "PASS after fix"
+  },
+  "PREEXISTING_BUG_cp_update_uuid_serialization": "CP update API (link fmea_ref_id) raises 500 — AuditLog changed_fields stores UUID not str. Exists on main (line 202/214 unchanged by branch). Blocked CP linking via API; worked around by direct DB UPDATE for this walk."
+}

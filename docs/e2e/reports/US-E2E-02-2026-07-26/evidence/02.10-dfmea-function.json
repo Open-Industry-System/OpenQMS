@@ -1,0 +1,16 @@
+{
+  "function_nodes": [
+    {
+      "type": "ProcessWorkElementFunction",
+      "name": "转换电压",
+      "specification": "输出精度 ±2%",
+      "requirement": "输入12V输出5V"
+    }
+  ],
+  "HAS_FUNCTION_edges": [
+    {
+      "src_type": "Component",
+      "tgt_type": "ProcessWorkElementFunction"
+    }
+  ]
+}

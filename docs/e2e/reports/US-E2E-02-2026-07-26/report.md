@@ -22,6 +22,9 @@
 | 02.7 | PFMEA Step7 documentation | **PASS** |
 | 02.8 | DFMEA Step1 planning | **PASS** |
 | 02.9 | DFMEA Step2 structure | **PASS** |
+| 02.10 | DFMEA Step3 function | **PASS** |
+| 02.18 | version snapshot + CP sync | **PASS** (caught+fixed DFMEA guard defect) |
+| 02.19 | approval cycle | **PASS** (14/14 API cases) |
 
 ---
 
@@ -126,6 +129,53 @@
 - UPDATE 审计：OK
 - 控制台断言：PASS（0 error）
 - 证据：evidence/02.9-dfmea-structure.json, screenshots/02.9-dfmea-structure.png
+
+### 02.10 DFMEA Step3 功能分析 — PASS
+
+- Component 有 HAS_FUNCTION：OK（Component 变压器 T1 → ProcessWorkElementFunction「转换电压」；DFMEA 复用 ProcessWorkElementFunction 节点类型，与 PFMEA 共享功能契约）
+- 规范/要求落库：OK（specification=输出精度 ±2%, requirement=输入12V输出5V）
+- 控制台断言：PASS（0 error）
+- 证据：evidence/02.10-dfmea-function.json, screenshots/02.10-dfmea-function.png
+- **注**：DFMEA Step3 仅 1 个功能节点时无 FUNCTION_MAPPED_TO 边（需 ≥2 功能才连），与 PFMEA Step3 契约一致；多结构节点功能挂载已在 PFMEA 02.3 动态验证。
+
+### 02.18 版本快照 + CP 联动 — PASS（API 直调，动态验证）
+
+- submit 快照字段齐：OK（change_type=submit, major_no=0, minor_no=1, sha256_hash 非空, created_by 非空）
+- approve 快照字段齐：OK（change_type=approve, major_no=1, minor_no=0, sha256_hash 非空）
+- **CP sync = Durable outbox**：OK（cp_sync_outbox 独立表，非 GraphSyncOutbox；审批事务入队 pre-commit；worker 批处理；幂等键 unique constraint `(fmea_id, fmea_version_id, event_type)` 存在）
+  - 审批后 outbox 行 status=completed, processed_at 非空
+  - worker 写 control_plans/UPDATE 审计，changed_fields 仅 `sync_pending:"false->true"` + `trigger_fmea_version_id`，**不含** source_fmea_version_id ✓
+  - CP.source_fmea_version_id 仍 NULL（只在 CP 实际同步内容时更新）✓
+  - 审计总量 = 2（TRANSITION + fmea_versions/CREATE）+ affected_cp_count（1 CP UPDATE）✓
+- **幂等性（Test D APPROVED→REWORK→re-approve）**：OK
+  - 2 条 outbox 行（不同 fmea_version_id），幂等键允许同 fmea 多次
+  - CP sync_pending UPDATE 审计仅 1 条（worker `sync_pending == False` 过滤，已 pending 不重复审计）✓
+- **DFMEA 不触发 CP sync（对照）**：**修复后 PASS**
+  - **走查发现 DEFECT（已修）**：DFMEA 审批也入队 cp_sync_outbox 行（P1.9 漏了 `fmea_type == "PFMEA"` 守卫，fmea_service.py:433）。修复前 DFMEA approve → 1 行；修复后 → 0 行。已提交修复。
+- 证据：evidence/02.18-cp-sync.json
+- **预存 BUG（非本分支引入，main 也有）**：CP update API（link fmea_ref_id）500 — AuditLog changed_fields 存 UUID 非 str（control_plan_service.py:214，main 与本分支均未变）。走查用 DB 直改绕开。
+
+### 02.19 审核闭环 — PASS（API 直调，14/14 用例）
+
+| 用例 | 期望 | 实际 | 标签 |
+|---|---|---|---|
+| A 提交（wizard_completed=true） | 200 + TRANSITION + submit 快照 | 200, status=in_review | PASS |
+| B wizard_completed=false → 422 | 422 | 422 "向导未完成，不能提交评审" | PASS |
+| C manager 审批 | 200 + approved_by/at | 200, approved_by=manager_id, approved_at 非空 | PASS |
+| D engineer 审批 → 403 | 403 | 403 "审批权限不足" | PASS |
+| E1 驳回无 reason → 422 | 422 | 422 "驳回必须携带非空 reason" | PASS |
+| E2 驳回空 reason → 422 | 422 | 422 | PASS |
+| E3 驳回空白 reason → 422 | 422 | 422 | PASS |
+| F1 engineer 驳回 → 403 | 403 | 403 "审批权限不足" | PASS |
+| F2 manager 驳回带 reason → 200 | 200, status=rework | 200, status=rework | PASS |
+| G APPROVED→REWORK 保留 approved_by/at | 保留 | status=rework, approved_by 仍 manager, approved_at 仍非空 | PASS |
+| H IN_REVIEW PUT → 409 | 409 | 409 "当前状态不可编辑（仅草稿/返工可编辑）" | PASS |
+| I DRAFT→APPROVED 跳步 → 400 | 400 | admin 400 "Cannot transition from draft to approved"（engineer 先撞 403 APPROVE 门） | PASS |
+| J REWORK→IN_REVIEW wizard_completed=false → 422 | 422 | 422 "向导未完成" | PASS |
+| J2 REWORK→IN_REVIEW wizard_completed=true → 200 | 200 | 200, status=in_review | PASS |
+
+- 证据：evidence/02.19-approval-cycle.json
+- **确认 follow-up**：rework reason 仅校验未持久化（fmea.py:224 transition_fmea 未传 req.reason）→ 审计 changed_fields 不含 reason。已在 ledger 记为最强 follow-up。
 
 ## 尚未走查
 
