@@ -309,6 +309,10 @@ async def recommend(
     if scope.factory_scope.accessible_factory_ids is not None:
         if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
             raise HTTPException(status_code=404, detail="FMEA not found")
+    # 仅可编辑状态（draft/rework）允许触发 AI 推荐——与 PUT 门禁一致，
+    # 避免向已锁定（in_review/approved/archived）的 FMEA 喂内容。
+    if fmea.status not in ("draft", "rework"):
+        raise HTTPException(status_code=409, detail="当前状态不可编辑（仅草稿/返工可编辑）")
 
     # 提前计算 effective_scope（短输入 early return 也需要正确值）
     requested_scope = getattr(request, "scope", "global")

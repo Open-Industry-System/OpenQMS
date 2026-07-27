@@ -121,3 +121,34 @@ async def test_rework_reason_persisted_in_audit(perm_client_builder, db, default
     latest = rows[-1]
     assert latest.changed_fields.get("reason") == "风险评审核改", (
         f"reason 未落审计：changed_fields={latest.changed_fields}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["in_review", "approved", "archived"])
+async def test_recommend_rejected_when_not_editable(perm_client_builder, db, default_factory, admin_user, status):
+    """缺陷修复 #6：/recommend 端点无 status 门禁（report 02.16 §I）。
+    PUT 已门禁 draft/rework（fmea.py:130-131 409），但 recommend 仍向锁定的
+    FMEA 喂 AI 内容。期望：非 draft/rework → 409，与 PUT 门禁一致。"""
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, status)
+    client = await perm_client_builder(fmea_level=3)  # EDIT
+    resp = await client.post(
+        f"/api/fmea/{fmea.fmea_id}/recommend",
+        json={"trigger_type": "failure_mode",
+              "context": {"function_description": "焊接固定电池极耳"}})
+    assert resp.status_code == 409, (
+        f"status={status} 应 409，实际 {resp.status_code}: {resp.text[:200]}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["draft", "rework"])
+async def test_recommend_allowed_when_editable(perm_client_builder, db, default_factory, admin_user, status):
+    """缺陷修复 #6 对照：draft/rework 可编辑，门禁不得误伤。
+    期望：不返回 409（短 anchor/无 LLM 时可 200 空建议，但绝不能 409）。"""
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, status)
+    client = await perm_client_builder(fmea_level=3)  # EDIT
+    resp = await client.post(
+        f"/api/fmea/{fmea.fmea_id}/recommend",
+        json={"trigger_type": "failure_mode",
+              "context": {"function_description": "焊接固定电池极耳"}})
+    assert resp.status_code != 409, (
+        f"status={status} 不应 409，实际 {resp.status_code}: {resp.text[:200]}")
