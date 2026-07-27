@@ -269,4 +269,4 @@
 | 6 | /recommend 无 status 门禁 | 02.16 §I | 仅 draft/rework 可推荐，其余 409（同 PUT 门禁） | 7c9994d3 |
 | 7 | LLM prompt 中文写死（i18n） | 02.8 | 英文时追加输出语言指令，前端携 i18n.language | 419c2a0a |
 
-**超出范围（do-not-fix，预存 dev-DB schema 漂移，main 亦存）**：`cp_sync_outbox` 缺表、`embedding_sync_outbox.content_hash` 缺列、`recommendation_cache.stage_runs` 缺列 —— 导致 test_transition_cp_outbox / test_fmea_update_core / test_approve_can_approve 等预存失败，与本分支无关（baseline-fmea-failures.txt 已记录）。
+**Schema 漂移（2026-07-27 已修复，5268741e）**：此前标记 do-not-fix 的 dev/test DB 漂移已根治。根因：qms 库 alembic stamp 落后 head ~8 个迁移且列被手工添加 + 31 个未跟踪 ` 2.py` Finder 副本导致 alembic 重复注册（伪「多 head」），`upgrade head` 永远跑不了。修复：删副本、2 个迁移幂等化、新增 `20260727_warranty_factory_id`（warranty_records.factory_id 模型 NOT NULL 但迁移未建）、audit_plan 模型补 factory_id、seed.py 全面补 factory_id/legacy_role 并修 CHECK 值。qms 已重建到 head + reseed。干净库全套 2894 通过；此前失败的 capa_recommendation(12) / cp_outbox / approval-gates(13) 全绿。
