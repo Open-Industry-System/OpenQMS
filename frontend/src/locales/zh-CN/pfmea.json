@@ -63,6 +63,7 @@
       "preventionControl": "预防控制",
       "detectionControl": "探测控制",
       "addFailureChain": "添加失效链",
+      "addEffect": "添加失效影响",
       "delete": "删除",
       "newFailureMode": "新建失效模式",
       "workElementHint": "该步骤的4M作业要素",

@@ -9,7 +9,7 @@ import { calculateAP, displayActionStatus } from '../../../utils/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { usePfmeaWizardValidation } from '../../../hooks/usePfmeaWizardValidation';
-import { buildRows, getRowSeverity, getProcessChain, type FMEARow } from '../../../utils/fmeaTable';
+import { buildRows, getRowSeverity, getProcessChain, addEffect, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/pfmea/PFMEAWizardSidebar';
 import WizardGuidanceCard from '../../../components/pfmea/PFMEAGuidanceCard';
@@ -460,8 +460,10 @@ export default function PFMEAWizardPage() {
                 </div>
               )}
               {fmNodes.map(fmNode => {
-                const effectEdge = edges.find(e => e.source === fmNode.id && e.type === 'EFFECT_OF');
-                const effectNode = effectEdge ? nodes.find(n => n.id === effectEdge!.target) : null;
+                const effectEdges = edges.filter(e => e.source === fmNode.id && e.type === 'EFFECT_OF');
+                const effectNodes = effectEdges
+                  .map(e => nodes.find(n => n.id === e.target))
+                  .filter(Boolean) as GraphNode[];
                 const causeEdges = edges.filter(e => e.target === fmNode.id && e.type === 'CAUSE_OF');
                 const causeNodes = causeEdges.map(e => nodeMap.get(e.source)).filter(Boolean) as GraphNode[];
 
@@ -479,8 +481,8 @@ export default function PFMEAWizardPage() {
                           onSelect={(s) => { recordAdoption(fmNode.id, s); handleUpdateNodeField(fmNode.id, 'name', s.name); }}
                         />
                       </div>
-                      {effectNode && (
-                        <div>
+                      {effectNodes.map(effectNode => (
+                        <div key={effectNode.id}>
                           <div style={{ fontSize: 12, marginBottom: 2 }}>{t('wizard.failure.failureEffect')}</div>
                           <SmartSuggestionDropdown
                             triggerType="failure_effect"
@@ -491,7 +493,18 @@ export default function PFMEAWizardPage() {
                             onSelect={(s) => { recordAdoption(effectNode.id, s); handleUpdateNodeField(effectNode.id, 'name', s.name); }}
                           />
                         </div>
-                      )}
+                      ))}
+                      <Button
+                        type="dashed"
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          const result = addEffect(fmNode.id, nodes, edges);
+                          updateGraphData(result.nodes, result.edges);
+                        }}
+                      >
+                        {t('wizard.failure.addEffect')}
+                      </Button>
                       {causeNodes.map(causeNode => {
                         const pcEdge = edges.find(e => e.source === causeNode.id && e.type === 'PREVENTED_BY');
                         const dcEdge = edges.find(e => e.source === causeNode.id && e.type === 'DETECTED_BY');

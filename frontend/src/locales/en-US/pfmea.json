@@ -63,6 +63,7 @@
       "preventionControl": "Prevention Control",
       "detectionControl": "Detection Control",
       "addFailureChain": "Add Failure Chain",
+      "addEffect": "Add Effect",
       "delete": "Delete",
       "newFailureMode": "New Failure Mode",
       "workElementHint": "4M work elements for this step",
