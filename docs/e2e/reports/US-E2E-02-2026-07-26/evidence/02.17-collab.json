@@ -1,0 +1,46 @@
+{
+  "summary": "02.17 collaborative editing — API contract live-verified; UI wiring statically verified",
+  "checkpoints": {
+    "D_optimistic_lock_409": {
+      "result": "PASS",
+      "engineer_put_lock_52_to_53": "HTTP 200, lock_version=53",
+      "admin_put_stale_52_current_53": "HTTP 409",
+      "conflict_response": {
+        "detail": "Document has been modified by another user.",
+        "conflict": {"saved_by": null, "saved_at": null, "latest_lock_version": 53}
+      }
+    },
+    "G_force_save_override": {
+      "result": "PASS",
+      "admin_force_put_confirmed_53": "HTTP 200, lock_version=54",
+      "wizardScope_wizard_completed_preserved": true,
+      "fm_name_overwrote_to": "贴装偏移_admin_overwrite",
+      "audit": {
+        "action": "FORCE_SAVE_OVERRIDE",
+        "operated_by": "admin (71f408af-f816-4b01-a9f9-faf40ab32392)",
+        "changed_fields_reason": "User confirmed overwrite after conflict detection"
+      }
+    },
+    "H_secondary_conflict_lock_version_changed_again": {
+      "result": "PASS",
+      "engineer_put2_lock_54_to_55": "HTTP 200, lock_version=55",
+      "admin_force_put2_stale_confirmed_54_current_55": "HTTP 409",
+      "response": {
+        "detail": "Document was modified again while you were reviewing. Please refresh.",
+        "conflict": {"latest_lock_version": 55}
+      }
+    },
+    "I_no_increment_on_no_change": {
+      "result": "PASS",
+      "no_op_put_identical_graph": "HTTP 200",
+      "lock_version_before": 55,
+      "lock_version_after": 55
+    },
+    "UI_wiring_static": {
+      "online_users_CollaborationBar": "FMEAEditorPage.tsx:1655 useCollaboration(:366)",
+      "row_level_indicator_ActiveUserIndicator": "FMEAEditorPage.tsx:1109,1228,1316",
+      "conflict_dialog_3way_diff": "FMEAEditorPage.tsx:2085-2089 (conflictInfo+conflictDiff, onRefresh+onForceSave)",
+      "force_save_sends_confirmed_latest_lock_version": "FMEAEditorPage.tsx:650-658 handleConflictForceSave"
+    }
+  }
+}

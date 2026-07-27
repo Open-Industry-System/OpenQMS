@@ -27,6 +27,7 @@
 | 02.19 | approval cycle | **PASS** (14/14 API cases) |
 | 02.15 | editor row CRUD + multi-effect | **PASS-NOTE** (multi-effect FM-level sharing live-verified; SC-sync 403 + addCause self-edge pre-existing) |
 | 02.16 | editor AI recommend | **PASS-NOTE** (8/9 checkpoints live; §I recommend-lacks-status-gate is pre-existing spec gap) |
+| 02.17 | collaborative editing | **PASS** (4 API checkpoints live: 409/conflict, FORCE_SAVE_OVERRIDE+wizardScope, 二次冲突, no-increment; UI wiring static-verified) |
 
 ---
 
@@ -192,11 +193,6 @@
 - **预存 UI 缺口（follow-up，非本分支引入）**：第 2 行 FC「操作员未按 SOP」无 PC/DC 文本时，`PREVENTED_BY`/`DETECTED_BY` 边 source==target（自指），疑似 `fmeaTable.ts` addCause 边构造在空 PC/DC 时用 FC 自身占位；非阻塞。
 - 证据：evidence/02.15-multi-effect.json
 
-## 尚未走查
-
-02.11–02.13（DFMEA Step4–6，对称于 PFMEA 02.4–02.6）、02.14（DFMEA Step7 文件化）、
-02.17（协同编辑）。
-
 ### 02.16 编辑器内 AI 推荐 — PASS-NOTE（动态验证）
 
 - **5 触发器 + 3 required_retrievers（failure_mode live，全 5 触发器 02.4 已验）**：OK
@@ -211,3 +207,21 @@
 - **§I 可编辑状态门禁**：**NOTE**（spec gap，非 Option X 回归）— `/api/fmea/{id}/recommend` 端点（fmea.py:281-336）仅校验 EDIT 权限 + 限流 + 工厂访问 + anchor 长度，**无 status 门禁**（IN_REVIEW/APPROVED 仍可触发推荐）。spec 表 §I 行标注「见 02.19」即此端点不独立校验，依赖 02.19 的 PUT 门禁。属既有设计，非本分支引入。
 - 控制台断言：PASS-NOTE — 仅既有 `special-characteristics/sync-from-fmea` 403 噪声（engineer 无 SC 同步权限，保存后自动触发）。
 - 证据：evidence/02.16-recommend-response.json, evidence/02.16-adopt-audit.json
+
+### 02.17 协同编辑 + 冲突检测 — PASS（API 直调，4 关键契约 live + UI 接线静态验证）
+
+- **§D 乐观锁 409 + conflict.latest_lock_version**：OK — engineer PUT (lock 52→53) 200；admin PUT (stale 52, current 53) → **409** + `conflict.latest_lock_version=53`
+- **§G FORCE_SAVE_OVERRIDE + wizardScope 保留**：OK — admin retry `confirmed_latest_lock_version=53` → 200, lock 53→54, `wizardScope.wizard_completed=true` **保留**，FM 名覆盖为 admin 版本；DB 写 `action=FORCE_SAVE_OVERRIDE`，`operated_by=admin`，`changed_fields.reason="User confirmed overwrite after conflict detection"`
+- **§H 二次冲突 `lock_version_changed_again`**：OK — engineer 再保存 (54→55) 后，admin 带 stale `confirmed_latest_lock_version=54` 重试 → **409** + detail "Document was modified again while you were reviewing. Please refresh." + `conflict.latest_lock_version=55`
+- **§I lock_version 无变更不递增**：OK — no-op PUT（graph_data 完全相同）HTTP 200，lock_version 55→55（不递增）
+- **UI 接线静态验证**（FMEAEditorPage.tsx）：
+  - §A 在线用户列表：`useCollaboration` (:366) + `CollaborationBar` (:1655) 短轮询存在感
+  - §B 行级编辑指示器：`ActiveUserIndicator activeUsers rowKey field` (:1109/1228/1316) 行+字段级
+  - §E 三方 diff 对话框：`ConflictDialog` (:2085-2089) + `conflictInfo/conflictDiff` (:397-399)，`onRefresh`(放弃)/`onForceSave`(覆盖) 两路径
+  - force save 发 `confirmed_latest_lock_version`：`handleConflictForceSave` (:650-658)
+- 控制台断言：未单独采集（API 直调路径，无浏览器交互）；UI 接线静态完整。
+- 证据：evidence/02.17-collab.json
+
+## 尚未走查
+
+02.11–02.13（DFMEA Step4–6，对称于 PFMEA 02.4–02.6）、02.14（DFMEA Step7 文件化）。
