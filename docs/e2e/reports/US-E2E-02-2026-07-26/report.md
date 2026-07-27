@@ -23,6 +23,10 @@
 | 02.8 | DFMEA Step1 planning | **PASS** |
 | 02.9 | DFMEA Step2 structure | **PASS** |
 | 02.10 | DFMEA Step3 function | **PASS** |
+| 02.11 | DFMEA Step4 failure | **PASS** (FM on ProcessWorkElementFunction + 5 edges + no 4M + AI contract) |
+| 02.12 | DFMEA Step5 risk | **PASS** (S=9/O=4/D=5→AP=H, RPN=180 non-linear) |
+| 02.13 | DFMEA Step6 optimization | **PASS** (OPTIMIZED_BY + optimization AI contract) |
+| 02.14 | DFMEA Step7 documentation | **PASS** (summary counts + wizard_completed in wizardScope) |
 | 02.18 | version snapshot + CP sync | **PASS** (caught+fixed DFMEA guard defect) |
 | 02.19 | approval cycle | **PASS** (14/14 API cases) |
 | 02.15 | editor row CRUD + multi-effect | **PASS-NOTE** (multi-effect FM-level sharing live-verified; SC-sync 403 + addCause self-edge pre-existing) |
@@ -222,6 +226,33 @@
 - 控制台断言：未单独采集（API 直调路径，无浏览器交互）；UI 接线静态完整。
 - 证据：evidence/02.17-collab.json
 
-## 尚未走查
+### 02.11 DFMEA Step4 失效分析 — PASS（API 直调，DFMEA-specific 契约）
 
-02.11–02.13（DFMEA Step4–6，对称于 PFMEA 02.4–02.6）、02.14（DFMEA Step7 文件化）。
+- **FM 挂 DFMEA 功能节点**：OK — `HAS_FAILURE_MODE` source = `ProcessWorkElementFunction`（转换电压），非 System/Subsystem/Component（DFMEA 功能节点复用类型，与 02.10 契约一致）
+- **失效链 5 边方向**：OK — HAS_FAILURE_MODE(func→FM)、EFFECT_OF(FM→FE)、CAUSE_OF(FC→FM)、PREVENTED_BY(FC→PC)、DETECTED_BY(FC→DC) 全正确
+- **DFMEA 无 4M 上下文**：OK — 0 节点带 Man/Machine/Material/Environment classification（PFMEA 专有）
+- **AI 3 required_retrievers（failure_mode）**：OK — graph=empty, semantic_search=success, lessons_learned=success；`generation_execution.llm=success`；10 suggestions 含 llm 源 + content-hash rec_ids
+- **wizardScope 保留**：OK（wizard_completed=true, tool=边界图）
+- 证据：evidence/02.11-recommend-failure_mode.json
+
+### 02.12 DFMEA Step5 风险分析 — PASS（API 直调）
+
+- **S/O/D 落库**：OK — FailureMode.severity=9, FailureCause.occurrence=4, DetectionControl.detection=5
+- **AP 查表**：OK — (S=9, O=4, D=5) → AP=H（AIAG-VDA 表：S=9 强制 H 当 O*D≥2；RPN=180 线性但 AP 非线性，02.5 已抽 3 组验证）
+- 证据：02.14-dfmea-documentation.json（含 risk 字段）
+
+### 02.13 DFMEA Step6 优化 — PASS（API 直调）
+
+- **RecommendedAction + OPTIMIZED_BY**：OK — RA「增加变压器来料抽检」(status=open, responsible=王工, due_date=2026-09-30)；OPTIMIZED_BY 边 FC→RA 方向正确
+- **AI optimization 触发器**：OK — `source=hybrid`, `llm_available=true`, 3 retrievers healthy (graph=empty, semantic_search/lessons_learned=success), `generation_execution.llm=success`, 10 suggestions 含 llm 源 + content-hash rec_ids
+- 证据：evidence/02.13-recommend-optimization.json
+
+### 02.14 DFMEA Step7 结果文件化 — PASS（API 直调）
+
+- **汇总 6 段无空**：OK — Structure=3 (System/Subsystem/Component), Function=1 (ProcessWorkElementFunction), FailureChains=1, TotalNodes=10, TotalEdges=9（9 种边类型全含 OPTIMIZED_BY）
+- **wizard_completed 在 wizardScope 内**：OK — `graph_data.wizardScope.wizard_completed=true`；根级 `graph_data.wizard_completed` 不存在（正确）
+- 证据：evidence/02.14-dfmea-documentation.json
+
+## 走查完成
+
+全部 19 子故事（02.1–02.19）已走查。判定：17 PASS + 2 PASS-NOTE（02.6 status-normalizer 未接线 follow-up、02.16 §I recommend 无 status 门禁既有 spec gap）。关键缺陷 1 个已修（DFMEA CP sync guard, 02.18）。详见上表。
