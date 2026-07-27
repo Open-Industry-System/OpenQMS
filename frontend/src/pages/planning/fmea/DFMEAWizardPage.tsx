@@ -9,7 +9,7 @@ import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../t
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
 import { useDfmeaRules } from '../../../utils/dfmeaRules';
-import { calculateAP, displayActionStatus } from '../../../utils/fmea';
+import { calculateAP } from '../../../utils/fmea';
 import { buildRows, getRowSeverity, getProcessChain, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
@@ -764,10 +764,10 @@ export default function DFMEAWizardPage() {
     };
 
     const statusOptions = [
-      { value: 'undecided', label: t('wizard.optimization.statusOptions.undecided') },
-      { value: 'planned', label: t('wizard.optimization.statusOptions.planned') },
-      { value: 'done', label: t('wizard.optimization.statusOptions.done') },
-      { value: 'notExecuted', label: t('wizard.optimization.statusOptions.notExecuted') },
+      { value: 'open', label: t('wizard.optimization.statusOptions.open') },
+      { value: 'in_progress', label: t('wizard.optimization.statusOptions.in_progress') },
+      { value: 'completed', label: t('wizard.optimization.statusOptions.completed') },
+      { value: 'not_executed', label: t('wizard.optimization.statusOptions.not_executed') },
     ];
 
     return (
@@ -817,7 +817,7 @@ export default function DFMEAWizardPage() {
                 <Col xs={24} sm={8}>
                   <Field label={t('wizard.optimization.status')}>
                     <Select size="small" style={{ width: '100%' }} options={statusOptions} allowClear
-                      value={displayActionStatus(ra?.status)} onChange={v => handleActionField(r, 'status', v)} />
+                      value={ra?.status} onChange={v => handleActionField(r, 'status', v)} />
                   </Field>
                 </Col>
                 <Col span={24}>

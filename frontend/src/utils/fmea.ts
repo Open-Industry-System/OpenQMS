@@ -51,20 +51,3 @@ export function calculateAP(s: number, o: number, d: number): "H" | "M" | "L" | 
   }
   return "L";
 }
-
-/**
- * Map canonical RecommendedAction.status (open/in_progress/completed/not_executed)
- * back to the legacy option value the wizard/editor dropdowns use for display.
- * Legacy inputs pass through unchanged. Backend normalizes legacy → canonical on save.
- */
-const CANONICAL_TO_LEGACY_STATUS: Record<string, string> = {
-  open: "open",
-  in_progress: "planned",
-  completed: "done",
-  not_executed: "notExecuted",
-};
-
-export function displayActionStatus(status: string | undefined): string | undefined {
-  if (!status) return status;
-  return CANONICAL_TO_LEGACY_STATUS[status] ?? status;
-}

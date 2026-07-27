@@ -323,7 +323,7 @@ describe("PFMEAWizardPage", () => {
           { id: "fc", type: "FailureCause", name: "吸嘴磨损", ...Z, occurrence: 4 },
           { id: "pc", type: "PreventionControl", name: "定期更换吸嘴", ...Z },
           { id: "dc", type: "DetectionControl", name: "SPC监控", ...Z, detection: 4 },
-          { id: "ra", type: "RecommendedAction", name: "更换吸嘴规格", responsible: "张三", due_date: "2026-07-01", status: "planned" },
+          { id: "ra", type: "RecommendedAction", name: "更换吸嘴规格", responsible: "张三", due_date: "2026-07-01", status: "in_progress" },
         ],
         edges: [
           { source: "pi", target: "ps", type: "HAS_PROCESS_STEP" },
@@ -372,5 +372,69 @@ describe("PFMEAWizardPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("editor-page")).toBeInTheDocument();
     });
+  });
+
+  it("Step 6 status select shows canonical 4-state options", async () => {
+    const doc = {
+      ...baseDoc,
+      graph_data: {
+        nodes: [
+          { id: "pi", type: "ProcessItem", name: "线", ...Z },
+          { id: "ps", type: "ProcessStep", name: "贴装", process_number: "OP10", ...Z },
+          { id: "we1", type: "ProcessWorkElement", name: "贴片机吸嘴", classification: "Machine", ...Z },
+          { id: "pif", type: "ProcessItemFunction", name: "输送线路", ...Z },
+          { id: "psf", type: "ProcessStepFunction", name: "准确贴装", ...Z },
+          { id: "wef", type: "ProcessWorkElementFunction", name: "吸嘴保持真空", ...Z },
+          { id: "fm", type: "FailureMode", name: "偏移", ...Z },
+          { id: "fe", type: "FailureEffect", name: "焊接不良", severity: 9, severity_plant: 9, severity_customer: 9, severity_user: 9 },
+          { id: "fc", type: "FailureCause", name: "吸嘴磨损", ...Z, occurrence: 4 },
+          { id: "pc", type: "PreventionControl", name: "定期更换吸嘴", ...Z },
+          { id: "dc", type: "DetectionControl", name: "SPC监控", ...Z, detection: 4 },
+          { id: "ra", type: "RecommendedAction", name: "更换吸嘴规格", responsible: "张三", due_date: "2026-07-01", status: "open" },
+        ],
+        edges: [
+          { source: "pi", target: "ps", type: "HAS_PROCESS_STEP" },
+          { source: "ps", target: "we1", type: "HAS_WORK_ELEMENT" },
+          { source: "pi", target: "pif", type: "HAS_FUNCTION" },
+          { source: "pif", target: "psf", type: "FUNCTION_MAPPED_TO" },
+          { source: "ps", target: "psf", type: "HAS_FUNCTION" },
+          { source: "psf", target: "wef", type: "FUNCTION_MAPPED_TO" },
+          { source: "we1", target: "wef", type: "HAS_FUNCTION" },
+          { source: "psf", target: "fm", type: "HAS_FAILURE_MODE" },
+          { source: "fm", target: "fe", type: "EFFECT_OF" },
+          { source: "fc", target: "fm", type: "CAUSE_OF" },
+          { source: "fc", target: "pc", type: "PREVENTED_BY" },
+          { source: "fc", target: "dc", type: "DETECTED_BY" },
+          { source: "fc", target: "ra", type: "OPTIMIZED_BY" },
+        ],
+        wizardScope: {},
+      },
+    };
+    vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
+    render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
+    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    // advance to the optimization step (0 -> 1 -> 2 -> 3 -> 4 -> 5)
+    for (let i = 0; i < 5; i++) {
+      fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    }
+
+    // The status Select is inside the optimization Card. Open it and assert the
+    // rendered options are canonical (no legacy values). Ant Select virtualizes
+    // the dropdown in jsdom, so we assert: every rendered option is canonical,
+    // at least `open` is present, and no legacy value appears.
+    const statusSelect = await screen.findByRole("combobox");
+    fireEvent.mouseDown(statusSelect);
+    await waitFor(() => expect(screen.getAllByRole("option").length).toBeGreaterThan(0));
+    const canonical = ["open", "in_progress", "completed", "not_executed"];
+    const legacy = ["undecided", "planned", "done", "notExecuted"];
+    const optionTexts = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(optionTexts.some((t) => t.includes("open"))).toBe(true);
+    for (const leg of legacy) {
+      expect(optionTexts.some((t) => t.includes(leg))).toBe(false);
+    }
+    // every rendered option must be one of the canonical values
+    for (const t of optionTexts) {
+      expect(canonical.some((c) => t.includes(c))).toBe(true);
+    }
   });
 });

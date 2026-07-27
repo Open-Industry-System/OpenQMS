@@ -112,10 +112,10 @@
       "revisedRatings": "重新评估 S / O / D",
       "revisedAp": "措施后 AP",
       "statusOptions": {
-        "undecided": "尚未确定",
-        "planned": "尚未执行",
-        "done": "已完成",
-        "notExecuted": "不执行"
+        "open": "待执行",
+        "in_progress": "进行中",
+        "completed": "已完成",
+        "not_executed": "不执行"
       },
       "preventionPlaceholder": "预防措施",
       "detectionPlaceholder": "探测措施"

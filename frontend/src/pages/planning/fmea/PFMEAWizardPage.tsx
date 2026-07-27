@@ -5,7 +5,7 @@ import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined } from '@ant-desig
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import { getFMEA, deleteFMEA, type RecommendationAdoption } from '../../../api/fmea';
-import { calculateAP, displayActionStatus } from '../../../utils/fmea';
+import { calculateAP } from '../../../utils/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { usePfmeaWizardValidation } from '../../../hooks/usePfmeaWizardValidation';
@@ -603,10 +603,9 @@ export default function PFMEAWizardPage() {
 
     const statusOptions = [
       { value: 'open', label: t('wizard.optimization.statusOptions.open') },
-      { value: 'undecided', label: t('wizard.optimization.statusOptions.undecided') },
-      { value: 'planned', label: t('wizard.optimization.statusOptions.planned') },
-      { value: 'done', label: t('wizard.optimization.statusOptions.done') },
-      { value: 'notExecuted', label: t('wizard.optimization.statusOptions.notExecuted') },
+      { value: 'in_progress', label: t('wizard.optimization.statusOptions.in_progress') },
+      { value: 'completed', label: t('wizard.optimization.statusOptions.completed') },
+      { value: 'not_executed', label: t('wizard.optimization.statusOptions.not_executed') },
     ];
 
     return (
@@ -653,7 +652,7 @@ export default function PFMEAWizardPage() {
                 <Col xs={24} sm={8}>
                   <Field label={t('wizard.optimization.status')}>
                     <Select size="small" style={{ width: '100%' }} options={statusOptions} allowClear
-                      value={displayActionStatus(ra?.status)} onChange={v => handleActionField(r, 'status', v)} />
+                      value={ra?.status} onChange={v => handleActionField(r, 'status', v)} />
                   </Field>
                 </Col>
                 <Col span={24}>

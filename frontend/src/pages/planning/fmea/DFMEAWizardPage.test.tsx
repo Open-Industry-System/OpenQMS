@@ -332,4 +332,31 @@ describe("DFMEAWizardPage Step 5 优化 — redesigned per reference", () => {
 
     await waitFor(() => expect(within(revisedField).getByText("L")).toBeInTheDocument());
   });
+
+  it("status select shows canonical 4-state options", async () => {
+    mocks.getFMEA.mockResolvedValue(makeHighRiskDoc());
+    renderWizard();
+    await goToStep5();
+
+    // Create the RA node so the status Select renders
+    fireEvent.change(fieldInput("wizard.optimization.measure"), { target: { value: "增加冗余传感器" } });
+    await act(async () => { vi.advanceTimersByTime(600); });
+
+    // Open the status dropdown. Ant Select virtualizes in jsdom, so assert:
+    // every rendered option is canonical, `open` is present, no legacy value.
+    const statusField = fieldContainer("wizard.optimization.status");
+    const select = statusField.querySelector(".ant-select-selector") as HTMLElement;
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(screen.getAllByRole("option").length).toBeGreaterThan(0));
+    const canonical = ["open", "in_progress", "completed", "not_executed"];
+    const legacy = ["undecided", "planned", "done", "notExecuted"];
+    const optionTexts = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    expect(optionTexts.some((t) => t.includes("open"))).toBe(true);
+    for (const leg of legacy) {
+      expect(optionTexts.some((t) => t.includes(leg))).toBe(false);
+    }
+    for (const t of optionTexts) {
+      expect(canonical.some((c) => t.includes(c))).toBe(true);
+    }
+  });
 });
