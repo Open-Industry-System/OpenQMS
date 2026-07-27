@@ -547,6 +547,13 @@ D: 焊后100% X射线探伤 / 焊缝气密性在线检测
 """,
 }
 
+# 追加到模板末尾的输出语言指令：请求语言为英文时让 LLM 用英文返回 name/explanation。
+_EN_OUTPUT_DIRECTIVE = (
+    "\n\n【输出语言 / Output language】The user's UI language is English. "
+    "Respond entirely in English: every suggestion's \"name\" and \"explanation\" "
+    "must be in English. Keep the required JSON structure unchanged.\n"
+)
+
 
 # ---------------------------------------------------------------------------
 # Recommendation Service
@@ -1105,4 +1112,11 @@ class RecommendationService:
         safe.update({k: v for k, v in context.get("current_context", {}).items()})
         safe.update({k: v for k, v in context.items() if k != "current_context"})
         safe["historical_patterns"] = json.dumps(context.get("historical_patterns", []), ensure_ascii=False)
-        return template.format_map(safe)
+        prompt = template.format_map(safe)
+        # i18n：模板为单一 canonical zh（避免 9 份重复英文模板漂移）。当请求语言
+        # 为英文时追加输出语言指令，让 LLM 用英文作答（边界图/参数图/FTA 等术语
+        # 通用）。context["language"] 由前端 i18n.language 经 RecommendRequest.context 传入。
+        language = context.get("language") or ""
+        if language.lower().startswith("en"):
+            prompt += _EN_OUTPUT_DIRECTIVE
+        return prompt
