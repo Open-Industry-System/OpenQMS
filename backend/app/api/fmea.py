@@ -221,7 +221,7 @@ async def transition_fmea(
         if wizard_scope.get("wizard_completed") is not True:
             raise HTTPException(status_code=422, detail="向导未完成，不能提交评审")
     try:
-        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id)
+        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id, req.reason)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return FMEAResponse.model_validate(fmea)

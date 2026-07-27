@@ -100,3 +100,24 @@ async def test_approved_to_rework_keeps_approved_by(perm_client_builder, db, def
     assert resp.status_code == 200
     assert resp.json()["status"] == "rework"
     assert resp.json()["approved_by"] is not None  # 保留历史，不清空
+
+
+@pytest.mark.asyncio
+async def test_rework_reason_persisted_in_audit(perm_client_builder, db, default_factory, admin_user):
+    """缺陷修复 #1：rework reason 仅校验未持久化（fmea.py:224 未传 req.reason）。
+    期望：TRANSITION AuditLog.changed_fields 含 reason。"""
+    from app.models.audit import AuditLog
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, "in_review")
+    client = await perm_client_builder(fmea_level=4)
+    resp = await client.post(f"/api/fmea/{fmea.fmea_id}/transition",
+                             json={"target_status": "rework", "reason": "风险评审核改"})
+    assert resp.status_code == 200
+    rows = (await db.execute(select(AuditLog).where(
+        AuditLog.table_name == "fmea_documents",
+        AuditLog.record_id == fmea.fmea_id,
+        AuditLog.action == "TRANSITION",
+    ))).scalars().all()
+    assert rows, "TRANSITION audit 缺失"
+    latest = rows[-1]
+    assert latest.changed_fields.get("reason") == "风险评审核改", (
+        f"reason 未落审计：changed_fields={latest.changed_fields}")

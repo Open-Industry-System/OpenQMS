@@ -382,6 +382,7 @@ async def transition_fmea(
     fmea: FMEADocument,
     target_status: str,
     user_id: uuid.UUID,
+    reason: str | None = None,
 ) -> FMEADocument:
     current = FMEAState(fmea.status)
     target = FMEAState(target_status)
@@ -410,14 +411,17 @@ async def transition_fmea(
         version = await _create_fmea_version_no_commit(db, fmea, change_type, change_summary, user_id)
 
     # Audit log
+    transition_changed = {
+        "old_status": old_status,
+        "new_status": target_status,
+    }
+    if reason and reason.strip():
+        transition_changed["reason"] = reason.strip()
     audit_log = AuditLog(
         table_name="fmea_documents",
         record_id=fmea.fmea_id,
         action="TRANSITION",
-        changed_fields={
-            "old_status": old_status,
-            "new_status": target_status,
-        },
+        changed_fields=transition_changed,
         operated_by=user_id,
     )
     db.add(audit_log)
