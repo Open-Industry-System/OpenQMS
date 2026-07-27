@@ -211,7 +211,9 @@ async def update_control_plan(
     ]:
         value = getattr(data, field, None)
         if value is not None and value != getattr(cp, field, None):
-            changed_fields[field] = value
+            # AuditLog.changed_fields is JSONB: UUID 须先序列化成 str，否则
+            # json.dumps 抛 TypeError（fmea_ref_id 是 UUID 类型）。
+            changed_fields[field] = str(value) if isinstance(value, uuid.UUID) else value
             setattr(cp, field, value)
 
     cp.updated_by = user_id
