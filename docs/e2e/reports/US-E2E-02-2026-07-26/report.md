@@ -25,6 +25,8 @@
 | 02.10 | DFMEA Step3 function | **PASS** |
 | 02.18 | version snapshot + CP sync | **PASS** (caught+fixed DFMEA guard defect) |
 | 02.19 | approval cycle | **PASS** (14/14 API cases) |
+| 02.15 | editor row CRUD + multi-effect | **PASS-NOTE** (multi-effect FM-level sharing live-verified; SC-sync 403 + addCause self-edge pre-existing) |
+| 02.16 | editor AI recommend | **PASS-NOTE** (8/9 checkpoints live; §I recommend-lacks-status-gate is pre-existing spec gap) |
 
 ---
 
@@ -177,8 +179,35 @@
 - 证据：evidence/02.19-approval-cycle.json
 - **确认 follow-up**：rework reason 仅校验未持久化（fmea.py:224 transition_fmea 未传 req.reason）→ 审计 changed_fields 不含 reason。已在 ledger 记为最强 follow-up。
 
+### 02.15 编辑器行 CRUD + 多效应 — PASS-NOTE（动态验证）
+
+- **行 CRUD**：OK（编辑器 `/fmea/{id}` status=rework 可编辑；Add Cause → 新增第 2 行 FC「操作员未按 SOP」，FM×FC 语义正确：2 FailureCause 节点，2 条 CAUSE_OF 边均 → 同一 FM「贴装偏移」）
+- **多效应 FM 级共享（核心断言）**：OK — 点「添加失效影响」在效应单元格内新增第 2 个效应输入框（**非**新行）；填「焊接短路」+ Save 后 API 回读：
+  - FM「贴装偏移」(wcc56326e) 发出 **2 条 EFFECT_OF 边** → 2 个不同 FE 节点（焊接开路 wc67ee381 + 焊接短路 n1785117662）✓
+  - 编辑器行数仍 2（单元格内多值，非笛卡尔积）✓
+  - `failureEffectNodeIds` 字段 `NOT_SET`（数据模型用边表达多效应，非数组字段，与 `fmeaTable.ts` 一致）✓
+- **wizardScope 保留**：OK（`wizard_completed=True`，tool/team/task/trend/timeframe 全保留；rework 编辑不洗向导范围）
+- UPDATE 审计：OK（lock_version 50，graph_data 多次自动保存）
+- 控制台断言：**PASS-NOTE** — 仅 2 条 `special-characteristics/sync-from-fmea` 403（engineer 无 SC 同步权限，保存后自动触发，pre-existing main 行为，非 Option X 回归）
+- **预存 UI 缺口（follow-up，非本分支引入）**：第 2 行 FC「操作员未按 SOP」无 PC/DC 文本时，`PREVENTED_BY`/`DETECTED_BY` 边 source==target（自指），疑似 `fmeaTable.ts` addCause 边构造在空 PC/DC 时用 FC 自身占位；非阻塞。
+- 证据：evidence/02.15-multi-effect.json
+
 ## 尚未走查
 
-02.5–02.13（PFMEA Step5–7 + 编辑器 CRUD + 编辑器 AI）、02.14–02.16（协同编辑）、
-02.17（版本快照 + CP 同步）、02.18（CP 同步 worker）、02.19（审批环）。
-均依赖浏览器 UI；走查因浏览器安全分类器临时不可用暂停，恢复后继续。
+02.11–02.13（DFMEA Step4–6，对称于 PFMEA 02.4–02.6）、02.14（DFMEA Step7 文件化）、
+02.17（协同编辑）。
+
+### 02.16 编辑器内 AI 推荐 — PASS-NOTE（动态验证）
+
+- **5 触发器 + 3 required_retrievers（failure_mode live，全 5 触发器 02.4 已验）**：OK
+  - 编辑器 FM 单元格输入「贴装偏移测试」→ SmartSuggestionDropdown 500ms 防抖弹出 → 5 条建议（rule/lessons_learned/semantic_search 来源齐全）
+  - 响应 `source_executions`：graph=empty, semantic_search=success(7), lessons_learned=success(4)
+  - `context_execution.current_product_structure=assembled`，`generation_execution.llm=success`，`llm_available=true`
+- **source 枚举 + source_document_no**：OK（`source ∈ {rule, lessons_learned, semantic_search}`，每条带 content-hash `recommendation_id`；semantic_search 命中带 `source_document_no` E2E-FMEA-P-001/D-001）
+- **§E ADOPT_RECOMMENDATION 审计（核心，live）**：OK — 点建议「贴装漏件」采纳 + Save → DB 写 `ADOPT_RECOMMENDATION`：`field_id=wcc56326e..._fm`, `source=rule`, `recommendation_id=rec_bc5d32dfe150`, `adopted_text=贴装漏件`, `stage_index=0`（5 元数据全落）
+- **§F 手工 vs 采纳区分**：OK — 手工编辑 PC 单元格「SOP 培训与考核」+ Save → 仅写 1 条 UPDATE，`ADOPT_RECOMMENDATION` 计数不变（仍 2）；采纳路径同事务写 UPDATE+ADOPT_RECOMMENDATION（时间戳一致，幂等去重确认）
+- **§G 限流 per_user 5/s**：OK — 1 秒内连发 6 次，第 6 次 HTTP 429「请求过于频繁」
+- **§H 缓存 24h**：OK — 相同 trigger+context 第 2 次调用 `cached=true`（第 1 次 `cached=false`）；DB 确认 `recommendation_cache` 行写入，`expires_at = created_at + 24h`
+- **§I 可编辑状态门禁**：**NOTE**（spec gap，非 Option X 回归）— `/api/fmea/{id}/recommend` 端点（fmea.py:281-336）仅校验 EDIT 权限 + 限流 + 工厂访问 + anchor 长度，**无 status 门禁**（IN_REVIEW/APPROVED 仍可触发推荐）。spec 表 §I 行标注「见 02.19」即此端点不独立校验，依赖 02.19 的 PUT 门禁。属既有设计，非本分支引入。
+- 控制台断言：PASS-NOTE — 仅既有 `special-characteristics/sync-from-fmea` 403 噪声（engineer 无 SC 同步权限，保存后自动触发）。
+- 证据：evidence/02.16-recommend-response.json, evidence/02.16-adopt-audit.json
