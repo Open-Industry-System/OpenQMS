@@ -39,8 +39,12 @@ async def test_update_fmea_normalizes_action_status(_mock_enqueue, db, default_f
             {"id": "ra3", "type": "RecommendedAction", "name": "c", "status": "notExecuted"},
             {"id": "ra4", "type": "RecommendedAction", "name": "d", "status": "open"},
             {"id": "fm1", "type": "FailureMode", "name": "x"},
+            {"id": "fc3", "type": "FailureCause", "name": "cause3", "occurrence": 5,
+             "risk_acceptance_reason": "现有控制充分，风险可接受"},
         ],
-        "edges": [],
+        "edges": [
+            {"source": "fc3", "target": "ra3", "type": "OPTIMIZED_BY"},
+        ],
     }
     await update_fmea(db, fmea, None, graph, admin_user.user_id)
     await db.refresh(fmea)

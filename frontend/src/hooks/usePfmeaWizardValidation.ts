@@ -15,6 +15,7 @@ export interface PfmeaStepValidation {
   step4MissingControl: boolean;
   step4MissingSeverity: boolean;
   step5MissingCompletedFields: boolean;
+  step5MissingNotExecutedReason: boolean;
 }
 
 const STRUCTURE_TYPES = ['ProcessItem', 'ProcessStep', 'ProcessWorkElement'];
@@ -154,11 +155,25 @@ export function usePfmeaWizardValidation(
           || !((ra.revised_detection ?? 0) > 0)
           || !(ra.revised_ap ?? '').trim();
       }));
+    // A not_executed RecommendedAction requires a risk-disposition reason on the
+    // row's FailureCause (control_sufficiency_reason / risk_acceptance_reason);
+    // placeholder rows (no cause) fall back to the FailureMode's reason fields.
+    const step5MissingNotExecutedReason = rows.some((r) => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const fm = nodeMap.get(r.failureModeNodeId);
+      const carrier = cause ?? fm;
+      const reasonOk = !!carrier && (
+        !!(carrier.control_sufficiency_reason ?? '').trim()
+        || !!(carrier.risk_acceptance_reason ?? '').trim()
+      );
+      return r.recommendedActionIds.some((raId) =>
+        nodeMap.get(raId)?.status === 'not_executed' && !reasonOk);
+    });
     const step5Complete = (rowsWithAP_H.length === 0 || rowsWithAP_H.every((r) =>
       r.recommendedActionIds.some((raId) => {
         const ra = nodeMap.get(raId);
         return !!ra && (ra.responsible ?? '').trim() && (ra.due_date ?? '').trim();
-      }))) && !step5MissingCompletedFields;
+      }))) && !step5MissingCompletedFields && !step5MissingNotExecutedReason;
 
     const warnings: number[] = [];
     if (!step1Complete) warnings.push(1);
@@ -172,6 +187,7 @@ export function usePfmeaWizardValidation(
       warnings,
       step4MissingCause, step4Unrated, step4MissingControl, step4MissingSeverity,
       step5MissingCompletedFields,
+      step5MissingNotExecutedReason,
     };
   }, [nodes, edges]);
 }

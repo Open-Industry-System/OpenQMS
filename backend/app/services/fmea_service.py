@@ -226,6 +226,19 @@ def _validate_step6_optimization(graph_data: dict) -> None:
                 missing.append("revised_ap")
             if missing:
                 raise ValueError("step6_completed_fields_required")
+        if status == "not_executed":
+            # 反向 OPTIMIZED_BY 找该 RA 的源节点（FC，或 placeholder 行的 FM）。
+            source_node = None
+            for e in edges:
+                if e.get("type") == "OPTIMIZED_BY" and e.get("target") == node.get("id"):
+                    source_node = next((n for n in nodes if n.get("id") == e.get("source")), None)
+                    break
+            reason_ok = bool(source_node) and (
+                bool((source_node.get("control_sufficiency_reason") or "").strip())
+                or bool((source_node.get("risk_acceptance_reason") or "").strip())
+            )
+            if not reason_ok:
+                raise ValueError("step6_not_executed_reason_required")
 
 
 async def _apply_fmea_update(

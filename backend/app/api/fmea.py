@@ -168,6 +168,16 @@ async def update_fmea(
                 status_code=422,
                 detail="completed 状态的优化措施必须填写 action_taken/completion_date/revised_occurrence/revised_detection/revised_ap",
             ) from e
+        if error_msg == "step6_not_executed_reason_required":
+            raise HTTPException(
+                status_code=422,
+                detail="not_executed 状态的优化措施必须在关联失效原因上填写 control_sufficiency_reason 或 risk_acceptance_reason",
+            ) from e
+        if error_msg == "step6_management_review_required":
+            raise HTTPException(
+                status_code=422,
+                detail="S=9-10 且 AP=H/M 的失效链必须在关联失效原因上填写 management_review_evidence",
+            ) from e
         raise HTTPException(status_code=400, detail=error_msg) from e
     return FMEAResponse.model_validate(fmea)
 

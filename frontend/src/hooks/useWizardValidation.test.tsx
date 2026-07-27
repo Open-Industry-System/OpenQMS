@@ -191,6 +191,53 @@ describe('useWizardValidation — Step 6 optimization completed-action gate', ()
   });
 });
 
+describe('useWizardValidation — Step 6 optimization not_executed reason gate', () => {
+  // Defect C (02.6/02.13): a not_executed RecommendedAction requires a
+  // risk-disposition reason on the row's FailureCause (control_sufficiency_reason
+  // / risk_acceptance_reason), or the FailureMode for placeholder rows.
+  const rowWithAction = (fcProps: Partial<GraphNode>) => ({
+    nodes: [
+      n('func1', 'ProcessWorkElementFunction'),
+      n('fm1', 'FailureMode'),
+      n('fc1', 'FailureCause', { occurrence: 5, ...fcProps }),
+      n('fe1', 'FailureEffect', { severity: 7 }),
+      n('pc1', 'PreventionControl'),
+      n('dc1', 'DetectionControl', { detection: 3 }),
+      n('ra1', 'RecommendedAction', { status: 'not_executed' }),
+    ],
+    edges: [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fc1', 'pc1', 'PREVENTED_BY'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+      e('fc1', 'ra1', 'OPTIMIZED_BY'),
+    ],
+  });
+
+  it('blocks finish when a not_executed action has no disposition reason', () => {
+    const g = rowWithAction({});
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6MissingNotExecutedReason).toBe(true);
+    expect(result.current.step6Complete).toBe(false);
+    expect(result.current.warnings).toContain(5);
+  });
+
+  it('allows finish when the cause carries control_sufficiency_reason', () => {
+    const g = rowWithAction({ control_sufficiency_reason: '现有 PC 已覆盖 H 级风险' });
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6MissingNotExecutedReason).toBe(false);
+    expect(result.current.step6Complete).toBe(true);
+    expect(result.current.warnings).not.toContain(5);
+  });
+
+  it('allows finish when the cause carries risk_acceptance_reason', () => {
+    const g = rowWithAction({ risk_acceptance_reason: '风险可接受' });
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6Complete).toBe(true);
+  });
+});
+
 describe('useWizardValidation — failure-chain name completeness (Step 4)', () => {
   // The wizard creates FM/FE/FC with empty names by default (so the AI
   // SmartSuggestionDropdown doesn't auto-fire on a placeholder). step4Complete

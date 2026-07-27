@@ -23,6 +23,10 @@ export interface StepValidation {
    *  5 completion fields (action_taken / completion_date / revised_occurrence /
    *  revised_detection / revised_ap). */
   step6MissingCompletedFields: boolean;
+  /** Step 6 (optimization): a not_executed RecommendedAction whose row carries no
+   *  risk-disposition reason (control_sufficiency_reason / risk_acceptance_reason)
+   *  on its FailureCause (or FailureMode fallback for placeholder rows). */
+  step6MissingNotExecutedReason: boolean;
   /** Step 6 complete: no completed-action missing completion fields. */
   step6Complete: boolean;
   warnings: number[];
@@ -109,7 +113,21 @@ export function useWizardValidation(
           || !((ra.revised_detection ?? 0) > 0)
           || !(ra.revised_ap ?? '').trim();
       }));
-    const step6Complete = !step6MissingCompletedFields;
+    // A not_executed RecommendedAction requires a risk-disposition reason on the
+    // row's FailureCause (control_sufficiency_reason / risk_acceptance_reason);
+    // placeholder rows (no cause) fall back to the FailureMode's reason fields.
+    const step6MissingNotExecutedReason = rows.some((r) => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const fm = nodeMap.get(r.failureModeNodeId);
+      const carrier = cause ?? fm;
+      const reasonOk = !!carrier && (
+        !!(carrier.control_sufficiency_reason ?? '').trim()
+        || !!(carrier.risk_acceptance_reason ?? '').trim()
+      );
+      return r.recommendedActionIds.some((raId) =>
+        nodeMap.get(raId)?.status === 'not_executed' && !reasonOk);
+    });
+    const step6Complete = !step6MissingCompletedFields && !step6MissingNotExecutedReason;
 
     const warnings: number[] = [];
     if (components.length > 0 && !step3Complete) warnings.push(2);
@@ -119,6 +137,6 @@ export function useWizardValidation(
 
     const structureGaps = structureGapsForTools(selectedTools, toolStructureMap, nodes, edges);
 
-    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, step6MissingCompletedFields, step6Complete, warnings, structureGaps };
+    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, step6MissingCompletedFields, step6MissingNotExecutedReason, step6Complete, warnings, structureGaps };
   }, [nodes, edges, selectedTools, toolStructureMap]);
 }

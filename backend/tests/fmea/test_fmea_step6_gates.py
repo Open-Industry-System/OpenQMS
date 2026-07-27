@@ -95,3 +95,39 @@ async def test_completed_action_with_all_fields_succeeds(perm_client_builder, db
     }
     resp = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
     assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_not_executed_requires_reason(perm_client_builder, db, default_factory, admin_user):
+    """Defect C: status=not_executed 但无 control_sufficiency_reason/risk_acceptance_reason → 422。"""
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, "draft")
+    client = await perm_client_builder(fmea_level=3)
+    graph = {
+        "nodes": [
+            {"id": "fc1", "type": "FailureCause", "name": "c", "occurrence": 5,
+             "control_sufficiency_reason": None, "risk_acceptance_reason": None},
+            {"id": "ra1", "type": "RecommendedAction", "name": "act", "status": "not_executed"},
+        ],
+        "edges": [{"source": "fc1", "target": "ra1", "type": "OPTIMIZED_BY"}],
+        "wizardScope": {"wizard_completed": True},
+    }
+    resp = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_not_executed_with_reason_succeeds(perm_client_builder, db, default_factory, admin_user):
+    """正向：status=not_executed 且 control_sufficiency_reason 非空 → 200。"""
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, "draft")
+    client = await perm_client_builder(fmea_level=3)
+    graph = {
+        "nodes": [
+            {"id": "fc1", "type": "FailureCause", "name": "c", "occurrence": 5,
+             "control_sufficiency_reason": "现有 PC 已覆盖 H 级风险"},
+            {"id": "ra1", "type": "RecommendedAction", "name": "act", "status": "not_executed"},
+        ],
+        "edges": [{"source": "fc1", "target": "ra1", "type": "OPTIMIZED_BY"}],
+        "wizardScope": {"wizard_completed": True},
+    }
+    resp = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
+    assert resp.status_code == 200, resp.text
