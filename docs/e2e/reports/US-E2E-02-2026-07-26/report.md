@@ -79,7 +79,7 @@
   - `generation_execution.llm=error`（prevention/detection 两次）为 D1 契约允许枚举（疑为走查中段 LLM 抖动），非 FAIL 条件。
   - suggestion.source ∈ {rule, lessons_learned, semantic_search}（5 枚举子集），每条带 content-hash recommendation_id。
 - **失效链 5 边方向：动态验证 OK**（live 回读：HAS_FAILURE_MODE ProcessStepFunction→FM；EFFECT_OF FM→FE；CAUSE_OF FC→FM；PREVENTED_BY FC→PC；DETECTED_BY FC→DC；FM 正确挂 ProcessStepFunction）。
-- **多效应 FM 级共享：PASS-NOTE** — `fmeaTable.ts` 的 `addEffect`/`failureEffectNodeIds` 模式级共享契约静态正确（L13/271/294/324-359，本分支未改，2026-07-25 编辑器走查已动态验证）；但 PFMEA 向导 Step4 视图（PFMEAWizardPage.tsx:463 `edges.find(...)`）只渲染首个 EFFECT_OF，未暴露 addEffect 入口 → 向导内无法驱动多效应 UI（既有 UI 缺口，非 Option X 回归）。
+- **多效应 FM 级共享：PASS（已修复 UI 缺口）** — `fmeaTable.ts` 的 `addEffect`/`failureEffectNodeIds` 模式级共享契约静态正确；PFMEA 向导 Step4 视图此前只渲染首个 EFFECT_OF 且无 addEffect 入口（PFMEAWizardPage.tsx 旧 `edges.find(...)`）→ 向导内无法驱动多效应 UI。**已修复（c5ba08c7）**：Step4 现收集每个 FailureMode 的全部 EFFECT_OF 边并逐条渲染 SmartSuggestionDropdown，并新增「添加失效影响」按钮接 `fmeaTable.addEffect`，与编辑器 FM 级多效应模型一致。
 - **ADOPT_RECOMMENDATION**：本走查 FM/FE/FC/PC/DC 均手工录入（未点 AI 建议），不产生采纳审计（符合预期）；采纳机制已由 02.1 live 验证 + SDD P2.3/P2.4 测试覆盖。
 - UPDATE 审计：OK（Step4 段 6 条 UPDATE + 2 条 llm_recommend）。
 - 控制台断言：PASS-NOTE — 仅 antd addonBefore 弃用 + HMR 噪声 + token 过期前 401（均与本子故事无关）。
@@ -126,7 +126,7 @@
 - 控制台断言：PASS（reload 后 0 error）
 - 证据：evidence/02.8-recommend-dfmea_tool.json, evidence/02.8-recommend-dfmea_trend.json, screenshots/02.8-dfmea-step1.png
 - **注**：DFMEA-E2E-001 走查前不存在，通过 `POST /api/fmea` 创建（fmea_type=DFMEA, product_line_code=DC-DC-100-E2E），id c3c8cc3b-70b8-44cc-8453-d3635a843eaa。
-- **i18n 缺口（follow-up）**：Tool/Trend 字段紫色 AI 建议标签显示中文，因 `recommendation_service.py:464` 的 `PROMPT_TEMPLATES["dfmea_tool"]` 等是中文写死的（"你是资深DFMEA工程师…示例: 边界图"），LLM 无论 UI 语言都返回中文名。i18n 预设（灰色 "+ Boundary Diagram"）已正确英文化。属 Option X 范围外的既有 prompt 国际化缺口。
+- **i18n 缺口：已修复（419c2a0a）** — Tool/Trend 字段紫色 AI 建议标签此前显示中文，因 `recommendation_service.py` 的 `PROMPT_TEMPLATES` 中文写死，LLM 无论 UI 语言都返回中文名。修复：保留单一 canonical zh 模板，请求语言为英文时追加输出语言指令让 LLM 用英文作答；前端 `getRecommendations` 携带 `i18n.language` 到 `context.language`，`_build_prompt` 按 `en*` 追加指令。i18n 预设（灰色 "+ Boundary Diagram"）本已英文化，现 AI 建议亦跟随界面语言。TDD：TestBuildPromptLanguageDirective 3 例。
 
 ### 02.9 DFMEA Step2 结构分析 — PASS
 
@@ -194,7 +194,7 @@
 - **wizardScope 保留**：OK（`wizard_completed=True`，tool/team/task/trend/timeframe 全保留；rework 编辑不洗向导范围）
 - UPDATE 审计：OK（lock_version 50，graph_data 多次自动保存）
 - 控制台断言：**PASS-NOTE** — 仅 2 条 `special-characteristics/sync-from-fmea` 403（engineer 无 SC 同步权限，保存后自动触发，pre-existing main 行为，非 Option X 回归）
-- **预存 UI 缺口（follow-up，非本分支引入）**：第 2 行 FC「操作员未按 SOP」无 PC/DC 文本时，`PREVENTED_BY`/`DETECTED_BY` 边 source==target（自指），疑似 `fmeaTable.ts` addCause 边构造在空 PC/DC 时用 FC 自身占位；非阻塞。
+- **预存 UI 缺口（follow-up，非本分支引入）**：~~第 2 行 FC「操作员未按 SOP」无 PC/DC 文本时，`PREVENTED_BY`/`DETECTED_BY` 边 source==target（自指）~~ **修正（2026-07-27）：非缺陷**。全量回读 edges（无截断）确认 `PREVENTED_BY n1785117522602_fc_l6x5 → n1785117522602_pc_95vc`、`DETECTED_BY n1785117522602_fc_l6x5 → n1785117522602_dc_upyk` 方向正确（FC→PC/DC）。报告原文「自指」是我打印 `source[:12]`/`target[:12]` 截断造成的视觉假象——`_fc_l6x5`/`_pc_95vc` 后缀被截掉后前 12 字符相同。数据模型与 `fmeaTable.addCause` 边构造均正确。
 - 证据：evidence/02.15-multi-effect.json
 
 ### 02.16 编辑器内 AI 推荐 — PASS-NOTE（动态验证）
@@ -208,7 +208,7 @@
 - **§F 手工 vs 采纳区分**：OK — 手工编辑 PC 单元格「SOP 培训与考核」+ Save → 仅写 1 条 UPDATE，`ADOPT_RECOMMENDATION` 计数不变（仍 2）；采纳路径同事务写 UPDATE+ADOPT_RECOMMENDATION（时间戳一致，幂等去重确认）
 - **§G 限流 per_user 5/s**：OK — 1 秒内连发 6 次，第 6 次 HTTP 429「请求过于频繁」
 - **§H 缓存 24h**：OK — 相同 trigger+context 第 2 次调用 `cached=true`（第 1 次 `cached=false`）；DB 确认 `recommendation_cache` 行写入，`expires_at = created_at + 24h`
-- **§I 可编辑状态门禁**：**NOTE**（spec gap，非 Option X 回归）— `/api/fmea/{id}/recommend` 端点（fmea.py:281-336）仅校验 EDIT 权限 + 限流 + 工厂访问 + anchor 长度，**无 status 门禁**（IN_REVIEW/APPROVED 仍可触发推荐）。spec 表 §I 行标注「见 02.19」即此端点不独立校验，依赖 02.19 的 PUT 门禁。属既有设计，非本分支引入。
+- **§I 可编辑状态门禁：已修复（7c9994d3）** — `/api/fmea/{id}/recommend` 端点（fmea.py）原仅校验 EDIT 权限 + 限流 + 工厂访问 + anchor 长度，**无 status 门禁**（IN_REVIEW/APPROVED 仍可触发推荐）。已加与 PUT 一致的可编辑门禁（仅 draft/rework，其余 409「当前状态不可编辑」）。TDD：test_fmea_approval_gates.py 新增 5 例（in_review/approved/archived→409；draft/rework→非 409），38 条 recommend 测试全绿。
 - 控制台断言：PASS-NOTE — 仅既有 `special-characteristics/sync-from-fmea` 403 噪声（engineer 无 SC 同步权限，保存后自动触发）。
 - 证据：evidence/02.16-recommend-response.json, evidence/02.16-adopt-audit.json
 
@@ -255,4 +255,18 @@
 
 ## 走查完成
 
-全部 19 子故事（02.1–02.19）已走查。判定：17 PASS + 2 PASS-NOTE（02.6 status-normalizer 未接线 follow-up、02.16 §I recommend 无 status 门禁既有 spec gap）。关键缺陷 1 个已修（DFMEA CP sync guard, 02.18）。详见上表。
+全部 19 子故事（02.1–02.19）已走查。判定：17 PASS + 2 PASS-NOTE。走查中修复 1 个关键缺陷（DFMEA CP sync guard, 02.18）。走查后另修复 6 项发现（见下文「走查后修复」）。详见上表。
+
+## 走查后修复（2026-07-27，均 TDD：先失败测试后实现）
+
+| # | 问题 | 出处 | 修复 | 提交 |
+|---|---|---|---|---|
+| 1 | rework reason 仅校验未持久化 | 02.19 | transition_fmea 接 req.reason，TRANSITION 审计落 reason | （前期） |
+| 2 | status-normalizer 未接线 | 02.6 | update_fmea 保存时归一 RecommendedAction.status → canonical | （前期） |
+| 3 | CP update UUID 500 | 02.18 | changed_fields UUID→str 序列化 | （前期） |
+| 4 | PFMEA 向导 Step4 无多效应 UI | 02.4 | 渲染全部 EFFECT_OF + addEffect 入口 | c5ba08c7 |
+| 5 | addCause 自指边 | 02.15 | **非缺陷**（报告截断假象，已修正） | — |
+| 6 | /recommend 无 status 门禁 | 02.16 §I | 仅 draft/rework 可推荐，其余 409（同 PUT 门禁） | 7c9994d3 |
+| 7 | LLM prompt 中文写死（i18n） | 02.8 | 英文时追加输出语言指令，前端携 i18n.language | 419c2a0a |
+
+**超出范围（do-not-fix，预存 dev-DB schema 漂移，main 亦存）**：`cp_sync_outbox` 缺表、`embedding_sync_outbox.content_hash` 缺列、`recommendation_cache.stage_runs` 缺列 —— 导致 test_transition_cp_outbox / test_fmea_update_core / test_approve_can_approve 等预存失败，与本分支无关（baseline-fmea-failures.txt 已记录）。
