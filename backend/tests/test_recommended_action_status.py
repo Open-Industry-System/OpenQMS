@@ -33,7 +33,9 @@ async def test_update_fmea_normalizes_action_status(_mock_enqueue, db, default_f
     graph = {
         "nodes": [
             {"id": "ra1", "type": "RecommendedAction", "name": "a", "status": "planned"},
-            {"id": "ra2", "type": "RecommendedAction", "name": "b", "status": "done"},
+            {"id": "ra2", "type": "RecommendedAction", "name": "b", "status": "done",
+             "action_taken": "已实施", "completion_date": "2026-08-15",
+             "revised_occurrence": 3, "revised_detection": 2, "revised_ap": "L"},
             {"id": "ra3", "type": "RecommendedAction", "name": "c", "status": "notExecuted"},
             {"id": "ra4", "type": "RecommendedAction", "name": "d", "status": "open"},
             {"id": "fm1", "type": "FailureMode", "name": "x"},

@@ -163,6 +163,11 @@ async def update_fmea(
                     },
                 },
             ) from e
+        if error_msg == "step6_completed_fields_required":
+            raise HTTPException(
+                status_code=422,
+                detail="completed 状态的优化措施必须填写 action_taken/completion_date/revised_occurrence/revised_detection/revised_ap",
+            ) from e
         raise HTTPException(status_code=400, detail=error_msg) from e
     return FMEAResponse.model_validate(fmea)
 

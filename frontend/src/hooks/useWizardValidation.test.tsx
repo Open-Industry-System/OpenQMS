@@ -140,6 +140,57 @@ describe('useWizardValidation — structure gaps from selected tools', () => {
   });
 });
 
+describe('useWizardValidation — Step 6 optimization completed-action gate', () => {
+  // Defect B (02.6/02.13): a RecommendedAction with status=completed must carry
+  // the 5 completion fields (action_taken / completion_date / revised_occurrence /
+  // revised_detection / revised_ap). step6Complete blocks finish otherwise.
+  const rowWithAction = (raProps: Partial<GraphNode>) => ({
+    nodes: [
+      n('func1', 'ProcessWorkElementFunction'),
+      n('fm1', 'FailureMode'),
+      n('fc1', 'FailureCause', { occurrence: 5 }),
+      n('fe1', 'FailureEffect', { severity: 7 }),
+      n('pc1', 'PreventionControl'),
+      n('dc1', 'DetectionControl', { detection: 3 }),
+      n('ra1', 'RecommendedAction', raProps),
+    ],
+    edges: [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fc1', 'pc1', 'PREVENTED_BY'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+      e('fc1', 'ra1', 'OPTIMIZED_BY'),
+    ],
+  });
+
+  it('blocks finish when a completed action is missing completion fields', () => {
+    const g = rowWithAction({ status: 'completed', responsible: '张工', due_date: '2026-08-31' });
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6MissingCompletedFields).toBe(true);
+    expect(result.current.step6Complete).toBe(false);
+    expect(result.current.warnings).toContain(5);
+  });
+
+  it('allows finish when a completed action has all 5 completion fields', () => {
+    const g = rowWithAction({
+      status: 'completed', responsible: '张工', due_date: '2026-08-31',
+      action_taken: '已增加 AOI 复检工位', completion_date: '2026-08-15',
+      revised_occurrence: 3, revised_detection: 2, revised_ap: 'L',
+    });
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6MissingCompletedFields).toBe(false);
+    expect(result.current.step6Complete).toBe(true);
+    expect(result.current.warnings).not.toContain(5);
+  });
+
+  it('ignores non-completed actions (open needs no completion fields)', () => {
+    const g = rowWithAction({ status: 'open', responsible: '张工', due_date: '2026-08-31' });
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6Complete).toBe(true);
+  });
+});
+
 describe('useWizardValidation — failure-chain name completeness (Step 4)', () => {
   // The wizard creates FM/FE/FC with empty names by default (so the AI
   // SmartSuggestionDropdown doesn't auto-fire on a placeholder). step4Complete

@@ -251,7 +251,8 @@ export default function DFMEAWizardPage() {
   const canFinish = validation.warnings.length === 0
     && validation.step3Complete
     && validation.step4Complete
-    && validation.step5Complete;
+    && validation.step5Complete
+    && validation.step6Complete;
 
   const saveStatusLabel: Record<SaveStatus, string> = {
     idle: '',

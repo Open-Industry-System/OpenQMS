@@ -14,6 +14,7 @@ export interface PfmeaStepValidation {
   step4Unrated: boolean;
   step4MissingControl: boolean;
   step4MissingSeverity: boolean;
+  step5MissingCompletedFields: boolean;
 }
 
 const STRUCTURE_TYPES = ['ProcessItem', 'ProcessStep', 'ProcessWorkElement'];
@@ -140,11 +141,24 @@ export function usePfmeaWizardValidation(
       const d = dc?.detection ?? 0;
       return calculateAP(s, o, d) === 'H';
     });
-    const step5Complete = rowsWithAP_H.length === 0 || rowsWithAP_H.every((r) =>
+    // Step 5 (optimization) gate: a completed RecommendedAction must carry the
+    // 5 completion fields (action_taken / completion_date / revised_occurrence /
+    // revised_detection / revised_ap). revised_severity may stay 0 if S is unchanged.
+    const step5MissingCompletedFields = rows.some((r) =>
+      r.recommendedActionIds.some((raId) => {
+        const ra = nodeMap.get(raId);
+        if (!ra || ra.status !== 'completed') return false;
+        return !(ra.action_taken ?? '').trim()
+          || !(ra.completion_date ?? '').trim()
+          || !((ra.revised_occurrence ?? 0) > 0)
+          || !((ra.revised_detection ?? 0) > 0)
+          || !(ra.revised_ap ?? '').trim();
+      }));
+    const step5Complete = (rowsWithAP_H.length === 0 || rowsWithAP_H.every((r) =>
       r.recommendedActionIds.some((raId) => {
         const ra = nodeMap.get(raId);
         return !!ra && (ra.responsible ?? '').trim() && (ra.due_date ?? '').trim();
-      }));
+      }))) && !step5MissingCompletedFields;
 
     const warnings: number[] = [];
     if (!step1Complete) warnings.push(1);
@@ -157,6 +171,7 @@ export function usePfmeaWizardValidation(
       step1Complete, step2Complete, step3Complete, step4Complete, step5Complete,
       warnings,
       step4MissingCause, step4Unrated, step4MissingControl, step4MissingSeverity,
+      step5MissingCompletedFields,
     };
   }, [nodes, edges]);
 }

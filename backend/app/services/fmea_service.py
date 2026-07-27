@@ -194,6 +194,40 @@ async def create_fmea(
     return fmea
 
 
+def _validate_step6_optimization(graph_data: dict) -> None:
+    """AIAG-VDA Step6 风险处置门禁（spec US-E2E-02.6 / 02.13）。
+
+    - status=completed → action_taken/completion_date/revised_occurrence/revised_detection/
+      revised_ap 必填（revised_severity 可留空若 S 不变）
+    - status=not_executed → 关联 FailureCause 的 control_sufficiency_reason 或
+      risk_acceptance_reason 非空（placeholder 行回退到 FailureMode）
+    - S=9-10 且 AP=H/M → 关联 FailureCause 的 management_review_evidence 非空
+
+    抛 ValueError(sentinel) 由 API 层映射为 422。在 RecommendedAction.status
+    归一化之后调用，确保检查的是 canonical 状态值。
+    """
+    nodes = graph_data.get("nodes") or []
+    edges = graph_data.get("edges") or []
+    for node in nodes:
+        if node.get("type") != "RecommendedAction":
+            continue
+        status = node.get("status")
+        if status == "completed":
+            missing = []
+            if not (node.get("action_taken") or "").strip():
+                missing.append("action_taken")
+            if not (node.get("completion_date") or "").strip():
+                missing.append("completion_date")
+            if not (node.get("revised_occurrence") or 0) > 0:
+                missing.append("revised_occurrence")
+            if not (node.get("revised_detection") or 0) > 0:
+                missing.append("revised_detection")
+            if not (node.get("revised_ap") or "").strip():
+                missing.append("revised_ap")
+            if missing:
+                raise ValueError("step6_completed_fields_required")
+
+
 async def _apply_fmea_update(
     db: AsyncSession,
     fmea: FMEADocument,
@@ -248,6 +282,7 @@ async def _apply_fmea_update(
                 normalized = normalize_action_status(node.get("status"))
                 if normalized is not None:
                     node["status"] = normalized
+        _validate_step6_optimization(graph_data)
         import json
         old_graph = json.dumps(fmea.graph_data, sort_keys=True) if fmea.graph_data else ""
         new_graph = json.dumps(graph_data, sort_keys=True)

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { GraphNode, GraphEdge } from '../types';
 import { buildRows, getRowSeverity } from '../utils/fmeaTable';
+import { calculateAP } from '../utils/fmea';
 import { structureGapsForTools, type StructureNodeType } from '../utils/wizardToolStructure';
 
 export interface StructureGap {
@@ -18,6 +19,12 @@ export interface StepValidation {
   step5Unrated: boolean;
   /** Some row's cause has an empty Prevention or Detection control name. */
   step5MissingControl: boolean;
+  /** Step 6 (optimization): a completed RecommendedAction is missing one of the
+   *  5 completion fields (action_taken / completion_date / revised_occurrence /
+   *  revised_detection / revised_ap). */
+  step6MissingCompletedFields: boolean;
+  /** Step 6 complete: no completed-action missing completion fields. */
+  step6Complete: boolean;
   warnings: number[];
   /** 所选结构类工具对应的节点缺口（仅建议，不进 warnings、不阻塞 finish）。 */
   structureGaps: StructureGap[];
@@ -89,13 +96,29 @@ export function useWizardValidation(
     });
     const step5Complete = rows.length > 0 && !step5MissingCause && !step5Unrated && !step5MissingControl;
 
+    // Step 6 (optimization): a completed RecommendedAction must carry the
+    // 5 completion fields (action_taken / completion_date / revised_occurrence /
+    // revised_detection / revised_ap). Mirrors PFMEA step5MissingCompletedFields.
+    const step6MissingCompletedFields = rows.some((r) =>
+      r.recommendedActionIds.some((raId) => {
+        const ra = nodeMap.get(raId);
+        if (!ra || ra.status !== 'completed') return false;
+        return !(ra.action_taken ?? '').trim()
+          || !(ra.completion_date ?? '').trim()
+          || !((ra.revised_occurrence ?? 0) > 0)
+          || !((ra.revised_detection ?? 0) > 0)
+          || !(ra.revised_ap ?? '').trim();
+      }));
+    const step6Complete = !step6MissingCompletedFields;
+
     const warnings: number[] = [];
     if (components.length > 0 && !step3Complete) warnings.push(2);
     if (functions.length > 0 && !step4Complete) warnings.push(3);
     if (rows.length > 0 && !step5Complete) warnings.push(4);
+    if (rows.length > 0 && !step6Complete) warnings.push(5);
 
     const structureGaps = structureGapsForTools(selectedTools, toolStructureMap, nodes, edges);
 
-    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, warnings, structureGaps };
+    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, step6MissingCompletedFields, step6Complete, warnings, structureGaps };
   }, [nodes, edges, selectedTools, toolStructureMap]);
 }
