@@ -5,7 +5,7 @@ import { ArrowLeftOutlined, PlusOutlined, CheckCircleOutlined } from '@ant-desig
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 import { getFMEA, deleteFMEA, type RecommendationAdoption } from '../../../api/fmea';
-import { calculateAP } from '../../../utils/fmea';
+import { calculateAP, displayActionStatus } from '../../../utils/fmea';
 import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../types';
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { usePfmeaWizardValidation } from '../../../hooks/usePfmeaWizardValidation';
@@ -640,7 +640,7 @@ export default function PFMEAWizardPage() {
                 <Col xs={24} sm={8}>
                   <Field label={t('wizard.optimization.status')}>
                     <Select size="small" style={{ width: '100%' }} options={statusOptions} allowClear
-                      value={ra?.status} onChange={v => handleActionField(r, 'status', v)} />
+                      value={displayActionStatus(ra?.status)} onChange={v => handleActionField(r, 'status', v)} />
                   </Field>
                 </Col>
                 <Col span={24}>

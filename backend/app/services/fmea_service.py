@@ -239,6 +239,15 @@ async def _apply_fmea_update(
         existing_scope = (fmea.graph_data or {}).get("wizardScope")
         if existing_scope is not None and graph_data.get("wizardScope") is None:
             raise ValueError("wizard_scope_required")
+        # 归一 RecommendedAction.status：legacy（planned/done/undecided/notExecuted/closed）
+        # → canonical 4-state（open/in_progress/completed/not_executed）。
+        # 在 diff 比较前做，确保归一后的值随 graph_data 落库并计入 changed_fields。
+        from app.services.recommended_action_status import normalize_action_status
+        for node in graph_data.get("nodes") or []:
+            if node.get("type") == "RecommendedAction" and "status" in node:
+                normalized = normalize_action_status(node.get("status"))
+                if normalized is not None:
+                    node["status"] = normalized
         import json
         old_graph = json.dumps(fmea.graph_data, sort_keys=True) if fmea.graph_data else ""
         new_graph = json.dumps(graph_data, sort_keys=True)

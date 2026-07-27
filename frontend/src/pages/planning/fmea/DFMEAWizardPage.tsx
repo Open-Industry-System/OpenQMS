@@ -9,7 +9,7 @@ import type { FMEADocument, GraphNode, GraphEdge, WizardScope } from '../../../t
 import { useWizardSave, type SaveStatus } from '../../../hooks/useWizardSave';
 import { useWizardValidation } from '../../../hooks/useWizardValidation';
 import { useDfmeaRules } from '../../../utils/dfmeaRules';
-import { calculateAP } from '../../../utils/fmea';
+import { calculateAP, displayActionStatus } from '../../../utils/fmea';
 import { buildRows, getRowSeverity, getProcessChain, type FMEARow } from '../../../utils/fmeaTable';
 import { cascadeDeleteStructureNode } from '../../../utils/wizardCascadeDelete';
 import WizardSidebar from '../../../components/dfmea/WizardSidebar';
@@ -817,7 +817,7 @@ export default function DFMEAWizardPage() {
                 <Col xs={24} sm={8}>
                   <Field label={t('wizard.optimization.status')}>
                     <Select size="small" style={{ width: '100%' }} options={statusOptions} allowClear
-                      value={ra?.status} onChange={v => handleActionField(r, 'status', v)} />
+                      value={displayActionStatus(ra?.status)} onChange={v => handleActionField(r, 'status', v)} />
                   </Field>
                 </Col>
                 <Col span={24}>

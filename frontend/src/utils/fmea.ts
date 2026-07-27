@@ -7,7 +7,6 @@ export function calculateAP(s: number, o: number, d: number): "H" | "M" | "L" | 
   if (s < 1 || s > 10 || o < 1 || o > 10 || d < 1 || d > 10) {
     return "";
   }
-
   // Severity 9-10
   if (s >= 9) {
     if (o >= 4) return "H";
@@ -51,4 +50,21 @@ export function calculateAP(s: number, o: number, d: number): "H" | "M" | "L" | 
     return d >= 5 ? "M" : "L";
   }
   return "L";
+}
+
+/**
+ * Map canonical RecommendedAction.status (open/in_progress/completed/not_executed)
+ * back to the legacy option value the wizard/editor dropdowns use for display.
+ * Legacy inputs pass through unchanged. Backend normalizes legacy → canonical on save.
+ */
+const CANONICAL_TO_LEGACY_STATUS: Record<string, string> = {
+  open: "open",
+  in_progress: "planned",
+  completed: "done",
+  not_executed: "notExecuted",
+};
+
+export function displayActionStatus(status: string | undefined): string | undefined {
+  if (!status) return status;
+  return CANONICAL_TO_LEGACY_STATUS[status] ?? status;
 }
