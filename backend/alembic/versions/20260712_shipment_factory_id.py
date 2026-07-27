@@ -20,11 +20,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add nullable first so existing rows can be backfilled.
-    op.add_column(
-        "shipment_records",
-        sa.Column("factory_id", UUID(as_uuid=True), nullable=True),
-    )
+    # Idempotent column add: some dev/test DBs had factory_id added out-of-band
+    # while the alembic stamp lagged (schema drift), without the backfill / NOT
+    # NULL / FK below. Skip only the add if the column already exists so the
+    # remaining hardening still runs and `upgrade head` doesn't fail on
+    # DuplicateColumnError.
+    from sqlalchemy import inspect
+    cols = {c["name"] for c in inspect(op.get_bind()).get_columns("shipment_records")}
+    if "factory_id" not in cols:
+        # Add nullable first so existing rows can be backfilled.
+        op.add_column(
+            "shipment_records",
+            sa.Column("factory_id", UUID(as_uuid=True), nullable=True),
+        )
 
     # Backfill factory_id from the linked customer's factory.
     op.execute(
