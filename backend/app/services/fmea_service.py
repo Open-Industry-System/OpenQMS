@@ -430,7 +430,8 @@ async def transition_fmea(
         payload={"version": fmea.version, "product_line_code": fmea.product_line_code, "status": target_status},
     ))
 
-    if target == FMEAState.APPROVED and version is not None:
+    # CP sync_pending outbox — 仅 PFMEA 审批触发（DFMEA 不关联控制计划）。
+    if target == FMEAState.APPROVED and version is not None and fmea.fmea_type == "PFMEA":
         from app.models.cp_sync_outbox import CPSyncOutbox
         db.add(CPSyncOutbox(
             fmea_id=fmea.fmea_id,
