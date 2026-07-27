@@ -108,6 +108,33 @@ async def _check_db_available() -> bool:
 # ── Resolve the effective database URL for this test run ──────────────────────
 _test_db_url = os.environ.get("TEST_DATABASE_URL", settings.DATABASE_URL)
 
+
+def _assert_not_seed_db(url: str) -> None:
+    """Fail loudly if the suite is about to run against the seeded dev DB.
+
+    Tests and seed data pollute each other (e.g. product_types), so the suite
+    must run against an isolated test DB (CI uses qms_test). The seed/dev DB is
+    whatever settings.DATABASE_URL points at; running tests there is only OK
+    when explicitly opted in via ALLOW_SEED_DB_TESTS=1.
+    """
+    if os.environ.get("ALLOW_SEED_DB_TESTS") == "1":
+        return
+    seed_url = settings.DATABASE_URL
+    seed_db = _parse_pg(seed_url)["dbname"]
+    test_db = _parse_pg(url)["dbname"]
+    # Only guard when the caller did NOT set TEST_DATABASE_URL (i.e. silently
+    # fell back to the seed DB). An explicit TEST_DATABASE_URL is intentional.
+    if "TEST_DATABASE_URL" not in os.environ and test_db == seed_db:
+        raise RuntimeError(
+            f"Refusing to run tests against the seeded dev database '{test_db}'. "
+            "Tests and seed data pollute each other. Point TEST_DATABASE_URL at an "
+            "isolated test DB (e.g. qms_test) — `make check-backend` does this "
+            "automatically — or set ALLOW_SEED_DB_TESTS=1 to override."
+        )
+
+
+_assert_not_seed_db(_test_db_url)
+
 # ── Patch the production engine with NullPool to prevent event-loop attachment
 # issues across test functions.  Tests that use app.database.async_session or
 # get_tenant_aware_session (e.g. MES concurrency, PLM sync) must not hold

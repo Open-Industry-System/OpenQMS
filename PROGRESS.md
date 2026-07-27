@@ -23,6 +23,15 @@
 
 ---
 
+## 测试库隔离 + Schema 漂移修复（2026-07-27，US-E2E-02 后续）
+
+- **Schema 漂移已修**：qms dev 库此前 alembic stamp 滞后 + 列被带外手加 + 31 个未跟踪 ` 2.py` Finder 副本导致假多头。已重建 qms 到 head `20260727_warranty_factory_id` 并重 seed（备份 `/tmp/qms_backup_20260727_122825.sql`）；`stage_runs`/`shipment.factory_id` 迁移改为幂等；新增 `warranty_records.factory_id` 迁移；`audit_plans.factory_id` 补进模型（反向漂移）。
+- **测试库隔离（对齐 CI + 守卫）**：`make check-backend` 现默认 `TEST_DATABASE_URL=qms_test`（与 CI 一致），新增 `check-test-db` 目标用 psycopg 自动建库 + `alembic upgrade head`（不依赖本机 psql/createdb）。`conftest.py` 加 `_assert_not_seed_db` 守卫：未显式设 `TEST_DATABASE_URL` 而回落到种子库 `qms` 时直接 `RuntimeError`（`ALLOW_SEED_DB_TESTS=1` 可显式绕过）。
+- **验证**：脏 qms_test（旧 create_all schema + 无 stamp）经用户确认后 drop 重建到 head（151 表，users 有 role_id/legacy_role/factory_id，warranty.factory_id NOT NULL）；backend 全绿 `1906 passed / 4 skipped / 3 xfailed / 2 xpassed / 0 failed`；守卫三路径（拒绝种子库 / 显式 qms_test 通过 / ALLOW_SEED_DB_TESTS 绕过）均正确；`make check-frontend` tsc+build 绿。
+- **后续**：126 个 ` 2.` Finder 副本已删（0 git-tracked）；残留的 `__pycache__` ` 2.cpython-*.pyc` 无害，可后续清理。
+
+---
+
 ## US-E2E-01 8D 全程闭环 — 特性缺口清单（2026-07-03 审计）
 
 对照 `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（v6，定稿）逐条审计当前系统实现的结果。**结论：故事结构上无法端到端通过**，需先补齐以下产品实现，再写故事级 spec `capa-story-closed-loop.spec.ts`。审计口径：代码路径（models/api/services/state_machines + frontend components/e2e），未跑运行时。

@@ -21,6 +21,22 @@ PYTEST_IGNORES    := --ignore=tests/test_graph_sync_worker.py --ignore=tests/tes
 # this, `make check-backend` may resolve a system python lacking openai/anthropic.
 # Resolve to an ABSOLUTE path so it stays valid after the target's `cd $(BACKEND_DIR)`.
 PYTEST ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/pytest"; else echo pytest; fi)
+# Same venv-first resolution for python + alembic (used by check-test-db).
+PYTHON_BIN ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi)
+ALEMBIC    ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/alembic" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/alembic"; else echo alembic; fi)
+
+# Test DB: mirror CI (.github/workflows/test.yml), which uses an isolated
+# qms_test database — NOT the seeded dev DB (qms). Running the suite against qms
+# pollutes seed data and is polluted by it (product_types etc.). Override with
+# `make check-backend TEST_DATABASE_URL=...` for a different cluster/DB.
+PGUSER     ?= qms
+PGPASSWORD ?= qms_dev_2026
+PGHOST     ?= localhost
+PGPORT     ?= 5432
+TEST_DB    ?= qms_test
+TEST_DATABASE_URL ?= postgresql+asyncpg://$(PGUSER):$(PGPASSWORD)@$(PGHOST):$(PGPORT)/$(TEST_DB)
+# Sync (psql/createdb) form of the admin + test URLs.
+PGADMIN_URL := postgresql://$(PGUSER):$(PGPASSWORD)@$(PGHOST):$(PGPORT)/postgres
 
 .PHONY: help check check-backend check-frontend-tsc check-frontend-build check-frontend \
 	doc-gate-preflight deploy-migrate deploy-release
@@ -41,8 +57,26 @@ help:
 # check = code consistency only (pytest + tsc + build). Does NOT hit deploy DB.
 check: check-backend check-frontend
 
-check-backend:
-	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTEST) tests/ -v $(PYTEST_IGNORES)
+check-backend: check-test-db
+	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. \
+		TEST_DATABASE_URL=$(TEST_DATABASE_URL) $(PYTEST) tests/ -v $(PYTEST_IGNORES)
+
+# Ensure the isolated test DB exists and is migrated to head (idempotent).
+# Mirrors the CI "Run database migrations" step so a fresh clone can run
+# `make check` without manual DB setup. Uses psycopg (already a backend dep)
+# instead of psql/createdb, which aren't installed on every dev machine.
+check-test-db:
+	@cd $(BACKEND_DIR) && PYTHONPATH=. $(PYTHON_BIN) -c "\
+from sqlalchemy import create_engine, text; \
+pg='$(PGUSER):$(PGPASSWORD)@$(PGHOST):$(PGPORT)'; db='$(TEST_DB)'; \
+e=create_engine(f'postgresql+psycopg://{pg}/postgres', isolation_level='AUTOCOMMIT'); \
+conn=e.connect(); \
+exists=conn.execute(text('SELECT 1 FROM pg_database WHERE datname=:d'), {'d': db}).scalar(); \
+print(f'test db {db} exists' if exists else f'creating test db {db}...'); \
+conn.execute(text(f'CREATE DATABASE \"{db}\"')) if not exists else None; \
+conn.close(); e.dispose()"
+	@cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. \
+		DATABASE_URL=$(TEST_DATABASE_URL) $(ALEMBIC) upgrade head >/dev/null
 
 check-frontend: check-frontend-tsc check-frontend-build
 
@@ -54,7 +88,6 @@ check-frontend: check-frontend-tsc check-frontend-build
 #
 # doc-gate-preflight exit 1 = blocked_modify, stale_analysis, or invalid_waiver.
 # potential_disconnect is WARN (exit 0) unless PREFLIGHT_STRICT_POTENTIAL=1.
-PYTHON_BIN ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi)
 PREFLIGHT_STRICT_POTENTIAL ?= 0
 
 doc-gate-preflight:
