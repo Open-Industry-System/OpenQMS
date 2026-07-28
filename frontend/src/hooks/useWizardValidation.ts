@@ -27,6 +27,9 @@ export interface StepValidation {
    *  risk-disposition reason (control_sufficiency_reason / risk_acceptance_reason)
    *  on its FailureCause (or FailureMode fallback for placeholder rows). */
   step6MissingNotExecutedReason: boolean;
+  /** Step 6 (optimization): an S=9-10 + AP=H/M row whose carrier (FailureCause or
+   *  FailureMode fallback) has no management_review_evidence. */
+  step6MissingMgmtReview: boolean;
   /** Step 6 complete: no completed-action missing completion fields. */
   step6Complete: boolean;
   warnings: number[];
@@ -127,7 +130,21 @@ export function useWizardValidation(
       return r.recommendedActionIds.some((raId) =>
         nodeMap.get(raId)?.status === 'not_executed' && !reasonOk);
     });
-    const step6Complete = !step6MissingCompletedFields && !step6MissingNotExecutedReason;
+    // S=9-10 + AP=H/M rows require management_review_evidence on the row's
+    // FailureCause (or FailureMode fallback for placeholder rows). S = max effect
+    // severity (getRowSeverity); AP from the AIAG-VDA lookup (calculateAP).
+    const step6MissingMgmtReview = rows.some((r) => {
+      const s = getRowSeverity(r, nodeMap);
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+      const ap = calculateAP(s, cause?.occurrence ?? 0, dc?.detection ?? 0);
+      if (s < 9 || !['H', 'M'].includes(ap)) return false;
+      const carrier = cause ?? nodeMap.get(r.failureModeNodeId);
+      return !(carrier?.management_review_evidence ?? '').trim();
+    });
+    const step6Complete = !step6MissingCompletedFields
+      && !step6MissingNotExecutedReason
+      && !step6MissingMgmtReview;
 
     const warnings: number[] = [];
     if (components.length > 0 && !step3Complete) warnings.push(2);
@@ -137,6 +154,6 @@ export function useWizardValidation(
 
     const structureGaps = structureGapsForTools(selectedTools, toolStructureMap, nodes, edges);
 
-    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, step6MissingCompletedFields, step6MissingNotExecutedReason, step6Complete, warnings, structureGaps };
+    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, step6MissingCompletedFields, step6MissingNotExecutedReason, step6MissingMgmtReview, step6Complete, warnings, structureGaps };
   }, [nodes, edges, selectedTools, toolStructureMap]);
 }

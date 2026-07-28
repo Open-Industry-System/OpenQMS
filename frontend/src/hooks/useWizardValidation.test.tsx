@@ -238,6 +238,49 @@ describe('useWizardValidation — Step 6 optimization not_executed reason gate',
   });
 });
 
+describe('useWizardValidation — Step 6 optimization S=9-10 management-review gate', () => {
+  // Defect D (02.6/02.13): an S=9-10 + AP=H/M row requires management_review_evidence
+  // on its FailureCause (or FailureMode fallback). S = max effect severity, AP = lookup.
+  const highRow = (fcProps: Partial<GraphNode>) => ({
+    nodes: [
+      n('func1', 'ProcessWorkElementFunction'),
+      n('fm1', 'FailureMode'),
+      n('fc1', 'FailureCause', { occurrence: 5, ...fcProps }),
+      n('fe1', 'FailureEffect', { severity: 9 }), // S=9
+      n('pc1', 'PreventionControl'),
+      n('dc1', 'DetectionControl', { detection: 5 }), // O=5,D=5 → AP=H
+    ],
+    edges: [
+      e('func1', 'fm1', 'HAS_FAILURE_MODE'),
+      e('fc1', 'fm1', 'CAUSE_OF'),
+      e('fm1', 'fe1', 'EFFECT_OF'),
+      e('fc1', 'pc1', 'PREVENTED_BY'),
+      e('fc1', 'dc1', 'DETECTED_BY'),
+    ],
+  });
+
+  it('blocks finish when an S=9 AP=H row has no management_review_evidence', () => {
+    const g = highRow({});
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6MissingMgmtReview).toBe(true);
+    expect(result.current.step6Complete).toBe(false);
+  });
+
+  it('allows finish when the cause carries management_review_evidence', () => {
+    const g = highRow({ management_review_evidence: '管理层评审纪要 2026-07-27' });
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6MissingMgmtReview).toBe(false);
+    expect(result.current.step6Complete).toBe(true);
+  });
+
+  it('does not require evidence for low-severity rows (S<9)', () => {
+    const g = highRow({});
+    g.nodes[3] = n('fe1', 'FailureEffect', { severity: 7 }); // S=7 < 9
+    const { result } = renderHook(() => useWizardValidation(g.nodes, g.edges, NO_TOOLS, NO_MAP));
+    expect(result.current.step6MissingMgmtReview).toBe(false);
+  });
+});
+
 describe('useWizardValidation — failure-chain name completeness (Step 4)', () => {
   // The wizard creates FM/FE/FC with empty names by default (so the AI
   // SmartSuggestionDropdown doesn't auto-fire on a placeholder). step4Complete

@@ -131,3 +131,60 @@ async def test_not_executed_with_reason_succeeds(perm_client_builder, db, defaul
     }
     resp = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
     assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_s9_ap_h_requires_management_review(perm_client_builder, db, default_factory, admin_user):
+    """Defect D: S=9-10 + AP=H/M 但无 management_review_evidence → 422。"""
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, "draft")
+    client = await perm_client_builder(fmea_level=3)
+    # S=9 (FE severity), O=5 (FC occurrence), D=5 (DC detection) → calculate_ap(9,5,5)="H"。
+    # RA completed 且 5 字段齐（过 completed 门禁），但 FC 无 management_review_evidence。
+    graph = {
+        "nodes": [
+            {"id": "fc1", "type": "FailureCause", "name": "c", "occurrence": 5},
+            {"id": "fm1", "type": "FailureMode", "name": "m"},
+            {"id": "fe1", "type": "FailureEffect", "name": "e", "severity": 9},
+            {"id": "dc1", "type": "DetectionControl", "name": "d", "detection": 5},
+            {"id": "ra1", "type": "RecommendedAction", "name": "act", "status": "completed",
+             "action_taken": "done", "completion_date": "2026-08-15",
+             "revised_occurrence": 3, "revised_detection": 2, "revised_ap": "L"},
+        ],
+        "edges": [
+            {"source": "fc1", "target": "fm1", "type": "CAUSE_OF"},
+            {"source": "fm1", "target": "fe1", "type": "EFFECT_OF"},
+            {"source": "fc1", "target": "dc1", "type": "DETECTED_BY"},
+            {"source": "fc1", "target": "ra1", "type": "OPTIMIZED_BY"},
+        ],
+        "wizardScope": {"wizard_completed": True},
+    }
+    resp = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_s9_ap_h_with_management_review_succeeds(perm_client_builder, db, default_factory, admin_user):
+    """正向：S=9 + AP=H 且 management_review_evidence 非空 → 200。"""
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, "draft")
+    client = await perm_client_builder(fmea_level=3)
+    graph = {
+        "nodes": [
+            {"id": "fc1", "type": "FailureCause", "name": "c", "occurrence": 5,
+             "management_review_evidence": "管理层评审纪要 2026-07-27"},
+            {"id": "fm1", "type": "FailureMode", "name": "m"},
+            {"id": "fe1", "type": "FailureEffect", "name": "e", "severity": 9},
+            {"id": "dc1", "type": "DetectionControl", "name": "d", "detection": 5},
+            {"id": "ra1", "type": "RecommendedAction", "name": "act", "status": "completed",
+             "action_taken": "done", "completion_date": "2026-08-15",
+             "revised_occurrence": 3, "revised_detection": 2, "revised_ap": "L"},
+        ],
+        "edges": [
+            {"source": "fc1", "target": "fm1", "type": "CAUSE_OF"},
+            {"source": "fm1", "target": "fe1", "type": "EFFECT_OF"},
+            {"source": "fc1", "target": "dc1", "type": "DETECTED_BY"},
+            {"source": "fc1", "target": "ra1", "type": "OPTIMIZED_BY"},
+        ],
+        "wizardScope": {"wizard_completed": True},
+    }
+    resp = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
+    assert resp.status_code == 200, resp.text

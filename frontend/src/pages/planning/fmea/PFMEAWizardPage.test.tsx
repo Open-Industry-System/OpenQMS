@@ -320,7 +320,7 @@ describe("PFMEAWizardPage", () => {
           { id: "wef", type: "ProcessWorkElementFunction", name: "吸嘴保持真空", ...Z },
           { id: "fm", type: "FailureMode", name: "偏移", ...Z },
           { id: "fe", type: "FailureEffect", name: "焊接不良", severity: 9, severity_plant: 9, severity_customer: 9, severity_user: 9 },
-          { id: "fc", type: "FailureCause", name: "吸嘴磨损", ...Z, occurrence: 4 },
+          { id: "fc", type: "FailureCause", name: "吸嘴磨损", ...Z, occurrence: 4, management_review_evidence: "管理层评审纪要 2026-06-01" },
           { id: "pc", type: "PreventionControl", name: "定期更换吸嘴", ...Z },
           { id: "dc", type: "DetectionControl", name: "SPC监控", ...Z, detection: 4 },
           { id: "ra", type: "RecommendedAction", name: "更换吸嘴规格", responsible: "张三", due_date: "2026-07-01", status: "in_progress" },

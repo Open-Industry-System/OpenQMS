@@ -16,6 +16,7 @@ export interface PfmeaStepValidation {
   step4MissingSeverity: boolean;
   step5MissingCompletedFields: boolean;
   step5MissingNotExecutedReason: boolean;
+  step5MissingMgmtReview: boolean;
 }
 
 const STRUCTURE_TYPES = ['ProcessItem', 'ProcessStep', 'ProcessWorkElement'];
@@ -169,11 +170,22 @@ export function usePfmeaWizardValidation(
       return r.recommendedActionIds.some((raId) =>
         nodeMap.get(raId)?.status === 'not_executed' && !reasonOk);
     });
+    // S=9-10 + AP=H/M rows require management_review_evidence on the row's
+    // FailureCause (or FailureMode fallback for placeholder rows).
+    const step5MissingMgmtReview = rows.some((r) => {
+      const s = getRowSeverity(r, nodeMap);
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+      const ap = calculateAP(s, cause?.occurrence ?? 0, dc?.detection ?? 0);
+      if (s < 9 || !['H', 'M'].includes(ap)) return false;
+      const carrier = cause ?? nodeMap.get(r.failureModeNodeId);
+      return !(carrier?.management_review_evidence ?? '').trim();
+    });
     const step5Complete = (rowsWithAP_H.length === 0 || rowsWithAP_H.every((r) =>
       r.recommendedActionIds.some((raId) => {
         const ra = nodeMap.get(raId);
         return !!ra && (ra.responsible ?? '').trim() && (ra.due_date ?? '').trim();
-      }))) && !step5MissingCompletedFields && !step5MissingNotExecutedReason;
+      }))) && !step5MissingCompletedFields && !step5MissingNotExecutedReason && !step5MissingMgmtReview;
 
     const warnings: number[] = [];
     if (!step1Complete) warnings.push(1);
@@ -188,6 +200,7 @@ export function usePfmeaWizardValidation(
       step4MissingCause, step4Unrated, step4MissingControl, step4MissingSeverity,
       step5MissingCompletedFields,
       step5MissingNotExecutedReason,
+      step5MissingMgmtReview,
     };
   }, [nodes, edges]);
 }

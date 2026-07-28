@@ -206,8 +206,18 @@ def _validate_step6_optimization(graph_data: dict) -> None:
     抛 ValueError(sentinel) 由 API 层映射为 422。在 RecommendedAction.status
     归一化之后调用，确保检查的是 canonical 状态值。
     """
+    from app.services.action_priority import calculate_ap
     nodes = graph_data.get("nodes") or []
     edges = graph_data.get("edges") or []
+    node_map = {n.get("id"): n for n in nodes}
+
+    def _source_of(ra_id):
+        """反向 OPTIMIZED_BY 找 RA 的源节点（FC，或 placeholder 行的 FM）。"""
+        for e in edges:
+            if e.get("type") == "OPTIMIZED_BY" and e.get("target") == ra_id:
+                return node_map.get(e.get("source"))
+        return None
+
     for node in nodes:
         if node.get("type") != "RecommendedAction":
             continue
@@ -226,19 +236,44 @@ def _validate_step6_optimization(graph_data: dict) -> None:
                 missing.append("revised_ap")
             if missing:
                 raise ValueError("step6_completed_fields_required")
+        source = _source_of(node.get("id"))
         if status == "not_executed":
-            # 反向 OPTIMIZED_BY 找该 RA 的源节点（FC，或 placeholder 行的 FM）。
-            source_node = None
-            for e in edges:
-                if e.get("type") == "OPTIMIZED_BY" and e.get("target") == node.get("id"):
-                    source_node = next((n for n in nodes if n.get("id") == e.get("source")), None)
-                    break
-            reason_ok = bool(source_node) and (
-                bool((source_node.get("control_sufficiency_reason") or "").strip())
-                or bool((source_node.get("risk_acceptance_reason") or "").strip())
+            reason_ok = bool(source) and (
+                bool((source.get("control_sufficiency_reason") or "").strip())
+                or bool((source.get("risk_acceptance_reason") or "").strip())
             )
             if not reason_ok:
                 raise ValueError("step6_not_executed_reason_required")
+        # S=9-10 且 AP=H/M → management_review_evidence 必填（源节点 FC，或 FM 回退）。
+        # S = 该失效模式各 FailureEffect severity 的最大值（镜像前端 getRowSeverity）；
+        # O = 源节点 occurrence；D = 源节点（FC）DETECTED_BY 探测度，回退到 FM。
+        if source is not None:
+            fm_id = source.get("id") if source.get("type") == "FailureMode" else None
+            if fm_id is None:
+                for e in edges:
+                    if e.get("source") == source.get("id") and e.get("type") == "CAUSE_OF":
+                        fm_id = e.get("target")
+                        break
+            if fm_id is not None:
+                s = 0
+                for e in edges:
+                    if e.get("source") == fm_id and e.get("type") == "EFFECT_OF":
+                        fe = node_map.get(e.get("target"))
+                        if fe and (fe.get("severity") or 0) > s:
+                            s = fe.get("severity") or 0
+                o = source.get("occurrence") or 0
+                d = 0
+                for src_id in (source.get("id"), fm_id):
+                    for e in edges:
+                        if e.get("source") == src_id and e.get("type") == "DETECTED_BY":
+                            dc = node_map.get(e.get("target"))
+                            if dc and (dc.get("detection") or 0) > d:
+                                d = dc.get("detection") or 0
+                    if d:
+                        break
+                if s >= 9 and calculate_ap(s, o, d) in ("H", "M"):
+                    if not (source.get("management_review_evidence") or "").strip():
+                        raise ValueError("step6_management_review_required")
 
 
 async def _apply_fmea_update(
