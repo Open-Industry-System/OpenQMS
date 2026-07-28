@@ -1,6 +1,14 @@
 import client from "./client";
 import type { FMEADocument, FMEAListResponse, GraphData } from "../types";
 
+export interface RecommendationAdoption {
+  field_id: string;
+  recommendation_id: string;
+  source: string;
+  stage_index: number;
+  adopted_text: string;
+}
+
 export async function listFMEAs(params: {
   page?: number;
   page_size?: number;
@@ -36,6 +44,7 @@ export async function updateFMEA(
     graph_data?: GraphData;
     lock_version?: number;
     confirmed_latest_lock_version?: number;
+    adoptions?: RecommendationAdoption[];
   }
 ): Promise<FMEADocument> {
   const resp = await client.put(`/fmea/${id}`, data);

@@ -85,3 +85,45 @@ async def test_update_accepts_braced_uuid_when_single(db, default_factory, admin
     assert len(items) == 1
     assert items[0].item_id == iid  # preserved (canonical match)
     assert items[0].product_characteristic == "A2"
+
+
+@pytest.mark.asyncio
+async def test_update_fmea_ref_id_audit_serializes_uuid(db, default_factory, admin_user):
+    """缺陷修复 #3：control_plan_service.py:214 把 UUID 直接塞进 changed_fields →
+    AuditLog JSONB 序列化崩溃（500）。期望：changed_fields 存 str，更新本身成功。"""
+    import json
+    from app.models.audit import AuditLog
+    cp = ControlPlan(
+        cp_id=uuid.uuid4(),
+        document_no=f"CP-REF-{uuid.uuid4().hex[:6]}",
+        title="t",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        status="draft",
+        created_by=admin_user.user_id,
+    )
+    db.add(cp)
+    await db.flush()
+    # fmea_ref_id 有 FK → 需先落一条真实 FMEA
+    from app.models.fmea import FMEADocument
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(), document_no=f"PFMEA-REF-{uuid.uuid4().hex[:6]}",
+        fmea_type="PFMEA", title="t", product_line_code="DC-DC-100",
+        factory_id=default_factory.id, status="draft",
+        graph_data={"nodes": [], "edges": []}, version=1, created_by=admin_user.user_id,
+    )
+    db.add(fmea)
+    await db.flush()
+    new_ref = fmea.fmea_id
+    data = ControlPlanUpdate(fmea_ref_id=new_ref)
+    await update_control_plan(db, cp, data, admin_user.user_id)
+    await db.flush()
+    assert cp.fmea_ref_id == new_ref
+    row = (await db.execute(select(AuditLog).where(
+        AuditLog.table_name == "control_plans",
+        AuditLog.record_id == cp.cp_id,
+        AuditLog.action == "UPDATE",
+    ))).scalars().all()[-1]
+    # changed_fields 必须可 JSON 序列化（不抛 TypeError），且值是 str 形式
+    json.dumps(row.changed_fields)
+    assert row.changed_fields["fmea_ref_id"] == str(new_ref)

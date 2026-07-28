@@ -14,6 +14,9 @@ export interface PfmeaStepValidation {
   step4Unrated: boolean;
   step4MissingControl: boolean;
   step4MissingSeverity: boolean;
+  step5MissingCompletedFields: boolean;
+  step5MissingNotExecutedReason: boolean;
+  step5MissingMgmtReview: boolean;
 }
 
 const STRUCTURE_TYPES = ['ProcessItem', 'ProcessStep', 'ProcessWorkElement'];
@@ -140,11 +143,49 @@ export function usePfmeaWizardValidation(
       const d = dc?.detection ?? 0;
       return calculateAP(s, o, d) === 'H';
     });
-    const step5Complete = rowsWithAP_H.length === 0 || rowsWithAP_H.every((r) =>
+    // Step 5 (optimization) gate: a completed RecommendedAction must carry the
+    // 5 completion fields (action_taken / completion_date / revised_occurrence /
+    // revised_detection / revised_ap). revised_severity may stay 0 if S is unchanged.
+    const step5MissingCompletedFields = rows.some((r) =>
+      r.recommendedActionIds.some((raId) => {
+        const ra = nodeMap.get(raId);
+        if (!ra || ra.status !== 'completed') return false;
+        return !(ra.action_taken ?? '').trim()
+          || !(ra.completion_date ?? '').trim()
+          || !((ra.revised_occurrence ?? 0) > 0)
+          || !((ra.revised_detection ?? 0) > 0)
+          || !(ra.revised_ap ?? '').trim();
+      }));
+    // A not_executed RecommendedAction requires a risk-disposition reason on the
+    // row's FailureCause (control_sufficiency_reason / risk_acceptance_reason);
+    // placeholder rows (no cause) fall back to the FailureMode's reason fields.
+    const step5MissingNotExecutedReason = rows.some((r) => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const fm = nodeMap.get(r.failureModeNodeId);
+      const carrier = cause ?? fm;
+      const reasonOk = !!carrier && (
+        !!(carrier.control_sufficiency_reason ?? '').trim()
+        || !!(carrier.risk_acceptance_reason ?? '').trim()
+      );
+      return r.recommendedActionIds.some((raId) =>
+        nodeMap.get(raId)?.status === 'not_executed' && !reasonOk);
+    });
+    // S=9-10 + AP=H/M rows require management_review_evidence on the row's
+    // FailureCause (or FailureMode fallback for placeholder rows).
+    const step5MissingMgmtReview = rows.some((r) => {
+      const s = getRowSeverity(r, nodeMap);
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+      const ap = calculateAP(s, cause?.occurrence ?? 0, dc?.detection ?? 0);
+      if (s < 9 || !['H', 'M'].includes(ap)) return false;
+      const carrier = cause ?? nodeMap.get(r.failureModeNodeId);
+      return !(carrier?.management_review_evidence ?? '').trim();
+    });
+    const step5Complete = (rowsWithAP_H.length === 0 || rowsWithAP_H.every((r) =>
       r.recommendedActionIds.some((raId) => {
         const ra = nodeMap.get(raId);
         return !!ra && (ra.responsible ?? '').trim() && (ra.due_date ?? '').trim();
-      }));
+      }))) && !step5MissingCompletedFields && !step5MissingNotExecutedReason && !step5MissingMgmtReview;
 
     const warnings: number[] = [];
     if (!step1Complete) warnings.push(1);
@@ -157,6 +198,9 @@ export function usePfmeaWizardValidation(
       step1Complete, step2Complete, step3Complete, step4Complete, step5Complete,
       warnings,
       step4MissingCause, step4Unrated, step4MissingControl, step4MissingSeverity,
+      step5MissingCompletedFields,
+      step5MissingNotExecutedReason,
+      step5MissingMgmtReview,
     };
   }, [nodes, edges]);
 }

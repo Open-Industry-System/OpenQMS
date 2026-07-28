@@ -32,4 +32,15 @@ describe("getRecommendations timeout", () => {
     const cfg = mockedPost.mock.calls[0][2] as { timeout?: number } | undefined;
     expect(cfg?.timeout).toBeGreaterThanOrEqual(30000);
   });
+
+  it("injects the current UI language into context.language (defect #7 i18n)", async () => {
+    // 缺陷修复 #7：前端携带 i18n.language 到 context.language，后端据此让
+    // AI 建议跟随界面语言。此处断言 payload.context.language 被注入且为已支持语言。
+    mockedPost.mockResolvedValueOnce({ data: RESPONSE });
+    await getRecommendations("fmea-1", { trigger_type: "dfmea_tool", context: { task: "t" } });
+    const payload = mockedPost.mock.calls[0][1] as { context: Record<string, unknown> };
+    expect(payload.context.task).toBe("t"); // 原 context 字段保留
+    expect(typeof payload.context.language).toBe("string");
+    expect(["zh-CN", "en-US"]).toContain(payload.context.language);
+  });
 });

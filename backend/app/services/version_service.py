@@ -135,6 +135,7 @@ async def _create_fmea_version_no_commit(
     version = FMEAVersion(
         version_id=uuid.uuid4(),
         fmea_id=fmea.fmea_id,
+        factory_id=fmea.factory_id,
         major_no=major_no,
         minor_no=minor_no,
         snapshot=snapshot,

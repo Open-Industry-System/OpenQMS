@@ -105,6 +105,34 @@ class TestBuildPromptForToolTrend:
         assert "{task}" not in prompt
 
 
+class TestBuildPromptLanguageDirective:
+    """缺陷修复 #7：PROMPT_TEMPLATES 中文写死 → LLM 无论 UI 语言都返回中文名
+    （report 02.8 i18n 缺口）。单一 zh 模板 + 英文输出指令（output-language
+    directive），按 context["language"] 选择，避免 9 份重复英文模板漂移。"""
+
+    def _svc(self):
+        return RecommendationService(db=None, graph_repo=StubGraphRepo())
+
+    def test_english_language_appends_output_directive(self):
+        prompt = self._svc()._build_prompt("dfmea_tool", {
+            "fmea_title": "DC-DC Converter DFMEA",
+            "task": "analyze voltage sensing",
+            "language": "en-US",
+        })
+        assert "English" in prompt  # 追加了英文输出指令
+        assert "分析工具" in prompt  # 模板正文仍是 canonical zh
+
+    def test_chinese_language_has_no_english_directive(self):
+        prompt = self._svc()._build_prompt("dfmea_tool", {
+            "fmea_title": "DFMEA", "task": "t", "language": "zh-CN",
+        })
+        assert "English" not in prompt  # 中文 → 不追加英文指令
+
+    def test_absent_language_has_no_english_directive(self):
+        prompt = self._svc()._build_prompt("dfmea_tool", {"fmea_title": "DFMEA", "task": "t"})
+        assert "English" not in prompt  # 未指定 → 默认中文，不追加英文指令
+
+
 # --- recommend() 集成：验证新 trigger 走完整链路 + source 分支（spec §9） ---
 # 通过 monkeypatch 绕过 db（_get_fmea_or_404 / _get_cached / _assemble_context /
 # _cache_result）与权限（get_user_permission），直接驱动 recommend() 逻辑。
@@ -122,6 +150,8 @@ from app.schemas.recommendation import RecommendRequest
 class _StubFmea:
     def __init__(self):
         self.id = _uuid.uuid4()
+        # Real FMEADocument PK is `fmea_id`; recommend() passes it to run_retrievers.
+        self.fmea_id = self.id
         self.product_line_code = "DC-DC-100"
         self.fmea_type = "DFMEA"
         self.title = "DC-DC转换器设计FMEA"

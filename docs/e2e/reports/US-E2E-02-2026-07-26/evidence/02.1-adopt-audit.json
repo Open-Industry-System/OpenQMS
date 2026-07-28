@@ -1,0 +1,20 @@
+[
+  {
+    "log_id": "9ae38083-2331-49f7-882b-63f284f80569",
+    "table_name": "fmea_documents",
+    "record_id": "00000000-0000-0000-0000-000000e20100",
+    "action": "ADOPT_RECOMMENDATION",
+    "operated_by": "engineer",
+    "ip_address": null,
+    "operated_at": "2026-07-26T06:48:15.231029+00:00",
+    "changed_fields": {
+      "source": "llm",
+      "field_id": "wizardScope.tool",
+      "stage_index": 0,
+      "adopted_text": "P图",
+      "recommendation_id": "rec_f700a54c1684"
+    },
+    "old_values": null,
+    "new_values": null
+  }
+]

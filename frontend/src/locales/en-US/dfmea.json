@@ -112,10 +112,10 @@
       "revisedRatings": "Revised S / O / D",
       "revisedAp": "AP After Action",
       "statusOptions": {
-        "undecided": "Undecided",
-        "planned": "Planned (not executed)",
-        "done": "Completed",
-        "notExecuted": "Not executed"
+        "open": "Open",
+        "in_progress": "In Progress",
+        "completed": "Completed",
+        "not_executed": "Not Executed"
       },
       "preventionPlaceholder": "Prevention measure",
       "detectionPlaceholder": "Detection measure"

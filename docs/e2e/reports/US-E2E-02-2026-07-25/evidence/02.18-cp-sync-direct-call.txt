@@ -1,0 +1,11 @@
+=== FMEA submit fails (factory_id NOT NULL on fmea_versions) ===
+Code: backend/app/services/version_service.py line 135 FMEAVersion() does NOT set factory_id=fmea.factory_id
+
+=== CP sync is direct post-commit call, not durable outbox ===
+Code: backend/app/services/fmea_service.py line 426-431
+await db.commit()  # FMEA transition commits first
+if target == FMEAState.APPROVED and version:
+    from app.services.control_plan_service import mark_cp_sync_pending_on_fmea_approve
+    await mark_cp_sync_pending_on_fmea_approve(db, fmea.fmea_id, version.version_id)
+
+If process crashes between commit and mark_cp_sync_pending, CP sync_pending_set is lost (no outbox row).

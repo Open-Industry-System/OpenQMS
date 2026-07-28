@@ -40,3 +40,6 @@ class AuditPlan(Base):
     customer_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     audit_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
     customer_confirmation_doc: Mapped[list] = mapped_column(JSONB, default=list)
+    factory_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("factories.id", ondelete="RESTRICT"), nullable=False
+    )

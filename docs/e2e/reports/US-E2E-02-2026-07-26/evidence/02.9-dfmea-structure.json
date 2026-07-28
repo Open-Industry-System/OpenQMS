@@ -1,0 +1,34 @@
+{
+  "structure_nodes": [
+    {
+      "type": "System",
+      "name": "DC-DC 转换器系统"
+    },
+    {
+      "type": "Subsystem",
+      "name": "功率变换子系统"
+    },
+    {
+      "type": "Component",
+      "name": "变压器 T1"
+    }
+  ],
+  "edges": [
+    {
+      "type": "HAS_PROCESS_STEP",
+      "src_type": "System",
+      "tgt_type": "Subsystem"
+    },
+    {
+      "type": "HAS_WORK_ELEMENT",
+      "src_type": "Subsystem",
+      "tgt_type": "Component"
+    }
+  ],
+  "shared_vocabulary_check": {
+    "HAS_SUBSYSTEM_forbidden_absent": true,
+    "HAS_COMPONENT_forbidden_absent": true,
+    "HAS_PROCESS_STEP_present": true,
+    "HAS_WORK_ELEMENT_present": true
+  }
+}

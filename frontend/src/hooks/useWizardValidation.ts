@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { GraphNode, GraphEdge } from '../types';
 import { buildRows, getRowSeverity } from '../utils/fmeaTable';
+import { calculateAP } from '../utils/fmea';
 import { structureGapsForTools, type StructureNodeType } from '../utils/wizardToolStructure';
 
 export interface StructureGap {
@@ -18,6 +19,19 @@ export interface StepValidation {
   step5Unrated: boolean;
   /** Some row's cause has an empty Prevention or Detection control name. */
   step5MissingControl: boolean;
+  /** Step 6 (optimization): a completed RecommendedAction is missing one of the
+   *  5 completion fields (action_taken / completion_date / revised_occurrence /
+   *  revised_detection / revised_ap). */
+  step6MissingCompletedFields: boolean;
+  /** Step 6 (optimization): a not_executed RecommendedAction whose row carries no
+   *  risk-disposition reason (control_sufficiency_reason / risk_acceptance_reason)
+   *  on its FailureCause (or FailureMode fallback for placeholder rows). */
+  step6MissingNotExecutedReason: boolean;
+  /** Step 6 (optimization): an S=9-10 + AP=H/M row whose carrier (FailureCause or
+   *  FailureMode fallback) has no management_review_evidence. */
+  step6MissingMgmtReview: boolean;
+  /** Step 6 complete: no completed-action missing completion fields. */
+  step6Complete: boolean;
   warnings: number[];
   /** 所选结构类工具对应的节点缺口（仅建议，不进 warnings、不阻塞 finish）。 */
   structureGaps: StructureGap[];
@@ -89,13 +103,57 @@ export function useWizardValidation(
     });
     const step5Complete = rows.length > 0 && !step5MissingCause && !step5Unrated && !step5MissingControl;
 
+    // Step 6 (optimization): a completed RecommendedAction must carry the
+    // 5 completion fields (action_taken / completion_date / revised_occurrence /
+    // revised_detection / revised_ap). Mirrors PFMEA step5MissingCompletedFields.
+    const step6MissingCompletedFields = rows.some((r) =>
+      r.recommendedActionIds.some((raId) => {
+        const ra = nodeMap.get(raId);
+        if (!ra || ra.status !== 'completed') return false;
+        return !(ra.action_taken ?? '').trim()
+          || !(ra.completion_date ?? '').trim()
+          || !((ra.revised_occurrence ?? 0) > 0)
+          || !((ra.revised_detection ?? 0) > 0)
+          || !(ra.revised_ap ?? '').trim();
+      }));
+    // A not_executed RecommendedAction requires a risk-disposition reason on the
+    // row's FailureCause (control_sufficiency_reason / risk_acceptance_reason);
+    // placeholder rows (no cause) fall back to the FailureMode's reason fields.
+    const step6MissingNotExecutedReason = rows.some((r) => {
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const fm = nodeMap.get(r.failureModeNodeId);
+      const carrier = cause ?? fm;
+      const reasonOk = !!carrier && (
+        !!(carrier.control_sufficiency_reason ?? '').trim()
+        || !!(carrier.risk_acceptance_reason ?? '').trim()
+      );
+      return r.recommendedActionIds.some((raId) =>
+        nodeMap.get(raId)?.status === 'not_executed' && !reasonOk);
+    });
+    // S=9-10 + AP=H/M rows require management_review_evidence on the row's
+    // FailureCause (or FailureMode fallback for placeholder rows). S = max effect
+    // severity (getRowSeverity); AP from the AIAG-VDA lookup (calculateAP).
+    const step6MissingMgmtReview = rows.some((r) => {
+      const s = getRowSeverity(r, nodeMap);
+      const cause = r.failureCauseNodeId ? nodeMap.get(r.failureCauseNodeId) : null;
+      const dc = r.detectionControlIds[0] ? nodeMap.get(r.detectionControlIds[0]) : null;
+      const ap = calculateAP(s, cause?.occurrence ?? 0, dc?.detection ?? 0);
+      if (s < 9 || !['H', 'M'].includes(ap)) return false;
+      const carrier = cause ?? nodeMap.get(r.failureModeNodeId);
+      return !(carrier?.management_review_evidence ?? '').trim();
+    });
+    const step6Complete = !step6MissingCompletedFields
+      && !step6MissingNotExecutedReason
+      && !step6MissingMgmtReview;
+
     const warnings: number[] = [];
     if (components.length > 0 && !step3Complete) warnings.push(2);
     if (functions.length > 0 && !step4Complete) warnings.push(3);
     if (rows.length > 0 && !step5Complete) warnings.push(4);
+    if (rows.length > 0 && !step6Complete) warnings.push(5);
 
     const structureGaps = structureGapsForTools(selectedTools, toolStructureMap, nodes, edges);
 
-    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, warnings, structureGaps };
+    return { step3Complete, step4Complete, step5Complete, step5MissingCause, step5Unrated, step5MissingControl, step6MissingCompletedFields, step6MissingNotExecutedReason, step6MissingMgmtReview, step6Complete, warnings, structureGaps };
   }, [nodes, edges, selectedTools, toolStructureMap]);
 }

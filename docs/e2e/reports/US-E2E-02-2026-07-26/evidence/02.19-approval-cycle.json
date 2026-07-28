@@ -1,0 +1,77 @@
+{
+  "test_B_wizard_completed_false_submit_422": {
+    "http": 422,
+    "detail": "向导未完成，不能提交评审",
+    "verdict": "PASS"
+  },
+  "test_A_submit_200": {
+    "http": 200,
+    "status": "in_review",
+    "verdict": "PASS"
+  },
+  "test_C_manager_approve_200": {
+    "http": 200,
+    "status": "approved",
+    "approved_by": "fb4e2a44-634f-4824-a2da-1755b0b2bcd3",
+    "approved_at_nonempty": true,
+    "verdict": "PASS"
+  },
+  "test_D_engineer_approve_403": {
+    "http": 403,
+    "detail": "审批权限不足",
+    "verdict": "PASS"
+  },
+  "test_E1_reject_no_reason_422": {
+    "http": 422,
+    "detail": "驳回必须携带非空 reason",
+    "verdict": "PASS"
+  },
+  "test_E2_reject_empty_reason_422": {
+    "http": 422,
+    "detail": "驳回必须携带非空 reason",
+    "verdict": "PASS"
+  },
+  "test_E3_reject_whitespace_reason_422": {
+    "http": 422,
+    "detail": "驳回必须携带非空 reason",
+    "verdict": "PASS"
+  },
+  "test_F1_engineer_reject_403": {
+    "http": 403,
+    "detail": "审批权限不足",
+    "verdict": "PASS"
+  },
+  "test_F2_manager_reject_with_reason_200": {
+    "http": 200,
+    "status": "rework",
+    "verdict": "PASS"
+  },
+  "test_G_approved_to_rework_preserves_approved_by": {
+    "http": 200,
+    "status": "rework",
+    "approved_by_preserved": "fb4e2a44-634f-4824-a2da-1755b0b2bcd3",
+    "approved_at_preserved_nonempty": true,
+    "verdict": "PASS"
+  },
+  "test_H_put_in_review_409": {
+    "http": 409,
+    "detail": "当前状态不可编辑（仅草稿/返工可编辑）",
+    "verdict": "PASS"
+  },
+  "test_I_admin_skip_draft_to_approved_400": {
+    "http": 400,
+    "detail": "Cannot transition from draft to approved. Allowed: [in_review, archived]",
+    "verdict": "PASS",
+    "note": "engineer gets 403 first (APPROVE gate before state machine); admin bypasses to hit state machine 400"
+  },
+  "test_J_rework_submit_wizard_false_422": {
+    "http": 422,
+    "detail": "向导未完成，不能提交评审",
+    "verdict": "PASS"
+  },
+  "test_J2_rework_submit_wizard_true_200": {
+    "http": 200,
+    "status": "in_review",
+    "verdict": "PASS"
+  }
+}

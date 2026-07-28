@@ -76,6 +76,10 @@ export interface GraphNode {
   revised_detection?: number;
   ap?: string;
   revised_ap?: string;
+  // FailureCause/FailureMode 风险处置字段（Step6 优化门禁）
+  control_sufficiency_reason?: string;
+  risk_acceptance_reason?: string;
+  management_review_evidence?: string;
   p_diagram?: {
     inputs: string[];
     outputs: string[];

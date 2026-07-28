@@ -1140,6 +1140,7 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
         created_by=admin_id,
         product_line_code="DC-DC-100",
         audit_category="internal",
+        factory_id=default_factory_id,
     )
     db.add(plan1)
     await db.flush()
@@ -1196,7 +1197,8 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
         status="planned",
         created_by=admin_id,
         product_line_code="DC-DC-100",
-        audit_category="process",
+        audit_category="internal",
+        factory_id=default_factory_id,
     )
     db.add(plan2)
     await db.flush()
@@ -1232,8 +1234,9 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
         created_by=admin_id,
         product_line_code="DC-DC-100",
         audit_category="customer", customer_name="上海新能源主机厂",
-        customer_type="automotive",
+        customer_type="OEM",
         customer_confirmation_doc=[],
+        factory_id=default_factory_id,
     )
     db.add(plan3)
     await db.flush()
@@ -1475,7 +1478,7 @@ async def seed_mes_mock(db, admin_id, default_factory_id):
         ("EQ-003", "回流焊炉-1", "running", 97.5, 92.1, 99.5, 89.3),
         ("EQ-004", "综合测试台-1", "running", 91.0, 85.0, 99.2, 76.6),
         ("EQ-005", "AOI检测仪-1", "idle", 85.0, 78.0, 99.0, 65.5),
-        ("EQ-006", "点胶机-1", "maintenance", 60.0, 45.0, 95.0, 25.7),
+        ("EQ-006", "点胶机-1", "down", 60.0, 45.0, 95.0, 25.7),
     ]
     for eq_code, eq_name, status, avail, perf, qual, oee in equipment_list:
         db.add(MESEquipmentStatus(
@@ -1484,7 +1487,7 @@ async def seed_mes_mock(db, admin_id, default_factory_id):
             equipment_name=eq_name, status=status,
             availability=Decimal(str(avail)), performance=Decimal(str(perf)),
             quality=Decimal(str(qual)), oee=Decimal(str(oee)),
-            downtime_reason="计划性维护" if status == "maintenance" else None,
+            downtime_reason="计划性维护" if status == "down" else None,
             recorded_at=now, product_line_code="DC-DC-100",
         ))
 
@@ -1760,7 +1763,7 @@ async def seed():
             admin = User(
                 username="admin", display_name="系统管理员",
                 password_hash=hash_password("Admin@2026"),
-                role_id=roles["admin"],
+                role_id=roles["admin"], legacy_role="admin",
             )
             db.add(admin)
             await db.flush()
@@ -1769,17 +1772,34 @@ async def seed():
         engineer = User(
             username="engineer", display_name="质量工程师",
             password_hash=hash_password("Engineer@2026"), role_id=roles["field_qe"],
+            legacy_role="field_qe",
         )
         manager = User(
             username="manager", display_name="质量经理",
             password_hash=hash_password("Manager@2026"), role_id=roles["manager"],
+            legacy_role="manager",
         )
         viewer = User(
             username="viewer", display_name="只读用户",
             password_hash=hash_password("Viewer@2026"), role_id=roles["viewer"],
+            legacy_role="viewer",
         )
         db.add_all([engineer, manager, viewer])
         await db.flush()
+
+        # Default factory must exist BEFORE any factory-scoped entity (product
+        # lines, FMEA, CAPA, suppliers, complaints, …) because those tables have
+        # factory_id NOT NULL. Create it up-front so INSERTs can carry it
+        # directly instead of relying on a later UPDATE backfill (which never
+        # runs — the NOT NULL INSERT fails first).
+        from app.models.factory import Factory
+        default_factory = (await db.execute(
+            select(Factory).where(Factory.code == "DEFAULT")
+        )).scalar_one_or_none()
+        if not default_factory:
+            default_factory = Factory(code="DEFAULT", name="默认工厂", location="总部", is_active=True)
+            db.add(default_factory)
+            await db.flush()
 
         # Product types (cross-factory taxonomy)
         from app.models.product_type import ProductType
@@ -1796,8 +1816,8 @@ async def seed():
         # Product lines (must exist before UserProductLine assignments)
         from app.models.product_line import ProductLine
         pl_data = [
-            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER"},
-            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB"},
+            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER", "factory_id": default_factory.id},
+            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB", "factory_id": default_factory.id},
         ]
         for pl_dict in pl_data:
             existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
@@ -1818,6 +1838,7 @@ async def seed():
             created_by=engineer.user_id, updated_by=engineer.user_id,
             approved_by=manager.user_id,
             approved_at=datetime.now(UTC),
+            factory_id=default_factory.id,
         )
         fmea2 = FMEADocument(
             document_no="PFMEA-2026-002", title="注塑工序PFMEA",
@@ -1826,12 +1847,14 @@ async def seed():
                 {"id": "pi_draft", "type": "ProcessItem", "name": "新建过程项目", "severity": 0, "occurrence": 0, "detection": 0}
             ], "edges": []},
             created_by=engineer.user_id, updated_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         fmea3 = FMEADocument(
             document_no="DFMEA-2026-001", title="电池管理系统 (BMS) DFMEA",
             fmea_type="DFMEA", status="in_review",
             graph_data=SAMPLE_DFMEA_GRAPH,
             created_by=engineer.user_id, updated_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         db.add_all([fmea1, fmea2, fmea3])
         await db.flush()
@@ -1847,6 +1870,7 @@ async def seed():
             due_date=date(2026, 6, 1),
             fmea_ref_id=fmea1.fmea_id,
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         capa2 = CAPAEightD(
             document_no="8D-2026-002", title="注塑尺寸超差",
@@ -1854,6 +1878,7 @@ async def seed():
             d1_team=[],
             due_date=date(2026, 6, 15),
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         db.add_all([capa1, capa2])
 
@@ -1880,6 +1905,7 @@ async def seed():
             },
             created_by=engineer.user_id,
             updated_by=manager.user_id,
+            factory_id=default_factory.id,
         )
         db.add(review1)
         await db.flush()
@@ -1896,6 +1922,7 @@ async def seed():
             verified_by=manager.user_id,
             verified_at=date(2026, 5, 10),
             verification_notes="看板运行稳定，数据准确，达到预期效果",
+            factory_id=default_factory.id,
         )
         output2_v = ReviewOutput(
             review_id=review1.review_id,
@@ -1908,6 +1935,7 @@ async def seed():
             verified_by=manager.user_id,
             verified_at=date(2026, 5, 20),
             verification_notes="文件审批完成，培训记录完整",
+            factory_id=default_factory.id,
         )
         output3_c = ReviewOutput(
             review_id=review1.review_id,
@@ -1917,6 +1945,7 @@ async def seed():
             due_date=date(2026, 6, 1),
             status="completed",
             completion_notes="设备已采购到位，安装调试完成",
+            factory_id=default_factory.id,
         )
         db.add_all([output1_v, output2_v, output3_c])
 
@@ -1933,6 +1962,7 @@ async def seed():
                 {"user_id": str(engineer.user_id), "name": "质量工程师", "role": "数据准备", "department": "质量部"},
             ],
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         db.add(review2)
         await db.flush()
@@ -1944,6 +1974,7 @@ async def seed():
             responsible_id=engineer.user_id,
             due_date=date(2026, 7, 15),
             status="pending",
+            factory_id=default_factory.id,
         )
         db.add(output4_p)
 
@@ -1990,15 +2021,15 @@ async def seed():
                 select(SpecialCharacteristic).where(SpecialCharacteristic.sc_code == sc_dict["sc_code"])
             )
             if not existing.scalar_one_or_none():
-                sc = SpecialCharacteristic(**sc_dict, created_by=admin_id)
+                sc = SpecialCharacteristic(**sc_dict, created_by=admin_id, factory_id=default_factory.id)
                 db.add(sc)
 
         # Product lines
         from app.models.product_line import ProductLine
 
         pl_data = [
-            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER"},
-            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB"},
+            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER", "factory_id": default_factory.id},
+            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB", "factory_id": default_factory.id},
         ]
         for pl_dict in pl_data:
             existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
@@ -2043,7 +2074,7 @@ async def seed():
         for mat_dict in iqc_materials:
             existing = await db.execute(select(IqcMaterial).where(IqcMaterial.part_no == mat_dict["part_no"]))
             if not existing.scalar_one_or_none():
-                db.add(IqcMaterial(created_by=admin_id, **mat_dict))
+                db.add(IqcMaterial(created_by=admin_id, factory_id=default_factory.id, **mat_dict))
 
         await db.flush()
 
@@ -2063,6 +2094,7 @@ async def seed():
             annual_shipment_qty=36500,
             notes="重点汽车客户，月度质量例会",
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         customer2 = Customer(
             customer_code="CUS-002",
@@ -2076,6 +2108,7 @@ async def seed():
             annual_shipment_qty=18000,
             notes="工业控制器客户",
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         db.add_all([customer1, customer2])
         await db.flush()
@@ -2124,6 +2157,7 @@ async def seed():
             assignee_id=engineer.user_id,
             supplier_responsibility=False,
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         complaint2 = CustomerComplaint(
             complaint_no="CC-2026-002",
@@ -2145,6 +2179,7 @@ async def seed():
             assignee_id=engineer.user_id,
             supplier_responsibility=False,
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         complaint3 = CustomerComplaint(
             complaint_no="CC-2026-003",
@@ -2168,6 +2203,7 @@ async def seed():
             supplier_responsibility=False,
             closed_at=datetime(2026, 5, 10, tzinfo=UTC),
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         db.add_all([complaint1, complaint2, complaint3])
         await db.flush()
@@ -2193,6 +2229,7 @@ async def seed():
             tracking_number="SF123456789CN",
             received_date=date(2026, 5, 26),
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         rma2 = RMARecord(
             rma_no="RMA-2026-002",
@@ -2212,6 +2249,7 @@ async def seed():
             received_date=date(2026, 5, 21),
             closed_at=datetime(2026, 5, 25, tzinfo=UTC),
             created_by=engineer.user_id,
+            factory_id=default_factory.id,
         )
         db.add_all([rma1, rma2])
 
@@ -2228,6 +2266,7 @@ async def seed():
             product_scope="电子元器件、PCB板",
             status="approved",
             created_by=admin.user_id,
+            factory_id=default_factory.id,
         )
         supplier2 = Supplier(
             supplier_no="SUP-2026-002",
@@ -2240,6 +2279,7 @@ async def seed():
             product_scope="结构件、包装材料",
             status="approved",
             created_by=admin.user_id,
+            factory_id=default_factory.id,
         )
         db.add_all([supplier1, supplier2])
         await db.flush()
@@ -2256,6 +2296,7 @@ async def seed():
             grade="A",
             notes="供应商表现优秀，按时交付且质量稳定",
             evaluated_by=admin.user_id,
+            factory_id=default_factory.id,
         )
         eval2 = SupplierEvaluation(
             supplier_id=supplier2.supplier_id,
@@ -2270,6 +2311,7 @@ async def seed():
             grade="B",
             notes="供应商表现一般，存在一次CAPA需关注",
             evaluated_by=admin.user_id,
+            factory_id=default_factory.id,
         )
         db.add_all([eval1, eval2])
 
@@ -2331,6 +2373,7 @@ async def seed():
                 config={},
                 is_active=True,
                 created_by=SYSTEM_USER_ID,
+                factory_id=default_factory.id,
             )
             db.add(plm_conn)
             await db.flush()
@@ -2448,6 +2491,7 @@ async def seed():
             email="groupadmin@qms.example.com",
             password_hash=hash_password("GroupAdmin@2026"),
             role_id=admin.role_id,  # same role as admin
+            legacy_role="admin",
             is_active=True,
         )
         db.add(group_admin)

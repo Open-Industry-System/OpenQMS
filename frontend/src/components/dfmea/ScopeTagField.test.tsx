@@ -99,7 +99,7 @@ describe("ScopeTagField", () => {
     expect(screen.queryByText("故障树分析(FTA)")).not.toBeInTheDocument();
   });
 
-  it("passes trigger_type, scope and include_graph:false to getRecommendations", async () => {
+  it("passes trigger_type, scope and include_graph:true to getRecommendations", async () => {
     mockedGetRecommendations.mockResolvedValueOnce(AI_RESPONSE);
     renderField({ triggerType: "dfmea_trend" });
     fireEvent.click(screen.getByTestId("scope-ai-btn"));
@@ -107,6 +107,7 @@ describe("ScopeTagField", () => {
     const arg = mockedGetRecommendations.mock.calls[0][1];
     expect(arg.trigger_type).toBe("dfmea_trend");
     expect(arg.scope).toBe("current_product_type");
-    expect(arg.include_graph).toBe(false);
+    // graph 是 required_retriever：向导范围推荐也必须查图，与 SmartSuggestionDropdown 对齐
+    expect(arg.include_graph).toBe(true);
   });
 });

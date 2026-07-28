@@ -211,7 +211,9 @@ async def update_control_plan(
     ]:
         value = getattr(data, field, None)
         if value is not None and value != getattr(cp, field, None):
-            changed_fields[field] = value
+            # AuditLog.changed_fields is JSONB: UUID 须先序列化成 str，否则
+            # json.dumps 抛 TypeError（fmea_ref_id 是 UUID 类型）。
+            changed_fields[field] = str(value) if isinstance(value, uuid.UUID) else value
             setattr(cp, field, value)
 
     cp.updated_by = user_id
@@ -742,24 +744,33 @@ async def check_stale_items(
     return stale_items
 
 
-async def mark_cp_sync_pending_on_fmea_approve(
-    db: AsyncSession, fmea_id: uuid.UUID, fmea_version_id: uuid.UUID
-) -> list[ControlPlan]:
-    """Mark all linked CPs as sync pending when FMEA is approved.
+async def apply_cp_sync_pending(db: AsyncSession, outbox, user_id: uuid.UUID) -> int:
+    """Idempotently mark linked CPs sync_pending + audit each flip.
 
-    NOTE: All FMEA-CP sync logic is consolidated in version_service.py's
-    build_sync_preview and apply_sync_preview. Do NOT create separate sync
-    functions here to avoid architectural redundancy.
-    """
+    Only flips CPs currently sync_pending=False; already-pending CPs are skipped
+    (no duplicate audit), giving idempotency per (outbox_id, cp_id). Does NOT
+    commit — the worker commits atomically with the outbox status."""
+    from app.models.audit import AuditLog
     result = await db.execute(
-        select(ControlPlan).where(ControlPlan.fmea_ref_id == fmea_id)
+        select(ControlPlan).where(
+            ControlPlan.fmea_ref_id == outbox.fmea_id,
+            ControlPlan.sync_pending == False,  # noqa: E712
+        )
     )
     cps = list(result.scalars().all())
     for cp in cps:
-        if cp.source_fmea_version_id != fmea_version_id:
-            cp.sync_pending = True
-    await db.commit()
-    return cps
+        cp.sync_pending = True
+        db.add(AuditLog(
+            table_name="control_plans",
+            record_id=cp.cp_id,
+            action="UPDATE",
+            changed_fields={
+                "sync_pending": "false->true",
+                "trigger_fmea_version_id": str(outbox.fmea_version_id),
+            },
+            operated_by=user_id,
+        ))
+    return len(cps)
 
 
 # ─── CSR Sync ───

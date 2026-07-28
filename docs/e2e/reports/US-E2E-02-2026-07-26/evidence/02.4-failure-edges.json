@@ -1,0 +1,51 @@
+{
+  "failure_nodes": [
+    {
+      "type": "FailureMode",
+      "name": "贴装偏移"
+    },
+    {
+      "type": "FailureEffect",
+      "name": "焊接开路"
+    },
+    {
+      "type": "FailureCause",
+      "name": "吸嘴磨损"
+    },
+    {
+      "type": "PreventionControl",
+      "name": "吸嘴定期更换"
+    },
+    {
+      "type": "DetectionControl",
+      "name": "AOI 自动检测"
+    }
+  ],
+  "failure_edges": [
+    {
+      "type": "HAS_FAILURE_MODE",
+      "src_type": "ProcessStepFunction",
+      "tgt_type": "FailureMode"
+    },
+    {
+      "type": "EFFECT_OF",
+      "src_type": "FailureMode",
+      "tgt_type": "FailureEffect"
+    },
+    {
+      "type": "CAUSE_OF",
+      "src_type": "FailureCause",
+      "tgt_type": "FailureMode"
+    },
+    {
+      "type": "PREVENTED_BY",
+      "src_type": "FailureCause",
+      "tgt_type": "PreventionControl"
+    },
+    {
+      "type": "DETECTED_BY",
+      "src_type": "FailureCause",
+      "tgt_type": "DetectionControl"
+    }
+  ]
+}

@@ -7,7 +7,6 @@ export function calculateAP(s: number, o: number, d: number): "H" | "M" | "L" | 
   if (s < 1 || s > 10 || o < 1 || o > 10 || d < 1 || d > 10) {
     return "";
   }
-
   // Severity 9-10
   if (s >= 9) {
     if (o >= 4) return "H";

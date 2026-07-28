@@ -1,6 +1,16 @@
+import hashlib
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+
+def compute_recommendation_id(trigger_type: str, anchor: str, name: str, source: str) -> str:
+    """Deterministic content-hash id for a suggestion. Idempotent across re-fetch
+    of the same suggestion; distinct across source/name. Suggestions are transient
+    (not persisted), so a content hash — not a DB id — is the natural key for
+    adoption-audit dedupe. Zero migration."""
+    raw = f"{trigger_type}|{anchor}|{name}|{source}"
+    return "rec_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
 
 class RecommendRequest(BaseModel):
@@ -18,7 +28,8 @@ class RecommendRequest(BaseModel):
 class SuggestionItem(BaseModel):
     name: str
     confidence: float = Field(ge=0.0, le=1.0)
-    source: Literal["rule", "graph", "llm"] = "rule"
+    source: Literal["rule", "graph", "semantic_search", "lessons_learned", "llm"] = "rule"
+    recommendation_id: str | None = None  # backend-stamped content hash (Phase-1 Task P1.4)
     explanation: str = ""
     # 来源文档标注（仅 source == "graph" 时填充）
     source_fmea_id: str | None = None
@@ -31,6 +42,21 @@ class SuggestionItem(BaseModel):
     match_reason: str | None = None
 
 
+class SourceExecution(BaseModel):
+    source: str
+    status: Literal["success", "empty", "unavailable", "error"]
+    hit_count: int = 0
+    latency_ms: int = 0
+
+
+class ContextExecution(BaseModel):
+    current_product_structure: Literal["assembled", "unavailable"] = "assembled"
+
+
+class GenerationExecution(BaseModel):
+    llm: Literal["success", "unavailable", "error"] = "unavailable"
+
+
 class RecommendResponse(BaseModel):
     suggestions: list[SuggestionItem]
     source: Literal["rule", "graph", "hybrid", "rule_fallback", "graph_enriched"]
@@ -38,6 +64,9 @@ class RecommendResponse(BaseModel):
     llm_available: bool = False
     graph_match_count: int = 0
     effective_scope: Literal["global", "current_product_type", "current_product_line"] = "global"
+    source_executions: list[SourceExecution] = Field(default_factory=list)
+    context_execution: ContextExecution = Field(default_factory=ContextExecution)
+    generation_execution: GenerationExecution = Field(default_factory=GenerationExecution)
 
 
 class SuggestionList(BaseModel):

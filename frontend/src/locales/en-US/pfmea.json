@@ -63,6 +63,7 @@
       "preventionControl": "Prevention Control",
       "detectionControl": "Detection Control",
       "addFailureChain": "Add Failure Chain",
+      "addEffect": "Add Effect",
       "delete": "Delete",
       "newFailureMode": "New Failure Mode",
       "workElementHint": "4M work elements for this step",
@@ -102,7 +103,7 @@
       "completionDate": "Completion Date",
       "revisedRatings": "Re-evaluate S′/O′/D′",
       "revisedAp": "Re-evaluated AP",
-      "statusOptions": { "open": "Open", "undecided": "Undecided", "planned": "Planned", "done": "Done", "notExecuted": "Not Executed" }
+      "statusOptions": { "open": "Open", "in_progress": "In Progress", "completed": "Completed", "not_executed": "Not Executed" }
     },
     "confirm": {
       "title": "Result Documentation",

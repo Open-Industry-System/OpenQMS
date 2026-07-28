@@ -1,0 +1,12 @@
+{
+  "note": "Tool AI recommend response AFTER include_graph fix (request 167). All 3 required retrievers success|empty; suggestions carry recommendation_id + 5-enum source.",
+  "source_executions": [
+    {"source":"graph","status":"empty","hit_count":0,"latency_ms":0},
+    {"source":"semantic_search","status":"empty","hit_count":0,"latency_ms":0},
+    {"source":"lessons_learned","status":"empty","hit_count":0,"latency_ms":0}
+  ],
+  "context_execution": {"current_product_structure":"assembled"},
+  "generation_execution": {"llm":"success"},
+  "sample_suggestion": {"name":"过程流程图","source":"llm","recommendation_id":"rec_aa97d709de3a"},
+  "prior_to_fix": "graph was 'unavailable' because ScopeTagField sent include_graph:false (commit 579bed96 fixed to true)"
+}

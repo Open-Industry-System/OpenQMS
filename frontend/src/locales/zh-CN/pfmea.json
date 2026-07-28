@@ -63,6 +63,7 @@
       "preventionControl": "预防控制",
       "detectionControl": "探测控制",
       "addFailureChain": "添加失效链",
+      "addEffect": "添加失效影响",
       "delete": "删除",
       "newFailureMode": "新建失效模式",
       "workElementHint": "该步骤的4M作业要素",
@@ -102,7 +103,7 @@
       "completionDate": "完成日期",
       "revisedRatings": "重评 S′/O′/D′",
       "revisedAp": "重评AP",
-      "statusOptions": { "open": "待执行", "undecided": "未决", "planned": "已计划", "done": "已完成", "notExecuted": "不执行" }
+      "statusOptions": { "open": "待执行", "in_progress": "进行中", "completed": "已完成", "not_executed": "不执行" }
     },
     "confirm": {
       "title": "结果文档",

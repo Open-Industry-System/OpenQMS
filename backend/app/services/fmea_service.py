@@ -194,6 +194,88 @@ async def create_fmea(
     return fmea
 
 
+def _validate_step6_optimization(graph_data: dict) -> None:
+    """AIAG-VDA Step6 风险处置门禁（spec US-E2E-02.6 / 02.13）。
+
+    - status=completed → action_taken/completion_date/revised_occurrence/revised_detection/
+      revised_ap 必填（revised_severity 可留空若 S 不变）
+    - status=not_executed → 关联 FailureCause 的 control_sufficiency_reason 或
+      risk_acceptance_reason 非空（placeholder 行回退到 FailureMode）
+    - S=9-10 且 AP=H/M → 关联 FailureCause 的 management_review_evidence 非空
+
+    抛 ValueError(sentinel) 由 API 层映射为 422。在 RecommendedAction.status
+    归一化之后调用，确保检查的是 canonical 状态值。
+    """
+    from app.services.action_priority import calculate_ap
+    nodes = graph_data.get("nodes") or []
+    edges = graph_data.get("edges") or []
+    node_map = {n.get("id"): n for n in nodes}
+
+    def _source_of(ra_id):
+        """反向 OPTIMIZED_BY 找 RA 的源节点（FC，或 placeholder 行的 FM）。"""
+        for e in edges:
+            if e.get("type") == "OPTIMIZED_BY" and e.get("target") == ra_id:
+                return node_map.get(e.get("source"))
+        return None
+
+    for node in nodes:
+        if node.get("type") != "RecommendedAction":
+            continue
+        status = node.get("status")
+        if status == "completed":
+            missing = []
+            if not (node.get("action_taken") or "").strip():
+                missing.append("action_taken")
+            if not (node.get("completion_date") or "").strip():
+                missing.append("completion_date")
+            if not (node.get("revised_occurrence") or 0) > 0:
+                missing.append("revised_occurrence")
+            if not (node.get("revised_detection") or 0) > 0:
+                missing.append("revised_detection")
+            if not (node.get("revised_ap") or "").strip():
+                missing.append("revised_ap")
+            if missing:
+                raise ValueError("step6_completed_fields_required")
+        source = _source_of(node.get("id"))
+        if status == "not_executed":
+            reason_ok = bool(source) and (
+                bool((source.get("control_sufficiency_reason") or "").strip())
+                or bool((source.get("risk_acceptance_reason") or "").strip())
+            )
+            if not reason_ok:
+                raise ValueError("step6_not_executed_reason_required")
+        # S=9-10 且 AP=H/M → management_review_evidence 必填（源节点 FC，或 FM 回退）。
+        # S = 该失效模式各 FailureEffect severity 的最大值（镜像前端 getRowSeverity）；
+        # O = 源节点 occurrence；D = 源节点（FC）DETECTED_BY 探测度，回退到 FM。
+        if source is not None:
+            fm_id = source.get("id") if source.get("type") == "FailureMode" else None
+            if fm_id is None:
+                for e in edges:
+                    if e.get("source") == source.get("id") and e.get("type") == "CAUSE_OF":
+                        fm_id = e.get("target")
+                        break
+            if fm_id is not None:
+                s = 0
+                for e in edges:
+                    if e.get("source") == fm_id and e.get("type") == "EFFECT_OF":
+                        fe = node_map.get(e.get("target"))
+                        if fe and (fe.get("severity") or 0) > s:
+                            s = fe.get("severity") or 0
+                o = source.get("occurrence") or 0
+                d = 0
+                for src_id in (source.get("id"), fm_id):
+                    for e in edges:
+                        if e.get("source") == src_id and e.get("type") == "DETECTED_BY":
+                            dc = node_map.get(e.get("target"))
+                            if dc and (dc.get("detection") or 0) > d:
+                                d = dc.get("detection") or 0
+                    if d:
+                        break
+                if s >= 9 and calculate_ap(s, o, d) in ("H", "M"):
+                    if not (source.get("management_review_evidence") or "").strip():
+                        raise ValueError("step6_management_review_required")
+
+
 async def _apply_fmea_update(
     db: AsyncSession,
     fmea: FMEADocument,
@@ -236,6 +318,19 @@ async def _apply_fmea_update(
         changed_fields["title"] = title
         fmea.title = title
     if graph_data is not None:
+        existing_scope = (fmea.graph_data or {}).get("wizardScope")
+        if existing_scope is not None and graph_data.get("wizardScope") is None:
+            raise ValueError("wizard_scope_required")
+        # 归一 RecommendedAction.status：legacy（planned/done/undecided/notExecuted/closed）
+        # → canonical 4-state（open/in_progress/completed/not_executed）。
+        # 在 diff 比较前做，确保归一后的值随 graph_data 落库并计入 changed_fields。
+        from app.services.recommended_action_status import normalize_action_status
+        for node in graph_data.get("nodes") or []:
+            if node.get("type") == "RecommendedAction" and "status" in node:
+                normalized = normalize_action_status(node.get("status"))
+                if normalized is not None:
+                    node["status"] = normalized
+        _validate_step6_optimization(graph_data)
         import json
         old_graph = json.dumps(fmea.graph_data, sort_keys=True) if fmea.graph_data else ""
         new_graph = json.dumps(graph_data, sort_keys=True)
@@ -285,11 +380,15 @@ async def update_fmea(
     product_line_code: str | None = None,
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
+    adoptions: list | None = None,
 ) -> FMEADocument:
     fmea = await _apply_fmea_update(
         db, fmea, title, graph_data, user_id, product_line_code,
         lock_version, confirmed_latest_lock_version,
     )
+    if adoptions:
+        from app.services.adoption_audit import write_adoption_audits
+        await write_adoption_audits(db, fmea.fmea_id, adoptions, user_id)
     await db.commit()
     await db.refresh(fmea)
     return fmea
@@ -375,6 +474,7 @@ async def transition_fmea(
     fmea: FMEADocument,
     target_status: str,
     user_id: uuid.UUID,
+    reason: str | None = None,
 ) -> FMEADocument:
     current = FMEAState(fmea.status)
     target = FMEAState(target_status)
@@ -403,14 +503,17 @@ async def transition_fmea(
         version = await _create_fmea_version_no_commit(db, fmea, change_type, change_summary, user_id)
 
     # Audit log
+    transition_changed = {
+        "old_status": old_status,
+        "new_status": target_status,
+    }
+    if reason and reason.strip():
+        transition_changed["reason"] = reason.strip()
     audit_log = AuditLog(
         table_name="fmea_documents",
         record_id=fmea.fmea_id,
         action="TRANSITION",
-        changed_fields={
-            "old_status": old_status,
-            "new_status": target_status,
-        },
+        changed_fields=transition_changed,
         operated_by=user_id,
     )
     db.add(audit_log)
@@ -423,12 +526,17 @@ async def transition_fmea(
         payload={"version": fmea.version, "product_line_code": fmea.product_line_code, "status": target_status},
     ))
 
-    await db.commit()
+    # CP sync_pending outbox — 仅 PFMEA 审批触发（DFMEA 不关联控制计划）。
+    if target == FMEAState.APPROVED and version is not None and fmea.fmea_type == "PFMEA":
+        from app.models.cp_sync_outbox import CPSyncOutbox
+        db.add(CPSyncOutbox(
+            fmea_id=fmea.fmea_id,
+            fmea_version_id=version.version_id,
+            event_type="cp.sync_pending_set",
+            payload={"user_id": str(user_id)},
+        ))
 
-    # Trigger CP sync when FMEA is approved
-    if target == FMEAState.APPROVED and version:
-        from app.services.control_plan_service import mark_cp_sync_pending_on_fmea_approve
-        await mark_cp_sync_pending_on_fmea_approve(db, fmea.fmea_id, version.version_id)
+    await db.commit()
 
     await db.refresh(fmea)
     return fmea

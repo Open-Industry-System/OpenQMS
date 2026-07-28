@@ -1,0 +1,34 @@
+{
+  "nodes": [
+    {
+      "type": "ProcessItem",
+      "name": "DC-DC 组装线",
+      "process_number": null,
+      "classification": null
+    },
+    {
+      "type": "ProcessStep",
+      "name": "DC-DC 电路板贴装",
+      "process_number": "OP10",
+      "classification": null
+    },
+    {
+      "type": "ProcessWorkElement",
+      "name": "贴片机操作员",
+      "process_number": null,
+      "classification": "Man"
+    }
+  ],
+  "edges": [
+    {
+      "type": "HAS_PROCESS_STEP",
+      "source": "we4210428-18b7-41c8-8b8d-4717191bd9c4_processitem",
+      "target": "w58ff7e63-0355-443c-8a07-48a8076339ef_processstep"
+    },
+    {
+      "type": "HAS_WORK_ELEMENT",
+      "source": "w58ff7e63-0355-443c-8a07-48a8076339ef_processstep",
+      "target": "w5696ea5a-0eef-4f20-a744-f7ba5ab721bc_processworkelement"
+    }
+  ]
+}

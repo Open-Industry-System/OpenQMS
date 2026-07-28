@@ -1,10 +1,12 @@
 import client from "./client";
+import i18n from "../i18n";
 
 export interface Suggestion {
   name: string;
   confidence: number;
-  source: "rule" | "graph" | "llm";
+  source: "rule" | "graph" | "semantic_search" | "lessons_learned" | "llm";
   explanation: string;
+  recommendation_id?: string;
   source_fmea_id?: string;
   source_document_no?: string;
   source_product_line_code?: string;
@@ -42,7 +44,13 @@ export async function getRecommendations(
   // the caller's catch block fires ("AI recommend failed"). Override per-request
   // to wait long enough for the backend to self-bound. Must exceed the
   // configured llm_timeout (see /admin/ai-config); 45s covers 15-30s + buffer.
-  const { data } = await client.post(`/fmea/${fmeaId}/recommend`, request, {
+  // 携带当前 UI 语言（i18n.language, 如 en-US）到 context.language，后端据此
+  // 追加英文输出指令，让 AI 建议名跟随界面语言（缺陷修复 #7）。
+  const payload = {
+    ...request,
+    context: { ...request.context, language: i18n.language },
+  };
+  const { data } = await client.post(`/fmea/${fmeaId}/recommend`, payload, {
     signal,
     timeout: 45000,
   });

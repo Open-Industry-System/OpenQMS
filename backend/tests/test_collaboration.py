@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy import select
+
 from app.services.collaboration_service import (
     upsert_session,
     delete_session,
@@ -13,6 +15,7 @@ from app.services.collaboration_service import (
     delete_expired_sessions,
 )
 from app.models.collaboration_session import CollaborationSession
+from app.models.fmea import FMEADocument
 
 
 DOC_ID = uuid.UUID("123e4567-e89b-12d3-a456-426614174000")
@@ -46,11 +49,51 @@ async def test_upsert_session_calls_execute_and_commit():
 
     await upsert_session(
         db, "fmea", DOC_ID,
-        user_id=USER_ID, user_name="张三", action="viewing", editing_area=None
+        user_id=USER_ID, user_name="张三", action="viewing", editing_area=None,
+        factory_id=uuid.uuid4(),
     )
 
     db.execute.assert_called_once()
     db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_session_carries_factory_id(db, default_factory, admin_user):
+    """真实 DB：heartbeat upsert 的 session 行应带上文档所属 factory_id（N2 回归）。"""
+    from app.services import collaboration_service
+
+    fmea = FMEADocument(
+        fmea_id=uuid.uuid4(),
+        document_no=f"PFMEA-COLLAB-{uuid.uuid4().hex[:6]}",
+        title="t",
+        fmea_type="PFMEA",
+        product_line_code="DC-DC-100",
+        factory_id=default_factory.id,
+        status="draft",
+        created_by=admin_user.user_id,
+        graph_data={"nodes": [], "edges": []},
+    )
+    db.add(fmea)
+    await db.flush()
+
+    await collaboration_service.upsert_session(
+        db,
+        document_type="fmea",
+        document_id=fmea.fmea_id,
+        user_id=admin_user.user_id,
+        user_name="admin",
+        action="viewing",
+        editing_area=None,
+        factory_id=fmea.factory_id,
+    )
+
+    row = (await db.execute(
+        select(CollaborationSession).where(
+            CollaborationSession.document_id == fmea.fmea_id,
+            CollaborationSession.user_id == admin_user.user_id,
+        )
+    )).scalar_one()
+    assert row.factory_id == default_factory.id
 
 
 @pytest.mark.asyncio

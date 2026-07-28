@@ -1,0 +1,12 @@
+{
+  "status": "draft",
+  "wizardScope.wizard_completed": true,
+  "graph_data.wizard_completed_root_level": null,
+  "summary_counts": {
+    "Structure Nodes": 3,
+    "Function Nodes": 3,
+    "Failure Chains": 1,
+    "Total Nodes": 12,
+    "Total Edges": 13
+  }
+}

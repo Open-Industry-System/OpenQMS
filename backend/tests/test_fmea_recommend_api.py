@@ -29,7 +29,7 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
     captured = {}
 
     class _FakeService:
-        def __init__(self, db, graph_repo, llm_timeout=None):
+        def __init__(self, db, graph_repo, llm_timeout=None, embedding=None):
             captured["ctor_kwargs"] = list(self.__init__.__code__.co_varnames)
             # Reject llm_provider at construction so the test fails if the route
             # still passes it. (We assert via __init__ signature below instead.)

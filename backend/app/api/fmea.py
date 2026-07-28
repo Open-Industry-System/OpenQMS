@@ -127,12 +127,15 @@ async def update_fmea(
     if scope.factory_scope.accessible_factory_ids is not None:
         if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
             raise HTTPException(status_code=404, detail="FMEA not found")
+    if fmea.status not in ("draft", "rework"):
+        raise HTTPException(status_code=409, detail="当前状态不可编辑（仅草稿/返工可编辑）")
     graph_dict = req.graph_data.model_dump() if req.graph_data else None
     try:
         fmea = await fmea_service.update_fmea(
             db, fmea, req.title, graph_dict, scope.user.user_id, req.product_line_code,
             lock_version=req.lock_version,
             confirmed_latest_lock_version=req.confirmed_latest_lock_version,
+            adoptions=req.adoptions,
         )
     except ValueError as e:
         error_msg = str(e)
@@ -159,6 +162,21 @@ async def update_fmea(
                         "latest_lock_version": fmea.lock_version,
                     },
                 },
+            ) from e
+        if error_msg == "step6_completed_fields_required":
+            raise HTTPException(
+                status_code=422,
+                detail="completed 状态的优化措施必须填写 action_taken/completion_date/revised_occurrence/revised_detection/revised_ap",
+            ) from e
+        if error_msg == "step6_not_executed_reason_required":
+            raise HTTPException(
+                status_code=422,
+                detail="not_executed 状态的优化措施必须在关联失效原因上填写 control_sufficiency_reason 或 risk_acceptance_reason",
+            ) from e
+        if error_msg == "step6_management_review_required":
+            raise HTTPException(
+                status_code=422,
+                detail="S=9-10 且 AP=H/M 的失效链必须在关联失效原因上填写 management_review_evidence",
             ) from e
         raise HTTPException(status_code=400, detail=error_msg) from e
     return FMEAResponse.model_validate(fmea)
@@ -187,15 +205,18 @@ async def delete_fmea(
     await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id)
 
 
-async def require_approve_permission(
+async def require_transition_permission(
     req: TransitionRequest,
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ) -> RequestScope:
-    if req.target_status == "approved":
-        level = await get_user_permission(scope.user, Module.FMEA, db)
-        if level < PermissionLevel.APPROVE:
-            raise HTTPException(status_code=403, detail="审批权限不足")
+    level = await get_user_permission(scope.user, Module.FMEA, db)
+    if level < PermissionLevel.EDIT:
+        raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+    if req.target_status in ("approved", "rework") and level < PermissionLevel.APPROVE:
+        raise HTTPException(status_code=403, detail="审批权限不足")
+    if req.target_status == "rework" and not (req.reason and req.reason.strip()):
+        raise HTTPException(status_code=422, detail="驳回必须携带非空 reason")
     return scope
 
 
@@ -204,14 +225,18 @@ async def transition_fmea(
     fmea_id: uuid.UUID,
     req: TransitionRequest,
     db: AsyncSession = Depends(get_db),
-    scope: RequestScope = Depends(require_approve_permission),
+    scope: RequestScope = Depends(require_transition_permission),
 ):
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
     check_factory_access(fmea.factory_id, scope)
+    if req.target_status == "in_review":
+        wizard_scope = (fmea.graph_data or {}).get("wizardScope") or {}
+        if wizard_scope.get("wizard_completed") is not True:
+            raise HTTPException(status_code=422, detail="向导未完成，不能提交评审")
     try:
-        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id)
+        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id, req.reason)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return FMEAResponse.model_validate(fmea)
@@ -299,6 +324,10 @@ async def recommend(
     if scope.factory_scope.accessible_factory_ids is not None:
         if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
             raise HTTPException(status_code=404, detail="FMEA not found")
+    # 仅可编辑状态（draft/rework）允许触发 AI 推荐——与 PUT 门禁一致，
+    # 避免向已锁定（in_review/approved/archived）的 FMEA 喂内容。
+    if fmea.status not in ("draft", "rework"):
+        raise HTTPException(status_code=409, detail="当前状态不可编辑（仅草稿/返工可编辑）")
 
     # 提前计算 effective_scope（短输入 early return 也需要正确值）
     requested_scope = getattr(request, "scope", "global")
@@ -321,7 +350,8 @@ async def recommend(
         )
 
     llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
-    service = RecommendationService(db=db, graph_repo=graph_repo, llm_timeout=llm_timeout)
+    embedding = getattr(fastapi_request.app.state, "embedding_provider", None)
+    service = RecommendationService(db=db, graph_repo=graph_repo, llm_timeout=llm_timeout, embedding=embedding)
     result = await service.recommend(
         fmea_id, request, scope.user, scope, tenant_schema=tenant_schema(fastapi_request),
     )
