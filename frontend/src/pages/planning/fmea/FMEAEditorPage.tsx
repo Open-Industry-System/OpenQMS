@@ -27,7 +27,7 @@ import axios from "axios";
 import { useAuthStore } from "../../../store/authStore";
 import { usePermission } from "../../../hooks/usePermission";
 import { calculateAP } from "../../../utils/fmea";
-import { aggregateSpecialCharacteristic } from "../../../components/pfmea/RiskTable";
+import { aggregateSpecialCharacteristic, specialCharBadgeStyle } from "../../../components/pfmea/RiskTable";
 import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, getProcessChain, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
@@ -1122,7 +1122,7 @@ export default function FMEAEditorPage() {
           // ---- DFMEA: Filter Code on FailureMode, editable (UNCHANGED) ----
           const node = nodeMap.get(row.failureModeNodeId);
           const classValue = node?.classification || "";
-          const bgStyle = classValue === "CC" ? { background: "#fff1f0" } : classValue === "SC" ? { background: "#fffbe6" } : {};
+          const bgStyle = specialCharBadgeStyle(classValue || "-");
           return (
             <Select
               size="small"
@@ -1146,8 +1146,8 @@ export default function FMEAEditorPage() {
             tag = fmClass;
           }
         }
-        const bg = tag === "CC" ? "#fff1f0" : tag === "SC" ? "#fffbe6" : undefined;
-        return <Tooltip title={label}><Tag style={{ background: bg }}>{label}</Tag></Tooltip>;
+        const bg = specialCharBadgeStyle(tag);
+        return <Tooltip title={label}><Tag style={bg}>{label}</Tag></Tooltip>;
       },
     },
     {
