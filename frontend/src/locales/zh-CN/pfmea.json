@@ -103,7 +103,8 @@
       "completionDate": "完成日期",
       "revisedRatings": "重评 S′/O′/D′",
       "revisedAp": "重评AP",
-      "statusOptions": { "open": "待执行", "in_progress": "进行中", "completed": "已完成", "not_executed": "不执行" }
+      "statusOptions": { "open": "待执行", "in_progress": "进行中", "completed": "已完成", "not_executed": "不执行" },
+      "mustOptimize": "仍有 {{count}} 条高风险项（AP=H）必须制定优化措施。"
     },
     "confirm": {
       "title": "结果文档",
@@ -125,7 +126,10 @@
       "step4Incomplete": "风险分析未完成：需填写三段式严重度、O/D，且控制非空",
       "step5Incomplete": "优化未完成：AP=H的行需填负责人与计划完成日期",
       "finishFailed": "完成失败", "loadFailed": "加载失败",
-      "conflictTitle": "内容已被他人修改", "conflictContent": "文档已被他人修改，请刷新后重试。", "conflictReload": "刷新"
+      "conflictTitle": "内容已被他人修改", "conflictContent": "文档已被他人修改，请刷新后重试。", "conflictReload": "刷新",
+      "confirmEmptyDraftTitle": "删除空草稿？", "confirmEmptyDraft": "当前 FMEA 仅有初始结构、尚无内容，离开将删除该草稿。确定离开吗？",
+      "confirmEmptyDraftOk": "删除并离开", "confirmEmptyDraftCancel": "取消",
+      "completionWarning": "完成前请先完善以下步骤："
     },
     "guidance": {
       "step0": { "title": "5T范围", "purpose": "界定PFMEA分析范围、团队与关注点。", "points": "5T 即 Team(团队)、Timing(时间)、Tool(工具)、Task(任务)、Trend(趋势)；据此框定本次过程分析范围。", "fields": [{ "name": "团队 Team", "desc": "跨职能核心团队：工艺/制造工程师、质量工程师、设备维护、生产班组长、采购/供应商代表、顾客代表。" }, { "name": "时间范围 Timing", "desc": "PFMEA 起止时间，应在过程设计早期启动，试生产前完成主要优化。" }, { "name": "工具 Tool", "desc": "过程流程图、参数图(P-图)、鱼骨图(4M)、PFMEA模板、控制计划草案、历史经验教训库。" }, { "name": "任务 Task", "desc": "本次分析的过程范围、生产线、工序段及需重点关注的特殊特性。" }, { "name": "趋势 Trend", "desc": "历史PFMEA、过程SPC数据、NCR、客户投诉、CAPA、返工/报废记录、审核发现等趋势输入。" }], "example": "团队：SMT工艺组、质量组；时间：2026年Q2；工具：过程流程图+4M鱼骨图；任务：SMT焊接OP10-OP40；趋势：近6个月贴装不良趋势" },

@@ -104,6 +104,7 @@
   },
   "changeOrders": {
     "title": "PLM 变更单管理",
+    "listTitle": "变更单清单",
     "impactAnalysis": "影响分析",
     "changeType": {
       "ECN": "ECN",
@@ -126,6 +127,10 @@
   },
   "connections": {
     "title": "PLM 连接管理",
+    "new": "新建连接",
+    "listTitle": "PLM 连接清单",
+    "newTitle": "新建 PLM 连接",
+    "editTitle": "编辑 PLM 连接",
     "create": "新建连接",
     "edit": "编辑",
     "test": "测试",

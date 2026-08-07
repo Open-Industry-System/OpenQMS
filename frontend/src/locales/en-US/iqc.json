@@ -70,8 +70,26 @@
     "inspectionList": "Incoming Inspection",
     "materialList": "Material Management",
     "profileList": "AQL Profile Management",
+    "profileDetail": "AQL Profile Detail",
     "recommendationList": "AQL Optimization Recommendations",
+    "aqlOptimization": "AQL Optimization",
     "aqlConfig": "AQL Rule Parameter Configuration"
+  },
+  "subtitle": {
+    "inspectionList": "Registration, judgement, and tracking of incoming inspection tasks"
+  },
+  "list": {
+    "confirmDeleteMaterial": "Are you sure you want to delete this material?"
+  },
+  "recommendation": {
+    "approvalLevel": "Approval Level",
+    "expiresAt": "Valid Until",
+    "qualitySnapshot": "Quality Snapshot",
+    "triggerRules": "Trigger Rules",
+    "approve": "Approve",
+    "submitToManager": "Forward to Manager",
+    "reject": "Reject",
+    "confirmReject": "Confirm Reject"
   },
   "stats": {
     "totalInspections": "Total Inspections",

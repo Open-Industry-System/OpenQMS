@@ -104,6 +104,7 @@
   },
   "changeOrders": {
     "title": "PLM Change Orders",
+    "listTitle": "Change Orders",
     "impactAnalysis": "Impact Analysis",
     "changeType": {
       "ECN": "ECN",
@@ -126,6 +127,10 @@
   },
   "connections": {
     "title": "PLM Connection Management",
+    "new": "New Connection",
+    "listTitle": "PLM Connections",
+    "newTitle": "New PLM Connection",
+    "editTitle": "Edit PLM Connection",
     "create": "New Connection",
     "edit": "Edit",
     "test": "Test",

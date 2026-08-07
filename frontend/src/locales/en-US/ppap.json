@@ -3,7 +3,11 @@
     "ppapManagement": "PPAP Management",
     "ppapManagementSubtitle": "Submit, review, and approve Production Part Approval Process packages",
     "ppapList": "PPAP Submissions",
-    "newPPAP": "New PPAP"
+    "newPPAP": "New PPAP",
+    "ppapDetailSubtitle": "View PPAP submission details, element status, and approval progress"
+  },
+  "card": {
+    "ppapList": "PPAP Submission List"
   },
   "tab": {
     "all": "All",

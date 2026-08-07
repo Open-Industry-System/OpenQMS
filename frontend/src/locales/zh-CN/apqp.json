@@ -5,7 +5,8 @@
     "apqpProjects": "APQP 项目",
     "newAPQPProject": "新建 APQP 项目",
     "projectDetail": "项目详情",
-    "editProject": "编辑项目"
+    "editProject": "编辑项目",
+    "apqpProjectDetail": "APQP 项目阶段、交付物与门控审批详情"
   },
   "tab": {
     "all": "全部",
@@ -73,7 +74,8 @@
     "phaseActions": "阶段操作",
     "deliverables": "关联交付物",
     "phaseTimeline": "阶段时间线",
-    "gateHistory": "门控审批记录"
+    "gateHistory": "门控审批记录",
+    "projectList": "APQP 项目清单"
   },
   "label": {
     "projectCode": "项目编号",

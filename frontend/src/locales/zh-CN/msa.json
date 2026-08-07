@@ -178,6 +178,8 @@
       "appraiser_name": "评价人",
       "part_no": "零件号",
       "trial_no": "试验",
+      "reference_value": "参考值",
+      "measured_value": "测量值",
       "value": "测量值",
       "sequence_no": "序号",
       "measurement_date": "日期",

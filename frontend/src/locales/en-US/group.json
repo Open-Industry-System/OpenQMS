@@ -13,6 +13,7 @@
   },
   "suppliers": {
     "title": "Shared Suppliers",
+    "listTitle": "Group Suppliers",
     "columns": {
       "name": "Supplier Name",
       "shortName": "Short Name",
@@ -24,6 +25,7 @@
   },
   "factoryManagement": {
     "title": "Factory Management",
+    "listTitle": "Factories",
     "createFactory": "Create Factory",
     "editFactory": "Edit Factory",
     "newFactory": "New Factory",
@@ -65,6 +67,7 @@
   },
   "factoryComparison": {
     "title": "Factory Comparison",
+    "metricsTitle": "Factory Comparison Metrics",
     "columns": {
       "code": "Factory Code",
       "name": "Factory Name"
@@ -72,6 +75,7 @@
   },
   "audits": {
     "title": "Cross-Factory Audits",
+    "listTitle": "Group Audits",
     "columns": {
       "programNo": "Program No.",
       "auditType": "Audit Type",

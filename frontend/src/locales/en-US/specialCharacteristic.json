@@ -4,7 +4,10 @@
     "scMatrix": "Special Characteristic Coverage Matrix",
     "scTraceability": "Special Characteristic Traceability",
     "newSC": "New Special Characteristic",
-    "scDetail": "Special Characteristic Detail"
+    "scDetail": "Special Characteristic Detail",
+    "new": "New Special Characteristic",
+    "scListSubtitle": "Identification, approval and coverage tracking of special characteristics (CC/SC)",
+    "scMatrixSubtitle": "Coverage matrix of special characteristics across DFMEA/PFMEA/Control Plan/MSA/SOP"
   },
   "filter": {
     "type": "Type filter",
@@ -55,7 +58,8 @@
     "pfmeaCoverage": "PFMEA Coverage",
     "cpCoverage": "CP Coverage",
     "msaPass": "MSA Pass",
-    "sopCoverage": "SOP Coverage"
+    "sopCoverage": "SOP Coverage",
+    "title": "Special Characteristic Matrix"
   },
   "traceability": {
     "selectSC": "Select Special Characteristic",
@@ -76,7 +80,8 @@
     "usl": "USL",
     "lsl": "LSL",
     "emptySelect": "Please select a special characteristic to view its traceability chain",
-    "loadFailed": "Unable to load traceability chain"
+    "loadFailed": "Unable to load traceability chain",
+    "emptyHint": "Please select a special characteristic to view its traceability chain"
   },
   "form": {
     "scType": "Characteristic Type",
@@ -86,7 +91,16 @@
     "specRequirement": "Specification Requirement",
     "sopRef": "SOP Reference",
     "supplierShared": "Supplier Shared",
-    "supplierCode": "Supplier Code"
+    "supplierCode": "Supplier Code",
+    "category": "Characteristic Category",
+    "scNamePlaceholder": "Enter characteristic name",
+    "scNameRequired": "Please enter characteristic name",
+    "scTypeRequired": "Please select characteristic type",
+    "customerSymbolPlaceholder": "Enter customer special characteristic symbol",
+    "selectPlaceholder": "Please select",
+    "sopRefPlaceholder": "Enter SOP number or name",
+    "specRequirementPlaceholder": "Enter specification / requirement",
+    "supplierCodePlaceholder": "Enter supplier code"
   },
   "category": {
     "product": "Product Characteristic",
@@ -132,14 +146,16 @@
     "submitted": "Submitted: {{time}}",
     "approved": "Approved: {{time}}",
     "rejected": "Rejected: {{time}}{{comment}}",
-    "result": "Approval Result"
+    "result": "Approval Result",
+    "pendingDescription": "Pending: fill in safety info and submit for approval"
   },
   "action": {
     "view": "View",
     "confirmSafety": "Confirm Safety",
     "dismiss": "Dismiss",
     "delete": "Delete",
-    "backToList": "Back to List"
+    "backToList": "Back to List",
+    "reject": "Reject"
   },
   "message": {
     "loadFailed": "Failed to load special characteristic",
@@ -167,5 +183,67 @@
     "enterName": "Please enter characteristic name",
     "enterRegulationRef": "Please enter regulation reference",
     "enterVerificationMethod": "Please enter verification method"
+  },
+  "actions": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "save": "Save",
+    "backToList": "Back to List",
+    "confirmSafety": "Confirm Safety",
+    "dismiss": "Dismiss",
+    "new": "New Special Characteristic"
+  },
+  "basicInfo": {
+    "title": "Basic Information",
+    "scCode": "Characteristic Code",
+    "type": "Characteristic Type",
+    "productLine": "Product Line",
+    "sourceType": "Source Type",
+    "sourceFmea": "Source FMEA",
+    "sourceNodeId": "Source Node ID",
+    "parentSc": "Parent Characteristic",
+    "msaStatus": "MSA Status"
+  },
+  "confirm": {
+    "delete": "Delete this special characteristic?"
+  },
+  "coverage": {
+    "title": "Coverage",
+    "statsTitle": "Coverage Statistics",
+    "total": "Total Characteristics",
+    "dfmea": "DFMEA Coverage",
+    "pfmea": "PFMEA Coverage",
+    "cp": "Control Plan Coverage",
+    "msa": "MSA Pass Rate",
+    "sop": "SOP Coverage"
+  },
+  "createInfo": {
+    "title": "Create Information"
+  },
+  "editInfo": {
+    "title": "Edit Information"
+  },
+  "list": {
+    "title": "Special Characteristics"
+  },
+  "productLine": "Product Line",
+  "safety": {
+    "title": "Safety Characteristic",
+    "safetyRelated": "Safety Related",
+    "regulationRef": "Regulation / Standard Reference",
+    "regulationRefPlaceholder": "Enter the relevant regulation or standard clause",
+    "regulationRefRequired": "Please enter the regulation / standard reference",
+    "verificationMethod": "Verification Method",
+    "verificationMethodPlaceholder": "Enter the verification method",
+    "verificationMethodRequired": "Please enter the verification method",
+    "submitApproval": "Submit for Approval",
+    "autoSwitchHint": "Once marked as safety-related, it will automatically become an SC and require approval"
+  },
+  "sourceFmea": {
+    "title": "Source FMEA Information",
+    "documentNo": "Document No.",
+    "fmeaTitle": "FMEA Title",
+    "viewFmea": "View FMEA",
+    "openEditor": "Open Editor"
   }
 }
