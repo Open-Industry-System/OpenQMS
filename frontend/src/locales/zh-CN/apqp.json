@@ -1,5 +1,7 @@
 {
   "pageTitle": {
+    "apqpProjectManagement": "APQP 项目管理",
+    "apqpProjectManagementSubtitle": "产品质量先期策划项目的创建、阶段跟踪与交付物管理",
     "apqpProjects": "APQP 项目",
     "newAPQPProject": "新建 APQP 项目",
     "projectDetail": "项目详情",

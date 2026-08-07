@@ -1,5 +1,7 @@
 {
   "pageTitle": {
+    "apqpProjectManagement": "APQP Project Management",
+    "apqpProjectManagementSubtitle": "Create APQP projects, track phases, and manage deliverables",
     "apqpProjects": "APQP Projects",
     "newAPQPProject": "New APQP Project",
     "projectDetail": "Project Detail",

@@ -1,5 +1,7 @@
 {
   "pageTitle": {
+    "ppapManagement": "PPAP 管理",
+    "ppapManagementSubtitle": "生产件批准程序的提交、审查与批准管理",
     "ppapList": "PPAP 提交",
     "newPPAP": "新建 PPAP"
   },
