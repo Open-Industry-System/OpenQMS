@@ -178,6 +178,8 @@
       "appraiser_name": "Appraiser",
       "part_no": "Part No",
       "trial_no": "Trial",
+      "reference_value": "Reference Value",
+      "measured_value": "Measured Value",
       "value": "Value",
       "sequence_no": "Seq",
       "measurement_date": "Date",

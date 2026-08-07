@@ -1,5 +1,6 @@
 {
   "page": {
+    "title": "Supplier Risk Assessment",
     "evaluateAll": "Evaluate All Now",
     "evaluateSuccess": "Evaluation completed",
     "evaluateFailed": "Evaluation failed",
@@ -12,6 +13,7 @@
     "noData": "No data"
   },
   "config": {
+    "title": "Risk Rule Configuration",
     "rules": "Rule Configuration",
     "channels": "Notification Channels"
   },

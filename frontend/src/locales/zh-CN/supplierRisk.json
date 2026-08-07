@@ -1,5 +1,6 @@
 {
   "page": {
+    "title": "供应商风险评估",
     "evaluateAll": "立即评估全部",
     "evaluateSuccess": "全量评估完成",
     "evaluateFailed": "评估失败",
@@ -12,6 +13,7 @@
     "noData": "暂无数据"
   },
   "config": {
+    "title": "风险规则配置",
     "rules": "规则配置",
     "channels": "通知渠道"
   },

@@ -4,7 +4,10 @@
     "scMatrix": "特殊特性覆盖矩阵",
     "scTraceability": "特殊特性贯穿追踪",
     "newSC": "新建特殊特性",
-    "scDetail": "特殊特性详情"
+    "scDetail": "特殊特性详情",
+    "new": "新建特殊特性",
+    "scListSubtitle": "特殊特性(CC/SC)的识别、审批与覆盖跟踪",
+    "scMatrixSubtitle": "特殊特性在 DFMEA/PFMEA/控制计划/MSA/SOP 中的覆盖矩阵"
   },
   "filter": {
     "type": "类型筛选",
@@ -55,7 +58,8 @@
     "pfmeaCoverage": "PFMEA覆盖",
     "cpCoverage": "CP覆盖",
     "msaPass": "MSA通过",
-    "sopCoverage": "SOP覆盖"
+    "sopCoverage": "SOP覆盖",
+    "title": "特殊特性矩阵"
   },
   "traceability": {
     "selectSC": "选择特殊特性",
@@ -76,7 +80,8 @@
     "usl": "USL",
     "lsl": "LSL",
     "emptySelect": "请选择一个特殊特性以查看其贯穿追踪链",
-    "loadFailed": "无法获取追溯链"
+    "loadFailed": "无法获取追溯链",
+    "emptyHint": "请选择一个特殊特性以查看其贯穿追踪链"
   },
   "form": {
     "scType": "特性类型",
@@ -86,7 +91,16 @@
     "specRequirement": "规格要求",
     "sopRef": "SOP参考",
     "supplierShared": "供应商共享",
-    "supplierCode": "供应商代码"
+    "supplierCode": "供应商代码",
+    "category": "特性类别",
+    "scNamePlaceholder": "请输入特性名称",
+    "scNameRequired": "请输入特性名称",
+    "scTypeRequired": "请选择特性类型",
+    "customerSymbolPlaceholder": "请输入客户特殊特性符号",
+    "selectPlaceholder": "请选择",
+    "sopRefPlaceholder": "请输入 SOP 编号或名称",
+    "specRequirementPlaceholder": "请输入规格/要求",
+    "supplierCodePlaceholder": "请输入供应商编码"
   },
   "category": {
     "product": "产品特性",
@@ -132,14 +146,16 @@
     "submitted": "已提交：{{time}}",
     "approved": "已批准：{{time}}",
     "rejected": "已驳回：{{time}}{{comment}}",
-    "result": "审批结果"
+    "result": "审批结果",
+    "pendingDescription": "待提交：填写安全信息并提交审批"
   },
   "action": {
     "view": "查看",
     "confirmSafety": "确认安全",
     "dismiss": "忽略",
     "delete": "删除",
-    "backToList": "返回列表"
+    "backToList": "返回列表",
+    "reject": "驳回"
   },
   "message": {
     "loadFailed": "加载特殊特性失败",
@@ -167,5 +183,67 @@
     "enterName": "请输入特性名称",
     "enterRegulationRef": "请输入法规引用",
     "enterVerificationMethod": "请输入验证方法"
+  },
+  "actions": {
+    "approve": "批准",
+    "reject": "驳回",
+    "save": "保存",
+    "backToList": "返回列表",
+    "confirmSafety": "确认安全特性",
+    "dismiss": "忽略",
+    "new": "新建特殊特性"
+  },
+  "basicInfo": {
+    "title": "基本信息",
+    "scCode": "特性编码",
+    "type": "特性类型",
+    "productLine": "所属产线",
+    "sourceType": "来源类型",
+    "sourceFmea": "来源 FMEA",
+    "sourceNodeId": "来源节点 ID",
+    "parentSc": "父级特性",
+    "msaStatus": "MSA 状态"
+  },
+  "confirm": {
+    "delete": "确认删除该特殊特性？"
+  },
+  "coverage": {
+    "title": "覆盖情况",
+    "statsTitle": "覆盖统计",
+    "total": "特殊特性总数",
+    "dfmea": "DFMEA 覆盖率",
+    "pfmea": "PFMEA 覆盖率",
+    "cp": "控制计划覆盖率",
+    "msa": "MSA 通过率",
+    "sop": "SOP 覆盖率"
+  },
+  "createInfo": {
+    "title": "创建信息"
+  },
+  "editInfo": {
+    "title": "编辑信息"
+  },
+  "list": {
+    "title": "特殊特性清单"
+  },
+  "productLine": "所属产线",
+  "safety": {
+    "title": "安全特性",
+    "safetyRelated": "安全相关",
+    "regulationRef": "法规/标准引用",
+    "regulationRefPlaceholder": "请输入相关法规或标准条款",
+    "regulationRefRequired": "请输入法规/标准引用",
+    "verificationMethod": "验证方法",
+    "verificationMethodPlaceholder": "请输入验证方法",
+    "verificationMethodRequired": "请输入验证方法",
+    "submitApproval": "提交审批",
+    "autoSwitchHint": "标记为安全相关后将自动转为 SC 并需审批"
+  },
+  "sourceFmea": {
+    "title": "来源 FMEA 信息",
+    "documentNo": "文档编号",
+    "fmeaTitle": "FMEA 标题",
+    "viewFmea": "查看 FMEA",
+    "openEditor": "打开编辑器"
   }
 }

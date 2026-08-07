@@ -70,8 +70,26 @@
     "inspectionList": "来料检验",
     "materialList": "物料管理",
     "profileList": "AQL档案管理",
+    "profileDetail": "AQL档案详情",
     "recommendationList": "AQL优化建议",
+    "aqlOptimization": "AQL优化",
     "aqlConfig": "AQL规则参数配置"
+  },
+  "subtitle": {
+    "inspectionList": "来料检验任务的登记、判定与跟踪"
+  },
+  "list": {
+    "confirmDeleteMaterial": "确认删除该物料？"
+  },
+  "recommendation": {
+    "approvalLevel": "审批级别",
+    "expiresAt": "有效期至",
+    "qualitySnapshot": "质量快照",
+    "triggerRules": "触发规则",
+    "approve": "批准",
+    "submitToManager": "转交经理审批",
+    "reject": "驳回",
+    "confirmReject": "确认驳回"
   },
   "stats": {
     "totalInspections": "检验单总数",

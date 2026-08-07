@@ -5,7 +5,8 @@
     "controlPlanDetail": "Control Plan Detail",
     "newControlPlan": "New Control Plan",
     "versionHistory": "Version History",
-    "versionCompare": "Version Compare"
+    "versionCompare": "Version Compare",
+    "controlPlanListSubtitle": "Create control plans and manage versions and special characteristics"
   },
   "button": {
     "newControlPlan": "New Control Plan",
@@ -136,7 +137,8 @@
   "card": {
     "basicInfo": "Basic Information",
     "controlPlanContent": "Control Plan Content",
-    "customerRequirements": "Customer Requirements"
+    "customerRequirements": "Customer Requirements",
+    "controlPlanList": "Control Plan List"
   },
   "specialClass": {
     "none": "-",

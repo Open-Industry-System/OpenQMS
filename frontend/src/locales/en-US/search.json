@@ -10,6 +10,14 @@
     "switchToSearch": "Switch to search mode",
     "switchToQa": "Switch to Q&A mode",
     "filterType": "Filter type",
+    "entityTypes": {
+      "fmeaNode": "FMEA Node",
+      "capa": "CAPA / 8D Report",
+      "auditFinding": "Audit Finding",
+      "complaint": "Customer Complaint",
+      "scar": "SCAR",
+      "rma": "RMA Return"
+    },
     "productType": "Product Type",
     "productLine": "Product Line",
     "resultsFound": "Found {{count}} results in {{ms}}ms",

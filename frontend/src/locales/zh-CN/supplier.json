@@ -67,7 +67,8 @@
     "evaluations": "绩效评价",
     "complaints": "客诉 ({{count}})",
     "iqcRejects": "IQC 不合格 ({{count}})",
-    "scars": "SCAR ({{count}})"
+    "scars": "SCAR ({{count}})",
+    "supplierDetail": "供应商详情"
   },
   "table": {
     "certType": "证书类型",
@@ -148,6 +149,7 @@
   },
   "list": {
     "title": "供应商管理",
+    "subtitle": "供应商档案、绩效与准入管理",
     "addSupplier": "新增供应商",
     "searchPlaceholder": "搜索名称 / 简称",
     "statusPlaceholder": "状态",

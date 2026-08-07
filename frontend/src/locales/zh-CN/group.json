@@ -13,6 +13,7 @@
   },
   "suppliers": {
     "title": "共享供应商",
+    "listTitle": "集团供应商清单",
     "columns": {
       "name": "供应商名称",
       "shortName": "简称",
@@ -24,6 +25,7 @@
   },
   "factoryManagement": {
     "title": "工厂管理",
+    "listTitle": "工厂清单",
     "createFactory": "新建工厂",
     "editFactory": "编辑工厂",
     "newFactory": "新建工厂",
@@ -65,6 +67,7 @@
   },
   "factoryComparison": {
     "title": "工厂对比",
+    "metricsTitle": "工厂对比指标",
     "columns": {
       "code": "工厂编码",
       "name": "工厂名称"
@@ -72,6 +75,7 @@
   },
   "audits": {
     "title": "跨厂审核",
+    "listTitle": "集团审核清单",
     "columns": {
       "programNo": "审核编号",
       "auditType": "审核类型",

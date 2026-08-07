@@ -103,7 +103,8 @@
       "completionDate": "Completion Date",
       "revisedRatings": "Re-evaluate S′/O′/D′",
       "revisedAp": "Re-evaluated AP",
-      "statusOptions": { "open": "Open", "in_progress": "In Progress", "completed": "Completed", "not_executed": "Not Executed" }
+      "statusOptions": { "open": "Open", "in_progress": "In Progress", "completed": "Completed", "not_executed": "Not Executed" },
+      "mustOptimize": "{{count}} high-risk item(s) (AP=H) still require optimization actions."
     },
     "confirm": {
       "title": "Result Documentation",
@@ -125,7 +126,10 @@
       "step4Incomplete": "Risk analysis incomplete: three-tier severity, O/D must be filled and controls must not be empty",
       "step5Incomplete": "Optimization incomplete: AP=H rows need responsible person and planned completion date",
       "finishFailed": "Completion Failed", "loadFailed": "Load Failed",
-      "conflictTitle": "Content Modified by Others", "conflictContent": "The document has been modified by someone else, please refresh and retry.", "conflictReload": "Refresh"
+      "conflictTitle": "Content Modified by Others", "conflictContent": "The document has been modified by someone else, please refresh and retry.", "conflictReload": "Refresh",
+      "confirmEmptyDraftTitle": "Delete empty draft?", "confirmEmptyDraft": "This FMEA has only the initial structure and no content yet. Leaving will delete the draft. Continue?",
+      "confirmEmptyDraftOk": "Delete and leave", "confirmEmptyDraftCancel": "Cancel",
+      "completionWarning": "Please complete the following steps before finishing:"
     },
     "guidance": {
       "step0": { "title": "5T Scope", "purpose": "Define analysis scope", "points": "The 5Ts are Team, Timing, Tool, Task, Trend; use them to frame the scope of this process analysis.", "fields": [{ "name": "Team", "desc": "Cross-functional core team: process/manufacturing engineers, quality engineers, equipment maintenance, production leads, purchasing/supplier reps, and customer reps." }, { "name": "Timing", "desc": "PFMEA start and end dates; launch early in process design and complete major optimization before pilot production." }, { "name": "Tool", "desc": "Process flow diagram, P-Diagram, fishbone (4M), PFMEA template, control plan draft, historical lessons-learned library." }, { "name": "Task", "desc": "Process scope, production line, operation range, and special characteristics to focus on." }, { "name": "Trend", "desc": "Historical PFMEA, process SPC data, NCRs, customer complaints, CAPA, rework/scrap records, and audit findings." }], "example": "Team: SMT process & quality; Timing: Q2 2026; Tools: process flow + 4M fishbone; Task: SMT welding OP10-OP40; Trend: 6-month placement defect trend" },

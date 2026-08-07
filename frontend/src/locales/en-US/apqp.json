@@ -5,7 +5,8 @@
     "apqpProjects": "APQP Projects",
     "newAPQPProject": "New APQP Project",
     "projectDetail": "Project Detail",
-    "editProject": "Edit Project"
+    "editProject": "Edit Project",
+    "apqpProjectDetail": "APQP project phases, deliverables, and gate approval details"
   },
   "tab": {
     "all": "All",
@@ -73,7 +74,8 @@
     "phaseActions": "Phase Actions",
     "deliverables": "Linked Deliverables",
     "phaseTimeline": "Phase Timeline",
-    "gateHistory": "Gate Review History"
+    "gateHistory": "Gate Review History",
+    "projectList": "APQP Project List"
   },
   "label": {
     "projectCode": "Project Code",

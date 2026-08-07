@@ -5,7 +5,8 @@
     "controlPlanDetail": "控制计划详情",
     "newControlPlan": "新建控制计划",
     "versionHistory": "版本历史",
-    "versionCompare": "版本对比"
+    "versionCompare": "版本对比",
+    "controlPlanListSubtitle": "控制计划的创建、版本与特殊特性管理"
   },
   "button": {
     "newControlPlan": "新建控制计划",
@@ -136,7 +137,8 @@
   "card": {
     "basicInfo": "基本信息",
     "controlPlanContent": "控制计划内容",
-    "customerRequirements": "客户要求"
+    "customerRequirements": "客户要求",
+    "controlPlanList": "控制计划清单"
   },
   "specialClass": {
     "none": "-",

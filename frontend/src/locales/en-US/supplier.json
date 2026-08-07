@@ -67,7 +67,8 @@
     "evaluations": "Evaluations",
     "complaints": "Complaints ({{count}})",
     "iqcRejects": "IQC Rejects ({{count}})",
-    "scars": "SCAR ({{count}})"
+    "scars": "SCAR ({{count}})",
+    "supplierDetail": "Supplier Detail"
   },
   "table": {
     "certType": "Certificate Type",
@@ -148,6 +149,7 @@
   },
   "list": {
     "title": "Supplier Management",
+    "subtitle": "Supplier profiles, performance and qualification management",
     "addSupplier": "Add Supplier",
     "searchPlaceholder": "Search name / short name",
     "statusPlaceholder": "Status",

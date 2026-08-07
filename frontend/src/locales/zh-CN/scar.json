@@ -1,7 +1,8 @@
 {
   "pageTitle": {
     "list": "SCAR 管理",
-    "detail": "SCAR 详情"
+    "detail": "SCAR 详情",
+    "subtitle": "供应商纠正措施请求"
   },
   "status": {
     "open": "待处理",
@@ -47,7 +48,8 @@
     "scarInfo": "SCAR 信息",
     "supplierResponse": "供应商回复",
     "capaLink": "CAPA 关联",
-    "resolutionSummary": "解决摘要"
+    "resolutionSummary": "解决摘要",
+    "list": "SCAR 清单"
   },
   "descriptions": {
     "supplier": "供应商",
