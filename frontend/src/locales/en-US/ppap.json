@@ -1,5 +1,7 @@
 {
   "pageTitle": {
+    "ppapManagement": "PPAP Management",
+    "ppapManagementSubtitle": "Submit, review, and approve Production Part Approval Process packages",
     "ppapList": "PPAP Submissions",
     "newPPAP": "New PPAP"
   },
