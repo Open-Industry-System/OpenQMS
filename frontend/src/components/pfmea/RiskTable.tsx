@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Table, InputNumber, Popover, Tag, Tooltip } from 'antd';
 import type { GraphNode, GraphEdge } from '../../types';
@@ -15,6 +15,21 @@ interface RiskTableProps {
 /** severity = max(plant, customer, user); 0 if any unset (caller treats 0 as unrated). */
 export function computeSeverity(plant: number, customer: number, user: number): number {
   return Math.max(plant || 0, customer || 0, user || 0);
+}
+
+/**
+ * Dark-theme badge style for a CC/SC special-characteristic tag.
+ * Uses the palette accent colors (#ff4757 / #ffb800) at low alpha so the badge
+ * reads as a glow on the dark table instead of the light-theme pale tints.
+ */
+export function specialCharBadgeStyle(tag: 'CC' | 'SC' | string): CSSProperties {
+  if (tag === 'CC') {
+    return { background: 'rgba(255, 71, 87, 0.15)', color: '#ff4757', border: '1px solid rgba(255, 71, 87, 0.4)' };
+  }
+  if (tag === 'SC') {
+    return { background: 'rgba(255, 184, 0, 0.15)', color: '#ffb800', border: '1px solid rgba(255, 184, 0, 0.4)' };
+  }
+  return {};
 }
 
 /** CC wins; else list SC WEF names (collapse to SC×N when >2); '-' when none. */
@@ -112,8 +127,7 @@ export default function RiskTable({ nodes, edges, fmeaId, onChange }: RiskTableP
         const stepFunc = nodeMap.get(row.functionNodeId);
         const wefs = nodes.filter((n) => n.type === 'ProcessWorkElementFunction');
         const { label, tag } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
-        const bg = tag === 'CC' ? '#fff1f0' : tag === 'SC' ? '#fffbe6' : undefined;
-        return <Tooltip title={label}><Tag style={{ background: bg }}>{label}</Tag></Tooltip>;
+        return <Tooltip title={label}><Tag style={specialCharBadgeStyle(tag)}>{label}</Tag></Tooltip>;
       },
     },
   ];

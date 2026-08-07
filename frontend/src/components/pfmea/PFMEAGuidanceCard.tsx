@@ -7,6 +7,7 @@ const { Paragraph, Text } = Typography;
 const STORAGE_KEY = 'pfmea_wizard_card_collapsed';
 
 function getInitialCollapsed(): boolean {
+  // 默认展开：仅当用户明确收起过（存储 'true'）才收起；旧版本存过 'false' 的按未设置处理
   try {
     return localStorage.getItem(STORAGE_KEY) === 'true';
   } catch {
@@ -26,7 +27,12 @@ export default function PFMEAGuidanceCard({ stepIndex }: PFMEAGuidanceCardProps)
     const next = !collapsed;
     setCollapsed(next);
     try {
-      localStorage.setItem(STORAGE_KEY, String(next));
+      // 仅记录"用户收起过"这一偏好；展开是默认态，不持久化
+      if (next) {
+        localStorage.setItem(STORAGE_KEY, 'true');
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
     } catch {
       // ignore write failures
     }
