@@ -116,7 +116,7 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/admin/review-skills": ["grp:admin"],
 };
 
-interface MenuItem {
+export interface MenuItem {
   key: string;
   icon?: ReactNode;
   label: string;
@@ -291,7 +291,7 @@ function useMenuItems(): MenuItem[] {
   );
 }
 
-function filterMenuByPermission(
+export function filterMenuByPermission(
   items: MenuItem[],
   canViewFn: (m: ModuleKey) => boolean,
   isAdmin: boolean,
@@ -302,7 +302,6 @@ function filterMenuByPermission(
       // the backend enforces require_admin regardless, but we hide the menu
       // entry so non-admins don't see a link that 403s on click.
       if (item.adminOnly && !isAdmin) return null;
-      if (!item.module && !item.adminOnly) return item;
       if (item.module && !canViewFn(item.module)) return null;
       if (item.children) {
         const filteredChildren = filterMenuByPermission(item.children, canViewFn, isAdmin);
