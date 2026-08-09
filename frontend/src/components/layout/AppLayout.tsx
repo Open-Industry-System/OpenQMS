@@ -89,20 +89,20 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/scars": ["grp:supplier"],
   "/knowledge-graph": ["grp:planning"],
   "/change-impact": ["grp:planning"],
-  "/mes/dashboard": ["grp:mes"],
-  "/mes/orders": ["grp:mes"],
-  "/mes/scrap": ["grp:mes"],
-  "/mes/connections": ["grp:mes"],
-  "/plm/dashboard": ["grp:plm"],
-  "/plm/connections": ["grp:plm"],
-  "/plm/parts": ["grp:plm"],
-  "/plm/change-orders": ["grp:plm"],
-  "/erp": ["grp:erp"],
-  "/erp/connections": ["grp:erp"],
-  "/erp/master-data": ["grp:erp"],
-  "/erp/supply-chain": ["grp:erp"],
-  "/erp/commercial": ["grp:erp"],
-  "/erp/traceability": ["grp:erp"],
+  "/mes/dashboard": ["grp:admin", "grp:integration", "grp:mes"],
+  "/mes/orders": ["grp:admin", "grp:integration", "grp:mes"],
+  "/mes/scrap": ["grp:admin", "grp:integration", "grp:mes"],
+  "/mes/connections": ["grp:admin", "grp:integration", "grp:mes"],
+  "/plm/dashboard": ["grp:admin", "grp:integration", "grp:plm"],
+  "/plm/connections": ["grp:admin", "grp:integration", "grp:plm"],
+  "/plm/parts": ["grp:admin", "grp:integration", "grp:plm"],
+  "/plm/change-orders": ["grp:admin", "grp:integration", "grp:plm"],
+  "/erp": ["grp:admin", "grp:integration", "grp:erp"],
+  "/erp/connections": ["grp:admin", "grp:integration", "grp:erp"],
+  "/erp/master-data": ["grp:admin", "grp:integration", "grp:erp"],
+  "/erp/supply-chain": ["grp:admin", "grp:integration", "grp:erp"],
+  "/erp/commercial": ["grp:admin", "grp:integration", "grp:erp"],
+  "/erp/traceability": ["grp:admin", "grp:integration", "grp:erp"],
   "/group/dashboard": ["grp:group"],
   "/group/comparison": ["grp:group"],
   "/group/suppliers": ["grp:group"],
@@ -116,7 +116,7 @@ const MENU_KEY_TO_OPEN_KEYS: Record<string, string[]> = {
   "/admin/review-skills": ["grp:admin"],
 };
 
-interface MenuItem {
+export interface MenuItem {
   key: string;
   icon?: ReactNode;
   label: string;
@@ -223,44 +223,6 @@ function useMenuItems(): MenuItem[] {
         ],
       },
       {
-        key: "grp:mes",
-        icon: <ToolOutlined />,
-        label: t("menu.mesIntegration"),
-        module: "mes",
-        children: [
-          { key: "/mes/dashboard", label: t("menu.mesDashboard"), module: "mes" },
-          { key: "/mes/orders", label: t("menu.workOrders"), module: "mes" },
-          { key: "/mes/scrap", label: t("menu.scrapRework"), module: "mes" },
-          { key: "/mes/connections", label: t("menu.mesConnections"), module: "mes" },
-        ],
-      },
-      {
-        key: "grp:plm",
-        icon: <BuildOutlined />,
-        label: t("menu.plmIntegration"),
-        module: "plm",
-        children: [
-          { key: "/plm/dashboard", label: t("menu.plmDashboard"), module: "plm" },
-          { key: "/plm/parts", label: t("menu.partList"), module: "plm" },
-          { key: "/plm/change-orders", label: t("menu.changeOrderManagement"), module: "plm" },
-          { key: "/plm/connections", label: t("menu.plmConnections"), module: "plm" },
-        ],
-      },
-      {
-        key: "grp:erp",
-        icon: <SettingOutlined />,
-        label: t("menu.erpIntegration"),
-        module: "erp",
-        children: [
-          { key: "/erp", label: t("menu.erpDashboard"), module: "erp" },
-          { key: "/erp/connections", label: t("menu.erpConnections"), module: "erp" },
-          { key: "/erp/master-data", label: t("menu.masterData"), module: "erp" },
-          { key: "/erp/supply-chain", label: t("menu.supplyChain"), module: "erp" },
-          { key: "/erp/commercial", label: t("menu.salesCost"), module: "erp" },
-          { key: "/erp/traceability", label: t("menu.batchTraceability"), module: "erp" },
-        ],
-      },
-      {
         key: "grp:group",
         icon: <GlobalOutlined />,
         label: t("menu.groupManagement"),
@@ -284,6 +246,51 @@ function useMenuItems(): MenuItem[] {
           { key: "/admin/users", icon: <UserOutlined />, label: t("menu.users"), adminOnly: true },
           { key: "/admin/logs", icon: <FileTextOutlined />, label: t("menu.logs"), adminOnly: true },
           { key: "/admin/review-skills", icon: <AuditOutlined />, label: t("menu.reviewSkills"), adminOnly: true },
+          {
+            key: "grp:integration",
+            icon: <ShareAltOutlined />,
+            label: t("menu.integration"),
+            children: [
+              {
+                key: "grp:mes",
+                icon: <ToolOutlined />,
+                label: t("menu.mesIntegration"),
+                module: "mes",
+                children: [
+                  { key: "/mes/dashboard", label: t("menu.mesDashboard"), module: "mes" },
+                  { key: "/mes/orders", label: t("menu.workOrders"), module: "mes" },
+                  { key: "/mes/scrap", label: t("menu.scrapRework"), module: "mes" },
+                  { key: "/mes/connections", label: t("menu.mesConnections"), module: "mes" },
+                ],
+              },
+              {
+                key: "grp:plm",
+                icon: <BuildOutlined />,
+                label: t("menu.plmIntegration"),
+                module: "plm",
+                children: [
+                  { key: "/plm/dashboard", label: t("menu.plmDashboard"), module: "plm" },
+                  { key: "/plm/parts", label: t("menu.partList"), module: "plm" },
+                  { key: "/plm/change-orders", label: t("menu.changeOrderManagement"), module: "plm" },
+                  { key: "/plm/connections", label: t("menu.plmConnections"), module: "plm" },
+                ],
+              },
+              {
+                key: "grp:erp",
+                icon: <SettingOutlined />,
+                label: t("menu.erpIntegration"),
+                module: "erp",
+                children: [
+                  { key: "/erp", label: t("menu.erpDashboard"), module: "erp" },
+                  { key: "/erp/connections", label: t("menu.erpConnections"), module: "erp" },
+                  { key: "/erp/master-data", label: t("menu.masterData"), module: "erp" },
+                  { key: "/erp/supply-chain", label: t("menu.supplyChain"), module: "erp" },
+                  { key: "/erp/commercial", label: t("menu.salesCost"), module: "erp" },
+                  { key: "/erp/traceability", label: t("menu.batchTraceability"), module: "erp" },
+                ],
+              },
+            ],
+          },
         ],
       },
     ],
@@ -291,7 +298,7 @@ function useMenuItems(): MenuItem[] {
   );
 }
 
-function filterMenuByPermission(
+export function filterMenuByPermission(
   items: MenuItem[],
   canViewFn: (m: ModuleKey) => boolean,
   isAdmin: boolean,
@@ -302,7 +309,6 @@ function filterMenuByPermission(
       // the backend enforces require_admin regardless, but we hide the menu
       // entry so non-admins don't see a link that 403s on click.
       if (item.adminOnly && !isAdmin) return null;
-      if (!item.module && !item.adminOnly) return item;
       if (item.module && !canViewFn(item.module)) return null;
       if (item.children) {
         const filteredChildren = filterMenuByPermission(item.children, canViewFn, isAdmin);
