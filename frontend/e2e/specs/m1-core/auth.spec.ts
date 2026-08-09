@@ -81,13 +81,21 @@ test.describe("auth + RBAC + factory isolation", () => {
 });
 
 test.describe("系统集成菜单（系统设置下）权限可见性", () => {
-  test("viewer 无集成权限：展开系统设置后系统集成组隐藏", async ({ browser }) => {
+  // seed.py 中 viewer 角色 mes/plm/erp 均为 VIEW=1，故 viewer 应看到系统设置→系统集成
+  // 下的三个集成组，但看不到 adminOnly 的管理项（用户管理等）。
+  test("viewer 有集成 VIEW 权限：看到系统集成组，但看不到 adminOnly 管理项", async ({ browser }) => {
     const ctx = await browser.newContext({ storageState: "e2e/.storage-state/viewer.json" });
     const page = await ctx.newPage();
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");
-    // viewer 无任何 mes/plm/erp 权限且无 admin 权限 → 整个系统设置组隐藏
-    await expect(page.locator('[data-e2e="menu-grp:admin"]')).toBeHidden();
+    // 逐级展开，再断言，避免“未展开”造成的假阳性
+    await page.locator('[data-e2e="menu-grp:admin"]').click();
+    await page.locator('[data-e2e="menu-grp:integration"]').click();
+    await expect(page.locator('[data-e2e="menu-grp:mes"]')).toBeVisible();
+    await expect(page.locator('[data-e2e="menu-grp:plm"]')).toBeVisible();
+    await expect(page.locator('[data-e2e="menu-grp:erp"]')).toBeVisible();
+    // adminOnly 项对非 admin 隐藏
+    await expect(page.locator('[data-e2e="menu-admin-users"]')).toBeHidden();
     await ctx.close();
   });
 
