@@ -79,3 +79,32 @@ test.describe("auth + RBAC + factory isolation", () => {
     await ctx.close();
   });
 });
+
+test.describe("系统集成菜单（系统设置下）权限可见性", () => {
+  test("viewer 无集成权限：展开系统设置后系统集成组隐藏", async ({ browser }) => {
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/viewer.json" });
+    const page = await ctx.newPage();
+    await page.goto("/dashboard");
+    await page.waitForLoadState("networkidle");
+    // viewer 无任何 mes/plm/erp 权限且无 admin 权限 → 整个系统设置组隐藏
+    await expect(page.locator('[data-e2e="menu-grp:admin"]')).toBeHidden();
+    await ctx.close();
+  });
+
+  test("admin：展开系统设置→系统集成后三个集成组均可见", async ({ browser }) => {
+    const ctx = await browser.newContext({ storageState: "e2e/.storage-state/admin.json" });
+    const page = await ctx.newPage();
+    await page.goto("/dashboard");
+    await page.waitForLoadState("networkidle");
+    // 逐级展开，再断言，避免“未展开”造成的假阳性
+    await page.locator('[data-e2e="menu-grp:admin"]').click();
+    await page.locator('[data-e2e="menu-grp:integration"]').click();
+    await expect(page.locator('[data-e2e="menu-grp:mes"]')).toBeVisible();
+    await expect(page.locator('[data-e2e="menu-grp:plm"]')).toBeVisible();
+    await expect(page.locator('[data-e2e="menu-grp:erp"]')).toBeVisible();
+    // 展开 MES 组，子页面可见
+    await page.locator('[data-e2e="menu-grp:mes"]').click();
+    await expect(page.locator('[data-e2e="menu-mes-dashboard"]')).toBeVisible();
+    await ctx.close();
+  });
+});
