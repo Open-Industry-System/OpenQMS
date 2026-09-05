@@ -98,7 +98,7 @@ A green Playwright exit code is insufficient when required AI scenarios were ski
 Do not inherit environment-dependent retry behavior from `frontend/playwright.config.ts`. Every stabilization run explicitly uses zero automatic retries and retains the first failing trace:
 
 ```bash
-PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/openqms-stabilization-20260905/playwright/attempt-1.json \
+PLAYWRIGHT_JSON_OUTPUT_FILE=/tmp/openqms-stabilization-20260905/playwright/attempt-1.json \
   make e2e-run TEST_ARGS="--retries=0 --trace=retain-on-failure --reporter=list,json --output=/tmp/openqms-stabilization-20260905/playwright/attempt-1"
 ```
 
