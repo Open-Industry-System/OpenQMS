@@ -119,7 +119,11 @@ A successful download alone does not pass the CAPA PPT gate because the API inte
 
 1. **File structure:** HTTP 200, PPTX MIME type, non-empty valid OOXML package, exactly 11 slides, and the expected titles for cover, D1–D8, linkage appendix, and generation information.
 2. **Source consistency:** parse the PPTX with `python-pptx` and compare the document number, title, severity, product line, status, D1–D8 values, and seeded linkage data against the source CAPA/API record. No invented or stale business data is allowed.
-3. **Review metadata:** response headers, generation-information slide, `GET /api/capa/{report_id}/ppt-exports/{export_id}`, and `capa_ppt_export` must agree on export ID, version, `review_status`, `review_rounds`, and review report.
+3. **Review metadata by carrier:** use response header `X-PPT-Export-Id` to fetch `GET /api/capa/{report_id}/ppt-exports/{export_id}` and locate the `capa_ppt_export` row, then compare only fields exposed by each existing carrier:
+   - response headers: export ID, `review_status`, and `review_rounds` must match the query API and database;
+   - generation-information slide: version, `review_status`, and `review_rounds` must match the query API and database;
+   - query API: export ID, version, `review_status`, `review_rounds`, and `review_report` must match the database row;
+   - `review_report` is compared only between the query API and database because neither response headers nor the slide exposes it.
 4. **Review outcome:** `review_status` must be `passed`; rounds must be in `1..3`; the persisted report must contain valid `issues` and `suggestions` lists consistent with the passing outcome.
 
 For this AI-enabled release gate, `review_status=skipped` is **BLOCKED** because it proves the configured review agent did not run. `review_status=needs_review` is also **BLOCKED** pending an explicit human-review workflow outside this iteration; the presence of a downloadable file does not downgrade either state to pass.
@@ -227,7 +231,7 @@ The final stabilization report records:
 - Backend pytest passed/failed/skipped counts
 - Frontend typecheck and build result
 - Playwright command line, attempt number, JSON report, passed/failed/skipped counts, skipped titles, and retained trace paths
-- CAPA PPT structure/source comparison plus response-header, generation-slide, API, and database review metadata
+- CAPA PPT structure/source comparison plus carrier-aware metadata checks: headers and slide against API/database on their exposed fields, and `review_report` between API and database only
 - Collaboration response contracts and before/after database evidence proving cross-factory, missing-document, and unsupported-type denials have no side effects
 - Any unverified item or release blocker
 
@@ -255,7 +259,7 @@ The stabilization iteration is complete only when all applicable conditions are 
 - [ ] `make check` completes successfully.
 - [ ] The complete AI-enabled E2E suite runs with zero automatic retries and retained JSON/trace evidence.
 - [ ] The only skipped Playwright tests are the two explicitly allowlisted no-credential inverse scenarios; every positive AI scenario runs.
-- [ ] CAPA PPT has 11 valid, source-consistent slides and matching response/API/database review metadata, with `review_status=passed` and `review_rounds` in `1..3`; `skipped` or `needs_review` blocks release.
+- [ ] CAPA PPT has 11 valid, source-consistent slides; response headers match API/database export ID and review fields; the generation slide matches API/database version and review fields; API and database match on all persisted fields including `review_report`; `review_status=passed` and `review_rounds` is in `1..3`; `skipped` or `needs_review` blocks release.
 - [ ] System Integration menu permission scenarios pass.
 - [ ] `PROGRESS.md` and `docs/ROADMAP.md` match verified repository state.
 - [ ] The final diff contains only stabilization-related changes.
