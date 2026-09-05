@@ -1004,7 +1004,7 @@ $DC ps
 $DC exec -T db pg_isready -U qms -d qms_e2e
 $DC exec -T redis redis-cli ping
 $DC exec -T backend python -c 'import pptx; print(pptx.__version__)'
-curl -fsS http://localhost:8001/health
+curl -fsS http://localhost:8001/api/health
 curl -fsS http://localhost:5174/ >/dev/null
 ```
 
@@ -1028,7 +1028,7 @@ Expected: DB ready, Redis `PONG`, backend health succeeds, frontend responds, an
 
 ```bash
 make e2e-reset
-curl -fsS http://localhost:8001/health
+curl -fsS http://localhost:8001/api/health
 ```
 
 Expected: isolated data returns to deterministic seed state.
