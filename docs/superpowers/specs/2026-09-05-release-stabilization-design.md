@@ -3,7 +3,7 @@
 **Date:** 2026-09-05  
 **Branch:** `chore/release-stabilization-20260905`  
 **Base:** `main` at `98bca381`  
-**Status:** Approved
+**Status:** Revised after review; pending final approval
 
 ## 1. Goal
 
@@ -15,7 +15,7 @@ This iteration does not add product functionality.
 
 ### 2.1 Workspace hygiene
 
-- Remove the 25 untracked ` 2.*` files already verified byte-for-byte identical to their tracked originals.
+- Remove the 25 untracked files whose basenames contain the duplicate suffix `2`, already verified byte-for-byte identical to their tracked originals.
 - Preserve the unique untracked plan `docs/superpowers/plans/2026-07-26-fmea-n1-n7-fixes.md`.
 - Add a completion notice to that plan identifying the merged N1–N7 implementation commits, then commit it as historical implementation documentation.
 - Finish with no unexplained untracked or modified files.
@@ -39,18 +39,25 @@ This iteration does not add product functionality.
 Apply the only product-code change known before the iteration:
 
 - Protect collaboration `heartbeat`, `active-users`, and `leave` endpoints with the existing `RequestScope` and `check_factory_access` mechanisms.
-- Resolve the owning document's factory before reading or mutating collaboration sessions.
-- Reject cross-factory requests without exposing inaccessible document data.
+- Resolve the owning document's factory and authorize it before reading or mutating collaboration sessions.
+- Preserve the existing document-type support boundary: `fmea` is supported; an unsupported type returns `404` with `detail="unsupported_document_type"`; a missing FMEA returns `404` with `detail="document_not_found"`.
+- Treat an inaccessible cross-factory document as not found: return `404` with `detail="document_not_found"` so the response does not disclose document existence.
+- Require denial without side effects for each route:
+  - rejected `heartbeat` creates no session and does not refresh `last_activity`, action, editing area, user name, or factory on an existing session;
+  - rejected `active-users` returns no session/user projection from the inaccessible factory;
+  - rejected `leave` deletes no session.
+- Apply the same no-side-effect requirements to missing documents and unsupported document types.
 - Preserve existing route shapes and successful same-factory behavior.
-- Do not refactor unrelated collaboration code.
+- Do not add Control Plan collaboration support or refactor unrelated collaboration code in this iteration.
 
 Implementation follows test-driven development:
 
-1. Add failing cross-factory endpoint tests.
-2. Confirm the tests fail for the expected authorization reason.
-3. Add the smallest scope enforcement change.
-4. Run negative and positive collaboration tests.
-5. Run related FMEA tests and the full repository gate.
+1. Add failing endpoint tests for cross-factory, missing-document, and unsupported-type requests.
+2. For each route, snapshot the relevant collaboration rows before the request and assert both the response contract and unchanged database state afterward.
+3. Confirm the tests fail for the expected authorization/validation reason, not from test setup.
+4. Add the smallest shared preflight that resolves the document factory, checks scope, and only then dispatches to session read/write/delete logic.
+5. Run negative tests plus same-factory positive controls.
+6. Run related FMEA tests and the full repository gate.
 
 ### 2.5 Database release gate
 
@@ -74,7 +81,48 @@ Run the following release evidence:
 
 The E2E configuration may call the existing Alibaba Bailian model and incur limited external API usage. Secrets must not be printed, copied into documentation, or committed.
 
-If an external model call times out intermittently, retain the first failure evidence and retry once. A repeated failure is recorded as a release blocker or external-dependency blocker; it is not converted into a pass by skipping the scenario or weakening assertions.
+#### AI skip gate
+
+A green Playwright exit code is insufficient when required AI scenarios were skipped. With the authorized `.env.e2e` credentials:
+
+- the AI credential guard must pass rather than skip;
+- all positive AI scenarios are mandatory, including D3 containment, D4 recommendation, AI draft, doc-gate impact analysis, knowledge sink, and lateral diffusion;
+- the only allowed skips are the two inverse, no-credential-only tests whose exact titles are:
+  - `no-LLM: D8 close is blocked (422 outcome=blocked)`;
+  - `no creds: advice endpoint 422 blocked + import still 200 blocked`;
+- any other skipped test, including a positive test that dynamically skips after receiving a provider-not-configured/BLOCKED response, makes the iteration **BLOCKED** even if Playwright exits zero;
+- the JSON report is inspected after every full run to compare actual skipped titles with this allowlist.
+
+#### Fixed Playwright execution and retry evidence
+
+Do not inherit environment-dependent retry behavior from `frontend/playwright.config.ts`. Every stabilization run explicitly uses zero automatic retries and retains the first failing trace:
+
+```bash
+PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/openqms-stabilization-20260905/playwright/attempt-1.json \
+  make e2e-run TEST_ARGS="--retries=0 --trace=retain-on-failure --reporter=list,json --output=/tmp/openqms-stabilization-20260905/playwright/attempt-1"
+```
+
+Before attempt 1, run `make e2e-reset` and verify the deterministic seed state. Preserve attempt 1 JSON, traces, screenshots, videos, and terminal output under `/tmp/openqms-stabilization-20260905/`.
+
+If the only failure is plausibly intermittent external-provider behavior:
+
+1. keep attempt 1 evidence unchanged;
+2. run `make e2e-reset` to recreate only the isolated `openqms-e2e` database volume and reseed all mutable test data;
+3. re-check the AI credential guard and seed state;
+4. rerun the same scope once with paths named `attempt-2` and the same `--retries=0 --trace=retain-on-failure` parameters.
+
+A repeated failure is a release or external-dependency blocker. Product-code fixes require a new clean full-suite attempt after `make e2e-reset`; a passing targeted retry alone is not release evidence.
+
+#### CAPA PPT acceptance
+
+A successful download alone does not pass the CAPA PPT gate because the API intentionally returns a file for `skipped` and `needs_review` outcomes. Acceptance requires all of the following:
+
+1. **File structure:** HTTP 200, PPTX MIME type, non-empty valid OOXML package, exactly 11 slides, and the expected titles for cover, D1–D8, linkage appendix, and generation information.
+2. **Source consistency:** parse the PPTX with `python-pptx` and compare the document number, title, severity, product line, status, D1–D8 values, and seeded linkage data against the source CAPA/API record. No invented or stale business data is allowed.
+3. **Review metadata:** response headers, generation-information slide, `GET /api/capa/{report_id}/ppt-exports/{export_id}`, and `capa_ppt_export` must agree on export ID, version, `review_status`, `review_rounds`, and review report.
+4. **Review outcome:** `review_status` must be `passed`; rounds must be in `1..3`; the persisted report must contain valid `issues` and `suggestions` lists consistent with the passing outcome.
+
+For this AI-enabled release gate, `review_status=skipped` is **BLOCKED** because it proves the configured review agent did not run. `review_status=needs_review` is also **BLOCKED** pending an explicit human-review workflow outside this iteration; the presence of a downloadable file does not downgrade either state to pass.
 
 ### 2.7 Documentation synchronization
 
@@ -110,10 +158,11 @@ The work proceeds through serial gates.
 
 ### Stage 3 — Collaboration isolation fix
 
-1. Add cross-factory failure tests and same-factory controls.
-2. Demonstrate the current failure.
-3. Add factory-scope enforcement to all three routes.
-4. Run targeted and related tests.
+1. Add cross-factory, missing-document, and unsupported-type tests with same-factory controls.
+2. Demonstrate the current response and side-effect failures.
+3. Add factory-scope preflight enforcement to all three routes.
+4. Assert rejected heartbeat does not insert/refresh, rejected active-users leaks no users, and rejected leave does not delete.
+5. Run targeted and related tests.
 
 ### Stage 4 — Fresh-database gate
 
@@ -126,9 +175,11 @@ The work proceeds through serial gates.
 
 1. Run `make check`.
 2. Reset and seed the isolated E2E stack.
-3. Run all AI-enabled Playwright scenarios.
-4. Verify CAPA PPT and integration-menu cases explicitly.
-5. Diagnose failures without broadening product scope unnecessarily.
+3. Run all Playwright scenarios with the fixed zero-retry, retain-on-failure-trace parameters and JSON evidence paths.
+4. Verify that the skipped-title set exactly matches the two no-credential inverse-test allowlist entries; any unexpected skip blocks release.
+5. Verify CAPA PPT file structure, source consistency, persisted review metadata, and mandatory `passed` review outcome.
+6. Verify integration-menu cases explicitly.
+7. Diagnose failures without broadening product scope unnecessarily.
 
 ### Stage 6 — Documentation and delivery
 
@@ -154,7 +205,7 @@ Capture the command, scenario, error, and impact. A small release-blocking defec
 
 ### 4.4 External dependency failure
 
-Record provider response and timing without exposing credentials. Retry one intermittent failure. Repeated failures remain visible in the final status.
+Record provider response and timing without exposing credentials. Use only the fixed zero-automatic-retry procedure in section 2.6: preserve attempt 1, restore the isolated E2E dataset with `make e2e-reset`, and permit one manually identified attempt 2. Repeated failures remain visible in the final status.
 
 ## 5. Data and Secret Safety
 
@@ -175,9 +226,9 @@ The final stabilization report records:
 - Fresh migration and seed result
 - Backend pytest passed/failed/skipped counts
 - Frontend typecheck and build result
-- Playwright passed/failed/skipped counts
-- CAPA PPT generation and structural review result
-- Collaboration cross-factory rejection and same-factory success results
+- Playwright command line, attempt number, JSON report, passed/failed/skipped counts, skipped titles, and retained trace paths
+- CAPA PPT structure/source comparison plus response-header, generation-slide, API, and database review metadata
+- Collaboration response contracts and before/after database evidence proving cross-factory, missing-document, and unsupported-type denials have no side effects
 - Any unverified item or release blocker
 
 ## 7. Explicit Non-Goals
@@ -196,14 +247,15 @@ The final stabilization report records:
 
 The stabilization iteration is complete only when all applicable conditions are satisfied:
 
-- [ ] The 25 duplicate ` 2.*` files are removed.
+- [ ] The 25 verified duplicate files whose basenames contain the suffix `2` are removed.
 - [ ] The unique N1–N7 plan is annotated and tracked.
-- [ ] All three collaboration endpoints enforce factory scope.
-- [ ] Cross-factory collaboration requests are rejected and same-factory paths pass.
+- [ ] All three collaboration endpoints enforce factory scope before session access.
+- [ ] Cross-factory, missing-document, and unsupported-type requests satisfy their `404` contracts without inserting, refreshing, exposing, or deleting collaboration sessions; same-factory paths pass.
 - [ ] A fresh isolated database upgrades to a single Alembic head and seeds successfully.
 - [ ] `make check` completes successfully.
-- [ ] The complete AI-enabled E2E suite runs; every failure is fixed or explicitly classified as a release blocker.
-- [ ] CAPA PPT generation is exercised successfully.
+- [ ] The complete AI-enabled E2E suite runs with zero automatic retries and retained JSON/trace evidence.
+- [ ] The only skipped Playwright tests are the two explicitly allowlisted no-credential inverse scenarios; every positive AI scenario runs.
+- [ ] CAPA PPT has 11 valid, source-consistent slides and matching response/API/database review metadata, with `review_status=passed` and `review_rounds` in `1..3`; `skipped` or `needs_review` blocks release.
 - [ ] System Integration menu permission scenarios pass.
 - [ ] `PROGRESS.md` and `docs/ROADMAP.md` match verified repository state.
 - [ ] The final diff contains only stabilization-related changes.
