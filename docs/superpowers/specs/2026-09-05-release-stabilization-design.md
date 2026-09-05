@@ -33,6 +33,8 @@ This iteration does not add product functionality.
 - Build the E2E backend image and prove `python-pptx` is installed in the resulting runtime rather than inferring it from requirements files.
 - Check PostgreSQL, Redis, backend, and frontend service health.
 - Run a pre-product-change baseline check so later failures can be attributed to environment, pre-existing code, or stabilization changes.
+- If a test destructively rebuilds the shared suite database, move that test to an existing one-shot isolated-database fixture before continuing; this is test-infrastructure stabilization, not product scope.
+- The user explicitly authorized deleting and recreating only the local `qms_test` database, and deleting the diagnostic database `qms_test_stabilization_diag_20260905_1844`, after root-cause evidence showed both are test-only. The development `qms` database remains prohibited.
 
 ### 2.4 Collaboration factory isolation
 
@@ -255,6 +257,7 @@ The stabilization iteration is complete only when all applicable conditions are 
 - [ ] The unique N1–N7 plan is annotated and tracked.
 - [ ] All three collaboration endpoints enforce factory scope before session access.
 - [ ] Cross-factory, missing-document, and unsupported-type requests satisfy their `404` contracts without inserting, refreshing, exposing, or deleting collaboration sessions; same-factory paths pass.
+- [ ] The destructive `test_spc_fmea_match.py` fixture uses a one-shot isolated database and no longer removes migration-only DDL or seed data from `qms_test`.
 - [ ] A fresh isolated database upgrades to a single Alembic head and seeds successfully.
 - [ ] `make check` completes successfully.
 - [ ] The complete AI-enabled E2E suite runs with zero automatic retries and retained JSON/trace evidence.

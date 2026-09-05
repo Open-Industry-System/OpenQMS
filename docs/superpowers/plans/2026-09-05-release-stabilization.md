@@ -241,6 +241,190 @@ Do not include `docker compose config` environment values or `.env.e2e` contents
 
 ---
 
+### Task 2A: Isolate the Destructive SPC–FMEA Test Database
+
+**Scope amendment (approved 2026-09-05):** The Task 2 baseline produced 38 failures and 2 errors. A controlled fresh-DB experiment proved that `backend/tests/test_spc_fmea_match.py` destroys migration-only DDL and seed rows in the shared `TEST_DATABASE_URL` through `Base.metadata.drop_all()/create_all()`. The user explicitly authorized this test-only fix, deletion/recreation of `qms_test`, and deletion of diagnostic DB `qms_test_stabilization_diag_20260905_1844`; `qms` remains prohibited.
+
+**Files:**
+- Modify: `backend/tests/test_spc_fmea_match.py:1-55`
+- Reference: `backend/tests/conftest.py:51-84` (`mig_db_url`)
+- Evidence: `/tmp/openqms-stabilization-20260905/diagnosis-task2.log`
+
+**Interfaces:**
+- Consumes: top-level `mig_db_url` fixture, which creates a unique one-shot PostgreSQL database, sets `DATABASE_URL`, and drops that database after dependent fixtures finish.
+- Produces: a `db(mig_db_url)` fixture that runs `Base.metadata.create_all()` only in the one-shot database and never calls `drop_all()` on shared `qms_test`.
+
+- [ ] **Step 1: Preserve the already-proven RED evidence**
+
+Confirm the diagnosis log records:
+
+```text
+fresh migrated representative tests: 5/5 passed
+SPC-FMEA tests: 10/10 passed
+post-SPC catalog: document_embeddings.embedding absent; both version triggers absent; migration seed rows absent
+post-SPC representative rerun: 3 failed, 1 error, 1 passed
+```
+
+Do not rerun the destructive fixture against `qms_test` to reproduce it again.
+
+- [ ] **Step 2: Replace the shared destructive fixture with `mig_db_url`**
+
+In `backend/tests/test_spc_fmea_match.py`:
+
+1. remove unused imports `os` and `urlparse`;
+2. replace the current `db()` fixture with:
+
+```python
+@pytest_asyncio.fixture(scope="function")
+async def db(mig_db_url):
+    """Use a one-shot DB; never rebuild the shared suite database."""
+    engine = create_async_engine(mig_db_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                Factory.__table__.insert().values(
+                    id=_DEFAULT_FACTORY_ID,
+                    code="TEST",
+                    name="Test Factory",
+                )
+            )
+            await conn.execute(
+                ProductLine.__table__.insert().values(
+                    code="DC-DC-100",
+                    name="DC-DC Convert 100W",
+                    factory_id=_DEFAULT_FACTORY_ID,
+                )
+            )
+            await conn.commit()
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
+```
+
+Do not copy APQP/PPAP database-creation helpers; reuse `mig_db_url` from the shared conftest.
+
+- [ ] **Step 3: Recreate only the explicitly authorized `qms_test` database**
+
+From the repository root, first prove the names differ:
+
+```bash
+test "qms_test" != "qms"
+docker compose exec -T db psql -U qms -d postgres -Atc \
+  "select datname from pg_database where datname in ('qms','qms_test') order by datname;"
+```
+
+Then run:
+
+```bash
+backend/.venv/bin/python - <<'PY'
+from sqlalchemy import create_engine, text
+
+admin = create_engine(
+    "postgresql+psycopg://qms:qms_dev_2026@localhost:5432/postgres",
+    isolation_level="AUTOCOMMIT",
+)
+with admin.connect() as connection:
+    connection.execute(text(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        "WHERE datname='qms_test' AND pid <> pg_backend_pid()"
+    ))
+    connection.execute(text('DROP DATABASE IF EXISTS "qms_test"'))
+    connection.execute(text('CREATE DATABASE "qms_test"'))
+admin.dispose()
+PY
+make check-test-db
+```
+
+Never substitute `qms` in this script.
+
+- [ ] **Step 4: Record migration artifacts before the SPC–FMEA test**
+
+```bash
+docker compose exec -T db psql -U qms -d qms_test -v ON_ERROR_STOP=1 -Atc \
+  "select 'embedding='||count(*) from information_schema.columns where table_schema='public' and table_name='document_embeddings' and column_name='embedding'; select 'fmea_trigger='||count(*) from pg_trigger where tgname like 'trg_fmea_version_%' and not tgisinternal; select 'cp_trigger='||count(*) from pg_trigger where tgname like 'trg_cp_version_%' and not tgisinternal; select 'ppt_skill='||count(*) from agent_review_skill where name='capa_ppt_review';" \
+  | tee /tmp/openqms-stabilization-20260905/spc-isolation-before.txt
+```
+
+Use the actual migrated review-skill table name returned by `to_regclass` if the migration names it differently; do not change the required seed-name assertion.
+
+- [ ] **Step 5: Run SPC–FMEA tests, then prove shared artifacts are unchanged**
+
+```bash
+cd backend && SECRET_KEY=test-secret-key-for-ci-only \
+  TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test \
+  .venv/bin/pytest tests/test_spc_fmea_match.py -x --tb=short -v
+```
+
+Return to the repository root and run the Step 4 catalog query into `spc-isolation-after.txt`, then:
+
+```bash
+diff -u \
+  /tmp/openqms-stabilization-20260905/spc-isolation-before.txt \
+  /tmp/openqms-stabilization-20260905/spc-isolation-after.txt
+```
+
+Expected: 10/10 SPC–FMEA tests pass and the catalog/seed counts are identical.
+
+- [ ] **Step 6: Re-run the five representative tests on clean shared `qms_test`**
+
+```bash
+cd backend && SECRET_KEY=test-secret-key-for-ci-only \
+  TEST_DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test \
+  .venv/bin/pytest \
+  tests/capa/test_capa_doc_gate_coverage.py::test_run_audit_inserts_audit_and_decision_rows \
+  tests/capa/test_capa_ppt_review_service.py::test_pass_first_round \
+  tests/test_agent_review_skill_api.py::test_admin_can_list_skills \
+  tests/test_retriever_executions.py::test_status_is_empty_or_success_never_raises \
+  tests/e2e/test_seed_e2e_d3.py::test_d3_seed_twice_restores_initial_state_without_accumulation \
+  -x --tb=short -v
+```
+
+Expected: 5/5 pass after the SPC–FMEA test.
+
+- [ ] **Step 7: Run complete `make check` twice**
+
+```bash
+set -o pipefail
+make check 2>&1 | tee /tmp/openqms-stabilization-20260905/make-check-clean-1.log
+make check 2>&1 | tee /tmp/openqms-stabilization-20260905/make-check-clean-2.log
+```
+
+Expected: both runs pass. The second run proves the first no longer corrupts shared test state. If other failures remain, preserve both logs and return BLOCKED without broadening code changes.
+
+- [ ] **Step 8: Delete only the explicitly authorized diagnostic DB**
+
+```bash
+backend/.venv/bin/python - <<'PY'
+from sqlalchemy import create_engine, text
+
+name = "qms_test_stabilization_diag_20260905_1844"
+admin = create_engine(
+    "postgresql+psycopg://qms:qms_dev_2026@localhost:5432/postgres",
+    isolation_level="AUTOCOMMIT",
+)
+with admin.connect() as connection:
+    connection.execute(text(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        "WHERE datname=:name AND pid <> pg_backend_pid()"
+    ), {"name": name})
+    connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+admin.dispose()
+PY
+```
+
+- [ ] **Step 9: Commit the test-isolation fix**
+
+```bash
+git diff --check -- backend/tests/test_spc_fmea_match.py
+git add backend/tests/test_spc_fmea_match.py
+git commit -m "test(spc): isolate destructive FMEA match database"
+```
+
+---
+
 ### Task 3: Add Failing Collaboration Factory-Scope Contract Tests
 
 **Files:**
