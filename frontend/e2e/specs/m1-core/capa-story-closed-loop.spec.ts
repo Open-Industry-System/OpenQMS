@@ -1,13 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { accountPassword } from "../../fixtures/seed-state";
-import { cleanupByPrefix, loginForToken, authedApi, E2E_API_BASE_URL } from "../../helpers/api-client";
+import { cleanupByPrefix, completeD3Gate, loginForToken, authedApi, E2E_API_BASE_URL } from "../../helpers/api-client";
 
 /**
- * US-E2E-01 — 8D 非 AI 闭环故事级 spec（Spec C / P2-11）。
+ * US-E2E-01 — 8D credentialed closed-loop story spec（Spec C / P2-11）。
  *
- * 覆盖故事主流程 10 步、7 条 TRANSITION 审计断言、viewer 只读。
- * 原混合 spec 中的 AI 推荐断言（D4 12 阶段 DAG / AI 采纳 provenance）已拆分至
- * capa-story-ai-recommend.spec.ts；本文件无 LLM 凭证也必须全绿。
+ * 覆盖故事主流程 10 步、7 条 TRANSITION 审计断言、viewer 只读。D3 gate
+ * 必须生成 AI report 并记录手工执行后才能进入 D4；D4 AI 推荐断言另拆分至
+ * capa-story-ai-recommend.spec.ts。
  *
  * 与 m1-core/capa.spec.ts（D1→D2 冒烟）、capa-ai-draft.spec.ts（按钮可见性）、
  * capa-story-ai-recommend.spec.ts（AI D4 推荐）并行；用独立单号前缀
@@ -97,6 +97,7 @@ async function createCapaAndAdvanceToD4(
   const d3 = page.locator("textarea").first();
   await d3.fill("对该批螺栓 100% 复检隔离，超差件判退供应商。");
   await d3.evaluate((el: any) => el.blur());
+  await completeD3Gate(capId);
   await page.locator('[data-e2e="capa-advance"]').click();
   // Step 5: D4 — 用验证卡 testid 作哨兵。
   await expect(page.locator('[data-e2e="d4-verification-card"]')).toBeVisible({ timeout: 10000 });

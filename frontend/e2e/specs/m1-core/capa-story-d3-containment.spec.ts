@@ -24,14 +24,14 @@ test.describe('D3 containment', () => {
     await expect(page.locator('[data-e2e=capa-status]')).toHaveText('D3_INTERIM');
 
     // 2. import → 200 + run + 4 类快照 + report_status='done'
-    const importResp = await authedRequest.post(`/capa/${capaId}/d3/import`, {data:{snapshot_types:['inventory','shipment','iqc','spc']}});
+    const importResp = await authedRequest.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/import`, {data:{snapshot_types:['inventory','shipment','iqc','spc']}});
     expect(importResp.status()).toBe(200);
     const importJson = await importResp.json();
     expect(importJson.report_status).toBe('done');
     expect(importJson.run_id).toBeDefined();
 
     // 3. 报告 5 项齐全 + risk_level∈{high,medium,low} + status='done' + 客户名真名
-    const reportResp = await authedRequest.get(`/capa/${capaId}/d3/report`);
+    const reportResp = await authedRequest.get(`${E2E_API_BASE_URL}/capa/${capaId}/d3/report`);
     expect(reportResp.status()).toBe(200);
     const report = await reportResp.json();
     expect(report.status).toBe('done');
@@ -47,7 +47,7 @@ test.describe('D3 containment', () => {
     }
 
     // 4. advice → 列表非空 + advice_type∈枚举 + source_provenance 非空 + target_batch_refs 契约
-    const adviceResp = await authedRequest.post(`/capa/${capaId}/d3/advice`);
+    const adviceResp = await authedRequest.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/advice`);
     expect(adviceResp.status()).toBe(200);
     const advice = await adviceResp.json();
     expect(advice.advice.length).toBeGreaterThan(0);
@@ -65,18 +65,18 @@ test.describe('D3 containment', () => {
 
     // 5. 采纳 1 条 → adoptions 回读 adopted
     const adviceId = a.advice_id;
-    const adoptResp = await authedRequest.post(`/capa/${capaId}/d3/advice/${adviceId}/decision`, {data:{decision:'adopted',adopted_text:'召回批次'}});
+    const adoptResp = await authedRequest.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/advice/${adviceId}/decision`, {data:{decision:'adopted',adopted_text:'召回批次'}});
     expect(adoptResp.status()).toBe(200);
-    const adoptionsResp = await authedRequest.get(`/capa/${capaId}/d3/adoptions`);
+    const adoptionsResp = await authedRequest.get(`${E2E_API_BASE_URL}/capa/${capaId}/d3/adoptions`);
     const adoptions = await adoptionsResp.json();
     expect(adoptions.some((x: any) => x.advice_id === adviceId && x.decision === 'adopted')).toBe(true);
 
     // 6. 记录 execution → executions 回读
-    const execResp = await authedRequest.post(`/capa/${capaId}/d3/execution`, {data:{source:'manual',measure_text:'人工隔离库位 A',result_status:'in_progress'}});
+    const execResp = await authedRequest.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/execution`, {data:{source:'manual',measure_text:'人工隔离库位 A',result_status:'in_progress'}});
     expect(execResp.status()).toBe(200);
     const execJson = await execResp.json();
     const execId = execJson.execution_id;
-    const execsResp = await authedRequest.get(`/capa/${capaId}/d3/executions`);
+    const execsResp = await authedRequest.get(`${E2E_API_BASE_URL}/capa/${capaId}/d3/executions`);
     const execs = await execsResp.json();
     expect(execs.some((x: any) => x.execution_id === execId)).toBe(true);
 
@@ -168,7 +168,7 @@ test.describe('D3 containment', () => {
       baseURL: E2E_API_BASE_URL,
       extraHTTPHeaders: { Authorization: `Bearer ${engToken}` },
     });
-    const adviceResp = await engReq.get(`/capa/${capaId}/d3/advice`);
+    const adviceResp = await engReq.get(`${E2E_API_BASE_URL}/capa/${capaId}/d3/advice`);
     expect(adviceResp.status()).toBe(200);  // advice 必存在（007 seed 已生成）
     const adviceJson = await adviceResp.json();
     const adviceId = adviceJson.advice?.[0]?.advice_id;
@@ -185,7 +185,7 @@ test.describe('D3 containment', () => {
       extraHTTPHeaders: { Authorization: `Bearer ${groupToken}` },
     });
     // P1-3 修复：factory_id 走 Query 参数（非 header）；groupadmin 切到 SH 工厂视角访问 DC 工厂 capa → 404
-    const resp = await crossReq.post(`/capa/${capaId}/d3/advice/${adviceId}/decision?factory_id=${shFactory}`, {data:{decision:'adopted',adopted_text:'t'}});
+    const resp = await crossReq.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/advice/${adviceId}/decision?factory_id=${shFactory}`, {data:{decision:'adopted',adopted_text:'t'}});
     expect(resp.status()).toBe(404);  // 跨工厂（SH 工厂视角访问 DC 工厂 capa）
     await crossReq.dispose();
   });
@@ -218,9 +218,9 @@ test.describe('D3 containment', () => {
       baseURL: E2E_API_BASE_URL,
       extraHTTPHeaders: { Authorization: `Bearer ${engToken}` },
     });
-    const imp = await req.post(`/capa/${capaId}/d3/import`);
+    const imp = await req.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/import`);
     expect(imp.status()).toBe(200); expect(await imp.json()).toMatchObject({report_status:'blocked'});
-    const adv = await req.post(`/capa/${capaId}/d3/advice`);
+    const adv = await req.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/advice`);
     expect(adv.status()).toBe(422); expect((await adv.json()).detail.blocked).toBe(true);
     await req.dispose();
   });

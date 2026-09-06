@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "fs";
 import path from "path";
 import { accountPassword } from "../../fixtures/seed-state";
-import { cleanupByPrefix, loginForToken } from "../../helpers/api-client";
+import { cleanupByPrefix, completeD3Gate, loginForToken } from "../../helpers/api-client";
 
 /**
  * US-E2E-01 — AI D4 推荐路径故事级 spec。
@@ -46,7 +46,7 @@ test.describe("US-E2E-01 CAPA AI D4 recommendation", () => {
   });
 
   test("AI D4 recommendation DAG (200 done | 422 BLOCKED)", async ({ browser, request }) => {
-    test.setTimeout(120000);
+    test.setTimeout(240000);
     const llm = hasLLMCreds();
 
     // ── Engineer: create 8D and advance to D4 ─────────────────────────────
@@ -88,6 +88,7 @@ test.describe("US-E2E-01 CAPA AI D4 recommendation", () => {
     const d3 = page.locator("textarea").first();
     await d3.fill("对该批螺栓 100% 复检隔离，超差件判退供应商。");
     await d3.evaluate((el: any) => el.blur());
+    await completeD3Gate(capaId);
     await page.locator('[data-e2e="capa-advance"]').click();
     await expect(page.locator('[data-e2e="d4-verification-card"]')).toBeVisible({ timeout: 10000 });
 
