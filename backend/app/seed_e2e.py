@@ -885,6 +885,7 @@ async def _seed_fmea_linkage(db, factory_ids):
             factory_id=factory_id,
             status=EightDState.D4_ROOT_CAUSE.value,
             severity="serious",
+            d2_description="孔径超差投诉：定位销磨损导致孔径超差（E2E FMEA 联动）",
             d4_root_cause=root_cause,
             d5_correction="更换定位销并校准夹具",
             d7_prevention="将定位销磨损检测纳入首件检验",
@@ -896,6 +897,7 @@ async def _seed_fmea_linkage(db, factory_ids):
         await db.flush()
     else:
         capa.status = EightDState.D4_ROOT_CAUSE.value
+        capa.d2_description = "孔径超差投诉：定位销磨损导致孔径超差（E2E FMEA 联动）"
         capa.d4_root_cause = root_cause
         capa.d5_correction = "更换定位销并校准夹具"
         capa.d7_prevention = "将定位销磨损检测纳入首件检验"

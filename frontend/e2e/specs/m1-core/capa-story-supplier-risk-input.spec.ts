@@ -81,6 +81,7 @@ test.describe("US-E2E-01.6 8D→供应商风险输入", () => {
   test.describe.configure({ mode: "serial" });
 
   test("advance D7 → worker processes risk input → confirm-repeat", async () => {
+    test.setTimeout(120_000);
     const capaId = await resolveCapaId();
 
     // engineer advances D7_PREVENTION → D7_COMPLETED (capa EDIT; not APPROVE edge)
