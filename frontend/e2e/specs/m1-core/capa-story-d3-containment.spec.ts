@@ -12,6 +12,7 @@ test.describe('D3 containment', () => {
   // 依赖 done report 的测试各自 test.skip(noLlmCreds())。
 
   test('D3 containment main flow', async ({ page, browser, authedRequest, capaId }) => {
+    test.setTimeout(120_000);
     // 主流程依赖 LLM 生成 done report + advice
     test.skip(noLlmCreds(), 'No AI credentials');
     // P2-1 修复：固定审计时间窗；±5s 容忍浏览器与 DB 容器的轻微时钟偏差。
