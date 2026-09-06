@@ -1,8 +1,8 @@
 # OpenQMS Release Stabilization Design
 
-**Date:** 2026-09-05  
-**Branch:** `chore/release-stabilization-20260905`  
-**Base:** `main` at `98bca381`  
+**Date:** 2026-09-05
+**Branch:** `chore/release-stabilization-20260905`
+**Base:** `main` at `98bca381`
 **Status:** Approved
 
 ## 1. Goal
