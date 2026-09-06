@@ -80,7 +80,7 @@ Run the following release evidence:
 - Complete AI-enabled E2E using the existing `.env.e2e` configuration
 - Targeted verification of CAPA PPT generation and review output
 - Targeted verification of System Settings → System Integration menu permissions
-- E2E helpers reuse authenticated storage-state tokens so the suite exercises production login rate limiting without triggering a self-inflicted 429 cascade.
+- E2E helpers reuse authenticated storage-state tokens and localStorage so the suite exercises production login rate limiting without triggering a self-inflicted 429 cascade; global setup remains the single real five-role UI login path.
 - CAPA story setup follows the current D3→D4 gate (four snapshots, done report, valid execution), and D3 Playwright requests retain the `/api` prefix.
 - D3 execution validation surfaces the backend's specific 422 detail to the user instead of replacing it with a generic message.
 - E2E cleanup removes dynamic CAPA D3 descendants in FK-safe order; D3 endpoints honor a selected effective factory; seed data is visible to the roles/scopes that exercise it.

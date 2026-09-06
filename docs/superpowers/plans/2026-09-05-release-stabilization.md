@@ -1487,6 +1487,21 @@ git commit -m "fix(capa): surface D3 execution validation detail"
 
 ---
 
+### Task 6G: Reuse Storage State for UI Login Helpers
+
+**Root cause:** `loginForToken()` no longer consumes rate-limit attempts, but `loginAs(page, username)` still performs a fresh UI/password login for every D3/AI-draft test. Repeated Playwright invocations and the five-role global setup exhaust the production 10-attempt/5-minute per-IP limiter.
+
+**Files:**
+- Modify: `frontend/e2e/fixtures/auth.ts`
+- Modify: `frontend/e2e/specs/_guards/storage-token.guard.spec.ts`
+
+- [ ] Add a RED Playwright guard that attaches a request listener, calls `loginAs(page, "engineer")`, and asserts no `/api/auth/login` request occurred; current helper must fail with one login request.
+- [ ] Change `loginAs` to read `storageStatePath(username)`, obtain the saved `http://localhost:5174` localStorage entries, install them with `page.addInitScript`, navigate to `/dashboard`, and wait for an authenticated route. Throw a clear error if the storage file/origin/token is absent. Do not alter global setup: it remains the one real five-role UI login coverage.
+- [ ] Run both storage-token guards, D3 containment tests excluding no-credential inverse as appropriate, AI draft test, TypeScript, and build. Assert backend login audit/rate-limit logs show no test-helper logins beyond global setup.
+- [ ] Commit as `test(e2e): reuse storage state for UI helpers`, then restart E2E backend once before the next combined credentialed run.
+
+---
+
 ### Task 7: Perform Carrier-Aware CAPA PPT Acceptance
 
 **Files:**
