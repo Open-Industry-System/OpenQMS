@@ -1771,6 +1771,24 @@ If the closed CAPA ID was not closed because an earlier mandatory E2E scenario f
 
 ---
 
+### Task 7B: Align PPT Review Runtime Context and Complete D4/D7 Seed Facts
+
+**Root cause:** after D1 completion the LLM reviewer still requires post-review generation metadata before it exists, treats explicit no-link appendix values as missing, and correctly notes that the acceptance seed lacks D4 verification evidence. The seed also lacks a D7 action required by the default review skill.
+
+**Files:**
+- Modify: `backend/tests/capa/test_capa_ppt_review_service.py`
+- Modify: `backend/app/services/capa_ppt_review_service.py`
+- Modify: `backend/app/seed_e2e.py`
+
+- [ ] Add RED prompt tests capturing `_subagent_review` and `_subagent_correct` prompts: both must state that generation-info version/status/rounds are filled only after review and must not be assessed/corrected; explicit `无` for absent FMEA/SCAR/risk links is a valid DB-faithful appendix and must not be fabricated.
+- [ ] Add one shared runtime-context constant to both review/correction prompts; do not change REVIEW_SCHEMA, round count, corrected-content needs_review policy, or rule validation.
+- [ ] Extend `_seed_knowledge_sink` idempotently with one passed D4 verification matching current root cause, including method/result/is_verified and a named evidence attachment; add one confirmed D7 node action. Delete/recreate only those fixed child records on reseed.
+- [ ] Run PPT review/content/API tests, seed idempotency tests, and full `make check`.
+- [ ] After review/integration, reseed, close KNOW CAPA, and rerun full Task 7. Require first-round `passed`, not corrected `needs_review`.
+- [ ] Commit as `fix(capa): align PPT review with render lifecycle`.
+
+---
+
 ### Task 8: Re-run the System Integration Menu Permission Slice
 
 **Files:**
