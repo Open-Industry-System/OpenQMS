@@ -1805,6 +1805,22 @@ If the closed CAPA ID was not closed because an earlier mandatory E2E scenario f
 
 ---
 
+### Task 7D: Render Explicit Empty Linkage Rows in the PPT Appendix
+
+**Root cause:** the appendix explicitly renders `关联 FMEA 节点: 无`, but empty SCAR/risk lists render no rows at all. The reviewer cannot distinguish no association from omitted content and nondeterministically returns `needs_review`.
+
+**Files:**
+- Modify: `backend/tests/capa/test_capa_ppt_service.py`
+- Modify: `backend/app/services/capa_ppt_service.py`
+
+- [ ] Add a RED content test for a CAPA with no FMEA, SCAR, or risk links: appendix sections must contain explicit labels/values for all three categories, each value `无`.
+- [ ] In `generate_content`, preserve existing populated rows but emit one `SCAR`/`风险预警` empty row when each list is empty. Do not invent IDs/statuses.
+- [ ] Run PPT service/review/API tests and full `make check`.
+- [ ] After review/integration, reseed/close and rerun Task 7 repeatedly enough to capture a numeric-round success toast; review must be `passed`, never accepted as needs_review.
+- [ ] Commit as `fix(capa): render empty PPT linkage sections`.
+
+---
+
 ### Task 8: Re-run the System Integration Menu Permission Slice
 
 **Files:**
