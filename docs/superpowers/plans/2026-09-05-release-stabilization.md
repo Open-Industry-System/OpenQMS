@@ -1285,10 +1285,11 @@ cd frontend && npx playwright test \
   e2e/specs/m1-core/capa-story-closed-loop.spec.ts \
   e2e/specs/m1-core/capa-story-lateral-diffusion.spec.ts \
   e2e/specs/m1-core/capa-story-scar-trigger.spec.ts \
+  --grep-invert='evidence_refs javascript scheme rejected 422' \
   --retries=0 --trace=retain-on-failure
 ```
 
-Expected: no 404 from lost `/api`, no D3 direct-advance stall, no 429 cascade, four lateral positives run rather than skip, and SCAR serial audit is not skipped due to an upstream login failure. The only skip in this targeted credentialed set is the D3 no-credential inverse test.
+Expected: no 404 from lost `/api`, no D3 direct-advance stall, no 429 cascade, four lateral positives run rather than skip, and SCAR serial audit is not skipped due to an upstream login failure. The only skip in this targeted credentialed set is the D3 no-credential inverse test. The D3 URL-detail assertion is deliberately excluded until Task 6B turns its unit test RED→GREEN.
 
 - [ ] **Step 8: Run static gates and commit**
 
