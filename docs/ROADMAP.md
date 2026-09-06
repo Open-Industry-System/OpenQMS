@@ -1,8 +1,8 @@
 # OpenQMS 开发路线图
 
 **更新日期**: 2026-09-06
-**当前阶段**: Release Candidate 稳定化
-**产品范围**: Phase 1–4 + Phase 4+ 已完成；进入发布门禁与试点准备
+**当前阶段**: Release Candidate 稳定化门禁已通过（待分支评审与集成）
+**产品范围**: Phase 1–4 + Phase 4+ 已完成；进入分支评审与试点准备
 **版本目标**: v3.0（全功能发布）
 
 ---
@@ -267,18 +267,16 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ## 下一步行动
 
-**立即：Release Candidate 稳定化**
+**Release Candidate 稳定化门禁：已通过**
 
-1. fresh DB migration + seed 可重复通过；
-2. `make check` 全绿；
-3. credentialed AI E2E 无意外 skip；
-4. CAPA PPT 审查状态为 `passed`；
-5. collaboration 跨工厂访问无泄露、无副作用；
-6. 稳定化分支评审后再决定是否合入 `main`。
+1. ✅ final fresh DB reset/migration/seed：`qms_e2e` 唯一 head `20260727_warranty_factory_id`；
+2. ✅ final `make check`：backend `1975 passed / 5 skipped / 5 xfailed / 0 failed`（181.95s），frontend tsc 与 Vite build 通过（7.61s）；
+3. ✅ final Playwright（zero retry）：44 total，`42 passed / 0 failed`，仅两项 allowed inverse skip；
+4. ✅ final CAPA PPT：`f3f5753b-cbd6-45ba-818b-c51df70a9d83` round 1 `passed`，11 slides/carriers/DB/audit 通过，`issues=[]`，非空 suggestions 为 advisory；
+5. ✅ collaboration 跨工厂访问无泄露、无副作用；最终系统集成菜单切片 `2/2 passed`；
+6. ⏳ 仍待稳定化分支评审，并决定是否集成至 `main`。
 
-**已验证证据（2026-09-06）**：fresh `qms_e2e` 唯一 head `20260727_warranty_factory_id`，初始+两次 reseed 为 `5/21/5`；最新 `make check` backend `1975 passed / 5 skipped / 3 xfailed / 2 xpassed` 且 frontend tsc/build 通过；credentialed CAPA 组合目标 `18 passed / 1 intended inverse skip`；PPT round 1 `passed`、11 slides、source/carrier/DB/audit/UI 已核；collaboration scope 已修复；系统集成菜单 `2/2`。
-
-**未完成发布门禁**：最近一次 clean full E2E 为 `41 passed / 1 D3 timeout / 2 allowed skips`；D3 随后在定向复验通过。最终 reset 后的全套回归仍由 Task 10 执行，故不得将最终 clean full suite 标记为已通过。
+**最终 Playwright allowed skips**：`no creds: advice endpoint 422 blocked + import still 200 blocked`；`no-LLM: D8 close is blocked (422 outcome=blocked)`。除此之外无 failed 或意外 skip。
 
 **历史：Phase 4 已完成（2026-06-13）**:
 

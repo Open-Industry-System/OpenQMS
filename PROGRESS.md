@@ -4,7 +4,7 @@
 **当前分支**: `chore/release-stabilization-20260905`
 **基线**: `main@98bca381`
 **最近提交**: `0b22a1fa fix(capa): render empty PPT linkage sections`
-**当前阶段**: 发布候选版纯稳定化（环境、迁移、全量回归、AI E2E、安全边界）
+**当前阶段**: 发布候选版稳定化门禁已通过（待分支评审与集成）
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
@@ -16,11 +16,11 @@
 
 - **范围与分支**：仅稳定化，不新增功能；工作位于 `chore/release-stabilization-20260905`，基线为 `main@98bca381`。
 - **协同编辑隔离**：heartbeat、active-users、leave 在访问 session 前校验文档 factory scope；跨工厂统一 404 且无读写副作用。回归选择 23 passed，FMEA 相关选择 193 passed。
-- **最新全量 `make check` 证据**：backend `1975 passed / 5 skipped / 3 xfailed / 2 xpassed`；frontend TypeScript 与 production build 均通过。
-- **fresh E2E 数据库**：`qms_e2e` 的唯一 Alembic head 为 `20260727_warranty_factory_id`；初始 seed 和两次额外 reseed 均为 `5 accounts / 21 CAPAs / 5 PFMEAs`，运行健康检查通过。
-- **凭证 E2E**：CAPA 组合目标 `18 passed / 1 intended inverse skip`；D3 主流程在后续定向复验中通过（18.5s）。最近一次干净全套仍是 `41 passed / 1 D3 timeout / 2 allowed skips`，因此**尚不能声明最终 clean full suite 已通过**；Task 10 仍须做最终 reset 与全套回归。
-- **CAPA PPT**：provider-backed 导出 round 1 `passed`，11 张幻灯片，source/carrier/DB/audit/UI 验证通过，review `issues=[]`、`suggestions=[]`。
-- **系统集成菜单**：权限切片 `2 passed / 0 skipped`（13.2s）；viewer 可见集成组而不见 admin-only 管理项，admin 可见三组及 MES 子页。
+- **最终全量 `make check`**：backend `1975 passed / 5 skipped / 5 xfailed / 0 failed`（181.95s）；frontend TypeScript 与 Vite build 通过（7.61s）。
+- **最终 fresh E2E 数据库**：已授权的 `qms_e2e` reset、迁移与 seed 通过；唯一 Alembic head 仍为 `20260727_warranty_factory_id`。此前初始 seed 与两次额外 reseed 均为 `5 accounts / 21 CAPAs / 5 PFMEAs`。
+- **最终 Playwright（zero retry）**：44 total，`42 passed / 0 failed`；仅两项 allowed skip：`no creds: advice endpoint 422 blocked + import still 200 blocked` 与 `no-LLM: D8 close is blocked (422 outcome=blocked)`。
+- **最终 CAPA PPT**：export `f3f5753b-cbd6-45ba-818b-c51df70a9d83` 在 round 1 `passed`，11 张幻灯片，source/carrier/DB/audit 验证通过；`issues=[]`，非空 `suggestions` 为 advisory。
+- **最终系统集成菜单**：权限切片 `2/2 passed`；viewer 可见集成组而不见 admin-only 管理项，admin 可见三组及 MES 子页。
 
 ## 历史：系统级 E2E 测试套件（M0+M1，2026-07 基线）
 
@@ -210,7 +210,7 @@
   - 待 brainstorm 的范围：模块覆盖（FMEA / CAPA / IQC / SPC / MSA / 客户质量 / 供应商质量 / Admin / Agent Base）、层次（API 契约 + 浏览器 UI 流 + RBAC 角色矩阵 + 多工厂 `factory_id` 隔离）、运行方式（docker-compose 整栈 vs in-process）
   - 候选工具：后端 pytest + httpx；前端 Playwright（仓库已有 `mcp__plugin_playwright`）；位置建议 `backend/tests/e2e/` + `frontend/e2e/`，或新增顶层 `e2e/`
   - 与现有 `make check`（单元层）分离为独立 target，避免 CI 时长爆炸
-  - 历史 E2E 建设已完成；本轮仅剩 Task 10 的最终 reset + 全套发布门禁验证。
+  - 历史 E2E 建设与本轮 Task 10 最终 reset + 全套发布门禁均已完成。
 
 ### P2 — Copilot（对话式助手）
 - 前端 UI 侧栏（`ProtectedRoute` 接入待做）
@@ -248,9 +248,11 @@
 
 ## 三、当前阻塞 / 风险点
 
-### RC 发布门禁
-1. **Task 10 最终 E2E 门禁未完成**：需对 fresh `qms_e2e` 再 reset 后运行完整 suite。此前 clean full suite 为 `41 passed / 1 D3 timeout / 2 allowed skips`；D3 随后仅在定向复验通过，不能替代最终全套结果。
-2. **凭证依赖**：credentialed 场景已得到正向证据；无凭证的 inverse 场景是预期 skip，最终运行仍须确认没有意外 skip 或 provider 失败。
+### Release stabilization 门禁：已通过
+- 最终 fresh `qms_e2e` reset/migration/seed、全量 `make check`、zero-retry Playwright、CAPA PPT 与系统集成菜单切片均通过；两项 E2E skip 均为允许的 inverse 场景。
+
+### 待办：分支评审与集成
+- 稳定化证据已齐备；仍需完成分支评审并决定是否集成至 `main`。这不是测试、迁移或 E2E 门禁失败。
 
 ### Post-RC 风险（不阻塞本轮）
 - Agent Base：embedding worker、随机 `record_id` 兼容、多工具循环及 Anthropic `tool_result` shaping 尚待产品化排期。
@@ -262,9 +264,9 @@
 
 | 项目 | 状态 | 证据 / 下一步 |
 |---|---|---|
-| Release stabilization | 🟡 Task 1–9 已完成 | 协同 scope、fresh migration/seed、CAPA/PPT、菜单权限均已验证；Task 10 final reset/full suite 待执行 |
-| `make check` | ✅ 最近完整证据通过 | backend `1975 / 5 skipped / 3 xfailed / 2 xpassed`；frontend tsc/build 通过 |
-| credentialed CAPA E2E | ✅ 目标通过 | 组合目标 `18 passed / 1 intended inverse skip`；D3 main 后续定向通过 |
+| Release stabilization | ✅ Task 1–10 门禁通过 | final fresh reset/migration/seed、回归、E2E、PPT、菜单权限均通过；待分支评审与集成决定 |
+| `make check` | ✅ 最终通过 | backend `1975 passed / 5 skipped / 5 xfailed / 0 failed`（181.95s）；frontend tsc/Vite build 通过（7.61s） |
+| Playwright | ✅ 最终 zero-retry 通过 | `42 passed / 0 failed / 2 allowed skips`，共 44 项 |
 | US-E2E-01 / US-E2E-02 实现 | ✅ 已合并，当前为历史 | 保留归档与 story/skill 契约资料，不是 RC 功能开发 |
 | Agent / 性能后续 | ⚪ Post-RC backlog | 不作为当前 release blocker |
 
