@@ -1534,6 +1534,20 @@ git commit -m "fix(capa): surface D3 execution validation detail"
 
 ---
 
+### Task 6J: Align D3 Main-Flow Test Timeout with Its Workload
+
+**Root cause:** the credentialed D3 main flow performs LLM report/advice, adoption, execution, transition, audit pagination, and viewer verification but retains Playwright's 30-second default. In the clean full suite all business assertions reached the final viewer navigation before timing out at 30.3 seconds.
+
+**Files:**
+- Modify: `frontend/e2e/specs/m1-core/capa-story-d3-containment.spec.ts`
+
+- [ ] Preserve the clean-run RED evidence: 41 passed/1 D3 timeout/2 allowed skips; timeout occurred at final viewer `goToCapa` after core D3 assertions.
+- [ ] Add `test.setTimeout(120_000)` at the start of `D3 containment main flow`; retain all waits and assertions unchanged.
+- [ ] Run TypeScript/build and, after review/integration/reseed, the D3 main test with zero retries. Final Task 10 clean full suite must prove the complete suite.
+- [ ] Commit as `test(e2e): allow full D3 story timeout`.
+
+---
+
 ### Task 7: Perform Carrier-Aware CAPA PPT Acceptance
 
 **Files:**
