@@ -1122,6 +1122,292 @@ Do not stage `/tmp` evidence.
 
 ---
 
+### Task 6A: Repair E2E Authentication, API Paths, and D3 Gate Setup
+
+**Scope amendment (approved by stabilization defect policy):** Attempt 1 produced 21 unexpected failures and 7 skips. Ordered evidence proved three test-harness causes before the 429 cascade: repeated token logins exceed the production 10/5-minute per-IP limit; Playwright request contexts resolve leading `/capa` paths outside `/api`; two CAPA story helpers still bypass the current D3→D4 gate. No backend rate-limit or business-gate weakening is allowed.
+
+**Files:**
+- Modify: `frontend/e2e/helpers/api-client.ts`
+- Modify: `frontend/e2e/fixtures/d3-containment.ts`
+- Modify: `frontend/e2e/specs/m1-core/capa-story-d3-containment.spec.ts`
+- Modify: `frontend/e2e/specs/m1-core/capa-story-ai-recommend.spec.ts`
+- Modify: `frontend/e2e/specs/m1-core/capa-story-closed-loop.spec.ts`
+- Create: `frontend/e2e/specs/_guards/storage-token.guard.spec.ts`
+
+**Interfaces:**
+- Consumes: storage files `e2e/.storage-state/{username}.json`; localStorage key `access_token`; `E2E_API_BASE_URL`; D3 import and execution APIs.
+- Produces: `loginForToken()` reuses the global-setup token before fallback login; `completeD3Gate(capaId)` creates four snapshots, a done report, and one manual in-progress execution; all Playwright API calls retain `/api`.
+
+- [ ] **Step 1: Add a RED guard proving storage token reuse**
+
+Create `frontend/e2e/specs/_guards/storage-token.guard.spec.ts`:
+
+```typescript
+import { test, expect } from "@playwright/test";
+import { loginForToken } from "../../helpers/api-client";
+
+
+test("loginForToken reuses global storage state before password login", async () => {
+  const token = await loginForToken("engineer", "intentionally-wrong-password");
+  expect(token.split(".")).toHaveLength(3);
+});
+```
+
+Restart only the E2E backend to clear the in-memory limiter, then run this guard before implementation. Expected RED: HTTP 401 because current `loginForToken` calls `/auth/login` with the deliberately wrong password.
+
+- [ ] **Step 2: Implement storage-state token reuse with fallback**
+
+In `frontend/e2e/helpers/api-client.ts`, add Node imports and a private reader:
+
+```typescript
+import { readFileSync } from "fs";
+import path from "path";
+
+function storageStateToken(username: string): string | null {
+  try {
+    const statePath = path.resolve(
+      process.cwd(),
+      "e2e/.storage-state",
+      `${username}.json`,
+    );
+    const state = JSON.parse(readFileSync(statePath, "utf-8"));
+    for (const origin of state.origins || []) {
+      const token = (origin.localStorage || []).find(
+        (entry: { name: string; value: string }) => entry.name === "access_token",
+      )?.value;
+      if (typeof token === "string" && token.split(".").length === 3) return token;
+    }
+  } catch {
+    // Global setup may not have created storage state yet; use API login fallback.
+  }
+  return null;
+}
+```
+
+Change `loginForToken` to:
+
+```typescript
+export async function loginForToken(username: string, password: string): Promise<string> {
+  const stored = storageStateToken(username);
+  if (stored) return stored;
+  const r = await apiClient.post("/auth/login", { username, password });
+  return r.data.access_token as string;
+}
+```
+
+Do not change `backend/app/api/auth.py` or its rate limit.
+
+- [ ] **Step 3: Add the reusable current D3 gate helper**
+
+Append to `frontend/e2e/helpers/api-client.ts`:
+
+```typescript
+export async function completeD3Gate(capaId: string): Promise<void> {
+  const { accountPassword } = await import("../fixtures/seed-state");
+  const password = await accountPassword("engineer");
+  const token = await loginForToken("engineer", password);
+  const client = await authedApi(token);
+
+  const imported = await client.post(`/capa/${capaId}/d3/import`, {
+    snapshot_types: ["inventory", "shipment", "iqc", "spc"],
+  });
+  if (imported.data.report_status !== "done") {
+    throw new Error(`D3 report not done: ${JSON.stringify(imported.data)}`);
+  }
+
+  await client.post(`/capa/${capaId}/d3/execution`, {
+    source: "manual",
+    measure_text: "E2E manual containment execution",
+    result_status: "in_progress",
+  });
+}
+```
+
+This helper uses Axios, whose `/capa` paths are correctly combined with the `/api` base. It does not generate advice because the backend gate accepts a manual execution.
+
+- [ ] **Step 4: Update both create→D4 story helpers**
+
+Import `completeD3Gate` in:
+
+- `capa-story-ai-recommend.spec.ts`;
+- `capa-story-closed-loop.spec.ts`.
+
+After the D3 textarea blur and before clicking Advance, add:
+
+```typescript
+await completeD3Gate(capaId);
+```
+
+Use the local ID spelling in each file (`capaId` in AI recommend, `capId` in closed loop). Increase the AI recommendation test timeout from 120000 to 240000 because D3 report generation now performs the required LLM call. Update stale comments claiming the closed-loop story is non-AI/no-credential-green: D3 is AI-required, so the credentialed release gate must run it.
+
+- [ ] **Step 5: Fix D3 Playwright request URLs to retain `/api`**
+
+In `capa-story-d3-containment.spec.ts`, replace every request made through a Playwright `APIRequestContext` configured with `E2E_API_BASE_URL` from a leading-root path such as:
+
+```typescript
+await authedRequest.post(`/capa/${capaId}/d3/import`, ...)
+```
+
+with the explicit absolute API URL:
+
+```typescript
+await authedRequest.post(`${E2E_API_BASE_URL}/capa/${capaId}/d3/import`, ...)
+```
+
+Apply this to report, advice, decision, adoption, execution, and executions calls, including `engReq`, `crossReq`, and the no-credential request. Keep the already-absolute admin audit URL unchanged. Do not change Axios `authedApi()` callers.
+
+- [ ] **Step 6: Fix module-load-time AI skip evaluation**
+
+In `capa-story-lateral-diffusion.spec.ts`, remove:
+
+```typescript
+const llmMissing = noLlmCreds();
+```
+
+and change each of its four positive test guards to call at test runtime:
+
+```typescript
+test.skip(noLlmCreds(), "requires LLM credentials to close");
+```
+
+This prevents test discovery from reading stale `e2e-env.json` before global setup refreshes it.
+
+- [ ] **Step 7: Verify guard and targeted E2E GREEN**
+
+Restart only the backend container to clear the prior rate limiter, reseed, then run with zero retries:
+
+```bash
+make e2e-seed
+cd frontend && npx playwright test \
+  e2e/specs/_guards/storage-token.guard.spec.ts \
+  e2e/specs/m1-core/capa-story-d3-containment.spec.ts \
+  e2e/specs/m1-core/capa-story-ai-recommend.spec.ts \
+  e2e/specs/m1-core/capa-story-closed-loop.spec.ts \
+  e2e/specs/m1-core/capa-story-lateral-diffusion.spec.ts \
+  e2e/specs/m1-core/capa-story-scar-trigger.spec.ts \
+  --retries=0 --trace=retain-on-failure
+```
+
+Expected: no 404 from lost `/api`, no D3 direct-advance stall, no 429 cascade, four lateral positives run rather than skip, and SCAR serial audit is not skipped due to an upstream login failure. The only skip in this targeted credentialed set is the D3 no-credential inverse test.
+
+- [ ] **Step 8: Run static gates and commit**
+
+```bash
+cd frontend
+npx tsc --noEmit
+npm run build
+git diff --check
+git add \
+  e2e/helpers/api-client.ts \
+  e2e/fixtures/d3-containment.ts \
+  e2e/specs/_guards/storage-token.guard.spec.ts \
+  e2e/specs/m1-core/capa-story-d3-containment.spec.ts \
+  e2e/specs/m1-core/capa-story-ai-recommend.spec.ts \
+  e2e/specs/m1-core/capa-story-closed-loop.spec.ts \
+  e2e/specs/m1-core/capa-story-lateral-diffusion.spec.ts
+git commit -m "test(e2e): align CAPA flows with current gates"
+```
+
+The D3 fixture file may need no content change after absolute URLs are applied in the spec; do not stage it if unchanged.
+
+---
+
+### Task 6B: Surface D3 Execution Validation Details
+
+**Files:**
+- Modify: `frontend/src/components/capa/D3ContainmentPanel.tsx:299-318`
+- Modify: `frontend/src/components/capa/D3ContainmentPanel.test.tsx`
+
+**Interfaces:**
+- Consumes: rejected API error shaped as `response.data.detail`; Ant Design `message.error`.
+- Produces: string backend details such as `非法 url scheme` reach the user; unknown error shapes retain the existing localized generic fallback.
+
+- [ ] **Step 1: Add the failing unit test**
+
+In `D3ContainmentPanel.test.tsx`, import `message` from Ant Design and `recordD3Execution` from the mocked API. Add:
+
+```typescript
+it("surfaces the backend detail when execution validation fails", async () => {
+  vi.mocked(getD3Report).mockResolvedValue(mockDoneReport);
+  vi.mocked(recordD3Execution).mockRejectedValueOnce({
+    response: { data: { detail: "非法 url scheme" } },
+  });
+  const errorSpy = vi.spyOn(message, "error").mockImplementation(() => undefined as never);
+  renderPanel();
+
+  await waitFor(() => expect(screen.getByTestId("d3-execution-add")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("d3-execution-add"));
+  fireEvent.change(screen.getByTestId("d3-execution-measure"), {
+    target: { value: "t" },
+  });
+  fireEvent.change(screen.getByTestId("d3-execution-evidence-url"), {
+    target: { value: "javascript:alert(1)" },
+  });
+  fireEvent.click(screen.getByTestId("d3-execution-save"));
+
+  await waitFor(() => expect(errorSpy).toHaveBeenCalledWith("非法 url scheme"));
+  errorSpy.mockRestore();
+});
+```
+
+Run this test before implementation. Expected RED: spy receives generic `添加执行记录失败` instead of the backend detail.
+
+- [ ] **Step 2: Implement minimal detail extraction**
+
+Change only the `handleExecutionOk` catch:
+
+```typescript
+    } catch (error: unknown) {
+      const detail = (
+        error as { response?: { data?: { detail?: unknown } } }
+      ).response?.data?.detail;
+      message.error(
+        typeof detail === "string"
+          ? detail
+          : t("d3.executionAddFailed", "添加执行记录失败"),
+      );
+    }
+```
+
+Do not change other D3 error handling in this task.
+
+- [ ] **Step 3: Verify unit, component, type, and build gates**
+
+```bash
+cd frontend
+npx vitest run src/components/capa/D3ContainmentPanel.test.tsx
+npx vitest run src/components/capa/__tests__/D3ContainmentPanel.test.tsx
+npx tsc --noEmit
+npm run build
+```
+
+Expected: all pass.
+
+- [ ] **Step 4: Re-run the specific browser security assertion**
+
+After backend restart and E2E reseed:
+
+```bash
+cd frontend && npx playwright test \
+  e2e/specs/m1-core/capa-story-d3-containment.spec.ts \
+  --grep='evidence_refs javascript scheme rejected 422' \
+  --retries=0 --trace=retain-on-failure
+```
+
+Expected: the browser finds `非法 url scheme` and the test passes.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git diff --check
+git add \
+  frontend/src/components/capa/D3ContainmentPanel.tsx \
+  frontend/src/components/capa/D3ContainmentPanel.test.tsx
+git commit -m "fix(capa): surface D3 execution validation detail"
+```
+
+---
+
 ### Task 7: Perform Carrier-Aware CAPA PPT Acceptance
 
 **Files:**

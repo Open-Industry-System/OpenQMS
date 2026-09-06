@@ -80,6 +80,9 @@ Run the following release evidence:
 - Complete AI-enabled E2E using the existing `.env.e2e` configuration
 - Targeted verification of CAPA PPT generation and review output
 - Targeted verification of System Settings → System Integration menu permissions
+- E2E helpers reuse authenticated storage-state tokens so the suite exercises production login rate limiting without triggering a self-inflicted 429 cascade.
+- CAPA story setup follows the current D3→D4 gate (four snapshots, done report, valid execution), and D3 Playwright requests retain the `/api` prefix.
+- D3 execution validation surfaces the backend's specific 422 detail to the user instead of replacing it with a generic message.
 
 The E2E configuration may call the existing Alibaba Bailian model and incur limited external API usage. Secrets must not be printed, copied into documentation, or committed.
 
@@ -260,6 +263,7 @@ The stabilization iteration is complete only when all applicable conditions are 
 - [ ] The destructive `test_spc_fmea_match.py` fixture uses a one-shot isolated database and no longer removes migration-only DDL or seed data from `qms_test`.
 - [ ] A fresh isolated database upgrades to a single Alembic head and seeds successfully.
 - [ ] `make check` completes successfully.
+- [ ] Required D3/CAPA E2E paths retain `/api`, satisfy the current D3 gate, surface specific execution-validation details, and complete without a login 429 cascade.
 - [ ] The complete AI-enabled E2E suite runs with zero automatic retries and retained JSON/trace evidence.
 - [ ] The only skipped Playwright tests are the two explicitly allowlisted no-credential inverse scenarios; every positive AI scenario runs.
 - [ ] CAPA PPT has 11 valid, source-consistent slides; response headers match API/database export ID and review fields; the generation slide matches API/database version and review fields; API and database match on all persisted fields including `review_report`; `review_status=passed` and `review_rounds` is in `1..3`; `skipped` or `needs_review` blocks release.
