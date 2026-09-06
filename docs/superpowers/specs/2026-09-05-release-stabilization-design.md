@@ -86,7 +86,7 @@ Run the following release evidence:
 - E2E cleanup removes dynamic CAPA D3 descendants in FK-safe order; D3 endpoints honor a selected effective factory; seed data is visible to the roles/scopes that exercise it.
 - The aggregate CAPA story follows the current D7_COMPLETED → D8_GATE_PENDING shell, while mandatory dedicated specs retain doc-gate and D8-close coverage.
 - Hit-bearing lateral-diffusion prompts explicitly request the JSON object consumed by `complete_json`; provider fallback must not silently turn prose into a release-blocking parse failure.
-- Async E2E assertions read terminal full representations rather than POST summaries, seed recommendation probes with the fields their source consumes, and give background workers a test timeout longer than their polling budget.
+- Async E2E assertions read terminal full representations rather than POST summaries, seed recommendation probes with the fields their source consumes, give background workers a test timeout longer than their polling budget, and use the established five-second tolerance for cross-process audit timestamps.
 
 The E2E configuration may call the existing Alibaba Bailian model and incur limited external API usage. Secrets must not be printed, copied into documentation, or committed.
 

@@ -1520,6 +1520,20 @@ git commit -m "fix(capa): surface D3 execution validation detail"
 
 ---
 
+### Task 6I: Add Clock-Skew Tolerance to Knowledge Audit Freshness
+
+**Root cause:** the retrieval audit exists with the expected entry IDs, but PostgreSQL recorded `07:54:57.388876Z` while the browser millisecond floor was `07:54:57.389Z`; a 124-microsecond host/container boundary caused a false stale result. Other audit E2E paths already use a five-second tolerance.
+
+**Files:**
+- Modify: `frontend/e2e/specs/m1-core/capa-story-knowledge-sink.spec.ts`
+
+- [ ] Preserve the RED evidence and exact timestamps.
+- [ ] Change only the freshness floor to `new Date(Date.now() - 5_000).toISOString()` before recommend. Retain record_id, action, entry_ids, and lower-bound comparisons unchanged.
+- [ ] Run TypeScript/build and, after review/integration/reseed, the credentialed knowledge-sink spec with zero retries. Require the positive test and fresh audit/entry ID assertions to pass; only the no-LLM inverse test may skip.
+- [ ] Commit as `test(e2e): tolerate audit clock skew`.
+
+---
+
 ### Task 7: Perform Carrier-Aware CAPA PPT Acceptance
 
 **Files:**
