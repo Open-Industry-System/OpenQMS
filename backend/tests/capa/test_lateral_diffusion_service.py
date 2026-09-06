@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,6 +16,7 @@ from app.services.agent.provider_adapter import ProviderNotConfiguredError
 from app.services.capa_lateral_diffusion_service import (
     LateralBlockedError,
     LateralFailedError,
+    _build_prompt,
     run_lateral_diffusion_check,
 )
 from tests.capa.test_lateral_diffusion_match import (
@@ -185,6 +187,25 @@ async def test_hits_llm_missing_type_fills_fallback(db):
     assert len(check.similar_products or []) >= 1
     for sp in check.similar_products or []:
         assert sp.get("suggestion_direction")
+
+
+def test_lateral_prompt_requires_json_object_shape():
+    prompt = _build_prompt(
+        SimpleNamespace(
+            document_no="8D-TEST-001",
+            severity="严重",
+            d2_description="测试问题",
+            d4_root_cause="测试根因",
+        ),
+        [{"product_type_code": "TYPE-A", "hit_criteria": ["same_product_type"]}],
+    )
+
+    assert "JSON 对象" in prompt
+    assert '{"items":' in prompt
+    assert '"product_type_code"' in prompt
+    assert '"suggestion_direction"' in prompt
+    assert "只返回 JSON，不要 Markdown/解释" in prompt
+    assert "≤120字" in prompt
 
 
 # ─── decide / rerun (Task 5) ────────────────────────────────────────────────
