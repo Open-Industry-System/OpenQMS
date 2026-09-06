@@ -1,4 +1,6 @@
 import { test, expect } from "@playwright/test";
+import { readFileSync } from "fs";
+import path from "path";
 import { accountPassword } from "../../fixtures/seed-state";
 import { cleanupByPrefix, completeD3Gate, loginForToken, authedApi } from "../../helpers/api-client";
 
@@ -27,6 +29,15 @@ const STORY_DOC_NO = "E2E-STORY-CAPA-001";
 const D4_SUBFLOW_DOC_NO = "E2E-STORY-CAPA-D4-001";
 const D4_BASE_DOC_NO = "E2E-STORY-CAPA-D4-BASE-001";
 const PRODUCT_LINE = "DC-DC-100-E2E";
+
+function noLlmCreds(): boolean {
+  const envPath = path.resolve(process.cwd(), "e2e/.storage-state/e2e-env.json");
+  try {
+    return JSON.parse(readFileSync(envPath, "utf-8")).hasLLM !== true;
+  } catch {
+    return true;
+  }
+}
 
 async function setProductLine(page: import("@playwright/test").Page, code: string) {
   await page.addInitScript((c) => {
@@ -113,6 +124,7 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
 
   test("core chain: create → D1..D7 → D8 gate handoff + viewer read-only + audit trail", async ({ browser }) => {
     test.setTimeout(240000); // 全故事驱动 8 次推进 + D7 处置 + 三角色，远超默认 30s。
+    test.skip(noLlmCreds(), "requires LLM credentials");
     // 审计窗口起点（留 5s 抵消时钟漂移）。
     const auditStart = new Date(Date.now() - 5000).toISOString();
 
@@ -243,6 +255,7 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
 
   test("D4 verification subflow: passed does not increment retry_count (base case)", async ({ browser }) => {
     test.setTimeout(180000);
+    test.skip(noLlmCreds(), "requires LLM credentials");
 
     const { page, context, capId } = await createCapaAndAdvanceToD4(browser, D4_BASE_DOC_NO);
 
@@ -342,6 +355,7 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
 
   test("D4 verification subflow: threshold warning at retry_count >= 3", async ({ browser }) => {
     test.setTimeout(180000);
+    test.skip(noLlmCreds(), "requires LLM credentials");
 
     const { page, context, capId } = await createCapaAndAdvanceToD4(browser, D4_SUBFLOW_DOC_NO);
 

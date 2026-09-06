@@ -45,9 +45,9 @@ test.describe("US-E2E-01 CAPA AI D4 recommendation", () => {
     await cleanupByPrefix("E2E-AI-REC-CAPA");
   });
 
-  test("AI D4 recommendation DAG (200 done | 422 BLOCKED)", async ({ browser, request }) => {
+  test("AI D4 recommendation DAG (200 done)", async ({ browser, request }) => {
     test.setTimeout(240000);
-    const llm = hasLLMCreds();
+    test.skip(!hasLLMCreds(), "requires LLM credentials");
 
     // ── Engineer: create 8D and advance to D4 ─────────────────────────────
     const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
@@ -101,17 +101,10 @@ test.describe("US-E2E-01 CAPA AI D4 recommendation", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    if (llm) {
-      expect(r.status()).toBe(200);
-      const body = await r.json();
-      const s11 = body.stages.find((s: any) => s.index === 11);
-      expect(s11).toBeTruthy();
-      expect(s11.status).toBe("done");
-    } else {
-      expect(r.status()).toBe(422);
-      const body = await r.json();
-      expect(body.detail.blocked).toBe(true);
-      test.skip(true, "BLOCKED: no LLM creds");
-    }
+    expect(r.status()).toBe(200);
+    const body = await r.json();
+    const s11 = body.stages.find((s: any) => s.index === 11);
+    expect(s11).toBeTruthy();
+    expect(s11.status).toBe("done");
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
 configure({ testIdAttribute: "data-e2e" });
 afterAll(() => configure({ testIdAttribute: "data-testid" }));
@@ -130,6 +130,8 @@ beforeEach(() => {
   vi.mocked(getD3Adoptions).mockResolvedValue([]);
   vi.mocked(getD3Executions).mockResolvedValue(mockExecutions);
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("D3ContainmentPanel", () => {
   it("hides write buttons on historical run and restores them on current run", async () => {

@@ -3,7 +3,7 @@
 **更新日期**: 2026-09-06
 **当前分支**: `chore/release-stabilization-20260905`
 **基线**: `main@98bca381`
-**最近提交**: `0b22a1fa fix(capa): render empty PPT linkage sections`
+**最近实现提交**: `0b22a1fa fix(capa): render empty PPT linkage sections`
 **当前阶段**: 发布候选版稳定化门禁已通过（待分支评审与集成）
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
