@@ -155,9 +155,12 @@ async def _seed_d3_sources(db, factory_id, user_id):
         supplier = Supplier(
             supplier_no=D3_E2E_SUPPLIER_NO, factory_id=factory_id,
             name="D3 E2E Supplier", short_name="D3E2E",
+            product_scope=D3_E2E_PRODUCT_LINE,
             status="approved", created_by=user_id)
         db.add(supplier)
         await db.flush()
+    else:
+        supplier.product_scope = D3_E2E_PRODUCT_LINE
 
     customer = await db.scalar(select(Customer).where(Customer.customer_code == D3_E2E_CUSTOMER_CODE))
     if customer is None:
@@ -1445,9 +1448,9 @@ async def _seed_lateral_diffusion(db, factory_ids):
             existing.is_active = True
     await db.flush()
 
-    # recipients: engineer/manager on PL-A..D
+    # recipients: engineer/manager on source + target product lines
     for u in (engineer, manager):
-        for pl in (LATERAL_PL_A, LATERAL_PL_B, LATERAL_PL_C, LATERAL_PL_D):
+        for pl in (LATERAL_PL_SRC, LATERAL_PL_A, LATERAL_PL_B, LATERAL_PL_C, LATERAL_PL_D):
             exists = await db.scalar(
                 select(UserProductLine).where(
                     UserProductLine.user_id == u.user_id,
