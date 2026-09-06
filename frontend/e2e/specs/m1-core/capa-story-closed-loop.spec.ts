@@ -120,8 +120,9 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     const { page, context: engCtx, capId } = await createCapaAndAdvanceToD4(browser, STORY_DOC_NO);
 
     // D4 根因由工程师手动填写（AI 推荐断言已拆分至 capa-story-ai-recommend.spec.ts）。
+    const aggregateRootCause = "现场根因：螺栓孔径定位销磨损导致孔径偏大";
     const d4Textarea = page.locator("textarea").first();
-    await d4Textarea.fill("现场根因：螺栓孔径定位销磨损导致孔径偏大");
+    await d4Textarea.fill(aggregateRootCause);
     await d4Textarea.evaluate((el: any) => el.blur());
 
     // D4 现场验证：method 选 measurement，填写 result，提交 passed，满足 D4→D5 闸口。
@@ -132,7 +133,10 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     await page.locator('[data-e2e="verification-result"] textarea')
       .fill("孔径实测 8.12mm 超差，定位销磨损 0.07mm，根因验证通过");
     await page.locator('[data-e2e="verify-pass"]').click();
-    await expect(page.locator('[data-e2e="verification-conclusion-0"]'))
+    const aggregateVerification = page
+      .locator('[data-e2e^="verification-item-"]')
+      .filter({ hasText: aggregateRootCause });
+    await expect(aggregateVerification.locator('[data-e2e^="verification-conclusion-"]'))
       .toContainText(/通过|Passed/i, { timeout: 10000 });
 
     // D4→D5 闸口要求当前根因已验证，推进。
@@ -157,6 +161,13 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     const d7 = page.locator("textarea").first();
     await d7.fill("将定位销磨损检测纳入首件检验 + 周保养点检表。");
     await d7.evaluate((el: any) => el.blur());
+    // D7 推荐（FMEA 节点）须由 engineer 在 D7_PREVENTION 逐一处置后才可完成 D7。全部标记「无需更新」(skip)。
+    const d7Items = page.locator('[data-e2e^="d7-node-action-"]');
+    const d7Count = await d7Items.count();
+    for (let i = 0; i < d7Count; i++) {
+      await d7Items.nth(i).locator('[data-e2e="d7-skip"]').click();
+      await expect(d7Items.nth(i).locator('[data-e2e="d7-action-status"]')).toBeVisible({ timeout: 10000 });
+    }
     await expect(page.locator('[data-e2e="capa-advance"]')).toBeVisible();
     await page.locator('[data-e2e="capa-advance"]').click();
     await expect(page.locator('[data-e2e="capa-status"]')).toHaveText("D7_COMPLETED");
@@ -170,13 +181,7 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     await mPage.waitForLoadState("networkidle");
     await expect(mPage.locator('[data-e2e="capa-status"]')).toHaveText("D7_COMPLETED");
 
-    // D7 推荐（FMEA 节点）需逐一处置后方可推进 manager 审批边。全部标记「无需更新」(skip)。
-    const d7Items = mPage.locator('[data-e2e^="d7-node-action-"]');
-    const d7Count = await d7Items.count();
-    for (let i = 0; i < d7Count; i++) {
-      await d7Items.nth(i).locator('[data-e2e="d7-skip"]').click();
-      await expect(d7Items.nth(i).locator('[data-e2e="d7-action-status"]')).toBeVisible({ timeout: 10000 });
-    }
+    // Manager 仅执行 D7_COMPLETED→D8_GATE_PENDING 审批边。
     await expect(mPage.locator('[data-e2e="capa-advance"]')).toBeVisible();
     await mPage.locator('[data-e2e="capa-advance"]').click();
     await mPage.waitForLoadState("networkidle");
@@ -262,42 +267,54 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
         .fill("实测孔径 8.12mm 超差，定位销磨损 0.07mm");
     }
 
-    async function saveDraft(index: number) {
+    function verificationItems(rootCause: string) {
+      return page.locator('[data-e2e^="verification-item-"]').filter({ hasText: rootCause });
+    }
+
+    async function saveDraft(rootCause: string) {
       await page.locator('[data-e2e="verify-save-draft"]').click();
-      await expect(page.locator(`[data-e2e="verification-conclusion-${index}"]`))
+      const item = verificationItems(rootCause);
+      await expect(item).toHaveCount(1);
+      await expect(item.locator('[data-e2e^="verification-conclusion-"]'))
         .toContainText(/草稿|Draft|Pending/i, { timeout: 10000 });
     }
 
-    async function submitFail(index: number) {
-      await page.locator(`[data-e2e="verify-fail-${index}"]`).click();
-      await expect(page.locator(`[data-e2e="verification-conclusion-${index}"]`))
-        .toContainText(/不通过|Failed|未通过/i, { timeout: 10000 });
+    async function submitFail(rootCause: string) {
+      const pendingItem = verificationItems(rootCause).filter({ has: page.locator('[data-e2e^="verify-fail-"]') });
+      await expect(pendingItem).toHaveCount(1);
+      await pendingItem.locator('[data-e2e^="verify-fail-"]').click();
+      const failedItem = verificationItems(rootCause).filter({ hasText: /不通过|Failed|未通过/i });
+      await expect(failedItem).toHaveCount(1);
+      await expect(failedItem.locator('[data-e2e^="verify-pass-"]')).toHaveCount(0);
     }
 
-    async function submitPass(index: number) {
+    async function submitPass(rootCause: string) {
       await page.locator('[data-e2e="verify-pass"]').click();
-      await expect(page.locator(`[data-e2e="verification-conclusion-${index}"]`))
-        .toContainText(/通过|Passed/i, { timeout: 10000 });
+      const passedItem = verificationItems(rootCause)
+        .filter({ hasText: /通过|Passed/i })
+        .filter({ hasNotText: /不通过|Failed|未通过/i });
+      await expect(passedItem).toHaveCount(1);
     }
 
     // 根因 A：保存草稿 → retry_count 不递增。
-    await setCurrentRootCause("根因 A：定位销磨损导致孔径偏大");
+    const rootCauseA = "根因 A：定位销磨损导致孔径偏大";
+    await setCurrentRootCause(rootCauseA);
     await openVerificationForm();
     await fillVerificationDetail();
-    await saveDraft(0);
+    await saveDraft(rootCauseA);
     let capa = await fetchCapa(capId);
     expect(capa.d4_retry_count).toBe(0);
 
     // 根因 A：提交 failed → retry_count = 1；failed 记录不可再改为 passed。
-    await submitFail(0);
+    await submitFail(rootCauseA);
     capa = await fetchCapa(capId);
     expect(capa.d4_retry_count).toBe(1);
-    await expect(page.locator('[data-e2e="verify-pass-0"]')).toHaveCount(0);
 
     // 根因 A：追加一条 passed 验证 → retry_count 仍为 1（passed 不递增）。
     await openVerificationForm();
     await fillVerificationDetail();
-    await submitPass(1);
+    await submitPass(rootCauseA);
+    await expect(verificationItems(rootCauseA)).toHaveCount(2);
     capa = await fetchCapa(capId);
     expect(capa.d4_retry_count).toBe(1);
 
@@ -349,63 +366,74 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
         .fill("实测孔径 8.12mm 超差，定位销磨损 0.07mm");
     }
 
-    async function saveDraft(index: number) {
+    function verificationItems(rootCause: string) {
+      return page.locator('[data-e2e^="verification-item-"]').filter({ hasText: rootCause });
+    }
+
+    async function saveDraft(rootCause: string) {
       await page.locator('[data-e2e="verify-save-draft"]').click();
-      await expect(page.locator(`[data-e2e="verification-conclusion-${index}"]`))
+      const item = verificationItems(rootCause);
+      await expect(item).toHaveCount(1);
+      await expect(item.locator('[data-e2e^="verification-conclusion-"]'))
         .toContainText(/草稿|Draft|Pending/i, { timeout: 10000 });
     }
 
-    async function submitFail(index: number) {
-      await page.locator(`[data-e2e="verify-fail-${index}"]`).click();
-      await expect(page.locator(`[data-e2e="verification-conclusion-${index}"]`))
-        .toContainText(/不通过|Failed|未通过/i, { timeout: 10000 });
+    async function submitFail(rootCause: string) {
+      const pendingItem = verificationItems(rootCause).filter({ has: page.locator('[data-e2e^="verify-fail-"]') });
+      await expect(pendingItem).toHaveCount(1);
+      await pendingItem.locator('[data-e2e^="verify-fail-"]').click();
+      const failedItem = verificationItems(rootCause).filter({ hasText: /不通过|Failed|未通过/i });
+      await expect(failedItem).toHaveCount(1);
+      await expect(failedItem.locator('[data-e2e^="verify-pass-"]')).toHaveCount(0);
     }
 
-    async function submitPass(index: number) {
+    async function submitPass(rootCause: string) {
       await page.locator('[data-e2e="verify-pass"]').click();
-      await expect(page.locator(`[data-e2e="verification-conclusion-${index}"]`))
-        .toContainText(/通过|Passed/i, { timeout: 10000 });
+      const passedItem = verificationItems(rootCause)
+        .filter({ hasText: /通过|Passed/i })
+        .filter({ hasNotText: /不通过|Failed|未通过/i });
+      await expect(passedItem).toHaveCount(1);
     }
 
-    // 根因 A：保存草稿 → retry_count 不递增。
-    await setCurrentRootCause("根因 A：定位销磨损导致孔径偏大");
+    // 阈值根因 A：提交 failed → retry_count = 1。
+    const rootCauseA = "阈值根因 A：定位销磨损导致孔径偏大";
+    await setCurrentRootCause(rootCauseA);
     await openVerificationForm();
     await fillVerificationDetail();
-    await saveDraft(0);
+    await saveDraft(rootCauseA);
     let capa = await fetchCapa(capId);
     expect(capa.d4_retry_count).toBe(0);
 
-    // 根因 A：提交 failed → retry_count = 1。
-    await submitFail(0);
+    await submitFail(rootCauseA);
     capa = await fetchCapa(capId);
     expect(capa.d4_retry_count).toBe(1);
-    await expect(page.locator('[data-e2e="verify-pass-0"]')).toHaveCount(0);
 
-    // 根因 B：failed 行 1 → retry_count = 2。
-    await setCurrentRootCause("根因 B：夹具重复定位误差");
+    // 阈值根因 B：failed 行 → retry_count = 2。
+    const rootCauseB = "阈值根因 B：夹具重复定位误差";
+    await setCurrentRootCause(rootCauseB);
     await openVerificationForm();
     await fillVerificationDetail();
-    await saveDraft(1);
-    await submitFail(1);
+    await saveDraft(rootCauseB);
+    await submitFail(rootCauseB);
     capa = await fetchCapa(capId);
     expect(capa.d4_retry_count).toBe(2);
-    await expect(page.locator('[data-e2e="verify-pass-1"]')).toHaveCount(0);
 
-    // 根因 C：failed 行 2 → retry_count = 3（达到阈值）。
-    await setCurrentRootCause("根因 C：切削液温度波动");
+    // 阈值根因 C：failed 行 → retry_count = 3（达到阈值）。
+    const rootCauseC = "阈值根因 C：切削液温度波动";
+    await setCurrentRootCause(rootCauseC);
     await openVerificationForm();
     await fillVerificationDetail();
-    await saveDraft(2);
-    await submitFail(2);
+    await saveDraft(rootCauseC);
+    await submitFail(rootCauseC);
     capa = await fetchCapa(capId);
     expect(capa.d4_retry_count).toBe(3);
-    await expect(page.locator('[data-e2e="verify-pass-2"]')).toHaveCount(0);
 
-    // 根因 D：行 3 直接 passed → 不递增；随后 advance 触发 threshold 警告。
-    await setCurrentRootCause("根因 D：刀具磨损补偿未生效");
+    // 阈值根因 D：直接 passed → 不递增；随后 advance 触发 threshold 警告。
+    const rootCauseD = "阈值根因 D：刀具磨损补偿未生效";
+    await setCurrentRootCause(rootCauseD);
     await openVerificationForm();
     await fillVerificationDetail();
-    await submitPass(3);
+    await submitPass(rootCauseD);
 
     const advanceResponsePromise = page.waitForResponse(
       (res) => res.url().includes(`/api/capa/${capId}/advance`) && res.request().method() === "POST"
