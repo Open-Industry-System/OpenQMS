@@ -1409,6 +1409,69 @@ git commit -m "fix(capa): surface D3 execution validation detail"
 
 ---
 
+### Task 6C: Delete Dynamic CAPA D3 Chains in E2E Cleanup
+
+**Root cause:** `completeD3Gate()` creates `capa_d3_import_run` descendants for dynamic `E2E-AI-REC-CAPA*` and `E2E-STORY-CAPA*` records. `/api/e2e/cleanup` deletes the CAPA without deleting the RESTRICT D3 chain, so afterAll returns 500 and leaves rerun pollution.
+
+**Files:**
+- Create: `backend/tests/e2e/test_e2e_cleanup_d3.py`
+- Modify: `backend/app/api/e2e.py`
+
+**Interfaces:**
+- Consumes: CAPA IDs selected by the existing prefix whitelist; seven D3 ORM models.
+- Produces: `_delete_capa_d3_chains(db, capa_ids, deleted)` that deletes adoption/execution/advice/generation/report/snapshot/run rows in FK-reverse order before deleting CAPAs.
+
+- [ ] Write a real-DB RED test that creates a prefixed CAPA and a complete seven-table D3 chain, calls `cleanup_test_data(prefix, db)`, and asserts the CAPA plus every D3 row is absent. Verify current code raises `ForeignKeyViolationError` on `fk_d3_run_capa_factory`.
+- [ ] Implement one private helper in `backend/app/api/e2e.py`: query run IDs by `capa_id`, report IDs by run, generation IDs by report, and advice IDs by generation; delete `CapaD3AdviceAdoption` by advice, `CapaD3Execution` by report, `CapaD3AiAdvice`, `CapaD3AdviceGeneration`, `CapaD3ImpactReport`, `CapaD3ContainmentSnapshot`, then `CapaD3ImportRun`; accumulate row counts in the existing `deleted` response.
+- [ ] Call the helper only when the cleanup parent model is `CAPAEightD`, before existing child and parent deletion. Preserve the single transaction and rollback behavior.
+- [ ] Run the new test, `backend/tests/test_e2e_endpoints.py`, and the E2E cleanup endpoint twice on a dynamic D3 CAPA. Expected: 200 both times, first deletes rows, second is idempotent no-op.
+- [ ] Run backend type/import diagnostics and `git diff --check`; commit test and API together as `fix(e2e): clean dynamic CAPA D3 chains`.
+
+---
+
+### Task 6D: Enforce Effective Factory Scope and Seed API Visibility
+
+**Root causes:** `_d3_check_scope()` checks accessible factories but ignores a non-null selected `effective_factory_id`; lateral seed assigns manager/engineer only PL-A..D while source CAPAs use `LATERAL_PL_SRC`; D3 supplier seed omits `product_scope`, so scoped supplier listing hides it.
+
+**Files:**
+- Modify: `backend/tests/capa/test_capa_d3_api.py`
+- Modify: `backend/app/api/capa.py:1382-1388`
+- Modify: `backend/tests/e2e/test_seed_e2e_d3.py`
+- Modify: `backend/tests/e2e/test_seed_e2e_lateral.py`
+- Modify: `backend/app/seed_e2e.py:137-160,1448-1459`
+
+**Interfaces:**
+- Produces: selected factory mismatch returns information-hiding 404 before advice decision; D3 supplier is visible under `DC-DC-100-E2E`; manager/engineer can list source lateral CAPAs.
+
+- [ ] Add a RED D3 API test with `accessible_factory_ids=None` and `scope.effective_factory_id=<other factory>`; POST advice decision for a DC CAPA must return 404 before advice lookup. Verify current response is not 404.
+- [ ] Add RED seed assertions: after `_seed_d3_sources`, supplier `D3-SUP-E2E-001.product_scope == D3_E2E_PRODUCT_LINE`; after `_seed_lateral_diffusion`, manager and engineer `UserProductLine` sets include `LATERAL_PL_SRC` as well as PL-A..D.
+- [ ] In `_d3_check_scope`, before `check_factory_access`, raise the existing information-hiding 404 when `scope.effective_factory_id` is non-null and differs from `entity.factory_id`.
+- [ ] Set `product_scope=D3_E2E_PRODUCT_LINE` on both create and existing-update paths for the D3 supplier.
+- [ ] Include `LATERAL_PL_SRC` in the lateral recipient assignment loop for engineer and manager.
+- [ ] Run the focused D3 API and both seed test files, then run `make e2e-seed`; use storage-state tokens in a read-only probe to assert manager lists all four lateral CAPAs and engineer supplier search returns `D3-SUP-E2E-001`.
+- [ ] Run backend full tests through `make check-backend`; commit as `fix(e2e): align seeded data with factory scopes`.
+
+---
+
+### Task 6E: Align Closed-Loop E2E with Current CAPA Shell States
+
+**Root cause:** the aggregate E2E still expects the pre-shell D7→D8 transition and mutates one D4 verification from failed to passed even though the UI only allows pending records to transition. Dedicated doc-gate/knowledge/lateral specs cover closure after the shell.
+
+**Files:**
+- Modify: `frontend/e2e/specs/m1-core/capa-story-closed-loop.spec.ts`
+
+**Interfaces:**
+- Produces: aggregate core-chain coverage through `D8_GATE_PENDING`; valid append-only D4 verification retries; zero direct login requests outside storage-token helper.
+
+- [ ] Preserve Attempt 1/Task 6A RED evidence for the visible D7 advance button and missing `verify-pass-0` after a failed record.
+- [ ] Replace both direct `/auth/login` calls in the D4 subflows with `loginForToken()` so they reuse storage state.
+- [ ] Parameterize D4 verification helpers by row index. A failed row remains failed; create a new passed verification for the same current root cause in the base case. For the threshold case, fail rows 0, 1, and 2; create row 3 directly as passed. Assert retry count stays 1/3 respectively.
+- [ ] In the aggregate story, after filling D7, click Advance as engineer and assert `D7_COMPLETED`; manager then opens the CAPA, advances to `D8_GATE_PENDING`, and asserts `doc-gate-panel` visible plus global advance hidden. Rename the test/comment from direct closure to core chain + D8 gate handoff; do not claim D8 closure in this aggregate test.
+- [ ] Update transition audit expectations from the obsolete seven-edge sequence to the actual eight edges through D8 gate: D1→D2, D2→D3, D3→D4, D4→D5, D5→D6, D6→D7_PREVENTION, D7_PREVENTION→D7_COMPLETED by engineer, D7_COMPLETED→D8_GATE_PENDING by manager. Keep viewer read-only assertions at the gate. Dedicated doc-gate and close specs remain mandatory in the full suite.
+- [ ] Run the closed-loop spec alone with zero retries after E2E seed; require all tests pass and afterAll cleanup 200. Run TypeScript/build and commit as `test(e2e): align closed loop with CAPA shell states`.
+
+---
+
 ### Task 7: Perform Carrier-Aware CAPA PPT Acceptance
 
 **Files:**
