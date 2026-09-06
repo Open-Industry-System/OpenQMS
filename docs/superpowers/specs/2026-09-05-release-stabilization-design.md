@@ -126,7 +126,7 @@ A repeated failure is a release or external-dependency blocker. Product-code fix
 
 A successful download alone does not pass the CAPA PPT gate because the API intentionally returns a file for `skipped` and `needs_review` outcomes. Acceptance requires all of the following:
 
-1. **File structure:** HTTP 200, PPTX MIME type, non-empty valid OOXML package, exactly 11 slides, and the expected titles for cover, D1–D8, linkage appendix, and generation information.
+1. **File structure:** HTTP 200, PPTX MIME type, non-empty valid OOXML package, exactly 11 slides, and the expected titles for cover, D1–D8, linkage appendix, and generation information. The designated acceptance seed must contain a nonempty structured D1 team so a rule-correct complete report is exercised.
 2. **Source consistency:** parse the PPTX with `python-pptx` and compare the document number, title, severity, product line, status, D1–D8 values, and seeded linkage data against the source CAPA/API record. No invented or stale business data is allowed.
 3. **Review metadata by carrier:** use response header `X-PPT-Export-Id` to fetch `GET /api/capa/{report_id}/ppt-exports/{export_id}` and locate the `capa_ppt_export` row, then compare only fields exposed by each existing carrier:
    - response headers: export ID, `review_status`, and `review_rounds` must match the query API and database;

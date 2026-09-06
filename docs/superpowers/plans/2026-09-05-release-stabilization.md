@@ -1757,6 +1757,20 @@ If the closed CAPA ID was not closed because an earlier mandatory E2E scenario f
 
 ---
 
+### Task 7A: Complete the PPT Acceptance Seed's D1 Team
+
+**Root cause:** credentialed PPT generation correctly returned `needs_review` with rule report `D1 页内容为空`; `8D-E2E-KNOW-001` was called a complete D1–D8 report but its seed omitted `d1_team`.
+
+**Files:**
+- Modify: `backend/app/seed_e2e.py:1146-1162`
+
+- [ ] Preserve the UI/API RED evidence: export 200, review_status needs_review, rounds 0, report issue D1 empty.
+- [ ] Add a nonempty structured `d1_team` list to the shared `values` dict so both create and reseed paths restore the same team; do not change PPT validation/review code.
+- [ ] Run seed idempotency and backend PPT content/review tests. After review/integration, reseed, close `8D-E2E-KNOW-001`, and rerun Task 7; require review_status passed.
+- [ ] Commit as `test(e2e): complete knowledge CAPA PPT seed`.
+
+---
+
 ### Task 8: Re-run the System Integration Menu Permission Slice
 
 **Files:**
