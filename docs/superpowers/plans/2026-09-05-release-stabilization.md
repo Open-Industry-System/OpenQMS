@@ -1502,6 +1502,24 @@ git commit -m "fix(capa): surface D3 execution validation detail"
 
 ---
 
+### Task 6H: Align Final E2E Assertions with Async Response Contracts
+
+**Root causes from the first clean full-suite run:** doc-gate POST success is a summary without `affected_docs`; the knowledge D4 probe has empty D2 although KnowledgeEntrySource intentionally queries D2; supplier-risk polling allows 90 seconds but the Playwright test retains the 30-second default and the worker processes successfully afterward.
+
+**Files:**
+- Modify: `frontend/e2e/specs/m1-core/capa-story-doc-gate.spec.ts`
+- Modify: `backend/app/seed_e2e.py:876-905`
+- Modify: `frontend/e2e/specs/m1-core/capa-story-supplier-risk-input.spec.ts`
+
+- [ ] Preserve clean-run RED evidence: doc-gate confirm expected 200 got 400; knowledge recommendation omitted entry because selected probe D2 is empty; supplier-risk timed out at 30 seconds but DB later shows `processed/matched`.
+- [ ] After doc-gate POST/poll reaches a terminal status, always GET `/doc-gate/impact` and branch on that full representation's `affected_docs`; do not treat absent summary fields as an empty list.
+- [ ] Set a nonempty, semantically matching D2 description on `8D-E2E-FMEA-LINK-001` in both create and reseed paths so the D4 knowledge source executes and can retrieve `8D-E2E-KNOW-001`.
+- [ ] At the start of the supplier-risk test set `test.setTimeout(120_000)`; retain the internal 90-second poll and all processed/matched/audit assertions.
+- [ ] Run TypeScript/build and backend seed tests. After review/integration, reseed and run the three exact credentialed specs with zero retries; require all pass and no unexpected skip.
+- [ ] Commit as `test(e2e): align async story contracts`.
+
+---
+
 ### Task 7: Perform Carrier-Aware CAPA PPT Acceptance
 
 **Files:**
