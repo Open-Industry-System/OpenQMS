@@ -335,7 +335,7 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     const advanceBody = await advanceRes.json();
     expect(advanceBody.capa.status).toBe("D5_CORRECTION");
     expect(advanceBody.capa.d4_retry_count).toBe(1);
-    expect(advanceBody.warning).toBeUndefined();
+    expect(advanceBody.warning).toBeNull();
 
     await context.close();
   });
