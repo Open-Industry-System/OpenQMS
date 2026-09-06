@@ -133,7 +133,7 @@ A successful download alone does not pass the CAPA PPT gate because the API inte
    - generation-information slide: version, `review_status`, and `review_rounds` must match the query API and database;
    - query API: export ID, version, `review_status`, `review_rounds`, and `review_report` must match the database row;
    - `review_report` is compared only between the query API and database because neither response headers nor the slide exposes it.
-4. **Review outcome:** `review_status` must be `passed`; rounds must be in `1..3`; the persisted report must contain valid `issues` and `suggestions` lists consistent with the passing outcome. Review prompts must respect the render lifecycle: generation metadata is filled after review, and explicit no-link appendix values are valid when the database has no corresponding associations.
+4. **Review outcome:** `review_status` must be `passed`; rounds must be in `1..3`; the persisted report must contain valid `issues` and `suggestions` lists consistent with the passing outcome. Review prompts must respect the render lifecycle: generation metadata is filled after review, and explicit no-link appendix values are valid when the database has no corresponding associations. UI feedback must interpolate the numeric review round rather than expose a raw localization placeholder.
 
 For this AI-enabled release gate, `review_status=skipped` is **BLOCKED** because it proves the configured review agent did not run. `review_status=needs_review` is also **BLOCKED** pending an explicit human-review workflow outside this iteration; the presence of a downloadable file does not downgrade either state to pass.
 

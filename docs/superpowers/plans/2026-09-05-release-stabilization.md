@@ -1789,6 +1789,22 @@ If the closed CAPA ID was not closed because an earlier mandatory E2E scenario f
 
 ---
 
+### Task 7C: Fix PPT Review-Round i18n Interpolation
+
+**Root cause:** the passed UI toast was captured, but both locale files use `{rounds}` instead of i18next `{{rounds}}`, so users see the literal placeholder.
+
+**Files:**
+- Create: `frontend/src/locales/capa-ppt.i18n.test.ts`
+- Modify: `frontend/src/locales/zh-CN/capa.json`
+- Modify: `frontend/src/locales/en-US/capa.json`
+
+- [ ] Add a RED locale test requiring `ppt.generated` and `ppt.needsReview` in both languages to contain `{{rounds}}` and not a remaining single-brace placeholder.
+- [ ] Change only those four strings to i18next double-brace interpolation.
+- [ ] Run the locale test, TypeScript, and build. Commit as `fix(i18n): interpolate PPT review rounds`.
+- [ ] After review/integration, regenerate PPT in UI and capture a success screenshot showing the numeric round value, not `{rounds}`.
+
+---
+
 ### Task 8: Re-run the System Integration Menu Permission Slice
 
 **Files:**
