@@ -22,14 +22,14 @@
 - **CAPA PPT**：provider-backed 导出 round 1 `passed`，11 张幻灯片，source/carrier/DB/audit/UI 验证通过，review `issues=[]`、`suggestions=[]`。
 - **系统集成菜单**：权限切片 `2 passed / 0 skipped`（13.2s）；viewer 可见集成组而不见 admin-only 管理项，admin 可见三组及 MES 子页。
 
-## 系统级 E2E 测试套件（M0+M1，已落地）
+## 历史：系统级 E2E 测试套件（M0+M1，2026-07 基线）
 
-浏览器全栈 E2E（Playwright + 专用 docker-compose e2e profile），手动 `make e2e`，**不接入 CI**。
+> 本节记录 2026-07 的初始套件范围与验证基线；其 M1 3/4、dashboard follow-up 和 `9 passed / 1 skipped` 结果均已由上方 **Release Stabilization（2026-09-06）** 证据取代，不能作为当前 RC 门禁结论。
 
 - **M0 基建**：`docker-compose.e2e.yml`（独立库 qms_e2e + 卷 pgdata_e2e + 端口 5433/8001/5174，redis 不暴露，AI 服务 `profiles:["ai-infra"]`，`!override` 端口）；`E2E_MODE` config + 生产门控条件路由；确定性幂等 `seed_e2e`（2 工厂/产品线含 DC-DC-100 默认/5 账号 + UserProductLine/已知 PFMEA-E2E-001 + 8D-E2E-001）；`/api/e2e/seed-state` 只读（账号密码单一来源）+ `/api/e2e/cleanup` 白名单 FK 逆序单事务删（禁用 version 触发器）；`make e2e*` 目标（先 db/redis→migrate→backend/frontend）；`tsconfig.e2e.json` + `@types/node`；helpers/fixtures/global.setup（5 角色 UI 登录→storageState）+ guards。
-- **M1 流程**（3/4，④原延后现可解封）：①登录+RBAC+工厂隔离 ②FMEA 生命周期 ③CAPA 8D 生命周期。④看板下钻此前仅实现一半（`KPICard` onClick + 列表页 query param 已有；widget→navigate 接线 + `dashboardDrilldown.ts` 缺失），**本轮已补齐**（见下文「仪表盘下钻」）；E2E Task 13 下钻 spec 可据此解封（follow-up）。
+- **M1 流程（2026-07 历史基线，3/4）**：①登录+RBAC+工厂隔离 ②FMEA 生命周期 ③CAPA 8D 生命周期。④看板下钻当时仅实现一半（`KPICard` onClick + 列表页 query param 已有；widget→navigate 接线 + `dashboardDrilldown.ts` 缺失），后续已补齐；此处的 E2E Task 13 follow-up 不是当前 RC 待办。
 - **生产代码**：仅 `data-e2e` testid（`CAPAListPage` 的 `product_line_code` 为已批准的 bug 修复例外）。
-- **验证**：M1 套件 9 passed / 1 skipped（无 LLM 凭证时 AI spec skip-with-warning）；backend e2e 端点测试 2 passed；`make check` + e2e tsc 干净；生产门控 `[]`（TENANT_MODE=production 时 `/api/e2e/*` 不载入）。
+- **验证（2026-07 历史基线）**：M1 套件 9 passed / 1 skipped（无 LLM 凭证时 AI spec skip-with-warning）；backend e2e 端点测试 2 passed；`make check` + e2e tsc 干净；生产门控 `[]`（TENANT_MODE=production 时 `/api/e2e/*` 不载入）。
 - **已知摩擦**：backend 登录限流（`auth.py` 10 次/5min 内存）在反复跑 Playwright 时可能让 `global.setup` 超时——重启 e2e backend 即恢复（未改生产代码）。
 - spec: `docs/superpowers/specs/2026-07-01-system-e2e-test-suite-design.md`；plan: `docs/superpowers/plans/2026-07-01-system-e2e-test-suite.md`；指南: `docs/e2e.md`。
 
@@ -239,7 +239,7 @@
 
 ### ROADMAP 之外的已知缺口（来自 CLAUDE.md）
 - 测试套件仍在补齐，部分历史模块缺 `factory_id` fixture 回填
-- 登录无速率限制
+- 登录限流为每进程内存 `10 次/5min`，未在多副本间分布式共享；跨副本部署时限流不具全局一致性。
 - Redis 已配置但**未实现缓存逻辑**
 - 前端 bundle 5.5MB，需代码分割
 - 部分 Alembic 迁移号重叠，需规整
