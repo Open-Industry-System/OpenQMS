@@ -1149,6 +1149,7 @@ async def _seed_knowledge_sink(db, factory_ids):
         factory_id=factory_id,
         status=EightDState.D8_APPROVAL_PENDING.value,
         severity="serious",
+        d1_team=[{"name": "E2E 知识沉淀", "role": "质量工程师"}],
         d2_description=(
             "现场抽检一批 DC-DC-100-E2E 来料螺栓，发现 M8 螺栓孔径超差，"
             "实测 8.12mm（上限 8.05mm）。"
