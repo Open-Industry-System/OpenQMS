@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
 configure({ testIdAttribute: "data-e2e" });
 afterAll(() => configure({ testIdAttribute: "data-testid" }));
-import { App, ConfigProvider } from "antd";
+import { App, ConfigProvider, message } from "antd";
 import D3ContainmentPanel from "./D3ContainmentPanel";
 import type { CAPAReport, D3ImportRun, D3ImpactReport, D3AdviceResponse, D3Execution } from "../../types";
 
@@ -96,6 +96,7 @@ import {
   getD3Advice,
   getD3Adoptions,
   getD3Executions,
+  recordD3Execution,
 } from "../../api/capa";
 
 const baseCapa: CAPAReport = {
@@ -262,5 +263,27 @@ describe("D3ContainmentPanel", () => {
 
     const banner = await waitFor(() => screen.getByTestId("d3-report-attempt-banner"));
     expect(banner).toHaveTextContent("已被 newer 代次取代");
+  });
+
+  it("surfaces the backend detail when execution validation fails", async () => {
+    vi.mocked(getD3Report).mockResolvedValue(mockDoneReport);
+    vi.mocked(recordD3Execution).mockRejectedValueOnce({
+      response: { data: { detail: "非法 url scheme" } },
+    });
+    const errorSpy = vi.spyOn(message, "error").mockImplementation(() => undefined as never);
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByTestId("d3-execution-add")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("d3-execution-add"));
+    fireEvent.change(screen.getByTestId("d3-execution-measure"), {
+      target: { value: "t" },
+    });
+    fireEvent.change(screen.getByTestId("d3-execution-evidence-url"), {
+      target: { value: "javascript:alert(1)" },
+    });
+    fireEvent.click(screen.getByTestId("d3-execution-save"));
+
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith("非法 url scheme"));
+    errorSpy.mockRestore();
   });
 });
