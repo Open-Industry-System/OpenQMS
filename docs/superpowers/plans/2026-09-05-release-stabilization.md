@@ -1472,6 +1472,21 @@ git commit -m "fix(capa): surface D3 execution validation detail"
 
 ---
 
+### Task 6F: Make the Lateral-Diffusion Prompt JSON-Compatible
+
+**Root cause:** the hit-bearing lateral prompt does not contain an explicit JSON instruction. The configured OpenAI-compatible provider rejects `response_format=json_object` unless the prompt contains `json`; `complete_json` then retries unconstrained and receives bullet-list prose, causing `extract_json` to fail at column 1. EMPTY has no hits and correctly skips this call.
+
+**Files:**
+- Modify: `backend/tests/capa/test_lateral_diffusion_service.py`
+- Modify: `backend/app/services/capa_lateral_diffusion_service.py:424-430`
+
+- [ ] Add a RED unit test for `_build_prompt` asserting it explicitly requests a JSON object with top-level `items` and per-item `product_type_code` plus `suggestion_direction`; verify current prompt fails the JSON assertion.
+- [ ] Minimally append an explicit Chinese instruction and concrete JSON example matching `LATERAL_SCHEMA`, including “只返回 JSON，不要 Markdown/解释”. Preserve existing incident data and 120-character direction constraint.
+- [ ] Run lateral service/API/concurrency tests and complete `make check-backend`; commit as `fix(capa): require JSON for lateral diffusion advice`.
+- [ ] After review/integration and reseed, run the credentialed lateral spec with zero retries. Require all five tests to run (no positive skip), all close calls 200, and persisted checks/audits/decisions pass.
+
+---
+
 ### Task 7: Perform Carrier-Aware CAPA PPT Acceptance
 
 **Files:**

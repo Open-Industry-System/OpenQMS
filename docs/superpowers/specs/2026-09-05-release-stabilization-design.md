@@ -85,6 +85,7 @@ Run the following release evidence:
 - D3 execution validation surfaces the backend's specific 422 detail to the user instead of replacing it with a generic message.
 - E2E cleanup removes dynamic CAPA D3 descendants in FK-safe order; D3 endpoints honor a selected effective factory; seed data is visible to the roles/scopes that exercise it.
 - The aggregate CAPA story follows the current D7_COMPLETED → D8_GATE_PENDING shell, while mandatory dedicated specs retain doc-gate and D8-close coverage.
+- Hit-bearing lateral-diffusion prompts explicitly request the JSON object consumed by `complete_json`; provider fallback must not silently turn prose into a release-blocking parse failure.
 
 The E2E configuration may call the existing Alibaba Bailian model and incur limited external API usage. Secrets must not be printed, copied into documentation, or committed.
 
@@ -265,6 +266,7 @@ The stabilization iteration is complete only when all applicable conditions are 
 - [ ] The destructive `test_spc_fmea_match.py` fixture uses a one-shot isolated database and no longer removes migration-only DDL or seed data from `qms_test`.
 - [ ] A fresh isolated database upgrades to a single Alembic head and seeds successfully.
 - [ ] `make check` completes successfully.
+- [ ] Hit-bearing lateral diffusion returns structured JSON, closes successfully with the configured provider, and executes all dedicated positive tests.
 - [ ] Dynamic D3 E2E cleanup is FK-safe/idempotent, selected-factory D3 access is isolated, and seeded lateral/supplier records are visible to their intended test roles.
 - [ ] Required D3/CAPA E2E paths retain `/api`, satisfy the current D3 gate, surface specific execution-validation details, and complete without a login 429 cascade.
 - [ ] The complete AI-enabled E2E suite runs with zero automatic retries and retained JSON/trace evidence.
