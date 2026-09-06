@@ -154,8 +154,13 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     const d6 = page.locator("textarea").first();
     await d6.fill("更换后连续 3 批抽检孔径均合格，CPK 1.67。");
     await d6.evaluate((el: any) => el.blur());
+    const d7RecommendationsResponsePromise = page.waitForResponse(
+      (res) => res.url().includes(`/api/capa/${capId}/d7-fmea-recommendations`) && res.request().method() === "GET"
+    );
     await page.locator('[data-e2e="capa-advance"]').click();
     await waitForStep(page, /^预防复发措施$|^Prevent Recurrence$/);
+    const d7RecommendationsResponse = await d7RecommendationsResponsePromise;
+    expect(d7RecommendationsResponse.ok()).toBeTruthy();
 
     // Step 8: D7 预防复发 — engineer 完成 D7，进入 manager 审批边。
     const d7 = page.locator("textarea").first();
@@ -163,7 +168,9 @@ test.describe("US-E2E-01 CAPA 8D closed-loop story", () => {
     await d7.evaluate((el: any) => el.blur());
     // D7 推荐（FMEA 节点）须由 engineer 在 D7_PREVENTION 逐一处置后才可完成 D7。全部标记「无需更新」(skip)。
     const d7Items = page.locator('[data-e2e^="d7-node-action-"]');
+    await expect(d7Items.first()).toBeVisible({ timeout: 10000 });
     const d7Count = await d7Items.count();
+    expect(d7Count).toBeGreaterThan(0);
     for (let i = 0; i < d7Count; i++) {
       await d7Items.nth(i).locator('[data-e2e="d7-skip"]').click();
       await expect(d7Items.nth(i).locator('[data-e2e="d7-action-status"]')).toBeVisible({ timeout: 10000 });
