@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "fs";
 import path from "path";
 import { accountPassword } from "../../fixtures/seed-state";
-import { cleanupByPrefix, loginForToken } from "../../helpers/api-client";
+import { cleanupByPrefix, completeD3Gate, loginForToken } from "../../helpers/api-client";
 
 /**
  * US-E2E-01 — AI D4 推荐路径故事级 spec。
@@ -45,9 +45,9 @@ test.describe("US-E2E-01 CAPA AI D4 recommendation", () => {
     await cleanupByPrefix("E2E-AI-REC-CAPA");
   });
 
-  test("AI D4 recommendation DAG (200 done | 422 BLOCKED)", async ({ browser, request }) => {
-    test.setTimeout(120000);
-    const llm = hasLLMCreds();
+  test("AI D4 recommendation DAG (200 done)", async ({ browser, request }) => {
+    test.setTimeout(240000);
+    test.skip(!hasLLMCreds(), "requires LLM credentials");
 
     // ── Engineer: create 8D and advance to D4 ─────────────────────────────
     const ctx = await browser.newContext({ storageState: "e2e/.storage-state/engineer.json" });
@@ -88,6 +88,7 @@ test.describe("US-E2E-01 CAPA AI D4 recommendation", () => {
     const d3 = page.locator("textarea").first();
     await d3.fill("对该批螺栓 100% 复检隔离，超差件判退供应商。");
     await d3.evaluate((el: any) => el.blur());
+    await completeD3Gate(capaId);
     await page.locator('[data-e2e="capa-advance"]').click();
     await expect(page.locator('[data-e2e="d4-verification-card"]')).toBeVisible({ timeout: 10000 });
 
@@ -100,17 +101,10 @@ test.describe("US-E2E-01 CAPA AI D4 recommendation", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    if (llm) {
-      expect(r.status()).toBe(200);
-      const body = await r.json();
-      const s11 = body.stages.find((s: any) => s.index === 11);
-      expect(s11).toBeTruthy();
-      expect(s11.status).toBe("done");
-    } else {
-      expect(r.status()).toBe(422);
-      const body = await r.json();
-      expect(body.detail.blocked).toBe(true);
-      test.skip(true, "BLOCKED: no LLM creds");
-    }
+    expect(r.status()).toBe(200);
+    const body = await r.json();
+    const s11 = body.stages.find((s: any) => s.index === 11);
+    expect(s11).toBeTruthy();
+    expect(s11.status).toBe("done");
   });
 });

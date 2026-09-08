@@ -12,14 +12,21 @@ from sqlalchemy import func, select, update
 from app.config import settings
 from app.models.capa import CAPAEightD
 from app.models.capa_d3 import CapaD3Execution, CapaD3ImpactReport, CapaD3ImportRun
+from app.models.supplier import Supplier
+from app.models.user import User
 from app.seed_e2e import (
     _reset_d3_chain,
     _seed_accounts,
+    _seed_d3_sources,
     _seed_d3_test_capas,
     _seed_factories,
     _seed_product_line,
 )
-from app.seed_e2e_constants import D3_E2E_CAPA_DOC_NO_REPORTED
+from app.seed_e2e_constants import (
+    D3_E2E_CAPA_DOC_NO_REPORTED,
+    D3_E2E_PRODUCT_LINE,
+    D3_E2E_SUPPLIER_NO,
+)
 from app.services.agent import provider_adapter
 
 
@@ -64,6 +71,23 @@ async def test_d3_reset_refuses_non_e2e_mode(db, monkeypatch):
     monkeypatch.setattr(settings, "E2E_MODE", False)
     with pytest.raises(RuntimeError, match="requires E2E_MODE"):
         await _reset_d3_chain(db, D3_E2E_CAPA_DOC_NO_REPORTED, None)
+
+
+async def test_d3_supplier_product_scope_is_restored_on_reseed(db, d3_seed_base):
+    """The D3 supplier remains visible to the DC-DC-100-E2E product-line scope."""
+    factory_id = d3_seed_base["DC-FACT-E2E"]
+    admin = await db.scalar(select(User).where(User.username == "admin"))
+
+    await _seed_d3_sources(db, factory_id, admin.user_id)
+    supplier = await db.scalar(select(Supplier).where(
+        Supplier.factory_id == factory_id,
+        Supplier.supplier_no == D3_E2E_SUPPLIER_NO,
+    ))
+    assert supplier.product_scope == D3_E2E_PRODUCT_LINE
+
+    supplier.product_scope = None
+    await _seed_d3_sources(db, factory_id, admin.user_id)
+    assert supplier.product_scope == D3_E2E_PRODUCT_LINE
 
 
 async def test_d3_seed_twice_restores_initial_state_without_accumulation(

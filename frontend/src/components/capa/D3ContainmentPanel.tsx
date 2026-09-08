@@ -313,8 +313,15 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       message.success(t("d3.executionAdded", "执行记录已添加"));
       closeModal();
       await loadExecutions(currentRun?.run_id);
-    } catch {
-      message.error(t("d3.executionAddFailed", "添加执行记录失败"));
+    } catch (error: unknown) {
+      const detail = (
+        error as { response?: { data?: { detail?: unknown } } }
+      ).response?.data?.detail;
+      message.error(
+        typeof detail === "string"
+          ? detail
+          : t("d3.executionAddFailed", "添加执行记录失败"),
+      );
     }
   };
 
