@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import PublicHomePage from "./PublicHomePage";
 import i18n from "../../i18n";
+
+const publicHomeStyles = readFileSync("src/pages/public/PublicHomePage.css", "utf8");
 
 const auth = vi.hoisted(() => ({ token: null as string | null }));
 vi.mock("../../store/authStore", () => ({
@@ -65,6 +68,20 @@ describe("PublicHomePage", () => {
     auth.token = "present";
     renderPage();
     expect(screen.getAllByRole("link", { name: "Enter system" })[0]).toHaveAttribute("href", "/dashboard");
+  });
+
+  it("keeps required navigation controls in bounded rows on narrow phones", () => {
+    const narrowPhoneStyles = publicHomeStyles.slice(
+      publicHomeStyles.indexOf("@media (max-width: 400px)"),
+      publicHomeStyles.indexOf("@media (prefers-reduced-motion: reduce)"),
+    );
+
+    expect(narrowPhoneStyles).toMatch(
+      /\.public-home__nav\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+    );
+    expect(narrowPhoneStyles).toMatch(
+      /\.public-home__nav-actions\s*\{[^}]*width:\s*100%;[^}]*justify-content:\s*space-between;/s,
+    );
   });
 
   it("switches the visible copy to Chinese", async () => {
