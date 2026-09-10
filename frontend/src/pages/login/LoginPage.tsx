@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Form, Input, Button, Typography, App } from "antd";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Form, Input, Button, Typography, App, Alert, Space } from "antd";
 import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
+import { getPublicDemoConfig } from "../../config/publicDemo";
 import LanguageSwitcher from "../../components/LanguageSwitcher";
 
 const { Title, Text } = Typography;
@@ -13,6 +14,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [form] = Form.useForm<{ username: string; password: string }>();
+  const configuredDemo = getPublicDemoConfig();
+  const demoConfig = searchParams.get("demo") === "viewer" ? configuredDemo : null;
   const { message } = App.useApp();
 
   const onFinish = async (values: { username: string; password: string }) => {
@@ -142,7 +147,32 @@ export default function LoginPage() {
             </Text>
           </div>
 
-          <Form onFinish={onFinish} size="large" layout="vertical">
+          {demoConfig && (
+            <Alert
+              type="info"
+              showIcon
+              message={t("demo.title")}
+              description={(
+                <Space direction="vertical" size={4}>
+                  <Text>{t("demo.description")}</Text>
+                  <Text>{t("demo.username")}: <Text code>{demoConfig.username}</Text></Text>
+                  <Text>{t("demo.password")}: <Text code>{demoConfig.password}</Text></Text>
+                  <Button
+                    htmlType="button"
+                    onClick={() => form.setFieldsValue({
+                      username: demoConfig.username,
+                      password: demoConfig.password,
+                    })}
+                  >
+                    {t("demo.fill")}
+                  </Button>
+                </Space>
+              )}
+              style={{ marginBottom: 24 }}
+            />
+          )}
+
+          <Form form={form} onFinish={onFinish} size="large" layout="vertical">
             <Form.Item
               name="username"
               rules={[{ required: true, message: t("usernameRequired") }]}
@@ -194,19 +224,6 @@ export default function LoginPage() {
               </Button>
             </Form.Item>
           </Form>
-
-          <Text
-            style={{
-              display: "block",
-              textAlign: "center",
-              fontSize: 12,
-              color: "var(--qf-text-tertiary)",
-              marginTop: 24,
-              fontFamily: "var(--qf-font-mono)",
-            }}
-          >
-            {t("defaultAccount")}
-          </Text>
         </div>
 
         <div style={{ textAlign: "center", marginTop: 16 }}>
