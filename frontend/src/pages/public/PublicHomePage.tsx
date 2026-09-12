@@ -230,6 +230,22 @@ export default function PublicHomePage() {
 
       <footer className="public-home__footer">
         <span>{t("footer.license")}</span>
+        <div className="public-home__footer-links">
+          <a
+            href={githubUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            {t("openSource.github")}
+          </a>
+          <a
+            href={docsUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            {t("openSource.docs")}
+          </a>
+        </div>
         <span>{t("footer.tagline")}</span>
       </footer>
     </div>

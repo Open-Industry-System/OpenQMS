@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import PublicHomePage from "./PublicHomePage";
 import i18n from "../../i18n";
@@ -37,6 +37,20 @@ describe("PublicHomePage", () => {
     const links = screen.getAllByRole("link", { name: /github/i });
     for (const link of links) {
       expect(link).toHaveAttribute("href", "https://github.com/Open-Industry-System/OpenQMS");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    }
+  });
+
+  it("exposes safe GitHub and docs links in the semantic footer", () => {
+    renderPage();
+    const footer = within(screen.getByRole("contentinfo"));
+    const github = footer.getByRole("link", { name: "View GitHub" });
+    const docs = footer.getByRole("link", { name: "Read the docs" });
+
+    expect(github).toHaveAttribute("href", "https://github.com/Open-Industry-System/OpenQMS");
+    expect(docs).toHaveAttribute("href", "https://github.com/Open-Industry-System/OpenQMS/tree/main/docs");
+    for (const link of [github, docs]) {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"));
     }

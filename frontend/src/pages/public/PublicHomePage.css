@@ -651,6 +651,21 @@
   font-size: 0.75rem;
 }
 
+.public-home__footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+}
+
+.public-home__footer-links a {
+  color: var(--public-home-text-secondary);
+  text-decoration: none;
+}
+
+.public-home__footer-links a:hover {
+  color: var(--public-home-accent);
+}
+
 @media (max-width: 900px) {
   .public-home__nav-links {
     display: none;

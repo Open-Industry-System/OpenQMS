@@ -13,10 +13,10 @@
 ## 公开项目首页（2026-09-12）
 
 - **状态**：公开 `/` 首页已完成，无需登录；AI-first 内容、中文/英文切换和 Viewer 演示门控已完成。
-- **自动化证据**：公开首页 focused tests `5 files / 29 tests passed`；`publicDemo.ts`、`PublicHomePage.tsx`、`LoginPage.tsx`、`App.tsx` 文件级 ESLint exit 0；前端 production build exit 0（Vite `6835 modules transformed`）。最终 `make check TEST_DB=qms_test_public_home_final` exit 0：backend `1957 passed / 5 skipped / 3 xfailed / 2 xpassed`（25 warnings），frontend `tsc --noEmit` 与 production build 均通过。
-- **浏览器验收**：真实 Playwright 在 `1440×900`、`390×844`、`320×844` 通过；三档均 `scrollWidth == clientWidth`（分别 `1432/1432`、`382/382`、`312/312`），Hero、AI、能力、架构、开源区均可读。桌面锚点导航可见，移动端隐藏；语言和系统入口始终可见，320px 头部两行均在视口内。
-- **路由与可访问性**：公开 `/` 无 `/api/` 请求即可渲染；未登录访问 `/dashboard` 跳转 `/login`；中英文原地切换不 reload；实际交互链接均可由 Tab 到达且有 `3px` 可见焦点。页脚为信息文本，不包含交互链接。
-- **演示门控**：关闭配置时 `/login?demo=viewer` 不显示演示卡或凭据；仅用进程环境临时启用的假值可显示 Viewer 卡并填充表单，未提交、未发出 `/api/auth/login` 请求，未写入跟踪文件。
+- **自动化证据**：页脚链接 TDD RED `1 failed / 8 passed`（语义页脚内缺少 `View GitHub`），最小实现后 GREEN `9/9 passed`；公开首页 focused tests `5 files / 30 tests passed`；`PublicHomePage.tsx` 与其测试文件级 ESLint exit 0；前端 production build exit 0（Vite `6835 modules transformed`）。最终 `make check TEST_DB=qms_test_public_home_fix_round1` 在新建专用库上 exit 0：backend `1957 passed / 5 skipped / 3 xfailed / 2 xpassed`（25 warnings），frontend `tsc --noEmit` 与 production build 均通过。
+- **浏览器验收**：真实 Playwright 在 `1440×900`、`390×844`、`320×844` 通过；三档均 `scrollWidth == clientWidth`（分别 `1432/1432`、`382/382`、`312/312`），Hero、AI、能力、架构、开源区均可读。桌面锚点导航可见，移动端隐藏；语言和系统入口始终可见，320px 头部两行均在视口内。新增页脚链接后复验 390/320px：两链接均可见，320px 页脚宽 `284px` 且完整位于 `312px` clientWidth 内。
+- **路由与可访问性**：公开 `/` 无 `/api/` 请求即可渲染；未登录访问 `/dashboard` 跳转 `/login`；中英文原地切换不 reload；实际交互链接均可由 Tab 到达且有 `3px` 可见焦点。语义页脚内新增 GitHub 与项目文档链接，复用本地化文案和既有 URL，均带 `_blank` 与 `noreferrer noopener`；真实浏览器中分别为 Tab stop 15/16。
+- **演示门控**：关闭配置时 `/login?demo=viewer` 不显示演示卡或凭据；仅用进程环境临时启用的假值可显示 Viewer 卡并填充表单，未提交、未发出 `/api/auth/login` 请求，未写入跟踪文件。启用态真实键盘验收中，首页演示 CTA 为 Tab stop 9、登录页“使用 Viewer 账号”为 Tab stop 1，两者均在视口内且有 `3px` 实线可见焦点。
 - **验证例外**：仓库级 `npm run lint` 有 1 个与本功能无关的既存错误（`frontend/e2e/global.setup.ts:33`，`preserve-caught-error`；总计 `1 error / 49 warnings`）。按 Task 6 裁定不修改该文件；公开首页相关源文件的文件级 lint 已通过。
 - **下一步**：启用多角色公开演示前，先设计隔离租户、自动重置、写入限流和危险操作控制的可重置基础设施。
 
