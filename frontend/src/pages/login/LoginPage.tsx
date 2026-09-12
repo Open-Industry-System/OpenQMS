@@ -17,7 +17,7 @@ export default function LoginPage() {
   const [searchParams] = useSearchParams();
   const [form] = Form.useForm<{ username: string; password: string }>();
   const configuredDemo = getPublicDemoConfig();
-  const demoConfig = searchParams.get("demo") === "viewer" ? configuredDemo : null;
+  const demoConfig = searchParams.toString() === "demo=viewer" ? configuredDemo : null;
   const { message } = App.useApp();
 
   const onFinish = async (values: { username: string; password: string }) => {
