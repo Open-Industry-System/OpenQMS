@@ -34,6 +34,7 @@ describe("LoginPage public Viewer demo", () => {
     renderLogin();
     expect(screen.queryByText("disabled-demo")).not.toBeInTheDocument();
     expect(screen.queryByText("disabled-password")).not.toBeInTheDocument();
+    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/default account/i)).not.toBeInTheDocument();
   });
@@ -44,6 +45,7 @@ describe("LoginPage public Viewer demo", () => {
     vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "");
     renderLogin();
     expect(screen.queryByText("incomplete-viewer")).not.toBeInTheDocument();
+    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
   });
 
@@ -75,6 +77,7 @@ describe("LoginPage public Viewer demo", () => {
     renderLogin("/login");
     expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
     expect(screen.queryByText("public-readonly-password")).not.toBeInTheDocument();
+    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
   });
 
@@ -85,6 +88,7 @@ describe("LoginPage public Viewer demo", () => {
     renderLogin("/login?demo=viewer&next=%2Fdashboard");
     expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
     expect(screen.queryByText("public-readonly-password")).not.toBeInTheDocument();
+    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
   });
 
@@ -95,6 +99,7 @@ describe("LoginPage public Viewer demo", () => {
     renderLogin("/login?demo=viewer&demo=viewer");
     expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
     expect(screen.queryByText("public-readonly-password")).not.toBeInTheDocument();
+    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
   });
 });
