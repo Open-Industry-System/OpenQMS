@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import App from "./App";
@@ -49,5 +49,29 @@ describe("public route boundary", () => {
   it("still redirects an unauthenticated dashboard request to login", async () => {
     renderAt("/dashboard");
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+  });
+
+  it("redirects an expired token to login without fetching the user", async () => {
+    state.token = "header.eyJleHAiOjB9.signature";
+    renderAt("/dashboard");
+    expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+    await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
+    expect(state.fetchUser).not.toHaveBeenCalled();
+  });
+
+  it("redirects a malformed token to login without fetching the user", async () => {
+    state.token = "not-a-jwt";
+    renderAt("/dashboard");
+    expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+    await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
+    expect(state.fetchUser).not.toHaveBeenCalled();
+  });
+
+  it("fetches the user and shows loading for a valid token without a user", async () => {
+    state.token = `header.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))}.signature`;
+    renderAt("/dashboard");
+    expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument();
+    await waitFor(() => expect(state.fetchUser).toHaveBeenCalledOnce());
+    expect(state.logout).not.toHaveBeenCalled();
   });
 });

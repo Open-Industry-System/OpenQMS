@@ -102,22 +102,23 @@ function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: 
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const { canView, isAdmin } = usePermission();
+  const isInvalidToken = !token || isTokenExpired(token);
 
   useEffect(() => {
-    if (token && !user) fetchUser();
-  }, [token, user, fetchUser]);
+    if (token && isInvalidToken) logout();
+    else if (!isInvalidToken && !user) fetchUser();
+  }, [token, isInvalidToken, user, fetchUser, logout]);
 
-  if (token && !user) {
+  if (isInvalidToken) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!user) {
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <Spin size="large" />
       </div>
     );
-  }
-
-  if (!token || isTokenExpired(token)) {
-    if (token && isTokenExpired(token)) logout();
-    return <Navigate to="/login" replace />;
   }
 
   if (requiredModule && !canView(requiredModule)) return <Navigate to="/dashboard" replace />;

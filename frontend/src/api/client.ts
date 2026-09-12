@@ -13,15 +13,24 @@ const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/fa
 
 // Guard against concurrent refresh attempts
 let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
+type RefreshSubscriber = {
+  resolve: (token: string) => void;
+  reject: (error: unknown) => void;
+};
+let refreshSubscribers: RefreshSubscriber[] = [];
 
 function onRefreshed(token: string) {
-  refreshSubscribers.forEach((cb) => cb(token));
+  refreshSubscribers.forEach(({ resolve }) => resolve(token));
   refreshSubscribers = [];
 }
 
-function addRefreshSubscriber(cb: (token: string) => void) {
-  refreshSubscribers.push(cb);
+function onRefreshFailed(error: unknown) {
+  refreshSubscribers.forEach(({ reject }) => reject(error));
+  refreshSubscribers = [];
+}
+
+function addRefreshSubscriber(subscriber: RefreshSubscriber) {
+  refreshSubscribers.push(subscriber);
 }
 
 client.interceptors.request.use((config) => {
@@ -86,27 +95,36 @@ client.interceptors.response.use(
         isRefreshing = true;
         try {
           const newToken = await useAuthStore.getState().tryRefreshToken();
-          isRefreshing = false;
           if (newToken) {
             onRefreshed(newToken);
             // Retry the original request with the new token
+            originalRequest._retry = true;
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
             return client(originalRequest);
           }
-        } catch {
-          isRefreshing = false;
+          onRefreshFailed(error);
           useAuthStore.getState().logout();
           window.location.href = "/login";
           return Promise.reject(error);
+        } catch {
+          onRefreshFailed(error);
+          useAuthStore.getState().logout();
+          window.location.href = "/login";
+          return Promise.reject(error);
+        } finally {
+          isRefreshing = false;
         }
-        isRefreshing = false;
       }
 
       // Queue pending requests while refresh is in flight
-      return new Promise((resolve) => {
-        addRefreshSubscriber((token: string) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          resolve(client(originalRequest));
+      return new Promise((resolve, reject) => {
+        addRefreshSubscriber({
+          resolve: (token: string) => {
+            originalRequest._retry = true;
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            resolve(client(originalRequest));
+          },
+          reject,
         });
       });
     }
