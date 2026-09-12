@@ -30,14 +30,12 @@ describe("client 401 refresh handling", () => {
     const client = await loadClient();
     client.defaults.adapter = (config) => Promise.reject({ config, response: { status: 401 } });
 
-    const request = client.get("/protected");
-
-    await expect(request).rejects.toMatchObject({ response: { status: 401 } });
+    await expect(client.get("/protected")).rejects.toMatchObject({ response: { status: 401 } });
     expect(tryRefreshToken).toHaveBeenCalledOnce();
     expect(logout).toHaveBeenCalledOnce();
   });
 
-  it("rejects concurrent requests and clears the refresh queue when refresh returns null", async () => {
+  it("preserves queued errors and does not replay failed non-idempotent work in a later refresh", async () => {
     const logout = vi.fn();
     let resolveRefresh!: (token: string | null) => void;
     const pendingRefresh = new Promise<string | null>((resolve) => { resolveRefresh = resolve; });
@@ -46,25 +44,54 @@ describe("client 401 refresh handling", () => {
       .mockResolvedValueOnce("later-token");
     auth.getState.mockReturnValue({ logout, tryRefreshToken });
     const client = await loadClient();
+    const invocationCount = new Map<string, number>();
     client.defaults.adapter = (config) => {
+      const url = String(config.url);
+      invocationCount.set(url, (invocationCount.get(url) ?? 0) + 1);
       if (config.headers.Authorization === "Bearer later-token") {
         return Promise.resolve({ config, data: { recovered: true }, headers: {}, status: 200, statusText: "OK" });
       }
-      const error = { config, response: { status: 401 } };
-      return Promise.reject(error);
+      return unauthorized(config);
     };
 
-    const first = client.get("/protected/one");
-    const second = client.get("/protected/two");
+    const initiatingOrders = client.get("/orders");
     await vi.waitFor(() => expect(tryRefreshToken).toHaveBeenCalledOnce());
+    const queuedProfile = client.get("/profile");
+    const queuedOrderCreate = client.post("/orders", { quantity: 1 });
+    await vi.waitFor(() => expect(invocationCount.get("/profile")).toBe(1));
+    await vi.waitFor(() => expect(invocationCount.get("/orders")).toBe(2));
     resolveRefresh(null);
 
-    await expect(first).rejects.toMatchObject({ response: { status: 401 } });
-    await expect(second).rejects.toMatchObject({ response: { status: 401 } });
+    await expect(initiatingOrders).rejects.toMatchObject({ config: { url: "/orders" }, response: { status: 401 } });
+    await expect(queuedProfile).rejects.toMatchObject({ config: { url: "/profile" }, response: { status: 401 } });
+    await expect(queuedOrderCreate).rejects.toMatchObject({ config: { url: "/orders" }, response: { status: 401 } });
     expect(logout).toHaveBeenCalledOnce();
 
-    await expect(client.get("/protected/three")).resolves.toMatchObject({ data: { recovered: true } });
+    await expect(client.get("/later")).resolves.toMatchObject({ data: { recovered: true } });
     expect(tryRefreshToken).toHaveBeenCalledTimes(2);
+    expect(invocationCount.get("/profile")).toBe(1);
+    expect(invocationCount.get("/orders")).toBe(2);
+  });
+
+  it("rejects every concurrent request with its own error when refresh throws", async () => {
+    const logout = vi.fn();
+    let rejectRefresh!: (error: Error) => void;
+    const pendingRefresh = new Promise<string>((_resolve, reject) => { rejectRefresh = reject; });
+    const tryRefreshToken = vi.fn().mockReturnValue(pendingRefresh);
+    auth.getState.mockReturnValue({ logout, tryRefreshToken });
+    const client = await loadClient();
+    const adapter = vi.fn(unauthorized);
+    client.defaults.adapter = adapter;
+
+    const orders = client.get("/orders");
+    await vi.waitFor(() => expect(tryRefreshToken).toHaveBeenCalledOnce());
+    const profile = client.get("/profile");
+    await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(2));
+    rejectRefresh(new Error("refresh failed"));
+
+    await expect(orders).rejects.toMatchObject({ config: { url: "/orders" }, response: { status: 401 } });
+    await expect(profile).rejects.toMatchObject({ config: { url: "/profile" }, response: { status: 401 } });
+    expect(logout).toHaveBeenCalledOnce();
   });
 
   it("retries the initiating and queued requests with a refreshed Authorization token", async () => {
@@ -100,7 +127,7 @@ describe("client 401 refresh handling", () => {
     const tryRefreshToken = vi.fn();
     auth.getState.mockReturnValue({ logout, tryRefreshToken });
     const client = await loadClient();
-    client.defaults.adapter = (config) => Promise.reject({ config, response: { status: 401 } });
+    client.defaults.adapter = unauthorized;
 
     await expect(client.post("/auth/login", {})).rejects.toMatchObject({ response: { status: 401 } });
     expect(tryRefreshToken).not.toHaveBeenCalled();

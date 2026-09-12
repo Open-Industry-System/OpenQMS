@@ -14,6 +14,7 @@ const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/fa
 // Guard against concurrent refresh attempts
 let isRefreshing = false;
 type RefreshSubscriber = {
+  error: unknown;
   resolve: (token: string) => void;
   reject: (error: unknown) => void;
 };
@@ -24,8 +25,8 @@ function onRefreshed(token: string) {
   refreshSubscribers = [];
 }
 
-function onRefreshFailed(error: unknown) {
-  refreshSubscribers.forEach(({ reject }) => reject(error));
+function onRefreshFailed() {
+  refreshSubscribers.forEach(({ error, reject }) => reject(error));
   refreshSubscribers = [];
 }
 
@@ -102,12 +103,12 @@ client.interceptors.response.use(
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
             return client(originalRequest);
           }
-          onRefreshFailed(error);
+          onRefreshFailed();
           useAuthStore.getState().logout();
           window.location.href = "/login";
           return Promise.reject(error);
         } catch {
-          onRefreshFailed(error);
+          onRefreshFailed();
           useAuthStore.getState().logout();
           window.location.href = "/login";
           return Promise.reject(error);
@@ -119,6 +120,7 @@ client.interceptors.response.use(
       // Queue pending requests while refresh is in flight
       return new Promise((resolve, reject) => {
         addRefreshSubscriber({
+          error,
           resolve: (token: string) => {
             originalRequest._retry = true;
             originalRequest.headers.Authorization = `Bearer ${token}`;

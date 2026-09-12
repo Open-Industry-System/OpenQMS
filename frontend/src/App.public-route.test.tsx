@@ -22,6 +22,10 @@ vi.mock("./hooks/usePermission", () => ({
   usePermission: () => ({ canView: () => true, isAdmin: false }),
 }));
 
+function jwt(payload: Record<string, unknown>) {
+  return `header.${btoa(JSON.stringify(payload))}.signature`;
+}
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -67,8 +71,24 @@ describe("public route boundary", () => {
     expect(state.fetchUser).not.toHaveBeenCalled();
   });
 
+  it("redirects a token without an expiry claim to login without fetching the user", async () => {
+    state.token = jwt({});
+    renderAt("/dashboard");
+    expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+    await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
+    expect(state.fetchUser).not.toHaveBeenCalled();
+  });
+
+  it("redirects a token with a nonnumeric expiry claim to login without fetching the user", async () => {
+    state.token = jwt({ exp: "tomorrow" });
+    renderAt("/dashboard");
+    expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+    await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
+    expect(state.fetchUser).not.toHaveBeenCalled();
+  });
+
   it("fetches the user and shows loading for a valid token without a user", async () => {
-    state.token = `header.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }))}.signature`;
+    state.token = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
     renderAt("/dashboard");
     expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument();
     await waitFor(() => expect(state.fetchUser).toHaveBeenCalledOnce());
