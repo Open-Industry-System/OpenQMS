@@ -1,12 +1,24 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-23
-**当前分支**: `feature/us-e2e-01-spec-a`
-**最近提交**: US-E2E-01 epic hybrid walk 10/10 PASS（`docs/e2e/reports/US-E2E-01-2026-07-23-2/`）；小模型兜底：tags normalize / doc-gate remap / lateral fill
+**更新日期**: 2026-09-12
+**当前分支**: `worktree-public-home`
+**最近提交**: 公开项目首页、双语 AI-first 内容与 Viewer 演示门控已完成；Task 6 运维文档和验收证据同步
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+
+---
+
+## 公开项目首页（2026-09-12）
+
+- **状态**：公开 `/` 首页已完成，无需登录；AI-first 内容、中文/英文切换和 Viewer 演示门控已完成。
+- **自动化证据**：公开首页 focused tests `5 files / 29 tests passed`；`publicDemo.ts`、`PublicHomePage.tsx`、`LoginPage.tsx`、`App.tsx` 文件级 ESLint exit 0；前端 production build exit 0（Vite `6835 modules transformed`）。最终 `make check TEST_DB=qms_test_public_home_final` exit 0：backend `1957 passed / 5 skipped / 3 xfailed / 2 xpassed`（25 warnings），frontend `tsc --noEmit` 与 production build 均通过。
+- **浏览器验收**：真实 Playwright 在 `1440×900`、`390×844`、`320×844` 通过；三档均 `scrollWidth == clientWidth`（分别 `1432/1432`、`382/382`、`312/312`），Hero、AI、能力、架构、开源区均可读。桌面锚点导航可见，移动端隐藏；语言和系统入口始终可见，320px 头部两行均在视口内。
+- **路由与可访问性**：公开 `/` 无 `/api/` 请求即可渲染；未登录访问 `/dashboard` 跳转 `/login`；中英文原地切换不 reload；实际交互链接均可由 Tab 到达且有 `3px` 可见焦点。页脚为信息文本，不包含交互链接。
+- **演示门控**：关闭配置时 `/login?demo=viewer` 不显示演示卡或凭据；仅用进程环境临时启用的假值可显示 Viewer 卡并填充表单，未提交、未发出 `/api/auth/login` 请求，未写入跟踪文件。
+- **验证例外**：仓库级 `npm run lint` 有 1 个与本功能无关的既存错误（`frontend/e2e/global.setup.ts:33`，`preserve-caught-error`；总计 `1 error / 49 warnings`）。按 Task 6 裁定不修改该文件；公开首页相关源文件的文件级 lint 已通过。
+- **下一步**：启用多角色公开演示前，先设计隔离租户、自动重置、写入限流和危险操作控制的可重置基础设施。
 
 ---
 
