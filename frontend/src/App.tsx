@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Spin } from "antd";
 import { useAuthStore } from "./store/authStore";
@@ -86,34 +86,57 @@ const UserManagementPage = lazy(() => import("./pages/admin/UserManagementPage")
 const LogManagementPage = lazy(() => import("./pages/admin/LogManagementPage"));
 const ReviewSkillsPage = lazy(() => import("./pages/admin/ReviewSkillsPage"));
 
-function isTokenExpired(token: string): boolean {
+type TokenState = "missing" | "malformed" | "expired" | "valid";
+
+function classifyToken(token: string | null): TokenState {
+  if (!token) return "missing";
+
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || payload.exp * 1000 < Date.now();
+    const payload: unknown = JSON.parse(atob(token.split('.')[1]));
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      return "malformed";
+    }
+
+    const exp = (payload as Record<string, unknown>).exp;
+    if (typeof exp !== "number" || !Number.isFinite(exp)) return "malformed";
+    return exp * 1000 < Date.now() ? "expired" : "valid";
   } catch {
-    return true;
+    return "malformed";
   }
 }
 
 function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: React.ReactNode; requiredModule?: ModuleKey; requireAdmin?: boolean }) {
   const token = useAuthStore((s) => s.token);
-  const _loading = useAuthStore((s) => s.loading);
+  const loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
+  const tryRefreshToken = useAuthStore((s) => s.tryRefreshToken);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const { canView, isAdmin } = usePermission();
-  const isInvalidToken = !token || isTokenExpired(token);
+  const refreshAttemptedToken = useRef<string | null>(null);
+  const tokenState = classifyToken(token);
 
   useEffect(() => {
-    if (token && isInvalidToken) logout();
-    else if (!isInvalidToken && !user) fetchUser();
-  }, [token, isInvalidToken, user, fetchUser, logout]);
+    if (tokenState === "malformed") {
+      logout();
+    } else if (tokenState === "expired" && token) {
+      if (refreshAttemptedToken.current === token) return;
+      refreshAttemptedToken.current = token;
+      void tryRefreshToken()
+        .then((refreshedToken) => {
+          if (!refreshedToken || classifyToken(refreshedToken) !== "valid") logout();
+        })
+        .catch(() => logout());
+    } else if (tokenState === "valid" && !user && !loading) {
+      fetchUser();
+    }
+  }, [token, tokenState, user, loading, fetchUser, tryRefreshToken, logout]);
 
-  if (isInvalidToken) {
+  if (tokenState === "missing" || tokenState === "malformed") {
     return <Navigate to="/login" replace />;
   }
 
-  if (!user) {
+  if (tokenState === "expired" || !user) {
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <Spin size="large" />

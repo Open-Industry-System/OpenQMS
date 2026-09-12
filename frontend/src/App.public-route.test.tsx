@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -11,6 +12,7 @@ const state = vi.hoisted(() => ({
   loading: false,
   login: vi.fn(),
   fetchUser: vi.fn(),
+  tryRefreshToken: vi.fn(),
   logout: vi.fn(),
 }));
 
@@ -26,18 +28,25 @@ function jwt(payload: Record<string, unknown>) {
   return `header.${btoa(JSON.stringify(payload))}.signature`;
 }
 
-function renderAt(path: string) {
-  return render(
+function routeAt(path: string) {
+  return (
     <MemoryRouter initialEntries={[path]}>
       <AntdApp><App /></AntdApp>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderAt(path: string, strict = false) {
+  const route = routeAt(path);
+  return render(strict ? <StrictMode>{route}</StrictMode> : route);
 }
 
 beforeEach(async () => {
   state.token = null;
   state.user = null;
+  state.loading = false;
   vi.clearAllMocks();
+  state.tryRefreshToken.mockReset();
   await i18n.changeLanguage("en-US");
 });
 
@@ -55,16 +64,48 @@ describe("public route boundary", () => {
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
   });
 
-  it("redirects an expired token to login without fetching the user", async () => {
+  it("refreshes an expired structurally valid token before fetching the user", async () => {
+    state.tryRefreshToken.mockResolvedValue(jwt({ exp: Math.floor(Date.now() / 1000) + 3600 }));
     state.token = "header.eyJleHAiOjB9.signature";
+    renderAt("/dashboard");
+    expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /login/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(state.tryRefreshToken).toHaveBeenCalledOnce());
+    expect(state.fetchUser).not.toHaveBeenCalled();
+    expect(state.logout).not.toHaveBeenCalled();
+  });
+
+  it("logs out when an expired token cannot be refreshed", async () => {
+    state.tryRefreshToken.mockResolvedValue(null);
+    state.token = "header.eyJleHAiOjB9.signature";
+    const view = renderAt("/dashboard");
+    await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
+    expect(state.fetchUser).not.toHaveBeenCalled();
+
+    state.token = null;
+    view.rerender(routeAt("/dashboard"));
+    expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+  });
+
+  it("does not refresh the same expired token twice under StrictMode", async () => {
+    state.tryRefreshToken.mockReturnValue(new Promise<string | null>(() => undefined));
+    state.token = "header.eyJleHAiOjB9.signature";
+    renderAt("/dashboard", true);
+    await waitFor(() => expect(state.tryRefreshToken).toHaveBeenCalled());
+    expect(state.tryRefreshToken).toHaveBeenCalledOnce();
+    expect(state.fetchUser).not.toHaveBeenCalled();
+  });
+
+  it("redirects a malformed token to login without fetching the user", async () => {
+    state.token = "not-a-jwt";
     renderAt("/dashboard");
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
     await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
     expect(state.fetchUser).not.toHaveBeenCalled();
   });
 
-  it("redirects a malformed token to login without fetching the user", async () => {
-    state.token = "not-a-jwt";
+  it("redirects a token with a non-object payload to login without fetching the user", async () => {
+    state.token = `header.${btoa("null")}.signature`;
     renderAt("/dashboard");
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
     await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
@@ -81,6 +122,14 @@ describe("public route boundary", () => {
 
   it("redirects a token with a nonnumeric expiry claim to login without fetching the user", async () => {
     state.token = jwt({ exp: "tomorrow" });
+    renderAt("/dashboard");
+    expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+    await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
+    expect(state.fetchUser).not.toHaveBeenCalled();
+  });
+
+  it("redirects a token with a non-finite expiry claim to login without fetching the user", async () => {
+    state.token = `header.${btoa('{"exp":1e400}')}.signature`;
     renderAt("/dashboard");
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
     await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());

@@ -2,7 +2,7 @@
 
 **更新日期**: 2026-09-12
 **当前分支**: `worktree-public-home`
-**最近提交**: 公开项目首页、双语 AI-first 内容与 Viewer 演示门控已完成；Task 6 运维文档和验收证据同步
+**最近提交**: 公开首页终审唯一修复已完成：保留过期 access token 的 refresh recovery，同时维持 malformed token fail-closed
 
 > **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
@@ -14,6 +14,7 @@
 
 - **状态**：公开 `/` 首页已完成，无需登录；AI-first 内容、中文/英文切换和 Viewer 演示门控已完成。
 - **自动化证据**：页脚链接 TDD RED `1 failed / 8 passed`（语义页脚内缺少 `View GitHub`），最小实现后 GREEN `9/9 passed`；公开首页 focused tests `5 files / 30 tests passed`；`PublicHomePage.tsx` 与其测试文件级 ESLint exit 0；前端 production build exit 0（Vite `6835 modules transformed`）。最终 `make check TEST_DB=qms_test_public_home_fix_round1` 在新建专用库上 exit 0：backend `1957 passed / 5 skipped / 3 xfailed / 2 xpassed`（25 warnings），frontend `tsc --noEmit` 与 production build 均通过。
+- **终审唯一修复**：`ProtectedRoute` 将 access token 分为 missing / malformed / expired / valid；missing 直接登录页，malformed 在 effect 中 logout 后登录页，expired 保留并对同一 token 只调用一次 `tryRefreshToken()`，刷新为 valid 后再调用一次 `fetchUser()`；null/thrown/非 valid 刷新结果均 logout，权限跳转和公开 `/` 行为不变。首轮 TDD RED 为 focused route/client `1 failed / 13 passed`（expired token 缺 loading），首轮 GREEN `2 files / 14 tests passed`；终审发现以 `/auth/me` 401 间接触发 refresh 在时钟偏差下会永久 spinner，且 token 先更新可重复 fetch，补测 RED `3 failed / 13 passed`，最终 GREEN `2 files / 16 tests passed`，六文件 aggregate `6 files / 39 tests passed`，变更文件 ESLint exit 0，production build exit 0（`6835 modules transformed`）。最终 `make check TEST_DB=qms_test_public_home_final_fix_review` 在新建专用库上 exit 0：backend `1957 passed / 5 skipped / 3 xfailed / 2 xpassed`（25 warnings），frontend `tsc --noEmit` 与 production build 均通过。
 - **浏览器验收**：真实 Playwright 在 `1440×900`、`390×844`、`320×844` 通过；三档均 `scrollWidth == clientWidth`（分别 `1432/1432`、`382/382`、`312/312`），Hero、AI、能力、架构、开源区均可读。桌面锚点导航可见，移动端隐藏；语言和系统入口始终可见，320px 头部两行均在视口内。新增页脚链接后复验 390/320px：两链接均可见，320px 页脚宽 `284px` 且完整位于 `312px` clientWidth 内。
 - **路由与可访问性**：公开 `/` 无 `/api/` 请求即可渲染；未登录访问 `/dashboard` 跳转 `/login`；中英文原地切换不 reload；实际交互链接均可由 Tab 到达且有 `3px` 可见焦点。语义页脚内新增 GitHub 与项目文档链接，复用本地化文案和既有 URL，均带 `_blank` 与 `noreferrer noopener`；真实浏览器中分别为 Tab stop 15/16。
 - **演示门控**：关闭配置时 `/login?demo=viewer` 不显示演示卡或凭据；仅用进程环境临时启用的假值可显示 Viewer 卡并填充表单，未提交、未发出 `/api/auth/login` 请求，未写入跟踪文件。启用态真实键盘验收中，首页演示 CTA 为 Tab stop 9、登录页“使用 Viewer 账号”为 Tab stop 1，两者均在视口内且有 `3px` 实线可见焦点。
