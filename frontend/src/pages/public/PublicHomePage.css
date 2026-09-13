@@ -605,6 +605,11 @@
   min-height: 4.35rem;
 }
 
+.public-home__flow-tier--intelligence {
+  border-color: var(--public-home-accent);
+  background: rgba(56, 212, 184, 0.09);
+}
+
 .public-home__open-source {
   margin-bottom: clamp(4rem, 8vw, 7rem);
   padding-top: clamp(4rem, 7vw, 6rem);
@@ -762,6 +767,7 @@
     top: auto;
     right: 50%;
     bottom: -0.65rem;
+    display: grid;
     transform: translateX(50%) rotate(90deg);
   }
 

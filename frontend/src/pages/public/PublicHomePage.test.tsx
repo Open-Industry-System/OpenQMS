@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import PublicHomePage from "./PublicHomePage";
 import i18n from "../../i18n";
@@ -57,6 +57,24 @@ describe("PublicHomePage", () => {
     auth.token = "present";
     renderPage();
     expect(screen.getAllByRole("link", { name: "Enter system" })[0]).toHaveAttribute("href", "/dashboard");
+  });
+
+  it("localizes the architecture flow and shows deployment and governance layers", async () => {
+    renderPage();
+    const englishFlow = screen.getByLabelText("OpenQMS technical data flow");
+    expect(within(englishFlow).getByText("Transactions and audit")).toBeInTheDocument();
+    expect(within(englishFlow).getByText("Knowledge graph")).toBeInTheDocument();
+    expect(within(englishFlow).getByText("Caching, models, and retrieval augmentation")).toBeInTheDocument();
+    expect(screen.getByText("Docker Compose · Alembic")).toBeInTheDocument();
+    expect(screen.getByText("Multi-tenancy · Audit trace")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("中文"));
+    const chineseFlow = await screen.findByLabelText("OpenQMS 技术数据流");
+    expect(within(chineseFlow).getByText("事务与审计")).toBeInTheDocument();
+    expect(within(chineseFlow).getByText("知识图谱")).toBeInTheDocument();
+    expect(within(chineseFlow).getByText("缓存、模型与检索增强")).toBeInTheDocument();
+    expect(screen.getByText("Docker Compose · Alembic")).toBeInTheDocument();
+    expect(screen.getByText("多租户 · 审计追踪")).toBeInTheDocument();
   });
 
   it("switches the visible copy to Chinese", async () => {

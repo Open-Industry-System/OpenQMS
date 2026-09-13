@@ -1,5 +1,7 @@
 {
+  "brand": "OpenQMS",
   "nav": {
+    "ariaLabel": "OpenQMS",
     "ai": "AI 质量智能",
     "capabilities": "核心能力",
     "architecture": "技术架构",
@@ -58,7 +60,20 @@
     "eyebrow": "MODERN OPEN ARCHITECTURE",
     "title": "可部署、可扩展，也可持续演进",
     "description": "关系数据保持事务与审计，图数据支撑知识关联，AI 服务通过可配置 Provider 接入。",
-    "stack": ["React + TypeScript", "FastAPI", "SQLAlchemy", "PostgreSQL", "Neo4j", "Redis", "Docker Compose"]
+    "stack": ["React + TypeScript", "FastAPI + SQLAlchemy", "PostgreSQL", "Neo4j", "Redis · LLM · RAG", "Docker Compose · Alembic", "多租户 · 审计追踪"],
+    "flow": {
+      "label": "OpenQMS 技术数据流",
+      "frontend": "React",
+      "frontendDetail": "TypeScript",
+      "service": "FastAPI",
+      "serviceDetail": "SQLAlchemy",
+      "database": "PostgreSQL",
+      "databaseDetail": "事务与审计",
+      "graph": "Neo4j",
+      "graphDetail": "知识图谱",
+      "intelligence": "Redis · LLM · RAG",
+      "intelligenceDetail": "缓存、模型与检索增强"
+    }
   },
   "openSource": {
     "eyebrow": "BUILT IN THE OPEN",

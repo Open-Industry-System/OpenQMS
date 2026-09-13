@@ -46,6 +46,16 @@ describe("public route boundary", () => {
     expect(state.fetchUser).not.toHaveBeenCalled();
   });
 
+  it("keeps the public home available to authenticated users", async () => {
+    state.token = "present";
+    renderAt("/");
+    expect(await screen.findByRole("heading", {
+      name: /turn quality data into actionable intelligence/i,
+    })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Enter system" })[0]).toHaveAttribute("href", "/dashboard");
+    expect(state.fetchUser).not.toHaveBeenCalled();
+  });
+
   it("still redirects an unauthenticated dashboard request to login", async () => {
     renderAt("/dashboard");
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();

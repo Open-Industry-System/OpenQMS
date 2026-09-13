@@ -1,5 +1,7 @@
 {
+  "brand": "OpenQMS",
   "nav": {
+    "ariaLabel": "OpenQMS",
     "ai": "AI quality intelligence",
     "capabilities": "Core capabilities",
     "architecture": "Architecture",
@@ -58,7 +60,20 @@
     "eyebrow": "MODERN OPEN ARCHITECTURE",
     "title": "Deployable, extensible, and built to evolve",
     "description": "Relational data preserves transactions and audit trails, graph data powers knowledge links, and configurable providers connect AI services.",
-    "stack": ["React + TypeScript", "FastAPI", "SQLAlchemy", "PostgreSQL", "Neo4j", "Redis", "Docker Compose"]
+    "stack": ["React + TypeScript", "FastAPI + SQLAlchemy", "PostgreSQL", "Neo4j", "Redis · LLM · RAG", "Docker Compose · Alembic", "Multi-tenancy · Audit trace"],
+    "flow": {
+      "label": "OpenQMS technical data flow",
+      "frontend": "React",
+      "frontendDetail": "TypeScript",
+      "service": "FastAPI",
+      "serviceDetail": "SQLAlchemy",
+      "database": "PostgreSQL",
+      "databaseDetail": "Transactions and audit",
+      "graph": "Neo4j",
+      "graphDetail": "Knowledge graph",
+      "intelligence": "Redis · LLM · RAG",
+      "intelligenceDetail": "Caching, models, and retrieval augmentation"
+    }
   },
   "openSource": {
     "eyebrow": "BUILT IN THE OPEN",

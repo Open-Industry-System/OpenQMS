@@ -40,9 +40,9 @@ export default function PublicHomePage() {
   return (
     <div className="public-home">
       <header className="public-home__header">
-        <nav className="public-home__nav" aria-label="OpenQMS">
+        <nav className="public-home__nav" aria-label={t("nav.ariaLabel")}>
           <Link className="public-home__brand" to="/">
-            OpenQMS<span>.</span>
+            {t("brand")}<span>.</span>
           </Link>
           <div className="public-home__nav-links">
             <a href="#ai">{t("nav.ai")}</a>
@@ -91,7 +91,7 @@ export default function PublicHomePage() {
               <div className="public-home__graph-orbit public-home__graph-orbit--outer" />
               <div className="public-home__graph-orbit public-home__graph-orbit--inner" />
               <div className="public-home__graph-core">
-                <span>OpenQMS</span>
+                <span>{t("brand")}</span>
                 <strong>{t("hero.graphLabel")}</strong>
               </div>
               {graphNodes.map((node, index) => (
@@ -174,20 +174,30 @@ export default function PublicHomePage() {
               {stack.map((technology) => <span key={technology}>{technology}</span>)}
             </div>
           </div>
-          <div className="public-home__architecture-flow" aria-label="React through FastAPI to PostgreSQL and Neo4j">
+          <div className="public-home__architecture-flow" aria-label={t("architecture.flow.label")}>
             <div className="public-home__flow-tier">
-              <span>React</span>
-              <small>TypeScript</small>
+              <span>{t("architecture.flow.frontend")}</span>
+              <small>{t("architecture.flow.frontendDetail")}</small>
             </div>
             <span className="public-home__flow-arrow" aria-hidden="true">→</span>
             <div className="public-home__flow-tier">
-              <span>FastAPI</span>
-              <small>SQLAlchemy</small>
+              <span>{t("architecture.flow.service")}</span>
+              <small>{t("architecture.flow.serviceDetail")}</small>
             </div>
             <span className="public-home__flow-arrow" aria-hidden="true">→</span>
             <div className="public-home__flow-destinations">
-              <div className="public-home__flow-tier"><span>PostgreSQL</span><small>transactions</small></div>
-              <div className="public-home__flow-tier"><span>Neo4j</span><small>knowledge graph</small></div>
+              <div className="public-home__flow-tier">
+                <span>{t("architecture.flow.database")}</span>
+                <small>{t("architecture.flow.databaseDetail")}</small>
+              </div>
+              <div className="public-home__flow-tier">
+                <span>{t("architecture.flow.graph")}</span>
+                <small>{t("architecture.flow.graphDetail")}</small>
+              </div>
+              <div className="public-home__flow-tier public-home__flow-tier--intelligence">
+                <span>{t("architecture.flow.intelligence")}</span>
+                <small>{t("architecture.flow.intelligenceDetail")}</small>
+              </div>
             </div>
           </div>
         </section>

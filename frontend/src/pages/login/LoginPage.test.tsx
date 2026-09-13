@@ -64,6 +64,9 @@ describe("LoginPage public Viewer demo", () => {
     vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "readonly-demo");
     vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "public-readonly-password");
     renderLogin("/login");
+    expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
     expect(screen.queryByText("public-readonly-password")).not.toBeInTheDocument();
+    expect(screen.queryByText(/viewer read-only demo/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
   });
 });
