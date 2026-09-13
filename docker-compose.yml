@@ -56,6 +56,9 @@ services:
     environment:
       BACKEND_URL: http://backend:8000
       VITE_API_BASE_URL: http://backend:8000/api
+      VITE_PUBLIC_DEMO_ENABLED: ${VITE_PUBLIC_DEMO_ENABLED:-false}
+      VITE_PUBLIC_DEMO_USERNAME: ${VITE_PUBLIC_DEMO_USERNAME:-}
+      VITE_PUBLIC_DEMO_PASSWORD: ${VITE_PUBLIC_DEMO_PASSWORD:-}
     depends_on:
       - backend
 
