@@ -2,7 +2,6 @@ import logging
 import time
 import uuid
 from collections import defaultdict
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -14,7 +13,6 @@ from app.core.permissions import Module, PermissionLevel, require_permission
 from app.core.product_line_filter import get_user_product_line_codes
 from app.core.security import (
     create_access_token,
-    create_refresh_token,
     decode_refresh_token,
     hash_password,
     verify_password,
@@ -35,6 +33,11 @@ from app.schemas.auth import (
 )
 from app.services import factory_service, permission_service, user_service
 from app.services.permission_service import get_role_permissions
+from app.services.refresh_session_service import (
+    issue_refresh_session,
+    rotate_refresh_session,
+    upgrade_legacy_refresh_token,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -143,12 +146,11 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     if tenant:
         token_data["tenant_id"] = str(tenant.id)
     token = create_access_token(data=token_data)
-    refresh_token, refresh_expires = create_refresh_token(
-        str(user.user_id),
+    refresh_token, _refresh_expires = await issue_refresh_session(
+        db,
+        user.user_id,
         tenant_id=str(tenant.id) if tenant else None,
     )
-    user.refresh_token = refresh_token
-    user.refresh_token_expires = refresh_expires
     db.add(LoginAuditLog(
         username=user.username, user_id=user.user_id, success=True,
         failure_reason=None, ip_address=client_ip, user_agent=user_agent,
@@ -274,33 +276,38 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
-    if user is None or user.refresh_token != req.refresh_token:
+    if user is None:
         logger.warning("AUTH_REFRESH_INVALID user_id=%s ip=%s", user_id, client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
-    if user.refresh_token_expires and user.refresh_token_expires < datetime.now(UTC):
-        logger.warning("AUTH_REFRESH_EXPIRED user_id=%s ip=%s", user_id, client_ip)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
-    # Preserve multi-tenant claims in refreshed token.
-    # Prefer tenant_id from the refresh token payload; fall back to the
-    # request-resolved tenant for backward compatibility.
+
+    # Preserve multi-tenant claims in refreshed tokens. Prefer the signed claim;
+    # request-resolved tenant is only needed while upgrading legacy tokens.
+    tenant = getattr(request.state, "tenant", None)
+    tenant_id = payload.get("tenant_id") or (str(tenant.id) if tenant else None)
+    if "sid" in payload:
+        rotated = await rotate_refresh_session(db, user, req.refresh_token, payload)
+    else:
+        rotated = await upgrade_legacy_refresh_token(
+            db,
+            user,
+            req.refresh_token,
+            tenant_id=tenant_id,
+        )
+    if rotated is None:
+        logger.warning("AUTH_REFRESH_INVALID user_id=%s ip=%s", user_id, client_ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    new_refresh, _new_expires = rotated
+
     token_data = {
         "sub": str(user.user_id),
         "role_id": str(user.role_id),
         "factory_id": str(user.factory_id) if user.factory_id else None,
     }
-    tenant = getattr(request.state, "tenant", None)
-    tenant_id = payload.get("tenant_id") or (str(tenant.id) if tenant else None)
     if tenant_id:
         token_data["tenant_id"] = tenant_id
     new_access = create_access_token(data=token_data)
-    new_refresh, new_expires = create_refresh_token(
-        str(user.user_id),
-        tenant_id=tenant_id,
-    )
-    user.refresh_token = new_refresh
-    user.refresh_token_expires = new_expires
     await db.commit()
     logger.info("AUTH_REFRESH_SUCCESS user_id=%s ip=%s", user.user_id, client_ip)
     return RefreshTokenResponse(access_token=new_access, refresh_token=new_refresh)
