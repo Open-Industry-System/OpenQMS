@@ -1,3 +1,4 @@
+import hmac
 import logging
 import time
 import uuid
@@ -118,13 +119,28 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     client_ip = request.client.host if request.client else "unknown"
     _check_login_rate_limit(client_ip)
     user_agent = request.headers.get("user-agent", "")
+    result = await db.execute(select(User).where(User.username == req.username))
+    user = result.scalar_one_or_none()
+    verified_password_hash = user.password_hash if user is not None else None
+    if user is None or not verify_password(req.password, verified_password_hash):
+        logger.warning("AUTH_LOGIN_FAILED username=%s ip=%s ua=%s", req.username, client_ip, user_agent[:200])
+        db.add(LoginAuditLog(
+            username=req.username, user_id=None, success=False,
+            failure_reason="Invalid credentials", ip_address=client_ip, user_agent=user_agent,
+        ))
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
     result = await db.execute(
         select(User)
-        .where(User.username == req.username)
+        .where(User.user_id == user.user_id)
         .with_for_update(of=User)
+        .execution_options(populate_existing=True)
     )
     user = result.scalar_one_or_none()
-    if user is None or not verify_password(req.password, user.password_hash):
+    if user is None or not hmac.compare_digest(
+        user.password_hash, verified_password_hash
+    ):
         logger.warning("AUTH_LOGIN_FAILED username=%s ip=%s ua=%s", req.username, client_ip, user_agent[:200])
         db.add(LoginAuditLog(
             username=req.username, user_id=None, success=False,

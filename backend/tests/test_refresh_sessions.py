@@ -327,25 +327,39 @@ async def test_password_reset_revokes_all_target_tokens_after_commit(sessionmake
 
 
 @pytest.mark.asyncio
-async def test_password_reset_waits_for_login_and_revokes_issued_session(
+async def test_password_reset_between_login_phases_rejects_old_credentials(
     sessionmaker, monkeypatch
 ):
     target_id = uuid.uuid4()
     actor_id = uuid.uuid4()
     target_username = f"lock_login_target_{uuid.uuid4().hex[:8]}"
-    login_validated = asyncio.Event()
-    release_login = asyncio.Event()
-    original_issue_refresh_session = auth_api.issue_refresh_session
+    phase_one_read = asyncio.Event()
+    before_phase_two_lock = asyncio.Event()
+    release_phase_two_lock = asyncio.Event()
     login_task = None
     reset_task = None
     previous_override = app.dependency_overrides.get(get_db)
 
-    async def pause_after_credential_validation(db, user_id, tenant_id=None):
-        login_validated.set()
-        await release_login.wait()
-        return await original_issue_refresh_session(db, user_id, tenant_id=tenant_id)
+    class PausingSession:
+        def __init__(self, session):
+            self._session = session
 
-    monkeypatch.setattr(auth_api, "issue_refresh_session", pause_after_credential_validation)
+        async def execute(self, statement, *args, **kwargs):
+            is_locked = getattr(statement, "_for_update_arg", None) is not None
+            if not is_locked and not phase_one_read.is_set():
+                phase_one_read.set()
+            elif (
+                is_locked
+                and phase_one_read.is_set()
+                and not before_phase_two_lock.is_set()
+            ):
+                before_phase_two_lock.set()
+                await release_phase_two_lock.wait()
+            return await self._session.execute(statement, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
     monkeypatch.setattr(
         "app.services.user_service.hash_password",
         lambda _password: "new-password-hash",
@@ -381,7 +395,7 @@ async def test_password_reset_waits_for_login_and_revokes_issued_session(
 
         async def request_db():
             async with sessionmaker() as session:
-                yield session
+                yield PausingSession(session)
 
         async def reset_password():
             async with sessionmaker() as reset_db:
@@ -410,24 +424,27 @@ async def test_password_reset_waits_for_login_and_revokes_issued_session(
                     json={"username": target_username, "password": VALID_PASSWORD},
                 )
             )
-            await login_validated.wait()
+            await asyncio.wait_for(phase_one_read.wait(), timeout=0.2)
+            await asyncio.wait_for(before_phase_two_lock.wait(), timeout=0.2)
 
             reset_task = asyncio.create_task(reset_password())
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.shield(reset_task), timeout=0.2)
-
-            release_login.set()
-            login_response = await login_task
             await reset_task
-            assert login_response.status_code == 200
 
-            refresh_response = await client.post(
-                "/api/auth/refresh",
-                json={"refresh_token": login_response.json()["refresh_token"]},
-            )
-            assert refresh_response.status_code == 401
+            release_phase_two_lock.set()
+            login_response = await login_task
+            assert login_response.status_code == 401
+
+        async with sessionmaker() as verify_db:
+            sessions = (
+                await verify_db.execute(
+                    select(UserRefreshSession).where(
+                        UserRefreshSession.user_id == target_id
+                    )
+                )
+            ).scalars().all()
+            assert sessions == []
     finally:
-        release_login.set()
+        release_phase_two_lock.set()
         if login_task is not None:
             await asyncio.gather(login_task, return_exceptions=True)
         if reset_task is not None:
@@ -456,6 +473,82 @@ async def test_password_reset_waits_for_login_and_revokes_issued_session(
             await cleanup_db.execute(
                 delete(User).where(User.user_id.in_([target_id, actor_id]))
             )
+            await cleanup_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_wrong_password_login_does_not_wait_on_user_lock(sessionmaker, monkeypatch):
+    target_id = uuid.uuid4()
+    target_username = f"wrong_password_target_{uuid.uuid4().hex[:8]}"
+    previous_override = app.dependency_overrides.get(get_db)
+    verify_called = asyncio.Event()
+    login_task = None
+
+    def wrong_password(_password, _hash):
+        verify_called.set()
+        return False
+
+    monkeypatch.setattr(auth_api, "verify_password", wrong_password)
+    try:
+        async with sessionmaker() as setup_db:
+            role = (
+                await setup_db.execute(
+                    select(RoleDefinition).where(RoleDefinition.role_key == "viewer")
+                )
+            ).scalar_one()
+            setup_db.add(
+                User(
+                    user_id=target_id,
+                    username=target_username,
+                    display_name="Wrong Password Target",
+                    password_hash="password-hash",
+                    role_id=role.id,
+                    legacy_role="viewer",
+                    is_active=True,
+                )
+            )
+            await setup_db.commit()
+
+        async def request_db():
+            async with sessionmaker() as session:
+                yield session
+
+        async with sessionmaker() as lock_db:
+            await lock_db.execute(
+                select(User)
+                .where(User.user_id == target_id)
+                .with_for_update(of=User)
+            )
+            app.dependency_overrides[get_db] = request_db
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                login_task = asyncio.create_task(
+                    client.post(
+                        "/api/auth/login",
+                        json={"username": target_username, "password": "wrong"},
+                    )
+                )
+                try:
+                    await asyncio.wait_for(verify_called.wait(), timeout=0.2)
+                    verification_reached = True
+                except asyncio.TimeoutError:
+                    verification_reached = False
+                finally:
+                    await lock_db.rollback()
+                response = await login_task
+            assert verification_reached
+            assert response.status_code == 401
+    finally:
+        if previous_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = previous_override
+        async with sessionmaker() as cleanup_db:
+            await cleanup_db.execute(
+                delete(LoginAuditLog).where(LoginAuditLog.username == target_username)
+            )
+            await cleanup_db.execute(delete(User).where(User.user_id == target_id))
             await cleanup_db.commit()
 
 
