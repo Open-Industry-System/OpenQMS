@@ -118,7 +118,11 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     client_ip = request.client.host if request.client else "unknown"
     _check_login_rate_limit(client_ip)
     user_agent = request.headers.get("user-agent", "")
-    result = await db.execute(select(User).where(User.username == req.username))
+    result = await db.execute(
+        select(User)
+        .where(User.username == req.username)
+        .with_for_update(of=User)
+    )
     user = result.scalar_one_or_none()
     if user is None or not verify_password(req.password, user.password_hash):
         logger.warning("AUTH_LOGIN_FAILED username=%s ip=%s ua=%s", req.username, client_ip, user_agent[:200])

@@ -111,6 +111,7 @@ async def test_password_reset_rollback_restores_hash_and_refresh_sessions(sessio
     actor_id = uuid.uuid4()
     original_hash = "old-password-hash"
     original_refresh_token = "old-refresh-token"
+    original_refresh_expires = datetime.now(UTC) + timedelta(days=7)
 
     async with sessionmaker() as setup_db:
         role = (
@@ -128,7 +129,7 @@ async def test_password_reset_rollback_restores_hash_and_refresh_sessions(sessio
                 legacy_role="viewer",
                 is_active=True,
                 refresh_token=original_refresh_token,
-                refresh_token_expires=datetime.now(UTC) + timedelta(days=7),
+                refresh_token_expires=original_refresh_expires,
             ),
             User(
                 user_id=actor_id,
@@ -191,6 +192,7 @@ async def test_password_reset_rollback_restores_hash_and_refresh_sessions(sessio
             ).scalars().all()
             assert restored.password_hash == original_hash
             assert restored.refresh_token == original_refresh_token
+            assert restored.refresh_token_expires == original_refresh_expires
             assert all(row.revoked_at is None for row in restored_sessions)
     finally:
         async with sessionmaker() as cleanup_db:
