@@ -15,6 +15,7 @@ from app.models.factory import Factory, UserFactory
 from app.models.role import RoleDefinition
 from app.models.user import User
 from app.schemas.auth import validate_password_complexity
+from app.services.refresh_session_service import revoke_all_refresh_sessions
 
 # 显式 null 视为非法的字段（不可"清空"）
 _NON_NULLABLE_FIELDS = ("role_key", "password", "is_active", "factory_ids")
@@ -119,6 +120,7 @@ async def update_user(
         user.legacy_role = new_role_key
     if new_password is not None:
         user.password_hash = hash_password(new_password)
+        await revoke_all_refresh_sessions(db, user.user_id)
         user.refresh_token = None
         user.refresh_token_expires = None
         changes["password"] = "[reset]"

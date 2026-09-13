@@ -1,12 +1,15 @@
 """user_service.update_user / delete_user — validation, guards, factory set (DB)."""
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.orm import selectinload
 
 from app.models.factory import Factory, UserFactory
 from app.models.role import RoleDefinition
 from app.models.user import User
+from app.models.user_refresh_session import UserRefreshSession
 from app.services import user_service
 
 pytestmark = pytest.mark.requires_db
@@ -52,12 +55,156 @@ async def test_update_email_empty_string_clears(db, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_update_password_resets_hash_and_refresh_token(db, admin_user):
+async def test_update_password_resets_hash_and_revokes_target_refresh_sessions(db, admin_user):
     target = await _make_user(db, "t_pw")
-    target.refresh_token = "old"; await db.flush()
-    user = await user_service.update_user(db, target.user_id, {"password": "ValidPass123!"}, admin_user.user_id)
+    other = await _make_user(db, "t_pw_other")
+    target.refresh_token = "old"
+    target.refresh_token_expires = datetime.now(UTC) + timedelta(days=7)
+    target_sessions = [
+        UserRefreshSession(
+            user_id=target.user_id,
+            token_hash=uuid.uuid4().hex,
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+        ),
+        UserRefreshSession(
+            user_id=target.user_id,
+            token_hash=uuid.uuid4().hex,
+            expires_at=datetime.now(UTC) + timedelta(days=7),
+        ),
+    ]
+    other_session = UserRefreshSession(
+        user_id=other.user_id,
+        token_hash=uuid.uuid4().hex,
+        expires_at=datetime.now(UTC) + timedelta(days=7),
+    )
+    db.add_all([*target_sessions, other_session])
+    await db.flush()
+
+    user = await user_service.update_user(
+        db, target.user_id, {"password": "ValidPass123!"}, admin_user.user_id
+    )
+    await db.flush()
+    refreshed_sessions = (
+        await db.execute(
+            select(UserRefreshSession)
+            .where(UserRefreshSession.user_id.in_([target.user_id, other.user_id]))
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
+    target_sessions = [
+        row for row in refreshed_sessions if row.user_id == target.user_id
+    ]
+    other_session = next(
+        row for row in refreshed_sessions if row.user_id == other.user_id
+    )
+
     assert user.password_hash != "h"
-    assert user.refresh_token is None and user.refresh_token_expires is None
+    assert target.refresh_token is None
+    assert target.refresh_token_expires is None
+    assert all(row.revoked_at is not None for row in target_sessions)
+    assert other_session.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_password_reset_rollback_restores_hash_and_refresh_sessions(sessionmaker):
+    target_id = uuid.uuid4()
+    actor_id = uuid.uuid4()
+    original_hash = "old-password-hash"
+    original_refresh_token = "old-refresh-token"
+
+    async with sessionmaker() as setup_db:
+        role = (
+            await setup_db.execute(
+                select(RoleDefinition).where(RoleDefinition.role_key == "viewer")
+            )
+        ).scalar_one()
+        setup_db.add_all([
+            User(
+                user_id=target_id,
+                username=f"rollback_target_{uuid.uuid4().hex[:8]}",
+                display_name="Rollback Target",
+                password_hash=original_hash,
+                role_id=role.id,
+                legacy_role="viewer",
+                is_active=True,
+                refresh_token=original_refresh_token,
+                refresh_token_expires=datetime.now(UTC) + timedelta(days=7),
+            ),
+            User(
+                user_id=actor_id,
+                username=f"rollback_actor_{uuid.uuid4().hex[:8]}",
+                display_name="Rollback Actor",
+                password_hash="actor-password-hash",
+                role_id=role.id,
+                legacy_role="viewer",
+                is_active=True,
+            ),
+        ])
+        setup_db.add_all([
+            UserRefreshSession(
+                user_id=target_id,
+                token_hash=uuid.uuid4().hex,
+                expires_at=datetime.now(UTC) + timedelta(days=7),
+            ),
+            UserRefreshSession(
+                user_id=target_id,
+                token_hash=uuid.uuid4().hex,
+                expires_at=datetime.now(UTC) + timedelta(days=7),
+            ),
+        ])
+        await setup_db.commit()
+
+    try:
+        async with sessionmaker() as change_db:
+            target = (
+                await change_db.execute(
+                    select(User)
+                    .options(selectinload(User.role_definition))
+                    .where(User.user_id == target_id)
+                )
+            ).scalar_one()
+            await user_service.update_user(
+                change_db,
+                target_id,
+                {"password": "ValidPass123!"},
+                actor_id,
+            )
+            await change_db.flush()
+            assert target.password_hash != original_hash
+
+            await change_db.rollback()
+            change_db.expire_all()
+
+            restored = (
+                await change_db.execute(
+                    select(User)
+                    .options(selectinload(User.role_definition))
+                    .where(User.user_id == target_id)
+                )
+            ).scalar_one()
+            restored_sessions = (
+                await change_db.execute(
+                    select(UserRefreshSession).where(
+                        UserRefreshSession.user_id == target_id
+                    )
+                )
+            ).scalars().all()
+            assert restored.password_hash == original_hash
+            assert restored.refresh_token == original_refresh_token
+            assert all(row.revoked_at is None for row in restored_sessions)
+    finally:
+        async with sessionmaker() as cleanup_db:
+            await cleanup_db.execute(
+                delete(UserRefreshSession).where(
+                    UserRefreshSession.user_id == target_id
+                )
+            )
+            await cleanup_db.execute(
+                delete(User).where(
+                    User.user_id.in_([target_id, actor_id])
+                )
+            )
+            await cleanup_db.commit()
 
 
 @pytest.mark.asyncio

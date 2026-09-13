@@ -2,7 +2,7 @@ import hashlib
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import create_refresh_token
@@ -22,6 +22,23 @@ async def cleanup_expired_refresh_sessions(
             UserRefreshSession.user_id == user_id,
             UserRefreshSession.expires_at < datetime.now(UTC),
         )
+    )
+
+
+async def revoke_all_refresh_sessions(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    revoked_at: datetime | None = None,
+) -> None:
+    timestamp = revoked_at or datetime.now(UTC)
+    await db.execute(
+        update(UserRefreshSession)
+        .where(
+            UserRefreshSession.user_id == user_id,
+            UserRefreshSession.revoked_at.is_(None),
+        )
+        .values(revoked_at=timestamp)
     )
 
 

@@ -1,21 +1,25 @@
 import asyncio
 import hashlib
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
 from sqlalchemy import delete, select, text
+from sqlalchemy.orm import selectinload
 
 from app.api import auth as auth_api
 from app.config import settings
 from app.core.security import create_refresh_token, decode_refresh_token, hash_password
 from app.database import get_db
 from app.main import app
+from app.models.audit import AuditLog
 from app.models.role import RoleDefinition
 from app.models.user import User
 from app.models.user_refresh_session import UserRefreshSession
 from app.services.refresh_session_service import issue_refresh_session
+from app.services.user_service import update_user
 
 pytestmark = pytest.mark.requires_db
 
@@ -221,6 +225,104 @@ async def test_legacy_refresh_token_upgrades_once_and_clears_legacy_fields(
     ).scalars().all()
     assert len(rows) == 1
     assert reused.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_password_reset_revokes_all_target_tokens_after_commit(sessionmaker):
+    target_id = uuid.uuid4()
+    other_id = uuid.uuid4()
+    target_tokens: list[str] = []
+    other_token = ""
+    try:
+        async with sessionmaker() as setup_db:
+            role = (
+                await setup_db.execute(
+                    select(RoleDefinition).where(RoleDefinition.role_key == "viewer")
+                )
+            ).scalar_one()
+            setup_db.add_all([
+                User(
+                    user_id=target_id,
+                    username=f"reset_target_{uuid.uuid4().hex[:8]}",
+                    display_name="Reset Target",
+                    password_hash=hash_password(VALID_PASSWORD),
+                    role_id=role.id,
+                    legacy_role="viewer",
+                    is_active=True,
+                ),
+                User(
+                    user_id=other_id,
+                    username=f"reset_other_{uuid.uuid4().hex[:8]}",
+                    display_name="Reset Other",
+                    password_hash=hash_password(VALID_PASSWORD),
+                    role_id=role.id,
+                    legacy_role="viewer",
+                    is_active=True,
+                ),
+            ])
+            await setup_db.flush()
+            target_tokens = [
+                (await issue_refresh_session(setup_db, target_id))[0],
+                (await issue_refresh_session(setup_db, target_id))[0],
+            ]
+            other_token = (await issue_refresh_session(setup_db, other_id))[0]
+            target = (
+                await setup_db.execute(
+                    select(User)
+                    .options(selectinload(User.role_definition))
+                    .where(User.user_id == target_id)
+                )
+            ).scalar_one()
+            await update_user(
+                setup_db,
+                target.user_id,
+                {"password": "ValidPass123!"},
+                other_id,
+            )
+            await setup_db.commit()
+
+        async def request_db():
+            async with sessionmaker() as session:
+                yield session
+
+        previous_override = app.dependency_overrides.get(get_db)
+        app.dependency_overrides[get_db] = request_db
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                target_responses = [
+                    await client.post("/api/auth/refresh", json={"refresh_token": token})
+                    for token in target_tokens
+                ]
+                other_response = await client.post(
+                    "/api/auth/refresh", json={"refresh_token": other_token}
+                )
+
+            assert all(response.status_code == 401 for response in target_responses)
+            assert other_response.status_code == 200
+        finally:
+            if previous_override is None:
+                app.dependency_overrides.pop(get_db, None)
+            else:
+                app.dependency_overrides[get_db] = previous_override
+    finally:
+        async with sessionmaker() as cleanup_db:
+            await cleanup_db.execute(
+                delete(AuditLog).where(
+                    AuditLog.record_id == target_id,
+                    AuditLog.table_name == "users",
+                )
+            )
+            await cleanup_db.execute(
+                delete(UserRefreshSession).where(
+                    UserRefreshSession.user_id.in_([target_id, other_id])
+                )
+            )
+            await cleanup_db.execute(
+                delete(User).where(User.user_id.in_([target_id, other_id]))
+            )
+            await cleanup_db.commit()
 
 
 @pytest.mark.asyncio
