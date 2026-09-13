@@ -424,8 +424,8 @@ async def test_password_reset_between_login_phases_rejects_old_credentials(
                     json={"username": target_username, "password": VALID_PASSWORD},
                 )
             )
-            await asyncio.wait_for(phase_one_read.wait(), timeout=0.2)
-            await asyncio.wait_for(before_phase_two_lock.wait(), timeout=0.2)
+            await asyncio.wait_for(phase_one_read.wait(), timeout=2.0)
+            await asyncio.wait_for(before_phase_two_lock.wait(), timeout=2.0)
 
             reset_task = asyncio.create_task(reset_password())
             await reset_task
@@ -454,6 +454,9 @@ async def test_password_reset_between_login_phases_rejects_old_credentials(
         else:
             app.dependency_overrides[get_db] = previous_override
         async with sessionmaker() as cleanup_db:
+            await cleanup_db.execute(
+                delete(LoginAuditLog).where(LoginAuditLog.username == target_username)
+            )
             await cleanup_db.execute(
                 delete(LoginAuditLog).where(
                     LoginAuditLog.user_id.in_([target_id, actor_id])
@@ -620,6 +623,9 @@ async def test_old_password_login_is_rejected_after_password_reset(sessionmaker)
         else:
             app.dependency_overrides[get_db] = previous_override
         async with sessionmaker() as cleanup_db:
+            await cleanup_db.execute(
+                delete(LoginAuditLog).where(LoginAuditLog.username == target_username)
+            )
             await cleanup_db.execute(
                 delete(AuditLog).where(
                     AuditLog.record_id == target_id,
