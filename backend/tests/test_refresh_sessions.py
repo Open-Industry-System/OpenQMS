@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -54,19 +53,21 @@ async def make_loginable_viewer(db, default_factory, username: str) -> User:
 @pytest.mark.asyncio
 async def test_refresh_sessions_allow_multiple_rows_per_user(db, admin_user):
     first = UserRefreshSession(
-        session_id=uuid.uuid4(),
         user_id=admin_user.user_id,
         token_hash=hashlib.sha256(b"first").hexdigest(),
         expires_at=datetime.now(UTC) + timedelta(days=7),
     )
     second = UserRefreshSession(
-        session_id=uuid.uuid4(),
         user_id=admin_user.user_id,
         token_hash=hashlib.sha256(b"second").hexdigest(),
         expires_at=datetime.now(UTC) + timedelta(days=7),
     )
     db.add_all([first, second])
     await db.flush()
+
+    assert first.session_id is not None
+    assert second.session_id is not None
+    assert first.session_id != second.session_id
 
     rows = (
         await db.execute(
