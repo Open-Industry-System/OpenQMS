@@ -17,6 +17,8 @@ interface AuthState {
   tryRefreshToken: () => Promise<string | null>;
 }
 
+let refreshPromise: Promise<string | null> | null = null;
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   token: localStorage.getItem("access_token"),
@@ -82,19 +84,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ currentFactoryId: factoryId });
   },
 
-  tryRefreshToken: async () => {
+  tryRefreshToken: () => {
+    if (refreshPromise) return refreshPromise;
+
     const refresh_token = localStorage.getItem("refresh_token");
-    if (!refresh_token) return null;
-    try {
-      const resp = await apiRefreshToken(refresh_token);
-      localStorage.setItem("access_token", resp.access_token);
-      localStorage.setItem("refresh_token", resp.refresh_token);
-      set({ token: resp.access_token });
-      return resp.access_token;
-    } catch {
-      // Refresh failed — clear tokens and let caller handle redirect
-      get().logout();
-      return null;
-    }
+    if (!refresh_token) return Promise.resolve(null);
+
+    refreshPromise = (async () => {
+      try {
+        const resp = await apiRefreshToken(refresh_token);
+        localStorage.setItem("access_token", resp.access_token);
+        localStorage.setItem("refresh_token", resp.refresh_token);
+        set({ token: resp.access_token });
+        return resp.access_token;
+      } catch {
+        // Refresh failed — clear tokens and let caller handle redirect
+        get().logout();
+        return null;
+      }
+    })().finally(() => {
+      refreshPromise = null;
+    });
+
+    return refreshPromise;
   },
 }));
