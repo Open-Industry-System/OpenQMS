@@ -1,0 +1,75 @@
+{
+  "nav": {
+    "ai": "AI 质量智能",
+    "capabilities": "核心能力",
+    "architecture": "技术架构",
+    "openSource": "开源社区",
+    "enterSystem": "进入系统"
+  },
+  "hero": {
+    "eyebrow": "AI-NATIVE QUALITY MANAGEMENT",
+    "title": "让质量数据，转化为可执行智能。",
+    "description": "OpenQMS 将 AI 嵌入 FMEA、8D、过程分析与知识复用流程，让质量工程师更快发现风险、验证原因并沉淀经验。",
+    "demo": "在线体验",
+    "login": "进入系统",
+    "github": "查看 GitHub",
+    "graphLabel": "质量智能核心",
+    "graphNodes": ["FMEA 风险", "SPC 过程", "8D 闭环", "供应商质量", "知识图谱"]
+  },
+  "metrics": [
+    { "value": "20+", "label": "质量模块" },
+    { "value": "AIAG-VDA", "label": "七步法" },
+    { "value": "IATF 16949", "label": "核心流程覆盖" },
+    { "value": "MIT", "label": "开源许可" }
+  ],
+  "ai": {
+    "eyebrow": "HOW AI WORKS IN OPENQMS",
+    "title": "AI 是质量工程师的副驾驶，不是黑盒决策者",
+    "description": "系统先从质量上下文中检索事实，再融合生成建议，由人确认后写入业务流程。每条建议保留来源、置信度和审计轨迹。",
+    "stages": [
+      { "index": "01 · CONTEXT", "title": "连接质量上下文", "body": "FMEA、CAPA、SPC、IQC、MES、供应商与经验库" },
+      { "index": "02 · RETRIEVAL", "title": "多路径知识召回", "body": "知识图谱、语义搜索、规则引擎与历史案例" },
+      { "index": "03 · REASONING", "title": "融合与生成建议", "body": "候选去重、排序、上下文增强与 LLM 结构化输出" },
+      { "index": "04 · GOVERNANCE", "title": "人工确认并留痕", "body": "权限门禁、人工审批、来源标签与审计日志" }
+    ],
+    "useCases": [
+      { "title": "FMEA 智能推荐", "body": "辅助补全功能、失效、原因、控制措施与优化行动。" },
+      { "title": "8D 根因与措施", "body": "以 12 阶段编排多类质量数据，提供可解释候选建议。" },
+      { "title": "质量知识问答", "body": "RAG 混合检索历史文档和节点，并按权限范围返回答案。" },
+      { "title": "趋势解读与草拟", "body": "辅助解释质量趋势，生成 8D 步骤和管理评审内容草稿。" }
+    ],
+    "trust": ["来源可见", "采纳可审计", "工厂数据隔离", "权限范围约束", "输入 / 输出 Guardrails", "多 Provider 配置"],
+    "principleLabel": "核心原则",
+    "principle": "AI 不绕过业务规则，也不替代工程师审批；它把分散在系统里的质量知识带到决策现场。"
+  },
+  "capabilities": {
+    "eyebrow": "CONNECTED QUALITY SYSTEM",
+    "title": "AI 之下，是完整的质量业务闭环",
+    "items": [
+      { "title": "风险与策划", "body": "FMEA · APQP · PPAP · 控制计划" },
+      { "title": "过程与测量", "body": "SPC · MSA · IQC · 特殊特性" },
+      { "title": "问题与改进", "body": "8D/CAPA · SCAR · 客诉 · RMA" },
+      { "title": "供应链质量", "body": "供应商绩效 · 风险预警 · 客户质量" },
+      { "title": "治理与合规", "body": "审计 · 管理评审 · RBAC · 多工厂" },
+      { "title": "开放集成", "body": "ERP · MES · PLM · API" }
+    ]
+  },
+  "architecture": {
+    "eyebrow": "MODERN OPEN ARCHITECTURE",
+    "title": "可部署、可扩展，也可持续演进",
+    "description": "关系数据保持事务与审计，图数据支撑知识关联，AI 服务通过可配置 Provider 接入。",
+    "stack": ["React + TypeScript", "FastAPI", "SQLAlchemy", "PostgreSQL", "Neo4j", "Redis", "Docker Compose"]
+  },
+  "openSource": {
+    "eyebrow": "BUILT IN THE OPEN",
+    "title": "从源码开始，构建你的质量系统",
+    "description": "查看源代码和部署文档，或使用 Viewer 只读账号体验完整质量流程。",
+    "github": "查看 GitHub",
+    "docs": "阅读项目文档",
+    "demo": "进入演示系统"
+  },
+  "footer": {
+    "license": "OpenQMS · MIT License",
+    "tagline": "面向制造业的开源质量管理平台"
+  }
+}
