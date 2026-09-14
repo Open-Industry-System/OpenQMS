@@ -11,18 +11,8 @@ const client = axios.create({
 // NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
 const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories"];
 
-// Guard against concurrent refresh attempts
-let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
-
-function onRefreshed(token: string) {
-  refreshSubscribers.forEach((cb) => cb(token));
-  refreshSubscribers = [];
-}
-
-function addRefreshSubscriber(cb: (token: string) => void) {
-  refreshSubscribers.push(cb);
-}
+// Shared by every request that receives a 401 while refresh is in flight.
+let refreshPromise: Promise<string | null> | null = null;
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");
@@ -75,40 +65,33 @@ client.interceptors.response.use(
       if (originalRequest.url?.includes("/auth/login")) {
         return Promise.reject(error);
       }
-      // Don't retry refresh endpoint or already-retried requests
-      if (originalRequest.url?.includes("/auth/refresh") || originalRequest._retry) {
+      // A refresh request must reject back to tryRefreshToken(), which owns
+      // generation-aware state cleanup. Retried requests fail closed.
+      if (originalRequest.url?.includes("/auth/refresh")) {
+        return Promise.reject(error);
+      }
+      if (originalRequest._retry) {
         useAuthStore.getState().logout();
         window.location.href = "/login";
         return Promise.reject(error);
       }
 
-      if (!isRefreshing) {
-        isRefreshing = true;
-        try {
-          const newToken = await useAuthStore.getState().tryRefreshToken();
-          isRefreshing = false;
-          if (newToken) {
-            onRefreshed(newToken);
-            // Retry the original request with the new token
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            return client(originalRequest);
-          }
-        } catch {
-          isRefreshing = false;
-          useAuthStore.getState().logout();
-          window.location.href = "/login";
-          return Promise.reject(error);
-        }
-        isRefreshing = false;
+      originalRequest._retry = true;
+      if (!refreshPromise) {
+        refreshPromise = useAuthStore.getState().tryRefreshToken()
+          .catch(() => null)
+          .finally(() => { refreshPromise = null; });
       }
 
-      // Queue pending requests while refresh is in flight
-      return new Promise((resolve) => {
-        addRefreshSubscriber((token: string) => {
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          resolve(client(originalRequest));
-        });
-      });
+      const newToken = await refreshPromise;
+      if (newToken) {
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return client(originalRequest);
+      }
+
+      useAuthStore.getState().logout();
+      window.location.href = "/login";
+      return Promise.reject(error);
     }
 
     if (error.response?.status === 403) {

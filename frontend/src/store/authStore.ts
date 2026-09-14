@@ -45,7 +45,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("current_factory_id");
-    set({ user: null, token: null, factoryScope: null, factories: [], currentFactoryId: null });
+    set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
   },
 
   fetchUser: async () => {
@@ -83,16 +83,25 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   tryRefreshToken: async () => {
-    const refresh_token = localStorage.getItem("refresh_token");
-    if (!refresh_token) return null;
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (!refreshToken) return null;
+
+    const currentAccessToken = () => {
+      const accessToken = localStorage.getItem("access_token");
+      if (accessToken !== get().token) set({ token: accessToken });
+      return accessToken;
+    };
+
     try {
-      const resp = await apiRefreshToken(refresh_token);
+      const resp = await apiRefreshToken(refreshToken);
+      if (localStorage.getItem("refresh_token") !== refreshToken) return currentAccessToken();
+
       localStorage.setItem("access_token", resp.access_token);
       localStorage.setItem("refresh_token", resp.refresh_token);
       set({ token: resp.access_token });
       return resp.access_token;
     } catch {
-      // Refresh failed — clear tokens and let caller handle redirect
+      if (localStorage.getItem("refresh_token") !== refreshToken) return currentAccessToken();
       get().logout();
       return null;
     }

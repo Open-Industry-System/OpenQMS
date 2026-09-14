@@ -39,9 +39,17 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   which POSTs `/auth/login`, persists `access_token`, `refresh_token`,
   and the default `current_factory_id` to `localStorage`, then sets
   the store.
-- **Initial hydration** — `ProtectedRoute` in `App.tsx` calls
-  `fetchUser()` when a token exists but `user` is null
-  (e.g. after a page reload).
+- **Initial hydration** — `ProtectedRoute` in `App.tsx` classifies the stored
+  JWT before starting user hydration: missing and malformed tokens navigate to
+  login (the malformed case clears auth in an effect); expired, structurally
+  valid tokens remain on an `aria-busy` spinner while exactly one
+  `tryRefreshToken()` call runs for that token, including StrictMode; valid
+  tokens with no user call `fetchUser()`.
+- **Refresh generation guard** — `tryRefreshToken()` captures the request's
+  refresh token. It only writes a response or clears state if that same token
+  still exists in storage. A login, refresh rotation, or logout during the
+  request wins: the stale request synchronizes only the access-token slice
+  when necessary and returns the current token without overwriting its user.
 
 ## Conventions & Constraints
 
@@ -57,11 +65,11 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   `fetchUser`, and `tryRefreshToken`. `App.tsx` reads `localStorage` at
   startup to seed `token`, and `ProtectedRoute` validates expiry
   client-side via `JSON.parse(atob(token.split('.')[1])).exp`.
-- **Refresh is awaited by the axios interceptor.** `tryRefreshToken()`
-  is invoked from `api/client.ts` 401 handling. It returns the new
-  access token or `null`; the interceptor queues retried requests
-  while the refresh is in flight. Failure path calls `logout()` and
-  the interceptor redirects to `/login`.
+- **Refresh is generation-safe.** `tryRefreshToken()` is invoked from
+  `api/client.ts` 401 handling and returns the new access token or `null`.
+  A true failure clears the access token, refresh token, factory selection,
+  user, scopes, and loading state; a response from an older refresh-token
+  generation never overwrites or clears a newer session.
 - **`current_factory_id` is the single source for tenant scoping.**
   Set on login from `user.factory_scope.default_factory_id`, updated
   via `setCurrentFactoryId(factoryId)` when the header selector

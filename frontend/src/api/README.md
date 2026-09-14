@@ -15,8 +15,8 @@ remaining files are per-domain function bundles, named after the
 backend route prefix.
 
 - **Shared client** — `client.ts`. Axios instance with `baseURL: "/api"`,
-  request/response interceptors, 401 refresh queue, 503/410 tenant
-  redirects.
+  request/response interceptors, shared-promise 401 refresh recovery,
+  503/410 tenant redirects.
 - **Auth & tenancy** — `auth.ts` (login / refresh / me / users /
   factories), `group.ts`, `productLine.ts`, `productType.ts`, `admin.ts`,
   `aiConfig.ts`, `logs.ts`.
@@ -67,11 +67,13 @@ function returns the parsed JSON body typed against `types/index.ts`.
   injects `X-Tenant-ID` from `localStorage["tenant_slug"]` so the dev
   proxy can route to a tenant. Production relies on host-based routing
   and ignores this header.
-- **401 refresh is queued, not retried in parallel.** A single in-flight
-  refresh is guarded by `isRefreshing`; concurrent 401s are parked on
-  `refreshSubscribers` and replayed with the new token. `/auth/login`
-  401s short-circuit (no refresh) so the login form can surface the
-  error.
+- **401 refresh shares one promise.** Each non-login 401 marks its request
+  `_retry` and awaits the same `tryRefreshToken()` promise. A returned token
+  replays every caller with its Bearer value; a `null` or thrown refresh
+  rejects every caller and redirects to login. `/auth/login` 401s reject
+  immediately, `/auth/refresh` 401s reject back to the store without
+  recursion, and an already-retried 401 fails closed. The shared promise is
+  cleared after either outcome so later sessions can refresh.
 - **403 silently re-syncs the user** by calling `/auth/me` and updating
   the auth store, then propagating the rejection. Pages must still
   handle the rejection.
