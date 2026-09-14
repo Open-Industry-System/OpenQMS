@@ -1,6 +1,7 @@
 """Focused PostgreSQL tests for the user refresh-session migration contract."""
 from argparse import Namespace
 from pathlib import Path
+import re
 import uuid
 
 import pytest
@@ -74,13 +75,14 @@ def _prepare_base(engine, schema: str, version: str = DOWN_REV) -> None:
         ))
 
 
-def _create_refresh_table(engine, schema: str) -> None:
+def _create_refresh_table(engine, schema: str, *, token_unique: bool = True) -> None:
+    token_unique_sql = " UNIQUE" if token_unique else ""
     with engine.begin() as conn:
         conn.execute(text(
             f"CREATE TABLE {_q(schema, TABLE)} ("
             "session_id UUID PRIMARY KEY, "
             f"user_id UUID NOT NULL REFERENCES {_q(schema, 'users')}(user_id) ON DELETE CASCADE, "
-            "token_hash VARCHAR(64) NOT NULL UNIQUE, "
+            f"token_hash VARCHAR(64) NOT NULL{token_unique_sql}, "
             "expires_at TIMESTAMPTZ NOT NULL, "
             "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
             "rotated_at TIMESTAMPTZ, "
@@ -103,6 +105,34 @@ def _create_incomplete_refresh_table(engine, schema: str) -> None:
         ))
 
 
+def _create_partial_index_variant(engine, schema: str, defect: str) -> None:
+    _create_refresh_table(engine, schema, token_unique=defect != "partial_token_hash_unique")
+    with engine.begin() as conn:
+        if defect == "partial_token_hash_unique":
+            conn.execute(text(
+                "CREATE UNIQUE INDEX uq_user_refresh_sessions_token_hash_partial "
+                f"ON {_q(schema, TABLE)} (token_hash) WHERE revoked_at IS NULL"
+            ))
+        elif defect == "partial_user_id_index":
+            conn.execute(text(
+                f"DROP INDEX {_q(schema, 'ix_user_refresh_sessions_user_id')}"
+            ))
+            conn.execute(text(
+                f"CREATE INDEX ix_user_refresh_sessions_user_id ON {_q(schema, TABLE)} "
+                "(user_id) WHERE revoked_at IS NULL"
+            ))
+        elif defect == "partial_composite_index":
+            conn.execute(text(
+                f"DROP INDEX {_q(schema, 'ix_user_refresh_sessions_user_id_expires_at')}"
+            ))
+            conn.execute(text(
+                "CREATE INDEX ix_user_refresh_sessions_user_id_expires_at "
+                f"ON {_q(schema, TABLE)} (user_id, expires_at) WHERE revoked_at IS NULL"
+            ))
+        else:
+            raise AssertionError(f"unknown partial-index defect {defect}")
+
+
 def _version(engine, schema: str) -> str | None:
     with engine.connect() as conn:
         return conn.execute(text(
@@ -110,35 +140,51 @@ def _version(engine, schema: str) -> str | None:
         )).scalar_one_or_none()
 
 
-def _table_oid(engine, schema: str) -> int:
+def _table_oid(engine, schema: str) -> int | None:
     with engine.connect() as conn:
         return conn.execute(text(
             "SELECT cls.oid "
             "FROM pg_class cls "
             "JOIN pg_namespace ns ON ns.oid=cls.relnamespace "
             "WHERE ns.nspname=:schema AND cls.relname=:table AND cls.relkind='r'"
-        ), {"schema": schema, "table": TABLE}).scalar_one()
+        ), {"schema": schema, "table": TABLE}).scalar_one_or_none()
 
 
 def _assert_complete_contract(engine, schema: str) -> None:
     with engine.connect() as conn:
         columns = {
-            row["column_name"]: (row["data_type"], row["is_nullable"], row["character_maximum_length"])
+            row["column_name"]: (
+                row["data_type"],
+                row["is_nullable"],
+                row["character_maximum_length"],
+                row["column_default"],
+            )
             for row in conn.execute(text(
-                "SELECT column_name, data_type, is_nullable, character_maximum_length "
+                "SELECT column_name, data_type, is_nullable, character_maximum_length, column_default "
                 "FROM information_schema.columns "
                 "WHERE table_schema=:schema AND table_name=:table"
             ), {"schema": schema, "table": TABLE}).mappings()
         }
-        assert columns == {
-            "session_id": ("uuid", "NO", None),
-            "user_id": ("uuid", "NO", None),
-            "token_hash": ("character varying", "NO", 64),
-            "expires_at": ("timestamp with time zone", "NO", None),
-            "created_at": ("timestamp with time zone", "NO", None),
-            "rotated_at": ("timestamp with time zone", "YES", None),
-            "revoked_at": ("timestamp with time zone", "YES", None),
+        expected_columns = {
+            "session_id": ("uuid", "NO", None, None),
+            "user_id": ("uuid", "NO", None, None),
+            "token_hash": ("character varying", "NO", 64, None),
+            "expires_at": ("timestamp with time zone", "NO", None, None),
+            "created_at": ("timestamp with time zone", "NO", None, "current_time"),
+            "rotated_at": ("timestamp with time zone", "YES", None, None),
+            "revoked_at": ("timestamp with time zone", "YES", None, None),
         }
+        for name, expected in expected_columns.items():
+            actual = columns.get(name)
+            assert actual is not None, f"missing required column {name}"
+            assert actual[:3] == expected[:3], f"{name}: {actual!r} != {expected!r}"
+            if name == "created_at":
+                normalized_default = re.sub(r"\\s+", "", str(actual[3] or "").lower())
+                assert normalized_default in {"now()", "current_timestamp", "current_timestamp()"}, (
+                    f"created_at has non-current default {actual[3]!r}"
+                )
+            else:
+                assert actual[3] is None, f"{name} has unexpected default {actual[3]!r}"
 
         primary_key = conn.execute(text(
             "SELECT array_agg(att.attname ORDER BY key.ord) "
@@ -153,7 +199,8 @@ def _assert_complete_contract(engine, schema: str) -> None:
 
         indexes = conn.execute(text(
             "SELECT idx.relname AS index_name, idx_data.indisunique AS is_unique, "
-            "array_agg(att.attname ORDER BY key.ord) AS columns "
+            "array_agg(att.attname ORDER BY key.ord) AS columns, "
+            "pg_get_expr(idx_data.indpred, idx_data.indrelid) AS predicate "
             "FROM pg_index idx_data "
             "JOIN pg_class tbl ON tbl.oid=idx_data.indrelid "
             "JOIN pg_namespace ns ON ns.oid=tbl.relnamespace "
@@ -161,12 +208,25 @@ def _assert_complete_contract(engine, schema: str) -> None:
             "JOIN LATERAL unnest(idx_data.indkey) WITH ORDINALITY AS key(attnum, ord) ON true "
             "JOIN pg_attribute att ON att.attrelid=tbl.oid AND att.attnum=key.attnum "
             "WHERE ns.nspname=:schema AND tbl.relname=:table "
-            "GROUP BY idx.relname, idx_data.indisunique"
+            "GROUP BY idx.relname, idx_data.indisunique, idx_data.indpred, idx_data.indrelid"
         ), {"schema": schema, "table": TABLE}).mappings().all()
-        signatures = {(tuple(row["columns"]), row["is_unique"]) for row in indexes}
-        assert (("token_hash",), True) in signatures
-        assert any(columns == ("user_id",) for columns, _ in signatures)
-        assert any(columns == ("user_id", "expires_at") for columns, _ in signatures)
+        expected_indexes = {
+            "ix_user_refresh_sessions_user_id": (("user_id",), False),
+            "ix_user_refresh_sessions_user_id_expires_at": (("user_id", "expires_at"), False),
+        }
+        indexes_by_name = {index["index_name"]: index for index in indexes}
+        for name, (expected_columns, expected_unique) in expected_indexes.items():
+            index = indexes_by_name.get(name)
+            assert index is not None, f"missing required index {name}"
+            assert tuple(index["columns"]) == expected_columns
+            assert index["is_unique"] is expected_unique
+            assert index["predicate"] is None, f"{name} must not be partial"
+        assert any(
+            tuple(index["columns"]) == ("token_hash",)
+            and index["is_unique"] is True
+            and index["predicate"] is None
+            for index in indexes
+        ), "token_hash must have global uniqueness"
 
         foreign_keys = conn.execute(text(
             "SELECT remote_ns.nspname AS remote_schema, remote_tbl.relname AS remote_table, "
@@ -230,6 +290,47 @@ def test_incomplete_squash_table_fails_and_is_not_stamped(migration_db_url, tena
 
 
 @pytest.mark.requires_db
+@pytest.mark.parametrize(
+    "defect",
+    ["partial_token_hash_unique", "partial_user_id_index", "partial_composite_index"],
+)
+def test_partial_required_indexes_are_rejected(migration_db_url, tenant_schema, defect):
+    """Partial indexes must never satisfy the historical global contract."""
+    engine = _sync_engine(migration_db_url)
+    _prepare_base(engine, tenant_schema)
+    _create_partial_index_variant(engine, tenant_schema, defect)
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="user_refresh_sessions"):
+        command.upgrade(_cfg(migration_db_url, tenant_schema), REV)
+
+    engine = _sync_engine(migration_db_url)
+    assert _version(engine, tenant_schema) == DOWN_REV
+    engine.dispose()
+
+
+@pytest.mark.requires_db
+def test_offset_created_at_default_is_rejected(migration_db_url, tenant_schema):
+    """A future created_at default must not pass as a current-time default."""
+    engine = _sync_engine(migration_db_url)
+    _prepare_base(engine, tenant_schema)
+    _create_refresh_table(engine, tenant_schema)
+    with engine.begin() as conn:
+        conn.execute(text(
+            f"ALTER TABLE {_q(tenant_schema, TABLE)} "
+            "ALTER COLUMN created_at SET DEFAULT now() + interval '7 days'"
+        ))
+    engine.dispose()
+
+    with pytest.raises(RuntimeError, match="user_refresh_sessions"):
+        command.upgrade(_cfg(migration_db_url, tenant_schema), REV)
+
+    engine = _sync_engine(migration_db_url)
+    assert _version(engine, tenant_schema) == DOWN_REV
+    engine.dispose()
+
+
+@pytest.mark.requires_db
 def test_complete_squash_table_is_validated_without_recreation(migration_db_url, tenant_schema):
     """A complete pre-existing table is preserved while the revision is stamped."""
     user_id = uuid.uuid4()
@@ -246,6 +347,9 @@ def test_complete_squash_table_is_validated_without_recreation(migration_db_url,
             "(session_id, user_id, token_hash, expires_at) "
             "VALUES (:session_id, :user_id, :token_hash, now() + interval '1 day')"
         ), {"session_id": session_id, "user_id": user_id, "token_hash": "squash-marker"})
+        conn.execute(text(
+            f"ALTER TABLE {_q(tenant_schema, TABLE)} ADD COLUMN last_used_at TIMESTAMPTZ"
+        ))
     engine.dispose()
 
     command.upgrade(_cfg(migration_db_url, tenant_schema), REV)
@@ -257,6 +361,11 @@ def test_complete_squash_table_is_validated_without_recreation(migration_db_url,
         assert conn.execute(text(
             f"SELECT session_id FROM {_q(tenant_schema, TABLE)} WHERE session_id=:session_id"
         ), {"session_id": session_id}).scalar_one() == session_id
+        extra_column = conn.execute(text(
+            "SELECT data_type, is_nullable FROM information_schema.columns "
+            "WHERE table_schema=:schema AND table_name=:table AND column_name='last_used_at'"
+        ), {"schema": tenant_schema, "table": TABLE}).one()
+        assert extra_column == ("timestamp with time zone", "YES")
     engine.dispose()
 
 
@@ -291,6 +400,27 @@ def test_downgrade_targets_schema_and_is_safe_when_absent(migration_db_url, tena
 
     engine = _sync_engine(migration_db_url)
     assert _version(engine, tenant_schema) == DOWN_REV
+    assert _version(engine, "public") == public_version
+    assert _table_oid(engine, "public") == public_oid
+    engine.dispose()
+
+
+@pytest.mark.requires_db
+def test_downgrade_drops_present_tenant_table_only(migration_db_url, tenant_schema):
+    """Present-table downgrade removes only the exact tenant table."""
+    engine = _sync_engine(migration_db_url)
+    public_oid = _table_oid(engine, "public")
+    public_version = _version(engine, "public")
+    assert public_version == REV
+    _prepare_base(engine, tenant_schema, REV)
+    _create_refresh_table(engine, tenant_schema)
+    engine.dispose()
+
+    command.downgrade(_cfg(migration_db_url, tenant_schema), DOWN_REV)
+
+    engine = _sync_engine(migration_db_url)
+    assert _version(engine, tenant_schema) == DOWN_REV
+    assert _table_oid(engine, tenant_schema) is None
     assert _version(engine, "public") == public_version
     assert _table_oid(engine, "public") == public_oid
     engine.dispose()

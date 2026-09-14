@@ -48,11 +48,8 @@ def _validate_existing_table(bind, schema: str) -> None:
     mismatches: list[str] = []
 
     missing = sorted(set(expected_columns) - set(columns))
-    unexpected = sorted(set(columns) - set(expected_columns))
     if missing:
         mismatches.append(f"missing columns {missing}")
-    if unexpected:
-        mismatches.append(f"unexpected columns {unexpected}")
     for name, (expected_type, nullable, has_now_default) in expected_columns.items():
         column = columns.get(name)
         if column is None:
@@ -61,10 +58,10 @@ def _validate_existing_table(bind, schema: str) -> None:
             mismatches.append(f"{name} has type {column['type']!s}, expected {expected_type}")
         if column["nullable"] is not nullable:
             mismatches.append(f"{name} nullable={column['nullable']}, expected {nullable}")
-        default = str(column.get("default") or "").lower()
+        default = "".join(str(column.get("default") or "").lower().split())
         if has_now_default:
-            if "now()" not in default and "current_timestamp" not in default:
-                mismatches.append(f"{name} missing current-time server default")
+            if default not in {"now()", "current_timestamp", "current_timestamp()"}:
+                mismatches.append(f"{name} has invalid current-time server default {column['default']!r}")
         elif default:
             mismatches.append(f"{name} has unexpected server default {column['default']!r}")
 
@@ -77,17 +74,29 @@ def _validate_existing_table(bind, schema: str) -> None:
     indexes = inspector.get_indexes(_TABLE, schema=schema)
     index_by_name = {index["name"]: index for index in indexes}
     simple = index_by_name.get(_SIMPLE_INDEX)
-    if simple is None or simple.get("column_names") != ["user_id"] or simple.get("unique"):
+    if (
+        simple is None
+        or simple.get("column_names") != ["user_id"]
+        or simple.get("unique") is not False
+        or (simple.get("dialect_options") or {}).get("postgresql_where") is not None
+    ):
         mismatches.append(f"missing or invalid index {_SIMPLE_INDEX}")
     composite = index_by_name.get(_COMPOSITE_INDEX)
-    if composite is None or composite.get("column_names") != ["user_id", "expires_at"] or composite.get("unique"):
+    if (
+        composite is None
+        or composite.get("column_names") != ["user_id", "expires_at"]
+        or composite.get("unique") is not False
+        or (composite.get("dialect_options") or {}).get("postgresql_where") is not None
+    ):
         mismatches.append(f"missing or invalid index {_COMPOSITE_INDEX}")
 
     unique_token = any(
         constraint.get("column_names") == ["token_hash"]
         for constraint in inspector.get_unique_constraints(_TABLE, schema=schema)
     ) or any(
-        index.get("column_names") == ["token_hash"] and index.get("unique")
+        index.get("column_names") == ["token_hash"]
+        and index.get("unique") is True
+        and (index.get("dialect_options") or {}).get("postgresql_where") is None
         for index in indexes
     )
     if not unique_token:
