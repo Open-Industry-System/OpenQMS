@@ -7,50 +7,136 @@ FRONTEND = ROOT / "frontend"
 DEPLOY = ROOT / "deploy"
 
 
-def test_frontend_root_and_frontend_context_ignores_are_bounded():
-    assert (FRONTEND / ".dockerignore").read_text().splitlines() == [
-        "node_modules",
-        "dist",
-        "test-results",
-        "e2e/.storage-state",
-        "*.log",
-    ]
+def _dockerignore_patterns(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
 
-    root_context_ignore = (FRONTEND / "Dockerfile.prod.dockerignore").read_text().splitlines()
+
+def _glob_matches(path: str, pattern: str, include_descendants: bool = False) -> bool:
+    pattern = pattern.lstrip("/").rstrip("/")
+    if not pattern:
+        return False
+
+    regex = ""
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "*" and pattern[index : index + 2] == "**":
+            if index + 2 < len(pattern) and pattern[index + 2] == "/":
+                regex += "(?:.*/)?"
+                index += 3
+            else:
+                regex += ".*"
+                index += 2
+        elif char == "*":
+            regex += "[^/]*"
+            index += 1
+        elif char == "?":
+            regex += "[^/]"
+            index += 1
+        else:
+            regex += re.escape(char)
+            index += 1
+
+    if "/" not in pattern:
+        if include_descendants:
+            return any(re.fullmatch(regex, part) is not None for part in path.split("/"))
+        return re.fullmatch(regex, path) is not None
+    if re.fullmatch(regex, path) is not None:
+        return True
+    return include_descendants and path.startswith(f"{pattern}/")
+
+
+def _included_in_docker_context(path: str, patterns: list[str]) -> bool:
+    included = True
+    for raw_pattern in patterns:
+        negated = raw_pattern.startswith("!")
+        pattern = raw_pattern[1:] if negated else raw_pattern
+        if _glob_matches(path, pattern, include_descendants=not negated):
+            included = negated
+    return included
+
+
+def test_frontend_context_ignore_excludes_generated_content_without_raw_order_dependence():
+    patterns = _dockerignore_patterns((FRONTEND / ".dockerignore").read_text())
+
     for excluded_path in (
-        ".git",
-        ".claude",
-        ".superpowers",
-        "backend",
-        "docs",
-        "scripts",
-        "frontend/node_modules",
-        "frontend/dist",
-        "frontend/test-results",
-        "frontend/e2e/.storage-state",
-        "*.log",
-        "deploy/*",
+        "node_modules/esbuild/bin/esbuild",
+        "dist/assets/app.js",
+        "test-results/results.json",
+        "e2e/.storage-state/viewer.json",
+        "frontend.log",
     ):
-        assert excluded_path in root_context_ignore
-    assert "!deploy/Caddyfile" in root_context_ignore
+        assert not _included_in_docker_context(excluded_path, patterns)
 
 
-def test_production_dockerfile_keeps_disabled_demo_credentials_out_of_vite():
+def test_root_context_allowlist_admits_only_required_production_build_inputs():
+    patterns = _dockerignore_patterns((FRONTEND / "Dockerfile.prod.dockerignore").read_text())
+
+    for required_path in (
+        "frontend",
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "frontend/index.html",
+        "frontend/tsconfig.json",
+        "frontend/tsconfig.node.json",
+        "frontend/vite.config.ts",
+        "frontend/src",
+        "frontend/src/main.tsx",
+        "frontend/src/App.test.tsx",
+        "frontend/public",
+        "frontend/public/logo.svg",
+        "deploy",
+        "deploy/Caddyfile",
+    ):
+        assert _included_in_docker_context(required_path, patterns)
+
+    for excluded_path in (
+        ".env.production",
+        "frontend/.env.production.local",
+        "backend/.env",
+        ".git/config",
+        ".claude/settings.json",
+        ".superpowers/sdd/task-9-report.md",
+        "backend/app/main.py",
+        "docs/deploy.md",
+        "scripts/release.sh",
+        "frontend/node_modules/esbuild/bin/esbuild",
+        "frontend/dist/assets/app.js",
+        "frontend/tsconfig.tsbuildinfo",
+        "frontend/test-results/results.json",
+        "frontend/coverage/lcov.info",
+        "frontend/playwright-report/index.html",
+        "frontend/blob-report/report.zip",
+        "frontend/e2e/smoke.spec.ts",
+        "frontend/e2e/.storage-state/viewer.json",
+        "frontend/debug.log",
+        "deploy/private.key",
+    ):
+        assert not _included_in_docker_context(excluded_path, patterns)
+
+    assert not _included_in_docker_context("frontend/package.json", [*patterns, "**"])
+    assert _included_in_docker_context("frontend/package.json", [*patterns, "**", "!frontend/package.json"])
+
+
+def test_production_dockerfile_keeps_disabled_demo_credentials_out_of_vite_and_final_stage_minimal():
     dockerfile = (FRONTEND / "Dockerfile.prod").read_text()
 
     assert "FROM node:20-alpine AS build" in dockerfile
     assert "RUN npm ci" in dockerfile
     assert "COPY frontend/package.json frontend/package-lock.json ./" in dockerfile
     assert "COPY frontend/ ./" in dockerfile
-    assert "FROM caddy:2-alpine" in dockerfile
-    assert "COPY deploy/Caddyfile /etc/caddy/Caddyfile" in dockerfile
-    assert "COPY --from=build /app/dist /srv" in dockerfile
     assert "EXPOSE 80 443 8080" in dockerfile
     assert "ENV VITE_PUBLIC_DEMO_" not in dockerfile
     assert 'if [ "$VITE_PUBLIC_DEMO_ENABLED" = "true" ]' in dockerfile
     assert "VITE_PUBLIC_DEMO_USERNAME=$VITE_PUBLIC_DEMO_USERNAME" in dockerfile
     assert "VITE_PUBLIC_DEMO_PASSWORD=$VITE_PUBLIC_DEMO_PASSWORD" in dockerfile
     assert "VITE_PUBLIC_DEMO_ENABLED=false VITE_PUBLIC_DEMO_USERNAME= VITE_PUBLIC_DEMO_PASSWORD= npm run build" in dockerfile
+
+    final_stage = dockerfile.split("FROM caddy:2-alpine", maxsplit=1)[1]
+    assert re.findall(r"(?m)^COPY .+$", final_stage) == [
+        "COPY deploy/Caddyfile /etc/caddy/Caddyfile",
+        "COPY --from=build /app/dist /srv",
+    ]
 
 
 def test_caddy_serves_api_before_spa_fallback_on_all_required_listeners():
