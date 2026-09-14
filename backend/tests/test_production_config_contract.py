@@ -23,6 +23,16 @@ def _short_ports(service: str, block: str) -> list[str]:
     return re.findall(r'''(?m)^\s*-\s*["']?([^"'\n]+)["']?\s*$''', match.group("body"))
 
 
+def _forwarded_allow_ips(backend_block: str) -> list[str]:
+    return re.findall(r"--forwarded-allow-ips=([^\s'\"\]]+)", backend_block)
+
+
+def test_forwarded_allow_ips_preserves_comma_separated_values():
+    backend = "command: --forwarded-allow-ips=172.30.0.10,203.0.113.1 --proxy-headers"
+
+    assert _forwarded_allow_ips(backend) == ["172.30.0.10,203.0.113.1"]
+
+
 def test_production_compose_and_caddy_trusted_proxy_contract():
     compose = (ROOT / "docker-compose.prod.yml").read_text()
     caddy = (ROOT / "deploy" / "Caddyfile").read_text()
@@ -35,9 +45,7 @@ def test_production_compose_and_caddy_trusted_proxy_contract():
     assert re.search(r"(?m)^\s*ipv4_address:\s*172\.30\.0\.10\s*$", web)
     assert _short_ports("web", web) == ["80:80", "443:443"]
     assert "--proxy-headers" in backend
-    forwarded_allow_ips = re.findall(
-        r"--forwarded-allow-ips=([^\s'\"\],]+)", backend
-    )
+    forwarded_allow_ips = _forwarded_allow_ips(backend)
     assert forwarded_allow_ips == ["172.30.0.10"]
     assert "--forwarded-allow-ips=*" not in backend
 
