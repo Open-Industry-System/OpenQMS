@@ -14,8 +14,8 @@ Two files, one store each.
 
 - `authStore.ts` — `useAuthStore`. Holds `user`, `token`,
   `factoryScope`, `factories`, `currentFactoryId`, `loading`. Exposes
-  `login(username, password)`, `logout()`, `fetchUser()`, `setUser()`,
-  `setCurrentFactoryId()`, `tryRefreshToken()`. Initialises `token`
+  `login(username, password)`, `logout()`, `fetchUser()`,
+  `syncStoredAccessToken()`, `setCurrentFactoryId()`, `tryRefreshToken()`. Initialises `token`
   from `localStorage["access_token"]` so a reload keeps the session.
 - `productLineStore.ts` — `useProductLineStore`. Holds `productLines`
   and the currently-selected `selected` product-line code. Exposes
@@ -46,11 +46,12 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   `tryRefreshToken()` call runs for that token, including StrictMode; valid
   tokens with no user call `fetchUser()`.
 - **Refresh generation guard** — `tryRefreshToken()` captures the request
-  refresh token. It only writes a response or clears state if that same token
-  still exists in storage. When another tab has changed the stored access
-  token, the store adopts it and clears in-memory user and factory-derived
-  state so `ProtectedRoute` re-fetches `/auth/me`; when storage already
-  matches the store token, a same-tab newer login keeps its user state.
+  refresh token and accepts a current-generation response only when its access
+  token classifies as valid. The store exposes `syncStoredAccessToken()` and
+  one central browser `storage` listener invokes it for idle tabs. A different
+  valid stored token clears in-memory user/factory state for a `/auth/me`
+  bootstrap; an invalid stored token is removed while its refresh token is
+  preserved. Matching store/storage tokens retain same-tab login state.
 - **User hydration generation guard** — `fetchUser()` captures its starting
   access token. A later login or cross-tab token change causes stale `/auth/me`
   success and failure continuations to preserve/adopt the newer generation
@@ -67,9 +68,9 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   if you rename them in the store.
 - **JWT lives in localStorage, not store-only.** Both the store and
   `localStorage` are written together inside `login`, `logout`,
-  `fetchUser`, and `tryRefreshToken`. `App.tsx` reads `localStorage` at
-  startup to seed `token`, and `ProtectedRoute` validates expiry
-  client-side via `JSON.parse(atob(token.split('.')[1])).exp`.
+  `fetchUser`, and `tryRefreshToken`. `App.tsx` seeds `token` from
+  `localStorage`; `utils/jwt.ts` performs base64url JWT payload validation
+  before route bootstrap or refresh replay decisions.
 - **Refresh is generation-safe.** `tryRefreshToken()` is invoked from
   `api/client.ts` 401 handling and returns the new access token or `null`.
   A true failure clears the access token, refresh token, factory selection,

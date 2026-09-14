@@ -96,23 +96,34 @@ function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: 
   const logout = useAuthStore((s) => s.logout);
   const { canView, isAdmin } = usePermission();
   const refreshAttemptedToken = useRef<string | null>(null);
+  const refreshInFlight = useRef(false);
   const tokenState = classifyToken(token);
 
   useEffect(() => {
-    const logoutIfCurrent = () => {
+    const logoutIfCurrent = (candidate: string) => {
       const storedToken = localStorage.getItem("access_token");
-      if (token && useAuthStore.getState().token === token && (!storedToken || storedToken === token)) logout();
+      if (useAuthStore.getState().token === candidate && (!storedToken || storedToken === candidate)) logout();
     };
 
     if (tokenState === "malformed") {
-      logoutIfCurrent();
+      if (token) logoutIfCurrent(token);
     } else if (tokenState === "expired" && token) {
-      if (refreshAttemptedToken.current === token) return;
+      if (refreshInFlight.current || refreshAttemptedToken.current === token) return;
       refreshAttemptedToken.current = token;
+      refreshInFlight.current = true;
       void tryRefreshToken().then((refreshedToken) => {
-        if (!refreshedToken || classifyToken(refreshedToken) !== "valid") logoutIfCurrent();
-      }).catch(logoutIfCurrent);
-    } else if (tokenState === "valid" && !user && !loading) {
+        refreshInFlight.current = false;
+        if (!refreshedToken || classifyToken(refreshedToken) !== "valid") {
+          logoutIfCurrent(refreshedToken ?? token);
+        }
+
+        const latest = useAuthStore.getState();
+        if (classifyToken(latest.token) === "valid" && !latest.user) void latest.fetchUser();
+      }).catch(() => {
+        refreshInFlight.current = false;
+        logoutIfCurrent(token);
+      });
+    } else if (tokenState === "valid" && !user && !loading && !refreshInFlight.current) {
       fetchUser();
     }
   }, [token, tokenState, user, loading, fetchUser, tryRefreshToken, logout]);

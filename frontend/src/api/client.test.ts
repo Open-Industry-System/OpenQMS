@@ -2,8 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AxiosRequestConfig } from "axios";
 
 const store = vi.hoisted(() => ({
+  token: null as string | null,
+  user: { user_id: "alice" } as unknown,
+  factoryScope: { default_factory_id: "alice-factory" } as unknown,
+  factories: [{ id: "alice-factory" }] as unknown[],
+  currentFactoryId: "alice-factory" as string | null,
+  loading: true,
   logout: vi.fn(),
   tryRefreshToken: vi.fn(),
+  fetchUser: vi.fn(),
+  syncStoredAccessToken: vi.fn(),
   setUser: vi.fn(),
 }));
 
@@ -16,7 +24,11 @@ function unauthorized(config: AxiosRequestConfig) {
 }
 
 function jwt(sub: string) {
-  return `header.${btoa(JSON.stringify({ sub, exp: Math.floor(Date.now() / 1000) + 3600 }))}.signature`;
+  return jwtPayload({ sub, exp: Math.floor(Date.now() / 1000) + 3600 });
+}
+
+function jwtPayload(payload: Record<string, unknown>) {
+  return `header.${btoa(JSON.stringify(payload))}.signature`;
 }
 
 function deferred<T>() {
@@ -34,6 +46,20 @@ async function loadClient() {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
+  store.token = null;
+  store.user = { user_id: "alice" };
+  store.factoryScope = { default_factory_id: "alice-factory" };
+  store.factories = [{ id: "alice-factory" }];
+  store.currentFactoryId = "alice-factory";
+  store.loading = true;
+  store.syncStoredAccessToken.mockImplementation(() => {
+    store.token = localStorage.getItem("access_token");
+    store.user = null;
+    store.factoryScope = null;
+    store.factories = [];
+    store.currentFactoryId = null;
+    store.loading = false;
+  });
   window.history.replaceState({}, "", "/");
 });
 
@@ -68,6 +94,7 @@ describe("401 recovery", () => {
     const client = await loadClient();
     const aliceToken = jwt("alice");
     localStorage.setItem("access_token", aliceToken);
+    store.token = aliceToken;
     store.tryRefreshToken.mockResolvedValue(aliceToken);
     let attempts = 0;
     client.defaults.adapter = (config) => {
@@ -89,6 +116,7 @@ describe("401 recovery", () => {
     const aliceToken = jwt("alice");
     const bobToken = jwt("bob");
     localStorage.setItem("access_token", aliceToken);
+    store.token = aliceToken;
     store.tryRefreshToken.mockReturnValue(refresh.promise);
     let attempts = 0;
     client.defaults.adapter = (config) => {
@@ -111,7 +139,9 @@ describe("401 recovery", () => {
   it("preserves an explicitly bound retry authorization instead of replacing it from storage", async () => {
     const client = await loadClient();
     const refreshedAliceToken = jwt("alice");
-    localStorage.setItem("access_token", jwt("unrelated"));
+    const unrelatedToken = jwt("unrelated");
+    localStorage.setItem("access_token", unrelatedToken);
+    store.token = unrelatedToken;
     store.tryRefreshToken.mockResolvedValue(refreshedAliceToken);
     client.defaults.adapter = (config) => (config as AxiosRequestConfig & { _retry?: boolean })._retry
       ? Promise.resolve({ config, data: config.headers?.Authorization, status: 200, statusText: "OK", headers: {} })
@@ -124,7 +154,9 @@ describe("401 recovery", () => {
 
   it("fails closed instead of retrying when the refreshed token has no decodable subject", async () => {
     const client = await loadClient();
-    localStorage.setItem("access_token", jwt("alice"));
+    const aliceToken = jwt("alice");
+    localStorage.setItem("access_token", aliceToken);
+    store.token = aliceToken;
     store.tryRefreshToken.mockResolvedValue("not-a-jwt");
     let attempts = 0;
     client.defaults.adapter = (config) => {
@@ -141,7 +173,9 @@ describe("401 recovery", () => {
   it("does not log out a newer session when an old refresh resolves null", async () => {
     const client = await loadClient();
     const refresh = deferred<string | null>();
-    localStorage.setItem("access_token", jwt("alice"));
+    const aliceToken = jwt("alice");
+    localStorage.setItem("access_token", aliceToken);
+    store.token = aliceToken;
     store.tryRefreshToken.mockReturnValue(refresh.promise);
     client.defaults.adapter = unauthorized;
 
@@ -156,7 +190,9 @@ describe("401 recovery", () => {
 
   it("does not log out a newer session for an already-retried request", async () => {
     const client = await loadClient();
-    localStorage.setItem("access_token", jwt("bob"));
+    const bobToken = jwt("bob");
+    localStorage.setItem("access_token", bobToken);
+    store.token = bobToken;
     client.defaults.adapter = unauthorized;
 
     await expect(client.request({
@@ -170,6 +206,7 @@ describe("401 recovery", () => {
     const client = await loadClient();
     const aliceToken = jwt("alice");
     localStorage.setItem("access_token", aliceToken);
+    store.token = aliceToken;
     store.tryRefreshToken.mockResolvedValueOnce(aliceToken).mockResolvedValueOnce(aliceToken);
     client.defaults.adapter = (config) => (config as AxiosRequestConfig & { _retry?: boolean })._retry
       ? Promise.resolve({ config, data: "ok", status: 200, statusText: "OK", headers: {} })
@@ -178,6 +215,74 @@ describe("401 recovery", () => {
     await expect(client.get("/fmea")).resolves.toMatchObject({ data: "ok" });
     await expect(client.get("/capa")).resolves.toMatchObject({ data: "ok" });
     expect(store.tryRefreshToken).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects before the adapter when stored access belongs to a different idle-tab generation", async () => {
+    const client = await loadClient();
+    const aliceToken = jwt("alice");
+    const bobToken = jwt("bob");
+    store.token = aliceToken;
+    localStorage.setItem("access_token", bobToken);
+    const adapter = vi.fn(() => Promise.resolve({ data: "networked", status: 200, statusText: "OK", headers: {}, config: {} }));
+    client.defaults.adapter = adapter as unknown as typeof client.defaults.adapter;
+
+    await expect(client.post("/fmea", { name: "Alice mutation" })).rejects.toBeDefined();
+    expect(adapter).not.toHaveBeenCalled();
+    expect(store.syncStoredAccessToken).toHaveBeenCalledOnce();
+    expect(store).toMatchObject({ token: bobToken, user: null, factoryScope: null, factories: [], currentFactoryId: null, loading: false });
+  });
+
+  it.each([
+    jwtPayload({ sub: "alice", exp: 0 }),
+    jwtPayload({ sub: "alice" }),
+    jwtPayload({ sub: "alice", exp: "not-a-number" }),
+  ])("does not replay a same-sub refresh token that is not usable: %s", async (returnedToken) => {
+    const client = await loadClient();
+    const aliceToken = jwt("alice");
+    localStorage.setItem("access_token", aliceToken);
+    store.token = aliceToken;
+    store.tryRefreshToken.mockResolvedValue(returnedToken);
+    let attempts = 0;
+    client.defaults.adapter = (config) => {
+      attempts += 1;
+      return (config as AxiosRequestConfig & { _retry?: boolean })._retry
+        ? Promise.resolve({ config, data: "replayed", status: 200, statusText: "OK", headers: {} })
+        : unauthorized(config);
+    };
+
+    await expect(client.post("/fmea", { name: "Alice mutation" })).rejects.toMatchObject({ response: { status: 401 } });
+    expect(attempts).toBe(1);
+  });
+
+  it("delegates a 403 resync to the guarded full-store user bootstrap", async () => {
+    const client = await loadClient();
+    store.fetchUser.mockResolvedValue(undefined);
+    const adapter = vi.fn((config: AxiosRequestConfig) => config.url === "/fmea"
+      ? Promise.reject({ config, response: { status: 403, data: {} } })
+      : Promise.resolve({ config, data: { user_id: "alice" }, status: 200, statusText: "OK", headers: {} }));
+    client.defaults.adapter = adapter as unknown as typeof client.defaults.adapter;
+
+    await expect(client.get("/fmea")).rejects.toMatchObject({ response: { status: 403 } });
+    expect(store.fetchUser).toHaveBeenCalledOnce();
+    expect(store.setUser).not.toHaveBeenCalled();
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not recursively issue /auth/me resyncs for a 403 response", async () => {
+    const client = await loadClient();
+    store.fetchUser.mockImplementation(async () => {
+      await client.get("/auth/me").catch(() => undefined);
+    });
+    let attempts = 0;
+    const adapter = vi.fn((config: AxiosRequestConfig) => {
+      attempts += 1;
+      return Promise.reject({ config, response: { status: attempts < 3 ? 403 : 500, data: {} } });
+    });
+    client.defaults.adapter = adapter as unknown as typeof client.defaults.adapter;
+
+    await expect(client.get("/fmea")).rejects.toMatchObject({ response: { status: 403 } });
+    expect(store.fetchUser).toHaveBeenCalledOnce();
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a refresh endpoint 401 without recursively refreshing", async () => {

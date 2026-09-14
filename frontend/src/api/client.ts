@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getTokenSubject } from "../utils/jwt";
+import { classifyToken, getTokenSubject } from "../utils/jwt";
 import { useAuthStore } from "../store/authStore";
 
 const client = axios.create({
@@ -35,7 +35,13 @@ function rejectForCurrentSession(error: unknown, request: { headers: { Authoriza
 }
 
 client.interceptors.request.use((config) => {
+  const authState = useAuthStore.getState();
   const token = localStorage.getItem("access_token");
+  if (authState.token !== token) {
+    authState.syncStoredAccessToken();
+    return Promise.reject(new Error("Access token changed in another tab"));
+  }
+
   if (token && !bearerToken(config.headers)) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -107,7 +113,12 @@ client.interceptors.response.use(
 
       const initiatingSubject = getTokenSubject(initiatingToken);
       const refreshedSubject = getTokenSubject(newToken);
-      if (!initiatingSubject || !refreshedSubject || initiatingSubject !== refreshedSubject) {
+      if (
+        classifyToken(newToken) !== "valid"
+        || !initiatingSubject
+        || !refreshedSubject
+        || initiatingSubject !== refreshedSubject
+      ) {
         return Promise.reject(error);
       }
 
@@ -116,11 +127,14 @@ client.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
-      try {
-        const resp = await client.get("/auth/me");
-        useAuthStore.getState().setUser(resp.data);
-      } catch {
-        // refresh failed — ignore, user stays with stale state
+      if (originalRequest.url?.includes("/auth/me")) return Promise.reject(error);
+
+      const authState = useAuthStore.getState();
+      const storedToken = localStorage.getItem("access_token");
+      if (authState.token !== storedToken) {
+        authState.syncStoredAccessToken();
+      } else if (bearerToken(originalRequest.headers) === authState.token) {
+        await authState.fetchUser();
       }
     }
     return Promise.reject(error);

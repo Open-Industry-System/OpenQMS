@@ -154,6 +154,23 @@ describe("protected route bootstrap", () => {
     expect(useAuthStore.getState()).toMatchObject({ token: bobToken, user: bob });
     expect(logout).not.toHaveBeenCalled();
   });
+
+  it("logs out once when refresh replaces an expired token with another expired token", async () => {
+    const originalToken = jwt({ sub: "alice", exp: 0 });
+    const returnedToken = jwt({ sub: "alice", exp: 1 });
+    const refresh = vi.fn(() => {
+      localStorage.setItem("access_token", returnedToken);
+      useAuthStore.setState({ token: returnedToken });
+      return Promise.resolve(returnedToken);
+    });
+    localStorage.setItem("access_token", originalToken);
+    useAuthStore.setState({ token: originalToken, tryRefreshToken: refresh });
+
+    renderAt("/dashboard");
+
+    expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+    expect(refresh).toHaveBeenCalledOnce();
+  });
 });
 
 describe("public route boundary", () => {

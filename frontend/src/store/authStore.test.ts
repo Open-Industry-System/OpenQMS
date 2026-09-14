@@ -23,6 +23,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function jwt(payload: Record<string, unknown>) {
+  return `header.${btoa(JSON.stringify(payload))}.signature`;
+}
+
+const aliceFactory = { id: "alice-factory", code: "ALICE", name: "Alice", is_active: true };
+const bobFactory = { id: "bob-factory", code: "BOB", name: "Bob", is_active: true };
+
 function resetStore() {
   localStorage.clear();
   useAuthStore.setState({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
@@ -32,16 +39,18 @@ beforeEach(() => { vi.clearAllMocks(); resetStore(); });
 
 describe("tryRefreshToken", () => {
   it("rotates both stored tokens and the Zustand access token on success", async () => {
-    localStorage.setItem("access_token", "old-access");
+    const oldAccessToken = jwt({ sub: "alice", exp: 9999999999 });
+    const newAccessToken = jwt({ sub: "alice", exp: 9999999999 });
+    localStorage.setItem("access_token", oldAccessToken);
     localStorage.setItem("refresh_token", "old-refresh");
-    useAuthStore.setState({ token: "old-access", user: oldUser });
-    api.refreshToken.mockResolvedValue({ access_token: "new-access", refresh_token: "new-refresh" });
+    useAuthStore.setState({ token: oldAccessToken, user: oldUser });
+    api.refreshToken.mockResolvedValue({ access_token: newAccessToken, refresh_token: "new-refresh" });
 
-    await expect(useAuthStore.getState().tryRefreshToken()).resolves.toBe("new-access");
+    await expect(useAuthStore.getState().tryRefreshToken()).resolves.toBe(newAccessToken);
 
-    expect(localStorage.getItem("access_token")).toBe("new-access");
+    expect(localStorage.getItem("access_token")).toBe(newAccessToken);
     expect(localStorage.getItem("refresh_token")).toBe("new-refresh");
-    expect(useAuthStore.getState().token).toBe("new-access");
+    expect(useAuthStore.getState().token).toBe(newAccessToken);
     expect(useAuthStore.getState().user).toBe(oldUser);
   });
 
@@ -109,18 +118,19 @@ describe("tryRefreshToken", () => {
       currentFactoryId: "old-factory",
     });
     const request = deferred<{ access_token: string; refresh_token: string }>();
+    const winnerAccessToken = jwt({ sub: "bob", exp: 9999999999 });
     api.refreshToken.mockReturnValue(request.promise);
 
     const losingRefresh = useAuthStore.getState().tryRefreshToken();
-    localStorage.setItem("access_token", "winner-access");
+    localStorage.setItem("access_token", winnerAccessToken);
     localStorage.setItem("refresh_token", "winner-refresh");
     request.reject(new Error("refresh token already rotated"));
 
-    await expect(losingRefresh).resolves.toBe("winner-access");
-    expect(localStorage.getItem("access_token")).toBe("winner-access");
+    await expect(losingRefresh).resolves.toBe(winnerAccessToken);
+    expect(localStorage.getItem("access_token")).toBe(winnerAccessToken);
     expect(localStorage.getItem("refresh_token")).toBe("winner-refresh");
     expect(useAuthStore.getState()).toMatchObject({
-      token: "winner-access", user: null, factoryScope: null, factories: [], currentFactoryId: null,
+      token: winnerAccessToken, user: null, factoryScope: null, factories: [], currentFactoryId: null,
     });
   });
 
@@ -151,11 +161,19 @@ describe("fetchUser generation guard", () => {
 
     const fetching = useAuthStore.getState().fetchUser();
     localStorage.setItem("access_token", "bob-access");
-    useAuthStore.setState({ token: "bob-access", user: newUser });
+    useAuthStore.setState({
+      token: "bob-access", user: newUser, loading: false,
+      factoryScope: { accessible_factory_ids: [bobFactory.id], default_factory_id: bobFactory.id },
+      factories: [bobFactory], currentFactoryId: bobFactory.id,
+    });
     request.resolve(oldUser);
 
     await expect(fetching).resolves.toBeUndefined();
-    expect(useAuthStore.getState()).toMatchObject({ token: "bob-access", user: newUser });
+    expect(useAuthStore.getState()).toMatchObject({
+      token: "bob-access", user: newUser, loading: false,
+      factoryScope: { accessible_factory_ids: [bobFactory.id], default_factory_id: bobFactory.id },
+      factories: [bobFactory], currentFactoryId: bobFactory.id,
+    });
   });
 
   it("does not let a stale /auth/me failure clear a newer same-tab login", async () => {
@@ -180,12 +198,13 @@ describe("fetchUser generation guard", () => {
     api.getMe.mockReturnValue(request.promise);
 
     const fetching = useAuthStore.getState().fetchUser();
-    localStorage.setItem("access_token", "bob-access");
+    const bobAccessToken = jwt({ sub: "bob", exp: 9999999999 });
+    localStorage.setItem("access_token", bobAccessToken);
     request.resolve(oldUser);
 
     await expect(fetching).resolves.toBeUndefined();
     expect(useAuthStore.getState()).toMatchObject({
-      token: "bob-access", user: null, factoryScope: null, factories: [], currentFactoryId: null,
+      token: bobAccessToken, user: null, factoryScope: null, factories: [], currentFactoryId: null,
     });
   });
 
@@ -196,12 +215,76 @@ describe("fetchUser generation guard", () => {
     api.getMe.mockReturnValue(request.promise);
 
     const fetching = useAuthStore.getState().fetchUser();
-    localStorage.setItem("access_token", "bob-access");
+    const bobAccessToken = jwt({ sub: "bob", exp: 9999999999 });
+    localStorage.setItem("access_token", bobAccessToken);
     request.reject(new Error("old session expired"));
 
     await expect(fetching).resolves.toBeUndefined();
     expect(useAuthStore.getState()).toMatchObject({
-      token: "bob-access", user: null, factoryScope: null, factories: [], currentFactoryId: null,
+      token: bobAccessToken, user: null, factoryScope: null, factories: [], currentFactoryId: null,
+    });
+  });
+});
+
+describe("idle storage and usable refresh tokens", () => {
+  it("adopts an idle cross-tab access-token StorageEvent and clears Alice identity state", () => {
+    localStorage.setItem("access_token", "alice-access");
+    useAuthStore.setState({
+      token: "alice-access", user: oldUser, loading: true,
+      factoryScope: { accessible_factory_ids: [aliceFactory.id], default_factory_id: aliceFactory.id },
+      factories: [aliceFactory], currentFactoryId: aliceFactory.id,
+    });
+    const bobAccessToken = jwt({ sub: "bob", exp: 9999999999 });
+    localStorage.setItem("access_token", bobAccessToken);
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "access_token", oldValue: "alice-access", newValue: bobAccessToken,
+    }));
+
+    expect(useAuthStore.getState()).toMatchObject({
+      token: bobAccessToken, user: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null,
+    });
+  });
+
+  it.each([
+    jwt({ sub: "alice", exp: 0 }),
+    jwt({ sub: "alice" }),
+    jwt({ sub: "alice", exp: "not-a-number" }),
+  ])("clears a current refresh response with non-valid access token %s", async (accessToken) => {
+    localStorage.setItem("access_token", jwt({ sub: "alice", exp: 9999999999 }));
+    localStorage.setItem("refresh_token", "current-refresh");
+    useAuthStore.setState({ token: localStorage.getItem("access_token"), user: oldUser });
+    api.refreshToken.mockResolvedValue({ access_token: accessToken, refresh_token: "rotated-refresh" });
+
+    await expect(useAuthStore.getState().tryRefreshToken()).resolves.toBeNull();
+    expect(localStorage.getItem("access_token")).toBeNull();
+    expect(localStorage.getItem("refresh_token")).toBeNull();
+    expect(useAuthStore.getState()).toMatchObject({ token: null, user: null, loading: false });
+  });
+
+  it("does not delete a newer refresh generation when its stored access token is non-valid", async () => {
+    const request = deferred<{ access_token: string; refresh_token: string }>();
+    localStorage.setItem("access_token", jwt({ sub: "alice", exp: 9999999999 }));
+    localStorage.setItem("refresh_token", "alice-refresh");
+    useAuthStore.setState({ token: localStorage.getItem("access_token"), user: oldUser, factories: [aliceFactory], currentFactoryId: aliceFactory.id });
+    api.refreshToken.mockReturnValue(request.promise);
+
+    const refreshing = useAuthStore.getState().tryRefreshToken();
+    localStorage.setItem("access_token", jwt({ sub: "bob", exp: 0 }));
+    localStorage.setItem("refresh_token", "bob-refresh");
+    request.reject(new Error("Alice refresh revoked"));
+
+    const result = await refreshing;
+    expect({
+      result,
+      storedAccessToken: localStorage.getItem("access_token"),
+      storedRefreshToken: localStorage.getItem("refresh_token"),
+      state: useAuthStore.getState(),
+    }).toMatchObject({
+      result: null,
+      storedAccessToken: null,
+      storedRefreshToken: "bob-refresh",
+      state: { token: null, user: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null },
     });
   });
 });

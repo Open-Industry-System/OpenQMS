@@ -68,19 +68,20 @@ function returns the parsed JSON body typed against `types/index.ts`.
   proxy can route to a tenant. Production relies on host-based routing
   and ignores this header.
 - **401 refresh shares one promise.** Each non-login 401 marks its request
-  `_retry` and awaits the same `tryRefreshToken()` promise. Replay is permitted
-  only when the initiating Bearer token and returned token have decodable,
-  equal JWT `sub` identities; malformed or mismatched identities reject the
-  original request without replaying it as another user. Explicit request
-  `Authorization` headers are preserved, including on retries. A `null` or
-  thrown refresh conditionally clears/redirects only when that request's token
-  is still the browser's current token; `/auth/login` 401s reject immediately,
-  `/auth/refresh` 401s reject back to the store without recursion, and an
-  already-retried 401 fails closed without clearing a newer generation. The
-  shared promise is cleared after either outcome so later sessions can refresh.
-- **403 silently re-syncs the user** by calling `/auth/me` and updating
-  the auth store, then propagating the rejection. Pages must still
-  handle the rejection.
+  `_retry` and awaits the same `tryRefreshToken()` promise. Before every
+  dispatch, the interceptor rejects a store/storage token mismatch after
+  calling `syncStoredAccessToken()`, so an idle-tab change cannot send a
+  request with another user's token. Replay is permitted only when the
+  initiating Bearer and returned JWT are both valid and have decodable, equal
+  `sub` identities; malformed, expired, or mismatched tokens reject without
+  replaying as another user. Explicit request `Authorization` headers are
+  preserved. A `null` refresh conditionally clears only the still-current
+  request token; `/auth/login` and `/auth/refresh` 401s never recurse.
+- **403 hydration is generation-guarded.** A non-`/auth/me` 403 delegates to
+  `authStore.fetchUser()` so complete user/factory slices update together.
+  `/auth/me` 403s reject directly, preventing recursive re-sync requests; a
+  request/store/storage generation mismatch synchronizes and rejects before
+  stale user data can apply.
 - **No FastAPI imports, no schema duplication.** Request and response
   types live in `types/index.ts`; this layer only imports them.
 
