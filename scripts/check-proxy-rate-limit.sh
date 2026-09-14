@@ -14,9 +14,26 @@ if [[ -z "${LOGIN_PASSWORD:-}" ]]; then
     exit 2
 fi
 
+SITE_SCHEME="${SITE_SCHEME:-http}"
+case "$SITE_SCHEME" in
+    http)
+        SITE_PORT=80
+        ;;
+    https)
+        SITE_PORT=443
+        ;;
+    *)
+        echo "check-proxy-rate-limit: SITE_SCHEME must be http or https" >&2
+        exit 2
+        ;;
+esac
+
 CURL_IMAGE="curlimages/curl:8.11.1"
+CURL_CONNECT_TIMEOUT=5
+CURL_MAX_TIME=10
 PROBE_ONE_IP="172.30.0.101"
 PROBE_TWO_IP="172.30.0.102"
+export SITE_SCHEME SITE_PORT CURL_CONNECT_TIMEOUT CURL_MAX_TIME
 
 backend_container() {
     docker compose -f "$COMPOSE_FILE" ps -q backend
@@ -46,10 +63,13 @@ web_is_running() {
 
 health_is_ready() {
     docker run --rm --entrypoint /bin/sh --network "$PRODUCTION_NETWORK" --ip "$PROBE_TWO_IP" \
-        -e SITE_HOST "$CURL_IMAGE" -eu -c '
+        -e SITE_HOST -e SITE_SCHEME -e SITE_PORT -e CURL_CONNECT_TIMEOUT -e CURL_MAX_TIME \
+        "$CURL_IMAGE" -eu -c '
             curl --fail --silent --show-error --output /dev/null \
-                --resolve "$SITE_HOST:443:172.30.0.10" \
-                "https://${SITE_HOST}/api/health"
+                --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+                --max-time "$CURL_MAX_TIME" \
+                --resolve "$SITE_HOST:$SITE_PORT:172.30.0.10" \
+                "${SITE_SCHEME}://${SITE_HOST}/api/health"
         '
 }
 
@@ -71,22 +91,26 @@ login_status() {
     local forged_xff="${2:-}"
 
     FORGED_XFF="$forged_xff" docker run --rm --entrypoint /bin/sh --network "$PRODUCTION_NETWORK" --ip "$client_ip" \
-        -e LOGIN_PASSWORD -e SITE_HOST -e FORGED_XFF "$CURL_IMAGE" -eu -c '
+        -e SITE_HOST -e SITE_SCHEME -e SITE_PORT -e CURL_CONNECT_TIMEOUT -e CURL_MAX_TIME -e FORGED_XFF "$CURL_IMAGE" -eu -c '
             if [ -n "${FORGED_XFF:-}" ]; then
                 curl --silent --show-error --output /dev/null --write-out "%{http_code}" \
+                    --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+                    --max-time "$CURL_MAX_TIME" \
                     --request POST \
-                    --resolve "$SITE_HOST:443:172.30.0.10" \
+                    --resolve "$SITE_HOST:$SITE_PORT:172.30.0.10" \
                     --header "Content-Type: application/json" \
                     --header "X-Forwarded-For: ${FORGED_XFF}" \
-                    --data "{\"username\":\"__proxy_rate_limit_probe__\",\"password\":\"${LOGIN_PASSWORD}\"}" \
-                    "https://${SITE_HOST}/api/auth/login"
+                    --data "{\"username\":\"__proxy_rate_limit_probe__\",\"password\":\"__rate_limit_probe_password__\"}" \
+                    "${SITE_SCHEME}://${SITE_HOST}/api/auth/login"
             else
                 curl --silent --show-error --output /dev/null --write-out "%{http_code}" \
+                    --connect-timeout "$CURL_CONNECT_TIMEOUT" \
+                    --max-time "$CURL_MAX_TIME" \
                     --request POST \
-                    --resolve "$SITE_HOST:443:172.30.0.10" \
+                    --resolve "$SITE_HOST:$SITE_PORT:172.30.0.10" \
                     --header "Content-Type: application/json" \
-                    --data "{\"username\":\"__proxy_rate_limit_probe__\",\"password\":\"${LOGIN_PASSWORD}\"}" \
-                    "https://${SITE_HOST}/api/auth/login"
+                    --data "{\"username\":\"__proxy_rate_limit_probe__\",\"password\":\"__rate_limit_probe_password__\"}" \
+                    "${SITE_SCHEME}://${SITE_HOST}/api/auth/login"
             fi
         '
 }
@@ -98,15 +122,6 @@ expect_status() {
     actual="$(login_status "$@")"
     if [[ "$actual" != "$expected" ]]; then
         echo "check-proxy-rate-limit: expected HTTP ${expected}, got ${actual}" >&2
-        exit 1
-    fi
-}
-
-expect_not_rate_limited() {
-    local actual
-    actual="$(login_status "$@")"
-    if [[ "$actual" == "429" ]]; then
-        echo "check-proxy-rate-limit: unexpected HTTP 429" >&2
         exit 1
     fi
 }
@@ -131,10 +146,10 @@ wait_for_ready
 
 echo "check-proxy-rate-limit: scenario 1 — independent client quotas"
 for _ in $(seq 1 10); do
-    expect_not_rate_limited "$PROBE_ONE_IP"
+    expect_status 401 "$PROBE_ONE_IP"
 done
 expect_status 429 "$PROBE_ONE_IP"
-expect_not_rate_limited "$PROBE_TWO_IP"
+expect_status 401 "$PROBE_TWO_IP"
 
 echo "check-proxy-rate-limit: restarting backend before forged-header scenario"
 docker compose -f "$COMPOSE_FILE" restart backend
@@ -142,9 +157,9 @@ wait_for_ready
 
 echo "check-proxy-rate-limit: scenario 2 — forged X-Forwarded-For shares probe bucket"
 for _ in $(seq 1 9); do
-    expect_not_rate_limited "$PROBE_ONE_IP"
+    expect_status 401 "$PROBE_ONE_IP"
 done
-expect_not_rate_limited "$PROBE_ONE_IP" "203.0.113.200"
+expect_status 401 "$PROBE_ONE_IP" "203.0.113.200"
 expect_status 429 "$PROBE_ONE_IP"
 
 echo "check-proxy-rate-limit: passed"
