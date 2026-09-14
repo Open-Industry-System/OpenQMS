@@ -1,8 +1,26 @@
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check-proxy-rate-limit.sh"
+
+
+def _loop_body_and_post(scenario: str, limit: int) -> tuple[list[str], list[str]]:
+    match = re.search(
+        rf"(?ms)^[ \t]*for _ in \$\(seq 1 {limit}\); do\n(?P<body>.*?)^[ \t]*done\n(?P<post>.*)\Z",
+        scenario,
+    )
+    assert match, f"missing exact seq 1 {limit} loop"
+    body = [line.strip() for line in match.group("body").splitlines() if line.strip()]
+    post = [line.strip() for line in match.group("post").splitlines() if line.strip()]
+    return body, post
+
+
+def _assert_loop_contract(scenario: str, limit: int, post_commands: list[str]) -> None:
+    body, post = _loop_body_and_post(scenario, limit)
+    assert body == ['expect_status 401 "$PROBE_ONE_IP"']
+    assert post == post_commands
 
 
 def test_proxy_rate_limit_script_has_required_safety_contract():
@@ -46,13 +64,48 @@ def test_proxy_rate_limit_script_covers_both_fixed_probe_scenarios():
     assert "172.30.0.102" in script
     assert "X-Forwarded-For" in script
     assert "expect_not_rate_limited" not in script
-    assert script.count('expect_status 401 "$PROBE_ONE_IP"\n') == 2
-    assert 'expect_status 401 "$PROBE_TWO_IP"' in script
-    assert 'expect_status 401 "$PROBE_ONE_IP" "203.0.113.200"' in script
-    assert script.count('expect_status 429 "$PROBE_ONE_IP"') == 2
-    scenario_one = script.split("scenario 1", 1)[1].split("restarting backend", 1)[0]
-    scenario_two = script.split("scenario 2", 1)[1]
-    assert scenario_one.count("for _ in $(seq 1 10); do") == 1
-    assert 'expect_status 401 "$PROBE_ONE_IP"\ndone\nexpect_status 429 "$PROBE_ONE_IP"\nexpect_status 401 "$PROBE_TWO_IP"' in scenario_one
-    assert scenario_two.count("for _ in $(seq 1 9); do") == 1
-    assert 'expect_status 401 "$PROBE_ONE_IP"\ndone\nexpect_status 401 "$PROBE_ONE_IP" "203.0.113.200"\nexpect_status 429 "$PROBE_ONE_IP"' in scenario_two
+    scenario_one = script.split('echo "check-proxy-rate-limit: scenario 1', 1)[1].split(
+        'echo "check-proxy-rate-limit: restarting backend', 1
+    )[0]
+    scenario_two = script.split('echo "check-proxy-rate-limit: scenario 2', 1)[1]
+    _assert_loop_contract(
+        scenario_one,
+        10,
+        [
+            'expect_status 429 "$PROBE_ONE_IP"',
+            'expect_status 401 "$PROBE_TWO_IP"',
+        ],
+    )
+    _assert_loop_contract(
+        scenario_two,
+        9,
+        [
+            'expect_status 401 "$PROBE_ONE_IP" "203.0.113.200"',
+            'expect_status 429 "$PROBE_ONE_IP"',
+            'echo "check-proxy-rate-limit: passed"',
+        ],
+    )
+
+
+def test_loop_contract_rejects_extra_quota_request():
+    scenario = '''
+for _ in $(seq 1 10); do
+    expect_status 401 "$PROBE_ONE_IP"
+    expect_status 401 '$PROBE_ONE_IP'
+done
+expect_status 429 "$PROBE_ONE_IP"
+expect_status 401 "$PROBE_TWO_IP"
+'''
+
+    try:
+        _assert_loop_contract(
+            scenario,
+            10,
+            [
+                'expect_status 429 "$PROBE_ONE_IP"',
+                'expect_status 401 "$PROBE_TWO_IP"',
+            ],
+        )
+    except AssertionError:
+        return
+    raise AssertionError("extra quota request was accepted")
