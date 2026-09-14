@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${COMPOSE_FILE:-}" ]]; then
+    echo "check-proxy-rate-limit: COMPOSE_FILE is required" >&2
+    exit 2
+fi
+if [[ -z "${SITE_HOST:-}" ]]; then
+    echo "check-proxy-rate-limit: SITE_HOST is required" >&2
+    exit 2
+fi
+if [[ -z "${LOGIN_PASSWORD:-}" ]]; then
+    echo "check-proxy-rate-limit: LOGIN_PASSWORD is required" >&2
+    exit 2
+fi
+
+CURL_IMAGE="curlimages/curl:8.11.1"
+PROBE_ONE_IP="172.30.0.101"
+PROBE_TWO_IP="172.30.0.102"
+
+backend_container() {
+    docker compose -f "$COMPOSE_FILE" ps -q backend
+}
+
+wait_for() {
+    local description="$1"
+    shift
+    local deadline=$((SECONDS + 60))
+
+    until "$@"; do
+        if (( SECONDS >= deadline )); then
+            echo "check-proxy-rate-limit: timed out waiting for ${description}" >&2
+            exit 1
+        fi
+        sleep 1
+    done
+}
+
+backend_is_running() {
+    [[ "$(docker inspect -f '{{.State.Running}}' "$BACKEND_CONTAINER")" == "true" ]]
+}
+
+web_is_running() {
+    [[ "$(docker inspect -f '{{.State.Running}}' "$WEB_CONTAINER")" == "true" ]]
+}
+
+health_is_ready() {
+    docker run --rm --entrypoint /bin/sh --network "$PRODUCTION_NETWORK" --ip "$PROBE_TWO_IP" \
+        -e SITE_HOST "$CURL_IMAGE" -eu -c '
+            curl --fail --silent --show-error --output /dev/null \
+                --resolve "$SITE_HOST:443:172.30.0.10" \
+                "https://${SITE_HOST}/api/health"
+        '
+}
+
+wait_for_ready() {
+    BACKEND_CONTAINER="$(backend_container)"
+    WEB_CONTAINER="$(docker compose -f "$COMPOSE_FILE" ps -q web)"
+    if [[ -z "$BACKEND_CONTAINER" || -z "$WEB_CONTAINER" ]]; then
+        echo "check-proxy-rate-limit: backend and web containers must exist" >&2
+        exit 1
+    fi
+
+    wait_for "backend container" backend_is_running
+    wait_for "web container" web_is_running
+    wait_for "Caddy health endpoint" health_is_ready
+}
+
+login_status() {
+    local client_ip="$1"
+    local forged_xff="${2:-}"
+
+    FORGED_XFF="$forged_xff" docker run --rm --entrypoint /bin/sh --network "$PRODUCTION_NETWORK" --ip "$client_ip" \
+        -e LOGIN_PASSWORD -e SITE_HOST -e FORGED_XFF "$CURL_IMAGE" -eu -c '
+            if [ -n "${FORGED_XFF:-}" ]; then
+                curl --silent --show-error --output /dev/null --write-out "%{http_code}" \
+                    --request POST \
+                    --resolve "$SITE_HOST:443:172.30.0.10" \
+                    --header "Content-Type: application/json" \
+                    --header "X-Forwarded-For: ${FORGED_XFF}" \
+                    --data "{\"username\":\"__proxy_rate_limit_probe__\",\"password\":\"${LOGIN_PASSWORD}\"}" \
+                    "https://${SITE_HOST}/api/auth/login"
+            else
+                curl --silent --show-error --output /dev/null --write-out "%{http_code}" \
+                    --request POST \
+                    --resolve "$SITE_HOST:443:172.30.0.10" \
+                    --header "Content-Type: application/json" \
+                    --data "{\"username\":\"__proxy_rate_limit_probe__\",\"password\":\"${LOGIN_PASSWORD}\"}" \
+                    "https://${SITE_HOST}/api/auth/login"
+            fi
+        '
+}
+
+expect_status() {
+    local expected="$1"
+    shift
+    local actual
+    actual="$(login_status "$@")"
+    if [[ "$actual" != "$expected" ]]; then
+        echo "check-proxy-rate-limit: expected HTTP ${expected}, got ${actual}" >&2
+        exit 1
+    fi
+}
+
+expect_not_rate_limited() {
+    local actual
+    actual="$(login_status "$@")"
+    if [[ "$actual" == "429" ]]; then
+        echo "check-proxy-rate-limit: unexpected HTTP 429" >&2
+        exit 1
+    fi
+}
+
+BACKEND_CONTAINER="$(backend_container)"
+if [[ -z "$BACKEND_CONTAINER" ]]; then
+    echo "check-proxy-rate-limit: backend container must exist" >&2
+    exit 1
+fi
+
+mapfile -t backend_networks < <(
+    docker inspect -f '{{range $name, $network := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
+        "$BACKEND_CONTAINER"
+)
+if [[ "${#backend_networks[@]}" -ne 1 ]]; then
+    echo "check-proxy-rate-limit: backend must be attached to exactly one production network" >&2
+    exit 1
+fi
+PRODUCTION_NETWORK="${backend_networks[0]}"
+
+wait_for_ready
+
+echo "check-proxy-rate-limit: scenario 1 — independent client quotas"
+for _ in $(seq 1 10); do
+    expect_not_rate_limited "$PROBE_ONE_IP"
+done
+expect_status 429 "$PROBE_ONE_IP"
+expect_not_rate_limited "$PROBE_TWO_IP"
+
+echo "check-proxy-rate-limit: restarting backend before forged-header scenario"
+docker compose -f "$COMPOSE_FILE" restart backend
+wait_for_ready
+
+echo "check-proxy-rate-limit: scenario 2 — forged X-Forwarded-For shares probe bucket"
+for _ in $(seq 1 9); do
+    expect_not_rate_limited "$PROBE_ONE_IP"
+done
+expect_not_rate_limited "$PROBE_ONE_IP" "203.0.113.200"
+expect_status 429 "$PROBE_ONE_IP"
+
+echo "check-proxy-rate-limit: passed"
