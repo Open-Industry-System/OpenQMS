@@ -1,8 +1,60 @@
+import json
+import os
 import re
+import shutil
+import subprocess
+from collections import Counter
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
+COMPOSE_PATH = ROOT / "docker-compose.prod.yml"
+ENV_EXAMPLE_PATH = ROOT / ".env.production.example"
+PRODUCTION_COMPOSE_SCRIPT = ROOT / "scripts" / "production-compose.sh"
+
+REQUIRED_ENV_KEYS = {
+    "SITE_ADDRESS",
+    "TAILSCALE_IP",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+    "DATABASE_URL",
+    "REDIS_PASSWORD",
+    "REDIS_URL",
+    "NEO4J_USER",
+    "NEO4J_PASSWORD",
+    "NEO4J_URI",
+    "NEO4J_DATABASE",
+    "SECRET_KEY",
+    "ACCESS_TOKEN_EXPIRE_MINUTES",
+    "REFRESH_TOKEN_EXPIRE_DAYS",
+    "ALGORITHM",
+    "GRAPH_REPOSITORY",
+    "TENANT_MODE",
+    "E2E_MODE",
+    "LLM_PROVIDER",
+    "LLM_API_KEY",
+    "LLM_MODEL",
+    "LLM_BASE_URL",
+    "EMBEDDING_PROVIDER",
+    "EMBEDDING_API_KEY",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_BASE_URL",
+    "VITE_PUBLIC_DEMO_ENABLED",
+    "VITE_PUBLIC_DEMO_USERNAME",
+    "VITE_PUBLIC_DEMO_PASSWORD",
+}
+EXPECTED_SERVICES = {"db", "redis", "neo4j", "backend", "graph-worker", "web"}
+EXPECTED_IPS = {
+    "web": "172.30.0.10",
+    "backend": "172.30.0.20",
+    "db": "172.30.0.30",
+    "redis": "172.30.0.40",
+    "neo4j": "172.30.0.50",
+    "graph-worker": "172.30.0.60",
+}
 
 
 def _service_block(compose: str, service: str) -> str:
@@ -31,6 +83,98 @@ def _has_single_forwarded_allow_ips_option(backend_block: str) -> bool:
     return backend_block.count("--forwarded-allow-ips") == 1
 
 
+def _mapping_block(block: str, key: str) -> dict[str, str]:
+    match = re.search(
+        rf"(?ms)^    {re.escape(key)}:\n(?P<body>.*?)(?=^    [\w-]+:|^  [\w-]+:|^\S|\Z)",
+        block,
+    )
+    assert match, f"missing {key} mapping"
+    return dict(
+        re.findall(r"(?m)^      ([A-Za-z0-9_]+):\s*(.*?)\s*$", match.group("body"))
+    )
+
+
+def _depends_on_conditions(block: str) -> dict[str, str]:
+    match = re.search(
+        r"(?ms)^    depends_on:\n(?P<body>.*?)(?=^    [\w-]+:|^  [\w-]+:|^\S|\Z)",
+        block,
+    )
+    assert match
+    return dict(
+        re.findall(
+            r"(?m)^      ([\w-]+):\n        condition:\s*([^\s]+)\s*$",
+            match.group("body"),
+        )
+    )
+
+
+def _assert_exact_environment(actual: dict[str, str], expected: dict[str, str]) -> None:
+    assert actual == expected
+
+
+def _assert_healthy_dependencies(
+    actual: dict[str, dict[str, object]], expected_names: set[str]
+) -> None:
+    assert set(actual) == expected_names
+    assert {name: config.get("condition") for name, config in actual.items()} == {
+        name: "service_healthy" for name in expected_names
+    }
+
+
+def _dotenv(path: Path) -> tuple[Counter[str], dict[str, str]]:
+    entries = [
+        line.split("=", 1)
+        for line in path.read_text().splitlines()
+        if line and not line.startswith("#")
+    ]
+    return Counter(key for key, _ in entries), dict(entries)
+
+
+def _compose_cli_available() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "version"],
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _compose_process_environment(**overrides: str) -> dict[str, str]:
+    environment = {
+        **os.environ,
+        "OPENQMS_ENV_FILE": str(ENV_EXAMPLE_PATH),
+    }
+    environment.update(overrides)
+    return environment
+
+
+def _render_compose(**overrides: str) -> dict[str, object]:
+    assert PRODUCTION_COMPOSE_SCRIPT.is_file(), "missing production Compose wrapper"
+    result = subprocess.run(
+        [
+            str(PRODUCTION_COMPOSE_SCRIPT),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env=_compose_process_environment(**overrides),
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
 def test_forwarded_allow_ips_preserves_comma_separated_values():
     backend = "command: --forwarded-allow-ips=172.30.0.10,203.0.113.1 --proxy-headers"
 
@@ -44,21 +188,51 @@ def test_forwarded_allow_ips_rejects_spaced_wildcard_after_safe_option():
     assert not _has_single_forwarded_allow_ips_option(backend)
 
 
+def test_exact_environment_contract_rejects_removed_auth_and_hardcoded_secret():
+    expected = {
+        "REDIS_PASSWORD": "REQUIRED_GENERATED_ON_SERVER",
+        "SECRET_KEY": "REQUIRED_GENERATED_ON_SERVER",
+    }
+
+    with pytest.raises(AssertionError):
+        _assert_exact_environment(
+            {"SECRET_KEY": "REQUIRED_GENERATED_ON_SERVER"}, expected
+        )
+    with pytest.raises(AssertionError):
+        _assert_exact_environment(
+            {
+                "REDIS_PASSWORD": "REQUIRED_GENERATED_ON_SERVER",
+                "SECRET_KEY": "hardcoded-default",
+            },
+            expected,
+        )
+
+
+def test_healthy_dependency_contract_rejects_removed_dependency():
+    actual = {
+        "db": {"condition": "service_healthy"},
+        "redis": {"condition": "service_healthy"},
+    }
+
+    with pytest.raises(AssertionError):
+        _assert_healthy_dependencies(actual, {"db", "redis", "neo4j"})
+
+
 def test_production_compose_and_caddy_trusted_proxy_contract():
-    compose = (ROOT / "docker-compose.prod.yml").read_text()
+    compose = COMPOSE_PATH.read_text()
     caddy = (ROOT / "deploy" / "Caddyfile").read_text()
 
     web = _service_block(compose, "web")
     backend = _service_block(compose, "backend")
     db = _service_block(compose, "db")
 
-    assert "172.30.0.10" in compose
+    assert re.search(r"(?m)^\s*context:\s*\.\s*$", web)
+    assert re.search(r"(?m)^\s*dockerfile:\s*frontend/Dockerfile\.prod\s*$", web)
     assert re.search(r"(?m)^\s*ipv4_address:\s*172\.30\.0\.10\s*$", web)
     assert _short_ports("web", web) == ["80:80", "443:443"]
     assert "--proxy-headers" in backend
     assert _has_single_forwarded_allow_ips_option(backend)
-    forwarded_allow_ips = _forwarded_allow_ips(backend)
-    assert forwarded_allow_ips == ["172.30.0.10"]
+    assert _forwarded_allow_ips(backend) == ["172.30.0.10"]
     assert "--forwarded-allow-ips=*" not in backend
 
     assert _short_ports("db", db) == ["127.0.0.1:5432:5432"]
@@ -66,4 +240,423 @@ def test_production_compose_and_caddy_trusted_proxy_contract():
     for service in ("redis", "neo4j", "backend", "graph-worker"):
         assert "ports:" not in _service_block(compose, service)
     assert "ollama" not in compose.lower()
+    assert "--reload" not in compose
+    assert "env_file:" not in compose
+    assert "./backend:/app" not in compose
+    assert "./frontend:/app" not in compose
+    for secret_key in (
+        "POSTGRES_PASSWORD",
+        "REDIS_PASSWORD",
+        "NEO4J_PASSWORD",
+        "SECRET_KEY",
+        "DATABASE_URL",
+        "REDIS_URL",
+    ):
+        assert secret_key not in web
     assert "trusted_proxies" not in caddy
+
+
+def test_static_production_stack_contract():
+    compose = COMPOSE_PATH.read_text()
+
+    assert set(re.findall(r"(?m)^  ([\w-]+):\n", compose.split("services:\n", 1)[1].split("\nnetworks:", 1)[0])) == EXPECTED_SERVICES
+    assert "subnet: 172.30.0.0/24" in compose
+    assert "pgdata_prod:" in compose
+    assert "neo4j_data_prod:" in compose
+    assert "caddy_data:" in compose
+    assert "caddy_config:" in compose
+    db = _service_block(compose, "db")
+    redis = _service_block(compose, "redis")
+    neo4j = _service_block(compose, "neo4j")
+    backend = _service_block(compose, "backend")
+    graph_worker = _service_block(compose, "graph-worker")
+    web = _service_block(compose, "web")
+
+    _assert_exact_environment(
+        _mapping_block(db, "environment"),
+        {
+            "POSTGRES_USER": "${POSTGRES_USER}",
+            "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+            "POSTGRES_DB": "${POSTGRES_DB}",
+        },
+    )
+    _assert_exact_environment(
+        _mapping_block(redis, "environment"),
+        {"REDIS_PASSWORD": "${REDIS_PASSWORD}"},
+    )
+    _assert_exact_environment(
+        _mapping_block(neo4j, "environment"),
+        {
+            "NEO4J_AUTH": "${NEO4J_USER}/${NEO4J_PASSWORD}",
+            "NEO4J_server_memory_pagecache_size": "128M",
+            "NEO4J_server_memory_heap_initial__size": "256M",
+            "NEO4J_server_memory_heap_max__size": "512M",
+        },
+    )
+    _assert_exact_environment(
+        _mapping_block(backend, "environment"),
+        {
+            key: f"${{{key}}}"
+            for key in (
+                "DATABASE_URL",
+                "REDIS_URL",
+                "SECRET_KEY",
+                "ACCESS_TOKEN_EXPIRE_MINUTES",
+                "REFRESH_TOKEN_EXPIRE_DAYS",
+                "ALGORITHM",
+                "NEO4J_URI",
+                "NEO4J_USER",
+                "NEO4J_PASSWORD",
+                "NEO4J_DATABASE",
+                "GRAPH_REPOSITORY",
+                "TENANT_MODE",
+                "E2E_MODE",
+                "LLM_PROVIDER",
+                "LLM_API_KEY",
+                "LLM_MODEL",
+                "LLM_BASE_URL",
+                "EMBEDDING_PROVIDER",
+                "EMBEDDING_API_KEY",
+                "EMBEDDING_MODEL",
+                "EMBEDDING_BASE_URL",
+            )
+        },
+    )
+    _assert_exact_environment(
+        _mapping_block(graph_worker, "environment"),
+        {
+            key: f"${{{key}}}"
+            for key in (
+                "DATABASE_URL",
+                "SECRET_KEY",
+                "NEO4J_URI",
+                "NEO4J_USER",
+                "NEO4J_PASSWORD",
+                "NEO4J_DATABASE",
+                "GRAPH_REPOSITORY",
+                "TENANT_MODE",
+                "E2E_MODE",
+            )
+        },
+    )
+    _assert_exact_environment(
+        _mapping_block(web, "environment"),
+        {
+            "SITE_ADDRESS": "${SITE_ADDRESS}",
+            "TAILSCALE_IP": "${TAILSCALE_IP}",
+        },
+    )
+    assert _depends_on_conditions(backend) == {
+        "db": "service_healthy",
+        "redis": "service_healthy",
+        "neo4j": "service_healthy",
+    }
+    assert _depends_on_conditions(graph_worker) == {
+        "db": "service_healthy",
+        "neo4j": "service_healthy",
+    }
+    assert _depends_on_conditions(web) == {"backend": "service_healthy"}
+
+    assert "$$REDIS_PASSWORD" in redis
+    assert "REDISCLI_AUTH=" in redis
+    assert "redis-cli -a" not in redis
+    assert "redis-cli -p" not in redis
+    assert "redis-server --requirepass" not in redis
+    assert "mktemp /tmp/openqms-redis." in redis
+    assert "chmod 600" in redis
+    assert 'exec redis-server "$$config"' in redis
+    assert "$$POSTGRES_USER" in _service_block(compose, "db")
+    assert "$$POSTGRES_DB" in _service_block(compose, "db")
+    assert "NEO4J_USERNAME=" in neo4j
+    assert "NEO4J_PASSWORD=" in neo4j
+    assert "$${NEO4J_AUTH%%/*}" in neo4j
+    assert "$${NEO4J_AUTH#*/}" in neo4j
+    assert "cypher-shell -p" not in neo4j
+    assert "cypher-shell --password" not in neo4j
+    assert "http://127.0.0.1:8000/api/health" in _service_block(compose, "backend")
+    assert "http://127.0.0.1:8080/api/health" in web
+    assert 'test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/api/health"]' in web
+    assert "python" in _service_block(compose, "graph-worker")
+    assert "app.services.graph_sync_worker" in _service_block(compose, "graph-worker")
+
+    for service, address in EXPECTED_IPS.items():
+        block = _service_block(compose, service)
+        assert f"ipv4_address: {address}" in block
+        assert "restart: unless-stopped" in block
+        assert "driver: json-file" in block
+        assert 'max-size: "10m"' in block
+        assert 'max-file: "3"' in block
+
+
+def test_backend_dockerignore_contract():
+    assert (ROOT / "backend" / ".dockerignore").read_text().splitlines() == [
+        ".venv",
+        ".venv312",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        "tests",
+        "*.pyc",
+        "*.log",
+        ".env*",
+    ]
+
+
+def test_production_env_example_and_gitignore_contract():
+    counts, values = _dotenv(ENV_EXAMPLE_PATH)
+
+    assert set(counts) == REQUIRED_ENV_KEYS
+    assert all(counts[key] == 1 for key in REQUIRED_ENV_KEYS)
+    for key in ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "NEO4J_PASSWORD", "SECRET_KEY"):
+        assert values[key] == "REQUIRED_GENERATED_ON_SERVER"
+    assert values["DATABASE_URL"] == (
+        "postgresql+asyncpg://qms:REQUIRED_GENERATED_ON_SERVER@db:5432/qms"
+    )
+    assert values["REDIS_URL"] == (
+        "redis://:REQUIRED_GENERATED_ON_SERVER@redis:6379/0"
+    )
+    assert values["TENANT_MODE"] == "single"
+    assert values["E2E_MODE"] == "false"
+    assert values["LLM_PROVIDER"] == ""
+    assert values["EMBEDDING_PROVIDER"] == ""
+    assert values["VITE_PUBLIC_DEMO_ENABLED"] == "true"
+    assert values["VITE_PUBLIC_DEMO_USERNAME"] == "viewer"
+    assert values["VITE_PUBLIC_DEMO_PASSWORD"] == "Viewer@2026"
+    assert "qms_dev_2026" not in ENV_EXAMPLE_PATH.read_text()
+
+    gitignore = (ROOT / ".gitignore").read_text().splitlines()
+    env_pattern = gitignore.index(".env.*")
+    assert gitignore[env_pattern + 1 : env_pattern + 4] == [
+        "!.env.example",
+        "!.env.production.example",
+        "backups/",
+    ]
+
+
+@pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
+def test_rendered_production_compose_contract():
+    rendered = _render_compose(
+        SITE_ADDRESS="qms.example.test",
+        TAILSCALE_IP="100.64.0.10",
+    )
+    services = rendered["services"]
+
+    assert rendered["name"] == "openqms"
+    assert set(services) == EXPECTED_SERVICES
+    assert set(rendered["volumes"]) == {
+        "pgdata_prod",
+        "neo4j_data_prod",
+        "caddy_data",
+        "caddy_config",
+    }
+    assert rendered["networks"]["openqms_internal"]["ipam"]["config"] == [
+        {"subnet": "172.30.0.0/24"}
+    ]
+
+    assert services["backend"]["command"] == [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--proxy-headers",
+        "--forwarded-allow-ips=172.30.0.10",
+    ]
+    assert services["graph-worker"]["command"] == [
+        "python",
+        "-m",
+        "app.services.graph_sync_worker",
+    ]
+    assert services["backend"]["image"] == services["graph-worker"]["image"]
+    assert services["backend"]["build"] == services["graph-worker"]["build"]
+    assert Path(services["backend"]["build"]["context"]) == ROOT / "backend"
+    assert Path(services["web"]["build"]["context"]) == ROOT
+    assert services["web"]["build"]["dockerfile"] == "frontend/Dockerfile.prod"
+    assert services["web"]["build"]["args"] == {
+        "VITE_PUBLIC_DEMO_ENABLED": "true",
+        "VITE_PUBLIC_DEMO_PASSWORD": "Viewer@2026",
+        "VITE_PUBLIC_DEMO_USERNAME": "viewer",
+    }
+    assert services["web"]["environment"] == {
+        "SITE_ADDRESS": "qms.example.test",
+        "TAILSCALE_IP": "100.64.0.10",
+    }
+
+    _, example = _dotenv(ENV_EXAMPLE_PATH)
+    _assert_exact_environment(
+        services["db"]["environment"],
+        {
+            "POSTGRES_USER": example["POSTGRES_USER"],
+            "POSTGRES_PASSWORD": example["POSTGRES_PASSWORD"],
+            "POSTGRES_DB": example["POSTGRES_DB"],
+        },
+    )
+    _assert_exact_environment(
+        services["redis"]["environment"],
+        {"REDIS_PASSWORD": example["REDIS_PASSWORD"]},
+    )
+    _assert_exact_environment(
+        services["neo4j"]["environment"],
+        {
+            "NEO4J_AUTH": f"{example['NEO4J_USER']}/{example['NEO4J_PASSWORD']}",
+            "NEO4J_server_memory_pagecache_size": "128M",
+            "NEO4J_server_memory_heap_initial__size": "256M",
+            "NEO4J_server_memory_heap_max__size": "512M",
+        },
+    )
+    backend_environment_keys = (
+        "DATABASE_URL",
+        "REDIS_URL",
+        "SECRET_KEY",
+        "ACCESS_TOKEN_EXPIRE_MINUTES",
+        "REFRESH_TOKEN_EXPIRE_DAYS",
+        "ALGORITHM",
+        "NEO4J_URI",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+        "NEO4J_DATABASE",
+        "GRAPH_REPOSITORY",
+        "TENANT_MODE",
+        "E2E_MODE",
+        "LLM_PROVIDER",
+        "LLM_API_KEY",
+        "LLM_MODEL",
+        "LLM_BASE_URL",
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_BASE_URL",
+    )
+    _assert_exact_environment(
+        services["backend"]["environment"],
+        {key: example[key] for key in backend_environment_keys},
+    )
+    worker_environment_keys = (
+        "DATABASE_URL",
+        "SECRET_KEY",
+        "NEO4J_URI",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+        "NEO4J_DATABASE",
+        "GRAPH_REPOSITORY",
+        "TENANT_MODE",
+        "E2E_MODE",
+    )
+    _assert_exact_environment(
+        services["graph-worker"]["environment"],
+        {key: example[key] for key in worker_environment_keys},
+    )
+    _assert_healthy_dependencies(
+        services["backend"]["depends_on"], {"db", "redis", "neo4j"}
+    )
+    _assert_healthy_dependencies(
+        services["graph-worker"]["depends_on"], {"db", "neo4j"}
+    )
+    _assert_healthy_dependencies(services["web"]["depends_on"], {"backend"})
+
+    expected_ports = {
+        "db": [
+            {
+                "host_ip": "127.0.0.1",
+                "mode": "ingress",
+                "protocol": "tcp",
+                "published": "5432",
+                "target": 5432,
+            }
+        ],
+        "web": [
+            {"mode": "ingress", "protocol": "tcp", "published": "80", "target": 80},
+            {"mode": "ingress", "protocol": "tcp", "published": "443", "target": 443},
+        ],
+    }
+    assert services["db"]["ports"] == expected_ports["db"]
+    assert services["web"]["ports"] == expected_ports["web"]
+    for service in EXPECTED_SERVICES - {"db", "web"}:
+        assert not services[service].get("ports")
+
+    for service, address in EXPECTED_IPS.items():
+        assert services[service]["networks"]["openqms_internal"]["ipv4_address"] == address
+        assert services[service]["restart"] == "unless-stopped"
+        assert services[service]["logging"] == {
+            "driver": "json-file",
+            "options": {"max-file": "3", "max-size": "10m"},
+        }
+        for mount in services[service].get("volumes", []):
+            assert mount["type"] == "volume"
+
+    for service in ("db", "redis", "neo4j", "backend", "web"):
+        healthcheck = services[service]["healthcheck"]
+        assert healthcheck["interval"]
+        assert healthcheck["timeout"]
+        assert healthcheck["retries"] > 0
+        assert healthcheck["test"]
+    redis_command = " ".join(services["redis"]["command"])
+    assert "--requirepass" not in redis_command
+    assert "REQUIRED_GENERATED_ON_SERVER" not in redis_command
+    assert "mktemp /tmp/openqms-redis." in redis_command
+    assert "chmod 600" in redis_command
+    assert 'redis-server "$$config"' in redis_command
+
+    redis_health = " ".join(services["redis"]["healthcheck"]["test"])
+    assert "$REDIS_PASSWORD" in redis_health
+    assert "REDISCLI_AUTH=" in redis_health
+    assert "redis-cli -a" not in redis_health
+    assert "redis-cli -p" not in redis_health
+    assert "REQUIRED_GENERATED_ON_SERVER" not in redis_health
+    assert "$POSTGRES_USER" in " ".join(services["db"]["healthcheck"]["test"])
+    assert "$POSTGRES_DB" in " ".join(services["db"]["healthcheck"]["test"])
+
+    neo4j_health = services["neo4j"]["healthcheck"]["test"]
+    assert neo4j_health[0] == "CMD-SHELL"
+    neo4j_health_command = " ".join(neo4j_health[1:])
+    assert "NEO4J_USERNAME=" in neo4j_health_command
+    assert "NEO4J_PASSWORD=" in neo4j_health_command
+    assert "$${NEO4J_AUTH%%/*}" in neo4j_health_command
+    assert "$${NEO4J_AUTH#*/}" in neo4j_health_command
+    assert " -p " not in f" {neo4j_health_command} "
+    assert "--password" not in neo4j_health_command
+    assert "REQUIRED_GENERATED_ON_SERVER" not in neo4j_health_command
+
+    assert "127.0.0.1:8000/api/health" in " ".join(
+        services["backend"]["healthcheck"]["test"]
+    )
+    assert services["web"]["healthcheck"]["test"] == [
+        "CMD",
+        "wget",
+        "--no-verbose",
+        "--tries=1",
+        "--spider",
+        "http://127.0.0.1:8080/api/health",
+    ]
+
+
+@pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
+def test_rendered_compose_ignores_ambient_test_credentials(monkeypatch):
+    ambient_database_url = "postgresql+asyncpg://test:test@localhost:5432/qms_test"
+    ambient_secret = "ambient-test-secret"
+    monkeypatch.setenv("DATABASE_URL", ambient_database_url)
+    monkeypatch.setenv("SECRET_KEY", ambient_secret)
+    monkeypatch.setenv("POSTGRES_PASSWORD", ambient_secret)
+    monkeypatch.setenv("REDIS_PASSWORD", ambient_secret)
+    monkeypatch.setenv("NEO4J_PASSWORD", ambient_secret)
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "attacker-project")
+
+    rendered = _render_compose(
+        SITE_ADDRESS="qms.example.test",
+        TAILSCALE_IP="100.64.0.10",
+    )
+    services = rendered["services"]
+    _, example = _dotenv(ENV_EXAMPLE_PATH)
+
+    assert rendered["name"] == "openqms"
+    assert services["backend"]["environment"]["DATABASE_URL"] == example["DATABASE_URL"]
+    assert services["graph-worker"]["environment"]["DATABASE_URL"] == example["DATABASE_URL"]
+    assert services["backend"]["environment"]["SECRET_KEY"] == example["SECRET_KEY"]
+    assert services["graph-worker"]["environment"]["SECRET_KEY"] == example["SECRET_KEY"]
+    assert services["db"]["environment"]["POSTGRES_PASSWORD"] == example["POSTGRES_PASSWORD"]
+    rendered_environments = json.dumps(
+        {name: service.get("environment", {}) for name, service in services.items()}
+    )
+    assert ambient_database_url not in rendered_environments
+    assert ambient_secret not in rendered_environments
