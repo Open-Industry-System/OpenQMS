@@ -1,0 +1,13 @@
+.git
+.claude
+.superpowers
+backend
+docs
+scripts
+frontend/node_modules
+frontend/dist
+frontend/test-results
+frontend/e2e/.storage-state
+*.log
+deploy/*
+!deploy/Caddyfile

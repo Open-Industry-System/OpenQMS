@@ -1,0 +1,24 @@
+FROM node:20-alpine AS build
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+
+ARG VITE_PUBLIC_DEMO_ENABLED=false
+ARG VITE_PUBLIC_DEMO_USERNAME=
+ARG VITE_PUBLIC_DEMO_PASSWORD=
+RUN if [ "$VITE_PUBLIC_DEMO_ENABLED" = "true" ]; then \
+      VITE_PUBLIC_DEMO_ENABLED=$VITE_PUBLIC_DEMO_ENABLED \
+      VITE_PUBLIC_DEMO_USERNAME=$VITE_PUBLIC_DEMO_USERNAME \
+      VITE_PUBLIC_DEMO_PASSWORD=$VITE_PUBLIC_DEMO_PASSWORD \
+      npm run build; \
+    else \
+      VITE_PUBLIC_DEMO_ENABLED=false VITE_PUBLIC_DEMO_USERNAME= VITE_PUBLIC_DEMO_PASSWORD= npm run build; \
+    fi
+
+FROM caddy:2-alpine
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+EXPOSE 80 443 8080
