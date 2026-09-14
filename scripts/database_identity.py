@@ -9,6 +9,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 
 
+_CONNECT_TIMEOUT_SECONDS = 10
+_STATEMENT_TIMEOUT = "15s"
+
 _IDENTITY_SQL = """
 SELECT
     (pg_control_system()).system_identifier::text,
@@ -56,10 +59,16 @@ def resolve_live_identity(dsn: str) -> DatabaseIdentity:
     url = make_url(dsn)
     if url.get_backend_name().lower() != "postgresql":
         raise ValueError("only PostgreSQL database URLs are supported")
-    engine = create_engine(url.set(drivername="postgresql+psycopg"))
+    sync_url = url.set(drivername="postgresql+psycopg").update_query_dict(
+        {"connect_timeout": str(_CONNECT_TIMEOUT_SECONDS)}
+    )
+    engine = create_engine(sync_url)
     try:
         with engine.connect() as connection:
             connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+            connection.exec_driver_sql(
+                f"SET LOCAL statement_timeout = '{_STATEMENT_TIMEOUT}'"
+            )
             system_identifier, database, database_oid = connection.exec_driver_sql(
                 _IDENTITY_SQL
             ).one()

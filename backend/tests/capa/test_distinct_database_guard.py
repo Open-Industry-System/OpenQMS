@@ -86,7 +86,27 @@ def test_guard_rejects_different_urls_that_connect_to_same_live_database():
         )
 
 
-def test_live_identity_uses_psycopg_and_a_read_only_transaction(monkeypatch):
+@pytest.mark.parametrize(
+    ("dsn", "expected_query"),
+    [
+        (
+            "postgresql+asyncpg://qms@db.internal/openqms",
+            {"connect_timeout": "10"},
+        ),
+        (
+            "postgresql+asyncpg://qms@db.internal/openqms"
+            "?connect_timeout=999&application_name=release&sslmode=require",
+            {
+                "connect_timeout": "10",
+                "application_name": "release",
+                "sslmode": "require",
+            },
+        ),
+    ],
+)
+def test_live_identity_bounds_connection_and_query_timeouts(
+    monkeypatch, dsn: str, expected_query: dict[str, str]
+):
     identity_module = _load_identity()
     created_urls = []
     statements: list[str] = []
@@ -119,14 +139,14 @@ def test_live_identity_uses_psycopg_and_a_read_only_transaction(monkeypatch):
 
     monkeypatch.setattr(identity_module, "create_engine", create_engine)
 
-    identity = identity_module.resolve_live_identity(
-        "postgresql+asyncpg://qms@db.internal/openqms"
-    )
+    identity = identity_module.resolve_live_identity(dsn)
 
     assert created_urls[0].drivername == "postgresql+psycopg"
+    assert dict(created_urls[0].query) == expected_query
     assert statements[0] == "SET TRANSACTION READ ONLY"
-    assert "(pg_control_system()).system_identifier::text" in statements[1]
-    assert "current_database()" in statements[1]
+    assert statements[1] == "SET LOCAL statement_timeout = '15s'"
+    assert "(pg_control_system()).system_identifier::text" in statements[2]
+    assert "current_database()" in statements[2]
     assert identity == identity_module.DatabaseIdentity("cluster-a", "openqms", 16384)
     assert statements[-1] == "DISPOSE"
 

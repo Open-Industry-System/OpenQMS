@@ -14,6 +14,9 @@ from database_identity import (
 )
 
 
+_SSH_CONNECT_TIMEOUT_SECONDS = 10
+_SSH_PROCESS_TIMEOUT_SECONDS = 60
+
 _REMOTE_SQL = (
     "SELECT json_build_object('system_identifier', "
     "(pg_control_system()).system_identifier::text, 'database', "
@@ -39,12 +42,32 @@ def verify_runtime_target_identity(
 ) -> None:
     """Compare the local tunneled identity with the remote Compose database."""
     local_identity = resolve_live_identity(dsn)
-    result = subprocess.run(
-        ["ssh", "-i", ssh_key, ssh_target, _remote_identity_command(app_dir)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    ssh_argv = [
+        "ssh",
+        "-i",
+        ssh_key,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "ConnectionAttempts=1",
+        "-o",
+        f"ConnectTimeout={_SSH_CONNECT_TIMEOUT_SECONDS}",
+        ssh_target,
+        _remote_identity_command(app_dir),
+    ]
+    try:
+        result = subprocess.run(
+            ssh_argv,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_SSH_PROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        raise DatabaseIdentityError("ssh command timed out") from None
     if result.returncode != 0:
         raise DatabaseIdentityError("ssh command failed")
 

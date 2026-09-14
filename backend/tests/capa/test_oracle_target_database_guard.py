@@ -124,16 +124,73 @@ def test_remote_command_unsets_local_db_variables_and_uses_container_variables(
     calls = _verify(guard, monkeypatch)
 
     argv, kwargs = calls[0]
-    assert argv[:4] == ["ssh", "-i", "/safe/id_ed25519", "ubuntu@oracle.internal"]
+    remote_command = argv[-1]
+    assert argv == [
+        "ssh",
+        "-i",
+        "/safe/id_ed25519",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "ConnectionAttempts=1",
+        "-o",
+        "ConnectTimeout=10",
+        "ubuntu@oracle.internal",
+        remote_command,
+    ]
     assert LOCAL_DSN not in argv
-    remote_command = argv[4]
     assert remote_command.startswith(
         "cd /opt/openqms && unset DATABASE_URL TEST_DATABASE_URL && docker compose"
     )
     assert "--env-file .env.production -f docker-compose.prod.yml exec -T db" in remote_command
     assert 'psql -XAt -U "$POSTGRES_USER" -d "$POSTGRES_DB"' in remote_command
     assert "POSTGRES_PASSWORD" not in remote_command
-    assert kwargs == {"capture_output": True, "text": True, "check": False}
+    assert kwargs == {
+        "stdin": guard.subprocess.DEVNULL,
+        "capture_output": True,
+        "text": True,
+        "check": False,
+        "timeout": 60,
+    }
+
+
+def test_cli_ssh_timeout_is_fixed_and_does_not_echo_exception_data(
+    monkeypatch, capsys
+):
+    guard = _load_guard()
+    secret = "credential-bearing timeout detail"
+    monkeypatch.setenv("DATABASE_URL", LOCAL_DSN)
+    monkeypatch.setenv("ORACLE_SSH_TARGET", "ubuntu@oracle.internal")
+    monkeypatch.setenv("ORACLE_SSH_KEY", "/private/secret-key")
+    monkeypatch.setenv("ORACLE_APP_DIR", "/opt/openqms")
+    monkeypatch.setattr(
+        guard,
+        "resolve_live_identity",
+        lambda _dsn: guard.DatabaseIdentity("cluster-a", "qms", 16384),
+    )
+
+    def timeout(argv, **kwargs):
+        raise guard.subprocess.TimeoutExpired(
+            argv,
+            kwargs["timeout"],
+            output=secret,
+            stderr=secret,
+        )
+
+    monkeypatch.setattr(guard.subprocess, "run", timeout)
+
+    result = guard.main()
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert captured.out == ""
+    assert captured.err == "runtime target identity guard failed: ssh command timed out\n"
+    assert secret not in captured.err
+    assert "ubuntu@oracle.internal" not in captured.err
+    assert "/private/secret-key" not in captured.err
+    assert LOCAL_DSN not in captured.err
 
 
 def test_cli_prints_only_success_text(monkeypatch, capsys):
