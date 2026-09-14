@@ -152,13 +152,24 @@ async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_t
         _session_factory(statements, sessions),
     )
 
-    with pytest.raises(tenant_migrate.TenantMigrationError) as exc:
+    caught: Exception | None = None
+    try:
         await tenant_migrate.main(all_tenants=True)
+    except Exception as exc:
+        caught = exc
 
-    assert attempted == ["tenant_first", "tenant_second"]
+    _assert_contract(caught is not None, "tenant migration raises an exception")
     _assert_contract(
-        secret not in str(exc.value),
+        type(caught) is tenant_migrate.TenantMigrationError,
+        "tenant migration raises TenantMigrationError",
+    )
+    _assert_contract(
+        secret not in str(caught),
         "tenant migration exception message is sanitized",
+    )
+    _assert_contract(
+        attempted == ["tenant_first", "tenant_second"],
+        "tenant migration attempts later tenants after a failure",
     )
     _assert_contract(
         error_calls
@@ -187,19 +198,19 @@ async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_t
     )
 
 
-def test_contract_assertion_hides_captured_secret():
-    secret = "credential-bearing captured logger argument"
-    captured = (("logger format", secret), {})
+def test_contract_assertion_hides_raw_exception_secret():
+    secret = "credential-bearing raw RuntimeError"
+    captured = RuntimeError(secret)
 
     with pytest.raises(pytest.fail.Exception) as exc:
         _assert_contract(
-            captured == (("logger format", "safe"), {}),
-            "logger call contract",
+            type(captured) is tenant_migrate.TenantMigrationError,
+            "tenant migration exception category contract",
         )
 
     _assert_contract(
         secret not in str(exc.value),
-        "contract assertion failures exclude captured values",
+        "contract assertion failures exclude captured exception values",
     )
 
 
