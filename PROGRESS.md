@@ -332,3 +332,15 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 - P1-D 剩余 LLM 消费者迁移：`docs/superpowers/specs/2026-07-01-ai-qms-p1d-remaining-llm-migration-design.md` + `docs/superpowers/plans/2026-07-01-ai-qms-p1d-remaining-llm-migration.md`（5 TDD 任务，3 轮 spec + 3 轮 plan 评审）
 - 权限矩阵：`docs/permissions.md`
 - 各模块详细文档：`docs/modules/`
+
+---
+
+## Oracle 生产部署 master plan — Task 11（2026-09-14）
+
+- [x] 新增 `scripts/backup-postgres.sh`：仅经 authoritative `production-compose.sh` 执行 `pg_dump -Fc` / container-local `pg_restore --list`，私有 partial、空文件拒绝、原子不覆盖发布、成功后七日窄范围保留、信号/失败清理与固定无敏感输出。
+- [x] 新增 `openqms-backup.service` / `.timer`（ubuntu oneshot；每日 03:17、Persistent、10m 随机延迟）。
+- [x] README 与中英部署 runbook 统一为固定项目名 `openqms` 的生产包装器命令；补齐 Oracle ARM64/Tailscale、Cloudflare DNS-only、Caddy trusted proxy、identity/check/initialize/preflight/rollout、密码轮换、Viewer 公共值、备份/恢复/回滚边界；移除生产直连 Compose、自动刷新旧说法与删除卷建议。
+- [x] ADR-0005 由 ADR-0014 supersede；记录 per-browser hashed rotating refresh session、replay/legacy/password-reset/audit 边界。
+- [x] RED→GREEN：backup 14 tests、docs 12 tests；Task 11 focused regressions 共 148 passed；shell syntax、stale-doc static check、`git diff --check` 通过。
+
+**下一步**：coordinator 集成 Task 11 commit 后继续 master plan 后续任务；实际 Docker/systemd/SSH/Oracle/DNS/OCI/迁移/seed/生产环境生成仍只在受控发布阶段执行。

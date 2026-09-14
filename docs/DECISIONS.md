@@ -70,7 +70,7 @@
 ## ADR-0005 — JWT HS256 + 120 min 过期，不用 OAuth2 第三方/refresh token
 
 - **日期**：2025-09-25
-- **状态**：Accepted
+- **状态**：Superseded by ADR-0014
 - **背景**：内部部署为主，没有第三方 IdP；用户接受 2 小时后重新登录。备选：JWT RS256（需要密钥分发）、Session + Redis、OAuth2 + refresh token。
 - **决策**：HS256 单 secret，`SECRET_KEY` 环境变量；token `sub=user_id`，120 min `exp`；前端 `ProtectedRoute` 本地校验过期；过期则 axios 拦截器清 token → `/login`。无 refresh token。
 - **影响**：
@@ -173,6 +173,25 @@
   - ✅ JSONB 字段、check constraint 行为可控
   - ⚠️ 编号偶发冲突（多分支并行开发时）——`PROGRESS.md` Known Gaps 已标注，需规范
   - ⚠️ 新开发者上手成本略高，参考已有迁移文件模仿
+
+## ADR-0014 — 每浏览器会话使用哈希存储、轮换且可撤销的 Refresh Token
+
+- **日期**：2026-09-14
+- **状态**：Accepted
+- **背景**：ADR-0005 的单一 120 分钟 access JWT 无法在过期时无感续期，也无法隔离多个浏览器登录或检测 refresh credential 重放。系统仍不引入第三方 OAuth2/IdP，需要在保留 HS256 access JWT 的同时增加最小、可审计的服务端会话安全状态。
+- **决策**：
+  - 每次浏览器登录创建独立 refresh session；JWT 中的稳定 `sid` 标识会话，每次签发生成新的随机 `jti`。数据库仅保存完整 Refresh Token 的 `SHA-256` hash，不保存明文。
+  - 刷新时对 `(sid, user_id)` 的**精确行锁**执行校验与轮换；旧 hash 在一次成功轮换后立即失效，旧 Token replay 重放一律拒绝。刷新期限按成功使用滚动，是 inactivity-based 不活跃期限，而不是固定登录总时长。
+  - 不含 `sid` 的 legacy Refresh Token 只允许一次升级：在用户行锁内核对旧值、清除旧列并签发新的 session token，之后不能再次升级或重放。
+  - 前端对同一时刻的 `401` 合并刷新，并只在新旧 access JWT 属于同一 identity 时重放原请求；跨标签页同步最新 generation，清空旧身份派生状态，再通过 `/auth/me` 安全恢复用户、权限与工厂/产品线范围。
+  - 密码重置会撤销该用户全部 refresh sessions；已经签发的无状态 access JWT 仍可能继续有效至原 120 分钟过期。通过 token-version 或 denylist 立即撤销 access JWT 的方案延期，未在本决策中实现。
+  - `user_refresh_sessions` 行是认证安全状态，不是质量/业务 CRUD 记录，因此轮换不写入业务 `AuditLog`。登录成功与失败继续写入 `LoginAuditLog`；管理员密码重置本身仍按用户变更写业务审计。
+- **影响**：
+  - ✅ 用户在持续使用期间可自动续期，同时不同浏览器会话互不覆盖
+  - ✅ 数据库泄露时不直接暴露可用 refresh credential；精确行锁与 hash 轮换提供一次性使用/replay 防护
+  - ✅ 跨标签页竞争不会把旧用户请求重放到新登录身份
+  - ⚠️ 密码重置不是 access JWT 的即时撤销；最高仍有 120 分钟窗口，运维与管理员界面必须明确该边界
+  - ⚠️ Refresh rotation 属于高频认证安全状态，故意不复制到合规业务 `AuditLog`；安全监控应使用认证日志与异常指标
 
 ---
 

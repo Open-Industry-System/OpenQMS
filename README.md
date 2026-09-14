@@ -41,7 +41,7 @@
 |----|------|
 | 后端 | Python 3.11 / FastAPI 0.115 (async) / SQLAlchemy 2.0 (async) / PostgreSQL 15 / Redis 7 |
 | 前端 | React 18 / TypeScript 5.6 / Vite 5.4 / Ant Design 5.21 |
-| 基础设施 | Docker Compose / Alembic (迁移) / Neo4j 5 (知识图谱) / Ollama (AI 推荐) |
+| 基础设施 | Docker Compose / Alembic (迁移) / Neo4j 5 (知识图谱) / 外部 AI 提供商（可选） |
 
 ---
 
@@ -50,7 +50,7 @@
 ### 前提条件
 
 - [Docker](https://www.docker.com/get-started) 与 Docker Compose
-- 4 GB+ 可用内存（Neo4j + Ollama 各占 256–512 MB）
+- 4 GB+ 可用内存（PostgreSQL + Redis + Neo4j + 应用服务）
 
 ### 1. 启动服务
 
@@ -98,6 +98,103 @@ docker compose exec backend python -m app.seed
 
 - Swagger UI：**http://localhost:8000/docs**
 - ReDoc：**http://localhost:8000/redoc**
+
+---
+
+## Oracle ARM64 生产部署
+
+生产目标为 `qms.smartindustry.world`：Oracle Cloud ARM64 单机、`TENANT_MODE=single`，Tailscale 用于管理和私网验收，Cloudflare 上线时保持 **DNS-only**。生产 Compose 包含 PostgreSQL、Redis、Neo4j、backend、graph-worker 和 Caddy web；**不部署 Ollama**，LLM/Embedding 提供商在上线后通过管理员 AI 配置页设置。
+
+`/` 是唯一显式公开的路由保护例外，`/login` 是认证入口；仪表盘和全部业务路由仍由 `ProtectedRoute` 与模块权限保护。access JWT 有效期为 120 分钟；密码重置会撤销 refresh 会话，但已签发的无状态 access JWT 最长仍可有效到原过期时间。Caddy 固定为 `172.30.0.10`，backend 仅信任该代理地址；不要在未重跑代理探针时改变生产子网或 trusted-proxy 边界。
+
+### 生产环境与 Compose 包装器
+
+根目录 `.env` / `.env.production` 由 Compose 使用。首次在服务器生成 `.env.production` 后，所有生产命令都必须经过包装器；它固定项目名 `openqms`、项目目录、Compose 文件和环境文件，并清除可能污染生产配置的 ambient 环境覆盖。
+
+```bash
+cd /opt/openqms
+SITE_ADDRESS=qms.smartindustry.world \
+  TAILSCALE_IP='<tailscale-ip>' \
+  OUTPUT_PATH=.env.production \
+  ./scripts/init-production-env.sh
+./scripts/production-compose.sh config
+./scripts/production-compose.sh up -d db redis neo4j
+./scripts/production-compose.sh ps
+```
+
+浏览器可见的公开 Viewer 值是有意提供的只读演示凭据，绝不能用作 privileged 特权账号凭据。独立运行 Vite 不读取根目录 `.env.production`，而读取 `frontend/.env*`；将公开值写入 `frontend/.env.local`，或在 `npm run dev/build` 前导出。禁用时三个构建值必须是 `false` 加空用户名/密码。
+
+```bash
+cat > frontend/.env.local <<'EOF'
+VITE_PUBLIC_DEMO_ENABLED=true
+VITE_PUBLIC_DEMO_USERNAME=viewer
+VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+EOF
+
+# 禁用公开演示入口
+VITE_PUBLIC_DEMO_ENABLED=false \
+VITE_PUBLIC_DEMO_USERNAME= \
+VITE_PUBLIC_DEMO_PASSWORD= \
+  npm --prefix frontend run build
+```
+
+### 身份门禁与串行发布
+
+容器内 DSN 使用 `db:5432`；主机发布命令使用指向同一 Oracle PostgreSQL 的本地 SSH 隧道 DSN，测试 DSN 必须指向独立 `qms_test`。迁移前必须先通过远端运行时身份比对，且 release 顺序固定为 identity → migrate → check → initialize → preflight → rollout。首次部署用 `INITIALIZE_CMD` 以无凭据输出模式 seed；它在 preflight 前运行。
+
+```bash
+export DATABASE_URL='postgresql+asyncpg://qms:<generated-postgres-password>@127.0.0.1:5432/qms'
+export TEST_DATABASE_URL='postgresql+asyncpg://qms:<test-only-password>@127.0.0.1:5433/qms_test'
+export ORACLE_SSH_TARGET='ubuntu@<tailscale-ip>'
+export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
+export ORACLE_APP_DIR=/opt/openqms
+backend/.venv/bin/python scripts/check-oracle-target-database.py
+
+TARGET_IDENTITY_CMD='backend/.venv/bin/python scripts/check-oracle-target-database.py' \
+INITIALIZE_CMD='./scripts/production-compose.sh run --rm backend python -m app.seed --no-print-credentials' \
+ROLLOUT_CMD='./scripts/production-compose.sh up -d --build backend graph-worker web' \
+TENANT_MODE=single \
+  make deploy-release
+
+COMPOSE_FILE=/opt/openqms/docker-compose.prod.yml \
+SITE_HOST=qms.smartindustry.world \
+LOGIN_PASSWORD='<current-viewer-password>' \
+  ./scripts/check-proxy-rate-limit.sh
+./scripts/production-compose.sh logs --tail=200 backend web
+./scripts/production-compose.sh restart backend
+```
+
+在公开 DNS/防火墙放行前，通过 Tailscale 私网登录管理员界面，轮换 `admin`、`engineer`、`manager`、`groupadmin` 等所有 privileged 特权密码，只保留 Viewer 公开演示值。Cloudflare 记录保持 DNS-only，让 Caddy 直接终止 HTTPS。**SSH 仅在 HTTPS 与 Tailscale private 私网验收均通过后关闭公网入口。**
+
+### 备份、恢复与回滚
+
+```bash
+sudo install -m 0644 deploy/openqms-backup.service /etc/systemd/system/openqms-backup.service
+sudo install -m 0644 deploy/openqms-backup.timer /etc/systemd/system/openqms-backup.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now openqms-backup.timer
+sudo -u ubuntu OPENQMS_DIR=/opt/openqms \
+  BACKUP_DIR=/opt/openqms/backups/postgres \
+  RETENTION_DAYS=7 \
+  /opt/openqms/scripts/backup-postgres.sh
+sudo systemctl list-timers openqms-backup.timer
+latest=$(find /opt/openqms/backups/postgres -type f -name '*.dump' | sort | tail -1)
+./scripts/production-compose.sh exec -T db pg_restore --list < "$latest" >/dev/null
+```
+
+备份脚本每天生成经 `pg_restore --list` 校验的 custom-format dump，验证成功后才发布并执行七日保留。恢复必须在停写后先导入**新的空数据库**完成演练；脚本不备份 Neo4j/Caddy 卷，也不提供覆盖生产库的一键恢复。
+
+代码回滚只切换到已验证版本并重建应用服务；schema 回滚必须依据迁移兼容性和已验证备份另行决策。以下命令保留命名卷，绝不删除生产数据卷：
+
+```bash
+git checkout '<previous-release-tag>'
+./scripts/production-compose.sh config
+./scripts/production-compose.sh up -d --build backend graph-worker web
+./scripts/production-compose.sh ps
+./scripts/production-compose.sh down
+```
+
+完整双语操作手册见 [部署指南](docs/deployment.md) 与 [English Deployment Guide](docs/en/deployment.md)。
 
 ---
 
