@@ -38,9 +38,9 @@ def _glob_matches(path: str, pattern: str, include_descendants: bool = False) ->
             index += 1
 
     if "/" not in pattern:
-        if include_descendants:
-            return any(re.fullmatch(regex, part) is not None for part in path.split("/"))
-        return re.fullmatch(regex, path) is not None
+        if re.fullmatch(regex, path) is not None:
+            return True
+        return include_descendants and path.startswith(f"{pattern}/")
     if re.fullmatch(regex, path) is not None:
         return True
     return include_descendants and path.startswith(f"{pattern}/")
@@ -97,6 +97,10 @@ def test_root_context_allowlist_admits_only_required_production_build_inputs():
         ".git/config",
         ".claude/settings.json",
         ".superpowers/sdd/task-9-report.md",
+        "frontend/src/vendor/.git/config",
+        "frontend/public/.claude/settings.json",
+        "frontend/src/vendor/.superpowers/state.json",
+        "frontend/src/vendor/.worktrees/other/secret",
         "backend/app/main.py",
         "docs/deploy.md",
         "scripts/release.sh",
@@ -116,6 +120,19 @@ def test_root_context_allowlist_admits_only_required_production_build_inputs():
 
     assert not _included_in_docker_context("frontend/package.json", [*patterns, "**"])
     assert _included_in_docker_context("frontend/package.json", [*patterns, "**", "!frontend/package.json"])
+
+    recursive_metadata_rules = {
+        "**/.git",
+        "**/.git/**",
+        "**/.claude",
+        "**/.claude/**",
+        "**/.superpowers",
+        "**/.superpowers/**",
+        "**/.worktrees",
+        "**/.worktrees/**",
+    }
+    without_recursive_rules = [pattern for pattern in patterns if pattern not in recursive_metadata_rules]
+    assert _included_in_docker_context("frontend/src/vendor/.git/config", without_recursive_rules)
 
 
 def test_production_dockerfile_keeps_disabled_demo_credentials_out_of_vite_and_final_stage_minimal():

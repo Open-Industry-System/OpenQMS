@@ -12,6 +12,17 @@
 !frontend/src/**
 !frontend/public/
 !frontend/public/**
+
+# Source subtrees may contain checked-out metadata; keep it out of BuildKit.
+**/.git
+**/.git/**
+**/.claude
+**/.claude/**
+**/.superpowers
+**/.superpowers/**
+**/.worktrees
+**/.worktrees/**
+
 !deploy/
 !deploy/Caddyfile
 
