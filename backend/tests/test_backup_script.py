@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import signal
 import stat
 import subprocess
@@ -64,8 +65,12 @@ if any("pg_dump" in arg for arg in args):
     raise SystemExit(0)
 if args[-2:] == ["pg_restore", "--list"]:
     payload = sys.stdin.buffer.read()
-    if os.environ.get("FAKE_CREATE_FINAL"):
-        Path(os.environ["FAKE_CREATE_FINAL"]).write_bytes(b"existing-backup-must-survive")
+    race_path = os.environ.get("FAKE_CREATE_FINAL")
+    if race_path:
+        if os.environ.get("FAKE_CREATE_FINAL_KIND") == "directory":
+            Path(race_path).mkdir()
+        else:
+            Path(race_path).write_bytes(b"existing-backup-must-survive")
     if os.environ.get("FAKE_RESTORE_MODE") == "fail" or not payload.startswith(b"PGDMP"):
         raise SystemExit(24)
     raise SystemExit(0)
@@ -158,6 +163,34 @@ def test_backup_script_is_executable_valid_bash_with_signal_cleanup_contract():
     _require(result.returncode == 0, "backup script syntax check failed")
 
 
+def test_backup_requires_python3_for_exact_atomic_publication(tmp_path):
+    openqms_dir, backup_dir, compose_log, fake_bin = _write_harness(tmp_path)
+    bash = shutil.which("bash")
+    assert bash is not None
+    environment = _environment(openqms_dir, backup_dir, compose_log, fake_bin)
+    environment["PATH"] = str(fake_bin)
+
+    result = subprocess.run(
+        [bash, str(SCRIPT)],
+        cwd=tmp_path,
+        env=environment,
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert not backup_dir.exists()
+    assert _calls(compose_log) == []
+    _require(result.stdout == "", "missing-python path wrote stdout")
+    _require(
+        result.stderr == "error: python3 is required for atomic publication\n",
+        "missing-python error category changed",
+    )
+    _assert_no_secret(result)
+
+
 def test_success_publishes_valid_dump_securely_then_applies_narrow_retention(tmp_path):
     openqms_dir, backup_dir, compose_log, fake_bin = _write_harness(tmp_path)
     backup_dir.mkdir()
@@ -245,11 +278,67 @@ def test_failed_dump_or_validation_never_publishes_or_runs_retention(
     _assert_no_secret(result)
 
 
-def test_atomic_publication_refuses_existing_final_without_changing_it(tmp_path):
+@pytest.mark.parametrize(
+    "existing_kind",
+    ["file", "fifo", "directory", "file-symlink", "directory-symlink"],
+)
+def test_existing_final_target_is_rejected_without_altering_target(
+    tmp_path, existing_kind
+):
     openqms_dir, backup_dir, compose_log, fake_bin = _write_harness(tmp_path)
     backup_dir.mkdir()
     final = backup_dir / f"openqms-postgres-{TIMESTAMP}.dump"
     original = b"existing-backup-must-survive"
+    target = tmp_path / "target"
+
+    if existing_kind == "file":
+        final.write_bytes(original)
+    elif existing_kind == "fifo":
+        os.mkfifo(final, mode=0o600)
+    elif existing_kind == "directory":
+        final.mkdir()
+    elif existing_kind == "file-symlink":
+        target.write_bytes(original)
+        final.symlink_to(target)
+    else:
+        target.mkdir()
+        final.symlink_to(target, target_is_directory=True)
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=tmp_path,
+        env=_environment(openqms_dir, backup_dir, compose_log, fake_bin),
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert _calls(compose_log) == []
+    assert _partials(backup_dir) == []
+    if existing_kind == "file":
+        assert final.read_bytes() == original
+    elif existing_kind == "fifo":
+        assert stat.S_ISFIFO(final.stat().st_mode)
+    elif existing_kind == "directory":
+        assert final.is_dir() and list(final.iterdir()) == []
+    elif existing_kind == "file-symlink":
+        assert final.is_symlink() and target.read_bytes() == original
+    else:
+        assert final.is_symlink() and target.is_dir() and list(target.iterdir()) == []
+    _require(result.stdout == "", "existing-target refusal wrote stdout")
+    _require(
+        result.stderr == "error: backup already exists\n",
+        "existing-target error changed",
+    )
+    _assert_no_secret(result)
+
+
+def test_atomic_publication_refuses_directory_created_after_initial_check(tmp_path):
+    openqms_dir, backup_dir, compose_log, fake_bin = _write_harness(tmp_path)
+    backup_dir.mkdir()
+    final = backup_dir / f"openqms-postgres-{TIMESTAMP}.dump"
     old_dump = backup_dir / "old.dump"
     old_dump.write_bytes(b"keep")
     old = time.time() - 9 * 24 * 60 * 60
@@ -264,6 +353,7 @@ def test_atomic_publication_refuses_existing_final_without_changing_it(tmp_path)
             compose_log,
             fake_bin,
             FAKE_CREATE_FINAL=str(final),
+            FAKE_CREATE_FINAL_KIND="directory",
         ),
         text=True,
         capture_output=True,
@@ -272,7 +362,8 @@ def test_atomic_publication_refuses_existing_final_without_changing_it(tmp_path)
     )
 
     assert result.returncode != 0
-    assert final.read_bytes() == original
+    assert final.is_dir()
+    assert list(final.iterdir()) == []
     assert old_dump.exists()
     assert _partials(backup_dir) == []
     assert _calls(compose_log) == [EXPECTED_DUMP_COMMAND, EXPECTED_RESTORE_COMMAND]

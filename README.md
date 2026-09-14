@@ -45,7 +45,9 @@
 
 ---
 
-## 快速开始
+## 本地开发快速开始（非生产）
+
+本节普通 `docker compose` 命令仅用于本地开发；修改演示密码不会把该栈变成生产配置。生产部署必须使用 `production-compose.sh` 和下方 Oracle 流程，完整步骤见 [部署指南](docs/deployment.md)。
 
 ### 前提条件
 
@@ -103,13 +105,67 @@ docker compose exec backend python -m app.seed
 
 ## Oracle ARM64 生产部署
 
-生产目标为 `qms.smartindustry.world`：Oracle Cloud ARM64 单机、`TENANT_MODE=single`，Tailscale 用于管理和私网验收，Cloudflare 上线时保持 **DNS-only**。生产 Compose 包含 PostgreSQL、Redis、Neo4j、backend、graph-worker 和 Caddy web；**不部署 Ollama**，LLM/Embedding 提供商在上线后通过管理员 AI 配置页设置。
+生产目标为 `qms.smartindustry.world`：Oracle Cloud ARM64 单机、`TENANT_MODE=single`、`E2E_MODE=false`，Tailscale 用于管理和私网验收，Cloudflare 上线时保持 **DNS-only**。生产 Compose 包含 PostgreSQL、Redis、Neo4j、backend、graph-worker 和 Caddy web；**不部署 Ollama**，LLM/Embedding 提供商在上线后通过管理员 AI 配置页设置。
 
 `/` 是唯一显式公开的路由保护例外，`/login` 是认证入口；仪表盘和全部业务路由仍由 `ProtectedRoute` 与模块权限保护。access JWT 有效期为 120 分钟；密码重置会撤销 refresh 会话，但已签发的无状态 access JWT 最长仍可有效到原过期时间。Caddy 固定为 `172.30.0.10`，backend 仅信任该代理地址；不要在未重跑代理探针时改变生产子网或 trusted-proxy 边界。
 
 ### 生产环境与 Compose 包装器
 
 根目录 `.env` / `.env.production` 由 Compose 使用。首次在服务器生成 `.env.production` 后，所有生产命令都必须经过包装器；它固定项目名 `openqms`、项目目录、Compose 文件和环境文件，并清除可能污染生产配置的 ambient 环境覆盖。
+
+Mac 运维仓库必须先锁定一个 tracked 内容与 HEAD 一致的不可变 release；无关 untracked 计划/参考文件不参与部署身份。部署字节只从 `git archive "$RELEASE_SHA"` 提取到权限 `0700` 的私有 stage，不再从可变 working tree 读取；path stream 同样来自 `git ls-tree` commit object。manifest 为每个 tracked 路径记录 SHA-256 与 Git 相关模式 `100644`/`100755`，并拒绝 symlink/不安全路径。Oracle 必须验证 manifest 本身、verifier、所有 tracked 文件 hash/mode 和完整 deployable path set；只排除持久运行时状态 `.env.production`、`backups/`、`.release-sha` 与 `.release-manifest`。验证成功后才写入非敏感 commit SHA marker。首次部署不做远端删除同步，任何额外/遗留 source、config 或 script 都会 fail closed。stage 在正常完成、EXIT 或信号时清理。
+
+```bash
+set -euo pipefail
+cd '<local-openqms-checkout>'
+git checkout --detach '<immutable-release-sha>'
+git diff --quiet
+git diff --cached --quiet
+export RELEASE_SHA=$(git rev-parse HEAD)
+export ORACLE_SSH_TARGET=ubuntu@100.84.141.70
+export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
+RELEASE_STAGE=""
+cleanup_release_stage() {
+  if [[ -n "$RELEASE_STAGE" ]]; then
+    rm -rf -- "$RELEASE_STAGE"
+    RELEASE_STAGE=""
+  fi
+}
+handle_release_signal() {
+  trap - HUP INT TERM QUIT
+  cleanup_release_stage
+  exit 1
+}
+trap cleanup_release_stage EXIT
+trap handle_release_signal HUP INT TERM QUIT
+RELEASE_STAGE=$(mktemp -d)
+chmod 700 "$RELEASE_STAGE"
+RELEASE_MANIFEST="$RELEASE_STAGE/.release-manifest"
+umask 022
+git archive --format=tar "$RELEASE_SHA" | tar -xf - -C "$RELEASE_STAGE"
+git ls-tree -r -z --name-only "$RELEASE_SHA" | \
+  python3 "$RELEASE_STAGE/scripts/check-release-tree.py" create --root "$RELEASE_STAGE" \
+  > "$RELEASE_MANIFEST"
+git ls-tree -r -z --name-only "$RELEASE_SHA" | \
+  rsync --from0 --files-from=- -a \
+    -e "ssh -i $ORACLE_SSH_KEY" \
+    "$RELEASE_STAGE/" "$ORACLE_SSH_TARGET:/opt/openqms/"
+scp -i "$ORACLE_SSH_KEY" \
+  "$RELEASE_MANIFEST" \
+  "$ORACLE_SSH_TARGET:/opt/openqms/.release-manifest"
+export RELEASE_MANIFEST_SHA=$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$RELEASE_MANIFEST")
+export RELEASE_GUARD_SHA=$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$RELEASE_STAGE/scripts/check-release-tree.py")
+export REMOTE_RELEASE_VERIFY='test "$(sha256sum .release-manifest | cut -d " " -f1)" = "'"$RELEASE_MANIFEST_SHA"'" && test "$(sha256sum scripts/check-release-tree.py | cut -d " " -f1)" = "'"$RELEASE_GUARD_SHA"'" && python3 scripts/check-release-tree.py verify --root . --manifest .release-manifest >/dev/null'
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+  "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+printf '%s\n' "$RELEASE_SHA" | \
+  ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+    'cat > /opt/openqms/.release-sha'
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+```
+
+以下初始化命令在 **Oracle 主机 `/opt/openqms` shell** 执行：
 
 ```bash
 cd /opt/openqms
@@ -118,6 +174,7 @@ SITE_ADDRESS=qms.smartindustry.world \
   OUTPUT_PATH=.env.production \
   ./scripts/init-production-env.sh
 ./scripts/production-compose.sh config
+./scripts/production-compose.sh build
 ./scripts/production-compose.sh up -d db redis neo4j
 ./scripts/production-compose.sh ps
 ```
@@ -140,25 +197,56 @@ VITE_PUBLIC_DEMO_PASSWORD= \
 
 ### 身份门禁与串行发布
 
-容器内 DSN 使用 `db:5432`；主机发布命令使用指向同一 Oracle PostgreSQL 的本地 SSH 隧道 DSN，测试 DSN 必须指向独立 `qms_test`。迁移前必须先通过远端运行时身份比对，且 release 顺序固定为 identity → migrate → check → initialize → preflight → rollout。首次部署用 `INITIALIZE_CMD` 以无凭据输出模式 seed；它在 preflight 前运行。
+容器内 DSN 使用 `db:5432`。在一台 Mac 运维终端建立 Oracle 目标隧道到本地 `15432`；本地 PostgreSQL `5432` 用于独立、唯一的 release gate 测试库。迁移前 distinct guard 的两个数据库都必须已经存在且可达。release 在第二个 Mac 终端运行，但 `INITIALIZE_CMD` / `ROLLOUT_CMD` 通过 SSH 回到 Oracle `/opt/openqms` 执行生产包装器。顺序固定为 identity → migrate → check → initialize → preflight → rollout；首次部署的 seed 在 preflight 前以无凭据输出模式运行。
+
+Mac 专用隧道终端：
 
 ```bash
-export DATABASE_URL='postgresql+asyncpg://qms:<generated-postgres-password>@127.0.0.1:5432/qms'
-export TEST_DATABASE_URL='postgresql+asyncpg://qms:<test-only-password>@127.0.0.1:5433/qms_test'
-export ORACLE_SSH_TARGET='ubuntu@<tailscale-ip>'
+ssh -N \
+  -i "$HOME/.ssh/<private-key-file>" \
+  -L 15432:127.0.0.1:5432 \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  ubuntu@100.84.141.70
+```
+
+执行同步且保留 `RELEASE_SHA` 的 Mac 运维终端（先将占位符替换为本机测试库凭据；不得打印生产密码或 DSN）：
+
+```bash
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+export DATABASE_URL='postgresql+asyncpg://qms:<url-encoded-production-password>@127.0.0.1:15432/qms'
+export RELEASE_GATE_DB="qms_release_gate_$(date +%Y%m%d%H%M%S)"
+make check-test-db TEST_DB="$RELEASE_GATE_DB" \
+  PGUSER='<local-test-user>' \
+  PGPASSWORD='<local-test-password>' \
+  PGHOST=127.0.0.1 \
+  PGPORT=5432
+export TEST_DATABASE_URL="postgresql+asyncpg://<local-test-user>:<url-encoded-local-test-password>@127.0.0.1:5432/${RELEASE_GATE_DB}"
+export ORACLE_SSH_TARGET=ubuntu@100.84.141.70
 export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
 export ORACLE_APP_DIR=/opt/openqms
-backend/.venv/bin/python scripts/check-oracle-target-database.py
+export TARGET_IDENTITY_CMD='"$PYTHON_BIN" "$REPO_ROOT/scripts/check-oracle-target-database.py"'
+export INITIALIZE_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh run --rm --no-deps backend python -m app.seed --no-print-credentials"'
+export ROLLOUT_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh up -d --wait backend graph-worker web"'
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+TENANT_MODE=single make deploy-release
+cleanup_release_stage
+trap - EXIT HUP INT TERM QUIT
+```
 
-TARGET_IDENTITY_CMD='backend/.venv/bin/python scripts/check-oracle-target-database.py' \
-INITIALIZE_CMD='./scripts/production-compose.sh run --rm backend python -m app.seed --no-print-credentials' \
-ROLLOUT_CMD='./scripts/production-compose.sh up -d --build backend graph-worker web' \
-TENANT_MODE=single \
-  make deploy-release
+预公开代理探针必须在 Oracle 主机运行，并命中 Caddy 的 Tailnet HTTP site；公网证书签发后若再次探测 `qms.smartindustry.world`，必须显式设置 `SITE_SCHEME=https`。
 
+```bash
 COMPOSE_FILE=/opt/openqms/docker-compose.prod.yml \
-SITE_HOST=qms.smartindustry.world \
-LOGIN_PASSWORD='<current-viewer-password>' \
+SITE_HOST=100.84.141.70 \
+SITE_SCHEME=http \
+LOGIN_PASSWORD=Viewer@2026 \
   ./scripts/check-proxy-rate-limit.sh
 ./scripts/production-compose.sh logs --tail=200 backend web
 ./scripts/production-compose.sh restart backend
@@ -167,6 +255,8 @@ LOGIN_PASSWORD='<current-viewer-password>' \
 在公开 DNS/防火墙放行前，通过 Tailscale 私网登录管理员界面，轮换 `admin`、`engineer`、`manager`、`groupadmin` 等所有 privileged 特权密码，只保留 Viewer 公开演示值。Cloudflare 记录保持 DNS-only，让 Caddy 直接终止 HTTPS。**SSH 仅在 HTTPS 与 Tailscale private 私网验收均通过后关闭公网入口。**
 
 ### 备份、恢复与回滚
+
+以下备份安装、手动执行与校验命令都在 **Oracle 主机 `/opt/openqms` shell** 执行：
 
 ```bash
 sudo install -m 0644 deploy/openqms-backup.service /etc/systemd/system/openqms-backup.service
@@ -178,20 +268,23 @@ sudo -u ubuntu OPENQMS_DIR=/opt/openqms \
   RETENTION_DAYS=7 \
   /opt/openqms/scripts/backup-postgres.sh
 sudo systemctl list-timers openqms-backup.timer
-latest=$(find /opt/openqms/backups/postgres -type f -name '*.dump' | sort | tail -1)
+latest=$(find /opt/openqms/backups/postgres -maxdepth 1 -type f -name '*.dump' | sort | tail -1)
+test -n "$latest"
 ./scripts/production-compose.sh exec -T db pg_restore --list < "$latest" >/dev/null
 ```
 
 备份脚本每天生成经 `pg_restore --list` 校验的 custom-format dump，验证成功后才发布并执行七日保留。恢复必须在停写后先导入**新的空数据库**完成演练；脚本不备份 Neo4j/Caddy 卷，也不提供覆盖生产库的一键恢复。
 
-代码回滚只切换到已验证版本并重建应用服务；schema 回滚必须依据迁移兼容性和已验证备份另行决策。以下命令保留命名卷，绝不删除生产数据卷：
+代码回滚先在 **Mac 仓库**切换到已验证版本并按 Task 14 的同一受控 rsync 流程同步源码，再在 **Oracle 主机**重建应用服务；schema 回滚必须依据迁移兼容性和已验证备份另行决策。以下步骤保留命名卷，并以服务运行和 `ps` 检查结束：
 
 ```bash
+# Mac 仓库：切换版本并完成受控源码同步
 git checkout '<previous-release-tag>'
+
+# Oracle 主机 /opt/openqms：同步完成后重建并保持运行
 ./scripts/production-compose.sh config
 ./scripts/production-compose.sh up -d --build backend graph-worker web
 ./scripts/production-compose.sh ps
-./scripts/production-compose.sh down
 ```
 
 完整双语操作手册见 [部署指南](docs/deployment.md) 与 [English Deployment Guide](docs/en/deployment.md)。

@@ -37,6 +37,9 @@ fi
 if [[ ! -x "$COMPOSE_WRAPPER" ]]; then
   fail "error: production Compose wrapper is not executable"
 fi
+if ! command -v python3 >/dev/null 2>&1; then
+  fail "error: python3 is required for atomic publication"
+fi
 if ! mkdir -p -- "$BACKUP_DIR" 2>/dev/null; then
   fail "error: backup directory creation failed"
 fi
@@ -77,7 +80,13 @@ if ! "$COMPOSE_WRAPPER" exec -T db pg_restore --list \
   fail "error: PostgreSQL dump validation failed"
 fi
 
-if ! ln -- "$partial_path" "$final_path" 2>/dev/null; then
+if ! python3 - "$partial_path" "$final_path" 2>/dev/null <<'PY'
+import os
+import sys
+
+os.link(sys.argv[1], sys.argv[2], follow_symlinks=False)
+PY
+then
   if [[ -e "$final_path" || -L "$final_path" ]]; then
     fail "error: backup already exists"
   fi

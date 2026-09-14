@@ -12,7 +12,7 @@ This guide separates the Oracle ARM64 production runbook from local development.
 |------|---------------------|
 | Public hostname | `qms.smartindustry.world` |
 | Compute | Single Oracle Cloud Ampere ARM64 host |
-| Tenant mode | `TENANT_MODE=single` |
+| Tenant/test mode | `TENANT_MODE=single`, `E2E_MODE=false`; single tenant with production E2E endpoints disabled |
 | Management plane | Tailscale SSH and private acceptance |
 | Public edge | Cloudflare **DNS-only** → Caddy on `80/443` |
 | Data services | PostgreSQL 15, Redis 7, Neo4j 5 |
@@ -35,6 +35,60 @@ After initialization, **every production Compose command** must use:
 
 The wrapper pins project name `openqms`, project directory, `.env.production`, and `docker-compose.prod.yml`, then strips ambient overrides that could replace validated production values. Do not reconstruct the production Compose invocation by hand.
 
+First pin the Mac operator repository to one immutable release whose tracked worktree and index both match HEAD; unrelated untracked plan/reference files are not deployment identity. Do not use remote deletion on the first deployment. Deployment bytes come only from `git archive "$RELEASE_SHA"` extracted into a private mode-`0700` stage, never from the mutable working tree; the path stream likewise comes from the `git ls-tree` commit object. The manifest records SHA-256 plus Git-relevant mode `100644`/`100755` for every tracked path and rejects symlinks or unsafe paths. Oracle verifies the manifest itself, the verifier, every tracked-file hash/mode, and the complete deployable path set. The only exclusions are persistent runtime state: `.env.production`, `backups/`, `.release-sha`, and `.release-manifest`. Any extra or stale source, configuration, or script fails closed. Only successful content verification permits the non-secret `RELEASE_SHA` marker to be written and read back. The stage is removed on normal completion, EXIT, or signals:
+
+```bash
+set -euo pipefail
+cd '<local-openqms-checkout>'
+git checkout --detach '<immutable-release-sha>'
+git diff --quiet
+git diff --cached --quiet
+export RELEASE_SHA=$(git rev-parse HEAD)
+export ORACLE_SSH_TARGET=ubuntu@100.84.141.70
+export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
+RELEASE_STAGE=""
+cleanup_release_stage() {
+  if [[ -n "$RELEASE_STAGE" ]]; then
+    rm -rf -- "$RELEASE_STAGE"
+    RELEASE_STAGE=""
+  fi
+}
+handle_release_signal() {
+  trap - HUP INT TERM QUIT
+  cleanup_release_stage
+  exit 1
+}
+trap cleanup_release_stage EXIT
+trap handle_release_signal HUP INT TERM QUIT
+RELEASE_STAGE=$(mktemp -d)
+chmod 700 "$RELEASE_STAGE"
+RELEASE_MANIFEST="$RELEASE_STAGE/.release-manifest"
+umask 022
+git archive --format=tar "$RELEASE_SHA" | tar -xf - -C "$RELEASE_STAGE"
+git ls-tree -r -z --name-only "$RELEASE_SHA" | \
+  python3 "$RELEASE_STAGE/scripts/check-release-tree.py" create --root "$RELEASE_STAGE" \
+  > "$RELEASE_MANIFEST"
+git ls-tree -r -z --name-only "$RELEASE_SHA" | \
+  rsync --from0 --files-from=- -a \
+    -e "ssh -i $ORACLE_SSH_KEY" \
+    "$RELEASE_STAGE/" "$ORACLE_SSH_TARGET:/opt/openqms/"
+scp -i "$ORACLE_SSH_KEY" \
+  "$RELEASE_MANIFEST" \
+  "$ORACLE_SSH_TARGET:/opt/openqms/.release-manifest"
+export RELEASE_MANIFEST_SHA=$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$RELEASE_MANIFEST")
+export RELEASE_GUARD_SHA=$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$RELEASE_STAGE/scripts/check-release-tree.py")
+export REMOTE_RELEASE_VERIFY='test "$(sha256sum .release-manifest | cut -d " " -f1)" = "'"$RELEASE_MANIFEST_SHA"'" && test "$(sha256sum scripts/check-release-tree.py | cut -d " " -f1)" = "'"$RELEASE_GUARD_SHA"'" && python3 scripts/check-release-tree.py verify --root . --manifest .release-manifest >/dev/null'
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+  "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+printf '%s\n' "$RELEASE_SHA" | \
+  ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+    'cat > /opt/openqms/.release-sha'
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+```
+
+Local migration code, tests/preflight, and remote containers must all come from this same immutable release. Run the following in the **Oracle host `/opt/openqms` shell**:
+
 ```bash
 cd /opt/openqms
 SITE_ADDRESS=qms.smartindustry.world \
@@ -42,6 +96,7 @@ SITE_ADDRESS=qms.smartindustry.world \
   OUTPUT_PATH=.env.production \
   ./scripts/init-production-env.sh
 ./scripts/production-compose.sh config
+./scripts/production-compose.sh build
 ./scripts/production-compose.sh up -d db redis neo4j
 ./scripts/production-compose.sh ps
 ```
@@ -84,44 +139,66 @@ VITE_PUBLIC_DEMO_PASSWORD= \
 
 #### A. Prepare the host and infrastructure
 
-1. Check out the validated release under `/opt/openqms` on Oracle.
+1. In the Mac operator repository, pin and synchronize the same `RELEASE_SHA` as described in 1.2, then initialize that release under Oracle `/opt/openqms`.
 2. Generate `.env.production` and validate `./scripts/production-compose.sh config`.
 3. Start only `db redis neo4j` and wait for health. Do not start backend/web early.
-4. From the operator host, create a local SSH tunnel to Oracle `127.0.0.1:5432`. Use a private-key filename placeholder; never record key contents.
+4. In a dedicated terminal on the Mac operator host, create the Oracle target tunnel on local port `15432`, leaving local PostgreSQL `5432` available for the release test database.
 
 ```bash
-ssh -i "$HOME/.ssh/<private-key-file>" \
-  -N -L 5432:127.0.0.1:5432 \
-  'ubuntu@<tailscale-ip>'
+ssh -N \
+  -i "$HOME/.ssh/<private-key-file>" \
+  -L 15432:127.0.0.1:5432 \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  ubuntu@100.84.141.70
 ```
 
 #### B. Target, test, and runtime identity gates
 
-`DATABASE_URL` addresses the Oracle target through the local tunnel. `TEST_DATABASE_URL` must address a separate `qms_test`; it must not point to the seeded development database or the production target. The test-database guard canonicalizes DSNs and fails closed if the databases are equivalent.
+Run the following in the **Mac operator terminal that performed the 1.2 sync and retains `RELEASE_SHA`**. `DATABASE_URL` reaches Oracle `qms` through local port `15432`. `TEST_DATABASE_URL` reaches a unique, timestamped database on the Mac's local PostgreSQL `5432`. Both databases must already exist and be reachable before the distinct-DB guard starts; the test URL must never name the seeded development database or production target.
 
-The runtime identity checker uses SSH to execute `./scripts/production-compose.sh exec -T db ...` on Oracle and compares PostgreSQL system identifier, database name, and OID. This mandatory `TARGET_IDENTITY_CMD` runs before migration and has no bypass.
+Create and migrate the unique local release-gate database first, then export its actual URL. Replace the following local username/password placeholders with credentials for the Mac's local test PostgreSQL; never use the production password:
 
 ```bash
-export DATABASE_URL='postgresql+asyncpg://qms:<generated-postgres-password>@127.0.0.1:5432/qms'
-export TEST_DATABASE_URL='postgresql+asyncpg://qms:<test-only-password>@127.0.0.1:5433/qms_test'
-export ORACLE_SSH_TARGET='ubuntu@<tailscale-ip>'
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+export DATABASE_URL='postgresql+asyncpg://qms:<url-encoded-production-password>@127.0.0.1:15432/qms'
+export RELEASE_GATE_DB="qms_release_gate_$(date +%Y%m%d%H%M%S)"
+make check-test-db TEST_DB="$RELEASE_GATE_DB" \
+  PGUSER='<local-test-user>' \
+  PGPASSWORD='<local-test-password>' \
+  PGHOST=127.0.0.1 \
+  PGPORT=5432
+export TEST_DATABASE_URL="postgresql+asyncpg://<local-test-user>:<url-encoded-local-test-password>@127.0.0.1:5432/${RELEASE_GATE_DB}"
+export ORACLE_SSH_TARGET=ubuntu@100.84.141.70
 export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
 export ORACLE_APP_DIR=/opt/openqms
 backend/.venv/bin/python scripts/check-oracle-target-database.py
 ```
 
+The runtime identity checker uses SSH to execute `./scripts/production-compose.sh exec -T db ...` on Oracle and compares PostgreSQL system identifier, database name, and OID. This mandatory `TARGET_IDENTITY_CMD` runs before migration and has no bypass.
+
 #### C. Serial release and initialization
 
 `deploy-release.sh` runs: distinct-DB guard → target identity → migrate → tenant migrate (when configured) → check → initialize → preflight → rollout. Any failure stops the sequence.
 
-On first deployment, `INITIALIZE_CMD` seeds data. The release script runs initialization before preflight. `--no-print-credentials` keeps privileged demo passwords out of logs. Omit `INITIALIZE_CMD` on later releases once data is initialized.
+On first deployment, `INITIALIZE_CMD` seeds data. The release script runs initialization before preflight. `--no-print-credentials` keeps privileged demo passwords out of logs. Omit `INITIALIZE_CMD` on later releases once data is initialized. `deploy-release.sh` evaluates command strings on the Mac operator host, so initializer and rollout must explicitly SSH to Oracle, change to `/opt/openqms`, and invoke the remote wrapper; they must not invoke Compose on the Mac.
+
+Continue in the Mac operator terminal that retains `RELEASE_SHA`. Both remote commands first revalidate the manifest hash, every tracked file, and the exact path set, then check the Oracle marker, and only then invoke the wrapper. A changed tree, stale file, or marker mismatch blocks initialization and rollout:
 
 ```bash
-TARGET_IDENTITY_CMD='backend/.venv/bin/python scripts/check-oracle-target-database.py' \
-INITIALIZE_CMD='./scripts/production-compose.sh run --rm backend python -m app.seed --no-print-credentials' \
-ROLLOUT_CMD='./scripts/production-compose.sh up -d --build backend graph-worker web' \
-TENANT_MODE=single \
-  make deploy-release
+export TARGET_IDENTITY_CMD='"$PYTHON_BIN" "$REPO_ROOT/scripts/check-oracle-target-database.py"'
+export INITIALIZE_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh run --rm --no-deps backend python -m app.seed --no-print-credentials"'
+export ROLLOUT_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh up -d --wait backend graph-worker web"'
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+TENANT_MODE=single make deploy-release
+cleanup_release_stage
+trap - EXIT HUP INT TERM QUIT
 ```
 
 Do not split migrate, check, preflight, and rollout into parallel commands. The target `DATABASE_URL` is used only for migration/preflight; during check, both `DATABASE_URL` and `TEST_DATABASE_URL` are bound to the isolated test database. Rollout receives neither host DSN.
@@ -130,15 +207,18 @@ Do not split migrate, check, preflight, and rollout into parallel commands. The 
 
 1. Use the Tailscale endpoint to accept `/`, `/login`, admin login, business permissions, and health.
 2. In admin user management, rotate every privileged password, including `admin`, `engineer`, `manager`, and `groupadmin`. Do not disclose generated passwords. Keep only the Viewer demo values public.
-3. Run the proxy/rate-limit probe with the current Viewer password. The script itself uses the fixed production wrapper and checks independent-client quotas plus forged `X-Forwarded-For` behavior.
+3. On the **Oracle host**, run the proxy/rate-limit probe with the public Viewer password and explicitly target the Tailnet `http://100.84.141.70` site. The script itself uses the fixed production wrapper and checks independent-client quotas plus forged `X-Forwarded-For` behavior. Do not probe the public hostname with default HTTP before certificate issuance: Caddy's 308 HTTPS redirect breaks the expected 401 assertions.
 4. Point the Cloudflare `qms.smartindustry.world` record to the Oracle public IP with Proxy status **DNS-only**, allowing Caddy to obtain and terminate HTTPS directly.
-5. Accept `https://qms.smartindustry.world/`, `/login`, API health, and permissions over the public path.
+5. Accept `https://qms.smartindustry.world/`, `/login`, API health, and permissions over the public path. If the proxy probe is rerun against the public hostname, set `SITE_SCHEME=https` explicitly.
 6. **Close public SSH only after HTTPS and private Tailscale acceptance both pass.** Keep the Tailnet management path.
+
+Run this block in the Oracle `/opt/openqms` shell:
 
 ```bash
 COMPOSE_FILE=/opt/openqms/docker-compose.prod.yml \
-SITE_HOST=qms.smartindustry.world \
-LOGIN_PASSWORD='<current-viewer-password>' \
+SITE_HOST=100.84.141.70 \
+SITE_SCHEME=http \
+LOGIN_PASSWORD=Viewer@2026 \
   ./scripts/check-proxy-rate-limit.sh
 ./scripts/production-compose.sh ps
 ./scripts/production-compose.sh logs --tail=200 backend web
@@ -146,6 +226,8 @@ LOGIN_PASSWORD='<current-viewer-password>' \
 ```
 
 ### 1.5 Routine operations
+
+Run these commands in the Oracle `/opt/openqms` shell:
 
 ```bash
 ./scripts/production-compose.sh ps
@@ -167,7 +249,7 @@ Every production `exec` example also goes through the wrapper. Do not `source` `
 
 It invokes `$OPENQMS_DIR/scripts/production-compose.sh exec -T db` for `pg_dump -Fc`, writes a private same-directory partial, rejects zero bytes, and validates with container-local `pg_restore --list` before atomic publication. Retention runs only after publication and removes only regular `*.dump` files older than the configured period; symlinks, partials, and unrelated files remain untouched.
 
-Install the persistent daily timer (03:17 with randomized delay):
+On the **Oracle host in the `/opt/openqms` shell**, install the persistent daily timer (03:17 with randomized delay):
 
 ```bash
 sudo install -m 0644 deploy/openqms-backup.service /etc/systemd/system/openqms-backup.service
@@ -186,7 +268,8 @@ sudo -u ubuntu OPENQMS_DIR=/opt/openqms \
   /opt/openqms/scripts/backup-postgres.sh
 sudo systemctl status openqms-backup.service
 sudo -u ubuntu find /opt/openqms/backups/postgres -maxdepth 1 -type f -name '*.dump' -ls
-latest=$(find /opt/openqms/backups/postgres -type f -name '*.dump' | sort | tail -1)
+latest=$(find /opt/openqms/backups/postgres -maxdepth 1 -type f -name '*.dump' | sort | tail -1)
+test -n "$latest"
 ./scripts/production-compose.sh exec -T db pg_restore --list < "$latest" >/dev/null
 ```
 
@@ -196,14 +279,16 @@ The dump covers PostgreSQL only—not Neo4j, Caddy volumes, `.env.production`, o
 
 Stop writes and preserve the current state before restore. Restore with `pg_restore` into a **new empty database** first, then validate schema, data, and application behavior before planning a cutover. Never overwrite the live production database as the first restore step. A custom-format dump is not a full-host snapshot; plan separately for Neo4j rebuild time.
 
-Application rollback checks out a validated release and rebuilds only application services:
+For application rollback, check out the validated release in the **Mac repository** and use the same controlled rsync procedure as Task 14 to synchronize source to `/opt/openqms`. Then rebuild application services on the **Oracle host**:
 
 ```bash
+# Mac repository: select the release and complete the controlled source sync
 git checkout '<previous-release-tag>'
+
+# Oracle host /opt/openqms: rebuild after sync and leave services running
 ./scripts/production-compose.sh config
 ./scripts/production-compose.sh up -d --build backend graph-worker web
 ./scripts/production-compose.sh ps
-./scripts/production-compose.sh down
 ```
 
 Named volumes must remain intact. Database migrations may be irreversible. If old code is incompatible with the new schema, roll forward or use a validated backup plus a migration-specific restore plan; volume deletion is never a rollback strategy.

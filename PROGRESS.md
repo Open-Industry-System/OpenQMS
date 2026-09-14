@@ -341,6 +341,7 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 - [x] 新增 `openqms-backup.service` / `.timer`（ubuntu oneshot；每日 03:17、Persistent、10m 随机延迟）。
 - [x] README 与中英部署 runbook 统一为固定项目名 `openqms` 的生产包装器命令；补齐 Oracle ARM64/Tailscale、Cloudflare DNS-only、Caddy trusted proxy、identity/check/initialize/preflight/rollout、密码轮换、Viewer 公共值、备份/恢复/回滚边界；移除生产直连 Compose、自动刷新旧说法与删除卷建议。
 - [x] ADR-0005 由 ADR-0014 supersede；记录 per-browser hashed rotating refresh session、replay/legacy/password-reset/audit 边界。
-- [x] RED→GREEN：backup 14 tests、docs 12 tests；Task 11 focused regressions 共 148 passed；shell syntax、stale-doc static check、`git diff --check` 通过。
+- [x] RED→GREEN：初始 backup 14 tests / docs 12 tests；正式 review 修复后 backup 20 tests / release-tree 15 tests / docs 32 tests；Task 11 focused regressions 共 189 passed；Python compile、shell syntax、stale-doc static check、`git diff --check` 通过。
+- [x] 正式 review 修复：backup 改为 `python3 os.link(..., follow_symlinks=False)` 精确目标原子发布并覆盖现有 file/FIFO/directory/symlink/race；新增 `check-release-tree.py` deterministic SHA-256 + `100644`/`100755` mode manifest 与 exact path/hash/mode verifier；runbook 修正 Mac→Oracle remote initializer/rollout、target tunnel `15432` + local release DB `5432`、immutable `RELEASE_SHA` 的 `git archive` 私有 stage/manifest/marker/远端二次门禁、Tailnet HTTP probe、rollback 保持服务运行、nonrecursive latest dump guard、README dev-only 标识与 `E2E_MODE=false`。
 
 **下一步**：coordinator 集成 Task 11 commit 后继续 master plan 后续任务；实际 Docker/systemd/SSH/Oracle/DNS/OCI/迁移/seed/生产环境生成仍只在受控发布阶段执行。
