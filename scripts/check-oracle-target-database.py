@@ -32,7 +32,7 @@ def _remote_identity_command(app_dir: str) -> str:
     )
     return (
         f"cd {shlex.quote(app_dir)} && unset DATABASE_URL TEST_DATABASE_URL && "
-        "docker compose --env-file .env.production -f docker-compose.prod.yml "
+        "./scripts/production-compose.sh "
         f"exec -T db sh -ec {shlex.quote(psql_command)}"
     )
 

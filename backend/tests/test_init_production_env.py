@@ -496,6 +496,40 @@ def test_generator_removes_written_output_when_finalization_fails(tmp_path):
     assert _temporary_outputs(output) == []
 
 
+@pytest.mark.parametrize(
+    ("command", "expected_error", "final_exists", "temp_count"),
+    [
+        ("cat", "error: environment write failed\n", False, 0),
+        ("chmod", "error: environment permission failed\n", False, 0),
+        ("python3", "error: atomic publication failed\n", False, 0),
+        ("rm", "error: temporary output cleanup failed\n", True, 1),
+    ],
+    ids=("write", "permissions", "atomic-link", "final-temp-removal"),
+)
+def test_generator_reports_fixed_secret_free_file_operation_failures(
+    tmp_path, command, expected_error, final_exists, temp_count
+):
+    output = tmp_path / "injected-failure.env"
+    fake_bin = tmp_path / "failing-bin"
+    fake_bin.mkdir()
+    failing_command = fake_bin / command
+    failing_command.write_text("#!/bin/sh\nexit 42\n")
+    failing_command.chmod(0o755)
+
+    result = _run(output, PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}")
+
+    assert result.returncode != 0
+    assert output.exists() is final_exists
+    assert len(_temporary_outputs(output)) == temp_count
+    _require(result.stdout == "", "injected failure wrote stdout")
+    _require(result.stderr == expected_error, "file-operation error category invalid")
+    _require("SECRET_KEY=" not in result.stderr, "secret leaked on file-operation failure")
+    _require(
+        "postgresql+asyncpg://" not in result.stderr,
+        "database URL leaked on file-operation failure",
+    )
+
+
 def test_generator_keeps_final_path_absent_until_atomic_publish(tmp_path):
     output = tmp_path / "atomic production.env"
     environment, started, release = _blocking_openssl_environment(

@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 
@@ -13,7 +15,7 @@ EXPECTED_EXECUTION_TAIL = [
     'expect_status 429 "$PROBE_ONE_IP"',
     'expect_status 401 "$PROBE_TWO_IP"',
     'echo "check-proxy-rate-limit: restarting backend before forged-header scenario"',
-    'docker compose -f "$COMPOSE_FILE" restart backend',
+    '"$PRODUCTION_COMPOSE_WRAPPER" restart backend',
     "wait_for_ready",
     'echo "check-proxy-rate-limit: scenario 2 — forged X-Forwarded-For shares probe bucket"',
     "for _ in $(seq 1 9); do",
@@ -39,9 +41,15 @@ def test_proxy_rate_limit_script_has_required_safety_contract():
     assert "set -euo pipefail" in script
     for required in ("COMPOSE_FILE", "SITE_HOST", "LOGIN_PASSWORD"):
         assert f"${{{required}:-}}" in script
-    assert 'docker compose -f "$COMPOSE_FILE" ps -q backend' in script
+    assert 'PRODUCTION_COMPOSE_WRAPPER="$REPO_ROOT/scripts/production-compose.sh"' in script
+    assert '${PRODUCTION_COMPOSE_WRAPPER:-' not in script
+    assert '"$PRODUCTION_COMPOSE_WRAPPER" ps -q backend' in script
+    assert '"$PRODUCTION_COMPOSE_WRAPPER" ps -q web' in script
     assert "docker inspect" in script
-    assert 'docker compose -f "$COMPOSE_FILE" restart backend' in script
+    assert '"$PRODUCTION_COMPOSE_WRAPPER" restart backend' in script
+    assert "docker compose" not in script
+    assert 'EXPECTED_COMPOSE_FILE="$REPO_ROOT/docker-compose.prod.yml"' in script
+    assert '"$COMPOSE_FILE_RESOLVED" != "$EXPECTED_COMPOSE_FILE"' in script
     assert 'curlimages/curl' in script
     assert '--entrypoint /bin/sh' in script
     assert '"$CURL_IMAGE" -eu -c' in script
@@ -95,11 +103,11 @@ echo "check-proxy-rate-limit: scenario 1 — independent client quotas"''',
         ),
         (
             "quota request before scenario 2 banner",
-            '''docker compose -f "$COMPOSE_FILE" restart backend
+            '''"$PRODUCTION_COMPOSE_WRAPPER" restart backend
 wait_for_ready
 
 echo "check-proxy-rate-limit: scenario 2 — forged X-Forwarded-For shares probe bucket"''',
-            '''docker compose -f "$COMPOSE_FILE" restart backend
+            '''"$PRODUCTION_COMPOSE_WRAPPER" restart backend
 wait_for_ready
 expect_status 401 "$PROBE_ONE_IP"
 
@@ -171,3 +179,31 @@ echo "check-proxy-rate-limit: passed"''',
         except AssertionError:
             continue
         raise AssertionError(f"execution tail accepted {label}")
+
+
+def test_proxy_rate_limit_script_rejects_nonproduction_compose_before_docker(tmp_path):
+    attacker_compose = tmp_path / "attacker-compose.yml"
+    attacker_compose.write_text("services: {}\n")
+    environment = {
+        **os.environ,
+        "COMPOSE_FILE": str(attacker_compose),
+        "SITE_HOST": "qms.example.test",
+        "LOGIN_PASSWORD": "non-secret-test-value",
+    }
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == (
+        "check-proxy-rate-limit: COMPOSE_FILE must name repository "
+        "docker-compose.prod.yml\n"
+    )

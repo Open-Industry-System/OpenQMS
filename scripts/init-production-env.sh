@@ -8,7 +8,7 @@ temp_path=""
 
 cleanup_temp() {
   if [[ -n "$temp_path" ]]; then
-    rm -f -- "$temp_path"
+    rm -f -- "$temp_path" >/dev/null 2>&1 || true
     temp_path=""
   fi
 }
@@ -83,7 +83,8 @@ if [[ "$POSTGRES_PASSWORD" == "$REDIS_PASSWORD" ||
   fail "error: secret generation failed"
 fi
 
-cat >"$temp_path" <<EOF
+if ! {
+  cat >"$temp_path" <<EOF
 SITE_ADDRESS=${SITE_ADDRESS}
 TAILSCALE_IP=${TAILSCALE_IP}
 POSTGRES_USER=qms
@@ -115,8 +116,13 @@ VITE_PUBLIC_DEMO_ENABLED=true
 VITE_PUBLIC_DEMO_USERNAME=viewer
 VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
 EOF
+} 2>/dev/null; then
+  fail "error: environment write failed"
+fi
 
-chmod 600 "$temp_path"
+if ! chmod 600 "$temp_path" 2>/dev/null; then
+  fail "error: environment permission failed"
+fi
 
 if ! python3 - "$temp_path" "$OUTPUT_PATH" 2>/dev/null <<'PY'
 import os
@@ -125,10 +131,15 @@ import sys
 os.link(sys.argv[1], sys.argv[2], follow_symlinks=False)
 PY
 then
-  fail "error: output already exists"
+  if [[ -e "$OUTPUT_PATH" || -L "$OUTPUT_PATH" ]]; then
+    fail "error: output already exists"
+  fi
+  fail "error: atomic publication failed"
 fi
 
-rm -f -- "$temp_path"
+if ! rm -f -- "$temp_path" 2>/dev/null; then
+  fail "error: temporary output cleanup failed"
+fi
 temp_path=""
 trap - EXIT HUP INT TERM QUIT
 

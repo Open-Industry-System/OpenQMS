@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shlex
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -141,10 +142,27 @@ def test_remote_command_unsets_local_db_variables_and_uses_container_variables(
         remote_command,
     ]
     assert LOCAL_DSN not in argv
-    assert remote_command.startswith(
-        "cd /opt/openqms && unset DATABASE_URL TEST_DATABASE_URL && docker compose"
+    expected_psql = (
+        'psql -XAt -U "$POSTGRES_USER" -d "$POSTGRES_DB" '
+        f'-c "{guard._REMOTE_SQL}"'
     )
-    assert "--env-file .env.production -f docker-compose.prod.yml exec -T db" in remote_command
+    assert shlex.split(remote_command) == [
+        "cd",
+        "/opt/openqms",
+        "&&",
+        "unset",
+        "DATABASE_URL",
+        "TEST_DATABASE_URL",
+        "&&",
+        "./scripts/production-compose.sh",
+        "exec",
+        "-T",
+        "db",
+        "sh",
+        "-ec",
+        expected_psql,
+    ]
+    assert "docker compose" not in remote_command
     assert 'psql -XAt -U "$POSTGRES_USER" -d "$POSTGRES_DB"' in remote_command
     assert "POSTGRES_PASSWORD" not in remote_command
     assert kwargs == {
@@ -154,6 +172,22 @@ def test_remote_command_unsets_local_db_variables_and_uses_container_variables(
         "check": False,
         "timeout": 60,
     }
+
+
+def test_remote_command_quotes_app_directory_as_one_shell_token():
+    guard = _load_guard()
+    app_dir = "/opt/open qms;touch-not-allowed"
+
+    tokens = shlex.split(guard._remote_identity_command(app_dir))
+
+    assert tokens[:3] == ["cd", app_dir, "&&"]
+    assert tokens[7:12] == [
+        "./scripts/production-compose.sh",
+        "exec",
+        "-T",
+        "db",
+        "sh",
+    ]
 
 
 def test_cli_ssh_timeout_is_fixed_and_does_not_echo_exception_data(

@@ -146,33 +146,62 @@ def _compose_cli_available() -> bool:
     return result.returncode == 0
 
 
-def _compose_process_environment(**overrides: str) -> dict[str, str]:
-    environment = {
-        **os.environ,
-        "OPENQMS_ENV_FILE": str(ENV_EXAMPLE_PATH),
-    }
-    environment.update(overrides)
-    return environment
+def _valid_render_environment() -> dict[str, str]:
+    _, values = _dotenv(ENV_EXAMPLE_PATH)
+    postgres_password = "a" * 48
+    redis_password = "b" * 48
+    neo4j_password = "c" * 48
+    values.update(
+        {
+            "POSTGRES_PASSWORD": postgres_password,
+            "DATABASE_URL": (
+                f"postgresql+asyncpg://{values['POSTGRES_USER']}:"
+                f"{postgres_password}@db:5432/{values['POSTGRES_DB']}"
+            ),
+            "REDIS_PASSWORD": redis_password,
+            "REDIS_URL": f"redis://:{redis_password}@redis:6379/0",
+            "NEO4J_PASSWORD": neo4j_password,
+            "SECRET_KEY": "d" * 96,
+        }
+    )
+    return values
 
 
-def _render_compose(**overrides: str) -> dict[str, object]:
+def _temporary_render_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    repo = tmp_path / "render-repo"
+    scripts = repo / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy2(PRODUCTION_COMPOSE_SCRIPT, scripts / PRODUCTION_COMPOSE_SCRIPT.name)
+    shutil.copy2(COMPOSE_PATH, repo / COMPOSE_PATH.name)
+    values = _valid_render_environment()
+    (repo / ".env.production").write_text(
+        "".join(f"{key}={value}\n" for key, value in values.items())
+    )
+    return repo, values
+
+
+def _render_compose(
+    tmp_path: Path, **overrides: str
+) -> tuple[dict[str, object], Path, dict[str, str]]:
     assert PRODUCTION_COMPOSE_SCRIPT.is_file(), "missing production Compose wrapper"
+    repo, values = _temporary_render_repo(tmp_path)
+    environment = {**os.environ, **overrides}
     result = subprocess.run(
         [
-            str(PRODUCTION_COMPOSE_SCRIPT),
+            str(repo / "scripts" / PRODUCTION_COMPOSE_SCRIPT.name),
             "config",
             "--format",
             "json",
         ],
-        cwd=ROOT,
-        env=_compose_process_environment(**overrides),
+        cwd=tmp_path,
+        env=environment,
         text=True,
         capture_output=True,
         timeout=30,
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    return json.loads(result.stdout), repo, values
 
 
 def test_forwarded_allow_ips_preserves_comma_separated_values():
@@ -434,11 +463,8 @@ def test_production_env_example_and_gitignore_contract():
 
 
 @pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
-def test_rendered_production_compose_contract():
-    rendered = _render_compose(
-        SITE_ADDRESS="qms.example.test",
-        TAILSCALE_IP="100.64.0.10",
-    )
+def test_rendered_production_compose_contract(tmp_path):
+    rendered, render_root, example = _render_compose(tmp_path)
     services = rendered["services"]
 
     assert rendered["name"] == "openqms"
@@ -470,8 +496,8 @@ def test_rendered_production_compose_contract():
     ]
     assert services["backend"]["image"] == services["graph-worker"]["image"]
     assert services["backend"]["build"] == services["graph-worker"]["build"]
-    assert Path(services["backend"]["build"]["context"]) == ROOT / "backend"
-    assert Path(services["web"]["build"]["context"]) == ROOT
+    assert Path(services["backend"]["build"]["context"]) == render_root / "backend"
+    assert Path(services["web"]["build"]["context"]) == render_root
     assert services["web"]["build"]["dockerfile"] == "frontend/Dockerfile.prod"
     assert services["web"]["build"]["args"] == {
         "VITE_PUBLIC_DEMO_ENABLED": "true",
@@ -483,7 +509,6 @@ def test_rendered_production_compose_contract():
         "TAILSCALE_IP": "100.64.0.10",
     }
 
-    _, example = _dotenv(ENV_EXAMPLE_PATH)
     _assert_exact_environment(
         services["db"]["environment"],
         {
@@ -547,6 +572,11 @@ def test_rendered_production_compose_contract():
         services["graph-worker"]["environment"],
         {key: example[key] for key in worker_environment_keys},
     )
+    assert services["backend"]["environment"]["E2E_MODE"] == "false"
+    assert services["backend"]["environment"]["TENANT_MODE"] == "single"
+    assert services["backend"]["environment"]["ALGORITHM"] == "HS256"
+    assert services["graph-worker"]["environment"]["E2E_MODE"] == "false"
+    assert services["graph-worker"]["environment"]["TENANT_MODE"] == "single"
     _assert_healthy_dependencies(
         services["backend"]["depends_on"], {"db", "redis", "neo4j"}
     )
@@ -632,7 +662,7 @@ def test_rendered_production_compose_contract():
 
 
 @pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
-def test_rendered_compose_ignores_ambient_test_credentials(monkeypatch):
+def test_rendered_compose_ignores_ambient_test_credentials(tmp_path, monkeypatch):
     ambient_database_url = "postgresql+asyncpg://test:test@localhost:5432/qms_test"
     ambient_secret = "ambient-test-secret"
     monkeypatch.setenv("DATABASE_URL", ambient_database_url)
@@ -641,13 +671,12 @@ def test_rendered_compose_ignores_ambient_test_credentials(monkeypatch):
     monkeypatch.setenv("REDIS_PASSWORD", ambient_secret)
     monkeypatch.setenv("NEO4J_PASSWORD", ambient_secret)
     monkeypatch.setenv("COMPOSE_PROJECT_NAME", "attacker-project")
+    monkeypatch.setenv("COMPOSE_FILE", "/tmp/attacker-compose.yml")
+    monkeypatch.setenv("COMPOSE_ENV_FILES", "/tmp/attacker.env")
+    monkeypatch.setenv("OPENQMS_ENV_FILE", "/tmp/attacker-production.env")
 
-    rendered = _render_compose(
-        SITE_ADDRESS="qms.example.test",
-        TAILSCALE_IP="100.64.0.10",
-    )
+    rendered, _render_root, example = _render_compose(tmp_path)
     services = rendered["services"]
-    _, example = _dotenv(ENV_EXAMPLE_PATH)
 
     assert rendered["name"] == "openqms"
     assert services["backend"]["environment"]["DATABASE_URL"] == example["DATABASE_URL"]

@@ -5,6 +5,24 @@ if [[ -z "${COMPOSE_FILE:-}" ]]; then
     echo "check-proxy-rate-limit: COMPOSE_FILE is required" >&2
     exit 2
 fi
+
+if ! SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P); then
+    echo "check-proxy-rate-limit: repository root resolution failed" >&2
+    exit 2
+fi
+REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
+EXPECTED_COMPOSE_FILE="$REPO_ROOT/docker-compose.prod.yml"
+if ! COMPOSE_FILE_DIR=$(cd -- "$(dirname -- "$COMPOSE_FILE")" 2>/dev/null && pwd -P); then
+    echo "check-proxy-rate-limit: COMPOSE_FILE must name repository docker-compose.prod.yml" >&2
+    exit 2
+fi
+COMPOSE_FILE_RESOLVED="$COMPOSE_FILE_DIR/$(basename -- "$COMPOSE_FILE")"
+if [[ "$COMPOSE_FILE_RESOLVED" != "$EXPECTED_COMPOSE_FILE" ]]; then
+    echo "check-proxy-rate-limit: COMPOSE_FILE must name repository docker-compose.prod.yml" >&2
+    exit 2
+fi
+PRODUCTION_COMPOSE_WRAPPER="$REPO_ROOT/scripts/production-compose.sh"
+
 if [[ -z "${SITE_HOST:-}" ]]; then
     echo "check-proxy-rate-limit: SITE_HOST is required" >&2
     exit 2
@@ -36,7 +54,7 @@ PROBE_TWO_IP="172.30.0.102"
 export SITE_SCHEME SITE_PORT CURL_CONNECT_TIMEOUT CURL_MAX_TIME
 
 backend_container() {
-    docker compose -f "$COMPOSE_FILE" ps -q backend
+    "$PRODUCTION_COMPOSE_WRAPPER" ps -q backend
 }
 
 wait_for() {
@@ -75,7 +93,7 @@ health_is_ready() {
 
 wait_for_ready() {
     BACKEND_CONTAINER="$(backend_container)"
-    WEB_CONTAINER="$(docker compose -f "$COMPOSE_FILE" ps -q web)"
+    WEB_CONTAINER="$("$PRODUCTION_COMPOSE_WRAPPER" ps -q web)"
     if [[ -z "$BACKEND_CONTAINER" || -z "$WEB_CONTAINER" ]]; then
         echo "check-proxy-rate-limit: backend and web containers must exist" >&2
         exit 1
@@ -152,7 +170,7 @@ expect_status 429 "$PROBE_ONE_IP"
 expect_status 401 "$PROBE_TWO_IP"
 
 echo "check-proxy-rate-limit: restarting backend before forged-header scenario"
-docker compose -f "$COMPOSE_FILE" restart backend
+"$PRODUCTION_COMPOSE_WRAPPER" restart backend
 wait_for_ready
 
 echo "check-proxy-rate-limit: scenario 2 — forged X-Forwarded-For shares probe bucket"
