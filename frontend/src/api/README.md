@@ -35,8 +35,10 @@ backend route prefix.
 
 ## Public Interface
 
-Consumers are `pages/`, `components/`, `hooks/`, and `store/`. Every
-function returns the parsed JSON body typed against `types/index.ts`.
+Consumers are `pages/`, `components/`, `hooks/`, and `store/`. Domain
+functions return the parsed JSON body typed against `types/index.ts`;
+`auth.getMe()` additionally pairs its user body with the successful response
+config's Bearer token so the store can verify the exact auth generation.
 
 - **Shape** — `export async function verbThing(...): Promise<Thing>` or
   `Promise<PaginatedResponse<Thing>>`. List endpoints take a typed

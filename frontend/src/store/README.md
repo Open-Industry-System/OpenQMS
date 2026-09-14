@@ -60,7 +60,13 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   capturing its access token. A typed pre-dispatch generation-change rejection
   re-synchronizes and returns without logout; later login or cross-tab changes
   likewise preserve/adopt the newer generation instead of applying stale
-  `/auth/me` success or failure.
+  `/auth/me` success or failure. If the 401 interceptor refreshes that request
+  to a valid token with the same decodable subject, its successful replay may
+  hydrate the user/factory slices only when the response config confirms that
+  exact current Bearer token; an unrelated same-subject token change
+  re-bootstraps, and a newer same-tab login user remains untouched.
+  Each hydration operation owns its loading state, so an older completion
+  cannot apply data or release loading for a newer bootstrap.
 
 ## Conventions & Constraints
 

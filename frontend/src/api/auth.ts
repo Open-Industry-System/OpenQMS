@@ -11,9 +11,13 @@ export async function refreshToken(refresh_token: string): Promise<{ access_toke
   return resp.data;
 }
 
-export async function getMe(): Promise<User> {
+export async function getMe(): Promise<{ user: User; requestAccessToken: string | null }> {
   const resp = await client.get("/auth/me");
-  return resp.data;
+  const authorization = resp.config.headers.Authorization;
+  const requestAccessToken = typeof authorization === "string" && authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : null;
+  return { user: resp.data, requestAccessToken };
 }
 
 export async function listUsers(): Promise<User[]> {

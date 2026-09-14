@@ -153,8 +153,66 @@ describe("tryRefreshToken", () => {
 });
 
 describe("fetchUser generation guard", () => {
+  it("applies a same-account replay over the user present when hydration started", async () => {
+    const accessA = jwt({ sub: oldUser.user_id, exp: 9999999999, generation: "A" });
+    const accessB = jwt({ sub: oldUser.user_id, exp: 9999999999, generation: "B" });
+    const refreshedUser: User = {
+      ...oldUser,
+      display_name: "Refreshed",
+      factory_scope: { accessible_factory_ids: [aliceFactory.id], default_factory_id: aliceFactory.id },
+      factories: [aliceFactory],
+    };
+    const request = deferred<{ user: User; requestAccessToken: string }>();
+    localStorage.setItem("access_token", accessA);
+    useAuthStore.setState({ token: accessA, user: oldUser, loading: false });
+    api.getMe.mockReturnValue(request.promise);
+
+    const fetching = useAuthStore.getState().fetchUser();
+    localStorage.setItem("access_token", accessB);
+    useAuthStore.setState({ token: accessB });
+    request.resolve({ user: refreshedUser, requestAccessToken: accessB });
+
+    await expect(fetching).resolves.toBeUndefined();
+    expect(useAuthStore.getState()).toMatchObject({
+      token: accessB,
+      user: refreshedUser,
+      loading: false,
+      factoryScope: refreshedUser.factory_scope,
+      factories: refreshedUser.factories,
+      currentFactoryId: aliceFactory.id,
+    });
+  });
+
+  it("does not let an older same-token fetch failure log out a newer success", async () => {
+    const accessToken = jwt({ sub: oldUser.user_id, exp: 9999999999 });
+    const firstRequest = deferred<{ user: User; requestAccessToken: string }>();
+    const secondRequest = deferred<{ user: User; requestAccessToken: string }>();
+    const refreshedUser = { ...oldUser, display_name: "Refreshed" };
+    localStorage.setItem("access_token", accessToken);
+    localStorage.setItem("refresh_token", "refresh-token");
+    useAuthStore.setState({ token: accessToken, user: null, loading: false });
+    api.getMe
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(secondRequest.promise);
+
+    const firstFetch = useAuthStore.getState().fetchUser();
+    const secondFetch = useAuthStore.getState().fetchUser();
+    secondRequest.resolve({ user: refreshedUser, requestAccessToken: accessToken });
+    await expect(secondFetch).resolves.toBeUndefined();
+    firstRequest.reject(new Error("older request failed"));
+    await expect(firstFetch).resolves.toBeUndefined();
+
+    expect(localStorage.getItem("access_token")).toBe(accessToken);
+    expect(localStorage.getItem("refresh_token")).toBe("refresh-token");
+    expect(useAuthStore.getState()).toMatchObject({
+      token: accessToken,
+      user: refreshedUser,
+      loading: false,
+    });
+  });
+
   it("does not let a stale /auth/me success overwrite a newer same-tab login", async () => {
-    const request = deferred<User>();
+    const request = deferred<{ user: User; requestAccessToken: string }>();
     localStorage.setItem("access_token", "alice-access");
     useAuthStore.setState({ token: "alice-access", user: oldUser });
     api.getMe.mockReturnValue(request.promise);
@@ -166,7 +224,7 @@ describe("fetchUser generation guard", () => {
       factoryScope: { accessible_factory_ids: [bobFactory.id], default_factory_id: bobFactory.id },
       factories: [bobFactory], currentFactoryId: bobFactory.id,
     });
-    request.resolve(oldUser);
+    request.resolve({ user: oldUser, requestAccessToken: "alice-access" });
 
     await expect(fetching).resolves.toBeUndefined();
     expect(useAuthStore.getState()).toMatchObject({
@@ -177,7 +235,7 @@ describe("fetchUser generation guard", () => {
   });
 
   it("does not let a stale /auth/me failure clear a newer same-tab login", async () => {
-    const request = deferred<User>();
+    const request = deferred<{ user: User; requestAccessToken: string }>();
     localStorage.setItem("access_token", "alice-access");
     useAuthStore.setState({ token: "alice-access", user: oldUser });
     api.getMe.mockReturnValue(request.promise);
@@ -192,7 +250,7 @@ describe("fetchUser generation guard", () => {
   });
 
   it("adopts a changed cross-tab token after a stale /auth/me success", async () => {
-    const request = deferred<User>();
+    const request = deferred<{ user: User; requestAccessToken: string }>();
     localStorage.setItem("access_token", "alice-access");
     useAuthStore.setState({ token: "alice-access", user: oldUser, currentFactoryId: "alice-factory" });
     api.getMe.mockReturnValue(request.promise);
@@ -200,7 +258,7 @@ describe("fetchUser generation guard", () => {
     const fetching = useAuthStore.getState().fetchUser();
     const bobAccessToken = jwt({ sub: "bob", exp: 9999999999 });
     localStorage.setItem("access_token", bobAccessToken);
-    request.resolve(oldUser);
+    request.resolve({ user: oldUser, requestAccessToken: "alice-access" });
 
     await expect(fetching).resolves.toBeUndefined();
     expect(useAuthStore.getState()).toMatchObject({
@@ -209,7 +267,7 @@ describe("fetchUser generation guard", () => {
   });
 
   it("adopts a changed cross-tab token after a stale /auth/me failure", async () => {
-    const request = deferred<User>();
+    const request = deferred<{ user: User; requestAccessToken: string }>();
     localStorage.setItem("access_token", "alice-access");
     useAuthStore.setState({ token: "alice-access", user: oldUser, currentFactoryId: "alice-factory" });
     api.getMe.mockReturnValue(request.promise);
