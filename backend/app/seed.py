@@ -2,6 +2,7 @@
 Seed script: creates demo data for development.
 Run: docker compose exec backend python -m app.seed
 """
+import argparse
 import asyncio
 import secrets
 import uuid
@@ -1632,7 +1633,17 @@ async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, fme
     print("Seeded APQP projects.")
 
 
-async def seed():
+def print_seed_summary(*, print_credentials: bool) -> None:
+    print("Seed data created successfully!")
+    if print_credentials:
+        print(
+            "Users: admin/Admin@2026, engineer/Engineer@2026, "
+            "manager/Manager@2026, viewer/Viewer@2026, "
+            "groupadmin/GroupAdmin@2026"
+        )
+
+
+async def seed(*, print_credentials: bool = True):
     async with async_session() as db:
         # ─── Seed roles if missing (single-tenant mode) ───
         from app.models.role import RoleDefinition, RolePermission
@@ -2576,9 +2587,19 @@ async def seed():
 
         await db.commit()
 
-    print("Seed data created successfully!")
-    print("Users: admin/Admin@2026, engineer/Engineer@2026, manager/Manager@2026, viewer/Viewer@2026, groupadmin/GroupAdmin@2026")
+    print_seed_summary(print_credentials=print_credentials)
+
+
+def parse_args(argv: list[str] | None = None):
+    parser = argparse.ArgumentParser(description="Seed OpenQMS demo data")
+    parser.add_argument(
+        "--no-print-credentials",
+        action="store_true",
+        help="Do not print seeded account passwords",
+    )
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    args = parse_args()
+    asyncio.run(seed(print_credentials=not args.no_print_credentials))
