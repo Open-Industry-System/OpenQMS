@@ -38,6 +38,11 @@ def _compiled(statement) -> tuple[str, dict[str, object]]:
     return str(compiled), compiled.params
 
 
+def _assert_contract(condition: bool, message: str) -> None:
+    if not condition:
+        pytest.fail(message, pytrace=False)
+
+
 @pytest.mark.asyncio
 async def test_bookkeeping_rerun_uses_same_race_safe_upsert(monkeypatch):
     tenant_id = uuid.uuid4()
@@ -58,9 +63,18 @@ async def test_bookkeeping_rerun_uses_same_race_safe_upsert(monkeypatch):
         sql, params = _compiled(statement)
         assert "ON CONFLICT (tenant_id, version) DO UPDATE" in sql
         assert "updated_at" not in sql
-        assert params["tenant_id"] == tenant_id
-        assert params["version"] == "tenant@head"
-        assert params["status"] == "completed"
+        _assert_contract(
+            params["tenant_id"] == tenant_id,
+            "upsert tenant_id parameter contract",
+        )
+        _assert_contract(
+            params["version"] == "tenant@head",
+            "upsert version parameter contract",
+        )
+        _assert_contract(
+            params["status"] == "completed",
+            "upsert success status parameter contract",
+        )
     assert [session.commits for session in sessions] == [1, 1]
 
 
@@ -96,7 +110,10 @@ async def test_main_attempts_later_tenants_records_every_status_then_fails(monke
     assert attempted == ["tenant_first", "tenant_second", "tenant_third"]
     upserts = [statement for statement in statements if not hasattr(statement, "text")]
     statuses = [_compiled(statement)[1]["status"] for statement in upserts]
-    assert statuses == ["failed", "completed", "completed"]
+    _assert_contract(
+        statuses == ["failed", "completed", "completed"],
+        "migration status parameter sequence contract",
+    )
     assert [session.commits for session in sessions] == [1, 1, 1]
 
 
@@ -139,16 +156,51 @@ async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_t
         await tenant_migrate.main(all_tenants=True)
 
     assert attempted == ["tenant_first", "tenant_second"]
-    assert secret not in str(exc.value)
-    assert error_calls == [
-        (("Alembic invocation failed for tenant schema %s", "tenant_first"), {})
-    ]
-    assert secret not in repr(error_calls)
+    _assert_contract(
+        secret not in str(exc.value),
+        "tenant migration exception message is sanitized",
+    )
+    _assert_contract(
+        error_calls
+        == [
+            (("Alembic invocation failed for tenant schema %s", "tenant_first"), {})
+        ],
+        "Alembic invocation logger contract",
+    )
+    _assert_contract(
+        secret not in repr(error_calls),
+        "Alembic invocation logger excludes exception details",
+    )
     upserts = [statement for statement in statements if not hasattr(statement, "text")]
     params = [_compiled(statement)[1] for statement in upserts]
-    assert params[0]["status"] == "failed"
-    assert params[0]["error_message"] == "tenant migration failed"
-    assert secret not in repr(params)
+    _assert_contract(
+        params[0]["status"] == "failed",
+        "failed migration status parameter contract",
+    )
+    _assert_contract(
+        params[0]["error_message"] == "tenant migration failed",
+        "failed migration error parameter contract",
+    )
+    _assert_contract(
+        secret not in repr(params),
+        "failed migration parameters exclude exception details",
+    )
+
+
+def test_contract_assertion_hides_captured_secret():
+    secret = "credential-bearing captured logger argument"
+    captured = (("logger format", secret), {})
+
+    with pytest.raises(pytest.fail.Exception) as exc:
+        _assert_contract(
+            captured == (("logger format", "safe"), {}),
+            "logger call contract",
+        )
+
+    _assert_contract(
+        secret not in str(exc.value),
+        "contract assertion failures exclude captured values",
+    )
 
 
 def test_cli_sanitizes_unexpected_orchestration_failure(monkeypatch):
@@ -168,8 +220,14 @@ def test_cli_sanitizes_unexpected_orchestration_failure(monkeypatch):
     exit_code = tenant_migrate.run_cli(all_tenants=True, slug=None)
 
     assert exit_code == 1
-    assert error_calls == [(("tenant migration orchestration failed",), {})]
-    assert secret not in repr(error_calls)
+    _assert_contract(
+        error_calls == [(("tenant migration orchestration failed",), {})],
+        "orchestration logger contract",
+    )
+    _assert_contract(
+        secret not in repr(error_calls),
+        "orchestration logger excludes exception details",
+    )
 
 
 def test_alembic_failure_log_does_not_include_subprocess_output(monkeypatch):
@@ -189,7 +247,12 @@ def test_alembic_failure_log_does_not_include_subprocess_output(monkeypatch):
     success = tenant_migrate.run_alembic_upgrade("tenant_safe")
 
     assert success is False
-    assert error_calls == [
-        (("Alembic failed for tenant schema %s", "tenant_safe"), {})
-    ]
-    assert secret not in repr(error_calls)
+    _assert_contract(
+        error_calls
+        == [(("Alembic failed for tenant schema %s", "tenant_safe"), {})],
+        "Alembic subprocess logger contract",
+    )
+    _assert_contract(
+        secret not in repr(error_calls),
+        "Alembic subprocess logger excludes stderr",
+    )
