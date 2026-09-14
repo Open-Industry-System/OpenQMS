@@ -69,9 +69,11 @@ function returns the parsed JSON body typed against `types/index.ts`.
   and ignores this header.
 - **401 refresh shares one promise.** Each non-login 401 marks its request
   `_retry` and awaits the same `tryRefreshToken()` promise. Before every
-  dispatch, the interceptor rejects a store/storage token mismatch after
-  calling `syncStoredAccessToken()`, so an idle-tab change cannot send a
-  request with another user's token. Replay is permitted only when the
+  dispatch, the interceptor rejects a store/storage token mismatch with a typed
+  generation-change error after calling `syncStoredAccessToken()`, so stores
+  treat that pre-dispatch result as reconciliation rather than a failed auth
+  request. This prevents an idle-tab change from sending a request with another
+  user's token. Replay is permitted only when the
   initiating Bearer and returned JWT are both valid and have decodable, equal
   `sub` identities; malformed, expired, or mismatched tokens reject without
   replaying as another user. Explicit request `Authorization` headers are

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { AuthGenerationChangedError } from "../utils/authGeneration";
 import { classifyToken, getTokenSubject } from "../utils/jwt";
 import { useAuthStore } from "../store/authStore";
 
@@ -39,7 +40,7 @@ client.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");
   if (authState.token !== token) {
     authState.syncStoredAccessToken();
-    return Promise.reject(new Error("Access token changed in another tab"));
+    return Promise.reject(new AuthGenerationChangedError());
   }
 
   if (token && !bearerToken(config.headers)) {

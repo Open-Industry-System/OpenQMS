@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isAuthGenerationChangedError } from "../utils/authGeneration";
 import { classifyToken } from "../utils/jwt";
 import type { User, FactoryScope, Factory } from "../types";
 import { login as apiLogin, getMe, refreshToken as apiRefreshToken } from "../api/auth";
@@ -66,8 +67,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
   },
 
   fetchUser: async () => {
-    const accessToken = localStorage.getItem("access_token");
-    if (!accessToken) return;
+    const previousToken = get().token;
+    const accessToken = syncStoredAccessToken();
+    if (accessToken !== previousToken || !accessToken) return;
 
     try {
       set({ loading: true });
@@ -87,7 +89,11 @@ export const useAuthStore = create<AuthState>((set, get) => {
         factories: user.factories ?? [],
         currentFactoryId: factoryId,
       });
-    } catch {
+    } catch (error) {
+      if (isAuthGenerationChangedError(error)) {
+        syncStoredAccessToken();
+        return;
+      }
       if (localStorage.getItem("access_token") !== accessToken) {
         syncStoredAccessToken();
         return;
@@ -105,6 +111,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
   },
 
   tryRefreshToken: async () => {
+    const previousToken = get().token;
+    const adoptedToken = syncStoredAccessToken();
+    if (adoptedToken !== previousToken) return adoptedToken;
+
     const refreshToken = localStorage.getItem("refresh_token");
     if (!refreshToken) return null;
 
@@ -120,7 +130,8 @@ export const useAuthStore = create<AuthState>((set, get) => {
       localStorage.setItem("refresh_token", resp.refresh_token);
       set({ token: resp.access_token });
       return resp.access_token;
-    } catch {
+    } catch (error) {
+      if (isAuthGenerationChangedError(error)) return syncStoredAccessToken();
       if (localStorage.getItem("refresh_token") !== refreshToken) return syncStoredAccessToken();
       get().logout();
       return null;

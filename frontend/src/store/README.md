@@ -47,15 +47,20 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   tokens with no user call `fetchUser()`.
 - **Refresh generation guard** — `tryRefreshToken()` captures the request
   refresh token and accepts a current-generation response only when its access
-  token classifies as valid. The store exposes `syncStoredAccessToken()` and
-  one central browser `storage` listener invokes it for idle tabs. A different
-  valid stored token clears in-memory user/factory state for a `/auth/me`
-  bootstrap; an invalid stored token is removed while its refresh token is
-  preserved. Matching store/storage tokens retain same-tab login state.
-- **User hydration generation guard** — `fetchUser()` captures its starting
-  access token. A later login or cross-tab token change causes stale `/auth/me`
-  success and failure continuations to preserve/adopt the newer generation
-  rather than overwrite or clear it.
+  token classifies as valid. Both `fetchUser()` and `tryRefreshToken()`
+  reconcile storage before starting network work; a typed pre-dispatch
+  generation-change rejection synchronizes and returns without treating the
+  newer session as a failed refresh. The store exposes
+  `syncStoredAccessToken()`, and one central browser `storage` listener invokes
+  it for idle tabs. A different valid stored token clears in-memory user/factory
+  state for a `/auth/me` bootstrap; an invalid stored token is removed while
+  its refresh token is preserved. Matching store/storage tokens retain same-tab
+  login state.
+- **User hydration generation guard** — `fetchUser()` reconciles storage before
+  capturing its access token. A typed pre-dispatch generation-change rejection
+  re-synchronizes and returns without logout; later login or cross-tab changes
+  likewise preserve/adopt the newer generation instead of applying stale
+  `/auth/me` success or failure.
 
 ## Conventions & Constraints
 
