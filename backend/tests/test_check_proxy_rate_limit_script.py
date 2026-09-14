@@ -7,8 +7,8 @@ SCRIPT = ROOT / "scripts" / "check-proxy-rate-limit.sh"
 
 
 def _loop_body_and_post(scenario: str, limit: int) -> tuple[list[str], list[str]]:
-    match = re.search(
-        rf"(?ms)^[ \t]*for _ in \$\(seq 1 {limit}\); do\n(?P<body>.*?)^[ \t]*done\n(?P<post>.*)\Z",
+    match = re.fullmatch(
+        rf"(?ms)\A[ \t\r\n]*for _ in \$\(seq 1 {limit}\); do\n(?P<body>.*?)^[ \t]*done\n(?P<post>.*)\Z",
         scenario,
     )
     assert match, f"missing exact seq 1 {limit} loop"
@@ -64,10 +64,16 @@ def test_proxy_rate_limit_script_covers_both_fixed_probe_scenarios():
     assert "172.30.0.102" in script
     assert "X-Forwarded-For" in script
     assert "expect_not_rate_limited" not in script
-    scenario_one = script.split('echo "check-proxy-rate-limit: scenario 1', 1)[1].split(
-        'echo "check-proxy-rate-limit: restarting backend', 1
+    scenario_one = script.split(
+        'echo "check-proxy-rate-limit: scenario 1 — independent client quotas"\n', 1
+    )[1].split(
+        'echo "check-proxy-rate-limit: restarting backend before forged-header scenario"\n',
+        1,
     )[0]
-    scenario_two = script.split('echo "check-proxy-rate-limit: scenario 2', 1)[1]
+    scenario_two = script.split(
+        'echo "check-proxy-rate-limit: scenario 2 — forged X-Forwarded-For shares probe bucket"\n',
+        1,
+    )[1]
     _assert_loop_contract(
         scenario_one,
         10,
@@ -109,3 +115,46 @@ expect_status 401 "$PROBE_TWO_IP"
     except AssertionError:
         return
     raise AssertionError("extra quota request was accepted")
+
+
+def test_loop_contract_rejects_extra_quota_request_before_scenario_loop():
+    script = SCRIPT.read_text()
+    cases = [
+        (
+            'echo "check-proxy-rate-limit: scenario 1 — independent client quotas"',
+            'echo "check-proxy-rate-limit: restarting backend before forged-header scenario"',
+            10,
+            [
+                'expect_status 429 "$PROBE_ONE_IP"',
+                'expect_status 401 "$PROBE_TWO_IP"',
+            ],
+        ),
+        (
+            'echo "check-proxy-rate-limit: scenario 2 — forged X-Forwarded-For shares probe bucket"',
+            None,
+            9,
+            [
+                'expect_status 401 "$PROBE_ONE_IP" "203.0.113.200"',
+                'expect_status 429 "$PROBE_ONE_IP"',
+                'echo "check-proxy-rate-limit: passed"',
+            ],
+        ),
+    ]
+
+    for banner, next_banner, limit, post_commands in cases:
+        loop = f"for _ in $(seq 1 {limit}); do"
+        mutated = script.replace(
+            f"{banner}\n{loop}",
+            f'{banner}\nexpect_status 401 "$PROBE_ONE_IP"\n{loop}',
+            1,
+        )
+        assert mutated != script, f"failed to mutate scenario {limit}"
+        scenario = mutated.split(f"{banner}\n", 1)[1]
+        if next_banner is not None:
+            scenario = scenario.split(f"{next_banner}\n", 1)[0]
+
+        try:
+            _assert_loop_contract(scenario, limit, post_commands)
+        except AssertionError:
+            continue
+        raise AssertionError(f"pre-loop quota request was accepted for scenario {limit}")
