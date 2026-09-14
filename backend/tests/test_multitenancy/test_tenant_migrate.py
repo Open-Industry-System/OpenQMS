@@ -102,7 +102,7 @@ async def test_main_attempts_later_tenants_records_every_status_then_fails(monke
 
 @pytest.mark.asyncio
 async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_tenants(
-    monkeypatch, caplog
+    monkeypatch,
 ):
     secret = "postgresql://name:password@secret.internal/qms"
     tenants = [
@@ -112,6 +112,10 @@ async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_t
     attempted: list[str] = []
     statements: list[object] = []
     sessions: list[FakeSession] = []
+    error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def error(*args: object, **kwargs: object) -> None:
+        error_calls.append((args, kwargs))
 
     async def active(_slug=None):
         return tenants
@@ -122,6 +126,7 @@ async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_t
             raise RuntimeError(secret)
         return True
 
+    monkeypatch.setattr(tenant_migrate.logger, "error", error)
     monkeypatch.setattr(tenant_migrate, "get_active_tenants", active)
     monkeypatch.setattr(tenant_migrate, "run_alembic_upgrade", migrate)
     monkeypatch.setattr(
@@ -135,7 +140,10 @@ async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_t
 
     assert attempted == ["tenant_first", "tenant_second"]
     assert secret not in str(exc.value)
-    assert secret not in caplog.text
+    assert error_calls == [
+        (("Alembic invocation failed for tenant schema %s", "tenant_first"), {})
+    ]
+    assert secret not in repr(error_calls)
     upserts = [statement for statement in statements if not hasattr(statement, "text")]
     params = [_compiled(statement)[1] for statement in upserts]
     assert params[0]["status"] == "failed"
@@ -143,23 +151,35 @@ async def test_alembic_exception_is_sanitized_recorded_and_does_not_stop_later_t
     assert secret not in repr(params)
 
 
-def test_cli_sanitizes_unexpected_orchestration_failure(monkeypatch, caplog):
+def test_cli_sanitizes_unexpected_orchestration_failure(monkeypatch):
     secret = "credential-bearing failure detail"
+    error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def error(*args: object, **kwargs: object) -> None:
+        error_calls.append((args, kwargs))
 
     async def fail_main(**_kwargs):
         raise RuntimeError(secret)
 
+    monkeypatch.setattr(tenant_migrate.logger, "error", error)
+    monkeypatch.setattr(tenant_migrate.logger, "disabled", True)
     monkeypatch.setattr(tenant_migrate, "main", fail_main)
 
     exit_code = tenant_migrate.run_cli(all_tenants=True, slug=None)
 
     assert exit_code == 1
-    assert "tenant migration orchestration failed" in caplog.text
-    assert secret not in caplog.text
+    assert error_calls == [(("tenant migration orchestration failed",), {})]
+    assert secret not in repr(error_calls)
 
 
-def test_alembic_failure_log_does_not_include_subprocess_output(monkeypatch, caplog):
+def test_alembic_failure_log_does_not_include_subprocess_output(monkeypatch):
     secret = "postgresql://name:password@secret.internal/qms"
+    error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def error(*args: object, **kwargs: object) -> None:
+        error_calls.append((args, kwargs))
+
+    monkeypatch.setattr(tenant_migrate.logger, "error", error)
     monkeypatch.setattr(
         tenant_migrate.subprocess,
         "run",
@@ -169,4 +189,7 @@ def test_alembic_failure_log_does_not_include_subprocess_output(monkeypatch, cap
     success = tenant_migrate.run_alembic_upgrade("tenant_safe")
 
     assert success is False
-    assert secret not in caplog.text
+    assert error_calls == [
+        (("Alembic failed for tenant schema %s", "tenant_safe"), {})
+    ]
+    assert secret not in repr(error_calls)
