@@ -2,7 +2,7 @@
 set +x
 set -euo pipefail
 
-unset SCRIPT_DIR REPO_ROOT ENV_FILE
+unset SCRIPT_DIR REPO_ROOT ENV_FILE RELEASE_MARKER RELEASE_SHA release_line_count
 unset production_keys expected_database_url expected_redis_url
 unset line key value seen_var value_var
 
@@ -24,6 +24,24 @@ fi
 if [[ -z "$1" || "$1" == -* ]]; then
   fail "error: invalid Compose subcommand"
 fi
+
+RELEASE_MARKER="$REPO_ROOT/.release-sha"
+if [[ ! -f "$RELEASE_MARKER" || ! -r "$RELEASE_MARKER" || -L "$RELEASE_MARKER" ]]; then
+  fail "error: release marker is not readable"
+fi
+if ! release_line_count=$(awk 'END { print NR }' "$RELEASE_MARKER" 2>/dev/null); then
+  fail "error: release marker is not readable"
+fi
+if [[ "$release_line_count" != "1" ]]; then
+  fail "error: invalid release marker"
+fi
+if ! RELEASE_SHA=$(cat -- "$RELEASE_MARKER" 2>/dev/null); then
+  fail "error: release marker is not readable"
+fi
+if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  fail "error: invalid release marker"
+fi
+unset release_line_count
 
 ENV_FILE="$REPO_ROOT/.env.production"
 if [[ ! -r "$ENV_FILE" ]]; then
@@ -169,8 +187,9 @@ done
 unset production_keys expected_database_url expected_redis_url
 unset line key value seen_var value_var
 unset COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PROJECT_NAME OPENQMS_ENV_FILE
+unset RELEASE_MARKER
 
-exec docker compose \
+exec env RELEASE_SHA="$RELEASE_SHA" docker compose \
   --project-name openqms \
   --project-directory "$REPO_ROOT" \
   --env-file "$ENV_FILE" \

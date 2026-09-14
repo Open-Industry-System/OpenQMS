@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -212,6 +213,57 @@ def test_verify_rejects_malformed_or_untrusted_manifest(tmp_path):
     assert result.stdout == b""
     assert result.stderr == b"error: invalid release manifest\n"
     assert SECRET_PATH.encode() not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("reserved_name", "wrong_kind"),
+    [
+        (".env.production", "directory"),
+        (".env.production", "symlink"),
+        (".env.production", "fifo"),
+        (".release-sha", "directory"),
+        (".release-sha", "symlink"),
+        (".release-manifest", "directory"),
+        (".release-manifest", "symlink"),
+        ("backups", "file"),
+        ("backups", "symlink"),
+    ],
+)
+def test_verify_rejects_wrong_type_reserved_runtime_paths(
+    tmp_path, reserved_name, wrong_kind
+):
+    tracked = tmp_path / "tracked.txt"
+    tracked.write_bytes(b"tracked")
+    created = _run(
+        "create",
+        "--root",
+        str(tmp_path),
+        input_bytes=b"tracked.txt\0",
+    )
+    assert created.returncode == 0
+    manifest = tmp_path.parent / f"{tmp_path.name}-manifest"
+    manifest.write_bytes(created.stdout)
+    reserved = tmp_path / reserved_name
+    target = tmp_path.parent / f"{tmp_path.name}-target"
+
+    if wrong_kind == "directory":
+        reserved.mkdir()
+    elif wrong_kind == "file":
+        reserved.write_bytes(b"wrong type")
+    elif wrong_kind == "fifo":
+        os.mkfifo(reserved, mode=0o600)
+    else:
+        target.write_bytes(b"symlink target")
+        reserved.symlink_to(target)
+
+    result = _run(
+        "verify", "--root", str(tmp_path), "--manifest", str(manifest)
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == b""
+    assert result.stderr == b"error: release tree path set mismatch\n"
+    assert reserved_name.encode() not in result.stderr
 
 
 def test_verify_rejects_symlink_as_extra_deployable_path(tmp_path):

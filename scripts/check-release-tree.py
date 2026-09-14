@@ -123,6 +123,29 @@ def _read_manifest(path: Path) -> list[tuple[str, str, str]]:
     return entries
 
 
+def _validate_runtime_state(root: Path) -> None:
+    for name in _RUNTIME_FILES:
+        candidate = root / name
+        try:
+            mode = candidate.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise ReleaseTreeError("release tree path set mismatch") from None
+        if not stat.S_ISREG(mode):
+            raise ReleaseTreeError("release tree path set mismatch")
+
+    backups = root / "backups"
+    try:
+        backups_mode = backups.lstat().st_mode
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise ReleaseTreeError("release tree path set mismatch") from None
+    if not stat.S_ISDIR(backups_mode):
+        raise ReleaseTreeError("release tree path set mismatch")
+
+
 def _actual_deployable_files(root: Path) -> set[str]:
     actual: set[str] = set()
     try:
@@ -163,6 +186,7 @@ def verify_manifest(root_argument: str, manifest_argument: str) -> None:
         raise ReleaseTreeError("release root is not readable")
 
     entries = _read_manifest(Path(manifest_argument))
+    _validate_runtime_state(root)
     expected_paths = {relative_path for _, _, relative_path in entries}
     if _actual_deployable_files(root) != expected_paths:
         raise ReleaseTreeError("release tree path set mismatch")

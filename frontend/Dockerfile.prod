@@ -19,6 +19,8 @@ RUN if [ "$VITE_PUBLIC_DEMO_ENABLED" = "true" ]; then \
     fi
 
 FROM caddy:2-alpine
+ARG RELEASE_SHA
+LABEL org.opencontainers.image.revision=$RELEASE_SHA
 COPY deploy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/dist /srv
 EXPOSE 80 443 8080

@@ -150,6 +150,8 @@ def test_production_dockerfile_keeps_disabled_demo_credentials_out_of_vite_and_f
     assert "VITE_PUBLIC_DEMO_ENABLED=false VITE_PUBLIC_DEMO_USERNAME= VITE_PUBLIC_DEMO_PASSWORD= npm run build" in dockerfile
 
     final_stage = dockerfile.split("FROM caddy:2-alpine", maxsplit=1)[1]
+    assert "ARG RELEASE_SHA" in final_stage
+    assert "LABEL org.opencontainers.image.revision=$RELEASE_SHA" in final_stage
     assert re.findall(r"(?m)^COPY .+$", final_stage) == [
         "COPY deploy/Caddyfile /etc/caddy/Caddyfile",
         "COPY --from=build /app/dist /srv",

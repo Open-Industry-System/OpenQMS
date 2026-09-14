@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PATH = ROOT / "docker-compose.prod.yml"
 ENV_EXAMPLE_PATH = ROOT / ".env.production.example"
 PRODUCTION_COMPOSE_SCRIPT = ROOT / "scripts" / "production-compose.sh"
+RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567"
 
 REQUIRED_ENV_KEYS = {
     "SITE_ADDRESS",
@@ -177,6 +178,7 @@ def _temporary_render_repo(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     (repo / ".env.production").write_text(
         "".join(f"{key}={value}\n" for key, value in values.items())
     )
+    (repo / ".release-sha").write_text(RELEASE_SHA + "\n")
     return repo, values
 
 
@@ -283,6 +285,27 @@ def test_production_compose_and_caddy_trusted_proxy_contract():
     ):
         assert secret_key not in web
     assert "trusted_proxies" not in caddy
+
+
+def test_production_images_require_release_revision_build_arg_and_label():
+    compose = COMPOSE_PATH.read_text()
+    backend_block = _service_block(compose, "backend")
+    graph_worker_block = _service_block(compose, "graph-worker")
+    web_block = _service_block(compose, "web")
+    backend_dockerfile = (ROOT / "backend" / "Dockerfile").read_text()
+    frontend_dockerfile = (ROOT / "frontend" / "Dockerfile.prod").read_text()
+    frontend_final = frontend_dockerfile.split("FROM caddy:2-alpine", 1)[1]
+
+    assert "ARG RELEASE_SHA" in backend_dockerfile
+    assert "ARG RELEASE_SHA=" not in backend_dockerfile
+    assert "LABEL org.opencontainers.image.revision=$RELEASE_SHA" in backend_dockerfile
+    assert "ARG RELEASE_SHA" in frontend_final
+    assert "ARG RELEASE_SHA=" not in frontend_final
+    assert "LABEL org.opencontainers.image.revision=$RELEASE_SHA" in frontend_final
+    assert re.search(r"(?ms)^    build:.*?^      args:\n        RELEASE_SHA: \$\{RELEASE_SHA\}", backend_block)
+    assert re.search(r"(?ms)^    build:.*?^      args:.*?^        RELEASE_SHA: \$\{RELEASE_SHA\}", web_block)
+    assert "build:" not in graph_worker_block
+    assert "image: openqms-backend:prod" in graph_worker_block
 
 
 def test_static_production_stack_contract():
@@ -495,11 +518,13 @@ def test_rendered_production_compose_contract(tmp_path):
         "app.services.graph_sync_worker",
     ]
     assert services["backend"]["image"] == services["graph-worker"]["image"]
-    assert services["backend"]["build"] == services["graph-worker"]["build"]
+    assert "build" not in services["graph-worker"]
+    assert services["backend"]["build"]["args"] == {"RELEASE_SHA": RELEASE_SHA}
     assert Path(services["backend"]["build"]["context"]) == render_root / "backend"
     assert Path(services["web"]["build"]["context"]) == render_root
     assert services["web"]["build"]["dockerfile"] == "frontend/Dockerfile.prod"
     assert services["web"]["build"]["args"] == {
+        "RELEASE_SHA": RELEASE_SHA,
         "VITE_PUBLIC_DEMO_ENABLED": "true",
         "VITE_PUBLIC_DEMO_PASSWORD": "Viewer@2026",
         "VITE_PUBLIC_DEMO_USERNAME": "viewer",

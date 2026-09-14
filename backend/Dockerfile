@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+ARG RELEASE_SHA
+LABEL org.opencontainers.image.revision=$RELEASE_SHA
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

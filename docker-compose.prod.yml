@@ -84,6 +84,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        RELEASE_SHA: ${RELEASE_SHA}
     restart: unless-stopped
     command:
       - uvicorn
@@ -139,9 +141,6 @@ services:
 
   graph-worker:
     image: openqms-backend:prod
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
     restart: unless-stopped
     command:
       - python
@@ -177,6 +176,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile.prod
       args:
+        RELEASE_SHA: ${RELEASE_SHA}
         VITE_PUBLIC_DEMO_ENABLED: ${VITE_PUBLIC_DEMO_ENABLED}
         VITE_PUBLIC_DEMO_USERNAME: ${VITE_PUBLIC_DEMO_USERNAME}
         VITE_PUBLIC_DEMO_PASSWORD: ${VITE_PUBLIC_DEMO_PASSWORD}

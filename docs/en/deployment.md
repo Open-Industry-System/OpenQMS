@@ -38,8 +38,10 @@ The wrapper pins project name `openqms`, project directory, `.env.production`, a
 First pin the Mac operator repository to one immutable release whose tracked worktree and index both match HEAD; unrelated untracked plan/reference files are not deployment identity. Do not use remote deletion on the first deployment. Deployment bytes come only from `git archive "$RELEASE_SHA"` extracted into a private mode-`0700` stage, never from the mutable working tree; the path stream likewise comes from the `git ls-tree` commit object. The manifest records SHA-256 plus Git-relevant mode `100644`/`100755` for every tracked path and rejects symlinks or unsafe paths. Oracle verifies the manifest itself, the verifier, every tracked-file hash/mode, and the complete deployable path set. The only exclusions are persistent runtime state: `.env.production`, `backups/`, `.release-sha`, and `.release-manifest`. Any extra or stale source, configuration, or script fails closed. Only successful content verification permits the non-secret `RELEASE_SHA` marker to be written and read back. The stage is removed on normal completion, EXIT, or signals:
 
 ```bash
+set +x
 set -euo pipefail
 cd '<local-openqms-checkout>'
+export LOCAL_RELEASE_REPO=$(pwd -P)
 git checkout --detach '<immutable-release-sha>'
 git diff --quiet
 git diff --cached --quiet
@@ -85,6 +87,17 @@ printf '%s\n' "$RELEASE_SHA" | \
     'cat > /opt/openqms/.release-sha'
 REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
 test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+command -v python3.11 >/dev/null
+command -v node >/dev/null
+command -v npm >/dev/null
+test "$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.11"
+test "$(node -p 'process.versions.node.split(".")[0]')" = "20"
+python3.11 -m venv "$RELEASE_STAGE/backend/.venv"
+"$RELEASE_STAGE/backend/.venv/bin/python" -m pip install \
+  --disable-pip-version-check --no-input \
+  -r "$RELEASE_STAGE/backend/requirements.txt" \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple
+(cd "$RELEASE_STAGE/frontend" && npm ci)
 ```
 
 Local migration code, tests/preflight, and remote containers must all come from this same immutable release. Run the following in the **Oracle host `/opt/openqms` shell**:
@@ -96,7 +109,6 @@ SITE_ADDRESS=qms.smartindustry.world \
   OUTPUT_PATH=.env.production \
   ./scripts/init-production-env.sh
 ./scripts/production-compose.sh config
-./scripts/production-compose.sh build
 ./scripts/production-compose.sh up -d db redis neo4j
 ./scripts/production-compose.sh ps
 ```
@@ -155,27 +167,68 @@ ssh -N \
 
 #### B. Target, test, and runtime identity gates
 
-Run the following in the **Mac operator terminal that performed the 1.2 sync and retains `RELEASE_SHA`**. `DATABASE_URL` reaches Oracle `qms` through local port `15432`. `TEST_DATABASE_URL` reaches a unique, timestamped database on the Mac's local PostgreSQL `5432`. Both databases must already exist and be reachable before the distinct-DB guard starts; the test URL must never name the seeded development database or production target.
+Run the following in the **Mac operator terminal that performed the 1.2 sync and retains `RELEASE_SHA`/`RELEASE_STAGE`**. First `cd "$RELEASE_STAGE"`, so local migration, check, preflight, and target-identity code all come from the immutable archive. The stage requires Python 3.11, Node 20, and npm; it creates a fresh venv from the archive's own `backend/requirements.txt` and runs clean `npm ci` from `frontend/package-lock.json`. It never reuses the original checkout's `.venv`, `node_modules`, untracked files, or subsequently changed source.
 
-Create and migrate the unique local release-gate database first, then export its actual URL. Replace the following local username/password placeholders with credentials for the Mac's local test PostgreSQL; never use the production password:
+`DATABASE_URL` reaches Oracle `qms` through local `15432`. Clear and reject any hostile ambient `TEST_DATABASE_URL`, then construct and export the actual URL for the unique timestamped database on the Mac's local PostgreSQL `5432`. That exact URL plus `TEST_DB`/`PG*` values must reach both the first silent `make check-test-db` and deploy-release's nested `make check`; the flow never falls back to creating or migrating default `qms_test`. Local username/password values are non-production placeholders. Xtrace remains disabled and make is silent, so neither local nor production passwords are printed.
+
+After the Oracle manifest check and wrapper build succeed, use direct `docker image inspect` to read the newly built `openqms-backend:prod` / `openqms-web:prod` non-secret sha256 IDs; do not use Compose `images -q`, which reports images used by created containers. Graph-worker shares the backend tag. Mark the IDs readonly/exported and associate them with this `RELEASE_SHA`. The remote image guard compares current tag IDs, so any rebuild or replacement fails closed before migration.
 
 ```bash
-test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+cd "$RELEASE_STAGE"
+test "$(git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD)" = "$RELEASE_SHA"
 ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
 REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
 test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
-export DATABASE_URL='postgresql+asyncpg://qms:<url-encoded-production-password>@127.0.0.1:15432/qms'
+
+read -r BACKEND_IMAGE_ID WEB_IMAGE_ID <<< "$(
+  ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+    bash -s -- "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA" "$RELEASE_GUARD_SHA" <<'REMOTE_BUILD'
+set -euo pipefail
+release_sha=$1
+manifest_sha=$2
+guard_sha=$3
+cd /opt/openqms
+test "$(sha256sum .release-manifest | cut -d " " -f1)" = "$manifest_sha"
+test "$(sha256sum scripts/check-release-tree.py | cut -d " " -f1)" = "$guard_sha"
+python3 scripts/check-release-tree.py verify --root . --manifest .release-manifest >/dev/null
+test "$(cat .release-sha)" = "$release_sha"
+./scripts/production-compose.sh build >/dev/null
+revision_label='{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+backend_id=$(docker image inspect openqms-backend:prod --format '{{.Id}}')
+web_id=$(docker image inspect openqms-web:prod --format '{{.Id}}')
+backend_revision=$(docker image inspect openqms-backend:prod --format "$revision_label")
+web_revision=$(docker image inspect openqms-web:prod --format "$revision_label")
+[[ "$backend_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$web_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+test "$backend_revision" = "$release_sha"
+test "$web_revision" = "$release_sha"
+printf '%s %s\n' "$backend_id" "$web_id"
+REMOTE_BUILD
+)"
+[[ "$BACKEND_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+readonly BACKEND_IMAGE_ID WEB_IMAGE_ID
+export BACKEND_IMAGE_ID WEB_IMAGE_ID
+export REMOTE_IMAGE_VERIFY='revision_label='\''{{ index .Config.Labels "org.opencontainers.image.revision" }}'\'' && test "$(docker image inspect openqms-backend:prod --format "{{.Id}}")" = "'"$BACKEND_IMAGE_ID"'" && test "$(docker image inspect openqms-web:prod --format "{{.Id}}")" = "'"$WEB_IMAGE_ID"'" && test "$(docker image inspect openqms-backend:prod --format "$revision_label")" = "'"$RELEASE_SHA"'" && test "$(docker image inspect openqms-web:prod --format "$revision_label")" = "'"$RELEASE_SHA"'"'
+
+unset TEST_DATABASE_URL
+test -z "${TEST_DATABASE_URL+x}"
+export LOCAL_TEST_PGUSER='<local-test-user>'
+export LOCAL_TEST_PGPASSWORD='<local-test-password>'
+export LOCAL_TEST_PGHOST=127.0.0.1
+export LOCAL_TEST_PGPORT=5432
+export LOCAL_TEST_PASSWORD_ENCODED=$(LOCAL_TEST_PGPASSWORD="$LOCAL_TEST_PGPASSWORD" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["LOCAL_TEST_PGPASSWORD"], safe=""))')
 export RELEASE_GATE_DB="qms_release_gate_$(date +%Y%m%d%H%M%S)"
-make check-test-db TEST_DB="$RELEASE_GATE_DB" \
-  PGUSER='<local-test-user>' \
-  PGPASSWORD='<local-test-password>' \
-  PGHOST=127.0.0.1 \
-  PGPORT=5432
-export TEST_DATABASE_URL="postgresql+asyncpg://<local-test-user>:<url-encoded-local-test-password>@127.0.0.1:5432/${RELEASE_GATE_DB}"
-export ORACLE_SSH_TARGET=ubuntu@100.84.141.70
-export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
+export TEST_DATABASE_URL="postgresql+asyncpg://${LOCAL_TEST_PGUSER}:${LOCAL_TEST_PASSWORD_ENCODED}@${LOCAL_TEST_PGHOST}:${LOCAL_TEST_PGPORT}/${RELEASE_GATE_DB}"
+PGUSER="$LOCAL_TEST_PGUSER" \
+PGPASSWORD="$LOCAL_TEST_PGPASSWORD" \
+PGHOST="$LOCAL_TEST_PGHOST" \
+PGPORT="$LOCAL_TEST_PGPORT" \
+TEST_DB="$RELEASE_GATE_DB" \
+TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+  make --silent check-test-db TEST_DB="$RELEASE_GATE_DB"
+export DATABASE_URL='postgresql+asyncpg://qms:<url-encoded-production-password>@127.0.0.1:15432/qms'
 export ORACLE_APP_DIR=/opt/openqms
-backend/.venv/bin/python scripts/check-oracle-target-database.py
 ```
 
 The runtime identity checker uses SSH to execute `./scripts/production-compose.sh exec -T db ...` on Oracle and compares PostgreSQL system identifier, database name, and OID. This mandatory `TARGET_IDENTITY_CMD` runs before migration and has no bypass.
@@ -186,22 +239,21 @@ The runtime identity checker uses SSH to execute `./scripts/production-compose.s
 
 On first deployment, `INITIALIZE_CMD` seeds data. The release script runs initialization before preflight. `--no-print-credentials` keeps privileged demo passwords out of logs. Omit `INITIALIZE_CMD` on later releases once data is initialized. `deploy-release.sh` evaluates command strings on the Mac operator host, so initializer and rollout must explicitly SSH to Oracle, change to `/opt/openqms`, and invoke the remote wrapper; they must not invoke Compose on the Mac.
 
-Continue in the Mac operator terminal that retains `RELEASE_SHA`. Both remote commands first revalidate the manifest hash, every tracked file, and the exact path set, then check the Oracle marker, and only then invoke the wrapper. A changed tree, stale file, or marker mismatch blocks initialization and rollout:
+Continue inside `RELEASE_STAGE`. `TARGET_IDENTITY_CMD` first revalidates the Oracle manifest/tree/modes, marker, and backend/web image IDs, then runs database identity; image or source drift therefore blocks before migrate. Initializer and rollout repeat every remote gate before invoking the wrapper:
 
 ```bash
-export TARGET_IDENTITY_CMD='"$PYTHON_BIN" "$REPO_ROOT/scripts/check-oracle-target-database.py"'
-export INITIALIZE_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh run --rm --no-deps backend python -m app.seed --no-print-credentials"'
-export ROLLOUT_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh up -d --wait backend graph-worker web"'
-test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
-REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
-test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+export CHECK_CMD='PGUSER="$LOCAL_TEST_PGUSER" PGPASSWORD="$LOCAL_TEST_PGPASSWORD" PGHOST="$LOCAL_TEST_PGHOST" PGPORT="$LOCAL_TEST_PGPORT" TEST_DB="$RELEASE_GATE_DB" TEST_DATABASE_URL="$TEST_DATABASE_URL" make --silent -C "$REPO_ROOT" check'
+export TARGET_IDENTITY_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY" && "$PYTHON_BIN" "$REPO_ROOT/scripts/check-oracle-target-database.py"'
+export INITIALIZE_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY && ./scripts/production-compose.sh run --rm --no-deps backend python -m app.seed --no-print-credentials"'
+export ROLLOUT_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY && ./scripts/production-compose.sh up -d --wait backend graph-worker web"'
+test "$(git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY"
 TENANT_MODE=single make deploy-release
 cleanup_release_stage
 trap - EXIT HUP INT TERM QUIT
 ```
 
-Do not split migrate, check, preflight, and rollout into parallel commands. The target `DATABASE_URL` is used only for migration/preflight; during check, both `DATABASE_URL` and `TEST_DATABASE_URL` are bound to the isolated test database. Rollout receives neither host DSN.
+Do not split migrate, check, preflight, and rollout into parallel commands. `deploy-release.sh` derives `REPO_ROOT` from the stage, so default migrate/preflight read archive code; explicit `CHECK_CMD` passes the same `TEST_DATABASE_URL`, `TEST_DB`, and `PG*` values to nested make. The target `DATABASE_URL` is used only for migration/preflight; during check, both `DATABASE_URL` and `TEST_DATABASE_URL` are bound to that unique isolated test database. Rollout receives neither host DSN.
 
 #### D. Private acceptance, password rotation, proxy probe, and public launch
 

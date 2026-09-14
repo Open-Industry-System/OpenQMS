@@ -1,4 +1,7 @@
+import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -150,11 +153,11 @@ def test_runbooks_provision_reachable_isolated_test_database_before_release():
         assert "-L 15432:127.0.0.1:5432" in commands
         assert "127.0.0.1:15432/qms" in commands
         assert 'export RELEASE_GATE_DB="qms_release_gate_$(date +%Y%m%d%H%M%S)"' in commands
-        assert 'make check-test-db TEST_DB="$RELEASE_GATE_DB"' in commands
-        assert "127.0.0.1:5432/${RELEASE_GATE_DB}" in commands
+        assert 'make --silent check-test-db TEST_DB="$RELEASE_GATE_DB"' in commands
+        assert "@${LOCAL_TEST_PGHOST}:${LOCAL_TEST_PGPORT}/${RELEASE_GATE_DB}" in commands
         assert "export TEST_DATABASE_URL=" in commands
         assert "127.0.0.1:5433" not in commands
-        assert commands.index("make check-test-db") < commands.index("make deploy-release")
+        assert commands.index('make --silent check-test-db') < commands.index("make deploy-release")
 
 
 @pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))
@@ -191,7 +194,7 @@ def test_operator_and_oracle_use_one_tracked_immutable_release(path):
     manifest = 'RELEASE_MANIFEST="$RELEASE_STAGE/.release-manifest"'
     marker = "/opt/openqms/.release-sha"
     remote_sha = 'REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \'cat /opt/openqms/.release-sha\')'
-    local_comparison = 'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"'
+    local_comparison = 'test "$(git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD)" = "$RELEASE_SHA"'
     remote_comparison = 'test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"'
     remote_command_guard = 'test \\"\\$(cat .release-sha)\\" = \\"$RELEASE_SHA\\"'
     content_guard = "python3 scripts/check-release-tree.py verify --root . --manifest .release-manifest >/dev/null"
@@ -237,6 +240,248 @@ def test_operator_and_oracle_use_one_tracked_immutable_release(path):
     assert commands.index(content_guard) < commands.index("cat > /opt/openqms/.release-sha")
     assert commands.rindex(local_comparison) < commands.index("make deploy-release")
     assert commands.rindex(remote_comparison) < commands.index("make deploy-release")
+
+
+@pytest.mark.parametrize(
+    ("path", "start_heading", "end_heading"),
+    [
+        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
+    ],
+)
+def test_release_uses_exact_precreated_test_database_through_nested_make(
+    path, start_heading, end_heading
+):
+    commands = _normalized(_bash_blocks(_section(path, start_heading, end_heading)))
+    unset = "unset TEST_DATABASE_URL"
+    release_db = 'export RELEASE_GATE_DB="qms_release_gate_$(date +%Y%m%d%H%M%S)"'
+    url = 'export TEST_DATABASE_URL="postgresql+asyncpg://${LOCAL_TEST_PGUSER}:${LOCAL_TEST_PASSWORD_ENCODED}@${LOCAL_TEST_PGHOST}:${LOCAL_TEST_PGPORT}/${RELEASE_GATE_DB}"'
+    setup = 'make --silent check-test-db TEST_DB="$RELEASE_GATE_DB"'
+    check = 'export CHECK_CMD=\'PGUSER="$LOCAL_TEST_PGUSER" PGPASSWORD="$LOCAL_TEST_PGPASSWORD" PGHOST="$LOCAL_TEST_PGHOST" PGPORT="$LOCAL_TEST_PGPORT" TEST_DB="$RELEASE_GATE_DB" TEST_DATABASE_URL="$TEST_DATABASE_URL" make --silent -C "$REPO_ROOT" check\''
+
+    assert unset in commands
+    assert 'test -z "${TEST_DATABASE_URL+x}"' in commands
+    for variable in (
+        "LOCAL_TEST_PGUSER",
+        "LOCAL_TEST_PGPASSWORD",
+        "LOCAL_TEST_PGHOST",
+        "LOCAL_TEST_PGPORT",
+        "LOCAL_TEST_PASSWORD_ENCODED",
+    ):
+        assert f"export {variable}=" in commands
+    assert release_db in commands
+    assert url in commands
+    assert setup in commands
+    setup_line = next(line for line in commands.splitlines() if setup in line)
+    for value in (
+        'PGUSER="$LOCAL_TEST_PGUSER"',
+        'PGPASSWORD="$LOCAL_TEST_PGPASSWORD"',
+        'PGHOST="$LOCAL_TEST_PGHOST"',
+        'PGPORT="$LOCAL_TEST_PGPORT"',
+        'TEST_DATABASE_URL="$TEST_DATABASE_URL"',
+    ):
+        assert value in setup_line
+    assert check in commands
+    assert commands.index(unset) < commands.index(url) < commands.index(setup)
+    assert commands.index(check) < commands.index("make deploy-release")
+    assert "/qms_test" not in commands
+
+
+@pytest.mark.parametrize(
+    ("path", "start_heading", "end_heading"),
+    [
+        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
+    ],
+)
+def test_all_local_release_gates_execute_from_archive_stage(
+    path, start_heading, end_heading
+):
+    text = _section(path, start_heading, end_heading)
+    commands = _normalized(_bash_blocks(text))
+    repo = 'export LOCAL_RELEASE_REPO=$(pwd -P)'
+    python_venv = 'python3.11 -m venv "$RELEASE_STAGE/backend/.venv"'
+    frontend_install = '(cd "$RELEASE_STAGE/frontend" && npm ci)'
+    stage_cd = 'cd "$RELEASE_STAGE"'
+
+    assert repo in commands
+    assert "ln -s" not in commands
+    assert "command -v python3.11" in commands
+    assert 'test "$(python3.11 -c \'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")\')" = "3.11"' in commands
+    assert "command -v node" in commands
+    assert 'test "$(node -p \'process.versions.node.split(".")[0]\')" = "20"' in commands
+    assert python_venv in commands
+    assert '"$RELEASE_STAGE/backend/.venv/bin/python" -m pip install' in commands
+    assert '-r "$RELEASE_STAGE/backend/requirements.txt"' in commands
+    assert frontend_install in commands
+    assert 'git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD' in commands
+    assert 'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"' not in commands
+    assert '"$REPO_ROOT/scripts/check-oracle-target-database.py"' in commands
+    assert 'make --silent -C "$REPO_ROOT" check' in commands
+    assert commands.index("cat > /opt/openqms/.release-sha") < commands.index(python_venv)
+    assert commands.index(python_venv) < commands.index(frontend_install)
+    assert commands.index(frontend_install) < commands.index(stage_cd)
+    assert commands.index(stage_cd) < commands.index("make deploy-release")
+    assert "mutable working tree" in text or "可变 working tree" in text
+
+
+@pytest.mark.parametrize(
+    ("path", "start_heading", "end_heading"),
+    [
+        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
+    ],
+)
+def test_remote_images_are_bound_to_release_before_migration(
+    path, start_heading, end_heading
+):
+    text = _section(path, start_heading, end_heading)
+    commands = _normalized(_bash_blocks(text))
+    capture = 'read -r BACKEND_IMAGE_ID WEB_IMAGE_ID <<< "$('
+
+    assert capture in commands
+    assert 'bash -s -- "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA" "$RELEASE_GUARD_SHA"' in commands
+    assert "<<'REMOTE_BUILD'" in commands
+    assert "release_sha=$1" in commands
+    assert "manifest_sha=$2" in commands
+    assert "guard_sha=$3" in commands
+    assert 'test "$(cat .release-sha)" = "$release_sha"' in commands
+    assert 'revision_label=\'{{ index .Config.Labels "org.opencontainers.image.revision" }}\'' in commands
+    assert 'test "$backend_revision" = "$release_sha"' in commands
+    assert 'test "$web_revision" = "$release_sha"' in commands
+    assert 'printf \'%s %s\\n\' "$backend_id" "$web_id"' in commands
+    assert '[[ "$BACKEND_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]' in commands
+    assert '[[ "$WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]' in commands
+    assert "production-compose.sh images -q" not in commands
+    assert "docker image inspect openqms-backend:prod" in commands
+    assert "docker image inspect openqms-web:prod" in commands
+    assert "org.opencontainers.image.revision" in commands
+    assert r'\\"org.opencontainers.image.revision\\"' not in commands
+    assert "readonly BACKEND_IMAGE_ID WEB_IMAGE_ID" in commands
+    assert "export BACKEND_IMAGE_ID WEB_IMAGE_ID" in commands
+    assert "export REMOTE_IMAGE_VERIFY=" in commands
+    assert commands.count("$REMOTE_IMAGE_VERIFY") >= 3
+    build_index = commands.index("./scripts/production-compose.sh build >/dev/null")
+    assert commands.index(capture) < build_index
+    assert build_index < commands.index("docker image inspect openqms-backend:prod", build_index)
+    assert commands.index(capture) < commands.index("make deploy-release")
+    target_line = next(
+        line for line in commands.splitlines() if line.startswith("export TARGET_IDENTITY_CMD=")
+    )
+    assert target_line.index("$REMOTE_RELEASE_VERIFY") < target_line.index("$REMOTE_IMAGE_VERIFY")
+    assert target_line.index("$REMOTE_IMAGE_VERIFY") < target_line.index("check-oracle-target-database.py")
+    assert "RELEASE_SHA" in text
+    assert "image" in text.lower()
+
+
+@pytest.mark.parametrize(
+    ("path", "start_heading", "end_heading"),
+    [
+        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
+    ],
+)
+def test_remote_image_verify_survives_two_shell_layers_with_exact_template(
+    tmp_path, path, start_heading, end_heading
+):
+    section = _section(path, start_heading, end_heading)
+    assignment = next(
+        line
+        for line in _bash_blocks(section).splitlines()
+        if line.startswith("export REMOTE_IMAGE_VERIFY=")
+    )
+    release_sha = "0123456789abcdef0123456789abcdef01234567"
+    backend_id = "sha256:" + "a" * 64
+    web_id = "sha256:" + "b" * 64
+    first_layer = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                f"BACKEND_IMAGE_ID={backend_id}; "
+                f"WEB_IMAGE_ID={web_id}; RELEASE_SHA={release_sha}; "
+                f"{assignment}; printf '%s\\n' \"$REMOTE_IMAGE_VERIFY\""
+            ),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert first_layer.returncode == 0, first_layer.stderr
+    remote_command = first_layer.stdout.rstrip("\n")
+    exact_template = '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+    assert remote_command.startswith(f"revision_label='{exact_template}' && ")
+    assert '\\"org.opencontainers.image.revision\\"' not in remote_command
+
+    fake_bin = tmp_path / path.name
+    fake_bin.mkdir()
+    calls = fake_bin / "calls.jsonl"
+    docker = fake_bin / "docker"
+    docker.write_text(
+        """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+with Path(os.environ["FAKE_DOCKER_CALLS"]).open("a") as stream:
+    stream.write(json.dumps(args) + "\\n")
+if len(args) != 5 or args[:2] != ["image", "inspect"] or args[3] != "--format":
+    raise SystemExit(70)
+tag, template = args[2], args[4]
+if template == "{{.Id}}":
+    print(os.environ["FAKE_BACKEND_ID"] if tag == "openqms-backend:prod" else os.environ["FAKE_WEB_ID"])
+elif template == '{{ index .Config.Labels "org.opencontainers.image.revision" }}':
+    if tag == "openqms-web:prod":
+        print(os.environ.get("FAKE_WEB_REVISION", os.environ["FAKE_RELEASE_SHA"]))
+    else:
+        print(os.environ["FAKE_RELEASE_SHA"])
+else:
+    raise SystemExit(71)
+"""
+    )
+    docker.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_DOCKER_CALLS": str(calls),
+        "FAKE_BACKEND_ID": backend_id,
+        "FAKE_WEB_ID": web_id,
+        "FAKE_RELEASE_SHA": release_sha,
+    }
+
+    success = subprocess.run(
+        ["bash", "-c", remote_command],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert success.returncode == 0, success.stderr
+    assert success.stdout == ""
+    recorded = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert [call[-1] for call in recorded] == [
+        "{{.Id}}",
+        "{{.Id}}",
+        exact_template,
+        exact_template,
+    ]
+
+    calls.unlink()
+    failure = subprocess.run(
+        ["bash", "-c", remote_command],
+        env={**environment, "FAKE_WEB_REVISION": "f" * 40},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert failure.returncode != 0
 
 
 def test_readme_quick_start_is_explicitly_local_development_only():

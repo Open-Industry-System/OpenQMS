@@ -116,8 +116,10 @@ docker compose exec backend python -m app.seed
 Mac 运维仓库必须先锁定一个 tracked 内容与 HEAD 一致的不可变 release；无关 untracked 计划/参考文件不参与部署身份。部署字节只从 `git archive "$RELEASE_SHA"` 提取到权限 `0700` 的私有 stage，不再从可变 working tree 读取；path stream 同样来自 `git ls-tree` commit object。manifest 为每个 tracked 路径记录 SHA-256 与 Git 相关模式 `100644`/`100755`，并拒绝 symlink/不安全路径。Oracle 必须验证 manifest 本身、verifier、所有 tracked 文件 hash/mode 和完整 deployable path set；只排除持久运行时状态 `.env.production`、`backups/`、`.release-sha` 与 `.release-manifest`。验证成功后才写入非敏感 commit SHA marker。首次部署不做远端删除同步，任何额外/遗留 source、config 或 script 都会 fail closed。stage 在正常完成、EXIT 或信号时清理。
 
 ```bash
+set +x
 set -euo pipefail
 cd '<local-openqms-checkout>'
+export LOCAL_RELEASE_REPO=$(pwd -P)
 git checkout --detach '<immutable-release-sha>'
 git diff --quiet
 git diff --cached --quiet
@@ -163,6 +165,17 @@ printf '%s\n' "$RELEASE_SHA" | \
     'cat > /opt/openqms/.release-sha'
 REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
 test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+command -v python3.11 >/dev/null
+command -v node >/dev/null
+command -v npm >/dev/null
+test "$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.11"
+test "$(node -p 'process.versions.node.split(".")[0]')" = "20"
+python3.11 -m venv "$RELEASE_STAGE/backend/.venv"
+"$RELEASE_STAGE/backend/.venv/bin/python" -m pip install \
+  --disable-pip-version-check --no-input \
+  -r "$RELEASE_STAGE/backend/requirements.txt" \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple
+(cd "$RELEASE_STAGE/frontend" && npm ci)
 ```
 
 以下初始化命令在 **Oracle 主机 `/opt/openqms` shell** 执行：
@@ -174,7 +187,6 @@ SITE_ADDRESS=qms.smartindustry.world \
   OUTPUT_PATH=.env.production \
   ./scripts/init-production-env.sh
 ./scripts/production-compose.sh config
-./scripts/production-compose.sh build
 ./scripts/production-compose.sh up -d db redis neo4j
 ./scripts/production-compose.sh ps
 ```
@@ -197,7 +209,7 @@ VITE_PUBLIC_DEMO_PASSWORD= \
 
 ### 身份门禁与串行发布
 
-容器内 DSN 使用 `db:5432`。在一台 Mac 运维终端建立 Oracle 目标隧道到本地 `15432`；本地 PostgreSQL `5432` 用于独立、唯一的 release gate 测试库。迁移前 distinct guard 的两个数据库都必须已经存在且可达。release 在第二个 Mac 终端运行，但 `INITIALIZE_CMD` / `ROLLOUT_CMD` 通过 SSH 回到 Oracle `/opt/openqms` 执行生产包装器。顺序固定为 identity → migrate → check → initialize → preflight → rollout；首次部署的 seed 在 preflight 前以无凭据输出模式运行。
+容器内 DSN 使用 `db:5432`。Mac 专用终端把 Oracle 目标隧道映射到本地 `15432`；本地 PostgreSQL `5432` 提供本次唯一 release gate 数据库。运维 shell 先清除 hostile ambient `TEST_DATABASE_URL`，在首次 `make --silent check-test-db` 前构造并导出唯一 URL，并通过显式 `CHECK_CMD` 把同一 URL、库名和 PG 参数传入 deploy-release 的 nested `make check`，绝不回落到 `qms_test`。所有 migrate/check/preflight 脚本从 `RELEASE_STAGE` 运行；stage 使用 Python 3.11 从 archive 的 `backend/requirements.txt` 创建全新 `.venv`，并使用 Node 20 对 archive 的 `frontend/package-lock.json` 执行 clean `npm ci`。不复用原 checkout 的未跟踪依赖或源码。Oracle wrapper build 后直接用 `docker image inspect` 捕获并锁定新构建的 `openqms-backend:prod` / `openqms-web:prod` sha256 image ID（graph-worker 共用 backend tag），与 `RELEASE_SHA` 关联；不能用只反映已创建容器的 Compose `images -q`。target identity 在迁移前首先复验 remote tree/marker/tag image，initializer 与 rollout 也重复同一门禁。
 
 Mac 专用隧道终端：
 
@@ -213,28 +225,68 @@ ssh -N \
 执行同步且保留 `RELEASE_SHA` 的 Mac 运维终端（先将占位符替换为本机测试库凭据；不得打印生产密码或 DSN）：
 
 ```bash
-test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+cd "$RELEASE_STAGE"
+test "$(git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD)" = "$RELEASE_SHA"
 ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
 REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
 test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
-export DATABASE_URL='postgresql+asyncpg://qms:<url-encoded-production-password>@127.0.0.1:15432/qms'
+
+read -r BACKEND_IMAGE_ID WEB_IMAGE_ID <<< "$(
+  ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+    bash -s -- "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA" "$RELEASE_GUARD_SHA" <<'REMOTE_BUILD'
+set -euo pipefail
+release_sha=$1
+manifest_sha=$2
+guard_sha=$3
+cd /opt/openqms
+test "$(sha256sum .release-manifest | cut -d " " -f1)" = "$manifest_sha"
+test "$(sha256sum scripts/check-release-tree.py | cut -d " " -f1)" = "$guard_sha"
+python3 scripts/check-release-tree.py verify --root . --manifest .release-manifest >/dev/null
+test "$(cat .release-sha)" = "$release_sha"
+./scripts/production-compose.sh build >/dev/null
+revision_label='{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+backend_id=$(docker image inspect openqms-backend:prod --format '{{.Id}}')
+web_id=$(docker image inspect openqms-web:prod --format '{{.Id}}')
+backend_revision=$(docker image inspect openqms-backend:prod --format "$revision_label")
+web_revision=$(docker image inspect openqms-web:prod --format "$revision_label")
+[[ "$backend_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$web_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+test "$backend_revision" = "$release_sha"
+test "$web_revision" = "$release_sha"
+printf '%s %s\n' "$backend_id" "$web_id"
+REMOTE_BUILD
+)"
+[[ "$BACKEND_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+readonly BACKEND_IMAGE_ID WEB_IMAGE_ID
+export BACKEND_IMAGE_ID WEB_IMAGE_ID
+export REMOTE_IMAGE_VERIFY='revision_label='\''{{ index .Config.Labels "org.opencontainers.image.revision" }}'\'' && test "$(docker image inspect openqms-backend:prod --format "{{.Id}}")" = "'"$BACKEND_IMAGE_ID"'" && test "$(docker image inspect openqms-web:prod --format "{{.Id}}")" = "'"$WEB_IMAGE_ID"'" && test "$(docker image inspect openqms-backend:prod --format "$revision_label")" = "'"$RELEASE_SHA"'" && test "$(docker image inspect openqms-web:prod --format "$revision_label")" = "'"$RELEASE_SHA"'"'
+
+unset TEST_DATABASE_URL
+test -z "${TEST_DATABASE_URL+x}"
+export LOCAL_TEST_PGUSER='<local-test-user>'
+export LOCAL_TEST_PGPASSWORD='<local-test-password>'
+export LOCAL_TEST_PGHOST=127.0.0.1
+export LOCAL_TEST_PGPORT=5432
+export LOCAL_TEST_PASSWORD_ENCODED=$(LOCAL_TEST_PGPASSWORD="$LOCAL_TEST_PGPASSWORD" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["LOCAL_TEST_PGPASSWORD"], safe=""))')
 export RELEASE_GATE_DB="qms_release_gate_$(date +%Y%m%d%H%M%S)"
-make check-test-db TEST_DB="$RELEASE_GATE_DB" \
-  PGUSER='<local-test-user>' \
-  PGPASSWORD='<local-test-password>' \
-  PGHOST=127.0.0.1 \
-  PGPORT=5432
-export TEST_DATABASE_URL="postgresql+asyncpg://<local-test-user>:<url-encoded-local-test-password>@127.0.0.1:5432/${RELEASE_GATE_DB}"
-export ORACLE_SSH_TARGET=ubuntu@100.84.141.70
-export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
+export TEST_DATABASE_URL="postgresql+asyncpg://${LOCAL_TEST_PGUSER}:${LOCAL_TEST_PASSWORD_ENCODED}@${LOCAL_TEST_PGHOST}:${LOCAL_TEST_PGPORT}/${RELEASE_GATE_DB}"
+PGUSER="$LOCAL_TEST_PGUSER" \
+PGPASSWORD="$LOCAL_TEST_PGPASSWORD" \
+PGHOST="$LOCAL_TEST_PGHOST" \
+PGPORT="$LOCAL_TEST_PGPORT" \
+TEST_DB="$RELEASE_GATE_DB" \
+TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+  make --silent check-test-db TEST_DB="$RELEASE_GATE_DB"
+
+export DATABASE_URL='postgresql+asyncpg://qms:<url-encoded-production-password>@127.0.0.1:15432/qms'
 export ORACLE_APP_DIR=/opt/openqms
-export TARGET_IDENTITY_CMD='"$PYTHON_BIN" "$REPO_ROOT/scripts/check-oracle-target-database.py"'
-export INITIALIZE_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh run --rm --no-deps backend python -m app.seed --no-print-credentials"'
-export ROLLOUT_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && ./scripts/production-compose.sh up -d --wait backend graph-worker web"'
-test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
-REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
-test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+export CHECK_CMD='PGUSER="$LOCAL_TEST_PGUSER" PGPASSWORD="$LOCAL_TEST_PGPASSWORD" PGHOST="$LOCAL_TEST_PGHOST" PGPORT="$LOCAL_TEST_PGPORT" TEST_DB="$RELEASE_GATE_DB" TEST_DATABASE_URL="$TEST_DATABASE_URL" make --silent -C "$REPO_ROOT" check'
+export TARGET_IDENTITY_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY" && "$PYTHON_BIN" "$REPO_ROOT/scripts/check-oracle-target-database.py"'
+export INITIALIZE_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY && ./scripts/production-compose.sh run --rm --no-deps backend python -m app.seed --no-print-credentials"'
+export ROLLOUT_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY && ./scripts/production-compose.sh up -d --wait backend graph-worker web"'
+test "$(git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY"
 TENANT_MODE=single make deploy-release
 cleanup_release_stage
 trap - EXIT HUP INT TERM QUIT

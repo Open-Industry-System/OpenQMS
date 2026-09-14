@@ -55,6 +55,7 @@ REQUIRED_NONEMPTY_KEYS = set(ENV_KEYS) - {
     "EMBEDDING_BASE_URL",
 }
 POISON = "AMBIENT_POISON_MUST_NOT_REACH_DOCKER"
+RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567"
 INTERNAL_STATE_KEYS = (
     "production_keys",
     "expected_database_url",
@@ -133,13 +134,17 @@ def _env_text(
     return "# generated non-secret test environment\n" + "\n".join(lines) + "\n"
 
 
-def _make_repo(tmp_path: Path, env_text: str) -> Path:
+def _make_repo(
+    tmp_path: Path, env_text: str, marker_text: str | None = RELEASE_SHA
+) -> Path:
     repo = tmp_path / "repo"
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
     shutil.copy2(SCRIPT, scripts / SCRIPT.name)
     shutil.copy2(COMPOSE, repo / COMPOSE.name)
     (repo / ".env.production").write_text(env_text)
+    if marker_text is not None:
+        (repo / ".release-sha").write_text(marker_text + "\n")
     return repo
 
 
@@ -164,6 +169,7 @@ Path(os.environ["DOCKER_CAPTURE"]).write_text(json.dumps({
         for value in os.environ.values()
     ),
     "docker_host": os.environ.get("DOCKER_HOST"),
+    "release_sha": os.environ.get("RELEASE_SHA"),
 }))
 """
     )
@@ -177,8 +183,9 @@ def _run_wrapper(
     *arguments: str,
     bash_env: Path | None = None,
     extra_env: dict[str, str] | None = None,
+    marker_text: str | None = RELEASE_SHA,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
-    repo = _make_repo(tmp_path, env_text)
+    repo = _make_repo(tmp_path, env_text, marker_text)
     fake_bin, capture = _write_fake_docker(tmp_path)
     checked_keys = (
         *ENV_KEYS,
@@ -240,7 +247,12 @@ def test_production_compose_wrapper_is_executable_valid_and_non_sourcing():
 
 def test_wrapper_uses_fixed_env_compose_and_project_arguments(tmp_path):
     result, capture, repo = _run_wrapper(
-        tmp_path, _env_text(), "config", "--format", "json"
+        tmp_path,
+        _env_text(),
+        "config",
+        "--format",
+        "json",
+        extra_env={"RELEASE_SHA": f"{POISON}_RELEASE_SHA"},
     )
 
     _require(result.returncode == 0, "wrapper command failed")
@@ -250,6 +262,7 @@ def test_wrapper_uses_fixed_env_compose_and_project_arguments(tmp_path):
     assert recorded["present_keys"] == []
     assert recorded["poison_present"] is False
     assert recorded["docker_host"] == "unix:///tmp/non-secret-docker.sock"
+    assert recorded["release_sha"] == RELEASE_SHA
     assert recorded["argv"] == [
         "compose",
         "--project-name",
@@ -514,6 +527,36 @@ def test_wrapper_rejects_invalid_dotenv_key_without_printing_value(tmp_path):
         secret_sentinel not in result.stdout + result.stderr,
         "invalid env value leaked to output",
     )
+
+
+@pytest.mark.parametrize(
+    ("marker_text", "expected_error"),
+    [
+        (None, "error: release marker is not readable\n"),
+        ("", "error: invalid release marker\n"),
+        ("A" * 40, "error: invalid release marker\n"),
+        ("a" * 39, "error: invalid release marker\n"),
+        ("a" * 41, "error: invalid release marker\n"),
+        ("a" * 40 + "\nextra", "error: invalid release marker\n"),
+    ],
+    ids=("missing", "empty", "uppercase", "short", "long", "multiline"),
+)
+def test_wrapper_rejects_missing_or_invalid_release_marker_before_docker(
+    tmp_path, marker_text, expected_error
+):
+    result, capture, _repo = _run_wrapper(
+        tmp_path,
+        _env_text(),
+        "config",
+        marker_text=marker_text,
+        extra_env={"RELEASE_SHA": f"{POISON}_RELEASE_SHA"},
+    )
+
+    assert result.returncode != 0
+    assert not capture.exists()
+    _require(result.stdout == "", "release-marker rejection wrote stdout")
+    _require(result.stderr == expected_error, "release-marker error category changed")
+    _require(POISON not in result.stdout + result.stderr, "ambient release SHA leaked")
 
 
 def test_wrapper_requires_repo_env_file_with_fixed_error(tmp_path):
