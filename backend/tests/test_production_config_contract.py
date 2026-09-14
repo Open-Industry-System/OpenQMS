@@ -33,6 +33,7 @@ def test_production_compose_and_caddy_trusted_proxy_contract():
 
     assert "172.30.0.10" in compose
     assert re.search(r"(?m)^\s*ipv4_address:\s*172\.30\.0\.10\s*$", web)
+    assert _short_ports("web", web) == ["80:80", "443:443"]
     assert "--proxy-headers" in backend
     forwarded_allow_ips = re.findall(
         r"--forwarded-allow-ips=([^\s'\"\],]+)", backend
