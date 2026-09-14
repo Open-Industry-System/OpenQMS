@@ -68,12 +68,16 @@ function returns the parsed JSON body typed against `types/index.ts`.
   proxy can route to a tenant. Production relies on host-based routing
   and ignores this header.
 - **401 refresh shares one promise.** Each non-login 401 marks its request
-  `_retry` and awaits the same `tryRefreshToken()` promise. A returned token
-  replays every caller with its Bearer value; a `null` or thrown refresh
-  rejects every caller and redirects to login. `/auth/login` 401s reject
-  immediately, `/auth/refresh` 401s reject back to the store without
-  recursion, and an already-retried 401 fails closed. The shared promise is
-  cleared after either outcome so later sessions can refresh.
+  `_retry` and awaits the same `tryRefreshToken()` promise. Replay is permitted
+  only when the initiating Bearer token and returned token have decodable,
+  equal JWT `sub` identities; malformed or mismatched identities reject the
+  original request without replaying it as another user. Explicit request
+  `Authorization` headers are preserved, including on retries. A `null` or
+  thrown refresh conditionally clears/redirects only when that request's token
+  is still the browser's current token; `/auth/login` 401s reject immediately,
+  `/auth/refresh` 401s reject back to the store without recursion, and an
+  already-retried 401 fails closed without clearing a newer generation. The
+  shared promise is cleared after either outcome so later sessions can refresh.
 - **403 silently re-syncs the user** by calling `/auth/me` and updating
   the auth store, then propagating the rejection. Pages must still
   handle the rejection.

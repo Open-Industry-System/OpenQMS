@@ -17,7 +17,16 @@ interface AuthState {
   tryRefreshToken: () => Promise<string | null>;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set, get) => {
+  const adoptStoredAccessToken = () => {
+    const accessToken = localStorage.getItem("access_token");
+    if (accessToken !== get().token) {
+      set({ user: null, token: accessToken, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
+    }
+    return accessToken;
+  };
+
+  return ({
   user: null,
   token: localStorage.getItem("access_token"),
   loading: false,
@@ -35,6 +44,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({
       user: resp.user,
       token: resp.access_token,
+      loading: false,
       factoryScope: resp.user.factory_scope ?? null,
       factories: resp.user.factories ?? [],
       currentFactoryId: factoryId,
@@ -49,11 +59,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   fetchUser: async () => {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
+    const accessToken = localStorage.getItem("access_token");
+    if (!accessToken) return;
+
     try {
       set({ loading: true });
       const user = await getMe();
+      if (localStorage.getItem("access_token") !== accessToken) {
+        adoptStoredAccessToken();
+        return;
+      }
+
       const factoryId = user.factory_scope?.default_factory_id || null;
       if (factoryId) localStorage.setItem("current_factory_id", factoryId);
       else localStorage.removeItem("current_factory_id");
@@ -65,10 +81,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         currentFactoryId: factoryId,
       });
     } catch {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("current_factory_id");
-      set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
+      if (localStorage.getItem("access_token") !== accessToken) {
+        adoptStoredAccessToken();
+        return;
+      }
+      get().logout();
     }
   },
 
@@ -86,24 +103,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const refreshToken = localStorage.getItem("refresh_token");
     if (!refreshToken) return null;
 
-    const currentAccessToken = () => {
-      const accessToken = localStorage.getItem("access_token");
-      if (accessToken !== get().token) set({ token: accessToken });
-      return accessToken;
-    };
-
     try {
       const resp = await apiRefreshToken(refreshToken);
-      if (localStorage.getItem("refresh_token") !== refreshToken) return currentAccessToken();
+      if (localStorage.getItem("refresh_token") !== refreshToken) return adoptStoredAccessToken();
 
       localStorage.setItem("access_token", resp.access_token);
       localStorage.setItem("refresh_token", resp.refresh_token);
       set({ token: resp.access_token });
       return resp.access_token;
     } catch {
-      if (localStorage.getItem("refresh_token") !== refreshToken) return currentAccessToken();
+      if (localStorage.getItem("refresh_token") !== refreshToken) return adoptStoredAccessToken();
       get().logout();
       return null;
     }
   },
-}));
+  });
+});

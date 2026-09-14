@@ -98,10 +98,16 @@ describe("tryRefreshToken", () => {
     expect(useAuthStore.getState()).toMatchObject({ token: "login-access", user: newUser });
   });
 
-  it("preserves the winning tab after its stale refresh request is rejected", async () => {
+  it("clears identity-derived state when adopting the winning tab's access token", async () => {
     localStorage.setItem("access_token", "old-access");
     localStorage.setItem("refresh_token", "old-refresh");
-    useAuthStore.setState({ token: "old-access", user: oldUser });
+    localStorage.setItem("current_factory_id", "old-factory");
+    useAuthStore.setState({
+      token: "old-access", user: oldUser,
+      factoryScope: { accessible_factory_ids: ["old-factory"], default_factory_id: "old-factory" },
+      factories: [{ id: "old-factory", code: "OLD", name: "Old", is_active: true }],
+      currentFactoryId: "old-factory",
+    });
     const request = deferred<{ access_token: string; refresh_token: string }>();
     api.refreshToken.mockReturnValue(request.promise);
 
@@ -113,7 +119,9 @@ describe("tryRefreshToken", () => {
     await expect(losingRefresh).resolves.toBe("winner-access");
     expect(localStorage.getItem("access_token")).toBe("winner-access");
     expect(localStorage.getItem("refresh_token")).toBe("winner-refresh");
-    expect(useAuthStore.getState()).toMatchObject({ token: "winner-access", user: oldUser });
+    expect(useAuthStore.getState()).toMatchObject({
+      token: "winner-access", user: null, factoryScope: null, factories: [], currentFactoryId: null,
+    });
   });
 
   it("does not resurrect tokens after logout during a refresh", async () => {
@@ -131,5 +139,69 @@ describe("tryRefreshToken", () => {
     expect(localStorage.getItem("access_token")).toBeNull();
     expect(localStorage.getItem("refresh_token")).toBeNull();
     expect(useAuthStore.getState()).toMatchObject({ token: null, user: null });
+  });
+});
+
+describe("fetchUser generation guard", () => {
+  it("does not let a stale /auth/me success overwrite a newer same-tab login", async () => {
+    const request = deferred<User>();
+    localStorage.setItem("access_token", "alice-access");
+    useAuthStore.setState({ token: "alice-access", user: oldUser });
+    api.getMe.mockReturnValue(request.promise);
+
+    const fetching = useAuthStore.getState().fetchUser();
+    localStorage.setItem("access_token", "bob-access");
+    useAuthStore.setState({ token: "bob-access", user: newUser });
+    request.resolve(oldUser);
+
+    await expect(fetching).resolves.toBeUndefined();
+    expect(useAuthStore.getState()).toMatchObject({ token: "bob-access", user: newUser });
+  });
+
+  it("does not let a stale /auth/me failure clear a newer same-tab login", async () => {
+    const request = deferred<User>();
+    localStorage.setItem("access_token", "alice-access");
+    useAuthStore.setState({ token: "alice-access", user: oldUser });
+    api.getMe.mockReturnValue(request.promise);
+
+    const fetching = useAuthStore.getState().fetchUser();
+    localStorage.setItem("access_token", "bob-access");
+    useAuthStore.setState({ token: "bob-access", user: newUser });
+    request.reject(new Error("old session expired"));
+
+    await expect(fetching).resolves.toBeUndefined();
+    expect(useAuthStore.getState()).toMatchObject({ token: "bob-access", user: newUser });
+  });
+
+  it("adopts a changed cross-tab token after a stale /auth/me success", async () => {
+    const request = deferred<User>();
+    localStorage.setItem("access_token", "alice-access");
+    useAuthStore.setState({ token: "alice-access", user: oldUser, currentFactoryId: "alice-factory" });
+    api.getMe.mockReturnValue(request.promise);
+
+    const fetching = useAuthStore.getState().fetchUser();
+    localStorage.setItem("access_token", "bob-access");
+    request.resolve(oldUser);
+
+    await expect(fetching).resolves.toBeUndefined();
+    expect(useAuthStore.getState()).toMatchObject({
+      token: "bob-access", user: null, factoryScope: null, factories: [], currentFactoryId: null,
+    });
+  });
+
+  it("adopts a changed cross-tab token after a stale /auth/me failure", async () => {
+    const request = deferred<User>();
+    localStorage.setItem("access_token", "alice-access");
+    useAuthStore.setState({ token: "alice-access", user: oldUser, currentFactoryId: "alice-factory" });
+    api.getMe.mockReturnValue(request.promise);
+
+    const fetching = useAuthStore.getState().fetchUser();
+    localStorage.setItem("access_token", "bob-access");
+    request.reject(new Error("old session expired"));
+
+    await expect(fetching).resolves.toBeUndefined();
+    expect(useAuthStore.getState()).toMatchObject({
+      token: "bob-access", user: null, factoryScope: null, factories: [], currentFactoryId: null,
+    });
   });
 });

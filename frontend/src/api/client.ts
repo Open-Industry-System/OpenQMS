@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getTokenSubject } from "../utils/jwt";
 import { useAuthStore } from "../store/authStore";
 
 const client = axios.create({
@@ -14,9 +15,28 @@ const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/fa
 // Shared by every request that receives a 401 while refresh is in flight.
 let refreshPromise: Promise<string | null> | null = null;
 
+function bearerToken(headers: { Authorization?: unknown; get?: (name: string) => unknown }) {
+  const authorization = headers.get?.("Authorization") ?? headers.Authorization;
+  return typeof authorization === "string" && authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : null;
+}
+
+function rejectForCurrentSession(error: unknown, request: { headers: { Authorization?: unknown; get?: (name: string) => unknown } }) {
+  const requestToken = bearerToken(request.headers);
+  const storedToken = localStorage.getItem("access_token");
+  if (storedToken === requestToken) {
+    useAuthStore.getState().logout();
+    window.location.href = "/login";
+  } else if (!storedToken) {
+    window.location.href = "/login";
+  }
+  return Promise.reject(error);
+}
+
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");
-  if (token) {
+  if (token && !bearerToken(config.headers)) {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
@@ -71,11 +91,10 @@ client.interceptors.response.use(
         return Promise.reject(error);
       }
       if (originalRequest._retry) {
-        useAuthStore.getState().logout();
-        window.location.href = "/login";
-        return Promise.reject(error);
+        return rejectForCurrentSession(error, originalRequest);
       }
 
+      const initiatingToken = bearerToken(originalRequest.headers);
       originalRequest._retry = true;
       if (!refreshPromise) {
         refreshPromise = useAuthStore.getState().tryRefreshToken()
@@ -84,14 +103,16 @@ client.interceptors.response.use(
       }
 
       const newToken = await refreshPromise;
-      if (newToken) {
-        originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        return client(originalRequest);
+      if (!newToken) return rejectForCurrentSession(error, originalRequest);
+
+      const initiatingSubject = getTokenSubject(initiatingToken);
+      const refreshedSubject = getTokenSubject(newToken);
+      if (!initiatingSubject || !refreshedSubject || initiatingSubject !== refreshedSubject) {
+        return Promise.reject(error);
       }
 
-      useAuthStore.getState().logout();
-      window.location.href = "/login";
-      return Promise.reject(error);
+      originalRequest.headers.Authorization = `Bearer ${newToken}`;
+      return client(originalRequest);
     }
 
     if (error.response?.status === 403) {

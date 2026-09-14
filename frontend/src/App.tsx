@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Spin } from "antd";
+import { classifyToken } from "./utils/jwt";
 import { useAuthStore } from "./store/authStore";
 import { usePermission } from "./hooks/usePermission";
 import type { ModuleKey } from "./hooks/usePermission";
@@ -86,23 +87,6 @@ const UserManagementPage = lazy(() => import("./pages/admin/UserManagementPage")
 const LogManagementPage = lazy(() => import("./pages/admin/LogManagementPage"));
 const ReviewSkillsPage = lazy(() => import("./pages/admin/ReviewSkillsPage"));
 
-type TokenState = "missing" | "malformed" | "expired" | "valid";
-
-function classifyToken(token: string | null): TokenState {
-  if (!token) return "missing";
-
-  try {
-    const payload: unknown = JSON.parse(atob(token.split(".")[1]));
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return "malformed";
-
-    const exp = (payload as Record<string, unknown>).exp;
-    if (typeof exp !== "number" || !Number.isFinite(exp)) return "malformed";
-    return exp * 1000 < Date.now() ? "expired" : "valid";
-  } catch {
-    return "malformed";
-  }
-}
-
 function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: React.ReactNode; requiredModule?: ModuleKey; requireAdmin?: boolean }) {
   const token = useAuthStore((s) => s.token);
   const loading = useAuthStore((s) => s.loading);
@@ -115,14 +99,19 @@ function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: 
   const tokenState = classifyToken(token);
 
   useEffect(() => {
+    const logoutIfCurrent = () => {
+      const storedToken = localStorage.getItem("access_token");
+      if (token && useAuthStore.getState().token === token && (!storedToken || storedToken === token)) logout();
+    };
+
     if (tokenState === "malformed") {
-      logout();
+      logoutIfCurrent();
     } else if (tokenState === "expired" && token) {
       if (refreshAttemptedToken.current === token) return;
       refreshAttemptedToken.current = token;
       void tryRefreshToken().then((refreshedToken) => {
-        if (!refreshedToken || classifyToken(refreshedToken) !== "valid") logout();
-      }).catch(logout);
+        if (!refreshedToken || classifyToken(refreshedToken) !== "valid") logoutIfCurrent();
+      }).catch(logoutIfCurrent);
     } else if (tokenState === "valid" && !user && !loading) {
       fetchUser();
     }

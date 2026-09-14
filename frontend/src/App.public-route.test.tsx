@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import App from "./App";
 import i18n from "./i18n";
+import type { User } from "./types";
 import { useAuthStore } from "./store/authStore";
 
 vi.mock("./hooks/usePermission", () => ({
@@ -18,6 +19,25 @@ function jwt(payload: unknown) {
 function rawJwt(payload: string) {
   return `header.${btoa(payload)}.signature`;
 }
+
+function base64UrlJwt(payload: unknown) {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const binary = String.fromCharCode(...bytes);
+  return `header.${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}.signature`;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+const bob: User = {
+  user_id: "bob", username: "bob", display_name: "Bob", email: null,
+  role_key: "quality_engineer", permissions: {}, product_lines: [],
+  bypass_row_level_security: false, is_active: true,
+};
 
 function renderAt(path: string, strict = false) {
   const app = (
@@ -101,6 +121,38 @@ describe("protected route bootstrap", () => {
 
     expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument();
     await waitFor(() => expect(fetchUser).toHaveBeenCalledOnce());
+  });
+
+  it("accepts a padded base64url payload before bootstrapping the user", async () => {
+    const fetchUser = vi.fn();
+    const token = base64UrlJwt({ sub: "alice", exp: Math.floor(Date.now() / 1000) + 3600, marker: "￿" });
+    expect(token.split(".")[1]).toMatch(/[-_]/);
+    useAuthStore.setState({ token, fetchUser });
+
+    renderAt("/dashboard");
+
+    expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument();
+    await waitFor(() => expect(fetchUser).toHaveBeenCalledOnce());
+  });
+
+  it("does not clear a newer login when an old refresh resolves null", async () => {
+    const refresh = deferred<string | null>();
+    const logout = useAuthStore.getState().logout;
+    const aliceToken = jwt({ sub: "alice", exp: 0 });
+    const bobToken = jwt({ sub: "bob", exp: Math.floor(Date.now() / 1000) + 3600 });
+    localStorage.setItem("access_token", aliceToken);
+    useAuthStore.setState({ token: aliceToken, tryRefreshToken: vi.fn(() => refresh.promise) });
+
+    renderAt("/dashboard");
+    await waitFor(() => expect(useAuthStore.getState().tryRefreshToken).toHaveBeenCalledOnce());
+    refresh.resolve(null);
+    localStorage.setItem("access_token", bobToken);
+    useAuthStore.setState({ token: bobToken, user: bob });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(useAuthStore.getState()).toMatchObject({ token: bobToken, user: bob });
+    expect(logout).not.toHaveBeenCalled();
   });
 });
 

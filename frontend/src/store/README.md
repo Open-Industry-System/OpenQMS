@@ -45,11 +45,16 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   valid tokens remain on an `aria-busy` spinner while exactly one
   `tryRefreshToken()` call runs for that token, including StrictMode; valid
   tokens with no user call `fetchUser()`.
-- **Refresh generation guard** — `tryRefreshToken()` captures the request's
+- **Refresh generation guard** — `tryRefreshToken()` captures the request
   refresh token. It only writes a response or clears state if that same token
-  still exists in storage. A login, refresh rotation, or logout during the
-  request wins: the stale request synchronizes only the access-token slice
-  when necessary and returns the current token without overwriting its user.
+  still exists in storage. When another tab has changed the stored access
+  token, the store adopts it and clears in-memory user and factory-derived
+  state so `ProtectedRoute` re-fetches `/auth/me`; when storage already
+  matches the store token, a same-tab newer login keeps its user state.
+- **User hydration generation guard** — `fetchUser()` captures its starting
+  access token. A later login or cross-tab token change causes stale `/auth/me`
+  success and failure continuations to preserve/adopt the newer generation
+  rather than overwrite or clear it.
 
 ## Conventions & Constraints
 
@@ -68,8 +73,9 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
 - **Refresh is generation-safe.** `tryRefreshToken()` is invoked from
   `api/client.ts` 401 handling and returns the new access token or `null`.
   A true failure clears the access token, refresh token, factory selection,
-  user, scopes, and loading state; a response from an older refresh-token
-  generation never overwrites or clears a newer session.
+  user, scopes, and loading state; a stale cross-tab response adopts the
+  stored token and clears stale identity-derived fields for re-bootstrap
+  rather than overwriting a newer session.
 - **`current_factory_id` is the single source for tenant scoping.**
   Set on login from `user.factory_scope.default_factory_id`, updated
   via `setCurrentFactoryId(factoryId)` when the header selector
