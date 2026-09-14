@@ -50,3 +50,9 @@ def test_proxy_rate_limit_script_covers_both_fixed_probe_scenarios():
     assert 'expect_status 401 "$PROBE_TWO_IP"' in script
     assert 'expect_status 401 "$PROBE_ONE_IP" "203.0.113.200"' in script
     assert script.count('expect_status 429 "$PROBE_ONE_IP"') == 2
+    scenario_one = script.split("scenario 1", 1)[1].split("restarting backend", 1)[0]
+    scenario_two = script.split("scenario 2", 1)[1]
+    assert scenario_one.count("for _ in $(seq 1 10); do") == 1
+    assert 'expect_status 401 "$PROBE_ONE_IP"\ndone\nexpect_status 429 "$PROBE_ONE_IP"\nexpect_status 401 "$PROBE_TWO_IP"' in scenario_one
+    assert scenario_two.count("for _ in $(seq 1 9); do") == 1
+    assert 'expect_status 401 "$PROBE_ONE_IP"\ndone\nexpect_status 401 "$PROBE_ONE_IP" "203.0.113.200"\nexpect_status 429 "$PROBE_ONE_IP"' in scenario_two
