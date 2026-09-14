@@ -55,6 +55,20 @@ REQUIRED_NONEMPTY_KEYS = set(ENV_KEYS) - {
     "EMBEDDING_BASE_URL",
 }
 POISON = "AMBIENT_POISON_MUST_NOT_REACH_DOCKER"
+INTERNAL_STATE_KEYS = (
+    "production_keys",
+    "expected_database_url",
+    "expected_redis_url",
+    "line",
+    "key",
+    "value",
+    "seen_var",
+    "value_var",
+    "seen_SECRET_KEY",
+    "value_SECRET_KEY",
+    "seen_E2E_MODE",
+    "value_E2E_MODE",
+)
 
 
 def _require(condition: bool, fixed_message: str) -> None:
@@ -145,6 +159,10 @@ keys = os.environ["CHECK_ENV_KEYS"].split(",")
 Path(os.environ["DOCKER_CAPTURE"]).write_text(json.dumps({
     "argv": sys.argv[1:],
     "present_keys": sorted(key for key in keys if key in os.environ),
+    "poison_present": any(
+        "POISON_MUST_NOT_REACH_DOCKER" in value
+        for value in os.environ.values()
+    ),
     "docker_host": os.environ.get("DOCKER_HOST"),
 }))
 """
@@ -168,6 +186,7 @@ def _run_wrapper(
         "COMPOSE_ENV_FILES",
         "COMPOSE_PROJECT_NAME",
         "OPENQMS_ENV_FILE",
+        *INTERNAL_STATE_KEYS,
     )
     alternate_env = tmp_path / "must-not-be-used.env"
     alternate_env.write_text(_env_text(overrides={"SECRET_KEY": "e" * 96}))
@@ -229,6 +248,7 @@ def test_wrapper_uses_fixed_env_compose_and_project_arguments(tmp_path):
     _require(result.stderr == "", "wrapper wrote unexpected stderr")
     recorded = json.loads(capture.read_text())
     assert recorded["present_keys"] == []
+    assert recorded["poison_present"] is False
     assert recorded["docker_host"] == "unix:///tmp/non-secret-docker.sock"
     assert recorded["argv"] == [
         "compose",
@@ -244,6 +264,84 @@ def test_wrapper_uses_fixed_env_compose_and_project_arguments(tmp_path):
         "--format",
         "json",
     ]
+
+
+def test_missing_secret_cannot_use_ambient_validator_state(tmp_path):
+    forged_secret = "e" * 96
+    result, capture, _repo = _run_wrapper(
+        tmp_path,
+        _env_text(omit={"SECRET_KEY"}),
+        "config",
+        extra_env={
+            "seen_SECRET_KEY": "1",
+            "value_SECRET_KEY": forged_secret,
+        },
+    )
+
+    _require(result.returncode != 0, "ambient validator state bypassed missing key")
+    assert not capture.exists()
+    _require(result.stdout == "", "state-poison rejection wrote stdout")
+    _require(
+        result.stderr == "error: production environment is incomplete\n",
+        "state-poison rejection category invalid",
+    )
+    _require(
+        forged_secret not in result.stdout + result.stderr,
+        "forged validator value leaked",
+    )
+
+
+@pytest.mark.parametrize(
+    "unknown_key",
+    ("production_keys", "seen_SECRET_KEY", "value_SECRET_KEY", "OTHER_VALID_KEY"),
+    ids=("array-name", "seen-state", "value-state", "other-valid-key"),
+)
+def test_wrapper_rejects_unknown_and_internal_dotenv_keys(tmp_path, unknown_key):
+    poisoned_value = "INTERNAL_KEY_POISON_MUST_NOT_REACH_DOCKER"
+    env_text = _env_text() + f"{unknown_key}={poisoned_value}\n"
+
+    result, capture, _repo = _run_wrapper(tmp_path, env_text, "config")
+
+    _require(result.returncode != 0, "wrapper accepted unknown dotenv key")
+    assert not capture.exists()
+    _require(result.stdout == "", "unknown-key rejection wrote stdout")
+    _require(
+        result.stderr == "error: unknown production environment key\n",
+        "unknown-key rejection category invalid",
+    )
+    _require(
+        poisoned_value not in result.stdout + result.stderr,
+        "unknown dotenv value leaked",
+    )
+
+
+def test_ambient_internal_state_cannot_affect_or_leak_from_valid_file(tmp_path):
+    internal_poison = "INTERNAL_STATE_POISON_MUST_NOT_REACH_DOCKER"
+    ambient_state = {key: f"{internal_poison}_{key}" for key in INTERNAL_STATE_KEYS}
+    ambient_state.update(
+        {
+            "seen_SECRET_KEY": "0",
+            "value_SECRET_KEY": "f" * 96,
+            "seen_E2E_MODE": "1",
+            "value_E2E_MODE": "true",
+        }
+    )
+
+    result, capture, _repo = _run_wrapper(
+        tmp_path,
+        _env_text(),
+        "config",
+        extra_env=ambient_state,
+    )
+
+    _require(result.returncode == 0, "valid file was affected by ambient state")
+    recorded = json.loads(capture.read_text())
+    assert recorded["present_keys"] == []
+    assert recorded["poison_present"] is False
+    _require(
+        internal_poison not in result.stdout + result.stderr,
+        "ambient internal state leaked to output",
+    )
 
 
 def test_wrapper_forwards_subcommand_arguments_exactly(tmp_path):

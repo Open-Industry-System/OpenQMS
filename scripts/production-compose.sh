@@ -2,6 +2,10 @@
 set +x
 set -euo pipefail
 
+unset SCRIPT_DIR REPO_ROOT ENV_FILE
+unset production_keys expected_database_url expected_redis_url
+unset line key value seen_var value_var
+
 fail() {
   printf '%s\n' "$1" >&2
   exit 1
@@ -58,6 +62,10 @@ production_keys=(
   VITE_PUBLIC_DEMO_USERNAME
   VITE_PUBLIC_DEMO_PASSWORD
 )
+for key in "${production_keys[@]}"; do
+  unset "$key" "seen_${key}" "value_${key}"
+done
+unset key
 
 is_production_key() {
   case "$1" in
@@ -88,10 +96,6 @@ allows_empty_value() {
   esac
 }
 
-for key in "${production_keys[@]}"; do
-  unset "$key"
-done
-
 while IFS= read -r line || [[ -n "$line" ]]; do
   if [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]]; then
     continue
@@ -104,16 +108,16 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   if [[ "$value" == *'$'* ]]; then
     fail "error: production environment interpolation is not allowed"
   fi
-  if is_production_key "$key"; then
-    seen_var="seen_${key}"
-    if [[ "${!seen_var:-}" == "1" ]]; then
-      fail "error: duplicate production environment key"
-    fi
-    value_var="value_${key}"
-    printf -v "$seen_var" '%s' 1
-    printf -v "$value_var" '%s' "$value"
+  if ! is_production_key "$key"; then
+    fail "error: unknown production environment key"
   fi
-  unset "$key"
+  seen_var="seen_${key}"
+  if [[ "${!seen_var:-}" == "1" ]]; then
+    fail "error: duplicate production environment key"
+  fi
+  value_var="value_${key}"
+  printf -v "$seen_var" '%s' 1
+  printf -v "$value_var" '%s' "$value"
 done < "$ENV_FILE"
 
 for key in "${production_keys[@]}"; do
@@ -159,6 +163,11 @@ if [[ "$value_REDIS_URL" != "$expected_redis_url" ]]; then
   fail "error: invalid internal Redis URL"
 fi
 
+for key in "${production_keys[@]}"; do
+  unset "seen_${key}" "value_${key}"
+done
+unset production_keys expected_database_url expected_redis_url
+unset line key value seen_var value_var
 unset COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PROJECT_NAME OPENQMS_ENV_FILE
 
 exec docker compose \
