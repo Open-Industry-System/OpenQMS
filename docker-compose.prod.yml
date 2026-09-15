@@ -86,6 +86,7 @@ services:
       dockerfile: Dockerfile
       args:
         RELEASE_SHA: ${RELEASE_SHA}
+        PIP_INDEX_URL: https://pypi.org/simple
     restart: unless-stopped
     command:
       - uvicorn

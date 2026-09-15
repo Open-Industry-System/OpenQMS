@@ -299,6 +299,17 @@ def test_production_images_require_release_revision_build_arg_and_label():
     assert "ARG RELEASE_SHA" in backend_dockerfile
     assert "ARG RELEASE_SHA=" not in backend_dockerfile
     assert "LABEL org.opencontainers.image.revision=$RELEASE_SHA" in backend_dockerfile
+    assert "ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple" in backend_dockerfile
+    assert (
+        'RUN python -m pip install --no-cache-dir --index-url "$PIP_INDEX_URL" '
+        "-r requirements.txt"
+    ) in backend_dockerfile
+    assert not re.search(r"https?://[^\s\"']+@[^\s\"']+", backend_dockerfile)
+    assert re.search(
+        r"(?ms)^    build:.*?^      args:.*?^        PIP_INDEX_URL: https://pypi\.org/simple$",
+        backend_block,
+    )
+    assert not re.search(r"(?m)^        PIP_INDEX_URL:.*@", backend_block)
     assert "ARG RELEASE_SHA" in frontend_final
     assert "ARG RELEASE_SHA=" not in frontend_final
     assert "LABEL org.opencontainers.image.revision=$RELEASE_SHA" in frontend_final
@@ -519,7 +530,11 @@ def test_rendered_production_compose_contract(tmp_path):
     ]
     assert services["backend"]["image"] == services["graph-worker"]["image"]
     assert "build" not in services["graph-worker"]
-    assert services["backend"]["build"]["args"] == {"RELEASE_SHA": RELEASE_SHA}
+    assert "PIP_INDEX_URL" not in services["graph-worker"]
+    assert services["backend"]["build"]["args"] == {
+        "RELEASE_SHA": RELEASE_SHA,
+        "PIP_INDEX_URL": "https://pypi.org/simple",
+    }
     assert Path(services["backend"]["build"]["context"]) == render_root / "backend"
     assert Path(services["web"]["build"]["context"]) == render_root
     assert services["web"]["build"]["dockerfile"] == "frontend/Dockerfile.prod"

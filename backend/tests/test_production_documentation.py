@@ -315,6 +315,8 @@ def test_all_local_release_gates_execute_from_archive_stage(
     assert python_venv in commands
     assert '"$RELEASE_STAGE/backend/.venv/bin/python" -m pip install' in commands
     assert '-r "$RELEASE_STAGE/backend/requirements.txt"' in commands
+    assert "--index-url https://pypi.org/simple" in commands
+    assert "pypi.tuna.tsinghua.edu.cn" not in commands
     assert frontend_install in commands
     assert 'git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD' in commands
     assert 'test "$(git rev-parse HEAD)" = "$RELEASE_SHA"' not in commands

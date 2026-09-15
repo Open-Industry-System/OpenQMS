@@ -174,7 +174,7 @@ python3.11 -m venv "$RELEASE_STAGE/backend/.venv"
 "$RELEASE_STAGE/backend/.venv/bin/python" -m pip install \
   --disable-pip-version-check --no-input \
   -r "$RELEASE_STAGE/backend/requirements.txt" \
-  -i https://pypi.tuna.tsinghua.edu.cn/simple
+  --index-url https://pypi.org/simple
 (cd "$RELEASE_STAGE/frontend" && npm ci)
 ```
 
