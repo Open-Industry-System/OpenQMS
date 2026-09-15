@@ -80,9 +80,14 @@ docker compose exec backend python -m app.seed
 
 Output `Seed data created successfully!` indicates success.
 
+After step 1, backend service has startup errors because database is actually empty，we need to restart it.
+```bash
+docker compose restart backend
+```
+
 ### 4. Access the System
 
-Open **http://localhost:5173** in your browser and log in with one of the following accounts:
+Open **[http://localhost:5173](http://localhost:5173)** in your browser and log in with one of the following accounts:
 
 | Username | Password | Role | Description |
 |----------|----------|------|-------------|
