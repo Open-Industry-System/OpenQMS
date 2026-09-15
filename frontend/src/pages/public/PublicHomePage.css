@@ -798,6 +798,19 @@
   }
 }
 
+@media (max-width: 360px) {
+  .public-home__nav {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .public-home__nav-actions {
+    flex: 0 0 100%;
+    justify-content: space-between;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .public-home {
     scroll-behavior: auto;
