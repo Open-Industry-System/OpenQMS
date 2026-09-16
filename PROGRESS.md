@@ -1,14 +1,24 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-23
-**当前分支**: `feature/us-e2e-01-spec-a`
-**最近提交**: US-E2E-01 epic hybrid walk 10/10 PASS（`docs/e2e/reports/US-E2E-01-2026-07-23-2/`）；小模型兜底：tags normalize / doc-gate remap / lateral fill
+**更新日期**: 2026-09-16
+**当前工作分支**: `worktree-oracle-production-deploy`
+**Oracle 已部署不可变版本**: `ac84e158ec2cf44252a078cdaa48c3d40483101a`（本文档的后续提交不代表已重新部署）
 
-> **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
+详细路线图见 `docs/ROADMAP.md`；下文保留此前各阶段的历史记录。
 
-详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+## Oracle A1 私网部署（2026-09-16）
+
+- **运行状态**：`http://100.84.141.70/` 经 Tailscale 可访问；`/api/health` 返回 `{"status":"ok"}`。PostgreSQL、Redis、Neo4j、backend、web 的配置健康检查通过；graph-worker 运行中，但未配置 Docker healthcheck。生产镜像为 ARM64，backend/web/worker 的实际 image ID 与发布时锁定的镜像 ID 相同，backend/web 的 OCI revision 标签为发布 SHA。只经 Caddy 发布 80/443；PostgreSQL 仅绑定主机 `127.0.0.1:5432`。
+- **发布门禁**：不可变归档的路径、SHA-256 与文件模式清单通过本机和 Oracle 校验；目标/测试库身份区分及迁移前运行时目标身份通过。串行迁移 → 本地独立测试库完整检查（2172 passed / 43 skipped / 3 xfailed / 2 xpassed / 3 Pydantic warnings；前端构建 6837 modules）→ preflight CLEAN（0 breaks）→ rollout 均完成。首次发布已静默 seed；后续发布未再次 seed。发布所用 `15432` SSH 隧道退出后已关闭。
+- **私网验收**：公开首页中英切换、导航和 Viewer 填充但不自动提交、未登录仪表盘跳转、已登录公开首页、320/390/1440px 布局均验证；320px 顶部链接裁切已修复。两个独立 Viewer 会话分别刷新成功，A 的旧 token 重放返回 401，B 仍可刷新；Viewer 对不存在用户发出的更新请求返回 403。backend/worker/web 重启后，Viewer 仍能读取 3 条 FMEA 和仪表盘。真实代理探针通过 `.101` 的 10×401→429、独立 `.102` 401，以及重启后伪造 XFF 不逃逸配额的 9×401/第 10 次 401→429。重启等待中出现短暂 502，随后健康恢复。
+- **备份**：systemd 每日 timer 已启用；手动生成一个非空、0600 权限的 PostgreSQL custom-format dump，并独立通过 `pg_restore --list` 校验。备份仍在同一主机，尚无异地副本。
+- **阻塞与边界**：`admin`、`engineer`、`manager`、`groupadmin` 的种子密码尚未轮换；用户选择暂缓公网，因此临时非公开用户的密码重置全会话撤销验收、Cloudflare DNS、OCI 80/443 规则、公网 SSH 关闭和正式 HTTPS 浏览器验收均未执行。不得以私网成功代替公网验收；宿主机 Caddy 已绑定 0.0.0.0:80/443，OCI 公网入站规则尚未由本轮核验，暂缓 DNS 不等于确认公网隔离。轮换前应保持 OCI Web 入站关闭。新密码只由用户在密码管理器与私网管理界面处理，不进入聊天或日志。没有 push、PR 或 merge。
+
+**下一步**：保持私网运行；用户决定恢复公网计划后，先手动轮换四个高权限密码并完成密码重置撤销验收，再逐关取得 Cloudflare/OCI/SSH 的明确授权，最后完成全分支复核和交接。
 
 ---
+
+> **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
 
 ## 系统级 E2E 测试套件（M0+M1，已落地）
 
@@ -344,4 +354,4 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 - [x] RED→GREEN：初始 backup 14 tests / docs 12 tests；正式 review round 2 后 backup 20 tests / release-tree 24 tests / docs 44 tests，并扩充 wrapper/Compose/Dockerfile/web provenance regressions；coordinator 要求矩阵 198 passed，agent-expanded 最终矩阵实际 221 passed；Python compile、shell syntax、runbook Bash parse、两层 shell fake-Docker OCI 模板 pass/fail、stale-doc static check、`git diff --check` 通过。
 - [x] 正式 review 修复：backup 改为 `python3 os.link(..., follow_symlinks=False)` 精确目标原子发布并覆盖现有 file/FIFO/directory/symlink/race；`check-release-tree.py` 使用 deterministic SHA-256 + `100644`/`100755` mode manifest、exact path/hash/mode verifier，并拒绝 reserved runtime name 错误类型；runbook 使用 immutable `RELEASE_SHA` 的 `git archive` 私有 stage，stage 内由 archive manifests 新建 Python 3.11 venv + clean `npm ci`，所有本地 migrate/check/preflight 从 stage 执行；唯一 local test DB URL 显式贯穿首次/nested silent make；`production-compose.sh` 仅接受仓库 `.release-sha` 并清除 ambient override，Compose 将 SHA 传入 backend/web OCI revision label、graph-worker 复用 backend build；manifest/marker/build/label/ID 在单一 fail-closed SSH 中绑定，target identity（迁移前）、initialize、rollout 重复 tree/marker/tag ID/revision gate；并保留 `15432` target tunnel、Tailnet HTTP probe、持续运行 rollback、nonrecursive backup guard、README dev-only 与 `E2E_MODE=false`。
 
-**下一步**：coordinator 集成 Task 11 commit 后继续 master plan 后续任务；实际 Docker/systemd/SSH/Oracle/DNS/OCI/迁移/seed/生产环境生成仍只在受控发布阶段执行。
+**下一步（2026-09-16）**：以上 Task 11 为历史实施记录；最新 Oracle 私网状态和剩余公网门禁以文件开头的「Oracle A1 私网部署」为准。待用户恢复公网计划后先轮换高权限种子密码，再补密码重置撤销验收；Cloudflare、OCI、关闭公网 SSH 均须逐关明确授权，最终复核与分支交接也尚未完成。
