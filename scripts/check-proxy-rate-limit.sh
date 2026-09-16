@@ -152,7 +152,7 @@ fi
 
 mapfile -t backend_networks < <(
     docker inspect -f '{{range $name, $network := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
-        "$BACKEND_CONTAINER"
+        "$BACKEND_CONTAINER" | sed '/^$/d'
 )
 if [[ "${#backend_networks[@]}" -ne 1 ]]; then
     echo "check-proxy-rate-limit: backend must be attached to exactly one production network" >&2

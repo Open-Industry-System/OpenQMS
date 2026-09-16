@@ -181,6 +181,37 @@ echo "check-proxy-rate-limit: passed"''',
         raise AssertionError(f"execution tail accepted {label}")
 
 
+def test_network_detection_ignores_docker_template_trailing_blank_line():
+    script = SCRIPT.read_text()
+    network_block = (
+        "mapfile -t backend_networks < <("
+        + script.split("mapfile -t backend_networks < <(", 1)[1].split(
+            PRODUCTION_NETWORK_ASSIGNMENT, 1
+        )[0]
+        + PRODUCTION_NETWORK_ASSIGNMENT
+    )
+    shell_script = (
+        "set -euo pipefail\n"
+        "BACKEND_CONTAINER=backend\n"
+        "mapfile() { backend_networks=(); local line; while IFS= read -r line; do "
+        "backend_networks[${#backend_networks[@]}]=\"$line\"; done; }\n"
+        "docker() { printf 'openqms_openqms_internal\\n\\n'; }\n"
+        + network_block
+        + '\nprintf "%s\\n" "$PRODUCTION_NETWORK"\n'
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", shell_script],
+        text=True,
+        capture_output=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "openqms_openqms_internal\n"
+
+
 def test_proxy_rate_limit_script_rejects_nonproduction_compose_before_docker(tmp_path):
     attacker_compose = tmp_path / "attacker-compose.yml"
     attacker_compose.write_text("services: {}\n")
