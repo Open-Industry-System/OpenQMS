@@ -9,6 +9,8 @@ import { getPublicDemoConfig } from "../../config/publicDemo";
 
 const { Title, Text } = Typography;
 
+type DemoRole = "viewer" | "admin" | "engineer" | "manager" | "groupadmin";
+
 export default function LoginPage() {
   const { t } = useTranslation("login");
   const [loading, setLoading] = useState(false);
@@ -18,7 +20,17 @@ export default function LoginPage() {
   const [form] = Form.useForm<{ username: string; password: string }>();
   const [searchParams] = useSearchParams();
   const configuredDemo = getPublicDemoConfig();
-  const demoConfig = searchParams.get("demo") === "viewer" ? configuredDemo : null;
+  const demoAccounts = configuredDemo
+    ? [
+      { username: configuredDemo.username, password: configuredDemo.password, role: "viewer" as const },
+      ...(configuredDemo.additionalAccounts ?? []).map((account) => ({
+        ...account,
+        role: account.username as Exclude<DemoRole, "viewer">,
+      })),
+    ]
+    : [];
+  const isMultiRoleDemo = demoAccounts.length === 5;
+  const showDemo = Boolean(configuredDemo && (isMultiRoleDemo || searchParams.get("demo") === "viewer"));
 
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true);
@@ -37,13 +49,15 @@ export default function LoginPage() {
     <div
       style={{
         minHeight: "100vh",
+        maxHeight: "100vh",
         display: "flex",
-        alignItems: "center",
+        alignItems: "safe center",
         justifyContent: "center",
         background: "var(--qf-bg-base)",
         position: "relative",
-        overflow: "hidden",
-        padding: 24,
+        overflowX: "hidden",
+        overflowY: "auto",
+        padding: "24px 16px",
       }}
     >
       {/* 背景网格 */}
@@ -102,7 +116,7 @@ export default function LoginPage() {
             border: "1px solid var(--qf-border)",
             borderRadius: "var(--qf-radius-lg)",
             boxShadow: "var(--qf-shadow-glow), var(--qf-shadow-md)",
-            padding: "40px 36px",
+            padding: "32px clamp(16px, 8vw, 36px)",
           }}
         >
           <div style={{ textAlign: "center", marginBottom: 36 }}>
@@ -147,30 +161,38 @@ export default function LoginPage() {
             </Text>
           </div>
 
-          {demoConfig && (
+          {showDemo && (
             <Alert
               type="info"
               showIcon
-              message={t("demo.title")}
+              message={t(isMultiRoleDemo ? "demo.multiRoleTitle" : "demo.title")}
               description={(
-                <Space direction="vertical" size={8}>
-                  <Text>{t("demo.description")}</Text>
-                  <Text>
-                    {t("demo.username")}: <Text code>{demoConfig.username}</Text>
-                  </Text>
-                  <Text>
-                    {t("demo.password")}: <Text code>{demoConfig.password}</Text>
-                  </Text>
-                  <Button
-                    type="link"
-                    onClick={() => form.setFieldsValue({
-                      username: demoConfig.username,
-                      password: demoConfig.password,
-                    })}
-                    style={{ padding: 0, alignSelf: "flex-start" }}
-                  >
-                    {t("demo.fill")}
-                  </Button>
+                <Space direction="vertical" size={isMultiRoleDemo ? 6 : 8} style={{ width: "100%" }}>
+                  <Text>{t(isMultiRoleDemo ? "demo.sharedWarning" : "demo.description")}</Text>
+                  {demoAccounts.map((account) => {
+                    const role = t(`demo.roles.${account.role}`);
+                    return (
+                      <Space direction="vertical" size={2} key={account.role} style={{ width: "100%" }}>
+                        <Text strong>{role}</Text>
+                        <Text>
+                          {t("demo.username")}: <Text code style={{ wordBreak: "break-all" }}>{account.username}</Text>
+                        </Text>
+                        <Text>
+                          {t("demo.password")}: <Text code style={{ wordBreak: "break-all" }}>{account.password}</Text>
+                        </Text>
+                        <Button
+                          type="link"
+                          onClick={() => form.setFieldsValue({
+                            username: account.username,
+                            password: account.password,
+                          })}
+                          style={{ padding: 0, alignSelf: "flex-start" }}
+                        >
+                          {t("demo.fill", { role })}
+                        </Button>
+                      </Space>
+                    );
+                  })}
                 </Space>
               )}
               style={{ marginBottom: 24 }}

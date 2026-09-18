@@ -13,9 +13,18 @@
   "demo": {
     "title": "Viewer read-only demo",
     "description": "Browse all demo modules without creating, editing, or approving data.",
+    "multiRoleTitle": "Shared writable demo",
+    "sharedWarning": "Other visitors can change demo data and account passwords. Do not enter real or personal data.",
     "username": "Username",
     "password": "Password",
-    "fill": "Use Viewer account"
+    "fill": "Use {{role}} account",
+    "roles": {
+      "viewer": "Viewer",
+      "admin": "Administrator",
+      "engineer": "Quality engineer",
+      "manager": "Manager",
+      "groupadmin": "Group administrator"
+    }
   },
   "footer": "© OpenQMS · China Manufacturing Quality Operating System"
 }
