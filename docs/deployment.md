@@ -14,10 +14,10 @@
 | 计算节点 | Oracle Cloud Ampere ARM64 单机 |
 | 租户/测试模式 | `TENANT_MODE=single`、`E2E_MODE=false`，单租户且生产禁用 E2E 端点 |
 | 管理面 | Tailscale SSH 与私网验收 |
-| 公网入口 | Cloudflare **DNS-only** → Caddy `80/443` |
+| 公网入口 | Namecheap BasicDNS `qms` A → `150.230.197.45` → Caddy `80/443` |
 | 数据服务 | PostgreSQL 15、Redis 7、Neo4j 5 |
 | 应用服务 | backend、graph-worker、web/Caddy |
-| AI | 初始不部署 Ollama；上线后在管理员 AI 配置页接入外部 LLM/Embedding |
+| AI | 初始不部署 Ollama；此公开可写演示实例不得配置真实 LLM/Embedding API 密钥 |
 
 Caddy 在固定生产网段中使用 `172.30.0.10`，backend 的 `--forwarded-allow-ips` 只信任这个地址。这是登录限流与来源 IP 判断的 trusted-proxy 边界。不要随意改变 `172.30.0.0/24`、Caddy 地址或信任列表；若确需调整，必须重新运行代理探针。
 
@@ -108,24 +108,31 @@ SITE_ADDRESS=qms.smartindustry.world \
   TAILSCALE_IP='<tailscale-ip>' \
   OUTPUT_PATH=.env.production \
   ./scripts/init-production-env.sh
-./scripts/production-compose.sh config
+./scripts/production-compose.sh config --quiet
 ./scripts/production-compose.sh up -d db redis neo4j
 ./scripts/production-compose.sh ps
 ```
 
 `.env.production` 内部服务 DSN 使用 Compose 主机名，例如 PostgreSQL 为 `db:5432`。主机上的迁移、identity 和 preflight 通过 SSH 隧道访问同一实例时，应使用 `127.0.0.1:<tunnel-port>`；两者文本不同，但运行时数据库身份必须一致。
 
-### 1.3 公开 Viewer 与独立 Vite
+### 1.3 公开演示账号与独立 Vite
 
-生产 web 构建接收：
+生产 web 构建默认只公开 Viewer：
 
 ```env
 VITE_PUBLIC_DEMO_ENABLED=true
 VITE_PUBLIC_DEMO_USERNAME=viewer
 VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 ```
 
-浏览器可见的公开 Viewer 值是有意提供的只读演示凭据，不是 secret，绝不能用作任何 privileged 特权账号凭据。公开前仍需确认 Viewer 只有 VIEW 权限。
+浏览器可见的 Viewer 值是只读演示凭据，不是 secret。`VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 是**可选且默认留空**的公开构建输入；仅本实例在四个账号均确认可登录、尤其 `admin` 已由实例所有者手动恢复后，才编辑服务器现有 mode `0600` 的 `.env.production`：若已有该键，替换已有空值；仅当旧文件缺少该键才追加以下完整单行 JSON，绝不生成重复键。不要重写该文件中的数据库、JWT 或其他生成密钥，也不要把文件内容打印到终端/工单：
+
+```env
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"admin","password":"Admin@2026"},{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"},{"username":"groupadmin","password":"GroupAdmin@2026"}]
+```
+
+新版本的包装器允许**缺失或空值**，故可先从不可变归档同步新源码并核验清单，再编辑现有 `.env.production`，在构建 web 镜像前执行 `./scripts/production-compose.sh config --quiet` 校验。若 JSON 缺失，沿用 Viewer-only；非空但不完整/格式错误则前端 fail closed，不显示任何演示凭据。配置完整时，正常 `/login` 与 `/login?demo=viewer` 都展示五个账号；点击只填入，不自动登录。四个额外账号拥有真实写入或管理权限，任意访客可改数据和账号密码，页面中的静态凭据可能失效；没有自动重置，**不得录入真实数据或真实 API 密钥**。其他正式生产环境仍须轮换特权密码并保持该可选值为空。
 
 根目录 `.env` / `.env.production` 只由 Compose 使用；独立 Vite 读取 `frontend/.env*`。本地独立运行或构建公开首页时，可写入 `frontend/.env.local`：
 
@@ -134,16 +141,18 @@ cat > frontend/.env.local <<'EOF'
 VITE_PUBLIC_DEMO_ENABLED=true
 VITE_PUBLIC_DEMO_USERNAME=viewer
 VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 EOF
 npm --prefix frontend run dev
 ```
 
-也可在构建前导出。关闭演示登录时，必须同时提供 `false`、空用户名和空密码，避免旧 shell 值进入 bundle：
+也可在构建前导出。关闭演示登录时，必须同时提供 `false` 和全部空凭据值，避免旧 shell 值进入 bundle：
 
 ```bash
 VITE_PUBLIC_DEMO_ENABLED=false \
 VITE_PUBLIC_DEMO_USERNAME= \
 VITE_PUBLIC_DEMO_PASSWORD= \
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS= \
   npm --prefix frontend run build
 ```
 
@@ -152,7 +161,7 @@ VITE_PUBLIC_DEMO_PASSWORD= \
 #### A. 准备与基础设施
 
 1. 在 Mac 运维仓库按 1.2 锁定并同步同一 `RELEASE_SHA`，再在 Oracle `/opt/openqms` 初始化该 release。
-2. 生成 `.env.production`，检查 `./scripts/production-compose.sh config`。
+2. 生成 `.env.production`，检查 `./scripts/production-compose.sh config --quiet`。
 3. 仅启动 `db redis neo4j`，等待 `healthy`；此时不要提前启动 backend/web。
 4. 在 Mac 运维机的专用终端建立 Oracle 目标隧道；本地端口固定为 `15432`，避免覆盖本机 PostgreSQL `5432`。
 
@@ -255,14 +264,14 @@ trap - EXIT HUP INT TERM QUIT
 
 不要把 migrate、check、preflight 和 rollout 拆成可并行命令。`deploy-release.sh` 从 stage 中推导 `REPO_ROOT`，默认 migrate/preflight 因此读取 archive 代码；显式 `CHECK_CMD` 将同一 `TEST_DATABASE_URL`、`TEST_DB` 与 `PG*` 传给 nested make。`DATABASE_URL` 只用于目标迁移/preflight，check 阶段把 `DATABASE_URL` 与 `TEST_DATABASE_URL` 都绑定到该唯一隔离测试库；rollout 不接收这两个主机 DSN。
 
-#### D. 私网验收、密码轮换、代理探针与公网
+#### D. 私网验收、共享演示账号、代理探针与公网
 
 1. 先经 Tailscale 地址验收 `/`、`/login`、管理员登录、业务权限和 health。
-2. 在管理员用户管理页轮换 `admin`、`engineer`、`manager`、`groupadmin` 等所有 privileged 特权密码；不得公开生成密码。只保留 Viewer 演示凭据。
+2. **仅此公开演示实例**按所有者决定保留 `admin`、`engineer`、`manager`、`groupadmin` 的真实角色与公开演示密码；`groupadmin` 也有管理员权限。公开登录页展示这些账号之前，所有者必须手动恢复并验证目前返回 401 的 `admin` 演示登录。任何访客都能修改数据与密码，且没有自动重置；不得输入真实数据或真实 API 密钥。其他正式生产环境仍应轮换特权密码，只公开 Viewer。
 3. 在 **Oracle 主机**用当前公开 Viewer 密码运行代理/限流探针，明确命中 Tailnet `http://100.84.141.70` site。脚本内部使用固定生产包装器，并验证独立客户端配额与伪造 `X-Forwarded-For` 场景。不要在证书签发前用公网域名的默认 HTTP 探针，否则 Caddy 的 308 HTTPS 重定向会让 401 断言失败。
-4. Cloudflare 创建指向 Oracle 公网 IP 的 `qms.smartindustry.world` 记录，Proxy status 保持 **DNS-only**，由 Caddy 直接申请和终止 HTTPS。
+4. Namecheap BasicDNS 的 `qms` A 记录指向 `150.230.197.45`；由 Caddy 直接申请和终止 HTTPS，不使用 Cloudflare 代理。
 5. 验收公网 `https://qms.smartindustry.world/`、`/login`、API health 与权限；若对公网域名重跑代理探针，必须设置 `SITE_SCHEME=https`。
-6. **SSH 仅在 HTTPS 与 Tailscale private 私网验收均通过后关闭公网入口**；保留 Tailnet 管理路径。
+6. 公网 SSH 22 当前按所有者选择保留；以后如需关闭，先验证 HTTPS 与 Tailscale 私网 SSH，再单独授权变更 OCI 入站规则，主机 sshd 不关闭。
 
 以下命令在 Oracle 主机 `/opt/openqms` shell 执行：
 
@@ -338,7 +347,7 @@ test -n "$latest"
 git checkout '<previous-release-tag>'
 
 # Oracle 主机 /opt/openqms：同步完成后重建并保持运行
-./scripts/production-compose.sh config
+./scripts/production-compose.sh config --quiet
 ./scripts/production-compose.sh up -d --build backend graph-worker web
 ./scripts/production-compose.sh ps
 ```
@@ -421,7 +430,7 @@ alembic upgrade head
 
 ### 4.2 HTTPS 或代理来源异常
 
-- 确认 Cloudflare 为 DNS-only，域名解析指向 Oracle 公网 IP。
+- 确认 Namecheap BasicDNS 的 `qms` A 记录解析到 Oracle 公网 IP，Caddy 证书有效。
 - 确认 Caddy 仍为 `172.30.0.10`，backend 只信任该地址。
 - 修改网络后重跑 `check-proxy-rate-limit.sh`。
 

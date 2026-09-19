@@ -147,7 +147,9 @@ def test_production_dockerfile_keeps_disabled_demo_credentials_out_of_vite_and_f
     assert 'if [ "$VITE_PUBLIC_DEMO_ENABLED" = "true" ]' in dockerfile
     assert "VITE_PUBLIC_DEMO_USERNAME=$VITE_PUBLIC_DEMO_USERNAME" in dockerfile
     assert "VITE_PUBLIC_DEMO_PASSWORD=$VITE_PUBLIC_DEMO_PASSWORD" in dockerfile
-    assert "VITE_PUBLIC_DEMO_ENABLED=false VITE_PUBLIC_DEMO_USERNAME= VITE_PUBLIC_DEMO_PASSWORD= npm run build" in dockerfile
+    assert "ARG VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=" in dockerfile
+    assert 'VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS="$VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS"' in dockerfile
+    assert "VITE_PUBLIC_DEMO_ENABLED=false VITE_PUBLIC_DEMO_USERNAME= VITE_PUBLIC_DEMO_PASSWORD= VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS= npm run build" in dockerfile
 
     final_stage = dockerfile.split("FROM caddy:2-alpine", maxsplit=1)[1]
     assert "ARG RELEASE_SHA" in final_stage

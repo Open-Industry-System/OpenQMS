@@ -94,7 +94,7 @@ docker compose exec backend python -m app.seed
 | `viewer` | `Viewer@2026` | 只读用户 | 所有模块只读 |
 | `groupadmin` | `GroupAdmin@2026` | 系统管理员（集团） | 多工厂管理权限 |
 
-> ⚠️ 演示密码仅用于开发环境，生产环境请务必修改。
+> ⚠️ 上述默认密码只适用于本地开发或实例所有者明确批准的公开演示。`qms.smartindustry.world` 是共享可写演示环境：管理员能改账号密码与数据，不得录入真实数据或真实 API 密钥；其他正式生产部署必须轮换特权密码。
 
 ### 5. API 文档
 
@@ -105,7 +105,7 @@ docker compose exec backend python -m app.seed
 
 ## Oracle ARM64 生产部署
 
-生产目标为 `qms.smartindustry.world`：Oracle Cloud ARM64 单机、`TENANT_MODE=single`、`E2E_MODE=false`，Tailscale 用于管理和私网验收，Cloudflare 上线时保持 **DNS-only**。生产 Compose 包含 PostgreSQL、Redis、Neo4j、backend、graph-worker 和 Caddy web；**不部署 Ollama**，LLM/Embedding 提供商在上线后通过管理员 AI 配置页设置。
+生产目标为 `qms.smartindustry.world`：Oracle Cloud ARM64 单机、`TENANT_MODE=single`、`E2E_MODE=false`，Tailscale 用于管理和私网验收，Namecheap BasicDNS 的 `qms` A 记录直指 `150.230.197.45`，由 Caddy 终止 HTTPS。生产 Compose 包含 PostgreSQL、Redis、Neo4j、backend、graph-worker 和 Caddy web；**不部署 Ollama**，此公开可写演示实例不得配置真实 LLM/Embedding API 密钥。
 
 `/` 是唯一显式公开的路由保护例外，`/login` 是认证入口；仪表盘和全部业务路由仍由 `ProtectedRoute` 与模块权限保护。access JWT 有效期为 120 分钟；密码重置会撤销 refresh 会话，但已签发的无状态 access JWT 最长仍可有效到原过期时间。Caddy 固定为 `172.30.0.10`，backend 仅信任该代理地址；不要在未重跑代理探针时改变生产子网或 trusted-proxy 边界。
 
@@ -186,24 +186,31 @@ SITE_ADDRESS=qms.smartindustry.world \
   TAILSCALE_IP='<tailscale-ip>' \
   OUTPUT_PATH=.env.production \
   ./scripts/init-production-env.sh
-./scripts/production-compose.sh config
+./scripts/production-compose.sh config --quiet
 ./scripts/production-compose.sh up -d db redis neo4j
 ./scripts/production-compose.sh ps
 ```
 
-浏览器可见的公开 Viewer 值是有意提供的只读演示凭据，绝不能用作 privileged 特权账号凭据。独立运行 Vite 不读取根目录 `.env.production`，而读取 `frontend/.env*`；将公开值写入 `frontend/.env.local`，或在 `npm run dev/build` 前导出。禁用时三个构建值必须是 `false` 加空用户名/密码。
+浏览器可见的 Viewer 值是有意提供的只读演示凭据；默认构建仅公开 Viewer。实例所有者额外批准 `admin`、`engineer`、`manager`、`groupadmin` 作为**共享可写**演示账号：只有在可选 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 配置为完整四账号 JSON 且各账号实际可登录时，正常 `/login` 与 `?demo=viewer` 才展示五账号；按钮只填表，不自动登录。任何访客都可能改动账号密码和演示数据，静态展示值随之失效。此配置是公开的浏览器构建输入，不是 secret；不要输入真实数据或真实 API 密钥。独立运行 Vite 不读取根目录 `.env.production`，而读取 `frontend/.env*`；关闭演示时必须同时清空所有凭据变量。
+
+```env
+# 仅本实例、且四个账号均确认可登录后：替换已有空值；仅当旧文件缺少该键才追加到 mode 0600 的 .env.production
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"admin","password":"Admin@2026"},{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"},{"username":"groupadmin","password":"GroupAdmin@2026"}]
+```
 
 ```bash
 cat > frontend/.env.local <<'EOF'
 VITE_PUBLIC_DEMO_ENABLED=true
 VITE_PUBLIC_DEMO_USERNAME=viewer
 VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 EOF
 
 # 禁用公开演示入口
 VITE_PUBLIC_DEMO_ENABLED=false \
 VITE_PUBLIC_DEMO_USERNAME= \
 VITE_PUBLIC_DEMO_PASSWORD= \
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS= \
   npm --prefix frontend run build
 ```
 
@@ -304,7 +311,7 @@ LOGIN_PASSWORD=Viewer@2026 \
 ./scripts/production-compose.sh restart backend
 ```
 
-在公开 DNS/防火墙放行前，通过 Tailscale 私网登录管理员界面，轮换 `admin`、`engineer`、`manager`、`groupadmin` 等所有 privileged 特权密码，只保留 Viewer 公开演示值。Cloudflare 记录保持 DNS-only，让 Caddy 直接终止 HTTPS。**SSH 仅在 HTTPS 与 Tailscale private 私网验收均通过后关闭公网入口。**
+本实例已使用 Namecheap BasicDNS 的 `qms` A 记录与 Caddy HTTPS，公开 80/443；`admin` 默认演示登录须由实例所有者手动恢复并验证，才能发布五账号登录页。此实例特例保留四个特权演示账号及完整权限；其他正式生产环境仍须轮换特权密码，只公开 Viewer。公网 SSH 22 暂按实例所有者决定保留，若以后关闭，必须先重新验证 Tailscale SSH，且单独取得授权。
 
 ### 备份、恢复与回滚
 
@@ -334,7 +341,7 @@ test -n "$latest"
 git checkout '<previous-release-tag>'
 
 # Oracle 主机 /opt/openqms：同步完成后重建并保持运行
-./scripts/production-compose.sh config
+./scripts/production-compose.sh config --quiet
 ./scripts/production-compose.sh up -d --build backend graph-worker web
 ./scripts/production-compose.sh ps
 ```

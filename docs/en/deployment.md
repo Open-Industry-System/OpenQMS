@@ -14,10 +14,10 @@ This guide separates the Oracle ARM64 production runbook from local development.
 | Compute | Single Oracle Cloud Ampere ARM64 host |
 | Tenant/test mode | `TENANT_MODE=single`, `E2E_MODE=false`; single tenant with production E2E endpoints disabled |
 | Management plane | Tailscale SSH and private acceptance |
-| Public edge | Cloudflare **DNS-only** → Caddy on `80/443` |
+| Public edge | Namecheap BasicDNS `qms` A → `150.230.197.45` → Caddy on `80/443` |
 | Data services | PostgreSQL 15, Redis 7, Neo4j 5 |
 | Application services | backend, graph-worker, web/Caddy |
-| AI | No Ollama in the initial stack; configure an external LLM/embedding provider later in the admin AI page |
+| AI | No Ollama in the initial stack; do not configure real LLM/embedding API keys on this publicly writable demo instance |
 
 Caddy has the fixed production address `172.30.0.10`, and backend `--forwarded-allow-ips` trusts only that address. This is the trusted-proxy boundary used for source-IP handling and login rate limiting. Do not change `172.30.0.0/24`, the Caddy address, or the allowlist without rerunning the proxy probe.
 
@@ -108,24 +108,31 @@ SITE_ADDRESS=qms.smartindustry.world \
   TAILSCALE_IP='<tailscale-ip>' \
   OUTPUT_PATH=.env.production \
   ./scripts/init-production-env.sh
-./scripts/production-compose.sh config
+./scripts/production-compose.sh config --quiet
 ./scripts/production-compose.sh up -d db redis neo4j
 ./scripts/production-compose.sh ps
 ```
 
 The `.env.production` container DSN uses the Compose hostname `db:5432`. Host-side migration, identity, and preflight commands use `127.0.0.1:<tunnel-port>` through an SSH tunnel to the same Oracle instance. The strings differ, but the runtime database identity must match.
 
-### 1.3 Public Viewer values and standalone Vite
+### 1.3 Public demo accounts and standalone Vite
 
-The production web build receives:
+The production web build exposes only Viewer by default:
 
 ```env
 VITE_PUBLIC_DEMO_ENABLED=true
 VITE_PUBLIC_DEMO_USERNAME=viewer
 VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 ```
 
-Browser-visible public Viewer values are intentional read-only demo credentials. They are not secrets and must never be used as privileged credentials. Before exposure, verify the Viewer role has VIEW-only permissions.
+Browser-visible Viewer values are intentional read-only demo credentials, not secrets. `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` is an **optional, blank-by-default public build input**. Only on this instance, after all four accounts are confirmed usable—and after the owner manually restores the `admin` login—edit the existing mode-`0600` server `.env.production`: replace an existing blank value; append only when the key is absent from an older file. Add exactly one complete JSON line below. Do not replace its generated database/JWT secrets or print the file into a terminal or ticket:
+
+```env
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"admin","password":"Admin@2026"},{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"},{"username":"groupadmin","password":"GroupAdmin@2026"}]
+```
+
+The new wrapper accepts the key when missing or blank, so synchronize the immutable new source and verify its manifest first; edit the existing `.env.production` next, then run `./scripts/production-compose.sh config --quiet` before building the web image. Missing JSON retains Viewer-only behavior; malformed or incomplete nonblank JSON fails closed and hides all demo credentials. With all four configured, both ordinary `/login` and `/login?demo=viewer` display five accounts; each button only pre-fills the form and never logs in automatically. The added accounts have real write or admin privileges: any visitor can change data and account passwords, making displayed values stale. There is no automatic reset. **Never enter real data or real API keys** on this instance. Other production deployments must still rotate privileged passwords and keep the optional value empty.
 
 Root `.env` / `.env.production` files belong to Compose; standalone Vite reads `frontend/.env*`. For a standalone public-home development session or build, place the public values in `frontend/.env.local`:
 
@@ -134,16 +141,18 @@ cat > frontend/.env.local <<'EOF'
 VITE_PUBLIC_DEMO_ENABLED=true
 VITE_PUBLIC_DEMO_USERNAME=viewer
 VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 EOF
 npm --prefix frontend run dev
 ```
 
-You may export them before the Vite command instead. To disable the demo entry, pass `false` plus a blank username and password so old shell values cannot enter the bundle:
+You may export them before the Vite command instead. To disable the demo entry, pass `false` plus blank values for **all** credential variables so stale shell values cannot enter the bundle:
 
 ```bash
 VITE_PUBLIC_DEMO_ENABLED=false \
 VITE_PUBLIC_DEMO_USERNAME= \
 VITE_PUBLIC_DEMO_PASSWORD= \
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS= \
   npm --prefix frontend run build
 ```
 
@@ -152,7 +161,7 @@ VITE_PUBLIC_DEMO_PASSWORD= \
 #### A. Prepare the host and infrastructure
 
 1. In the Mac operator repository, pin and synchronize the same `RELEASE_SHA` as described in 1.2, then initialize that release under Oracle `/opt/openqms`.
-2. Generate `.env.production` and validate `./scripts/production-compose.sh config`.
+2. Generate `.env.production` and validate `./scripts/production-compose.sh config --quiet`.
 3. Start only `db redis neo4j` and wait for health. Do not start backend/web early.
 4. In a dedicated terminal on the Mac operator host, create the Oracle target tunnel on local port `15432`, leaving local PostgreSQL `5432` available for the release test database.
 
@@ -255,14 +264,14 @@ trap - EXIT HUP INT TERM QUIT
 
 Do not split migrate, check, preflight, and rollout into parallel commands. `deploy-release.sh` derives `REPO_ROOT` from the stage, so default migrate/preflight read archive code; explicit `CHECK_CMD` passes the same `TEST_DATABASE_URL`, `TEST_DB`, and `PG*` values to nested make. The target `DATABASE_URL` is used only for migration/preflight; during check, both `DATABASE_URL` and `TEST_DATABASE_URL` are bound to that unique isolated test database. Rollout receives neither host DSN.
 
-#### D. Private acceptance, password rotation, proxy probe, and public launch
+#### D. Private acceptance, shared demo accounts, proxy probe, and public launch
 
 1. Use the Tailscale endpoint to accept `/`, `/login`, admin login, business permissions, and health.
-2. In admin user management, rotate every privileged password, including `admin`, `engineer`, `manager`, and `groupadmin`. Do not disclose generated passwords. Keep only the Viewer demo values public.
+2. **Only this public demo instance** intentionally retains the real roles and public demo passwords for `admin`, `engineer`, `manager`, and `groupadmin`; `groupadmin` also has admin privileges. Before the public login page lists all five, the owner must manually restore and verify the `admin` demo login that currently returns 401. Any visitor can change data and passwords, and there is no automatic reset. Never enter real data or real API keys. Other production deployments must still rotate privileged passwords and expose only Viewer.
 3. On the **Oracle host**, run the proxy/rate-limit probe with the public Viewer password and explicitly target the Tailnet `http://100.84.141.70` site. The script itself uses the fixed production wrapper and checks independent-client quotas plus forged `X-Forwarded-For` behavior. Do not probe the public hostname with default HTTP before certificate issuance: Caddy's 308 HTTPS redirect breaks the expected 401 assertions.
-4. Point the Cloudflare `qms.smartindustry.world` record to the Oracle public IP with Proxy status **DNS-only**, allowing Caddy to obtain and terminate HTTPS directly.
+4. Namecheap BasicDNS has a `qms` A record pointing to `150.230.197.45`; Caddy obtains and terminates HTTPS directly, without a Cloudflare proxy.
 5. Accept `https://qms.smartindustry.world/`, `/login`, API health, and permissions over the public path. If the proxy probe is rerun against the public hostname, set `SITE_SCHEME=https` explicitly.
-6. **Close public SSH only after HTTPS and private Tailscale acceptance both pass.** Keep the Tailnet management path.
+6. The owner chose to retain public SSH 22 for now. If closing it later, first verify HTTPS and private Tailscale SSH, then separately authorize the OCI ingress change; keep host sshd running.
 
 Run this block in the Oracle `/opt/openqms` shell:
 
@@ -338,7 +347,7 @@ For application rollback, check out the validated release in the **Mac repositor
 git checkout '<previous-release-tag>'
 
 # Oracle host /opt/openqms: rebuild after sync and leave services running
-./scripts/production-compose.sh config
+./scripts/production-compose.sh config --quiet
 ./scripts/production-compose.sh up -d --build backend graph-worker web
 ./scripts/production-compose.sh ps
 ```
@@ -421,7 +430,7 @@ In production, never run migration separately from the identity gate and serial 
 
 ### 4.2 HTTPS or source-IP behavior
 
-- Verify Cloudflare is DNS-only and resolves to the Oracle public IP.
+- Verify Namecheap BasicDNS `qms` A resolves to the Oracle public IP and the Caddy certificate is valid.
 - Verify Caddy remains `172.30.0.10` and backend trusts only that address.
 - Rerun `check-proxy-rate-limit.sh` after any network change.
 

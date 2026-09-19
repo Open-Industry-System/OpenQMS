@@ -46,6 +46,7 @@ REQUIRED_ENV_KEYS = {
     "VITE_PUBLIC_DEMO_ENABLED",
     "VITE_PUBLIC_DEMO_USERNAME",
     "VITE_PUBLIC_DEMO_PASSWORD",
+    "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS",
 }
 EXPECTED_SERVICES = {"db", "redis", "neo4j", "backend", "graph-worker", "web"}
 EXPECTED_IPS = {
@@ -485,6 +486,7 @@ def test_production_env_example_and_gitignore_contract():
     assert values["VITE_PUBLIC_DEMO_ENABLED"] == "true"
     assert values["VITE_PUBLIC_DEMO_USERNAME"] == "viewer"
     assert values["VITE_PUBLIC_DEMO_PASSWORD"] == "Viewer@2026"
+    assert values["VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS"] == ""
     assert "qms_dev_2026" not in ENV_EXAMPLE_PATH.read_text()
 
     gitignore = (ROOT / ".gitignore").read_text().splitlines()
@@ -494,6 +496,24 @@ def test_production_env_example_and_gitignore_contract():
         "!.env.production.example",
         "backups/",
     ]
+
+
+@pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
+def test_production_compose_quiet_validation_prints_no_resolved_values(tmp_path):
+    repo, _values = _temporary_render_repo(tmp_path)
+    result = subprocess.run(
+        [str(repo / "scripts" / PRODUCTION_COMPOSE_SCRIPT.name), "config", "--quiet"],
+        cwd=tmp_path,
+        env=os.environ.copy(),
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, "quiet Compose validation failed"
+    assert result.stdout == ""
+    assert result.stderr == ""
 
 
 @pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
@@ -543,6 +563,7 @@ def test_rendered_production_compose_contract(tmp_path):
         "VITE_PUBLIC_DEMO_ENABLED": "true",
         "VITE_PUBLIC_DEMO_PASSWORD": "Viewer@2026",
         "VITE_PUBLIC_DEMO_USERNAME": "viewer",
+        "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS": "",
     }
     assert services["web"]["environment"] == {
         "SITE_ADDRESS": "qms.example.test",
@@ -699,6 +720,36 @@ def test_rendered_production_compose_contract(tmp_path):
         "--spider",
         "http://127.0.0.1:8080/api/health",
     ]
+
+
+@pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
+def test_rendered_web_build_uses_optional_public_accounts_from_file(tmp_path):
+    repo, _values = _temporary_render_repo(tmp_path)
+    accounts = json.dumps([
+        {"username": "admin", "password": "public-admin-sentinel"},
+        {"username": "engineer", "password": "public-engineer-sentinel"},
+        {"username": "manager", "password": "public-manager-sentinel"},
+        {"username": "groupadmin", "password": "public-groupadmin-sentinel"},
+    ], separators=(",", ":"))
+    env_file = repo / ".env.production"
+    source = env_file.read_text()
+    marker = "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=\n"
+    assert source.count(marker) == 1
+    env_file.write_text(source.replace(marker, f"VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS={accounts}\n"))
+
+    result = subprocess.run(
+        [str(repo / "scripts" / PRODUCTION_COMPOSE_SCRIPT.name), "config", "--format", "json"],
+        cwd=tmp_path,
+        env={**os.environ, "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS": "ambient-stale-value"},
+        text=True,
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, "optional demo Compose render failed"
+    rendered = json.loads(result.stdout)
+    assert rendered["services"]["web"]["build"]["args"]["VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS"] == accounts
 
 
 @pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")

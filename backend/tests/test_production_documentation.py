@@ -59,7 +59,8 @@ def test_production_shell_blocks_use_only_authoritative_wrapper_and_scripts(
     assert "--env-file .env.production" not in commands
     assert "-f docker-compose.prod.yml" not in commands
     assert "./scripts/init-production-env.sh" in commands
-    assert "./scripts/production-compose.sh config" in commands
+    assert "./scripts/production-compose.sh config --quiet" in commands
+    assert re.search(r"(?m)^\s*\./scripts/production-compose\.sh config\s*$", _bash_blocks(_section(path, start_heading, end_heading))) is None
     assert "./scripts/production-compose.sh up -d db redis neo4j" in commands
     assert "./scripts/production-compose.sh ps" in commands
     assert "scripts/check-oracle-target-database.py" in commands
@@ -81,7 +82,8 @@ def test_production_docs_explain_wrapper_and_data_safe_rollback(path):
     assert "ambient" in text.lower() or "环境覆盖" in text
     assert "down -v" not in text
     assert "qms.smartindustry.world" in text
-    assert "DNS-only" in text
+    assert "Namecheap" in text
+    assert "Caddy" in text
     assert "Tailscale" in text
     assert "ARM64" in text
     assert "Ollama" in text
@@ -101,6 +103,7 @@ def test_bilingual_runbooks_cover_launch_security_and_restore_boundaries(path):
         "VITE_PUBLIC_DEMO_ENABLED=true",
         "VITE_PUBLIC_DEMO_USERNAME=viewer",
         "VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026",
+        "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=",
         "frontend/.env.local",
         "VITE_PUBLIC_DEMO_ENABLED=false",
         "VITE_PUBLIC_DEMO_USERNAME=",
@@ -124,8 +127,26 @@ def test_docs_distinguish_compose_env_from_standalone_vite_public_values():
         assert ".env.production" in text
         assert "frontend/.env.local" in text
         assert "Viewer@2026" in text
+        assert "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS" in text
+        assert "Namecheap" in text
         assert re.search(r"(?:browser-visible|浏览器可见|公开).{0,120}(?:Viewer|viewer)", text, flags=re.IGNORECASE | re.DOTALL)
-        assert re.search(r"(?:never|不得|不能).{0,80}(?:privileged|特权).{0,40}(?:credential|凭据|账号)", text, flags=re.IGNORECASE | re.DOTALL)
+        assert "groupadmin" in text
+        assert "real data" in text or "真实数据" in text
+        assert "API key" in text or "API 密钥" in text
+
+
+@pytest.mark.parametrize(
+    ("path", "replace_instruction", "append_instruction"),
+    [
+        (README, "替换已有空值", "仅当旧文件缺少该键才追加"),
+        (ZH_DEPLOYMENT, "替换已有空值", "仅当旧文件缺少该键才追加"),
+        (EN_DEPLOYMENT, "replace an existing blank value", "append only when the key is absent"),
+    ],
+)
+def test_optional_demo_env_migration_avoids_duplicate_keys(path, replace_instruction, append_instruction):
+    text = _text(path)
+    assert replace_instruction in text
+    assert append_instruction in text
 
 
 @pytest.mark.parametrize(
@@ -547,7 +568,7 @@ def test_user_and_architecture_docs_describe_safe_automatic_refresh():
 def test_adr_0014_supersedes_legacy_refresh_decision_with_security_boundaries():
     decisions = _text(DECISIONS)
     adr_0005 = _section(DECISIONS, "## ADR-0005", "## ADR-0006")
-    adr_0014 = _section(DECISIONS, "## ADR-0014", "## 何时写新 ADR")
+    adr_0014 = _section(DECISIONS, "## ADR-0014", "## ADR-0015")
     assert "Superseded by ADR-0014" in adr_0005
     for literal in (
         "sid",
@@ -563,3 +584,14 @@ def test_adr_0014_supersedes_legacy_refresh_decision_with_security_boundaries():
     assert re.search(r"(?:rolling|滚动).{0,80}(?:inactivity|不活跃)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
     assert re.search(r"(?:password reset|密码重置).{0,160}(?:revoke|撤销).{0,160}(?:access|访问)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
     assert decisions.index("## ADR-0014") > decisions.index("## ADR-0013")
+
+
+def test_adr_0015_records_deliberate_public_writable_demo_exception():
+    decisions = _text(DECISIONS)
+    adr = _section(DECISIONS, "## ADR-0015", "## 何时写新 ADR")
+    assert decisions.index("## ADR-0015") > decisions.index("## ADR-0014")
+    for literal in ("Namecheap", "admin", "groupadmin", "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS", "Viewer"):
+        assert literal in adr
+    assert "真实数据" in adr
+    assert "API 密钥" in adr
+    assert "自动重置" in adr

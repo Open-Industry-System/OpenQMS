@@ -48,6 +48,7 @@ REQUIRED_KEYS = (
     "VITE_PUBLIC_DEMO_ENABLED",
     "VITE_PUBLIC_DEMO_USERNAME",
     "VITE_PUBLIC_DEMO_PASSWORD",
+    "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS",
 )
 
 
@@ -249,6 +250,10 @@ def test_generator_creates_secure_complete_environment_without_leaking_secrets(t
     _require(values.get("NEO4J_URI") == "bolt://neo4j:7687", "NEO4J_URI invalid")
     _require(values.get("TENANT_MODE") == "single", "TENANT_MODE invalid")
     _require(values.get("E2E_MODE") == "false", "E2E_MODE invalid")
+    _require(
+        values.get("VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS") == "",
+        "privileged demo accounts must be disabled by default",
+    )
     for key in (
         "LLM_PROVIDER",
         "LLM_API_KEY",

@@ -5,6 +5,7 @@ set -euo pipefail
 unset SCRIPT_DIR REPO_ROOT ENV_FILE RELEASE_MARKER RELEASE_SHA release_line_count
 unset production_keys expected_database_url expected_redis_url
 unset line key value seen_var value_var
+unset VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS seen_VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS value_VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -93,7 +94,7 @@ is_production_key() {
     GRAPH_REPOSITORY|TENANT_MODE|E2E_MODE|LLM_PROVIDER|LLM_API_KEY|LLM_MODEL|\
     LLM_BASE_URL|EMBEDDING_PROVIDER|EMBEDDING_API_KEY|EMBEDDING_MODEL|\
     EMBEDDING_BASE_URL|VITE_PUBLIC_DEMO_ENABLED|VITE_PUBLIC_DEMO_USERNAME|\
-    VITE_PUBLIC_DEMO_PASSWORD)
+    VITE_PUBLIC_DEMO_PASSWORD|VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS)
       return 0
       ;;
     *)
@@ -186,6 +187,7 @@ for key in "${production_keys[@]}"; do
 done
 unset production_keys expected_database_url expected_redis_url
 unset line key value seen_var value_var
+unset VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS seen_VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS value_VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS
 unset COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PROJECT_NAME OPENQMS_ENV_FILE
 unset RELEASE_MARKER
 

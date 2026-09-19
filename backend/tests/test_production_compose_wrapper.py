@@ -189,6 +189,7 @@ def _run_wrapper(
     fake_bin, capture = _write_fake_docker(tmp_path)
     checked_keys = (
         *ENV_KEYS,
+        "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS",
         "COMPOSE_FILE",
         "COMPOSE_ENV_FILES",
         "COMPOSE_PROJECT_NAME",
@@ -277,6 +278,41 @@ def test_wrapper_uses_fixed_env_compose_and_project_arguments(tmp_path):
         "--format",
         "json",
     ]
+
+
+def test_optional_public_demo_accounts_come_only_from_file(tmp_path):
+    optional_key = "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS"
+    public_value = json.dumps([
+        {"username": "admin", "password": "public-test-value"},
+        {"username": "engineer", "password": "public-test-value"},
+        {"username": "manager", "password": "public-test-value"},
+        {"username": "groupadmin", "password": "public-test-value"},
+    ], separators=(",", ":"))
+    result, capture, _repo = _run_wrapper(
+        tmp_path,
+        _env_text() + f"{optional_key}={public_value}\n",
+        "config",
+        extra_env={optional_key: POISON},
+    )
+
+    _require(result.returncode == 0, "optional public demo config was rejected")
+    recorded = json.loads(capture.read_text())
+    _require(recorded["present_keys"] == [], "optional demo value leaked as ambient env")
+    _require(recorded["poison_present"] is False, "ambient demo value reached Docker")
+    _require(public_value not in result.stdout + result.stderr, "public demo value printed")
+
+
+def test_optional_public_demo_accounts_reject_duplicate_key(tmp_path):
+    key = "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS"
+    result, capture, _repo = _run_wrapper(
+        tmp_path,
+        _env_text() + f"{key}=[]\n{key}=[]\n",
+        "config",
+    )
+
+    _require(result.returncode != 0, "duplicate optional demo key was accepted")
+    _require(not capture.exists(), "Docker was called after duplicate demo key")
+    _require(result.stderr == "error: duplicate production environment key\n", "duplicate error category invalid")
 
 
 def test_missing_secret_cannot_use_ambient_validator_state(tmp_path):
