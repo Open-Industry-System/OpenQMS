@@ -57,32 +57,38 @@
 ```bash
 git clone https://github.com/your-org/OpenQMS.git
 cd OpenQMS
-docker compose up -d
+docker compose up -d db redis neo4j
 ```
 
 等待所有容器健康（约 30 秒）：
 
 ```bash
-docker compose ps   # 确认 db/redis/neo4j 为 healthy，backend/frontend 为 running
+docker compose ps   # 确认 db/redis/neo4j 为 healthy
 ```
 
 ### 2. 初始化数据库
 
 ```bash
-docker compose exec backend alembic upgrade head
+docker compose run --rm backend alembic upgrade head
 ```
 
 ### 3. 导入演示数据
 
 ```bash
-docker compose exec backend python -m app.seed
+docker compose run --rm backend python -m app.seed
 ```
 
 输出 `Seed data created successfully!` 即成功。
 
+迁移和演示数据导入完成后，启动完整应用栈：
+
+```bash
+docker compose up -d
+```
+
 ### 4. 访问系统
 
-浏览器打开 **http://localhost:5173**，使用以下账号登录：
+浏览器打开 **[http://localhost:5173](http://localhost:5173)**，使用以下账号登录：
 
 | 用户名 | 密码 | 角色 | 说明 |
 |--------|------|------|------|

@@ -86,10 +86,20 @@ key_point（baseline item_id 在 latest 中消失）、`stale_analysis` 或
 
 ### 1.4 本地/首次初始化（开发）
 
+后端镜像默认使用 Debian 官方软件源。中国大陆网络环境可在首次启动前选择 TUNA 镜像加速构建：
+
 ```bash
+docker compose build --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn backend graph-worker
+```
+
+```bash
+# 先启动数据库和基础设施；此时不要启动依赖业务表的应用进程
+docker compose up -d db redis neo4j
+# one-off backend 不要求常驻 backend 容器已经运行
+docker compose run --rm backend alembic upgrade head
+docker compose run --rm backend python -m app.seed
+# 数据库准备完成后再启动完整应用栈
 docker compose up -d
-docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.seed
 ```
 
 ### 1.5 访问

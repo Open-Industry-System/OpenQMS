@@ -57,32 +57,38 @@ An out-of-the-box quality management system platform for manufacturing, covering
 ```bash
 git clone https://github.com/your-org/OpenQMS.git
 cd OpenQMS
-docker compose up -d
+docker compose up -d db redis neo4j
 ```
 
 Wait for all containers to become healthy (about 30 seconds):
 
 ```bash
-docker compose ps   # Confirm db/redis/neo4j are healthy, backend/frontend are running
+docker compose ps   # Confirm db/redis/neo4j are healthy
 ```
 
 ### 2. Initialize the Database
 
 ```bash
-docker compose exec backend alembic upgrade head
+docker compose run --rm backend alembic upgrade head
 ```
 
 ### 3. Import Demo Data
 
 ```bash
-docker compose exec backend python -m app.seed
+docker compose run --rm backend python -m app.seed
 ```
 
 Output `Seed data created successfully!` indicates success.
 
+After applying migrations and importing the demo data, start the complete application stack:
+
+```bash
+docker compose up -d
+```
+
 ### 4. Access the System
 
-Open **http://localhost:5173** in your browser and log in with one of the following accounts:
+Open **[http://localhost:5173](http://localhost:5173)** in your browser and log in with one of the following accounts:
 
 | Username | Password | Role | Description |
 |----------|----------|------|-------------|
