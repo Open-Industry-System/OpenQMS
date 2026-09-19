@@ -1,8 +1,8 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-09-18
+**更新日期**: 2026-09-19
 **当前工作分支**: `worktree-oracle-production-deploy`
-**Oracle 已部署不可变版本**: `ac84e158ec2cf44252a078cdaa48c3d40483101a`（后续文档与五账号 UI 提交尚未重新部署）
+**Oracle 已部署不可变版本**: `ac84e158ec2cf44252a078cdaa48c3d40483101a`（后三账号 UI 与生产构建提交尚未重新部署）
 
 详细路线图见 `docs/ROADMAP.md`；下文保留此前各阶段的历史记录。
 
@@ -11,10 +11,10 @@
 - **已部署运行状态**：Namecheap BasicDNS 的 `qms` A 记录解析到 `150.230.197.45`，`http://qms.smartindustry.world/` 返回 308，公网 `https://qms.smartindustry.world/api/health` 返回 200；Let's Encrypt YE2 证书的 SAN 包含域名，有效期至 2026-12-16。PostgreSQL、Redis、Neo4j、backend、web 的配置健康检查通过；graph-worker 运行中但没有 Docker healthcheck。Caddy 在主机发布 80/443，PostgreSQL 仅绑定 `127.0.0.1:5432`；公网 SSH 22 按所有者决定暂保留。Mac 的 OpenClash 使 `nc` 对保留地址的不存在端口也报 open，因此其端口扫描不能证明内部服务公网可达。
 - **发布门禁与浏览器**：已部署版本的不可变归档/OCI revision、目标身份、迁移、独立测试库完整检查（2172 passed / 43 skipped / 3 xfailed / 2 xpassed / 3 warnings；前端构建 6837 modules）、preflight CLEAN（0 breaks）和串行 rollout 通过。首次发布已静默 seed，后续未再次 seed，`15432` 隧道已关闭。公网浏览器验证 320/390/1440px 无横向溢出、中文/English、Viewer 只填表再登录、未登录仪表盘跳转、嵌套路由刷新、已登录公开首页和无控制台错误/混合内容；私网双 Viewer refresh 独立轮换/重放拒绝、Viewer PATCH 403、代理限流与重启后数据持久性也通过。
 - **备份**：systemd 每日 timer 已启用；手动生成一个 mode `0600` 的非空 PostgreSQL dump 并通过 `pg_restore --list` 校验。备份仍在同一主机，尚无异地副本。
-- **演示账号决策**：实例所有者明确保留 `admin`、`engineer`、`manager`、`groupadmin` 的真实写入/管理权限与公开演示密码；没有自动重置，不得输入真实数据或真实 API 密钥。公网登录探针中后三者返回 200，`groupadmin` 是管理员角色；`admin` 的仓库默认值返回 401，所有者将手动恢复。当前已部署登录页仍只展示 Viewer；五账号登录页和可选构建输入已在本地开发，**尚未发布**，必须等 `admin` 实际登录验证后再做新不可变 release。
+- **演示账号决策**：公开登录最终只展示 `viewer`、`engineer`、`manager`；`admin` 与同为管理员角色的 `groupadmin` 保持私密，避免访客进入用户管理修改密码与权限。Engineer 的 `user_mgmt` 为 0，Manager 仅为 VIEW=1，均不能修改账号；两者仍可修改共享质量数据。没有自动重置，不得输入真实数据或真实 API 密钥。当前已部署登录页仍只展示 Viewer；三账号 UI 和可选构建输入已在本地完成，**尚未发布**。
 - **边界**：主机防火墙 80/443 已精确持久化且原文件备份；OCI 公共子网 80/443 已由用户添加，公网 22 未删除。没有 push、PR 或 merge。临时非公开用户密码重置的全 refresh 会话撤销线上验收、可信外部网络的内部端口关闭扫描、异地备份及全分支最终复核仍未完成。
 
-**下一步**：由所有者通过 `groupadmin` 手动恢复 `admin` 演示密码并自行保存，确认后仅做一次登录复核；完成可选公开凭据构建输入、禁用构建无泄漏测试、完整本地门禁与评审，再按不可变归档流程发布并验收五账号页面。最后处理异地备份、保留公网 22 的风险与分支交接。
+**下一步**：重新验证三账号解析、禁用构建无泄漏、完整本地门禁和评审；随后按不可变归档流程发布，并在公网确认三账号可登录且 Engineer/Manager 对用户修改接口仍返回 403。最后处理异地备份、保留公网 22 的风险与分支交接。
 
 ---
 
@@ -354,4 +354,4 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 - [x] RED→GREEN：初始 backup 14 tests / docs 12 tests；正式 review round 2 后 backup 20 tests / release-tree 24 tests / docs 44 tests，并扩充 wrapper/Compose/Dockerfile/web provenance regressions；coordinator 要求矩阵 198 passed，agent-expanded 最终矩阵实际 221 passed；Python compile、shell syntax、runbook Bash parse、两层 shell fake-Docker OCI 模板 pass/fail、stale-doc static check、`git diff --check` 通过。
 - [x] 正式 review 修复：backup 改为 `python3 os.link(..., follow_symlinks=False)` 精确目标原子发布并覆盖现有 file/FIFO/directory/symlink/race；`check-release-tree.py` 使用 deterministic SHA-256 + `100644`/`100755` mode manifest、exact path/hash/mode verifier，并拒绝 reserved runtime name 错误类型；runbook 使用 immutable `RELEASE_SHA` 的 `git archive` 私有 stage，stage 内由 archive manifests 新建 Python 3.11 venv + clean `npm ci`，所有本地 migrate/check/preflight 从 stage 执行；唯一 local test DB URL 显式贯穿首次/nested silent make；`production-compose.sh` 仅接受仓库 `.release-sha` 并清除 ambient override，Compose 将 SHA 传入 backend/web OCI revision label、graph-worker 复用 backend build；manifest/marker/build/label/ID 在单一 fail-closed SSH 中绑定，target identity（迁移前）、initialize、rollout 重复 tree/marker/tag ID/revision gate；并保留 `15432` target tunnel、Tailnet HTTP probe、持续运行 rollback、nonrecursive backup guard、README dev-only 与 `E2E_MODE=false`。
 
-**下一步（2026-09-18）**：以上 Task 11 为历史实施记录；最新 Oracle 公网运行状态和当前五账号演示 UI 发布门禁以文件开头的「Oracle A1 公开演示部署」为准。不得把本地新 UI 提交误报为已部署；`admin` 默认演示登录仍需所有者手动恢复并验证。
+**下一步（2026-09-19）**：以上 Task 11 为历史实施记录；最新 Oracle 公网状态和当前三账号演示 UI 发布门禁以文件开头的「Oracle A1 公开演示部署」为准。不得把本地新 UI 提交误报为已部署；`admin` 与 `groupadmin` 保持私密，无需恢复默认演示登录。

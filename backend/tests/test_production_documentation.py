@@ -588,10 +588,31 @@ def test_adr_0014_supersedes_legacy_refresh_decision_with_security_boundaries():
 
 def test_adr_0015_records_deliberate_public_writable_demo_exception():
     decisions = _text(DECISIONS)
-    adr = _section(DECISIONS, "## ADR-0015", "## 何时写新 ADR")
+    adr = _section(DECISIONS, "## ADR-0015", "## ADR-0016")
+    assert "Superseded by ADR-0016" in adr
     assert decisions.index("## ADR-0015") > decisions.index("## ADR-0014")
     for literal in ("Namecheap", "admin", "groupadmin", "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS", "Viewer"):
         assert literal in adr
     assert "真实数据" in adr
     assert "API 密钥" in adr
     assert "自动重置" in adr
+
+
+def test_adr_0016_keeps_admin_roles_private_and_public_demo_nonadministrative():
+    decisions = _text(DECISIONS)
+    adr = _section(DECISIONS, "## ADR-0016", "## 何时写新 ADR")
+    assert decisions.index("## ADR-0016") > decisions.index("## ADR-0015")
+    for literal in (
+        "Viewer",
+        "engineer",
+        "manager",
+        "admin",
+        "groupadmin",
+        "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS",
+        "user_mgmt",
+        "403",
+    ):
+        assert literal in adr
+    assert "保持私密" in adr
+    assert "真实数据" in adr
+    assert "API 密钥" in adr

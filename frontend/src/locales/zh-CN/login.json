@@ -14,16 +14,14 @@
     "title": "Viewer 只读演示",
     "description": "可浏览全部演示模块，无法创建、修改或审批数据。",
     "multiRoleTitle": "共享可写演示",
-    "sharedWarning": "其他访问者可以修改演示数据和账号密码。请勿输入真实或个人数据。",
+    "sharedWarning": "其他访问者可以修改共享演示数据。请勿输入真实或个人数据。",
     "username": "用户名",
     "password": "密码",
     "fill": "使用 {{role}} 账号",
     "roles": {
       "viewer": "Viewer",
-      "admin": "管理员",
       "engineer": "质量工程师",
-      "manager": "经理",
-      "groupadmin": "集团管理员"
+      "manager": "经理"
     }
   },
   "footer": "© OpenQMS · 中国制造质量操作系统"

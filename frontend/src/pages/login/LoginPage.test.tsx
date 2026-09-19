@@ -12,10 +12,8 @@ vi.mock("../../store/authStore", () => ({
 
 const accounts = [
   { role: "Viewer", username: "viewer", password: "viewer-sentinel" },
-  { role: "Administrator", username: "admin", password: "admin-sentinel" },
   { role: "Quality engineer", username: "engineer", password: "engineer-sentinel" },
   { role: "Manager", username: "manager", password: "manager-sentinel" },
-  { role: "Group administrator", username: "groupadmin", password: "groupadmin-sentinel" },
 ];
 
 function configureMultiRoleDemo() {
@@ -68,7 +66,7 @@ describe("LoginPage public demo", () => {
     expect(screen.getByText(/viewer read-only demo/i)).toBeInTheDocument();
   });
 
-  it.each(["/login", "/login?demo=viewer"])("shows all five accounts on %s when fully configured", (path) => {
+  it.each(["/login", "/login?demo=viewer"])("shows only the three approved public accounts on %s when fully configured", (path) => {
     configureMultiRoleDemo();
     renderLogin(path);
 
@@ -78,6 +76,8 @@ describe("LoginPage public demo", () => {
       expect(screen.getByText(account.username)).toBeInTheDocument();
       expect(screen.getByText(account.password)).toBeInTheDocument();
     }
+    expect(screen.queryByText("admin")).not.toBeInTheDocument();
+    expect(screen.queryByText("groupadmin")).not.toBeInTheDocument();
   });
 
   it("prefills every multi-role account without invoking login", () => {
@@ -97,6 +97,6 @@ describe("LoginPage public demo", () => {
     await i18n.changeLanguage("zh-CN");
     renderLogin("/login");
 
-    expect(screen.getByText("其他访问者可以修改演示数据和账号密码。请勿输入真实或个人数据。")).toBeInTheDocument();
+    expect(screen.getByText("其他访问者可以修改共享演示数据。请勿输入真实或个人数据。")).toBeInTheDocument();
   });
 });

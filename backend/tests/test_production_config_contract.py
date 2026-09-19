@@ -726,10 +726,8 @@ def test_rendered_production_compose_contract(tmp_path):
 def test_rendered_web_build_uses_optional_public_accounts_from_file(tmp_path):
     repo, _values = _temporary_render_repo(tmp_path)
     accounts = json.dumps([
-        {"username": "admin", "password": "public-admin-sentinel"},
         {"username": "engineer", "password": "public-engineer-sentinel"},
         {"username": "manager", "password": "public-manager-sentinel"},
-        {"username": "groupadmin", "password": "public-groupadmin-sentinel"},
     ], separators=(",", ":"))
     env_file = repo / ".env.production"
     source = env_file.read_text()

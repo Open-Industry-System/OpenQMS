@@ -283,10 +283,8 @@ def test_wrapper_uses_fixed_env_compose_and_project_arguments(tmp_path):
 def test_optional_public_demo_accounts_come_only_from_file(tmp_path):
     optional_key = "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS"
     public_value = json.dumps([
-        {"username": "admin", "password": "public-test-value"},
         {"username": "engineer", "password": "public-test-value"},
         {"username": "manager", "password": "public-test-value"},
-        {"username": "groupadmin", "password": "public-test-value"},
     ], separators=(",", ":"))
     result, capture, _repo = _run_wrapper(
         tmp_path,

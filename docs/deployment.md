@@ -126,13 +126,13 @@ VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
 VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 ```
 
-浏览器可见的 Viewer 值是只读演示凭据，不是 secret。`VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 是**可选且默认留空**的公开构建输入；仅本实例在四个账号均确认可登录、尤其 `admin` 已由实例所有者手动恢复后，才编辑服务器现有 mode `0600` 的 `.env.production`：若已有该键，替换已有空值；仅当旧文件缺少该键才追加以下完整单行 JSON，绝不生成重复键。不要重写该文件中的数据库、JWT 或其他生成密钥，也不要把文件内容打印到终端/工单：
+浏览器可见的 Viewer 值是只读演示凭据，不是 secret。`VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 是**可选且默认留空**的公开构建输入；本实例只允许 `engineer` 与 `manager` 两个额外账号。编辑服务器现有 mode `0600` 的 `.env.production` 时，若已有该键则替换已有空值；仅当旧文件缺少该键才追加以下完整单行 JSON，绝不生成重复键。`admin` 与 `groupadmin` 保持私密，不得写入该变量。不要重写数据库、JWT 或其他生成密钥，也不要把文件内容打印到终端/工单：
 
 ```env
-VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"admin","password":"Admin@2026"},{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"},{"username":"groupadmin","password":"GroupAdmin@2026"}]
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"}]
 ```
 
-新版本的包装器允许**缺失或空值**，故可先从不可变归档同步新源码并核验清单，再编辑现有 `.env.production`，在构建 web 镜像前执行 `./scripts/production-compose.sh config --quiet` 校验。若 JSON 缺失，沿用 Viewer-only；非空但不完整/格式错误则前端 fail closed，不显示任何演示凭据。配置完整时，正常 `/login` 与 `/login?demo=viewer` 都展示五个账号；点击只填入，不自动登录。四个额外账号拥有真实写入或管理权限，任意访客可改数据和账号密码，页面中的静态凭据可能失效；没有自动重置，**不得录入真实数据或真实 API 密钥**。其他正式生产环境仍须轮换特权密码并保持该可选值为空。
+新版本包装器允许该键缺失或为空，故可先从不可变归档同步新源码并核验清单，再编辑 `.env.production`，在构建 web 镜像前执行 `./scripts/production-compose.sh config --quiet` 校验。缺失 JSON 时沿用 Viewer-only；非空 JSON 必须恰好包含 Engineer 与 Manager，否则前端 fail closed，不显示任何演示凭据。配置完整时，正常 `/login` 与 `/login?demo=viewer` 都展示 Viewer、Engineer、Manager；点击只填入，不自动登录。Engineer 的 `user_mgmt` 为 0，Manager 仅为 VIEW=1，均不能修改其他账号密码；两者仍可修改共享质量数据。没有自动重置，**不得录入真实数据或真实 API 密钥**。其他正式生产环境仍须轮换演示密码并保持该可选值为空。
 
 根目录 `.env` / `.env.production` 只由 Compose 使用；独立 Vite 读取 `frontend/.env*`。本地独立运行或构建公开首页时，可写入 `frontend/.env.local`：
 
@@ -267,7 +267,7 @@ trap - EXIT HUP INT TERM QUIT
 #### D. 私网验收、共享演示账号、代理探针与公网
 
 1. 先经 Tailscale 地址验收 `/`、`/login`、管理员登录、业务权限和 health。
-2. **仅此公开演示实例**按所有者决定保留 `admin`、`engineer`、`manager`、`groupadmin` 的真实角色与公开演示密码；`groupadmin` 也有管理员权限。公开登录页展示这些账号之前，所有者必须手动恢复并验证目前返回 401 的 `admin` 演示登录。任何访客都能修改数据与密码，且没有自动重置；不得输入真实数据或真实 API 密钥。其他正式生产环境仍应轮换特权密码，只公开 Viewer。
+2. 公开登录页只展示 `viewer`、`engineer`、`manager`。`admin` 与同为管理员角色的 `groupadmin` 保持私密，防止访客进入用户管理并修改其他账号密码；不得将其凭据写入 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS`。Engineer 没有用户管理权限，Manager 只有查看权限，但两者仍能修改共享质量业务数据；没有自动重置，不得输入真实数据或真实 API 密钥。
 3. 在 **Oracle 主机**用当前公开 Viewer 密码运行代理/限流探针，明确命中 Tailnet `http://100.84.141.70` site。脚本内部使用固定生产包装器，并验证独立客户端配额与伪造 `X-Forwarded-For` 场景。不要在证书签发前用公网域名的默认 HTTP 探针，否则 Caddy 的 308 HTTPS 重定向会让 401 断言失败。
 4. Namecheap BasicDNS 的 `qms` A 记录指向 `150.230.197.45`；由 Caddy 直接申请和终止 HTTPS，不使用 Cloudflare 代理。
 5. 验收公网 `https://qms.smartindustry.world/`、`/login`、API health 与权限；若对公网域名重跑代理探针，必须设置 `SITE_SCHEME=https`。

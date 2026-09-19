@@ -196,7 +196,7 @@
 ## ADR-0015 — Oracle 实例作为公开可写演示环境，特权账号显式公开
 
 - **日期**：2026-09-18
-- **状态**：Accepted（仅适用于 `qms.smartindustry.world` 演示实例，不改变其他生产部署的密码轮换建议）
+- **状态**：Superseded by ADR-0016
 - **背景**：原上线方案只公开 Viewer，要求轮换 `admin`、`engineer`、`manager`、`groupadmin` 密码。实例所有者改为让访客体验真实权限，明确选择保留这四个共享演示账号及其完整写入/管理能力，并在登录页显示凭据。
 - **决策**：
   - 域名在 Namecheap BasicDNS 配置 `qms` A 记录直指 Oracle 公网 IP，由 Caddy 终止 HTTPS；不迁移到 Cloudflare 代理。公网 SSH 22 暂按实例所有者选择保留，Tailscale 仍用于管理。
@@ -206,6 +206,18 @@
   - ✅ 访客可体验 Viewer、工程师、经理及管理员功能；当前 Viewer 仍保持只读。
   - ⚠️ `admin` 与 `groupadmin` 拥有真实管理员权限，任意访客可修改账号密码、权限和共享数据；演示数据不具备完整性保证，也没有自动重置。静态页面展示的密码可能被访客更改后失效：恢复原公开值无需重新构建；若改为另一公开值，必须更新构建输入并重新发布。
   - ⚠️ PostgreSQL 备份目前仅同机；公开可写环境不适合承载任何客户、员工或合规数据。禁用演示构建时必须清空所有 `VITE_PUBLIC_DEMO_*` 凭据输入，不能只隐藏 UI。
+
+## ADR-0016 — 公开演示仅保留无用户修改权限的三个账号
+
+- **日期**：2026-09-19
+- **状态**：Accepted（Supersedes ADR-0015）
+- **背景**：ADR-0015 计划公开 `admin` 与 `groupadmin`，但两者都是 `admin` 角色，可通过 `user_mgmt` 修改其他账号密码与权限。实例所有者随后明确要求管理员账号不公开，以防访客改动其他账号。
+- **决策**：公开登录页只展示 `Viewer`（账号 `viewer`）、`engineer` 和 `manager`；`admin`、`groupadmin` 保持私密，也不得写入 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS`。其中 `engineer` 的 `user_mgmt` 为 0，`manager` 仅为 VIEW=1，均不能修改用户或密码。可选 JSON 必须恰好包含 `engineer` 与 `manager`，否则前端 fail closed。
+- **影响**：
+  - ✅ 访客仍可体验只读、质量工程师和经理审批流程，且不能进入用户修改接口。
+  - ✅ `admin` 当前默认密码返回 401 不再阻塞三账号页面发布，也无需为公开展示恢复。
+  - ⚠️ `engineer` 与 `manager` 仍可修改大量共享质量数据；演示数据没有自动重置，仍不得录入真实数据或真实 API 密钥。
+  - ⚠️ 这是账号展示约束，不替代后端 RBAC；每次发布仍需回归验证公开账号的 `user_mgmt` 权限和对 `/api/auth/users/{id}` 的 403 边界。
 
 ---
 

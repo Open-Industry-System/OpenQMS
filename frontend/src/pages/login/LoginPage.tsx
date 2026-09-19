@@ -9,7 +9,7 @@ import { getPublicDemoConfig } from "../../config/publicDemo";
 
 const { Title, Text } = Typography;
 
-type DemoRole = "viewer" | "admin" | "engineer" | "manager" | "groupadmin";
+type DemoRole = "viewer" | "engineer" | "manager";
 
 export default function LoginPage() {
   const { t } = useTranslation("login");
@@ -29,7 +29,7 @@ export default function LoginPage() {
       })),
     ]
     : [];
-  const isMultiRoleDemo = demoAccounts.length === 5;
+  const isMultiRoleDemo = demoAccounts.length === 3;
   const showDemo = Boolean(configuredDemo && (isMultiRoleDemo || searchParams.get("demo") === "viewer"));
 
   const onFinish = async (values: { username: string; password: string }) => {

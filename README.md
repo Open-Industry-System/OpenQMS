@@ -191,11 +191,11 @@ SITE_ADDRESS=qms.smartindustry.world \
 ./scripts/production-compose.sh ps
 ```
 
-浏览器可见的 Viewer 值是有意提供的只读演示凭据；默认构建仅公开 Viewer。实例所有者额外批准 `admin`、`engineer`、`manager`、`groupadmin` 作为**共享可写**演示账号：只有在可选 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 配置为完整四账号 JSON 且各账号实际可登录时，正常 `/login` 与 `?demo=viewer` 才展示五账号；按钮只填表，不自动登录。任何访客都可能改动账号密码和演示数据，静态展示值随之失效。此配置是公开的浏览器构建输入，不是 secret；不要输入真实数据或真实 API 密钥。独立运行 Vite 不读取根目录 `.env.production`，而读取 `frontend/.env*`；关闭演示时必须同时清空所有凭据变量。
+浏览器可见的 Viewer 值是有意提供的只读演示凭据；默认构建仅公开 Viewer。本实例额外公开 `engineer` 与 `manager` 作为**共享可写**演示账号：只有在可选 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 配置为完整两账号 JSON 时，正常 `/login` 与 `?demo=viewer` 才展示三个账号；按钮只填表，不自动登录。`admin` 与同为管理员角色的 `groupadmin` 保持私密，绝不进入浏览器 bundle。Engineer 没有用户管理权限，Manager 只有查看权限，均不能修改其他账号密码。其他访客仍可能改动共享质量数据；此配置是公开构建输入，不是 secret，不得输入真实数据或真实 API 密钥。关闭演示时必须同时清空所有凭据变量。
 
 ```env
-# 仅本实例、且四个账号均确认可登录后：替换已有空值；仅当旧文件缺少该键才追加到 mode 0600 的 .env.production
-VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"admin","password":"Admin@2026"},{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"},{"username":"groupadmin","password":"GroupAdmin@2026"}]
+# 仅本实例：替换已有空值；仅当旧文件缺少该键才追加到 mode 0600 的 .env.production
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"}]
 ```
 
 ```bash
@@ -311,7 +311,7 @@ LOGIN_PASSWORD=Viewer@2026 \
 ./scripts/production-compose.sh restart backend
 ```
 
-本实例已使用 Namecheap BasicDNS 的 `qms` A 记录与 Caddy HTTPS，公开 80/443；`admin` 默认演示登录须由实例所有者手动恢复并验证，才能发布五账号登录页。此实例特例保留四个特权演示账号及完整权限；其他正式生产环境仍须轮换特权密码，只公开 Viewer。公网 SSH 22 暂按实例所有者决定保留，若以后关闭，必须先重新验证 Tailscale SSH，且单独取得授权。
+本实例已使用 Namecheap BasicDNS 的 `qms` A 记录与 Caddy HTTPS，公开 80/443；登录页只公开 Viewer、Engineer、Manager。`admin` 与 `groupadmin` 保持私密，避免访客修改账号密码和权限；其他正式生产环境仍应轮换全部演示密码。公网 SSH 22 暂按实例所有者决定保留，若以后关闭，必须先重新验证 Tailscale SSH，且单独取得授权。
 
 ### 备份、恢复与回滚
 

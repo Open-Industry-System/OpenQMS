@@ -16,7 +16,7 @@ export interface PublicDemoConfig {
   additionalAccounts?: PublicDemoAccount[];
 }
 
-const ADDITIONAL_DEMO_USERNAMES = ["admin", "engineer", "manager", "groupadmin"] as const;
+const ADDITIONAL_DEMO_USERNAMES = ["engineer", "manager"] as const;
 
 function parseAdditionalAccounts(value: string): PublicDemoAccount[] | null {
   let parsed: unknown;

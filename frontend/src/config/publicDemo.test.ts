@@ -3,8 +3,6 @@ import { getPublicDemoConfig } from "./publicDemo";
 
 const additionalAccounts = JSON.stringify([
   { username: "manager", password: "manager-sentinel" },
-  { username: "admin", password: "admin-sentinel" },
-  { username: "groupadmin", password: "groupadmin-sentinel" },
   { username: "engineer", password: "engineer-sentinel" },
 ]);
 
@@ -45,10 +43,8 @@ describe("getPublicDemoConfig", () => {
       username: "viewer",
       password: "viewer-sentinel",
       additionalAccounts: [
-        { username: "admin", password: "admin-sentinel" },
         { username: "engineer", password: "engineer-sentinel" },
         { username: "manager", password: "manager-sentinel" },
-        { username: "groupadmin", password: "groupadmin-sentinel" },
       ],
     });
   });
@@ -56,27 +52,23 @@ describe("getPublicDemoConfig", () => {
   it.each([
     ["malformed JSON", "["],
     ["an incomplete account set", JSON.stringify([
-      { username: "admin", password: "admin-sentinel" },
       { username: "engineer", password: "engineer-sentinel" },
-      { username: "manager", password: "manager-sentinel" },
     ])],
     ["a duplicate username", JSON.stringify([
-      { username: "admin", password: "admin-sentinel" },
-      { username: "admin", password: "admin-sentinel-duplicate" },
-      { username: "manager", password: "manager-sentinel" },
-      { username: "groupadmin", password: "groupadmin-sentinel" },
+      { username: "engineer", password: "engineer-sentinel" },
+      { username: "engineer", password: "engineer-sentinel-duplicate" },
     ])],
     ["a blank additional password", JSON.stringify([
-      { username: "admin", password: "   " },
+      { username: "engineer", password: "   " },
+      { username: "manager", password: "manager-sentinel" },
+    ])],
+    ["a privileged admin account", JSON.stringify([
       { username: "engineer", password: "engineer-sentinel" },
+      { username: "admin", password: "admin-sentinel" },
+    ])],
+    ["a privileged groupadmin account", JSON.stringify([
       { username: "manager", password: "manager-sentinel" },
       { username: "groupadmin", password: "groupadmin-sentinel" },
-    ])],
-    ["an unexpected username", JSON.stringify([
-      { username: "admin", password: "admin-sentinel" },
-      { username: "engineer", password: "engineer-sentinel" },
-      { username: "manager", password: "manager-sentinel" },
-      { username: "operator", password: "operator-sentinel" },
     ])],
   ])("fails closed for %s", (_reason, VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS) => {
     expect(getPublicDemoConfig({
