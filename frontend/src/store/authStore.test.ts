@@ -24,6 +24,26 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function loginResponse(name: string) {
+  return {
+    access_token: `${name}-access-token`,
+    refresh_token: `${name}-refresh-token`,
+    user: {
+      user_id: `${name}-id`,
+      username: name,
+      display_name: name,
+      email: null,
+      role_key: "viewer",
+      permissions: {},
+      product_lines: [],
+      bypass_row_level_security: false,
+      is_active: true,
+      factory_scope: { accessible_factory_ids: [], default_factory_id: `${name}-factory` },
+      factories: [],
+    },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
@@ -98,5 +118,125 @@ describe("authStore refresh coordination", () => {
   it("returns null without calling the API when no refresh token exists", async () => {
     await expect(useAuthStore.getState().tryRefreshToken()).resolves.toBeNull();
     expect(auth.refreshToken).not.toHaveBeenCalled();
+  });
+
+  it("does not let an older refresh success overwrite a newer login", async () => {
+    localStorage.setItem("access_token", "old-access-token");
+    localStorage.setItem("refresh_token", "old-refresh-token");
+    useAuthStore.setState({ token: "old-access-token" });
+    const oldRefresh = deferred<{ access_token: string; refresh_token: string }>();
+    auth.refreshToken.mockReturnValue(oldRefresh.promise);
+    const pending = useAuthStore.getState().tryRefreshToken();
+
+    auth.login.mockResolvedValue(loginResponse("new-user"));
+    await useAuthStore.getState().login("new-user", "password");
+    oldRefresh.resolve({ access_token: "old-rotated-access", refresh_token: "old-rotated-refresh" });
+
+    await expect(pending).resolves.toBeNull();
+    expect(localStorage.getItem("access_token")).toBe("new-user-access-token");
+    expect(localStorage.getItem("refresh_token")).toBe("new-user-refresh-token");
+    expect(useAuthStore.getState().token).toBe("new-user-access-token");
+    expect(useAuthStore.getState().user?.username).toBe("new-user");
+  });
+
+  it("does not let an older refresh failure log out a newer login", async () => {
+    localStorage.setItem("access_token", "old-access-token");
+    localStorage.setItem("refresh_token", "old-refresh-token");
+    useAuthStore.setState({ token: "old-access-token" });
+    const oldRefresh = deferred<{ access_token: string; refresh_token: string }>();
+    auth.refreshToken.mockReturnValue(oldRefresh.promise);
+    const pending = useAuthStore.getState().tryRefreshToken();
+
+    auth.login.mockResolvedValue(loginResponse("new-user"));
+    await useAuthStore.getState().login("new-user", "password");
+    oldRefresh.reject(new Error("old refresh failed"));
+
+    await expect(pending).resolves.toBeNull();
+    expect(localStorage.getItem("access_token")).toBe("new-user-access-token");
+    expect(localStorage.getItem("refresh_token")).toBe("new-user-refresh-token");
+    expect(useAuthStore.getState().token).toBe("new-user-access-token");
+    expect(useAuthStore.getState().user?.username).toBe("new-user");
+  });
+
+  it("does not restore a session when refresh succeeds after logout", async () => {
+    localStorage.setItem("access_token", "old-access-token");
+    localStorage.setItem("refresh_token", "old-refresh-token");
+    useAuthStore.setState({ token: "old-access-token" });
+    const oldRefresh = deferred<{ access_token: string; refresh_token: string }>();
+    auth.refreshToken.mockReturnValue(oldRefresh.promise);
+    const pending = useAuthStore.getState().tryRefreshToken();
+
+    useAuthStore.getState().logout();
+    oldRefresh.resolve({ access_token: "resurrected-access", refresh_token: "resurrected-refresh" });
+
+    await expect(pending).resolves.toBeNull();
+    expect(localStorage.getItem("access_token")).toBeNull();
+    expect(localStorage.getItem("refresh_token")).toBeNull();
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it("starts a separate refresh for a newer session and old cleanup cannot clear it", async () => {
+    localStorage.setItem("refresh_token", "old-refresh-token");
+    const oldRefresh = deferred<{ access_token: string; refresh_token: string }>();
+    const newRefresh = deferred<{ access_token: string; refresh_token: string }>();
+    auth.refreshToken
+      .mockReturnValueOnce(oldRefresh.promise)
+      .mockReturnValueOnce(newRefresh.promise);
+    const oldPending = useAuthStore.getState().tryRefreshToken();
+
+    auth.login.mockResolvedValue(loginResponse("new-user"));
+    await useAuthStore.getState().login("new-user", "password");
+    const newPending = useAuthStore.getState().tryRefreshToken();
+    expect(newPending).not.toBe(oldPending);
+    expect(auth.refreshToken).toHaveBeenCalledTimes(2);
+    expect(auth.refreshToken).toHaveBeenLastCalledWith("new-user-refresh-token");
+
+    oldRefresh.resolve({ access_token: "old-rotated-access", refresh_token: "old-rotated-refresh" });
+    await expect(oldPending).resolves.toBeNull();
+    const sameNewPending = useAuthStore.getState().tryRefreshToken();
+    expect(sameNewPending).toBe(newPending);
+    expect(auth.refreshToken).toHaveBeenCalledTimes(2);
+
+    newRefresh.resolve({ access_token: "new-rotated-access", refresh_token: "new-rotated-refresh" });
+    await expect(Promise.all([newPending, sameNewPending])).resolves.toEqual([
+      "new-rotated-access",
+      "new-rotated-access",
+    ]);
+  });
+
+  it("ignores a stale fetchUser success after a newer login", async () => {
+    localStorage.setItem("access_token", "old-access-token");
+    useAuthStore.setState({ token: "old-access-token" });
+    const oldMe = deferred<ReturnType<typeof loginResponse>["user"]>();
+    auth.getMe.mockReturnValue(oldMe.promise);
+    const pending = useAuthStore.getState().fetchUser();
+
+    auth.login.mockResolvedValue(loginResponse("new-user"));
+    await useAuthStore.getState().login("new-user", "password");
+    oldMe.resolve(loginResponse("old-user").user);
+    await pending;
+
+    expect(useAuthStore.getState().user?.username).toBe("new-user");
+    expect(useAuthStore.getState().token).toBe("new-user-access-token");
+    expect(useAuthStore.getState().loading).toBe(false);
+  });
+
+  it("ignores a stale fetchUser failure after a newer login", async () => {
+    localStorage.setItem("access_token", "old-access-token");
+    useAuthStore.setState({ token: "old-access-token" });
+    const oldMe = deferred<ReturnType<typeof loginResponse>["user"]>();
+    auth.getMe.mockReturnValue(oldMe.promise);
+    const pending = useAuthStore.getState().fetchUser();
+
+    auth.login.mockResolvedValue(loginResponse("new-user"));
+    await useAuthStore.getState().login("new-user", "password");
+    oldMe.reject(new Error("old getMe failed"));
+    await pending;
+
+    expect(useAuthStore.getState().user?.username).toBe("new-user");
+    expect(useAuthStore.getState().token).toBe("new-user-access-token");
+    expect(localStorage.getItem("access_token")).toBe("new-user-access-token");
+    expect(useAuthStore.getState().loading).toBe(false);
   });
 });
