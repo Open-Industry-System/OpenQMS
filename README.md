@@ -80,9 +80,10 @@ docker compose exec backend python -m app.seed
 
 输出 `Seed data created successfully!` 即成功。
 
-第一步启动服务的时候数据库是空的，backend服务启动报错了，需要重启一下。
+首次启动时数据库尚未迁移，`backend` 和 `graph-worker` 可能因数据表不存在而启动失败。完成迁移和演示数据导入后，重启这两个服务：
+
 ```bash
-docker compose restart backend
+docker compose restart backend graph-worker
 ```
 
 ### 4. 访问系统

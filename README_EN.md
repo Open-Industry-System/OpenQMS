@@ -80,9 +80,10 @@ docker compose exec backend python -m app.seed
 
 Output `Seed data created successfully!` indicates success.
 
-After step 1, backend service has startup errors because database is actually empty, we need to restart it.
+On the first startup, the database has not been migrated yet, so `backend` and `graph-worker` may fail because their tables do not exist. After applying migrations and importing the demo data, restart both services:
+
 ```bash
-docker compose restart backend
+docker compose restart backend graph-worker
 ```
 
 ### 4. Access the System
