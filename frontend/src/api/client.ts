@@ -1,10 +1,35 @@
-import axios from "axios";
-import { useAuthStore } from "../store/authStore";
+import axios, { type InternalAxiosRequestConfig } from "axios";
+import { getAuthSessionGeneration, useAuthStore } from "../store/authStore";
 
 const client = axios.create({
   baseURL: "/api",
   timeout: 10000,
 });
+
+type AuthRequestConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean;
+  _authAccessToken?: string | null;
+  _authSessionGeneration?: number;
+};
+
+function isAuthUrl(url?: string): boolean {
+  return Boolean(url?.startsWith("/auth/"));
+}
+
+function isRequestSessionCurrent(config: AuthRequestConfig): boolean {
+  return config._authSessionGeneration === getAuthSessionGeneration();
+}
+
+function isRequestOwnerCurrent(config: AuthRequestConfig): boolean {
+  return isRequestSessionCurrent(config)
+    && config._authAccessToken === localStorage.getItem("access_token");
+}
+
+function logoutAndRedirectIfCurrent(config: AuthRequestConfig): void {
+  if (!isRequestOwnerCurrent(config)) return;
+  useAuthStore.getState().logout();
+  window.location.href = "/login";
+}
 
 // Factory ID auto-injection for GET requests on business APIs
 // Excluded: auth, group, product-lines, factories (management endpoints)
@@ -36,6 +61,9 @@ function addRefreshSubscriber(subscriber: RefreshSubscriber) {
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");
+  const authConfig = config as AuthRequestConfig;
+  authConfig._authAccessToken = token;
+  authConfig._authSessionGeneration = getAuthSessionGeneration();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -65,7 +93,7 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config as AuthRequestConfig;
 
     if (error.response?.status === 503 && error.response?.data?.detail?.tenant_suspended) {
       window.location.href = "/tenant-suspended";
@@ -78,17 +106,18 @@ client.interceptors.response.use(
 
     // 401: attempt token refresh before redirecting to login
     if (error.response?.status === 401) {
-      // Login 401 = invalid credentials (not an expired token). Reject
-      // immediately so the login form can show the error and stop loading —
-      // the refresh flow below would otherwise hang the request forever
-      // (no refresh_token exists for an unauthenticated login attempt).
-      if (originalRequest.url?.includes("/auth/login")) {
+      // Auth endpoints own their failure handling. Re-entering refresh from the
+      // refresh endpoint itself can wait on the same in-flight promise forever.
+      if (originalRequest.url?.includes("/auth/login") || originalRequest.url?.includes("/auth/refresh")) {
         return Promise.reject(error);
       }
-      // Don't retry refresh endpoint or already-retried requests
-      if (originalRequest.url?.includes("/auth/refresh") || originalRequest._retry) {
-        useAuthStore.getState().logout();
-        window.location.href = "/login";
+      if (originalRequest._retry) {
+        logoutAndRedirectIfCurrent(originalRequest);
+        return Promise.reject(error);
+      }
+      // A delayed response from a previous login/session must not refresh or
+      // log out the session that is current now.
+      if (!isRequestOwnerCurrent(originalRequest)) {
         return Promise.reject(error);
       }
 
@@ -96,21 +125,18 @@ client.interceptors.response.use(
         isRefreshing = true;
         try {
           const newToken = await useAuthStore.getState().tryRefreshToken();
-          if (newToken) {
+          if (newToken && isRequestSessionCurrent(originalRequest)) {
             onRefreshed(newToken);
-            // Retry the original request with the new token
             originalRequest._retry = true;
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
             return client(originalRequest);
           }
           onRefreshFailed();
-          useAuthStore.getState().logout();
-          window.location.href = "/login";
+          logoutAndRedirectIfCurrent(originalRequest);
           return Promise.reject(error);
         } catch {
           onRefreshFailed();
-          useAuthStore.getState().logout();
-          window.location.href = "/login";
+          logoutAndRedirectIfCurrent(originalRequest);
           return Promise.reject(error);
         } finally {
           isRefreshing = false;
@@ -132,11 +158,19 @@ client.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
+      // Auth endpoints must reject directly. Revalidating /auth/refresh or
+      // /auth/me through /auth/me can recurse or self-wait on refreshPromise.
+      if (isAuthUrl(originalRequest.url) || !isRequestOwnerCurrent(originalRequest)) {
+        return Promise.reject(error);
+      }
+      const generation = originalRequest._authSessionGeneration;
       try {
         const resp = await client.get("/auth/me");
-        useAuthStore.getState().setUser(resp.data);
+        if (generation === getAuthSessionGeneration()) {
+          useAuthStore.getState().setUser(resp.data);
+        }
       } catch {
-        // refresh failed — ignore, user stays with stale state
+        // Revalidation failure is handled by the auth request itself.
       }
     }
     return Promise.reject(error);

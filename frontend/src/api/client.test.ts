@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const auth = vi.hoisted(() => ({
+  generation: 0,
   getState: vi.fn(),
 }));
 
 vi.mock("../store/authStore", () => ({
+  getAuthSessionGeneration: () => auth.generation,
   useAuthStore: { getState: auth.getState },
 }));
 
@@ -16,10 +18,30 @@ function unauthorized(config: any) {
   return Promise.reject({ config, response: { status: 401 } });
 }
 
+function forbidden(config: any) {
+  return Promise.reject({ config, response: { status: 403 } });
+}
+
+function deferredAdapter() {
+  let config: any;
+  let rejectRequest!: (error: unknown) => void;
+  const adapter = vi.fn((requestConfig: any) => {
+    config = requestConfig;
+    return new Promise((_resolve, reject) => {
+      rejectRequest = reject;
+    });
+  });
+  return {
+    adapter,
+    reject401: () => rejectRequest({ config, response: { status: 401 } }),
+  };
+}
+
 describe("client 401 refresh handling", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    auth.generation = 0;
     localStorage.clear();
   });
 
@@ -130,6 +152,141 @@ describe("client 401 refresh handling", () => {
     client.defaults.adapter = unauthorized;
 
     await expect(client.post("/auth/login", {})).rejects.toMatchObject({ response: { status: 401 } });
+    expect(tryRefreshToken).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("rejects refresh 403 without revalidating through auth me", async () => {
+    const logout = vi.fn();
+    const setUser = vi.fn();
+    const tryRefreshToken = vi.fn();
+    auth.getState.mockReturnValue({ logout, setUser, tryRefreshToken });
+    const client = await loadClient();
+    const adapter = vi.fn((config) => {
+      if (config.url === "/auth/me") {
+        return Promise.resolve({ config, data: { username: "unexpected" }, headers: {}, status: 200, statusText: "OK" });
+      }
+      return forbidden(config);
+    });
+    client.defaults.adapter = adapter;
+
+    await expect(client.post("/auth/refresh", {})).rejects.toMatchObject({ response: { status: 403 } });
+    expect(adapter).toHaveBeenCalledOnce();
+    expect(setUser).not.toHaveBeenCalled();
+    expect(tryRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it("rejects auth me 403 without recursively requesting auth me", async () => {
+    const logout = vi.fn();
+    const setUser = vi.fn();
+    const tryRefreshToken = vi.fn();
+    auth.getState.mockReturnValue({ logout, setUser, tryRefreshToken });
+    const client = await loadClient();
+    const adapter = vi.fn()
+      .mockImplementationOnce(forbidden)
+      .mockImplementationOnce((config) => Promise.resolve({
+        config,
+        data: { username: "unexpected" },
+        headers: {},
+        status: 200,
+        statusText: "OK",
+      }));
+    client.defaults.adapter = adapter;
+
+    await expect(client.get("/auth/me")).rejects.toMatchObject({ response: { status: 403 } });
+    expect(adapter).toHaveBeenCalledOnce();
+    expect(setUser).not.toHaveBeenCalled();
+  });
+
+  it("still revalidates one business 403 through auth me", async () => {
+    const logout = vi.fn();
+    const setUser = vi.fn();
+    const tryRefreshToken = vi.fn();
+    auth.getState.mockReturnValue({ logout, setUser, tryRefreshToken });
+    const client = await loadClient();
+    const user = { username: "current-user" };
+    const adapter = vi.fn((config) => {
+      if (config.url === "/auth/me") {
+        return Promise.resolve({ config, data: user, headers: {}, status: 200, statusText: "OK" });
+      }
+      return forbidden(config);
+    });
+    client.defaults.adapter = adapter;
+
+    await expect(client.get("/business")).rejects.toMatchObject({ response: { status: 403 } });
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(setUser).toHaveBeenCalledWith(user);
+  });
+
+  it("settles a protected 401 when refresh returns 403", async () => {
+    const logout = vi.fn();
+    const setUser = vi.fn();
+    const clientPromise = loadClient();
+    const tryRefreshToken = vi.fn(async () => {
+      const client = await clientPromise;
+      try {
+        await client.post("/auth/refresh", { refresh_token: "expired" });
+        return "unexpected";
+      } catch {
+        return null;
+      }
+    });
+    auth.getState.mockReturnValue({ logout, setUser, tryRefreshToken });
+    const client = await clientPromise;
+    client.defaults.adapter = (config) => {
+      if (config.url === "/auth/refresh") return forbidden(config);
+      if (config.url === "/auth/me") return unauthorized(config);
+      return unauthorized(config);
+    };
+
+    const outcome = await Promise.race([
+      client.get("/protected").then(() => "resolved", () => "rejected"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("timeout"), 100)),
+    ]);
+
+    expect(outcome).toBe("rejected");
+    expect(tryRefreshToken).toHaveBeenCalledOnce();
+  });
+
+  it("does not logout a newer session when an older refresh returns null", async () => {
+    const logout = vi.fn();
+    let resolveRefresh!: (token: string | null) => void;
+    const pendingRefresh = new Promise<string | null>((resolve) => { resolveRefresh = resolve; });
+    const tryRefreshToken = vi.fn().mockReturnValue(pendingRefresh);
+    auth.getState.mockReturnValue({ logout, tryRefreshToken, setUser: vi.fn() });
+    auth.generation = 1;
+    localStorage.setItem("access_token", "old-token");
+    const client = await loadClient();
+    client.defaults.adapter = unauthorized;
+
+    const oldRequest = client.get("/protected");
+    await vi.waitFor(() => expect(tryRefreshToken).toHaveBeenCalledOnce());
+    auth.generation = 2;
+    localStorage.setItem("access_token", "new-login-token");
+    resolveRefresh(null);
+
+    await expect(oldRequest).rejects.toMatchObject({ response: { status: 401 } });
+    expect(logout).not.toHaveBeenCalled();
+    expect(localStorage.getItem("access_token")).toBe("new-login-token");
+  });
+
+  it("does not refresh a delayed 401 from an older session", async () => {
+    const logout = vi.fn();
+    const tryRefreshToken = vi.fn();
+    auth.getState.mockReturnValue({ logout, tryRefreshToken, setUser: vi.fn() });
+    auth.generation = 1;
+    localStorage.setItem("access_token", "old-token");
+    const delayed = deferredAdapter();
+    const client = await loadClient();
+    client.defaults.adapter = delayed.adapter;
+
+    const oldRequest = client.get("/slow");
+    await vi.waitFor(() => expect(delayed.adapter).toHaveBeenCalledOnce());
+    auth.generation = 2;
+    localStorage.setItem("access_token", "new-login-token");
+    delayed.reject401();
+
+    await expect(oldRequest).rejects.toMatchObject({ response: { status: 401 } });
     expect(tryRefreshToken).not.toHaveBeenCalled();
     expect(logout).not.toHaveBeenCalled();
   });
