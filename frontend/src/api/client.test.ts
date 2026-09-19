@@ -27,7 +27,7 @@ function deferredAdapter() {
   let rejectRequest!: (error: unknown) => void;
   const adapter = vi.fn((requestConfig: any) => {
     config = requestConfig;
-    return new Promise((_resolve, reject) => {
+    return new Promise<never>((_resolve, reject) => {
       rejectRequest = reject;
     });
   });
