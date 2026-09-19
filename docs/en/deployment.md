@@ -35,6 +35,12 @@ Key environment variables:
 
 ### 1.3 Start Services
 
+The backend image uses Debian's official repository by default. In mainland China, you can optionally build with the TUNA mirror before starting the stack:
+
+```bash
+docker compose build --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn backend graph-worker
+```
+
 ```bash
 docker compose up -d
 ```
@@ -55,6 +61,9 @@ docker compose exec backend alembic upgrade head
 
 # Import demo data (includes users, FMEA, CAPA, suppliers, etc.)
 docker compose exec backend python -m app.seed
+
+# On a fresh database, backend / graph-worker may have exited before migrations
+docker compose restart backend graph-worker
 ```
 
 ### 1.5 Access
