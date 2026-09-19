@@ -42,10 +42,10 @@ docker compose build --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn back
 ```
 
 ```bash
-docker compose up -d
+docker compose up -d db redis neo4j
 ```
 
-The first startup will automatically build frontend and backend images. Check service status:
+Check the infrastructure status:
 
 ```bash
 docker compose ps
@@ -56,14 +56,14 @@ Wait for the `db` and `neo4j` containers to become `healthy` (approximately 15â€
 ### 1.4 Initialize the Database
 
 ```bash
-# Run database migrations
-docker compose exec backend alembic upgrade head
+# Run database migrations in a one-off container; the backend service need not be running
+docker compose run --rm backend alembic upgrade head
 
 # Import demo data (includes users, FMEA, CAPA, suppliers, etc.)
-docker compose exec backend python -m app.seed
+docker compose run --rm backend python -m app.seed
 
-# On a fresh database, backend / graph-worker may have exited before migrations
-docker compose restart backend graph-worker
+# Start the complete application stack after the database is ready
+docker compose up -d
 ```
 
 ### 1.5 Access

@@ -57,33 +57,33 @@
 ```bash
 git clone https://github.com/your-org/OpenQMS.git
 cd OpenQMS
-docker compose up -d
+docker compose up -d db redis neo4j
 ```
 
 等待所有容器健康（约 30 秒）：
 
 ```bash
-docker compose ps   # 确认 db/redis/neo4j 为 healthy，backend/frontend 为 running
+docker compose ps   # 确认 db/redis/neo4j 为 healthy
 ```
 
 ### 2. 初始化数据库
 
 ```bash
-docker compose exec backend alembic upgrade head
+docker compose run --rm backend alembic upgrade head
 ```
 
 ### 3. 导入演示数据
 
 ```bash
-docker compose exec backend python -m app.seed
+docker compose run --rm backend python -m app.seed
 ```
 
 输出 `Seed data created successfully!` 即成功。
 
-首次启动时数据库尚未迁移，`backend` 和 `graph-worker` 可能因数据表不存在而启动失败。完成迁移和演示数据导入后，重启这两个服务：
+迁移和演示数据导入完成后，启动完整应用栈：
 
 ```bash
-docker compose restart backend graph-worker
+docker compose up -d
 ```
 
 ### 4. 访问系统

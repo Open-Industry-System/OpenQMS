@@ -93,11 +93,13 @@ docker compose build --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn back
 ```
 
 ```bash
+# 先启动数据库和基础设施；此时不要启动依赖业务表的应用进程
+docker compose up -d db redis neo4j
+# one-off backend 不要求常驻 backend 容器已经运行
+docker compose run --rm backend alembic upgrade head
+docker compose run --rm backend python -m app.seed
+# 数据库准备完成后再启动完整应用栈
 docker compose up -d
-docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.seed
-# 首次启动时 backend / graph-worker 可能在迁移前因缺表退出
-docker compose restart backend graph-worker
 ```
 
 ### 1.5 访问
