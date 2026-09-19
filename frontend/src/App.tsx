@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Spin } from "antd";
-import { useAuthStore } from "./store/authStore";
+import { getAuthSessionGeneration, useAuthStore } from "./store/authStore";
 import { usePermission } from "./hooks/usePermission";
 import type { ModuleKey } from "./hooks/usePermission";
 import AppLayout from "./components/layout/AppLayout";
@@ -122,11 +122,20 @@ function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: 
     } else if (tokenState === "expired" && token) {
       if (refreshAttemptedToken.current === token) return;
       refreshAttemptedToken.current = token;
+      const generation = getAuthSessionGeneration();
+      const refreshToken = localStorage.getItem("refresh_token");
+      const stillOwnsRefresh = () => (
+        generation === getAuthSessionGeneration()
+        && refreshToken === localStorage.getItem("refresh_token")
+      );
       void tryRefreshToken()
         .then((refreshedToken) => {
+          if (!stillOwnsRefresh()) return;
           if (!refreshedToken || classifyToken(refreshedToken) !== "valid") logout();
         })
-        .catch(() => logout());
+        .catch(() => {
+          if (stillOwnsRefresh()) logout();
+        });
     } else if (tokenState === "valid" && !user && !loading) {
       fetchUser();
     }

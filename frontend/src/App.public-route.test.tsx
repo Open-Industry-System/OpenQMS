@@ -7,8 +7,9 @@ import App from "./App";
 import i18n from "./i18n";
 
 const state = vi.hoisted(() => ({
+  generation: 0,
   token: null as string | null,
-  user: null,
+  user: null as any,
   loading: false,
   login: vi.fn(),
   fetchUser: vi.fn(),
@@ -17,6 +18,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("./store/authStore", () => ({
+  getAuthSessionGeneration: () => state.generation,
   useAuthStore: (selector: (value: typeof state) => unknown) => selector(state),
 }));
 
@@ -26,6 +28,16 @@ vi.mock("./hooks/usePermission", () => ({
 
 function jwt(payload: Record<string, unknown>) {
   return `header.${btoa(JSON.stringify(payload))}.signature`;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function routeAt(path: string) {
@@ -42,6 +54,7 @@ function renderAt(path: string, strict = false) {
 }
 
 beforeEach(async () => {
+  state.generation = 0;
   state.token = null;
   state.user = null;
   state.loading = false;
@@ -85,6 +98,38 @@ describe("public route boundary", () => {
     state.token = null;
     view.rerender(routeAt("/dashboard"));
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
+  });
+
+  it("ignores a stale null refresh result after the session changes", async () => {
+    const refresh = deferred<string | null>();
+    state.tryRefreshToken.mockReturnValue(refresh.promise);
+    state.token = "header.eyJleHAiOjB9.signature";
+    renderAt("/dashboard");
+    await waitFor(() => expect(state.tryRefreshToken).toHaveBeenCalledOnce());
+
+    state.generation = 1;
+    state.token = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+    refresh.resolve(null);
+    await refresh.promise;
+    await Promise.resolve();
+
+    expect(state.logout).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale refresh rejection after the session changes", async () => {
+    const refresh = deferred<string | null>();
+    state.tryRefreshToken.mockReturnValue(refresh.promise);
+    state.token = "header.eyJleHAiOjB9.signature";
+    renderAt("/dashboard");
+    await waitFor(() => expect(state.tryRefreshToken).toHaveBeenCalledOnce());
+
+    state.generation = 1;
+    state.token = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+    refresh.reject(new Error("old refresh failed"));
+    await expect(refresh.promise).rejects.toThrow("old refresh failed");
+    await Promise.resolve();
+
+    expect(state.logout).not.toHaveBeenCalled();
   });
 
   it("does not refresh the same expired token twice under StrictMode", async () => {
