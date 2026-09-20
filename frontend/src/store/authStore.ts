@@ -48,8 +48,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   login: async (username, password) => {
     invalidateSessionWork();
+    const generation = sessionGeneration;
     set({ loading: false });
     const resp = await apiLogin({ username, password });
+    if (generation !== sessionGeneration) {
+      throw new Error("Authentication session changed");
+    }
     localStorage.setItem("access_token", resp.access_token);
     localStorage.setItem("refresh_token", resp.refresh_token);
     const factoryId = resp.user.factory_scope?.default_factory_id || null;

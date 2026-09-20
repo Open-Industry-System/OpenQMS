@@ -278,4 +278,38 @@ describe("authStore refresh coordination", () => {
     expect(useAuthStore.getState().user).toBeNull();
     expect(useAuthStore.getState().loading).toBe(false);
   });
+
+  it("rejects an older login response that arrives after a newer login", async () => {
+    const loginA = deferred<ReturnType<typeof loginResponse>>();
+    const loginB = deferred<ReturnType<typeof loginResponse>>();
+    auth.login
+      .mockReturnValueOnce(loginA.promise)
+      .mockReturnValueOnce(loginB.promise);
+
+    const pendingA = useAuthStore.getState().login("user-a", "password-a");
+    const pendingB = useAuthStore.getState().login("user-b", "password-b");
+    loginB.resolve(loginResponse("user-b"));
+    await pendingB;
+    loginA.resolve(loginResponse("user-a"));
+
+    await expect(pendingA).rejects.toThrow("Authentication session changed");
+    expect(useAuthStore.getState().user?.username).toBe("user-b");
+    expect(useAuthStore.getState().token).toBe("user-b-access-token");
+    expect(localStorage.getItem("refresh_token")).toBe("user-b-refresh-token");
+  });
+
+  it("rejects a login response that arrives after logout", async () => {
+    const login = deferred<ReturnType<typeof loginResponse>>();
+    auth.login.mockReturnValue(login.promise);
+
+    const pending = useAuthStore.getState().login("user-a", "password");
+    useAuthStore.getState().logout();
+    login.resolve(loginResponse("user-a"));
+
+    await expect(pending).rejects.toThrow("Authentication session changed");
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(localStorage.getItem("access_token")).toBeNull();
+    expect(localStorage.getItem("refresh_token")).toBeNull();
+  });
 });
