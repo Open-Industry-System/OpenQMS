@@ -239,4 +239,43 @@ describe("authStore refresh coordination", () => {
     expect(localStorage.getItem("access_token")).toBe("new-user-access-token");
     expect(useAuthStore.getState().loading).toBe(false);
   });
+
+  it("invalidates an older refresh as soon as a new login starts", async () => {
+    localStorage.setItem("access_token", "old-access-token");
+    localStorage.setItem("refresh_token", "old-refresh-token");
+    useAuthStore.setState({ token: "old-access-token" });
+    const oldRefresh = deferred<{ access_token: string; refresh_token: string }>();
+    const newLogin = deferred<ReturnType<typeof loginResponse>>();
+    auth.refreshToken.mockReturnValue(oldRefresh.promise);
+    auth.login.mockReturnValue(newLogin.promise);
+
+    const oldPending = useAuthStore.getState().tryRefreshToken();
+    const loginPending = useAuthStore.getState().login("new-user", "password");
+    await vi.waitFor(() => expect(auth.login).toHaveBeenCalledOnce());
+
+    oldRefresh.resolve({ access_token: "old-rotated-access", refresh_token: "old-rotated-refresh" });
+    await expect(oldPending).resolves.toBeNull();
+    expect(localStorage.getItem("access_token")).toBe("old-access-token");
+
+    newLogin.resolve(loginResponse("new-user"));
+    await loginPending;
+    expect(useAuthStore.getState().token).toBe("new-user-access-token");
+    expect(localStorage.getItem("refresh_token")).toBe("new-user-refresh-token");
+  });
+
+  it("clears loading when fetchUser becomes stale after an external token change", async () => {
+    localStorage.setItem("access_token", "old-access-token");
+    useAuthStore.setState({ token: "old-access-token" });
+    const oldMe = deferred<ReturnType<typeof loginResponse>["user"]>();
+    auth.getMe.mockReturnValue(oldMe.promise);
+
+    const pending = useAuthStore.getState().fetchUser();
+    expect(useAuthStore.getState().loading).toBe(true);
+    localStorage.setItem("access_token", "external-new-access-token");
+    oldMe.resolve(loginResponse("old-user").user);
+    await pending;
+
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().loading).toBe(false);
+  });
 });

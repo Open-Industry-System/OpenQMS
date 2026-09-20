@@ -18,6 +18,7 @@ interface AuthState {
 }
 
 let sessionGeneration = 0;
+let fetchRequestId = 0;
 let refreshPromise: Promise<string | null> | null = null;
 let refreshOwner: { generation: number; refreshToken: string } | null = null;
 
@@ -27,6 +28,7 @@ export function getAuthSessionGeneration(): number {
 
 function invalidateSessionWork(): void {
   sessionGeneration += 1;
+  fetchRequestId += 1;
   refreshPromise = null;
   refreshOwner = null;
 }
@@ -45,8 +47,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   currentFactoryId: null,
 
   login: async (username, password) => {
-    const resp = await apiLogin({ username, password });
     invalidateSessionWork();
+    set({ loading: false });
+    const resp = await apiLogin({ username, password });
     localStorage.setItem("access_token", resp.access_token);
     localStorage.setItem("refresh_token", resp.refresh_token);
     const factoryId = resp.user.factory_scope?.default_factory_id || null;
@@ -74,10 +77,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const token = localStorage.getItem("access_token");
     if (!token) return;
     const generation = sessionGeneration;
+    const requestId = ++fetchRequestId;
+    const isCurrentRequest = () => (
+      requestId === fetchRequestId
+      && ownsSession(generation)
+      && localStorage.getItem("access_token") === token
+    );
+    const finishStaleRequest = () => {
+      if (requestId === fetchRequestId) set({ loading: false });
+    };
     try {
       set({ loading: true });
       const user = await getMe();
-      if (!ownsSession(generation) || localStorage.getItem("access_token") !== token) return;
+      if (!isCurrentRequest()) {
+        finishStaleRequest();
+        return;
+      }
       const factoryId = user.factory_scope?.default_factory_id || null;
       if (factoryId) localStorage.setItem("current_factory_id", factoryId);
       else localStorage.removeItem("current_factory_id");
@@ -89,7 +104,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         currentFactoryId: factoryId,
       });
     } catch {
-      if (!ownsSession(generation) || localStorage.getItem("access_token") !== token) return;
+      if (!isCurrentRequest()) {
+        finishStaleRequest();
+        return;
+      }
       get().logout();
     }
   },

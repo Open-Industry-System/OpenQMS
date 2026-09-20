@@ -254,6 +254,26 @@ describe("client 401 refresh handling", () => {
     expect(setUser).toHaveBeenCalledWith(user);
   });
 
+  it("revalidates an auth user-management 403 exactly once", async () => {
+    const logout = vi.fn();
+    const setUser = vi.fn();
+    const tryRefreshToken = vi.fn();
+    auth.getState.mockReturnValue({ logout, setUser, tryRefreshToken });
+    const client = await loadClient();
+    const user = { username: "current-user" };
+    const adapter = vi.fn((config) => {
+      if (config.url === "/auth/me") {
+        return Promise.resolve({ config, data: user, headers: {}, status: 200, statusText: "OK" });
+      }
+      return forbidden(config);
+    });
+    client.defaults.adapter = adapter;
+
+    await expect(client.get("/auth/users")).rejects.toMatchObject({ response: { status: 403 } });
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(setUser).toHaveBeenCalledWith(user);
+  });
+
   it("settles a protected 401 when refresh returns 403", async () => {
     const logout = vi.fn();
     const setUser = vi.fn();

@@ -54,6 +54,7 @@ function renderAt(path: string, strict = false) {
 }
 
 beforeEach(async () => {
+  localStorage.clear();
   state.generation = 0;
   state.token = null;
   state.user = null;
@@ -85,6 +86,32 @@ describe("public route boundary", () => {
     expect(screen.queryByRole("button", { name: /login/i })).not.toBeInTheDocument();
     await waitFor(() => expect(state.tryRefreshToken).toHaveBeenCalledOnce());
     expect(state.fetchUser).not.toHaveBeenCalled();
+    expect(state.logout).not.toHaveBeenCalled();
+  });
+
+  it("logs out when a successful refresh returns an invalid token after rotation", async () => {
+    localStorage.setItem("refresh_token", "old-refresh-token");
+    state.tryRefreshToken.mockImplementation(async () => {
+      localStorage.setItem("refresh_token", "rotated-refresh-token");
+      return "not-a-valid-jwt";
+    });
+    state.token = "header.eyJleHAiOjB9.signature";
+    renderAt("/dashboard");
+
+    await waitFor(() => expect(state.logout).toHaveBeenCalledOnce());
+  });
+
+  it("refetches an existing user after refreshing an expired token", async () => {
+    const refreshedToken = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+    state.user = { username: "existing-user" };
+    state.token = "header.eyJleHAiOjB9.signature";
+    state.tryRefreshToken.mockImplementation(async () => {
+      state.token = refreshedToken;
+      return refreshedToken;
+    });
+    renderAt("/dashboard");
+
+    await waitFor(() => expect(state.fetchUser).toHaveBeenCalledOnce());
     expect(state.logout).not.toHaveBeenCalled();
   });
 

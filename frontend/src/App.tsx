@@ -124,17 +124,25 @@ function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: 
       refreshAttemptedToken.current = token;
       const generation = getAuthSessionGeneration();
       const refreshToken = localStorage.getItem("refresh_token");
-      const stillOwnsRefresh = () => (
+      const stillOwnsFailedRefresh = () => (
         generation === getAuthSessionGeneration()
         && refreshToken === localStorage.getItem("refresh_token")
       );
       void tryRefreshToken()
         .then((refreshedToken) => {
-          if (!stillOwnsRefresh()) return;
-          if (!refreshedToken || classifyToken(refreshedToken) !== "valid") logout();
+          if (generation !== getAuthSessionGeneration()) return;
+          if (!refreshedToken) {
+            if (stillOwnsFailedRefresh()) logout();
+            return;
+          }
+          if (classifyToken(refreshedToken) !== "valid") {
+            logout();
+            return;
+          }
+          if (user) void fetchUser();
         })
         .catch(() => {
-          if (stillOwnsRefresh()) logout();
+          if (stillOwnsFailedRefresh()) logout();
         });
     } else if (tokenState === "valid" && !user && !loading) {
       fetchUser();

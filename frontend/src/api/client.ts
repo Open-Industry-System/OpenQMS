@@ -12,8 +12,9 @@ type AuthRequestConfig = InternalAxiosRequestConfig & {
   _authSessionGeneration?: number;
 };
 
-function isAuthUrl(url?: string): boolean {
-  return Boolean(url?.startsWith("/auth/"));
+function isAuthSessionEndpoint(url?: string): boolean {
+  const path = url?.split("?", 1)[0];
+  return path === "/auth/login" || path === "/auth/refresh" || path === "/auth/me";
 }
 
 function isRequestSessionCurrent(config: AuthRequestConfig): boolean {
@@ -174,9 +175,10 @@ client.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
-      // Auth endpoints must reject directly. Revalidating /auth/refresh or
+      // Session endpoints must reject directly. Revalidating /auth/refresh or
       // /auth/me through /auth/me can recurse or self-wait on refreshPromise.
-      if (isAuthUrl(originalRequest.url) || !isRequestOwnerCurrent(originalRequest)) {
+      // Other protected /auth/* management endpoints still revalidate the user.
+      if (isAuthSessionEndpoint(originalRequest.url) || !isRequestOwnerCurrent(originalRequest)) {
         return Promise.reject(error);
       }
       const generation = originalRequest._authSessionGeneration;
