@@ -61,6 +61,8 @@ SCAR_TRIGGER_CAPA_ID = uuid.UUID(SCAR_TRIGGER_E2E_CAPA_ID)
 SCAR_TRIGGER_RUN_ID = uuid.UUID("a0000005-0001-4000-8000-000000000002")
 SCAR_TRIGGER_REPORT_ID = uuid.UUID("a0000005-0001-4000-8000-000000000003")
 KNOWLEDGE_SINK_CAPA_ID = uuid.UUID(KNOWLEDGE_SINK_E2E_CAPA_ID)
+KNOWLEDGE_SINK_VERIFICATION_ID = uuid.UUID("00000000-0000-0000-0000-000000e20280")
+KNOWLEDGE_SINK_D7_ACTION_ID = uuid.UUID("00000000-0000-0000-0000-000000e20281")
 SUPPLIER_RISK_CAPA_ID = uuid.UUID(SUPPLIER_RISK_E2E_CAPA_ID)
 SUPPLIER_RISK_HIST_CAPA_ID = uuid.UUID(SUPPLIER_RISK_E2E_HIST_CAPA_ID)
 SUPPLIER_RISK_D7_ACTION_ID = uuid.UUID(SUPPLIER_RISK_E2E_D7_ACTION_ID)
@@ -155,9 +157,12 @@ async def _seed_d3_sources(db, factory_id, user_id):
         supplier = Supplier(
             supplier_no=D3_E2E_SUPPLIER_NO, factory_id=factory_id,
             name="D3 E2E Supplier", short_name="D3E2E",
+            product_scope=D3_E2E_PRODUCT_LINE,
             status="approved", created_by=user_id)
         db.add(supplier)
         await db.flush()
+    else:
+        supplier.product_scope = D3_E2E_PRODUCT_LINE
 
     customer = await db.scalar(select(Customer).where(Customer.customer_code == D3_E2E_CUSTOMER_CODE))
     if customer is None:
@@ -882,6 +887,7 @@ async def _seed_fmea_linkage(db, factory_ids):
             factory_id=factory_id,
             status=EightDState.D4_ROOT_CAUSE.value,
             severity="serious",
+            d2_description="孔径超差投诉：定位销磨损导致孔径超差（E2E FMEA 联动）",
             d4_root_cause=root_cause,
             d5_correction="更换定位销并校准夹具",
             d7_prevention="将定位销磨损检测纳入首件检验",
@@ -893,6 +899,7 @@ async def _seed_fmea_linkage(db, factory_ids):
         await db.flush()
     else:
         capa.status = EightDState.D4_ROOT_CAUSE.value
+        capa.d2_description = "孔径超差投诉：定位销磨损导致孔径超差（E2E FMEA 联动）"
         capa.d4_root_cause = root_cause
         capa.d5_correction = "更换定位销并校准夹具"
         capa.d7_prevention = "将定位销磨损检测纳入首件检验"
@@ -1126,7 +1133,7 @@ async def _seed_knowledge_sink(db, factory_ids):
     Idempotent: resets status and D-step fields so close can re-trigger sink.
     Does not pre-create knowledge_entries (sink happens on D8 close via LLM).
     """
-    from app.models.capa import CAPAEightD
+    from app.models.capa import CAPAEightD, CapaD7NodeAction, CapaRootCauseVerification
     from app.models.knowledge_entry import KnowledgeEntry
     from app.state_machines.eightd_state import EightDState
 
@@ -1144,6 +1151,7 @@ async def _seed_knowledge_sink(db, factory_ids):
         factory_id=factory_id,
         status=EightDState.D8_APPROVAL_PENDING.value,
         severity="serious",
+        d1_team=[{"name": "E2E 知识沉淀", "role": "质量工程师"}],
         d2_description=(
             "现场抽检一批 DC-DC-100-E2E 来料螺栓，发现 M8 螺栓孔径超差，"
             "实测 8.12mm（上限 8.05mm）。"
@@ -1175,6 +1183,45 @@ async def _seed_knowledge_sink(db, factory_ids):
         capa = (await db.execute(
             select(CAPAEightD).where(CAPAEightD.document_no == KNOWLEDGE_SINK_E2E_CAPA_DOC_NO)
         )).scalar_one()
+
+    # Reset only fixed D4/D7 children so re-seed produces the same review-ready CAPA.
+    await db.execute(delete(CapaRootCauseVerification).where(
+        CapaRootCauseVerification.capa_id == capa.report_id
+    ))
+    await db.execute(delete(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa.report_id
+    ))
+    db.add(CapaRootCauseVerification(
+        verification_id=KNOWLEDGE_SINK_VERIFICATION_ID,
+        capa_id=capa.report_id,
+        factory_id=factory_id,
+        root_cause_text=capa.d4_root_cause,
+        method="reproduction",
+        result="复现定位销磨损后孔径超差",
+        is_verified=True,
+        conclusion="passed",
+        evidence_attachments=[{
+            "filename": "D4-定位销磨损复现实验记录.pdf",
+            "content_type": "application/pdf",
+        }],
+        verified_by=admin.user_id,
+        verified_at=datetime.now(timezone.utc),
+    ))
+    db.add(CapaD7NodeAction(
+        action_id=KNOWLEDGE_SINK_D7_ACTION_ID,
+        capa_id=capa.report_id,
+        factory_id=factory_id,
+        action="confirmed",
+        fmea_id=None,
+        failure_mode_node_id="rule:定位销磨损导致孔径超差",
+        failure_cause_node_id=None,
+        match_source="rule",
+        prevention_control_node_id=None,
+        prevention_control_name_before=None,
+        prevention_control_name_after="定位销磨损周检",
+        acted_by=admin.user_id,
+    ))
+    await db.flush()
 
     # Drop prior sink entry so re-seed starts clean (no CAPA FK; source_id is logical).
     existing_entry = await db.scalar(
@@ -1445,9 +1492,9 @@ async def _seed_lateral_diffusion(db, factory_ids):
             existing.is_active = True
     await db.flush()
 
-    # recipients: engineer/manager on PL-A..D
+    # recipients: engineer/manager on source + target product lines
     for u in (engineer, manager):
-        for pl in (LATERAL_PL_A, LATERAL_PL_B, LATERAL_PL_C, LATERAL_PL_D):
+        for pl in (LATERAL_PL_SRC, LATERAL_PL_A, LATERAL_PL_B, LATERAL_PL_C, LATERAL_PL_D):
             exists = await db.scalar(
                 select(UserProductLine).where(
                     UserProductLine.user_id == u.user_id,
