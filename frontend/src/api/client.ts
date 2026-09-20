@@ -36,27 +36,76 @@ function logoutAndRedirectIfCurrent(config: AuthRequestConfig): void {
 // NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
 const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories"];
 
-// Guard against concurrent refresh attempts
-let isRefreshing = false;
 type RefreshSubscriber = {
+  config: AuthRequestConfig;
   error: unknown;
   resolve: (token: string) => void;
   reject: (error: unknown) => void;
 };
-let refreshSubscribers: RefreshSubscriber[] = [];
 
-function onRefreshed(token: string) {
-  refreshSubscribers.forEach(({ resolve }) => resolve(token));
-  refreshSubscribers = [];
+type RefreshCycle = {
+  key: string;
+  owner: AuthRequestConfig;
+  subscribers: RefreshSubscriber[];
+};
+
+const refreshCycles = new Map<string, RefreshCycle>();
+
+function refreshCycleKey(config: AuthRequestConfig): string {
+  return `${config._authSessionGeneration ?? -1}:${config._authAccessToken ?? ""}`;
 }
 
-function onRefreshFailed() {
-  refreshSubscribers.forEach(({ error, reject }) => reject(error));
-  refreshSubscribers = [];
+function settleRefreshSuccess(cycle: RefreshCycle, token: string): void {
+  const subscribers = cycle.subscribers.splice(0);
+  subscribers.forEach(({ resolve }) => resolve(token));
 }
 
-function addRefreshSubscriber(subscriber: RefreshSubscriber) {
-  refreshSubscribers.push(subscriber);
+function settleRefreshFailure(cycle: RefreshCycle): void {
+  const subscribers = cycle.subscribers.splice(0);
+  subscribers.forEach(({ error, reject }) => reject(error));
+}
+
+async function runRefreshCycle(cycle: RefreshCycle): Promise<void> {
+  try {
+    const newToken = await useAuthStore.getState().tryRefreshToken();
+    if (newToken && cycle.owner._authSessionGeneration === getAuthSessionGeneration()) {
+      settleRefreshSuccess(cycle, newToken);
+      return;
+    }
+    settleRefreshFailure(cycle);
+    logoutAndRedirectIfCurrent(cycle.owner);
+  } catch {
+    settleRefreshFailure(cycle);
+    logoutAndRedirectIfCurrent(cycle.owner);
+  } finally {
+    if (refreshCycles.get(cycle.key) === cycle) refreshCycles.delete(cycle.key);
+  }
+}
+
+function enqueueRefresh(error: unknown, config: AuthRequestConfig): Promise<unknown> {
+  const key = refreshCycleKey(config);
+  let cycle = refreshCycles.get(key);
+  let shouldStart = false;
+  if (!cycle) {
+    cycle = { key, owner: config, subscribers: [] };
+    refreshCycles.set(key, cycle);
+    shouldStart = true;
+  }
+
+  const response = new Promise((resolve, reject) => {
+    cycle!.subscribers.push({
+      config,
+      error,
+      resolve: (token: string) => {
+        config._retry = true;
+        config.headers.Authorization = `Bearer ${token}`;
+        resolve(client(config));
+      },
+      reject,
+    });
+  });
+  if (shouldStart) void runRefreshCycle(cycle);
+  return response;
 }
 
 client.interceptors.request.use((config) => {
@@ -121,40 +170,7 @@ client.interceptors.response.use(
         return Promise.reject(error);
       }
 
-      if (!isRefreshing) {
-        isRefreshing = true;
-        try {
-          const newToken = await useAuthStore.getState().tryRefreshToken();
-          if (newToken && isRequestSessionCurrent(originalRequest)) {
-            onRefreshed(newToken);
-            originalRequest._retry = true;
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            return client(originalRequest);
-          }
-          onRefreshFailed();
-          logoutAndRedirectIfCurrent(originalRequest);
-          return Promise.reject(error);
-        } catch {
-          onRefreshFailed();
-          logoutAndRedirectIfCurrent(originalRequest);
-          return Promise.reject(error);
-        } finally {
-          isRefreshing = false;
-        }
-      }
-
-      // Queue pending requests while refresh is in flight
-      return new Promise((resolve, reject) => {
-        addRefreshSubscriber({
-          error,
-          resolve: (token: string) => {
-            originalRequest._retry = true;
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            resolve(client(originalRequest));
-          },
-          reject,
-        });
-      });
+      return enqueueRefresh(error, originalRequest);
     }
 
     if (error.response?.status === 403) {

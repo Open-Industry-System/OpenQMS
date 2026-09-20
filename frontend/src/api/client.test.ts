@@ -95,6 +95,42 @@ describe("client 401 refresh handling", () => {
     expect(invocationCount.get("/orders")).toBe(2);
   });
 
+  it("starts a separate refresh cycle for a newer session", async () => {
+    const logout = vi.fn();
+    let resolveOld!: (token: string | null) => void;
+    let resolveNew!: (token: string | null) => void;
+    const oldRefresh = new Promise<string | null>((resolve) => { resolveOld = resolve; });
+    const newRefresh = new Promise<string | null>((resolve) => { resolveNew = resolve; });
+    const tryRefreshToken = vi.fn()
+      .mockReturnValueOnce(oldRefresh)
+      .mockReturnValueOnce(newRefresh);
+    auth.getState.mockReturnValue({ logout, tryRefreshToken, setUser: vi.fn() });
+    auth.generation = 1;
+    localStorage.setItem("access_token", "old-token");
+    const client = await loadClient();
+    client.defaults.adapter = (config) => {
+      if (config.url === "/new" && config.headers.Authorization === "Bearer new-refreshed-token") {
+        return Promise.resolve({ config, data: { session: "new" }, headers: {}, status: 200, statusText: "OK" });
+      }
+      return unauthorized(config);
+    };
+
+    const oldRequest = client.get("/old");
+    await vi.waitFor(() => expect(tryRefreshToken).toHaveBeenCalledOnce());
+
+    auth.generation = 2;
+    localStorage.setItem("access_token", "new-login-token");
+    const newRequest = client.get("/new");
+    await vi.waitFor(() => expect(tryRefreshToken).toHaveBeenCalledTimes(2));
+
+    localStorage.setItem("access_token", "new-refreshed-token");
+    resolveNew("new-refreshed-token");
+    await expect(newRequest).resolves.toMatchObject({ data: { session: "new" } });
+    resolveOld(null);
+    await expect(oldRequest).rejects.toMatchObject({ config: { url: "/old" }, response: { status: 401 } });
+    expect(logout).not.toHaveBeenCalled();
+  });
+
   it("rejects every concurrent request with its own error when refresh throws", async () => {
     const logout = vi.fn();
     let rejectRefresh!: (error: Error) => void;
