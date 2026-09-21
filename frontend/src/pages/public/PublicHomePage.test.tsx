@@ -7,7 +7,10 @@ import i18n from "../../i18n";
 
 const publicHomeStyles = readFileSync("src/pages/public/PublicHomePage.css", "utf8");
 
-const auth = vi.hoisted(() => ({ token: null as string | null }));
+const auth = vi.hoisted(() => ({
+  token: null as string | null,
+  user: null as { username: string } | null,
+}));
 vi.mock("../../store/authStore", () => ({
   useAuthStore: (selector: (state: typeof auth) => unknown) => selector(auth),
 }));
@@ -18,6 +21,7 @@ function renderPage() {
 
 beforeEach(async () => {
   auth.token = null;
+  auth.user = null;
   vi.unstubAllEnvs();
   await i18n.changeLanguage("en-US");
 });
@@ -78,8 +82,15 @@ describe("PublicHomePage", () => {
     expect(screen.getByRole("link", { name: "Online demo" })).toHaveAttribute("href", "/login?demo=viewer");
   });
 
-  it("sends authenticated users to the dashboard", () => {
+  it("sends a stored token without a loaded user to login", () => {
+    auth.token = "persisted-token";
+    renderPage();
+    expect(screen.getAllByRole("link", { name: "Enter system" })[0]).toHaveAttribute("href", "/login");
+  });
+
+  it("sends a loaded authenticated user to the dashboard", () => {
     auth.token = "present";
+    auth.user = { username: "viewer" };
     renderPage();
     expect(screen.getAllByRole("link", { name: "Enter system" })[0]).toHaveAttribute("href", "/dashboard");
   });

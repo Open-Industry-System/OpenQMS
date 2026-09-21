@@ -1,5 +1,7 @@
 # OpenQMS Public Home Implementation Plan
 
+> **Scope decision, 2026-09-21:** This plan records the original implementation path. The final PR excludes all subsequently added authentication refactoring and concurrency tests: `authStore.ts`, `api/client.ts`, and `ProtectedRoute` match `main`. Public-home system entry uses `/dashboard` only when both token and loaded user exist; otherwise it uses `/login`. This decision supersedes any token-presence-only CTA instruction below. Authentication infrastructure issues are separate follow-up work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a public, bilingual OpenQMS landing page at `/` that presents AI as the core product differentiator, links to the real open-source repository, and optionally exposes a configuration-gated Viewer demo login.

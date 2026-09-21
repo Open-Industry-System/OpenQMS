@@ -1,119 +1,31 @@
-import axios, { type InternalAxiosRequestConfig } from "axios";
-import { getAuthSessionGeneration, useAuthStore } from "../store/authStore";
+import axios from "axios";
+import { useAuthStore } from "../store/authStore";
 
 const client = axios.create({
   baseURL: "/api",
   timeout: 10000,
 });
 
-type AuthRequestConfig = InternalAxiosRequestConfig & {
-  _retry?: boolean;
-  _authAccessToken?: string | null;
-  _authSessionGeneration?: number;
-};
-
-function isAuthSessionEndpoint(url?: string): boolean {
-  const path = url?.split("?", 1)[0];
-  return path === "/auth/login" || path === "/auth/refresh" || path === "/auth/me";
-}
-
-function isRequestSessionCurrent(config: AuthRequestConfig): boolean {
-  return config._authSessionGeneration === getAuthSessionGeneration();
-}
-
-function isRequestOwnerCurrent(config: AuthRequestConfig): boolean {
-  return isRequestSessionCurrent(config)
-    && config._authAccessToken === localStorage.getItem("access_token");
-}
-
-function logoutAndRedirectIfCurrent(config: AuthRequestConfig): void {
-  if (!isRequestOwnerCurrent(config)) return;
-  useAuthStore.getState().logout();
-  window.location.href = "/login";
-}
-
 // Factory ID auto-injection for GET requests on business APIs
 // Excluded: auth, group, product-lines, factories (management endpoints)
 // NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
 const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories"];
 
-type RefreshSubscriber = {
-  config: AuthRequestConfig;
-  error: unknown;
-  resolve: (token: string) => void;
-  reject: (error: unknown) => void;
-};
+// Guard against concurrent refresh attempts
+let isRefreshing = false;
+let refreshSubscribers: Array<(token: string) => void> = [];
 
-type RefreshCycle = {
-  key: string;
-  owner: AuthRequestConfig;
-  subscribers: RefreshSubscriber[];
-};
-
-const refreshCycles = new Map<string, RefreshCycle>();
-
-function refreshCycleKey(config: AuthRequestConfig): string {
-  return `${config._authSessionGeneration ?? -1}:${config._authAccessToken ?? ""}`;
+function onRefreshed(token: string) {
+  refreshSubscribers.forEach((cb) => cb(token));
+  refreshSubscribers = [];
 }
 
-function settleRefreshSuccess(cycle: RefreshCycle, token: string): void {
-  const subscribers = cycle.subscribers.splice(0);
-  subscribers.forEach(({ resolve }) => resolve(token));
-}
-
-function settleRefreshFailure(cycle: RefreshCycle): void {
-  const subscribers = cycle.subscribers.splice(0);
-  subscribers.forEach(({ error, reject }) => reject(error));
-}
-
-async function runRefreshCycle(cycle: RefreshCycle): Promise<void> {
-  try {
-    const newToken = await useAuthStore.getState().tryRefreshToken();
-    if (newToken && cycle.owner._authSessionGeneration === getAuthSessionGeneration()) {
-      settleRefreshSuccess(cycle, newToken);
-      return;
-    }
-    settleRefreshFailure(cycle);
-    logoutAndRedirectIfCurrent(cycle.owner);
-  } catch {
-    settleRefreshFailure(cycle);
-    logoutAndRedirectIfCurrent(cycle.owner);
-  } finally {
-    if (refreshCycles.get(cycle.key) === cycle) refreshCycles.delete(cycle.key);
-  }
-}
-
-function enqueueRefresh(error: unknown, config: AuthRequestConfig): Promise<unknown> {
-  const key = refreshCycleKey(config);
-  let cycle = refreshCycles.get(key);
-  let shouldStart = false;
-  if (!cycle) {
-    cycle = { key, owner: config, subscribers: [] };
-    refreshCycles.set(key, cycle);
-    shouldStart = true;
-  }
-
-  const response = new Promise((resolve, reject) => {
-    cycle!.subscribers.push({
-      config,
-      error,
-      resolve: (token: string) => {
-        config._retry = true;
-        config.headers.Authorization = `Bearer ${token}`;
-        resolve(client(config));
-      },
-      reject,
-    });
-  });
-  if (shouldStart) void runRefreshCycle(cycle);
-  return response;
+function addRefreshSubscriber(cb: (token: string) => void) {
+  refreshSubscribers.push(cb);
 }
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem("access_token");
-  const authConfig = config as AuthRequestConfig;
-  authConfig._authAccessToken = token;
-  authConfig._authSessionGeneration = getAuthSessionGeneration();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -143,7 +55,7 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config as AuthRequestConfig;
+    const originalRequest = error.config;
 
     if (error.response?.status === 503 && error.response?.data?.detail?.tenant_suspended) {
       window.location.href = "/tenant-suspended";
@@ -156,39 +68,55 @@ client.interceptors.response.use(
 
     // 401: attempt token refresh before redirecting to login
     if (error.response?.status === 401) {
-      // Auth endpoints own their failure handling. Re-entering refresh from the
-      // refresh endpoint itself can wait on the same in-flight promise forever.
-      if (originalRequest.url?.includes("/auth/login") || originalRequest.url?.includes("/auth/refresh")) {
+      // Login 401 = invalid credentials (not an expired token). Reject
+      // immediately so the login form can show the error and stop loading —
+      // the refresh flow below would otherwise hang the request forever
+      // (no refresh_token exists for an unauthenticated login attempt).
+      if (originalRequest.url?.includes("/auth/login")) {
         return Promise.reject(error);
       }
-      if (originalRequest._retry) {
-        logoutAndRedirectIfCurrent(originalRequest);
-        return Promise.reject(error);
-      }
-      // A delayed response from a previous login/session must not refresh or
-      // log out the session that is current now.
-      if (!isRequestOwnerCurrent(originalRequest)) {
+      // Don't retry refresh endpoint or already-retried requests
+      if (originalRequest.url?.includes("/auth/refresh") || originalRequest._retry) {
+        useAuthStore.getState().logout();
+        window.location.href = "/login";
         return Promise.reject(error);
       }
 
-      return enqueueRefresh(error, originalRequest);
+      if (!isRefreshing) {
+        isRefreshing = true;
+        try {
+          const newToken = await useAuthStore.getState().tryRefreshToken();
+          isRefreshing = false;
+          if (newToken) {
+            onRefreshed(newToken);
+            // Retry the original request with the new token
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return client(originalRequest);
+          }
+        } catch {
+          isRefreshing = false;
+          useAuthStore.getState().logout();
+          window.location.href = "/login";
+          return Promise.reject(error);
+        }
+        isRefreshing = false;
+      }
+
+      // Queue pending requests while refresh is in flight
+      return new Promise((resolve) => {
+        addRefreshSubscriber((token: string) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          resolve(client(originalRequest));
+        });
+      });
     }
 
     if (error.response?.status === 403) {
-      // Session endpoints must reject directly. Revalidating /auth/refresh or
-      // /auth/me through /auth/me can recurse or self-wait on refreshPromise.
-      // Other protected /auth/* management endpoints still revalidate the user.
-      if (isAuthSessionEndpoint(originalRequest.url) || !isRequestOwnerCurrent(originalRequest)) {
-        return Promise.reject(error);
-      }
-      const generation = originalRequest._authSessionGeneration;
       try {
         const resp = await client.get("/auth/me");
-        if (generation === getAuthSessionGeneration()) {
-          useAuthStore.getState().setUser(resp.data);
-        }
+        useAuthStore.getState().setUser(resp.data);
       } catch {
-        // Revalidation failure is handled by the auth request itself.
+        // refresh failed — ignore, user stays with stale state
       }
     }
     return Promise.reject(error);

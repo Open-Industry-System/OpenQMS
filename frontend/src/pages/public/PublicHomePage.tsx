@@ -24,8 +24,9 @@ interface TranslatedContent {
 export default function PublicHomePage() {
   const { t } = useTranslation("home");
   const token = useAuthStore((state) => state.token);
+  const user = useAuthStore((state) => state.user);
   const demoConfig = getPublicDemoConfig();
-  const systemPath = token ? "/dashboard" : "/login";
+  const systemPath = token && user ? "/dashboard" : "/login";
   const githubUrl = "https://github.com/Open-Industry-System/OpenQMS";
   const docsUrl = `${githubUrl}/tree/main/docs`;
 

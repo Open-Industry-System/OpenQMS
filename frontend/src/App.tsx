@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Spin } from "antd";
-import { getAuthSessionGeneration, useAuthStore } from "./store/authStore";
+import { useAuthStore } from "./store/authStore";
 import { usePermission } from "./hooks/usePermission";
 import type { ModuleKey } from "./hooks/usePermission";
 import AppLayout from "./components/layout/AppLayout";
@@ -86,79 +86,38 @@ const UserManagementPage = lazy(() => import("./pages/admin/UserManagementPage")
 const LogManagementPage = lazy(() => import("./pages/admin/LogManagementPage"));
 const ReviewSkillsPage = lazy(() => import("./pages/admin/ReviewSkillsPage"));
 
-type TokenState = "missing" | "malformed" | "expired" | "valid";
-
-function classifyToken(token: string | null): TokenState {
-  if (!token) return "missing";
-
+function isTokenExpired(token: string): boolean {
   try {
-    const payload: unknown = JSON.parse(atob(token.split('.')[1]));
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-      return "malformed";
-    }
-
-    const exp = (payload as Record<string, unknown>).exp;
-    if (typeof exp !== "number" || !Number.isFinite(exp)) return "malformed";
-    return exp * 1000 < Date.now() ? "expired" : "valid";
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp * 1000 < Date.now();
   } catch {
-    return "malformed";
+    return true;
   }
 }
 
 function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: React.ReactNode; requiredModule?: ModuleKey; requireAdmin?: boolean }) {
   const token = useAuthStore((s) => s.token);
-  const loading = useAuthStore((s) => s.loading);
+  const _loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
-  const tryRefreshToken = useAuthStore((s) => s.tryRefreshToken);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const { canView, isAdmin } = usePermission();
-  const refreshAttemptedToken = useRef<string | null>(null);
-  const tokenState = classifyToken(token);
 
   useEffect(() => {
-    if (tokenState === "malformed") {
-      logout();
-    } else if (tokenState === "expired" && token) {
-      if (refreshAttemptedToken.current === token) return;
-      refreshAttemptedToken.current = token;
-      const generation = getAuthSessionGeneration();
-      const refreshToken = localStorage.getItem("refresh_token");
-      const stillOwnsFailedRefresh = () => (
-        generation === getAuthSessionGeneration()
-        && refreshToken === localStorage.getItem("refresh_token")
-      );
-      void tryRefreshToken()
-        .then((refreshedToken) => {
-          if (generation !== getAuthSessionGeneration()) return;
-          if (!refreshedToken) {
-            if (stillOwnsFailedRefresh()) logout();
-            return;
-          }
-          if (classifyToken(refreshedToken) !== "valid") {
-            logout();
-            return;
-          }
-          if (user) void fetchUser();
-        })
-        .catch(() => {
-          if (stillOwnsFailedRefresh()) logout();
-        });
-    } else if (tokenState === "valid" && !user && !loading) {
-      fetchUser();
-    }
-  }, [token, tokenState, user, loading, fetchUser, tryRefreshToken, logout]);
+    if (token && !user) fetchUser();
+  }, [token, user, fetchUser]);
 
-  if (tokenState === "missing" || tokenState === "malformed") {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (tokenState === "expired" || !user) {
+  if (token && !user) {
     return (
       <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <Spin size="large" />
       </div>
     );
+  }
+
+  if (!token || isTokenExpired(token)) {
+    if (token && isTokenExpired(token)) logout();
+    return <Navigate to="/login" replace />;
   }
 
   if (requiredModule && !canView(requiredModule)) return <Navigate to="/dashboard" replace />;
