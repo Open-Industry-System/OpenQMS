@@ -88,7 +88,13 @@ docker compose up -d
 
 ### 4. 访问系统
 
-浏览器打开 **[http://localhost:5173](http://localhost:5173)**，使用以下账号登录：
+| 页面 | 地址 | 说明 |
+|------|------|------|
+| 公开项目首页 | [http://localhost:5173/](http://localhost:5173/) | 无需登录 |
+| 系统登录 | [http://localhost:5173/login](http://localhost:5173/login) | 登录入口 |
+| 仪表盘 | [http://localhost:5173/dashboard](http://localhost:5173/dashboard) | 登录后访问 |
+
+以下种子账号仅用于本地开发：
 
 | 用户名 | 密码 | 角色 | 说明 |
 |--------|------|------|------|
@@ -98,7 +104,7 @@ docker compose up -d
 | `viewer` | `Viewer@2026` | 只读用户 | 所有模块只读 |
 | `groupadmin` | `GroupAdmin@2026` | 系统管理员（集团） | 多工厂管理权限 |
 
-> ⚠️ 演示密码仅用于开发环境，生产环境请务必修改。
+> 公开部署不得暴露上述种子账号凭据。Viewer 演示入口默认关闭，只有显式完成专用演示配置后才会显示。
 
 ### 5. API 文档
 

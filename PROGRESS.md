@@ -1,14 +1,27 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-09-06
-**当前分支**: `chore/release-stabilization-20260905`
-**基线**: `main@98bca381`
-**最近实现提交**: `0b22a1fa fix(capa): render empty PPT linkage sections`
-**当前阶段**: 发布候选版稳定化门禁已通过（待分支评审与集成）
+**更新日期**: 2026-09-20
+**当前分支**: `worktree-public-home`
+**基线**: `main@eaf5793c`
+**最近实现提交**: 公开首页保持 `/` 无需认证；认证重构按 2026-09-21 评审决定撤回，与 `main` 行为一致
+**当前阶段**: PR #22 收缩为公开首页、Viewer 演示与文档；待最终验证
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+
+---
+
+## 公开项目首页（2026-09-13）
+
+- **状态**：公开 `/` 首页已完成，无需登录；AI-first 内容、中文/英文切换和 Viewer 演示门控已完成。
+- **自动化证据**：页脚链接 TDD RED `1 failed / 8 passed`（语义页脚内缺少 `View GitHub`），最小实现后 GREEN `9/9 passed`；公开首页 focused tests `5 files / 30 tests passed`；`PublicHomePage.tsx` 与其测试文件级 ESLint exit 0；前端 production build exit 0（Vite `6835 modules transformed`）。最终 `make check TEST_DB=qms_test_public_home_fix_round1` 在新建专用库上 exit 0：backend `1957 passed / 5 skipped / 3 xfailed / 2 xpassed`（25 warnings），frontend `tsc --noEmit` 与 production build 均通过。
+- **2026-09-21 范围收缩**：多轮评审持续发现 authStore、Axios 401 队列与跨标签 refresh 轮换的新增竞态；按产品决策，已从本 PR 撤回认证状态机、刷新协调器及其并发测试，`authStore.ts`、`api/client.ts` 和 `ProtectedRoute` 恢复到已合入 `main` 的行为。公开首页“进入系统”只在 token 且 user 已加载时进入 `/dashboard`，否则进入 `/login`，避免仅凭持久化 token 进入受保护页。TDD RED：仅有持久化 token、user 未加载时错误跳往 `/dashboard`；GREEN：公开首页/演示/路由聚焦 `5 files / 26 tests passed`，文件级 ESLint 与 production build 通过。`make check` 首次运行时现有共享 PostgreSQL 容器中途停止；改用仅绑定 `127.0.0.1:55422` 的隔离临时数据库后，`make check TEST_DB=qms_test_pr22_homeonly_20260921b` exit 0：backend `1975 passed / 5 skipped / 3 xfailed / 2 xpassed`，frontend `tsc --noEmit` 与 production build 均通过。隔离容器已停止。认证基础设施的既有问题留待独立任务处理，本 PR 不宣称修复它们。
+- **浏览器验收**：真实 Playwright 在 `1440×900`、`390×844`、`320×844` 通过；三档均 `scrollWidth == clientWidth`（分别 `1432/1432`、`382/382`、`312/312`），Hero、AI、能力、架构、开源区均可读。桌面锚点导航可见，移动端隐藏；语言和系统入口始终可见，320px 头部两行均在视口内。新增页脚链接后复验 390/320px：两链接均可见，320px 页脚宽 `284px` 且完整位于 `312px` clientWidth 内。
+- **路由与可访问性**：公开 `/` 无 `/api/` 请求即可渲染；未登录访问 `/dashboard` 跳转 `/login`；中英文原地切换不 reload；实际交互链接均可由 Tab 到达且有 `3px` 可见焦点。语义页脚内新增 GitHub 与项目文档链接，复用本地化文案和既有 URL，均带 `_blank` 与 `noreferrer noopener`；真实浏览器中分别为 Tab stop 15/16。
+- **演示门控**：关闭配置时 `/login?demo=viewer` 不显示演示卡或凭据；仅用进程环境临时启用的假值可显示 Viewer 卡并填充表单，未提交、未发出 `/api/auth/login` 请求，未写入跟踪文件。启用态真实键盘验收中，首页演示 CTA 为 Tab stop 9、登录页“使用 Viewer 账号”为 Tab stop 1，两者均在视口内且有 `3px` 实线可见焦点。
+- **验证例外**：仓库级 `npm run lint` 有 1 个与本功能无关的既存错误（`frontend/e2e/global.setup.ts:33`，`preserve-caught-error`；总计 `1 error / 49 warnings`）。按 Task 6 裁定不修改该文件；公开首页相关源文件的文件级 lint 已通过。
+- **下一步**：启用多角色公开演示前，先设计隔离租户、自动重置、写入限流和危险操作控制的可重置基础设施。
 
 ---
 

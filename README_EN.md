@@ -88,7 +88,13 @@ docker compose up -d
 
 ### 4. Access the System
 
-Open **[http://localhost:5173](http://localhost:5173)** in your browser and log in with one of the following accounts:
+| Page | URL | Description |
+|------|-----|-------------|
+| Public project home | [http://localhost:5173/](http://localhost:5173/) | No login required |
+| System login | [http://localhost:5173/login](http://localhost:5173/login) | Login entry |
+| Dashboard | [http://localhost:5173/dashboard](http://localhost:5173/dashboard) | Available after login |
+
+The following seed accounts are for local development only:
 
 | Username | Password | Role | Description |
 |----------|----------|------|-------------|
@@ -98,7 +104,7 @@ Open **[http://localhost:5173](http://localhost:5173)** in your browser and log 
 | `viewer` | `Viewer@2026` | Read-only User | Read-only access to all modules |
 | `groupadmin` | `GroupAdmin@2026` | System Administrator (Group) | Multi-plant management permissions |
 
-> ⚠️ Demo passwords are for development environments only — be sure to change them in production.
+> Public deployments must not expose these seed credentials. The Viewer demo entry remains hidden until a dedicated demo account is explicitly configured.
 
 ### 5. API Documentation
 

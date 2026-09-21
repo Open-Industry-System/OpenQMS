@@ -1,0 +1,75 @@
+{
+  "nav": {
+    "ai": "AI quality intelligence",
+    "capabilities": "Core capabilities",
+    "architecture": "Architecture",
+    "openSource": "Open source",
+    "enterSystem": "Enter system"
+  },
+  "hero": {
+    "eyebrow": "AI-NATIVE QUALITY MANAGEMENT",
+    "title": "Turn quality data into actionable intelligence.",
+    "description": "OpenQMS embeds AI into FMEA, 8D, process analysis, and knowledge reuse so quality engineers can identify risk, validate causes, and retain experience faster.",
+    "demo": "Online demo",
+    "login": "Enter system",
+    "github": "View GitHub",
+    "graphLabel": "Quality AI core",
+    "graphNodes": ["FMEA risk", "SPC process", "8D closure", "Supplier quality", "Knowledge graph"]
+  },
+  "metrics": [
+    { "value": "20+", "label": "Quality modules" },
+    { "value": "AIAG-VDA", "label": "Seven-step method" },
+    { "value": "IATF 16949", "label": "Core process coverage" },
+    { "value": "MIT", "label": "Open-source license" }
+  ],
+  "ai": {
+    "eyebrow": "HOW AI WORKS IN OPENQMS",
+    "title": "AI is the quality engineer's copilot—not a black-box decision maker.",
+    "description": "The system retrieves evidence from quality context, fuses it into suggestions, and writes back only after human confirmation. Every suggestion retains its source, confidence, and audit trail.",
+    "stages": [
+      { "index": "01 · CONTEXT", "title": "Connect quality context", "body": "FMEA, CAPA, SPC, IQC, MES, supplier data, and lessons learned" },
+      { "index": "02 · RETRIEVAL", "title": "Retrieve through multiple paths", "body": "Knowledge graph, semantic search, rule engines, and historical cases" },
+      { "index": "03 · REASONING", "title": "Fuse and generate suggestions", "body": "Candidate deduplication, ranking, context enrichment, and structured LLM output" },
+      { "index": "04 · GOVERNANCE", "title": "Confirm and audit", "body": "Permission gates, human approval, source labels, and audit logs" }
+    ],
+    "useCases": [
+      { "title": "FMEA recommendations", "body": "Assist with functions, failures, causes, controls, and optimization actions." },
+      { "title": "8D causes and actions", "body": "Orchestrate quality data across 12 stages to produce explainable candidates." },
+      { "title": "Quality knowledge Q&A", "body": "Use hybrid RAG over historical documents and nodes, scoped by user permissions." },
+      { "title": "Trend interpretation and drafting", "body": "Interpret quality trends and draft 8D steps and management-review content." }
+    ],
+    "trust": ["Visible sources", "Auditable adoption", "Factory data isolation", "Permission-scoped results", "Input / output guardrails", "Multiple providers"],
+    "principleLabel": "Core principle",
+    "principle": "AI does not bypass business rules or replace engineering approval. It brings quality knowledge from across the system into the decision workflow."
+  },
+  "capabilities": {
+    "eyebrow": "CONNECTED QUALITY SYSTEM",
+    "title": "A complete quality loop beneath the AI layer",
+    "items": [
+      { "title": "Risk and planning", "body": "FMEA · APQP · PPAP · Control plans" },
+      { "title": "Process and measurement", "body": "SPC · MSA · IQC · Special characteristics" },
+      { "title": "Problems and improvement", "body": "8D/CAPA · SCAR · Complaints · RMA" },
+      { "title": "Supply-chain quality", "body": "Supplier performance · Risk alerts · Customer quality" },
+      { "title": "Governance and compliance", "body": "Audits · Management review · RBAC · Multiple factories" },
+      { "title": "Open integrations", "body": "ERP · MES · PLM · API" }
+    ]
+  },
+  "architecture": {
+    "eyebrow": "MODERN OPEN ARCHITECTURE",
+    "title": "Deployable, extensible, and built to evolve",
+    "description": "Relational data preserves transactions and audit trails, graph data powers knowledge links, and configurable providers connect AI services.",
+    "stack": ["React + TypeScript", "FastAPI", "SQLAlchemy", "PostgreSQL", "Neo4j", "Redis", "Docker Compose"]
+  },
+  "openSource": {
+    "eyebrow": "BUILT IN THE OPEN",
+    "title": "Start from the source and build your quality system",
+    "description": "Explore the source and deployment docs, or use a Viewer account to experience the complete quality workflow.",
+    "github": "View GitHub",
+    "docs": "Read the docs",
+    "demo": "Open demo system"
+  },
+  "footer": {
+    "license": "OpenQMS · MIT License",
+    "tagline": "Open-source quality management for manufacturing"
+  }
+}

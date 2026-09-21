@@ -10,6 +10,12 @@
   "login": "登录",
   "loginSuccess": "登录成功",
   "loginError": "用户名或密码错误",
-  "defaultAccount": "默认账号 admin / Admin@2026",
+  "demo": {
+    "title": "Viewer 只读演示",
+    "description": "可浏览全部演示模块，无法创建、修改或审批数据。",
+    "username": "用户名",
+    "password": "密码",
+    "fill": "使用 Viewer 账号"
+  },
   "footer": "© OpenQMS · 中国制造质量操作系统"
 }
