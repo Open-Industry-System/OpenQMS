@@ -166,8 +166,8 @@ def test_single_alembic_head(mig_db_url):
     cfg = _cfg(mig_db_url)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    # Single head, currently 20260727_warranty_factory_id (extends
-    # 20260726_add_cp_sync_outbox, which merged lateral_diffusion).
-    assert heads == ["20260727_warranty_factory_id"], (
-        f"expected single head 20260727_warranty_factory_id, got {heads}"
+    # Single head, currently 20260926_agent_plugin_registry (extends
+    # 20260727_warranty_factory_id).
+    assert heads == ["20260926_agent_plugin_registry"], (
+        f"expected single head 20260926_agent_plugin_registry, got {heads}"
     )
