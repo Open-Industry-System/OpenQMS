@@ -36,6 +36,20 @@ async def test_generate_content_returns_11_pages(db, admin_user, default_factory
     assert content.root_cause_verifications == []
 
 
+async def test_generate_content_empty_linkages_render_explicit_appendix_rows(db, admin_user, default_factory):
+    """无 FMEA、SCAR、风险预警关联时，附录仍显式呈现三类「无」。"""
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
+    content = await capa_ppt_service.generate_content(db, capa.report_id)
+
+    appendix = next(page for page in content.pages if page.title == "联动附录")
+    sections = {section["label"]: section["value"] for section in appendix.sections}
+    assert sections == {
+        "关联 FMEA 节点": "无",
+        "SCAR": "无",
+        "风险预警": "无",
+    }
+
+
 async def test_generate_content_with_verification_and_evidence(db, admin_user, default_factory):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id)
     db.add(CapaRootCauseVerification(

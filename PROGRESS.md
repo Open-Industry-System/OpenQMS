@@ -1,10 +1,12 @@
 # OpenQMS 开发进度
 
-**更新日期**: 2026-07-23
-**当前分支**: `feature/us-e2e-01-spec-a`
-**最近提交**: US-E2E-01 epic hybrid walk 10/10 PASS（`docs/e2e/reports/US-E2E-01-2026-07-23-2/`）；小模型兜底：tags normalize / doc-gate remap / lateral fill
+**更新日期**: 2026-09-20
+**当前分支**: `worktree-public-home`
+**基线**: `main@eaf5793c`
+**最近实现提交**: 公开首页保持 `/` 无需认证；认证重构按 2026-09-21 评审决定撤回，与 `main` 行为一致
+**当前阶段**: PR #22 收缩为公开首页、Viewer 演示与文档；待最终验证
 
-> **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
+> **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
@@ -18,14 +20,37 @@
 
 ---
 
-## 系统级 E2E 测试套件（M0+M1，已落地）
+## 公开项目首页（2026-09-13）
 
-浏览器全栈 E2E（Playwright + 专用 docker-compose e2e profile），手动 `make e2e`，**不接入 CI**。
+- **状态**：公开 `/` 首页已完成，无需登录；AI-first 内容、中文/英文切换和 Viewer 演示门控已完成。
+- **自动化证据**：页脚链接 TDD RED `1 failed / 8 passed`（语义页脚内缺少 `View GitHub`），最小实现后 GREEN `9/9 passed`；公开首页 focused tests `5 files / 30 tests passed`；`PublicHomePage.tsx` 与其测试文件级 ESLint exit 0；前端 production build exit 0（Vite `6835 modules transformed`）。最终 `make check TEST_DB=qms_test_public_home_fix_round1` 在新建专用库上 exit 0：backend `1957 passed / 5 skipped / 3 xfailed / 2 xpassed`（25 warnings），frontend `tsc --noEmit` 与 production build 均通过。
+- **2026-09-21 范围收缩**：多轮评审持续发现 authStore、Axios 401 队列与跨标签 refresh 轮换的新增竞态；按产品决策，已从本 PR 撤回认证状态机、刷新协调器及其并发测试，`authStore.ts`、`api/client.ts` 和 `ProtectedRoute` 恢复到已合入 `main` 的行为。公开首页“进入系统”只在 token 且 user 已加载时进入 `/dashboard`，否则进入 `/login`，避免仅凭持久化 token 进入受保护页。TDD RED：仅有持久化 token、user 未加载时错误跳往 `/dashboard`；GREEN：公开首页/演示/路由聚焦 `5 files / 26 tests passed`，文件级 ESLint 与 production build 通过。`make check` 首次运行时现有共享 PostgreSQL 容器中途停止；改用仅绑定 `127.0.0.1:55422` 的隔离临时数据库后，`make check TEST_DB=qms_test_pr22_homeonly_20260921b` exit 0：backend `1975 passed / 5 skipped / 3 xfailed / 2 xpassed`，frontend `tsc --noEmit` 与 production build 均通过。隔离容器已停止。认证基础设施的既有问题留待独立任务处理，本 PR 不宣称修复它们。
+- **浏览器验收**：真实 Playwright 在 `1440×900`、`390×844`、`320×844` 通过；三档均 `scrollWidth == clientWidth`（分别 `1432/1432`、`382/382`、`312/312`），Hero、AI、能力、架构、开源区均可读。桌面锚点导航可见，移动端隐藏；语言和系统入口始终可见，320px 头部两行均在视口内。新增页脚链接后复验 390/320px：两链接均可见，320px 页脚宽 `284px` 且完整位于 `312px` clientWidth 内。
+- **路由与可访问性**：公开 `/` 无 `/api/` 请求即可渲染；未登录访问 `/dashboard` 跳转 `/login`；中英文原地切换不 reload；实际交互链接均可由 Tab 到达且有 `3px` 可见焦点。语义页脚内新增 GitHub 与项目文档链接，复用本地化文案和既有 URL，均带 `_blank` 与 `noreferrer noopener`；真实浏览器中分别为 Tab stop 15/16。
+- **演示门控**：关闭配置时 `/login?demo=viewer` 不显示演示卡或凭据；仅用进程环境临时启用的假值可显示 Viewer 卡并填充表单，未提交、未发出 `/api/auth/login` 请求，未写入跟踪文件。启用态真实键盘验收中，首页演示 CTA 为 Tab stop 9、登录页“使用 Viewer 账号”为 Tab stop 1，两者均在视口内且有 `3px` 实线可见焦点。
+- **验证例外**：仓库级 `npm run lint` 有 1 个与本功能无关的既存错误（`frontend/e2e/global.setup.ts:33`，`preserve-caught-error`；总计 `1 error / 49 warnings`）。按 Task 6 裁定不修改该文件；公开首页相关源文件的文件级 lint 已通过。
+- **下一步**：启用多角色公开演示前，先设计隔离租户、自动重置、写入限流和危险操作控制的可重置基础设施。
+
+---
+
+## Release Stabilization（2026-09-06）
+
+- **范围与分支**：仅稳定化，不新增功能；工作位于 `chore/release-stabilization-20260905`，基线为 `main@98bca381`。
+- **协同编辑隔离**：heartbeat、active-users、leave 在访问 session 前校验文档 factory scope；跨工厂统一 404 且无读写副作用。回归选择 23 passed，FMEA 相关选择 193 passed。
+- **最终全量 `make check`**：backend `1975 passed / 5 skipped / 5 xfailed / 0 failed`（181.95s）；frontend TypeScript 与 Vite build 通过（7.61s）。
+- **最终 fresh E2E 数据库**：已授权的 `qms_e2e` reset、迁移与 seed 通过；唯一 Alembic head 仍为 `20260727_warranty_factory_id`。此前初始 seed 与两次额外 reseed 均为 `5 accounts / 21 CAPAs / 5 PFMEAs`。
+- **最终 Playwright（zero retry）**：44 total，`42 passed / 0 failed`；仅两项 allowed skip：`no creds: advice endpoint 422 blocked + import still 200 blocked` 与 `no-LLM: D8 close is blocked (422 outcome=blocked)`。
+- **最终 CAPA PPT**：export `f3f5753b-cbd6-45ba-818b-c51df70a9d83` 在 round 1 `passed`，11 张幻灯片，source/carrier/DB/audit 验证通过；`issues=[]`，非空 `suggestions` 为 advisory。
+- **最终系统集成菜单**：权限切片 `2/2 passed`；viewer 可见集成组而不见 admin-only 管理项，admin 可见三组及 MES 子页。
+
+## 历史：系统级 E2E 测试套件（M0+M1，2026-07 基线）
+
+> 本节记录 2026-07 的初始套件范围与验证基线；其 M1 3/4、dashboard follow-up 和 `9 passed / 1 skipped` 结果均已由上方 **Release Stabilization（2026-09-06）** 证据取代，不能作为当前 RC 门禁结论。
 
 - **M0 基建**：`docker-compose.e2e.yml`（独立库 qms_e2e + 卷 pgdata_e2e + 端口 5433/8001/5174，redis 不暴露，AI 服务 `profiles:["ai-infra"]`，`!override` 端口）；`E2E_MODE` config + 生产门控条件路由；确定性幂等 `seed_e2e`（2 工厂/产品线含 DC-DC-100 默认/5 账号 + UserProductLine/已知 PFMEA-E2E-001 + 8D-E2E-001）；`/api/e2e/seed-state` 只读（账号密码单一来源）+ `/api/e2e/cleanup` 白名单 FK 逆序单事务删（禁用 version 触发器）；`make e2e*` 目标（先 db/redis→migrate→backend/frontend）；`tsconfig.e2e.json` + `@types/node`；helpers/fixtures/global.setup（5 角色 UI 登录→storageState）+ guards。
-- **M1 流程**（3/4，④原延后现可解封）：①登录+RBAC+工厂隔离 ②FMEA 生命周期 ③CAPA 8D 生命周期。④看板下钻此前仅实现一半（`KPICard` onClick + 列表页 query param 已有；widget→navigate 接线 + `dashboardDrilldown.ts` 缺失），**本轮已补齐**（见下文「仪表盘下钻」）；E2E Task 13 下钻 spec 可据此解封（follow-up）。
+- **M1 流程（2026-07 历史基线，3/4）**：①登录+RBAC+工厂隔离 ②FMEA 生命周期 ③CAPA 8D 生命周期。④看板下钻当时仅实现一半（`KPICard` onClick + 列表页 query param 已有；widget→navigate 接线 + `dashboardDrilldown.ts` 缺失），后续已补齐；此处的 E2E Task 13 follow-up 不是当前 RC 待办。
 - **生产代码**：仅 `data-e2e` testid（`CAPAListPage` 的 `product_line_code` 为已批准的 bug 修复例外）。
-- **验证**：M1 套件 9 passed / 1 skipped（无 LLM 凭证时 AI spec skip-with-warning）；backend e2e 端点测试 2 passed；`make check` + e2e tsc 干净；生产门控 `[]`（TENANT_MODE=production 时 `/api/e2e/*` 不载入）。
+- **验证（2026-07 历史基线）**：M1 套件 9 passed / 1 skipped（无 LLM 凭证时 AI spec skip-with-warning）；backend e2e 端点测试 2 passed；`make check` + e2e tsc 干净；生产门控 `[]`（TENANT_MODE=production 时 `/api/e2e/*` 不载入）。
 - **已知摩擦**：backend 登录限流（`auth.py` 10 次/5min 内存）在反复跑 Playwright 时可能让 `global.setup` 超时——重启 e2e backend 即恢复（未改生产代码）。
 - spec: `docs/superpowers/specs/2026-07-01-system-e2e-test-suite-design.md`；plan: `docs/superpowers/plans/2026-07-01-system-e2e-test-suite.md`；指南: `docs/e2e.md`。
 
@@ -40,9 +65,9 @@
 
 ---
 
-## US-E2E-01 8D 全程闭环 — 特性缺口清单（2026-07-03 审计）
+## 历史：US-E2E-01 8D 全程闭环特性缺口审计（2026-07-03，已完成）
 
-对照 `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（v6，定稿）逐条审计当前系统实现的结果。**结论：故事结构上无法端到端通过**，需先补齐以下产品实现，再写故事级 spec `capa-story-closed-loop.spec.ts`。审计口径：代码路径（models/api/services/state_machines + frontend components/e2e），未跑运行时。
+以下为当时对 `docs/user-stories/US-E2E-01-capa-8d-closed-loop.md`（v6，定稿）的代码路径审计记录；当时结论是需补齐产品实现并新增故事级 spec。所列 11 项现均已完成，保留本段仅作实现演进追溯。
 
 **进度**：11 项全部完成（P0-1~P0-4 / P1-5~P1-10 / P2-11 全部落地）
 
@@ -55,7 +80,7 @@
 - [x] **D4/D5/D7 推荐 API + 面板骨架** —— `api/capa.py:276-461`；`D4RecPanel.tsx` / `D5RecPanel.tsx` / `D7RecPanel.tsx`（⚠️ 有骨架但缺阶段/来源丰富度，见"待补 P0-2/P0-3"）
 - [x] **3 类推荐源实现** —— `FMEAGraphSource`、`SemanticSearchSource`（pgvector + FTS RRF）、`HistoricalCAPASource`（已关闭 8D D2→D2 语义匹配）、`RuleEngineSource` + LLM 融合（`match_source: "llm"`）
 
-### 待补（P0 — 补齐后故事才能落地）
+### 历史缺口（已完成）
 
 1. [x] **P0-1 D4 现场根因验证子流程** — 故事验收：「根因必须经现场验证才可确认；验证记录（方法/结果/证据）落库且可追溯；未验证的根因不能推进 D4→D5」
    - 当前 `d4_root_cause` 只是单个 `Text` 列，**无** 方法/结果/证据字段，**无** 附件表关联，**无** D4→D5 阻断校验
@@ -70,7 +95,7 @@
    - `grep "adopt_recommendation|recommendation_audit"` = 0 命中；当前采纳只把文本追加到 `d4_root_cause`/`d5_correction`，未记录 which item / from which source / at what stage
    - **交付物**：新表 `capa_ai_adoption`（`capa_id, d_step, adopted_text, source, stage_index, item_ref, adopted_by, adopted_at`）；D4/D5/D7 采纳按钮点击时 insert 记录并写 `AuditLog(action='ADOPT_RECOMMENDATION', metadata={source, stage})` (Spec A 已落地，commit 见 git log)
 
-### 待补（P1 — 4 类推荐源接入）
+### 历史缺口（已完成）
 
 5. [x] **P1-5 SPC 异常关联推荐源**（故事阶段 6）— 已有 SPC 判异算法（`spc_service.py`），需新增 `SPCAnomalySource` 类：查询该产品线近 30 天判异记录 → 关联到候选失效模式 → 输出到 D4 推荐；无 SPC 数据时 `status="skipped"` reason="产品线暂无 SPC 图" (Spec B 已落地，commit 见 git log)
 6. [x] **P1-6 IQC 来料检验推荐源**（故事阶段 8）— 已有 IQC 模型（`iqc_materials`），新增 `IQCSource`：本批 + 历史来料不良趋势 → D4 推荐；这两个（5、6）由于底层数据已在系统内，接入成本最低，建议先做 (Spec B 已落地，commit 见 git log)
@@ -79,7 +104,7 @@
 9. [x] **P1-9 同类型产品 KB 检索**（故事阶段 4）— 需按 `product_types` 主数据聚合跨工厂共享 KB，扩展 `SemanticSearchSource` 增加 `product_type` 过滤维度或新增 `SameTypeProductKBSource` (Spec B 已落地，commit 见 git log)
 10. [x] **P1-10 经验教训库结构化**（故事阶段 5）— 当前 `HistoricalCAPASource` 只做 D2 语义匹配；建议新增 `capa_lessons_learned` 表（`capa_id, lesson_text, category, tags`）或从 D7/D8 抽取字段，让 lessons 检索更精准 (Spec B 已落地，commit 见 git log)
 
-### 待补（P2 — 故事级 E2E）
+### 历史缺口（已完成）
 
 11. [x] **P2-11 `capa-story-closed-loop.spec.ts`** — 用 `E2E-STORY-CAPA-001` 前缀（故事主角单号），覆盖 10 步主流程 + 12 阶段 DAG 结构断言（`data-e2e="rec-stage-{n}"` 状态属性）+ 7 条 TRANSITION 审计断言（`GET /api/audit-logs?target_id=...` 断 1 CREATE + 7 TRANSITION，D1-D7 operator=engineer、D7-D8 operator=manager）+ AI 采纳留痕断言（`capa_ai_adoption` 表通过 seed-state 端点回读）+ viewer 只读断言（`/capa` 列表看到关闭 8D、详情打开、`capa-create`/`capa-advance` 隐藏）
     - LLM 无凭证时 AI 断言 `test.skip` + 核心闭环照跑（沿用 `_guards/ai-credentials.guard.spec.ts` 模式）
@@ -88,7 +113,7 @@
 
 ### 补齐建议顺序
 
-`[x] P0-1 (D4 验证) → [x] P0-4 (采纳审计) → [x] P0-2 (DAG 面板) → [x] P0-3 (provenance UI) → [x] P1-5/6 (SPC/IQC 源) → [ ] P2-11 (故事 spec) → [x] P1-7~10 (MES/供货/同类型/lessons，视实际 ROI 决定)`
+`[x] P0-1 (D4 验证) → [x] P0-4 (采纳审计) → [x] P0-2 (DAG 面板) → [x] P0-3 (provenance UI) → [x] P1-5/6 (SPC/IQC 源) → [x] P2-11 (故事 spec) → [x] P1-7~10 (MES/供货/同类型/lessons，视实际 ROI 决定)`
 
 理由：D4 验证 + 采纳审计是**数据模型缺口**，先落表结构；DAG + provenance 是**观测层缺口**，依赖 orchestrator；4 类源里 SPC/IQC 数据已在库最优先；MES/供货/同类型/lessons 优先级由业务实际数据密度决定。
 
@@ -149,7 +174,7 @@
 - 图谱布局清晰度（边色/方向切换/PNG 导出背景合成）
 - 结构树拖拽迁移 `@dnd-kit`、推荐缓存与作用域修复
 
-### 当前分支 `fix/dashboard-admin-pages` 已落地（未合 main）
+### 历史：`fix/dashboard-admin-pages` 已完成并已合入
 1. **管理后台增强**（2026-06-26 起）
    - 用户管理页（创建 + 列表 + 启停 + 删除 + 工厂访问/角色/密码编辑）
    - 日志管理页（audit / login / system 三 tab 分页）
@@ -191,9 +216,9 @@
 
 ---
 
-## 二、还没有开发（已规划，待启动或进行中）
+## 二、Post-RC backlog（非当前 RC 阻塞）
 
-### 紧邻待启动
+### 已完成的历史交付与后续选项
 - **P1 LLM 迁移收尾**（P1-D 后剩余项）
   - P1-B + P1-C + P1-D 全部落地：4 个 LLM 消费者（8D D4/D5 / RAG 搜索 / 管理评审报告 / CAPA draft）已迁到 `provider_adapter.complete_json` + `write_audit_raw`
   - 经核实 **SPC-FMEA 异常关联 / D7 预防复发 / 经验教训推送均无 LLM 调用**（纯规则/图匹配），早先 PROGRESS 列入"剩余 LLM 调用点"有误
@@ -206,7 +231,7 @@
   - 待 brainstorm 的范围：模块覆盖（FMEA / CAPA / IQC / SPC / MSA / 客户质量 / 供应商质量 / Admin / Agent Base）、层次（API 契约 + 浏览器 UI 流 + RBAC 角色矩阵 + 多工厂 `factory_id` 隔离）、运行方式（docker-compose 整栈 vs in-process）
   - 候选工具：后端 pytest + httpx；前端 Playwright（仓库已有 `mcp__plugin_playwright`）；位置建议 `backend/tests/e2e/` + `frontend/e2e/`，或新增顶层 `e2e/`
   - 与现有 `make check`（单元层）分离为独立 target，避免 CI 时长爆炸
-  - 下一步：Task 4 cleanup endpoint + 后续 E2E spec 任务
+  - 历史 E2E 建设与本轮 Task 10 最终 reset + 全套发布门禁均已完成。
 
 ### P2 — Copilot（对话式助手）
 - 前端 UI 侧栏（`ProtectedRoute` 接入待做）
@@ -231,11 +256,11 @@
    - P0 harness 主循环目前是骨架，需补完多轮 tool-call 调度
 4. **Anthropic tool_result 完整 shaping**
    - 当前 provider_adapter 偏 OpenAI 形态，Anthropic 侧的 tool_result 结构需补齐
-5. `fix/dashboard-admin-pages` 分支整体合并回 `main`（含 Admin 增强 + 仪表盘下钻 + P0 Agent Base）
+5. `fix/dashboard-admin-pages` 的内容已合入当前稳定化历史；不再作为 `main` 合并前的独立阻塞项。
 
 ### ROADMAP 之外的已知缺口（来自 CLAUDE.md）
 - 测试套件仍在补齐，部分历史模块缺 `factory_id` fixture 回填
-- 登录无速率限制
+- 登录限流为每进程内存 `10 次/5min`，未在多副本间分布式共享；跨副本部署时限流不具全局一致性。
 - Redis 已配置但**未实现缓存逻辑**
 - 前端 bundle 5.5MB，需代码分割
 - 部分 Alembic 迁移号重叠，需规整
@@ -244,47 +269,31 @@
 
 ## 三、当前阻塞 / 风险点
 
-### 设计/技术决策已规避的"曾经阻塞"
-- ~~引入 pydantic-ai 做 agent 基座~~ — 与项目 pinned **pydantic 2.9.2 冲突**，已切换到**自研 tool-calling 循环 + 现有 openai/anthropic SDK**（spec `f57fcff` 记录决策）
-- ~~LLM 推荐"AI 建议暂不可用"误导~~ — 三因叠加（Docker 镜像缺 SDK / OpenAIProvider 忽略 `llm_base_url` / 硬编码 `response_format=json_object` 被 Ark/DeepSeek 拒绝），已诊断；`llm_timeout=5s` < Ark 实际 ~9s 导致静默 rule_fallback，需把 `/admin/ai-config` 默认值上调到 15–30s
-- ~~Worktree 执行 superpowers 计划~~ — `worktree.baseRef=fresh` 缺已 commit 的 plan + 当前代码状态，已改为 `baseRef=head`；backend 测试需 `SECRET_KEY=test-secret-key`；worktree frontend 需 `npm install`
+### Release stabilization 门禁：已通过
+- 最终 fresh `qms_e2e` reset/migration/seed、全量 `make check`、zero-retry Playwright、CAPA PPT 与系统集成菜单切片均通过；两项 E2E skip 均为允许的 inverse 场景。
 
-### 当前实际待解（需要决策/手动操作）
-1. **P1 后续迁移排期**：P1-B + P1-C 已落地，剩余旧 LLM 调用点（8D D4/D5 / SPC-FMEA / D7 / 经验教训推送）未排迁移顺序
-2. **P0 follow-up 优先级未排期**：embedding worker / 随机 record_id 修复 / 多工具循环 / Anthropic shaping 四项已识别但未挑顺序
-3. **`fix/dashboard-admin-pages` 合 main 时机**：分支已领先 108 个 commit，含 P0 Agent Base 大变更（6 新表 + audit_logs schema 扩展）+ P1-B/C 迁移，合并前需：
-   - 完整运行 backend `pytest` + frontend `npm run lint` + `tsc --noEmit`
-   - 在干净 DB 上跑 `alembic upgrade head` 验证迁移
-   - 评审者过 P0 Agent Base 整体（已逐 commit review，但 PR 级总览未做）
-4. **LLM Provider 兼容性**：Anthropic 的 `tool_result` 结构与 OpenAI 不一致，provider_adapter 当前仅 OpenAI 形态完善，切到 Claude provider 会跑不通（P1-B/C 都走 OpenAI 形态 `complete_json`，未触碰此缺口）
-5. **数据库基线**：CLAUDE.md 已标注"部分 Alembic 迁移号重叠，需规整"——P0 加了 6 表 + audit_logs 扩展，迁移线越来越长，建议在合 main 前做一次 squash
+### 待办：分支评审与集成
+- 稳定化证据已齐备；仍需完成分支评审并决定是否集成至 `main`。这不是测试、迁移或 E2E 门禁失败。
 
-### 非阻塞但需关注
-- 前端 5.5MB bundle，代码分割工作未排期
-- Redis 配置在但缓存层为空（agent harness 短期记忆是首次实际用上 Redis 的地方）
-- 测试套件 `factory_id` fixture 仍在按模块回填，跨模块测试偶发因 fixture 缺失失败
+### Post-RC 风险（不阻塞本轮）
+- Agent Base：embedding worker、随机 `record_id` 兼容、多工具循环及 Anthropic `tool_result` shaping 尚待产品化排期。
+- 性能与维护：前端 bundle 代码分割、Redis 通用缓存、历史 `factory_id` fixture 回填与 Alembic 编号规整均待后续评估；本轮 fresh migration 已验证唯一 head。
 
 ---
 
 ## 四、当前在做
 
-| 项目 | 状态 | 位置 |
+| 项目 | 状态 | 证据 / 下一步 |
 |---|---|---|
-| P0 Agent Base | ✅ 已合并 `178487b`，82 测试通过 | `fix/dashboard-admin-pages` |
-| P1-B 质量趋势迁移 | ✅ 已落地（`4102de5`） | `fix/dashboard-admin-pages` |
-| P1-C FMEA 推荐迁移 | ✅ 已落地（6 任务 TDD，41 推荐测试绿） | `fix/dashboard-admin-pages` |
-| P1-D 剩余 LLM 消费者迁移 | ✅ 已落地（5 任务 TDD：D4/D5 + RAG + 管理评审 + CAPA draft，948 测试绿） | `fix/dashboard-admin-pages` |
-| Admin 用户/日志/工厂编辑 | ✅ 已落地（`cfde81c` 等） | `fix/dashboard-admin-pages` |
-| 仪表盘下钻 | ✅ 已落地（本轮补齐 widget→navigate 接线 + `dashboardDrilldown.ts`；`b82967c` 实为 customer-quality 修复，非下钻） | `fix/dashboard-admin-pages` |
-| `fix/dashboard-admin-pages` → `main` 合并 | 🟡 待统一回归 + PR 评审（已领先 125 commit） | — |
-| US-E2E-01 epic v8.1 定稿 + gap analysis | ✅ 已落地（README + 10 子故事转定稿 + gap 报告，3 轮评审修订） | `feature/us-e2e-01-spec-a` |
-| US-E2E-01 v8.1 实现（10 子故事） | 🟡 进行中（01.1–01.9 已落地；待 01.10 PPT） | — |
-| US-E2E-01 verify skill 同步 | 🟡 契约修复第十九轮（01.3 同步 01.7 FAIL 传播；全 skill 去 PASS-NOTE→备注列）。仍 🟡 未 RED/GREEN 行为测 | — |
-| 01.10 PPT 输出 | ✅ 已落地（PPT generator + sub-agent 3-round review + admin review-skill management + frontend） | `feature/us-e2e-01-spec-a` |
+| Release stabilization | ✅ Task 1–10 门禁通过 | final fresh reset/migration/seed、回归、E2E、PPT、菜单权限均通过；待分支评审与集成决定 |
+| `make check` | ✅ 最终通过 | backend `1975 passed / 5 skipped / 5 xfailed / 0 failed`（181.95s）；frontend tsc/Vite build 通过（7.61s） |
+| Playwright | ✅ 最终 zero-retry 通过 | `42 passed / 0 failed / 2 allowed skips`，共 44 项 |
+| US-E2E-01 / US-E2E-02 实现 | ✅ 已合并，当前为历史 | 保留归档与 story/skill 契约资料，不是 RC 功能开发 |
+| Agent / 性能后续 | ⚪ Post-RC backlog | 不作为当前 release blocker |
 
 ---
 
-## US-E2E-01 v8.1 待办任务（2026-07-08 录入）
+## US-E2E-01 v8.1 实现历史（已完成并已合入）
 
 US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事）。配套 gap analysis：`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`。以下为按 gap 分析结论排定的实现任务，按优先级 + 交付顺序。
 

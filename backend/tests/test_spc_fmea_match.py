@@ -1,7 +1,5 @@
 # backend/tests/test_spc_fmea_match.py
 import uuid
-import os
-from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
@@ -31,29 +29,32 @@ _DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 @pytest_asyncio.fixture(scope="function")
-async def db():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
-    db_name = urlparse(url).path.lstrip("/")
-    if "_test" not in db_name:
-        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
-
-    engine = create_async_engine(url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(
-            Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
-        )
-        await conn.execute(
-            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
-        )
-        await conn.commit()
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with session_factory() as session:
-        yield session
-    await engine.dispose()
+async def db(mig_db_url):
+    """Use a one-shot DB; never rebuild the shared suite database."""
+    engine = create_async_engine(mig_db_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                Factory.__table__.insert().values(
+                    id=_DEFAULT_FACTORY_ID,
+                    code="TEST",
+                    name="Test Factory",
+                )
+            )
+            await conn.execute(
+                ProductLine.__table__.insert().values(
+                    code="DC-DC-100",
+                    name="DC-DC Convert 100W",
+                    factory_id=_DEFAULT_FACTORY_ID,
+                )
+            )
+            await conn.commit()
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture(scope="function")
