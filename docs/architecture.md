@@ -154,6 +154,12 @@ async def create_fmea(...):
 
 详见 [权限参考](permissions.md)。
 
+### 4.6 Agent 模块权限内核（未接入运行路径）
+
+`backend/app/services/agent/permissions/` 已有纯策略内核：模块能力声明、执行身份与插件/任务授权交集、操作审批等级与员工审批资格、投递外发判断及派生内容来源限制。8D D4 样板目录中的上下文与候选命令目前均为 `DENY`；`authorize()` 重新读取不可原位修改的服务端目录，拒绝未知能力及与目录声明不一致的定义；盘点见[Agent 模块能力清单](development/agent-module-capability-inventory.md)，目标行为见[模块权限设计](superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md)。
+
+内核**尚未连接**现有 Agent gateway、模型调用、审批 API、业务服务或外部插件入口；没有持久化的插件/任务授权，也没有开放新的读取或写入能力。现有角色权限和旧 Agent 工具仍按原路径执行，不能把这些纯函数测试当作生产访问隔离的验收。
+
 ---
 
 ## 5. 数据模型概览
