@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.tenant_transaction import stable_tenant_lock_key
+from app.services.tenant_migrator import MaintenanceAttempt, maintenance_connection
 from app.services.tenant_schema_diff import compare_business_schema, load_snapshot_manifest
 from alembic_tenant import upgrade_tenant
 
@@ -26,19 +27,23 @@ def disposable_public_db(mig_db_url):
 @pytest.mark.asyncio
 async def test_tenant_bootstrap_matches_canonical_business_objects(disposable_public_db):
     schema = f"tenant_parity_{uuid.uuid4().hex[:12]}"
+    tenant_id = uuid.uuid4()
+    attempt = MaintenanceAttempt(tenant_id=tenant_id, schema_name=schema, generation=1,
+                                 attempt_id=uuid.uuid4(), backend_pid=0,
+                                 lock_key=stable_tenant_lock_key(tenant_id))
     engine = create_async_engine(disposable_public_db)
     try:
-        async with engine.connect() as connection:
-            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-            await connection.commit()
-            key = stable_tenant_lock_key(uuid.uuid4())
-            assert await connection.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
+        async with engine.begin() as setup:
+            await setup.execute(text(f'CREATE SCHEMA "{schema}"'))
+            await setup.execute(text("""INSERT INTO public.tenants
+                (id,name,slug,subdomain,schema_name,status,generation,provisioning_attempt_id)
+                VALUES (:id,'Parity',:slug,:slug,:schema,'provisioning',1,:attempt)"""),
+                {"id": tenant_id, "slug": f"parity-{uuid.uuid4().hex[:12]}",
+                 "schema": schema, "attempt": attempt.attempt_id})
+        async with maintenance_connection(engine, attempt) as connection:
             before_platform_oid = await connection.scalar(text("SELECT 'public.tenants'::regclass::oid"))
-            try:
-                await upgrade_tenant(connection, schema, "tv001_business_snapshot")
-                await upgrade_tenant(connection, schema, "tv001_business_snapshot")
-            finally:
-                assert await connection.scalar(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+            await upgrade_tenant(connection, schema, "tv001_business_snapshot")
+            await upgrade_tenant(connection, schema, "tv001_business_snapshot")
             assert await connection.scalar(text("SELECT 'public.tenants'::regclass::oid")) == before_platform_oid
             assert await connection.scalar(text(f'SELECT version_num FROM "{schema}".tenant_schema_version')) == "tv001_business_snapshot"
             differences = await compare_business_schema(connection, "public", schema, load_snapshot_manifest())
