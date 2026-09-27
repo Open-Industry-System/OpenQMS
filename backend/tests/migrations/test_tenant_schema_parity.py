@@ -188,6 +188,49 @@ def test_parity_preserves_literal_and_function_body_whitespace():
         "CREATE FUNCTION tenant_example.f() AS $$BEGIN RETURN 'a b'; END$$", "tenant_example")
 
 
+@pytest.mark.parametrize("literal", ["$$public.users$$", "$$O'Reilly$$", "$$客户$$"])
+def test_generator_keeps_dollar_quoted_column_defaults_opaque(literal, tmp_path):
+    import ast
+    from scripts.generate_tenant_snapshot import TocEntry, write_versioned_ddl
+    source = f"CREATE TABLE public.users (label text DEFAULT {literal});"
+    output = tmp_path / "snapshot.py"
+    write_versioned_ddl([TocEntry("TABLE", "public", "users", ddl=(source,))], str(output))
+    generated = ast.literal_eval(ast.parse(output.read_text()).body[1].value)
+    assert generated == (f"CREATE TABLE users (label text DEFAULT {literal});",)
+
+
+def test_nested_dollar_literal_in_executable_function_is_opaque(tmp_path):
+    import ast
+    from scripts.generate_tenant_snapshot import TocEntry, write_versioned_ddl
+    source = ("CREATE FUNCTION public.example() RETURNS text LANGUAGE plpgsql AS $outer$ "
+              "BEGIN RETURN $inner$public.users$inner$; END; $outer$;")
+    output = tmp_path / "snapshot.py"
+    write_versioned_ddl([TocEntry("FUNCTION", "public", "example()", ddl=(source,))], str(output))
+    generated = ast.literal_eval(ast.parse(output.read_text()).body[1].value)
+    assert generated == (source.replace("CREATE FUNCTION public.example", "CREATE FUNCTION example"),)
+
+
+def test_dollar_literal_drift_is_visible_to_parity():
+    from app.services.tenant_schema_diff import _normalize
+    assert _normalize("DEFAULT $$public.users$$", "public") != _normalize("DEFAULT $$users$$", "tenant_example")
+    canonical = "CREATE FUNCTION public.example() RETURNS text AS $body$ BEGIN RETURN $inner$public.users$inner$; END; $body$"
+    changed = "CREATE FUNCTION tenant_example.example() RETURNS text AS $body$ BEGIN RETURN $inner$users$inner$; END; $body$"
+    assert _normalize(canonical, "public") != _normalize(changed, "tenant_example")
+
+
+def test_executable_function_body_still_rewrites_business_references(tmp_path):
+    import ast
+    from scripts.generate_tenant_snapshot import TocEntry, write_versioned_ddl
+    source = ("CREATE FUNCTION public.count_users() RETURNS bigint LANGUAGE plpgsql AS $body$ "
+              "BEGIN RETURN (SELECT count(*) FROM public /*gap*/ . users); END; $body$;")
+    objects = [TocEntry("TABLE", "public", "users", ddl=("CREATE TABLE public.users (id uuid);",)),
+               TocEntry("FUNCTION", "public", "count_users()", ddl=(source,))]
+    output = tmp_path / "snapshot.py"
+    write_versioned_ddl(objects, str(output))
+    generated = ast.literal_eval(ast.parse(output.read_text()).body[1].value)
+    assert "FROM users" in generated[1] and "public" not in generated[1]
+
+
 def test_generator_rejects_unknown_objects_and_platform_dependencies():
     from scripts.generate_tenant_snapshot import TocEntry, select_business_objects
     with pytest.raises(ValueError, match="Unknown|Index without owning"):
