@@ -158,8 +158,14 @@ def select_business_objects(toc: list[TocEntry], excluded_platform_tables: froze
 
 def _statements(objects: list[TocEntry]) -> tuple[str, ...]:
     result = []
+    business_names = {obj.name for obj in objects if obj.type in {"TABLE", "TEXT SEARCH CONFIGURATION"}}
+    business_names.update(obj.name.split("(", 1)[0] for obj in objects if obj.type == "FUNCTION")
+    shared_names = {"vector", "vector_cosine_ops", "digest"}
     for obj in objects:
         for statement in obj.ddl:
+            references = set(re.findall(r"\bpublic\.([A-Za-z_][A-Za-z_0-9]*)", statement))
+            if unknown := references - business_names - shared_names:
+                raise ValueError(f"Unreviewed public reference: {obj.name}: {sorted(unknown)}")
             # pg_dump's schema-qualified business references must resolve in the
             # verified tenant search_path, never public. The pgcrypto digest
             # extension is shared and explicitly schema-qualified instead.

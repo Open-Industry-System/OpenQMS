@@ -129,6 +129,15 @@ def test_tampered_baseline_checksum_is_rejected():
         verify_snapshot_checksum(manifest)
 
 
+def test_generator_rejects_unreviewed_public_dependency(tmp_path):
+    from scripts.generate_tenant_snapshot import TocEntry, write_versioned_ddl
+    objects = [TocEntry("TABLE", "public", "users", ddl=(
+        "CREATE TABLE public.users (id uuid DEFAULT public.unreviewed_factory());",
+    ))]
+    with pytest.raises(ValueError, match="Unreviewed public reference"):
+        write_versioned_ddl(objects, str(tmp_path / "snapshot.py"))
+
+
 def test_generator_rejects_unknown_objects_and_platform_dependencies():
     from scripts.generate_tenant_snapshot import TocEntry, select_business_objects
     with pytest.raises(ValueError, match="Unknown|Index without owning"):
