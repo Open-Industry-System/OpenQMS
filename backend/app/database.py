@@ -62,11 +62,18 @@ Base = TenantBase
 async def get_db(request: Request):
     """Business requests require a captured tenant binding in multi-tenant mode."""
     tenant = getattr(request.state, "tenant", None)
-    if settings.TENANT_MODE != "single" and tenant is None:
-        raise TenantUnavailable("tenant binding required")
-    captured = getattr(request.state, "tenant_binding", None)
-    binding = (captured if isinstance(captured, TenantBinding)
-               else _business_binding(tenant)) if tenant else None
+    if settings.TENANT_MODE == "single":
+        # Single-tenant business data is deliberately in public.
+        binding = None
+    else:
+        captured = getattr(request.state, "tenant_binding", None)
+        if (tenant is None or not isinstance(captured, TenantBinding)
+                or captured.mode != "business"
+                or captured.tenant_id != getattr(tenant, "id", None)
+                or captured.schema_name != getattr(tenant, "schema_name", None)
+                or captured.generation != getattr(tenant, "generation", None)):
+            raise TenantUnavailable("captured tenant binding required")
+        binding = captured
     schema_token = current_tenant_schema.set(binding.schema_name if binding else None)
     binding_token = current_tenant_binding.set(binding)
     try:

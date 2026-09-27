@@ -1,7 +1,12 @@
 """Tests for tenant utilities and TenantContextMiddleware."""
+import uuid
+from dataclasses import replace
+from types import SimpleNamespace
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.core.tenant_transaction import TenantBinding, TenantUnavailable
 from app.core.tenant_utils import set_search_path_sql, slug_to_schema_name
 
 
@@ -140,17 +145,19 @@ async def test_get_db_captures_tenant_binding():
 
     # Mock request with a tenant
     mock_request = MagicMock()
-    mock_tenant = MagicMock()
-    mock_tenant.schema_name = "tenant_acme"
-    mock_tenant.generation = 7
+    mock_tenant = SimpleNamespace(id=uuid.uuid4(), schema_name="tenant_acme", generation=7)
+    expected_binding = TenantBinding(mock_tenant.id, "tenant_acme", 7, "business")
     mock_request.state.tenant = mock_tenant
+    mock_request.state.tenant_binding = expected_binding
 
-    with patch("app.database.tenant_async_session", mock_sessionmaker):
+    with patch("app.database.settings", TENANT_MODE="dev"), \
+         patch("app.database.tenant_async_session", mock_sessionmaker):
         # Drive the async generator to get the session
         gen = get_db(mock_request)
         db = await gen.__anext__()
         try:
             binding = mock_sessionmaker.call_args.kwargs["binding"]
+            assert binding is expected_binding
             assert binding.tenant_id == mock_tenant.id
             assert binding.schema_name == "tenant_acme"
             assert binding.generation == 7
@@ -167,6 +174,44 @@ async def test_get_db_captures_tenant_binding():
     # After generator cleanup, ContextVar must be reset
     assert current_tenant_schema.get() is None
     assert current_tenant_binding.get() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["missing", "malformed", "tenant_id", "schema_name", "generation", "mode"])
+async def test_get_db_rejects_uncaptured_or_mismatched_binding_before_session(case):
+    """Middleware's frozen identity is mandatory; never reconstruct it later."""
+    from app.database import get_db
+    from app.core.tenant_utils import current_tenant_binding, current_tenant_schema
+
+    tenant = SimpleNamespace(id=uuid.uuid4(), schema_name="tenant_acme", generation=7)
+    request = SimpleNamespace(state=SimpleNamespace(tenant=tenant))
+    captured = TenantBinding(tenant.id, tenant.schema_name, tenant.generation, "business")
+    if case == "malformed":
+        request.state.tenant_binding = "tenant_acme"
+    elif case == "tenant_id":
+        request.state.tenant_binding = replace(captured, tenant_id=uuid.uuid4())
+    elif case == "schema_name":
+        request.state.tenant_binding = replace(captured, schema_name="tenant_other")
+    elif case == "generation":
+        request.state.tenant_binding = replace(captured, generation=8)
+    elif case == "mode":
+        request.state.tenant_binding = replace(captured, mode="maintenance")
+    # 'missing' intentionally has no tenant_binding attribute.
+
+    with patch("app.database.settings", TENANT_MODE="dev"), \
+         patch("app.database.tenant_async_session") as tenant_factory, \
+         patch("app.database.async_session") as public_factory:
+        tenant_factory.return_value.__aenter__.return_value.in_transaction = MagicMock(return_value=False)
+        generator = get_db(request)
+        try:
+            with pytest.raises(TenantUnavailable):
+                await generator.__anext__()
+        finally:
+            await generator.aclose()
+        tenant_factory.assert_not_called()
+        public_factory.assert_not_called()
+    assert current_tenant_binding.get() is None
+    assert current_tenant_schema.get() is None
 
 
 def test_context_var_default_is_none():
