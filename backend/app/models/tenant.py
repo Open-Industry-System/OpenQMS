@@ -36,6 +36,7 @@ class Tenant(PlatformBase):
     subdomain: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
     plan: Mapped[str] = mapped_column(String(20), default="free")
     status: Mapped[str] = mapped_column(String(20), default="pending")
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     provisioning_step: Mapped[str | None] = mapped_column(String(50), nullable=True)
     provisioning_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     db_instance: Mapped[str | None] = mapped_column(String(100), nullable=True)

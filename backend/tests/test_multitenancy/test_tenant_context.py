@@ -116,10 +116,10 @@ async def test_x_tenant_id_ignored_in_production():
 
 
 @pytest.mark.asyncio
-async def test_get_db_sets_search_path_for_tenant():
-    """get_db() must execute SET search_path when a tenant is present on the request."""
+async def test_get_db_captures_tenant_binding():
+    """get_db() must send the resolved ID and generation to the gated session."""
     from app.database import get_db
-    from app.core.tenant_utils import current_tenant_schema
+    from app.core.tenant_utils import current_tenant_binding, current_tenant_schema
 
     # Build a mock session that records execute calls
     mock_session = AsyncMock()
@@ -142,23 +142,20 @@ async def test_get_db_sets_search_path_for_tenant():
     mock_request = MagicMock()
     mock_tenant = MagicMock()
     mock_tenant.schema_name = "tenant_acme"
+    mock_tenant.generation = 7
     mock_request.state.tenant = mock_tenant
 
-    with patch("app.database.async_session", mock_sessionmaker):
+    with patch("app.database.tenant_async_session", mock_sessionmaker):
         # Drive the async generator to get the session
         gen = get_db(mock_request)
         db = await gen.__anext__()
         try:
-            # SET search_path must have been called with the tenant schema
-            # SQLAlchemy text() objects don't stringify to their SQL content;
-            # inspect the .text attribute instead of str(call).
-            executed_sql = [
-                getattr(c.args[0], "text", "") for c in mock_session.execute.call_args_list
-            ]
-            assert any(
-                'SET search_path TO "tenant_acme", "public"' in sql for sql in executed_sql
-            ), f"Expected SET search_path TO tenant_acme, got SQL: {executed_sql}"
-            # ContextVar must be set to the tenant schema
+            binding = mock_sessionmaker.call_args.kwargs["binding"]
+            assert binding.tenant_id == mock_tenant.id
+            assert binding.schema_name == "tenant_acme"
+            assert binding.generation == 7
+            assert binding.mode == "business"
+            assert current_tenant_binding.get() == binding
             assert current_tenant_schema.get() == "tenant_acme"
         finally:
             # Clean up the generator
@@ -169,6 +166,7 @@ async def test_get_db_sets_search_path_for_tenant():
 
     # After generator cleanup, ContextVar must be reset
     assert current_tenant_schema.get() is None
+    assert current_tenant_binding.get() is None
 
 
 def test_context_var_default_is_none():

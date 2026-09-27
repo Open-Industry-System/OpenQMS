@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse
 
 from app.config import settings
 from app.core.security import verify_token
+from app.core.tenant_transaction import TenantBinding
 from app.database import async_session
 from app.models.tenant import Tenant
 
@@ -102,8 +103,12 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
                 content={"message": "无法解析租户，请使用正确的访问地址", "tenant_unresolved": True},
             )
 
-        # Store resolved tenant in request state
+        # Freeze admission identity at request entry, not after later registry changes.
         request.state.tenant = tenant
+        request.state.tenant_binding = TenantBinding(
+            tenant_id=tenant.id, schema_name=tenant.schema_name,
+            generation=tenant.generation, mode="business",
+        )
         response = await call_next(request)
         return response
 

@@ -2,7 +2,9 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.core.tenant_utils import current_tenant_schema
+from app.core.tenant_utils import current_tenant_binding, current_tenant_schema
+from app.core.tenant_transaction import TenantBinding, TenantUnavailable
+import uuid
 
 
 def _make_mock_session():
@@ -48,13 +50,16 @@ async def test_run_for_each_tenant_iterates_all_active_tenants():
     mock_sessionmaker = MagicMock(return_value=mock_session)
     # Multi-tenant path only — single mode never reads the tenants table.
     with patch("app.database.settings") as mock_settings, \
-         patch("app.database.async_session", mock_sessionmaker):
+         patch("app.database.async_session", mock_sessionmaker), \
+         patch("app.database.tenant_async_session", mock_sessionmaker):
         mock_settings.TENANT_MODE = "dev"
         seen = []
         async for tenant, db in run_for_each_tenant():
             seen.append(tenant.slug)
             # ContextVar must be set to this tenant's schema during iteration
             assert current_tenant_schema.get() == f"tenant_{tenant.slug}"
+            assert current_tenant_binding.get().schema_name == tenant.schema_name
+            assert current_tenant_binding.get().generation == tenant.generation
 
     # After iteration, ContextVar must be None (no leak)
     assert current_tenant_schema.get() is None
@@ -90,7 +95,8 @@ async def test_run_for_each_tenant_resets_context_var_on_failure():
 
     mock_sessionmaker = MagicMock(return_value=mock_session)
     with patch("app.database.settings") as mock_settings, \
-         patch("app.database.async_session", mock_sessionmaker):
+         patch("app.database.async_session", mock_sessionmaker), \
+         patch("app.database.tenant_async_session", mock_sessionmaker):
         mock_settings.TENANT_MODE = "dev"
         seen = []
         gen = run_for_each_tenant()
@@ -125,7 +131,8 @@ async def test_run_for_each_tenant_single_mode_yields_public_when_empty():
     mock_sessionmaker = MagicMock(return_value=mock_session)
 
     with patch("app.database.settings") as mock_settings, \
-         patch("app.database.async_session", mock_sessionmaker):
+         patch("app.database.async_session", mock_sessionmaker), \
+         patch("app.database.tenant_async_session", mock_sessionmaker):
         mock_settings.TENANT_MODE = "single"
         seen = []
         async for tenant, db in run_for_each_tenant():
@@ -158,7 +165,8 @@ async def test_run_for_each_tenant_single_mode_ignores_tenant_rows():
     mock_sessionmaker = MagicMock(return_value=mock_session)
 
     with patch("app.database.settings") as mock_settings, \
-         patch("app.database.async_session", mock_sessionmaker):
+         patch("app.database.async_session", mock_sessionmaker), \
+         patch("app.database.tenant_async_session", mock_sessionmaker):
         mock_settings.TENANT_MODE = "single"
         seen = []
         async for tenant, db in run_for_each_tenant():
@@ -168,25 +176,34 @@ async def test_run_for_each_tenant_single_mode_ignores_tenant_rows():
 
 
 @pytest.mark.asyncio
-async def test_get_tenant_aware_session_sets_search_path():
-    """get_tenant_aware_session must execute SET search_path when current_tenant_schema is set."""
+async def test_get_tenant_aware_session_uses_captured_binding():
+    """Worker sessions use ID/generation, never a schema-only context value."""
     from app.database import get_tenant_aware_session
 
     mock_session = _make_mock_session()
+    binding = TenantBinding(uuid.uuid4(), "tenant_test", 5, "business")
+    token = current_tenant_binding.set(binding)
+    try:
+        mock_sessionmaker = MagicMock(return_value=mock_session)
+        with patch("app.database.settings", TENANT_MODE="dev"), \
+             patch("app.database.tenant_async_session", mock_sessionmaker):
+            async with get_tenant_aware_session() as db:
+                assert db is mock_session
+                mock_sessionmaker.assert_called_once_with(binding=binding)
+    finally:
+        current_tenant_binding.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_get_tenant_aware_session_rejects_schema_only_context():
+    from app.database import get_tenant_aware_session
 
     token = current_tenant_schema.set("tenant_test")
     try:
-        mock_sessionmaker = MagicMock(return_value=mock_session)
-        with patch("app.database.async_session", mock_sessionmaker):
-            async with get_tenant_aware_session() as db:
-                # SET search_path must have been called with the tenant schema.
-                # SQLAlchemy text() objects don't stringify to their SQL content;
-                # inspect the .text attribute instead of str(call).
-                executed_sql = [
-                    getattr(c.args[0], "text", "") for c in mock_session.execute.call_args_list
-                ]
-                assert any("tenant_test" in sql for sql in executed_sql), \
-                    f"Expected SET search_path to tenant_test, got SQL: {executed_sql}"
+        with patch("app.database.settings", TENANT_MODE="dev"):
+            with pytest.raises(TenantUnavailable):
+                async with get_tenant_aware_session():
+                    pytest.fail("unbound session admitted")
     finally:
         current_tenant_schema.reset(token)
 
