@@ -10,6 +10,7 @@ import asyncio
 from sqlalchemy import func, update
 
 from app.database import async_session
+from app.core.tenant_transaction import require_single_tenant_global_feature
 from app.graph.neo4j_driver import ensure_constraints, get_neo4j_driver
 from app.models.graph_sync_outbox import GraphSyncOutbox
 from app.services.graph_projection_service import GraphProjectionService
@@ -17,6 +18,7 @@ from app.services.graph_projection_service import GraphProjectionService
 
 async def retry_failed() -> int:
     """将 outbox 中 dead 状态的任务重置为 pending。"""
+    require_single_tenant_global_feature("global graph outbox reset")
     async with async_session() as db:
         result = await db.execute(
             update(GraphSyncOutbox)
@@ -31,6 +33,7 @@ async def retry_failed() -> int:
 
 async def full_rebuild() -> dict:
     """清空 Neo4j 并从 PG 全量重建。"""
+    require_single_tenant_global_feature("global graph rebuild")
     driver = await get_neo4j_driver()
     await ensure_constraints()
     projection = GraphProjectionService(driver, async_session)

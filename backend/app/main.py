@@ -60,7 +60,7 @@ from app.config import settings
 from app.core.logging_handler import DBLogHandler, start_log_drainer
 from app.core.security import hash_password
 from app.core.tenant_context import TenantContextMiddleware
-from app.database import async_session, get_tenant_aware_session, run_for_each_tenant
+from app.database import async_session, get_tenant_aware_session, run_for_each_tenant, tenant_async_session
 from app.models.role import RoleDefinition
 from app.models.user import User
 
@@ -105,11 +105,16 @@ async def lifespan(app: FastAPI):
     # config page survives restarts/reloads instead of only being (re)built when
     # an admin saves the page. Non-fatal: falls back to rule-only on failure.
     from app.services import ai_config_service
-    try:
-        async with async_session() as db:
-            await ai_config_service._rebuild_providers(db, app.state)
-    except Exception as e:
-        logger.warning("AI provider init from DB failed: %s", e)
+    if settings.TENANT_MODE == "single":
+        try:
+            async with async_session() as db:
+                await ai_config_service._rebuild_providers(db, app.state)
+        except Exception as e:
+            logger.warning("AI provider init from DB failed: %s", e)
+            app.state.llm_provider = None
+            app.state.embedding_provider = None
+    else:
+        # Tenant-local settings cannot populate one process-global provider safely.
         app.state.llm_provider = None
         app.state.embedding_provider = None
 
@@ -396,7 +401,7 @@ async def lifespan(app: FastAPI):
 
     global _log_queue, _log_drainer, _log_handler
     _log_queue = asyncio.Queue()
-    _log_drainer = start_log_drainer(_log_queue, async_session)
+    _log_drainer = start_log_drainer(_log_queue, async_session, tenant_async_session)
     _log_handler = DBLogHandler(_log_queue, asyncio.get_running_loop())
     logging.getLogger().addHandler(_log_handler)
 

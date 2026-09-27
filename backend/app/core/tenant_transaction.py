@@ -7,11 +7,18 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from app.config import settings
 from app.core.tenant_utils import strict_tenant_search_path_sql
 
 
 class TenantUnavailable(Exception):
     """The tenant cannot admit this business transaction."""
+
+
+def require_single_tenant_global_feature(feature: str) -> None:
+    """Prevent process-global providers and graph resets in multi-tenant mode."""
+    if settings.TENANT_MODE != "single":
+        raise TenantUnavailable(f"{feature} is unavailable in multi-tenant mode")
 
 
 @dataclass(frozen=True)

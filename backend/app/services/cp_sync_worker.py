@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session
+from app.database import run_for_each_tenant
 from app.models.cp_sync_outbox import CPSyncOutbox
 from app.services.control_plan_service import apply_cp_sync_pending
 
@@ -52,11 +52,14 @@ async def process_cp_sync_outbox_batch(db: AsyncSession, batch_size: int = BATCH
 
 async def _loop() -> None:
     while True:
-        async with async_session() as db:
-            try:
-                await process_cp_sync_outbox_batch(db)
-            except Exception:  # noqa: BLE001
-                logger.exception("cp_sync batch failed")
+        try:
+            async for tenant, db in run_for_each_tenant():
+                try:
+                    await process_cp_sync_outbox_batch(db)
+                except Exception:  # noqa: BLE001
+                    logger.exception("cp_sync batch failed for tenant %s", tenant.slug)
+        except Exception:  # noqa: BLE001
+            logger.exception("cp_sync tenant iteration failed")
         await asyncio.sleep(POLL_INTERVAL)
 
 

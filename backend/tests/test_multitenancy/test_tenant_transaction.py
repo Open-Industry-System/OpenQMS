@@ -158,6 +158,44 @@ async def test_generation_rechecked_after_commit_and_exclusive_lock_denies(tenan
 
 
 @pytest.mark.asyncio
+async def test_queued_log_cannot_write_after_generation_changes(tenant_registry, platform_session_factory, monkeypatch):
+    import asyncio
+    from app.config import settings
+    from app.core.logging_handler import drain_log_queue
+    from app.database import async_session
+
+    monkeypatch.setattr(settings, "TENANT_MODE", "dev")
+    engine, (tenant_a, _) = tenant_registry
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            f'CREATE TABLE "{tenant_a.schema_name}".system_logs '
+            '(log_id uuid PRIMARY KEY, logger_name varchar(100) NOT NULL, '
+            'level varchar(20) NOT NULL, message text NOT NULL, '
+            'module varchar(200), traceback text, occurred_at timestamptz NOT NULL DEFAULT now())'
+        ))
+    async with platform_session_factory() as public:
+        await public.execute(text("UPDATE public.tenants SET generation=1 WHERE id=:id"), {"id": tenant_a.tenant_id})
+        await public.commit()
+
+    queue = asyncio.Queue()
+    queue.put_nowait({"schema": tenant_a.schema_name, "binding": tenant_a,
+                      "logger_name": "test", "level": "WARNING", "message": "stale-queued-log",
+                      "module": None, "traceback": None})
+    drainer = asyncio.create_task(drain_log_queue(queue, async_session))
+    await asyncio.wait_for(queue.join(), timeout=5)
+    drainer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await drainer
+    async with engine.connect() as conn:
+        assert await conn.scalar(text(
+            f'SELECT count(*) FROM "{tenant_a.schema_name}".system_logs WHERE message=\'stale-queued-log\''
+        )) == 0
+        assert await conn.scalar(text(
+            "SELECT count(*) FROM public.system_logs WHERE message='stale-queued-log'"
+        )) == 0
+
+
+@pytest.mark.asyncio
 async def test_pending_and_mismatched_schema_are_not_admitted(tenant_registry, tenant_session_factory, platform_session_factory):
     _, (tenant_a, tenant_b) = tenant_registry
     wrong_schema = TenantBinding(tenant_a.tenant_id, tenant_b.schema_name, 0, "business")
