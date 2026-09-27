@@ -3,12 +3,12 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-import re
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.core.tenant_utils import strict_tenant_search_path_sql
+from app.core.tenant_sql_tokens import rewrite_qualifiers, scan_sql
 
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "alembic_tenant/snapshot/manifest.json"
 EXCLUDED = frozenset({"tenants", "tenant_migrations", "platform_admin_users", "reference_templates",
@@ -34,24 +34,63 @@ def verify_snapshot_checksum(manifest: dict) -> None:
         raise ValueError("Tenant baseline checksum or PostgreSQL major mismatch")
 
 
+def _normalize_varchar_arrays(source: str) -> str:
+    """Normalize PG15 dump/restore's varchar[]→text[] cast at token boundaries."""
+    tokens = scan_sql(source)
+    values = [t.text for t in tokens]
+    def next_code(i):
+        while i < len(tokens) and tokens[i].kind in {"space", "comment"}:
+            i += 1
+        return i
+
+    for i, token in enumerate(tokens):
+        if token.identifier != "array":
+            continue
+        opening = next_code(i + 1)
+        if opening >= len(tokens) or values[opening] != "[":
+            continue
+        depth, closing = 1, opening + 1
+        while closing < len(tokens) and depth:
+            if values[closing] == "[": depth += 1
+            if values[closing] == "]": depth -= 1
+            closing += 1
+        if depth:
+            continue
+        suffix = []
+        pos = next_code(closing)
+        for part in (":", ":", "text", "[", "]"):
+            if pos >= len(tokens) or values[pos].lower() != part:
+                break
+            suffix.append(pos)
+            pos = next_code(pos + 1)
+        if len(suffix) != 5:
+            continue
+        casts = []
+        for j in range(opening + 1, closing - 1):
+            if values[j] != ":":
+                continue
+            second = next_code(j + 1)
+            typ = next_code(second + 1)
+            varying = next_code(typ + 1)
+            if (second < len(tokens) and values[second] == ":" and typ < len(tokens)
+                    and tokens[typ].identifier == "character" and varying < len(tokens)
+                    and tokens[varying].identifier == "varying"):
+                casts.append(varying)
+        if casts:
+            for j in casts:
+                values[j] += "::text"
+            for j in suffix:
+                values[j] = ""
+    return "".join(values)
+
+
 def _normalize(value: object, schema: str) -> str:
     result = str(value) if value is not None else "<null>"
-    # Shared pgcrypto/pgvector objects live in public on both sides. Every
-    # other reference must point to the schema currently being inspected:
-    # public.users inside a tenant trigger is not equivalent to tenant.users.
-    result = re.sub(r"\bpublic\.(digest|vector_cosine_ops|vector)\b",
-                    lambda match: "__SHARED_" + match[1] + "__", result)
-    result = re.sub(r"(?<![\w])(?:\"" + re.escape(schema) + r"\"|" + re.escape(schema) + r")\.",
-                    "", result)
-    result = result.replace("__SHARED_digest__", "digest")
-    result = result.replace("__SHARED_vector__", "public.vector")
-    result = result.replace("__SHARED_vector_cosine_ops__", "public.vector_cosine_ops")
-    # pg_dump recreates varchar-literal arrays with element casts rather than
-    # an equivalent outer ::text[] cast. Normalize only this narrow roundtrip.
-    result = re.sub(r"ARRAY\[([^\[\]]+)\]::text\[\]",
-                    lambda match: "ARRAY[" + match[1].replace("::character varying", "::character varying::text") + "]"
-                    if "::character varying" in match[1] else match[0], result)
-    return " ".join(result.split())
+    # pg_dump recreates varchar literal arrays with equivalent element casts.
+    # Only rewrite SQL tokens, never quoted literals containing array-like text.
+    result = _normalize_varchar_arrays(result)
+    return rewrite_qualifiers(result, schema, shared_public=frozenset({"vector", "vector_cosine_ops"}),
+                              canonicalize_shared_digest=True, collapse_space=True)
 
 
 async def _objects(connection: AsyncConnection, schema: str) -> dict[tuple[str, str], str]:

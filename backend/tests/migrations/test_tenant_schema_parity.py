@@ -138,6 +138,56 @@ def test_generator_rejects_unreviewed_public_dependency(tmp_path):
         write_versioned_ddl(objects, str(tmp_path / "snapshot.py"))
 
 
+@pytest.mark.parametrize("reference", [
+    "public . users", "public /*gap*/ . users", '"public"."users"',
+    '"public" /*gap*/ . "users"',
+])
+def test_generator_rewrites_only_qualified_business_identifiers(reference, tmp_path):
+    import ast
+    from scripts.generate_tenant_snapshot import TocEntry, write_versioned_ddl
+    objects = [TocEntry("TABLE", "public", "users", ddl=(
+        f"CREATE TABLE public.users (id uuid REFERENCES {reference}(id), label text DEFAULT 'public.users');",
+    ))]
+    output = tmp_path / "snapshot.py"
+    write_versioned_ddl(objects, str(output))
+    generated = ast.literal_eval(ast.parse(output.read_text()).body[1].value)
+    target = '"users"' if '"users"' in reference else "users"
+    assert generated == (f"CREATE TABLE users (id uuid REFERENCES {target}(id), label text DEFAULT 'public.users');",)
+
+
+def test_generator_preserves_function_body_literals(tmp_path):
+    import ast
+    from scripts.generate_tenant_snapshot import TocEntry, write_versioned_ddl
+    objects = [TocEntry("FUNCTION", "public", "example()", ddl=(
+        "CREATE FUNCTION public.example() RETURNS text LANGUAGE plpgsql AS $$ "
+        "BEGIN RETURN 'public.users  a'; END; $$;",
+    ))]
+    output = tmp_path / "snapshot.py"
+    write_versioned_ddl(objects, str(output))
+    generated = ast.literal_eval(ast.parse(output.read_text()).body[1].value)
+    assert "'public.users  a'" in generated[0]
+
+
+@pytest.mark.parametrize("foreign_ref", [
+    "public . verify_version_hash()", "public /*gap*/ . verify_version_hash()",
+    '"public"."verify_version_hash"()',
+])
+def test_parity_does_not_hide_spaced_public_business_references(foreign_ref):
+    from app.services.tenant_schema_diff import _normalize
+    canonical = _normalize(f"EXECUTE FUNCTION {foreign_ref}", "public")
+    actual = _normalize(f"EXECUTE FUNCTION {foreign_ref}", "tenant_example")
+    assert actual != canonical
+
+
+def test_parity_preserves_literal_and_function_body_whitespace():
+    from app.services.tenant_schema_diff import _normalize
+    assert _normalize("DEFAULT 'a  b'", "public") != _normalize("DEFAULT 'a b'", "tenant_example")
+    assert _normalize("DEFAULT 'ARRAY[''x''::character varying]::text[]'", "public") != _normalize(
+        "DEFAULT 'ARRAY[''x''::character varying::text]'", "tenant_example")
+    assert _normalize("CREATE FUNCTION public.f() AS $$BEGIN RETURN 'a  b'; END$$", "public") != _normalize(
+        "CREATE FUNCTION tenant_example.f() AS $$BEGIN RETURN 'a b'; END$$", "tenant_example")
+
+
 def test_generator_rejects_unknown_objects_and_platform_dependencies():
     from scripts.generate_tenant_snapshot import TocEntry, select_business_objects
     with pytest.raises(ValueError, match="Unknown|Index without owning"):

@@ -160,25 +160,16 @@ def _statements(objects: list[TocEntry]) -> tuple[str, ...]:
     result = []
     business_names = {obj.name for obj in objects if obj.type in {"TABLE", "TEXT SEARCH CONFIGURATION"}}
     business_names.update(obj.name.split("(", 1)[0] for obj in objects if obj.type == "FUNCTION")
-    shared_names = {"vector", "vector_cosine_ops", "digest"}
+    from app.core.tenant_sql_tokens import rewrite_qualifiers
+    shared_names = frozenset({"vector", "vector_cosine_ops", "digest"})
+    known_names = frozenset(business_names)
     for obj in objects:
         for statement in obj.ddl:
-            references = set(re.findall(r"\bpublic\.([A-Za-z_][A-Za-z_0-9]*)", statement))
-            if unknown := references - business_names - shared_names:
-                raise ValueError(f"Unreviewed public reference: {obj.name}: {sorted(unknown)}")
-            # pg_dump's schema-qualified business references must resolve in the
-            # verified tenant search_path, never public. The pgcrypto digest
-            # extension is shared and explicitly schema-qualified instead.
-            sql = statement.replace("public.vector_cosine_ops", "__SHARED_VECTOR_COSINE_OPS__")
-            sql = sql.replace("public.vector(", "__SHARED_VECTOR_TYPE__(")
-            sql = sql.replace("public.", "")
-            sql = sql.replace("__SHARED_VECTOR_COSINE_OPS__", "public.vector_cosine_ops")
-            sql = sql.replace("__SHARED_VECTOR_TYPE__", "public.vector")
-            if obj.type == "FUNCTION" and obj.name == "verify_version_hash()":
-                sql = sql.replace("digest(payload::text", "public.digest(payload::text")
-            unexpected = re.findall(r"public\.([A-Za-z_][A-Za-z_0-9]*)", sql)
-            if any(name not in {"vector", "vector_cosine_ops", "digest"} for name in unexpected):
-                raise ValueError(f"Unreviewed public reference: {obj.name}: {unexpected}")
+            # Tokenize identifiers and PL/pgSQL body separately; quoted literals
+            # are opaque. Unknown public references fail before any DDL is emitted.
+            sql = rewrite_qualifiers(statement, "public", known_public=known_names,
+                                     shared_public=shared_names,
+                                     qualify_digest=obj.type == "FUNCTION" and obj.name == "verify_version_hash()")
             if not sql.startswith(("CREATE ", "ALTER TABLE ", "ALTER TEXT SEARCH CONFIGURATION ", "COMMENT ON ")):
                 raise ValueError(f"Unexpected DDL: {sql[:100]}")
             result.append(sql)
