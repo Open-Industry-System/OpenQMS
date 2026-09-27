@@ -54,7 +54,7 @@ def mig_db_url(monkeypatch):
     from sqlalchemy import create_engine, text
 
     pg = _parse_pg(_test_db_url)
-    mig_dbname = f"qms_migtest_{uuid.uuid4().hex}"
+    mig_dbname = f"qms_migtest_{uuid.uuid4().hex}_test"
     admin = create_engine(
         f"postgresql+psycopg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/postgres",
         isolation_level="AUTOCOMMIT",
