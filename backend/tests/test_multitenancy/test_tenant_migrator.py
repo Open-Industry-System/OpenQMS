@@ -606,3 +606,186 @@ async def test_active_parity_drift_is_not_a_noop(disposable_public_db, tenant_re
                                        {"id": tenant.id}) == "failed"
         assert await connection.scalar(text(
             f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == "tv001_business_snapshot"
+
+
+@pytest.mark.asyncio
+async def test_active_tenant_growth_and_permission_edit_keep_resume_read_only(
+        disposable_public_db, tenant_request, monkeypatch):
+    """Ordinary tenant edits cannot turn a complete bootstrap into a failed tenant."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.database import TenantSession
+    from app.cli import tenant_migrate
+    from app.services.tenant_migrator import provision_new, resume_tenant
+
+    tenant = await provision_new(tenant_request)
+    binding = TenantBinding(tenant.id, tenant.schema_name, tenant.generation, "business")
+    extra_factory, extra_user, extra_role = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    async with AsyncSession(bind=disposable_public_db, sync_session_class=TenantSession,
+                            binding=binding) as ordinary:
+        admin_role = await ordinary.scalar(text(
+            "SELECT id FROM role_definitions WHERE role_key='admin'"))
+        await ordinary.execute(text("""
+            INSERT INTO factories (id,code,name,is_active)
+            VALUES (:id,'ADDED','Additional factory',true)
+        """), {"id": extra_factory})
+        await ordinary.execute(text("""
+            INSERT INTO product_lines (code,name,factory_id,is_active)
+            VALUES ('ADDED-LINE','Additional line',:factory,true)
+        """), {"factory": extra_factory})
+        await ordinary.execute(text("""
+            INSERT INTO role_definitions (id,role_key,name_zh,name_en,is_system,is_editable,is_active,sort_order)
+            VALUES (:id,'extra_role','额外角色','Extra role',false,true,true,99)
+        """), {"id": extra_role})
+        await ordinary.execute(text("""
+            INSERT INTO role_permissions (id,role_id,module,permission_level)
+            VALUES (:id,:role,'dashboard',1)
+        """), {"id": uuid.uuid4(), "role": extra_role})
+        await ordinary.execute(text("""
+            INSERT INTO users (user_id,username,email,display_name,password_hash,role_id,
+                               legacy_role,factory_id,is_active)
+            VALUES (:id,'extra@example.test','extra@example.test','Additional user',
+                    'test-hash',:role,'viewer',:factory,true)
+        """), {"id": extra_user, "role": extra_role, "factory": extra_factory})
+        await ordinary.execute(text("""
+            INSERT INTO user_factories (id,user_id,factory_id) VALUES (:id,:user,:factory)
+        """), {"id": uuid.uuid4(), "user": extra_user, "factory": extra_factory})
+        await ordinary.execute(text("""
+            INSERT INTO user_product_lines (id,user_id,product_line_code)
+            VALUES (:id,:user,'ADDED-LINE')
+        """), {"id": uuid.uuid4(), "user": extra_user})
+        await ordinary.execute(text("""
+            UPDATE role_permissions SET permission_level=4
+            WHERE role_id=:role AND module='dashboard'
+        """), {"role": admin_role})
+        await ordinary.commit()
+
+    async with disposable_public_db.connect() as connection:
+        before = (await connection.execute(text("""
+            SELECT status,generation,provisioning_attempt_id,provisioning_step
+            FROM public.tenants WHERE id=:id
+        """), {"id": tenant.id})).one()
+        version = await connection.scalar(text(
+            f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version'))
+    assert (await resume_tenant(tenant.id)).status == "active"
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    monkeypatch.setattr(tenant_migrate, "async_session", async_sessionmaker(disposable_public_db))
+    await tenant_migrate.main(all_tenants=True)
+    async with disposable_public_db.connect() as connection:
+        after = (await connection.execute(text("""
+            SELECT status,generation,provisioning_attempt_id,provisioning_step
+            FROM public.tenants WHERE id=:id
+        """), {"id": tenant.id})).one()
+        assert before == after
+        assert await connection.scalar(text(
+            f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == version
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{tenant.schema_name}".users')) == 2
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{tenant.schema_name}".factories')) == 2
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{tenant.schema_name}".role_definitions')) == 8
+        assert await connection.scalar(text(
+            "SELECT count(*) FROM public.tenant_migrations WHERE tenant_id=:id"),
+            {"id": tenant.id}) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", ["admin_assignment", "bootstrap_permission"])
+async def test_incomplete_seed_relationship_refuses_without_reseeding(
+        disposable_public_db, tenant_request, missing):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+    from app.database import TenantSession
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    tenant = await provision_new(tenant_request)
+    binding = TenantBinding(tenant.id, tenant.schema_name, tenant.generation, "business")
+    async with AsyncSession(bind=disposable_public_db, sync_session_class=TenantSession,
+                            binding=binding) as ordinary:
+        if missing == "admin_assignment":
+            await ordinary.execute(text("DELETE FROM user_factories"))
+        else:
+            await ordinary.execute(text("""
+                DELETE FROM role_permissions WHERE module='dashboard'
+                AND role_id=(SELECT id FROM role_definitions WHERE role_key='admin')
+            """))
+        await ordinary.commit()
+
+    with pytest.raises(TenantUnavailable, match="partial tenant seed"):
+        await resume_tenant(tenant.id)
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text(
+            "SELECT status FROM public.tenants WHERE id=:id"), {"id": tenant.id}) == "failed"
+        if missing == "admin_assignment":
+            query = f'SELECT count(*) FROM "{tenant.schema_name}".user_factories'
+        else:
+            query = (f'SELECT count(*) FROM "{tenant.schema_name}".role_permissions '
+                     f'WHERE module=\'dashboard\' AND role_id=(SELECT id FROM '
+                     f'"{tenant.schema_name}".role_definitions WHERE role_key=\'admin\')')
+        assert await connection.scalar(text(query)) == 0
+
+
+@pytest.mark.asyncio
+async def test_empty_seed_of_previously_active_tenant_requires_manual_review(
+        disposable_public_db, tenant_request):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+    from app.database import TenantSession
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    tenant = await provision_new(tenant_request)
+    binding = TenantBinding(tenant.id, tenant.schema_name, tenant.generation, "business")
+    async with AsyncSession(bind=disposable_public_db, sync_session_class=TenantSession,
+                            binding=binding) as ordinary:
+        for table in ("users", "role_permissions", "role_definitions", "product_lines", "factories"):
+            await ordinary.execute(text(f'DELETE FROM {table}'))
+        await ordinary.commit()
+
+    with pytest.raises(TenantUnavailable, match="manual review"):
+        await resume_tenant(tenant.id, bootstrap_request=tenant_request)
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text(
+            'SELECT status FROM public.tenants WHERE id=:id'), {"id": tenant.id}) == "failed"
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{tenant.schema_name}".users')) == 0
+        generation = await connection.scalar(text(
+            'SELECT generation FROM public.tenants WHERE id=:id'), {"id": tenant.id})
+    with pytest.raises(TenantUnavailable, match="manual review"):
+        await resume_tenant(tenant.id, bootstrap_request=tenant_request)
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text(
+            'SELECT generation FROM public.tenants WHERE id=:id'), {"id": tenant.id}) == generation
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{tenant.schema_name}".users')) == 0
+
+
+@pytest.mark.asyncio
+async def test_active_seed_loss_failure_is_recorded_before_owner_unlock(
+        disposable_public_db, tenant_request, monkeypatch):
+    """A second resume cannot rebootstrap in the failure-recording gap."""
+    from app.database import TenantSession
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.services import tenant_migrator
+
+    tenant = await tenant_migrator.provision_new(tenant_request)
+    binding = TenantBinding(tenant.id, tenant.schema_name, tenant.generation, "business")
+    async with AsyncSession(bind=disposable_public_db, sync_session_class=TenantSession,
+                            binding=binding) as ordinary:
+        for table in ("users", "role_permissions", "role_definitions", "product_lines", "factories"):
+            await ordinary.execute(text(f'DELETE FROM {table}'))
+        await ordinary.commit()
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = tenant_migrator._record_failure
+
+    async def paused_failure(attempt, exc):
+        entered.set()
+        await release.wait()
+        await original(attempt, exc)
+
+    monkeypatch.setattr(tenant_migrator, "_record_failure", paused_failure)
+    first = asyncio.create_task(tenant_migrator.resume_tenant(tenant.id,
+                                                              bootstrap_request=tenant_request))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=15)
+        with pytest.raises(TenantUnavailable):
+            await tenant_migrator.resume_tenant(tenant.id, bootstrap_request=tenant_request)
+    finally:
+        release.set()
+        with pytest.raises(TenantUnavailable, match="manual review"):
+            await first
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{tenant.schema_name}".users')) == 0

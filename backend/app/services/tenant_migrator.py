@@ -17,12 +17,14 @@ from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
 REVISION = "tv001_business_snapshot"
+_PREVIOUSLY_ACTIVE_SEED_REASON = "previously active tenant seed unavailable; manual review required"
 _SAFE_FAILURE_REASONS = frozenset({
     "partial or unknown tenant schema; manual review required",
     "tenant migration version or DDL incomplete",
     "tenant schema revision is not current",
     "tenant schema does not match reviewed business snapshot",
     "partial tenant seed; manual review required",
+    _PREVIOUSLY_ACTIVE_SEED_REASON,
     "matching admin bootstrap credentials required",
     "tenant seed incomplete",
     "tenant has active transactions",
@@ -47,6 +49,7 @@ class MaintenanceAttempt:
     attempt_id: UUID
     backend_pid: int
     lock_key: int
+    origin_status: str | None = None
 
 
 def _claim(attempt: MaintenanceAttempt) -> tuple:
@@ -315,7 +318,7 @@ def _maintenance_seed_session(connection: AsyncConnection, attempt: MaintenanceA
 
 async def _read_seed_state(session: AsyncSession) -> str:
     """Shared invariants under either a guarded maintenance or active transaction."""
-    from app.services.tenant_service import _ROLES, _PERMISSION_MATRIX, _PERMISSION_MODULES
+    from app.services.tenant_service import _ROLES, _PERMISSION_MODULES
     counts = (await session.execute(text("""
         SELECT (SELECT count(*) FROM role_definitions),
                (SELECT count(*) FROM role_permissions),
@@ -327,8 +330,9 @@ async def _read_seed_state(session: AsyncSession) -> str:
     """))).one()
     if all(count == 0 for count in counts):
         return "empty"
-    if tuple(counts) != (len(_ROLES), len(_ROLES)*len(_PERMISSION_MODULES), 1, 1, 1, 1, 1):
-        return "partial"
+    # Initial records are a minimum, not a census. Active tenants can add users,
+    # factories, lines and roles, and authorized permissions may change levels.
+    # A nonempty but missing bootstrap relationship remains a partial seed.
     consistent = await session.scalar(text("""
         SELECT EXISTS (SELECT 1 FROM users u
             JOIN role_definitions r ON r.id=u.role_id AND r.role_key='admin'
@@ -340,26 +344,29 @@ async def _read_seed_state(session: AsyncSession) -> str:
     """))
     roles = (await session.execute(text("SELECT role_key FROM role_definitions"))).scalars().all()
     permissions = (await session.execute(text("""
-        SELECT r.role_key, p.module, p.permission_level FROM role_permissions p
+        SELECT r.role_key, p.module FROM role_permissions p
         JOIN role_definitions r ON r.id=p.role_id
     """))).all()
-    actual = {(role, module): level for role, module, level in permissions}
-    expected = {(role, module): level for role, levels in _PERMISSION_MATRIX.items()
-                for module, level in levels.items()}
-    return ("complete" if consistent and set(roles) == {role[0] for role in _ROLES}
-            and actual == expected else "partial")
+    present = set(permissions)
+    required = {(role[0], module) for role in _ROLES for module in _PERMISSION_MODULES}
+    return ("complete" if consistent and {role[0] for role in _ROLES} <= set(roles)
+            and required <= present else "partial")
 
 
 async def lock_platform_tenant_row(connection: AsyncConnection, tenant_id: UUID):
     """Lock the registry row only after the caller owns its exclusive session lock."""
     row = (await connection.execute(text("""
-        SELECT id, slug, schema_name, status, generation, provisioning_attempt_id
+        SELECT id, slug, schema_name, status, generation, provisioning_attempt_id,
+               provisioning_error
         FROM public.tenants WHERE id=:id FOR UPDATE
     """), {"id": tenant_id})).one_or_none()
     if row is None or row.schema_name != slug_to_schema_name(row.slug):
         raise TenantUnavailable("tenant registry or canonical schema unavailable")
     if row.status not in {"pending", "provisioning", "failed", "active", "maintenance"}:
         raise TenantUnavailable("tenant status does not permit migration")
+    if (row.status == "failed" and row.provisioning_error ==
+            f"TenantUnavailable: {_PREVIOUSLY_ACTIVE_SEED_REASON}"):
+        raise TenantUnavailable(_PREVIOUSLY_ACTIVE_SEED_REASON)
     return row
 
 
@@ -376,7 +383,7 @@ async def begin_new_attempt(connection: AsyncConnection, tenant_id: UUID) -> Mai
            "generation": generation, "attempt": new_id, "id": tenant_id})
     await connection.commit()
     return MaintenanceAttempt(tenant_id, row.schema_name, generation, new_id, 0,
-                              stable_tenant_lock_key(tenant_id))
+                              stable_tenant_lock_key(tenant_id), row.status)
 
 
 async def _platform_step(attempt: MaintenanceAttempt, phase: str, *, status: str | None = None):
@@ -560,6 +567,13 @@ async def resume_tenant(tenant_id: UUID, *, bootstrap_request: TenantCreateReque
             await require_schema_parity(maintenance, attempt)
             await _platform_step(attempt, "verified")
             if not await seed_invariants_complete(maintenance, attempt):
+                if attempt.origin_status in {"active", "maintenance"}:
+                    failure = TenantUnavailable(_PREVIOUSLY_ACTIVE_SEED_REASON)
+                    # Persist the manual-review barrier before the exclusive
+                    # owner unlocks. Otherwise another resume may see the
+                    # transient maintenance status and reseed an old tenant.
+                    await _record_failure(attempt, failure)
+                    raise failure
                 await seed_all_in_one_transaction(maintenance, attempt, bootstrap_request,
                                                   before_commit_hook=after_stage_hook)
                 if after_stage_hook:
