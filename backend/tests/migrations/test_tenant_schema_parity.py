@@ -10,9 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.tenant_transaction import stable_tenant_lock_key
+from app.core.tenant_utils import strict_tenant_search_path_sql
 from app.services.tenant_migrator import MaintenanceAttempt, maintenance_connection
 from app.services.tenant_schema_diff import compare_business_schema, load_snapshot_manifest
-from alembic_tenant import upgrade_tenant
 
 
 @pytest.fixture
@@ -40,14 +40,18 @@ async def test_tenant_bootstrap_matches_canonical_business_objects(disposable_pu
                 VALUES (:id,'Parity',:slug,:slug,:schema,'provisioning',1,:attempt)"""),
                 {"id": tenant_id, "slug": f"parity-{uuid.uuid4().hex[:12]}",
                  "schema": schema, "attempt": attempt.attempt_id})
-        async with maintenance_connection(engine, attempt) as connection:
-            before_platform_oid = await connection.scalar(text("SELECT 'public.tenants'::regclass::oid"))
-            await upgrade_tenant(connection, schema, "tv001_business_snapshot")
-            await upgrade_tenant(connection, schema, "tv001_business_snapshot")
+            before_platform_oid = await setup.scalar(text("SELECT 'public.tenants'::regclass::oid"))
+        async with maintenance_connection(engine, attempt) as maintenance:
+            await maintenance.run_migration("tv001_business_snapshot")
+            await maintenance.run_migration("tv001_business_snapshot")
+            differences = await maintenance.compare_schema("public", load_snapshot_manifest())
+            assert differences == [], "\n".join(map(str, differences))
+        # The remaining writes deliberately corrupt disposable test objects to
+        # exercise the diff detector. They are not tenant maintenance operations.
+        async with engine.connect() as connection:
+            await connection.exec_driver_sql(strict_tenant_search_path_sql(schema))
             assert await connection.scalar(text("SELECT 'public.tenants'::regclass::oid")) == before_platform_oid
             assert await connection.scalar(text(f'SELECT version_num FROM "{schema}".tenant_schema_version')) == "tv001_business_snapshot"
-            differences = await compare_business_schema(connection, "public", schema, load_snapshot_manifest())
-            assert differences == [], "\n".join(map(str, differences))
             assert await connection.scalar(text("SELECT to_regclass(:name)"), {"name": f"{schema}.agent_plugin_installations"})
             factory_id, fmea_id, cp_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
             await connection.execute(text(f'INSERT INTO "{schema}".factories (id, code, name) VALUES (:id, :code, :name)'),

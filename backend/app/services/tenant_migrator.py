@@ -1,6 +1,6 @@
-"""Internal, owner-bound tenant maintenance on one physical PostgreSQL connection.
+"""Internal owner-bound tenant maintenance on one private physical PostgreSQL connection.
 
-Not a production entry point: Task 4 will move provisioning/CLI to this primitive.
+Not a provisioning route: Task 4 will move production callers to this coordinator.
 """
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -15,6 +15,14 @@ from app.core.tenant_transaction import TenantUnavailable, stable_tenant_lock_ke
 from app.core.tenant_utils import strict_tenant_search_path_sql
 
 _OWNER_KEY = "_tenant_maintenance_owner"
+_LOCK_SQL = """
+    SELECT EXISTS (SELECT 1 FROM pg_locks
+    WHERE locktype='advisory' AND granted AND pid=pg_backend_pid() AND objsubid=1
+      AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+      AND classid=((CAST(:key AS bigint) >> 32) & 4294967295)::oid
+      AND objid=(CAST(:key AS bigint) & 4294967295)::oid
+      AND mode IN ('ExclusiveLock','ShareLock'))
+"""
 
 
 @dataclass
@@ -49,39 +57,99 @@ def _owner_attempt(connection: AsyncConnection, schema_name: str) -> Maintenance
                               attempt_id=owner[3], lock_key=owner[4], backend_pid=owner[5])
 
 
+class MaintenanceContext:
+    """Guarded DDL and catalog operations; Task 4 adds private domain seeding."""
+
+    def __init__(self, connection: AsyncConnection, attempt: MaintenanceAttempt):
+        self.__connection = connection
+        self.__attempt = attempt
+
+    @property
+    def backend_pid(self) -> int:
+        return self.__attempt.backend_pid
+
+    async def run_migration(self, revision: str) -> str:
+        from alembic_tenant import upgrade_tenant
+
+        await bind_maintenance_transaction(self.__connection, self.__attempt)
+        result = await upgrade_tenant(self.__connection, self.__attempt.schema_name, revision)
+        await self.__connection.commit()
+        return result
+
+    async def compare_schema(self, reference_schema: str, manifest: dict):
+        from app.services.tenant_schema_diff import compare_business_schema
+
+        await bind_maintenance_transaction(self.__connection, self.__attempt)
+        return await compare_business_schema(
+            self.__connection, reference_schema, self.__attempt.schema_name, manifest,
+        )
+
+
 @asynccontextmanager
 async def maintenance_connection(engine: AsyncEngine, attempt: MaintenanceAttempt):
-    """Hold the exclusive session lock on this connection across every commit."""
+    """Own one session lock across DDL, seed and parity; invalidate uncertain owners."""
     _claim(attempt)
     if attempt.backend_pid != 0:
         raise TenantUnavailable("maintenance attempt already has an owner")
     async with engine.connect() as connection:
-        held = await connection.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": attempt.lock_key})
-        if not held:
-            raise TenantUnavailable("tenant has active transactions")
-        info = connection.info
+        # A canceled preflight could otherwise return a previously locked
+        # backend to the pool before its contamination can be inspected.
+        state = "uncertain"
+        info = None
         try:
+            # A pooled backend may retain a session lock from another borrower.
+            # pg_try_advisory_lock is reentrant on that backend, so checking
+            # after acquisition would silently leak one lock count on release.
+            if await connection.scalar(text(_LOCK_SQL), {"key": attempt.lock_key}):
+                await connection.invalidate()
+                state = "not_started"
+                raise TenantUnavailable("pre-held tenant maintenance lock on pooled connection")
+            state = "uncertain"
+            held = await connection.scalar(text("SELECT pg_try_advisory_lock(:key)"),
+                                           {"key": attempt.lock_key})
+            if not held:
+                state = "not_started"
+                raise TenantUnavailable("tenant has active transactions")
+            state = "held"
+            info = connection.info
             attempt.backend_pid = await connection.scalar(text("SELECT pg_backend_pid()"))
             info[_OWNER_KEY] = _claim(attempt)
-            await connection.commit()  # acquisition query's implicit transaction is finished; session lock persists
+            await connection.commit()  # session lock survives transaction commit
             await bind_maintenance_transaction(connection, attempt)
-            yield connection
+            await connection.commit()  # no unguarded initial transaction escapes
+            yield MaintenanceContext(connection, attempt)
+        except BaseException:
+            if state == "uncertain":
+                # Cancellation may arrive after PostgreSQL acquired the lock
+                # but before the await returned. Never check such a backend in.
+                await connection.invalidate()
+                state = "not_started"
+            raise
         finally:
-            info.pop(_OWNER_KEY, None)
-            # A failed statement can leave the transaction aborted. Roll it back
-            # before unlocking; dropping the physical connection is also fail-closed.
-            if connection.in_transaction():
-                await connection.rollback()
-            if not connection.invalidated:
-                try:
-                    await connection.scalar(text("SELECT pg_advisory_unlock(:key)"), {"key": attempt.lock_key})
-                finally:
-                    if connection.in_transaction():
+            if info is not None:
+                info.pop(_OWNER_KEY, None)
+            if state == "held":
+                if connection.invalidated:
+                    # A severed backend already released its session locks.
+                    pass
+                else:
+                    try:
+                        if connection.in_transaction():
+                            await connection.rollback()
+                        released = await connection.scalar(text("SELECT pg_advisory_unlock(:key)"),
+                                                           {"key": attempt.lock_key})
+                        if not released or await connection.scalar(text(_LOCK_SQL), {"key": attempt.lock_key}):
+                            raise TenantUnavailable("maintenance lock release failed or remains held")
                         await connection.rollback()
+                    except BaseException:
+                        # Includes cancellation during release and SQL errors.
+                        # Never return a potentially locked backend to the pool.
+                        await connection.invalidate()
+                        raise
 
 
 def _bind_maintenance_sync(connection: Connection, attempt: MaintenanceAttempt) -> None:
-    """Recheck the registry AND actual session-lock owner before setting a tenant path."""
+    """Recheck registry, backend PID and actual session-lock owner before path binding."""
     claim = _claim(attempt)
     if connection.info.get(_OWNER_KEY) != claim:
         raise TenantUnavailable("maintenance connection is not the attempt owner")
@@ -110,25 +178,25 @@ def _bind_maintenance_sync(connection: Connection, attempt: MaintenanceAttempt) 
 
 
 async def bind_maintenance_transaction(connection: AsyncConnection, attempt: MaintenanceAttempt) -> None:
-    """Begin/rebind each DDL, seed, or parity transaction on the original owner."""
+    """Bind an internal DDL/seed/parity transaction on the original owner."""
     await connection.run_sync(_bind_maintenance_sync, attempt)
 
 
-class MaintenanceSeedSession(Session):
-    """Bound-only seed session: recheck owner on each transaction after commits."""
+class _MaintenanceSeedSession(Session):
+    """Task 4's private seed session rechecks owner on each transaction."""
 
     def __init__(self, *args, attempt: MaintenanceAttempt, **kwargs):
         super().__init__(*args, **kwargs)
         self.info["maintenance_attempt"] = attempt
 
 
-@event.listens_for(MaintenanceSeedSession, "after_begin")
+@event.listens_for(_MaintenanceSeedSession, "after_begin")
 def _bind_seed_transaction(session: Session, transaction, connection: Connection) -> None:
     if not transaction.nested:
         _bind_maintenance_sync(connection, session.info["maintenance_attempt"])
 
 
-def maintenance_seed_session(connection: AsyncConnection, attempt: MaintenanceAttempt) -> AsyncSession:
-    """Session pinned to the owner connection, never to the engine's pool."""
-    return AsyncSession(bind=connection, sync_session_class=MaintenanceSeedSession,
+def _maintenance_seed_session(connection: AsyncConnection, attempt: MaintenanceAttempt) -> AsyncSession:
+    """Task 4 uses only inside seed_tenant; never return this session to callers."""
+    return AsyncSession(bind=connection, sync_session_class=_MaintenanceSeedSession,
                         attempt=attempt, expire_on_commit=False)
