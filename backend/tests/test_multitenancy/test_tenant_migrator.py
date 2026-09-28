@@ -252,3 +252,281 @@ async def test_migration_rejects_unowned_connection(tenant_record):
     async with engine.connect() as unowned:
         with pytest.raises(TenantUnavailable, match="lock owner"):
             await upgrade_tenant(unowned, attempt.schema_name, "tv001_business_snapshot")
+
+
+class SimulatedCrash(Exception):
+    pass
+
+
+@pytest_asyncio.fixture
+async def disposable_public_db(mig_db_url, monkeypatch):
+    """A fresh, migrated public database; fixture owns its entire disposal."""
+    from app.services import tenant_migrator
+
+    cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", mig_db_url)
+    await asyncio.to_thread(command.upgrade, cfg, "head")
+    engine = create_async_engine(mig_db_url, poolclass=NullPool)
+    monkeypatch.setattr(tenant_migrator, "engine", engine, raising=False)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+def tenant_request():
+    from app.schemas.platform import TenantCreateRequest
+    slug = "recovery-" + uuid.uuid4().hex[:12]
+    return TenantCreateRequest(name="Recovery test", slug=slug,
+                               admin_email="admin@example.test", admin_password="private-password-123")
+
+
+@pytest.mark.asyncio
+async def test_seed_commit_then_platform_status_retry_uses_same_tenant(disposable_public_db, tenant_request):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+    from app.core.tenant_utils import slug_to_schema_name
+
+    def fail_after_seed(stage):
+        if stage == "seed_commit":
+            raise SimulatedCrash()
+
+    with pytest.raises(SimulatedCrash):
+        await provision_new(tenant_request, after_stage_hook=fail_after_seed)
+    async with disposable_public_db.connect() as connection:
+        row = (await connection.execute(text(
+            "SELECT id,status FROM public.tenants WHERE slug=:slug"), {"slug": tenant_request.slug})).one()
+        tenant_id = row.id
+        assert row.status != "active"
+    tenant = await resume_tenant(tenant_id)
+    assert tenant.id == tenant_id and tenant.status == "active"
+    schema = slug_to_schema_name(tenant_request.slug)
+    async with disposable_public_db.connect() as connection:
+        admin_count = await connection.scalar(text(
+            f'SELECT count(*) FROM "{schema}".users u JOIN "{schema}".role_definitions r '
+            'ON r.id=u.role_id WHERE r.role_key=:role_key'), {"role_key": "admin"})
+        factory_count = await connection.scalar(text(
+            f'SELECT count(*) FROM "{schema}".factories WHERE code=:code'), {"code": "DEFAULT"})
+        count = await connection.scalar(text("SELECT count(*) FROM public.tenants WHERE slug=:slug"),
+                                        {"slug": tenant_request.slug})
+    assert (admin_count, factory_count, count) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["registration", "schema_created", "migration_commit",
+                                   "seed_precommit", "final_platform_update"])
+async def test_resume_each_crash_stage_requires_credentials_only_before_seed(
+        disposable_public_db, tenant_request, stage):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+
+    def crash(current):
+        if current == stage:
+            raise SimulatedCrash()
+
+    with pytest.raises(SimulatedCrash):
+        await provision_new(tenant_request, after_stage_hook=crash)
+    async with disposable_public_db.connect() as connection:
+        row = (await connection.execute(text(
+            "SELECT id,status,generation,provisioning_attempt_id FROM public.tenants WHERE slug=:slug"),
+            {"slug": tenant_request.slug})).one()
+        assert row.status != "active"
+        assert row.generation <= 1
+        assert tenant_request.admin_password not in str(row)
+    if stage != "final_platform_update":
+        with pytest.raises(TenantUnavailable, match="credentials"):
+            await resume_tenant(row.id)
+        async with disposable_public_db.connect() as connection:
+            assert await connection.scalar(text("SELECT count(*) FROM public.tenants WHERE id=:id"),
+                                           {"id": row.id}) == 1
+    tenant = await resume_tenant(row.id, bootstrap_request=tenant_request if stage != "final_platform_update" else None)
+    assert tenant.id == row.id and tenant.status == "active"
+    assert tenant.generation > row.generation
+    with pytest.raises(ValueError, match="already exists"):
+        await provision_new(tenant_request)
+
+
+@pytest.mark.asyncio
+async def test_unknown_version_and_partial_schema_refuse_without_reset(disposable_public_db, tenant_request):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+    from app.core.tenant_utils import slug_to_schema_name
+    with pytest.raises(SimulatedCrash):
+        await provision_new(tenant_request, after_stage_hook=lambda stage: (
+            (_ for _ in ()).throw(SimulatedCrash()) if stage == "registration" else None))
+    schema = slug_to_schema_name(tenant_request.slug)
+    async with disposable_public_db.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await connection.execute(text(f'CREATE TABLE "{schema}".unreviewed (id integer)'))
+    async with disposable_public_db.connect() as connection:
+        tenant_id = await connection.scalar(text("SELECT id FROM public.tenants WHERE slug=:slug"),
+                                            {"slug": tenant_request.slug})
+    with pytest.raises(TenantUnavailable, match="partial"):
+        await resume_tenant(tenant_id, bootstrap_request=tenant_request)
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".unreviewed')) == 0
+        assert await connection.scalar(text("SELECT status FROM public.tenants WHERE id=:id"),
+                                       {"id": tenant_id}) == "failed"
+        assert await connection.scalar(text("SELECT to_regclass(:name)"),
+                                       {"name": f"{schema}.tenant_schema_version"}) is None
+
+
+@pytest.mark.asyncio
+async def test_crash_after_lock_before_attempt_does_not_change_registry(disposable_public_db, tenant_request):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+    with pytest.raises(SimulatedCrash):
+        await provision_new(tenant_request, after_stage_hook=lambda stage: (
+            (_ for _ in ()).throw(SimulatedCrash()) if stage == "registration" else None))
+    async with disposable_public_db.connect() as connection:
+        before = (await connection.execute(text("""
+            SELECT id,status,generation,provisioning_attempt_id FROM public.tenants WHERE slug=:slug
+        """), {"slug": tenant_request.slug})).one()
+    with pytest.raises(SimulatedCrash):
+        await resume_tenant(before.id, bootstrap_request=tenant_request,
+                            after_stage_hook=lambda stage: (
+                                (_ for _ in ()).throw(SimulatedCrash())
+                                if stage == "lock_acquired" else None))
+    async with disposable_public_db.connect() as connection:
+        after = (await connection.execute(text("""
+            SELECT id,status,generation,provisioning_attempt_id FROM public.tenants WHERE id=:id
+        """), {"id": before.id})).one()
+        assert before == after
+        assert await connection.scalar(text("SELECT pg_try_advisory_xact_lock_shared(:key)"),
+                                       {"key": stable_tenant_lock_key(before.id)})
+    assert (await resume_tenant(before.id, bootstrap_request=tenant_request)).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_competing_resume_does_not_change_owner_claim(disposable_public_db, tenant_request, monkeypatch):
+    from app.services import tenant_migrator
+    with pytest.raises(SimulatedCrash):
+        await tenant_migrator.provision_new(tenant_request, after_stage_hook=lambda stage: (
+            (_ for _ in ()).throw(SimulatedCrash()) if stage == "registration" else None))
+    async with disposable_public_db.connect() as connection:
+        tenant_id = await connection.scalar(text("SELECT id FROM public.tenants WHERE slug=:slug"),
+                                            {"slug": tenant_request.slug})
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = tenant_migrator.MaintenanceContext.seed_tenant
+
+    async def paused_seed(self, request, **kwargs):
+        entered.set()
+        await release.wait()
+        return await original(self, request, **kwargs)
+
+    monkeypatch.setattr(tenant_migrator.MaintenanceContext, "seed_tenant", paused_seed)
+    winner = asyncio.create_task(tenant_migrator.resume_tenant(tenant_id, bootstrap_request=tenant_request))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=15)
+        async with disposable_public_db.connect() as connection:
+            before = (await connection.execute(text(
+                "SELECT generation,provisioning_attempt_id FROM public.tenants WHERE id=:id"),
+                {"id": tenant_id})).one()
+        with pytest.raises(TenantUnavailable, match="active transactions"):
+            await tenant_migrator.resume_tenant(tenant_id, bootstrap_request=tenant_request)
+        async with disposable_public_db.connect() as connection:
+            after = (await connection.execute(text(
+                "SELECT generation,provisioning_attempt_id FROM public.tenants WHERE id=:id"),
+                {"id": tenant_id})).one()
+        assert before == after
+    finally:
+        release.set()
+        assert (await winner).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_seed_failure_rolls_back_all_rows_and_retry_same_tenant(
+        disposable_public_db, tenant_request, monkeypatch):
+    from app.services import tenant_service, tenant_migrator
+    from app.core.tenant_utils import slug_to_schema_name
+
+    original = tenant_service._seed_first_admin
+
+    async def crash_after_factory(*args, **kwargs):
+        raise SimulatedCrash("no credentials in stored failure")
+
+    monkeypatch.setattr(tenant_service, "_seed_first_admin", crash_after_factory)
+    with pytest.raises(SimulatedCrash):
+        await tenant_migrator.provision_new(tenant_request)
+    schema = slug_to_schema_name(tenant_request.slug)
+    async with disposable_public_db.connect() as connection:
+        row = (await connection.execute(text(
+            "SELECT id,status,provisioning_error FROM public.tenants WHERE slug=:slug"),
+            {"slug": tenant_request.slug})).one()
+        assert row.status == "failed" and row.provisioning_error == "SimulatedCrash"
+        for table in ("users", "role_definitions", "role_permissions", "factories", "product_lines"):
+            assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}"."{table}"')) == 0
+    with pytest.raises(TenantUnavailable, match="credentials"):
+        await tenant_migrator.resume_tenant(row.id)
+    monkeypatch.setattr(tenant_service, "_seed_first_admin", original)
+    assert (await tenant_migrator.resume_tenant(row.id, bootstrap_request=tenant_request)).status == "active"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corruption", ["unknown_version", "missing_column"])
+async def test_committed_schema_corruption_never_stamped_or_deleted(
+        disposable_public_db, tenant_request, corruption):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+    from app.core.tenant_utils import slug_to_schema_name
+
+    def crash(stage):
+        if stage == "migration_commit":
+            raise SimulatedCrash()
+
+    with pytest.raises(SimulatedCrash):
+        await provision_new(tenant_request, after_stage_hook=crash)
+    schema = slug_to_schema_name(tenant_request.slug)
+    async with disposable_public_db.begin() as connection:
+        tenant_id = await connection.scalar(text("SELECT id FROM public.tenants WHERE slug=:slug"),
+                                            {"slug": tenant_request.slug})
+        if corruption == "unknown_version":
+            await connection.execute(text(f'UPDATE "{schema}".tenant_schema_version '
+                                          "SET version_num='unknown_revision'"))
+        else:
+            await connection.execute(text(f'ALTER TABLE "{schema}".users DROP COLUMN display_name'))
+    with pytest.raises(TenantUnavailable, match="unknown|partial|match"):
+        await resume_tenant(tenant_id, bootstrap_request=tenant_request)
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text("SELECT status FROM public.tenants WHERE id=:id"),
+                                       {"id": tenant_id}) == "failed"
+        if corruption == "unknown_version":
+            assert await connection.scalar(text(
+                f'SELECT version_num FROM "{schema}".tenant_schema_version')) == "unknown_revision"
+        else:
+            assert await connection.scalar(text("SELECT to_regclass(:table)"),
+                                           {"table": f"{schema}.users"}) is not None
+
+
+@pytest.mark.asyncio
+async def test_service_provision_uses_coordinator_and_never_falls_back_public(
+        disposable_public_db, tenant_request):
+    from app.services.tenant_service import TenantService
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.core.tenant_utils import slug_to_schema_name
+
+    async with AsyncSession(disposable_public_db) as platform:
+        tenant = await TenantService.provision(platform, tenant_request)
+    assert tenant.status == "active"
+    schema = slug_to_schema_name(tenant_request.slug)
+    async with disposable_public_db.connect() as connection:
+        count = await connection.scalar(text(f'SELECT count(*) FROM "{schema}".users'))
+        public_admin = await connection.scalar(text(
+            'SELECT count(*) FROM public.users WHERE email=:email'),
+            {"email": tenant_request.admin_email})
+        assert count == 1 and public_admin == 0
+
+
+@pytest.mark.asyncio
+async def test_cli_resumes_postseed_tenant_without_legacy_subprocess(
+        disposable_public_db, tenant_request, monkeypatch):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.cli import tenant_migrate
+    from app.services.tenant_migrator import provision_new
+
+    with pytest.raises(SimulatedCrash):
+        await provision_new(tenant_request, after_stage_hook=lambda stage: (
+            (_ for _ in ()).throw(SimulatedCrash()) if stage == "seed_commit" else None))
+    monkeypatch.setattr(tenant_migrate, "async_session", async_sessionmaker(disposable_public_db))
+    await tenant_migrate.main(slug=tenant_request.slug)
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text(
+            "SELECT status FROM public.tenants WHERE slug=:slug"),
+            {"slug": tenant_request.slug}) == "active"

@@ -1,76 +1,38 @@
 """Test tenant lifecycle: create → active → suspended → reactivated → deactivated."""
 import uuid
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.database import async_session
 from app.models.tenant import Tenant
 from app.core.permissions import Module
 from app.services.tenant_service import TenantService
-from app.schemas.platform import TenantCreateRequest
+from .test_tenant_migrator import disposable_public_db, tenant_request
 
 
-@pytest.mark.skip(reason="Requires live DB with Alembic migrations; run manually against provisioned environment")
 @pytest.mark.asyncio
-async def test_tenant_provisioning():
-    """Tenant provisioning creates schema, runs migrations, seeds data, and sets status active."""
-    request = TenantCreateRequest(
-        name="Test Corp",
-        slug="test-corp",
-        admin_email="admin@testcorp.com",
-        admin_password="Admin@2026",
-    )
-    async with async_session() as db:
-        tenant = await TenantService.provision(db, request)
-        assert tenant.status == "active"
-        assert tenant.schema_name == "tenant_test_corp"
-        assert tenant.slug == "test-corp"
+async def test_tenant_provisioning(disposable_public_db, tenant_request):
+    """Actual first registration migrates/atomically seeds in a disposable _test DB."""
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-        # Verify schema exists
-        result = await db.execute(text(
-            "SELECT 1 FROM information_schema.schemata WHERE schema_name = :name"
-        ), {"name": tenant.schema_name})
-        assert result.scalar() == 1
-
-        # Verify seeded data inside the tenant schema
-        await db.execute(text(f'SET search_path TO "{tenant.schema_name}"'))
-
-        from app.models.role import RoleDefinition, RolePermission
-        from app.models.user import User
-        from app.models.factory import Factory
-        from app.models.product_line import ProductLine
-
-        admin_role = (await db.execute(
-            select(RoleDefinition).where(RoleDefinition.role_key == "admin")
-        )).scalar_one()
-        assert admin_role is not None
-
-        admin_perms = (await db.execute(
-            select(RolePermission).where(RolePermission.role_id == admin_role.id)
-        )).scalars().all()
-        assert len(admin_perms) == len(Module)  # all Module enum values
-        assert all(p.permission_level == 5 for p in admin_perms)
-
-        admin_user = (await db.execute(
-            select(User).where(User.username == request.admin_email)
-        )).scalar_one()
-        assert admin_user is not None
-        assert admin_user.role_id == admin_role.id
-
-        factory = (await db.execute(select(Factory).where(Factory.code == "DEFAULT"))).scalar_one()
-        assert factory is not None
-
-        product_line = (await db.execute(
-            select(ProductLine).where(ProductLine.code == "DC-DC-100")
-        )).scalar_one()
-        assert product_line is not None
-
-        # Cleanup
-        await db.execute(text('SET search_path TO "public"'))
-        await db.execute(text(f'DROP SCHEMA IF EXISTS "{tenant.schema_name}" CASCADE'))
-        await db.execute(text("DELETE FROM public.tenants WHERE id = :id"), {"id": str(tenant.id)})
-        await db.commit()
+    async with AsyncSession(disposable_public_db) as db:
+        tenant = await TenantService.provision(db, tenant_request)
+    assert tenant.status == "active"
+    assert tenant.generation == 1
+    assert tenant.schema_name == "tenant_" + tenant_request.slug.replace("-", "_")
+    async with disposable_public_db.connect() as connection:
+        schema = tenant.schema_name
+        assert await connection.scalar(text(
+            'SELECT count(*) FROM public.tenants WHERE id=:id'), {"id": tenant.id}) == 1
+        assert await connection.scalar(text(
+            f'SELECT version_num FROM "{schema}".tenant_schema_version')) == "tv001_business_snapshot"
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".role_definitions')) == 7
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".role_permissions')) == 7 * len(Module)
+        for table in ("users", "factories", "product_lines", "user_factories", "user_product_lines"):
+            assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}"."{table}"')) == 1
+        assert await connection.scalar(text(
+            'SELECT count(*) FROM public.users WHERE email=:email'),
+            {"email": tenant_request.admin_email}) == 0
 
 
 @pytest.mark.asyncio
