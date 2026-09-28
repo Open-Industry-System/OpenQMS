@@ -1,5 +1,4 @@
 """Owner-bound tenant migration, atomic seed and same-tenant recovery."""
-import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
@@ -10,14 +9,13 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from sqlalchemy.orm import Session
 
-from app.core.tenant_transaction import TenantUnavailable, stable_tenant_lock_key
+from app.core.tenant_transaction import TenantBinding, TenantUnavailable, stable_tenant_lock_key
 from app.core.tenant_utils import slug_to_schema_name, strict_tenant_search_path_sql
-from app.database import engine
+from app.database import TenantSession, engine
 from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-logger = logging.getLogger(__name__)
 REVISION = "tv001_business_snapshot"
 _SAFE_FAILURE_REASONS = frozenset({
     "partial or unknown tenant schema; manual review required",
@@ -155,40 +153,7 @@ class MaintenanceContext:
     async def seed_state(self) -> str:
         """No seed rows means retryable; ANY partial set is not silently overwritten."""
         async with _maintenance_seed_session(self.__connection, self.__attempt) as session:
-            from app.services.tenant_service import _ROLES, _PERMISSION_MATRIX, _PERMISSION_MODULES
-            counts = (await session.execute(text("""
-                SELECT (SELECT count(*) FROM role_definitions),
-                       (SELECT count(*) FROM role_permissions),
-                       (SELECT count(*) FROM factories),
-                       (SELECT count(*) FROM product_lines),
-                       (SELECT count(*) FROM users),
-                       (SELECT count(*) FROM user_factories),
-                       (SELECT count(*) FROM user_product_lines)
-            """))).one()
-            if all(count == 0 for count in counts):
-                return "empty"
-            if tuple(counts) != (len(_ROLES), len(_ROLES)*len(_PERMISSION_MODULES), 1, 1, 1, 1, 1):
-                return "partial"
-            consistent = await session.scalar(text("""
-                SELECT EXISTS (SELECT 1 FROM users u
-                    JOIN role_definitions r ON r.id=u.role_id AND r.role_key='admin'
-                    JOIN factories f ON f.id=u.factory_id AND f.code='DEFAULT' AND f.is_active
-                    JOIN user_factories uf ON uf.user_id=u.user_id AND uf.factory_id=f.id
-                    JOIN product_lines pl ON pl.factory_id=f.id AND pl.code='DC-DC-100' AND pl.is_active
-                    JOIN user_product_lines upl ON upl.user_id=u.user_id
-                         AND upl.product_line_code=pl.code
-                    WHERE u.is_active AND u.password_hash IS NOT NULL AND u.password_hash <> '')
-            """))
-            roles = (await session.execute(text("SELECT role_key FROM role_definitions"))).scalars().all()
-            permissions = (await session.execute(text("""
-                SELECT r.role_key, p.module, p.permission_level FROM role_permissions p
-                JOIN role_definitions r ON r.id=p.role_id
-            """))).all()
-            actual = {(role, module): level for role, module, level in permissions}
-            expected = {(role, module): level for role, levels in _PERMISSION_MATRIX.items()
-                        for module, level in levels.items()}
-            return ("complete" if consistent and set(roles) == {role[0] for role in _ROLES}
-                    and actual == expected else "partial")
+            return await _read_seed_state(session)
 
     async def seed_tenant(self, request: TenantCreateRequest, *,
                           before_commit_hook: Callable[[str], None] | None = None) -> SeedResult:
@@ -348,6 +313,43 @@ def _maintenance_seed_session(connection: AsyncConnection, attempt: MaintenanceA
                         attempt=attempt, expire_on_commit=False)
 
 
+async def _read_seed_state(session: AsyncSession) -> str:
+    """Shared invariants under either a guarded maintenance or active transaction."""
+    from app.services.tenant_service import _ROLES, _PERMISSION_MATRIX, _PERMISSION_MODULES
+    counts = (await session.execute(text("""
+        SELECT (SELECT count(*) FROM role_definitions),
+               (SELECT count(*) FROM role_permissions),
+               (SELECT count(*) FROM factories),
+               (SELECT count(*) FROM product_lines),
+               (SELECT count(*) FROM users),
+               (SELECT count(*) FROM user_factories),
+               (SELECT count(*) FROM user_product_lines)
+    """))).one()
+    if all(count == 0 for count in counts):
+        return "empty"
+    if tuple(counts) != (len(_ROLES), len(_ROLES)*len(_PERMISSION_MODULES), 1, 1, 1, 1, 1):
+        return "partial"
+    consistent = await session.scalar(text("""
+        SELECT EXISTS (SELECT 1 FROM users u
+            JOIN role_definitions r ON r.id=u.role_id AND r.role_key='admin'
+            JOIN factories f ON f.id=u.factory_id AND f.code='DEFAULT' AND f.is_active
+            JOIN user_factories uf ON uf.user_id=u.user_id AND uf.factory_id=f.id
+            JOIN product_lines pl ON pl.factory_id=f.id AND pl.code='DC-DC-100' AND pl.is_active
+            JOIN user_product_lines upl ON upl.user_id=u.user_id AND upl.product_line_code=pl.code
+            WHERE u.is_active AND u.password_hash IS NOT NULL AND u.password_hash <> '')
+    """))
+    roles = (await session.execute(text("SELECT role_key FROM role_definitions"))).scalars().all()
+    permissions = (await session.execute(text("""
+        SELECT r.role_key, p.module, p.permission_level FROM role_permissions p
+        JOIN role_definitions r ON r.id=p.role_id
+    """))).all()
+    actual = {(role, module): level for role, module, level in permissions}
+    expected = {(role, module): level for role, levels in _PERMISSION_MATRIX.items()
+                for module, level in levels.items()}
+    return ("complete" if consistent and set(roles) == {role[0] for role in _ROLES}
+            and actual == expected else "partial")
+
+
 async def lock_platform_tenant_row(connection: AsyncConnection, tenant_id: UUID):
     """Lock the registry row only after the caller owns its exclusive session lock."""
     row = (await connection.execute(text("""
@@ -384,7 +386,8 @@ async def _platform_step(attempt: MaintenanceAttempt, phase: str, *, status: str
     if status:
         sql += ", status=:status"
         values["status"] = status
-    sql += " WHERE id=:id AND provisioning_attempt_id=:attempt AND generation=:generation"
+    sql += (" WHERE id=:id AND provisioning_attempt_id=:attempt "
+            "AND generation=:generation AND status IN ('provisioning','maintenance')")
     async with engine.begin() as connection:
         result = await connection.execute(text(sql), values)
         if result.rowcount != 1:
@@ -413,6 +416,49 @@ async def _load_tenant(tenant_id: UUID) -> Tenant:
         if tenant is None:
             raise TenantUnavailable("tenant not found")
         return tenant
+
+
+async def _active_current(tenant: Tenant) -> bool:
+    """Read-only active fast path behind the normal shared lock and strict path.
+
+    A stale captured generation, maintenance lock, or status change raises;
+    pending/failed tenants never enter this ordinary business transaction.
+    """
+    if tenant.status != "active":
+        return False
+    from app.services.tenant_schema_diff import compare_business_schema
+
+    binding = TenantBinding(tenant.id, tenant.schema_name, tenant.generation, "business")
+    async with AsyncSession(bind=engine, sync_session_class=TenantSession,
+                            binding=binding, expire_on_commit=False) as session:
+        # TenantSession.after_begin enforces shared lock, active status and
+        # generation before the first catalog or tenant-business query.
+        schema = await session.scalar(text("SELECT current_schema()"))
+        if schema != tenant.schema_name:
+            raise TenantUnavailable("tenant active read was not isolated")
+        version_table = f"{schema}.tenant_schema_version"
+        if not await session.scalar(text("SELECT to_regclass(:name) IS NOT NULL"),
+                                    {"name": version_table}):
+            return False
+        versions = (await session.execute(text(
+            f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
+        if versions != [REVISION]:
+            return False
+        connection = await session.connection()  # private, never returned to caller
+        if await compare_business_schema(connection, "public", schema, load_snapshot_manifest()):
+            return False
+        if await _read_seed_state(session) != "complete":
+            return False
+        # Check the registry again at the linearization point. A later update
+        # cannot invalidate an already-running shared-locked read transaction.
+        current = (await session.execute(text("""
+            SELECT status,generation,schema_name FROM public.tenants WHERE id=:id FOR SHARE
+        """), {"id": tenant.id})).one_or_none()
+        if (current is None or current.status != "active"
+                or current.generation != tenant.generation
+                or current.schema_name != tenant.schema_name):
+            raise TenantUnavailable("tenant changed during active verification")
+        return True
 
 
 async def schema_is_current(maintenance: MaintenanceContext) -> bool:
@@ -496,6 +542,9 @@ async def provision_new(request: TenantCreateRequest, *,
 async def resume_tenant(tenant_id: UUID, *, bootstrap_request: TenantCreateRequest | None = None,
                         after_stage_hook: Callable[[str], None] | None = None) -> Tenant:
     """Recover only the registered tenant, reconciling committed schema and seed."""
+    tenant = await _load_tenant(tenant_id)
+    if await _active_current(tenant):
+        return tenant
     attempt = None
     try:
         async with maintenance_connection(engine, tenant_id, after_lock_hook=after_stage_hook) as maintenance:

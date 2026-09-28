@@ -530,3 +530,79 @@ async def test_cli_resumes_postseed_tenant_without_legacy_subprocess(
         assert await connection.scalar(text(
             "SELECT status FROM public.tenants WHERE slug=:slug"),
             {"slug": tenant_request.slug}) == "active"
+
+
+@pytest.mark.asyncio
+async def test_active_current_resume_and_cli_are_read_only_noops(
+        disposable_public_db, tenant_request, monkeypatch):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.services.tenant_migrator import provision_new, resume_tenant
+    from app.cli import tenant_migrate
+
+    tenant = await provision_new(tenant_request)
+    schema = tenant.schema_name
+    async with disposable_public_db.connect() as connection:
+        before = (await connection.execute(text("""
+            SELECT status,generation,provisioning_attempt_id,provisioning_step
+            FROM public.tenants WHERE id=:id
+        """), {"id": tenant.id})).one()
+        version = await connection.scalar(text(
+            f'SELECT version_num FROM "{schema}".tenant_schema_version'))
+    assert (await resume_tenant(tenant.id)).id == tenant.id
+    monkeypatch.setattr(tenant_migrate, "async_session", async_sessionmaker(disposable_public_db))
+    await tenant_migrate.main(slug=tenant_request.slug)
+    async with disposable_public_db.connect() as connection:
+        after = (await connection.execute(text("""
+            SELECT status,generation,provisioning_attempt_id,provisioning_step
+            FROM public.tenants WHERE id=:id
+        """), {"id": tenant.id})).one()
+        assert before == after
+        assert await connection.scalar(text(
+            f'SELECT version_num FROM "{schema}".tenant_schema_version')) == version
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".users')) == 1
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".factories')) == 1
+        assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".role_definitions')) == 7
+        assert await connection.scalar(text(
+            "SELECT count(*) FROM public.tenant_migrations WHERE tenant_id=:id"),
+            {"id": tenant.id}) == 0
+
+
+@pytest.mark.asyncio
+async def test_active_fast_path_refuses_stale_generation_and_exclusive_owner(
+        disposable_public_db, tenant_request):
+    from app.services.tenant_migrator import _active_current, provision_new, resume_tenant
+
+    tenant = await provision_new(tenant_request)
+    async with disposable_public_db.begin() as connection:
+        await connection.execute(text(
+            'UPDATE public.tenants SET generation=generation+1 WHERE id=:id'), {"id": tenant.id})
+    with pytest.raises(TenantUnavailable, match="generation"):
+        await _active_current(tenant)
+    async with disposable_public_db.connect() as owner:
+        key = stable_tenant_lock_key(tenant.id)
+        assert await owner.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
+        await owner.commit()
+        try:
+            with pytest.raises(TenantUnavailable, match="maintenance"):
+                await resume_tenant(tenant.id)
+        finally:
+            assert await owner.scalar(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text('SELECT generation FROM public.tenants WHERE id=:id'),
+                                       {"id": tenant.id}) == tenant.generation + 1
+
+
+@pytest.mark.asyncio
+async def test_active_parity_drift_is_not_a_noop(disposable_public_db, tenant_request):
+    from app.services.tenant_migrator import provision_new, resume_tenant
+
+    tenant = await provision_new(tenant_request)
+    async with disposable_public_db.begin() as connection:
+        await connection.execute(text(f'ALTER TABLE "{tenant.schema_name}".users DROP COLUMN display_name'))
+    with pytest.raises(TenantUnavailable, match="match"):
+        await resume_tenant(tenant.id)
+    async with disposable_public_db.connect() as connection:
+        assert await connection.scalar(text("SELECT status FROM public.tenants WHERE id=:id"),
+                                       {"id": tenant.id}) == "failed"
+        assert await connection.scalar(text(
+            f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == "tv001_business_snapshot"
