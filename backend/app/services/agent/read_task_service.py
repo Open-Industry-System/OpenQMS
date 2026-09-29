@@ -56,10 +56,13 @@ async def create_read_task(
     _require_single_tenant()
     report = await db.get(CAPAEightD, capa_id)
     if report is None:
-        raise LookupError("CAPA not found")
+        raise ValueError("CAPA unavailable")
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
-        raise ValueError("CAPA view denied")
-    _require_report_scope(report, scope)
+        raise ValueError("CAPA unavailable")
+    try:
+        _require_report_scope(report, scope)
+    except ValueError:
+        raise ValueError("CAPA unavailable") from None
     created_at = datetime.now(UTC)
     task = AgentReadTask(
         initiator_user_id=scope.user.user_id, tenant_schema=_TENANT_SCHEMA,
@@ -90,7 +93,9 @@ async def check_read_task(
         raise LookupError("Agent read task not found")
 
     reason = None
-    if task.status != "active":
+    if task.status == "revoked":
+        reason = "revoked"
+    elif task.status != "active":
         reason = "inactive"
     elif task.expires_at <= now:
         reason = "expired"
@@ -115,7 +120,11 @@ async def check_read_task(
     if reason is not None:
         await _audit(db, scope, task, "CHECK_DENY", {"reason": reason})
         await db.commit()
-        raise ValueError("Agent read task denied")
+        message = {
+            "expired": "Agent read task expired",
+            "revoked": "Agent read task revoked",
+        }.get(reason, "Agent read task denied")
+        raise ValueError(message)
 
     grant = Grant(
         capability_id=task.capability_id,

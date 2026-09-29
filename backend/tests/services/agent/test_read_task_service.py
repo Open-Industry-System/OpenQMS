@@ -115,8 +115,13 @@ async def test_check_denies_stale_or_out_of_scope_task(db, scope, capa, denial, 
         monkeypatch.setattr("app.services.agent.read_task_service.get_capability", lambda _id: None)
     elif denial == "revoked":
         await revoke_read_task(db, scope, task.task_id)
-    with pytest.raises((ValueError, LookupError)):
+    with pytest.raises(ValueError) as exc:
         await check_read_task(db, scope, task.task_id, now)
+    expected_message = {
+        "expired": "Agent read task expired",
+        "revoked": "Agent read task revoked",
+    }.get(denial, "Agent read task denied")
+    assert str(exc.value) == expected_message
     denials = [x for x in await _logs(db, task.task_id) if x.action == "CHECK_DENY"]
     assert len(denials) == 1
     assert set(denials[0].changed_fields) == {"reason"}
@@ -140,6 +145,27 @@ async def test_create_requires_current_permission_and_scope(db, scope, capa):
     await db.flush()
     with pytest.raises((ValueError, LookupError)):
         await create_read_task(db, scope, capa.report_id)
+
+
+@pytest.mark.parametrize("denial", ["missing", "permission", "factory", "product_line"])
+async def test_create_does_not_reveal_report_existence(db, scope, capa, denial):
+    await db.flush()
+    capa_id = capa.report_id
+    if denial == "missing":
+        capa_id = uuid4()
+    elif denial == "permission":
+        permission = (await db.execute(select(RolePermission).where(
+            RolePermission.role_id == scope.user.role_id, RolePermission.module == Module.CAPA.value
+        ))).scalar_one()
+        permission.permission_level = 0
+        await db.flush()
+    elif denial == "factory":
+        scope.effective_factory_id = uuid4()
+    elif denial == "product_line":
+        scope.pl_scope = ProductLineScope("NONE", None)
+    with pytest.raises(ValueError) as exc:
+        await create_read_task(db, scope, capa_id)
+    assert str(exc.value) == "CAPA unavailable"
 
 
 async def test_revoke_is_idempotent_and_owner_bound(db, scope, capa, other_admin_user):
