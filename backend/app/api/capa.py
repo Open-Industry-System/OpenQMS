@@ -1382,6 +1382,11 @@ async def get_ppt_export(
 def _d3_check_scope(entity, scope: RequestScope):
     """Wrap factory/product-line checks to raise 404 (information hiding)."""
     try:
+        if (
+            scope.effective_factory_id is not None
+            and entity.factory_id != scope.effective_factory_id
+        ):
+            raise HTTPException(status_code=404, detail="8D report not found")
         check_factory_access(entity.factory_id, scope)
         check_product_line_access(getattr(entity, "product_line_code", None), scope)
     except HTTPException:

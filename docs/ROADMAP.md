@@ -1,8 +1,9 @@
 # OpenQMS 开发路线图
 
-**更新日期**: 2026-06-25
-**当前版本**: v0.1.0 (MVP)
-**目标版本**: v3.0 (全功能发布)
+**更新日期**: 2026-09-06
+**当前阶段**: Release Candidate 稳定化门禁已通过（待分支评审与集成）
+**产品范围**: Phase 1–4 + Phase 4+ 已完成；进入分支评审与试点准备
+**版本目标**: v3.0（全功能发布）
 
 ---
 
@@ -12,8 +13,8 @@
 Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase 4 (M13-M16)
 基础平台 + 核心模块        供应商/客户质量           AI + 知识图谱增强         高级分析 + 生态集成
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-██████████████████████████ █████████████████████████ █████████████████████████ ░░░░░░░░░░░░░░░░░░░░░░░░
-      已完成                  已完成                      已完成                    进行中
+██████████████████████████ █████████████████████████ █████████████████████████ █████████████████████████
+      已完成                  已完成                      已完成                    已完成
 ```
 
 ---
@@ -140,7 +141,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ---
 
-## Phase 4: 高级分析 + 生态集成 (Month 13-16) 🔄 进行中
+## Phase 4: 高级分析 + 生态集成 (Month 13-16) ✅ 已完成
 
 | 功能 | 优先级 | 状态 | 说明 |
 |------|--------|------|------|
@@ -236,7 +237,7 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 2026 M5  ──── ✅ 供应商/客户模块完成 (含增强功能)
 2026 M5  ──── ✅ 知识图谱基础设施 + 可视化上线
 2026 M6  ──── ✅ Phase 3 AI + 知识图谱增强全部完成
-2026 M6  ──── ✅ Phase 4 高级分析 + 生态集成启动
+2026 M6  ──── ✅ Phase 4 高级分析 + 生态集成完成
 2026 M6.5 ── ✅ 供应链风险地图上线
 2026 M6   ── ✅ Phase 4+ FMEA 向导化与体验优化（PFMEA/DFMEA 七步法向导、版本快照查看、安全删除、产品类型主数据）
 2026 M12 ──── 🔲 GA v2.0 发布
@@ -266,7 +267,18 @@ Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase
 
 ## 下一步行动
 
-**Phase 4 全部完成 — SaaS 多租户架构已上线 (2026-06-13)**:
+**Release Candidate 稳定化门禁：已通过**
+
+1. ✅ final fresh DB reset/migration/seed：`qms_e2e` 唯一 head `20260727_warranty_factory_id`；
+2. ✅ final `make check`：backend `1975 passed / 5 skipped / 5 xfailed / 0 failed`（181.95s），frontend tsc 与 Vite build 通过（7.61s）；
+3. ✅ final Playwright（zero retry）：44 total，`42 passed / 0 failed`，仅两项 allowed inverse skip；
+4. ✅ final CAPA PPT：`f3f5753b-cbd6-45ba-818b-c51df70a9d83` round 1 `passed`，11 slides/carriers/DB/audit 通过，`issues=[]`，非空 suggestions 为 advisory；
+5. ✅ collaboration 跨工厂访问无泄露、无副作用；最终系统集成菜单切片 `2/2 passed`；
+6. ⏳ 仍待稳定化分支评审，并决定是否集成至 `main`。
+
+**最终 Playwright allowed skips**：`no creds: advice endpoint 422 blocked + import still 200 blocked`；`no-LLM: D8 close is blocked (422 outcome=blocked)`。除此之外无 failed 或意外 skip。
+
+**历史：Phase 4 已完成（2026-06-13）**:
 
 Phase 4 全部功能已开发完毕。多租户架构是最后一个 Phase 4 模块，包括：
 - Schema-per-tenant 隔离（PostgreSQL schema 级别）
@@ -287,9 +299,8 @@ Phase 4 全部功能已开发完毕。多租户架构是最后一个 Phase 4 模
 - [x] AppLayout 清理 (移除硬编码颜色，依赖 ConfigProvider Token)
 - [x] D7 预防复发提示 (图结构匹配 + 关键词搜索 + 自动填充 + 软门禁 + 审计日志)
 
-**立即**:
-- Phase 3 全部完成，准备进入 Phase 4
-- 选择 Phase 4 首个开发模块
+**历史（Phase 3→4 过渡，已完成）**:
+- Phase 3 全部完成，Phase 4 已完成并进入 RC 稳定化。
 
 **已完成 (2026-06-02)**:
 - [x] 8D 根因+措施推荐 (D4/D5 智能推荐：FMEA 图匹配 + 规则引擎 + 推荐面板)

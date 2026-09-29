@@ -1,8 +1,11 @@
 import uuid
+from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 
-from app.models.capa import CAPAEightD
+from app import seed_e2e
+from app.models.capa import CAPAEightD, CapaD7NodeAction, CapaRootCauseVerification
 from app.services import agent_review_skill_service, capa_ppt_review_service, capa_ppt_service
 from app.services.agent import provider_adapter
 from app.services.capa_ppt_service import PptContent, PptPage
@@ -26,6 +29,68 @@ async def _make_capa(db, factory_id, user_id):
 
 class _PC:
     pass  # fake provider client
+
+
+async def test_subagent_prompts_exclude_post_review_metadata_and_preserve_absent_links(monkeypatch):
+    """审查和校正 prompt 均不得把渲染后字段或 DB-faithful 的“无”当成待修复内容。"""
+    prompts = []
+
+    async def _mock(pc, prompt, response_schema):
+        prompts.append(prompt)
+        if response_schema is capa_ppt_review_service.REVIEW_SCHEMA:
+            return {"passed": True, "issues": [], "suggestions": []}
+        return {"pages": []}
+
+    monkeypatch.setattr(provider_adapter, "complete_json", _mock)
+    content = _base_content()
+    skill = SimpleNamespace(content="测试审查规则")
+    await capa_ppt_review_service._subagent_review(_PC(), skill, content)
+    await capa_ppt_review_service._subagent_correct(_PC(), skill, content, [])
+
+    assert len(prompts) == 2
+    for prompt in prompts:
+        assert "generation-info 的 version/status/rounds 由审查完成后的渲染层填充，当前审查阶段不得评估、质疑或校正它们。" in prompt
+        assert "缺少关联 FMEA、SCAR 或风险预警时，附录中的“无”是忠实反映数据库的有效值，不得要求补充或编造链接事实。" in prompt
+
+
+async def test_knowledge_sink_seed_has_one_passed_d4_and_confirmed_d7(db, admin_user, default_factory):
+    """知识沉淀 CAPA 重 seed 仅保留固定的 D4 通过证据与 D7 确认动作。"""
+    admin_user.username = "admin"
+    await db.flush()
+    factory_ids = {seed_e2e.E2E_FACTORY_DC100["code"]: default_factory.id}
+    await seed_e2e._seed_knowledge_sink(db, factory_ids)
+    await seed_e2e._seed_knowledge_sink(db, factory_ids)
+
+    capa = await db.scalar(select(CAPAEightD).where(
+        CAPAEightD.document_no == seed_e2e.KNOWLEDGE_SINK_E2E_CAPA_DOC_NO
+    ))
+    verifications = list((await db.execute(select(CapaRootCauseVerification).where(
+        CapaRootCauseVerification.capa_id == capa.report_id
+    ))).scalars())
+    actions = list((await db.execute(select(CapaD7NodeAction).where(
+        CapaD7NodeAction.capa_id == capa.report_id
+    ))).scalars())
+
+    assert len(verifications) == 1
+    verification = verifications[0]
+    assert verification.verification_id == seed_e2e.KNOWLEDGE_SINK_VERIFICATION_ID
+    assert verification.root_cause_text == capa.d4_root_cause
+    assert verification.method == "reproduction"
+    assert verification.result == "复现定位销磨损后孔径超差"
+    assert verification.is_verified is True
+    assert verification.conclusion == "passed"
+    assert verification.evidence_attachments == [{
+        "filename": "D4-定位销磨损复现实验记录.pdf",
+        "content_type": "application/pdf",
+    }]
+
+    assert len(actions) == 1
+    action = actions[0]
+    assert action.action_id == seed_e2e.KNOWLEDGE_SINK_D7_ACTION_ID
+    assert action.action == "confirmed"
+    assert action.fmea_id is None
+    assert action.failure_mode_node_id == "rule:定位销磨损导致孔径超差"
+    assert action.match_source == "rule"
 
 
 async def test_skipped_when_clean_and_llm_off(db, admin_user, default_factory):

@@ -121,8 +121,10 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID) -> PptContent:
         PptPage("D8 关闭结论", [{"label": "结论", "value": capa.d8_closure or ""}]),
         PptPage("联动附录", [
             {"label": "关联 FMEA 节点", "value": str(linked_fmea_node) if linked_fmea_node else "无"},
-            *[{"label": f"SCAR{i+1}", "value": str(s)} for i, s in enumerate(linked_scars)],
-            *[{"label": f"风险预警{i+1}", "value": str(r)} for i, r in enumerate(linked_risk_alerts)],
+            *([{"label": "SCAR", "value": "无"}] if not linked_scars else
+              [{"label": f"SCAR{i+1}", "value": str(s)} for i, s in enumerate(linked_scars)]),
+            *([{"label": "风险预警", "value": "无"}] if not linked_risk_alerts else
+              [{"label": f"风险预警{i+1}", "value": str(r)} for i, r in enumerate(linked_risk_alerts)]),
         ]),
         PptPage("生成信息", []),  # 占位，render_pptx 时用 meta + review 填充
     ]

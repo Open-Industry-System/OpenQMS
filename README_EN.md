@@ -57,32 +57,44 @@ An out-of-the-box quality management system platform for manufacturing, covering
 ```bash
 git clone https://github.com/your-org/OpenQMS.git
 cd OpenQMS
-docker compose up -d
+docker compose up -d db redis neo4j
 ```
 
 Wait for all containers to become healthy (about 30 seconds):
 
 ```bash
-docker compose ps   # Confirm db/redis/neo4j are healthy, backend/frontend are running
+docker compose ps   # Confirm db/redis/neo4j are healthy
 ```
 
 ### 2. Initialize the Database
 
 ```bash
-docker compose exec backend alembic upgrade head
+docker compose run --rm backend alembic upgrade head
 ```
 
 ### 3. Import Demo Data
 
 ```bash
-docker compose exec backend python -m app.seed
+docker compose run --rm backend python -m app.seed
 ```
 
 Output `Seed data created successfully!` indicates success.
 
+After applying migrations and importing the demo data, start the complete application stack:
+
+```bash
+docker compose up -d
+```
+
 ### 4. Access the System
 
-Open **http://localhost:5173** in your browser and log in with one of the following accounts:
+| Page | URL | Description |
+|------|-----|-------------|
+| Public project home | [http://localhost:5173/](http://localhost:5173/) | No login required |
+| System login | [http://localhost:5173/login](http://localhost:5173/login) | Login entry |
+| Dashboard | [http://localhost:5173/dashboard](http://localhost:5173/dashboard) | Available after login |
+
+The following seed accounts are for local development only:
 
 | Username | Password | Role | Description |
 |----------|----------|------|-------------|
@@ -92,7 +104,7 @@ Open **http://localhost:5173** in your browser and log in with one of the follow
 | `viewer` | `Viewer@2026` | Read-only User | Read-only access to all modules |
 | `groupadmin` | `GroupAdmin@2026` | System Administrator (Group) | Multi-plant management permissions |
 
-> ⚠️ Demo passwords are for development environments only — be sure to change them in production.
+> Public deployments must not expose these seed credentials. The Viewer demo entry remains hidden until a dedicated demo account is explicitly configured.
 
 ### 5. API Documentation
 

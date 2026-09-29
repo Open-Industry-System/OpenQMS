@@ -1,11 +1,11 @@
 # backend/tests/test_spc_fmea_match.py
 import uuid
 import os
-from urllib.parse import urlparse
 
 import pytest
 import pytest_asyncio
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.services.spc_service import (
@@ -21,7 +21,6 @@ from app.models.role import RoleDefinition
 from app.models.product_line import ProductLine
 from app.models.factory import Factory
 from app.database import Base
-from sqlalchemy import text
 
 import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
 
@@ -49,23 +48,26 @@ async def test_fixture_preserves_shared_migration_schema(db):
 
 @pytest_asyncio.fixture(scope="function")
 async def db(mig_db_url):
-    shared_url = os.environ.get("TEST_DATABASE_URL")
-    if not shared_url:
-        pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
-    db_name = urlparse(shared_url).path.lstrip("/")
-    if "_test" not in db_name:
-        pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
-
+    """Use a one-shot DB; never rebuild the shared suite database."""
     engine = create_async_engine(mig_db_url)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             await conn.execute(
-                Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
+                Factory.__table__.insert().values(
+                    id=_DEFAULT_FACTORY_ID,
+                    code="TEST",
+                    name="Test Factory",
+                )
             )
             await conn.execute(
-                ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
+                ProductLine.__table__.insert().values(
+                    code="DC-DC-100",
+                    name="DC-DC Convert 100W",
+                    factory_id=_DEFAULT_FACTORY_ID,
+                )
             )
+            await conn.commit()
         session_factory = async_sessionmaker(engine, expire_on_commit=False)
         async with session_factory() as session:
             yield session

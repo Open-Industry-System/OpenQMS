@@ -3,27 +3,45 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import get_current_user
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_factory_access
 from app.database import get_db
-from app.models.user import User
 from app.schemas.collaboration import ActiveUser, ActiveUsersResponse, HeartbeatRequest
 from app.services import collaboration_service
 
 router = APIRouter(prefix="/api/collaboration", tags=["collaboration"])
 
 
+async def _require_document_access(
+    db: AsyncSession,
+    scope: RequestScope,
+    document_type: str,
+    document_id: uuid.UUID,
+) -> uuid.UUID:
+    try:
+        factory_id = await collaboration_service.resolve_document_factory_id(
+            db, document_type, document_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        check_factory_access(factory_id, scope)
+    except HTTPException as exc:
+        raise HTTPException(status_code=404, detail="document_not_found") from exc
+    return factory_id
+
+
 @router.post("/heartbeat", status_code=status.HTTP_204_NO_CONTENT)
 async def heartbeat(
     req: HeartbeatRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
-    try:
-        factory_id = await collaboration_service.resolve_document_factory_id(
-            db, req.document_type, req.document_id
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    factory_id = await _require_document_access(
+        db, scope, req.document_type, req.document_id
+    )
+    user = scope.user
     await collaboration_service.upsert_session(
         db,
         document_type=req.document_type,
@@ -41,13 +59,14 @@ async def leave(
     document_type: str,
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    await _require_document_access(db, scope, document_type, document_id)
     await collaboration_service.delete_session(
         db,
         document_type=document_type,
         document_id=document_id,
-        user_id=user.user_id,
+        user_id=scope.user.user_id,
     )
 
 
@@ -56,23 +75,24 @@ async def active_users(
     document_type: str,
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    scope: RequestScope = Depends(get_request_scope),
 ):
+    await _require_document_access(db, scope, document_type, document_id)
     sessions = await collaboration_service.get_active_users(
         db,
         document_type=document_type,
         document_id=document_id,
-        exclude_user_id=user.user_id,
+        exclude_user_id=scope.user.user_id,
     )
     return ActiveUsersResponse(
         users=[
             ActiveUser(
-                user_id=str(s.user_id),
-                user_name=s.user_name or "未知用户",
-                action=s.action,  # type: ignore[arg-type]
-                editing_area=s.editing_area,
+                user_id=str(session.user_id),
+                user_name=session.user_name or "未知用户",
+                action=session.action,  # type: ignore[arg-type]
+                editing_area=session.editing_area,
             )
-            for s in sessions
+            for session in sessions
         ],
         total=len(sessions),
     )

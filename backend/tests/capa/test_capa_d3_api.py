@@ -47,6 +47,7 @@ async def client(db, admin_user, default_factory):
     """ASGI client authenticated as engineer (CAPA EDIT = 3)."""
     await _seed_perm(db, admin_user.role_id, "capa", 3)
     scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    scope.effective_factory_id = None
     app.dependency_overrides[get_current_user] = lambda: admin_user
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_request_scope] = lambda: scope
@@ -61,6 +62,7 @@ async def viewer_client(db, admin_user, default_factory):
     """ASGI client authenticated as viewer (CAPA VIEW = 1)."""
     await _seed_perm(db, admin_user.role_id, "capa", 1)
     scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    scope.effective_factory_id = None
     app.dependency_overrides[get_current_user] = lambda: admin_user
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_request_scope] = lambda: scope
@@ -835,6 +837,41 @@ async def test_decision_cross_factory_404(other_factory_client, capa_d3_done_rep
         f"/api/capa/{capa.report_id}/d3/advice/{fake_advice_id}/decision",
         json={"decision": "adopted", "adopted_text": "t"},
     )
+    assert resp.status_code == 404
+
+
+async def test_decision_effective_factory_mismatch_404(
+    client, db, admin_user, default_factory, capa_d3_done_report, llm_mock,
+):
+    """A selected factory hides a CAPA even when the group-like scope is unrestricted."""
+    capa, _report, _run, _user = capa_d3_done_report
+    scope = _scope_for(admin_user, default_factory, accessible_factory_ids=None)
+    scope.effective_factory_id = capa.factory_id
+    app.dependency_overrides[get_request_scope] = lambda: scope
+    llm_mock.return_value = {
+        "advice": [{
+            "advice_type": "strict_inspection",
+            "advice_text": "加强检验",
+            "target_batch_refs": None,
+            "provenance_sources_hint": ["iqc"],
+        }]
+    }
+    advice_response = await client.post(f"/api/capa/{capa.report_id}/d3/advice")
+    assert advice_response.status_code == 200
+    advice_id = advice_response.json()["advice"][0]["advice_id"]
+
+    other_factory = Factory(
+        id=uuid.uuid4(), code="EFFECTIVE-OTHER-D3", name="Effective Other D3 Factory", is_active=True,
+    )
+    db.add(other_factory)
+    await db.flush()
+    scope.effective_factory_id = other_factory.id
+
+    resp = await client.post(
+        f"/api/capa/{capa.report_id}/d3/advice/{advice_id}/decision",
+        json={"decision": "adopted", "adopted_text": "t"},
+    )
+
     assert resp.status_code == 404
 
 

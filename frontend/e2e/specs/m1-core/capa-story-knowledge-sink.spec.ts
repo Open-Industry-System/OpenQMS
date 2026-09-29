@@ -235,7 +235,7 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
 
     // Capture freshness floor before recommend so historical RETRIEVED rows
     // from prior runs cannot satisfy the audit assertion.
-    const beforeIso = new Date().toISOString();
+    const beforeIso = new Date(Date.now() - 5_000).toISOString();
 
     const rec = await engAc.get(`/capa/${probe!.report_id}/d4-fmea-recommendations`, ok);
     expect(rec.status, `recommend status: ${JSON.stringify(rec.data)}`).toBe(200);

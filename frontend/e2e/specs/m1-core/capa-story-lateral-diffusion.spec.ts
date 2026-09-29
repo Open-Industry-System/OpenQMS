@@ -17,8 +17,6 @@ const CAPA_002 = "8D-E2E-LATERAL-002";
 const CAPA_BLOCK = "8D-E2E-LATERAL-BLOCK";
 const CAPA_EMPTY = "8D-E2E-LATERAL-EMPTY";
 
-const llmMissing = noLlmCreds();
-
 async function findCapa(ac: any, docNo: string) {
   const r = await ac.get("/capa", { params: { page: 1, page_size: 100 } });
   const item = (r.data.items || []).find((c: any) => c.document_no === docNo);
@@ -51,7 +49,7 @@ test.describe("capa-story-lateral-diffusion", () => {
   });
 
   test("001 close yields all four hit criteria union", async () => {
-    test.skip(llmMissing, "requires LLM credentials to close");
+    test.skip(noLlmCreds(), "requires LLM credentials to close");
     const capa = await findCapa(managerAc, CAPA_001);
 
     let detail: any;
@@ -83,7 +81,7 @@ test.describe("capa-story-lateral-diffusion", () => {
   });
 
   test("001 decide notify writes notifications + CHECKED + SENT audit", async () => {
-    test.skip(llmMissing, "requires LLM credentials to close");
+    test.skip(noLlmCreds(), "requires LLM credentials to close");
     const capa = await findCapa(managerAc, CAPA_001);
     const r = await managerAc.get(`/capa/${capa.report_id}`);
     const lat = r.data.lateral_diffusion;
@@ -119,7 +117,7 @@ test.describe("capa-story-lateral-diffusion", () => {
   });
 
   test("002 decide skip writes SKIPPED with skip_reason + audit", async () => {
-    test.skip(llmMissing, "requires LLM credentials to close");
+    test.skip(noLlmCreds(), "requires LLM credentials to close");
     const capa = await findCapa(managerAc, CAPA_002);
 
     if (capa.status === "D8_APPROVAL_PENDING") {
@@ -155,7 +153,7 @@ test.describe("capa-story-lateral-diffusion", () => {
   });
 
   test("EMPTY closes and reports empty lateral status", async () => {
-    test.skip(llmMissing, "requires LLM credentials to close");
+    test.skip(noLlmCreds(), "requires LLM credentials to close");
     const capa = await findCapa(managerAc, CAPA_EMPTY);
 
     if (capa.status !== "D8_APPROVAL_PENDING") {
@@ -176,6 +174,7 @@ test.describe("capa-story-lateral-diffusion", () => {
   });
 
   test("BLOCK without LLM is 422 blocked; with LLM closes", async () => {
+    const llmMissing = noLlmCreds();
     const capa = await findCapa(managerAc, CAPA_BLOCK);
 
     if (capa.status !== "D8_APPROVAL_PENDING") {
