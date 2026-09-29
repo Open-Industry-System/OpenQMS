@@ -75,7 +75,8 @@ def test_upgrade_creates_tenant_table_with_required_columns_and_indexes(mig_db_u
     command.upgrade(_cfg(mig_db_url), REV)
     engine = _engine(mig_db_url)
     with engine.connect() as conn:
-        columns = {c["name"]: c for c in sa.inspect(conn).get_columns("agent_read_tasks")}
+        inspector = sa.inspect(conn)
+        columns = {c["name"]: c for c in inspector.get_columns("agent_read_tasks")}
         assert set(columns) == {
             "task_id", "initiator_user_id", "tenant_schema", "capa_id", "factory_id",
             "product_line_code", "capability_id", "status", "expires_at", "created_at", "revoked_at",
@@ -83,11 +84,18 @@ def test_upgrade_creates_tenant_table_with_required_columns_and_indexes(mig_db_u
         assert all(not col["nullable"] for name, col in columns.items() if name != "revoked_at")
         assert columns["revoked_at"]["nullable"]
         assert columns["task_id"]["type"].__class__.__name__ == "UUID"
+        assert inspector.get_pk_constraint("agent_read_tasks")["constrained_columns"] == ["task_id"]
+        assert any(
+            fk["constrained_columns"] == ["capa_id", "factory_id"]
+            and fk["referred_table"] == "capa_eightd"
+            and fk["referred_columns"] == ["report_id", "factory_id"]
+            for fk in inspector.get_foreign_keys("agent_read_tasks")
+        )
         assert columns["tenant_schema"]["default"] is None
-        assert {i["name"] for i in sa.inspect(conn).get_indexes("agent_read_tasks")} == {
+        assert {i["name"] for i in inspector.get_indexes("agent_read_tasks")} == {
             "ix_agent_read_tasks_initiator_status", "ix_agent_read_tasks_expires_at",
         }
-        assert "agent_read_tasks" in sa.inspect(conn).get_table_names()
+        assert "agent_read_tasks" in inspector.get_table_names()
     engine.dispose()
 
 
