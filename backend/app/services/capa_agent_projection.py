@@ -3,6 +3,7 @@
 import hashlib
 import json
 import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select, text
@@ -10,6 +11,28 @@ from sqlalchemy import select, text
 from app.config import settings
 from app.database import async_session
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
+
+
+@dataclass(frozen=True, slots=True)
+class _VerificationItem:
+    verification_id: str
+    conclusion: str
+    is_verified: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectionPayload:
+    projection_id: str
+    source_capa_id: str
+    data_class: str
+    report_id: str
+    document_no: str
+    status: str
+    severity: str
+    factory_id: str
+    product_line_code: str
+    updated_at: str
+    verifications: tuple[_VerificationItem, ...]
 
 
 def _utc_iso(value: datetime) -> str:
@@ -20,26 +43,28 @@ def _utc_iso(value: datetime) -> str:
 
 def _serialize_projection(capa: CAPAEightD, rows: list[CapaRootCauseVerification]) -> dict:
     """Construct the v1 allowlist and digest without serializing ORM state."""
-    payload = {
-        "projection_id": "capa.d4.summary.masked.v1",
-        "source_capa_id": str(capa.report_id),
-        "data_class": "internal",
-        "report_id": str(capa.report_id),
-        "document_no": capa.document_no,
-        "status": capa.status,
-        "severity": capa.severity,
-        "factory_id": str(capa.factory_id),
-        "product_line_code": capa.product_line_code,
-        "updated_at": _utc_iso(capa.updated_at),
-        "verifications": [
-            {
-                "verification_id": str(row.verification_id),
-                "conclusion": row.conclusion,
-                "is_verified": row.is_verified,
-            }
+    contract = _ProjectionPayload(
+        projection_id="capa.d4.summary.masked.v1",
+        source_capa_id=str(capa.report_id),
+        data_class="internal",
+        report_id=str(capa.report_id),
+        document_no=capa.document_no,
+        status=capa.status,
+        severity=capa.severity,
+        factory_id=str(capa.factory_id),
+        product_line_code=capa.product_line_code,
+        updated_at=_utc_iso(capa.updated_at),
+        verifications=tuple(
+            _VerificationItem(
+                verification_id=str(row.verification_id),
+                conclusion=row.conclusion,
+                is_verified=row.is_verified,
+            )
             for row in sorted(rows, key=lambda row: str(row.verification_id))
-        ],
-    }
+        ),
+    )
+    payload = asdict(contract)
+    payload["verifications"] = list(payload["verifications"])
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return {**payload, "projection_digest": hashlib.sha256(canonical.encode("utf-8")).hexdigest()}
 

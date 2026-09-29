@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import uuid
+from dataclasses import FrozenInstanceError, fields, is_dataclass
 from types import SimpleNamespace
 
 import pytest
@@ -133,6 +134,24 @@ def test_verification_order_does_not_change_digest():
     assert _serialize_projection(capa, rows) == _serialize_projection(capa, list(reversed(rows)))
 
 
+def test_projection_contract_uses_frozen_explicit_field_types():
+    from app.services.capa_agent_projection import _ProjectionPayload, _VerificationItem
+
+    assert is_dataclass(_ProjectionPayload)
+    assert is_dataclass(_VerificationItem)
+    assert {field.name for field in fields(_VerificationItem)} == {
+        "verification_id", "conclusion", "is_verified",
+    }
+    assert {field.name for field in fields(_ProjectionPayload)} == {
+        "projection_id", "source_capa_id", "data_class", "report_id",
+        "document_no", "status", "severity", "factory_id",
+        "product_line_code", "updated_at", "verifications",
+    }
+    item = _VerificationItem("id", "pending", False)
+    with pytest.raises(FrozenInstanceError):
+        item.conclusion = "passed"
+
+
 @pytest.mark.asyncio
 async def test_snapshot_remains_consistent_across_concurrent_child_commit(
     seeded_projection, sessionmaker, monkeypatch,
@@ -152,16 +171,20 @@ async def test_snapshot_remains_consistent_across_concurrent_child_commit(
 
     monkeypatch.setattr(AsyncSession, "execute", paused_execute)
     load_task = asyncio.create_task(build_masked_d4_projection(capa_id))
-    await asyncio.wait_for(parent_read.wait(), 5)
     try:
+        await asyncio.wait_for(parent_read.wait(), 5)
         async with sessionmaker() as db:
             await db.execute(update(CapaRootCauseVerification).where(
                 CapaRootCauseVerification.verification_id == verification_id,
             ).values(conclusion="passed", is_verified=True))
             await db.commit()
+        continue_read.set()
+        old_snapshot = await asyncio.wait_for(load_task, 5)
     finally:
         continue_read.set()
-    old_snapshot = await asyncio.wait_for(load_task, 5)
+        if not load_task.done():
+            load_task.cancel()
+        await asyncio.gather(load_task, return_exceptions=True)
     assert old_snapshot["verifications"][0]["conclusion"] == "pending"
     current = await build_masked_d4_projection(capa_id)
     assert current["verifications"][0]["conclusion"] == "passed"
