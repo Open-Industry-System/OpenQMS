@@ -88,7 +88,7 @@ async def check_read_task(
     task = (await db.execute(select(AgentReadTask).where(
         AgentReadTask.task_id == task_id,
         AgentReadTask.initiator_user_id == scope.user.user_id,
-    ))).scalar_one_or_none()
+    ).with_for_update(read=True).execution_options(populate_existing=True))).scalar_one_or_none()
     if task is None:
         raise LookupError("Agent read task not found")
 
@@ -104,7 +104,9 @@ async def check_read_task(
     elif task.capability_id != _CAPABILITY_ID or get_capability(task.capability_id) != CAPA_CAPABILITIES[_CAPABILITY_ID]:
         reason = "capability_mismatch"
     else:
-        report = await db.get(CAPAEightD, task.capa_id)
+        report = (await db.execute(select(CAPAEightD).where(
+            CAPAEightD.report_id == task.capa_id,
+        ).with_for_update(read=True).execution_options(populate_existing=True))).scalar_one_or_none()
         if report is None:
             reason = "report_missing"
         elif report.report_id != task.capa_id or report.factory_id != task.factory_id or report.product_line_code != task.product_line_code:
@@ -148,7 +150,7 @@ async def revoke_read_task(
     task = (await db.execute(select(AgentReadTask).where(
         AgentReadTask.task_id == task_id,
         AgentReadTask.initiator_user_id == scope.user.user_id,
-    ))).scalar_one_or_none()
+    ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if task is None:
         raise LookupError("Agent read task not found")
     if task.status == "revoked":
