@@ -154,6 +154,7 @@ async def revoke_read_task(
     if task is None:
         raise LookupError("Agent read task not found")
     if task.status == "revoked":
+        await db.commit()
         return
     task.status = "revoked"
     task.revoked_at = datetime.now(UTC)

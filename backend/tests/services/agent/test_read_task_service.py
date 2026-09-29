@@ -148,6 +148,23 @@ async def test_overlapping_revoke_transactions_write_one_audit(sessionmaker, com
         assert len(revocations) == 1
 
 
+async def test_idempotent_revoke_releases_task_lock(sessionmaker, committed_task):
+    scope, task_id, _report_id, _check_time = committed_task
+    async with sessionmaker() as first, sessionmaker() as second:
+        await revoke_read_task(first, scope, task_id)
+        await revoke_read_task(first, scope, task_id)
+        # The first session remains open; the no-op must end its FOR UPDATE transaction.
+        await asyncio.wait_for(
+            second.execute(select(AgentReadTask).where(
+                AgentReadTask.task_id == task_id,
+            ).with_for_update()),
+            timeout=0.2,
+        )
+    async with sessionmaker() as verify:
+        revocations = [log for log in await _logs(verify, task_id) if log.action == "REVOKE"]
+        assert len(revocations) == 1
+
+
 async def test_create_and_check_issue_single_report_grant_with_safe_audit(db, scope, capa):
     await db.flush()
     task = await create_read_task(db, scope, capa.report_id)
