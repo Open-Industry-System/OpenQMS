@@ -106,14 +106,15 @@ async def test_digest_changes_for_child_add_and_conclusion_without_parent_update
 
 
 @pytest.mark.asyncio
-async def test_non_single_mode_rejects_before_session(monkeypatch):
+@pytest.mark.parametrize("mode", ["dev", "production"])
+async def test_non_single_mode_rejects_before_session(monkeypatch, mode):
     import app.services.capa_agent_projection as projection
 
     def forbidden_session():
         raise AssertionError("session opened before tenant gate")
 
     monkeypatch.setattr(projection, "async_session", forbidden_session)
-    monkeypatch.setattr(settings, "TENANT_MODE", "dev")
+    monkeypatch.setattr(settings, "TENANT_MODE", mode)
     with pytest.raises(PermissionError, match="tenant transaction isolation"):
         await build_masked_d4_projection(uuid.uuid4())
 

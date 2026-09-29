@@ -12,13 +12,16 @@ from sqlalchemy import delete, select
 from app.config import settings
 from app.core.deps import RequestScope
 from app.core.factory_scope import FactoryScope, ProductLineScope
-from app.core.permissions import Module
+from app.core.permissions import Module, PermissionLevel
 from app.models.agent_read_task import AgentReadTask
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.factory import Factory
 from app.models.role import RoleDefinition, RolePermission
 from app.models.user import User
+from app.services.agent.permissions.access import authorize
+from app.services.agent.permissions.catalog import get_capability
+from app.services.agent.permissions.types import AccessAttempt, ApprovalFloor, Grant
 from app.services.agent.read_task_service import create_read_task, check_read_task, revoke_read_task
 
 pytestmark = pytest.mark.asyncio
@@ -194,6 +197,35 @@ async def test_create_and_check_issue_single_report_grant_with_safe_audit(db, sc
         assert log.old_values is None and log.new_values is None
 
 
+async def test_persisted_task_grant_cannot_enable_denied_capa_delivery(db, scope, capa):
+    await db.flush()
+    task = await create_read_task(db, scope, capa.report_id)
+    task_grant = await check_read_task(db, scope, task.task_id, task.created_at)
+    spec = get_capability(CAPABILITY)
+    assert spec.approval_floor == ApprovalFloor.DENY
+    plugin_grant = Grant(
+        capability_id=CAPABILITY,
+        factory_ids=frozenset({capa.factory_id}),
+        object_ids=frozenset({capa.report_id}),
+        product_line_codes=frozenset({capa.product_line_code}),
+    )
+    decision = authorize(AccessAttempt(
+        spec=spec,
+        identity_levels={Module.CAPA: PermissionLevel.ADMIN},
+        identity_factories=frozenset({capa.factory_id}),
+        identity_product_lines=frozenset({capa.product_line_code}),
+        plugin_grant=plugin_grant,
+        task_grant=task_grant,
+        factory_id=capa.factory_id,
+        object_id=capa.report_id,
+        product_line_code=capa.product_line_code,
+        now=task.created_at,
+    ))
+    assert decision.allowed is False
+    assert decision.reason == "capability disabled"
+    assert decision.approval_floor == ApprovalFloor.DENY
+
+
 async def test_check_denies_other_user_without_audit(db, scope, capa, other_admin_user):
     await db.flush()
     task = await create_read_task(db, scope, capa.report_id)
@@ -303,6 +335,8 @@ async def test_revoke_is_idempotent_and_owner_bound(db, scope, capa, other_admin
 async def test_unsupported_tenant_mode_denies_before_any_query(db, scope, monkeypatch, mode):
     monkeypatch.setattr(settings, "TENANT_MODE", mode)
     class NoQuery:
+        async def get(self, *_args, **_kwargs):
+            raise AssertionError("queried before tenant mode check")
         async def execute(self, *_args, **_kwargs):
             raise AssertionError("queried before tenant mode check")
     no_query = NoQuery()
