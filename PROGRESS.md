@@ -8,6 +8,13 @@
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
+### 2026-09-29 — Agent 模块权限内核（独立切片）
+
+- 对照 [权限设计](docs/superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md) 核对并修订 [实施计划](docs/superpowers/plans/2026-09-26-agent-module-permission-kernel.md)：CAPA 持有声明；派生数据按来源能力及投影校验，脱敏权限不能复用为原文权限。
+- 已实现纯策略目录（调用前核对服务端规范声明）、身份×插件×任务交集（全域范围须验证 GROUP ADMIN / 行级豁免）、审批下限/模块专用员工资格、来源投影限制与显式交付守卫；CAPA 试点能力仍为 `DENY`，**未接入生产入口**。业务锚点和边界见 [能力盘点](docs/development/agent-module-capability-inventory.md)。
+- 验证：新内核与旧 Agent/工厂作用域聚焦回归通过；完整 `make check-backend` 未通过（1909 passed、34 failed、2 errors，另有 skipped/xfail/xpass），独立复现 `qms_test` 缺少 FMEA 版本 trigger；旧 PPT review seed、嵌入表列等另有失败，未在本切片修改。
+- 下一步：先确认设计 §6 的租户绑定、插件身份/可信部署、任务授权持久化、CAPA 脱敏投影及外发矩阵，再另行规划只读 8D 试点；不要把内核测试通过当成实际授权上线。
+
 ---
 
 ## 系统级 E2E 测试套件（M0+M1，已落地）
@@ -225,7 +232,9 @@
    - 当前 provider_adapter 偏 OpenAI 形态，Anthropic 侧的 tool_result 结构需补齐
 5. `fix/dashboard-admin-pages` 分支整体合并回 `main`（含 Admin 增强 + 仪表盘下钻 + P0 Agent Base）
 
-### ROADMAP 之外的已知缺口（来自 CLAUDE.md）
+### ROADMAP 之外的历史缺口（待按当前代码复核）
+
+以下为历史记录，不代表本次已验证仍然存在；实际排期前先复现或测量。
 - 测试套件仍在补齐，部分历史模块缺 `factory_id` fixture 回填
 - 登录无速率限制
 - Redis 已配置但**未实现缓存逻辑**
@@ -249,7 +258,7 @@
    - 在干净 DB 上跑 `alembic upgrade head` 验证迁移
    - 评审者过 P0 Agent Base 整体（已逐 commit review，但 PR 级总览未做）
 4. **LLM Provider 兼容性**：Anthropic 的 `tool_result` 结构与 OpenAI 不一致，provider_adapter 当前仅 OpenAI 形态完善，切到 Claude provider 会跑不通（P1-B/C 都走 OpenAI 形态 `complete_json`，未触碰此缺口）
-5. **数据库基线**：CLAUDE.md 已标注"部分 Alembic 迁移号重叠，需规整"——P0 加了 6 表 + audit_logs 扩展，迁移线越来越长，建议在合 main 前做一次 squash
+5. **数据库基线**：历史记录提及“部分 Alembic 迁移号重叠”。应先检查当前迁移链与已部署数据库版本，再决定处理方式；本记录不授权直接 squash 已部署迁移。
 
 ### 非阻塞但需关注
 - 前端 5.5MB bundle，代码分割工作未排期

@@ -154,6 +154,12 @@ async def create_fmea(...):
 
 详见 [权限参考](permissions.md)。
 
+### 4.6 Agent 模块权限内核（未接入运行入口）
+
+`backend/app/services/capa_agent_capabilities.py` 持有两个未批准的 CAPA 能力声明，审批下限均为 `DENY`；`backend/app/services/agent/permissions/` 提供规范目录校验、身份/插件/任务范围交集、审批下限和员工资格、来源投影限制及显式外发判断等纯策略函数。详情见 [能力盘点](development/agent-module-capability-inventory.md)。
+
+这些函数**尚未接入**旧 Agent 网关、API、插件或模型传输、业务写入及索引；当前角色矩阵与旧接口行为不变。任务授权持久化、数据脱敏和真实交付需在后续切片设计、审批并接线，不能因目录声明或单元测试通过而开放能力。
+
 ---
 
 ## 5. 数据模型概览
