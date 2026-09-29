@@ -21,6 +21,7 @@ from app.models.role import RoleDefinition
 from app.models.product_line import ProductLine
 from app.models.factory import Factory
 from app.database import Base
+from sqlalchemy import text
 
 import app.models  # noqa: F401 — ensure all FK-referenced tables are registered in Base.metadata
 
@@ -30,30 +31,46 @@ import app.models  # noqa: F401 — ensure all FK-referenced tables are register
 _DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
+@pytest.mark.asyncio
+async def test_fixture_preserves_shared_migration_schema(db):
+    shared_url = os.environ["TEST_DATABASE_URL"]
+    shared_engine = create_async_engine(shared_url)
+    try:
+        async with shared_engine.connect() as conn:
+            trigger = await conn.scalar(text(
+                "SELECT COUNT(*) FROM pg_trigger WHERE tgrelid = "
+                "'control_plan_versions'::regclass "
+                "AND tgname = 'trg_cp_version_hash_verify'"
+            ))
+        assert trigger == 1
+    finally:
+        await shared_engine.dispose()
+
+
 @pytest_asyncio.fixture(scope="function")
-async def db():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
+async def db(mig_db_url):
+    shared_url = os.environ.get("TEST_DATABASE_URL")
+    if not shared_url:
         pytest.skip("TEST_DATABASE_URL not set; this test requires a dedicated test database")
-    db_name = urlparse(url).path.lstrip("/")
+    db_name = urlparse(shared_url).path.lstrip("/")
     if "_test" not in db_name:
         pytest.skip(f"Database '{db_name}' does not contain '_test'; refusing to run destructive tests")
 
-    engine = create_async_engine(url)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(
-            Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
-        )
-        await conn.execute(
-            ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
-        )
-        await conn.commit()
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with session_factory() as session:
-        yield session
-    await engine.dispose()
+    engine = create_async_engine(mig_db_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                Factory.__table__.insert().values(id=_DEFAULT_FACTORY_ID, code="TEST", name="Test Factory")
+            )
+            await conn.execute(
+                ProductLine.__table__.insert().values(code="DC-DC-100", name="DC-DC Convert 100W", factory_id=_DEFAULT_FACTORY_ID)
+            )
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_factory() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 @pytest_asyncio.fixture(scope="function")

@@ -33,6 +33,7 @@
 - CAPA D4 元数据投影使用明确字段白名单，在同一只读 `REPEATABLE READ` 快照中读取报告和验证子记录，对完整投影计算 SHA-256 摘要。新增验证记录、修改结论会改变摘要；投影不包含 D4 自由文本。
 - 集成测试覆盖真实持久化任务生成 `Grant` 后，规范能力 `capa.d4.summary.masked.v1` 的 `DENY` 仍使 `authorize()` 拒绝交付；非单租户模式在任务服务查询和投影开启会话前拒绝。未新增 HTTP、插件或模型读取入口。
 - 验证：任务及投影聚焦测试 30 passed；新建隔离库从空库迁移后，新任务表的升级/约束/降级 3 项测试通过。首次新库 `make check` 通过：后端 1969 passed、43 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过。原默认 `qms_test` 虽标记为新 head，仍缺少控制计划版本 trigger 和基础角色，导致全量测试失败；已保留为 `qms_test_drifted_task4_20260929`，并将经全量验证的新库改名为默认 `qms_test`。默认 `make check` 复跑通过：后端 2007 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过。
+- 后续连续复跑定位到 `tests/test_spc_fmea_match.py` 的夹具会对共享 `qms_test` 执行 `drop_all/create_all`，抹掉迁移 trigger 和角色种子，造成下一轮全量失败。该夹具现使用独立临时库；回归测试先复现 trigger 丢失、修复后 11 passed。恢复默认测试库后，连续两次 `make check` 均通过：后端各 2008 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过；首轮后确认 trigger 与基础角色仍存在。漂移库保留为 `qms_test_drifted_fixture_20260929`。
 - 下一步：先独立完成逐事务租户绑定、无 `public` 回退及提交/回滚/连接复用/租户缺表等隔离验收；插件身份与外发控制再单独设计、评审。当前单租户内部基础不代表能力批准或多租户可用。
 
 ---
