@@ -15,6 +15,12 @@
 - 验证：新内核与旧 Agent/工厂作用域聚焦回归通过；完整 `make check-backend` 未通过（1909 passed、34 failed、2 errors，另有 skipped/xfail/xpass），独立复现 `qms_test` 缺少 FMEA 版本 trigger；旧 PPT review seed、嵌入表列等另有失败，未在本切片修改。
 - 下一步：先确认设计 §6 的租户绑定、插件身份/可信部署、任务授权持久化、CAPA 脱敏投影及外发矩阵，再另行规划只读 8D 试点；不要把内核测试通过当成实际授权上线。
 
+### 2026-09-29 — 独立测试库基线恢复
+
+- 旧 `qms_test` 的 Alembic 版本虽为 `20260727_warranty_factory_id`，但缺少 FMEA/控制计划版本 trigger 和 `document_embeddings.embedding` 列；在该库运行 `make check-backend` 得到 34 failed、2 errors。新建 `qms_test_baseline` 并从空库迁移到 head 后，上次失败的 36 项全部通过，完整后端套件为 1974 passed、5 skipped、3 xfailed、2 xpassed。
+- 已把旧库改名保留为 `qms_test_drifted_20260929`，重新创建默认 `qms_test` 并从迁移构建。默认 `make check` 通过：后端同上，前端 TypeScript 检查与构建通过。此项为本地测试库修复，没有改动业务数据库或生产代码。
+- 下一步：确定只读 8D 试点的首个开发切片，再补齐对应实施规格；身份/租户绑定、任务授权持久化及 CAPA 脱敏投影是当前建议的起点。
+
 ---
 
 ## 系统级 E2E 测试套件（M0+M1，已落地）
