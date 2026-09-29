@@ -23,9 +23,9 @@
 
 ### 2026-09-29 — 只读 8D 首切片设计与计划
 
-- 已选定单报告任务授权持久化与 CAPA D4 元数据投影作为首切片；[设计规格](docs/superpowers/specs/2026-09-29-agent-readonly-8d-foundation-design.md)按审查意见增加多租户逐事务隔离前置条件及完整投影摘要，尚未实施。
-- [实施计划](docs/superpowers/plans/2026-09-29-agent-readonly-8d-foundation.md)已起草：先完成单租户任务表/服务/投影与验证；多租户路径在逐事务绑定和无 `public` 回退的测试验收前关闭；能力仍为 `DENY`，不提供插件或 HTTP 读取入口。
-- 下一步：复核实施计划，再按测试先行顺序执行单租户切片；多租户隔离改造独立安排。
+- 设计阶段选定单报告任务授权持久化与 CAPA D4 元数据投影作为首切片；[设计规格](docs/superpowers/specs/2026-09-29-agent-readonly-8d-foundation-design.md)按审查意见增加多租户逐事务隔离前置条件及完整投影摘要。单租户内部基础现已实施，见下节。
+- [实施计划](docs/superpowers/plans/2026-09-29-agent-readonly-8d-foundation.md)按测试先行顺序执行了单租户任务表、服务和投影；多租户路径在逐事务绑定和无 `public` 回退的测试验收前关闭；能力仍为 `DENY`，不提供插件或 HTTP 读取入口。
+- 后续依赖：多租户隔离改造及验收独立安排；外部交付尚未开放。
 
 ### 2026-09-29 — 只读 8D 内部基础
 
