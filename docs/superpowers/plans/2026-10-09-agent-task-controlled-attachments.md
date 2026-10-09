@@ -87,7 +87,7 @@ Create public revision `20261009_agent_task_attachments` with `down_revision="20
 
 - [ ] **Step 4: Add tenant migration and parity updates.**
 
-Create `tv005_agent_task_attachments` with `down_revision="tv004_agent_readonly_controls"`; it creates only the tenant-local attachment table. Update tenant head constants and reviewed schema snapshot so fresh tenant migration/parity agrees with public business tables; do not put the platform disposal table in the tenant snapshot.
+Create `tv005_agent_task_attachments` with `down_revision="tv004_agent_readonly_controls"`; it creates only the tenant-local attachment table. Keep the frozen `tv001_business_snapshot` DDL and `business_20260927.py` unchanged: it is the irreversible baseline and already runs before every delta. Update `REVIEWED_REVISIONS`, the tenant head constants, and tv001→tv005 migration/parity tests so fresh tenant migration proves the final schema without duplicate table creation. Do not put the platform disposal table in the tenant snapshot.
 
 - [ ] **Step 5: Add configuration/model imports.**
 
