@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal
+
+
+_VERSION_REPLY = re.compile(rb"ClamAV [0-9]+(?:\.[0-9]+)+/[0-9]+(?:/[^\r\n\0]{1,200})?")
 
 
 @dataclass(frozen=True)
@@ -27,7 +31,7 @@ async def scan_stream(
             stream_reader, writer = await asyncio.open_connection(host, port)
             writer.write(b"zVERSIONCOMMANDS\0")
             await writer.drain()
-            version = await _read_frame(stream_reader)
+            version = _version(await _read_frame(stream_reader))
 
             writer.write(b"zINSTREAM\0")
             async for chunk in reader:
@@ -43,7 +47,7 @@ async def scan_stream(
             reply = await _read_final_reply(stream_reader)
             outcome = _parse_outcome(reply)
             if outcome is not None:
-                return ScanResult(outcome, _version(version), None)
+                return ScanResult(outcome, version, None)
             return ScanResult("unavailable", None, "scanner_unavailable")
     except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError, TypeError, OverflowError):
         return ScanResult("unavailable", None, "scanner_unavailable")
@@ -82,6 +86,6 @@ def _parse_outcome(reply: bytes) -> Literal["clean", "found"] | None:
 
 
 def _version(reply: bytes) -> str:
-    if not reply or len(reply) > 255:
+    if len(reply) > 255 or _VERSION_REPLY.fullmatch(reply) is None:
         raise ValueError("scanner version reply is invalid")
     return reply.decode("ascii")

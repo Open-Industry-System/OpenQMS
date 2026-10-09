@@ -23,6 +23,7 @@ async def chunks(values: list[bytes]) -> AsyncIterator[bytes]:
 @dataclass
 class StrictClamd:
     reply: bytes = b"stream: OK\0"
+    version_reply: bytes = b"ClamAV 1.4.2/12345\0"
     frames: list[bytes] = field(default_factory=list)
     version_command: bytes | None = None
     _server: asyncio.AbstractServer | None = None
@@ -35,9 +36,13 @@ class StrictClamd:
 
     async def handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.version_command = await reader.readuntil(b"\0")
-        writer.write(b"ClamAV 1.4.2/12345\0")
+        writer.write(self.version_reply)
         await writer.drain()
-        assert await reader.readuntil(b"\0") == b"zINSTREAM\0"
+        try:
+            command = await reader.readuntil(b"\0")
+        except asyncio.IncompleteReadError:
+            return
+        assert command == b"zINSTREAM\0"
         while True:
             size = int.from_bytes(await reader.readexactly(4), "big")
             if size == 0:
@@ -71,6 +76,21 @@ async def test_scan_stream_sends_zinstream_and_zero_terminator():
     assert result.failure_code is None
     assert strict_clamd.version_command == b"zVERSIONCOMMANDS\0"
     assert strict_clamd.frames == [b"abc", b""]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "version_reply",
+    [b"anything\0", b"stream: ERROR\0", b"ClamAV 1.4.2/12345\0extra\0"],
+)
+async def test_scan_stream_rejects_invalid_version_negotiation(version_reply):
+    async with strict_clamd_server() as strict_clamd:
+        strict_clamd.version_reply = version_reply
+        result = await scan_module().scan_stream(chunks([b"x"]), **strict_clamd.address)
+
+    assert result.outcome == "unavailable"
+    assert result.scanner_version is None
+    assert result.failure_code == "scanner_unavailable"
 
 
 @pytest.mark.asyncio

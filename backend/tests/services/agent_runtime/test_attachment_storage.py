@@ -1,6 +1,9 @@
 """Private, descriptor-safe storage tests for controlled task attachments."""
 import hashlib
 import os
+import subprocess
+import sys
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -41,6 +44,8 @@ def test_storage_rejects_symlink_root_and_filename_paths(tmp_path):
         storage_module().AttachmentNamespace(uuid4(), None, "tenant")
     with pytest.raises(ValueError):
         storage_module().AttachmentNamespace(None, 1, "public")
+    with pytest.raises(ValueError):
+        storage_module().AttachmentNamespace(uuid4(), 1, "public")
     assert namespace.storage_namespace == "public"
 
 
@@ -79,5 +84,33 @@ def test_open_clean_rechecks_digest_and_remove_is_idempotent(tmp_path):
 
     storage.remove(public_namespace(), attachment_id, "clean")
     storage.remove(public_namespace(), attachment_id, "clean")
-    with pytest.raises(FileNotFoundError):
-        storage.open_clean(public_namespace(), attachment_id, digest, 5)
+
+
+def test_open_clean_rejects_fifo_without_blocking(tmp_path):
+    root = tmp_path / "attachments"
+    attachment_id = uuid4()
+    namespace = public_namespace()
+    storage = private_storage(tmp_path)
+    with storage._area_fd(namespace, "clean"):
+        pass
+    os.mkfifo(root / "public" / "clean" / attachment_id.hex)
+
+    script = """
+from pathlib import Path
+from uuid import UUID
+from app.services.agent_runtime.attachment_storage import AttachmentIntegrityError, AttachmentNamespace, PrivateAttachmentStorage
+storage = PrivateAttachmentStorage(Path(__import__('sys').argv[1]))
+try:
+    storage.open_clean(AttachmentNamespace(None, None, 'public'), UUID(__import__('sys').argv[2]), '0' * 64, 0)
+except AttachmentIntegrityError:
+    pass
+else:
+    raise AssertionError('FIFO was not rejected')
+"""
+    environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[3])}
+    subprocess.run(
+        [sys.executable, "-c", script, str(root), str(attachment_id)],
+        check=True,
+        env=environment,
+        timeout=3,
+    )

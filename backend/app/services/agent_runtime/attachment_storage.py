@@ -34,6 +34,8 @@ class AttachmentNamespace:
             raise ValueError("storage namespace must be an opaque server-generated key")
         if self.tenant_id is None and self.storage_namespace != "public":
             raise ValueError("public storage must use the public namespace")
+        if self.tenant_id is not None and self.storage_namespace == "public":
+            raise ValueError("tenant storage must not use the public namespace")
 
 
 class PrivateAttachmentStorage:
@@ -152,7 +154,7 @@ class PrivateAttachmentStorage:
     def _open_regular(self, area_fd: int, attachment_id: UUID) -> int:
         fd = os.open(
             self._attachment_name(attachment_id),
-            os.O_RDONLY | os.O_NOFOLLOW,
+            os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
             dir_fd=area_fd,
         )
         if not stat.S_ISREG(os.fstat(fd).st_mode):
