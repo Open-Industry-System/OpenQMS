@@ -113,6 +113,62 @@ async def test_tenant_bootstrap_matches_canonical_business_objects(disposable_pu
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_tenant_attachment_delta_matches_current_public_schema(disposable_public_db):
+    import asyncio
+
+    from app.services import tenant_migrator
+
+    cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", disposable_public_db)
+    await asyncio.to_thread(command.upgrade, cfg, "20261009_agent_task_attachments")
+
+    schema = f"tenant_attachment_parity_{uuid.uuid4().hex[:12]}"
+    tenant_id = uuid.uuid4()
+    attempt = MaintenanceAttempt(
+        tenant_id=tenant_id,
+        schema_name=schema,
+        generation=1,
+        attempt_id=uuid.uuid4(),
+        backend_pid=0,
+        lock_key=stable_tenant_lock_key(tenant_id),
+    )
+    engine = create_async_engine(disposable_public_db)
+    try:
+        async with engine.begin() as setup:
+            await setup.execute(text(f'CREATE SCHEMA "{schema}"'))
+            await setup.execute(
+                text("""INSERT INTO public.tenants
+                    (id,name,slug,subdomain,schema_name,status,generation,provisioning_attempt_id)
+                    VALUES (:id,'Attachment parity',:slug,:slug,:schema,'provisioning',1,:attempt)"""),
+                {
+                    "id": tenant_id,
+                    "slug": f"attachment-parity-{uuid.uuid4().hex[:12]}",
+                    "schema": schema,
+                    "attempt": attempt.attempt_id,
+                },
+            )
+        async with maintenance_connection(engine, attempt) as maintenance:
+            assert await maintenance.run_migration("tv005_agent_task_attachments") == (
+                "tv005_agent_task_attachments"
+            )
+        async with engine.connect() as connection:
+            assert await connection.scalar(
+                text("SELECT to_regclass(:name)"),
+                {"name": f"{schema}.agent_task_attachments"},
+            )
+            assert await connection.scalar(
+                text("SELECT to_regclass(:name)"),
+                {"name": f"{schema}.tenant_attachment_storage_disposals"},
+            ) is None
+            assert await compare_business_schema(
+                connection, "public", schema, load_snapshot_manifest()
+            ) == []
+    finally:
+        await engine.dispose()
+
+
 def test_regenerated_canonical_snapshot_is_reviewed(disposable_public_db, tmp_path):
     """CI regenerates the frozen DDL from its pinned public revision."""
     import ast

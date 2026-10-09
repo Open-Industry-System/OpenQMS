@@ -11,7 +11,7 @@ from app.core.tenant_utils import strict_tenant_search_path_sql
 from app.core.tenant_sql_tokens import rewrite_qualifiers, scan_sql
 
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "alembic_tenant/snapshot/manifest.json"
-EXCLUDED = frozenset({"tenants", "tenant_migrations", "platform_admin_users", "reference_templates",
+EXCLUDED = frozenset({"tenants", "tenant_migrations", "tenant_attachment_storage_disposals", "platform_admin_users", "reference_templates",
                       "alembic_version", "tenant_schema_version"})
 
 
@@ -161,16 +161,20 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
                      or (key[0] == "function" and f"FUNCTION:{key[1]}" in keys)
                      or (key[0] == "text_search_config" and f"TEXT SEARCH CONFIGURATION:{key[1]}" in keys)}
     if predecessor is not None:
-        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"} or baseline_only:
+        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls"} or baseline_only:
             raise ValueError("Unsupported schema predecessor")
         # The reference is current public; remove only the reviewed cumulative
         # additions after this exact predecessor. The tenant remains unfiltered.
-        added_tables = {"agent_task_controls", "agent_readonly_checkpoints",
-                        "agent_checkpoint_receipts", "agent_task_updates"}
-        added_objects = {
-            ("column", "agent_runs.resume_checkpoint_id"),
-            ("constraint", "agent_runs.fk_agent_run_resume_checkpoint"),
-        }
+        added_tables = {"agent_task_attachments"}
+        if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
+            added_tables |= {"agent_task_controls", "agent_readonly_checkpoints",
+                             "agent_checkpoint_receipts", "agent_task_updates"}
+        added_objects = set()
+        if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
+            added_objects |= {
+                ("column", "agent_runs.resume_checkpoint_id"),
+                ("constraint", "agent_runs.fk_agent_run_resume_checkpoint"),
+            }
         if predecessor == "tv002_agent_task_core":
             added_tables |= {"agent_projection_receipts", "agent_run_events", "agent_results",
                              "agent_event_receipts", "agent_result_receipts"}

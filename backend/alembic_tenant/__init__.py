@@ -14,7 +14,7 @@ from app.services.tenant_migrator import _owner_attempt, bind_maintenance_transa
 from app.services.tenant_schema_diff import load_snapshot_manifest, verify_snapshot_checksum
 
 
-REVIEWED_REVISIONS = ("tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls")
+REVIEWED_REVISIONS = ("tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments")
 
 
 async def upgrade_tenant(connection: AsyncConnection, schema_name: str, target_revision: str) -> str:

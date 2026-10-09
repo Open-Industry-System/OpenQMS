@@ -13,6 +13,16 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     CAPA_D4_TEXT_PREVIEW_ENABLED: bool = False
     AGENT_TASK_RUNTIME_ENABLED: bool = False
+    AGENT_TASK_ATTACHMENTS_ENABLED: bool = False
+    AGENT_TASK_ATTACHMENT_STORAGE_ROOT: str = ""
+    AGENT_TASK_ATTACHMENT_MAX_BYTES: int = Field(
+        default=20 * 1024 * 1024, ge=1, le=20 * 1024 * 1024
+    )
+    AGENT_TASK_ATTACHMENT_MAX_PER_TASK: int = Field(default=5, ge=1, le=5)
+    AGENT_TASK_ATTACHMENT_RETENTION_HOURS: int = Field(default=168, ge=1, le=168)
+    AGENT_TASK_ATTACHMENT_CLAMAV_HOST: str = ""
+    AGENT_TASK_ATTACHMENT_CLAMAV_PORT: int = Field(default=3310, ge=1, le=65535)
+    AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=60)
     AGENT_LOCAL_TRIAL_MODE: str = "disabled"
     AGENT_LOCAL_TRIAL_POLICY_PATH: str = ""
     AGENT_RUN_TOKEN_TTL_MINUTES: int = Field(default=5, ge=1, le=30)

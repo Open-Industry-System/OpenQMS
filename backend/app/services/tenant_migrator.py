@@ -16,9 +16,9 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv004_agent_readonly_controls"
-PREDECESSOR_REVISION = "tv003_agent_readonly_delivery"
-EARLIER_PREDECESSOR_REVISION = "tv002_agent_task_core"
+REVISION = "tv005_agent_task_attachments"
+PREDECESSOR_REVISION = "tv004_agent_readonly_controls"
+EARLIER_PREDECESSOR_REVISION = "tv003_agent_readonly_delivery"
 ANCESTOR_REVISION = "tv001_business_snapshot"
 _PREVIOUSLY_ACTIVE_SEED_REASON = "previously active tenant seed unavailable; manual review required"
 _SAFE_FAILURE_REASONS = frozenset({

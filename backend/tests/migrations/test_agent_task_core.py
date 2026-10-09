@@ -269,7 +269,7 @@ async def test_plugin_tables_after_full_fresh_tenant_provision(mig_db_url, monke
         tenant = await tenant_migrator.provision_new(request)
         assert tenant.status == "active" and tenant.generation > 0
         async with engine.connect() as connection:
-            for table in ("agent_plugin_installations", "agent_plugin_grants"):
+            for table in ("agent_plugin_installations", "agent_plugin_grants", "agent_task_attachments"):
                 assert await connection.scalar(sa.text("SELECT to_regclass(:name)"),
                                                {"name": f"{tenant.schema_name}.{table}"})
             revision = await connection.scalar(sa.text(
