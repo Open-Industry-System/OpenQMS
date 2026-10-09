@@ -85,3 +85,13 @@ shapes sit side by side (`LoginRequest` next to `TokenResponse`,
 - **Depended on by:** `pages/`, `components/`, `api/`, `store/`,
   `hooks/`, `utils/` — essentially every other directory under
   `frontend/src/`.
+
+## Persistent Agent task contracts
+
+`agentTask.ts` declares user task/control and closed activity unions matching
+the backend schemas. Activity uses a bounded window/cursor envelope without a
+total; the installation directory returns only eligible IDs, names and versions.
+These read-specific envelopes are intentional; task lists retain pagination.
+Activity messages use `received` for confirmed reception, while the existing
+append acknowledgement uses `accepted`; neither proves execution. Runtime
+validation lives in `api/agentTasks.ts`, keeping this module declaration-only.

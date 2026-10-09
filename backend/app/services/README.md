@@ -39,7 +39,26 @@ verb — one module per business concept:
   DAG: recall → fusion → LLM → terminal), `capa_recommendation_service`,
   `capa_draft_service`, `llm_provider`, `llm_fusion_layer`,
   `ai_config_service`, plus the `recommendation_*.py` type/scope helpers.
+- **Employee D4 candidate preview** — `capa_current_access` shares fresh namespace,
+  role and object-scope reads with runtime task wrappers; `capa_d4_redaction`
+  performs bounded deterministic literal/format replacement only.
+  `capa_d4_text_preview` uses explicit D4 fields in tenant-bound readonly snapshots,
+  current declared FMEA access, opaque source versions and final rechecks before
+  safe audit commit. All output stays restricted; no body cache, business update,
+  embedding or plugin/model delivery. See
+  [employee preview operations](../../../docs/development/capa-d4-text-preview.md).
 - **Subdirectories** (composite areas with their own internal structure):
+  - `agent_runtime/` — persistent target-bound tasks, plugin credentials and
+    current-authority readonly delivery. Controls, checkpoints and activity
+    pointers share INSTALL → TASK → RUN locking and caller transactions;
+    historical reads recheck all actual sources. `trial_policy.py` loads an
+    immutable default-off local metadata declaration; normal profile/grant
+    admission and bound JWT deadlines never replace current business authority.
+    Registry CAS revocation fences credentials; `trial_launcher.py` runs only
+    pinned bytes with private files, a clean environment and bounded children.
+    See [local trial operations](../../../docs/development/agent-local-trial.md).
+    This is separate from the legacy gateway and introduces no provider or
+    business-write commands.
   - `agent/` — agent harness (tool registry, state gateway, memory, audit).
     Has its own README.
   - `cp_validation/` — Control Plan import/validation pipeline.

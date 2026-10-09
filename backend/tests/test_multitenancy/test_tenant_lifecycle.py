@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.models.tenant import Tenant
 from app.core.permissions import Module
 from app.services.tenant_service import TenantService
+from app.services.tenant_migrator import REVISION
 from .test_tenant_migrator import disposable_public_db, tenant_request
 
 
@@ -25,7 +26,7 @@ async def test_tenant_provisioning(disposable_public_db, tenant_request):
         assert await connection.scalar(text(
             'SELECT count(*) FROM public.tenants WHERE id=:id'), {"id": tenant.id}) == 1
         assert await connection.scalar(text(
-            f'SELECT version_num FROM "{schema}".tenant_schema_version')) == "tv001_business_snapshot"
+            f'SELECT version_num FROM "{schema}".tenant_schema_version')) == REVISION
         assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".role_definitions')) == 7
         assert await connection.scalar(text(f'SELECT count(*) FROM "{schema}".role_permissions')) == 7 * len(Module)
         for table in ("users", "factories", "product_lines", "user_factories", "user_product_lines"):

@@ -17,7 +17,7 @@ from app.core.tenant_transaction import (
     TenantBinding, TenantUnavailable, bind_business_transaction, stable_tenant_lock_key,
 )
 from app.services.tenant_migrator import (
-    MaintenanceAttempt, bind_maintenance_transaction, maintenance_connection,
+    MaintenanceAttempt, REVISION, bind_maintenance_transaction, maintenance_connection,
 )
 from alembic_tenant import upgrade_tenant
 from app.services.tenant_schema_diff import load_snapshot_manifest
@@ -28,7 +28,7 @@ async def tenant_record(mig_db_url):
     cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
     cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
     cfg.set_main_option("sqlalchemy.url", mig_db_url)
-    await asyncio.to_thread(command.upgrade, cfg, "head")
+    await asyncio.to_thread(command.upgrade, cfg, "20260927_tenant_attempt")
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     tenant_id = uuid.uuid4()
     schema = f"tenant_lock_{uuid.uuid4().hex[:16]}"
@@ -605,7 +605,7 @@ async def test_active_parity_drift_is_not_a_noop(disposable_public_db, tenant_re
         assert await connection.scalar(text("SELECT status FROM public.tenants WHERE id=:id"),
                                        {"id": tenant.id}) == "failed"
         assert await connection.scalar(text(
-            f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == "tv001_business_snapshot"
+            f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == REVISION
 
 
 @pytest.mark.asyncio

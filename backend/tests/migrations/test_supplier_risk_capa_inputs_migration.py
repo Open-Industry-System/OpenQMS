@@ -166,7 +166,7 @@ def test_single_alembic_head(mig_db_url):
     cfg = _cfg(mig_db_url)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    # Single head after the platform maintenance-attempt migration.
-    assert heads == ["20260927_tenant_attempt"], (
-        f"expected single head 20260927_tenant_attempt, got {heads}"
+    # Single head after the durable agent task migration.
+    assert heads == ["20261001_agent_readonly_controls"], (
+        f"expected single head 20261001_agent_readonly_controls, got {heads}"
     )

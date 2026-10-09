@@ -143,12 +143,48 @@ async def _objects(connection: AsyncConnection, schema: str) -> dict[tuple[str, 
 
 
 async def compare_business_schema(connection: AsyncConnection, reference_schema: str, tenant_schema: str,
-                                  manifest: dict) -> list[SchemaDifference]:
+                                  manifest: dict, *, baseline_only: bool = False, predecessor: str | None = None) -> list[SchemaDifference]:
     if reference_schema != "public":
         raise ValueError("Only canonical public schema is a supported reference")
     strict_tenant_search_path_sql(tenant_schema)
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
+    if baseline_only:
+        # R1 adds tables only: retain every frozen table-owned object plus the
+        # reviewed functions/configuration. The tenant side is never filtered,
+        # so extra or partially applied delta objects are still rejected.
+        keys = set(manifest["object_keys"])
+        tables = {key.removeprefix("TABLE:") for key in keys if key.startswith("TABLE:")}
+        reference = {key: value for key, value in reference.items()
+                     if (key[0] in {"table", "column", "constraint", "index", "trigger"}
+                         and key[1].split(".", 1)[0] in tables)
+                     or (key[0] == "function" and f"FUNCTION:{key[1]}" in keys)
+                     or (key[0] == "text_search_config" and f"TEXT SEARCH CONFIGURATION:{key[1]}" in keys)}
+    if predecessor is not None:
+        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"} or baseline_only:
+            raise ValueError("Unsupported schema predecessor")
+        # The reference is current public; remove only the reviewed cumulative
+        # additions after this exact predecessor. The tenant remains unfiltered.
+        added_tables = {"agent_task_controls", "agent_readonly_checkpoints",
+                        "agent_checkpoint_receipts", "agent_task_updates"}
+        added_objects = {
+            ("column", "agent_runs.resume_checkpoint_id"),
+            ("constraint", "agent_runs.fk_agent_run_resume_checkpoint"),
+        }
+        if predecessor == "tv002_agent_task_core":
+            added_tables |= {"agent_projection_receipts", "agent_run_events", "agent_results",
+                             "agent_event_receipts", "agent_result_receipts"}
+            added_objects |= {
+                ("column", "agent_runs.claim_key"),
+                ("column", "agent_runs.lease_expires_at"),
+                ("index", "agent_runs.uq_agent_run_installation_claim"),
+                ("column", "agent_task_messages.delivery_batch_id"),
+                ("column", "agent_task_messages.delivery_epoch"),
+            }
+        reference = {key: value for key, value in reference.items()
+                     if key not in added_objects and not (
+                         key[0] in {"table", "column", "constraint", "index", "trigger"}
+                         and key[1].split(".", 1)[0] in added_tables)}
     tenant = await _objects(connection, tenant_schema)
     return [SchemaDifference(kind, key, reference.get((kind, key), "<missing>"),
                              tenant.get((kind, key), "<missing>"))

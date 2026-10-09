@@ -9,7 +9,8 @@ const client = axios.create({
 // Factory ID auto-injection for GET requests on business APIs
 // Excluded: auth, group, product-lines, factories (management endpoints)
 // NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
-const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories"];
+const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories", "/agent/tasks"];
+const isD4TextPreview = (url?: string) => /^\/capa\/[^/]+\/d4-text-preview(?:\/availability|\/version)?\/?$/.test(url ?? "");
 
 // Guard against concurrent refresh attempts
 let isRefreshing = false;
@@ -41,7 +42,7 @@ client.interceptors.request.use((config) => {
   // Auto-inject factory_id on GET requests for business APIs
   const currentFactoryId = localStorage.getItem("current_factory_id");
   const isGetRequest = config.method === "get";
-  const isExcluded = FACTORY_ID_EXCLUDE_PREFIXES.some(
+  const isExcluded = isD4TextPreview(config.url) || FACTORY_ID_EXCLUDE_PREFIXES.some(
     (prefix) => config.url?.startsWith(prefix)
   );
   if (currentFactoryId && isGetRequest && !isExcluded) {
@@ -56,6 +57,13 @@ client.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+
+    // User task reads must withdraw restricted content immediately on denial.
+    // Credential refresh elsewhere can refetch the same selected task afterward.
+    if ((originalRequest?.url?.startsWith("/agent/tasks") || isD4TextPreview(originalRequest?.url))
+        && (error.response?.status === 401 || error.response?.status === 403)) {
+      return Promise.reject(error);
+    }
 
     if (error.response?.status === 503 && error.response?.data?.detail?.tenant_suspended) {
       window.location.href = "/tenant-suspended";

@@ -16,7 +16,10 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv001_business_snapshot"
+REVISION = "tv004_agent_readonly_controls"
+PREDECESSOR_REVISION = "tv003_agent_readonly_delivery"
+EARLIER_PREDECESSOR_REVISION = "tv002_agent_task_core"
+ANCESTOR_REVISION = "tv001_business_snapshot"
 _PREVIOUSLY_ACTIVE_SEED_REASON = "previously active tenant seed unavailable; manual review required"
 _SAFE_FAILURE_REASONS = frozenset({
     "partial or unknown tenant schema; manual review required",
@@ -84,9 +87,10 @@ class SeedResult:
 class MaintenanceContext:
     """Domain operations only; the physical connection and seed session stay private."""
 
-    def __init__(self, connection: AsyncConnection, attempt: MaintenanceAttempt):
+    def __init__(self, connection: AsyncConnection, attempt: MaintenanceAttempt, *, rebuild_authorized: bool = False):
         self.__connection = connection
         self.__attempt = attempt
+        self.__rebuild_authorized = rebuild_authorized
 
     @property
     def backend_pid(self) -> int:
@@ -105,12 +109,21 @@ class MaintenanceContext:
         await self.__connection.commit()
         return result
 
-    async def compare_schema(self, reference_schema: str, manifest: dict):
+    async def run_downgrade(self, revision: str) -> str:
+        """Internal owner-bound delta rollback; never used by provisioning."""
+        from alembic_tenant import _downgrade_tenant
+
+        await bind_maintenance_transaction(self.__connection, self.__attempt)
+        result = await _downgrade_tenant(self.__connection, self.__attempt.schema_name, revision)
+        await self.__connection.commit()
+        return result
+
+    async def compare_schema(self, reference_schema: str, manifest: dict, *, baseline_only: bool = False, predecessor: str | None = None):
         from app.services.tenant_schema_diff import compare_business_schema
 
         await bind_maintenance_transaction(self.__connection, self.__attempt)
         differences = await compare_business_schema(
-            self.__connection, reference_schema, self.__attempt.schema_name, manifest,
+            self.__connection, reference_schema, self.__attempt.schema_name, manifest, baseline_only=baseline_only, predecessor=predecessor,
         )
         await self.__connection.commit()
         return differences
@@ -141,6 +154,12 @@ class MaintenanceContext:
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
             if versions == [REVISION]:
                 result = "current"
+            elif versions == [PREDECESSOR_REVISION]:
+                result = "predecessor"
+            elif versions == [EARLIER_PREDECESSOR_REVISION]:
+                result = "earlier_predecessor"
+            elif versions == [ANCESTOR_REVISION]:
+                result = "ancestor"
             elif not versions and set(rows) == {"tenant_schema_version"}:
                 result = "empty"
             else:
@@ -185,16 +204,127 @@ class MaintenanceContext:
             raise TenantUnavailable("tenant search path is not isolated")
         await self.__connection.commit()
 
+    async def require_rebuild_quiescence(self) -> None:
+        from app.services.tenant_offline import require_no_other_clients, require_test_database
+        await bind_maintenance_transaction(self.__connection, self.__attempt)
+        await require_test_database(self.__connection)
+        await require_no_other_clients(self.__connection)
+        await self.__connection.commit()
+
+    async def reset_test_schema(self, *, slug: str, schema_name: str, previous_generation: int) -> None:
+        """Reset only the exact owner schema after the test-only gates and idle recheck."""
+        import os
+        from app.config import settings
+        from app.services.tenant_offline import require_no_other_clients, require_test_database
+        if not self.__rebuild_authorized:
+            raise PermissionError("explicit rebuild authorization required")
+        if settings.TENANT_MODE == "production" or os.getenv("ALLOW_TEST_TENANT_REBUILD") != "1":
+            raise PermissionError("test-only rebuild disabled")
+        if (schema_name != self.__attempt.schema_name or schema_name != slug_to_schema_name(slug)
+                or previous_generation + 1 != self.__attempt.generation):
+            raise TenantUnavailable("rebuild target changed")
+        await bind_maintenance_transaction(self.__connection, self.__attempt)
+        actual_slug = await self.__connection.scalar(text("SELECT slug FROM public.tenants WHERE id=:id"),
+                                                     {"id": self.__attempt.tenant_id})
+        if actual_slug != slug:
+            raise TenantUnavailable("rebuild target changed")
+        await require_test_database(self.__connection)
+        await require_no_other_clients(self.__connection)
+        await _require_reset_dependency_isolation(self.__connection, schema_name)
+        await self.__connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        await self.__connection.commit()
+
+    async def record_rebuild_phase(self, phase: str, *, active: bool = False) -> None:
+        """Coordinator bookkeeping; it verifies revision/parity before activation."""
+        if phase not in {"schema_created", "migrated", "seeded", "verified", "active"} or active != (phase == "active"):
+            raise ValueError("invalid rebuild phase")
+        await bind_maintenance_transaction(self.__connection, self.__attempt)
+        if active:
+            if await self.seed_state() != "complete":
+                raise TenantUnavailable("tenant seed incomplete")
+            await self.verify_isolation()
+            await bind_maintenance_transaction(self.__connection, self.__attempt)
+        await self.__connection.execute(text("""
+            UPDATE public.tenants SET provisioning_step=:phase,
+                status=CASE WHEN :active THEN 'active' ELSE status END,
+                provisioning_error=CASE WHEN :active THEN NULL ELSE provisioning_error END
+            WHERE id=:id AND provisioning_attempt_id=:attempt AND generation=:generation
+        """), {"id": self.__attempt.tenant_id, "attempt": self.__attempt.attempt_id,
+               "generation": self.__attempt.generation, "phase": phase, "active": active})
+        await self.__connection.commit()
+
+    async def record_rebuild_failure(self, reason: str) -> None:
+        """A failed rebuild can only retry through the explicitly guarded rebuild path."""
+        if reason not in {"rebuild_failed", "services_not_offline", "database_not_quiescent", "target_changed", "external_schema_dependency"}:
+            reason = "rebuild_failed"
+        await self.__connection.rollback()
+        await bind_maintenance_transaction(self.__connection, self.__attempt)
+        await self.__connection.execute(text("""
+            UPDATE public.tenants SET status='failed', provisioning_step=:step, provisioning_error=:error
+            WHERE id=:id AND provisioning_attempt_id=:attempt AND generation=:generation
+        """), {"id": self.__attempt.tenant_id, "attempt": self.__attempt.attempt_id,
+               "generation": self.__attempt.generation, "step": "rebuild_failed:" + reason,
+               "error": f"TenantUnavailable: {_PREVIOUSLY_ACTIVE_SEED_REASON}"})
+        await self.__connection.commit()
+
+
+async def _require_reset_dependency_isolation(connection: AsyncConnection, schema_name: str) -> None:
+    """CASCADE must not reach public/another tenant or an unidentifiable global object.
+
+    Follow reverse dependencies from the namespace, including indirect view,
+    trigger and constraint dependencies. TOAST objects are table internals.
+    """
+    external = await connection.scalar(text("""
+        WITH RECURSIVE dropped(classid,objid) AS (
+            SELECT 'pg_catalog.pg_namespace'::pg_catalog.regclass::pg_catalog.oid,n.oid
+            FROM pg_catalog.pg_namespace n WHERE n.nspname=:schema
+            UNION
+            SELECT d.classid,d.objid FROM pg_catalog.pg_depend d
+            JOIN dropped o ON d.refclassid=o.classid AND d.refobjid=o.objid
+        ), identified AS (
+            SELECT o.classid,o.objid,CASE
+                WHEN o.classid='pg_catalog.pg_rewrite'::pg_catalog.regclass THEN
+                    (SELECT n.nspname FROM pg_catalog.pg_rewrite r
+                     JOIN pg_catalog.pg_class c ON c.oid=r.ev_class
+                     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE r.oid=o.objid)
+                WHEN o.classid='pg_catalog.pg_trigger'::pg_catalog.regclass THEN
+                    (SELECT n.nspname FROM pg_catalog.pg_trigger t
+                     JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+                     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE t.oid=o.objid)
+                WHEN o.classid='pg_catalog.pg_attrdef'::pg_catalog.regclass THEN
+                    (SELECT n.nspname FROM pg_catalog.pg_attrdef a
+                     JOIN pg_catalog.pg_class c ON c.oid=a.adrelid
+                     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE a.oid=o.objid)
+                WHEN o.classid='pg_catalog.pg_constraint'::pg_catalog.regclass THEN
+                    (SELECT n.nspname FROM pg_catalog.pg_constraint c
+                     JOIN pg_catalog.pg_namespace n ON n.oid=c.connamespace WHERE c.oid=o.objid)
+                WHEN o.classid='pg_catalog.pg_policy'::pg_catalog.regclass THEN
+                    (SELECT n.nspname FROM pg_catalog.pg_policy p
+                     JOIN pg_catalog.pg_class c ON c.oid=p.polrelid
+                     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE p.oid=o.objid)
+                ELSE identity.schema END AS object_schema
+            FROM dropped o
+            CROSS JOIN LATERAL pg_catalog.pg_identify_object(o.classid,o.objid,0) identity
+            WHERE o.classid<>'pg_catalog.pg_namespace'::pg_catalog.regclass
+        ) SELECT EXISTS (SELECT 1 FROM identified
+            WHERE object_schema IS NULL OR object_schema NOT IN (:schema,'pg_toast'))
+    """), {"schema": schema_name})
+    if external:
+        raise TenantUnavailable("external schema dependency")
+
 
 @asynccontextmanager
 async def maintenance_connection(engine: AsyncEngine, attempt: MaintenanceAttempt | UUID,
-                                 *, after_lock_hook: Callable[[str], None] | None = None):
+                                 *, after_lock_hook: Callable[[str], None] | None = None,
+                                 rebuild_precondition: tuple | None = None):
     """Own one session lock across DDL, seed and parity; invalidate uncertain owners.
 
     UUID entry acquires the lock BEFORE changing attempt ID/generation. The
     legacy explicit-attempt entry is retained for narrowly scoped owner tests.
     """
     tenant_id = attempt if isinstance(attempt, UUID) else attempt.tenant_id
+    if rebuild_precondition is not None and not isinstance(attempt, UUID):
+        raise PermissionError("rebuild requires a fresh owner attempt")
     if not isinstance(attempt, UUID):
         _claim(attempt)
         if attempt.backend_pid != 0:
@@ -225,13 +355,13 @@ async def maintenance_connection(engine: AsyncEngine, attempt: MaintenanceAttemp
                 after_lock_hook("lock_acquired")
             if isinstance(attempt, UUID):
                 # The ONLY mutation of an attempt happens under this owner.
-                attempt = await begin_new_attempt(connection, tenant_id)
+                attempt = await begin_new_attempt(connection, tenant_id, rebuild_precondition=rebuild_precondition)
             attempt.backend_pid = await connection.scalar(text("SELECT pg_backend_pid()"))
             info[_OWNER_KEY] = _claim(attempt)
             await connection.commit()  # session lock survives transaction commit
             await bind_maintenance_transaction(connection, attempt)
             await connection.commit()  # no unguarded initial transaction escapes
-            yield MaintenanceContext(connection, attempt)
+            yield MaintenanceContext(connection, attempt, rebuild_authorized=rebuild_precondition is not None)
         except BaseException:
             if state == "uncertain":
                 # Cancellation may arrive after PostgreSQL acquired the lock
@@ -353,7 +483,7 @@ async def _read_seed_state(session: AsyncSession) -> str:
             and required <= present else "partial")
 
 
-async def lock_platform_tenant_row(connection: AsyncConnection, tenant_id: UUID):
+async def lock_platform_tenant_row(connection: AsyncConnection, tenant_id: UUID, *, rebuild_precondition: tuple | None = None):
     """Lock the registry row only after the caller owns its exclusive session lock."""
     row = (await connection.execute(text("""
         SELECT id, slug, schema_name, status, generation, provisioning_attempt_id,
@@ -364,23 +494,37 @@ async def lock_platform_tenant_row(connection: AsyncConnection, tenant_id: UUID)
         raise TenantUnavailable("tenant registry or canonical schema unavailable")
     if row.status not in {"pending", "provisioning", "failed", "active", "maintenance"}:
         raise TenantUnavailable("tenant status does not permit migration")
-    if (row.status == "failed" and row.provisioning_error ==
-            f"TenantUnavailable: {_PREVIOUSLY_ACTIVE_SEED_REASON}"):
+    if rebuild_precondition is not None:
+        # Validate captured state BEFORE changing generation, including a rival's
+        # attempt identity. A test reset is the only explicit manual-review bypass.
+        import os
+        from app.config import settings
+        from app.services.tenant_offline import require_test_database
+        if settings.TENANT_MODE == "production" or os.getenv("ALLOW_TEST_TENANT_REBUILD") != "1":
+            raise PermissionError("test-only rebuild disabled")
+        await require_test_database(connection)
+        if (row.id, row.slug, row.schema_name, row.generation, row.status, row.provisioning_attempt_id) != rebuild_precondition:
+            raise TenantUnavailable("rebuild target changed")
+        return row
+    if row.provisioning_error == f"TenantUnavailable: {_PREVIOUSLY_ACTIVE_SEED_REASON}":
         raise TenantUnavailable(_PREVIOUSLY_ACTIVE_SEED_REASON)
     return row
 
 
-async def begin_new_attempt(connection: AsyncConnection, tenant_id: UUID) -> MaintenanceAttempt:
+async def begin_new_attempt(connection: AsyncConnection, tenant_id: UUID, *, rebuild_precondition: tuple | None = None) -> MaintenanceAttempt:
     """Persist a fresh attempt under the session-lock owner's FOR UPDATE row lock."""
-    row = await lock_platform_tenant_row(connection, tenant_id)
+    row = await lock_platform_tenant_row(connection, tenant_id, rebuild_precondition=rebuild_precondition)
     new_id = uuid4()
     generation = row.generation + 1
     await connection.execute(text("""
         UPDATE public.tenants SET status=:status, generation=:generation,
-            provisioning_attempt_id=:attempt, provisioning_step='registered',
-            provisioning_error=NULL WHERE id=:id
-    """), {"status": "maintenance" if row.status == "active" else "provisioning",
-           "generation": generation, "attempt": new_id, "id": tenant_id})
+            provisioning_attempt_id=:attempt, provisioning_step=:step,
+            provisioning_error=:error WHERE id=:id
+    """), {"status": "maintenance" if row.status == "active" or rebuild_precondition is not None else "provisioning",
+           "generation": generation, "attempt": new_id, "id": tenant_id,
+           "step": "rebuild_claimed" if rebuild_precondition is not None else "registered",
+           "error": (f"TenantUnavailable: {_PREVIOUSLY_ACTIVE_SEED_REASON}"
+                     if rebuild_precondition is not None else None)})
     await connection.commit()
     return MaintenanceAttempt(tenant_id, row.schema_name, generation, new_id, 0,
                               stable_tenant_lock_key(tenant_id), row.status)
@@ -476,13 +620,22 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current"}:
+    elif state not in {"empty", "current", "ancestor", "predecessor", "earlier_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
 async def migrate_if_needed(maintenance: MaintenanceContext, attempt: MaintenanceAttempt):
     state = await maintenance.schema_state()
-    if state == "empty":
+    if state == "ancestor":
+        if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
+            raise TenantUnavailable("partial or unknown tenant schema; manual review required")
+        await maintenance.run_migration(REVISION)
+    elif state in {"predecessor", "earlier_predecessor"}:
+        predecessor = PREDECESSOR_REVISION if state == "predecessor" else EARLIER_PREDECESSOR_REVISION
+        if await maintenance.compare_schema("public", load_snapshot_manifest(), predecessor=predecessor):
+            raise TenantUnavailable("partial or unknown tenant schema; manual review required")
+        await maintenance.run_migration(REVISION)
+    elif state == "empty":
         await maintenance.run_migration(REVISION)
     elif state != "current":
         raise TenantUnavailable("tenant migration version or DDL incomplete")

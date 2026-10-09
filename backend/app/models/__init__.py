@@ -13,6 +13,13 @@ from app.models.agent import (
     AgentToolCall,
 )
 from app.models.agent_plugin import AgentPluginGrant, AgentPluginInstallation
+from app.models.agent_runtime_event import (
+    AgentEventReceipt, AgentProjectionReceipt, AgentResult, AgentResultReceipt, AgentRunEvent,
+)
+from app.models.agent_readonly_control import (
+    AgentCheckpointReceipt, AgentReadonlyCheckpoint, AgentTaskControl, AgentTaskUpdate,
+)
+from app.models.agent_task import AgentTask, AgentRun, AgentTaskGrant, AgentTaskMessage
 from app.models.agent_review_skill import AgentReviewSkill
 from app.models.audit import AuditLog
 from app.models.login_audit_log import LoginAuditLog
@@ -144,6 +151,9 @@ __all__ = [
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
     "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
     "CapaLateralDiffusionCheck", "CapaLateralNotification",
+    "AgentTask", "AgentRun", "AgentTaskGrant", "AgentTaskMessage",
+    "AgentCheckpointReceipt", "AgentReadonlyCheckpoint", "AgentTaskControl", "AgentTaskUpdate",
+    "AgentEventReceipt", "AgentProjectionReceipt", "AgentResult", "AgentResultReceipt", "AgentRunEvent",
     "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentPluginGrant", "AgentPluginInstallation", "AgentSession", "AgentToolCall",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",

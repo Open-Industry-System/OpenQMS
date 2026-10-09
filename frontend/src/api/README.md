@@ -8,6 +8,13 @@ request, and exposes one typed function per backend endpoint. No
 business logic — payloads in, typed responses out. Pages and hooks
 never call `axios` or `fetch` directly; they import from here.
 
+`capaD4TextPreview.ts` parses fixed restricted candidate/source-version contracts,
+not an unchecked cast. The three exact preview URLs omit automatic factory_id
+injection and reject401/403 immediately, without refreshing and replaying a
+private-term POST; other CAPA GET behavior is retained. No installation secret,
+run credential, client source/classification or declassification is accepted.
+See [employee preview guide](../../../docs/development/capa-d4-text-preview.md).
+
 ## File Organisation
 
 One module per backend domain. The shared client lives at the root; the
@@ -87,3 +94,13 @@ function returns the parsed JSON body typed against `types/index.ts`.
   needs server data, `store/authStore` (login / refresh / getMe), and
   `store/productLineStore` (listProductLines). `components/` rarely
   imports api directly — pages own data fetching and pass it down.
+
+## Persistent Agent task user API
+
+`agentTasks.ts` uses the existing user-authenticated axios client, strict runtime
+response validation and abort signals. It never holds installation secrets or
+run JWTs. `/agent/tasks` GETs are excluded from selected-factory injection; the
+server checks current actual scope. Agent 401/403 errors reject immediately so
+restricted activity is withdrawn without waiting for global auth refresh.
+Activity and installation reads have deliberately bounded, separate envelopes;
+task selection retains the existing paginated list envelope.

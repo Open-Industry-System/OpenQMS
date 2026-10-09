@@ -1,6 +1,8 @@
 import { useState, useEffect, ReactNode, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Tooltip, Badge } from "antd";
+import { AgentTaskProvider } from "../agent/AgentTaskContext";
+import AgentSidebar from "../agent/AgentSidebar";
 import LanguageSwitcher from "../LanguageSwitcher";
 import type { MenuProps } from "antd";
 import {
@@ -533,7 +535,10 @@ export default function AppLayout() {
           </Space>
         </Header>
         <Content style={{ padding: 24, background: "var(--qf-bg-base)", minWidth: 0 }}>
-          <Outlet />
+          <AgentTaskProvider>
+            <AgentSidebar />
+            <Outlet />
+          </AgentTaskProvider>
         </Content>
       </Layout>
     </Layout>

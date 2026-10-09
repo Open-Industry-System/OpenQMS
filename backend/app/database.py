@@ -61,6 +61,7 @@ Base = TenantBase
 
 async def get_db(request: Request):
     """Business requests require a captured tenant binding in multi-tenant mode."""
+    from app.services.agent_runtime.trial_policy import EMPTY_POLICY
     tenant = getattr(request.state, "tenant", None)
     if settings.TENANT_MODE == "single":
         # Single-tenant business data is deliberately in public.
@@ -80,6 +81,9 @@ async def get_db(request: Request):
         factory = tenant_async_session if binding else async_session
         kwargs = {"binding": binding} if binding else {}
         async with factory(**kwargs) as session:
+            session.info["agent_local_trial_policy"] = getattr(
+                request.app.state, "agent_local_trial_policy", EMPTY_POLICY,
+            )
             try:
                 yield session
             finally:

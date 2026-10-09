@@ -1,12 +1,17 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api import agent as agent_api
+from app.api.capa_d4_text_preview import router as capa_d4_text_preview_router
+from app.api.agent_tasks import router as agent_tasks_router
+from app.api.agent_runtime import router as agent_runtime_router
+from app.api.admin.agent_plugins import router as admin_agent_plugins_router
 from app.api.admin import ai_config as admin_ai_config_api
 from app.api.admin import logs as admin_logs_api
 from app.api.admin import permissions as admin_permissions_api
@@ -73,6 +78,12 @@ _log_handler: logging.Handler | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.services.agent_runtime.trial_policy import load_policy
+    app.state.agent_local_trial_policy = load_policy(
+        settings.AGENT_LOCAL_TRIAL_POLICY_PATH, mode=settings.AGENT_LOCAL_TRIAL_MODE,
+        tenant_mode=settings.TENANT_MODE, now=datetime.now(UTC),
+    )
+    logger.info("%s", app.state.agent_local_trial_policy.diagnostic)
     # Legacy single-tenant bootstrap: create default admin user.
     # In multi-tenant mode, users/role_definitions live in tenant schemas,
     # so running this against the public schema would fail after platform-only
@@ -511,6 +522,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(fmea_router)
 app.include_router(capa_router)
+app.include_router(capa_d4_text_preview_router)
 app.include_router(dashboard_router)
 app.include_router(quality_goal_router)
 app.include_router(control_plan_router)
@@ -546,6 +558,9 @@ app.include_router(admin_ai_config_api.router)
 app.include_router(admin_logs_api.router)
 app.include_router(admin_review_skills_api.router)
 app.include_router(agent_api.router)
+app.include_router(agent_tasks_router)
+app.include_router(agent_runtime_router)
+app.include_router(admin_agent_plugins_router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)

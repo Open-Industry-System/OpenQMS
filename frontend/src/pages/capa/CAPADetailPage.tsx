@@ -18,6 +18,7 @@ import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
 import D4RecPanel from "../../components/capa/D4RecPanel";
 import D4VerificationCard from "../../components/capa/D4VerificationCard";
+import D4TextRedactionPreview from "../../components/capa/D4TextRedactionPreview";
 import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import D3ContainmentPanel from "../../components/capa/D3ContainmentPanel";
@@ -37,6 +38,7 @@ import { getCAPALessons } from "../../api/lessonsLearned";
 import axios from "axios";
 import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
+import { useAgentTaskContext } from "../../components/agent/AgentTaskContext";
 import { PageShell, StatusBadge, DataCard } from "../../components/design";
 
 const { Title, Text } = Typography;
@@ -68,6 +70,7 @@ export default function CAPADetailPage() {
   const { t } = useTranslation("capa");
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
+  const agentTasks = useAgentTaskContext();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [capa, setCapa] = useState<CAPAReport | null>(null);
@@ -750,6 +753,9 @@ export default function CAPADetailPage() {
 
   const actions = (
     <Space>
+      {agentTasks?.available && (
+        <Button onClick={() => agentTasks.beginCreate(capa.report_id)}>以本报告创建任务</Button>
+      )}
       {capa.fmea_ref_id && (
         <Tag style={{ background: "var(--qf-green-dim)", color: "var(--qf-green)", borderColor: "var(--qf-green)" }} icon={<LinkOutlined />}>
           {t("fmea.linked", "已关联 FMEA")}
@@ -929,6 +935,7 @@ export default function CAPADetailPage() {
                   }}
                   onAdopted={() => refreshCapa()}
                 />
+                <D4TextRedactionPreview reportId={id!} />
                 <D4VerificationCard capaId={id!} canEdit={canEdit('capa')} currentRootCause={localData.d4_root_cause} fmeaRefId={capa.fmea_ref_id ?? null} />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label", "根因分析 (5Why / 鱼骨图)"))}>

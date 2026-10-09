@@ -8,6 +8,10 @@ import * as draftApi from "../../api/capaDraft";
 import * as knowledgeApi from "../../api/knowledge";
 import CAPADetailPage from "./CAPADetailPage";
 
+const agentContext = vi.hoisted(() => ({ value: null as any }));
+vi.mock("../../components/agent/AgentTaskContext", () => ({ useAgentTaskContext: () => agentContext.value }));
+beforeEach(() => { agentContext.value = null; });
+
 configure({ testIdAttribute: "data-e2e" });
 afterAll(() => configure({ testIdAttribute: "data-testid" }));
 
@@ -34,6 +38,7 @@ vi.mock("../../api/capa", async () => {
     generatePpt: vi.fn(),
     getPptExportReviewReport: vi.fn(),
     triggerScar: vi.fn(),
+    listCapaSupplierOptions: vi.fn(),
     sinkKnowledge: vi.fn(),
     getD3Runs: vi.fn(),
     getD3Adoptions: vi.fn(),
@@ -42,6 +47,11 @@ vi.mock("../../api/capa", async () => {
     getD3Report: vi.fn(),
     getD3Advice: vi.fn(),
     getD4Recommendations: vi.fn(),
+    getD7Recommendations: vi.fn(),
+    getDocGateImpact: vi.fn(),
+    getDocGateAudit: vi.fn(),
+    getDocGateDecision: vi.fn(),
+    confirmRepeat: vi.fn(),
     importD3Containment: vi.fn(),
   };
 });
@@ -950,3 +960,20 @@ describe("CAPADetailPage knowledge sink card", () => {
   });
 });
 
+
+
+describe("CAPADetailPage explicit Agent task target", () => {
+  it("passes the displayed immutable report UUID to the global task provider", async () => {
+    vi.clearAllMocks();
+    mockSupplierOptions();
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({ ai_draft_enabled: false, llm_provider: null });
+    const reportId = "00000000-0000-4000-8000-000000000001";
+    const beginCreate = vi.fn();
+    agentContext.value = { available: true, beginCreate };
+    useAuthStore.setState({ user: { user_id: "u1", permissions: { capa: 1 } } as any, token: "test-token" });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, report_id: reportId } as any);
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "以本报告创建任务" }));
+    expect(beginCreate).toHaveBeenCalledWith(reportId);
+  });
+});

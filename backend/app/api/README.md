@@ -8,6 +8,14 @@ in `services/`, and shapes the result into a Pydantic response model.
 No business rules live here — handlers stay thin and delegate. Routers
 are mounted by `app/main.py`.
 
+`capa_d4_text_preview.py` is an ordinary-employee, default-off readonly
+candidate boundary, separate from plugin runtime credentials. Availability,
+preview POST and source-version GET use current CAPA/source scope. Its local
+APIRoute bounds request bytes and returns constant validation/fault diagnostics
+without input echoes; early tenant middleware hides closed preview paths
+before body/auth/DB work. Other domain error formats remain unchanged.
+See [preview operations](../../../docs/development/capa-d4-text-preview.md).
+
 ## File Organisation
 
 One `*.py` file per business module at the top level, plus three

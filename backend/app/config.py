@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    CAPA_D4_TEXT_PREVIEW_ENABLED: bool = False
+    AGENT_TASK_RUNTIME_ENABLED: bool = False
+    AGENT_LOCAL_TRIAL_MODE: str = "disabled"
+    AGENT_LOCAL_TRIAL_POLICY_PATH: str = ""
+    AGENT_RUN_TOKEN_TTL_MINUTES: int = Field(default=5, ge=1, le=30)
     ALGORITHM: str = "HS256"
 
     # Neo4j

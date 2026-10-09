@@ -1,5 +1,6 @@
 """TenantContext middleware — resolves tenant from request and injects into request.state."""
 import logging
+import re
 
 from fastapi import Request
 from sqlalchemy import select, text
@@ -7,10 +8,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.config import settings
+from app.core.agent_local_trial import is_local_trial_path, local_trial_peer_allowed
 from app.core.security import verify_token
 from app.core.tenant_transaction import TenantBinding
 from app.database import async_session
 from app.models.tenant import Tenant
+from app.services.agent_runtime.routes import RUNTIME_PATHS, RUNTIME_JWT_ROUTES
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,21 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
+        # Hide the default-off feature before auth, validation or tenant lookups.
+        path = request.url.path
+        if (not settings.CAPA_D4_TEXT_PREVIEW_ENABLED
+                and re.fullmatch(r'/api/capa/[^/]+/d4-text-preview(?:/version|/availability)?/?', path)):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        if not settings.AGENT_TASK_RUNTIME_ENABLED and (path in RUNTIME_PATHS or any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in ("/api/agent/tasks", "/api/admin/agent-plugins")
+        )):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+        if (settings.AGENT_LOCAL_TRIAL_MODE == "local_metadata" and is_local_trial_path(path)
+                and not local_trial_peer_allowed(request)):
+            return JSONResponse(status_code=403, content={"detail": "Access denied"})
+
         # In single-tenant mode, skip all tenant resolution
         if settings.TENANT_MODE == "single":
             request.state.tenant = None
@@ -64,15 +82,24 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         # 3. Try JWT tenant_id claim (fallback for authenticated requests)
         # Verify the JWT fully to prevent tenant enumeration attacks — an
         # unverified token would allow attackers to probe tenant statuses.
-        if tenant is None:
+        if tenant is None and (request.method, path) != ("POST", "/api/agent/runtime/claim"):
             auth_header = request.headers.get("authorization", "")
             if auth_header.startswith("Bearer "):
                 try:
                     token = auth_header[7:]
-                    payload = verify_token(token)
+                    if (request.method, path) in RUNTIME_JWT_ROUTES:
+                        from app.services.agent_runtime.run_auth import _claims
+                        payload = _claims(token)
+                    else:
+                        payload = verify_token(token)
+                        if payload.get("type") == "agent_run":
+                            raise ValueError("Runtime credentials cannot resolve ordinary user routes")
                     jwt_tenant_id = payload.get("tenant_id")
                     if jwt_tenant_id:
                         tenant = await self._resolve_by_id(jwt_tenant_id)
+                        if ((request.method, path) in RUNTIME_JWT_ROUTES and tenant is not None
+                                and tenant.generation != payload["tenant_generation"]):
+                            return JSONResponse(status_code=401, content={"detail": "Invalid run credential"})
                 except Exception:
                     pass  # Invalid token — will be caught by auth dependency
 

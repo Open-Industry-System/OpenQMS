@@ -9,6 +9,15 @@ Components render Ant Design primitives, accept data and callbacks via
 props, and stay free of routing concerns — pages own routes, data
 fetching, and page-level state, and pass results down.
 
+`capa/D4TextRedactionPreview.tsx` is an explicit ordinary-user readonly preview,
+not the AI draft/edit widget. It discovers availability without a body fetch,
+keeps terms/candidates only in component memory, polls versions every2s while
+visible and caps display at30s independently of clock skew/network progress.
+Deny/uncertainty/change withdraws content and private terms; close/hide unmounts
+private DOM immediately. Session/target/scope epochs prevent late response
+publication. No business apply/save action, storage, model or plugin delivery.
+See [employee preview guide](../../../docs/development/capa-d4-text-preview.md).
+
 ## File Organisation
 
 `layout/` and `shared/` are cross-cutting; every other subdirectory is
@@ -29,6 +38,13 @@ visual category.
   smart-suggestion dropdown, scope tags, AI inline recs),
   `pfmea/` (PFMEA function-tree editor, guidance card, wizard sidebar,
   risk table).
+- **Persistent Agent tasks** — `agent/` is mounted by AppLayout. Its provider
+  retains a fixed-target task selection across route/factory/product-line changes;
+  CAPA starts creation only through an explicit action. Local activity state
+  refreshes two newly adjacent authorised pages as one bounded window. Closing
+  or hiding the drawer aborts browser reads; it does not control the plugin
+  process. Logout/tenant identity changes clear selection and content. Controls
+  use current run/epoch and preserve the original retry key and parameters.
 - **CAPA** — `capa/` (`AIDraftButton`, `AIDraftPreview`, the D4/D5/D7
   recommendation panels, `useAIDraft` hook colocated with its panel).
 - **IQC / control plan** — `iqc/` (AQL chart + recommendation drawer),

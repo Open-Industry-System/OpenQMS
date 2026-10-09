@@ -20,12 +20,19 @@ def disposable_public_db(mig_db_url):
     cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
     cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
     cfg.set_main_option("sqlalchemy.url", mig_db_url)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, load_snapshot_manifest()["public_head"])
     return mig_db_url
 
 
 @pytest.mark.asyncio
 async def test_tenant_bootstrap_matches_canonical_business_objects(disposable_public_db):
+    import asyncio
+    # The pinned business baseline predates this platform-only owner column.
+    # Bootstrap needs the current owner registry; the exporter fixture stays pinned.
+    cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", disposable_public_db)
+    await asyncio.to_thread(command.upgrade, cfg, "20260927_tenant_attempt")
     schema = f"tenant_parity_{uuid.uuid4().hex[:12]}"
     tenant_id = uuid.uuid4()
     attempt = MaintenanceAttempt(tenant_id=tenant_id, schema_name=schema, generation=1,
@@ -107,7 +114,7 @@ async def test_tenant_bootstrap_matches_canonical_business_objects(disposable_pu
 
 
 def test_regenerated_canonical_snapshot_is_reviewed(disposable_public_db, tmp_path):
-    """CI regenerates the DDL from public head; any unreviewed drift fails."""
+    """CI regenerates the frozen DDL from its pinned public revision."""
     import ast
     import os
     import shutil

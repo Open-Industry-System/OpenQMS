@@ -243,3 +243,45 @@ def test_plugin_registry_migration_downgrade_removes_grant_before_installation(
         assert "agent_plugin_grants" not in tables
         assert "agent_plugin_installations" not in tables
     engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_plugin_tables_after_full_fresh_tenant_provision(mig_db_url, monkeypatch):
+    """The registry delta test above does not prove an empty tenant can bootstrap."""
+    import asyncio
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+    from app.schemas.platform import TenantCreateRequest
+    from app.services import tenant_migrator
+    from app.services.tenant_schema_diff import compare_business_schema, load_snapshot_manifest
+
+    await asyncio.to_thread(command.upgrade, _migration_config(mig_db_url), "head")
+    engine = create_async_engine(mig_db_url, poolclass=NullPool)
+    monkeypatch.setattr(tenant_migrator, "engine", engine)
+    request = TenantCreateRequest(
+        name="Fresh plugin tenant", slug=f"fresh-plugin-{uuid.uuid4().hex[:10]}",
+        admin_email="admin@example.test", admin_password="FreshTenantTest123",
+    )
+    try:
+        async with engine.connect() as connection:
+            public_users_before = await connection.scalar(sa.text("SELECT count(*) FROM public.users"))
+            public_factories_before = await connection.scalar(sa.text("SELECT count(*) FROM public.factories"))
+        tenant = await tenant_migrator.provision_new(request)
+        assert tenant.status == "active" and tenant.generation > 0
+        async with engine.connect() as connection:
+            for table in ("agent_plugin_installations", "agent_plugin_grants"):
+                assert await connection.scalar(sa.text("SELECT to_regclass(:name)"),
+                                               {"name": f"{tenant.schema_name}.{table}"})
+            revision = await connection.scalar(sa.text(
+                f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version'))
+            assert revision == tenant_migrator.REVISION
+            assert await compare_business_schema(connection, "public", tenant.schema_name,
+                                                 load_snapshot_manifest()) == []
+            assert await connection.scalar(sa.text("SELECT count(*) FROM public.users")) == public_users_before
+            assert await connection.scalar(sa.text("SELECT count(*) FROM public.factories")) == public_factories_before
+            assert await connection.scalar(sa.text(
+                f'SELECT count(*) FROM "{tenant.schema_name}".users')) == 1
+            assert await connection.scalar(sa.text(
+                f'SELECT count(*) FROM "{tenant.schema_name}".factories')) == 1
+    finally:
+        await engine.dispose()

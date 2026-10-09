@@ -20,7 +20,7 @@ def _grant_covers(grant: Grant | None, attempt: AccessAttempt) -> bool:
 
 
 def authorize(attempt: AccessAttempt) -> AccessDecision:
-    declared = get_capability(attempt.spec.id)
+    declared = get_capability(attempt.spec.id, profile=attempt.catalog_profile)
     if declared is None:
         return AccessDecision(False, "unknown capability", ApprovalFloor.DENY)
     if declared != attempt.spec:
