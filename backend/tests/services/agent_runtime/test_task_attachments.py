@@ -162,6 +162,34 @@ async def test_expired_scanning_reservations_do_not_consume_capacity(owned_task,
 
 
 @pytest.mark.asyncio
+async def test_known_foreign_task_does_not_acquire_pipeline_slot_or_task_lock(
+    owned_task, attachment_settings,
+):
+    """Regression: pre-admission rejects a known foreign UUID before global locking."""
+    service = attachment_service()
+    foreign = User(
+        user_id=uuid.uuid4(),
+        username="attachment-foreign-" + uuid.uuid4().hex[:8],
+        password_hash="fixture",
+        role_id=owned_task.scope.user.role_id,
+        legacy_role="admin",
+        is_active=True,
+        factory_id=owned_task.factory_id,
+    )
+    owned_task.db.add(foreign)
+    await owned_task.db.flush()
+    owned_task.task.executor_user_id = foreign.user_id
+    await owned_task.db.flush()
+
+    with pytest.raises(LookupError):
+        await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
+
+    owned_task.task.executor_user_id = owned_task.scope.user.user_id
+    await owned_task.db.flush()
+    reservation = await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
+    await service.abandon_upload(reservation)
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("task_status", ["completed", "blocked_capability", "cancelled"])
 async def test_reservation_rejects_task_outside_ready_or_paused(owned_task, attachment_settings, task_status):
     """Regression: terminal or blocked tasks cannot create a private upload slot."""

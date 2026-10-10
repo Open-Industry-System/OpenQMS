@@ -167,17 +167,23 @@ async def _release_slot_lock(reservation: ReservedAttachment) -> None:
         await connection.close()
 
 
-async def _locked_task(db: AsyncSession, scope: RequestScope, task_id: UUID) -> AgentTask:
-    """Lock fresh task state, then authorize current user/CAPA authority after any wait."""
+async def _locked_task(db: AsyncSession, scope: RequestScope, preauthorized: AgentTask) -> AgentTask:
+    """Lock only the pre-authorized caller/task row, then reauthorize after waiting."""
     task = await db.scalar(
         select(AgentTask)
-        .where(AgentTask.task_id == task_id)
+        .where(
+            AgentTask.task_id == preauthorized.task_id,
+            AgentTask.initiator_id == scope.user.user_id,
+            AgentTask.executor_user_id == scope.user.user_id,
+            AgentTask.target_capa_id == preauthorized.target_capa_id,
+            AgentTask.factory_id == preauthorized.factory_id,
+        )
         .with_for_update()
         .execution_options(populate_existing=True)
     )
     if task is None:
         raise LookupError("Task not found")
-    authorized = await task_service.get_task_for_view(db, scope, task_id)
+    authorized = await task_service.get_task_for_view(db, scope, task.task_id)
     if authorized.task_id != task.task_id:
         raise LookupError("Task not found")
     return task
@@ -218,9 +224,10 @@ async def reserve_upload(db: AsyncSession, scope: RequestScope, task_id: UUID) -
     binding = db.info.get("tenant_binding")
     if binding is not None and not isinstance(binding, TenantBinding):
         raise AttachmentSourceChanged("attachment tenant binding changed")
+    preauthorized = await task_service.get_task_for_view(db, scope, task_id)
     lock_connection = await _acquire_slot_lock(db)
     try:
-        task = await _locked_task(db, scope, task_id)
+        task = await _locked_task(db, scope, preauthorized)
         if task.status not in {"ready", "paused"}:
             raise AttachmentTaskStateError("task is not accepting attachments")
         now = _now()
@@ -362,7 +369,8 @@ async def receive_and_scan(reservation: ReservedAttachment, chunks: AsyncIterato
         if db.info.get("tenant_binding") != reservation.binding:
             raise AttachmentSourceChanged("attachment tenant binding changed")
         try:
-            task = await _locked_task(db, reservation.scope, reservation.task_id)
+            preauthorized = await task_service.get_task_for_view(db, reservation.scope, reservation.task_id)
+            task = await _locked_task(db, reservation.scope, preauthorized)
         except (LookupError, PermissionError) as exc:
             raise AttachmentSourceChanged("attachment source changed") from exc
         if task.status not in {"ready", "paused"}:
@@ -384,7 +392,8 @@ async def receive_and_scan(reservation: ReservedAttachment, chunks: AsyncIterato
         if db.info.get("tenant_binding") != reservation.binding:
             raise AttachmentSourceChanged("attachment tenant binding changed")
         try:
-            task = await _locked_task(db, reservation.scope, reservation.task_id)
+            preauthorized = await task_service.get_task_for_view(db, reservation.scope, reservation.task_id)
+            task = await _locked_task(db, reservation.scope, preauthorized)
         except (LookupError, PermissionError) as exc:
             raise AttachmentSourceChanged("attachment source changed") from exc
         attachment = await db.get(AgentTaskAttachment, reservation.attachment_id)
@@ -479,7 +488,8 @@ async def open_download(
 async def purge_for_owner(
     db: AsyncSession, scope: RequestScope, task_id: UUID, attachment_id: UUID
 ) -> None:
-    task = await _locked_task(db, scope, task_id)
+    preauthorized = await task_service.get_task_for_view(db, scope, task_id)
+    task = await _locked_task(db, scope, preauthorized)
     attachment = await db.scalar(
         select(AgentTaskAttachment)
         .where(
