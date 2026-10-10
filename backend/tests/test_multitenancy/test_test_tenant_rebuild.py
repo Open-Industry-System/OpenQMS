@@ -540,7 +540,7 @@ async def test_only_successful_test_schema_drop_records_exact_attachment_disposa
     result = await invoke(
         rebuild_db, [failed_target], {failed.id: failed_request}, after_stage_hook=crash,
     )
-    assert result[0].status == "failed"
+    assert result[0].status == "refused"
     async with rebuild_db.connect() as conn:
         assert await conn.scalar(text("""
             SELECT count(*) FROM public.tenant_attachment_storage_disposals
