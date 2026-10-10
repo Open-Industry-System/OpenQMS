@@ -169,13 +169,17 @@ async def reconcile_live_namespace(
 
 async def reconcile_disposed_namespace(
     platform_db: AsyncSession,
-    disposal: TenantAttachmentStorageDisposal,
+    disposal_id,
     storage: PrivateAttachmentStorage,
 ) -> ReconcileStats:
-    """Remove a whole namespace only after re-reading its durable disposal authority."""
-    durable = await platform_db.get(TenantAttachmentStorageDisposal, disposal.disposal_id)
+    """Remove only after a fresh platform session observes committed authority."""
+    bind = platform_db.bind
+    if bind is None or not hasattr(bind, "connect"):
+        raise RuntimeError("disposed attachment reconciliation requires an engine-bound platform session")
+    async with AsyncSession(bind=bind, expire_on_commit=False) as authority_db:
+        durable = await authority_db.get(TenantAttachmentStorageDisposal, disposal_id)
     if durable is None or durable.reason not in {"test_rebuild", "tenant_destroyed"}:
-        raise PermissionError("durable attachment disposal authority is required")
+        return ReconcileStats()
     namespace = _namespace_for_disposal(durable)
     removed = storage.remove_namespace(namespace)
     return ReconcileStats(disposed_namespaces=int(removed))
@@ -207,7 +211,7 @@ async def reconcile_configured_storage() -> ReconcileStats:
             namespace = _namespace_for_disposal(disposal)
             known_namespaces.add(namespace.storage_namespace)
             if namespace.storage_namespace in present_namespaces:
-                stats = stats.plus(await reconcile_disposed_namespace(db, disposal, storage))
+                stats = stats.plus(await reconcile_disposed_namespace(db, disposal.disposal_id, storage))
 
     if settings.TENANT_MODE != "single":
         async for tenant, db in run_for_each_tenant():

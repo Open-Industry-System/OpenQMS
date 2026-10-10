@@ -526,7 +526,7 @@ async def test_only_successful_test_schema_drop_records_exact_attachment_disposa
         """), {"id": tenant.id})
         authority = await platform_db.get(TenantAttachmentStorageDisposal, disposal)
         assert authority is not None
-        assert (await reconcile_disposed_namespace(platform_db, authority, storage)).disposed_namespaces == 1
+        assert (await reconcile_disposed_namespace(platform_db, authority.disposal_id, storage)).disposed_namespaces == 1
     assert not (tmp_path / "attachments" / namespace.storage_namespace).exists()
 
     failed_request = request.model_copy(update={"slug": "reset-" + uuid.uuid4().hex[:12]})
@@ -546,3 +546,34 @@ async def test_only_successful_test_schema_drop_records_exact_attachment_disposa
             SELECT count(*) FROM public.tenant_attachment_storage_disposals
             WHERE tenant_id=:id
         """), {"id": failed.id}) == 0
+
+
+@pytest.mark.asyncio
+async def test_uncommitted_disposal_never_authorizes_namespace_removal(rebuild_db, tmp_path):
+    """A caller flush is not durable disposal authority until a separate commit."""
+    from app.models.tenant_attachment_disposal import TenantAttachmentStorageDisposal
+    from app.services.agent_runtime.attachment_recovery import reconcile_disposed_namespace
+    from app.services.agent_runtime.attachment_storage import AttachmentNamespace, PrivateAttachmentStorage
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    tenant_id = uuid.uuid4()
+    namespace = AttachmentNamespace(tenant_id, 7, f"tenant_{tenant_id.hex}_7")
+    storage = PrivateAttachmentStorage(tmp_path / "attachments")
+    orphan = uuid.uuid4()
+    with storage.create_staging(namespace, orphan) as handle:
+        handle.write(b"must-preserve")
+
+    async with AsyncSession(rebuild_db, expire_on_commit=False) as writer:
+        pending = TenantAttachmentStorageDisposal(
+            tenant_id=tenant_id,
+            origin_generation=7,
+            storage_namespace=namespace.storage_namespace,
+            reason="test_rebuild",
+        )
+        writer.add(pending)
+        await writer.flush()
+        assert (await reconcile_disposed_namespace(writer, pending.disposal_id, storage)).disposed_namespaces == 0
+        assert (tmp_path / "attachments" / namespace.storage_namespace).exists()
+        await writer.rollback()
+
+    assert (tmp_path / "attachments" / namespace.storage_namespace).exists()
