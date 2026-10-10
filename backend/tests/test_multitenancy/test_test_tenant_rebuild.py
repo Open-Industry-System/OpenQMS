@@ -481,3 +481,68 @@ async def test_interrupted_owner_persisted_state_requires_explicit_rebuild_retry
     assert (await invoke(rebuild_db, fresh, {tenant.id: request}))[0].status == "active"
     async with rebuild_db.connect() as conn:
         assert await conn.scalar(text("SELECT provisioning_error FROM public.tenants WHERE id=:id"), {"id": tenant.id}) is None
+
+
+@pytest.mark.asyncio
+async def test_only_successful_test_schema_drop_records_exact_attachment_disposal(rebuild_db, sample, tmp_path):
+    """The disposal authority is atomic with exactly the destructive test rebuild."""
+    from app.services.tenant_test_rebuild import preview_rebuild
+
+    tenant, request = sample
+    target = (await preview_rebuild([tenant.id], engine=rebuild_db))[0]
+    result = await invoke(rebuild_db, [target], {tenant.id: request})
+    assert result[0].status == "active"
+    async with rebuild_db.connect() as conn:
+        row = (await conn.execute(text("""
+            SELECT tenant_id,origin_generation,storage_namespace,reason
+            FROM public.tenant_attachment_storage_disposals
+            WHERE tenant_id=:id
+        """), {"id": tenant.id})).one()
+    assert row == (
+        tenant.id,
+        target.generation,
+        f"tenant_{tenant.id.hex}_{target.generation}",
+        "test_rebuild",
+    )
+
+    # Bytes in the old namespace are preserved until the exact committed
+    # disposal record exists, then maintenance authority can remove the whole
+    # generation without consulting an upload owner.
+    from app.models.tenant_attachment_disposal import TenantAttachmentStorageDisposal
+    from app.services.agent_runtime.attachment_recovery import reconcile_disposed_namespace
+    from app.services.agent_runtime.attachment_storage import AttachmentNamespace, PrivateAttachmentStorage
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    namespace = AttachmentNamespace(tenant.id, target.generation, f"tenant_{tenant.id.hex}_{target.generation}")
+    storage = PrivateAttachmentStorage(tmp_path / "attachments")
+    orphan = uuid.uuid4()
+    with storage.create_staging(namespace, orphan) as handle:
+        handle.write(b"old")
+    assert (tmp_path / "attachments" / namespace.storage_namespace / "staging" / orphan.hex).exists()
+    async with AsyncSession(rebuild_db, expire_on_commit=False) as platform_db:
+        disposal = await platform_db.scalar(text("""
+            SELECT disposal_id FROM public.tenant_attachment_storage_disposals
+            WHERE tenant_id=:id
+        """), {"id": tenant.id})
+        authority = await platform_db.get(TenantAttachmentStorageDisposal, disposal)
+        assert authority is not None
+        assert (await reconcile_disposed_namespace(platform_db, authority, storage)).disposed_namespaces == 1
+    assert not (tmp_path / "attachments" / namespace.storage_namespace).exists()
+
+    failed_request = request.model_copy(update={"slug": "reset-" + uuid.uuid4().hex[:12]})
+    failed = await tenant_migrator.provision_new(failed_request)
+    failed_target = (await preview_rebuild([failed.id], engine=rebuild_db))[0]
+
+    def crash(stage):
+        if stage == "maintenance_marked":
+            raise RuntimeError()
+
+    result = await invoke(
+        rebuild_db, [failed_target], {failed.id: failed_request}, after_stage_hook=crash,
+    )
+    assert result[0].status == "failed"
+    async with rebuild_db.connect() as conn:
+        assert await conn.scalar(text("""
+            SELECT count(*) FROM public.tenant_attachment_storage_disposals
+            WHERE tenant_id=:id
+        """), {"id": failed.id}) == 0

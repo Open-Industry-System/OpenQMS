@@ -106,6 +106,77 @@ class PrivateAttachmentStorage:
             except FileNotFoundError:
                 pass
 
+    def list_attachment_ids(self, namespace: AttachmentNamespace, area: Literal["staging", "clean"]) -> set[UUID]:
+        """Return only server-shaped regular file names; preserve anything else."""
+        attachment_ids: set[UUID] = set()
+        with self._area_fd(namespace, area) as area_fd:
+            with os.scandir(area_fd) as entries:
+                for entry in entries:
+                    if not entry.is_file(follow_symlinks=False) or len(entry.name) != 32:
+                        continue
+                    try:
+                        attachment_id = UUID(hex=entry.name)
+                    except ValueError:
+                        continue
+                    if attachment_id.hex == entry.name:
+                        attachment_ids.add(attachment_id)
+        return attachment_ids
+
+    def list_namespaces(self) -> set[str]:
+        """List only safe opaque namespace directories; unknown values are not opened."""
+        self.validate_root()
+        names: set[str] = set()
+        root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            with os.scandir(root_fd) as entries:
+                for entry in entries:
+                    name = entry.name
+                    if (entry.is_dir(follow_symlinks=False) and 0 < len(name) <= 160
+                            and all(char in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for char in name)):
+                        names.add(name)
+        finally:
+            os.close(root_fd)
+        return names
+
+    def remove_namespace(self, namespace: AttachmentNamespace) -> None:
+        """Remove a disposition-authorized namespace without following links."""
+        self.validate_root()
+        root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            try:
+                namespace_fd = os.open(
+                    namespace.storage_namespace,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=root_fd,
+                )
+            except FileNotFoundError:
+                return
+            try:
+                self._remove_tree(namespace_fd)
+            finally:
+                os.close(namespace_fd)
+            os.rmdir(namespace.storage_namespace, dir_fd=root_fd)
+        finally:
+            os.close(root_fd)
+
+    @classmethod
+    def _remove_tree(cls, directory_fd: int) -> None:
+        with os.scandir(directory_fd) as entries:
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False):
+                    child_fd = os.open(
+                        entry.name,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=directory_fd,
+                    )
+                    try:
+                        cls._remove_tree(child_fd)
+                    finally:
+                        os.close(child_fd)
+                    os.rmdir(entry.name, dir_fd=directory_fd)
+                else:
+                    os.unlink(entry.name, dir_fd=directory_fd)
+
     def _area_fd(self, namespace: AttachmentNamespace, area: Literal["staging", "clean"]):
         if area not in {"staging", "clean"}:
             raise ValueError("unknown attachment storage area")

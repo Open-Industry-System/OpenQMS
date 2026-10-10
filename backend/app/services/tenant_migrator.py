@@ -1,5 +1,5 @@
 """Owner-bound tenant migration, atomic seed and same-tenant recovery."""
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from uuid import UUID, uuid4
@@ -211,7 +211,8 @@ class MaintenanceContext:
         await require_no_other_clients(self.__connection)
         await self.__connection.commit()
 
-    async def reset_test_schema(self, *, slug: str, schema_name: str, previous_generation: int) -> None:
+    async def reset_test_schema(self, *, slug: str, schema_name: str, previous_generation: int,
+                                after_drop: Callable[[AsyncConnection], Awaitable[None]] | None = None) -> None:
         """Reset only the exact owner schema after the test-only gates and idle recheck."""
         import os
         from app.config import settings
@@ -232,6 +233,8 @@ class MaintenanceContext:
         await require_no_other_clients(self.__connection)
         await _require_reset_dependency_isolation(self.__connection, schema_name)
         await self.__connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        if after_drop is not None:
+            await after_drop(self.__connection)
         await self.__connection.commit()
 
     async def record_rebuild_phase(self, phase: str, *, active: bool = False) -> None:

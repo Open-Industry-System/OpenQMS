@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.config import settings
 from app.core.tenant_transaction import TenantUnavailable
@@ -112,6 +113,24 @@ def require_execute_flags(confirmation: str) -> None:
         raise PermissionError("explicit discard confirmation required")
 
 
+async def record_test_rebuild_disposal(connection: AsyncConnection, target: RebuildTarget) -> None:
+    """Record only an exact old generation in the transaction that dropped it."""
+    from app.models.tenant_attachment_disposal import TenantAttachmentStorageDisposal
+
+    if not isinstance(target, RebuildTarget):
+        raise ValueError("exact rebuild target required")
+    await connection.execute(
+        insert(TenantAttachmentStorageDisposal).values(
+            tenant_id=target.tenant_id,
+            origin_generation=target.generation,
+            storage_namespace=f"tenant_{target.tenant_id.hex}_{target.generation}",
+            reason="test_rebuild",
+        ).on_conflict_do_nothing(
+            index_elements=["tenant_id", "origin_generation", "storage_namespace"],
+        )
+    )
+
+
 async def _mark_maintenance(engine: AsyncEngine, target: RebuildTarget) -> tuple:
     """Deny new work without changing the attempt or generation before owning the lock."""
     async with engine.begin() as connection:
@@ -176,8 +195,12 @@ async def rebuild_test_tenants(
                     # Only the lock owner incremented generation. Recheck all live proof before DROP.
                     await observer.require_stopped(compose_project)
                     await maintenance.require_rebuild_quiescence()
-                    await maintenance.reset_test_schema(slug=target.slug, schema_name=target.schema_name,
-                                                        previous_generation=target.generation)
+                    await maintenance.reset_test_schema(
+                        slug=target.slug,
+                        schema_name=target.schema_name,
+                        previous_generation=target.generation,
+                        after_drop=lambda connection: record_test_rebuild_disposal(connection, target),
+                    )
                     if after_stage_hook:
                         after_stage_hook("reset_commit")
                     await maintenance.create_schema()

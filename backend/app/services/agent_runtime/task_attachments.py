@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -107,7 +108,7 @@ def _namespace(attachment: AgentTaskAttachment) -> attachment_storage.Attachment
 
 
 def _storage() -> attachment_storage.PrivateAttachmentStorage:
-    if not settings.AGENT_TASK_ATTACHMENT_STORAGE_ROOT:
+    if not settings.AGENT_TASK_ATTACHMENTS_ENABLED or not settings.AGENT_TASK_ATTACHMENT_STORAGE_ROOT:
         raise RuntimeError("attachment storage is unavailable")
     return attachment_storage.PrivateAttachmentStorage(Path(settings.AGENT_TASK_ATTACHMENT_STORAGE_ROOT))
 
@@ -146,10 +147,7 @@ async def _acquire_slot_lock(db: AsyncSession) -> AsyncConnection:
         raise
 
 
-async def _release_slot_lock(reservation: ReservedAttachment) -> None:
-    if reservation.slot_released:
-        return
-    connection = reservation.lock_connection
+async def _release_lock_connection(connection: AsyncConnection) -> None:
     try:
         if connection.invalidated:
             return
@@ -163,8 +161,26 @@ async def _release_slot_lock(reservation: ReservedAttachment) -> None:
         await connection.invalidate()
         raise
     finally:
-        reservation.slot_released = True
         await connection.close()
+
+
+async def _release_slot_lock(reservation: ReservedAttachment) -> None:
+    if reservation.slot_released:
+        return
+    try:
+        await _release_lock_connection(reservation.lock_connection)
+    finally:
+        reservation.slot_released = True
+
+
+@asynccontextmanager
+async def maintenance_pipeline_lock(db: AsyncSession):
+    """Serialize non-user recovery with the normal scan/promotion pipeline."""
+    connection = await _acquire_slot_lock(db)
+    try:
+        yield
+    finally:
+        await _release_lock_connection(connection)
 
 
 async def _locked_task(db: AsyncSession, scope: RequestScope, preauthorized: AgentTask) -> AgentTask:

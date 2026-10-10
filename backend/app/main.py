@@ -84,6 +84,17 @@ async def lifespan(app: FastAPI):
         tenant_mode=settings.TENANT_MODE, now=datetime.now(UTC),
     )
     logger.info("%s", app.state.agent_local_trial_policy.diagnostic)
+    if settings.AGENT_TASK_ATTACHMENTS_ENABLED:
+        try:
+            from app.services.agent_runtime.attachment_recovery import reconcile_configured_storage
+
+            stats = await reconcile_configured_storage()
+            logger.info("[agent_attachments] startup reconciliation: %s", stats)
+        except Exception:
+            # Any inability to validate/reconcile storage leaves the attachment
+            # service unavailable; unknown bytes are preserved, not guessed at.
+            logger.exception("[agent_attachments] startup reconciliation failed; attachments remain closed")
+            settings.AGENT_TASK_ATTACHMENTS_ENABLED = False
     # Legacy single-tenant bootstrap: create default admin user.
     # In multi-tenant mode, users/role_definitions live in tenant schemas,
     # so running this against the public schema would fail after platform-only
