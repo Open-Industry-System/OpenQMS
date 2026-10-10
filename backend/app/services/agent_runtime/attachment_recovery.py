@@ -177,8 +177,8 @@ async def reconcile_disposed_namespace(
     if durable is None or durable.reason not in {"test_rebuild", "tenant_destroyed"}:
         raise PermissionError("durable attachment disposal authority is required")
     namespace = _namespace_for_disposal(durable)
-    storage.remove_namespace(namespace)
-    return ReconcileStats(disposed_namespaces=1)
+    removed = storage.remove_namespace(namespace)
+    return ReconcileStats(disposed_namespaces=int(removed))
 
 
 async def reconcile_configured_storage() -> ReconcileStats:
@@ -191,15 +191,23 @@ async def reconcile_configured_storage() -> ReconcileStats:
 
     stats = ReconcileStats()
     known_namespaces = set()
+    present_namespaces = storage.list_namespaces()
     public = AttachmentNamespace(None, None, "public")
     async with async_session() as db:
         stats = stats.plus(await reconcile_live_namespace(db, public, storage, now=datetime.now(UTC)))
         known_namespaces.add(public.storage_namespace)
-        disposals = (await db.scalars(select(TenantAttachmentStorageDisposal))).all()
+        disposals = ()
+        if present_namespaces:
+            disposals = (await db.scalars(
+                select(TenantAttachmentStorageDisposal).where(
+                    TenantAttachmentStorageDisposal.storage_namespace.in_(present_namespaces)
+                )
+            )).all()
         for disposal in disposals:
             namespace = _namespace_for_disposal(disposal)
             known_namespaces.add(namespace.storage_namespace)
-            stats = stats.plus(await reconcile_disposed_namespace(db, disposal, storage))
+            if namespace.storage_namespace in present_namespaces:
+                stats = stats.plus(await reconcile_disposed_namespace(db, disposal, storage))
 
     if settings.TENANT_MODE != "single":
         async for tenant, db in run_for_each_tenant():

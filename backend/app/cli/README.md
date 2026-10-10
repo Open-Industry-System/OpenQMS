@@ -19,6 +19,9 @@ uses normal authenticated HTTP and never performs privileged database writes.
   private credential-file paths, never secret/token argv values, arbitrary
   commands or a report selector. See the
   [local trial operating guide](../../../docs/development/agent-local-trial.md).
+- **`agent_task_attachments.py`** — fixed `reconcile` maintenance command for
+  already-configured private task attachment storage. It accepts no storage
+  path, tenant selector, or wildcard; it reports aggregate safe counters only.
 
 ## Public Interface
 
@@ -31,6 +34,7 @@ python -m app.cli.graph_rebuild
 python -m app.cli.tenant_migrate --slug acme
 python -m app.cli.agent_local_trial check-policy --policy-file "$OWNED_POLICY_FILE"
 python -m app.cli.agent_local_trial --help
+python -m app.cli.agent_task_attachments reconcile
 ```
 
 ## Conventions & Constraints
@@ -43,6 +47,10 @@ Maintenance-only conventions below do **not** apply to `agent_local_trial`:
   replace the maintenance gate with an unbound public business session.
 - Existing Alembic subprocess entry points preserve normal config resolution.
 - Recovery must remain safe on partial failure; record the actual outcome.
+- Attachment reconciliation acts only on configured storage and durable metadata;
+  it preserves unknown/historical namespaces. Startup defers while a live
+  attachment pipeline owns the global lock, but validation/recovery failures
+  leave attachments closed for that process.
 
 For `agent_local_trial`:
 

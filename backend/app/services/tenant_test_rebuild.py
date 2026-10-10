@@ -119,6 +119,10 @@ async def record_test_rebuild_disposal(connection: AsyncConnection, target: Rebu
 
     if not isinstance(target, RebuildTarget):
         raise ValueError("exact rebuild target required")
+    # reset_test_schema has a strict path for the just-dropped tenant schema;
+    # disposal authority is platform state and must be written to public in the
+    # same open destructive transaction.
+    await connection.execute(text("SET LOCAL search_path TO public, pg_catalog"))
     await connection.execute(
         insert(TenantAttachmentStorageDisposal).values(
             tenant_id=target.tenant_id,

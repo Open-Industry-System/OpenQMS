@@ -39,13 +39,30 @@ def test_recovery_module_exposes_platform_authorized_reconciliation():
     assert callable(recovery.reconcile_live_namespace)
     assert callable(recovery.reconcile_disposed_namespace)
 
-
 def test_maintenance_cli_accepts_only_the_fixed_reconcile_command():
     name = "app.cli.agent_task_attachments"
     assert importlib.util.find_spec(name) is not None, "attachment maintenance CLI is missing"
     cli = __import__(name, fromlist=["parser"])
     args = cli.parser().parse_args(["reconcile"])
     assert vars(args) == {"command": "reconcile"}
+
+
+@pytest.mark.asyncio
+async def test_startup_defers_when_a_live_attachment_pipeline_holds_the_lock(monkeypatch):
+    """A live predecessor pipeline is not storage-integrity failure authority."""
+    from app import main
+    from app.config import settings
+    from app.services.agent_runtime import attachment_recovery, task_attachments
+
+    monkeypatch.setattr(settings, "TENANT_MODE", "dev")
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENTS_ENABLED", True)
+
+    async def locked_reconciliation():
+        raise task_attachments.AttachmentCapacityError("attachment pipeline is busy")
+
+    monkeypatch.setattr(attachment_recovery, "reconcile_configured_storage", locked_reconciliation)
+    async with main.lifespan(main.app):
+        assert settings.AGENT_TASK_ATTACHMENTS_ENABLED is True
 
 
 @pytest.fixture

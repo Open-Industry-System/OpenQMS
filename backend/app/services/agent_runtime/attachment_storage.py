@@ -138,8 +138,11 @@ class PrivateAttachmentStorage:
             os.close(root_fd)
         return names
 
-    def remove_namespace(self, namespace: AttachmentNamespace) -> None:
-        """Remove a disposition-authorized namespace without following links."""
+    def remove_namespace(self, namespace: AttachmentNamespace) -> bool:
+        """Remove a disposition-authorized namespace without following links.
+
+        Returns whether an existing namespace was physically removed.
+        """
         self.validate_root()
         root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
@@ -150,12 +153,13 @@ class PrivateAttachmentStorage:
                     dir_fd=root_fd,
                 )
             except FileNotFoundError:
-                return
+                return False
             try:
                 self._remove_tree(namespace_fd)
             finally:
                 os.close(namespace_fd)
             os.rmdir(namespace.storage_namespace, dir_fd=root_fd)
+            return True
         finally:
             os.close(root_fd)
 

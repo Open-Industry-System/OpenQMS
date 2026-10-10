@@ -114,3 +114,13 @@ else:
         env=environment,
         timeout=3,
     )
+
+
+def test_remove_namespace_reports_only_actual_disposal(tmp_path):
+    storage = private_storage(tmp_path)
+    attachment_id = uuid4()
+    with storage.create_staging(public_namespace(), attachment_id) as staged:
+        staged.write(b"old")
+
+    assert storage.remove_namespace(public_namespace()) is True
+    assert storage.remove_namespace(public_namespace()) is False

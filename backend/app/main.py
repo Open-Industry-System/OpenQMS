@@ -85,11 +85,17 @@ async def lifespan(app: FastAPI):
     )
     logger.info("%s", app.state.agent_local_trial_policy.diagnostic)
     if settings.AGENT_TASK_ATTACHMENTS_ENABLED:
+        from app.services.agent_runtime.task_attachments import AttachmentCapacityError
         try:
             from app.services.agent_runtime.attachment_recovery import reconcile_configured_storage
 
             stats = await reconcile_configured_storage()
             logger.info("[agent_attachments] startup reconciliation: %s", stats)
+        except AttachmentCapacityError:
+            # A predecessor that holds this exact pipeline lock is completing a
+            # normal upload; defer startup recovery instead of converting that
+            # transient contention into a process-lifetime disablement.
+            logger.warning("[agent_attachments] startup reconciliation deferred; pipeline is busy")
         except Exception:
             # Any inability to validate/reconcile storage leaves the attachment
             # service unavailable; unknown bytes are preserved, not guessed at.
