@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event, select, update
+from sqlalchemy import select, update
 
 from app.config import settings
 from app.models.agent_task import AgentTask
@@ -37,7 +37,8 @@ def attachment_service():
 
 
 @pytest_asyncio.fixture
-async def owned_task(db, scope, sample_capa, enabled_plugin):
+async def owned_task(db, request_scope_all, sample_capa, enabled_plugin):
+    scope = request_scope_all
     task = AgentTask(
         initiator_id=scope.user.user_id,
         executor_user_id=scope.user.user_id,
@@ -49,7 +50,15 @@ async def owned_task(db, scope, sample_capa, enabled_plugin):
     )
     db.add(task)
     await db.flush()
-    return SimpleNamespace(db=db, scope=scope, task=task, task_id=task.task_id)
+    return SimpleNamespace(
+        db=db,
+        scope=scope,
+        task=task,
+        task_id=task.task_id,
+        factory_id=sample_capa.factory_id,
+        plugin_id=enabled_plugin.installation_id,
+        target_capa_id=sample_capa.report_id,
+    )
 
 
 @pytest.fixture
@@ -65,7 +74,7 @@ def attachment_settings(monkeypatch, tmp_path):
 async def seed_attachment(owned, *, status: str, expires_at: datetime | None = None):
     attachment = AgentTaskAttachment(
         task_id=owned.task_id,
-        factory_id=owned.task.factory_id,
+        factory_id=owned.factory_id,
         uploaded_by=owned.scope.user.user_id,
         tenant_id=None,
         origin_generation=None,
@@ -121,9 +130,9 @@ async def test_reservation_uses_one_global_pipeline_slot_and_abandon_releases_it
     other = AgentTask(
         initiator_id=owned_task.scope.user.user_id,
         executor_user_id=owned_task.scope.user.user_id,
-        preferred_installation_id=owned_task.task.preferred_installation_id,
-        target_capa_id=owned_task.task.target_capa_id,
-        factory_id=owned_task.task.factory_id,
+        preferred_installation_id=owned_task.plugin_id,
+        target_capa_id=owned_task.target_capa_id,
+        factory_id=owned_task.factory_id,
         request_key=uuid.uuid4().hex,
         status="ready",
     )
@@ -185,7 +194,7 @@ async def test_revocation_before_promotion_leaves_no_downloadable_blob(
 
     attachment = await owned_task.db.get(AgentTaskAttachment, reservation.attachment_id)
     assert attachment.status != "available"
-    with pytest.raises(LookupError):
+    with pytest.raises(PermissionError):
         await service.open_download(
             owned_task.db, owned_task.scope, owned_task.task_id, reservation.attachment_id
         )
@@ -204,14 +213,19 @@ async def test_post_promotion_task_cancellation_never_publishes_available(
             pass
         return service.clamav_scan.ScanResult("clean", "ClamAV 1.4.2/12345", None)
 
-    original_promote = service.attachment_storage.PrivateAttachmentStorage.promote
+    original_locked_task = service._locked_task
+    calls = 0
 
-    def cancel_after_promote(storage, namespace, attachment_id, digest, size):
-        original_promote(storage, namespace, attachment_id, digest, size)
-        owned_task.task.status = "cancelled"
+    async def cancel_after_promotion(db, scope, task_id):
+        nonlocal calls
+        task = await original_locked_task(db, scope, task_id)
+        calls += 1
+        if calls == 2:
+            task.status = "cancelled"
+        return task
 
     monkeypatch.setattr(service.clamav_scan, "scan_stream", clean_scan)
-    monkeypatch.setattr(service.attachment_storage.PrivateAttachmentStorage, "promote", cancel_after_promote)
+    monkeypatch.setattr(service, "_locked_task", cancel_after_promotion)
     with pytest.raises(service.AttachmentSourceChanged):
         await service.receive_and_scan(reservation, chunks([b"clean"]))
     attachment = await owned_task.db.get(AgentTaskAttachment, reservation.attachment_id)
@@ -227,6 +241,12 @@ async def test_stream_limit_has_distinct_safe_exception_for_http_413(
     monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_MAX_BYTES", 4)
     reservation = await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
 
+    async def consume_scan(reader, **_kwargs):
+        async for _ in reader:
+            pass
+        return service.clamav_scan.ScanResult("clean", "ClamAV 1.4.2/12345", None)
+
+    monkeypatch.setattr(service.clamav_scan, "scan_stream", consume_scan)
     with pytest.raises(service.AttachmentInputLimitError):
         await service.receive_and_scan(reservation, chunks([b"clean"]))
     attachment = await owned_task.db.get(AgentTaskAttachment, reservation.attachment_id)
@@ -288,11 +308,14 @@ async def test_delete_commits_purging_before_physical_delete(
     service = attachment_service()
     attachment = await seed_attachment(owned_task, status="available")
     observed_statuses: list[str] = []
-    committed_statuses: list[str] = []
+    commits: list[str] = []
+    original_commit = owned_task.db.commit
 
-    @event.listens_for(owned_task.db.sync_session, "after_commit")
-    def observe_commit(_session):
-        committed_statuses.append(attachment.status)
+    async def observe_commit():
+        await original_commit()
+        commits.append("commit")
+
+    monkeypatch.setattr(owned_task.db, "commit", observe_commit)
 
     class StorageSpy:
         def __init__(self, _root: Path):
@@ -301,7 +324,7 @@ async def test_delete_commits_purging_before_physical_delete(
         def remove(self, _namespace, attachment_id, area):
             assert area == "clean"
             assert attachment_id == attachment.attachment_id
-            assert committed_statuses == ["purging"]
+            assert commits == ["commit"]
             observed_statuses.append("purging")
 
     monkeypatch.setattr(service.attachment_storage, "PrivateAttachmentStorage", StorageSpy)
@@ -310,7 +333,7 @@ async def test_delete_commits_purging_before_physical_delete(
     )
 
     assert observed_statuses == ["purging"]
-    assert committed_statuses == ["purging", "purged"]
+    assert commits == ["commit", "commit"]
     assert (await owned_task.db.get(AgentTaskAttachment, attachment.attachment_id)).status == "purged"
     audit_actions = (await owned_task.db.scalars(
         select(AuditLog.action).where(AuditLog.record_id == attachment.attachment_id)

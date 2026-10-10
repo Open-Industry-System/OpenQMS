@@ -289,6 +289,7 @@ async def _transition_failure(reservation: ReservedAttachment, *, status: str, f
         status=status,
     )
     await reservation.db.commit()
+    await reservation.db.refresh(attachment)
 
 
 async def abandon_upload(reservation: ReservedAttachment) -> None:
@@ -296,7 +297,6 @@ async def abandon_upload(reservation: ReservedAttachment) -> None:
     if reservation.slot_released:
         return
     try:
-        await reservation.db.rollback()
         attachment = await reservation.db.get(AgentTaskAttachment, reservation.attachment_id)
         if attachment is not None and attachment.status in {"scanning", "promoting"}:
             await _transition_failure(reservation, status="failed_storage", failure_code="abandoned")
@@ -389,23 +389,21 @@ async def receive_and_scan(reservation: ReservedAttachment, chunks: AsyncIterato
         attachment.status = "available"
         _audit(db, attachment, reservation.scope.user.user_id, "AGENT_TASK_ATTACHMENT_RESULT", status="available")
         await db.commit()
+        await db.refresh(attachment)
         return _view(attachment)
     except AttachmentSourceChanged:
         if file_handle is not None:
             file_handle.close()
-        await db.rollback()
         await _transition_failure(reservation, status="failed_storage", failure_code="source_changed")
         raise
     except asyncio.CancelledError:
         if file_handle is not None:
             file_handle.close()
-        await db.rollback()
         await _transition_failure(reservation, status="failed_storage", failure_code="cancelled")
         raise
     except (_ReservationExpired, asyncio.TimeoutError):
         if file_handle is not None:
             file_handle.close()
-        await db.rollback()
         await _transition_failure(reservation, status="failed_storage", failure_code="reservation_expired")
         attachment = await db.get(AgentTaskAttachment, reservation.attachment_id)
         assert attachment is not None
@@ -413,13 +411,11 @@ async def receive_and_scan(reservation: ReservedAttachment, chunks: AsyncIterato
     except AttachmentInputLimitError:
         if file_handle is not None:
             file_handle.close()
-        await db.rollback()
         await _transition_failure(reservation, status="failed_storage", failure_code="input_limit")
         raise
     except (OSError, ValueError, AttachmentStorageError):
         if file_handle is not None:
             file_handle.close()
-        await db.rollback()
         await _transition_failure(reservation, status="failed_storage", failure_code="storage_failed")
         attachment = await db.get(AgentTaskAttachment, reservation.attachment_id)
         assert attachment is not None
