@@ -526,7 +526,7 @@ async def test_only_successful_test_schema_drop_records_exact_attachment_disposa
         """), {"id": tenant.id})
         authority = await platform_db.get(TenantAttachmentStorageDisposal, disposal)
         assert authority is not None
-        assert (await reconcile_disposed_namespace(platform_db, authority.disposal_id, storage)).disposed_namespaces == 1
+        assert (await reconcile_disposed_namespace(platform_db, authority, storage)).disposed_namespaces == 1
     assert not (tmp_path / "attachments" / namespace.storage_namespace).exists()
 
     failed_request = request.model_copy(update={"slug": "reset-" + uuid.uuid4().hex[:12]})
@@ -572,7 +572,7 @@ async def test_uncommitted_disposal_never_authorizes_namespace_removal(rebuild_d
         )
         writer.add(pending)
         await writer.flush()
-        assert (await reconcile_disposed_namespace(writer, pending.disposal_id, storage)).disposed_namespaces == 0
+        assert (await reconcile_disposed_namespace(writer, pending, storage)).disposed_namespaces == 0
         assert (tmp_path / "attachments" / namespace.storage_namespace).exists()
         await writer.rollback()
 
