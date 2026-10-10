@@ -168,12 +168,17 @@ async def _release_slot_lock(reservation: ReservedAttachment) -> None:
 
 
 async def _locked_task(db: AsyncSession, scope: RequestScope, task_id: UUID) -> AgentTask:
-    """Authorize through the canonical task view, then take the mutation lock."""
-    authorized = await task_service.get_task_for_view(db, scope, task_id)
+    """Lock fresh task state, then authorize current user/CAPA authority after any wait."""
     task = await db.scalar(
-        select(AgentTask).where(AgentTask.task_id == authorized.task_id).with_for_update()
+        select(AgentTask)
+        .where(AgentTask.task_id == task_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if task is None:
+        raise LookupError("Task not found")
+    authorized = await task_service.get_task_for_view(db, scope, task_id)
+    if authorized.task_id != task.task_id:
         raise LookupError("Task not found")
     return task
 

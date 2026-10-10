@@ -6,6 +6,7 @@ observed through a minimal spy.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib.util
 import uuid
@@ -19,10 +20,13 @@ import pytest_asyncio
 from sqlalchemy import select, update
 
 from app.config import settings
+from app.core.deps import RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.models.agent_task import AgentTask
 from app.models.agent_task_attachment import AgentTaskAttachment
 from app.models.audit import AuditLog
 from app.models.role import RolePermission
+from app.models.user import User
 
 
 async def chunks(values: list[bytes]) -> AsyncIterator[bytes]:
@@ -201,35 +205,52 @@ async def test_revocation_before_promotion_leaves_no_downloadable_blob(
 
 
 @pytest.mark.asyncio
-async def test_post_promotion_task_cancellation_never_publishes_available(
-    owned_task, attachment_settings, monkeypatch,
+@pytest.mark.parametrize("change", ["cancel", "revoke"])
+async def test_two_session_stale_authority_race_never_publishes_available(
+    committed_runtime, attachment_settings, monkeypatch, change,
 ):
-    """Regression: cancellation during physical promotion must terminalize, not publish bytes."""
+    """A pre-change read cannot survive a second session's committed change."""
+    owned = committed_runtime
     service = attachment_service()
-    reservation = await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
+    ready_for_change = asyncio.Event()
+    change_committed = asyncio.Event()
 
     async def clean_scan(reader, **_kwargs):
         async for _ in reader:
             pass
+        ready_for_change.set()
+        await change_committed.wait()
         return service.clamav_scan.ScanResult("clean", "ClamAV 1.4.2/12345", None)
 
-    original_locked_task = service._locked_task
-    calls = 0
-
-    async def cancel_after_promotion(db, scope, task_id):
-        nonlocal calls
-        task = await original_locked_task(db, scope, task_id)
-        calls += 1
-        if calls == 2:
-            task.status = "cancelled"
-        return task
-
     monkeypatch.setattr(service.clamav_scan, "scan_stream", clean_scan)
-    monkeypatch.setattr(service, "_locked_task", cancel_after_promotion)
-    with pytest.raises(service.AttachmentSourceChanged):
-        await service.receive_and_scan(reservation, chunks([b"clean"]))
-    attachment = await owned_task.db.get(AgentTaskAttachment, reservation.attachment_id)
-    assert attachment.status == "failed_storage"
+    async with owned.factory(binding=owned.binding) as upload:
+        user = await upload.get(User, owned.user_id)
+        assert user is not None
+        scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), user)
+        # Establish the stale pre-change authority read in the upload session.
+        assert (await service.task_service.get_task_for_view(upload, scope, owned.task_id)).status == "ready"
+        reservation = await service.reserve_upload(upload, scope, owned.task_id)
+        receive = asyncio.create_task(service.receive_and_scan(reservation, chunks([b"clean"])))
+        await ready_for_change.wait()
+        async with owned.factory(binding=owned.binding) as rival:
+            if change == "cancel":
+                task = await rival.scalar(select(AgentTask).where(AgentTask.task_id == owned.task_id).with_for_update())
+                assert task is not None
+                task.status = "cancelled"
+            else:
+                await rival.execute(update(RolePermission).where(RolePermission.role_id == owned.role_id,
+                    RolePermission.module == "capa").values(permission_level=0))
+            await rival.commit()
+        change_committed.set()
+        with pytest.raises(service.AttachmentSourceChanged):
+            await receive
+        attachment = await upload.get(AgentTaskAttachment, reservation.attachment_id)
+        assert attachment is not None and attachment.status == "failed_storage"
+        assert not (await upload.scalars(select(AuditLog.action).where(
+            AuditLog.record_id == reservation.attachment_id,
+            AuditLog.action == "AGENT_TASK_ATTACHMENT_RESULT",
+            AuditLog.changed_fields["status"].astext == "available",
+        ))).all()
 
 
 @pytest.mark.asyncio
