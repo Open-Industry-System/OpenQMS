@@ -31,6 +31,9 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         if (not settings.CAPA_D4_TEXT_PREVIEW_ENABLED
                 and re.fullmatch(r'/api/capa/[^/]+/d4-text-preview(?:/version|/availability)?/?', path)):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        if (not settings.AGENT_TASK_ATTACHMENTS_ENABLED
+                and re.fullmatch(r'/api/agent/tasks/[^/]+/attachments(?:/[^/]+(?:/download)?)?/?', path)):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
         if not settings.AGENT_TASK_RUNTIME_ENABLED and (path in RUNTIME_PATHS or any(
             path == prefix or path.startswith(prefix + "/")
             for prefix in ("/api/agent/tasks", "/api/admin/agent-plugins")

@@ -218,13 +218,20 @@ async def reconcile_configured_storage() -> ReconcileStats:
 
     if settings.TENANT_MODE != "single":
         async for tenant, db in run_for_each_tenant():
+            binding = TenantBinding(tenant.id, tenant.schema_name, tenant.generation, "business")
+            if db.info.get("tenant_binding") not in (None, binding):
+                raise RuntimeError("tenant recovery session binding changed")
+            db.info["tenant_binding"] = binding
             namespace = AttachmentNamespace(
                 tenant_id=tenant.id,
                 origin_generation=tenant.generation,
                 storage_namespace=f"tenant_{tenant.id.hex}_{tenant.generation}",
             )
             known_namespaces.add(namespace.storage_namespace)
-            stats = stats.plus(await reconcile_live_namespace(db, namespace, storage, now=datetime.now(UTC)))
+            try:
+                stats = stats.plus(await reconcile_live_namespace(db, namespace, storage, now=datetime.now(UTC)))
+            finally:
+                db.info.pop("tenant_binding", None)
 
     unknown = storage.list_namespaces() - known_namespaces
     for namespace in sorted(unknown):

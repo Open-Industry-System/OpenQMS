@@ -48,7 +48,7 @@ class PrivateAttachmentStorage:
         try:
             info = os.lstat(self._root)
         except FileNotFoundError:
-            self._root.mkdir(mode=0o700, parents=True)
+            self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
             info = os.lstat(self._root)
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
             raise ValueError("attachment root must be a directory, not a symlink")
@@ -100,11 +100,44 @@ class PrivateAttachmentStorage:
             raise
 
     def remove(self, namespace: AttachmentNamespace, attachment_id: UUID, area: Literal["staging", "clean"]) -> None:
-        with self._area_fd(namespace, area) as area_fd:
+        """Remove one opaque file and prune only now-empty server-owned directories."""
+        if area not in {"staging", "clean"}:
+            raise ValueError("unknown attachment storage area")
+        self.validate_root()
+        root_fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
             try:
-                os.unlink(self._attachment_name(attachment_id), dir_fd=area_fd)
+                namespace_fd = os.open(
+                    namespace.storage_namespace,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=root_fd,
+                )
             except FileNotFoundError:
+                return
+            try:
+                try:
+                    area_fd = os.open(area, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=namespace_fd)
+                except FileNotFoundError:
+                    return
+                try:
+                    try:
+                        os.unlink(self._attachment_name(attachment_id), dir_fd=area_fd)
+                    except FileNotFoundError:
+                        pass
+                finally:
+                    os.close(area_fd)
+                try:
+                    os.rmdir(area, dir_fd=namespace_fd)
+                except OSError:
+                    pass
+            finally:
+                os.close(namespace_fd)
+            try:
+                os.rmdir(namespace.storage_namespace, dir_fd=root_fd)
+            except OSError:
                 pass
+        finally:
+            os.close(root_fd)
 
     def list_attachment_ids(self, namespace: AttachmentNamespace, area: Literal["staging", "clean"]) -> set[UUID]:
         """Return only server-shaped regular file names; preserve anything else."""

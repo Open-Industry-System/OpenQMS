@@ -119,3 +119,16 @@ async def test_scan_stream_maps_error_or_malformed_reply_to_unavailable(reply):
     assert result.outcome == "unavailable"
     assert result.scanner_version is None
     assert result.failure_code is not None
+
+
+@pytest.mark.asyncio
+async def test_scan_stream_propagates_input_limit_from_reader():
+    from app.services.agent_runtime.task_attachments import AttachmentInputLimitError
+
+    async def limited_reader():
+        raise AttachmentInputLimitError("input limit")
+        yield b""
+
+    async with strict_clamd_server() as strict_clamd:
+        with pytest.raises(AttachmentInputLimitError):
+            await scan_module().scan_stream(limited_reader(), **strict_clamd.address)

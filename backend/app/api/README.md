@@ -16,6 +16,12 @@ without input echoes; early tenant middleware hides closed preview paths
 before body/auth/DB work. Other domain error formats remain unchanged.
 See [preview operations](../../../docs/development/capa-d4-text-preview.md).
 
+`agent_task_attachments.py` is a separate, default-off task subresource. Its
+POST route reserves the authorized Task 3 lifecycle slot before it iterates the
+raw request stream, accepts one bounded multipart file part without FastAPI
+form parsing, and returns fixed error codes only. It never accepts or exposes a
+client filename, path, storage key, file bytes, or scanner diagnostics.
+
 ## File Organisation
 
 One `*.py` file per business module at the top level, plus three

@@ -18,6 +18,18 @@ class ScanResult:
     failure_code: str | None
 
 
+class _ReaderValueError(Exception):
+    """Separates caller stream validation from scanner protocol failures."""
+
+
+async def _reader_chunks(reader: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    try:
+        async for chunk in reader:
+            yield chunk
+    except ValueError as exc:
+        raise _ReaderValueError from exc
+
+
 async def scan_stream(
     reader: AsyncIterator[bytes], *, host: str, port: int, timeout_seconds: int
 ) -> ScanResult:
@@ -34,7 +46,7 @@ async def scan_stream(
             version = _version(await _read_frame(stream_reader))
 
             writer.write(b"zINSTREAM\0")
-            async for chunk in reader:
+            async for chunk in _reader_chunks(reader):
                 if not isinstance(chunk, bytes):
                     raise ValueError("scanner stream must contain bytes")
                 if not chunk:
@@ -49,6 +61,8 @@ async def scan_stream(
             if outcome is not None:
                 return ScanResult(outcome, version, None)
             return ScanResult("unavailable", None, "scanner_unavailable")
+    except _ReaderValueError as exc:
+        raise exc.__cause__ from None
     except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError, TypeError, OverflowError):
         return ScanResult("unavailable", None, "scanner_unavailable")
     finally:
