@@ -99,17 +99,26 @@ def attachment_e2e_samples() -> AttachmentE2ESamples:
     )
 
 
-async def clamav_versioncommands_metadata(host: str, port: int) -> tuple[bytes, ...]:
+async def clamav_versioncommands_metadata(
+    host: str,
+    port: int,
+    command: bytes = b'zVERSIONCOMMANDS\0',
+) -> tuple[bytes, ...]:
     """Collect bounded scanner-only negotiation frames for a failing E2E assertion."""
     reader, writer = await asyncio.open_connection(host, port)
     try:
-        writer.write(b'zVERSIONCOMMANDS\0')
+        writer.write(command)
         await writer.drain()
         frames: list[bytes] = []
         total = 0
         for timeout in (3, 0.1, 0.1, 0.1):
             try:
                 frame = await asyncio.wait_for(reader.readuntil(b'\0'), timeout)
+            except asyncio.IncompleteReadError as exc:
+                if exc.partial:
+                    frames.append(exc.partial[:4096 - total])
+                frames.append(b'<EOF>')
+                break
             except asyncio.TimeoutError:
                 break
             remaining = 4096 - total
