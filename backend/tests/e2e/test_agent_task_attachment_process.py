@@ -22,6 +22,7 @@ from app.models.user import User
 from app.services.agent_runtime import clamav_scan
 from tests.e2e.agent_local_trial_harness import (
     attachment_e2e_samples,
+    clamav_instream_eicar_metadata,
     clamav_versioncommands_metadata,
 )
 from tests.services.agent_runtime.conftest import committed_runtime
@@ -117,6 +118,16 @@ async def test_actual_clamav_advertises_version_and_instream(actual_attachment_s
     metadata = b"".join(probes["newline"])
     safe_metadata = repr({name: tuple(frame[:256] for frame in frames) for name, frames in probes.items()})[:1024]
     assert b"ClamAV " in metadata and b"COMMANDS:" in metadata and b"INSTREAM" in metadata, safe_metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_actual_clamav_reports_found_for_newline_instream(actual_attachment_stack):
+    metadata = await clamav_instream_eicar_metadata(
+        actual_attachment_stack.scanner_host,
+        actual_attachment_stack.scanner_port,
+    )
+    assert b"stream:" in metadata and b"FOUND" in metadata, repr(metadata[:1024])
 
 
 @pytest.mark.asyncio

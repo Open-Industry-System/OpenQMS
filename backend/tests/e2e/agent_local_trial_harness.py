@@ -31,6 +31,7 @@ from tests.services.agent_runtime.trial_support import WORKER_SHA256
 SUMMARY = 'capa.d4.summary.masked.v1'
 MARKER = 'BODY-MUST-NOT-LEAVE-D4-TRIAL'
 PASSWORD = 'owned-trial-bootstrap-password'
+EICAR_BYTES = b'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
 
 
 @dataclass(frozen=True)
@@ -80,9 +81,7 @@ def _zipcrypto_encrypt(payload: bytes, password: bytes) -> bytes:
 
 def attachment_e2e_samples() -> AttachmentE2ESamples:
     """Return deterministic samples that a real ClamAV daemon must reject or allow."""
-    eicar = (
-        b'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
-    )
+    eicar = EICAR_BYTES
     encrypted_pdf = _zipcrypto_encrypt(b'%PDF-1.7\n% encrypted evidence fixture\n', b'openqms-e2e')
     document = b'<w:document xmlns:w="urn:openqms">' + b'A' * (21 * 1024 * 1024) + b'</w:document>'
     import io
@@ -129,6 +128,24 @@ async def clamav_versioncommands_metadata(
             if len(frame) > remaining:
                 break
         return tuple(frames)
+    finally:
+        writer.close()
+        await writer.wait_closed()
+
+
+async def clamav_instream_eicar_metadata(host: str, port: int) -> bytes:
+    """Return bounded scanner result metadata for the fixed EICAR protocol probe."""
+    reader, writer = await asyncio.open_connection(host, port)
+    try:
+        writer.write(b'nINSTREAM\n')
+        writer.write(len(EICAR_BYTES).to_bytes(4, 'big') + EICAR_BYTES)
+        writer.write((0).to_bytes(4, 'big'))
+        await writer.drain()
+        try:
+            result = await asyncio.wait_for(reader.read(4096), 3)
+        except asyncio.TimeoutError:
+            return b'<TIMEOUT>'
+        return result or b'<EOF>'
     finally:
         writer.close()
         await writer.wait_closed()
