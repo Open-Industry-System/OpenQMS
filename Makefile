@@ -157,6 +157,11 @@ agent-attachment-e2e:
 	trap cleanup EXIT; \
 	echo "agent-attachment-e2e project=$$project"; \
 	dc build agent-attachment-e2e; \
-	dc up -d agent-attachment-e2e-db clamav; \
+	if ! dc up -d --wait --wait-timeout 180 clamav agent-attachment-e2e-db; then \
+	  echo "agent-attachment-e2e dependency readiness failed" >&2; \
+	  dc ps >&2; \
+	  dc logs --no-color --tail=100 clamav agent-attachment-e2e-db >&2 || true; \
+	  exit 1; \
+	fi; \
 	dc run --rm --no-deps agent-attachment-e2e; \
 	echo "agent-attachment-e2e exit=0 image=clamav/clamav@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c"
