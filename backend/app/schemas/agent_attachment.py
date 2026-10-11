@@ -23,7 +23,8 @@ class AttachmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid", frozen=True)
 
     attachment_id: UUID
-    display_name: None = None
+    display_name: Annotated[str | None, Field(min_length=1, max_length=255)]
+    extension: Annotated[str | None, Field(min_length=1, max_length=16, pattern=r"^[a-z0-9]+$")]
     byte_size: Annotated[int | None, Field(ge=0)]
     status: AttachmentStatus
     created_at: datetime

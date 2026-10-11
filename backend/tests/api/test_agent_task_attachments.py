@@ -15,6 +15,27 @@ from tests.services.agent_runtime.conftest import committed_runtime
 MIB = 1024 * 1024
 
 
+def test_attachment_out_accepts_sanitized_display_metadata():
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from app.schemas.agent_attachment import AttachmentOut
+
+    now = datetime.now(UTC)
+    attachment = AttachmentOut(
+        attachment_id=uuid4(),
+        display_name="clean.txt",
+        extension="txt",
+        byte_size=5,
+        status="available",
+        created_at=now,
+        updated_at=now,
+        expires_at=now + timedelta(hours=1),
+    )
+
+    assert (attachment.display_name, attachment.extension) == ("clean.txt", "txt")
+
+
 @pytest.mark.parametrize(
     ("filename", "expected_name", "expected_extension"),
     [(b"EVIDENCE.TxT", "EVIDENCE.TxT", "txt"), (b"report.PDF", "report.PDF", "pdf")],
@@ -172,9 +193,11 @@ async def test_attachment_lifecycle_exposes_only_safe_metadata_and_descriptor_do
         assert created.status_code == 200, created.text
         attachment = created.json()
         assert set(attachment) == {
-            "attachment_id", "display_name", "byte_size", "status", "created_at", "updated_at", "expires_at",
+            "attachment_id", "display_name", "extension", "byte_size", "status", "created_at", "updated_at", "expires_at",
         }
-        assert attachment["display_name"] is None and attachment["byte_size"] == 5
+        assert (attachment["display_name"], attachment["extension"], attachment["byte_size"]) == (
+            "EVIDENCE.TxT", "txt", 5,
+        )
         assert "never-returned.txt" not in created.text
         async with owned.factory(binding=owned.binding) as db:
             stored = await db.get(AgentTaskAttachment, UUID(attachment["attachment_id"]))

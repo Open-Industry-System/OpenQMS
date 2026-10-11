@@ -68,6 +68,7 @@ class _ReservationExpired(ValueError):
 class AttachmentView:
     attachment_id: UUID
     display_name: str | None
+    extension: str | None
     byte_size: int | None
     status: str
     created_at: datetime
@@ -227,6 +228,7 @@ def _view(attachment: AgentTaskAttachment) -> AttachmentView:
     return AttachmentView(
         attachment_id=attachment.attachment_id,
         display_name=attachment.display_name,
+        extension=attachment.extension,
         byte_size=attachment.byte_size,
         status=attachment.status,
         created_at=attachment.created_at,
