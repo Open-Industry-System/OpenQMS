@@ -154,8 +154,11 @@ async def test_actual_scan_stream_reaches_found_with_safe_parse_stage_trace(actu
     from app.services.agent_runtime import clamav_scan
 
     stages: list[str] = []
+    failures: list[tuple[str, str]] = []
     original_version_commands = clamav_scan._version_commands
     original_final_reply = clamav_scan._read_final_reply
+    original_version = clamav_scan._version
+    original_commands = clamav_scan._commands
 
     async def trace_version_commands(reader):
         stages.append("version_commands")
@@ -165,11 +168,31 @@ async def test_actual_scan_stream_reaches_found_with_safe_parse_stage_trace(actu
         stages.append("result_record")
         return await original_final_reply(reader)
 
+    def trace_version(reply):
+        stages.append("version")
+        try:
+            return original_version(reply)
+        except Exception as exc:
+            failures.append(("version", type(exc).__name__))
+            raise
+
+    def trace_commands(reply):
+        stages.append("commands")
+        try:
+            return original_commands(reply)
+        except Exception as exc:
+            failures.append(("commands", type(exc).__name__))
+            raise
+
     monkeypatch.setattr(clamav_scan, "_version_commands", trace_version_commands)
     monkeypatch.setattr(clamav_scan, "_read_final_reply", trace_final_reply)
+    monkeypatch.setattr(clamav_scan, "_version", trace_version)
+    monkeypatch.setattr(clamav_scan, "_commands", trace_commands)
     result = await actual_attachment_stack.scan(attachment_e2e_samples().eicar)
 
-    assert (result.outcome, result.failure_code) == ("found", None), (result.outcome, result.failure_code, stages)
+    assert (result.outcome, result.failure_code) == ("found", None), (
+        result.outcome, result.failure_code, stages, failures,
+    )
 
 
 @pytest.mark.asyncio
