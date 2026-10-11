@@ -103,6 +103,8 @@ async def actual_attachment_stack(committed_runtime, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.requires_db
 async def test_actual_clamav_advertises_version_and_instream(actual_attachment_stack):
+    from app.services.agent_runtime import clamav_scan
+
     probes = {
         "nul": await clamav_versioncommands_metadata(
             actual_attachment_stack.scanner_host,
@@ -115,9 +117,20 @@ async def test_actual_clamav_advertises_version_and_instream(actual_attachment_s
             b"nVERSIONCOMMANDS\n",
         ),
     }
-    metadata = b"".join(probes["newline"])
+    records = tuple(
+        record
+        for frame in probes["newline"]
+        if frame != b"<EOF>"
+        for record in frame.splitlines()
+        if record
+    )
     safe_metadata = repr({name: tuple(frame[:256] for frame in frames) for name, frames in probes.items()})[:1024]
-    assert b"ClamAV " in metadata and b"COMMANDS:" in metadata and b"INSTREAM" in metadata, safe_metadata
+    try:
+        assert len(records) == 2
+        clamav_scan._version(records[0])
+        clamav_scan._commands(records[1])
+    except (AssertionError, ValueError):
+        pytest.fail(safe_metadata)
 
 
 @pytest.mark.asyncio
