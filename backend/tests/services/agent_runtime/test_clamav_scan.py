@@ -26,6 +26,7 @@ class StrictClamd:
     version_reply: bytes = b"ClamAV 1.4.2/12345\nCOMMANDS: INSTREAM VERSIONCOMMANDS\n"
     frames: list[bytes] = field(default_factory=list)
     version_command: bytes | None = None
+    hold_open_after_reply: bool = False
     _server: asyncio.AbstractServer | None = None
 
     @property
@@ -51,13 +52,16 @@ class StrictClamd:
             self.frames.append(await reader.readexactly(size))
         writer.write(self.reply)
         await writer.drain()
+        if self.hold_open_after_reply:
+            await reader.read()
+            return
         writer.close()
         await writer.wait_closed()
 
 
 @asynccontextmanager
-async def strict_clamd_server(reply: bytes = b"stream: OK\n"):
-    clamd = StrictClamd(reply=reply)
+async def strict_clamd_server(reply: bytes = b"stream: OK\n", *, hold_open_after_reply: bool = False):
+    clamd = StrictClamd(reply=reply, hold_open_after_reply=hold_open_after_reply)
     clamd._server = await asyncio.start_server(clamd.handler, "127.0.0.1", 0)
     try:
         yield clamd
@@ -75,6 +79,16 @@ async def test_scan_stream_sends_newline_instream_and_zero_terminator():
     assert result.scanner_version == "ClamAV 1.4.2/12345"
     assert result.failure_code is None
     assert strict_clamd.version_command == b"nVERSIONCOMMANDS\n"
+    assert strict_clamd.frames == [b"abc", b""]
+
+
+@pytest.mark.asyncio
+async def test_scan_stream_accepts_valid_result_when_daemon_keeps_socket_open():
+    async with strict_clamd_server(hold_open_after_reply=True) as strict_clamd:
+        result = await scan_module().scan_stream(chunks([b"abc"]), **strict_clamd.address)
+
+    assert result.outcome == "clean"
+    assert result.scanner_version == "ClamAV 1.4.2/12345"
     assert strict_clamd.frames == [b"abc", b""]
 
 

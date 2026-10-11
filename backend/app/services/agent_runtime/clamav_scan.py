@@ -80,7 +80,7 @@ async def _read_line(reader: asyncio.StreamReader) -> bytes:
 
 async def _read_final_reply(reader: asyncio.StreamReader) -> bytes:
     reply = await _read_line(reader)
-    if await reader.read(1):
+    if bytes(reader._buffer).strip():
         raise ValueError("scanner reply has trailing data")
     return reply
 
