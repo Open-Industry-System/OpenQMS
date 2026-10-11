@@ -104,6 +104,7 @@ async def test_actual_clamav_rejects_eicar_and_never_promotes_clean_file(actual_
     scan = await actual_attachment_stack.scan(samples.eicar)
     assert scan.outcome == "found"
     assert scan.scanner_version is not None
+    print(f"actual scanner version: {scan.scanner_version}")
 
     result = await actual_attachment_stack.upload(samples.eicar, "eicar.txt")
     assert result.status_code == 422

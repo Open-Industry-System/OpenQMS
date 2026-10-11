@@ -130,12 +130,7 @@ services:
       - agent_attachment_clamav_definitions:/var/lib/clamav
       - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          /bin/bash -ec 'exec 3<>/dev/tcp/127.0.0.1/3310; printf "zPING\\0zVERSIONCOMMANDS\\0" >&3;
-          IFS= read -r -d "" pong <&3; IFS= read -r -d "" version <&3;
-          [[ "$$pong" == PONG && "$$version" == ClamAV* ]]'
+      test: ["CMD-SHELL", "clamdcheck.sh"]
       interval: 3s
       timeout: 5s
       retries: 40

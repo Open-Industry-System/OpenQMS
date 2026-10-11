@@ -158,6 +158,5 @@ agent-attachment-e2e:
 	echo "agent-attachment-e2e project=$$project"; \
 	dc build agent-attachment-e2e; \
 	dc up -d agent-attachment-e2e-db clamav; \
-	dc exec -T clamav /bin/bash -ec 'exec 3<>/dev/tcp/127.0.0.1/3310; printf "zPING\\0zVERSIONCOMMANDS\\0" >&3; IFS= read -r -d "" pong <&3; IFS= read -r -d "" version <&3; [[ "$$pong" == PONG && "$$version" == ClamAV* ]]; printf "actual scanner version: %s\\n" "$$version"'; \
 	dc run --rm --no-deps agent-attachment-e2e; \
 	echo "agent-attachment-e2e exit=0 image=clamav/clamav@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c"
