@@ -130,7 +130,7 @@ services:
       - agent_attachment_clamav_definitions:/var/lib/clamav
       - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
     healthcheck:
-      test: ["CMD-SHELL", "clamdcheck.sh"]
+      test: ["CMD", "clamdscan", "--config-file=/etc/clamav/clamd.conf", "--ping", "1"]
       interval: 3s
       timeout: 5s
       retries: 40
@@ -140,7 +140,7 @@ services:
     build: ./backend
     profiles: ["agent-attachment-e2e"]
     command: >-
-      /bin/sh -ec 'alembic upgrade head && pytest -q -s tests/e2e/test_agent_task_attachment_process.py'
+      /bin/sh -ec 'chmod 0700 /var/lib/openqms/attachments && alembic upgrade head && pytest -q -s tests/e2e/test_agent_task_attachment_process.py'
     environment:
       DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@agent-attachment-e2e-db:5432/openqms_agent_attachment_test
       TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@agent-attachment-e2e-db:5432/openqms_agent_attachment_test
