@@ -1,6 +1,7 @@
 """Content-safe HTTP boundary for scan-gated task attachments."""
 from __future__ import annotations
 
+import asyncio
 import re
 import unicodedata
 from collections.abc import AsyncIterator
@@ -22,6 +23,9 @@ from app.services.agent_runtime import task_attachments, task_service
 
 
 _MAX_PART_HEADERS: Final = 16 * 1024
+_MULTIPART_OVERHEAD_BYTES: Final = 64 * 1024
+_PARSER_CHUNK_BYTES: Final = 64 * 1024
+_UPLOAD_DEADLINE_SECONDS: Final = 120
 _BOUNDARY_RE: Final = re.compile(
     r'^\s*multipart/form-data\s*;\s*boundary=(?:"([^"]+)"|([^;\s]+))\s*$', re.IGNORECASE,
 )
@@ -137,65 +141,37 @@ async def _file_part_chunks(
     boundary: bytes,
     metadata: task_attachments.AttachmentUploadMetadata,
 ) -> AsyncIterator[bytes]:
-    """Yield exactly one form-data file payload without buffering the payload."""
+    """Yield one file payload under fixed header, body, and output bounds."""
     opening = b"--" + boundary + b"\r\n"
     delimiter = b"\r\n--" + boundary
     header_buffer = bytearray()
-    body_buffer: bytearray | None = None
+    body_buffer = bytearray()
+    headers_parsed = False
     complete = False
+    received = 0
+    body_limit = settings.AGENT_TASK_ATTACHMENT_MAX_BYTES + _MULTIPART_OVERHEAD_BYTES
 
-    async for chunk in stream:
-        if not isinstance(chunk, bytes):
-            raise MultipartInputInvalid("invalid multipart stream")
-        if complete:
-            if chunk:
-                raise MultipartInputInvalid("unexpected multipart data")
-            continue
-        started_body = False
-        if body_buffer is None:
-            header_buffer.extend(chunk)
-            opening_prefix = min(len(header_buffer), len(opening))
-            if header_buffer[:opening_prefix] != opening[:opening_prefix]:
-                raise MultipartInputInvalid("invalid multipart opening boundary")
-            if len(header_buffer) < len(opening):
-                continue
-            headers_start = len(opening)
-            headers_end = header_buffer.find(b"\r\n\r\n", headers_start)
-            if headers_end < 0:
-                if len(header_buffer) - headers_start > _MAX_PART_HEADERS:
-                    raise MultipartInputInvalid("multipart headers too large")
-                continue
-            if headers_end - headers_start > _MAX_PART_HEADERS:
-                raise MultipartInputInvalid("multipart headers too large")
-            parsed_metadata = _validate_part_headers(bytes(header_buffer[headers_start:headers_end]))
-            metadata.display_name = parsed_metadata.display_name
-            metadata.extension = parsed_metadata.extension
-            metadata.declared_content_type = parsed_metadata.declared_content_type
-            del header_buffer[:headers_end + 4]
-            body_buffer = header_buffer
-            started_body = True
-
-        if not started_body:
-            body_buffer.extend(chunk)
+    def drain_body() -> list[bytes]:
+        nonlocal complete
+        emitted: list[bytes] = []
         while not complete:
             marker_at = body_buffer.find(delimiter)
             if marker_at < 0:
                 keep = len(delimiter) + 4
-                if len(body_buffer) > keep:
-                    safe_size = len(body_buffer) - keep
-                    yield bytes(body_buffer[:safe_size])
-                    del body_buffer[:safe_size]
-                break
-            marker_end = marker_at + len(delimiter)
-            if len(body_buffer) < marker_end + 2:
-                if marker_at:
-                    yield bytes(body_buffer[:marker_at])
-                    del body_buffer[:marker_at]
-                break
+                if len(body_buffer) <= keep:
+                    break
+                safe_size = min(len(body_buffer) - keep, _PARSER_CHUNK_BYTES)
+                emitted.append(bytes(body_buffer[:safe_size]))
+                del body_buffer[:safe_size]
+                continue
             if marker_at:
-                yield bytes(body_buffer[:marker_at])
-                del body_buffer[:marker_at]
-                marker_end = len(delimiter)
+                safe_size = min(marker_at, _PARSER_CHUNK_BYTES)
+                emitted.append(bytes(body_buffer[:safe_size]))
+                del body_buffer[:safe_size]
+                continue
+            marker_end = len(delimiter)
+            if len(body_buffer) < marker_end + 2:
+                break
             suffix = body_buffer[marker_end:marker_end + 2]
             if suffix == b"\r\n":
                 raise MultipartInputInvalid("multiple multipart parts are not allowed")
@@ -209,8 +185,59 @@ async def _file_part_chunks(
             if body_buffer:
                 raise MultipartInputInvalid("unexpected multipart data")
             complete = True
+        return emitted
 
-    if body_buffer is None or not complete:
+    async for chunk in stream:
+        if not isinstance(chunk, bytes):
+            raise MultipartInputInvalid("invalid multipart stream")
+        received += len(chunk)
+        if received > body_limit:
+            raise task_attachments.AttachmentInputLimitError("multipart body limit exceeded")
+        if complete:
+            if chunk:
+                raise MultipartInputInvalid("unexpected multipart data")
+            continue
+        pending = memoryview(chunk)
+        while pending:
+            if complete:
+                raise MultipartInputInvalid("unexpected multipart data")
+            if not headers_parsed:
+                capacity = len(opening) + _MAX_PART_HEADERS + 4 - len(header_buffer)
+                if capacity <= 0:
+                    raise MultipartInputInvalid("multipart headers too large")
+                take = min(len(pending), capacity)
+                header_buffer.extend(pending[:take])
+                pending = pending[take:]
+                opening_prefix = min(len(header_buffer), len(opening))
+                if header_buffer[:opening_prefix] != opening[:opening_prefix]:
+                    raise MultipartInputInvalid("invalid multipart opening boundary")
+                if len(header_buffer) < len(opening):
+                    continue
+                headers_start = len(opening)
+                headers_end = header_buffer.find(b"\r\n\r\n", headers_start)
+                if headers_end < 0:
+                    if len(header_buffer) - headers_start >= _MAX_PART_HEADERS:
+                        raise MultipartInputInvalid("multipart headers too large")
+                    continue
+                if headers_end - headers_start > _MAX_PART_HEADERS:
+                    raise MultipartInputInvalid("multipart headers too large")
+                parsed_metadata = _validate_part_headers(bytes(header_buffer[headers_start:headers_end]))
+                metadata.display_name = parsed_metadata.display_name
+                metadata.extension = parsed_metadata.extension
+                metadata.declared_content_type = parsed_metadata.declared_content_type
+                body_buffer.extend(header_buffer[headers_end + 4:])
+                header_buffer.clear()
+                headers_parsed = True
+                for output in drain_body():
+                    yield output
+                continue
+            take = min(len(pending), _PARSER_CHUNK_BYTES)
+            body_buffer.extend(pending[:take])
+            pending = pending[take:]
+            for output in drain_body():
+                yield output
+
+    if not headers_parsed or not complete:
         raise MultipartInputInvalid("incomplete multipart input")
 
 
@@ -278,11 +305,12 @@ async def upload(
         async with await task_attachments.reserve_upload(db, scope, task_id) as reservation:
             boundary = _multipart_boundary(request.headers.get("content-type"))
             metadata = task_attachments.AttachmentUploadMetadata()
-            view = await task_attachments.receive_and_scan(
-                reservation,
-                _file_part_chunks(request.stream(), boundary, metadata),
-                metadata,
-            )
+            async with asyncio.timeout(_UPLOAD_DEADLINE_SECONDS):
+                view = await task_attachments.receive_and_scan(
+                    reservation,
+                    _file_part_chunks(request.stream(), boundary, metadata),
+                    metadata,
+                )
         return _upload_result(view)
     except HTTPException:
         raise

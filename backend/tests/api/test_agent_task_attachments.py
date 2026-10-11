@@ -111,6 +111,54 @@ async def stream_multipart_without_content_length(byte_size: int, filename: str 
 
 
 @pytest.mark.asyncio
+async def test_file_part_chunks_splits_one_large_asgi_chunk_without_whole_chunk_copy():
+    from app.api import agent_task_attachments
+    from app.services.agent_runtime import task_attachments
+
+    boundary = b"agent-attachment-boundary"
+    payload = b"x" * (3 * 64 * 1024 + 17)
+    request = (
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="clean.txt"\r\n'
+        b"Content-Type: text/plain\r\n\r\n"
+        + payload + b"\r\n--" + boundary + b"--\r\n"
+    )
+
+    async def one_chunk():
+        yield request
+
+    metadata = task_attachments.AttachmentUploadMetadata()
+    chunks = [
+        chunk async for chunk in agent_task_attachments._file_part_chunks(one_chunk(), boundary, metadata)
+    ]
+
+    assert b"".join(chunks) == payload
+    assert max(map(len, chunks)) <= 64 * 1024
+
+
+@pytest.mark.asyncio
+async def test_file_part_chunks_rejects_oversized_single_asgi_chunk_before_buffering():
+    from app.api import agent_task_attachments
+    from app.services.agent_runtime import task_attachments
+
+    boundary = b"agent-attachment-boundary"
+    request = (
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="clean.txt"\r\n'
+        b"Content-Type: text/plain\r\n\r\n"
+        + b"x" * (20 * MIB + 64 * 1024 + 1)
+    )
+
+    async def one_chunk():
+        yield request
+
+    metadata = task_attachments.AttachmentUploadMetadata()
+    with pytest.raises(task_attachments.AttachmentInputLimitError):
+        async for _ in agent_task_attachments._file_part_chunks(one_chunk(), boundary, metadata):
+            pass
+
+
+@pytest.mark.asyncio
 @pytest.mark.requires_db
 async def test_chunked_over_limit_returns_constant_413_and_removes_staging(
     committed_runtime, monkeypatch, tmp_path,

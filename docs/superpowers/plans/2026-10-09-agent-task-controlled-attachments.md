@@ -4,7 +4,7 @@
 
 **Goal:** 为目标绑定 AgentTask 提供默认关闭、租户隔离、实际 ClamAV 扫描门禁、受权下载与可恢复清理的私有附件基础。
 
-**Architecture:** 附件元数据位于 tenant-local `agent_task_attachments`，文件只能在 backend 私有本地卷中暂存或 clean。上传先原子预留任务额度和全局 PostgreSQL advisory pipeline slot，再以低层 `python-multipart` 流式解析与 `clamd` `zINSTREAM` 扫描；仅经过 `scanning → promoting → available` 两阶段提升的对象可下载。跨文件系统/数据库崩溃由状态对账恢复，整代删除只能由平台层显式销毁记录授权。
+**Architecture:** 附件元数据位于 tenant-local `agent_task_attachments`，文件只能在 backend 私有本地卷中暂存或 clean。上传先原子预留任务额度和全局 PostgreSQL advisory pipeline slot，再以低层 `python-multipart` 流式解析与 `clamd` newline `nINSTREAM` 扫描；仅经过 `scanning → promoting → available` 两阶段提升的对象可下载。跨文件系统/数据库崩溃由状态对账恢复，整代删除只能由平台层显式销毁记录授权。
 
 **Tech Stack:** FastAPI 0.115 / Starlette 0.38.6、SQLAlchemy async 2.0、PostgreSQL 15 advisory locks、Alembic public + tenant migrations、已安装 `python-multipart`、ClamAV `clamd`、React 18 / TypeScript / Ant Design、Vitest、Playwright。
 
@@ -31,7 +31,7 @@
 | `backend/app/models/agent_task_attachment.py` | tenant-local 附件 ORM；状态/字段约束由 migration 保证 |
 | `backend/app/models/tenant_attachment_disposal.py` | platform-local append-only 销毁授权 ORM |
 | `backend/app/services/agent_runtime/attachment_storage.py` | 私有根校验、descriptor-relative I/O、staging/clean 原子移动与 digest 检查 |
-| `backend/app/services/agent_runtime/clamav_scan.py` | 严格 `zINSTREAM`/`VERSIONCOMMANDS` client 与固定扫描结论 |
+| `backend/app/services/agent_runtime/clamav_scan.py` | 严格 newline `nVERSIONCOMMANDS`/`nINSTREAM` client 与固定扫描结论 |
 | `backend/app/services/agent_runtime/task_attachments.py` | 授权、reservation、advisory slot、上传状态机、列表/下载/删除 |
 | `backend/app/services/agent_runtime/attachment_recovery.py` | promoting/purging/scanning 对账、live orphan 和 disposal 处理 |
 | `backend/app/api/agent_task_attachments.py` | 薄 HTTP 路由；早期受权后低层 streaming multipart 接线 |
@@ -180,7 +180,7 @@ Use only server-generated UUID path components below a validated `0700` root; cr
 
 - [ ] **Step 5: Implement strict ClamAV client.**
 
-Open a bounded TCP connection, issue framed `zVERSIONCOMMANDS\0` and `zINSTREAM\0`, send 4-byte big-endian lengths and a zero-length terminator, enforce 60 seconds on the whole exchange, and accept only strict single-result `OK`, `FOUND`, or `ERROR`. Map every `FOUND` to `found`, every malformed/error/timeout/connection error to `unavailable`; do not expose daemon text.
+Open one bounded TCP connection for newline `nVERSIONCOMMANDS\n`, validate the version/capability response, close it, then open a fresh bounded connection for `nINSTREAM\n`. Send 4-byte big-endian lengths and a zero-length terminator, enforce 60 seconds on the whole exchange, and accept only strict single-result `OK`, `FOUND`, or `ERROR`. Map every `FOUND` to `found`, every malformed/error/timeout/connection error to `unavailable`; do not expose daemon text.
 
 - [ ] **Step 6: Run GREEN units and focused regression.**
 

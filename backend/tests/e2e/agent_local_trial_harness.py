@@ -105,6 +105,7 @@ async def clamav_versioncommands_metadata(
 ) -> tuple[bytes, ...]:
     """Collect bounded scanner-only negotiation frames for a failing E2E assertion."""
     reader, writer = await asyncio.open_connection(host, port)
+    delimiter = b'\n' if command.startswith(b'n') else b'\0'
     try:
         writer.write(command)
         await writer.drain()
@@ -112,7 +113,7 @@ async def clamav_versioncommands_metadata(
         total = 0
         for timeout in (3, 0.1, 0.1, 0.1):
             try:
-                frame = await asyncio.wait_for(reader.readuntil(b'\0'), timeout)
+                frame = await asyncio.wait_for(reader.readuntil(delimiter), timeout)
             except asyncio.IncompleteReadError as exc:
                 if exc.partial:
                     frames.append(exc.partial[:4096 - total])

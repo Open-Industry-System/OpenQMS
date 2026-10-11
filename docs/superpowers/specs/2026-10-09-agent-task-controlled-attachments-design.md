@@ -161,12 +161,12 @@ scanning  -> promoting -> available -> purging -> purged
 
 Compose 增加受控附件 profile 内的 ClamAV daemon：不向宿主机发布端口，只允许 backend 通过内部网络连接。scanner 有独立病毒库卷；backend 不与 scanner 共享业务存储卷。配置显式固定 `StreamMaxLength`、`MaxFileSize`、`MaxScanSize` 为 20 MiB、`MaxRecursion` 为 10、`MaxFiles` 为 1000、`MaxScanTime` 为 60000 毫秒，并显式开启 `AlertExceedsMax yes` 与 `AlertEncrypted yes`（同时在最终镜像中验证 archive/document 两类加密告警均有效）。受控 profile 还固定 `MaxThreads 1`、`MaxQueue 1`。镜像必须在实施时固定至经验证的版本/摘要，不使用浮动 `latest` 作为验收依据。
 
-后端用标准库异步 TCP 调用 ClamAV `zINSTREAM\0` 协议：每块带四字节大端长度，零长度块结束流。实现每次扫描前或同一受控连接内读取 `VERSIONCOMMANDS`，将 scanner/数据库版本写入记录；该版本仅用于审计，不是授权或健康检查替代。回复按严格、有限的 `OK`、`FOUND`、`ERROR` 形式解析，不把 daemon 原始字符串返回给 API、日志或审计。`OK` 只在上传流、ClamAV 扫描预算和全部启用告警都已正常完成时才可进入 `promoting`；任意 `FOUND`（包括 `Heuristics.Limits.Exceeded`、加密 archive/document 或其他 heuristic）、`ERROR`、连接中断或超时都作为无法接受的扫描结论，删除 staging 并拒绝提升。
+后端用标准库异步 TCP 调用 ClamAV newline 协议：先在短连接发送 `nVERSIONCOMMANDS\n` 并严格验证版本/能力后关闭，再在新连接发送 `nINSTREAM\n`。每块带四字节大端长度，零长度块结束流。将 scanner/数据库版本写入记录；该版本仅用于审计，不是授权或健康检查替代。回复按严格、有限的 `OK`、`FOUND`、`ERROR` 形式解析，不把 daemon 原始字符串返回给 API、日志或审计。`OK` 只在上传流、ClamAV 扫描预算和全部启用告警都已正常完成时才可进入 `promoting`；任意 `FOUND`（包括 `Heuristics.Limits.Exceeded`、加密 archive/document 或其他 heuristic）、`ERROR`、连接中断或超时都作为无法接受的扫描结论，删除 staging 并拒绝提升。
 
 上传的安全顺序：
 
 1. 早期默认关闭门禁，然后取得全局 pipeline slot、当前任务授权、状态检查与锁定任务行的五位额度 reservation；完成 reservation 后才读取 body。
-2. 以受限低层 multipart parser 读取唯一文件；服务在 parser data callback 中把每个有界块写入 staging、累计 SHA-256/大小，并按 `zINSTREAM` 发送给 daemon。任何总 body、文件、header、超时或解析限制触发时立即停止读取、关闭所有句柄、删除 staging 并终结 reservation。
+2. 以受限低层 multipart parser 读取唯一文件；服务在 parser data callback 中把每个有界块写入 staging、累计 SHA-256/大小，并按 newline `nINSTREAM` 发送给 daemon。任何总 body、文件、header、超时或解析限制触发时立即停止读取、关闭所有句柄、删除 staging 并终结 reservation。
 3. 发送结束块并严格读取扫描结论；任一 `FOUND`、`ERROR`、超时、连接或协议错误都不进入提升。
 4. clean 时，多租户模式重新读取 tenant binding；single 模式重新确认 `public` 命名空间。两种模式都重新读取任务权限、CAPA 坐标和附件行锁；仍一致才持久化扫描摘要并提交 `scanning -> promoting`。
 5. 在 `promoting` 下核验 staging 大小/摘要并原子移动至 clean 区，再以独立事务转为 `available`。
