@@ -132,6 +132,30 @@ async def test_actual_clamav_reports_found_for_newline_instream(actual_attachmen
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
+async def test_actual_scan_stream_reaches_found_with_safe_parse_stage_trace(actual_attachment_stack, monkeypatch):
+    from app.services.agent_runtime import clamav_scan
+
+    stages: list[str] = []
+    original_version_commands = clamav_scan._version_commands
+    original_final_reply = clamav_scan._read_final_reply
+
+    async def trace_version_commands(reader):
+        stages.append("version_commands")
+        return await original_version_commands(reader)
+
+    async def trace_final_reply(reader):
+        stages.append("result_record")
+        return await original_final_reply(reader)
+
+    monkeypatch.setattr(clamav_scan, "_version_commands", trace_version_commands)
+    monkeypatch.setattr(clamav_scan, "_read_final_reply", trace_final_reply)
+    result = await actual_attachment_stack.scan(attachment_e2e_samples().eicar)
+
+    assert (result.outcome, result.failure_code) == ("found", None), (result.outcome, result.failure_code, stages)
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
 async def test_actual_clamav_rejects_eicar_and_never_promotes_clean_file(actual_attachment_stack):
     samples = attachment_e2e_samples()
 
