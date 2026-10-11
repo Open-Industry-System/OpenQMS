@@ -58,9 +58,11 @@ client.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // User task reads must withdraw restricted content immediately on denial.
-    // Credential refresh elsewhere can refetch the same selected task afterward.
-    if ((originalRequest?.url?.startsWith("/agent/tasks") || isD4TextPreview(originalRequest?.url))
+    // User task activity and attachment reads must withdraw restricted content
+    // immediately on denial. Credential refresh elsewhere can refetch the same
+    // selected task afterward, but never replays a protected attachment request.
+    const isUserTaskRead = originalRequest?.url?.startsWith("/agent/tasks");
+    if ((isUserTaskRead || isD4TextPreview(originalRequest?.url))
         && (error.response?.status === 401 || error.response?.status === 403)) {
       return Promise.reject(error);
     }

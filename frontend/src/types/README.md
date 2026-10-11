@@ -95,3 +95,7 @@ These read-specific envelopes are intentional; task lists retain pagination.
 Activity messages use `received` for confirmed reception, while the existing
 append acknowledgement uses `accepted`; neither proves execution. Runtime
 validation lives in `api/agentTasks.ts`, keeping this module declaration-only.
+
+`agentAttachment.ts` declares only task-scoped, scan-status metadata. It has no
+content, path, storage-key, or scanner-diagnostic fields; strict runtime validation
+remains in `api/agentTaskAttachments.ts`.

@@ -104,3 +104,8 @@ server checks current actual scope. Agent 401/403 errors reject immediately so
 restricted activity is withdrawn without waiting for global auth refresh.
 Activity and installation reads have deliberately bounded, separate envelopes;
 task selection retains the existing paginated list envelope.
+
+`agentTaskAttachments.ts` separately gates every attachment list/upload/download call
+behind task-scoped availability and exact-key metadata validation. Upload sends a
+`FormData` payload containing only `file`; attachment content is neither previewed
+nor retained in browser storage. A 401/403 rejection is not refreshed or replayed.

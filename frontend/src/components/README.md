@@ -45,6 +45,9 @@ visual category.
   or hiding the drawer aborts browser reads; it does not control the plugin
   process. Logout/tenant identity changes clear selection and content. Controls
   use current run/epoch and preserve the original retry key and parameters.
+  `AgentTaskAttachments` mounts after activity only for a visible selected task;
+  it verifies task-scoped availability before listing or uploading and aborts plus
+  clears file/metadata state on identity, credential, epoch, denial, or close.
 - **CAPA** — `capa/` (`AIDraftButton`, `AIDraftPreview`, the D4/D5/D7
   recommendation panels, `useAIDraft` hook colocated with its panel).
 - **IQC / control plan** — `iqc/` (AQL chart + recommendation drawer),

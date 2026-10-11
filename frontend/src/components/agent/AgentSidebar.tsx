@@ -3,6 +3,7 @@ import { Button, Drawer } from "antd";
 import { appendTaskMessage, controlTask, createTask, listTaskInstallations, listTasks } from "../../api/agentTasks";
 import type { AgentTask, InstallationChoice, TaskAction, TaskControl, TaskCreate, TaskMessageCreate } from "../../types/agentTask";
 import AgentActivity from "./AgentActivity";
+import AgentTaskAttachments from "./AgentTaskAttachments";
 import { useAgentTaskContext } from "./AgentTaskContext";
 import { readAgentIdentity, useAgentTaskActivity } from "./useAgentTaskActivity";
 type Operation = {
@@ -227,6 +228,13 @@ export default function AgentSidebar() {
         {activity.status === "loading" && <p>正在读取任务活动</p>}
         {page && <>
           <AgentActivity task={ctx.selectedTask} page={page} onControl={command} pending={pending || retry !== null} />
+          <AgentTaskAttachments
+            taskId={ctx.selectedTask.task_id}
+            identity={ctx.identity}
+            credential={ctx.credential}
+            open={ctx.open}
+            requestEpoch={ctx.requestEpoch}
+          />
           <label>追加指令<textarea
             aria-label="追加指令"
             maxLength={10000}

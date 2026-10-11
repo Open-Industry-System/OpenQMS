@@ -16,6 +16,9 @@ vi.mock("../../api/agentTasks", async () => ({
   appendTaskMessage: vi.fn(),
   controlTask: vi.fn()
 }));
+vi.mock("./AgentTaskAttachments", () => ({
+  default: ({ taskId }: { taskId: string }) => <div data-testid="task-attachments">附件任务 {taskId}</div>
+}));
 const a = "00000000-0000-4000-8000-000000000001", b = "00000000-0000-4000-8000-000000000002", run = "00000000-0000-4000-8000-000000000003";
 const task = {
   task_id: a,
@@ -185,6 +188,13 @@ describe("global user task sidebar", () => {
     expect(api.getTaskActivity).toHaveBeenCalledTimes(2);
     expect(api.listTasks).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("button", { name: "下一页任务" })).toBeDisabled();
+  });
+  it("mounts the selected task attachment panel after activity without changing runtime controls", async () => {
+    render(<Harness />);
+    await select();
+    expect(screen.getByTestId("task-attachments")).toHaveTextContent(`附件任务 ${a}`);
+    expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "发送指令" })).toBeDisabled();
   });
   it("follows the fixed report link through SPA navigation and retains the selected task", async () => {
     render(<Harness />);
