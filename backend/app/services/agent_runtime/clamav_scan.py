@@ -9,6 +9,7 @@ from typing import Literal
 
 
 _VERSION_REPLY = re.compile(rb"ClamAV [0-9]+(?:\.[0-9]+)+/[0-9]+(?:/[^\r\n\0]{1,200})?")
+_COMMANDS_REPLY = re.compile(rb"COMMANDS: [A-Z][A-Z_]*(?: [A-Z][A-Z_]*){0,255}")
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ async def scan_stream(
             stream_reader, writer = await asyncio.open_connection(host, port)
             writer.write(b"zVERSIONCOMMANDS\0")
             await writer.drain()
-            version = _version(await _read_frame(stream_reader))
+            version = await _version_commands(stream_reader)
 
             writer.write(b"zINSTREAM\0")
             async for chunk in _reader_chunks(reader):
@@ -103,3 +104,22 @@ def _version(reply: bytes) -> str:
     if len(reply) > 255 or _VERSION_REPLY.fullmatch(reply) is None:
         raise ValueError("scanner version reply is invalid")
     return reply.decode("ascii")
+
+
+def _commands(reply: bytes) -> None:
+    if len(reply) > 4096 or _COMMANDS_REPLY.fullmatch(reply) is None:
+        raise ValueError("scanner commands reply is invalid")
+    if b"INSTREAM" not in reply.removeprefix(b"COMMANDS: ").split(b" "):
+        raise ValueError("scanner does not support instream")
+
+
+async def _version_commands(reader: asyncio.StreamReader) -> str:
+    reply = await _read_frame(reader)
+    if b"\n" in reply:
+        version_reply, commands_reply = reply.split(b"\n", 1)
+        version = _version(version_reply)
+        _commands(commands_reply)
+        return version
+    version = _version(reply)
+    _commands(await _read_frame(reader))
+    return version

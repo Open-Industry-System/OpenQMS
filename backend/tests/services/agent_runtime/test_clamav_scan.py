@@ -23,7 +23,7 @@ async def chunks(values: list[bytes]) -> AsyncIterator[bytes]:
 @dataclass
 class StrictClamd:
     reply: bytes = b"stream: OK\0"
-    version_reply: bytes = b"ClamAV 1.4.2/12345\0"
+    version_reply: bytes = b"ClamAV 1.4.2/12345\nCOMMANDS: INSTREAM VERSIONCOMMANDS\0"
     frames: list[bytes] = field(default_factory=list)
     version_command: bytes | None = None
     _server: asyncio.AbstractServer | None = None
@@ -75,6 +75,24 @@ async def test_scan_stream_sends_zinstream_and_zero_terminator():
     assert result.scanner_version == "ClamAV 1.4.2/12345"
     assert result.failure_code is None
     assert strict_clamd.version_command == b"zVERSIONCOMMANDS\0"
+    assert strict_clamd.frames == [b"abc", b""]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "version_reply",
+    (
+        b"ClamAV 1.4.2/12345\nCOMMANDS: INSTREAM VERSIONCOMMANDS\0",
+        b"ClamAV 1.4.2/12345\0COMMANDS: INSTREAM VERSIONCOMMANDS\0",
+    ),
+)
+async def test_scan_stream_accepts_versioncommands_with_commands_record(version_reply):
+    async with strict_clamd_server() as strict_clamd:
+        strict_clamd.version_reply = version_reply
+        result = await scan_module().scan_stream(chunks([b"abc"]), **strict_clamd.address)
+
+    assert result.outcome == "clean"
+    assert result.scanner_version == "ClamAV 1.4.2/12345"
     assert strict_clamd.frames == [b"abc", b""]
 
 
