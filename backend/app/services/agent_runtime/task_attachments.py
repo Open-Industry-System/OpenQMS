@@ -56,6 +56,10 @@ class AttachmentInputLimitError(ValueError):
     """The bounded input stream exceeded the fixed attachment limit."""
 
 
+class AttachmentInputRejected(ValueError):
+    """The HTTP boundary rejected multipart metadata after reservation."""
+
+
 class _ReservationExpired(ValueError):
     pass
 
@@ -69,6 +73,14 @@ class AttachmentView:
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
+
+
+@dataclass
+class AttachmentUploadMetadata:
+    """Safe display metadata captured by the HTTP boundary, never used as a path."""
+    display_name: str | None = None
+    extension: str | None = None
+    declared_content_type: str | None = None
 
 
 @dataclass
@@ -260,7 +272,7 @@ async def reserve_upload(db: AsyncSession, scope: RequestScope, task_id: UUID) -
                 ),
             )
         )
-        if active_count >= 5:
+        if active_count >= settings.AGENT_TASK_ATTACHMENT_MAX_PER_TASK:
             raise AttachmentCapacityError("attachment capacity reached")
         tenant_id, generation, namespace = _storage_namespace(binding)
         attachment = AgentTaskAttachment(
@@ -332,7 +344,11 @@ async def abandon_upload(reservation: ReservedAttachment) -> None:
         await _release_slot_lock(reservation)
 
 
-async def receive_and_scan(reservation: ReservedAttachment, chunks: AsyncIterator[bytes]) -> AttachmentView:
+async def receive_and_scan(
+    reservation: ReservedAttachment,
+    chunks: AsyncIterator[bytes],
+    metadata: AttachmentUploadMetadata | None = None,
+) -> AttachmentView:
     """Write once, scan once, and promote only after current authority rechecks."""
     db = reservation.db
     storage = _storage()
@@ -394,6 +410,12 @@ async def receive_and_scan(reservation: ReservedAttachment, chunks: AsyncIterato
         attachment = await db.get(AgentTaskAttachment, reservation.attachment_id)
         if attachment is None or attachment.task_id != task.task_id or attachment.status != "scanning":
             raise AttachmentSourceChanged("attachment source changed")
+        if metadata is not None:
+            if metadata.display_name is None or metadata.extension is None:
+                raise ValueError("attachment metadata is incomplete")
+            attachment.display_name = metadata.display_name
+            attachment.extension = metadata.extension
+            attachment.declared_content_type = metadata.declared_content_type
         attachment.byte_size = size
         attachment.sha256 = digest.hexdigest()
         attachment.scanner_version = scan.scanner_version
@@ -442,6 +464,11 @@ async def receive_and_scan(reservation: ReservedAttachment, chunks: AsyncIterato
         if file_handle is not None:
             file_handle.close()
         await _transition_failure(reservation, status="failed_storage", failure_code="input_limit")
+        raise
+    except AttachmentInputRejected:
+        if file_handle is not None:
+            file_handle.close()
+        await _transition_failure(reservation, status="failed_storage", failure_code="input_invalid")
         raise
     except (OSError, ValueError, AttachmentStorageError):
         if file_handle is not None:

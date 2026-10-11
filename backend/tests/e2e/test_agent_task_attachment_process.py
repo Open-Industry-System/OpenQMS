@@ -20,7 +20,10 @@ from app.main import app
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.services.agent_runtime import clamav_scan
-from tests.e2e.agent_local_trial_harness import attachment_e2e_samples
+from tests.e2e.agent_local_trial_harness import (
+    attachment_e2e_samples,
+    clamav_versioncommands_metadata,
+)
 from tests.services.agent_runtime.conftest import committed_runtime
 
 
@@ -94,6 +97,18 @@ async def actual_attachment_stack(committed_runtime, monkeypatch):
             scanner_port=settings.AGENT_TASK_ATTACHMENT_CLAMAV_PORT,
             scanner_timeout_seconds=settings.AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.requires_db
+async def test_actual_clamav_advertises_version_and_instream(actual_attachment_stack):
+    frames = await clamav_versioncommands_metadata(
+        actual_attachment_stack.scanner_host,
+        actual_attachment_stack.scanner_port,
+    )
+    metadata = b"".join(frames)
+    safe_metadata = repr(tuple(frame[:256] for frame in frames))[:1024]
+    assert b"ClamAV " in metadata and b"COMMANDS:" in metadata and b"INSTREAM" in metadata, safe_metadata
 
 
 @pytest.mark.asyncio

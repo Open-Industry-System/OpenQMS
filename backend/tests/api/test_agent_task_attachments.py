@@ -15,6 +15,47 @@ from tests.services.agent_runtime.conftest import committed_runtime
 MIB = 1024 * 1024
 
 
+@pytest.mark.parametrize(
+    ("filename", "expected_name", "expected_extension"),
+    [(b"EVIDENCE.TxT", "EVIDENCE.TxT", "txt"), (b"report.PDF", "report.PDF", "pdf")],
+)
+def test_attachment_filename_metadata_normalizes_allowed_extension(filename, expected_name, expected_extension):
+    from app.api import agent_task_attachments
+
+    metadata = agent_task_attachments._attachment_metadata(filename, b"application/octet-stream")
+
+    assert (metadata.display_name, metadata.extension) == (expected_name, expected_extension)
+
+
+@pytest.mark.parametrize(
+    ("filename", "error"),
+    [
+        (b"payload.exe", "type"),
+        (b"report.txt.exe", "type"),
+        (b"../report.txt", "input"),
+        (b"report\x01.txt", "input"),
+    ],
+)
+def test_attachment_filename_metadata_rejects_disallowed_or_unsafe_names(filename, error):
+    from app.api import agent_task_attachments
+
+    exception = (
+        agent_task_attachments.AttachmentTypeRejected
+        if error == "type"
+        else agent_task_attachments.MultipartInputInvalid
+    )
+    with pytest.raises(exception):
+        agent_task_attachments._attachment_metadata(filename, b"application/octet-stream")
+
+
+def test_attachment_type_rejection_maps_to_fixed_422():
+    from app.api import agent_task_attachments
+
+    response = agent_task_attachments._error(agent_task_attachments.AttachmentTypeRejected("rejected"))
+
+    assert (response.status_code, response.detail) == (422, "ATTACHMENT_TYPE_REJECTED")
+
+
 @pytest.mark.asyncio
 async def test_disabled_attachment_post_returns_404_before_body_and_tenant_lookup(monkeypatch):
     """The attachment-specific flag must close this path before any request work."""
@@ -35,10 +76,10 @@ async def test_disabled_attachment_post_returns_404_before_body_and_tenant_looku
     tenant_lookup.assert_not_awaited()
 
 
-async def stream_multipart_without_content_length(byte_size: int):
+async def stream_multipart_without_content_length(byte_size: int, filename: str = "never-returned.txt"):
     boundary = b"agent-attachment-boundary"
     yield b"--" + boundary + b"\r\n"
-    yield b'Content-Disposition: form-data; name="file"; filename="never-returned.bin"\r\n'
+    yield f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode("utf-8")
     yield b"Content-Type: application/octet-stream\r\n\r\n"
     remaining = byte_size
     while remaining:
@@ -96,7 +137,9 @@ async def test_attachment_lifecycle_exposes_only_safe_metadata_and_descriptor_do
     """The HTTP surface preserves Task 3 authority and safe response contracts."""
     import app.database as database
     from app.core.security import create_access_token
+    from app.models.agent_task_attachment import AgentTaskAttachment
     from app.services.agent_runtime import task_attachments
+    from uuid import UUID
 
     owned = committed_runtime
     monkeypatch.setattr(database, "tenant_async_session", owned.factory)
@@ -118,14 +161,27 @@ async def test_attachment_lifecycle_exposes_only_safe_metadata_and_descriptor_do
     base = f"/api/agent/tasks/{owned.task_id}/attachments"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", headers=headers) as client:
         assert (await client.get(base + "/availability")).json() == {"enabled": True}
-        created = await client.post(base, content=stream_multipart_without_content_length(5))
+        rejected_type = await client.post(base, content=stream_multipart_without_content_length(5, "payload.exe"))
+        assert rejected_type.status_code == 422
+        assert rejected_type.json() == {"detail": "ATTACHMENT_TYPE_REJECTED"}
+        for unsafe_name in ("../report.txt", "report\x01.txt"):
+            rejected_name = await client.post(base, content=stream_multipart_without_content_length(5, unsafe_name))
+            assert rejected_name.status_code == 422
+            assert rejected_name.json() == {"detail": "ATTACHMENT_INPUT_INVALID"}
+        created = await client.post(base, content=stream_multipart_without_content_length(5, "EVIDENCE.TxT"))
         assert created.status_code == 200, created.text
         attachment = created.json()
         assert set(attachment) == {
             "attachment_id", "display_name", "byte_size", "status", "created_at", "updated_at", "expires_at",
         }
         assert attachment["display_name"] is None and attachment["byte_size"] == 5
-        assert "never-returned.bin" not in created.text
+        assert "never-returned.txt" not in created.text
+        async with owned.factory(binding=owned.binding) as db:
+            stored = await db.get(AgentTaskAttachment, UUID(attachment["attachment_id"]))
+            assert stored is not None
+            assert (stored.display_name, stored.extension, stored.declared_content_type) == (
+                "EVIDENCE.TxT", "txt", "application/octet-stream",
+            )
         assert (await client.get(base)).json()["items"] == [attachment]
 
         downloaded = await client.get(base + "/" + attachment["attachment_id"] + "/download")
@@ -133,7 +189,7 @@ async def test_attachment_lifecycle_exposes_only_safe_metadata_and_descriptor_do
         assert downloaded.headers["content-type"] == "application/octet-stream"
         assert downloaded.headers["x-content-type-options"] == "nosniff"
         assert downloaded.headers["cache-control"] == "no-store"
-        assert "never-returned.bin" not in downloaded.headers["content-disposition"]
+        assert "never-returned.txt" not in downloaded.headers["content-disposition"]
 
         deleted = await client.delete(base + "/" + attachment["attachment_id"])
         assert deleted.status_code == 204

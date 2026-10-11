@@ -98,6 +98,21 @@ async def seed_attachment(owned, *, status: str, expires_at: datetime | None = N
 
 
 @pytest.mark.asyncio
+async def test_reservation_honors_configured_active_attachment_limit(owned_task, attachment_settings, monkeypatch):
+    """Regression: configured quota, not a literal five, controls admission."""
+    service = attachment_service()
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_MAX_PER_TASK", 1)
+    await seed_attachment(owned_task, status="available")
+    reservation = None
+    try:
+        with pytest.raises(service.AttachmentCapacityError):
+            reservation = await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
+    finally:
+        if reservation is not None:
+            await service.abandon_upload(reservation)
+
+
+@pytest.mark.asyncio
 async def test_sixth_active_reservation_is_rejected(owned_task, attachment_settings):
     """Regression: sixth scanning/promoting/available slot must never be allocated."""
     service = attachment_service()

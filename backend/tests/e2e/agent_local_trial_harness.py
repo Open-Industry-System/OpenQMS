@@ -84,7 +84,7 @@ def attachment_e2e_samples() -> AttachmentE2ESamples:
         b'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
     )
     encrypted_pdf = _zipcrypto_encrypt(b'%PDF-1.7\n% encrypted evidence fixture\n', b'openqms-e2e')
-    document = b'<w:document xmlns:w="urn:openqms">' + b'A' * (2 * 1024 * 1024) + b'</w:document>'
+    document = b'<w:document xmlns:w="urn:openqms">' + b'A' * (21 * 1024 * 1024) + b'</w:document>'
     import io
     import zipfile
     stream = io.BytesIO()
@@ -97,6 +97,32 @@ def attachment_e2e_samples() -> AttachmentE2ESamples:
         expansion_docx=stream.getvalue(),
         clean_text=b'OpenQMS controlled attachment E2E clean fixture.\n',
     )
+
+
+async def clamav_versioncommands_metadata(host: str, port: int) -> tuple[bytes, ...]:
+    """Collect bounded scanner-only negotiation frames for a failing E2E assertion."""
+    reader, writer = await asyncio.open_connection(host, port)
+    try:
+        writer.write(b'zVERSIONCOMMANDS\0')
+        await writer.drain()
+        frames: list[bytes] = []
+        total = 0
+        for timeout in (3, 0.1, 0.1, 0.1):
+            try:
+                frame = await asyncio.wait_for(reader.readuntil(b'\0'), timeout)
+            except asyncio.TimeoutError:
+                break
+            remaining = 4096 - total
+            if remaining <= 0:
+                break
+            frames.append(frame[:remaining])
+            total += len(frame)
+            if len(frame) > remaining:
+                break
+        return tuple(frames)
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
 
 class OwnedTrial(SimpleNamespace):
