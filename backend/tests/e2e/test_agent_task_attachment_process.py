@@ -126,9 +126,14 @@ async def test_actual_clamav_advertises_version_and_instream(actual_attachment_s
     )
     safe_metadata = repr({name: tuple(frame[:256] for frame in frames) for name, frames in probes.items()})[:1024]
     try:
-        assert len(records) == 2
-        clamav_scan._version(records[0])
-        clamav_scan._commands(records[1])
+        if len(records) == 1 and b"| COMMANDS: " in records[0]:
+            version, commands = records[0].split(b"| COMMANDS: ", 1)
+            clamav_scan._version(version)
+            clamav_scan._commands(b"COMMANDS: " + commands)
+        else:
+            assert len(records) == 2
+            clamav_scan._version(records[0])
+            clamav_scan._commands(records[1])
     except (AssertionError, ValueError):
         pytest.fail(safe_metadata)
 

@@ -114,6 +114,13 @@ def _commands(reply: bytes) -> None:
 
 
 async def _version_commands(reader: asyncio.StreamReader) -> str:
-    version = _version(await _read_line(reader))
+    reply = await _read_line(reader)
+    delimiter = b"| COMMANDS: "
+    if delimiter in reply:
+        version_reply, commands = reply.split(delimiter, 1)
+        version = _version(version_reply)
+        _commands(b"COMMANDS: " + commands)
+        return version
+    version = _version(reply)
     _commands(await _read_line(reader))
     return version

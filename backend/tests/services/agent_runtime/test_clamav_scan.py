@@ -80,19 +80,23 @@ async def test_scan_stream_sends_newline_instream_and_zero_terminator():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "version_reply",
+    ("version_reply", "expected_version"),
     (
-        b"ClamAV 1.4.2/12345\nCOMMANDS: INSTREAM VERSIONCOMMANDS\n",
-        b"ClamAV 1.4.2/12345\nCOMMANDS: VERSIONCOMMANDS INSTREAM\n",
+        (b"ClamAV 1.4.2/12345\nCOMMANDS: INSTREAM VERSIONCOMMANDS\n", "ClamAV 1.4.2/12345"),
+        (b"ClamAV 1.4.2/12345\nCOMMANDS: VERSIONCOMMANDS INSTREAM\n", "ClamAV 1.4.2/12345"),
+        (
+            b"ClamAV 1.4.3/28150/Sun Oct 11 06:26:01 2026| COMMANDS: VERSIONCOMMANDS INSTREAM\n",
+            "ClamAV 1.4.3/28150/Sun Oct 11 06:26:01 2026",
+        ),
     ),
 )
-async def test_scan_stream_accepts_newline_versioncommands_record(version_reply):
+async def test_scan_stream_accepts_newline_versioncommands_record(version_reply, expected_version):
     async with strict_clamd_server() as strict_clamd:
         strict_clamd.version_reply = version_reply
         result = await scan_module().scan_stream(chunks([b"abc"]), **strict_clamd.address)
 
     assert result.outcome == "clean"
-    assert result.scanner_version == "ClamAV 1.4.2/12345"
+    assert result.scanner_version == expected_version
     assert strict_clamd.frames == [b"abc", b""]
 
 
