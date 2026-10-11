@@ -1,4 +1,4 @@
-"""Strict, fail-closed ClamAV zINSTREAM client for private attachments."""
+"""Strict, fail-closed ClamAV newline-INSTREAM client for private attachments."""
 from __future__ import annotations
 
 import asyncio
@@ -42,11 +42,11 @@ async def scan_stream(
     try:
         async with asyncio.timeout(timeout_seconds):
             stream_reader, writer = await asyncio.open_connection(host, port)
-            writer.write(b"zVERSIONCOMMANDS\0")
+            writer.write(b"nVERSIONCOMMANDS\n")
             await writer.drain()
             version = await _version_commands(stream_reader)
 
-            writer.write(b"zINSTREAM\0")
+            writer.write(b"nINSTREAM\n")
             async for chunk in _reader_chunks(reader):
                 if not isinstance(chunk, bytes):
                     raise ValueError("scanner stream must contain bytes")
@@ -71,17 +71,17 @@ async def scan_stream(
             writer.close()
 
 
-async def _read_frame(reader: asyncio.StreamReader) -> bytes:
-    reply = await reader.readuntil(b"\0")
-    if not reply.endswith(b"\0"):
-        raise ValueError("scanner reply is not framed")
+async def _read_line(reader: asyncio.StreamReader) -> bytes:
+    reply = await reader.readuntil(b"\n")
+    if len(reply) > 4096 or not reply.endswith(b"\n"):
+        raise ValueError("scanner reply is not newline framed")
     return reply[:-1]
 
 
 async def _read_final_reply(reader: asyncio.StreamReader) -> bytes:
-    reply = await _read_frame(reader)
+    reply = await _read_line(reader)
     if await reader.read(1):
-        raise ValueError("scanner reply is not a single frame")
+        raise ValueError("scanner reply has trailing data")
     return reply
 
 
@@ -114,12 +114,6 @@ def _commands(reply: bytes) -> None:
 
 
 async def _version_commands(reader: asyncio.StreamReader) -> str:
-    reply = await _read_frame(reader)
-    if b"\n" in reply:
-        version_reply, commands_reply = reply.split(b"\n", 1)
-        version = _version(version_reply)
-        _commands(commands_reply)
-        return version
-    version = _version(reply)
-    _commands(await _read_frame(reader))
+    version = _version(await _read_line(reader))
+    _commands(await _read_line(reader))
     return version
