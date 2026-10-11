@@ -106,7 +106,72 @@ services:
         limits:
           memory: 2G
 
+  # This profile is intentionally not part of normal local startup. It supplies
+  # the real, network-only ClamAV daemon used by `make agent-attachment-e2e`.
+  agent-attachment-e2e-db:
+    build: ./docker/postgres
+    profiles: ["agent-attachment-e2e"]
+    environment:
+      POSTGRES_USER: qms
+      POSTGRES_PASSWORD: qms_dev_2026
+      POSTGRES_DB: openqms_agent_attachment_test
+    volumes:
+      - agent_attachment_e2e_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qms -d openqms_agent_attachment_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  clamav:
+    image: clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c
+    profiles: ["agent-attachment-e2e"]
+    volumes:
+      - agent_attachment_clamav_definitions:/var/lib/clamav
+      - ./docker/clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /bin/bash -ec 'exec 3<>/dev/tcp/127.0.0.1/3310; printf "zPING\\0zVERSIONCOMMANDS\\0" >&3;
+          IFS= read -r -d "" pong <&3; IFS= read -r -d "" version <&3;
+          [[ "$$pong" == PONG && "$$version" == ClamAV* ]]'
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+
+  agent-attachment-e2e:
+    build: ./backend
+    profiles: ["agent-attachment-e2e"]
+    command: >-
+      /bin/sh -ec 'alembic upgrade head && pytest -q -s tests/e2e/test_agent_task_attachment_process.py'
+    environment:
+      DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@agent-attachment-e2e-db:5432/openqms_agent_attachment_test
+      TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@agent-attachment-e2e-db:5432/openqms_agent_attachment_test
+      SECRET_KEY: agent-attachment-e2e-secret
+      AGENT_TASK_RUNTIME_ENABLED: "true"
+      AGENT_TASK_ATTACHMENTS_ENABLED: "true"
+      AGENT_TASK_ATTACHMENT_STORAGE_ROOT: /var/lib/openqms/attachments
+      AGENT_TASK_ATTACHMENT_CLAMAV_HOST: clamav
+      AGENT_TASK_ATTACHMENT_CLAMAV_PORT: "3310"
+      AGENT_ATTACHMENT_E2E_STORAGE_ROOT: /var/lib/openqms/attachments
+      AGENT_ATTACHMENT_E2E_CLAMAV_HOST: clamav
+      AGENT_ATTACHMENT_E2E_CLAMAV_PORT: "3310"
+    volumes:
+      - agent_attachment_e2e_storage:/var/lib/openqms/attachments
+      - agent_attachment_e2e_runtime:/var/run/openqms/agent-attachment-e2e
+    depends_on:
+      agent-attachment-e2e-db:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
 volumes:
   pgdata:
   neo4j_data:
   ollama_data:
+  agent_attachment_e2e_db:
+  agent_attachment_e2e_storage:
+  agent_attachment_e2e_runtime:
+  agent_attachment_clamav_definitions:

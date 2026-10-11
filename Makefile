@@ -119,7 +119,7 @@ DC_E2E := docker compose -f docker-compose.yml -f docker-compose.e2e.yml --profi
 # defaults in the override, so absence is fine.
 E2E_ENV := $(shell test -f .env.e2e && echo --env-file .env.e2e)
 
-.PHONY: e2e e2e-up e2e-seed e2e-down e2e-reset e2e-run
+.PHONY: e2e e2e-up e2e-seed e2e-down e2e-reset e2e-run agent-attachment-e2e
 
 e2e-up:
 	$(DC_E2E) $(E2E_ENV) up -d db redis
@@ -146,3 +146,18 @@ e2e-down:
 
 e2e-reset: e2e-down e2e-up
 	$(MAKE) e2e-seed
+
+# Actual-ClamAV attachment gate.  All containers, database and volumes are
+# namespaced by one random Compose project and removed even on test failure.
+agent-attachment-e2e:
+	@set -euo pipefail; \
+	project="openqms-agent-attachment-e2e-$$(date +%s)-$$RANDOM"; \
+	dc() { docker compose -p "$$project" --profile agent-attachment-e2e -f docker-compose.yml "$$@"; }; \
+	cleanup() { dc down --volumes --remove-orphans >/dev/null 2>&1 || true; }; \
+	trap cleanup EXIT; \
+	echo "agent-attachment-e2e project=$$project"; \
+	dc build agent-attachment-e2e; \
+	dc up -d agent-attachment-e2e-db clamav; \
+	dc exec -T clamav /bin/bash -ec 'exec 3<>/dev/tcp/127.0.0.1/3310; printf "zPING\\0zVERSIONCOMMANDS\\0" >&3; IFS= read -r -d "" pong <&3; IFS= read -r -d "" version <&3; [[ "$$pong" == PONG && "$$version" == ClamAV* ]]; printf "actual scanner version: %s\\n" "$$version"'; \
+	dc run --rm --no-deps agent-attachment-e2e; \
+	echo "agent-attachment-e2e exit=0 image=clamav/clamav@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c"

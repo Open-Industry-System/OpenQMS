@@ -1,11 +1,14 @@
 """Owned normal-policy infrastructure; no catalog/authority/delivery replacements."""
 import asyncio
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
 import os
+import struct
 from types import SimpleNamespace
 from uuid import uuid4
+import zlib
 
 from fastapi import FastAPI
 import httpx
@@ -28,6 +31,72 @@ from tests.services.agent_runtime.trial_support import WORKER_SHA256
 SUMMARY = 'capa.d4.summary.masked.v1'
 MARKER = 'BODY-MUST-NOT-LEAVE-D4-TRIAL'
 PASSWORD = 'owned-trial-bootstrap-password'
+
+
+@dataclass(frozen=True)
+class AttachmentE2ESamples:
+    eicar: bytes
+    encrypted_pdf: bytes
+    expansion_docx: bytes
+    clean_text: bytes
+
+
+def _zipcrypto_encrypt(payload: bytes, password: bytes) -> bytes:
+    """Build one deterministic encrypted DEFLATE member without test dependencies."""
+    key0, key1, key2 = 0x12345678, 0x23456789, 0x34567890
+
+    def crc32_byte(value: int, crc: int) -> int:
+        value = (crc ^ value) & 0xFF
+        for _ in range(8):
+            value = (value >> 1) ^ (0xEDB88320 if value & 1 else 0)
+        return ((crc >> 8) ^ value) & 0xFFFFFFFF
+
+    def update_keys(value: int) -> None:
+        nonlocal key0, key1, key2
+        key0 = crc32_byte(value, key0)
+        key1 = (key1 + (key0 & 0xFF)) * 134775813 + 1 & 0xFFFFFFFF
+        key2 = crc32_byte(key1 >> 24, key2)
+
+    def encrypt(value: int) -> int:
+        temp = key2 | 2
+        encrypted = value ^ ((temp * (temp ^ 1)) >> 8 & 0xFF)
+        update_keys(value)
+        return encrypted
+
+    for value in password:
+        update_keys(value)
+    compressed = zlib.compress(payload)[2:-4]
+    check_byte = zlib.crc32(payload).to_bytes(4, 'little')[-1]
+    encrypted = bytes(encrypt(value) for value in bytes(range(1, 12)) + bytes((check_byte,)) + compressed)
+    name = b'evidence.pdf'
+    crc = zlib.crc32(payload) & 0xFFFFFFFF
+    local = struct.pack('<IHHHHHIIIHH', 0x04034B50, 20, 1, 8, 0, 0, crc, len(encrypted), len(payload), len(name), 0)
+    central = struct.pack('<IHHHHHHIIIHHHHHII', 0x02014B50, 20, 20, 1, 8, 0, 0, crc, len(encrypted), len(payload),
+        len(name), 0, 0, 0, 0, 0, 0)
+    offset = len(local) + len(name) + len(encrypted)
+    end = struct.pack('<IHHHHIIH', 0x06054B50, 0, 0, 1, 1, len(central) + len(name), offset, 0)
+    return local + name + encrypted + central + name + end
+
+
+def attachment_e2e_samples() -> AttachmentE2ESamples:
+    """Return deterministic samples that a real ClamAV daemon must reject or allow."""
+    eicar = (
+        b'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+    )
+    encrypted_pdf = _zipcrypto_encrypt(b'%PDF-1.7\n% encrypted evidence fixture\n', b'openqms-e2e')
+    document = b'<w:document xmlns:w="urn:openqms">' + b'A' * (2 * 1024 * 1024) + b'</w:document>'
+    import io
+    import zipfile
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('[Content_Types].xml', '<Types/>')
+        archive.writestr('word/document.xml', document)
+    return AttachmentE2ESamples(
+        eicar=eicar,
+        encrypted_pdf=encrypted_pdf,
+        expansion_docx=stream.getvalue(),
+        clean_text=b'OpenQMS controlled attachment E2E clean fixture.\n',
+    )
 
 
 class OwnedTrial(SimpleNamespace):
