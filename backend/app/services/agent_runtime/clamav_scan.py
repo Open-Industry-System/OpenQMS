@@ -41,11 +41,8 @@ async def scan_stream(
     writer: asyncio.StreamWriter | None = None
     try:
         async with asyncio.timeout(timeout_seconds):
+            version = await _scanner_version(host, port)
             stream_reader, writer = await asyncio.open_connection(host, port)
-            writer.write(b"nVERSIONCOMMANDS\n")
-            await writer.drain()
-            version = await _version_commands(stream_reader)
-
             writer.write(b"nINSTREAM\n")
             async for chunk in _reader_chunks(reader):
                 if not isinstance(chunk, bytes):
@@ -66,6 +63,18 @@ async def scan_stream(
         raise exc.__cause__ from None
     except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError, TypeError, OverflowError):
         return ScanResult("unavailable", None, "scanner_unavailable")
+    finally:
+        if writer is not None:
+            writer.close()
+
+
+async def _scanner_version(host: str, port: int) -> str:
+    writer: asyncio.StreamWriter | None = None
+    try:
+        reader, writer = await asyncio.open_connection(host, port)
+        writer.write(b"nVERSIONCOMMANDS\n")
+        await writer.drain()
+        return await _version_commands(reader)
     finally:
         if writer is not None:
             writer.close()

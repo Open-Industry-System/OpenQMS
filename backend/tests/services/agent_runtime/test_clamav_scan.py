@@ -36,12 +36,12 @@ class StrictClamd:
         return {"host": host, "port": port, "timeout_seconds": 1}
 
     async def handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        self.version_command = await reader.readuntil(b"\n")
-        writer.write(self.version_reply)
-        await writer.drain()
-        try:
-            command = await reader.readuntil(b"\n")
-        except asyncio.IncompleteReadError:
+        command = await reader.readuntil(b"\n")
+        if command == b"nVERSIONCOMMANDS\n":
+            self.version_command = command
+            writer.write(self.version_reply)
+            await writer.drain()
+            await reader.read()
             return
         assert command == b"nINSTREAM\n"
         while True:
