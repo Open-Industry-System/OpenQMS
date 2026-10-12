@@ -27,10 +27,20 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
   const [message, setMessage] = useState("");
   const [withdrawn, setWithdrawn] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const operationController = useRef<AbortController | null>(null);
+  const controllers = useRef(new Set<AbortController>());
   const sessionRef = useRef("");
   const session = JSON.stringify([taskId, identity, credential, open, requestEpoch]);
   sessionRef.current = session;
+
+  const newController = () => {
+    const controller = new AbortController();
+    controllers.current.add(controller);
+    return controller;
+  };
+  const abortAll = () => {
+    controllers.current.forEach(controller => controller.abort());
+    controllers.current.clear();
+  };
 
   const clear = () => {
     setRows([]);
@@ -42,10 +52,10 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
   };
 
   useEffect(() => {
-    const controller = new AbortController();
-    operationController.current?.abort();
+    abortAll();
+    const controller = newController();
     clear();
-    if (!open || !taskId || !identity) return () => { controller.abort(); operationController.current?.abort(); };
+    if (!open || !taskId || !identity) return abortAll;
     const live = () => !controller.signal.aborted;
     void getAttachmentAvailability(taskId, controller.signal).then(async () => {
       if (!live()) return;
@@ -57,17 +67,16 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
       clear();
       if (denied(error)) setWithdrawn(true);
       else setMessage("附件暂不可用。");
-    });
-    return () => { controller.abort(); operationController.current?.abort(); };
+    }).finally(() => controllers.current.delete(controller));
+    return abortAll;
   // Every identity, task, credential, open-state, and epoch transition invalidates retained state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   async function upload() {
     if (!file || !enabled || pending) return;
-    const controller = new AbortController();
+    const controller = newController();
     const captured = session;
-    operationController.current = controller;
     setPending(true);
     setMessage("");
     try {
@@ -81,14 +90,14 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
       if (denied(error)) { clear(); setWithdrawn(true); }
       else setMessage("上传失败，请稍后重试。");
     } finally {
+      controllers.current.delete(controller);
       if (!controller.signal.aborted && captured === sessionRef.current) setPending(false);
     }
   }
 
   async function remove(attachmentId: string) {
-    const controller = new AbortController();
+    const controller = newController();
     const captured = session;
-    operationController.current = controller;
     try {
       await deleteTaskAttachment(taskId, attachmentId, controller.signal);
       if (controller.signal.aborted || captured !== sessionRef.current) return;
@@ -97,19 +106,22 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
       if (controller.signal.aborted || captured !== sessionRef.current) return;
       if (denied(error)) { clear(); setWithdrawn(true); }
       else setMessage("删除失败，请稍后重试。");
+    } finally {
+      controllers.current.delete(controller);
     }
   }
 
   async function download(attachmentId: string) {
-    const controller = new AbortController();
+    const controller = newController();
     const captured = session;
-    operationController.current = controller;
     try {
       await downloadTaskAttachment(taskId, attachmentId, controller.signal);
     } catch (error) {
       if (controller.signal.aborted || captured !== sessionRef.current) return;
       if (denied(error)) { clear(); setWithdrawn(true); }
       else setMessage("下载失败，请稍后重试。");
+    } finally {
+      controllers.current.delete(controller);
     }
   }
 
@@ -123,8 +135,8 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
     {file && <p>{file.name}</p>}
     <ul>{rows.map(item => <li key={item.attachment_id}>
       <span>{item.display_name ?? "未命名附件"} · {item.status}</span>
-      <Button disabled={item.status !== "available"} onClick={() => void download(item.attachment_id)}>下载</Button>
-      <Button disabled={pending} onClick={() => void remove(item.attachment_id)}>删除</Button>
+      <Button aria-label="下载" disabled={item.status !== "available"} onClick={() => void download(item.attachment_id)}>下载</Button>
+      <Button aria-label="删除" disabled={pending} onClick={() => void remove(item.attachment_id)}>删除</Button>
     </li>)}</ul>
     <p role="status" aria-live="polite">{message}</p>
   </section>;

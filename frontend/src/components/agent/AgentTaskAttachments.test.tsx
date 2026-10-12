@@ -54,4 +54,24 @@ describe("AgentTaskAttachments", () => {
     await waitFor(() => expect(screen.queryByText("任务私有附件")).toBeNull());
     expect(screen.queryByText("local.pdf")).toBeNull();
   });
+
+  it("aborts concurrent download and delete requests when the session changes", async () => {
+    let resolveDownload!: () => void;
+    let resolveDelete!: () => void;
+    vi.mocked(api.downloadTaskAttachment).mockReturnValue(new Promise<void>(resolve => { resolveDownload = resolve; }));
+    vi.mocked(api.deleteTaskAttachment).mockReturnValue(new Promise<void>(resolve => { resolveDelete = resolve; }));
+    const view = render(<AgentTaskAttachments taskId={taskId} identity="u1" credential="jwt" open requestEpoch={1} />);
+
+    await screen.findByRole("button", { name: "下载" });
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    const downloadSignal = vi.mocked(api.downloadTaskAttachment).mock.calls[0][2];
+    const deleteSignal = vi.mocked(api.deleteTaskAttachment).mock.calls[0][2];
+    view.rerender(<AgentTaskAttachments taskId={taskId} identity="u2" credential="jwt" open requestEpoch={2} />);
+
+    expect(downloadSignal?.aborted).toBe(true);
+    expect(deleteSignal?.aborted).toBe(true);
+    resolveDownload();
+    resolveDelete();
+  });
 });
