@@ -6,17 +6,26 @@ vi.mock("./client", () => ({ default: { get: vi.fn(), post: vi.fn(), delete: vi.
 
 const taskId = "00000000-0000-4000-8000-000000000001";
 const attachmentId = "00000000-0000-4000-8000-000000000002";
+// Matches backend app.schemas.agent_attachment.AttachmentOut exactly.
 const attachment = {
   attachment_id: attachmentId,
   display_name: "clean.pdf",
+  extension: "pdf",
   byte_size: 42,
   status: "available",
-  scanned_at: "2026-10-12T00:00:00Z",
+  created_at: "2026-10-12T00:00:00Z",
+  updated_at: "2026-10-12T00:00:01Z",
   expires_at: "2026-10-13T00:00:00Z"
 };
 
 describe("controlled task attachment API", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("accepts the exact real backend attachment metadata", async () => {
+    vi.mocked(client.post).mockResolvedValue({ data: attachment });
+
+    await expect(uploadTaskAttachment(taskId, new File(["safe"], "clean.pdf"))).resolves.toEqual(attachment);
+  });
 
   it("sends only the file multipart field after availability is explicitly requested", async () => {
     vi.mocked(client.get).mockResolvedValue({ data: { enabled: true } });
@@ -36,7 +45,7 @@ describe("controlled task attachment API", () => {
 
   it("rejects unknown or malformed attachment metadata before returning it", async () => {
     vi.mocked(client.get).mockResolvedValueOnce({ data: { items: [{ ...attachment, unsafe: "no" }] } })
-      .mockResolvedValueOnce({ data: { items: [{ ...attachment, scanned_at: "not-a-date" }] } });
+      .mockResolvedValueOnce({ data: { items: [{ ...attachment, extension: "PDF" }] } });
 
     await expect(listTaskAttachments(taskId)).rejects.toThrow("Invalid Agent attachment response");
     await expect(listTaskAttachments(taskId)).rejects.toThrow("Invalid Agent attachment response");

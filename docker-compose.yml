@@ -162,6 +162,36 @@ services:
       clamav:
         condition: service_healthy
 
+  agent-attachment-browser-backend:
+    build: ./backend
+    profiles: ["agent-attachment-e2e"]
+    command: >-
+      /bin/sh -ec 'chmod 0700 /var/lib/openqms/attachments && alembic upgrade head && uvicorn tests.e2e.agent_task_attachment_browser_app:acceptance_app --host 0.0.0.0 --port 8000'
+    ports:
+      - "127.0.0.1:8008:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@agent-attachment-e2e-db:5432/openqms_agent_attachment_test
+      SECRET_KEY: agent-attachment-e2e-secret
+      AGENT_TASK_RUNTIME_ENABLED: "true"
+      AGENT_TASK_ATTACHMENTS_ENABLED: "true"
+      AGENT_TASK_ATTACHMENT_STORAGE_ROOT: /var/lib/openqms/attachments
+      AGENT_TASK_ATTACHMENT_CLAMAV_HOST: clamav
+      AGENT_TASK_ATTACHMENT_CLAMAV_PORT: "3310"
+      AGENT_ATTACHMENT_BROWSER_NONCE: ${AGENT_ATTACHMENT_BROWSER_NONCE:?set by make agent-attachment-e2e}
+    volumes:
+      - agent_attachment_e2e_storage:/var/lib/openqms/attachments
+      - agent_attachment_e2e_runtime:/var/run/openqms/agent-attachment-e2e
+    depends_on:
+      agent-attachment-e2e-db:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/docs')"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
 volumes:
   pgdata:
   neo4j_data:

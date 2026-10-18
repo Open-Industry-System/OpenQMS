@@ -12,6 +12,10 @@
 
 ## 顺序与交付门槛
 
+**2026-10-18 R4b-2 更新**：受控任务附件保持双默认关闭，采用单节点私有卷、后端受权流式 ClamAV 与无直链下载。真实验收必须运行 pinned `clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c`，同时覆盖 clean 实际下载字节、EICAR、scanner unavailable、撤权和浏览器状态撤回；不以 mock scan/permission 声称通过。browser bridge 只发布 loopback backend HTTP，扫描器不发布端口；临时 Compose project/volumes 须清理。对象存储、生产启用、多节点和 tenant destruction 仍未获批，详见[附件操作指南](../../development/agent-task-attachments.md)。
+
+## 顺序与交付门槛
+
 | 切片 | 独立交付物 | 进入下一片的必要证据 |
 |---|---|---|
 | R0 设计与基线 | 审核任务/插件设计、确认 PR #24 权限内核作为依赖；冻结 HTTP v1、首版 Python SDK、任务/运行/消息 ID 与租户凭据契约 | 接口规格经过评审；与现有 `AgentSession`/`gateway` 并行而无第二条无门禁写路径 |

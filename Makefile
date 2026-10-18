@@ -152,11 +152,13 @@ e2e-reset: e2e-down e2e-up
 agent-attachment-e2e:
 	@set -euo pipefail; \
 	project="openqms-agent-attachment-e2e-$$(date +%s)-$$RANDOM"; \
+	nonce="$$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"; \
+	export AGENT_ATTACHMENT_BROWSER_NONCE="$$nonce"; \
 	dc() { docker compose -p "$$project" --profile agent-attachment-e2e -f docker-compose.yml "$$@"; }; \
 	cleanup() { dc down --volumes --remove-orphans >/dev/null 2>&1 || true; }; \
 	trap cleanup EXIT; \
 	echo "agent-attachment-e2e project=$$project"; \
-	dc build agent-attachment-e2e; \
+	dc build agent-attachment-e2e agent-attachment-browser-backend; \
 	if ! dc up -d --wait --wait-timeout 180 clamav agent-attachment-e2e-db; then \
 	  echo "agent-attachment-e2e dependency readiness failed" >&2; \
 	  dc ps >&2; \
@@ -164,4 +166,8 @@ agent-attachment-e2e:
 	  exit 1; \
 	fi; \
 	dc run --rm --no-deps agent-attachment-e2e; \
-	echo "agent-attachment-e2e exit=0 image=clamav/clamav@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c"
+	dc up -d --wait --wait-timeout 90 agent-attachment-browser-backend; \
+	AGENT_ATTACHMENT_BROWSER_BACKEND=http://127.0.0.1:8008 AGENT_ATTACHMENT_BROWSER_NONCE="$$nonce" \
+	  TEST_DATABASE_URL=postgresql+asyncpg://qms:qms@127.0.0.1:1/openqms_attachment_browser_controller_test \
+	  PYTHONPATH="$(CURDIR)/backend" $(PYTEST) $(CURDIR)/backend/tests/e2e/test_agent_task_attachment_browser.py -q; \
+	echo "agent-attachment-e2e exit=0 image=clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c"

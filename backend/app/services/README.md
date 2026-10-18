@@ -1,5 +1,7 @@
 # services/
 
+> `agent_runtime/task_attachments.py` implements the default-off private attachment lifecycle, current-authority rechecks, ClamAV gate, recovery and disposal constraints. Operations: [agent task attachments](../../../docs/development/agent-task-attachments.md).
+
 ## Responsibility
 
 Business logic layer. API handlers stay thin and delegate every non-trivial

@@ -13,9 +13,11 @@ const attachment = (value: unknown): value is AgentTaskAttachment => {
   const fields: Record<keyof AgentTaskAttachment, Check> = {
     attachment_id: uuid,
     display_name: nullable(value => typeof value === "string" && value.length > 0 && value.length <= 255),
+    extension: nullable(value => typeof value === "string" && /^[a-z0-9]+$/.test(value) && value.length <= 16),
     byte_size: nullable(value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0),
     status: attachmentStatus,
-    scanned_at: nullable(date),
+    created_at: date,
+    updated_at: date,
     expires_at: date,
   };
   return Object.keys(input).length === Object.keys(fields).length

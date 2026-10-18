@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-18 R4b-2 controlled attachments**：default-off private attachment boundary、pinned actual ClamAV process evidence and host-Chromium browser bridge are added on the Agent runtime branch. The bridge maps only backend HTTP to `127.0.0.1:8008`; ClamAV remains internal. Final evidence must record the real image/definition version, focused exits and owned random Compose cleanup; object storage, production enablement, multi-node support and tenant destruction remain unapproved. See `docs/development/agent-task-attachments.md`.
+
 **更新日期**: 2026-10-07
 **当前分支**: `feature/agent-task-runtime-foundation`
 **基线**: `7503e9e5`（独立工作树，未合入主工作区）

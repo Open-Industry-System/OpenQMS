@@ -1,5 +1,7 @@
 # 架构概览
 
+> R4b-2 受控任务附件采用单节点私有卷、后端流式 ClamAV 与无直链下载；拓扑和未批准的生产边界见[操作指南](development/agent-task-attachments.md)。
+
 本文档描述 OpenQMS 的系统架构、权限模型、数据流和开发约定。
 
 ---

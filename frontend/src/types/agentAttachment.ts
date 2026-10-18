@@ -11,8 +11,10 @@ export type AttachmentStatus =
 export interface AgentTaskAttachment {
   attachment_id: string;
   display_name: string | null;
+  extension: string | null;
   byte_size: number | null;
   status: AttachmentStatus;
-  scanned_at: string | null;
+  created_at: string;
+  updated_at: string;
   expires_at: string;
 }

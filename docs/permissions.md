@@ -1,5 +1,7 @@
 # OpenQMS 权限参考
 
+> R4b-2 任务私有附件始终重查当前任务/CAPA VIEW、本人任务身份与工厂/产品线范围；下载不产生直链，操作约束见[附件指南](development/agent-task-attachments.md)。
+
 > 最后更新: 2026-10-01（Agent 任务权限补充） | 基于代码库权限模型（ModuleKey × PermissionLevel × Role）
 
 ---
