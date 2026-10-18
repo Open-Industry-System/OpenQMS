@@ -111,11 +111,21 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
     }
   }
 
-  async function download(attachmentId: string) {
+  async function download(item: AgentTaskAttachment) {
     const controller = newController();
     const captured = session;
     try {
-      await downloadTaskAttachment(taskId, attachmentId, controller.signal);
+      const blob = await downloadTaskAttachment(taskId, item.attachment_id, controller.signal);
+      if (controller.signal.aborted || captured !== sessionRef.current) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = item.display_name ?? "attachment";
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch (error) {
       if (controller.signal.aborted || captured !== sessionRef.current) return;
       if (denied(error)) { clear(); setWithdrawn(true); }
@@ -135,7 +145,7 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
     {file && <p>{file.name}</p>}
     <ul>{rows.map(item => <li key={item.attachment_id}>
       <span>{item.display_name ?? "未命名附件"} · {item.status}</span>
-      <Button aria-label="下载" disabled={item.status !== "available"} onClick={() => void download(item.attachment_id)}>下载</Button>
+      <Button aria-label="下载" disabled={item.status !== "available"} onClick={() => void download(item)}>下载</Button>
       <Button aria-label="删除" disabled={pending} onClick={() => void remove(item.attachment_id)}>删除</Button>
     </li>)}</ul>
     <p role="status" aria-live="polite">{message}</p>

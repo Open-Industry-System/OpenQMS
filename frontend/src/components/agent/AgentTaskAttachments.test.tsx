@@ -56,9 +56,9 @@ describe("AgentTaskAttachments", () => {
   });
 
   it("aborts concurrent download and delete requests when the session changes", async () => {
-    let resolveDownload!: () => void;
+    let resolveDownload!: (value: Blob) => void;
     let resolveDelete!: () => void;
-    vi.mocked(api.downloadTaskAttachment).mockReturnValue(new Promise<void>(resolve => { resolveDownload = resolve; }));
+    vi.mocked(api.downloadTaskAttachment).mockReturnValue(new Promise<Blob>(resolve => { resolveDownload = resolve; }));
     vi.mocked(api.deleteTaskAttachment).mockReturnValue(new Promise<void>(resolve => { resolveDelete = resolve; }));
     const view = render(<AgentTaskAttachments taskId={taskId} identity="u1" credential="jwt" open requestEpoch={1} />);
 
@@ -71,7 +71,22 @@ describe("AgentTaskAttachments", () => {
 
     expect(downloadSignal?.aborted).toBe(true);
     expect(deleteSignal?.aborted).toBe(true);
-    resolveDownload();
+    resolveDownload(new Blob());
     resolveDelete();
+  });
+
+  it("triggers one-time download and revokes its object URL", async () => {
+    const blob = new Blob(["clean"]);
+    vi.mocked(api.downloadTaskAttachment).mockResolvedValue(blob);
+    const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:attachment");
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<AgentTaskAttachments taskId={taskId} identity="u1" credential="jwt" open requestEpoch={1} />);
+
+    await screen.findByRole("button", { name: "下载" });
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    await waitFor(() => expect(create).toHaveBeenCalledWith(blob));
+    expect(click).toHaveBeenCalledOnce();
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:attachment"));
   });
 });

@@ -51,8 +51,10 @@ export async function listTaskAttachments(taskId: string, signal?: AbortSignal):
   return { items: (value as { items: unknown[] }).items.map(parse) };
 }
 
-export async function downloadTaskAttachment(taskId: string, attachmentId: string, signal?: AbortSignal): Promise<void> {
-  await client.get(`${base(taskId)}/${attachmentId}/download`, { signal, responseType: "blob" });
+export async function downloadTaskAttachment(taskId: string, attachmentId: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await client.get(`${base(taskId)}/${attachmentId}/download`, { signal, responseType: "blob" });
+  if (!(response.data instanceof Blob)) throw new Error("Invalid Agent attachment download");
+  return response.data;
 }
 
 export async function deleteTaskAttachment(taskId: string, attachmentId: string, signal?: AbortSignal): Promise<void> {
