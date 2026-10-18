@@ -496,7 +496,7 @@ Expected: FAIL because attachment API/types/component are absent.
 
 - [ ] **Step 3: Implement strict client DTO validation.**
 
-Follow `agentTasks.ts` exact-key runtime validation. POST only `FormData` with `file`; never attach task/factory/tenant/scan fields. Downloads request the authenticated endpoint as a browser attachment response, not a constructed URL; do not create a preview, `FileReader`, blob URL, or persistent storage.
+Follow `agentTasks.ts` exact-key runtime validation. POST only `FormData` with `file`; never attach task/factory/tenant/scan fields. Downloads request the authenticated endpoint, never a constructed server URL. Per the user's explicit 2026-10-18 exception, an authorized Blob may be delivered using a one-time object URL and temporary download anchor; revoke promptly, ignore stale/cancelled responses, and never preview, persist, or reuse the URL. `FileReader` and browser persistence remain forbidden.
 
 - [ ] **Step 4: Implement isolated panel and sidebar mounting.**
 
