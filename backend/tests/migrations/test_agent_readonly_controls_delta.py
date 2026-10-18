@@ -20,7 +20,9 @@ from app.services.tenant_schema_diff import compare_business_schema, load_snapsh
 from tests.migrations.test_agent_task_core import _migration_config, _sync_engine
 
 PUBLIC = "20261001_agent_readonly_controls"
-LATEST = "tv004_agent_readonly_controls"
+CONTROLS_TENANT = "tv004_agent_readonly_controls"
+LATEST = "tv005_agent_task_attachments"
+HEAD = "20261009_agent_task_attachments"
 PARENT = "20260930_agent_readonly_delivery"
 TABLES = {"agent_task_controls", "agent_readonly_checkpoints", "agent_checkpoint_receipts", "agent_task_updates"}
 COLUMNS = {
@@ -50,12 +52,18 @@ def test_models_register_exact_control_shapes_and_python_uuid_defaults():
 
 def test_reviewed_heads_and_static_equivalent_deltas(mig_db_url):
     from alembic_tenant import REVIEWED_REVISIONS
-    assert ScriptDirectory.from_config(_migration_config(mig_db_url)).get_heads() == [PUBLIC]
-    assert REVIEWED_REVISIONS == ("tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery", LATEST)
+    assert ScriptDirectory.from_config(_migration_config(mig_db_url)).get_heads() == [HEAD]
+    assert REVIEWED_REVISIONS == (
+        "tv001_business_snapshot",
+        "tv002_agent_task_core",
+        "tv003_agent_readonly_delivery",
+        CONTROLS_TENANT,
+        LATEST,
+    )
     root = Path(__file__).resolve().parents[2]
     public = (root / "alembic/versions/20261001_agent_readonly_controls.py").read_text()
     tenant = (root / "alembic_tenant/versions/tv004_agent_readonly_controls.py").read_text()
-    assert public.replace(PUBLIC, LATEST).replace(PARENT, "tv003_agent_readonly_delivery") == tenant
+    assert public.replace(PUBLIC, CONTROLS_TENANT).replace(PARENT, "tv003_agent_readonly_delivery") == tenant
 
 
 def _seed_history(conn, schema="public", runtime=True, outputs=True):
@@ -126,7 +134,7 @@ def test_public_populated_delta_backfill_and_downgrade_preserve_original_rows(mi
         command.upgrade(config,"head")
         with engine.connect() as conn:
             assert TABLES <= set(sa.inspect(conn).get_table_names())
-            assert conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == PUBLIC
+            assert conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == HEAD
             assert _history_rows(conn,"public") == before
             _assert_backfill(conn,"public",ids)
             _assert_backfill(conn,"public",second_ids)
