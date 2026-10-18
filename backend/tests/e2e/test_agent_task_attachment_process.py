@@ -58,13 +58,38 @@ class ActualAttachmentStack:
         return sorted(path for path in self.storage_root.rglob("*") if path.is_file() and "clean" in path.parts)
 
 
+def _actual_attachment_e2e_environment() -> dict[str, str]:
+    names = (
+        "AGENT_ATTACHMENT_E2E_STORAGE_ROOT",
+        "AGENT_ATTACHMENT_E2E_CLAMAV_HOST",
+        "AGENT_ATTACHMENT_E2E_CLAMAV_PORT",
+    )
+    missing = [name for name in names if not os.environ.get(name)]
+    if missing:
+        pytest.skip("actual ClamAV attachment E2E requires `make agent-attachment-e2e`")
+    return {name: os.environ[name] for name in names}
+
+
+def test_actual_attachment_stack_requires_compose_opt_in(monkeypatch):
+    for name in (
+        "AGENT_ATTACHMENT_E2E_STORAGE_ROOT",
+        "AGENT_ATTACHMENT_E2E_CLAMAV_HOST",
+        "AGENT_ATTACHMENT_E2E_CLAMAV_PORT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    with pytest.raises(pytest.skip.Exception, match="make agent-attachment-e2e"):
+        _actual_attachment_e2e_environment()
+
+
 @pytest_asyncio.fixture
 async def actual_attachment_stack(committed_runtime, monkeypatch):
     """A fixture-owned tenant, private volume root, and real Compose scanner."""
     import app.database as database
 
     owned = committed_runtime
-    storage_root = Path(os.environ["AGENT_ATTACHMENT_E2E_STORAGE_ROOT"])
+    e2e_environment = _actual_attachment_e2e_environment()
+    storage_root = Path(e2e_environment["AGENT_ATTACHMENT_E2E_STORAGE_ROOT"])
     assert storage_root.is_absolute()
     assert not storage_root.exists() or not any(storage_root.iterdir())
 
@@ -81,8 +106,8 @@ async def actual_attachment_stack(committed_runtime, monkeypatch):
     monkeypatch.setattr(settings, "AGENT_TASK_RUNTIME_ENABLED", True)
     monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENTS_ENABLED", True)
     monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_STORAGE_ROOT", str(storage_root))
-    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_HOST", os.environ["AGENT_ATTACHMENT_E2E_CLAMAV_HOST"])
-    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_PORT", int(os.environ["AGENT_ATTACHMENT_E2E_CLAMAV_PORT"]))
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_HOST", e2e_environment["AGENT_ATTACHMENT_E2E_CLAMAV_HOST"])
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_PORT", int(e2e_environment["AGENT_ATTACHMENT_E2E_CLAMAV_PORT"]))
     monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS", 30)
     token = create_access_token({"sub": str(user.user_id), "tenant_id": str(owned.binding.tenant_id)})
     headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": tenant_slug}

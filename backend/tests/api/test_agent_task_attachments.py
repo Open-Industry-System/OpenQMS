@@ -253,7 +253,27 @@ async def test_attachment_lifecycle_exposes_only_safe_metadata_and_descriptor_do
             assert (stored.display_name, stored.extension, stored.declared_content_type) == (
                 "EVIDENCE.TxT", "txt", "application/octet-stream",
             )
-        assert (await client.get(base)).json()["items"] == [attachment]
+        listed = (await client.get(base)).json()["items"]
+        failed, listed_attachment = listed[:-1], listed[-1]
+        assert len(failed) == 3
+        assert all(set(item) == set(attachment) for item in failed)
+        assert [
+            {
+                "display_name": item["display_name"],
+                "extension": item["extension"],
+                "byte_size": item["byte_size"],
+                "status": item["status"],
+            }
+            for item in failed
+        ] == [
+            {
+                "display_name": None,
+                "extension": None,
+                "byte_size": None,
+                "status": "failed_storage",
+            }
+        ] * 3
+        assert listed_attachment == attachment
 
         downloaded = await client.get(base + "/" + attachment["attachment_id"] + "/download")
         assert downloaded.status_code == 200 and downloaded.content == b"x" * 5
@@ -264,7 +284,9 @@ async def test_attachment_lifecycle_exposes_only_safe_metadata_and_descriptor_do
 
         deleted = await client.delete(base + "/" + attachment["attachment_id"])
         assert deleted.status_code == 204
-        assert (await client.get(base)).json()["items"][0]["status"] == "purged"
+        after_delete = (await client.get(base)).json()["items"]
+        assert [item["status"] for item in after_delete] == ["failed_storage"] * 3 + ["purged"]
+        assert after_delete[-1]["attachment_id"] == attachment["attachment_id"]
 
 
 @pytest.mark.asyncio

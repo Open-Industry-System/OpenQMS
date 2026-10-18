@@ -149,3 +149,61 @@ def test_attachment_generation_pair_and_status_are_constrained(mig_db_url):
             invalid_status.rollback()
     finally:
         engine.dispose()
+
+
+def test_attachment_disposal_reason_and_namespace_are_constrained(mig_db_url):
+    config = _migration_config(mig_db_url)
+    command.upgrade(config, REVISION)
+
+    engine = _sync_engine(mig_db_url)
+    try:
+        with engine.begin() as connection:
+            namespace = "tenant-disposal-test"
+            tenant_id = uuid4()
+
+            invalid_reason = connection.begin_nested()
+            with pytest.raises(IntegrityError, match="ck_tenant_attachment_disposal_reason"):
+                connection.execute(
+                    sa.text(
+                        """INSERT INTO tenant_attachment_storage_disposals
+                        (disposal_id, tenant_id, origin_generation, storage_namespace, reason)
+                        VALUES (:disposal_id, :tenant_id, 1, :storage_namespace, 'maintenance')"""
+                    ),
+                    {
+                        "disposal_id": uuid4(),
+                        "tenant_id": tenant_id,
+                        "storage_namespace": namespace,
+                    },
+                )
+            invalid_reason.rollback()
+
+            connection.execute(
+                sa.text(
+                    """INSERT INTO tenant_attachment_storage_disposals
+                    (disposal_id, tenant_id, origin_generation, storage_namespace, reason)
+                    VALUES (:disposal_id, :tenant_id, 1, :storage_namespace, 'test_rebuild')"""
+                ),
+                {
+                    "disposal_id": uuid4(),
+                    "tenant_id": tenant_id,
+                    "storage_namespace": namespace,
+                },
+            )
+
+            duplicate_namespace = connection.begin_nested()
+            with pytest.raises(IntegrityError, match="uq_tenant_attachment_disposal_namespace"):
+                connection.execute(
+                    sa.text(
+                        """INSERT INTO tenant_attachment_storage_disposals
+                        (disposal_id, tenant_id, origin_generation, storage_namespace, reason)
+                        VALUES (:disposal_id, :tenant_id, 1, :storage_namespace, 'tenant_destroyed')"""
+                    ),
+                    {
+                        "disposal_id": uuid4(),
+                        "tenant_id": tenant_id,
+                        "storage_namespace": namespace,
+                    },
+                )
+            duplicate_namespace.rollback()
+    finally:
+        engine.dispose()
