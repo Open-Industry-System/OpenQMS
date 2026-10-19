@@ -18,20 +18,22 @@ from sqlalchemy import select, update
 
 from app.config import settings
 from app.core.permissions import Module, PermissionLevel
+from app.core.security import hash_password
 from app.core.tenant_transaction import TenantBinding
 from app.database import async_session, tenant_async_session
 from app.main import app
 from app.models.agent_task import AgentRun, AgentTask
 from app.models.capa import CAPAEightD
+from app.models.factory import UserFactory
 from app.models.product_line import ProductLine
-from app.models.role import RolePermission
+from app.models.role import RolePermission, UserProductLine
 from app.models.user import User
 from app.schemas.platform import TenantCreateRequest
 from app.services import tenant_migrator
 from app.services.agent_runtime.plugin_registry import register_plugin
 
 PASSWORD = "attachment-browser-owned-password"
-state = SimpleNamespace(nonce=os.environ.get("AGENT_ATTACHMENT_BROWSER_NONCE") or token_urlsafe(24), tenant=None, binding=None, user=None, task=None, report=None)
+state = SimpleNamespace(nonce=os.environ.get("AGENT_ATTACHMENT_BROWSER_NONCE") or token_urlsafe(24), tenant=None, binding=None, user=None, second_user=None, task=None, report=None)
 _original_lifespan = app.router.lifespan_context
 
 
@@ -50,6 +52,13 @@ async def _lifespan(application):
             user = await db.scalar(select(User).where(User.email == "attachment-browser@example.test"))
             line = await db.scalar(select(ProductLine))
             assert user is not None and line is not None
+            second_user = User(username="attachment-browser-second", display_name="Attachment browser second",
+                password_hash=hash_password(PASSWORD), role_id=user.role_id, legacy_role=user.legacy_role,
+                factory_id=line.factory_id, is_active=True)
+            db.add(second_user)
+            await db.flush()
+            db.add(UserFactory(user_id=second_user.user_id, factory_id=line.factory_id))
+            db.add(UserProductLine(user_id=second_user.user_id, product_line_code=line.code))
             plugin, _ = await register_plugin(db, user, "attachment-browser-owned", "1.0.0", {"protocol_versions": ["1"]})
             plugin.enabled = True
             report = CAPAEightD(document_no="8D-ATTACHMENT-BROWSER", title="Attachment browser target",
@@ -64,7 +73,7 @@ async def _lifespan(application):
             db.add(AgentRun(task_id=task.task_id, installation_id=plugin.installation_id, plugin_version="1.0.0",
                 status="active", lease_expires_at=datetime.now(UTC) + timedelta(minutes=5)))
             await db.commit()
-            state.tenant, state.binding, state.user, state.task, state.report = tenant, binding, user, task, report
+            state.tenant, state.binding, state.user, state.second_user, state.task, state.report = tenant, binding, user, second_user, task, report
         try:
             yield
         finally:
@@ -87,7 +96,7 @@ def _require(request: Request) -> None:
 async def config(request: Request):
     _require(request)
     return {"nonce": state.nonce, "tenant": state.tenant.slug, "username": state.user.username,
-        "password": PASSWORD, "task_id": str(state.task.task_id), "report_id": str(state.report.report_id)}
+        "second_username": state.second_user.username, "password": PASSWORD, "task_id": str(state.task.task_id), "report_id": str(state.report.report_id)}
 
 
 @acceptance_app.post("/__agent_attachment_acceptance/{action}")
@@ -99,6 +108,12 @@ async def mutate(action: str, request: Request):
     if action == "on":
         settings.AGENT_TASK_ATTACHMENTS_ENABLED = True
         return {"attachments": "on"}
+    if action == "task-withdraw":
+        async with tenant_async_session(binding=state.binding) as db:
+            await db.execute(update(AgentTask).where(AgentTask.task_id == state.task.task_id).values(
+                initiator_id=state.second_user.user_id, executor_user_id=state.second_user.user_id))
+            await db.commit()
+        return {"task_withdrawn": True}
     if action == "withdraw":
         async with tenant_async_session(binding=state.binding) as db:
             await db.execute(update(RolePermission).where(RolePermission.role_id == state.user.role_id,

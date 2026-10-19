@@ -152,6 +152,43 @@ def test_public_populated_delta_backfill_and_downgrade_preserve_original_rows(mi
 
 
 @pytest.mark.asyncio
+async def test_tv002_to_tv005_to_tv002_to_tv005_preserves_two_historical_task_histories(mig_db_url, monkeypatch):
+    """Exercise the exact reviewed tenant path without changing frozen migrations."""
+    config = _migration_config(mig_db_url)
+    await asyncio.to_thread(command.upgrade, config, "20260926_agent_task_core")
+    engine = create_async_engine(mig_db_url, poolclass=NullPool)
+    monkeypatch.setattr(tenant_migrator, "engine", engine)
+    monkeypatch.setattr(tenant_migrator, "REVISION", "tv002_agent_task_core")
+    try:
+        tenant = await tenant_migrator.provision_new(TenantCreateRequest(
+            name="R3 tv002 cycle", slug="r3v2-" + uuid.uuid4().hex[:12],
+            admin_email="r3v2@example.test", admin_password="R3TestPassword123",
+        ))
+        async with engine.begin() as conn:
+            first = await conn.run_sync(lambda sync: _seed_history(sync, tenant.schema_name, True, False))
+            second = await conn.run_sync(lambda sync: _seed_history(sync, tenant.schema_name, True, False))
+            before = await conn.run_sync(lambda sync: _history_rows(sync, tenant.schema_name, True, False))
+        await asyncio.to_thread(command.upgrade, config, "head")
+        monkeypatch.setattr(tenant_migrator, "REVISION", LATEST)
+        tenant = await tenant_migrator.resume_tenant(tenant.id)
+        async with engine.connect() as conn:
+            assert await conn.scalar(sa.text(f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == LATEST
+            assert await conn.run_sync(lambda sync: _history_rows(sync, tenant.schema_name, True, False)) == before
+            await conn.run_sync(lambda sync: _assert_backfill(sync, tenant.schema_name, first, True, False))
+            await conn.run_sync(lambda sync: _assert_backfill(sync, tenant.schema_name, second, True, False))
+        async with tenant_migrator.maintenance_connection(engine, tenant.id) as maintenance:
+            await maintenance.run_downgrade("tv002_agent_task_core")
+            await maintenance.run_migration(LATEST)
+            assert await maintenance.compare_schema("public", load_snapshot_manifest()) == []
+        async with engine.connect() as conn:
+            assert await conn.run_sync(lambda sync: _history_rows(sync, tenant.schema_name, True, False)) == before
+            await conn.run_sync(lambda sync: _assert_backfill(sync, tenant.schema_name, first, True, False))
+            await conn.run_sync(lambda sync: _assert_backfill(sync, tenant.schema_name, second, True, False))
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("ancestor,public_head,runtime,outputs", [
     ("tv001_business_snapshot","20260927_tenant_attempt",False,False),
     ("tv002_agent_task_core","20260926_agent_task_core",True,False),

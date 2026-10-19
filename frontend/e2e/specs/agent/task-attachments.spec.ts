@@ -91,14 +91,45 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
   expect(await (await scannerResponse).json()).toEqual({ detail: "ATTACHMENT_SCANNER_UNAVAILABLE" });
   await acceptance(page, "scanner-restore", config.nonce);
 
-  await file.setInputFiles({ name: "discard.txt", mimeType: "text/plain", buffer: Buffer.from(clean) });
-  await expect(page.getByText("discard.txt", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "关闭任务侧栏" }).click();
+  await file.setInputFiles({ name: "revoked.txt", mimeType: "text/plain", buffer: Buffer.from(clean) });
+  await expect(page.getByText("revoked.txt", { exact: true })).toBeVisible();
+  await acceptance(page, "task-withdraw", config.nonce);
+  const capaStillVisible = await page.request.get(`${backend}/api/capa/${config.report_id}`, {
+    headers: { Authorization: `Bearer ${tokens.access_token}`, "X-Tenant-ID": config.tenant },
+  });
+  expect(capaStillVisible.status()).toBe(200);
+  let downloadStarted!: () => void;
+  const deniedDownloadStarted = new Promise<void>(resolve => { downloadStarted = resolve; });
+  let releaseDeniedDownload!: () => void;
+  const deniedDownloadReleased = new Promise<void>(resolve => { releaseDeniedDownload = resolve; });
+  await page.route(`**/api/agent/tasks/${config.task_id}/attachments/*/download`, async route => {
+    const response = await route.fetch(); // real current-authority denial after task-only withdrawal
+    expect(response.status()).toBe(404);
+    downloadStarted();
+    await deniedDownloadReleased;
+    await route.fulfill({ response });
+  });
+  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await deniedDownloadStarted;
+
+  // A second real login remounts the provider by identity. User B retains CAPA
+  // VIEW and is now the task identity; User A's held 404 must not clear B's rows.
+  await page.goto("/login");
+  await page.locator("input").nth(0).fill(config.second_username);
+  await page.locator("input").nth(1).fill(config.password);
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.goto(`/capa/${config.report_id}`);
   await page.getByRole("button", { name: "Agent 任务", exact: true }).click();
-  await expect(page.getByText("discard.txt", { exact: true })).toHaveCount(0);
-  await acceptance(page, "withdraw", config.nonce);
-  await page.getByRole("button", { name: "关闭任务侧栏" }).click();
-  await page.getByRole("button", { name: "Agent 任务", exact: true }).click();
+  const secondChooser = page.getByRole("combobox", { name: "选择任务" });
+  await expect(secondChooser).toHaveValue("");
   await expect(page.getByText("任务私有附件", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("clean.txt", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("revoked.txt", { exact: true })).toHaveCount(0);
+  await secondChooser.selectOption(config.task_id);
+  await expect(page.getByText("任务私有附件", { exact: true })).toBeVisible();
+  await expect(page.getByText("clean.txt · available", { exact: true })).toBeVisible();
+  releaseDeniedDownload();
+  await expect(page.getByText("clean.txt · available", { exact: true })).toBeVisible();
+  await expect(page.getByText("revoked.txt", { exact: true })).toHaveCount(0);
+  await page.unroute(`**/api/agent/tasks/${config.task_id}/attachments/*/download`);
 });
