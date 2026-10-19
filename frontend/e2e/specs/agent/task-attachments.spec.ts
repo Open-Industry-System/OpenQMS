@@ -140,6 +140,7 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
     const { useAuthStore } = await import(/* @vite-ignore */ modulePath);
     await useAuthStore.getState().login(username, password);
   }, { username: config.second_username, password: config.password });
+  await page.getByRole("button", { name: "Agent 任务", exact: true }).click();
   const secondChooser = page.getByRole("combobox", { name: "选择任务" });
   await expect(secondChooser.locator(`option[value="${config.task_id}"]`)).toBeAttached();
   await expect(secondChooser).toHaveValue("");
