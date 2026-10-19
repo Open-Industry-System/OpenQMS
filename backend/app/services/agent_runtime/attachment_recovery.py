@@ -99,7 +99,7 @@ async def _ensure_expiry_audit(db: AsyncSession, attachment: AgentTaskAttachment
             action="AGENT_TASK_ATTACHMENT_EXPIRED",
             operated_by=None,
             factory_id=attachment.factory_id,
-            changed_fields={"status": "purged", "actor": "system", "reason": "expired"},
+            changed_fields={"status": "purging", "actor": "system", "reason": "expired"},
         ))
 
 
@@ -127,6 +127,7 @@ async def _reconcile_live_namespace_unlocked(
             # Persist both purge authority and its system audit before bytes move.
             # A later filesystem failure leaves a durable, retryable purging row.
             attachment.status = "purging"
+            attachment.failure_code = "expired"
             await _ensure_expiry_audit(db, attachment)
             await db.commit()
             _discard_inflight(storage, namespace, attachment.attachment_id)
@@ -159,10 +160,11 @@ async def _reconcile_live_namespace_unlocked(
                 attachment.reservation_expires_at = None
                 failed_promoting += 1
         elif attachment.status == "purging":
-            # Handles a crash/delete failure after the first durable transition,
-            # and repairs legacy purging rows that predate audit-first cleanup.
-            await _ensure_expiry_audit(db, attachment)
-            await db.commit()
+            # Retry only a prior retention purge. User-requested purging has no
+            # expiry cause and must never acquire a phantom expiry audit.
+            if attachment.failure_code == "expired":
+                await _ensure_expiry_audit(db, attachment)
+                await db.commit()
             _discard_inflight(storage, namespace, attachment.attachment_id)
             attachment.status = "purged"
             attachment.deleted_at = now
