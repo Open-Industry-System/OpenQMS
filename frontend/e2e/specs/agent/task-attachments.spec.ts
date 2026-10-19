@@ -66,8 +66,10 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
   expect(Date.parse(cleanJson.created_at)).not.toBeNaN();
   expect(Date.parse(cleanJson.updated_at)).not.toBeNaN();
   await expect(page.getByText("clean.txt · available", { exact: true })).toBeVisible();
+  const cleanRow = page.getByRole("listitem").filter({ hasText: "clean.txt · available" });
+  await expect(cleanRow).toHaveCount(1);
   const [download] = await Promise.all([
-    page.waitForEvent("download"), page.getByRole("button", { name: "下载", exact: true }).click(),
+    page.waitForEvent("download"), cleanRow.getByRole("button", { name: "下载", exact: true }).click(),
   ]);
   expect(download.suggestedFilename()).toBe("clean.txt");
   const stream = await download.createReadStream();
@@ -101,7 +103,7 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
   expect(capaStillVisible.status()).toBe(200);
   const aDenied = page.waitForResponse(response => response.request().method() === "GET"
     && new URL(response.url()).pathname.endsWith("/download") && response.status() === 404);
-  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await cleanRow.getByRole("button", { name: "下载", exact: true }).click();
   await aDenied;
   await expect(page.getByText("任务私有附件", { exact: true })).toHaveCount(0);
   await expect(page.getByText("clean.txt", { exact: true })).toHaveCount(0);
@@ -128,7 +130,7 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
     await deniedDownloadReleased;
     await route.fulfill({ response });
   });
-  await page.getByRole("button", { name: "下载", exact: true }).click();
+  await cleanRow.getByRole("button", { name: "下载", exact: true }).click();
   await deniedDownloadStartedPromise;
 
   // This is the production auth-store login action in the same document, backed
