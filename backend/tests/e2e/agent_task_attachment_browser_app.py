@@ -108,6 +108,12 @@ async def mutate(action: str, request: Request):
     if action == "on":
         settings.AGENT_TASK_ATTACHMENTS_ENABLED = True
         return {"attachments": "on"}
+    if action == "task-restore":
+        async with tenant_async_session(binding=state.binding) as db:
+            await db.execute(update(AgentTask).where(AgentTask.task_id == state.task.task_id).values(
+                initiator_id=state.user.user_id, executor_user_id=state.user.user_id))
+            await db.commit()
+        return {"task_restored": True}
     if action == "task-withdraw":
         async with tenant_async_session(binding=state.binding) as db:
             await db.execute(update(AgentTask).where(AgentTask.task_id == state.task.task_id).values(
