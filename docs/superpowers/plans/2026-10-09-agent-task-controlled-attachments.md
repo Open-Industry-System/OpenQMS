@@ -57,7 +57,7 @@
 - Modify: `backend/app/models/__init__.py`
 - Modify: `backend/app/config.py`
 - Modify: `backend/alembic_tenant/__init__.py`
-- Modify: `backend/alembic_tenant/snapshot/business_20260927.py`
+- Keep frozen (do not modify): `backend/alembic_tenant/snapshot/business_20260927.py`
 - Modify: `backend/tests/migrations/test_tenant_schema_parity.py`
 - Modify: `backend/tests/migrations/test_agent_task_core.py`
 
@@ -161,12 +161,13 @@ def test_promote_requires_exact_size_and_digest(tmp_path):
 - [x] **Step 2: Write ClamAV framing RED tests with a strict local TCP fixture.**
 
 ```python
-async def test_scan_stream_sends_zinstream_and_zero_terminator(strict_clamd):
+async def test_scan_stream_sends_newline_instream_and_zero_terminator(strict_clamd):
     result = await scan_stream(chunks([b"abc"]), **strict_clamd.address)
     assert result.outcome == "clean"
+    assert strict_clamd.version_command == b"nVERSIONCOMMANDS\n"
     assert strict_clamd.frames == [b"abc", b""]
 
-@pytest.mark.parametrize("reply", [b"stream: Heuristics.Limits.Exceeded FOUND\0", b"stream: Encrypted.Doc FOUND\0"])
+@pytest.mark.parametrize("reply", [b"stream: Heuristics.Limits.Exceeded FOUND\n", b"stream: Encrypted.Doc FOUND\n"])
 async def test_scan_stream_rejects_all_found_replies(strict_clamd, reply):
     strict_clamd.reply = reply
     assert (await scan_stream(chunks([b"x"]), **strict_clamd.address)).outcome == "found"
@@ -471,7 +472,7 @@ Confirm no test replaces ClamAV with an always-clean fake when claiming final sc
 
 ```ts
 type AttachmentStatus = "scanning" | "promoting" | "available" | "rejected_malware" | "rejected_scanner" | "failed_storage" | "purging" | "purged";
-interface AgentTaskAttachment { attachment_id: string; display_name: string | null; byte_size: number | null; status: AttachmentStatus; scanned_at: string | null; expires_at: string; }
+interface AgentTaskAttachment { attachment_id: string; display_name: string | null; extension: string | null; byte_size: number | null; status: AttachmentStatus; created_at: string; updated_at: string; expires_at: string; }
 async function getAttachmentAvailability(taskId: string, signal?: AbortSignal): Promise<{ enabled: true }>;
 async function uploadTaskAttachment(taskId: string, file: File, signal?: AbortSignal): Promise<AgentTaskAttachment>;
 ```
@@ -628,3 +629,7 @@ Remove only the run-created database, Compose project, volumes, scanner definiti
 自有数据库容器 `openqms_r4b2_final_pg_20261018` 已停止并自动移除，库与匿名数据卷随容器清理；最终随机 Compose 项目、scanner 定义/附件/runtime/DB 卷及自有 Vite/Chromium/backend 进程已由验收 finally/trap 清理并核验。前期独立 scanner diagnostic 项目亦已精确清理。测试日志保留作证据；没有操作共享业务库或删除其他会话资源。
 
 代码保留于 `feature/agent-task-runtime-foundation` 的当前独立 worktree，按用户授权创建本地提交。**R4b-2 本片完成**不等于 R4b 全部完成：对象存储、多节点、生产可信部署、租户正式销毁、附件解析、脱敏发布/例外审批及插件/模型正文附件交付仍不开放。
+
+### 完整性再核对（2026-10-19）
+
+用户再次要求完成全部内容后，重新核对：**8 个任务、54 个已完成步骤、27 个 Create 交付文件，未勾选步骤和缺失文件均为 0**。重建当前源码 manifest 与上述 accepted SHA-256 完全一致，未变更已验收代码。本轮同步了文件清单中 frozen snapshot 的处理方式、newline scanner 测试示例和附件 DTO 字段，消除计划中的过时示例。另行重跑 scanner/private-storage 单元为 **20 passed**；保留 3 项 Pydantic 提示及本次 Python 3.13 asyncio 测试 transport teardown 的 unraisable warning，未将警告隐藏或声称为零。先前完整门禁和真实 scanner/browser 验收记录仍对应同一源码。
