@@ -10,9 +10,7 @@
 
 **2026-10-07 实施更新**：R4b-1 员工内部 D4 正文分类与确定性脱敏候选已完整验收，固定 restricted/未批准降敏/外发关闭，只读且不改业务原文。完整冻结后端及恢复会话实际 `make check` 均为 **2926 passed /4 skipped /3 xfailed /2 xpassed（exit0）**；前端 **87项/8文件**与类型/构建/E2E类型检查通过，1214个源码/配置指纹未变；真实员工API/Chromium及旧R4a/R3链已回归。两项独立复核收口完成红绿修正，资源清理与范围限制见[R4b-1台账](2026-10-06-capa-d4-text-redaction-foundation.md)和[操作指南](../../development/capa-d4-text-preview.md)。工作树保留，默认关闭，未提交/集成/部署；其他R4b审批、附件、正文外发、SDK与生产可信部署仍需独立范围确认。
 
-## 顺序与交付门槛
-
-**2026-10-18 R4b-2 更新**：受控任务附件保持双默认关闭，采用单节点私有卷、后端受权流式 ClamAV 与无直链下载。真实验收必须运行 pinned `clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c`，同时覆盖 clean 实际下载字节、EICAR、scanner unavailable、撤权和浏览器状态撤回；不以 mock scan/permission 声称通过。browser bridge 只发布 loopback backend HTTP，扫描器不发布端口；临时 Compose project/volumes 须清理。对象存储、生产启用、多节点和 tenant destruction 仍未获批，详见[附件操作指南](../../development/agent-task-attachments.md)。
+**2026-10-19 R4b-2 完成**：双默认关闭的任务私有附件、真实 ClamAV 扫描门禁、受权无直链下载/删除与保留期可恢复清理已验收。最终冻结完整后端 **2999 passed /12 skipped /3 xfailed /2 xpassed（exit0）**，前端95项与类型/构建/E2E类型通过；真实 pinned ClamAV7项、host Chromium1项覆盖 clean 保存字节、EICAR/加密/展开超限、scanner故障、CAPA/任务撤权与同document身份隔离。1371个源码/配置指纹未变，自有数据库/随机Compose/卷/进程已清理。证据见[R4b-2台账](2026-10-09-agent-task-controlled-attachments.md)及[附件操作指南](../../development/agent-task-attachments.md)。代码保留独立工作树和已授权本地提交，未push/合并/部署。对象存储、多节点、生产可信部署、正式tenant销毁、解析/审批/降敏发布和插件/模型正文附件交付仍需独立批准。
 
 ## 顺序与交付门槛
 

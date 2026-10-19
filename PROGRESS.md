@@ -1,11 +1,11 @@
 # OpenQMS 开发进度
 
-> **2026-10-18 R4b-2 controlled attachments**：default-off private attachment boundary、pinned actual ClamAV process evidence and host-Chromium browser bridge are added on the Agent runtime branch. The bridge maps only backend HTTP to `127.0.0.1:8008`; ClamAV remains internal. Final evidence must record the real image/definition version, focused exits and owned random Compose cleanup; object storage, production enablement, multi-node support and tenant destruction remain unapproved. See `docs/development/agent-task-attachments.md`.
+> **2026-10-19 R4b-2 已完成**：默认关闭的任务私有附件、真实扫描门禁、受权下载/删除与可恢复保留期清理已验收。最终冻结 `make check` **2999 passed / 12 skipped / 3 xfailed / 2 xpassed，exit 0**；前端 **95 项**及类型/构建、实际 ClamAV **7 项**和 Chromium **1 项**通过；1371 个源码/配置指纹未变，自有验收资源已清理。完整证据见[实施计划](docs/superpowers/plans/2026-10-09-agent-task-controlled-attachments.md)，运行边界见[操作指南](docs/development/agent-task-attachments.md)。没有 push/合并/部署；插件/模型附件投递与生产部署仍未开放。
 
-**更新日期**: 2026-10-07
+**更新日期**: 2026-10-19
 **当前分支**: `feature/agent-task-runtime-foundation`
 **基线**: `7503e9e5`（独立工作树，未合入主工作区）
-**当前阶段**: R1–R4a及R4b-1员工内部D4受限正文候选已完整验收；默认关闭，保留独立工作树，未提交/合并/部署
+**当前阶段**: R1–R4b-2 已完整验收；默认关闭，保留独立工作树及用户授权本地提交，未 push/合并/部署。
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
@@ -35,7 +35,7 @@
 - **R4a 实施中（2026-10-05）**：用户已确认书面方案，另行明确授权自有随机 `_test` 库的创建/迁移/清理。保留 R1–R3 原有改动基线；相关后端基线 `526 passed`，前端类型/构建通过。Task1 严格启动策略与请求会话快照接入红绿验证 `53 passed`；Task2 规范 profile/精确绑定与默认拒绝回归 `85 passed`，正常 grant→目录→建任务及绑定变更 `8 passed`。广回归 `606 passed`、运行 API 回归 `26 passed`、撤销/真实事务与凭据回归 `61 passed`，最终 R4a 新契约/规范权限/正常 CLI/Chromium 聚焦 `147 passed`。冻结前端类型/构建、74项单测及 E2E 类型检查通过，独立复核未发现具体重要缺陷；1197个源码/配置文件已冻结且未变化，相关47个文档链接及差异检查通过。完整全新隔离库冻结后端 **2859 passed / 4 skipped / 3 xfailed / 2 xpassed（1977.86秒，exit0）** 通过；4项skip为Redis1与旧E2E_MODE端点3，既有MES非严格预期失败/通过标记保留，沿用Makefile两项graph测试排除。R4a整片验收结束，自有主测试库与插件/Vite/浏览器进程已清理；另4个目录创建于2026-09-27/28的存量随机临时库未删除。默认关闭，不启用用户或生产环境。详见[六任务计划与执行台账](docs/superpowers/plans/2026-10-02-agent-metadata-local-trial.md)。
 - **R4b-1 设计中（2026-10-05）**：用户已选择“D4正文脱敏底座”与“规则＋显式替换词”。首片只覆盖 d4_root_cause 及验证 root_cause_text/result，生成平台内部只读候选，全部仍为restricted，不扩到附件/模型/插件正文或业务写入。[书面设计](docs/superpowers/specs/2026-10-05-capa-d4-text-redaction-foundation-design.md)已写入，包含当前CAPA/FMEA来源权限、默认关闭、预算、内容安全422、源版本/短期失效和审计；尚待书面审阅，未实现新接口或运行新片测试。
 - **R4b-1 实施中（2026-10-06）**：用户确认书面设计并按[六任务计划](docs/superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)执行。相关新基线186项及前端类型/构建通过；纯规则/DTO42项、受权快照17项、普通用户API4项红绿验证通过，共享当前访问抽取及旧运行时回归643项。本片与R4a/R3实际进程/浏览器聚焦119项通过，前端相关40项及类型/构建/E2E类型检查通过。独立复核两项收口已红绿修正：服务端失权/不确定性同时清空显式词；成功快照仅查询批准正文/来源元数据。修正后服务/API/实际Chromium25项与前端40项通过；1214个源码/配置已冻结；2026-10-06完整新库后端 **2926 passed /4 skipped /3 xfailed /2 xpassed（2067.61秒，exit0）**，前端 **87项/8文件**及类型/构建/E2E类型检查通过。2026-10-07恢复会话实际 `make check` 在另一个自有新库复验，同样 **2926 passed /4 skipped /3 xfailed /2 xpassed（2174.36秒，exit0）**，前端构建通过。冻结源码未变、60个文档链接有效、自有库和子进程清理；既有Redis1/旧E2E_MODE3跳过、MES非严格xfail/xpass及Makefile两项graph排除保留。整片验收结束，剩余附件/原文例外/降敏发布/SDK/部署与正文外发门禁不因此开放。始终restricted/外发关闭，不改业务原文、结论或R4a目录；[操作指南](docs/development/capa-d4-text-preview.md)已同步。
-- **当前下一步**：保留已验收工作树；提交/集成仍需明确授权。若继续业务开发，先独立确认R4b下一首片（受控附件、原文例外与降敏审批或可信部署），不自动扩展本片正文到插件/模型，不从历史路线直接执行。默认关闭、不改业务事实。
+- **当前下一步（2026-10-19）**：R4b-2 已按[受控附件计划](docs/superpowers/plans/2026-10-09-agent-task-controlled-attachments.md)完成最终冻结、真实 scanner/browser、整片复核与资源清理。保留独立工作树和本地提交；若继续 R4b，须另行确认原文例外/降敏发布审批或可信部署切片，不自动把正文/附件交付给插件或模型，不开放业务写入。push/merge/部署仍需独立授权。
 
 ---
 
