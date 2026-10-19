@@ -14,9 +14,10 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import SYSTEM_USER_ID, settings
 from app.core.tenant_transaction import TenantBinding
 from app.models.agent_task_attachment import AgentTaskAttachment
+from app.models.audit import AuditLog
 from app.models.tenant_attachment_disposal import TenantAttachmentStorageDisposal
 from app.services.agent_runtime.attachment_storage import AttachmentNamespace, PrivateAttachmentStorage
 
@@ -80,9 +81,8 @@ def _require_live_namespace(db: AsyncSession, namespace: AttachmentNamespace) ->
     if not isinstance(binding, TenantBinding):
         raise PermissionError("tenant attachment recovery requires a bound tenant session")
     if (namespace.tenant_id != binding.tenant_id
-            or namespace.origin_generation != binding.generation
-            or namespace.storage_namespace != f"tenant_{binding.tenant_id.hex}_{binding.generation}"):
-        raise PermissionError("historical attachment namespace is not live recovery authority")
+            or namespace.storage_namespace != f"tenant_{binding.tenant_id.hex}_{namespace.origin_generation}"):
+        raise PermissionError("attachment recovery namespace does not belong to bound tenant")
 
 
 async def _reconcile_live_namespace_unlocked(
@@ -105,7 +105,25 @@ async def _reconcile_live_namespace_unlocked(
     referenced_ids = {row.attachment_id for row in rows}
 
     for attachment in rows:
-        if attachment.status == "scanning":
+        if attachment.status == "available" and attachment.expires_at <= now:
+            # The database and filesystem cannot commit together: make purge
+            # authority durable before touching bytes, then audit final disposal.
+            attachment.status = "purging"
+            await db.commit()
+            _discard_inflight(storage, namespace, attachment.attachment_id)
+            attachment.status = "purged"
+            attachment.deleted_at = now
+            db.add(AuditLog(
+                table_name="agent_task_attachments",
+                record_id=attachment.attachment_id,
+                action="AGENT_TASK_ATTACHMENT_EXPIRED",
+                operated_by=SYSTEM_USER_ID,
+                factory_id=attachment.factory_id,
+                changed_fields={"status": "purged"},
+            ))
+            await db.commit()
+            purged += 1
+        elif attachment.status == "scanning":
             if attachment.reservation_expires_at is not None and attachment.reservation_expires_at <= now:
                 _discard_inflight(storage, namespace, attachment.attachment_id)
                 attachment.status = "failed_storage"
@@ -222,16 +240,34 @@ async def reconcile_configured_storage() -> ReconcileStats:
             if db.info.get("tenant_binding") not in (None, binding):
                 raise RuntimeError("tenant recovery session binding changed")
             db.info["tenant_binding"] = binding
-            namespace = AttachmentNamespace(
+            known_rows = (await db.execute(
+                select(
+                    AgentTaskAttachment.tenant_id,
+                    AgentTaskAttachment.origin_generation,
+                    AgentTaskAttachment.storage_namespace,
+                ).distinct()
+            )).all()
+            namespaces = {
+                AttachmentNamespace(
+                    tenant_id=row.tenant_id,
+                    origin_generation=row.origin_generation,
+                    storage_namespace=row.storage_namespace,
+                )
+                for row in known_rows
+            }
+            namespaces.add(AttachmentNamespace(
                 tenant_id=tenant.id,
                 origin_generation=tenant.generation,
                 storage_namespace=f"tenant_{tenant.id.hex}_{tenant.generation}",
-            )
-            known_namespaces.add(namespace.storage_namespace)
-            try:
-                stats = stats.plus(await reconcile_live_namespace(db, namespace, storage, now=datetime.now(UTC)))
-            finally:
-                db.info.pop("tenant_binding", None)
+            ))
+            for namespace in namespaces:
+                known_namespaces.add(namespace.storage_namespace)
+                try:
+                    stats = stats.plus(await reconcile_live_namespace(db, namespace, storage, now=datetime.now(UTC)))
+                finally:
+                    db.info.pop("tenant_binding", None)
+                    db.info["tenant_binding"] = binding
+            db.info.pop("tenant_binding", None)
 
     unknown = storage.list_namespaces() - known_namespaces
     for namespace in sorted(unknown):

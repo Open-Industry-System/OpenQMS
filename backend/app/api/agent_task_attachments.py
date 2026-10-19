@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
+from multipart import MultipartParser
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse, StreamingResponse
@@ -141,103 +142,99 @@ async def _file_part_chunks(
     boundary: bytes,
     metadata: task_attachments.AttachmentUploadMetadata,
 ) -> AsyncIterator[bytes]:
-    """Yield one file payload under fixed header, body, and output bounds."""
-    opening = b"--" + boundary + b"\r\n"
-    delimiter = b"\r\n--" + boundary
-    header_buffer = bytearray()
-    body_buffer = bytearray()
-    headers_parsed = False
-    complete = False
+    """Yield one bounded file part using python-multipart's low-level callbacks."""
     received = 0
+    part_count = 0
+    part_ended = False
+    complete = False
+    header_bytes = 0
+    current_header_name = bytearray()
+    current_header_value = bytearray()
+    headers: list[tuple[bytes, bytes]] = []
+    output: list[bytes] = []
     body_limit = settings.AGENT_TASK_ATTACHMENT_MAX_BYTES + _MULTIPART_OVERHEAD_BYTES
 
-    def drain_body() -> list[bytes]:
+    def on_part_begin() -> None:
+        nonlocal part_count, part_ended, header_bytes
+        part_count += 1
+        if part_count != 1:
+            raise MultipartInputInvalid("multiple multipart parts are not allowed")
+        part_ended = False
+        header_bytes = 0
+        headers.clear()
+
+    def on_header_field(data: bytes, start: int, end: int) -> None:
+        nonlocal header_bytes
+        value = data[start:end]
+        header_bytes += len(value)
+        if header_bytes > _MAX_PART_HEADERS:
+            raise MultipartInputInvalid("multipart headers too large")
+        current_header_name.extend(value)
+
+    def on_header_value(data: bytes, start: int, end: int) -> None:
+        nonlocal header_bytes
+        value = data[start:end]
+        header_bytes += len(value)
+        if header_bytes > _MAX_PART_HEADERS:
+            raise MultipartInputInvalid("multipart headers too large")
+        current_header_value.extend(value)
+
+    def on_header_end() -> None:
+        if not current_header_name or not current_header_value:
+            raise MultipartInputInvalid("invalid multipart headers")
+        headers.append((bytes(current_header_name), bytes(current_header_value)))
+        current_header_name.clear()
+        current_header_value.clear()
+
+    def on_headers_finished() -> None:
+        raw_headers = b"\r\n".join(name + b": " + value for name, value in headers)
+        parsed = _validate_part_headers(raw_headers)
+        metadata.display_name = parsed.display_name
+        metadata.extension = parsed.extension
+        metadata.declared_content_type = parsed.declared_content_type
+
+    def on_part_data(data: bytes, start: int, end: int) -> None:
+        value = data[start:end]
+        if value:
+            output.append(bytes(value))
+
+    def on_part_end() -> None:
+        nonlocal part_ended
+        part_ended = True
+
+    def on_end() -> None:
         nonlocal complete
-        emitted: list[bytes] = []
-        while not complete:
-            marker_at = body_buffer.find(delimiter)
-            if marker_at < 0:
-                keep = len(delimiter) + 4
-                if len(body_buffer) <= keep:
-                    break
-                safe_size = min(len(body_buffer) - keep, _PARSER_CHUNK_BYTES)
-                emitted.append(bytes(body_buffer[:safe_size]))
-                del body_buffer[:safe_size]
-                continue
-            if marker_at:
-                safe_size = min(marker_at, _PARSER_CHUNK_BYTES)
-                emitted.append(bytes(body_buffer[:safe_size]))
-                del body_buffer[:safe_size]
-                continue
-            marker_end = len(delimiter)
-            if len(body_buffer) < marker_end + 2:
-                break
-            suffix = body_buffer[marker_end:marker_end + 2]
-            if suffix == b"\r\n":
-                raise MultipartInputInvalid("multiple multipart parts are not allowed")
-            if suffix != b"--":
-                raise MultipartInputInvalid("invalid multipart closing boundary")
-            if len(body_buffer) < marker_end + 4:
-                break
-            if body_buffer[marker_end + 2:marker_end + 4] != b"\r\n":
-                raise MultipartInputInvalid("invalid multipart closing boundary")
-            del body_buffer[:marker_end + 4]
-            if body_buffer:
-                raise MultipartInputInvalid("unexpected multipart data")
-            complete = True
-        return emitted
+        complete = True
 
-    async for chunk in stream:
-        if not isinstance(chunk, bytes):
-            raise MultipartInputInvalid("invalid multipart stream")
-        received += len(chunk)
-        if received > body_limit:
-            raise task_attachments.AttachmentInputLimitError("multipart body limit exceeded")
-        if complete:
-            if chunk:
-                raise MultipartInputInvalid("unexpected multipart data")
-            continue
-        pending = memoryview(chunk)
-        while pending:
-            if complete:
-                raise MultipartInputInvalid("unexpected multipart data")
-            if not headers_parsed:
-                capacity = len(opening) + _MAX_PART_HEADERS + 4 - len(header_buffer)
-                if capacity <= 0:
-                    raise MultipartInputInvalid("multipart headers too large")
-                take = min(len(pending), capacity)
-                header_buffer.extend(pending[:take])
-                pending = pending[take:]
-                opening_prefix = min(len(header_buffer), len(opening))
-                if header_buffer[:opening_prefix] != opening[:opening_prefix]:
-                    raise MultipartInputInvalid("invalid multipart opening boundary")
-                if len(header_buffer) < len(opening):
-                    continue
-                headers_start = len(opening)
-                headers_end = header_buffer.find(b"\r\n\r\n", headers_start)
-                if headers_end < 0:
-                    if len(header_buffer) - headers_start >= _MAX_PART_HEADERS:
-                        raise MultipartInputInvalid("multipart headers too large")
-                    continue
-                if headers_end - headers_start > _MAX_PART_HEADERS:
-                    raise MultipartInputInvalid("multipart headers too large")
-                parsed_metadata = _validate_part_headers(bytes(header_buffer[headers_start:headers_end]))
-                metadata.display_name = parsed_metadata.display_name
-                metadata.extension = parsed_metadata.extension
-                metadata.declared_content_type = parsed_metadata.declared_content_type
-                body_buffer.extend(header_buffer[headers_end + 4:])
-                header_buffer.clear()
-                headers_parsed = True
-                for output in drain_body():
-                    yield output
-                continue
-            take = min(len(pending), _PARSER_CHUNK_BYTES)
-            body_buffer.extend(pending[:take])
-            pending = pending[take:]
-            for output in drain_body():
-                yield output
-
-    if not headers_parsed or not complete:
+    parser = MultipartParser(boundary, {
+        "on_part_begin": on_part_begin,
+        "on_header_field": on_header_field,
+        "on_header_value": on_header_value,
+        "on_header_end": on_header_end,
+        "on_headers_finished": on_headers_finished,
+        "on_part_data": on_part_data,
+        "on_part_end": on_part_end,
+        "on_end": on_end,
+    }, max_size=body_limit)
+    try:
+        async for chunk in stream:
+            if not isinstance(chunk, bytes):
+                raise MultipartInputInvalid("invalid multipart stream")
+            received += len(chunk)
+            if received > body_limit:
+                raise task_attachments.AttachmentInputLimitError("multipart body limit exceeded")
+            for offset in range(0, len(chunk), _PARSER_CHUNK_BYTES):
+                parser.write(chunk[offset:offset + _PARSER_CHUNK_BYTES])
+                while output:
+                    yield output.pop(0)
+        parser.finalize()
+    except task_attachments.AttachmentInputLimitError:
+        raise
+    except MultipartInputInvalid:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise MultipartInputInvalid("invalid multipart input") from exc
+    if part_count != 1 or not part_ended or not complete:
         raise MultipartInputInvalid("incomplete multipart input")
 
 
@@ -268,7 +265,7 @@ def _upload_result(view: task_attachments.AttachmentView) -> AttachmentView:
 
 
 def require_attachments() -> None:
-    if not settings.AGENT_TASK_ATTACHMENTS_ENABLED:
+    if not (settings.AGENT_TASK_RUNTIME_ENABLED and settings.AGENT_TASK_ATTACHMENTS_ENABLED):
         raise HTTPException(status_code=404, detail="Not Found")
 
 

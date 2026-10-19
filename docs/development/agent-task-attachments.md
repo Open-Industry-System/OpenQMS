@@ -7,7 +7,7 @@ R4b-2 附件默认关闭：`AGENT_TASK_RUNTIME_ENABLED` 和
 0700 的绝对私有 `AGENT_TASK_ATTACHMENT_STORAGE_ROOT` 和健康的 ClamAV host/port。
 缺任一项即失败关闭；关闭在租户解析、认证、multipart 读取、数据库和扫描器连接前返回 404。
 
-该实现仅限单节点私有卷。clean/staging/runtime 卷不与 ClamAV 或插件共享；scanner 没有宿主机端口。
+该实现仅限单节点私有卷。clean/staging/runtime 卷不与 ClamAV 或插件共享；scanner 没有宿主机端口。`AGENT_TASK_ATTACHMENT_STORAGE_ROOT` 不能位于任何由本应用实际 `StaticFiles` 挂载的目录之内，也不能包含静态挂载目录；部署运维必须保证该根目录没有被反向代理、静态站点或其他公开文件服务挂载。
 生产对象存储、预签名 URL、S3/MinIO、多副本共享存储及生产启用均**尚未获批**。
 
 ## 限制和数据边界
@@ -25,7 +25,7 @@ R4b-2 附件默认关闭：`AGENT_TASK_RUNTIME_ENABLED` 和
 
 EICAR、加密或超限启发式命中为 `422 ATTACHMENT_MALWARE_REJECTED`；scanner 超时、不可达或协议错误为 `503 ATTACHMENT_SCANNER_UNAVAILABLE`。两者删除 staging、保留最小失败记录以追踪，且没有可下载对象。权限/任务/坐标变化拒绝或撤回访问；列表、下载、删除和提升均重新核验当前事实。
 
-对账仅清理已有记录所属的 live namespace 中可证明安全的遗留 staging/状态转换；普通 maintenance、failed/suspended/deactivated 或 generation 改变必须保留未过期字节。整代删除只能有平台 `tenant_attachment_storage_disposals` 的精确、已提交 `test_rebuild`（或未来 `tenant_destroyed`）授权；每个 disposal 是 append-only 记录。过期和用户删除均经 `purging -> purged` 两阶段及系统审计，不能硬删除记录。
+对账仅清理已有记录所属的 live namespace 中可证明安全的遗留 staging/状态转换；普通 maintenance、failed/suspended/deactivated 或 generation 改变必须保留未过期字节。`expires_at <= now` 的记录在列表中立即不可见，即使清理尚未运行；对账以 `available -> purging` 的已提交状态后删除 clean 字节，再提交 `purged` 和系统审计。历史 generation 中有持久化记录的已过期对象可按该记录清理，未知历史 namespace 则只保留并告警。整代删除只能有平台 `tenant_attachment_storage_disposals` 的精确、已提交 `test_rebuild`（或未来 `tenant_destroyed`）授权；每个 disposal 是 append-only 记录。过期和用户删除均经 `purging -> purged` 两阶段，不能硬删除记录。
 
 ## 实际验收和资源处置
 

@@ -492,7 +492,10 @@ async def list_for_view(db: AsyncSession, scope: RequestScope, task_id: UUID) ->
     task = await task_service.get_task_for_view(db, scope, task_id)
     rows = (await db.scalars(
         select(AgentTaskAttachment)
-        .where(AgentTaskAttachment.task_id == task.task_id)
+        .where(
+            AgentTaskAttachment.task_id == task.task_id,
+            AgentTaskAttachment.expires_at > _now(),
+        )
         .order_by(AgentTaskAttachment.created_at, AgentTaskAttachment.attachment_id)
     )).all()
     return [_view(row) for row in rows]

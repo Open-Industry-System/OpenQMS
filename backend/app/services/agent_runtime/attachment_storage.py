@@ -38,6 +38,23 @@ class AttachmentNamespace:
             raise ValueError("tenant storage must not use the public namespace")
 
 
+def validate_root_for_app(root: Path, app) -> None:
+    """Validate a private root and reject overlap with this app's StaticFiles mounts."""
+    storage = PrivateAttachmentStorage(root)
+    storage.validate_root()
+    resolved_root = root.resolve(strict=True)
+    from starlette.staticfiles import StaticFiles
+
+    for route in app.routes:
+        mounted = getattr(route, "app", None)
+        if not isinstance(mounted, StaticFiles):
+            continue
+        for directory in mounted.all_directories:
+            static_root = Path(directory).resolve(strict=True)
+            if static_root == resolved_root or static_root in resolved_root.parents or resolved_root in static_root.parents:
+                raise ValueError("attachment root must not overlap a static files mount")
+
+
 class PrivateAttachmentStorage:
     """Stores opaque attachment UUIDs only; it never accepts or returns paths."""
 
@@ -45,15 +62,30 @@ class PrivateAttachmentStorage:
         self._root = root
 
     def validate_root(self) -> None:
+        if not self._root.is_absolute():
+            raise ValueError("attachment root must be absolute")
+        self._validate_directory_chain(self._root.parent)
         try:
             info = os.lstat(self._root)
         except FileNotFoundError:
-            self._root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.mkdir(self._root, mode=0o700)
+            os.chmod(self._root, 0o700)
             info = os.lstat(self._root)
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
             raise ValueError("attachment root must be a directory, not a symlink")
+        if info.st_uid != os.geteuid():
+            raise ValueError("attachment root must be owned by the service identity")
         if stat.S_IMODE(info.st_mode) != 0o700:
             raise ValueError("attachment root must have mode 0700")
+
+    @staticmethod
+    def _validate_directory_chain(directory: Path) -> None:
+        current = Path(directory.anchor)
+        for part in directory.parts[1:]:
+            current /= part
+            info = os.lstat(current)
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise ValueError("attachment root components must be normal directories")
 
     def create_staging(self, namespace: AttachmentNamespace, attachment_id: UUID) -> BinaryIO:
         with self._area_fd(namespace, "staging") as area_fd:
@@ -241,9 +273,10 @@ class PrivateAttachmentStorage:
             pass
         fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
         info = os.fstat(fd)
-        if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700:
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o700):
             os.close(fd)
-            raise ValueError("attachment storage directory must have mode 0700")
+            raise ValueError("attachment storage directory must be service-owned mode 0700")
         return fd
 
     def _verify_file(

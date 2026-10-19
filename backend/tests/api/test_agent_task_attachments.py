@@ -317,3 +317,38 @@ async def test_malformed_multipart_returns_constant_422_without_echo(
     assert response.status_code == 422
     assert response.json() == {"detail": "ATTACHMENT_INPUT_INVALID"}
     assert "PRIVATE-ATTACHMENT-BODY" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_file_part_chunks_uses_low_level_multipart_parser_for_fragmented_boundary_and_headers(monkeypatch):
+    """The HTTP boundary delegates wire framing to installed python-multipart callbacks."""
+    from app.api import agent_task_attachments
+    from app.services.agent_runtime import task_attachments
+
+    actual_parser = __import__("multipart", fromlist=["MultipartParser"]).MultipartParser
+    constructed = []
+
+    def tracking_parser(*args, **kwargs):
+        constructed.append((args, kwargs))
+        return actual_parser(*args, **kwargs)
+
+    monkeypatch.setattr(agent_task_attachments, "MultipartParser", tracking_parser)
+    boundary = b"fragmented-boundary"
+    request = (
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="clean.txt"\r\n'
+        b"Content-Type: text/plain\r\n\r\n"
+        + b"payload"
+        + b"\r\n--" + boundary + b"--\r\n"
+    )
+
+    async def fragments():
+        for offset in range(0, len(request), 3):
+            yield request[offset:offset + 3]
+
+    metadata = task_attachments.AttachmentUploadMetadata()
+    result = [chunk async for chunk in agent_task_attachments._file_part_chunks(fragments(), boundary, metadata)]
+
+    assert b"".join(result) == b"payload"
+    assert (metadata.display_name, metadata.extension) == ("clean.txt", "txt")
+    assert len(constructed) == 1

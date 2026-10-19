@@ -235,3 +235,159 @@ async def test_generation_increment_preserves_available_attachment(committed_run
             assert handle.stream.read() == b"clean"
         finally:
             handle.stream.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_known_historical_generation_is_purged_without_orphan_sweep(
+    committed_runtime, attachment_settings,
+):
+    """Current tenant authority may purge its own expired old-generation row only."""
+    runtime = committed_runtime
+    recovery = recovery_module()
+    old_generation = runtime.binding.generation - 1
+    old_namespace = f"tenant_{runtime.binding.tenant_id.hex}_{old_generation}"
+    async with runtime.factory(binding=runtime.binding) as db:
+        task = await db.get(AgentTask, runtime.task_id)
+        assert task is not None
+        attachment = AgentTaskAttachment(
+            task_id=task.task_id,
+            factory_id=task.factory_id,
+            uploaded_by=runtime.user_id,
+            tenant_id=runtime.binding.tenant_id,
+            origin_generation=old_generation,
+            storage_namespace=old_namespace,
+            storage_key=uuid.uuid4().hex,
+            byte_size=5,
+            sha256=hashlib.sha256(b"clean").hexdigest(),
+            status="available",
+            expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        )
+        db.add(attachment)
+        await db.commit()
+        storage = _write_clean_file(attachment)
+        namespace = _namespace(attachment)
+        stats = await recovery.reconcile_live_namespace(db, namespace, storage, now=datetime.now(UTC))
+        await db.refresh(attachment)
+
+    assert stats.purged == 1
+    assert attachment.status == "purged"
+
+@pytest.mark.asyncio
+async def test_expired_available_is_hidden_then_purged_with_system_audit(
+    owned_attachment, attachment_settings,
+):
+    """Expiry hides bytes before cleanup; recovery owns the auditable final purge."""
+    from sqlalchemy import select
+
+    from app.config import SYSTEM_USER_ID
+    from app.models.audit import AuditLog
+    from app.services.agent_runtime import task_attachments
+
+    recovery = recovery_module()
+    attachment = owned_attachment.attachment
+    attachment.status = "available"
+    attachment.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    storage = _write_clean_file(attachment)
+    await owned_attachment.db.commit()
+
+    assert await task_attachments.list_for_view(
+        owned_attachment.db, owned_attachment.scope, owned_attachment.task.task_id
+    ) == []
+
+    stats = await recovery.reconcile_live_namespace(
+        owned_attachment.db, _namespace(attachment), storage, now=datetime.now(UTC),
+    )
+    await owned_attachment.db.refresh(attachment)
+    audit = await owned_attachment.db.scalar(
+        select(AuditLog).where(
+            AuditLog.record_id == attachment.attachment_id,
+            AuditLog.action == "AGENT_TASK_ATTACHMENT_EXPIRED",
+        )
+    )
+
+    assert stats.purged == 1
+    assert attachment.status == "purged"
+    assert attachment.deleted_at is not None
+    assert audit is not None and audit.operated_by == SYSTEM_USER_ID
+    with pytest.raises(FileNotFoundError):
+        storage.open_clean(_namespace(attachment), attachment.attachment_id, attachment.sha256, attachment.byte_size)
+
+
+@pytest.mark.asyncio
+async def test_attachment_startup_gates_runtime_and_real_scanner_handshake(monkeypatch, tmp_path):
+    """Startup never opens storage/DB/scanner unless both flags and health are true."""
+    import asyncio
+
+    from app import main
+    from app.services.agent_runtime import attachment_recovery
+
+    root = tmp_path / "private"
+    calls = 0
+
+    async def reconciliation():
+        nonlocal calls
+        calls += 1
+        return None
+
+    monkeypatch.setattr(attachment_recovery, "reconcile_configured_storage", reconciliation)
+    monkeypatch.setattr(settings, "AGENT_TASK_RUNTIME_ENABLED", False)
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENTS_ENABLED", True)
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_STORAGE_ROOT", str(root))
+    assert await main.initialize_attachment_runtime(main.app) is False
+    assert calls == 0 and not root.exists()
+
+    monkeypatch.setattr(settings, "AGENT_TASK_RUNTIME_ENABLED", True)
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_HOST", "")
+    assert await main.initialize_attachment_runtime(main.app) is False
+    assert settings.AGENT_TASK_ATTACHMENTS_ENABLED is False and calls == 0
+
+    monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENTS_ENABLED", True)
+
+    async def healthy(reader, writer):
+        assert await reader.readuntil(b"\n") == b"nVERSIONCOMMANDS\n"
+        writer.write(b"ClamAV 1.4.3/28150\nCOMMANDS: VERSIONCOMMANDS INSTREAM\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(healthy, "127.0.0.1", 0)
+    host, port = server.sockets[0].getsockname()[:2]
+    try:
+        monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_HOST", host)
+        monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_PORT", port)
+        assert await main.initialize_attachment_runtime(main.app) is True
+        assert calls == 1 and main.app.state.agent_task_attachments_ready is True
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_attachment_startup_disables_after_malformed_real_health_reply(monkeypatch, tmp_path):
+    import asyncio
+
+    from app import main
+    from app.services.agent_runtime import attachment_recovery
+
+    async def must_not_reconcile():
+        raise AssertionError("scanner health failure must precede database reconciliation")
+
+    async def malformed(reader, writer):
+        assert await reader.readuntil(b"\n") == b"nVERSIONCOMMANDS\n"
+        writer.write(b"not-clamav\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(malformed, "127.0.0.1", 0)
+    host, port = server.sockets[0].getsockname()[:2]
+    try:
+        monkeypatch.setattr(attachment_recovery, "reconcile_configured_storage", must_not_reconcile)
+        monkeypatch.setattr(settings, "AGENT_TASK_RUNTIME_ENABLED", True)
+        monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENTS_ENABLED", True)
+        monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_STORAGE_ROOT", str(tmp_path / "private"))
+        monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_HOST", host)
+        monkeypatch.setattr(settings, "AGENT_TASK_ATTACHMENT_CLAMAV_PORT", port)
+        assert await main.initialize_attachment_runtime(main.app) is False
+        assert settings.AGENT_TASK_ATTACHMENTS_ENABLED is False
+    finally:
+        server.close()
+        await server.wait_closed()

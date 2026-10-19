@@ -124,3 +124,25 @@ def test_remove_namespace_reports_only_actual_disposal(tmp_path):
 
     assert storage.remove_namespace(public_namespace()) is True
     assert storage.remove_namespace(public_namespace()) is False
+
+
+def test_storage_root_must_be_absolute_service_owned_and_outside_static_mount(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.staticfiles import StaticFiles
+
+    storage = storage_module()
+    with pytest.raises(ValueError):
+        storage.PrivateAttachmentStorage(Path("relative-attachments")).validate_root()
+
+    root = tmp_path / "private"
+    root.mkdir(mode=0o700)
+    expected_euid = os.lstat(root).st_uid
+    monkeypatch.setattr(storage.os, "geteuid", lambda: expected_euid + 1)
+    with pytest.raises(ValueError, match="service identity"):
+        storage.PrivateAttachmentStorage(root).validate_root()
+
+    monkeypatch.setattr(storage.os, "geteuid", lambda: expected_euid)
+    app = FastAPI()
+    app.mount("/static", StaticFiles(directory=str(tmp_path)), name="static")
+    with pytest.raises(ValueError, match="static"):
+        storage.validate_root_for_app(root, app)

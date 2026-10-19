@@ -31,6 +31,18 @@ async def _reader_chunks(reader: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
         raise _ReaderValueError from exc
 
 
+async def probe_health(*, host: str, port: int, timeout_seconds: int) -> bool:
+    """Prove the configured daemon supports the one required INSTREAM capability."""
+    if not host or not 0 < port <= 65535 or not 0 < timeout_seconds <= 60:
+        return False
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            await _scanner_version(host, port)
+        return True
+    except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError):
+        return False
+
+
 async def scan_stream(
     reader: AsyncIterator[bytes], *, host: str, port: int, timeout_seconds: int
 ) -> ScanResult:

@@ -77,6 +77,34 @@ _log_drainer: asyncio.Task | None = None
 _log_handler: logging.Handler | None = None
 
 
+async def initialize_attachment_runtime(app: FastAPI) -> bool:
+    """Enable attachments only after private-root and real scanner capability checks."""
+    app.state.agent_task_attachments_ready = False
+    if not (settings.AGENT_TASK_RUNTIME_ENABLED and settings.AGENT_TASK_ATTACHMENTS_ENABLED):
+        return False
+    from app.services.agent_runtime import attachment_recovery, attachment_storage, clamav_scan, task_attachments
+    try:
+        attachment_storage.validate_root_for_app(
+            __import__("pathlib", fromlist=["Path"]).Path(settings.AGENT_TASK_ATTACHMENT_STORAGE_ROOT), app
+        )
+        healthy = await clamav_scan.probe_health(
+            host=settings.AGENT_TASK_ATTACHMENT_CLAMAV_HOST,
+            port=settings.AGENT_TASK_ATTACHMENT_CLAMAV_PORT,
+            timeout_seconds=settings.AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS,
+        )
+        if not healthy:
+            raise RuntimeError("attachment scanner health probe failed")
+        await attachment_recovery.reconcile_configured_storage()
+    except task_attachments.AttachmentCapacityError:
+        logger.warning("[agent_attachments] startup reconciliation deferred; pipeline is busy")
+    except Exception:
+        logger.exception("[agent_attachments] startup validation failed; attachments remain closed")
+        settings.AGENT_TASK_ATTACHMENTS_ENABLED = False
+        return False
+    app.state.agent_task_attachments_ready = True
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.services.agent_runtime.trial_policy import load_policy
@@ -85,23 +113,7 @@ async def lifespan(app: FastAPI):
         tenant_mode=settings.TENANT_MODE, now=datetime.now(UTC),
     )
     logger.info("%s", app.state.agent_local_trial_policy.diagnostic)
-    if settings.AGENT_TASK_ATTACHMENTS_ENABLED:
-        from app.services.agent_runtime.task_attachments import AttachmentCapacityError
-        try:
-            from app.services.agent_runtime.attachment_recovery import reconcile_configured_storage
-
-            stats = await reconcile_configured_storage()
-            logger.info("[agent_attachments] startup reconciliation: %s", stats)
-        except AttachmentCapacityError:
-            # A predecessor that holds this exact pipeline lock is completing a
-            # normal upload; defer startup recovery instead of converting that
-            # transient contention into a process-lifetime disablement.
-            logger.warning("[agent_attachments] startup reconciliation deferred; pipeline is busy")
-        except Exception:
-            # Any inability to validate/reconcile storage leaves the attachment
-            # service unavailable; unknown bytes are preserved, not guessed at.
-            logger.exception("[agent_attachments] startup reconciliation failed; attachments remain closed")
-            settings.AGENT_TASK_ATTACHMENTS_ENABLED = False
+    await initialize_attachment_runtime(app)
     # Legacy single-tenant bootstrap: create default admin user.
     # In multi-tenant mode, users/role_definitions live in tenant schemas,
     # so running this against the public schema would fail after platform-only
