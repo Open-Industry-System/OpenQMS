@@ -279,7 +279,6 @@ async def test_expired_available_is_hidden_then_purged_with_system_audit(
     """Expiry hides bytes before cleanup; recovery owns the auditable final purge."""
     from sqlalchemy import select
 
-    from app.config import SYSTEM_USER_ID
     from app.models.audit import AuditLog
     from app.services.agent_runtime import task_attachments
 
@@ -308,9 +307,60 @@ async def test_expired_available_is_hidden_then_purged_with_system_audit(
     assert stats.purged == 1
     assert attachment.status == "purged"
     assert attachment.deleted_at is not None
-    assert audit is not None and audit.operated_by == SYSTEM_USER_ID
+    assert audit is not None and audit.operated_by is None
+    assert audit.changed_fields == {"status": "purged", "actor": "system", "reason": "expired"}
     with pytest.raises(FileNotFoundError):
         storage.open_clean(_namespace(attachment), attachment.attachment_id, attachment.sha256, attachment.byte_size)
+
+
+@pytest.mark.asyncio
+async def test_expiry_delete_failure_retries_with_exactly_one_system_audit(
+    owned_attachment, attachment_settings, monkeypatch,
+):
+    """A crash/failure after durable purging never loses or duplicates expiry audit."""
+    from sqlalchemy import func, select
+
+    from app.models.audit import AuditLog
+
+    recovery = recovery_module()
+    attachment = owned_attachment.attachment
+    attachment.status = "available"
+    attachment.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    storage = _write_clean_file(attachment)
+    await owned_attachment.db.commit()
+    original_remove = storage.remove
+    calls = 0
+
+    def fail_once(namespace, attachment_id, area):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("injected delete failure")
+        return original_remove(namespace, attachment_id, area)
+
+    monkeypatch.setattr(storage, "remove", fail_once)
+    with pytest.raises(OSError):
+        await recovery.reconcile_live_namespace(
+            owned_attachment.db, _namespace(attachment), storage, now=datetime.now(UTC),
+        )
+    await owned_attachment.db.refresh(attachment)
+    assert attachment.status == "purging"
+
+    monkeypatch.setattr(storage, "remove", original_remove)
+    stats = await recovery.reconcile_live_namespace(
+        owned_attachment.db, _namespace(attachment), storage, now=datetime.now(UTC),
+    )
+    audit_count = await owned_attachment.db.scalar(
+        select(func.count()).select_from(AuditLog).where(
+            AuditLog.record_id == attachment.attachment_id,
+            AuditLog.action == "AGENT_TASK_ATTACHMENT_EXPIRED",
+        )
+    )
+    await owned_attachment.db.refresh(attachment)
+
+    assert stats.purged == 1
+    assert attachment.status == "purged"
+    assert audit_count == 1
 
 
 @pytest.mark.asyncio

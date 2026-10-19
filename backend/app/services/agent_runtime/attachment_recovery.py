@@ -14,7 +14,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import SYSTEM_USER_ID, settings
+from app.config import settings
 from app.core.tenant_transaction import TenantBinding
 from app.models.agent_task_attachment import AgentTaskAttachment
 from app.models.audit import AuditLog
@@ -85,6 +85,24 @@ def _require_live_namespace(db: AsyncSession, namespace: AttachmentNamespace) ->
         raise PermissionError("attachment recovery namespace does not belong to bound tenant")
 
 
+async def _ensure_expiry_audit(db: AsyncSession, attachment: AgentTaskAttachment) -> None:
+    existing = await db.scalar(
+        select(AuditLog.log_id).where(
+            AuditLog.record_id == attachment.attachment_id,
+            AuditLog.action == "AGENT_TASK_ATTACHMENT_EXPIRED",
+        ).limit(1)
+    )
+    if existing is None:
+        db.add(AuditLog(
+            table_name="agent_task_attachments",
+            record_id=attachment.attachment_id,
+            action="AGENT_TASK_ATTACHMENT_EXPIRED",
+            operated_by=None,
+            factory_id=attachment.factory_id,
+            changed_fields={"status": "purged", "actor": "system", "reason": "expired"},
+        ))
+
+
 async def _reconcile_live_namespace_unlocked(
     db: AsyncSession,
     namespace: AttachmentNamespace,
@@ -106,21 +124,14 @@ async def _reconcile_live_namespace_unlocked(
 
     for attachment in rows:
         if attachment.status == "available" and attachment.expires_at <= now:
-            # The database and filesystem cannot commit together: make purge
-            # authority durable before touching bytes, then audit final disposal.
+            # Persist both purge authority and its system audit before bytes move.
+            # A later filesystem failure leaves a durable, retryable purging row.
             attachment.status = "purging"
+            await _ensure_expiry_audit(db, attachment)
             await db.commit()
             _discard_inflight(storage, namespace, attachment.attachment_id)
             attachment.status = "purged"
             attachment.deleted_at = now
-            db.add(AuditLog(
-                table_name="agent_task_attachments",
-                record_id=attachment.attachment_id,
-                action="AGENT_TASK_ATTACHMENT_EXPIRED",
-                operated_by=SYSTEM_USER_ID,
-                factory_id=attachment.factory_id,
-                changed_fields={"status": "purged"},
-            ))
             await db.commit()
             purged += 1
         elif attachment.status == "scanning":
@@ -148,6 +159,10 @@ async def _reconcile_live_namespace_unlocked(
                 attachment.reservation_expires_at = None
                 failed_promoting += 1
         elif attachment.status == "purging":
+            # Handles a crash/delete failure after the first durable transition,
+            # and repairs legacy purging rows that predate audit-first cleanup.
+            await _ensure_expiry_audit(db, attachment)
+            await db.commit()
             _discard_inflight(storage, namespace, attachment.attachment_id)
             attachment.status = "purged"
             attachment.deleted_at = now

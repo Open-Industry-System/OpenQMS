@@ -228,6 +228,8 @@ async def _file_part_chunks(
                 while output:
                     yield output.pop(0)
         parser.finalize()
+    except AttachmentTypeRejected:
+        raise
     except task_attachments.AttachmentInputLimitError:
         raise
     except MultipartInputInvalid:

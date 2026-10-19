@@ -111,6 +111,28 @@ async def stream_multipart_without_content_length(byte_size: int, filename: str 
 
 
 @pytest.mark.asyncio
+async def test_file_part_chunks_preserves_typed_extension_rejection_from_callback():
+    from app.api import agent_task_attachments
+    from app.services.agent_runtime import task_attachments
+
+    boundary = b"agent-attachment-boundary"
+    request = (
+        b"--" + boundary + b"\r\n"
+        b'Content-Disposition: form-data; name="file"; filename="payload.exe"\r\n\r\n'
+        b"x\r\n--" + boundary + b"--\r\n"
+    )
+
+    async def one_chunk():
+        yield request
+
+    with pytest.raises(agent_task_attachments.AttachmentTypeRejected):
+        async for _ in agent_task_attachments._file_part_chunks(
+            one_chunk(), boundary, task_attachments.AttachmentUploadMetadata(),
+        ):
+            pass
+
+
+@pytest.mark.asyncio
 async def test_file_part_chunks_splits_one_large_asgi_chunk_without_whole_chunk_copy():
     from app.api import agent_task_attachments
     from app.services.agent_runtime import task_attachments
