@@ -985,3 +985,7 @@ async def capa_with_cp_blocked_modify(db, capa_d8_gate):
     }]
     await _make_done_analysis(db, capa, user, affected)
     return capa, user, cp, "old-item", "control_method"
+
+
+# Outcome-review fixtures use independent committed sessions, unlike the local db fixture.
+from tests.capa.outcome_review_support import review_case, review_http_client  # noqa: F401,E402

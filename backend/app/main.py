@@ -24,6 +24,7 @@ from app.api.audit_program import router as audit_program_router
 from app.api.auditor import router as auditor_router
 from app.api.auth import router as auth_router
 from app.api.capa import router as capa_router
+from app.api.capa_review_errors import register_capa_review_errors
 from app.api.change_impact import router as change_impact_router
 from app.api.collaboration import router as collaboration_router
 from app.api.control_plan import router as control_plan_router
@@ -535,6 +536,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)
+register_capa_review_errors(app)
 
 # Expose tenant domain for subdomain-based tenant resolution
 app.state.tenant_domain = settings.TENANT_DOMAIN

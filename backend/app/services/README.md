@@ -108,6 +108,10 @@ CLI commands in `cli/`. Conventions every caller can rely on:
   `state_machines/fmea_state.can_transition`,
   `state_machines/eight_d_state.can_transition`, etc. Never compare
   status strings inline.
+- **Reviewed CAPA material-lock helper.** `capa_review_guard.lock_material_write()`
+  provides the parent-row refresh and reviewed-content check for CAPA material
+  writers before they lock children or create audits/outbox rows. It does not
+  grant a capability or replace existing route and service permission checks.
 - **No HTTP, no FastAPI imports.** Services know about `AsyncSession`,
   ORM models, state machines, outbox queues — nothing about requests,
   responses, headers, or auth tokens. Auth context arrives as plain
