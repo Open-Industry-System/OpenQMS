@@ -729,7 +729,8 @@ async def capa_d8_gate(db: AsyncSession):
     """Create a CAPA in D8_GATE_PENDING status with factory + user (no docs)."""
     from app.models.factory import Factory
     from app.models.product_line import ProductLine
-    from app.models.role import RoleDefinition
+    from app.models.role import RoleDefinition, RolePermission, UserProductLine
+    from app.models.factory import UserFactory
     from app.models.user import User
     factory = Factory(
         id=uuid.uuid4(), code="FAC-DOCG", name="DocGate Test Factory", is_active=True,
@@ -754,6 +755,12 @@ async def capa_d8_gate(db: AsyncSession):
     db.add(ProductLine(
         code=product_line_code, name="DocGate Test Line", factory_id=factory.id,
     ))
+    await db.flush()
+    db.add_all([
+        RolePermission(role_id=role.id, module="capa", permission_level=5),
+        UserFactory(user_id=user.user_id, factory_id=factory.id),
+        UserProductLine(user_id=user.user_id, product_line_code=product_line_code),
+    ])
     await db.flush()
     capa = CAPAEightD(
         report_id=uuid.uuid4(), document_no="CAPA-DOCG-001", title="DocGate Test CAPA",

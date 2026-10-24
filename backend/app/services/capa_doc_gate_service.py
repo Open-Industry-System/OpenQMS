@@ -16,7 +16,9 @@ from app.models.audit import AuditLog
 from app.services.agent import provider_adapter
 from app.services.agent.provider_adapter import ProviderClient, ProviderNotConfiguredError
 from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
+from app.services.capa_current_access import current_capa_actor_target
 from app.services.capa_review_guard import lock_material_write
+from app.core.permissions import PermissionLevel
 
 logger = logging.getLogger(__name__)
 STALE_THRESHOLD_SECONDS = 300  # 5 min; running older than 2x = stale
@@ -149,6 +151,9 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
 
 async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict, user_id: uuid.UUID) -> dict:
     capa = await _lock_doc_gate_write(db, capa)
+    capa = await current_capa_actor_target(
+        db, user_id, capa.report_id, PermissionLevel.EDIT
+    )
     analysis_id = uuid.UUID(p1["analysis_id"])
     attempt_token = p1["attempt_token"]
     now = datetime.now(timezone.utc)

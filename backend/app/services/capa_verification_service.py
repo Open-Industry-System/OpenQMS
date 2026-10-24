@@ -4,12 +4,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import PermissionLevel
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaAIAdoption, CapaRootCauseVerification
 from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services import capa_service
 from app.services.embedding_outbox import enqueue_embedding
+from app.services.capa_current_access import current_capa_actor_target
 from app.services.capa_review_guard import (
     assert_reviewed_material_mutable,
     lock_capa_parent,
@@ -96,6 +98,9 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     # This must happen before the idempotency fast-path: returning an existing
     # adoption is still a reviewed-material write admission decision.
     capa = await lock_material_write(db, capa)
+    capa = await current_capa_actor_target(
+        db, user.user_id, capa.report_id, PermissionLevel.EDIT
+    )
     field = FIELD_MAP[req.d_step]
     # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
     # 若不归一化，pre-query 的 IS NULL 查不到刚插的 JSON null 行，重试会撞 unique index 后 re-raise 500。
@@ -109,11 +114,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         await db.refresh(capa)
         return existing, getattr(capa, field) or ""
 
-    # 锁 CAPA 行（FOR UPDATE），串行化并发采纳，防 lost update：
-    # 两个并发采纳都读到旧 current、各自追加，后提交者覆盖前者（追加丢失）
-    await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
-    # 锁后重读 capa 字段，拿到最新值再追加
-    await db.refresh(capa)
+    # The parent guard already holds the row lock and returned fresh data.
     current = getattr(capa, field) or ""
     new_value = f"{current}\n{req.adopted_text}" if current else req.adopted_text
     setattr(capa, field, new_value)

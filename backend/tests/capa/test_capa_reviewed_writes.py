@@ -1,7 +1,10 @@
 """Reviewed CAPA materials reject every writer before side effects."""
 
+import uuid
+
 import pytest
 
+from app.core.permissions import PermissionLevel
 from app.schemas.capa_verification import (
     AdoptRequest,
     D7AutoFillRequest,
@@ -65,3 +68,40 @@ async def test_core_writer_paths_reject_reviewed_capa_before_side_effects(review
             assert await review_case.snapshot(db) == before
         await db.rollback()
     assert await review_case.snapshot() == before
+
+
+@pytest.mark.asyncio
+async def test_adoption_rechecks_current_actor_permission_after_parent_lock(review_case):
+    """Would fail if an actor revoked after admission could append CAPA material."""
+    from app.models.user import User
+    from app.services.capa_verification_service import adopt_recommendation
+
+    await review_case.set_capa_level(PermissionLevel.VIEW)
+    before = await review_case.snapshot()
+    async with review_case.session_factory() as db:
+        capa = await review_case.report(db)
+        user = await db.get(User, review_case.actor_id)
+        with pytest.raises(PermissionError, match="^Current CAPA permission required$"):
+            await adopt_recommendation(db, capa, AdoptRequest(
+                d_step="d5", adopted_text="权限撤销后追加", source="manual"), user)
+        await db.rollback()
+    assert await review_case.snapshot() == before
+
+
+@pytest.mark.asyncio
+async def test_doc_gate_phase_three_rechecks_current_actor_permission(review_case):
+    """Would fail if a revoked actor could publish a completed impact attempt."""
+    from app.models.user import User
+    from app.services.capa_doc_gate_service import _phase3_cas
+
+    await review_case.set_status("D8_GATE_PENDING")
+    await review_case.set_capa_level(PermissionLevel.VIEW)
+    async with review_case.session_factory() as db:
+        capa = await review_case.report(db)
+        user = await db.get(User, review_case.actor_id)
+        with pytest.raises(PermissionError, match="^Current CAPA permission required$"):
+            await _phase3_cas(db, capa, {
+                "analysis_id": str(review_case.owned_ids["analysis_id"]),
+                "attempt_token": uuid.uuid4(),
+            }, {"llm_error": "simulated"}, user.user_id)
+        await db.rollback()
