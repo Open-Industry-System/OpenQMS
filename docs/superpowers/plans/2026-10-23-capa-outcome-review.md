@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。现从 Task 1 建立新基线；任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1 共享基础已通过规格及质量复核（覆盖测试 36 passed）；当前准备 Task 2 全写入口接线，任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
 ## Global Constraints
 
@@ -186,7 +186,7 @@ FMEA/CP 正常创建新版本继续允许；历史审核始终指向既有不可
 
 **Interfaces:** 生产接口按实现决定 §1。测试 `ReviewCase` 保存 `session_factory/report_id/actor_id/factory_id/product_line_code/verification_id`，提供 `report(db)`、`scope(db)`、`snapshot()`、`set_capa_level(level)`、`set_status(status)`；fixtures `review_case` 和 `review_http_client` 在本任务定义并从 capa conftest 导入。
 
-- [ ] **Step 1: 记录实施基线和自有资源**
+- [x] **Step 1: 记录实施基线和自有资源**
 
 ```bash
 git status --short
@@ -198,7 +198,7 @@ npm --prefix frontend ls --depth=0
 
 确认当前 worktree、已审规格与现有未提交 docs；测试环境仅登记自己创建的随机 DB/容器/端口。创建上文的私有 owned-env.sh；source 后核对随机库名与获授权 host/port，再按现有 Make 配置运行 `make check` 建基线。无法获得可用且获授权的测试环境则报告 BLOCKED，不能回退共享 qms/qms_test。本轮不得执行这些命令来代替用户对实施的确认。
 
-- [ ] **Step 2: 创建真实提交 case**
+- [x] **Step 2: 创建真实提交 case**
 
 在 support 中定义 dataclass 与以下基础实现；不从 flush-only `db` 搬未提交对象到独立 session：
 
@@ -253,7 +253,7 @@ class ReviewCase:
 
 `review_http_client` 使用真实 case session factory 和真实用户，按现有 API 单测方式注入 get_db/get_current_user/get_request_scope，使用生产 app 的路由和异常注册；每请求独立 session、真实提交/回滚，不改 authorize 返回值。真实 JWT/tenant 中间件由 Task 7 验证。
 
-- [ ] **Step 3: 写 guard RED 测试**
+- [x] **Step 3: 写 guard RED 测试**
 
 ```python
 import pytest
@@ -278,7 +278,7 @@ async def test_closed_core_is_locked(review_case, status, field):
 
 另测 fields=None、显式 null 所对应字段名、补报告不被核心 guard 错拦、pending 正常可写、父行刷新替换旧 identity-map 状态、不提交或修改其他数据。
 
-- [ ] **Step 4: 运行并记录 RED**
+- [x] **Step 4: 运行并记录 RED**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh
@@ -288,7 +288,7 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/capa/test_capa_review_gua
 
 须因 guard 不存在/缺实现而失败，不接受 DB 不可达或 fixture 未定义作为 RED。
 
-- [ ] **Step 5: 实现窄 guard**
+- [x] **Step 5: 实现窄 guard**
 
 ```python
 from sqlalchemy import select
@@ -340,7 +340,7 @@ async def lock_material_write(db, capa, fields=None):
     return fresh
 ```
 
-- [ ] **Step 6: 注册固定 409 并验证 GREEN**
+- [x] **Step 6: 注册固定 409 并验证 GREEN**
 
 新增 `backend/app/api/capa_review_errors.py` 的 `register_capa_review_errors(app) -> None`，在 main 和测试 app 调用，注册本任务四个 RuntimeError 子类的 exception handler，返回 `{'detail': 固定码}`，不回显异常自由文本。自有 FastAPI 测试 app 也必须显式注册同一窄 handler；不得仅在 main 注册后遗漏 harness。
 
