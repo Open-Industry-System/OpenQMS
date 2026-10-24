@@ -48,41 +48,46 @@ class ReviewCase:
             [self.factory_id], "EXPLICIT", [self.product_line_code],
         )
 
-    async def snapshot(self):
-        async with self.session_factory() as db:
-            capa = await self.report(db)
-            verifications = list((await db.scalars(select(CapaRootCauseVerification).where(
-                CapaRootCauseVerification.capa_id == self.report_id))).all())
-            adoptions = list((await db.scalars(select(CapaAIAdoption).where(
-                CapaAIAdoption.capa_id == self.report_id))).all())
-            node_actions = list((await db.scalars(select(CapaD7NodeAction).where(
-                CapaD7NodeAction.capa_id == self.report_id))).all())
-            analyses = list((await db.scalars(select(CapaDocgAnalysis).where(
-                CapaDocgAnalysis.capa_id == self.report_id))).all())
-            analysis_ids = [row.analysis_id for row in analyses]
-            decisions = list((await db.scalars(select(CapaDocgDecision).where(
-                CapaDocgDecision.analysis_id.in_(analysis_ids)))).all()) if analysis_ids else []
-            audits = list((await db.scalars(select(AuditLog).where(
-                AuditLog.record_id == self.report_id))).all())
-            embeddings = list((await db.scalars(select(DocumentEmbedding).where(
-                DocumentEmbedding.entity_id == self.report_id))).all())
-            outbox = list((await db.scalars(select(EmbeddingSyncOutbox).where(
-                EmbeddingSyncOutbox.entity_id == self.report_id))).all())
-            return {
-                "capa": None if capa is None else {
-                    "status": capa.status, "d4_root_cause": capa.d4_root_cause,
-                    "d5_correction": capa.d5_correction, "d6_verification": capa.d6_verification,
-                    "d7_prevention": capa.d7_prevention,
-                },
-                "verification_ids": [str(row.verification_id) for row in verifications],
-                "adoption_ids": [str(row.adoption_id) for row in adoptions],
-                "node_action_ids": [str(row.action_id) for row in node_actions],
-                "doc_gate": {"analysis_ids": [str(row.analysis_id) for row in analyses],
-                             "decisions": [row.decision for row in decisions]},
-                "successful_audits": [row.action for row in audits],
-                "embedding_ids": [str(row.id) for row in embeddings],
-                "outbox_ids": [str(row.id) for row in outbox],
-            }
+    async def snapshot(self, db=None):
+        if db is None:
+            async with self.session_factory() as snapshot_db:
+                return await self._snapshot(snapshot_db)
+        return await self._snapshot(db)
+
+    async def _snapshot(self, db):
+        capa = await self.report(db)
+        verifications = list((await db.scalars(select(CapaRootCauseVerification).where(
+            CapaRootCauseVerification.capa_id == self.report_id))).all())
+        adoptions = list((await db.scalars(select(CapaAIAdoption).where(
+            CapaAIAdoption.capa_id == self.report_id))).all())
+        node_actions = list((await db.scalars(select(CapaD7NodeAction).where(
+            CapaD7NodeAction.capa_id == self.report_id))).all())
+        analyses = list((await db.scalars(select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.capa_id == self.report_id))).all())
+        analysis_ids = [row.analysis_id for row in analyses]
+        decisions = list((await db.scalars(select(CapaDocgDecision).where(
+            CapaDocgDecision.analysis_id.in_(analysis_ids)))).all()) if analysis_ids else []
+        audits = list((await db.scalars(select(AuditLog).where(
+            AuditLog.record_id == self.report_id))).all())
+        embeddings = list((await db.scalars(select(DocumentEmbedding).where(
+            DocumentEmbedding.entity_id == self.report_id))).all())
+        outbox = list((await db.scalars(select(EmbeddingSyncOutbox).where(
+            EmbeddingSyncOutbox.entity_id == self.report_id))).all())
+        return {
+            "capa": None if capa is None else {
+                "status": capa.status, "d4_root_cause": capa.d4_root_cause,
+                "d5_correction": capa.d5_correction, "d6_verification": capa.d6_verification,
+                "d7_prevention": capa.d7_prevention,
+            },
+            "verification_ids": [str(row.verification_id) for row in verifications],
+            "adoption_ids": [str(row.adoption_id) for row in adoptions],
+            "node_action_ids": [str(row.action_id) for row in node_actions],
+            "doc_gate": {"analysis_ids": [str(row.analysis_id) for row in analyses],
+                         "decisions": [row.decision for row in decisions]},
+            "successful_audits": [row.action for row in audits],
+            "embedding_ids": [str(row.id) for row in embeddings],
+            "outbox_ids": [str(row.id) for row in outbox],
+        }
 
     async def set_status(self, status):
         async with self.session_factory() as db:

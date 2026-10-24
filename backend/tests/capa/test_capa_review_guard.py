@@ -86,6 +86,50 @@ async def test_parent_lock_refreshes_stale_identity_map_before_allowing_write(re
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status, fields", [
+    ("D8_CLOSURE", {"d4_root_cause"}),
+    ("ARCHIVED", None),
+])
+async def test_rejected_material_write_has_no_committed_or_transactional_side_effects(
+    review_case, status, fields,
+):
+    """Would fail if a rejected reviewed-material write changed data or committed it."""
+    await review_case.set_status(status)
+    before = await review_case.snapshot()
+    async with review_case.session_factory() as db:
+        capa = await review_case.report(db)
+        transaction = db.sync_session.get_transaction()
+        with pytest.raises(ReviewedContentLocked, match="^CAPA_REVIEWED_CONTENT_LOCKED$"):
+            await lock_material_write(db, capa, fields)
+        assert db.sync_session.get_transaction() is transaction
+        assert transaction.is_active
+        assert await review_case.snapshot(db) == before
+        await db.rollback()
+    assert await review_case.snapshot() == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status, fields", [
+    ("D8_APPROVAL_PENDING", {"d4_root_cause"}),
+    ("D8_CLOSURE", {"d8_closure"}),
+])
+async def test_permitted_guard_path_has_no_unrelated_side_effects(review_case, status, fields):
+    """Would fail if a permitted guard check changed material, audit, embedding, or outbox state."""
+    await review_case.set_status(status)
+    before = await review_case.snapshot()
+    async with review_case.session_factory() as db:
+        capa = await review_case.report(db)
+        transaction = db.sync_session.get_transaction()
+        fresh = await lock_material_write(db, capa, fields)
+        assert fresh.status == status
+        assert db.sync_session.get_transaction() is transaction
+        assert transaction.is_active
+        assert await review_case.snapshot(db) == before
+        await db.rollback()
+    assert await review_case.snapshot() == before
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("error_type, code", [
     (ReviewedContentLocked, "CAPA_REVIEWED_CONTENT_LOCKED"),
     (OutcomeReviewConflict, "CAPA_OUTCOME_REVIEW_CHANGED"),
