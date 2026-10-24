@@ -11,6 +11,7 @@ from app.models.capa import CapaD7NodeAction
 from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import D7AutoFillRequest, D7NodeActionCreate
 from app.services.fmea_service import _apply_fmea_update
+from app.services.capa_review_guard import lock_material_write
 from app.state_machines.eightd_state import EightDState
 
 
@@ -151,6 +152,7 @@ async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = Fa
 
 
 async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user) -> CapaD7NodeAction:
+    capa = await lock_material_write(db, capa)
     await _assert_d7_stage(capa)
     # 规则引擎兜底推荐无关联 FMEA（fmea_id=None）——跳过 FMEA 校验，仅记录 confirm/skip
     if req.fmea_id is not None:
@@ -280,6 +282,7 @@ async def list_d7_actions(db: AsyncSession, capa) -> list[CapaD7NodeAction]:
 
 
 async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
+    capa = await lock_material_write(db, capa)
     if not capa.d5_correction:
         raise ValueError("D5 永久措施为空，无法自动回填")
     if req.fmea_id is None or not req.failure_cause_node_id:

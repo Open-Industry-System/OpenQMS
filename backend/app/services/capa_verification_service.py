@@ -10,6 +10,11 @@ from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services import capa_service
 from app.services.embedding_outbox import enqueue_embedding
+from app.services.capa_review_guard import (
+    assert_reviewed_material_mutable,
+    lock_capa_parent,
+    lock_material_write,
+)
 
 FIELD_MAP = {"d4": "d4_root_cause", "d5": "d5_correction"}
 
@@ -88,6 +93,9 @@ async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest):
 
 
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
+    # This must happen before the idempotency fast-path: returning an existing
+    # adoption is still a reviewed-material write admission decision.
+    capa = await lock_material_write(db, capa)
     field = FIELD_MAP[req.d_step]
     # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
     # 若不归一化，pre-query 的 IS NULL 查不到刚插的 JSON null 行，重试会撞 unique index 后 re-raise 500。
@@ -136,13 +144,15 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         existing = await _find_existing_adoption(db, capa_id, req)
         if existing is None:
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
-        await db.refresh(capa)
+        capa = await lock_capa_parent(db, capa_id)
+        assert_reviewed_material_mutable(capa)
         return existing, getattr(capa, field) or ""
     await db.refresh(adoption)
     return adoption, new_value
 
 
 async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user):
+    capa = await lock_material_write(db, capa)
     conclusion = req.conclusion
     is_verified = (conclusion == "passed")
     if is_verified:
@@ -177,9 +187,6 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         ))
     elif conclusion == "failed":
         # 创建即 failed（罕见，但支持）→ 递增
-        # 锁后必须 refresh capa 读最新 retry_count，否则传入的 capa 对象可能缓存旧值
-        await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
-        await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
@@ -217,6 +224,9 @@ async def list_verifications(db: AsyncSession, capa):
 
 
 async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpdate, user):
+    # Parent-before-child lock ordering prevents a reviewed CAPA from being
+    # changed by a stale verification row.
+    capa = await lock_material_write(db, capa)
     # 锁 verification 行，序列化同记录并发跃迁（去重）
     rec = await db.scalar(select(CapaRootCauseVerification).where(
         CapaRootCauseVerification.verification_id == vid,
@@ -257,10 +267,6 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     # conclusion→failed 跃迁递增 retry_count（仅跃迁，防重复计；锁 capa 行防跨记录丢计数）
     conclusion_transitioned = False
     if old_conclusion != "failed" and rec.conclusion == "failed":
-        # 锁后必须 refresh capa 读最新 retry_count；不同 verification 并发失败时
-        # 各 session 的 capa 可能缓存旧 retry_count=0，不 refresh 会丢失跨记录计数
-        await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
-        await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
         passed_fields = {
             "verification_id": str(vid),

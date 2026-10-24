@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
 from app.services.embedding_outbox import enqueue_embedding
+from app.services.capa_review_guard import lock_material_write
 from app.services.product_line_service import validate_product_line
 from app.services.capa_d3_containment_service import _d3_to_d4_gate
 from app.state_machines.eightd_state import EightDState, _linear_next, can_transition, capa_open_clause
@@ -232,15 +233,9 @@ async def update_capa(
     update_data: dict,
     user_id: uuid.UUID,
 ) -> CAPAEightD:
-    # US-E2E-01.5: lock + refresh the row so the linked-SCAR invariant and PL
-    # checks below observe committed concurrent links/moves. Safety must not
-    # depend on a single API caller having locked first.
-    await db.execute(
-        select(CAPAEightD)
-        .where(CAPAEightD.report_id == capa.report_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    # Lock and refresh before every validation or side effect.  The reviewed
+    # material guard also preserves the existing concurrent-link invariant.
+    capa = await lock_material_write(db, capa, set(update_data))
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         from app.models.product_line import ProductLine
         from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
@@ -836,9 +831,9 @@ async def link_fmea(
 ) -> CAPAEightD:
     from app.models.fmea import FMEADocument
 
-    # Lock the CAPA row so concurrent identical links don't both read old and both write LINKAGE.
-    await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
-    await db.refresh(capa)
+    # Parent lock and reviewed-material check must precede lookup of the target
+    # document so a closed CAPA cannot leak or mutate linkage state.
+    capa = await lock_material_write(db, capa, {"fmea_ref_id", "fmea_node_id"})
     old_fmea_ref_id = capa.fmea_ref_id
     old_fmea_node_id = capa.fmea_node_id
     fmea = await db.get(FMEADocument, fmea_ref_id)

@@ -78,6 +78,7 @@ from app.services import capa_scar_service
 from app.services import capa_verification_service
 from app.models.supplier import SupplierSCAR
 from app.services.capa_d7_action_service import ConflictError
+from app.services.capa_current_access import current_capa_actor_target
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
@@ -534,6 +535,12 @@ async def update_capa(
     if new_pl is not None and new_pl != capa.product_line_code:
         check_product_line_access(new_pl, scope)
     try:
+        capa = await current_capa_actor_target(db, scope.user.user_id, report_id, PermissionLevel.EDIT)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
+    try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -666,6 +673,12 @@ async def link_fmea(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
+    try:
+        capa = await current_capa_actor_target(db, scope.user.user_id, report_id, PermissionLevel.EDIT)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     try:
         capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
     except LookupError:
@@ -2053,7 +2066,12 @@ async def _load_capa_for_doc_gate(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     _d3_check_scope(capa, scope)
-    return capa
+    try:
+        return await current_capa_actor_target(db, scope.user.user_id, report_id, min_level)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"需要 capa 模块的 {min_level.name} 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
 
 
 @router.post("/{report_id}/doc-gate/impact")

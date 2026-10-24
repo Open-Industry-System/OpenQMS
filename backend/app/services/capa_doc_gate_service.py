@@ -16,11 +16,20 @@ from app.models.audit import AuditLog
 from app.services.agent import provider_adapter
 from app.services.agent.provider_adapter import ProviderClient, ProviderNotConfiguredError
 from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
+from app.services.capa_review_guard import lock_material_write
 
 logger = logging.getLogger(__name__)
 STALE_THRESHOLD_SECONDS = 300  # 5 min; running older than 2x = stale
 RETRY_AFTER_SECONDS = 2
 _ALLOWED_NODE_TYPES = {"FailureMode", "FailureEffect", "FailureCause", "ProcessStep", "Function", "WorkElement"}
+
+
+async def _lock_doc_gate_write(db: AsyncSession, capa: CAPAEightD) -> CAPAEightD:
+    """Lock CAPA material before mutating a D8 document-gate record."""
+    capa = await lock_material_write(db, capa)
+    if capa.status != "D8_GATE_PENDING":
+        raise ValueError("当前状态不可写入文档门禁")
+    return capa
 
 
 async def generate_impact_analysis(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
@@ -49,11 +58,8 @@ async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD) -> dict | None
 # ---------------------------------------------------------------------------
 
 async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
-    # Lock capa row
-    await db.execute(
-        text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"),
-        {"cid": capa.report_id},
-    )
+    capa = await _lock_doc_gate_write(db, capa)
+    # The parent lock is retained through phase 1's small transaction.
     # Demote old current (fail-closed: before credential check)
     await db.execute(
         update(CapaDocgAnalysis)
@@ -142,6 +148,7 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict, user_id: uuid.UUID) -> dict:
+    capa = await _lock_doc_gate_write(db, capa)
     analysis_id = uuid.UUID(p1["analysis_id"])
     attempt_token = p1["attempt_token"]
     now = datetime.now(timezone.utc)
@@ -724,6 +731,7 @@ from app.services.diff_engine import diff_fmea_graphs, diff_cp_headers
 
 async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
     """Audit each affected doc's version bump + key-point coverage. Insert audit + decision rows."""
+    capa = await _lock_doc_gate_write(db, capa)
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
@@ -1018,6 +1026,7 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
     product-line filtering, NOT factory scope (factory_scope.py docstring) — do
     not treat it as group-admin cross-factory access.
     """
+    capa = await _lock_doc_gate_write(db, capa)
     if not reason or not str(reason).strip():
         raise ValueError("defer reason 必填")
     from app.models.user import User
@@ -1056,6 +1065,7 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
 
 async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
     """Engineer confirms an empty affected_docs list is correct -> decision=passed (no_affected_confirmed)."""
+    capa = await _lock_doc_gate_write(db, capa)
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
@@ -1104,6 +1114,7 @@ async def record_gate_waiver(
 
     Caller must require APPROVE permission on the capa module (enforced in API).
     """
+    capa = await _lock_doc_gate_write(db, capa)
     if not reason or not str(reason).strip():
         raise ValueError("waiver reason 必填")
     if not items:

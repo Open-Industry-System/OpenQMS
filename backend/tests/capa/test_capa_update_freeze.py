@@ -3,6 +3,7 @@ import uuid
 import pytest
 from app.models.capa import CAPAEightD
 from app.services.capa_service import update_capa
+from app.services.capa_review_guard import ReviewedContentLocked
 
 pytestmark = pytest.mark.requires_db
 
@@ -55,14 +56,14 @@ async def test_d8_closure_allows_d8_closure_edit(db, default_factory, admin_user
 async def test_d8_closure_freezes_d7_prevention(db, default_factory, admin_user):
     """D7 永久冻结：D8_CLOSURE 态也不可改 d7_prevention。"""
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "D8_CLOSURE")
-    with pytest.raises(ValueError, match="冻结字段不可修改"):
+    with pytest.raises(ReviewedContentLocked, match="^CAPA_REVIEWED_CONTENT_LOCKED$"):
         await update_capa(db, capa, {"d7_prevention": "改写"}, admin_user.user_id)
 
 
 @pytest.mark.asyncio
 async def test_archived_freezes_all(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "ARCHIVED")
-    with pytest.raises(ValueError, match="冻结字段不可修改"):
+    with pytest.raises(ReviewedContentLocked, match="^CAPA_REVIEWED_CONTENT_LOCKED$"):
         await update_capa(db, capa, {"d7_prevention": "改"}, admin_user.user_id)
     with pytest.raises(ValueError, match="冻结字段不可修改"):
         await update_capa(db, capa, {"d8_closure": "改"}, admin_user.user_id)

@@ -381,6 +381,12 @@ async def delete_control_plan(
     db: AsyncSession, cp: ControlPlan, user_id: uuid.UUID
 ) -> None:
     """Delete a control plan and log the action."""
+    from app.services.capa_review_source_guard import (
+        assert_source_references_unchanged,
+        lock_source_capa_references,
+    )
+
+    locked_capa_ids = await lock_source_capa_references(db, "control_plan", cp.cp_id)
     observed_product_line = cp.product_line_code
     await lock_candidate_scopes(
         db, [(cp.factory_id, observed_product_line)]
@@ -400,6 +406,7 @@ async def delete_control_plan(
         raise ValueError("product_line_changed_again")
 
     cp_id = fresh.cp_id
+    await assert_source_references_unchanged(db, "control_plan", cp_id, locked_capa_ids)
     await db.delete(fresh)
 
     await create_audit_log(

@@ -112,6 +112,9 @@ CLI commands in `cli/`. Conventions every caller can rely on:
   provides the parent-row refresh and reviewed-content check for CAPA material
   writers before they lock children or create audits/outbox rows. It does not
   grant a capability or replace existing route and service permission checks.
+  `capa_review_source_guard` locks technical CAPA references before FMEA or
+  Control Plan deletion, then rechecks the reference set under the document
+  lock; reviewed references reject deletion without loading CAPA material.
 - **No HTTP, no FastAPI imports.** Services know about `AsyncSession`,
   ORM models, state machines, outbox queues — nothing about requests,
   responses, headers, or auth tokens. Auth context arrives as plain

@@ -68,3 +68,13 @@ async def current_capa_target(db, report_id, factories, lines):
             factories, lines).execution_options(populate_existing=True))
     if target is None: raise LookupError('8D report not found')
     return target
+
+
+async def current_capa_actor_target(db, actor_id, report_id, required_level: PermissionLevel) -> CAPAEightD:
+    """Resolve fresh CAPA access from the server-side actor identity only."""
+    levels, factories, lines = await current_capa_access(
+        db, SimpleNamespace(user=SimpleNamespace(user_id=actor_id))
+    )
+    if levels.get(Module.CAPA, PermissionLevel.NONE) < required_level:
+        raise PermissionError('Current CAPA permission required')
+    return await current_capa_target(db, report_id, factories, lines)
