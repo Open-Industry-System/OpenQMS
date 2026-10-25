@@ -100,10 +100,11 @@ async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest):
 
 
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
+    actor_id = user.user_id  # rollback expires even the persisted User PK
     # This must happen before the idempotency fast-path: returning an existing
     # adoption is still a reviewed-material write admission decision.
     capa = await lock_current_material_write(
-        db, capa, user.user_id, PermissionLevel.EDIT
+        db, capa, actor_id, PermissionLevel.EDIT
     )
     field = FIELD_MAP[req.d_step]
     # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
@@ -126,7 +127,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         capa_id=capa.report_id, factory_id=capa.factory_id,
         d_step=req.d_step, adopted_text=req.adopted_text,
         source=req.source, stage_index=req.stage_index, item_ref=req.item_ref,
-        adopted_by=user.user_id,
+        adopted_by=actor_id,
     )
     db.add(adoption)
     db.add(AuditLog(
@@ -136,7 +137,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
             "d_step": req.d_step, "source": req.source, "stage_index": req.stage_index,
             "adopted_text": req.adopted_text, "item_ref": req.item_ref,
         },
-        operated_by=user.user_id, factory_id=capa.factory_id,
+        operated_by=actor_id, factory_id=capa.factory_id,
     ))
     if field in capa_service.EMBEDDING_FIELDS:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
@@ -151,7 +152,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
         capa = await lock_capa_parent(db, capa_id)
         capa = await lock_current_material_write(
-            db, capa, user.user_id, PermissionLevel.EDIT
+            db, capa, actor_id, PermissionLevel.EDIT
         )
         return existing, getattr(capa, field) or ""
     await db.refresh(adoption)

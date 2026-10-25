@@ -4,6 +4,8 @@
 
 > **2026-10-25 Task 2 fix round 1 takeover**：补齐真实 HTTP 终态/撤权/目标迁移、FMEA/CP 实际删除、来源变体/畸形 JSON、正常版本演进及 PostgreSQL 真提交竞争验收。追加修正 PUT fresh admission 前重复取锁、waiver 锁后 APPROVE 门槛与历史 planning 来源别名；沿用同一自有测试库，不执行完整 `make check`、迁移或后续任务。最终同树聚焦回归 **411 passed / 3 既有 warnings**；证据及 I1–I8 对照见 `.superpowers/sdd/2026-10-23-capa-outcome-review/task-2-report.md` takeover 节；本轮仍待控制方独立复核，不声明已通过审核。
 
+> **2026-10-25 Task 2 fix round 2/5**：复核仅余 I1（D7 来源权限锁等待重查）与新增 B1（采纳回滚后 User 过期）。本轮仅补 D7 当前 FMEA VIEW/EDIT 在父锁/来源锁后的校验，以及回滚前保留可信 actor UUID；新增 13 项真实提交/锁等待/实际唯一冲突回滚用例，完整 Task 2 聚焦回归 **424 passed / 3 既有 warnings**。增量复核 BASE 为 `5665228f`；等待控制方独立复核，不重开 I2–I8 或后续任务。
+
 > **2026-10-19 R4b-2 已完成**：默认关闭的任务私有附件、真实扫描门禁、受权下载/删除与可恢复保留期清理已验收。最终冻结 `make check` **2999 passed / 12 skipped / 3 xfailed / 2 xpassed，exit 0**；前端 **95 项**及类型/构建、实际 ClamAV **7 项**和 Chromium **1 项**通过；1371 个源码/配置指纹未变，自有验收资源已清理。完整证据见[实施计划](docs/superpowers/plans/2026-10-09-agent-task-controlled-attachments.md)，运行边界见[操作指南](docs/development/agent-task-attachments.md)。没有 push/合并/部署；插件/模型附件投递与生产部署仍未开放。
 
 **更新日期**: 2026-10-25

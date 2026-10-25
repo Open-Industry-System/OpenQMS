@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import uuid
+from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -11,8 +12,9 @@ from app.models.capa import CapaD7NodeAction
 from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import D7AutoFillRequest, D7NodeActionCreate
 from app.services.fmea_service import _apply_fmea_update
-from app.services.capa_review_guard import lock_current_material_write
-from app.core.permissions import PermissionLevel
+from app.services.capa_current_access import current_capa_access, current_capa_target
+from app.services.capa_review_guard import lock_capa_parent, assert_reviewed_material_mutable
+from app.core.permissions import Module, PermissionLevel
 from app.state_machines.eightd_state import EightDState
 
 
@@ -152,9 +154,32 @@ async def _fetch_fmea_for_d7(db: AsyncSession, capa, fmea_id, *, lock: bool = Fa
     return fmea
 
 
+async def _current_d7_actor_target(db, capa, actor_id, fmea_level):
+    """Resolve both existing module minima from the current server-side actor."""
+    levels, factories, lines = await current_capa_access(
+        db, SimpleNamespace(user=SimpleNamespace(user_id=actor_id))
+    )
+    if levels.get(Module.CAPA, PermissionLevel.NONE) < PermissionLevel.EDIT:
+        raise PermissionError("Current CAPA permission required")
+    capa = await current_capa_target(db, capa.report_id, factories, lines)
+    if levels.get(Module.FMEA, PermissionLevel.NONE) < fmea_level:
+        raise PermissionError(f"需要 fmea 模块的 {fmea_level.name} 权限")
+    return capa
+
+
+async def _lock_d7_material_write(db, capa, actor_id, fmea_level):
+    # Source authority must precede terminal disclosure, including after a
+    # parent wait; the ordinary CAPA-only guard cannot enforce this minimum.
+    capa = await _current_d7_actor_target(db, capa, actor_id, fmea_level)
+    capa = await lock_capa_parent(db, capa.report_id)
+    capa = await _current_d7_actor_target(db, capa, actor_id, fmea_level)
+    assert_reviewed_material_mutable(capa)
+    return capa
+
+
 async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user) -> CapaD7NodeAction:
-    capa = await lock_current_material_write(
-        db, capa, user.user_id, PermissionLevel.EDIT
+    capa = await _lock_d7_material_write(
+        db, capa, user.user_id, PermissionLevel.VIEW
     )
     await _assert_d7_stage(capa)
     # 规则引擎兜底推荐无关联 FMEA（fmea_id=None）——跳过 FMEA 校验，仅记录 confirm/skip
@@ -285,7 +310,7 @@ async def list_d7_actions(db: AsyncSession, capa) -> list[CapaD7NodeAction]:
 
 
 async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
-    capa = await lock_current_material_write(
+    capa = await _lock_d7_material_write(
         db, capa, user.user_id, PermissionLevel.EDIT
     )
     if not capa.d5_correction:
@@ -297,6 +322,9 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     # 锁 FMEA 行（FOR UPDATE），串行化并发 auto-fill；必须在读 graph_data 之前锁，
     # 否则两个并发请求都读到旧 graph、都过既有行检查，一个 commit 时撞 unique index → 500
     fmea = await _fetch_fmea_for_d7(db, capa, req.fmea_id, lock=True)
+    # The source lock can also wait while role grants change. Keep the parent
+    # already held, but recheck live CAPA/FMEA authority before source mutation.
+    capa = await _current_d7_actor_target(db, capa, user.user_id, PermissionLevel.EDIT)
     # 先查既有行：已 auto_filled 直接 409，必须在改 FMEA graph 之前，避免污染 session
     existing = await db.scalar(select(CapaD7NodeAction).where(
         CapaD7NodeAction.capa_id == capa.report_id,

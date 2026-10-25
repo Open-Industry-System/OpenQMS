@@ -124,6 +124,10 @@ CLI commands in `cli/`. Conventions every caller can rely on:
   aliases Control Plan identities. JSON-only doc-gate audit creators serialize
   CAPA → ProductLine → document and revalidate after locking, so they cannot
   commit a dangling reference in deletion's final-recheck interval.
+  D7 additionally rechecks live FMEA VIEW (confirmation) or EDIT (auto-fill)
+  before terminal disclosure after the parent wait; auto-fill rechecks both
+  modules again after its source-document wait. Adoption rollback recovery
+  retains a trusted actor UUID scalar, never an expired User attribute.
 - **No HTTP, no FastAPI imports.** Services know about `AsyncSession`,
   ORM models, state machines, outbox queues — nothing about requests,
   responses, headers, or auth tokens. Auth context arrives as plain

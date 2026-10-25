@@ -497,3 +497,232 @@ async def test_terminal_http_preserves_source_and_waiver_minima(review_case, rev
         body = {"reason": "waive", "items": [{"doc_type": "control_plan", "doc_id": str(uuid.uuid4()), "target_key": "item", "field": "control_method"}]}
     response = await review_http_client.post(f"/api/capa/{review_case.report_id}/" + path, json=body)
     assert response.status_code == expected, response.text
+
+
+async def _prepare_d7_permission_case(case, sources, operation):
+    from sqlalchemy import update
+    from app.models.fmea import FMEADocument
+    from app.models.role import RolePermission
+    async with case.session_factory() as db:
+        fmea = await db.get(FMEADocument, sources.fmea_id)
+        fmea.graph_data = {"nodes": [
+            {"id": "fm-1", "type": "FailureMode", "name": "虚焊"},
+            {"id": "c-1", "type": "FailureCause", "name": "参数偏移"},
+        ], "edges": [{"source": "c-1", "target": "fm-1", "type": "CAUSE_OF"}]}
+        capa = await case.report(db)
+        capa.status = "D7_PREVENTION"
+        capa.fmea_ref_id = sources.fmea_id
+        capa.fmea_node_id = "fm-1"
+        await db.execute(update(RolePermission).where(RolePermission.role_id == case.owned_ids["role_id"],
+            RolePermission.module == "fmea").values(permission_level=1 if operation == "record" else 3))
+        await db.execute(update(RolePermission).where(RolePermission.role_id == case.owned_ids["role_id"],
+            RolePermission.module == "capa").values(permission_level=3))
+        await db.commit()
+    body = {"fmea_id": str(sources.fmea_id), "failure_mode_node_id": "fm-1",
+            "failure_cause_node_id": "c-1", "match_source": "linked"}
+    if operation == "record":
+        body["action"] = "confirmed"
+    return body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["D7_PREVENTION", "D8_CLOSURE", "ARCHIVED"])
+@pytest.mark.parametrize("operation", ["record", "auto-fill"])
+async def test_d7_source_revocation_during_real_parent_wait(review_case, review_sources, review_http_client, operation, status):
+    """I1: source minima must be live after parent wait and before terminal disclosure."""
+    import asyncio
+    from sqlalchemy import select, text, update
+    from app.models.capa import CAPAEightD
+    from app.models.role import RolePermission
+    from app.main import app
+    from app.core.deps import get_db
+    from tests.capa.outcome_review_support import wait_for_pg_blocker
+    body = await _prepare_d7_permission_case(review_case, review_sources, operation)
+    original_db = app.dependency_overrides[get_db]
+    started = asyncio.Event()
+    pids = {}
+    async def observed_db():
+        async for db in original_db():
+            pids["writer"] = await db.scalar(text("SELECT pg_backend_pid()"))
+            started.set()
+            yield db
+    app.dependency_overrides[get_db] = observed_db
+    request = None
+    try:
+        async with review_case.session_factory() as blocker:
+            pid = await blocker.scalar(text("SELECT pg_backend_pid()"))
+            capa = await blocker.scalar(select(CAPAEightD).where(CAPAEightD.report_id == review_case.report_id).with_for_update())
+            capa.status = status
+            await blocker.flush()
+            route = "d7-node-actions" if operation == "record" else "d7-auto-fill"
+            request = asyncio.create_task(review_http_client.post(f"/api/capa/{review_case.report_id}/" + route, json=body))
+            await asyncio.wait_for(started.wait(), 5)
+            await wait_for_pg_blocker(review_case, pids["writer"], pid)
+            async with review_case.session_factory() as revoker:
+                await revoker.execute(update(RolePermission).where(RolePermission.role_id == review_case.owned_ids["role_id"],
+                    RolePermission.module == "fmea").values(permission_level=0 if operation == "record" else 1))
+                await revoker.commit()
+            # Capture expected post-blocker state before releasing the writer.
+            before = await review_case.snapshot(blocker)
+            source_before = await review_sources.snapshot(blocker)
+            await blocker.commit()
+        response = await asyncio.wait_for(request, 10)
+        assert response.status_code == 403, response.text
+        assert "CAPA_REVIEWED_CONTENT_LOCKED" not in response.text
+        assert await review_case.snapshot() == before
+        async with review_case.session_factory() as db:
+            assert await review_sources.snapshot(db) == source_before
+    finally:
+        app.dependency_overrides[get_db] = original_db
+        if request is not None:
+            if not request.done():
+                request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_d7_auto_fill_rechecks_source_authority_after_real_fmea_wait(review_case, review_sources, review_http_client):
+    """I1: retaining the parent does not freeze source grants while FMEA is locked."""
+    import asyncio
+    from sqlalchemy import select, text, update
+    from app.models.fmea import FMEADocument
+    from app.models.role import RolePermission
+    from app.main import app
+    from app.core.deps import get_db
+    from tests.capa.outcome_review_support import wait_for_pg_blocker
+    body = await _prepare_d7_permission_case(review_case, review_sources, "auto-fill")
+    before = await review_case.snapshot()
+    async with review_case.session_factory() as db:
+        source_before = await review_sources.snapshot(db)
+    original_db = app.dependency_overrides[get_db]
+    started = asyncio.Event()
+    pids = {}
+    async def observed_db():
+        async for db in original_db():
+            pids["writer"] = await db.scalar(text("SELECT pg_backend_pid()"))
+            started.set()
+            yield db
+    app.dependency_overrides[get_db] = observed_db
+    request = None
+    try:
+        async with review_case.session_factory() as blocker:
+            pid = await blocker.scalar(text("SELECT pg_backend_pid()"))
+            await blocker.execute(select(FMEADocument).where(FMEADocument.fmea_id == review_sources.fmea_id).with_for_update())
+            request = asyncio.create_task(review_http_client.post(f"/api/capa/{review_case.report_id}/d7-auto-fill", json=body))
+            await asyncio.wait_for(started.wait(), 5)
+            await wait_for_pg_blocker(review_case, pids["writer"], pid)
+            async with review_case.session_factory() as revoker:
+                await revoker.execute(update(RolePermission).where(RolePermission.role_id == review_case.owned_ids["role_id"],
+                    RolePermission.module == "fmea").values(permission_level=1))
+                await revoker.commit()
+            await blocker.commit()
+        response = await asyncio.wait_for(request, 10)
+        assert response.status_code == 403, response.text
+        assert await review_case.snapshot() == before
+        async with review_case.session_factory() as db:
+            assert await review_sources.snapshot(db) == source_before
+    finally:
+        app.dependency_overrides[get_db] = original_db
+        if request is not None:
+            if not request.done():
+                request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["record", "auto-fill"])
+async def test_d7_actual_open_write_preserves_distinct_source_minima(review_case, review_sources, review_http_client, operation):
+    """Confirmation needs FMEA VIEW only; graph auto-fill needs EDIT, not APPROVE."""
+    from app.models.fmea import FMEADocument
+    body = await _prepare_d7_permission_case(review_case, review_sources, operation)
+    route = "d7-node-actions" if operation == "record" else "d7-auto-fill"
+    response = await review_http_client.post(f"/api/capa/{review_case.report_id}/" + route, json=body)
+    assert response.status_code == 200, response.text
+    async with review_case.session_factory() as db:
+        fmea = await db.get(FMEADocument, review_sources.fmea_id)
+        controls = [n for n in fmea.graph_data["nodes"] if n["type"] == "PreventionControl"]
+        if operation == "record":
+            assert response.json()["action"] == "confirmed"
+            assert controls == []
+        else:
+            assert len(controls) == 1
+            assert controls[0]["name"] == (await review_case.report(db)).d5_correction
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", ["existing", "revoked", "terminal", "invisible"])
+async def test_adoption_real_rollback_recovers_with_same_session_user(review_case, monkeypatch, recovery):
+    """B1: actual unique violation/rollback expires User; fallback still locks and authorizes."""
+    import asyncio
+    from sqlalchemy import inspect, select, text, delete
+    from app.models.capa import CAPAEightD
+    from app.models.role import UserProductLine
+    from app.models.user import User
+    from app.services import capa_verification_service as service
+    from tests.capa.outcome_review_support import wait_for_pg_blocker
+    req = AdoptRequest(d_step="d5", adopted_text="persisted rollback adoption", source="manual")
+    await review_case.set_status("D5_CORRECTION")
+    async with review_case.session_factory() as db:
+        adoption, _ = await service.adopt_recommendation(db, await review_case.report(db), req, await db.get(User, review_case.actor_id))
+        adoption_id = adoption.adoption_id
+    reached_recovery, resume = asyncio.Event(), asyncio.Event()
+    original_find = service._find_existing_adoption
+    count = 0
+    same_user = None
+    async def miss_once(db, capa_id, request):
+        nonlocal count
+        count += 1
+        if count == 1:
+            # Only the initial dedupe read misses. The real INSERT and real
+            # commit encounter the existing database unique index; neither
+            # commit nor rollback is replaced with a flush/fake exception.
+            return None
+        assert inspect(same_user).persistent
+        assert inspect(same_user).session is db.sync_session
+        assert inspect(same_user).expired
+        # NullPool returns a new physical backend after real rollback.
+        pids["writer"] = await db.scalar(text("SELECT pg_backend_pid()"))
+        reached_recovery.set()
+        await asyncio.wait_for(resume.wait(), 10)
+        return await original_find(db, capa_id, request)
+    monkeypatch.setattr(service, "_find_existing_adoption", miss_once)
+    pids = {}
+    async def writer():
+        nonlocal same_user
+        async with review_case.session_factory() as db:
+            pids["writer"] = await db.scalar(text("SELECT pg_backend_pid()"))
+            same_user = await db.get(User, review_case.actor_id)
+            return await service.adopt_recommendation(db, await review_case.report(db), req, same_user)
+    task = asyncio.create_task(writer())
+    try:
+        await asyncio.wait_for(reached_recovery.wait(), 5)
+        async with review_case.session_factory() as blocker:
+            pid = await blocker.scalar(text("SELECT pg_backend_pid()"))
+            capa = await blocker.scalar(select(CAPAEightD).where(CAPAEightD.report_id == review_case.report_id).with_for_update())
+            resume.set()
+            await wait_for_pg_blocker(review_case, pids["writer"], pid)
+            if recovery == "revoked":
+                await review_case.set_capa_level(PermissionLevel.VIEW)
+            elif recovery == "terminal":
+                capa.status = "D8_CLOSURE"
+            elif recovery == "invisible":
+                async with review_case.session_factory() as revoker:
+                    await revoker.execute(delete(UserProductLine).where(UserProductLine.user_id == review_case.actor_id))
+                    await revoker.commit()
+            before = await review_case.snapshot(blocker)
+            await blocker.commit()
+        if recovery == "existing":
+            adoption, field_value = await asyncio.wait_for(task, 10)
+            assert adoption.adoption_id == adoption_id
+            assert field_value.count(req.adopted_text) == 1
+        else:
+            error = {"revoked": PermissionError, "terminal": ReviewedContentLocked, "invisible": LookupError}[recovery]
+            with pytest.raises(error):
+                await asyncio.wait_for(task, 10)
+        assert count == 2
+        assert await review_case.snapshot() == before
+    finally:
+        resume.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
