@@ -1,5 +1,24 @@
 # OpenQMS 开发进度
 
+> **2026-10-25 CAPA 结果审核 Task 3 实施完成、待独立复核**：基于 `44633b72`，新增完整受控 outcome reader、严格 DTO/GET、tenant-bound RR/只读快照、独立最终当前权限/来源/版本门禁、稳定 HMAC/轮次及历史回执兼容。保留真实 FMEA/CP 历史版本，不用最新图改绑旧审批；D7 支持其他同范围 FMEA；无 GET 写入、迁移、候选、provider 路径或新开关。最终同树聚焦回归 **217 passed / 3 既有 Pydantic warnings / 0 skipped、xfail、xpass，exit 0，197.99 秒**；包含完整 Task 3、R4b-1 service/schema/API、R4a readonly delivery、当前 FMEA 反查及共享 guard。Task 4 D8 决定生产/绑定尚未实施；本片尚未经过独立规格/质量复核。
+
+### Task 3 本次验证记录（2026-10-25）
+
+- [x] 完整 D4–D7/子集合字段与版本、稳定排序、证据和 source_ref、门禁 decision/revision/version_snapshot；100 条 UUID keyset 批次，超过 200 行仍完整。状态、D8 DTO/补充、report updated_at 和 generation 不进入核心 HMAC。
+- [x] 当前 CAPA/FMEA/PLANNING 权限、身份/角色停用、产品线成员撤销、目标/来源工厂和产品线迁移；RR 内真实外部提交不混版，快照后及最终 DTO 组装后的撤权拒绝旧正文。
+- [x] 真实提交 ReviewCase、两完整租户同 UUID/public sentinel、伪造/缺 TenantBinding 拒绝、维护 generation 后持久版本不变；真实员工 HTTP 成功，refresh/runtime/plugin 凭据拒绝。
+- [x] 源版本 object/factory/hash、历史节点/CAUSE_OF；FMEA/CP 正常新版本不影响旧审批。必要来源缺绑定/未知形状/不可读整次失败；legacy pending 精确 UUID5，legacy closed 不造审批；密钥轮换/坏 HMAC 标记 unverifiable，不改历史记录。补充文本与编辑人/时间来自实际 UPDATE 审计。
+- [x] 真实 8 MiB text/JSON/source-validator 字段预检、JSON 编码膨胀、独立 response 预算、固定 409；SQL 观察证明超限正文未加载，GET 不写业务/audit/embedding/outbox。
+- **RED→GREEN**（所有日志均在私有 `.superpowers/sdd/2026-10-23-capa-outcome-review/`，不含环境凭据）：`focused-20261025T054328902104.log` 为初始 23 failed（缺 reader）；`054507232745` 为 23 passed。`054629911389` 为 source/API 5 failed /16 passed（gate 排序、GET 缺失）；`054703807915` 为 44 passed。`055036674047` 为 D7 历史 CAUSE_OF 1 failed /16 passed；`055355943962` 为证据排序 1 failed。`055658931110` 为畸形 source module/Unicode HMAC 3 failed /6 passed；`055737784934` 为现有版本 validator 的大 change_summary 未预检 1 failed /1 passed。自检追加 `060434299360` 为最终 DTO 后撤权 3 failed；均在最终 217-case GREEN 中通过。中间两次测试自身问题（response 长度 null→string 的 2-byte 差值、非空 PL fixture、refresh helper tuple）已更正，不算产品缺陷 RED。
+- **最终命令**（工作目录为本独立 worktree；wrapper 每次静态读取已登记 owned env、清空 provider keys/E2E_MODE、脱敏输出）：
+
+```bash
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_review.py tests/capa/test_capa_outcome_sources.py tests/capa/test_capa_outcome_api.py tests/capa/test_capa_outcome_boundaries.py tests/capa/test_capa_outcome_namespace.py tests/capa/test_capa_outcome_d7.py tests/capa/test_d4_text_preview.py tests/capa/test_d4_text_preview_schemas.py tests/api/test_d4_text_preview.py tests/services/agent_runtime/test_readonly_delivery.py tests/capa/test_capa_by_fmea_node_sources.py tests/capa/test_capa_by_fmea_node_api.py tests/capa/test_capa_review_guard.py -q
+```
+
+- **最终输出**：`217 passed, 3 warnings in 197.99s (0:03:17)`；完整脱敏日志 `focused-20261025T060513145952.log`，exit 0。没有重跑完整基线/Task 8 freeze，也没有把历史 2999/424 当作本次结果。前端未修改，未运行前端 build；未安装依赖或浏览器、重建基础设施、触碰主 checkout、push/merge/deploy。
+- **自检与交接**：复用原 current-access 和 source integrity validators，保留 reader 旧接口；parent/source 写锁协议未改。新增 collector 不是授权入口；Task 4 仍须在实际写事务重查 actor/source 权限并持有既定锁。Task 4 必须实际生产并核对嵌套 `{contract, round_id, revision, source_versions}` 回执；本次仅通过真实提交的测试回执验证消费端。API/services README 已同步；等待独立复核后再推进 Task 4。
+
 > **2026-10-25 CAPA 结果审核 Task 1–2 已验收，准备 Task 3**：[八任务计划](docs/superpowers/plans/2026-10-23-capa-outcome-review.md)持续按用户授权执行。Task 1 共享基础复核通过；Task 2 已接通终态写保护、当前权限重查、来源删除与 JSON 引用锁协议，两轮修正后规格/质量复核均通过（最终代码 `acc54804`）。完整聚焦回归 **424 passed /3 既有 warnings**，包含真实 HTTP、源权限与目标范围撤销、FMEA/CP 删除及 PostgreSQL 实际锁等待/回滚竞争。以下 fix round 条目为历史实施记录，以本条最终验收状态为准。下一任务为受控读取和版本 DTO，整片结果审核/界面/最终验收尚未完成；不 push/合并/部署。
 
 > **2026-10-25 Task 2 fix round 1 takeover**：补齐真实 HTTP 终态/撤权/目标迁移、FMEA/CP 实际删除、来源变体/畸形 JSON、正常版本演进及 PostgreSQL 真提交竞争验收。追加修正 PUT fresh admission 前重复取锁、waiver 锁后 APPROVE 门槛与历史 planning 来源别名；沿用同一自有测试库，不执行完整 `make check`、迁移或后续任务。最终同树聚焦回归 **411 passed / 3 既有 warnings**；证据及 I1–I8 对照见 `.superpowers/sdd/2026-10-23-capa-outcome-review/task-2-report.md` takeover 节；本轮仍待控制方独立复核，不声明已通过审核。
@@ -11,7 +30,7 @@
 **更新日期**: 2026-10-25
 **当前分支**: `feature/agent-task-runtime-foundation`
 **基线**: `7503e9e5`（独立工作树，未合入主工作区）
-**当前阶段**: R1–R4b-2 已完整验收；原 R4b-3 候选审批提案撤回，CAPA 实施结果集中审核设计已复核通过，实施计划已确认，Task 1–2 已复核通过，Task 3 受控读取及审核版本准备中。保留独立工作树及此前用户授权本地提交，未 push/合并/部署；Agent 新能力仍默认关闭。
+**当前阶段**: R1–R4b-2 已完整验收；原 R4b-3 候选审批提案撤回，CAPA 实施结果集中审核设计已复核通过，实施计划已确认，Task 1–2 已复核通过，Task 3 受控读取及审核版本已实现、217-case 聚焦回归通过，等待独立复核；Task 4 决定绑定尚未实施。保留独立工作树及此前用户授权本地提交，未 push/合并/部署；Agent 新能力仍默认关闭。
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
@@ -41,7 +60,7 @@
 - **R4a 实施中（2026-10-05）**：用户已确认书面方案，另行明确授权自有随机 `_test` 库的创建/迁移/清理。保留 R1–R3 原有改动基线；相关后端基线 `526 passed`，前端类型/构建通过。Task1 严格启动策略与请求会话快照接入红绿验证 `53 passed`；Task2 规范 profile/精确绑定与默认拒绝回归 `85 passed`，正常 grant→目录→建任务及绑定变更 `8 passed`。广回归 `606 passed`、运行 API 回归 `26 passed`、撤销/真实事务与凭据回归 `61 passed`，最终 R4a 新契约/规范权限/正常 CLI/Chromium 聚焦 `147 passed`。冻结前端类型/构建、74项单测及 E2E 类型检查通过，独立复核未发现具体重要缺陷；1197个源码/配置文件已冻结且未变化，相关47个文档链接及差异检查通过。完整全新隔离库冻结后端 **2859 passed / 4 skipped / 3 xfailed / 2 xpassed（1977.86秒，exit0）** 通过；4项skip为Redis1与旧E2E_MODE端点3，既有MES非严格预期失败/通过标记保留，沿用Makefile两项graph测试排除。R4a整片验收结束，自有主测试库与插件/Vite/浏览器进程已清理；另4个目录创建于2026-09-27/28的存量随机临时库未删除。默认关闭，不启用用户或生产环境。详见[六任务计划与执行台账](docs/superpowers/plans/2026-10-02-agent-metadata-local-trial.md)。
 - **R4b-1 设计中（2026-10-05）**：用户已选择“D4正文脱敏底座”与“规则＋显式替换词”。首片只覆盖 d4_root_cause 及验证 root_cause_text/result，生成平台内部只读候选，全部仍为restricted，不扩到附件/模型/插件正文或业务写入。[书面设计](docs/superpowers/specs/2026-10-05-capa-d4-text-redaction-foundation-design.md)已写入，包含当前CAPA/FMEA来源权限、默认关闭、预算、内容安全422、源版本/短期失效和审计；尚待书面审阅，未实现新接口或运行新片测试。
 - **R4b-1 实施中（2026-10-06）**：用户确认书面设计并按[六任务计划](docs/superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)执行。相关新基线186项及前端类型/构建通过；纯规则/DTO42项、受权快照17项、普通用户API4项红绿验证通过，共享当前访问抽取及旧运行时回归643项。本片与R4a/R3实际进程/浏览器聚焦119项通过，前端相关40项及类型/构建/E2E类型检查通过。独立复核两项收口已红绿修正：服务端失权/不确定性同时清空显式词；成功快照仅查询批准正文/来源元数据。修正后服务/API/实际Chromium25项与前端40项通过；1214个源码/配置已冻结；2026-10-06完整新库后端 **2926 passed /4 skipped /3 xfailed /2 xpassed（2067.61秒，exit0）**，前端 **87项/8文件**及类型/构建/E2E类型检查通过。2026-10-07恢复会话实际 `make check` 在另一个自有新库复验，同样 **2926 passed /4 skipped /3 xfailed /2 xpassed（2174.36秒，exit0）**，前端构建通过。冻结源码未变、60个文档链接有效、自有库和子进程清理；既有Redis1/旧E2E_MODE3跳过、MES非严格xfail/xpass及Makefile两项graph排除保留。整片验收结束，剩余附件/原文例外/降敏发布/SDK/部署与正文外发门禁不因此开放。始终restricted/外发关闭，不改业务原文、结论或R4a目录；[操作指南](docs/development/capa-d4-text-preview.md)已同步。
-- **当前下一步（2026-10-25）**：按[CAPA 措施实施后的集中结果审核实施计划](docs/superpowers/plans/2026-10-23-capa-outcome-review.md)子代理驱动执行；本片资源与本地提交已获明确授权，独占环境与完整基线已通过；Task 1–2 已验收，继续 Task 3 完整结果读取、来源约束与版本 DTO。设计及 P1 已通过书面复核。原 D4 候选申请/发布审批及 7 天审核正文清理不再实施，不重复启动已验收的 R4b-2。现有 D8 审批和业务门禁继续按原代码运行；插件/模型正文附件投递、Agent 业务写入、原文例外与可信部署不因此开放。保留独立工作树，提交、push/merge/部署仍按各自授权边界处理。
+- **当前下一步（2026-10-25）**：按[CAPA 措施实施后的集中结果审核实施计划](docs/superpowers/plans/2026-10-23-capa-outcome-review.md)子代理驱动执行；本片资源与本地提交已获明确授权，独占环境与完整基线已通过；Task 1–2 已验收，Task 3 完整结果读取、来源约束与版本 DTO 已实现，最终聚焦 217 passed；先独立复核 Task 3，再按授权推进 Task 4 实际 D8 决定绑定与生产回执。设计及 P1 已通过书面复核。原 D4 候选申请/发布审批及 7 天审核正文清理不再实施，不重复启动已验收的 R4b-2。现有 D8 审批和业务门禁继续按原代码运行；插件/模型正文附件投递、Agent 业务写入、原文例外与可信部署不因此开放。保留独立工作树，提交、push/merge/部署仍按各自授权边界处理。
 
 ---
 

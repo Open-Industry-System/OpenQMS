@@ -49,6 +49,45 @@ verb — one module per business concept:
   safe audit commit. All output stays restricted; no body cache, business update,
   embedding or plugin/model delivery. See
   [employee preview operations](../../../docs/development/capa-d4-text-preview.md).
+- **Controlled CAPA outcome read** — `capa_outcome_review.read_outcome_review`
+  admits the current employee through `capa_current_access`, captures its
+  `TenantBinding`, and uses only the request `db.bind` engine for a dedicated
+  REPEATABLE READ / READ ONLY snapshot. The independent request-session gate
+  rechecks live identity/role/scope, source access, state, round, material and
+  response before returning. Multi-tenant reads never fall back to public;
+  single mode explicitly binds public. The internal `collect_outcome_material`
+  is not an authorization grant and can also run under a caller's already
+  authorized, parent/source-locked READ COMMITTED write transaction without
+  changing isolation or writing anything.
+  Canonical keys are `contract/tenant_identity/report_id/factory_id/`
+  `product_line_code/round_id/core/verifications/d7_actions/doc_gate/source_versions`.
+  The domain-separated HMAC-SHA256 covers the reviewed core whitelist, all
+  actual child fields/versions, and accepted gate/version identities. UUID
+  batches are 100 rows without a UI count cap; evidence and source collections
+  have deterministic ordering. Unbounded text/JSON lengths (including immutable
+  version fields loaded by existing integrity validators) are preflighted;
+  incremental canonical and final response budgets are separately 8 MiB, with
+  whole-read rejection rather than truncation or cleanup.
+  FMEA uses FMEA VIEW and Control Plans use PLANNING VIEW. Version identity,
+  object/factory ownership, hash integrity and historical node/CAUSE_OF checks
+  use immutable versions, never latest graphs. D7 may refer to a different
+  same-scope FMEA. Pending explicit FMEA references outside the gate set bind
+  existing controlled versions; missing versions conflict and GET creates none.
+  Terminal reads use only the accepted gate and nested
+  `D8_APPROVED`/`D8_REJECTED.changed_fields.outcome_review` envelope:
+  `{contract, round_id, revision, source_versions}`; each source is exactly
+  `{module, object_id, version_id, sha256}` with `module` `fmea` or `planning`.
+  The old gate `control_plan` spelling normalizes to `planning` in document DTOs.
+  Production TRANSITION `new_status=D8_APPROVAL_PENDING` identifies a round;
+  legacy pending uses the specified tenant/report/updated_at UUID5 without
+  creating an audit. Missing terminal receipts are `legacy_unversioned`, not
+  fabricated approvals; malformed or non-reverifiable HMAC receipts are
+  `unverifiable` and existing valid-format historical revisions are not re-signed.
+  Necessary sources lacking any recoverable immutable binding fail the whole
+  read rather than pretending historical verification. Status, decision DTO,
+  d8 supplement, report updated_at and admission generation are not digest
+  inputs. The supplement's editor/time comes only from its actual UPDATE audit.
+  This reader does not implement D8 decision/receipt production (Task 4).
 - **Subdirectories** (composite areas with their own internal structure):
   - `agent_runtime/` — persistent target-bound tasks, plugin credentials and
     current-authority readonly delivery. Controls, checkpoints and activity

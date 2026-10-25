@@ -99,3 +99,28 @@ async def current_capa_actor_target(db, actor_id, report_id, required_level: Per
     if levels.get(Module.CAPA, PermissionLevel.NONE) < required_level:
         raise PermissionError('Current CAPA permission required')
     return await current_capa_target(db, report_id, factories, lines)
+
+
+async def current_capa_target_metadata(db, report_id, factories, lines):
+    """Admit a read before selecting any outcome body or unbounded JSON."""
+    with db.no_autoflush:
+        target = (await db.execute(capa_target_filters(
+            select(CAPAEightD.report_id, CAPAEightD.factory_id,
+                   CAPAEightD.product_line_code, CAPAEightD.status, CAPAEightD.updated_at)
+            .where(CAPAEightD.report_id == report_id), factories, lines))).one_or_none()
+    if target is None:
+        raise LookupError('8D report not found')
+    return target
+
+
+def require_capa_source_access(levels, factories, lines, module, source, capa):
+    """Necessary sources use their own module and the current target scope."""
+    if (module not in {Module.FMEA, Module.PLANNING}
+            or levels.get(module, PermissionLevel.NONE) < PermissionLevel.VIEW
+            or source is None
+            or source.factory_id != capa.factory_id
+            or source.product_line_code != capa.product_line_code
+            or (factories.accessible_factory_ids is not None
+                and source.factory_id not in factories.accessible_factory_ids)
+            or (lines.mode != 'ALL' and source.product_line_code not in (lines.codes or []))):
+        raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')

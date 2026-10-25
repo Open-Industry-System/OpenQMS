@@ -28,6 +28,16 @@ from app.services.capa_doc_gate_service import _compute_input_hash
 from tests.conftest import _scope_for
 
 
+async def review_expectation(db, capa) -> dict:
+    """Flush-only compatibility helper, never HTTP or RR admission evidence."""
+    from app.services.capa_outcome_review import collect_outcome_material, outcome_revision
+    material = await collect_outcome_material(db, capa)
+    return {
+        'expected_outcome_revision': outcome_revision(material),
+        'expected_review_round_id': material['round_id'],
+    }
+
+
 @dataclass
 class ReviewCase:
     session_factory: object

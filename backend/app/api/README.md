@@ -22,6 +22,23 @@ raw request stream, accepts one bounded multipart file part without FastAPI
 form parsing, and returns fixed error codes only. It never accepts or exposes a
 client filename, path, storage key, file bytes, or scanner diagnostics.
 
+`GET /api/capa/{report_id}/outcome-review` is a normal access-user read,
+not a candidate or plugin-delivery route. It returns the strict
+`capa.outcome-review.v1` DTO only in `D8_APPROVAL_PENDING`, `D8_CLOSURE`, or
+`ARCHIVED`, with `Cache-Control: no-store`. It rechecks live CAPA VIEW and
+factory/product-line scope plus every necessary FMEA VIEW / PLANNING VIEW
+(Control Plans). Unknown/unreadable sources return constant 403
+`CAPA_OUTCOME_REVIEW_ACCESS_DENIED`, unavailable reports/stages constant 404
+`CAPA_OUTCOME_REVIEW_UNAVAILABLE`; changed or unbound versions return 409
+`CAPA_OUTCOME_REVIEW_CHANGED`, and complete-material/response byte overflow
+returns 409 `CAPA_OUTCOME_REVIEW_LIMIT`. No partial counts or body are returned.
+The response contains four core sections, complete verification/D7 collections,
+version identifiers/hashes (not current source bodies), historical decision
+metadata, and a separately marked `unreviewed_supplement`. GET has no business,
+audit, round, embedding, outbox, or provider side effects. D8 decision binding
+and the `/advance` producer are a separate subsequent task; this read does not
+make legacy approvals version-verified.
+
 ## File Organisation
 
 One `*.py` file per business module at the top level, plus three

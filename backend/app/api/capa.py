@@ -60,6 +60,7 @@ from app.schemas.capa_d3 import (
     ProvenanceEntry,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.capa_outcome_review import CapaOutcomeReview
 from app.schemas.capa_ppt import PptExportDetailResponse
 from app.schemas.capa_verification import (
     AdoptRequest, AdoptResponse, D7AutoFillRequest, D7AutoFillResponse,
@@ -89,6 +90,28 @@ from app.utils.pptx import pptx_response
 router = APIRouter(prefix="/api/capa", tags=["capa"])
 
 D4_RETRY_THRESHOLD = 3
+
+
+@router.get('/{report_id}/outcome-review', response_model=CapaOutcomeReview)
+async def get_outcome_review(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    from app.core.tenant_transaction import TenantUnavailable
+    from app.services.capa_outcome_review import read_outcome_review
+    from app.services.capa_review_guard import OutcomeReviewConflict, OutcomeReviewLimit
+
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await read_outcome_review(db, scope, report_id)
+    except (PermissionError, TenantUnavailable):
+        return JSONResponse(status_code=403, content={'detail': 'CAPA_OUTCOME_REVIEW_ACCESS_DENIED'}, headers=headers)
+    except LookupError:
+        return JSONResponse(status_code=404, content={'detail': 'CAPA_OUTCOME_REVIEW_UNAVAILABLE'}, headers=headers)
+    except (OutcomeReviewConflict, OutcomeReviewLimit) as exc:
+        return JSONResponse(status_code=409, content={'detail': str(exc)}, headers=headers)
+    return JSONResponse(content=result.model_dump(mode='json'), headers=headers)
 
 
 @router.get("", response_model=CAPAListResponse)
