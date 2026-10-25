@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；当前准备 Task 4 实际决定绑定和生产回执，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；Task 4 实际决定绑定和生产回执已通过独立规格/质量复核，最终聚焦回归 662 passed；当前准备 Task 5 生产界面，真实 provider/浏览器与最终冻结仍待后续任务，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
 ## Global Constraints
 
@@ -519,7 +519,7 @@ async def test_outcome_read_is_not_cached(review_http_client, review_case):
 
 **Interfaces:** 新 `require_outcome_expectation(db, scope, capa, req) -> dict` 返回安全回执 metadata；`apply_outcome_expectation(db, capa, req, actor_id) -> dict` 用于 service 直接调用并执行同一校验。服务不能从客户端接收准备好的回执替代校验。原 `advance_capa(db,capa,user_id,req=None)` 签名保留，但 D8 决定不可因 req=None 绕过。
 
-- [ ] **Step 1: 写缺版本、旧版本与旧轮次 RED**
+- [x] **Step 1: 写缺版本、旧版本与旧轮次 RED**
 
 ```python
 @pytest.mark.asyncio
@@ -538,7 +538,7 @@ async def test_approve_without_seen_revision_is_rejected(
 
 另测新版看完材料后修改 D6/验证、驳回重提后使用旧 round、EDIT 用户附真实 token 仍 403、合法自有 APPROVE 用户不因本人提交被新增阻断、reject_reason 空仍拒绝、直接 service 缺版本仍拒绝。
 
-- [ ] **Step 2: RED 后更新 DTO/调用契约**
+- [x] **Step 2: RED 后更新 DTO/调用契约**
 
 ```python
 from pydantic import Field
@@ -551,7 +551,7 @@ expected_review_round_id: uuid.UUID | None = None
 
 仅审批/驳回两条边强制字段。不得给生产服务或 tests 加 `skip_review_version` 开关。已真实提交的单测先读取 review revision 再提交。现存 flush-only `db` 夹具不能被独立 RR 连接读取：这类原有权限/流程单测使用下面定义的同事务 review_expectation helper，或改为真实 sessionmaker case，不能盲调 GET 后得到 404。权限拒绝测试仍先 403，不为了拿 token 赋予无权用户源权限。逐一核对实际直接调用文件 `test_capa_advance_flow.py`、`test_capa_post_review_fixes.py`、`test_lateral_diffusion_service.py`、`tests/recommendation/test_capa_lesson_embedding_chain.py`、`test_lessons_extraction.py` 及 frontend/e2e 的关闭请求；只升级其中 D8 决定调用。旧夹具若缺当前已验证根因/正式措施/门禁前置，应补真实前置，而非放松新条件。早期 3-arg 推进和归档仍保留兼容。
 
-- [ ] **Step 3: 固定事务顺序**
+- [x] **Step 3: 固定事务顺序**
 
 父行锁后，基于 fresh 状态判定 EDIT/APPROVE 边；fresh 当前角色/工厂/产品线检查，审批必要源可读，round/revision 相同。批准还检查当前根因匹配 passed 记录、D5/D6 材料非空；不通过非空文本自动判断“已有效”。
 
@@ -559,7 +559,7 @@ expected_review_round_id: uuid.UUID | None = None
 
 驳回同样绑定所见 round/revision 与当前 APPROVE，保留必填理由和 D7 回退；不替代或执行现场补偿。内部 service 直接调用须构造当前 actor scope（服务端 UUID），复用 fresh access，不从 ORM 历史角色猜测。
 
-- [ ] **Step 4: 在既有决定审计中保存安全回执**
+- [x] **Step 4: 在既有决定审计中保存安全回执**
 
 ```python
 receipt = {
@@ -575,7 +575,7 @@ changed_fields['outcome_review'] = receipt
 
 `round_id/revision/doc_decision_id/source_versions` 只能来自 Task 3 的校验输出。既有驳回理由仍为正式业务记录，不能复制全包正文进 audit。批准后用该 receipt 读取历史绑定；补充更新和归档不替换它。
 
-- [ ] **Step 5: 用真实会话证明两个竞争方向**
+- [x] **Step 5: 用真实会话证明两个竞争方向**
 
 新并发测试不使用 flush-only `db`：session A 用已缓存旧 pending 对象调用真实写服务；session B 持父行锁进行真实审批并提交，A 获锁后须 ReviewedContentLocked。用 Events/SQLAlchemy 测试级 execute witness 确认 A 已到锁请求，不能靠 sleep 猜测；另查 `pg_blocking_pids` 证明确实等待。
 
@@ -583,7 +583,7 @@ changed_fields['outcome_review'] = receipt
 
 单元/并发测试可以只替换 provider 的外部响应以隔离网络，不能替换 authorize、版本 collector、状态迁移或 commit；这不是最终真实 LLM/HTTP 通过证据。
 
-- [ ] **Step 6: GREEN 与历史闭环回归**
+- [x] **Step 6: GREEN 与历史闭环回归**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh
