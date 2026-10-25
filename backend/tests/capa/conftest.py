@@ -995,4 +995,4 @@ async def capa_with_cp_blocked_modify(db, capa_d8_gate):
 
 
 # Outcome-review fixtures use independent committed sessions, unlike the local db fixture.
-from tests.capa.outcome_review_support import review_case, review_http_client  # noqa: F401,E402
+from tests.capa.outcome_review_support import review_case, review_http_client, review_sources  # noqa: F401,E402

@@ -25,10 +25,13 @@ RETRY_AFTER_SECONDS = 2
 _ALLOWED_NODE_TYPES = {"FailureMode", "FailureEffect", "FailureCause", "ProcessStep", "Function", "WorkElement"}
 
 
-async def _lock_doc_gate_write(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> CAPAEightD:
+async def _lock_doc_gate_write(
+    db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID,
+    required_level: PermissionLevel = PermissionLevel.EDIT,
+) -> CAPAEightD:
     """Authorize, lock, and validate CAPA material before D8 gate mutation."""
     capa = await lock_current_material_write(
-        db, capa, user_id, PermissionLevel.EDIT
+        db, capa, user_id, required_level
     )
     if capa.status != "D8_GATE_PENDING":
         raise ValueError("当前状态不可写入文档门禁")
@@ -1142,7 +1145,7 @@ async def record_gate_waiver(
 
     Caller must require APPROVE permission on the capa module (enforced in API).
     """
-    capa = await _lock_doc_gate_write(db, capa, user_id)
+    capa = await _lock_doc_gate_write(db, capa, user_id, PermissionLevel.APPROVE)
     if not reason or not str(reason).strip():
         raise ValueError("waiver reason 必填")
     if not items:

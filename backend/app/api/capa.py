@@ -519,21 +519,8 @@ async def update_capa(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_product_line_access(capa.product_line_code, scope)
     update_data = req.model_dump(exclude_unset=True)
-    # Always lock + refresh before mutating: a concurrent PL move or link can
-    # change the row's scope/invariants between the pre-check above and commit.
-    await db.execute(
-        select(CAPAEightD)
-        .where(CAPAEightD.report_id == report_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if not is_factory_visible(capa.factory_id, scope):
-        raise HTTPException(status_code=404, detail="8D report not found")
-    check_product_line_access(capa.product_line_code, scope)
-    # Target PL must be within caller's scope too (locked state)
-    new_pl = update_data.get("product_line_code")
-    if new_pl is not None and new_pl != capa.product_line_code:
-        check_product_line_access(new_pl, scope)
+    # Fresh admission precedes any parent lock. The service then locks,
+    # refreshes authority/target, and checks a destination against live scope.
     try:
         capa = await current_capa_actor_target(db, scope.user.user_id, report_id, PermissionLevel.EDIT)
     except PermissionError:

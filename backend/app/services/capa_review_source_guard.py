@@ -66,20 +66,19 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
     # Historical decisions retain the immutable accepted version set even when
     # the current audit rows have been superseded. JSON containment is safe for
     # malformed snapshots: a non-matching shape simply cannot identify a CAPA.
-    snapshot_ref = [{"doc_type": doc_type, "doc_id": str(doc_id)}]
-    ids.update(await db.scalars(
-        select(CapaDocgAnalysis.capa_id)
-        .join(CapaDocgDecision, CapaDocgDecision.analysis_id == CapaDocgAnalysis.analysis_id)
-        .where(
-            CapaDocgAnalysis.factory_id == source_factory_id,
-            CapaDocgDecision.version_snapshot.contains(snapshot_ref),
-        )
-    ))
+    source_modules = [doc_type, "planning"] if doc_type == "control_plan" else [doc_type]
+    for source_module in source_modules:
+        snapshot_ref = [{"doc_type": source_module, "doc_id": str(doc_id)}]
+        ids.update(await db.scalars(
+            select(CapaDocgAnalysis.capa_id)
+            .join(CapaDocgDecision, CapaDocgDecision.analysis_id == CapaDocgAnalysis.analysis_id)
+            .where(
+                CapaDocgAnalysis.factory_id == source_factory_id,
+                CapaDocgDecision.version_snapshot.contains(snapshot_ref),
+            )
+        ))
     # Outcome-review receipts are AuditLog JSON metadata.  Treat both the
     # current module spelling and the planning alias as one source identity.
-    source_modules = [doc_type]
-    if doc_type == "control_plan":
-        source_modules.append("planning")
     receipt_base = (
         select(AuditLog.record_id)
         .join(CAPAEightD, CAPAEightD.report_id == AuditLog.record_id)

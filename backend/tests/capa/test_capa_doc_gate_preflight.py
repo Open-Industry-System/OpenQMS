@@ -290,8 +290,9 @@ async def test_preflight_rejects_waiver_replaced_after_validation(
     sessionmaker, monkeypatch,
 ):
     """A newer decision committed by another session invalidates waiver N."""
-    from app.models.factory import Factory
-    from app.models.role import RoleDefinition
+    from app.models.factory import Factory, UserFactory
+    from app.models.product_line import ProductLine
+    from app.models.role import RoleDefinition, RolePermission, UserProductLine
     from app.models.user import User
     from app.services import capa_doc_gate_service, capa_doc_gate_waiver
 
@@ -299,6 +300,7 @@ async def test_preflight_rejects_waiver_replaced_after_validation(
     factory_id, role_id, user_id, capa_id = (
         uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     )
+    product_line_code = "PR" + suffix
     analysis_id = cp_id = None
     target_key, field = "old-item", "control_method"
 
@@ -321,9 +323,16 @@ async def test_preflight_rejects_waiver_replaced_after_validation(
         )
         seed.add(user)
         await seed.flush()
+        seed.add(ProductLine(code=product_line_code, name="Preflight line", factory_id=factory_id))
+        await seed.flush()
+        seed.add_all([
+            RolePermission(role_id=role_id, module="capa", permission_level=4),
+            UserFactory(user_id=user_id, factory_id=factory_id),
+            UserProductLine(user_id=user_id, product_line_code=product_line_code),
+        ])
         capa = CAPAEightD(
             report_id=capa_id, document_no=f"CAPA-PREF-{suffix}",
-            title="preflight race", product_line_code="DC-DC-100",
+            title="preflight race", product_line_code=product_line_code,
             factory_id=factory_id, status="D8_GATE_PENDING", severity="serious",
             d4_root_cause="root", d5_correction="correction",
             d7_prevention="prevention", created_by=user_id,
@@ -333,7 +342,7 @@ async def test_preflight_rejects_waiver_replaced_after_validation(
         await seed.flush()
         cp, baseline_id = await _seed_cp_with_version(
             seed, factory_id, user_id, [target_key],
-            capa.created_at - timedelta(days=2),
+            capa.created_at - timedelta(days=2), product_line_code=product_line_code,
         )
         cp_id = cp.cp_id
         await _add_cp_version(
@@ -414,13 +423,17 @@ async def test_preflight_rejects_waiver_replaced_after_validation(
                 "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
                 "DELETE FROM control_plans WHERE cp_id=:cpid",
                 "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM user_product_lines WHERE user_id=:uid",
+                "DELETE FROM user_factories WHERE user_id=:uid",
+                "DELETE FROM role_permissions WHERE role_id=:rid",
+                "DELETE FROM product_lines WHERE code=:plcode",
                 "DELETE FROM users WHERE user_id=:uid",
                 "DELETE FROM role_definitions WHERE id=:rid",
                 "DELETE FROM factories WHERE id=:fid",
             ):
                 await cleanup.execute(text(statement), {
                     "aid": analysis_id, "cpid": cp_id, "cid": capa_id,
-                    "uid": user_id, "rid": role_id, "fid": factory_id,
+                    "uid": user_id, "rid": role_id, "fid": factory_id, "plcode": product_line_code,
                 })
             await cleanup.execute(text(
                 "ALTER TABLE control_plan_versions "

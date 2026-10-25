@@ -115,6 +115,15 @@ CLI commands in `cli/`. Conventions every caller can rely on:
   `capa_review_source_guard` locks technical CAPA references before FMEA or
   Control Plan deletion, then rechecks the reference set under the document
   lock; reviewed references reject deletion without loading CAPA material.
+  `lock_current_material_write()` derives live actor authority at admission and
+  after the parent lock, before exposing terminal state. Doc-gate waiver keeps
+  its APPROVE minimum across that wait; other material writes retain EDIT.
+  Reference collection includes verification source identities and historical
+  doc-gate snapshots, plus `changed_fields.outcome_review` receipts with
+  contract `capa.outcome-review.v1` and a `source_versions` array. `planning`
+  aliases Control Plan identities. JSON-only doc-gate audit creators serialize
+  CAPA → ProductLine → document and revalidate after locking, so they cannot
+  commit a dangling reference in deletion's final-recheck interval.
 - **No HTTP, no FastAPI imports.** Services know about `AsyncSession`,
   ORM models, state machines, outbox queues — nothing about requests,
   responses, headers, or auth tokens. Auth context arrives as plain

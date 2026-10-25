@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from copy import deepcopy
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, update, text
 
 from app.config import settings
 from app.core.deps import get_current_user, get_db, get_request_scope
 from app.main import app
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaAIAdoption, CapaD7NodeAction, CapaRootCauseVerification
+from app.models.capa_lesson import CapaLessonLearned
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.factory import Factory, UserFactory
@@ -73,7 +75,16 @@ class ReviewCase:
             DocumentEmbedding.entity_id == self.report_id))).all())
         outbox = list((await db.scalars(select(EmbeddingSyncOutbox).where(
             EmbeddingSyncOutbox.entity_id == self.report_id))).all())
+        doc_audits = list((await db.scalars(select(CapaDocgAudit).where(
+            CapaDocgAudit.analysis_id.in_(analysis_ids)))).all()) if analysis_ids else []
+        def rows(values):
+            return sorted((deepcopy({column.name: getattr(row, column.name)
+                                    for column in row.__table__.columns})
+                           for row in values), key=repr)
         return {
+            "material_rows": rows([capa]) + rows(verifications) + rows(adoptions) + rows(node_actions),
+            "gate_rows": rows(analyses) + rows(decisions) + rows(doc_audits),
+            "audit_rows": rows(audits),
             "capa": None if capa is None else {
                 "status": capa.status, "d4_root_cause": capa.d4_root_cause,
                 "d5_correction": capa.d5_correction, "d6_verification": capa.d6_verification,
@@ -175,13 +186,15 @@ async def review_case(sessionmaker, monkeypatch):
         yield case
     finally:
         async with sessionmaker() as db:
-            await db.execute(delete(EmbeddingSyncOutbox).where(EmbeddingSyncOutbox.entity_id == report_id))
+            await db.execute(delete(EmbeddingSyncOutbox).where(EmbeddingSyncOutbox.factory_id == factory_id))
+            await db.execute(delete(CapaLessonLearned).where(CapaLessonLearned.capa_id == report_id))
             await db.execute(delete(DocumentEmbedding).where(DocumentEmbedding.entity_id == report_id))
             await db.execute(delete(AuditLog).where(
                 (AuditLog.record_id == report_id) | (AuditLog.operated_by == actor_id)))
-            await db.execute(delete(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis_id))
-            await db.execute(delete(CapaDocgAudit).where(CapaDocgAudit.analysis_id == analysis_id))
-            await db.execute(delete(CapaDocgAnalysis).where(CapaDocgAnalysis.analysis_id == analysis_id))
+            analysis_ids = select(CapaDocgAnalysis.analysis_id).where(CapaDocgAnalysis.capa_id == report_id)
+            await db.execute(delete(CapaDocgDecision).where(CapaDocgDecision.analysis_id.in_(analysis_ids)))
+            await db.execute(delete(CapaDocgAudit).where(CapaDocgAudit.analysis_id.in_(analysis_ids)))
+            await db.execute(delete(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id == report_id))
             await db.execute(delete(CapaAIAdoption).where(CapaAIAdoption.capa_id == report_id))
             await db.execute(delete(CapaD7NodeAction).where(CapaD7NodeAction.capa_id == report_id))
             await db.execute(delete(CapaRootCauseVerification).where(
@@ -222,3 +235,114 @@ async def review_http_client(review_case):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
+
+
+@dataclass
+class ReviewSources:
+    case: ReviewCase
+    fmea_id: UUID
+    cp_id: UUID
+
+    def identity(self, doc_type):
+        return self.fmea_id if doc_type == "fmea" else self.cp_id
+
+    async def snapshot(self, db):
+        from app.models.fmea import FMEADocument
+        from app.models.control_plan import ControlPlan
+        from app.models.fmea_version import FMEAVersion
+        from app.models.control_plan_version import ControlPlanVersion
+        from app.models.graph_sync_outbox import GraphSyncOutbox
+        result = {}
+        for model, predicate in (
+            (FMEADocument, FMEADocument.fmea_id == self.fmea_id),
+            (ControlPlan, ControlPlan.cp_id == self.cp_id),
+            (FMEAVersion, FMEAVersion.fmea_id == self.fmea_id),
+            (ControlPlanVersion, ControlPlanVersion.cp_id == self.cp_id),
+            (GraphSyncOutbox, GraphSyncOutbox.aggregate_id == self.fmea_id),
+            (AuditLog, AuditLog.record_id.in_([self.fmea_id, self.cp_id])),
+            (EmbeddingSyncOutbox, EmbeddingSyncOutbox.entity_id == self.fmea_id),
+        ):
+            result[model.__tablename__] = sorted((
+                deepcopy({col.name: getattr(row, col.name) for col in model.__table__.columns})
+                for row in await db.scalars(select(model).where(predicate))
+            ), key=repr)
+        return result
+
+    async def prepare_audit(self, doc_type):
+        from app.services.capa_doc_gate_service import _build_allowlist
+        async with self.case.session_factory() as db:
+            capa = await self.case.report(db)
+            capa.status = "D8_GATE_PENDING"
+            candidates = await _build_allowlist(db, capa)
+            doc = next(c for c in candidates if c["doc_type"] == doc_type)
+            analysis = await db.get(CapaDocgAnalysis, self.case.owned_ids["analysis_id"])
+            analysis.affected_docs = [{**doc, "key_points": []}]
+            analysis.analysis_input_hash = _compute_input_hash(capa, candidates)
+            await db.commit()
+
+    async def delete(self, db, doc_type):
+        from app.services.fmea_service import delete_fmea
+        from app.services.control_plan_service import delete_control_plan, get_control_plan
+        if doc_type == "fmea":
+            return await delete_fmea(db, self.fmea_id, self.case.actor_id)
+        cp = await get_control_plan(db, self.cp_id)
+        return await delete_control_plan(db, cp, self.case.actor_id)
+
+
+@pytest_asyncio.fixture
+async def review_sources(review_case, request):
+    """Real versioned source objects, no CAPA reference until a test creates it."""
+    from app.models.fmea import FMEADocument
+    from app.models.control_plan import ControlPlan
+    from app.models.fmea_version import FMEAVersion
+    from app.models.control_plan_version import ControlPlanVersion
+    from app.models.graph_sync_outbox import GraphSyncOutbox
+    from app.services.version_service import create_fmea_version, create_cp_version
+    case = review_case
+    sources = ReviewSources(case, uuid4(), uuid4())
+    async with case.session_factory() as db:
+        fmea = FMEADocument(
+            fmea_id=sources.fmea_id, document_no=f"PFMEA-OR-{sources.fmea_id.hex[:10]}",
+            title="Reviewed source FMEA", fmea_type="PFMEA", status="draft",
+            factory_id=case.factory_id, product_line_code=case.product_line_code,
+            graph_data={"nodes": [{"id": "cause", "type": "FailureCause", "properties": {"name": "cause"}}], "edges": []},
+            created_by=case.actor_id,
+        )
+        cp = ControlPlan(cp_id=sources.cp_id, document_no=f"CP-OR-{sources.cp_id.hex[:10]}",
+                         title="Reviewed source CP", status="draft", factory_id=case.factory_id,
+                         product_line_code=case.product_line_code, created_by=case.actor_id)
+        db.add_all([fmea, cp])
+        await db.commit()
+        if getattr(request, "param", True):
+            await create_fmea_version(db, fmea, "edit", "initial", case.actor_id)
+            await create_cp_version(db, cp, "edit", "initial", case.actor_id)
+        await db.commit()
+    try:
+        yield sources
+    finally:
+        async with case.session_factory() as db:
+            await db.execute(update(CAPAEightD).where(CAPAEightD.report_id == case.report_id).values(fmea_ref_id=None))
+            await db.execute(delete(CapaD7NodeAction).where(CapaD7NodeAction.fmea_id == sources.fmea_id))
+            # Cleanup only: immutable snapshots must never be bypassed during
+            # the business calls/assertions above. LOCAL restores at commit.
+            await db.execute(text("SET LOCAL session_replication_role = replica"))
+            await db.execute(delete(FMEAVersion).where(FMEAVersion.fmea_id == sources.fmea_id))
+            await db.execute(delete(ControlPlanVersion).where(ControlPlanVersion.cp_id == sources.cp_id))
+            await db.execute(delete(ControlPlan).where(ControlPlan.cp_id == sources.cp_id))
+            await db.execute(delete(FMEADocument).where(FMEADocument.fmea_id == sources.fmea_id))
+            await db.execute(delete(GraphSyncOutbox).where(GraphSyncOutbox.aggregate_id == sources.fmea_id))
+            await db.execute(delete(AuditLog).where(AuditLog.record_id.in_([sources.fmea_id, sources.cp_id])))
+            await db.commit()
+
+
+async def wait_for_pg_blocker(case, waiter_pid, blocker_pid):
+    """Observe a real PostgreSQL wait, not a timing/sleep assumption."""
+    import asyncio
+    from sqlalchemy import text
+    async def observe():
+        async with case.session_factory() as monitor:
+            while True:
+                blockers = await monitor.scalar(text("SELECT pg_blocking_pids(:pid)"), {"pid": waiter_pid})
+                if blocker_pid in blockers:
+                    return
+    await asyncio.wait_for(observe(), timeout=5)

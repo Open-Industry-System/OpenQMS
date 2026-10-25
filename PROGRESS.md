@@ -2,6 +2,8 @@
 
 > **2026-10-25 CAPA 结果审核 Task 1 已通过，准备 Task 2**：[设计及八任务计划](docs/superpowers/plans/2026-10-23-capa-outcome-review.md)按用户授权子代理驱动执行。完整新基线 `make check` exit 0：后端 **2999 passed /12 skipped /3 xfailed /2 xpassed /5 warnings**，前端类型/构建通过。Task 1 已建立真实提交夹具、共享父行锁/终态 guard 与固定 409 处理；补强无副作用及不提交断言后 **36 passed**，规格与质量复核通过（提交 `6ad0d18c`、`9872c8dd`）。下一任务接通实际写入口；目前不能宣称全入口终态保护已生效。原 D4 候选审批已撤回，本人审批政策和正式记录保留规则不变。不 push/合并/部署。
 
+> **2026-10-25 Task 2 fix round 1 takeover**：补齐真实 HTTP 终态/撤权/目标迁移、FMEA/CP 实际删除、来源变体/畸形 JSON、正常版本演进及 PostgreSQL 真提交竞争验收。追加修正 PUT fresh admission 前重复取锁、waiver 锁后 APPROVE 门槛与历史 planning 来源别名；沿用同一自有测试库，不执行完整 `make check`、迁移或后续任务。最终同树聚焦回归 **411 passed / 3 既有 warnings**；证据及 I1–I8 对照见 `.superpowers/sdd/2026-10-23-capa-outcome-review/task-2-report.md` takeover 节；本轮仍待控制方独立复核，不声明已通过审核。
+
 > **2026-10-19 R4b-2 已完成**：默认关闭的任务私有附件、真实扫描门禁、受权下载/删除与可恢复保留期清理已验收。最终冻结 `make check` **2999 passed / 12 skipped / 3 xfailed / 2 xpassed，exit 0**；前端 **95 项**及类型/构建、实际 ClamAV **7 项**和 Chromium **1 项**通过；1371 个源码/配置指纹未变，自有验收资源已清理。完整证据见[实施计划](docs/superpowers/plans/2026-10-09-agent-task-controlled-attachments.md)，运行边界见[操作指南](docs/development/agent-task-attachments.md)。没有 push/合并/部署；插件/模型附件投递与生产部署仍未开放。
 
 **更新日期**: 2026-10-25
