@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，当前准备 Task 3 受控读取与版本 DTO。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 已实现、217-case 聚焦回归通过，但独立复核发现三项实现缺口与旧轮次规则冲突；用户已选择固定兼容轮次，当前进入首轮修正，尚未验收。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
 ## Global Constraints
 
@@ -65,7 +65,7 @@ HMAC domain = openqms.capa.outcome-review.v1
 规范材料顶层键固定为 `contract/tenant_identity/report_id/factory_id/product_line_code/round_id/core/verifications/d7_actions/doc_gate/source_versions`；内部 core 含审核字段及相关关联/严重度，API core 仅投影四段正文。doc_gate 是文档门禁决定，不是新增的 D8 审批回执。不纳入 `status`、`binding_status`、D8 决定 DTO、`d8_closure`、CAPA `updated_at`、普通 admission generation、按钮状态或当前 FMEA/CP 的最新正文；否则批准、补报告、归档或普通维护会错误改变已审核心版本。子记录实际字段及版本必须覆盖，不能仅 hash 主表更新时间。
 
 - 新的审核轮次使用进入 `D8_APPROVAL_PENDING` 的最新 `TRANSITION` 审计 `log_id`。
-- 已有待审批数据没有此审计时，使用服务端 `uuid5(NAMESPACE_URL, 'capa.outcome-review.legacy:' + tenant_identity + ':' + report_id + ':' + capa.updated_at.isoformat())` 作为本次兼容轮次。它不是读取授权，不新增 GET 写入。
+- 已有待审批数据没有此审计时，使用服务端 `uuid5(NAMESPACE_URL, 'capa.outcome-review.legacy:' + str(tenant_identity) + ':' + str(report_id))` 作为固定兼容轮次。2026-10-25 用户明确批准此修订：不包含 updated_at 或其他可变维护元数据；实际材料/来源变化仍由 HMAC 检出，正常重提后使用新的 TRANSITION 审计 ID。它不是读取授权，不新增 GET 写入或迁移。
 - 批准或驳回时，将 round ID、contract、HMAC revision 和来源版本标识加入既有 `D8_APPROVED`/`D8_REJECTED.changed_fields['outcome_review']`。不存正文快照或复制验证自由文本。
 - 结案/归档后的轮次从新审计回执取得，不再用变过的 `updated_at` 推导。
 - 历史已结案但无该回执：标为 `legacy_unversioned`，保持已结案事实和写保护，不伪造“当时已校验这一版”。

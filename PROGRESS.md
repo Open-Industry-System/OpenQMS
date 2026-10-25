@@ -2,6 +2,8 @@
 
 > **2026-10-25 CAPA 结果审核 Task 3 实施完成、待独立复核**：基于 `44633b72`，新增完整受控 outcome reader、严格 DTO/GET、tenant-bound RR/只读快照、独立最终当前权限/来源/版本门禁、稳定 HMAC/轮次及历史回执兼容。保留真实 FMEA/CP 历史版本，不用最新图改绑旧审批；D7 支持其他同范围 FMEA；无 GET 写入、迁移、候选、provider 路径或新开关。最终同树聚焦回归 **217 passed / 3 既有 Pydantic warnings / 0 skipped、xfail、xpass，exit 0，197.99 秒**；包含完整 Task 3、R4b-1 service/schema/API、R4a readonly delivery、当前 FMEA 反查及共享 guard。Task 4 D8 决定生产/绑定尚未实施；本片尚未经过独立规格/质量复核。
 
+> **Task 3 独立复核及用户决策**：本次读取实现尚未验收。复核要求修正必填原因节点为空、DTO 组装后的材料/补充一致性、历史回执严格结构及来源完整性三项缺口；计划原旧轮次公式含 updated_at 与维护稳定性冲突。用户已明确选择固定租户＋报告兼容轮次，不含 updated_at；按此已批准修订进入同一批修正，不新增 GET 写入、迁移或后续任务。
+
 ### Task 3 本次验证记录（2026-10-25）
 
 - [x] 完整 D4–D7/子集合字段与版本、稳定排序、证据和 source_ref、门禁 decision/revision/version_snapshot；100 条 UUID keyset 批次，超过 200 行仍完整。状态、D8 DTO/补充、report updated_at 和 generation 不进入核心 HMAC。
