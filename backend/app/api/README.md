@@ -34,7 +34,12 @@ factory/product-line scope plus every necessary FMEA VIEW / PLANNING VIEW
 returns 409 `CAPA_OUTCOME_REVIEW_LIMIT`. No partial counts or body are returned.
 The response contains four core sections, complete verification/D7 collections,
 version identifiers/hashes (not current source bodies), historical decision
-metadata, and a separately marked `unreviewed_supplement`. GET has no business,
+metadata, and a separately marked `unreviewed_supplement`. A post-assembly
+shared-lock/read fence rejects stale core or response-only supplement/audit
+metadata without adding those supplemental values to the core HMAC. A valid
+HMAC alone does not verify an incomplete or non-contract historical receipt.
+Legacy pending rounds depend only on server tenant/report identity, not title
+or updated_at maintenance. GET has no business,
 audit, round, embedding, outbox, or provider side effects. D8 decision binding
 and the `/advance` producer are a separate subsequent task; this read does not
 make legacy approvals version-verified.

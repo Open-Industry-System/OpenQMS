@@ -39,9 +39,12 @@ async def bind_sources(case, sources, *, modules=('fmea', 'planning'), explicit=
 async def approved_receipt(case):
     """Test-only exact Task 4 consumer fixture; no production decision writer."""
     result = await read(case)
-    receipt = {'contract': result.contract, 'round_id': str(result.review_round_id),
-               'revision': result.revision, 'source_versions': [v.model_dump(mode='json') for v in result.documents]}
     async with case.session_factory() as db:
+        doc_decision_id = await db.scalar(select(CapaDocgDecision.decision_id).where(
+            CapaDocgDecision.analysis_id == case.owned_ids['analysis_id']).order_by(CapaDocgDecision.revision.desc()).limit(1))
+        receipt = {'contract': result.contract, 'round_id': str(result.review_round_id),
+                   'revision': result.revision, 'doc_decision_id': str(doc_decision_id),
+                   'source_versions': [v.model_dump(mode='json') for v in result.documents]}
         db.add(AuditLog(table_name='capa_eightd', record_id=case.report_id,
             action='D8_APPROVED', operated_by=case.actor_id, factory_id=case.factory_id,
             changed_fields={'old_status': 'D8_APPROVAL_PENDING', 'new_status': 'D8_CLOSURE', 'outcome_review': receipt}))
@@ -180,7 +183,7 @@ async def test_legacy_pending_round_is_exact_server_uuid5_without_get_writes(rev
     async with review_case.session_factory() as db:
         await db.execute(delete(AuditLog).where(AuditLog.record_id == review_case.report_id))
         capa = await review_case.report(db)
-        expected = uuid5(NAMESPACE_URL, f'capa.outcome-review.legacy:public:{capa.report_id}:{capa.updated_at.isoformat()}')
+        expected = uuid5(NAMESPACE_URL, f'capa.outcome-review.legacy:public:{capa.report_id}')
         await db.commit()
     before = await review_case.snapshot()
     result = await read(review_case)
@@ -264,10 +267,13 @@ async def test_latest_production_transition_is_round_and_old_rejection_is_not_cu
     old = await read(review_case)
     round_id = uuid4()
     async with review_case.session_factory() as db:
+        doc_decision_id = await db.scalar(select(CapaDocgDecision.decision_id).where(
+            CapaDocgDecision.analysis_id == review_case.owned_ids['analysis_id']))
         db.add(AuditLog(table_name='capa_eightd', record_id=review_case.report_id,
             factory_id=review_case.factory_id, action='D8_REJECTED', operated_by=review_case.actor_id,
             operated_at=datetime.now(UTC), changed_fields={'outcome_review': {
-                'contract': old.contract, 'round_id': str(old.review_round_id), 'revision': old.revision, 'source_versions': []}}))
+                'contract': old.contract, 'round_id': str(old.review_round_id), 'revision': old.revision,
+                'doc_decision_id': str(doc_decision_id), 'source_versions': []}}))
         db.add(AuditLog(log_id=round_id, table_name='capa_eightd', record_id=review_case.report_id,
             factory_id=review_case.factory_id, action='TRANSITION', operated_by=review_case.actor_id,
             operated_at=datetime.now(UTC)+timedelta(seconds=1),

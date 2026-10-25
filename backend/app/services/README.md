@@ -54,7 +54,15 @@ verb — one module per business concept:
   `TenantBinding`, and uses only the request `db.bind` engine for a dedicated
   REPEATABLE READ / READ ONLY snapshot. The independent request-session gate
   rechecks live identity/role/scope, source access, state, round, material and
-  response before returning. Multi-tenant reads never fall back to public;
+  response before returning. After request-session DTO assembly it takes shared
+  CAPA then source-parent locks (control_plan before fmea, matching writer
+  order), and re-reads/compares complete material and DTO under that fence.
+  Locks remain until the request transaction ends; no business/audit writes or
+  request-transaction isolation changes occur. Material, unreviewed supplement
+  and decision/editor audit metadata committed before the fence invalidate the
+  old response. Normal Task 2 parent/source writers serialize behind it, while
+  authority is independently checked again after assembly. The dedicated
+  snapshot remains REPEATABLE READ / READ ONLY. Multi-tenant reads never fall back to public;
   single mode explicitly binds public. The internal `collect_outcome_material`
   is not an authorization grant and can also run under a caller's already
   authorized, parent/source-locked READ COMMITTED write transaction without
@@ -70,17 +78,26 @@ verb — one module per business concept:
   whole-read rejection rather than truncation or cleanup.
   FMEA uses FMEA VIEW and Control Plans use PLANNING VIEW. Version identity,
   object/factory ownership, hash integrity and historical node/CAUSE_OF checks
-  use immutable versions, never latest graphs. D7 may refer to a different
+  use immutable versions, never latest graphs. Verification cause IDs are
+  required non-empty strings, unlike an optional report node ID. D7 may refer to a different
   same-scope FMEA. Pending explicit FMEA references outside the gate set bind
   existing controlled versions; missing versions conflict and GET creates none.
   Terminal reads use only the accepted gate and nested
   `D8_APPROVED`/`D8_REJECTED.changed_fields.outcome_review` envelope:
-  `{contract, round_id, revision, source_versions}`; each source is exactly
-  `{module, object_id, version_id, sha256}` with `module` `fmea` or `planning`.
-  The old gate `control_plan` spelling normalizes to `planning` in document DTOs.
+  `{contract, round_id, revision, doc_decision_id, source_versions}`; each source
+  is exactly `{module, object_id, version_id, sha256}` with `module` `fmea` or
+  `planning`. Verification requires exact envelope keys, the bound gate decision
+  ID, and a unique, complete matching source set as well as the HMAC. Recovering
+  a missing receipt source from an existing gate does not make the receipt
+  verified. The old gate `control_plan` spelling normalizes to `planning` in
+  document DTOs but is never accepted as a receipt module.
   Production TRANSITION `new_status=D8_APPROVAL_PENDING` identifies a round;
-  legacy pending uses the specified tenant/report/updated_at UUID5 without
-  creating an audit. Missing terminal receipts are `legacy_unversioned`, not
+  legacy pending uses only the server tenant/report identity:
+  `uuid5(NAMESPACE_URL, 'capa.outcome-review.legacy:' + str(tenant_identity) + ':' + str(report_id))`.
+  No updated_at/mutable maintenance field or GET write participates. Ordinary
+  maintenance preserves the fallback round/HMAC; real material/source changes
+  still change HMAC and audited resubmission obtains a new transition round.
+  Missing terminal receipts are `legacy_unversioned`, not
   fabricated approvals; malformed or non-reverifiable HMAC receipts are
   `unverifiable` and existing valid-format historical revisions are not re-signed.
   Necessary sources lacking any recoverable immutable binding fail the whole

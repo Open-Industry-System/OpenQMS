@@ -4,6 +4,8 @@
 
 > **Task 3 独立复核及用户决策**：本次读取实现尚未验收。复核要求修正必填原因节点为空、DTO 组装后的材料/补充一致性、历史回执严格结构及来源完整性三项缺口；计划原旧轮次公式含 updated_at 与维护稳定性冲突。用户已明确选择固定租户＋报告兼容轮次，不含 updated_at；按此已批准修订进入同一批修正，不新增 GET 写入、迁移或后续任务。
 
+> **Task 3 fix round 1/5（2026-10-25）**：I1–I4 修正及自检完成；基于 fix-review BASE `0adf2f17`，保留 `cbd4ee3a` 中用户批准的轮次契约修订。最后一次代码/测试支持修改后的完整受影响聚焦回归 **242 passed / 3 既有 Pydantic warnings，exit 0，213.27 秒**，无 skip/xfail/xpass。包含全部原 217-case Task 3＋R4b-1/R4a 当前读取兼容与 25 项本轮新增用例。下方保留初次 217-case 历史记录，并追加本轮逐项证据；独立规格/质量门禁仍待重审，不启动 Task 4。
+
 ### Task 3 本次验证记录（2026-10-25）
 
 - [x] 完整 D4–D7/子集合字段与版本、稳定排序、证据和 source_ref、门禁 decision/revision/version_snapshot；100 条 UUID keyset 批次，超过 200 行仍完整。状态、D8 DTO/补充、report updated_at 和 generation 不进入核心 HMAC。
@@ -19,7 +21,37 @@
 ```
 
 - **最终输出**：`217 passed, 3 warnings in 197.99s (0:03:17)`；完整脱敏日志 `focused-20261025T060513145952.log`，exit 0。没有重跑完整基线/Task 8 freeze，也没有把历史 2999/424 当作本次结果。前端未修改，未运行前端 build；未安装依赖或浏览器、重建基础设施、触碰主 checkout、push/merge/deploy。
-- **自检与交接**：复用原 current-access 和 source integrity validators，保留 reader 旧接口；parent/source 写锁协议未改。新增 collector 不是授权入口；Task 4 仍须在实际写事务重查 actor/source 权限并持有既定锁。Task 4 必须实际生产并核对嵌套 `{contract, round_id, revision, source_versions}` 回执；本次仅通过真实提交的测试回执验证消费端。API/services README 已同步；等待独立复核后再推进 Task 4。
+- **自检与交接**：复用原 current-access 和 source integrity validators，保留 reader 旧接口；parent/source 写锁协议未改。新增 collector 不是授权入口；Task 4 仍须在实际写事务重查 actor/source 权限并持有既定锁。Task 4 必须实际生产并核对嵌套 `{contract, round_id, revision, doc_decision_id, source_versions}` 回执（首次 helper 少了 doc_decision_id，已在本轮 I3 修正）；本次仅通过真实提交的测试回执验证消费端。API/services README 已同步；等待独立复核后再推进 Task 4。
+
+#### Task 3 fix round 1/5：I1–I4 完整修正证据
+
+- **范围/基准**：只修 `task-3-review.json` 的 I1–I4。fix-review BASE 为 `0adf2f17`；起始 HEAD `cbd4ee3a` 仅含用户批准的 I4 修订，本轮保留该提交及协调方进度文字。沿用既有随机 owned application/test 库、Python 3.11 和私有 wrapper；不读取凭据正文、不调用 provider、不重跑完整基线/Task 8、不重建基础设施、不改依赖/迁移/策略/主 checkout，不 push/merge/deploy。此 PROGRESS 节按协调方许可充当本轮完整报告，不新建独立 report Markdown。
+- [x] **I1，必填原因节点**：在精确形状 `{fmea_id,cause_node_id}` 通过后、调用可选 report-node 引用逻辑之前，明确拒绝 cause_node_id 的 null、非字符串、空字符串。非空字符串继续走真实不可变版本的 FailureCause 节点类型/存在性检查。`test_i1_exact_verification_source_requires_nonempty_string_cause` 使用真实提交且已绑定的 FMEA/验证；覆盖 null/空串/0/False/列表/字典，拒绝不写任何业务/audit/outbox。初次 RED 的 null 用例真实复现原先绕过，其他五项作为已有拒绝控制；可选 report node 为 None 仍由原完整回归证明可读。
+- [x] **I2，DTO 后完整一致性 fence**：保留原专用 RR/READ ONLY 快照及当前 `db.bind`/TenantBinding。请求 session 在已有 DTO 组装/比较之后，先以 `FOR SHARE` 锁 CAPA 父行，锁后重查当前 admission，再按既有 `version_service` 写锁顺序（control_plan → fmea、同类按 UUID）对源父行加共享锁；不在已启动事务里修改 isolation，不写数据。共享锁持有至请求事务结束，串行化 Task 2 父锁材料/补充/gate 写入及真实来源版本/范围写入。锁定后重新收集完整材料并检查核心 HMAC，再组装完整 DTO 比较；补充文本/补充 UPDATE 编辑元数据/决定元数据的变化通过完整 DTO 检测，不移入核心 HMAC；之后仍独立重查身份、权限、scope、round、来源。
+  - `test_i2_commit_after_request_dto_before_last_gate_cannot_return_old_response` 用 Events 精确暂停首次 request-session `_dto` **组装完成后、取最终锁前**，另一真实 session 提交验证 result、d8_closure、仅补充审计、仅决定审计时间，及实际 source-version helper 创建的新版本。前四项均功能性 RED，补充及两类 audit-only 更新保持核心 revision 不变但必须 409，验证/显式源版本变化改变 revision；GET 不回写业务/审计。新增源版本分支也在最终完整运行通过。
+  - `test_i2_read_fence_serializes_actual_parent_and_source_writer_protocols` 四项正向竞争：调用实际 `lock_current_material_write` 的验证/补充 writer、实际 `create_fmea_version`/`create_cp_version`。`pg_blocking_pids` 证明 writer 确实等待 reader，SQL 观察证明锁顺序是 CAPA → CP → FMEA；reader 结束后 writer 正常提交。下一读看到验证/补充/显式 FMEA 版本变化；gate-bound CP 正常出新版不改绑旧版本。没有时间睡眠或假锁替代。
+- [x] **I3，严格五键回执**：核对更新 context 中已批准的 Task 4 producer，消费端严格匹配嵌套 `{contract, round_id, revision, doc_decision_id, source_versions}`，要求正确 contract/UUID/小写 HMAC 格式、实际 gate decision ID 及完整唯一来源集合；不能因为 gate 能补齐来源就把损坏回执标为 verified。gate 的 doc_type=control_plan 历史别名仍可读，receipt.module 严格仅 fmea/planning，source entry 精确四键。未知必要源 shape 整次拒绝；有效历史 revision 不被重签，历史显式来源仍只使用原绑定版本而非 latest。
+  - 原 `approved_receipt` 测试 helper 及正常驳回测试回执已补齐真实 doc_decision_id；它们仅在测试中创建回执，不是 Task 4 producer 集成证据。修正前先使 fixture 符合已批准契约，避免把 fixture 不完整误计为产品 RED。
+  - 九项 `test_i3_valid_hmac_is_not_enough_for_noncontract_or_incomplete_receipt` 每项先确认完整回执 verified，然后保留原真实 HMAC，仅破坏 receipt 的 planning→control_plan discriminator、去掉 FMEA/CP 来源、重复来源、额外 envelope 键、缺失/错误 doc_decision_id、source 额外键、错误 contract。前七项功能性 RED（损坏回执原先仍 verified），后两项是已有拒绝/无法验证控制；最终均不再错误 verified，业务/审计不被 GET 改写。原 FMEA/CP 正常新版本与历史节点回归仍通过。
+- [x] **I4，用户批准的稳定 legacy 轮次**：精确实施 `uuid5(NAMESPACE_URL, 'capa.outcome-review.legacy:' + str(tenant_identity) + ':' + str(report_id))`，没有 updated_at、其他维护元数据、稳定性例外、GET 写入或迁移。已更新既有 UUID5 断言。新增 composed regression 无 entry audit：标题＋updated_at 维护不改变 round/revision；实际 core、子验证、源图内容＋受控版本逐一改变 HMAC 而 legacy round 固定；正常审计重提改用新 TRANSITION.log_id 并使 revision 改变。API/service README 已同步该明确批准修订及 I2/I3 协议。
+
+**本轮命令/输出（均从本独立 worktree 运行，每次 wrapper 静态加载 owned env、清空 provider/E2E_MODE、脱敏输出）**：
+
+```bash
+# Functional RED: 13 failed, 7 passed, 3 existing warnings in 8.17s; exit 1
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_review_fixes.py -q
+# I1/I3/I4 GREEN: 45 passed, 4 deselected, 3 existing warnings in 14.58s; exit 0
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_review_fixes.py tests/capa/test_capa_outcome_sources.py -k 'not test_i2' -q
+# I2 + existing RR/budget/current-authority GREEN: 50 passed, 3 warnings in 21.26s; exit 0
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_review_fixes.py tests/capa/test_capa_outcome_boundaries.py -q
+# Including actual PostgreSQL writer waits: 24 passed, 3 warnings in 11.92s; exit 0
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_review_fixes.py -q
+# LAST implementation/test-support tree: COMPLETE affected suite, 242 passed, 3 warnings in 213.27s; exit 0
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_review.py tests/capa/test_capa_outcome_sources.py tests/capa/test_capa_outcome_api.py tests/capa/test_capa_outcome_boundaries.py tests/capa/test_capa_outcome_namespace.py tests/capa/test_capa_outcome_d7.py tests/capa/test_capa_outcome_review_fixes.py tests/capa/test_d4_text_preview.py tests/capa/test_d4_text_preview_schemas.py tests/api/test_d4_text_preview.py tests/services/agent_runtime/test_readonly_delivery.py tests/capa/test_capa_by_fmea_node_sources.py tests/capa/test_capa_by_fmea_node_api.py tests/capa/test_capa_review_guard.py -q
+```
+
+- **日志与 RED 真实性**：日志均位于私有 `.superpowers/sdd/2026-10-23-capa-outcome-review/`；依次为 `focused-20261025T140523453110.log`（RED）、`140639729856`、`140843615768`、`141147468030`、`focused-20261025T141924330442.log`（最终完整 GREEN）。本轮 13 个 RED 全是已登记真实提交 case 的功能性断言失败，无 fixture/导入/环境失败冒充 RED；其中 I1=1、I2=4、I3=7、I4=1。后续补足四项真实锁等待及一项 post-DTO 源版本提交，最终新增 25 项全部通过。最终 242 项无 skip/xfail/xpass；三个 warnings 均为原有 Pydantic class-based config 弃用提示，未屏蔽或改写既有 warning。
+- **自检/交接**：逐项重读 structured findings 和更新 context；核查源锁顺序、真实 writer 阻塞/释放、只读快照与 request fence 分离、核心与完整 DTO 的不同失效边界、五键回执/来源完整性及历史版本不改绑。原 current-access 接口、Task 2 写保护/锁 helper、collector/DTO 公共签名、8 MiB/100-row 完整性预算和默认关闭的旧候选/Agent 边界未变。没有已知未处理的 I1–I4 技术缺口；规格/质量重审仍由协调方执行，未宣称门禁已通过。Task 4 仍未启动，必须验证其实际 producer 生成的完整五键回执与实际写时权限/版本绑定，不把本次消费测试当作 producer 证据。
 
 > **2026-10-25 CAPA 结果审核 Task 1–2 已验收，准备 Task 3**：[八任务计划](docs/superpowers/plans/2026-10-23-capa-outcome-review.md)持续按用户授权执行。Task 1 共享基础复核通过；Task 2 已接通终态写保护、当前权限重查、来源删除与 JSON 引用锁协议，两轮修正后规格/质量复核均通过（最终代码 `acc54804`）。完整聚焦回归 **424 passed /3 既有 warnings**，包含真实 HTTP、源权限与目标范围撤销、FMEA/CP 删除及 PostgreSQL 实际锁等待/回滚竞争。以下 fix round 条目为历史实施记录，以本条最终验收状态为准。下一任务为受控读取和版本 DTO，整片结果审核/界面/最终验收尚未完成；不 push/合并/部署。
 
@@ -32,7 +64,7 @@
 **更新日期**: 2026-10-25
 **当前分支**: `feature/agent-task-runtime-foundation`
 **基线**: `7503e9e5`（独立工作树，未合入主工作区）
-**当前阶段**: R1–R4b-2 已完整验收；原 R4b-3 候选审批提案撤回，CAPA 实施结果集中审核设计已复核通过，实施计划已确认，Task 1–2 已复核通过，Task 3 受控读取及审核版本已实现、217-case 聚焦回归通过，等待独立复核；Task 4 决定绑定尚未实施。保留独立工作树及此前用户授权本地提交，未 push/合并/部署；Agent 新能力仍默认关闭。
+**当前阶段**: R1–R4b-2 已完整验收；原 R4b-3 候选审批提案撤回，CAPA 实施结果集中审核设计已复核通过，实施计划已确认，Task 1–2 已复核通过，Task 3 受控读取及审核版本 fix round 1/5 的 I1–I4 已修正、242-case 完整受影响聚焦回归通过，等待独立重审；Task 4 决定绑定尚未实施。保留独立工作树及此前用户授权本地提交，未 push/合并/部署；Agent 新能力仍默认关闭。
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
@@ -62,7 +94,7 @@
 - **R4a 实施中（2026-10-05）**：用户已确认书面方案，另行明确授权自有随机 `_test` 库的创建/迁移/清理。保留 R1–R3 原有改动基线；相关后端基线 `526 passed`，前端类型/构建通过。Task1 严格启动策略与请求会话快照接入红绿验证 `53 passed`；Task2 规范 profile/精确绑定与默认拒绝回归 `85 passed`，正常 grant→目录→建任务及绑定变更 `8 passed`。广回归 `606 passed`、运行 API 回归 `26 passed`、撤销/真实事务与凭据回归 `61 passed`，最终 R4a 新契约/规范权限/正常 CLI/Chromium 聚焦 `147 passed`。冻结前端类型/构建、74项单测及 E2E 类型检查通过，独立复核未发现具体重要缺陷；1197个源码/配置文件已冻结且未变化，相关47个文档链接及差异检查通过。完整全新隔离库冻结后端 **2859 passed / 4 skipped / 3 xfailed / 2 xpassed（1977.86秒，exit0）** 通过；4项skip为Redis1与旧E2E_MODE端点3，既有MES非严格预期失败/通过标记保留，沿用Makefile两项graph测试排除。R4a整片验收结束，自有主测试库与插件/Vite/浏览器进程已清理；另4个目录创建于2026-09-27/28的存量随机临时库未删除。默认关闭，不启用用户或生产环境。详见[六任务计划与执行台账](docs/superpowers/plans/2026-10-02-agent-metadata-local-trial.md)。
 - **R4b-1 设计中（2026-10-05）**：用户已选择“D4正文脱敏底座”与“规则＋显式替换词”。首片只覆盖 d4_root_cause 及验证 root_cause_text/result，生成平台内部只读候选，全部仍为restricted，不扩到附件/模型/插件正文或业务写入。[书面设计](docs/superpowers/specs/2026-10-05-capa-d4-text-redaction-foundation-design.md)已写入，包含当前CAPA/FMEA来源权限、默认关闭、预算、内容安全422、源版本/短期失效和审计；尚待书面审阅，未实现新接口或运行新片测试。
 - **R4b-1 实施中（2026-10-06）**：用户确认书面设计并按[六任务计划](docs/superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)执行。相关新基线186项及前端类型/构建通过；纯规则/DTO42项、受权快照17项、普通用户API4项红绿验证通过，共享当前访问抽取及旧运行时回归643项。本片与R4a/R3实际进程/浏览器聚焦119项通过，前端相关40项及类型/构建/E2E类型检查通过。独立复核两项收口已红绿修正：服务端失权/不确定性同时清空显式词；成功快照仅查询批准正文/来源元数据。修正后服务/API/实际Chromium25项与前端40项通过；1214个源码/配置已冻结；2026-10-06完整新库后端 **2926 passed /4 skipped /3 xfailed /2 xpassed（2067.61秒，exit0）**，前端 **87项/8文件**及类型/构建/E2E类型检查通过。2026-10-07恢复会话实际 `make check` 在另一个自有新库复验，同样 **2926 passed /4 skipped /3 xfailed /2 xpassed（2174.36秒，exit0）**，前端构建通过。冻结源码未变、60个文档链接有效、自有库和子进程清理；既有Redis1/旧E2E_MODE3跳过、MES非严格xfail/xpass及Makefile两项graph排除保留。整片验收结束，剩余附件/原文例外/降敏发布/SDK/部署与正文外发门禁不因此开放。始终restricted/外发关闭，不改业务原文、结论或R4a目录；[操作指南](docs/development/capa-d4-text-preview.md)已同步。
-- **当前下一步（2026-10-25）**：按[CAPA 措施实施后的集中结果审核实施计划](docs/superpowers/plans/2026-10-23-capa-outcome-review.md)子代理驱动执行；本片资源与本地提交已获明确授权，独占环境与完整基线已通过；Task 1–2 已验收，Task 3 完整结果读取、来源约束与版本 DTO 已实现，最终聚焦 217 passed；先独立复核 Task 3，再按授权推进 Task 4 实际 D8 决定绑定与生产回执。设计及 P1 已通过书面复核。原 D4 候选申请/发布审批及 7 天审核正文清理不再实施，不重复启动已验收的 R4b-2。现有 D8 审批和业务门禁继续按原代码运行；插件/模型正文附件投递、Agent 业务写入、原文例外与可信部署不因此开放。保留独立工作树，提交、push/merge/部署仍按各自授权边界处理。
+- **当前下一步（2026-10-25）**：按[CAPA 措施实施后的集中结果审核实施计划](docs/superpowers/plans/2026-10-23-capa-outcome-review.md)子代理驱动执行；本片资源与本地提交已获明确授权，独占环境与完整基线已通过；Task 1–2 已验收，Task 3 完整结果读取、来源约束与版本 DTO 的 I1–I4 fix round 1/5 已修正，最终完整受影响聚焦 242 passed；先独立重审 Task 3，再按授权推进 Task 4 实际 D8 决定绑定与生产回执。设计及 P1 已通过书面复核。原 D4 候选申请/发布审批及 7 天审核正文清理不再实施，不重复启动已验收的 R4b-2。现有 D8 审批和业务门禁继续按原代码运行；插件/模型正文附件投递、Agent 业务写入、原文例外与可信部署不因此开放。保留独立工作树，提交、push/merge/部署仍按各自授权边界处理。
 
 ---
 

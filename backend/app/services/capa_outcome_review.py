@@ -181,8 +181,8 @@ async def resolve_review_round(db, capa) -> UUID | None:
         (AuditLog.changed_fields['to'].astext == 'D8_APPROVAL_PENDING'))
     if transition is not None:
         return transition.log_id
-    return uuid5(NAMESPACE_URL, 'capa.outcome-review.legacy:' + _tenant_identity(db) + ':'
-                 + str(capa.report_id) + ':' + capa.updated_at.isoformat())
+    return uuid5(NAMESPACE_URL, 'capa.outcome-review.legacy:' + str(_tenant_identity(db)) + ':'
+                 + str(capa.report_id))
 
 
 def _uuid(value):
@@ -209,6 +209,8 @@ def _version_ref(value, *, gate=False):
         'module', 'object_id', 'version_id', 'sha256'}
     if type(value) is not dict or set(value) != keys:
         raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')
+    if not gate and (type(value['module']) is not str or value['module'] not in {'fmea', 'planning'}):
+        raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')
     module, object_id = _source_key(value['doc_type' if gate else 'module'], value['doc_id' if gate else 'object_id'])
     version_id = value['version_after_id' if gate else 'version_id']
     if version_id is None:
@@ -217,6 +219,27 @@ def _version_ref(value, *, gate=False):
     if type(value['sha256']) is not str or re.fullmatch('[0-9a-f]{64}', value['sha256']) is None:
         raise OutcomeReviewConflict()
     return {'module': module, 'object_id': object_id, 'version_id': version_id, 'sha256': value['sha256']}
+
+
+def _receipt_matches_material(receipt, material):
+    """A signature authenticates material, not a damaged receipt envelope."""
+    if (type(receipt) is not dict or set(receipt) != {
+            'contract', 'round_id', 'revision', 'doc_decision_id', 'source_versions'}
+            or receipt['contract'] != CONTRACT or type(receipt['source_versions']) is not list
+            or type(receipt['revision']) is not str
+            or re.fullmatch('[0-9a-f]{64}', receipt['revision']) is None
+            or material['doc_gate'] is None):
+        return False
+    try:
+        if (str(_uuid(receipt['round_id'])) != material['round_id']
+                or str(_uuid(receipt['doc_decision_id'])) != material['doc_gate']['decision_id']):
+            return False
+        sources = [_version_ref(value) for value in receipt['source_versions']]
+    except (PermissionError, OutcomeReviewConflict):
+        return False
+    keys = [(value['module'], value['object_id']) for value in sources]
+    return (len(keys) == len(set(keys))
+            and sorted(sources, key=lambda value: (value['module'], value['object_id'])) == material['source_versions'])
 
 
 async def _controlled_version(db, capa, key, ref):
@@ -253,12 +276,14 @@ async def _node(db, ref, node_id, node_type=None):
         raise OutcomeReviewConflict()
 
 
-async def _source_access(db, capa, key, access):
+async def _source_access(db, capa, key, access, *, lock=False):
     module, identifier = key
     model = FMEADocument if module == 'fmea' else ControlPlan
     identity = model.fmea_id if module == 'fmea' else model.cp_id
-    source = (await db.execute(select(model.factory_id, model.product_line_code)
-        .where(identity == _uuid(identifier)))).one_or_none()
+    query = select(model.factory_id, model.product_line_code).where(identity == _uuid(identifier))
+    if lock:
+        query = query.with_for_update(read=True)
+    source = (await db.execute(query)).one_or_none()
     if access is not None:
         require_capa_source_access(*access, Module.FMEA if module == 'fmea' else Module.PLANNING, source, capa)
     elif source is None or (source.factory_id, source.product_line_code) != (capa.factory_id, capa.product_line_code):
@@ -306,6 +331,8 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
                     or value['fmea_id'] != core['fmea_ref_id']):
                 raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')
             _uuid(value['fmea_id'])
+            if type(value['cause_node_id']) is not str or not value['cause_node_id']:
+                raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')
             reference(value['fmea_id'], value['cause_node_id'], 'FailureCause')
     for row in actions:
         if row['fmea_id'] is not None:
@@ -412,10 +439,7 @@ async def _dto(db, capa, material):
     elif receipt is None:
         binding_status = 'legacy_unversioned'
     else:
-        valid = (type(receipt) is dict and receipt.get('contract') == CONTRACT
-                 and _receipt_round(receipt) is not None
-                 and type(receipt.get('revision')) is str
-                 and re.fullmatch('[0-9a-f]{64}', receipt['revision']) is not None
+        valid = (_receipt_matches_material(receipt, material)
                  and hmac.compare_digest(receipt['revision'], revision)
                  and audit.action == 'D8_APPROVED')
         binding_status = 'verified' if valid else 'unverifiable'
@@ -466,6 +490,25 @@ async def _read_snapshot(db, scope, report_id, binding):
                 return material, await _dto(snapshot, target, material), signature
 
 
+async def _lock_read_fence(db, scope, report_id, sources):
+    """Fence normal writers on the request transaction, never the RR/RO one.
+
+    Task 2 material/supplement/gate writers lock the CAPA parent first;
+    version/scope writers lock their source parents. Retain shared locks until
+    the request transaction ends. Match version_service's document lock order
+    (control_plan before fmea), not the DTO's fmea/planning spelling order.
+    """
+    identifier = await db.scalar(select(CAPAEightD.report_id).where(
+        CAPAEightD.report_id == report_id).with_for_update(read=True))
+    if identifier is None:
+        raise LookupError('CAPA_OUTCOME_REVIEW_UNAVAILABLE')
+    target, access, _ = await _admission(db, scope, report_id)
+    for source in sorted(sources, key=lambda value: (
+            'control_plan' if value['module'] == 'planning' else 'fmea', value['object_id'])):
+        await _source_access(db, target, (source['module'], source['object_id']), access, lock=True)
+    return await _admission(db, scope, report_id)
+
+
 async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
     """A pure GET: build once in RR/RO, independently recheck on request DB."""
     with db.no_autoflush:
@@ -492,8 +535,29 @@ async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
         if (not hmac.compare_digest(outcome_revision(material), outcome_revision(final))
                 or output.model_dump(mode='json') != final_output.model_dump(mode='json')):
             raise OutcomeReviewConflict()
-        # DTO construction performs reads too. Authority must still be live
-        # after that work, not just before assembling the final material.
+        # Post-assembly commits must invalidate the complete response, not just
+        # its core HMAC. Re-read under the existing parent/source write fences;
+        # supplements and decision/audit metadata remain outside the core HMAC.
+        locked_target, locked_access, locked_signature = await _lock_read_fence(
+            db, scope, report_id, final['source_versions'])
+        if (db.info.get('tenant_binding') != binding or locked_signature != signature
+                or locked_target.status != output.status):
+            raise OutcomeReviewConflict()
+        previous = db.info.get('outcome_read_access')
+        db.info['outcome_read_access'] = locked_access
+        try:
+            locked_material = await collect_outcome_material(db, locked_target)
+            if not hmac.compare_digest(outcome_revision(material), outcome_revision(locked_material)):
+                raise OutcomeReviewConflict()
+            locked_output = await _dto(db, locked_target, locked_material)
+        finally:
+            if previous is None:
+                db.info.pop('outcome_read_access', None)
+            else:
+                db.info['outcome_read_access'] = previous
+        if output.model_dump(mode='json') != locked_output.model_dump(mode='json'):
+            raise OutcomeReviewConflict()
+        # Authority can be revoked independently of the material lock protocol.
         last_target, last_access, last_signature = await _admission(db, scope, report_id)
         if (db.info.get('tenant_binding') != binding or last_signature != signature
                 or last_target.status != output.status
