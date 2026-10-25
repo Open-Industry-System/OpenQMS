@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1 共享基础已通过规格及质量复核（覆盖测试 36 passed）；当前准备 Task 2 全写入口接线，任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，当前准备 Task 3 受控读取与版本 DTO。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
 ## Global Constraints
 
@@ -352,7 +352,7 @@ async def lock_material_write(db, capa, fields=None):
 
 **Interfaces:** 消费 Task 1 guard。新 source helper `lock_source_capa_references(db, doc_type, doc_id) -> frozenset[UUID]`、`assert_source_references_unchanged(db, doc_type, doc_id, locked_ids) -> None`；doc_type 仅 fmea/control_plan。引用查询同时覆盖直接关联、D7 action、doc-gate version_snapshot 和新版审计回执；doc-gate 的 doc_type/doc_id 与新回执的 module/object_id 先规范成同一来源身份，`planning` 对应 `control_plan`，不能只识别一种 JSON 形状。不返回 CAPA 正文。
 
-- [ ] **Step 1: 为实际入口写 RED 矩阵**
+- [x] **Step 1: 为实际入口写 RED 矩阵**
 
 ```python
 @pytest.mark.asyncio
@@ -375,7 +375,7 @@ async def test_adoption_cannot_append_after_close(review_case, status):
 
 同样用现有请求模型覆盖：PUT D4/D5/D6、核心+补充混合 PUT、root verification create/update（含清空证据/换结论/换 source_ref）、既有 adoption 幂等 fast path、link_fmea、D7 record/auto_fill、doc-gate phase1/run_audit/defer/confirm/waiver。分别直接服务与 HTTP 409，不依赖 UI。不存在验证 DELETE/CAPA DELETE API：标明无此入口，不新增接口；FMEA 删除的清关联/删动作是真实需要覆盖的间接删除。
 
-- [ ] **Step 2: 运行矩阵确认 RED**
+- [x] **Step 2: 运行矩阵确认 RED**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh
@@ -385,29 +385,29 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/capa/test_capa_reviewed_w
 
 确认能复现实际改写或错误的 400/500；保存最小失败证据，不把通用测试框架错误算作功能 RED。
 
-- [ ] **Step 3: 接通普通编辑与关联**
+- [x] **Step 3: 接通普通编辑与关联**
 
 `update_capa()` 最前使用 `capa = await lock_material_write(db, capa, set(update_data))`，在任何供应商处理、字段 mutate、lesson/embedding/outbox 之前执行；保留原 D7+/d8_closure freeze。`link_fmea()` 先 `lock_material_write(db,capa,{'fmea_ref_id','fmea_node_id'})`，再检查/操作来源；不再保留一条无检查的重复锁路径。
 
 在 `capa_current_access.py` 定义 `current_capa_actor_target(db, actor_id: UUID, report_id: UUID, required_level: PermissionLevel) -> CAPAEightD`：由服务端 actor UUID 构造只含 user_id 的内部 scope，调用既有 current_capa_access，检查最低等级，再调用 current_capa_target；不接收调用方角色或范围声明。CAPA HTTP 层在 admission、锁后都用该 fresh 权限和目标范围，不能仅使用 token/旧 scope 缓存。没有调用者 scope 的内部服务仍必须做终态保护，不能引入可从请求传入的 bypass 参数。
 
-- [ ] **Step 4: 接通采纳和验证**
+- [x] **Step 4: 接通采纳和验证**
 
 `adopt_recommendation()` 在 `_find_existing_adoption()` 之前执行父锁/终态保护；保留原去重和 IntegrityError 回滚语义；发生 rollback 后的既有记录返回路径也必须重新取得父锁、刷新并检查终态。`create_verification()` 必须在校验/插入任何子记录前取父锁；failed 计数不再另走晚期父锁。`update_verification()` 改为父行→verification 行，父锁后再载入原记录和更新；删除原先“先改子记录、failed 才补父锁”的分支。禁止 guard 之前 autoflush。
 
-- [ ] **Step 5: 接通 D7 及文档门禁写阶段**
+- [x] **Step 5: 接通 D7 及文档门禁写阶段**
 
 D7 record/auto_fill 最前取父锁/终态检查，再执行原 `_assert_d7_stage`；终态固定 409，其他错误阶段仍保持既有业务错误，不放松 FMEA 编辑权限或推荐匹配。
 
 doc-gate `_phase1_create_running`、`_phase3_cas`（包括 llm_error 分支）、`run_audit`、`record_defer`、`confirm_no_affected`、`record_gate_waiver` 在 demote/current/CAS/decision 变更之前取父锁、刷新并确认仍为 D8_GATE_PENDING。多阶段 LLM 调用不跨网络持事务；phase3 重入时再用 current_capa_actor_target 核验当前 actor 的 EDIT/范围并检查父行状态，终态不能修改当前/历史审核依据。GET 和只读推荐不误用写 guard。
 
-- [ ] **Step 6: 保护 FMEA/CP 间接删除**
+- [x] **Step 6: 保护 FMEA/CP 间接删除**
 
 按实现决定 §4，在原 ProductLine 锁之前获取关联 CAPA 父锁、判断终态；文档锁后重查引用集合，新增未锁引用则回滚重试，不持文档锁反向拿 CAPA 锁。FMEA 的 `_null_out_fmea_references()` 和 `delete(CapaD7NodeAction)` 必须位于此保护之后；CP 删除同样保护 snapshot 中的历史版本。
 
 写正反测试：闭案引用阻止删除且 graph/outbox/版本/关联不变；未结案引用仍保持原清理行为；正常新建 FMEA/CP 版本继续允许；间隙中新增引用导致冲突而非漏删/死锁。引用查询应以当前 namespace 和来源 factory 为边界，固定错误不暴露无权 CAPA ID。
 
-- [ ] **Step 7: GREEN 与明确回归**
+- [x] **Step 7: GREEN 与明确回归**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh
