@@ -70,6 +70,27 @@ async def current_capa_target(db, report_id, factories, lines):
     return target
 
 
+async def current_capa_actor_access(db, actor_id, required_level: PermissionLevel):
+    """Resolve the server-side actor's live CAPA role and scope."""
+    levels, factories, lines = await current_capa_access(
+        db, SimpleNamespace(user=SimpleNamespace(user_id=actor_id))
+    )
+    if levels.get(Module.CAPA, PermissionLevel.NONE) < required_level:
+        raise PermissionError('Current CAPA permission required')
+    return factories, lines
+
+
+async def current_capa_actor_product_line(
+    db, actor_id, factory_id, product_line_code, required_level: PermissionLevel,
+) -> None:
+    """Require a live CAPA scope that includes a destination product line."""
+    factories, lines = await current_capa_actor_access(db, actor_id, required_level)
+    if factories.accessible_factory_ids is not None and factory_id not in factories.accessible_factory_ids:
+        raise PermissionError('Current CAPA permission required')
+    if lines.mode != 'ALL' and product_line_code not in (lines.codes or []):
+        raise PermissionError('Current CAPA permission required')
+
+
 async def current_capa_actor_target(db, actor_id, report_id, required_level: PermissionLevel) -> CAPAEightD:
     """Resolve fresh CAPA access from the server-side actor identity only."""
     levels, factories, lines = await current_capa_access(

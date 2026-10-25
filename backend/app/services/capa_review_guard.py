@@ -3,7 +3,10 @@
 from sqlalchemy import select
 
 from app.models.capa import CAPAEightD
-from app.services.capa_current_access import require_business_namespace
+from app.services.capa_current_access import (
+    current_capa_actor_target,
+    require_business_namespace,
+)
 
 REVIEWED_STATES = frozenset({"D8_CLOSURE", "ARCHIVED"})
 REVIEWED_FIELDS = frozenset({
@@ -52,6 +55,19 @@ def assert_reviewed_material_mutable(capa, fields=None):
         fields is None or REVIEWED_FIELDS.intersection(fields)
     ):
         raise ReviewedContentLocked()
+
+
+async def lock_current_material_write(db, capa, actor_id, required_level, fields=None):
+    """Authorize before and after the parent lock, then disclose terminal state."""
+    # Admission precedes the lock so invisible/revoked callers cannot learn
+    # that the target has reviewed material.
+    await current_capa_actor_target(db, actor_id, capa.report_id, required_level)
+    fresh = await lock_capa_parent(db, capa.report_id)
+    # The lock serializes scope-changing updates; refresh current authority
+    # against that locked target before any terminal-state check or mutation.
+    fresh = await current_capa_actor_target(db, actor_id, fresh.report_id, required_level)
+    assert_reviewed_material_mutable(fresh, fields)
+    return fresh
 
 
 async def lock_material_write(db, capa, fields=None):

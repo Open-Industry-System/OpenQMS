@@ -105,3 +105,20 @@ async def test_doc_gate_phase_three_rechecks_current_actor_permission(review_cas
                 "attempt_token": uuid.uuid4(),
             }, {"llm_error": "simulated"}, user.user_id)
         await db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_revoked_actor_is_denied_before_reviewed_terminal_disclosure(review_case):
+    """Would fail if the material lock exposed a reviewed state before current authority."""
+    from app.models.user import User
+    from app.services.capa_verification_service import adopt_recommendation
+
+    await review_case.set_status("D8_CLOSURE")
+    await review_case.set_capa_level(PermissionLevel.VIEW)
+    async with review_case.session_factory() as db:
+        capa = await review_case.report(db)
+        user = await db.get(User, review_case.actor_id)
+        with pytest.raises(PermissionError, match="^Current CAPA permission required$"):
+            await adopt_recommendation(db, capa, AdoptRequest(
+                d_step="d5", adopted_text="不可见追加", source="manual"), user)
+        await db.rollback()

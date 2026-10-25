@@ -542,6 +542,10 @@ async def update_capa(
         raise HTTPException(status_code=404, detail="8D report not found")
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await _capa_response_with_projections(db, capa)
@@ -1093,7 +1097,12 @@ async def adopt_recommendation_ep(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
-    adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
+    try:
+        adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
 
 
@@ -2050,6 +2059,9 @@ async def d3_list_executions_ep(
 
 
 def _assert_d8_gate_stage(capa: CAPAEightD):
+    if capa.status in (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value):
+        from app.services.capa_review_guard import ReviewedContentLocked
+        raise ReviewedContentLocked()
     if capa.status != EightDState.D8_GATE_PENDING.value:
         raise HTTPException(status_code=400, detail="仅 D8_GATE_PENDING 阶段可操作")
 
@@ -2087,6 +2099,10 @@ async def doc_gate_impact_ep(
         result = await capa_doc_gate_service.generate_impact_analysis(
             db, capa, scope.user.user_id
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         if "BLOCKED" in str(e):
             raise HTTPException(
@@ -2121,6 +2137,10 @@ async def doc_gate_audit_ep(
     _assert_d8_gate_stage(capa)
     try:
         result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # Serialize UUID fields for JSON
@@ -2203,6 +2223,10 @@ async def doc_gate_defer_ep(
         result = await capa_doc_gate_service.record_defer(
             db, capa, body.reason, owner_id, body.deadline, scope.user.user_id
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2221,6 +2245,10 @@ async def doc_gate_confirm_no_affected_ep(
         result = await capa_doc_gate_service.confirm_no_affected(
             db, capa, scope.user.user_id
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2289,6 +2317,10 @@ async def doc_gate_waiver_ep(
             [item.model_dump() for item in body.items],
             scope.user.user_id,
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 APPROVE 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result

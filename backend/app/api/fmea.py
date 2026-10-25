@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.core.tenant import tenant_schema
 from app.database import get_db
@@ -199,6 +199,7 @@ async def delete_fmea(
     if scope.factory_scope.accessible_factory_ids is not None:
         if fmea.factory_id not in scope.factory_scope.accessible_factory_ids:
             raise HTTPException(status_code=404, detail="FMEA not found")
+    check_product_line_access(fmea.product_line_code, scope)
     # Only allow deleting draft or rework (rejected) FMEAs
     if fmea.status not in ("draft", "rework"):
         raise HTTPException(status_code=400, detail="只能删除草稿或返工状态的FMEA")

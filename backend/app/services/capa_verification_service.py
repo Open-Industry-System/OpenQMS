@@ -11,11 +11,9 @@ from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services import capa_service
 from app.services.embedding_outbox import enqueue_embedding
-from app.services.capa_current_access import current_capa_actor_target
 from app.services.capa_review_guard import (
-    assert_reviewed_material_mutable,
     lock_capa_parent,
-    lock_material_write,
+    lock_current_material_write,
 )
 
 FIELD_MAP = {"d4": "d4_root_cause", "d5": "d5_correction"}
@@ -62,7 +60,14 @@ async def _normalize_and_validate_source_ref(db: AsyncSession, capa, source_ref)
     cause_node_id = str(source_ref["cause_node_id"]).strip()
     if not cause_node_id:
         raise ValueError("cause_node_id 不能为空")
-    fmea = await db.get(FMEADocument, capa.fmea_ref_id)
+    # source_ref is JSON-only, so serialize creation with source deletion in
+    # the same CAPA -> ProductLine -> FMEA order before inspecting its graph.
+    from app.services.product_line_service import lock_candidate_scopes
+    await lock_candidate_scopes(db, [(capa.factory_id, capa.product_line_code)])
+    fmea = await db.scalar(
+        select(FMEADocument).where(FMEADocument.fmea_id == capa.fmea_ref_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     if fmea is None:
         raise LookupError("目标 FMEA 不存在")
     if fmea.factory_id != capa.factory_id:
@@ -97,9 +102,8 @@ async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest):
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     # This must happen before the idempotency fast-path: returning an existing
     # adoption is still a reviewed-material write admission decision.
-    capa = await lock_material_write(db, capa)
-    capa = await current_capa_actor_target(
-        db, user.user_id, capa.report_id, PermissionLevel.EDIT
+    capa = await lock_current_material_write(
+        db, capa, user.user_id, PermissionLevel.EDIT
     )
     field = FIELD_MAP[req.d_step]
     # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
@@ -146,14 +150,18 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         if existing is None:
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
         capa = await lock_capa_parent(db, capa_id)
-        assert_reviewed_material_mutable(capa)
+        capa = await lock_current_material_write(
+            db, capa, user.user_id, PermissionLevel.EDIT
+        )
         return existing, getattr(capa, field) or ""
     await db.refresh(adoption)
     return adoption, new_value
 
 
 async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user):
-    capa = await lock_material_write(db, capa)
+    capa = await lock_current_material_write(
+        db, capa, user.user_id, PermissionLevel.EDIT
+    )
     conclusion = req.conclusion
     is_verified = (conclusion == "passed")
     if is_verified:
@@ -227,7 +235,9 @@ async def list_verifications(db: AsyncSession, capa):
 async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpdate, user):
     # Parent-before-child lock ordering prevents a reviewed CAPA from being
     # changed by a stale verification row.
-    capa = await lock_material_write(db, capa)
+    capa = await lock_current_material_write(
+        db, capa, user.user_id, PermissionLevel.EDIT
+    )
     # 锁 verification 行，序列化同记录并发跃迁（去重）
     rec = await db.scalar(select(CapaRootCauseVerification).where(
         CapaRootCauseVerification.verification_id == vid,

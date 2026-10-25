@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 
 from app.models.audit import AuditLog
-from app.models.capa import CAPAEightD, CapaD7NodeAction
+from app.models.capa import CAPAEightD, CapaD7NodeAction, CapaRootCauseVerification
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
 from app.models.control_plan import ControlPlan
 from app.models.fmea import FMEADocument
@@ -46,6 +46,13 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
             CapaD7NodeAction.fmea_id == doc_id,
             CapaD7NodeAction.factory_id == source_factory_id,
         )))
+        # D4's supported source_ref identity is exactly {fmea_id,cause_node_id}.
+        # Extracting text compares malformed JSON safely without UUID casts.
+        ids.update(await db.scalars(select(CapaRootCauseVerification.capa_id).where(
+            CapaRootCauseVerification.factory_id == source_factory_id,
+            func.jsonb_typeof(CapaRootCauseVerification.source_ref) == "object",
+            func.jsonb_extract_path_text(CapaRootCauseVerification.source_ref, "fmea_id") == str(doc_id),
+        )))
 
     ids.update(await db.scalars(
         select(CapaDocgAnalysis.capa_id)
@@ -73,14 +80,32 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
     source_modules = [doc_type]
     if doc_type == "control_plan":
         source_modules.append("planning")
-    ids.update(await db.scalars(
-        select(AuditLog.record_id).where(
+    receipt_base = (
+        select(AuditLog.record_id)
+        .join(CAPAEightD, CAPAEightD.report_id == AuditLog.record_id)
+        .where(
             AuditLog.table_name == "capa_eightd",
             AuditLog.factory_id == source_factory_id,
+            CAPAEightD.factory_id == source_factory_id,
+        )
+    )
+    ids.update(await db.scalars(
+        receipt_base.where(
             func.jsonb_extract_path_text(AuditLog.changed_fields, "module").in_(source_modules),
             func.jsonb_extract_path_text(AuditLog.changed_fields, "object_id") == str(doc_id),
         )
     ))
+    # Final outcome receipts use the versioned nested envelope.  JSONB
+    # containment is shape-safe and recognizes the planning module alias.
+    for source_module in source_modules:
+        ids.update(await db.scalars(
+            receipt_base.where(
+                AuditLog.changed_fields["outcome_review"]["contract"].astext == "capa.outcome-review.v1",
+                AuditLog.changed_fields["outcome_review"]["source_versions"].contains([
+                    {"module": source_module, "object_id": str(doc_id)}
+                ]),
+            )
+        ))
     return frozenset(ids)
 
 

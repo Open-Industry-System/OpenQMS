@@ -16,8 +16,7 @@ from app.models.audit import AuditLog
 from app.services.agent import provider_adapter
 from app.services.agent.provider_adapter import ProviderClient, ProviderNotConfiguredError
 from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
-from app.services.capa_current_access import current_capa_actor_target
-from app.services.capa_review_guard import lock_material_write
+from app.services.capa_review_guard import lock_current_material_write
 from app.core.permissions import PermissionLevel
 
 logger = logging.getLogger(__name__)
@@ -26,9 +25,11 @@ RETRY_AFTER_SECONDS = 2
 _ALLOWED_NODE_TYPES = {"FailureMode", "FailureEffect", "FailureCause", "ProcessStep", "Function", "WorkElement"}
 
 
-async def _lock_doc_gate_write(db: AsyncSession, capa: CAPAEightD) -> CAPAEightD:
-    """Lock CAPA material before mutating a D8 document-gate record."""
-    capa = await lock_material_write(db, capa)
+async def _lock_doc_gate_write(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> CAPAEightD:
+    """Authorize, lock, and validate CAPA material before D8 gate mutation."""
+    capa = await lock_current_material_write(
+        db, capa, user_id, PermissionLevel.EDIT
+    )
     if capa.status != "D8_GATE_PENDING":
         raise ValueError("当前状态不可写入文档门禁")
     return capa
@@ -60,7 +61,7 @@ async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD) -> dict | None
 # ---------------------------------------------------------------------------
 
 async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
-    capa = await _lock_doc_gate_write(db, capa)
+    capa = await _lock_doc_gate_write(db, capa, user_id)
     # The parent lock is retained through phase 1's small transaction.
     # Demote old current (fail-closed: before credential check)
     await db.execute(
@@ -150,10 +151,7 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict, user_id: uuid.UUID) -> dict:
-    capa = await _lock_doc_gate_write(db, capa)
-    capa = await current_capa_actor_target(
-        db, user_id, capa.report_id, PermissionLevel.EDIT
-    )
+    capa = await _lock_doc_gate_write(db, capa, user_id)
     analysis_id = uuid.UUID(p1["analysis_id"])
     attempt_token = p1["attempt_token"]
     now = datetime.now(timezone.utc)
@@ -736,7 +734,7 @@ from app.services.diff_engine import diff_fmea_graphs, diff_cp_headers
 
 async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
     """Audit each affected doc's version bump + key-point coverage. Insert audit + decision rows."""
-    capa = await _lock_doc_gate_write(db, capa)
+    capa = await _lock_doc_gate_write(db, capa, user_id)
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
@@ -744,6 +742,31 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
     )
     if analysis is None or analysis.status != "done":
         raise ValueError("未生成有效影响分析")
+    if not analysis.affected_docs:
+        raise ValueError("空影响清单须人工确认，不可运行自动审核")
+    # JSON references have no FK to their source.  Serialize their creation
+    # with source deletion in CAPA -> ProductLine -> document order.
+    from app.services.product_line_service import lock_candidate_scopes
+    from app.services.version_service import lock_version_parents_in_order
+    identities = []
+    for doc in analysis.affected_docs:
+        if not isinstance(doc, dict) or doc.get("doc_type") not in {"fmea", "control_plan"}:
+            raise ValueError("影响清单文档非法")
+        try:
+            identities.append((doc["doc_type"], uuid.UUID(str(doc["doc_id"]))))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("影响清单文档非法") from exc
+    await lock_candidate_scopes(db, [(capa.factory_id, capa.product_line_code)])
+    await lock_version_parents_in_order(db, identities)
+    analysis = await db.scalar(
+        select(CapaDocgAnalysis).where(
+            CapaDocgAnalysis.analysis_id == analysis.analysis_id,
+            CapaDocgAnalysis.capa_id == capa.report_id,
+            CapaDocgAnalysis.is_current == True,
+        ).execution_options(populate_existing=True)
+    )
+    if analysis is None or analysis.status != "done":
+        raise ValueError("影响分析已失效，请重新生成影响分析")
     # C9 precheck
     candidates = await _build_allowlist(db, capa)
     cur_hash = _compute_input_hash(capa, candidates)
@@ -1031,7 +1054,7 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
     product-line filtering, NOT factory scope (factory_scope.py docstring) — do
     not treat it as group-admin cross-factory access.
     """
-    capa = await _lock_doc_gate_write(db, capa)
+    capa = await _lock_doc_gate_write(db, capa, user_id)
     if not reason or not str(reason).strip():
         raise ValueError("defer reason 必填")
     from app.models.user import User
@@ -1070,7 +1093,7 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
 
 async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
     """Engineer confirms an empty affected_docs list is correct -> decision=passed (no_affected_confirmed)."""
-    capa = await _lock_doc_gate_write(db, capa)
+    capa = await _lock_doc_gate_write(db, capa, user_id)
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
@@ -1119,7 +1142,7 @@ async def record_gate_waiver(
 
     Caller must require APPROVE permission on the capa module (enforced in API).
     """
-    capa = await _lock_doc_gate_write(db, capa)
+    capa = await _lock_doc_gate_write(db, capa, user_id)
     if not reason or not str(reason).strip():
         raise ValueError("waiver reason 必填")
     if not items:
