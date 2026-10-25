@@ -38,6 +38,30 @@ async def review_expectation(db, capa) -> dict:
     }
 
 
+async def prepare_decision_material(db, capa, actor_id):
+    """Explicit prerequisites for legacy closure unit fixtures (not HTTP/RR evidence)."""
+    from app.services.capa_doc_gate_service import _build_allowlist
+    if not (capa.d4_root_cause or '').strip():
+        capa.d4_root_cause = '已验证根因'
+    db.add(CapaRootCauseVerification(capa_id=capa.report_id, factory_id=capa.factory_id,
+        root_cause_text=capa.d4_root_cause.strip(), method='observation', result='实施后复测合格',
+        is_verified=True, conclusion='passed', evidence_attachments=[], verified_by=actor_id,
+        verified_at=datetime.now(timezone.utc)))
+    await db.flush()
+    existing = await db.scalar(select(CapaDocgAnalysis.analysis_id).where(
+        CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current.is_(True)))
+    if existing is None:
+        analysis = CapaDocgAnalysis(capa_id=capa.report_id, factory_id=capa.factory_id,
+            is_current=True, status='done', affected_docs=[],
+            analysis_input_hash=_compute_input_hash(capa, await _build_allowlist(db, capa)),
+            llm_available=True, model='unit', completed_at=datetime.now(timezone.utc), generated_by=actor_id)
+        db.add(analysis)
+        await db.flush()
+        db.add(CapaDocgDecision(analysis_id=analysis.analysis_id, factory_id=capa.factory_id,
+            decision='passed', no_affected_confirmed=True, version_snapshot=[], decided_by=actor_id))
+        await db.flush()
+
+
 @dataclass
 class ReviewCase:
     session_factory: object
@@ -196,6 +220,10 @@ async def review_case(sessionmaker, monkeypatch):
         yield case
     finally:
         async with sessionmaker() as db:
+            from app.models.knowledge_entry import KnowledgeEntry
+            from app.models.capa_lateral_diffusion import CapaLateralDiffusionCheck
+            await db.execute(delete(CapaLateralDiffusionCheck).where(CapaLateralDiffusionCheck.capa_id == report_id))
+            await db.execute(delete(KnowledgeEntry).where(KnowledgeEntry.source_id == report_id))
             await db.execute(delete(EmbeddingSyncOutbox).where(EmbeddingSyncOutbox.factory_id == factory_id))
             await db.execute(delete(CapaLessonLearned).where(CapaLessonLearned.capa_id == report_id))
             await db.execute(delete(DocumentEmbedding).where(DocumentEmbedding.entity_id == report_id))

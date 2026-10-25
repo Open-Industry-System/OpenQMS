@@ -234,3 +234,39 @@ if target_status == "approved" and user.role_definition.role_key not in ("admin"
 | 2026-06-13 | 认证审计日志：登录成功/失败/账户停用/注册/refresh 成功/失败均输出结构化日志 |
 
 > **US-E2E-01.1 D3 遏制（2026-07-12）**：D3 相关端点复用 `capa` 模块现有权限模型，未新增权限点或角色。
+
+
+## CAPA D8 结果审核版本绑定（2026-10-25，Task 4）
+
+`POST /api/capa/{report_id}/advance` 保留现有状态边。仅
+`D8_APPROVAL_PENDING → D8_CLOSURE`（批准）与
+`D8_APPROVAL_PENDING → D7_PREVENTION`（驳回）必须提交：
+
+- `expected_outcome_revision`：`GET /api/capa/{report_id}/outcome-review` 返回的 64 位小写 hex revision。
+- `expected_review_round_id`：同一次读取返回的 UUID 轮次。
+
+当前有权限的调用方缺任一字段返回 `409 CAPA_OUTCOME_REVIEW_REQUIRED`；
+材料、显式来源版本或轮次已变化返回 `409 CAPA_OUTCOME_REVIEW_CHANGED`。
+字段格式非法仍由 DTO 返回 422。没有权限的调用方先拒绝，版本不是授权凭证。
+早期 EDIT 推进及 `D8_CLOSURE → ARCHIVED` 不要求这两个字段；本人提交后具有当前 APPROVE
+权限仍可审批，不新增禁止自批或允许自批开关。驳回仍须非空理由，回到 D7，不补偿现场措施。
+
+HTTP 与直接服务调用都重新解析当前用户的 CAPA 权限、工厂/产品线范围，并独立检查所有必要来源的
+FMEA VIEW / PLANNING VIEW。GET 的 RR/只读快照和读取围栏不代替写授权；写事务使用真实 collector
+重算完整 HMAC。锁序为 CAPA 父行 → 当前 analysis → ProductLine → 排序后的 CP/FMEA 父行全集，
+显式引用但不在文档门禁 snapshot 中的 FMEA 也必须进入同一个排序锁集合。锁持有至最终结案事务结束，
+所有锁等待后重新核对材料与当前权限。批准复用完整 C8/C9/waiver 门禁，并要求当前根因匹配 passed
+验证记录、D5 正式措施及 D6 验证结果非空；非空文字本身不表示有效性已获批准。
+
+知识沉淀和横向扩散的长 await 后分别重新校验；MES outbox、状态和审计写入后、最终提交前再次校验
+actor/范围/来源权限、tenant admission、轮次及 revision。失败回滚数据库中的结案副作用；不声称数据库
+回滚能收回先前合法外部调用已经发送的信息。helpers 不提前提交。
+
+既有 `D8_APPROVED` / `D8_REJECTED` 的 `changed_fields.outcome_review` 仅含五键：
+`contract`、`round_id`、`revision`、`doc_decision_id`、`source_versions`。
+五键值全部来自服务器校验结果，不接受客户端准备的 receipt，不复制正文或验证自由文本。
+Task 3 reader 与来源引用 collector 直接消费实际决定产生的该 envelope。
+结案补充和归档不替换 receipt。兼容旧待审核轮次仍仅绑定 tenant + report，不绑定 updated_at；
+GET 不写入轮次，无迁移。现有知识沉淀/横向扩散 E2E API 调用先读版本再提交，待审批 seed 只补齐
+根因、门禁与不可变来源版本前置，不预造 D8 审批回执。前端审核面板/交互属于 Task 5，真实 provider
+与浏览器全链路属于 Task 7，本次不作为已验收项。

@@ -435,3 +435,207 @@ US-E2E-01 已升级为 epic 合集 v8.1 定稿（`docs/user-stories/US-E2E-01-ca
 - P1-D 剩余 LLM 消费者迁移：`docs/superpowers/specs/2026-07-01-ai-qms-p1d-remaining-llm-migration-design.md` + `docs/superpowers/plans/2026-07-01-ai-qms-p1d-remaining-llm-migration.md`（5 TDD 任务，3 轮 spec + 3 轮 plan 评审）
 - 权限矩阵：`docs/permissions.md`
 - 各模块详细文档：`docs/modules/`
+
+
+---
+
+## Task 4 — CAPA outcome-review production decision binding (2026-10-25)
+
+### Scope, assumptions and result
+
+- **DONE: Task 4 only**, based on `a1721b3c`, reviewed dependencies Task 3 `894349fa` and Task 2 `acc54804`.
+  Read only the Task 4 brief/context, not the eight-task implementation plan. The approved existing D8 approve/reject
+  edges, current APPROVE/source authority and existing self-approval policy remain authoritative.
+- Implemented the actual production D8 producer in `backend/app/services/capa_service.py`, not a fixture receipt or UI.
+  No new state/table/feature switch/migration, no client-selected receipt, no version-skip flag, no new policy.
+- Worked solely in this worktree. Used the already registered owned application/test resources via private `run-owned.py`;
+  no environment/profile/credential dump, global installs, infrastructure recreation, shared/seed/production data writes,
+  migration CLI, full `make check`, push/merge/deploy or main-checkout edits. Existing reviewed owned tenant fixture
+  provisioning was reused for real tenant/JWT tests. `app.seed_e2e.main()` was **not** run.
+- CodeGraph focused context was queried first; its stale index was not repaired. Actual reviewed helper interfaces were
+  inspected directly in the known files. No unrelated audit or agent delegation.
+
+### Production contract and transaction review
+
+1. `AdvanceRequest` adds exactly `expected_outcome_revision: str | None` (64 lowercase hex) and
+   `expected_review_round_id: UUID | None`. Only valid D8 decision edges require both. Authorized missing/partial
+   expectations return 409 `CAPA_OUTCOME_REVIEW_REQUIRED`; stale material/round returns 409
+   `CAPA_OUTCOME_REVIEW_CHANGED`; malformed DTO fields remain 422. Arbitrary client `outcome_review` metadata does
+   not satisfy the expectation. Invalid state edges remain invalid. A three-argument service call at pending cannot
+   infer a D8 decision; it retains the explicit-target error, not a bypass. Early three-argument EDIT progression and
+   archival without tokens remain supported.
+2. API dependency and direct service entry use current actor identity/role/factory/product-line admission. CAPA parent is
+   locked and refreshed; actual EDIT/APPROVE edge authority is determined again after waiting. Server UUID scalars are
+   captured before any closure rollback could expire ORM identities. Neither a cached role nor a GET receipt grants access.
+3. `require_outcome_expectation(db, scope, capa, req)` reuses the complete reviewed collector, round resolver and HMAC
+   plus **fresh** CAPA/target/source/tenant authorization. It does not call the RR/GET wrapper. The temporary collector
+   access context is restored on success/failure. It returns only the server-owned five-key metadata envelope.
+4. `apply_outcome_expectation(db, capa, req, actor_id)` resolves a current server-UUID scope. Approval calls the existing
+   `_d8_doc_gate_gate()` with the complete additional source-parent set, preserving C8/C9, waiver and version checks.
+   The retained order is CAPA → analysis → ProductLine → sorted CP/FMEA parents; explicit references outside the gate
+   snapshot join that **same** sorted set, never a late reverse-order lock. Full material/version/access checks repeat
+   after all actual waits. Approval also requires a current-root-cause matching passed record and nonblank D5/D6;
+   text alone does not establish effectiveness. Rejection locks the same source/gate hierarchy and binds the same tokens,
+   still needs a nonblank reason, and returns only to D7; it need not turn a failed gate into a passing one to reject.
+5. Knowledge sink, lateral diffusion, transition, audit and MES outbox stay in one transaction with the parent and all
+   source/gate locks retained. Revalidation occurs after sink and after lateral long awaits, then again after actual
+   state/audit/MES flush and immediately before final commit. Failed closure effects roll back. No helper commits early.
+   This does **not** claim to retract information already sent in a previously authorized external call.
+6. Existing `D8_APPROVED` / `D8_REJECTED.changed_fields['outcome_review']` gains exactly
+   `contract`, `round_id`, `revision`, `doc_decision_id`, `source_versions`. Existing reason remains a normal rejection
+   field; no free-text body/verification snapshot is copied into the receipt and no second D8 decision audit is emitted.
+   Decision and TRANSITION audits carry the target factory so the reviewed round/reader can locate actual production logs.
+7. New production receipt tests check actual emitted approve/reject envelopes. Actual approval is consumed as `verified`
+   by the reviewed RR reader, survives archive and later normal source evolution, and its nested source refs are found by
+   the reviewed source-reference collector. A rolled-back test transaction removes nonreceipt FMEA refs to prove the
+   **actual** receipt alone still identifies the CAPA; no manually fabricated D8 receipt is used for this acceptance.
+   Legacy round remains tenant+report only; no updated_at binding, GET write or historical re-signing was added.
+
+### Test evidence and limits
+
+The exact command prefix for all backend runs below, from this worktree root, was:
+
+```bash
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest
+```
+
+The runner re-parses the private owned exports, removes provider keys/E2E_MODE and redacts sensitive connection data.
+No real provider was called. Strict unit provider responses isolate only external responses; authorization, collectors,
+state transitions, source locks, real sessions and commits run normally. The old flush-only helper is used only in old
+unit cases; those are **not** represented as committed HTTP/RR or concurrency evidence.
+
+#### Actual RED → GREEN
+
+Initial RED exact command:
+
+```bash
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_decision.py -q
+```
+
+`focused-20261025T145705208875.log` ended with:
+
+```text
+7 failed, 2 passed, 3 warnings, 1 error in 2.32s
+```
+
+Failures were absent expectations on approve/reject, stale D6/verification material, missing expectation on direct service,
+missing real approval receipt and missing real rejection receipt. The old-round branch initially stopped earlier at the
+missing receipt assertion; it was not claimed as independently reached RED. The error was teardown of the newly real sink:
+the old fixture did not remove KnowledgeEntry before deleting its factory. Fixture cleanup was extended for actual
+knowledge/lateral rows; the exact single owned RED fixture residue was subsequently removed with a guarded, exact-UUID
+cleanup test (no database recreation). The initial simple decision GREEN using the identical command was
+`9 passed, 3 warnings in 2.73s` (`focused-20261025T150054775690.log`).
+
+Iteration ledger (all logs are in the private ignored plan workspace, not a new report artifact):
+
+| Log suffix (20261025T…) | Actual summary | Reason / resolution |
+|---|---|---|
+| 150117697305 | 10 failed, 54 passed, 3 warnings in 2.98s | Old closure callers lacked expectations/prerequisites; overbroad failure rollback also broke an early D7 flush-only case. Closure rollback was scoped to the D8 decision execution path; old callers/fixtures upgraded, not assertions weakened. |
+| 150452642041 | 5 failed, 67 passed, 3 warnings in 6.69s | Test prerequisite helper tried the gate writer while already pending; corrected explicit fixture rows; fixed a provider fixture import. |
+| 150608779259 | 4 failed, 43 passed, 3 warnings in 4.77s | New MES assertion named the wrong model and old flow created its first source version after analysis in one flush-only transaction; corrected the model and created the controlled version before analysis. |
+| 150853618342 | 1 failed, 37 passed, 3 warnings in 12.04s | Negative verification fixture violated the existing conclusion/is_verified DB constraint; kept the constraint and made the negative row valid. |
+| 151349392516 | 37 passed, 3 warnings in 18.20s | Expanded decision + real-wait acceptance green. |
+| 151642614486 | 80 passed, 3 warnings in 27.03s | Decision/concurrency + upgraded closure caller suites green. |
+| 151821820365 | 40 passed, 3 warnings in 24.42s | Added seed prerequisite/real JWT HTTP acceptance green. |
+| 152044538564 | 46 passed, 3 warnings in 25.25s | Added actual PostgreSQL commit-boundary failure/retry + C9 approval coverage green (includes old flow file). |
+| 152324581179 | 5 failed, 656 passed, 3 warnings in 129.08s | First complete affected run: three unscoped old gate assertions saw the single initial RED residue; two old direct gate race fixtures lacked current actor role/scope rows. Cleaned only the exact owned residue and backfilled those two real fixture actors. No gate assertion was relaxed. |
+| 152841755867 | 1 passed, 3 warnings in 1.86s | Exact initial RED-fixture cleanup only, guarded to the registered owned random test DB. |
+| 152858430310 | 661 passed, 3 warnings in 125.75s | First green complete rerun. Final diff self-review then caught an accidentally removed, unrelated synchronous lateral suggestion test; restored it unchanged, removed newly unused imports and retained the original explicit blocked-flag assertions. |
+| 153709552672 | **662 passed, 3 warnings in 125.20s** | Complete affected rerun after the LAST source/support change, including the restored original lateral test. |
+
+The first 64-case caller regression used exactly these pytest arguments:
+
+```text
+tests/capa/test_capa_advance_flow.py tests/capa/test_capa_advance_permission.py tests/capa/test_capa_doc_gate_freshness.py tests/capa/test_knowledge_sink.py tests/capa/test_lateral_diffusion_concurrency.py tests/capa/test_lateral_diffusion_service.py tests/capa/test_lateral_diffusion_api.py tests/capa/test_capa_post_review_fixes.py tests/recommendation/test_capa_lesson_embedding_chain.py tests/recommendation/test_lessons_extraction.py -q
+```
+
+The next 72-case iteration prepended `tests/capa/test_capa_outcome_decision.py` to that list. The 47-case iteration used
+`tests/capa/test_capa_review_concurrency.py tests/capa/test_capa_advance_flow.py tests/capa/test_capa_advance_permission.py tests/capa/test_knowledge_sink.py tests/capa/test_lateral_diffusion_service.py tests/capa/test_lateral_diffusion_api.py -q`.
+Decision/concurrency-only iterations used those two exact files with `-q`; the 38/46-case iterations also appended
+`tests/capa/test_capa_advance_flow.py`. The 80-case command was decision/concurrency/advance_flow/advance_permission/
+knowledge_sink/lateral_diffusion_service/lateral_diffusion_api (the seven named files above), with `-q`.
+The cleanup-only command appended
+`-c pytest.ini /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task4_owned_cleanup.py -q` to the same runner prefix.
+
+#### Final complete affected command and output
+
+```bash
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_capa_outcome_decision.py tests/capa/test_capa_review_concurrency.py tests/capa/test_capa_outcome_api.py tests/capa/test_capa_outcome_boundaries.py tests/capa/test_capa_outcome_d7.py tests/capa/test_capa_outcome_namespace.py tests/capa/test_capa_outcome_review.py tests/capa/test_capa_outcome_review_fixes.py tests/capa/test_capa_outcome_sources.py tests/capa/test_capa_review_guard.py tests/capa/test_capa_review_source_guard.py tests/capa/test_capa_reviewed_writes.py tests/capa/test_capa_advance_flow.py tests/capa/test_capa_advance_permission.py tests/capa/test_capa_post_review_fixes.py tests/capa/test_capa_doc_gate_api.py tests/capa/test_capa_doc_gate_concurrency.py tests/capa/test_capa_doc_gate_coverage.py tests/capa/test_capa_doc_gate_freshness.py tests/capa/test_capa_doc_gate_preflight.py tests/capa/test_capa_doc_gate_regression.py tests/capa/test_capa_doc_gate_service.py tests/capa/test_knowledge_sink.py tests/capa/test_knowledge_api.py tests/capa/test_lateral_diffusion_api.py tests/capa/test_lateral_diffusion_concurrency.py tests/capa/test_lateral_diffusion_match.py tests/capa/test_lateral_diffusion_service.py tests/capa/test_capa_d4_gate.py tests/capa/test_capa_d7_action_service.py tests/capa/test_capa_verification_api.py tests/capa/test_capa_verification_conclusion.py tests/capa/test_capa_verification_service.py tests/capa/test_capa_verification_source_ref.py tests/recommendation/test_capa_lesson_embedding_chain.py tests/recommendation/test_lessons_extraction.py --ignore=tests/test_graph_sync_worker.py --ignore=tests/test_graph_projection.py -q
+```
+
+```text
+CHECK_COMPLETE: mode=pytest; exit_code=0
+log=.superpowers/sdd/2026-10-23-capa-outcome-review/focused-20261025T153709552672.log
+662 passed, 3 warnings in 125.20s (0:02:05)
+```
+
+The three warnings are the existing Pydantic class-based Config deprecations. The selected run has **0 failures,
+0 skips, 0 xfails, 0 xpasses**. Both Makefile graph exclusions were retained explicitly. Migration/release-entrypoint
+suites were not invoked. No historical 242/2999/full-suite baseline was counted as this result.
+
+The two changed E2E API callers were statically checked without starting the app or contacting providers:
+
+```bash
+node frontend/node_modules/typescript/bin/tsc --noEmit --skipLibCheck --moduleResolution bundler --module esnext --target es2020 --esModuleInterop --typeRoots frontend/node_modules/@types frontend/e2e/specs/m1-core/capa-story-knowledge-sink.spec.ts frontend/e2e/specs/m1-core/capa-story-lateral-diffusion.spec.ts
+```
+
+Actual result: exit 0, no output. `git diff --check` also exited 0 with no output.
+A final AST comparison against BASE confirmed every original test name in all changed existing backend test files was
+preserved (`task4-check-old-tests.py`: `Original test-name preservation: PASS`). The accidental intermediate test removal
+is recorded above, not counted as a skip or silently omitted from final acceptance.
+
+### Source, transaction, receipt and caller coverage
+
+- **True race, approval first:** session A retains a cached pending ORM object, then reaches real CAPA FOR UPDATE.
+  SQLAlchemy execute witness sets an Event and `pg_blocking_pids` proves A is blocked by B. B executes real approval
+  and commit; A refreshes and receives ReviewedContentLocked. No simulated authorization/commit/source lock.
+- **True race, material first:** real D6 update and real verification service update each commit ahead of a waiting
+  approval with old tokens. Both directions have Events + PostgreSQL blocker evidence. Approval conflicts and remains
+  pending with no D8_APPROVED, knowledge, lateral or MES success rows.
+- Both approve/reject orderings emit exactly one first actual decision; the second sees the fresh invalid edge.
+  CAPA authority revoked during parent wait is refused. Planning-source permission and product-line assignment revoked
+  while waiting for explicit FMEA (after gate CP was locked) are rechecked. A real source-version commit during that
+  wait invalidates the token. A CP version change with unchanged bound revision still fails the original C8 gate;
+  a freshly read token cannot replace a stale C9 gate.
+- Complete CP→FMEA union order is witnessed. An actual source-version writer is blocked while knowledge provider
+  response is paused; only the real decision commit releases it. Reader then still verifies the accepted old version.
+- Current CAPA role, source-module permission, active actor and product-line scope revocation during a provider wait all
+  roll back the transaction. Separate owned tenant status/generation changes exercise real registry admission, not fake
+  authorization. The post-MES test stages a **real** outbox row, revokes authority, observes complete rollback, restores
+  authority and retries to exactly one decision/knowledge/MES event. A real PostgreSQL `SELECT 1/0` at the actual commit
+  event aborts the database transaction; retry produces only one final D8 audit. Commit itself is not mocked.
+- Real employee JWT login, tenant middleware, production scope dependencies, real committed sessions and RR/RO GET are
+  exercised for both approve and reject. Approved output becomes verified; rejected output returns the existing early-state
+  404. The `review_http_client` cases separately use committed production handlers with explicit scope fixtures; they are
+  not mislabeled as JWT authentication evidence.
+- Missing/partial/malformed expectations, client receipt injection, stale D6/verification, resubmitted old round,
+  current-source access, current-root validation, D5/D6 content, blank rejection reason, valid state edges, self-approval,
+  early EDIT and archive compatibility are asserted without softening old permission assertions.
+
+Updated old callers/fixtures:
+
+| Location | Exact treatment |
+|---|---|
+| `backend/tests/capa/test_capa_advance_flow.py` | Actual D8 approval/rejection requests use same-transaction real collector expectations; source version exists before analysis; passed current-root prerequisite added. Blank-reason negative also has valid version fields. |
+| `backend/tests/capa/test_capa_advance_permission.py` | Manager approval gets explicit verified-root/gate prerequisites and real collector token. EDIT denial remains exact 403 with no unnecessary source grants. |
+| `backend/tests/capa/test_knowledge_sink.py` | Success/50-character cases use real collector tokens and prerequisites; provider failure cases moved to actual committed cases so production rollback is observable. |
+| `backend/tests/capa/test_lateral_diffusion_service.py`, `test_lateral_diffusion_api.py` | Real own case + real current role/scope + real sink/advance/rollback; only external responses isolated. Removed old fake sink/authorization setup from the affected closure cases. |
+| `backend/tests/capa/test_capa_doc_gate_regression.py` | Two existing gate-lock direct-service actor fixtures now have real EDIT permission and factory/product-line assignments plus scoped cleanup; existing gate/race assertions retained. |
+| `backend/tests/capa/outcome_review_support.py` | Explicit legacy unit prerequisites and actual knowledge/lateral teardown; existing `review_expectation` is same-transaction collection, never a production bypass or independent RR claim. |
+| `backend/tests/capa/test_capa_post_review_fixes.py` | Inspected and rerun; only D8-looking calls are invalid stale-state / exact permission-denial tests, not successful decisions needing a token. No weakening or source grants. |
+| `backend/tests/recommendation/test_capa_lesson_embedding_chain.py`, `test_lessons_extraction.py` | Inspected actual calls: D7_COMPLETED / manual extraction, not D8 decisions. Unchanged and rerun. |
+| `frontend/e2e/specs/m1-core/capa-story-knowledge-sink.spec.ts`, `capa-story-lateral-diffusion.spec.ts` | Existing direct closing API requests now GET the review revision/round and send those fields; no Task 5 UI added. Static TS check passed. |
+| `backend/app/seed_e2e.py` | Backfill only the six affected pending knowledge/lateral/rejection fixture reports with root/gate/source-version prerequisites and a new submission audit. No D8 decision receipt, no early helper commit. Representative helper case is tested inside owned rollback; main seed was not executed. |
+
+### Self-review, documentation and next steps
+
+- Self-reviewed the complete source/fixture/caller diff for exact five-key producer/consumer compatibility, state-edge
+  authority, complete lock union/order, post-wait/current access, late rollback identity expiry, helper commits, HMAC
+  exclusions and frozen legacy round. Existing C8/C9/waiver/current-source and Task 2 write/source-deletion guards were
+  rerun in the final covering command. No unresolved Task 4 correctness finding remains.
+- Synced `docs/permissions.md` with DTO/error/authority/transaction/receipt contracts. This named PROGRESS section is the
+  requested full Task 4 report, using the brief's explicit fallback because this session prohibits standalone report Markdown.
+- Remaining **planned** work only: Task 5 production frontend review UI/interaction and Task 7 real-provider/browser
+  acceptance. Existing production frontend closes must fail closed until upgraded in Task 5; no missing-version legacy
+  escape was added. This run is not presented as real LLM, Chromium or release acceptance. Full check belongs to Task 8.
+- Local commit subject: `feat(capa): bind D8 decisions to reviewed outcome versions`. No push/merge/deploy.

@@ -420,6 +420,101 @@ async def collect_outcome_material(db, capa) -> dict:
     return material
 
 
+async def require_outcome_expectation(db, scope, capa, req) -> dict:
+    """Validate seen material in the caller's locked write transaction, not GET/RR."""
+    from app.core.permissions import PermissionLevel
+    from app.services.capa_review_guard import OutcomeReviewRequired
+
+    async def access_now():
+        access = await current_capa_access(db, scope)
+        if access[0].get(Module.CAPA, PermissionLevel.NONE) < PermissionLevel.APPROVE:
+            raise PermissionError('Current CAPA APPROVE required')
+        target = await current_capa_target_metadata(db, capa.report_id, access[1], access[2])
+        if (target.factory_id, target.product_line_code) != (capa.factory_id, capa.product_line_code):
+            raise OutcomeReviewConflict()
+        return access
+
+    access = await access_now()
+    if req is None or req.expected_outcome_revision is None or req.expected_review_round_id is None:
+        raise OutcomeReviewRequired()
+    previous = db.info.get('outcome_read_access')
+    db.info['outcome_read_access'] = access
+    try:
+        material = await collect_outcome_material(db, capa)
+    finally:
+        if previous is None:
+            db.info.pop('outcome_read_access', None)
+        else:
+            db.info['outcome_read_access'] = previous
+    revision = outcome_revision(material)
+    if (str(req.expected_review_round_id) != material['round_id']
+            or not hmac.compare_digest(req.expected_outcome_revision, revision)):
+        raise OutcomeReviewConflict()
+    # Collection is not admission. Re-resolve live role/row/source authority
+    # after every potentially long collection/lock/provider wait.
+    access = await access_now()
+    for source in material['source_versions']:
+        await _source_access(db, capa, (source['module'], source['object_id']), access)
+    await require_business_namespace(db)
+    return dict(contract=CONTRACT, round_id=material['round_id'], revision=revision,
+        doc_decision_id=material['doc_gate']['decision_id'], source_versions=material['source_versions'])
+
+
+async def apply_outcome_expectation(db, capa, req, actor_id) -> dict:
+    """Server-actor decision entry; acquire the COMPLETE gate/source lock set."""
+    from types import SimpleNamespace
+    from app.core.permissions import PermissionLevel
+    from app.services.capa_current_access import current_capa_actor_target
+    from app.services.capa_review_guard import lock_capa_parent
+    from app.services.product_line_service import lock_candidate_scopes
+    from app.services.version_service import lock_version_parents_in_order
+    from app.services.capa_service import _d8_doc_gate_gate
+
+    scope = SimpleNamespace(user=SimpleNamespace(user_id=UUID(str(actor_id))))
+    report_id = capa.report_id
+    await current_capa_actor_target(db, scope.user.user_id, report_id, PermissionLevel.APPROVE)
+    capa = await lock_capa_parent(db, report_id)
+    if capa.status != 'D8_APPROVAL_PENDING':
+        raise OutcomeReviewConflict()
+    receipt = await require_outcome_expectation(db, scope, capa, req)
+    if req.target_state == 'D7_PREVENTION':
+        if not req.reject_reason or not req.reject_reason.strip():
+            raise ValueError('驳回需填写理由')
+    parents = [('control_plan' if ref['module'] == 'planning' else 'fmea', UUID(ref['object_id']))
+               for ref in receipt['source_versions']]
+    if req.target_state == 'D8_CLOSURE':
+        # Reuse C8/C9/waiver validation and its analysis -> ProductLine -> sorted
+        # parent lock order. Explicit references join the SAME sorted set.
+        await _d8_doc_gate_gate(db, capa, additional_parents=parents)
+    elif req.target_state == 'D7_PREVENTION':
+        # Rejection binds the seen gate, but must not require a passing gate to
+        # return the report for correction. Use the identical lock ordering.
+        await db.execute(select(CapaDocgAnalysis.analysis_id).where(
+            CapaDocgAnalysis.analysis_id == select(CapaDocgDecision.analysis_id).where(
+                CapaDocgDecision.decision_id == UUID(receipt['doc_decision_id'])).scalar_subquery()
+        ).with_for_update())
+        await lock_candidate_scopes(db, [(capa.factory_id, capa.product_line_code)])
+        await lock_version_parents_in_order(db, parents)
+    else:
+        raise OutcomeReviewConflict()
+    locked = await require_outcome_expectation(db, scope, capa, req)
+    if locked != receipt:
+        raise OutcomeReviewConflict()
+    if req.target_state == 'D8_CLOSURE':
+        current_rc = (capa.d4_root_cause or '').strip()
+        if (not current_rc or not (capa.d5_correction or '').strip()
+                or not (capa.d6_verification or '').strip()):
+            raise ValueError('D8 审批需当前根因、正式措施及验证结果')
+        passed = await db.scalar(select(func.count()).select_from(CapaRootCauseVerification).where(
+            CapaRootCauseVerification.capa_id == report_id,
+            CapaRootCauseVerification.factory_id == capa.factory_id,
+            CapaRootCauseVerification.root_cause_text == current_rc,
+            CapaRootCauseVerification.conclusion == 'passed'))
+        if not passed:
+            raise ValueError('D8 审批需当前根因已验证')
+    return locked
+
+
 async def _admission(db, scope, report_id):
     access = await current_capa_access(db, scope)
     target = await current_capa_target_metadata(db, report_id, access[1], access[2])

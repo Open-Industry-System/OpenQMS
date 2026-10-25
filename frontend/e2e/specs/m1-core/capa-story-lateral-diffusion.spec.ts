@@ -25,7 +25,13 @@ async function findCapa(ac: any, docNo: string) {
 }
 
 async function closeCapa(ac: any, reportId: string) {
-  return ac.post(`/capa/${reportId}/advance`, { target_state: "D8_CLOSURE" });
+  const review = await ac.get(`/capa/${reportId}/outcome-review`);
+  expect(review.status).toBe(200);
+  return ac.post(`/capa/${reportId}/advance`, {
+    target_state: "D8_CLOSURE",
+    expected_outcome_revision: review.data.revision,
+    expected_review_round_id: review.data.review_round_id,
+  });
 }
 
 async function queryAudit(ac: any, action: string, recordId: string) {

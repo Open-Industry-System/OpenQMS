@@ -19,6 +19,7 @@ from app.models.role import RolePermission
 from app.models.user import User
 from app.services.agent.provider_adapter import ProviderClient
 from tests.conftest import _scope_for
+from tests.capa.outcome_review_support import review_expectation, prepare_decision_material
 
 pytestmark = pytest.mark.requires_db
 
@@ -122,79 +123,46 @@ def _ok_llm_result(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_advance_blocked_without_llm(
-    approve_client, db, default_factory, admin_user, monkeypatch
-):
-    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    await db.commit()
-
+async def test_advance_blocked_without_llm(review_http_client, review_case, monkeypatch):
     async def no_client(db_):
         return None
-
-    monkeypatch.setattr(
-        "app.services.agent.provider_adapter.build_client", no_client
-    )
-
-    r = await approve_client.post(
-        f"/api/capa/{capa.report_id}/advance",
-        json={"target_state": "D8_CLOSURE"},
-    )
+    monkeypatch.setattr("app.services.agent.provider_adapter.build_client", no_client)
+    from tests.capa.test_capa_outcome_decision import expectation
+    seen = await expectation(review_case)
+    before = await review_case.snapshot()
+    r = await review_http_client.post(f"/api/capa/{review_case.report_id}/advance",
+        json={"target_state": "D8_CLOSURE", **seen})
     assert r.status_code == 422
-    body = r.json()["detail"]
-    assert body["outcome"] == "blocked"
-    assert body["reason"] == "llm_unavailable"
-    assert "blocked" not in body or body.get("blocked") is not True
-
-    await db.refresh(capa)
-    assert capa.status == "D8_APPROVAL_PENDING"
-    entry = await db.scalar(
-        select(KnowledgeEntry).where(
-            KnowledgeEntry.source_type == "capa",
-            KnowledgeEntry.source_id == capa.report_id,
-        )
-    )
-    assert entry is None
+    assert r.json()["detail"]["outcome"] == "blocked"
+    assert r.json()["detail"]["reason"] == "llm_unavailable"
+    assert r.json()["detail"].get("blocked") is not True
+    assert await review_case.snapshot() == before
+    async with review_case.session_factory() as db:
+        assert await db.scalar(select(KnowledgeEntry.entry_id).where(
+            KnowledgeEntry.source_id == review_case.report_id)) is None
 
 
 @pytest.mark.asyncio
-async def test_advance_failed_on_llm_error(
-    approve_client, db, default_factory, admin_user, monkeypatch
-):
-    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    await db.commit()
-
+async def test_advance_failed_on_llm_error(review_http_client, review_case, monkeypatch):
     async def ok_client(db_):
         return _fake_pc()
-
     async def boom(pc, prompt, schema):
         raise RuntimeError("llm timeout")
-
-    monkeypatch.setattr(
-        "app.services.agent.provider_adapter.build_client", ok_client
-    )
-    monkeypatch.setattr(
-        "app.services.agent.provider_adapter.complete_json", boom
-    )
-
-    r = await approve_client.post(
-        f"/api/capa/{capa.report_id}/advance",
-        json={"target_state": "D8_CLOSURE"},
-    )
+    monkeypatch.setattr("app.services.agent.provider_adapter.build_client", ok_client)
+    monkeypatch.setattr("app.services.agent.provider_adapter.complete_json", boom)
+    from tests.capa.test_capa_outcome_decision import expectation
+    seen = await expectation(review_case)
+    before = await review_case.snapshot()
+    r = await review_http_client.post(f"/api/capa/{review_case.report_id}/advance",
+        json={"target_state": "D8_CLOSURE", **seen})
     assert r.status_code == 422
-    body = r.json()["detail"]
-    assert body["outcome"] == "failed"
-    assert body["reason"] == "llm_failed"
-    assert body.get("blocked") is not True
-
-    await db.refresh(capa)
-    assert capa.status == "D8_APPROVAL_PENDING"
-    entry = await db.scalar(
-        select(KnowledgeEntry).where(
-            KnowledgeEntry.source_type == "capa",
-            KnowledgeEntry.source_id == capa.report_id,
-        )
-    )
-    assert entry is None
+    assert r.json()["detail"]["outcome"] == "failed"
+    assert r.json()["detail"]["reason"] == "llm_failed"
+    assert r.json()["detail"].get("blocked") is not True
+    assert await review_case.snapshot() == before
+    async with review_case.session_factory() as db:
+        assert await db.scalar(select(KnowledgeEntry.entry_id).where(
+            KnowledgeEntry.source_id == review_case.report_id)) is None
 
 
 @pytest.mark.asyncio
@@ -217,9 +185,10 @@ async def test_sink_success_fields_and_outbox(
         "app.services.agent.provider_adapter.complete_json", ok_json
     )
 
+    await prepare_decision_material(db, capa, admin_user.user_id)
     r = await approve_client.post(
         f"/api/capa/{capa.report_id}/advance",
-        json={"target_state": "D8_CLOSURE"},
+        json={"target_state": "D8_CLOSURE", **await review_expectation(db, capa)},
     )
     assert r.status_code == 200, r.text
     await db.refresh(capa)
@@ -427,9 +396,10 @@ async def test_document_no_len_50(
         "app.services.agent.provider_adapter.complete_json", ok_json
     )
 
+    await prepare_decision_material(db, capa, admin_user.user_id)
     r = await approve_client.post(
         f"/api/capa/{capa.report_id}/advance",
-        json={"target_state": "D8_CLOSURE"},
+        json={"target_state": "D8_CLOSURE", **await review_expectation(db, capa)},
     )
     assert r.status_code == 200, r.text
     entry = await db.scalar(

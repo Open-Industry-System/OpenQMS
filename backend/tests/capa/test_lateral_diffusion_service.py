@@ -451,99 +451,48 @@ async def test_rerun_without_check_inserts_then_runs(db):
 
 
 @pytest.mark.asyncio
-async def test_lateral_blocked_after_sink_succeeds(sessionmaker, monkeypatch):
-    """§5.2.1: advance_capa(D8→CLOSE) with sink success + lateral no-LLM is blocked,
-    and the whole close transaction rolls back (status stays D8_APPROVAL_PENDING,
-    no lateral check row, sink side-effect rolled back).
-
-    Uses the real-commit sessionmaker so mid-test rollback semantics match prod.
-    """
-    from sqlalchemy import func
-    from app.models.capa import CAPAEightD
-    from app.models.factory import Factory
-    from app.models.knowledge_entry import KnowledgeEntry
+async def test_lateral_blocked_after_sink_succeeds(review_case, monkeypatch):
+    """Real closure transaction: successful sink must roll back on lateral failure."""
     from app.models.product_line import ProductLine
-    from app.models.product_type import ProductType
-    from app.models.role import RoleDefinition
-    from app.models.user import User
+    from app.models.knowledge_entry import KnowledgeEntry
+    from app.services.agent.provider_adapter import ProviderClient
     from app.schemas.capa import AdvanceRequest
+    from app.services.capa_service import advance_capa
     from app.services.capa_lateral_diffusion_service import LateralBlockedError
-    from app.services import capa_service
+    from tests.capa.test_capa_outcome_decision import expectation
+    from sqlalchemy import delete
 
-    # Unique suffix per run
-    suffix = uuid.uuid4().hex[:8]
-    factory_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    capa_id = uuid.uuid4()
-    role_id = uuid.uuid4()
-    async with sessionmaker() as s:
-        s.add(Factory(id=factory_id, code=f"F-BKSINK-{suffix}", name="BKSINK", is_active=True))
-        await s.flush()
-        s.add(ProductType(code=f"T-BKSINK-{suffix}", name="T", is_active=True))
-        await s.flush()
-        s.add(ProductLine(code=f"PS-BKSINK-{suffix}", name="src", factory_id=factory_id, product_type_code=f"T-BKSINK-{suffix}"))
-        s.add(ProductLine(code=f"PA-BKSINK-{suffix}", name="a", factory_id=factory_id, product_type_code=f"T-BKSINK-{suffix}"))
-        s.add(RoleDefinition(id=role_id, role_key=f"r-bksink-{suffix}", name_zh="t", name_en="t", is_system=False, is_editable=True, is_active=True))
-        await s.flush()
-        s.add(User(user_id=user_id, username=f"u-bksink-{suffix}", display_name="u", password_hash="x", role_id=role_id, legacy_role="viewer", is_active=True, factory_id=factory_id))
-        await s.flush()
-        s.add(CAPAEightD(
-            report_id=capa_id, document_no=f"8D-BKSINK-{suffix}", title="t",
-            product_line_code=f"PS-BKSINK-{suffix}", factory_id=factory_id,
-            status="D8_APPROVAL_PENDING", severity="general", created_by=user_id,
-            d2_description="d2", d4_root_cause="d4", d5_correction="d5",
-            d6_verification="d6", d7_prevention="d7", d8_closure="d8", d1_team=[],
-        ))
-        await s.commit()
-
-    async def _noop_sink(db, capa, uid, manual=False):
-        db.add(KnowledgeEntry(
-            entry_id=uuid.uuid4(), source_type="capa", source_id=capa.report_id,
-            factory_id=factory_id, product_line_code=capa.product_line_code,
-            document_no=capa.document_no, title="sink side-effect", fields={},
-            status="active", llm_status="skipped", embedding_text="x",
-            content_hash="x" * 64, embedding_status="pending",
-        ))
-        await db.flush()
-        return None
-
-    monkeypatch.setattr(
-        "app.services.knowledge_sink_service.sink_capa_on_close",
-        _noop_sink,
-    )
-    monkeypatch.setattr(
-        "app.services.capa_lateral_diffusion_service.build_client",
-        AsyncMock(side_effect=ProviderNotConfiguredError("no cfg")),
-    )
-
-    # Run advance in its own session so prod-like rollback applies
-    with pytest.raises(LateralBlockedError):
-        async with sessionmaker() as db:
-            capa = await db.get(CAPAEightD, capa_id)
-            await capa_service.advance_capa(
-                db, capa, user_id, AdvanceRequest(target_state="D8_CLOSURE")
-            )
+    async def client(db):
+        return ProviderClient(provider="openai", client=object(), model="test-model")
+    async def complete(pc, prompt, schema):
+        assert "lesson_summary" in schema["properties"]
+        return {"lesson_summary": "关闭验证摘要", "tags": ["关闭", "验证", "预防"]}
+    monkeypatch.setattr("app.services.agent.provider_adapter.build_client", client)
+    monkeypatch.setattr("app.services.agent.provider_adapter.complete_json", complete)
+    monkeypatch.setattr("app.services.capa_lateral_diffusion_service.build_client",
+        AsyncMock(side_effect=ProviderNotConfiguredError("no cfg")))
+    line = "LAT" + uuid.uuid4().hex[:15]
+    async with review_case.session_factory() as db:
+        db.add(ProductLine(code=line, name="similar product", factory_id=review_case.factory_id,
+            product_type_code=review_case.owned_ids["product_type_code"]))
+        await db.commit()
+    try:
+        seen = await expectation(review_case)
+        before = await review_case.snapshot()
+        async with review_case.session_factory() as db:
+            with pytest.raises(LateralBlockedError):
+                await advance_capa(db, await review_case.report(db), review_case.actor_id,
+                    AdvanceRequest(target_state="D8_CLOSURE", **seen))
+        assert await review_case.snapshot() == before
+        async with review_case.session_factory() as db:
+            assert await db.scalar(select(KnowledgeEntry.entry_id).where(
+                KnowledgeEntry.source_id == review_case.report_id)) is None
+            assert await db.scalar(select(CapaLateralDiffusionCheck.check_id).where(
+                CapaLateralDiffusionCheck.capa_id == review_case.report_id)) is None
+    finally:
+        async with review_case.session_factory() as db:
+            await db.execute(delete(ProductLine).where(ProductLine.code == line))
             await db.commit()
-
-    # Verify rollback in a fresh session
-    async with sessionmaker() as db:
-        n = await db.scalar(
-            select(func.count())
-            .select_from(CapaLateralDiffusionCheck)
-            .where(CapaLateralDiffusionCheck.capa_id == capa_id)
-        )
-        assert n == 0
-
-        capa_after = await db.get(CAPAEightD, capa_id)
-        assert capa_after.status == "D8_APPROVAL_PENDING"
-
-        sink_rows = await db.scalar(
-            select(func.count())
-            .select_from(KnowledgeEntry)
-            .where(KnowledgeEntry.source_id == capa_id)
-        )
-        assert sink_rows == 0
-
 
 def test_fill_missing_lateral_suggestions():
     from app.services.capa_lateral_diffusion_service import _merge_llm_suggestions

@@ -1774,6 +1774,49 @@ async def _seed_d4_audit(db, factory_ids):
         await db.flush()
 
 
+async def _seed_pending_outcome_prerequisites(db, capa, actor_id):
+    """Fixture setup only: pending reports still need real root/gate/version rows.
+
+    Never emit a D8 decision receipt here; the actual /advance produces it.
+    Caller retains the seed transaction and owns its final commit.
+    """
+    from app.models.audit import AuditLog
+    from app.models.capa import CapaRootCauseVerification
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+    from app.models.fmea import FMEADocument
+    from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+    from app.services.version_service import get_latest_fmea_version, _create_fmea_version_no_commit
+
+    if capa.status != 'D8_APPROVAL_PENDING':
+        raise ValueError('outcome fixture must be approval-pending')
+    passed = await db.scalar(select(CapaRootCauseVerification.verification_id).where(
+        CapaRootCauseVerification.capa_id == capa.report_id,
+        CapaRootCauseVerification.root_cause_text == capa.d4_root_cause.strip(),
+        CapaRootCauseVerification.conclusion == 'passed'))
+    if passed is None:
+        db.add(CapaRootCauseVerification(capa_id=capa.report_id, factory_id=capa.factory_id,
+            root_cause_text=capa.d4_root_cause.strip(), method='reproduction',
+            result='E2E fixture: implemented correction verified', conclusion='passed', is_verified=True,
+            evidence_attachments=[], verified_by=actor_id, verified_at=datetime.now(timezone.utc)))
+    if capa.fmea_ref_id and await get_latest_fmea_version(db, capa.fmea_ref_id) is None:
+        await _create_fmea_version_no_commit(db, await db.get(FMEADocument, capa.fmea_ref_id),
+            'edit', 'E2E outcome source fixture', actor_id)
+    await db.execute(update(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id == capa.report_id,
+        CapaDocgAnalysis.is_current.is_(True)).values(is_current=False))
+    analysis = CapaDocgAnalysis(capa_id=capa.report_id, factory_id=capa.factory_id,
+        status='done', is_current=True, affected_docs=[], llm_available=True, model='e2e-fixture',
+        analysis_input_hash=_compute_input_hash(capa, await _build_allowlist(db, capa)),
+        completed_at=datetime.now(timezone.utc), generated_by=actor_id)
+    db.add(analysis)
+    await db.flush()
+    db.add(CapaDocgDecision(analysis_id=analysis.analysis_id, factory_id=capa.factory_id,
+        decision='passed', no_affected_confirmed=True, version_snapshot=[], decided_by=actor_id))
+    db.add(AuditLog(table_name='capa_eightd', record_id=capa.report_id, factory_id=capa.factory_id,
+        action='TRANSITION', changed_fields={'old_status': 'D8_GATE_PENDING', 'new_status': 'D8_APPROVAL_PENDING'},
+        operated_by=actor_id))
+    await db.flush()
+
+
 async def main():
     async with async_session() as db:
         factory_ids = await _seed_factories(db)
@@ -1789,6 +1832,13 @@ async def main():
         await _seed_knowledge_sink(db, factory_ids)
         await _seed_supplier_risk_input(db, factory_ids)
         await _seed_lateral_diffusion(db, factory_ids)
+        from app.models.capa import CAPAEightD
+        pending_ids = [KNOWLEDGE_SINK_CAPA_ID, D4_AUDIT_APPROVAL_CAPA_ID,
+            *(uuid.UUID(value) for value in (LATERAL_E2E_CAPA_001_ID, LATERAL_E2E_CAPA_002_ID,
+                LATERAL_E2E_CAPA_BLOCK_ID, LATERAL_E2E_CAPA_EMPTY_ID))]
+        for report_id in pending_ids:
+            capa = await db.get(CAPAEightD, report_id)
+            await _seed_pending_outcome_prerequisites(db, capa, capa.created_by)
         await db.commit()
     print("E2E seed complete.")
 

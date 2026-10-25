@@ -567,18 +567,15 @@ async def require_advance_permission(
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ) -> tuple[RequestScope, Any]:
-    capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    actor_id = uuid.UUID(str(scope.user.user_id))
+    try:
+        capa = await current_capa_actor_target(db, actor_id, report_id, PermissionLevel.EDIT)
+        from app.services.capa_review_guard import lock_capa_parent
+        capa = await lock_capa_parent(db, report_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="编辑权限不足")
+    except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
-    # P1 TOCTOU：锁 capa 行 FOR UPDATE + 刷新状态，再做边权限校验，确保授权与状态迁移基于
-    # 同一份锁定状态。否则「锁前按 D8_GATE_PENDING 判 EDIT 放行 → 并发推进到 D8_APPROVAL_PENDING
-    # → 锁后 (D8_APPROVAL_PENDING→D8_CLOSURE) 变合法 APPROVE 边」会让 EDIT 用户越权完成审批。
-    # 锁在同一请求 session 上持有至 advance_capa（后者再锁为 no-op，并保护绕过依赖的直接调用方）。
-    await db.execute(
-        select(CAPAEightD).where(CAPAEightD.report_id == report_id)
-        .with_for_update().execution_options(populate_existing=True)
-    )
     target = body.target_state if body else None
     # target_state=None（线性 advance）时算出实际 target，否则归档边 (D8_CLOSURE→ARCHIVED)
     # 因 target=None 不命中 approve_edges，会误落 EDIT 分支放行 field_qe 归档。
@@ -589,14 +586,15 @@ async def require_advance_permission(
         (EightDState.D8_APPROVAL_PENDING.value, EightDState.D7_PREVENTION.value),
         (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value),
     )
-    if (capa.status, target.value if target else None) in approve_edges:
-        level = await get_user_permission(scope.user, Module.CAPA, db)
-        if level < PermissionLevel.APPROVE:
-            raise HTTPException(status_code=403, detail="审批权限不足")
-    else:
-        level = await get_user_permission(scope.user, Module.CAPA, db)
-        if level < PermissionLevel.EDIT:
-            raise HTTPException(status_code=403, detail="编辑权限不足")
+    required = PermissionLevel.APPROVE if (
+        capa.status, target.value if target else None
+    ) in approve_edges else PermissionLevel.EDIT
+    try:
+        capa = await current_capa_actor_target(db, actor_id, report_id, required)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="审批权限不足" if required == PermissionLevel.APPROVE else "编辑权限不足")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     return scope, capa
 
 
@@ -616,12 +614,20 @@ async def advance_capa(
         LateralFailedError,
     )
 
+    from app.services.capa_review_guard import OutcomeReviewRequired, OutcomeReviewConflict, OutcomeReviewLimit
     scope, capa = result
+    actor_id = uuid.UUID(str(scope.user.user_id))
     from_status = capa.status
     try:
         capa = await capa_service.advance_capa(
-            db, capa, scope.user.user_id, body or AdvanceRequest()
+            db, capa, actor_id, body or AdvanceRequest()
         )
+    except (OutcomeReviewRequired, OutcomeReviewConflict, OutcomeReviewLimit) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="CAPA_OUTCOME_REVIEW_ACCESS_DENIED")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except KnowledgeSinkBlockedError as e:
         raise HTTPException(
             status_code=422,

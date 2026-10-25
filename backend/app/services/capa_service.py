@@ -503,7 +503,9 @@ async def _d7_completion_gate(db: AsyncSession, capa) -> None:
         )
 
 
-async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
+async def _d8_doc_gate_gate(
+    db: AsyncSession, capa: CAPAEightD, *, additional_parents=(),
+) -> None:
     """D8_GATE_PENDING→D8_APPROVAL_PENDING: require latest decision=passed + C8/C9 freshness.
 
     Structured waiver: version_snapshot still lists every audited doc (including
@@ -583,7 +585,7 @@ async def _d8_doc_gate_gate(db: AsyncSession, capa: CAPAEightD) -> None:
 
     # Version writers lock the same parent rows before reading/inserting latest.
     # Sorted acquisition prevents CP/FMEA multi-document lock-order deadlocks.
-    await lock_version_parents_in_order(db, parent_identities)
+    await lock_version_parents_in_order(db, [*parent_identities, *additional_parents])
 
     # Reconfirm every mutable gate input only after all document locks are held.
     current_analysis_id = await db.scalar(
@@ -645,18 +647,54 @@ async def advance_capa(
     # 若不锁，两并发请求都从同一状态推进 → 重复 TRANSITION/D8_APPROVED 审计/MES 事件。
     # populate_existing 强制把 identity-mapped 对象属性刷新为最新 DB 值，防 dep 加载的
     # capa.status 陈旧（另一事务已推进）→ can_transition 误判放行重复推进。
-    await db.execute(
-        select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id)
-        .with_for_update().execution_options(populate_existing=True)
-    )
+    # Admission before locking must not reveal invisible targets. Recompute the
+    # required edge authority after the wait, never from a cached ORM role.
+    from app.services.capa_current_access import current_capa_actor_target
+    from app.services.capa_review_guard import lock_capa_parent
+    report_id = capa.report_id
+    await current_capa_actor_target(db, user_id, report_id, PermissionLevel.EDIT)
+    capa = await lock_capa_parent(db, report_id)
 
     current = EightDState(capa.status)
     target = req.target_state
     if target is None:
         target = _linear_next(current)  # 壳/分支状态 raise；D1→D6→D7_PREVENTION、D8→ARCHIVED 线性
 
+    required_level = PermissionLevel.APPROVE if (
+        current == EightDState.D8_APPROVAL_PENDING
+        or (current == EightDState.D8_CLOSURE and target == EightDState.ARCHIVED)
+    ) else PermissionLevel.EDIT
+    capa = await current_capa_actor_target(db, user_id, report_id, required_level)
     if not can_transition(current, target):
         raise ValueError(f"Cannot transition from {capa.status} to {target.value}")
+
+    receipt = None
+    if current == EightDState.D8_APPROVAL_PENDING:
+        from app.services.capa_outcome_review import apply_outcome_expectation
+        receipt = await apply_outcome_expectation(db, capa, req, user_id)
+
+    # Capture trusted UUIDs before any closure rollback can expire ORM users.
+    actor_id = uuid.UUID(str(user_id))
+    try:
+        return await _apply_capa_transition(db, capa, actor_id, req, current, target, receipt)
+    except Exception:
+        if receipt is not None:
+            await db.rollback()
+        raise
+
+
+async def _apply_capa_transition(db, capa, user_id, req, current, target, receipt):
+    report_id = capa.report_id
+
+    async def revalidate_decision():
+        from types import SimpleNamespace
+        from app.services.capa_outcome_review import require_outcome_expectation
+        from app.services.capa_review_guard import OutcomeReviewConflict
+        pending = SimpleNamespace(report_id=report_id, factory_id=capa.factory_id,
+            product_line_code=capa.product_line_code, status=EightDState.D8_APPROVAL_PENDING.value)
+        scope = SimpleNamespace(user=SimpleNamespace(user_id=user_id))
+        if await require_outcome_expectation(db, scope, pending, req) != receipt:
+            raise OutcomeReviewConflict()
 
     # per-edge 闸口分发
     if current == EightDState.D7_PREVENTION and target == EightDState.D7_COMPLETED:
@@ -682,11 +720,13 @@ async def advance_capa(
     elif current == EightDState.D8_GATE_PENDING and target == EightDState.D8_APPROVAL_PENDING:
         await _d8_doc_gate_gate(db, capa)
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
-        # 权限由 require_advance_permission 强制；关闭前 fail-closed 知识沉淀 → 横向扩散
+        # Closure side effects remain in the same locked decision transaction.
         from app.services.knowledge_sink_service import sink_capa_on_close
         await sink_capa_on_close(db, capa, user_id, manual=False)
+        await revalidate_decision()
         from app.services.capa_lateral_diffusion_service import run_lateral_diffusion_check
         await run_lateral_diffusion_check(db, capa, user_id)
+        await revalidate_decision()
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D7_PREVENTION:
         if not req.reject_reason or not req.reject_reason.strip():
             raise ValueError("驳回需填写理由")
@@ -716,7 +756,7 @@ async def advance_capa(
         record_id=capa.report_id,
         action="TRANSITION",
         changed_fields={"old_status": old_status, "new_status": target.value},
-        operated_by=user_id,
+        operated_by=user_id, factory_id=capa.factory_id,
     )
     db.add(audit_log)
 
@@ -735,15 +775,15 @@ async def advance_capa(
     if current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
-            action="D8_APPROVED", changed_fields={"old_status": old_status, "new_status": target.value},
-            operated_by=user_id,
+            action="D8_APPROVED", changed_fields={"old_status": old_status, "new_status": target.value, "outcome_review": receipt},
+            operated_by=user_id, factory_id=capa.factory_id,
         ))
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D7_PREVENTION:
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
             action="D8_REJECTED",
-            changed_fields={"reject_reason": req.reject_reason, "old_status": old_status, "new_status": target.value},
-            operated_by=user_id,
+            changed_fields={"reject_reason": req.reject_reason, "old_status": old_status, "new_status": target.value, "outcome_review": receipt},
+            operated_by=user_id, factory_id=capa.factory_id,
         ))
 
     # Write to MES outbox before commit
@@ -824,6 +864,11 @@ async def advance_capa(
                 },
             ))
 
+    if receipt is not None:
+        # Include our own writes without letting status/decision metadata enter
+        # the core HMAC. Retained locks still fence every material/source writer.
+        await db.flush()
+        await revalidate_decision()
     await db.commit()  # existing commit includes outbox
     await db.refresh(capa)
     return capa
