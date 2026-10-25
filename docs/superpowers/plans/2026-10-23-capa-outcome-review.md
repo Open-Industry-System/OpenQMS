@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 已实现、217-case 聚焦回归通过，但独立复核发现三项实现缺口与旧轮次规则冲突；用户已选择固定兼容轮次，当前进入首轮修正，尚未验收。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；当前准备 Task 4 实际决定绑定和生产回执，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
 ## Global Constraints
 
@@ -423,7 +423,7 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/capa/test_capa_review_gua
 
 **Interfaces:** `read_outcome_review(db, scope, report_id) -> CapaOutcomeReview`；`collect_outcome_material(db, capa) -> dict`；`outcome_revision(material: dict) -> str`；`resolve_review_round(db, capa) -> UUID|None`。输出严格按实现决定 §2/§3；material 是 repr 不带内容的内部值，不接收客户端 JSON。
 
-- [ ] **Step 1: 写完整版本与权限 RED**
+- [x] **Step 1: 写完整版本与权限 RED**
 
 ```python
 @pytest.mark.asyncio
@@ -448,7 +448,7 @@ async def test_all_verification_rows_participate_in_revision(review_case):
 
 这里直接 SQL 只模拟真实外部提交，不用于绕过生产权限的验收。另测 D4/5/6/7、证据列表、source_ref、verification 增/删、D7 动作、gate decision/version 各变化；补充/updated_at/归档/generation 不改变核心 digest；排序不改变版本。
 
-- [ ] **Step 2: 运行 RED 并定义严格 DTO**
+- [x] **Step 2: 运行 RED 并定义严格 DTO**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh
@@ -458,7 +458,7 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/capa/test_capa_outcome_re
 
 复用 `VerificationResponse`、`D7NodeActionResponse`，定义 OutcomeDocumentRef/OutcomeDecision/Supplement/Response；正文集合 `repr=False`，固定 contract/review_scope。新读端点拒绝非 access 用户凭据，复用当前 tenant binding；无源权返回常量 403，不返回部分材料/数量。single 明确 public，多租户不得 public fallback。
 
-- [ ] **Step 3: 实现确定性版本函数**
+- [x] **Step 3: 实现确定性版本函数**
 
 ```python
 import hashlib
@@ -476,7 +476,7 @@ def outcome_revision(material):
 
 `collect_outcome_material` 只序列化本计划白名单；不得使用 ORM `__dict__`、最新源文档正文或把 d8_closure/updated_at 加进 token。按 UUID 批次读取全部验证/动作，不用 UI 页截断参与计算。来源引用对齐 report/factory/PL，FMEA 节点检查复用既有严格规则；CP source 用 PLANNING VIEW。doc-gate snapshot 绑定真实 FMEAVersion/ControlPlanVersion 的 version ID、所属对象/factory 和 SHA256；不以任意 JSON 自报版本为准。所有明确 FMEA 引用（报告、验证、D7）也进入来源版本集合：pending 时在既有 gate snapshot 外补齐当前受控版本，若没有可绑定的受控版本则固定冲突，不由 GET 创建版本。结案/归档后只能使用批准回执和既有 gate 绑定的历史版本，引用节点应对照该版本 snapshot 而非 latest graph。来源正常出新版不得让旧批准材料改绑或无故失效。历史无法恢复完整绑定时明确 legacy/无法验证，不编造历史节点或 silently 用最新版本。
 
-- [ ] **Step 4: 让读取与所见版本保持同一事务快照**
+- [x] **Step 4: 让读取与所见版本保持同一事务快照**
 
 快照连接只从当前 `db.bind` 对应的测试/业务引擎和入口捕获的 TenantBinding 构造，不能从全局 DATABASE_URL 另开可能指向种子库的连接。在专用 tenant-bound REPEATABLE READ READ ONLY 快照中构造材料和 DTO（沿用 R4b-1 的安全连接/门禁模式，不改变其 canonical）；生成后在请求 DB 重查当前 actor、范围、来源、当前 round/material revision。任一变化整次冲突，不返回旧正文。不得为复用 preview 把其 200 条预算、替换词或 30 秒 TTL 搬到正式资料。
 
@@ -499,7 +499,7 @@ async def review_expectation(db, capa):
 
 新读取 API、并发与最终验收必须使用真实提交 case，不得用该 helper 冒充完整 HTTP/RR 快照证据。
 
-- [ ] **Step 5: 加 API、历史兼容和 GREEN**
+- [x] **Step 5: 加 API、历史兼容和 GREEN**
 
 ```python
 @pytest.mark.asyncio
