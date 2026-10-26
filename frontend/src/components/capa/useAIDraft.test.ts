@@ -1,5 +1,7 @@
 import { renderHook, act } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
+import { useAuthStore } from "../../store/authStore";
+import { capaRequestOwner } from "../../api/capaRequestOwnership";
 import { useAIDraft } from "./useAIDraft";
 import * as api from "../../api/capaDraft";
 
@@ -148,4 +150,19 @@ it('aborts every in-flight draft on replacement and view unmount', async () => {
   const second = mockGenerateDraft.mock.calls[mockGenerateDraft.mock.calls.length - 1][3];
   unmount();
   expect(second?.aborted).toBe(true);
+});
+
+
+it('registers the complete draft lifecycle for Axios ownership before and after credential change', async () => {
+  let resolve!: (value: any) => void;
+  mockGenerateDraft.mockReturnValue(new Promise(yes => { resolve = yes; }));
+  useAuthStore.setState({ token: 'draft-A' });
+  const { result } = renderHook(() => useAIDraft());
+  act(() => { result.current.generate('report-1', 'd4', 'structured'); });
+  const signal = mockGenerateDraft.mock.calls[mockGenerateDraft.mock.calls.length - 1][3]!;
+  expect(capaRequestOwner(signal)?.()).toBe(true);
+  await act(async () => { useAuthStore.setState({ token: 'draft-B' }); });
+  expect(capaRequestOwner(signal)?.()).toBe(false);
+  await act(async () => resolve({ content: 'OLD PRIVATE', step: 'd4', request_id: 'old', structured_data: null }));
+  expect(result.current.draft).toBeNull();
 });

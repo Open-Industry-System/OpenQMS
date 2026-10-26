@@ -30,6 +30,15 @@ approve/reject path. Closed core editing is frozen even for admins; the separate
 labelled unreviewed supplement remains editable with EDIT, and archive freezes it.
 Existing D4 preview/attachment restrictions and early D4–D6 workflows are unchanged.
 
+CAPA child recommendation/verification/D7/document-gate/D3 actions own their whole
+async lifetime through `useCapaChildRequests`: prerequisite saves, subsequent writes,
+reloads, callbacks and notifications all recheck ownership after awaits. Cancelled
+prerequisite saves reject rather than resolving as permission to continue. Draft
+requests use the same transport ownership. D3 run selection cancels pending work
+and clears edit/modal tokens without refetching or stranding the visible run list.
+Material-panel reload only withdraws its review token/reason; it does not invalidate
+unrelated page knowledge lookups/resinks or leave their loading flags stranded.
+
 ## File Organisation
 
 `layout/` and `shared/` are cross-cutting; every other subdirectory is

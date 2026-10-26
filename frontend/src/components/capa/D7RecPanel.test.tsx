@@ -49,7 +49,7 @@ describe("D7RecPanel", () => {
     fireEvent.click(screen.getByTestId("d7-confirm"));
     await waitFor(() => expect(recordD7Action).toHaveBeenCalledWith("c1", expect.objectContaining({
       action: "confirmed", fmea_id: "f1", failure_mode_node_id: "fm1", failure_cause_node_id: "c1",
-    })));
+    }), expect.any(AbortSignal)));
   });
 
   it("auto-fills via backend endpoint", async () => {
@@ -58,12 +58,12 @@ describe("D7RecPanel", () => {
     fireEvent.click(screen.getByTestId("d7-auto-fill"));
     await waitFor(() => expect(autoFillD7).toHaveBeenCalledWith("c1", expect.objectContaining({
       fmea_id: "f1", failure_cause_node_id: "c1", match_source: "linked",
-    })));
+    }), expect.any(AbortSignal)));
   });
 
   it("reloads actions on mount (persistence)", async () => {
     renderPanel();
-    await waitFor(() => expect(listD7Actions).toHaveBeenCalledWith("c1"));
+    await waitFor(() => expect(listD7Actions).toHaveBeenCalledWith("c1", expect.any(AbortSignal)));
   });
 
   it("deep-links to FMEA graph preferring prevention → cause → mode", async () => {

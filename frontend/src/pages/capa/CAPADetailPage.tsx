@@ -217,7 +217,6 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   const decisionLock = useRef(false);
   const onOutcomeReview = useCallback((value: CapaOutcomeReview | null) => {
     if (!credentialsCurrent()) return;
-    if (!value && !decisionLock.current) requests.invalidate();
     outcomeRef.current = value;
     setOutcomeReview(value);
     setRejectReason("");
@@ -507,10 +506,16 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     setSaving(true);
     try {
       const updated = await updateCAPA(id, { [field]: value }, request.signal);
-      if (!request.current()) return;
+      if (!request.current()) {
+        if (throwOnError) throw new axios.CanceledError("CAPA view invalidated");
+        return;
+      }
       setCapa(updated);
     } catch (e) {
-      if (!request.current()) return;
+      if (!request.current()) {
+        if (throwOnError) throw new axios.CanceledError("CAPA view invalidated");
+        return;
+      }
       message.error(tc("messages.saveFailed", "保存失败"));
       if (throwOnError) throw e;
     } finally {
@@ -520,6 +525,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   };
 
   const refreshCapa = async () => {
+    if (!credentialsCurrent()) throw new axios.CanceledError("CAPA view invalidated");
     const request = requests.begin();
     try {
       const updated = await getCAPA(id!, request.signal);

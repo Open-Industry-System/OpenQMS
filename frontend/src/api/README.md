@@ -25,6 +25,15 @@ ordinary CAPA reads. An uncertain decision is checked via actual report state,
 never automatically replayed. Runtime completeness/source-shape checks live with
 `types/capaOutcomeReview.ts`; server authorization remains independent.
 
+`capaRequestOwnership.ts` registers only explicitly owned CAPA view signals in a
+WeakMap (no result content). Their current-session check runs before request
+credential injection and before auth mutation, redirects or continuation. Related
+`/auth/me` and refresh calls carry the same signal; the optional refresh owner is
+rechecked before token installation or logout. An invalidated owned view settles
+without replay/queueing under a new credential; normal installed refreshes still
+release existing unrelated queued reads. Unowned routes keep the original refresh
+policy and the existing private-route exclusions remain unchanged.
+
 ## File Organisation
 
 One module per backend domain. The shared client lives at the root; the

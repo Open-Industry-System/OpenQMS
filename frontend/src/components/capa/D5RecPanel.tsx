@@ -3,6 +3,7 @@ import { Card, List, Tag, Button, Space, Empty, Spin, App, Collapse, Alert } fro
 import { CheckOutlined, CloseOutlined, SafetyOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getD5Recommendations, adoptRecommendation, RecommendationBlockedError } from "../../api/capa";
+import { useCapaChildRequests } from "./useCapaViewRequests";
 import RecommendationDAG from "./RecommendationDAG";
 import RiskTags from "./RiskTags";
 import type { D5ExistingControl, D5GeneralSuggestion, StageRun } from "../../types";
@@ -16,6 +17,7 @@ interface D5RecPanelProps {
 
 export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = true }: D5RecPanelProps) {
   const { t } = useTranslation("capa");
+  const requests = useCapaChildRequests(capaId, canAdopt);
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const [controls, setControls] = useState<D5ExistingControl[]>([]);
@@ -26,15 +28,18 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    const request = requests.begin();
     setLoading(true);
-    setBlocked(false);
-    getD5Recommendations(capaId)
+    setBlocked(false); setSkipped(new Set());
+    getD5Recommendations(capaId, request.signal)
       .then((res) => {
+        if (!request.current()) return;
         setControls(res.existing_controls);
         setSuggestions(res.general_suggestions);
         setStages(res.stages ?? []);
       })
       .catch((err) => {
+        if (!request.current()) return;
         if (err instanceof RecommendationBlockedError) {
           setBlocked(true);
           setStages(err.detail.stages ?? []);
@@ -42,9 +47,10 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
           message.error(t("d5.loadFailed"));
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (request.current()) setLoading(false); request.finish(); });
+    return request.cancel;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capaId]);
+  }, [capaId, requests]);
 
   if (loading) return <Spin size="small" />;
 
@@ -82,8 +88,12 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
             disabled={!canAdopt}
             title={!canAdopt ? t("d5.readonlyTooltip") : undefined}
             onClick={async () => {
+              if (!canAdopt) return;
+              const request = requests.begin();
+              if (!request.current()) return;
               try {
                 await beforeAdopt?.();
+                if (!request.current()) return;
                 await adoptRecommendation(capaId, {
                   d_step: "d5",
                   adopted_text: item.control_name,
@@ -94,9 +104,13 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                     failure_cause_node_id: item.failure_cause_node_id,
                     fmea_id: item.fmea_id,
                   },
-                });
-                message.success(t("d5.adopted")); onAdopted?.();
-              } catch { message.error(t("d5.adoptFailed")); }
+                }, request.signal);
+                if (!request.current()) return;
+                await onAdopted?.();
+                if (!request.current()) return;
+                message.success(t("d5.adopted"));
+              } catch { if (request.current()) message.error(t("d5.adoptFailed")); }
+              finally { request.finish(); }
             }}
           >
             {t("d5.adopt")}
@@ -166,8 +180,12 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
             disabled={!canAdopt}
             title={!canAdopt ? t("d5.readonlyTooltip") : undefined}
             onClick={async () => {
+              if (!canAdopt) return;
+              const request = requests.begin();
+              if (!request.current()) return;
               try {
                 await beforeAdopt?.();
+                if (!request.current()) return;
                 await adoptRecommendation(capaId, {
                   d_step: "d5",
                   adopted_text: item.content,
@@ -181,9 +199,13 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                     category: item.category,
                     basis: item.basis,
                   },
-                });
-                message.success(t("d5.adopted")); onAdopted?.();
-              } catch { message.error(t("d5.adoptFailed")); }
+                }, request.signal);
+                if (!request.current()) return;
+                await onAdopted?.();
+                if (!request.current()) return;
+                message.success(t("d5.adopted"));
+              } catch { if (request.current()) message.error(t("d5.adoptFailed")); }
+              finally { request.finish(); }
             }}
           >
             {t("d5.adopt")}

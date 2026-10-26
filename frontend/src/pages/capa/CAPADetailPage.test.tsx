@@ -11,6 +11,11 @@ import * as fmeaApi from "../../api/fmea";
 import CAPADetailPage from "./CAPADetailPage";
 
 const route = vi.hoisted(() => ({ id: "test-report-id" }));
+const prerequisiteProbe = vi.hoisted(() => ({ before: null as null | (() => Promise<void>) }));
+vi.mock("../../components/capa/D4RecPanel", async () => {
+  const actual = await vi.importActual<typeof import("../../components/capa/D4RecPanel")>("../../components/capa/D4RecPanel");
+  return { default: (props: any) => { prerequisiteProbe.before = props.beforeAdopt; return <actual.default {...props} />; } };
+});
 const verificationCard = vi.hoisted(() => vi.fn());
 const agentContext = vi.hoisted(() => ({ value: null as any }));
 vi.mock("../../components/agent/AgentTaskContext", () => ({ useAgentTaskContext: () => agentContext.value }));
@@ -1206,6 +1211,40 @@ describe("Task 5 reviewed outcome integration", () => {
     expect(capaApi.advanceCAPA).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument();
     expect(verificationCard).not.toHaveBeenCalled();
+  });
+
+  it.each(["lookup", "resink"])("same-identity material reload does not cancel or strand pending knowledge %s", async operation => {
+    const closed = { ...mockCapa, status: "D8_CLOSURE" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(closed as any);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...structuredClone(review), status: "D8_CLOSURE", binding_status: "legacy_unversioned" } as any);
+    const pending = deferred<any>();
+    const entry = { entry_id: "e1", lesson_summary: "CURRENT KNOWLEDGE", tags: [], embedding_status: "ready" };
+    if (operation === "lookup") vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mockReturnValueOnce(pending.promise);
+    else {
+      vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mockResolvedValueOnce(null).mockResolvedValue(entry as any);
+      vi.mocked(capaApi.sinkKnowledge).mockReturnValueOnce(pending.promise);
+    }
+    renderPage(); await screen.findByText("实施后复测合格");
+    if (operation === "resink") fireEvent.click(await screen.findByTestId("capa-knowledge-resink"));
+    const signal = operation === "lookup" ? vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mock.calls[0][2]! : vi.mocked(capaApi.sinkKnowledge).mock.calls[0][1]!;
+    fireEvent.click(screen.getByRole("button", { name: /Reload review materials|重新加载审核材料/ }));
+    expect(signal.aborted).toBe(false);
+    await act(async () => pending.resolve(operation === "lookup" ? entry : { entry_id: "e1", title: "Knowledge", document_no: "K-1", embedding_status: "ready" }));
+    await screen.findByText("CURRENT KNOWLEDGE");
+    expect(screen.getByTestId("capa-knowledge-resink")).not.toHaveClass("ant-btn-loading");
+  });
+
+  it.each(["success", "denial"])("a cancelled actual beforeAdopt rejects rather than granting continuation on late %s", async outcome => {
+    const write = deferred<any>();
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, status: "D4_ROOT_CAUSE", d4_root_cause: "Original" } as any);
+    vi.mocked(capaApi.updateCAPA).mockReturnValueOnce(write.promise);
+    renderPage(); const field = await screen.findByRole("textbox");
+    fireEvent.change(field, { target: { value: "Unsaved material" } });
+    const result = prerequisiteProbe.before!().then(() => ({ resolved: true }), error => ({ error }));
+    expect(capaApi.updateCAPA).toHaveBeenCalledTimes(1);
+    await act(async () => { useAuthStore.setState({ token: "credential-B" }); });
+    await act(async () => outcome === "success" ? write.resolve({ ...mockCapa, status: "D4_ROOT_CAUSE" }) : write.reject({ response: { status: 403 } }));
+    expect(await result).toMatchObject({ error: { name: "CanceledError" } });
   });
 
 });

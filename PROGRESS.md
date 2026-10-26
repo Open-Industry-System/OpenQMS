@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-26 Task 5 fix round 1/5 本地修复批次完成，待重审**：BASE `16dff517` 的 I1 前置/子操作归属、I2 Axios 认证副作用及 I3 无关知识操作 loading 已按复核修正。最终完整前端 **27 files /241 passed**（保留原 210），前端 tsc、生产 build、完整 E2E tsc 均有持久日志 **SHELL_EXIT=0**。下方初次 Task 5 自检结论已被复核问题取代，以文末同名 fix round 1 报告为当前状态；不冒称独立门禁已通过，不 push/合并/部署。
+
 > **2026-10-26 CAPA 结果审核 Task 5 本地实现完成**：生产 D8 集中审核面板、当前 revision/round 唯一决定入口、身份/范围请求隔离与终态核心只读已实现；最终受影响前端 **25 files /210 passed**、前端 tsc、生产 build、完整 E2E tsc 均 exit 0。尚待控制方独立复核；真实浏览器/provider 仍属 Task 7。本次完整报告见文末同名 Task 5 章节，不将单元 mock 当作真实验收，不 push/合并/部署。
 
 > **2026-10-25 CAPA 结果审核 Task 1–4 已验收，准备 Task 5**：Task 4 实际 D8 批准/驳回版本绑定、当前权限/来源/事务锁与完整五键生产回执已通过独立规格及质量复核（代码 `2c3d212b`）。最终受影响聚焦回归 **662 passed /3 既有 warnings /exit 0**；两个升级的 E2E API 调用方类型检查通过。下一任务为生产界面，真实 provider/浏览器与最终完整冻结尚未完成。六个固定种子报告的 synthetic passed gate 仅是测试前置，不能作为真实门禁成功证据。非阻塞的驳回来源等待覆盖建议已进入最终复核台账；不 push/合并/部署。下方 Task 3/4 记录为历史实现与验证过程，以本条当前状态为准。
@@ -818,3 +820,203 @@ All task files, including this report and existing README/permission documentati
 - Next: controller's independent Task 5 review, then only the separately authorized next task. No Task 6/7/8 implementation,
   candidate workflow, global auth/state-machine redesign or new self-approval policy was started.
 - Authorized local commit subject: `feat(capa): add consolidated D8 outcome review panel`. No push/merge/deploy.
+
+
+## Task 5 fix round 1/5 — complete action ownership, auth effects and independent reloads (2026-10-26)
+
+### Status and scope
+
+**DONE locally against fix BASE `16dff517`; ready for the coordinator's independent re-review.** Both initial gates
+returned Needs fixes (no Critical, three Important). The earlier Task 5 "no unresolved defect" self-review statement
+was incomplete and is superseded by the findings and evidence below; this report does not claim the external gates passed.
+Local fix commit is authorized. This batch changes only the exact frontend actions/helpers/tests/docs needed to address
+I1–I3, including the explicitly authorized same-pattern D3/D7/doc-gate/draft child continuations. No backend, DB, provider,
+infrastructure, dependencies, business/self-approval policy, global auth state-machine redesign, later task, push/merge/deploy
+or main-checkout work was performed. CodeGraph focused context was consulted first; current known files were read afterward.
+
+### Received findings (verbatim)
+
+> I1: A cancelled prerequisite resolves successfully, allowing an old child action to write under the new credential. CAPADetailPage.tsx:496-519,1080-1085 and D4RecPanel.tsx:130-149: A's beforeAdopt awaits handleUpdate(...,true); switch credential/report to B aborts A; handleUpdate returns normally when !request.current even in catch/throwOnError path; old child resumes adoptRecommendation(A) without signal/identity check and Axios supplies B. It can write to A if B is authorized, then toast/refresh from old continuation. Verification requests also lack cancellation/post-await ownership at D4VerificationCard.tsx:38-43,77-100,125-130. Cancellation must not resolve a prerequisite as permission to continue; fence the complete child action, subsequent writes, notifications and reloads under its originating lifecycle.
+
+> I2: Page guards run too late to prevent stale Axios denial/refresh side effects altering new session. client.ts:69-71,101-115,129-136; authStore.ts:85-97; CAPADetailPage.tsx:274-287. A-owned initial/related getCAPA request 403 can start unsignalled /auth/me; switch to B while it waits; A's response setUser mutates B before request.current checks. Likewise A's in-progress tryRefreshToken can later install A tokens or log out B. Exact outcome-read/advance exclusions are correct, but generic page-related paths are unfenced. Carry originating request/session ownership through Task 5 path and check BEFORE auth side effects, preserving other routes' existing refresh policy. Add real Axios transport-level races during /auth/me and refresh, not mocked page API rejection only.
+
+> I3: Reload review aborts unrelated page work and leaves permanent loading. CAPADetailPage.tsx:218-225,380-424,431-480; CapaOutcomeReviewPanel.tsx:29-33: every load first publishes null; parent invalidates ALL page requests. Knowledge lookup/resink pending gets aborted, finally refuses to clear loading because not current; same identity/report/status means effect doesn't restart and retry control can remain inaccessible. Separate token withdrawal from whole-view invalidation, or explicitly reconcile cancelled operations/busy state. Same-identity material reload must not silently strand unrelated business work.
+
+### Implemented fixes and self-review
+
+- **I1 — entire child action lifetime:** `handleUpdate(..., true)` now rejects with `CanceledError` on stale success and
+  stale failure instead of granting successful prerequisite completion. The actual parent callback is tested directly as well
+  as through recommendation children. `refreshCapa` also refuses to start under an old credential.
+- D4, both D5 adoption paths and verification list/source/create/conclusion/source-PATCH operations own their prerequisite,
+  POST/PATCH, callbacks, notifications and subsequent reads. Every await is followed by an origin check; each transport receives
+  the original owned signal. `useCapaChildRequests` binds report/credential/tenant/factory-line/selection to the existing local
+  controller registry. Invalid `begin()` calls produce an already-aborted signal. Late success and late denial do not toast,
+  reset a new form or reload under B. D4 verification's source read and record read are both cancelled on close.
+- The same actual chain pattern in D7 confirm/auto-fill, doc-gate sequential reads/actions/defer/advance and D3 import/advice/
+  execution/read paths is fenced, not deferred as another task. D3 selection cancels child work and clears busy/modal/private
+  edit tokens without refetching the visible run list. Separate run-list and selected-run lifetimes avoid a newly introduced
+  selection spinner regression. Draft generation now uses registered ownership as well as cancellation/request IDs and resets
+  private draft/undo state on lifecycle changes. Early workflows and their payload/provenance remain unchanged.
+- **I2 — before auth side effects:** a WeakMap of explicitly owned signal → current-origin guard contains lifetimes only,
+  never result content. Axios checks ownership before injecting credentials or entering auth mutation/redirect/retry work.
+  Related `/auth/me` and refresh calls carry the same signal. `setUser` is fenced after `/auth/me`; the optional CAPA owner and
+  original refresh credential are rechecked inside `tryRefreshToken` before installing tokens or logging out.
+- The existing exact outcome-read/advance/D4-preview/Agent private-route exclusions are unchanged. An invalidated owned CAPA
+  request settles without being replayed or stranded in another session's refresh queue. Successful still-installed refreshes
+  can release existing unrelated queued reads. **Unowned routes retain their existing refresh/queue policy**; the shared queue,
+  rotation protocol and global auth state machine were not rewritten. Tests exercise the real interceptor, real auth wrapper
+  and real store helper through an Axios adapter, including a stale POST blocked before B's Authorization reaches transport.
+  Stored access, refresh and tenant changes are checked even without a storage event or React rerender.
+- **I3 — independent panel reload:** null panel callbacks now withdraw only the review token and rejection reason; they do
+  not invalidate the whole page request registry. Same-identity material reload lets pending knowledge lookup/resink finish,
+  settle loading and retain accessible controls. Whole identity/selection teardown and explicit decision-denial withdrawal
+  still cancel the appropriate originating lifetimes. The panel's own failed/new reads still clear all old actionable tokens.
+- Self-reviewed all touched await chains and auth side-effect entry points, source versus selected-run scope, settled busy
+  state, signal forwarding, exact private exclusions, backend authority and unchanged single decision/terminal/DTO guarantees.
+  Original test payload/provenance assertions were retained and only extended with `expect.any(AbortSignal)` where signatures
+  gained cancellation. No test/assertion was dropped or warning suppression added. An AST comparison against BASE found
+  **25 original test files /171 original declarations /0 removed tests**, with no per-file assertion-count decrease; those
+  declarations expand to the original 210 runtime cases, all retained in final 241-case coverage.
+- Synced the existing API/components/store READMEs and `docs/permissions.md`. No new user-facing copy was needed, so locale
+  files and the approved outcome DTO were unchanged; their original locale/DTO/terminal tests were rerun.
+
+### Actual RED commands, outputs and recorded exit codes
+
+All commands ran in `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend` with
+existing node_modules/Node/npm. Every final evidence log below ends with its actual `SHELL_EXIT` marker. Logs live under
+`.superpowers/sdd/2026-10-23-capa-outcome-review/` in this workspace and are not committed source files.
+
+New regressions first failed against the live unfixed implementation. To preserve explicit exit-code evidence after writing
+all regression cases, a second deterministic mutation RED restored **only** the ten implicated production files from fix
+BASE `16dff517` (not the whole worktree, no stash/reset); current tests, API-compatible optional signatures and the ownership
+registry stayed in place. Each RED ran in a fresh process. A `finally` block restored every fixed source byte and verified
+`FIXED_SOURCE_BYTE_RESTORE=PASS` before any final GREEN. This is failure-proof regression evidence, not production execution.
+
+```bash
+npx vitest run src/components/capa/CapaChildOwnership.test.tsx src/pages/capa/CAPADetailPage.test.tsx -t 'same-identity material reload|cancels the entire|pending D4 adoption|pending verification|aborts both|D7 confirmation|DocGate load|D3 import|cancelled actual beforeAdopt'
+```
+
+`task5-fix-r1-i1-i3-red.log`: **2 files failed /15 failed /60 selected-out /SHELL_EXIT=1**. The actual prerequisite resolved
+`{resolved:true}` instead of rejecting for both late success and denial; children sent old adoption POSTs or reloaded/toasted,
+verification/source signals were absent, doc-gate/D3/D7 continued, and both knowledge operations were aborted by review reload.
+
+The isolated real-transport commands were:
+
+```bash
+npx vitest run src/api/client.capaOwnership.test.ts -t 'actual /auth/me late success'
+npx vitest run src/api/client.capaOwnership.test.ts -t 'actual refresh late success'
+npx vitest run src/api/client.capaOwnership.test.ts -t 'actual refresh late failure'
+npx vitest run src/api/client.capaOwnership.test.ts -t 'an old child signal'
+npx vitest run src/components/capa/useAIDraft.test.ts -t 'registers the complete draft lifecycle'
+```
+
+| RED log | Actual failure and output |
+|---|---|
+| `task5-fix-r1-auth-me-red.log` | A's user/permissions replaced B after pending real `/auth/me`; **1 failed /9 selected-out /SHELL_EXIT=1**. |
+| `task5-fix-r1-refresh-success-red.log` | Store token became `A-new` instead of `B-access`; **1 failed /9 selected-out /SHELL_EXIT=1**. |
+| `task5-fix-r1-refresh-failure-red.log` | B's user became null on A refresh failure; **1 failed /9 selected-out /SHELL_EXIT=1**. |
+| `task5-fix-r1-stale-post-red.log` | Old child POST reached B transport instead of rejecting; **1 failed /9 selected-out /SHELL_EXIT=1**. |
+| `task5-fix-r1-draft-red.log` | Draft's signal had no registered owner (`undefined` rather than current=true); **1 failed /9 selected-out /SHELL_EXIT=1**. |
+
+GREEN used the identical I1/I3 selection command: `task5-fix-r1-i1-i3-green.log` → **2 files /15 passed /60 selected-out /
+SHELL_EXIT=0**. I2 plus existing exact private-route controls used:
+
+```bash
+npx vitest run src/api/client.capaOwnership.test.ts src/api/client.agentTasks.test.ts
+```
+
+`task5-fix-r1-i2-green.log` → **2 files /18 passed /SHELL_EXIT=0**. No selection skip is counted as acceptance in the complete
+final run. The actual Axios adapter tests are transport-level unit evidence, **not** browser, backend/provider or live JWT evidence.
+
+### Intermediate attempts retained, not silently counted as success
+
+- `task5-fix-i1-i3-red.log`: initial 13-case behavioral RED after correcting a test-only D7 locator (`d7-confirm`, not
+  `d7-confirm-0`). `task5-fix-i1-i3-green1.log`: the corresponding 13 passed with 55 selected-out after child/I3 fixes.
+- `task5-fix-i2-red.log`: first combined unfixed interceptor run had 5 failures, including a timeout/global-refresh-flag cascade
+  after the late auth denial. Those dependent failures are **not** counted as five independent defects. Subsequent isolated
+  `task5-fix-i2-refresh-success-red.log` and `task5-fix-i2-refresh-failure-red.log` showed actual token overwrite/logout, then
+  `task5-fix-i2-green1.log` had 13 passed including old private-route guards. Final marker-bearing isolated REDs above are authoritative.
+- `task5-fix-expanded1.log`: **18 failed /210 passed**. Seventeen were old exact-call assertions needing the new signal while
+  preserving payload/provenance; the other was a real new D3 selection spinner caused by unnecessary run-list refetch. Fixed
+  both, without dropping cases: `task5-fix-expanded2.log` → **27 files /228 passed**.
+- `task5-fix-draft-red.log`: **1 failed /9 passed** for missing transport ownership. `task5-fix-prerequisite-red.log`: BASE-only
+  method mutation gave **2 failed /57 selected-out /RED_EXIT=1** for wrongly successful cancelled prerequisites.
+  `task5-fix-prerequisite-green.log`: page + draft **69 passed** after actual method and registered draft fixes.
+- `task5-fix-extra-green.log`: **35 passed** for additional source/conclusion PATCH, D5 late denial, report switch, D7 auto-fill,
+  stored-credential transitions and normal unrelated queued refresh behavior. `task5-fix-last-focus.log`: **20 passed** after
+  final stale pre-transport POST and draft reset checks. These are intermediate counts, not replacements for the final suite.
+- Earlier no-diagnostic tsc attempts (`task5-fix-ts1.log` and tool output) are not relied on for shell success; the final
+  explicit marker-bearing compiler/build logs below are the authoritative results. Tool-verifier refusals of compound shell
+  forms did not execute tests; a zsh runner executed the exact commands and persisted their real shell statuses instead.
+
+### Final complete verification AFTER the last production/test change
+
+```bash
+npx vitest run src/components/capa src/pages/capa/CAPADetailPage.test.tsx src/api src/locales/capa-ppt.i18n.test.ts
+npx tsc --noEmit
+npm run build
+npx tsc --noEmit -p tsconfig.e2e.json
+```
+
+| Exact final evidence log | Actual output |
+|---|---|
+| `task5-fix-r1-final-vitest.log` | **27 files passed /241 passed /0 failed /0 skipped /no unhandled errors**, start 23:54:27, duration 13.82s, **SHELL_EXIT=0**. Original 210 cases +31 new regressions. |
+| `task5-fix-r1-final-tsc.log` | `npx tsc --noEmit`; no compiler diagnostics; **SHELL_EXIT=0**. |
+| `task5-fix-r1-final-build.log` | `tsc -b && vite build`; production Vite 5.4.21 built in **6.43s**, CAPADetailPage 103.87kB /30.48kB gzip; **SHELL_EXIT=0**. |
+| `task5-fix-r1-final-e2e-tsc.log` | `npx tsc --noEmit -p tsconfig.e2e.json`; no compiler diagnostics; **SHELL_EXIT=0**. |
+| `task5-fix-r1-preservation.log` | `BASE_TEST_FILES=25; ORIGINAL_TEST_DECLARATIONS=171; REMOVED_TESTS=0; ASSERTION_COUNTS_NOT_DECREASED=PASS; PROCESS_EXIT=0`. |
+| `task5-fix-r1-diff-check.log` | `git diff --check`; no whitespace errors; **PROCESS_EXIT=0**. |
+
+The installed Node/npm and dependencies were reused; no packages or test configuration changed. Existing Vite/react-babel
+esbuild→oxc notices, Node experimental localStorage notices, jsdom pseudo-element getComputedStyle diagnostics and the mixed
+static/dynamic `api/version.ts` production chunk warning remain visible. They were not suppressed or converted to skips.
+Final full selection has no xfail/xpass or omitted original assertions; this is not a historical backend/full-system baseline.
+
+### Exact fix files (relative to BASE `16dff517`)
+
+```text
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/PROGRESS.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/docs/permissions.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/README.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/auth.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/capa.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/capaRequestOwnership.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/client.capaOwnership.test.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/client.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/fmea.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/README.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/CapaChildOwnership.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D3ContainmentPanel.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D3ContainmentPanel.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D4RecPanel.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D4RecPanel.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D4VerificationCard.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D4VerificationCard.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D5RecPanel.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D5RecPanel.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D7RecPanel.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/D7RecPanel.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/DocGatePanel.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/__tests__/D4VerificationCard.cause.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/useAIDraft.test.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/useAIDraft.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/useCapaViewRequests.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/pages/capa/CAPADetailPage.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/pages/capa/CAPADetailPage.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/store/README.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/store/authStore.ts
+```
+
+### Remaining limits and next steps
+
+- No unresolved I1/I2/I3 blocker was identified in this batch's self-review. Independent coordinator gates remain pending;
+  this report does not self-approve the fixes. Review only `16dff517..` the final local fix head.
+- The optional owner is deliberately limited to explicitly owned Task 5 CAPA requests. Unowned routes' existing global
+  refresh/queue behavior is retained, not claimed fixed or redesigned. Exact private-route controls and backend authority remain.
+- Cancellation cannot undo a POST already accepted by the server. It prevents old continuation/publication and prohibits
+  replay under B; the existing D8 uncertainty path still queries actual state without auto replay. DTO/revision/round binding,
+  terminal/admin core freeze, unreviewed closed supplement, archive freeze, escaped metadata and no private result persistence
+  remain unchanged and covered by the original tests.
+- No real browser, provider, database or production acceptance was run or claimed. Those remain separately authorized Task 7
+  and final-system gates. No later task or business approval/self policy was started.
+- Authorized local commit subject: `fix(capa): fence child actions and auth side effects`. No push/merge/deploy.

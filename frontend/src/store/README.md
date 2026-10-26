@@ -62,6 +62,12 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   access token or `null`; the interceptor queues retried requests
   while the refresh is in flight. Failure path calls `logout()` and
   the interceptor redirects to `/login`.
+- **Optional CAPA refresh ownership.** `tryRefreshToken(isCurrent?, signal?)`
+  carries an explicitly owned view through the existing auth request and rechecks
+  both its lifetime and original refresh credential before storing tokens or
+  logging out. A late A response cannot alter B. Calls without an owner keep the
+  existing policy; this adds no global auth state machine, token rotation protocol
+  or business-data store. No CAPA result content is persisted here.
 - **`current_factory_id` is the single source for tenant scoping.**
   Set on login from `user.factory_scope.default_factory_id`, updated
   via `setCurrentFactoryId(factoryId)` when the header selector

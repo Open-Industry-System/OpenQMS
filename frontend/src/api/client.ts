@@ -1,4 +1,5 @@
 import axios from "axios";
+import { capaRequestOwner } from "./capaRequestOwnership";
 import { useAuthStore } from "../store/authStore";
 
 const client = axios.create({
@@ -30,6 +31,8 @@ function addRefreshSubscriber(cb: (token: string) => void) {
 }
 
 client.interceptors.request.use((config) => {
+  const owner = capaRequestOwner(config.signal);
+  if (owner && !owner()) throw new axios.CanceledError("CAPA view invalidated");
   const token = localStorage.getItem("access_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -61,6 +64,9 @@ client.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const owner = capaRequestOwner(originalRequest?.signal);
+    // Ownership is checked before any session mutation, redirect, retry or related auth read.
+    if (owner && !owner()) return Promise.reject(error);
 
     // User task activity and attachment reads must withdraw restricted content
     // immediately on denial. Credential refresh elsewhere can refetch the same
@@ -100,8 +106,18 @@ client.interceptors.response.use(
       if (!isRefreshing) {
         isRefreshing = true;
         try {
-          const newToken = await useAuthStore.getState().tryRefreshToken();
+          const newToken = await (owner
+            ? useAuthStore.getState().tryRefreshToken(owner, originalRequest.signal)
+            : useAuthStore.getState().tryRefreshToken());
           isRefreshing = false;
+          if (owner) {
+            // A successful refresh invalidates the old CAPA credential/view. Only the
+            // still-installed refresh may release existing unrelated subscribers.
+            if (newToken && useAuthStore.getState().token === newToken && localStorage.getItem("access_token") === newToken) {
+              onRefreshed(newToken);
+            }
+            return Promise.reject(error);
+          }
           if (newToken) {
             onRefreshed(newToken);
             // Retry the original request with the new token
@@ -110,12 +126,17 @@ client.interceptors.response.use(
           }
         } catch {
           isRefreshing = false;
+          if (owner && !owner()) return Promise.reject(error);
           useAuthStore.getState().logout();
           window.location.href = "/login";
           return Promise.reject(error);
         }
         isRefreshing = false;
       }
+
+      // An owned CAPA view must settle on a denial, not wait on another session's
+      // refresh or replay its old action. Other routes retain the existing queue.
+      if (owner) return Promise.reject(error);
 
       // Queue pending requests while refresh is in flight
       return new Promise((resolve) => {
@@ -128,8 +149,8 @@ client.interceptors.response.use(
 
     if (error.response?.status === 403) {
       try {
-        const resp = await client.get("/auth/me");
-        useAuthStore.getState().setUser(resp.data);
+        const resp = await (owner ? client.get("/auth/me", { signal: originalRequest.signal }) : client.get("/auth/me"));
+        if (!owner || owner()) useAuthStore.getState().setUser(resp.data);
       } catch {
         // refresh failed — ignore, user stays with stale state
       }
