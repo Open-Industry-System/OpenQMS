@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-27 Task 7 实现复核通过，真实验收仍 BLOCKED**：代码 `665511e3` 独立实现符合性/质量复核无 Critical/Important；API/并发35 passed、额外后端104 passed、前端221 passed及类型/构建通过。完整真实验收 **2 failed /1 passed，exit1**：一项 Chromium 保护通过，两项正向用例因缺少本工作树授权测试 `.env.e2e` 在真实D3阻断，D4及后续审批/知识/横向扩散未验证。不能标Task 7完成，Task 8最终冻结及整体收口未完成。另已披露自有测试DB配置误输出工具记录，未涉及生产/provider密钥、未静默轮换；临时租户/进程/端口清理，登记PG资源保留。独立复核的拒绝审计缺席断言、缺少provider错误类别及噪声归因建议保留在最终复核台账，不push/合并/部署。
+
 > **2026-10-27 CAPA 结果审核 Task 1–6 已验收，进入 Task 7**：Task 6 `99f108ff` 通过独立规格及质量复核，无 Critical/Important。受影响后端 **821 passed /3 warnings**，前端 **121 passed /5 files**，类型与构建通过。归档后仅补充 d8_closure 的既有冻结仍为400，依据实施计划第52行明确保留原规则；已审核心及混合PUT继续固定409，不是新增豁免。诊断噪声保留供最终复核，不扩展整改。下一步真实员工HTTP/provider/浏览器验收及最后完整冻结，整片尚未完成；不push/合并/部署。
 
 > **2026-10-27 CAPA 结果审核 Task 1–5 已验收，进入 Task 6**：Task 5 第二轮修正 `fa5f4332` 已通过独立规格及质量复核，原 I1/I2/I3 和新增 F1 均已解决，无 Critical/Important 遗留。最终受影响前端 **245 passed /27 files**，前端 tsc、生产 build、E2E tsc 均有 **SHELL_EXIT=0**。下面各轮待审条目保留历史过程，以本条最新验收为准。下一任务为未审补充的知识/经验派生边界；真实 provider/浏览器和最终完整冻结尚未完成，不 push/合并/部署。
