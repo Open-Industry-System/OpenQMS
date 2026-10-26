@@ -467,5 +467,60 @@
     "decideFailed": "横向扩散决策失败",
     "blocked": "横向扩散被阻断：LLM 未配置",
     "failed": "横向扩散失败，可重试"
+  },
+  "outcome": {
+    "title": "D8 集中成果审核",
+    "reload": "重新加载审核材料",
+    "round": "审核轮次",
+    "revision": "材料版本",
+    "verifications": "根因验证记录",
+    "evidence": "证据元数据（不打开附件）",
+    "source": "来源元数据",
+    "d7": "D7 动作记录",
+    "documents": "受控来源版本",
+    "controlPlan": "控制计划",
+    "noDocuments": "本次材料无受控文档引用",
+    "object": "对象",
+    "version": "版本",
+    "decision": "审核决定",
+    "supplement": "结案后补充，未纳入本次审核",
+    "conflict": "材料已变化或已冻结，请重新加载并核对后再决定。",
+    "denied": "无法读取完整审核材料，请检查当前登录、范围及来源权限。",
+    "loadFailed": "审核材料读取失败或不完整，请重新加载；当前不可审批。",
+    "uncertain": "决定结果尚未确认，正在查询实际报告状态；不会自动重发。",
+    "unavailable": "请重新加载完整材料并核对后再审批。",
+    "binding": {
+      "pending": "待审核材料",
+      "verified": "已核对审核版本",
+      "legacy_unversioned": "历史记录，未绑定审核版本",
+      "unverifiable": "无法验证审核绑定"
+    },
+    "core": {
+      "d4_root_cause": "D4 根因",
+      "d5_correction": "D5 实际纠正措施",
+      "d6_verification": "D6 实施验证结果",
+      "d7_prevention": "D7 预防复发措施"
+    },
+    "action": {
+      "confirmed": "已确认动作",
+      "skipped": "已跳过",
+      "auto_filled": "已填入控制措施"
+    },
+    "actionStatus": {
+      "pending": "待确认",
+      "verified": "已核验",
+      "confirmed": "已确认",
+      "skipped": "已跳过",
+      "completed": "已完成"
+    },
+    "decisionAction": {
+      "approved": "已批准",
+      "rejected": "已驳回"
+    },
+    "conclusion": {
+      "pending": "待验证",
+      "passed": "验证通过",
+      "failed": "验证未通过"
+    }
   }
 }

@@ -61,3 +61,15 @@ it.each([401, 403])('D4 text preview %s rejects immediately without refresh or b
     .rejects.toMatchObject({ response: { status } });
   expect(seen).toEqual(['/capa/report/d4-text-preview']);
 });
+
+
+it.each([401, 403])('outcome reads and exact decision POST fail immediately on %s without refresh/replay', async status => {
+  const seen: string[] = [];
+  client.defaults.adapter = async config => {
+    seen.push(config.url!);
+    throw { config, response: { status, data: {} } };
+  };
+  await expect(client.get('/capa/report/outcome-review')).rejects.toMatchObject({ response: { status } });
+  await expect(client.post('/capa/report/advance', { target_state: 'D8_CLOSURE' })).rejects.toMatchObject({ response: { status } });
+  expect(seen).toEqual(['/capa/report/outcome-review', '/capa/report/advance']);
+});

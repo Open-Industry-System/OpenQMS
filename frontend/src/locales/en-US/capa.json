@@ -467,5 +467,60 @@
     "decideFailed": "Lateral diffusion decision failed",
     "blocked": "Lateral diffusion blocked: LLM not configured",
     "failed": "Lateral diffusion failed; retry"
+  },
+  "outcome": {
+    "title": "D8 outcome review",
+    "reload": "Reload review materials",
+    "round": "Review round",
+    "revision": "Material revision",
+    "verifications": "Root cause verifications",
+    "evidence": "Evidence metadata (attachments are not opened)",
+    "source": "Source metadata",
+    "d7": "D7 action records",
+    "documents": "Controlled source versions",
+    "controlPlan": "Control plan",
+    "noDocuments": "No controlled document references in this review",
+    "object": "Object",
+    "version": "Version",
+    "decision": "Review decision",
+    "supplement": "Post-closure supplement — not included in this review",
+    "conflict": "Materials changed or are frozen. Reload and review before deciding.",
+    "denied": "Cannot read the complete review. Check your session, scope and source permissions.",
+    "loadFailed": "Review materials are unreadable or incomplete. Reload before deciding.",
+    "uncertain": "Decision result is uncertain. Checking actual report state; the decision will not be replayed.",
+    "unavailable": "Reload and check the complete materials before deciding.",
+    "binding": {
+      "pending": "Pending review",
+      "verified": "Review version verified",
+      "legacy_unversioned": "Legacy record — no bound review version",
+      "unverifiable": "Review binding cannot be verified"
+    },
+    "core": {
+      "d4_root_cause": "D4 root cause",
+      "d5_correction": "D5 implemented corrective actions",
+      "d6_verification": "D6 implementation verification results",
+      "d7_prevention": "D7 recurrence prevention"
+    },
+    "action": {
+      "confirmed": "Action confirmed",
+      "skipped": "Skipped",
+      "auto_filled": "Control filled"
+    },
+    "actionStatus": {
+      "pending": "Pending confirmation",
+      "verified": "Verified",
+      "confirmed": "Confirmed",
+      "skipped": "Skipped",
+      "completed": "Completed"
+    },
+    "decisionAction": {
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "conclusion": {
+      "pending": "Pending verification",
+      "passed": "Verification passed",
+      "failed": "Verification failed"
+    }
   }
 }

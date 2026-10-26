@@ -136,3 +136,16 @@ describe("useAIDraft", () => {
     expect(restored).toBeUndefined();
   });
 });
+
+
+it('aborts every in-flight draft on replacement and view unmount', async () => {
+  mockGenerateDraft.mockReturnValue(new Promise(() => {}));
+  const { result, unmount } = renderHook(() => useAIDraft());
+  act(() => { result.current.generate('report-1', 'd6', 'structured'); });
+  const first = mockGenerateDraft.mock.calls[mockGenerateDraft.mock.calls.length - 1][3];
+  act(() => { result.current.generate('report-1', 'd6', 'structured'); });
+  expect(first?.aborted).toBe(true);
+  const second = mockGenerateDraft.mock.calls[mockGenerateDraft.mock.calls.length - 1][3];
+  unmount();
+  expect(second?.aborted).toBe(true);
+});

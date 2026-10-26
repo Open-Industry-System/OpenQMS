@@ -12,6 +12,10 @@ const client = axios.create({
 const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories", "/agent/tasks"];
 const isD4TextPreview = (url?: string) => /^\/capa\/[^/]+\/d4-text-preview(?:\/availability|\/version)?\/?$/.test(url ?? "");
 
+const isOutcomePrivateRequest = (url?: string, method?: string) =>
+  /^\/capa\/[^/]+\/outcome-review\/?$/.test(url ?? "")
+  || (method?.toLowerCase() === "post" && /^\/capa\/[^/]+\/advance\/?$/.test(url ?? ""));
+
 // Guard against concurrent refresh attempts
 let isRefreshing = false;
 let refreshSubscribers: Array<(token: string) => void> = [];
@@ -62,7 +66,8 @@ client.interceptors.response.use(
     // immediately on denial. Credential refresh elsewhere can refetch the same
     // selected task afterward, but never replays a protected attachment request.
     const isUserTaskRead = originalRequest?.url?.startsWith("/agent/tasks");
-    if ((isUserTaskRead || isD4TextPreview(originalRequest?.url))
+    if ((isUserTaskRead || isD4TextPreview(originalRequest?.url)
+        || isOutcomePrivateRequest(originalRequest?.url, originalRequest?.method))
         && (error.response?.status === 401 || error.response?.status === 403)) {
       return Promise.reject(error);
     }

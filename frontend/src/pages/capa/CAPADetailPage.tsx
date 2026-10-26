@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   Alert, Button, Space, Tag, Typography, Steps, Form, Input,
@@ -16,6 +16,9 @@ import { findCapaKnowledgeEntry } from "../../api/knowledge";
 import { getAIDraftCapabilities } from "../../api/capaDraft";
 import { listFMEAs } from "../../api/fmea";
 import RelatedFMEALink from "../../components/cross-links/RelatedFMEALink";
+import CapaOutcomeReviewPanel from "../../components/capa/CapaOutcomeReviewPanel";
+import { useCapaViewRequests, useCapaCredentialIdentity } from "../../components/capa/useCapaViewRequests";
+import type { CapaOutcomeReview } from "../../types/capaOutcomeReview";
 import D4RecPanel from "../../components/capa/D4RecPanel";
 import D4VerificationCard from "../../components/capa/D4VerificationCard";
 import D4TextRedactionPreview from "../../components/capa/D4TextRedactionPreview";
@@ -67,6 +70,15 @@ const severityMap: Record<string, string> = {
 };
 
 export default function CAPADetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const credential = useCapaCredentialIdentity();
+  const identity = JSON.stringify([credential.identity, id, location.key]);
+  return <CAPADetailView key={identity} credentialIdentity={identity} credentialsCurrent={credential.current} />;
+}
+
+function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credentialIdentity: string; credentialsCurrent: () => boolean }) {
+  const requests = useCapaViewRequests(credentialIdentity, credentialsCurrent);
   const { t } = useTranslation("capa");
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
@@ -74,6 +86,8 @@ export default function CAPADetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [capa, setCapa] = useState<CAPAReport | null>(null);
+  const currentCapa = useRef(capa);
+  currentCapa.current = capa;
   const [loading, setLoading] = useState(true);
   const [_saving, setSaving] = useState(false);
   const [fmeas, setFmeas] = useState<FMEADocument[]>([]);
@@ -150,9 +164,10 @@ export default function CAPADetailPage() {
       setLessonsModalOpen(true);
       setLessonsLoading(true);
 
-      const controller = new AbortController();
+      const request = requests.begin();
       const timeoutId = setTimeout(() => {
-        controller.abort();
+        if (!request.current()) return;
+        request.cancel();
         setLessonsLoading(false);
         setLessonsModalOpen(false);
         message.warning(t("messages.searchTimeout", "检索超时，请稍后在编辑过程中使用推荐功能"));
@@ -162,28 +177,30 @@ export default function CAPADetailPage() {
       getCAPALessons(
         id!,
         problemDescription ? { problem_description: problemDescription } : undefined,
-        { signal: controller.signal }
+        { signal: request.signal }
       )
         .then((res) => {
+          if (!request.current()) return;
           clearTimeout(timeoutId);
           setLessonsData(res);
           setLessonsLoading(false);
         })
         .catch((err) => {
+          if (!request.current()) return;
           clearTimeout(timeoutId);
           if (!axios.isCancel(err)) {
             message.error(t("messages.searchFailed", "检索经验教训失败"));
           }
           setLessonsLoading(false);
-        });
+        }).finally(request.finish);
 
       return () => {
         clearTimeout(timeoutId);
-        controller.abort();
+        request.cancel();
       };
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state, id]);
+  }, [location.state, id, requests]);
 
   const [allD7Confirmed, setAllD7Confirmed] = useState(true);
   const [d7UnconfirmedItems, setD7UnconfirmedItems] = useState<D7UnconfirmedItem[]>([]);
@@ -192,6 +209,30 @@ export default function CAPADetailPage() {
 
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [outcomeReview, setOutcomeReview] = useState<CapaOutcomeReview | null>(null);
+  const outcomeRef = useRef<CapaOutcomeReview | null>(null);
+  const [outcomeWithdrawn, setOutcomeWithdrawn] = useState(false);
+  const [decisionNotice, setDecisionNotice] = useState("");
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  const decisionLock = useRef(false);
+  const onOutcomeReview = useCallback((value: CapaOutcomeReview | null) => {
+    if (!credentialsCurrent()) return;
+    if (!value && !decisionLock.current) requests.invalidate();
+    outcomeRef.current = value;
+    setOutcomeReview(value);
+    setRejectReason("");
+    setRejectDialogOpen(false);
+  }, [credentialsCurrent, requests]);
+  const reviewedState = capa?.status === "D8_CLOSURE" || capa?.status === "ARCHIVED";
+  const coreEditable = canEdit("capa") && !reviewedState;
+  const mayEditField = (field: string) => {
+    const current = currentCapa.current;
+    return canEdit("capa") && !!current && current.status !== "ARCHIVED"
+      && (current.status !== "D8_CLOSURE" || field === "d8_closure");
+  };
+  const decisionReady = capa?.status === "D8_APPROVAL_PENDING" && canApprove("capa") && !decisionBusy
+    && !outcomeWithdrawn && !!outcomeReview && outcomeReview.report_id === id && outcomeReview.status === capa.status
+    && outcomeReview.binding_status === "pending" && !!outcomeReview.review_round_id && !outcomeReview.decision;
 
   const [aiDraftEnabled, setAiDraftEnabled] = useState(false);
 
@@ -208,6 +249,9 @@ export default function CAPADetailPage() {
     canUndo,
   } = useAIDraft();
   const [previewOpen, setPreviewOpen] = useState(false);
+  useEffect(() => {
+    if (reviewedState) { clear(); setPreviewOpen(false); setLinkModal(false); setScarModalOpen(false); }
+  }, [reviewedState, clear]);
 
   useEffect(() => {
     if (draft && !draftLoading) {
@@ -226,16 +270,17 @@ export default function CAPADetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    getCAPA(id).then(setCapa).finally(() => setLoading(false));
-    listFMEAs({ page_size: 100 }).then((res) => setFmeas(res.items));
-    getAIDraftCapabilities()
-      .then((caps) => setAiDraftEnabled(caps.ai_draft_enabled))
-      .catch(() => setAiDraftEnabled(false));
-    // Prefetch supplier options so readonly labels can resolve names
-    listCapaSupplierOptions({ page_size: 50 })
-      .then((res) => setSuppliers(res.items))
-      .catch(() => { /* leave empty; fall back to UUID */ });
-  }, [id]);
+    const report = requests.begin(), sources = requests.begin(), caps = requests.begin(), suppliers = requests.begin();
+    getCAPA(id, report.signal).then(value => { if (report.current()) setCapa(value); })
+      .catch(() => { if (report.current()) setCapa(null); })
+      .finally(() => { if (report.current()) setLoading(false); report.finish(); });
+    listFMEAs({ page_size: 100 }, sources.signal).then(res => { if (sources.current()) setFmeas(res.items); })
+      .catch(() => { if (sources.current()) setFmeas([]); }).finally(sources.finish);
+    getAIDraftCapabilities(caps.signal).then(value => { if (caps.current()) setAiDraftEnabled(value.ai_draft_enabled); })
+      .catch(() => { if (caps.current()) setAiDraftEnabled(false); }).finally(caps.finish);
+    listCapaSupplierOptions({ page_size: 50 }, suppliers.signal).then(res => { if (suppliers.current()) setSuppliers(res.items); })
+      .catch(() => { /* labels fall back to UUID */ }).finally(suppliers.finish);
+  }, [id, requests]);
 
   useEffect(() => {
     if (capa) {
@@ -274,17 +319,20 @@ export default function CAPADetailPage() {
     decision: "notify" | "skip",
     skipReason?: string,
   ) => {
-    if (!id) return;
+    if (!id || !credentialsCurrent()) return;
+    const request = requests.begin();
     setLateralLoading(true);
     try {
       const proj = await decideLateralDiffusion(id, {
         decision,
         skip_reason: skipReason,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       setCapa((prev) => (prev ? { ...prev, lateral_diffusion: proj } : prev));
       setLateralModalOpen(false);
       message.success(t("lateral.decideSuccess", "横向扩散决策已保存"));
     } catch (e: unknown) {
+      if (!request.current()) return;
       message.error(
         formatCapaAdvanceError(
           e,
@@ -296,18 +344,22 @@ export default function CAPADetailPage() {
         ),
       );
     } finally {
-      setLateralLoading(false);
+      if (request.current()) setLateralLoading(false);
+      request.finish();
     }
   };
 
   const handleLateralRerun = async () => {
-    if (!id) return;
+    if (!id || !credentialsCurrent()) return;
+    const request = requests.begin();
     setLateralRerunLoading(true);
     try {
-      const proj = await rerunLateralDiffusion(id);
+      const proj = await rerunLateralDiffusion(id, request.signal);
+      if (!request.current()) return;
       setCapa((prev) => (prev ? { ...prev, lateral_diffusion: proj } : prev));
       message.success(t("lateral.rerun", "重新检查"));
     } catch (e: unknown) {
+      if (!request.current()) return;
       message.error(
         formatCapaAdvanceError(
           e,
@@ -319,21 +371,25 @@ export default function CAPADetailPage() {
         ),
       );
     } finally {
-      setLateralRerunLoading(false);
+      if (request.current()) setLateralRerunLoading(false);
+      request.finish();
     }
   };
 
   const loadKnowledgeEntry = async (report: CAPAReport) => {
-    if (!report.report_id) return;
+    if (!report.report_id || !credentialsCurrent()) return;
+    const request = requests.begin();
     setKnowledgeLoading(true);
     setKnowledgeLoadError(null);
     try {
       const entry = await findCapaKnowledgeEntry(report.report_id, {
         document_no: report.document_no,
         product_line_code: report.product_line_code,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       setKnowledgeEntry(entry);
     } catch (e: unknown) {
+      if (!request.current()) return;
       // Distinguish load failure (network/403/500) from genuine absence.
       // Absence is `null` from findCapaKnowledgeEntry (200 + no match).
       setKnowledgeEntry(null);
@@ -352,7 +408,8 @@ export default function CAPADetailPage() {
         );
       }
     } finally {
-      setKnowledgeLoading(false);
+      if (request.current()) setKnowledgeLoading(false);
+      request.finish();
     }
   };
 
@@ -373,11 +430,13 @@ export default function CAPADetailPage() {
   };
 
   const handleResinkKnowledge = async () => {
-    if (!id) return;
+    if (!id || !credentialsCurrent()) return;
+    const request = requests.begin();
     setKnowledgeResinking(true);
     setKnowledgeError(null);
     try {
-      const result = await sinkKnowledge(id);
+      const result = await sinkKnowledge(id, request.signal);
+      if (!request.current()) return;
       message.success(t("knowledge.resinkSuccess", "知识库已重新沉淀"));
       setKnowledgeEntry((prev) =>
         prev
@@ -406,7 +465,9 @@ export default function CAPADetailPage() {
             },
       );
       if (capa) await loadKnowledgeEntry(capa);
+      if (!request.current()) return;
     } catch (e: unknown) {
+      if (!request.current()) return;
       const msg = formatCapaAdvanceError(
         e,
         t("knowledge.resinkFailed", "重新沉淀失败"),
@@ -415,7 +476,8 @@ export default function CAPADetailPage() {
       setKnowledgeError(msg);
       message.error(msg);
     } finally {
-      setKnowledgeResinking(false);
+      if (request.current()) setKnowledgeResinking(false);
+      request.finish();
     }
   };
 
@@ -434,25 +496,35 @@ export default function CAPADetailPage() {
   const currentStep = capa ? (stepIndex[capa.status] ?? 0) : 0;
 
   const handleUpdate = async (field: string, value: unknown, throwOnError = false) => {
-    if (!id || !canEdit('capa')) return;
+    if (!id || !credentialsCurrent() || !mayEditField(field)) {
+      if (throwOnError) throw new Error("CAPA_REVIEWED_CONTENT_LOCKED");
+      return;
+    }
     if (capa && JSON.stringify(capa[field as keyof CAPAReport]) === JSON.stringify(value)) {
       return;
     }
+    const request = requests.begin();
     setSaving(true);
     try {
-      const updated = await updateCAPA(id, { [field]: value });
+      const updated = await updateCAPA(id, { [field]: value }, request.signal);
+      if (!request.current()) return;
       setCapa(updated);
     } catch (e) {
+      if (!request.current()) return;
       message.error(tc("messages.saveFailed", "保存失败"));
       if (throwOnError) throw e;
     } finally {
-      setSaving(false);
+      if (request.current()) setSaving(false);
+      request.finish();
     }
   };
 
   const refreshCapa = async () => {
-    const updated = await getCAPA(id!);
-    setCapa(updated);
+    const request = requests.begin();
+    try {
+      const updated = await getCAPA(id!, request.signal);
+      if (request.current()) setCapa(updated);
+    } finally { request.finish(); }
     // 不在此处用闭包 localData 覆盖 d4/d5——交给下方 useEffect([capa]) 统一同步全部 localData，
     // 避免闭包陈旧 localData 覆盖刚同步的其它字段（如 d6/d7/d8）造成闪回
   };
@@ -463,7 +535,7 @@ export default function CAPADetailPage() {
   };
 
   const handleGenerate = (step: string, format: DraftFormat) => {
-    if (!id) return;
+    if (!id || !credentialsCurrent() || !mayEditField(stepToField[step])) return;
     clear();
     generate(id, step, format);
   };
@@ -471,16 +543,19 @@ export default function CAPADetailPage() {
   const handleReplace = async () => {
     if (!draft) return;
     const field = stepToField[draft.step];
-    if (!field) return;
+    if (!field || !credentialsCurrent() || !mayEditField(field)) return;
+    const request = requests.begin();
     const originalValue = localData[field] || "";
     saveUndo(field, originalValue);
     setLocalData((p) => ({ ...p, [field]: draft.content }));
     try {
       await handleUpdate(field, draft.content, true);
     } catch {
+      if (!request.current()) return;
       setLocalData((p) => ({ ...p, [field]: originalValue }));
       return;
-    }
+    } finally { request.finish(); }
+    if (!request.current()) return;
     setPreviewOpen(false);
     clear();
   };
@@ -488,7 +563,8 @@ export default function CAPADetailPage() {
   const handleAppend = async () => {
     if (!draft) return;
     const field = stepToField[draft.step];
-    if (!field) return;
+    if (!field || !credentialsCurrent() || !mayEditField(field)) return;
+    const request = requests.begin();
     const originalValue = localData[field] || "";
     const appended = originalValue ? `${originalValue}\n\n${draft.content}` : draft.content;
     saveUndo(field, originalValue);
@@ -496,14 +572,17 @@ export default function CAPADetailPage() {
     try {
       await handleUpdate(field, appended, true);
     } catch {
+      if (!request.current()) return;
       setLocalData((p) => ({ ...p, [field]: originalValue }));
       return;
-    }
+    } finally { request.finish(); }
+    if (!request.current()) return;
     setPreviewOpen(false);
     clear();
   };
 
   const handleUndo = (field: string) => {
+    if (!credentialsCurrent() || !mayEditField(field)) return;
     const prev = undo(field);
     if (prev !== undefined) {
       setLocalData((p) => ({ ...p, [field]: prev }));
@@ -515,12 +594,12 @@ export default function CAPADetailPage() {
   const renderLabelWithDraft = (step: string, label: string) => {
     const field = stepToField[step];
     const hasHistory = canUndo(field);
-    const showAIButton = aiDraftEnabled && canEdit('capa');
+    const showAIButton = aiDraftEnabled && coreEditable && mayEditField(field);
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ color: "var(--qf-text-secondary)", fontWeight: 500 }}>{label}</span>
         <Space size="small">
-          {hasHistory && (
+          {hasHistory && coreEditable && mayEditField(field) && (
             <Button
               size="small"
               type="link"
@@ -552,7 +631,7 @@ export default function CAPADetailPage() {
   };
 
   const handleAdvance = async () => {
-    if (!id) return;
+    if (!id || !credentialsCurrent() || !coreEditable || capa?.status === "D8_APPROVAL_PENDING") return;
     // D7_PREVENTION 未全确认 → skip 对话框
     if (capa?.status === "D7_PREVENTION" && !allD7Confirmed) {
       setD7SkipDialogOpen(true);
@@ -565,17 +644,21 @@ export default function CAPADetailPage() {
       D8_GATE_PENDING: "D8_APPROVAL_PENDING",
     };
     const target = branchTarget[capa?.status || ""];
+    const request = requests.begin();
     try {
-      const updated = await advanceCAPA(id, target ? { target_state: target } : {});
+      const updated = await advanceCAPA(id, target ? { target_state: target } : {}, request.signal);
+      if (!request.current()) return;
       setCapa(updated);
       message.success(t("messages.advanceSuccess", "已推进到下一步"));
     } catch (e: unknown) {
+      if (!request.current()) return;
       reportAdvanceError(e);
-    }
+    } finally { request.finish(); }
   };
 
   const handleD7SkipConfirm = async () => {
-    if (!id) return;
+    if (!id || !credentialsCurrent() || !coreEditable || capa?.status !== "D7_PREVENTION") return;
+    const request = requests.begin();
     setD7SkipDialogOpen(false);
 
     const globalReason = (d7SkipReasons["__global__"] || "").trim();
@@ -589,56 +672,92 @@ export default function CAPADetailPage() {
       const updated = await advanceCAPA(id, {
         target_state: "D7_COMPLETED",
         d7_skip_reasons: skipReasonsList.length > 0 ? skipReasonsList : undefined,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       setCapa(updated);
       message.success(t("messages.advanceSuccess", "已推进到下一步"));
       setD7SkipReasons({});
       setD7UnconfirmedItems([]);
     } catch (e: unknown) {
+      if (!request.current()) return;
       reportAdvanceError(e);
-    }
+    } finally { request.finish(); }
   };
 
-  const handleApprove = async () => {
-    if (!id) return;
+  const queryDecisionState = async () => {
+    const request = requests.begin();
     try {
-      const updated = await advanceCAPA(id, { target_state: "D8_CLOSURE" });
-      setCapa(updated);
-      message.success(t("messages.approveSuccess", "已审批关闭"));
-    } catch (e: unknown) {
-      reportAdvanceError(e);
+      const actual = await getCAPA(id!, request.signal);
+      if (!request.current()) return;
+      setCapa(actual);
+      // Even if the server is still pending, only an explicit material reload can supply new expectations.
+    } catch {
+      if (request.current()) { setCapa(null); onOutcomeReview(null); }
+    } finally { request.finish(); }
+  };
+
+  const decideOutcome = async (target_state: "D8_CLOSURE" | "D7_PREVENTION") => {
+    const review = outcomeRef.current;
+    if (!id || !credentialsCurrent() || decisionLock.current || !decisionReady || !review
+      || review !== outcomeReview || !review.review_round_id || (target_state === "D7_PREVENTION" && !rejectReason.trim())) return;
+    const reason = rejectReason.trim();
+    decisionLock.current = true; setDecisionBusy(true);
+    // Consume the seen token once. Never silently reread and auto-submit after uncertainty/conflict.
+    onOutcomeReview(null); setOutcomeWithdrawn(true); setDecisionNotice("");
+    const request = requests.begin();
+    try {
+      const updated = await advanceCAPA(id, {
+        target_state,
+        expected_outcome_revision: review.revision,
+        expected_review_round_id: review.review_round_id,
+        ...(target_state === "D7_PREVENTION" ? { reject_reason: reason } : {}),
+      }, request.signal);
+      if (!request.current()) return;
+      setCapa(updated); setOutcomeWithdrawn(false);
+      message.success(t(target_state === "D8_CLOSURE" ? "messages.approveSuccess" : "messages.rejectSuccess"));
+    } catch (e) {
+      if (!request.current()) return;
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if ([401, 403, 404].includes(status ?? 0)) {
+        requests.invalidate(); setCapa(null); onOutcomeReview(null);
+        message.error(t("outcome.denied"));
+      } else {
+        setDecisionNotice(t(status === 409 ? "outcome.conflict" : "outcome.uncertain"));
+        reportAdvanceError(e);
+        // A timeout may mean the decision committed. Query state, never replay the POST.
+        await queryDecisionState();
+        if (!request.current()) return;
+      }
+    } finally {
+      if (request.current()) { decisionLock.current = false; setDecisionBusy(false); }
+      request.finish();
     }
   };
+  const handleApprove = () => decideOutcome("D8_CLOSURE");
 
   const handleArchive = async () => {
-    if (!id) return;
+    if (!id || !credentialsCurrent() || capa?.status !== "D8_CLOSURE" || !canApprove("capa")) return;
+    const request = requests.begin();
     try {
-      const updated = await advanceCAPA(id, {});  // target_state 缺省 → ARCHIVED（线性）
+      const updated = await advanceCAPA(id, {}, request.signal);  // target_state 缺省 → ARCHIVED（线性）
+      if (!request.current()) return;
       setCapa(updated);
       message.success(t("messages.archiveSuccess", "已归档"));
     } catch (e: unknown) {
+      if (!request.current()) return;
       reportAdvanceError(e);
-    }
+    } finally { request.finish(); }
   };
 
-  const handleRejectSubmit = async () => {
-    if (!id || !rejectReason.trim()) return;
-    try {
-      const updated = await advanceCAPA(id, { target_state: "D7_PREVENTION", reject_reason: rejectReason.trim() });
-      setCapa(updated);
-      setRejectDialogOpen(false);
-      setRejectReason("");
-      message.success(t("messages.rejectSuccess", "已驳回"));
-    } catch (e: unknown) {
-      reportAdvanceError(e);
-    }
-  };
+  const handleRejectSubmit = () => decideOutcome("D7_PREVENTION");
 
   const handleGeneratePpt = async () => {
-    if (!capa) return;
+    if (!capa || !credentialsCurrent()) return;
+    const request = requests.begin();
     setPptLoading(true);
     try {
-      const { reviewStatus, reviewRounds, exportId } = await generatePpt(capa.report_id);
+      const { reviewStatus, reviewRounds, exportId } = await generatePpt(capa.report_id, request.signal);
+      if (!request.current()) return;
       if (reviewStatus === "skipped") {
         message.warning(t("capa:ppt.llmNotConfigured"));
       } else if (reviewStatus === "needs_review") {
@@ -647,27 +766,33 @@ export default function CAPADetailPage() {
           ? t("capa:ppt.needsReview", { rounds: reviewRounds })
           : t("capa:ppt.needsReviewRuleIssues"));
         if (exportId) {
-          const { reviewReport: rr } = await getPptExportReviewReport(capa.report_id, exportId);
+          const { reviewReport: rr } = await getPptExportReviewReport(capa.report_id, exportId, request.signal);
+          if (!request.current()) return;
           setReviewReport(rr);
         }
       } else {
         message.success(t("capa:ppt.generated", { rounds: reviewRounds }));
       }
     } catch {
+      if (!request.current()) return;
       message.error(t("capa:ppt.generateFailed"));
     } finally {
-      setPptLoading(false);
+      if (request.current()) setPptLoading(false);
+      request.finish();
     }
   };
 
   const handleLinkFMEA = async (fmeaId: string) => {
-    if (!id) return;
+    if (!id || !credentialsCurrent() || !coreEditable || !mayEditField("fmea_ref_id")) return;
+    const request = requests.begin();
     try {
-      const updated = await linkFMEA(id, fmeaId);
+      const updated = await linkFMEA(id, fmeaId, request.signal);
+      if (!request.current()) return;
       setCapa(updated);
       setLinkModal(false);
       message.success(t("messages.linkFMEASuccess", "已关联 FMEA"));
-    } catch { message.error(t("messages.linkFMEAFailed", "关联失败")); }
+    } catch { if (request.current()) message.error(t("messages.linkFMEAFailed", "关联失败")); }
+    finally { request.finish(); }
   };
 
   const buildScarDescriptionPrefill = (report: CAPAReport) => {
@@ -679,7 +804,8 @@ export default function CAPADetailPage() {
   };
 
   const openScarModal = async () => {
-    if (!capa) return;
+    if (!capa || !credentialsCurrent() || !coreEditable) return;
+    const request = requests.begin();
     scarForm.setFieldsValue({
       supplier_id: capa.supplier_id || undefined,
       description: buildScarDescriptionPrefill(capa),
@@ -689,11 +815,12 @@ export default function CAPADetailPage() {
     });
     setScarModalOpen(true);
     try {
-      const res = await listCapaSupplierOptions({ page_size: 50 });
+      const res = await listCapaSupplierOptions({ page_size: 50 }, request.signal);
+      if (!request.current()) return;
       setSuppliers(res.items);
     } catch {
       // keep empty list; user can still search
-    }
+    } finally { request.finish(); }
   };
 
   const supplierEditable =
@@ -705,26 +832,31 @@ export default function CAPADetailPage() {
     !capa?.supplier_risk_input;
 
   const handleSupplierChange = async (supplierId: string | null) => {
-    if (!id) return;
+    if (!id || !credentialsCurrent() || !supplierEditable || !coreEditable) return;
+    const request = requests.begin();
     try {
-      const updated = await updateCAPA(id, { supplier_id: supplierId });
+      const updated = await updateCAPA(id, { supplier_id: supplierId }, request.signal);
+      if (!request.current()) return;
       setCapa(updated);
       // If backend froze (input already exists), reflect lock for subsequent edits
       if (updated.supplier_risk_input) setSupplierLocked(true);
       message.success(t("messages.supplierSaved", "供应商已保存"));
     } catch (err: any) {
+      if (!request.current()) return;
       const detail = err?.response?.data?.detail;
       if (typeof detail === "string" && detail.includes("供应商风险输入")) {
         setSupplierLocked(true);
       }
       message.error(detail || t("messages.supplierSaveFailed", "供应商保存失败"));
-    }
+    } finally { request.finish(); }
   };
 
   const handleTriggerScar = async () => {
-    if (!id) return;
+    if (!id || !credentialsCurrent() || !coreEditable) return;
+    const request = requests.begin();
     try {
       const values = await scarForm.validateFields();
+      if (!request.current()) return;
       setScarSubmitting(true);
       await triggerScar(id, {
         supplier_id: values.supplier_id,
@@ -734,17 +866,21 @@ export default function CAPADetailPage() {
           ? (values.due_date as { format: (f: string) => string }).format("YYYY-MM-DD")
           : undefined,
         affected_batches: values.affected_batches || [],
-      });
-      const updated = await getCAPA(id);
+      }, request.signal);
+      if (!request.current()) return;
+      const updated = await getCAPA(id, request.signal);
+      if (!request.current()) return;
       setCapa(updated);
       setScarModalOpen(false);
       scarForm.resetFields();
       message.success(t("messages.triggerScarSuccess", "SCAR 发起成功"));
     } catch (err: any) {
+      if (!request.current()) return;
       if (err?.errorFields) return; // form validation
       message.error(t("messages.triggerScarFailed", "SCAR 发起失败"));
     } finally {
-      setScarSubmitting(false);
+      if (request.current()) setScarSubmitting(false);
+      request.finish();
     }
   };
 
@@ -762,19 +898,19 @@ export default function CAPADetailPage() {
         </Tag>
       )}
       <RelatedFMEALink fmeaRefId={capa.fmea_ref_id ?? null} fmeaNodeId={capa.fmea_node_id ?? null} />
-      {canEdit('capa') && (
+      {coreEditable && (
         <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
           {capa.fmea_ref_id ? t("fmea.changeFMEA", "更换FMEA关联") : t("fmea.linkFMEA", "关联FMEA")}
         </Button>
       )}
       {capa.status !== "ARCHIVED" && canEdit('capa') && (
         <>
-          {capa.status === "D8_APPROVAL_PENDING" && canApprove('capa') && (
+          {capa.status === "D8_APPROVAL_PENDING" && canApprove('capa') && (decisionReady || decisionBusy) && (
             <>
-              <Button type="primary" icon={<CheckOutlined />} onClick={handleApprove} data-e2e="capa-approve">
+              <Button type="primary" disabled={!decisionReady} loading={decisionBusy} icon={<CheckOutlined />} onClick={handleApprove} data-e2e="capa-approve">
                 {t("reject.approve", "审批关闭")}
               </Button>
-              <Button danger icon={<UndoOutlined />} onClick={() => setRejectDialogOpen(true)} data-e2e="capa-reject">
+              <Button danger disabled={!decisionReady} icon={<UndoOutlined />} onClick={() => { if (decisionReady) setRejectDialogOpen(true); }} data-e2e="capa-reject">
                 {t("reject.confirm", "驳回")}
               </Button>
             </>
@@ -815,8 +951,20 @@ export default function CAPADetailPage() {
       <Steps current={currentStep} items={stepItems} style={{ marginBottom: 24 }} />
 
       <Row gutter={16}>
-        <Col span={16}>
-          <DataCard title={t("detail.currentStepDetails", "当前步骤详情")}>
+        <Col xs={24} lg={16}>
+          {["D8_APPROVAL_PENDING", "D8_CLOSURE", "ARCHIVED"].includes(capa.status) && (
+            outcomeWithdrawn ? <DataCard title={t("outcome.title")}>
+              <Alert type="warning" showIcon message={decisionNotice || t("outcome.unavailable")} />
+              <Button disabled={decisionBusy} onClick={async () => {
+                const request = requests.begin();
+                await queryDecisionState();
+                if (!request.current()) return;
+                setOutcomeWithdrawn(false); setDecisionNotice(""); request.finish();
+              }}>{t("outcome.reload")}</Button>
+            </DataCard> : <CapaOutcomeReviewPanel reportId={id!} status={capa.status} canApprove={canApprove("capa")}
+              credentialIdentity={credentialIdentity} onReviewChange={onOutcomeReview} />
+          )}
+          {capa.status !== "D8_APPROVAL_PENDING" && <DataCard title={t("detail.currentStepDetails", "当前步骤详情")}>
             {capa.status === "D1_TEAM" && (
               <div>
                 <Table
@@ -910,7 +1058,7 @@ export default function CAPADetailPage() {
 
             {capa.status === "D3_INTERIM" && (
               <>
-                <D3ContainmentPanel capa={capa} canEdit={canEdit('capa')} />
+                <D3ContainmentPanel capa={capa} canEdit={coreEditable} />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d3", t("fields.d3Label", "临时遏制措施"))}>
                     <TextArea
@@ -929,14 +1077,14 @@ export default function CAPADetailPage() {
               <>
                 <D4RecPanel
                   capaId={id!}
-                  canAdopt={canEdit('capa')}
+                  canAdopt={coreEditable}
                   beforeAdopt={async () => {
                     await handleUpdate("d4_root_cause", localData.d4_root_cause, true);
                   }}
                   onAdopted={() => refreshCapa()}
                 />
                 <D4TextRedactionPreview reportId={id!} />
-                <D4VerificationCard capaId={id!} canEdit={canEdit('capa')} currentRootCause={localData.d4_root_cause} fmeaRefId={capa.fmea_ref_id ?? null} />
+                <D4VerificationCard capaId={id!} canEdit={coreEditable} currentRootCause={localData.d4_root_cause} fmeaRefId={capa.fmea_ref_id ?? null} />
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label", "根因分析 (5Why / 鱼骨图)"))}>
                     <TextArea
@@ -955,7 +1103,7 @@ export default function CAPADetailPage() {
               <>
                 <D5RecPanel
                   capaId={id!}
-                  canAdopt={canEdit('capa')}
+                  canAdopt={coreEditable}
                   beforeAdopt={async () => {
                     await handleUpdate("d5_correction", localData.d5_correction, true);
                   }}
@@ -989,7 +1137,7 @@ export default function CAPADetailPage() {
               </Form>
             )}
 
-            {["D7_PREVENTION", "D7_COMPLETED", "D8_GATE_PENDING", "D8_APPROVAL_PENDING"].includes(capa.status) && (
+            {["D7_PREVENTION", "D7_COMPLETED", "D8_GATE_PENDING"].includes(capa.status) && (
               <>
                 <Form layout="vertical">
                   <Form.Item label={renderLabelWithDraft("d7", t("fields.d7Label", "预防复发措施"))}>
@@ -1026,10 +1174,11 @@ export default function CAPADetailPage() {
 
             {capa.status === "D8_CLOSURE" && (
               <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d8", t("fields.d8Label", "关闭确认"))}>
+                <Form.Item label={t("outcome.supplement")}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
+                    data-e2e="capa-outcome-supplement-edit"
                     value={localData.d8_closure || ""}
                     onChange={(e) => setLocalData({ ...localData, d8_closure: e.target.value })}
                     onBlur={() => handleUpdate("d8_closure", localData.d8_closure)}
@@ -1039,10 +1188,10 @@ export default function CAPADetailPage() {
             )}
 
             {capa.status === "ARCHIVED" && <Empty description={t("messages.reportArchived", "报告已归档")} />}
-          </DataCard>
+          </DataCard>}
         </Col>
 
-        <Col span={8}>
+        <Col xs={24} lg={8}>
           <DataCard title={t("detail.reportInfo", "报告信息")}>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.documentNo", "编号")}:</Text> <span style={{ fontFamily: "var(--qf-font-mono)" }}>{capa.document_no}</span></p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.status", "状态")}:</Text> <span data-e2e="capa-status">{capa.status}</span></p>
@@ -1063,25 +1212,28 @@ export default function CAPADetailPage() {
                   value={capa.supplier_id || undefined}
                   onSearch={async (q) => {
                     const seq = ++supplierSearchSeq.current;
+                    const request = requests.begin();
                     try {
                       const res = await listCapaSupplierOptions({
                         page_size: 50,
                         search: q?.trim() || undefined,
-                      });
-                      if (seq !== supplierSearchSeq.current) return;
+                      }, request.signal);
+                      if (!request.current() || seq !== supplierSearchSeq.current) return;
                       setSuppliers(res.items);
                     } catch {
                       /* leave existing options */
-                    }
+                    } finally { request.finish(); }
                   }}
                   onFocus={async () => {
                     if (suppliers.length === 0) {
+                      const request = requests.begin();
                       try {
-                        const res = await listCapaSupplierOptions({ page_size: 50 });
+                        const res = await listCapaSupplierOptions({ page_size: 50 }, request.signal);
+                        if (!request.current()) return;
                         setSuppliers(res.items);
                       } catch {
                         /* leave empty */
-                      }
+                      } finally { request.finish(); }
                     }
                   }}
                   onChange={(val) => handleSupplierChange(val ?? null)}
@@ -1118,8 +1270,8 @@ export default function CAPADetailPage() {
                 >
                   {capa.linked_scar.scar_no} <Tag>{capa.linked_scar.status}</Tag>
                 </a>
-              ) : canEdit("capa") &&
-                !["D1_TEAM", "D2_DESCRIPTION", "ARCHIVED"].includes(capa.status) ? (
+              ) : coreEditable &&
+                !["D1_TEAM", "D2_DESCRIPTION"].includes(capa.status) ? (
                 <Button data-e2e="capa-trigger-scar" size="small" onClick={openScarModal}>
                   {t("actions.triggerScar", "发起 SCAR")}
                 </Button>
@@ -1138,14 +1290,17 @@ export default function CAPADetailPage() {
                   input={capa.supplier_risk_input}
                   canEdit={canEdit("capa") && canEdit("supplier_risk")}
                   onConfirm={async (confirmed) => {
-                    if (!id) return;
+                    if (!id || !credentialsCurrent()) return;
+                    const request = requests.begin();
                     try {
-                      await confirmRepeat(id, confirmed);
+                      await confirmRepeat(id, confirmed, request.signal);
+                      if (!request.current()) return;
                       await refreshCapa();
+                      if (!request.current()) return;
                       message.success(t("riskInput.confirmSuccess", "复发确认已保存"));
                     } catch {
-                      message.error(t("riskInput.confirmFailed", "复发确认失败"));
-                    }
+                      if (request.current()) message.error(t("riskInput.confirmFailed", "复发确认失败"));
+                    } finally { request.finish(); }
                   }}
                 />
               </div>
@@ -1266,7 +1421,7 @@ export default function CAPADetailPage() {
             </div>
           )}
 
-          {linkModal && canEdit('capa') && (
+          {linkModal && coreEditable && (
             <DataCard title={t("fmea.selectTitle", "选择关联的 FMEA")} style={{ marginTop: 16 }}>
               <Select
                 showSearch
@@ -1289,7 +1444,7 @@ export default function CAPADetailPage() {
 
       <Modal
         title={t("d7.skipDialogTitle", "⚠️ 以下 FMEA 节点尚未确认")}
-        open={d7SkipDialogOpen}
+        open={d7SkipDialogOpen && coreEditable && capa.status === "D7_PREVENTION"}
         onOk={handleD7SkipConfirm}
         onCancel={() => setD7SkipDialogOpen(false)}
         okText={t("d7.skipConfirm", "确认跳过并推进")}
@@ -1322,7 +1477,8 @@ export default function CAPADetailPage() {
         onCancel={() => { setRejectDialogOpen(false); setRejectReason(""); }}
         onOk={handleRejectSubmit}
         okText={t("reject.confirm", "驳回")}
-        okButtonProps={{ danger: true, disabled: !rejectReason.trim() }}
+        confirmLoading={decisionBusy}
+        okButtonProps={{ danger: true, disabled: !decisionReady || !rejectReason.trim() }}
         cancelText={tc("actions.cancel", "取消")}
       >
         <Input.TextArea
@@ -1336,7 +1492,7 @@ export default function CAPADetailPage() {
 
       <Modal
         title={t("scar.modalTitle", "从 8D 发起 SCAR")}
-        open={scarModalOpen}
+        open={scarModalOpen && coreEditable}
         onCancel={() => {
           setScarModalOpen(false);
           scarForm.resetFields();
@@ -1359,8 +1515,11 @@ export default function CAPADetailPage() {
               filterOption={false}
               placeholder={t("scar.supplier", "供应商")}
               onSearch={async (search) => {
-                const res = await listCapaSupplierOptions({ search, page_size: 20 });
-                setSuppliers(res.items);
+                const request = requests.begin();
+                try {
+                  const res = await listCapaSupplierOptions({ search, page_size: 20 }, request.signal);
+                  if (request.current()) setSuppliers(res.items);
+                } catch { /* retain options */ } finally { request.finish(); }
               }}
               options={suppliers.map((s) => ({
                 value: s.supplier_id,
@@ -1408,7 +1567,7 @@ export default function CAPADetailPage() {
         )}
       </Modal>
 
-      <AIDraftPreview
+      {coreEditable && <AIDraftPreview
         open={previewOpen}
         content={draft?.content || ""}
         onClose={() => {
@@ -1417,7 +1576,7 @@ export default function CAPADetailPage() {
         }}
         onReplace={handleReplace}
         onAppend={handleAppend}
-      />
+      />}
       <LessonsLearnedModal
         open={lessonsModalOpen}
         loading={lessonsLoading}

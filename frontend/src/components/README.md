@@ -18,6 +18,18 @@ private DOM immediately. Session/target/scope epochs prevent late response
 publication. No business apply/save action, storage, model or plugin delivery.
 See [employee preview guide](../../../docs/development/capa-d4-text-preview.md).
 
+`capa/CapaOutcomeReviewPanel.tsx` is the production current-report D8 outcome
+reader for pending approval, closed and archived reports. It renders the complete
+review DTO as escaped text/metadata (no evidence extraction, external preview or
+download), including controlled FMEA/control-plan versions and honest legacy /
+unverifiable labels. Formal report materials have no preview expiry or browser
+persistence. A local epoch/controller registry withdraws materials and decision
+expectations before reload and on identity/scope changes or failed reads.
+`CAPADetailPage` alone consumes the current panel's revision/round for one explicit
+approve/reject path. Closed core editing is frozen even for admins; the separately
+labelled unreviewed supplement remains editable with EDIT, and archive freezes it.
+Existing D4 preview/attachment restrictions and early D4–D6 workflows are unchanged.
+
 ## File Organisation
 
 `layout/` and `shared/` are cross-cutting; every other subdirectory is

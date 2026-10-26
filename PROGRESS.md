@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-26 CAPA 结果审核 Task 5 本地实现完成**：生产 D8 集中审核面板、当前 revision/round 唯一决定入口、身份/范围请求隔离与终态核心只读已实现；最终受影响前端 **25 files /210 passed**、前端 tsc、生产 build、完整 E2E tsc 均 exit 0。尚待控制方独立复核；真实浏览器/provider 仍属 Task 7。本次完整报告见文末同名 Task 5 章节，不将单元 mock 当作真实验收，不 push/合并/部署。
+
 > **2026-10-25 CAPA 结果审核 Task 1–4 已验收，准备 Task 5**：Task 4 实际 D8 批准/驳回版本绑定、当前权限/来源/事务锁与完整五键生产回执已通过独立规格及质量复核（代码 `2c3d212b`）。最终受影响聚焦回归 **662 passed /3 既有 warnings /exit 0**；两个升级的 E2E API 调用方类型检查通过。下一任务为生产界面，真实 provider/浏览器与最终完整冻结尚未完成。六个固定种子报告的 synthetic passed gate 仅是测试前置，不能作为真实门禁成功证据。非阻塞的驳回来源等待覆盖建议已进入最终复核台账；不 push/合并/部署。下方 Task 3/4 记录为历史实现与验证过程，以本条当前状态为准。
 
 > **2026-10-25 CAPA 结果审核 Task 1–3 已验收，准备 Task 4**：Task 3 受控读取、来源/快照/完整性预算和审核版本已通过独立规格/质量复核（最终代码 `894349fa`，用户批准的规则修订 `cbd4ee3a`）。I1–I4 首轮修正全部解决，最终完整受影响聚焦回归 **242 passed /3 既有 warnings /exit 0**。旧待审批兼容轮次不含 updated_at，正常重提使用新入审计 ID；GET 不写数据。下一任务为实际 D8 决定绑定及完整五键生产回执，不能把消费测试当作审批写入已实现。下列验证/修正条目保留历史过程，以本条当前验收状态为准；不 push/合并/部署。
@@ -641,3 +643,178 @@ Updated old callers/fixtures:
   acceptance. Existing production frontend closes must fail closed until upgraded in Task 5; no missing-version legacy
   escape was added. This run is not presented as real LLM, Chromium or release acceptance. Full check belongs to Task 8.
 - Local commit subject: `feat(capa): bind D8 decisions to reviewed outcome versions`. No push/merge/deploy.
+
+
+## Task 5 — Production D8 outcome review panel: implementation and verification report (2026-10-26)
+
+### Scope, authority and completion
+
+- **DONE locally.** Implemented Task 5 only on BASE `f89b6806`, using reviewed writer `2c3d212b`,
+  reader `894349fa` and source/material guard `acc54804`. Local task commit was explicitly authorized.
+  Prior backend acceptance is not presented as new frontend evidence; independent Task 5 review remains the controller's gate.
+- Read only the exact Task 5 brief/context, current PROGRESS/decisions and focused production/test files, not the whole plan.
+  CodeGraph context was queried first; its narrow/stale results lacked current outcome symbols, so precise known-file reads followed.
+  No index repair, other task implementation, backend DB/provider/infrastructure/migration work, full `make check`, package
+  installation, main-checkout edit, push, merge or deployment was performed.
+- Loaded frontend-design guidance within the existing UI scope: Chinese/English locale keys, Ant Design, PageShell/DataCard,
+  theme variables and responsive existing columns; no font, dependency or visual redesign. Report uses this existing file because
+  this session prohibits standalone report Markdown, as explicitly permitted by the Task 5 context.
+
+### Actual reviewed contract and implementation
+
+- Inspected `backend/app/schemas/capa_outcome_review.py`, `backend/app/schemas/capa_verification.py`, production
+  `backend/app/api/capa.py`, and the reader/source tests. TS mirrors `capa.outcome-review.v1`, full core/Verification/D7 action
+  collections, exact `{module, object_id, version_id, sha256}` references, exact decision fields and the separate supplement.
+  The existing reused D7 type now includes the actual response `status`. The reviewed verification source dictionary is
+  **`{fmea_id, cause_node_id}`**, not an invented object/version reference; immutable versions are in `documents`.
+- Added `getCapaOutcomeReview(id, signal?)`; advance forwards the current seen revision/round, rejection reason and optional
+  signal. No backend compatibility bypass, new policy, candidate approval or per-step D4/D5/D6 approval was introduced.
+- The panel renders only pending approval/closed/archived. It shows implemented D5 measures, D6 result text, verification
+  method/conclusion and complete escaped evidence/source metadata, D7 actual action/status and before/after controls, both
+  FMEA and PLANNING controlled source versions/hashes, decision history and explicit legacy/unverifiable labels.
+  D7 pending is never relabelled verified; nonempty D6 never becomes an effectiveness badge.
+- Read completeness checks reject malformed/partial DTOs, unknown verification source shapes, mismatched report/status and
+  missing required referenced documents. Empty documents remain valid for genuinely unreferenced materials. Authorization,
+  source-version integrity and current authority still belong independently to the backend.
+- Evidence is text/JSON metadata only: no extraction, external URL preview/link execution, HTML/Markdown execution or new
+  download. Formal materials have no preview TTL and are not persisted to Zustand/localStorage/sessionStorage/IndexedDB.
+  Existing private D4 preview TTL and attachment behavior were not weakened.
+- Only the successful current panel callback supplies the sole page approval/rejection path. It checks pending status,
+  APPROVE, matching report/current identity, nonnull round, pending binding and no decision. Both decisions consume the token
+  once; rejection uses the existing trimmed nonempty reason. Duplicate clicks are locked synchronously and disabled visually.
+- Before reload the old material/token/reason is cleared. 409 requires explicit reload/review, never silently reading a new
+  revision and approving it. Network uncertainty queries actual report state without replaying the POST. 401/403/404 withdraw
+  the decision/report. Exact outcome-read and advance-POST 401/403 failures reject before Axios refresh/replay; refresh
+  coordination and other private-route guards were left intact.
+- Page/panel local epoch/controller registries cover their concurrent reads and actions. User/permissions, store and actual
+  stored credential, tenant, report/route selection, factory and product-line changes unmount/withdraw the view, abort requests
+  and clear reasons/tokens. Every page/panel awaited result is checked before publication; late success **and** late denial
+  cannot update the new view. Existing draft generation also aborts on replacement/clear/unmount; no private result is cached.
+- Terminal core handlers guard update/replace/append/undo/link before API calls; terminal UI unmounts draft controls immediately
+  (including retained modal content), removes association/core/verification edits even for admin, and keeps closed `d8_closure`
+  editable only with EDIT under the explicit unreviewed label. Archived supplement is frozen. Early D4/D5/D6 editing and D4
+  verification permissions remain writable under their existing rules. Supplier-risk/lateral/knowledge behavior was not given
+  new review policy; page-owned requests were only cancelled/fenced for identity safety.
+
+### RED/GREEN evidence and self-review corrections
+
+All commands below ran from this workspace's `frontend/` using existing node_modules. Logs are retained in
+`.superpowers/sdd/2026-10-23-capa-outcome-review/` and are private local verification evidence, not task source files.
+The first attempted combined sourcing of `owned-env.sh` was refused by the worktree command verifier before execution;
+frontend-only commands therefore used the identical explicit workspace path and did not need backend environment variables.
+Node **v26.4.0**, npm **12.0.2**, Vitest **4.1.7**, production Vite **5.4.21** were the installed tools.
+
+| Actual command / log | Actual result and interpretation |
+|---|---|
+| `npx vitest run src/api/capa.test.ts src/pages/capa/CAPADetailPage.test.tsx -t 'outcome review contract\|Task 5 reviewed'` → `task5-red.log` | **5 failed, 33 skipped** (selection only). Missing getter, missing forwarded signal and missing actual outcome materials. Initial D7 fixture error was corrected before this retained meaningful RED. |
+| `npx vitest run src/components/capa/CapaOutcomeReviewPanel.test.tsx` → `task5-panel-red.log` | 1 suite failed / no tests because the component did not yet exist. Scaffolding RED only, not a behavioral acceptance claim. |
+| `npx vitest run src/components/capa/CapaOutcomeReviewPanel.test.tsx src/api/capa.test.ts src/pages/capa/CAPADetailPage.test.tsx` → `task5-green1.log` | 50 passed, 2 failed: old assertions/caller fixture still omitted the newly required signal/current review. Separate tsc also exposed `.at` vs project lib and nullable narrowing; corrected without changing target configuration. |
+| `npx vitest run src/pages/capa/CAPADetailPage.test.tsx -t 'Task 5 reviewed'` → `task5-races-red.log` | 18 passed, 3 failed, 24 selected-out. One actual failure: a withdrawn 409 token still left an approval control visible (disabled). Two invalid early recommendation fixtures caused 2 unhandled errors; fixed to actual D4/D5 contracts, not counted as product RED. |
+| Primary four-file run → `task5-green2.log`, then `task5-green3.log` | An intermediate duplicate test variable caused panel transform failure and four legacy assertions needed new cancellation arguments; corrected. Subsequent actual four-file run: **79 passed**, frontend tsc exit 0. No backend fallback or permission assertion relaxation. |
+| `npx vitest run src/components/capa/useAIDraft.test.ts` → `task5-draft-red.log` | **1 failed, 8 passed**: in-flight draft signal was absent on replacement/unmount. Added narrowly scoped cancellation and after-await checks; covered in final GREEN. |
+| Expanded complete affected run → `task5-expanded.log` | 25 files / 195 passed before the final added regressions. This is an intermediate run, not the final count. |
+| `npx vitest run src/components/capa/CapaOutcomeReviewPanel.test.tsx src/pages/capa/CAPADetailPage.test.tsx` → `task5-extra.log` / `task5-extra-green.log` | **2 failed, 68 passed**: real retained Append/Replace modal controls remained during terminal transition. Unmounted the actual draft component immediately; **70 passed** afterward. |
+| `npx vitest run src/components/capa/CapaOutcomeReviewPanel.test.tsx` → `task5-source-red.log` / `task5-source-green.log` | Self-review corrected the initial source fixture to the actual reviewed `{fmea_id,cause_node_id}` shape and added negative cases. **2 failed, 16 passed** showed missing required refs/unknown source shape were accepted; runtime completeness checks fixed both. **18 passed** afterward. |
+| Panel + detail + locale run → `task5-self-review.log` | **3 files / 76 passed**, tsc exit 0, after final terminal, successful verified-decision and bilingual parity assertions. |
+
+The primary four-file command above is exactly:
+
+```bash
+npx vitest run src/components/capa/CapaOutcomeReviewPanel.test.tsx src/api/capa.test.ts src/pages/capa/CAPADetailPage.test.tsx src/api/client.agentTasks.test.ts
+```
+
+Self-review covered the actual Python-to-TS field contract, exact source shape, no-source legitimate case, revision/round
+provenance, single decision route, rejection reason lifecycle, duplicate click lock, post-await checks, every page-owned
+request/controller, stale success/denial, terminal state controls and modal retention, unchanged preview guards, escaped
+metadata, no private persistence, locales and documentation. No unresolved Task 5 defect was identified by that self-review.
+No external review or real browser/provider success is inferred from these mocked transport unit tests.
+
+### Final verification after the LAST code/test/support change
+
+```bash
+cd /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend
+npx vitest run src/components/capa src/pages/capa/CAPADetailPage.test.tsx src/api src/locales/capa-ppt.i18n.test.ts
+npx tsc --noEmit
+npm run build
+npx tsc --noEmit -p tsconfig.e2e.json
+```
+
+Actual final output:
+
+```text
+Test Files  25 passed (25)
+     Tests  210 passed (210)
+Start at 22:55:31
+Duration 11.78s
+VITEST_EXIT=0
+
+npm notice run 'tsc' --noEmit
+TSC_EXIT=0                         # no compiler diagnostics
+
+npm notice run tsc -b && vite build
+vite v5.4.21 building for production...
+6847 modules transformed.
+CAPADetailPage chunk: 98.55 kB (gzip 29.63 kB)
+built in 6.52s
+BUILD_EXIT=0
+
+npm notice run 'tsc' --noEmit -p tsconfig.e2e.json
+E2E_TSC_EXIT=0                     # no compiler diagnostics
+```
+
+Final logs: `task5-final-vitest.log`, `task5-final-tsc.log`, `task5-final-build.log`, `task5-final-e2e-tsc.log` in the
+private verification directory above. Final selection has **0 failures, 0 skips, 0 xfails, 0 xpasses and no unhandled errors**.
+Existing diagnostics remain visible: Vitest's Vite/react-babel esbuild→oxc deprecation notices, Node experimental localStorage
+notice and jsdom pseudo-element getComputedStyle messages; build reports the existing mixed static/dynamic `api/version.ts`
+import chunk warning. None was hidden, converted to a skip or fixed by unrelated configuration changes. `git diff --check`
+also passed. No historical backend/full-suite baseline is counted here.
+
+Coverage includes complete real DTO values, D7 pending vs verified, both source modules/version/hash, escaped malicious-looking
+metadata and no arbitrary URL elements, no-reference reports, legacy/unverifiable labels, incomplete/mismatched/source-missing
+reads, current approve/reject expectation parameters, 401/403/404/409, explicit new-version review after conflict, timeout actual
+state lookup without POST replay, same-document identity/credential transitions, every concurrent initial view controller,
+panel/decision close and aborts, stale success/denial, terminal/admin replacement/append/undo/link/verification controls,
+closed supplement preserving the core binding, archived freeze, successful verified decision display and still-writable D4/5/6.
+The formal-material test advances beyond 30 seconds and checks no storage writes. Existing D4 preview tests are included.
+
+### Exact changed files
+
+All task files, including this report and existing README/permission documentation sync:
+
+```text
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/PROGRESS.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/docs/permissions.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/README.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/capa.test.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/capa.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/capaDraft.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/client.agentTasks.test.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/client.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/fmea.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/knowledge.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/README.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/CapaOutcomeReviewPanel.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/CapaOutcomeReviewPanel.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/useCapaViewRequests.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/useAIDraft.test.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/useAIDraft.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/locales/capa-ppt.i18n.test.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/locales/en-US/capa.json
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/locales/zh-CN/capa.json
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/pages/capa/CAPADetailPage.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/pages/capa/CAPADetailPage.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/types/capaOutcomeReview.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/types/index.ts
+```
+
+### Remaining limits and next steps
+
+- These are frontend unit/component/transport tests and static/build checks. No actual browser, backend HTTP transaction,
+  database, provider, LLM, production report or live permissions acceptance is claimed. **Task 7** remains the real browser/
+  provider acceptance; the final full-system freeze/check remains its separately authorized task. No infrastructure was touched.
+- Ordinary formal material reads do not inherit candidate retention/expiry. Local abort does not roll back a POST already accepted
+  by the backend; uncertainty deliberately queries actual state and requires explicit material review before another decision.
+- Existing toolchain/build warnings above are retained, not new unresolved Task 5 functionality blockers.
+- Next: controller's independent Task 5 review, then only the separately authorized next task. No Task 6/7/8 implementation,
+  candidate workflow, global auth/state-machine redesign or new self-approval policy was started.
+- Authorized local commit subject: `feat(capa): add consolidated D8 outcome review panel`. No push/merge/deploy.

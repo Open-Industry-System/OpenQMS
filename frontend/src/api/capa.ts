@@ -1,3 +1,4 @@
+import type { CapaOutcomeReview } from "../types/capaOutcomeReview";
 import client from "./client";
 import { message } from "antd";
 import type {
@@ -30,8 +31,8 @@ export async function listCAPAs(params: {
   return resp.data;
 }
 
-export async function getCAPA(id: string): Promise<CAPAReport> {
-  const resp = await client.get(`/capa/${id}`);
+export async function getCAPA(id: string, signal?: AbortSignal): Promise<CAPAReport> {
+  const resp = await client.get(`/capa/${id}`, { signal });
   return resp.data;
 }
 
@@ -44,18 +45,20 @@ export async function triggerScar(
     due_date?: string | null;
     affected_batches?: string[];
   },
+  signal?: AbortSignal,
 ): Promise<SupplierSCAR> {
-  const resp = await client.post(`/capa/${id}/trigger-scar`, body);
+  const resp = await client.post(`/capa/${id}/trigger-scar`, body, { signal });
   return resp.data;
 }
 
 export async function confirmRepeat(
   reportId: string,
   repeatConfirmed: boolean,
+  signal?: AbortSignal,
 ): Promise<CAPAReport> {
   const resp = await client.post(`/capa/${reportId}/confirm-repeat`, {
     repeat_confirmed: repeatConfirmed,
-  });
+  }, { signal });
   return resp.data;
 }
 
@@ -63,13 +66,13 @@ export async function listCapaSupplierOptions(params?: {
   page?: number;
   page_size?: number;
   search?: string;
-}): Promise<{
+}, signal?: AbortSignal): Promise<{
   items: Array<{ supplier_id: string; supplier_no: string; name: string; status: string }>;
   total: number;
   page: number;
   page_size: number;
 }> {
-  const resp = await client.get("/capa/supplier-options", { params });
+  const resp = await client.get("/capa/supplier-options", { params, signal });
   return resp.data;
 }
 
@@ -87,29 +90,32 @@ export async function createCAPA(data: {
 
 export async function updateCAPA(
   id: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<CAPAReport> {
-  const resp = await client.put(`/capa/${id}`, data);
+  const resp = await client.put(`/capa/${id}`, data, { signal });
   return resp.data;
 }
 
 export interface AdvanceRequest {
   target_state?: string;
   reject_reason?: string;
+  expected_outcome_revision?: string;
+  expected_review_round_id?: string;
   d7_skip_reasons?: Array<{ fmea_id: string | null; node_id: string; reason: string }>;
 }
 
 export interface CAPAAdvanceResponse { capa: CAPAReport; warning: string | null }
 
-export async function advanceCAPA(id: string, req: AdvanceRequest = {}): Promise<CAPAReport> {
-  const r = (await client.post(`/capa/${id}/advance`, req)).data as CAPAAdvanceResponse;
-  if (r.warning) message.warning(r.warning);
+export async function advanceCAPA(id: string, req: AdvanceRequest = {}, signal?: AbortSignal): Promise<CAPAReport> {
+  const r = (await client.post(`/capa/${id}/advance`, req, { signal })).data as CAPAAdvanceResponse;
+  if (r.warning && !signal?.aborted) message.warning(r.warning);
   return r.capa;
 }
 
 /** Manual knowledge resink for D8_CLOSURE / ARCHIVED CAPA (US-E2E-01.8). */
-export async function sinkKnowledge(capaId: string): Promise<SinkKnowledgeResponse> {
-  const resp = await client.post(`/capa/${capaId}/sink-knowledge`);
+export async function sinkKnowledge(capaId: string, signal?: AbortSignal): Promise<SinkKnowledgeResponse> {
+  const resp = await client.post(`/capa/${capaId}/sink-knowledge`, undefined, { signal });
   return resp.data;
 }
 
@@ -167,15 +173,17 @@ export function formatCapaAdvanceError(
 export async function decideLateralDiffusion(
   id: string,
   body: { decision: "notify" | "skip"; skip_reason?: string },
+  signal?: AbortSignal,
 ): Promise<import("../types").LateralDiffusionProjection> {
-  const resp = await client.post(`/capa/${id}/lateral-diffusion/decide`, body);
+  const resp = await client.post(`/capa/${id}/lateral-diffusion/decide`, body, { signal });
   return resp.data;
 }
 
 export async function rerunLateralDiffusion(
   id: string,
+  signal?: AbortSignal,
 ): Promise<import("../types").LateralDiffusionProjection> {
-  const resp = await client.post(`/capa/${id}/lateral-diffusion/rerun`);
+  const resp = await client.post(`/capa/${id}/lateral-diffusion/rerun`, undefined, { signal });
   return resp.data;
 }
 
@@ -208,9 +216,9 @@ export async function getD5Recommendations(id: string): Promise<D5Recommendation
   }
 }
 
-export async function linkFMEA(id: string, fmea_id: string): Promise<CAPAReport> {
+export async function linkFMEA(id: string, fmea_id: string, signal?: AbortSignal): Promise<CAPAReport> {
   const resp = await client.post(`/capa/${id}/link-fmea`, null, {
-    params: { fmea_id },
+    params: { fmea_id }, signal,
   });
   return resp.data;
 }
@@ -246,11 +254,14 @@ export async function autoFillD7(capaId: string, req: D7AutoFillRequest): Promis
 
 export async function generatePpt(
   reportId: string,
+  signal?: AbortSignal,
 ): Promise<{ reviewStatus: string; reviewRounds: number; exportId: string | null }> {
   const resp = await client.post(`/capa/${reportId}/ppt-export`, {}, {
     responseType: "blob",
+    signal,
     timeout: 120000,
   });
+  if (signal?.aborted) throw new Error("export view invalidated");
   const reviewStatus = resp.headers["x-ppt-review-status"] || "skipped";
   const reviewRounds = parseInt(resp.headers["x-ppt-review-rounds"] || "0", 10);
   const exportId = resp.headers["x-ppt-export-id"] || null;
@@ -271,8 +282,9 @@ export async function generatePpt(
 export async function getPptExportReviewReport(
   reportId: string,
   exportId: string,
+  signal?: AbortSignal,
 ): Promise<{ reviewReport: any }> {
-  const resp = await client.get(`/capa/${reportId}/ppt-exports/${exportId}`);
+  const resp = await client.get(`/capa/${reportId}/ppt-exports/${exportId}`, { signal });
   return { reviewReport: resp.data.review_report };
 }
 
@@ -453,4 +465,8 @@ export async function confirmNoAffected(capaId: string): Promise<{
 export async function getDocGateDecision(capaId: string): Promise<DocGateDecision> {
   const resp = await client.get(`/capa/${capaId}/doc-gate/decision`);
   return resp.data;
+}
+
+export async function getCapaOutcomeReview(id: string, signal?: AbortSignal): Promise<CapaOutcomeReview> {
+  return (await client.get<CapaOutcomeReview>(`/capa/${id}/outcome-review`, { signal })).data;
 }

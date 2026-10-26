@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, configure, act, within } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "antd";
@@ -6,8 +6,12 @@ import { useAuthStore } from "../../store/authStore";
 import * as capaApi from "../../api/capa";
 import * as draftApi from "../../api/capaDraft";
 import * as knowledgeApi from "../../api/knowledge";
+import { useProductLineStore } from "../../store/productLineStore";
+import * as fmeaApi from "../../api/fmea";
 import CAPADetailPage from "./CAPADetailPage";
 
+const route = vi.hoisted(() => ({ id: "test-report-id" }));
+const verificationCard = vi.hoisted(() => vi.fn());
 const agentContext = vi.hoisted(() => ({ value: null as any }));
 vi.mock("../../components/agent/AgentTaskContext", () => ({ useAgentTaskContext: () => agentContext.value }));
 beforeEach(() => { agentContext.value = null; });
@@ -21,7 +25,7 @@ vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual("react-router-dom");
   return {
     ...actual,
-    useParams: () => ({ id: "test-report-id" }),
+    useParams: () => ({ id: route.id }),
     useNavigate: () => mockNavigate,
   };
 });
@@ -32,6 +36,7 @@ vi.mock("../../api/capa", async () => {
   return {
     ...actual,
     getCAPA: vi.fn(),
+    getCapaOutcomeReview: vi.fn(),
     updateCAPA: vi.fn(),
     advanceCAPA: vi.fn(),
     linkFMEA: vi.fn(),
@@ -48,6 +53,7 @@ vi.mock("../../api/capa", async () => {
     getD3Advice: vi.fn(),
     getD4Recommendations: vi.fn(),
     getD7Recommendations: vi.fn(),
+    listD7Actions: vi.fn().mockResolvedValue([]),
     getDocGateImpact: vi.fn(),
     getDocGateAudit: vi.fn(),
     getDocGateDecision: vi.fn(),
@@ -67,7 +73,7 @@ vi.mock("../../api/fmea", () => ({
 
 // Mock D4VerificationCard to avoid rendering issues
 vi.mock("../../components/capa/D4VerificationCard", () => ({
-  default: () => null,
+  default: (props: unknown) => { verificationCard(props); return null; },
 }));
 
 const mockCapa = {
@@ -287,7 +293,7 @@ describe("CAPADetailPage supplier risk input", () => {
     });
     fireEvent.click(screen.getByTestId("supplier-risk-confirm-yes"));
     await waitFor(() => {
-      expect(capaApi.confirmRepeat).toHaveBeenCalledWith("test-report-id", true);
+      expect(capaApi.confirmRepeat).toHaveBeenCalledWith("test-report-id", true, expect.any(AbortSignal));
     });
   });
 
@@ -764,6 +770,7 @@ describe("CAPADetailPage trigger SCAR", () => {
           supplier_id: "sup-1",
           affected_batches: ["LOT-A", "LOT-B"],
         }),
+        expect.any(AbortSignal),
       );
     });
     expect(capaApi.getCAPA).toHaveBeenCalled();
@@ -877,6 +884,13 @@ describe("CAPADetailPage knowledge sink card", () => {
       },
     };
     vi.mocked(capaApi.advanceCAPA).mockRejectedValue(err);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({
+      report_id: "test-report-id", status: "D8_APPROVAL_PENDING", contract: "capa.outcome-review.v1",
+      review_round_id: "00000000-0000-4000-8000-000000000002", revision: "a".repeat(64), binding_status: "pending",
+      core: { d4_root_cause: "root", d5_correction: "implemented", d6_verification: "tested", d7_prevention: "prevention" },
+      verifications: [], d7_actions: [], documents: [], decision: null,
+      supplement: { text: null, review_scope: "unreviewed_supplement", updated_by: null, updated_at: null },
+    });
 
     renderPage();
 
@@ -885,8 +899,9 @@ describe("CAPADetailPage knowledge sink card", () => {
 
     await waitFor(() => {
       expect(capaApi.advanceCAPA).toHaveBeenCalledWith("test-report-id", {
-        target_state: "D8_CLOSURE",
-      });
+        target_state: "D8_CLOSURE", expected_outcome_revision: "a".repeat(64),
+        expected_review_round_id: "00000000-0000-4000-8000-000000000002",
+      }, expect.any(AbortSignal));
     });
     // Real formatter should map blocked outcome
     expect(capaApi.formatCapaAdvanceError(err, "fallback")).toMatch(/blocked|阻断|LLM/i);
@@ -923,7 +938,7 @@ describe("CAPADetailPage knowledge sink card", () => {
     fireEvent.click(resinkBtn);
 
     await waitFor(() => {
-      expect(capaApi.sinkKnowledge).toHaveBeenCalledWith("test-report-id");
+      expect(capaApi.sinkKnowledge).toHaveBeenCalledWith("test-report-id", expect.any(AbortSignal));
     });
     await waitFor(() => {
       expect(screen.getByTestId("capa-knowledge-error")).toHaveTextContent(/沉淀失败|timeout|failed|重试/i);
@@ -976,4 +991,221 @@ describe("CAPADetailPage explicit Agent task target", () => {
     fireEvent.click(await screen.findByRole("button", { name: "以本报告创建任务" }));
     expect(beginCreate).toHaveBeenCalledWith(reportId);
   });
+});
+
+
+describe("Task 5 reviewed outcome integration", () => {
+  const review = {
+    report_id: "test-report-id", status: "D8_APPROVAL_PENDING", contract: "capa.outcome-review.v1",
+    review_round_id: "00000000-0000-4000-8000-000000000002", revision: "a".repeat(64), binding_status: "pending",
+    core: { d4_root_cause: "根因", d5_correction: "实际纠正措施", d6_verification: "实施后复测合格", d7_prevention: "预防复发" },
+    verifications: [], d7_actions: [], documents: [], decision: null,
+    supplement: { text: "补充说明", review_scope: "unreviewed_supplement", updated_by: null, updated_at: null },
+  } as const;
+  const deferred = <T,>() => { let resolve!: (value: T) => void; let reject!: (value: unknown) => void;
+    const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+  beforeEach(() => {
+    route.id = "test-report-id";
+    useProductLineStore.setState({ selected: null });
+    vi.clearAllMocks(); localStorage.clear(); mockSupplierOptions();
+    useAuthStore.setState({ user: { user_id: "u1", role_key: "admin", permissions: { capa: 5 } } as any, token: "credential-A" });
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, status: "D8_APPROVAL_PENDING" } as any);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(structuredClone(review) as any);
+    vi.mocked(draftApi.getAIDraftCapabilities).mockResolvedValue({ ai_draft_enabled: true, llm_provider: null });
+    vi.mocked(capaApi.getD7Recommendations).mockResolvedValue({ recommendations: [] } as any);
+    vi.mocked(capaApi.getD4Recommendations).mockResolvedValue({ items: [], stages: [] });
+  });
+  it("only the visible current panel supplies decision expectations and duplicate approval is disabled", async () => {
+    vi.mocked(capaApi.advanceCAPA).mockReturnValue(new Promise(() => {}));
+    renderPage();
+    await screen.findByText("实施后复测合格");
+    const approve = screen.getByTestId("capa-approve");
+    fireEvent.click(approve); fireEvent.click(approve);
+    expect(capaApi.advanceCAPA).toHaveBeenCalledTimes(1);
+    expect(capaApi.advanceCAPA).toHaveBeenCalledWith("test-report-id", {
+      target_state: "D8_CLOSURE", expected_outcome_revision: review.revision, expected_review_round_id: review.review_round_id,
+    }, expect.any(AbortSignal));
+  });
+  it("closed admin has no core link/adoption/undo controls but the unreviewed supplement remains writable", async () => {
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, status: "D8_CLOSURE" } as any);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...review, status: "D8_CLOSURE", binding_status: "legacy_unversioned" } as any);
+    renderPage();
+    await screen.findByText("实施后复测合格");
+    expect(screen.queryByRole("button", { name: /关联FMEA|Link FMEA|Change FMEA/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /撤销修改/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument();
+    const supplement = screen.getByTestId("capa-outcome-supplement-edit");
+    fireEvent.change(supplement, { target: { value: "结案后新增说明" } }); fireEvent.blur(supplement);
+    expect(capaApi.updateCAPA).toHaveBeenCalledWith("test-report-id", { d8_closure: "结案后新增说明" }, expect.any(AbortSignal));
+  });
+  it("rejection sends exactly the current seen token with the existing reason", async () => {
+    vi.mocked(capaApi.advanceCAPA).mockReturnValue(new Promise(() => {}));
+    renderPage(); await screen.findByText("实施后复测合格");
+    fireEvent.click(screen.getByTestId("capa-reject"));
+    fireEvent.change(screen.getByTestId("capa-reject-reason"), { target: { value: "  重新验证  " } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Reject|驳 回|驳回/ }));
+    expect(capaApi.advanceCAPA).toHaveBeenCalledWith("test-report-id", {
+      target_state: "D7_PREVENTION", reject_reason: "重新验证", expected_outcome_revision: review.revision,
+      expected_review_round_id: review.review_round_id,
+    }, expect.any(AbortSignal));
+  });
+  it.each([401, 403, 404, 409])("decision %s consumes the old token and reason without automatic material reload/replay", async status => {
+    vi.mocked(capaApi.advanceCAPA).mockRejectedValue({ response: { status, data: { detail: "denied" } } });
+    renderPage(); await screen.findByText("实施后复测合格");
+    fireEvent.click(screen.getByTestId("capa-approve"));
+    await waitFor(() => expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument());
+    expect(capaApi.advanceCAPA).toHaveBeenCalledTimes(1);
+    expect(capaApi.getCapaOutcomeReview).toHaveBeenCalledTimes(1);
+    if (status === 409) {
+      expect(capaApi.getCAPA).toHaveBeenCalledTimes(2);
+      vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...structuredClone(review), revision: "b".repeat(64) } as any);
+      fireEvent.click(screen.getByRole("button", { name: /Reload review materials|重新加载审核材料/ }));
+      await screen.findByText("实施后复测合格");
+      expect(capaApi.advanceCAPA).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByTestId("capa-approve"));
+      expect(capaApi.advanceCAPA).toHaveBeenLastCalledWith("test-report-id", expect.objectContaining({ expected_outcome_revision: "b".repeat(64) }), expect.any(AbortSignal));
+    }
+  });
+  it("timeout queries actual state and never automatically repeats a decision", async () => {
+    vi.mocked(capaApi.advanceCAPA).mockRejectedValue(new Error("network timeout"));
+    vi.mocked(capaApi.getCAPA).mockResolvedValueOnce({ ...mockCapa, status: "D8_APPROVAL_PENDING" } as any)
+      .mockResolvedValue({ ...mockCapa, status: "D8_CLOSURE" } as any);
+    renderPage(); await screen.findByText("实施后复测合格");
+    fireEvent.click(screen.getByTestId("capa-approve"));
+    await waitFor(() => expect(screen.getByTestId("capa-status")).toHaveTextContent("D8_CLOSURE"));
+    expect(capaApi.advanceCAPA).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument();
+    expect(capaApi.getCapaOutcomeReview).toHaveBeenCalledTimes(1);
+  });
+  it.each(["success", "denial"])("credential change aborts a decision and old %s cannot alter the new same-document view", async result => {
+    const old = deferred<any>(); vi.mocked(capaApi.advanceCAPA).mockReturnValueOnce(old.promise);
+    renderPage(); await screen.findByText("实施后复测合格");
+    fireEvent.click(screen.getByTestId("capa-approve"));
+    const signal = vi.mocked(capaApi.advanceCAPA).mock.calls[0][2]!;
+    await act(async () => { useAuthStore.setState({ token: "credential-B" }); });
+    await screen.findByText("实施后复测合格");
+    expect(signal.aborted).toBe(true);
+    await act(async () => result === "success" ? old.resolve({ ...mockCapa, status: "ARCHIVED" }) : old.reject({ response: { status: 403 } }));
+    expect(screen.getByTestId("capa-status")).toHaveTextContent("D8_APPROVAL_PENDING");
+    expect(screen.getByTestId("capa-approve")).toBeEnabled();
+  });
+  it.each(["user", "credential", "factory", "line", "tenant", "report", "stored credential", "stored factory"])("%s invalidation aborts every concurrent initial view controller and ignores old success/denial", async dimension => {
+    const old = deferred<any>(), sources = deferred<any>(), capabilities = deferred<any>(), suppliers = deferred<any>();
+    vi.mocked(capaApi.getCAPA).mockReturnValueOnce(old.promise);
+    vi.mocked(fmeaApi.listFMEAs).mockReturnValueOnce(sources.promise);
+    vi.mocked(draftApi.getAIDraftCapabilities).mockReturnValueOnce(capabilities.promise);
+    vi.mocked(capaApi.listCapaSupplierOptions).mockReturnValueOnce(suppliers.promise);
+    const rendered = renderPage();
+    const signals = [vi.mocked(capaApi.getCAPA).mock.calls[0][1], vi.mocked(fmeaApi.listFMEAs).mock.calls[0][1],
+      vi.mocked(draftApi.getAIDraftCapabilities).mock.calls[0][0], vi.mocked(capaApi.listCapaSupplierOptions).mock.calls[0][1]];
+    await act(async () => {
+      if (dimension === "stored credential") { localStorage.setItem("access_token", "stored-B"); window.dispatchEvent(new Event("storage")); }
+      if (dimension === "stored factory") { localStorage.setItem("current_factory_id", "stored-factory-B"); window.dispatchEvent(new Event("storage")); }
+      if (dimension === "user") useAuthStore.setState({ user: { ...useAuthStore.getState().user!, user_id: "u2" } });
+      if (dimension === "credential") useAuthStore.setState({ token: "credential-B" });
+      if (dimension === "factory") useAuthStore.setState({ currentFactoryId: "factory-B" });
+      if (dimension === "line") useProductLineStore.setState({ selected: "line-B" });
+      if (dimension === "tenant") { localStorage.setItem("tenant_slug", "tenant-B"); window.dispatchEvent(new Event("storage")); }
+      if (dimension === "report") { route.id = "report-B"; rendered.rerender(<App><BrowserRouter><CAPADetailPage /></BrowserRouter></App>); }
+    });
+    await waitFor(() => signals.forEach(signal => expect(signal?.aborted).toBe(true)));
+    await act(async () => {
+      old.resolve({ ...mockCapa, title: "OLD PRIVATE", status: "ARCHIVED" });
+      sources.reject({ response: { status: 403 } }); capabilities.resolve({ ai_draft_enabled: true }); suppliers.resolve({ items: [] });
+    });
+    expect(screen.queryByText("OLD PRIVATE")).not.toBeInTheDocument();
+  });
+  it("identity change aborts the current panel read and removes a typed rejection reason", async () => {
+    renderPage(); await screen.findByText("实施后复测合格");
+    fireEvent.click(screen.getByTestId("capa-reject"));
+    fireEvent.change(screen.getByTestId("capa-reject-reason"), { target: { value: "PRIVATE REASON" } });
+    const next = deferred<any>(); vi.mocked(capaApi.getCapaOutcomeReview).mockReturnValueOnce(next.promise);
+    fireEvent.click(screen.getByRole("button", { name: /Reload review materials|重新加载审核材料/ }));
+    const calls = vi.mocked(capaApi.getCapaOutcomeReview).mock.calls;
+    const signal = calls[calls.length - 1][1]!;
+    await act(async () => { useAuthStore.setState({ token: "credential-B" }); });
+    expect(signal.aborted).toBe(true);
+    await screen.findByText("实施后复测合格");
+    fireEvent.click(screen.getByTestId("capa-reject"));
+    expect(screen.getByTestId("capa-reject-reason")).toHaveValue("");
+    await act(async () => next.reject({ response: { status: 403 } }));
+    expect(screen.getByTestId("capa-reject-reason")).toHaveValue("");
+  });
+  it("archived admin has no core, supplement, verification or draft writing controls", async () => {
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, status: "ARCHIVED" } as any);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...structuredClone(review), status: "ARCHIVED", binding_status: "verified" } as any);
+    renderPage(); await screen.findByText("实施后复测合格");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Link FMEA|关联FMEA|Change FMEA|撤销修改|Undo Change|通过验证|Save verification/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("capa-ai-draft")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("capa-outcome-supplement-edit")).not.toBeInTheDocument();
+    expect(verificationCard).not.toHaveBeenCalled();
+  });
+  it.each(["D4_ROOT_CAUSE", "D5_CORRECTION", "D6_VERIFICATION"])("%s stays writable without per-step approval", async status => {
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, status } as any);
+    // Isolate only recommendation transport; the actual page form and writer remain under test.
+    if (status === "D5_CORRECTION") vi.spyOn(capaApi, "getD5Recommendations").mockResolvedValue({ existing_controls: [], general_suggestions: [], stages: [] });
+    renderPage();
+    const field = await screen.findByRole("textbox");
+    fireEvent.change(field, { target: { value: "现场实施材料" } }); fireEvent.blur(field);
+    const key = status === "D4_ROOT_CAUSE" ? "d4_root_cause" : status === "D5_CORRECTION" ? "d5_correction" : "d6_verification";
+    expect(capaApi.updateCAPA).toHaveBeenCalledWith("test-report-id", { [key]: "现场实施材料" }, expect.any(AbortSignal));
+    expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument();
+    expect(capaApi.getCapaOutcomeReview).not.toHaveBeenCalled();
+    if (status === "D4_ROOT_CAUSE") expect(verificationCard).toHaveBeenCalledWith(expect.objectContaining({ canEdit: true }));
+  });
+
+  it.each([401, 403, 404, 409])("unreadable necessary sources (%s) never expose an approval or rejection control", async status => {
+    vi.mocked(capaApi.getCapaOutcomeReview).mockRejectedValue({ response: { status } });
+    renderPage(); await screen.findByRole("alert");
+    expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("capa-reject")).not.toBeInTheDocument();
+    expect(capaApi.advanceCAPA).not.toHaveBeenCalled();
+  });
+  it.each(["Replace", "Append"])("a %s completing with terminal state withdraws all draft, undo, link and core editing controls", async action => {
+    vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, status: "D6_VERIFICATION" } as any);
+    vi.mocked(draftApi.generateDraft).mockResolvedValue({ content: "已实施的验证记录", step: "d6", request_id: "draft", structured_data: null });
+    vi.mocked(capaApi.updateCAPA).mockResolvedValue({ ...mockCapa, status: "D8_CLOSURE" } as any);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...structuredClone(review), status: "D8_CLOSURE", binding_status: "verified" } as any);
+    renderPage(); fireEvent.click(await screen.findByText("AI Draft"));
+    await screen.findByText("AI Draft Preview");
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(action) }));
+    await screen.findByText("实施后复测合格");
+    expect(capaApi.updateCAPA).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /Undo Change|Replace|Append|Link FMEA|Change FMEA/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("capa-ai-draft")).not.toBeInTheDocument();
+    expect(screen.getByTestId("capa-outcome-supplement-edit")).toBeEnabled();
+  });
+  it("closed supplement updates do not change the approved core binding or request decision expectations", async () => {
+    const closed = { ...mockCapa, status: "D8_CLOSURE" };
+    vi.mocked(capaApi.getCAPA).mockResolvedValue(closed as any);
+    vi.mocked(capaApi.updateCAPA).mockResolvedValue({ ...closed, d8_closure: "新补充" } as any);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...structuredClone(review), status: "D8_CLOSURE", binding_status: "verified" } as any);
+    renderPage(); await screen.findByText("实施后复测合格");
+    const binding = screen.getByTestId("capa-outcome-binding").textContent;
+    const field = screen.getByTestId("capa-outcome-supplement-edit");
+    fireEvent.change(field, { target: { value: "新补充" } }); fireEvent.blur(field);
+    await waitFor(() => expect(field).toHaveValue("新补充"));
+    expect(screen.getByTestId("capa-outcome-binding").textContent).toBe(binding);
+    expect(screen.getByTestId("capa-outcome-core")).not.toHaveTextContent("新补充");
+    expect(capaApi.advanceCAPA).not.toHaveBeenCalled();
+    expect(capaApi.getCapaOutcomeReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("a successful single approval displays the actual verified decision and terminal core", async () => {
+    const closed = { ...mockCapa, status: "D8_CLOSURE" };
+    vi.mocked(capaApi.advanceCAPA).mockResolvedValue(closed as any);
+    vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValueOnce(structuredClone(review) as any).mockResolvedValue({
+      ...structuredClone(review), status: "D8_CLOSURE", binding_status: "verified",
+      decision: { action: "approved", actor_id: "00000000-0000-4000-8000-000000000001", operated_at: "2026-10-23T00:00:00Z", audit_id: "00000000-0000-4000-8000-000000000005" },
+    } as any);
+    renderPage(); await screen.findByText("实施后复测合格");
+    fireEvent.click(screen.getByTestId("capa-approve"));
+    await waitFor(() => expect(screen.getByTestId("capa-outcome-binding")).toHaveTextContent("Review version verified"));
+    expect(screen.getByTestId("capa-outcome-core")).toHaveTextContent("approved");
+    expect(capaApi.advanceCAPA).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument();
+    expect(verificationCard).not.toHaveBeenCalled();
+  });
+
 });

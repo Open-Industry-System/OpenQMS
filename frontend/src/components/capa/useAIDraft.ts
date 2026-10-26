@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { generateDraft } from "../../api/capaDraft";
 import type { DraftResponse, DraftFormat } from "../../types";
@@ -25,11 +25,16 @@ export function useAIDraft(): UseAIDraftResult {
   const [error, setError] = useState<string | null>(null);
   const [errorLevel, setErrorLevel] = useState<ErrorLevel>("error");
   const [tempUnavailable, setTempUnavailable] = useState(false);
+  const controllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef<string>("");
+  useEffect(() => () => { controllerRef.current?.abort(); requestIdRef.current = ""; }, []);
   const undoStack = useRef<Record<string, string>>({});
 
   const generate = useCallback(
     async (reportId: string, step: string, format: DraftFormat) => {
+      controllerRef.current?.abort();
+      const controller = new AbortController();
+      controllerRef.current = controller;
       setLoading(true);
       setError(null);
       setTempUnavailable(false);
@@ -42,12 +47,12 @@ export function useAIDraft(): UseAIDraftResult {
         const resp = await generateDraft(reportId, step, {
           format,
           request_id: reqId,
-        });
+        }, controller.signal);
         // Race-condition guard: ignore stale responses
-        if (requestIdRef.current !== reqId) return;
+        if (controller.signal.aborted || requestIdRef.current !== reqId) return;
         setDraft(resp);
       } catch (e: unknown) {
-        if (requestIdRef.current !== reqId) return;
+        if (controller.signal.aborted || requestIdRef.current !== reqId) return;
         const err = e as { response?: { data?: { detail?: string }; status?: number } };
         const status = err.response?.status;
 
@@ -75,7 +80,7 @@ export function useAIDraft(): UseAIDraftResult {
           setErrorLevel("error");
         }
       } finally {
-        if (requestIdRef.current === reqId) {
+        if (!controller.signal.aborted && requestIdRef.current === reqId) {
           setLoading(false);
         }
       }
@@ -84,6 +89,8 @@ export function useAIDraft(): UseAIDraftResult {
   );
 
   const clear = useCallback(() => {
+    controllerRef.current?.abort();
+    setLoading(false);
     setDraft(null);
     setError(null);
     setTempUnavailable(false);

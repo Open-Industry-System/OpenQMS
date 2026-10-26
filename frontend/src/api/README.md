@@ -15,6 +15,16 @@ private-term POST; other CAPA GET behavior is retained. No installation secret,
 run credential, client source/classification or declassification is accepted.
 See [employee preview guide](../../../docs/development/capa-d4-text-preview.md).
 
+`capa.ts` exposes `getCapaOutcomeReview(id, signal?)` using the reviewed
+`capa.outcome-review.v1` DTO, plus optional revision/round expectations and a signal
+on `advanceCAPA`. Page-owned related reads/actions forward optional cancellation
+signals as well. Exact `/capa/{id}/outcome-review` and POST `/capa/{id}/advance`
+401/403 failures reject immediately without refresh/body replay; this does not
+change refresh coordination, other private-route guards or factory injection for
+ordinary CAPA reads. An uncertain decision is checked via actual report state,
+never automatically replayed. Runtime completeness/source-shape checks live with
+`types/capaOutcomeReview.ts`; server authorization remains independent.
+
 ## File Organisation
 
 One module per backend domain. The shared client lives at the root; the
