@@ -31,7 +31,10 @@ credential injection and before auth mutation, redirects or continuation. Relate
 `/auth/me` and refresh calls carry the same signal; the optional refresh owner is
 rechecked before token installation or logout. An invalidated owned view settles
 without replay/queueing under a new credential; normal installed refreshes still
-release existing unrelated queued reads. Unowned routes keep the original refresh
+release existing unrelated queued reads. If an owned refresh instead returns null
+or is obsolete, its queued unrelated requests reject with their own original 401
+and the subscriber list is drained; they cannot hang or replay on a later refresh.
+A caller may explicitly make a new request to recover. Unowned-initiated refresh
 policy and the existing private-route exclusions remain unchanged.
 
 ## File Organisation

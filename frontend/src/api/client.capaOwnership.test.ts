@@ -141,3 +141,79 @@ it('an old child signal cannot enter POST transport with a newly stored credenti
     .rejects.toMatchObject({ name: 'CanceledError' });
   expect(seen).toEqual([]); hook.unmount();
 });
+
+
+it.each(['navigation', 'selection'])('owned refresh cancellation settles unrelated waiters after same-session %s without replaying CAPA', async change => {
+  const pending = deferred<any>(); let refreshConfig: any, refreshCalls = 0;
+  const calls: Record<string, number> = {};
+  client.defaults.adapter = async config => {
+    const url = config.url!; calls[url] = (calls[url] || 0) + 1;
+    if (url === '/auth/refresh') {
+      refreshCalls += 1;
+      if (refreshCalls > 1) return { config, data: { access_token: 'A-recovered', refresh_token: 'A-recovered-refresh' }, headers: {}, status: 200, statusText: 'OK' };
+      refreshConfig = config;
+      return pending.promise.then(data => ({ config, data, headers: {}, status: 200, statusText: 'OK' }));
+    }
+    if (url === '/recover-business' && calls[url] > 1) return { config, data: { recovered: true }, headers: {}, status: 200, statusText: 'OK' };
+    throw { config, response: { status: 401, data: {} } };
+  };
+  const hook = owned(); const request = hook.result.current.begin();
+  const userA = useAuthStore.getState().user;
+  const oldView = getCAPA('report-A', request.signal).catch(error => error);
+  await waitFor(() => expect(refreshConfig).toBeDefined());
+  const settled = ['pending', 'pending'];
+  const subscribers = ['/queued-one', '/queued-two'].map((url, index) => client.get(url).then(
+    value => { settled[index] = 'resolved'; return value; },
+    error => { settled[index] = 'rejected'; return error; },
+  ));
+  await waitFor(() => { expect(calls['/queued-one']).toBe(1); expect(calls['/queued-two']).toBe(1); });
+  await act(async () => {
+    if (change === 'navigation') hook.unmount(); else hook.result.current.invalidate();
+  });
+  expect(request.signal.aborted).toBe(true);
+  // Deliberately complete despite cancellation; Axios and the real store helper handle the obsolete response.
+  await act(async () => pending.resolve({ access_token: 'A-obsolete', refresh_token: 'A-obsolete-refresh' }));
+  await oldView;
+  await waitFor(() => expect(settled).toEqual(['rejected', 'rejected']));
+  const errors = await Promise.all(subscribers);
+  errors.forEach(error => expect(error).toMatchObject({ response: { status: 401 } }));
+  expect(useAuthStore.getState().user).toBe(userA); expect(useAuthStore.getState().token).toBe('A-access');
+  expect(localStorage.getItem('refresh_token')).toBe('A-refresh');
+  expect(calls['/capa/report-A']).toBe(1); expect(refreshCalls).toBe(1);
+  // Recovery is explicit. Drained old subscribers and the obsolete CAPA action must not replay on it.
+  expect((await client.get('/recover-business')).data).toEqual({ recovered: true });
+  expect(refreshCalls).toBe(2); expect(useAuthStore.getState().token).toBe('A-recovered');
+  expect(calls['/queued-one']).toBe(1); expect(calls['/queued-two']).toBe(1); expect(calls['/capa/report-A']).toBe(1);
+  hook.unmount();
+});
+
+it.each(['success', 'failure'])('owned refresh replacement late %s settles queued reads without changing B or replaying A', async outcome => {
+  const pending = deferred<any>(); let refreshConfig: any;
+  const calls: string[] = [];
+  client.defaults.adapter = async config => {
+    calls.push(config.url!);
+    if (config.url === '/auth/refresh') {
+      refreshConfig = config;
+      return pending.promise.then(data => ({ config, data, headers: {}, status: 200, statusText: 'OK' }));
+    }
+    throw { config, response: { status: 401, data: {} } };
+  };
+  const hook = owned(); const request = hook.result.current.begin();
+  const oldView = getCAPA('report-A', request.signal).catch(error => error);
+  await waitFor(() => expect(refreshConfig).toBeDefined());
+  let settled = false;
+  const subscriber = client.get('/queued-before-replacement').then(
+    value => { settled = true; return value; }, error => { settled = true; return error; },
+  );
+  await waitFor(() => expect(calls).toContain('/queued-before-replacement'));
+  await act(async () => { session('B'); });
+  const userB = useAuthStore.getState().user;
+  await act(async () => outcome === 'success' ? pending.resolve({ access_token: 'A-obsolete', refresh_token: 'A-obsolete-refresh' })
+    : pending.reject({ config: refreshConfig, response: { status: 401, data: {} } }));
+  await oldView;
+  await waitFor(() => expect(settled).toBe(true));
+  expect(await subscriber).toMatchObject({ response: { status: 401 } });
+  expect(useAuthStore.getState().user).toBe(userB); expect(useAuthStore.getState().token).toBe('B-access');
+  expect(localStorage.getItem('access_token')).toBe('B-access'); expect(localStorage.getItem('refresh_token')).toBe('B-refresh');
+  expect(calls).toEqual(['/capa/report-A', '/auth/refresh', '/queued-before-replacement']); hook.unmount();
+});

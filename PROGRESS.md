@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-27 Task 5 fix round 2/5：F1 本地修复待独立重审**：FIX_BASE `e79be478`；owned refresh 取消/失效时现有无关订阅者以各自原始 401 reject 并结束，不再无限等待，旧 CAPA 不重放。最终覆盖 **107 passed**，完整原目标集 **27 files /245 passed**（保留原 241）；前端 tsc、生产 build、E2E tsc 均有持久 **SHELL_EXIT=0**。I1/I2/I3 已由控制方确认 addressed，本轮不重开；Task 5 不宣告完成，仍待 scoped re-review。详见文末 round 2 报告。
+
 > **2026-10-26 Task 5 fix round 1/5 本地修复批次完成，待重审**：BASE `16dff517` 的 I1 前置/子操作归属、I2 Axios 认证副作用及 I3 无关知识操作 loading 已按复核修正。最终完整前端 **27 files /241 passed**（保留原 210），前端 tsc、生产 build、完整 E2E tsc 均有持久日志 **SHELL_EXIT=0**。下方初次 Task 5 自检结论已被复核问题取代，以文末同名 fix round 1 报告为当前状态；不冒称独立门禁已通过，不 push/合并/部署。
 
 > **2026-10-26 CAPA 结果审核 Task 5 本地实现完成**：生产 D8 集中审核面板、当前 revision/round 唯一决定入口、身份/范围请求隔离与终态核心只读已实现；最终受影响前端 **25 files /210 passed**、前端 tsc、生产 build、完整 E2E tsc 均 exit 0。尚待控制方独立复核；真实浏览器/provider 仍属 Task 7。本次完整报告见文末同名 Task 5 章节，不将单元 mock 当作真实验收，不 push/合并/部署。
@@ -1020,3 +1022,130 @@ Final full selection has no xfail/xpass or omitted original assertions; this is 
 - No real browser, provider, database or production acceptance was run or claimed. Those remain separately authorized Task 7
   and final-system gates. No later task or business approval/self policy was started.
 - Authorized local commit subject: `fix(capa): fence child actions and auth side effects`. No push/merge/deploy.
+
+
+## Task 5 fix round 2/5 — F1 owned-refresh subscriber settlement (2026-10-27)
+
+### Status, received finding and root cause
+
+**F1 fix batch implemented and verified locally against FIX_BASE `e79be478`; independent scoped re-review remains
+required. Task 5 is NOT declared complete or accepted.** The coordinator independently marked prior I1/I2/I3 addressed;
+this batch does not reopen them or change their ownership/session fences. No plan-mandated conflict arose.
+
+Reviewer finding (substantive text preserved): **Cancelling the owned refresh initiator strands unrelated refresh
+subscribers.** An owned CAPA 401 starts the shared refresh; unrelated unowned 401s subscribe; navigation or selection
+disposes the CAPA lifetime and aborts its refresh signal; the scoped store returns null; the interceptor clears
+`isRefreshing` and rejects only the initiating CAPA request. A null token never calls the success-only subscriber callbacks,
+and the interceptor waiting Promise has no rejection path, so unrelated requests can remain pending indefinitely.
+Adapter timeout does not bound that interceptor Promise. This was a fix-induced same-session cancellation regression,
+not authorization to audit or redesign unrelated failed-refresh policy.
+
+Systematic debugging/TDD steps were followed: focused CodeGraph context first (no useful current frontend symbols),
+precise reads of actual `client.ts`, `authStore.ts`, ownership adapter tests, comparison with the working valid-refresh
+queue test, deterministic deferred-adapter RED, then a single small correction and covering/final verification. No
+production change preceded the new failing regression. No mutation RED or guessed backend response was needed this round.
+
+### Minimal correction and self-review
+
+- The existing subscriber callback now accepts a token **or null**. The helper is named `settleRefreshSubscribers` to reflect
+  both outcomes; it still drains the same existing subscriber list. A real token retains the existing success/replay behavior.
+- An owned refresh that returns null or no longer matches installed credentials explicitly settles that list with null,
+  including the owned initiator exception path. Each queued request then rejects with **its own original 401 error**, without
+  replay or a new automatic refresh. No null path is added to unrelated unowned-initiated refresh behavior.
+- The obsolete initiating CAPA action still rejects and never replays. Existing owner checks before auth effects, signal
+  propagation, store token-install/logout fences, private-route exclusions and backend authority are unchanged. `authStore.ts`,
+  child/page hooks and all decision/DTO/terminal code were not modified in this round.
+- Tests queue unrelated requests **before** cancelling the initiating view. Two same-session cases cover navigation/unmount
+  and selection invalidation, multiple subscribers, retained A credentials, explicit new-request recovery and proof that drained
+  subscribers/obsolete CAPA do not replay on a later successful refresh. Two replacement-session cases cover late refresh success
+  and failure, waiter rejection, unchanged B credentials/user and no old A replay.
+- Self-review traced null, obsolete-token, exception and valid-token branches and queue drain ordering; checked each waiter
+  uses its own error; checked no automatic CAPA replay or stale auth mutation was introduced. The previous successful-refresh
+  queue test and all prior actual adapter/session/privacy tests remain intact. This is not a blanket auth/refresh redesign.
+- Synced existing API README and permissions documentation. No new UI text/policy was added, so no locale changes were needed.
+  All 241 prior tests and their payload/provenance assertions remain unchanged; the adapter regression file was append-only.
+  AST preservation against `e79be478` reports **27 original files /191 declarations /0 removed tests**, and no per-file
+  assertion-count decrease. Those original declarations expand to the prior 241 runtime cases.
+
+### Actual RED / GREEN evidence
+
+Commands ran from `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend` using
+existing Node/npm/node_modules. Full logs below are retained under
+`.superpowers/sdd/2026-10-23-capa-outcome-review/`; every test/compiler/build log has its real persisted shell exit marker.
+
+RED, before production changes:
+
+```bash
+npx vitest run src/api/client.capaOwnership.test.ts -t 'owned refresh cancellation|owned refresh replacement'
+```
+
+`task5-fix-r2-red.log` actual result: **1 file failed /4 failed /10 selected-out /SHELL_EXIT=1**. Navigation and selection
+left both subscriber states `pending` instead of `rejected`; replacement success/failure left `settled=false`. The bounded
+`waitFor` assertions expose non-settlement, not a hidden five-second test-runner timeout or an adapter/network fixture error.
+The real interceptor, real refresh wrapper/store and deliberately deferred adapter were used; no mocked page API rejection
+was substituted for the queue race.
+
+First GREEN:
+
+```bash
+npx vitest run src/api/client.capaOwnership.test.ts src/api/client.agentTasks.test.ts
+```
+
+`task5-fix-r2-adapter-green.log`: **2 files /22 passed /SHELL_EXIT=0**, including all four new regressions, previous real
+session-corruption cases and exact private-route controls. No global queue state reset or diagnostic suppression was added.
+
+### Final checks after the LAST source/test change
+
+Covering adapter/store/child/page/hook command:
+
+```bash
+npx vitest run src/api/client.capaOwnership.test.ts src/api/client.agentTasks.test.ts src/components/capa/CapaChildOwnership.test.tsx src/components/capa/useAIDraft.test.ts src/pages/capa/CAPADetailPage.test.tsx
+```
+
+`task5-fix-r2-covering-green.log`: **5 files /107 passed**, start 00:32:35, duration 6.98s, **SHELL_EXIT=0**.
+The store helper is exercised through the actual Axios transport/real store path, not a fake store implementation.
+
+Complete prior targeted set and all required final compiler/build commands:
+
+```bash
+npx vitest run src/components/capa src/pages/capa/CAPADetailPage.test.tsx src/api src/locales/capa-ppt.i18n.test.ts
+npx tsc --noEmit
+npm run build
+npx tsc --noEmit -p tsconfig.e2e.json
+```
+
+| Final evidence log | Actual output / exit |
+|---|---|
+| `task5-fix-r2-final-vitest.log` | **27 files passed /245 passed** (all prior 241 +4 new); start 00:32:42; duration 12.57s; **SHELL_EXIT=0**. |
+| `task5-fix-r2-final-tsc.log` | `npx tsc --noEmit`; no compiler diagnostics; **SHELL_EXIT=0**. |
+| `task5-fix-r2-final-build.log` | `tsc -b && vite build`; production build **6.43s**; CAPADetailPage 103.87kB /30.49kB gzip; **SHELL_EXIT=0**. |
+| `task5-fix-r2-final-e2e-tsc.log` | `npx tsc --noEmit -p tsconfig.e2e.json`; no compiler diagnostics; **SHELL_EXIT=0**. |
+| `task5-fix-r2-preservation.log` | `BASE_TEST_FILES=27; ORIGINAL_TEST_DECLARATIONS=191; REMOVED_TESTS=0; ASSERTION_COUNTS_NOT_DECREASED=PASS; PROCESS_EXIT=0`. |
+| `task5-fix-r2-diff-check.log` | `git diff --check`; no whitespace diagnostics; **PROCESS_EXIT=0**. |
+
+The complete final run has **0 failures, 0 skips and no unhandled errors**. The RED selection's ten selected-out cases were
+not omitted from final acceptance. Existing Vite/react-babel esbuild→oxc, experimental localStorage and jsdom pseudo-element
+getComputedStyle diagnostics and the production mixed static/dynamic `api/version.ts` chunk warning remain visible. No
+assertion was removed, warning silenced, dependency installed or configuration changed. No historical suite count is used.
+
+### Exact round-2 changed files
+
+```text
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/client.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/client.capaOwnership.test.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/api/README.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/docs/permissions.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/PROGRESS.md
+```
+
+### Limits, concerns and next step
+
+- No unresolved F1 blocker was identified in this batch's self-review. **Independent scoped re-review follows**; this is not
+  a claim that both gates passed or Task 5 is complete. Prior I1/I2/I3 fences and decision/terminal/metadata guarantees remain.
+- Abandoned-refresh waiters now reject; they do not transparently retry. Recovery is an explicit new request subject to current
+  session/server authorization. This does not promise recovery from every real server-side refresh rotation or fix pre-existing
+  unowned failed-refresh policy; neither is part of this scoped F1 correction.
+- These are adapter/component/static/build checks, not real browser/provider/DB evidence. Task 7 remains separately authorized.
+  No backend, provider, DB, infrastructure, browser, full baseline, later-task, global auth redesign or business/self policy work
+  was performed. No push/merge/deploy.
+- Authorized local commit subject: `fix(capa): settle waiters when owned refresh is cancelled`.

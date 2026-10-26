@@ -19,14 +19,14 @@ const isOutcomePrivateRequest = (url?: string, method?: string) =>
 
 // Guard against concurrent refresh attempts
 let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
+let refreshSubscribers: Array<(token: string | null) => void> = [];
 
-function onRefreshed(token: string) {
+function settleRefreshSubscribers(token: string | null) {
   refreshSubscribers.forEach((cb) => cb(token));
   refreshSubscribers = [];
 }
 
-function addRefreshSubscriber(cb: (token: string) => void) {
+function addRefreshSubscriber(cb: (token: string | null) => void) {
   refreshSubscribers.push(cb);
 }
 
@@ -114,18 +114,22 @@ client.interceptors.response.use(
             // A successful refresh invalidates the old CAPA credential/view. Only the
             // still-installed refresh may release existing unrelated subscribers.
             if (newToken && useAuthStore.getState().token === newToken && localStorage.getItem("access_token") === newToken) {
-              onRefreshed(newToken);
+              settleRefreshSubscribers(newToken);
+            } else {
+              // An abandoned owned refresh must also settle unrelated waiters.
+              settleRefreshSubscribers(null);
             }
             return Promise.reject(error);
           }
           if (newToken) {
-            onRefreshed(newToken);
+            settleRefreshSubscribers(newToken);
             // Retry the original request with the new token
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
             return client(originalRequest);
           }
         } catch {
           isRefreshing = false;
+          if (owner) settleRefreshSubscribers(null);
           if (owner && !owner()) return Promise.reject(error);
           useAuthStore.getState().logout();
           window.location.href = "/login";
@@ -139,8 +143,9 @@ client.interceptors.response.use(
       if (owner) return Promise.reject(error);
 
       // Queue pending requests while refresh is in flight
-      return new Promise((resolve) => {
-        addRefreshSubscriber((token: string) => {
+      return new Promise((resolve, reject) => {
+        addRefreshSubscriber((token: string | null) => {
+          if (token === null) { reject(error); return; }
           originalRequest.headers.Authorization = `Bearer ${token}`;
           resolve(client(originalRequest));
         });
