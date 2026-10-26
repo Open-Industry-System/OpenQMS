@@ -726,3 +726,27 @@ def test_normalize_tags_rejects_non_list_or_empty():
         _normalize_tags([])
     with pytest.raises(KnowledgeSinkFailedError):
         _normalize_tags([None, "", "  "])
+
+
+@pytest.mark.asyncio
+async def test_sink_marks_closure_in_fields_summary_prompt_and_embedding(db, default_factory, admin_user, monkeypatch):
+    from app.services.knowledge_sink_service import sink_capa_on_close
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id, status='D8_CLOSURE',
+        d8_closure='补充意见，尚未验证')
+    prompts = []
+    async def client(db_):
+        return _fake_pc()
+    async def complete(pc, prompt, schema):
+        prompts.append(prompt)
+        return _ok_llm_result(lesson_summary='补充可能有效')
+    monkeypatch.setattr('app.services.agent.provider_adapter.build_client', client)
+    monkeypatch.setattr('app.services.agent.provider_adapter.complete_json', complete)
+    entry = await sink_capa_on_close(db, capa, admin_user.user_id)
+    assert entry.fields['closure_review_scope'] == 'unreviewed_supplement'
+    assert 'unreviewed_supplement' in prompts[0]
+    assert '未审核补充' in prompts[0]
+    assert '已审根因' in prompts[0] and '已验证效果' in prompts[0]
+    assert entry.fields['lesson_summary'] == '补充可能有效'
+    assert '关闭（未审核补充）: 补充意见，尚未验证' in entry.embedding_text
+    assert '摘要: 未审核补充' in entry.embedding_text
+    assert len(prompts) == 1

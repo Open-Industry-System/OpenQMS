@@ -1151,3 +1151,182 @@ assertion was removed, warning silenced, dependency installed or configuration c
   No backend, provider, DB, infrastructure, browser, full baseline, later-task, global auth redesign or business/self policy work
   was performed. No push/merge/deploy.
 - Authorized local commit subject: `fix(capa): settle waiters when owned refresh is cancelled`.
+
+## Task 6 implementation report — unreviewed closure supplements (independent review pending)
+
+### Scope, assumptions and implementation
+
+- Worktree: `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel`.
+  Starting HEAD: `8187f6a9`. Requirements read in order: task-6-brief.md, then task-6-context.md.
+  Only Task 6 is implemented; this report does not change the controller ledger or grant acceptance.
+- Used focused CodeGraph context/explore before editing and precise source/test reads. Read only the
+  relevant status/decision tails, not the full plan/history/PROGRESS. Used TDD, systematic debugging
+  and verification-before-completion. No child agents or independent-review claims.
+- Exact provenance literals: KnowledgeEntry `fields.closure_review_scope=unreviewed_supplement`;
+  D8 lesson tag `review_scope:unreviewed_supplement`, generated once on insert/upsert and returned
+  lesson objects. D7 extraction does not receive this tag or any approved classification.
+- Existing summary prompt explicitly calls closure an unreviewed supplement, not an approved root
+  cause or verified outcome, without expanding business source fields or adding a provider call.
+  Knowledge embedding text labels closure and warns about mixed summaries; original stored closure
+  and lesson_summary values remain intact, preserving all original assertions and consumer contracts.
+- Knowledge list/detail projections expose nullable closure_review_scope; detail copies fields before
+  adding the marker for CAPA closure, including legacy rows. No ORM/database read-side backfill.
+  Existing source type, classification, tags, authorization and factory/product-line predicates remain.
+- Lesson retrieval selects source_d_step, adds D8 review_scope metadata and a Chinese unreviewed
+  warning to content. Knowledge retrieval selects source_type and adds closure_review_scope plus an
+  explicit warning for CAPA closure, including legacy summary/embedding/chunk text fallbacks.
+  Text-only D4/D5 serialization retains the warning. The existing 500-character bound is retained.
+- Supplement metadata selects ONLY operated_by and operated_at from the report/factory's latest
+  UPDATE containing d8_closure, ordered by operated_at then log_id. It does not load private audit
+  bodies or infer responsibility from CAPA.updated_at/created_by. Missing audit/actor stays null.
+  Real update_capa UPDATE audits now stamp capa.factory_id: previously the scoped reader could not
+  see those production audits. Historical null-factory audit rows are not inferred or backfilled.
+- Existing Task 5 panel source is unchanged. Added rendered tests for actual actor/time values, null
+  fallback (`— · —`), unreviewed label and separation from reviewed core.
+- Real supplement test uses Task 4 production HTTP approval producer and production reader with real
+  source snapshots; only external provider responses are deterministic test fixtures. It compares the
+  receipt audit, revision, round, decision, core, source versions and D7 lessons before/after editing.
+  Legacy is explicitly legacy_unversioned, never a fabricated verified receipt. Mixed PUT rejection,
+  archive freeze, relevant-only metadata, unknown actor, private audit-body isolation and failed
+  delete/rebuild restoring tags/outbox/audits are covered. Existing assertions/declarations remain.
+- No terminal/auth/core/HMAC or source-version policy changes, migrations/model columns, new
+  dependencies, live provider calls, browser run, UI redesign, install, full make-check, DB reset,
+  reseed/recreation, infrastructure recovery, settings/permissions changes, push/merge/deploy.
+  All pytest runs used the existing registered run-owned.py pytest mode. No private profile, URL,
+  secret or credential output. Shell complexity refusals made no changes; edits used absolute-path
+  file tools where the shell could not verify the operation. No denied operation was forced.
+
+### RED, setup distinction, focused GREEN and self-review correction
+
+Commands below ran from the worktree root. Backend command prefix (verbatim):
+
+```text
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest
+```
+
+1. Initial RED: prefix + `tests/capa/test_capa_outcome_supplement.py tests/capa/test_knowledge_api.py tests/recommendation/test_capa_lesson_embedding_chain.py tests/services/test_knowledge_entry_source.py tests/capa/test_knowledge_sink.py -q`.
+   Result: **10 failed, 38 passed, 3 warnings**, exit **1**, 4.80 s. Log:
+   `.superpowers/sdd/2026-10-23-capa-outcome-review/focused-20261026T164527480658.log`.
+   Expected defects, NOT setup failures: missing audit responsibility for actual supplement saves;
+   metadata unnecessarily subject to private changed_fields body-size limit; missing knowledge scope
+   marker; missing D8 tag; legacy recommendation metadata/text provenance absent. Real approval was
+   produced and read as verified before the expected missing-responsibility assertion failed.
+2. Before implementation, revised only new tests to preserve existing raw closure/summary contracts
+   (rather than prefixing stored source fields); provenance belongs to projections/derived text.
+   RED: prefix + `tests/capa/test_knowledge_api.py tests/capa/test_knowledge_sink.py -k 'legacy_closure_projection or marks_closure' -q`.
+   Result: **2 failed, 2 passed, 18 deselected, 3 warnings**, exit **1**, 0.37 s; both failures are the
+   missing closure_review_scope. Log `focused-20261026T164656696324.log` in the same SDD directory.
+3. Focused GREEN: same command as initial RED after implementation.
+   Result: **48 passed, 3 warnings**, exit **0**, 4.75 s.
+   Log `focused-20261026T164906190689.log` in the same SDD directory.
+4. Self-review caught prefix growth beyond the existing recommendation 500-character cap. Extended
+   new summary/embedding/chunk fallback cases with long text and the existing bound assertion.
+   RED: prefix + `tests/services/test_knowledge_entry_source.py -k legacy_capa_closure -q`.
+   Result: **3 failed, 14 deselected, 3 warnings**, exit **1**, 0.33 s; actual length 537 > 500.
+   Log `focused-20261026T165108840949.log` in the same SDD directory. Fixed by retaining the warning
+   at the beginning and applying the original cap to the final content; final covering run below.
+5. Initial panel characterization: `npm --prefix frontend test -- --run src/components/capa/CapaOutcomeReviewPanel.test.tsx`.
+   Result **20 passed**, exit **0**, 2.18 s, confirming no panel implementation edit is needed.
+   Completed task output `b2tb4v4cv.output`; final persistent frontend logs are listed below.
+
+### Final covering checks (after the last source change)
+
+Full affected backend command (verbatim, worktree root; only ordinary registered pytest mode):
+
+```bash
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/capa/test_knowledge_api.py tests/capa/test_knowledge_sink.py tests/capa/test_capa_outcome_supplement.py tests/capa/test_capa_outcome_api.py tests/capa/test_capa_outcome_boundaries.py tests/capa/test_capa_outcome_d7.py tests/capa/test_capa_outcome_decision.py tests/capa/test_capa_outcome_namespace.py tests/capa/test_capa_outcome_review.py tests/capa/test_capa_outcome_review_fixes.py tests/capa/test_capa_outcome_sources.py tests/capa/test_capa_review_guard.py tests/capa/test_capa_review_source_guard.py tests/capa/test_capa_reviewed_writes.py tests/capa/test_capa_review_concurrency.py tests/capa/test_capa_post_review_fixes.py tests/capa/test_capa_update_freeze.py tests/capa/test_capa_advance_flow.py tests/capa/test_capa_advance_permission.py tests/capa/test_capa_d7_gate.py tests/capa/test_capa_d7_action_service.py tests/capa/test_capa_d7_api.py tests/capa/test_capa_d7_prevention_linkage.py tests/capa/test_capa_doc_gate_api.py tests/capa/test_capa_doc_gate_freshness.py tests/capa/test_capa_doc_gate_regression.py tests/capa/test_capa_verification_api.py tests/capa/test_capa_verification_conclusion.py tests/capa/test_capa_verification_service.py tests/capa/test_capa_verification_source_ref.py tests/capa/test_capa_api_d4_d5.py tests/capa/test_capa_link_fmea_linkage.py tests/capa/test_advance_warning.py tests/recommendation tests/recommendations tests/services/test_knowledge_entry_source.py tests/test_embedding_sync_worker.py tests/test_lessons_learned.py tests/test_capa_recommendation.py tests/test_capa_supplier_id.py tests/test_capa_advance_supplier_risk_trigger.py --ignore=tests/test_graph_sync_worker.py --ignore=tests/test_graph_projection.py -q -ra
+```
+
+Actual output/receipt:
+
+```text
+CHECK_COMPLETE: mode=pytest; exit_code=0; log=/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/focused-20261026T165335357306.log
+821 passed, 3 warnings in 133.83s (0:02:13)
+[exited with code 0]
+```
+
+- Includes final long-text bound regressions, detailed failed-rebuild tags/outbox/audit restoration,
+  original D7/D8 lesson embedding/retrieval chain, knowledge fail-closed/concurrency/isolation tests,
+  real production approval/rejection and historical reader, tenant namespace/current authority,
+  immutable source versions and terminal/concurrent material writes.
+- No skip, xfail or xpass in this selected run. Both Makefile graph exclusions retained. This is
+  the actual Task 6 affected-set result, not a full baseline or the historical 2999-pass receipt.
+- Backend warnings: three PydanticDeprecatedSince20 class-based Config deprecations; not suppressed.
+
+Frontend commands and exact result wrappers (worktree root):
+
+```bash
+npm --prefix frontend test -- --run src/components/capa/CapaOutcomeReviewPanel.test.tsx src/pages/capa/CAPADetailPage.test.tsx src/api/capa.test.ts src/api/client.capaOwnership.test.ts src/components/capa/CapaChildOwnership.test.tsx > .superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-tests.log 2>&1; result=$?; tail -n 45 .superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-tests.log; printf '\nEXIT_CODE=%s\n' "$result"; exit "$result"
+npm --prefix frontend exec -- tsc --noEmit -p frontend/tsconfig.json > .superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-types.log 2>&1; result=$?; cat .superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-types.log; printf '\nEXIT_CODE=%s\n' "$result"; exit "$result"
+npm --prefix frontend run build > .superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-build.log 2>&1; result=$?; tail -n 35 .superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-build.log; printf '\nEXIT_CODE=%s\n' "$result"; exit "$result"
+```
+
+Actual results:
+
+```text
+Test Files  5 passed (5)
+Tests       121 passed (121)
+Duration    8.74s
+EXIT_CODE=0
+
+npm notice run 'tsc' --noEmit -p frontend/tsconfig.json
+EXIT_CODE=0
+
+npm notice run tsc -b && vite build
+vite v5.4.21 building for production...
+✓ 6848 modules transformed.
+✓ built in 7.12s
+EXIT_CODE=0
+```
+
+Persistent frontend log paths:
+
+```text
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-tests.log
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-types.log
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task-6-frontend-build.log
+```
+
+Observed frontend warnings (not suppressed): Vite React plugin esbuild/optimizeDeps.esbuildOptions
+API deprecations and esbuild/oxc coexistence notice; Node localStorage ExperimentalWarning;
+jsdom getComputedStyle pseudo-element not implemented messages. Build warns api/version.ts has
+both dynamic and static imports and will not move into a separate chunk. Types emitted no warning.
+No browser/provider behavior or full-repository baseline is inferred from these checks.
+
+### Changed files, final self-review and remaining gates
+
+All changed file paths:
+
+```text
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/api/knowledge.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/schemas/knowledge.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/services/capa_lessons_service.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/services/capa_outcome_review.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/services/capa_service.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/services/knowledge_sink_service.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/services/recommendation_sources_extra.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/capa/test_capa_outcome_supplement.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/capa/test_knowledge_api.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/capa/test_knowledge_sink.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/recommendation/test_capa_lesson_embedding_chain.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/services/test_knowledge_entry_source.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/CapaOutcomeReviewPanel.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/docs/permissions.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/PROGRESS.md
+```
+
+- Self-reviewed diff against Task 6 brief/context: exact markers, negative non-CAPA/no-closure
+  projection cases, read-only legacy projections, text-only warnings, 500-character cap, unchanged
+  D7 lessons/core/source references and approval receipt, scoped audit-only responsibility/nulls,
+  private audit-body exclusion, original cleanup/savepoint/outbox failure ordering and UI fallback.
+- All pre-existing test declarations/assertions are retained (only additions in existing tests).
+  No source edits in the Task 5 panel, terminal/auth/core/HMAC policy, model/migration or provider
+  adapter. Documentation is synchronized with actual implementation, not prospective features.
+- `git diff --check` is clean. Local commit is authorized for this phase, subject:
+  `fix(capa): distinguish unreviewed closure supplements` (commit containing this report).
+- No unresolved Task 6 implementation defect identified in self-review. Non-fatal observed warnings
+  remain as above. Old null-factory UPDATE audits deliberately remain unattributed; no inferred
+  responsibility/backfill. This self-review and test result are NOT independent task acceptance.
+- Next: controller's independent Task 6 spec/quality review. Live provider/browser/full make-check
+  and later-task acceptance are separate gates and were deliberately not run here. No later task
+  implemented; no controller ledger changed, push, merge or deployment.

@@ -120,6 +120,7 @@ def _to_list_item(entry: KnowledgeEntry) -> KnowledgeEntryListItem:
         embedding_status=entry.embedding_status,
         embedding_id=entry.embedding_id,
         lesson_summary=fields.get("lesson_summary"),
+        closure_review_scope="unreviewed_supplement" if entry.source_type == "capa" and "closure" in fields else None,
         tags=[str(t) for t in tags],
         created_at=entry.created_at,
     )
@@ -127,9 +128,12 @@ def _to_list_item(entry: KnowledgeEntry) -> KnowledgeEntryListItem:
 
 def _to_detail(entry: KnowledgeEntry) -> KnowledgeEntryDetail:
     item = _to_list_item(entry)
+    fields = dict(entry.fields or {})
+    if item.closure_review_scope is not None:
+        fields["closure_review_scope"] = item.closure_review_scope
     return KnowledgeEntryDetail(
         **item.model_dump(),
-        fields=entry.fields or {},
+        fields=fields,
         content_hash=entry.content_hash,
         llm_status=entry.llm_status,
         updated_at=entry.updated_at,

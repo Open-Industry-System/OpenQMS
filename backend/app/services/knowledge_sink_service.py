@@ -260,6 +260,7 @@ async def _assemble_deterministic_fields(db: AsyncSession, capa: CAPAEightD) -> 
         "d7_node_action": _clip(d7),
         "linkage": linkage,
         "closure": _clip(capa.d8_closure or ""),
+        "closure_review_scope": "unreviewed_supplement",
     }
 
 
@@ -271,6 +272,7 @@ def _build_embedding_text(
 ) -> str:
     tags = fields.get("tags") or []
     tag_str = ", ".join(str(t) for t in tags)
+    summary_prefix = "未审核补充（closure 未纳入审核，不得作为已审根因或已验证效果）: " if fields.get("closure") else ""
     return (
         f"[{document_no}] {title}\n"
         f"严重度: {severity or ''}\n"
@@ -279,8 +281,8 @@ def _build_embedding_text(
         f"D4: {fields.get('d4_root_cause', '')}\n"
         f"D5: {fields.get('d5', '')}\n"
         f"D7: {fields.get('d7_node_action', '')}\n"
-        f"关闭: {fields.get('closure', '')}\n"
-        f"摘要: {fields.get('lesson_summary', '')}\n"
+        f"关闭（未审核补充）: {fields.get('closure', '')}\n"
+        f"摘要: {summary_prefix}{fields.get('lesson_summary', '')}\n"
         f"标签: {tag_str}"
     )
 
@@ -297,12 +299,15 @@ def _build_prompt(capa: CAPAEightD, fields: dict) -> str:
         f"D5: {fields['d5']}\n"
         f"D7: {fields['d7_node_action']}\n"
         f"linkage: {fields['linkage']}\n"
-        f"closure: {fields['closure']}\n"
+        f"closure_review_scope: {fields['closure_review_scope']}\n"
+        f"closure（未审核补充）: {fields['closure']}\n"
     )
     return (
         "你是质量知识库编辑。根据以下 8D 确定性字段，生成 JSON："
         '{"lesson_summary": string(非空), "tags": string[3..8]}。'
         "lesson_summary 用中文总结可复用的经验教训；tags 为短标签。"
+        "closure 是未审核补充，未纳入本次审核，不得解释为已审根因或已验证效果；"
+        "若摘要引用 closure，必须保留其未审核补充身份，不得覆盖 D4/D5/D6/D7 正式材料。"
         "只输出 JSON，不要 markdown。\n\n"
         f"{blocks}"
     )

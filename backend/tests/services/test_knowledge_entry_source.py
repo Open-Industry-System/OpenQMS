@@ -534,3 +534,29 @@ def test_knowledge_entry_candidate_serializes_entry_id():
     assert d5["source_knowledge_entry_id"] == entry_id
     assert d5["source_capa_document_no"] == "8D-KE-SER"
     assert d5["source_capa_id"] == capa_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text_source', ['summary', 'embedding', 'chunk'])
+async def test_legacy_capa_closure_retrieval_preserves_unreviewed_text_and_metadata(db, default_factory, text_source):
+    from copy import deepcopy
+    from tests.recommendation.test_capa_lesson_embedding_chain import _make_provider
+    dim = await _embedding_dim(db)
+    assert dim is not None
+    entry = _make_entry(db, factory_id=default_factory.id, lesson_summary='可能有效的补充意见' * 200 if text_source == 'summary' else '')
+    entry.fields = {**entry.fields, 'closure': '尚未经验证的补充'}
+    entry.embedding_text = '旧 embedding 补充' * 200 if text_source == 'embedding' else ''
+    await db.flush()
+    await _seed_embedding(db, dim, entry.entry_id, default_factory.id, 'DC-DC-100', chunk_text='旧 chunk 补充' * 200)
+    stored = deepcopy(entry.fields)
+    candidates = await KnowledgeEntrySource(db, _make_provider(dim)).retrieve(_ctx(factory_id=default_factory.id))
+    candidate = next(c for c in candidates if c.metadata['entry_id'] == str(entry.entry_id))
+    assert candidate.metadata['closure_review_scope'] == 'unreviewed_supplement'
+    assert candidate.content.startswith('未审核补充')
+    assert len(candidate.content) <= 500
+    assert candidate.to_d4_schema()['failure_cause_name'].startswith('未审核补充')
+    assert candidate.to_d5_suggestion_schema()['content'].startswith('未审核补充')
+    assert entry.fields == stored
+    assert not db.is_modified(entry, include_collections=True)
+    await db.refresh(entry)
+    assert entry.fields == stored

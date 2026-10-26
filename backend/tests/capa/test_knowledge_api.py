@@ -334,3 +334,32 @@ async def test_list_and_detail_happy_path(view_client, db, default_factory, admi
     assert d["entry_id"] == str(entry.entry_id)
     assert d["fields"]["lesson_summary"] == "learned X"
     assert d["document_no"] == entry.document_no
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('source_type,has_closure', [('capa', True), ('capa', False), ('fmea', True)])
+async def test_legacy_closure_projection_is_unreviewed_and_read_only(db, default_factory, view_client, source_type, has_closure):
+    from copy import deepcopy
+    fields = _fields()
+    if not has_closure:
+        fields.pop('closure')
+    entry = await _make_entry(db, default_factory.id, source_type=source_type, fields=fields)
+    await db.commit()
+    stored = deepcopy(entry.fields)
+    detail = await view_client.get(f'/api/knowledge/entries/{entry.entry_id}')
+    assert detail.status_code == 200, detail.text
+    projected = detail.json()['fields']
+    if source_type == 'capa' and has_closure:
+        assert projected['closure_review_scope'] == 'unreviewed_supplement'
+        assert projected['closure'] == stored['closure']
+        assert projected['lesson_summary'] == stored['lesson_summary']
+        listed = await view_client.get('/api/knowledge/entries')
+        item = next(item for item in listed.json()['items'] if item['entry_id'] == str(entry.entry_id))
+        assert item['closure_review_scope'] == 'unreviewed_supplement'
+        assert item['lesson_summary'] == stored['lesson_summary']
+    else:
+        assert projected == stored
+    assert entry.fields == stored
+    assert not db.is_modified(entry, include_collections=True)
+    await db.refresh(entry)
+    assert entry.fields == stored

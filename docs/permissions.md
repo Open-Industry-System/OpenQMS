@@ -321,3 +321,21 @@ CAPA 视图关闭或选择切换取消其 refresh 后，若原 helper 返回 nul
 调用方可显式发起新请求恢复；旧 CAPA 请求始终不重放。会话替换后的迟到成功/失败仍不得
 改写新凭据或登出新用户。仅补齐 owned initiator 的订阅结束分支，不改变无关请求自行发起
 refresh 的既有策略、private-route 保护、后端权限或业务审批规则。
+
+### Task 6：未审核结案补充的派生与修改责任
+
+`d8_closure` 不进入正式核心或 D8 receipt，补写不改 revision、review round、审批记录或历史来源版本。
+知识沉淀的 `fields.closure_review_scope` 固定为 `unreviewed_supplement`；D8 lesson 的 tags 固定追加
+`review_scope:unreviewed_supplement`（重复抽取不重复标签），D7 lesson 不因此获得 approved 身份。
+既有摘要提示明确 closure 是未审核补充，不得作为已审根因或已验证效果；知识 embedding 和推荐
+派生文本保留相同警示。原始 closure、摘要、分类与授权不变，不增加 provider 调用。
+
+历史知识 API 仅在返回的 fields 副本补齐该标记，列表也返回可空的 `closure_review_scope`；
+经验教训推荐按 `source_d_step=d8` 投影 `review_scope`，知识推荐按 CAPA closure 投影
+`closure_review_scope`，文本前置“未审核补充”，不因源 CAPA 已结案而推断为 approved。
+读取不修改 ORM、历史 fields/tags、embedding 或数据库；不迁移、不回填。
+
+补充责任只取当前报告、工厂下最近一条包含 `d8_closure` 的 UPDATE 审计的操作者与时间；
+新 UPDATE 审计记录工厂 ID。无适用审计或无操作者时对应值为 null，不借主表 updated_at 或
+created_by 推断。元数据查询不加载审计私有 before/after，Task 5 面板沿用实际值或 `—` 回退。
+原 savepoint、旧 embedding/outbox 清理及失败回滚顺序、终态/权限规则均不变。

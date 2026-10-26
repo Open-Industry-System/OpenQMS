@@ -130,6 +130,7 @@ async def _extract_lessons(
             f"capa_lesson:{capa_id}:{source_d_step}:{norm}",
         )
         category = _category_for(sentence)
+        tags = ["review_scope:unreviewed_supplement"] if source_d_step == "d8" else []
         values = {
             "lesson_id": lesson_id,
             "capa_id": capa_id,
@@ -139,13 +140,13 @@ async def _extract_lessons(
             "lesson_text_normalized": norm,
             "category": category,
             "source_d_step": source_d_step,
-            "tags": [],
+            "tags": tags,
         }
         stmt = pg_insert(CapaLessonLearned).values(**values).on_conflict_do_update(
             index_elements=["lesson_id"],
             set_={
                 "category": category,
-                "tags": [],
+                "tags": tags,
                 "updated_at": datetime.now(UTC),
             },
         )
@@ -162,7 +163,7 @@ async def _extract_lessons(
                 lesson_text_normalized=norm,
                 category=category,
                 source_d_step=source_d_step,
-                tags=[],
+                tags=tags,
             )
         )
     return lessons

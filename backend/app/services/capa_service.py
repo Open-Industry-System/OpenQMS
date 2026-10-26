@@ -370,6 +370,7 @@ async def update_capa(
             action="UPDATE",
             changed_fields=changed_fields,
             operated_by=user_id,
+            factory_id=capa.factory_id,
         )
         db.add(audit_log)
 

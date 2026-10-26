@@ -275,3 +275,44 @@ async def test_capa_lesson_chain_d8_edit_to_retrieval(db, default_factory, admin
     assert not (returned_deleted_lesson_ids & deleted_lesson_ids), (
         "deleted lesson_id should not appear in retrieve results"
     )
+
+
+@pytest.mark.asyncio
+async def test_d8_tags_and_legacy_text_only_retrieval_keep_unreviewed_scope(db, default_factory, admin_user):
+    from app.services.capa_lessons_service import _extract_lessons
+    capa = await _make_capa(db, default_factory.id, admin_user.user_id,
+        status='D8_CLOSURE', d7_prevention='正式预防要求', d8_closure='未验证的效果建议')
+    first = await _extract_lessons(db, capa, 'd8')
+    repeated = await _extract_lessons(db, capa, 'd8')
+    d7 = await _extract_lessons(db, capa, 'd7')
+    assert first[0].tags == ['review_scope:unreviewed_supplement']
+    assert repeated[0].tags == ['review_scope:unreviewed_supplement']
+    assert d7[0].tags == []
+    lessons = list((await db.scalars(select(CapaLessonLearned).where(
+        CapaLessonLearned.capa_id == capa.report_id))).all())
+    d8 = next(lesson for lesson in lessons if lesson.source_d_step == 'd8')
+    assert d8.tags == ['review_scope:unreviewed_supplement']
+    # Legacy rows have no tag. The read projection must still identify their origin.
+    d8.tags = []
+    await db.flush()
+    dim = await _embedding_dim(db)
+    assert dim is not None
+    provider = _make_provider(dim)
+    await process_batch_once(db, provider)
+    context = RecommendationContext(capa_data={'d2_description': '效果建议',
+        'product_line_code': 'DC-DC-100', 'report_id': capa.report_id}, stage='d4',
+        factory_id=default_factory.id, user_product_lines=['DC-DC-100'])
+    candidates = await LessonsLearnedSource(db, provider).retrieve(context)
+    supplement = next(c for c in candidates if c.metadata['lesson_id'] == str(d8.lesson_id))
+    assert supplement.metadata['review_scope'] == 'unreviewed_supplement'
+    assert supplement.metadata['source_d_step'] == 'd8'
+    assert supplement.content.startswith('未审核补充')
+    assert supplement.to_d4_schema()['failure_cause_name'].startswith('未审核补充')
+    assert supplement.to_d5_suggestion_schema()['content'].startswith('未审核补充')
+    formal = next(c for c in candidates if c.metadata['lesson_id'] == str(d7[0].lesson_id))
+    assert 'review_scope' not in formal.metadata
+    assert '未审核补充' not in formal.content
+    assert d8.tags == []
+    assert not db.is_modified(d8, include_collections=True)
+    await db.refresh(d8)
+    assert d8.tags == []

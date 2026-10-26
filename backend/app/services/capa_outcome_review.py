@@ -546,7 +546,11 @@ async def _dto(db, capa, material):
             UUID(material['round_id']) if material['round_id'] else None)):
         decision = dict(action='approved' if audit.action == 'D8_APPROVED' else 'rejected',
             actor_id=audit.operated_by, operated_at=audit.operated_at, audit_id=audit.log_id)
-    supplement_audit = await _audit(db, capa, ['UPDATE'], AuditLog.changed_fields.has_key('d8_closure'))
+    supplement_audit = (await db.execute(select(AuditLog.operated_by, AuditLog.operated_at).where(
+        AuditLog.table_name == 'capa_eightd', AuditLog.record_id == capa.report_id,
+        AuditLog.factory_id == capa.factory_id, AuditLog.action == 'UPDATE',
+        AuditLog.changed_fields.has_key('d8_closure'),
+    ).order_by(AuditLog.operated_at.desc(), AuditLog.log_id.desc()).limit(1))).one_or_none()
     output = CapaOutcomeReview(report_id=capa.report_id, status=capa.status,
         review_round_id=material['round_id'], revision=revision, binding_status=binding_status,
         core={key: material['core'][key] for key in _CORE[:4]},

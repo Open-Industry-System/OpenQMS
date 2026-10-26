@@ -133,3 +133,16 @@ it('aborts an in-flight read on close and ignores its later denial', async () =>
   await act(async () => read.reject({ response: { status: 403 } }));
   expect(changed).toHaveBeenCalledTimes(count);
 });
+
+it.each([true, false])('shows supplement audit responsibility or honest null fallback (available=%s)', async available => {
+  const supplement = { text: '结案补充但未审核', review_scope: 'unreviewed_supplement' as const,
+    updated_by: available ? source : null, updated_at: available ? '2026-10-24T12:34:56Z' : null };
+  vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...fixture, status: 'D8_CLOSURE',
+    binding_status: 'legacy_unversioned', supplement });
+  render(view('A', 'D8_CLOSURE')); await screen.findByText('结案补充但未审核');
+  const section = screen.getByTestId('capa-outcome-supplement');
+  expect(section).toHaveTextContent('结案后补充，未纳入本次审核');
+  expect(section).toHaveTextContent(available ? `${source} · 2026-10-24T12:34:56Z` : '— · —');
+  expect(section).not.toHaveTextContent('已批准');
+  expect(screen.getByTestId('capa-outcome-core')).not.toHaveTextContent(supplement.text);
+});
