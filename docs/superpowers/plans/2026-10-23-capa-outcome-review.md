@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-25）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；Task 4 实际决定绑定和生产回执已通过独立规格/质量复核，最终聚焦回归 662 passed；当前准备 Task 5 生产界面，真实 provider/浏览器与最终冻结仍待后续任务，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-27）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；Task 4 实际决定绑定和生产回执已通过独立规格/质量复核，最终聚焦回归 662 passed；Task 5 生产集中面板、请求归属及终态只读经两轮修正通过独立规格/质量复核，最终前端 245 passed /27 files，类型/构建/E2E 类型通过；当前准备 Task 6 未审补充派生边界，真实 provider/浏览器与最终冻结仍待后续任务，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
 ## Global Constraints
 
@@ -599,7 +599,7 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/capa/test_capa_outcome_de
 
 **Interfaces:** `getCapaOutcomeReview(id: string, signal?: AbortSignal): Promise<CapaOutcomeReview>`；advance 增加两个 expected 字段及可选 signal。Panel props 为 `{reportId:string; status:string; canApprove:boolean; credentialIdentity:string; onReviewChange:(review:CapaOutcomeReview|null)=>void}`。父页只从当前 Panel 成功回调取得 token，不另有隐藏批准入口。
 
-- [ ] **Step 1: 写 DTO 和材料显示 RED**
+- [x] **Step 1: 写 DTO 和材料显示 RED**
 
 ```typescript
 import { render, screen } from '@testing-library/react';
@@ -650,7 +650,7 @@ it('shows actual measures and excludes the supplement from reviewed core', async
 
 上面的无 FMEA/CP 场景允许 documents 为空；另加真实 document ref 与 D7 action fixture 验证来源版本和权限失败的显示，不以空集合代替来源契约覆盖。使用与现有页面测试相同的 i18n/auth store 包装；将 getByTestId 配置为 data-e2e 并在测试结束恢复，避免污染其他文件。
 
-- [ ] **Step 2: 定义新读取与 advance 类型**
+- [x] **Step 2: 定义新读取与 advance 类型**
 
 ```typescript
 export async function getCapaOutcomeReview(id: string, signal?: AbortSignal) {
@@ -662,11 +662,11 @@ export async function getCapaOutcomeReview(id: string, signal?: AbortSignal) {
 
 类型严格复用完整 DTO；不缓存到 Zustand/localStorage/IndexedDB，不把普通报告改成 30 秒自动消失。既有 Axios 401 自动重放若覆盖 advance，需为这条决定 POST 加精确不自动重放规则并测 `frontend/src/api/client.ts`；不能重写全站认证状态机。
 
-- [ ] **Step 3: 实现纯文本集中面板**
+- [x] **Step 3: 实现纯文本集中面板**
 
 D8 pending/closed/archive 展示根因、实际措施、D6 结果、验证方法/结论/证据元数据、D7 记录和受控版本；证据不内联执行 URL/HTML，不提取附件。显示当前状态和 legacy/无法验证绑定，不把 D7 pending 画成 verified，不把非空 D6 自动画成“有效”。必要源读取失败时不显示批准按钮，不能以“部分加载成功”放行。
 
-- [ ] **Step 4: 唯一决定入口绑定当前面板**
+- [x] **Step 4: 唯一决定入口绑定当前面板**
 
 ```typescript
 const req: AdvanceRequest = {
@@ -681,11 +681,11 @@ await advanceCAPA(id, req);
 
 用会话 epoch 和 controller registry 中止该面板全部并发请求；身份/token/tenant/report/selection 改变、401/403/404 或关闭时清空 review/理由。每次 await 后检查 epoch，旧成功和旧拒绝都不能覆盖新身份。新读请求失败不得继续保留可批准的旧 token；不无谓给整页普通业务状态引入新全局缓存。
 
-- [ ] **Step 5: 关闭所有终态核心编辑入口**
+- [x] **Step 5: 关闭所有终态核心编辑入口**
 
 CAPADetailPage 的 handleUpdate/Replace/Append/Undo/link 在调用 API 前检查当前终态与核心字段；父页将 `canEdit && !reviewedState` 传到所有实际材料编辑组件。pending 仍保留原阶段规则。终态面板为只读；补报告在 closed 下可编辑，在 archived 下不可编辑且始终显示未审标识。不用这个本地检查代替 Task 2 后端保护。
 
-- [ ] **Step 6: 乱序响应测试、GREEN 与类型检查**
+- [x] **Step 6: 乱序响应测试、GREEN 与类型检查**
 
 测试 A 请求未回→同文档切 B→A 成功/拒绝迟到；旧 token 不能批准；closed/admin 没有核心编辑/采纳按钮；D4/D5/D6 原可编辑流程无新审批按钮；补报告不改变 approved core 标志。
 

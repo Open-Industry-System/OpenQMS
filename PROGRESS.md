@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-27 CAPA 结果审核 Task 1–5 已验收，进入 Task 6**：Task 5 第二轮修正 `fa5f4332` 已通过独立规格及质量复核，原 I1/I2/I3 和新增 F1 均已解决，无 Critical/Important 遗留。最终受影响前端 **245 passed /27 files**，前端 tsc、生产 build、E2E tsc 均有 **SHELL_EXIT=0**。下面各轮待审条目保留历史过程，以本条最新验收为准。下一任务为未审补充的知识/经验派生边界；真实 provider/浏览器和最终完整冻结尚未完成，不 push/合并/部署。
+
 > **2026-10-27 Task 5 fix round 2/5：F1 本地修复待独立重审**：FIX_BASE `e79be478`；owned refresh 取消/失效时现有无关订阅者以各自原始 401 reject 并结束，不再无限等待，旧 CAPA 不重放。最终覆盖 **107 passed**，完整原目标集 **27 files /245 passed**（保留原 241）；前端 tsc、生产 build、E2E tsc 均有持久 **SHELL_EXIT=0**。I1/I2/I3 已由控制方确认 addressed，本轮不重开；Task 5 不宣告完成，仍待 scoped re-review。详见文末 round 2 报告。
 
 > **2026-10-26 Task 5 fix round 1/5 本地修复批次完成，待重审**：BASE `16dff517` 的 I1 前置/子操作归属、I2 Axios 认证副作用及 I3 无关知识操作 loading 已按复核修正。最终完整前端 **27 files /241 passed**（保留原 210），前端 tsc、生产 build、完整 E2E tsc 均有持久日志 **SHELL_EXIT=0**。下方初次 Task 5 自检结论已被复核问题取代，以文末同名 fix round 1 报告为当前状态；不冒称独立门禁已通过，不 push/合并/部署。
