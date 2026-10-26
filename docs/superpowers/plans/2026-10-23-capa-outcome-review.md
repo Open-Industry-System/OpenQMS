@@ -8,7 +8,7 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-27）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；Task 4 实际决定绑定和生产回执已通过独立规格/质量复核，最终聚焦回归 662 passed；Task 5 生产集中面板、请求归属及终态只读经两轮修正通过独立规格/质量复核，最终前端 245 passed /27 files，类型/构建/E2E 类型通过；当前准备 Task 6 未审补充派生边界，真实 provider/浏览器与最终冻结仍待后续任务，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-27）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；Task 4 实际决定绑定和生产回执已通过独立规格/质量复核，最终聚焦回归 662 passed；Task 5 生产集中面板、请求归属及终态只读经两轮修正通过独立规格/质量复核，最终前端 245 passed /27 files，类型/构建/E2E 类型通过；Task 6 未审补充派生边界亦通过独立规格/质量复核，受影响后端821 passed、前端121 passed及类型/构建通过；当前准备 Task 7 真实员工 HTTP/provider/浏览器验收，最终冻结仍待后续任务，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
 ## Global Constraints
 
@@ -706,7 +706,7 @@ npx tsc --noEmit -p tsconfig.e2e.json
 
 **Interfaces:** 补充来源统一字面量 `unreviewed_supplement`。`KnowledgeEntry.fields['closure_review_scope']` 使用该值；D8 `CapaLessonLearned.tags` 追加固定 `review_scope:unreviewed_supplement`（去重），D7 lessons 不借此被标为 approved。不新增模型列/迁移，不改旧知识授权/分类。
 
-- [ ] **Step 1: 写补充不改变批准绑定 RED**
+- [x] **Step 1: 写补充不改变批准绑定 RED**
 
 ```python
 @pytest.mark.asyncio
@@ -729,17 +729,17 @@ async def test_supplement_never_rebinds_approval(review_case):
 
 另以 Task 4 真实新回执重复同测试，确认 verified 绑定不变；legacy 不伪造新版已验证回执。mixed PUT（d8_closure+d5）整体拒绝，archived 仍不能补写。
 
-- [ ] **Step 2: 在原来源抽取处加明确未审语义**
+- [x] **Step 2: 在原来源抽取处加明确未审语义**
 
 `_extract_lessons(..., source_d_step='d8')` 在生成 tags 时加入固定 tag；`_assemble_deterministic_fields()` 为 closure 增加 `closure_review_scope`。现有 `_extract_d8_with_cleanup` 的 savepoint、旧 embedding/outbox 清理和失败回滚顺序保持，不先 mutate capa；不产生新的 D8_APPROVED，也不重签 receipt。
 
 在传给既有摘要流程的字段/提示中明确 closure 是未审补充，不能解释为已审根因或已验证效果；不扩大送模字段或新增 provider 调用。下游读取投影必须保留该机器标记：knowledge API 在返回 source_type=capa 且含 closure 的 fields 副本中补齐 unreviewed_supplement；recommendation_sources_extra 读到 source_d_step=d8 时把同一未审标记带入来源元数据，必要时在派生文本前标明“未审核补充”。不得 mutate ORM 或回填历史数据库。旧数据无标记不默认为 approved，只有文本的消费者也不能根据来源 CAPA 已结案就将其当成已审依据。
 
-- [ ] **Step 3: 补充修改责任 metadata**
+- [x] **Step 3: 补充修改责任 metadata**
 
 outcome GET 只从该报告最近包含 d8_closure 的 UPDATE 审计取得 updated_by/updated_at；不把 CAPA 主表 updated_at 当成补充的专属时间。没有审计时返回 null，不推测操作人。界面显示未审标识和可用的修改责任信息；不复制审计中的私有 before/after 到新 DTO。
 
-- [ ] **Step 4: GREEN 与原知识链回归**
+- [x] **Step 4: GREEN 与原知识链回归**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh

@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-27 CAPA 结果审核 Task 1–6 已验收，进入 Task 7**：Task 6 `99f108ff` 通过独立规格及质量复核，无 Critical/Important。受影响后端 **821 passed /3 warnings**，前端 **121 passed /5 files**，类型与构建通过。归档后仅补充 d8_closure 的既有冻结仍为400，依据实施计划第52行明确保留原规则；已审核心及混合PUT继续固定409，不是新增豁免。诊断噪声保留供最终复核，不扩展整改。下一步真实员工HTTP/provider/浏览器验收及最后完整冻结，整片尚未完成；不push/合并/部署。
+
 > **2026-10-27 CAPA 结果审核 Task 1–5 已验收，进入 Task 6**：Task 5 第二轮修正 `fa5f4332` 已通过独立规格及质量复核，原 I1/I2/I3 和新增 F1 均已解决，无 Critical/Important 遗留。最终受影响前端 **245 passed /27 files**，前端 tsc、生产 build、E2E tsc 均有 **SHELL_EXIT=0**。下面各轮待审条目保留历史过程，以本条最新验收为准。下一任务为未审补充的知识/经验派生边界；真实 provider/浏览器和最终完整冻结尚未完成，不 push/合并/部署。
 
 > **2026-10-27 Task 5 fix round 2/5：F1 本地修复待独立重审**：FIX_BASE `e79be478`；owned refresh 取消/失效时现有无关订阅者以各自原始 401 reject 并结束，不再无限等待，旧 CAPA 不重放。最终覆盖 **107 passed**，完整原目标集 **27 files /245 passed**（保留原 241）；前端 tsc、生产 build、E2E tsc 均有持久 **SHELL_EXIT=0**。I1/I2/I3 已由控制方确认 addressed，本轮不重开；Task 5 不宣告完成，仍待 scoped re-review。详见文末 round 2 报告。
