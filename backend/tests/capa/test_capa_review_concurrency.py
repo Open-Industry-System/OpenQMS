@@ -173,7 +173,8 @@ async def test_role_revoked_during_real_parent_lock_wait(review_case):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('change', ['source_version', 'planning_permission', 'scope'])
-async def test_complete_source_wait_revalidates_version_and_current_access(review_case, review_sources, change):
+@pytest.mark.parametrize('target', ['D8_CLOSURE', 'D7_PREVENTION'])
+async def test_complete_source_wait_revalidates_version_and_current_access(review_case, review_sources, change, target):
     from app.models.fmea import FMEADocument
     from app.models.role import UserProductLine
     from app.services.version_service import create_fmea_version, lock_version_parent
@@ -188,7 +189,7 @@ async def test_complete_source_wait_revalidates_version_and_current_access(revie
         await lock_version_parent(holder, 'fmea', review_sources.fmea_id)
         async with lock_witness(case, approver_pid, 'fmea_documents') as reached:
             task = asyncio.create_task(advance_capa(approver, await case.report(approver), case.actor_id,
-                AdvanceRequest(target_state='D8_CLOSURE', **seen)))
+                AdvanceRequest(target_state=target, reject_reason='需补足实施证据', **seen)))
             try:
                 await asyncio.wait_for(reached.wait(), 5)
                 await wait_for_pg_blocker(case, approver_pid, holder_pid)

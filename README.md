@@ -161,6 +161,7 @@ docker compose up -d
 | [管理员指南](docs/admin-guide.md) | 用户管理、权限配置、工厂分配 |
 | [权限参考](docs/permissions.md) | 完整权限矩阵 |
 | [开发指南](docs/development.md) | 开发约定、添加新模块 |
+| [E2E 验收](docs/e2e.md) | 常规 E2E 与自有租户 CAPA 成果审核 gate（缺测试 provider 不算通过） |
 | [路线图](docs/ROADMAP.md) | 开发计划与进度 |
 | [决策日志](docs/DECISIONS.md) | 关键架构决策（ADR）及其背景与影响 |
 

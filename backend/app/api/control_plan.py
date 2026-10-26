@@ -71,7 +71,7 @@ async def create_control_plan(
         check_factory_access(factory_id, scope)
         cp = await control_plan_service.create_control_plan(db, req, scope.user.user_id, factory_id=factory_id)
         await validate_factory_invariant(cp, db)
-        await db.refresh(cp)
+        cp = await control_plan_service.get_control_plan(db, cp.cp_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ControlPlanResponse.model_validate(cp)

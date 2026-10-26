@@ -60,6 +60,13 @@ it('shows actual complete DTO materials, source versions and escaped evidence; s
   expect(changed).toHaveBeenLastCalledWith(fixture);
 });
 
+it.each(['D8_CLOSURE', 'ARCHIVED'])('exposes immutable core semantics in %s for employee acceptance', async status => {
+  vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...fixture, status, binding_status: 'legacy_unversioned', review_round_id: null });
+  render(view('A', status));
+  await screen.findByText('实施后复测合格');
+  expect(screen.getByTestId('capa-outcome-core')).toHaveAttribute('data-readonly', 'true');
+});
+
 it.each([401, 403, 404, 409])('withdraws a prior token before reload and on %s, without partial material fallback', async status => {
   render(view()); await screen.findByText('实施后复测合格');
   const read = deferred<CapaOutcomeReview>(); vi.mocked(capaApi.getCapaOutcomeReview).mockReturnValueOnce(read.promise);

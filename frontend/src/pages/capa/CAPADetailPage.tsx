@@ -913,7 +913,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
         <>
           {capa.status === "D8_APPROVAL_PENDING" && canApprove('capa') && (decisionReady || decisionBusy) && (
             <>
-              <Button type="primary" disabled={!decisionReady} loading={decisionBusy} icon={<CheckOutlined />} onClick={handleApprove} data-e2e="capa-approve">
+              <Button type="primary" disabled={!decisionReady} loading={decisionBusy} icon={<CheckOutlined />} onClick={handleApprove} data-e2e="capa-approve" data-testid="capa-outcome-approve">
                 {t("reject.approve", "审批关闭")}
               </Button>
               <Button danger disabled={!decisionReady} icon={<UndoOutlined />} onClick={() => { if (decisionReady) setRejectDialogOpen(true); }} data-e2e="capa-reject">
@@ -1200,7 +1200,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
         <Col xs={24} lg={8}>
           <DataCard title={t("detail.reportInfo", "报告信息")}>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.documentNo", "编号")}:</Text> <span style={{ fontFamily: "var(--qf-font-mono)" }}>{capa.document_no}</span></p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.status", "状态")}:</Text> <span data-e2e="capa-status">{capa.status}</span></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.status", "状态")}:</Text> <span data-e2e="capa-status" data-testid="capa-status">{capa.status}</span></p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.severity", "严重等级")}:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.dueDate", "期限")}:</Text> {capa.due_date || t("detail.notSet", "未设定")}</p>
             <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedFMEA", "关联 FMEA")}:</Text> {capa.fmea_ref_id || t("detail.notLinked", "未关联")}</p>

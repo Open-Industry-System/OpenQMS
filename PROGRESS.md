@@ -1332,3 +1332,270 @@ All changed file paths:
 - Next: controller's independent Task 6 spec/quality review. Live provider/browser/full make-check
   and later-task acceptance are separate gates and were deliberately not run here. No later task
   implemented; no controller ledger changed, push, merge or deployment.
+
+## Task 7 report — genuine employee HTTP, tenant, provider and Chromium outcome review
+
+**Status: BLOCKED, not Task7 done or independently accepted.** Base `f6198232`;
+Tasks1–6 were not restarted. This complete named report is appended here instead
+of creating a standalone report Markdown file, following the session restriction.
+Local commit authorized: `test(capa): verify outcome review and post-close immutability`
+(the commit containing this report). No push, merge, deploy or controller-ledger edit.
+
+### Requirements, assumptions and implementation
+
+- Read only Task7 brief/context plus focused existing interfaces, the Task4 Minor
+  summary and the tail of this progress file. CodeGraph context returned unrelated
+  symbols; its focused file query reproduced `database disk image is malformed`.
+  Used the permitted bounded native discovery/precise reads. No index repair,
+  rebuild, configuration/security modification or child agents.
+- Existing registered random `_test` DB and installed interpreter/Chromium only.
+  Real public migrations were reused, not recreated/reset/reseeded; read-only final
+  witness finds public revision `20261009_agent_task_attachments`. Every run-owned
+  business tenant executes real tenant migrations through `tv005_agent_task_attachments`.
+  The current container fingerprint, owner label, loopback host/port, current DB/user
+  are checked before lifecycle work; container ownership is checked again at cleanup.
+- `owned_outcome_server` exposes `app`, `base_url`, `tenant_slug`, `report_id`,
+  `editor_login`, `approver_login`, `session_factory`, `binding`, `nonce` plus scoped
+  negative-test identities. Sessions are real binding-aware TenantSessions with
+  real commits. New FastAPI app mounts actual auth/CAPA/product-line/FMEA/CP/knowledge
+  routers, TenantContextMiddleware and narrow production outcome error handlers.
+  No normal get_db/auth/permission/commit replacement. The existing login limiter's
+  storage is isolated for the fixture, without changing its threshold/check.
+- Two actual business tenants contain identical protection UUIDs but distinguishable
+  material. Current roles are field_qe EDIT and manager APPROVE; terminal write matrix
+  also logs in the real bootstrap admin. Synthetic legacy terminal records are
+  **protection-only**, without fabricated approval receipts or document gates.
+  Their verification rows are synthetic terminal material, not positive gate proof.
+  An unbound legacy FMEA source correctly cannot reconstruct an approval version.
+- The positive report is created over normal HTTP at D1. Executable live helpers
+  cover D1/D2/D3 import and provider, manual containment execution, current-root-cause
+  verification, implemented D5 measures, exact D6 `实施后复测合格`, real D7 dispositions,
+  real D8 impact and decision/audit services, then pending. No D4/D5/D6 approval nodes.
+  Empty-source and new-controlled-document cases are separate: the latter creates
+  FMEA/CP over actual HTTP, publishes real versions and requires the actual provider
+  to identify both new documents and the actual document audit to pass. Unexpected
+  provider output is failure, never permission to fabricate a passed gate.
+- Live pending HTTP assertions cover EDIT approval403, D6/verification stale409,
+  mandatory rejection reason, real return to D7/resubmission, old-round409, and current
+  FMEA/PLANNING source denials with no partial DTO or closure side effects. These
+  downstream assertions are implemented but **not executed past D3** in this session.
+- Browser spec uses normal UI login; its deliberate same-document identity switch
+  calls the production auth-store `login` action with real credentials, not setState
+  or injected APPROVE authority. A nonce-controlled window holds an actual completed
+  authorized server response, not a mocked DTO/query/lock. Old request cancellation
+  and fresh employee material are asserted without browser sleeps. Nonce endpoints
+  only change real permissions/windows or read owned assertion data.
+- Browser approval captures actual outgoing revision/round and compares it to the
+  displayed server metadata. Required core/status/approve testids were added without
+  removing existing data-e2e selectors; immutable core gets `data-readonly=true`.
+  Positive closure invokes untouched production advance/knowledge/lateral services.
+  An empty real lateral result is not claimed as a lateral provider invocation.
+- Direct HTTP terminal matrix checks PUT/mixed PUT/adoption/create+patch verification/
+  D7/link writes409 across EDIT/APPROVE/ADMIN with unchanged material, audit, embedding,
+  knowledge, lateral and outbox snapshots. Legitimate closed supplement remains
+  unreviewed and separate from core; archive is real HTTP. Archive-only supplement400
+  versus core/mixed409 is preserved. Factory/PL/source denial precedes lock disclosure.
+- Deferred rejection-specific Task4 source-row-wait Minor is now covered by three
+  added rejection variants (source version, current planning privilege, current PL
+  scope), each using actual PostgreSQL wait/blocker witnesses and unchanged original
+  approval cases. Existing Task4 fixture/provider tests remain fixture evidence;
+  their synthetic gate/closure collaborators are **not** live-provider acceptance.
+- Controlled runner has explicit `live`/`acceptance` opt-in and loads only an existing
+  authorized worktree `.env.e2e` whitelist: LLM_PROVIDER/API_KEY/MODEL/BASE_URL/TIMEOUT.
+  No shell evaluation, interpolation, arbitrary environment passthrough or ambient
+  Anthropic/OpenAI credentials/proxies. Invalid/missing test profile never falls
+  back to ambient credentials. Node/Vite/browser get a separate safe whitelist and
+  disposable employee credentials, never provider/DB credentials. Ordinary private
+  run-owned.py clears keys and is not claimed as genuine live acceptance.
+- Minimal integration defects discovered by real tests were fixed, rather than
+  bypassed: version hashing qualifies `public.digest`, matching the existing tenant
+  trigger without widening search_path; CP create response uses existing eager-loaded
+  `get_control_plan`, avoiding post-commit MissingGreenlet on `items`. No migration,
+  provider adapter, production advance, knowledge or lateral implementation changed.
+
+### RED / GREEN / systematic debugging evidence
+
+All paths below are under the isolated worktree; recorded exit codes are real.
+
+1. Frontend immutable-core RED: two new terminal attribute tests failed because
+   data-readonly was absent (20 existing tests passed), exit1. Minimal attribute
+   addition GREEN: 22 passed, exit0. Logs:
+   `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-readonly-red.log`
+   and `task7-readonly-green.log` in the same directory.
+2. Runner first RED was an explicitly disclosed collection failure (missing runner
+   module), not proof of a production behavior defect:
+   `focused-20261026T171226247353.log`, exit2. Genuine behavioral RED for invalid
+   controlled timeout then failed `authorized_test_profile != invalid_test_profile`:
+   `focused-20261026T172829983735.log`, exit1, 1 failed/3 passed. Timeout validation
+   GREEN is included in the final full 35-test gate. Initial controlled API runner
+   startup also exposed invalid empty numeric LLM_TIMEOUT (exit4,
+   task7-api-20261026T171709712526.log); explicit safe timeout30 corrected that
+   harness input without provider credentials or an authority bypass.
+3. Genuine tenant setup RED: `focused-20261026T171502216291.log`, exit1, two setup
+   errors `UndefinedFunctionError: function digest(text, unknown) does not exist`.
+   Traced strict tenant search_path to the unqualified service call; the reviewed
+   tenant trigger already qualifies public.digest. Minimal qualification plus
+   independent real FMEA/CP producer/verifier tests are GREEN in the final API gate;
+   the original version/control-plan regressions also pass.
+4. Subsequent fixture mistakes were corrected, not counted as production RED:
+   legacy source without an approval binding must conflict, not return200; link-fmea
+   takes query parameters, not a JSON fmea_id. The terminal readable fixture and
+   unbound-source negative are now separate, without manufacturing receipts/gates.
+5. First actual Chromium run failed on an incorrect test locale assumption:
+   `task7-browser-20261026T172320369036.log`, exit1. Accessibility evidence showed
+   English `Reload review materials`; app stores language in `openqms_locale`, not
+   i18nextLng. Corrected only the test preference. Genuine rerun passed, including
+   actual held-response cancellation and same-document employee login.
+6. Actual controlled-document HTTP RED exposed CP create500. Real exception was
+   Pydantic attribute extraction -> MissingGreenlet for items, not an authority or
+   provider denial. Provider-free isolated RED:
+   `focused-20261026T173536652179.log`, exit1. Existing eager-loading service reuse
+   GREEN: `focused-20261026T173603845907.log`, exit0, 1 passed. This regression is
+   also part of the final complete API gate. No DTO/approval/gate fixture replaced it.
+
+### Final commands, actual output and persistent exit markers
+
+Working directory for all commands:
+`/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel`.
+Commands with the private runner enter this worktree's backend only. The allowed
+main-checkout Python path is used solely as executable, not as a code/config source.
+
+```text
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python backend/tests/e2e/capa_outcome_runner.py api
+TASK7_EXIT: mode=api; code=0; provider_config=not_requested
+35 passed, 5 warnings in 38.17s
+
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python backend/tests/e2e/capa_outcome_runner.py acceptance
+TASK7_EXIT: mode=acceptance; code=1; provider_config=missing_test_profile
+2 failed, 1 passed, 5 warnings in 23.38s
+CHROMIUM_REAL: scenario=terminal protection; exit=0; 1 passed; retries=0; workers=1
+LIVE_PROVIDER_BLOCKED: config=missing_test_profile; D3 report_status=blocked; report_error=None
+```
+
+`api` executes the entire requested outcome API/concurrency files plus runner tests.
+`acceptance` executes the entire browser test file with no -k, no skips and no
+xfail/xpass/deselection. Both live cases fail at the genuine D3 provider gate;
+no downstream assertion is silently counted as passing. Final controlled runner
+commands include `-q --tb=short -rA`; their result JSON records the full subprocess
+argv and real exit code. Final logs/result JSON:
+
+- `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-api-20261026T175333395663.log`
+- `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-api-20261026T175333395663-result.json`
+- `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-acceptance-20261026T175414927310.log`
+- `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-acceptance-20261026T175414927310-result.json`
+
+Additional affected regression command (ordinary cleared-key runner, fixture/service
+proof only, no live-provider claim):
+
+```text
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/run-owned.py pytest tests/fmea/test_fmea_version_factory_id.py tests/test_control_plan_item_id_stability.py tests/test_control_plan_uuid_dedup.py tests/capa/test_capa_outcome_review.py tests/capa/test_capa_outcome_sources.py tests/capa/test_capa_outcome_decision.py tests/capa/test_capa_outcome_supplement.py -q --tb=short
+104 passed, 3 warnings in 31.75s; exit0
+```
+
+Persistent log/result: `focused-20261026T174139383746.log` and matching
+`focused-20261026T174139383746-result.json` under the same absolute evidence directory.
+
+Frontend commands and actual results:
+
+```text
+(cd frontend && node node_modules/vitest/vitest.mjs run src/components/capa src/pages/capa/CAPADetailPage.test.tsx src/api/capa.test.ts src/api/client.capaOwnership.test.ts)
+20 files / 221 tests passed, 11.77s; EXIT_CODE=0
+node frontend/node_modules/typescript/bin/tsc --noEmit -p frontend/tsconfig.json
+EXIT_CODE=0
+node frontend/node_modules/typescript/bin/tsc --noEmit -p frontend/tsconfig.e2e.json
+EXIT_CODE=0
+(cd frontend && npm run build)
+built in 6.48s; EXIT_CODE=0
+```
+
+Logs with persistent real EXIT_CODE lines:
+`task7-final-frontend-tests.log`, `task7-final-frontend-types.log`,
+`task7-final-e2e-types.log`, `task7-final-frontend-build.log`, all under
+`/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/`.
+
+Warnings were retained: 3 baseline Pydantic class-Config deprecations; websockets
+legacy/server protocol deprecations in actual HTTP gates; Node localStorage
+ExperimentalWarning, jsdom pseudo-element getComputedStyle messages, React/Vite
+esbuild/optimizeDeps deprecations in frontend tests; static+dynamic api/version.ts
+import warning in build. Earlier Chromium failure also recorded Node module.register
+deprecations. No final skip/xfail/xpass; no historical 2999-test baseline was claimed.
+Full make check and story/skill freeze are deliberately deferred to Task8.
+
+### Resources, teardown and handling concern
+
+- Only registered PG container `openqms_capa_outcome_pg_20261025_92f8027e`, its registered
+  volume and two registered `_test` databases were used. No new DB, reset, reseed,
+  recreation, migration baseline replacement, production/shared/seed DB or ClamAV
+  operation. The application DB was not used for business test writes.
+- Per-run journals identify only owned random tenant UUIDs/slugs/schemas, actual
+  cleanup and closed sockets. No password, provider key/URL, access/refresh token or
+  harness control nonce is stored in those journals. Only pre-allocated run slugs
+  are cleaned, including a failed provisioning attempt; unrelated tenants are not
+  enumerated for deletion. Core container/volume/databases remain for Task8.
+- Final read-only resource witness:
+  `/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/task7-resource-check.py`
+  exited0: container ID/owner verified, registered volume and both databases preserved,
+  remaining outcome tenants=0; 28 tenant teardown journals verified; 2 Node
+  teardown journal verified. Actual final Node journal records Vite port54298,
+  Vite PID74676 exit0, Playwright PID74678 exit0. No PID from a journal is killed or
+  reused as cleanup authority.
+- Persistent witness:
+  `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-final-resources.json`.
+  Final Node evidence: `task7-node-resources-9bcdd21ca3bf42bc9ca39e7b8b1a2bc5.json`
+  in the same directory. Final API/browser logs name their individual tenant journals.
+- **Handling concern:** initial inspection mistakenly printed the private owned-test
+  shell profile into tool output. Its credential values are not repeated here and
+  were not sent to browser children. No authorized provider secret was loaded (the
+  test profile is absent), no production config was read, and no credential rotation
+  or profile change was performed. The transcript exposure of owned-test credentials
+  remains disclosed for owner handling; this report does not claim perfect secret
+  handling or silently change resource/security configuration to hide the mistake.
+
+### Changed files and self-review
+
+All paths are absolute; existing documentation/history was appended, not overwritten.
+
+```text
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/README.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/PROGRESS.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/docs/e2e.md
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/api/control_plan.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/app/services/version_service.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/capa/test_capa_outcome_api.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/capa/test_capa_review_concurrency.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/e2e/capa_outcome_harness.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/e2e/capa_outcome_progression.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/e2e/capa_outcome_runner.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/e2e/test_capa_outcome_review_browser.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/backend/tests/e2e/test_capa_outcome_runner.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/playwright.agent.config.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/e2e/specs/capa/outcome-review.spec.ts
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/CapaOutcomeReviewPanel.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/components/capa/CapaOutcomeReviewPanel.test.tsx
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/frontend/src/pages/capa/CAPADetailPage.tsx
+```
+
+- Self-reviewed business/transaction/authority boundaries and every brief checklist.
+  Original test cases/assertions retained; no existing guard weakened. Real lock
+  waits, rollback side effects, current authorization precedence, strict tenant
+  namespaces, historical binding and supplement/archive policy remain intact.
+  Only two one-line backend integration fixes and minimal DOM semantics touch
+  production. No Agent command/plugin/DIRECT/scanner/model delivery or broad settings.
+- README/docs reflect actual implemented gate semantics, not a claimed live success.
+  `git diff --check` clean before report append; final commit also checks it.
+- **Unresolved external blocker:** no existing authorized worktree `.env.e2e`.
+  The controlled runner deliberately does not use ambient general-purpose credentials.
+  Actual business import returns blocked, not a provider HTTP result. Genuine D4+
+  progression, pending EDIT403/stale409/rejection/resubmission, bound PLANNING/FMEA
+  review denials, actual browser approval/receipt, knowledge sink and lateral close
+  remain **unexecuted acceptance**, despite executable tests and independent fixtures.
+- **Diagnostic/provenance limitation remains carried for final triage:** the real
+  D3 blocked API exposes `report_error=None`; its internal missing-config catch does
+  not preserve a provider exception class in that response. No invented error class,
+  mock response or inferred provider success fills that gap. The inherited deferred
+  diagnostic-provenance limitation is not marked resolved by this task. The separate
+  rejection source-wait Minor is covered as described above.
+- Next: owner supplies/locates an existing authorized **test** profile without exposing
+  secrets, reruns the complete `acceptance` command and obtains independent Task7
+  review. This report does not mark Task7 accepted/done. Task8 full freeze remains
+  separate; no controller ledger was updated.

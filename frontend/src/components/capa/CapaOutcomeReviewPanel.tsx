@@ -65,7 +65,7 @@ export default function CapaOutcomeReviewPanel({ reportId, status, canApprove, c
       <Typography.Paragraph style={{ ...plainStyle, marginTop: 12 }}>
         {t('outcome.round')}: {review.review_round_id ?? '—'}<br />{t('outcome.revision')}: {review.revision}
       </Typography.Paragraph>
-      <section data-e2e="capa-outcome-core">
+      <section data-e2e="capa-outcome-core" data-testid="capa-outcome-core" data-readonly={status === 'D8_CLOSURE' || status === 'ARCHIVED'}>
         <Descriptions column={1} size="small" layout="vertical" items={Object.entries(review.core).map(([key, value]) => ({
           key, label: t(`outcome.core.${key}`), children: <div style={plainStyle}>{value || '—'}</div>,
         }))} />

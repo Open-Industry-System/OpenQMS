@@ -48,7 +48,7 @@ async def compute_pg_jsonb_hash(db: AsyncSession, payload: dict | list) -> str:
     verification agree.
     """
     result = await db.execute(
-        text("SELECT encode(digest(CAST(:p AS JSONB)::text, 'sha256'), 'hex')"),
+        text("SELECT encode(public.digest(CAST(:p AS JSONB)::text, 'sha256'), 'hex')"),
         {"p": json.dumps(payload, ensure_ascii=False)},
     )
     return result.scalar_one()
