@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-10-29 Task8 review-fix R1（I1已局部验证，待SCOPED独立复核）**：仅SCAR denial测试补齐source ProductLine前置四行，保留non-bypass actor及403/不变断言。空迁移库真实FK RED1 failed后，同库cold GREEN1 passed、D3controls12 passed，168表行数及product_lines0前后全恢复，无预载/重复reset。新1391文件freeze `a8acea805fd51fba5b4c1494b3909e5dfb6a40ca8eba43b6c8d9b9c182077e07`，完整make实际2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings、make exit2，仅两项强制live缺opt-in；不是全量绿灯。补充/前端/真实终态保护/DBheads/资源/链接均有当前收据；真实Task7/scanner/最终清理仍BLOCKED，控制方将仅对b16..新HEAD复核，不签Task8/整片完成。
+
 > **2026-10-29 Task8 独立交接 DONE_WITH_CONCERNS（非Task8/整片签收）**：最终真实完整检查 **2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit2**，仅缺live opt-in的两项强制用例失败，不能称全量绿灯。修正后的普通回归无失败/错误；额外API/并发与R4保护 **344 passed /5 warnings**，真实Chromium终态保护 **1 passed /2 deselected /5 warnings**（不代表真实关闭），最终前端232 passed及类型/构建通过。1391文件指纹未变，实际public/tenant heads及无新候选表、临时租户/进程/事务清理已证明；登记核心PG/卷/工作树/证据保留。正向provider/浏览器/知识/横向、精确授权scanner及最终破坏性清理仍BLOCKED；待控制方整体独立复核，不push/合并/部署。详见文末Task8最终独立交接。
 
 > **2026-10-27 Task 7 实现复核通过，真实验收仍 BLOCKED**：代码 `665511e3` 独立实现符合性/质量复核无 Critical/Important；API/并发35 passed、额外后端104 passed、前端221 passed及类型/构建通过。完整真实验收 **2 failed /1 passed，exit1**：一项 Chromium 保护通过，两项正向用例因缺少本工作树授权测试 `.env.e2e` 在真实D3阻断，D4及后续审批/知识/横向扩散未验证。不能标Task 7完成，Task 8最终冻结及整体收口未完成。另已披露自有测试DB配置误输出工具记录，未涉及生产/provider密钥、未静默轮换；临时租户/进程/端口清理，登记PG资源保留。独立复核的拒绝审计缺席断言、缺少provider错误类别及噪声归因建议保留在最终复核台账，不push/合并/部署。
@@ -1626,3 +1628,11 @@ All paths are absolute; existing documentation/history was appended, not overwri
 - 实际catalog前后：自有app/test DB各168表、无新增/删除表，无CAPA候选发布表；public head **20261009_agent_task_attachments**。本轮真实迁移两临时tenant，前后head均 **tv005_agent_task_attachments**、表列表不变、无候选表，随后仅清理该两tenant。`task8-resource-final.json`证明当前所登记runner/browser/Vite无存活、自有outcome schemas为0、app/test其他连接及idle事务均0，核心PG/卷保留；未重置application/shared/seed库。
 - 指南/规格/roadmap/权限/受影响README同步；01.3 v2、01.7 v3、01.8 v2及对应skill均为实际原契约修订日2026-10-27，本次仅更新交接状态，不乱改未变故事日期。3组版本一致、本地链接和既有引用checker、`diff --check`、最终manifest均有真实exit0/unchanged收据；来源权限和批准条件/驳回边界已自检。仅三个既有测试文件改动，未改生产行为、迁移、开关、自批或Agent/model/生产授权。
 - **剩余阻塞/下一步**：本工作树授权.env.e2e仍缺，真实正向provider、浏览器、受控来源、知识/横向仍未通过；实际ClamAV专用gate本轮缺精确镜像/资源授权，未启动或清理他人环境。控制方负责最终整片独立复核。核心PG/container/卷/数据库登记、worktree和所有证据为Task7保留，最终破坏性清理是依赖BLOCKED，不标已完成。仅授权本地提交，实际提交号记私有完整报告；不push/merge/deploy，不勾Task8/计划完成，不改控制方ledger。
+
+## Task8 review-fix round1 / I1 独立交接（2026-10-29；待复核）
+
+FIX_BASE b16d7d19。reviewer指出并经真实空迁移库证实：移除admin_user后source ProductLine未建立，UserProductLine先flush会FK失败。仅在同一test插入四行缺失时创建default_factory下DC-DC-100并flush；viewer_user、CAPA EDIT、scope、目标、403及原line不变断言均保留，未改生产/公共fixture/其他契约。RED是SQL FK失败1 failed，不是collection/import异常；同一owned空库GREEN1 passed和D3controls12 passed，每次前后product_lines0、168表行数与迁移baseline完全一致。
+
+新manifest1391文件SHA a8acea805fd51fba5b4c1494b3909e5dfb6a40ca8eba43b6c8d9b9c182077e07，最后源码修改后唯一新fullmake实际2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings（make exit2），只余两项mandatory live无opt-in失败；保留原graph忽略与所有既有非pass，无新增掩盖。旧4310462d…及全部历史failed receipts仅作历史保留、不用于本轮新源码。冷检查后直接同库make，无第二次reset；仅精确自有test DB一次owner/identity/zero-workers验证重建，不动app/shared/seed库。
+
+补充后端/前端/类型build/真实Chromium终态保护、实际public head20261009_agent_task_attachments与tenant headtv005_agent_task_attachments、无新candidate表、相同1391hash、diff/三组story-skill/链接及无临时runner/schema/连接事务已复查；逐项真实命令/结果/exit/warnings/rows证明在同一私有task-8-report.md的R1附录与task8-r1-*收据中。核心PG/卷/worktree/证据保留，最终破坏性清理依赖BLOCKED；profile/scanner外部权限条件未变，不调用生产/ambient凭证，不安装工具/镜像、不改auth/配置、不push/merge/deploy。源码仅此test四行，公共文档仅本PROGRESS当前状态；授权本地focused commit，提交号记私有R1报告；自检不等于控制方SCOPED复核，不标Task8/全片complete，不改controller ledger。

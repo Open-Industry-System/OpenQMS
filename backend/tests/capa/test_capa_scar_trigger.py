@@ -493,6 +493,10 @@ async def test_update_capa_target_pl_unauthorized_403(
     from app.models.product_line import ProductLine
     from app.models.role import UserProductLine
 
+    if await db.get(ProductLine, "DC-DC-100") is None:
+        db.add(ProductLine(code="DC-DC-100", name="DC-DC-100", factory_id=default_factory.id))
+        await db.flush()
+
     db.add(UserProductLine(user_id=viewer_user.user_id, product_line_code="DC-DC-100"))
     await db.flush()
 
