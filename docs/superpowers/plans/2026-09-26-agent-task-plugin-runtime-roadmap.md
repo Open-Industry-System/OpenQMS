@@ -67,3 +67,5 @@ R2 保存结构化分析结果时，由平台把已返回证据的 `(来源模�
 
 
 **2026-10-29 CAPA 独立冻结结果（不签署整片）**：最后测试前置修正后1391文件冻结（4310462d…）保持不变；真正完整make check最终2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit2，仅缺live opt-in的两项强制真实用例失败。前两轮15 failed及75 setup errors均保留为失败证据，不冒充当前结果；测试fixture修正不改变生产授权。独立指南/三个故事与剧本已同步，普通/保护与数据库head/资源证据见PROGRESS Task8。真实provider/知识/横向、精确授权scanner及最终资源删除仍BLOCKED；核心自有PG/卷/工作树和证据保留，不push/合并/部署。
+
+**2026-10-30 CAPA 最终代码复核**：整片增量复核的唯一 Important（verification create/update 与run_audit来源锁等待后的当前权限竞态）由b375f26d修正并经最终限定复核通过，无新增代码发现。当前完整检查3447 passed /2 failed、make exit2；live配置/真实正向验收、精确授权scanner专项与依赖安全最终清理尚未完成。代码复核关闭不代表Task 7/8签收、R4b/Agent/R5放行或可合并部署；保留工作树、自有核心资源及全部失败/成功证据。
