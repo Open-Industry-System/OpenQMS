@@ -405,3 +405,112 @@ async def test_tenant_admission_revalidated_after_actual_provider_wait(
         assert await db.scalar(select(AuditLog.log_id).where(AuditLog.record_id == report_id,
             AuditLog.action.in_(['D8_APPROVED', 'KNOWLEDGE_SUNK', 'LATERAL_DIFFUSION_CHECKED']))) is None
         assert await db.scalar(select(KnowledgeEntry.entry_id).where(KnowledgeEntry.source_id == report_id)) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('writer_kind', ['create', 'update', 'audit-fmea', 'audit-control_plan'])
+@pytest.mark.parametrize('boundary', ['product_line', 'document'])
+@pytest.mark.parametrize('revocation', ['inactive', 'capa-edit', 'membership', None], ids=['inactive', 'capa-edit', 'membership', 'valid'])
+async def test_source_wait_material_writer_rechecks_current_actor(
+    review_case, review_sources, writer_kind, boundary, revocation,
+):
+    """Missing post-source-wait authority must not commit or even stage material."""
+    from sqlalchemy import delete
+    from app.core.permissions import PermissionLevel
+    from app.models.role import UserProductLine
+    from app.models.user import User
+    from app.schemas.capa_verification import VerificationCreate, VerificationUpdate
+    from app.services.capa_current_access import current_capa_actor_target
+    from app.services.capa_doc_gate_service import run_audit
+    from app.services.capa_verification_service import create_verification, update_verification
+    from app.services.product_line_service import lock_candidate_scopes
+    from app.services.version_service import lock_version_parent
+
+    case = review_case
+    if writer_kind.startswith('audit-'):
+        doc_type = writer_kind.removeprefix('audit-')
+        await review_sources.prepare_audit(doc_type)
+    else:
+        doc_type = 'fmea'
+        async with case.session_factory() as db:
+            (await case.report(db)).fmea_ref_id = review_sources.fmea_id
+            await db.commit()
+    # Exact existing CAPA EDIT minimum, not an administrator/bypass control.
+    await case.set_capa_level(PermissionLevel.EDIT)
+    before = await case.snapshot()
+    async with case.session_factory() as holder, case.session_factory() as writer:
+        holder_pid, writer_pid = await pid(holder), await pid(writer)
+        cached_capa = await case.report(writer)
+        cached_actor = await writer.get(User, case.actor_id)
+        await current_capa_actor_target(writer, case.actor_id, case.report_id, PermissionLevel.EDIT)
+        if boundary == 'product_line':
+            await lock_candidate_scopes(holder, [(case.factory_id, case.product_line_code)])
+            table = 'product_lines'
+        else:
+            await lock_version_parent(holder, doc_type, review_sources.identity(doc_type))
+            table = 'fmea_documents' if doc_type == 'fmea' else 'control_plans'
+        source_ref = {'fmea_id': str(review_sources.fmea_id), 'cause_node_id': 'cause'}
+        if writer_kind == 'create':
+            operation = create_verification(writer, cached_capa, VerificationCreate(
+                root_cause_text='扭矩不足', result='new result', conclusion='failed',
+                source_ref=source_ref), cached_actor)
+        elif writer_kind == 'update':
+            operation = update_verification(writer, cached_capa, case.verification_id,
+                VerificationUpdate(method='measurement', result='changed before source wait',
+                    evidence_attachments=[{'name': 'new evidence'}], conclusion='failed',
+                    source_ref=source_ref), cached_actor)
+        else:
+            operation = run_audit(writer, cached_capa, case.actor_id)
+        async with lock_witness(case, writer_pid, table) as reached:
+            task = asyncio.create_task(operation)
+            try:
+                await asyncio.wait_for(reached.wait(), 5)
+                await wait_for_pg_blocker(case, writer_pid, holder_pid)
+                assert not task.done()  # admitted; truly waiting on the chosen source lock
+                if revocation is not None:
+                    # Independent committed authority change while the source is locked.
+                    async with case.session_factory() as revoke:
+                        if revocation == 'inactive':
+                            await revoke.execute(update(User).where(User.user_id == case.actor_id).values(is_active=False))
+                        elif revocation == 'capa-edit':
+                            await revoke.execute(update(RolePermission).where(
+                                RolePermission.role_id == case.owned_ids['role_id'],
+                                RolePermission.module == 'capa').values(permission_level=PermissionLevel.CREATE))
+                        else:
+                            await revoke.execute(delete(UserProductLine).where(UserProductLine.user_id == case.actor_id))
+                        await revoke.commit()
+                    async with case.session_factory() as check:
+                        with pytest.raises((PermissionError, LookupError)):
+                            await current_capa_actor_target(check, case.actor_id, case.report_id, PermissionLevel.EDIT)
+                await holder.commit()
+                denied = None
+                try:
+                    result = await asyncio.wait_for(task, 5)
+                except (PermissionError, LookupError) as exc:
+                    denied = exc
+                # Check pending ORM mutation and transaction-visible rows BEFORE
+                # rollback, then independently committed rows AFTER rollback.
+                pending = bool(writer.new) or any(writer.is_modified(row) for row in writer.dirty)
+                with writer.no_autoflush:
+                    in_transaction = await case.snapshot(writer)
+                await writer.rollback()
+                persisted = await case.snapshot()
+                if revocation is not None:
+                    assert in_transaction == before, 'material/gate/audit/outbox changed before denial rollback'
+                    assert not pending, 'material mutation staged before current authority denial'
+                    assert persisted == before, 'revoked actor committed material/gate/audit/outbox'
+                    assert denied is not None, 'actor revoked during real source wait was allowed to commit'
+                else:
+                    assert denied is None
+                    assert persisted != before
+                    if writer_kind.startswith('audit-'):
+                        assert result['decision'] == 'passed'
+                        assert 'DOC_UPDATE_AUDITED' in persisted['successful_audits']
+                    else:
+                        assert 'D4_VERIFICATION_FAILED' in persisted['successful_audits']
+                        assert 'FMEA_LINKAGE_CREATED' in persisted['successful_audits']
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                await writer.rollback()

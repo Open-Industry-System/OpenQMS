@@ -17,6 +17,7 @@ from app.services.agent import provider_adapter
 from app.services.agent.provider_adapter import ProviderClient, ProviderNotConfiguredError
 from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
 from app.services.capa_review_guard import lock_current_material_write
+from app.services.capa_current_access import current_capa_actor_target
 from app.core.permissions import PermissionLevel
 
 logger = logging.getLogger(__name__)
@@ -761,6 +762,8 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
             raise ValueError("影响清单文档非法") from exc
     await lock_candidate_scopes(db, [(capa.factory_id, capa.product_line_code)])
     await lock_version_parents_in_order(db, identities)
+    # Refresh actor activity, namespace and target authority after source waits.
+    capa = await current_capa_actor_target(db, user_id, capa.report_id, PermissionLevel.EDIT)
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.analysis_id == analysis.analysis_id,
