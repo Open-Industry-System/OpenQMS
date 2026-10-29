@@ -4,7 +4,7 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/US-E2E-01.8-knowledge-sink.md
-> 故事版本：定稿 v1（2026-07-08）
+> 故事版本：定稿 v2（2026-10-27）
 > 所属 epic：US-E2E-01（README.md v8.1）
 > 同步规则：当子故事版本号或日期变更，本剧本必须重新核对并同步。
 
@@ -17,6 +17,10 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ## When to Use
 
 **用**：用户说「验收 01.8」「走查知识沉淀」「验证 embedding/recommend」等。
+
+## 本轮实施契约与验收边界
+
+版本/日期同步仅表明剧本对应已实现契约，不是走查 PASS。2026-10-27 正向真实 provider/浏览器、知识及横向扩散仍因本工作树缺少授权 `.env.e2e` 而 BLOCKED；不得借用环境/生产密钥、mock provider 或预造 passed gate。独立权限/终态保护可单列，不冒充整故事完成。操作解释见 `docs/development/capa-outcome-review.md`。
 
 ## 前置
 
@@ -49,7 +53,7 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ## 走查剧本
 
 ### A. 关闭触发 sink
-- manager 登录 → 进 `8D-E2E-KNOW-001` → `[data-e2e="capa-approve"]`（`D8_APPROVAL_PENDING`→`D8_CLOSURE`）。
+- manager 登录 → 进 `8D-E2E-KNOW-001` → 完整读取并核对集中结果面板及必要来源，提交同次 revision/round → `[data-e2e="capa-approve"]`（`D8_APPROVAL_PENDING`→`D8_CLOSURE`）。
 - **断言**：`GET /api/capa/{id}` `status=D8_CLOSURE`。
 - **断言**：`GET /api/knowledge/entries?source_type=capa&q=8D-E2E-KNOW-001` 的 items 中存在 `source_id={capa_id}`，entry 含 `summary`/`tags`/`embedding_status` ∈ {pending, ready, failed}。
 - 无 LLM → advance/approve 422 `detail.outcome=blocked`（fail-closed）。
@@ -64,8 +68,12 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 - **断言**：`GET /api/capa/{id}/d4-fmea-recommendations` 某条 `match_source`/`source_knowledge_entry_id` 命中该 entry（或 provenance 含 entry_id）。命中时审计可有 `action=KNOWLEDGE_RETRIEVED`。
 
 ### D. 手动 resink
+- 在已关闭报告有 EDIT 时单独补写 d8_closure（明确未审补充），记录前后核心/revision/round/决定/source_versions 相同；不要以直接改库制造真实关闭证据。
 - manager 进已关闭 CAPA → `[data-e2e="capa-knowledge-resink"]`。
 - **断言**：`POST /api/capa/{id}/sink-knowledge` 200；entry 更新；新增 `KNOWLEDGE_SUNK` 审计。
+- **v2 来源断言**：知识详情 fields.closure_review_scope 和列表 closure_review_scope 为 `unreviewed_supplement`；D8 lesson.tags 含且不重复 `review_scope:unreviewed_supplement`，D7 lesson 不获 approved 标记。知识/经验推荐文本保留“未审核补充”；不得把补充用作已审根因/已验证效果。
+- 历史缺标记知识/经验读取只投影，不更新 fields/tags/embedding/数据库；无适用 UPDATE 审计时补充人/时间为 null。归档补充仍冻结400，混合核心 PUT 409；正式记录无候选7天清理。
+- 本轮 Task7 缺授权测试配置，真实 sink/embedding/recommend 与横向扩散尚未执行成功。普通 provider double 测试只能说明逻辑回归，不能把这些步骤记 PASS。
 
 ## 缺陷分类
 

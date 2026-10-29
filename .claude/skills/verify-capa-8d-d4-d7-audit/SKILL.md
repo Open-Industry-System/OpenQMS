@@ -4,7 +4,7 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/US-E2E-01.3-d4-verification-d7-node-action.md
-> 故事版本：定稿 v1（2026-07-08）
+> 故事版本：定稿 v2（2026-10-27）
 > 所属 epic：US-E2E-01（README.md v8.1）
 > 同步规则：当子故事版本号或日期变更，本剧本必须重新核对并同步。
 
@@ -17,6 +17,10 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ## When to Use
 
 **用**：用户说「验收 01.3」「走查 D4 验证」「验证 D7 node-action」「检查审批壳」等。
+
+## 本轮实施契约与验收边界
+
+版本/日期同步仅表明剧本对应已实现契约，不是走查 PASS。2026-10-27 正向真实 provider/浏览器、知识及横向扩散仍因本工作树缺少授权 `.env.e2e` 而 BLOCKED；不得借用环境/生产密钥、mock provider 或预造 passed gate。独立权限/终态保护可单列，不冒充整故事完成。操作解释见 `docs/development/capa-outcome-review.md`。
 
 ## 前置
 
@@ -90,12 +94,16 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 | **(c) 审批** | `8D-E2E-DOCGATE-001` | **是**（须 01.7 推到 `D8_APPROVAL_PENDING`） | 该子路径 `BLOCKED` | 该子路径 `BLOCKED（前置 01.7 未通过）` |
 
 - **(a) 权限（先做）**：**engineer** → 进 `8D-E2E-APPROVAL-001` → `[data-e2e="capa-approve"]` **不可见**。须在 manager 改状态前。
-- **(b) 驳回**：manager → `8D-E2E-APPROVAL-001` → `[data-e2e="capa-reject"]` + reason → `status=D7_PREVENTION`；审计 `D8_REJECTED`。
-- **(c) 审批**：仅当 01.7 已使 `8D-E2E-DOCGATE-001` 为 `D8_APPROVAL_PENDING` 时：manager → approve → `D8_CLOSURE`（`D8_APPROVED`）。否则本子路径 `BLOCKED`，**不**把 (a)(b) 一并 BLOCKED。
+- **(b) 驳回**：manager → `8D-E2E-APPROVAL-001` → 先完整加载集中结果面板（必要历史来源/门禁前置真实可读），记录 GET 返回的 revision/round → `[data-e2e="capa-reject"]` + 非空 reason → `status=D7_PREVENTION`；审计 `D8_REJECTED` 严格五键 receipt。仅 seed 状态不足以决定；前置不完整时如实记录，不预造 receipt。
+- **(c) 审批**：仅当 01.7 已使 `8D-E2E-DOCGATE-001` 为 `D8_APPROVAL_PENDING` 时：manager → 完整读取并核对集中结果面板 → approve（同次 revision/round）→ `D8_CLOSURE`（`D8_APPROVED` 五键 receipt）。否则本子路径 `BLOCKED`，**不**把 (a)(b) 一并 BLOCKED。
 
 **禁止**：01.7 FAIL 后把整个 post-gate（含权限/驳回）标 BLOCKED。
 
 ### D. 审计
+- 批准/驳回前后核对 `outcome_review` 仅含 contract/round_id/revision/doc_decision_id/source_versions，不复制正文。正常重提用新 TRANSITION round，旧版本不得重放。
+- 在独立待审记录加载后更改 D6/验证/来源，旧决定应 409 且无 D8_APPROVED、D8_REJECTED、知识/横向/MES 副作用；必须显式重载核对后另作决定，网络不确定先查真实状态。身份/范围切换后迟到成功/拒绝不能污染新视图。
+- 用已闭/归档保护夹具测试全部现有核心写入口（EDIT/APPROVE/ADMIN 均 409），无权先拒绝；与真实关闭正向证据分开。D8_CLOSURE 补充可独立写但标未审，不改 receipt/core；ARCHIVED 补充沿用 400，混合核心 PUT 原子 409。历史 legacy_unversioned/unverifiable 不补造已审版本。
+- D7 仍只验 pending 创建/追溯，不新增 verified 条件；正式材料无 7 天清理，当前自批策略不变。前端选择器新增 `capa-outcome-core` / `capa-outcome-binding` / `capa-outcome-supplement-edit`，以实际 DOM 为准。
 - `TRANSITION`（D4→D5 等 engineer 边）；`D7_SKIP_CONFIRMATION`（若 skip）；`D8_APPROVED` / `D8_REJECTED`（manager）；`ADOPT_RECOMMENDATION`（若 D4 采纳）。
 
 ## UI 截图清单（强制）

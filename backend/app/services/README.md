@@ -203,3 +203,18 @@ CLI commands in `cli/`. Conventions every caller can rely on:
   workers (`embedding_sync_worker`, `graph_sync_worker`), and other
   services that compose workflows (e.g. `capa_service` calls
   `version_service`, `fmea_service` calls `product_line_service`).
+
+
+## Outcome-review handoff (2026-10-27)
+
+See the [operator guide](../../../docs/development/capa-outcome-review.md) for the implemented current-material review,
+explicit reload after conflict/uncertainty, historical unbound labels, and terminal
+core versus unreviewed closure-supplement rules (archived supplement retains the
+existing 400; reviewed core and mixed updates use 409). No controlled revision or
+reopen workflow is implemented. This does not authorize plugin/model delivery.
+Stories 01.3 v2, 01.7 v3 and 01.8 v2 and their derived walkthroughs are synchronized
+as implementation contracts, not acceptance signoff. Task7 positive real-provider /
+browser / knowledge / lateral acceptance remains blocked by the missing authorized
+worktree test profile. Frozen ordinary checks and dedicated scanner gates are
+recorded separately in PROGRESS Task8; retained owned infrastructure is not final
+cleanup completion. No deployment, dependency, or migration change is implied.

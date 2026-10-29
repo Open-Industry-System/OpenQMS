@@ -46,12 +46,24 @@ async def no_closure_effects(case):
     async with case.session_factory() as db:
         assert (await case.report(db)).status == 'D8_APPROVAL_PENDING'
         assert await db.scalar(select(AuditLog.log_id).where(AuditLog.record_id == case.report_id,
-            AuditLog.action.in_(['D8_APPROVED', 'KNOWLEDGE_SUNK', 'LATERAL_DIFFUSION_CHECKED']))) is None
+            AuditLog.action.in_(['D8_APPROVED', 'D8_REJECTED', 'KNOWLEDGE_SUNK', 'LATERAL_DIFFUSION_CHECKED']))) is None
         assert await db.scalar(select(KnowledgeEntry.entry_id).where(KnowledgeEntry.source_id == case.report_id)) is None
         assert await db.scalar(select(CapaLateralDiffusionCheck.check_id).where(
             CapaLateralDiffusionCheck.capa_id == case.report_id)) is None
         assert await db.scalar(select(MESPushOutbox.outbox_id).where(
             MESPushOutbox.payload['capa_id'].astext == str(case.report_id))) is None
+
+
+@pytest.mark.asyncio
+async def test_no_closure_effects_detects_rejection_audit(review_case):
+    """A failed decision must not leave a successful rejection audit either."""
+    async with review_case.session_factory() as db:
+        db.add(AuditLog(table_name='capa_eightd', record_id=review_case.report_id,
+            action='D8_REJECTED', operated_by=review_case.actor_id,
+            factory_id=review_case.factory_id))
+        await db.commit()
+    with pytest.raises(AssertionError):
+        await no_closure_effects(review_case)
 
 
 @pytest.mark.asyncio

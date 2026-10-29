@@ -2,7 +2,7 @@
 
 > R4b-2 任务私有附件始终重查当前任务/CAPA VIEW、本人任务身份与工厂/产品线范围；下载不产生直链，操作约束见[附件指南](development/agent-task-attachments.md)。
 
-> 最后更新: 2026-10-01（Agent 任务权限补充） | 基于代码库权限模型（ModuleKey × PermissionLevel × Role）
+> 最后更新: 2026-10-29（CAPA 独立冻结结果及外部门禁边界） | 基于代码库权限模型（ModuleKey × PermissionLevel × Role）
 
 ---
 
@@ -339,3 +339,15 @@ refresh 的既有策略、private-route 保护、后端权限或业务审批规�
 新 UPDATE 审计记录工厂 ID。无适用审计或无操作者时对应值为 null，不借主表 updated_at 或
 created_by 推断。元数据查询不加载审计私有 before/after，Task 5 面板沿用实际值或 `—` 回退。
 原 savepoint、旧 embedding/outbox 清理及失败回滚顺序、终态/权限规则均不变。
+
+
+### Task 8：操作交接与当前验收边界（2026-10-27）
+
+[CAPA 结果审核指南](development/capa-outcome-review.md)说明工程师实施/验证、审核人完整核对、显式重载和历史无绑定处理。当前仅有用户管理的既有角色分配 UI 与现有角色权限 API，没有本片新增的角色设计器；CAPA EDIT/APPROVE、FMEA VIEW、PLANNING VIEW 及当前范围分别检查。当前 D8 本人审批策略不变，ADMIN 也不能原位改写已审核心。审批是结果接受，不是外发、附件解密或 Agent 授权。
+
+终态核心材料各入口统一 `409 CAPA_REVIEWED_CONTENT_LOCKED`，无权限/不可见先拒绝。D8_CLOSURE 单独补充标未审；ARCHIVED 的纯 d8_closure 补充沿用原400冻结，混合核心 PUT 原子409。正式记录没有候选7天清理或预览30秒时限；受控修订/重开未实现。
+
+Task 1–6 已独立复核，不等于全片验收。Task7 完整真实门禁已有2 failed /1 passed /exit1，缺本工作树授权 `.env.e2e`；真实 provider 正向浏览器、知识、横向扩散未验证。Task8普通冻结回归、专用ClamAV门禁与真实验收分别记账（见 PROGRESS Task8），不能用 mocks/跳过/历史基线签字。保留登记核心PG资源等待后续真实验收，最终清理依赖阻塞；不改变生产、R4b或R5权限边界。
+
+
+**2026-10-29 实际冻结结果**：1391个源码/配置/测试哈希保持不变；最终真实完整make check为2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings（make exit2），仅两项强制live用例因无显式opt-in失败，不是全量绿灯。旧fixture与fresh DB前置问题只在测试中修正，没有降低当前授权或终态保护。正向provider、知识/横向、scanner专用gate及最终破坏性资源清理仍未签收；普通回归/终态保护和实际数据库head证明见PROGRESS Task8及私有完整报告。

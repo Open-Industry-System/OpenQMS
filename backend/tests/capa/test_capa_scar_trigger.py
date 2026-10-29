@@ -487,14 +487,18 @@ async def test_get_capa_wrong_pl_403(db, default_factory, admin_user):
 
 @pytest.mark.asyncio
 async def test_update_capa_target_pl_unauthorized_403(
-    db, default_factory, admin_user
+    db, default_factory, viewer_user
 ):
     """User with PL-A access cannot move a CAPA to PL-B they lack (same factory)."""
     from app.models.product_line import ProductLine
+    from app.models.role import UserProductLine
 
-    await _seed_perm(db, admin_user.role_id, "capa", 3)
+    db.add(UserProductLine(user_id=viewer_user.user_id, product_line_code="DC-DC-100"))
+    await db.flush()
+
+    await _seed_perm(db, viewer_user.role_id, "capa", 3)
     capa = await _make_capa(
-        db, default_factory.id, admin_user.user_id, product_line_code="DC-DC-100"
+        db, default_factory.id, viewer_user.user_id, product_line_code="DC-DC-100"
     )
     # Ensure target PL exists in same factory
     existing = await db.execute(
@@ -510,19 +514,21 @@ async def test_update_capa_target_pl_unauthorized_403(
 
     # User has access to DC-DC-100 but NOT DC-DC-200
     scope = _scope_for(
-        admin_user,
+        viewer_user,
         default_factory,
         accessible_factory_ids=None,
         pl_mode="EXPLICIT",
         pl_codes=["DC-DC-100"],
     )
-    async with _client_for(db, admin_user, scope) as ac:
+    async with _client_for(db, viewer_user, scope) as ac:
         resp = await ac.put(
             f"/api/capa/{capa.report_id}",
             json={"product_line_code": "DC-DC-200"},
         )
     app.dependency_overrides.clear()
     assert resp.status_code == 403
+    await db.refresh(capa)
+    assert capa.product_line_code == "DC-DC-100"
 
 
 @pytest.mark.asyncio

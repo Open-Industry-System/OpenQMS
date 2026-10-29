@@ -25,7 +25,8 @@ from app.models.customer_quality import Customer
 from app.models.erp import ERPConnection, ERPInventoryBalance, ERPShipment
 from app.models.factory import Factory
 from app.models.iqc_inspection import IqcInspection
-from app.models.role import RoleDefinition
+from app.models.role import RoleDefinition, RolePermission, UserProductLine
+from app.models.product_line import ProductLine
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import Supplier
 from app.models.user import User
@@ -128,6 +129,14 @@ async def capa_d3_setup(db: AsyncSession):
         factory_id=factory.id,
     )
     db.add(user)
+    await db.flush()
+    # Keep the persisted line grant valid on an empty migrated test database too.
+    if await db.get(ProductLine, "DC-DC-100") is None:
+        db.add(ProductLine(code="DC-DC-100", name="D3 Test Line", factory_id=factory.id))
+        await db.flush()
+    # Service admission now resolves persisted authority, not the caller's scope.
+    db.add(RolePermission(role_id=role.id, module="capa", permission_level=3))
+    db.add(UserProductLine(user_id=user.user_id, product_line_code="DC-DC-100"))
     await db.flush()
 
     capa = CAPAEightD(
