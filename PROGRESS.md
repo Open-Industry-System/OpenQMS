@@ -1709,3 +1709,112 @@ Real before/after catalog proofs `final-fix-db-before-reset.json` and `final-fix
 Mechanical docs links and unchanged three story/skill version pairs pass (`final-fix-doccheck-result.json`, reference checker exit0); no unrelated story/skill date bump. Local diff/self-review and whitespace check passed. Authorized focused local commit follows these actual checks; post-commit receipt records its actual hash and unchanged manifest.
 
 **Remaining gates / next step:** controller's ONE independent scoped rereview of this I1 wave; authorized worktree `.env.e2e` is still absent, so no real provider-positive/browser/controlled-source/knowledge/lateral claim; exact-authorized scanner resource/image gate NOT RUN/BLOCKED; eventual dependency-safe destructive cleanup. Do not mark Task8/phase complete or Ready to Merge. No requested policy changed.
+
+## LIVEACCEPTANCERESUME — Task7, 2026-10-30
+
+**Status: BLOCKED before application use; no new acceptance result or completion claim.**
+Resume baseline was HEAD `83deef88`, confirmed by Git. The coordinator reports final
+production source-wait fix `b375f26d` independently approved and the phase code review
+closed; this resume changes no production/test source or contract and does not redo
+Tasks1–6, the Task8 freeze, or full make check.
+
+### User baseline and authorized profile
+
+- Initial tracked status was exactly ` D .env.e2e.example`; that user deletion is
+  preserved. It is not restored, staged or committed. No fully clean-tree claim.
+- The selected, now user-authorized TEST profile is
+  `/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.env.e2e`.
+  `git check-ignore -q -- .env.e2e` exited0. Filesystem metadata confirmed regular
+  file and not a symlink. The existing `provider_environment` whitelist parser
+  returned `authorized_test_profile`; its output was only:
+  `TEST_PROFILE_METADATA: regular=true; symlink=false; validation=authorized_test_profile`.
+- No profile contents, model/endpoint values, keys, passwords, headers or tokens were
+  displayed. Parser data stayed backend-local. No production/main-checkout config,
+  ambient provider credentials or old agent transcripts were read. No profile,
+  endpoint, login, network or security configuration was changed.
+- The earlier missing-test-profile blocker is therefore superseded by successful
+  local profile validation, **not** by a claimed provider or application success.
+
+### Actual resource preflight and blocker
+
+Before app use, a private read-only helper uses the existing owned profile loader,
+then attempts to inspect only the registered container's ID/owner/running/paused/
+endpoint/volume metadata. Only after those checks could it perform a read-only
+current-database/current-user/health query. No start/unpause/reset/reseed/recreation
+or cleanup action is implemented in this helper.
+
+Actual command from the isolated worktree:
+
+```text
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/task7-live-resume-preflight.py
+```
+
+It failed at Docker metadata inspection with real category `CalledProcessError`,
+exit1. A second bounded read-only invocation retained the same actual error in a
+persistent log; it was for recording/reproduction, not a provider/API test retry.
+Exact safe output:
+
+```text
+failed to connect to the docker API at unix:///Users/sam/.docker/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /Users/sam/.docker/run/docker.sock: connect: no such file or directory
+PREFLIGHT_ERROR_CLASS=CalledProcessError
+PREFLIGHT_EXIT_CODE=1
+```
+
+Read-only diagnosis corroborated the failure:
+
+- `docker context show`: `desktop-linux`, exit0.
+- `pgrep -x com.docker.backend`: no process found, exit1; no process was signalled.
+- Socket metadata: `socket_exists=False`, `socket_is_socket=False`.
+- `DOCKER_HOST` and `DOCKER_CONTEXT` override presence: both False; no values printed.
+
+The Docker API is unavailable in the selected context. Consequently current actual
+registered container ID/nonce, host mapping, volume and DB health **could not be
+verified**. No stale historical resource proof is substituted for that check. No
+private endpoint was guessed/rewritten. Docker Desktop was not started globally:
+that could resume unrelated workloads beyond the exact owned-container scope.
+No conclusion is drawn about changed ports, container loss, provider credentials,
+provider request categories or application defects.
+
+### Acceptance execution, observability, resources and evidence
+
+Required complete command remains **NOT EXECUTED**, because its mandatory owned
+resource/DB preflight could not pass:
+
+```text
+/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python backend/tests/e2e/capa_outcome_runner.py acceptance
+```
+
+- New acceptance cases run: **0**. No pass, skip, xfail, xpass or provider failure is
+  manufactured. All three real cases remain pending, without -k/exclusions; installed
+  Chromium/retries0/workers1 and all prior assertions are unchanged.
+- No application/employee HTTP, document-gate, advance, knowledge, lateral or Chromium
+  operation was started in this resume. No provider invocation was initiated; there
+  is no new provider usage/billing telemetry. No inference from historical
+  `report_error=None` is made. Historical failed logs/results remain untouched.
+- No test tenant, socket, server, Vite, browser, DB or container was created/changed,
+  so this resume has no newly owned runtime resource to tear down. No shared/seed/
+  application/production DB or other worker was touched. Core resource registrations,
+  profiles, volume and DBs were not modified; their current health remains unverified
+  while the daemon is unavailable. No destructive cleanup or scanner operation.
+- Production/test source changes: **none**. Only this append-only report is a tracked
+  change owned by this resume; private helper/log are ignored evidence. No proposed
+  application/test-contract fix: no application execution reached that boundary.
+
+Persistent evidence and helper, without secrets:
+
+```text
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-live-resume-preflight.py
+/Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/task7-live-resume-preflight-docker-unavailable.log
+```
+
+Next: owner/controller restores the Docker service within the authorized resource
+scope, then verifies the SAME registered container ID/owner, current endpoint and
+read-only DB health before invoking the complete acceptance command. This report
+does not authorize a different context/container, recreation/reset, global service
+restart, browser/dependency install or scanner image. If later application/test
+failures require source changes, report the concrete reproduction/proposed narrow
+fix before editing, as the existing freeze/reviews must then be revisited.
+
+No Task7/Task8/phase acceptance or controller ledger was marked complete; no push,
+merge or deployment. Any local report-only commit excludes the user-deleted example
+and all test profile/evidence files; the worktree remains user-dirty afterward.
