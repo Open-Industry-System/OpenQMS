@@ -753,6 +753,8 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/capa/test_capa_outcome_su
 
 ### Task 7: 真正员工 HTTP、租户及浏览器验收
 
+**2026-10-31 用户批准的验收分层**：真实 AI 正向闭环与双模块撤权保护分开取证。正向用例必须执行实际 provider、业务门禁、生产 advance、浏览器批准、知识沉淀和横向扩散；不能用模拟结果替代。FMEA 与 PLANNING 撤权用例允许建立明确标注的确定性保护前置（含真实受控版本和来源绑定），随后通过真实员工 HTTP、数据库与当前权限校验分别断言整包拒绝和零成功副作用。该前置不得经新增 nonce/HTTP 假批准接口提供，不计作真实 AI 影响选择或门禁成功，不再要求不受控的 AI 在同一轮必选全部候选文档。必须保留两个模块的独立拒绝断言，不能仅检查 AI 本次恰好选中的子集。既有业务状态、门禁、来源权限和生产行为不变；此调整不豁免任一剩余检查或最终清理。
+
 **Files:** Create outcome harness/browser/spec；Modify `playwright.agent.config.ts`；补齐 API/concurrency tests，更新相关 README。
 
 **Interfaces:** `owned_outcome_server` fixture 返回 `{app, base_url, tenant_slug, report_id, editor_login, approver_login, session_factory, binding, nonce}`；`session_factory` 创建真实 TenantSession。仿照现有 owned harness 的 provision/loopback/teardown，但不调用 `owned_local_trial.enable()`、插件注册、DIRECT 替换或旧 scanner 配置。
