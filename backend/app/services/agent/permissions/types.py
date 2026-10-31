@@ -24,6 +24,7 @@ class CapabilitySpec:
     approval_floor: ApprovalFloor
     projection: str
     approver_level: PermissionLevel = PermissionLevel.APPROVE
+    self_approval_allowed: bool = False
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,7 @@ class SourceLabel:
     sensitivity: str
     capability_id: str
     projection: str
+    source_version: str
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class DeliveryAttempt:
 def derive_label(sources: tuple[SourceLabel, ...]) -> DerivedLabel:
     if not sources:
         raise ValueError("derived content requires server-attached sources")
+    if any(not source.source_version.strip() for source in sources):
+        raise ValueError("source version required")
     if any(source.sensitivity not in {"internal", "restricted"}
            or source.projection not in {"masked", "raw"}
            or not source.capability_id for source in sources):
@@ -42,13 +45,16 @@ def derive_label(sources: tuple[SourceLabel, ...]) -> DerivedLabel:
     return DerivedLabel(sources, level)
 
 
-def can_view_derived(label: DerivedLabel, target_authorized: bool,
-                     authorized_sources: frozenset[tuple[Module, UUID, str, str]]) -> bool:
+def _valid_label(label: DerivedLabel) -> bool:
     try:
-        valid_label = derive_label(label.sources)
+        return derive_label(label.sources) == label
     except ValueError:
         return False
-    return (target_authorized and label.sensitivity == valid_label.sensitivity
+
+
+def can_view_derived(label: DerivedLabel, target_authorized: bool,
+                     authorized_sources: frozenset[tuple[Module, UUID, str, str]]) -> bool:
+    return (_valid_label(label) and target_authorized
             and all((source.owner, source.object_id, source.capability_id, source.projection)
                     in authorized_sources for source in label.sources))
 
@@ -58,5 +64,10 @@ def can_deliver(attempt: DeliveryAttempt) -> bool:
     return (attempt.sensitivity in {"internal", "restricted"}
             and attempt.projection in {"masked", "raw"}
             and attempt.target_kind in {"plugin", "model"}
+            and bool(attempt.target_id.strip())
             and explicit in attempt.allowed
             and (attempt.sensitivity != "restricted" or attempt.controlled_egress))
+
+
+def can_deliver_derived(label: DerivedLabel, attempt: DeliveryAttempt) -> bool:
+    return _valid_label(label) and label.sensitivity == attempt.sensitivity and can_deliver(attempt)

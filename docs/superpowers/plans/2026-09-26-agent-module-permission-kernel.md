@@ -10,6 +10,8 @@
 
 **Implementation status (2026-09-29):** Kernel and focused tests implemented on `feature/agent-permission-kernel`; the complete backend check was attempted but is not green (1909 passed, 34 failed, 2 errors, including a separately reproduced missing version trigger in `qms_test`). No new capability is wired to production; no commit was made.
 
+**Integration update (2026-10-31):** Reconciled with `main@63d06571` (#24). Keep CAPA-owned declarations and the strengthened module/scope/projection checks, while retaining the immutable catalog, timestamp rejection, requester self-approval denial, source versions, non-empty delivery targets and derived-delivery sensitivity binding from main. Regression coverage includes service and delegated-user execution; verification results are recorded in `PROGRESS.md`.
+
 ## Global Constraints
 
 - Preserve existing `backend/app/services/agent/gateway.py` and `backend/app/api/agent/*` behavior; no new capability becomes callable in production from this plan alone.
@@ -17,7 +19,7 @@
 - Unlisted or unapproved capabilities fail closed; the CAPA matrix is **not yet approved**. No automatic approval for a real CAPA operation is assigned here.
 - A backend service identity is not an employee approver; task-creation authorization and per-operation approval are separate.
 - No data (raw or masked) may reach a plugin or model solely because it was masked; an explicit delivery decision is required. Derived content retains source restrictions across modules.
-- Run backend tests only against isolated `qms_test` via `make check-backend`; never let tests fall back to the seeded development DB. At execution time inspect the current Alembic heads before planning any later migrations.
+- Run backend tests only against an isolated test DB (`qms_test` or a fresh dedicated verification DB); never let tests fall back to the seeded development DB. A full-suite rerun against a DB altered by migration/seed tests may fail, so create a fresh test DB instead of resetting an existing one. Its name must contain `_test`; several APQP/PPAP/SPC fixtures skip otherwise. At execution time inspect the current Alembic heads before planning any later migrations.
 - Work in a separate branch before editing on `main`. Review the user's existing uncommitted files; do not stage or commit anything without an explicit request.
 
 ## File map
@@ -103,6 +105,7 @@ class CapabilitySpec:
     approval_floor: ApprovalFloor
     projection: str           # "masked", "raw", or "none"
     approver_level: PermissionLevel = PermissionLevel.APPROVE
+    self_approval_allowed: bool = False  # no exception is enabled by this kernel
 
 @dataclass(frozen=True)
 class Grant:
@@ -134,18 +137,30 @@ class AccessDecision:
 ```
 
 ```python
-# capa_agent_capabilities.py — declarations only; business-owner approval is a later gate
+# capa_agent_capabilities.py
+"""CAPA-owned Agent capability declarations, disabled until approved."""
+
+from types import MappingProxyType
+
 from app.core.permissions import Module, PermissionLevel
 from app.services.agent.permissions.types import ApprovalFloor, CapabilitySpec
 
-CAPA_CAPABILITIES = {
+
+CAPA_CAPABILITIES = MappingProxyType({
     spec.id: spec for spec in (
         CapabilitySpec("capa.d4.summary.masked.v1", Module.CAPA, "context", PermissionLevel.VIEW, ApprovalFloor.DENY, "masked"),
         CapabilitySpec("capa.d4.candidate.propose.v1", Module.CAPA, "command", PermissionLevel.EDIT, ApprovalFloor.DENY, "none"),
     )
-}
+})
 
-# catalog.py imports CAPA_CAPABILITIES and implements lookup without moving declarations here.
+# catalog.py
+"""Lookup for module-owned Agent capability declarations."""
+
+from app.services.capa_agent_capabilities import CAPA_CAPABILITIES
+
+from .types import CapabilitySpec
+
+
 def get_capability(id: str) -> CapabilitySpec | None:
     return CAPA_CAPABILITIES.get(id)
 ```
@@ -198,16 +213,23 @@ def test_task_object_and_owner_module_are_both_required():
 
 ```python
 # access.py
+"""Pure intersection of current identity, plugin and task authorization."""
+
 from app.core.permissions import Module, PermissionLevel
+
 from .catalog import get_capability
+
 from .types import AccessAttempt, AccessDecision, ApprovalFloor, Grant
 
 
 def _grant_covers(grant: Grant | None, attempt: AccessAttempt) -> bool:
     if grant is None or grant.capability_id != attempt.spec.id:
         return False
-    if grant.expires_at is not None and grant.expires_at <= attempt.now:
-        return False
+    if grant.expires_at is not None:
+        if grant.expires_at.tzinfo is None or attempt.now.tzinfo is None:
+            return False
+        if grant.expires_at <= attempt.now:
+            return False
     return (attempt.factory_id in grant.factory_ids
             and (grant.object_ids is None or attempt.object_id in grant.object_ids)
             and (grant.product_line_codes is None or attempt.product_line_code in grant.product_line_codes))
@@ -221,7 +243,7 @@ def _intersect_scopes(attempt: AccessAttempt) -> AccessDecision:
           or attempt.spec.kind == "command" and attempt.spec.projection != "none"
           or attempt.spec.kind not in {"context", "command"}):
         reason = "unknown capability contract"
-    elif attempt.identity_levels.get(attempt.spec.owner, 0) < attempt.spec.required_level:
+    elif attempt.identity_levels.get(attempt.spec.owner, PermissionLevel.NONE) < attempt.spec.required_level:
         reason = "identity permission denied"
     elif (attempt.identity_factories is None
           and attempt.identity_levels.get(Module.GROUP, PermissionLevel.NONE) < PermissionLevel.ADMIN):
@@ -260,7 +282,7 @@ Add tests for expiry, no implicit factory access, read-only grants not authorizi
 
 **Interfaces:**
 - Consumes: `ApprovalFloor`, `CapabilitySpec` from Task 1.
-- Produces: `route_review(module_floor: ApprovalFloor, admin_floor: ApprovalFloor) -> ApprovalFloor` and `can_employee_approve(spec: CapabilitySpec, executor_id: UUID | None, approver_id: UUID, approver_levels: Mapping[Module, PermissionLevel], has_capability_approval: bool, in_object_scope: bool, is_active: bool, is_employee: bool) -> bool`. The dedicated capability-approval predicate and object scope come from the server; their persistence and task binding belong to the later approval slice.
+- Produces: `route_review(module_floor: ApprovalFloor, admin_floor: ApprovalFloor) -> ApprovalFloor` and `can_employee_approve(spec: CapabilitySpec, executor_id: UUID | None, approver_id: UUID, approver_levels: Mapping[Module, PermissionLevel], has_capability_approval: bool, in_object_scope: bool, is_active: bool, is_employee: bool, requester_id: UUID | None = None) -> bool`. The requester, dedicated capability-approval predicate and object scope come from the server; requesters cannot approve their own requests even when a different user or a service executes them; their persistence and task binding belong to the later approval slice.
 
 - [x] **Step 1: Write failing approval tests**
 
@@ -279,6 +301,7 @@ def test_service_executor_does_not_force_human_review_or_act_as_reviewer():
     levels = {Module.CAPA: PermissionLevel.APPROVE}
     assert can_employee_approve(spec, None, employee, levels, True, True, True, True)
     assert not can_employee_approve(spec, employee, employee, levels, True, True, True, True)
+    assert not can_employee_approve(spec, None, employee, levels, True, True, True, True, requester_id=employee)
     assert not can_employee_approve(spec, None, employee, {Module.FMEA: PermissionLevel.ADMIN}, True, True, True, True)
     assert not can_employee_approve(spec, None, employee, levels, False, True, True, True)
     assert not can_employee_approve(spec, None, employee, levels, True, False, True, True)
@@ -289,9 +312,13 @@ def test_service_executor_does_not_force_human_review_or_act_as_reviewer():
 
 ```python
 # review.py
+"""Minimum approval route and employee reviewer eligibility."""
+
 from collections.abc import Mapping
 from uuid import UUID
+
 from app.core.permissions import Module, PermissionLevel
+
 from .types import ApprovalFloor, CapabilitySpec
 
 
@@ -302,11 +329,13 @@ def route_review(module_floor: ApprovalFloor, admin_floor: ApprovalFloor) -> App
 def can_employee_approve(spec: CapabilitySpec, executor_id: UUID | None,
                          approver_id: UUID, approver_levels: Mapping[Module, PermissionLevel],
                          has_capability_approval: bool, in_object_scope: bool,
-                         is_active: bool, is_employee: bool) -> bool:
+                         is_active: bool, is_employee: bool,
+                         requester_id: UUID | None = None) -> bool:
     return (spec.approval_floor != ApprovalFloor.DENY
             and is_active and is_employee and has_capability_approval and in_object_scope
             and approver_levels.get(spec.owner, PermissionLevel.NONE) >= spec.approver_level
-            and (executor_id is None or executor_id != approver_id))
+            and (executor_id is None or executor_id != approver_id)
+            and approver_id != requester_id)
 ```
 
 The direct path has no employee review; a `MODEL_REVIEW` result may escalate to `HUMAN`, which then uses the same employee qualification check. Task creation authorization is a distinct check in the later persistence plan. Add a test proving `DENY` cannot be lowered and that an inactive approver is rejected. This kernel forbids all self-approval (a stricter initial policy than the spec's possible low-risk exception); do not introduce an exception until a module declares and tests it.
@@ -322,8 +351,8 @@ The direct path has no employee review; a `MODEL_REVIEW` result may escalate to 
 - Modify: `docs/architecture.md`
 
 **Interfaces:**
-- Produces: `SourceLabel(owner: Module, object_id: UUID, sensitivity: str, capability_id: str, projection: str)`, `DerivedLabel(sources: tuple[SourceLabel, ...], sensitivity: str)`, `derive_label(sources: tuple[SourceLabel, ...]) -> DerivedLabel`, `can_view_derived(label: DerivedLabel, target_authorized: bool, authorized_sources: frozenset[tuple[Module, UUID, str, str]]) -> bool`, `DeliveryAttempt(sensitivity: str, projection: str, target_id: str, target_kind: str, allowed: frozenset[tuple[str, str, str, str]], controlled_egress: bool)`, and `can_deliver(attempt: DeliveryAttempt) -> bool`.
-- Consumes: source authorization results from Task 2; `authorized_sources`, `target_authorized` and `controlled_egress` are server-resolved, never plugin-declared. Source labels are server-attached and must preserve the exact capability and projection that informed the derived content; a masked source grant cannot authorize a raw-derived result. All transport wiring belongs to the later read-only pilot plan.
+- Produces: `SourceLabel(owner: Module, object_id: UUID, sensitivity: str, capability_id: str, projection: str, source_version: str)`, `DerivedLabel(sources: tuple[SourceLabel, ...], sensitivity: str)`, `derive_label(sources: tuple[SourceLabel, ...]) -> DerivedLabel`, `can_view_derived(label: DerivedLabel, target_authorized: bool, authorized_sources: frozenset[tuple[Module, UUID, str, str]]) -> bool`, `DeliveryAttempt(sensitivity: str, projection: str, target_id: str, target_kind: str, allowed: frozenset[tuple[str, str, str, str]], controlled_egress: bool)`, `can_deliver(attempt: DeliveryAttempt) -> bool`, and `can_deliver_derived(label: DerivedLabel, attempt: DeliveryAttempt) -> bool`.
+- Consumes: source authorization results from Task 2; `authorized_sources`, `target_authorized` and `controlled_egress` are server-resolved, never plugin-declared. Source labels are server-attached and must preserve a non-empty source version plus the exact capability and projection that informed the derived content; a masked source grant cannot authorize a raw-derived result. All transport wiring belongs to the later read-only pilot plan.
 
 - [x] **Step 1: Write failing lineage and delivery tests**
 
@@ -336,7 +365,7 @@ from app.services.agent.permissions.delivery import (
 
 
 def test_supplier_source_stays_restricted_after_capa_writeback():
-    supplier = SourceLabel(Module.SUPPLIER, uuid4(), "restricted", "supplier.confidential.raw.v1", "raw")
+    supplier = SourceLabel(Module.SUPPLIER, uuid4(), "restricted", "supplier.confidential.raw.v1", "raw", "v3")
     label = derive_label((supplier,))
     assert not can_view_derived(label, True, frozenset({(Module.CAPA, uuid4(), "capa.read.v1", "masked")}))
     assert not can_view_derived(label, False, frozenset({(supplier.owner, supplier.object_id, supplier.capability_id, supplier.projection)}))
@@ -361,9 +390,13 @@ def test_masking_never_implicitly_authorizes_egress():
 
 ```python
 # delivery.py
+"""Conservative lineage and explicit target-delivery guards."""
+
 from dataclasses import dataclass
 from uuid import UUID
+
 from app.core.permissions import Module
+
 
 @dataclass(frozen=True)
 class SourceLabel:
@@ -372,11 +405,14 @@ class SourceLabel:
     sensitivity: str
     capability_id: str
     projection: str
+    source_version: str
+
 
 @dataclass(frozen=True)
 class DerivedLabel:
     sources: tuple[SourceLabel, ...]
     sensitivity: str
+
 
 @dataclass(frozen=True)
 class DeliveryAttempt:
@@ -391,6 +427,8 @@ class DeliveryAttempt:
 def derive_label(sources: tuple[SourceLabel, ...]) -> DerivedLabel:
     if not sources:
         raise ValueError("derived content requires server-attached sources")
+    if any(not source.source_version.strip() for source in sources):
+        raise ValueError("source version required")
     if any(source.sensitivity not in {"internal", "restricted"}
            or source.projection not in {"masked", "raw"}
            or not source.capability_id for source in sources):
@@ -399,15 +437,18 @@ def derive_label(sources: tuple[SourceLabel, ...]) -> DerivedLabel:
     return DerivedLabel(sources, level)
 
 
-def can_view_derived(label: DerivedLabel, target_authorized: bool,
-                     authorized_sources: frozenset[tuple[Module, UUID, str, str]]) -> bool:
+def _valid_label(label: DerivedLabel) -> bool:
     try:
-        valid_label = derive_label(label.sources)
+        return derive_label(label.sources) == label
     except ValueError:
         return False
-    return target_authorized and label.sensitivity == valid_label.sensitivity and all(
-        (source.owner, source.object_id, source.capability_id, source.projection) in authorized_sources for source in label.sources
-    )
+
+
+def can_view_derived(label: DerivedLabel, target_authorized: bool,
+                     authorized_sources: frozenset[tuple[Module, UUID, str, str]]) -> bool:
+    return (_valid_label(label) and target_authorized
+            and all((source.owner, source.object_id, source.capability_id, source.projection)
+                    in authorized_sources for source in label.sources))
 
 
 def can_deliver(attempt: DeliveryAttempt) -> bool:
@@ -415,8 +456,13 @@ def can_deliver(attempt: DeliveryAttempt) -> bool:
     return (attempt.sensitivity in {"internal", "restricted"}
             and attempt.projection in {"masked", "raw"}
             and attempt.target_kind in {"plugin", "model"}
+            and bool(attempt.target_id.strip())
             and explicit in attempt.allowed
             and (attempt.sensitivity != "restricted" or attempt.controlled_egress))
+
+
+def can_deliver_derived(label: DerivedLabel, attempt: DeliveryAttempt) -> bool:
+    return _valid_label(label) and label.sensitivity == attempt.sensitivity and can_deliver(attempt)
 ```
 
 The explicit allowed tuple must match the actual target and projection; add tests for unknown projection/target kind and a raw projection denied by a masked-only policy. Check `label.sensitivity == "restricted"` when any source is restricted, and reject a masked-only grant for a raw source. This is a pure guard; later transport and persistence must bind these labels to actual server-resolved records. Record in the inventory that these pure guards are not yet attached to the legacy Agent gateway, business writes, indexers or model calls; the next plans must wire them before exposing any capability.

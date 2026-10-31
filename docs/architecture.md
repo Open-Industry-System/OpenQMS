@@ -156,7 +156,7 @@ async def create_fmea(...):
 
 ### 4.6 Agent 模块权限内核（未接入运行入口）
 
-`backend/app/services/capa_agent_capabilities.py` 持有两个未批准的 CAPA 能力声明，审批下限均为 `DENY`；`backend/app/services/agent/permissions/` 提供规范目录校验、身份/插件/任务范围交集、审批下限和员工资格、来源投影限制及显式外发判断等纯策略函数。详情见 [能力盘点](development/agent-module-capability-inventory.md)。
+`backend/app/services/capa_agent_capabilities.py` 持有两个未批准的 CAPA 能力声明，审批下限均为 `DENY`，目录不可原位修改；`backend/app/services/agent/permissions/` 提供规范目录校验、身份/插件/任务范围交集、审批下限和员工资格、来源投影限制及显式外发判断等纯策略函数。审批资格同时排除执行者与请求发起人自批；来源标签保留版本、能力和实际投影，派生交付不能降低来源敏感等级。详情见 [能力盘点](development/agent-module-capability-inventory.md)。
 
 内部首切片已增加 `agent_read_tasks` 租户表及 `read_task_service`：在 `TENANT_MODE=single` 下，为当前用户可见的单个 CAPA 记录创建 24 小时任务，检查时重验当前权限与对象范围，并支持撤销及审计。`capa_agent_projection` 在独立的 PostgreSQL `REPEATABLE READ READ ONLY` 事务中读取报告及 D4 验证子记录，只输出明确允许的元数据字段，并对完整投影计算稳定摘要。非单租户模式在读取数据库前拒绝这些入口。
 

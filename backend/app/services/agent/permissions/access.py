@@ -10,8 +10,11 @@ from .types import AccessAttempt, AccessDecision, ApprovalFloor, Grant
 def _grant_covers(grant: Grant | None, attempt: AccessAttempt) -> bool:
     if grant is None or grant.capability_id != attempt.spec.id:
         return False
-    if grant.expires_at is not None and grant.expires_at <= attempt.now:
-        return False
+    if grant.expires_at is not None:
+        if grant.expires_at.tzinfo is None or attempt.now.tzinfo is None:
+            return False
+        if grant.expires_at <= attempt.now:
+            return False
     return (attempt.factory_id in grant.factory_ids
             and (grant.object_ids is None or attempt.object_id in grant.object_ids)
             and (grant.product_line_codes is None or attempt.product_line_code in grant.product_line_codes))
