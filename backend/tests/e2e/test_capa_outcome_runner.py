@@ -1,4 +1,8 @@
 """No credentials or provider authority may leak into ordinary/browser children."""
+from contextlib import asynccontextmanager
+
+import pytest
+
 from tests.e2e.capa_outcome_runner import provider_environment, child_environment
 
 
@@ -32,3 +36,38 @@ def test_live_profile_rejects_invalid_timeout_without_ambient_fallback(tmp_path)
     profile.write_text('LLM_PROVIDER=openai\nLLM_API_KEY=test-secret\nLLM_TIMEOUT=not-an-integer\n')
     env, diagnostic = provider_environment(profile)
     assert diagnostic == 'invalid_test_profile' and env == {}
+
+
+@pytest.mark.asyncio
+async def test_real_progression_submits_d3_fixture_reference_accepted_by_production_contract(monkeypatch):
+    """Catch a fixture reference that omits the URL required by D3 execution."""
+    from app.services.capa_d3_containment_service import _validate_evidence_refs
+    from tests.e2e import capa_outcome_progression
+
+    class StopAtD3Execution(Exception):
+        pass
+
+    class Owned:
+        report_id = 'fixture-report'
+
+        @asynccontextmanager
+        async def client(self, *_args, **_kwargs):
+            yield object()
+
+    async def controlled_business_response(_client, _method, path, payload=None, expected=200):
+        if path.endswith('/d3/import'):
+            return {'report_status': 'done'}
+        if path.endswith('/d3/execution'):
+            _validate_evidence_refs(payload['evidence_refs'])
+            assert payload['evidence_refs'] == [{
+                'name': 'synthetic containment fixture data',
+                'url': './fixtures/capa-outcome-containment.txt',
+            }]
+            raise StopAtD3Execution
+        return {}
+
+    monkeypatch.setenv('OPENQMS_OUTCOME_LIVE_TEST', '1')
+    monkeypatch.setattr(capa_outcome_progression, 'business_response', controlled_business_response)
+
+    with pytest.raises(StopAtD3Execution):
+        await capa_outcome_progression.progress_real_outcome(Owned())

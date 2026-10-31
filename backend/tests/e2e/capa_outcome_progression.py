@@ -54,7 +54,8 @@ async def progress_real_outcome(owned, *, sources=None):
             f"D3 report_status={imported['report_status']}; report_error={imported['report_error']}")
         await business_response(editor, 'POST', path + '/d3/execution', {'source': 'manual',
             'measure_text': '合成样件已隔离，复测记录已确认。', 'result_status': 'completed',
-            'evidence_refs': [{'name': 'synthetic containment worksheet'}]})
+            'evidence_refs': [{'name': 'synthetic containment fixture data',
+                'url': './fixtures/capa-outcome-containment.txt'}]})
         await business_response(editor, 'POST', path + '/advance', {'target_state': 'D4_ROOT_CAUSE'})
         await business_response(editor, 'PUT', path, {'d4_root_cause': '合成样件扭矩不足'})
         response = await editor.post(path + '/advance', json={'target_state': 'D5_CORRECTION'})
