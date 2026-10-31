@@ -8,9 +8,11 @@
 
 **Tech Stack:** 现有 FastAPI、SQLAlchemy async、Pydantic v2、PostgreSQL 15、React 18、TypeScript、Ant Design、pytest/httpx、Vitest、已安装 Chromium/Playwright；不新增依赖。
 
-**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**执行状态（2026-10-27）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；Task 4 实际决定绑定和生产回执已通过独立规格/质量复核，最终聚焦回归 662 passed；Task 5 生产集中面板、请求归属及终态只读经两轮修正通过独立规格/质量复核，最终前端 245 passed /27 files，类型/构建/E2E 类型通过；Task 6 未审补充派生边界亦通过独立规格/质量复核，受影响后端821 passed、前端121 passed及类型/构建通过；Task 7 实现已通过独立代码复核（665511e3），但完整真实验收2 failed /1 passed、exit1：缺少授权测试.env.e2e，正向链在D3阻断，未完成验收；当前等待测试配置，最终冻结仍待后续任务，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
+**日期**：2026-10-23。**依据**：[已获书面复核通过的规格](../specs/2026-10-22-capa-d4-internal-review-publication-design.md)，包含 §5.4/§8 的结案后写保护 P1。**历史执行状态（2026-10-27）**：用户确认采用子代理驱动，并明确授权本片独占测试资源、本地文档基线/任务提交和仅合成数据的现有测试 provider 调用。完整前置基线已通过，Task 1–2 已通过规格及质量复核；Task 2 完整聚焦回归 424 passed，权限重查、间接删除及真实竞争保护已验收，Task 3 读取及版本 DTO 的 I1–I4 首轮修正经独立复核通过（最终聚焦回归 242 passed），旧轮次采用用户批准的固定兼容规则；Task 4 实际决定绑定和生产回执已通过独立规格/质量复核，最终聚焦回归 662 passed；Task 5 生产集中面板、请求归属及终态只读经两轮修正通过独立规格/质量复核，最终前端 245 passed /27 files，类型/构建/E2E 类型通过；Task 6 未审补充派生边界亦通过独立规格/质量复核，受影响后端821 passed、前端121 passed及类型/构建通过；Task 7 实现已通过独立代码复核（665511e3），但完整真实验收2 failed /1 passed、exit1：缺少授权测试.env.e2e，正向链在D3阻断，未完成验收；当前等待测试配置，最终冻结仍待后续任务，整片尚未完成。任务完成证据记录在本计划专属台账。未授权 push、合并或部署。
 
-**最终代码复核状态（2026-10-30）**：整片增量复核的唯一 Important I1（来源锁等待后的当前权限复核）已在 b375f26d 修正，唯一限定重审 PASS/Approved，无新代码阻塞发现。最新冻结完整命令3447 passed /2 failed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit2；两项live opt-in失败仍未解除，不能签署Task 7、Task 8或整片完成。真实正向provider/浏览器/知识/横向、实际scanner专项所需精确授权及依赖安全的最终清理保持待办；不合并、push或部署。
+**历史代码复核状态（2026-10-30）**：整片增量复核的唯一 Important I1（来源锁等待后的当前权限复核）已在 b375f26d 修正，唯一限定重审 PASS/Approved，无新代码阻塞发现。最新冻结完整命令3447 passed /2 failed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit2；两项live opt-in失败仍未解除，不能签署Task 7、Task 8或整片完成。真实正向provider/浏览器/知识/横向、实际scanner专项所需精确授权及依赖安全的最终清理保持待办；不合并、push或部署。
+
+**当前验收状态（2026-11-01）**：8个任务、44个步骤均已完成并通过约定验收。整片代码复核、最终交接/私有配置/证据复核通过；当前源码冻结后的完整make check为3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings、exit0，补充回归与真实分层主链、ClamAV专项均通过。最后重新核验精确身份、专属卷、两库归属及零连接/worker后，本轮核心测试容器与专属卷已处置，两库随卷删除；工作树、用户TEST profile、用户删除示例与全部历史证据保留。用户删除不纳入本轮提交，无push/合并/部署或生产开放授权。前述历史待办不再代表当前阻塞。
 
 ## Global Constraints
 
@@ -811,17 +813,17 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/e2e/test_capa_outcome_rev
 
 **Interfaces:** 没有新业务接口；产出真实验收台账与可重跑命令，标明 legacy、未审补充、终态 409 和受控修订未实现。
 
-- [ ] **Step 1: 写操作指南和受影响故事**
+- [x] **Step 1: 写操作指南和受影响故事**
 
 指南明确工程师和审核人的操作、角色配置当前仅用户分配 UI/权限 API、审批是结果接受不是外发、补充不是已审更正、正式资料没有 7 天清理、自批不变、错误后的显式重新核对、历史无绑定状态。
 
 实施完成时，将 01.3 从 v1 修订为 v2（终态不可覆写及所见版本），01.7 从 v2 修订为 v3（最终决定时复核现有门禁），01.8 从 v1 修订为 v2（未审补充来源语义），修订日期使用实际完成日期；保留 D7 pending 范围。同步 `.claude/skills/verify-capa-8d-d4-d7-audit/SKILL.md`、`verify-capa-8d-doc-update-gate/SKILL.md`、`verify-capa-8d-knowledge-sink/SKILL.md` 的故事版本/日期与受影响剧本，之后才用于走查。本轮写计划不提前改故事或 skill 的已实现契约。更新仅服务本片，不新增现场执行模型。
 
-- [ ] **Step 2: 自检规格覆盖与源码冻结**
+- [x] **Step 2: 自检规格覆盖与源码冻结**
 
 逐条对照本文末覆盖表；记录源码/配置文件 SHA256 manifest（排除文档和 node_modules/临时文件）。实际查询数据库证明没有新候选表/迁移或开关，不以“本来没写”代替范围检查；记录使用的 public/tenant head 不变。
 
-- [ ] **Step 3: 冻结后完整门禁**
+- [x] **Step 3: 冻结后完整门禁**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh
@@ -834,11 +836,11 @@ npx tsc --noEmit -p tsconfig.e2e.json
 
 `make check` 必须使用登记的自有随机 DB 配置；原有两项 graph 忽略明确列入报告。重复真实 outcome 浏览器；回归受影响的 R4a/R4b-1/R4b-2 链，若需要真实 ClamAV 专用环境，只在其精确镜像/资源本轮仍获授权时执行，否则明确阻塞项。不得启动或清除别人的历史诊断 Compose。
 
-- [ ] **Step 4: 核对结果而非预写通过**
+- [x] **Step 4: 核对结果而非预写通过**
 
 记录实际测试数、失败/skip/xfail/xpass/warnings、命令和退出码，解释专用 gate 与普通 suite 的区别；核对 manifest 未变。若最后又改源码，相关 gate 与完整冻结验证重新执行，不能用改前的绿灯收口。
 
-- [ ] **Step 5: 清理自有资源并交接**
+- [x] **Step 5: 清理自有资源并交接**
 
 只删除登记属于本片的随机库、schema、卷、端口监听和子进程；确认无挂起事务/浏览器/Vite。校验本地文档链接、代码引用、`git diff --check` 和实际变更清单；保留 worktree，不自动 merge/push/deploy。授权后提交文档与最终测试修正，主题 `docs(capa): close consolidated outcome review acceptance`；否则如实报告未提交。
 

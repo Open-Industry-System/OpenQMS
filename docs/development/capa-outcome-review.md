@@ -1,7 +1,7 @@
 # CAPA 措施实施后的集中结果审核
 
 更新：2026-11-01（本轮日志使用 UTC 2026-10-31）。本文是已实现契约的操作指南，**不是现场验收或生产开放签字**。
-Task 1–7 已通过独立复核及本片真实分层验收：Task 7 是一条真实 provider/HTTP/D8/Chromium/知识/横向主链加两条独立保护链（3 passed、5 warnings、exit 0），不是三条 AI 正向链。真实 ClamAV 专项亦通过（process 7、browser controller 1、exit 0）。Task 8 新鲜完整 `make check` 实际 3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0，1390 个源码/配置/测试文件指纹未变；用户删除的示例文件保留且排除。实际补充门禁、命令、退出码和资源证明见 [PROGRESS](../../PROGRESS.md) 的最新 Task 8 交接及私有 final-closure report。Task 8/整片仍待父级最终复核及核心资源处置，不是生产开放签字。
+Task 1–8 已完成并通过本片约定的复核及验收：Task 7 是一条真实 provider/HTTP/D8/Chromium/知识/横向主链加两条独立保护链（3 passed、5 warnings、exit 0），不是三条 AI 正向链。真实 ClamAV 专项亦通过（process 7、browser controller 1、exit 0）。Task 8 新鲜完整 `make check` 实际 3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0，1390 个源码/配置/测试文件指纹未变；用户删除的示例文件保留且排除。实际补充门禁、命令、退出码和资源证明见 [PROGRESS](../../PROGRESS.md) 的最新 Task 8 交接及私有 final-closure report。Task 8/整片最终复核已通过，登记核心测试容器与专属卷（含两测试库）已按精确身份和零连接条件完成处置；工作树、用户TEST profile及证据保留。这不是生产开放签字。
 
 依据：[当前规格](../superpowers/specs/2026-10-22-capa-d4-internal-review-publication-design.md)、[实施计划](../superpowers/plans/2026-10-23-capa-outcome-review.md)、[权限参考](../permissions.md)。
 
@@ -69,4 +69,4 @@ Task 1–7 已通过独立复核及本片真实分层验收：Task 7 是一条�
 
 不新增候选表、迁移、开关、发布路由或清理 CLI；不开放 Agent 命令、plugin/model 正文交付、通用 R5 写入/补偿或生产部署。真实验收只可经本工作树显式授权的 TEST profile、静态白名单加载和 live opt-in 进行；不得借用环境/生产密钥、mock 真实验收或制造 passed gate。
 
-独立完整检查使用登记自有随机测试 DB、现有解释器/依赖、`E2E_MODE` **未设置**，保留 Makefile 两项 graph 排除；整段 pytest 默认 provider 为空，只有精确 mandatory live node 的 fixture setup/call/teardown 临时应用本工作树 TEST profile 并在 finally 恢复原环境及同一个 Settings 对象；Node/Vite/browser 仅保留必要 nonce、后端地址与一次性员工登录等白名单，不接收 DB 或 provider 密钥。Task 7 真实主链与两条保护链已通过，ClamAV 专用 gate 也已通过；它们的收据和本轮新鲜完整门禁分别记录，不能用跳过代替成功。自有核心 PostgreSQL/卷/工作树及证据仍保留供父级复核；父级最终复核后按既有本片授权重新校验精确身份再处置；本轮只准备 DRY_RUN，不提前删除。只清理本轮创建的临时租户、监听和子进程，不清别人的诊断环境。
+独立完整检查使用登记自有随机测试 DB、现有解释器/依赖、`E2E_MODE` **未设置**，保留 Makefile 两项 graph 排除；整段 pytest 默认 provider 为空，只有精确 mandatory live node 的 fixture setup/call/teardown 临时应用本工作树 TEST profile 并在 finally 恢复原环境及同一个 Settings 对象；Node/Vite/browser 仅保留必要 nonce、后端地址与一次性员工登录等白名单，不接收 DB 或 provider 密钥。Task 7 真实主链与两条保护链已通过，ClamAV 专用 gate 也已通过；它们的收据和本轮新鲜完整门禁分别记录，不能用跳过代替成功。父级最终复核已通过；按既有本片授权，重新核验精确容器/owner/镜像/回环端点、专属卷、两库归属与零连接/登记worker后，已处置本轮核心测试容器及其专属卷，两库随卷删除。工作树、用户TEST profile、用户删除示例和全部证据保留；镜像缓存、Docker Desktop及其他服务不动。本轮资源已删除，重跑须重新登记隔离资源，不可复用旧连接或回退共享库。

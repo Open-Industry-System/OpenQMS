@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-11-01 CAPA 实施结果集中审核：8/8 任务、44/44 步骤已完成验收**。最终交接、私有配置隔离、原始收据和源码冻结已独立复核通过，无阻塞发现；完整 `make check` **3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，exit0**。补充后端1203、前端232、类型/构建、真实主链与两条保护链、真实ClamAV7过程＋1浏览器均有通过证据。父级随后重新核验精确容器/owner/镜像/回环端点/专属卷/两库归属及零连接、零登记worker，已删除本轮核心测试容器与专属卷，两测试库随卷处置；Docker Desktop、镜像缓存、其他服务、工作树、用户profile和全部SDD证据均保留。用户删除.env.e2e.example仍为唯一未提交改动，不恢复或提交。不push、合并、部署或开启生产/Agent/R5权限；下方待复核/保留核心资源条目是历史，以本条为最新结论。
+
 > **2026-11-01 Task 8 最终验证交接（UTC 收据 2026-10-31，待父级复核/核心清理）**：私有 runner 的 provider 全局污染已限制到唯一真实 live node 的 setup/call/teardown；纯配置 **8 passed**，混合真实 **14 passed /5 warnings /exit0**。新1390文件冻结后的唯一新鲜完整 `make check` 实际 **3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0**（总2201.64秒），并在真实主链后证明 provider 不再存在。后续受影响后端 **1203 passed /5 warnings**，前端 **232 passed /24 files**、app/E2E类型与生产build、真实Chromium终态及双来源保护 **2 passed /5 warnings** 均exit0。Task7真实一条主链＋两条保护链及真实ClamAV7过程＋1浏览器已通过，不混称三条AI正向链；旧失败与历史阻塞保留。1390指纹不变、实际public/tenant heads与无新候选表、无临时租户/进程/事务已核对。无tracked应用/测试/配置改动；用户删除.env.e2e.example保留且不提交。核心PG/卷/DB/SDD/worktree/证据保留，清理仅DRY_RUN；独立交接DONE_WITH_CONCERNS，不签Task8/整片完成、不push/合并/部署。完整证据见文末“Task 8 FINAL CLOSURE”。
 
 > **2026-10-31 Task 7 真实分层验收与独立复核通过，scanner 专项通过**：用户批准将真实AI正向闭环与双模块撤权保护分层；代码00b8bd5d及D3证据前置修正82c7985e经独立规格/质量复核通过，无阻塞发现。完整受控验收 **3 passed /5 warnings /exit0**：真实provider/HTTP/D8浏览器批准/知识/横向主链、终态保护、确定性双模块撤权保护；后者不冒充AI影响选择。真实ClamAV专项 **7过程测试＋1浏览器控制测试通过**，ClamAV1.4.3/定义28170，随机专项容器/卷/网络均清理，核心CAPA测试环境保留。现在进入最终受控全量检查与新冻结；旧3447/2failed是改动前历史，不是当前源码绿灯。用户删除.env.e2e.example保留且不纳入本轮提交；仍未签Task 8/整片完成，不push/合并/部署。
@@ -1855,3 +1857,10 @@ and all test profile/evidence files; the worktree remains user-dirty afterward.
 - 源码1390指纹在full后、全部supplement后和doc-only提交后分别复核。每个命令、退出码、实际计数、全量case非pass、原失败根因、catalog差异及日志hash见 `task8-takeover-gate-inventory-v2.json`（v1派生索引保留；v2补齐failed-only RED摘要，未重跑测试）。全部primary helper与补充helper/证明的SHA256及最终doc-only commit见 `task8-takeover-seal.json`。私有完整交接：`.superpowers/sdd/2026-10-23-capa-outcome-review/final-closure-report.md`。
 - **核心资源不删除**：已准备 `task8-final-closure-cleanup.py --dry-run` 与精确ID/卷/DB/零连接证明及仅供父级复核后执行的命令清单，当前只是DRY_RUN。parent独立review后按既有本片授权再次核验身份/零worker，才处置登记核心container/volume/DB；worktree、SDD、用户profile/删除及全部证据继续保留。没有静默轮换凭据、重述先前暴露值或操作远程密钥。
 - **最终剩余**：父级独立最终复核和复核后的精确核心处置。仅授权并执行doc-only本地提交（实际号见seal/report），排除用户删除示例和所有ignored profile/evidence；不push/merge/deploy，不修改controller ledger，不提前勾Task8/整片完成。
+
+## 最终验收与资源处置完成（2026-11-01）
+
+- 八任务、44步骤均完成。整片代码复核、Task7分层验收复核，以及最终私有配置/原始证据/交接与清理计划复核均已通过，无未解决阻塞发现。真实AI正向主链与两条确定性保护链分开取证，不把保护前置视为AI门禁成功。
+- 最终源冻结完整 `make check`：**3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，exit0**；补充后端1203、前端232、app/E2E类型及build、真实主链/保护、ClamAV7过程＋1浏览器均通过。保留两项既有graph排除、所有17条非pass记录、警告与全部失败轮次，不声称所有测试均无条件执行或日志纯净。
+- 最后处置前重新核验精确容器ID/owner/固定镜像/回环端点/专属卷及独占挂载、两库归属、零连接与零登记worker。只停止并删除本轮登记核心容器，删除其专属卷；两测试库随卷处置，后续inspect证明容器与卷均不存在。处置收据：`parent-core-disposal-20261031T170149851965.json`（本计划私有SDD目录）。Docker Desktop、镜像缓存、其他服务均未清理。
+- 保留当前分支、worktree、用户TEST profile、用户删除的`.env.e2e.example`及全部报告/日志/seal/旧收据。用户删除不恢复、不提交。本片未push、合并、部署或开放生产/Agent/R5能力；现场效果与业务受控修订/任意重开仍按指南边界处理。后续重跑须重新登记隔离资源，不得使用旧连接或回退共享库。

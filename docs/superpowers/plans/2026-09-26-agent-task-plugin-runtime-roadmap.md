@@ -72,3 +72,5 @@ R2 保存结构化分析结果时，由平台把已返回证据的 `(来源模�
 
 
 **2026-11-01 CAPA Task 8 最终验证交接（UTC 收据 2026-10-31，非整片签收）**：00b8bd5d 的分层验收修订及 D3 前置修正已独立复核；Task 7 一条真实 provider/HTTP/D8/Chromium/知识/横向主链和两条独立保护链 3 passed /5 warnings /exit0，真实 ClamAV 专项 process7＋browser1 通过，旧缺 profile/scanner 授权阻塞已解除。私有验证 runner 的全局 provider 污染曾造成 3439 passed /11 failed /make2，失败收据保留，不改正确的默认关闭断言；精确 live node 的 fixture setup/call/teardown 隔离经纯配置8项和混合真实14项验证后，唯一新鲜完整 make 实际 3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0。1390 源码/配置/测试文件保持冻结，用户删除示例保留；故事/skill 01.3 v2、01.7 v3、01.8 v2 的业务日期仍为2026-10-27。后续补充与 schema/resources/hash/文档证明见 PROGRESS 最终 Task 8 章节及私有 final-closure report。核心自有PG/卷/DB/工作树/SDD/证据保留，清理仅 DRY_RUN，父级最终复核后再按既有授权精确处置；不把自检当 Task8/整片验收或 R4b/Agent/R5/生产放行，不 push/merge/deploy。
+
+**2026-11-01 CAPA 结果集中审核验收收口**：8/8任务、44/44步骤完成；最终代码、交接/私有配置隔离/证据复核通过。完整make check3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings、exit0；真实一条provider正向主链加两条保护链、真实ClamAV专项及补充回归通过。父级已复核精确身份与零连接并处置本轮核心容器及专属卷，两测试库随卷删除；其他服务/镜像、工作树、用户profile/删除示例和全部证据保留。不将本片验收等同生产开放、Agent/R4b/R5放行或全部用户故事完整走查；未push/合并/部署。

@@ -2,7 +2,7 @@
 
 **初稿日期**：2026-10-22。**修订日期**：2026-10-23。
 
-**当前验证状态（2026-11-01；UTC 收据 2026-10-31）**：Task 1–7 的实现复核已通过，Task 7 一条真实 provider/HTTP/D8/Chromium/知识/横向主链和两条保护链实际 3 passed /5 warnings /exit0；两类证据不混称。独立真实 ClamAV 专项 process7＋browser1 通过。新鲜冻结后的完整 `make check` 实际 3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0，1390 文件指纹未变，用户删除示例显式排除且保留。Task 8/整片尚待父级最终复核及精确核心资源处置；补充回归、schema/resources/hash/文档证据以 PROGRESS 最新 Task 8 交接及私有 final-closure report 为准。下方设计期现状和旧失败为历史，不再表示缺 profile/scanner 授权；不重写原业务契约或关闭生产/R4b/R5 门禁。
+**当前验证状态（2026-11-01；UTC 收据 2026-10-31）**：Task 1–7 的实现复核已通过，Task 7 一条真实 provider/HTTP/D8/Chromium/知识/横向主链和两条保护链实际 3 passed /5 warnings /exit0；两类证据不混称。独立真实 ClamAV 专项 process7＋browser1 通过。新鲜冻结后的完整 `make check` 实际 3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0，1390 文件指纹未变，用户删除示例显式排除且保留。Task 8/整片最终复核和精确核心资源处置已完成：重新核验身份与零连接后删除本轮核心容器及专属卷（两测试库随卷处置），保留工作树、用户profile/删除示例和全部证据；补充回归、schema/resources/hash/文档证据以 PROGRESS 最新 Task 8 交接及私有 final-closure report 为准。下方设计期现状和旧失败为历史，不再表示缺 profile/scanner 授权；不重写原业务契约或关闭生产/R4b/R5 门禁。
 
 **状态沿革（历史，截至 2026-10-29）**：2026-10-23 用户已完成书面复核，确认结案后写保护 P1 已补齐、未发现新增阻塞问题，批准进入实施计划编写。本文替代原“D4 正文候选审核与内部发布”方案。设计通过不代表整片已交付；截至 2026-10-27，Task 1–6（写保护、受控读取、实际 D8 决定绑定、生产面板与未审补充派生）已通过独立复核。Task 7 实现代码 665511e3 已复核，但完整真实验收 2 failed /1 passed /exit1：本工作树缺少授权 .env.e2e，两项正向用例在 D3 阻断，D4 后续审批、知识及横向扩散未验证。2026-10-29 Task 8 独立指南/故事/剧本同步与冻结回归已实际执行：最终完整检查 2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit2，唯一失败为缺少显式live测试opt-in的两项必跑用例，不能称全量绿灯。13项旧授权fixture失真及本轮中间冷库前置错误已修正，失败轮次保留。真实Task7、精确授权的scanner专用门禁与最终资源删除仍依赖外部条件，不能签署Task8或整片完成。见[操作指南](../../development/capa-outcome-review.md)及 PROGRESS 的 Task 8 交接；未启用生产功能。
 

@@ -117,6 +117,8 @@ The new source-frozen full `make check` passed: 3450 passed, 12 skipped, 3 xfail
 2 xpassed, 5 warnings, exit 0. These ordinary skips do not substitute for scanner
 acceptance. The 1390-file freeze explicitly preserves the user-deleted example.
 Actual post-full checks and evidence are recorded in PROGRESS's final Task 8 section
-and the private final-closure report. Parent final review and identity-checked core
-resource disposal remain pending; retained infrastructure is not cleanup completion.
+and the private final-closure report. Final independent review passed; the exact
+registered core container and its exclusive volume (both owned test databases)
+were disposed after fresh identity and zero-use checks. The worktree, user TEST
+profile, user-owned example deletion and all evidence remain preserved.
 No dependency, migration, authority, self-approval, or deployment change is implied.
