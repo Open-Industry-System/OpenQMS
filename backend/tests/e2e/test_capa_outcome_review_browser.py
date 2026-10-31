@@ -120,13 +120,14 @@ async def test_live_employee_http_provider_chromium_outcome_review(owned_outcome
 
 
 @pytest.mark.asyncio
-async def test_live_employee_controlled_source_modules_fail_closed(owned_outcome_server):
-    """Both FMEA and PLANNING enforced on genuine source-bound pending review."""
-    from tests.e2e.capa_outcome_progression import prepare_real_documents, business_response, displayed_expectation
+async def test_employee_controlled_source_modules_fail_closed(owned_outcome_server):
+    """Protection-only source bindings deny FMEA and PLANNING independently."""
+    from tests.e2e.capa_outcome_progression import (
+        prepare_source_protection, business_response, displayed_expectation,
+    )
     owned = owned_outcome_server
-    sources = await prepare_real_documents(owned)
-    await progress_real_outcome(owned, sources=sources)
-    path = f'/api/capa/{owned.report_id}'
+    protection = await prepare_source_protection(owned)
+    path = f"/api/capa/{protection['report_id']}"
     async with owned.client() as client:
         seen = await business_response(client, 'GET', path + '/outcome-review')
         assert {doc['module'] for doc in seen['documents']} == {'fmea', 'planning'}
@@ -143,3 +144,5 @@ async def test_live_employee_controlled_source_modules_fail_closed(owned_outcome
             assert decision.json() == {'detail': 'CAPA_OUTCOME_REVIEW_ACCESS_DENIED'}
             assert await owned.snapshot() == before
             await owned.permission(module, 4)
+            restored = await business_response(client, 'GET', path + '/outcome-review')
+            assert {doc['module'] for doc in restored['documents']} == {'fmea', 'planning'}

@@ -99,6 +99,66 @@ async def prepare_real_documents(owned):
     return {'fmea_id': fmea_id, 'cp_id': cp['cp_id']}
 
 
+async def prepare_source_protection(owned):
+    """Create deterministic PROTECTION-ONLY bindings, never provider-gate evidence."""
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from app.models.capa import CAPAEightD
+    from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+    from app.models.control_plan import ControlPlan
+    from app.models.fmea import FMEADocument
+    from app.services.version_service import create_cp_version, create_fmea_version
+
+    async with owned.session_factory() as db:
+        fmea = FMEADocument(
+            document_no='PFMEA-PROTECTION-' + owned.report_id.hex[:8],
+            title='PROTECTION ONLY synthetic FMEA source', fmea_type='PFMEA',
+            factory_id=owned.factory_id, product_line_code='OUTCOME-LIVE', created_by=owned.editor_id,
+            graph_data={'nodes': [], 'edges': []},
+        )
+        cp = ControlPlan(
+            document_no='CP-PROTECTION-' + owned.report_id.hex[:8],
+            title='PROTECTION ONLY synthetic control-plan source',
+            factory_id=owned.factory_id, product_line_code='OUTCOME-LIVE', created_by=owned.editor_id,
+        )
+        db.add_all([fmea, cp])
+        await db.flush()
+        fmea_version = await create_fmea_version(db, fmea, 'edit', 'PROTECTION ONLY fixture', owned.editor_id)
+        cp_version = await create_cp_version(db, cp, 'edit', 'PROTECTION ONLY fixture', owned.editor_id)
+        report_id = uuid4()
+        capa = CAPAEightD(
+            report_id=report_id, document_no='8D-PROTECTION-' + report_id.hex[:8],
+            title='PROTECTION ONLY source authorization fixture', status='D8_APPROVAL_PENDING',
+            factory_id=owned.factory_id, product_line_code='OUTCOME-LIVE', created_by=owned.editor_id,
+            fmea_ref_id=fmea.fmea_id, d4_root_cause='PROTECTION ONLY',
+            d5_correction='PROTECTION ONLY', d6_verification='PROTECTION ONLY',
+            d7_prevention='PROTECTION ONLY',
+        )
+        db.add(capa)
+        await db.flush()
+        refs = [
+            {'doc_type': 'fmea', 'doc_id': str(fmea.fmea_id),
+             'version_after_id': str(fmea_version.version_id), 'sha256': fmea_version.sha256_hash},
+            {'doc_type': 'control_plan', 'doc_id': str(cp.cp_id),
+             'version_after_id': str(cp_version.version_id), 'sha256': cp_version.sha256_hash},
+        ]
+        analysis = CapaDocgAnalysis(
+            capa_id=report_id, factory_id=owned.factory_id, is_current=True, status='done',
+            affected_docs=[{'doc_type': ref['doc_type'], 'doc_id': ref['doc_id']} for ref in refs],
+            analysis_input_hash='0' * 64, llm_available=True, completed_at=datetime.now(timezone.utc),
+            generated_by=owned.editor_id,
+        )
+        db.add(analysis)
+        await db.flush()
+        db.add(CapaDocgDecision(
+            analysis_id=analysis.analysis_id, factory_id=owned.factory_id, decision='passed',
+            version_snapshot=refs, decided_by=owned.editor_id,
+        ))
+        await db.commit()
+    return {'report_id': report_id, 'fmea_id': fmea.fmea_id, 'cp_id': cp.cp_id}
+
+
 
 async def complete_real_d7(editor, path):
     recommendations = await business_response(editor, 'GET', path + '/d7-fmea-recommendations')
