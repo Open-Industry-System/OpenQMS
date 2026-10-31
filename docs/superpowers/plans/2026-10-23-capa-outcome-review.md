@@ -759,19 +759,19 @@ PYTHONPATH=. "$OPENQMS_OUTCOME_PYTHON" -m pytest tests/capa/test_capa_outcome_su
 
 **Interfaces:** `owned_outcome_server` fixture 返回 `{app, base_url, tenant_slug, report_id, editor_login, approver_login, session_factory, binding, nonce}`；`session_factory` 创建真实 TenantSession。仿照现有 owned harness 的 provision/loopback/teardown，但不调用 `owned_local_trial.enable()`、插件注册、DIRECT 替换或旧 scanner 配置。
 
-- [ ] **Step 1: 创建隔离生命周期并登记清理**
+- [x] **Step 1: 创建隔离生命周期并登记清理**
 
 仅使用当前获授权的随机 `_test` DB，真实 public/tenant migrations、业务租户和当前角色。新 FastAPI app 挂真实 auth/capa/product-line/fmea/control-plan/knowledge 路由、TenantContextMiddleware 与 Task 1 窄异常处理；不替换 normal get_db/权限判断/commit。
 
 使用分配的 loopback socket 和已有 Chromium；复制既有 Vite 控制器的 no-proxy、安全 env 白名单、进程失败检测、finally 关闭自有进程。harness 的 nonce 控制端点只用于切换真实权限/并发窗口和读取自有断言数据，不提供 fake approval/doc-gate/版本响应。
 
-- [ ] **Step 2: 验证无需逐步审批的正向业务链**
+- [x] **Step 2: 验证无需逐步审批的正向业务链**
 
 工程师经实际业务端点形成可验证根因、填正式措施/实施结果；D7 按现有要求处理，D8 文档门禁使用当前获授权测试 provider 和真实业务服务，最后提交到 pending。不要用“状态直接设为 pending”代替这条正向链的证据。
 
 最终 provider/知识沉淀/横向扩散链缺凭据或不可用时，报告 BLOCKED 并保留真实错误类别；不能在最终验收 monkeypatch passed gate、sink、authorize 或生产 advance。单独的保护场景可预置终态记录，但不能将其计作正向结案已贯通。
 
-- [ ] **Step 3: 写浏览器用例**
+- [x] **Step 3: 写浏览器用例**
 
 ```typescript
 await page.getByTestId('capa-outcome-core').waitFor();
@@ -788,13 +788,13 @@ await expect(page.getByTestId('capa-outcome-core')).toHaveAttribute('data-readon
 
 `reportId` 从 harness config 获取，正常登录获取当前 token；不直接注入伪造的 APPROVE store。测试从网络捕获实际发出的 expected revision/round，断言与显示版本相同，而不是只看按钮文案。
 
-- [ ] **Step 4: 反向、保护与同文档身份切换**
+- [x] **Step 4: 反向、保护与同文档身份切换**
 
 覆盖 EDIT 审批 403；审批期间 D6/验证变更导致旧版本 409；驳回必须理由并回到 D7，重提后旧轮次失效；批准后 PUT/采纳/验证直接 HTTP 均 409，材料/副作用快照不变；补报告只显示未审；归档后只读；source 撤权不返回半包；真实同 document 切换用户后旧响应不能回填或继续批准。
 
 用 Task 4 并发测试证明等待锁的真实修改被拒绝，不用浏览器 sleep 替代事务证明。跨 tenant 同 UUID、当前工厂/PL/来源权限在真实 HTTP 上各有断言。
 
-- [ ] **Step 5: 运行真实验收并记录退出码**
+- [x] **Step 5: 运行真实验收并记录退出码**
 
 ```bash
 . /Users/sam/Documents/Code/OpenQMS/.claude/worktrees/agent-module-permission-kernel/.superpowers/sdd/2026-10-23-capa-outcome-review/owned-env.sh
