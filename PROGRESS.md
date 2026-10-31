@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-11-01 Task 8 最终验证交接（UTC 收据 2026-10-31，待父级复核/核心清理）**：私有 runner 的 provider 全局污染已限制到唯一真实 live node 的 setup/call/teardown；纯配置 **8 passed**，混合真实 **14 passed /5 warnings /exit0**。新1390文件冻结后的唯一新鲜完整 `make check` 实际 **3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0**（总2201.64秒），并在真实主链后证明 provider 不再存在。后续受影响后端 **1203 passed /5 warnings**，前端 **232 passed /24 files**、app/E2E类型与生产build、真实Chromium终态及双来源保护 **2 passed /5 warnings** 均exit0。Task7真实一条主链＋两条保护链及真实ClamAV7过程＋1浏览器已通过，不混称三条AI正向链；旧失败与历史阻塞保留。1390指纹不变、实际public/tenant heads与无新候选表、无临时租户/进程/事务已核对。无tracked应用/测试/配置改动；用户删除.env.e2e.example保留且不提交。核心PG/卷/DB/SDD/worktree/证据保留，清理仅DRY_RUN；独立交接DONE_WITH_CONCERNS，不签Task8/整片完成、不push/合并/部署。完整证据见文末“Task 8 FINAL CLOSURE”。
+
 > **2026-10-31 Task 7 真实分层验收与独立复核通过，scanner 专项通过**：用户批准将真实AI正向闭环与双模块撤权保护分层；代码00b8bd5d及D3证据前置修正82c7985e经独立规格/质量复核通过，无阻塞发现。完整受控验收 **3 passed /5 warnings /exit0**：真实provider/HTTP/D8浏览器批准/知识/横向主链、终态保护、确定性双模块撤权保护；后者不冒充AI影响选择。真实ClamAV专项 **7过程测试＋1浏览器控制测试通过**，ClamAV1.4.3/定义28170，随机专项容器/卷/网络均清理，核心CAPA测试环境保留。现在进入最终受控全量检查与新冻结；旧3447/2failed是改动前历史，不是当前源码绿灯。用户删除.env.e2e.example保留且不纳入本轮提交；仍未签Task 8/整片完成，不push/合并/部署。
 
 > **2026-10-30 最终代码复核收口，整体验收仍 BLOCKED**：整片复核提出的唯一 Important I1 已由 `b375f26d` 修正，并经唯一一次最终限定复核确认 ADDRESSED，限定规格 PASS、质量 Approved，无新增 Critical/Important/Minor。来源锁等待后重新核验 verification create/update 及 run_audit 当前权限；真实并发32 passed，受影响后端1113 passed，前端232 passed及类型/构建/真实终态保护通过。当前1391文件指纹 `87fb0a10615affa1d3ef3c3c4bee3db9273fc3896a23ccdea8146f07858a5b33`，最后完整检查 **3447 passed /2 failed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit2**，两项强制live缺opt-in，不能称全绿或Ready to Merge。代码发现已关闭，不再自动派发修正；授权测试profile、真实正向provider/浏览器/知识/横向、精确授权scanner专项及依赖安全的最终清理仍待完成。保留分支、worktree、自有核心PG与全部证据，不push/合并/部署。下方各“待复核”条目是历史过程，以本条为最新状态。
@@ -1820,3 +1822,36 @@ fix before editing, as the existing freeze/reviews must then be revisited.
 No Task7/Task8/phase acceptance or controller ledger was marked complete; no push,
 merge or deployment. Any local report-only commit excludes the user-deleted example
 and all test profile/evidence files; the worktree remains user-dirty afterward.
+
+## Task 8 FINAL CLOSURE — 2026-11-01（UTC 收据 2026-10-31）
+
+**独立验证交接 DONE_WITH_CONCERNS，不是 Task8/整片最终签收。** BASE `0052f8621440f4af324c21cfccf008218cc5dd35`；已复核源码 `00b8bd5d` 及 D3 前置修正/分层证据保持不变。仅待父级独立最终复核（包含私有配置 harness）和复核后的精确核心资源处置。下列均为本轮实际执行，不引用历史2999/3447作为当前结果。
+
+### 私有配置根因与实证
+
+- 旧 `task8-final-closure-full-result.json/log` 的 **3439 passed /11 failed /12 skipped /3 xfailed /2 xpassed /5 warnings，make2** 原样保留：私有 runner 在收集时全局载入 provider，使缓存的同一个 Settings 被所有用例看到；2项 no-LLM CAPA 预期422却200、8项 readonly browser 预期未配置provider却为True，以及同轮1项local-trial浏览器控制失败。正确的安全/默认关闭断言没有修改；没有应用缺陷修正、SDK/provider结果替身或新增skip/ignore/xfail。
+- 接管发现未验证的 hookwrapper 在非 live 分支直接 return，真实配置 RED **1 failed /exit1**（`task8-pytest-20261031T153413155233-*`）；修正私有 hook 后，纯配置 **8 passed /0 warnings /exit0**（`153727914942`），覆盖正常、异常、实际pytest setup/call/teardown故障后的精确恢复和Node白名单，无付费调用。原草稿及全部旧收据保留。
+- 只有精确 `tests/e2e/test_capa_outcome_review_browser.py::test_live_employee_http_provider_chromium_outcome_review` 的完整 fixture setup＋call＋teardown 临时应用本工作树授权 TEST profile 的5项既有LLM配置。整段pytest默认provider为空；原环境、Settings字段及fields-set在finally精确恢复，不替换Settings对象/导入引用，不改鉴权/门禁/提交。已核对的AI配置服务和provider_adapter按请求读取配置，没有需要清除的配置缓存；不增加生产生命周期修正。
+- 实际混合 **14 passed /5 warnings /exit0（170.72秒）**，无skip/xfail/xpass/deselection：D4 no-LLM、全部8个R4 readonly浏览器、正常local-trial浏览器、CAPA三条分层用例，最后D5 no-LLM再次422；真实主链使用实际provider/员工HTTP/D8/Chromium/知识/横向，后两条仅是保护证据。日志有 `TASK8_PROVIDER_SCOPE` 和最终 `TASK8_PROVIDER_ABSENCE_AFTER_SUITE`。Node/Vite/browser保留已有nonce/backend/一次性员工登录等明确白名单，不接收DB/provider键；npm/npx只有系统环境。旧receipt的`node_environment=system-only wrapper`标签未覆盖直接Node的运行时白名单，解释在私有metadata-note，未重写原receipt。
+
+### 新冻结、唯一新鲜完整门禁、全部后续验证
+
+- 新manifest `task8-takeover-frozen-manifest.json`：**1390文件**，SHA256 **69a55eb9bb2df59377626aa81bd0de1b8436cd5b34cea1c5232b4f788aa2b456**。仅包含tracked源码/配置/测试，排除文档、依赖/构建、私有证据；用户已删除的tracked `.env.e2e.example` 明确作为缺失基线排除，不恢复、不stage、不提交。用户ignored TEST profile不修改或纳入清单。
+- 精确登记container ID/owner nonce/image/端口、DB名/owner及**零活动worker/连接**核验后，仅重建登记随机TEST DB一次；application/shared/seed DB没有reset，没有终止worker。独占attempt记录和primary helper SHA256在 `task8-final-closure-r2-attempt.json`，原failure/fresh-DB日志均保留，输出使用新stem与0600脱敏文件。
+- 实际命令（本worktree；解释器main路径仅执行，不读main checkout配置）：`/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python .superpowers/sdd/2026-10-23-capa-outcome-review/task8-final-run.py full`。其child是 **`make --silent check`**，不是自造替代门禁；私有pytest entry仅使plugin在Makefile的`PYTHONPATH=.`下可导入。真实live opt-in只配合精确node的配置scope；不将provider全局暴露。
+- **实际完整结果：3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，pytest2168.07秒，make exit0，总2201.64秒，UTC完成16:19:59。** 完整case/结果见 `task8-final-closure-r2-full-result.json/log`；真实mandatory CAPA live passed且最终provider为空。只运行这一次新鲜full，无超时重置/重复full/盲目provider重试；等待真实后台完成，未轮询日志。
+- 保留Makefile两项graph排除：`tests/test_graph_sync_worker.py`、`tests/test_graph_projection.py`。全部17条skip/xfail/xpass逐条保存在 `task8-takeover-full-nonpass-cases.txt`。普通suite的ClamAV专用环境skip不替代已通过的独立scanner gate；其余既有canonical snapshot/Redis/E2E_MODE skips及MES xfail/xpass未隐藏或修正。
+- 完整退出后，补充受影响后端 `tests/capa tests/fmea`、规划ID稳定性/去重/产品线，以及D4 preview、readonly delivery、附件API/存储/恢复共 **1203 passed /5 warnings /exit0（395.07秒）**，无skip/xfail/xpass/deselection；收据 `task8-pytest-20261031T162129573385-*`。
+- 后续前端实际 **24 files /232 passed /exit0**，目标为CAPA API/详情/组件及受影响Agent任务、附件和D4 preview API/组件；收据 `task8-frontend-20261031T162057808062-*`。接着实际 `npx --no-install -c 'tsc --noEmit && tsc --noEmit -p tsconfig.e2e.json && npm run build'` **exit0**，收据 `162111767655`；不安装依赖或浏览器。
+- 最后实际Chromium终态保护及确定性FMEA/PLANNING逐模块撤权保护 **2 passed /5 warnings /exit0（20.22秒）**，显式选择两项，无deselection、无mock真实关闭；收据 `task8-pytest-20261031T162811209284-*`。每个fixture在真实租户中记录public/tenant heads及表列表，随后真实teardown，`TASK8_FINAL_TENANT_CLEANUP: remaining=0`。真正正向provider/关闭证据来自混合和完整suite中的mandatory live，不拿保护夹具冒充。
+- Python warnings为3项既有Pydantic class-config及2项websockets/uvicorn弃用；前端原React act/jsdom getComputedStyle/组件弃用提示与浏览器Node弃用、合成租户缺R11风险配置等诊断仍在原日志，没有全局silence或扩大整改。Vitest没有统一warning计数，未伪造为零。
+
+### Schema、资源、文档与剩余动作
+
+- 实际before/after两个自有DB各 **168张public表**，表集合及public head **20261009_agent_task_attachments** 不变，无新增/删除候选表。真实fixture租户前后head **tv005_agent_task_attachments**、表集合不变、无候选表；未新增迁移、候选路由/开关、现场执行模型或生产配置。
+- `task8-takeover-resources-final.json`：container ID/owner/image/独占卷挂载核验；两个自有DB其他连接和idle事务均0，全部临时tenant schemas为0，登记runner/子进程/Vite/browser已结束。原scanner随机项目当前containers/volumes/networks均0。没有全局Docker stop/prune或处理其他项目资源。
+- Task7已验收的 `task7-acceptance-20261031T135252615462-*` **3 passed /5 warnings /exit0** 是一条真正主链＋两条独立保护链；`task8-scanner-20261031T135929361071-*` 是已授权真实ClamAV **7过程测试 /3 warnings＋1浏览器控制测试 /3 warnings，exit0**，ClamAV1.4.3/definitions28170。源码/镜像契约未变，不重跑不必要scanner/build/download；不把ordinary skip当其通过。
+- 已保留并完成4份partial docs，补齐PROGRESS、当前spec、runtime roadmap及受影响frontend README的当前状态。**01.3 v2 /01.7 v3 /01.8 v2及三个skill的业务版本/日期仍为2026-10-27**，没有无关升级或重写历史；D7 pending、CP+FMEA、当前自批及R4b/Agent/R5/生产边界不变。机械版本/本地链接/源码引用/既有selector-API-audit检查和diff结果见 `task8-takeover-doccheck.json`，不冒充整个用户故事剧本走查。
+- 源码1390指纹在full后、全部supplement后和doc-only提交后分别复核。每个命令、退出码、实际计数、全量case非pass、原失败根因、catalog差异及日志hash见 `task8-takeover-gate-inventory-v2.json`（v1派生索引保留；v2补齐failed-only RED摘要，未重跑测试）。全部primary helper与补充helper/证明的SHA256及最终doc-only commit见 `task8-takeover-seal.json`。私有完整交接：`.superpowers/sdd/2026-10-23-capa-outcome-review/final-closure-report.md`。
+- **核心资源不删除**：已准备 `task8-final-closure-cleanup.py --dry-run` 与精确ID/卷/DB/零连接证明及仅供父级复核后执行的命令清单，当前只是DRY_RUN。parent独立review后按既有本片授权再次核验身份/零worker，才处置登记核心container/volume/DB；worktree、SDD、用户profile/删除及全部证据继续保留。没有静默轮换凭据、重述先前暴露值或操作远程密钥。
+- **最终剩余**：父级独立最终复核和复核后的精确核心处置。仅授权并执行doc-only本地提交（实际号见seal/report），排除用户删除示例和所有ignored profile/evidence；不push/merge/deploy，不修改controller ledger，不提前勾Task8/整片完成。

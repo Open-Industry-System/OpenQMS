@@ -101,16 +101,22 @@ requiredModule="...">`.
   module graph and are not imported elsewhere.
 
 
-## Outcome-review handoff (2026-10-27)
+## Outcome-review handoff (2026-11-01)
 
-See the [operator guide](../../../docs/development/capa-outcome-review.md) for the implemented current-material review,
+See the [operator guide](../../../docs/development/capa-outcome-review.md) for current-material review,
 explicit reload after conflict/uncertainty, historical unbound labels, and terminal
 core versus unreviewed closure-supplement rules (archived supplement retains the
-existing 400; reviewed core and mixed updates use 409). No controlled revision or
-reopen workflow is implemented. This does not authorize plugin/model delivery.
-Stories 01.3 v2, 01.7 v3 and 01.8 v2 and their derived walkthroughs are synchronized
-as implementation contracts, not acceptance signoff. Task7 positive real-provider /
-browser / knowledge / lateral acceptance remains blocked by the missing authorized
-worktree test profile. Frozen ordinary checks and dedicated scanner gates are
-recorded separately in PROGRESS Task8; retained owned infrastructure is not final
-cleanup completion. No deployment, dependency, or migration change is implied.
+existing 400; reviewed core and mixed updates use 409). Controlled revision/reopen
+is not implemented. No plugin/model delivery or production enablement is authorized.
+Stories 01.3 v2, 01.7 v3 and 01.8 v2 and their derived walkthroughs keep the
+2026-10-27 business-contract versions; this is not signoff for every story walkthrough.
+The authorized TEST-profile Task 7 gate passed: one real-provider HTTP/D8/Chromium/
+knowledge/lateral primary chain plus two independent protection cases (3 passed,
+5 warnings, exit 0). The separate real ClamAV gate passed (process 7 + browser 1).
+The new source-frozen full `make check` passed: 3450 passed, 12 skipped, 3 xfailed,
+2 xpassed, 5 warnings, exit 0. These ordinary skips do not substitute for scanner
+acceptance. The 1390-file freeze explicitly preserves the user-deleted example.
+Actual post-full checks and evidence are recorded in PROGRESS's final Task 8 section
+and the private final-closure report. Parent final review and identity-checked core
+resource disposal remain pending; retained infrastructure is not cleanup completion.
+No dependency, migration, authority, self-approval, or deployment change is implied.

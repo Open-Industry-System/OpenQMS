@@ -347,7 +347,9 @@ created_by 推断。元数据查询不加载审计私有 before/after，Task 5 �
 
 终态核心材料各入口统一 `409 CAPA_REVIEWED_CONTENT_LOCKED`，无权限/不可见先拒绝。D8_CLOSURE 单独补充标未审；ARCHIVED 的纯 d8_closure 补充沿用原400冻结，混合核心 PUT 原子409。正式记录没有候选7天清理或预览30秒时限；受控修订/重开未实现。
 
-Task 1–6 已独立复核，不等于全片验收。Task7 完整真实门禁已有2 failed /1 passed /exit1，缺本工作树授权 `.env.e2e`；真实 provider 正向浏览器、知识、横向扩散未验证。Task8普通冻结回归、专用ClamAV门禁与真实验收分别记账（见 PROGRESS Task8），不能用 mocks/跳过/历史基线签字。保留登记核心PG资源等待后续真实验收，最终清理依赖阻塞；不改变生产、R4b或R5权限边界。
+**2026-10-27 历史状态**：Task 1–6 已独立复核，不等于全片验收。Task7 完整真实门禁已有2 failed /1 passed /exit1，缺本工作树授权 `.env.e2e`；真实 provider 正向浏览器、知识、横向扩散未验证。Task8普通冻结回归、专用ClamAV门禁与真实验收分别记账（见 PROGRESS Task8），不能用 mocks/跳过/历史基线签字。保留登记核心PG资源等待后续真实验收，最终清理依赖阻塞；不改变生产、R4b或R5权限边界。
 
 
-**2026-10-29 实际冻结结果**：1391个源码/配置/测试哈希保持不变；最终真实完整make check为2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings（make exit2），仅两项强制live用例因无显式opt-in失败，不是全量绿灯。旧fixture与fresh DB前置问题只在测试中修正，没有降低当前授权或终态保护。正向provider、知识/横向、scanner专用gate及最终破坏性资源清理仍未签收；普通回归/终态保护和实际数据库head证明见PROGRESS Task8及私有完整报告。
+**2026-10-29 实际冻结结果（历史）**：1391个源码/配置/测试哈希保持不变；完整 make check 为2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings（make exit2），仅两项强制live用例因无显式 opt-in 失败。该轮次保留为历史失败证据，不是当前结论。
+
+**2026-11-01 当前交接（UTC 收据 2026-10-31）**：授权 TEST profile 经静态白名单和精确 live node 的 setup/call/teardown 作用域完成 Task 7 一条真正 provider/HTTP/D8/Chromium/知识/横向主链及两条保护链（3 passed、5 warnings、exit 0）；独立真实 ClamAV gate 亦通过（process 7、browser controller 1、exit 0）。Task 8 新鲜全量实际 3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0；1390 文件指纹不变，用户删除示例不恢复或提交。既有两项 graph 排除和全部非 pass 保留；scanner 专项不由普通 skip 代替。补充回归及权限/来源/终态证明见最新 PROGRESS 和私有 final-closure report；Task 8/整片只待父级复核和身份校验后的核心资源处置，不改变任何权限、自批、默认关闭或生产开放边界。
