@@ -1,0 +1,35 @@
+name: "📖 文档反馈"
+description: 反馈文档错误、内容缺失或安装使用指引不清晰的问题。
+title: "[文档] "
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢帮助完善文档！请先搜索已有 Issue，避免重复提交。
+        请勿上传账号密码、Token、客户资料或未脱敏的质量记录；配置示例和日志也请先脱敏。
+  - type: input
+    id: location
+    attributes:
+      label: 文档位置
+      description: 请提供文档链接或文件路径，尽量注明章节；如果是缺少文档，请说明希望在哪里补充。
+      placeholder: 例如 README.md 的安装章节，或 docs/e2e.md
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 哪些内容有误、缺失或不易理解？如涉及操作失败，请说明参照的文档版本与失败步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 建议修改内容（可选）
+      description: 希望如何修正或补充？不确定修改方式也可以只描述问题。
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息（可选）
+      description: 可提供相关版本、脱敏截图、错误提示或参考链接。
