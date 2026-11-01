@@ -1,35 +1,40 @@
-name: "📖 文档反馈"
-description: 反馈文档错误、内容缺失或安装使用指引不清晰的问题。
-title: "[文档] "
+name: "📖 文档反馈 / Documentation feedback"
+description: 反馈文档错误、缺失或不清晰的指引。 / Report incorrect, missing, or unclear documentation.
+title: "[Docs] "
 labels: [documentation]
 body:
   - type: markdown
     attributes:
       value: |
+        **可使用中文或英文填写 / You may submit this issue in Chinese or English.**
+
         感谢帮助完善文档！请先搜索已有 Issue，避免重复提交。
+        Thanks for helping improve the documentation! Please search existing issues to avoid duplicates.
+
         请勿上传账号密码、Token、客户资料或未脱敏的质量记录；配置示例和日志也请先脱敏。
+        Do not share credentials, tokens, customer information, or unsanitized quality records. Sanitize configuration examples and logs before sharing.
   - type: input
     id: location
     attributes:
-      label: 文档位置
-      description: 请提供文档链接或文件路径，尽量注明章节；如果是缺少文档，请说明希望在哪里补充。
-      placeholder: 例如 README.md 的安装章节，或 docs/e2e.md
+      label: 文档位置 / Documentation location
+      description: 请提供链接或文件路径，尽量注明章节；若缺少文档，请说明希望在哪里补充。 / Provide a link or file path and section if possible. For missing documentation, suggest where it belongs.
+      placeholder: 例如 README.md 的安装章节，或 docs/e2e.md / e.g. the installation section in README.md, or docs/e2e.md
     validations:
       required: true
   - type: textarea
     id: problem
     attributes:
-      label: 问题描述
-      description: 哪些内容有误、缺失或不易理解？如涉及操作失败，请说明参照的文档版本与失败步骤。
+      label: 问题描述 / Problem description
+      description: 哪些内容有误、缺失或不易理解？如操作失败，请说明文档版本与失败步骤。 / What is incorrect, missing, or unclear? If instructions failed, include the documentation version and the step that failed.
     validations:
       required: true
   - type: textarea
     id: suggestion
     attributes:
-      label: 建议修改内容（可选）
-      description: 希望如何修正或补充？不确定修改方式也可以只描述问题。
+      label: 建议修改内容（可选） / Suggested changes (optional)
+      description: 希望如何修正或补充？不确定修改方式也可只描述问题。 / How could the documentation be improved? It is fine to report a problem without proposing a fix.
   - type: textarea
     id: context
     attributes:
-      label: 补充信息（可选）
-      description: 可提供相关版本、脱敏截图、错误提示或参考链接。
+      label: 补充信息（可选） / Additional context (optional)
+      description: 可提供相关版本、脱敏截图、错误提示或参考链接。 / Include relevant versions, sanitized screenshots, error messages, or reference links.

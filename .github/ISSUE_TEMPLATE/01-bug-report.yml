@@ -1,68 +1,76 @@
-name: "🐛 Bug 反馈"
-description: 报告功能异常、报错或不符合预期的结果。
+name: "🐛 Bug 反馈 / Bug report"
+description: 报告功能异常或不符合预期的结果。 / Report errors or unexpected behavior.
 title: "[Bug] "
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
+        **可使用中文或英文填写 / You may submit this issue in Chinese or English.**
+
         感谢反馈！请先搜索已有 Issue，避免重复提交。
+        Thanks for reporting! Please search existing issues to avoid duplicates.
+
         请勿上传账号密码、Token、客户资料或未脱敏的质量记录；截图和日志也请先脱敏。
+        Do not share credentials, tokens, customer information, or unsanitized quality records. Sanitize screenshots and logs before uploading.
+
         安全漏洞请勿在公开 Issue 中披露利用细节或敏感数据。
+        For security vulnerabilities, do not disclose exploit details or sensitive data in public issues.
   - type: input
     id: module
     attributes:
-      label: 所属模块
-      description: 例如 FMEA、控制计划、CAPA / 8D、供应商管理、权限或部署。
-      placeholder: 模块名称；不确定可填写“不确定”
+      label: 所属模块 / Affected module
+      description: 例如 FMEA、控制计划、CAPA / 8D、供应商管理、权限或部署。 / For example, FMEA, Control Plan, CAPA / 8D, supplier management, permissions, or deployment.
+      placeholder: 模块名称；不确定可填写“不确定” / Module name, or “Not sure”
     validations:
       required: true
   - type: textarea
     id: problem
     attributes:
-      label: 问题描述
-      description: 简要描述发生了什么，以及对使用造成的影响。
+      label: 问题描述 / Problem description
+      description: 简要描述发生了什么，以及对使用造成的影响。 / Describe what happened and how it affects your work.
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: 复现步骤
-      description: 请说明必要的前置条件、用户角色和操作步骤，不要包含真实账号或业务数据。
+      label: 复现步骤 / Steps to reproduce
+      description: 请说明前置条件、用户角色和操作步骤，不要包含真实账号或业务数据。 / Include prerequisites, user roles, and steps. Do not include real accounts or business data.
       placeholder: |
-        1. 使用什么角色，打开哪个页面
-        2. 执行什么操作
-        3. 出现什么问题
+        1. 用户角色及页面 / User role and page
+        2. 执行的操作 / Action taken
+        3. 出现的问题 / Problem observed
         若无法稳定复现，请说明发生频率和已知条件。
+        If intermittent, describe the frequency and known conditions.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: 预期结果
+      label: 预期结果 / Expected behavior
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
-      label: 实际结果
-      description: 如有错误提示，请提供脱敏后的原文。
+      label: 实际结果 / Actual behavior
+      description: 如有错误提示，请提供脱敏后的原文。 / Include the exact error message with sensitive information removed, if available.
     validations:
       required: true
   - type: textarea
     id: environment
     attributes:
-      label: 版本与运行环境
-      description: 请尽量提供版本号或 commit、部署方式、操作系统和浏览器版本；无法确定的项可填写“不确定”。
+      label: 版本与运行环境 / Version and environment
+      description: 请提供版本或 commit、部署方式、操作系统和浏览器版本；不确定的项可填写“不确定”。 / Include the version or commit, deployment method, OS, and browser version. Enter “Not sure” for unknown items.
       placeholder: |
-        OpenQMS 版本 / commit：
-        部署方式：Docker Compose / 本地开发 / 其他
-        操作系统：
-        浏览器及版本：
+        OpenQMS 版本 / Version or commit:
+        部署方式 / Deployment: Docker Compose / 本地开发 Local development / 其他 Other
+        操作系统 / OS:
+        浏览器及版本 / Browser and version:
     validations:
       required: true
   - type: textarea
     id: evidence
     attributes:
-      label: 截图、日志或补充信息（可选）
-      description: 可粘贴脱敏日志或上传截图；请不要粘贴完整 .env、请求凭据或真实质量记录。
+      label: 截图、日志或补充信息（可选） / Screenshots, logs, or context (optional)
+      description: 可提供脱敏日志或截图；不要粘贴完整 .env、请求凭据或真实质量记录。 / Attach sanitized logs or screenshots. Do not paste complete .env files, request credentials, or real quality records.

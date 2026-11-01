@@ -1,60 +1,67 @@
-name: "💡 功能建议与优化"
-description: 提出新功能、业务流程改进、体验或性能优化建议。
-title: "[建议] "
+name: "💡 功能建议与优化 / Features and improvements"
+description: 提出新功能、流程、体验或性能优化建议。 / Suggest features or workflow, usability, and performance improvements.
+title: "[Enhancement] "
 labels: [enhancement]
 body:
   - type: markdown
     attributes:
       value: |
+        **可使用中文或英文填写 / You may submit this issue in Chinese or English.**
+
         感谢提出建议！请先搜索已有 Issue，看看是否已有相关讨论。
+        Thanks for your suggestion! Please search existing issues for related discussions first.
+
         无需提供技术方案，说明实际场景和希望解决的问题即可。
+        No technical solution is required. Describe your use case and the problem you want to solve.
+
         请勿上传账号密码、Token、客户资料或未脱敏的质量记录。
+        Do not share credentials, tokens, customer information, or unsanitized quality records.
   - type: dropdown
     id: suggestion-type
     attributes:
-      label: 建议类型
+      label: 建议类型 / Suggestion type
       options:
-        - 新功能
-        - 业务流程改进
-        - 使用体验优化
-        - 性能优化
-        - 其他
+        - 新功能 / New feature
+        - 业务流程改进 / Workflow improvement
+        - 使用体验优化 / Usability improvement
+        - 性能优化 / Performance improvement
+        - 其他 / Other
     validations:
       required: true
   - type: input
     id: module
     attributes:
-      label: 所属模块
-      placeholder: 例如 FMEA、控制计划、CAPA / 8D；不确定可填写“不确定”
+      label: 所属模块 / Affected module
+      placeholder: 例如 FMEA、控制计划、CAPA / 8D；不确定可填写“不确定” / e.g. FMEA, Control Plan, CAPA / 8D, or “Not sure”
     validations:
       required: true
   - type: textarea
     id: scenario
     attributes:
-      label: 使用场景与痛点
-      description: 谁在什么场景下遇到了什么困难？目前如何处理，有什么不足？请使用虚构或脱敏示例。
+      label: 使用场景与痛点 / Use case and pain points
+      description: 谁在什么场景下遇到什么困难？目前如何处理，有什么不足？请使用虚构或脱敏示例。 / Who encounters this problem, and when? How is it handled today, and what falls short? Use fictional or sanitized examples.
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: 期望的改进
-      description: 希望系统增加或调整什么行为？涉及质量标准时，请注明标准名称、版本及相关条款编号，无需上传受版权保护的原文。
+      label: 期望的改进 / Proposed improvement
+      description: 希望增加或调整什么行为？涉及质量标准时，请注明名称、版本和条款编号，无需上传受版权保护的原文。 / What behavior should be added or changed? For quality standards, cite the name, edition, and clause number without uploading copyrighted text.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: 替代方案（可选）
-      description: 是否考虑过其他方式，或已有临时解决办法？
+      label: 替代方案（可选） / Alternatives (optional)
+      description: 是否考虑过其他方式，或已有临时解决办法？ / Have you considered alternatives or used any workarounds?
   - type: textarea
     id: acceptance
     attributes:
-      label: 验收标准（可选）
-      description: 出现什么可观察的结果，就说明改进有效？不需要编写测试代码。
-      placeholder: 例如：在控制计划列表中，可以按产品线筛选，并保留筛选条件。
+      label: 验收标准（可选） / Acceptance criteria (optional)
+      description: 什么可观察的结果能说明改进有效？不需要编写测试代码。 / What observable outcome would demonstrate success? Test code is not required.
+      placeholder: 例如：控制计划列表支持按产品线筛选并保留筛选条件。 / Example — filter Control Plans by product line and retain the selected filter.
   - type: textarea
     id: context
     attributes:
-      label: 补充信息（可选）
-      description: 可补充脱敏截图、示意图、关联 Issue 或参考链接。
+      label: 补充信息（可选） / Additional context (optional)
+      description: 可补充脱敏截图、示意图、关联 Issue 或参考链接。 / Add sanitized screenshots, mockups, related issues, or reference links.
