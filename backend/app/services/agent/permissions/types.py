@@ -1,3 +1,5 @@
+"""Value types for the module Agent permission kernel."""
+
 from dataclasses import dataclass
 from datetime import datetime
 from enum import IntEnum
@@ -46,6 +48,7 @@ class AccessAttempt:
     object_id: UUID
     product_line_code: str
     now: datetime
+    identity_bypass_row_level_security: bool = False
 
 
 @dataclass(frozen=True)

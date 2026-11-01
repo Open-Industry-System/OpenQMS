@@ -1,14 +1,16 @@
-# Agent 模块能力盘点：8D D4/D5 样板
+# Agent 模块能力盘点
 
-日期：2026-09-26。当前事实与目标边界分别见[架构概览](../architecture.md)、[模块权限设计](../superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md)。本清单不是授权表；本切片没有开放新的 Agent 能力。
+本页记录现有代码锚点及**尚未批准**的 CAPA 试点声明，不是插件可调用接口或审批矩阵。目标语义见 [模块级权限设计](../superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md)。
 
-| 目标能力标识 | 当前业务入口 | 已知现状 | 本切片状态 |
+| 稳定能力 ID | 模块及类型 | 当前状态 | 已有代码锚点与缺口 |
 |---|---|---|---|
-| `capa.d4.summary.masked.v1` | `backend/app/api/capa.py:get_capa` → `backend/app/services/capa_service.py:get_capa` | 页面 API 检查 CAPA VIEW、工厂和产品线；返回完整 `CAPAResponse`，不是已定义的 Agent 脱敏投影。 | 未批准/未开放；目录声明为 DENY。 |
-| `capa.d4.candidate.propose.v1` | `backend/app/services/capa_verification_service.py:adopt_recommendation` 与 `create_verification` 是现有相邻业务入口 | 采纳将文本追加进 D4/D5；验证是正式业务记录，不是独立候选根因命令。不可把现有入口直接包装成候选写工具。 | 未批准/未开放；目录声明为 DENY。 |
-| 关联 FMEA / IQC 详情 | 所属模块查询入口待逐项盘点 | 8D 关联关系或 CAPA 权限不自动授予 FMEA/IQC 读取权。 | 无能力声明；禁止 Agent 调用。 |
-| 供应商选择器 | `backend/app/api/capa.py:list_capa_supplier_options` | 现有人类页面以 CAPA CREATE 获取受限的供应商摘要，不要求 SUPPLIER VIEW；这不是 Agent 跨模块授权的模板。 | 不注册为 Agent 能力。 |
+| `capa.d4.summary.masked.v1` | CAPA / 上下文 | 未批准、未开放；最低审批 `DENY` | `backend/app/services/agent/read_task_service.py` 持久化单报告任务并复核当前权限；`backend/app/services/capa_agent_projection.py` 在一致性快照中生成字段白名单 D4 元数据投影及内容摘要。两者仅为单租户内部基础，不接入插件、模型或 HTTP。现有 `backend/app/api/capa.py:get_capa` 是人类页面接口，不能作为 Agent 投影。 |
+| `capa.d4.candidate.propose.v1` | CAPA / 命令 | 未批准、未开放；最低审批 `DENY` | `backend/app/services/capa_verification_service.py` 含 D4 验证业务规则；`adopt_recommendation` 与 `create_verification` 是相邻业务入口，不是独立候选根因命令；候选建议与正式验证/采纳的区分、审批下限和服务入口仍待业务责任方确认。 |
 
-目录不可原位修改；纯内核的 `authorize()` 以服务端目录为准，拒绝伪造审批等级和未知能力 ID。现有 `backend/app/services/agent/gateway.py:invoke` 使用工具权限等级和 commit 白名单；本计划的纯策略内核尚未接入它。任何目录项或本清单都不意味着既有网关、模型调用、搜索索引或业务写入已经受到新规则约束。后续切片须取得业务责任人对数据分类、脱敏、最低审批和外发矩阵的逐项确认，然后才能开放对应能力。
+现有 `backend/app/services/agent/gateway.py:invoke` 使用既有工具注册与白名单，不接入上述声明；`backend/app/api/capa.py:list_capa_supplier_options` 为人类界面供应商选择器，以 CAPA CREATE 开放且不要求 SUPPLIER VIEW，**不得**当作 Agent 跨模块授权样板。FMEA/IQC 尚无能力声明，证据必须由其所属模块分别批准和校验。
 
-已实现的纯函数要求来源模块、对象、版本与敏感等级；派生内容同时检查目标对象权限和各来源对应敏感等级的读取权限。投递模型/插件须按实际投影和目标明确匹配外发策略，受限数据还要求可信外发控制；缺失、未知或格式错误时拒绝。来源标签和外发目标须由服务端可信路径提供，本切片没有业务写回、降敏、可信插件认证或传输接线。
+CAPA 模块持有不可原位修改的目录；`authorize()` 回查规范声明，拒绝未知或伪造能力。审批资格同时排除执行者与请求发起人自批，专用审批能力和所属模块权限仍须满足。来源标签保留模块、对象、版本、敏感等级、能力和实际投影；派生读取要求目标及各来源授权，派生交付核对来源标签与交付敏感等级一致，空交付目标被拒绝。来源标签和外发目标须由服务端可信路径提供，不能据此宣称已完成业务写回、降敏或外发接线。
+
+内核仍是纯策略函数。单报告任务授权已持久化，D4 元数据投影已实现，但未接入旧 Agent 网关、业务写入、索引器、插件传输或模型调用；`DENY` 能力不能被任务 `Grant` 放开。后续交付接线前须确定插件身份、可验证外发控制及来源绑定；正式命令与降敏另经业务审批。
+
+当前任务服务与投影只接受 `TENANT_MODE=single`。既有租户会话会在事务后重置搜索路径，且允许 `public` 回退，因此不得将其用作此切片的多租户隔离基础。多租户启用前需完成逐事务租户绑定、禁用公共表回退，并验收首查询、提交、回滚、连接复用、租户缺表和跨租户同 UUID 的负例。专用审批资格在内核以服务端解析结果作为输入；资格如何存储及审批决议如何绑定任务属于后续审批切片。

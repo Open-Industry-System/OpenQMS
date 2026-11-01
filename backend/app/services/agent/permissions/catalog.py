@@ -1,21 +1,8 @@
-from types import MappingProxyType
+"""Lookup for module-owned Agent capability declarations."""
 
-from app.core.permissions import Module, PermissionLevel
-from app.services.agent.permissions.types import ApprovalFloor, CapabilitySpec
+from app.services.capa_agent_capabilities import CAPA_CAPABILITIES
 
-
-CAPA_CAPABILITIES = MappingProxyType({
-    spec.id: spec for spec in (
-        CapabilitySpec(
-            "capa.d4.summary.masked.v1", Module.CAPA, "context",
-            PermissionLevel.VIEW, ApprovalFloor.DENY, "masked",
-        ),
-        CapabilitySpec(
-            "capa.d4.candidate.propose.v1", Module.CAPA, "command",
-            PermissionLevel.EDIT, ApprovalFloor.DENY, "none",
-        ),
-    )
-})
+from .types import CapabilitySpec
 
 
 def get_capability(id: str) -> CapabilitySpec | None:

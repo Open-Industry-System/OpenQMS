@@ -13,6 +13,7 @@ from app.models.agent import (
     AgentToolCall,
 )
 from app.models.agent_review_skill import AgentReviewSkill
+from app.models.agent_read_task import AgentReadTask
 from app.models.audit import AuditLog
 from app.models.login_audit_log import LoginAuditLog
 from app.models.system_log import SystemLog
@@ -143,7 +144,7 @@ __all__ = [
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
     "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
     "CapaLateralDiffusionCheck", "CapaLateralNotification",
-    "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall",
+    "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall", "AgentReadTask",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
     "InspectionCharacteristic", "SampleBatch", "SampleValue", "SPCAlarm", "ControlLimitSnapshot",

@@ -154,11 +154,13 @@ async def create_fmea(...):
 
 详见 [权限参考](permissions.md)。
 
-### 4.6 Agent 模块权限内核（未接入运行路径）
+### 4.6 Agent 模块权限内核（未接入运行入口）
 
-`backend/app/services/agent/permissions/` 已有纯策略内核：模块能力声明、执行身份与插件/任务授权交集、操作审批等级与员工审批资格、投递外发判断及派生内容来源限制。8D D4 样板目录中的上下文与候选命令目前均为 `DENY`；`authorize()` 重新读取不可原位修改的服务端目录，拒绝未知能力及与目录声明不一致的定义；盘点见[Agent 模块能力清单](development/agent-module-capability-inventory.md)，目标行为见[模块权限设计](superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md)。
+`backend/app/services/capa_agent_capabilities.py` 持有两个未批准的 CAPA 能力声明，审批下限均为 `DENY`，目录不可原位修改；`backend/app/services/agent/permissions/` 提供规范目录校验、身份/插件/任务范围交集、审批下限和员工资格、来源投影限制及显式外发判断等纯策略函数。审批资格同时排除执行者与请求发起人自批；来源标签保留版本、能力和实际投影，派生交付不能降低来源敏感等级。详情见 [能力盘点](development/agent-module-capability-inventory.md)。
 
-内核**尚未连接**现有 Agent gateway、模型调用、审批 API、业务服务或外部插件入口；没有持久化的插件/任务授权，也没有开放新的读取或写入能力。现有角色权限和旧 Agent 工具仍按原路径执行，不能把这些纯函数测试当作生产访问隔离的验收。
+内部首切片已增加 `agent_read_tasks` 租户表及 `read_task_service`：在 `TENANT_MODE=single` 下，为当前用户可见的单个 CAPA 记录创建 24 小时任务，检查时重验当前权限与对象范围，并支持撤销及审计。`capa_agent_projection` 在独立的 PostgreSQL `REPEATABLE READ READ ONLY` 事务中读取报告及 D4 验证子记录，只输出明确允许的元数据字段，并对完整投影计算稳定摘要。非单租户模式在读取数据库前拒绝这些入口。
+
+能力 `capa.d4.summary.masked.v1` 仍为 `DENY`；即使任务能生成对象级 `Grant`，策略内核仍拒绝交付。此切片没有新增 HTTP、插件或模型入口，也没有接入旧 Agent 网关、业务写入或索引。多租户路径须先完成逐事务租户绑定、禁用 `public` 回退及相应隔离验收；插件身份与外发控制仍需另行设计和批准。
 
 ---
 
