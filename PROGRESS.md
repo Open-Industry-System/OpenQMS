@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-11-01 CI 适配：方案已选，书面规格待确认**。用户选择“普通自动CI无模型密钥＋独立确定性浏览器保护＋维护者手动真实provider/ClamAV验收”。规格见 `docs/superpowers/specs/2026-11-01-ci-layered-acceptance-design.md`，本阶段只落文并按授权本地提交供复核，尚未修改workflow/pytest/Makefile或测试harness，也未触发新CI、上传本地profile、配置Secrets/Environment/分支保护或推送。新手动workflow需进入默认分支后才可触发，设计限定main；不为此自动合并。确认书面规格后再写实施计划与明确验证资源/后续提交推送范围。
+
 > **2026-11-01 推送前只读Agent设计核对**：已完整阅读用户指定的2026-09-29基础设计，并按用户确认的现行后续合同核对，不把旧表/旧函数/固定24小时服务接口原样套回当前架构。当前AgentTask/AgentTaskGrant持久化、当前身份/权限/工厂/产品线与租户代际检查、逐事务严格绑定、只读RR元数据白名单及完整digest、baseline DENY和runtime默认关闭均有对应实现；受限local_metadata试用沿后续独立合同，不放开命令或生产交付。新补跑设计契约 **16 passed /3既有warnings**；与已验收3450全量快照对比，唯一变化的冻结源码是本轮已独立复核并33项通过的MES测试。未声称当前工作树重跑过全站make check。用户已授权将MES整改独立提交并仅推当前功能分支到origin，不建PR、不合并、不部署；用户删除示例、TEST profile和全部私有证据不纳入提交。远端CI尚未适配本地live条件，功能分支推送不等于远端CI通过；Git执行结果另以实际远端ref回执为准。下方早先未提交状态为当时交接历史。
 
 > **2026-11-01 MES 预期失败测试整改（独立后续任务，仅改测试）**：原3条XFAIL/2条XPASS实际对应4个用例，现已重写无效覆盖、移除4处旧xfail并修复rollback后的fixture主键清理。4项目标测试通过；整份MES并发模块正常运行及`--runxfail`均 **33 passed /3既有Pydantic warnings /exit0**，无skip/xfail/xpass/teardown error。四个私有故障变体均被关键业务断言捕获，独立代码复核无阻塞发现；本轮专属临时容器/卷/网络已清理。生产逻辑未改、未调用真实MES/provider，用户删除示例保留；本轮测试改动现已获独立提交及功能分支推送授权。本次按授权只跑MES相关回归，未重跑全站make check；下方CAPA3450全量记录对应当时快照，不覆盖这次新增测试改动。
