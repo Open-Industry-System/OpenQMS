@@ -1,5 +1,9 @@
 # OpenQMS 开发进度
 
+> **2026-11-01 推送前只读Agent设计核对**：已完整阅读用户指定的2026-09-29基础设计，并按用户确认的现行后续合同核对，不把旧表/旧函数/固定24小时服务接口原样套回当前架构。当前AgentTask/AgentTaskGrant持久化、当前身份/权限/工厂/产品线与租户代际检查、逐事务严格绑定、只读RR元数据白名单及完整digest、baseline DENY和runtime默认关闭均有对应实现；受限local_metadata试用沿后续独立合同，不放开命令或生产交付。新补跑设计契约 **16 passed /3既有warnings**；与已验收3450全量快照对比，唯一变化的冻结源码是本轮已独立复核并33项通过的MES测试。未声称当前工作树重跑过全站make check。用户已授权将MES整改独立提交并仅推当前功能分支到origin，不建PR、不合并、不部署；用户删除示例、TEST profile和全部私有证据不纳入提交。远端CI尚未适配本地live条件，功能分支推送不等于远端CI通过；Git执行结果另以实际远端ref回执为准。下方早先未提交状态为当时交接历史。
+
+> **2026-11-01 MES 预期失败测试整改（独立后续任务，仅改测试）**：原3条XFAIL/2条XPASS实际对应4个用例，现已重写无效覆盖、移除4处旧xfail并修复rollback后的fixture主键清理。4项目标测试通过；整份MES并发模块正常运行及`--runxfail`均 **33 passed /3既有Pydantic warnings /exit0**，无skip/xfail/xpass/teardown error。四个私有故障变体均被关键业务断言捕获，独立代码复核无阻塞发现；本轮专属临时容器/卷/网络已清理。生产逻辑未改、未调用真实MES/provider，用户删除示例保留；本轮测试改动现已获独立提交及功能分支推送授权。本次按授权只跑MES相关回归，未重跑全站make check；下方CAPA3450全量记录对应当时快照，不覆盖这次新增测试改动。
+
 > **2026-11-01 CAPA 实施结果集中审核：8/8 任务、44/44 步骤已完成验收**。最终交接、私有配置隔离、原始收据和源码冻结已独立复核通过，无阻塞发现；完整 `make check` **3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，exit0**。补充后端1203、前端232、类型/构建、真实主链与两条保护链、真实ClamAV7过程＋1浏览器均有通过证据。父级随后重新核验精确容器/owner/镜像/回环端点/专属卷/两库归属及零连接、零登记worker，已删除本轮核心测试容器与专属卷，两测试库随卷处置；Docker Desktop、镜像缓存、其他服务、工作树、用户profile和全部SDD证据均保留。用户删除.env.e2e.example仍为唯一未提交改动，不恢复或提交。不push、合并、部署或开启生产/Agent/R5权限；下方待复核/保留核心资源条目是历史，以本条为最新结论。
 
 > **2026-11-01 Task 8 最终验证交接（UTC 收据 2026-10-31，待父级复核/核心清理）**：私有 runner 的 provider 全局污染已限制到唯一真实 live node 的 setup/call/teardown；纯配置 **8 passed**，混合真实 **14 passed /5 warnings /exit0**。新1390文件冻结后的唯一新鲜完整 `make check` 实际 **3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0**（总2201.64秒），并在真实主链后证明 provider 不再存在。后续受影响后端 **1203 passed /5 warnings**，前端 **232 passed /24 files**、app/E2E类型与生产build、真实Chromium终态及双来源保护 **2 passed /5 warnings** 均exit0。Task7真实一条主链＋两条保护链及真实ClamAV7过程＋1浏览器已通过，不混称三条AI正向链；旧失败与历史阻塞保留。1390指纹不变、实际public/tenant heads与无新候选表、无临时租户/进程/事务已核对。无tracked应用/测试/配置改动；用户删除.env.e2e.example保留且不提交。核心PG/卷/DB/SDD/worktree/证据保留，清理仅DRY_RUN；独立交接DONE_WITH_CONCERNS，不签Task8/整片完成、不push/合并/部署。完整证据见文末“Task 8 FINAL CLOSURE”。
@@ -1864,3 +1868,14 @@ and all test profile/evidence files; the worktree remains user-dirty afterward.
 - 最终源冻结完整 `make check`：**3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，exit0**；补充后端1203、前端232、app/E2E类型及build、真实主链/保护、ClamAV7过程＋1浏览器均通过。保留两项既有graph排除、所有17条非pass记录、警告与全部失败轮次，不声称所有测试均无条件执行或日志纯净。
 - 最后处置前重新核验精确容器ID/owner/固定镜像/回环端点/专属卷及独占挂载、两库归属、零连接与零登记worker。只停止并删除本轮登记核心容器，删除其专属卷；两测试库随卷处置，后续inspect证明容器与卷均不存在。处置收据：`parent-core-disposal-20261031T170149851965.json`（本计划私有SDD目录）。Docker Desktop、镜像缓存、其他服务均未清理。
 - 保留当前分支、worktree、用户TEST profile、用户删除的`.env.e2e.example`及全部报告/日志/seal/旧收据。用户删除不恢复、不提交。本片未push、合并、部署或开放生产/Agent/R5能力；现场效果与业务受控修订/任意重开仍按指南边界处理。后续重跑须重新登记隔离资源，不得使用旧连接或回退共享库。
+
+## MES XFAIL/XPASS 测试整改完成（2026-11-01）
+
+- 仅修改`backend/tests/test_mes_concurrency.py`：fixture在yield前保存connection/ic标量主键；删除4处过时的非strict xfail；不改生产服务、权限、接口、模型或迁移。
+- 回滚测试执行真实采样写入和SPC重算后注入异常，由调用方rollback，再用独立会话断言ingestion、采样批、采样值及审计全部未持久化，并验证相同external_id可重试，删除永真断言。
+- 推送用例调用真实process_outbox和REST连接器，仅替换外部HTTP传输；验证已提交claim、真实sent落库、不重复发送；重投用例在外部接收后模拟worker中断，走真实超时恢复与重领，核验claim token更换但event_id固定。外部接收方去重是明确的测试假设，不声称真实厂商保证。
+- 同步失败用例通过真实REST校验和run_sync_round触发失败，从新Session确认failed、失败次数/错误、claim释放、checkpoint未推进及无订单落库；不再手改job状态或读取旧identity-map对象。
+- 先记录4通过但原fixture teardown MissingGreenlet的RED，保存PK后4通过；中间本轮一次列名拼写NameError已修正，保留日志且不当作功能RED。模块最终正常及`--runxfail`均33通过/3 warnings。私有内存故障注入的提前commit、跳过推送、改变重投event_id、错误推进checkpoint各触发预期失败，随后未注入的模块重跑通过；未改写生产源码。
+- 独立小范围复核Approved，无Critical/Important/Minor。证据在本工作树私有`.superpowers/mes-xfail-fix-20261101/`；原检查的3xfail2xpass及展开2failed2passed1teardown error记录在另一私有检查目录，均保留。
+- 仅使用本轮明确获授权的缓存固定pgvector镜像与随机_test库、回环端口。核验owner/专属卷/网络及零连接后，临时项目已删除，容器/卷/网络剩余均0；没有恢复旧CAPA环境或使用共享/种子/生产库。一次迁移后的正常停机请求来源未确定，已核验并恢复同一容器/卷，无数据重置。
+- 首次整改交接时未跑全站make check、未提交/push/merge/deploy；后续用户已授权按现行设计核对后独立提交并仅推功能分支，不创建PR/合并/部署。此改动作为后续测试维护差异审阅，不覆盖已完成CAPA阶段的原始冻结/验收收据。
