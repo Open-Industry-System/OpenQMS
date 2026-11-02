@@ -13,25 +13,22 @@ from sqlalchemy import select
 from app.models.audit import AuditLog
 from app.models.capa_lateral_diffusion import CapaLateralDiffusionCheck
 from app.models.knowledge_entry import KnowledgeEntry
-from tests.e2e.capa_outcome_harness import WORK, owned_outcome_server  # noqa: F401
+from tests.ci.browser_runtime import browser_environment, resolve_browser
+from tests.ci.owned_resources import artifact_directory
+from tests.e2e.capa_outcome_harness import owned_outcome_server  # noqa: F401
 from tests.e2e.capa_outcome_progression import progress_real_outcome, exercise_real_pending_http
-from tests.e2e.capa_outcome_runner import child_environment
 
 FRONTEND = Path(__file__).resolve().parents[3] / 'frontend'
-CHROMIUM = Path('/Users/sam/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing')
 
 
 def installed_browser():
-    assert CHROMIUM.is_file(), 'Installed Chromium missing; no installation or acceptance skip'
-    assert (FRONTEND / 'node_modules/@playwright/test/cli.js').is_file(), 'Installed Playwright CLI missing; no installation'
-    return CHROMIUM
+    return resolve_browser(FRONTEND, os.environ)
 
 
 async def run_browser(owned, tmp_path, scenario):
     chromium = installed_browser()
     probe = socket.socket(); probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]; probe.close()
-    env = child_environment()
-    env.update(BACKEND_URL=owned.base_url)
+    env = browser_environment(os.environ, {'BACKEND_URL': owned.base_url})
     log = (tmp_path / 'vite.log').open('wb')
     vite = browser = None
     try:
@@ -47,12 +44,17 @@ async def run_browser(owned, tmp_path, scenario):
                 await asyncio.sleep(.05)
             else: pytest.fail('Owned Vite did not start')
         # Only disposable employee credentials go to Node; never provider/DB secrets.
-        env.update(AGENT_BROWSER_URL=f'http://127.0.0.1:{port}', AGENT_BACKEND_URL=owned.base_url,
-            AGENT_HARNESS_NONCE=owned.nonce, AGENT_BROWSER_TENANT=owned.tenant_slug,
-            AGENT_BROWSER_REPORT=str(owned.report_id), OUTCOME_TERMINAL_REPORT=str(owned.terminal_report_id),
-            OUTCOME_SOURCE_REPORT=str(owned.source_report_id),
-            OUTCOME_EDITOR_LOGIN=json.dumps(owned.editor_login), OUTCOME_APPROVER_LOGIN=json.dumps(owned.approver_login),
-            AGENT_BROWSER_ARTIFACTS=str(tmp_path / 'playwright'), OPENQMS_AGENT_BROWSER_EXECUTABLE=str(chromium))
+        env = browser_environment(os.environ, {
+            'BACKEND_URL': owned.base_url, 'AGENT_BROWSER_URL': f'http://127.0.0.1:{port}',
+            'AGENT_BACKEND_URL': owned.base_url, 'AGENT_HARNESS_NONCE': owned.nonce,
+            'AGENT_BROWSER_TENANT': owned.tenant_slug, 'AGENT_BROWSER_REPORT': str(owned.report_id),
+            'OUTCOME_TERMINAL_REPORT': str(owned.terminal_report_id),
+            'OUTCOME_SOURCE_REPORT': str(owned.source_report_id),
+            'OUTCOME_EDITOR_LOGIN': json.dumps(owned.editor_login),
+            'OUTCOME_APPROVER_LOGIN': json.dumps(owned.approver_login),
+            'AGENT_BROWSER_ARTIFACTS': str(tmp_path / 'playwright'),
+            'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(chromium),
+        })
         browser = await asyncio.create_subprocess_exec('node', str(FRONTEND / 'node_modules/@playwright/test/cli.js'),
             'test', '--config', 'playwright.agent.config.ts', 'outcome-review.spec.ts', '--grep', scenario,
             cwd=FRONTEND, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
@@ -74,12 +76,13 @@ async def run_browser(owned, tmp_path, scenario):
             'vite_exit': vite.returncode if vite else None,
             'browser_pid': browser.pid if browser else None,
             'browser_exit': browser.returncode if browser else None}
-        journal = WORK / ('task7-node-resources-' + uuid4().hex + '.json')
+        journal = artifact_directory(os.environ) / ('task7-node-resources-' + uuid4().hex + '.json')
         journal.write_text(json.dumps(evidence, indent=2) + '\n')
         print('OWNED_NODE_TEARDOWN: ' + json.dumps(evidence) + '; journal=' + journal.name)
 
 
 @pytest.mark.asyncio
+@pytest.mark.ci_browser
 async def test_employee_chromium_terminal_protection(owned_outcome_server, tmp_path):
     """Independent of provider availability; legacy protection, NOT real closure."""
     owned = owned_outcome_server
@@ -96,6 +99,8 @@ async def test_employee_chromium_terminal_protection(owned_outcome_server, tmp_p
 
 
 @pytest.mark.asyncio
+@pytest.mark.ci_browser
+@pytest.mark.live_provider
 async def test_live_employee_http_provider_chromium_outcome_review(owned_outcome_server, tmp_path):
     """Mandatory live gate. Missing opt-in/provider/browser is failure, never skip."""
     installed_browser()

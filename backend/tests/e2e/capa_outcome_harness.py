@@ -34,30 +34,18 @@ from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.user import User
 from app.schemas.platform import TenantCreateRequest
+from tests.ci.owned_resources import (
+    artifact_directory,
+    verify_owned_database as verify_target_database,
+    verify_owned_instance,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
-WORK = ROOT / '.superpowers/sdd/2026-10-23-capa-outcome-review'
 # Each is in our disposable tenant, never public or another harness tenant.
 SNAPSHOT_TABLES = ('capa_eightd', 'capa_root_cause_verification', 'capa_ai_adoption',
     'capa_d7_node_action', 'audit_logs', 'document_embeddings', 'embedding_sync_outbox',
     'knowledge_entries', 'capa_lateral_diffusion_checks', 'mes_push_outbox',
     'capa_docg_analysis', 'capa_docg_audit', 'capa_docg_decision', 'capa_lessons_learned')
-
-
-def verify_owned_database():
-    """Registration + live container owner + DB identity, without emitting secrets."""
-    from urllib.parse import urlsplit
-    resources = json.loads((WORK / 'owned-resources.json').read_text())
-    url = os.environ['TEST_DATABASE_URL']
-    parsed = urlsplit(url)
-    assert parsed.path[1:] == resources['test_database'] and parsed.path.endswith('_test')
-    assert resources['test_database'] != resources['application_database']
-    owner = subprocess.check_output(['docker', 'inspect', '--format',
-        '{{.Id}} {{index .Config.Labels "openqms.owner"}}', resources['container']], text=True).strip()
-    assert owner == resources['container_id'] + ' ' + resources['owner_nonce'], 'Owned container identity mismatch'
-    assert parsed.hostname == resources['host'] == '127.0.0.1', 'Owned DB must use loopback'
-    assert parsed.port == int(resources['port']), 'Owned DB port mismatch'
-    return url
 
 
 @dataclass
@@ -138,7 +126,10 @@ async def owned_outcome_server(monkeypatch):
     # Isolate limiter storage; the production threshold/check remains unchanged.
     monkeypatch.setattr(auth, '_login_attempts', defaultdict(list))
 
-    engine = create_async_engine(verify_owned_database(), poolclass=NullPool)
+    target = verify_owned_instance(os.environ)
+    database_url = verify_target_database(target)
+    artifacts = artifact_directory(os.environ)
+    engine = create_async_engine(database_url, poolclass=NullPool)
     platform = async_sessionmaker(engine, expire_on_commit=False)
     tenants = async_sessionmaker(engine, class_=AsyncSession,
         sync_session_class=TenantSession, expire_on_commit=False)
@@ -157,7 +148,7 @@ async def owned_outcome_server(monkeypatch):
     register_capa_review_errors(app)
     created = []
     allocated_slugs = []
-    journal = WORK / ('task7-resources-' + uuid4().hex + '.json')
+    journal = artifacts / ('task7-resources-' + uuid4().hex + '.json')
     cleaned = []
     sock, server, runner = None, None, None
     password = token_urlsafe(24)
@@ -165,9 +156,8 @@ async def owned_outcome_server(monkeypatch):
     source_report_id = uuid4()
     try:
         async with platform() as db:
-            assert await db.scalar(text('SELECT current_database()')) == json.loads(
-                (WORK / 'owned-resources.json').read_text())['test_database']
-            assert await db.scalar(text('SELECT current_user')) == os.environ['PGUSER']
+            assert await db.scalar(text('SELECT current_database()')) == target.database
+            assert await db.scalar(text('SELECT current_user')) == target.username
         for _ in range(2):
             slug = 'outcome-' + uuid4().hex[:12]
             allocated_slugs.append(slug)
@@ -274,7 +264,7 @@ async def owned_outcome_server(monkeypatch):
                 runner.cancel(); await asyncio.gather(runner, return_exceptions=True)
         if sock: sock.close()
         # Include a failed provision's registered random slug, not other tenants.
-        verify_owned_database()
+        verify_target_database(target)
         from app.core.tenant_utils import slug_to_schema_name
         async with engine.begin() as conn:
             for slug in reversed(allocated_slugs):

@@ -140,7 +140,7 @@ services:
     build: ./backend
     profiles: ["agent-attachment-e2e"]
     command: >-
-      /bin/sh -ec 'chmod 0700 /var/lib/openqms/attachments && alembic upgrade head && pytest -q -s tests/e2e/test_agent_task_attachment_process.py'
+      /bin/sh -ec 'chmod 0700 /var/lib/openqms/attachments && alembic upgrade head && python -m tests.ci.scanner_gate process --artifacts /var/run/openqms/agent-attachment-e2e/receipts'
     environment:
       DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@agent-attachment-e2e-db:5432/openqms_agent_attachment_test
       TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@agent-attachment-e2e-db:5432/openqms_agent_attachment_test
@@ -153,6 +153,7 @@ services:
       AGENT_ATTACHMENT_E2E_STORAGE_ROOT: /var/lib/openqms/attachments
       AGENT_ATTACHMENT_E2E_CLAMAV_HOST: clamav
       AGENT_ATTACHMENT_E2E_CLAMAV_PORT: "3310"
+      OPENQMS_CI_SHA: ${OPENQMS_CI_SHA:-}
     volumes:
       - agent_attachment_e2e_storage:/var/lib/openqms/attachments
       - agent_attachment_e2e_runtime:/var/run/openqms/agent-attachment-e2e

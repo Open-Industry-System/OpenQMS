@@ -127,7 +127,8 @@ async def actual_attachment_stack(committed_runtime, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_actual_clamav_advertises_version_and_instream(actual_attachment_stack):
+@pytest.mark.real_scanner
+async def test_actual_clamav_advertises_version_and_instream(actual_attachment_stack, record_property):
     from app.services.agent_runtime import clamav_scan
 
     probes = {
@@ -161,21 +162,25 @@ async def test_actual_clamav_advertises_version_and_instream(actual_attachment_s
             clamav_scan._commands(records[1])
     except (AssertionError, ValueError):
         pytest.fail(safe_metadata)
+    record_property("versioncommands", safe_metadata)
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_actual_clamav_reports_found_for_newline_instream(actual_attachment_stack):
+@pytest.mark.real_scanner
+async def test_actual_clamav_reports_found_for_newline_instream(actual_attachment_stack, record_property):
     metadata = await clamav_instream_eicar_metadata(
         actual_attachment_stack.scanner_host,
         actual_attachment_stack.scanner_port,
     )
     assert b"stream:" in metadata and b"FOUND" in metadata, repr(metadata[:1024])
+    record_property("eicar_reply", repr(metadata[:1024]))
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_actual_scan_stream_reaches_found_with_safe_parse_stage_trace(actual_attachment_stack, monkeypatch):
+@pytest.mark.real_scanner
+async def test_actual_scan_stream_reaches_found_with_safe_parse_stage_trace(actual_attachment_stack, monkeypatch, record_property):
     from app.services.agent_runtime import clamav_scan
 
     stages: list[str] = []
@@ -218,11 +223,13 @@ async def test_actual_scan_stream_reaches_found_with_safe_parse_stage_trace(actu
     assert (result.outcome, result.failure_code) == ("found", None), (
         result.outcome, result.failure_code, stages, failures,
     )
+    record_property("parse_trace", repr((result.outcome, result.failure_code, stages, failures)))
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_actual_clamav_rejects_eicar_and_never_promotes_clean_file(actual_attachment_stack):
+@pytest.mark.real_scanner
+async def test_actual_clamav_rejects_eicar_and_never_promotes_clean_file(actual_attachment_stack, record_property):
     samples = attachment_e2e_samples()
 
     scan = await actual_attachment_stack.scan(samples.eicar)
@@ -234,11 +241,13 @@ async def test_actual_clamav_rejects_eicar_and_never_promotes_clean_file(actual_
     assert result.status_code == 422
     assert result.json() == {"detail": "ATTACHMENT_MALWARE_REJECTED"}
     assert actual_attachment_stack.clean_objects() == []
+    record_property("malware_rejection", repr((scan.scanner_version, scan.outcome, result.status_code, result.json(), actual_attachment_stack.clean_objects())))
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_actual_clamav_rejects_encrypted_and_expansion_limit_samples(actual_attachment_stack):
+@pytest.mark.real_scanner
+async def test_actual_clamav_rejects_encrypted_and_expansion_limit_samples(actual_attachment_stack, record_property):
     samples = attachment_e2e_samples()
     assert len(samples.expansion_docx) < settings.AGENT_TASK_ATTACHMENT_MAX_BYTES
 
@@ -252,13 +261,16 @@ async def test_actual_clamav_rejects_encrypted_and_expansion_limit_samples(actua
         result = await actual_attachment_stack.upload(payload, filename)
         assert result.status_code == 422
         assert result.json() == {"detail": "ATTACHMENT_MALWARE_REJECTED"}
+        record_property("encrypted_pdf" if filename == "encrypted.pdf" else "expansion_limit",
+                        repr((scan.scanner_version, scan.outcome, result.status_code, result.json())))
 
     assert actual_attachment_stack.clean_objects() == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.requires_db
-async def test_actual_clamav_allows_only_clean_fixture_to_download(actual_attachment_stack):
+@pytest.mark.real_scanner
+async def test_actual_clamav_allows_only_clean_fixture_to_download(actual_attachment_stack, record_property):
     samples = attachment_e2e_samples()
 
     rejected = await actual_attachment_stack.upload(samples.eicar, "eicar.txt")
@@ -280,3 +292,7 @@ async def test_actual_clamav_allows_only_clean_fixture_to_download(actual_attach
     assert downloaded.status_code == 200
     assert downloaded.content == samples.clean_text
     assert len(actual_attachment_stack.clean_objects()) == 1
+    record_property("clean_download", repr((created.status_code, [item["status"] for item in items],
+                                            blocked_download.status_code, downloaded.status_code,
+                                            downloaded.content == samples.clean_text,
+                                            len(actual_attachment_stack.clean_objects()))))

@@ -28,10 +28,37 @@ class TocEntry:
     ddl: tuple[str, ...] = ()
 
 
+def _verified_pg15_container(database_url: str | None = None) -> str:
+    """Resolve PG tools only on the explicitly owned server, including fixture DBs."""
+    from sqlalchemy.engine import make_url
+    from tests.ci.owned_resources import verify_owned_instance
+
+    source = dict(os.environ)
+    recorded = source.get("OPENQMS_MIGRATION_TEST_DATABASE_URL")
+    # mig_db_url intentionally replaces DATABASE_URL after creating its own DB.
+    # The base registration still owns the server, not an arbitrary sibling DB.
+    if recorded and source.get("DATABASE_URL") == recorded:
+        source["DATABASE_URL"] = source.get("TEST_DATABASE_URL", "")
+    target = verify_owned_instance(source)
+    candidate = make_url(database_url or os.environ.get("DATABASE_URL") or target.async_url)
+    if (
+        not candidate.drivername.startswith("postgresql")
+        or candidate.query
+        or (candidate.host, candidate.port, candidate.username, candidate.password)
+        != (target.host, target.port, target.username, target.password)
+        or not candidate.database or not candidate.database.endswith("_test")
+        or (candidate.database != target.database and (
+            not recorded or candidate != make_url(recorded)
+        ))
+    ):
+        raise ValueError("Snapshot database does not match the verified test target or created migration database")
+    return target.container_id
+
+
 def _command(program: str) -> list[str]:
     """Use PostgreSQL 15 tools, optionally in the disposable DB's Docker container."""
     container = os.environ.get("PG15_CONTAINER")
-    return ["docker", "exec", "-i", container, program] if container else [program]
+    return ["docker", "exec", "-i", _verified_pg15_container(), program] if container else [program]
 
 
 def _run(program: str, *args: str, input: bytes | None = None) -> bytes:
@@ -50,8 +77,7 @@ def pg_dump_custom(url: str, schema: str, schema_only: bool = True) -> bytes:
         raise ValueError("Only public schema-only archives are permitted")
     # docker exec talks to the container's own DB. Locally, libpq uses the URL.
     if os.environ.get("PG15_CONTAINER"):
-        if parsed.hostname not in {"localhost", "127.0.0.1"} or (parsed.port or 5432) != 5432:
-            raise ValueError("Container pg_dump requires a local port-5432 disposable DB URL")
+        _verified_pg15_container(url)
         return _run("pg_dump", "-U", parsed.username or "qms", "-d", parsed.path.lstrip("/"),
                     "--schema=public", "--schema-only", "--no-owner", "--no-acl", "-Fc")
     env = os.environ.copy()

@@ -18,8 +18,11 @@ export default defineConfig({
   },
   projects: [{
     name: 'owned-chromium',
-    use: { ...devices['Desktop Chrome'], launchOptions: {
-      executablePath: process.env.OPENQMS_AGENT_BROWSER_EXECUTABLE || '/Users/sam/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
-    } },
+    use: {
+      ...devices['Desktop Chrome'],
+      launchOptions: process.env.OPENQMS_AGENT_BROWSER_EXECUTABLE
+        ? { executablePath: process.env.OPENQMS_AGENT_BROWSER_EXECUTABLE }
+        : {},
+    },
   }],
 });

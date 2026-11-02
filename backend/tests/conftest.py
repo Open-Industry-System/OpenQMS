@@ -65,6 +65,7 @@ def mig_db_url(monkeypatch):
 
     mig_url = f"postgresql+asyncpg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/{mig_dbname}"
     monkeypatch.setenv("DATABASE_URL", mig_url)
+    monkeypatch.setenv("OPENQMS_MIGRATION_TEST_DATABASE_URL", mig_url)
     try:
         yield mig_url
     finally:

@@ -1,0 +1,280 @@
+name: Main acceptance gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      gate:
+        description: Acceptance gate to run
+        required: true
+        type: choice
+        options:
+          - live-capa
+          - scanner
+          - all
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      frozen_sha: ${{ steps.freeze.outputs.frozen_sha }}
+    steps:
+      - name: Checkout main at preflight
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify dispatch and freeze main SHA
+        id: freeze
+        env:
+          GATE: ${{ inputs.gate }}
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]
+          [ "$GITHUB_REF" = refs/heads/main ]
+          case "$GATE" in live-capa|scanner|all) ;; *) exit 1 ;; esac
+          frozen_sha="$(git rev-parse HEAD)"
+          mkdir -p ci-receipts
+          printf '{"gate":"%s","frozen_sha":"%s","status":"PASSED"}\n' "$GATE" "$frozen_sha" > ci-receipts/preflight.json
+          echo "frozen_sha=$frozen_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Upload preflight receipt
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-receipt
+          path: ci-receipts/preflight.json
+          if-no-files-found: error
+
+  live-capa:
+    if: ${{ needs.preflight.result == 'success' && (inputs.gate == 'live-capa' || inputs.gate == 'all') }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/live-capa
+      OPENQMS_CI_SHA: ${{ needs.preflight.outputs.frozen_sha }}
+    environment: ci-acceptance
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: qms
+          POSTGRES_PASSWORD: qms_dev_2026
+          POSTGRES_DB: qms_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --label openqms.ci.run=${{ github.run_id }}
+          --label openqms.ci.attempt=${{ github.run_attempt }}
+          --label openqms.ci.job=live-capa
+        ports:
+          - 5432/tcp
+    steps:
+      - name: Checkout frozen main SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.frozen_sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          test -f package-lock.json || { echo "frontend package-lock.json is required" >&2; exit 1; }
+          npm ci
+
+      - name: Install Chromium
+        run: |
+          cd frontend
+          npx --no-install playwright install --with-deps chromium
+
+      - name: Prepare verified live database
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+          PG15_CONTAINER: ${{ job.services.postgres.id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_JOB: live-capa
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
+        run: |
+          cd backend
+          PYTHONPATH=. python -m tests.ci.prepare_database
+
+      - name: Run live CAPA acceptance
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          PG15_CONTAINER: ${{ job.services.postgres.id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_JOB: live-capa
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_TIMEOUT: ${{ vars.LLM_TIMEOUT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+        run: |
+          make check-live
+
+      - name: Upload live receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-capa-receipt
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
+          if-no-files-found: error
+
+  scanner:
+    if: ${{ needs.preflight.result == 'success' && (inputs.gate == 'scanner' || inputs.gate == 'all') }}
+    needs: [preflight]
+    runs-on: ubuntu-latest
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/scanner
+      OPENQMS_CI_SHA: ${{ needs.preflight.outputs.frozen_sha }}
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    steps:
+      - name: Checkout frozen main SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.frozen_sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          test -f package-lock.json || { echo "frontend package-lock.json is required" >&2; exit 1; }
+          npm ci
+
+      - name: Install Chromium
+        run: |
+          cd frontend
+          npx --no-install playwright install --with-deps chromium
+
+      - name: Run scanner acceptance
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+        run: |
+          make agent-attachment-e2e
+
+      - name: Upload scanner receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-receipt
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/process/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/process/*.log
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/browser/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/browser/*.log
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/cleanup.json
+          if-no-files-found: error
+
+  summary:
+    if: always()
+    needs: [preflight, live-capa, scanner]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout frozen summary validator
+        if: needs.preflight.result == 'success'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.frozen_sha }}
+          persist-credentials: false
+
+      - name: Download preflight receipt
+        if: needs.preflight.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: preflight-receipt
+          path: ci-receipts
+
+      - name: Download live receipt
+        if: always() && needs.live-capa.result != 'skipped'
+        uses: actions/download-artifact@v4
+        with:
+          name: live-capa-receipt
+          path: ci-receipts/live-capa
+
+      - name: Download scanner receipt
+        if: always() && needs.scanner.result != 'skipped'
+        uses: actions/download-artifact@v4
+        with:
+          name: scanner-receipt
+          path: ci-receipts/scanner
+
+      - name: Require requested gate receipts
+        if: always()
+        env:
+          GATE: ${{ inputs.gate }}
+          FROZEN_SHA: ${{ needs.preflight.outputs.frozen_sha }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          LIVE_RESULT: ${{ needs.live-capa.result }}
+          SCANNER_RESULT: ${{ needs.scanner.result }}
+        run: |
+          set -euo pipefail
+          # Actual receipt validation rejects cancelled/blocked jobs, missing evidence,
+          # status-only wrappers and wrong SHA. The other gate is NOT_REQUESTED.
+          [ "$PREFLIGHT_RESULT" = success ] || { echo 'preflight blocked'; exit 1; }
+          cd backend
+          PYTHONPATH=. python3 -m tests.ci.acceptance_evidence summary --root ../ci-receipts
+
+      - name: Upload validated summary receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-summary-receipt
+          path: ci-receipts/summary.json
+          if-no-files-found: error

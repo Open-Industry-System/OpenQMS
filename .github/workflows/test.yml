@@ -2,13 +2,28 @@ name: Test OpenQMS
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/backend-tests
+      OPENQMS_CI_SHA: ${{ github.sha }}
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
     services:
       postgres:
         image: pgvector/pgvector:pg15
@@ -21,11 +36,16 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+          --label openqms.ci.run=${{ github.run_id }}
+          --label openqms.ci.attempt=${{ github.run_attempt }}
+          --label openqms.ci.job=backend-tests
         ports:
-          - 5432:5432
+          - 5432/tcp
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,13 +58,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run database migrations
+      - name: Prepare verified test database
         env:
           SECRET_KEY: test-secret-key-for-ci-only
-          DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+          PG15_CONTAINER: ${{ job.services.postgres.id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_JOB: backend-tests
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
         run: |
           cd backend
-          PYTHONPATH=. alembic upgrade head
+          PYTHONPATH=. python -m tests.ci.prepare_database
 
       - name: Run manual tests
         env:
@@ -54,23 +83,38 @@ jobs:
           PYTHONPATH=. python app/test_schema.py
           PYTHONPATH=. python app/test_spc_engine.py
 
-      - name: Run pytest suite
+      - name: Run deterministic backend acceptance
         env:
           SECRET_KEY: test-secret-key-for-ci-only
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
           PG15_CONTAINER: ${{ job.services.postgres.id }}
-          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test
-        run: |
-          cd backend
-          PYTHONPATH=. pytest tests/ -v --ignore=tests/test_graph_sync_worker.py --ignore=tests/test_graph_projection.py
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_JOB: backend-tests
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
+        run: make check-backend
 
       - name: D8 doc-gate preflight (against migrated test DB)
-        # Runs the doc-gate CP lineage preflight against the CI test DB. This
-        # catches schema/contract regressions; a CLEAN test DB should report 0
-        # breaks. Real deploy gating must run `make doc-gate-preflight` against
-        # the TARGET DATABASE_URL (see docs/deployment.md §1.4).
+        # A clean migrated CI DB must report no broken CP lineage. Deployment
+        # gating remains the explicit target DATABASE_URL command documented in
+        # docs/deployment.md; this check never reads a local environment file.
         env:
           SECRET_KEY: test-secret-key-for-ci-only
-          DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms_test
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+          PG15_CONTAINER: ${{ job.services.postgres.id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_JOB: backend-tests
+          DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
         run: |
           cd backend
           PYTHONPATH=. python -m app.services.capa_doc_gate_preflight
@@ -97,10 +141,30 @@ jobs:
           print('All engine modules imported successfully')
           "
 
+      - name: Upload actual safe receipts and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-tests-evidence
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
+          if-no-files-found: error
+
   frontend-checks:
     runs-on: ubuntu-latest
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/frontend-checks
+      OPENQMS_CI_SHA: ${{ github.sha }}
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -109,28 +173,155 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Validate lockfile and install dependencies
         run: |
           cd frontend
-          npm install
+          if [ ! -f package-lock.json ]; then
+            echo "frontend lockfile package-lock.json is required for reproducible CI" >&2
+            exit 1
+          fi
+          npm ci
 
       - name: TypeScript check
         run: |
-          cd frontend
-          npx tsc --noEmit
+          cd backend
+          PYTHONPATH=. python3 -m tests.ci.acceptance_evidence frontend tsc
 
       - name: Build check
         run: |
+          cd backend
+          PYTHONPATH=. python3 -m tests.ci.acceptance_evidence frontend build
+
+      - name: Upload actual safe receipts and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-checks-evidence
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
+          if-no-files-found: error
+
+  browser-protection:
+    runs-on: ubuntu-latest
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/browser-protection
+      OPENQMS_CI_SHA: ${{ github.sha }}
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: qms
+          POSTGRES_PASSWORD: qms_dev_2026
+          POSTGRES_DB: qms_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --label openqms.ci.run=${{ github.run_id }}
+          --label openqms.ci.attempt=${{ github.run_attempt }}
+          --label openqms.ci.job=browser-protection
+        ports:
+          - 5432/tcp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
           cd frontend
-          npm run build
+          if [ ! -f package-lock.json ]; then
+            echo "frontend package-lock.json is required for browser protection" >&2
+            exit 1
+          fi
+          npm ci
+
+      - name: Install Chromium
+        run: |
+          cd frontend
+          npx --no-install playwright install --with-deps chromium
+
+      - name: Prepare verified browser database
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+          PG15_CONTAINER: ${{ job.services.postgres.id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_JOB: browser-protection
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
+        run: |
+          cd backend
+          PYTHONPATH=. python -m tests.ci.prepare_database
+
+      - name: Run deterministic browser protection
+        env:
+          SECRET_KEY: test-secret-key-for-ci-only
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+          PG15_CONTAINER: ${{ job.services.postgres.id }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_JOB: browser-protection
+          TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
+        run: make check-browser
+
+      - name: Upload actual safe receipts and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-protection-evidence
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
+          if-no-files-found: error
 
   docs-check:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    env:
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify docs updated alongside code changes
         env:
@@ -150,12 +341,12 @@ jobs:
           echo "$CHANGED"
           echo "---"
 
-          CODE=$(echo "$CHANGED" | grep -E '^(backend/app/|frontend/src/|docker-compose\.ya?ml$|(^|.*/)Dockerfile($|\..*))' || true)
-          DOCS=$(echo "$CHANGED" | grep -E '^(docs/|CLAUDE\.md$|README\.md$|.*/README\.md$)' || true)
+          CODE=$(echo "$CHANGED" | grep -E '^(backend/app/|frontend/src/|docker-compose\.ya?ml$|(^|.*/)Dockerfile($|\..*)|\.github/workflows/|Makefile$|backend/tests/|frontend/e2e/|frontend/.*playwright.*\.ts$)' || true)
+          DOCS=$(echo "$CHANGED" | grep -E '^(docs/|AGENTS\.md$|README\.md$|.*/README\.md$)' || true)
 
           if [ -n "$CODE" ] && [ -z "$DOCS" ]; then
-            echo "::error::Code changed under backend/app/, frontend/src/, docker-compose.yml, or Dockerfile, but no documentation was updated."
-            echo "::error::Update one of: docs/**, CLAUDE.md, README.md, or any module README.md."
+            echo "::error::Application or CI/test infrastructure changed without related documentation."
+            echo "::error::Update one of: docs/**, AGENTS.md, README.md, or any module README.md."
             echo "::error::If documentation truly does not need an update, add the 'docs-not-needed' label to this PR."
             echo ""
             echo "Code changes detected:"
