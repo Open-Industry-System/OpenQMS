@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
 from uuid import UUID
@@ -47,7 +47,8 @@ class AccessAttempt:
     object_id: UUID
     product_line_code: str
     now: datetime
-    catalog_profile: str = "baseline"
+    identity_bypass_row_level_security: bool = False
+    catalog_profile: str = field(default="baseline", kw_only=True)
 
 
 @dataclass(frozen=True)

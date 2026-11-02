@@ -122,7 +122,7 @@ async def test_tenant_attachment_delta_matches_current_public_schema(disposable_
     cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
     cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
     cfg.set_main_option("sqlalchemy.url", disposable_public_db)
-    await asyncio.to_thread(command.upgrade, cfg, "20261009_agent_task_attachments")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
 
     schema = f"tenant_attachment_parity_{uuid.uuid4().hex[:12]}"
     tenant_id = uuid.uuid4()
@@ -150,8 +150,8 @@ async def test_tenant_attachment_delta_matches_current_public_schema(disposable_
                 },
             )
         async with maintenance_connection(engine, attempt) as maintenance:
-            assert await maintenance.run_migration("tv005_agent_task_attachments") == (
-                "tv005_agent_task_attachments"
+            assert await maintenance.run_migration("tv006_agent_read_tasks") == (
+                "tv006_agent_read_tasks"
             )
         async with engine.connect() as connection:
             assert await connection.scalar(

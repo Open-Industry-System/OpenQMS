@@ -161,11 +161,13 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
                      or (key[0] == "function" and f"FUNCTION:{key[1]}" in keys)
                      or (key[0] == "text_search_config" and f"TEXT SEARCH CONFIGURATION:{key[1]}" in keys)}
     if predecessor is not None:
-        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls"} or baseline_only:
+        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments"} or baseline_only:
             raise ValueError("Unsupported schema predecessor")
         # The reference is current public; remove only the reviewed cumulative
         # additions after this exact predecessor. The tenant remains unfiltered.
-        added_tables = {"agent_task_attachments"}
+        added_tables = {"agent_read_tasks"}
+        if predecessor != "tv005_agent_task_attachments":
+            added_tables.add("agent_task_attachments")
         if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
             added_tables |= {"agent_task_controls", "agent_readonly_checkpoints",
                              "agent_checkpoint_receipts", "agent_task_updates"}

@@ -117,7 +117,7 @@ def _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grant
             None if factories.accessible_factory_ids is None else frozenset(factories.accessible_factory_ids),
             None if lines.mode == "ALL" else frozenset(lines.codes or []),
             grant, pinned, capa.factory_id, capa.report_id, capa.product_line_code, now,
-            catalog_profile=profile))
+            identity_bypass_row_level_security=lines.mode == "ALL", catalog_profile=profile))
         if not decision.allowed or decision.approval_floor != ApprovalFloor.DIRECT:
             continue
         # A task is about one report. Even broad plugin grants produce only the

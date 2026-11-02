@@ -182,7 +182,15 @@ R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收
 
 租户维护通过固定物理连接持有会话级排他锁；同一连接建立 attempt、递增 generation、执行独立 Alembic 链和原子 seed。维护事务验证 PID、attempt、generation 与锁所有权，不再申请业务共享锁。public 平台迁移与租户迁移分别记账，租户基线 `tv001_business_snapshot` 为冻结 DDL；激活前检查对象级 schema parity、seed 和隔离。
 
-普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv004_agent_readonly_controls`；完整 v1/v2/v3 租户在同一排他锁与 generation 维护流程下前向升级。v1 核对冻结基线；v2 仅从 public 参考扣除已审定的 v3＋v4 增量对象，v3 仅扣除 v4，不过滤租户对象；升级后比较最新 public 的全部业务对象。冻结 v1/v2/v3 迁移和快照保持原样，导出测试仍绑定 manifest 中的 public head。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv006_agent_read_tasks`；完整 v1–v5 租户在同一排他锁与 generation 维护流程下前向升级。v1 核对冻结基线；v2–v5 仅从 public 参考扣除各自尚未应用的已审定增量，不过滤租户实际对象；升级后比较最新 public 的全部业务对象。冻结 v1–v5 迁移和基线快照保持原样，基线导出测试仍绑定 manifest 中的 public head，当前增量 parity 另以合并后 public head 验收。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+
+### 4.8 主线旧单报告只读基础与集成边界
+
+`backend/app/services/capa_agent_capabilities.py` 持有 CAPA 规范只读声明；默认两能力仍为 `DENY`，summary 必须有明确目标。平台目录仅对服务端受限本地 profile 覆盖 summary 的审批下限，不接受调用方声明降权。无界工厂范围需要 `GROUP ADMIN`，无界产品线需要现场解析的显式行级豁免；豁免不代替工厂、业务模块或两层 grant。审批按能力 owner 模块权限及专门审批授权判定，同时排除执行者与请求发起人自批，`DENY` 不可批准。
+
+主线保留 `AgentReadTask` / `agent_read_tasks` 及 `read_task_service`，它们是独立旧单报告基础，不是 `AgentTask` / `AgentRun` 的替代或迁移版。旧服务仅支持 `TENANT_MODE=single`，创建 24 小时授权、逐次重查范围、撤销及审计，不新增 HTTP/插件/模型入口，也不开放 baseline 能力。公共投影函数沿用运行时的独立 RR/READ ONLY 连接；多租户读取必须有服务器捕获的有效业务绑定，缺绑定不回退 public。
+
+来源标签同时保留 owner、对象、能力、实际投影和版本；历史输出在当前业务 ACL 校验通过后，才生成四键来源授权集合，并在序列化前后再次复核。保存旧 receipt 或 digest 正确不能替代当前来源授权。两条 public 迁移链由 `20261102_agent_mainline_merge` 显式合并，独立 tenant `tv006_agent_read_tasks` 补齐旧表，不修改冻结基线。详情见[本轮实施计划](superpowers/plans/2026-11-02-agent-main-semantic-integration.md)。
 
 ---
 

@@ -1,9 +1,11 @@
 # backend/tests/test_spc_fmea_match.py
 import uuid
+import os
 
 import pytest
 import pytest_asyncio
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.services.spc_service import (
@@ -26,6 +28,22 @@ import app.models  # noqa: F401 — ensure all FK-referenced tables are register
 # ─── Fixtures ───
 
 _DEFAULT_FACTORY_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+@pytest.mark.asyncio
+async def test_fixture_preserves_shared_migration_schema(db):
+    shared_url = os.environ["TEST_DATABASE_URL"]
+    shared_engine = create_async_engine(shared_url)
+    try:
+        async with shared_engine.connect() as conn:
+            trigger = await conn.scalar(text(
+                "SELECT COUNT(*) FROM pg_trigger WHERE tgrelid = "
+                "'control_plan_versions'::regclass "
+                "AND tgname = 'trg_cp_version_hash_verify'"
+            ))
+        assert trigger == 1
+    finally:
+        await shared_engine.dispose()
 
 
 @pytest_asyncio.fixture(scope="function")

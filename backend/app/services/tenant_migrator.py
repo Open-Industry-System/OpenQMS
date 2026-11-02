@@ -16,10 +16,11 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv005_agent_task_attachments"
-PREDECESSOR_REVISION = "tv004_agent_readonly_controls"
-EARLIER_PREDECESSOR_REVISION = "tv003_agent_readonly_delivery"
-EARLIEST_PREDECESSOR_REVISION = "tv002_agent_task_core"
+REVISION = "tv006_agent_read_tasks"
+PREDECESSOR_REVISION = "tv005_agent_task_attachments"
+EARLIER_PREDECESSOR_REVISION = "tv004_agent_readonly_controls"
+EARLIEST_PREDECESSOR_REVISION = "tv003_agent_readonly_delivery"
+CORE_PREDECESSOR_REVISION = "tv002_agent_task_core"
 ANCESTOR_REVISION = "tv001_business_snapshot"
 _PREVIOUSLY_ACTIVE_SEED_REASON = "previously active tenant seed unavailable; manual review required"
 _SAFE_FAILURE_REASONS = frozenset({
@@ -161,6 +162,8 @@ class MaintenanceContext:
                 result = "earlier_predecessor"
             elif versions == [EARLIEST_PREDECESSOR_REVISION]:
                 result = "earliest_predecessor"
+            elif versions == [CORE_PREDECESSOR_REVISION]:
+                result = "core_predecessor"
             elif versions == [ANCESTOR_REVISION]:
                 result = "ancestor"
             elif not versions and set(rows) == {"tenant_schema_version"}:
@@ -626,7 +629,7 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current", "ancestor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state not in {"empty", "current", "ancestor", "predecessor", "earlier_predecessor", "earliest_predecessor", "core_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
@@ -636,11 +639,12 @@ async def migrate_if_needed(maintenance: MaintenanceContext, attempt: Maintenanc
         if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")
         await maintenance.run_migration(REVISION)
-    elif state in {"predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state in {"predecessor", "earlier_predecessor", "earliest_predecessor", "core_predecessor"}:
         predecessor = {
             "predecessor": PREDECESSOR_REVISION,
             "earlier_predecessor": EARLIER_PREDECESSOR_REVISION,
             "earliest_predecessor": EARLIEST_PREDECESSOR_REVISION,
+            "core_predecessor": CORE_PREDECESSOR_REVISION,
         }[state]
         if await maintenance.compare_schema("public", load_snapshot_manifest(), predecessor=predecessor):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")

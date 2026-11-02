@@ -166,7 +166,7 @@ def test_single_alembic_head(mig_db_url):
     cfg = _cfg(mig_db_url)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    # Single head after the durable agent task attachment migration.
-    assert heads == ["20261009_agent_task_attachments"], (
-        f"expected single head 20261009_agent_task_attachments, got {heads}"
+    # Both published Agent branches are retained beneath this no-op merge.
+    assert heads == ["20261102_agent_mainline_merge"], (
+        f"expected single head 20261102_agent_mainline_merge, got {heads}"
     )

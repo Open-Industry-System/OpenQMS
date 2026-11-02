@@ -1,5 +1,8 @@
 # OpenQMS 开发进度
 
+> **2026-11-02 主线语义集成本地完成**：独立分支 `integration/agent-main-semantic-20261102` 集成 runtime `ef3e24e0` 与 `origin/main@d8e2cef5`，不直接更新 main、不推送。双方权限、审批、来源和租户保护及调用方兼容已保留，新增 public merge revision 与独立 tenant `tv006_agent_read_tasks`；两部分规格复核 PASS、质量复核 Approve，无实质发现。权限/adapter纯测试128通过、迁移/租户纯测试28通过（均0网络）；专属PG15真实升级3通过、迁移/parity48通过1跳过、旧任务/多租户等193通过。runtime大套件首轮741通过/17库名守卫setup errors；换符合守卫的新库后17项全部通过，未改代码/守卫，不冒称一次全套exit0。跳过的冻结快照再生另用自有容器PG15工具补验1131对象一致。临时容器/匿名卷已核验清理；未跑完整make check、前端、浏览器、provider或scanner，不启用生产。CI由另一Agent实施且其未提交内容未复制；下一步接入其独立提交并跑分层门禁。[完整交接](docs/development/agent-main-semantic-integration.md)保留命令、首轮失败、复跑证据和限制；下方数字均为历史快照。
+
+## 既有分支历史记录
 > **2026-11-01 CI 适配：方案已选，书面规格待确认**。用户选择“普通自动CI无模型密钥＋独立确定性浏览器保护＋维护者手动真实provider/ClamAV验收”。规格见 `docs/superpowers/specs/2026-11-01-ci-layered-acceptance-design.md`，本阶段只落文并按授权本地提交供复核，尚未修改workflow/pytest/Makefile或测试harness，也未触发新CI、上传本地profile、配置Secrets/Environment/分支保护或推送。新手动workflow需进入默认分支后才可触发，设计限定main；不为此自动合并。确认书面规格后再写实施计划与明确验证资源/后续提交推送范围。
 
 > **2026-11-01 推送前只读Agent设计核对**：已完整阅读用户指定的2026-09-29基础设计，并按用户确认的现行后续合同核对，不把旧表/旧函数/固定24小时服务接口原样套回当前架构。当前AgentTask/AgentTaskGrant持久化、当前身份/权限/工厂/产品线与租户代际检查、逐事务严格绑定、只读RR元数据白名单及完整digest、baseline DENY和runtime默认关闭均有对应实现；受限local_metadata试用沿后续独立合同，不放开命令或生产交付。新补跑设计契约 **16 passed /3既有warnings**；与已验收3450全量快照对比，唯一变化的冻结源码是本轮已独立复核并33项通过的MES测试。未声称当前工作树重跑过全站make check。用户已授权将MES整改独立提交并仅推当前功能分支到origin，不建PR、不合并、不部署；用户删除示例、TEST profile和全部私有证据不纳入提交。远端CI尚未适配本地live条件，功能分支推送不等于远端CI通过；Git执行结果另以实际远端ref回执为准。下方早先未提交状态为当时交接历史。
@@ -95,14 +98,59 @@
 
 > **2026-10-19 R4b-2 已完成**：默认关闭的任务私有附件、真实扫描门禁、受权下载/删除与可恢复保留期清理已验收。最终冻结 `make check` **2999 passed / 12 skipped / 3 xfailed / 2 xpassed，exit 0**；前端 **95 项**及类型/构建、实际 ClamAV **7 项**和 Chromium **1 项**通过；1371 个源码/配置指纹未变，自有验收资源已清理。完整证据见[实施计划](docs/superpowers/plans/2026-10-09-agent-task-controlled-attachments.md)，运行边界见[操作指南](docs/development/agent-task-attachments.md)。没有 push/合并/部署；插件/模型附件投递与生产部署仍未开放。
 
-**更新日期**: 2026-10-29
-**当前分支**: `feature/agent-task-runtime-foundation`
-**基线**: `7503e9e5`（独立工作树，未合入主工作区）
-**当前阶段**: R1–R4b-2 已完整验收，原候选审批方案撤回；CAPA结果审核Task1–6已独立复核，Task7代码已复核但真实正向provider/浏览器/知识/横向仍BLOCKED（无本工作树授权.env.e2e）。Task8独立文档/契约/冻结普通回归已执行并交接，完整make仍因两项强制live测试exit2，不能签署Task8/整片完成；精确授权scanner、控制方整体复核和最终破坏性清理仍待条件。核心PG/卷/工作树/证据保留，仅授权本地提交，不push/合并/部署，Agent新能力默认关闭。
+**更新日期**: 2026-11-02
+**当前分支**: `integration/agent-main-semantic-20261102`
+**集成基线**: runtime `ef3e24e0` ＋ main `d8e2cef5`
+**当前阶段**: 本地语义集成、受控回归及独立复核完成；保留本地分支供后续CI接入，无 main 更新、远端推送或生产启用。
+
+**被集成分支的历史状态**：runtime 的 R1–R4b-2、CAPA 集中审核及其多轮验证记录保留在上方和文末；main 的 PR #24/#26 权限内核、单报告只读基础与自批修复记录保留在下方。旧运行状态、资源登记和验证数字均限于对应历史快照，不作为本次结果。
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+
+### 2026-11-01 — PR #26 提交推送与远端复核
+
+- 按本次授权提交自批回归修复及 `main@63d06571` 的冲突整合，更新原 #26 分支；提交前重新执行权限策略测试，39 passed（3 项既有 Pydantic 弃用警告）。完整本地验证证据见 2026-10-31 条目。
+- 本次推送后核对远端提交、冲突状态、CI 与代码复审结果；以对应提交的 GitHub 检查为准。当前授权不包含直接合并 PR。
+
+### 2026-10-31 — PR #26 自批回归修复与 main 整合
+
+- 恢复 `can_employee_approve()` 的请求发起人检查；员工发起、服务执行及其他用户代执行均不得由发起员工自批，独立审批员工仍可按原资格规则审批。新增回归先复现失败，再验证修复。
+- 与 `main@63d06571`（#24）逐项整合 13 个冲突文件：保留 CAPA 模块持有声明、模块专用审批/范围/来源投影检查，同时保留不可原位修改的目录、无时区时间戳拒绝、来源版本、非空交付目标及派生交付敏感等级绑定。能力仍为 `DENY`，未新增运行入口。
+- 验证：聚焦策略测试 39 passed；在自有临时 PostgreSQL/全新 `qms_test_pr26_merge_20261031` 上执行 `make check-backend`，2048 passed、5 skipped、3 xfailed、2 xpassed（3 项既有 Pydantic 弃用警告）；前端 `check-frontend`（TypeScript + Vite 构建）通过。临时测试容器已清理，未连接业务库。文档相对链接与差异空白检查通过。当前为本地未提交的合并结果，尚未推送或合并 PR。
+- 限制：`npm ci` 报告锁定依赖有 30 项审计告警（1 low、18 moderate、11 high），本次未修改依赖或自动升级；既有 MES 的 2 个 XPASS 不视为本次修复。
+- 下一步：经授权提交本地合并结果并推送以更新 #26，确认远端 CI 后再决定合并 PR；当前远端 PR 尚未变化。
+
+### 2026-09-29 — Agent 模块权限内核（独立切片）
+
+- 对照 [权限设计](docs/superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md) 核对并修订 [实施计划](docs/superpowers/plans/2026-09-26-agent-module-permission-kernel.md)：CAPA 持有声明；派生数据按来源能力及投影校验，脱敏权限不能复用为原文权限。
+- 已实现纯策略目录（调用前核对服务端规范声明）、身份×插件×任务交集（全域范围须验证 GROUP ADMIN / 行级豁免）、审批下限/模块专用员工资格、来源投影限制与显式交付守卫；CAPA 试点能力仍为 `DENY`，**未接入生产入口**。业务锚点和边界见 [能力盘点](docs/development/agent-module-capability-inventory.md)。
+- 验证：新内核与旧 Agent/工厂作用域聚焦回归通过；完整 `make check-backend` 未通过（1909 passed、34 failed、2 errors，另有 skipped/xfail/xpass），独立复现 `qms_test` 缺少 FMEA 版本 trigger；旧 PPT review seed、嵌入表列等另有失败，未在本切片修改。
+- 下一步：先确认设计 §6 的租户绑定、插件身份/可信部署、任务授权持久化、CAPA 脱敏投影及外发矩阵，再另行规划只读 8D 试点；不要把内核测试通过当成实际授权上线。
+
+### 2026-09-29 — 独立测试库基线恢复
+
+- 旧 `qms_test` 的 Alembic 版本虽为 `20260727_warranty_factory_id`，但缺少 FMEA/控制计划版本 trigger 和 `document_embeddings.embedding` 列；在该库运行 `make check-backend` 得到 34 failed、2 errors。新建 `qms_test_baseline` 并从空库迁移到 head 后，上次失败的 36 项全部通过，完整后端套件为 1974 passed、5 skipped、3 xfailed、2 xpassed。
+- 已把旧库改名保留为 `qms_test_drifted_20260929`，重新创建默认 `qms_test` 并从迁移构建。默认 `make check` 通过：后端同上，前端 TypeScript 检查与构建通过。此项为本地测试库修复，没有改动业务数据库或生产代码。
+- 下一步：确定只读 8D 试点的首个开发切片，再补齐对应实施规格；身份/租户绑定、任务授权持久化及 CAPA 脱敏投影是当前建议的起点。
+
+### 2026-09-29 — 只读 8D 首切片设计与计划
+
+- 设计阶段选定单报告任务授权持久化与 CAPA D4 元数据投影作为首切片；[设计规格](docs/superpowers/specs/2026-09-29-agent-readonly-8d-foundation-design.md)按审查意见增加多租户逐事务隔离前置条件及完整投影摘要。单租户内部基础现已实施，见下节。
+- [实施计划](docs/superpowers/plans/2026-09-29-agent-readonly-8d-foundation.md)按测试先行顺序执行了单租户任务表、服务和投影；多租户路径在逐事务绑定和无 `public` 回退的测试验收前关闭；能力仍为 `DENY`，不提供插件或 HTTP 读取入口。
+- 后续依赖：多租户隔离改造及验收独立安排；外部交付尚未开放。
+
+### 2026-09-29 — 只读 8D 内部基础
+
+- `agent_read_tasks` 表及迁移、单报告任务生命周期服务已实现。服务仅在 `TENANT_MODE=single` 运行；创建时按服务端 CAPA 记录确定工厂与产品线，检查时重验操作者权限、范围、有效期及撤销状态，并记录安全审计。
+- CAPA D4 元数据投影使用明确字段白名单，在同一只读 `REPEATABLE READ` 快照中读取报告和验证子记录，对完整投影计算 SHA-256 摘要。新增验证记录、修改结论会改变摘要；投影不包含 D4 自由文本。
+- 集成测试覆盖真实持久化任务生成 `Grant` 后，规范能力 `capa.d4.summary.masked.v1` 的 `DENY` 仍使 `authorize()` 拒绝交付；非单租户模式在任务服务查询和投影开启会话前拒绝。未新增 HTTP、插件或模型读取入口。
+- 验证：任务及投影聚焦测试 30 passed；新建隔离库从空库迁移后，新任务表的升级/约束/降级 3 项测试通过。首次新库 `make check` 通过：后端 1969 passed、43 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过。原默认 `qms_test` 虽标记为新 head，仍缺少控制计划版本 trigger 和基础角色，导致全量测试失败；已保留为 `qms_test_drifted_task4_20260929`，并将经全量验证的新库改名为默认 `qms_test`。默认 `make check` 复跑通过：后端 2007 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过。
+- 后续连续复跑定位到 `tests/test_spc_fmea_match.py` 的夹具会对共享 `qms_test` 执行 `drop_all/create_all`，抹掉迁移 trigger 和角色种子，造成下一轮全量失败。该夹具现使用独立临时库；回归测试先复现 trigger 丢失、修复后 11 passed。恢复默认测试库后，连续两次 `make check` 均通过：后端各 2008 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过；首轮后确认 trigger 与基础角色仍存在。漂移库保留为 `qms_test_drifted_fixture_20260929`。
+- 2026-09-30 PR 整合：在独立工作树的 `feature/agent-permission-kernel-pr` 分支合入 `main@dbd58690`，保留 main 的 SPC 临时库夹具及本切片的 trigger 保留回归；进度文档保留两侧记录。新建 `qms_test_agent_pr_20260930` 后运行 `make check` 通过：后端 2026 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查及构建通过。
+- 下一步：先独立完成逐事务租户绑定、无 `public` 回退及提交/回滚/连接复用/租户缺表等隔离验收；插件身份与外发控制再单独设计、评审。当前单租户内部基础不代表能力批准或多租户可用。
+
 
 ---
 
@@ -133,6 +181,8 @@
 ---
 
 ## 模块级 Agent 权限内核（2026-09-26，第一切片）
+
+> 以下为第一切片当日状态；后续单租户任务持久化和内部投影进展见上文，不能据此判定生产授权已接线。
 
 - **已完成**：CAPA D4 样板能力目录（条目均为 `DENY`，未开放；授权时回查不可原位修改的服务端目录）；纯策略内核覆盖执行身份×插件×任务授权范围、最低审批与员工资格、明确外发许可、跨模块派生来源和敏感等级继承。服务身份发起操作不一律人工审批；由员工发起的后台任务禁止该员工自批。
 - **边界**：尚未接入现有 Agent gateway、任务/插件持久授权、业务查询和写入、审批 API、模型调用、索引或外部插件。此内核的单测通过不代表生产入口已受新策略保护；现有 Agent 功能保持不变。

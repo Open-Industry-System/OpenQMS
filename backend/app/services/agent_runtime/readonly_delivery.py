@@ -218,7 +218,7 @@ async def save_result(db: AsyncSession, identity: RuntimeIdentity, body) -> dict
 async def admit_historical_sources(db, scope, task, run_id, identifiers,
                                    generation=None, epoch=None):
     """Reload actual source bindings and current ACL; saved versions grant nothing."""
-    from app.core.permissions import Module
+    from app.services.agent.permissions.catalog import get_capability
     from app.services.agent.permissions.delivery import SourceLabel, derive_label, can_view_derived
     from app.services.agent_runtime import task_service
 
@@ -234,9 +234,13 @@ async def admit_historical_sources(db, scope, task, run_id, identifiers,
             raise PermissionError("Source unavailable") from None
         if source.factory_id != task.factory_id:
             raise PermissionError("Source unavailable")
-        labels.append(SourceLabel(Module.CAPA, receipt.source_capa_id,
-            receipt.projection_digest, receipt.data_class))
-        authorized.add((Module.CAPA, receipt.source_capa_id, receipt.data_class))
+        spec = get_capability(receipt.projection_id)
+        if spec is None:
+            raise PermissionError("Source unavailable")
+        labels.append(SourceLabel(owner=spec.owner, object_id=receipt.source_capa_id,
+            sensitivity=receipt.data_class, capability_id=receipt.projection_id,
+            projection=spec.projection, source_version=receipt.projection_digest))
+        authorized.add((spec.owner, receipt.source_capa_id, receipt.projection_id, spec.projection))
     if not can_view_derived(derive_label(tuple(labels)), True, frozenset(authorized)):
         raise PermissionError("Source unavailable")
     return receipts

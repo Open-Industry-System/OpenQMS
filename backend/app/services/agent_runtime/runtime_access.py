@@ -105,7 +105,8 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
                         None if factories.accessible_factory_ids is None else frozenset(factories.accessible_factory_ids),
                         None if lines.mode == "ALL" else frozenset(lines.codes or []),
                         _grant(plugin), _grant(grant), target.factory_id, target.report_id,
-                        target.product_line_code, datetime.now(UTC), catalog_profile=profile))
+                        target.product_line_code, datetime.now(UTC),
+                        identity_bypass_row_level_security=lines.mode == "ALL", catalog_profile=profile))
                     allowed = allowed or (decision.allowed and decision.approval_floor == ApprovalFloor.DIRECT)
         decisions.append(RuntimeCapability(id=capability, allowed=allowed,
             required=capability in required, projection=spec.projection if spec.projection in {"masked", "raw"} else None))

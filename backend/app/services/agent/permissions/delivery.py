@@ -1,3 +1,5 @@
+"""Conservative lineage and explicit target-delivery guards."""
+
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -8,8 +10,10 @@ from app.core.permissions import Module
 class SourceLabel:
     owner: Module
     object_id: UUID
-    source_version: str
     sensitivity: str
+    capability_id: str
+    projection: str
+    source_version: str
 
 
 @dataclass(frozen=True)
@@ -33,8 +37,10 @@ def derive_label(sources: tuple[SourceLabel, ...]) -> DerivedLabel:
         raise ValueError("derived content requires server-attached sources")
     if any(not source.source_version.strip() for source in sources):
         raise ValueError("source version required")
-    if any(source.sensitivity not in {"internal", "restricted"} for source in sources):
-        raise ValueError("unknown sensitivity")
+    if any(source.sensitivity not in {"internal", "restricted"}
+           or source.projection not in {"masked", "raw"}
+           or not source.capability_id for source in sources):
+        raise ValueError("unknown source authorization")
     level = "restricted" if any(source.sensitivity == "restricted" for source in sources) else "internal"
     return DerivedLabel(sources, level)
 
@@ -46,27 +52,21 @@ def _valid_label(label: DerivedLabel) -> bool:
         return False
 
 
-def can_view_derived(
-    label: DerivedLabel,
-    target_authorized: bool,
-    authorized_sources: frozenset[tuple[Module, UUID, str]],
-) -> bool:
-    return _valid_label(label) and target_authorized and all(
-        (source.owner, source.object_id, source.sensitivity) in authorized_sources
-        for source in label.sources
-    )
+def can_view_derived(label: DerivedLabel, target_authorized: bool,
+                     authorized_sources: frozenset[tuple[Module, UUID, str, str]]) -> bool:
+    return (_valid_label(label) and target_authorized
+            and all((source.owner, source.object_id, source.capability_id, source.projection)
+                    in authorized_sources for source in label.sources))
 
 
 def can_deliver(attempt: DeliveryAttempt) -> bool:
     explicit = (attempt.sensitivity, attempt.projection, attempt.target_kind, attempt.target_id)
-    return (
-        attempt.sensitivity in {"internal", "restricted"}
-        and attempt.projection in {"masked", "raw"}
-        and attempt.target_kind in {"plugin", "model"}
-        and bool(attempt.target_id.strip())
-        and explicit in attempt.allowed
-        and (attempt.sensitivity != "restricted" or attempt.controlled_egress)
-    )
+    return (attempt.sensitivity in {"internal", "restricted"}
+            and attempt.projection in {"masked", "raw"}
+            and attempt.target_kind in {"plugin", "model"}
+            and bool(attempt.target_id.strip())
+            and explicit in attempt.allowed
+            and (attempt.sensitivity != "restricted" or attempt.controlled_egress))
 
 
 def can_deliver_derived(label: DerivedLabel, attempt: DeliveryAttempt) -> bool:

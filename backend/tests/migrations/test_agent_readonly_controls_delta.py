@@ -22,7 +22,7 @@ from tests.migrations.test_agent_task_core import _migration_config, _sync_engin
 PUBLIC = "20261001_agent_readonly_controls"
 CONTROLS_TENANT = "tv004_agent_readonly_controls"
 LATEST = "tv005_agent_task_attachments"
-HEAD = "20261009_agent_task_attachments"
+HEAD = "20261102_agent_mainline_merge"
 PARENT = "20260930_agent_readonly_delivery"
 TABLES = {"agent_task_controls", "agent_readonly_checkpoints", "agent_checkpoint_receipts", "agent_task_updates"}
 COLUMNS = {
@@ -59,6 +59,7 @@ def test_reviewed_heads_and_static_equivalent_deltas(mig_db_url):
         "tv003_agent_readonly_delivery",
         CONTROLS_TENANT,
         LATEST,
+        "tv006_agent_read_tasks",
     )
     root = Path(__file__).resolve().parents[2]
     public = (root / "alembic/versions/20261001_agent_readonly_controls.py").read_text()
@@ -168,7 +169,8 @@ async def test_tv002_to_tv005_to_tv002_to_tv005_preserves_two_historical_task_hi
             first = await conn.run_sync(lambda sync: _seed_history(sync, tenant.schema_name, True, False))
             second = await conn.run_sync(lambda sync: _seed_history(sync, tenant.schema_name, True, False))
             before = await conn.run_sync(lambda sync: _history_rows(sync, tenant.schema_name, True, False))
-        await asyncio.to_thread(command.upgrade, config, "head")
+        # This cycle intentionally remains the published tv005 contract.
+        await asyncio.to_thread(command.upgrade, config, "20261009_agent_task_attachments")
         monkeypatch.setattr(tenant_migrator, "REVISION", LATEST)
         tenant = await tenant_migrator.resume_tenant(tenant.id)
         async with engine.connect() as conn:
@@ -207,7 +209,7 @@ async def test_nonempty_known_ancestors_upgrade_parity_and_owned_downgrade(mig_d
             ids = await conn.run_sync(lambda sync: _seed_history(sync,tenant.schema_name,runtime,outputs))
             second_ids = await conn.run_sync(lambda sync: _seed_history(sync,tenant.schema_name,runtime,outputs))
             before = await conn.run_sync(lambda sync: _history_rows(sync,tenant.schema_name,runtime,outputs))
-        await asyncio.to_thread(command.upgrade,config,"head")
+        await asyncio.to_thread(command.upgrade,config,"20261009_agent_task_attachments")
         monkeypatch.setattr(tenant_migrator,"REVISION",LATEST)
         tenant = await tenant_migrator.resume_tenant(tenant.id)
         async with engine.connect() as conn:
@@ -245,7 +247,7 @@ async def test_predecessor_damage_is_rejected_before_any_control_ddl(mig_db_url,
             statements = {"extra":f'CREATE TABLE "{schema}".unexpected (id int)',"missing":f'ALTER TABLE "{schema}".users DROP COLUMN display_name',"partial":f'CREATE TABLE "{schema}".agent_task_controls (control_id uuid PRIMARY KEY)'}
             statements["partial_column"] = (f'ALTER TABLE "{schema}".users ADD r3_partial integer' if ancestor == "tv001_business_snapshot" else f'ALTER TABLE "{schema}".agent_runs ADD resume_checkpoint_id uuid')
             await conn.execute(sa.text(statements[damage]))
-        await asyncio.to_thread(command.upgrade,config,"head")
+        await asyncio.to_thread(command.upgrade,config,"20261009_agent_task_attachments")
         monkeypatch.setattr(tenant_migrator,"REVISION",LATEST)
         with pytest.raises(TenantUnavailable,match="partial"):
             await tenant_migrator.resume_tenant(tenant.id)
