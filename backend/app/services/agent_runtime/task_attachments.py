@@ -504,33 +504,70 @@ async def list_for_view(db: AsyncSession, scope: RequestScope, task_id: UUID) ->
 async def open_download(
     db: AsyncSession, scope: RequestScope, task_id: UUID, attachment_id: UUID
 ) -> DownloadHandle:
+    binding = db.info.get("tenant_binding")
     task = await task_service.get_task_for_view(db, scope, task_id)
+    target = (task.target_capa_id, task.factory_id)
     attachment = await db.scalar(
         select(AgentTaskAttachment).where(
             AgentTaskAttachment.task_id == task.task_id,
             AgentTaskAttachment.attachment_id == attachment_id,
             AgentTaskAttachment.status == "available",
-        )
+        ).execution_options(populate_existing=True)
     )
     if attachment is None or attachment.expires_at <= _now() or attachment.sha256 is None or attachment.byte_size is None:
         raise LookupError("attachment not found")
+    namespace = _namespace(attachment)
+    verified_content = (attachment.sha256, attachment.byte_size)
     try:
-        stream = _storage().open_clean(
-            _namespace(attachment), attachment.attachment_id, attachment.sha256, attachment.byte_size
-        )
+        stream = _storage().open_clean(namespace, attachment_id, *verified_content)
     except (OSError, ValueError, attachment_storage.AttachmentIntegrityError) as exc:
         raise LookupError("attachment not found") from exc
-    _audit(db, attachment, scope.user.user_id, "AGENT_TASK_ATTACHMENT_DOWNLOAD", status="available")
-    await db.commit()
-    return DownloadHandle(
-        stream=stream,
-        headers={
-            "Content-Disposition": f'attachment; filename="attachment-{attachment.attachment_id}.bin"',
-            "Content-Type": "application/octet-stream",
-            "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "no-store",
-        },
-    )
+    delivered = False
+    try:
+        # Hash verification may outlast authority or retention. Never deliver
+        # against the identity-map values captured before opening the file.
+        if db.info.get("tenant_binding") != binding:
+            raise PermissionError("attachment tenant binding changed")
+        task = await task_service.get_task_for_view(db, scope, task_id)
+        if (task.target_capa_id, task.factory_id) != target:
+            raise LookupError("attachment not found")
+        attachment = await db.scalar(
+            select(AgentTaskAttachment).where(
+                AgentTaskAttachment.task_id == task.task_id,
+                AgentTaskAttachment.attachment_id == attachment_id,
+            ).execution_options(populate_existing=True)
+        )
+        if (attachment is None or attachment.status != "available"
+                or attachment.expires_at <= _now() or attachment.factory_id != task.factory_id
+                or _namespace(attachment) != namespace
+                or attachment.tenant_id != (binding.tenant_id if binding is not None else None)
+                or (attachment.sha256, attachment.byte_size) != verified_content):
+            raise LookupError("attachment not found")
+        try:
+            _audit(db, attachment, scope.user.user_id, "AGENT_TASK_ATTACHMENT_DOWNLOAD", status="available")
+            await db.commit()
+        except BaseException as exc:
+            # Do not leave a pending/flushed success audit for a later caller
+            # commit after a failed or cancelled handoff.
+            try:
+                await db.rollback()
+            except BaseException:
+                exc.add_note("attachment download rollback also failed")
+            raise
+        handle = DownloadHandle(
+            stream=stream,
+            headers={
+                "Content-Disposition": f'attachment; filename="attachment-{attachment_id}.bin"',
+                "Content-Type": "application/octet-stream",
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store",
+            },
+        )
+        delivered = True
+        return handle
+    finally:
+        if not delivered:
+            stream.close()
 
 
 async def purge_for_owner(

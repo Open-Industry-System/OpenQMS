@@ -17,7 +17,7 @@ async def test_outcome_read_is_not_cached(review_http_client, review_case):
     body = response.json()
     assert body['contract'] == 'capa.outcome-review.v1'
     assert set(body) == {'report_id', 'status', 'contract', 'review_round_id', 'revision',
-                        'binding_status', 'core', 'verifications', 'd7_actions', 'documents', 'decision', 'supplement'}
+                        'binding_status', 'core', 'verifications', 'd7_actions', 'doc_gate', 'documents', 'decision', 'supplement'}
     assert set(body['core']) == {'d4_root_cause', 'd5_correction', 'd6_verification', 'd7_prevention'}
     assert before == await review_case.snapshot()
 

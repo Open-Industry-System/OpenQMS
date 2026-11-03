@@ -6,6 +6,23 @@ export interface OutcomeDocumentRef {
   version_id: string;
   sha256: string;
 }
+export interface OutcomeDocGate {
+  decision_id: string;
+  analysis_id: string;
+  audit_run_id: string | null;
+  revision: number;
+  factory_id: string;
+  decision: 'passed' | 'blocked' | 'deferred';
+  no_affected_confirmed: boolean;
+  version_snapshot: unknown[];
+  defer_reason: string | null;
+  defer_owner: string | null;
+  defer_deadline: string | null;
+  waiver_reason: string | null;
+  waiver_items: unknown[] | null;
+  decided_by: string;
+  decided_at: string;
+}
 export interface OutcomeDecision {
   action: 'approved' | 'rejected';
   actor_id: string | null;
@@ -27,6 +44,7 @@ export interface CapaOutcomeReview {
   };
   verifications: Verification[];
   d7_actions: D7NodeAction[];
+  doc_gate: OutcomeDocGate | null;
   documents: OutcomeDocumentRef[];
   decision: OutcomeDecision | null;
   supplement: {
@@ -64,6 +82,16 @@ export function isCompleteOutcomeReview(v: unknown, reportId: string, status: st
     && fields(row, ['fmea_id', 'failure_cause_node_id', 'prevention_control_node_id', 'prevention_control_name_before', 'prevention_control_name_after', 'reason'], nullableText))) return false;
   if (!Array.isArray(v.documents) || !v.documents.every(doc => record(doc)
     && ['fmea', 'planning'].includes(String(doc.module)) && uuid(doc.object_id) && uuid(doc.version_id) && hash(doc.sha256))) return false;
+  const gate = v.doc_gate;
+  if (gate === null ? status === 'D8_APPROVAL_PENDING' : !(record(gate)
+    && fields(gate, ['decision_id', 'analysis_id', 'factory_id', 'decided_by'], uuid)
+    && (gate.audit_run_id === null || uuid(gate.audit_run_id))
+    && Number.isInteger(gate.revision) && Number(gate.revision) >= 0
+    && ['passed', 'blocked', 'deferred'].includes(String(gate.decision))
+    && typeof gate.no_affected_confirmed === 'boolean' && Array.isArray(gate.version_snapshot)
+    && fields(gate, ['defer_reason', 'defer_deadline', 'waiver_reason'], nullableText)
+    && (gate.defer_owner === null || uuid(gate.defer_owner))
+    && (gate.waiver_items === null || Array.isArray(gate.waiver_items)) && text(gate.decided_at))) return false;
   const documents = v.documents;
   const hasFmea = (id: unknown) => documents.some((doc: unknown) => record(doc) && doc.module === 'fmea' && doc.object_id === id);
   if (!v.verifications.every(row => row.source_ref === null || (record(row.source_ref)

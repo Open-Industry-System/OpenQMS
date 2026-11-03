@@ -558,7 +558,7 @@ async def _dto(db, capa, material):
                        for row in material['verifications']],
         d7_actions=[{key: value for key, value in row.items() if key not in {'factory_id', 'recommendation_hash'}}
                     for row in material['d7_actions']],
-        documents=material['source_versions'], decision=decision,
+        doc_gate=material['doc_gate'], documents=material['source_versions'], decision=decision,
         supplement=dict(text=None, updated_by=supplement_audit.operated_by if supplement_audit else None,
                         updated_at=supplement_audit.operated_at if supplement_audit else None))
     _check_size(output.model_dump(mode='json'))

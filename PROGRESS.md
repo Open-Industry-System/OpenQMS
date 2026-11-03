@@ -1,5 +1,14 @@
 # OpenQMS 开发进度
 
+### 2026-11-03 — PR #28 四项审查修复（本地验证完成，未推送）
+
+- 基于 `4a00636f` 的独立 `fix/pr28-review-findings-20261103`：补齐 npm10 缺失的27个 esbuild 锁条目，原567条目不变；Make 发布入口保留操作者密钥；D8 响应/中英文面板补齐已绑定门禁、豁免与责任信息；附件文件校验后重查权限/目标/附件状态，失败关闭描述符并回滚失败成功审计。运行时和生产边界不开放。
+- RED/GREEN：Make 6 failed/2 passed → 8 passed；D8 后端4 failed/1控制通过、前端7 failed/22 passed → 后端125、面板/详情88通过；附件初次9 failed/1控制通过 → 27通过。首轮全量在61%发现新增代际比较过严后取消，日志保留，不算全量验收；既有代际用例再现RED后改为保持原坐标且检查当前tenant，扩大四模块64通过，并再次独立复核，无重要遗留。
+- **最终完整后端**：全新专属库，3648 passed /4 skipped /19 deselected /5 warnings，pytest与runner exit0（2231.10秒）；4skip为Redis与3个未启用seed E2E端点。实际Chromium保护11 passed /3660 deselected /5 warnings，exit0；纯CI192、全前端88文件/748测试、app/E2E类型通过。Linux Node20.20.2/npm10.8.2正常干净安装与生产构建通过，既有warnings保留。
+- **整条 Make 的限制**：最终 `make check` 后端及tsc通过后，macOS Vite/esbuild在文件open处停顿超过10分钟，主动取消，不能报告整条make exit0。497个输入逐文件相同的全新本地前端export正常npm ci/build（6.22秒）通过；此前Linux同源构建也通过，未修改源码绕过。最初两次检查命令工作目录错误亦已纠正，不计成功验证。
+- 最终1423源码指纹 `02ff9c2667b6c7305ec1f6d4f04fea3930194f22c0ecccf677f58e48b51e447e` 检查前后不变；收据中的SHA为基点，修复源码以此manifest区别，不冒充已推送提交。操作与验证见[修复计划](docs/superpowers/plans/2026-11-03-pr28-review-fixes.md)。本次容器精确ID/owner、零客户端、匿名卷独占核验后已单独清理；原工作区、其他容器、源码及日志保留。
+- **下一步**：按授权推送修复并获取真正远端CI，再独立处理main既有冲突及整合验证。本轮未推送、合并、调用真实provider/scanner或部署。
+
 > **2026-11-03 07:36 CI 限定提交/推送已获授权，远端结果待实际回执**：仅提交本轮CI代码、测试、使用文档/实施计划和CI进度记录并推送 `feature/agent-task-runtime-foundation`；原有架构/开发基线文档、开发基线进度条目与 `.env.e2e.example` 删除不混入提交。当前代码逐文件匹配最终完整本地验证源 manifest `d7a3a8bc…`；下一步读取该提交真实 GitHub 自动运行结果，不以本地记录代替。未授权创建PR、集成main、手动模型/scanner事件、配置仓库保护或部署。
 
 > **2026-11-03 CI 分层实施与本地交接完成（未提交/未远端验收）**：最终同源冻结 manifest `d7a3a8bc…` 完整 `make check` exit0：后端 **3622 passed /4 skipped /19 deselected /5 warnings**，前端类型/生产build通过；串行浏览器 **11 passed /3634 deselected /5 warnings**，纯测试 **184 passed**。最终修正另实际复验API85、显式浏览器11、ClamAV过程6＋浏览器1；真实收据/日志与daemon/场景/cleanup观测在销毁前保留，frontend CI无backend依赖CLI实测通过，actionlint通过。整体复核与全部Important修正均关闭；SDK短密码JSON结构、可选timeout、显式浏览器路径、CI证据保留均有反例。4skip为Redis＋三个seed E2E endpoint，PG15快照已实测；scanner属性记录兼容warnings如实保留。仅本任务owned PG/container/volume在零其他client/消费者核验后处置，扫描随机project资源清零；源码/旧失败与取消证据/其他Docker项目保留。未触发GitHub自动/手动或应用真实provider、未提交/推送/PR/main集成/部署；下一步需授权仅提交CI相关改动并推送取得远端自动CI，再隔离处理main冲突。详见[实施计划](docs/superpowers/plans/2026-11-02-ci-layered-acceptance.md)、[E2E指南](docs/e2e.md#ci-分层验收task-7)、[开发指南](docs/development.md#42-分层验收资源与边界)。下方失败/待复核条目均保留为历史。

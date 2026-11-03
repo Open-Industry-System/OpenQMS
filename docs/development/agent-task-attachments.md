@@ -23,7 +23,7 @@ R4b-2 附件默认关闭：`AGENT_TASK_RUNTIME_ENABLED` 和
 受控 profile 使用 `clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c`。
 `docker/clamav/clamd.conf` 固定 20 MiB 流/文件/扫描限制、加密和超限告警、单线程/队列。验收必须记录 daemon/definitions 版本，并以真实 `VERSIONCOMMANDS` 与 EICAR `FOUND` 证明，不得以 always-clean fake 代替。
 
-EICAR、加密或超限启发式命中为 `422 ATTACHMENT_MALWARE_REJECTED`；scanner 超时、不可达或协议错误为 `503 ATTACHMENT_SCANNER_UNAVAILABLE`。两者删除 staging、保留最小失败记录以追踪，且没有可下载对象。权限/任务/坐标变化拒绝或撤回访问；列表、下载、删除和提升均重新核验当前事实。
+EICAR、加密或超限启发式命中为 `422 ATTACHMENT_MALWARE_REJECTED`；scanner 超时、不可达或协议错误为 `503 ATTACHMENT_SCANNER_UNAVAILABLE`。两者删除 staging、保留最小失败记录以追踪，且没有可下载对象。权限/任务/坐标变化拒绝或撤回访问；列表、下载、删除和提升均重新核验当前事实。下载在 clean 文件完整性校验后，再次读取当前身份、权限和目标绑定，并刷新附件状态、期限及存储/内容标识；并发撤权、目标重绑、过期或元数据变化时不交付描述符。最终检查、审计提交失败或请求取消时关闭已打开文件，审计提交异常还回滚未完成事务，避免后续误记成功下载。
 
 对账仅清理已有记录所属的 live namespace 中可证明安全的遗留 staging/状态转换；普通 maintenance、failed/suspended/deactivated 或 generation 改变必须保留未过期字节。`expires_at <= now` 的记录在列表中立即不可见，即使清理尚未运行；对账以 `available -> purging` 的已提交状态后删除 clean 字节，再提交 `purged` 和系统审计。历史 generation 中有持久化记录的已过期对象可按该记录清理，未知历史 namespace 则只保留并告警。整代删除只能有平台 `tenant_attachment_storage_disposals` 的精确、已提交 `test_rebuild`（或未来 `tenant_destroyed`）授权；每个 disposal 是 append-only 记录。过期和用户删除均经 `purging -> purged` 两阶段，不能硬删除记录。
 

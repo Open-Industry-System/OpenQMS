@@ -89,6 +89,25 @@ export default function CapaOutcomeReviewPanel({ reportId, status, canApprove, c
               prevention_control_node_id: row.prevention_control_node_id, reason: row.reason, acted_by: row.acted_by, acted_at: row.acted_at })}
           </section>)}
         </section>
+        <section data-e2e="capa-outcome-doc-gate">
+          <Divider orientation="left">{t('outcome.gate.title')}</Divider>
+          {review.doc_gate ? <>
+            <Tag>{t(`outcome.gate.decision.${review.doc_gate.decision}`)}</Tag>
+            <Descriptions column={1} size="small" layout="vertical" items={[
+              { key: 'decision_id', label: t('outcome.gate.decisionId'), children: review.doc_gate.decision_id },
+              { key: 'revision', label: t('outcome.gate.revision'), children: review.doc_gate.revision },
+              { key: 'decided_by', label: t('outcome.gate.decidedBy'), children: review.doc_gate.decided_by },
+              { key: 'decided_at', label: t('outcome.gate.decidedAt'), children: review.doc_gate.decided_at },
+              { key: 'no_affected', label: t('outcome.gate.noAffected'), children: t(review.doc_gate.no_affected_confirmed ? 'outcome.gate.confirmed' : 'outcome.gate.notConfirmed') },
+              { key: 'snapshot', label: t('outcome.gate.snapshot'), children: metadata(review.doc_gate.version_snapshot) },
+              { key: 'waiver_reason', label: t('outcome.gate.waiverReason'), children: <div style={plainStyle}>{review.doc_gate.waiver_reason ?? '—'}</div> },
+              { key: 'waiver_items', label: t('outcome.gate.waiverItems'), children: review.doc_gate.waiver_items === null ? '—' : metadata(review.doc_gate.waiver_items) },
+              { key: 'defer_reason', label: t('outcome.gate.deferReason'), children: <div style={plainStyle}>{review.doc_gate.defer_reason ?? '—'}</div> },
+              { key: 'defer_owner', label: t('outcome.gate.deferOwner'), children: review.doc_gate.defer_owner ?? '—' },
+              { key: 'defer_deadline', label: t('outcome.gate.deferDeadline'), children: review.doc_gate.defer_deadline ?? '—' },
+            ]} />
+          </> : <Typography.Paragraph>{t('outcome.gate.unavailable')}</Typography.Paragraph>}
+        </section>
         <Divider orientation="left">{t('outcome.documents')}</Divider>
         {review.documents.length === 0 && <Typography.Paragraph>{t('outcome.noDocuments')}</Typography.Paragraph>}
         {review.documents.map(doc => <section key={`${doc.module}:${doc.object_id}:${doc.version_id}`}>

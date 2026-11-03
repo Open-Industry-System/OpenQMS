@@ -1,5 +1,5 @@
 """The current-report outcome read contract; not a decision-write request."""
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -26,6 +26,24 @@ class OutcomeDocumentRef(OutcomeModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class OutcomeDocGate(OutcomeModel):
+    decision_id: UUID
+    analysis_id: UUID
+    audit_run_id: UUID | None
+    revision: int
+    factory_id: UUID
+    decision: Literal["passed", "blocked", "deferred"]
+    no_affected_confirmed: bool
+    version_snapshot: list = Field(repr=False)
+    defer_reason: str | None = Field(repr=False)
+    defer_owner: UUID | None
+    defer_deadline: date | None
+    waiver_reason: str | None = Field(repr=False)
+    waiver_items: list | None = Field(repr=False)
+    decided_by: UUID
+    decided_at: datetime
+
+
 class OutcomeDecision(OutcomeModel):
     action: Literal["approved", "rejected"]
     actor_id: UUID | None
@@ -50,6 +68,7 @@ class CapaOutcomeReview(OutcomeModel):
     core: OutcomeCore = Field(repr=False)
     verifications: list[VerificationResponse] = Field(repr=False)
     d7_actions: list[D7NodeActionResponse] = Field(repr=False)
+    doc_gate: OutcomeDocGate | None = Field(repr=False)
     documents: list[OutcomeDocumentRef]
     decision: OutcomeDecision | None
     supplement: OutcomeSupplement = Field(repr=False)

@@ -231,6 +231,8 @@ Make 参数显式传递。可通过 `python scripts/check-ci-pure.py tests/ci/
 tests/e2e/test_capa_outcome_runner.py -q -rA` 运行导入、收集、执行全程禁止网络的 CI
 基础设施纯测试。
 
+前端依赖使用 `npm ci`，变更锁文件后须在 CI 的 Node 20/npm 10 环境复验；不能以已有 `node_modules` 的构建通过代替干净安装。发布诊断 `doc-gate-preflight` 和迁移 `deploy-migrate` 保留调用方 `SECRET_KEY`，未提供时不生成空值覆盖 `.env`；仅在调用方未提供非空密钥时接受显式 `PYTEST_SECRET_KEY` 作为旧接口兼容，不在这些入口新增生产默认密钥。
+
 ### 4.2 分层验收资源与边界
 
 `make check-browser` 使用 `ci_browser and not live_provider and not real_scanner`，

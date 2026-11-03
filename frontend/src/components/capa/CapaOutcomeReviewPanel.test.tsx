@@ -30,10 +30,53 @@ const fixture: CapaOutcomeReview = {
     failure_mode_node_id: 'fm-1', failure_cause_node_id: 'cause-1', match_source: 'linked',
     prevention_control_node_id: 'pc-1', prevention_control_name_before: '原点检', prevention_control_name_after: '新版点检',
     reason: '现场确认', acted_by: id, acted_at: '2026-10-23T00:00:00Z' }],
+  doc_gate: { decision_id: id, analysis_id: source, audit_run_id: null, factory_id: id, revision: 0,
+    decision: 'passed', no_affected_confirmed: false, version_snapshot: [{ doc_type: 'fmea', doc_id: source }],
+    defer_reason: null, defer_owner: null, defer_deadline: null, waiver_reason: null, waiver_items: null,
+    decided_by: source, decided_at: '2026-10-23T12:34:56Z' },
   documents: [{ module: 'fmea', object_id: source, version_id: id, sha256: 'a'.repeat(64) },
     { module: 'planning', object_id: id, version_id: source, sha256: 'b'.repeat(64) }], decision: null,
   supplement: { text: '补充说明', review_scope: 'unreviewed_supplement', updated_by: null, updated_at: null },
 };
+it.each(['zh-CN', 'en-US'])('shows read-only gate decision and waiver responsibility in %s', async language => {
+  await i18n.changeLanguage(language);
+  const value = structuredClone(fixture);
+  value.doc_gate!.waiver_reason = '<img src=x onerror=alert(1)> historical item removed';
+  value.doc_gate!.waiver_items = [{ doc_type: 'control_plan', doc_id: id, target_key: 'removed-item', field: 'control_method' }];
+  vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);
+  render(view());
+  const section = await screen.findByTestId('capa-outcome-doc-gate');
+  expect(section).toHaveTextContent(language === 'zh-CN' ? '文档门禁决定' : 'Document gate decision');
+  expect(section).toHaveTextContent(language === 'zh-CN' ? '已通过' : 'Passed');
+  expect(section).toHaveTextContent(value.doc_gate!.waiver_reason);
+  expect(section).toHaveTextContent('removed-item');
+  expect(section).toHaveTextContent(source);
+  expect(section).toHaveTextContent('2026-10-23T12:34:56Z');
+  expect(section.querySelector('img,input,textarea,a')).toBeNull();
+});
+
+it('shows explicit no-affected confirmation and honest absent historical gate', async () => {
+  const value = structuredClone(fixture); value.doc_gate!.no_affected_confirmed = true;
+  vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);
+  const { unmount } = render(view());
+  expect(await screen.findByTestId('capa-outcome-doc-gate')).toHaveTextContent('已确认无受影响文档');
+  unmount();
+  vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...fixture, status: 'ARCHIVED', doc_gate: null });
+  render(view('A', 'ARCHIVED'));
+  expect(await screen.findByTestId('capa-outcome-doc-gate')).toHaveTextContent('无历史门禁决定记录');
+});
+
+it.each(['missing', 'pending null', 'partial', 'malformed waiver'])('rejects incomplete gate context: %s', async kind => {
+  const value: any = structuredClone(fixture);
+  if (kind === 'missing') delete value.doc_gate;
+  if (kind === 'pending null') value.doc_gate = null;
+  if (kind === 'partial') delete value.doc_gate.decided_by;
+  if (kind === 'malformed waiver') value.doc_gate.waiver_items = 'not a list';
+  vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);
+  render(view()); await screen.findByRole('alert');
+  expect(changed).toHaveBeenLastCalledWith(null);
+});
+
 const deferred = <T,>() => { let resolve!: (v: T) => void; let reject!: (e: unknown) => void;
   const promise = new Promise<T>((r, j) => { resolve = r; reject = j; }); return { promise, resolve, reject }; };
 const changed = vi.fn();

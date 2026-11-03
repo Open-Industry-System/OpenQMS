@@ -78,16 +78,19 @@ check-frontend: check-frontend-tsc check-frontend-build
 # doc-gate-preflight exit 1 = blocked_modify, stale_analysis, or invalid_waiver.
 # potential_disconnect is WARN (exit 0) unless PREFLIGHT_STRICT_POTENTIAL=1.
 PREFLIGHT_STRICT_POTENTIAL ?= 0
+# Preserve the operator's SECRET_KEY (or Settings' .env resolution). An explicit
+# legacy test-key override is a fallback only; never synthesize an empty secret.
+RELEASE_SECRET_ENV = $(if $(strip $(PYTEST_SECRET_KEY)),SECRET_KEY="$${SECRET_KEY:-$$PYTEST_SECRET_KEY}")
 
 doc-gate-preflight:
-	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) PYTHONPATH=. $(PYTHON_BIN) -m app.services.capa_doc_gate_preflight $(if $(filter 1,$(PREFLIGHT_STRICT_POTENTIAL)),--strict-potential,)
+	cd $(BACKEND_DIR) && $(RELEASE_SECRET_ENV) PYTHONPATH=. $(PYTHON_BIN) -m app.services.capa_doc_gate_preflight $(if $(filter 1,$(PREFLIGHT_STRICT_POTENTIAL)),--strict-potential,)
 
 # Schema migrate ONLY (no app containers that serve traffic).
 # Use against a reachable DATABASE_URL; for docker, start db first, then:
 #   docker compose up -d db redis neo4j
 #   DATABASE_URL=... make deploy-migrate
 deploy-migrate:
-	cd $(BACKEND_DIR) && SECRET_KEY=$(PYTEST_SECRET_KEY) DATABASE_URL=$${DATABASE_URL:?DATABASE_URL required} \
+	cd $(BACKEND_DIR) && $(RELEASE_SECRET_ENV) DATABASE_URL=$${DATABASE_URL:?DATABASE_URL required} \
 		$(PYTHON_BIN) -m alembic upgrade head
 
 # Forced release entry. The script owns the entire synchronous sequence so

@@ -364,6 +364,192 @@ async def test_only_available_unexpired_attachment_can_open_download(owned_task,
             )
 
 
+async def prepare_clean_download(owned, service):
+    attachment = await seed_attachment(owned, status="available")
+    binding = owned.db.info.get("tenant_binding")
+    if binding is not None:
+        attachment.tenant_id = binding.tenant_id
+        attachment.origin_generation = binding.generation
+        attachment.storage_namespace = f"tenant_{binding.tenant_id.hex}_{binding.generation}"
+    storage = service._storage()
+    namespace = service._namespace(attachment)
+    with storage.create_staging(namespace, attachment.attachment_id) as stream:
+        stream.write(b"clean")
+    storage.promote(namespace, attachment.attachment_id, attachment.sha256, attachment.byte_size)
+    await owned.db.commit()
+    return attachment
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", [
+    "revoke", "disable", "retarget", "purging", "expire", "digest",
+    "namespace", "origin_generation", "tenant", "unchanged",
+])
+async def test_download_rechecks_committed_changes_after_file_verification(
+    committed_runtime, attachment_settings, monkeypatch, change,
+):
+    """A real second transaction changes authority after the descriptor is verified."""
+    from app.models.capa import CAPAEightD
+
+    owned = committed_runtime
+    service = attachment_service()
+    verified = asyncio.Event()
+    changed = asyncio.Event()
+    streams = []
+    original_open = service.attachment_storage.PrivateAttachmentStorage.open_clean
+
+    def observe_open(storage, *args):
+        stream = original_open(storage, *args)
+        streams.append(stream)
+        verified.set()
+        return stream
+
+    async with owned.factory(binding=owned.binding) as download:
+        user = await download.get(User, owned.user_id)
+        task = await download.get(AgentTask, owned.task_id)
+        scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), user)
+        attachment = await prepare_clean_download(SimpleNamespace(
+            db=download, task_id=owned.task_id, factory_id=task.factory_id, scope=scope,
+        ), service)
+        attachment_id = attachment.attachment_id
+        original_execute = download.execute
+        original_commit = download.commit
+
+        async def fence_execute(*args, **kwargs):
+            if verified.is_set():
+                await changed.wait()
+            return await original_execute(*args, **kwargs)
+
+        async def fence_commit():
+            if verified.is_set():
+                await changed.wait()
+            await original_commit()
+
+        async def rival_change():
+            await verified.wait()
+            try:
+                async with owned.factory(binding=owned.binding) as rival:
+                    if change == "revoke":
+                        await rival.execute(update(RolePermission).where(
+                            RolePermission.role_id == owned.role_id, RolePermission.module == "capa",
+                        ).values(permission_level=0))
+                    elif change == "disable":
+                        await rival.execute(update(User).where(User.user_id == owned.user_id).values(is_active=False))
+                    elif change == "retarget":
+                        target = await rival.get(CAPAEightD, task.target_capa_id)
+                        replacement = CAPAEightD(document_no="8D-RETARGET", title="Replacement",
+                            factory_id=target.factory_id, product_line_code=target.product_line_code,
+                            created_by=owned.user_id)
+                        rival.add(replacement)
+                        await rival.flush()
+                        await rival.execute(update(AgentTask).where(AgentTask.task_id == owned.task_id)
+                            .values(target_capa_id=replacement.report_id))
+                    elif change in {"purging", "expire", "digest", "namespace", "origin_generation", "tenant"}:
+                        values = {"purging": {"status": "purging"},
+                            "expire": {"expires_at": datetime.now(UTC) - timedelta(seconds=1)},
+                            "digest": {"sha256": "0" * 64},
+                            "namespace": {"storage_namespace": f"tenant_{owned.binding.tenant_id.hex}_{owned.binding.generation + 1}"},
+                            "origin_generation": {"origin_generation": owned.binding.generation + 1},
+                            "tenant": {"tenant_id": uuid.uuid4()}}[change]
+                        await rival.execute(update(AgentTaskAttachment).where(
+                            AgentTaskAttachment.attachment_id == attachment_id).values(**values))
+                    await rival.commit()
+            finally:
+                changed.set()
+
+        monkeypatch.setattr(service.attachment_storage.PrivateAttachmentStorage, "open_clean", observe_open)
+        monkeypatch.setattr(download, "execute", fence_execute)
+        monkeypatch.setattr(download, "commit", fence_commit)
+        rival = asyncio.create_task(rival_change())
+        try:
+            async with asyncio.timeout(20):
+                if change == "unchanged":
+                    handle = await service.open_download(download, scope, owned.task_id, attachment_id)
+                    assert handle.stream.read() == b"clean"
+                    handle.stream.close()
+                else:
+                    with pytest.raises((PermissionError, LookupError)):
+                        await service.open_download(download, scope, owned.task_id, attachment_id)
+                    assert streams and streams[0].closed
+                await rival
+            # Even if the caller later commits, a denied download must leave no success audit.
+            await original_commit()
+            actions = (await download.scalars(select(AuditLog.action).where(
+                AuditLog.record_id == attachment_id,
+                AuditLog.action == "AGENT_TASK_ATTACHMENT_DOWNLOAD",
+            ))).all()
+            assert actions == (["AGENT_TASK_ATTACHMENT_DOWNLOAD"] if change == "unchanged" else [])
+        finally:
+            rival.cancel()
+            await asyncio.gather(rival, return_exceptions=True)
+            for stream in streams:
+                stream.close()
+
+
+@pytest.mark.asyncio
+async def test_download_expiring_during_file_verification_closes_descriptor(
+    owned_task, attachment_settings, monkeypatch,
+):
+    service = attachment_service()
+    attachment = await prepare_clean_download(owned_task, service)
+    expires_at = attachment.expires_at
+    streams = []
+    original_open = service.attachment_storage.PrivateAttachmentStorage.open_clean
+
+    def expire_after_verification(storage, *args):
+        stream = original_open(storage, *args)
+        streams.append(stream)
+        monkeypatch.setattr(service, "_now", lambda: expires_at)
+        return stream
+
+    monkeypatch.setattr(service.attachment_storage.PrivateAttachmentStorage, "open_clean", expire_after_verification)
+    try:
+        with pytest.raises(LookupError):
+            await service.open_download(owned_task.db, owned_task.scope, owned_task.task_id, attachment.attachment_id)
+        assert streams and streams[0].closed
+        assert not (await owned_task.db.scalars(select(AuditLog).where(
+            AuditLog.record_id == attachment.attachment_id, AuditLog.action == "AGENT_TASK_ATTACHMENT_DOWNLOAD",
+        ))).all()
+    finally:
+        for stream in streams:
+            stream.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [RuntimeError, asyncio.CancelledError])
+async def test_download_commit_failure_closes_verified_descriptor_without_success_audit(
+    owned_task, attachment_settings, monkeypatch, failure,
+):
+    service = attachment_service()
+    attachment = await prepare_clean_download(owned_task, service)
+    attachment_id = attachment.attachment_id
+    streams = []
+    original_open = service.attachment_storage.PrivateAttachmentStorage.open_clean
+    original_commit = owned_task.db.commit
+
+    def observe_open(storage, *args):
+        stream = original_open(storage, *args)
+        streams.append(stream)
+        return stream
+
+    async def fail_commit():
+        raise failure("download commit interrupted")
+
+    monkeypatch.setattr(service.attachment_storage.PrivateAttachmentStorage, "open_clean", observe_open)
+    monkeypatch.setattr(owned_task.db, "commit", fail_commit)
+    try:
+        with pytest.raises(failure):
+            await service.open_download(owned_task.db, owned_task.scope, owned_task.task_id, attachment_id)
+        assert streams and streams[0].closed
+        await original_commit()
+        assert not (await owned_task.db.scalars(select(AuditLog).where(
+            AuditLog.record_id == attachment_id, AuditLog.action == "AGENT_TASK_ATTACHMENT_DOWNLOAD",
+        ))).all()
+    finally:
+        for stream in streams:
+            stream.close()
+
+
 @pytest.mark.asyncio
 async def test_delete_commits_purging_before_physical_delete(
     owned_task, attachment_settings, monkeypatch,
