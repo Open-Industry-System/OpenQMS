@@ -214,18 +214,68 @@ npm run dev      # 开发服务器（:5173，代理 /api → :8000）
 
 ## 4. 测试
 
-### 4.1 后端
+### 4.1 日常检查
 
-当前项目使用手动测试脚本 `backend/app/test_schema.py`，暂无 pytest 框架。
+后端使用 pytest，前端使用 TypeScript/Vite 与 Vitest。常规一致性检查从仓库根目录运行：
 
 ```bash
-cd backend
-python app/test_schema.py
+make check-backend       # 已核验 PostgreSQL 上的 deterministic backend 层
+make check-frontend-tsc  # 类型检查
+make check-frontend-build # 生产构建
+make check               # backend + tsc + build
 ```
 
-### 4.2 前端
+`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。它只允许 `not ci_browser
+and not live_provider and not real_scanner`；graph worker/projection 的既有两项排除仍由
+Make 参数显式传递。可通过 `python scripts/check-ci-pure.py tests/ci/
+tests/e2e/test_capa_outcome_runner.py -q -rA` 运行 CI 基础设施纯测试。pure 模式要求
+collection 不探测数据库，误用 DB fixture 明确失败而非转成 skip；导入前禁隐式 dotenv，
+并对 Python 网络及项目已知数据库入口设置拒绝保护，已知 pytest 子进程沿同一 bootstrap。
+这不是任意 shell、Node、原生代码或不可信程序的通用 OS 网络沙箱，不得据此执行未知外部程序。
 
-前端暂无测试框架。建议后续引入 Vitest + React Testing Library。
+### 4.2 分层验收资源与边界
+
+`make check-browser` 使用 `ci_browser and not live_provider and not real_scanner`，
+要求已安装项目 Chromium；`make check-live` 只选择 `live_provider`，必须显式授权，
+普通任务不能把 `E2E_MODE=false` 当作关闭开关。分层入口（含独立 scanner）及本地 registration 格式见
+[E2E 指南](e2e.md#ci-分层验收task-7)。调用方在 Make 之前设置禁止 group/world 写入的 secret-free
+`OPENQMS_TEST_RESOURCE_FILE` 和同一 loopback `TEST_DATABASE_URL`；本地若同时提供
+`PG15_CONTAINER`，必须匹配登记的容器名称或完整 ID，不能借用 CI metadata。SDK
+`OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` 必须移除而非置空，应用 provider 配置仍
+显式禁用。不得由旧注册、
+`run-owned.py`、固定 `/Users/` 路径或环境文件推断资源。
+
+本地资源核验在 Docker inspect 或 DB I/O 前拒绝额外的 `PGHOSTADDR`、`PGSERVICE`、
+`PGSERVICEFILE`、`PGSYSCONFDIR` 和 `PGOPTIONS`，实际 libpq 连接还固定数字回环地址。
+`localhost` 使用 IPv4 回环；仅 IPv6 的实例应显式使用 `::1`。普通测试迁移前置与测试 recipe
+共用测试专用 `SECRET_KEY` fallback，并保留调用者显式值；`doc-gate-preflight` 和
+`deploy-migrate` 则必须显式提供实际 `SECRET_KEY`，不继承测试 fallback 或旧 `PYTEST_SECRET_KEY`。
+本说明不授权执行部署命令。
+
+本地 source export 只复制当前 tracked present source 与明确列出的 CI 实现文件，
+不复制 `.git`、`.env*`、`.superpowers`、`.codegraph`、cache、`node_modules` 或旧 owned
+registry；用 SHA-256 manifest 冻结后在 export 内 `npm ci`。普通/provider 凭据保持空，
+`PYTHON_BIN` 可指向操作者提供的解释器但不写入源码。收到安装脚本/浏览器缺失阻止时，
+记录为 BLOCKED 并继续可以运行的 backend/静态检查，不能绕过为升级依赖或浏览器下载。
+
+runner 仅发布已脱敏的 receipt/log；原始 JUnit/hooks 与配置文件保持私有。各 job 通过专用
+`OPENQMS_TEST_ARTIFACTS`、`always()` 保留成功和失败的实际收据，而非状态包装；scanner
+在 teardown 前导出过程证据并另记清理观察，summary 校验冻结 SHA 与实际计数。可选
+`LLM_TIMEOUT` 缺省/空值为 30 秒，显式配置仍严格限制 1–120。receipt 必须记录
+命令、退出码、selected/passed/failed/errors/skipped/xfail/xpass/deselected/warnings 和
+清理范围。确认虚构 sentinel 不在 Node allowlist 或待上传产物后才能发布。不要停止、
+删除或 prune controller 保留的 container/volume；只清理本次创建的 runner artifact。
+
+### 4.3 GitHub 自动与手动层
+
+自动 job 使用无密钥 all-branch push 与 main PR，`contents: read`、checkout
+`persist-credentials: false`。`workflow_dispatch` 的 live/scanner 只在 `main`，固定
+选项和 main-only 预检：先检查 event/ref/gate 并冻结 main SHA，才由下游 job
+使用该 SHA。workflow_dispatch 文件必须先正式进入默认分支 main；仅 live job 使用 `ci-acceptance` Environment 与模型配置，scanner 不读取
+模型密钥且不依赖该 Environment。Environment 审批者、允许的 main 与测试配置由管理员在 GitHub 配置；
+代码不读取本地 credential、不创建 Secrets/Environment/branch protection。未实际 push
+或 dispatch 的 GITHUB_AUTO/GITHUB_MANUAL 不是 PASS，分别保留 BLOCKED 或
+NOT_REQUESTED。
 
 ---
 

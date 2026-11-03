@@ -9,6 +9,16 @@ Provides:
 """
 import os
 
+from tests.ci.python_isolation import bootstrap, is_pure
+
+bootstrap()
+
+
+def _require_database_lane():
+    if is_pure():
+        raise RuntimeError("pure_test_database_forbidden: select a real database lane")
+
+
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only")
 
 import uuid
@@ -53,6 +63,7 @@ def mig_db_url(monkeypatch):
     """Create one-shot PG db (no migrations applied), return async URL. Teardown drops it."""
     from sqlalchemy import create_engine, text
 
+    _require_database_lane()
     pg = _parse_pg(_test_db_url)
     mig_dbname = f"qms_migtest_{uuid.uuid4().hex}_test"
     admin = create_engine(
@@ -65,6 +76,7 @@ def mig_db_url(monkeypatch):
 
     mig_url = f"postgresql+asyncpg://{pg['user']}:{pg['password'] or ''}@{pg['host']}:{pg['port']}/{mig_dbname}"
     monkeypatch.setenv("DATABASE_URL", mig_url)
+    monkeypatch.setenv("OPENQMS_MIGRATION_TEST_DATABASE_URL", mig_url)
     try:
         yield mig_url
     finally:
@@ -91,6 +103,7 @@ _db_available: bool | None = None
 
 async def _check_db_available() -> bool:
     """Return True if the database is reachable, False otherwise."""
+    _require_database_lane()
     global _db_available
     if _db_available is not None:
         return _db_available
@@ -160,6 +173,7 @@ def sessionmaker():
     常规 ``db`` fixture 把 commit() 替换为 flush 并在外层事务内回滚，无法验证
     FOR UPDATE 行锁的并发语义。此 fixture 提供独立的、真实提交的 AsyncSession。
     """
+    _require_database_lane()
     return _test_session_factory
 
 
@@ -176,6 +190,8 @@ def pytest_collection_modifyitems(config, items):
     would error instead of skip in a no-DB lane — this marker makes them skip
     gracefully. DB availability is checked once (cached by _check_db_available).
     """
+    if is_pure():
+        return
     import asyncio
 
     db_available = asyncio.new_event_loop().run_until_complete(_check_db_available())
@@ -198,6 +214,7 @@ async def db():
 
     Skips the test if the database is not reachable.
     """
+    _require_database_lane()
     if not await _check_db_available():
         pytest.skip("Database not available")
     async with _test_session_factory() as session:

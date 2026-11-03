@@ -1,8 +1,32 @@
 # OpenQMS 开发进度
 
+> **2026-11-03 CI 接入与本地分层门禁完成**：本地 `integration/agent-main-semantic-20261102` 已接入 CI 独立提交 `4a00636f`，未复制原工作树未提交内容；pure/隐式dotenv、DNS/已知Python子进程、显式Chromium末级传递、libpq路由及地址族闭环、Make secret缺口已先红后绿并独立复核收口。冻结执行源码1444文件：后端 **3827 passed /4 skipped**，浏览器 **11 passed** 且显式wrapper启动11次，pure **238 passed**；前端类型/build/E2E类型与 **741项单测**通过；同源固定ClamAV **6过程＋1浏览器**通过且导出/cleanup收据核验成功。执行源码前后不变，本轮主PG/卷、scanner随机project及私有执行口令均已精确清理。四项skip为未配置Redis及共享seed E2E，不当passed；未执行本集成分支远端CI或真实provider，不更新main、不push/部署/生产开启。[完整交接](docs/development/agent-ci-integration-gates.md)保留失败、修正、真实收据与源码身份。用户选择下一片先做元数据只读SDK与协议兼容，先规格设计/评审，不提前开放正文附件外发或R5业务写入。
+
+## 先前语义集成记录
 > **2026-11-02 主线语义集成本地完成**：独立分支 `integration/agent-main-semantic-20261102` 集成 runtime `ef3e24e0` 与 `origin/main@d8e2cef5`，不直接更新 main、不推送。双方权限、审批、来源和租户保护及调用方兼容已保留，新增 public merge revision 与独立 tenant `tv006_agent_read_tasks`；两部分规格复核 PASS、质量复核 Approve，无实质发现。权限/adapter纯测试128通过、迁移/租户纯测试28通过（均0网络）；专属PG15真实升级3通过、迁移/parity48通过1跳过、旧任务/多租户等193通过。runtime大套件首轮741通过/17库名守卫setup errors；换符合守卫的新库后17项全部通过，未改代码/守卫，不冒称一次全套exit0。跳过的冻结快照再生另用自有容器PG15工具补验1131对象一致。临时容器/匿名卷已核验清理；未跑完整make check、前端、浏览器、provider或scanner，不启用生产。CI由另一Agent实施且其未提交内容未复制；下一步接入其独立提交并跑分层门禁。[完整交接](docs/development/agent-main-semantic-integration.md)保留命令、首轮失败、复跑证据和限制；下方数字均为历史快照。
 
-## 既有分支历史记录
+## CI 原分支交付记录
+
+以下授权与验证属于原 CI 分支，不扩展为本集成分支的推送、部署或生产授权。
+> **2026-11-03 07:36 CI 限定提交/推送已获授权，远端结果待实际回执**：仅提交本轮CI代码、测试、使用文档/实施计划和CI进度记录并推送 `feature/agent-task-runtime-foundation`；原有架构/开发基线文档、开发基线进度条目与 `.env.e2e.example` 删除不混入提交。当前代码逐文件匹配最终完整本地验证源 manifest `d7a3a8bc…`；下一步读取该提交真实 GitHub 自动运行结果，不以本地记录代替。未授权创建PR、集成main、手动模型/scanner事件、配置仓库保护或部署。
+
+> **2026-11-03 CI 分层实施与本地交接完成（未提交/未远端验收）**：最终同源冻结 manifest `d7a3a8bc…` 完整 `make check` exit0：后端 **3622 passed /4 skipped /19 deselected /5 warnings**，前端类型/生产build通过；串行浏览器 **11 passed /3634 deselected /5 warnings**，纯测试 **184 passed**。最终修正另实际复验API85、显式浏览器11、ClamAV过程6＋浏览器1；真实收据/日志与daemon/场景/cleanup观测在销毁前保留，frontend CI无backend依赖CLI实测通过，actionlint通过。整体复核与全部Important修正均关闭；SDK短密码JSON结构、可选timeout、显式浏览器路径、CI证据保留均有反例。4skip为Redis＋三个seed E2E endpoint，PG15快照已实测；scanner属性记录兼容warnings如实保留。仅本任务owned PG/container/volume在零其他client/消费者核验后处置，扫描随机project资源清零；源码/旧失败与取消证据/其他Docker项目保留。未触发GitHub自动/手动或应用真实provider、未提交/推送/PR/main集成/部署；下一步需授权仅提交CI相关改动并推送取得远端自动CI，再隔离处理main冲突。详见[实施计划](docs/superpowers/plans/2026-11-02-ci-layered-acceptance.md)、[E2E指南](docs/e2e.md#ci-分层验收task-7)、[开发指南](docs/development.md#42-分层验收资源与边界)。下方失败/待复核条目均保留为历史。
+
+> **2026-11-03 CI 最终复核修正波（新源码动态验收待执行）**：修正三项 Important：自动/手动 job 使用专用安全目录并在成功/失败时保留实际收据与过滤日志；scanner 过程证据在卷 teardown 前导出、host browser 与实际清理观察一并保留，summary 校验冻结 main SHA/完整计数/退出码而非 PASSED wrapper；显式 Chromium 路径规范化后保留到 pytest；可选 live timeout 缺省/空值为 30 秒，仍严格限制 1–120。已对配置、真实本地子进程收据、文件系统导出/删除保留、workflow wiring 和 summary 失败场景进行 RED/GREEN；本波网络禁止纯检查 182 passed /3 既有 warnings；真实 DB/browser/scanner 尚待 controller 验证。下方 manifest `79859d6b…` 的完整检查为历史源码 D，不代表本波修改后的完整验证；保留早先失败/中断记录。下一步由 controller 执行新源码 focused Make/browser/scanner 与 workflow lint；GITHUB_AUTO 为 BLOCKED（无 push/trigger 授权），GITHUB_MANUAL/真实 provider 为 NOT_REQUESTED（main/Environment/显式 dispatch 尚未就绪）。未提交、推送、PR、合并、配置 Secrets/Environment 或调用模型。
+
+> **2026-11-03 CI 最终本地回归通过（整体复核待收尾）**：修正 SDK 端点空值、CI 通配绑定/随机端口与 PG15 工具登记后，新冻结干净源码（manifest `79859d6b…`）完整 `make check` exit0：后端 3577 passed /4 skipped /19 deselected /5 warnings，前端类型/生产构建通过；串行浏览器 11 passed /3589 deselected /5 warnings，exit0；纯 CI 139 passed。同源 ClamAV 过程 6/6＋浏览器 1/1、随机 project 清理通过，actionlint 两 workflow 通过。PG15 快照已实际执行，剩余 skip 为 Redis 与三个共享 seed E2E endpoint。旧中断/失败收据均保留，未以历史结果拼接。尚未触发远端 GitHub 自动/手动、调用真实 provider、提交、推送、建 PR、合并或部署；进入最终整体复核和交接。
+
+> **2026-11-03 干净源码完整回归首轮失败（未签通过）**：已在新登记专属测试库完成未中断的完整后端检查，结果 3536 passed / 2 failed / 5 skipped / 19 deselected / 5 warnings，pytest exit1、make check exit2；两项失败为默认 OpenAI/embedding SDK 端点被测试隔离环境空值覆盖。串行 make check-browser 实际 11 passed / 3551 deselected / 5 warnings，exit0；纯 CI 101 passed、npm ci 成功。正在修正 SDK 环境移除语义及进一步核查发现的 CI 发布端口匹配/PG15 工具随机端口衔接问题；前端类型/构建单独补跑中。此前中断运行及这次失败均保留记录；尚无全套通过、远端 GitHub 验收、真实 provider、提交、推送、PR、合并或部署。
+
+> **2026-11-02 CI Task 1–5 已复核，实施 workflow 中**：分组、资源归属、Chromium/Node 白名单、隔离验收 runner 与分层 Make 入口已完成任务复核。最新 Task 5 纯测试 66 passed（3 既有 warnings）；真实固定 ClamAV 过程 6/6＋浏览器 1/1，通过随机专属 project 且容器/卷/网络清理已核查。现有 backend CI 已先切到资源核验和确定性 Make 路径，Task 6 正在扩展所有分支 push、独立浏览器及 main-only 手动验收。完整冻结回归、干净 checkout 和远端 GitHub run 尚未完成；未读取模型密钥、调用真实 provider、提交、推送、建 PR、合并或部署。
+
+> **2026-11-02 CI 分层实施中（Task 1–4 已复核）**：已实现纯测试引导入口与严格逐用例 marker，分类回归经一次补充 local-trial 保护后独立复核通过；纯 runner 基线 5 passed、分类回归 3 passed（3 项既有 Pydantic warnings），前端类型/构建均 exit0。收集核账为 backend 3450/browser 11/live 1/scanner 7，不是各层实际运行通过。Task 2 已实现并经修正复核通过：所有权纯测试 28 passed，专属有标签 PG15 经核验后建库/迁移，provider-disabled 双来源真实 HTTP 1 passed；额外拒绝全部 URL 查询参数以防 hostaddr/service 重定向。Task 3 已完成并独立复核 Chromium 解析与 Node 白名单实现：纯支持层与 legacy runner 18 passed（3 项既有 Pydantic warnings）、前端 tsc exit 0，项目 Playwright Chromium 已实际解析；更正首次将临时口令误作数据库名的本地调用，使用正确已迁移 `qms_ci_layered_test` 后以 Task 2 的 `verify_owned_instance`/`verify_owned_database` 替代 legacy `openqms_r4a_*` 前缀守卫（更强 ownership/loopback/_test 验证），并修正实际浏览器 RED 暴露的 readonly `frontend` 初始化顺序；provider-disabled deterministic browser 层 11 passed（另 2 项既有 websockets warnings），未弱化业务/来源/终态安全断言或回落其他数据库。Task 4 已完成纯测试复核：live 配置改为显式环境或显式 `--test-profile`，不再隐式读取 `.env.e2e`；api/browser/live 独立子进程，普通子进程显式清空 provider/embedding 凭据且移除 `E2E_MODE`，并以隔离 Settings 预检确认无 provider 回补；JUnit+pytest hook 生成含 deselected/warnings/xfail/xpass 的收据，原始 XML 保持私有并在公开收据前删除，日志过滤密钥、URL 编码密码和 Authorization header。纯套件 `36 passed`（3 项既有 Pydantic warnings）；未运行真实 provider/scanner/browser/数据库 gate，Task 5 可通过 runner 的 `--pytest-target`/`--pytest-arg` 接口执行全量 backend/browser 选择。额外前端全量单测默认并行基线 739 passed/2 timeout；不改测试/超时，限制 maxWorkers=1 后完整 88 文件/741 测试通过，原并行超时仍保留记录。当前未提交/推送/建 PR/集成 main/部署，尚未调用真实 provider；下方“未实施”条目为此前计划阶段历史。
+
+> **2026-11-02 CI 计划复核修订（未实施）**：已对照 Makefile 与 conftest 核实并修订两项问题：数据库建库/迁移/pytest 从同一已核验目标派生，补充显式 PG 变量冲突零写入与缺库先验实例核验；纯测试统一使用导入前设置专用不可连接测试 URL、禁止网络连接的计划入口，不绕过种子库守卫。详见 [实施计划](docs/superpowers/plans/2026-11-02-ci-layered-acceptance.md) 第 0 节及 Task 2/5/6。仅文档修订与静态检查，脚本尚未实现，未运行测试/操作数据库或提交推送。
+
+> **2026-11-02 CI 分层实施计划已落文（未实施）**：已复核分层设计、当前 workflow/Makefile、CAPA 私有资源及浏览器控制器，计划见 [CI 分层验收实施计划](docs/superpowers/plans/2026-11-02-ci-layered-acceptance.md)。按逐用例分类、资源归属验证、Chromium/Node 环境隔离、独立 live 配置与结果收据、Make 入口、自动/手动 workflow、干净环境验证分步推进；主分支 8 冲突集成为后续独立检查点。手动远端验收需 workflow 进入 main 且 Environment 就绪，不能用静态检查或旧本地收据替代。本轮仅新增计划及本条进度，未修改 CI/测试代码、运行项目测试、读取本地密钥、提交、推送、建 PR、合并或部署；原有未提交改动和示例删除保留。
+
+## 更早的分支历史
 > **2026-11-01 CI 适配：方案已选，书面规格待确认**。用户选择“普通自动CI无模型密钥＋独立确定性浏览器保护＋维护者手动真实provider/ClamAV验收”。规格见 `docs/superpowers/specs/2026-11-01-ci-layered-acceptance-design.md`，本阶段只落文并按授权本地提交供复核，尚未修改workflow/pytest/Makefile或测试harness，也未触发新CI、上传本地profile、配置Secrets/Environment/分支保护或推送。新手动workflow需进入默认分支后才可触发，设计限定main；不为此自动合并。确认书面规格后再写实施计划与明确验证资源/后续提交推送范围。
 
 > **2026-11-01 推送前只读Agent设计核对**：已完整阅读用户指定的2026-09-29基础设计，并按用户确认的现行后续合同核对，不把旧表/旧函数/固定24小时服务接口原样套回当前架构。当前AgentTask/AgentTaskGrant持久化、当前身份/权限/工厂/产品线与租户代际检查、逐事务严格绑定、只读RR元数据白名单及完整digest、baseline DENY和runtime默认关闭均有对应实现；受限local_metadata试用沿后续独立合同，不放开命令或生产交付。新补跑设计契约 **16 passed /3既有warnings**；与已验收3450全量快照对比，唯一变化的冻结源码是本轮已独立复核并33项通过的MES测试。未声称当前工作树重跑过全站make check。用户已授权将MES整改独立提交并仅推当前功能分支到origin，不建PR、不合并、不部署；用户删除示例、TEST profile和全部私有证据不纳入提交。远端CI尚未适配本地live条件，功能分支推送不等于远端CI通过；Git执行结果另以实际远端ref回执为准。下方早先未提交状态为当时交接历史。
@@ -98,10 +122,10 @@
 
 > **2026-10-19 R4b-2 已完成**：默认关闭的任务私有附件、真实扫描门禁、受权下载/删除与可恢复保留期清理已验收。最终冻结 `make check` **2999 passed / 12 skipped / 3 xfailed / 2 xpassed，exit 0**；前端 **95 项**及类型/构建、实际 ClamAV **7 项**和 Chromium **1 项**通过；1371 个源码/配置指纹未变，自有验收资源已清理。完整证据见[实施计划](docs/superpowers/plans/2026-10-09-agent-task-controlled-attachments.md)，运行边界见[操作指南](docs/development/agent-task-attachments.md)。没有 push/合并/部署；插件/模型附件投递与生产部署仍未开放。
 
-**更新日期**: 2026-11-02
+**更新日期**: 2026-11-03
 **当前分支**: `integration/agent-main-semantic-20261102`
-**集成基线**: runtime `ef3e24e0` ＋ main `d8e2cef5`
-**当前阶段**: 本地语义集成、受控回归及独立复核完成；保留本地分支供后续CI接入，无 main 更新、远端推送或生产启用。
+**集成基线**: runtime `ef3e24e0` ＋ main `d8e2cef5` ＋ CI `4a00636f` 与本地安全收口
+**当前阶段**: CI接入及本地分层门禁完成，进入元数据只读SDK/协议兼容设计；无 main 更新、远端推送或生产启用。
 
 **被集成分支的历史状态**：runtime 的 R1–R4b-2、CAPA 集中审核及其多轮验证记录保留在上方和文末；main 的 PR #24/#26 权限内核、单报告只读基础与自批修复记录保留在下方。旧运行状态、资源登记和验证数字均限于对应历史快照，不作为本次结果。
 

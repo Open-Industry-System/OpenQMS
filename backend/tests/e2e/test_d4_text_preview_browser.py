@@ -16,10 +16,12 @@ from app.core.permissions import Module, PermissionLevel
 from app.models.capa import CAPAEightD
 from app.models.role import RolePermission
 from tests.capa.d4_preview_support import owned_d4_preview, owned_local_trial
+from tests.ci.browser_runtime import browser_environment, resolve_browser
 from tests.e2e.agent_local_trial_harness import local_trial_server, business_snapshot
 
 
 @pytest.mark.asyncio
+@pytest.mark.ci_browser
 async def test_actual_employee_preview_masks_text_and_withdraws_changed_or_denied_sources(local_trial_server, owned_d4_preview, tmp_path, monkeypatch):
     from app.api.capa_d4_text_preview import router
     from app.api import product_line, fmea, knowledge
@@ -49,13 +51,9 @@ async def test_actual_employee_preview_masks_text_and_withdraws_changed_or_denie
         expected = await business_snapshot(owned)
         return {'changed': True}
     frontend = Path(__file__).resolve().parents[3]/'frontend'
-    chromium = Path(os.environ.get('OPENQMS_AGENT_BROWSER_EXECUTABLE') or
-        '/Users/sam/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing')
-    if not chromium.is_file(): pytest.fail('Installed Chromium missing; no installation or skip')
+    chromium = resolve_browser(frontend, os.environ)
     probe = socket.socket(); probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]; probe.close()
-    env = {key: value for key, value in os.environ.items() if key not in {
-        'DATABASE_URL','TEST_DATABASE_URL','SECRET_KEY','OPENAI_API_KEY','ANTHROPIC_API_KEY'}}
-    env.update(BACKEND_URL=owned.base_url)
+    env = browser_environment(os.environ, {'BACKEND_URL': owned.base_url})
     log = (tmp_path/'vite.log').open('wb')
     vite = await asyncio.create_subprocess_exec('node', str(frontend/'node_modules/vite/bin/vite.js'),
         '--host','127.0.0.1','--port',str(port),'--strictPort',cwd=frontend,env=env,stdout=log,stderr=log)
@@ -69,10 +67,13 @@ async def test_actual_employee_preview_masks_text_and_withdraws_changed_or_denie
                 except httpx.HTTPError: pass
                 await asyncio.sleep(.05)
             else: pytest.fail('Owned Vite did not start')
-        env.update(AGENT_BROWSER_URL=f'http://127.0.0.1:{port}',AGENT_BACKEND_URL=owned.base_url,
-            AGENT_HARNESS_NONCE=nonce,AGENT_BROWSER_LOGIN=json.dumps(owned.login),AGENT_BROWSER_TENANT=owned.slug,
-            AGENT_BROWSER_REPORT=str(owned.report_id),AGENT_BROWSER_ARTIFACTS=str(tmp_path/'playwright'),
-            OPENQMS_AGENT_BROWSER_EXECUTABLE=str(chromium))
+        env = browser_environment(os.environ, {
+            'BACKEND_URL': owned.base_url, 'AGENT_BROWSER_URL': f'http://127.0.0.1:{port}',
+            'AGENT_BACKEND_URL': owned.base_url, 'AGENT_HARNESS_NONCE': nonce,
+            'AGENT_BROWSER_LOGIN': json.dumps(owned.login), 'AGENT_BROWSER_TENANT': owned.slug,
+            'AGENT_BROWSER_REPORT': str(owned.report_id), 'AGENT_BROWSER_ARTIFACTS': str(tmp_path / 'playwright'),
+            'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(chromium),
+        })
         browser = await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/@playwright/test/cli.js'),
             'test','--config','playwright.agent.config.ts','d4-text-preview.spec.ts',cwd=frontend,env=env,
             stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)

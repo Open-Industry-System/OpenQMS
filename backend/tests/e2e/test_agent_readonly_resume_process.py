@@ -14,6 +14,8 @@ import uuid
 from fastapi import FastAPI
 import httpx
 import pytest
+
+from tests.ci.browser_runtime import browser_environment, resolve_browser
 import pytest_asyncio
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -533,14 +535,13 @@ class BrowserHarness:
 
 
 @pytest.mark.asyncio
+@pytest.mark.ci_browser
 @pytest.mark.parametrize('scenario', ['lifecycle','window','authority-role','authority-capa','authority-factory','authority-line','race-append','race-finish'])
 async def test_actual_local_browser_sidebar_acceptance(resume_server, scenario, tmp_path, monkeypatch):
     """Node Playwright drives Chromium, Vite and actual authenticated tenant APIs."""
     from fastapi import Request, HTTPException
-    chromium=Path(os.environ.get('OPENQMS_AGENT_BROWSER_EXECUTABLE') or
-        '/Users/sam/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing')
-    if not chromium.is_file():
-        pytest.fail('Installed Chromium missing; set OPENQMS_AGENT_BROWSER_EXECUTABLE. No browser is installed by this harness.')
+    frontend = Path(__file__).resolve().parents[3] / 'frontend'
+    chromium = resolve_browser(frontend, os.environ)
     server = resume_server
     harness = BrowserHarness(server,monkeypatch)
     await harness.prepare(scenario)
@@ -551,14 +552,11 @@ async def test_actual_local_browser_sidebar_acceptance(resume_server, scenario, 
         return await harness.handle(action, await request.json())
     # Our test router lives only in this allocated fixture app and is not checked
     # into or mounted by any product module.
-    frontend = Path(__file__).resolve().parents[3] / 'frontend'
     socket_probe = socket.socket()
     socket_probe.bind(('127.0.0.1',0))
     port = socket_probe.getsockname()[1]
     socket_probe.close()
-    env = {key:value for key,value in os.environ.items() if key not in {
-        'DATABASE_URL','TEST_DATABASE_URL','SECRET_KEY','OPENAI_API_KEY','ANTHROPIC_API_KEY'}}
-    env.update(BACKEND_URL=server.url)
+    env = browser_environment(os.environ, {'BACKEND_URL': server.url})
     vite_log = (tmp_path/'vite.log').open('wb')
     vite = await asyncio.create_subprocess_exec('node', str(frontend/'node_modules/vite/bin/vite.js'),
         '--host','127.0.0.1','--port',str(port),'--strictPort',cwd=frontend,env=env,stdout=vite_log,stderr=vite_log)
@@ -576,11 +574,14 @@ async def test_actual_local_browser_sidebar_acceptance(resume_server, scenario, 
                 await asyncio.sleep(.05)
             else:
                 pytest.fail('owned Vite did not start')
-        env.update(AGENT_BROWSER_URL=f'http://127.0.0.1:{port}', AGENT_BACKEND_URL=server.url,
-            AGENT_HARNESS_NONCE=harness.nonce, AGENT_BROWSER_SCENARIO=scenario,
-            AGENT_BROWSER_LOGIN=json.dumps(server.login), AGENT_BROWSER_TENANT=server.owned.slug,
-            AGENT_BROWSER_TASK=str(server.owned.task_id),AGENT_BROWSER_REPORT=str(server.owned.report_id),
-            AGENT_BROWSER_REPORT_B=str(harness.report_b), AGENT_BROWSER_ARTIFACTS=str(tmp_path/'playwright'))
+        env = browser_environment(os.environ, {
+            'BACKEND_URL': server.url, 'AGENT_BROWSER_URL': f'http://127.0.0.1:{port}',
+            'AGENT_BACKEND_URL': server.url, 'AGENT_HARNESS_NONCE': harness.nonce,
+            'AGENT_BROWSER_SCENARIO': scenario, 'AGENT_BROWSER_LOGIN': json.dumps(server.login),
+            'AGENT_BROWSER_TENANT': server.owned.slug, 'AGENT_BROWSER_TASK': str(server.owned.task_id),
+            'AGENT_BROWSER_REPORT': str(server.owned.report_id), 'AGENT_BROWSER_REPORT_B': str(harness.report_b),
+            'AGENT_BROWSER_ARTIFACTS': str(tmp_path / 'playwright'),
+        })
         browser = await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/@playwright/test/cli.js'),
             'test','--config','playwright.agent.config.ts','readonly-sidebar.spec.ts',cwd=frontend,env=env,
             stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)

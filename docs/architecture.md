@@ -367,3 +367,23 @@ D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封�
 | 无登录限速 | 登录接口无速率限制 |
 | Redis 未使用 | 已配置但未实现缓存逻辑 |
 | 前端权限守卫不全 | `/knowledge-graph`、`/change-impact`、MES 路由无 `requiredModule` 守卫 |
+
+---
+
+## 10. 分层验收与发布边界
+
+测试基础设施通过独立 backend、确定性 browser、frontend、显式 scanner/live 层执行；`make check`
+仅组合 backend 与前端检查，不隐式调用真实模型或扫描器。每层根据实际选择、JUnit/hook计数、
+退出码和过滤日志生成收据；显式gate的零选中、skip/xfail/xpass或缺失收据不得算成功。
+backend保留未配置依赖的实际skip，不把它们记为passed。
+
+公共迁移、pytest与受控fixture使用同一已核验PostgreSQL目标。核验涵盖容器完整ID、owner标签、
+镜像、绑定地址/端口及数据库身份；localhost规范为IPv4，IPv6显式使用::1，libpq额外路由参数拒绝，
+核验与实际两种驱动使用同一数字地址。known Python测试入口在应用导入前禁隐式dotenv；pure模式
+不做collection探库并拒绝项目支持的网络/数据库入口，不冒称任意进程的OS沙箱。
+
+普通/browser子进程无模型凭据或E2E_MODE回填；浏览器环境采用固定白名单并严格保留已验证的
+显式Chromium路径。scanner固定镜像、随机自有Compose项目，先导出实际证据再teardown并核余量。
+远端手动workflow仍要求main、冻结提交与显式管理员配置；本地门禁通过不代表远端已执行、生产已启用，
+也不授权main更新或部署。当前接入与新鲜结果见[CI集成交接](development/agent-ci-integration-gates.md)。
+现有SDK、正文/附件外发及业务写入的未实现部分仍按独立设计与阶段门禁推进。

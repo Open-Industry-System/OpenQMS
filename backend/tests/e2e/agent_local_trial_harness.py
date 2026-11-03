@@ -213,8 +213,10 @@ async def owned_local_trial(monkeypatch, tmp_path):
     from app.services import tenant_migrator
     from app.core.security import hash_password
 
-    url = os.environ['TEST_DATABASE_URL']
-    assert url.rsplit('/', 1)[-1].startswith('openqms_r4a_') and url.endswith('_test')
+    from tests.ci.owned_resources import verify_owned_database, verify_owned_instance
+
+    target = verify_owned_instance(os.environ)
+    url = verify_owned_database(target)
     engine = create_async_engine(url, poolclass=NullPool)
     factory = async_sessionmaker(engine, class_=AsyncSession, sync_session_class=TenantSession, expire_on_commit=False)
     platform = async_sessionmaker(engine, expire_on_commit=False)
