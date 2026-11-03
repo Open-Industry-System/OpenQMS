@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-11-04 SDK client与离线构建器已复核，整体验收待续**：客户端中断后保留原代码恢复，18项明确RED及新增响应预算/非2xx deadline顺序反例已修；十方法、凭据分域、单D与finish全链unknown完成双复核（`b2d8cc96`）。SDK相关480项在3.11/3.13均通过，旧自有回环16项通过。独立构建器修正“仅声明pin却未核actual setuptools”后双复核（`8f4132a2`），仅自建静态fixture真实离线构建，不代表当前SDK wheel已验收；Lead 3.11全unit最新 **521 passed**（含41 builder案例）。下一步Task9：实际SDK wheel快照/独立venv安装与API smoke、分层SDK检查入口，再Task10真实normal-policy HTTP与Task11 CI。当前业务/权限/profile/worker与hash未改，未新增模型/正文附件/业务写、未main/push/发布/部署；下方11-03数字均为各阶段历史证据。
+
 > **2026-11-03 SDK基础、codec与transport阶段收口（SDK尚未整体验收）**：包/安全异常/DTO已TDD并独立Spec/Quality通过（`426c2d20`）；严格十操作codec修正report透出children后双复核通过（`12a50948`），foundation+codec在3.11/3.13各294项通过；整体deadline、有界DNS、partial send、buffer下raw read及IO refs传输修正TE尾OWS后双复核通过（`1b97f067`）。Lead最新独立实测全SDK纯单测 **371 passed**、单独自有回环 **16 passed**，0 warning；未用远端DNS/模型/业务数据库。下一步Task8封装client及finish全链unknown，再做wheel/真实normal-policy QMS HTTP/CI。当前无公开client或完整SDK可用性结论，应用/权限/profile/固定worker/hash不变；不main/push/发布/部署。
 
 > **2026-11-03 SDK 规格审查通过，进入实施**：用户已书面通过[SDK规格](docs/superpowers/specs/2026-11-03-agent-metadata-python-sdk-design.md)并要求继续；[实施计划](docs/superpowers/plans/2026-11-03-agent-metadata-python-sdk.md)明确唯一单调deadline覆盖整次操作、每client有界DNS helper/底层raw IO预算，以及finish发送后超限/解码/schema/绑定错误统一unknown。按包与DTO→codec/transport→client→wheel/真实HTTP/CI→复核门禁推进；当前尚不能称SDK完成。应用权限/profile/固定worker及hash不改，模型/正文附件/业务写、main/push/部署仍不开放。
