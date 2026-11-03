@@ -1,5 +1,11 @@
 # OpenQMS 开发进度
 
+### 2026-11-03 — PR #28 后端 CI 超时根因修复（待真实远端全量）
+
+- 诊断提交 `888c6b98` 已推送原PR，新run `41638011344` 在运行；其前端已通过。随后native Python3.12/CI依赖整套诊断的最后START精确落在index1764 `test_scan_stream_sends_newline_instream_and_zero_terminator`；不是先前怀疑的lifespan/DDL业务等待。
+- Linux/Python3.12单跑该旧例30秒无结束，exit124，8秒堆栈处于asyncio等待；原因是StrictClamd假服务器的VERSIONCOMMANDS和held-stream分支读到peer EOF即return，未关闭accepted writer。Python3.12 Server.wait_closed继续等这个服务端半连接；不依赖GC的两条新TCP关闭断言先RED2failed，明确证明泄漏。
+- 仅将测试fake handler包在try/finally关闭/等待writer，生产扫描器及原协议/结果/恶意文件/错误/输入限额断言不变。完整扫描模块Linux3.12/native3.11均16passed/3既有warnings，限定独立复核无重要遗留。旧整套诊断已在确认根因后取消，不能记为完整通过；后续按新提交的实际远端CI结果验收。未合入main、未调用模型/真实scanner或部署。
+
 ### 2026-11-03 — PR #28 远端 CI 跟进（诊断轮，超时未签解决）
 
 - `aeaf7fb2` 已推送原PR分支；实际run `41585162399`：frontend成功、browser因Ubuntu26.04/Playwright1.60不兼容在安装阶段失败；backend超过6小时取消。下载1920字节backend产物后发现39%已有4个失败，47%后无更多换行，不能把取消当成无失败。
