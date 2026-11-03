@@ -1,6 +1,6 @@
 # Agent 元数据只读 Python SDK 与 HTTP 协议兼容设计
 
-日期：2026-11-03。状态：用户已确认“标准库同步 SDK、封装现有十个 plugin runtime 接口”的首版边界；本文书面规格待复核。**尚未实现 SDK，不代表新的执行物准入、生产部署或业务写权限。**
+日期：2026-11-03。状态：用户书面审查通过，未发现阻塞实施计划的问题；整体deadline及finish发送后超限/解码/绑定失败的unknown语义已按审查补充。实施计划见[SDK实施计划](../plans/2026-11-03-agent-metadata-python-sdk.md)。**规格通过不等于SDK已实现，也不代表新的执行物准入、生产部署或业务写权限。**
 
 ## 1. 基线、目标与非目标
 
@@ -119,9 +119,9 @@ CAPA context只对应 [服务端现有投影](../../../backend/app/services/agen
 | checkpoint | 同key还绑定epoch/generation/accepted位置；不是任意模型内存快照，无runtime load接口 |
 | finish | 无幂等key；成功epoch递增、旧token失效；completed要求完整ACK，不能无脑重试 |
 
-收到明确v1错误状态时返回安全HTTP异常。finish一旦已发送但因超时、连接中断、5xx或无法解析成功响应而不能确定结果，返回带`outcome_unknown=True`的专用异常；不假称失败未发生，不自动再次finish。操作方需要从独立平台/用户视角处理不确定结果；SDK不偷偷使用user JWT查证。
+收到明确v1错误状态时返回安全HTTP异常。finish一旦可能已发送，但因超时、连接中断、5xx、响应超限、UTF-8/JSON解码失败、schema错误或run/task绑定验证失败而不能取得完整可信成功确认，统一返回带`outcome_unknown=True`的专用异常；不假称失败未发生，不自动再次finish。该guard包住transport、预算、codec、绑定及最终deadline检查的整条链，而不是仅捕获timeout。操作方需要从独立平台/用户视角处理不确定结果；SDK不偷偷使用user JWT查证。
 
-成功finish后run client可标记本地已关闭并移除token引用；这不是Python内存安全擦除保证，服务端epoch fencing仍是真正权威。
+只有完整合法成功响应、绑定正确且最终deadline检查通过，才能标记本地成功关闭并移除token引用。unknown不能标成成功关闭；这不是Python内存安全擦除保证，服务端epoch fencing仍是真正权威。
 
 ## 7. Transport与错误安全
 
@@ -129,9 +129,11 @@ CAPA context只对应 [服务端现有投影](../../../backend/app/services/agen
 
 - HTTPS使用系统正常TLS证书验证，不提供`verify=False`。HTTP只允许本地回环测试；localhost规范为IPv4，显式::1可用。远端HTTPS传输支持不代表远端SDK执行物已经获准生产运行。
 - base origin不得带userinfo、query或fragment，path只允许空或`/`；不隐式重写反向代理路径前缀。路径由库固定组合，不接受任意绝对URL请求。可信dev tenant_slug可设置X-Tenant-ID，空值/控制字符拒绝，不能从模型文本/未验证JWT猜测，也不能改变服务端租户授权。
-- 禁全部重定向（含同origin），不跟随Location、不转发凭据。使用私有opener，禁ambient proxy/.netrc/全局opener或cookie注入；不读取.env/SDK凭据profile。
+- 禁全部重定向（含同origin），不跟随Location、不转发凭据。使用每请求私有连接（优先http.client）或等效私有opener，禁ambient proxy/.netrc/全局opener或cookie注入；不读取.env/SDK凭据profile。
 - 凭据由调用方显式提供，内存持有，repr隐藏；错误、日志和示例输出不含token、secret、完整URL、headers或请求/响应正文。TLS系统根证书读取不属于SDK凭据文件加载。
-- 默认timeout10秒，允许配置1–120秒；默认response budget4MiB，允许64KiB–16MiB；请求budget1MiB，使用紧凑UTF-8 JSON。这些是**SDK资源保护，不是服务端/模型上下文的协议最大值**。
+- 默认timeout10秒，允许配置1–120秒，定义为一次SDK操作共享的单调时钟deadline：从编码前开始，覆盖DNS等待、全部候选地址连接、TLS、发送、状态/headers、chunk元数据/正文/trailer、解码与绑定；分片或阶段切换均不重置预算。每次受控阻塞I/O使用remaining，CPU阶段前后及返回DTO前再check。
+- 这是caller-facing预算而非hard realtime或OS强制取消保证。CPU/C代码与调度只能阶段前后校验；OS DNS通过每client至多一个daemon helper/单outstanding lookup有界等待，超时后迟到解析结果不得连接或发送，close不无限join。不得用整请求后台thread超时返回后继续HTTP副作用。
+- 默认response budget4MiB，允许64KiB–16MiB；请求budget1MiB，使用紧凑UTF-8 JSON。这些是**SDK资源保护，不是服务端/模型上下文的协议最大值**。
 - 超预算明确失败，不截断成成功DTO；不自动解压未知Content-Encoding。成功响应需为受支持JSON，错误体不直接进入异常repr。
 
 异常至少区分Config/Validation、Transport/Timeout、HTTP、Protocol、ResponseTooLarge及UnknownOutcome。保留operation、HTTP status和安全的结果未知标识；不发明服务端稳定业务error_code。

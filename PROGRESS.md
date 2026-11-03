@@ -1,6 +1,6 @@
 # OpenQMS 开发进度
 
-> **2026-11-03 SDK 首版范围确认，书面规格待复核**：用户已选择元数据只读SDK先行，并确认Python标准库同步包封装现有十个plugin runtime接口。[SDK规格](docs/superpowers/specs/2026-11-03-agent-metadata-python-sdk-design.md)已按真实wire、凭据分域、逐操作幂等/finish未知结果、metadata与restricted任务内容、资源预算和固定worker准入边界落文。这里只是设计，不代表SDK已实现；书面复核后再写实施计划。未改后端权限/profile/worker hash，未开放模型、正文附件或业务写入，未push/部署。
+> **2026-11-03 SDK 规格审查通过，进入实施**：用户已书面通过[SDK规格](docs/superpowers/specs/2026-11-03-agent-metadata-python-sdk-design.md)并要求继续；[实施计划](docs/superpowers/plans/2026-11-03-agent-metadata-python-sdk.md)明确唯一单调deadline覆盖整次操作、每client有界DNS helper/底层raw IO预算，以及finish发送后超限/解码/schema/绑定错误统一unknown。按包与DTO→codec/transport→client→wheel/真实HTTP/CI→复核门禁推进；当前尚不能称SDK完成。应用权限/profile/固定worker及hash不改，模型/正文附件/业务写、main/push/部署仍不开放。
 
 > **2026-11-03 CI 接入与本地分层门禁完成**：本地 `integration/agent-main-semantic-20261102` 已接入 CI 独立提交 `4a00636f`，未复制原工作树未提交内容；pure/隐式dotenv、DNS/已知Python子进程、显式Chromium末级传递、libpq路由及地址族闭环、Make secret缺口已先红后绿并独立复核收口。冻结执行源码1444文件：后端 **3827 passed /4 skipped**，浏览器 **11 passed** 且显式wrapper启动11次，pure **238 passed**；前端类型/build/E2E类型与 **741项单测**通过；同源固定ClamAV **6过程＋1浏览器**通过且导出/cleanup收据核验成功。执行源码前后不变，本轮主PG/卷、scanner随机project及私有执行口令均已精确清理。四项skip为未配置Redis及共享seed E2E，不当passed；未执行本集成分支远端CI或真实provider，不更新main、不push/部署/生产开启。[完整交接](docs/development/agent-ci-integration-gates.md)保留失败、修正、真实收据与源码身份。用户选择下一片先做元数据只读SDK与协议兼容，先规格设计/评审，不提前开放正文附件外发或R5业务写入。
 
