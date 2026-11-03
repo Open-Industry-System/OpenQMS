@@ -10,6 +10,8 @@ from .models import (
     ResultPayload, Source, RuntimeEvent, RuntimeResult, ReadonlyCheckpoint, FinishResult,
 )
 
+from .client import InstallationClient, RunClient
+
 __version__ = "0.1.0"
 __all__ = [
     "__version__", "SDKError", "ConfigError", "ValidationError", "TransportError",
@@ -18,5 +20,5 @@ __all__ = [
     "ClientConfig", "RunClaim", "Capability", "Capabilities", "RuntimeMessage",
     "MessageBatch", "MessageAck", "MessageHistory", "Verification", "CapaContext",
     "EventPayload", "ResultPayload", "Source", "RuntimeEvent", "RuntimeResult",
-    "ReadonlyCheckpoint", "FinishResult",
+    "ReadonlyCheckpoint", "FinishResult", "InstallationClient", "RunClient",
 ]

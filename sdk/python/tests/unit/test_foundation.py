@@ -175,10 +175,13 @@ def test_all_error_signatures_and_safe_diagnostics(name):
         assert cls("finish", kind="http_status", status=status).status == expected
 
 
-def test_no_backend_imports_or_future_clients():
+def test_no_backend_imports_or_internal_client_exports():
     import sys
     import openqms_agent_sdk as sdk
-    assert not hasattr(sdk, "InstallationClient") and not hasattr(sdk, "RunClient")
+    assert {"InstallationClient", "RunClient"} <= set(sdk.__all__)
+    assert not {"ClaimEnvelope", "EncodedRequest", "WireResponse", "SUPPORTED_OPERATIONS"} & set(sdk.__all__)
+    for cls in (sdk.InstallationClient, sdk.RunClient):
+        assert not {"request", "get", "post", "user", "admin"} & set(dir(cls))
     for module in ("app", "fastapi", "pydantic", "sqlalchemy", "jwt"):
         assert module not in sys.modules
     assert socket.socket.connect.__name__ == "denied"
