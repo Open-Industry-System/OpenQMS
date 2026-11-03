@@ -5,6 +5,7 @@ from pathlib import Path
 import copy
 import re
 
+import pytest
 import yaml
 
 
@@ -172,6 +173,18 @@ def test_frontend_uses_its_lockfile_without_falling_back_to_npm_install() -> Non
     assert 'npm ci' in script
     assert 'npm install' not in script
     assert 'lockfile' in script.lower()
+
+
+@pytest.mark.parametrize(('path', 'job_name'), [
+    (AUTOMATIC_PATH, 'browser-protection'),
+    (ACCEPTANCE_PATH, 'live-capa'),
+    (ACCEPTANCE_PATH, 'scanner'),
+])
+def test_chromium_jobs_pin_a_playwright_supported_ubuntu_runner(path: Path, job_name: str) -> None:
+    job = _jobs(_load_workflow(path))[job_name]
+    assert job.get('runs-on') == 'ubuntu-24.04', (
+        f'{path.name}:{job_name} must not follow ubuntu-latest beyond Playwright support'
+    )
 
 
 def test_browser_protection_is_a_separate_secretless_postgres_and_chromium_job() -> None:

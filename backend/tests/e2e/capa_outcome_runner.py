@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -148,7 +149,7 @@ def build_pytest_command(
         raise ValueError('pytest target overrides may not replace acceptance evidence options')
     return [
         python or sys.executable, *pytest_entrypoint, *targets, *pytest_args, '-m', MARKS[layer], '-q', '--tb=short', '-rA',
-        f'--junitxml={junit}', '-p', 'tests.ci.gate_results',
+        f'--junitxml={junit}', '-p', 'tests.ci.gate_results', '-o', 'faulthandler_timeout=120',
     ]
 
 
@@ -177,6 +178,23 @@ def _require_completed_layer(summary: Mapping[str, int], exit_code: int) -> None
 def _write_receipt(path: Path, receipt: Mapping[str, object]) -> None:
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
     path.chmod(0o600)
+
+
+def _progress_message(line: str) -> dict | None:
+    prefix = 'OPENQMS_GATE_PROGRESS '
+    if not line.startswith(prefix) or len(line) > 4096:
+        return None
+    try:
+        message = json.loads(line[len(prefix):])
+    except json.JSONDecodeError:
+        return None
+    if (type(message) is not dict or set(message) != {'event', 'test', 'index'}
+            or message['event'] not in ('start', 'finish')
+            or type(message['index']) is not int or message['index'] < 1
+            or not isinstance(message['test'], str)
+            or not re.fullmatch(r'[/A-Za-z0-9_. -]+\.py(?:::[A-Za-z_]\w*)+', message['test'], re.ASCII)):
+        return None
+    return message
 
 
 def run_pytest_layer(
@@ -213,9 +231,23 @@ def run_pytest_layer(
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             ) as process:
                 assert process.stdout is not None
+                next_index, active = 1, None
                 for line in process.stdout:
-                    log.write(redact(line, secrets))
+                    filtered = redact(line, secrets)
+                    log.write(filtered)
                     log.flush()
+                    message = _progress_message(line)
+                    if message is None:
+                        continue
+                    identity = (message['index'], message['test'])
+                    if message['event'] == 'start' and active is None and message['index'] == next_index:
+                        active = identity
+                    elif message['event'] == 'finish' and identity == active:
+                        active, next_index = None, next_index + 1
+                    else:
+                        continue  # Ignore captured-output replays and nested-run sequences.
+                    public = {**message, 'test': redact(message['test'], secrets)}
+                    print('OPENQMS_GATE_PROGRESS ' + json.dumps(public, sort_keys=True), flush=True)
                 exit_code = process.wait()
         try:
             summary = merge_summaries(summarize_junit(private_junit), read_hook_summary(private_hooks))

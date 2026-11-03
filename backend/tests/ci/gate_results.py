@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
@@ -77,6 +78,26 @@ _HOOK_STATE: dict[str, Any] = {}
 def pytest_sessionstart(session) -> None:
     _HOOK_STATE.clear()
     _HOOK_STATE.update(selected=0, deselected=0, outcomes={}, warnings=0)
+
+
+def _progress(event: str, nodeid: str) -> None:
+    if not os.environ.get('OPENQMS_GATE_HOOKS'):
+        return
+    # Parameter IDs can contain free text or credentials. Only the source test
+    # identity and a sequence number belong in live diagnostics, never its body.
+    payload = {'event': event, 'test': nodeid.split('[', 1)[0],
+               'index': _HOOK_STATE.get('progress_index', 0)}
+    print('\nOPENQMS_GATE_PROGRESS ' + json.dumps(payload, sort_keys=True),
+          file=sys.__stdout__, flush=True)
+
+
+def pytest_runtest_logstart(nodeid, location) -> None:
+    _HOOK_STATE['progress_index'] = _HOOK_STATE.get('progress_index', 0) + 1
+    _progress('start', nodeid)
+
+
+def pytest_runtest_logfinish(nodeid, location) -> None:
+    _progress('finish', nodeid)
 
 
 def pytest_collection_finish(session) -> None:

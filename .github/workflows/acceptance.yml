@@ -52,7 +52,7 @@ jobs:
   live-capa:
     if: ${{ needs.preflight.result == 'success' && (inputs.gate == 'live-capa' || inputs.gate == 'all') }}
     needs: [preflight]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/live-capa
       OPENQMS_CI_SHA: ${{ needs.preflight.outputs.frozen_sha }}
@@ -158,7 +158,7 @@ jobs:
   scanner:
     if: ${{ needs.preflight.result == 'success' && (inputs.gate == 'scanner' || inputs.gate == 'all') }}
     needs: [preflight]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/scanner
       OPENQMS_CI_SHA: ${{ needs.preflight.outputs.frozen_sha }}

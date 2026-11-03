@@ -203,7 +203,7 @@ jobs:
           if-no-files-found: error
 
   browser-protection:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/browser-protection
       OPENQMS_CI_SHA: ${{ github.sha }}

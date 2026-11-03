@@ -271,10 +271,10 @@ def test_run_pytest_layer_consumes_hook_receipt_and_redacts_full_database_url(tm
 @pytest.mark.parametrize('layer', ['api', 'browser', 'scanner', 'live'])
 def test_layer_removes_sdk_endpoint_overrides_and_preserves_official_defaults(layer, monkeypatch):
     import asyncio
+    from importlib import import_module
     from unittest.mock import patch
-    import httpx
-    from openai import AsyncOpenAI
-    from anthropic import AsyncAnthropic
+    import openai
+    import anthropic
     from tests.e2e.capa_outcome_runner import build_layer_environment
 
     live = {
@@ -292,11 +292,17 @@ def test_layer_removes_sdk_endpoint_overrides_and_preserves_official_defaults(la
     async def check_clients():
         def reject(request):
             pytest.fail('SDK default URL inspection must never send a request')
-        async with AsyncOpenAI(api_key='synthetic-test-key', http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(reject),
-        )) as openai_client, AsyncAnthropic(api_key='synthetic-test-key', http_client=httpx.AsyncClient(
-            transport=httpx.MockTransport(reject),
-        )) as anthropic_client:
+        def mock_client(sdk):
+            # SDK majors use either httpx or httpx2; never mix their transports.
+            client_class = sdk.DefaultAsyncHttpxClient
+            http = import_module(client_class.__bases__[0].__module__.split('.')[0])
+            return client_class(transport=http.MockTransport(reject))
+
+        async with openai.AsyncOpenAI(
+            api_key='synthetic-test-key', http_client=mock_client(openai),
+        ) as openai_client, anthropic.AsyncAnthropic(
+            api_key='synthetic-test-key', http_client=mock_client(anthropic),
+        ) as anthropic_client:
             assert str(openai_client.base_url) == 'https://api.openai.com/v1/'
             assert str(anthropic_client.base_url) == 'https://api.anthropic.com'
 

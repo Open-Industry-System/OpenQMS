@@ -1,5 +1,12 @@
 # OpenQMS 开发进度
 
+### 2026-11-03 — PR #28 远端 CI 跟进（诊断轮，超时未签解决）
+
+- `aeaf7fb2` 已推送原PR分支；实际run `41585162399`：frontend成功、browser因Ubuntu26.04/Playwright1.60不兼容在安装阶段失败；backend超过6小时取消。下载1920字节backend产物后发现39%已有4个失败，47%后无更多换行，不能把取消当成无失败。
+- 4项SDK fixture失败已复现：CI Anthropic2.4改用httpx2，原测试注入httpx.AsyncClient导致TypeError；生产adapter未注入此对象。改用各SDK公开默认client与匹配MockTransport，保留精确官方URL/ambient清空/无请求断言，不改生产依赖版本。旧/新SDK各目标4、整模块20通过。
+- Chromium自动/手动3个job固定Ubuntu24.04，新contract先RED3后GREEN13；不改其他job或验收门禁。新增逐用例start/finish与120秒线程dump（仅诊断、不跳过/通过/延长超时），参数ID不输出；独立复核指出前缀碰撞，真实子进程RED后以精确JSON、源标识和连续序列校验/重构修正，避免实时回放正文。两套依赖纯CI均198 passed/3既有warnings。
+- Linux/Python3.12/provider+附件recovery/storage相邻37项通过，但未复现整套顺序超时；native Python3.12/CI依赖整套诊断运行中，实际远端仍待验证。源码/断言未为绿灯删减，不将诊断增强宣称为超时根因修复。详见[CI跟进计划](docs/superpowers/plans/2026-11-03-pr28-ci-followup.md)。本轮不合入main、不调用真实provider/scanner或部署。
+
 ### 2026-11-03 — PR #28 四项审查修复（本地验证完成，未推送）
 
 - 基于 `4a00636f` 的独立 `fix/pr28-review-findings-20261103`：补齐 npm10 缺失的27个 esbuild 锁条目，原567条目不变；Make 发布入口保留操作者密钥；D8 响应/中英文面板补齐已绑定门禁、豁免与责任信息；附件文件校验后重查权限/目标/附件状态，失败关闭描述符并回滚失败成功审计。运行时和生产边界不开放。
