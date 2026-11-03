@@ -49,6 +49,7 @@
 - `Deadline(timeout, operation, *, clock=time.monotonic)`：`remaining()`、`check()`，一次操作唯一end，不能按阶段重建。
 - `_RequestState(operation)`：`may_have_been_sent=False`，首次HTTP部分send可能发生前置True；DNS/TCP/TLS不置True。
 - `EncodedRequest(body: bytes|None, query: tuple[tuple[str,str],...])`，`WireResponse(status:int, body:bytes, may_have_been_sent:bool)`；body repr隐藏。
+- `models.SUPPORTED_OPERATIONS`为MappingProxyType只读十operation→(METHOD,完整/api/agent/runtime路径)；由Task1提供，codec/transport共享，不从app import、不经未完成的codec互相耦合，也不作为公开通用HTTP方法导出。
 - `encode_request(operation, parameters)->EncodedRequest`：只取本计划十操作允许参数，严格验证；无任意上传字段。
 - `decode_response(operation, body, *, view='report', run_id=None, task_id=None, finish_status=None)`：严格JSON/DTO/绑定，返回下表DTO；无raw/extra缓存。
 - `Transport.exchange(operation, *, token, request, deadline)->WireResponse`：只接受闭合operation常量；HTTP非成功抛安全HTTPError，其他异常携带may_have_been_sent。
