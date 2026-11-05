@@ -160,6 +160,8 @@ async def create_fmea(...):
 
 `backend/app/services/agent/permissions/` 已有纯策略内核：模块能力声明、执行身份与插件/任务授权交集、操作审批等级与员工审批资格、投递外发判断及派生内容来源限制。8D D4 的默认 `baseline` 目录中的上下文与候选命令均为 `DENY`；`authorize()` 重新读取不可原位修改的服务端目录，拒绝未知能力及与目录声明不一致的定义；盘点见[Agent 模块能力清单](development/agent-module-capability-inventory.md)，目标行为见[模块权限设计](superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md)。
 
+能力声明由 CAPA 模块的 `capa_agent_capabilities.py` 持有；受控 profile 仅派生 summary 的审批下限，不复制或扩大写权限。无界工厂需要当前 GROUP ADMIN；无界产品线必须带明确行级豁免，模块权限不能替代范围。员工审批同时排除执行者与申请人自批。派生内容保留全部来源的版本、能力与实际投影，任一来源当前撤权整包拒绝，不得降敏投递。
+
 权限内核已用于新任务服务的只读授权派生；现有 Agent gateway、模型调用和审批 API 仍按原路径执行。租户内已有禁用默认值的插件安装与长期授权表；持久任务、运行、只读任务授权与受限消息已有独立模型和显式 public/tenant 迁移。安装注册/轮换服务仅持久化密钥 hash，返回一次性 secret；管理员身份与权限在每次写入时重读，事务由调用方提交。
 
 独立运行 JWT 有专门的 issuer/audience/type 与租户 generation、安装/租约 epoch，且有效期不超过当前租约；缺租约或已到期记录不能作为运行身份。多租户验证要求真正的逐事务绑定会话，每次操作重查登记、运行、任务、安装、执行用户及当前角色、工厂/产品线和两层 grant。普通用户凭据与运行凭据不互相授权。
@@ -176,13 +178,15 @@ R4a 的元数据本地受控试用已实现：lifespan 一次加载严格安全�
 
 R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收口既有当前 namespace/角色/对象范围，运行时旧入口保留；纯规则与显式字面词只处理三个D4正文位置，输出固定restricted/未批准降敏/外发关闭。预览服务先验证预算再在捕获租户的独立RR/READ ONLY快照读取显式字段，明确FMEA引用重验当前源权限/坐标/节点，仅返回有权来源元数据，不加载图/标题/附件。源版本用域分离HMAC；最终重查当前权限和源版本后只提交安全审计，不写原文/状态/outbox。三个普通用户接口受独立默认关闭开关和内容安全输入/错误边界保护，运行凭据不适用。只读组件不缓存正文或词语，2秒可见校验、30秒本地最长生命周期，失权/不确定/关闭隐藏时撤回私密内容及词语；旧响应按身份/目标/请求轮次隔离。实际员工API/Chromium已贯通；完整冻结证据见[R4b-1台账](superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)，操作与规则限制见[员工预览指南](development/capa-d4-text-preview.md)。不扩展R4a插件目录或任何正文/模型外发，附件/SDK/部署与正式降敏门禁仍独立。
 
+兼容的内部 `agent_read_tasks`/`agent.read_task_service` 仍限单租户：为当前用户可见的单个 CAPA 创建 24 小时任务，检查时重验当前权限和固定对象范围，支持撤销与审计；没有新增 HTTP、插件或模型入口。其对象级 Grant 不改变 baseline DENY。共享 `capa_agent_projection.build_masked_d4_projection(capa_id, *, binding=None, engine=None)` 仅接受服务端绑定/引擎：单租户显式 public，多租户要求 business binding 并核验当前登记/generation；先设置独立 REPEATABLE READ READ ONLY，再读取固定元数据和同工厂 D4 验证子记录，计算完整稳定摘要，不加载正文/附件/ORM 全量状态。运行路径在最终交付前继续复核当前权限与全部来源。
+
 ### 4.7 租户事务与独立迁移
 
 多租户业务会话在每次事务开始时重新获取共享事务锁，校验 `public.tenants` 的 active 状态、schema 与 generation，然后设置仅含租户 schema 和 `pg_catalog` 的 `SET LOCAL search_path`。跨 commit 的请求和后台任务沿用捕获的 generation；维护或重建后，旧绑定拒绝继续执行。单租户模式显式使用 public；多租户模式不回退 public。
 
 租户维护通过固定物理连接持有会话级排他锁；同一连接建立 attempt、递增 generation、执行独立 Alembic 链和原子 seed。维护事务验证 PID、attempt、generation 与锁所有权，不再申请业务共享锁。public 平台迁移与租户迁移分别记账，租户基线 `tv001_business_snapshot` 为冻结 DDL；激活前检查对象级 schema parity、seed 和隔离。
 
-普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv004_agent_readonly_controls`；完整 v1/v2/v3 租户在同一排他锁与 generation 维护流程下前向升级。v1 核对冻结基线；v2 仅从 public 参考扣除已审定的 v3＋v4 增量对象，v3 仅扣除 v4，不过滤租户对象；升级后比较最新 public 的全部业务对象。冻结 v1/v2/v3 迁移和快照保持原样，导出测试仍绑定 manifest 中的 public head。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv006_agent_read_tasks`；public 通过无 DDL 的 `20261103_merge_agent_foundations` 合并既有只读任务与运行基础两条历史，tv006 仅补齐 main 已有 `agent_read_tasks` 的租户 DDL。tv001–tv005 和冻结 snapshot 保持不变；tv005 先严格比较扣除 tv006 增量的 public 参考，再在原维护连接/锁/generation 下前向升级，租户侧不隐藏额外或部分对象。完整 v1–v5 租户在同一排他锁与 generation 维护流程下前向升级。v1 核对冻结基线；v2–v5 仅从 public 参考扣除对应版本之后已审定的累计增量对象，不过滤租户对象；升级后比较最新 public 的全部业务对象。导出测试仍绑定冻结 manifest 中的 public head，而非将新表反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
 
 ---
 

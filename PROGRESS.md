@@ -1,5 +1,24 @@
 # OpenQMS 开发进度
 
+### 2026-11-04 — Task8 main 冲突已本地解除，合并态验证通过（未提交/推送）
+
+- 隔离分支 `integration/agent-runtime-main-20261103` 合并 feature `35dc36bb` 与 main `d8e2cef5`；8 个冲突均已在工作文件和索引解除，保留双方历史及权限保护。原功能分支/根工作区未提交改动未触碰。尚无合并提交，远端 PR #28 不会在推送前自动解除冲突。
+- 最终同源可执行文件 manifest `1bcb8175e69fa0d36ff01069755a72ec3eaa4ddf6e73b6c10480d65279297927`：完整 `make check` exit0，后端 **3742 passed /4 skipped /19 deselected /5 warnings**、0 failed/error/xfail/xpass，前端类型/生产构建通过；串行无模型浏览器 **11 passed /3754 deselected /5 warnings**、0 skipped、exit0。合并态真实数据库定向 **182 passed**，公共双分支升级及租户 tv005→tv006 parity/回退/重升 **3 passed**，禁网纯矩阵 **270 passed /3 DB deselected /3 既有 warnings**。collection 只作导入证据，不算执行通过。
+- T8-01 历史来源适配已按 main 六字段 SourceLabel 和四元授权键修正，当前来源/版本/整包拒绝与防降级不变；投影测试使用真实持久、有限工厂/产品线、非 bypass 的 CAPA EDIT 操作者，不放宽服务写保护。独立复核及修正复核通过，无未关闭 Important/Critical；旧失败与拒绝记录保留于下方历史。
+- 公共迁移通过加法合并头 `20261103_merge_agent_foundations`，租户新增 `tv006_agent_read_tasks`；冻结 tv001–tv005 和 snapshot 未改，main 内部 single-only read-task 与绑定租户 runtime/projection 职责分清。feature 最新锁文件、SDK/浏览器 CI 兼容、假 ClamAV 连接关闭修复保留。实际合并态回归未发现需追加修改 CI workflow 的问题。
+- 用户在 2026-11-04 明确授权此专属 PG15 定向/完整/无模型浏览器回归；专属实例和 volume 按授权范围保留，未删除，仅 fixture 自建数据/schema 按正常流程清理。旧权限拦截没有绕过，后续实际结果来自人工授权后的本会话进程与退出回执。
+- feature 合并前真实 GitHub run `41639970275` 已成功，但**尚未运行合并态远端 CI**；本次没有调用真实 provider/scanner 或 main 手动 gate，没有提交、推送、创建 PR、合入 main、配置 Secrets/保护或部署。下一步需授权创建这个合并提交并仅推送功能分支更新既有 PR #28，再读取真实合并态 GitHub CI；不直接合并 main。
+
+### 2026-11-03 — Task8 main 隔离集成实施过程（以下待执行/失败记录为历史）
+
+- 在 `integration/agent-runtime-main-20261103` 隔离工作树协调 feature `35dc36bb` 与 main `d8e2cef5`；两侧历史保留。feature 的真实远端自动三层 run `41639970275` 成功属于**合并前**，不是本次集成通过证据。
+- 权限结合受控 profile 与 GROUP ADMIN 无界工厂、明确产品线豁免和禁止申请人自批；默认 DENY、runtime OFF、当前租户/generation 与来源复核不放宽。CAPA 模块持有能力声明，投影保留显式元数据 allowlist 与独立只读租户快照。
+- 两条既有 public 迁移通过新增 `20261103_merge_agent_foundations` 汇合；新增 `tv006_agent_read_tasks` 保持租户 parity，冻结 tv001–tv005 与 snapshot 不改。本次无网络纯回归实际 270 passed /3 DB tests deselected /3 既有 Pydantic warnings，受影响目录 collection 1996 项通过；这只是局部策略/契约证据。DB/迁移执行、前端、浏览器及完整 `make check` 仍待控制方运行；不继承任一侧绿灯。真实 provider/scanner 与 main 手动 gate 未运行，未提交/推送/PR/部署。
+- Fix round1：独立复核 T8-01 指出历史读取仍用旧 SourceLabel/授权键。真实专属库先复现历史 TypeError 与伪造 actor 拒绝两项 RED；现按已验证 canonical receipt 构造六字段标签/四元键，9 项新历史正反例已实际通过，涵盖结果/事件/活动整包拒绝。投影夹具改为真实持久 CAPA EDIT、非 bypass 且显式产品线成员的 actor；一次额外无效 method 字面值导致 3 setup errors（非 GREEN），现已移除，但修订后的最终 DB 验证仍未运行。请求原 95 项加历史/任务更新共 182 项的精确专属库重跑被权限系统拒绝，未重试或委托绕过，等待直接人工授权；最终纯回归仍为 270 passed /3 DB deselected /3 既有 warnings。控制方另提供迁移 3/3 通过及修前 94 passed /1 fixture fail，不冒充修后完整结果。
+- 下一步：控制方请求上述精确专属目标的直接人工授权，完成修后 182 项 DB 走查和独立复核，再标记冲突并验证全部迁移、权限/来源并发、后端/前端/浏览器。未经实际回执不签 Task8 自动整层通过。
+
+### 功能分支集成前历史（以下结果不代表合并态验证）
+
 ### 2026-11-03 — PR #28 后端 CI 超时根因修复（待真实远端全量）
 
 - 诊断提交 `888c6b98` 已推送原PR，新run `41638011344` 在运行；其前端已通过。随后native Python3.12/CI依赖整套诊断的最后START精确落在index1764 `test_scan_stream_sends_newline_instream_and_zero_terminator`；不是先前怀疑的lifespan/DDL业务等待。
@@ -140,9 +159,60 @@
 **基线**: `7503e9e5`（独立工作树，未合入主工作区）
 **当前阶段**: R1–R4b-2 已完整验收，原候选审批方案撤回；CAPA结果审核Task1–6已独立复核，Task7代码已复核但真实正向provider/浏览器/知识/横向仍BLOCKED（无本工作树授权.env.e2e）。Task8独立文档/契约/冻结普通回归已执行并交接，完整make仍因两项强制live测试exit2，不能签署Task8/整片完成；精确授权scanner、控制方整体复核和最终破坏性清理仍待条件。核心PG/卷/工作树/证据保留，仅授权本地提交，不push/合并/部署，Agent新能力默认关闭。
 
+### main 集成前历史
+
+**更新日期**: 2026-11-01
+**当前分支**: `feature/agent-permission-kernel-pr`
+**基线**: `main@63d06571`（#24 已合并）
+**最近实现提交**: Agent 权限内核、单租户只读 8D 内部基础及测试库夹具隔离
+**当前阶段**: PR #26 自批回归修复与 `main` 整合已完成本地验证，提交推送后检查远端 CI 与复审
+
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+
+### 2026-11-01 — PR #26 提交推送与远端复核
+
+- 按本次授权提交自批回归修复及 `main@63d06571` 的冲突整合，更新原 #26 分支；提交前重新执行权限策略测试，39 passed（3 项既有 Pydantic 弃用警告）。完整本地验证证据见 2026-10-31 条目。
+- 本次推送后核对远端提交、冲突状态、CI 与代码复审结果；以对应提交的 GitHub 检查为准。当前授权不包含直接合并 PR。
+
+### 2026-10-31 — PR #26 自批回归修复与 main 整合
+
+- 恢复 `can_employee_approve()` 的请求发起人检查；员工发起、服务执行及其他用户代执行均不得由发起员工自批，独立审批员工仍可按原资格规则审批。新增回归先复现失败，再验证修复。
+- 与 `main@63d06571`（#24）逐项整合 13 个冲突文件：保留 CAPA 模块持有声明、模块专用审批/范围/来源投影检查，同时保留不可原位修改的目录、无时区时间戳拒绝、来源版本、非空交付目标及派生交付敏感等级绑定。能力仍为 `DENY`，未新增运行入口。
+- 验证：聚焦策略测试 39 passed；在自有临时 PostgreSQL/全新 `qms_test_pr26_merge_20261031` 上执行 `make check-backend`，2048 passed、5 skipped、3 xfailed、2 xpassed（3 项既有 Pydantic 弃用警告）；前端 `check-frontend`（TypeScript + Vite 构建）通过。临时测试容器已清理，未连接业务库。文档相对链接与差异空白检查通过。当前为本地未提交的合并结果，尚未推送或合并 PR。
+- 限制：`npm ci` 报告锁定依赖有 30 项审计告警（1 low、18 moderate、11 high），本次未修改依赖或自动升级；既有 MES 的 2 个 XPASS 不视为本次修复。
+- 下一步：经授权提交本地合并结果并推送以更新 #26，确认远端 CI 后再决定合并 PR；当前远端 PR 尚未变化。
+
+### 2026-09-29 — Agent 模块权限内核（独立切片）
+
+- 对照 [权限设计](docs/superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md) 核对并修订 [实施计划](docs/superpowers/plans/2026-09-26-agent-module-permission-kernel.md)：CAPA 持有声明；派生数据按来源能力及投影校验，脱敏权限不能复用为原文权限。
+- 已实现纯策略目录（调用前核对服务端规范声明）、身份×插件×任务交集（全域范围须验证 GROUP ADMIN / 行级豁免）、审批下限/模块专用员工资格、来源投影限制与显式交付守卫；CAPA 试点能力仍为 `DENY`，**未接入生产入口**。业务锚点和边界见 [能力盘点](docs/development/agent-module-capability-inventory.md)。
+- 验证：新内核与旧 Agent/工厂作用域聚焦回归通过；完整 `make check-backend` 未通过（1909 passed、34 failed、2 errors，另有 skipped/xfail/xpass），独立复现 `qms_test` 缺少 FMEA 版本 trigger；旧 PPT review seed、嵌入表列等另有失败，未在本切片修改。
+- 下一步：先确认设计 §6 的租户绑定、插件身份/可信部署、任务授权持久化、CAPA 脱敏投影及外发矩阵，再另行规划只读 8D 试点；不要把内核测试通过当成实际授权上线。
+
+### 2026-09-29 — 独立测试库基线恢复
+
+- 旧 `qms_test` 的 Alembic 版本虽为 `20260727_warranty_factory_id`，但缺少 FMEA/控制计划版本 trigger 和 `document_embeddings.embedding` 列；在该库运行 `make check-backend` 得到 34 failed、2 errors。新建 `qms_test_baseline` 并从空库迁移到 head 后，上次失败的 36 项全部通过，完整后端套件为 1974 passed、5 skipped、3 xfailed、2 xpassed。
+- 已把旧库改名保留为 `qms_test_drifted_20260929`，重新创建默认 `qms_test` 并从迁移构建。默认 `make check` 通过：后端同上，前端 TypeScript 检查与构建通过。此项为本地测试库修复，没有改动业务数据库或生产代码。
+- 下一步：确定只读 8D 试点的首个开发切片，再补齐对应实施规格；身份/租户绑定、任务授权持久化及 CAPA 脱敏投影是当前建议的起点。
+
+### 2026-09-29 — 只读 8D 首切片设计与计划
+
+- 设计阶段选定单报告任务授权持久化与 CAPA D4 元数据投影作为首切片；[设计规格](docs/superpowers/specs/2026-09-29-agent-readonly-8d-foundation-design.md)按审查意见增加多租户逐事务隔离前置条件及完整投影摘要。单租户内部基础现已实施，见下节。
+- [实施计划](docs/superpowers/plans/2026-09-29-agent-readonly-8d-foundation.md)按测试先行顺序执行了单租户任务表、服务和投影；多租户路径在逐事务绑定和无 `public` 回退的测试验收前关闭；能力仍为 `DENY`，不提供插件或 HTTP 读取入口。
+- 后续依赖：多租户隔离改造及验收独立安排；外部交付尚未开放。
+
+### 2026-09-29 — 只读 8D 内部基础
+
+- `agent_read_tasks` 表及迁移、单报告任务生命周期服务已实现。服务仅在 `TENANT_MODE=single` 运行；创建时按服务端 CAPA 记录确定工厂与产品线，检查时重验操作者权限、范围、有效期及撤销状态，并记录安全审计。
+- CAPA D4 元数据投影使用明确字段白名单，在同一只读 `REPEATABLE READ` 快照中读取报告和验证子记录，对完整投影计算 SHA-256 摘要。新增验证记录、修改结论会改变摘要；投影不包含 D4 自由文本。
+- 集成测试覆盖真实持久化任务生成 `Grant` 后，规范能力 `capa.d4.summary.masked.v1` 的 `DENY` 仍使 `authorize()` 拒绝交付；非单租户模式在任务服务查询和投影开启会话前拒绝。未新增 HTTP、插件或模型读取入口。
+- 验证：任务及投影聚焦测试 30 passed；新建隔离库从空库迁移后，新任务表的升级/约束/降级 3 项测试通过。首次新库 `make check` 通过：后端 1969 passed、43 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过。原默认 `qms_test` 虽标记为新 head，仍缺少控制计划版本 trigger 和基础角色，导致全量测试失败；已保留为 `qms_test_drifted_task4_20260929`，并将经全量验证的新库改名为默认 `qms_test`。默认 `make check` 复跑通过：后端 2007 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过。
+- 后续连续复跑定位到 `tests/test_spc_fmea_match.py` 的夹具会对共享 `qms_test` 执行 `drop_all/create_all`，抹掉迁移 trigger 和角色种子，造成下一轮全量失败。该夹具现使用独立临时库；回归测试先复现 trigger 丢失、修复后 11 passed。恢复默认测试库后，连续两次 `make check` 均通过：后端各 2008 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查和构建通过；首轮后确认 trigger 与基础角色仍存在。漂移库保留为 `qms_test_drifted_fixture_20260929`。
+- 2026-09-30 PR 整合：在独立工作树的 `feature/agent-permission-kernel-pr` 分支合入 `main@dbd58690`，保留 main 的 SPC 临时库夹具及本切片的 trigger 保留回归；进度文档保留两侧记录。新建 `qms_test_agent_pr_20260930` 后运行 `make check` 通过：后端 2026 passed、5 skipped、3 xfailed、2 xpassed，前端 TypeScript 检查及构建通过。
+- 下一步：先独立完成逐事务租户绑定、无 `public` 回退及提交/回滚/连接复用/租户缺表等隔离验收；插件身份与外发控制再单独设计、评审。当前单租户内部基础不代表能力批准或多租户可用。
+
 
 ---
 
@@ -173,6 +243,8 @@
 ---
 
 ## 模块级 Agent 权限内核（2026-09-26，第一切片）
+
+> 以下为第一切片当日状态；后续单租户任务持久化和内部投影进展见上文，不能据此判定生产授权已接线。
 
 - **已完成**：CAPA D4 样板能力目录（条目均为 `DENY`，未开放；授权时回查不可原位修改的服务端目录）；纯策略内核覆盖执行身份×插件×任务授权范围、最低审批与员工资格、明确外发许可、跨模块派生来源和敏感等级继承。服务身份发起操作不一律人工审批；由员工发起的后台任务禁止该员工自批。
 - **边界**：尚未接入现有 Agent gateway、任务/插件持久授权、业务查询和写入、审批 API、模型调用、索引或外部插件。此内核的单测通过不代表生产入口已受新策略保护；现有 Agent 功能保持不变。

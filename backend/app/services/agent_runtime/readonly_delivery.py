@@ -10,6 +10,7 @@ from app.schemas.agent_runtime import CapaContextProjection, CapaContextQuery
 from app.services import capa_agent_projection
 from app.services.agent_runtime import runtime_access, task_updates
 from app.services.agent_runtime.runtime_access import RuntimeIdentity
+from app.services.agent.permissions.types import CapabilitySpec
 
 
 def _admit(identity: RuntimeIdentity) -> None:
@@ -79,8 +80,8 @@ async def get_capa_context(db: AsyncSession, identity: RuntimeIdentity,
 
 def _recognized_source(receipt: AgentProjectionReceipt, task_id: UUID,
                        run_id: UUID, target_id: UUID, generation: int | None,
-                       epoch: int | None = None) -> None:
-    """Only the server-owned summary receipt is a source, never client labels."""
+                       epoch: int | None = None) -> CapabilitySpec:
+    """Return the recognized server-owned source contract, never client labels."""
     import re
     from app.services.agent.permissions.catalog import get_capability
     from app.core.permissions import Module
@@ -96,6 +97,7 @@ def _recognized_source(receipt: AgentProjectionReceipt, task_id: UUID,
             or not isinstance(receipt.projection_digest, str)
             or re.fullmatch(r"[a-f0-9]{64}", receipt.projection_digest) is None):
         raise PermissionError("Source unavailable")
+    return spec
 
 
 async def _sources(db: AsyncSession, receipt_ids: list[UUID], task_id: UUID,
@@ -218,7 +220,6 @@ async def save_result(db: AsyncSession, identity: RuntimeIdentity, body) -> dict
 async def admit_historical_sources(db, scope, task, run_id, identifiers,
                                    generation=None, epoch=None):
     """Reload actual source bindings and current ACL; saved versions grant nothing."""
-    from app.core.permissions import Module
     from app.services.agent.permissions.delivery import SourceLabel, derive_label, can_view_derived
     from app.services.agent_runtime import task_service
 
@@ -234,9 +235,12 @@ async def admit_historical_sources(db, scope, task, run_id, identifiers,
             raise PermissionError("Source unavailable") from None
         if source.factory_id != task.factory_id:
             raise PermissionError("Source unavailable")
-        labels.append(SourceLabel(Module.CAPA, receipt.source_capa_id,
-            receipt.projection_digest, receipt.data_class))
-        authorized.add((Module.CAPA, receipt.source_capa_id, receipt.data_class))
+        spec = _recognized_source(receipt, task.task_id, run_id,
+            task.target_capa_id, generation, epoch)
+        labels.append(SourceLabel(owner=spec.owner, object_id=receipt.source_capa_id,
+            sensitivity=receipt.data_class, capability_id=spec.id,
+            projection=spec.projection, source_version=receipt.projection_digest))
+        authorized.add((spec.owner, receipt.source_capa_id, spec.id, spec.projection))
     if not can_view_derived(derive_label(tuple(labels)), True, frozenset(authorized)):
         raise PermissionError("Source unavailable")
     return receipts

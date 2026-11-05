@@ -423,3 +423,99 @@ async def test_history_final_task_target_association_rechecked_after_source_read
         release.set()
         await asyncio.gather(future, return_exceptions=True)
         event.remove(owned.engine.sync_engine, 'after_cursor_execute', intercept)
+
+
+async def _read_integrated_history_path(owned, path, result_id, event_id, receipt_ids):
+    """Exercise services, including the final task-update source recheck."""
+    from tests.services.agent_runtime.test_task_reads import activity, scope_for
+    if path == 'result':
+        return await read(owned, result_id)
+    if path == 'activity':
+        return await activity(owned)
+    async with owned.factory(binding=owned.binding) as db:
+        scope = await scope_for(db, owned)
+        if path == 'event':
+            return await readonly_delivery.get_event_for_view(db, scope, owned.task_id, uuid.UUID(event_id))
+        from app.services.agent_runtime import task_service
+        task = await task_service.get_task_for_view(db, scope, owned.task_id)
+        return await readonly_delivery.admit_historical_sources(
+            db, scope, task, owned.run_id, list(map(uuid.UUID, receipt_ids)))
+
+
+@pytest.mark.asyncio
+async def test_integrated_lineage_serves_actual_saved_result_event_and_activity(context_delivery):
+    """Old four-field SourceLabel adapter must fail this service contract."""
+    owned = context_delivery
+    receipts = [(await context(owned))['receipt_id'], (await context(owned))['receipt_id']]
+    result = await write(owned, result_body(receipts))
+    event = await write(owned, event_body(receipts), True)
+    admitted = await _read_integrated_history_path(owned, 'admit', result['result_id'], event['event_id'], receipts)
+    assert {str(row.receipt_id) for row in admitted} == set(receipts)
+    for path in ('result', 'event'):
+        output = await _read_integrated_history_path(owned, path, result['result_id'], event['event_id'], receipts)
+        assert output['data_class'] == 'restricted'
+        assert {source['receipt_id'] for source in output['sources']} == set(receipts)
+        assert all(source['projection_id'] == 'capa.d4.summary.masked.v1' for source in output['sources'])
+        assert all(len(source['projection_digest']) == 64 for source in output['sources'])
+    page = await _read_integrated_history_path(owned, 'activity', result['result_id'], event['event_id'], receipts)
+    outputs = [item for item in page['items'] if item['kind'] in ('result', 'event')]
+    assert {item['kind'] for item in outputs} == {'result', 'event'}
+    assert all({source['receipt_id'] for source in item['data']['sources']} == set(receipts) for item in outputs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('corruption', ['module', 'projection', 'version', 'capability', 'receipt_task', 'receipt_run', 'receipt_target', 'revoked'])
+async def test_integrated_lineage_denies_entire_saved_package(context_delivery, monkeypatch, corruption):
+    from dataclasses import replace
+    from types import MappingProxyType
+    from app.core.permissions import Module
+    from app.models.capa import CAPAEightD
+    from app.services.agent.permissions import catalog
+
+    owned = context_delivery
+    receipts = [(await context(owned))['receipt_id'], (await context(owned))['receipt_id']]
+    result = await write(owned, result_body(receipts))
+    event = await write(owned, event_body(receipts), True)
+    if corruption in ('module', 'projection'):
+        spec = catalog.get_capability('capa.d4.summary.masked.v1')
+        changes = {'owner': Module.FMEA} if corruption == 'module' else {'projection': 'raw'}
+        monkeypatch.setattr(catalog, 'CAPA_CAPABILITIES', MappingProxyType({
+            **catalog.CAPA_CAPABILITIES, spec.id: replace(spec, **changes)}))
+    else:
+        async with owned.factory(binding=owned.binding) as db:
+            # Only the second receipt is corrupt: one valid source cannot admit
+            # a partial saved package or partially rendered activity page.
+            receipt = await db.get(AgentProjectionReceipt, uuid.UUID(receipts[1]))
+            task = await db.get(AgentTask, owned.task_id)
+            if corruption == 'version':
+                receipt.projection_digest = 'a' * 63
+            elif corruption == 'capability':
+                receipt.projection_id = 'unrecognized.v1'
+            elif corruption == 'receipt_task':
+                other = AgentTask(initiator_id=task.initiator_id, executor_user_id=task.executor_user_id,
+                    preferred_installation_id=task.preferred_installation_id,
+                    target_capa_id=task.target_capa_id, factory_id=task.factory_id,
+                    request_key=uuid.uuid4().hex, status='ready')
+                db.add(other)
+                await db.flush()
+                receipt.task_id = other.task_id
+            elif corruption == 'receipt_run':
+                run = await db.get(AgentRun, owned.run_id)
+                other = AgentRun(task_id=task.task_id, installation_id=run.installation_id,
+                    plugin_version=run.plugin_version, status='completed', lease_epoch=1)
+                db.add(other)
+                await db.flush()
+                receipt.run_id = other.run_id
+            elif corruption == 'receipt_target':
+                other = CAPAEightD(document_no='8D-HISTORY-OTHER', title='Other source',
+                    factory_id=task.factory_id, product_line_code='DC-DC-100')
+                db.add(other)
+                await db.flush()
+                receipt.source_capa_id = other.report_id
+            elif corruption == 'revoked':
+                await db.execute(update(RolePermission).where(RolePermission.role_id == owned.role_id,
+                    RolePermission.module == 'capa').values(permission_level=0))
+            await db.commit()
+    for path in ('admit', 'result', 'event', 'activity'):
+        with pytest.raises(PermissionError):
+            await _read_integrated_history_path(owned, path, result['result_id'], event['event_id'], receipts)
