@@ -6,9 +6,10 @@ database access, implicit environment/profile credentials or model calls.
 
 This source snapshot provides safe errors, immutable DTOs, a strict protocol
 codec, bounded standard-library HTTP transport and installation/run clients for
-the existing ten runtime operations. Independent wheel installation and full QMS
-HTTP compatibility are still pending; unit and owned-loopback results are not
-complete SDK acceptance or worker admission.
+the existing ten runtime operations. The developer gate below builds the actual
+current SDK wheel and checks a fresh isolated installation. Full normal-policy
+QMS HTTP compatibility is a separate pending gate; unit, owned-loopback and wheel
+results are not complete SDK acceptance or worker admission.
 Frozen/slotted DTOs are containers, not runtime type validation: the codec performs
 strict decoding. Configuration validates local budgets; transport validates origin.
 Request budget is 1 MiB; response defaults to 4 MiB (64 KiB–16 MiB); timeout defaults
@@ -51,5 +52,93 @@ Unknown-kind fallback is only safe diagnostics, never a basis for business flow.
 Future wrappers must raise sanitized errors outside except blocks (or from None)
 and must not echo underlying exception.args.
 
-Build uses setuptools==79.0.1, with no additional wheel build requirement.
-Wheel construction and isolated installation validation are later delivery gates.
+## Offline developer gates
+
+Run from the repository root with a Python >=3.11 interpreter containing pytest,
+pip and **actual setuptools==79.0.1**. The builder queries the selected interpreter
+before building and fails closed on any other setuptools version; the gate does
+not install or relax build requirements. Preserve a venv's Python entry point
+(do not resolve its symlink to the base interpreter).
+
+```sh
+PY=/absolute/path/to/developer-venv/bin/python
+"$PY" -I -B sdk/python/scripts/check-sdk.py --layer unit --artifacts /private/tmp/my-sdk-evidence
+"$PY" -I -B sdk/python/scripts/check-sdk.py --layer loopback --artifacts /private/tmp/my-sdk-evidence
+"$PY" -I -B sdk/python/scripts/check-sdk.py --layer wheel --artifacts /private/tmp/my-sdk-evidence
+"$PY" -I -B sdk/python/scripts/check-sdk.py --artifacts /private/tmp/my-sdk-evidence  # default: all
+```
+
+Use a non-symlink artifact parent outside the SDK source. Each invocation makes a
+new private directory (0700), never overwrites an existing file or changes the
+parent's permissions. Receipts and filtered count-only logs are 0600. stdout
+contains only layer status and receipt paths; raw pytest/pip output is discarded.
+No raw JUnit failure content is exported. Pytest hooks record actual selected,
+passed, failed, errors, skipped, xfailed, xpassed, deselected, warnings, exit and
+elapsed; receipts bind these to HEAD plus the SDK source manifest/hash. Zero
+selection, nonzero exit, skip, xfail or xpass cannot pass. Warnings are counted,
+not suppressed. Missing/malformed receipts and controlled child timeouts fail.
+On Linux/macOS POSIX, every test/build/venv/install/probe command runs in its own
+new session/process group. On exit, timeout or exception, the gate terminates only
+that group (bounded TERM grace, then KILL) and waits for its direct child, including
+when the leader exited before its descendants. Non-POSIX execution fails closed
+without launching children. This is cleanup for trusted tools, not containment of
+hostile descendants that deliberately escape their group; orphan reaping belongs
+to the OS. The builder CLI's metadata capture is bounded to 64 KiB and private.
+
+- `unit`: only `tests/unit`; no conftest, no ambient pytest plugins, empty pytest
+  config and no cache provider. `check-sdk-pure.py` sets plugin autoload off before
+  pytest/SDK imports, installs a stdlib Python audit hook denying supported
+  socket connect/DNS/bind/sendto/sendmsg events, then loads the source package.
+  **This is not an OS/native-code sandbox**; an audit hook does not propagate to
+  subprocesses. Builder tests constrain their pip subprocesses with fixed offline
+  arguments. Contract tests fake children to test faults; those are not real
+  wheel or full-suite acceptance evidence. Separate synthetic Python process-tree
+  tests use only their own temporary heartbeat/marker files to prove termination;
+  neither kind recursively runs this suite.
+- `loopback`: explicitly **non-pure**, separate `tests/loopback` invocation with
+  its guarded fixtures. Only fixture-owned numeric 127.0.0.1/::1 random ports;
+  no ambient proxy, DNS, shared service or backend bootstrap.
+- `wheel`: existing offline builder snapshots only README/pyproject/src from this
+  actual SDK, checks the pinned tool and builds without index/build isolation.
+  A fresh venv (pip included, system site packages excluded) installs that wheel
+  using `--isolated --disable-pip-version-check install --no-index --no-deps`.
+  The `-I -B` probe runs outside the repo with curated HOME and no PYTHONPATH;
+  verifies site-packages import, 0.1.0 / Python >=3.11 / no Requires-Dist, exact
+  exports and ten methods, absence of backend/HTTP/model dependency packages,
+  hidden internal DTO/routes and forbidden generic client methods. Constructing
+  and closing a client is audited against sockets, not a live HTTP call. Receipts
+  retain builder source manifest, wheel SHA256 and actual install/probe exits.
+  Wheel counts describe **one isolated probe**, not pytest test cases. Private
+  venv/build evidence is retained; no shared interpreter is changed.
+
+Children receive a curated environment, private HOME/TMPDIR and
+`PIP_CONFIG_FILE=/dev/null`; no caller credentials, `.env`, profiles, proxy or
+ambient plugin variables are passed. These gates do not contact external DNS,
+HTTP, models or databases and do not prove production readiness.
+
+## Fixture-only stdin example
+
+Install the wheel into your own environment, then run
+`python -B sdk/python/examples/metadata_session.py` with one explicit JSON object
+on stdin. Do not put secrets in argv, shell history, environment or saved public
+fixtures. Required keys: `origin`, `tenant`, `installation_id`, `secret`,
+`request_key`. The default performs claim + capabilities exactly once and closes
+locally. **claim_run is a platform write**: it creates/occupies a platform run and
+its short-lived run lease, even when only capabilities are read afterwards.
+Local close is **not remote finish** and does not release the lease. Use this
+sample only with fixture tasks you own; the parent test or user must separately
+manage remote run/lease cleanup under normal server policy. This is not a
+no-platform-write example, and it deliberately adds no automatic ACK or finish.
+Optional `operations` is a list of
+`{"operation":"get_capa_context","params":{"view":"report"}}` (or
+`"verifications"`, with optional `report_id`) and
+`{"operation":"message_history","params":{"after_sequence":0,"limit":20}}`.
+Normal server policy must still grant access. Output is only safe status, counts
+and receipt IDs, never tokens, bodies, messages or payloads.
+
+This deliberately minimal example does not claim messages or ACK: it has no safe
+message-body delivery channel to the caller. It does not automate events,
+results, checkpoints or finish, execute messages, call models, grant a profile,
+retry failures or resolve an unknown finish. Full ten-operation fixture HTTP
+compatibility is tested separately, not by silently expanding this example into
+an official worker. No real QMS server is started by these developer gates.
