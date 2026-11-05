@@ -703,6 +703,14 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
             code=f"GL{suffix[:8]}", name="Gate lock line", factory_id=factory_id,
         ))
         await seed.flush()
+        from app.models.factory import UserFactory
+        from app.models.role import RolePermission, UserProductLine
+        seed.add_all([
+            RolePermission(role_id=role_id, module='capa', permission_level=3),
+            UserFactory(user_id=user_id, factory_id=factory_id),
+            UserProductLine(user_id=user_id, product_line_code=f"GL{suffix[:8]}"),
+        ])
+        await seed.flush()
         capa = CAPAEightD(
             report_id=capa_id, document_no=f"CAPA-GATE-{suffix}", title="gate lock",
             product_line_code=f"GL{suffix[:8]}", factory_id=factory_id,
@@ -839,6 +847,9 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
                 "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
                 "DELETE FROM control_plans WHERE cp_id=:cpid",
                 "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM user_product_lines WHERE user_id=:uid",
+                "DELETE FROM user_factories WHERE user_id=:uid",
+                "DELETE FROM role_permissions WHERE role_id=:rid",
                 "DELETE FROM product_lines WHERE code=:plcode",
                 "DELETE FROM users WHERE user_id=:uid",
                 "DELETE FROM role_definitions WHERE id=:rid",
@@ -893,6 +904,14 @@ async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
         seed.add(ProductLine(
             code=product_line_code, name="Scope lock line", factory_id=factory_id,
         ))
+        await seed.flush()
+        from app.models.factory import UserFactory
+        from app.models.role import RolePermission, UserProductLine
+        seed.add_all([
+            RolePermission(role_id=role_id, module='capa', permission_level=3),
+            UserFactory(user_id=user_id, factory_id=factory_id),
+            UserProductLine(user_id=user_id, product_line_code=product_line_code),
+        ])
         await seed.flush()
         capa = CAPAEightD(
             report_id=capa_id, document_no=f"CAPA-SCOPE-{suffix}", title="scope lock",
@@ -987,6 +1006,9 @@ async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
                 "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
                 "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
                 "DELETE FROM capa_eightd WHERE report_id=:cid",
+                "DELETE FROM user_product_lines WHERE user_id=:uid",
+                "DELETE FROM user_factories WHERE user_id=:uid",
+                "DELETE FROM role_permissions WHERE role_id=:rid",
                 "DELETE FROM product_lines WHERE code=:plcode",
                 "DELETE FROM users WHERE user_id=:uid",
                 "DELETE FROM role_definitions WHERE id=:rid",

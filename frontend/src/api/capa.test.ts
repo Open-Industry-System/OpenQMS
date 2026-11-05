@@ -9,7 +9,7 @@ vi.mock("./client", () => ({
 import {
   adoptRecommendation, listVerifications, createVerification, updateVerification,
   recordD7Action, listD7Actions, autoFillD7, advanceCAPA, sinkKnowledge,
-  parseKnowledgeSinkError, formatCapaAdvanceError,
+  parseKnowledgeSinkError, formatCapaAdvanceError, getCapaOutcomeReview,
 } from "./capa";
 
 beforeEach(() => vi.clearAllMocks());
@@ -35,7 +35,7 @@ describe("capa verification/d7 api", () => {
     const capa = { capa_id: "c1", document_no: "8D-2026-001" } as any;
     (client.post as any).mockResolvedValue({ data: { capa, warning: "D7 skipped" } });
     const r = await advanceCAPA("c1");
-    expect(client.post).toHaveBeenCalledWith("/capa/c1/advance", {});
+    expect(client.post).toHaveBeenCalledWith("/capa/c1/advance", {}, { signal: undefined });
     expect(r.document_no).toBe("8D-2026-001");
   });
 
@@ -61,7 +61,7 @@ describe("capa knowledge sink api", () => {
       },
     });
     const r = await sinkKnowledge("c1");
-    expect(client.post).toHaveBeenCalledWith("/capa/c1/sink-knowledge");
+    expect(client.post).toHaveBeenCalledWith("/capa/c1/sink-knowledge", undefined, { signal: undefined });
     expect(r.embedding_status).toBe("pending");
   });
 
@@ -149,5 +149,23 @@ describe("capa recommendation stages (Spec B)", () => {
       expect.objectContaining({ stage_index: 2 }),
     );
     expect(r.d_step).toBe("d5");
+  });
+});
+
+
+describe("outcome review contract", () => {
+  it("reads the complete current DTO with cancellation", async () => {
+    const signal = new AbortController().signal;
+    const dto = { contract: "capa.outcome-review.v1", documents: [] };
+    vi.mocked(client.get).mockResolvedValue({ data: dto });
+    expect(await getCapaOutcomeReview("c1", signal)).toBe(dto);
+    expect(client.get).toHaveBeenCalledWith("/capa/c1/outcome-review", { signal });
+  });
+  it.each(["D8_CLOSURE", "D7_PREVENTION"])("sends seen revision and round for %s without changing rejection reason", async target_state => {
+    const signal = new AbortController().signal;
+    const req = { target_state, expected_outcome_revision: "a".repeat(64), expected_review_round_id: "round", reject_reason: "重新核对实施结果" };
+    vi.mocked(client.post).mockResolvedValue({ data: { capa: { status: target_state }, warning: null } });
+    await advanceCAPA("c1", req, signal);
+    expect(client.post).toHaveBeenCalledWith("/capa/c1/advance", req, { signal });
   });
 });

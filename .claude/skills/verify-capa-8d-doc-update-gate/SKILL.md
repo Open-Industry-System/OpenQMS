@@ -4,7 +4,7 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/US-E2E-01.7-doc-update-gate.md
-> 故事版本：定稿 v2（2026-07-23）
+> 故事版本：定稿 v3（2026-10-27）
 > 所属 epic：US-E2E-01（README.md v8.1）
 > 同步规则：当子故事版本号或日期变更，本剧本必须重新核对并同步。
 
@@ -18,9 +18,13 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 **用**：用户说「验收 01.7」「走查文档门禁」「验证 D8 gate」等。
 
+## 本轮实施契约与验收边界
+
+版本/日期同步仅表明剧本对应已实现契约，不是走查 PASS。2026-10-27 正向真实 provider/浏览器、知识及横向扩散仍因本工作树缺少授权 `.env.e2e` 而 BLOCKED；不得借用环境/生产密钥、mock provider 或预造 passed gate。独立权限/终态保护可单列，不冒充整故事完成。操作解释见 `docs/development/capa-outcome-review.md`。
+
 ## 前置
 
-1. 故事版本一致（比对 `US-E2E-01.7-doc-update-gate.md` 顶部：定稿 **v2（2026-07-23）**）。
+1. 故事版本一致（比对 `US-E2E-01.7-doc-update-gate.md` 顶部：定稿 **v3（2026-10-27）**）。
 2. e2e 栈在跑。
 3. LLM 凭证齐（AI_REQUIRED=true；影响分析需 LLM）。**无 LLM → 01.7 整体 `BLOCKED`**（影响分析路径不可降级为 skip；门禁无影响分析即无法 passed→advance）。
 4. seed-state 取 engineer/manager 账号。
@@ -119,6 +123,9 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 - **deferred**：`[data-e2e="doc-gate-defer-btn"]` → 填 reason/owner/deadline → 审计 `action=DOC_GATE_DEFERRED`（defer 仍阻断推进）。
 
 ### E. 版本新鲜度（input hash 不含 latest version）
+- **v3 最终复核**：本节不改变 C9 input hash 规则。进入待审后在 01.3 的最终批准处仍复核 C8/C9/waiver、当前根因 passed 验证及正式 D5/D6。独立记录测试旧分析/waiver 失效即使有新鲜所见 token 仍阻断，且无 D8_APPROVED/D8_REJECTED/知识/横向/MES 副作用；修复合法门禁后显式重读才能另作决定。
+- CP 必须检查当前 PLANNING VIEW，FMEA 检查当前 FMEA VIEW；不可读或缺失的必要绑定整份拒绝，不省略。来源权限/版本在锁等待中变化也应拒绝。受控历史版本不能被最新图替代；已审引用的 FMEA/CP 间接删除被终态保护阻止。
+- 结案/归档后 doc-gate 材料写入同样固定核心 409。本故事不新增 SOP、逐步人工审批、D7 verified 条件或任何延期旁路。
 - **断言**：`analysis_input_hash`（C9）= capa 语义输入 + 候选身份集（doc_type/doc_id/baseline）+ contract_version，**明确不含 latest version**（`_compute_input_hash` 注释 MUST NOT include latest version）。
 - **因此**：分析后创建新版本（passed 的必要步骤）**不会**使 input hash 失效或触发 freshness 阻断。freshness 只在 CAPA 语义输入（d4/d5/d7/severity/fmea_ref 等）或候选 baseline 变化时使旧分析 stale（须重生成 impact），不在新建版本时阻断。走查「分析后 bump 版本」是正确做法，不记 FAIL。
 
@@ -157,4 +164,4 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 
 ## 维护
 
-每次跑前比对故事版本（v2 / 2026-07-23）；不一致 → 停下提示同步。
+每次跑前比对故事版本（v3 / 2026-10-27）；不一致 → 停下提示同步。

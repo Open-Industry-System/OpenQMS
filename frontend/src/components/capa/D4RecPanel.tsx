@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Card, List, Tag, Button, Space, Typography, Empty, Spin, App, Alert } from "antd";import { CheckOutlined, CloseOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getD4Recommendations, adoptRecommendation, RecommendationBlockedError } from "../../api/capa";
+import { useCapaChildRequests } from "./useCapaViewRequests";
 import RecommendationDAG from "./RecommendationDAG";
 import RiskTags from "./RiskTags";
 import type { D4Recommendation, StageRun } from "../../types";
@@ -17,6 +18,7 @@ interface D4RecPanelProps {
 
 export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdopted }: D4RecPanelProps) {
   const { t } = useTranslation("capa");
+  const requests = useCapaChildRequests(capaId, canAdopt);
   const { message } = App.useApp();
   const [recommendations, setRecommendations] = useState<D4Recommendation[]>([]);
   const [stages, setStages] = useState<StageRun[]>([]);
@@ -25,14 +27,17 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    const request = requests.begin();
     setLoading(true);
-    setBlocked(false);
-    getD4Recommendations(capaId)
+    setBlocked(false); setSkipped(new Set());
+    getD4Recommendations(capaId, request.signal)
       .then((res) => {
+        if (!request.current()) return;
         setRecommendations(res.items);
         setStages(res.stages ?? []);
       })
       .catch((err) => {
+        if (!request.current()) return;
         if (err instanceof RecommendationBlockedError) {
           setBlocked(true);
           setStages(err.detail.stages ?? []);
@@ -40,9 +45,10 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
           message.error(t("d4.loadFailed"));
         }
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (request.current()) setLoading(false); request.finish(); });
+    return request.cancel;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capaId]);
+  }, [capaId, requests]);
 
   if (loading) return <Spin size="small" />;
 
@@ -126,8 +132,12 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
                     disabled={!canAdopt}
                     title={!canAdopt ? t("d4.readonlyTooltip") : undefined}
                     onClick={async () => {
+                      if (!canAdopt) return;
+                      const request = requests.begin();
+                      if (!request.current()) return;
                       try {
                         await beforeAdopt?.();
+                        if (!request.current()) return;
                         await adoptRecommendation(capaId, {
                           d_step: "d4",
                           adopted_text: item.failure_cause_name,
@@ -142,12 +152,14 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
                             source_capa_id: item.source_capa_id,
                             source_capa_document_no: item.source_capa_document_no,
                           },
-                        });
+                        }, request.signal);
+                        if (!request.current()) return;
+                        await onAdopted?.();
+                        if (!request.current()) return;
                         message.success(t("d4.adopted"));
-                        onAdopted?.();
                       } catch {
-                        message.error(t("d4.adoptFailed"));
-                      }
+                        if (request.current()) message.error(t("d4.adoptFailed"));
+                      } finally { request.finish(); }
                     }}
                   >
                     {t("d4.adopt")}

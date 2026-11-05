@@ -1,4 +1,10 @@
 import uuid
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from app.config import settings
+from app.services import cp_sync_worker
 
 import pytest
 from sqlalchemy import select
@@ -48,6 +54,27 @@ async def test_applier_flips_only_pending_and_audits_each(db, default_factory, a
         assert a.changed_fields["sync_pending"] == "false->true"
         assert "source_fmea_version_id" not in a.changed_fields
         assert a.changed_fields["trigger_fmea_version_id"] == str(version_id)
+
+
+@pytest.mark.asyncio
+async def test_standalone_loop_uses_tenant_iterator_not_public_session(monkeypatch):
+    monkeypatch.setattr(settings, "TENANT_MODE", "dev")
+    tenant_session = object()
+    seen = []
+
+    async def tenant_iterator():
+        yield SimpleNamespace(slug="a"), tenant_session
+
+    async def process(db):
+        seen.append(db)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(cp_sync_worker, "run_for_each_tenant", tenant_iterator, raising=False)
+    monkeypatch.setattr(cp_sync_worker, "process_cp_sync_outbox_batch", process)
+    with patch.object(cp_sync_worker, "async_session", side_effect=AssertionError("public outbox"), create=True):
+        with pytest.raises(asyncio.CancelledError):
+            await cp_sync_worker._loop()
+    assert seen == [tenant_session]
 
 
 @pytest.mark.asyncio

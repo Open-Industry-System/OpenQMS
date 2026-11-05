@@ -15,6 +15,7 @@ import {
   decideD3Advice, getD3Adoptions,
   recordD3Execution, updateD3Execution, getD3Executions,
 } from "../../api/capa";
+import { useCapaChildRequests } from "./useCapaViewRequests";
 import type {
   CAPAReport, D3ImportRun, D3ContainmentSnapshot, D3ImpactReport,
   D3AiAdvice, D3AdviceAdoption, D3Execution, D3AdviceType,
@@ -92,6 +93,18 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   const historicalRuns = useMemo(() => runs.filter(r => !r.is_current), [runs]);
 
   // For historical runs, disable all write buttons
+  const runRequests = useCapaChildRequests(capa.report_id, canEdit);
+  const requests = useCapaChildRequests(capa.report_id, [canEdit, selectedRunId]);
+  useEffect(() => {
+    // Selection cancels pending work, but does not refetch the already visible run list.
+    runRequests.invalidate(); setLoading(false);
+    setImporting(false); setGeneratingReport(false); setGeneratingAdvice(false);
+    setModalMode(null); setActiveAdvice(null); setAdoptedText(""); setRejectReason("");
+    setExecutionMeasure(""); setExecutionEvidenceUrl("");
+    setSnapshots([]); setReport(null); setAdvice([]); setAdoptions([]); setExecutions([]);
+    setAdviceError(null); setAdviceAttemptError(null); setReportAttemptError(null);
+  }, [requests, runRequests]);
+
   const isReadOnly = !currentRun?.is_current || !canEdit;
 
   // Show import button when canEdit, status is D3_INTERIM, and viewing the current run
@@ -103,7 +116,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       loadAdoptions();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capa.report_id]);
+  }, [capa.report_id, runRequests]);
 
   useEffect(() => {
     if (currentRun?.run_id) {
@@ -114,32 +127,44 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       loadAdoptions(currentRun.run_id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentRun?.run_id]);
+  }, [currentRun?.run_id, requests]);
 
   const loadRuns = async () => {
+    const request = runRequests.begin();
+    if (!request.current()) return;
     setLoading(true);
     try {
-      const data = await getD3Runs(capa.report_id);
+      const data = await getD3Runs(capa.report_id, request.signal);
+      if (!request.current()) return;
       setRuns(data);
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.loadRunsFailed", "加载代次失败"));
     } finally {
-      setLoading(false);
+      request.finish();
+      if (request.current()) setLoading(false);
     }
   };
 
   const loadSnapshots = async (runId?: string) => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
-      const data = await getD3Snapshots(capa.report_id, runId);
+      const data = await getD3Snapshots(capa.report_id, runId, request.signal);
+      if (!request.current()) return;
       setSnapshots(data);
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.loadSnapshotsFailed", "加载快照失败"));
-    }
+    } finally { request.finish(); }
   };
 
   const loadReport = async (runId?: string) => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
-      const data = await getD3Report(capa.report_id, runId);
+      const data = await getD3Report(capa.report_id, runId, request.signal);
+      if (!request.current()) return;
       setReport(data);
       // A newer non-current attempt (failed or superseded) exists alongside the
       // still-valid current report. Surface it as a non-blocking retry banner.
@@ -149,6 +174,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           : null,
       );
     } catch (e: any) {
+      if (!request.current()) return;
       // 404 = no report at all (never generated) — silent, show generate UI
       if (e?.response?.status === 404) {
         setReport(null);
@@ -156,12 +182,15 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       } else {
         message.error(t("d3.loadReportFailed", "加载报告失败"));
       }
-    }
+    } finally { request.finish(); }
   };
 
   const loadAdvice = async (runId?: string) => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
-      const resp = await getD3Advice(capa.report_id, runId);
+      const resp = await getD3Advice(capa.report_id, runId, request.signal);
+      if (!request.current()) return;
       setAdvice(resp.advice ?? []);
       // adviceError = the *current* generation failed (blocking, shows retry replacing advice).
       // adviceAttemptError = a newer failed retry alongside a still-valid current generation
@@ -173,73 +202,100 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           : null,
       );
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.loadAdviceFailed", "加载建议失败"));
-    }
+    } finally { request.finish(); }
   };
 
   const loadAdoptions = async (runId?: string) => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
-      const data = await getD3Adoptions(capa.report_id, runId);
+      const data = await getD3Adoptions(capa.report_id, runId, request.signal);
+      if (!request.current()) return;
       setAdoptions(data);
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.loadAdoptionsFailed", "加载采纳记录失败"));
-    }
+    } finally { request.finish(); }
   };
 
   const loadExecutions = async (runId?: string) => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
-      const data = await getD3Executions(capa.report_id, runId);
+      const data = await getD3Executions(capa.report_id, runId, request.signal);
+      if (!request.current()) return;
       setExecutions(data);
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.loadExecutionsFailed", "加载执行记录失败"));
-    }
+    } finally { request.finish(); }
   };
 
   const handleImport = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     setImporting(true);
     try {
-      await importD3Containment(capa.report_id);
+      await importD3Containment(capa.report_id, undefined, request.signal);
+      if (!request.current()) return;
       message.success(t("d3.importSuccess", "导入成功"));
       await loadRuns();
+      if (!request.current()) return;
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.importFailed", "导入失败"));
     } finally {
-      setImporting(false);
+      request.finish();
+      if (request.current()) setImporting(false);
     }
   };
 
   const handleGenerateReport = async () => {
-    if (!currentRun) return;
+    const request = requests.begin();
+    if (!request.current()) return;
+    if (!currentRun) { request.finish(); return; }
     setGeneratingReport(true);
     try {
-      await generateD3Report(capa.report_id, { run_id: currentRun.run_id });
+      await generateD3Report(capa.report_id, { run_id: currentRun.run_id }, request.signal);
+      if (!request.current()) return;
       message.success(t("d3.reportGenerated", "报告生成中"));
       await loadReport(currentRun?.run_id);
+      if (!request.current()) return;
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.reportGenerateFailed", "报告生成失败"));
     } finally {
-      setGeneratingReport(false);
+      request.finish();
+      if (request.current()) setGeneratingReport(false);
     }
   };
 
   const handleGenerateAdvice = async () => {
-    if (!currentRun) return;
+    const request = requests.begin();
+    if (!request.current()) return;
+    if (!currentRun) { request.finish(); return; }
     // Advice generation requires a valid current done report (backend /d3/advice
     // reads the current report). Gate here so the user gets a clear hint instead of
     // a generic "建议生成失败" from the backend's "需先生成影响报告" check.
     if (!report || report.status !== "done") {
       message.warning(t("d3.adviceNeedsReport", "需先生成影响报告才能生成建议"));
-      return;
+      request.finish(); return;
     }
     setGeneratingAdvice(true);
     try {
-      await generateD3Advice(capa.report_id, { run_id: currentRun.run_id });
+      await generateD3Advice(capa.report_id, { run_id: currentRun.run_id }, request.signal);
+      if (!request.current()) return;
       message.success(t("d3.adviceGenerated", "建议生成中"));
       await loadAdvice(currentRun?.run_id);
+      if (!request.current()) return;
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.adviceGenerateFailed", "建议生成失败"));
     } finally {
-      setGeneratingAdvice(false);
+      request.finish();
+      if (request.current()) setGeneratingAdvice(false);
     }
   };
 
@@ -267,40 +323,53 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   };
 
   const handleAdoptOk = async () => {
-    if (!activeAdvice) return;
+    const request = requests.begin();
+    if (!request.current()) return;
+    if (!activeAdvice) { request.finish(); return; }
     try {
       await decideD3Advice(capa.report_id, activeAdvice.advice_id, {
         decision: "adopted",
         adopted_text: adoptedText,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       message.success(t("d3.acceptSuccess", "已采纳"));
       closeModal();
       await loadAdoptions();
+      if (!request.current()) return;
       await loadAdvice(currentRun?.run_id);
+      if (!request.current()) return;
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.acceptFailed", "采纳失败"));
-    }
+    } finally { request.finish(); }
   };
 
   const handleRejectOk = async () => {
-    if (!activeAdvice) return;
+    const request = requests.begin();
+    if (!request.current()) return;
+    if (!activeAdvice) { request.finish(); return; }
     try {
       await decideD3Advice(capa.report_id, activeAdvice.advice_id, {
         decision: "rejected",
         adopted_text: null,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       message.success(t("d3.rejectSuccess", "已拒绝"));
       closeModal();
       await loadAdvice(currentRun?.run_id);
+      if (!request.current()) return;
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.rejectFailed", "拒绝失败"));
-    }
+    } finally { request.finish(); }
   };
 
   const handleExecutionOk = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     if (!executionMeasure.trim()) {
       message.warning(t("d3.measureRequired", "请填写措施"));
-      return;
+      request.finish(); return;
     }
     try {
       await recordD3Execution(capa.report_id, {
@@ -309,11 +378,14 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
         evidence_refs: executionEvidenceUrl.trim()
           ? [{ type: "url", url: executionEvidenceUrl.trim() }]
           : [],
-      });
+      }, request.signal);
+      if (!request.current()) return;
       message.success(t("d3.executionAdded", "执行记录已添加"));
       closeModal();
       await loadExecutions(currentRun?.run_id);
+      if (!request.current()) return;
     } catch (error: unknown) {
+      if (!request.current()) return;
       const detail = (
         error as { response?: { data?: { detail?: unknown } } }
       ).response?.data?.detail;
@@ -322,17 +394,22 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           ? detail
           : t("d3.executionAddFailed", "添加执行记录失败"),
       );
-    }
+    } finally { request.finish(); }
   };
 
   const handleExecutionStatusChange = async (item: D3Execution, nextStatus: D3Execution["result_status"]) => {
-    if (nextStatus === item.result_status) return;
+    const request = requests.begin();
+    if (!request.current()) return;
+    if (nextStatus === item.result_status) { request.finish(); return; }
     try {
-      await updateD3Execution(capa.report_id, item.execution_id, { result_status: nextStatus });
+      await updateD3Execution(capa.report_id, item.execution_id, { result_status: nextStatus }, request.signal);
+      if (!request.current()) return;
       await loadExecutions(currentRun?.run_id);
+      if (!request.current()) return;
     } catch {
+      if (!request.current()) return;
       message.error(t("d3.executionUpdateFailed", "更新执行记录失败"));
-    }
+    } finally { request.finish(); }
   };
 
   // Group snapshots by type

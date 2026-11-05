@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.recommendation_stage import StageRunSchema
 from app.state_machines.eightd_state import EightDState
@@ -213,6 +213,8 @@ class D5RecommendationResponse(BaseModel):
 
 
 class AdvanceRequest(BaseModel):
+    expected_outcome_revision: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    expected_review_round_id: uuid.UUID | None = None
     target_state: EightDState | None = None   # 显式；None = 线性 next（D1→D6→D7_PREVENTION、D8→ARCHIVED）
     reject_reason: str | None = None          # target=D7_PREVENTION（自 D8_APPROVAL_PENDING）时必填
     d7_skip_reasons: list[dict] | None = None  # 不变

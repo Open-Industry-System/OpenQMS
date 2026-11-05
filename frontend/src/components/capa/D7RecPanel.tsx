@@ -8,6 +8,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { getD7Recommendations, recordD7Action, listD7Actions, autoFillD7 } from "../../api/capa";
+import { useCapaChildRequests } from "./useCapaViewRequests";
 import type { D7Recommendation, D7NodeAction } from "../../types";
 
 const { Text } = Typography;
@@ -35,6 +36,7 @@ export default function D7RecPanel({
   onConfirmationChange,
 }: D7RecPanelProps) {
   const { t } = useTranslation("capa");
+  const requests = useCapaChildRequests(capaId, [canAdopt, canAutoFill, d5Correction]);
   const { message } = App.useApp();
   const navigate = useNavigate();
   const [recommendations, setRecommendations] = useState<D7Recommendation[]>([]);
@@ -43,19 +45,26 @@ export default function D7RecPanel({
   const [fillingNode, setFillingNode] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    getD7Recommendations(capaId)
-      .then((res) => setRecommendations(res.recommendations))
-      .catch(() => message.error(t("d7.loadFailed")))
-      .finally(() => setLoading(false));
+    const request = requests.begin();
+    setLoading(true); setFillingNode(null);
+    getD7Recommendations(capaId, request.signal)
+      .then((res) => { if (request.current()) setRecommendations(res.recommendations); })
+      .catch(() => { if (request.current()) message.error(t("d7.loadFailed")); })
+      .finally(() => { if (request.current()) setLoading(false); request.finish(); });
+    return request.cancel;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capaId]);
+  }, [capaId, requests]);
 
   const reloadActions = async () => {
-    try { setActions(await listD7Actions(capaId)); } catch { /* ignore */ }
+    const request = requests.begin();
+    if (!request.current()) return;
+    try {
+      const rows = await listD7Actions(capaId, request.signal);
+      if (request.current()) setActions(rows);
+    } catch { /* ignore */ } finally { request.finish(); }
   };
 
-  useEffect(() => { reloadActions(); /* eslint-disable-line */ }, [capaId]);
+  useEffect(() => { reloadActions(); /* eslint-disable-line */ }, [capaId, requests]);
 
   const actionFor = (rec: D7Recommendation): D7NodeAction | undefined =>
     actions.find(a => a.fmea_id === rec.fmea_id && a.failure_mode_node_id === rec.failure_mode_node_id
@@ -64,31 +73,42 @@ export default function D7RecPanel({
   const actionOf = (rec: D7Recommendation) => actionFor(rec);
 
   const handleConfirm = async (rec: D7Recommendation, action: "confirmed" | "skipped") => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
       await recordD7Action(capaId, {
         action, fmea_id: rec.fmea_id, failure_mode_node_id: rec.failure_mode_node_id,
         failure_cause_node_id: rec.failure_cause_node_id, match_source: rec.match_source,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       await reloadActions();
-      const refreshed = await getD7Recommendations(capaId);
+      if (!request.current()) return;
+      const refreshed = await getD7Recommendations(capaId, request.signal);
+      if (!request.current()) return;
       setRecommendations(refreshed.recommendations);
-    } catch { message.error(t("d7.actionFailed")); }
+    } catch { if (request.current()) message.error(t("d7.actionFailed")); }
+    finally { request.finish(); }
   };
 
   const handleAutoFill = async (rec: D7Recommendation) => {
     if (!d5Correction || !rec.failure_cause_node_id) return;
     setFillingNode(rec.failure_cause_node_id);
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
       await autoFillD7(capaId, {
         fmea_id: rec.fmea_id, failure_mode_node_id: rec.failure_mode_node_id,
         failure_cause_node_id: rec.failure_cause_node_id, match_source: rec.match_source,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       message.success(t("d7.autoFillSuccess"));
       await reloadActions();
-      const refreshed = await getD7Recommendations(capaId);
+      if (!request.current()) return;
+      const refreshed = await getD7Recommendations(capaId, request.signal);
+      if (!request.current()) return;
       setRecommendations(refreshed.recommendations);
-    } catch { message.error(t("d7.autoFillFailed")); }
-    finally { setFillingNode(null); }
+    } catch { if (request.current()) message.error(t("d7.autoFillFailed")); }
+    finally { if (request.current()) setFillingNode(null); request.finish(); }
   };
 
   useEffect(() => {

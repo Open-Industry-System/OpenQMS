@@ -166,7 +166,7 @@ def test_single_alembic_head(mig_db_url):
     cfg = _cfg(mig_db_url)
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    # Agent read-task migration extends the former warranty factory head.
-    assert heads == ["20260929_agent_read_task"], (
-        f"expected single head 20260929_agent_read_task, got {heads}"
+    # Additive merge keeps both previously shipped Agent branches reachable.
+    assert heads == ["20261103_merge_agent_foundations"], (
+        f"expected single head 20261103_merge_agent_foundations, got {heads}"
     )

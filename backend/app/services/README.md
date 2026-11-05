@@ -1,5 +1,7 @@
 # services/
 
+> `agent_runtime/task_attachments.py` implements the default-off private attachment lifecycle, current-authority rechecks, ClamAV gate, recovery and disposal constraints. Operations: [agent task attachments](../../../docs/development/agent-task-attachments.md).
+
 ## Responsibility
 
 Business logic layer. API handlers stay thin and delegate every non-trivial
@@ -39,7 +41,82 @@ verb — one module per business concept:
   DAG: recall → fusion → LLM → terminal), `capa_recommendation_service`,
   `capa_draft_service`, `llm_provider`, `llm_fusion_layer`,
   `ai_config_service`, plus the `recommendation_*.py` type/scope helpers.
+- **Employee D4 candidate preview** — `capa_current_access` shares fresh namespace,
+  role and object-scope reads with runtime task wrappers; `capa_d4_redaction`
+  performs bounded deterministic literal/format replacement only.
+  `capa_d4_text_preview` uses explicit D4 fields in tenant-bound readonly snapshots,
+  current declared FMEA access, opaque source versions and final rechecks before
+  safe audit commit. All output stays restricted; no body cache, business update,
+  embedding or plugin/model delivery. See
+  [employee preview operations](../../../docs/development/capa-d4-text-preview.md).
+- **Controlled CAPA outcome read** — `capa_outcome_review.read_outcome_review`
+  admits the current employee through `capa_current_access`, captures its
+  `TenantBinding`, and uses only the request `db.bind` engine for a dedicated
+  REPEATABLE READ / READ ONLY snapshot. The independent request-session gate
+  rechecks live identity/role/scope, source access, state, round, material and
+  response before returning. After request-session DTO assembly it takes shared
+  CAPA then source-parent locks (control_plan before fmea, matching writer
+  order), and re-reads/compares complete material and DTO under that fence.
+  Locks remain until the request transaction ends; no business/audit writes or
+  request-transaction isolation changes occur. Material, unreviewed supplement
+  and decision/editor audit metadata committed before the fence invalidate the
+  old response. Normal Task 2 parent/source writers serialize behind it, while
+  authority is independently checked again after assembly. The dedicated
+  snapshot remains REPEATABLE READ / READ ONLY. Multi-tenant reads never fall back to public;
+  single mode explicitly binds public. The internal `collect_outcome_material`
+  is not an authorization grant and can also run under a caller's already
+  authorized, parent/source-locked READ COMMITTED write transaction without
+  changing isolation or writing anything.
+  Canonical keys are `contract/tenant_identity/report_id/factory_id/`
+  `product_line_code/round_id/core/verifications/d7_actions/doc_gate/source_versions`.
+  The domain-separated HMAC-SHA256 covers the reviewed core whitelist, all
+  actual child fields/versions, and accepted gate/version identities. UUID
+  batches are 100 rows without a UI count cap; evidence and source collections
+  have deterministic ordering. Unbounded text/JSON lengths (including immutable
+  version fields loaded by existing integrity validators) are preflighted;
+  incremental canonical and final response budgets are separately 8 MiB, with
+  whole-read rejection rather than truncation or cleanup.
+  FMEA uses FMEA VIEW and Control Plans use PLANNING VIEW. Version identity,
+  object/factory ownership, hash integrity and historical node/CAUSE_OF checks
+  use immutable versions, never latest graphs. Verification cause IDs are
+  required non-empty strings, unlike an optional report node ID. D7 may refer to a different
+  same-scope FMEA. Pending explicit FMEA references outside the gate set bind
+  existing controlled versions; missing versions conflict and GET creates none.
+  Terminal reads use only the accepted gate and nested
+  `D8_APPROVED`/`D8_REJECTED.changed_fields.outcome_review` envelope:
+  `{contract, round_id, revision, doc_decision_id, source_versions}`; each source
+  is exactly `{module, object_id, version_id, sha256}` with `module` `fmea` or
+  `planning`. Verification requires exact envelope keys, the bound gate decision
+  ID, and a unique, complete matching source set as well as the HMAC. Recovering
+  a missing receipt source from an existing gate does not make the receipt
+  verified. The old gate `control_plan` spelling normalizes to `planning` in
+  document DTOs but is never accepted as a receipt module.
+  Production TRANSITION `new_status=D8_APPROVAL_PENDING` identifies a round;
+  legacy pending uses only the server tenant/report identity:
+  `uuid5(NAMESPACE_URL, 'capa.outcome-review.legacy:' + str(tenant_identity) + ':' + str(report_id))`.
+  No updated_at/mutable maintenance field or GET write participates. Ordinary
+  maintenance preserves the fallback round/HMAC; real material/source changes
+  still change HMAC and audited resubmission obtains a new transition round.
+  Missing terminal receipts are `legacy_unversioned`, not
+  fabricated approvals; malformed or non-reverifiable HMAC receipts are
+  `unverifiable` and existing valid-format historical revisions are not re-signed.
+  Necessary sources lacking any recoverable immutable binding fail the whole
+  read rather than pretending historical verification. Status, decision DTO,
+  d8 supplement, report updated_at and admission generation are not digest
+  inputs. The supplement's editor/time comes only from its actual UPDATE audit.
+  This reader does not implement D8 decision/receipt production (Task 4).
 - **Subdirectories** (composite areas with their own internal structure):
+  - `agent_runtime/` — persistent target-bound tasks, plugin credentials and
+    current-authority readonly delivery. Controls, checkpoints and activity
+    pointers share INSTALL → TASK → RUN locking and caller transactions;
+    historical reads recheck all actual sources. `trial_policy.py` loads an
+    immutable default-off local metadata declaration; normal profile/grant
+    admission and bound JWT deadlines never replace current business authority.
+    Registry CAS revocation fences credentials; `trial_launcher.py` runs only
+    pinned bytes with private files, a clean environment and bounded children.
+    See [local trial operations](../../../docs/development/agent-local-trial.md).
+    This is separate from the legacy gateway and introduces no provider or
+    business-write commands.
   - `agent/` — agent harness (tool registry, state gateway, memory, audit).
     Has its own README.
   - `cp_validation/` — Control Plan import/validation pipeline.
@@ -87,6 +164,26 @@ CLI commands in `cli/`. Conventions every caller can rely on:
   `state_machines/fmea_state.can_transition`,
   `state_machines/eight_d_state.can_transition`, etc. Never compare
   status strings inline.
+- **Reviewed CAPA material-lock helper.** `capa_review_guard.lock_material_write()`
+  provides the parent-row refresh and reviewed-content check for CAPA material
+  writers before they lock children or create audits/outbox rows. It does not
+  grant a capability or replace existing route and service permission checks.
+  `capa_review_source_guard` locks technical CAPA references before FMEA or
+  Control Plan deletion, then rechecks the reference set under the document
+  lock; reviewed references reject deletion without loading CAPA material.
+  `lock_current_material_write()` derives live actor authority at admission and
+  after the parent lock, before exposing terminal state. Doc-gate waiver keeps
+  its APPROVE minimum across that wait; other material writes retain EDIT.
+  Reference collection includes verification source identities and historical
+  doc-gate snapshots, plus `changed_fields.outcome_review` receipts with
+  contract `capa.outcome-review.v1` and a `source_versions` array. `planning`
+  aliases Control Plan identities. JSON-only doc-gate audit creators serialize
+  CAPA → ProductLine → document and revalidate after locking, so they cannot
+  commit a dangling reference in deletion's final-recheck interval.
+  D7 additionally rechecks live FMEA VIEW (confirmation) or EDIT (auto-fill)
+  before terminal disclosure after the parent wait; auto-fill rechecks both
+  modules again after its source-document wait. Adoption rollback recovery
+  retains a trusted actor UUID scalar, never an expired User attribute.
 - **No HTTP, no FastAPI imports.** Services know about `AsyncSession`,
   ORM models, state machines, outbox queues — nothing about requests,
   responses, headers, or auth tokens. Auth context arrives as plain
@@ -106,3 +203,26 @@ CLI commands in `cli/`. Conventions every caller can rely on:
   workers (`embedding_sync_worker`, `graph_sync_worker`), and other
   services that compose workflows (e.g. `capa_service` calls
   `version_service`, `fmea_service` calls `product_line_service`).
+
+
+## Outcome-review handoff (2026-11-01)
+
+See the [operator guide](../../../docs/development/capa-outcome-review.md) for current-material review,
+explicit reload after conflict/uncertainty, historical unbound labels, and terminal
+core versus unreviewed closure-supplement rules (archived supplement retains the
+existing 400; reviewed core and mixed updates use 409). Controlled revision/reopen
+is not implemented. No plugin/model delivery or production enablement is authorized.
+Stories 01.3 v2, 01.7 v3 and 01.8 v2 and their derived walkthroughs keep the
+2026-10-27 business-contract versions; this is not signoff for every story walkthrough.
+The authorized TEST-profile Task 7 gate passed: one real-provider HTTP/D8/Chromium/
+knowledge/lateral primary chain plus two independent protection cases (3 passed,
+5 warnings, exit 0). The separate real ClamAV gate passed (process 7 + browser 1).
+The new source-frozen full `make check` passed: 3450 passed, 12 skipped, 3 xfailed,
+2 xpassed, 5 warnings, exit 0. These ordinary skips do not substitute for scanner
+acceptance. The 1390-file freeze explicitly preserves the user-deleted example.
+Actual post-full checks and evidence are recorded in PROGRESS's final Task 8 section
+and the private final-closure report. Final independent review passed; the exact
+registered core container and its exclusive volume (both owned test databases)
+were disposed after fresh identity and zero-use checks. The worktree, user TEST
+profile, user-owned example deletion and all evidence remain preserved.
+No dependency, migration, authority, self-approval, or deployment change is implied.

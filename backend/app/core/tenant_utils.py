@@ -1,6 +1,15 @@
 """Tenant utility functions — shared between runtime code and Alembic env.py."""
 import re
 from contextvars import ContextVar
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.core.tenant_transaction import TenantBinding
+
+# Capture ID and generation at request/worker entry; schema alone is not authority.
+current_tenant_binding: ContextVar["TenantBinding | None"] = ContextVar(
+    "current_tenant_binding", default=None
+)
 
 # Context variable: current request/task's tenant schema name
 current_tenant_schema: ContextVar[str | None] = ContextVar("current_tenant_schema", default=None)
@@ -18,6 +27,13 @@ def slug_to_schema_name(slug: str) -> str:
     if not _SCHEMA_PATTERN.match(schema_name):
         raise ValueError(f"Invalid schema name derived from slug: {slug!r} -> {schema_name!r}")
     return schema_name
+
+
+def strict_tenant_search_path_sql(schema_name: str) -> str:
+    """Normal transactions never resolve unqualified business tables in public."""
+    if not isinstance(schema_name, str) or not _SCHEMA_PATTERN.fullmatch(schema_name):
+        raise ValueError(f"Invalid tenant schema name: {schema_name!r}")
+    return f'SET LOCAL search_path TO "{schema_name}", pg_catalog'
 
 
 def set_search_path_sql(schema_name: str) -> str:

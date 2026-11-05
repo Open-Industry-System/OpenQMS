@@ -14,6 +14,7 @@ pytest + asyncio tests covering:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -38,7 +39,7 @@ from app.core.security import create_access_token, hash_password
 from app.models.user import User
 from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.product_line import ProductLine
-from app.models.spc import InspectionCharacteristic
+from app.models.spc import InspectionCharacteristic, SampleBatch, SampleValue
 from app.models.mes import (
     MESConnection,
     MESSyncJob,
@@ -49,6 +50,8 @@ from app.models.mes import (
     MESEquipmentStatus,
 )
 from app.models.audit import AuditLog
+from app.services import mes_service
+from app.services.mes_connector import RESTMESConnector
 from app.services.mes_service import (
     MESIngestionService,
     MESSyncService,
@@ -238,33 +241,34 @@ async def test_connection(db: AsyncSession, admin_user: User):
     await db.flush()
     await db.commit()
 
+    connection_id = conn.connection_id
     yield conn
 
     # Cleanup: delete by PK
     async with app_async_session() as cleanup_db:
         # Delete dependent records first
         await cleanup_db.execute(
-            delete(MESPushOutbox).where(MESPushOutbox.connection_id == conn.connection_id)
+            delete(MESPushOutbox).where(MESPushOutbox.connection_id == connection_id)
         )
         await cleanup_db.execute(
-            delete(MESSyncJob).where(MESSyncJob.connection_id == conn.connection_id)
+            delete(MESSyncJob).where(MESSyncJob.connection_id == connection_id)
         )
         await cleanup_db.execute(
             delete(MESMeasurementIngestion).where(
-                MESMeasurementIngestion.connection_id == conn.connection_id
+                MESMeasurementIngestion.connection_id == connection_id
             )
         )
         await cleanup_db.execute(
-            delete(MESScrapRecord).where(MESScrapRecord.connection_id == conn.connection_id)
+            delete(MESScrapRecord).where(MESScrapRecord.connection_id == connection_id)
         )
         await cleanup_db.execute(
-            delete(MESProductionOrder).where(MESProductionOrder.connection_id == conn.connection_id)
+            delete(MESProductionOrder).where(MESProductionOrder.connection_id == connection_id)
         )
         await cleanup_db.execute(
-            delete(MESEquipmentStatus).where(MESEquipmentStatus.connection_id == conn.connection_id)
+            delete(MESEquipmentStatus).where(MESEquipmentStatus.connection_id == connection_id)
         )
         await cleanup_db.execute(
-            delete(MESConnection).where(MESConnection.connection_id == conn.connection_id)
+            delete(MESConnection).where(MESConnection.connection_id == connection_id)
         )
         await cleanup_db.commit()
 @pytest_asyncio.fixture(scope="function")
@@ -287,14 +291,38 @@ async def test_ic(db: AsyncSession, admin_user: User):
     await db.flush()
     await db.commit()
 
+    ic_id = ic.ic_id
     yield ic
 
     # Cleanup
     async with app_async_session() as cleanup_db:
         await cleanup_db.execute(
-            delete(InspectionCharacteristic).where(InspectionCharacteristic.ic_id == ic.ic_id)
+            delete(InspectionCharacteristic).where(InspectionCharacteristic.ic_id == ic_id)
         )
         await cleanup_db.commit()
+@pytest_asyncio.fixture
+async def mes_rest_transport(monkeypatch):
+    """Keep real MES/REST logic; replace only external HTTP in single-tenant mode."""
+    original_factory = mes_service.get_mes_connector_by_config
+    clients = []
+
+    def install(handler):
+        def build(connector_type, config, db=None):
+            connector = original_factory(connector_type, config, db)
+            assert isinstance(connector, RESTMESConnector)
+            clients.append(connector._client)
+            connector._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            clients.append(connector._client)
+            return connector
+        monkeypatch.setattr(mes_service, "get_mes_connector_by_config", build)
+
+    monkeypatch.setattr(settings, "TENANT_MODE", "single")
+    try:
+        yield install
+    finally:
+        for client in clients:
+            await client.aclose()
+
 @pytest_asyncio.fixture(scope="function")
 async def auth_client(admin_user: User):
     """Return an httpx.AsyncClient with JWT auth header."""
@@ -539,56 +567,55 @@ class TestMeasurementAtomicity:
     """Tests for measurement ingestion transaction atomicity."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Uses app_async_session() which doesn't see test transaction data; needs refactor to use test db fixture", strict=False)
     async def test_ingestion_atomic_rollback(
-        self, db: AsyncSession, test_connection: MESConnection, test_ic: InspectionCharacteristic
+        self, db: AsyncSession, test_connection: MESConnection,
+        test_ic: InspectionCharacteristic, monkeypatch
     ):
-        """If ingestion INSERT succeeds but downstream SPC fails, the transaction
-        should roll back and no ingestion record should remain."""
-        # Use a mock IC with invalid spec to trigger SPC failure
-        # Actually, let's test by rolling back explicitly after a successful insert
+        """A downstream SPC failure must not persist partial ingestion or samples."""
+        connection_id, ic_id, ic_code = test_connection.connection_id, test_ic.ic_id, test_ic.ic_code
         external_id = f"TEST-MEAS-{uuid.uuid4().hex[:8]}"
-
         data = {
-            "data_type": "measurement",
-            "connection_id": str(test_connection.connection_id),
-            "external_id": external_id,
-            "ic_code": test_ic.ic_code,
+            "data_type": "measurement", "connection_id": str(connection_id),
+            "external_id": external_id, "ic_code": ic_code,
             "values": [5.0, 5.1, 5.2, 5.0, 5.1],
-            "sampled_at": datetime.now(timezone.utc),
-            "product_line_code": "DC-DC-100",
+            "sampled_at": datetime.now(timezone.utc), "product_line_code": "DC-DC-100",
         }
+        reevaluate = mes_service._reevaluate_alarms_no_commit
+        batch_ids = []
 
-        # First ingestion should succeed
-        result = await MESIngestionService.ingest(db, data)
-        assert result["status"] == "success"
+        async def fail_after_spc(session, characteristic):
+            await reevaluate(session, characteristic)
+            batch_ids.extend((await session.scalars(select(SampleBatch.batch_id).where(
+                SampleBatch.ic_id == ic_id, SampleBatch.batch_no == external_id,
+            ))).all())
+            assert len(batch_ids) == 1
+            assert await session.scalar(select(func.count()).select_from(SampleValue).where(
+                SampleValue.batch_id.in_(batch_ids))) == 5
+            assert await session.scalar(select(func.count()).select_from(AuditLog).where(
+                AuditLog.table_name == "sample_batches", AuditLog.record_id.in_(batch_ids))) == 1
+            raise RuntimeError("forced failure after SPC reevaluation")
 
-        # Verify ingestion record exists
-        result = await db.execute(
-            select(MESMeasurementIngestion).where(
-                MESMeasurementIngestion.external_id == external_id,
-                MESMeasurementIngestion.connection_id == test_connection.connection_id,
-            )
-        )
-        ingest_record = result.scalar_one_or_none()
-        assert ingest_record is not None
+        with monkeypatch.context() as fault:
+            fault.setattr(mes_service, "_reevaluate_alarms_no_commit", fail_after_spc)
+            with pytest.raises(RuntimeError, match="forced failure after SPC reevaluation"):
+                await MESIngestionService.ingest(db, data)
+            await db.rollback()
 
-        # Now simulate rollback by starting fresh and forcing an error mid-transaction
-        # We do this by checking that if we rollback, the record is gone
-        await db.rollback()
-
-        # After rollback, the record should not be visible in a new session
         async with app_async_session() as fresh_db:
-            result = await fresh_db.execute(
-                select(MESMeasurementIngestion).where(
-                    MESMeasurementIngestion.external_id == external_id,
-                    MESMeasurementIngestion.connection_id == test_connection.connection_id,
-                )
-            )
-            # Note: the first ingest was committed by the test framework's db fixture
-            # This test verifies the service doesn't commit internally
-            # The key assertion is that the service methods don't call commit
-            assert result.scalar_one_or_none() is None or True  # May or may not exist depending on isolation
+            assert await fresh_db.scalar(select(func.count()).select_from(MESMeasurementIngestion).where(
+                MESMeasurementIngestion.connection_id == connection_id,
+                MESMeasurementIngestion.external_id == external_id)) == 0
+            assert await fresh_db.scalar(select(func.count()).select_from(SampleBatch).where(
+                SampleBatch.ic_id == ic_id, SampleBatch.batch_no == external_id)) == 0
+            assert await fresh_db.scalar(select(func.count()).select_from(SampleValue).where(
+                SampleValue.batch_id.in_(batch_ids))) == 0
+            assert await fresh_db.scalar(select(func.count()).select_from(AuditLog).where(
+                AuditLog.table_name == "sample_batches", AuditLog.record_id.in_(batch_ids))) == 0
+
+        # Rollback must also release the external_id for a genuine retry.
+        retry = await MESIngestionService.ingest(db, data)
+        assert retry["status"] == "success"
+        await db.rollback()
 
     @pytest.mark.asyncio
     async def test_duplicate_external_id_skipped(
@@ -624,92 +651,104 @@ class TestIdempotentRedelivery:
     """Tests for outbox idempotent redelivery."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="SKIP LOCKED cannot see rows in uncommitted test transaction; needs refactor", strict=False)
-    async def test_crash_redelivery_idempotent(self, db: AsyncSession, test_connection: MESConnection):
-        """Simulate crash after push but before status update.
-        On retry, the push should be idempotent (no duplicate side effects)."""
-        # This tests the claim token mechanism: after recovery, the item
-        # goes back to pending and can be re-claimed and re-processed.
+    async def test_crash_redelivery_idempotent(
+        self, db: AsyncSession, test_connection: MESConnection, mes_rest_transport
+    ):
+        """Redelivery uses the same event_id after a remote receipt and worker crash."""
+        connection_id = test_connection.connection_id
+        test_connection.connector_type = "rest"
+        test_connection.config = _make_rest_config(auth_type="none", auth_config={})
         outbox = MESPushOutbox(
-            event_type="spc_alarm",
-            connection_id=test_connection.connection_id,
-            payload={"ic_code": "TEST-001", "alarm_count": 1},
-            status="processing",
-            started_at=datetime.now(timezone.utc) - timedelta(minutes=15),
-            claim_token="crash-token",
-            next_retry_at=datetime.now(timezone.utc),
-            retry_count=0,
+            event_type="spc_alarm", connection_id=connection_id,
+            payload={"ic_code": "TEST-001", "alarm_count": 1}, status="pending",
+            next_retry_at=datetime.now(timezone.utc), retry_count=0,
             factory_id=test_connection.factory_id,
         )
         db.add(outbox)
         await db.commit()
+        outbox_id = outbox.outbox_id
+        requests, claim_tokens, remote_effects = [], [], {}
 
-        # Recover stuck outbox (simulates crash recovery)
-        recovered = await MESPushService.recover_stuck_outbox(db)
+        async def receive(request):
+            assert request.method == "POST" and request.url.path == "/api/push"
+            payload = json.loads(request.content)
+            requests.append(payload)
+            remote_effects.setdefault(payload["event_id"], payload)
+            async with app_async_session() as observer:
+                claimed = await observer.get(MESPushOutbox, outbox_id)
+                assert claimed.status == "processing"
+                claim_tokens.append(claimed.claim_token)
+            if len(requests) == 1:
+                raise asyncio.CancelledError("worker crashed after remote receipt")
+            return httpx.Response(200, json={"accepted": True})
+
+        mes_rest_transport(receive)
+        with pytest.raises(asyncio.CancelledError, match="worker crashed after remote receipt"):
+            await MESPushService.process_outbox(db)
+        async with app_async_session() as recovery_db:
+            crashed = await recovery_db.get(MESPushOutbox, outbox_id)
+            assert crashed.status == "processing" and crashed.sent_at is None
+            assert crashed.claim_token is not None
+            crashed.started_at = datetime.now(timezone.utc) - timedelta(minutes=15)
+            await recovery_db.commit()
+
+        assert await MESPushService.recover_stuck_outbox(db, connection_id) == 1
         await db.commit()
-        assert recovered >= 1
+        async with app_async_session() as observer:
+            recovered = await observer.get(MESPushOutbox, outbox_id)
+            assert recovered.status == "pending"
+            assert recovered.started_at is None and recovered.claim_token is None
 
-        # Verify item is back to pending
-        result = await db.execute(
-            select(MESPushOutbox).where(MESPushOutbox.outbox_id == outbox.outbox_id)
-        )
-        item = result.scalar_one()
-        assert item.status == "pending"
-        assert item.claim_token is None
-
-        # Now claim it again (simulates redelivery)
-        claimed = await MESPushService.claim_items(db)
-        await db.commit()
-
-        our_item = [c for c in claimed if c.outbox_id == outbox.outbox_id]
-        assert len(our_item) == 1
-        assert our_item[0].status == "processing"
-        assert our_item[0].claim_token is not None
+        await MESPushService.process_outbox(db)
+        async with app_async_session() as observer:
+            delivered = await observer.get(MESPushOutbox, outbox_id)
+            assert delivered.status == "sent" and delivered.sent_at is not None
+            assert delivered.claim_token is None and delivered.retry_count == 0
+        assert [request["event_id"] for request in requests] == [str(outbox_id), str(outbox_id)]
+        assert all(claim_tokens) and claim_tokens[0] != claim_tokens[1]
+        # A receiver honoring event_id observes only one logical side effect.
+        assert len(remote_effects) == 1
+        await MESPushService.process_outbox(db)
+        assert len(requests) == 2
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="SKIP LOCKED cannot see rows in uncommitted test transaction; needs refactor", strict=False)
-    async def test_process_outbox_full_flow(self, db: AsyncSession, test_connection: MESConnection):
-        """Test the full outbox flow: pending -> claim -> process -> sent."""
+    async def test_process_outbox_full_flow(
+        self, db: AsyncSession, test_connection: MESConnection, mes_rest_transport
+    ):
+        """The actual processor commits its claim, sends HTTP, and persists sent."""
+        connection_id = test_connection.connection_id
+        test_connection.connector_type = "rest"
+        test_connection.config = _make_rest_config(auth_type="none", auth_config={})
         outbox = MESPushOutbox(
-            event_type="spc_alarm",
-            connection_id=test_connection.connection_id,
-            payload={"ic_code": "TEST-002", "alarm_count": 1},
-            status="pending",
-            next_retry_at=datetime.now(timezone.utc),
-            retry_count=0,
+            event_type="spc_alarm", connection_id=connection_id,
+            payload={"ic_code": "TEST-002", "alarm_count": 1}, status="pending",
+            next_retry_at=datetime.now(timezone.utc), retry_count=0,
             factory_id=test_connection.factory_id,
         )
         db.add(outbox)
         await db.commit()
+        outbox_id = outbox.outbox_id
+        requests = []
 
-        # Step 1: claim
-        claimed = await MESPushService.claim_items(db)
-        await db.commit()
-        our_item = [c for c in claimed if c.outbox_id == outbox.outbox_id]
-        assert len(our_item) == 1
+        async def receive(request):
+            assert request.method == "POST" and request.url.path == "/api/push"
+            async with app_async_session() as observer:
+                claimed = await observer.get(MESPushOutbox, outbox_id)
+                assert claimed.status == "processing" and claimed.claim_token
+            requests.append(json.loads(request.content))
+            return httpx.Response(200, json={"accepted": True})
 
-        # Step 2: manually mark as sent (simulating successful push)
-        async with app_async_session() as write_db:
-            result = await write_db.execute(
-                select(MESPushOutbox)
-                .where(MESPushOutbox.outbox_id == outbox.outbox_id)
-                .with_for_update()
-            )
-            item = result.scalar_one()
-            item.status = "sent"
-            item.sent_at = datetime.now(timezone.utc)
-            item.claim_token = None
-            await write_db.commit()
-
-        # Verify final state
-        async with app_async_session() as verify_db:
-            result = await verify_db.execute(
-                select(MESPushOutbox).where(MESPushOutbox.outbox_id == outbox.outbox_id)
-            )
-            final = result.scalar_one()
-            assert final.status == "sent"
-            assert final.sent_at is not None
-            assert final.claim_token is None
+        mes_rest_transport(receive)
+        await MESPushService.process_outbox(db)
+        async with app_async_session() as observer:
+            delivered = await observer.get(MESPushOutbox, outbox_id)
+            assert delivered.status == "sent" and delivered.sent_at is not None
+            assert delivered.claim_token is None and delivered.last_error is None
+            assert delivered.retry_count == 0
+        assert requests == [{"ic_code": "TEST-002", "alarm_count": 1,
+                             "event_id": str(outbox_id), "event_type": "spc_alarm"}]
+        await MESPushService.process_outbox(db)
+        assert len(requests) == 1
 # ---------------------------------------------------------------------------
 # TestIngestValidation
 # ---------------------------------------------------------------------------
@@ -1018,59 +1057,42 @@ class TestSyncRoundValidationFailure:
     """Tests for sync round behavior when validation fails."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Uses app_async_session() which doesn't see test transaction data; needs refactor to use test db fixture", strict=False)
     async def test_sync_round_bad_data_fails_job_preserves_checkpoint(
-        self, db: AsyncSession, test_connection: MESConnection
+        self, db: AsyncSession, test_connection: MESConnection, mes_rest_transport
     ):
-        """When sync encounters bad data, the job should fail but checkpoint should be unchanged."""
-        # Create a sync job with an existing checkpoint
+        """Real REST validation failure is handled without advancing the checkpoint."""
+        connection_id = test_connection.connection_id
+        test_connection.connector_type = "rest"
+        test_connection.config = _make_rest_config(auth_type="none", auth_config={})
         existing_checkpoint = datetime(2026, 1, 1, tzinfo=timezone.utc)
-
-        result = await db.execute(
-            select(MESSyncJob).where(MESSyncJob.connection_id == test_connection.connection_id)
+        job = MESSyncJob(
+            connection_id=connection_id, data_type="production_orders", status="pending",
+            checkpoint=existing_checkpoint, next_run_at=datetime.now(timezone.utc),
+            consecutive_failures=0, factory_id=test_connection.factory_id,
         )
-        job = result.scalar_one_or_none()
-        if job is None:
-            job = MESSyncJob(
-                connection_id=test_connection.connection_id,
-                data_type="production_orders",
-                status="running",
-                checkpoint=existing_checkpoint,
-                started_at=datetime.now(timezone.utc),
-                claim_token="test-token",
-                factory_id=test_connection.factory_id,
-            )
-            db.add(job)
-        else:
-            job.status = "running"
-            job.checkpoint = existing_checkpoint
-            job.started_at = datetime.now(timezone.utc)
-            job.claim_token = "test-token"
-            job.consecutive_failures = 0
+        db.add(job)
         await db.commit()
+        job_id = job.job_id
+        requests = []
 
-        # Simulate a failure by manually marking the job as failed
-        # (The actual _sync_single_job would catch exceptions and handle this)
-        async with app_async_session() as fail_db:
-            result = await fail_db.execute(
-                select(MESSyncJob)
-                .where(MESSyncJob.job_id == job.job_id)
-                .with_for_update()
-            )
-            failed_job = result.scalar_one()
-            failed_job.status = "failed"
-            failed_job.claim_token = None
-            failed_job.consecutive_failures += 1
-            failed_job.error_message = "Validation failed"
-            await fail_db.commit()
+        def invalid_mes_response(request):
+            assert request.method == "GET" and request.url.path == "/api/orders"
+            requests.append(request)
+            # The existing REST validator rejects the missing source_updated_at.
+            return httpx.Response(200, json=[{"order_number": "INVALID-SYNC-ORDER"}])
 
-        # Verify checkpoint is preserved
-        result = await db.execute(
-            select(MESSyncJob).where(MESSyncJob.job_id == job.job_id)
-        )
-        refreshed = result.scalar_one()
-        assert refreshed.status == "failed"
-        assert refreshed.checkpoint == existing_checkpoint
+        mes_rest_transport(invalid_mes_response)
+        await MESSyncService.run_sync_round(db, connection_id)
+        async with app_async_session() as observer:
+            failed = await observer.get(MESSyncJob, job_id)
+            assert failed.status == "failed"
+            assert failed.checkpoint == existing_checkpoint
+            assert failed.claim_token is None and failed.consecutive_failures == 1
+            assert failed.completed_at is None
+            assert "source_updated_at" in failed.error_message
+            assert await observer.scalar(select(func.count()).select_from(MESProductionOrder).where(
+                MESProductionOrder.connection_id == connection_id)) == 0
+        assert len(requests) == 1
 # ---------------------------------------------------------------------------
 # TestRESTConfigValidation
 # ---------------------------------------------------------------------------

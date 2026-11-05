@@ -1,6 +1,7 @@
 import uuid
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
 from app.models.fmea import FMEADocument
@@ -179,6 +180,7 @@ async def test_update_change_cause_writes_linkage(db, default_factory, admin_use
     # graph has only cause-2; add cause-3 via a second FMEA? No—same FMEA, add node directly:
     fmea.graph_data["nodes"].append({"id": "cause-3", "type": "FailureCause", "name": "x"})
     fmea.graph_data["edges"].append({"source": "cause-3", "target": "fm-1", "type": "CAUSE_OF"})
+    flag_modified(fmea, "graph_data")
     await db.flush()
     await update_verification(db, capa, rec.verification_id,
                               VerificationUpdate(source_ref={"fmea_id": str(fmea.fmea_id), "cause_node_id": "cause-3"}),
@@ -197,6 +199,7 @@ async def test_update_conclusion_and_cause_carries_old_source_ref_no_updated(
     fmea = await _make_fmea_with_cause(db, default_factory.id, admin_user.user_id, cause_id="cause-a")
     fmea.graph_data["nodes"].append({"id": "cause-b", "type": "FailureCause", "name": "b"})
     fmea.graph_data["edges"].append({"source": "cause-b", "target": "fm-1", "type": "CAUSE_OF"})
+    flag_modified(fmea, "graph_data")
     await db.flush()
     capa = await _make_capa_linked(db, default_factory.id, admin_user.user_id, fmea.fmea_id)
     rec = await create_verification(db, capa, VerificationCreate(

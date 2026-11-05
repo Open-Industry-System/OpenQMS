@@ -49,7 +49,7 @@ def _intersect_scopes(attempt: AccessAttempt) -> AccessDecision:
 
 
 def authorize(attempt: AccessAttempt) -> AccessDecision:
-    canonical = get_capability(attempt.spec.id)
+    canonical = get_capability(attempt.spec.id, profile=attempt.catalog_profile)
     if canonical is None or canonical != attempt.spec:
         return AccessDecision(False, "unlisted capability", ApprovalFloor.DENY)
     return _intersect_scopes(attempt)

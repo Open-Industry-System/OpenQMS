@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from app.config import settings
+from app.core.tenant_transaction import require_single_tenant_global_feature
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +224,7 @@ class GraphProjectionService:
 
     async def full_rebuild(self) -> dict:
         """全量重建：清空 Neo4j + 遍历所有 FMEA 逐个同步。"""
+        require_single_tenant_global_feature("global graph rebuild")
         from sqlalchemy import func, select
 
         from app.models.fmea import FMEADocument

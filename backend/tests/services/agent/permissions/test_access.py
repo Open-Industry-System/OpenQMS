@@ -179,3 +179,68 @@ def test_naive_grant_timestamps_fail_closed(grant_field, naive_field):
     else:
         attempt = replace(attempt, now=attempt.now.replace(tzinfo=None))
     assert not _intersect_scopes(replace(attempt, **{grant_field: grant})).allowed
+
+
+def _controlled_attempt():
+    attempt = _attempt()
+    spec = get_capability("capa.d4.summary.masked.v1", profile="local_metadata_v1")
+    grant = replace(attempt.plugin_grant, capability_id=spec.id)
+    return replace(attempt, spec=spec, plugin_grant=grant, task_grant=grant,
+                   catalog_profile="local_metadata_v1")
+
+
+def test_controlled_profile_keeps_main_scope_safeguards():
+    """Neither main-only catalog lookup nor feature-only scope checks suffice."""
+    attempt = _controlled_attempt()
+    assert authorize(attempt).allowed
+    group = {**attempt.identity_levels, Module.GROUP: PermissionLevel.ADMIN}
+    assert authorize(replace(attempt, identity_factories=None, identity_levels=group)).allowed
+    assert authorize(replace(attempt, identity_product_lines=None,
+                             identity_bypass_row_level_security=True)).allowed
+
+
+@pytest.mark.parametrize("scope", ["factory", "product_line"])
+def test_controlled_profile_does_not_turn_unresolved_scopes_into_exemptions(scope):
+    attempt = _controlled_attempt()
+    if scope == "factory":
+        attempt = replace(attempt, identity_factories=None)
+    else:
+        attempt = replace(attempt, identity_product_lines=None,
+                          identity_levels={**attempt.identity_levels, Module.GROUP: PermissionLevel.ADMIN})
+    decision = authorize(attempt)
+    assert not decision.allowed
+    assert decision.reason == f"identity {scope.replace('_', ' ')} denied"
+
+
+def test_profile_cannot_lower_baseline_or_enable_a_command():
+    attempt = _controlled_attempt()
+    assert not authorize(replace(attempt, catalog_profile="baseline")).allowed
+    assert not authorize(replace(attempt, catalog_profile="unknown")).allowed
+    command = get_capability("capa.d4.candidate.propose.v1", profile="local_metadata_v1")
+    assert command.approval_floor == ApprovalFloor.DENY
+    assert not authorize(replace(attempt, spec=command)).allowed
+    forged = replace(command, approval_floor=ApprovalFloor.DIRECT)
+    assert not authorize(replace(attempt, spec=forged)).allowed
+
+
+def test_task_grant_derivation_preserves_fresh_explicit_all_lines_scope():
+    from types import SimpleNamespace
+    from app.core.factory_scope import FactoryScope, ProductLineScope
+    from app.schemas.agent_plugin import PluginManifest
+    from app.services.agent_runtime.task_service import _read_grants
+
+    attempt = _controlled_attempt()
+    manifest = PluginManifest(protocol_versions=["1"], required_capabilities=[attempt.spec.id])
+    capa = SimpleNamespace(factory_id=attempt.factory_id, report_id=attempt.object_id,
+                           product_line_code=attempt.product_line_code)
+    plugin = SimpleNamespace(capability_id=attempt.spec.id, enabled=True,
+        factory_ids=[str(attempt.factory_id)], object_ids=[str(attempt.object_id)],
+        product_line_codes=[attempt.product_line_code], expires_at=None)
+    trial = SimpleNamespace(profile="local_metadata_v1", expires_at=attempt.now + timedelta(hours=1))
+    grants, ready = _read_grants(uuid4(), capa, manifest, attempt.identity_levels,
+        FactoryScope([attempt.factory_id], attempt.factory_id), ProductLineScope("ALL", None),
+        [plugin], trial=trial)
+    assert ready
+    assert len(grants) == 1
+    assert grants[0].object_ids == [str(attempt.object_id)]
+    assert grants[0].product_line_codes == [attempt.product_line_code]

@@ -20,3 +20,17 @@ describe('capa PPT review-round i18n', () => {
     });
   }
 });
+
+
+describe('capa outcome review locale contract', () => {
+  const keys = (value: Record<string, unknown>, prefix = ''): string[] => Object.entries(value).flatMap(([key, child]) =>
+    typeof child === 'object' && child !== null ? keys(child as Record<string, unknown>, `${prefix}${key}.`) : [`${prefix}${key}`]);
+  it('has matching nonempty Chinese and English review labels', () => {
+    expect(keys(en.outcome).sort()).toEqual(keys(zh.outcome).sort());
+    for (const locale of [zh, en]) {
+      for (const value of Object.values(locale.outcome.binding)) expect(value.trim()).not.toBe('');
+      expect(locale.outcome.conclusion.pending).not.toBe(locale.outcome.conclusion.passed);
+      expect(locale.outcome.actionStatus.pending).not.toBe(locale.outcome.actionStatus.verified);
+    }
+  });
+});

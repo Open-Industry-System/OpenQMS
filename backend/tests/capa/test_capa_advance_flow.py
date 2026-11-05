@@ -10,6 +10,7 @@ from app.schemas.capa_verification import D7NodeActionCreate
 from app.services.capa_d7_action_service import record_d7_action
 from app.services.capa_doc_gate_service import confirm_no_affected
 from app.services.capa_service import advance_capa
+from tests.capa.outcome_review_support import review_expectation, prepare_decision_material
 
 pytestmark = pytest.mark.requires_db
 
@@ -18,7 +19,7 @@ async def _make_capa(db, factory_id, user_id, status="D7_PREVENTION"):
     capa = CAPAEightD(
         report_id=uuid.uuid4(), document_no=f"8D-FLOW-{uuid.uuid4().hex[:6]}",
         title="t", product_line_code="DC-DC-100", factory_id=factory_id,
-        created_by=user_id, status=status, d5_correction="措施A", d6_verification="已验证",
+        created_by=user_id, status=status, d4_root_cause="参数偏移", d5_correction="措施A", d6_verification="已验证",
         d7_prevention="预防",
     )
     db.add(capa); await db.flush()
@@ -36,6 +37,8 @@ async def _make_fmea(db, factory_id, user_id):
         ], "edges": [{"source": "c-1", "target": "fm-1", "type": "CAUSE_OF"}]},
     )
     db.add(fmea); await db.flush()
+    from app.services.version_service import create_fmea_version
+    await create_fmea_version(db, fmea, 'edit', 'controlled flow fixture', user_id)
     return fmea
 
 
@@ -94,7 +97,9 @@ async def test_full_flow_d7_to_d8_closure(db, default_factory, admin_user, monke
     monkeypatch.setattr("app.services.agent.provider_adapter.build_client", _ok_client)
     monkeypatch.setattr("app.services.agent.provider_adapter.complete_json", _ok_json)
 
-    await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(target_state="D8_CLOSURE"))
+    await prepare_decision_material(db, capa, admin_user.user_id)
+    await advance_capa(db, capa, admin_user.user_id, AdvanceRequest(
+        target_state="D8_CLOSURE", **await review_expectation(db, capa)))
     await db.refresh(capa); assert capa.status == "D8_CLOSURE"
 
     # D8_APPROVED 审计已发
@@ -120,11 +125,12 @@ async def test_reject_requires_reason(db, default_factory, admin_user):
     # 缺理由 → 400 ValueError
     with pytest.raises(ValueError, match="驳回需填写理由"):
         await advance_capa(db, capa, admin_user.user_id,
-                           AdvanceRequest(target_state="D7_PREVENTION"))
+                           AdvanceRequest(target_state="D7_PREVENTION", **await review_expectation(db, capa)))
 
     # 有理由 → 回退 D7_PREVENTION + D8_REJECTED 审计
     await advance_capa(db, capa, admin_user.user_id,
-                       AdvanceRequest(target_state="D7_PREVENTION", reject_reason="证据不足"))
+                       AdvanceRequest(target_state="D7_PREVENTION", reject_reason="证据不足",
+                           **await review_expectation(db, capa)))
     await db.refresh(capa); assert capa.status == "D7_PREVENTION"
     rejected = (await db.execute(select(AuditLog).where(
         AuditLog.record_id == capa.report_id, AuditLog.action == "D8_REJECTED"
