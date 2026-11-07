@@ -176,6 +176,8 @@ R4a 的元数据本地受控试用已实现：lifespan 一次加载严格安全�
 
 R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收口既有当前 namespace/角色/对象范围，运行时旧入口保留；纯规则与显式字面词只处理三个D4正文位置，输出固定restricted/未批准降敏/外发关闭。预览服务先验证预算再在捕获租户的独立RR/READ ONLY快照读取显式字段，明确FMEA引用重验当前源权限/坐标/节点，仅返回有权来源元数据，不加载图/标题/附件。源版本用域分离HMAC；最终重查当前权限和源版本后只提交安全审计，不写原文/状态/outbox。三个普通用户接口受独立默认关闭开关和内容安全输入/错误边界保护，运行凭据不适用。只读组件不缓存正文或词语，2秒可见校验、30秒本地最长生命周期，失权/不确定/关闭隐藏时撤回私密内容及词语；旧响应按身份/目标/请求轮次隔离。实际员工API/Chromium已贯通；完整冻结证据见[R4b-1台账](superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)，操作与规则限制见[员工预览指南](development/capa-d4-text-preview.md)。不扩展R4a插件目录或任何正文/模型外发，附件/SDK/部署与正式降敏门禁仍独立。
 
+独立元数据 Python SDK 已实现冻结 DTO/严格 codec/stdlib 同步 transport 与十操作 client，Python ≥3.11、零运行时依赖，不导入后端或访问数据库。服务端仍逐次授权，SDK 不缓存权限、解析 run token、自动重试/续租或执行消息；单调 deadline 覆盖整次操作，finish 可能已发送而缺完整确认时仅报告 unknown 并本地阻止重发。独立 unit/自有回环/实际 wheel 隔离安装以及 normal-policy 真实 HTTP fixture 已分阶段验收；Make/自动 CI 接线与最终组合门禁仍在收尾。SDK 不改变固定 worker/hash/profile/catalog 或生产准入，不开放正文附件外发、模型调用或 R5 业务写；见[SDK 交接与限制](development/agent-metadata-python-sdk.md)和[SDK README](../sdk/python/README.md)。
+
 ### 4.7 租户事务与独立迁移
 
 多租户业务会话在每次事务开始时重新获取共享事务锁，校验 `public.tenants` 的 active 状态、schema 与 generation，然后设置仅含租户 schema 和 `pg_catalog` 的 `SET LOCAL search_path`。跨 commit 的请求和后台任务沿用捕获的 generation；维护或重建后，旧绑定拒绝继续执行。单租户模式显式使用 public；多租户模式不回退 public。
@@ -372,8 +374,8 @@ D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封�
 
 ## 10. 分层验收与发布边界
 
-测试基础设施通过独立 backend、确定性 browser、frontend、显式 scanner/live 层执行；`make check`
-仅组合 backend 与前端检查，不隐式调用真实模型或扫描器。每层根据实际选择、JUnit/hook计数、
+测试基础设施通过独立 SDK、backend、确定性 browser、frontend、显式 scanner/live 层执行；`make check`
+组合 SDK、backend 与前端检查，不隐式调用真实模型或扫描器。SDK 分 unit（Python socket audit）、自有 loopback 和实际 wheel 隔离安装三层，独立解释器与零运行时依赖，不要求数据库或 backend requirements；Python audit 不等于 OS 沙箱。backend 层先离线构建当前 SDK wheel，再经专用资源变量显式传给 normal-policy HTTP fixture，不复用旧构建回执。每层根据实际选择、JUnit/hook计数、
 退出码和过滤日志生成收据；显式gate的零选中、skip/xfail/xpass或缺失收据不得算成功。
 backend保留未配置依赖的实际skip，不把它们记为passed。
 

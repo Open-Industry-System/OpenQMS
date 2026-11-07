@@ -219,13 +219,16 @@ npm run dev      # 开发服务器（:5173，代理 /api → :8000）
 后端使用 pytest，前端使用 TypeScript/Vite 与 Vitest。常规一致性检查从仓库根目录运行：
 
 ```bash
-make check-backend       # 已核验 PostgreSQL 上的 deterministic backend 层
+make check-sdk SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # 独立 SDK 三层
+make check-backend SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # 已核验 PostgreSQL + 当前 SDK wheel
 make check-frontend-tsc  # 类型检查
 make check-frontend-build # 生产构建
-make check               # backend + tsc + build
+make check SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # SDK + backend + tsc + build
 ```
 
-`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。它只允许 `not ci_browser
+SDK 的 `SDK_PYTHON_BIN` 默认 `python3`，与 backend 的 `PYTHON_BIN` 独立；须由调用者提供 Python ≥3.11、pytest、pip 与实际 setuptools==79.0.1，检查入口不会安装或放宽构建版本。`check-sdk-unit`、`check-sdk-loopback`、`check-sdk-wheel` 可独立执行，无数据库/backend requirements 依赖；`check-sdk` 聚合三层。backend 检查先离线构建当前源码 wheel，验证构建 JSON 返回的实际路径和 SHA256，再用专用 `OPENQMS_SDK_WHEEL` 传给真实 HTTP fixture；缺 wheel 不 skip。构建/安装与测试证据写入本次私有子目录，可通过 `SDK_ARTIFACT_ROOT` 指定父目录。详见[SDK 使用与安全边界](../sdk/python/README.md)。
+
+`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。后端层只允许 `not ci_browser
 and not live_provider and not real_scanner`；graph worker/projection 的既有两项排除仍由
 Make 参数显式传递。可通过 `python scripts/check-ci-pure.py tests/ci/
 tests/e2e/test_capa_outcome_runner.py -q -rA` 运行 CI 基础设施纯测试。pure 模式要求

@@ -15,6 +15,142 @@ def test_ordinary_child_rejects_ambient_provider_and_proxy_authority():
     assert env == {'PATH': '/safe', 'HOME': '/owned', 'NO_PROXY': '*', 'no_proxy': '*'}
 
 
+@pytest.mark.parametrize('wheel_mode', ['present', 'missing', 'fakepath'])
+def test_sdk_wheel_resource_crosses_only_explicit_pytest_child_environment(tmp_path, wheel_mode):
+    from tests.e2e.capa_outcome_runner import run_pytest_layer
+
+    root = Path(__file__).resolve().parents[3]
+    artifacts = tmp_path / 'artifacts'
+    artifacts.mkdir()
+    wheel = tmp_path / 'resource.whl'
+    if wheel_mode == 'present':
+        wheel.write_bytes(b'synthetic resource, not installed')
+    source = {'PATH': os.environ['PATH'], 'HOME': str(tmp_path),
+              'OPENQMS_SDK_UNRELATED': 'must-not-pass', 'LLM_API_KEY': 'must-not-pass',
+              'AWS_SECRET_ACCESS_KEY': 'must-not-pass'}
+    if wheel_mode != 'missing':
+        source['OPENQMS_SDK_WHEEL'] = str(wheel)
+    expected = source.get('OPENQMS_SDK_WHEEL')
+    sample = tmp_path / 'test_sdk_resource.py'
+    sample.write_text(
+        'import os, pytest\n'
+        'def test_resource():\n'
+        f'    assert os.environ.get("OPENQMS_SDK_WHEEL") == {expected!r}\n'
+        '    assert "OPENQMS_SDK_UNRELATED" not in os.environ\n'
+        '    assert "AWS_SECRET_ACCESS_KEY" not in os.environ\n'
+        '    assert not os.environ.get("LLM_API_KEY")\n'
+        + ('    from tests.e2e.sdk_process_support import sdk_runtime\n'
+           '    with pytest.raises(AssertionError, match="explicit SDK wheel required"):\n'
+           '        next(sdk_runtime.__wrapped__())\n' if wheel_mode != 'present' else '')
+    )
+    receipt = run_pytest_layer(
+        layer='api', targets=[str(sample)], source=source,
+        database_url='postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_resource_test',
+        artifacts=artifacts, python=sys.executable,
+        pytest_entrypoint=(str(root / 'scripts/check-ci-pure.py'),),
+    )
+    assert receipt['status'] == 'PASSED'
+    assert receipt['selected'] == receipt['passed'] == 1
+    assert receipt['skipped'] == receipt['xfailed'] == receipt['xpassed'] == 0
+    assert 'must-not-pass' not in ''.join(path.read_text() for path in artifacts.iterdir())
+
+
+@pytest.mark.parametrize('result, expected', [
+    ('pass', 'PASSED'), ('skip', 'FAILED'), ('missing', 'FAILED'),
+    ('substituted', 'FAILED'), ('duplicate', 'FAILED'),
+    ('xfail', 'FAILED'), ('xpass', 'FAILED'), ('ordinary_skip', 'PASSED'),
+])
+@pytest.mark.parametrize('targets', [('tests',), None])
+def test_api_requires_exact_sdk_junit_nodes_but_preserves_ordinary_skips(
+    tmp_path, monkeypatch, result, expected, targets,
+):
+    import json
+    from xml.etree import ElementTree as ET
+    from tests.ci.gate_results import COUNTS
+    from tests.ci.test_layer_selection import SDK_PROCESS_BACKEND_NODES
+    from tests.e2e.capa_outcome_runner import DEFAULT_TARGETS, run_pytest_layer
+
+    cases = ET.Element('testsuite')
+    names = [node.split('::')[1] for node in SDK_PROCESS_BACKEND_NODES]
+    if result == 'missing':
+        names.pop()
+    elif result == 'substituted':
+        names[-1] = 'test_unrelated_replacement'
+    elif result == 'duplicate':
+        names[-1] = names[0]
+    for name in names:
+        ET.SubElement(cases, 'testcase', classname='tests.e2e.test_agent_sdk_process', name=name)
+    summary = {key: 0 for key in COUNTS}
+    summary.update(selected=len(names), passed=len(names))
+    if result in {'skip', 'xfail'}:
+        ET.SubElement(cases[0], 'skipped', type='pytest.xfail' if result == 'xfail' else 'pytest.skip')
+        summary['passed'] -= 1
+        summary['xfailed' if result == 'xfail' else 'skipped'] = 1
+    elif result == 'xpass':
+        summary['passed'] -= 1
+        summary['xpassed'] = 1
+    elif result == 'ordinary_skip':
+        ordinary = ET.SubElement(cases, 'testcase', classname='tests.test_legacy', name='test_optional')
+        ET.SubElement(ordinary, 'skipped', type='pytest.skip')
+        summary['selected'] += 1
+        summary['skipped'] = 1
+
+    class CompletedChild:
+        stdout = ()
+
+        def __init__(self, command, **kwargs):
+            junit = next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml='))
+            ET.ElementTree(cases).write(junit)
+            Path(kwargs['env']['OPENQMS_GATE_HOOKS']).write_text(json.dumps(summary))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr('tests.e2e.capa_outcome_runner.subprocess.Popen', CompletedChild)
+    receipt = run_pytest_layer(
+        layer='api', targets=targets or DEFAULT_TARGETS['api'], source={},
+        database_url='postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_test', artifacts=tmp_path,
+    )
+    assert receipt['status'] == expected
+
+
+@pytest.mark.parametrize('targets, expected', [
+    (['tests'], True), (['tests/e2e'], True),
+    (['tests/e2e/test_agent_sdk_process.py'], True),
+    (['tests/e2e/test_agent_sdk_process.py::test_installed_sdk_claim_crosses_real_tcp'], True),
+    (['tests/ci'], False), (['tests/e2e/test_capa_outcome_runner.py'], False),
+])
+def test_sdk_mandatory_target_detection(targets, expected):
+    from tests.e2e.capa_outcome_runner import _includes_sdk_process
+
+    assert _includes_sdk_process(targets) is expected
+
+
+def test_focused_api_without_sdk_preserves_legal_skip(tmp_path):
+    from tests.e2e.capa_outcome_runner import run_pytest_layer
+
+    root = Path(__file__).resolve().parents[3]
+    sample = tmp_path / 'test_optional_backend.py'
+    sample.write_text('import pytest\ndef test_optional():\n    pytest.skip("legal legacy skip")\n')
+    artifacts = tmp_path / 'artifacts'
+    artifacts.mkdir()
+    receipt = run_pytest_layer(
+        layer='api', targets=[str(sample)], source={'PATH': os.environ['PATH']},
+        database_url='postgresql+asyncpg://ci_user:synthetic_password@127.0.0.1:1/ci_test',
+        artifacts=artifacts, python=sys.executable,
+        pytest_entrypoint=(str(root / 'scripts/check-ci-pure.py'),),
+    )
+    assert receipt['status'] == 'PASSED'
+    assert receipt['selected'] == receipt['skipped'] == 1
+    assert receipt['passed'] == 0
+
+
 def test_live_profile_never_expands_or_passes_arbitrary_environment(tmp_path):
     profile = tmp_path / '.env.e2e'
     profile.write_text('LLM_PROVIDER=openai\nLLM_API_KEY=test-secret\nLLM_MODEL=test-model\n'

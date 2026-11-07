@@ -7,9 +7,10 @@ database access, implicit environment/profile credentials or model calls.
 This source snapshot provides safe errors, immutable DTOs, a strict protocol
 codec, bounded standard-library HTTP transport and installation/run clients for
 the existing ten runtime operations. The developer gate below builds the actual
-current SDK wheel and checks a fresh isolated installation. Full normal-policy
-QMS HTTP compatibility is a separate pending gate; unit, owned-loopback and wheel
-results are not complete SDK acceptance or worker admission.
+current SDK wheel and checks a fresh isolated installation. The installed-wheel
+normal-policy QMS HTTP fixture gate has passed independently (14 SDK cases plus
+3 unchanged fixed-CLI cases). Final combined regression and CI wiring acceptance
+are still pending; these fixture results are not worker or production admission.
 Frozen/slotted DTOs are containers, not runtime type validation: the codec performs
 strict decoding. Configuration validates local budgets; transport validates origin.
 Request budget is 1 MiB; response defaults to 4 MiB (64 KiB–16 MiB); timeout defaults
@@ -67,6 +68,25 @@ PY=/absolute/path/to/developer-venv/bin/python
 "$PY" -I -B sdk/python/scripts/check-sdk.py --layer wheel --artifacts /private/tmp/my-sdk-evidence
 "$PY" -I -B sdk/python/scripts/check-sdk.py --artifacts /private/tmp/my-sdk-evidence  # default: all
 ```
+
+The top-level Make targets use the same gates and an independent interpreter:
+
+```sh
+make check-sdk-unit SDK_PYTHON_BIN="$PY"
+make check-sdk-loopback SDK_PYTHON_BIN="$PY"
+make check-sdk-wheel SDK_PYTHON_BIN="$PY"
+make check-sdk SDK_PYTHON_BIN="$PY"
+```
+
+`check-sdk` needs neither PostgreSQL nor backend dependencies. `make check` also
+runs this gate; select `SDK_PYTHON_BIN` explicitly if the default `python3` lacks
+the pinned developer tools. `check-backend` builds a fresh current-source wheel,
+checks its actual JSON path and SHA256, and passes `OPENQMS_SDK_WHEEL` through the
+controlled runner to the mandatory installed-wheel HTTP fixtures. It still needs
+the separately verified disposable database; missing/invalid wheels do not skip.
+`SDK_ARTIFACT_ROOT` overrides the private evidence parent (otherwise the configured
+`OPENQMS_TEST_ARTIFACTS` SDK subdirectory or a temporary-directory parent is used).
+No target installs tools into a shared interpreter or implicitly enables models.
 
 Use a non-symlink artifact parent outside the SDK source. Each invocation makes a
 new private directory (0700), never overwrites an existing file or changes the

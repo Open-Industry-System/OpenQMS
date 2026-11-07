@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 from typing import Mapping, Sequence
+from xml.etree import ElementTree
 
 from tests.ci.acceptance_config import validate_live_configuration
 from tests.ci.gate_results import (
@@ -33,6 +34,7 @@ ROOT = BACKEND_DIR.parent
 PROVIDER_KEYS = frozenset({'LLM_PROVIDER', 'LLM_API_KEY', 'LLM_MODEL', 'LLM_BASE_URL', 'LLM_TIMEOUT'})
 RESOURCE_KEYS = frozenset({
     'OPENQMS_TEST_RESOURCE_FILE', 'PG15_CONTAINER', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB',
+    'OPENQMS_SDK_WHEEL',
 })
 SCANNER_RUNTIME_KEYS = frozenset({
     'AGENT_ATTACHMENT_E2E_STORAGE_ROOT', 'AGENT_ATTACHMENT_E2E_CLAMAV_HOST',
@@ -51,6 +53,7 @@ DEFAULT_TARGETS = {
         'tests/capa/test_capa_outcome_api.py',
         'tests/e2e/test_capa_outcome_review_browser.py',
         'tests/e2e/test_capa_outcome_runner.py',
+        'tests/e2e/test_agent_sdk_process.py',
     ),
     'browser': ('tests/e2e/test_capa_outcome_review_browser.py',),
     'live': ('tests/e2e/test_capa_outcome_review_browser.py',),
@@ -184,6 +187,39 @@ def _require_completed_layer(summary: Mapping[str, int], exit_code: int) -> None
         raise ValueError('layer did not complete successfully')
 
 
+SDK_PROCESS_TARGET = 'tests/e2e/test_agent_sdk_process.py'
+SDK_PROCESS_NAMES = frozenset({
+    'test_installed_sdk_claim_crosses_real_tcp',
+    'test_sdk_ten_operations_sources_idempotency_and_terminal_fence',
+    'test_sdk_report_pause_restart_and_old_receipt_fences',
+    'test_sdk_credentials_cannot_claim_in_another_real_tenant',
+    'test_sdk_admin_grant_withdrawal_and_permanent_revoke',
+} | {
+    f'test_sdk_finish_committed_but_confirmation_unknown[{fault}]'
+    for fault in ('oversize', 'bad_json', 'wrong_run', 'wrong_task', 'wrong_status',
+                  'schema', 'disconnect', 'server_error', 'timeout')
+})
+
+
+def _includes_sdk_process(targets: Sequence[str]) -> bool:
+    sdk = (BACKEND_DIR / SDK_PROCESS_TARGET).resolve()
+    return any(sdk.is_relative_to((BACKEND_DIR / target.split('::', 1)[0]).resolve()) for target in targets)
+
+
+def _require_sdk_process_success(junit: Path, summary: Mapping[str, int]) -> None:
+    """Require the fixed SDK nodes, not merely fourteen unrelated passing cases."""
+    root = ElementTree.parse(junit).getroot()  # Already validated by summarize_junit.
+    cases = [case for case in root.iter('testcase')
+             if case.get('classname') == 'tests.e2e.test_agent_sdk_process']
+    if len(cases) != len(SDK_PROCESS_NAMES) or {case.get('name') for case in cases} != SDK_PROCESS_NAMES:
+        raise ValueError('mandatory SDK process nodes are missing or duplicated')
+    if any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error')):
+        raise ValueError('mandatory SDK process nodes did not all pass')
+    # JUnit renders non-strict XPASS as a pass; the existing hook supplies this count.
+    if summary['xpassed']:
+        raise ValueError('mandatory SDK process run has XPASS')
+
+
 def _write_receipt(path: Path, receipt: Mapping[str, object]) -> None:
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
     path.chmod(0o600)
@@ -238,6 +274,8 @@ def run_pytest_layer(
                     require_gate_success(summary, exit_code)
                 else:
                     _require_completed_layer(summary, exit_code)
+                    if _includes_sdk_process(targets):
+                        _require_sdk_process_success(private_junit, summary)
             except ValueError:
                 pass
             else:

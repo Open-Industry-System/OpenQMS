@@ -10,6 +10,18 @@
 
 ---
 
+## 执行状态（2026-11-07）
+
+| 计划任务 | 当前状态 |
+|---|---|
+| Task1–4：包/codec/transport/client | 已完成TDD与规格→质量双复核，分阶段本地提交 |
+| Task5：wheel与独立SDK门禁 | 已双复核并提交；Lead当前实际562 unit＋16 loopback＋1 wheel probe通过 |
+| Task6：normal-policy真实HTTP | 已双复核并提交；原14SDK＋3CLI/5warnings，新受控runner14＋3/6warnings均通过，区别见交接 |
+| Task7：Make/CI/分类/文档 | 接线与安全契约修正完成，追加旧Make fixture独立SDK mock；Lead纯契约278通过；七代码文件规格PASS、质量Approve（0 Critical/Important/Minor），本地接线验收完成 |
+| Task8：最终冻结/组合门禁/清理 | 尚未完成；不得以以上阶段证据替代完整make check/browser或远端CI |
+
+提交、首红/末绿、实际证据与剩余边界见[SDK实施交接](../../development/agent-metadata-python-sdk.md)。下方步骤为原计划细目，阶段状态以本表及新鲜回执为准；不因SDK通信成功扩大到worker/生产准入或R4b/R5/R6/R7完成。
+
 ## 0. 批准、基线与执行纪律
 
 - 依据：[已审SDK规格](../specs/2026-11-03-agent-metadata-python-sdk-design.md)。用户已明确审查通过，并要求计划明确整体timeout及finish超限/解码/绑定错误的unknown语义。

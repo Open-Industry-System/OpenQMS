@@ -16,6 +16,7 @@ TARGETS = (
     'tests/e2e/test_agent_readonly_resume_process.py',
     'tests/e2e/test_agent_local_trial_browser.py',
     'tests/e2e/test_agent_local_trial_process.py',
+    'tests/e2e/test_agent_sdk_process.py',
     'tests/e2e/test_d4_text_preview_browser.py',
     'tests/e2e/test_capa_outcome_review_browser.py',
     'tests/e2e/test_agent_task_attachment_browser.py',
@@ -39,6 +40,22 @@ LOCAL_TRIAL_PROCESS_BACKEND_NODES = (
     'tests/e2e/test_agent_local_trial_process.py::test_normal_policy_real_cli_rounds_same_run_resume_and_checkpoint_new_run',
     'tests/e2e/test_agent_local_trial_process.py::test_cli_permanent_revoke_between_actual_rounds_prevents_later_delivery',
     'tests/e2e/test_agent_local_trial_process.py::test_actual_tcp_forwarded_identity_is_rejected_before_invalid_tenant_or_body',
+)
+SDK_PROCESS_BACKEND_NODES = (
+    'tests/e2e/test_agent_sdk_process.py::test_installed_sdk_claim_crosses_real_tcp',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_ten_operations_sources_idempotency_and_terminal_fence',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[oversize]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[bad_json]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[wrong_run]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[wrong_task]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[wrong_status]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[schema]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[disconnect]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[server_error]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_finish_committed_but_confirmation_unknown[timeout]',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_report_pause_restart_and_old_receipt_fences',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_credentials_cannot_claim_in_another_real_tenant',
+    'tests/e2e/test_agent_sdk_process.py::test_sdk_admin_grant_withdrawal_and_permanent_revoke',
 )
 SCANNER_NODES = (
     'tests/e2e/test_agent_task_attachment_browser.py::test_actual_clamav_attachment_browser_acceptance',
@@ -96,6 +113,14 @@ def test_fixed_nodes_have_the_expected_ci_layer(collected_items: list[pytest.Ite
     for node in BACKEND_NODES:
         _assert_layer(collected_items, 'backend', node)
     for node in LOCAL_TRIAL_PROCESS_BACKEND_NODES:
+        _assert_layer(collected_items, 'backend', node)
+
+    from tests.e2e.capa_outcome_runner import SDK_PROCESS_NAMES, SDK_PROCESS_TARGET
+
+    assert {f'{SDK_PROCESS_TARGET}::{name}' for name in SDK_PROCESS_NAMES} == set(SDK_PROCESS_BACKEND_NODES)
+    assert len(SDK_PROCESS_BACKEND_NODES) == 14
+    assert _nodeids(collected_items, 'tests/e2e/test_agent_sdk_process.py::') == set(SDK_PROCESS_BACKEND_NODES)
+    for node in SDK_PROCESS_BACKEND_NODES:
         _assert_layer(collected_items, 'backend', node)
 
     readonly_non_browser = [
@@ -167,6 +192,32 @@ def test_make_layered_targets_use_receipted_runner_and_verified_single_database_
     assert '--pytest-target tests' not in live
 
 
+def test_sdk_make_targets_are_backend_independent_and_allocate_private_artifact_children() -> None:
+    for target, layer_name in (
+        ('check-sdk-unit', 'unit'), ('check-sdk-loopback', 'loopback'),
+        ('check-sdk-wheel', 'wheel'), ('check-sdk', 'all'),
+    ):
+        output = _make_dry_run(target)
+        assert 'sdk/python/scripts/check-sdk.py' in output
+        assert f'--layer {layer_name}' in output and '--artifacts' in output
+        assert 'mktemp -d' in output
+        assert 'tests.ci.prepare_database' not in output
+        assert 'requirements.txt' not in output and 'pip install' not in output
+    aggregate = _make_dry_run('check')
+    assert '--layer all' in aggregate
+
+
+def test_backend_make_builds_current_sdk_wheel_and_extracts_resource_from_json() -> None:
+    output = _make_dry_run('check-backend')
+    assert 'sdk/python/scripts/build-wheel.py' in output
+    assert '--source' in output and 'sdk/python' in output and '--artifacts' in output
+    assert 'mktemp -d' in output
+    assert 'json.load' in output and 'wheel_path' in output and 'wheel_sha256' in output
+    assert 'OPENQMS_SDK_WHEEL=' in output
+    assert output.index('build-wheel.py') < output.index('capa_outcome_runner.py api')
+    assert 'glob' not in output and 'pip install' not in output
+
+
 def test_make_marker_constants_match_the_receipted_runner_contract() -> None:
     from tests.e2e.capa_outcome_runner import MARKS
 
@@ -231,3 +282,18 @@ def test_default_api_acceptance_command_collects_mandatory_source_denial_only_in
     assert 'tests/e2e/test_capa_outcome_review_browser.py::test_employee_controlled_source_modules_fail_closed' in nodeids
     assert collector.items and {layer(item) for item in collector.items} == {'backend'}
     assert not any(_nodeids(collector.items, prefix) for prefix in (*BROWSER_NODES, *LIVE_NODES, *SCANNER_NODES))
+
+
+def test_default_api_acceptance_selects_all_fourteen_sdk_nodes_without_optional_markers(tmp_path):
+    from tests.e2e.capa_outcome_runner import DEFAULT_TARGETS, build_pytest_command
+
+    command = build_pytest_command(
+        'api', DEFAULT_TARGETS['api'], tmp_path / 'collection.xml', tmp_path / 'hooks.json',
+    )
+    collector = ItemCollector()
+    mark_index = command.index('-m', 3)
+    result = pytest.main(['--collect-only', '-q', *command[3:mark_index + 2]], plugins=[collector])
+    assert result == pytest.ExitCode.OK
+    assert _nodeids(collector.items, 'tests/e2e/test_agent_sdk_process.py::') == set(SDK_PROCESS_BACKEND_NODES)
+    for node in SDK_PROCESS_BACKEND_NODES:
+        _assert_layer(collector.items, 'backend', node)

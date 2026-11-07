@@ -1,6 +1,6 @@
 # OpenQMS — top-level Makefile
 #
-# The `check` target runs deterministic backend and frontend checks only; browser,
+# The `check` target runs SDK, deterministic backend and frontend checks; browser,
 # live-provider, and real scanner acceptance each require their explicit targets.
 #
 # Backend tests use one explicitly registered disposable PostgreSQL target.
@@ -22,17 +22,26 @@ PYTEST_IGNORES := --pytest-arg=--ignore=tests/test_graph_sync_worker.py --pytest
 PYTHON_BIN ?= $(shell if [ -x "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python" ]; then echo "$(CURDIR)/$(BACKEND_DIR)/.venv/bin/python"; else echo python; fi)
 CI_RUNNER := $(PYTHON_BIN) tests/e2e/capa_outcome_runner.py
 
+# SDK developer tools are independent of backend runtime dependencies. The caller
+# must select Python with pytest and setuptools==79.0.1; never install/fallback.
+SDK_PYTHON_BIN ?= python3
+SDK_ARTIFACT_ROOT ?= $(if $(OPENQMS_TEST_ARTIFACTS),$(OPENQMS_TEST_ARTIFACTS)/sdk,$(if $(TMPDIR),$(TMPDIR),/tmp)/openqms-sdk-artifacts)
+SDK_CHECK := "$(SDK_PYTHON_BIN)" "$(CURDIR)/sdk/python/scripts/check-sdk.py"
+
 # TEST_DATABASE_URL and OPENQMS_TEST_RESOURCE_FILE (or the explicit CI PG15
 # identity) are deliberately supplied by the caller. No legacy PG defaults are
 # synthesized here: prepare_database derives every write target from the one
 # verified URL.
 
 .PHONY: help check check-backend check-browser check-live check-test-db check-frontend-tsc check-frontend-build check-frontend \
+	check-sdk-unit check-sdk-loopback check-sdk-wheel check-sdk \
 	doc-gate-preflight deploy-migrate deploy-release
 
 help:
 	@echo "Targets:"
-	@echo "  check              — deterministic backend + frontend checks"
+	@echo "  check              — SDK + deterministic backend + frontend checks"
+	@echo "  check-sdk          — offline SDK unit + loopback + wheel developer gates"
+	@echo "  check-sdk-{unit,loopback,wheel} — individual SDK layers (SDK_PYTHON_BIN)"
 	@echo "  check-backend      — deterministic backend acceptance (verified test DB)"
 	@echo "  check-browser      — automatic browser acceptance (verified test DB)"
 	@echo "  check-live         — isolated explicit provider acceptance (verified test DB)"
@@ -48,10 +57,28 @@ help:
 	@echo "  check-frontend-build  — vite build only"
 
 # `check` deliberately excludes browser, live-provider, and real scanner gates.
-check: check-backend check-frontend
+check: check-sdk check-backend check-frontend
+
+check-sdk-unit: SDK_LAYER := unit
+check-sdk-loopback: SDK_LAYER := loopback
+check-sdk-wheel: SDK_LAYER := wheel
+check-sdk: SDK_LAYER := all
+check-sdk-unit check-sdk-loopback check-sdk-wheel check-sdk:
+	@set -euo pipefail; umask 077; \
+	mkdir -p "$(SDK_ARTIFACT_ROOT)"; \
+	root="$$(cd "$(SDK_ARTIFACT_ROOT)" && pwd -P)"; \
+	artifacts="$$(mktemp -d "$$root/sdk-$(SDK_LAYER)-XXXXXX")"; \
+	$(SDK_CHECK) --layer $(SDK_LAYER) --artifacts "$$artifacts"
 
 check-backend: check-test-db
-	cd $(BACKEND_DIR) && SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. \
+	@set -euo pipefail; umask 077; \
+	mkdir -p "$(SDK_ARTIFACT_ROOT)"; \
+	root="$$(cd "$(SDK_ARTIFACT_ROOT)" && pwd -P)"; \
+	artifacts="$$(mktemp -d "$$root/sdk-backend-XXXXXX")"; \
+	"$(SDK_PYTHON_BIN)" "$(CURDIR)/sdk/python/scripts/build-wheel.py" \
+		--source "$(CURDIR)/sdk/python" --artifacts "$$artifacts" > "$$artifacts/build.json"; \
+	wheel="$$("$(SDK_PYTHON_BIN)" -c 'import hashlib,json,pathlib,sys; data=json.load(open(sys.argv[1])); wheel=pathlib.Path(data["wheel_path"]); assert wheel.is_absolute() and wheel.is_file() and wheel.is_relative_to(pathlib.Path(sys.argv[1]).parent); assert hashlib.sha256(wheel.read_bytes()).hexdigest() == data["wheel_sha256"]; print(wheel)' "$$artifacts/build.json")"; \
+	cd $(BACKEND_DIR) && OPENQMS_SDK_WHEEL="$$wheel" SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. \
 		$(CI_RUNNER) api --pytest-target tests $(PYTEST_IGNORES)
 
 check-browser: check-test-db
