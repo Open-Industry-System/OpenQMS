@@ -10,10 +10,11 @@ from app.database import get_tenant_aware_session
 from app.models.audit import AuditLog
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
-from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, ImportFromFMEARequest
+from app.schemas.characteristic import CharacteristicSourceRef
+from app.schemas.control_plan import ControlPlanCreate, ControlPlanUpdate, ControlPlanItemResponse, ImportFromFMEARequest
 from app.services.cp_validation.engine import CPValidationEngine
 from app.services.product_line_service import lock_candidate_scopes, validate_product_line
-from app.services.version_service import create_cp_version
+from app.services.version_service import create_cp_version, stage_cp_version
 
 
 async def _run_validation_background(cp_id: uuid.UUID, user_id: uuid.UUID, trigger: str) -> None:
@@ -257,6 +258,14 @@ async def update_control_plan(
             seen_uuid_ids.add(sid)
             if sid not in existing_by_id:
                 raise ValueError(f"item_id 不属于当前控制计划: {sid}")
+            source_ref = existing_by_id[sid].source_characteristic_ref
+            if source_ref is not None:
+                try:
+                    source_step_id = CharacteristicSourceRef.model_validate(source_ref).step_id
+                except ValueError as exc:
+                    raise ValueError("stored source_characteristic_ref is invalid") from exc
+                if item_data.source_fmea_node_id not in (None, source_step_id):
+                    raise ValueError("source_fmea_node_id must match source_characteristic_ref.step_id")
             resolved.append((item_data, sid))
 
         # Detect content + identity change (include item_id so temp→new is not skipped)
@@ -308,7 +317,11 @@ async def update_control_plan(
                     old.sample_frequency = item_data.sample_frequency
                     old.control_method = item_data.control_method
                     old.reaction_plan = item_data.reaction_plan
-                    old.source_fmea_node_id = item_data.source_fmea_node_id
+                    old.source_fmea_node_id = (
+                        CharacteristicSourceRef.model_validate(old.source_characteristic_ref).step_id
+                        if old.source_characteristic_ref is not None
+                        else item_data.source_fmea_node_id
+                    )
                     old.sort_order = idx
                     continue
                 db.add(ControlPlanItem(
@@ -448,329 +461,463 @@ async def approve_control_plan(
     return cp
 
 
-async def import_from_fmea(
-    db: AsyncSession, cp_id: uuid.UUID, req: ImportFromFMEARequest, user_id: uuid.UUID
-) -> list[ControlPlanItem]:
-    """Import PFMEA process step topology into control plan items.
+class CharacteristicImportError(ValueError):
+    """Safe API-facing failure, without disclosing source names."""
 
-    Traverses the PFMEA graph to map:
-      ProcessStep                  → step_no, process_name
-      ProcessWorkElement           → equipment
-      ProcessStepFunction          → product_characteristic, specification_tolerance, special_class
-      ProcessWorkElementFunction   → process_characteristic
+    def __init__(self, message: str, status_code: int = 409):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+async def _import_tenant_boundary(db: AsyncSession, *, extra_tables=()) -> str:
+    """No tenant table may resolve through public fallback (ADR-0012)."""
+    from sqlalchemy import text
+    from app.core.tenant_utils import current_tenant_schema
+
+    schema = current_tenant_schema.get()
+    actual = await db.scalar(text("SELECT current_schema()"))
+    if schema is not None:
+        if actual != schema:
+            raise CharacteristicImportError("资源不存在", 404)
+        for table in (
+            "control_plans", "control_plan_items", "control_plan_versions",
+            "fmea_documents", "fmea_versions", "users", "role_definitions",
+            "role_permissions", "user_factories", "user_product_lines",
+            "product_lines", "audit_logs",
+        ) + tuple(extra_tables):
+            namespace = await db.scalar(text(
+                "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE c.oid=to_regclass(:table)"
+            ), {"table": table})
+            if namespace != schema:
+                raise CharacteristicImportError("资源不存在", 404)
+    return actual
+
+
+async def _import_authority(db: AsyncSession, scope, *, lock: bool):
+    """Re-resolve authority; neither digest nor cached RequestScope grants access.
+
+    UPDATE locks on user/role also exclude FK insertions into absent grant
+    sets (first explicit factory grant replaces fallback-own semantics). Positive
+    grant rows are SHARE locked against revocation, in deterministic key order.
     """
-    # Validate control plan exists and is editable
-    cp_result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id))
-    cp = cp_result.scalar_one_or_none()
-    if cp is None:
-        raise ValueError("Control plan not found.")
-    if cp.status == "approved":
-        raise ValueError("Cannot import into an approved control plan.")
+    from sqlalchemy.orm import lazyload
+    from sqlalchemy.orm.attributes import set_committed_value
+    from app.core.factory_scope import resolve_factory_scope, resolve_product_line_scope
+    from app.models.user import User
+    from app.models.role import RoleDefinition, RolePermission, UserProductLine
+    from app.models.factory import UserFactory
 
-    # Validate FMEA exists and is PFMEA
-    fmea_result = await db.execute(
-        select(FMEADocument).where(FMEADocument.fmea_id == req.fmea_id)
-    )
-    fmea = fmea_result.scalar_one_or_none()
-    if fmea is None:
-        raise ValueError("FMEA document not found.")
+    async def fresh(stmt, *, parent=False):
+        if lock:
+            stmt = stmt.with_for_update(read=not parent)
+        return await db.execute(stmt.execution_options(populate_existing=True))
+
+    user = (await fresh(select(User).options(lazyload(User.role_definition)).where(
+        User.user_id == scope.user.user_id
+    ), parent=True)).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise CharacteristicImportError("无导入权限", 403)
+    role = (await fresh(select(RoleDefinition).where(RoleDefinition.id == user.role_id), parent=True)).scalar_one_or_none()
+    if role is None or not role.is_active:
+        raise CharacteristicImportError("无导入权限", 403)
+    permissions = (await fresh(select(RolePermission).where(
+        RolePermission.role_id == role.id,
+        RolePermission.module.in_(["planning", "fmea", "group"]),
+    ).order_by(RolePermission.module))).scalars().all()
+    levels = {p.module: p.permission_level for p in permissions}
+    if levels.get("planning", 0) < 2 or levels.get("fmea", 0) < 1:
+        raise CharacteristicImportError("需要计划写权限和 FMEA 查看权限", 403)
+    factories = (await fresh(select(UserFactory).where(UserFactory.user_id == user.user_id)
+                             .order_by(UserFactory.factory_id))).scalars().all()
+    lines = (await fresh(select(UserProductLine).where(UserProductLine.user_id == user.user_id)
+                         .order_by(UserProductLine.product_line_code))).scalars().all()
+    set_committed_value(user, "role_definition", role)
+    factory_scope = resolve_factory_scope(user, [r.factory_id for r in factories], levels.get("group", 0) >= 5)
+    pl_scope = resolve_product_line_scope(user, [r.product_line_code for r in lines], factory_scope)
+    return factory_scope, pl_scope
+
+
+def _import_check_access(entity, scope, factory_scope, pl_scope):
+    if (
+        (scope.effective_factory_id is not None and entity.factory_id != scope.effective_factory_id)
+        or (factory_scope.accessible_factory_ids is not None and entity.factory_id not in factory_scope.accessible_factory_ids)
+        or (scope.factory_scope.accessible_factory_ids is not None and entity.factory_id not in scope.factory_scope.accessible_factory_ids)
+        or pl_scope.mode == "NONE"
+        or (pl_scope.mode == "EXPLICIT" and entity.product_line_code not in (pl_scope.codes or []))
+        or scope.pl_scope.mode == "NONE"
+        or (scope.pl_scope.mode == "EXPLICIT" and entity.product_line_code not in (scope.pl_scope.codes or []))
+    ):
+        raise CharacteristicImportError("资源不存在", 404)
+
+
+async def _characteristic_import_context(db, cp_id, req, scope, *, lock=False):
+    from app.models.fmea_version import FMEAVersion
+    from app.services.version_service import lock_version_parents_in_order, verify_fmea_version
+
+    tenant = await _import_tenant_boundary(db)
+    if req.source_fmea_version_id is None or req.expected_lock_version is None:
+        raise CharacteristicImportError("缺少预览上下文，请重新 preview / 预览后导入")
+    cp = await db.scalar(select(ControlPlan).where(ControlPlan.cp_id == cp_id)
+                         .execution_options(populate_existing=True))
+    fmea = await db.scalar(select(FMEADocument).where(FMEADocument.fmea_id == req.fmea_id)
+                           .execution_options(populate_existing=True))
+    if cp is None or fmea is None:
+        raise CharacteristicImportError("资源不存在", 404)
+    if lock:
+        # Existing scope-before-parent ordering and deterministic version locks.
+        observed = (cp.factory_id, cp.product_line_code, fmea.factory_id, fmea.product_line_code)
+        try:
+            await lock_candidate_scopes(db, [(cp.factory_id, cp.product_line_code), (fmea.factory_id, fmea.product_line_code)])
+            await lock_version_parents_in_order(db, [("control_plan", cp_id), ("fmea", req.fmea_id)])
+        except ValueError as exc:
+            raise CharacteristicImportError("资源范围已变化，请重新预览") from exc
+        await db.refresh(cp)
+        await db.refresh(fmea)
+        if observed != (cp.factory_id, cp.product_line_code, fmea.factory_id, fmea.product_line_code):
+            raise CharacteristicImportError("资源范围已变化，请重新预览")
+    factory_scope, pl_scope = await _import_authority(db, scope, lock=lock)
+    for entity in (cp, fmea):
+        _import_check_access(entity, scope, factory_scope, pl_scope)
+    if cp.factory_id != fmea.factory_id or cp.product_line_code != fmea.product_line_code:
+        raise CharacteristicImportError("来源与目标范围不一致")
+    if cp.status != "draft":
+        raise CharacteristicImportError("仅草稿控制计划允许首次导入")
+    if cp.lock_version != req.expected_lock_version:
+        raise CharacteristicImportError("控制计划已变化，请重新预览")
+    if cp.fmea_ref_id not in (None, fmea.fmea_id):
+        raise CharacteristicImportError("source_conflict: 控制计划已关联其他来源")
+    if cp.source_fmea_version_id is not None:
+        accepted_source = await db.scalar(select(FMEAVersion).where(
+            FMEAVersion.version_id == cp.source_fmea_version_id,
+            FMEAVersion.fmea_id == fmea.fmea_id,
+            FMEAVersion.factory_id == cp.factory_id,
+        ))
+        if accepted_source is None:
+            raise CharacteristicImportError("source_conflict: 控制计划版本关联其他来源")
     if fmea.fmea_type != "PFMEA":
-        raise ValueError("Only PFMEA documents can be imported into a control plan.")
+        raise CharacteristicImportError("仅允许 PFMEA 来源")
+    version = await db.scalar(select(FMEAVersion).where(
+        FMEAVersion.version_id == req.source_fmea_version_id,
+        FMEAVersion.fmea_id == fmea.fmea_id,
+        FMEAVersion.factory_id == fmea.factory_id,
+    ))
+    # Actual writer: approve publishes a major; snapshot is graph-only, not
+    # a status wrapper. The current document may already be in rework.
+    if (version is None or version.change_type != "approve" or version.major_no < 1
+            or version.minor_no != 0 or not await verify_fmea_version(db, version.version_id)):
+        raise CharacteristicImportError("来源必须为本 PFMEA 的真实批准快照，请重新预览")
+    return cp, fmea, version, tenant
 
-    graph = fmea.graph_data or {"nodes": [], "edges": []}
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
 
-    # Filter ProcessStep nodes
-    step_nodes = [n for n in nodes if n.get("type") == "ProcessStep"]
-
-    # If step_nos provided, further filter
+def _import_step_ids(req, graph):
+    if req.step_ids is not None and req.step_nos is not None:
+        raise CharacteristicImportError("step_ids 与 step_nos 不可同时指定")
     if req.step_nos is not None:
-        step_nodes = [
-            n for n in step_nodes if n.get("process_number") in req.step_nos
-        ]
-
-    # Build edge maps: source -> [targets], target -> [sources]
-    edge_map: dict[str, list[str]] = {}
-    for e in edges:
-        src = e.get("source")
-        tgt = e.get("target")
-        if src is not None:
-            edge_map.setdefault(src, []).append(tgt)
-
-    node_map = {n.get("id"): n for n in nodes if n.get("id") is not None}
-
-    def _children(parent_id: str, node_type: str) -> list[dict]:
-        """Find direct children of given type via edges."""
-        return [
-            node_map[t]
-            for t in edge_map.get(parent_id, [])
-            if node_map.get(t, {}).get("type") == node_type
-        ]
-
-    created_items: list[ControlPlanItem] = []
-    sort_idx = 0
-
-    for step in step_nodes:
-        step_id = step.get("id")
-        step_no = step.get("process_number") or ""
-        process_name = step.get("name") or ""
-
-        # Structural: process work elements (4M) → equipment
-        work_elements = _children(step_id, "ProcessWorkElement")
-
-        # Functional: product characteristic functions
-        step_functions = _children(step_id, "ProcessStepFunction")
-
-        # For each work element, find its process characteristic functions
-        we_func_map: dict[str, list[dict]] = {}
-        for we in work_elements:
-            we_funcs = _children(we.get("id"), "ProcessWorkElementFunction")
-            if we_funcs:
-                we_func_map[we.get("id")] = we_funcs
-
-        # Build CP items by pairing product + process characteristics
-        if step_functions:
-            for sf in step_functions:
-                sf_id = sf.get("id")
-                # Find WEFs linked to this step function via FUNCTION_MAPPED_TO
-                mapped_wef_ids = set(edge_map.get(sf_id, []))
-
-                # Match WEFs against work elements
-                matched_we = None
-                matched_wf = None
-                for we in work_elements:
-                    for wf in we_func_map.get(we.get("id"), []):
-                        if wf.get("id") in mapped_wef_ids or matched_wf is None:
-                            matched_we = we
-                            matched_wf = wf
-                            if wf.get("id") in mapped_wef_ids:
-                                break
-                    if matched_wf and matched_wf.get("id") in mapped_wef_ids:
-                        break
-
-                item = ControlPlanItem(
-                    item_id=uuid.uuid4(),
-                    cp_id=cp_id,
-                    step_no=step_no,
-                    process_name=process_name,
-                    equipment=matched_we.get("name") if matched_we else None,
-                    product_characteristic=sf.get("name") or "",
-                    specification_tolerance=sf.get("specification") or "",
-                    special_class=sf.get("classification") or "",
-                    process_characteristic=matched_wf.get("name") if matched_wf else None,
-                    source_fmea_node_id=step_id,
-                    sort_order=sort_idx,
-                )
-                db.add(item)
-                created_items.append(item)
-                sort_idx += 1
-        elif work_elements:
-            # No step functions — create items from work element functions
-            for we in work_elements:
-                we_funcs = we_func_map.get(we.get("id"), [])
-                if we_funcs:
-                    for wf in we_funcs:
-                        item = ControlPlanItem(
-                            item_id=uuid.uuid4(),
-                            cp_id=cp_id,
-                            step_no=step_no,
-                            process_name=process_name,
-                            equipment=we.get("name") or "",
-                            process_characteristic=wf.get("name") or "",
-                            source_fmea_node_id=step_id,
-                            sort_order=sort_idx,
-                        )
-                        db.add(item)
-                        created_items.append(item)
-                        sort_idx += 1
-                else:
-                    item = ControlPlanItem(
-                        item_id=uuid.uuid4(),
-                        cp_id=cp_id,
-                        step_no=step_no,
-                        process_name=process_name,
-                        equipment=we.get("name") or "",
-                        source_fmea_node_id=step_id,
-                        sort_order=sort_idx,
-                    )
-                    db.add(item)
-                    created_items.append(item)
-                    sort_idx += 1
-        else:
-            # Minimal item with just process step info
-            item = ControlPlanItem(
-                item_id=uuid.uuid4(),
-                cp_id=cp_id,
-                step_no=step_no,
-                process_name=process_name,
-                source_fmea_node_id=step_id,
-                sort_order=sort_idx,
-            )
-            db.add(item)
-            created_items.append(item)
-            sort_idx += 1
-
-    # Link control plan to FMEA
-    cp.fmea_ref_id = req.fmea_id
-    cp.updated_by = user_id
-
-    await create_audit_log(
-        db,
-        user_id=user_id,
-        action="IMPORT_FMEA",
-        target_type="control_plans",
-        target_id=cp_id,
-        detail={
-            "fmea_id": str(req.fmea_id),
-            "fmea_document_no": fmea.document_no,
-            "items_created": len(created_items),
-        },
-    )
-
-    await db.commit()
-    for item in created_items:
-        await db.refresh(item)
-    return created_items
+        ids = []
+        for number in req.step_nos:
+            matches = [str(n["id"]) for n in graph.get("nodes", [])
+                       if n.get("type") == "ProcessStep" and n.get("process_number") == number]
+            if len(matches) != 1:
+                raise CharacteristicImportError("step_nos 必须唯一匹配工序，请按 ID 重新预览")
+            ids.extend(matches)
+    else:
+        ids = req.step_ids or []
+    if not ids:
+        raise CharacteristicImportError("请选择工序后重新预览；空选择不代表全部")
+    return tuple(sorted(set(ids)))
 
 
-async def check_stale_items(
-    db: AsyncSession, cp_id: uuid.UUID
-) -> list[dict]:
-    """Check for stale control plan items by comparing against linked FMEA graph.
+async def _build_characteristic_import_preview(db, cp, fmea, version, tenant, req):
+    from dataclasses import asdict
+    from app.services.cp_characteristic_mapping import candidate_key, derive_cp_items
+    from app.services.fmea_characteristics import source_key
+    from app.services.version_service import compute_snapshot_hash
 
-    Compares process_name, step_no, and all functional/structural fields
-    (product_characteristic, process_characteristic, specification_tolerance,
-    special_class, equipment) derived from graph topology.
+    step_ids = _import_step_ids(req, version.snapshot)
+    result = derive_cp_items(fmea_id=fmea.fmea_id, fmea_type=fmea.fmea_type,
+                             graph=version.snapshot, step_ids=step_ids)
+    if any(i.code == "invalid_step_selection" for i in result.issues):
+        raise CharacteristicImportError("工序选择无效，请重新预览")
+    existing = list((await db.scalars(select(ControlPlanItem).where(
+        ControlPlanItem.cp_id == cp.cp_id
+    ).order_by(ControlPlanItem.sort_order, ControlPlanItem.item_id)
+        .execution_options(populate_existing=True))).all())
+    by_source = {}
+    for row in existing:
+        if row.factory_id != cp.factory_id:
+            raise CharacteristicImportError("控制计划行范围不一致")
+        if row.source_characteristic_ref is not None:
+            try:
+                ref = CharacteristicSourceRef.model_validate(row.source_characteristic_ref)
+            except ValueError as exc:
+                raise CharacteristicImportError("旧来源需人工确认，不可首次导入覆盖") from exc
+            if ref.fmea_id != fmea.fmea_id:
+                raise CharacteristicImportError("source_conflict: 已有行关联其他来源")
+            by_source.setdefault(source_key(ref), []).append(row)
+        elif row.source_fmea_node_id is not None:
+            raise CharacteristicImportError("旧自由文本来源需人工确认，请使用同步流程")
+    issues = [asdict(i) for i in result.issues]
+    items = []
+    for mapped in result.items:
+        ref = mapped.source_ref.model_copy(update={"accepted_source_version_id": version.version_id})
+        matches = by_source.get(source_key(ref), [])
+        if len(matches) > 1:
+            issues.append({"code": "ambiguous_existing_rows", "node_id": ref.step_id,
+                           "blocking": True, "message": "同源多个控制行，请人工确认；不覆盖或合并"})
+        if len(matches) == 1:
+            issues.append({"code": "existing_source_requires_sync", "node_id": ref.step_id,
+                           "blocking": False, "message": "已有同源行原样保留，变更请使用同步流程"})
+        action = "existing" if matches else "add"
+        item_id = matches[0].item_id if len(matches) == 1 else None
+        items.append({"candidate_key": candidate_key(action, ref, item_id), "action": action,
+                      "item_id": str(item_id) if item_id else None,
+                      "source_ref": ref.model_dump(mode="json"), "fields": mapped.fields})
+    preview = {"source_fmea_version_id": str(version.version_id), "expected_lock_version": cp.lock_version,
+               "mapping_version": 1, "items": items, "issues": issues}
+    preview["preview_digest"] = compute_snapshot_hash({
+        **preview, "tenant_schema": tenant, "cp_id": str(cp.cp_id), "cp_status": cp.status,
+        "cp_factory_id": str(cp.factory_id), "cp_product_line": cp.product_line_code,
+        "cp_fmea_ref_id": str(cp.fmea_ref_id) if cp.fmea_ref_id else None,
+        "cp_source_version_id": str(cp.source_fmea_version_id) if cp.source_fmea_version_id else None,
+        "source_snapshot_hash": version.sha256_hash, "step_ids": list(step_ids),
+        # Bind actual row material too, even if a legacy writer omitted a lock bump.
+        "existing_rows": [{"item_id": str(r.item_id), "source_ref": r.source_characteristic_ref,
+                           "fields": {c.name: str(getattr(r, c.name)) if isinstance(getattr(r, c.name), uuid.UUID)
+                                      else getattr(r, c.name) for c in ControlPlanItem.__table__.columns
+                                      if c.name != "source_characteristic_ref"}} for r in existing],
+    })
+    return preview, existing
+
+
+async def preview_import_from_fmea(db, cp_id, req, scope):
+    """Read-only projection of an explicitly requested immutable approved snapshot."""
+    with db.no_autoflush:
+        context = await _characteristic_import_context(db, cp_id, req, scope)
+        preview, _ = await _build_characteristic_import_preview(db, *context, req)
+        return preview
+
+
+async def import_from_fmea(
+    db: AsyncSession, cp_id: uuid.UUID, req: ImportFromFMEARequest, user_id: uuid.UUID,
+    *, scope=None,
+) -> list["ControlPlanItemResponse"]:
+    """Apply a fresh authorized full preview; never overwrite/delete existing rows.
+
+    Stage the shared snapshot without committing; materialize the response before
+    the sole commit. No post-commit business queries can lose tenant binding.
     """
-    cp_result = await db.execute(
-        select(ControlPlan).where(ControlPlan.cp_id == cp_id)
-    )
-    cp = cp_result.scalar_one_or_none()
-    if cp is None:
-        raise ValueError("Control plan not found.")
-
-    if cp.fmea_ref_id is None:
-        return []
-
-    fmea_result = await db.execute(
-        select(FMEADocument).where(FMEADocument.fmea_id == cp.fmea_ref_id)
-    )
-    fmea = fmea_result.scalar_one_or_none()
-    if fmea is None:
-        return []
-
-    graph = fmea.graph_data or {"nodes": [], "edges": []}
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
-    node_map = {n.get("id"): n for n in nodes if n.get("id") is not None}
-
-    edge_map: dict[str, list[str]] = {}
-    for e in edges:
-        src = e.get("source")
-        if src is not None:
-            edge_map.setdefault(src, []).append(e.get("target"))
-
-    items_result = await db.execute(
-        select(ControlPlanItem).where(ControlPlanItem.cp_id == cp_id)
-    )
-    items = list(items_result.scalars().all())
-
-    def _children(parent_id: str, node_type: str) -> list[dict]:
-        return [
-            node_map[t]
-            for t in edge_map.get(parent_id, [])
-            if node_map.get(t, {}).get("type") == node_type
-        ]
-
-    stale_items: list[dict] = []
-
-    for item in items:
-        if not item.source_fmea_node_id:
-            continue
-
-        node = node_map.get(item.source_fmea_node_id)
-        if node is None:
-            stale_items.append({
-                "item_id": str(item.item_id),
-                "step_no": item.step_no,
-                "status": "deleted",
-                "diff_fields": ["node_missing"],
+    if scope is None or scope.user.user_id != user_id:
+        raise CharacteristicImportError("需要当前请求授权上下文", 403)
+    if not req.preview_digest or req.selected_candidate_keys is None:
+        raise CharacteristicImportError("缺少预览上下文，请重新 preview / 预览后导入")
+    if not req.selected_candidate_keys or len(set(req.selected_candidate_keys)) != len(req.selected_candidate_keys):
+        raise CharacteristicImportError("请选择有效候选，空或重复选择不可导入")
+    savepoint = await db.begin_nested()
+    released = False
+    try:
+        context = await _characteristic_import_context(db, cp_id, req, scope, lock=True)
+        cp, fmea, version, _ = context
+        preview, existing = await _build_characteristic_import_preview(db, *context, req)
+        if preview["preview_digest"] != req.preview_digest:
+            raise CharacteristicImportError("预览已过期，请重新预览")
+        candidates = {i["candidate_key"]: i for i in preview["items"]}
+        if not set(req.selected_candidate_keys) <= candidates.keys():
+            raise CharacteristicImportError("候选键不属于本次预览")
+        if any(i["blocking"] for i in preview["issues"]):
+            raise CharacteristicImportError("预览存在阻塞问题，请人工确认后重新预览")
+        selected = set(req.selected_candidate_keys)
+        by_id = {str(r.item_id): r for r in existing}
+        accepted = []
+        added = 0
+        order = max((r.sort_order for r in existing), default=-1) + 1
+        for candidate in preview["items"]:
+            if candidate["candidate_key"] not in selected:
+                continue
+            if candidate["action"] == "existing":
+                accepted.append(by_id[candidate["item_id"]])
+                continue
+            row = ControlPlanItem(
+                item_id=uuid.uuid4(), cp_id=cp_id, factory_id=cp.factory_id,
+                source_fmea_node_id=candidate["source_ref"]["step_id"],
+                source_characteristic_ref=candidate["source_ref"], item_source="fmea",
+                sort_order=order + added, **candidate["fields"],
+            )
+            db.add(row)
+            accepted.append(row)
+            added += 1
+        if added:
+            cp.fmea_ref_id = fmea.fmea_id
+            cp.source_fmea_version_id = version.version_id
+            cp.updated_by = user_id
+            cp.lock_version += 1
+            await create_audit_log(db, user_id, "IMPORT_FMEA", "control_plans", cp_id, {
+                "fmea_id": str(fmea.fmea_id), "source_fmea_version_id": str(version.version_id),
+                "preview_digest": preview["preview_digest"], "items_created": added,
+                "selected_candidate_keys": req.selected_candidate_keys,
             })
-            continue
+            await db.flush()
+            # Approval may already have been delivered before this CP existed.
+            # Persist incomplete coverage now; never wait for another event.
+            cp.sync_pending = not await _cp_has_handled_latest_approval(db, cp)
+            await stage_cp_version(db, cp, "import", "PFMEA 特性首次导入", user_id,
+                                    source_fmea_version_id=version.version_id)
+        response = [ControlPlanItemResponse.model_validate(row) for row in accepted]
+        await savepoint.commit()
+        released = True
+        await db.commit()
+        return response
+    except Exception:
+        if released:
+            await db.rollback()
+        else:
+            # Includes a nested transaction deactivated by failed flush.
+            await savepoint.rollback()
+        raise
 
-        diff_fields: list[str] = []
 
-        # Check structural fields
-        if (node.get("name") or "") != (item.process_name or ""):
-            diff_fields.append("process_name")
-        if (node.get("process_number") or "") != (item.step_no or ""):
-            diff_fields.append("step_no")
+async def check_stale_items(db: AsyncSession, cp_id: uuid.UUID, *, scope, source_fmea_version_id=None) -> list[dict]:
+    """Use the exact approved-snapshot sync projection, including conflicts and protection."""
+    from app.services.version_service import build_sync_preview
+    preview = await build_sync_preview(db, cp_id, source_fmea_version_id, scope=scope)
+    return [{**item, "status": "deleted" if item["action"] == "delete" else "modified"}
+            for item in preview["items"]] + [
+                {**i, "status": "conflict" if i["blocking"] else "modified",
+                 "diff_fields": i.get("diff_fields", []), "issues": [i]}
+                for i in preview["issues"] if i.get("item_id")]
 
-        # Check derived product characteristic fields from ProcessStepFunction
-        step_funcs = _children(item.source_fmea_node_id, "ProcessStepFunction")
-        if step_funcs:
-            # Match by product_characteristic name
-            for sf in step_funcs:
-                if sf.get("name") == item.product_characteristic:
-                    if (sf.get("specification") or "") != (item.specification_tolerance or ""):
-                        diff_fields.append("specification_tolerance")
-                    if (sf.get("classification") or "") != (item.special_class or ""):
-                        diff_fields.append("special_class")
-                    break
 
-        # Check equipment from ProcessWorkElement
-        work_elements = _children(item.source_fmea_node_id, "ProcessWorkElement")
-        if item.equipment and work_elements:
-            if not any(we.get("name") == item.equipment for we in work_elements):
-                diff_fields.append("equipment")
+async def _cp_has_handled_latest_approval(db, cp) -> bool:
+    """Completion must cover the highest approval, not only a chosen historical source.
 
-        # Check process characteristic from ProcessWorkElementFunction
-        for we in work_elements:
-            we_funcs = _children(we.get("id"), "ProcessWorkElementFunction")
-            if item.process_characteristic and we_funcs:
-                if not any(wf.get("name") == item.process_characteristic for wf in we_funcs):
-                    diff_fields.append("process_characteristic")
-                    break
+    Writers already hold scope and CP/FMEA parent locks. Verify ownership/hash
+    and actual accepted coverage with the same conservative worker predicate.
+    """
+    from app.models.fmea_version import FMEAVersion
 
-        if diff_fields:
-            stale_items.append({
-                "item_id": str(item.item_id),
-                "step_no": item.step_no,
-                "status": "modified",
-                "diff_fields": diff_fields,
-            })
+    versions = list((await db.scalars(select(FMEAVersion).where(
+        FMEAVersion.fmea_id == cp.fmea_ref_id, FMEAVersion.factory_id == cp.factory_id,
+        FMEAVersion.change_type == "approve", FMEAVersion.major_no >= 1,
+        FMEAVersion.minor_no == 0).order_by(FMEAVersion.major_no.desc()).limit(2))).all())
+    if not versions or (len(versions) > 1 and versions[0].major_no == versions[1].major_no):
+        return False
+    return await _cp_has_handled_approval(db, cp, versions[0].version_id)
 
-    return stale_items
+
+async def _cp_has_handled_approval(db, cp, event_version_id) -> bool:
+    """Acknowledge only a valid complete accepted baseline, never a guess.
+
+    The document pointer alone is insufficient (partial imports can carry it).
+    Unchanged rows may retain older per-row accepted versions.
+    """
+    from app.models.fmea_version import FMEAVersion
+    from app.services.fmea_characteristics import source_key
+    from app.services.version_service import verify_fmea_version, _mapped_snapshot
+
+    source = await db.scalar(select(FMEADocument).where(FMEADocument.fmea_id == cp.fmea_ref_id)
+                             .execution_options(populate_existing=True))
+    if (source is None or source.fmea_type != 'PFMEA' or source.factory_id != cp.factory_id
+            or source.product_line_code != cp.product_line_code):
+        return False
+    cache = {}
+
+    async def approved(version_id):
+        if version_id not in cache:
+            version = await db.scalar(select(FMEAVersion).where(
+                FMEAVersion.version_id == version_id, FMEAVersion.fmea_id == cp.fmea_ref_id,
+                FMEAVersion.factory_id == cp.factory_id, FMEAVersion.change_type == 'approve',
+                FMEAVersion.major_no >= 1, FMEAVersion.minor_no == 0)) if version_id else None
+            cache[version_id] = version if version and await verify_fmea_version(db, version.version_id) else None
+        return cache[version_id]
+
+    event = await approved(event_version_id)
+    accepted = await approved(cp.source_fmea_version_id)
+    if event is None or accepted is None or accepted.major_no < event.major_no:
+        return False
+    projections = {}
+
+    def projection(version):
+        if version.version_id not in projections:
+            mapped = _mapped_snapshot(cp.fmea_ref_id, version.snapshot)
+            projections[version.version_id] = None if any(i.blocking for i in mapped.issues) else {
+                source_key(item.source_ref): item for item in mapped.items}
+        return projections[version.version_id]
+
+    target = projection(accepted)
+    if target is None:
+        return False
+    rows = list((await db.scalars(select(ControlPlanItem).where(ControlPlanItem.cp_id == cp.cp_id)
+                                 .order_by(ControlPlanItem.item_id)
+                                 .execution_options(populate_existing=True))).all())
+    covered = set()
+    for row in rows:
+        try:
+            ref = CharacteristicSourceRef.model_validate(row.source_characteristic_ref)
+        except (ValueError, TypeError):
+            return False
+        key = source_key(ref)
+        expected = target.get(key)
+        baseline = await approved(ref.accepted_source_version_id)
+        if (row.factory_id != cp.factory_id or ref.mapping_version != 1 or expected is None
+                or ref.step_id != row.source_fmea_node_id
+                or ref.work_element_id != expected.source_ref.work_element_id
+                or baseline is None or baseline.major_no > accepted.major_no):
+            return False
+        base_items = projection(baseline)
+        base = base_items.get(key) if base_items is not None else None
+        # Match _sync_projection's unchanged-source completion semantics:
+        # trusted accepted SOURCE material must match the completed document
+        # baseline. Current local values may differ as a permitted nonblocking
+        # override; neither explicit acknowledgment nor notification rewrites it.
+        if (base is None or base.source_ref.work_element_id != ref.work_element_id
+                or base.fields != expected.fields):
+            return False
+        covered.add(key)
+    return covered == set(target)
 
 
 async def apply_cp_sync_pending(db: AsyncSession, outbox, user_id: uuid.UUID) -> int:
-    """Idempotently mark linked CPs sync_pending + audit each flip.
+    """Notify genuinely unhandled approvals under the existing CP mutex.
 
-    Only flips CPs currently sync_pending=False; already-pending CPs are skipped
-    (no duplicate audit), giving idempotency per (outbox_id, cp_id). Does NOT
-    commit — the worker commits atomically with the outbox status."""
-    from app.models.audit import AuditLog
-    result = await db.execute(
-        select(ControlPlan).where(
-            ControlPlan.fmea_ref_id == outbox.fmea_id,
-            ControlPlan.sync_pending == False,  # noqa: E712
-        )
-    )
-    cps = list(result.scalars().all())
+    Scope locks precede CP parent locks, in deterministic order as import/sync
+    writers. Refresh after waiting so late delivery cannot overwrite their clear.
+    Only sync_pending and its actual false-to-true audit are written; the caller
+    completes the outbox atomically in the same transaction.
+    """
+    from app.services.version_service import lock_version_parents_in_order
+
+    query = select(ControlPlan.cp_id, ControlPlan.factory_id, ControlPlan.product_line_code).where(
+        ControlPlan.fmea_ref_id == outbox.fmea_id).order_by(ControlPlan.cp_id)
+    observed = list((await db.execute(query)).all())
+    source_scope = (await db.execute(select(FMEADocument.factory_id, FMEADocument.product_line_code)
+                                    .where(FMEADocument.fmea_id == outbox.fmea_id))).first()
+    scopes = {(row.factory_id, row.product_line_code) for row in observed}
+    if source_scope is not None:
+        scopes.add((source_scope.factory_id, source_scope.product_line_code))
+    if not scopes:
+        return 0
+    await lock_candidate_scopes(db, scopes)
+    # A create may have committed while discovery waited on the scope mutex.
+    candidates = list((await db.execute(query)).all())
+    if any((row.factory_id, row.product_line_code) not in scopes for row in candidates):
+        raise ValueError('CP candidate scope changed; retry approval notification')
+    await lock_version_parents_in_order(db, [('control_plan', row.cp_id) for row in candidates])
+    cps = list((await db.scalars(select(ControlPlan).where(
+        ControlPlan.cp_id.in_([row.cp_id for row in candidates])).order_by(ControlPlan.cp_id)
+        .execution_options(populate_existing=True))).all())
+    identities = {row.cp_id: (row.factory_id, row.product_line_code) for row in candidates}
+    if any(cp.fmea_ref_id != outbox.fmea_id or identities[cp.cp_id] != (cp.factory_id, cp.product_line_code) for cp in cps):
+        raise ValueError('CP source or scope changed; retry approval notification')
+    processed = 0
     for cp in cps:
+        if cp.sync_pending or await _cp_has_handled_approval(db, cp, outbox.fmea_version_id):
+            continue
         cp.sync_pending = True
-        db.add(AuditLog(
-            table_name="control_plans",
-            record_id=cp.cp_id,
-            action="UPDATE",
-            changed_fields={
-                "sync_pending": "false->true",
-                "trigger_fmea_version_id": str(outbox.fmea_version_id),
-            },
-            operated_by=user_id,
-        ))
-    return len(cps)
+        db.add(AuditLog(table_name='control_plans', record_id=cp.cp_id, action='UPDATE',
+            changed_fields={'sync_pending': 'false->true',
+                            'trigger_fmea_version_id': str(outbox.fmea_version_id)}, operated_by=user_id))
+        processed += 1
+    return processed
 
 
 # ─── CSR Sync ───

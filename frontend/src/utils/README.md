@@ -99,3 +99,9 @@ Grouped by what each helper does, not alphabetical:
 - **Depended on by:** `pages/` (especially the FMEA editor and
   wizard), `components/` (the FMEA table, structure tree, graph
   view), `main.tsx` (theme), and the vitest suite.
+
+## Characteristic helpers (2026-11-03)
+
+`fmeaCharacteristics.ts` resolves kind from unique actual HAS_FUNCTION ownership plus FMEA type, not the shared function name. PFMEA work-element ownership also requires one real process-step parent; ambiguous/missing owners return undefined for review. It updates collections without changing function fields, offers same-step product choices, and plans/cleans references only on confirmed product deletion. Rename keeps characteristic UUID.
+
+`fmeaTable.ts` graph/table round trips retain collections and metadata; legacy absence/null stays distinct from explicit `[]`. Graph mutation copy/delete helpers preserve identities appropriately and remove dangling intra-document links. Multi-effect/FM×FC/shared-control behavior is unchanged. `graphDiff.ts` includes structured collection changes; CP source metadata is compared by content, not object identity. These helpers do not authorize writes to approved documents or alter standard table headers.

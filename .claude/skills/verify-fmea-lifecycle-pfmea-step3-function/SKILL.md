@@ -1,144 +1,42 @@
 ---
 name: verify-fmea-lifecycle-pfmea-step3-function
-description: Use when asked to verify / walk through / 验收 / 走查 OpenQMS 子故事 US-E2E-02.3（PFMEA Step3 功能分析：为每个结构节点录入 ProcessItemFunction/ProcessStepFunction/ProcessWorkElementFunction + HAS_FUNCTION 边 + FUNCTION_MAPPED_TO 边 + CC/SC 写 Function.classification）end-to-end — e.g. "验收 02.3" / "走查 PFMEA Step3" / "verify pfmea-step3-function".
+description: Use when asked to verify / walk through / 验收 / 走查 OpenQMS 子故事 US-E2E-02.3（PFMEA Step3 功能分析：为每个结构节点录入 ProcessItemFunction/ProcessStepFunction/ProcessWorkElementFunction + HAS_FUNCTION 边 + FUNCTION_MAPPED_TO 边 + 结构化 characteristics 与独立 CC/SC）end-to-end — e.g. "验收 02.3" / "走查 PFMEA Step3" / "verify pfmea-step3-function".
 ---
 
 > 依据：docs/user-stories/US-E2E-02-fmea-lifecycle/US-E2E-02.3-pfmea-step3-function.md
-> 故事版本：定稿 v2（2026-07-25）
-> 同步规则：当用户故事版本号或日期变更，本剧本必须重新核对并同步（见「维护」）。
+> 故事版本：定稿 v3（2026-11-03）
+> 剧本版本：v3（2026-11-03）
 
-# verify-fmea-lifecycle-pfmea-step3-function
+# PFMEA Step3 功能与产品／过程特性
 
-## Overview
+## 使用与前置
 
-本子 skill 走查 US-E2E-02.3：在 PFMEA 向导 Step3 为每个结构节点录入功能树（产品特性 / 过程特性），并维护 CC/SC 特殊特性。
+用于验收 US-E2E-02.3。先核对上述故事版本／日期；不一致先同步再走查。先取得服务、独立库和测试数据授权。专用环境按 docs/e2e.md；不得未经授权执行共享 reset/seed。新 fixture 唯一命名并记录 IDs，审批使用不同的真实授权账号。AI_REQUIRED=false，本剧本不证明 AI、CSR、PPAP、scanner 或 live Neo4j 可用。
 
-核心验收点：
+## 公共数据契约
 
-1. **每个纳入分析范围的结构节点都有功能节点**（`HAS_FUNCTION` 边），**非仅"至少一个功能"**（README 评审决议）。
-2. **功能节点类型**：`ProcessItemFunction`（产品特性）/ `ProcessStepFunction`（产品特性，CC/SC 可设）/ `ProcessWorkElementFunction`（过程特性，CC/SC 可设）。
-3. **`FUNCTION_MAPPED_TO`**：不同层级功能之间的功能关系（**非功能→结构**）。
-4. **CC/SC 写入 Function.classification 字段**（复用现有字段），**不写** `FailureCause.special_characteristic`。
-5. **门禁**：推进 Step4 前每个结构节点都有功能节点。
+- 功能仍用 Process*Function 与 HAS_FUNCTION／FUNCTION_MAPPED_TO。新字段是 characteristics[]：id（稳定 UUID）/kind/name/specification/unit/classification/reference/related_product_characteristic_ids。
+- PFMEA kind 由唯一真实 HAS_FUNCTION 所属决定：ProcessStep=product；ProcessWorkElement=process，后者必须唯一属于同工序。DFMEA 的 System/Subsystem/Component 所属均 product，即使类型名是 ProcessWorkElementFunction。缺失／歧义复核，不猜测。
+- 名称为空显示必填，不保存空白；改名保留 UUID。分类与 kind 独立，不按严重度或类别自动 CC/SC。新 CC/SC 在 characteristics[].classification；旧 Function.classification 只兼容参考。
+- characteristics 缺失/null 显示历史参考提示，不自动转换；显式 [] 不回退旧字段。查看历史快照不修改集合、UUID 或源数据。
 
-## When to Use
+## 可复用特性专项走查
 
-**用**：用户说「验收 02.3」「走查 PFMEA Step3」等。
-**不用**：其他子故事。
+1. 以合法新草稿及已声明的结构／失效链 API 前置进入页面；确认 status=draft，guards 启用。打开向导功能分析，legacy 提示出现且 GET 不新增 characteristics。
+2. PFMEA 同一工序：步骤功能 UI 录入 2 产品；工作要素功能 UI 录入 3 过程。使用 aria-label「特性名称」「规范／公差」「特殊分类」「关联产品特性」及按钮「新增产品特性」「新增过程特性」「确认特性」。模拟数值不是客户批准。
+3. 保存草稿、刷新、重新进入功能分析；GET 核对两个集合与稳定 UUID。DFMEA 共享类型 UI 只有产品入口，保存刷新仍 kind=product。
+4. 完成既有向导／审批流程；不能直接写 approved 或禁用 trigger 构造通过。查看版本快照时输入禁用、无新增入口，版本 hash verify 通过。
 
-## 前置
+## 本故事补充
 
-1. **epic 级前置**：见 epic skill。
-2. **AI_REQUIRED=false**。
-3. **02.2 已就绪**：Step2 结构树已落库（ProcessItem/ProcessStep/ProcessWorkElement）。
-4. **engineer 账号**。
+逐一核对每个分析范围结构节点 HAS_FUNCTION；FUNCTION_MAPPED_TO 连上下层功能而非结构。ProcessItemFunction 是过程项功能，不新增本次结构化特性。步骤产品与工作要素过程各有多项，过程关联只允许同工序产品。功能描述不等于特性名称。保存后 graph_data 与 UPDATE 审计存在；Step4 仍遵守既有门禁。
 
-## 账号 × 权限
+## 执行与结果模板
 
-| 账号 | 角色 | 用途 |
-|---|---|---|
-| engineer | quality_engineer (L2) | 录入功能树 + 保存 |
+特性专项自动浏览器：`make e2e-run TEST_ARGS='--config=playwright.characteristic.config.ts e2e/specs/m1-core/characteristic-correction.spec.ts'`。独立配置不运行共享 global setup/reset，先确认已授权的本地服务、owned endpoint 和 bootstrap，并设置 CHARACTERISTIC_PYTHON 指向既有只读测试解释器；不得据该命令跳过环境审批。
 
-## selector 表
+记录：故事／剧本版本、API 前置与真实 UI 步骤分开、实际命令／退出码／passed/failed/skipped/xfail/xpass/warnings、截图路径与 LOOK 观察、审计／版本 IDs、清理及保留对象。每项写 PASS/FAIL/BLOCKED/NOT_RUN；专项通过不代表本故事全部历史能力重新验收。证据回填 docs/development/characteristic-correction-acceptance.md，不能以静态阅读或模拟成功替代浏览器。
 
-| selector | 读取方式 | 用途 |
-|---|---|---|
-| Step3 视图 = `FunctionTreeEditor` | 组件（`PFMEAWizardPage.tsx:367-369`） | 功能树编辑 |
-| 功能名 Input | Ant Input，无 data-e2e | 按 placeholder/i18n 定位 |
-| CC/SC Select | Ant Select，无 data-e2e | Function.classification |
-| 「保存草稿」/「下一步」 | 按钮文本 | 页脚 |
+## 维护
 
-## 走查剧本
-
-### A. 进入 Step3
-
-1. **做**：engineer 登录 → 打开 02.2 已完成的 PFMEA → 向导 Step3。
-   - **期望**：FunctionTreeEditor 渲染；显示 02.2 录入的 ProcessItem/ProcessStep/ProcessWorkElement 挂载点。
-   - **断言**：`GET /api/fmea/{id}` 回读结构节点 ≥3。
-   - **落库**：无。
-
-### B. 为每个结构节点录入功能
-
-2. **做**：分别为 ProcessItem/ProcessStep/ProcessWorkElement 添加功能节点：
-   - ProcessItemFunction：「提供稳定 12V 输出」（产品特性）；
-   - ProcessStepFunction：「精确贴装 IC 至焊盘」（产品特性，CC 设「CC」）；
-   - ProcessWorkElementFunction：「按规程操作贴片机」（过程特性，SC 设「SC」）。
-   - **期望**：每个结构节点下挂 1 个功能节点；UI 显示功能树。
-   - **断言**：UI read-back 三个功能节点均可见。
-   - **落库**：尚未保存。
-
-### C. FUNCTION_MAPPED_TO 边（层级功能关系）
-
-3. **做**：在 FunctionTreeEditor 中把 ProcessItemFunction 与 ProcessStepFunction 关联（通常通过拖拽或显式"映射"操作）。
-   - **期望**：两个功能节点之间出现一条边，类型 `FUNCTION_MAPPED_TO`。
-   - **断言**：保存后回读 `graph_data.edges` 含 `type == "FUNCTION_MAPPED_TO"`，且 source/target 均为功能节点（**非功能→结构**）。
-   - **若 FUNCTION_MAPPED_TO 误连功能→结构** → FAIL。
-
-### D. CC/SC 写 Function.classification
-
-4. **做**：把 ProcessStepFunction 的 CC/SC Select 设为「CC」；ProcessWorkElementFunction 设为「SC」→ 保存。
-   - **期望**：保存成功。
-   - **断言（回读，关键）**：`GET /api/fmea/{id}`：
-     - ProcessStepFunction 节点 `classification == "CC"`；
-     - ProcessWorkElementFunction 节点 `classification == "SC"`；
-     - **不**在 `FailureCause.special_characteristic` 写 CC/SC（若写了 → FAIL，字段错位置）。
-   - **落库**：1 条 UPDATE 审计。
-
-### E. 每个结构节点都有功能（门禁）
-
-5. **做**：保存后 `GET /api/fmea/{id}`，对每个结构节点（ProcessItem/ProcessStep/ProcessWorkElement）查 `graph_data.edges` 中是否存在 `type == "HAS_FUNCTION"` 且 source == 该结构节点 id。
-   - **期望**：**每个**结构节点都至少有 1 条 HAS_FUNCTION 出边。
-   - **断言**：3 个结构节点均有 HAS_FUNCTION 出边。
-   - **若只挂了一个功能（其他结构节点裸奔）** → FAIL（评审决议要求"每个纳入分析范围的结构节点都有功能节点"）。
-
-### F. 推进 Step4
-
-6. **做**：点「下一步」。
-   - **期望**：跳到 Step4 失效分析；FunctionTreeEditor 已建立的功能树作为 FM 挂载点。
-   - **落库**：无。
-
-## 判定汇总
-
-| 检查点 | 通过条件 |
-|---|---|
-| 每个结构节点有 HAS_FUNCTION | 3 个结构节点均有功能出边 |
-| FUNCTION_MAPPED_TO 方向 | 功能↔功能，非功能→结构 |
-| CC/SC 写 Function.classification | 字段正确，不写 FailureCause.special_characteristic |
-| UPDATE 审计 | 1 条/次保存 |
-
-## 缺陷分类
-
-| 标签 | 含义 |
-|---|---|
-| **PASS** | 功能树 + 边 + CC/SC 全满足 |
-| **FAIL** | 结构节点缺功能；CC/SC 写错字段；FUNCTION_MAPPED_TO 误连功能→结构；未审计 |
-| **MISSING** | FunctionTreeEditor 不渲染；CC/SC Select 不存在 |
-| **BLOCKED** | — |
-
-### 浏览器控制台断言（收尾必做）
-
-走查剧本全部步骤完成后、返回判定前，执行一次控制台检查（判定规则见总 skill `.claude/skills/verify-fmea-lifecycle/SKILL.md`「缺陷分类 → 浏览器控制台断言」）：
-
-- **做**：`browser_console_messages(level="error")`。
-- **期望**：无 error 级消息。
-- **断言**：无 error → 通过；有与本子故事相关的 error → 本故事判 **FAIL**（error 文本记入缺陷清单 + 截图）；仅有无关噪声 error → **PASS-NOTE** 并附文本。多标签/多账号走查对每个标签页分别检查。
-
-## 报告片段
-
-```markdown
-### 02.3 PFMEA Step3 功能分析 — <PASS|PASS-NOTE|FAIL|MISSING>
-
-- 每个结构节点有 HAS_FUNCTION：<OK|FAIL>
-- FUNCTION_MAPPED_TO 方向正确：<OK|FAIL>
-- CC/SC 写 Function.classification：<OK|FAIL>
-- UPDATE 审计：<OK|FAIL>
-- 截图：screenshots/02.3-*.png
-```
-
-## 维护（同步）
-
-1. 读 skill 顶部「故事版本」（定稿 v2（2026-07-25））。
-2. 读 `docs/user-stories/US-E2E-02-fmea-lifecycle/US-E2E-02.3-pfmea-step3-function.md` 顶部。
-3. 一致 → 跑；不一致 → 停下同步。
-
-引用校验：`bash .claude/skills/verify-fmea-lifecycle/scripts/verify-refs.sh`。
+用户故事版本或日期改变，先核对实际源码与步骤，再同步本剧本版本／日期并运行相关验收。保留原有历史运行结论，新增结果只针对实际运行范围；不要把旧“待实现”或旧行号当现状。

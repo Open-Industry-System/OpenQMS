@@ -26,6 +26,10 @@ interface FmeaSource {
 }
 
 interface CPItem {
+  cp_id: string;
+  gauge_id?: string | null;
+  requires_version_sync?: boolean;
+  guidance?: string | null;
   item_id: string;
   step_no: string;
   process_name: string;
@@ -46,6 +50,12 @@ interface SPChar {
 }
 
 interface TraceabilityChain {
+  sc_category?: 'product' | 'process' | null;
+  source_characteristic_id?: string | null;
+  msa_study_id?: string | null;
+  msa_status?: string | null;
+  review_required?: boolean;
+  review_message?: string | null;
   sc_code: string;
   sc_name: string;
   sc_type: string;
@@ -70,14 +80,18 @@ export default function TraceabilityPage() {
   useEffect(() => {
     if (!selectedId) {
       setChain(null);
+      setLoading(false);
       return;
     }
+    let active = true;
+    setChain(null);
     setLoading(true);
     client
       .get(`/api/special-characteristics/traceability/${selectedId}`)
-      .then((r) => setChain(r.data))
-      .catch(() => setChain(null))
-      .finally(() => setLoading(false));
+      .then((r) => { if (active) setChain(r.data); })
+      .catch(() => { if (active) setChain(null); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [selectedId]);
 
   return (
@@ -116,6 +130,9 @@ export default function TraceabilityPage() {
               </StatusBadge>
               <Title level={5} style={{ margin: 0 }}>{chain.sc_code} - {chain.sc_name}</Title>
             </Space>
+            {chain.review_required && <Alert type="warning" showIcon message={chain.review_message || t('traceability.formalSync')} />}
+            {chain.sc_category && <div>{t(`category.${chain.sc_category}`)}</div>}
+            {chain.source_characteristic_id && <Text code>{chain.source_characteristic_id}</Text>}
             <div style={{ marginTop: 8 }}>
               <Text type="secondary">{t('traceability.specRequirement')}：</Text> {chain.spec_requirement || '—'}
             </div>
@@ -165,8 +182,9 @@ export default function TraceabilityPage() {
                       <div>
                         {chain.control_plan_items.map((item) => (
                           <div key={item.item_id} style={{ marginBottom: 12, padding: 8, background: '#f6ffed', borderRadius: 4 }}>
-                            <Text strong>{item.cp_document_no}</Text>
+                            <Link to={`/control-plans/${item.cp_id}`}><Text strong>{item.cp_document_no}</Text></Link>
                             <Text type="secondary"> — {item.cp_title}</Text>
+                            {item.requires_version_sync && <Alert type="warning" showIcon message={item.guidance || t('traceability.formalSync')} />}
                             <div style={{ marginTop: 4 }}>
                               <StatusBadge status="info">{t('traceability.step')} {item.step_no}</StatusBadge>
                               <Text> {item.process_name} / {item.characteristic_no}</Text>
@@ -188,7 +206,9 @@ export default function TraceabilityPage() {
                 color: 'orange',
                 children: (
                   <DataCard title={t('traceability.msaAnalysis')} style={{ marginBottom: 16 }}>
-                    <Text type="secondary">{t('traceability.msaDescription')}</Text>
+                    <Text type="secondary">{chain.msa_study_id
+                      ? `${t('basicInfo.msaStatus')}: ${chain.msa_status || 'PENDING'} (${chain.msa_study_id})`
+                      : t('traceability.msaMissingEvidence')}</Text>
                   </DataCard>
                 ),
               },

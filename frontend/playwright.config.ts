@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e/specs",
+  // Owned-runtime acceptance is opt-in via playwright.characteristic.config.ts.
+  testIgnore: "**/characteristic-correction.spec.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

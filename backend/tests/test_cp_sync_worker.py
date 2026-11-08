@@ -42,8 +42,10 @@ async def test_applier_flips_only_pending_and_audits_each(db, default_factory, a
     await db.commit()
     assert n == 2
     audits = (await db.execute(select(AuditLog).where(
-        AuditLog.table_name == "control_plans", AuditLog.action == "UPDATE"))).scalars().all()
+        AuditLog.table_name == "control_plans", AuditLog.action == "UPDATE",
+        AuditLog.record_id.in_([cp.cp_id for cp in cps])))).scalars().all()
     assert len(audits) == 2  # 2 + N rule: one per flipped CP
+    assert {a.record_id for a in audits} == {cp.cp_id for cp in cps}
     for a in audits:
         assert a.changed_fields["sync_pending"] == "false->true"
         assert "source_fmea_version_id" not in a.changed_fields
@@ -59,5 +61,7 @@ async def test_worker_idempotent_no_duplicate_audit(db, default_factory, admin_u
     await process_cp_sync_outbox_batch(db)
     await process_cp_sync_outbox_batch(db)  # second run: row already completed
     audits = (await db.execute(select(AuditLog).where(
-        AuditLog.table_name == "control_plans", AuditLog.action == "UPDATE"))).scalars().all()
+        AuditLog.table_name == "control_plans", AuditLog.action == "UPDATE",
+        AuditLog.record_id.in_([cp.cp_id for cp in cps])))).scalars().all()
     assert len(audits) == 2  # still exactly one per CP
+    assert {a.record_id for a in audits} == {cp.cp_id for cp in cps}

@@ -129,7 +129,12 @@ async def update_fmea(
             raise HTTPException(status_code=404, detail="FMEA not found")
     if fmea.status not in ("draft", "rework"):
         raise HTTPException(status_code=409, detail="当前状态不可编辑（仅草稿/返工可编辑）")
-    graph_dict = req.graph_data.model_dump() if req.graph_data else None
+    graph_dict = None
+    if req.graph_data is not None:
+        graph_dict = req.graph_data.model_dump(mode="json")
+        for node_model, node_dict in zip(req.graph_data.nodes, graph_dict["nodes"]):
+            if "characteristics" not in node_model.model_fields_set:
+                node_dict.pop("characteristics", None)
     try:
         fmea = await fmea_service.update_fmea(
             db, fmea, req.title, graph_dict, scope.user.user_id, req.product_line_code,

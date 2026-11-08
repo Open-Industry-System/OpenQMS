@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import uuid
 from collections.abc import Iterable
 
@@ -260,7 +261,7 @@ async def get_latest_cp_version(db: AsyncSession, cp_id: uuid.UUID) -> ControlPl
     return result.scalar_one_or_none()
 
 
-async def create_cp_version(
+async def stage_cp_version(
     db: AsyncSession,
     cp: ControlPlan,
     change_type: str,
@@ -268,7 +269,7 @@ async def create_cp_version(
     user_id: uuid.UUID,
     source_fmea_version_id: uuid.UUID | None = None,
 ) -> ControlPlanVersion:
-    """Snapshot the current Control Plan (header + items) as a new version.
+    """Stage a CP snapshot and audit; flush only, never commit or refresh.
 
     Header snapshot captures scalar CP fields.  Items snapshot is a list of
     dicts, each preserving the ``item_id`` UUID string for identity tracking.
@@ -331,6 +332,7 @@ async def create_cp_version(
             "control_method": item.control_method,
             "reaction_plan": item.reaction_plan,
             "source_fmea_node_id": item.source_fmea_node_id,
+            "source_characteristic_ref": item.source_characteristic_ref,
             "sort_order": item.sort_order,
         })
 
@@ -369,6 +371,22 @@ async def create_cp_version(
         operated_by=user_id,
     ))
 
+    await db.flush()
+    return version
+
+
+async def create_cp_version(
+    db: AsyncSession,
+    cp: ControlPlan,
+    change_type: str,
+    change_summary: str | None,
+    user_id: uuid.UUID,
+    source_fmea_version_id: uuid.UUID | None = None,
+) -> ControlPlanVersion:
+    """Compatibility wrapper retaining the existing committing behavior."""
+    version = await stage_cp_version(
+        db, cp, change_type, change_summary, user_id, source_fmea_version_id,
+    )
     await db.commit()
     await db.refresh(version)
     return version
@@ -590,6 +608,7 @@ async def rollback_control_plan(
             existing.control_method = snap.get("control_method")
             existing.reaction_plan = snap.get("reaction_plan")
             existing.source_fmea_node_id = snap.get("source_fmea_node_id")
+            existing.source_characteristic_ref = snap.get("source_characteristic_ref")
             existing.sort_order = snap.get("sort_order", 0)
         else:
             # Re-create with original item_id
@@ -610,6 +629,8 @@ async def rollback_control_plan(
                 control_method=snap.get("control_method"),
                 reaction_plan=snap.get("reaction_plan"),
                 source_fmea_node_id=snap.get("source_fmea_node_id"),
+                source_characteristic_ref=snap.get("source_characteristic_ref"),
+                factory_id=cp.factory_id,
                 sort_order=snap.get("sort_order", 0),
             )
             db.add(new_item)
@@ -652,272 +673,253 @@ async def rollback_control_plan(
 # FMEA-CP sync functions
 # ---------------------------------------------------------------------------
 
-# Fields on ControlPlanItem that can be synced from FMEA graph nodes
-_SYNCABLE_ITEM_FIELDS = (
-    "process_name",
-    "equipment",
-    "product_characteristic",
-    "process_characteristic",
-    "special_class",
-    "specification_tolerance",
-)
+# Source-owned fields, projected by the same mapper as initial import.
+_SYNCABLE_ITEM_FIELDS = ('step_no', 'process_name', 'equipment', 'product_characteristic',
+                         'process_characteristic', 'special_class', 'specification_tolerance')
 
 
-async def get_fmea_version_by_id(
-    db: AsyncSession, version_id: uuid.UUID,
-) -> FMEAVersion | None:
-    """Return an FMEA version by its version_id."""
-    result = await db.execute(
-        select(FMEAVersion).where(FMEAVersion.version_id == version_id)
-    )
-    return result.scalar_one_or_none()
+async def get_fmea_version_by_id(db: AsyncSession, version_id: uuid.UUID) -> FMEAVersion | None:
+    """Return an FMEA version by its version_id (existing compatibility helper)."""
+    return await db.scalar(select(FMEAVersion).where(FMEAVersion.version_id == version_id))
 
 
-async def build_sync_preview(
-    db: AsyncSession,
-    cp: ControlPlan,
-    fmea_version: FMEAVersion,
-) -> list[dict]:
-    """Build a preview of changes that would result from syncing a CP with an FMEA version.
-
-    Returns a list of preview dicts, each with:
-        item_id:          existing item UUID string, or pre-generated UUID for "add"
-        source_fmea_node_id: FMEA graph node_id (always present)
-        step_no:          process step number
-        action:           "add" | "sync" | "delete"
-        current_value:    dict of current CP item fields (None for "add")
-        fmea_new_value:   dict of FMEA-derived field values
-        merged_value:     proposed merged values (FMEA overwrites where non-empty)
-    """
-    graph = fmea_version.snapshot or {"nodes": [], "edges": []}
-    nodes = graph.get("nodes", [])
-    edges = graph.get("edges", [])
-
-    node_map: dict[str, dict] = {n["id"]: n for n in nodes if "id" in n}
-    edge_map: dict[str, list[str]] = {}
-    for e in edges:
-        src = e.get("source")
-        tgt = e.get("target")
-        if src:
-            edge_map.setdefault(src, []).append(tgt)
-
-    # Load current CP items
-    items_result = await db.execute(
-        select(ControlPlanItem)
-        .where(ControlPlanItem.cp_id == cp.cp_id)
-        .order_by(ControlPlanItem.sort_order)
-    )
-    current_items = list(items_result.scalars().all())
-
-    # Index existing items by source_fmea_node_id
-    existing_by_node: dict[str, ControlPlanItem] = {}
-    for item in current_items:
-        if item.source_fmea_node_id:
-            existing_by_node[item.source_fmea_node_id] = item
-
-    # Identify FMEA ProcessStep nodes as sync sources
-    step_nodes = [n for n in nodes if n.get("type") == "ProcessStep"]
-
-    def _children(parent_id: str, node_type: str) -> list[dict]:
-        return [
-            node_map[t]
-            for t in edge_map.get(parent_id, [])
-            if node_map.get(t, {}).get("type") == node_type
-        ]
-
-    def _derive_item_fields(step_node: dict) -> dict:
-        """Derive CP item fields from an FMEA ProcessStep and its children."""
-        step_id = step_node["id"]
-        work_elements = _children(step_id, "ProcessWorkElement")
-        step_functions = _children(step_id, "ProcessStepFunction")
-
-        fields: dict = {
-            "step_no": step_node.get("process_number", ""),
-            "process_name": step_node.get("name", ""),
-            "equipment": None,
-            "product_characteristic": None,
-            "process_characteristic": None,
-            "special_class": None,
-            "specification_tolerance": None,
-        }
-
-        if work_elements:
-            fields["equipment"] = work_elements[0].get("name")
-
-        if step_functions:
-            sf = step_functions[0]
-            fields["product_characteristic"] = sf.get("name")
-            fields["specification_tolerance"] = sf.get("specification")
-            fields["special_class"] = sf.get("classification")
-
-        # Process characteristic from work element functions
-        for we in work_elements:
-            we_funcs = _children(we["id"], "ProcessWorkElementFunction")
-            if we_funcs:
-                fields["process_characteristic"] = we_funcs[0].get("name")
-                break
-
-        return fields
-
-    preview: list[dict] = []
-    seen_node_ids: set[str] = set()
-
-    for step in step_nodes:
-        node_id = step["id"]
-        seen_node_ids.add(node_id)
-        fmea_fields = _derive_item_fields(step)
-
-        if node_id in existing_by_node:
-            # Existing item — check for field differences
-            item = existing_by_node[node_id]
-            current_value: dict = {}
-            merged_value: dict = {}
-            has_changes = False
-
-            for field in _SYNCABLE_ITEM_FIELDS:
-                cur = getattr(item, field, None) or ""
-                new = fmea_fields.get(field) or ""
-                current_value[field] = cur or None
-                # FMEA overwrites where it has data; keep current where FMEA is empty
-                merged = new if new else cur
-                merged_value[field] = merged or None
-                if cur != new:
-                    has_changes = True
-
-            if has_changes:
-                preview.append({
-                    "item_id": str(item.item_id),
-                    "source_fmea_node_id": node_id,
-                    "step_no": fmea_fields["step_no"],
-                    "action": "sync",
-                    "current_value": current_value,
-                    "fmea_new_value": fmea_fields,
-                    "merged_value": merged_value,
-                })
-        else:
-            # New FMEA node — propose "add" with pre-generated UUID
-            preview.append({
-                "item_id": str(uuid.uuid4()),
-                "source_fmea_node_id": node_id,
-                "step_no": fmea_fields["step_no"],
-                "action": "add",
-                "current_value": None,
-                "fmea_new_value": fmea_fields,
-                "merged_value": fmea_fields,
-            })
-
-    # Items with source_fmea_node_id that no longer exist in the FMEA graph
-    for item in current_items:
-        if item.source_fmea_node_id and item.source_fmea_node_id not in seen_node_ids:
-            preview.append({
-                "item_id": str(item.item_id),
-                "source_fmea_node_id": item.source_fmea_node_id,
-                "step_no": item.step_no,
-                "action": "delete",
-                "current_value": {
-                    f: getattr(item, f, None) for f in _SYNCABLE_ITEM_FIELDS
-                },
-                "fmea_new_value": None,
-                "merged_value": None,
-            })
-
-    return preview
+async def _sync_context(db, cp_id, source_version_id, scope, *, expected_lock=None, lock=False):
+    from types import SimpleNamespace
+    from app.services import control_plan_service as cps
+    await cps._import_tenant_boundary(db, extra_tables=(
+        "capa_eightd", "capa_docg_analysis", "capa_docg_audit", "capa_docg_decision", "special_characteristics"))
+    cp = await db.scalar(select(ControlPlan).where(ControlPlan.cp_id == cp_id)
+                         .execution_options(populate_existing=True))
+    if cp is None or cp.fmea_ref_id is None:
+        raise cps.CharacteristicImportError('控制计划或关联来源不存在', 404)
+    factory_scope, pl_scope = await cps._import_authority(db, scope, lock=False)
+    cps._import_check_access(cp, scope, factory_scope, pl_scope)
+    if source_version_id is None:
+        versions = list((await db.scalars(select(FMEAVersion).where(
+            FMEAVersion.fmea_id == cp.fmea_ref_id, FMEAVersion.factory_id == cp.factory_id,
+            FMEAVersion.change_type == 'approve', FMEAVersion.minor_no == 0,
+            FMEAVersion.major_no >= 1).order_by(FMEAVersion.major_no.desc()))).all())
+        if not versions or (len(versions) > 1 and versions[0].major_no == versions[1].major_no):
+            raise cps.CharacteristicImportError('无法唯一确定批准来源，请明确选择版本')
+        source_version_id = versions[0].version_id
+    req = SimpleNamespace(fmea_id=cp.fmea_ref_id, source_fmea_version_id=source_version_id,
+                          expected_lock_version=cp.lock_version if expected_lock is None else expected_lock)
+    return await cps._characteristic_import_context(db, cp_id, req, scope, lock=lock)
 
 
-async def apply_sync_preview(
-    db: AsyncSession,
-    cp: ControlPlan,
-    fmea_version: FMEAVersion,
-    accepted_item_ids: list[str],
-    user_id: uuid.UUID,
-) -> ControlPlanVersion:
-    """Apply accepted sync preview items to the control plan.
+def _mapped_snapshot(fmea_id, snapshot):
+    from app.services.cp_characteristic_mapping import derive_cp_items, MappingResult
+    steps = tuple(str(n['id']) for n in snapshot.get('nodes', []) if n.get('type') == 'ProcessStep')
+    return derive_cp_items(fmea_id=fmea_id, fmea_type='PFMEA', graph=snapshot, step_ids=steps) if steps else MappingResult((), ())
 
-    For each preview_item:
-      - "add": create ControlPlanItem with the pre-generated UUID and source_fmea_node_id
-      - "sync": update existing item fields
-      - "delete": remove the item
 
-    Then create a CP version with change_type="fmea_sync".
-    """
-    preview = await build_sync_preview(db, cp, fmea_version)
-    accepted_set = set(accepted_item_ids)
-
-    for preview_item in preview:
-        item_id_str = preview_item["item_id"]
-        if item_id_str not in accepted_set:
+async def _sync_projection(db, cp, fmea, version, tenant, *, lock=False):
+    from dataclasses import asdict
+    from app.schemas.characteristic import CharacteristicSourceRef
+    from app.services.fmea_characteristics import source_key
+    from app.services.cp_characteristic_mapping import candidate_key
+    from app.services.cp_sync_protection import sync_protection, row_material
+    from app.services.control_plan_service import CharacteristicImportError
+    query = select(ControlPlanItem).where(ControlPlanItem.cp_id == cp.cp_id).order_by(
+        ControlPlanItem.sort_order, ControlPlanItem.item_id).execution_options(populate_existing=True)
+    if lock:
+        query = query.with_for_update()
+    existing = list((await db.scalars(query)).all())
+    if any(i.factory_id != cp.factory_id for i in existing):
+        raise CharacteristicImportError('控制计划行范围不一致')
+    mapped = _mapped_snapshot(fmea.fmea_id, version.snapshot)
+    issues = [asdict(i) for i in mapped.issues]
+    target = {source_key(i.source_ref): i for i in mapped.items}
+    blocking_mapping = any(i.blocking for i in mapped.issues)
+    codes, execution, protection_digest = await sync_protection(db, cp, existing)
+    baselines, seen, candidates = {}, set(), []
+    for row in existing:
+        iid = str(row.item_id)
+        current = {f: getattr(row, f) for f in _SYNCABLE_ITEM_FIELDS}
+        try:
+            ref = CharacteristicSourceRef.model_validate(row.source_characteristic_ref)
+            if ref.fmea_id != fmea.fmea_id or ref.mapping_version != 1 or ref.step_id != row.source_fmea_node_id:
+                raise ValueError('source mismatch')
+        except (ValueError, TypeError):
+            issues.append({'code': 'manual_or_legacy_source', 'item_id': iid, 'blocking': True,
+                           'message': '人工或历史混合来源需人工确认，不重绑或删除'})
             continue
+        key = source_key(ref)
+        seen.add(key)
+        new = target.get(key)
+        baseline_id = ref.accepted_source_version_id
+        if baseline_id not in baselines:
+            v = await db.scalar(select(FMEAVersion).where(
+                FMEAVersion.version_id == baseline_id, FMEAVersion.fmea_id == fmea.fmea_id,
+                FMEAVersion.factory_id == cp.factory_id)) if baseline_id else None
+            if (v is not None and v.change_type == 'approve' and v.major_no >= 1 and v.minor_no == 0
+                    and await verify_fmea_version(db, v.version_id)):
+                bm = _mapped_snapshot(fmea.fmea_id, v.snapshot)
+                baselines[baseline_id] = ({source_key(i.source_ref): i for i in bm.items}
+                                          if not any(i.blocking for i in bm.issues) else {})
+            else:
+                baselines[baseline_id] = {}
+        base = baselines[baseline_id].get(key)
+        conflict = []
+        if base is None or base.source_ref.work_element_id != ref.work_element_id:
+            conflict.append({'code': 'baseline_unavailable', 'message': '无可信逐行接受基线，需人工复核'})
+        action = 'sync' if new else 'delete'
+        merged = dict(current) if new else None
+        if new and base:
+            for field in _SYNCABLE_ITEM_FIELDS:
+                b, n, c = base.fields[field], new.fields[field], current[field]
+                source_changed, local_changed = n != b, c != b
+                if source_changed and local_changed and c != n:
+                    conflict.append({'code': 'three_way_conflict', 'field': field, 'base': b, 'current': c, 'source': n})
+                if source_changed:
+                    merged[field] = n
+        elif base and not new and any(current[f] != base.fields[f] for f in _SYNCABLE_ITEM_FIELDS):
+            conflict.append({'code': 'local_change_on_delete', 'message': '本地源字段已修改，不自动删除'})
+        new_ref = new.source_ref.model_copy(update={'accepted_source_version_id': version.version_id}) if new else ref
+        source_changed = not new or not base or any(new.fields[f] != base.fields[f] for f in _SYNCABLE_ITEM_FIELDS)
+        if new and base and not conflict and not source_changed and new_ref.work_element_id == ref.work_element_id:
+            local_fields = [f for f in _SYNCABLE_ITEM_FIELDS if current[f] != new.fields[f]]
+            if local_fields:
+                issues.append({'code': 'local_source_override', 'item_id': iid, 'blocking': False,
+                               'diff_fields': local_fields, 'current_value': current,
+                               'fmea_new_value': new.fields, 'message': '保留本地源字段修改，请复核'})
+            continue  # no source change: never rebase protected material solely for metadata
+        row_issues = []
+        if blocking_mapping:
+            row_issues.append({'code': 'source_projection_blocked', 'blocking': True})
+        for code in codes[iid]:
+            row_issues.append({'code': code, 'blocking': True, 'message': '存在受控流程引用，需复核'})
+        if action == 'delete' and iid in execution:
+            row_issues.append({'code': 'linked_execution_reference', 'blocking': True,
+                               'message': '执行或特殊特性关联禁止自动删除'})
+        elif iid in execution:
+            row_issues.append({'code': 'review_execution_applicability', 'blocking': False,
+                               'message': '保留执行关联，请复核适用性'})
+        candidates.append({'candidate_key': candidate_key(action, ref, row.item_id), 'item_id': iid,
+                           'source_fmea_node_id': ref.step_id, 'source_ref': new_ref.model_dump(mode='json'),
+                           'step_no': new.fields['step_no'] if new else row.step_no, 'action': action,
+                           'current_value': current, 'base_value': base.fields if base else None,
+                           'fmea_new_value': new.fields if new else None, 'merged_value': merged,
+                           'diff_fields': [f for f in _SYNCABLE_ITEM_FIELDS if not new or current[f] != new.fields[f]],
+                           'issues': row_issues, 'conflicts': conflict,
+                           'applicable': not conflict and not any(i['blocking'] for i in row_issues)})
+    for key, new in target.items():
+        if key in seen:
+            continue
+        ref = new.source_ref.model_copy(update={'accepted_source_version_id': version.version_id})
+        candidates.append({'candidate_key': candidate_key('add', ref, None), 'item_id': None,
+                           'source_fmea_node_id': ref.step_id, 'source_ref': ref.model_dump(mode='json'),
+                           'step_no': new.fields['step_no'], 'action': 'add', 'current_value': None,
+                           'base_value': None, 'fmea_new_value': new.fields, 'merged_value': new.fields,
+                           'diff_fields': list(_SYNCABLE_ITEM_FIELDS), 'issues': [], 'conflicts': [],
+                           'applicable': not blocking_mapping})
+    preview = {'source_fmea_version_id': str(version.version_id), 'fmea_version_id': str(version.version_id),
+               'fmea_version': f'v{version.major_no}.{version.minor_no}',
+               'expected_lock_version': cp.lock_version, 'mapping_version': 1,
+               'items': candidates, 'issues': issues,
+               'summary': {'add_count': sum(i['action'] == 'add' for i in candidates),
+                           'update_count': sum(i['action'] == 'sync' for i in candidates),
+                           'delete_count': sum(i['action'] == 'delete' for i in candidates)}}
+    preview['preview_digest'] = compute_snapshot_hash({**preview, 'tenant': tenant, 'cp_id': str(cp.cp_id),
+        'status': cp.status, 'factory': str(cp.factory_id), 'product_line': cp.product_line_code,
+        'source_hash': version.sha256_hash, 'accepted_global': str(cp.source_fmea_version_id),
+        'protection': protection_digest, 'rows': [row_material(i) for i in existing]})
+    return preview, existing
 
-        action = preview_item["action"]
-        merged = preview_item["merged_value"] or {}
 
-        if action == "add":
-            new_item = ControlPlanItem(
-                item_id=uuid.UUID(item_id_str),  # use pre-generated UUID
-                cp_id=cp.cp_id,
-                step_no=preview_item.get("step_no"),
-                process_name=merged.get("process_name"),
-                equipment=merged.get("equipment"),
-                product_characteristic=merged.get("product_characteristic"),
-                process_characteristic=merged.get("process_characteristic"),
-                special_class=merged.get("special_class"),
-                specification_tolerance=merged.get("specification_tolerance"),
-                source_fmea_node_id=preview_item["source_fmea_node_id"],
-            )
-            db.add(new_item)
+async def build_sync_preview(db, cp_id, source_fmea_version_id=None, *, scope):
+    """Fresh-authority read-only preview of an immutable approved target."""
+    with db.no_autoflush:
+        context = await _sync_context(db, cp_id, source_fmea_version_id, scope)
+        preview, _ = await _sync_projection(db, *context)
+        return preview
 
-        elif action == "sync":
-            result = await db.execute(
-                select(ControlPlanItem).where(
-                    ControlPlanItem.item_id == uuid.UUID(item_id_str)
-                )
-            )
-            item = result.scalar_one_or_none()
-            if item:
+
+async def apply_sync_preview(db, cp_id, req, user_id, *, scope):
+    """Apply stable candidate selections atomically; own the sole outer commit."""
+    from app.services.control_plan_service import CharacteristicImportError, _cp_has_handled_latest_approval
+    from app.schemas.version import ControlPlanVersionListItem
+    if scope is None or scope.user.user_id != user_id:
+        raise CharacteristicImportError('需要当前请求授权上下文', 403)
+    if (req.source_fmea_version_id is None or req.expected_lock_version is None
+            or not req.preview_digest or req.selected_candidate_keys is None or req.selected_item_ids):
+        raise CharacteristicImportError('缺少稳定预览上下文，请重新预览')
+    keys = req.selected_candidate_keys
+    if len(keys) != len(set(keys)):
+        raise CharacteristicImportError('重复候选选择')
+    savepoint = await db.begin_nested()
+    released = False
+    try:
+        context = await _sync_context(db, cp_id, req.source_fmea_version_id, scope,
+                                      expected_lock=req.expected_lock_version, lock=True)
+        cp, fmea, version, tenant = context
+        preview, existing = await _sync_projection(db, *context, lock=True)
+        if preview['preview_digest'] != req.preview_digest:
+            logging.getLogger(__name__).warning('CP_SYNC_REJECTED cp=%s actor=%s reason=stale_preview basis=%s',
+                                                cp_id, user_id, preview['preview_digest'])
+            raise CharacteristicImportError('预览已过期，请重新预览')
+        candidates = {i['candidate_key']: i for i in preview['items']}
+        if not set(keys) <= candidates.keys() or any(not candidates[k]['applicable'] for k in keys):
+            reasons = [{'item_id': candidates[k]['item_id'], 'action': candidates[k]['action'],
+                        'codes': [i['code'] for i in candidates[k]['issues'] + candidates[k]['conflicts']]}
+                       for k in keys if k in candidates and not candidates[k]['applicable']]
+            logging.getLogger(__name__).warning('CP_SYNC_REJECTED cp=%s actor=%s reason=blocked_selection basis=%s rows=%s',
+                                                cp_id, user_id, preview['preview_digest'], reasons)
+            raise CharacteristicImportError('所选候选存在冲突或保护，需复核')
+        if any(i['blocking'] for i in preview['issues'] if i['code'] != 'manual_or_legacy_source'):
+            raise CharacteristicImportError('来源投影存在阻塞问题')
+        if not keys:
+            if preview['items'] or any(i['blocking'] for i in preview['issues']):
+                raise CharacteristicImportError('仍有待处理项，请选择可应用候选')
+            if (cp.source_fmea_version_id == version.version_id and not cp.sync_pending
+                    and await _cp_has_handled_latest_approval(db, cp)):
+                latest = await get_latest_cp_version(db, cp_id)
+                if latest is not None:
+                    response = ControlPlanVersionListItem.model_validate(latest)
+                    await savepoint.commit()
+                    released = True
+                    await db.commit()
+                    return response
+        by_id = {str(i.item_id): i for i in existing}
+        order = max((i.sort_order for i in existing), default=-1) + 1
+        for key in keys:
+            candidate = candidates[key]
+            action = candidate['action']
+            if action == 'add':
+                db.add(ControlPlanItem(item_id=uuid.uuid4(), cp_id=cp_id, factory_id=cp.factory_id,
+                    sort_order=order, item_source='fmea', source_fmea_node_id=candidate['source_ref']['step_id'],
+                    source_characteristic_ref=candidate['source_ref'], **candidate['merged_value']))
+                order += 1
+            elif action == 'sync':
+                row = by_id[candidate['item_id']]
                 for field in _SYNCABLE_ITEM_FIELDS:
-                    val = merged.get(field)
-                    if val is not None:
-                        setattr(item, field, val)
-
-        elif action == "delete":
-            result = await db.execute(
-                select(ControlPlanItem).where(
-                    ControlPlanItem.item_id == uuid.UUID(item_id_str)
-                )
-            )
-            item = result.scalar_one_or_none()
-            if item:
-                await db.delete(item)
-
-    # Update CP sync tracking
-    cp.source_fmea_version_id = fmea_version.version_id
-    cp.sync_pending = False
-    cp.updated_by = user_id
-
-    # Create a CP version snapshot
-    version = await create_cp_version(
-        db,
-        cp,
-        change_type="fmea_sync",
-        change_summary=f"从FMEA版本 v{fmea_version.major_no}.{fmea_version.minor_no} 同步",
-        user_id=user_id,
-        source_fmea_version_id=fmea_version.version_id,
-    )
-
-    # Audit log
-    db.add(AuditLog(
-        table_name="control_plans",
-        record_id=cp.cp_id,
-        action="SYNC_FMEA",
-        changed_fields={
-            "fmea_version_id": str(fmea_version.version_id),
-            "accepted_items": len(accepted_item_ids),
-            "new_cp_version": f"v{version.major_no}.{version.minor_no}",
-        },
-        operated_by=user_id,
-    ))
-
-    await db.commit()
-    await db.refresh(cp)
-    await db.refresh(version)
-    return version
+                    setattr(row, field, candidate['merged_value'][field])
+                row.source_characteristic_ref = candidate['source_ref']
+            else:
+                await db.delete(by_id[candidate['item_id']])
+        await db.flush()
+        remaining, _ = await _sync_projection(db, *context, lock=True)
+        selected_pending = bool(remaining['items'] or any(i['blocking'] for i in remaining['issues']))
+        if not selected_pending:
+            cp.source_fmea_version_id = version.version_id
+        cp.sync_pending = selected_pending or not await _cp_has_handled_latest_approval(db, cp)
+        cp.updated_by = user_id
+        cp.lock_version += 1
+        staged = await stage_cp_version(db, cp, 'fmea_sync', 'PFMEA 逐特性同步', user_id,
+                                        source_fmea_version_id=version.version_id)
+        db.add(AuditLog(table_name='control_plans', record_id=cp_id, action='SYNC_FMEA',
+            operated_by=user_id, factory_id=cp.factory_id, changed_fields={
+                'source_fmea_version_id': str(version.version_id), 'selected_candidate_keys': keys,
+                'preview_digest': req.preview_digest, 'sync_pending': cp.sync_pending}))
+        await db.flush()
+        response = ControlPlanVersionListItem.model_validate(staged)
+        await savepoint.commit()
+        released = True
+        await db.commit()
+        return response
+    except Exception:
+        if released:
+            await db.rollback()
+        else:
+            await savepoint.rollback()
+        raise

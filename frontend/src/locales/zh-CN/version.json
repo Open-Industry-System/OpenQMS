@@ -34,6 +34,11 @@
     "syncFailed": "同步失败",
     "cancel": "取消",
     "confirmSync": "确认同步",
+    "confirmNoChanges": "确认无需同步",
+    "previewAgain": "重新生成预览",
+    "previewExpired": "预览已失效，请重新生成预览后再确认。",
+    "partialPending": "仍有 {{count}} 项待同步。",
+    "refreshFailedAfterSync": "同步已提交，但无法刷新最新控制计划。再次确认前请重新生成预览。",
     "loadPreviewFailed": "无法加载预览",
     "none": "无",
     "columns": {
@@ -41,7 +46,8 @@
       "stepNo": "工序号",
       "currentValue": "当前值",
       "fmeaNewValue": "FMEA新值",
-      "mergedValue": "合并值"
+      "mergedValue": "合并值",
+      "issues": "限制说明"
     },
     "actions": {
       "add": "新增",

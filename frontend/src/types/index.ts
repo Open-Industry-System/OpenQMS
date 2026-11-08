@@ -52,6 +52,27 @@ export interface TokenResponse {
   user: User;
 }
 
+export interface Characteristic {
+  id: string;
+  kind: "product" | "process";
+  name: string;
+  specification: string | null;
+  unit: string | null;
+  classification: string | null;
+  reference: string | null;
+  related_product_characteristic_ids: string[];
+}
+
+export interface CharacteristicSourceRef {
+  mapping_version: number;
+  fmea_id: string;
+  step_id: string;
+  function_id: string;
+  work_element_id: string | null;
+  characteristic_id: string;
+  accepted_source_version_id: string | null;
+}
+
 export interface GraphNode {
   id: string;
   type: string;
@@ -60,6 +81,7 @@ export interface GraphNode {
   classification?: string;
   requirement?: string;
   specification?: string;
+  characteristics?: Characteristic[] | null;
   severity: number;
   severity_plant?: number;
   severity_customer?: number;
@@ -359,10 +381,44 @@ export interface ControlPlanItem {
   control_method: string;
   reaction_plan: string;
   source_fmea_node_id: string | null;
+  source_characteristic_ref: CharacteristicSourceRef | null;
   sop_ref?: string;
   spc_chart_id?: string;
   gauge_id?: string;
   sort_order: number;
+}
+
+export interface ImportFromFMEARequest {
+  fmea_id: string;
+  source_fmea_version_id: string;
+  expected_lock_version: number;
+  step_ids: string[];
+  preview_digest?: string;
+  selected_candidate_keys?: string[];
+}
+
+export interface CharacteristicImportIssue {
+  code: string;
+  node_id: string;
+  blocking: boolean;
+  message: string;
+}
+
+export interface CharacteristicImportCandidate {
+  candidate_key: string;
+  action: "add" | "existing";
+  item_id: string | null;
+  source_ref: CharacteristicSourceRef;
+  fields: Record<string, string | null>;
+}
+
+export interface CharacteristicImportPreview {
+  source_fmea_version_id: string;
+  expected_lock_version: number;
+  mapping_version: number;
+  preview_digest: string;
+  items: CharacteristicImportCandidate[];
+  issues: CharacteristicImportIssue[];
 }
 
 export interface ControlPlan {
@@ -820,16 +876,36 @@ export interface VerifyResponse {
   warnings: string[];
 }
 
+export interface SyncPreviewIssue {
+  code: string;
+  message: string;
+  blocking?: boolean;
+  [key: string]: unknown;
+}
+
 export interface SyncPreviewItem {
-  item_id: string;
+  item_id: string | null;
+  candidate_key: string;
+  source_ref: Record<string, unknown>;
+  base_value: Record<string, string | null> | null;
+  diff_fields: string[];
+  issues: SyncPreviewIssue[];
+  conflicts: SyncPreviewIssue[];
+  applicable: boolean;
+  source_fmea_node_id: string;
+  step_no: string | null;
   action: "add" | "sync" | "delete";
-  step_no: string;
   current_value: Record<string, string | null> | null;
-  fmea_new_value: Record<string, string | null>;
-  merged_value: Record<string, string | null>;
+  fmea_new_value: Record<string, string | null> | null;
+  merged_value: Record<string, string | null> | null;
 }
 
 export interface SyncPreviewResponse {
+  source_fmea_version_id: string;
+  expected_lock_version: number;
+  preview_digest: string;
+  mapping_version: number;
+  issues: SyncPreviewIssue[];
   fmea_version_id: string;
   fmea_version: string;
   items: SyncPreviewItem[];
@@ -838,6 +914,13 @@ export interface SyncPreviewResponse {
     update_count: number;
     delete_count: number;
   };
+}
+
+export interface SyncFromFMEARequest {
+  source_fmea_version_id: string;
+  expected_lock_version: number;
+  preview_digest: string;
+  selected_candidate_keys: string[];
 }
 
 export interface PPAPSubmission {

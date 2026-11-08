@@ -37,13 +37,37 @@ export function aggregateSpecialCharacteristic(
   stepFunc: GraphNode | undefined,
   weFunctionNodes: GraphNode[],
   edges: GraphEdge[],
-): { label: string; tag: 'CC' | 'SC' | '-' } {
-  if (stepFunc?.classification === 'CC') return { label: 'CC', tag: 'CC' };
-  const scWefs = weFunctionNodes.filter((w) =>
-    w.classification === 'SC' && edges.some((e) => e.source === stepFunc?.id && e.target === w.id && e.type === 'FUNCTION_MAPPED_TO'));
-  if (scWefs.length === 0) return { label: '-', tag: '-' };
-  if (scWefs.length <= 2) return { label: `SC(${scWefs.map((w) => w.name).join('/')})`, tag: 'SC' };
-  return { label: `SC×${scWefs.length}`, tag: 'SC' };
+): { label: string; tag: 'CC' | 'SC' | '-'; hasStructuredCharacteristics: boolean } {
+  const classifications = (node: GraphNode | undefined) => {
+    if (Array.isArray(node?.characteristics)) {
+      return {
+        structured: true,
+        values: node.characteristics
+          .map((characteristic) => characteristic.classification)
+          .filter((classification): classification is 'CC' | 'SC' => classification === 'CC' || classification === 'SC'),
+      };
+    }
+    return {
+      structured: false,
+      values: node?.classification === 'CC' || node?.classification === 'SC' ? [node.classification] : [],
+    };
+  };
+
+  const stepClasses = classifications(stepFunc);
+  const linkedWefs = weFunctionNodes.filter((wef) =>
+    edges.some((edge) => edge.source === stepFunc?.id && edge.target === wef.id && edge.type === 'FUNCTION_MAPPED_TO'),
+  );
+  const wefClasses = linkedWefs.map((wef) => ({ wef, ...classifications(wef) }));
+  const hasStructuredCharacteristics = stepClasses.structured || wefClasses.some(({ structured }) => structured);
+
+  if (stepClasses.values.includes('CC') || wefClasses.some(({ values }) => values.includes('CC'))) return { label: 'CC', tag: 'CC', hasStructuredCharacteristics };
+  const scWefs = [
+    ...(stepFunc && stepClasses.values.includes('SC') ? [stepFunc] : []),
+    ...wefClasses.filter(({ values }) => values.includes('SC')).map(({ wef }) => wef),
+  ];
+  if (scWefs.length === 0) return { label: '-', tag: '-', hasStructuredCharacteristics };
+  if (scWefs.length <= 2) return { label: `SC(${scWefs.map((wef) => wef.name).join('/')})`, tag: 'SC', hasStructuredCharacteristics };
+  return { label: `SC×${scWefs.length}`, tag: 'SC', hasStructuredCharacteristics };
 }
 
 export default function RiskTable({ nodes, edges, fmeaId, onChange }: RiskTableProps) {

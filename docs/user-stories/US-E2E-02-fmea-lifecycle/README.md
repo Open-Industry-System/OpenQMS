@@ -1,11 +1,11 @@
 # Epic US-E2E-02：FMEA 生命周期（AIAG-VDA 七步法创建 + 编辑器编辑 + 审核闭环）
 
-**状态**: 定稿 v3（2026-07-25），经三轮代码评审修订（数据契约/图结构/审批权限/AI 可观测性 + RecommendedAction 数据模型 + AI 契约同步 + 审批门禁 + 审计实体）
+**状态**: 定稿 v4（2026-11-03），经三轮代码评审修订（数据契约/图结构/审批权限/AI 可观测性 + RecommendedAction 数据模型 + AI 契约同步 + 审批门禁 + 审计实体）
 **前序版本**: v2（2026-07-25，见 git 历史）、v1（2026-07-25，见 git 历史）
 **方法论来源**: `Reference/FMEA.md`（AIAG-VDA *FMEA手册* 第五版）§2(DFMEA)/§3(PFMEA) 七步法
 **关联**: 现有向导 `frontend/src/pages/planning/fmea/{DFMEA,PFMEA}WizardPage.tsx`；编辑器 `FMEAEditorPage.tsx`；审批 `POST /api/fmea/{id}/transition`
 **前序 epic**: US-E2E-01-capa-8d-closed-loop（8D 侧已建 FMEA 关联；本 epic 从 FMEA 侧验收创建→编辑→审批全生命周期）
-**派生 verify skill**: `.claude/skills/verify-fmea-lifecycle/`（总 skill，**待生成**）+ 19 子 skill（每子故事一个，**待生成**）
+**派生 verify skill**: `.claude/skills/verify-fmea-lifecycle/`（总 skill）+ 19 子 skill（每子故事一个）；本次只同步 02.3/02.10/02.15/02.18，运行其他剧本或整 epic 前仍需核对其版本，不沿用历史结果
 
 ## 故事
 
@@ -250,7 +250,9 @@ epic 级验收 = 各子故事验收的**合取**（全部子故事通过，epic 
 - README 版本变更，总 skill `verify-fmea-lifecycle` 须重新核对同步。
 - 子故事可独立迭代，无需 bumping epic 版本；仅当 epic 验收骨架、状态机、依赖关系或生命周期顺序变更时才 bumping README 版本。
 
-## 评审决议（v3，已定）
+## 历史评审决议（v3，2026-07-25）
+
+以下保留原时点的决策与缺口背景，不把历史“当前未实现”当作今日状态；本次只更新相关 CP 与剧本事实，其他能力未在本专项重新认证。
 
 - **范围**：本 epic 覆盖 PFMEA + DFMEA（不含 FMEA-MSR）；生命周期 = 创建向导 + 编辑器编辑 + 审核闭环。
 - **子故事粒度**：向导按"类型 × 七步"拆 14 子故事（每文件单一业务结果 = AIAG-VDA 一步一类）；编辑器/审批跨类型通用，拆 5 子故事（不按类型重复，避免冗余）。
@@ -262,9 +264,16 @@ epic 级验收 = 各子故事验收的**合取**（全部子故事通过，epic 
 - **编辑器行模型**：一行 = FM×FC；多效应为 FM 级共享列表（非笛卡尔积）。
 - **字段契约**：wizardScope.{team,timeframe,tool,task,trend}；wizard_completed 在 wizardScope 内；FMEAVersion.{major_no,minor_no,snapshot,sha256_hash,change_type}；RecommendedAction 现有字段（name/responsible/due_date/status/action_taken/completion_date/revised_*）+ 新增落库字段（FailureCause.control_sufficiency_reason / FailureCause.risk_acceptance_reason / FailureCause.management_review_evidence）；4M = Man/Machine/Material/Environment（存储枚举，中文仅 UI）。
 - **CP 联动**：仅 PFMEA 关联时触发 CP sync_pending；DFMEA 审批只生成版本快照，不要求 CP。
-- **CP sync 交付语义**：**Durable outbox**（目标语义，需新增实现）——审批事务原子提交 APPROVED + 版本快照 + FMEA transition/version 审计（2 条）+ CP outbox 记录（不写 CP 审计）；独立 worker 事务对每个非 pending→pending 翻转的关联 CP 原子置位 CP.sync_pending + 写 `control_plans/UPDATE` 审计 + 标记 processed（审计总量 = 2 + affected_cp_count）。**幂等**：outbox 事件键 = `(fmea_id, fmea_version_id, cp.sync_pending_set)`（每次批准版本一事件，支持 APPROVED→REWORK→重审批再触发）；worker 处理键 = `(outbox_id, cp_id)`（每 CP 每事件只处理/审计一次，已 pending 不重复审计）。**CP 审计 `changed_fields` 仅 `sync_pending: false→true` + `trigger_fmea_version_id`（上下文），不写 `source_fmea_version_id`**（该字段仅在实际应用同步时更新，`version_service.py:829`）。**不得复用 `GraphSyncOutbox`/`graph_sync_worker`**（面向 Neo4j 投影）——需新增独立 CP outbox 表/模型 + worker。现状是直接两阶段调用（`fmea_service.py:378` commit 后 `:381-383` 直接调 `mark_cp_sync_pending_on_fmea_approve`，后者 `control_plan_service.py:665` 再 commit），非 durable outbox → 验收标 `FAILED` 驱动补齐。
+- **CP sync 当前交付语义**：独立 `CPSyncOutbox`/`cp_sync_worker` 的 durable outbox 已实现，不是直接两阶段调用，也不复用 Neo4j GraphSyncOutbox。审批事务原子提交状态、版本、2 条 FMEA 审计及唯一事件 `(fmea_id,fmea_version_id,cp.sync_pending_set)`；worker 在既有 scope→CP parent 互斥下重读，只有真正未处理的 false→true 才写 CP UPDATE（仅 sync_pending＋trigger_fmea_version_id）。已经完整处理的同一／更老批准晚到事件完成但不重开 pending，部分／未知仍保守。旧“尚需新增／非 durable”的描述已被当前实现与 02.18 v6 取代，不再作为当前缺口。
+
 - **AIAG-VDA Step5/6**：AP 是 S/O/D 组合的**查表结果**（`calculateAP` 查 `utils/fmea.ts` AP 表），非 S×O×D 乘积（乘积是 RPN）；Step6 行动触发：H=行动或记录现有控制充分；M=行动或记录风险接受理由；L=行动可选；S=9-10 且 AP=H/M 需管理层评审证据；Step7 门禁 = 所有 AP 已评估（行动已关闭或风险接受已记录）。
 - **RecommendedAction 状态**：选定 canonical 枚举 `{open, in_progress, completed, not_executed}`（含第 4 态 `not_executed`，配理由门禁）；确定性 legacy 映射 `undecided→open, planned→in_progress, done→completed, notExecuted→not_executed, closed→completed`（见 02.6/02.13）。AIAG-VDA 手册的 {planned, decided, not_implemented} 不在本 spec 采用。
 - **Step3 功能树门禁**：每个纳入分析范围的结构节点都有功能节点（HAS_FUNCTION 边），而非仅"至少一个功能"。
 - **编辑器保存保留向导元数据**：编辑器保存 graph_data 时保留 wizardScope（含 wizard_completed），不覆盖非表格 metadata。
-- **verify skill**：README 声明的 19 子 skill + 1 总 skill **待生成**（本 epic 仅交付 user stories；skill 由后续走查时派生）。
+- **verify skill**：v3 当时记录为待生成；现在 19 子 skill 与总 skill 文件均已存在。运行前仍须核对版本；本轮 02.18 与 scoped 剧本同为 v6（2026-11-03），不是把全部旧走查结论当新验收。
+
+## 2026-11-03 特性契约修订（非全 epic 再验收）
+
+02.3 **v3**、02.10 **v3**、02.15 **v3**、02.18 **v6**（均 2026-11-03），四份派生 verify skill 同版本日期。其他子故事版本不变。功能与特性分离：PFMEA 真实步骤所属=产品、工作要素所属=过程；DFMEA System/Subsystem/Component 所属全部产品。新特殊分类在 characteristics[].classification，旧 Function.classification 只兼容。批准快照逐特性生成 CP、显式预览／接受和保守保护见 02.18。标准列、结构节点／边类型及既有审批规则不变。
+
+专项证据见 [验收基线](../../development/characteristic-correction-acceptance.md)。历史评审及验收记录保留，不把新专项结果解释为所有 AI／外部服务／标准认证通过。

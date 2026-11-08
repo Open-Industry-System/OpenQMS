@@ -141,7 +141,13 @@ vi.mock("../../../components/change-impact", () => ({
 vi.mock("../../../components/collaboration", () => ({
   CollaborationBar: () => <div data-testid="collaboration-bar" />,
   ActiveUserIndicator: () => <div data-testid="active-user" />,
-  ConflictResolutionModal: () => null,
+  ConflictResolutionModal: ({ visible, diff, onForceSave }: { visible: boolean; diff: { nodeChanges: Array<{ field?: string }>; conflictingFields: Array<{ field?: string }> } | null; onForceSave: () => void }) => visible ? (
+    <div data-testid="conflict-resolution">
+      {diff?.nodeChanges.map((change, index) => <span key={index}>{change.field}</span>)}
+      {diff?.conflictingFields.map((change, index) => <span key={`conflict-${index}`}>conflict:{change.field}</span>)}
+      <button onClick={onForceSave}>force-save</button>
+    </div>
+  ) : null,
 }));
 vi.mock("../../../components/design", () => ({
   PageShell: ({ children, title, extra, actions }: { children: React.ReactNode; title?: React.ReactNode; extra?: React.ReactNode; actions?: React.ReactNode }) => (
@@ -230,6 +236,7 @@ describe("FMEAEditorPage Class column", () => {
     // (mocks.canEdit is the hoisted vi.fn() from the copied harness.)
     mocks.canEdit.mockReturnValue(true);
     mocks.getFMEA.mockReset();
+    mocks.updateFMEA.mockReset();
   });
 
   it("PFMEA: Class column is read-only and shows CC from ProcessStepFunction.classification", async () => {
@@ -250,6 +257,95 @@ describe("FMEAEditorPage Class column", () => {
     await waitFor(() => {
       expect(screen.getAllByText("CC").length).toBeGreaterThan(0);
     });
+  });
+
+  it("PFMEA: an explicit empty collection suppresses the legacy CC tag", async () => {
+    const doc = makeDoc("PFMEA", "CC", "");
+    const stepFunction = doc.graph_data.nodes.find((node) => node.id === "psf")!;
+    stepFunction.characteristics = [];
+    mocks.getFMEA.mockResolvedValue(doc);
+    renderEditor();
+
+    await waitFor(() => expect(screen.getAllByText("-").length).toBeGreaterThan(0));
+    expect(screen.queryByText("CC")).toBeNull();
+  });
+
+  it("PFMEA: a structured CC renders even without a legacy function classification", async () => {
+    const doc = makeDoc("PFMEA", "", "");
+    const stepFunction = doc.graph_data.nodes.find((node) => node.id === "psf")!;
+    stepFunction.characteristics = [{
+      id: "product-cc", kind: "product", name: "贴装偏移量", specification: null,
+      unit: null, classification: "CC", reference: null, related_product_characteristic_ids: [],
+    }];
+    mocks.getFMEA.mockResolvedValue(doc);
+    renderEditor();
+
+    await waitFor(() => expect(screen.getAllByText("CC").length).toBeGreaterThan(0));
+  });
+
+  it("shows a remote structured-characteristic change in the 409 conflict view before force save", async () => {
+    const base = makeDoc("PFMEA", "", "");
+    const baseFunction = base.graph_data.nodes.find((node) => node.id === "psf")!;
+    baseFunction.characteristics = [];
+    const latest: FMEADocument = {
+      ...base,
+      graph_data: {
+        ...base.graph_data,
+        nodes: base.graph_data.nodes.map((node) => node.id === "psf" ? {
+          ...node,
+          characteristics: [{
+            id: "remote-product", kind: "product", name: "贴装偏移量", specification: "≤0.05",
+            unit: "mm", classification: "CC", reference: null, related_product_characteristic_ids: [],
+          }],
+        } : node),
+      },
+    };
+    mocks.getFMEA.mockResolvedValueOnce(base).mockResolvedValueOnce(latest);
+    mocks.updateFMEA.mockRejectedValueOnce({
+      response: { status: 409, data: { detail: { conflict: { latest_lock_version: 7 } } } },
+    }).mockResolvedValueOnce(latest);
+    renderEditor();
+
+    await waitFor(() => expect(screen.getByDisplayValue("准确贴装")).toBeInTheDocument());
+    fireEvent.change(screen.getByDisplayValue("准确贴装"), { target: { value: "精确贴装" } });
+    fireEvent.click(screen.getByRole("button", { name: /actions\.save/i }));
+
+    await waitFor(() => expect(screen.getByTestId("conflict-resolution")).toHaveTextContent("characteristics"));
+    fireEvent.click(screen.getByRole("button", { name: "force-save" }));
+    await waitFor(() => expect(mocks.updateFMEA).toHaveBeenCalledTimes(2));
+    expect(mocks.updateFMEA.mock.calls[1][1].confirmed_latest_lock_version).toBe(7);
+  });
+
+  it("marks concurrent structured-characteristic edits in the 409 conflict display", async () => {
+    const base = makeDoc("PFMEA", "", "");
+    const baseFunction = base.graph_data.nodes.find((node) => node.id === "psf")!;
+    baseFunction.characteristics = [];
+    const latest: FMEADocument = {
+      ...base,
+      graph_data: {
+        ...base.graph_data,
+        nodes: base.graph_data.nodes.map((node) => node.id === "psf" ? {
+          ...node,
+          characteristics: [{
+            id: "remote-product", kind: "product", name: "贴装偏移量", specification: "≤0.05",
+            unit: "mm", classification: "CC", reference: null, related_product_characteristic_ids: [],
+          }],
+        } : node),
+      },
+    };
+    mocks.getFMEA.mockResolvedValueOnce(base).mockResolvedValueOnce(latest);
+    mocks.updateFMEA.mockRejectedValueOnce({
+      response: { status: 409, data: { detail: { conflict: { latest_lock_version: 8 } } } },
+    });
+    renderEditor();
+
+    await screen.findByText("新增产品特性");
+    fireEvent.click(screen.getByText("新增产品特性"));
+    fireEvent.change(screen.getByLabelText("特性名称"), { target: { value: "本地偏移量" } });
+    fireEvent.click(screen.getByRole("button", { name: "确认特性" }));
+    fireEvent.click(screen.getByRole("button", { name: /actions\.save/i }));
+
+    await waitFor(() => expect(screen.getByTestId("conflict-resolution")).toHaveTextContent("conflict:characteristics"));
   });
 
   it("PFMEA: shows '-' when no CC and no SC", async () => {

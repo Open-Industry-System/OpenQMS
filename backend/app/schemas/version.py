@@ -162,7 +162,14 @@ class VerifyResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SyncPreviewItem(BaseModel):
-    item_id: str
+    item_id: str | None = None
+    candidate_key: str
+    source_ref: dict
+    base_value: dict | None = None
+    diff_fields: list[str] = []
+    issues: list[dict] = []
+    conflicts: list[dict] = []
+    applicable: bool
     source_fmea_node_id: str
     step_no: str | None = None
     action: str
@@ -178,6 +185,11 @@ class SyncSummary(BaseModel):
 
 
 class SyncPreviewResponse(BaseModel):
+    source_fmea_version_id: uuid.UUID
+    expected_lock_version: int
+    preview_digest: str
+    mapping_version: int
+    issues: list[dict] = []
     fmea_version_id: uuid.UUID
     fmea_version: str
     items: list[SyncPreviewItem]
@@ -185,4 +197,8 @@ class SyncPreviewResponse(BaseModel):
 
 
 class SyncFromFMEARequest(BaseModel):
-    selected_item_ids: list[str]
+    selected_item_ids: list[str] | None = None
+    source_fmea_version_id: uuid.UUID | None = None
+    expected_lock_version: int | None = None
+    preview_digest: str | None = None
+    selected_candidate_keys: list[str] | None = None

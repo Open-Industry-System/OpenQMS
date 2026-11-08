@@ -51,6 +51,36 @@ DOCGATE_FMEA_VER_ID = uuid.UUID("00000000-0000-0000-0000-000000e20171")
 DOCGATE_CP_ID = uuid.UUID(DOCGATE_E2E_CP_ID)
 DOCGATE_CP_ITEM_ID = uuid.UUID(DOCGATE_E2E_CP_ITEM_ID)
 DOCGATE_CP_VER_ID = uuid.UUID(DOCGATE_E2E_CP_VER_ID)
+
+
+def build_docgate_item_canon() -> dict:
+    """Return the immutable-shape input for the doc-gate CP demonstration item."""
+    return {
+        "step_no": "10",
+        "process_name": "定位",
+        "equipment": None,
+        "characteristic_no": "CP-DOC-001",
+        "product_characteristic": "孔径",
+        "process_characteristic": "定位销磨损量",
+        "special_class": None,
+        "specification_tolerance": None,
+        "evaluation_method": "首件定位销磨损量检测",
+        "sample_size": None,
+        "sample_frequency": None,
+        "control_method": "首件+巡检",
+        "reaction_plan": "隔离并换销",
+        "source_fmea_node_id": None,
+        "source_characteristic_ref": None,
+        "sort_order": 0,
+    }
+
+
+def build_docgate_item_snapshot(item_id: uuid.UUID) -> dict:
+    """Build the exact CP version-item payload, including explicit null provenance."""
+    item = build_docgate_item_canon()
+    return {"item_id": str(item_id), **item}
+
+
 FMEA_LINK_FMEA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20140")
 FMEA_LINK_CAPA_ID = uuid.UUID("00000000-0000-0000-0000-000000e20240")
 FMEA_LINK_CAPA_SKIPPED_ID = uuid.UUID("00000000-0000-0000-0000-000000e20241")
@@ -590,23 +620,7 @@ async def _seed_doc_gate_capa(db, factory_ids):
         org_factory=None,
         core_group=None,
     )
-    ITEM_CANON = dict(
-        step_no="10",
-        process_name="定位",
-        equipment=None,
-        characteristic_no="CP-DOC-001",
-        product_characteristic="孔径",
-        process_characteristic="定位销磨损检测",
-        special_class="CC",
-        specification_tolerance=None,
-        evaluation_method=None,
-        sample_size=None,
-        sample_frequency=None,
-        control_method="首件+巡检",
-        reaction_plan="隔离并换销",
-        source_fmea_node_id=None,
-        sort_order=0,
-    )
+    ITEM_CANON = build_docgate_item_canon()
 
     cp = (await db.execute(
         select(ControlPlan).where(ControlPlan.document_no == DOCGATE_E2E_CP_DOC_NO)
@@ -694,16 +708,7 @@ async def _seed_doc_gate_capa(db, factory_ids):
             "org_factory": cp.org_factory,
             "core_group": cp.core_group,
         }
-        items_snapshot = [{
-            "item_id": str(DOCGATE_CP_ITEM_ID),
-            **{k: ITEM_CANON[k] for k in (
-                "step_no", "process_name", "equipment", "characteristic_no",
-                "product_characteristic", "process_characteristic", "special_class",
-                "specification_tolerance", "evaluation_method", "sample_size",
-                "sample_frequency", "control_method", "reaction_plan",
-                "source_fmea_node_id", "sort_order",
-            )},
-        }]
+        items_snapshot = [build_docgate_item_snapshot(DOCGATE_CP_ITEM_ID)]
         cp_ver = (await db.execute(
             select(ControlPlanVersion).where(ControlPlanVersion.version_id == DOCGATE_CP_VER_ID)
         )).scalar_one_or_none()

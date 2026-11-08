@@ -56,6 +56,7 @@ function createBlankItem(sortOrder: number): ControlPlanItem {
     control_method: "",
     reaction_plan: "",
     source_fmea_node_id: null,
+    source_characteristic_ref: null,
     sort_order: sortOrder,
   };
 }
@@ -964,6 +965,7 @@ export default function ControlPlanEditorPage() {
       {!isNew && id && (
         <ImportFromFMEAModal
           cpId={id}
+          expectedLockVersion={cp?.lock_version ?? null}
           open={importOpen}
           onClose={() => setImportOpen(false)}
           onSuccess={handleImportSuccess}
@@ -1031,12 +1033,11 @@ export default function ControlPlanEditorPage() {
             cpId={id}
             onClose={() => setSyncDrawerOpen(false)}
             onSuccess={async () => {
-              setSyncDrawerOpen(false);
               if (!id) return;
-              try {
-                const refreshed = await getControlPlan(id);
-                setCp(refreshed);
-              } catch { /* silent */ }
+              const refreshed = await getControlPlan(id);
+              setCp(refreshed);
+              setItems(refreshed.items || []);
+              baseItemsRef.current = JSON.parse(JSON.stringify(refreshed.items || []));
             }}
           />
 

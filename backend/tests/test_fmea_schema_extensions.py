@@ -42,3 +42,15 @@ def test_recommended_action_status_rejects_legacy_value():
     with pytest.raises(Exception):
         GraphNodeSchema(id="ra1", type="RecommendedAction", name="m",
                         recommended_action_status="undecided")
+
+
+def test_graph_node_distinguishes_absent_and_explicit_empty_characteristics():
+    absent = GraphNodeSchema(id="sf-legacy", type="ProcessStepFunction", name="旧功能")
+    explicit_empty = GraphNodeSchema(
+        id="sf-empty", type="ProcessStepFunction", name="新功能", characteristics=[],
+    )
+
+    assert "characteristics" not in absent.model_fields_set
+    assert absent.characteristics is None
+    assert "characteristics" in explicit_empty.model_fields_set
+    assert explicit_empty.characteristics == []

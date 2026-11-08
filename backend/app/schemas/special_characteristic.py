@@ -45,6 +45,9 @@ class SCResponse(BaseModel):
     source_fmea_title: str | None = None
     source_fmea_document_no: str | None = None
     source_node_id: str
+    source_characteristic_id: uuid.UUID | None = None
+    review_required: bool = False
+    review_message: str | None = None
     source_type: str
     cp_item_id: uuid.UUID | None = None
     msa_study_id: uuid.UUID | None = None
@@ -116,6 +119,8 @@ class CPSyncStatusItem(BaseModel):
     current_special_class: str | None
     expected_special_class: str | None
     is_out_of_sync: bool
+    requires_version_sync: bool = False
+    guidance: str | None = None
 
 
 class CPSyncStatusResponse(BaseModel):

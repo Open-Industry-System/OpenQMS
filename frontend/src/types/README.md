@@ -85,3 +85,9 @@ shapes sit side by side (`LoginRequest` next to `TokenResponse`,
 - **Depended on by:** `pages/`, `components/`, `api/`, `store/`,
   `hooks/`, `utils/` — essentially every other directory under
   `frontend/src/`.
+
+## Structured characteristics (2026-11-03)
+
+`GraphNode.characteristics?: Characteristic[] | null` preserves legacy absence/null versus explicit `[]`. A characteristic has stable UUID `id`, `kind` (product/process), nonblank `name`, separate `specification`, `unit`, optional `classification`, `reference`, and `related_product_characteristic_ids`. Kind is not a special classification. DFMEA shares Process*Function types but all design-owned characteristics are product.
+
+`CharacteristicSourceRef` is server-owned provenance: mapping version, FMEA/step/function/work-element/characteristic identity, and `accepted_source_version_id`. Ordinary CP writes omit it. Import/sync previews and confirms bind `source_fmea_version_id`, `expected_lock_version`, `preview_digest`, and `selected_candidate_keys`. Document `source_fmea_version_id` is not every row's accepted baseline; partial sync remains pending. No new node/edge types or standard CP columns.

@@ -16,11 +16,32 @@ from app.models.audit import AuditLog
 from app.services.agent import provider_adapter
 from app.services.agent.provider_adapter import ProviderClient, ProviderNotConfiguredError
 from app.services.version_service import get_latest_cp_version, get_latest_fmea_version
+from app.services.cp_sync_protection import cp_input_state, lock_analysis_inputs
 
 logger = logging.getLogger(__name__)
 STALE_THRESHOLD_SECONDS = 300  # 5 min; running older than 2x = stale
 RETRY_AFTER_SECONDS = 2
 _ALLOWED_NODE_TYPES = {"FailureMode", "FailureEffect", "FailureCause", "ProcessStep", "Function", "WorkElement"}
+
+
+async def _fresh_capa_phase(db, capa):
+    # Local multi-phase handoff only: the pool resets search_path on checkout.
+    # Do not change the global session lifecycle or trust expired scalar attrs.
+    from sqlalchemy import inspect
+    from app.core.tenant_utils import current_tenant_schema, set_search_path_sql
+    from app.services.control_plan_service import _import_tenant_boundary
+    identity = inspect(capa).identity
+    if identity is None:
+        raise ValueError("CAPA input is not persisted")
+    schema = current_tenant_schema.get()
+    if schema and not db.in_transaction():
+        await db.execute(text(set_search_path_sql(schema)))
+    await _import_tenant_boundary(db, extra_tables=(
+        "capa_eightd", "capa_docg_analysis", "capa_docg_audit", "capa_docg_decision"))
+    fresh = await db.get(CAPAEightD, identity[0], populate_existing=True)
+    if fresh is None:
+        raise ValueError("CAPA input no longer exists")
+    return fresh
 
 
 async def generate_impact_analysis(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
@@ -49,6 +70,7 @@ async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD) -> dict | None
 # ---------------------------------------------------------------------------
 
 async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
+    capa = await _fresh_capa_phase(db, capa)
     # Lock capa row
     await db.execute(
         text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"),
@@ -107,9 +129,10 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
     )
     db.add(analysis)
     await db.flush()
+    response = {"status": "phase1_done", "analysis_id": str(analysis.analysis_id),
+                "attempt_token": attempt_token, "client": client}
     await db.commit()
-    return {"status": "phase1_done", "analysis_id": str(analysis.analysis_id),
-            "attempt_token": attempt_token, "client": client}
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -117,8 +140,10 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
 # ---------------------------------------------------------------------------
 
 async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
+    capa = await _fresh_capa_phase(db, capa)
     candidates = await _build_allowlist(db, capa)
     input_hash = _compute_input_hash(capa, candidates)
+    cp_inputs = await cp_input_state(db, capa.factory_id, capa.product_line_code)
     prompt = _build_prompt(capa, candidates)
     # Commit any autobegun read txn before calling LLM
     await db.commit()
@@ -133,6 +158,7 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
         return {"llm_error": f"LLM 输出非对象: {type(raw).__name__}"}
     raw["model"] = getattr(pc, "model", "unknown")
     raw["_input_hash"] = input_hash
+    raw["_cp_input_hash"] = cp_inputs
     raw["_candidates"] = candidates
     return raw
 
@@ -142,6 +168,7 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict, user_id: uuid.UUID) -> dict:
+    capa = await _fresh_capa_phase(db, capa)
     analysis_id = uuid.UUID(p1["analysis_id"])
     attempt_token = p1["attempt_token"]
     now = datetime.now(timezone.utc)
@@ -171,9 +198,13 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
     # made during the LLM window.)
     await db.execute(text("SELECT 1 FROM capa_eightd WHERE report_id=:cid FOR UPDATE"), {"cid": capa.report_id})
     await db.refresh(capa)
+    # Root -> analysis -> CP parents; never CP -> analysis (waiver/audit order).
+    await db.execute(select(CapaDocgAnalysis.analysis_id).where(
+        CapaDocgAnalysis.analysis_id == analysis_id).with_for_update())
+    cp_inputs = await cp_input_state(db, capa.factory_id, capa.product_line_code, lock=True)
     candidates = await _build_allowlist(db, capa)
     cur_hash = _compute_input_hash(capa, candidates)
-    if cur_hash != phase2["_input_hash"]:
+    if cur_hash != phase2["_input_hash"] or cp_inputs != phase2.get("_cp_input_hash"):
         res = await db.execute(
             update(CapaDocgAnalysis)
             .where(CapaDocgAnalysis.analysis_id == analysis_id,
@@ -731,6 +762,7 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
     )
     if analysis is None or analysis.status != "done":
         raise ValueError("未生成有效影响分析")
+    await lock_analysis_inputs(db, analysis)
     # C9 precheck
     candidates = await _build_allowlist(db, capa)
     cur_hash = _compute_input_hash(capa, candidates)
@@ -1036,6 +1068,7 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
     )
     if analysis is None:
         raise ValueError("未生成影响分析")
+    await lock_analysis_inputs(db, analysis)
     # C9 precheck
     candidates = await _build_allowlist(db, capa)
     if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
@@ -1063,6 +1096,7 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
     )
     if analysis is None or analysis.status != "done":
         raise ValueError("未生成有效影响分析")
+    await lock_analysis_inputs(db, analysis)
     candidates = await _build_allowlist(db, capa)
     if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
         raise ValueError("分析输入已变更，请重新生成影响分析")
@@ -1123,6 +1157,7 @@ async def record_gate_waiver(
         text("SELECT 1 FROM capa_docg_analysis WHERE analysis_id=:aid FOR UPDATE"),
         {"aid": analysis.analysis_id},
     )
+    await lock_analysis_inputs(db, analysis)
     latest_decision = await db.scalar(
         select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
         .order_by(CapaDocgDecision.revision.desc()).limit(1)

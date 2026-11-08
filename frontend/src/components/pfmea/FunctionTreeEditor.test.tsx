@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Modal } from 'antd';
 import { render, screen, fireEvent } from '@testing-library/react';
 import FunctionTreeEditor from './FunctionTreeEditor';
 import { I18nTestWrapper } from './__test-utils__/I18nWrapper';
@@ -118,5 +119,54 @@ describe('FunctionTreeEditor', () => {
     expect(mapped.length).toBe(1);
     // must map from psf2 (焊接B's step function), NOT psf1
     expect(mapped[0].source).toBe('psf2');
+  });
+
+  it('renders product characteristics for step functions and process characteristics for work-element functions', () => {
+    const nodes: GraphNode[] = [
+      { id: 'step', type: 'ProcessStep', name: '贴装', process_number: 'OP10', ...Z },
+      { id: 'step-fn', type: 'ProcessStepFunction', name: '准确贴装', ...Z },
+      { id: 'work-element', type: 'ProcessWorkElement', name: '贴片机', classification: 'Machine', ...Z },
+      { id: 'work-fn', type: 'ProcessWorkElementFunction', name: '贴装压力', ...Z },
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'step', target: 'step-fn', type: 'HAS_FUNCTION' },
+      { source: 'step', target: 'work-element', type: 'HAS_WORK_ELEMENT' },
+      { source: 'work-element', target: 'work-fn', type: 'HAS_FUNCTION' },
+    ];
+
+    render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={() => {}} />, { wrapper: I18nTestWrapper });
+
+    expect(screen.getByText('新增产品特性')).toBeInTheDocument();
+    expect(screen.getByText('新增过程特性')).toBeInTheDocument();
+  });
+
+  it('confirms reference impacts before deleting a product characteristic and cleans the process reference', () => {
+    const product = { id: 'product-char', kind: 'product' as const, name: '贴装偏移量', specification: null, unit: null, classification: null, reference: null, related_product_characteristic_ids: [] };
+    const process = { id: 'process-char', kind: 'process' as const, name: '贴装压力', specification: null, unit: null, classification: null, reference: null, related_product_characteristic_ids: ['product-char'] };
+    const nodes: GraphNode[] = [
+      { id: 'step', type: 'ProcessStep', name: '贴装', ...Z },
+      { id: 'step-fn', type: 'ProcessStepFunction', name: '准确贴装', characteristics: [product], ...Z },
+      { id: 'work-element', type: 'ProcessWorkElement', name: '贴片机', ...Z },
+      { id: 'work-fn', type: 'ProcessWorkElementFunction', name: '贴装压力', characteristics: [process], ...Z },
+    ];
+    const edges: GraphEdge[] = [
+      { source: 'step', target: 'step-fn', type: 'HAS_FUNCTION' },
+      { source: 'step', target: 'work-element', type: 'HAS_WORK_ELEMENT' },
+      { source: 'work-element', target: 'work-fn', type: 'HAS_FUNCTION' },
+    ];
+    const onChange = vi.fn();
+    const confirm = vi.spyOn(Modal, 'confirm').mockImplementation((config) => {
+      config.onOk?.();
+      return undefined as never;
+    });
+
+    render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />, { wrapper: I18nTestWrapper });
+    fireEvent.click(screen.getByRole('button', { name: /删除产品特性/ }));
+
+    expect(confirm).toHaveBeenCalledOnce();
+    const [updatedNodes] = onChange.mock.calls[0];
+    expect(updatedNodes.find((node: GraphNode) => node.id === 'step-fn').characteristics).toEqual([]);
+    expect(updatedNodes.find((node: GraphNode) => node.id === 'work-fn').characteristics?.[0].related_product_characteristic_ids).toEqual([]);
+    confirm.mockRestore();
   });
 });

@@ -137,10 +137,18 @@ beforeEach(() => {
     change_summary: "v1", created_by: "u1", created_at: "2026-06-18T00:00:00Z",
     snapshot: {
       nodes: [
-        node("f1", "ProcessItemFunction", "快照功能"),
+        node("step", "ProcessStep", "贴装工序"),
+        {
+          ...node("f1", "ProcessStepFunction", "快照功能"),
+          characteristics: [{
+            id: "snapshot-product-char", kind: "product", name: "快照产品特性",
+            specification: "≤0.05", unit: "mm", classification: "CC", reference: null,
+            related_product_characteristic_ids: [],
+          }],
+        },
         node("fm1", "FailureMode", "失效模式"),
       ],
-      edges: [{ source: "f1", target: "fm1", type: "HAS_FAILURE_MODE" }],
+      edges: [{ source: "step", target: "f1", type: "HAS_FUNCTION" }, { source: "f1", target: "fm1", type: "HAS_FAILURE_MODE" }],
     },
     sha256_hash: "abc",
   });
@@ -162,6 +170,7 @@ describe("FMEAEditorPage version snapshot", () => {
     fireEvent.click(screen.getByText("tabs.editor"));
     // 快照功能名在失效分析表的 function 列 <div> 中渲染（非 input），用 getByText
     await waitFor(() => expect(screen.getByText("快照功能")).toBeInTheDocument());
+    expect(screen.getByDisplayValue("快照产品特性")).toBeDisabled();
     // 只读态未产生协作事件（注：未主动 focus 控件，此断言验证「无副作用」而非 guard 被触发）
     expect(mocks.startEditing).not.toHaveBeenCalled();
   });

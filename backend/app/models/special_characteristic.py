@@ -33,6 +33,7 @@ class SpecialCharacteristic(Base):
     parent_sc_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("special_characteristics.sc_id"), nullable=True)
     source_fmea_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("fmea_documents.fmea_id"), nullable=True)
     source_node_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_characteristic_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     source_type: Mapped[str] = mapped_column(String(10), nullable=False)
     cp_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("control_plan_items.item_id"), nullable=True)
     msa_study_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

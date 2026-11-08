@@ -13,6 +13,8 @@ from app.schemas.control_plan import (
     ControlPlanResponse,
     ControlPlanUpdate,
     ImportFromFMEARequest,
+    CharacteristicImportPreview,
+    ControlPlanItemResponse,
 )
 from app.services import control_plan_service
 
@@ -71,7 +73,7 @@ async def create_control_plan(
         check_factory_access(factory_id, scope)
         cp = await control_plan_service.create_control_plan(db, req, scope.user.user_id, factory_id=factory_id)
         await validate_factory_invariant(cp, db)
-        await db.refresh(cp)
+        await db.refresh(cp, ["items"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ControlPlanResponse.model_validate(cp)
@@ -153,6 +155,20 @@ async def delete_control_plan(
     return {"message": "已删除"}
 
 
+@router.post("/{cp_id}/import-from-fmea/preview", response_model=CharacteristicImportPreview)
+async def preview_import_from_fmea(
+    cp_id: uuid.UUID,
+    req: ImportFromFMEARequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Read-only approved-snapshot import preview; digest does not confer authority."""
+    try:
+        return await control_plan_service.preview_import_from_fmea(db, cp_id, req, scope)
+    except control_plan_service.CharacteristicImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
 @router.post("/{cp_id}/import-from-fmea")
 async def import_from_fmea(
     cp_id: uuid.UUID,
@@ -160,19 +176,26 @@ async def import_from_fmea(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    level_perm = await get_user_permission(scope.user, Module.PLANNING, db)
-    if level_perm < PermissionLevel.CREATE:
-        raise HTTPException(status_code=403, detail="需要计划模块的 CREATE 权限")
+    """Apply an authorized fresh preview; old clients missing preview context get 409.
+
+    Send the exact source_fmea_version_id, expected_lock_version, explicit step_ids
+    (or uniquely resolving legacy step_nos), preview_digest and nonempty
+    selected_candidate_keys. Refresh preview on 409; no latest-source fallback.
+    Existing rows are returned unchanged; editing/synchronizing is a separate flow.
+    """
     try:
-        items = await control_plan_service.import_from_fmea(db, cp_id, req, scope.user.user_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"imported_count": len(items)}
+        items = await control_plan_service.import_from_fmea(
+            db, cp_id, req, scope.user.user_id, scope=scope,
+        )
+    except control_plan_service.CharacteristicImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return {"imported_count": len(items), "items": [ControlPlanItemResponse.model_validate(i) for i in items]}
 
 
 @router.get("/{cp_id}/stale-check")
 async def stale_check(
     cp_id: uuid.UUID,
+    source_fmea_version_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -181,7 +204,9 @@ async def stale_check(
         raise HTTPException(status_code=404, detail="控制计划不存在")
     _check_factory_access(cp, scope)
     try:
-        stale = await control_plan_service.check_stale_items(db, cp_id)
+        stale = await control_plan_service.check_stale_items(db, cp_id, scope=scope, source_fmea_version_id=source_fmea_version_id)
+    except control_plan_service.CharacteristicImportError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"stale_items": stale}
@@ -202,6 +227,8 @@ async def approve_control_plan(
     _check_factory_access(cp, scope)
     try:
         cp = await control_plan_service.approve_control_plan(db, cp, scope.user.user_id)
+    except control_plan_service.CharacteristicImportError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return ControlPlanResponse.model_validate(cp)

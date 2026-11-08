@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.schemas.characteristic import CharacteristicSourceRef
 
 
 class ControlPlanItemBase(BaseModel):
@@ -38,6 +40,7 @@ class ControlPlanItemUpdate(ControlPlanItemBase):
 
 class ControlPlanItemResponse(ControlPlanItemBase):
     item_id: uuid.UUID
+    source_characteristic_ref: CharacteristicSourceRef | None = None
 
     model_config = {"from_attributes": True}
 
@@ -93,9 +96,12 @@ class CustomerRequirementItem(BaseModel):
 
 class ControlPlanResponse(ControlPlanBase):
     cp_id: uuid.UUID
+    sync_pending: bool = False
+    source_fmea_version_id: uuid.UUID | None = None
     product_line_code: str
     status: str
     version: int
+    lock_version: int = 0
     items: list[ControlPlanItemResponse] = []
     factory_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
@@ -118,4 +124,36 @@ class ControlPlanListResponse(BaseModel):
 
 class ImportFromFMEARequest(BaseModel):
     fmea_id: uuid.UUID
+    # Optional only so old clients receive 409/re-preview rather than unsafe defaults.
+    source_fmea_version_id: uuid.UUID | None = None
+    expected_lock_version: int | None = Field(default=None, ge=0)
+    step_ids: list[str] | None = None
     step_nos: list[str] | None = None
+    preview_digest: str | None = None
+    selected_candidate_keys: list[str] | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+class CharacteristicImportIssue(BaseModel):
+    code: str
+    node_id: str
+    blocking: bool
+    message: str
+
+
+class CharacteristicImportCandidate(BaseModel):
+    candidate_key: str
+    action: str
+    item_id: uuid.UUID | None = None
+    source_ref: CharacteristicSourceRef
+    fields: dict[str, str | None]
+
+
+class CharacteristicImportPreview(BaseModel):
+    source_fmea_version_id: uuid.UUID
+    expected_lock_version: int
+    mapping_version: int
+    preview_digest: str
+    items: list[CharacteristicImportCandidate]
+    issues: list[CharacteristicImportIssue]

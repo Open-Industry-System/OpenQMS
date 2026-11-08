@@ -1,5 +1,18 @@
 import type { GraphNode, GraphEdge } from "../types";
 
+function stableValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableValue(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  return stableValue(left) === stableValue(right);
+}
+
 export interface NodeChange {
   type: "added" | "removed" | "modified";
   node_id: string;
@@ -55,13 +68,13 @@ export function diffGraphs(
       });
     } else {
       // Check modified fields
-      const diffFields = ["name", "severity", "occurrence", "detection", "specification", "requirement"];
+      const diffFields = ["name", "severity", "occurrence", "detection", "specification", "requirement", "characteristics"];
       for (const field of diffFields) {
         const baseVal = (baseNode as unknown as Record<string, unknown>)[field] ?? null;
         const latestVal = (latestNode as unknown as Record<string, unknown>)[field] ?? null;
         const localVal = (localNodeMap.get(id) as unknown as Record<string, unknown> | undefined)?.[field] ?? null;
 
-        if (baseVal !== latestVal) {
+        if (!valuesEqual(baseVal, latestVal)) {
           nodeChanges.push({
             type: "modified",
             node_id: id,
@@ -73,7 +86,7 @@ export function diffGraphs(
           });
 
           // Check if local also modified this field (conflict)
-          if (localVal !== null && baseVal !== localVal) {
+          if (!valuesEqual(baseVal, localVal)) {
             conflictingFields.push({
               type: "modified",
               node_id: id,

@@ -321,6 +321,8 @@ async def _apply_fmea_update(
         existing_scope = (fmea.graph_data or {}).get("wizardScope")
         if existing_scope is not None and graph_data.get("wizardScope") is None:
             raise ValueError("wizard_scope_required")
+        from app.services.fmea_characteristics import validate_characteristics
+        validate_characteristics(fmea.fmea_type, graph_data)
         # 归一 RecommendedAction.status：legacy（planned/done/undecided/notExecuted/closed）
         # → canonical 4-state（open/in_progress/completed/not_executed）。
         # 在 diff 比较前做，确保归一后的值随 graph_data 落库并计入 changed_fields。

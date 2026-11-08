@@ -1,8 +1,8 @@
 # 子故事 US-E2E-02.3：PFMEA Step3 功能分析
 
-**状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v3）
-**关联 skill**: `verify-fmea-lifecycle-pfmea-step3-function`（待生成）
+**状态**: 定稿 v3（2026-11-03），结构化特性契约同步
+**所属 epic**: US-E2E-02（README.md v4）
+**关联 skill**: `verify-fmea-lifecycle-pfmea-step3-function`（已同步；运行结果另见验收证据）
 **前置**: 02.2（Step2 结构树已就绪）
 **AIAG-VDA 引用**: `Reference/FMEA.md` §3.3（过程 FMEA 步骤三：功能分析）
 **AI_REQUIRED**: false（功能树由结构推导，无独立 AI 触发器）
@@ -19,12 +19,12 @@
 ## 主流程
 
 1. `planning_qe` 在 Step3 为每个结构节点录入功能：
-   - `ProcessItemFunction`（产品特性）
-   - `ProcessStepFunction`（产品特性，CC/SC 可设）
-   - `ProcessWorkElementFunction`（过程特性，CC/SC 可设）
+   - `ProcessItemFunction`（过程项功能，不在其上新增结构化特性）
+   - `ProcessStepFunction`（步骤功能，其 characteristics 可录入多项产品特性）
+   - `ProcessWorkElementFunction`（工作要素功能，其 characteristics 可录入多项过程特性）
 2. `HAS_FUNCTION` 边：结构节点 → 功能节点。
 3. `FUNCTION_MAPPED_TO` 边：不同层级功能之间的功能关系（**非功能→结构**，见 README "图结构契约" 节）。
-4. CC/SC 写入函数节点 `classification` 字段（复用现有字段，不新增）。
+4. 新 CC/SC 写入各 `characteristics[].classification`；旧 Function.classification 仅兼容参考，不自动转换。
 5. 保存草稿。
 6. 推进到 Step4。
 
@@ -33,7 +33,7 @@
 ### 结构完整性
 - **每个纳入分析范围的结构节点都有功能节点**（`HAS_FUNCTION` 边），非仅"至少一个功能"（见 README "评审决议" 节）。
 - `FUNCTION_MAPPED_TO` 边连接不同层级功能（如 ProcessItemFunction → ProcessStepFunction）。
-- CC/SC 写入 `ProcessStepFunction`/`ProcessWorkElementFunction` 的 `classification` 字段（非 FailureCause.special_characteristic）。
+- 新 CC/SC 写入 `characteristics[].classification`（非 Function.classification 或 FailureCause.special_characteristic）；不按 product/process 或严重度自动赋值。
 
 ### 门禁
 - 推进 Step4 前：每个结构节点都有功能节点（HAS_FUNCTION 边齐全）。
@@ -47,13 +47,13 @@
 | 项 | PFMEA 定义 |
 |---|---|
 | 落库实体 | `ProcessItemFunction`、`ProcessStepFunction`、`ProcessWorkElementFunction` |
-| 关键字段 | Function.name；Function.classification（CC/SC） |
+| 关键字段 | Function.name；Function.characteristics（id/kind/name/specification/unit/classification/reference/related_product_characteristic_ids） |
 | 边类型 | `HAS_FUNCTION`（结构→功能）、`FUNCTION_MAPPED_TO`（功能↔功能） |
 | AI 触发器 | 无（AI_REQUIRED=false） |
 | 状态枚举 | FMEAState 不变（DRAFT） |
 | 审计事件 | AuditLog `action="UPDATE"`（Outbox `fmea.updated`） |
 | E2E seed 前置 | 02.2 结构树 |
-| 通过条件 | 每个结构节点都有功能节点 + FUNCTION_MAPPED_TO 边连接层级功能 + CC/SC 写 classification 字段 + 审计 |
+| 通过条件 | 每个结构节点都有功能节点 + FUNCTION_MAPPED_TO 边连接层级功能 + CC/SC 写 characteristics[].classification + 审计 |
 | 失败条件（FAILED） | 结构节点缺功能节点；CC/SC 写错字段；FUNCTION_MAPPED_TO 误连功能→结构；未审计 |
 | 阻塞条件（BLOCKED） | 无（AI_REQUIRED=false） |
 
@@ -65,3 +65,11 @@
 ## 后续
 
 - 功能树为 Step4 失效分析提供 FM 挂载点（FM 挂 ProcessStepFunction）。
+
+## 2026-11-03 结构化特性补充验收
+
+- `characteristics` 缺失/null 是 legacy，只提示参考，不自动转换、保存不补空数组；显式 `[]` 是确认无特性，禁止回退旧功能字段。
+- 每项独立 UUID、kind、名称、规范、单位、可选特殊分类、依据；改名不换 UUID，名称不能为空。按真实唯一 `HAS_FUNCTION` 所属及 FMEA 类型判断 kind；缺失／歧义须复核，不猜测。
+- PFMEA 同一工序步骤功能录入 **2 产品**，其工作要素功能录入 **3 过程**；过程只能关联同工序产品 UUID。保存刷新核对集合、规范与分类分离。DFMEA 共享功能类型仍全部为 product。
+- 编辑器行级 CRUD／wizardScope、标准表头／结构边不变；approved 写保护和历史快照只读，不迁移历史批准数据。
+- 本次特性专项浏览器及完整检查结果见 [纠偏验收证据](../../development/characteristic-correction-acceptance.md)，并非整个子故事（含 AI 等）重新全量认证。

@@ -3,14 +3,12 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
 from app.core.factory_scope import check_factory_access
 from app.core.permissions import Module, PermissionLevel, require_permission
 from app.database import get_db
-from app.models.fmea_version import FMEAVersion
 from app.models.user import User
 from app.schemas.version import (
     ControlPlanVersionDetail,
@@ -28,9 +26,7 @@ from app.schemas.version import (
     RollbackRequest,
     RollbackResponse,
     SyncFromFMEARequest,
-    SyncPreviewItem,
     SyncPreviewResponse,
-    SyncSummary,
     VerifyResponse,
     VersionListResponse,
 )
@@ -323,73 +319,24 @@ async def verify_cp_version_integrity(
 @router.get("/control-plans/{cp_id}/sync-preview", response_model=SyncPreviewResponse)
 async def get_sync_preview(
     cp_id: uuid.UUID,
+    source_fmea_version_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    cp = await control_plan_service.get_control_plan(db, cp_id)
-    if cp is None:
-        raise HTTPException(status_code=404, detail="控制计划不存在")
-    check_factory_access(cp.factory_id, scope)
-    if not cp.fmea_ref_id:
-        raise HTTPException(status_code=400, detail="该控制计划未关联FMEA")
-
-    # Auto-detect latest FMEA version
-    result = await db.execute(
-        select(FMEAVersion)
-        .where(FMEAVersion.fmea_id == cp.fmea_ref_id)
-        .order_by(FMEAVersion.major_no.desc(), FMEAVersion.minor_no.desc())
-        .limit(1)
-    )
-    fmea_version = result.scalar_one_or_none()
-    if fmea_version is None:
-        raise HTTPException(status_code=404, detail="FMEA版本不存在")
-
-    preview = await build_sync_preview(db, cp, fmea_version)
-    items = [SyncPreviewItem(**p) for p in preview]
-    add_count = sum(1 for i in items if i.action == "add")
-    update_count = sum(1 for i in items if i.action == "sync")
-    delete_count = sum(1 for i in items if i.action == "delete")
-    return SyncPreviewResponse(
-        fmea_version_id=fmea_version.version_id,
-        fmea_version=f"v{fmea_version.major_no}.{fmea_version.minor_no}",
-        items=items,
-        summary=SyncSummary(add_count=add_count, update_count=update_count, delete_count=delete_count),
-    )
+    try:
+        return await build_sync_preview(db, cp_id, source_fmea_version_id, scope=scope)
+    except control_plan_service.CharacteristicImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
-@router.post("/control-plans/{cp_id}/sync-from-fmea")
+@router.post("/control-plans/{cp_id}/sync-from-fmea", response_model=ControlPlanVersionListItem)
 async def sync_from_fmea(
     cp_id: uuid.UUID,
     req: SyncFromFMEARequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    cp = await control_plan_service.get_control_plan(db, cp_id)
-    if cp is None:
-        raise HTTPException(status_code=404, detail="控制计划不存在")
-    check_factory_access(cp.factory_id, scope)
-    if cp.status == "approved":
-        raise HTTPException(status_code=400, detail="已批准的控制计划不能同步")
-    if not cp.fmea_ref_id:
-        raise HTTPException(status_code=400, detail="该控制计划未关联FMEA")
-
-    # Auto-detect latest FMEA version
-    result = await db.execute(
-        select(FMEAVersion)
-        .where(FMEAVersion.fmea_id == cp.fmea_ref_id)
-        .order_by(FMEAVersion.major_no.desc(), FMEAVersion.minor_no.desc())
-        .limit(1)
-    )
-    fmea_version = result.scalar_one_or_none()
-    if fmea_version is None:
-        raise HTTPException(status_code=404, detail="FMEA版本不存在")
-    if not req.selected_item_ids:
-        raise HTTPException(status_code=400, detail="请选择至少一项同步内容")
     try:
-        version = await apply_sync_preview(
-            db, cp, fmea_version, req.selected_item_ids, user.user_id,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return ControlPlanVersionListItem.model_validate(version)
+        return await apply_sync_preview(db, cp_id, req, scope.user.user_id, scope=scope)
+    except control_plan_service.CharacteristicImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

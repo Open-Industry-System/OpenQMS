@@ -655,3 +655,17 @@ describe("deleteSubtree — effect survivor handling", () => {
     expect(result.edges).toEqual([edge("fn2", "fm2", "HAS_FAILURE_MODE"), edge("fm2", "fe1", "EFFECT_OF")]);
   });
 });
+
+
+describe("subtree product reference cleanup", () => {
+  it.each(["fn", "step"])("clears only dangling references after deleting %s", (root) => {
+    const characteristic = (id: string, kind: "product" | "process", links: string[] = []) => ({ id, kind, name: id, specification: null, unit: null, reference: null, classification: null, related_product_characteristic_ids: links });
+    const nodes = [node("step", "ProcessStep"), { ...node("fn", "ProcessStepFunction"), characteristics: [characteristic("deleted", "product")] },
+      { ...node("survivor", "ProcessWorkElementFunction"), characteristics: [characteristic("process", "process", ["deleted", "retained"])] },
+      { ...node("other", "ProcessStepFunction"), characteristics: [characteristic("retained", "product")] }];
+    const edges: GraphEdge[] = [{ source: "step", target: "fn", type: "HAS_FUNCTION" }];
+    const result = deleteSubtree(nodes, edges, root);
+    expect(result.nodes.find((n) => n.id === "survivor")?.characteristics?.[0].related_product_characteristic_ids).toEqual(["retained"]);
+    expect(nodes[2].characteristics?.[0].related_product_characteristic_ids).toEqual(["deleted", "retained"]);
+  });
+});

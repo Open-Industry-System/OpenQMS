@@ -33,14 +33,14 @@ class FakeItem:
 
 # ─── stable_key ─────────────────────────────────────────────────────────────
 
-def test_stable_key_uses_fmea_node_id_and_characteristic():
+def test_stable_key_uses_fmea_node_id_and_persisted_row_id():
     item = FakeItem(source_fmea_node_id="node-1", step_no="10", product_characteristic="尺寸A")
-    assert _stable_key(item) == "node-1|尺寸A"
+    assert _stable_key(item) == f"node-1|{item.item_id}"
 
 
-def test_stable_key_falls_back_to_step_no_and_sort_order():
+def test_stable_key_falls_back_to_step_no_and_row_id():
     item = FakeItem(source_fmea_node_id=None, step_no="20", sort_order=3)
-    assert _stable_key(item) == "20|#3"
+    assert _stable_key(item) == f"20|{item.item_id}"
 
 
 def test_stable_key_distinguishes_same_fmea_node_different_characteristic():
@@ -65,7 +65,7 @@ def test_r001_detects_empty_control_method():
     assert len(findings) == 1
     assert findings[0].rule_id == "R001"
     assert findings[0].severity == "error"
-    assert findings[0].stable_key == "n1|#0"
+    assert findings[0].stable_key == f"n1|{items[0].item_id}"
 
 
 def test_r001_ignores_valid_control_method():

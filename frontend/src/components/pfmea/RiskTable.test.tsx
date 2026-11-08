@@ -142,5 +142,29 @@ describe('RiskTable', () => {
       const edges: GraphEdge[] = [{ source: 'OTHER', target: 'wef', type: 'FUNCTION_MAPPED_TO' }]; // linked to a different step func
       expect(aggregateSpecialCharacteristic(stepFunc, wefs, edges).label).toBe('-');
     });
+
+    it('uses structured collections as the authoritative classification source', () => {
+      const structuredCC = {
+        id: 'psf', type: 'ProcessStepFunction', name: 'f', classification: '',
+        characteristics: [{ id: 'product-cc', kind: 'product', name: '偏移量', specification: null, unit: null, classification: 'CC', reference: null, related_product_characteristic_ids: [] }],
+        ...Z2,
+      } as GraphNode;
+      const explicitEmpty = { ...structuredCC, characteristics: [], classification: 'CC' } as GraphNode;
+      const legacy = { ...structuredCC, characteristics: null, classification: 'CC' } as GraphNode;
+
+      expect(aggregateSpecialCharacteristic(structuredCC, [], []).tag).toBe('CC');
+      expect(aggregateSpecialCharacteristic(explicitEmpty, [], []).label).toBe('-');
+      expect(aggregateSpecialCharacteristic(legacy, [], []).tag).toBe('CC');
+    });
   });
+});
+
+
+it.each(["productSC", "processCC"])("renders independent structured classification %s", (example) => {
+  const { nodes, edges } = baseRow();
+  nodes[0] = { ...nodes[0], characteristics: example === "productSC" ? [{ id: "p", kind: "product", name: "Size", classification: "SC", specification: null, unit: null, reference: null, related_product_characteristic_ids: [] }] : [] };
+  nodes.push({ id: "wef", type: "ProcessWorkElementFunction", name: "Force", ...Z, characteristics: [{ id: "q", kind: "process", name: "Force", classification: example === "processCC" ? "CC" : null, specification: null, unit: null, reference: null, related_product_characteristic_ids: [] }] });
+  edges.push({ source: "psf", target: "wef", type: "FUNCTION_MAPPED_TO" });
+  render(<RiskTable nodes={nodes} edges={edges} fmeaId="f1" onChange={() => {}} />, { wrapper: I18nTestWrapper });
+  expect(screen.getByText(example === "processCC" ? "CC" : "SC(准确贴装)")).toBeInTheDocument();
 });

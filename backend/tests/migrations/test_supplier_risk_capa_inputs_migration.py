@@ -159,14 +159,14 @@ def test_upgrade_normalizes_empty_rule_results(mig_db_url):
     engine.dispose()
 
 
-def test_single_alembic_head(mig_db_url):
+def test_single_alembic_head():
     """Alembic reports a single head (all branches merged)."""
     from alembic.script import ScriptDirectory
 
-    cfg = _cfg(mig_db_url)
+    cfg = _cfg("postgresql+asyncpg://unused/metadata_only")
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    # Agent read-task migration extends the former warranty factory head.
-    assert heads == ["20260929_agent_read_task"], (
-        f"expected single head 20260929_agent_read_task, got {heads}"
+    # Characteristic provenance extends the agent read-task head; no new branch.
+    assert heads == ["20261101_char_refs"], (
+        f"expected single head 20261101_char_refs, got {heads}"
     )

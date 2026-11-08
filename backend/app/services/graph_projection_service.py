@@ -3,6 +3,7 @@
 核心逻辑是 build_cypher_sync()：给定一个 FMEA 文档的完整数据，生成一组
 (Cypher, params) 元组，worker 逐条执行实现幂等投影。
 """
+import json
 import logging
 import uuid
 from typing import Any
@@ -54,6 +55,11 @@ def _node_properties(node: dict) -> dict[str, Any]:
         val = node.get(key)
         if val is not None and val != 0 and val != "":
             props[key] = val
+
+    if isinstance(node.get("characteristics"), list):
+        props["characteristics_json"] = json.dumps(
+            node["characteristics"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
 
     if node["type"] in ("PreventionControl", "DetectionControl"):
         props["control_type"] = "prevention" if node["type"] == "PreventionControl" else "detection"

@@ -11,6 +11,7 @@ export interface SpecialCharacteristic {
   source_fmea_title: string | null;
   source_fmea_document_no: string | null;
   source_node_id: string;
+  source_characteristic_id: string | null;
   source_type: "DFMEA" | "PFMEA";
   cp_item_id: string | null;
   msa_study_id: string | null;
