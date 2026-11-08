@@ -83,7 +83,7 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 
 新增独立开关 `AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED=false` 与独立策略路径（正文策略槽，例如 `AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE`，默认不设置）。必须同时满足既有 runtime 开关及 `TENANT_MODE=dev`，不用于 single/production。正文开关关闭时，新入口必须在租户解析、认证、请求体和 DB 访问前返回404；该前置判断接入现有中间件，与旧 metadata 开关互相独立，任一关闭都不影响另一路径的既有行为。
 
-服务仅绑定数字回环、单 worker、无外部反向代理/代理 header 信任。启用本片的任务、管理员和 runtime 路径检查真实 ASGI peer，拒绝 Forwarded/X-Forwarded-*；新入口的回环 peer 检查由新开关驱动，不使用旧 metadata 开关替代。接收器 origin 只接受 127.0.0.1 或 ::1，无 userinfo/path/query/fragment，不用 localhost/DNS/代理/netrc/cookie/重定向；HTTPS 保留证书验证。
+服务仅绑定数字回环、单 worker、无外部反向代理/代理 header 信任。启用本片的任务、管理员和 runtime 路径检查真实 ASGI peer，拒绝 Forwarded/X-Forwarded-*；新入口的回环 peer 检查由新开关驱动（扩展现有 `app/core/agent_local_trial.py` 的真实 peer 校验与路径判定），不使用旧 metadata 开关替代。接收器 origin 只接受 127.0.0.1 或 ::1，无 userinfo/path/query/fragment，不用 localhost/DNS/代理/netrc/cookie/重定向；HTTPS 保留证书验证。
 
 两个策略槽均由服务端 lifespan 一次读取并冻结。正文槽最多一个精确条目，绑定租户 UUID/generation、安装 UUID/credential epoch、执行用户、报告、工厂、产品线、新 key/version/profile、固定执行物 hash 和 aware `expires_at`；不接受通配、未知字段、身份回退或插件自报 hash 作为证明。策略最长1小时；缺失、过期、格式或文件安全不满足时 fail closed。
 
@@ -131,7 +131,9 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 | 报告迁移前无修订记录 | 同事务建立首个修订并审计 `initial_revision_observed`，继续按后续条件签发 |
 | 全部满足 | 同事务签发证明，创建响应 `source_proof_issued=true` |
 
-`source_proof_issued` 只出现在创建端点专用的扩展响应模型（`VerificationResponse` 增加默认 `false` 字段或创建专用子类；列表/更新响应不变）；审计原因码只进 AuditLog，不返回给调用方。
+`source_proof_issued` 只出现在创建端点专用的扩展响应模型（`VerificationResponse` 增加默认 `false` 字段或创建专用子类；列表/更新响应不变）；审计原因码只进 AuditLog，不返回给调用方。409 分支需要在该创建端点新增明确的冲突异常映射（仅作用于 source-declaration 分支），既有 400/403/404 映射不变。
+
+> 修订记录：v4 同时补明 409 的端点映射；其余 v4 内容不变。
 
 同事务签发：
 
