@@ -1,11 +1,12 @@
 # D4 根因受限文本的本地受控交付设计
 
-日期：2026-11-08。状态：用户已审阅首版并提出三项修订；本文 v2 按确认边界更新，**待用户再次书面审阅**。当前仅落文；未实施、未启用正文能力，不授权生产、模型调用或业务写入。
+日期：2026-11-08。状态：用户已审阅首版并提出三项修订；v2 修订后经独立技术审阅发现一致性与可实现性问题；本文 v3 按审阅意见更新，**待用户再次书面审阅**。当前仅落文；未实施、未启用正文能力，不授权生产、模型调用或业务写入。
 
 修订记录：
 
 - v1（`a4b90d47`）：首版书面规格。
-- v2：按用户审阅意见修订——来源证明区分“验证通过／来源声明／当前接收方权限”三个事实，增加不可复用字段修订标识与失效规则；固定启动消息改为服务端内容边界；明确业务声明与部署信任分离、统一授权接缝与只读标量坐标读取。
+- v2：按用户审阅意见修订——来源证明三事实分离、不可复用修订标识与失效规则、服务端消息边界、业务声明与部署信任分离。
+- v3：按独立技术审阅修订——统一签发/不签发语义并补请求字段；证明绑定验证版本；新增“新证明取代旧证明”活性规则；移除对冻结基线表 `capa_eightd` 的加列/触发器，改用新表＋应用写入路径记录修订；补充第二 policy 槽、来源投影内部声明、节点有界读取、路由登记与开关联动；修正命名/版本号等一致性问题。
 
 ## 1. 基线与用户确认
 
@@ -23,15 +24,18 @@
 8. 固定启动消息必须在服务端任何正文出站、批次状态变化或 ACK 水位推进前校验。
 9. 业务模块声明能力、投影、依赖来源与最低要求；平台把已准入的安装/版本/执行物/profile 绑定到声明后统一计算权限。
 
-### 1.1 已有底座与不能直接复用的部分
+### 1.1 已有底座与已核实的限制
 
 - [员工预览](../../development/capa-d4-text-preview.md)及[确定性遮盖函数](../../../backend/app/services/capa_d4_redaction.py)已存在；候选仍为 restricted、未批准降敏。完整员工预览还会加载验证文本，本片不得调用它后再过滤。
-- [验证服务](../../../backend/app/services/capa_verification_service.py#L123-L140)的采纳路径把客户端 `adopted_text` 直接追加到 `d4_root_cause`，[字段模型](../../../backend/app/models/capa.py#L93-L104)只存自报 `source`/`item_ref`；普通更新同样可整字段改写。现有 `source_ref` 仅校验可选 FMEA 原因节点（[验证服务](../../../backend/app/services/capa_verification_service.py#L40-L81)），不能证明整段文字只来自该节点。
-- [D5 闸口](../../../backend/app/services/capa_service.py#L736-L749)只要求存在 `passed` 且文本等于当前根因的验证记录，不要求来源；审计/修改完整性 HMAC 不是来源证明。当前没有可直接复用的完整来源证明。
-- [元数据交付](../../../backend/app/services/agent_runtime/readonly_delivery.py)已采用独立只读快照、当前授权与平台收据，但其投影和 digest 不能冒充正文合同。
+- [验证服务](../../../backend/app/services/capa_verification_service.py#L123-L140)的采纳路径把客户端 `adopted_text` 直接追加到 `d4_root_cause`；[字段模型](../../../backend/app/models/capa.py#L93-L104)只存自报 `source`/`item_ref`；普通更新同样可整字段改写。现有 `source_ref` 仅校验可选 FMEA 原因节点（[验证服务](../../../backend/app/services/capa_verification_service.py#L40-L81)），不能证明整段文字只来自该节点。当前没有可直接复用的完整来源证明。
+- [验证创建](../../../backend/app/schemas/capa_verification.py#L21-L28)当前没有来源声明字段；[验证更新](../../../backend/app/schemas/capa_verification.py#L40-L46)只允许改方法/结果/结论/证据/`source_ref`，不能改 `root_cause_text`，且没有删除路由。
+- [D5 闸口](../../../backend/app/services/capa_service.py#L736-L749)只要求存在 `passed` 且文本等于当前根因的验证记录，不要求来源；审计/修改完整性 HMAC 不是来源证明。
+- 租户独立迁移当前只以新增表方式叠加 delta；[基线比对](../../../backend/app/services/tenant_schema_diff.py#L145-L163)会把冻结基线表上的新增列/触发器视为差异。因此本片**不修改 `capa_eightd` 结构、不添加触发器**，也不改动既有收据表；修订身份与证明均使用新表，迁移维护点见 §6。
+- [消息服务](../../../backend/app/services/agent_runtime/runtime_messages.py#L95-L98)的 claim 与 history 是 run token 唯一返回任务原文的出口；ACK 只返回水位。
 - [投递内核](../../../backend/app/services/agent/permissions/delivery.py)要求精确接收方许可；manifest、token 或插件自报不能替代服务端决定。
-- [现有收据模型](../../../backend/app/models/agent_runtime_event.py#L12-L27)仅允许 `data_class='internal'`，必须显式演进，不能把受限正文标为 internal。
-- [本地试用](../../development/agent-local-trial.md)的旧 key/version/hash/profile 只属于元数据链，不授权正文。
+- 专用 profile 接线目前不存在：策略选择返回硬编码 `local_metadata_v1`（[trial_policy.py:174-192](../../../backend/app/services/agent_runtime/trial_policy.py#L174-L192)），目录只有 baseline/`local_metadata_v1`（[catalog.py:15-20](../../../backend/app/services/agent/permissions/catalog.py#L15-L20)），任务 ready、运行授权、grant 启用与投递许可均硬要求 metadata summary（[task_service.py:129-130](../../../backend/app/services/agent_runtime/task_service.py#L129-L130)、[runtime_access.py:113](../../../backend/app/services/agent_runtime/runtime_access.py#L113)、[plugin_registry.py:184-211](../../../backend/app/services/agent_runtime/plugin_registry.py#L184-L211)、[runtime_access.py:190-201](../../../backend/app/services/agent_runtime/runtime_access.py#L190-L201)）。
+- `CapabilitySpec` 不含数据分类或来源依赖（[types.py:16-26](../../../backend/app/services/agent/permissions/types.py#L16-L26)）；FMEA 节点无独立版本字段，现有可核验版本为文档 `lock_version/updated_at`（[fmea.py:26-30](../../../backend/app/models/fmea.py#L26-L30)），预览使用的也是二者。
+- 新入口尚未登记于 [routes.py:1-15](../../../backend/app/services/agent_runtime/routes.py#L1-L15)；回环 peer 中间件目前只识别旧 metadata 模式（[tenant_context.py:37-45](../../../backend/app/core/tenant_context.py#L37-L45)）。
 
 ## 2. 范围与非目标
 
@@ -41,6 +45,7 @@
 
 - 验证记录 `root_cause_text/result`、标题、团队/人员、D2/D5、附件/文件名/路径/URL、FMEA 图或正文；不遍历其他模块凑来源。
 - 新增根因审批节点、D4 候选发布/快照表、正文副本库或已撤回的候选 7 天清理；来源证明表只存元数据，不存正文。D8 结果审核不是投递许可。
+- 修改冻结基线业务表结构（`capa_eightd` 不加列、不加触发器）或既有 internal 收据表；不使用首次读取自动补签来源证明。
 - 模型/解析器调用、规则分析、根因或措施结论、采纳/验证/审批/状态变更、embedding/outbox 业务写入。
 - 通用正文 SDK、任意 HTTP/代码/消息执行、结果/checkpoint 正文保存、自动恢复、生产部署或任意恶意插件隔离。
 - 改动原元数据 worker/hash/profile、SDK 0.1.0 十方法/DTO/元数据语义；不把新正文塞进 `get_capa_context`。
@@ -63,26 +68,28 @@
 
 protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口。安装 secret 只用于 claim，用户/admin JWT 不作为正文读取凭据。报告取自当前 run/task；新入口不接受报告、字段、schema、分类、投递目标或自定义规则选择，不接受 query 参数或请求正文。
 
-新接收器是可完整审核的固定标准库执行物，只调用固定平台路由与该正文入口。不加载 SDK/后端/provider 包或任意插件代码；启动使用隔离 Python、禁 site 初始化和字节码写入（`-I -S -B`）。应用执行逻辑由固定文件 hash 覆盖；Python/stdlib/OS 属于可信主机前提，不冒充整机字节证明。旧 SDK 仍可发现新增可选能力，但没有正文便利方法或隐式正文回退。
+新路由必须显式登记于 [RUNTIME_ROUTES](../../../backend/app/services/agent_runtime/routes.py#L1-L15) 并由 API 模块注册；未登记路由不参与 runtime 认证。新接收器是可完整审核的固定标准库执行物，只调用固定平台路由与该正文入口。不加载 SDK/后端/provider 包或任意插件代码；启动使用隔离 Python、禁 site 初始化和字节码写入（`-I -S -B`）。应用执行逻辑由固定文件 hash 覆盖；Python/stdlib/OS 属于可信主机前提，不冒充整机字节证明。旧 SDK 仍可发现新增可选能力，但没有正文便利方法或隐式正文回退。
 
 ### 3.2 业务声明与部署信任分离
 
 - **CAPA 声明业务含义**：新 capability 的 owner、kind、projection、数据分类、所需用户最低权限（CAPA VIEW）、依赖来源投影及基线 DENY；不声明哪个部署或安装可信。
-- **FMEA 声明来源投影**：来源投影 ID `fmea.failure_cause.reference.v1`，模块归属、敏感等级 `internal`、所需最低能力 `VIEW` 及坐标 `{fmea_id, cause_node_id}`，供平台判定来源权限；CAPA 不得自行赋值来源等级。
-- **平台绑定部署信任**：把已准入的具体安装、版本、固定执行物 hash、profile 及本地限时策略绑定到声明，并声明该 profile 必需能力集合：元数据 profile→summary，正文 profile→正文 capability。更换接收器只改平台部署信任，不改 CAPA 业务规则。
-- 管理员 grant、任务派生 grant、目录、ready/claim/运行身份重验、resume/restart 均消费同一份声明与平台准入结果；不另建正文专用授权流程。正文安装无需旧 summary grant，旧元数据安装不获得正文；manifest 只表达需求，不能定义 canonical 声明或授权。
+- **FMEA 声明来源投影**：来源投影 ID `fmea.failure_cause.reference.v1`，模块归属 FMEA、敏感等级 `internal`、所需最低能力 `VIEW`、坐标 `{fmea_id, cause_node_id}` 及节点版本方法。该声明放在平台内部来源注册表，**不进入** `get_capability`/manifest 响应；插件不能发现或查询 FMEA 来源数据。
+- **平台绑定部署信任**：平台维护独立的 profile 准入登记，把已准入的具体安装、版本、固定执行物 hash、profile 及策略槽绑定到声明，并声明该 profile 的必需能力集合：元数据 profile→summary，正文 profile→正文 capability；同时声明各 profile 允许的投递元组。更换接收器只改平台准入登记，不改 CAPA 业务规则。
+- **第二策略槽**：正文 profile 使用独立策略文件与加载槽（见 §3.3），不复用元数据策略的 key/version/worker/24 小时限制；两个槽在 lifespan 分别加载并冻结。claim 由服务端按安装身份与准入登记选择 profile，请求不能声明 profile。
+- 管理员 grant、任务派生 grant、目录、ready/claim/运行身份重验、resume/restart 均消费同一份声明与平台准入结果：元数据 profile 仍要求 summary；正文 profile 只要求正文 capability，不需要旧 summary grant。旧元数据安装不获得正文。manifest 只表达需求，不能定义 canonical 声明或授权。
+- 目录由模块声明＋平台 profile 准入生成：baseline 保持 DENY；各本地 profile 只把该 profile 必需/允许的能力按声明提升为 DIRECT，其他能力继续不可用。
 
 ### 3.3 默认关闭、精确限时许可
 
-新增独立开关 `AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED=false`，策略路径 `AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE` 默认不设置。必须同时满足既有 runtime 开关及 `TENANT_MODE=dev`，不用于 single/production。正文开关关闭时，新入口在租户解析、认证、请求体和 DB 访问前返回404；不能影响原元数据开关/路径的既有行为。
+新增独立开关 `AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED=false` 与独立策略路径（正文策略槽，例如 `AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE`，默认不设置）。必须同时满足既有 runtime 开关及 `TENANT_MODE=dev`，不用于 single/production。正文开关关闭时，新入口必须在租户解析、认证、请求体和 DB 访问前返回404；该前置判断接入现有中间件，与旧 metadata 开关互相独立，任一关闭都不影响另一路径的既有行为。
 
-服务仅绑定数字回环、单 worker、无外部反向代理/代理 header 信任。启用本片的任务、管理员和 runtime 路径检查真实 ASGI peer，拒绝 Forwarded/X-Forwarded-*。接收器 origin 只接受 127.0.0.1 或 ::1，无 userinfo/path/query/fragment，不用 localhost/DNS/代理/netrc/cookie/重定向；HTTPS 保留证书验证。
+服务仅绑定数字回环、单 worker、无外部反向代理/代理 header 信任。启用本片的任务、管理员和 runtime 路径检查真实 ASGI peer，拒绝 Forwarded/X-Forwarded-*；新入口的回环 peer 检查由新开关驱动，不使用旧 metadata 开关替代。接收器 origin 只接受 127.0.0.1 或 ::1，无 userinfo/path/query/fragment，不用 localhost/DNS/代理/netrc/cookie/重定向；HTTPS 保留证书验证。
 
-策略由服务端 lifespan 一次读取并冻结。本片文件最多一个精确条目，绑定租户 UUID/generation、安装 UUID/credential epoch、执行用户、报告、工厂、产品线、新 key/version/profile、固定执行物 hash 和 aware `expires_at`。不接受通配、未知字段、身份回退或插件自报 hash 作为证明。策略最长1小时；缺失、过期、格式或文件安全不满足时 fail closed。
+两个策略槽均由服务端 lifespan 一次读取并冻结。正文槽最多一个精确条目，绑定租户 UUID/generation、安装 UUID/credential epoch、执行用户、报告、工厂、产品线、新 key/version/profile、固定执行物 hash 和 aware `expires_at`；不接受通配、未知字段、身份回退或插件自报 hash 作为证明。策略最长1小时；缺失、过期、格式或文件安全不满足时 fail closed。
 
 策略/启动凭据放在自有私有目录：文件0600、目录0700，拒绝符号链接与不安全读取，不隐式读 `.env`、profile 或目录搜索。只有受信部署操作者维护策略；它仅许可这个受控接收方，不替代管理员 grant、任务级 grant、执行身份及当前业务权限。生产 `TRUSTED_DELIVERY_DEPLOYMENTS` 继续为空。
 
-正文 capability 的 baseline 为 DENY；只在上述新 profile 精确匹配且全部当前权限成立时形成本地许可。原 metadata profile 不增加正文许可。新 profile 只为具体安装许可 restricted/masked 正文，以及既有消息流程所需的 restricted/raw 平台输入；后者只由消息接口使用，不产生 raw CAPA 正文路由或选择权。受控投递依据来自服务端准入，不来自 HTTP 参数或 manifest。固定执行物 hash 在实施期按定稿字节计算并独立核验；定稿审核前不存在可启用的合法 hash，不使用占位摘要放行。
+正文 capability 的 baseline 为 DENY；只在正文 profile 精确匹配且全部当前权限成立时形成本地许可。原 metadata profile 不增加正文许可。正文 profile 只为具体安装许可 restricted/masked 正文，以及既有消息流程所需的 restricted/raw 平台输入；后者只由消息接口使用，不产生 raw CAPA 正文路由或选择权。受控投递依据来自服务端准入，不来自 HTTP 参数或 manifest。固定执行物 hash 在实施期按定稿字节计算并独立核验；定稿审核前不存在可启用的合法 hash，不使用占位摘要放行。
 
 更换策略/词表需显式重启自有实例；不声称磁盘文件替换即时撤权。立即撤权/轮换/暂停仍走正常 API 和 epoch fencing；新策略绑定不接受旧 token。run/JWT 有效期不超过既有租约与策略期限，不续租或重开。
 
@@ -90,40 +97,57 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 
 ### 4.1 限定字段与坐标
 
-只查询报告的授权坐标（租户/generation、报告、工厂、产品线、关联 FMEA 头）及 `d4_root_cause`；不加载整份 ORM/业务 DTO、验证文本、验证 `source_ref` 或 FMEA 图。正文加载前在同一独立 RR/READ ONLY 事务中检查 UTF-8 字节预算：单字段最多64 KiB，超过整次拒绝。null/空字段不制造事实文本。
+只查询报告的授权坐标（租户/generation、报告、工厂、产品线、关联 FMEA 头）及 `d4_root_cause`；runtime 交付路径不加载整份 ORM/业务 DTO、验证文本、验证 `source_ref` 或 FMEA 图。正文加载前在同一独立 RR/READ ONLY 事务中检查 UTF-8 字节预算：单字段最多64 KiB，超过整次拒绝。null/空字段不制造事实文本。
 
-现有任务/运行授权链（任务创建、claim、运行身份重验、目录、控制）会读取整份 `CAPAEightD`；本片要求这些共享路径改为显式标量坐标读取，不预加载标题、团队及 D2–D8 正文。该改动不改变既有 CAPA 权限语义，只收窄读取列；正文 builder 另以有界查询只读单字段。
+共享任务/运行授权链当前会读取整份 `CAPAEightD`；本片要求这些共享路径改为显式标量坐标读取（现有调用方仅使用 `report_id/factory_id/product_line_code`），不预加载标题、团队及 D2–D8 正文。该改动不改变既有 CAPA 权限语义，只收窄读取列。正文 builder 只以有界查询读取坐标与单字段。
+
+来源节点版本允许以有界单节点 SQL（`jsonb_array_elements` 过滤节点 + 大小上限）读取；这不等于加载整份 FMEA 图到 ORM，规格的“不加载 FMEA 图”指不得加载整图/图正文。
 
 ### 4.2 来源证明的三个事实
 
 根因验证通过、员工声明了哪些来源、当前接收方有权读取，三者独立且不可互相替代：
 
 1. **验证事实**：`conclusion='passed'`、`root_cause_text` 去空白后等于当前字段、验证记录仍有效。它只证明业务验证通过。
-2. **来源声明**：员工在同一次验证创建动作中显式声明所列来源覆盖当前整段文字。未声明、已知有其他来源或无法确认时，验证仍按原规则保存，但不签发来源证明。
+2. **来源声明**：员工在同一次验证创建动作中显式声明所列来源覆盖当前整段文字。未声明或无法确认时，验证仍按原规则保存，但不签发来源证明。
 3. **接收方权限**：平台重新核验执行身份的当前来源模块权限/对象范围，以及插件长期授权和本次任务授权覆盖该派生文本投影；任一缺失即拒绝交付。
 
 ### 4.3 签发条件
 
-复用现有 `create_verification`（已要求 CAPA EDIT、父行锁及 `source_ref` 校验）作为唯一签发路径：
+复用现有 `create_verification`（已要求 CAPA EDIT、父行锁及 `source_ref` 校验）作为唯一签发路径，并新增一个可选请求字段 `source_declaration`（严格对象，只允许 `{"declares_complete_coverage": true}`；未知键/类型拒绝）。`VerificationCreate` 增加该字段不影响未使用它的既有调用。
 
-- 仅当创建请求同时满足：`conclusion='passed'`；携带显式来源完整性声明；携带已校验 `source_ref`（本版仅支持单个 FMEA `FailureCause` 节点）；`root_cause_text` 去空白后等于创建时的当前 `d4_root_cause`；产生者当前具备 FMEA VIEW 及该 FMEA 的工厂/产品线对象范围。
-- 同一事务写入一条**仅元数据**来源证明：报告、字段修订、租户代际、工厂/产品线、验证 ID、来源集合（模块、`fmea_id`、`cause_node_id`、节点内容 HMAC 版本、来源投影声明）、字段 HMAC、声明类型 `employee_declared_complete`、产生者与时间。不复制正文；验证记录文本本就是既有业务数据。
-- 声明存在但形状非法、缺 `source_ref`、产生者无来源读取权，或结论非 `passed` 时拒绝该请求，不写业务记录；文本不等于当前字段、未声明或无法确认时，验证照常保存但不签发证明，审计只记安全原因码。
-- 本版仅创建时签发；验证更新（含改为 `failed`、改绑来源、改文本）不补发，并按下节使既有证明失效。
-- 同一报告同一修订已有证明时：来源集合与声明完全相同则幂等不新增；不一致则不签发、记安全拒绝码且不覆盖旧证明。已签发的证明不因后续重复声明被扩大来源集合。
+语义统一如下：
+
+| 请求状态 | 结果 |
+|---|---|
+| 无 `source_declaration` | 按原规则保存验证，不签发证明 |
+| 声明形状非法/未知键/值非 true | 400 拒绝，不写业务记录 |
+| 有声明但缺 `source_ref`，或 `conclusion` 非 `passed` | 400 拒绝，不写业务记录 |
+| 有声明且 `source_ref` 形状/关联校验失败 | 400/403 拒绝，不写业务记录 |
+| 有声明但产生者当前无 FMEA VIEW 或来源对象范围 | 403 拒绝，不写业务记录 |
+| 声明与来源校验通过，但文本去空白后不等于当前 `d4_root_cause` | 保存验证，不签发证明；响应仅返回安全布尔 `source_proof_issued=false` 与审计原因码 |
+| 全部满足 | 同事务签发证明，`source_proof_issued=true` |
+
+同事务签发：
+
+- 记录该报告的字段修订（§4.4 的新表）；若报告尚无任何修订记录（迁移前历史数据），为当前文本建立首个修订并审计 `initial_revision_observed`；若已有修订记录但最新修订 HMAC 与当前文本不一致，视为存在未记录写入，拒绝签发（不保存业务记录）。
+- 写入一条**仅元数据**来源证明：报告、修订 ID/序号、租户代际、工厂/产品线、验证 ID 与验证版本、来源投影、`fmea_id`、`cause_node_id`、节点内容 HMAC、字段 HMAC、声明类型 `employee_declared_complete_v1`、产生者与时间。不复制正文；验证记录文本本就是既有业务数据。
+- 同一报告同一修订只保留一条 active 证明：新签发必须校验通过，旧 active 证明标记 superseded（记录 superseded_by/时间与安全审计），不删除、不扩大旧证明来源集合。该取代规则用于来源坐标、FMEA 关联或节点版本变化而文本修订未变的情况。
+- 本版仅创建时签发；验证更新（改结论、改绑 `source_ref` 等）不补发，并使既有证明失效（§4.4）。
 
 ### 4.4 失效条件
 
-- 字段增加不可复用的修订标识：`d4_root_cause_revision` 整数列，由数据库触发器在 `d4_root_cause` 实际变化时递增（public 与 tenant schema 各自的迁移）；插入默认0。证明绑定 `(report_id, revision)`，唯一约束每个报告每修订至多一条。
-- 任何写入口（普通更新、采纳追加、审核发现复制、导入等）改变文本都会递增修订；即使内容回到旧值（A→B→A），修订已不同，旧证明不能再次匹配。证明中的字段 HMAC 另绑定原文与坐标，二者同时校验。
-- 交付前验证记录必须仍存在、仍为 `passed`、文本仍等于当前字段、`source_ref` 仍与证明一致；改绑、改结论或删除均使证明不可用。
-- 历史证明保留为审计元数据，但永不复用于其他修订；不得从历史记录中挑一条仍能哈希匹配的记录放行。
+- **字段修订表**：新增 `capa_d4_root_cause_revisions`（仅元数据，不含正文），每行绑定报告、递增序号、字段 HMAC、记录者/时间与安全写入路径。`d4_root_cause` 每次实际变化都由对应服务写入路径在同一事务追加一行：普通更新（通用字段循环）、采纳追加、审核发现建单初始文本；未变化不追加。
+- **覆盖保证**：新增静态契约测试枚举应用代码中所有 `d4_root_cause` 赋值/更新点，任何写入点未调用修订记录辅助函数即失败；三条现有路径各有真实 RED→GREEN 集成测试。新增写入路径必须同时更新测试与记录调用。若代码审查发现未记录写入，视为安全缺陷而非兼容问题。
+- **不可复用**：A→B→A 会产生三个修订，旧证明绑定旧修订 ID，永不匹配最新修订；不得从历史修订/历史验证中挑选仍能哈希匹配的记录放行。
+- **验证版本**：证明绑定 `verification_version` = 域分离 HMAC（验证 ID、结论、规范化 `source_ref`、`root_cause_text`、`updated_at`）。交付前重算并要求一致；验证改结论（含 `failed`→`passed`）、改绑来源、改文本/时间都会使旧证明不可用，不能“复活”。当前无删除路由；若未来新增删除入口，必须同时使证明失效，本片不实现删除。
+- 证明与修订均保留为审计元数据，不因验证/报告状态变化被自动删除；交付只接受与最新修订一致且 active 的证明。
 
 ### 4.5 交付条件
 
 交付前按安装→任务→运行锁顺序重新获取当前身份后，同时满足：
 
-- 当前字段修订与证明一致，字段 HMAC 匹配，来源节点内容 HMAC 版本与证明一致，且节点仍为原 FMEA 的 `FailureCause`、工厂/产品线未变；
+- 当前字段文本 HMAC 等于该报告最新修订的 HMAC，且存在与最新修订一致、状态 active 的来源证明；
+- 证明绑定的验证记录仍存在、仍为 `passed`、文本等于当前字段、`source_ref` 与证明一致、验证版本 HMAC 一致；节点仍为原 FMEA 的 `FailureCause`，节点内容 HMAC 与证明一致，工厂/产品线未变；
 - 当前 CAPA 权限、租户代际、运行/安装 epoch、策略期限与授权坐标仍有效；
 - 执行身份对声明的来源投影具备当前 `VIEW` 权限及对象范围；执行身份不是插件，插件不获得 FMEA 查询能力或原始 FMEA 数据；
 - 插件长期授权与本次任务派生授权均覆盖正文 capability，且对象/工厂/产品线范围精确匹配；旧 summary 授权不能替代；
@@ -133,7 +157,7 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 
 ### 4.6 确定性遮盖与分类
 
-复用既有确定性格式遮盖函数，不改变其匹配/重叠/Unicode语义。可选 `redaction_terms` 只来自本策略，默认空列表；沿用最多50词、每词1–100字符、总UTF-8最多8 KiB、规范重复/控制字符拒绝等既有规则。所有词串按字面处理，`A+B` 等看似正则的内容不会执行为正则或模板。插件不能提供或修改词表，不新增词表 UI/管理 API。词表不下发接收器，不进 token、审计或错误消息。
+复用既有确定性格式遮盖函数与 `rule_version`（`capa.d4.redaction.v1`），不改变其匹配/重叠/Unicode语义。可选 `redaction_terms` 只来自本策略，默认空列表；沿用最多50词、每词1–100字符、总UTF-8最多8 KiB、规范重复/控制字符拒绝等既有规则。所有词串按字面处理，`A+B` 等看似正则的内容不会执行为正则或模板。插件不能提供或修改词表，不新增词表 UI/管理 API。词表不下发接收器，不进 token、审计或错误消息。
 
 0命中或空词表也不代表完整脱敏；姓名、企业或商业机密可能仍在。分类永远 restricted，不产生降敏批准，不提供 raw 正文变体。旧员工预览 `external_delivery_allowed=false` 合同不改；新交付 DTO 单独表达精确本地接收许可，不能靠翻转旧字段变成公开发布。
 
@@ -145,40 +169,35 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 
 使用由服务端密钥派生、域分离的 HMAC-SHA256：
 
-- `source_version` 绑定租户/generation、报告/工厂/产品线、当前字段修订及原文；不复用元数据 digest、D8 已审核心版本或员工预览版本。
-- `source_proof_digest` 绑定证明 ID、修订、字段 HMAC、来源集合（模块、对象、节点、节点版本）与声明类型；不暴露节点正文或无密钥摘要。
-- `policy_binding` 绑定精确条目、规则版本及规范词表；不把词表或其摘要放进 token/公开诊断。
+- `source_version` 绑定租户/generation、报告/工厂/产品线、最新修订序号及原文；不复用元数据 digest、D8 已审核心版本或员工预览版本。
+- `source_proof_digest` 绑定证明 ID、修订、字段 HMAC、来源集合（模块、`fmea_id`、`cause_node_id`、节点 HMAC、来源投影）、声明类型与验证版本；不暴露节点正文或无密钥摘要。
+- `policy_binding` 绑定精确策略条目、规则版本 `capa.d4.redaction.v1` 及规范词表；不把词表或其摘要放进 token/公开诊断。
 - `projection_digest` 绑定专用 projection、source_version、source_proof_digest、policy_binding、规则/固定标签及候选字段。以上均为不透明的64字符十六进制值，接收器不自行重算原文或据此授权。
 
-先确定收据 UUID/生成时间，构造并校验最终响应字节、256 KiB编码预算，再按既有安装→任务→运行锁顺序重新获取当前身份。最后复核 capability、来源证明有效性、来源与接收方权限、精确投递许可、租户代际、期限/epoch、当前字段修订与授权坐标；源变大时仍先预算再加载。不得在原 RR/旧 ORM 缓存中假装完成“当前”复核。
+先确定收据 UUID/生成时间，构造并校验最终响应字节、256 KiB编码预算，再按既有安装→任务→运行锁顺序重新获取当前身份。最后复核 capability、最新修订与 active 证明、验证版本、来源节点 HMAC、来源与接收方权限、精确投递许可、租户代际、期限/epoch、当前字段文本 HMAC 与授权坐标；源变大时仍先预算再加载。不得在原 RR/旧 ORM 缓存中假装完成“当前”复核。
 
-在最终复核前已提交的撤权、文本/来源变化或不确定性导致整次拒绝，不返回正文/摘要/命中数/来源计数。复核通过后才登记收据及安全审计并提交，提交失败不交付正文。成功审计记录 `release_committed`，不声称证明接收器收到了字节。
+在最终复核前已提交的撤权、文本/来源变化或不确定性导致整次拒绝，不返回正文/摘要/命中数/来源计数。复核通过后才登记受限收据及安全审计并提交，提交失败不交付正文。成功审计记录 `release_committed`，不声称证明接收器收到了字节。
 
 ### 5.2 只含本片字段的响应
 
-新 DTO 不复用 `CapaContextProjection`，包含 protocol、run_id/task_id、report_id、recipient_installation_id、plugin_version、receipt_id、生成时间，以及：
+新 DTO 不复用 `CapaContextProjection`，包含 protocol、run_id/task_id、报告 ID、recipient_installation_id、plugin_version、受限收据 ID、生成时间，以及：
 
 - projection_id、`data_class=restricted`、`projection=masked`、`candidate_kind=redaction_candidate`；
 - `declassification_status=not_approved`、`source_proof=employee_declared_complete_v1`、`source_authorization=current`、`model_delivery_allowed=false`、`delivery_scope=local_plugin_only`；
 - rule_version、source_version、source_proof_digest、policy_binding、projection_digest；
 - 单个字段名 `d4_root_cause` 和候选 `text`（严格字符串或 null）。
 
-不含原文、词表、验证记录、FMEA/附件内容、标题、人员、来源对象 ID 或节点内容。不含可选择的投递 URL/路径。接收器严格检查必要字段/类型、UUID、aware时间、run/task/report/recipient绑定及固定安全枚举；重复JSON键、NaN/Infinity、坏UTF-8/JSON或未知关键标签拒绝，无 raw fallback。未知新增非安全字段丢弃，不显示或保留原始响应。响应使用 JSON 与 no-store，不注入浏览器组件。
+不含原文、词表、验证记录、FMEA/附件内容、标题、人员、来源对象 ID（`fmea_id`/`cause_node_id`）或节点内容；仅含本地任务目标的报告 ID。不含可选择的投递 URL/路径。接收器严格检查必要字段/类型、UUID、aware时间、run/task/report/recipient绑定及固定安全枚举；重复JSON键、NaN/Infinity、坏UTF-8/JSON或未知关键标签拒绝，无 raw fallback。未知新增非安全字段丢弃，不显示或保留原始响应。响应使用 JSON 与 no-store，不注入浏览器组件。
 
-## 6. 平台收据、来源证明元数据、审计与迁移
+## 6. 平台收据、证明/修订表、审计与迁移
 
-复用 `AgentProjectionReceipt`，只演进数据分类约束，不新增候选或正文表：
-
-- 专用正文 projection 必须 `data_class='restricted'`；其他 projection 延续 internal 约束，不能将正文 projection 伪装为 internal。
-- 保留 task/run、租约 epoch、tenant generation、source CAPA、projection ID/digest、创建时间等既有列。正文/词表/候选片段不落库。
-- 安全 AuditLog 绑定收据、当前执行人/坐标、规则、来源证明摘要、接收方和 release_committed。授权失败不输出内容或派生计数；诊断仅固定安全码，不带原始异常/响应/词表。
-- 本片的新正文收据不得用于旧元数据 event/result/checkpoint 来源证明；旧消费者显式检查 projection/data_class，混用在平台写入前拒绝，不仅依赖 FK。正文接收器不保存分析结果或checkpoint。
-
-来源证明使用独立元数据表（例如 `capa_d4_root_cause_source_proofs`）：报告、字段修订、租户代际、工厂/产品线、验证 ID、来源集合与节点版本 HMAC、字段 HMAC、声明类型、产生者/时间；每报告每修订唯一，验证记录删除时级联删除证明。表内不含正文。
-
-新增手写 public/tenant 前向迁移，分别接续当前合并 public head 与 `tv006_agent_read_tasks`；实现时重新核唯一head。迁移包含字段修订列、递增触发器、来源证明表及受限收据约束；冻结 tv001–tv005/基线快照不改，所有可升级 tenant 走原维护/代际与 parity 流程。没有降级清理正文/来源证据的便利操作；若恢复旧 internal-only 约束会丢失或排斥已存在正文收据，downgrade必须拒绝，不能删记录“修复”。本片不认证生产回退。
-
-沿用现有证据保留/来源删除规则。GET创建收据/审计可能影响证据保留，不能宣传为零平台副作用；仍不得修改 CAPA/D8/验证事实或 embedding/outbox。
+- **受限投影收据使用新表**（例如 `agent_restricted_projection_receipts`），只允许 `data_class='restricted'`；保留 task/run、租约 epoch、tenant generation、来源 CAPA、projection ID/digest、创建时间等列。既有 internal 收据表不改，旧 event/result/checkpoint 来源消费者继续只认 internal 收据；由于表与类型分离，正文收据天然不能混入旧链。正文/词表/候选片段不落库。
+- **来源修订表** `capa_d4_root_cause_revisions`：报告、序号、字段 HMAC、记录者/时间、安全写入路径；每报告序号唯一；仅元数据。应用写入路径负责追加（§4.4）。
+- **来源证明表** `capa_d4_root_cause_source_proofs`：报告、修订 ID/序号、租户代际、工厂/产品线、验证 ID/版本、来源投影、`fmea_id`/`cause_node_id`/节点 HMAC、字段 HMAC、声明类型、状态 active/superseded、产生者/时间；同一报告同一修订最多一条 active（partial unique index）。
+- 安全 AuditLog 绑定受限收据、当前执行人/坐标、规则、来源证明摘要、接收方和 `release_committed`。授权失败不输出内容或派生计数；诊断仅固定安全码，不带原始异常/响应/词表。
+- 迁移只新增表，不修改冻结基线表、不加触发器、不改既有收据表。新增手写 public 迁移接续 `20261102_agent_mainline_merge`；新增 tenant delta 接续 `tv006_agent_read_tasks`。同时必须更新租户迁移注册与契约测试：`tenant_migrator` 的当前/前驱 revision 常量（[tenant_migrator.py:19-24](../../../backend/app/services/tenant_migrator.py#L19-L24)）、[tenant_schema_diff](../../../backend/app/services/tenant_schema_diff.py#L163-L190) 的前驱/新增对象集合、固定 head/parity 断言（如 `test_agent_mainline_merge_graph.py`、`test_tenant_schema_parity.py`）。冻结 tv001–tv006 与基线快照不改；所有可升级 tenant 走原维护/代际与 parity 流程。
+- 没有降级清理正文/来源证据的便利操作；downgrade 必须拒绝丢失证据的路径，不能删记录“修复”。本片不认证生产回退。
+- 沿用现有证据保留/来源删除规则。GET/交付创建收据/审计可能影响证据保留，不能宣传为零平台副作用；仍不得修改 CAPA/D8/验证事实或 embedding/outbox。
 
 ## 7. 固定接收器闭环、服务端消息边界与错误语义
 
@@ -189,7 +208,7 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 3. 读取正文一次，完整校验响应标签、绑定、预算及收据后，才ACK这条实际受理的启动请求。
 4. 尝试 `finish(completed)` 一次；新输入或当前授权导致拒绝时不追加ACK、不循环、不绕过。完成仅指本次平台交付流程结束，不代表根因正确或业务批准。
 
-**服务端消息边界**：对该专用 profile（由服务端准入判定，不由请求声明），`claim` 在最终身份刷新后、首次消息状态/审计写入前，`history` 在 DTO 返回前，`ack` 在实际批次行检查后、推进接受水位前，逐条校验消息内容等于固定字面量；任一不符整批固定拒绝，不过滤、不跳过、不改 batch/水位，错误不含原文。覆盖重试批次、旧 epoch 重领及已接受历史。其他 Agent 队列语义不变；接收器侧比对只作纵深防御。
+**服务端消息边界**：对该专用 profile（由服务端准入判定，不由请求声明），`claim` 在最终身份刷新后、首次消息状态/审计写入前，`history` 在 DTO 返回前，`ack` 在实际批次行检查后、推进接受水位前，逐条校验消息内容等于固定字面量；任一不符整批固定拒绝，不过滤、不跳过、不改 batch/水位，错误不含原文。覆盖重试批次、旧 epoch 重领及已接受历史。其他 Agent 队列语义不变；接收器侧比对只作纵深防御。新入口与消息检查只在正文开关、正文 profile 及真实回环条件下生效。
 
 平台消息仍是 restricted/raw 的既有运行输入；只为该固定请求保留必要受控消息流程，不提供 raw CAPA 正文路由。claim/消息领取/ACK/收据/审计/finish均是明确的平台写入，不是业务事实写入。
 
@@ -205,21 +224,23 @@ finish一旦可能发送，缺完整有效确认（含超限、断连、JSON/sch
 
 先规格/质量复核与TDD，再按层证明，不能用fixture策略替代生产隔离结论：
 
-1. 默认关闭/非dev/非真实回环/伪造forwarded、坏/过期/通配策略、错key/version/hash/epoch/代际、缺grant等均拒绝。关闭优先级以零租户解析/正文读取/DB连接观察验证。
-2. 正常admin grant＋用户固定消息任务＋真实lifespan策略＋独立固定执行物，经真实TCP贯通claim/capability/启动请求/正文/ACK/finish；不替换canonical DIRECT或依赖注入绕过来源权限。
+1. 默认关闭/非dev/非真实回环/伪造forwarded、坏/过期/通配策略、错key/version/hash/epoch/代际、缺grant等均拒绝。关闭优先级以零租户解析/正文读取/DB连接观察验证；正文开关与旧 metadata 开关互不影响，新路由已登记且未登记/关闭时 404 先于认证与正文。
+2. 正常admin grant＋用户固定消息任务＋真实lifespan双策略槽＋正文profile准入＋独立固定执行物，经真实TCP贯通claim/capability/启动请求/正文/ACK/finish；不替换canonical DIRECT或依赖注入绕过来源权限。
 3. 只读SQL见证证明共享授权链未预加载标题/D1–D8正文，正文查询只读坐标与单字段；原文和CAPA/D8/验证/outbox/embedding快照不变，仅预期平台记录新增。
-4. 来源证明：未声明/无`source_ref`/声明非`passed`/文本不等于当前字段时不签发但验证保存；产生者无FMEA VIEW或无范围时整请求拒绝且无业务写入；签发后A→B→A、普通改写、采纳追加均使旧证明不可用；验证改`failed`/改绑来源/改文本/删除使证明失效；不得从历史匹配记录放行；每报告每修订唯一，重复声明一致幂等、冲突拒绝。
-5. 交付：执行身份缺来源VIEW、来源节点消失/改类型/版本变化、工厂产品线变化、插件长期授权或任务授权缺正文投影、仅旧summary授权、错误profile/安装/epoch/期限，均拒绝且无正文/摘要/计数泄漏；正文安装无需旧summary grant，旧元数据安装不能获得正文。
-6. 服务端消息边界：队列写入非字面量敏感哨兵，分别走首次领取、重领和历史读取，响应中无哨兵，批次/水位/成功审计无变化；ACK异常批次同样拒绝。其他队列语义回归不变。
-7. 空字段、64 KiB边界、编码膨胀、Unicode/词表边界、重复键/NaN/坏JSON/错标签/错绑定/慢滴/超时都不截断降级；已接收后的撤权不能被测试写成安全擦除承诺。
-8. DB正反约束/public与tenant升级/parity、字段修订触发器、旧metadata仍internal、新正文必须restricted、正文收据混入旧结果/checkpoint等拒绝路径均测试；不新增发布/快照/清理表或作业。
-9. stdout/stderr/argv/env/文件/访问日志/追踪/审计/安全收据中不得出现正文/词表/凭据/节点哨兵；验证固定数字回环、无重定向/代理/隐式模型调用。此为可信固定字节实测，不泛化为OS sandbox。
-10. 故障注入验证ACK/finish不循环；finish已提交但响应损坏时，父侧观察真实终态、子侧unknown且调用一次，不能靠猜失败或重新发送通过。
-11. 原metadata worker/hash/profile、SDK十方法及旧CLI/浏览器保护回归；重新收集当前节点并冻结源码，运行SDK/backend/browser/前端组合门禁，逐层区分实际pass/skip/xfail/xpass/warnings，不能套旧3881等数字。
-12. 全部required报告/job收齐后核精确owner/完整资源ID/唯一卷/零其他client/测试进程，只清理本片新建资源。SDK片旧PG已删除，不借用业务/生产库，不停止其他服务或下载/升级共享依赖。
+4. 来源证明签发语义逐项验证：无声明/声明非法/缺source_ref/非passed/无FMEA VIEW/文本不等/已有最新修订不一致/迁移前无修订等各分支与 §4.3 表完全一致；`source_proof_issued` 不泄漏正文或原因细节以外的敏感信息。
+5. 修订覆盖：普通更新、采纳追加、审核发现建单三条真实路径均产生修订并失效旧证明；A→B→A 三修订不复用；静态契约测试能捕获未记录的新写入点；fields未变不新增修订。
+6. 失效与活性：验证改 `failed`、改绑来源、改文本/时间使证明不可用且不能复活；来源坐标/节点版本变化后新签发可 supersede 旧 active 证明（旧 proof 保留、不可用）；同一修订并发重复签发幂等/冲突安全；无删除路由，未来删除不作本片承诺。
+7. 交付：执行身份缺来源VIEW、来源节点消失/改类型/节点HMAC变化、工厂产品线变化、插件长期授权或任务授权缺正文投影、仅旧summary授权、错误profile/安装/epoch/期限，均拒绝且无正文/摘要/计数泄漏；正文安装无需旧summary grant，旧元数据安装不能获得正文；正文profile只要求正文能力，旧metadata仍只要求summary。
+8. 服务端消息边界：队列写入非字面量敏感哨兵，分别走首次领取、重领和历史读取，响应中无哨兵，批次/水位/成功审计无变化；ACK异常批次同样拒绝；旧profile队列语义回归不变。
+9. 空字段、64 KiB边界、编码膨胀、Unicode/词表边界、重复键/NaN/坏JSON/错标签/错绑定/慢滴/超时都不截断降级；已接收后的撤权不能被测试写成安全擦除承诺。
+10. DB迁移：只新增表，不修改冻结基线表/触发器/既有收据表；public/tenant升级与parity通过，租户revision注册与前驱集合、固定head/parity断言同步更新；受限收据只能restricted、旧internal链拒绝混入。
+11. stdout/stderr/argv/env/文件/访问日志/追踪/审计/安全收据中不得出现正文/词表/凭据/节点哨兵；验证固定数字回环、无重定向/代理/隐式模型调用。此为可信固定字节实测，不泛化为OS sandbox。
+12. 故障注入验证ACK/finish不循环；finish已提交但响应损坏时，父侧观察真实终态、子侧unknown且调用一次，不能靠猜失败或重新发送通过。
+13. 原metadata worker/hash/profile、SDK十方法及旧CLI/浏览器保护回归；重新收集当前节点并冻结源码，运行SDK/backend/browser/前端组合门禁，逐层区分实际pass/skip/xfail/xpass/warnings，不能套旧3881等数字。
+14. 全部required报告/job收齐后核精确owner/完整资源ID/唯一卷/零其他client/测试进程，只清理本片新建资源。SDK片旧PG已删除，不借用业务/生产库，不停止其他服务或下载/升级共享依赖。
 
 ## 9. 取舍、阶段签收与实施边界
 
-选择独立接收器而非升级元数据插件，代价是额外固定执行物/本地策略；收益是旧受信字节、接口与权限不被静默扩权。选择既有验证动作＋显式来源声明＋字段修订绑定，而不是新建审批或全局血缘；代价是来源声明依赖员工业务事实、FMEA 改动会使交付要求重新验证，收益是不复制正文、不放开历史未知来源。平台收据/来源证明是明确的受限元数据演进，不是降敏或业务账本。
+选择独立接收器而非升级元数据插件，代价是额外固定执行物/本地策略；收益是旧受信字节、接口与权限不被静默扩权。选择既有验证动作＋显式来源声明＋新表修订绑定，而不是新建审批、全局血缘或对冻结基线表加列/触发器；代价是来源声明依赖员工业务事实、需要应用写入点契约测试、FMEA 改动会使交付要求重新验证，收益是不复制正文、不放开历史未知来源且不破坏租户冻结基线合同。平台收据/来源证明/修订表是明确的受限元数据演进，不是降敏或业务账本。
 
-本文待用户再次书面审阅；通过后才编写有序实施计划，记录新文件/共享文件写scope、public/tenant迁移依赖、RED/GREEN、两阶段复核和自有资源预算。当前没有实现承诺或测试通过结论；不更新main、不push/PR/发包/部署、不开生产/模型/R5能力。后续需要任意插件、模型、其他正文/附件或OS级隔离时，必须另行评审，不从本片策略外推。
+本文待用户再次书面审阅；通过后才编写有序实施计划，记录新文件/共享文件写scope、public/tenant迁移依赖、RED→GREEN、两阶段复核和自有资源预算。当前没有实现承诺或测试通过结论；不更新main、不push/PR/发包/部署、不开生产/模型/R5能力。后续需要任意插件、模型、其他正文/附件或OS级隔离时，必须另行评审，不从本片策略外推。
