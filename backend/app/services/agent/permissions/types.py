@@ -25,6 +25,7 @@ class CapabilitySpec:
     projection: str
     approver_level: PermissionLevel = PermissionLevel.APPROVE
     self_approval_allowed: bool = False
+    target_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class AccessAttempt:
     object_id: UUID
     product_line_code: str
     now: datetime
+    catalog_profile: str = "baseline"
     identity_bypass_row_level_security: bool = False
 
 

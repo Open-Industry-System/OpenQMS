@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
+from app.config import settings
 from app.core.factory_scope import check_factory_access
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.database import get_db
@@ -280,6 +281,8 @@ async def trigger_rebuild(
     scope: RequestScope = Depends(get_request_scope),
 ):
     """触发全量重建 (admin only)。异步执行，秒回防超时。"""
+    if settings.TENANT_MODE != "single":
+        raise HTTPException(status_code=503, detail="Global graph rebuild unavailable in multi-tenant mode")
     level = await get_user_permission(scope.user, Module.KNOWLEDGE_GRAPH, db)
     if level < PermissionLevel.ADMIN:
         raise HTTPException(status_code=403, detail="Admin access required")

@@ -14,7 +14,7 @@ interface AuthState {
   fetchUser: () => Promise<void>;
   setUser: (user: User | null) => void;
   setCurrentFactoryId: (factoryId: string | null) => void;
-  tryRefreshToken: () => Promise<string | null>;
+  tryRefreshToken: (isCurrent?: () => boolean, signal?: AbortSignal) => Promise<string | null>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -82,18 +82,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ currentFactoryId: factoryId });
   },
 
-  tryRefreshToken: async () => {
+  tryRefreshToken: async (isCurrent, signal) => {
     const refresh_token = localStorage.getItem("refresh_token");
     if (!refresh_token) return null;
+    const owns = () => !isCurrent || (isCurrent() && localStorage.getItem("refresh_token") === refresh_token);
+    if (!owns()) return null;
     try {
-      const resp = await apiRefreshToken(refresh_token);
+      const resp = await (isCurrent ? apiRefreshToken(refresh_token, signal) : apiRefreshToken(refresh_token));
+      if (!owns()) return null;
       localStorage.setItem("access_token", resp.access_token);
       localStorage.setItem("refresh_token", resp.refresh_token);
       set({ token: resp.access_token });
       return resp.access_token;
     } catch {
-      // Refresh failed — clear tokens and let caller handle redirect
-      get().logout();
+      // Only the originating live CAPA session may clear credentials on failure.
+      // Calls without an owner retain the existing refresh policy.
+      if (owns()) get().logout();
       return null;
     }
   },

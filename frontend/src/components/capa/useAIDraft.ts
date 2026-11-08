@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { generateDraft } from "../../api/capaDraft";
+import { useCapaCredentialIdentity, useCapaViewRequests } from "./useCapaViewRequests";
 import type { DraftResponse, DraftFormat } from "../../types";
 
 export type ErrorLevel = "warning" | "error";
@@ -20,16 +21,24 @@ export interface UseAIDraftResult {
 
 export function useAIDraft(): UseAIDraftResult {
   const { t } = useTranslation("capa");
+  const credential = useCapaCredentialIdentity();
+  const requests = useCapaViewRequests(credential.identity, credential.current);
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState<DraftResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorLevel, setErrorLevel] = useState<ErrorLevel>("error");
   const [tempUnavailable, setTempUnavailable] = useState(false);
+  const requestRef = useRef<ReturnType<typeof requests.begin> | null>(null);
   const requestIdRef = useRef<string>("");
+  useEffect(() => () => { requestRef.current?.cancel(); requestIdRef.current = ""; }, []);
   const undoStack = useRef<Record<string, string>>({});
 
   const generate = useCallback(
     async (reportId: string, step: string, format: DraftFormat) => {
+      requestRef.current?.cancel();
+      const request = requests.begin();
+      requestRef.current = request;
+      if (!request.current()) return;
       setLoading(true);
       setError(null);
       setTempUnavailable(false);
@@ -42,12 +51,12 @@ export function useAIDraft(): UseAIDraftResult {
         const resp = await generateDraft(reportId, step, {
           format,
           request_id: reqId,
-        });
+        }, request.signal);
         // Race-condition guard: ignore stale responses
-        if (requestIdRef.current !== reqId) return;
+        if (!request.current() || requestIdRef.current !== reqId) return;
         setDraft(resp);
       } catch (e: unknown) {
-        if (requestIdRef.current !== reqId) return;
+        if (!request.current() || requestIdRef.current !== reqId) return;
         const err = e as { response?: { data?: { detail?: string }; status?: number } };
         const status = err.response?.status;
 
@@ -75,20 +84,27 @@ export function useAIDraft(): UseAIDraftResult {
           setErrorLevel("error");
         }
       } finally {
-        if (requestIdRef.current === reqId) {
+        if (request.current() && requestIdRef.current === reqId) {
           setLoading(false);
         }
+        request.finish();
       }
     },
-    [t]
+    [t, requests]
   );
 
   const clear = useCallback(() => {
+    requestRef.current?.cancel();
+    setLoading(false);
     setDraft(null);
     setError(null);
     setTempUnavailable(false);
     requestIdRef.current = "";
   }, []);
+
+  useEffect(() => {
+    clear(); undoStack.current = {};
+  }, [requests, clear]);
 
   const saveUndo = useCallback((step: string, snapshot: string) => {
     undoStack.current[step] = snapshot;

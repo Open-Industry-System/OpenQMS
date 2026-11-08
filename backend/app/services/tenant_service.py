@@ -1,20 +1,12 @@
-import logging
-import subprocess
-import sys
 import uuid
-from contextlib import asynccontextmanager
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import Module
 from app.core.security import hash_password
-from app.core.tenant_utils import set_search_path_sql, slug_to_schema_name
-from app.database import async_session
 from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
-
-logger = logging.getLogger(__name__)
 
 
 # Module values used for the initial permission matrix seeded into every tenant.
@@ -85,35 +77,6 @@ _ROLES = [
 ]
 
 
-def _run_alembic_upgrade(schema_name: str) -> bool:
-    """Run alembic upgrade tenant@head for a specific tenant schema."""
-    cmd = [
-        sys.executable, "-m", "alembic",
-        "-x", f"schema={schema_name}",
-        "upgrade", "tenant@head",
-    ]
-    logger.info("Running: %s", " ".join(cmd))
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        logger.error("Alembic failed for %s:\n%s", schema_name, result.stderr)
-        return False
-    logger.info("Successfully migrated %s", schema_name)
-    return True
-
-
-@asynccontextmanager
-async def _tenant_schema_session(schema_name: str):
-    """Open a session whose search_path is set to the given tenant schema."""
-    async with async_session() as session:
-        await session.execute(text(set_search_path_sql(schema_name)))
-        try:
-            yield session
-        finally:
-            await session.rollback()
-            await session.execute(text('RESET search_path'))
-            await session.close()
-
-
 async def _seed_roles_and_permissions(tenant_db: AsyncSession):
     """Create the standard role definitions and permission matrix."""
     from app.models.role import RoleDefinition, RolePermission
@@ -138,7 +101,7 @@ async def _seed_roles_and_permissions(tenant_db: AsyncSession):
         for module, level in module_levels.items():
             tenant_db.add(RolePermission(role_id=role_id, module=module, permission_level=level))
 
-    await tenant_db.commit()
+    await tenant_db.flush()
 
 
 async def _seed_default_factory_and_product_line(tenant_db: AsyncSession):
@@ -163,7 +126,7 @@ async def _seed_default_factory_and_product_line(tenant_db: AsyncSession):
         factory_id=default_factory.id,
     )
     tenant_db.add(product_line)
-    await tenant_db.commit()
+    await tenant_db.flush()
 
     return default_factory, product_line
 
@@ -199,7 +162,7 @@ async def _seed_first_admin(
 
     tenant_db.add(UserFactory(user_id=admin.user_id, factory_id=factory_id))
     tenant_db.add(UserProductLine(user_id=admin.user_id, product_line_code=product_line_code))
-    await tenant_db.commit()
+    await tenant_db.flush()
 
     return admin
 
@@ -207,64 +170,11 @@ async def _seed_first_admin(
 class TenantService:
     @staticmethod
     async def provision(db: AsyncSession, request: TenantCreateRequest) -> Tenant:
-        """Provision a new tenant: create schema, run migrations, seed data."""
-        schema_name = slug_to_schema_name(request.slug)
-        subdomain = request.subdomain or request.slug
+        """Register once and provision through the owner-bound coordinator.
 
-        # Pre-check uniqueness to avoid IntegrityError 500s during races
-        existing = (
-            await db.execute(
-                select(Tenant).where(
-                    or_(
-                        Tenant.slug == request.slug,
-                        Tenant.schema_name == schema_name,
-                        Tenant.subdomain == subdomain,
-                    )
-                )
-            )
-        ).scalar_one_or_none()
-        if existing:
-            raise ValueError("Tenant slug, schema, or subdomain already exists")
+        db is the platform-admin session supplied by the API. The coordinator
+        owns its own short-lived platform transactions and exclusive owner.
+        """
+        from app.services.tenant_migrator import provision_new
 
-        tenant = Tenant(
-            name=request.name,
-            slug=request.slug,
-            schema_name=schema_name,
-            subdomain=subdomain,
-            plan=request.plan or "free",
-            status="provisioning",
-            provisioning_step="create_schema",
-        )
-        db.add(tenant)
-        await db.commit()
-        await db.refresh(tenant)
-
-        try:
-            # Step 1: Create schema
-            await db.execute(text(f'CREATE SCHEMA "{schema_name}"'))
-            await db.commit()
-            tenant.provisioning_step = "run_migrations"
-
-            # Step 2: Run tenant migrations to create business tables
-            migrations_ok = _run_alembic_upgrade(schema_name)
-            if not migrations_ok:
-                raise RuntimeError(f"Alembic migration failed for schema {schema_name}")
-            tenant.provisioning_step = "seed_data"
-
-            # Step 3: Seed initial tenant data
-            async with _tenant_schema_session(schema_name) as tenant_db:
-                await _seed_roles_and_permissions(tenant_db)
-                factory, product_line = await _seed_default_factory_and_product_line(tenant_db)
-                await _seed_first_admin(tenant_db, request, factory.id, product_line.code)
-
-            tenant.status = "active"
-            tenant.provisioning_step = None
-            await db.commit()
-        except Exception as e:
-            tenant.status = "failed"
-            tenant.provisioning_error = str(e)
-            await db.commit()
-            logger.error("Tenant provisioning failed for %s: %s", request.slug, e)
-            raise
-
-        return tenant
+        return await provision_new(request)

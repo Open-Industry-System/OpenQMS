@@ -1,8 +1,8 @@
 import client from "./client";
 import type { DraftRequest, DraftResponse, DraftCapabilitiesResponse, AIDraftCapabilitiesResponse } from "../types";
 
-export async function getAIDraftCapabilities(): Promise<AIDraftCapabilitiesResponse> {
-  const resp = await client.get("/capa/capabilities");
+export async function getAIDraftCapabilities(signal?: AbortSignal): Promise<AIDraftCapabilitiesResponse> {
+  const resp = await client.get("/capa/capabilities", { signal });
   return resp.data;
 }
 
@@ -16,8 +16,9 @@ export async function getDraftCapabilities(
 export async function generateDraft(
   reportId: string,
   step: string,
-  data: DraftRequest
+  data: DraftRequest,
+  signal?: AbortSignal,
 ): Promise<DraftResponse> {
-  const resp = await client.post(`/capa/${reportId}/draft/${step}`, data);
+  const resp = await client.post(`/capa/${reportId}/draft/${step}`, data, { signal });
   return resp.data;
 }

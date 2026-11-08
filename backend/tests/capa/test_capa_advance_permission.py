@@ -17,6 +17,7 @@ from app.main import app
 from app.models.capa import CAPAEightD
 from app.models.role import RolePermission
 from tests.conftest import _scope_for
+from tests.capa.outcome_review_support import review_expectation, prepare_decision_material
 
 pytestmark = pytest.mark.requires_db
 
@@ -117,9 +118,10 @@ async def test_manager_can_approve_d8_closure(
 
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "D8_APPROVAL_PENDING")
     ac = await perm_client_builder(capa_level=4)  # APPROVE
+    await prepare_decision_material(db, capa, admin_user.user_id)
     async with ac:
         resp = await ac.post(f"/api/capa/{capa.report_id}/advance",
-                             json={"target_state": "D8_CLOSURE"})
+                             json={"target_state": "D8_CLOSURE", **await review_expectation(db, capa)})
     assert resp.status_code == 200, resp.text
 
 

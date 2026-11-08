@@ -149,8 +149,8 @@ describe("D3ContainmentPanel", () => {
     await waitFor(() => expect(screen.queryByTestId("d3-generate-report")).not.toBeInTheDocument());
     expect(screen.queryByTestId("d3-execution-add")).not.toBeInTheDocument();
     expect(screen.queryByTestId("d3-generate-advice")).not.toBeInTheDocument();
-    expect(getD3Report).toHaveBeenLastCalledWith("capa-1", historicalRunId);
-    expect(getD3Adoptions).toHaveBeenLastCalledWith("capa-1", historicalRunId);
+    expect(getD3Report).toHaveBeenLastCalledWith("capa-1", historicalRunId, expect.any(AbortSignal));
+    expect(getD3Adoptions).toHaveBeenLastCalledWith("capa-1", historicalRunId, expect.any(AbortSignal));
 
     // Switch back to current run
     fireEvent.mouseDown(selector);
@@ -159,8 +159,8 @@ describe("D3ContainmentPanel", () => {
 
     await waitFor(() => expect(screen.queryByTestId("d3-generate-report")).toBeInTheDocument());
     expect(screen.getByTestId("d3-execution-add")).toBeInTheDocument();
-    expect(getD3Report).toHaveBeenLastCalledWith("capa-1", currentRunId);
-    expect(getD3Adoptions).toHaveBeenLastCalledWith("capa-1", currentRunId);
+    expect(getD3Report).toHaveBeenLastCalledWith("capa-1", currentRunId, expect.any(AbortSignal));
+    expect(getD3Adoptions).toHaveBeenLastCalledWith("capa-1", currentRunId, expect.any(AbortSignal));
   });
 
   it("shows advice card and generate button when no advice exists", async () => {

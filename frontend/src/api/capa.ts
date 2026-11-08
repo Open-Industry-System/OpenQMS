@@ -1,3 +1,4 @@
+import type { CapaOutcomeReview } from "../types/capaOutcomeReview";
 import client from "./client";
 import { message } from "antd";
 import type {
@@ -9,6 +10,8 @@ import type {
   D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate, D3AdviceResponse, SupplierSCAR,
   SinkKnowledgeResponse, KnowledgeSinkOutcomeDetail,
 } from "../types";
+
+const signalOptions = (signal?: AbortSignal) => signal ? [{ signal }] as const : [] as const;
 
 export class RecommendationBlockedError extends Error {
   detail: { blocked: true; reason: string; stages: StageRun[] };
@@ -30,8 +33,8 @@ export async function listCAPAs(params: {
   return resp.data;
 }
 
-export async function getCAPA(id: string): Promise<CAPAReport> {
-  const resp = await client.get(`/capa/${id}`);
+export async function getCAPA(id: string, signal?: AbortSignal): Promise<CAPAReport> {
+  const resp = await client.get(`/capa/${id}`, { signal });
   return resp.data;
 }
 
@@ -44,18 +47,20 @@ export async function triggerScar(
     due_date?: string | null;
     affected_batches?: string[];
   },
+  signal?: AbortSignal,
 ): Promise<SupplierSCAR> {
-  const resp = await client.post(`/capa/${id}/trigger-scar`, body);
+  const resp = await client.post(`/capa/${id}/trigger-scar`, body, { signal });
   return resp.data;
 }
 
 export async function confirmRepeat(
   reportId: string,
   repeatConfirmed: boolean,
+  signal?: AbortSignal,
 ): Promise<CAPAReport> {
   const resp = await client.post(`/capa/${reportId}/confirm-repeat`, {
     repeat_confirmed: repeatConfirmed,
-  });
+  }, { signal });
   return resp.data;
 }
 
@@ -63,13 +68,13 @@ export async function listCapaSupplierOptions(params?: {
   page?: number;
   page_size?: number;
   search?: string;
-}): Promise<{
+}, signal?: AbortSignal): Promise<{
   items: Array<{ supplier_id: string; supplier_no: string; name: string; status: string }>;
   total: number;
   page: number;
   page_size: number;
 }> {
-  const resp = await client.get("/capa/supplier-options", { params });
+  const resp = await client.get("/capa/supplier-options", { params, signal });
   return resp.data;
 }
 
@@ -87,29 +92,32 @@ export async function createCAPA(data: {
 
 export async function updateCAPA(
   id: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<CAPAReport> {
-  const resp = await client.put(`/capa/${id}`, data);
+  const resp = await client.put(`/capa/${id}`, data, { signal });
   return resp.data;
 }
 
 export interface AdvanceRequest {
   target_state?: string;
   reject_reason?: string;
+  expected_outcome_revision?: string;
+  expected_review_round_id?: string;
   d7_skip_reasons?: Array<{ fmea_id: string | null; node_id: string; reason: string }>;
 }
 
 export interface CAPAAdvanceResponse { capa: CAPAReport; warning: string | null }
 
-export async function advanceCAPA(id: string, req: AdvanceRequest = {}): Promise<CAPAReport> {
-  const r = (await client.post(`/capa/${id}/advance`, req)).data as CAPAAdvanceResponse;
-  if (r.warning) message.warning(r.warning);
+export async function advanceCAPA(id: string, req: AdvanceRequest = {}, signal?: AbortSignal): Promise<CAPAReport> {
+  const r = (await client.post(`/capa/${id}/advance`, req, { signal })).data as CAPAAdvanceResponse;
+  if (r.warning && !signal?.aborted) message.warning(r.warning);
   return r.capa;
 }
 
 /** Manual knowledge resink for D8_CLOSURE / ARCHIVED CAPA (US-E2E-01.8). */
-export async function sinkKnowledge(capaId: string): Promise<SinkKnowledgeResponse> {
-  const resp = await client.post(`/capa/${capaId}/sink-knowledge`);
+export async function sinkKnowledge(capaId: string, signal?: AbortSignal): Promise<SinkKnowledgeResponse> {
+  const resp = await client.post(`/capa/${capaId}/sink-knowledge`, undefined, { signal });
   return resp.data;
 }
 
@@ -167,26 +175,28 @@ export function formatCapaAdvanceError(
 export async function decideLateralDiffusion(
   id: string,
   body: { decision: "notify" | "skip"; skip_reason?: string },
+  signal?: AbortSignal,
 ): Promise<import("../types").LateralDiffusionProjection> {
-  const resp = await client.post(`/capa/${id}/lateral-diffusion/decide`, body);
+  const resp = await client.post(`/capa/${id}/lateral-diffusion/decide`, body, { signal });
   return resp.data;
 }
 
 export async function rerunLateralDiffusion(
   id: string,
+  signal?: AbortSignal,
 ): Promise<import("../types").LateralDiffusionProjection> {
-  const resp = await client.post(`/capa/${id}/lateral-diffusion/rerun`);
+  const resp = await client.post(`/capa/${id}/lateral-diffusion/rerun`, undefined, { signal });
   return resp.data;
 }
 
-export async function getD7Recommendations(id: string): Promise<D7RecommendationResponse> {
-  const resp = await client.get(`/capa/${id}/d7-fmea-recommendations`);
+export async function getD7Recommendations(id: string, signal?: AbortSignal): Promise<D7RecommendationResponse> {
+  const resp = await client.get(`/capa/${id}/d7-fmea-recommendations`, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function getD4Recommendations(id: string): Promise<D4RecommendationResponse> {
+export async function getD4Recommendations(id: string, signal?: AbortSignal): Promise<D4RecommendationResponse> {
   try {
-    const resp = await client.get(`/capa/${id}/d4-fmea-recommendations`);
+    const resp = await client.get(`/capa/${id}/d4-fmea-recommendations`, ...signalOptions(signal));
     return resp.data;
   } catch (e: any) {
     if (e.response?.status === 422 && e.response?.data?.detail?.blocked === true) {
@@ -196,9 +206,9 @@ export async function getD4Recommendations(id: string): Promise<D4Recommendation
   }
 }
 
-export async function getD5Recommendations(id: string): Promise<D5RecommendationResponse> {
+export async function getD5Recommendations(id: string, signal?: AbortSignal): Promise<D5RecommendationResponse> {
   try {
-    const resp = await client.get(`/capa/${id}/d5-fmea-recommendations`);
+    const resp = await client.get(`/capa/${id}/d5-fmea-recommendations`, ...signalOptions(signal));
     return resp.data;
   } catch (e: any) {
     if (e.response?.status === 422 && e.response?.data?.detail?.blocked === true) {
@@ -208,49 +218,52 @@ export async function getD5Recommendations(id: string): Promise<D5Recommendation
   }
 }
 
-export async function linkFMEA(id: string, fmea_id: string): Promise<CAPAReport> {
+export async function linkFMEA(id: string, fmea_id: string, signal?: AbortSignal): Promise<CAPAReport> {
   const resp = await client.post(`/capa/${id}/link-fmea`, null, {
-    params: { fmea_id },
+    params: { fmea_id }, signal,
   });
   return resp.data;
 }
 
-export async function adoptRecommendation(capaId: string, req: AdoptRequest): Promise<AdoptResponse> {
-  const resp = await client.post(`/capa/${capaId}/adopt-recommendation`, req);
+export async function adoptRecommendation(capaId: string, req: AdoptRequest, signal?: AbortSignal): Promise<AdoptResponse> {
+  const resp = await client.post(`/capa/${capaId}/adopt-recommendation`, req, ...signalOptions(signal));
   return resp.data;
 }
-export async function listVerifications(capaId: string): Promise<Verification[]> {
-  const resp = await client.get(`/capa/${capaId}/root-cause-verifications`);
+export async function listVerifications(capaId: string, signal?: AbortSignal): Promise<Verification[]> {
+  const resp = await client.get(`/capa/${capaId}/root-cause-verifications`, ...signalOptions(signal));
   return resp.data;
 }
-export async function createVerification(capaId: string, req: VerificationCreate): Promise<Verification> {
-  const resp = await client.post(`/capa/${capaId}/root-cause-verifications`, req);
+export async function createVerification(capaId: string, req: VerificationCreate, signal?: AbortSignal): Promise<Verification> {
+  const resp = await client.post(`/capa/${capaId}/root-cause-verifications`, req, ...signalOptions(signal));
   return resp.data;
 }
-export async function updateVerification(capaId: string, vid: string, req: VerificationUpdate): Promise<Verification> {
-  const resp = await client.patch(`/capa/${capaId}/root-cause-verifications/${vid}`, req);
+export async function updateVerification(capaId: string, vid: string, req: VerificationUpdate, signal?: AbortSignal): Promise<Verification> {
+  const resp = await client.patch(`/capa/${capaId}/root-cause-verifications/${vid}`, req, ...signalOptions(signal));
   return resp.data;
 }
-export async function recordD7Action(capaId: string, req: D7NodeActionCreate): Promise<D7NodeAction> {
-  const resp = await client.post(`/capa/${capaId}/d7-node-actions`, req);
+export async function recordD7Action(capaId: string, req: D7NodeActionCreate, signal?: AbortSignal): Promise<D7NodeAction> {
+  const resp = await client.post(`/capa/${capaId}/d7-node-actions`, req, ...signalOptions(signal));
   return resp.data;
 }
-export async function listD7Actions(capaId: string): Promise<D7NodeAction[]> {
-  const resp = await client.get(`/capa/${capaId}/d7-node-actions`);
+export async function listD7Actions(capaId: string, signal?: AbortSignal): Promise<D7NodeAction[]> {
+  const resp = await client.get(`/capa/${capaId}/d7-node-actions`, ...signalOptions(signal));
   return resp.data;
 }
-export async function autoFillD7(capaId: string, req: D7AutoFillRequest): Promise<D7AutoFillResponse> {
-  const resp = await client.post(`/capa/${capaId}/d7-auto-fill`, req);
+export async function autoFillD7(capaId: string, req: D7AutoFillRequest, signal?: AbortSignal): Promise<D7AutoFillResponse> {
+  const resp = await client.post(`/capa/${capaId}/d7-auto-fill`, req, ...signalOptions(signal));
   return resp.data;
 }
 
 export async function generatePpt(
   reportId: string,
+  signal?: AbortSignal,
 ): Promise<{ reviewStatus: string; reviewRounds: number; exportId: string | null }> {
   const resp = await client.post(`/capa/${reportId}/ppt-export`, {}, {
     responseType: "blob",
+    signal,
     timeout: 120000,
   });
+  if (signal?.aborted) throw new Error("export view invalidated");
   const reviewStatus = resp.headers["x-ppt-review-status"] || "skipped";
   const reviewRounds = parseInt(resp.headers["x-ppt-review-rounds"] || "0", 10);
   const exportId = resp.headers["x-ppt-export-id"] || null;
@@ -271,8 +284,9 @@ export async function generatePpt(
 export async function getPptExportReviewReport(
   reportId: string,
   exportId: string,
+  signal?: AbortSignal,
 ): Promise<{ reviewReport: any }> {
-  const resp = await client.get(`/capa/${reportId}/ppt-exports/${exportId}`);
+  const resp = await client.get(`/capa/${reportId}/ppt-exports/${exportId}`, { signal });
   return { reviewReport: resp.data.review_report };
 }
 
@@ -280,86 +294,92 @@ export async function getPptExportReviewReport(
 
 export async function importD3Containment(
   capaId: string,
-  req?: D3ImportRequest
+  req?: D3ImportRequest,
+  signal?: AbortSignal,
 ): Promise<D3ImportRun> {
-  const resp = await client.post(`/capa/${capaId}/d3/import`, req || {});
+  const resp = await client.post(`/capa/${capaId}/d3/import`, req || {}, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function getD3Runs(capaId: string): Promise<D3ImportRun[]> {
-  const resp = await client.get(`/capa/${capaId}/d3/runs`);
+export async function getD3Runs(capaId: string, signal?: AbortSignal): Promise<D3ImportRun[]> {
+  const resp = await client.get(`/capa/${capaId}/d3/runs`, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function getD3Snapshots(capaId: string, runId?: string): Promise<D3ContainmentSnapshot[]> {
+export async function getD3Snapshots(capaId: string, runId?: string, signal?: AbortSignal): Promise<D3ContainmentSnapshot[]> {
   const params = runId ? { run_id: runId } : {};
-  const resp = await client.get(`/capa/${capaId}/d3/snapshots`, { params });
+  const resp = await client.get(`/capa/${capaId}/d3/snapshots`, { params, ...signalOptions(signal)[0] });
   return resp.data;
 }
 
 export async function generateD3Report(
   capaId: string,
-  req: D3GenerateReportRequest
+  req: D3GenerateReportRequest,
+  signal?: AbortSignal,
 ): Promise<D3ImpactReport> {
-  const resp = await client.post(`/capa/${capaId}/d3/report`, req);
+  const resp = await client.post(`/capa/${capaId}/d3/report`, req, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function getD3Report(capaId: string, runId?: string): Promise<D3ImpactReport | null> {
+export async function getD3Report(capaId: string, runId?: string, signal?: AbortSignal): Promise<D3ImpactReport | null> {
   const params = runId ? { run_id: runId } : {};
-  const resp = await client.get(`/capa/${capaId}/d3/report`, { params });
+  const resp = await client.get(`/capa/${capaId}/d3/report`, { params, ...signalOptions(signal)[0] });
   return resp.data;
 }
 
 export async function generateD3Advice(
   capaId: string,
-  req: D3GenerateAdviceRequest
+  req: D3GenerateAdviceRequest,
+  signal?: AbortSignal,
 ): Promise<{ report_id: string; status: string }> {
-  const resp = await client.post(`/capa/${capaId}/d3/advice`, req);
+  const resp = await client.post(`/capa/${capaId}/d3/advice`, req, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function getD3Advice(capaId: string, runId?: string): Promise<D3AdviceResponse> {
+export async function getD3Advice(capaId: string, runId?: string, signal?: AbortSignal): Promise<D3AdviceResponse> {
   const params = runId ? { run_id: runId } : {};
-  const resp = await client.get(`/capa/${capaId}/d3/advice`, { params });
+  const resp = await client.get(`/capa/${capaId}/d3/advice`, { params, ...signalOptions(signal)[0] });
   return resp.data;
 }
 
 export async function decideD3Advice(
   capaId: string,
   adviceId: string,
-  req: D3DecideAdviceRequest
+  req: D3DecideAdviceRequest,
+  signal?: AbortSignal,
 ): Promise<D3AdviceAdoption> {
-  const resp = await client.post(`/capa/${capaId}/d3/advice/${adviceId}/decision`, req);
+  const resp = await client.post(`/capa/${capaId}/d3/advice/${adviceId}/decision`, req, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function getD3Adoptions(capaId: string, runId?: string): Promise<D3AdviceAdoption[]> {
+export async function getD3Adoptions(capaId: string, runId?: string, signal?: AbortSignal): Promise<D3AdviceAdoption[]> {
   const params = runId ? { run_id: runId } : {};
-  const resp = await client.get(`/capa/${capaId}/d3/adoptions`, { params });
+  const resp = await client.get(`/capa/${capaId}/d3/adoptions`, { params, ...signalOptions(signal)[0] });
   return resp.data;
 }
 
 export async function recordD3Execution(
   capaId: string,
-  req: D3ExecutionCreate
+  req: D3ExecutionCreate,
+  signal?: AbortSignal,
 ): Promise<D3Execution> {
-  const resp = await client.post(`/capa/${capaId}/d3/execution`, req);
+  const resp = await client.post(`/capa/${capaId}/d3/execution`, req, ...signalOptions(signal));
   return resp.data;
 }
 
 export async function updateD3Execution(
   capaId: string,
   executionId: string,
-  req: D3ExecutionUpdate
+  req: D3ExecutionUpdate,
+  signal?: AbortSignal,
 ): Promise<D3Execution> {
-  const resp = await client.patch(`/capa/${capaId}/d3/execution/${executionId}`, req);
+  const resp = await client.patch(`/capa/${capaId}/d3/execution/${executionId}`, req, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function getD3Executions(capaId: string, runId?: string): Promise<D3Execution[]> {
+export async function getD3Executions(capaId: string, runId?: string, signal?: AbortSignal): Promise<D3Execution[]> {
   const params = runId ? { run_id: runId } : {};
-  const resp = await client.get(`/capa/${capaId}/d3/executions`, { params });
+  const resp = await client.get(`/capa/${capaId}/d3/executions`, { params, ...signalOptions(signal)[0] });
   return resp.data;
 }
 
@@ -407,50 +427,55 @@ export interface DocGateDecision {
   decided_at?: string | null;
 }
 
-export async function docGateImpact(capaId: string): Promise<DocGateAnalysis> {
-  const resp = await client.post(`/capa/${capaId}/doc-gate/impact`);
+export async function docGateImpact(capaId: string, signal?: AbortSignal): Promise<DocGateAnalysis> {
+  const resp = await (signal ? client.post(`/capa/${capaId}/doc-gate/impact`, undefined, { signal }) : client.post(`/capa/${capaId}/doc-gate/impact`));
   return resp.data;
 }
 
-export async function getDocGateImpact(capaId: string): Promise<DocGateAnalysis> {
-  const resp = await client.get(`/capa/${capaId}/doc-gate/impact`);
+export async function getDocGateImpact(capaId: string, signal?: AbortSignal): Promise<DocGateAnalysis> {
+  const resp = await client.get(`/capa/${capaId}/doc-gate/impact`, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function runDocGateAudit(capaId: string): Promise<{
+export async function runDocGateAudit(capaId: string, signal?: AbortSignal): Promise<{
   decision: string;
   audits: DocGateAuditRow[];
   audit_run_id: string;
 }> {
-  const resp = await client.post(`/capa/${capaId}/doc-gate/audit`);
+  const resp = await (signal ? client.post(`/capa/${capaId}/doc-gate/audit`, undefined, { signal }) : client.post(`/capa/${capaId}/doc-gate/audit`));
   return resp.data;
 }
 
-export async function getDocGateAudit(capaId: string): Promise<{
+export async function getDocGateAudit(capaId: string, signal?: AbortSignal): Promise<{
   audit_run_id: string | null;
   audits: DocGateAuditRow[];
 }> {
-  const resp = await client.get(`/capa/${capaId}/doc-gate/audit`);
+  const resp = await client.get(`/capa/${capaId}/doc-gate/audit`, ...signalOptions(signal));
   return resp.data;
 }
 
 export async function recordDocGateDefer(
   capaId: string,
   payload: { reason: string; owner_id: string; deadline: string },
+  signal?: AbortSignal,
 ): Promise<{ decision: string }> {
-  const resp = await client.post(`/capa/${capaId}/doc-gate/defer`, payload);
+  const resp = await client.post(`/capa/${capaId}/doc-gate/defer`, payload, ...signalOptions(signal));
   return resp.data;
 }
 
-export async function confirmNoAffected(capaId: string): Promise<{
+export async function confirmNoAffected(capaId: string, signal?: AbortSignal): Promise<{
   decision: string;
   no_affected_confirmed: boolean;
 }> {
-  const resp = await client.post(`/capa/${capaId}/doc-gate/confirm-no-affected`);
+  const resp = await (signal ? client.post(`/capa/${capaId}/doc-gate/confirm-no-affected`, undefined, { signal }) : client.post(`/capa/${capaId}/doc-gate/confirm-no-affected`));
   return resp.data;
 }
 
-export async function getDocGateDecision(capaId: string): Promise<DocGateDecision> {
-  const resp = await client.get(`/capa/${capaId}/doc-gate/decision`);
+export async function getDocGateDecision(capaId: string, signal?: AbortSignal): Promise<DocGateDecision> {
+  const resp = await client.get(`/capa/${capaId}/doc-gate/decision`, ...signalOptions(signal));
   return resp.data;
+}
+
+export async function getCapaOutcomeReview(id: string, signal?: AbortSignal): Promise<CapaOutcomeReview> {
+  return (await client.get<CapaOutcomeReview>(`/capa/${id}/outcome-review`, { signal })).data;
 }

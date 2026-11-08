@@ -4,12 +4,18 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import PermissionLevel
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaAIAdoption, CapaRootCauseVerification
 from app.models.fmea import FMEADocument
 from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services import capa_service
+from app.services.capa_current_access import current_capa_actor_target
 from app.services.embedding_outbox import enqueue_embedding
+from app.services.capa_review_guard import (
+    lock_capa_parent,
+    lock_current_material_write,
+)
 
 FIELD_MAP = {"d4": "d4_root_cause", "d5": "d5_correction"}
 
@@ -55,7 +61,14 @@ async def _normalize_and_validate_source_ref(db: AsyncSession, capa, source_ref)
     cause_node_id = str(source_ref["cause_node_id"]).strip()
     if not cause_node_id:
         raise ValueError("cause_node_id 不能为空")
-    fmea = await db.get(FMEADocument, capa.fmea_ref_id)
+    # source_ref is JSON-only, so serialize creation with source deletion in
+    # the same CAPA -> ProductLine -> FMEA order before inspecting its graph.
+    from app.services.product_line_service import lock_candidate_scopes
+    await lock_candidate_scopes(db, [(capa.factory_id, capa.product_line_code)])
+    fmea = await db.scalar(
+        select(FMEADocument).where(FMEADocument.fmea_id == capa.fmea_ref_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     if fmea is None:
         raise LookupError("目标 FMEA 不存在")
     if fmea.factory_id != capa.factory_id:
@@ -88,6 +101,12 @@ async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest):
 
 
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
+    actor_id = user.user_id  # rollback expires even the persisted User PK
+    # This must happen before the idempotency fast-path: returning an existing
+    # adoption is still a reviewed-material write admission decision.
+    capa = await lock_current_material_write(
+        db, capa, actor_id, PermissionLevel.EDIT
+    )
     field = FIELD_MAP[req.d_step]
     # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
     # 若不归一化，pre-query 的 IS NULL 查不到刚插的 JSON null 行，重试会撞 unique index 后 re-raise 500。
@@ -101,11 +120,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         await db.refresh(capa)
         return existing, getattr(capa, field) or ""
 
-    # 锁 CAPA 行（FOR UPDATE），串行化并发采纳，防 lost update：
-    # 两个并发采纳都读到旧 current、各自追加，后提交者覆盖前者（追加丢失）
-    await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
-    # 锁后重读 capa 字段，拿到最新值再追加
-    await db.refresh(capa)
+    # The parent guard already holds the row lock and returned fresh data.
     current = getattr(capa, field) or ""
     new_value = f"{current}\n{req.adopted_text}" if current else req.adopted_text
     setattr(capa, field, new_value)
@@ -113,7 +128,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         capa_id=capa.report_id, factory_id=capa.factory_id,
         d_step=req.d_step, adopted_text=req.adopted_text,
         source=req.source, stage_index=req.stage_index, item_ref=req.item_ref,
-        adopted_by=user.user_id,
+        adopted_by=actor_id,
     )
     db.add(adoption)
     db.add(AuditLog(
@@ -123,7 +138,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
             "d_step": req.d_step, "source": req.source, "stage_index": req.stage_index,
             "adopted_text": req.adopted_text, "item_ref": req.item_ref,
         },
-        operated_by=user.user_id, factory_id=capa.factory_id,
+        operated_by=actor_id, factory_id=capa.factory_id,
     ))
     if field in capa_service.EMBEDDING_FIELDS:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
@@ -136,18 +151,28 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         existing = await _find_existing_adoption(db, capa_id, req)
         if existing is None:
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
-        await db.refresh(capa)
+        capa = await lock_capa_parent(db, capa_id)
+        capa = await lock_current_material_write(
+            db, capa, actor_id, PermissionLevel.EDIT
+        )
         return existing, getattr(capa, field) or ""
     await db.refresh(adoption)
     return adoption, new_value
 
 
 async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user):
+    actor_id = user.user_id
+    capa = await lock_current_material_write(
+        db, capa, actor_id, PermissionLevel.EDIT
+    )
     conclusion = req.conclusion
     is_verified = (conclusion == "passed")
     if is_verified:
         _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
     normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
+    if normalized_ref is not None:
+        # Source locks may have waited after parent-lock admission.
+        capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
     # Pre-generate PK so pending UPDATED audit can reference verification_id
     # before commit (model default would only fire on flush otherwise).
     vid = uuid.uuid4()
@@ -157,7 +182,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         root_cause_text=req.root_cause_text, method=req.method, result=req.result,
         is_verified=is_verified, conclusion=conclusion,
         evidence_attachments=req.evidence_attachments, source_ref=normalized_ref,
-        verified_by=user.user_id if is_verified else None,
+        verified_by=actor_id if is_verified else None,
         verified_at=func.now() if is_verified else None,
         # clock_timestamp() (per-statement wall-clock) not now() (constant within txn):
         # test fixture wraps inserts in one txn, so now() would give identical created_at
@@ -173,13 +198,10 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             changed_fields={"verification_id": str(vid),
                             "root_cause_text": req.root_cause_text, "method": req.method,
                             "source_ref": normalized_ref},
-            operated_by=user.user_id, factory_id=capa.factory_id,
+            operated_by=actor_id, factory_id=capa.factory_id,
         ))
     elif conclusion == "failed":
         # 创建即 failed（罕见，但支持）→ 递增
-        # 锁后必须 refresh capa 读最新 retry_count，否则传入的 capa 对象可能缓存旧值
-        await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
-        await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
         db.add(AuditLog(
             table_name="capa_eightd", record_id=capa.report_id,
@@ -187,7 +209,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             changed_fields={"verification_id": str(vid),
                             "root_cause_text": req.root_cause_text, "method": req.method,
                             "retry_count": capa.d4_retry_count, "source_ref": normalized_ref},
-            operated_by=user.user_id, factory_id=capa.factory_id,
+            operated_by=actor_id, factory_id=capa.factory_id,
         ))
     else:
         # pending: source_ref change (establish) must be audited
@@ -197,11 +219,11 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
                 action="D4_VERIFICATION_UPDATED",
                 changed_fields={"verification_id": str(vid), "source_ref": normalized_ref,
                                 "old_source_ref": None},
-                operated_by=user.user_id, factory_id=capa.factory_id,
+                operated_by=actor_id, factory_id=capa.factory_id,
             ))
     if source_changed:
         db.add(_linkage_audit(capa, capa.fmea_ref_id, normalized_ref["cause_node_id"],
-                              _LINKAGE_SOURCE_D4, user.user_id))
+                              _LINKAGE_SOURCE_D4, actor_id))
     await db.commit()
     await db.refresh(rec)
     return rec
@@ -217,6 +239,12 @@ async def list_verifications(db: AsyncSession, capa):
 
 
 async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpdate, user):
+    # Parent-before-child lock ordering prevents a reviewed CAPA from being
+    # changed by a stale verification row.
+    actor_id = user.user_id
+    capa = await lock_current_material_write(
+        db, capa, actor_id, PermissionLevel.EDIT
+    )
     # 锁 verification 行，序列化同记录并发跃迁（去重）
     rec = await db.scalar(select(CapaRootCauseVerification).where(
         CapaRootCauseVerification.verification_id == vid,
@@ -228,6 +256,12 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     # 用 exclude_unset 区分"省略"与"显式 null"：PATCH {method: null} 应清空，而非被当作省略跳过
     updates = req.model_dump(exclude_unset=True)
     old_conclusion = rec.conclusion
+    old_source_ref = rec.source_ref
+    if "source_ref" in updates:
+        new_ref = await _normalize_and_validate_source_ref(db, capa, updates["source_ref"])
+        if new_ref is not None:
+            # Do not dirty the child before source waits and current authority.
+            capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
     if "method" in updates:
         rec.method = updates["method"]
     if "result" in updates:
@@ -235,10 +269,8 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     if "evidence_attachments" in updates:
         # 列为 NOT NULL（默认 []）：显式 null 视为清空到 []，避免 IntegrityError/500
         rec.evidence_attachments = updates["evidence_attachments"] or []
-    old_source_ref = rec.source_ref
     source_ref_changed = False
     if "source_ref" in updates:
-        new_ref = await _normalize_and_validate_source_ref(db, capa, updates["source_ref"])
         if new_ref != old_source_ref:
             rec.source_ref = new_ref
             source_ref_changed = True
@@ -247,7 +279,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     # is_verified 派生
     rec.is_verified = (rec.conclusion == "passed")
     if rec.is_verified:
-        rec.verified_by = user.user_id
+        rec.verified_by = actor_id
         rec.verified_at = func.now()
     else:
         rec.verified_by = None
@@ -257,10 +289,6 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     # conclusion→failed 跃迁递增 retry_count（仅跃迁，防重复计；锁 capa 行防跨记录丢计数）
     conclusion_transitioned = False
     if old_conclusion != "failed" and rec.conclusion == "failed":
-        # 锁后必须 refresh capa 读最新 retry_count；不同 verification 并发失败时
-        # 各 session 的 capa 可能缓存旧 retry_count=0，不 refresh 会丢失跨记录计数
-        await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == capa.report_id).with_for_update())
-        await db.refresh(capa)  # 锁后重读最新值（同 adopt_recommendation 既有模式）
         capa.d4_retry_count = (capa.d4_retry_count or 0) + 1
         passed_fields = {
             "verification_id": str(vid),
@@ -277,7 +305,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
             changed_fields=passed_fields,
-            operated_by=user.user_id, factory_id=capa.factory_id,
+            operated_by=actor_id, factory_id=capa.factory_id,
         ))
         conclusion_transitioned = True
     elif old_conclusion != "passed" and rec.conclusion == "passed":
@@ -293,7 +321,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_PASSED",
             changed_fields=passed_fields,
-            operated_by=user.user_id, factory_id=capa.factory_id,
+            operated_by=actor_id, factory_id=capa.factory_id,
         ))
         conclusion_transitioned = True
     if source_ref_changed:
@@ -305,12 +333,12 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
                 action="D4_VERIFICATION_UPDATED",
                 changed_fields={"verification_id": str(vid), "source_ref": rec.source_ref,
                                 "old_source_ref": old_source_ref},
-                operated_by=user.user_id, factory_id=capa.factory_id,
+                operated_by=actor_id, factory_id=capa.factory_id,
             ))
         # LINKAGE only on establish/change (not clear). cleared → rec.source_ref is None.
         if rec.source_ref is not None:
             db.add(_linkage_audit(capa, capa.fmea_ref_id, rec.source_ref["cause_node_id"],
-                                  _LINKAGE_SOURCE_D4, user.user_id))
+                                  _LINKAGE_SOURCE_D4, actor_id))
     await db.commit()
     await db.refresh(rec)
     return rec

@@ -8,6 +8,42 @@ in `services/`, and shapes the result into a Pydantic response model.
 No business rules live here — handlers stay thin and delegate. Routers
 are mounted by `app/main.py`.
 
+`capa_d4_text_preview.py` is an ordinary-employee, default-off readonly
+candidate boundary, separate from plugin runtime credentials. Availability,
+preview POST and source-version GET use current CAPA/source scope. Its local
+APIRoute bounds request bytes and returns constant validation/fault diagnostics
+without input echoes; early tenant middleware hides closed preview paths
+before body/auth/DB work. Other domain error formats remain unchanged.
+See [preview operations](../../../docs/development/capa-d4-text-preview.md).
+
+`agent_task_attachments.py` is a separate, default-off task subresource. Its
+POST route reserves the authorized Task 3 lifecycle slot before it iterates the
+raw request stream, accepts one bounded multipart file part without FastAPI
+form parsing, and returns fixed error codes only. It never accepts or exposes a
+client filename, path, storage key, file bytes, or scanner diagnostics.
+
+`GET /api/capa/{report_id}/outcome-review` is a normal access-user read,
+not a candidate or plugin-delivery route. It returns the strict
+`capa.outcome-review.v1` DTO only in `D8_APPROVAL_PENDING`, `D8_CLOSURE`, or
+`ARCHIVED`, with `Cache-Control: no-store`. It rechecks live CAPA VIEW and
+factory/product-line scope plus every necessary FMEA VIEW / PLANNING VIEW
+(Control Plans). Unknown/unreadable sources return constant 403
+`CAPA_OUTCOME_REVIEW_ACCESS_DENIED`, unavailable reports/stages constant 404
+`CAPA_OUTCOME_REVIEW_UNAVAILABLE`; changed or unbound versions return 409
+`CAPA_OUTCOME_REVIEW_CHANGED`, and complete-material/response byte overflow
+returns 409 `CAPA_OUTCOME_REVIEW_LIMIT`. No partial counts or body are returned.
+The response contains four core sections, complete verification/D7 collections,
+version identifiers/hashes (not current source bodies), historical decision
+metadata, and a separately marked `unreviewed_supplement`. A post-assembly
+shared-lock/read fence rejects stale core or response-only supplement/audit
+metadata without adding those supplemental values to the core HMAC. A valid
+HMAC alone does not verify an incomplete or non-contract historical receipt.
+Legacy pending rounds depend only on server tenant/report identity, not title
+or updated_at maintenance. GET has no business,
+audit, round, embedding, outbox, or provider side effects. D8 decision binding
+and the `/advance` producer are a separate subsequent task; this read does not
+make legacy approvals version-verified.
+
 ## File Organisation
 
 One `*.py` file per business module at the top level, plus three
@@ -93,3 +129,26 @@ Consumed by the frontend over HTTP and by automated tests via FastAPI's
   `services/` (the work).
 - **Depended on by:** `app/main.py` (router registration). No other
   in-process consumer; everything reaches this layer through HTTP.
+
+
+## Outcome-review handoff (2026-11-01)
+
+See the [operator guide](../../../docs/development/capa-outcome-review.md) for current-material review,
+explicit reload after conflict/uncertainty, historical unbound labels, and terminal
+core versus unreviewed closure-supplement rules (archived supplement retains the
+existing 400; reviewed core and mixed updates use 409). Controlled revision/reopen
+is not implemented. No plugin/model delivery or production enablement is authorized.
+Stories 01.3 v2, 01.7 v3 and 01.8 v2 and their derived walkthroughs keep the
+2026-10-27 business-contract versions; this is not signoff for every story walkthrough.
+The authorized TEST-profile Task 7 gate passed: one real-provider HTTP/D8/Chromium/
+knowledge/lateral primary chain plus two independent protection cases (3 passed,
+5 warnings, exit 0). The separate real ClamAV gate passed (process 7 + browser 1).
+The new source-frozen full `make check` passed: 3450 passed, 12 skipped, 3 xfailed,
+2 xpassed, 5 warnings, exit 0. These ordinary skips do not substitute for scanner
+acceptance. The 1390-file freeze explicitly preserves the user-deleted example.
+Actual post-full checks and evidence are recorded in PROGRESS's final Task 8 section
+and the private final-closure report. Final independent review passed; the exact
+registered core container and its exclusive volume (both owned test databases)
+were disposed after fresh identity and zero-use checks. The worktree, user TEST
+profile, user-owned example deletion and all evidence remain preserved.
+No dependency, migration, authority, self-approval, or deployment change is implied.

@@ -60,6 +60,7 @@ from app.schemas.capa_d3 import (
     ProvenanceEntry,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.capa_outcome_review import CapaOutcomeReview
 from app.schemas.capa_ppt import PptExportDetailResponse
 from app.schemas.capa_verification import (
     AdoptRequest, AdoptResponse, D7AutoFillRequest, D7AutoFillResponse,
@@ -78,6 +79,7 @@ from app.services import capa_scar_service
 from app.services import capa_verification_service
 from app.models.supplier import SupplierSCAR
 from app.services.capa_d7_action_service import ConflictError
+from app.services.capa_current_access import current_capa_actor_target
 from app.services.capa_draft_service import generate_draft
 from app.services.hybrid_recommendation_pipeline import HybridRecommendationPipeline, RecommendationContext
 from app.services.lessons_learned.service import LessonsLearnedService
@@ -88,6 +90,28 @@ from app.utils.pptx import pptx_response
 router = APIRouter(prefix="/api/capa", tags=["capa"])
 
 D4_RETRY_THRESHOLD = 3
+
+
+@router.get('/{report_id}/outcome-review', response_model=CapaOutcomeReview)
+async def get_outcome_review(
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    from app.core.tenant_transaction import TenantUnavailable
+    from app.services.capa_outcome_review import read_outcome_review
+    from app.services.capa_review_guard import OutcomeReviewConflict, OutcomeReviewLimit
+
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await read_outcome_review(db, scope, report_id)
+    except (PermissionError, TenantUnavailable):
+        return JSONResponse(status_code=403, content={'detail': 'CAPA_OUTCOME_REVIEW_ACCESS_DENIED'}, headers=headers)
+    except LookupError:
+        return JSONResponse(status_code=404, content={'detail': 'CAPA_OUTCOME_REVIEW_UNAVAILABLE'}, headers=headers)
+    except (OutcomeReviewConflict, OutcomeReviewLimit) as exc:
+        return JSONResponse(status_code=409, content={'detail': str(exc)}, headers=headers)
+    return JSONResponse(content=result.model_dump(mode='json'), headers=headers)
 
 
 @router.get("", response_model=CAPAListResponse)
@@ -518,23 +542,20 @@ async def update_capa(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_product_line_access(capa.product_line_code, scope)
     update_data = req.model_dump(exclude_unset=True)
-    # Always lock + refresh before mutating: a concurrent PL move or link can
-    # change the row's scope/invariants between the pre-check above and commit.
-    await db.execute(
-        select(CAPAEightD)
-        .where(CAPAEightD.report_id == report_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if not is_factory_visible(capa.factory_id, scope):
+    # Fresh admission precedes any parent lock. The service then locks,
+    # refreshes authority/target, and checks a destination against live scope.
+    try:
+        capa = await current_capa_actor_target(db, scope.user.user_id, report_id, PermissionLevel.EDIT)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_product_line_access(capa.product_line_code, scope)
-    # Target PL must be within caller's scope too (locked state)
-    new_pl = update_data.get("product_line_code")
-    if new_pl is not None and new_pl != capa.product_line_code:
-        check_product_line_access(new_pl, scope)
     try:
         capa = await capa_service.update_capa(db, capa, update_data, scope.user.user_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return await _capa_response_with_projections(db, capa)
@@ -546,18 +567,15 @@ async def require_advance_permission(
     scope: RequestScope = Depends(get_request_scope),
     db: AsyncSession = Depends(get_db),
 ) -> tuple[RequestScope, Any]:
-    capa = await capa_service.get_capa(db, report_id)
-    if capa is None:
+    actor_id = uuid.UUID(str(scope.user.user_id))
+    try:
+        capa = await current_capa_actor_target(db, actor_id, report_id, PermissionLevel.EDIT)
+        from app.services.capa_review_guard import lock_capa_parent
+        capa = await lock_capa_parent(db, report_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="编辑权限不足")
+    except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
-    check_factory_access(capa.factory_id, scope)
-    # P1 TOCTOU：锁 capa 行 FOR UPDATE + 刷新状态，再做边权限校验，确保授权与状态迁移基于
-    # 同一份锁定状态。否则「锁前按 D8_GATE_PENDING 判 EDIT 放行 → 并发推进到 D8_APPROVAL_PENDING
-    # → 锁后 (D8_APPROVAL_PENDING→D8_CLOSURE) 变合法 APPROVE 边」会让 EDIT 用户越权完成审批。
-    # 锁在同一请求 session 上持有至 advance_capa（后者再锁为 no-op，并保护绕过依赖的直接调用方）。
-    await db.execute(
-        select(CAPAEightD).where(CAPAEightD.report_id == report_id)
-        .with_for_update().execution_options(populate_existing=True)
-    )
     target = body.target_state if body else None
     # target_state=None（线性 advance）时算出实际 target，否则归档边 (D8_CLOSURE→ARCHIVED)
     # 因 target=None 不命中 approve_edges，会误落 EDIT 分支放行 field_qe 归档。
@@ -568,14 +586,15 @@ async def require_advance_permission(
         (EightDState.D8_APPROVAL_PENDING.value, EightDState.D7_PREVENTION.value),
         (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value),
     )
-    if (capa.status, target.value if target else None) in approve_edges:
-        level = await get_user_permission(scope.user, Module.CAPA, db)
-        if level < PermissionLevel.APPROVE:
-            raise HTTPException(status_code=403, detail="审批权限不足")
-    else:
-        level = await get_user_permission(scope.user, Module.CAPA, db)
-        if level < PermissionLevel.EDIT:
-            raise HTTPException(status_code=403, detail="编辑权限不足")
+    required = PermissionLevel.APPROVE if (
+        capa.status, target.value if target else None
+    ) in approve_edges else PermissionLevel.EDIT
+    try:
+        capa = await current_capa_actor_target(db, actor_id, report_id, required)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="审批权限不足" if required == PermissionLevel.APPROVE else "编辑权限不足")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     return scope, capa
 
 
@@ -595,12 +614,20 @@ async def advance_capa(
         LateralFailedError,
     )
 
+    from app.services.capa_review_guard import OutcomeReviewRequired, OutcomeReviewConflict, OutcomeReviewLimit
     scope, capa = result
+    actor_id = uuid.UUID(str(scope.user.user_id))
     from_status = capa.status
     try:
         capa = await capa_service.advance_capa(
-            db, capa, scope.user.user_id, body or AdvanceRequest()
+            db, capa, actor_id, body or AdvanceRequest()
         )
+    except (OutcomeReviewRequired, OutcomeReviewConflict, OutcomeReviewLimit) as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="CAPA_OUTCOME_REVIEW_ACCESS_DENIED")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except KnowledgeSinkBlockedError as e:
         raise HTTPException(
             status_code=422,
@@ -666,6 +693,12 @@ async def link_fmea(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
+    try:
+        capa = await current_capa_actor_target(db, scope.user.user_id, report_id, PermissionLevel.EDIT)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     try:
         capa = await capa_service.link_fmea(db, capa, fmea_id, scope.user.user_id, fmea_node_id)
     except LookupError:
@@ -1080,7 +1113,12 @@ async def adopt_recommendation_ep(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
-    adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
+    try:
+        adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
 
 
@@ -2037,6 +2075,9 @@ async def d3_list_executions_ep(
 
 
 def _assert_d8_gate_stage(capa: CAPAEightD):
+    if capa.status in (EightDState.D8_CLOSURE.value, EightDState.ARCHIVED.value):
+        from app.services.capa_review_guard import ReviewedContentLocked
+        raise ReviewedContentLocked()
     if capa.status != EightDState.D8_GATE_PENDING.value:
         raise HTTPException(status_code=400, detail="仅 D8_GATE_PENDING 阶段可操作")
 
@@ -2053,7 +2094,12 @@ async def _load_capa_for_doc_gate(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     _d3_check_scope(capa, scope)
-    return capa
+    try:
+        return await current_capa_actor_target(db, scope.user.user_id, report_id, min_level)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"需要 capa 模块的 {min_level.name} 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
 
 
 @router.post("/{report_id}/doc-gate/impact")
@@ -2069,6 +2115,10 @@ async def doc_gate_impact_ep(
         result = await capa_doc_gate_service.generate_impact_analysis(
             db, capa, scope.user.user_id
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         if "BLOCKED" in str(e):
             raise HTTPException(
@@ -2103,6 +2153,10 @@ async def doc_gate_audit_ep(
     _assert_d8_gate_stage(capa)
     try:
         result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # Serialize UUID fields for JSON
@@ -2185,6 +2239,10 @@ async def doc_gate_defer_ep(
         result = await capa_doc_gate_service.record_defer(
             db, capa, body.reason, owner_id, body.deadline, scope.user.user_id
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2203,6 +2261,10 @@ async def doc_gate_confirm_no_affected_ep(
         result = await capa_doc_gate_service.confirm_no_affected(
             db, capa, scope.user.user_id
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2271,6 +2333,10 @@ async def doc_gate_waiver_ep(
             [item.model_dump() for item in body.items],
             scope.user.user_id,
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="需要 capa 模块的 APPROVE 权限")
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result

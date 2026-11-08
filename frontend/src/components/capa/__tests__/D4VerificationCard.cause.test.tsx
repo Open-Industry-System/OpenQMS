@@ -80,7 +80,7 @@ describe("D4VerificationCard cause selector", () => {
     renderCard({ fmeaRefId: "f1" });
     fireEvent.click(screen.getByTestId("d4-verification-new"));
 
-    await waitFor(() => expect(getFMEA).toHaveBeenCalledWith("f1"));
+    await waitFor(() => expect(getFMEA).toHaveBeenCalledWith("f1", expect.any(AbortSignal)));
 
     const causeSelect = screen.getByTestId("d4-cause-select").querySelector(".ant-select-selector")!;
     await user.click(causeSelect);
@@ -99,7 +99,8 @@ describe("D4VerificationCard cause selector", () => {
           root_cause_text: "rc1",
           conclusion: "pending",
           source_ref: { fmea_id: "f1", cause_node_id: "cause-1" },
-        })
+        }),
+        expect.any(AbortSignal),
       )
     );
   });
@@ -183,7 +184,7 @@ describe("D4VerificationCard cause selector", () => {
     fireEvent.click(screen.getByTestId("d4-cause-edit-btn-0"));
 
     await waitFor(() => expect(screen.getByTestId("d4-cause-edit-0")).toBeInTheDocument());
-    await waitFor(() => expect(getFMEA).toHaveBeenCalledWith("f1"));
+    await waitFor(() => expect(getFMEA).toHaveBeenCalledWith("f1", expect.any(AbortSignal)));
 
     const editSelect = screen.getByTestId("d4-cause-edit-select-0").querySelector(".ant-select-selector")!;
     await user.click(editSelect);
@@ -197,6 +198,7 @@ describe("D4VerificationCard cause selector", () => {
         "c1",
         "v-pass",
         { source_ref: { fmea_id: "f1", cause_node_id: "cause-2" } },
+        expect.any(AbortSignal),
       )
     );
   });
@@ -235,7 +237,7 @@ describe("D4VerificationCard cause selector", () => {
     fireEvent.click(screen.getByTestId("d4-cause-save-0"));
 
     await waitFor(() =>
-      expect(updateVerification).toHaveBeenCalledWith("c1", "v-pending", { source_ref: null })
+      expect(updateVerification).toHaveBeenCalledWith("c1", "v-pending", { source_ref: null }, expect.any(AbortSignal))
     );
   });
 
@@ -281,6 +283,7 @@ describe("D4VerificationCard cause selector", () => {
         "c1",
         "v-no-cause",
         { source_ref: { fmea_id: "f1", cause_node_id: "cause-1" } },
+        expect.any(AbortSignal),
       )
     );
   });

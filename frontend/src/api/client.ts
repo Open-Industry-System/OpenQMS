@@ -1,4 +1,5 @@
 import axios from "axios";
+import { capaRequestOwner } from "./capaRequestOwnership";
 import { useAuthStore } from "../store/authStore";
 
 const client = axios.create({
@@ -9,22 +10,29 @@ const client = axios.create({
 // Factory ID auto-injection for GET requests on business APIs
 // Excluded: auth, group, product-lines, factories (management endpoints)
 // NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
-const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories"];
+const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories", "/agent/tasks"];
+const isD4TextPreview = (url?: string) => /^\/capa\/[^/]+\/d4-text-preview(?:\/availability|\/version)?\/?$/.test(url ?? "");
+
+const isOutcomePrivateRequest = (url?: string, method?: string) =>
+  /^\/capa\/[^/]+\/outcome-review\/?$/.test(url ?? "")
+  || (method?.toLowerCase() === "post" && /^\/capa\/[^/]+\/advance\/?$/.test(url ?? ""));
 
 // Guard against concurrent refresh attempts
 let isRefreshing = false;
-let refreshSubscribers: Array<(token: string) => void> = [];
+let refreshSubscribers: Array<(token: string | null) => void> = [];
 
-function onRefreshed(token: string) {
+function settleRefreshSubscribers(token: string | null) {
   refreshSubscribers.forEach((cb) => cb(token));
   refreshSubscribers = [];
 }
 
-function addRefreshSubscriber(cb: (token: string) => void) {
+function addRefreshSubscriber(cb: (token: string | null) => void) {
   refreshSubscribers.push(cb);
 }
 
 client.interceptors.request.use((config) => {
+  const owner = capaRequestOwner(config.signal);
+  if (owner && !owner()) throw new axios.CanceledError("CAPA view invalidated");
   const token = localStorage.getItem("access_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -41,7 +49,7 @@ client.interceptors.request.use((config) => {
   // Auto-inject factory_id on GET requests for business APIs
   const currentFactoryId = localStorage.getItem("current_factory_id");
   const isGetRequest = config.method === "get";
-  const isExcluded = FACTORY_ID_EXCLUDE_PREFIXES.some(
+  const isExcluded = isD4TextPreview(config.url) || FACTORY_ID_EXCLUDE_PREFIXES.some(
     (prefix) => config.url?.startsWith(prefix)
   );
   if (currentFactoryId && isGetRequest && !isExcluded) {
@@ -56,6 +64,19 @@ client.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const owner = capaRequestOwner(originalRequest?.signal);
+    // Ownership is checked before any session mutation, redirect, retry or related auth read.
+    if (owner && !owner()) return Promise.reject(error);
+
+    // User task activity and attachment reads must withdraw restricted content
+    // immediately on denial. Credential refresh elsewhere can refetch the same
+    // selected task afterward, but never replays a protected attachment request.
+    const isUserTaskRead = originalRequest?.url?.startsWith("/agent/tasks");
+    if ((isUserTaskRead || isD4TextPreview(originalRequest?.url)
+        || isOutcomePrivateRequest(originalRequest?.url, originalRequest?.method))
+        && (error.response?.status === 401 || error.response?.status === 403)) {
+      return Promise.reject(error);
+    }
 
     if (error.response?.status === 503 && error.response?.data?.detail?.tenant_suspended) {
       window.location.href = "/tenant-suspended";
@@ -85,16 +106,31 @@ client.interceptors.response.use(
       if (!isRefreshing) {
         isRefreshing = true;
         try {
-          const newToken = await useAuthStore.getState().tryRefreshToken();
+          const newToken = await (owner
+            ? useAuthStore.getState().tryRefreshToken(owner, originalRequest.signal)
+            : useAuthStore.getState().tryRefreshToken());
           isRefreshing = false;
+          if (owner) {
+            // A successful refresh invalidates the old CAPA credential/view. Only the
+            // still-installed refresh may release existing unrelated subscribers.
+            if (newToken && useAuthStore.getState().token === newToken && localStorage.getItem("access_token") === newToken) {
+              settleRefreshSubscribers(newToken);
+            } else {
+              // An abandoned owned refresh must also settle unrelated waiters.
+              settleRefreshSubscribers(null);
+            }
+            return Promise.reject(error);
+          }
           if (newToken) {
-            onRefreshed(newToken);
+            settleRefreshSubscribers(newToken);
             // Retry the original request with the new token
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
             return client(originalRequest);
           }
         } catch {
           isRefreshing = false;
+          if (owner) settleRefreshSubscribers(null);
+          if (owner && !owner()) return Promise.reject(error);
           useAuthStore.getState().logout();
           window.location.href = "/login";
           return Promise.reject(error);
@@ -102,9 +138,14 @@ client.interceptors.response.use(
         isRefreshing = false;
       }
 
+      // An owned CAPA view must settle on a denial, not wait on another session's
+      // refresh or replay its old action. Other routes retain the existing queue.
+      if (owner) return Promise.reject(error);
+
       // Queue pending requests while refresh is in flight
-      return new Promise((resolve) => {
-        addRefreshSubscriber((token: string) => {
+      return new Promise((resolve, reject) => {
+        addRefreshSubscriber((token: string | null) => {
+          if (token === null) { reject(error); return; }
           originalRequest.headers.Authorization = `Bearer ${token}`;
           resolve(client(originalRequest));
         });
@@ -113,8 +154,8 @@ client.interceptors.response.use(
 
     if (error.response?.status === 403) {
       try {
-        const resp = await client.get("/auth/me");
-        useAuthStore.getState().setUser(resp.data);
+        const resp = await (owner ? client.get("/auth/me", { signal: originalRequest.signal }) : client.get("/auth/me"));
+        if (!owner || owner()) useAuthStore.getState().setUser(resp.data);
       } catch {
         // refresh failed — ignore, user stays with stale state
       }

@@ -395,9 +395,15 @@ async def update_fmea(
 
 
 async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    from app.services.capa_review_source_guard import (
+        assert_source_references_unchanged,
+        lock_source_capa_references,
+    )
+
     fmea = await get_fmea(db, fmea_id)
     if fmea is None:
         raise ValueError("FMEA not found")
+    locked_capa_ids = await lock_source_capa_references(db, "fmea", fmea_id)
     observed_product_line = fmea.product_line_code
     await lock_candidate_scopes(
         db, [(fmea.factory_id, observed_product_line)]
@@ -416,6 +422,7 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
     ):
         raise ValueError("product_line_changed_again")
     fmea = fresh
+    await assert_source_references_unchanged(db, "fmea", fmea_id, locked_capa_ids)
     # Audit log for deletion
     audit_log = AuditLog(
         table_name="fmea_documents",

@@ -9,6 +9,36 @@ Components render Ant Design primitives, accept data and callbacks via
 props, and stay free of routing concerns — pages own routes, data
 fetching, and page-level state, and pass results down.
 
+`capa/D4TextRedactionPreview.tsx` is an explicit ordinary-user readonly preview,
+not the AI draft/edit widget. It discovers availability without a body fetch,
+keeps terms/candidates only in component memory, polls versions every2s while
+visible and caps display at30s independently of clock skew/network progress.
+Deny/uncertainty/change withdraws content and private terms; close/hide unmounts
+private DOM immediately. Session/target/scope epochs prevent late response
+publication. No business apply/save action, storage, model or plugin delivery.
+See [employee preview guide](../../../docs/development/capa-d4-text-preview.md).
+
+`capa/CapaOutcomeReviewPanel.tsx` is the production current-report D8 outcome
+reader for pending approval, closed and archived reports. It renders the complete
+review DTO as escaped text/metadata (no evidence extraction, external preview or
+download), including controlled FMEA/control-plan versions and honest legacy /
+unverifiable labels. Formal report materials have no preview expiry or browser
+persistence. A local epoch/controller registry withdraws materials and decision
+expectations before reload and on identity/scope changes or failed reads.
+`CAPADetailPage` alone consumes the current panel's revision/round for one explicit
+approve/reject path. Closed core editing is frozen even for admins; the separately
+labelled unreviewed supplement remains editable with EDIT, and archive freezes it.
+Existing D4 preview/attachment restrictions and early D4–D6 workflows are unchanged.
+
+CAPA child recommendation/verification/D7/document-gate/D3 actions own their whole
+async lifetime through `useCapaChildRequests`: prerequisite saves, subsequent writes,
+reloads, callbacks and notifications all recheck ownership after awaits. Cancelled
+prerequisite saves reject rather than resolving as permission to continue. Draft
+requests use the same transport ownership. D3 run selection cancels pending work
+and clears edit/modal tokens without refetching or stranding the visible run list.
+Material-panel reload only withdraws its review token/reason; it does not invalidate
+unrelated page knowledge lookups/resinks or leave their loading flags stranded.
+
 ## File Organisation
 
 `layout/` and `shared/` are cross-cutting; every other subdirectory is
@@ -29,6 +59,16 @@ visual category.
   smart-suggestion dropdown, scope tags, AI inline recs),
   `pfmea/` (PFMEA function-tree editor, guidance card, wizard sidebar,
   risk table).
+- **Persistent Agent tasks** — `agent/` is mounted by AppLayout. Its provider
+  retains a fixed-target task selection across route/factory/product-line changes;
+  CAPA starts creation only through an explicit action. Local activity state
+  refreshes two newly adjacent authorised pages as one bounded window. Closing
+  or hiding the drawer aborts browser reads; it does not control the plugin
+  process. Logout/tenant identity changes clear selection and content. Controls
+  use current run/epoch and preserve the original retry key and parameters.
+  `AgentTaskAttachments` mounts after activity only for a visible selected task;
+  it verifies task-scoped availability before listing or uploading and aborts plus
+  clears file/metadata state on identity, credential, epoch, denial, or close.
 - **CAPA** — `capa/` (`AIDraftButton`, `AIDraftPreview`, the D4/D5/D7
   recommendation panels, `useAIDraft` hook colocated with its panel).
 - **IQC / control plan** — `iqc/` (AQL chart + recommendation drawer),
@@ -105,3 +145,26 @@ components that compose other components from the same bundle.
 - **Depended on by:** every page in `pages/`, plus `App.tsx` for
   `AppLayout`. Components occasionally compose siblings inside the same
   bundle (e.g. dashboard widgets import the dashboard `KPICard`).
+
+
+## Outcome-review handoff (2026-11-01)
+
+See the [operator guide](../../../docs/development/capa-outcome-review.md) for current-material review,
+explicit reload after conflict/uncertainty, historical unbound labels, and terminal
+core versus unreviewed closure-supplement rules (archived supplement retains the
+existing 400; reviewed core and mixed updates use 409). Controlled revision/reopen
+is not implemented. No plugin/model delivery or production enablement is authorized.
+Stories 01.3 v2, 01.7 v3 and 01.8 v2 and their derived walkthroughs keep the
+2026-10-27 business-contract versions; this is not signoff for every story walkthrough.
+The authorized TEST-profile Task 7 gate passed: one real-provider HTTP/D8/Chromium/
+knowledge/lateral primary chain plus two independent protection cases (3 passed,
+5 warnings, exit 0). The separate real ClamAV gate passed (process 7 + browser 1).
+The new source-frozen full `make check` passed: 3450 passed, 12 skipped, 3 xfailed,
+2 xpassed, 5 warnings, exit 0. These ordinary skips do not substitute for scanner
+acceptance. The 1390-file freeze explicitly preserves the user-deleted example.
+Actual post-full checks and evidence are recorded in PROGRESS's final Task 8 section
+and the private final-closure report. Final independent review passed; the exact
+registered core container and its exclusive volume (both owned test databases)
+were disposed after fresh identity and zero-use checks. The worktree, user TEST
+profile, user-owned example deletion and all evidence remain preserved.
+No dependency, migration, authority, self-approval, or deployment change is implied.

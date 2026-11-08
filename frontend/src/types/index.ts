@@ -2008,6 +2008,7 @@ export interface VerificationUpdate {
   source_ref?: Record<string, unknown> | null;
 }
 export interface D7NodeAction {
+  status: string;
   action_id: string;
   capa_id: string;
   action: "confirmed" | "skipped" | "auto_filled";

@@ -42,12 +42,12 @@ D8 关闭后知识沉淀 + 横向扩散预警 + 报告输出——
 |---|---|---|---|---|
 | 01.1 | D3 遏制措施（数据导入 + AI 分析报告 + 遏制建议） | `US-E2E-01.1-d3-containment-ai.md` | 定稿 v1 | true |
 | 01.2 | AI 推荐 12 源全接入（编排 DAG + provenance + 执行验证） | `US-E2E-01.2-recommendation-12-sources.md` | 定稿 v1 | true |
-| 01.3 | D4 现场验证深化 + D7 node-action + 审批壳 | `US-E2E-01.3-d4-verification-d7-node-action.md` | 定稿 v1 | true |
+| 01.3 | D4 现场验证深化 + D7 node-action + 审批壳 | `US-E2E-01.3-d4-verification-d7-node-action.md` | 定稿 v2 | true |
 | 01.4 | 8D ↔ FMEA 双向追溯 | `US-E2E-01.4-fmea-linkage.md` | 定稿 v1 | false |
 | 01.5 | 8D → SCAR 触发与回写 | `US-E2E-01.5-scar-trigger.md` | 定稿 v1 | false |
 | 01.6 | 8D → 供应商风险评级输入 | `US-E2E-01.6-supplier-risk-input.md` | 定稿 v1 | false |
-| 01.7 | D8 关闭前文档更新审核门禁（CP+FMEA；设计 C1） | `US-E2E-01.7-doc-update-gate.md` | 定稿 v2 | true |
-| 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | 定稿 v1 | true |
+| 01.7 | D8 关闭前文档更新审核门禁（CP+FMEA；设计 C1） | `US-E2E-01.7-doc-update-gate.md` | 定稿 v3 | true |
+| 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | 定稿 v2 | true |
 | 01.9 | 横向扩散预警与通知 | `US-E2E-01.9-lateral-diffusion.md` | 定稿 v1 | true |
 | 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | 定稿 v2 | false |
 

@@ -1,12 +1,18 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api import agent as agent_api
+from app.api.capa_d4_text_preview import router as capa_d4_text_preview_router
+from app.api.agent_tasks import router as agent_tasks_router
+from app.api.agent_task_attachments import router as agent_task_attachments_router
+from app.api.agent_runtime import router as agent_runtime_router
+from app.api.admin.agent_plugins import router as admin_agent_plugins_router
 from app.api.admin import ai_config as admin_ai_config_api
 from app.api.admin import logs as admin_logs_api
 from app.api.admin import permissions as admin_permissions_api
@@ -18,6 +24,7 @@ from app.api.audit_program import router as audit_program_router
 from app.api.auditor import router as auditor_router
 from app.api.auth import router as auth_router
 from app.api.capa import router as capa_router
+from app.api.capa_review_errors import register_capa_review_errors
 from app.api.change_impact import router as change_impact_router
 from app.api.collaboration import router as collaboration_router
 from app.api.control_plan import router as control_plan_router
@@ -60,7 +67,7 @@ from app.config import settings
 from app.core.logging_handler import DBLogHandler, start_log_drainer
 from app.core.security import hash_password
 from app.core.tenant_context import TenantContextMiddleware
-from app.database import async_session, get_tenant_aware_session, run_for_each_tenant
+from app.database import async_session, get_tenant_aware_session, run_for_each_tenant, tenant_async_session
 from app.models.role import RoleDefinition
 from app.models.user import User
 
@@ -71,8 +78,43 @@ _log_drainer: asyncio.Task | None = None
 _log_handler: logging.Handler | None = None
 
 
+async def initialize_attachment_runtime(app: FastAPI) -> bool:
+    """Enable attachments only after private-root and real scanner capability checks."""
+    app.state.agent_task_attachments_ready = False
+    if not (settings.AGENT_TASK_RUNTIME_ENABLED and settings.AGENT_TASK_ATTACHMENTS_ENABLED):
+        return False
+    from app.services.agent_runtime import attachment_recovery, attachment_storage, clamav_scan, task_attachments
+    try:
+        attachment_storage.validate_root_for_app(
+            __import__("pathlib", fromlist=["Path"]).Path(settings.AGENT_TASK_ATTACHMENT_STORAGE_ROOT), app
+        )
+        healthy = await clamav_scan.probe_health(
+            host=settings.AGENT_TASK_ATTACHMENT_CLAMAV_HOST,
+            port=settings.AGENT_TASK_ATTACHMENT_CLAMAV_PORT,
+            timeout_seconds=settings.AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS,
+        )
+        if not healthy:
+            raise RuntimeError("attachment scanner health probe failed")
+        await attachment_recovery.reconcile_configured_storage()
+    except task_attachments.AttachmentCapacityError:
+        logger.warning("[agent_attachments] startup reconciliation deferred; pipeline is busy")
+    except Exception:
+        logger.exception("[agent_attachments] startup validation failed; attachments remain closed")
+        settings.AGENT_TASK_ATTACHMENTS_ENABLED = False
+        return False
+    app.state.agent_task_attachments_ready = True
+    return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.services.agent_runtime.trial_policy import load_policy
+    app.state.agent_local_trial_policy = load_policy(
+        settings.AGENT_LOCAL_TRIAL_POLICY_PATH, mode=settings.AGENT_LOCAL_TRIAL_MODE,
+        tenant_mode=settings.TENANT_MODE, now=datetime.now(UTC),
+    )
+    logger.info("%s", app.state.agent_local_trial_policy.diagnostic)
+    await initialize_attachment_runtime(app)
     # Legacy single-tenant bootstrap: create default admin user.
     # In multi-tenant mode, users/role_definitions live in tenant schemas,
     # so running this against the public schema would fail after platform-only
@@ -105,11 +147,16 @@ async def lifespan(app: FastAPI):
     # config page survives restarts/reloads instead of only being (re)built when
     # an admin saves the page. Non-fatal: falls back to rule-only on failure.
     from app.services import ai_config_service
-    try:
-        async with async_session() as db:
-            await ai_config_service._rebuild_providers(db, app.state)
-    except Exception as e:
-        logger.warning("AI provider init from DB failed: %s", e)
+    if settings.TENANT_MODE == "single":
+        try:
+            async with async_session() as db:
+                await ai_config_service._rebuild_providers(db, app.state)
+        except Exception as e:
+            logger.warning("AI provider init from DB failed: %s", e)
+            app.state.llm_provider = None
+            app.state.embedding_provider = None
+    else:
+        # Tenant-local settings cannot populate one process-global provider safely.
         app.state.llm_provider = None
         app.state.embedding_provider = None
 
@@ -396,7 +443,7 @@ async def lifespan(app: FastAPI):
 
     global _log_queue, _log_drainer, _log_handler
     _log_queue = asyncio.Queue()
-    _log_drainer = start_log_drainer(_log_queue, async_session)
+    _log_drainer = start_log_drainer(_log_queue, async_session, tenant_async_session)
     _log_handler = DBLogHandler(_log_queue, asyncio.get_running_loop())
     logging.getLogger().addHandler(_log_handler)
 
@@ -489,6 +536,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OpenQMS API", version="0.1.0", lifespan=lifespan)
+register_capa_review_errors(app)
 
 # Expose tenant domain for subdomain-based tenant resolution
 app.state.tenant_domain = settings.TENANT_DOMAIN
@@ -506,6 +554,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(fmea_router)
 app.include_router(capa_router)
+app.include_router(capa_d4_text_preview_router)
 app.include_router(dashboard_router)
 app.include_router(quality_goal_router)
 app.include_router(control_plan_router)
@@ -541,6 +590,10 @@ app.include_router(admin_ai_config_api.router)
 app.include_router(admin_logs_api.router)
 app.include_router(admin_review_skills_api.router)
 app.include_router(agent_api.router)
+app.include_router(agent_tasks_router)
+app.include_router(agent_task_attachments_router)
+app.include_router(agent_runtime_router)
+app.include_router(admin_agent_plugins_router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)

@@ -83,7 +83,7 @@ describe("D5RecPanel adopt", () => {
       source: "fmea_graph",
       stage_index: 3,
       item_ref: expect.objectContaining({ control_node_id: "ctrl1", failure_cause_node_id: "c1" }),
-    })));
+    }), expect.any(AbortSignal)));
   });
 
   it("adopts general suggestion via d5-adopt-suggestion with stage_index", async () => {
@@ -95,7 +95,7 @@ describe("D5RecPanel adopt", () => {
       adopted_text: "通用措施",
       source: "rule",
       stage_index: 4,
-    })));
+    }), expect.any(AbortSignal)));
   });
 
   it("waits for beforeAdopt to resolve before adopting (flush-then-adopt ordering)", async () => {
@@ -108,7 +108,7 @@ describe("D5RecPanel adopt", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(adoptRecommendation).not.toHaveBeenCalled();
     resolveBefore();
-    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d5", stage_index: 3 })));
+    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d5", stage_index: 3 }), expect.any(AbortSignal)));
   });
 
   it("does not adopt when beforeAdopt rejects (save failed → block adopt)", async () => {
