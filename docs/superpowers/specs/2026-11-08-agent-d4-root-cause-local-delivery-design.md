@@ -68,7 +68,7 @@
 
 protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口。安装 secret 只用于 claim，用户/admin JWT 不作为正文读取凭据。报告取自当前 run/task；新入口不接受报告、字段、schema、分类、投递目标或自定义规则选择，不接受 query 参数或请求正文。
 
-新路由必须显式登记于 [RUNTIME_ROUTES](../../../backend/app/services/agent_runtime/routes.py#L1-L15) 并由 API 模块注册；未登记路由不参与 runtime 认证。新接收器是可完整审核的固定标准库执行物，只调用固定平台路由与该正文入口。不加载 SDK/后端/provider 包或任意插件代码；启动使用隔离 Python、禁 site 初始化和字节码写入（`-I -S -B`）。应用执行逻辑由固定文件 hash 覆盖；Python/stdlib/OS 属于可信主机前提，不冒充整机字节证明。旧 SDK 仍可发现新增可选能力，但没有正文便利方法或隐式正文回退。
+新路由必须显式登记于 [RUNTIME_ROUTES](../../../backend/app/services/agent_runtime/routes.py#L1-L15) 并由 API 模块注册；未登记路由不参与 runtime 认证。新接收器是可完整审核的固定标准库执行物，只调用固定平台路由与该正文入口。不加载 SDK/后端/provider 包或任意插件代码；启动使用隔离 Python、禁 site 初始化和字节码写入（`-I -S -B`）。应用执行逻辑由固定文件 hash 覆盖；Python/stdlib/OS 属于可信主机前提，不冒充整机字节证明。旧 SDK 不需要升级；元数据 profile 的能力列表不会出现正文能力，且没有正文便利方法或隐式正文回退。
 
 ### 3.2 业务声明与部署信任分离
 
