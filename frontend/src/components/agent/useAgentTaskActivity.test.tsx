@@ -58,16 +58,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("fresh bounded whole activity cycle", () => {
-  it("atomically replaces both pages using THIS latest cursor and W; retains 51–60", async () => {
+  it.each([
+    { first: 1, watermark: 100, latestFirst: 51, historyLast: 50 },
+    { first: 10, watermark: 109, latestFirst: 60, historyLast: 59 },
+  ])("atomically replaces both pages from $watermark using THIS latest cursor and W; retains 51–60", async ({ first, watermark, latestFirst, historyLast }) => {
     const history = deferred<any>();
-    vi.mocked(getTaskActivity).mockResolvedValueOnce(page(51, 100, 51)).mockResolvedValueOnce(page(1, 50, null, 100)).mockResolvedValueOnce(page(61, 110, 61)).mockReturnValueOnce(history.promise);
+    vi.mocked(getTaskActivity).mockResolvedValueOnce(page(latestFirst, watermark, latestFirst)).mockResolvedValueOnce(page(first, historyLast, null, watermark)).mockResolvedValueOnce(page(61, 110, 61)).mockReturnValueOnce(history.promise);
     const { result } = setup();
     await flush();
     expect(result.current.page?.items).toHaveLength(100);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
-    expect(result.current.page?.items[0].sequence).toBe(1); // no visible partial first page
+    expect(result.current.page?.items.map(i => i.sequence)).toEqual(Array.from({ length: 100 }, (_, i) => i + first)); // no visible partial first page
     expect(getTaskActivity).toHaveBeenLastCalledWith(task, { page_size: 50, before_sequence: 61, window_end_sequence: 110 }, expect.any(AbortSignal));
     history.resolve(page(11, 60, null, 110));
     await flush();

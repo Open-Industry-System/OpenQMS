@@ -134,6 +134,9 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
       }
       await route.fulfill({ response });
     };
+    // Real appends commit individually; establish the last complete window first.
+    await fixture(page, 'seed', { target: 109 });
+    await expect.poll(() => sequences(page)).toEqual(range(10,109));
     const firstLatest = page.waitForResponse(async response => {
       const url = new URL(response.url());
       return url.pathname === `/api/agent/tasks/${taskId}/activity`
@@ -143,7 +146,7 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
     await fixture(page, 'seed', { target: 110 });
     await firstLatest; // Observe the real poll while its history response stays held.
     await secondPending;
-    await expect.poll(() => sequences(page)).toEqual(range(1,100)); // no partial latest publication
+    await expect.poll(() => sequences(page)).toEqual(range(10,109)); // no partial latest publication
     releaseSecond();
     await expect.poll(() => sequences(page)).toEqual(range(11,110));
     expect((await sequences(page)).filter(n => n>=51 && n<=60)).toEqual(range(51,60));
