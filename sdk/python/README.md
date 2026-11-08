@@ -9,8 +9,10 @@ codec, bounded standard-library HTTP transport and installation/run clients for
 the existing ten runtime operations. The developer gate below builds the actual
 current SDK wheel and checks a fresh isolated installation. The installed-wheel
 normal-policy QMS HTTP fixture gate has passed independently (14 SDK cases plus
-3 unchanged fixed-CLI cases). Final combined regression and CI wiring acceptance
-are still pending; these fixture results are not worker or production admission.
+3 unchanged fixed-CLI cases). Local CI wiring review, full `make check` and the
+separate deterministic-browser gate have passed on a frozen source checkpoint;
+see [acceptance handoff](../../docs/development/agent-metadata-python-sdk.md).
+Remote CI has not been run. These results are not worker or production admission.
 Frozen/slotted DTOs are containers, not runtime type validation: the codec performs
 strict decoding. Configuration validates local budgets; transport validates origin.
 Request budget is 1 MiB; response defaults to 4 MiB (64 KiB–16 MiB); timeout defaults

@@ -10,7 +10,7 @@
 
 ---
 
-## 执行状态（2026-11-07）
+## 执行状态（2026-11-08，本地切片验收完成）
 
 | 计划任务 | 当前状态 |
 |---|---|
@@ -18,7 +18,7 @@
 | Task5：wheel与独立SDK门禁 | 已双复核并提交；Lead当前实际562 unit＋16 loopback＋1 wheel probe通过 |
 | Task6：normal-policy真实HTTP | 已双复核并提交；原14SDK＋3CLI/5warnings，新受控runner14＋3/6warnings均通过，区别见交接 |
 | Task7：Make/CI/分类/文档 | 接线与安全契约修正完成，追加旧Make fixture独立SDK mock；Lead纯契约278通过；七代码文件规格PASS、质量Approve（0 Critical/Important/Minor），本地接线验收完成 |
-| Task8：最终冻结/组合门禁/清理 | 尚未完成；不得以以上阶段证据替代完整make check/browser或远端CI |
+| Task8：最终冻结/组合门禁/清理 | 冻结9e54ad52完整make check（后端3881pass/4skip＋SDK562/16/1＋前端类型/build）、browser11、pure278通过，1612文件不变；整片复核Approve；README收口后新包三层与17项HTTP再验通过，3.12/3.13安装API smoke通过；11-08实际核验并清理精确自有PG/唯一卷及执行口令，本地验收收口，远端CI未执行 |
 
 提交、首红/末绿、实际证据与剩余边界见[SDK实施交接](../../development/agent-metadata-python-sdk.md)。下方步骤为原计划细目，阶段状态以本表及新鲜回执为准；不因SDK通信成功扩大到worker/生产准入或R4b/R5/R6/R7完成。
 
