@@ -1,6 +1,6 @@
 # D4 根因受限文本的本地受控交付设计
 
-日期：2026-11-08。状态：用户已审阅首版并提出三项修订；v2 后经两轮独立技术审阅与闭合复核发现并修正一致性与可实现性问题；本文 v5 为当前待审版本，**待用户再次书面审阅**。当前仅落文；未实施、未启用正文能力，不授权生产、模型调用或业务写入。
+日期：2026-11-08。状态：用户复核 v5 后要求补齐两层来源授权范围及签发接口鉴权优先级；本文 v6 按这两项边界修订，**待用户再次书面审阅，尚未批准进入实施计划**。当前仅落文；未实施、未启用正文能力，不授权生产、模型调用或业务写入。
 
 修订记录：
 
@@ -8,7 +8,8 @@
 - v2：按用户审阅意见修订——来源证明三事实分离、不可复用修订标识与失效规则、服务端消息边界、业务声明与部署信任分离。
 - v3：按第一轮独立技术审阅修订——统一签发/不签发语义并补请求字段；证明绑定验证版本；新增“新证明取代旧证明”活性规则；移除对冻结基线表 `capa_eightd` 的加列/触发器，改用新表＋应用写入路径记录修订；补充第二 policy 槽、来源投影内部声明、节点有界读取、路由登记与开关联动；修正命名/版本号等一致性问题。
 - v4：按第二轮技术复审修订——验证版本仅绑标量字段，文本/来源以有界 SQL 谓词校验；覆盖测试改为字面量白名单＋动态 `setattr` 断言＋三路径集成测试，签发首修订列为第四记录路径；补全 400/403/404/409/422 分支与 `source_proof_issued` 创建专用响应；迁移清单补租户注册与 head/revision 断言；明确来源投影/profile 准入为平台内部常量并定义节点 canonical HMAC。
-- v5：闭合复核修正——按实际异常映射拆分 `source_ref` 错误码（FMEA 文档缺失404、节点缺失/关联不符400、跨工厂产品线403）；字段侧去空白改用 Python `.strip()`；删除与“列表/更新响应不变”冲突的响应字段备选；补齐钉 head/revision 的精确行号。
+- v5：闭合复核修正——按当时原验证接口的异常映射拆分错误码；字段侧用 Python `.strip()`；创建响应专用子类；补钉 head/revision 行号。用户复核后仍要求以下两项修订，不视为书面通过。
+- v6：用户P1/P2修订——长期grant与任务grant均显式持久化精确派生来源范围，最终校验当前证明来源落入两者交集，supersede/claim/restart不能自动扩域；签发的新声明分支先做FMEA读取与对象可见性检查，无权/不可见/不存在/不确定均固定403，鉴权后才允许关联与节点诊断；新增两张来源范围旁表、严格DTO增量和A/B换源、无权真实/虚构节点不可区分验收。未实现或启用。
 
 ## 1. 基线与用户确认
 
@@ -95,6 +96,31 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 
 更换策略/词表需显式重启自有实例；不声称磁盘文件替换即时撤权。立即撤权/轮换/暂停仍走正常 API 和 epoch fencing；新策略绑定不接受旧 token。run/JWT 有效期不超过既有租约与策略期限，不续租或重开。
 
+### 3.4 两层派生来源授权（v6）
+
+来源证明只说明字段版本及其声明来源；`source_proof_digest`、active 状态或执行人能读来源都不是插件/任务的来源授权。正文交付额外要求两个独立、持久化的精确范围：
+
+- **插件长期范围 `P`**：管理员在创建正文 capability 的长期 grant 时，显式指定本 grant 允许的派生来源坐标。不得从当前证明、manifest 或部署策略自动推导/补齐。
+- **任务范围 `T`**：任务发起者在创建正文任务时显式指定本次允许的派生来源坐标；平台核其当前来源权限，并只在长期范围覆盖时派生任务 grant。不能把长期范围整体复制成任务范围，也不能自动采用最新证明的来源。
+
+首版每个正文 grant/任务只接受一个精确来源，不支持通配、前缀、任意节点、空范围或 `None=ALL`。规范范围元组为：
+
+`(target_report_id, derived_projection_id, source_module, source_projection_id, fmea_id, cause_node_id)`
+
+其中 `derived_projection_id` 固定为本片正文能力，`source_module/source_projection_id` 由 FMEA 内部声明解析，不由调用者声明分类或最低权限。来源版本由当前证明与节点 HMAC 校验，不以版本/digest 代替坐标授权；同一坐标的新版本仍须通过当前证明/版本检查，授权范围本身不随之改变。
+
+现有 grant 只有 capability/报告/工厂/产品线字段，没有这种来源范围。设计新增同构的两个旁表 `agent_plugin_derived_source_scopes`、`agent_task_derived_source_scopes`，分别以 `plugin_grant_id`、`task_grant_id` 外键绑定既有 grant，首版每个父 grant 至多一条；只存上述元组及审计元数据，不改既有 grant 表结构。管理员 `PluginGrantCreate` 和正文 `TaskCreate` 增加可选严格字段 `derived_source_scope`（报告、FMEA、原因节点坐标）；启用正文 grant/创建可运行正文任务时必填，旧元数据请求无此字段仍按原合同运行。响应不向无来源读取权的人暴露来源坐标。
+
+平台复用同一授权管线，把来源范围交集作为正文 capability 的附加必要条件，不复制正文专用身份/角色/grant 判定。设当前 active 证明的来源元组为 `S`，最终交付必须同时成立：
+
+`目标/工厂/产品线授权 ∧ 执行人当前来源权限 ∧ S ∈ P ∧ S ∈ T ∧ 当前证明有效 ∧ 精确本地投递许可`
+
+长期 grant 自身必须同时覆盖目标与来源，任务 grant 自身也必须同时覆盖两者；不能拼接不同 grant 的目标范围和来源范围凑成授权。每次重查长期 grant 的 enabled/期限/安装归属、任务 grant 的 access_kind/期限/任务归属，以及当前任务/运行状态；旁表不能绕过父 grant，也不虚构任务 grant 的 enabled 字段。缺范围或缺源声明一律拒绝，不回退为仅检查 CAPA 报告。
+
+范围一经签发不可自动扩展；首版修改来源需要停用旧长期 grant 并显式创建新 grant、以及由发起者显式创建新任务（新 request_key）。若已有长期 grant 明确覆盖新来源，也仍需新的任务范围。证明 supersede、claim 重试、消息重领、resume/restart、新 epoch 都不重写旧范围；同 request_key 的重复任务请求不得换源，参数不一致须固定冲突拒绝。
+
+目录发现复用模块声明、当前长期范围与用户来源可见性，只用于展示可用安装，不创建/补齐任务范围，也不保证后续能启动。创建可运行任务、ready/claim/运行重验及控制则必须检查显式的任务范围与当前长期范围；当前证明不在两层交集中时不得启动/交付，不新增“自动授权最新来源”的路径。先从证明的受信元数据取得 `S` 并做范围初检，不覆盖时不加载根因或来源节点内容；交付前再重新核对当前证明、两层范围与父 grant。创建/启用范围时也须先核调用者的来源可见性，不能借范围接口探测节点。不授予插件 FMEA 查询工具；`P/T` 只许可接收这一带来源的 CAPA 派生文本投影。
+
 ## 4. 字段、来源证明与确定性候选
 
 ### 4.1 限定字段与坐标
@@ -117,31 +143,33 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 
 复用现有 `create_verification`（已要求 CAPA EDIT、父行锁及 `source_ref` 校验）作为唯一签发路径，并新增一个可选请求字段 `source_declaration`（严格对象，只允许 `{"declares_complete_coverage": true}`；未知键/类型拒绝）。`VerificationCreate` 增加该字段不影响未使用它的既有调用。
 
-语义统一如下（HTTP 码以现有 API 映射为准）：
+**带声明分支的校验顺序是合同，不允许按旧 helper 的顺序先查节点再补权限。** 请求结构及声明前置条件通过后，先刷新产生者身份、FMEA 读取权及对象范围；来源对象可见性只通过带当前作用域过滤的标量坐标查询确认。无 FMEA VIEW、对象不在可见范围、对象不存在或无法确认可见时，统一403、固定响应 `{"detail":"Source unavailable"}`；不返回节点存在/类型/关联诊断，不回显 source_ref，不作节点存在性查询，不写验证、修订、证明或成功审计。只有已确认可见后，才先查报告关联/坐标一致性，再查节点存在/类型。诊断返回前和成功签发前均重验可见性；已撤权或不确定时收敛为同一固定403，不只在成功分支重验。不能先调用会读取 FMEA/检查节点的 `_normalize_and_validate_source_ref` 再执行新权限检查。
+
+这只改变带 `source_declaration` 的新签发分支；未带声明的既有验证调用仍保持原业务及错误映射，本片不宣称已统一整治所有旧来源诊断。以下表按先后顺序判定，后面的节点/关联行**仅适用于当前已授权且可见的来源**：
 
 | 请求状态 | 结果 |
 |---|---|
 | 无 `source_declaration` | 按原规则保存验证；创建响应 `source_proof_issued=false` |
-| 声明形状/未知键/值非 true | 422，不写业务记录（Pydantic 校验） |
-| 有声明但缺 `source_ref`，或 `conclusion` 非 `passed` | 400，不写业务记录 |
-| `source_ref` 形状非法 | 400，不写业务记录 |
-| `source_ref` 指向不存在的 FMEA 文档 | 404，不写业务记录 |
-| `source_ref` 的节点不存在/非 `FailureCause` | 400，不写业务记录 |
-| 报告未关联 FMEA，或 `source_ref.fmea_id` 与已关联 FMEA 不符 | 400，不写业务记录 |
-| `source_ref` 跨工厂/产品线 | 403，不写业务记录 |
-| 有声明但产生者当前无 FMEA VIEW 或来源对象范围 | 403，不写业务记录 |
+| 声明形状/未知键/值非 true | 422，不写业务记录（结构校验） |
+| 有声明但缺 `source_ref`，或 `conclusion` 非 `passed` | 400，不写业务记录；无节点查询 |
+| `source_ref` 基本结构/UUID/节点标识格式非法 | 400，不写业务记录；不作存在性诊断 |
+| 无当前 FMEA VIEW、源对象不可见/不存在或可见性不确定 | 统一403及固定 `Source unavailable`，真实/虚构节点不可区分；无节点查询、无写入 |
+| 已确认可见，但报告未关联 FMEA 或 `source_ref.fmea_id` 与报告关联不符 | 400，不写业务记录 |
+| 已确认可见，但来源与目标报告的工厂/产品线约束不符 | 固定403，不写业务记录；无节点查询 |
+| 已确认可见且关联/坐标正确，但节点不存在/非 `FailureCause` | 400，不写业务记录；返回前仍须可见，否则收敛为固定403 |
+| 诊断返回前或最终签发前权限已失效/不确定 | 固定403，不写业务记录，不保留先前节点诊断 |
 | 已有修订记录但最新修订 HMAC 与当前文本不一致（未记录写入） | 409，不写业务记录 |
 | 文本去空白后不等于当前 `d4_root_cause` | 保存验证；创建响应 `source_proof_issued=false`，安全原因码只写 AuditLog |
-| 报告迁移前无修订记录 | 同事务建立首个修订并审计 `initial_revision_observed`，继续按后续条件签发 |
-| 全部满足 | 同事务签发证明，创建响应 `source_proof_issued=true` |
+| 全部签发条件满足，且报告迁移前无修订记录 | 同事务建立首个修订并审计 `initial_revision_observed` 后签发；这不把修订标记本身当来源证明 |
+| 全部签发条件满足且已有匹配修订 | 同事务签发证明，创建响应 `source_proof_issued=true` |
 
-`source_proof_issued` 只出现在创建端点专用的响应子类（列表/更新继续使用现有 `VerificationResponse`，字段不变）；审计原因码只进 AuditLog，不返回给调用方。409 分支需要在该创建端点新增明确的冲突异常映射（仅作用于 source-declaration 分支），既有 400/403/404 映射不变。
+`source_proof_issued` 只出现在创建端点专用的响应子类（列表/更新继续使用现有 `VerificationResponse`，字段不变）；审计原因码只进 AuditLog，不返回给调用方。409 分支需要在该创建端点新增明确的冲突异常映射（仅作用于 source-declaration 分支）。未带声明的原400/403/404映射不变；带声明分支必须按上表先验证可见性，不能沿用旧404或节点400诊断去区分无权对象是否存在。
 
-同事务签发：
+同事务签发（所有先决条件、鉴权与版本检查通过后才写入）：
 
 - 记录该报告的字段修订（§4.4 的新表）；若报告尚无任何修订记录（迁移前历史数据），为当前文本建立首个修订并审计 `initial_revision_observed`；若已有修订记录但最新修订 HMAC 与当前文本不一致，视为存在未记录写入，拒绝签发（不保存业务记录）。
 - 写入一条**仅元数据**来源证明：报告、修订 ID/序号、租户代际、工厂/产品线、验证 ID 与验证版本、来源投影、`fmea_id`、`cause_node_id`、节点内容 HMAC、字段 HMAC、声明类型 `employee_declared_complete_v1`、产生者与时间。不复制正文；验证记录文本本就是既有业务数据。
-- 同一报告同一修订只保留一条 active 证明：新签发必须校验通过，旧 active 证明标记 superseded（记录 superseded_by/时间与安全审计），不删除、不扩大旧证明来源集合。该取代规则用于来源坐标、FMEA 关联或节点版本变化而文本修订未变的情况。
+- 同一报告同一修订只保留一条 active 证明：新签发必须校验通过，旧 active 证明标记 superseded（记录 superseded_by/时间与安全审计），不删除、不扩大旧证明来源集合。该取代规则用于来源坐标、FMEA 关联或节点版本变化而文本修订未变的情况。**它只取代证明，不替换/重算任何来源授权；允许新证明存在但因旧范围不覆盖而暂时无法交付，不为恢复活性自动同步旧授权。**
 - 本版仅创建时签发；验证更新（改结论、改绑 `source_ref` 等）不补发，并使既有证明失效（§4.4）。
 
 ### 4.4 失效条件
@@ -159,8 +187,9 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 - 当前字段文本 HMAC 等于该报告最新修订的 HMAC，且存在与最新修订一致、状态 active 的来源证明；
 - 证明绑定的验证记录仍存在、仍为 `passed`、验证版本 HMAC 一致；以有界标量 SQL 谓词比较 `root_cause_text` 与当前字段经服务端 Python `.strip()` 后的参数值（验证行创建时已由 Pydantic strip），并比较 `source_ref` JSONB 与证明来源相等，不把验证正文/`source_ref` 载入交付对象；字段侧不使用 SQL `btrim`，避免尾随 `\t`/`\n`/NBSP 与 `.strip()` 语义不同。节点仍为原 FMEA 的 `FailureCause`，节点内容 HMAC 与证明一致，工厂/产品线未变；
 - 当前 CAPA 权限、租户代际、运行/安装 epoch、策略期限与授权坐标仍有效；
-- 执行身份对声明的来源投影具备当前 `VIEW` 权限及对象范围；执行身份不是插件，插件不获得 FMEA 查询能力或原始 FMEA 数据；
-- 插件长期授权与本次任务派生授权均覆盖正文 capability，且对象/工厂/产品线范围精确匹配；旧 summary 授权不能替代；
+- 执行身份对声明的来源投影具备当前 `VIEW` 权限及对象范围；此条件不能替代插件/任务来源授权，插件不获得 FMEA 查询能力或原始 FMEA 数据；
+- 按 §3.4 把当前证明规范化为来源元组 `S`，从当前有效的长期 grant 与本任务 grant 分别读取精确来源范围 `P/T`，要求 `S ∈ P ∩ T`；两层父 grant 自身均同时覆盖正文 capability、目标报告、工厂、产品线及期限，不能从不同 grant 拼接权限，旧 summary 授权不能替代；
+- 来源证明替换不更新 `P/T`：A换为B即使正文、报告、产品线未变且执行人可读二者，只要任一范围未明确覆盖B就拒绝；不能依据新 digest、同产品线、当前FMEA关联或新epoch自动放行；
 - 模块声明与平台准入的投递元组精确匹配本安装/profile。
 
 任一不满足整次拒绝，不返回正文/摘要/命中数/来源计数。已实际交付的字节无法事后擦除，后续请求必须重新检查；此合同不提供全局业务写锁。
@@ -204,7 +233,8 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 - **受限投影收据使用新表**（例如 `agent_restricted_projection_receipts`），只允许 `data_class='restricted'`；保留 task/run、租约 epoch、tenant generation、来源 CAPA、projection ID/digest、创建时间等列。既有 internal 收据表不改，旧 event/result/checkpoint 来源消费者继续只认 internal 收据；由于表与类型分离，正文收据天然不能混入旧链。正文/词表/候选片段不落库。
 - **来源修订表** `capa_d4_root_cause_revisions`：报告、序号、字段 HMAC、记录者/时间、安全写入路径；每报告序号唯一；仅元数据。应用写入路径负责追加（§4.4）。
 - **来源证明表** `capa_d4_root_cause_source_proofs`：报告、修订 ID/序号、租户代际、工厂/产品线、验证 ID/版本、来源投影、`fmea_id`/`cause_node_id`/节点 HMAC、字段 HMAC、声明类型、状态 active/superseded、产生者/时间；同一报告同一修订最多一条 active（partial unique index）。
-- 安全 AuditLog 绑定受限收据、当前执行人/坐标、规则、来源证明摘要、接收方和 `release_committed`。授权失败不输出内容或派生计数；诊断仅固定安全码，不带原始异常/响应/词表。
+- **长期来源范围旁表** `agent_plugin_derived_source_scopes`：`plugin_grant_id` 外键/唯一键、§3.4 的精确来源元组、授予者/时间。**任务来源范围旁表** `agent_task_derived_source_scopes`：`task_grant_id` 外键/唯一键、同构来源元组、创建者/时间。正文 grant 要求有范围；缺失不是 ALL。两表不复制正文，不修改既有 grant 表，旧元数据 grant 无此旁表仍按旧合同运行。对应的新 DTO 字段只用于正文投影来源授权，不接受自报分类/权限，不产生 FMEA 查询工具。
+- 安全 AuditLog 绑定受限收据、当前执行人/坐标、规则、来源证明摘要、接收方、本次实际匹配的长期/任务 grant 与来源范围记录 ID，以及 `release_committed`。扩域须新建授权，不修改旧范围；证明 supersede 不写两张授权旁表。授权失败不输出内容、来源对象存在性或派生计数；诊断仅固定安全码，不带原始异常/响应/词表。
 - 迁移只新增表，不修改冻结基线表、不加触发器、不改既有收据表。新增手写 public 迁移接续 `20261102_agent_mainline_merge`；新增 tenant delta 接续 `tv006_agent_read_tasks`。同时必须更新：`tenant_migrator` 的当前/前驱 revision 常量（[tenant_migrator.py:19-24](../../../backend/app/services/tenant_migrator.py#L19-L24)）；`alembic_tenant/__init__.py` 的 `REVIEWED_REVISIONS` 精确元组（[__init__.py:17](../../../backend/alembic_tenant/__init__.py#L17)）；[tenant_schema_diff](../../../backend/app/services/tenant_schema_diff.py#L163-L190) 的前驱/新增对象集合；以及所有钉住当前 head/revision 的契约断言：`test_supplier_risk_capa_inputs_migration.py` 的单 head、`test_agent_mainline_merge_graph.py`、`test_agent_mainline_merge_db.py:31` 的 public `alembic_version`、`test_agent_readonly_controls_delta.py:55,138` 的 `ScriptDirectory` head/`alembic_version`、`test_multitenancy/test_agent_read_task_delta.py:15-17` 的 `REVISION`/`PREDECESSOR_REVISION`/`REVIEWED_REVISIONS`、`test_tenant_schema_parity.py` 的迁移调用与当前 head 比较。冻结 tv001–tv006 与基线快照不改；所有可升级 tenant 走原维护/代际与 parity 流程。
 - 没有降级清理正文/来源证据的便利操作；downgrade 必须拒绝丢失证据的路径，不能删记录“修复”。本片不认证生产回退。
 - 沿用现有证据保留/来源删除规则。GET/交付创建收据/审计可能影响证据保留，不能宣传为零平台副作用；仍不得修改 CAPA/D8/验证事实或 embedding/outbox。
@@ -237,10 +267,10 @@ finish一旦可能发送，缺完整有效确认（含超限、断连、JSON/sch
 1. 默认关闭/非dev/非真实回环/伪造forwarded、坏/过期/通配策略、错key/version/hash/epoch/代际、缺grant等均拒绝。关闭优先级以零租户解析/正文读取/DB连接观察验证；正文开关与旧 metadata 开关互不影响，新路由已登记且未登记/关闭时 404 先于认证与正文。
 2. 正常admin grant＋用户固定消息任务＋真实lifespan双策略槽＋正文profile准入＋独立固定执行物，经真实TCP贯通claim/capability/启动请求/正文/ACK/finish；不替换canonical DIRECT或依赖注入绕过来源权限。
 3. 只读SQL见证证明共享授权链未预加载标题/D1–D8正文，正文查询只读坐标与单字段；原文和CAPA/D8/验证/outbox/embedding快照不变，仅预期平台记录新增。
-4. 来源证明签发语义逐项验证：无声明/声明非法/缺source_ref/非passed/无FMEA VIEW/文本不等/已有最新修订不一致/迁移前无修订等各分支与 §4.3 表及同事务签发规则一致，覆盖实际 400/403/404/409/422 与“保存但不签发”分支；`source_proof_issued` 仅创建响应可见，原因码只进审计，不泄漏正文。
+4. 来源证明签发按 §4.3 的优先级逐项验证：无声明/结构非法/声明前置条件不满足/无FMEA VIEW/源对象不可见或可见性不确定/已授权后的节点诊断/文本不等/修订冲突/历史首修订。对同一有CAPA EDIT但无FMEA读取权的员工，分别提交真实节点、虚构节点和不存在/不可见源对象：**状态码和响应正文逐字一致，均为固定403，节点读取次数为0，验证/修订/证明/成功审计均不新增**。另覆盖有FMEA VIEW但对象越范围的相同情形；只有已确认来源可见者才区分关联/节点缺失/类型错误。非声明旧调用的错误映射回归不变；`source_proof_issued` 仅创建响应，原因码只进审计。
 5. 修订覆盖：普通更新、采纳追加、审核发现建单三条真实路径均产生修订并失效旧证明；A→B→A 三修订不复用；字面量站点白名单与动态 `setattr` 断言能捕获未记录的新写入点；字段未变不新增修订。
-6. 失效与活性：验证改 `failed`、改绑来源、改文本/时间使证明不可用且不能复活；来源坐标/节点版本变化后新签发可 supersede 旧 active 证明（旧 proof 保留、不可用）；同一修订并发重复签发幂等/冲突安全；无删除路由，未来删除不作本片承诺。
-7. 交付：执行身份缺来源VIEW、来源节点消失/改类型/节点HMAC变化、工厂产品线变化、插件长期授权或任务授权缺正文投影、仅旧summary授权、错误profile/安装/epoch/期限，均拒绝且无正文/摘要/计数泄漏；正文安装无需旧summary grant，旧元数据安装不能获得正文；正文profile只要求正文能力，旧metadata仍只要求summary。
+6. 失效与活性：验证改 `failed`、改绑来源、改文本/时间使证明不可用且不能复活；来源坐标/节点版本变化后新签发可 supersede 旧 active 证明（旧 proof 保留、不可用）；同一修订并发重复签发幂等/冲突安全；无删除路由，未来删除不作本片承诺。证明变化不修改长期/任务来源范围。
+7. 两层来源授权的核心反例：执行人当前可读同产品线的节点A/B；分别令长期范围仅A/任务范围覆盖B，以及长期范围覆盖B/任务范围仅A，当前证明改为B后均拒绝（另以两条明确长期grant覆盖A/B、任务仅A验证相同结果），不能因正文/报告/产品线相同或有新proof digest而放行。只有两层均明确覆盖B且其他条件成立才允许。缺/空来源范围、来源projection不符、父grant停用/过期、跨grant拼接范围、同request_key换源、claim重试/resume/restart尝试刷新范围均拒绝；相同证明替换不会写授权旁表。正文安装无需旧summary grant，旧元数据安装不能获得正文；旧metadata请求不需新来源字段且不获得正文许可。
 8. 服务端消息边界：队列写入非字面量敏感哨兵，分别走首次领取、重领和历史读取，响应中无哨兵，批次/水位/成功审计无变化；ACK异常批次同样拒绝；旧profile队列语义回归不变。
 9. 空字段、64 KiB边界、编码膨胀、Unicode/词表边界、重复键/NaN/坏JSON/错标签/错绑定/慢滴/超时都不截断降级；已接收后的撤权不能被测试写成安全擦除承诺。
 10. DB迁移：只新增表，不修改冻结基线表/触发器/既有收据表；public/tenant升级与parity通过，租户revision注册与前驱集合、固定head/parity断言同步更新；受限收据只能restricted、旧internal链拒绝混入。
