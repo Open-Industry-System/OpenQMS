@@ -123,8 +123,10 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 | 声明形状/未知键/值非 true | 422，不写业务记录（Pydantic 校验） |
 | 有声明但缺 `source_ref`，或 `conclusion` 非 `passed` | 400，不写业务记录 |
 | `source_ref` 形状非法 | 400，不写业务记录 |
-| `source_ref` 指向不存在的 FMEA/节点 | 404，不写业务记录 |
-| `source_ref` 跨工厂/产品线或关联不符 | 403，不写业务记录 |
+| `source_ref` 指向不存在的 FMEA 文档 | 404，不写业务记录 |
+| `source_ref` 的节点不存在/非 `FailureCause` | 400，不写业务记录 |
+| 报告未关联 FMEA，或 `source_ref.fmea_id` 与已关联 FMEA 不符 | 400，不写业务记录 |
+| `source_ref` 跨工厂/产品线 | 403，不写业务记录 |
 | 有声明但产生者当前无 FMEA VIEW 或来源对象范围 | 403，不写业务记录 |
 | 已有修订记录但最新修订 HMAC 与当前文本不一致（未记录写入） | 409，不写业务记录 |
 | 文本去空白后不等于当前 `d4_root_cause` | 保存验证；创建响应 `source_proof_issued=false`，安全原因码只写 AuditLog |
@@ -203,7 +205,7 @@ protocol 仍为 `1`，不虚构 URL `/v1`。只有 run token 能调用新入口�
 - **来源修订表** `capa_d4_root_cause_revisions`：报告、序号、字段 HMAC、记录者/时间、安全写入路径；每报告序号唯一；仅元数据。应用写入路径负责追加（§4.4）。
 - **来源证明表** `capa_d4_root_cause_source_proofs`：报告、修订 ID/序号、租户代际、工厂/产品线、验证 ID/版本、来源投影、`fmea_id`/`cause_node_id`/节点 HMAC、字段 HMAC、声明类型、状态 active/superseded、产生者/时间；同一报告同一修订最多一条 active（partial unique index）。
 - 安全 AuditLog 绑定受限收据、当前执行人/坐标、规则、来源证明摘要、接收方和 `release_committed`。授权失败不输出内容或派生计数；诊断仅固定安全码，不带原始异常/响应/词表。
-- 迁移只新增表，不修改冻结基线表、不加触发器、不改既有收据表。新增手写 public 迁移接续 `20261102_agent_mainline_merge`；新增 tenant delta 接续 `tv006_agent_read_tasks`。同时必须更新：`tenant_migrator` 的当前/前驱 revision 常量（[tenant_migrator.py:19-24](../../../backend/app/services/tenant_migrator.py#L19-L24)）；`alembic_tenant/__init__.py` 的 `REVIEWED_REVISIONS` 精确元组（[__init__.py:17](../../../backend/alembic_tenant/__init__.py#L17)，对应 `test_agent_readonly_controls_delta.py` 的断言）；[tenant_schema_diff](../../../backend/app/services/tenant_schema_diff.py#L163-L190) 的前驱/新增对象集合；固定 head/parity 断言（`test_supplier_risk_capa_inputs_migration.py` 的单 head 断言、`test_agent_mainline_merge_graph.py`、`test_tenant_schema_parity.py` 中的迁移调用与当前head比较）。冻结 tv001–tv006 与基线快照不改；所有可升级 tenant 走原维护/代际与 parity 流程。
+- 迁移只新增表，不修改冻结基线表、不加触发器、不改既有收据表。新增手写 public 迁移接续 `20261102_agent_mainline_merge`；新增 tenant delta 接续 `tv006_agent_read_tasks`。同时必须更新：`tenant_migrator` 的当前/前驱 revision 常量（[tenant_migrator.py:19-24](../../../backend/app/services/tenant_migrator.py#L19-L24)）；`alembic_tenant/__init__.py` 的 `REVIEWED_REVISIONS` 精确元组（[__init__.py:17](../../../backend/alembic_tenant/__init__.py#L17)）；[tenant_schema_diff](../../../backend/app/services/tenant_schema_diff.py#L163-L190) 的前驱/新增对象集合；以及所有钉住当前 head/revision 的契约断言：`test_supplier_risk_capa_inputs_migration.py` 的单 head、`test_agent_mainline_merge_graph.py`、`test_agent_mainline_merge_db.py` 的 public `alembic_version`、`test_agent_readonly_controls_delta.py` 的 `ScriptDirectory` head/`alembic_version`、`test_multitenancy/test_agent_read_task_delta.py` 的 `REVISION`/`PREDECESSOR_REVISION`/`REVIEWED_REVISIONS`、`test_tenant_schema_parity.py` 的迁移调用与当前 head 比较。冻结 tv001–tv006 与基线快照不改；所有可升级 tenant 走原维护/代际与 parity 流程。
 - 没有降级清理正文/来源证据的便利操作；downgrade 必须拒绝丢失证据的路径，不能删记录“修复”。本片不认证生产回退。
 - 沿用现有证据保留/来源删除规则。GET/交付创建收据/审计可能影响证据保留，不能宣传为零平台副作用；仍不得修改 CAPA/D8/验证事实或 embedding/outbox。
 
