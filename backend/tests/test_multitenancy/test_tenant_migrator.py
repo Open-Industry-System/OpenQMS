@@ -210,6 +210,56 @@ async def test_disconnected_owner_cannot_reconnect_and_inherit_permission(tenant
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_name", ["InterfaceError", "InternalClientError"])
+async def test_driver_failure_discards_maintenance_owner_without_reconnect(tenant_record, error_name):
+    import asyncpg
+    from sqlalchemy import event
+
+    engine, attempt = tenant_record
+    armed = False
+    fired = False
+    statements = []
+    checkouts = []
+
+    def fail_verification(connection, cursor, statement, parameters, context, executemany):
+        nonlocal fired
+        if not armed:
+            return
+        statements.append(statement)
+        if not fired and "FROM public.tenants" in statement and "FOR SHARE" in statement:
+            fired = True
+            raise getattr(asyncpg, error_name)("maintenance driver connection failed")
+
+    def checkout(dbapi_connection, record, proxy):
+        if armed:
+            checkouts.append(record)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", fail_verification)
+    event.listen(engine.sync_engine, "checkout", checkout)
+    try:
+        async with maintenance_connection(engine, attempt) as maintenance:
+            initial_pid = maintenance.backend_pid
+            armed = True
+            with pytest.raises(TenantUnavailable, match="maintenance connection"):
+                await maintenance.compare_schema("public", {})
+            with pytest.raises(TenantUnavailable, match="maintenance connection"):
+                await maintenance.compare_schema("public", {})
+            assert attempt.backend_pid == initial_pid
+        armed = False
+        assert fired and len(statements) == 1
+        assert checkouts == []
+        async with engine.connect() as inspector:
+            assert await inspector.scalar(text("SELECT pg_backend_pid()")) != initial_pid
+            assert await inspector.scalar(text("SELECT pg_try_advisory_xact_lock_shared(:key)"),
+                                          {"key": attempt.lock_key})
+            assert await inspector.scalar(text("SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND pid=:pid"),
+                                          {"pid": initial_pid}) == 0
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", fail_verification)
+        event.remove(engine.sync_engine, "checkout", checkout)
+
+
+@pytest.mark.asyncio
 async def test_owner_exception_releases_session_lock(tenant_record):
     engine, attempt = tenant_record
     with pytest.raises(RuntimeError, match="stop"):

@@ -4,8 +4,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from uuid import UUID, uuid4
 
+import asyncpg
+
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 from sqlalchemy.orm import Session
 
@@ -72,6 +75,8 @@ def _claim(attempt: MaintenanceAttempt) -> tuple:
 
 def _owner_attempt(connection: AsyncConnection, schema_name: str) -> MaintenanceAttempt:
     """Recover the immutable claim captured at lock acquisition, not mutable caller state."""
+    if connection.closed or connection.invalidated:
+        raise TenantUnavailable("maintenance connection unavailable")
     owner = connection.info.get(_OWNER_KEY)
     if owner is None or owner[1] != schema_name:
         raise TenantUnavailable("tenant migration requires its maintenance lock owner")
@@ -403,32 +408,38 @@ async def maintenance_connection(engine: AsyncEngine, attempt: MaintenanceAttemp
 
 def _bind_maintenance_sync(connection: Connection, attempt: MaintenanceAttempt) -> None:
     """Recheck registry, backend PID and actual session-lock owner before path binding."""
-    claim = _claim(attempt)
-    if connection.info.get(_OWNER_KEY) != claim:
-        raise TenantUnavailable("maintenance connection is not the attempt owner")
-    row = connection.execute(text("""
-        SELECT status, generation, schema_name, provisioning_attempt_id
-        FROM public.tenants WHERE id=:id FOR SHARE
-    """), {"id": attempt.tenant_id}).one_or_none()
-    if (row is None or row.status not in ("provisioning", "maintenance")
-            or row.generation != attempt.generation or row.schema_name != attempt.schema_name
-            or row.provisioning_attempt_id != attempt.attempt_id):
-        raise TenantUnavailable("maintenance attempt, generation, status, or schema changed")
-    pid = connection.scalar(text("SELECT pg_backend_pid()"))
-    if pid != attempt.backend_pid:
-        raise TenantUnavailable("maintenance backend changed")
-    owns_lock = connection.scalar(text("""
-        SELECT EXISTS (SELECT 1 FROM pg_locks
-        WHERE locktype='advisory' AND mode='ExclusiveLock' AND granted
-          AND pid=pg_backend_pid() AND objsubid=1
-          AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
-          AND classid=((CAST(:key AS bigint) >> 32) & 4294967295)::oid
-          AND objid=(CAST(:key AS bigint) & 4294967295)::oid)
-    """), {"key": attempt.lock_key})
-    if not owns_lock:
-        raise TenantUnavailable("maintenance lock ownership lost")
-    connection.exec_driver_sql(strict_tenant_search_path_sql(attempt.schema_name))
-
+    if connection.closed or connection.invalidated:
+        raise TenantUnavailable("maintenance connection unavailable")
+    try:
+        claim = _claim(attempt)
+        if connection.info.get(_OWNER_KEY) != claim:
+            raise TenantUnavailable("maintenance connection is not the attempt owner")
+        row = connection.execute(text("""
+            SELECT status, generation, schema_name, provisioning_attempt_id
+            FROM public.tenants WHERE id=:id FOR SHARE
+        """), {"id": attempt.tenant_id}).one_or_none()
+        if (row is None or row.status not in ("provisioning", "maintenance")
+                or row.generation != attempt.generation or row.schema_name != attempt.schema_name
+                or row.provisioning_attempt_id != attempt.attempt_id):
+            raise TenantUnavailable("maintenance attempt, generation, status, or schema changed")
+        pid = connection.scalar(text("SELECT pg_backend_pid()"))
+        if pid != attempt.backend_pid:
+            raise TenantUnavailable("maintenance backend changed")
+        owns_lock = connection.scalar(text("""
+            SELECT EXISTS (SELECT 1 FROM pg_locks
+            WHERE locktype='advisory' AND mode='ExclusiveLock' AND granted
+              AND pid=pg_backend_pid() AND objsubid=1
+              AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+              AND classid=((CAST(:key AS bigint) >> 32) & 4294967295)::oid
+              AND objid=(CAST(:key AS bigint) & 4294967295)::oid)
+        """), {"key": attempt.lock_key})
+        if not owns_lock:
+            raise TenantUnavailable("maintenance lock ownership lost")
+        connection.exec_driver_sql(strict_tenant_search_path_sql(attempt.schema_name))
+    except (DBAPIError, asyncpg.InterfaceError, asyncpg.InternalClientError) as exc:
+        # Never retry a verifier on a replacement physical session.
+        connection.invalidate(exc)
+        raise TenantUnavailable("maintenance connection unavailable") from exc
 
 async def bind_maintenance_transaction(connection: AsyncConnection, attempt: MaintenanceAttempt) -> None:
     """Bind an internal DDL/seed/parity transaction on the original owner."""

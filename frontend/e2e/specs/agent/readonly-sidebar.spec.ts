@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Locator } from '@playwright/test';
+import { test, expect, type Page, type Locator, type Route, type APIResponse } from '@playwright/test';
 
 const scenario = process.env.AGENT_BROWSER_SCENARIO!;
 const report = process.env.AGENT_BROWSER_REPORT!;
@@ -63,6 +63,15 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
     localStorage.setItem('tenant_slug', tenant);
     localStorage.setItem('i18nextLng', 'zh');
   }, { token: login.access_token, refresh: login.refresh_token, tenant: process.env.AGENT_BROWSER_TENANT! });
+  let observeWindow: ((route: Route, response: APIResponse) => Promise<void>) | undefined;
+  if (scenario === 'window') {
+    // Intercept even polls started before fixture mutation, using real responses.
+    await page.route(`**/api/agent/tasks/${taskId}/activity?**`, async route => {
+      const response = await route.fetch();
+      if (observeWindow) await observeWindow(route, response);
+      else await route.fulfill({ response });
+    });
+  }
   const authMe = page.waitForResponse(r => r.url().includes('/api/auth/me') && r.status() === 200);
   await page.goto(`/capa/${report}`);
   await authMe; // real frontend AuthMe + current permissions after actual login
@@ -105,19 +114,17 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
     const released = new Promise<void>(resolve => { releaseSecond = resolve; });
     const observed: { watermark: number; sequences: number[]; history: boolean }[] = [];
     let cycle = 0;
-    await fixture(page, 'seed', { target: 110 });
-    await page.route(`**/api/agent/tasks/${taskId}/activity?**`, async route => {
+    observeWindow = async (route, response) => {
       const url = new URL(route.request().url());
       const history = url.searchParams.has('before_sequence');
-      const response = await route.fetch(); // actual authenticated backend read
       const body = await response.json();
       observed.push({ watermark: body.window_end_sequence, sequences: body.items.map((i: {sequence:number}) => i.sequence), history });
-      if (!history && cycle === 0) {
+      if (!history && cycle === 0 && body.window_end_sequence === 110) {
         cycle = 1;
         expect(body.window_end_sequence).toBe(110);
         expect(body.items.map((i: {sequence:number}) => i.sequence)).toEqual(range(61,110));
         await fixture(page, 'seed', { target: 111 }); // interpage actual commit
-      } else if (history && cycle === 1) {
+      } else if (history && cycle === 1 && url.searchParams.get('window_end_sequence') === '110') {
         expect(url.searchParams.get('window_end_sequence')).toBe('110');
         expect(body.window_end_sequence).toBe(110);
         expect(body.items.map((i: {sequence:number}) => i.sequence)).toEqual(range(11,60));
@@ -126,7 +133,15 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
         cycle = 2;
       }
       await route.fulfill({ response });
+    };
+    const firstLatest = page.waitForResponse(async response => {
+      const url = new URL(response.url());
+      return url.pathname === `/api/agent/tasks/${taskId}/activity`
+        && !url.searchParams.has('before_sequence') && response.status() === 200
+        && (await response.json()).window_end_sequence === 110;
     });
+    await fixture(page, 'seed', { target: 110 });
+    await firstLatest; // Observe the real poll while its history response stays held.
     await secondPending;
     await expect.poll(() => sequences(page)).toEqual(range(1,100)); // no partial latest publication
     releaseSecond();
