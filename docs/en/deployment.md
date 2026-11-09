@@ -35,11 +35,17 @@ Key environment variables:
 
 ### 1.3 Start Services
 
+The backend image uses Debian's official repository by default. In mainland China, you can optionally build with the TUNA mirror before starting the stack:
+
 ```bash
-docker compose up -d
+docker compose build --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn backend graph-worker
 ```
 
-The first startup will automatically build frontend and backend images. Check service status:
+```bash
+docker compose up -d db redis neo4j
+```
+
+Check the infrastructure status:
 
 ```bash
 docker compose ps
@@ -50,11 +56,14 @@ Wait for the `db` and `neo4j` containers to become `healthy` (approximately 15â€
 ### 1.4 Initialize the Database
 
 ```bash
-# Run database migrations
-docker compose exec backend alembic upgrade head
+# Run database migrations in a one-off container; the backend service need not be running
+docker compose run --rm backend alembic upgrade head
 
 # Import demo data (includes users, FMEA, CAPA, suppliers, etc.)
-docker compose exec backend python -m app.seed
+docker compose run --rm backend python -m app.seed
+
+# Start the complete application stack after the database is ready
+docker compose up -d
 ```
 
 ### 1.5 Access

@@ -166,7 +166,11 @@ def test_single_alembic_head():
     cfg = _cfg("postgresql+asyncpg://unused/metadata_only")
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    # Characteristic provenance extends the agent read-task head; no new branch.
-    assert heads == ["20261101_char_refs"], (
-        f"expected single head 20261101_char_refs, got {heads}"
+    # Additive merge keeps both previously shipped Agent branches reachable.
+    assert heads == ["20261108_merge_characteristics"], (
+        f"expected single head 20261108_merge_characteristics, got {heads}"
     )
+
+    ancestry = {revision.revision for revision in script.walk_revisions()}
+    assert {"20261101_char_refs", "20261103_merge_agent_foundations",
+            "20260929_agent_read_task", "20261009_agent_task_attachments"} <= ancestry

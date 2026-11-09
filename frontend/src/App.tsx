@@ -7,6 +7,7 @@ import type { ModuleKey } from "./hooks/usePermission";
 import AppLayout from "./components/layout/AppLayout";
 import LoginPage from "./pages/login/LoginPage";
 
+const PublicHomePage = lazy(() => import("./pages/public/PublicHomePage"));
 const DashboardPage = lazy(() => import("./pages/dashboard/DashboardPage"));
 const FMEAListPage = lazy(() => import("./pages/planning/fmea/FMEAListPage"));
 const FMEAEditorPage = lazy(() => import("./pages/planning/fmea/FMEAEditorPage"));
@@ -129,6 +130,7 @@ export default function App() {
   return (
     <Suspense fallback={<div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}><Spin size="large" /></div>}>
       <Routes>
+      <Route path="/" element={<PublicHomePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/tenant-suspended" element={<TenantSuspended />} />
       <Route path="/tenant-deactivated" element={<TenantDeactivated />} />
@@ -139,7 +141,6 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<ProtectedRoute requiredModule="dashboard"><DashboardPage /></ProtectedRoute>} />
         <Route path="/fmea" element={<ProtectedRoute requiredModule="fmea"><FMEAListPage /></ProtectedRoute>} />
         <Route path="/fmea/wizard/:id" element={<ProtectedRoute requiredModule="fmea"><DFMEAWizardPage /></ProtectedRoute>} />

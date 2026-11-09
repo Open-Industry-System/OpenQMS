@@ -55,6 +55,14 @@ CORRECTION_SCHEMA = {
 }
 
 
+PPT_REVIEW_RUNTIME_CONTEXT = (
+    "generation-info 的 version/status/rounds 由审查完成后的渲染层填充，"
+    "当前审查阶段不得评估、质疑或校正它们。\n"
+    "缺少关联 FMEA、SCAR 或风险预警时，附录中的“无”是忠实反映数据库的有效值，"
+    "不得要求补充或编造链接事实。"
+)
+
+
 @dataclass
 class ReviewOutcome:
     passed: bool
@@ -135,8 +143,11 @@ async def review_and_correct(
 
 
 async def _subagent_review(pc, skill, content) -> ReviewOutcome:
-    """构造审查 prompt = skill.content + PptContent 序列化 → LLM → 解析。"""
-    prompt = f"{skill.content}\n\n--- 待审查 PPT 内容 ---\n{_serialize_content(content)}"
+    """构造审查 prompt = skill.content + 运行上下文 + PptContent 序列化 → LLM → 解析。"""
+    prompt = (
+        f"{skill.content}\n\n--- 审查运行上下文 ---\n{PPT_REVIEW_RUNTIME_CONTEXT}"
+        f"\n\n--- 待审查 PPT 内容 ---\n{_serialize_content(content)}"
+    )
     result = await provider_adapter.complete_json(pc, prompt, REVIEW_SCHEMA)
     return ReviewOutcome(
         passed=result["passed"], issues=result["issues"], suggestions=result["suggestions"],
@@ -152,7 +163,8 @@ async def _subagent_correct(pc, skill, content, suggestions) -> PptContent:
     """
     sug_text = "\n".join(f"- {s}" for s in suggestions) or "- (无具体建议)"
     prompt = (
-        f"{skill.content}\n\n--- 待校正 PPT 内容 ---\n{_serialize_content(content)}"
+        f"{skill.content}\n\n--- 审查运行上下文 ---\n{PPT_REVIEW_RUNTIME_CONTEXT}"
+        f"\n\n--- 待校正 PPT 内容 ---\n{_serialize_content(content)}"
         f"\n\n--- 审查建议 ---\n{sug_text}"
         "\n\n请据此修订各页 section 的 value 以回应建议。约束：仅改写已存在内容的呈现，"
         "不得添加输入中不存在的事实（不编造数据）；保持页数与各页 title/label 不变。"

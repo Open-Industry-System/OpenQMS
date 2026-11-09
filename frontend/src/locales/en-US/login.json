@@ -10,6 +10,12 @@
   "login": "Login",
   "loginSuccess": "Login successful",
   "loginError": "Invalid username or password",
-  "defaultAccount": "Default account admin / Admin@2026",
+  "demo": {
+    "title": "Viewer read-only demo",
+    "description": "Browse all demo modules without creating, editing, or approving data.",
+    "username": "Username",
+    "password": "Password",
+    "fill": "Use Viewer account"
+  },
   "footer": "© OpenQMS · China Manufacturing Quality Operating System"
 }

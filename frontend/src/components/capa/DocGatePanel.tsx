@@ -10,6 +10,7 @@ import {
   AuditOutlined, CheckOutlined, ReloadOutlined, ThunderboltOutlined, ClockCircleOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { useCapaChildRequests } from "./useCapaViewRequests";
 import dayjs from "dayjs";
 import {
   advanceCAPA,
@@ -57,6 +58,7 @@ export default function DocGatePanel({
   audits: auditsProp, onAdvanced,
 }: DocGatePanelProps) {
   const { t } = useTranslation("capa");
+  const requests = useCapaChildRequests(capaId, canEdit);
   const [analysis, setAnalysis] = useState<DocGateAnalysis | null>(analysisProp ?? null);
   const [decision, setDecision] = useState<DocGateDecision | null>(decisionProp ?? null);
   const [audits, setAudits] = useState<DocGateAuditRow[]>(auditsProp ?? []);
@@ -68,29 +70,40 @@ export default function DocGatePanel({
   const [deferOpen, setDeferOpen] = useState(false);
   const [deferForm] = Form.useForm();
 
+  useEffect(() => {
+    setGenerating(false); setAuditing(false); setAdvancing(false); setDeferOpen(false); deferForm.resetFields();
+  }, [requests, deferForm]);
+
   const load = useCallback(async () => {
     if (analysisProp !== undefined) return; // test mode
+    const request = requests.begin();
+    if (!request.current()) return;
     setLoading(true);
     try {
       try {
-        const a = await getDocGateImpact(capaId);
+        const a = await getDocGateImpact(capaId, request.signal);
+        if (!request.current()) return;
         setAnalysis(a);
         if (a.status === "failed" && a.error?.includes("LLM")) setBlocked(true);
       } catch (e: unknown) {
+        if (!request.current()) return;
         const ax = e as { response?: { status?: number } };
         if (ax?.response?.status === 404) setAnalysis(null);
         else throw e;
       }
-      const d = await getDocGateDecision(capaId);
+      const d = await getDocGateDecision(capaId, request.signal);
+      if (!request.current()) return;
       setDecision(d);
-      const au = await getDocGateAudit(capaId);
+      const au = await getDocGateAudit(capaId, request.signal);
+      if (!request.current()) return;
       setAudits(au.audits || []);
     } catch {
       /* silent: empty state is valid */
     } finally {
-      setLoading(false);
+      if (request.current()) setLoading(false);
+      request.finish();
     }
-  }, [capaId, analysisProp]);
+  }, [capaId, analysisProp, requests]);
 
   useEffect(() => {
     if (analysisProp !== undefined) {
@@ -106,10 +119,13 @@ export default function DocGatePanel({
   }, [load, analysisProp, decisionProp, auditsProp]);
 
   const handleGenerate = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     setGenerating(true);
     setBlocked(false);
     try {
-      const result = await docGateImpact(capaId);
+      const result = await docGateImpact(capaId, request.signal);
+      if (!request.current()) return;
       setAnalysis(result as DocGateAnalysis);
       if (result.status === "running") {
         message.info(t("docGate.retryAfter", "生成进行中，请稍后刷新"));
@@ -119,7 +135,9 @@ export default function DocGatePanel({
         message.error(result.error || t("docGate.generateFailed", "影响分析失败"));
       }
       await load();
+      if (!request.current()) return;
     } catch (e: unknown) {
+      if (!request.current()) return;
       if (isBlockedError(e)) {
         setBlocked(true);
         setAnalysis({ status: "failed", error: "LLM 未配置", is_current: false });
@@ -127,14 +145,18 @@ export default function DocGatePanel({
         message.error(errMsg(e));
       }
     } finally {
-      setGenerating(false);
+      if (request.current()) setGenerating(false);
+      request.finish();
     }
   };
 
   const handleAudit = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     setAuditing(true);
     try {
-      const result = await runDocGateAudit(capaId);
+      const result = await runDocGateAudit(capaId, request.signal);
+      if (!request.current()) return;
       setAudits(result.audits || []);
       setDecision({ decision: result.decision as DocGateDecision["decision"] });
       message.success(
@@ -143,52 +165,71 @@ export default function DocGatePanel({
           : t("docGate.auditBlocked", "审核未通过，门禁阻断"),
       );
       await load();
+      if (!request.current()) return;
     } catch (e: unknown) {
+      if (!request.current()) return;
       message.error(errMsg(e));
     } finally {
-      setAuditing(false);
+      if (request.current()) setAuditing(false);
+      request.finish();
     }
   };
 
   const handleConfirmEmpty = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
-      const result = await confirmNoAffected(capaId);
+      const result = await confirmNoAffected(capaId, request.signal);
+      if (!request.current()) return;
       setDecision({
         decision: result.decision as DocGateDecision["decision"],
         no_affected_confirmed: result.no_affected_confirmed,
       });
       message.success(t("docGate.confirmEmptyDone", "已确认无受影响文档"));
       await load();
+      if (!request.current()) return;
     } catch (e: unknown) {
+      if (!request.current()) return;
       message.error(errMsg(e));
-    }
+    } finally { request.finish(); }
   };
 
   const handleDefer = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
       const values = await deferForm.validateFields();
+      if (!request.current()) return;
       await recordDocGateDefer(capaId, {
         reason: values.reason,
         owner_id: values.owner_id,
         deadline: values.deadline.format("YYYY-MM-DD"),
-      });
+      }, request.signal);
+      if (!request.current()) return;
       message.success(t("docGate.deferDone", "已记录延期（门禁仍阻断）"));
       setDeferOpen(false);
       deferForm.resetFields();
       await load();
+      if (!request.current()) return;
     } catch (e: unknown) {
+      if (!request.current()) return;
       if ((e as { errorFields?: unknown }).errorFields) return;
       message.error(errMsg(e));
-    }
+    } finally { request.finish(); }
   };
 
   const handleAdvance = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     setAdvancing(true);
     try {
-      await advanceCAPA(capaId, { target_state: "D8_APPROVAL_PENDING" });
+      await advanceCAPA(capaId, { target_state: "D8_APPROVAL_PENDING" }, request.signal);
+      if (!request.current()) return;
+      await onAdvanced?.();
+      if (!request.current()) return;
       message.success(t("docGate.advanceDone", "已推进到审批"));
-      onAdvanced?.();
     } catch (e: unknown) {
+      if (!request.current()) return;
       const msg = errMsg(e);
       if (msg.includes("文档已变更")) {
         message.error(t("docGate.docChanged", "文档已变更，请重新审核"));
@@ -198,8 +239,10 @@ export default function DocGatePanel({
         message.error(msg);
       }
       await load();
+      if (!request.current()) return;
     } finally {
-      setAdvancing(false);
+      if (request.current()) setAdvancing(false);
+      request.finish();
     }
   };
 

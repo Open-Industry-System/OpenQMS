@@ -105,12 +105,18 @@ test.describe("doc-gate D8 document update gate", () => {
     }
     expect(["done", "failed"]).toContain(impactBody.status);
 
-    if (impactBody.status !== "done") {
+    // POST/POLL responses are summaries; GET provides the authoritative affected_docs list.
+    const currentImpact = await ac.get(`/capa/${capaId}/doc-gate/impact`, ok);
+    expect(currentImpact.status).toBe(200);
+    const fullImpact = currentImpact.data;
+    expect(["done", "failed"]).toContain(fullImpact.status);
+
+    if (fullImpact.status !== "done") {
       // Distinguish expected skips from real regressions (review test-quality #2):
       // - "LLM 未配置" / "BLOCKED" = no LLM creds in this env → expected skip.
       // - Any other failure (LLM returned garbage, validate error, input_changed)
       //   is a real product defect → surface as a test failure, not a silent skip.
-      const err = String(impactBody.error || "");
+      const err = String(fullImpact.error || "");
       const noCreds = err.includes("LLM 未配置") || err.includes("BLOCKED");
       if (noCreds) {
         test.skip(true, `Impact analysis skipped (no LLM credentials): ${err}`);
@@ -121,7 +127,8 @@ test.describe("doc-gate D8 document update gate", () => {
       );
     }
 
-    const affected = impactBody.affected_docs || [];
+    expect(Array.isArray(fullImpact.affected_docs)).toBe(true);
+    const affected = fullImpact.affected_docs;
     if (affected.length === 0) {
       const conf = await ac.post(`/capa/${capaId}/doc-gate/confirm-no-affected`, {}, ok);
       expect(conf.status).toBe(200);

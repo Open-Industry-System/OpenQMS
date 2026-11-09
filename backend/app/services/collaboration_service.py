@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.collaboration_session import CollaborationSession
 from app.models.fmea import FMEADocument
+from app.models.control_plan import ControlPlan
 
 SESSION_TTL_SECONDS = 60
 
@@ -49,23 +50,28 @@ async def upsert_session(
     await db.commit()
 
 
+async def resolve_document_scope(
+    db: AsyncSession, document_type: str, document_id: uuid.UUID
+) -> tuple[uuid.UUID, str | None]:
+    """Resolve only owning factory/line metadata, never document or item bodies."""
+    if document_type == "fmea":
+        model, key = FMEADocument, FMEADocument.fmea_id
+    elif document_type == "control_plan":
+        model, key = ControlPlan, ControlPlan.cp_id
+    else:
+        raise ValueError("unsupported_document_type")
+    row = (await db.execute(select(model.factory_id, model.product_line_code)
+                            .where(key == document_id))).one_or_none()
+    if row is None or row[0] is None:
+        raise ValueError("document_not_found")
+    return row[0], row[1]
+
+
 async def resolve_document_factory_id(
     db: AsyncSession, document_type: str, document_id: uuid.UUID
 ) -> uuid.UUID:
-    """Resolve the owning factory for a collaboration document.
-
-    Raises ValueError("document_not_found") when the document does not exist
-    and ValueError("unsupported_document_type") for unknown types; the API
-    layer converts these to HTTPException.
-    """
-    if document_type == "fmea":
-        factory_id = await db.scalar(
-            select(FMEADocument.factory_id).where(FMEADocument.fmea_id == document_id)
-        )
-        if factory_id is None:
-            raise ValueError("document_not_found")
-        return factory_id
-    raise ValueError("unsupported_document_type")
+    """Keep the existing factory-only resolver contract for FMEA admission."""
+    return (await resolve_document_scope(db, document_type, document_id))[0]
 
 
 async def delete_session(

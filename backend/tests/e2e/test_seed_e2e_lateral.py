@@ -7,6 +7,8 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.capa import CAPAEightD
 from app.models.product_line import ProductLine
+from app.models.role import UserProductLine
+from app.models.user import User
 from app.seed_e2e import (
     _seed_accounts,
     _seed_factories,
@@ -18,6 +20,10 @@ from app.seed_e2e_constants import (
     LATERAL_E2E_CAPA_002,
     LATERAL_E2E_CAPA_BLOCK,
     LATERAL_E2E_CAPA_EMPTY,
+    LATERAL_PL_A,
+    LATERAL_PL_B,
+    LATERAL_PL_C,
+    LATERAL_PL_D,
     LATERAL_PL_SRC,
 )
 
@@ -43,3 +49,11 @@ async def test_lateral_seed_present(db, monkeypatch):
 
     pl = await db.scalar(select(ProductLine).where(ProductLine.code == LATERAL_PL_SRC))
     assert pl is not None
+
+    expected_product_lines = {LATERAL_PL_SRC, LATERAL_PL_A, LATERAL_PL_B, LATERAL_PL_C, LATERAL_PL_D}
+    for username in ("engineer", "manager"):
+        user = await db.scalar(select(User).where(User.username == username))
+        assigned_product_lines = set((await db.scalars(
+            select(UserProductLine.product_line_code).where(UserProductLine.user_id == user.user_id)
+        )).all())
+        assert expected_product_lines <= assigned_product_lines

@@ -44,7 +44,7 @@ describe("D4VerificationCard", () => {
       conclusion: "passed",
       evidence_attachments: [],
       source_ref: null,
-    }));
+    }, expect.any(AbortSignal)));
   });
 
   it("patches existing record conclusion=failed via list inline button (PATCH not re-POST)", async () => {
@@ -57,7 +57,7 @@ describe("D4VerificationCard", () => {
     renderCard();
     await waitFor(() => expect(screen.queryByTestId("verification-item-0")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("verify-fail-0"));
-    await waitFor(() => expect(updateVerification).toHaveBeenCalledWith("c1", "v1", { conclusion: "failed" }));
+    await waitFor(() => expect(updateVerification).toHaveBeenCalledWith("c1", "v1", { conclusion: "failed" }, expect.any(AbortSignal)));
     expect(createVerification).not.toHaveBeenCalled();
   });
 
@@ -71,7 +71,7 @@ describe("D4VerificationCard", () => {
     renderCard();
     await waitFor(() => expect(screen.queryByTestId("verification-item-0")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("verify-pass-0"));
-    await waitFor(() => expect(updateVerification).toHaveBeenCalledWith("c1", "v1", { conclusion: "passed" }));
+    await waitFor(() => expect(updateVerification).toHaveBeenCalledWith("c1", "v1", { conclusion: "passed" }, expect.any(AbortSignal)));
   });
 
   it("passed submit blocked when all details empty (cross-field validator)", async () => {
@@ -117,7 +117,7 @@ describe("D4VerificationCard", () => {
       conclusion: "pending",
       evidence_attachments: [],
       source_ref: null,
-    }));
+    }, expect.any(AbortSignal)));
   });
 
   it("renders method Select with three options", async () => {

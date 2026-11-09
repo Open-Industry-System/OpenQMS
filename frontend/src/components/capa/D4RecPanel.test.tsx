@@ -77,7 +77,7 @@ describe("D4RecPanel adopt", () => {
       source: "fmea_graph",
       stage_index: 2,
       item_ref: expect.objectContaining({ failure_cause_node_id: "c1", fmea_id: "f1" }),
-    })));
+    }), expect.any(AbortSignal)));
     await waitFor(() => expect(onAdopted).toHaveBeenCalled());
   });
 
@@ -92,7 +92,7 @@ describe("D4RecPanel adopt", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(adoptRecommendation).not.toHaveBeenCalled();
     resolveBefore();
-    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d4", stage_index: 2 })));
+    await waitFor(() => expect(adoptRecommendation).toHaveBeenCalledWith("c1", expect.objectContaining({ d_step: "d4", stage_index: 2 }), expect.any(AbortSignal)));
   });
 
   it("does not call adoptRecommendation when beforeAdopt rejects (save failed → block adopt)", async () => {

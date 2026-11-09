@@ -86,10 +86,20 @@ key_point（baseline item_id 在 latest 中消失）、`stale_analysis` 或
 
 ### 1.4 本地/首次初始化（开发）
 
+后端镜像默认使用 Debian 官方软件源。中国大陆网络环境可在首次启动前选择 TUNA 镜像加速构建：
+
 ```bash
+docker compose build --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn backend graph-worker
+```
+
+```bash
+# 先启动数据库和基础设施；此时不要启动依赖业务表的应用进程
+docker compose up -d db redis neo4j
+# one-off backend 不要求常驻 backend 容器已经运行
+docker compose run --rm backend alembic upgrade head
+docker compose run --rm backend python -m app.seed
+# 数据库准备完成后再启动完整应用栈
 docker compose up -d
-docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.seed
 ```
 
 ### 1.5 访问
@@ -112,9 +122,29 @@ docker compose exec backend python -m app.seed
 | `viewer` | `Viewer@2026` | 只读用户 |
 | `groupadmin` | `GroupAdmin@2026` | 系统管理员（集团） |
 
-> ⚠️ 生产环境请务必修改默认密码。
+> 上述种子账号仅用于本地开发。公开部署不得暴露这些凭据，并应为所有实际账号设置独立密码。
 
-### 1.7 停止与重启
+### 1.7 公开 Viewer 演示
+
+Viewer 演示入口默认关闭。需要在一次性、可丢弃的演示环境中启用时，可使用以下配置作为模板：
+
+```dotenv
+VITE_PUBLIC_DEMO_ENABLED=true
+VITE_PUBLIC_DEMO_USERNAME=viewer-demo
+VITE_PUBLIC_DEMO_PASSWORD=change-me-viewer-demo-only
+```
+
+示例密码 `change-me-viewer-demo-only` 是刻意设置的无效文档占位值，不是仓库密钥；运维人员必须将其替换为专用 Viewer 演示账号的密码。
+
+- 这三个值由 Vite 读取并嵌入浏览器收到的 JavaScript，因此不能作为秘密保存。
+- 只能在可丢弃的演示环境中使用专用 Viewer 账号；绝不能使用生产账号或 Admin、Manager、Engineer 凭据。
+- 即使 `VITE_PUBLIC_DEMO_ENABLED=true`，缺少用户名或密码也会关闭演示 UI。
+- Docker Compose 从项目根目录的 `.env` 读取这些变量，并传给前端容器。
+- 单独运行 `cd frontend && npm run dev` 时，Vite 不会加载项目根目录的 `.env`；请将 `VITE_PUBLIC_DEMO_*` 写入不跟踪的 `frontend/.env.local`，或在启动进程的环境中导出。
+- 修改 Vite 变量后必须重启开发服务器；已构建的部署必须重新构建前端。
+- 多角色公开演示需要隔离租户、自动重置、写入限流和危险操作控制，本次变更未启用该能力。
+
+### 1.8 停止与重启
 
 ```bash
 # 停止所有服务

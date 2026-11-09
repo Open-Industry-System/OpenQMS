@@ -8,6 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.e2e_cleanup_whitelist import CLEANUP_PARENTS
+from app.models.capa import CAPAEightD
+from app.models.capa_d3 import (
+    CapaD3AdviceAdoption,
+    CapaD3AdviceGeneration,
+    CapaD3AiAdvice,
+    CapaD3ContainmentSnapshot,
+    CapaD3Execution,
+    CapaD3ImpactReport,
+    CapaD3ImportRun,
+)
 from app.models.factory import Factory, UserFactory
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
@@ -53,6 +63,38 @@ VERSION_TRIGGERS = [
 ]
 
 
+async def _delete_capa_d3_chains(db: AsyncSession, capa_ids: list, deleted: dict[str, int]) -> None:
+    """Delete RESTRICT-linked D3 records for CAPAs in FK-reverse order."""
+    run_ids = [row[0] for row in (await db.execute(
+        select(CapaD3ImportRun.run_id).where(CapaD3ImportRun.capa_id.in_(capa_ids))
+    )).all()]
+    if not run_ids:
+        return
+    report_ids = [row[0] for row in (await db.execute(
+        select(CapaD3ImpactReport.report_id).where(CapaD3ImpactReport.run_id.in_(run_ids))
+    )).all()]
+    generation_ids = [row[0] for row in (await db.execute(
+        select(CapaD3AdviceGeneration.generation_id).where(
+            CapaD3AdviceGeneration.report_id.in_(report_ids))
+    )).all()]
+    advice_ids = [row[0] for row in (await db.execute(
+        select(CapaD3AiAdvice.advice_id).where(CapaD3AiAdvice.generation_id.in_(generation_ids))
+    )).all()]
+
+    for model, column, ids in [
+        (CapaD3AdviceAdoption, CapaD3AdviceAdoption.advice_id, advice_ids),
+        (CapaD3Execution, CapaD3Execution.report_id, report_ids),
+        (CapaD3AiAdvice, CapaD3AiAdvice.advice_id, advice_ids),
+        (CapaD3AdviceGeneration, CapaD3AdviceGeneration.generation_id, generation_ids),
+        (CapaD3ImpactReport, CapaD3ImpactReport.report_id, report_ids),
+        (CapaD3ContainmentSnapshot, CapaD3ContainmentSnapshot.run_id, run_ids),
+        (CapaD3ImportRun, CapaD3ImportRun.run_id, run_ids),
+    ]:
+        if ids:
+            result = await db.execute(delete(model).where(column.in_(ids)))
+            deleted[model.__name__] = deleted.get(model.__name__, 0) + result.rowcount
+
+
 @router.post("/cleanup")
 async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20), db: AsyncSession = Depends(get_db)):
     """Whitelist-based, FK-ordered delete in a single transaction. Never string-concats table names.
@@ -72,6 +114,8 @@ async def cleanup_test_data(prefix: str = Query(..., min_length=4, max_length=20
             parent_ids = [row[0] for row in (await db.execute(select(pk).where(col.like(f"{escaped}%")))).all()]
             if not parent_ids:
                 continue
+            if model is CAPAEightD:
+                await _delete_capa_d3_chains(db, parent_ids, deleted)
             # Delete children first by FK to parent PK.
             for child_model, fk_col in children:
                 # Nested RESTRICT children of capa_docg_analysis must go first.

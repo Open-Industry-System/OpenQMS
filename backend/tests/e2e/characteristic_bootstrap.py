@@ -18,10 +18,13 @@ def require_owned_database(env: dict) -> str:
     if not url or env.get('TEST_DATABASE_URL') != url:
         raise ValueError('Both owned database URLs must be explicit and identical')
     parsed = urlsplit(url)
-    if (parsed.scheme, parsed.hostname, parsed.port, parsed.path) != (
-        'postgresql+asyncpg', '127.0.0.1', 55432, '/qms_test'
-    ) or parsed.query or parsed.fragment:
+    if ((parsed.scheme, parsed.hostname, parsed.path) != (
+        'postgresql+asyncpg', '127.0.0.1', '/qms_test'
+    ) or parsed.port not in {55432, 55433} or parsed.query or parsed.fragment):
         raise ValueError('Only the task-owned loopback qms_test endpoint is authorized')
+    if parsed.port == 55433:
+        from tests.ci.owned_resources import verify_owned_instance
+        verify_owned_instance(env)
     return url
 
 

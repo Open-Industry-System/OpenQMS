@@ -99,3 +99,26 @@ requiredModule="...">`.
   `types/`, `utils/`.
 - **Depended on by:** `App.tsx` only — pages are the leaves of the
   module graph and are not imported elsewhere.
+
+
+## Outcome-review handoff (2026-11-01)
+
+See the [operator guide](../../../docs/development/capa-outcome-review.md) for current-material review,
+explicit reload after conflict/uncertainty, historical unbound labels, and terminal
+core versus unreviewed closure-supplement rules (archived supplement retains the
+existing 400; reviewed core and mixed updates use 409). Controlled revision/reopen
+is not implemented. No plugin/model delivery or production enablement is authorized.
+Stories 01.3 v2, 01.7 v3 and 01.8 v2 and their derived walkthroughs keep the
+2026-10-27 business-contract versions; this is not signoff for every story walkthrough.
+The authorized TEST-profile Task 7 gate passed: one real-provider HTTP/D8/Chromium/
+knowledge/lateral primary chain plus two independent protection cases (3 passed,
+5 warnings, exit 0). The separate real ClamAV gate passed (process 7 + browser 1).
+The new source-frozen full `make check` passed: 3450 passed, 12 skipped, 3 xfailed,
+2 xpassed, 5 warnings, exit 0. These ordinary skips do not substitute for scanner
+acceptance. The 1390-file freeze explicitly preserves the user-deleted example.
+Actual post-full checks and evidence are recorded in PROGRESS's final Task 8 section
+and the private final-closure report. Final independent review passed; the exact
+registered core container and its exclusive volume (both owned test databases)
+were disposed after fresh identity and zero-use checks. The worktree, user TEST
+profile, user-owned example deletion and all evidence remain preserved.
+No dependency, migration, authority, self-approval, or deployment change is implied.

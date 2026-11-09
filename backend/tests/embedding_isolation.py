@@ -1,19 +1,21 @@
-"""Opt-in DB isolation for exactly three embedding integration-test modules.
+"""Opt-in isolated PUBLIC databases for exactly three embedding test modules.
 
-Never drains or fake-embeds the retained browser queue. Actual claim/fetch/upsert
-SQL runs against copied required tables and full FK closure in an owned schema.
-No production engine, batching, provider, global/autouse fixture is modified.
+The registered runner owns qms_test; mig_db_url owns each separate throwaway DB.
+Main's single-tenant CAPA namespace checks stay enabled. Real queues, migrations,
+FKs, immutable/hash guards and commits never touch retained/browser queues.
 """
+import asyncio
 import os
+from pathlib import Path
 import re
-import uuid
 
 import pytest_asyncio
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-
-from sqlalchemy.engine import make_url
 
 
 def require_isolated_test_database(env):
@@ -23,76 +25,31 @@ def require_isolated_test_database(env):
         raise ValueError("Explicit isolated TEST_DATABASE_URL with database qms_test required")
     return url
 
-ROOT_TABLES = {
-    'factories', 'product_lines', 'role_definitions', 'role_permissions', 'users',
-    'user_factories', 'user_product_lines', 'capa_eightd', 'capa_d7_node_action',
-    'capa_root_cause_verification', 'capa_lessons_learned', 'fmea_documents',
-    'knowledge_entries', 'document_embeddings', 'embedding_sync_outbox',
-    'audit_logs', 'graph_sync_outbox',
-}
-
 
 @pytest_asyncio.fixture
-async def embedding_test_engine():
-    url = require_isolated_test_database(os.environ)
-    schema = 'tenant_embedding_' + uuid.uuid4().hex
-    admin = create_async_engine(url, poolclass=NullPool)
-    private = None
-    created = False
+async def embedding_test_engine(mig_db_url):
+    target = make_url(require_isolated_test_database(os.environ))
+    private = make_url(mig_db_url)
+    if (private.set(database=target.database) != target
+            or not re.fullmatch(r"qms_migtest_[0-9a-f]{32}_test", private.database or "")):
+        raise ValueError("Embedding fixture requires the runner-owned migration database")
+    root = Path(__file__).resolve().parents[1]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    config.set_main_option("sqlalchemy.url", mig_db_url)
+    await asyncio.to_thread(command.upgrade, config, "head")
+    engine = create_async_engine(mig_db_url, poolclass=NullPool)
     try:
-        async with admin.begin() as connection:
-            foreign_keys = (await connection.execute(text('''
-                SELECT c.relname, p.relname, k.conname, pg_get_constraintdef(k.oid)
-                FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
-                JOIN pg_namespace cn ON cn.oid=c.relnamespace
-                JOIN pg_class p ON p.oid=k.confrelid
-                JOIN pg_namespace pn ON pn.oid=p.relnamespace
-                WHERE k.contype='f' AND cn.nspname='public' AND pn.nspname='public'
-            '''))).all()
-            tables = set(ROOT_TABLES)
-            while True:
-                closure = tables | {parent for child, parent, _, _ in foreign_keys if child in tables}
-                if closure == tables:
-                    break
-                tables = closure
-            assert all(re.fullmatch('[a-z0-9_]+', name) for name in tables)
-            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-            created = True
-            for table in sorted(tables):
-                await connection.execute(text(f'CREATE TABLE "{schema}"."{table}" (LIKE public."{table}" INCLUDING ALL)'))
-            for child, _, name, definition in foreign_keys:
-                if child not in tables:
-                    continue
-                def target(match):
-                    assert match[1] in tables, 'No FK may fall back to public'
-                    return f'REFERENCES "{schema}"."{match[1]}"'
-                definition = re.sub(r'REFERENCES (?:public\.)?"?([a-z0-9_]+)"?', target, definition)
-                await connection.execute(text(f'ALTER TABLE "{schema}"."{child}" ADD CONSTRAINT "{name}" {definition}'))
-            for table in sorted(tables):
-                triggers = (await connection.execute(text('''
-                    SELECT pg_get_triggerdef(oid) FROM pg_trigger
-                    WHERE tgrelid=to_regclass(:table) AND NOT tgisinternal
-                '''), {'table': 'public.' + table})).scalars().all()
-                for definition in triggers:
-                    definition = definition.replace(f' ON public.{table} ', f' ON "{schema}"."{table}" ')
-                    await connection.execute(text(definition))
-            # Existing real-commit worker tests require the stable factory to be
-            # visible independently, not blocked by the flush-only fixture.
-            await connection.execute(text(f'INSERT INTO "{schema}".factories (id,code,name) VALUES (:id,\'TEST\',\'Test Factory\')'),
-                                     {'id': uuid.UUID('00000000-0000-0000-0000-000000000001')})
-        private = create_async_engine(url, poolclass=NullPool, connect_args={
-            'server_settings': {'search_path': f'"{schema}", public'},
-        })
-        # Connection startup defaults survive both COMMIT and ROLLBACK and apply
-        # to every new checkout, unlike transaction-local SET search_path.
-        yield private
+        # Real-commit worker fixtures need the stable parent visible independently.
+        async with engine.begin() as connection:
+            await connection.execute(text(
+                "INSERT INTO factories (id,code,name) VALUES "
+                "('00000000-0000-0000-0000-000000000001','TEST','Test Factory') "
+                "ON CONFLICT (id) DO NOTHING"
+            ))
+        yield engine
     finally:
-        if private is not None:
-            await private.dispose()
-        if created:
-            async with admin.begin() as connection:
-                await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        await admin.dispose()
+        await engine.dispose()  # mig_db_url alone owns dropping its entire DB.
 
 
 @pytest_asyncio.fixture

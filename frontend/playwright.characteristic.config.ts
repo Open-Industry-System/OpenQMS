@@ -1,4 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 // Opt-in configuration: never invokes shared global setup/teardown or reset.
 if (!process.env.CHARACTERISTIC_PYTHON) throw new Error('Explicit installed test Python required for read-only outbox metadata assertion');
@@ -8,7 +10,9 @@ if (!process.env.CHARACTERISTIC_WORKER_PID) throw new Error('Explicit owned work
 const database = process.env.DATABASE_URL;
 if (!database || process.env.TEST_DATABASE_URL !== database) throw new Error('Explicit identical owned DB URLs required');
 const db = new URL(database.replace('postgresql+asyncpg:', 'postgresql:'));
-if (db.hostname !== '127.0.0.1' || db.port !== '55432' || db.pathname !== '/qms_test' || db.search || db.hash) throw new Error('Only owned qms_test is authorized');
+if (db.hostname !== '127.0.0.1' || !['55432', '55433'].includes(db.port) || db.pathname !== '/qms_test' || db.search || db.hash) throw new Error('Only owned qms_test is authorized');
+// The new integration endpoint also needs main's registered Docker identity.
+execFileSync(process.env.CHARACTERISTIC_PYTHON!, ['-c', 'import os; from tests.e2e.characteristic_bootstrap import require_owned_database; require_owned_database(os.environ)'], { cwd: resolve('../backend'), stdio: 'pipe' });
 const baseURL = process.env.CHARACTERISTIC_UI_URL;
 const apiURL = process.env.CHARACTERISTIC_API_URL;
 for (const value of [baseURL, apiURL]) {

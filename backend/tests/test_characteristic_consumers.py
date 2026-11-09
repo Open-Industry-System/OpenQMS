@@ -479,16 +479,18 @@ async def test_actual_approved_import_baseline_and_manual_override_survive_sc_co
 
 async def test_actual_request_transaction_rolls_back_mid_extraction_failure(sync_tenants, monkeypatch):
     """Real API + production get_db lifecycle, observed from a fresh connection."""
-    from fastapi import Depends, Request
+    from fastapi import Depends
+    from sqlalchemy import text
+    from app.core.tenant_utils import current_tenant_schema, strict_tenant_search_path_sql
     from httpx import ASGITransport, AsyncClient
     from sqlalchemy.ext.asyncio import AsyncSession
-    from types import SimpleNamespace
     from app.database import get_db
     from app.models.role import RolePermission
     from app.models.fmea_version import FMEAVersion
 
     sessions, schemas = sync_tenants
     schema = schemas[0]
+    token = current_tenant_schema.set(schema)
     ids, _ = await seed_tenant(sessions, schema)
     async with sessions() as db:
         await tenant_scope(db, schema, ids[3])
@@ -497,13 +499,10 @@ async def test_actual_request_transaction_rolls_back_mid_extraction_failure(sync
         db.add(RolePermission(role_id=ids[2], module='special_characteristic', permission_level=2))
         await db.commit()
 
-    async def request_db(request: Request):
-        request.state.tenant = SimpleNamespace(schema_name=schema)
-        async for session in get_db(request):
-            yield session
-
     async def request_scope(db: AsyncSession = Depends(get_db)):
-        return await tenant_scope(db, schema, ids[3])
+        scope = await tenant_scope(db, schema, ids[3])
+        await db.execute(text(strict_tenant_search_path_sql(schema)))
+        return scope
 
     original_audit = svc._create_audit
     staged_counts = []
@@ -517,11 +516,12 @@ async def test_actual_request_transaction_rolls_back_mid_extraction_failure(sync
 
     monkeypatch.setattr(svc, '_create_audit', fail_second_create)
     prior = dict(app.dependency_overrides)
-    app.dependency_overrides[get_db] = request_db
+    app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides[get_request_scope] = request_scope
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
-            response = await client.post(f'/api/special-characteristics/sync-from-fmea/{ids[5]}')
+            response = await client.post(f'/api/special-characteristics/sync-from-fmea/{ids[5]}',
+                                         headers={'X-Tenant-ID': schema.replace('_', '-')})
         assert response.status_code == 404, response.text
         assert 'injected_mid_extraction_failure' in response.text
         assert staged_counts == [1, 2]  # failure occurred after real rows were flushed
@@ -534,6 +534,7 @@ async def test_actual_request_transaction_rolls_back_mid_extraction_failure(sync
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(prior)
+        current_tenant_schema.reset(token)
 
 
 async def reviewed_import_controls(db, source, user, client, state='submitted'):

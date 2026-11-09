@@ -91,3 +91,16 @@ shapes sit side by side (`LoginRequest` next to `TokenResponse`,
 `GraphNode.characteristics?: Characteristic[] | null` preserves legacy absence/null versus explicit `[]`. A characteristic has stable UUID `id`, `kind` (product/process), nonblank `name`, separate `specification`, `unit`, optional `classification`, `reference`, and `related_product_characteristic_ids`. Kind is not a special classification. DFMEA shares Process*Function types but all design-owned characteristics are product.
 
 `CharacteristicSourceRef` is server-owned provenance: mapping version, FMEA/step/function/work-element/characteristic identity, and `accepted_source_version_id`. Ordinary CP writes omit it. Import/sync previews and confirms bind `source_fmea_version_id`, `expected_lock_version`, `preview_digest`, and `selected_candidate_keys`. Document `source_fmea_version_id` is not every row's accepted baseline; partial sync remains pending. No new node/edge types or standard CP columns.
+## Persistent Agent task contracts
+
+`agentTask.ts` declares user task/control and closed activity unions matching
+the backend schemas. Activity uses a bounded window/cursor envelope without a
+total; the installation directory returns only eligible IDs, names and versions.
+These read-specific envelopes are intentional; task lists retain pagination.
+Activity messages use `received` for confirmed reception, while the existing
+append acknowledgement uses `accepted`; neither proves execution. Runtime
+validation lives in `api/agentTasks.ts`, keeping this module declaration-only.
+
+`agentAttachment.ts` declares only task-scoped, scan-status metadata. It has no
+content, path, storage-key, or scanner-diagnostic fields; strict runtime validation
+remains in `api/agentTaskAttachments.ts`.

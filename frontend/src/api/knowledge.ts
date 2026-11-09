@@ -12,8 +12,8 @@ export async function listKnowledgeEntries(params: {
   factory_id?: string;
   source_type?: string;
   q?: string;
-}): Promise<KnowledgeEntryListResponse> {
-  const resp = await client.get("/knowledge/entries", { params });
+}, signal?: AbortSignal): Promise<KnowledgeEntryListResponse> {
+  const resp = await client.get("/knowledge/entries", { params, signal });
   return resp.data;
 }
 
@@ -26,6 +26,7 @@ export async function getKnowledgeEntry(id: string): Promise<KnowledgeEntryDetai
 export async function findCapaKnowledgeEntry(
   capaId: string,
   opts?: { document_no?: string; product_line_code?: string },
+  signal?: AbortSignal,
 ): Promise<KnowledgeEntrySummary | null> {
   const resp = await listKnowledgeEntries({
     source_type: "capa",
@@ -33,6 +34,6 @@ export async function findCapaKnowledgeEntry(
     q: opts?.document_no,
     page: 1,
     page_size: 50,
-  });
+  }, signal);
   return resp.items.find((item) => item.source_id === capaId) ?? null;
 }

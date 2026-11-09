@@ -687,3 +687,299 @@ c三个pageerror均0；console.error条数 **12/2/5**，全部为既有React fin
 ### 提交前协调者最终完整验证
 
 `parent-final-make.log/.exit`（同一owned55432 qms_test，完整make check）实际exit0：**2302 passed、5 skipped、5 xfailed、0 xpassed、3 warnings，280.36s**；随后tsc及Vite build通过（9.29s）。这是最终两处test-only修正后的新跑结果，不复用旧baseline。全量前端602/77、browser-c3/3、最终窄测试复审批准及截图LOOK事实见上节。用户授权提交推送当前功能分支；不创建PR、不合并、不部署，不清理受控测试证据或PG卷。提交范围113个功能文件，排除仅携带的architecture-maintenance.md、认证/截图/日志及scratch。
+
+
+## PR29 latest-main integration — 2026-11-08（验证进行中，未提交）
+
+### 范围、资源与边界
+
+在既有 `characteristic-correction` worktree 的 `--no-commit --no-ff origin/main`
+活动合并内处理。功能 HEAD 为 `3c5f6d9195b3dfba0831631874f08f1aae0987c9`，
+main/MERGE_HEAD 为 `c1d71afeec82e26dd93606dfe7549b8de2fc5582`。本节不复用
+上节 2302/602/3 的历史通过作为整合后证据；parent 负责独立复审及最终提交、推送和合并。
+
+旧 `openqms-characteristic-test-pg`（完整 ID `efdc07cd3ad5240de5e4ec0887f2d8a8730a37c58bc4c564ae142951bbb8651b`）
+仍在 `127.0.0.1:55432`，保留全部证据和 volume。其真实 task/worktree/purpose 标签不等于
+新 main 必需的 `openqms.owner`，因此先报告不兼容，没有伪造 registration、重建或重贴标签。
+随后经用户明确选择“创建新专用测试实例”，创建独立 `openqms-pr29-integration-pg`：
+完整 ID `2d224ae174d398a2c74070b3d0343d7d582e4650be8c929402a99fab29378875`，
+本地既有 `openqms-db:latest`，`127.0.0.1:55433/qms_test`，新 volume
+`openqms-pr29-integration-pg-data`，真实 `openqms.owner` nonce。secret-free registration
+为 `.superpowers/pr29-integration/resource.json`（0600），由 main 的 intended verifier
+核对 immutable ID/image/label/port。两实例和 volumes 均保留；未操作其他 worktree/settings、
+业务库、私密环境、外部 AI 或 live Neo4j。
+
+### 六处冲突的逐项理由
+
+| 文件 | 整合选择 |
+| --- | --- |
+| `PROGRESS.md` | 同时保留功能验收历史与 main 的 PR26 进度，另列本轮实际结果，不用一侧覆盖另一侧。 |
+| `backend/app/api/control_plan.py` | 保留 main 的 `get_control_plan` eager reload（TenantSession/提交后事务语义），同时保留逐特性 approved-source preview/apply/stale 接口、权限与事务返回。 |
+| `backend/app/services/capa_doc_gate_service.py` | phase1/3 同时执行 fresh persisted identity/namespace 和 main 当前 actor、状态及 reviewed-material guards；保留特性 CP input hash/current-analysis lock、main source scope/version lock及等待后权限复查。完整 CP 输入集合先于 referenced-subset 文档锁，以免不同 CAPA publisher 与 audit 的 UUID 顺序互逆。 |
+| `backend/tests/migrations/test_supplier_risk_capa_inputs_migration.py` | 断言实际 additive merge head，额外证明既有 Agent 两分支及 characteristic revision 全部可达；不选择任意一侧旧 head。 |
+| `frontend/src/pages/capa/CAPADetailPage.test.tsx` | 保留 outcome-review、D7、doc-gate 和 supplier mocks；只去重冲突合成的 `confirmRepeat`/supplier entries，不删断言、改 timeout 或跳过测试。 |
+| `frontend/src/types/README.md` | 同时保留 structured characteristics/provenance 与 persistent Agent task/attachment contracts。 |
+
+自动合并相关文件另检查 source delete guards、product-line access、版本 hash 的
+`public.digest` 和 approved snapshot/逐行 accepted baseline/late-event completion。
+特性 kind 与 CC/SC、旧缺失/null 与显式 []、标准 CP 列、CAPA/SPC/gauge/SC 保守保护均保留。
+
+### 直接兼容修复与真实 RED/GREEN
+
+- public 原来出现两个合法 heads；`migration-head-red` / `migration-lineage-red` 复现后新增
+  **无 DDL** 的 `20261108_merge_characteristics`，parents 恰为 `20261101_char_refs` 和
+  `20261103_merge_agent_foundations`。不改写任一旧 revision。
+- main 新独立 tenant chain 的冻结基线没有两个来源列，实际 provision 在 current parity
+  抛 `tenant schema does not match reviewed business snapshot`（`tenant-provision-red`）。
+  `tenant-delta-red` 与 `tenant-parity-red` 另证明新 tenant delta/精确历史比较缺失。
+  新增 `tv007_characteristic_refs -> tv006_agent_read_tasks`，DDL 与 public characteristic
+  migration完全相同；reviewed allowlist/migrator/current head同步。只在历史 reference 形状扣除
+  两个审定后来列，current head、tenant侧多余/部分对象不豁免，冻结 snapshot/hash不变。
+  真正 tv005/tv006 owned upgrade/rollback/parity/history-preservation 加入覆盖。
+- 自定义真实 commit fixture 原仅靠 search_path，main CAPA 当前权限检查如实拒绝（`capa-interlock-red`）。
+  仅测试夹具改为实际 active registry、generation、`TenantBinding`/`TenantSession` 和真实 CAPA EDIT
+  grant，保持独立 schema、真实 FK、不可变/哈希 guards；strict path 使用冻结审定 tenant-local
+  guards 而非依赖 public fallback。中途有效 slug/hash函数/权限等级夹具修正的失败日志均保留。
+- 多 phase helper 原会恢复 public fallback。第一次错误插桩没有实际到达 `db.scalar`，其 PASS
+  **不是 RED**；改为观察真实 phase CP-input 边界后 `phase-namespace-red-2` 确实失败。
+  生产修复是沿 main `require_business_namespace` 重新准入绑定事务，不再手动恢复 fallback。
+  最后真实8项 interlocks/权限撤销/reviewed-material/strict namespace通过。
+- `audit-order-red` 以另一个真实 PostgreSQL 连接的 `FOR UPDATE NOWAIT` 证明 audit 在锁 referenced
+  subset 前未持有完整 CP 输入锁。将完整 input-set lock移至 scope锁之后、version subset锁之前；
+  不移除 main source locks、等待后权限/analysis重查或特性 freshness checks。
+- 新55433浏览器guard先 RED，再由同一 main owned verifier证明 registration/真实 label；缺证或错 label
+  拒绝。配置和 outbox只读查询共用此守卫，仍只允许原55432和本次明确授权且proof-bound55433，
+  不改成任意 host/port、不放宽审批/immutable/hash/runtime guards。
+
+### 检查与运行状态（完成后续填）
+
+- `guard-lineage-green`：24 passed；`tenant-green`：16 passed；`interlock-lineage-green`：19 passed；
+  `phase-namespace-green`：8 passed。均 exit0，3项既有 Pydantic warnings。
+- 显式 projection 通过注册 runner：8 selected/8 passed/exit0；没有连接 Neo4j。
+- 最终 bounded Vitest：806 passed /95 files，exit0，80.28s；原 assertions/timeouts不变。
+- 第一轮 make 为**代码修改交错的预修复观察**，不作为 final source PASS。试图对核对了 cwd/command 的
+  本次 pytest28182发送 `kill -INT` 时被 workload classifier拒绝；没有其他信号/工具/peer重试，
+  让它自然结束。最终 full gate严格在其 exit文件出现之后才开始，不并发两个 full suite。
+- `git diff --check origin/main` exit0；对 HEAD 的全量检查只报告 main继承的四处其他文档空白问题，
+  未借整合任务改动这些无关历史文件。
+
+所有原始 `.log/.exit`、runner receipts、资源identity和review package保留在
+`.superpowers/pr29-integration/`。未新增 report.md、未 stage broad paths、未 commit/push/PR merge。
+本节仍待 full final gate、专用新 tag browser、LOOK、资源最终状态和 parent独立复审续填。
+
+
+### PR29 独立整合复审后的 CURRENT-head 与夹具兼容续记
+
+独立 review 指出 `test_agent_readonly_controls_delta.py` 仍把 **CURRENT** public/tenant
+head 固定为旧值。核实后只改这两个常量和 exact reviewed chain 中显式保留 tv006：
+原 controls static-equivalence、backfill、两组完整历史、所有约束与 downgrade assertions
+全部保留。完整注册 focused suite 先 **6 failed /14 passed /exit1**，后 **20 passed /exit0**；
+不是删除断言或把 current parity 改成历史 parity。`PUBLIC`/`PARENT` 等刻意历史修订不改。
+
+第一轮 make 自然结束，实际 **48 failed /3533 passed /456 errors /5 skipped /19 deselected /
+3 warnings /2060.85s**，Make exit2、runner exit1。先前 SIGINT 拒绝未被绕过。
+`.superpowers/pr29-integration/baseline-root-cause-inventory.json` 完整逐一对应 **504** 个
+FAILED/ERROR node（无未匹配项），保存每项实际 raw-log 行号、异常及处置：
+
+| 根因 | 实际数量 | 代表与处置 |
+| --- | ---: | --- |
+| 初始进程缓存的 pre-tv007 CURRENT parity | 456 ERROR +21 FAILED | Agent/API 完整 tenant fixtures 及 `test_seed_commit_then_platform_status_retry_uses_same_tenant`；新增真实 tv007/allowlist/migrator/current parity，正常 provision 与 drift rejection 实测。 |
+| 历史 predecessor 的新列参考形状 | 4 FAILED | controls nonempty ancestor 与 owned upgrade；只扣除审定后的 reference 增量，tenant/current 不隐藏差异。 |
+| 旧 CURRENT head literal | 4 FAILED | main-integration 与 controls 两套 metadata/head assertions；对齐实际 additive public/tenant head，保留历史 assertions。 |
+| raw 私有-schema 会话不符合 main 当前 CAPA namespace | 16 FAILED | 10 embedding/lessons +6 sync/race；不改生产 namespace/actor guards，改真实隔离测试会话。 |
+| 未捕获 tenant binding 的后台校验 | 3 FAILED | late-delivery permitted local override 的 validation 不能到达本测试 namespace；改真实捕获 binding 的普通后台路径，不伪造 completed。 |
+
+三个 embedding 模块改用 **既有 `mig_db_url` 正式夹具拥有的独立临时数据库**（仍是新55433，
+名称严格 `qms_migtest_<32hex>_test`，端点/用户名/口令/driver 必须等于注册父 target，
+只更换 database）。实际完整 Alembic public migrations、FK、四个 immutable/hash triggers、
+真实 outbox/worker SQL 与 commit/rollback 保留；由原夹具清理其唯一数据库，不触 qms_test
+保留队列、旧55432、任何 volume 或生产服务。这样 main 单租户 public-namespace guard
+保持开启。原“不得回 public schema”的夹具断言转为更直接的保留证据不变量：两次新会话、
+每次 commit/rollback/commit 前均实际 SQL 核对 `current_database()` 为唯一 private migration
+DB 且不等于保留 `qms_test`；该库内的 public queue 才是合法 fixture queue。若误连保留库仍失败，
+没有把任何业务期望或 queue assertions 改成宽松值。
+
+sync/late/race/consumer 夹具继续用实际 active registry/generation、TenantBinding/TenantSession，
+并在 session context 内捕获 ContextVar，使正常 `get_tenant_aware_session` 后台任务得到同一绑定。
+DDL setup 只用夹具 owner 的管理会话；三个旧 pinned/raw 业务 helper 改用真实 bound 会话。
+仅在这个 opt-in 夹具内把真实 request/background session factory 绑定其 NullPool engine，
+避免 pytest 每 test event loop 间复用连接；未改全局/autouse fixture、生产引擎、guard 或 worker。
+consumer 的事务回滚 probe 现在通过实际 dev `X-Tenant-ID` middleware + production `get_db`，
+不再伪造仅有 schema 的 tenant state；仍声明其 RequestScope 为测试前置，不冒充真实 JWT 验收。
+
+夹具适配中间失败均保留：`fixture-review-red`（1 failed/16 errors）、第一次全 affected
+（3 failed/186 passed）、第二次（1 import omission failed/188 passed），随后单项真实 HTTP
+rollback通过。最后从最终测试源码重跑 **完整226项 affected gate：226 selected /226 passed /
+0 failed /0 error /0 skipped /3 warnings，231.86s，exit0**。它包含全部三个 embedding 模块、
+所有使用改动 factory 的 import/sync/late/race/consumer suites，以及 controls、main integration、
+characteristic migrations、真实 provision 与 current-drift rejection。无测试 skip/deselect 来掩盖错误。
+最终完整 deterministic collection smoke **4049/4068 collected，19 项原 marker deselected，exit0**。
+
+复审跟进精确6文件 delta 为 `review-followup.patch` / `review-followup-manifest.json`；
+整合包 `review-source/` / `integration-file-manifest.json` 现27个文件。
+`verified-code-freeze.json` / `.sha256` 冻结1535个非 Markdown 源码/配置路径，状态/证据文档可续填。
+第二轮 `make-final` 在夹具继续适配前启动，因此也只算 pre-fixture full observation，不能当 final PASS。
+真正最终 `make-verified` 已在全部226项绿色、collection及504项根因盘点之后，排队等第二轮自然结束，
+且在运行前后重核代码冻结；绝不并发两个 full suite。实际 full/browser 结果尚待其完成后续填。
+
+另单列 main 继承观察：默认 `playwright test --list` 因四个 main 新 Agent/CAPA 专用 spec 在
+缺专用 login env 时导入 `JSON.parse(undefined)` 失败；没有伪造 env、加 skip 或扩展无关配置。
+特性专用 config 的独立 testMatch 不依赖这些 spec；其新 tag 真实运行仍待 full suite 结束后执行。
+
+
+## PR29 集成浏览器发现的直接兼容问题与最终分离验证 — 2026-11-09
+
+### 上轮完整验证与退出记录故障（保留，不冒充最终修复后证据）
+
+前述 frozen run 的 registered backend receipt 实际 **4049 selected /4044 passed /5 skipped /
+19 deselected /0 failed /0 errors /0 xfailed /0 xpassed /5 warnings，2675.52s，runner exit0**。
+其后 tsc 与 Vite build（8.30s）都执行完成。但退出记录 shell 用了 zsh 只读变量 `status`，
+在 make 返回后出现 `(eval):1: read-only variable: status`，wrapper **exit1**，导致
+**top-level make exit NOT CAPTURED**。未补写假 make-exit0；原始 log、task output和receipt保留。
+之后单独 `frontend-verified-exact.exit=0`，before/after代码1535路径一致。此4044通过现在仅为
+后续真实浏览器直接兼容修复前的 baseline；新的 full gate 在独立55434捕获真实 make exit。
+
+### 首轮真实集成浏览器 A：严格失败，不删证据
+
+`pr29-main-a`：factory `03acd8f6-d13c-4923-8710-4b49e52489cf`，run `908022d6`。
+三条业务主体验证都执行到截图/回读，但 afterEach 严格 console gate **3 failed /exit1**：
+main 默认关闭的 `/api/agent/tasks/availability` GET404，以及 CP 页面仍调用、而 main factory
+resolver 尚不支持的 `control_plan` presence GET/DELETE404。只读 trace 提取保存实际 URL/method/
+status/console-location 归因，没有读取或复制请求 credential headers，也没有 generic-ignore404。
+
+原17张PNG、三个失败worker的原始 evidence JSON、trace、截图及数据全部保留。
+`browser-look-pr29-main-a.png` 已 LOOK；不是空白启动页，也不因此改称严格 PASS。
+readonly audit 的 `strict_browser_exit=1`：3 FMEA、4真实 approve、4 completed outbox、8个现存
+FMEA version SQL hash均有效、两个角色均无 row-level bypass、四guards均O。CP分别5行pending=true
+及4行pending=false。两个 earlier `tenant_import_*` 临时测试 schema 和0 migration DB亦如实保留，
+没有为了清理数字删除来源不明的测试现场。
+
+### 经确认的最小生产/剧本修复与 RED/GREEN
+
+- 仅给已有 CP UI 的 presence consumer 补齐真实 metadata resolver：只查询 factory/line两列，
+  不加载 CP items。Planning VIEW 在任何 document ID resolution 前检查；然后复用既有
+  accessible-factory、effective-factory visibility、product-line helpers求交集。
+  missing/invisible同为不泄露404，permission denial为与ID存在性无关的403；所有拒绝路径没有
+  presence-table读写或已有session变更。FMEA的既有保护/legacy factory resolver与unknown404保留，
+  未改 CP普通GET、手工编辑、审批或权限矩阵。
+- 实际 PostgreSQL/ASGI suite 先 **22 failed /11 passed**，修复后 **33 passed**；包含全部三个
+  endpoints的缺失/跨工厂/有效工厂选择/PL NONE及other/Planning grant valid-vs-missing拒绝，
+  及Planning仅VIEW、明确同工厂同PL的 heartbeat→active→leave真往返。
+- Agent runtime保持OFF。特性专用诊断只认可同UI-origin、无query/hash、精确GET
+  `/api/agent/tasks/availability`状态404的真实response；console必须有同resource URL及network
+  归因，混合POST404/500仍拒绝，并实际断言Agent任务按钮不在DOM。raw console/page errors/
+  HTTP failures均保留；其余404/500和CP presence错误仍使gate失败。原PFMEA intentional409规则未扩大。
+- 诊断逻辑只在 `frontend/e2e/helpers/characteristic-diagnostics.ts`，供真实spec与既有test文件
+  共用，不进入产品权限或client interceptor。新focused RED **15 failed/1 passed**；完整两文件
+  GREEN **42 passed**（含main现有404隐藏入口组件契约），不是改成跳过全体console检查。
+- 合并CP admission与runtime guard的最终focused **57/57 passed /exit0**；补充明确拒绝
+  将full-suite-only55434用于browser/bootstrap。tsc/build exit0；完整bounded Vitest
+  **822 passed /95 files /exit0，74.60s**，原有所有业务assertions/timeouts保留。
+- 直接7 source-file scoped复审APPROVED，0新增Critical/Important/Minor；精确
+  `browser-compat-fix.patch` / `browser-compat-manifest.json`，全33文件manifest匹配。
+  后续无代码修改，`post-browser-fix-freeze.json`/`.sha256` 固定1536个非Markdown路径。
+
+### 明确授权的物理资源分离
+
+用户选择“分离完整测试与浏览器库”后新增 full-suite-only `openqms-pr29-check-pg`：
+完整ID `75a00dd80ae37521462c49a8dd0ffe0efb483d63cbc69ea2d99177aa00996231`，
+已有本地 `openqms-db:latest`，`127.0.0.1:55434/qms_test`，独立新volume
+`openqms-pr29-check-pg-data`（创建 `2026-11-09T12:50:01Z`）。真实openssl随机owner label与
+0600 `full-resource.json`通过main intended verifier；真实正常Alembic head已安装。
+不在该实例运行actor bootstrap/browser，不把任何retained evidence复制或迁过去。
+
+55432旧实例完全保留；55433保留A/B普通审批、账号、版本和截图，只用于本次浏览器与只读审计；
+55434用于全部full-suite与其正式migration fixture。两种验证各自显式双URL及独立artifact路径，
+无共享环境文件、source修改或共享DB重置。经parent允许，实例分离后full与browser可并行；
+browser结束后已停服；full gate仍使用独立dist/receipt路径，并以结束后的source proof为准。三container/volume均不清理。
+
+### 新tag B：真实浏览器严格 PASS
+
+`pr29-main-b`：run `4af0c9e9`，factory `93be402b-90b4-4bb1-a306-96c8203d2585`，
+product line `T11-4af0c9e9`。只有fresh actors/role/factory/line的guarded bootstrap；业务前置仍是
+已声明draft结构/失效链API，5特性经真实UI录入，合法wizard完成、不同actor普通审批、正常版本/
+hash guards；无approved直写、无admin bypass、无core API fulfill/mock、无外部AI或liveNeo4j。
+
+- 专用strict collection **3 tests /1 file /exit0**；实际完整 run **3 passed /46.5s /exit0**。
+- PFMEA：2 product+3 process、五个CP行、稳定UUID/单位、普通手工值、真正陈旧409、重新预览、
+  partial/fresh、worker-first/late delivery、事件消费后新CP部分导入、完整接受与可应用删除后4行回读。
+- DFMEA：共享ProcessWorkElementFunction仍为product，真实save/reload及仅产品入口。
+- Editor tree：真实影响确认、删除/save/reload；surviving process UUID保留，失去的产品关联为空。
+- 三页page errors均0。raw console分别 **28/5/9**，不是“零console”；精确已归因的默认off
+  Agent GET404分别16/3/4，共23，UI入口实测隐藏。其余HTTP failure仅PFMEA实际stale-sync409一条；
+  CP collaboration404已为0、无其他unexpected404/500。原始metadata保存全部messages及response属性。
+- worker96387/backend96651@58111/frontend96998@58112的command/cwd在signal/stop前均核对。
+  Agent flag显式false，JSONB repository，空provider配置/移除SDK key环境，uvicorn lifespan off。
+  body结束后只用这三项自己创建的job handles正常TaskStop；三PID/监听均消失，未停止PG。
+  这是新own-app停服，未重试先前拒绝的旧pytest SIGINT。
+
+### Screenshot LOOK 与 readonly resource audit
+
+最终B的17张图contact sheet `browser-look-pr29-main-b.png`全部 LOOK；另原图 LOOK：
+`4af0c9e9-pr29-main-b-import-preview.png`（2产品+3过程五候选，不是5×5）、
+`...-worker-first-partial-reload.png`（1行与真实pending提示）、
+`...-applicable-deletion-reloaded.png`（4行、单位各一次、无被删真空特性、非loader）、
+`...-tree-deletion-save-reload.png`（surviving process表单/删除后关联）、
+`...-dfmea-product.png`（≥2 /mm及仅产品入口）。409截图的红色stale提示/空候选是刻意失败状态，
+没有把它当最终同步成功页。Agent入口未出现；没有空白/loader被当作最终成功证据。
+
+`resource-audit-pr29-main-b.json/.log/.exit=0`为实际SQL READ ONLY审计，原evidence不改写。
+其 `strict_browser_exit=0`；3 FMEA、4真实不同actor approvals、4 completed outbox、8个现存FMEA
+version hash全部有效、两角色无row-level bypass、四guards全O。两张受控CP：
+`9474d7c5-2a53-48c2-8c9b-8ccdaa5914db`保留5行且pending=true；
+`a8215720-a838-4c1e-b0ef-bd284887f979`删除后4行且pending=false。该pending仅证明保留未接受工作，
+不单独冒充实际发起并拒绝的保护删除；保护拒绝由真实事务/consumer回归覆盖。
+CP worker实际false→true通知分别2/1条，changed_fields严格仅sync_pending和trigger_fmea_version_id。
+
+A和B审计的两个retained test schemas完全相同：`tenant_import_3ce2ea88d67742f8`、
+`tenant_import_123dc5b0ec5d499c`；55433无migration DB。早先口头仅说“一个schema”来自截断tail，
+这里以完整JSON更正为**两个**；未删改。B运行前后代码1536路径一致，PG/volume与所有controlled
+records保留。全full-suite-only55434最终结果、source-after和最终handoff manifest待其自然结束续填。
+
+
+### 最终分离 full gate 实际完成与交接 — 2026-11-09
+
+最终 `make-separated-final` 在真正注册的 **55434 full-suite-only** target 自然结束：
+
+| 证据 | 实际结果 |
+| --- | --- |
+| `make-separated-final.exit` | **0**，本次用安全 `pr29_rc` 原样捕获，不再使用zsh只读status变量。 |
+| `make-separated-final-artifacts/api-20261109T133835773575-receipt.json` | API layer **4072 selected /4067 passed /5 skipped /19 deselected /0 failed /0 errors /0 xfailed /0 xpassed /5 warnings /exit0**；runner wall2434.58s。 |
+| 同目录完整原始 `.log` | pytest实际2421.68s（40:21），root最终short-summary与receipt一致；嵌套scanner-child的刻意失败/skip测试输出不冒充root gate计数。 |
+| 同次make的frontend | `tsc --noEmit`与Vite build通过，build6.93s，顶层make真实exit0。 |
+| `source-before-separated-final.*` / `source-after-separated-final.*` | 前后均exit0、**1536路径完全一致**，与已审定post-browser-fix freeze相同。 |
+| `vitest-post-browser-fix.log/.exit` | **822 passed /95 files /74.60s /exit0**，maxWorkers=2，保留原assertions/timeouts。 |
+| `projection-final.log/.exit`及registered receipt | 末次冻结源码上显式Cypher projection **8 selected/8 passed/exit0**，无Neo4j连接。 |
+| `browser-pr29-main-b.log/.exit` | **3 passed /46.5s /exit0**，B的17图与5张原图LOOK、normal guards、strict diagnostics与readonly audit见上一节。 |
+
+五项root skip逐一是：PG15 host export工具未配置（CI提供其PG15服务容器）、Redis不可用、
+三个明确要求E2E_MODE/演示seed的旧e2e endpoints。没有开启general seed或凭据来消除这些skip，
+也没有选择性排除新失败。5 warnings仅3条Pydantic class-config及2条websockets/uvicorn弃用，
+不是新的async loop/事务失败。19个marker排除仍是main原分层规则；live provider/scanner与liveNeo4j
+没有被本次PASS涵盖。默认全局Playwright discovery缺专用env的继承限制仍另列，不冒充其通过。
+
+完成full后又对55433 A/B各做独立 **SQL READ ONLY** retention audit，不覆盖原audit：
+`resource-retention-pr29-main-a-after-full.json`、`resource-retention-pr29-main-b-after-full.json`，
+对应`.exit=0`。`retention-comparison-after-full.json`逐字段证明actors、FMEAs、approvals、outbox、
+CP内容/行/通知、SC、live version hashes和role guards均未变；四guards及两个retained schemas
+也未变。证明的是物理分离后实际保留，不仅是“没有打算删除”。
+
+55434 final read-only audit：current DB qms_test/user qms、public head
+`20261108_merge_characteristics`、四guardsO，0 tenant_import/tenant_embedding临时schema、
+0 qms_migtest临时数据库。55433保留A/B受控记录及前述两个早期测试现场；旧55432不触碰。
+`resource-retention-final.log`记录三container仍running及各自volume；`runtime-b-final-pids.log`与
+`runtime-b-final-ports.log`为空，58111/58112及三个own app PID已退出。没有删PG/volume、
+retained审批、身份或任何旧失败证据，没有修改别的worktree或harness settings。
+
+最终状态：六冲突**内容已解决**，原merge index仍保留其six unmerged stages供parent独立stage；
+无剩余内容marker。新增两份additive migration和test-only diagnostic helper由最终manifest显式列出，
+不遗失在untracked之外。所有生产/测试代码最后一次冻结后未再改；最后只补现有文档与review包。
+精确冲突阶段blob manifest、against-automatic/stage2/stage3补丁、new-migrations补丁、完整latest-main
+比较及33-file source/checksum位于 `.superpowers/pr29-integration/`。整合后的6文件follow-up与
+最终7文件scoped复审均APPROVED/0新增项（最初CURRENT-head Important已通过RED/GREEN关闭），parent仍须核对实际收据/LOOK并决定最终stage/commit/push/merge。
+本agent未stage broad paths、commit、push或执行PR merge/部署。
+
+
+### Parent final integration verification and submission decision
+
+协调者实际核对最终make-separated-final.exit=0及权威backend receipt（4067 passed/5 skipped/19 deselected，0 failed/error/xfail/xpass）、postfix Vitest822/95、projection8/8、browser-pr29-main-b.exit=0及3 passed/46.5s日志，核对1536冻结源码hash全部相同。实际查看17图contact sheet，确认非空白的五行/partial/四行删除结果/DFMEA/tree保存画面。retention-comparison-after-full逐字段全部true。此前各轮scope复审均批准，未遗留Critical/Important；本地集成门槛已满足。当前仅准备集成提交及推送，再以PR当前head远端检查判断合并，未把历史CI或本地PASS冒充远端PASS；无部署授权。

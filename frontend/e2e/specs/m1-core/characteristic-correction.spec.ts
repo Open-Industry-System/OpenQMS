@@ -1,3 +1,4 @@
+import { isDisabledAgentProbe, isDisabledAgentProbeConsole, unexpectedCharacteristicFailures, type HttpFailure } from "../../helpers/characteristic-diagnostics";
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
@@ -10,6 +11,7 @@ const evidencePath = `e2e/.storage-state/characteristic-${tag}-${process.pid}-ev
 const evidence: Record<string, unknown> = { run: owned.run, factory: owned.factory_id, documents: [], screenshots: [], preconditions: 'API-created draft + declared complete simulated structure/failure chain; all five characteristics entered through real UI; wizard completion via UI; approvals via real API with distinct actors' };
 const prefix = `E2E-T11-${owned.run}-${Date.now()}`;
 const apiURL = process.env.CHARACTERISTIC_API_URL!;
+const uiURL = process.env.CHARACTERISTIC_UI_URL!;
 let editor: APIRequestContext;
 let approver: APIRequestContext;
 const docs: { kind: string; id: string }[] = [];
@@ -28,17 +30,15 @@ function workerSignal(signal: 'SIGSTOP' | 'SIGCONT') {
 async function delivered(fmeaId: string, versionId: string) {
   await expect.poll(() => execFileSync(process.env.CHARACTERISTIC_PYTHON!, ['-c', `
 import os, sys, uuid
-from urllib.parse import urlsplit
-url = os.environ['DATABASE_URL']
-assert os.environ['TEST_DATABASE_URL'] == url
-p = urlsplit(url)
-assert (p.hostname, p.port, p.path) == ('127.0.0.1', 55432, '/qms_test')
+sys.path.insert(0, sys.argv[3])
+from tests.e2e.characteristic_bootstrap import require_owned_database
+url = require_owned_database(os.environ)
 import psycopg
 with psycopg.connect(url.replace('postgresql+asyncpg://', 'postgresql://')) as connection:
     connection.execute('SET TRANSACTION READ ONLY')
     row = connection.execute('SELECT status FROM cp_sync_outbox WHERE fmea_id=%s AND fmea_version_id=%s', (uuid.UUID(sys.argv[1]), uuid.UUID(sys.argv[2]))).fetchone()
     print(row[0] if row else 'missing')
-`, fmeaId, versionId], { encoding: 'utf8' }).trim(), { timeout: 15_000 }).toBe('completed');
+`, fmeaId, versionId, resolve('../backend')], { encoding: 'utf8' }).trim(), { timeout: 15_000 }).toBe('completed');
 }
 
 async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
@@ -136,18 +136,45 @@ async function approve(id: string) {
 }
 
 test.beforeEach(async ({ page }, info) => {
-  const observed = { test: info.title, pageErrors: [] as string[], consoleErrors: [] as string[] };
+  const observed = {
+    test: info.title, pageErrors: [] as string[], consoleErrors: [] as string[],
+    consoleErrorDetails: [] as { message: string; url: string }[],
+    httpFailures: [] as HttpFailure[], unavailableAgentProbes: [] as HttpFailure[],
+  };
   (evidence.browserDiagnostics ??= [] as unknown[]);
   (evidence.browserDiagnostics as unknown[]).push(observed);
   page.on('pageerror', error => observed.pageErrors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error') observed.consoleErrors.push(message.text()); });
+  page.on('console', message => {
+    if (message.type() === 'error') {
+      observed.consoleErrors.push(message.text());
+      observed.consoleErrorDetails.push({ message: message.text(), url: message.location().url });
+    }
+  });
+  page.on('response', response => {
+    if (response.status() < 400) return;
+    const failure = { method: response.request().method(), url: response.url(), status: response.status() };
+    observed.httpFailures.push(failure);
+    if (isDisabledAgentProbe(failure, uiURL)) observed.unavailableAgentProbes.push(failure);
+  });
 });
 
-test.afterEach(async ({}, info) => {
+test.afterEach(async ({ page }, info) => {
   if (workerPaused) workerSignal('SIGCONT');
-  const diagnostic = (evidence.browserDiagnostics as { test: string; pageErrors: string[]; consoleErrors: string[] }[]).find(item => item.test === info.title)!;
+  const diagnostic = (evidence.browserDiagnostics as {
+    test: string; pageErrors: string[]; consoleErrors: string[];
+    consoleErrorDetails: { message: string; url: string }[];
+    httpFailures: HttpFailure[]; unavailableAgentProbes: HttpFailure[];
+  }[]).find(item => item.test === info.title)!;
   expect(diagnostic.pageErrors).toEqual([]);
-  const unexpected = diagnostic.consoleErrors.filter(message => !message.startsWith('Warning:') && !(info.title.startsWith('real PFMEA') && message.includes('status of 409 (Conflict)')));
+  expect(unexpectedCharacteristicFailures(diagnostic.httpFailures, uiURL, info.title.startsWith('real PFMEA'))).toEqual([]);
+  // Main deliberately hides this default-off capability; prove its actual
+  // GET404 and unavailable UI, rather than ignoring arbitrary console404s.
+  expect(diagnostic.unavailableAgentProbes.length).toBeGreaterThan(0);
+  await expect(page.getByRole("button", { name: "Agent 任务", exact: true })).toHaveCount(0);
+  const unexpected = diagnostic.consoleErrorDetails.filter(({ message, url }) =>
+    !message.startsWith('Warning:')
+    && !(info.title.startsWith('real PFMEA') && message.includes('status of 409 (Conflict)'))
+    && !isDisabledAgentProbeConsole(message, url, diagnostic.httpFailures, uiURL));
   expect(unexpected).toEqual([]);
 });
 

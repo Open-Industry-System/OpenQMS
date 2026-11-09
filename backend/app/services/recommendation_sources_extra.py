@@ -654,6 +654,7 @@ class LessonsLearnedSource:
             SELECT de.entity_id AS lesson_id, de.chunk_text,
                    1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                    lesson.lesson_text, lesson.category, lesson.capa_id, lesson.product_line_code,
+                   lesson.source_d_step,
                    capa.document_no AS source_capa_document_no
             FROM document_embeddings de
             JOIN capa_lessons_learned lesson ON de.entity_id = lesson.lesson_id
@@ -679,11 +680,13 @@ class LessonsLearnedSource:
             lesson_id = row.lesson_id
             similarity = float(row.similarity)
             confidence = min(similarity * 0.8, 0.8)
+            unreviewed = row.source_d_step == "d8"
+            prefix = "未审核补充（不得作为已审根因或已验证效果）: " if unreviewed else ""
 
             candidates.append(
                 RecommendationCandidate(
                     source="lessons_learned",
-                    content=f"经验教训：{lesson_text}（来自 {source_capa_document_no}，类别 {category}）",
+                    content=f"{prefix}经验教训：{lesson_text}（来自 {source_capa_document_no}，类别 {category}）",
                     category=None,
                     confidence=confidence,
                     match_reason="经验教训库相似命中",
@@ -691,6 +694,8 @@ class LessonsLearnedSource:
                         "source_capa_id": str(source_capa_id),
                         "source_capa_document_no": source_capa_document_no,
                         "lesson_id": str(lesson_id),
+                        "source_d_step": row.source_d_step,
+                        **({"review_scope": "unreviewed_supplement"} if unreviewed else {}),
                         "category": category,
                         "product_line_code": row.product_line_code,
                         "factory_id": str(fid),
@@ -778,6 +783,7 @@ class KnowledgeEntrySource:
                    1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                    entry.document_no,
                    entry.source_id,
+                   entry.source_type,
                    entry.fields,
                    entry.embedding_text,
                    entry.product_line_code
@@ -802,6 +808,9 @@ class KnowledgeEntrySource:
             fields = row.fields or {}
             summary = fields.get("lesson_summary") if isinstance(fields, dict) else None
             content = (summary or row.embedding_text or row.chunk_text or "")[:500]
+            unreviewed = row.source_type == "capa" and "closure" in fields
+            if unreviewed:
+                content = f"未审核补充（closure 未纳入审核，不得作为已审根因或已验证效果）: {content}"[:500]
             similarity = float(row.similarity)
             confidence = min(similarity * 0.8, 0.8)
             entry_id_str = str(row.entry_id)
@@ -815,6 +824,7 @@ class KnowledgeEntrySource:
                     match_reason="知识库条目相似命中",
                     metadata={
                         "entry_id": entry_id_str,
+                        **({"closure_review_scope": "unreviewed_supplement"} if unreviewed else {}),
                         "document_no": row.document_no,
                         "capa_id": str(row.source_id),
                         "embedding_id": str(row.embedding_id),

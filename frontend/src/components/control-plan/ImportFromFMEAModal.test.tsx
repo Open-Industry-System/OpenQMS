@@ -1,3 +1,4 @@
+import { isDisabledAgentProbe, isDisabledAgentProbeConsole, unexpectedCharacteristicFailures } from "../../../e2e/helpers/characteristic-diagnostics";
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -196,4 +197,55 @@ it("candidate-table-only partial selection retains its notice until explicit dis
   expect(mocks.applyImportFromFMEA).toHaveBeenCalledWith("cp-1", expect.objectContaining({ selected_candidate_keys: ["add-1"] }));
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+
+// Pure diagnostic classification, not a substitute for the real browser run.
+describe("characteristic browser default-disabled capability diagnostics", () => {
+  const ui = "http://127.0.0.1:58112";
+  const url = `${ui}/api/agent/tasks/availability`;
+  const probe = { method: "GET", url, status: 404 };
+  const message = "Failed to load resource: the server responded with a status of 404 (Not Found)";
+
+  it("classifies only the actual exact GET availability404 response", () => {
+    expect(isDisabledAgentProbe(probe, ui)).toBe(true);
+    expect(unexpectedCharacteristicFailures([probe], ui, false)).toEqual([]);
+    expect(isDisabledAgentProbeConsole(message, url, [probe], ui)).toBe(true);
+  });
+
+  it.each([
+    { ...probe, method: "POST" }, { ...probe, method: "get" },
+    { ...probe, status: 403 }, { ...probe, status: 500 }, { ...probe, status: 200 },
+    { ...probe, url: `${url}/` }, { ...probe, url: `${url}?factory_id=other` },
+    { ...probe, url: `${ui}/api/agent/tasks/private` },
+    { ...probe, url: `${ui}/api/collaboration/control_plan/id/active-users` },
+    { ...probe, url: "http://127.0.0.1:58111/api/agent/tasks/availability" },
+    { ...probe, url: "http://remote/api/agent/tasks/availability" },
+    { ...probe, url: "not a URL" },
+  ])("does not exempt any other method/status/path/origin %#", response => {
+    expect(isDisabledAgentProbe(response, ui)).toBe(false);
+    expect(unexpectedCharacteristicFailures([probe, response], ui, false)).toEqual([response]);
+  });
+
+  it("requires matching network404 evidence and console resource URL, never text alone", () => {
+    expect(isDisabledAgentProbeConsole(message, url, [], ui)).toBe(false);
+    expect(isDisabledAgentProbeConsole(message, `${ui}/src/api/client.ts`, [probe], ui)).toBe(false);
+    expect(isDisabledAgentProbeConsole(message, url, [{ ...probe, status: 500 }], ui)).toBe(false);
+    expect(isDisabledAgentProbeConsole("Unhandled error", url, [probe], ui)).toBe(false);
+  });
+
+  it("a permitted GET probe cannot hide POST404 or500 at the same URL", () => {
+    const wrongMethod = { ...probe, method: "POST" };
+    const serverError = { ...probe, status: 500 };
+    expect(unexpectedCharacteristicFailures([probe, wrongMethod, serverError], ui, false)).toEqual([wrongMethod, serverError]);
+    expect(isDisabledAgentProbeConsole(message, url, [probe, wrongMethod], ui)).toBe(false);
+    expect(isDisabledAgentProbeConsole(message, url, [probe, serverError], ui)).toBe(false);
+  });
+
+  it("keeps the existing PFMEA conflict exception but never exempts an unrelated404", () => {
+    const conflict = { method: "POST", url: `${ui}/api/control-plans/id/sync-from-fmea`, status: 409 };
+    const missing = { method: "GET", url: `${ui}/api/control-plans/id`, status: 404 };
+    expect(unexpectedCharacteristicFailures([probe, conflict, missing], ui, true)).toEqual([missing]);
+    expect(unexpectedCharacteristicFailures([probe, conflict], ui, false)).toEqual([conflict]);
+  });
 });

@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
@@ -82,7 +83,7 @@ def test_upgrade_preserves_old_rows_and_adds_nullable_typed_columns(mig_db_url):
         assert conn.execute(sa.text(
             "SELECT source_characteristic_id FROM special_characteristics WHERE sc_id=:sc_id"
         ), {"sc_id": sc_id}).scalar_one() is None
-        assert conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == REV
+        assert conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one() == ScriptDirectory.from_config(cfg).get_current_head()
     engine.dispose()
 
 
@@ -105,3 +106,50 @@ def test_empty_database_downgrade_removes_only_characteristic_columns(mig_db_url
         assert "control_plan_items" in inspector.get_table_names()
         assert "special_characteristics" in inspector.get_table_names()
     engine.dispose()
+
+
+def test_tenant_characteristic_delta_matches_public_and_preserves_predecessor():
+    from tests.migrations.test_agent_main_integration import ROOT
+    from alembic.script import ScriptDirectory
+    import io
+    import runpy
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    cfg = Config()
+    cfg.set_main_option("script_location", str(ROOT / "alembic_tenant"))
+    script = ScriptDirectory.from_config(cfg)
+    assert script.get_heads() == ["tv007_characteristic_refs"]
+    assert script.get_revision("tv007_characteristic_refs").down_revision == "tv006_agent_read_tasks"
+    def ddl(path, action):
+        output = io.StringIO()
+        context = MigrationContext.configure(dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output})
+        migration = runpy.run_path(str(path))
+        with Operations.context(context):
+            migration[action]()
+        return output.getvalue()
+    for action in ("upgrade", "downgrade"):
+        assert ddl(ROOT / "alembic_tenant/versions/tv007_characteristic_refs.py", action) == ddl(ROOT / "alembic/versions/20261101_characteristic_refs.py", action)
+
+
+@pytest.mark.asyncio
+async def test_historical_characteristic_parity_never_hides_current_or_partial_drift(monkeypatch):
+    from app.services import tenant_schema_diff as diff
+    existing = ("column", "control_plan_items.control_method")
+    added = ("column", "control_plan_items.source_characteristic_ref")
+    objects = {"public": {existing: "text", added: "jsonb"},
+               "tenant_contract": {existing: "text"}}
+
+    async def load(connection, schema):
+        return objects[schema]
+
+    monkeypatch.setattr(diff, "_objects", load)
+    manifest = diff.load_snapshot_manifest()
+    assert await diff.compare_business_schema(None, "public", "tenant_contract", manifest,
+                                              predecessor="tv006_agent_read_tasks") == []
+    # The very same old schema is not current; a missing provenance column is drift.
+    assert await diff.compare_business_schema(None, "public", "tenant_contract", manifest)
+    objects["tenant_contract"][added] = "wrong partial column"
+    assert await diff.compare_business_schema(None, "public", "tenant_contract", manifest,
+                                              predecessor="tv006_agent_read_tasks")
+    objects["tenant_contract"][added] = "jsonb"
+    assert await diff.compare_business_schema(None, "public", "tenant_contract", manifest) == []

@@ -57,32 +57,44 @@
 ```bash
 git clone https://github.com/your-org/OpenQMS.git
 cd OpenQMS
-docker compose up -d
+docker compose up -d db redis neo4j
 ```
 
 等待所有容器健康（约 30 秒）：
 
 ```bash
-docker compose ps   # 确认 db/redis/neo4j 为 healthy，backend/frontend 为 running
+docker compose ps   # 确认 db/redis/neo4j 为 healthy
 ```
 
 ### 2. 初始化数据库
 
 ```bash
-docker compose exec backend alembic upgrade head
+docker compose run --rm backend alembic upgrade head
 ```
 
 ### 3. 导入演示数据
 
 ```bash
-docker compose exec backend python -m app.seed
+docker compose run --rm backend python -m app.seed
 ```
 
 输出 `Seed data created successfully!` 即成功。
 
+迁移和演示数据导入完成后，启动完整应用栈：
+
+```bash
+docker compose up -d
+```
+
 ### 4. 访问系统
 
-浏览器打开 **http://localhost:5173**，使用以下账号登录：
+| 页面 | 地址 | 说明 |
+|------|------|------|
+| 公开项目首页 | [http://localhost:5173/](http://localhost:5173/) | 无需登录 |
+| 系统登录 | [http://localhost:5173/login](http://localhost:5173/login) | 登录入口 |
+| 仪表盘 | [http://localhost:5173/dashboard](http://localhost:5173/dashboard) | 登录后访问 |
+
+以下种子账号仅用于本地开发：
 
 | 用户名 | 密码 | 角色 | 说明 |
 |--------|------|------|------|
@@ -92,7 +104,7 @@ docker compose exec backend python -m app.seed
 | `viewer` | `Viewer@2026` | 只读用户 | 所有模块只读 |
 | `groupadmin` | `GroupAdmin@2026` | 系统管理员（集团） | 多工厂管理权限 |
 
-> ⚠️ 演示密码仅用于开发环境，生产环境请务必修改。
+> 公开部署不得暴露上述种子账号凭据。Viewer 演示入口默认关闭，只有显式完成专用演示配置后才会显示。
 
 ### 5. API 文档
 
@@ -149,6 +161,7 @@ docker compose exec backend python -m app.seed
 | [管理员指南](docs/admin-guide.md) | 用户管理、权限配置、工厂分配 |
 | [权限参考](docs/permissions.md) | 完整权限矩阵 |
 | [开发指南](docs/development.md) | 开发约定、添加新模块 |
+| [E2E 验收](docs/e2e.md) | 常规 E2E 与自有租户 CAPA 成果审核 gate（缺测试 provider 不算通过） |
 | [路线图](docs/ROADMAP.md) | 开发计划与进度 |
 | [决策日志](docs/DECISIONS.md) | 关键架构决策（ADR）及其背景与影响 |
 

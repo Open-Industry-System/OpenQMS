@@ -10,7 +10,6 @@ import uuid
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenant_utils import current_tenant_schema
 from app.models.audit import AuditLog
@@ -31,7 +30,7 @@ pytestmark = pytest.mark.asyncio
 async def runtime(sync_tenants):
     sessions, schemas = sync_tenants
     added = ('cp_sync_outbox', 'cp_validation_runs', 'cp_validation_findings', 'cp_validation_occurrences')
-    async with sessions() as db:
+    async with sessions.admin_sessions() as db:
         for schema in schemas:
             for table in added:
                 await db.execute(text(f'CREATE TABLE "{schema}"."{table}" (LIKE public."{table}" INCLUDING ALL)'))
@@ -57,16 +56,12 @@ async def runtime(sync_tenants):
 
 
 async def create_after_approval(sessions, schema, ids, document_no):
-    # Keep the physical connection across this legacy service's post-commit
-    # refresh; never let a fixture fall back to public after pool checkout.
-    async with sessions.kw['bind'].connect() as connection:
-        await connection.execute(text(f'SET search_path TO "{schema}", public'))
-        await connection.commit()
-        async with AsyncSession(bind=connection, expire_on_commit=False) as db:
-            cp = await cp_service.create_control_plan(db, ControlPlanCreate(
-                title='Created after approval', document_no=document_no, fmea_ref_id=ids[5], product_line_code='LINE'),
-                ids[3], factory_id=ids[0])
-            return cp.cp_id
+    # Re-check captured tenant generation on every post-commit checkout.
+    async with sessions(expire_on_commit=False) as db:
+        cp = await cp_service.create_control_plan(db, ControlPlanCreate(
+            title='Created after approval', document_no=document_no, fmea_ref_id=ids[5], product_line_code='LINE'),
+            ids[3], factory_id=ids[0])
+        return cp.cp_id
 
 
 async def enqueue(sessions, schema, ids, version_id):
@@ -226,22 +221,19 @@ async def imported_baseline(sessions, schema):
 
 async def permitted_override(sessions, schema, ids):
     from tests.test_cp_characteristic_import import IDS
-    async with sessions.kw['bind'].connect() as connection:
-        await connection.execute(text(f'SET search_path TO "{schema}", public'))
-        await connection.commit()
-        async with AsyncSession(bind=connection, expire_on_commit=False) as db:
-            cp = await cp_service.get_control_plan(db, ids[4])
-            items = [ControlPlanItemCreate(**{name: getattr(item, name) for name in ControlPlanItemCreate.model_fields}) for item in cp.items]
-            selected = next(item for item in cp.items if item.source_characteristic_ref['characteristic_id'] == IDS[0])
-            next(item for item in items if item.item_id == selected.item_id).specification_tolerance = 'SIMULATED permitted local criterion'
-            item_id = selected.item_id
-            before_tasks = set(asyncio.all_tasks())
-            await cp_service.update_control_plan(db, cp, ControlPlanUpdate(items=items, lock_version=cp.lock_version), ids[3])
-            validation = [task for task in asyncio.all_tasks() - before_tasks
-                          if '_run_validation_background' in task.get_coro().__qualname__]
-            await asyncio.gather(*validation)
-            assert await db.scalar(text('SELECT status FROM cp_validation_runs WHERE cp_id=:id ORDER BY started_at DESC LIMIT 1'), {'id': ids[4]}) == 'completed'
-            return item_id
+    async with sessions(expire_on_commit=False) as db:
+        cp = await cp_service.get_control_plan(db, ids[4])
+        items = [ControlPlanItemCreate(**{name: getattr(item, name) for name in ControlPlanItemCreate.model_fields}) for item in cp.items]
+        selected = next(item for item in cp.items if item.source_characteristic_ref['characteristic_id'] == IDS[0])
+        next(item for item in items if item.item_id == selected.item_id).specification_tolerance = 'SIMULATED permitted local criterion'
+        item_id = selected.item_id
+        before_tasks = set(asyncio.all_tasks())
+        await cp_service.update_control_plan(db, cp, ControlPlanUpdate(items=items, lock_version=cp.lock_version), ids[3])
+        validation = [task for task in asyncio.all_tasks() - before_tasks
+                      if '_run_validation_background' in task.get_coro().__qualname__]
+        await asyncio.gather(*validation)
+        assert await db.scalar(text('SELECT status FROM cp_validation_runs WHERE cp_id=:id ORDER BY started_at DESC LIMIT 1'), {'id': ids[4]}) == 'completed'
+        return item_id
 
 
 async def fixture_approved_target(sessions, schema, ids, *, conflicting=False):
@@ -250,19 +242,16 @@ async def fixture_approved_target(sessions, schema, ids, *, conflicting=False):
     # all the real application services and real commits.
     from tests.test_cp_characteristic_import import graph
     from app.models.fmea import FMEADocument
-    async with sessions.kw['bind'].connect() as connection:
-        await connection.execute(text(f'SET search_path TO "{schema}", public'))
-        await connection.commit()
-        async with AsyncSession(bind=connection, expire_on_commit=False) as db:
-            source = await db.get(FMEADocument, ids[5])
-            changed = graph()
-            if conflicting:
-                changed['nodes'][2]['characteristics'][0]['specification'] = 'Changed source criterion'
-            else:
-                changed['nodes'][2]['characteristics'][1]['name'] = 'V2 different characteristic'
-            source.graph_data = changed
-            version = await versions.create_fmea_version(db, source, 'approve', 'R2 immutable fixture target', ids[3])
-            return version.version_id
+    async with sessions(expire_on_commit=False) as db:
+        source = await db.get(FMEADocument, ids[5])
+        changed = graph()
+        if conflicting:
+            changed['nodes'][2]['characteristics'][0]['specification'] = 'Changed source criterion'
+        else:
+            changed['nodes'][2]['characteristics'][1]['name'] = 'V2 different characteristic'
+        source.graph_data = changed
+        version = await versions.create_fmea_version(db, source, 'approve', 'R2 immutable fixture target', ids[3])
+        return version.version_id
 
 
 @pytest.mark.parametrize('event_source', ['same', 'older_after_other_source_change'])

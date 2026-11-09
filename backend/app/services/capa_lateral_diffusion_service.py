@@ -427,6 +427,9 @@ def _build_prompt(capa, similar) -> str:
         f"D2: {capa.d2_description or ''}\nD4 根因: {capa.d4_root_cause or ''}\n"
         f"命中类似产品类型:\n{_json.dumps([{'product_type_code': s['product_type_code'], 'hit_criteria': s['hit_criteria']} for s in similar], ensure_ascii=False)}\n"
         "为每个 product_type_code 生成 suggestion_direction（建议相关产品负责人更新方向，中文，≤120字）。"
+        "请严格返回一个 JSON 对象，顶层必须包含 items 数组，每个 item 必须包含 product_type_code 和 suggestion_direction。"
+        '格式示例：{"items":[{"product_type_code":"TYPE-A","suggestion_direction":"建议复核该产品类型的 FMEA 与控制计划，并评估横向措施。"}]}。'
+        "只返回 JSON，不要 Markdown/解释。"
     )
 
 

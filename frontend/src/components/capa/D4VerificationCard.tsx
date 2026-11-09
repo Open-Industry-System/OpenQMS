@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { listVerifications, createVerification, updateVerification } from "../../api/capa";
 import { getFMEA } from "../../api/fmea";
+import { useCapaChildRequests } from "./useCapaViewRequests";
 import type { Verification, VerificationConclusion } from "../../types";
 
 const { Option } = Select;
@@ -23,6 +24,7 @@ interface CauseOption {
 
 export default function D4VerificationCard({ capaId, canEdit, currentRootCause, fmeaRefId }: Props) {
   const { t } = useTranslation("capa");
+  const requests = useCapaChildRequests(capaId, [canEdit, fmeaRefId]);
   const { message } = App.useApp();
   const navigate = useNavigate();
   const [items, setItems] = useState<Verification[]>([]);
@@ -35,38 +37,49 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
   const [editingCauseVid, setEditingCauseVid] = useState<string | null>(null);
   const [editCauseValue, setEditCauseValue] = useState<string | undefined>(undefined);
 
+  useEffect(() => {
+    setItems([]); setShowForm(false); setSelectedCause(undefined);
+    setEditingCauseVid(null); setEditCauseValue(undefined); form.resetFields();
+  }, [requests, form]);
+
   const reload = async () => {
+    const request = requests.begin();
+    if (!request.current()) return;
     setLoading(true);
-    try { setItems(await listVerifications(capaId)); } catch { message.error(t("d4.verificationLoadFailed")); }
-    finally { setLoading(false); }
+    try {
+      const rows = await listVerifications(capaId, request.signal);
+      if (request.current()) setItems(rows);
+    } catch { if (request.current()) message.error(t("d4.verificationLoadFailed")); }
+    finally { if (request.current()) setLoading(false); request.finish(); }
   };
-  useEffect(() => { reload(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [capaId]);
+  useEffect(() => { void reload(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [capaId, requests]);
 
   useEffect(() => {
-    if (!fmeaRefId) {
-      setCauseOptions([]);
-      return;
-    }
-    getFMEA(fmeaRefId)
+    const request = requests.begin();
+    setCauseOptions([]);
+    if (!fmeaRefId) { request.finish(); return; }
+    getFMEA(fmeaRefId, request.signal)
       .then((doc) => {
+        if (!request.current()) return;
         const nodes = doc.graph_data?.nodes ?? [];
-        setCauseOptions(
-          nodes
-            .filter((n: { type?: string }) => n.type === "FailureCause")
-            .map((n: { id: string; name?: string }) => ({ id: n.id, name: n.name || n.id }))
-        );
+        setCauseOptions(nodes.filter((n: { type?: string }) => n.type === "FailureCause")
+          .map((n: { id: string; name?: string }) => ({ id: n.id, name: n.name || n.id })));
       })
-      .catch(() => setCauseOptions([]));
-  }, [fmeaRefId]);
+      .catch(() => { if (request.current()) setCauseOptions([]); }).finally(request.finish);
+    return request.cancel;
+  }, [fmeaRefId, requests]);
 
   const hasAtLeastOneDetail = (v: any): boolean =>
     !!((v.method && String(v.method).trim()) || (v.result && String(v.result).trim()) || ((v.evidence || []).length > 0));
 
   const submitCreate = async (conclusion: VerificationConclusion, requireDetail: boolean) => {
+    if (!canEdit) return;
+    const request = requests.begin();
+    if (!request.current()) return;
     const values = form.getFieldsValue();
     if (requireDetail && !hasAtLeastOneDetail(values)) {
       message.error(t("d4.needAtLeastOneDetail"));
-      return;
+      request.finish(); return;
     }
     const evidence = (values.evidence || []).map((f: any) => ({ filename: f.name, size: f.size }));
     const source_ref =
@@ -81,24 +94,33 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
         conclusion,
         evidence_attachments: evidence,
         source_ref,
-      });
+      }, request.signal);
+      if (!request.current()) return;
       message.success(t("d4.verificationSaved"));
       form.resetFields();
       setSelectedCause(undefined);
       setShowForm(false);
-      reload();
+      await reload();
+      if (!request.current()) return;
     } catch (e: any) {
+      if (!request.current()) return;
       message.error(e.response?.data?.detail?.[0]?.msg ?? t("d4.verificationFailed"));
-    }
+    } finally { request.finish(); }
   };
 
   const patchConclusion = async (rec: Verification, conclusion: VerificationConclusion) => {
+    if (!canEdit) return;
+    const request = requests.begin();
+    if (!request.current()) return;
     try {
-      await updateVerification(capaId, rec.verification_id, { conclusion });
-      message.success(t("d4.verificationSaved")); reload();
+      await updateVerification(capaId, rec.verification_id, { conclusion }, request.signal);
+      if (!request.current()) return;
+      message.success(t("d4.verificationSaved")); await reload();
+      if (!request.current()) return;
     } catch (e: any) {
+      if (!request.current()) return;
       message.error(e.response?.data?.detail?.[0]?.msg ?? t("d4.verificationFailed"));
-    }
+    } finally { request.finish(); }
   };
 
   const startEditCause = (rec: Verification) => {
@@ -116,19 +138,25 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
   };
 
   const saveEditCause = async (rec: Verification) => {
+    if (!canEdit) return;
+    const request = requests.begin();
+    if (!request.current()) return;
     // allowClear → undefined means clear Cause (source_ref: null).
     const source_ref =
       fmeaRefId && editCauseValue
         ? { fmea_id: fmeaRefId, cause_node_id: editCauseValue }
         : null;
     try {
-      await updateVerification(capaId, rec.verification_id, { source_ref });
+      await updateVerification(capaId, rec.verification_id, { source_ref }, request.signal);
+      if (!request.current()) return;
       message.success(t("d4.verificationSaved"));
       cancelEditCause();
-      reload();
+      await reload();
+      if (!request.current()) return;
     } catch (e: any) {
+      if (!request.current()) return;
       message.error(e.response?.data?.detail?.[0]?.msg ?? t("d4.verificationFailed"));
-    }
+    } finally { request.finish(); }
   };
 
   return (

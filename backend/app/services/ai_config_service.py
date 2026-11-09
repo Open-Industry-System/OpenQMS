@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.tenant_transaction import require_single_tenant_global_feature
 from app.models.audit import AuditLog
 from app.models.system_setting import SystemSetting
 from app.schemas.ai_config import AIConfigOut, AIConfigUpdate
@@ -119,6 +120,7 @@ async def update_ai_config(
     app_state: Any,
 ) -> AIConfigOut:
     """Persist updated AI config and recreate providers."""
+    require_single_tenant_global_feature("global AI configuration")
     # Read current DB values so we can keep the existing API key if masked.
     result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(AI_CONFIG_KEYS)))
     existing = {row.key: row for row in result.scalars().all()}
@@ -194,6 +196,7 @@ def _build_snapshot(values: dict[str, Any]) -> Any:
 
 async def _rebuild_providers(db: AsyncSession, app_state: Any) -> None:
     """Recreate LLM and embedding providers from the latest settings."""
+    require_single_tenant_global_feature("global AI provider")
     config = await get_ai_config(db)
     snapshot = _build_snapshot(config.model_dump())
 
@@ -306,6 +309,7 @@ async def test_ai_config(
 
     Nothing is persisted. Returns per-provider ok/latency/error.
     """
+    require_single_tenant_global_feature("global AI provider test")
     from app.services.llm_provider import create_llm_provider
     from app.services.embedding_provider import create_embedding_provider
 

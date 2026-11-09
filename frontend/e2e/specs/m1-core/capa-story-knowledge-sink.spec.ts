@@ -123,9 +123,12 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
     const token = await loginForToken("manager", mgrPw);
     const ac = await authedApi(token);
 
+    const review = await ac.get(`/capa/${capaId}/outcome-review`);
+    expect(review.status).toBe(200);
     const adv = await ac.post(
       `/capa/${capaId}/advance`,
-      { target_state: "D8_CLOSURE" },
+      { target_state: "D8_CLOSURE", expected_outcome_revision: review.data.revision,
+        expected_review_round_id: review.data.review_round_id },
       { validateStatus: () => true },
     );
     expect(adv.status).toBe(422);
@@ -154,9 +157,12 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
     const before = await mgrAc.get(`/capa/${capaId}`);
     expect(before.data.status).toBe("D8_APPROVAL_PENDING");
 
+    const review = await mgrAc.get(`/capa/${capaId}/outcome-review`);
+    expect(review.status).toBe(200);
     const adv = await mgrAc.post(
       `/capa/${capaId}/advance`,
-      { target_state: "D8_CLOSURE" },
+      { target_state: "D8_CLOSURE", expected_outcome_revision: review.data.revision,
+        expected_review_round_id: review.data.review_round_id },
       ok,
     );
     // 422 blocked must hard-fail when LLM creds exist (not soft-skip).
@@ -235,7 +241,7 @@ test.describe("US-E2E-01.8 8D 知识库沉淀", () => {
 
     // Capture freshness floor before recommend so historical RETRIEVED rows
     // from prior runs cannot satisfy the audit assertion.
-    const beforeIso = new Date().toISOString();
+    const beforeIso = new Date(Date.now() - 5_000).toISOString();
 
     const rec = await engAc.get(`/capa/${probe!.report_id}/d4-fmea-recommendations`, ok);
     expect(rec.status, `recommend status: ${JSON.stringify(rec.data)}`).toBe(200);

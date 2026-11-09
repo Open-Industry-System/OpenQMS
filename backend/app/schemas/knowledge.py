@@ -21,6 +21,7 @@ class KnowledgeEntryListItem(BaseModel):
     embedding_status: str
     embedding_id: uuid.UUID | None = None
     lesson_summary: str | None = None
+    closure_review_scope: str | None = None
     tags: list[str] = Field(default_factory=list)
     created_at: datetime
 

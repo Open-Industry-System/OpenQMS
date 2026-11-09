@@ -18,13 +18,13 @@ export async function listFMEAs(params: {
   pending?: boolean;
   fmea_type?: "PFMEA" | "DFMEA";
   search?: string;
-}): Promise<FMEAListResponse> {
-  const resp = await client.get("/fmea", { params });
+}, signal?: AbortSignal): Promise<FMEAListResponse> {
+  const resp = await client.get("/fmea", { params, signal });
   return resp.data;
 }
 
-export async function getFMEA(id: string): Promise<FMEADocument> {
-  const resp = await client.get(`/fmea/${id}`);
+export async function getFMEA(id: string, signal?: AbortSignal): Promise<FMEADocument> {
+  const resp = await client.get(`/fmea/${id}`, ...(signal ? [{ signal }] as const : [] as const));
   return resp.data;
 }
 

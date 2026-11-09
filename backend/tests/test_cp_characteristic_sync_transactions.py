@@ -1,5 +1,6 @@
 """Real commits and independent sessions for Task 6; only disposable qms_test schemas."""
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import re
 import uuid
@@ -12,10 +13,12 @@ from tests.test_cp_characteristic_import_transactions import (
     isolated_tenants, seed_tenant, tenant_scope, import_request,
 )
 from tests.test_cp_characteristic_import import graph, rows
-from app.core.tenant_utils import current_tenant_schema
+from app.core.tenant_utils import current_tenant_schema, current_tenant_binding
+from app.core.permissions import PermissionLevel
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.control_plan_version import ControlPlanVersion
 from app.models.fmea_version import FMEAVersion
+from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
 from app.models.special_characteristic import SpecialCharacteristic
@@ -31,7 +34,7 @@ BASE = ('factories', 'product_lines', 'role_definitions', 'users', 'role_permiss
         'control_plans', 'control_plan_items', 'control_plan_versions', 'audit_logs')
 
 @pytest_asyncio.fixture
-async def sync_tenants(isolated_tenants):
+async def sync_tenants(isolated_tenants, monkeypatch):
     sessions, schemas = isolated_tenants
     async with sessions() as db:
         for schema in schemas:
@@ -45,15 +48,74 @@ async def sync_tenants(isolated_tenants):
                     definition = re.sub(r'REFERENCES (?:public\.)?([a-z_]+)',
                         lambda m: f'REFERENCES "{schema if m[1] in BASE+EXTRAS else "public"}"."{m[1]}"', definition)
                     await db.execute(text(f'ALTER TABLE "{schema}"."{table}" ADD CONSTRAINT "{name}" {definition}'))
+        # Install the reviewed tenant-local guards (strict paths exclude public).
+        from alembic_tenant.snapshot.business_20260927 import DDL
+        for schema in schemas:
+            await db.execute(text(f'SET LOCAL search_path TO "{schema}", pg_catalog'))
+            for statement in DDL:
+                if statement.startswith(('CREATE FUNCTION verify_version_hash(', 'CREATE FUNCTION prevent_version_tampering(')):
+                    await db.execute(text(statement))
+            for statement in DDL:
+                if statement.startswith('CREATE TRIGGER trg_') and '_version_' in statement:
+                    name = statement.split()[2]
+                    table = statement.split(' ON ')[1].split()[0]
+                    await db.execute(text(f'DROP TRIGGER {name} ON {table}'))
+                    await db.execute(text(statement))
         await db.commit()
-    yield sessions, schemas
+    # Exercise main's real tenant-session admission, not search_path-only authority.
+    from app.config import settings
+    from app.core.tenant_transaction import TenantBinding
+    from app.database import TenantSession
+    from sqlalchemy.ext.asyncio import AsyncSession
+    bindings = {schema: TenantBinding(uuid.uuid4(), schema, 1, 'business') for schema in schemas}
+    async with sessions() as db:
+        for binding in bindings.values():
+            await db.execute(text("INSERT INTO public.tenants (id,name,slug,subdomain,schema_name,status,generation) "
+                                  "VALUES (:id,:schema,:slug,:slug,:schema,'active',1)"),
+                             {'id': binding.tenant_id, 'schema': binding.schema_name, 'slug': binding.schema_name.replace('_', '-')})
+        await db.commit()
+    monkeypatch.setattr(settings, 'TENANT_MODE', 'dev')
+    # Normal request/background entry points use the same real NullPool test
+    # engine; pooled connections cannot survive pytest's per-test event loops.
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app import database
+    from app.core import tenant_context
+    monkeypatch.setattr(database, 'tenant_async_session', async_sessionmaker(
+        sessions.kw['bind'], class_=AsyncSession, sync_session_class=TenantSession,
+        expire_on_commit=False))
+    monkeypatch.setattr(tenant_context, 'async_session', async_sessionmaker(
+        sessions.kw['bind'], class_=AsyncSession, expire_on_commit=False))
+
+    @asynccontextmanager
+    async def bound_sessions(*, expire_on_commit=True):
+        binding = bindings[current_tenant_schema.get()]
+        token = current_tenant_binding.set(binding)
+        try:
+            async with AsyncSession(bind=sessions.kw['bind'], sync_session_class=TenantSession,
+                                    binding=binding, expire_on_commit=expire_on_commit) as db:
+                yield db
+        finally:
+            current_tenant_binding.reset(token)
+
+    # DDL setup is owner maintenance, not an unbound business session.
+    bound_sessions.admin_sessions = sessions
+
+    try:
+        yield bound_sessions, schemas
+    finally:
+        async with sessions() as db:
+            for binding in bindings.values():
+                await db.execute(text('DELETE FROM public.tenants WHERE id=:id'), {'id': binding.tenant_id})
+            await db.commit()
 
 async def prepared(sessions, schema, *, ids=None, deletion=False):
-    ids, body = await seed_tenant(sessions, schema, identical_ids=ids)
     token = current_tenant_schema.set(schema)
     try:
+        ids, body = await seed_tenant(sessions, schema, identical_ids=ids)
         async with sessions() as db:
             scope = await tenant_scope(db, schema, ids[3])
+            db.add(RolePermission(role_id=ids[2], module='capa', permission_level=PermissionLevel.EDIT))
+            await db.flush()
             req = await import_request(db, ids, body, scope)
             await imports.import_from_fmea(db, ids[4], req, ids[3], scope=scope)
             await db.execute(text(f'SET search_path TO "{schema}", public'))
@@ -283,6 +345,12 @@ async def test_actual_multiphase_orchestration_refreshes_tenant_inputs_and_order
                     acquired.append(str(stmt.compile().params['cp_id_1']))
                 return result
             monkeypatch.setattr(db, 'execute', tracked)
+            input_state = gate.cp_input_state
+            async def strict_input_state(session, *args, **kwargs):
+                path = await session.scalar(text("SHOW search_path"))
+                assert 'public' not in path, 'phase handoff must retain strict tenant namespace'
+                return await input_state(session, *args, **kwargs)
+            monkeypatch.setattr(gate, 'cp_input_state', strict_input_state)
             result = await gate.generate_impact_analysis(db, capa, ids[3])
             assert result['status'] == 'done'
             assert not db.in_transaction()
@@ -291,5 +359,75 @@ async def test_actual_multiphase_orchestration_refreshes_tenant_inputs_and_order
             await tenant_scope(verify, schema, ids[3])
             a = await verify.scalar(select(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id == cid))
             assert a.status == 'done' and a.is_current
+    finally:
+        current_tenant_schema.reset(token)
+
+
+@pytest.mark.parametrize('change', ['permission', 'reviewed'])
+async def test_characteristic_publication_rechecks_current_authority_and_reviewed_material(sync_tenants, monkeypatch, change):
+    from app.services.capa_review_guard import ReviewedContentLocked
+    sessions, schemas = sync_tenants
+    schema = schemas[0]
+    ids, _, _ = await prepared(sessions, schema)
+    token = current_tenant_schema.set(schema)
+    try:
+        cid, p1, p2 = await running(sessions, schema, ids, monkeypatch)
+        async with sessions() as db:
+            if change == 'permission':
+                await db.execute(text("UPDATE role_permissions SET permission_level=1 WHERE role_id=:role AND module='capa'"), {'role': ids[2]})
+            else:
+                await db.execute(text("UPDATE capa_eightd SET status='D8_CLOSURE' WHERE report_id=:cid"), {'cid': cid})
+            await db.commit()
+        async with sessions() as db:
+            with pytest.raises(PermissionError if change == 'permission' else ReviewedContentLocked):
+                await publish(db, schema, ids, cid, p1, p2)
+            await db.rollback()
+        async with sessions() as db:
+            analysis = await db.get(CapaDocgAnalysis, uuid.UUID(p1['analysis_id']))
+            assert analysis.status == 'running' and not analysis.is_current
+            assert not (await db.scalars(select(AuditLog).where(
+                AuditLog.action == 'DOC_IMPACT_ANALYZED', AuditLog.record_id == cid))).all()
+    finally:
+        current_tenant_schema.reset(token)
+
+
+async def test_audit_locks_complete_cp_input_set_before_subset_source_locks(sync_tenants, monkeypatch):
+    from sqlalchemy.exc import DBAPIError
+    sessions, schemas = sync_tenants
+    schema = schemas[0]
+    ids, _, _ = await prepared(sessions, schema)
+    token = current_tenant_schema.set(schema)
+    try:
+        other_id = uuid.uuid4()
+        async with sessions() as db:
+            db.add(ControlPlan(cp_id=other_id, document_no='CP-OTHER-LOCK', title='Other',
+                               factory_id=ids[0], product_line_code='LINE', status='draft'))
+            await db.commit()
+        cid, p1, p2 = await running(sessions, schema, ids, monkeypatch)
+        async with sessions() as db:
+            assert (await publish(db, schema, ids, cid, p1, p2))['status'] == 'done'
+        original = sync.lock_version_parents_in_order
+        checked = []
+
+        async def verify_input_locks(db, identities):
+            # Before locking a referenced subset, every scope CP must already be
+            # locked. Otherwise another CAPA publisher can hold the lower UUID
+            # and wait on the higher UUID while this audit does the reverse.
+            for cp_id in sorted([ids[4], other_id], key=str):
+                async with sessions() as observer:
+                    with pytest.raises(DBAPIError) as error:
+                        await observer.execute(select(ControlPlan.cp_id).where(
+                            ControlPlan.cp_id == cp_id).with_for_update(nowait=True))
+                    assert error.value.orig.sqlstate == '55P03'
+                    await observer.rollback()
+                checked.append(cp_id)
+            await original(db, identities)
+
+        monkeypatch.setattr(sync, 'lock_version_parents_in_order', verify_input_locks)
+        async with sessions() as db:
+            capa = await db.get(CAPAEightD, cid)
+            result = await gate.run_audit(db, capa, ids[3])
+            assert result['decision'] == 'blocked'
+        assert set(checked) == {ids[4], other_id}
     finally:
         current_tenant_schema.reset(token)

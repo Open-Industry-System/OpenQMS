@@ -12,6 +12,15 @@ from app.models.agent import (
     AgentSession,
     AgentToolCall,
 )
+from app.models.agent_plugin import AgentPluginGrant, AgentPluginInstallation
+from app.models.agent_runtime_event import (
+    AgentEventReceipt, AgentProjectionReceipt, AgentResult, AgentResultReceipt, AgentRunEvent,
+)
+from app.models.agent_readonly_control import (
+    AgentCheckpointReceipt, AgentReadonlyCheckpoint, AgentTaskControl, AgentTaskUpdate,
+)
+from app.models.agent_task import AgentTask, AgentRun, AgentTaskGrant, AgentTaskMessage
+from app.models.agent_task_attachment import AgentTaskAttachment
 from app.models.agent_review_skill import AgentReviewSkill
 from app.models.agent_read_task import AgentReadTask
 from app.models.audit import AuditLog
@@ -122,6 +131,7 @@ from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 
 # Platform-level models (public schema)
 from app.models.tenant import Tenant  # noqa: F401
+from app.models.tenant_attachment_disposal import TenantAttachmentStorageDisposal
 from app.models.tenant_migration import TenantMigration  # noqa: F401
 from app.models.user import User
 from app.models.user_dashboard_layout import UserDashboardLayout
@@ -144,7 +154,10 @@ __all__ = [
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
     "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
     "CapaLateralDiffusionCheck", "CapaLateralNotification",
-    "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentSession", "AgentToolCall", "AgentReadTask",
+    "AgentTask", "AgentRun", "AgentTaskGrant", "AgentTaskMessage", "AgentTaskAttachment",
+    "AgentCheckpointReceipt", "AgentReadonlyCheckpoint", "AgentTaskControl", "AgentTaskUpdate",
+    "AgentEventReceipt", "AgentProjectionReceipt", "AgentResult", "AgentResultReceipt", "AgentRunEvent",
+    "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentPluginGrant", "AgentPluginInstallation", "AgentSession", "AgentToolCall", "AgentReadTask",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
     "InspectionCharacteristic", "SampleBatch", "SampleValue", "SPCAlarm", "ControlLimitSnapshot",
@@ -223,4 +236,5 @@ __all__ = [
     "PlatformAdminUser",
     "ReferenceTemplate",
     "TenantMigration",
+    "TenantAttachmentStorageDisposal",
 ]

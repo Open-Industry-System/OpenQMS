@@ -25,7 +25,8 @@ from app.models.customer_quality import Customer
 from app.models.erp import ERPConnection, ERPInventoryBalance, ERPShipment
 from app.models.factory import Factory
 from app.models.iqc_inspection import IqcInspection
-from app.models.role import RoleDefinition
+from app.models.role import RoleDefinition, RolePermission, UserProductLine
+from app.models.product_line import ProductLine
 from app.models.spc import InspectionCharacteristic, SPCAlarm
 from app.models.supplier import Supplier
 from app.models.user import User
@@ -128,6 +129,14 @@ async def capa_d3_setup(db: AsyncSession):
         factory_id=factory.id,
     )
     db.add(user)
+    await db.flush()
+    # Keep the persisted line grant valid on an empty migrated test database too.
+    if await db.get(ProductLine, "DC-DC-100") is None:
+        db.add(ProductLine(code="DC-DC-100", name="D3 Test Line", factory_id=factory.id))
+        await db.flush()
+    # Service admission now resolves persisted authority, not the caller's scope.
+    db.add(RolePermission(role_id=role.id, module="capa", permission_level=3))
+    db.add(UserProductLine(user_id=user.user_id, product_line_code="DC-DC-100"))
     await db.flush()
 
     capa = CAPAEightD(
@@ -729,7 +738,8 @@ async def capa_d8_gate(db: AsyncSession):
     """Create a CAPA in D8_GATE_PENDING status with factory + user (no docs)."""
     from app.models.factory import Factory
     from app.models.product_line import ProductLine
-    from app.models.role import RoleDefinition
+    from app.models.role import RoleDefinition, RolePermission, UserProductLine
+    from app.models.factory import UserFactory
     from app.models.user import User
     factory = Factory(
         id=uuid.uuid4(), code="FAC-DOCG", name="DocGate Test Factory", is_active=True,
@@ -754,6 +764,12 @@ async def capa_d8_gate(db: AsyncSession):
     db.add(ProductLine(
         code=product_line_code, name="DocGate Test Line", factory_id=factory.id,
     ))
+    await db.flush()
+    db.add_all([
+        RolePermission(role_id=role.id, module="capa", permission_level=5),
+        UserFactory(user_id=user.user_id, factory_id=factory.id),
+        UserProductLine(user_id=user.user_id, product_line_code=product_line_code),
+    ])
     await db.flush()
     capa = CAPAEightD(
         report_id=uuid.uuid4(), document_no="CAPA-DOCG-001", title="DocGate Test CAPA",
@@ -985,3 +1001,7 @@ async def capa_with_cp_blocked_modify(db, capa_d8_gate):
     }]
     await _make_done_analysis(db, capa, user, affected)
     return capa, user, cp, "old-item", "control_method"
+
+
+# Outcome-review fixtures use independent committed sessions, unlike the local db fixture.
+from tests.capa.outcome_review_support import review_case, review_http_client, review_sources  # noqa: F401,E402
