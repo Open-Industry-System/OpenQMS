@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.11+、FastAPI/Pydantic 2、async SQLAlchemy、PostgreSQL15/pgvector、手写 public/tenant Alembic delta、stdlib 固定进程、pytest、既有分层 Make/CI。
 
+**计划审阅修订：** 用户审阅初稿后要求修正三处实施边界；当前R2前移消息门禁、为blocked任务单独记录请求指纹、补撤权后仍可停止的有序API验收。当前仅计划，未获开始执行的确认；已批准v6规格的业务边界不变。
+
 ---
 
 ## 0. 批准状态、基线和执行纪律
@@ -49,6 +51,7 @@ Lead私有控制器白名单保留PATH/HOME/TMPDIR，显式传 `TEST_DATABASE_UR
 | `backend/app/services/fmea_agent_sources.py` | FMEA来源声明、先鉴权的标量定位及有界单节点版本 |
 | `backend/app/models/capa_d4_delivery.py` | 字段修订/来源证明两表，元数据无正文 |
 | `backend/app/models/agent_derived_source.py` | 长期/任务范围旁表及受限收据，元数据无正文 |
+| `backend/app/models/agent_task_request.py` | 不依赖grant是否存在的不可变请求指纹；只作幂等比较，不作授权 |
 | `backend/app/schemas/agent_d4_text.py` | 来源范围输入、声明、创建响应及正文输出DTO |
 | `backend/app/services/capa_d4_provenance.py` | 修订记录、显式声明签发、supersede及验证版本 |
 | `backend/app/services/agent_runtime/derived_source_grants.py` | 当前父grant/来源旁表装载、持久化与参数重放比对 |
@@ -114,15 +117,17 @@ class SourceRevisionConflict(ValueError):
 
 `SourceUnavailable` 对应 `403 {"detail":"Source unavailable"}`；仅新声明签发的修订冲突对应409，旧400/403/404路径不变。
 
-T8同文件的内部类型/辅助函数合同如下，不能在实现时以未校验dict替代：`SourceState`含当前report坐标/latest_revision/active_proof/规范source_scope；`RootCandidateSnapshot`含report坐标、revision_id、proof_id、field_hmac、source_version、source_proof_digest、policy_binding、rule_version及隐藏repr的候选text；`EncodedRelease`含预先分配的receipt_id/created_at、最终projection_digest、隐藏repr的JSON bytes和由该bytes构造的no-store Response。`require_current_text_authority(db, identity, state) -> None`核当前父grant/P/T/来源读取权；`build_root_candidate(*, binding, state) -> RootCandidateSnapshot`只读有界快照；`encode_bounded_release(identity, snapshot, *, limit) -> EncodedRelease`做DTO/JSON预算；`verify_release_is_current(db, identity, latest, snapshot) -> None`做版本/证明/坐标最终比较；`add_restricted_receipt_and_audit(db, identity, latest, release) -> None`只添加预定元数据，不commit。定义职责在T8，不是新增公开服务。
+T9同文件的内部类型/辅助函数合同如下，不能在实现时以未校验dict替代：`SourceState`含当前report坐标/latest_revision/active_proof/规范source_scope；`RootCandidateSnapshot`含report坐标、revision_id、proof_id、field_hmac、source_version、source_proof_digest、policy_binding、rule_version及隐藏repr的候选text；`EncodedRelease`含预先分配的receipt_id/created_at、最终projection_digest、隐藏repr的JSON bytes和由该bytes构造的no-store Response。`require_current_text_authority(db, identity, state) -> None`核当前父grant/P/T/来源读取权；`build_root_candidate(*, binding, state) -> RootCandidateSnapshot`只读有界快照；`encode_bounded_release(identity, snapshot, *, limit) -> EncodedRelease`做DTO/JSON预算；`verify_release_is_current(db, identity, latest, snapshot) -> None`做版本/证明/坐标最终比较；`add_restricted_receipt_and_audit(db, identity, latest, release) -> None`只添加预定元数据，不commit。定义职责在T9，不是新增公开服务。
 
 T5同文件定义 `FixedWire` 的六次HTTP流程，私有config含origin/tenant_slug/installation_id/secret/request_key/expected_report_id。方法：`claim(config) -> ClaimView(run_id,task_id,token)`；`require_body_capability(claim) -> None`调用固定capabilities GET；`claim_start(claim, *, limit=1) -> BatchView(batch_id,messages)`，message仅ID/sequence/content；`read_body(claim) -> DeliveryView(receipt_id,report_id,text,labels,versions)`；`validate_delivery(claim,config,delivery) -> None`严格校验全部安全标签和绑定；`ack_start(claim,batch) -> None`只确认该实际batch前缀；`finish_once(claim) -> FinishView(run_id,task_id,status)`完整确认completed。所有token/text/content/原始bytes隐藏repr，未知原始dict丢弃。路由分别为现有claim、capabilities、messages/claim、新正文GET、messages/ack、finish；除claim外仅run token，绝不接受任意URL。固定视图只服务该脚本，不作为SDK或通用HTTP接口。
 
 ## 2. 依赖顺序
 
-`T1合同/默认拒绝 → T2五表迁移 → T3来源读取/修订 → T4签发 → T5接收器定稿 → T6平台双槽准入 → T7双层来源授权 → T8正文交付 → T9消息门禁 → T10正常配置HTTP/CI分类 → T11冻结组合门禁/交接清理`。
+`T1合同/默认拒绝 → T2证据/范围/请求身份迁移 → T3来源读取/修订 → T4签发 → T5接收器定稿 → T6服务端消息门禁 → T7平台双槽准入 → T8双层来源授权 → T9正文交付 → T10正常配置HTTP/CI分类 → T11冻结门禁/交接清理`。
 
-T5可在T1后用自有fake/loopback协议完成；不得并行编辑T1/T6的公共文件。T6须等T5定稿实算hash后才能存在合法正文准入；禁止先放零hash/任意hash跑正向。生产可信集合全程为空。
+T5可在T1后用自有fake/loopback协议完成；不得并行编辑T1/T7的公共文件。T7须等T5定稿实算hash后才能存在合法正文准入；禁止先放零hash/任意hash跑正向。生产可信集合全程为空。
+
+**逐提交安全门槛**：T6必须在T7/T8任何正向正文准入之前完成并复核；否则正文profile始终拒绝消息交付，不能把它当legacy profile略过检查。无论首次可claim落在哪个任务，从首次允许正文安装claim的那个提交起，必须同提交实跑非字面量消息的首次领取/重领/history/ACK真实API负向验收；不延迟到T10，不用默认false或接收器不ACK代替服务端门禁。
 
 ---
 
@@ -217,11 +222,12 @@ HTTP JSON UUID按现有DTO的JSON解析习惯验证；不因Python strict UUID�
 - [ ] GREEN：纯反例＋默认关闭/未知query/body选择/未知安全枚举DTO断言；旧permissions纯测试。新增 `SourceDeclaration`、来源输入、正文输出DTO只表达合同，不做授权。
 - [ ] 精确提交：`feat(agent): define restricted D4 text contracts behind default deny`；规格→质量复核后进入T2。
 
-## Task 2: 仅新增五表的public/tenant迁移
+## Task 2: 授权/证据五表与请求身份旁表的public/tenant迁移
 
 **Files / write scope:**
 - Create: `backend/app/models/capa_d4_delivery.py`
 - Create: `backend/app/models/agent_derived_source.py`
+- Create: `backend/app/models/agent_task_request.py`
 - Create: `backend/alembic/versions/20261109_d4_text_delivery.py`
 - Create: `backend/alembic_tenant/versions/tv007_d4_text_delivery.py`
 - Create: `backend/tests/migrations/test_d4_text_delivery_delta.py`
@@ -237,7 +243,7 @@ HTTP JSON UUID按现有DTO的JSON解析习惯验证；不因Python strict UUID�
 - Modify: `backend/tests/migrations/test_tenant_schema_parity.py`
 
 - [ ] 执行前新建并登记本片PG；用 `make check-test-db PYTHON_BIN="$PY"` 核实例/库/迁移，URL仅从私有文件注入。无权限/本地Docker不匹配就停止，不借其他库。
-- [ ] RED：真实PG断言五表缺失；源码断言tv001–tv006与snapshot manifest字节不变。不能仅测模型 `create_all()`。
+- [ ] RED：真实PG断言五张授权/证据表及请求指纹旁表缺失；源码断言tv001–tv006与snapshot manifest字节不变。不能仅测模型 `create_all()`。
 - [ ] DDL字段表完整如下（所有PK UUID、时间aware；索引/约束均命名）：
 
 | 表 | 字段与必要约束 |
@@ -247,8 +253,22 @@ HTTP JSON UUID按现有DTO的JSON解析习惯验证；不因Python strict UUID�
 | `agent_restricted_projection_receipts` | receipt_id PK，task_id/run_id FK，lease_epoch/tenant_generation非负，source_capa_id、专用projection_id/digest、data_class固定restricted、created_at；不得连入旧receipt关联表 |
 | `agent_plugin_derived_source_scopes` | scope_id PK、plugin_grant_id FK/unique、target_report_id、derived_projection_id、source_module/source_projection_id、fmea_id/cause_node_id、actor_id/created_at |
 | `agent_task_derived_source_scopes` | 与长期范围同构，以task_grant_id FK/unique绑定；任务grant没有enabled字段 |
+| `agent_task_source_requests` | task_id PK/FK `agent_tasks.task_id`，request_fingerprint varchar64、fingerprint_format、created_at；不可变请求身份，无原文、无来源授权，ready/blocked均保存 |
 
 证明失效可使用proof表的可空 `invalidated_at` 元数据字段；任何成功验证更新在同事务永久填入，最终校验还要求为null，避免依赖时间精度恢复旧证明。此字段只实现v6“更新不补发且旧证明不得复活”，不新增审批/状态机。
+
+- [ ] 请求身份旁表DDL独立于任何grant：
+
+```python
+op.create_table('agent_task_source_requests',
+    sa.Column('task_id', pg.UUID(as_uuid=True),
+        sa.ForeignKey('agent_tasks.task_id', ondelete='RESTRICT'), primary_key=True),
+    sa.Column('request_fingerprint', sa.String(64), nullable=False),
+    sa.Column('fingerprint_format', sa.String(40), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False))
+```
+
+其模型为 `AgentTaskSourceRequest`；写入format固定 `d4-source-request.v1`。不得存source request原文副本、initial_text副本或直接当P/T使用；指纹不能验证/密钥变化时failclosed，不静默补写旧请求身份。
 
 - [ ] 两个范围表共享完整迁移辅助代码：
 
@@ -274,7 +294,7 @@ def create_scope_table(op, sa, pg, name, parent_column, parent_table):
 
 - [ ] 加active partial unique：`WHERE status='active'`。新签发在父锁下先将旧active标superseded并flush，再插新active，旧证据不删除。
 - [ ] 更新前驱/当前注册、`REVIEWED_REVISIONS`、累计新增对象过滤。只在public reference扣除已审新增表，不过滤tenant实际对象。钉头范围：`test_supplier_risk_capa_inputs_migration.py`、`test_agent_mainline_merge_graph.py`、`test_agent_mainline_merge_db.py`、`test_agent_readonly_controls_delta.py`、`test_multitenancy/test_agent_read_task_delta.py`、`test_tenant_schema_parity.py`；保留旧merge本身的历史升级验证，不能把所有MERGE常量盲改新head。
-- [ ] GREEN：空库/原两分支/当前head真实升级；tenant v1–v6受原maintenance/generation锁前向到v7；current parity一致、snapshot再生成仍钉旧public_head。downgrade若五表有证据就拒绝，不删除记录通过测试。
+- [ ] GREEN：空库/原两分支/当前head真实升级；tenant v1–v6受原maintenance/generation锁前向到v7；current parity一致、snapshot再生成仍钉旧public_head。downgrade若上述六表有证据就拒绝，不删除记录通过测试。
 - [ ] Commit `feat(agent): add tenant-local D4 delivery evidence and scope tables`。
 
 ## Task 3: FMEA内部来源访问与根因修订记录
@@ -389,7 +409,34 @@ def receive_once(wire, config):
 - [ ] GREEN：测试HTTP调用数、ACK水位与finish次数；stdout/stderr/argv/env/文件/异常sentinel不含正文/词表/secret/token。审计子进程网络仅固定回环，不称OS sandbox。
 - [ ] 独立review定稿后实算SHA256，记录该提交的worker bytes。Commit `feat(agent): add fixed local D4 text receiver and supervised launcher`。
 
-## Task 6: 第二策略槽与模块声明驱动的平台准入
+## Task 6: 固定启动消息的服务端门禁
+
+**Files / write scope:**
+- Create: `backend/tests/services/agent_runtime/test_d4_text_message_policy.py`
+- Create: `backend/app/services/agent_runtime/message_delivery_policy.py`
+- Modify: `backend/app/services/agent_runtime/runtime_messages.py`
+- Modify: `backend/tests/services/agent_runtime/test_runtime_messages.py`
+- Modify: `backend/tests/services/agent_runtime/test_readonly_checkpoints.py`
+
+- [ ] RED：新profile队列中放敏感非字面量sentinel；分别初领、同批重试、旧epoch重领、accepted history、ACK真实batch，所有响应不含sentinel且批次/水位/成功audit不变。
+- [ ] 在叶子模块 `message_delivery_policy.py` 定义唯一共用检查；消息服务仅从最终刷新后的服务端admission取profile再传入（不从请求取值），T7平台profile绑定导入该叶子常量，避免循环导入。此任务不开放任何正文安装：
+
+```python
+TEXT_PROFILE = 'local_d4_root_cause_text_v1'
+START_MESSAGE = 'deliver_d4_root_cause_candidate_v1'
+
+def require_profile_message_contents(profile, rows):
+    if profile != TEXT_PROFILE:
+        return
+    if any(row.content != START_MESSAGE for row in rows):
+        raise PermissionError('Message unavailable')
+```
+
+真正调用前仍是现有完整身份/准入/投递重验；新profile缺开关/peer/策略不得降级走legacy。claim在最终刷新后、清旧markers/新claimed/audit前调用；history在最后授权后、DTO构造前调用；ACK在加载真实batch及最终授权后、改accepted/watermark前调用。不挑掉非法消息，不跳seq，不只校验initial_text，不仅靠limit1。
+
+- [ ] 在尚未提供正文准入时，用纯predicate及服务插入点契约证明固定/非固定输入差分，明确不是新profile真实准入成功；旧profile自由输入/partial ACK/retry/history after99/epoch批次证明均保持。T7/T8首次实际可claim的同一提交必须另完成真实API哨兵测试，不准以此任务的纯测试代签。Commit `fix(agent): validate text-receiver inputs before message egress`。
+
+## Task 7: 第二策略槽与模块声明驱动的平台准入
 
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/deployment_profiles.py`
@@ -403,17 +450,22 @@ def receive_once(wire, config):
 - Modify: `backend/app/services/agent_runtime/run_auth.py`
 
 - [ ] RED：text slot缺失/错误类型/词表泄漏/错worker/hash/非dev/过期/重复JSON键/符号链接/不安全权限均不可准入；同时开启两个slot也不串安装或profile。由T5真实hash作正向，不自动接受当前文件的任意hash。
+- [ ] 准入前置：依赖已完成并双复核的T6消息门禁；缺任一路径的门禁调用就保持正文profile不可准入/消息不可交付，不能落入legacy分支。首次实际允许claim时同提交见证敏感非字面量在claim/reclaim/history/ACK均不出站且状态不推进（若本任务仍因共享授权未打通而不可claim，最晚T8首次打通时实测，不伪造token冒充）。
 - [ ] 固定平台绑定：metadata profile最低summary保持旧集合；text profile最低仅正文cap。baseline全DENY，profile目录只提升已准入的context，不把整个新增CAPA目录盲spread到旧profile。FMEA来源声明留内部，不出get_capability/manifest。
 - [ ] lifespan分别装两个frozen policy，`get_db`只从实际app.state附到session.info；缺引用用EMPTY，不读环境文件/不在每个请求reload。文字词表只存在text slot；binding字段兼容 `TrialAdmission.binding_sha256`，新值为HMAC-SHA256，不把私有词表的plain SHA暴露在token/日志。
 - [ ] `select_runtime_admission(db, installation, executor_id, coordinates)`逐个检查两个独立slot，匹配具体安装/key/version/hash；未知/冲突failclosed，不从HTTP profile名选择。Run token绑定该admission，每次重验比较binding和到期；租约clip不延长。
+- [ ] 本任务只加载第二slot/绑定，尚未完成T8的正文grant/ready路径；正文安装仅声明body能力时必须仍不能claim，不临时借授summary开门。若任一接线已经令其可claim，必须在本提交提前引入T8早期harness及全部消息负向验收，否则回退准入，不能延期。
 - [ ] peer gate由“metadata有效本地模式或text启用”驱动相关agent路径，保留旧metadata路径关闭语义；newGET还需自身flag和dev。拒forwarded，HTTPS不降级。SourceDeclaration业务入口只新分支使用真实peer上下文，不封锁无声明原业务调用。
 - [ ] GREEN：两个slot交叉错凭据、轮换/永久撤销/重启策略binding变化、元数据旧fixedhash与Capabilities不增加正文。Commit `feat(agent): bind independent local text admission to module contracts`。
 
-## Task 7: 两层范围持久化与统一授权/目录/控制
+## Task 8: 两层范围持久化与统一授权/目录/控制
 
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/derived_source_grants.py`
 - Create: `backend/tests/services/agent_runtime/test_d4_text_grants.py`
+- Create: `backend/tests/services/agent_runtime/test_d4_task_request_identity.py`
+- Create: `backend/tests/e2e/d4_text_local_harness.py`
+- Create: `backend/tests/e2e/test_d4_text_early_admission.py`
 - Modify: `backend/app/services/agent/permissions/types.py`
 - Modify: `backend/app/services/agent/permissions/access.py`
 - Modify: `backend/app/schemas/agent_plugin.py`
@@ -430,17 +482,45 @@ def receive_once(wire, config):
 - [ ] `AccessAttempt`新增kw-only来源输入（current/plugin/task），默认None。`authorize`从可信内部contract判断该cap是否必须来源；保留原canonical spec比对、身份/工厂/PL/父grant期限检查后，正文必须调用T1的精确范围谓词；metadata无来源依赖仍走旧语义。调用者不能用伪CapabilitySpec或请求字段关闭该要求。
 - [ ] `PluginGrantCreate.derived_source_scope`、`TaskCreate.derived_source_scope`可选严格DTO。对正文启用/可运行创建必填；旧metadata请求缺字段不改变结果。服务校验target_report_id与父对象范围一致，source_module/projection由代码声明补齐，不能接受用户自报等级。新的范围创建/启用也先源可见性后节点诊断。
 - [ ] 管理员范围P只来自显式输入，不从当前proof填。T只来自任务发起者显式输入；在同一父grant既覆盖目标又覆盖源时才派生task grant并写T旁表。为父grant先flush取得server UUID，旁表FK必须绑定同一个父grant。缺任何层则既有blocked状态/无可运行run，不自动匹配当前proof。
-- [ ] `task_service._existing`及唯一键竞争恢复分支都把规范化source_scope纳入参数比较；同key A换B固定409，不返回已授权B的错觉。旧请求参数比对保持。
-- [ ] 目录只提供发现结果：共享身份/插件范围谓词过滤可见安装，不创建或存储T，不将发现结果当执行AccessDecision。Task create/ready/claim/verify/resume/restart完整检查持久化P/T及当前source；claim/控制不得改旁表，restart新epoch也继承原任务范围。更换源要显式新grant/新任务，不帮用户扩域。
-- [ ] `_require_grant_enableable`、ready/required集合、runtime授权从T6的平台profile绑定取最低集合，不再额外硬要求summary。旧 `readonly_delivery._recognized_source`、旧checkpoint、legacy `agent_read_tasks` 的summary/internal限制保持，不泛化。
-- [ ] 仅改runtime共享 `_target`、registry目标读取、目录授权定位为标量；不要替换业务写函数所需的全ORM `current_capa_target`。checkpoint历史只用factory_id的调用方也验证。
-- [ ] GREEN：只正文安装的正常grant/create ready/claim/verify/控制；旧metadata3CLI/14SDK仍不获正文；两层旁表缺失/父grant关闭/到期/归属错/同key换源/source不可见均拒，SQL见证不预读D1–D8正文。Commit `feat(agent): intersect explicit plugin and task derived-source scopes`。
+- [ ] **请求身份与权限分离**：新增模型 `AgentTaskSourceRequest`（T2请求指纹表）及 helper `request_source_fingerprint(key, tenant_id, initiator_id, request)`。字段和函数完整定义如下；该函数放在 `derived_source_grants.py` 或task请求身份叶子helper，不查询grants/proof：
 
-## Task 8: 正文快照与最终交付服务
+```python
+import hashlib, hmac, json
+
+def request_source_fingerprint(key, tenant_id, initiator_id, request):
+    scope = request.derived_source_scope
+    payload = {
+        "format": "d4-source-request.v1",
+        "tenant": str(tenant_id), "initiator": str(initiator_id),
+        "report": str(request.report_id),
+        "installation": str(request.installation_id),
+        "initial_text": request.initial_text,
+        "source_scope": None if scope is None else scope.model_dump(mode="json"),
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hmac.new(key, b"openqms.d4.task-request.v1\n" + raw,
+        hashlib.sha256).hexdigest()
+```
+
+按规范请求（固定格式版本、tenant/initiator、report、installation、initial_text、显式source_scope或null）生成域分离HMAC-SHA256；仅存digest/格式版本，不存第二份原文。不能用proof digest、当前grant或最新source替代请求指纹。
+- [ ] 每个正文任务在同一Task创建savepoint内保存不可变请求指纹，**包括blocked任务**。缺长期grant但请求/用户资格合法时，保存blocked Task、原始消息与指纹；不产生正文task grant、授权来源旁表或pending run。指纹不是T、不参与authorize，不得从中补授权。安装的请求类型由受信绑定声明识别，不因本次不ready而漏存。
+- [ ] `_existing`及唯一键竞争恢复分支使用原请求参数比对＋该fingerprint：同key同A返回原Task（即使后来有grant也不升级原blocked任务）；同key换B固定409，不能重算或覆盖指纹。仅识别 `uq_agent_task_initiator_request` 的23505为竞争，rollback savepoint后重读胜出Task及已原子提交的指纹，再做同样比较。其它IntegrityError不伪装幂等。旧metadata调用不需指纹；正文历史行缺指纹或格式不可验证时failclosed，不从当前proof补签。
+- [ ] 新增 `backend/tests/services/agent_runtime/test_d4_task_request_identity.py` 的三项强制用例：blocked(A)同key/A返回同task_id且授权/运行行数仍0；同key/B→409且指纹未变；两个真实事务并发同key创建，唯一键竞争后同源返回同Task、异源409且仅一份指纹。
+- [ ] 目录只提供发现结果：共享身份/插件范围谓词过滤可见安装，不创建/存储T，不将发现结果当执行AccessDecision。Task create/ready/claim/verify及resume/restart完整检查持久化P/T及当前source；不得改旁表，restart新epoch仍原范围。更换源要新grant/新任务，不帮扩域。
+- [ ] **停止操作不是恢复操作**：保留 `task_controls._user_authority` 只核当前用户的任务归属、CAPA/工厂/PL/租户及run位置控制权；pause/cancel不能调用正文 `authorize_task`/`_resume_authority`、不能依赖plugin enabled/body grant/P/T/proof/FMEA VIEW，也不加载正文或来源节点。完整源重验仅放resume/restart；不能把新源权限检查塞进共享用户控制权函数，导致撤权后无法停止。用户自身失去任务控制权仍须拒绝，不能借“停止”扩大权限。
+- [ ] `_require_grant_enableable`、ready/required集合、runtime授权从T7的平台profile绑定取最低集合，不再额外硬要求summary。旧 `readonly_delivery._recognized_source`、旧checkpoint、legacy `agent_read_tasks` 的summary/internal限制保持，不泛化。
+- [ ] 仅改runtime共享 `_target`、registry目标读取、目录授权定位为标量；不要替换业务写函数所需的全ORM `current_capa_target`。checkpoint历史只用factory_id的调用方也验证。
+- [ ] 先在本任务创建正常配置的 `d4_text_local_harness.py` 与早期验收文件；不等T10才有可用fixture。复用OwnedTrial的租户/生命周期/随机TCP模式，但body安装/策略/来源声明与显式P/T必须走正常API，不能打DIRECT或TRUSTED补丁。早期测试由父controller真实claim并访问消息接口，不宣称已运行T10固定接收器完整闭环。
+- [ ] GREEN之前增加**首次可claim提交**的真实API消息负向见证：即使尚未做T9正文读取服务，当前运行可claim后任意非固定消息仍必须在服务端拒绝（首次/重领/history/ACK），HTTP响应无哨兵、batch/watermark/成功audit不变；没有该证据不提交准入正向。旧metadata3CLI/14SDK回归不获得正文。
+- [ ] 本任务实现并验收pause/cancel与resume/restart权限分离；撤正文grant后先用已存在的受保护capabilities GET验证运行身份拒绝，不能用尚未实现正文GET的404冒充撤权成功。完整的“撤grant→正文GET拒绝→pause成功→resume拒绝→cancel成功”安排在T9正文服务首次可用提交，T10再整合回归。另覆盖FMEA读取权撤销但任务控制权仍在时仍可停止，停止路径0正文/源node读取。Commit `feat(agent): intersect explicit plugin and task derived-source scopes`。
+
+## Task 9: 正文快照与最终交付服务
 
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/d4_text_delivery.py`
 - Create: `backend/tests/services/agent_runtime/test_d4_text_delivery.py`
+- Create: `backend/tests/e2e/test_d4_text_revocation_controls.py`
 - Modify: `backend/app/api/agent_runtime.py`
 - Modify: `backend/app/schemas/agent_d4_text.py`
 
@@ -468,36 +548,13 @@ async def get_d4_root_cause_text(db, identity):
 - [ ] `verify_release_is_current`不加载验证正文/source_ref：select验证ID/结论/updated_at，SQL布尔谓词比较verification.root_cause_text与当前根因的Python `.strip()` 参数、source_ref JSONB与proof；同时proof未invalidated/仍active、revision/field_hmac/源node版本/当前坐标/期限一致。SQL btrim不得处理字段侧Unicode空白。根因当前变大时先预算再取。
 - [ ] null/空根因不能凭空制造passed验证或有效proof；无证明则拒绝。DTO保留严格nullable但不为测试编造空字段事实。词表命中0不降级internal，原预览外发flag不翻转。
 - [ ] HTTP响应 `Cache-Control:no-store`，新DTO仅Root候选＋opaque版本＋local许可；不含词表/验证/FMEA node/来源ID。server/worker错误均不含原文/异常cause；audit名称release_committed不声称接收方已收到。实际事务失败不能提前发正文。
+- [ ] 在正文服务首次可用的本任务提交内，正常API顺序实测：任务已claim且正文GET原本可用 → 管理员撤正文grant → 同一run token正文GET拒绝（不是路由缺失404）→ 仍有任务控制权的用户pause成功并取新epoch → resume拒绝且task/run保持paused、无新run/成功恢复audit → 同用户cancel成功（新key/正确epoch），最终cancelled/stopped、租约清空。pause/cancel区间SQL见证不读root正文或来源节点，不因plugin失权/源失权而被阻止。
 - [ ] GREEN：字节扩张、坏数据、未知安全标签、同UUID跨tenant、generation维护、所有源/目标授权变化；metadata receipt/event/result/checkpoint不能消费受限receipt UUID。Commit `feat(agent): release bounded D4 root text with final source-scope fencing`。
-
-## Task 9: 固定启动消息的服务端门禁
-
-**Files / write scope:**
-- Create: `backend/tests/services/agent_runtime/test_d4_text_message_policy.py`
-- Modify: `backend/app/services/agent_runtime/runtime_messages.py`
-- Modify: `backend/tests/services/agent_runtime/test_runtime_messages.py`
-- Modify: `backend/tests/services/agent_runtime/test_readonly_checkpoints.py`
-
-- [ ] RED：新profile队列中放敏感非字面量sentinel；分别初领、同批重试、旧epoch重领、accepted history、ACK真实batch，所有响应不含sentinel且批次/水位/成功audit不变。
-- [ ] 在消息服务新增唯一共用检查：
-
-```python
-def require_profile_message_contents(current, rows):
-    trial = current.trial
-    if trial is None or trial.profile != 'local_d4_root_cause_text_v1':
-        return
-    if any(row.content != 'deliver_d4_root_cause_candidate_v1' for row in rows):
-        raise PermissionError('Message unavailable')
-```
-
-真正调用前仍是现有完整身份/准入/投递重验；新profile缺开关/peer/策略不得降级走legacy。claim在最终刷新后、清旧markers/新claimed/audit前调用；history在最后授权后、DTO构造前调用；ACK在加载真实batch及最终授权后、改accepted/watermark前调用。不挑掉非法消息，不跳seq，不只校验initial_text，不仅靠limit1。
-
-- [ ] GREEN：新profile真实/fake消息差分0；旧profile可用自由输入/partial ACK/retry/history after99/epoch批次证明均保持。Commit `fix(agent): validate text-receiver inputs before message egress`。
 
 ## Task 10: 正常策略真实HTTP、源权限反例与CI必选层
 
 **Files / write scope:**
-- Create: `backend/tests/e2e/d4_text_local_harness.py`
+- Modify: `backend/tests/e2e/d4_text_local_harness.py`
 - Create: `backend/tests/e2e/test_d4_text_local_process.py`
 - Modify: `backend/tests/ci/test_layer_selection.py`
 - Modify: `backend/tests/e2e/capa_outcome_runner.py`
@@ -514,6 +571,9 @@ def require_profile_message_contents(current, rows):
 | `test_declaration_denials_hide_node_existence` | 无FMEA VIEW、越范围两类员工真实/虚构合法node请求403/body完全一致，节点查询0且无四类写 |
 | `test_revision_and_verification_changes_fence_old_proofs` | Root A→B→A、验证failed→passed/改源、同时间戳不会复活；新合格创建可supersede |
 | `test_text_scope_idempotency_and_restart_do_not_regrant` | 同key换源冲突；claim/restart不写范围；父grant关闭/期限不被旁表绕过 |
+| `test_blocked_task_source_request_replay` | blocked请求FP与授权分离；同A/换B/真实唯一键竞争重放一致 |
+| `test_revoked_text_grant_does_not_block_stop_controls` | revoke→GET拒绝→pause成功→resume拒绝→cancel成功，停止0正文/源node读取 |
+| `test_first_claimable_text_profile_has_message_gate` | 从首次可claim提交即有消息首次/重领/history/ACK哨兵负向证据，非到本任务才安全 |
 | `test_text_message_sentinel_never_crosses_tcp` | 首领/重领/history/ACK非法批次均无sentinel/水位/成功audit变化 |
 | `test_text_budget_and_response_faults_fail_closed` | 64KiB/256KiB界限、错标签/绑定、bad JSON/UTF8/慢滴，无截断降级或重试 |
 | `test_text_finish_commit_without_confirmation_is_unknown` | 正常handler已commit后注入断连/坏JSON/超限；parent真实完成、child unknown、一次finish |
@@ -555,15 +615,17 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 
 | 已批准v6要求 | 覆盖任务 |
 |---|---|
-| 默认关闭/dev/真实回环/新路由/旧链不扩权 | T1、T5、T6、T10 |
-| 模块业务声明与平台部署信任分离、无summary依赖 | T1、T6、T7 |
-| P/T精确独立来源范围、父grant不拼接、不自动扩域 | T1、T2、T7、T8、T10 |
+| 默认关闭/dev/真实回环/新路由/旧链不扩权 | T1、T5、T7、T10 |
+| 模块业务声明与平台部署信任分离、无summary依赖 | T1、T7、T8 |
+| P/T精确独立来源范围、父grant不拼接、不自动扩域 | T1、T2、T8、T9、T10 |
 | SourceDeclaration同动作签发、先可见性后节点诊断 | T1、T3、T4、T10 |
-| 字段修订/ABA、验证不可复活、proof supersede不授权 | T2、T3、T4、T7、T10 |
-| 单字段RR/只读/预算/opaque HMAC/最终当前复核 | T3、T8、T10 |
-| 受限新收据与五表迁移/parity/冻结历史 | T2、T8、T10 |
-| 固定消息首次/重领/history/ACK出站前门禁 | T9、T10 |
-| 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T6、T10 |
+| 字段修订/ABA、验证不可复活、proof supersede不授权 | T2、T3、T4、T8、T10 |
+| 单字段RR/只读/预算/opaque HMAC/最终当前复核 | T3、T9、T10 |
+| 受限新收据与五张授权/证据表＋请求身份表/parity/冻结历史 | T2、T9、T10 |
+| 固定消息首次/重领/history/ACK出站前门禁、首次claim提交即安全 | T6、T7、T8、T10 |
+| blocked请求身份不授予权限、同源/换源/唯一键竞争重放 | T2、T8、T10 |
+| 撤权后仍可停止、恢复须完整源授权、有序正文GET控制验收 | T8、T9、T10 |
+| 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-当前仅编写计划，所有checkbox未执行。执行模式选定且计划审阅无阻塞后才开始T1；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。当前仅编写计划，所有checkbox未执行。执行模式选定且计划审阅无阻塞后才开始T1；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
