@@ -6,7 +6,7 @@ from app.services.agent.permissions.types import ApprovalFloor, CapabilitySpec
 
 
 _LOCAL_METADATA_CAPABILITIES = MappingProxyType({
-    **CAPA_CAPABILITIES,
+    "capa.d4.candidate.propose.v1": CAPA_CAPABILITIES["capa.d4.candidate.propose.v1"],
     "capa.d4.summary.masked.v1": replace(CAPA_CAPABILITIES["capa.d4.summary.masked.v1"],
         approval_floor=ApprovalFloor.DIRECT),
 })

@@ -28,6 +28,11 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Hide the default-off feature before auth, validation or tenant lookups.
         path = request.url.path
+        if (path.rstrip('/') == '/api/agent/runtime/capa/d4/root-cause-text'
+                and not (settings.AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED
+                         and settings.AGENT_TASK_RUNTIME_ENABLED
+                         and settings.TENANT_MODE == 'dev')):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
         if (not settings.CAPA_D4_TEXT_PREVIEW_ENABLED
                 and re.fullmatch(r'/api/capa/[^/]+/d4-text-preview(?:/version|/availability)?/?', path)):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
