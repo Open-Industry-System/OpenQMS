@@ -21,8 +21,8 @@ from tests.migrations.test_agent_task_core import _migration_config, _sync_engin
 
 PUBLIC = "20261001_agent_readonly_controls"
 CONTROLS_TENANT = "tv004_agent_readonly_controls"
-LATEST = "tv006_agent_read_tasks"
-HEAD = "20261103_merge_agent_foundations"
+LATEST = "tv007_characteristic_refs"
+HEAD = "20261108_merge_characteristics"
 PARENT = "20260930_agent_readonly_delivery"
 TABLES = {"agent_task_controls", "agent_readonly_checkpoints", "agent_checkpoint_receipts", "agent_task_updates"}
 COLUMNS = {
@@ -59,6 +59,7 @@ def test_reviewed_heads_and_static_equivalent_deltas(mig_db_url):
         "tv003_agent_readonly_delivery",
         CONTROLS_TENANT,
         "tv005_agent_task_attachments",
+        "tv006_agent_read_tasks",
         LATEST,
     )
     root = Path(__file__).resolve().parents[2]

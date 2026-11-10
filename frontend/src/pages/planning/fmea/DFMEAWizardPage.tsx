@@ -22,6 +22,8 @@ import { parseScopeTokens } from '../../../utils/wizardScopeTokens';
 import { toolsRequiringNodeType, pickParamParent, buildAttachedParamNode, type StructureNodeType } from '../../../utils/wizardToolStructure';
 import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
 import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
+import CharacteristicEditor from '../../../components/fmea/CharacteristicEditor';
+import { updateFunctionCharacteristics } from '../../../utils/fmeaCharacteristics';
 
 const { Title, Paragraph } = Typography;
 
@@ -478,6 +480,9 @@ export default function DFMEAWizardPage() {
     const handleUpdateFunction = (funcId: string, field: 'name' | 'requirement' | 'specification', value: string) => {
       updateGraphData(nodes.map(n => n.id === funcId ? { ...n, [field]: value } : n), edges);
     };
+    const handleCharacteristicsChange = (funcId: string, characteristics: NonNullable<GraphNode['characteristics']>) => {
+      updateGraphData(updateFunctionCharacteristics(nodes, funcId, characteristics), edges);
+    };
 
     return (
       <div>
@@ -494,6 +499,13 @@ export default function DFMEAWizardPage() {
                     onChange={e => handleUpdateFunction(fn.id, 'requirement', e.target.value)} style={{ marginBottom: 4 }} />
                   <Input placeholder={t('wizard.function.specification')} value={fn.specification || ''}
                     onChange={e => handleUpdateFunction(fn.id, 'specification', e.target.value)} />
+                  <CharacteristicEditor
+                    value={fn.characteristics}
+                    allowedKind="product"
+                    productOptions={[]}
+                    readOnly={false}
+                    onChange={(characteristics) => handleCharacteristicsChange(fn.id, characteristics)}
+                  />
                 </div>
               ))}
               <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => handleAddFunction(comp.id)}>

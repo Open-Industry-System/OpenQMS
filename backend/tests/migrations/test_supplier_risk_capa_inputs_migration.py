@@ -159,14 +159,18 @@ def test_upgrade_normalizes_empty_rule_results(mig_db_url):
     engine.dispose()
 
 
-def test_single_alembic_head(mig_db_url):
+def test_single_alembic_head():
     """Alembic reports a single head (all branches merged)."""
     from alembic.script import ScriptDirectory
 
-    cfg = _cfg(mig_db_url)
+    cfg = _cfg("postgresql+asyncpg://unused/metadata_only")
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     # Additive merge keeps both previously shipped Agent branches reachable.
-    assert heads == ["20261103_merge_agent_foundations"], (
-        f"expected single head 20261103_merge_agent_foundations, got {heads}"
+    assert heads == ["20261108_merge_characteristics"], (
+        f"expected single head 20261108_merge_characteristics, got {heads}"
     )
+
+    ancestry = {revision.revision for revision in script.walk_revisions()}
+    assert {"20261101_char_refs", "20261103_merge_agent_foundations",
+            "20260929_agent_read_task", "20261009_agent_task_attachments"} <= ancestry

@@ -1,3 +1,4 @@
+import { cleanupCharacteristicReferences } from "./fmeaCharacteristics";
 /**
  * Structure/Function tree helpers for the FMEA editor left panel.
  *
@@ -486,7 +487,12 @@ export function deleteSubtree(
   }
 
   // 5. Drop deleted nodes and any edge touching them.
-  const nextNodes = nodes.filter((n) => !deleteIds.has(n.id));
+  const deletedProductIds = nodes.filter((n) => deleteIds.has(n.id))
+    .flatMap((n) => n.characteristics ?? [])
+    .filter((c) => c.kind === "product").map((c) => c.id);
+  const nextNodes = cleanupCharacteristicReferences(
+    nodes.filter((n) => !deleteIds.has(n.id)), deletedProductIds,
+  );
   const nextEdges = edges.filter(
     (e) => !deleteIds.has(e.source) && !deleteIds.has(e.target),
   );

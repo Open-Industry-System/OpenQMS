@@ -3,9 +3,8 @@
 All rules are pure functions: (items, fmea_graph) -> (list[ValidationFinding], list[failed_rule_id]).
 No database access. Fast synchronous execution.
 
-Key design: finding_hash uses stable business keys (source_fmea_node_id or step_no),
-NOT volatile item UUIDs that change on every CP save (update_control_plan deletes +
-recreates items).
+Finding identities combine source identity with the persisted control-row UUID.
+Names and display order are not decision identities; same-source controls remain independent.
 """
 from __future__ import annotations
 
@@ -38,14 +37,20 @@ def _is_placeholder(val: str | None, placeholders: set[str]) -> bool:
 
 
 def _stable_key(item: Any) -> str:
-    """Business-stable identifier: FMEA node id + characteristic, else step_no + characteristic."""
-    base = item.source_fmea_node_id or item.step_no or ""
-    char = item.product_characteristic or item.process_characteristic or ""
-    if char:
-        return f"{base}|{char}"
-    # Fallback for items without characteristic text
-    order = str(getattr(item, "sort_order", 0))
-    return f"{base}|#{order}"
+    """A characteristic may have multiple controls; each owns its decisions."""
+    from app.schemas.characteristic import CharacteristicSourceRef
+    from app.services.fmea_characteristics import source_key
+
+    raw_ref = getattr(item, "source_characteristic_ref", None)
+    if raw_ref:
+        # Invalid provenance must not collapse unrelated rows either.
+        try:
+            base = source_key(CharacteristicSourceRef.model_validate(raw_ref))
+        except ValueError:
+            base = str(raw_ref)
+    else:
+        base = getattr(item, "source_fmea_node_id", None) or item.step_no or ""
+    return f"{base}|{item.item_id}"
 
 
 
@@ -164,6 +169,38 @@ def rule_r004_special_class(items: list[Any]) -> tuple[list[ValidationFinding], 
     return findings, []
 
 
+def rule_r005_specification(items: list[Any]) -> tuple[list[ValidationFinding], list[str]]:
+    """Qualitative requirements and controlled references are valid specs."""
+    findings = []
+    for item in items:
+        # Old lightweight callers may not expose this field at all.
+        if not hasattr(item, "specification_tolerance"):
+            continue
+        if not _norm(item.specification_tolerance):
+            findings.append(ValidationFinding(
+                rule_id="R005", severity="warning", category="completeness",
+                title="特性规范缺失", description="请填写规范、定性要求或受控规范引用",
+                stable_key=_stable_key(item), key_content="specification_empty",
+                item_id=str(item.item_id),
+            ))
+    return findings, []
+
+
+def rule_r006_legacy_dual_object(items: list[Any]) -> tuple[list[ValidationFinding], list[str]]:
+    findings = []
+    for item in items:
+        if (not getattr(item, "source_characteristic_ref", None)
+                and _norm(getattr(item, "product_characteristic", None))
+                and _norm(getattr(item, "process_characteristic", None))):
+            findings.append(ValidationFinding(
+                rule_id="R006", severity="warning", category="consistency",
+                title="历史双对象归属待复核", description="此历史行同时记录产品和过程特性，请人工确认归属；系统不自动拆分或猜测类型",
+                stable_key=_stable_key(item), key_content="legacy_dual_object",
+                item_id=str(item.item_id),
+            ))
+    return findings, []
+
+
 # ─── Rule registry ─────────────────────────────────────────────────────────
 
 RULE_REGISTRY: list = [
@@ -171,6 +208,8 @@ RULE_REGISTRY: list = [
     ("R002", rule_r002_reaction_plan),
     ("R003", rule_r003_fmea_consistency),
     ("R004", rule_r004_special_class),
+    ("R005", rule_r005_specification),
+    ("R006", rule_r006_legacy_dual_object),
 ]
 
 

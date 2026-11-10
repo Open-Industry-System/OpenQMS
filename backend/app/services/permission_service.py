@@ -39,7 +39,15 @@ async def update_role_permissions(
 ) -> None:
     from app.core.permissions import Module
 
-    role = await get_role_by_key(db, role_key)
+    # Match import authority's parent-before-permission-row protocol. Without
+    # this lock, DELETE can hold child rows while replacement INSERT waits for
+    # a role FK lock held by an import waiting on those same deleted rows.
+    role = await db.scalar(
+        select(RoleDefinition)
+        .where(RoleDefinition.role_key == role_key)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if not role:
         raise ValueError(f"角色 '{role_key}' 不存在")
     if not role.is_editable:

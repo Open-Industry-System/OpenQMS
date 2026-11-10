@@ -74,6 +74,8 @@
     "specification": "规格",
     "msaAnalysis": "MSA 分析",
     "msaDescription": "量具与测量系统分析（通过量具台账管理）",
+    "msaMissingEvidence": "尚未关联 MSA 研究；量具校准不能代替 MSA 证据。",
+    "formalSync": "请使用已批准 FMEA 版本的正式同步预览与确认。",
     "spcMonitor": "SPC 监控",
     "notLinkedSPC": "未关联 SPC 检验特性",
     "targetValue": "目标值",

@@ -149,6 +149,12 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     strict_tenant_search_path_sql(tenant_schema)
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
+    # Only historical reference shapes exclude the two reviewed later columns.
+    # Current parity and the tenant side remain complete and fail closed.
+    if baseline_only or predecessor is not None:
+        later_columns = {("column", "control_plan_items.source_characteristic_ref"),
+                         ("column", "special_characteristics.source_characteristic_id")}
+        reference = {key: value for key, value in reference.items() if key not in later_columns}
     if baseline_only:
         # R1 adds tables only: retain every frozen table-owned object plus the
         # reviewed functions/configuration. The tenant side is never filtered,
@@ -161,12 +167,12 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
                      or (key[0] == "function" and f"FUNCTION:{key[1]}" in keys)
                      or (key[0] == "text_search_config" and f"TEXT SEARCH CONFIGURATION:{key[1]}" in keys)}
     if predecessor is not None:
-        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments"} or baseline_only:
+        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks"} or baseline_only:
             raise ValueError("Unsupported schema predecessor")
         # The reference is current public; remove only the reviewed cumulative
         # additions after this exact predecessor. The tenant remains unfiltered.
-        added_tables = {"agent_read_tasks"}
-        if predecessor != "tv005_agent_task_attachments":
+        added_tables = set() if predecessor == "tv006_agent_read_tasks" else {"agent_read_tasks"}
+        if predecessor not in {"tv005_agent_task_attachments", "tv006_agent_read_tasks"}:
             added_tables.add("agent_task_attachments")
         if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
             added_tables |= {"agent_task_controls", "agent_readonly_checkpoints",

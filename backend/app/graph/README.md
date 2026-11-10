@@ -82,3 +82,9 @@ response shape.
   `api/graph.py`, `api/search.py`, plus
   `services/graph_projection_service` (writes the projection that
   Neo4jRepository reads) and `cli/graph_rebuild` (full rebuild).
+
+## Structured characteristics (2026-11-03)
+
+JSONB remains authoritative: Function.characteristics is an optional embedded collection, not a new graph node or structural edge type. Missing/null legacy collections stay absent; explicit [] is confirmed empty and never falls back to legacy Function fields. Product/process kind and CC/SC classification are independent.
+
+`services/fmea_characteristics.validate_characteristics` validates actual unique HAS_FUNCTION ownership: PFMEA ProcessStep product / ProcessWorkElement process (same-step product references); DFMEA System/Subsystem/Component product even with shared Process*Function names. `services/graph_projection_service` serializes the collection for projection and hydration preserves it. This does not certify a live Neo4j deployment: pure projection tests are run separately because make check excludes that file. Projection/read does not migrate historical approved JSONB or snapshots.

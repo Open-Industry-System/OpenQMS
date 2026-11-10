@@ -75,12 +75,7 @@ async def get_traceability(
     scope: RequestScope = Depends(get_request_scope),
 ):
     try:
-        result = await sc_svc.get_traceability_chain(db, sc_id)
-        # Traceability returns a dict; check factory access on the SC itself
-        sc = await sc_svc.get_special_characteristic(db, sc_id)
-        if sc and hasattr(sc, "factory_id"):
-            _check_factory_access(sc, scope)
-        return result
+        return await sc_svc.get_traceability_chain(db, sc_id, scope=scope)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -91,7 +86,10 @@ async def cp_sync_status(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    return await sc_svc.check_cp_sync_status(db, cp_id)
+    try:
+        return await sc_svc.check_cp_sync_status(db, cp_id, scope=scope)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 @router.get("/{sc_id}/references")
@@ -185,8 +183,10 @@ async def sync_from_fmea(
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
     try:
-        result = await sc_svc.sync_from_fmea(db, fmea_id, scope.user.user_id)
-        return {"detail": "synced", "count": len(result)}
+        result = await sc_svc.sync_from_fmea(db, fmea_id, scope.user.user_id, scope=scope)
+        return {"detail": "synced", "count": len(result),
+                "warnings": [{"sc_id": str(sc.sc_id), "message": sc.review_message}
+                             for sc in result if sc.review_required]}
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -201,8 +201,10 @@ async def sync_to_cp(
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
     try:
-        result = await sc_svc.sync_to_cp(db, cp_id, scope.user.user_id)
-        return {"detail": "synced", "updated_count": len(result)}
+        result = await sc_svc.sync_to_cp(db, cp_id, scope.user.user_id, scope=scope)
+        return {"detail": "synced", "updated_count": sum(i.get("updated", False) for i in result),
+                "requires_version_sync_count": sum(i.get("requires_version_sync", False) for i in result),
+                "items": result}
     except ValueError as e:
         raise HTTPException(404, str(e))
 

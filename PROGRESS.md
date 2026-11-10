@@ -1,5 +1,12 @@
 # OpenQMS 开发进度
 
+### 2026-11-09 — PR #29 main集成验证通过（待推送后远端CI）
+
+- 六处冲突保留双方有效改动；增量public merge head与tenant tv007、当前/历史parity、CAPA命名空间及锁顺序、测试隔离和CP协作权限已完成独立复审。复审发现的旧current-head测试遗漏已关闭，无剩余阻塞发现。
+- 最终冻结1536源码文件前后相同：注册55434完整make真实exit0，后端4067 passed/5 skipped/19 deselected/5 warnings，0 failed/error/xfail/xpass；tsc/build通过。全量bounded Vitest822/95、projection8/8；55433新tag真实browser3/3通过，17图LOOK，精确Agent默认关闭GET404归因，无CP协作404/其他意外HTTP失败。协调者核对原始回执和截图。
+- 55432历史库、55433浏览器审批证据及55434完整测试库均保留；A/B受控记录在full前后逐字段相同。仅自有app/worker停止，无删除卷/重置证据/部署。
+- 用户已授权解决冲突、验证通过后合并；下一步创建集成merge commit并推送功能分支，检查PR #29实际远端CI，满足条件后合并。上述本地验证不冒充远端CI成功；旧失败和wrapper日志保留于验收文档。
+
 > **2026-11-08 PR #28 第二轮窗口基线修复**：真实逐条提交允许完整109窗口先发布，现显式验证1..100→10..109，再持有110历史页检查10..109不变及最终11..110。确定性复现旧错误断言后修正；完整无模型浏览器11通过/3771未选择/5warnings，hook单元17通过、E2E类型/前端构建通过，独立定向复核无发现。不改生产hook、真实提交或退避合同。下一步等待新head远端CI后按授权合并；旧head失败不掩盖。本轮清理准备被权限系统拦截，临时资源保留、未绕过。用户原未提交内容不混入提交；详见[修复记录](docs/development/pr28-merge-readiness.md)。
 
 > **2026-11-08 PR #28 合并阻塞修复记录**：基于远端f9d6f95c修复维护连接断线错误未收敛及窗口验收先变更数据后装拦截的竞态。驱动故障先RED2/实际断线控制1通过，修复后3通过；维护/CI回归214通过，activity hook单元16通过，整层无模型浏览器11通过/3771未选择/5既有warnings、E2E类型检查通过。独立定向复核无阻塞发现，不放宽归属/代际/锁/窗口/退避断言，不改应用轮询hook或调用真实模型/scanner。远端新提交的检查与最终合并以PR当前事实为准，本地通过不替代；[修复记录](docs/development/pr28-merge-readiness.md)。原用户文档已备份并三方恢复，用户历史段落/架构改动/开发基线/示例删除不混入此修复提交；本段为本次独立新增记录。
@@ -175,6 +182,117 @@
 
 详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
 
+### 2026-11-09 — PR29 latest-main整合本地验证完成，待parent最终集成
+
+- 首次真实集成浏览器A业务主体验证完成但严格console门禁3失败；未改称PASS。定位main CP presence不支持已有control_plan consumer与默认off Agent capability404。
+- 经确认的窄修复保留FMEA/unknown保护，CP用Planning VIEW-before-ID +effective/accessible factory及PL求交集；33真实API cases绿色；probe仅exact网络GET404+URL归因+隐藏入口，其他404/500仍失败；7文件独立复审APPROVED/0新增项。
+- 新授权full-only55434与browser55433物理分离，旧55432不动，三PG/volume均保留。后修复code freeze1536路径；57focused、42前端focused、822/95完整bounded Vitest及tsc/build通过。
+- fresh tag pr29-main-b **3 passed/46.5s/exit0**；17图contact与5原图LOOK，0 pageerrors，23个明确defaultoff probe404，唯一其他HTTP失败为预期stale409，CP404为0；4正常approvals/8 live-valid hashes/4completed outbox/4guardsO。仅停已核对的own app jobs，端口释放，所有controlled数据/历史失败证据保留。
+- 最后full make在注册full-only55434真实exit0：4072selected/4067passed/5skip/19deselected/0fail/0error/5warnings，tsc/build通过；code1536路径before/after一致，显式projection8通过。A/B只读retention逐字段一致，55434临时schema/migrationDB均0，三PG/volume全部保留。六冲突内容无marker、index留parent stage；等待parent最终审查/提交/推送/合并，本agent未commit。
+
+### 2026-11-08 — PR29 latest-main 本地整合（验证进行中，未提交）
+
+- 在活动 no-commit merge 内保留功能批准来源/逐行baseline/保守保护，同时整合 main tenant、当前权限、reviewed-material及来源删除锁。六处冲突未整文件覆盖；main与功能进度均保留。
+- public additive merge head `20261108_merge_characteristics`；tenant新增 `tv007_characteristic_refs`，旧revision/frozen snapshot不改。真实provision、strict namespace与audit完整CP输入锁的RED/GREEN见[既有验收文档本轮节](docs/development/characteristic-correction-acceptance.md)。
+- 旧55432与证据不动；经用户新授权建立真实owner注册的独立55433/新volume，所有新运行使用该资源。bounded Vitest806/95通过，projection注册runner8通过；完整最终make和新专用browser待完成，不复用旧通过数字。
+- 独立复审指出的CURRENT-head漏改已真实RED6/14→GREEN20；全部504个baseline失败/错误逐项归因。夹具保留隔离与生产guards：embedding用正式mig_db_url独立public测试库，tenant业务/后台用实际binding；最终affected226/226与完整collection4049通过，精确6文件跟进包已冻结供复审。第二轮full观察自然结束后才执行真正最终make-verified；未用混合源码跑次冒充最终结果。
+- 停止预修复pytest的SIGINT被拒绝后未重试，等待自然结束，再顺序跑最终full gate。parent负责独立审查与最终提交/推送/合并；本轮不commit、不改settings/其他worktrees。
+
+### 2026-11-08 — 特性纠偏专项验收与独立复审通过，提交前完整检查通过
+
+- 本次运行获执行权限，严格owned55432、匹配worktree story/skill v6、新tag `mode-exit-a/b/c`。正常state/approval/hash guards开启，真实不同actor审批、5行CP/单位/手工字段、409/partial/fresh、lateworker、已消费事件后新CP部分导入刷新、可应用删除及tree确认/save/reload、DFMEA product均实际运行；最终c **3 passed/45.8s exit0**，不再仅静态/UNRUN。
+- a为2pass/1fail（两个PFMEA共用fixture编号，真实400）；仅测试helper增加TREE label并新增RED/GREEN。b为3pass/54.8s，但LOOK发现最终删除截图在loader；仅增四行visible后截图及覆盖回归，c全量重跑3pass。无生产修改、无timeout/guard放宽，精确两test文件delta留`mechanics-only.patch`待独立复审。
+- 新鲜bounded Vitest **602 passed/77 files**、tsc exit0；前轮完整make2302/5skip/5xfail为未改生产代码的最后baseline，不冒称重跑。c17图contact sheet全部LOOK，partial/delete/tree五张另原尺寸LOOK；无空白/loader成功证据。三页pageerror0，console12/2/5为既有弃用warning＋预期409，保留原始JSON。
+- 本次新日志`.superpowers/browser-mode-exit-logs/`，完整命令/失败/截图/APIvsUI/只读审计及保留UUID见[既有验收文档最新节](docs/development/characteristic-correction-acceptance.md)。三run共12真实approve/hash proofs与12completed outbox，四guards全O、临时schemas/迁移DB0。最终新partial CP四行pending=false；原CP因后续v4删除且有manual execution保留五行pending=true，未冒称全部CP已清洁。
+- 仅停核对身份/cwd后的自有worker69553/backend69889/frontend70177；PG/volume与三组受控records保留，无私密env/AI/shared reset。最终两文件test-mechanics独立scoped复审APPROVE，无新增Critical/Important/Minor；协调者核对原始退出码并实际查看17图contact sheet及删除后四行原图。原CP pending仅证明未接受工作和内容保留，不单独证明运行时曾发起并被拒绝的保护删除；该拒绝由定向回归覆盖。提交前parent完整make check已通过（exit0，2302 passed/5 skipped/5 xfailed/3 warnings，280.36s；tsc及build通过）；按用户明确授权提交推送当前分支，不创建PR/合并/部署，不清理worktree/证据/PG。
+
+### 2026-11-08 — 新用户明确授权专用环境后，runtime仍被执行权限拒绝
+
+- Coordinator收到用户“授权专用环境验收”后，本worker先核对owned PG/端口与worktree story/skill v6；工具解析原checkout旧v4未采用，不改原checkout。
+- 第一个CPsyncworker启动在执行前再次被权限系统拒绝：requires direct user authorization; coordinator relay does not establish it。立即停止，未等价重试/peer代跑/改权限，未启动backend/frontend/browser/bootstrap，无新业务写入、PID、截图或LOOK；专用gate仍BLOCKED。
+- 新只读状态`.superpowers/browser-authorized-logs/resource-final.log`：PG healthy/卷保留，58111/58112无监听；无worker执行log/exit，因为命令未执行。精确拒绝和条件限制已追加[既有验收文档](docs/development/characteristic-correction-acceptance.md)。代码/测试未变，make2302/frontend600仅为前轮实际结果；不重标新通过。
+- 下一步仅由coordinator向用户说明执行权限仍阻塞；不让parent重跑同一拒绝动作。用户提交/推送条件未达成，本worker不暂存/提交/推送/部署/清理；所有代码/证据/资源保留。
+
+### 2026-11-08 — 用户继续：bounded residual F1/F2（独立代码复审通过，browser仍BLOCKED）
+
+- 仅修复F1/F2，不重做八项已关闭发现。F1新增最高同源/同工厂真实批准完成检查，复用hash/归属/逐行accepted覆盖与既有parent锁；历史来源仍可选，但不能抹掉新批准义务。直接耦合sync/no-op分支同修，实际完成当前目标后可清pending。真实隔离事务RED3项→聚焦六文件146 passed/3 warnings，保留partial/late/localoverride/protection。
+- F2修正专用脚本候选表定位、partial剩余notice显式关闭、无失效行wf通过实际向导编辑、草稿先合法完成wizard再进主树删除。静态基线复现2失败后，mock/static/editor聚焦14 passed。来源检查/语法transpile不冒充浏览器执行。
+- 先前worker及draft-browser-write拒绝仍生效；本轮无app/worker/browser/bootstrap启动、无等价/peer/API/test绕过、无guard/privateconfig变更，无新UI证据或截图LOOK。新证据仅`.superpowers/residual-fix-logs/`；新冻结residual-fix-base.zip及既有日志保留，scoped diff/checksum对新基线生成。
+- 新鲜完整make exit0：2302 passed/5 skipped/5 xfailed/0 xpassed/3 warnings＋tsc/build通过；最终bounded全量Vitest600 passed/77 files，timeouts/assertions不变；默认collection42 tests/16 files。四guards全O、临时schemas/迁移DB0，自有PG保留、无新服务或资源清理。命令/限制见[既有验收文档residual节](docs/development/characteristic-correction-acceptance.md)。独立scoped复审已通过：F1 ADDRESSED、F2 source/static级ADDRESSED，八文件delta无新增Critical/Important/Minor。下一步仅为待权限系统合法授权后以新tag补跑专用真实浏览器gate及截图LOOK；overall验收仍BLOCKED，不将静态复审当作运行验收。不暂存/提交/推送/发布/删除资源。
+
+### 2026-11-07 — 特性纠偏 final coordinated fix wave（复审未通过；代码与真实浏览器验收均阻塞）
+
+- 核实并最小修复 I1–I7/M1–M2：初次部分导入同事务持久 pending、可应用删除显式勾选、功能/结构删除关联影响确认与dangling UUID清理、demo工序来源、独立CC/SC呈现、pytest/浏览器隔离guard分离、默认Playwright opt-in排除、受审SC规范单位复核、drawer重开busy重置。保留共享节点/审批/hash/逐行基线/手工安全API边界。
+- 实际RED后backend聚焦169 passed；最终完整make exit0：2299 passed/5 skipped/3 xfailed/2 xpassed/3 warnings＋tsc/build通过；最终bounded Vitest597 passed/77 files，maxWorkers2、timeouts不变；projection8 passed。第一次make因新测试Array.at不兼容TS target exit2（非wrapper0即通过），改兼容索引后完整重跑。默认collection42 tests/16 files通过。
+- CP worker启动被权限系统拒绝；专用collection因无owned worker PID fail-closed exit1。独立draft浏览器写入也被拒绝，均未改入口重试/peer代跑/绕guard。本轮没有新UI验收或截图LOOK，不复用旧r2-a作为新通过；已扩展但未运行的partial reload/applicable deletion/tree delete专用spec待合法授权重跑。
+- 完整九项处置、命令/日志/失败/资源见[既有验收文档 final wave节](docs/development/characteristic-correction-acceptance.md)，新证据`.superpowers/final-fix-logs/`，冻结feature-review-head.zip未覆盖。仅新bootstrap工厂/PL/2actors/roles残留，实际FMEA/CP为0；四guards全O、临时schema/迁移库0。只停自有backend8755/frontend9022，PG/卷保留；无提交/暂存/发布。
+- 独立 scoped 复审：Request changes。其余八项原问题代码层面关闭，I1 仍未完整解决：完整导入历史 v1 会把已由 v2 事件置真的 pending 清掉；扩展浏览器脚本另有候选表定位、部分导入弹窗预期、工作要素编辑入口及 wizard 未完成前置条件错误。两项均为 load-bearing，不能以现有绿色测试或权限授权代替修正。
+- 下一步：按单次最终修复波次规则停止自动修复，向用户交回上述 F1/F2 与权限阻塞，等待明确后续处置；未批准合并/交付。不自动开启第二轮，不重试被拒运行，不清理未提交 worktree/证据。手工SC/默认并发/MES/外部标准等既有限制不扩大修复范围。
+
+### 2026-11-03 — 特性纠偏 Task11 fix round 2（剩余 I2 已确认覆盖语义修正，待 scoped 复审）
+
+- 从冻结 round1 archive 验证 scoped baseline；已关闭 I1/M3 及 version_service.py 字节不变，不重做。仅完成谓词移除 CURRENT local 值必须等于源值的额外条件，继续要求可信逐行 accepted SOURCE 投影等于完成 DOC SOURCE 投影、owner/hash/作用域/完整覆盖有效；不盲信指针，不放宽 partial/unknown/legacy/changed-source conflicts，不改 normal local-override policy。
+- 实际事务 RED **2 failed/9 passed**（same/older 已真实 preview+ACK 却被重开 pending）；最小修复后聚焦 **67 passed**（包含同一 late 文件 **11 passed**，不相加）。真实 CP 普通编辑与后台 validation 在自身临时 schema 完成；另证明 changed-source 冲突拒绝 ACK，后来事件仍保守 pending。
+- 新 `r2-a` 实际浏览器 **2 passed/27.0s**：普通 UI criterion edit→真实授权 API 零候选/非阻塞 warning/explicit ACK（clean CP 无 drawer，不发明入口或标志）→释放自有 worker 后值/UUID/ref/marker 保持、pending=false；经过其他特性 v2/v3 完成后再 ACK/late 交付仍不重开。Older-after-later marker 为独立真实事务例，不冒称浏览器旧事件重插。
+- 新鲜完整 make check exit0：**2289 passed/5 skipped/4 xfailed/1 xpassed/3 warnings**，tsc/build 通过；完整 bounded Vitest **587/77 passed**（CLI maxWorkers2，超时不变；默认失败仍为历史、非绿色）；显式 projection **8 passed/3 warnings**。新日志 `.superpowers/task11-r2-logs/`，12 张全新截图已实际 LOOK，旧 r1/404b462f 证据不覆盖。
+- 现有 [验收文档 R2 节](docs/development/characteristic-correction-acceptance.md) 已追加命令/失败分类/实际 UI/API 区分/资源与只读通知审计；仅真正 worker-first v2 一条通知，两次 late 不重 pending。guards 均 O、临时 schema/迁移库0；本轮记录保留，自有服务已停，PG/卷保留。无 report.md/提交/推送，手工 SC 遗留与外部认证限制不扩展。下一步仅 coordinator scoped I2 re-review，之后 whole-feature final review。
+
+### 2026-11-03 — 特性纠偏 Task11 fix round 1（I1/I2 已修复并验证，待复审，未提交）
+
+- I1：共享 criteria_with_unit 让 CP 现有准则列与新自动 SC spec_requirement 保留单位恰好一次；单位不能补成空白准则、不换算数量，unit-only 变更/明确清空沿同源 import/sync/stale 协议。SC 受审材料只提示复核，手工 API 未改。
+- I2：CP worker 沿 scope→CP parent 有序互斥、等待后 fresh-row 重读，验证实际批准/hash/来源/逐行基线及完整覆盖；已完整处理的 same/older 晚到事件不重开 pending。真正更新、部分/未知仍保守；不改 source pointer 或业务字段，仅真实 false→true 记原两个字段审计。
+- RED：单位参数 5 failed，SC 单位 1 failed；独立事务 late-worker 4 failed（含真实 stale-reader 死锁）后聚焦绿色，最终强持有 ORM 实例断言重读通过。实际浏览器 r1-a/r1-b 均 2 passed：真实 CP API/UI 准则有单位、unit-only 修改、worker-first；暂停自有 worker 后批准→新 CP/UI 导入，和真实 partial→再批准→UI 完成同步，恢复 worker 后仍不 pending。三轮实际批准/hash、行 UUID/逐行接受版本/手工方法保持；11 张新 tag 截图已 LOOK，旧 404b462f 数据/图片/JSON 保留。
+- 新全套发现旧 embedding 测试 claim 64 个公共事件导致 6 failed；获协调者窄范围授权，仅三文件 opt-in 使用必要表/FK闭包的临时 schema，保留实际 claim/fetch/upsert、commit/rollback、batch64 和所有断言；新 regression 证明提交/回滚/重连不落 public，三文件 22 passed。未 drain/伪嵌入/删除保留队列；r1 两浏览器工厂各 12 pending embedding tasks、0 stored embeddings。
+- 最终 make check exit0：**2286 passed、5 skipped、4 xfailed、1 xpassed、3 warnings**，tsc/build 通过；full Vitest **587/77 全覆盖通过（CLI maxWorkers=2，超时不变）**，默认命令两轮均有 3 个 5s timeout，不称默认绿色；显式纯 projection **8 passed/3 warnings**，最终真实浏览器 **2 passed/28.2s**。新证据路径 `.superpowers/task11-r1-logs/`；完整结果/命令/失败/LOOK/资源见 [既有验收文档 r1 节](docs/development/characteristic-correction-acceptance.md)。旧 2258/587/2pass 只作首轮历史。
+- 02.18 故事/scoped verify 剧本同步 v6（2026-11-03）；epic/planning 的 M3 历史/当前矛盾已澄清。仅 owned qms_test，正常 UI guards 开启；新临时 schema/迁移库已清理，自有 app/worker 已停，PG 容器/卷和批准证据保留。手工 SC 遗留缺陷、外部服务/标准认证限制未扩展修复。下一步由 coordinator 独立复审 I1/I2 与 Task11，再作 whole-feature final review；无提交/推送。
+
+### 2026-11-03 — 产品／过程特性纠偏 Task 11（首轮历史；随后 I1/I2 缺口与修复见上节）
+
+- 同步 planning／types／utils／graph 文档、四个故事与派生 verify 剧本（02.3/02.10/02.15 v3、02.18 v5，2026-11-03）、epic README v4；[验收基线](docs/development/characteristic-correction-acceptance.md) 已追加 A01–A21 证据、全部验证日志、真实 UI/API 前置区分与限制，保留历史结论。
+- TDD 收尾真实 HAS_FUNCTION owner＋FMEA type 判定、既有空名必填反馈、metadata-only Alembic head 断言（20261101_char_refs）。真实浏览器进一步发现并以失败回归修复 CP create MissingGreenlet、CP response pending/source 字段遗漏、确认缺 step_ids 及 409 后 busy 锁死；未放宽任何业务／批准保护。
+- 实际浏览器：合法 draft 的同工序 2 产品＋3 过程录入／单位／关系、保存刷新、既有向导完成、不同授权人真实批准、选择批准快照生成 5 CP 行；合法返工改名再批准，实际 409→重预览→部分 pending→显式新预览完成，稳定行 UUID／逐行接受版本／手工执行字段保持。DFMEA product smoke、历史快照只读及普通 SC 精确 trace API＋无 MSA/SPC 证据提示通过；九张截图已实际 LOOK。
+- 最终 **make check exit 0**：后端 **2258 passed、5 skipped、3 xfailed、2 xpassed、3 warnings**，tsc/build 成功；full Vitest **587 passed / 77 files**；显式纯 projection **8 passed、3 warnings**；最终真实浏览器 **2 passed（18.3s）**。未排除 head/backfill。保留 E2E 历史后，全库 outbox/audit 断言曾失败；现改为本 fixture IDs 精确断言，无删除历史或约束放宽。worker 等待按确切版本的只读 completed metadata，而非旧 pending 标志或固定延时。
+- 仅任务 PG 127.0.0.1:55432/qms_test；完整旧负面 fixtures 的临时库／schema／trigger fault 数据按授权使用并恢复，正常 UI guards 全开。14 个明确无版本 draft 已经合法 API 清理，保留审批／版本／审计及最终 smoke 证据；自有 app/worker PIDs 已停止，PG 容器／卷保留。无私密 env 复制、外发 AI、共享 reset、原 checkout 修改或提交。
+- 限制：手工 SC 安全更新／删除与通用 create 审计缺陷仍 UNFIXED；未做全 AI、PPAP、CSR、scanner 或 live Neo4j 认证。下一步只交 coordinator 做 Task11 独立评审，再做 whole-feature final review；不把本轮自动／专项结果当成整功能获批。
+
+### 2026-11-03 — 产品／过程特性纠偏 Task 10（演示数据与版本基线，未提交）
+
+- `seed.py` 将 DC-DC 100W SMT 主示例收敛为固定 UUID 的产品“元器件贴装偏移量（≤0.05 mm）”和过程“贴装力（3.0±0.5 N）”两项，分别形成 AOI 位置／每次动作力监控行；均为模拟草案、无特殊分类、无接受版本来源。PFMEA、最小 DC-DC DFMEA、CP 与 APQP 使用同一 DC-DC 设计来源；BMS DFMEA 明确为独立示例并有同工厂有效 BMS-DEMO 产品线范围。
+- 旧主示例中的空载转速、RPM、压力／扭矩、伪 CC/SC 和悬挂失效引用已移除；原不完整 PFMEA/CP 新环境构造改为 draft 且审批字段为空。SPC/MSA 演示不再以主特性作为已验证证据。
+- Doc-gate E2E canonical 行将“定位销磨损量”作为对象、把检测活动放入方法、保留未知限值，并将显式空来源写入版本快照构造以保持 diff/hash 输入一致。
+- 验证：首轮 RED `test_characteristic_demo_data.py` 为 5 failed（构造函数不存在）后，聚焦回归为 **41 passed**；评审修复再做 RED（3 failed：DC-DC 选择／BMS scope／APQP 参数未实现）后，demo＋Task 3 mapping＋CP provenance 为 **27 passed**，CAPA doc-gate preflight（排除 `hash_backfill`）为 **16 passed、1 deselected**。仅使用独立 `qms_test`；未执行 `app.seed`／`seed_e2e`、迁移、全后端、E2E 或容器操作。
+- 下一步：Task 10 独立评审；如需验证实际新环境 seed，先取得独立 E2E 环境执行授权，不能将本轮纯构造通过视为已发布、MSA、PPAP 或顾客批准。
+
+### 2026-11-03 — 产品／过程特性纠偏 Task 9（自动消费者完成，未提交）
+
+- 用户已明确仅约束本次自动同步，解除下方历史阻塞：SC 按文档＋特性 UUID 提取，类型／分类／规范独立，空数组及未分类项不因功能分类／严重度升级；改名保持 SC 身份。submitted／approved 安全材料和来源绑定不自动改写／删除，源变化仅返回复核提示。旧手工 SC 保护和通用 create 审计缺陷仍未修复。
+- 新来源 CP 追溯按完整 source_ref、实际 RequestScope 和工厂／产品线派生全部控制行，不写最后一个 `cp_item_id`；SC 自动入口不改写新来源 CP 字段或已批准 CP，差异指引进入正式版本同步。SPC／量具依实际 FK，MSA 依实际同范围研究／结果，缺证据不显示缓存 PASS。
+- 新增 R005／R006 warning，finding 按来源＋持久行 UUID 分隔；改名／排序不换身份，同源多控制行不共用决定，不增加审批门禁。Task 2 延后的两工厂同名写入级回归已通过：两份 FMEA 均实际 PUT 成功，第二份引用第一份产品 UUID 后由特性验证拒绝，图／锁／审计保持。
+- 验证：聚焦后端 **161 passed、1 deselected**（主动排除 backfill 风格用例），含真实独立连接／临时 schema 竞态和 API 中途失败回滚；追溯组件 **4 passed**，`npx tsc --noEmit` 通过。仅用 `127.0.0.1:55432/qms_test`；未运行全后端／全 CAPA、迁移、容器操作或真实浏览器验收。
+- 下一步：独立评审 Task 9，随后按授权做 Task 11 真实服务验收；不把聚焦通过当作 PPAP／CSR 或全部标准验收。详细范围、RED／GREEN、手工入口遗留风险见 `.superpowers/sdd/2026-11-01-product-process-characteristics-correction/task-9-report.md`。未提交／推送。
+
+### 2026-11-02 — 产品／过程特性纠偏 Task 9（历史安全前置阻塞，已由用户限定自动范围解除）
+
+- 按 Task 9 Step 5 先验证受审对象保护：真实 SC 安全提交 API 成功后，通用 PUT 仍可改变名称／规范且保持 `submitted`；DELETE 返回 200 并实际删除该受审对象。仅在 `127.0.0.1:55432/qms_test` 的回滚事务内验证，新增两项 API／DB 测试真实 RED（2 failed，3 项既有 Pydantic 警告）。
+- 未擅自增加审批／删除策略或修改安全工作流；按 brief 的阻塞条件停止，Task 9 提取／追溯／校验与 Task 2 延后写入级隔离验收尚未完成，无 GREEN 或完整验收结论。
+- 下一步：确认受审保护是否涵盖 SC 主数据；若涵盖，先明确授权窄范围的安全状态／字段修改删除规则与合法变更路径，再恢复 Task 9。详细场景与命令见 `.superpowers/sdd/2026-11-01-product-process-characteristics-correction/task-9-report.md`。本轮未提交。
+
+### 2026-11-02 — 产品／过程特性纠偏 Task 8（CP 前端，未提交）
+
+- CP 的 PFMEA 导入改为仅使用用户选择的已批准 FMEA 版本快照：版本列表只提供 `change_type=approve` 的 v1.0+ 快照，工序来自所选快照，而非当前 rework 图；预览和确认分别携带来源版本、CP 锁、摘要与 `candidate_key`。
+- 同步抽屉显示后端候选与安全限制，受保护／冲突／不适用候选不能选择，删除默认不选；空候选允许显式 no-op 确认。导入／同步的 409 都会失效旧预览，不自动重试；CP、来源、选择、关闭及卸载时忽略陈旧异步结果。
+- CP 写入明确白名单化，只保留现有 `item_id` 与允许字段，绝不回写服务端来源元数据；控制计划标准列、分组和中英文主题未重排。`controlPlanDiff` 改为来源元数据内容比较，避免对象引用导致永久冲突。
+- 验证：Task 8 三个新组件／模板测试与 `CPVersionSnapshot` 共 11 passed；前端 `npm run build` 通过。Vitest/Vite 仍输出既有 Node localStorage、getComputedStyle 和 esbuild/oxc 弃用警告；未运行浏览器 E2E、后端、数据库或容器操作。
+- 下一步：按授权做 Task 8 独立审查与 Task 11 浏览器验收；不把本轮组件测试当作端到端验证。
+
+### 2026-11-02 — 产品／过程特性纠偏 Task 6（后端，未提交）
+
+- 已按用户确认的[同步保守保护补充](docs/superpowers/specs/2026-11-02-cp-sync-conservative-protection-design.md)恢复并实现逐特性同步、稳定候选选择、逐行批准快照三方基线及统一 stale-check；之前缺少既有 guard 的阻塞已由正式补充解决，不再沿用旧假设。
+- 保留实际行 UUID、人工方法及执行关联；源清空和工序编号变化显式呈现；部分接受、受保护行及旧混合行待办保留 pending。仅全量覆盖处理完才推进文档来源跟踪；真实 no-op 不偷偷重置逐行接受版本。
+- 自动同步保护活动 CAPA 当前有效材料，执行／特殊特性关联禁止自动删除；CAPA 目标发布、审核及决定参与 CP 父锁／输入新鲜度协议。通用手工更新、草稿回退及 CAPA 审核／豁免业务含义未改变。
+- 验证：特性／导入／真实事务／实际权限替换写入器／worker 及完整 CAPA 聚焦回归 724 passed。全后端首次执行 2143 passed，唯一失败是原有迁移测试硬编码旧 head（实际授权 head 为 `20261101_char_refs`），相关测试与迁移均与 Task 6 基线归档一致，未越界修改。 最终后端复跑排除该旧断言：2154 passed、5 skipped、1 deselected、3 xfailed、2 xpassed；Task 6 四文件最终 43 passed。
+- 验证范围偏差：全量套件既有 `mig_db_url` 夹具通过任务实例的管理连接创建／清理 `qms_migtest_*` 临时库，超出了本次仅 qms_test／临时 schema 的限制；已如实交接，未再执行此类验证。Task 6 新事务测试自身仅使用 qms_test 临时 schema，未操作其它容器或业务库。
+- 下一步：Task 6 独立评审，随后按授权处理 Task 7/8 前端选择契约与后续验收；本次不自动开展。仍未补 Task 2 延后的跨工厂同名写入级测试，也未新增已批准 CP 的合法返工流程。详细后端语义见[验收基线新增节](docs/development/characteristic-correction-acceptance.md)。
 ### 2026-11-01 — PR #26 提交推送与远端复核
 
 - 按本次授权提交自批回归修复及 `main@63d06571` 的冲突整合，更新原 #26 分支；提交前重新执行权限策略测试，39 passed（3 项既有 Pydantic 弃用警告）。完整本地验证证据见 2026-10-31 条目。

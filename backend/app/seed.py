@@ -22,57 +22,146 @@ from app.models.management_review import ManagementReview, ReviewOutput
 from app.models.role import RoleDefinition, UserProductLine
 from app.models.user import User
 
-SAMPLE_GRAPH = {
-    "nodes": [
-        {"id": "pi_1", "type": "ProcessItem", "name": "SMT焊接生产线", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "ps_1", "type": "ProcessStep", "name": "SMT元器件贴装", "process_number": "OP10", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "we_1", "type": "ProcessWorkElement", "name": "高速贴片机", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "pif_1", "type": "ProcessItemFunction", "name": "完成电路板SMT焊接与元器件组装", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "psf_1", "type": "ProcessStepFunction", "name": "准确贴装电子元器件", "specification": "元器件贴装偏移度 <= 0.05mm", "classification": "CC", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "wef_1", "type": "ProcessWorkElementFunction", "name": "设备提供适宜且稳定的贴装压力", "requirement": "贴装压力 3.0±0.5N", "classification": "SC", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "fe_1", "type": "FailureEffect", "name": "电控板功能丧失，导致整车无法启动报警", "severity": 8, "severity_plant": 4, "severity_customer": 8, "severity_user": 8, "occurrence": 0, "detection": 0},
-        {"id": "fm_1", "type": "FailureMode", "name": "元器件贴装偏移", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "fm-cc-001", "type": "FailureMode", "name": "空载转速偏差超出规格", "severity": 9, "occurrence": 3, "detection": 4},
-        {"id": "fm-sc-001", "type": "FailureMode", "name": "压装扭矩不稳定", "severity": 6, "occurrence": 4, "detection": 3},
-        {"id": "fc_1", "type": "FailureCause", "name": "贴装吸嘴磨损导致压力设定偏小", "severity": 0, "occurrence": 4, "detection": 0},
-        {"id": "pc_1", "type": "PreventionControl", "name": "开机吸嘴压力自动零点校准与设备预防性维护", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "dc_1", "type": "DetectionControl", "name": "贴装后在线 3D-AOI 光学检测仪", "severity": 0, "occurrence": 0, "detection": 3},
+# Stable IDs make the simulated DC-DC example traceable without treating it as
+# an accepted production source.  The two characteristics are deliberately
+# separate: position is a product result, while force is a process setting.
+DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID = uuid.UUID("00000000-0000-0000-0000-00000000d001")
+DCDC_PLACEMENT_FORCE_CHARACTERISTIC_ID = uuid.UUID("00000000-0000-0000-0000-00000000d002")
+
+
+def build_dcdc_pfmea_graph() -> dict:
+    """Build the draft DC-DC 100W SMT PFMEA demonstration graph."""
+    return {
+        "nodes": [
+            {"id": "pi_1", "type": "ProcessItem", "name": "DC-DC 100W 模块 SMT 贴装（模拟演示）", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "ps_1", "type": "ProcessStep", "name": "SMT 元器件贴装", "process_number": "OP10", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "we_1", "type": "ProcessWorkElement", "name": "高速贴片机", "classification": "Machine", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "pif_1", "type": "ProcessItemFunction", "name": "完成 DC-DC 100W 模块电路板元器件贴装", "severity": 0, "occurrence": 0, "detection": 0},
+            {
+                "id": "psf_1", "type": "ProcessStepFunction", "name": "将元器件贴装至设计位置", "severity": 0, "occurrence": 0, "detection": 0,
+                "characteristics": [{
+                    "id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID), "kind": "product", "name": "元器件贴装偏移量",
+                    "specification": "≤0.05 mm（模拟演示值）", "classification": None,
+                }],
+            },
+            {
+                "id": "wef_1", "type": "ProcessWorkElementFunction", "name": "设备以设定贴装力完成贴装", "severity": 0, "occurrence": 0, "detection": 0,
+                "characteristics": [{
+                    "id": str(DCDC_PLACEMENT_FORCE_CHARACTERISTIC_ID), "kind": "process", "name": "贴装力",
+                    "specification": "3.0±0.5 N（模拟演示值）", "classification": None,
+                    "related_product_characteristic_ids": [str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID)],
+                }],
+            },
+            {"id": "fe_1", "type": "FailureEffect", "name": "元器件贴装位置偏差导致模块功能异常", "severity": 8, "severity_plant": 4, "severity_customer": 8, "severity_user": 8, "occurrence": 0, "detection": 0},
+            {"id": "fm_1", "type": "FailureMode", "name": "元器件贴装位置偏移", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "fc_1", "type": "FailureCause", "name": "贴装吸嘴磨损导致贴装力偏离设定值", "severity": 0, "occurrence": 4, "detection": 0},
+            {"id": "pc_1", "type": "PreventionControl", "name": "开机贴装力零点确认与吸嘴预防性维护（模拟）", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "dc_1", "type": "DetectionControl", "name": "在线 AOI 检测元器件位置偏移（模拟）", "severity": 0, "occurrence": 0, "detection": 3},
+        ],
+        "edges": [
+            {"source": "pi_1", "target": "ps_1", "type": "HAS_PROCESS_STEP"},
+            {"source": "ps_1", "target": "we_1", "type": "HAS_WORK_ELEMENT"},
+            {"source": "pi_1", "target": "pif_1", "type": "HAS_FUNCTION"},
+            {"source": "ps_1", "target": "psf_1", "type": "HAS_FUNCTION"},
+            {"source": "we_1", "target": "wef_1", "type": "HAS_FUNCTION"},
+            {"source": "pif_1", "target": "psf_1", "type": "FUNCTION_MAPPED_TO"},
+            {"source": "psf_1", "target": "wef_1", "type": "FUNCTION_MAPPED_TO"},
+            {"source": "psf_1", "target": "fm_1", "type": "HAS_FAILURE_MODE"},
+            {"source": "fm_1", "target": "fe_1", "type": "EFFECT_OF"},
+            {"source": "fc_1", "target": "fm_1", "type": "CAUSE_OF"},
+            {"source": "fc_1", "target": "pc_1", "type": "PREVENTED_BY"},
+            {"source": "fc_1", "target": "dc_1", "type": "DETECTED_BY"},
+        ],
+    }
+
+
+def build_dcdc_design_dfmea_graph() -> dict:
+    """Build the separate draft DC-DC design example; BMS remains independent."""
+    return {
+        "nodes": [
+            {"id": "d_sys_1", "type": "System", "name": "DC-DC 100W 电源模块（模拟演示）", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "d_sub_1", "type": "Subsystem", "name": "模块电路板组件", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "d_cmp_1", "type": "Component", "name": "元器件贴装界面", "severity": 0, "occurrence": 0, "detection": 0},
+            {
+                "id": "d_cf_1", "type": "ProcessWorkElementFunction", "name": "保持元器件贴装位置满足待确认设计需求", "severity": 0, "occurrence": 0, "detection": 0,
+                "characteristics": [{
+                    "id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID), "kind": "product", "name": "元器件贴装偏移量",
+                    "specification": "≤0.05 mm（模拟演示值）", "classification": None, "reference": "演示需求，待确认",
+                }],
+            },
+            {"id": "d_fm_1", "type": "FailureMode", "name": "元器件贴装位置偏移", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "d_fe_1", "type": "FailureEffect", "name": "模块功能异常", "severity": 8, "occurrence": 0, "detection": 0},
+            {"id": "d_fc_1", "type": "FailureCause", "name": "设计定位裕量待确认", "severity": 0, "occurrence": 4, "detection": 0},
+        ],
+        "edges": [
+            {"source": "d_sys_1", "target": "d_sub_1", "type": "HAS_PROCESS_STEP"},
+            {"source": "d_sub_1", "target": "d_cmp_1", "type": "HAS_WORK_ELEMENT"},
+            {"source": "d_cmp_1", "target": "d_cf_1", "type": "HAS_FUNCTION"},
+            {"source": "d_cf_1", "target": "d_fm_1", "type": "HAS_FAILURE_MODE"},
+            {"source": "d_fm_1", "target": "d_fe_1", "type": "EFFECT_OF"},
+            {"source": "d_fc_1", "target": "d_fm_1", "type": "CAUSE_OF"},
+        ],
+    }
+
+
+def build_dcdc_control_plan_item_data(fmea_id: uuid.UUID) -> list[dict]:
+    """Build independent draft CP rows for the two DC-DC demonstration characteristics."""
+    product_ref = {
+        "mapping_version": 1, "fmea_id": str(fmea_id), "step_id": "ps_1", "function_id": "psf_1",
+        "work_element_id": None, "characteristic_id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID),
+        "accepted_source_version_id": None,
+    }
+    process_ref = {
+        "mapping_version": 1, "fmea_id": str(fmea_id), "step_id": "ps_1", "function_id": "wef_1",
+        "work_element_id": "we_1", "characteristic_id": str(DCDC_PLACEMENT_FORCE_CHARACTERISTIC_ID),
+        "accepted_source_version_id": None,
+    }
+    return [
         {
-            "id": "ra_1",
-            "type": "RecommendedAction",
-            "name": "引入吸嘴压力闭环传感器进行实时监测与自适应补偿",
-            "responsible": "张工",
-            "due_date": "2026-06-15",
-            "status": "open",
-            "action_taken": "",
-            "completion_date": "",
-            "severity": 0,
-            "occurrence": 0,
-            "detection": 0,
-            "revised_severity": 0,
-            "revised_occurrence": 0,
-            "revised_detection": 0,
-            "revised_ap": ""
-        }
-    ],
-    "edges": [
-        {"source": "pi_1", "target": "ps_1", "type": "HAS_PROCESS_STEP"},
-        {"source": "ps_1", "target": "we_1", "type": "HAS_WORK_ELEMENT"},
-        {"source": "pi_1", "target": "pif_1", "type": "HAS_FUNCTION"},
-        {"source": "ps_1", "target": "psf_1", "type": "HAS_FUNCTION"},
-        {"source": "we_1", "target": "wef_1", "type": "HAS_FUNCTION"},
-        {"source": "pif_1", "target": "psf_1", "type": "FUNCTION_MAPPED_TO"},
-        {"source": "psf_1", "target": "wef_1", "type": "FUNCTION_MAPPED_TO"},
-        {"source": "psf_1", "target": "fm_1", "type": "HAS_FAILURE_MODE"},
-        {"source": "fm_1", "target": "fe_1", "type": "EFFECT_OF"},
-        {"source": "fc_1", "target": "fm_1", "type": "CAUSE_OF"},
-        {"source": "fc_1", "target": "pc_1", "type": "PREVENTED_BY"},
-        {"source": "fc_1", "target": "dc_1", "type": "DETECTED_BY"},
-        {"source": "fc_1", "target": "ra_1", "type": "OPTIMIZED_BY"},
-        {"source": "psf_1", "target": "fm-cc-001", "type": "HAS_FAILURE_MODE"},
-        {"source": "wef_1", "target": "fm-sc-001", "type": "HAS_FAILURE_MODE"}
+            "sort_order": 1, "step_no": "10", "process_name": "SMT 元器件贴装", "equipment": "高速贴片机",
+            "characteristic_no": "DEMO-PC-001", "product_characteristic": "元器件贴装偏移量", "process_characteristic": None,
+            "special_class": None, "specification_tolerance": "≤0.05 mm（模拟演示值）",
+            "evaluation_method": "在线 AOI 检测元器件位置", "sample_size": "每件", "sample_frequency": "每件",
+            "control_method": "AOI 位置结果记录（模拟）",
+            "reaction_plan": "隔离本批次产品，调整贴装位置后复核首件位置并确认恢复",
+            "source_fmea_node_id": "ps_1", "source_characteristic_ref": product_ref, "item_source": "fmea",
+        },
+        {
+            "sort_order": 2, "step_no": "10", "process_name": "SMT 元器件贴装", "equipment": "高速贴片机",
+            "characteristic_no": "DEMO-PR-001", "product_characteristic": None, "process_characteristic": "贴装力",
+            "special_class": None, "specification_tolerance": "3.0±0.5 N（模拟演示值）",
+            "evaluation_method": "贴装设备贴装力传感器监控", "sample_size": "每次贴装动作", "sample_frequency": "每次贴装动作",
+            "control_method": "贴装力实时监控（模拟）",
+            "reaction_plan": "隔离自上次合格确认以来产品，调整贴装力后确认首件贴装力恢复并记录",
+            "source_fmea_node_id": "ps_1", "source_characteristic_ref": process_ref, "item_source": "fmea",
+        },
     ]
-}
+
+
+def build_demo_product_line_data(factory_id: uuid.UUID) -> list[dict]:
+    """Return the active product-line scopes used by the initial demo seed."""
+    return [
+        {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER", "factory_id": factory_id, "is_active": True},
+        {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB", "factory_id": factory_id, "is_active": True},
+        {"code": "BMS-DEMO", "name": "BMS 独立演示产品线", "product_type_code": "POWER", "factory_id": factory_id, "is_active": True},
+    ]
+
+
+def select_dcdc_design_fmea_id(fmeas: list[FMEADocument]) -> uuid.UUID | None:
+    """Return only the DC-DC design document; never substitute the BMS example."""
+    design = next(
+        (
+            fmea for fmea in fmeas
+            if fmea.document_no == "DFMEA-2026-002"
+            and fmea.fmea_type == "DFMEA"
+            and fmea.product_line_code == "DC-DC-100"
+        ),
+        None,
+    )
+    return design.fmea_id if design is not None else None
+
+
+SAMPLE_GRAPH = build_dcdc_pfmea_graph()
 
 
 SAMPLE_DFMEA_GRAPH = {
@@ -495,7 +584,7 @@ async def seed_spc(db, admin_id, engineer_id, default_factory_id, fmea1_id, capa
     chars = [
         InspectionCharacteristic(
             ic_code="SPC-001", product_line="DC-DC-100", factory_id=default_factory_id,
-            process_name="SMT贴装", characteristic_name="元器件贴装偏移度",
+            process_name="SMT贴装", characteristic_name="元器件贴装偏移量（独立SPC模拟）",
             spec_upper=Decimal("0.05"), spec_lower=Decimal("0"),
             target_value=Decimal("0.025"), chart_type="xbar_r", subgroup_size=5,
             created_by_id=admin_id,
@@ -658,9 +747,9 @@ async def seed_msa(db, admin_id, default_factory_id, gauges, spc_chars):
         return
 
     grr_study = GrrStudy(
-        study_no="MSA-GRR-001", title="千分尺GRR研究 - 元器件贴装偏移度",
+        study_no="MSA-GRR-001", title="千分尺GRR研究 - 独立量具演示（模拟）",
         method="average_range", gauge_id=gauges[0].gauge_id,
-        characteristic_name="元器件贴装偏移度", unit="mm",
+        characteristic_name="独立量具重复性（模拟）", unit="mm",
         tolerance_upper=0.05, tolerance_lower=0.0, reference_value=0.025,
         appraiser_count=3, part_count=10, trial_count=3,
         status="completed", study_date=date(2026, 5, 20),
@@ -1009,66 +1098,20 @@ async def seed_control_plans(db, admin_id, manager_id, default_factory_id, fmea1
     cp = ControlPlan(
         document_no="CP-2026-001", title="DC-DC 100W 电源模块控制计划",
         fmea_ref_id=fmea1_id, product_line_code="DC-DC-100",
-        factory_id=default_factory_id, status="approved", version=1,
-        phase="production", part_no="DCDC-100W-A", part_name="DC-DC 100W电源模块",
-        contact_info="质量部 张工", drawing_rev="Rev.C",
-        org_factory="DEFAULT", core_group="张工,李工,王工",
-        created_by=admin_id, updated_by=admin_id, approved_by=manager_id,
-        approved_at=datetime(2026, 5, 1, 10, 0, tzinfo=UTC),
+        factory_id=default_factory_id, status="draft", version=1,
+        phase="pre-launch", part_no="DCDC-100W-A", part_name="DC-DC 100W电源模块（模拟演示）",
+        contact_info="演示草案", drawing_rev="待确认",
+        org_factory="DEFAULT", core_group="演示草案",
+        created_by=admin_id, updated_by=admin_id,
+        approved_by=None, approved_at=None,
     )
     db.add(cp)
     await db.flush()
 
-    # Control plan items linked to FMEA nodes
+    # The two rows preserve product/process independence and draft provenance.
     cp_items = [
-        ControlPlanItem(
-            cp_id=cp.cp_id, factory_id=default_factory_id, sort_order=1,
-            step_no="10", process_name="SMT贴装",
-            equipment="高速贴片机",
-            characteristic_no="SC-001", product_characteristic="元器件贴装偏移度",
-            process_characteristic="贴装压力", special_class="CC",
-            specification_tolerance="≤0.05mm / 3.0±0.5N",
-            evaluation_method="3D-AOI检测", sample_size="5件/批",
-            sample_frequency="每批次", control_method="SPC Xbar-R图",
-            reaction_plan="调整贴装参数, 联系设备工程师",
-            source_fmea_node_id="psf_1", item_source="fmea",
-        ),
-        ControlPlanItem(
-            cp_id=cp.cp_id, factory_id=default_factory_id, sort_order=2,
-            step_no="20", process_name="回流焊接",
-            equipment="回流焊炉",
-            characteristic_no="SC-002", product_characteristic="焊接质量",
-            process_characteristic="炉温曲线", special_class="SC",
-            specification_tolerance="峰值温度235-255℃",
-            evaluation_method="炉温测试仪", sample_size="1次/班",
-            sample_frequency="每班", control_method="温度曲线监控",
-            reaction_plan="调整炉温参数, 通知工艺工程师",
-            source_fmea_node_id="wef_1", item_source="fmea",
-        ),
-        ControlPlanItem(
-            cp_id=cp.cp_id, factory_id=default_factory_id, sort_order=3,
-            step_no="30", process_name="功能测试",
-            equipment="综合测试台",
-            characteristic_no="CC-001", product_characteristic="空载转速",
-            process_characteristic="测试参数设置", special_class="CC",
-            specification_tolerance="3500±50 RPM",
-            evaluation_method="全检", sample_size="100%",
-            sample_frequency="每件", control_method="全检记录",
-            reaction_plan="隔离不合格品, 启动8D",
-            source_fmea_node_id="fm-cc-001", item_source="fmea",
-        ),
-        ControlPlanItem(
-            cp_id=cp.cp_id, factory_id=default_factory_id, sort_order=4,
-            step_no="40", process_name="终检包装",
-            equipment="目视检验台",
-            characteristic_no="", product_characteristic="外观质量",
-            process_characteristic="包装防护", special_class="",
-            specification_tolerance="无划伤/无损伤",
-            evaluation_method="目视检查", sample_size="AQL 1.0",
-            sample_frequency="每批", control_method="抽检记录",
-            reaction_plan="更换包装材料, 返工",
-            item_source="manual",
-        ),
+        ControlPlanItem(cp_id=cp.cp_id, factory_id=default_factory_id, **item_data)
+        for item_data in build_dcdc_control_plan_item_data(fmea1_id)
     ]
     db.add_all(cp_items)
     await db.flush()
@@ -1549,7 +1592,7 @@ async def seed_erp_mock(db, admin_id, default_factory_id):
     print("Seeded ERP mock connection.")
 
 
-async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, fmea3_id=None):
+async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, dfmea_id=None):
     """Seed APQP projects."""
     from app.models.apqp import APQPProject
 
@@ -1576,7 +1619,7 @@ async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, fme
         phase_1_completed_at=datetime(2026, 3, 1, 10, 0, tzinfo=UTC),
         phase_2_completed_at=datetime(2026, 4, 15, 14, 0, tzinfo=UTC),
         pfmea_id=fmea1_id,
-        dfmea_id=fmea3_id,
+        dfmea_id=dfmea_id,
         created_by=admin_id,
     )
     db.add(proj1)
@@ -1701,7 +1744,7 @@ async def seed():
             fmea_result = await db.execute(select(FMEADocument))
             fmeas = list(fmea_result.scalars().all())
             fmea1 = next((f for f in fmeas if f.document_no == "PFMEA-2026-001"), fmeas[0] if fmeas else None)
-            fmea3 = next((f for f in fmeas if f.document_no == "DFMEA-2026-001"), None)
+            dcdc_dfmea_id = select_dcdc_design_fmea_id(fmeas)
 
             capa_result = await db.execute(select(CAPAEightD))
             capa1 = capa_result.scalars().first()
@@ -1746,7 +1789,7 @@ async def seed():
             await seed_erp_mock(db, admin_id, default_factory.id)
             await seed_apqp(db, admin_id, engineer_user.user_id, default_factory.id,
                            fmea1.fmea_id if fmea1 else None,
-                           fmea3_id=fmea3.fmea_id if fmea3 else None)
+                           dfmea_id=dcdc_dfmea_id)
 
             await db.commit()
             print("Phase 2 seed data created successfully!")
@@ -1815,10 +1858,7 @@ async def seed():
 
         # Product lines (must exist before UserProductLine assignments)
         from app.models.product_line import ProductLine
-        pl_data = [
-            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER", "factory_id": default_factory.id},
-            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB", "factory_id": default_factory.id},
-        ]
+        pl_data = build_demo_product_line_data(default_factory.id)
         for pl_dict in pl_data:
             existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
             if not existing.scalar_one_or_none():
@@ -1832,12 +1872,11 @@ async def seed():
 
         # FMEA documents
         fmea1 = FMEADocument(
-            document_no="PFMEA-2026-001", title="SMT焊接工序PFMEA",
-            fmea_type="PFMEA", status="approved",
+            document_no="PFMEA-2026-001", title="DC-DC 100W SMT贴装PFMEA（模拟演示草案）",
+            fmea_type="PFMEA", status="draft", product_line_code="DC-DC-100",
             graph_data=SAMPLE_GRAPH,
             created_by=engineer.user_id, updated_by=engineer.user_id,
-            approved_by=manager.user_id,
-            approved_at=datetime.now(UTC),
+            approved_by=None, approved_at=None,
             factory_id=default_factory.id,
         )
         fmea2 = FMEADocument(
@@ -1850,14 +1889,23 @@ async def seed():
             factory_id=default_factory.id,
         )
         fmea3 = FMEADocument(
-            document_no="DFMEA-2026-001", title="电池管理系统 (BMS) DFMEA",
-            fmea_type="DFMEA", status="in_review",
+            document_no="DFMEA-2026-001", title="电池管理系统 (BMS) DFMEA（独立示例）",
+            fmea_type="DFMEA", status="in_review", product_line_code="BMS-DEMO",
             graph_data=SAMPLE_DFMEA_GRAPH,
             created_by=engineer.user_id, updated_by=engineer.user_id,
             factory_id=default_factory.id,
         )
-        db.add_all([fmea1, fmea2, fmea3])
+        fmea4 = FMEADocument(
+            document_no="DFMEA-2026-002", title="DC-DC 100W 模块DFMEA（模拟演示草案）",
+            fmea_type="DFMEA", status="draft", product_line_code="DC-DC-100",
+            graph_data=build_dcdc_design_dfmea_graph(),
+            created_by=engineer.user_id, updated_by=engineer.user_id,
+            approved_by=None, approved_at=None,
+            factory_id=default_factory.id,
+        )
+        db.add_all([fmea1, fmea2, fmea3, fmea4])
         await db.flush()
+        dcdc_dfmea_id = select_dcdc_design_fmea_id([fmea4])
 
         # CAPA reports
         capa1 = CAPAEightD(
@@ -1984,37 +2032,10 @@ async def seed():
         admin_result = await db.execute(select(User).where(User.username == "admin"))
         admin_id = admin_result.scalar_one().user_id
 
-        sc_data = [
-            {
-                "sc_code": "SC-2026-001",
-                "sc_name": "空载转速偏差",
-                "sc_type": "CC",
-                "customer_symbol": "🛡️",
-                "sc_category": "product",
-                "spec_requirement": "空载转速 3500±50 RPM",
-                "source_fmea_id": fmea1.fmea_id,
-                "source_node_id": "psf_1",
-                "source_type": "PFMEA",
-                "product_line_code": "DC-DC-100",
-                "msa_status": "PASS",
-                "sop_ref": "SOP-09",
-                "is_supplier_shared": True,
-                "supplier_code": "SUP-08",
-            },
-            {
-                "sc_code": "SC-2026-002",
-                "sc_name": "压装扭矩",
-                "sc_type": "SC",
-                "customer_symbol": "(S)",
-                "sc_category": "process",
-                "spec_requirement": "压装扭矩 25±2 Nm",
-                "source_fmea_id": fmea1.fmea_id,
-                "source_node_id": "wef_1",
-                "source_type": "PFMEA",
-                "product_line_code": "DC-DC-100",
-                "msa_status": "PENDING",
-            },
-        ]
+        # Main DC-DC draft data carries no CC/SC classification without an explicit
+        # demonstrated organization rule.  Do not manufacture SpecialCharacteristic
+        # records from this pre-approval example.
+        sc_data: list[dict] = []
 
         for sc_dict in sc_data:
             existing = await db.execute(
@@ -2027,10 +2048,7 @@ async def seed():
         # Product lines
         from app.models.product_line import ProductLine
 
-        pl_data = [
-            {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER", "factory_id": default_factory.id},
-            {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB", "factory_id": default_factory.id},
-        ]
+        pl_data = build_demo_product_line_data(default_factory.id)
         for pl_dict in pl_data:
             existing = await db.execute(select(ProductLine).where(ProductLine.code == pl_dict["code"]))
             if not existing.scalar_one_or_none():
@@ -2572,7 +2590,10 @@ async def seed():
         await seed_erp_mock(db, admin_id, default_factory.id)
 
         # ─── APQP Projects ───
-        await seed_apqp(db, admin_id, engineer.user_id, default_factory.id, fmea1.fmea_id, fmea3_id=fmea3.fmea_id)
+        await seed_apqp(
+            db, admin_id, engineer.user_id, default_factory.id, fmea1.fmea_id,
+            dfmea_id=dcdc_dfmea_id,
+        )
 
         await db.commit()
 

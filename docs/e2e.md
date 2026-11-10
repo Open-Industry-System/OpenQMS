@@ -182,3 +182,31 @@ only its own random Compose project. Normal backend hashing explicitly
 uses `public.digest`, matching the existing tenant trigger without adding public
 to strict search_path. CP creation returns the existing eager-loaded service view
 so async serialization does not lazy-load `items` after commit.
+
+### Characteristic integration dedicated endpoint
+
+The opt-in characteristic bootstrap/config keep the original explicitly owned
+`127.0.0.1:55432/qms_test` contract. The PR29 integration additionally authorizes
+only `127.0.0.1:55433/qms_test`, with identical explicit `DATABASE_URL` and
+`TEST_DATABASE_URL` and a genuine `OPENQMS_TEST_RESOURCE_FILE` verified against
+Docker's immutable container ID, image, ownership label and port binding via
+`tests.ci.owned_resources.verify_owned_instance`. A URL or handwritten registration
+alone is insufficient. The Playwright config and read-only outbox check invoke
+the same Python guard. This is not permission to launch arbitrary endpoints,
+reset retained evidence, or skip normal approvals/version guards. Use a fresh
+tag/manifest and identity-verified task-owned worker/backend/UI; shared global
+setup/seed/reset remain disabled. Retain both integration and prior containers
+and volumes unless their owner explicitly authorizes cleanup.
+
+
+PR29 separates retained browser evidence on registered55433 from a separately
+approved, genuinely registered full-suite-only55434 (`qms_test` in each instance,
+independent volumes). Never run the actor bootstrap/browser against55434 or run
+whole destructive fixture suites over retained55433 approvals. The browser's
+Agent runtime remains OFF: only an actual same-origin exact GET
+`/api/agent/tasks/availability`404, attributed to its response URL and accompanied
+by an absent Agent-task entry, is an expected capability probe. Raw console,
+page-error and HTTP failure records remain intact; CP collaboration404 and all
+other unexpected404/500 still fail. Existing intentional PFMEA409 handling is
+unchanged. The diagnostic helper lives only in `frontend/e2e/helpers/` and is
+shared with focused unit tests, not shipped as application behavior.

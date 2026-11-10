@@ -44,6 +44,7 @@ vi.mock("../../api/capa", async () => {
     getCapaOutcomeReview: vi.fn(),
     updateCAPA: vi.fn(),
     advanceCAPA: vi.fn(),
+    confirmRepeat: vi.fn(),
     linkFMEA: vi.fn(),
     generatePpt: vi.fn(),
     getPptExportReviewReport: vi.fn(),
@@ -62,7 +63,6 @@ vi.mock("../../api/capa", async () => {
     getDocGateImpact: vi.fn(),
     getDocGateAudit: vi.fn(),
     getDocGateDecision: vi.fn(),
-    confirmRepeat: vi.fn(),
     importD3Containment: vi.fn(),
   };
 });

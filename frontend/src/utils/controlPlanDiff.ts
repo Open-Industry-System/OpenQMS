@@ -54,7 +54,22 @@ const ITEM_FIELDS: (keyof ControlPlanItem)[] = [
   "sample_frequency",
   "control_method",
   "reaction_plan",
+  "source_fmea_node_id",
+  "source_characteristic_ref",
 ];
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  return stableValue(left) === stableValue(right);
+}
+
+function stableValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableValue).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableValue(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
 
 export function diffControlPlanItems(
   baseItems: ControlPlanItem[],
@@ -84,7 +99,7 @@ export function diffControlPlanItems(
         const localItem = localMap.get(id);
         const localVal = localItem ? (localItem as unknown as Record<string, unknown>)[field] ?? "" : "";
 
-        if (baseVal !== latestVal) {
+        if (!valuesEqual(baseVal, latestVal)) {
           itemChanges.push({
             type: "modified",
             item_id: id,
@@ -95,7 +110,7 @@ export function diffControlPlanItems(
           });
 
           // Conflict if local also modified this field
-          if (localItem && localVal !== "" && baseVal !== localVal) {
+          if (localItem && !valuesEqual(baseVal, localVal)) {
             conflictingFields.push({
               type: "modified",
               item_id: id,

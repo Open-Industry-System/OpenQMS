@@ -2,10 +2,11 @@ import uuid
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.services.fmea_characteristics import criteria_with_unit
 from app.models.audit import AuditLog
 from app.models.control_plan import ControlPlan, ControlPlanItem
 from app.models.fmea import FMEADocument
@@ -199,100 +200,262 @@ async def delete_special_characteristic(db: AsyncSession, sc_id: uuid.UUID, user
     return True
 
 
-async def sync_from_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) -> list[SCResponse]:
-    fmea_result = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id))
-    fmea = fmea_result.scalar_one_or_none()
+def _require_scope(entity, scope):
+    # Optional only for existing internal callers; HTTP consumers always pass it.
+    if scope is None:
+        return
+    if (scope.effective_factory_id and entity.factory_id != scope.effective_factory_id
+            or scope.factory_scope.accessible_factory_ids is not None
+            and entity.factory_id not in scope.factory_scope.accessible_factory_ids
+            or scope.pl_scope.mode == "NONE"
+            or scope.pl_scope.mode == "EXPLICIT"
+            and entity.product_line_code not in (scope.pl_scope.codes or [])):
+        raise ValueError("对象不存在或不在请求作用域内")
+
+
+def _frozen_safety(sc):
+    return sc.safety_approval_status in ("submitted", "approved")
+
+
+def _characteristic_records(fmea, *, graph=None):
+    # Validated canonical material; absent/None and explicit [] differ.
+    from app.schemas.characteristic import Characteristic, CharacteristicSourceRef
+    from app.services.fmea_characteristics import validate_characteristics
+
+    graph = (fmea.graph_data or {}) if graph is None else graph
+    validate_characteristics(fmea.fmea_type, graph)
+    nodes = graph.get("nodes", [])
+    node_map = {n["id"]: n for n in nodes}
+    edges = graph.get("edges", [])
+    records = {}
+    for node in nodes:
+        if node.get("characteristics") is None:
+            continue
+        for raw in node["characteristics"]:
+            char = Characteristic.model_validate(raw)
+            ref = None
+            if fmea.fmea_type == "PFMEA":
+                owner = next(node_map[e["source"]] for e in edges
+                             if e.get("type") == "HAS_FUNCTION" and e.get("target") == node["id"])
+                work_element_id = owner["id"] if owner["type"] == "ProcessWorkElement" else None
+                step_id = (next(e["source"] for e in edges if e.get("type") == "HAS_WORK_ELEMENT"
+                                and e.get("target") == work_element_id) if work_element_id else owner["id"])
+                ref = CharacteristicSourceRef(mapping_version=1, fmea_id=fmea.fmea_id,
+                    step_id=step_id, function_id=node["id"], work_element_id=work_element_id,
+                    characteristic_id=char.id)
+            records[str(char.id)] = (node, char, ref)
+    return records
+
+
+async def sync_from_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID, *, scope=None) -> list[SCResponse]:
+    fmea = await db.scalar(select(FMEADocument).where(FMEADocument.fmea_id == fmea_id)
+                          .with_for_update().execution_options(populate_existing=True))
     if not fmea:
         raise ValueError("FMEA document not found")
-    graph = fmea.graph_data if isinstance(fmea.graph_data, dict) else {}
+    _require_scope(fmea, scope)
+    canonical = _characteristic_records(fmea)
+    graph = fmea.graph_data or {}
     nodes = graph.get("nodes", [])
-    source_type = "DFMEA" if fmea.fmea_type == "DFMEA" else "PFMEA"
-    nodes_to_sync = {n["id"]: n for n in nodes if n.get("classification") in ("CC", "SC") or n.get("severity", 0) >= 9}
-    existing_result = await db.execute(
-        select(SpecialCharacteristic).where(SpecialCharacteristic.source_fmea_id == fmea_id)
-    )
-    existing = {sc.source_node_id: sc for sc in existing_result.scalars().all()}
-    # Severity drop detection: find existing safety SCs whose node severity dropped below 9
-    for node_id, sc in existing.items():
-        node = nodes_to_sync.get(node_id)
-        if sc.is_safety_related and node and node.get("severity", 0) < 9:
-            if sc.safety_approval_status == SafetyApprovalStatus.APPROVED.value:
-                await _create_audit(db, "SAFETY_SEVERITY_DROP", sc.sc_id, user_id, {
-                    "sc_code": sc.sc_code,
-                    "warning": "FMEA严重度已下降至8，请手动评估是否保留安全属性",
-                    "previous_severity": 9,
-                    "current_severity": node.get("severity", 0),
-                })
-            elif sc.safety_approval_status in (SafetyApprovalStatus.PENDING.value, SafetyApprovalStatus.SUBMITTED.value, SafetyApprovalStatus.REJECTED.value):
-                await _create_audit(db, "SAFETY_SEVERITY_DROP", sc.sc_id, user_id, {
-                    "sc_code": sc.sc_code,
-                    "warning": "FMEA严重度已下降至8，但该安全特性处于审批流程中，请人工评估",
-                })
-    created_or_updated = []
-    for node_id, node in nodes_to_sync.items():
-        sc_type = node.get("classification") or "CC"
-        if node_id in existing:
-            sc = existing[node_id]
-            if sc.sc_type != sc_type:
-                sc.sc_type = sc_type
-            if sc.sc_name != node.get("name", ""):
-                sc.sc_name = node.get("name", "")
-            # Auto-suggest safety for severity >= 9 CC nodes not yet safety-related
-            if node.get("severity", 0) >= 9 and sc_type == "CC" and not sc.is_safety_related:
-                sc.is_safety_suggested = True
-            created_or_updated.append(_to_response(sc))
+    canonical_functions = {n["id"] for n in nodes if n.get("characteristics") is not None}
+    canonical_failures = {e.get("target") for e in graph.get("edges", [])
+                          if e.get("type") == "HAS_FAILURE_MODE" and e.get("source") in canonical_functions}
+    legacy = {n["id"]: n for n in nodes
+              if n["id"] not in canonical_functions | canonical_failures
+              and (n.get("classification") in ("CC", "SC") or n.get("severity", 0) >= 9)}
+    existing = list((await db.scalars(select(SpecialCharacteristic).where(
+        SpecialCharacteristic.source_fmea_id == fmea_id).with_for_update()
+        .execution_options(populate_existing=True))).all())
+    if any(sc.factory_id != fmea.factory_id or sc.product_line_code != fmea.product_line_code for sc in existing):
+        raise ValueError("特殊特性来源范围不一致，请人工复核")
+    by_identity = {(str(sc.source_characteristic_id) if sc.source_characteristic_id else sc.source_node_id,
+                    sc.source_characteristic_id is not None): sc for sc in existing}
+    desired = {}
+    for cid, (node, char, _) in canonical.items():
+        if char.classification in ("CC", "SC"):
+            desired[(cid, True)] = dict(sc_name=char.name, sc_type=char.classification,
+                sc_category=char.kind, spec_requirement=criteria_with_unit(char.specification, char.unit) or char.reference,
+                source_node_id=node["id"], source_characteristic_id=char.id)
+    for node_id, node in legacy.items():
+        desired[(node_id, False)] = dict(sc_name=node.get("name", ""),
+            sc_type=node.get("classification") or "CC", source_node_id=node_id,
+            source_characteristic_id=None)
+    output = []
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                     {"key": "special_characteristics_sc_code"})
+    for identity, material in desired.items():
+        sc = by_identity.get(identity)
+        if sc is not None:
+            changes = {k: v for k, v in material.items() if getattr(sc, k) != v}
+            scope_changed = sc.factory_id != fmea.factory_id or sc.product_line_code != fmea.product_line_code
+            legacy_severity_drop = (not identity[1] and sc.is_safety_related
+                                    and legacy[identity[0]].get("severity", 0) < 9)
+            if scope_changed or _frozen_safety(sc) and (changes or legacy_severity_drop):
+                await _create_audit(db, "SAFETY_SEVERITY_DROP" if legacy_severity_drop else "SAFETY_SOURCE_REVIEW_REQUIRED", sc.sc_id, user_id,
+                                    {"warning": "来源材料已变化，保留受控特殊特性，请人工复核"})
+                response = _to_response(sc)
+                response.review_required = True
+                response.review_message = "来源材料已变化，保留受控特殊特性，请人工复核"
+                output.append(response)
+                continue
+            for k, v in changes.items():
+                setattr(sc, k, v)
+            if not identity[1] and not _frozen_safety(sc):
+                node = legacy[identity[0]]
+                if node.get("severity", 0) >= 9 and sc.sc_type == "CC" and not sc.is_safety_related:
+                    sc.is_safety_suggested = True
+                if sc.is_safety_related and node.get("severity", 0) < 9:
+                    await _create_audit(db, "SAFETY_SEVERITY_DROP", sc.sc_id, user_id,
+                                        {"warning": "FMEA严重度已下降，请人工评估是否保留安全属性"})
         else:
-            sc_code = await generate_sc_code(db)
-            parent_sc_id = None
-            if source_type == "PFMEA":
-                parent_result = await db.execute(
-                    select(SpecialCharacteristic).where(
-                        and_(SpecialCharacteristic.source_type == "DFMEA",
-                             SpecialCharacteristic.sc_name == node.get("name", ""))
-                    ).limit(1)
-                )
-                parent_sc = parent_result.scalar_one_or_none()
-                if parent_sc:
-                    parent_sc_id = parent_sc.sc_id
-            sc = SpecialCharacteristic(
-                sc_code=sc_code, sc_name=node.get("name", ""), sc_type=sc_type,
-                source_fmea_id=fmea_id, source_node_id=node_id, source_type=source_type,
-                parent_sc_id=parent_sc_id, product_line_code=fmea.product_line_code,
-                created_by=user_id,
-                is_safety_suggested=node.get("severity", 0) >= 9 and sc_type == "CC",
-            )
+            sc = SpecialCharacteristic(sc_id=uuid.uuid4(), sc_code=await generate_sc_code(db),
+                **material, source_fmea_id=fmea_id, source_type=fmea.fmea_type,
+                factory_id=fmea.factory_id, product_line_code=fmea.product_line_code,
+                created_by=user_id, is_safety_related=False,
+                is_safety_suggested=not identity[1] and legacy[identity[0]].get("severity", 0) >= 9
+                    and material["sc_type"] == "CC")
             db.add(sc)
-            created_or_updated.append(_to_response(sc))
-    for node_id, sc in existing.items():
-        if node_id not in nodes_to_sync:
-            if sc.is_safety_related:
-                # Intercept: don't auto-delete safety characteristics
-                await _create_audit(db, "SAFETY_DELETE_WARNING", sc.sc_id, user_id, {
-                    "sc_code": sc.sc_code,
-                    "warning": "FMEA中关联节点已变更，但该特性为安全特性，系统已拦截自动删除，请人工评估并处理",
-                })
-            else:
-                await db.delete(sc)
-    await _create_audit(db, "SYNC", fmea_id, user_id, {
-        "action": "sync_from_fmea",
-        "classified_count": len(nodes_to_sync),
-        "deleted_count": len([n for n in existing if n not in nodes_to_sync]),
-    })
+            await db.flush()
+            await _create_audit(db, "CREATE", sc.sc_id, user_id, {
+                "action": "sync_from_fmea", "source_fmea_id": str(fmea_id),
+                "source_characteristic_id": str(sc.source_characteristic_id) if sc.source_characteristic_id else None,
+                "source_node_id": sc.source_node_id,
+            })
+        output.append(_to_response(sc))
+    for identity, sc in by_identity.items():
+        if identity in desired:
+            continue
+        legacy_adopted = (sc.source_characteristic_id is None
+                          and sc.source_node_id in canonical_functions | canonical_failures)
+        if sc.is_safety_related or sc.safety_approval_status or legacy_adopted:
+            message = "来源取消分类、删除或已结构化；保留历史记录，请人工复核"
+            await _create_audit(db, "SAFETY_DELETE_WARNING" if not legacy_adopted else "LEGACY_SOURCE_REVIEW_REQUIRED",
+                                sc.sc_id, user_id, {"warning": message})
+            response = _to_response(sc)
+            response.review_required = True
+            response.review_message = message
+            output.append(response)
+        else:
+            await db.delete(sc)
+    await _create_audit(db, "SYNC", fmea_id, user_id,
+                        {"action": "sync_from_fmea", "classified_count": len(desired)})
     await db.commit()
-    return created_or_updated
+    return output
 
 
-async def sync_to_cp(db: AsyncSession, cp_id: uuid.UUID, user_id: uuid.UUID) -> list[dict]:
-    """Sync special_class from characteristics table to CP items.
+async def _lock_cp_link_target(db, sc, cp, item_id):
+    # CP parent is already held by sync_to_cp. Recheck the target after waits.
+    target = await db.scalar(select(ControlPlanItem).where(
+        ControlPlanItem.item_id == item_id, ControlPlanItem.cp_id == cp.cp_id,
+        ControlPlanItem.factory_id == cp.factory_id).with_for_update(read=True, key_share=True)
+        .execution_options(populate_existing=True))
+    if (target is None or sc.factory_id != cp.factory_id
+            or sc.product_line_code != cp.product_line_code):
+        raise ValueError("特殊特性控制计划链接目标不存在或范围不一致")
+    # Recheck review state after waiting, before any automatic SC rebinding.
+    locked_sc = await db.scalar(select(SpecialCharacteristic).where(
+        SpecialCharacteristic.sc_id == sc.sc_id).with_for_update()
+        .execution_options(populate_existing=True))
+    return locked_sc is not None and not _frozen_safety(locked_sc)
 
-    CRITICAL: CP items store source_fmea_node_id = ProcessStep node ID,
-    but special_characteristics store source_node_id = FailureMode node ID.
-    Must traverse FMEA graph edges: ProcessStep -> ... -> FailureMode
+
+def _source_review_required(sc, record):
+    if sc is None or not _frozen_safety(sc):
+        return False
+    if record is None:
+        return True
+    node, char, _ = record
+    return (sc.source_node_id, sc.sc_name, sc.sc_type, sc.sc_category, sc.spec_requirement) != (
+        node["id"], char.name, char.classification, char.kind,
+        criteria_with_unit(char.specification, char.unit) or char.reference)
+
+
+_VERSION_SYNC_GUIDANCE = "请使用已批准 FMEA 版本的正式同步预览与确认；此入口不改写来源字段"
+
+
+def _cp_source_record(fmea, cp, item, records):
+    from app.schemas.characteristic import CharacteristicSourceRef
+    from app.services.fmea_characteristics import source_key
+
+    if (fmea is None or fmea.fmea_id != cp.fmea_ref_id
+            or item.factory_id != cp.factory_id or fmea.factory_id != cp.factory_id
+            or fmea.product_line_code != cp.product_line_code):
+        return None
+    try:
+        ref = CharacteristicSourceRef.model_validate(item.source_characteristic_ref)
+    except ValueError:
+        return None
+    record = records.get(str(ref.characteristic_id))
+    if record is None or record[2] is None:
+        return None
+    expected = record[2]
+    if (ref.mapping_version == expected.mapping_version
+            and ref.work_element_id == expected.work_element_id
+            and item.source_fmea_node_id == ref.step_id
+            and source_key(ref) == source_key(expected)):
+        return record
+    return None
+
+
+async def _accepted_trace_records(db, fmea, cp, item, cache):
+    """Read an immutable per-row baseline; never fall back to the working graph."""
+    from app.models.fmea_version import FMEAVersion
+    from app.schemas.characteristic import CharacteristicSourceRef
+    from app.services.version_service import verify_fmea_version
+
+    if (fmea is None or fmea.fmea_id != cp.fmea_ref_id
+            or fmea.factory_id != cp.factory_id or item.factory_id != cp.factory_id
+            or fmea.product_line_code != cp.product_line_code):
+        return {}
+    try:
+        ref = CharacteristicSourceRef.model_validate(item.source_characteristic_ref)
+    except ValueError:
+        return {}
+    if ref.fmea_id != fmea.fmea_id or ref.accepted_source_version_id is None:
+        return {}
+    key = (ref.accepted_source_version_id, fmea.fmea_id, cp.factory_id)
+    if key not in cache:
+        cache[key] = {}
+        version = await db.scalar(select(FMEAVersion).where(
+            FMEAVersion.version_id == ref.accepted_source_version_id,
+            FMEAVersion.fmea_id == fmea.fmea_id, FMEAVersion.factory_id == cp.factory_id))
+        if (version is not None and isinstance(version.snapshot, dict)
+                and version.change_type == "approve" and version.major_no >= 1
+                and version.minor_no == 0 and await verify_fmea_version(db, version.version_id)):
+            try:
+                cache[key] = _characteristic_records(fmea, graph=version.snapshot)
+            except (ValueError, TypeError, KeyError):
+                # An untrustworthy historical graph is not coverage evidence.
+                pass
+    return cache[key]
+
+
+def _matches_source(sc, fmea, cp, item, records):
+    if (sc.source_fmea_id != cp.fmea_ref_id or fmea is None
+            or sc.factory_id != cp.factory_id or item.factory_id != cp.factory_id
+            or fmea.factory_id != cp.factory_id or fmea.product_line_code != cp.product_line_code
+            or sc.product_line_code != cp.product_line_code):
+        return False
+    if sc.source_characteristic_id is None:
+        # Legacy trace uses only an explicit link, never name/class similarity.
+        return sc.cp_item_id == item.item_id and not item.source_characteristic_ref
+    record = _cp_source_record(fmea, cp, item, records)
+    # SC identity is document + characteristic UUID. The row's full historical
+    # owner identity was verified against its accepted snapshot above; a newer
+    # SC/working-function binding must not erase still-existing older controls.
+    return record is not None and record[1].id == sc.source_characteristic_id
+
+
+async def sync_to_cp(db: AsyncSession, cp_id: uuid.UUID, user_id: uuid.UUID, *, scope=None) -> list[dict]:
+    """Report canonical mismatches without bypassing approved-version sync.
+
+    Only legacy rows without a source ref retain the guarded node-based sync.
+    Canonical multi-control coverage is derived by the read-only trace query.
     """
-    cp_result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id))
+    cp_result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id).with_for_update().execution_options(populate_existing=True))
     cp = cp_result.scalar_one_or_none()
     if not cp:
         raise ValueError("Control plan not found")
+    _require_scope(cp, scope)
     if not cp.fmea_ref_id:
         return []
 
@@ -300,11 +463,17 @@ async def sync_to_cp(db: AsyncSession, cp_id: uuid.UUID, user_id: uuid.UUID) -> 
     scs_result = await db.execute(
         select(SpecialCharacteristic).where(SpecialCharacteristic.source_fmea_id == cp.fmea_ref_id)
     )
-    scs = {sc.source_node_id: sc for sc in scs_result.scalars().all()}
+    all_scs = list(scs_result.scalars().all())
+    scs = {sc.source_node_id: sc for sc in all_scs if sc.source_characteristic_id is None
+           and sc.factory_id == cp.factory_id and sc.product_line_code == cp.product_line_code}
 
     # Build FMEA graph: ProcessStep node ID -> FailureMode node IDs
     fmea_result = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == cp.fmea_ref_id))
     fmea = fmea_result.scalar_one_or_none()
+    if fmea:
+        _require_scope(fmea, scope)
+        if fmea.factory_id != cp.factory_id or fmea.product_line_code != cp.product_line_code:
+            raise ValueError("FMEA与控制计划范围不一致")
     graph = fmea.graph_data if fmea and fmea.graph_data and isinstance(fmea.graph_data, dict) else {}
     step_to_fms: dict[str, list[str]] = {}
     for edge in graph.get("edges", []):
@@ -316,39 +485,40 @@ async def sync_to_cp(db: AsyncSession, cp_id: uuid.UUID, user_id: uuid.UUID) -> 
                     step_node_id = e2.get("source", "")
                     step_to_fms.setdefault(step_node_id, []).append(fm_node_id)
 
-    items_result = await db.execute(select(ControlPlanItem).where(ControlPlanItem.cp_id == cp_id))
+    items_result = await db.execute(select(ControlPlanItem).where(ControlPlanItem.cp_id == cp_id).order_by(ControlPlanItem.sort_order, ControlPlanItem.item_id).with_for_update().execution_options(populate_existing=True))
     items = items_result.scalars().all()
 
+    records = _characteristic_records(fmea) if fmea else {}
     updated = []
     for item in items:
+        if item.source_characteristic_ref is not None:
+            record = _cp_source_record(fmea, cp, item, records)
+            sc = next((sc for sc in all_scs if record is not None
+                       and sc.source_characteristic_id == record[1].id
+                       and sc.factory_id == cp.factory_id and sc.product_line_code == cp.product_line_code), None)
+            expected = record[1].classification if record else None
+            if record is None or _source_review_required(sc, record) or (item.special_class or "") != (expected or ""):
+                updated.append({"item_id": str(item.item_id), "step_no": item.step_no,
+                    "old": item.special_class, "new": expected, "updated": False,
+                    "requires_version_sync": True, "guidance": _VERSION_SYNC_GUIDANCE})
+            continue
         step_node_id = item.source_fmea_node_id or ""
-        matched = False
-        for fm_id in step_to_fms.get(step_node_id, []):
-            if fm_id in scs:
-                sc = scs[fm_id]
-                new_special_class = sc.sc_type
-                if item.special_class != new_special_class:
-                    item.special_class = new_special_class
-                    sc.cp_item_id = item.item_id
-                    updated.append({
-                        "item_id": str(item.item_id), "step_no": item.step_no,
-                        "old": item.special_class, "new": new_special_class,
-                    })
-                matched = True
-                break
-        if not matched and step_node_id in scs:
-            sc = scs[step_node_id]
-            new_special_class = sc.sc_type
-            if item.special_class != new_special_class:
-                item.special_class = new_special_class
-                sc.cp_item_id = item.item_id
-                updated.append({
-                    "item_id": str(item.item_id), "step_no": item.step_no,
-                    "old": item.special_class, "new": new_special_class,
-                })
+        sc = next((scs[fm_id] for fm_id in step_to_fms.get(step_node_id, []) if fm_id in scs), None)
+        sc = sc or scs.get(step_node_id)
+        if sc is None or item.special_class == sc.sc_type:
+            continue
+        outcome = {"item_id": str(item.item_id), "step_no": item.step_no,
+                   "old": item.special_class, "new": sc.sc_type}
+        if cp.status == "approved" or _frozen_safety(sc) or not await _lock_cp_link_target(db, sc, cp, item.item_id):
+            updated.append({**outcome, "updated": False, "requires_version_sync": True,
+                            "guidance": "受控材料保留不变，请通过正式版本同步或人工复核"})
+            continue
+        item.special_class = sc.sc_type
+        sc.cp_item_id = item.item_id
+        updated.append({**outcome, "updated": True})
 
     await _create_audit(db, "SYNC", cp_id, user_id, {
-        "action": "sync_to_cp", "updated_count": len(updated),
+        "action": "sync_to_cp", "updated_count": sum(i.get("updated", False) for i in updated),
     })
     await db.commit()
     return updated
@@ -442,11 +612,14 @@ async def update_msa_status(db: AsyncSession, sc_id: uuid.UUID, grr_percent: flo
     return _to_response(sc)
 
 
-async def check_cp_sync_status(db: AsyncSession, cp_id: uuid.UUID) -> CPSyncStatusResponse:
+async def check_cp_sync_status(db: AsyncSession, cp_id: uuid.UUID, *, scope=None) -> CPSyncStatusResponse:
     """Check CP items vs FMEA FailureMode classifications (edge-based mapping)."""
     cp_result = await db.execute(select(ControlPlan).where(ControlPlan.cp_id == cp_id))
     cp = cp_result.scalar_one_or_none()
-    if not cp or not cp.fmea_ref_id:
+    if cp is None:
+        raise ValueError("Control plan not found")
+    _require_scope(cp, scope)
+    if not cp.fmea_ref_id:
         return CPSyncStatusResponse(items=[], total_out_of_sync=0)
 
     fmea_result = await db.execute(select(FMEADocument).where(FMEADocument.fmea_id == cp.fmea_ref_id))
@@ -454,6 +627,9 @@ async def check_cp_sync_status(db: AsyncSession, cp_id: uuid.UUID) -> CPSyncStat
     if not fmea:
         return CPSyncStatusResponse(items=[], total_out_of_sync=0)
 
+    _require_scope(fmea, scope)
+    if fmea.factory_id != cp.factory_id or fmea.product_line_code != cp.product_line_code:
+        raise ValueError("FMEA与控制计划范围不一致")
     graph = fmea.graph_data if isinstance(fmea.graph_data, dict) else {}
 
     # Build ProcessStep -> FailureMode node mapping via graph edges
@@ -470,13 +646,29 @@ async def check_cp_sync_status(db: AsyncSession, cp_id: uuid.UUID) -> CPSyncStat
     scs_result = await db.execute(
         select(SpecialCharacteristic).where(SpecialCharacteristic.source_fmea_id == cp.fmea_ref_id)
     )
-    sc_map = {sc.source_node_id: sc for sc in scs_result.scalars().all()}
+    all_scs = list(scs_result.scalars().all())
+    sc_map = {sc.source_node_id: sc for sc in all_scs if sc.source_characteristic_id is None
+              and sc.factory_id == cp.factory_id and sc.product_line_code == cp.product_line_code}
+    records = _characteristic_records(fmea)
 
     items_result = await db.execute(select(ControlPlanItem).where(ControlPlanItem.cp_id == cp_id))
     items = items_result.scalars().all()
 
     sync_items = []
     for item in items:
+        if item.source_characteristic_ref is not None:
+            record = _cp_source_record(fmea, cp, item, records)
+            sc = next((sc for sc in all_scs if record is not None
+                       and sc.source_characteristic_id == record[1].id
+                       and sc.factory_id == cp.factory_id and sc.product_line_code == cp.product_line_code), None)
+            expected = record[1].classification if record else None
+            mismatch = (record is None or _source_review_required(sc, record)
+                        or (item.special_class or "") != (expected or ""))
+            sync_items.append(CPSyncStatusItem(item_id=item.item_id, step_no=item.step_no or "",
+                process_name=item.process_name or "", current_special_class=item.special_class,
+                expected_special_class=expected, is_out_of_sync=mismatch,
+                requires_version_sync=mismatch, guidance=_VERSION_SYNC_GUIDANCE if mismatch else None))
+            continue
         if not item.source_fmea_node_id:
             continue
         step_node_id = item.source_fmea_node_id or ""
@@ -504,87 +696,110 @@ async def check_cp_sync_status(db: AsyncSession, cp_id: uuid.UUID) -> CPSyncStat
 
 
 
-async def get_traceability_chain(db: AsyncSession, sc_id: uuid.UUID) -> dict:
-    """Build the full traceability chain for a special characteristic:
-    SC -> FMEA source node -> Control Plan items -> SPC characteristics
-    """
+async def _trace_msa_evidence(db, sc):
+    # The historical SC cache/callback is not itself a measurement result.
+    if sc.msa_study_id is None:
+        return None, "PENDING"
+    from app.models.grr import GrrStudy, GrrResult
+    from app.models.bias import BiasStudy, BiasResult
+    from app.models.linearity import LinearityStudy, LinearityResult
+    from app.models.stability import StabilityStudy, StabilityResult
+    from app.models.attribute import AttributeStudy, AttributeResult
+
+    for study_model, result_model in ((GrrStudy, GrrResult), (BiasStudy, BiasResult),
+            (LinearityStudy, LinearityResult), (StabilityStudy, StabilityResult), (AttributeStudy, AttributeResult)):
+        study = await db.scalar(select(study_model).where(study_model.study_id == sc.msa_study_id,
+            study_model.factory_id == sc.factory_id, study_model.product_line_code == sc.product_line_code))
+        if study is None:
+            continue
+        result = await db.scalar(select(result_model).where(result_model.study_id == study.study_id,
+                                                           result_model.factory_id == sc.factory_id))
+        return str(study.study_id), result.conclusion if result else "PENDING"
+    return None, "PENDING"
+
+
+async def get_traceability_chain(db: AsyncSession, sc_id: uuid.UUID, *, scope=None) -> dict:
+    # All CP controls are derived read-only from provenance, not the last link.
     sc = await db.get(SpecialCharacteristic, sc_id)
     if not sc:
         raise ValueError("特殊特性不存在")
-
+    _require_scope(sc, scope)
+    fmea = await db.get(FMEADocument, sc.source_fmea_id) if sc.source_fmea_id else None
+    if fmea and (fmea.factory_id != sc.factory_id or fmea.product_line_code != sc.product_line_code):
+        fmea = None
+    try:
+        records = _characteristic_records(fmea) if fmea else {}
+    except (ValueError, TypeError, KeyError):
+        # Current-source comparison is advisory, never the historical trust root.
+        records = {}
+    msa_study_id, msa_status = await _trace_msa_evidence(db, sc)
+    review_required = (sc.source_characteristic_id is not None
+                       and _source_review_required(sc, records.get(str(sc.source_characteristic_id))))
     chain = {
-        "sc_code": sc.sc_code,
-        "sc_name": sc.sc_name,
-        "sc_type": sc.sc_type,
-        "spec_requirement": sc.spec_requirement,
-        "product_line_code": sc.product_line_code,
-        "fmea_source": None,
-        "control_plan_items": [],
-        "spc_characteristics": [],
+        "sc_code": sc.sc_code, "sc_name": sc.sc_name, "sc_type": sc.sc_type,
+        "sc_category": sc.sc_category,
+        "review_required": review_required,
+        "review_message": "来源材料已变化，保留受控特殊特性，请人工复核" if review_required else None,
+        "source_characteristic_id": str(sc.source_characteristic_id) if sc.source_characteristic_id else None,
+        "spec_requirement": sc.spec_requirement, "product_line_code": sc.product_line_code,
+        "msa_study_id": msa_study_id, "msa_status": msa_status,
+        "fmea_source": None, "control_plan_items": [], "spc_characteristics": [],
     }
-
-    # 1. FMEA source
-    if sc.source_fmea_id:
-        fmea = await db.get(FMEADocument, sc.source_fmea_id)
-        if fmea and sc.source_node_id:
-            graph = fmea.graph_data or {}
-            node = next((n for n in graph.get("nodes", []) if n.get("id") == sc.source_node_id), None)
-            edges = graph.get("edges", [])
-            if node:
-                # Find connected failure modes
-                connected_fms = []
-                for e in edges:
-                    if e.get("source") == sc.source_node_id and e.get("type") == "HAS_FAILURE_MODE":
-                        fm = next((n for n in graph.get("nodes", []) if n.get("id") == e.get("target")), None)
-                        if fm:
-                            connected_fms.append({"id": fm["id"], "name": fm["name"], "type": fm.get("type", "")})
-
-                chain["fmea_source"] = {
-                    "fmea_id": str(fmea.fmea_id),
-                    "document_no": fmea.document_no,
-                    "title": fmea.title,
-                    "fmea_type": fmea.fmea_type,
-                    "node_id": sc.source_node_id,
-                    "node_name": node.get("name", ""),
-                    "node_type": node.get("type", ""),
-                    "connected_failure_modes": connected_fms,
-                }
-
-    # 2. Control Plan items
-    cp_items_result = await db.execute(
-        select(ControlPlanItem).where(
-            ControlPlanItem.special_class.in_([sc.sc_type, sc.sc_code, sc.sc_name])
-        )
-    )
-    for item in cp_items_result.scalars().all():
-        cp = await db.get(ControlPlan, item.cp_id)
-        chain["control_plan_items"].append({
-            "item_id": str(item.item_id),
-            "step_no": item.step_no,
-            "process_name": item.process_name,
-            "characteristic_no": item.characteristic_no,
-            "special_class": item.special_class,
-            "specification_tolerance": item.specification_tolerance,
-            "cp_document_no": cp.document_no if cp else "",
-            "cp_title": cp.title if cp else "",
-        })
-
-    # 3. SPC characteristics
-    spc_result = await db.execute(
-        select(InspectionCharacteristic).where(
-            InspectionCharacteristic.characteristic_name.ilike(f"%{sc.sc_name}%")
-        ).limit(10)
-    )
-    for ic in spc_result.scalars().all():
-        chain["spc_characteristics"].append({
-            "ic_id": str(ic.ic_id),
-            "characteristic_name": ic.characteristic_name,
-            "chart_type": ic.chart_type,
-            "spec_target": float(ic.spec_target) if ic.spec_target else None,
-            "spec_upper": float(ic.spec_upper) if ic.spec_upper else None,
-            "spec_lower": float(ic.spec_lower) if ic.spec_lower else None,
-        })
-
+    if fmea:
+        graph = fmea.graph_data or {}
+        node_map = {n["id"]: n for n in graph.get("nodes", [])}
+        node = node_map.get(sc.source_node_id)
+        if node:
+            connected = [node_map[e["target"]] for e in graph.get("edges", [])
+                         if e.get("source") == sc.source_node_id and e.get("type") == "HAS_FAILURE_MODE"
+                         and e.get("target") in node_map]
+            chain["fmea_source"] = dict(fmea_id=str(fmea.fmea_id), document_no=fmea.document_no,
+                title=fmea.title, fmea_type=fmea.fmea_type, node_id=sc.source_node_id,
+                node_name=node.get("name", ""), node_type=node.get("type", ""),
+                connected_failure_modes=[dict(id=n["id"], name=n.get("name", ""), type=n.get("type", "")) for n in connected])
+    query = select(ControlPlanItem, ControlPlan).join(ControlPlan, ControlPlan.cp_id == ControlPlanItem.cp_id).where(
+        ControlPlan.factory_id == sc.factory_id, ControlPlanItem.factory_id == sc.factory_id,
+        ControlPlan.product_line_code == sc.product_line_code,
+        ControlPlan.fmea_ref_id == sc.source_fmea_id).order_by(ControlPlan.document_no, ControlPlanItem.sort_order, ControlPlanItem.item_id)
+    spc_ids = set()
+    accepted_cache = {}
+    for item, cp in (await db.execute(query)).all():
+        accepted_records = (await _accepted_trace_records(db, fmea, cp, item, accepted_cache)
+                            if sc.source_characteristic_id is not None else {})
+        if not _matches_source(sc, fmea, cp, item, accepted_records):
+            continue
+        _require_scope(cp, scope)
+        gauge_id = None
+        if item.gauge_id:
+            from app.models.gauge import Gauge
+            gauge = await db.get(Gauge, item.gauge_id)
+            if gauge and gauge.factory_id == sc.factory_id and gauge.product_line_code == sc.product_line_code:
+                gauge_id = str(gauge.gauge_id)
+        record = records.get(str(sc.source_characteristic_id))
+        accepted_record = accepted_records.get(str(sc.source_characteristic_id))
+        diverged = (accepted_record is not None and (record is None
+                    or accepted_record[1] != record[1] or accepted_record[2] != record[2]))
+        if diverged:
+            chain["review_required"] = True
+            chain["review_message"] = "当前 FMEA 来源与已接受批准版本不同；保留控制行追溯，请人工复核"
+        expected = record[1].classification if record else sc.sc_type
+        mismatch = review_required or diverged or (item.special_class or "") != (expected or "")
+        chain["control_plan_items"].append(dict(item_id=str(item.item_id), cp_id=str(cp.cp_id),
+            step_no=item.step_no, process_name=item.process_name, characteristic_no=item.characteristic_no,
+            special_class=item.special_class, specification_tolerance=item.specification_tolerance,
+            cp_document_no=cp.document_no, cp_title=cp.title, gauge_id=gauge_id,
+            requires_version_sync=mismatch, guidance=_VERSION_SYNC_GUIDANCE if mismatch else None))
+        if item.spc_chart_id:
+            spc_ids.add(item.spc_chart_id)
+    if spc_ids:
+        spcs = await db.scalars(select(InspectionCharacteristic).where(
+            InspectionCharacteristic.ic_id.in_(spc_ids), InspectionCharacteristic.factory_id == sc.factory_id,
+            InspectionCharacteristic.product_line == sc.product_line_code).order_by(InspectionCharacteristic.ic_id))
+        for ic in spcs:
+            chain["spc_characteristics"].append(dict(ic_id=str(ic.ic_id), characteristic_name=ic.characteristic_name,
+                chart_type=ic.chart_type, spec_target=float(ic.target_value) if ic.target_value is not None else None,
+                spec_upper=float(ic.spec_upper) if ic.spec_upper is not None else None,
+                spec_lower=float(ic.spec_lower) if ic.spec_lower is not None else None))
     return chain
 
 def _to_response(sc: SpecialCharacteristic) -> SCResponse:
@@ -598,8 +813,9 @@ def _to_response(sc: SpecialCharacteristic) -> SCResponse:
         sc_category=sc.sc_category, spec_requirement=sc.spec_requirement,
         parent_sc_id=sc.parent_sc_id, source_fmea_id=sc.source_fmea_id,
         source_fmea_title=fmea_title, source_fmea_document_no=fmea_doc_no,
-        source_node_id=sc.source_node_id, source_type=sc.source_type,
-        cp_item_id=sc.cp_item_id, msa_study_id=sc.msa_study_id,
+        source_node_id=sc.source_node_id,
+        source_characteristic_id=sc.source_characteristic_id,
+        source_type=sc.source_type, cp_item_id=sc.cp_item_id, msa_study_id=sc.msa_study_id,
         msa_status=sc.msa_status or "PENDING", sop_ref=sc.sop_ref,
         product_line_code=sc.product_line_code,
         factory_id=sc.factory_id,

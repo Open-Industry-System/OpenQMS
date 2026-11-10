@@ -33,7 +33,12 @@
     "syncSuccess": "Sync successful",
     "syncFailed": "Sync failed",
     "cancel": "Cancel",
-    "confirmSync": "Confirm Sync",
+    "confirmSync": "Confirm sync",
+    "confirmNoChanges": "Confirm no changes",
+    "previewAgain": "Preview again",
+    "previewExpired": "Preview expired. Generate a new preview before confirming.",
+    "partialPending": "{{count}} item(s) remain pending.",
+    "refreshFailedAfterSync": "Sync was applied, but the latest control plan could not be refreshed. Generate a new preview before another confirmation.",
     "loadPreviewFailed": "Failed to load preview",
     "none": "None",
     "columns": {
@@ -41,7 +46,8 @@
       "stepNo": "Step No.",
       "currentValue": "Current Value",
       "fmeaNewValue": "FMEA New Value",
-      "mergedValue": "Merged Value"
+      "mergedValue": "Merged Value",
+      "issues": "Constraints"
     },
     "actions": {
       "add": "Add",

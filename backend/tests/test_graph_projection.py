@@ -1,3 +1,5 @@
+import json
+
 from app.services.graph_projection_service import build_cypher_sync
 
 
@@ -144,3 +146,44 @@ def test_build_cypher_sync_includes_product_line_name():
     _, params = doc_statements[0]
     assert "product_line_name" in params
     assert params["product_line_name"] == "DC-DC 电源模块"
+
+
+def test_build_cypher_sync_serializes_explicit_characteristics_without_graph_schema_changes():
+    """Neo4j property is deterministic JSON, while JSONB stays the source payload."""
+    characteristics = [
+        {
+            "id": "char-b",
+            "kind": "product",
+            "name": "贴装偏移量",
+            "specification": "≤0.05",
+            "unit": "mm",
+            "classification": None,
+            "reference": "DWG-01",
+            "related_product_characteristic_ids": [],
+        }
+    ]
+    statements = build_cypher_sync(
+        fmea_id="f1", document_no="PFMEA-001", title="测试",
+        fmea_type="PFMEA", product_line_code="DC-DC-100",
+        product_line_name="DC-DC 电源模块",
+        status="approved", version=1,
+        graph_data={
+            "nodes": [
+                {"id": "n1", "type": "ProcessStepFunction", "name": "准确贴装", "characteristics": characteristics},
+                {"id": "n2", "type": "FailureMode", "name": "虚焊"},
+                {"id": "n3", "type": "FailureCause", "name": "历史原因", "characteristics": None},
+            ],
+            "edges": [],
+        },
+    )
+
+    node_properties = [params["props"] for cypher, params in statements if "CREATE (n:GraphNode" in cypher]
+    projected = next(props for props in node_properties if props["node_id"] == "n1")
+    legacy = next(props for props in node_properties if props["node_id"] == "n2")
+    null_legacy = next(props for props in node_properties if props["node_id"] == "n3")
+    assert json.loads(projected["characteristics_json"]) == characteristics
+    assert projected["characteristics_json"] == json.dumps(
+        characteristics, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    assert "characteristics_json" not in legacy
+    assert "characteristics_json" not in null_legacy

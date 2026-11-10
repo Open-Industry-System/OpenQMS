@@ -1,7 +1,15 @@
 import { useTranslation } from 'react-i18next';
-import { Card, Input, Select, Button, Empty, Space } from 'antd';
+import { Card, Input, Select, Button, Empty, Space, Modal } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import type { GraphNode, GraphEdge } from '../../types';
+import type { Characteristic, GraphNode, GraphEdge } from '../../types';
+import CharacteristicEditor from '../fmea/CharacteristicEditor';
+import {
+  characteristicKindForFunction,
+  cleanupCharacteristicReferences,
+  findCharacteristicReferenceImpacts,
+  getSameStepProductCharacteristicOptions,
+  updateFunctionCharacteristics,
+} from '../../utils/fmeaCharacteristics';
 
 interface FunctionTreeEditorProps {
   nodes: GraphNode[];
@@ -23,6 +31,34 @@ export default function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: F
 
   const updateNode = (id: string, patch: Partial<GraphNode>) => {
     onChange(nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)), edges);
+  };
+
+  const updateCharacteristics = (functionNode: GraphNode, characteristics: Characteristic[]) => {
+    const previous = functionNode.characteristics ?? [];
+    const deletedProductIds = previous
+      .filter((characteristic) => characteristic.kind === 'product' && !characteristics.some((next) => next.id === characteristic.id))
+      .map((characteristic) => characteristic.id);
+    const impacts = findCharacteristicReferenceImpacts(nodes, deletedProductIds);
+    const applyChange = () => {
+      const updated = updateFunctionCharacteristics(nodes, functionNode.id, characteristics);
+      onChange(
+        deletedProductIds.length > 0 ? cleanupCharacteristicReferences(updated, deletedProductIds) : updated,
+        edges,
+      );
+    };
+
+    if (impacts.length > 0) {
+      Modal.confirm({
+        title: '删除产品特性会清除关联',
+        content: `以下过程特性将失去关联：${impacts.map((impact) => impact.characteristicName).join('、')}。确认继续吗？`,
+        okText: '确认删除',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: applyChange,
+      });
+      return;
+    }
+    applyChange();
   };
 
   // Branch-local parent resolution for FUNCTION_MAPPED_TO (spec §5 Step 2 + §8):
@@ -90,26 +126,39 @@ export default function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: F
     onChange([...nextNodes, fn], [...nextEdges, ...newEdges]);
   };
 
-  const renderFunctionCard = (fn: GraphNode, allowClass: boolean, classOptions: { value: string; label: string }[]) => (
+  const renderFunctionCard = (fn: GraphNode, allowClass: boolean, classOptions: { value: string; label: string }[]) => {
+    const characteristicKind = characteristicKindForFunction('PFMEA', fn.id, nodes, edges);
+    const hasStructuredCharacteristics = Array.isArray(fn.characteristics);
+    return (
     <Card key={fn.id} size="small" style={{ marginBottom: 8 }}
       title={<Input size="small" value={fn.name} placeholder={t('wizard.function.functionDesc')}
         onChange={(e) => updateNode(fn.id, { name: e.target.value })} />}>
       <Space direction="vertical" style={{ width: '100%' }}>
-        {fn.type === 'ProcessStepFunction' && (
+        {!hasStructuredCharacteristics && fn.type === 'ProcessStepFunction' && (
           <Input size="small" addonBefore={t('wizard.function.specification')} value={fn.specification ?? ''}
             onChange={(e) => updateNode(fn.id, { specification: e.target.value })} placeholder="偏移度 <= 0.05mm" />
         )}
-        {fn.type === 'ProcessWorkElementFunction' && (
+        {!hasStructuredCharacteristics && fn.type === 'ProcessWorkElementFunction' && (
           <Input size="small" addonBefore={t('wizard.function.requirement')} value={fn.requirement ?? ''}
             onChange={(e) => updateNode(fn.id, { requirement: e.target.value })} placeholder="贴装压力 3.0±0.5N" />
         )}
-        {allowClass && (
+        {!hasStructuredCharacteristics && allowClass && (
           <Select size="small" value={fn.classification || undefined} placeholder={t('wizard.function.specialCharacteristic')}
             onChange={(v) => updateNode(fn.id, { classification: v || '' })} options={classOptions} style={{ width: 120 }} />
         )}
+        {characteristicKind && (
+          <CharacteristicEditor
+            value={fn.characteristics}
+            allowedKind={characteristicKind}
+            productOptions={characteristicKind === 'process' ? getSameStepProductCharacteristicOptions(nodes, edges, fn.id) : []}
+            readOnly={false}
+            onChange={(characteristics) => updateCharacteristics(fn, characteristics)}
+          />
+        )}
       </Space>
     </Card>
-  );
+    );
+  };
 
   const classOpts = [
     { value: '', label: '-' },

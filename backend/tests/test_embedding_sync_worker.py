@@ -7,6 +7,9 @@ R17：6 元组 table_field_map，所有 entity_type 都写 factory_id。
 R18：capa 通用路径回归（5→6 元组改造后）。
 R9：capa_lesson upsert 前重查存在性，已删则丢弃。
 """
+# Opt-in per-module fixtures; never process the retained public/browser queue.
+from tests.embedding_isolation import embedding_test_engine, db, sessionmaker
+
 import json
 import uuid
 
@@ -771,3 +774,23 @@ async def test_worker_transient_fail_keeps_pending(
             {"eid": entry_id},
         )
         await db.commit()
+
+@pytest.mark.asyncio
+async def test_embedding_fixture_never_reaches_retained_database_across_commits(sessionmaker):
+    import os
+    import re
+    from sqlalchemy.engine import make_url
+    retained = make_url(os.environ['TEST_DATABASE_URL']).database
+    private = sessionmaker.kw['bind'].url.database
+    assert re.fullmatch(r'qms_migtest_[0-9a-f]{32}_test', private)
+    assert private != retained
+    for _ in range(2):
+        async with sessionmaker() as session:
+            for boundary in ('commit', 'rollback', 'commit'):
+                database, schema, queue_is_local = (await session.execute(text(
+                    "SELECT current_database(), current_schema(), "
+                    "to_regclass('embedding_sync_outbox') = to_regclass('public.embedding_sync_outbox')"
+                ))).one()
+                assert database == private and database != retained
+                assert schema == 'public' and queue_is_local is True
+                await getattr(session, boundary)()

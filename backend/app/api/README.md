@@ -152,3 +152,15 @@ registered core container and its exclusive volume (both owned test databases)
 were disposed after fresh identity and zero-use checks. The worktree, user TEST
 profile, user-owned example deletion and all evidence remain preserved.
 No dependency, migration, authority, self-approval, or deployment change is implied.
+
+
+### Collaboration document admission
+
+Heartbeat, active-users and leave share document admission. Existing FMEA
+factory checks and unknown-type404 are retained. `control_plan` additionally
+requires Planning VIEW before target lookup, then the intersection of accessible
+and effective factory plus product-line scope. Missing/invisible CPs return the
+same `document_not_found`404 before any presence read/write; missing Planning
+VIEW returns the same403 for existing and missing IDs. Resolution loads only
+factory/line metadata, never CP items. This does not change ordinary CP GET,
+manual editing or approval permissions.

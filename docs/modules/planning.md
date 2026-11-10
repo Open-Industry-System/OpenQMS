@@ -1,6 +1,6 @@
 # 前期策划模块 — 用户手册
 
-> 最后更新: 2026-06-25 | 适用版本: OpenQMS v1.0
+> 最后更新: 2026-11-03（结构化特性专项；其他模块未重新验收）| 适用版本: OpenQMS v1.0
 
 ---
 
@@ -209,15 +209,9 @@ FMEA 支持版本快照：每次审批通过时自动创建版本记录（`fmea_
 ### 3.4 FMEA 与控制计划的关联
 
 - 控制计划创建时可选择关联 FMEA（`fmea_ref_id`）
-- 通过「从 PFMEA 导入」功能，系统遍历 PFMEA 图谱的 ProcessStep 节点，自动生成控制计划行项
-- 导入映射关系：
-
-| PFMEA 图谱节点 | 控制计划字段 |
-|---------------|-------------|
-| ProcessStep | step_no, process_name |
-| ProcessWorkElement | equipment |
-| ProcessStepFunction | product_characteristic, specification_tolerance, special_class |
-| ProcessWorkElementFunction | process_characteristic |
+- 从用户明确选择的真实已批准 PFMEA 版本快照派生，不读当前返工图。每项特性一行：同一步骤 2 产品＋3 过程得到 5 条明细，非笛卡尔积。
+- 结构节点通过 `HAS_FUNCTION` 挂功能，`Function.characteristics[]` 存储特性。步骤所属功能为 product，工作要素所属功能为 process。
+- `step_no/process_name` 来自真实步骤；`equipment` 来自工作要素；名称、规范、特殊分类各来自对应特性，不把测量活动当作对象。
 
 ---
 
@@ -273,14 +267,11 @@ FMEA 支持版本快照：每次审批通过时自动创建版本记录（`fmea_
 
 ### 4.3 从 PFMEA 导入
 
-1. 在控制计划详情页，点击「从 PFMEA 导入」
-2. 选择 PFMEA 文档和需要导入的过程步骤（`step_nos`）
-3. 系统遍历 PFMEA 图谱：
-   - ProcessStep → 生成行项的 step_no 和 process_name
-   - ProcessWorkElement → 填入 equipment
-   - ProcessStepFunction → 填入 product_characteristic、specification_tolerance、special_class
-   - ProcessWorkElementFunction → 填入 process_characteristic
-4. 导入后自动关联 `fmea_ref_id`，行项标记 `item_source = "fmea"`
+1. 草稿 CP 点击「从 PFMEA 导入」，选择 PFMEA 和 `change_type=approve` 的 v1.0+ 历史快照，再选择快照工序（`step_ids`）。
+2. 生成只读预览；预览／确认绑定 `source_fmea_version_id`、`expected_lock_version`、`preview_digest`，确认发送 `selected_candidate_keys`。candidate_key 区分同来源的不同控制行，不能改发裸行 UUID。
+3. 每项特性生成独立 CP 行；完整 source_characteristic_ref 是服务端只读元数据（文档／工序／功能／工作要素／特性 UUID／mapping_version／accepted_source_version_id）。普通编辑白名单不回写它。
+4. 新版本批准后 durable CP outbox 提示 pending；显式预览／接受。409 使旧预览失效，不自动重试；部分接受仍 pending，再次确认须显式新预览。行 UUID 与手工方法／抽样／反应字段保持；未变行不虚增逐行接受版本，全部覆盖才推进文档 source_fmea_version_id。
+5. 活动 CAPA 有效材料、执行／SC 引用、冲突和旧混合行受保守保护，不能自动删除或清除待办；此功能不新增已批准 CP 返工路径。
 
 > **限制**：仅 PFMEA 类型文档可导入到控制计划；已审批的控制计划不可导入。
 
@@ -492,24 +483,16 @@ draft ──submit──→ under_review ──approve──→ approved
 
 ### 7.3 特殊特性识别方式
 
-1. **从 FMEA 同步**（推荐）：通过「从 FMEA 同步」功能，系统自动扫描 FMEA 图谱中 `classification` 为 CC/SC 的节点，或 `severity ≥ 9` 的节点，生成特殊特性记录
+1. **从 FMEA 同步**：新结构化来源只按 `characteristics[].classification` 的显式 CC/SC 提取，kind、规范和单位独立；未分类或 [] 不按功能分类／严重度自动升级。仅没有集合的 legacy 图继续兼容原节点 classification／severity 建议规则，该兼容不是新来源的通用识别政策。
 2. **手动创建**：在特殊特性列表页直接创建
 
 #### 7.3.1 FMEA 同步逻辑
 
-系统 `sync_from_fmea` 函数执行以下操作：
+系统 `sync_from_fmea` 对新结构化来源按 FMEA 文档＋特性 UUID 提取，kind、classification、specification 独立。显式数组（含 []）优先，未分类不按功能分类或严重度升级；缺失数组仍按兼容规则读取旧图，不批量迁移。改名保留身份，不按同名自动建立 DFMEA 父特性。
 
-1. **扫描 FMEA 图谱**：识别所有 `classification` 为 CC/SC 或 `severity ≥ 9` 的节点
-2. **新增**：对图谱中新的 CC/SC 节点，创建 `SpecialCharacteristic` 记录
-3. **更新**：对已存在的特性，更新名称和分类
-4. **安全建议**：对 `severity ≥ 9` 的 CC 节点，标记 `is_safety_suggested = true`
-5. **PFMEA→DFMEA 关联**：PFMEA 来源的特性自动查找同名 DFMEA 特性作为父级（`parent_sc_id`）
-6. **降级检测**：如果已标记安全特性的节点严重度从 ≥9 降至 <9：
-   - 审批通过的：记录审计日志警告，需人工评估
-   - 审批中/已驳回的：记录审计日志，需人工评估
-7. **删除保护**：FMEA 中移除的 CC/SC 节点：
-   - 普通特性：自动删除
-   - 安全相关特性：**拦截自动删除**，记录审计日志，需人工处理
+submitted／approved 安全 SC 的材料、身份、来源绑定及审批状态不被自动改写／删除；源变化只提示复核。新来源 CP 自动入口只读精确追溯并引导正式版本同步，不覆盖批准 CP 或人工内容。追溯按完整 source_ref＋RequestScope 派生全部匹配行，而非最后一个 cp_item_id；无实际 SPC／量具／同范围 MSA 研究结果就显示缺失，不以缓存 PASS 冒充证据。
+
+**未修复后续项**：旧手工 SC 更新／删除的安全保护和通用 create 审计缺陷未在本功能修正；不能把自动同步保护解释为全局安全流程认证。
 
 ### 7.4 安全特性审批流程
 
@@ -579,9 +562,9 @@ DFMEA 失效模式节点
 
 特殊特性在 FMEA 和控制计划之间的联动通过以下机制实现：
 
-1. **FMEA 标记**：在 FMEA 编辑器中为节点设置 `classification` 为 CC/SC
+1. **FMEA 标记**：新来源为 `characteristics[].classification`，旧 Function.classification 仅兼容
 2. **同步到特殊特性**：通过「从 FMEA 同步」功能自动创建/更新 `SpecialCharacteristic` 记录
-3. **控制计划导入**：通过「从 PFMEA 导入」功能，控制计划行项的 `special_class` 字段自动携带 FMEA 节点的分类标记
+3. **控制计划导入**：通过「从 PFMEA 导入」功能，控制计划行项的 `special_class` 字段自动携带 对应特性项的分类标记
 4. **手动关联**：可在特殊特性详情页手动关联控制计划行项（`cp_item_id`）
 
 ---
@@ -592,7 +575,7 @@ DFMEA 失效模式节点
 
 **Q: FMEA 审批后被退回修改，版本号会变吗？**
 
-A: 审批通过时自动创建版本快照（如 1.0）。退回到 rework 状态后再提交审批，审批通过时会创建新的版本快照（主版本号不变，次版本号递增）。版本历史可在详情页查看。
+A: 审批通过时自动创建版本快照（如 1.0）。退回到 rework 状态后再提交审批，审批通过时会创建新的批准主版本快照（如 2.0）。版本历史可在详情页查看。
 
 **Q: 已审批的 FMEA 可以编辑吗？**
 
@@ -600,7 +583,7 @@ A: 已审批（approved）的 FMEA 不能直接编辑，需要先将状态退回
 
 **Q: DFMEA 和 PFMEA 可以关联吗？**
 
-A: PFMEA 创建时可以选择关联的 DFMEA 文档。此外，特殊特性模块在 PFMEA 同步时会自动查找同名 DFMEA 特性建立父子关系。
+A: PFMEA 创建时可以选择关联的 DFMEA 文档。新来源不会按同名自动建立特殊特性父子关系，已有显式父关系保留。
 
 **Q: AP 值如何计算？**
 
@@ -622,7 +605,7 @@ A: 审批前系统自动检查所有关联量具的状态。如果量具未激�
 
 **Q: 控制计划版本和 FMEA 版本如何关联？**
 
-A: 控制计划版本快照中包含 `source_fmea_version_id`，指向审批时关联的 FMEA 版本。这确保了控制计划与特定版本的 FMEA 之间的可追溯性。
+A: 文档 source_fmea_version_id 表示全覆盖同步跟踪；逐行 source_characteristic_ref.accepted_source_version_id 表示该行实际接受的批准快照，部分同步时不能用文档字段替代各行基线。
 
 ### 8.3 APQP
 
@@ -676,8 +659,35 @@ A: 不会。同步功能只更新从同一 FMEA 节点来源的已有记录，�
 
 **Q: PFMEA 同步的特殊特性为什么会自动关联 DFMEA 特性？**
 
-A: PFMEA 的失效模式往往继承自 DFMEA。同步时系统在 DFMEA 来源的特殊特性中查找同名记录作为父级（`parent_sc_id`），建立 PFMEA→DFMEA 的追溯链，符合 AIAG-VDA 要求的层级追溯性。
+A: 新结构化来源不按同名自动建立 parent_sc_id；同名不是设计继承证据。已有显式父关系保持，需业务确认真实设计来源。
 
 ---
 
 > **文档路径**：`/docs/modules/planning.md`
+## 结构化特性兼容与验收（2026-11-03）
+
+Function.characteristics 缺失/null 保留旧自由文本参考提示，不自动转换；显式 [] 是确认无特性，不回退旧字段。每项含稳定 UUID、kind、name、specification、unit、可选 classification、reference、related_product_characteristic_ids。PFMEA 工作要素过程只能关联同工序产品；DFMEA System/Subsystem/Component 真实所属的共享 Process*Function 一律 product。kind 与 CC/SC 独立，不自动赋特殊分类。名称空白反馈必填、持久名称非空；改名不换 ID。
+
+标准 CP 栏目、分组及结构边枚举不变。未新增 CP Excel/PDF/打印格式；手册／CSR 转换缺口见 [验收基线](../development/characteristic-correction-acceptance.md)。R005 规范缺失及 R006 legacy 双对象只作 warning，不新增审批门禁。本次专项不等于全 AI／PPAP／CSR／scanner／live Neo4j 认证。
+
+### Task11 r1 单位与晚到通知补充
+
+CP 的现有“产品/过程/规格/公差”列呈现对象 specification＋unit，明确单位恰好一次；已经带单位的文字不重复加，None/空白不能被单位补成准则，不自动转换量值。unit-only 变更与明确清空也进入批准快照的同源 import/sync/stale 投影。新自动 SC 使用同一小格式化函数，受审安全材料只提示复核，不自动改写；手工入口遗留缺陷不在此修复。
+
+CP worker 不再把已完整处理的同一或更新批准基线重新标 pending。它按 scope→CP parent 顺序互斥，等待后 fresh-row 重读，核对来源/工厂/hash、实际逐行基线与完整覆盖；仅文档指针不够证明完成。部分／未知／真正更新仍保守 needs-update，worker 只通知不改业务字段；此前的直接两阶段／待实现说法是历史，不是当前事实。
+
+
+### 最终评审纠偏（2026-11-07）
+
+- 首次从批准快照仅导入部分特性时，在同一事务持久化 `sync_pending=true`；即使批准事件早于新 CP 且已交付，刷新仍可进入正式同步预览。未导入特性不写逐行 accepted baseline，完整覆盖后才清除 pending。
+- 正式同步中的可应用、无保护/冲突删除候选默认不勾选，但允许用户明确选择后确认；受保护或不适用候选仍禁用。关闭或更换预览上下文会清除本地 busy，旧请求完成不更新新 drawer；旧写入可能已提交，必须重新预览，不表示回滚。
+- 删除功能/结构子树时，先提示仍存过程特性受影响的关联，再确认清理仅指向被删产品特性 UUID 的引用；共享失效/控制节点继续按存活行保护。产品 SC、过程 CC 均合法，相关结构化集合聚合遵循 CC 优先于 SC，不按 kind 丢弃分类；缺失/null 与显式 [] 的兼容权威性不变。
+- DC-DC 草稿示例 CP 的 `source_fmea_node_id` 与 ref.step_id 同为结构工序 `ps_1`，function_id 分别保留 `psf_1` / `wef_1`，accepted source 仍为 null，不伪造审批。SC 自动来源复核使用与抽取相同的规范＋单位投影（规范空时回退 reference），不扩大手工安全特性 API 范围。
+- 常规 pytest 临时 schema fixtures 使用显式 `TEST_DATABASE_URL` 的隔离 `qms_test`，不套用浏览器实例授权规则；专用浏览器仍严格要求双 URL 同一 `127.0.0.1:55432/qms_test`。常规 Playwright discovery 排除 opt-in characteristic spec；专用配置与授权不变。
+
+
+### 历史来源选择与尚未处理的新批准（2026-11-08）
+
+允许从历史真实批准快照导入/同步；所选版本及逐行实际accepted_source_version_id均如实保留。完成所选历史版本不等于完成当前来源义务：首次导入、正式同步和零候选ACK，在现有scope＋CP/FMEA parent锁内同时检查同源/同工厂最高真实批准版本（批准major、hash/归属、完整accepted coverage；有歧义保守pending）。存在尚未完整接受的新批准时，sync_pending保持true，即使该批准通知早已交付；用户明确预览/完成当前批准目标后可清除，不永久pending、不禁止历史选择、不使用mutable graph冒充批准。
+
+本次剩余验收脚本修正仅静态/pure/mock/syntax验证：部分导入只选候选表并显式关闭剩余提示；无失效行的工作要素功能通过实际向导编辑；未完成draft先走合法向导完成再进主编辑器删除。既有运行时写入/worker拒绝仍有效，本轮不启动或补跑浏览器门禁。

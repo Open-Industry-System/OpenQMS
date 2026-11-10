@@ -20,7 +20,8 @@ import { getFMEA, updateFMEA, transitionFMEA, type RecommendationAdoption } from
 import { formatFMEAError } from "../../../utils/fmeaError";
 import { getFMEAVersion } from "../../../api/version";
 import { syncFromFMEA, getSeverityWarnings } from "../../../api/specialCharacteristic";
-import type { FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse } from "../../../types";
+import type { Characteristic, FMEADocument, GraphNode, GraphEdge, LessonsLearnedResponse } from "../../../types";
+import CharacteristicEditor from "../../../components/fmea/CharacteristicEditor";
 import LessonsLearnedModal from "../../../components/lessons/LessonsLearnedModal";
 import { getFMEALessons } from "../../../api/lessonsLearned";
 import axios from "axios";
@@ -30,6 +31,13 @@ import { calculateAP } from "../../../utils/fmea";
 import { aggregateSpecialCharacteristic, specialCharBadgeStyle } from "../../../components/pfmea/RiskTable";
 import { buildRows, createRowNodes, getRowSeverity, computeRowSpans, addEffect, deleteEffect, addCause, deleteMode, getProcessChain, type FMEARow } from "../../../utils/fmeaTable";
 import { planCauseDeletion } from "./deleteRowHelpers";
+import {
+  characteristicKindForFunction,
+  cleanupCharacteristicReferences,
+  findCharacteristicReferenceImpacts,
+  getSameStepProductCharacteristicOptions,
+  updateFunctionCharacteristics,
+} from "../../../utils/fmeaCharacteristics";
 import EffectLinesEditor from "../../../components/fmea/EffectLinesEditor";
 import {
   buildStructureTree,
@@ -707,6 +715,35 @@ export default function FMEAEditorPage() {
     setNodes(next);
   }, []);
 
+  const updateCharacteristics = useCallback((functionNode: GraphNode, characteristics: Characteristic[]) => {
+    const previous = functionNode.characteristics ?? [];
+    const deletedProductIds = previous
+      .filter((characteristic) => characteristic.kind === "product" && !characteristics.some((next) => next.id === characteristic.id))
+      .map((characteristic) => characteristic.id);
+    const impacts = findCharacteristicReferenceImpacts(nodesRef.current, deletedProductIds);
+    const applyChange = () => {
+      const updated = updateFunctionCharacteristics(nodesRef.current, functionNode.id, characteristics);
+      const nextNodes = deletedProductIds.length > 0
+        ? cleanupCharacteristicReferences(updated, deletedProductIds)
+        : updated;
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
+    };
+
+    if (impacts.length > 0) {
+      Modal.confirm({
+        title: "删除产品特性会清除关联",
+        content: `以下过程特性将失去关联：${impacts.map((impact) => impact.characteristicName).join("、")}。确认继续吗？`,
+        okText: "确认删除",
+        cancelText: "取消",
+        okButtonProps: { danger: true },
+        onOk: applyChange,
+      });
+      return;
+    }
+    applyChange();
+  }, []);
+
   // Auto-compute initial AP on cause nodes when S/O/D risk ratings change
   const nodesRiskKey = nodes
     .filter((n) => n.type === "FailureCause")
@@ -905,12 +942,30 @@ export default function FMEAEditorPage() {
   // kept (see deleteSubtree).
   const deleteSubtreeNode = useCallback((node: GraphNode) => {
     const { nodes: nextNodes, edges: nextEdges } = deleteSubtree(nodes, edges, node.id);
-    setNodes(nextNodes);
-    setEdges(nextEdges);
-    if (selectedFunctionId === node.id) {
-      setSelectedFunctionId(null);
-      setActiveRelatedNodeId(null);
+    const removedProductIds = nodes.filter((n) => !nextNodes.some((next) => next.id === n.id))
+      .flatMap((n) => n.characteristics ?? [])
+      .filter((c) => c.kind === "product").map((c) => c.id);
+    const survivingNodes = nodes.filter((n) => nextNodes.some((next) => next.id === n.id));
+    const impacts = findCharacteristicReferenceImpacts(survivingNodes, removedProductIds);
+    const applyDelete = () => {
+      nodesRef.current = nextNodes;
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      if (!nextNodes.some((n) => n.id === selectedFunctionId)) {
+        setSelectedFunctionId(null);
+        setActiveRelatedNodeId(null);
+      }
+    };
+    if (impacts.length > 0) {
+      Modal.confirm({
+        title: "删除产品特性会清除关联",
+        content: `以下过程特性将失去关联：${impacts.map((impact) => impact.characteristicName).join("、")}。确认继续吗？`,
+        okText: "确认删除", cancelText: "取消", okButtonProps: { danger: true },
+        onOk: applyDelete,
+      });
+      return;
     }
+    applyDelete();
   }, [nodes, edges, selectedFunctionId]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -1001,6 +1056,7 @@ export default function FMEAEditorPage() {
       onCell: (_row: FMEARow, index?: number) => ({ rowSpan: index != null ? rowSpans[index]?.function ?? 1 : 1 }),
       render: (_: unknown, row: FMEARow) => {
         const funcNode = nodeMap.get(row.functionNodeId);
+        const characteristicKind = funcNode ? characteristicKindForFunction(fmea?.fmea_type, funcNode.id, nodes, edges) : undefined;
         return (
           <div tabIndex={0} style={{ outline: "none", minWidth: 180 }}>
             <div style={{ fontWeight: 600, fontSize: 13, lineHeight: "1.5" }}>{funcNode?.name || "-"}</div>
@@ -1009,6 +1065,15 @@ export default function FMEAEditorPage() {
             )}
             {funcNode?.requirement && (
               <div><Text type="secondary" style={{ fontSize: 12 }}>{funcNode.requirement}</Text></div>
+            )}
+            {funcNode && characteristicKind && (
+              <CharacteristicEditor
+                value={funcNode.characteristics}
+                allowedKind={characteristicKind}
+                productOptions={characteristicKind === "process" ? getSameStepProductCharacteristicOptions(nodes, edges, funcNode.id) : []}
+                readOnly={!canEdit("fmea")}
+                onChange={(characteristics) => updateCharacteristics(funcNode, characteristics)}
+              />
             )}
           </div>
         );
@@ -1137,9 +1202,10 @@ export default function FMEAEditorPage() {
         // ---- PFMEA: read-only, from function-node classification (spec §9) ----
         const stepFunc = nodeMap.get(row.functionNodeId);
         const wefs = nodes.filter((n) => n.type === "ProcessWorkElementFunction");
-        let { label, tag } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
-        // backward compat: legacy PFMEA docs stored CC/SC on FailureMode.classification
-        if (tag === "-") {
+        let { label, tag, hasStructuredCharacteristics } = aggregateSpecialCharacteristic(stepFunc, wefs, edges);
+        // Legacy FailureMode values are only a fallback when no relevant function
+        // has an explicit structured collection; [] is authoritative emptiness.
+        if (tag === "-" && !hasStructuredCharacteristics) {
           const fmClass = nodeMap.get(row.failureModeNodeId)?.classification || "";
           if (fmClass === "CC" || fmClass === "SC") {
             label = fmClass;

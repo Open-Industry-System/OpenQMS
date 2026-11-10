@@ -7,6 +7,9 @@ End-to-end verification of the full chain:
   -> document_embeddings
   -> LessonsLearnedSource.retrieve
 """
+# Opt-in per-module fixtures; never process the retained public/browser queue.
+from tests.embedding_isolation import embedding_test_engine, db, sessionmaker
+
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 

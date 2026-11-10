@@ -74,6 +74,8 @@
     "specification": "Specification",
     "msaAnalysis": "MSA Analysis",
     "msaDescription": "Gauge & Measurement System Analysis (managed via gauge register)",
+    "msaMissingEvidence": "No linked MSA study; calibration alone is not MSA evidence.",
+    "formalSync": "Use an approved FMEA version with formal sync preview and confirmation.",
     "spcMonitor": "SPC Monitoring",
     "notLinkedSPC": "No SPC inspection characteristic linked",
     "targetValue": "Target",

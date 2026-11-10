@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access
+from app.core.factory_scope import check_factory_access, check_product_line_access, is_factory_visible
+from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.database import get_db
 from app.schemas.collaboration import ActiveUser, ActiveUsersResponse, HeartbeatRequest
 from app.services import collaboration_service
@@ -18,15 +19,28 @@ async def _require_document_access(
     document_type: str,
     document_id: uuid.UUID,
 ) -> uuid.UUID:
+    if document_type == "control_plan":
+        level = await get_user_permission(scope.user, Module.PLANNING, db)
+        if level < PermissionLevel.VIEW:
+            raise HTTPException(status_code=403, detail="需要计划模块的 VIEW 权限")
     try:
-        factory_id = await collaboration_service.resolve_document_factory_id(
-            db, document_type, document_id
-        )
+        if document_type == "control_plan":
+            factory_id, product_line_code = await collaboration_service.resolve_document_scope(
+                db, document_type, document_id
+            )
+        else:
+            factory_id = await collaboration_service.resolve_document_factory_id(
+                db, document_type, document_id
+            )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     try:
         check_factory_access(factory_id, scope)
+        if document_type == "control_plan":
+            if not is_factory_visible(factory_id, scope):
+                raise HTTPException(status_code=404, detail="document_not_found")
+            check_product_line_access(product_line_code, scope)
     except HTTPException as exc:
         raise HTTPException(status_code=404, detail="document_not_found") from exc
     return factory_id

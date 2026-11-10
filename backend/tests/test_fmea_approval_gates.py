@@ -152,3 +152,65 @@ async def test_recommend_allowed_when_editable(perm_client_builder, db, default_
               "context": {"function_description": "焊接固定电池极耳"}})
     assert resp.status_code != 409, (
         f"status={status} 不应 409，实际 {resp.status_code}: {resp.text[:200]}")
+
+
+@pytest.mark.asyncio
+async def test_update_round_trips_explicit_characteristics_without_rewriting_legacy_nodes(
+    perm_client_builder, db, default_factory, admin_user,
+):
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, "draft")
+    client = await perm_client_builder(fmea_level=3)
+    characteristic_id = str(uuid.uuid4())
+    graph = {
+        "nodes": [
+            {"id": "step-10", "type": "ProcessStep", "name": "贴装", "severity": 7},
+            {"id": "sf-10", "type": "ProcessStepFunction", "name": "准确贴装",
+             "characteristics": [{"id": characteristic_id, "kind": "product", "name": "偏移量",
+                                  "specification": "≤0.05 mm", "classification": "CC"}]},
+        ],
+        "edges": [{"source": "step-10", "target": "sf-10", "type": "HAS_FUNCTION"}],
+        "wizardScope": {"wizard_completed": True, "task": "结构化特性"},
+    }
+
+    saved = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
+    assert saved.status_code == 200, saved.text
+    response_graph = saved.json()["graph_data"]
+    assert response_graph["wizardScope"]["wizard_completed"] is True
+    assert response_graph["wizardScope"]["task"] == "结构化特性"
+    assert response_graph["nodes"][0]["severity"] == 7
+    assert "characteristics" not in response_graph["nodes"][0]
+    characteristic = response_graph["nodes"][1]["characteristics"][0]
+    assert characteristic["id"] == characteristic_id
+    assert characteristic["name"] == "偏移量"
+    assert characteristic["specification"] == "≤0.05 mm"
+    assert characteristic["classification"] == "CC"
+    assert characteristic["related_product_characteristic_ids"] == []
+
+    fetched = await client.get(f"/api/fmea/{fmea.fmea_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["graph_data"] == response_graph
+
+
+@pytest.mark.asyncio
+async def test_update_preserves_explicit_empty_characteristics_without_legacy_fallback(
+    perm_client_builder, db, default_factory, admin_user,
+):
+    fmea = await _mk(db, default_factory.id, admin_user.user_id, "draft")
+    client = await perm_client_builder(fmea_level=3)
+    graph = {
+        "nodes": [
+            {"id": "step-10", "type": "ProcessStep", "name": "贴装"},
+            {"id": "sf-10", "type": "ProcessStepFunction", "name": "准确贴装",
+             "requirement": "历史功能要求", "specification": "历史规格", "classification": "CC",
+             "characteristics": []},
+        ],
+        "edges": [{"source": "step-10", "target": "sf-10", "type": "HAS_FUNCTION"}],
+        "wizardScope": {"wizard_completed": True},
+    }
+
+    saved = await client.put(f"/api/fmea/{fmea.fmea_id}", json={"graph_data": graph})
+    assert saved.status_code == 200, saved.text
+    function = saved.json()["graph_data"]["nodes"][1]
+    assert function["characteristics"] == []
+    assert function["classification"] == "CC"
+    assert function["specification"] == "历史规格"

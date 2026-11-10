@@ -134,6 +134,28 @@ describe("DFMEAWizardPage sidebar step navigation on reopened draft", () => {
   });
 });
 
+describe("DFMEAWizardPage Step 2 structured characteristics", () => {
+  it("treats the shared ProcessWorkElementFunction as a product-characteristic owner", async () => {
+    const doc = makeDoc();
+    doc.graph_data = {
+      nodes: [
+        node("component-1", "Component", "电源模块"),
+        node("function-1", "ProcessWorkElementFunction", "输出稳定"),
+      ],
+      edges: [{ source: "component-1", target: "function-1", type: "HAS_FUNCTION" }],
+      wizardScope: { wizard_completed: true },
+    };
+    mocks.getFMEA.mockResolvedValueOnce(doc);
+
+    renderWizard();
+    await screen.findByText("wizard.page.nextStep");
+    fireEvent.click(screen.getByText("wizard.steps.2"));
+
+    expect(await screen.findByText("新增产品特性")).toBeInTheDocument();
+    expect(screen.queryByText("新增过程特性")).not.toBeInTheDocument();
+  });
+});
+
 describe("DFMEAWizardPage Step 3 失效分析 — AI recommend wiring", () => {
   it("wires FM / FE / FC fields to the failure_mode / failure_effect / failure_cause triggers", async () => {
     renderWizard();

@@ -7,8 +7,8 @@ from alembic.script import ScriptDirectory
 
 from app.services import tenant_migrator, tenant_schema_diff
 
-PUBLIC_HEAD = "20261103_merge_agent_foundations"
-TENANT_HEAD = "tv006_agent_read_tasks"
+PUBLIC_HEAD = "20261108_merge_characteristics"
+TENANT_HEAD = "tv007_characteristic_refs"
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -20,7 +20,7 @@ def test_integrated_public_head_retains_both_existing_branches():
     revisions = {rev.revision for rev in script.walk_revisions()}
     assert {"20260929_agent_read_task", "20261009_agent_task_attachments"} <= revisions
     assert set(script.get_revision(PUBLIC_HEAD).down_revision) == {
-        "20260929_agent_read_task", "20261009_agent_task_attachments",
+        "20261101_char_refs", "20261103_merge_agent_foundations",
     }
 
 
@@ -33,7 +33,7 @@ def test_integrated_tenant_head_is_reviewed_and_preserves_frozen_chain():
     assert script.get_heads() == [TENANT_HEAD]
     assert REVIEWED_REVISIONS == (
         "tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery",
-        "tv004_agent_readonly_controls", "tv005_agent_task_attachments", TENANT_HEAD,
+        "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks", TENANT_HEAD,
     )
     assert tenant_migrator.REVISION == TENANT_HEAD
 
@@ -153,7 +153,8 @@ def test_each_existing_public_branch_upgrades_to_integrated_head(mig_db_url, sou
 
 @pytest.mark.requires_db
 @pytest.mark.asyncio
-async def test_tv005_owned_upgrade_parity_and_roundtrip_preserve_existing_history(mig_db_url, monkeypatch):
+@pytest.mark.parametrize("predecessor,public_predecessor", [("tv005_agent_task_attachments", "20261009_agent_task_attachments"), ("tv006_agent_read_tasks", "20261103_merge_agent_foundations")])
+async def test_owned_upgrade_parity_and_roundtrip_preserve_existing_history(mig_db_url, monkeypatch, predecessor, public_predecessor):
     import asyncio
     from uuid import uuid4
     import sqlalchemy as sa
@@ -166,10 +167,10 @@ async def test_tv005_owned_upgrade_parity_and_roundtrip_preserve_existing_histor
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "alembic"))
     cfg.set_main_option("sqlalchemy.url", mig_db_url)
-    await asyncio.to_thread(command.upgrade, cfg, "20261009_agent_task_attachments")
+    await asyncio.to_thread(command.upgrade, cfg, public_predecessor)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, "engine", engine)
-    monkeypatch.setattr(tenant_migrator, "REVISION", "tv005_agent_task_attachments")
+    monkeypatch.setattr(tenant_migrator, "REVISION", predecessor)
     try:
         tenant = await tenant_migrator.provision_new(TenantCreateRequest(
             name="Integrated upgrade", slug="integration-" + uuid4().hex[:12],
@@ -183,9 +184,9 @@ async def test_tv005_owned_upgrade_parity_and_roundtrip_preserve_existing_histor
         tenant = await tenant_migrator.resume_tenant(tenant.id)
         async with tenant_migrator.maintenance_connection(engine, tenant.id) as maintenance:
             assert await maintenance.compare_schema("public", tenant_schema_diff.load_snapshot_manifest()) == []
-            await maintenance.run_downgrade("tv005_agent_task_attachments")
+            await maintenance.run_downgrade(predecessor)
             assert await maintenance.compare_schema("public", tenant_schema_diff.load_snapshot_manifest(),
-                                                     predecessor="tv005_agent_task_attachments") == []
+                                                     predecessor=predecessor) == []
             await maintenance.run_migration(TENANT_HEAD)
             assert await maintenance.compare_schema("public", tenant_schema_diff.load_snapshot_manifest()) == []
         async with engine.connect() as connection:

@@ -19,7 +19,8 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv006_agent_read_tasks"
+REVISION = "tv007_characteristic_refs"
+CHARACTERISTIC_PREDECESSOR_REVISION = "tv006_agent_read_tasks"
 LATEST_PREDECESSOR_REVISION = "tv005_agent_task_attachments"
 PREDECESSOR_REVISION = "tv004_agent_readonly_controls"
 EARLIER_PREDECESSOR_REVISION = "tv003_agent_readonly_delivery"
@@ -161,6 +162,8 @@ class MaintenanceContext:
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
             if versions == [REVISION]:
                 result = "current"
+            elif versions == [CHARACTERISTIC_PREDECESSOR_REVISION]:
+                result = "characteristic_predecessor"
             elif versions == [LATEST_PREDECESSOR_REVISION]:
                 result = "latest_predecessor"
             elif versions == [PREDECESSOR_REVISION]:
@@ -640,7 +643,7 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current", "ancestor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state not in {"empty", "current", "ancestor", "characteristic_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
@@ -650,8 +653,9 @@ async def migrate_if_needed(maintenance: MaintenanceContext, attempt: Maintenanc
         if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")
         await maintenance.run_migration(REVISION)
-    elif state in {"latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state in {"characteristic_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         predecessor = {
+            "characteristic_predecessor": CHARACTERISTIC_PREDECESSOR_REVISION,
             "latest_predecessor": LATEST_PREDECESSOR_REVISION,
             "predecessor": PREDECESSOR_REVISION,
             "earlier_predecessor": EARLIER_PREDECESSOR_REVISION,

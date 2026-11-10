@@ -186,7 +186,7 @@ R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收
 
 租户维护通过固定物理连接持有会话级排他锁；同一连接建立 attempt、递增 generation、执行独立 Alembic 链和原子 seed。维护事务验证 PID、attempt、generation 与锁所有权，不再申请业务共享锁。public 平台迁移与租户迁移分别记账，租户基线 `tv001_business_snapshot` 为冻结 DDL；激活前检查对象级 schema parity、seed 和隔离。
 
-普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv006_agent_read_tasks`；public 通过无 DDL 的 `20261103_merge_agent_foundations` 合并既有只读任务与运行基础两条历史，tv006 仅补齐 main 已有 `agent_read_tasks` 的租户 DDL。tv001–tv005 和冻结 snapshot 保持不变；tv005 先严格比较扣除 tv006 增量的 public 参考，再在原维护连接/锁/generation 下前向升级，租户侧不隐藏额外或部分对象。完整 v1–v5 租户在同一排他锁与 generation 维护流程下前向升级。v1 核对冻结基线；v2–v5 仅从 public 参考扣除对应版本之后已审定的累计增量对象，不过滤租户对象；升级后比较最新 public 的全部业务对象。导出测试仍绑定冻结 manifest 中的 public head，而非将新表反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv007_characteristic_refs`，在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv006 和冻结 snapshot 不改写。完整 v1–v6 租户在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列），不隐藏租户侧额外或部分对象。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
 
 ---
 

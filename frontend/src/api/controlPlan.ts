@@ -1,5 +1,58 @@
 import client from "./client";
-import type { ControlPlan, ControlPlanListResponse } from "../types";
+import type {
+  CharacteristicImportPreview,
+  ControlPlan,
+  ControlPlanItem,
+  ControlPlanListResponse,
+  ImportFromFMEARequest,
+} from "../types";
+
+export type ControlPlanItemWrite = Omit<ControlPlanItem, "source_characteristic_ref">;
+
+function toControlPlanItemWrite(item: ControlPlanItem): ControlPlanItemWrite {
+  const {
+    item_id,
+    step_no,
+    process_name,
+    equipment,
+    characteristic_no,
+    product_characteristic,
+    process_characteristic,
+    special_class,
+    specification_tolerance,
+    evaluation_method,
+    sample_size,
+    sample_frequency,
+    control_method,
+    reaction_plan,
+    source_fmea_node_id,
+    sop_ref,
+    spc_chart_id,
+    gauge_id,
+    sort_order,
+  } = item;
+  return {
+    item_id,
+    step_no,
+    process_name,
+    equipment,
+    characteristic_no,
+    product_characteristic,
+    process_characteristic,
+    special_class,
+    specification_tolerance,
+    evaluation_method,
+    sample_size,
+    sample_frequency,
+    control_method,
+    reaction_plan,
+    source_fmea_node_id,
+    sop_ref,
+    spc_chart_id,
+    gauge_id,
+    sort_order,
+  };
+}
 
 export async function listControlPlans(params: {
   page?: number;
@@ -45,12 +98,15 @@ export async function updateControlPlan(
     drawing_rev?: string;
     org_factory?: string;
     core_group?: string;
-    items?: ControlPlan["items"];
+    items?: ControlPlanItem[];
     lock_version?: number;
     confirmed_latest_lock_version?: number;
   }
 ): Promise<ControlPlan> {
-  const resp = await client.put(`/control-plans/${id}`, data);
+  const payload = data.items
+    ? { ...data, items: data.items.map(toControlPlanItemWrite) }
+    : data;
+  const resp = await client.put(`/control-plans/${id}`, payload);
   return resp.data;
 }
 
@@ -59,15 +115,19 @@ export async function deleteControlPlan(id: string): Promise<{ message: string }
   return resp.data;
 }
 
-export async function importFromFMEA(
+export async function previewImportFromFMEA(
   id: string,
-  fmeaId: string,
-  stepNos?: string[]
-): Promise<{ imported_count: number }> {
-  const resp = await client.post(`/control-plans/${id}/import-from-fmea`, {
-    fmea_id: fmeaId,
-    step_nos: stepNos,
-  });
+  data: Pick<ImportFromFMEARequest, "fmea_id" | "source_fmea_version_id" | "expected_lock_version" | "step_ids">
+): Promise<CharacteristicImportPreview> {
+  const resp = await client.post(`/control-plans/${id}/import-from-fmea/preview`, data);
+  return resp.data;
+}
+
+export async function applyImportFromFMEA(
+  id: string,
+  data: Required<Pick<ImportFromFMEARequest, "fmea_id" | "source_fmea_version_id" | "expected_lock_version" | "step_ids" | "preview_digest" | "selected_candidate_keys">>
+): Promise<{ imported_count: number; items: ControlPlanItem[] }> {
+  const resp = await client.post(`/control-plans/${id}/import-from-fmea`, data);
   return resp.data;
 }
 

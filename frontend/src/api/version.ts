@@ -9,6 +9,7 @@ import type {
   CPCompareResponse,
   VerifyResponse,
   SyncPreviewResponse,
+  SyncFromFMEARequest,
   RollbackResponse,
 } from "../types";
 
@@ -161,21 +162,20 @@ export async function verifyCPVersion(
 // --- FMEA-CP Sync APIs ---
 
 export async function getSyncPreview(
-  cpId: string
+  cpId: string,
+  sourceFmeaVersionId?: string
 ): Promise<SyncPreviewResponse> {
   const resp = await client.get(
-    `/control-plans/${cpId}/sync-preview`
+    `/control-plans/${cpId}/sync-preview`,
+    sourceFmeaVersionId ? { params: { source_fmea_version_id: sourceFmeaVersionId } } : undefined
   );
   return resp.data;
 }
 
 export async function applySyncFromFMEA(
   cpId: string,
-  selectedItemIds: string[]
+  data: SyncFromFMEARequest
 ): Promise<CPVersion> {
-  const resp = await client.post(
-    `/control-plans/${cpId}/sync-from-fmea`,
-    { selected_item_ids: selectedItemIds }
-  );
+  const resp = await client.post(`/control-plans/${cpId}/sync-from-fmea`, data);
   return resp.data;
 }

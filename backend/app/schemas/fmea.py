@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.characteristic import Characteristic
+
 # DFMEA 专用节点类型（语义标识，字段与现有 Function 节点相同）
 # SystemFunction = "SystemFunction"
 # SubsystemFunction = "SubsystemFunction"
@@ -32,7 +34,10 @@ class GraphNodeSchema(BaseModel):
     # 功能分析与要求属性 (Step 3)
     requirement: str | None = None     # 期望功能描述/技术要求
     specification: str | None = None   # 产品特性参数公差规格
-    
+    # New structured characteristics. None means this legacy node has no collection;
+    # an explicit [] is retained as a confirmed empty collection.
+    characteristics: list[Characteristic] | None = None
+
     # 风险分析属性 (Step 4 & 5)
     severity: int = Field(default=0, ge=0, le=10)            # 综合严重度 (1-10)
     severity_plant: int | None = Field(default=None, ge=0, le=10)     # 本厂影响严重度 (1-10)

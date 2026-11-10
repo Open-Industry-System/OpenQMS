@@ -105,9 +105,8 @@ async def test_finding_reused_across_runs(db, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_finding_survives_item_uuid_change(db, admin_user):
-    """When update_control_plan deletes+recreates items with new UUIDs,
-    the finding_hash (based on source_fmea_node_id) remains stable."""
+async def test_new_row_uuid_does_not_inherit_deleted_row_decisions(db, admin_user):
+    """A distinct control row must not inherit another control row decision."""
     cp = _make_cp(factory_id=admin_user.factory_id)
     db.add(cp)
     await db.flush()
@@ -130,7 +129,9 @@ async def test_finding_survives_item_uuid_change(db, admin_user):
     findings_before = result1.scalars().all()
     assert len(findings_before) >= 1
 
-    # Simulate what update_control_plan does: delete old item, create new with new UUID
+    for finding in findings_before:
+        finding.status = "accepted"
+    # An actual delete plus add is a new control; ordinary saves retain UUIDs.
     await db.delete(item1)
     await db.flush()
     item2 = ControlPlanItem(
@@ -148,8 +149,10 @@ async def test_finding_survives_item_uuid_change(db, admin_user):
         select(CPValidationFinding).where(CPValidationFinding.cp_id == cp.cp_id)
     )
     findings_after = result2.scalars().all()
-    # Same number of findings — no duplicates because hash is stable
-    assert len(findings_after) == len(findings_before)
+    assert len(findings_after) == 2 * len(findings_before)
+    old_ids = {f.finding_id for f in findings_before}
+    assert all(f.status == "accepted" for f in findings_after if f.finding_id in old_ids)
+    assert all(f.status == "open" for f in findings_after if f.finding_id not in old_ids)
 
 
 @pytest.mark.asyncio

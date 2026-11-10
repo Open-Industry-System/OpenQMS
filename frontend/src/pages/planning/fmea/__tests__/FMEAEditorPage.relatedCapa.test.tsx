@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { App } from "antd";
+import { App, Modal } from "antd";
 import FMEAEditorPage from "../FMEAEditorPage";
 import type { FMEADocument, GraphEdge, GraphNode } from "../../../../types";
 
@@ -130,10 +130,10 @@ vi.mock("../../../../components/collaboration", () => ({
   ConflictResolutionModal: () => null,
 }));
 vi.mock("../../../../components/design", () => ({
-  PageShell: ({ children, title, extra }: { children: React.ReactNode; title?: React.ReactNode; extra?: React.ReactNode }) => (
+  PageShell: ({ children, title, extra, actions }: { children: React.ReactNode; title?: React.ReactNode; extra?: React.ReactNode; actions?: React.ReactNode }) => (
     <div>
       <h1>{title}</h1>
-      <div>{extra}</div>
+      <div>{extra}{actions}</div>
       {children}
     </div>
   ),
@@ -151,6 +151,8 @@ vi.mock("react-i18next", () => ({
     t: (key: string) => key,
   }),
 }));
+
+afterEach(() => Modal.destroyAll());
 
 const Z = { severity: 0, occurrence: 0, detection: 0 };
 
@@ -224,4 +226,54 @@ describe("FMEAEditorPage activeRelatedNodeId", () => {
       expect(mocks.relatedCapaProps?.fmeaNodeId).toBe("cause-1");
     });
   });
+});
+
+
+it.each(["productSC", "processCC"])("main editor renders independent structured classification %s", async (example) => {
+  vi.clearAllMocks();
+  mocks.canEdit.mockReturnValue(true);
+  const doc = makeDoc();
+  const characteristic = (id: string, kind: "product" | "process", classification: "CC" | "SC") => ({ id, kind, name: id, classification, specification: null, unit: null, reference: null, related_product_characteristic_ids: [] });
+  doc.graph_data.nodes[1].characteristics = example === "productSC" ? [characteristic("p", "product", "SC")] : [];
+  doc.graph_data.nodes.push({ id: "wef", type: "ProcessWorkElementFunction", name: "Force", ...Z, characteristics: example === "processCC" ? [characteristic("q", "process", "CC")] : [] });
+  doc.graph_data.edges.push({ source: "fn1", target: "wef", type: "FUNCTION_MAPPED_TO" });
+  mocks.getFMEA.mockResolvedValue(doc);
+  renderEditor("/fmea/f1");
+  expect(await screen.findByText(example === "processCC" ? "CC" : "SC(准确贴装)")).toBeInTheDocument();
+});
+
+
+it.each(["fn1", "ps"])("editor confirms surviving relation impacts on deleting %s and saves/reloads", async (deletedRoot) => {
+  vi.clearAllMocks();
+  mocks.canEdit.mockReturnValue(true);
+  const doc = makeDoc();
+  doc.status = "draft";
+  const characteristic = (id: string, kind: "product" | "process", links: string[] = []) => ({ id, kind, name: id, classification: null, specification: null, unit: null, reference: null, related_product_characteristic_ids: links });
+  doc.graph_data.nodes[1].characteristics = [characteristic("deleted-product", "product")];
+  doc.graph_data.nodes.push({ id: "surviving-step", type: "ProcessStep", name: "Other step", ...Z },
+    { id: "surviving-we", type: "ProcessWorkElement", name: "Machine", ...Z },
+    { id: "surviving-fn", type: "ProcessWorkElementFunction", name: "Surviving function", ...Z, characteristics: [characteristic("affected-process", "process", ["deleted-product"])] });
+  doc.graph_data.edges.push({ source: "surviving-step", target: "surviving-we", type: "HAS_WORK_ELEMENT" },
+    { source: "surviving-we", target: "surviving-fn", type: "HAS_FUNCTION" });
+  mocks.getFMEA.mockResolvedValue(doc);
+  mocks.updateFMEA.mockImplementation(async (_id, body) => ({ ...doc, ...body, lock_version: 2 }));
+  const view = renderEditor("/fmea/f1");
+  const row = await screen.findByTestId(`fmea-structure-node-${deletedRoot}`);
+  fireEvent.click(within(row).getByRole("img", { name: "delete" }).closest("button")!);
+  fireEvent.click(await screen.findByRole("button", { name: "OK" }));
+  expect(await screen.findByText("以下过程特性将失去关联：affected-process。确认继续吗？")).toBeInTheDocument();
+  expect(screen.getByTestId("fmea-structure-node-fn1")).toBeInTheDocument();
+  const confirmations = screen.getAllByRole("button", { name: "确认删除" });
+  fireEvent.click(confirmations[confirmations.length - 1]);
+  await waitFor(() => expect(screen.queryByTestId("fmea-structure-node-fn1")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: /actions.save/ }));
+  await waitFor(() => expect(mocks.updateFMEA).toHaveBeenCalled());
+  const saved = mocks.updateFMEA.mock.calls[mocks.updateFMEA.mock.calls.length - 1][1];
+  expect(saved.graph_data.nodes.find((n: GraphNode) => n.id === "surviving-fn").characteristics[0].related_product_characteristic_ids).toEqual([]);
+  expect(saved.graph_data.wizardScope).toEqual({ wizard_completed: true });
+  view.unmount();
+  mocks.getFMEA.mockResolvedValue({ ...doc, ...saved });
+  renderEditor("/fmea/f1");
+  await screen.findByTestId("fmea-structure-node-surviving-fn");
+  expect(screen.queryByTestId("fmea-structure-node-fn1")).not.toBeInTheDocument();
 });

@@ -7,6 +7,9 @@ advance_capa D7_PREVENTION → D8_CLOSURE 在闸口（Task 12）通过后、状�
 update_capa 修改 d8_closure 且 status=D8_CLOSURE 时，savepoint 内 delete-and-rebuild
 d8 lessons + 清理旧 embedding/outbox，fail-closed：抽取失败 → 旧 lessons 集合完全不变。
 """
+# Opt-in per-module fixtures; never process the retained public/browser queue.
+from tests.embedding_isolation import embedding_test_engine, db, sessionmaker
+
 import uuid
 
 import pytest

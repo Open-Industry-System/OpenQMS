@@ -226,3 +226,22 @@ registered core container and its exclusive volume (both owned test databases)
 were disposed after fresh identity and zero-use checks. The worktree, user TEST
 profile, user-owned example deletion and all evidence remain preserved.
 No dependency, migration, authority, self-approval, or deployment change is implied.
+
+### Characteristic / latest-main integration
+
+`capa_doc_gate_service` retains both current actor/reviewed-material guards and
+characteristic CP input freshness locks. Every multi-phase transaction uses
+`require_business_namespace` and the captured tenant generation before reloading
+expired CAPA identity; it never restores a public-fallback tenant search path.
+Audit retains ordered source-scope/version locks and current-analysis/CP input
+locks. Public migrations merge additively at `20261108_merge_characteristics`;
+tenant provisioning advances to `tv007_characteristic_refs` without rewriting
+frozen baselines. Historical parity filters only reviewed later reference
+objects; current parity includes both characteristic provenance columns.
+
+
+`collaboration_service.resolve_document_scope` resolves FMEA/CP factory and line
+metadata; the existing factory-only resolver remains available for FMEA admission.
+The API preserves FMEA checks and applies Planning VIEW plus effective/accessible
+factory and product-line intersection for CP presence. Unsupported/missing
+objects fail closed; presence is never used as document access authority.

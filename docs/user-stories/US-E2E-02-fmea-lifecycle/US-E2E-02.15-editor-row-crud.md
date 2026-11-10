@@ -1,8 +1,8 @@
 # 子故事 US-E2E-02.15：编辑器行级 CRUD + 图同步
 
-**状态**: 定稿 v2（2026-07-25），经代码评审修订
-**所属 epic**: US-E2E-02（README.md v3）
-**关联 skill**: `verify-fmea-lifecycle-editor-row-crud`（待生成）
+**状态**: 定稿 v3（2026-11-03），结构化特性契约同步
+**所属 epic**: US-E2E-02（README.md v4）
+**关联 skill**: `verify-fmea-lifecycle-editor-row-crud`（已同步；运行结果另见验收证据）
 **前置**: 02.7 或 02.14（向导已完成，或已有 draft FMEA）
 **AI_REQUIRED**: false（纯结构编辑，AI 推荐见 02.16）
 
@@ -15,7 +15,7 @@
 
 - 向导已完成（wizardScope.wizard_completed=true）或已有 draft FMEA 进入编辑器 `/fmea/{id}`。
 - 编辑器基于 `utils/fmeaTable.ts` 的 `buildRows`/`createRowNodes` 实现图↔表格双向转换。
-- **当前实现缺口**：编辑器保存仅 `{nodes, edges}`（`FMEAEditorPage.tsx:568`），可能覆盖 `wizardScope`（含 wizard_completed）——本子故事验收保留向导元数据。
+- 当前保存保留 wizardScope；回归仍须验证普通保存与冲突覆盖，不能沿用旧缺口作为现状。
 
 ## 主流程
 
@@ -70,3 +70,11 @@
 ## 后续
 
 - 行级编辑为 02.16 AI 推荐、02.17 协同、02.18 版本快照提供编辑载体。
+
+## 2026-11-03 结构化特性补充验收
+
+- `characteristics` 缺失/null 是 legacy，只提示参考，不自动转换、保存不补空数组；显式 `[]` 是确认无特性，禁止回退旧功能字段。
+- 每项独立 UUID、kind、名称、规范、单位、可选特殊分类、依据；改名不换 UUID，名称不能为空。按真实唯一 `HAS_FUNCTION` 所属及 FMEA 类型判断 kind；缺失／歧义须复核，不猜测。
+- PFMEA 同一工序步骤功能录入 **2 产品**，其工作要素功能录入 **3 过程**；过程只能关联同工序产品 UUID。保存刷新核对集合、规范与分类分离。DFMEA 共享功能类型仍全部为 product。
+- 编辑器行级 CRUD／wizardScope、标准表头／结构边不变；approved 写保护和历史快照只读，不迁移历史批准数据。
+- 本次特性专项浏览器及完整检查结果见 [纠偏验收证据](../../development/characteristic-correction-acceptance.md)，并非整个子故事（含 AI 等）重新全量认证。

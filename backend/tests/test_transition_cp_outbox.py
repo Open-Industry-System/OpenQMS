@@ -47,5 +47,6 @@ async def test_approve_enqueues_cp_outbox_and_does_not_set_pending_sync(db, defa
 async def test_submit_does_not_enqueue_cp_outbox(db, default_factory, admin_user):
     fmea, _ = await _mk(db, default_factory.id)
     await fmea_service.transition_fmea(db, fmea, "in_review", admin_user.user_id)
-    rows = (await db.execute(select(CPSyncOutbox))).scalars().all()
+    rows = (await db.execute(select(CPSyncOutbox).where(
+        CPSyncOutbox.fmea_id == fmea.fmea_id))).scalars().all()
     assert rows == []

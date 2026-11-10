@@ -96,6 +96,7 @@ class ControlPlanItem(Base):
     control_method: Mapped[str | None] = mapped_column(String(200), nullable=True)
     reaction_plan: Mapped[str | None] = mapped_column(String(200), nullable=True)
     source_fmea_node_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_characteristic_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     item_source: Mapped[str] = mapped_column(String(20), default="fmea")
     sop_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
     spc_chart_id: Mapped[uuid.UUID | None] = mapped_column(
