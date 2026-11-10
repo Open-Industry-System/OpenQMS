@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+、FastAPI/Pydantic 2、async SQLAlchemy、PostgreSQL15/pgvector、手写 public/tenant Alembic delta、stdlib 固定进程、pytest、既有分层 Make/CI。
 
-**计划审阅修订：** 用户审阅初稿后要求修正三处实施边界；当前R2前移消息门禁、为blocked任务单独记录请求指纹、补撤权后仍可停止的有序API验收。当前仅计划，未获开始执行的确认；已批准v6规格的业务边界不变。
+**计划审阅修订：** 用户审阅初稿后要求修正三处实施边界；当前R2前移消息门禁、为blocked任务单独记录请求指纹、补撤权后仍可停止的有序API验收。2026-11-10用户明确选择“R2通过，子代理驱动执行”；当前T1已双复核签收，后续按原依赖执行，已批准v6规格的业务边界不变。
 
 ---
 
@@ -144,7 +144,7 @@ T5可在T1后用自有fake/loopback协议完成；不得并行编辑T1/T7的公�
 - Modify: `backend/app/services/agent_runtime/routes.py`
 - Modify: `backend/app/services/capa_agent_capabilities.py`
 
-- [ ] 写完整纯反例表，先RED：
+- [x] 写完整纯反例表，先RED：
 
 ```python
 from dataclasses import replace
@@ -175,9 +175,9 @@ def test_source_scope_does_not_cross_report():
         a, a, replace(a, target_report_id=UUID(int=3)))
 ```
 
-- [ ] Run `"$PY" -B scripts/check-ci-pure.py tests/services/agent/permissions/test_d4_text_scopes.py -q --tb=short`，预期因新模块缺失或谓词错误失败；保存日志，不把collection当RED。
-- [ ] 实现上节frozen类型与精确谓词。CAPA新增正文context spec（VIEW/DENY/masked/target_required），内部contract标restricted/source dependency；基线不翻DIRECT。`CapabilitySpec`公开字段/manifest不添加来源投影。
-- [ ] DTO实际代码采用严格类型及额外字段拒绝：
+- [x] Run `"$PY" -B scripts/check-ci-pure.py tests/services/agent/permissions/test_d4_text_scopes.py -q --tb=short`，预期因新模块缺失或谓词错误失败；保存日志，不把collection当RED。
+- [x] 实现上节frozen类型与精确谓词。CAPA新增正文context spec（VIEW/DENY/masked/target_required），内部contract标restricted/source dependency；基线不翻DIRECT。`CapabilitySpec`公开字段/manifest不添加来源投影。
+- [x] DTO实际代码采用严格类型及额外字段拒绝：
 
 ```python
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
@@ -218,9 +218,11 @@ class DerivedSourceScopeInput(BaseModel):
 
 HTTP JSON UUID按现有DTO的JSON解析习惯验证；不因Python strict UUID阻断合法JSON字符串。输入中不允许module/classification/permission字段；规范化后由内部FMEA声明补齐，node按字面精确匹配。
 
-- [ ] 加两个默认配置：`AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED=False`、`AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE=None`。新GET登记runtime routes；中间件只对该新path在关闭时早404（tenant/auth/body/DB均未访问）。旧metadata路径不受新flag关闭影响。API实现仍不存在，开flag也不能凭此获得正文。
-- [ ] GREEN：纯反例＋默认关闭/未知query/body选择/未知安全枚举DTO断言；旧permissions纯测试。新增 `SourceDeclaration`、来源输入、正文输出DTO只表达合同，不做授权。
-- [ ] 精确提交：`feat(agent): define restricted D4 text contracts behind default deny`；规格→质量复核后进入T2。
+- [x] 加两个默认配置：`AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED=False`、`AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE=None`。新GET登记runtime routes；中间件只对该新path在关闭时早404（tenant/auth/body/DB均未访问）。旧metadata路径不受新flag关闭影响。API实现仍不存在，开flag也不能凭此获得正文。
+- [x] GREEN：纯反例＋默认关闭/未知query/body选择/未知安全枚举DTO断言；旧permissions纯测试。新增 `SourceDeclaration`、来源输入、正文输出DTO只表达合同，不做授权。
+- [x] 精确提交：`feat(agent): define restricted D4 text contracts behind default deny`；规格→质量复核后进入T2。
+
+**T1签收（2026-11-10）**：实现 `3e2100d3`；独立SPEC、QUALITY均通过，无Critical/Important/Minor。Lead实跑本任务224 passed/3既有警告，CI pure278 passed/同3警告；reviewer内存重放base middleware＋base routes验证12个early-guard行为RED，随后候选仍GREEN。仅合同/默认拒绝签收，不证明源授权或正文交付已实现。
 
 ## Task 2: 授权/证据五表与请求身份旁表的public/tenant迁移
 
@@ -628,4 +630,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。当前仅编写计划，所有checkbox未执行。执行模式选定且计划审阅无阻塞后才开始T1；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；只有T1 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
