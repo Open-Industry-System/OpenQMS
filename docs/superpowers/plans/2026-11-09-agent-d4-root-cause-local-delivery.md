@@ -23,7 +23,7 @@
 
 ### 执行入口和资源预算
 
-执行选择确认后，Lead可在本片新建：一个带随机owner标签的缓存PG15容器、一个专属卷、一个 `_test` 库及一个不同名应用哨兵库；随机数字回环端口。仅使用现有本机Unix Docker context及缓存 `pgvector/pgvector:pg15`，不pull、不prune、不停止其他服务。HTTP/worker均fixture-owned；不启动共享开发服务器。
+执行选择确认后，Lead可在本片新建：一个带随机owner标签的缓存PG15容器、一个专属卷、一个 `_test` 主测试库及一个不同名应用哨兵库；随机数字回环端口。2026-11-10用户另明确允许既有 `mig_db_url` fixture 在**同一个已登记且核验owner的独占实例**内，串行创建/精确teardown `qms_migtest_<UUID>_test` 一次性迁移库；此授权不增加容器/卷、不涉及其它实例/任意数据库，不删除主测试库或哨兵库。每个迁移库仅按本fixture创建的精确名字清连接/drop，结束及最终清理复核零残留。预算最初未单列该既有fixture行为；此前完整make check已运行它，随后只读核验残留为0。仅使用现有本机Unix Docker context及缓存 `pgvector/pgvector:pg15`，不pull、不prune、不停止其他服务。HTTP/worker均fixture-owned；不启动共享开发服务器。
 
 凭据只写本片私有0700目录中的0600执行文件，登记按 `tests.ci.owned_resources` 格式不含口令。所有后端门禁从同一登记/URL派生，不在正文/命令行打印DSN。CLI配置只含临时安装凭据与预期绑定；子进程无用户/admin JWT、DB或provider凭据。
 
