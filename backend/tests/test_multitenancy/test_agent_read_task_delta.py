@@ -6,7 +6,7 @@ import pytest
 from app.core.tenant_transaction import TenantUnavailable
 from app.services import tenant_migrator, tenant_schema_diff
 
-TARGET = "tv006_agent_read_tasks"
+TARGET = "tv007_d4_text_delivery"
 
 
 def test_read_tasks_are_reviewed_current_target():
@@ -14,12 +14,14 @@ def test_read_tasks_are_reviewed_current_target():
 
     assert tenant_migrator.REVISION == TARGET
     assert tenant_migrator.PREDECESSOR_REVISION == "tv005_agent_task_attachments"
-    assert REVIEWED_REVISIONS[-2:] == ("tv005_agent_task_attachments", TARGET)
+    assert tenant_migrator.DELIVERY_PREDECESSOR_REVISION == "tv006_agent_read_tasks"
+    assert REVIEWED_REVISIONS[-3:] == ("tv005_agent_task_attachments", "tv006_agent_read_tasks", TARGET)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state,predecessor", [
     ("empty", None),
+    ("delivery_predecessor", "tv006_agent_read_tasks"),
     ("predecessor", "tv005_agent_task_attachments"),
     ("earlier_predecessor", "tv004_agent_readonly_controls"),
     ("earliest_predecessor", "tv003_agent_readonly_delivery"),
