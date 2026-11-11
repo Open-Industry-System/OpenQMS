@@ -331,13 +331,14 @@ SELECT count(*), max(octet_length(n::text)) FROM nodes;
 
 先确认唯一且<=64KiB，再仅取该node，检查type=FailureCause；不得加载FMEADocument整ORM/graph。HMAC规范：`json.dumps(node,sort_keys=True,separators=(',', ':'),ensure_ascii=False,allow_nan=False).encode('utf-8')`，前置规格域串和换行；未知/重复/过大拒绝，不输出node。
 
-- [ ] 根因字段HMAC与交付source_version**分开**：修订表field_hmac只绑定稳定tenant UUID、report UUID及原始text（null与空串区分），不绑定会改变的factory/PL、tenant generation、来源/规则，以免合法坐标变化被误报为“未记录文本写入”；交付source_version另覆盖规格所有当前坐标/修订/原文。
+- [ ] 根因字段HMAC与交付source_version**分开**：2026-11-11用户明确批准类型化命名空间补充。修订表field_hmac只绑定服务端命名空间（tenant真实UUID或显式single_public标记）、report UUID及原始text（null与空串区分），不绑定会改变的factory/PL、tenant generation、来源/规则，以免合法坐标变化被误报为“未记录文本写入”；交付source_version另覆盖规格所有当前坐标/修订/原文。不得用None/零UUID/UUID5伪装租户或从HTTP取身份，也不跳过single/public修订；single_public不增加正文准入。
 
 ```python
 import hashlib, hmac, json
 
-def field_hmac(key, tenant_id, report_id, text):
-    encoded = json.dumps({'tenant':str(tenant_id), 'report':str(report_id),
+def field_hmac(key, namespace, report_id, text):
+    # Server-owned validated identity: tenant+UUID or single_public, never HTTP input.
+    encoded = json.dumps({'namespace':namespace, 'report':str(report_id),
         'is_null':text is None, 'text':text}, sort_keys=True,
         separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
     return hmac.new(key, b'openqms.capa.root-field.v1\n' + encoded,
