@@ -244,9 +244,9 @@ HTTP JSON UUID按现有DTO的JSON解析习惯验证；不因Python strict UUID�
 - Modify: `backend/tests/test_multitenancy/test_agent_read_task_delta.py`
 - Modify: `backend/tests/migrations/test_tenant_schema_parity.py`
 
-- [ ] 执行前新建并登记本片PG；用 `make check-test-db PYTHON_BIN="$PY"` 核实例/库/迁移，URL仅从私有文件注入。无权限/本地Docker不匹配就停止，不借其他库。
-- [ ] RED：真实PG断言五张授权/证据表及请求指纹旁表缺失；源码断言tv001–tv006与snapshot manifest字节不变。不能仅测模型 `create_all()`。
-- [ ] DDL字段表完整如下（所有PK UUID、时间aware；索引/约束均命名）：
+- [x] 执行前新建并登记本片PG；用 `make check-test-db PYTHON_BIN="$PY"` 核实例/库/迁移，URL仅从私有文件注入。无权限/本地Docker不匹配就停止，不借其他库。
+- [x] RED：真实PG断言五张授权/证据表及请求指纹旁表缺失；源码断言tv001–tv006与snapshot manifest字节不变。不能仅测模型 `create_all()`。
+- [x] DDL字段表完整如下（所有PK UUID、时间aware；索引/约束均命名）：
 
 | 表 | 字段与必要约束 |
 |---|---|
@@ -259,7 +259,7 @@ HTTP JSON UUID按现有DTO的JSON解析习惯验证；不因Python strict UUID�
 
 证明失效可使用proof表的可空 `invalidated_at` 元数据字段；任何成功验证更新在同事务永久填入，最终校验还要求为null，避免依赖时间精度恢复旧证明。此字段只实现v6“更新不补发且旧证明不得复活”，不新增审批/状态机。
 
-- [ ] 请求身份旁表DDL独立于任何grant：
+- [x] 请求身份旁表DDL独立于任何grant：
 
 ```python
 op.create_table('agent_task_source_requests',
@@ -272,7 +272,7 @@ op.create_table('agent_task_source_requests',
 
 其模型为 `AgentTaskSourceRequest`；写入format固定 `d4-source-request.v1`。不得存source request原文副本、initial_text副本或直接当P/T使用；指纹不能验证/密钥变化时failclosed，不静默补写旧请求身份。
 
-- [ ] 两个范围表共享完整迁移辅助代码：
+- [x] 两个范围表共享完整迁移辅助代码：
 
 ```python
 def create_scope_table(op, sa, pg, name, parent_column, parent_table):
@@ -294,10 +294,12 @@ def create_scope_table(op, sa, pg, name, parent_column, parent_table):
 
 不对源FMEA建立额外删除阻塞FK以冒充当前存在性检查；每次由来源服务重验。其它三表按表中字段显式DDL；Proof.superseded_by作为历史UUID元数据，不用未插入新proof的立即自FK制造flush顺序问题。
 
-- [ ] 加active partial unique：`WHERE status='active'`。新签发在父锁下先将旧active标superseded并flush，再插新active，旧证据不删除。
-- [ ] 更新前驱/当前注册、`REVIEWED_REVISIONS`、累计新增对象过滤。只在public reference扣除已审新增表，不过滤tenant实际对象。钉头范围：`test_supplier_risk_capa_inputs_migration.py`、`test_agent_mainline_merge_graph.py`、`test_agent_mainline_merge_db.py`、`test_agent_readonly_controls_delta.py`、`test_multitenancy/test_agent_read_task_delta.py`、`test_tenant_schema_parity.py`；保留旧merge本身的历史升级验证，不能把所有MERGE常量盲改新head。
-- [ ] GREEN：空库/原两分支/当前head真实升级；tenant v1–v6受原maintenance/generation锁前向到v7；current parity一致、snapshot再生成仍钉旧public_head。downgrade若上述六表有证据就拒绝，不删除记录通过测试。
-- [ ] Commit `feat(agent): add tenant-local D4 delivery evidence and scope tables`。
+- [x] 加active partial unique：`WHERE status='active'`。新签发在父锁下先将旧active标superseded并flush，再插新active，旧证据不删除。
+- [x] 更新前驱/当前注册、`REVIEWED_REVISIONS`、累计新增对象过滤。只在public reference扣除已审新增表，不过滤tenant实际对象。钉头范围：`test_supplier_risk_capa_inputs_migration.py`、`test_agent_mainline_merge_graph.py`、`test_agent_mainline_merge_db.py`、`test_agent_readonly_controls_delta.py`、`test_multitenancy/test_agent_read_task_delta.py`、`test_tenant_schema_parity.py`；保留旧merge本身的历史升级验证，不能把所有MERGE常量盲改新head。
+- [x] GREEN：空库/原两分支/当前head真实升级；tenant v1–v6受原maintenance/generation锁前向到v7；current parity一致、snapshot再生成仍钉旧public_head。downgrade若上述六表有证据就拒绝，不删除记录通过测试。
+- [x] Commit `feat(agent): add tenant-local D4 delivery evidence and scope tables`。
+
+**T2技术签收（2026-11-11）**：候选ea300bb4经独立SPEC→QUALITY通过，C/I/M均0；Lead串行真实PG焦点35 passed/4 warnings，原执行窄回归101 passed/4 warnings。8冻结资产保持原字节。回退只覆盖受控tenant维护锁或public离线/无writer路径，不认证在线public并发回退；审阅者工具参数偏差单独披露，不充作纪律合规回执。
 
 ## Task 3: FMEA内部来源访问与根因修订记录
 
@@ -630,4 +632,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；只有T1 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；只有T1/T2 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
