@@ -54,6 +54,7 @@ DEFAULT_TARGETS = {
         'tests/e2e/test_capa_outcome_review_browser.py',
         'tests/e2e/test_capa_outcome_runner.py',
         'tests/e2e/test_agent_sdk_process.py',
+        'tests/e2e/test_d4_text_local_process.py',
     ),
     'browser': ('tests/e2e/test_capa_outcome_review_browser.py',),
     'live': ('tests/e2e/test_capa_outcome_review_browser.py',),
@@ -188,6 +189,31 @@ def _require_completed_layer(summary: Mapping[str, int], exit_code: int) -> None
 
 
 SDK_PROCESS_TARGET = 'tests/e2e/test_agent_sdk_process.py'
+D4_TEXT_PROCESS_TARGET = 'tests/e2e/test_d4_text_local_process.py'
+D4_TEXT_PROCESS_NAMES = frozenset({
+    'test_fixed_text_receiver_normal_http',
+    'test_source_swap_never_widens_old_grants',
+    'test_declaration_denials_hide_node_existence[no-view]',
+    'test_declaration_denials_hide_node_existence[outside-line]',
+    'test_revision_and_verification_changes_fence_old_proofs',
+    'test_text_scope_idempotency_and_restart_do_not_regrant',
+    'test_blocked_task_source_request_replay',
+    'test_revoked_text_grant_does_not_block_stop_controls',
+    'test_first_claimable_text_profile_has_message_gate',
+    'test_text_message_sentinel_never_crosses_tcp',
+    'test_text_budget_and_response_faults_fail_closed',
+    'test_text_finish_commit_without_confirmation_is_unknown',
+    'test_text_current_authority_and_tenant_boundaries[cross-tenant]',
+    'test_text_current_authority_and_tenant_boundaries[generation]',
+    'test_text_current_authority_and_tenant_boundaries[fmea-acl]',
+    'test_text_current_authority_and_tenant_boundaries[role]',
+    'test_text_current_authority_and_tenant_boundaries[source-factory]',
+    'test_text_current_authority_and_tenant_boundaries[source-line]',
+    'test_text_current_authority_and_tenant_boundaries[paused-epoch]',
+    'test_text_current_authority_and_tenant_boundaries[policy]',
+    'test_text_current_authority_and_tenant_boundaries[permanent]',
+    'test_metadata_sdk_and_worker_contracts_remain_unchanged',
+})
 SDK_PROCESS_NAMES = frozenset({
     'test_installed_sdk_claim_crosses_real_tcp',
     'test_sdk_ten_operations_sources_idempotency_and_terminal_fence',
@@ -204,6 +230,23 @@ SDK_PROCESS_NAMES = frozenset({
 def _includes_sdk_process(targets: Sequence[str]) -> bool:
     sdk = (BACKEND_DIR / SDK_PROCESS_TARGET).resolve()
     return any(sdk.is_relative_to((BACKEND_DIR / target.split('::', 1)[0]).resolve()) for target in targets)
+
+
+def _includes_d4_text_process(targets: Sequence[str]) -> bool:
+    target = (BACKEND_DIR / D4_TEXT_PROCESS_TARGET).resolve()
+    return any(target.is_relative_to((BACKEND_DIR / item.split('::', 1)[0]).resolve()) for item in targets)
+
+
+def _require_d4_text_process_success(junit: Path, summary: Mapping[str, int]) -> None:
+    root = ElementTree.parse(junit).getroot()
+    cases = [case for case in root.iter('testcase')
+             if case.get('classname') == 'tests.e2e.test_d4_text_local_process']
+    if len(cases) != len(D4_TEXT_PROCESS_NAMES) or {case.get('name') for case in cases} != D4_TEXT_PROCESS_NAMES:
+        raise ValueError('mandatory D4 text process nodes are missing or duplicated')
+    if any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error')):
+        raise ValueError('mandatory D4 text process nodes did not all pass')
+    if summary['xpassed']:
+        raise ValueError('mandatory D4 text process run has XPASS')
 
 
 def _require_sdk_process_success(junit: Path, summary: Mapping[str, int]) -> None:
@@ -276,6 +319,8 @@ def run_pytest_layer(
                     _require_completed_layer(summary, exit_code)
                     if _includes_sdk_process(targets):
                         _require_sdk_process_success(private_junit, summary)
+                    if _includes_d4_text_process(targets):
+                        _require_d4_text_process_success(private_junit, summary)
             except ValueError:
                 pass
             else:

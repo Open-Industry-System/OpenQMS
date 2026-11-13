@@ -465,7 +465,7 @@ def require_profile_message_contents(profile, rows):
 
 ## Task 8: 两层范围持久化与统一授权/目录/控制
 
-正文 restart 按用户批准的[受限恢复合同](../specs/2026-11-13-agent-d4-restricted-restart-design.md)及[补充计划](2026-11-13-agent-d4-restricted-restart.md)实施并纳入 T8 签收：独立控制位置、restart 映射与固定父 grant 绑定三表，不能复用旧 metadata checkpoint。T8 已通过独立规格、质量复核及本地验收，本地提交 `9195c1f5`；T9 的正文重读与新 receipt 已通过独立规格、质量复核及本地验收，精确本地提交待完成。
+正文 restart 按用户批准的[受限恢复合同](../specs/2026-11-13-agent-d4-restricted-restart-design.md)及[补充计划](2026-11-13-agent-d4-restricted-restart.md)实施并纳入 T8 签收：独立控制位置、restart 映射与固定父 grant 绑定三表，不能复用旧 metadata checkpoint。T8 已通过独立规格、质量复核及本地验收，本地提交 `9195c1f5`；T9 的正文重读与新 receipt 已通过独立规格、质量复核及本地验收，并本地提交 `be232bfe`。
 
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/derived_source_grants.py`
@@ -524,7 +524,7 @@ def request_source_fingerprint(key, tenant_id, initiator_id, request):
 
 ## Task 9: 正文快照与最终交付服务
 
-当前实现与锁竞争修复已通过独立规格和质量复核；冻结代码综合回归 144 passed / 6 warnings、旧链 181 passed / 6 warnings，均无 skip，T9 本地验收通过，精确本地提交待完成。恢复后新运行经固定接收器重读当前事实并产生新 receipt；T10/T11 整片验收仍待执行。
+当前实现与锁竞争修复已通过独立规格和质量复核；冻结代码综合回归 144 passed / 6 warnings、旧链 181 passed / 6 warnings，均无 skip，T9 本地验收通过，并本地提交 `be232bfe`。恢复后新运行经固定接收器重读当前事实并产生新 receipt；T10/T11 整片验收仍待执行。
 
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/d4_text_delivery.py`
@@ -564,9 +564,11 @@ async def get_d4_root_cause_text(db, identity):
 - [x] 在正文服务首次可用的本任务提交内，正常API顺序实测：任务已claim且正文GET原本可用 → 管理员撤正文grant → 同一run token正文GET拒绝（不是路由缺失404）→ 仍有任务控制权的用户pause成功并取新epoch → resume拒绝且task/run保持paused、无新run/成功恢复audit → 同用户cancel成功（新key/正确epoch），最终cancelled/stopped、租约清空。pause/cancel区间SQL见证不读root正文或来源节点，不因plugin失权/源失权而被阻止。
 - [x] 正文服务首次可用时，通过正常 API 与固定接收器验证受限 restart 后的新 run 重新读取当前业务事实并生成新 receipt；旧 receipt 或来源版本不得充当新运行读取凭证，也不得被新运行消费。撤权及原 P/T 范围外换源仍须拒绝，不能使用旧业务结果或模拟 receipt 代替真实读取。
 - [x] GREEN：字节扩张、坏数据、未知安全标签、同UUID跨tenant、generation维护、所有源/目标授权变化；metadata receipt/event/result/checkpoint不能消费受限receipt UUID。
-- [ ] 精确本地提交待完成。Commit `feat(agent): release bounded D4 root text with final source-scope fencing`。
+- [x] 本地提交 `be232bfe`：`feat(agent): release bounded D4 root text with final source-scope fencing`。
 
 ## Task 10: 正常策略真实HTTP、源权限反例与CI必选层
+
+T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 6 warnings / 0 skip（22 个 T10、14 个 SDK、3 个旧 CLI），旧 CLI 精确三节点另经 XML 核验，CI pure 307 passed / 3 warnings。本地提交待完成；T11 整片冻结门禁、运维交接与精准清理仍待执行。
 
 **Files / write scope:**
 - Modify: `backend/tests/e2e/d4_text_local_harness.py`
@@ -575,9 +577,9 @@ async def get_d4_root_cause_text(db, identity):
 - Modify: `backend/tests/e2e/capa_outcome_runner.py`
 - Modify: `backend/tests/e2e/test_capa_outcome_runner.py`
 
-- [ ] harness复用既有 owned-resource、TenantSession、lifespan/TCP启动清理模式；旧 `owned_local_trial` 可提供租户/端口工具，但body安装必须单独注册、仅授body，不利用其metadata安装的summary授权。不能修改旧metadata worker/profile/hash让body过关。
-- [ ] 父侧合成数据：同厂PL的FMEA含两个FailureCause A/B（正文可相同，用来证明来源变化与正文无关）；正常PUT建立报告关联/根因，正常POST验证passed＋完整声明生成proofA；真实admin POST body grant显式scopeA；真实user POST task显式scopeA与固定literal。启动第二slot读实际worker hash、正确app-state，不改canonical DIRECT。子侧仅安装secret/run token。
-- [ ] 必选场景名及内容：
+- [x] harness复用既有 owned-resource、TenantSession、lifespan/TCP启动清理模式；旧 `owned_local_trial` 可提供租户/端口工具，但body安装必须单独注册、仅授body，不利用其metadata安装的summary授权。不能修改旧metadata worker/profile/hash让body过关。
+- [x] 父侧合成数据：同厂PL的FMEA含两个FailureCause A/B（正文可相同，用来证明来源变化与正文无关）；正常PUT建立报告关联/根因，正常POST验证passed＋完整声明生成proofA；真实admin POST body grant显式scopeA；真实user POST task显式scopeA与固定literal。启动第二slot读实际worker hash、正确app-state，不改canonical DIRECT。子侧仅安装secret/run token。
+- [x] 必选场景名及内容：
 
 | 新测试名 | 必须见证 |
 |---|---|
@@ -595,9 +597,10 @@ async def get_d4_root_cause_text(db, identity):
 | `test_text_current_authority_and_tenant_boundaries` | 当前角色/源对象范围/epoch/暂停/永久撤销/策略/tenant generation及同UUID真跨租户 |
 | `test_metadata_sdk_and_worker_contracts_remain_unchanged` | 原固定worker字节/hash＋SDK实际wheel十方法/原14节点合同不变 |
 
-- [ ] 业务只读见证窗口必须在准备业务写（PUT/验证等）完成后、接收器运行前取snapshot；控制动作另记录，不把fixture主动改proof的业务写误算到runtime只读窗口。拒绝链不能只检查stdout，必须检查服务端HTTP response未含原文。
-- [ ] 分类契约把上述文件实际collected全部nodes归默认backend；不标live/browser/scanner，不为缺库/工具skip。runner增加精确新suite JUnit检查（按实际参数化后的节点集合固定维护），零选中/缺节点/skip/xfail/xpass不得算成功；SDK已有14mandatory检查保留。合成JUnit反例必须有RED，真实HTTP必须有独立receipt，不能互相替代。
-- [ ] GREEN：实际运行新suite＋旧3固定CLI＋原14SDK；另跑CI pure/classification。记录真实selected/pass/skip/warnings，不猜计数。Commit `test(agent): exercise source-bound D4 text delivery under normal local policy`。
+- [x] 业务只读见证窗口必须在准备业务写（PUT/验证等）完成后、接收器运行前取snapshot；控制动作另记录，不把fixture主动改proof的业务写误算到runtime只读窗口。拒绝链不能只检查stdout，必须检查服务端HTTP response未含原文。
+- [x] 分类契约把上述文件实际collected全部nodes归默认backend；不标live/browser/scanner，不为缺库/工具skip。runner增加精确新suite JUnit检查（按实际参数化后的节点集合固定维护），零选中/缺节点/skip/xfail/xpass不得算成功；SDK已有14mandatory检查保留。合成JUnit反例必须有RED，真实HTTP必须有独立receipt，不能互相替代。
+- [x] GREEN：实际运行新suite＋旧3固定CLI＋原14SDK；另跑CI pure/classification。记录真实selected/pass/skip/warnings，不猜计数。
+- [ ] 精确本地提交待完成。Commit `test(agent): exercise source-bound D4 text delivery under normal local policy`。
 
 ## Task 11: 冻结完整门禁、运维交接与精准清理
 

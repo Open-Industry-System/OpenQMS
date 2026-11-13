@@ -17,6 +17,7 @@ TARGETS = (
     'tests/e2e/test_agent_local_trial_browser.py',
     'tests/e2e/test_agent_local_trial_process.py',
     'tests/e2e/test_agent_sdk_process.py',
+    'tests/e2e/test_d4_text_local_process.py',
     'tests/e2e/test_d4_text_preview_browser.py',
     'tests/e2e/test_capa_outcome_review_browser.py',
     'tests/e2e/test_agent_task_attachment_browser.py',
@@ -57,6 +58,31 @@ SDK_PROCESS_BACKEND_NODES = (
     'tests/e2e/test_agent_sdk_process.py::test_sdk_credentials_cannot_claim_in_another_real_tenant',
     'tests/e2e/test_agent_sdk_process.py::test_sdk_admin_grant_withdrawal_and_permanent_revoke',
 )
+D4_TEXT_BACKEND_NAMES = (
+    'test_fixed_text_receiver_normal_http',
+    'test_source_swap_never_widens_old_grants',
+    'test_declaration_denials_hide_node_existence[no-view]',
+    'test_declaration_denials_hide_node_existence[outside-line]',
+    'test_revision_and_verification_changes_fence_old_proofs',
+    'test_text_scope_idempotency_and_restart_do_not_regrant',
+    'test_blocked_task_source_request_replay',
+    'test_revoked_text_grant_does_not_block_stop_controls',
+    'test_first_claimable_text_profile_has_message_gate',
+    'test_text_message_sentinel_never_crosses_tcp',
+    'test_text_budget_and_response_faults_fail_closed',
+    'test_text_finish_commit_without_confirmation_is_unknown',
+    'test_text_current_authority_and_tenant_boundaries[cross-tenant]',
+    'test_text_current_authority_and_tenant_boundaries[generation]',
+    'test_text_current_authority_and_tenant_boundaries[fmea-acl]',
+    'test_text_current_authority_and_tenant_boundaries[role]',
+    'test_text_current_authority_and_tenant_boundaries[source-factory]',
+    'test_text_current_authority_and_tenant_boundaries[source-line]',
+    'test_text_current_authority_and_tenant_boundaries[paused-epoch]',
+    'test_text_current_authority_and_tenant_boundaries[policy]',
+    'test_text_current_authority_and_tenant_boundaries[permanent]',
+    'test_metadata_sdk_and_worker_contracts_remain_unchanged',
+)
+D4_TEXT_BACKEND_NODES = tuple('tests/e2e/test_d4_text_local_process.py::' + name for name in D4_TEXT_BACKEND_NAMES)
 SCANNER_NODES = (
     'tests/e2e/test_agent_task_attachment_browser.py::test_actual_clamav_attachment_browser_acceptance',
     'tests/e2e/test_agent_task_attachment_process.py::test_actual_clamav_advertises_version_and_instream',
@@ -121,6 +147,12 @@ def test_fixed_nodes_have_the_expected_ci_layer(collected_items: list[pytest.Ite
     assert len(SDK_PROCESS_BACKEND_NODES) == 14
     assert _nodeids(collected_items, 'tests/e2e/test_agent_sdk_process.py::') == set(SDK_PROCESS_BACKEND_NODES)
     for node in SDK_PROCESS_BACKEND_NODES:
+        _assert_layer(collected_items, 'backend', node)
+
+    from tests.e2e.capa_outcome_runner import D4_TEXT_PROCESS_NAMES
+    assert set(D4_TEXT_BACKEND_NAMES) == D4_TEXT_PROCESS_NAMES
+    assert _nodeids(collected_items, 'tests/e2e/test_d4_text_local_process.py::') == set(D4_TEXT_BACKEND_NODES)
+    for node in D4_TEXT_BACKEND_NODES:
         _assert_layer(collected_items, 'backend', node)
 
     readonly_non_browser = [

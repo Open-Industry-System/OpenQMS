@@ -68,7 +68,7 @@ def test_api_requires_exact_sdk_junit_nodes_but_preserves_ordinary_skips(
     from xml.etree import ElementTree as ET
     from tests.ci.gate_results import COUNTS
     from tests.ci.test_layer_selection import SDK_PROCESS_BACKEND_NODES
-    from tests.e2e.capa_outcome_runner import DEFAULT_TARGETS, run_pytest_layer
+    from tests.e2e.capa_outcome_runner import DEFAULT_TARGETS, D4_TEXT_PROCESS_NAMES, run_pytest_layer
 
     cases = ET.Element('testsuite')
     names = [node.split('::')[1] for node in SDK_PROCESS_BACKEND_NODES]
@@ -82,6 +82,10 @@ def test_api_requires_exact_sdk_junit_nodes_but_preserves_ordinary_skips(
         ET.SubElement(cases, 'testcase', classname='tests.e2e.test_agent_sdk_process', name=name)
     summary = {key: 0 for key in COUNTS}
     summary.update(selected=len(names), passed=len(names))
+    for name in D4_TEXT_PROCESS_NAMES:
+        ET.SubElement(cases, 'testcase', classname='tests.e2e.test_d4_text_local_process', name=name)
+    summary['selected'] += len(D4_TEXT_PROCESS_NAMES)
+    summary['passed'] += len(D4_TEXT_PROCESS_NAMES)
     if result in {'skip', 'xfail'}:
         ET.SubElement(cases[0], 'skipped', type='pytest.xfail' if result == 'xfail' else 'pytest.skip')
         summary['passed'] -= 1
@@ -130,6 +134,88 @@ def test_sdk_mandatory_target_detection(targets, expected):
     from tests.e2e.capa_outcome_runner import _includes_sdk_process
 
     assert _includes_sdk_process(targets) is expected
+
+
+@pytest.mark.parametrize('fault', ['empty', 'missing', 'duplicate', 'substituted', 'skip', 'xfail', 'xpass', 'failure', 'error'])
+def test_d4_text_required_junit_rejects_missing_or_nonpassing_nodes(tmp_path, fault):
+    from xml.etree import ElementTree as ET
+    from tests.e2e.capa_outcome_runner import D4_TEXT_PROCESS_NAMES, _require_d4_text_process_success
+
+    suite = ET.Element('testsuite')
+    names = sorted(D4_TEXT_PROCESS_NAMES)
+    if fault == 'empty':
+        names.clear()
+    elif fault == 'missing':
+        names.pop()
+    elif fault == 'duplicate':
+        names[-1] = names[0]
+    elif fault == 'substituted':
+        names[-1] = 'test_unrelated'
+    for name in names:
+        ET.SubElement(suite, 'testcase', classname='tests.e2e.test_d4_text_local_process', name=name)
+    if fault in {'skip', 'xfail'}:
+        ET.SubElement(suite[0], 'skipped', type='pytest.xfail' if fault == 'xfail' else 'pytest.skip')
+    elif fault in {'failure', 'error'}:
+        ET.SubElement(suite[0], fault)
+    junit = tmp_path / 'd4.xml'
+    ET.ElementTree(suite).write(junit)
+    with pytest.raises(ValueError):
+        _require_d4_text_process_success(junit, {'xpassed': int(fault == 'xpass')})
+
+
+def test_d4_text_required_junit_accepts_exact_passing_nodes(tmp_path):
+    from xml.etree import ElementTree as ET
+    from tests.e2e.capa_outcome_runner import D4_TEXT_PROCESS_NAMES, _require_d4_text_process_success
+
+    suite = ET.Element('testsuite')
+    for name in sorted(D4_TEXT_PROCESS_NAMES):
+        ET.SubElement(suite, 'testcase', classname='tests.e2e.test_d4_text_local_process', name=name)
+    junit = tmp_path / 'd4.xml'
+    ET.ElementTree(suite).write(junit)
+    _require_d4_text_process_success(junit, {'xpassed': 0})
+
+
+@pytest.mark.parametrize('targets, expected', [
+    (['tests'], True), (['tests/e2e'], True),
+    (['tests/e2e/test_d4_text_local_process.py'], True),
+    (['tests/e2e/test_d4_text_local_process.py::test_fixed_text_receiver_normal_http'], True),
+    (['tests/ci'], False), (['tests/e2e/test_agent_sdk_process.py'], False),
+])
+def test_d4_text_mandatory_target_detection(targets, expected):
+    from tests.e2e.capa_outcome_runner import _includes_d4_text_process
+    assert _includes_d4_text_process(targets) is expected
+
+
+@pytest.mark.parametrize('missing, expected', [(False, 'PASSED'), (True, 'FAILED')])
+def test_api_runner_rejects_missing_d4_text_node(tmp_path, monkeypatch, missing, expected):
+    import json
+    from xml.etree import ElementTree as ET
+    from tests.ci.gate_results import COUNTS
+    from tests.e2e.capa_outcome_runner import D4_TEXT_PROCESS_NAMES, D4_TEXT_PROCESS_TARGET, run_pytest_layer
+
+    names = sorted(D4_TEXT_PROCESS_NAMES)
+    if missing:
+        names.pop()
+    suite = ET.Element('testsuite')
+    for name in names:
+        ET.SubElement(suite, 'testcase', classname='tests.e2e.test_d4_text_local_process', name=name)
+    summary = {key: 0 for key in COUNTS}
+    summary.update(selected=len(names), passed=len(names))
+
+    class Child:
+        stdout = ()
+        def __init__(self, command, **kwargs):
+            junit = next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml='))
+            ET.ElementTree(suite).write(junit)
+            Path(kwargs['env']['OPENQMS_GATE_HOOKS']).write_text(json.dumps(summary))
+        def __enter__(self): return self
+        def __exit__(self, *_args): pass
+        def wait(self): return 0
+
+    monkeypatch.setattr('tests.e2e.capa_outcome_runner.subprocess.Popen', Child)
+    receipt = run_pytest_layer(layer='api', targets=[D4_TEXT_PROCESS_TARGET], source={},
+        database_url='postgresql+asyncpg://ci:ci@127.0.0.1:1/ci_test', artifacts=tmp_path)
+    assert receipt['status'] == expected
 
 
 def test_focused_api_without_sdk_preserves_legal_skip(tmp_path):
