@@ -359,8 +359,8 @@ def field_hmac(key, namespace, report_id, text):
 - Modify: `backend/app/services/capa_verification_service.py`
 - Modify: `backend/app/services/capa_d4_provenance.py`
 
-- [ ] RED：API带声明、无源读取权提交真实/虚构节点，状态码及响应字节一致、均403，验证/修订/proof/成功audit零新增；有权限后才分别400节点错/关联错，结构422，修订冲突409。无声明旧调用不变。
-- [ ] 新字段与创建专用响应的实际改动：本片以正常员工API显式JSON声明，不新增前端审批/核验页面或自动勾选；旧UI不传该字段时继续保存验证、返回proof=false，不因为passed或已有source_ref自动认定来源完备。
+- [x] RED：API带声明、无源读取权提交真实/虚构节点，状态码及响应字节一致、均403，验证/修订/proof/成功audit零新增；有权限后才分别400节点错/关联错，结构422，修订冲突409。无声明旧调用不变。
+- [x] 新字段与创建专用响应的实际改动：本片以正常员工API显式JSON声明，不新增前端审批/核验页面或自动勾选；旧UI不传该字段时继续保存验证、返回proof=false，不因为passed或已有source_ref自动认定来源完备。
 
 ```python
 class VerificationCreatedResponse(VerificationResponse):
@@ -372,11 +372,11 @@ source_declaration: SourceDeclaration | None = None
 
 仅POST的response_model改为创建子类，GET/PATCH保留原model。新增 `SourceRevisionConflict` 专用409分支；源不可见403使用固定文本而不是原异常。422的新声明校验不回显原始输入值。
 
-- [ ] API为声明分支提供服务端真实请求上下文；不允许HTTP字段伪造peer/tenant/profile。普通无声明业务不受本地开关影响；本片新增声明签发仅用于已启用的自有dev/回环场景，不因生产请求包含新字段而激活功能。签发来源事实不依赖某个接收器安装的P/T范围，它本身不授权插件。
-- [ ] 父锁后、任何rec/add/audit前做新分支权限与来源检查。仅passed＋完整声明＋源可读＋文本匹配时签发；文本不匹配正常保存并false，原因仅audit。无修订历史只在显式合格声明时bootstrap；已有最新field_hmac不匹配则409且整事务无业务写入。不能从首次runtime读取创建修订/proof。
-- [ ] proof绑定新验证ID、标量verification_version（ID/结论/updated_at）、最新修订、源节点HMAC及当前坐标。先flush新验证取server时间，再issue；同一验证同一事务helper重复调用幂等，不制造第二proof。不同POST各创建验证是原语义，不擅加全局幂等键。
-- [ ] 每次合格新创建可supersede当前active；更新验证不补发，成功PATCH在同事务把引用该验证的proof设置invalidated_at，保留记录；最终也检标量版本。failed→passed、源A→B→A、相同时间戳/同一事务更新都不能恢复旧proof。没有delete路由，不增加delete/cascade清理。
-- [ ] GREEN：按v6判定表逐条断言事务写入差异；D4→D5闸口、D8终态保护、未审补充规则不改。Commit `feat(capa): issue version-bound source proofs from explicit verification declarations`。
+- [x] API为声明分支提供服务端真实请求上下文；不允许HTTP字段伪造peer/tenant/profile。普通无声明业务不受本地开关影响；本片新增声明签发仅用于已启用的自有dev/回环场景，不因生产请求包含新字段而激活功能。签发来源事实不依赖某个接收器安装的P/T范围，它本身不授权插件。
+- [x] 父锁后、任何rec/add/audit前做新分支权限与来源检查。仅passed＋完整声明＋源可读＋文本匹配时签发；文本不匹配正常保存并false，原因仅audit。无修订历史只在显式合格声明时bootstrap；已有最新field_hmac不匹配则409且整事务无业务写入。不能从首次runtime读取创建修订/proof。
+- [x] proof绑定新验证ID、标量verification_version（ID/结论/updated_at）、最新修订、源节点HMAC及当前坐标。先flush新验证取server时间，再issue；同一验证同一事务helper重复调用幂等，不制造第二proof。不同POST各创建验证是原语义，不擅加全局幂等键。
+- [x] 每次合格新创建可supersede当前active；更新验证不补发，成功PATCH在同事务把引用该验证的proof设置invalidated_at，保留记录；最终也检标量版本。failed→passed、源A→B→A、相同时间戳/同一事务更新都不能恢复旧proof。没有delete路由，不增加delete/cascade清理。
+- [x] GREEN：按v6判定表逐条断言事务写入差异；D4→D5闸口、D8终态保护、未审补充规则不改。Commit `feat(capa): issue version-bound source proofs from explicit verification declarations`。
 
 ## Task 5: 独立标准库接收器与启动器定稿
 
@@ -633,4 +633,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；只有T1/T2 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T4 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。

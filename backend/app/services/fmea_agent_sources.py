@@ -55,8 +55,12 @@ _NODES = """WITH nodes AS (
 ) """
 
 
-async def failure_cause_version(db, visible_source, cause_node_id):
-    """Budget and select one node only, rechecking authority before returning."""
+async def failure_cause_version(db, visible_source, cause_node_id, *, diagnose_invalid_node=False):
+    """Budget and select one node only, rechecking authority before returning.
+
+    Employee declaration creation may request missing/type diagnostics. Runtime
+    callers keep the default fixed denial; neither mode skips live authority.
+    """
     current = await visible_fmea_source(db, visible_source.actor_scope, visible_source.fmea_id)
     if current != visible_source:
         raise SourceUnavailable()
@@ -65,6 +69,8 @@ async def failure_cause_version(db, visible_source, cause_node_id):
         with db.no_autoflush:
             count, size = (await db.execute(text(_NODES +
                 'SELECT count(*), max(octet_length(n::text)) FROM nodes'), params)).one()
+            if count == 0 and diagnose_invalid_node:
+                raise ValueError('Invalid FailureCause node')
             if count != 1 or size is None or size > 64 * 1024:
                 raise SourceUnavailable()
             # The document can change between statements under READ COMMITTED.
@@ -74,7 +80,11 @@ async def failure_cause_version(db, visible_source, cause_node_id):
                 WHERE octet_length(n::text) <= 65536
                   AND (SELECT count(*) FROM nodes) = 1
             '''), params)).scalar_one_or_none()
-        if not isinstance(node, dict) or node.get('type') != 'FailureCause':
+        if not isinstance(node, dict):
+            raise SourceUnavailable()
+        if node.get('type') != 'FailureCause':
+            if diagnose_invalid_node:
+                raise ValueError('Invalid FailureCause node')
             raise SourceUnavailable()
         try:
             encoded = json.dumps(node, sort_keys=True, separators=(',', ':'), ensure_ascii=False,

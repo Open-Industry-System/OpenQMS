@@ -164,7 +164,10 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     return adoption, new_value
 
 
-async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user):
+async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user, *, request=None):
+    from app.services import capa_d4_provenance as provenance
+    if req.source_declaration is not None:
+        provenance.require_declaration_context(request)
     actor_id = user.user_id
     capa = await lock_current_material_write(
         db, capa, actor_id, PermissionLevel.EDIT
@@ -173,7 +176,16 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     is_verified = (conclusion == "passed")
     if is_verified:
         _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
-    normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
+    if req.source_declaration is None:
+        normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
+    else:
+        normalized_ref, _ = await provenance.validate_declared_source(db, report=capa, actor_id=actor_id,
+            source_ref=req.source_ref, conclusion=conclusion)
+        try:
+            await provenance.checked_current_revision(db, capa)
+        except provenance.SourceRevisionConflict:
+            await provenance.require_declared_source_visibility(db, capa, actor_id, normalized_ref)
+            raise
     if normalized_ref is not None:
         # Source locks may have waited after parent-lock admission.
         capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
@@ -228,8 +240,19 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     if source_changed:
         db.add(_linkage_audit(capa, capa.fmea_ref_id, normalized_ref["cause_node_id"],
                               _LINKAGE_SOURCE_D4, actor_id))
+    issued = False
+    if req.source_declaration is not None:
+        try:
+            await db.flush()
+            await db.refresh(rec)
+            issued = await provenance.issue_source_proof(db, report=capa, verification=rec,
+                actor_id=actor_id, declaration=req.source_declaration) is not None
+        except Exception:
+            await db.rollback()
+            raise
     await db.commit()
     await db.refresh(rec)
+    rec.source_proof_issued = issued
     return rec
 
 
@@ -343,6 +366,8 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         if rec.source_ref is not None:
             db.add(_linkage_audit(capa, capa.fmea_ref_id, rec.source_ref["cause_node_id"],
                                   _LINKAGE_SOURCE_D4, actor_id))
+    from app.services.capa_d4_provenance import invalidate_verification_proofs
+    await invalidate_verification_proofs(db, vid)
     await db.commit()
     await db.refresh(rec)
     return rec
