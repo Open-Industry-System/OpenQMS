@@ -465,7 +465,7 @@ def require_profile_message_contents(profile, rows):
 
 ## Task 8: 两层范围持久化与统一授权/目录/控制
 
-正文 restart 按用户批准的[受限恢复合同](../specs/2026-11-13-agent-d4-restricted-restart-design.md)及[补充计划](2026-11-13-agent-d4-restricted-restart.md)实施并纳入 T8 签收：独立控制位置、restart 映射与固定父 grant 绑定三表，不能复用旧 metadata checkpoint。T8 已通过独立规格、质量复核及本地验收；精确本地提交待完成，T9 的正文重读与新 receipt 仍待实现和验收。
+正文 restart 按用户批准的[受限恢复合同](../specs/2026-11-13-agent-d4-restricted-restart-design.md)及[补充计划](2026-11-13-agent-d4-restricted-restart.md)实施并纳入 T8 签收：独立控制位置、restart 映射与固定父 grant 绑定三表，不能复用旧 metadata checkpoint。T8 已通过独立规格、质量复核及本地验收，本地提交 `9195c1f5`；T9 的正文重读与新 receipt 已通过独立规格、质量复核及本地验收，精确本地提交待完成。
 
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/derived_source_grants.py`
@@ -520,9 +520,11 @@ def request_source_fingerprint(key, tenant_id, initiator_id, request):
 - [x] 仅改runtime共享 `_target`、registry目标读取、目录授权定位为标量；不要替换业务写函数所需的全ORM `current_capa_target`。checkpoint历史只用factory_id的调用方也验证。
 - [x] 先在本任务创建正常配置的 `d4_text_local_harness.py` 与早期验收文件；不等T10才有可用fixture。复用OwnedTrial的租户/生命周期/随机TCP模式，但body安装/策略/来源声明与显式P/T必须走正常API，不能打DIRECT或TRUSTED补丁。早期测试由父controller真实claim并访问消息接口，不宣称已运行T10固定接收器完整闭环。
 - [x] GREEN之前增加**首次可claim提交**的真实API消息负向见证：即使尚未做T9正文读取服务，当前运行可claim后任意非固定消息仍必须在服务端拒绝（首次/重领/history/ACK），HTTP响应无哨兵、batch/watermark/成功audit不变；没有该证据不提交准入正向。旧metadata3CLI/14SDK回归不获得正文。
-- [ ] 本任务已实现并验收 pause/cancel 与 resume/restart 权限分离，以下本地提交待完成；撤正文grant后先用已存在的受保护capabilities GET验证运行身份拒绝，不能用尚未实现正文GET的404冒充撤权成功。完整的“撤grant→正文GET拒绝→pause成功→resume拒绝→cancel成功”安排在T9正文服务首次可用提交，T10再整合回归。另覆盖FMEA读取权撤销但任务控制权仍在时仍可停止，停止路径0正文/源node读取。Commit `feat(agent): intersect explicit plugin and task derived-source scopes`。
+- [x] 本任务已实现并验收 pause/cancel 与 resume/restart 权限分离；撤正文grant后先用已存在的受保护capabilities GET验证运行身份拒绝，不能用尚未实现正文GET的404冒充撤权成功。完整的“撤grant→正文GET拒绝→pause成功→resume拒绝→cancel成功”安排在T9正文服务首次可用提交，T10再整合回归。另覆盖FMEA读取权撤销但任务控制权仍在时仍可停止，停止路径0正文/源node读取。Commit `feat(agent): intersect explicit plugin and task derived-source scopes`。
 
 ## Task 9: 正文快照与最终交付服务
+
+当前实现与锁竞争修复已通过独立规格和质量复核；冻结代码综合回归 144 passed / 6 warnings、旧链 181 passed / 6 warnings，均无 skip，T9 本地验收通过，精确本地提交待完成。恢复后新运行经固定接收器重读当前事实并产生新 receipt；T10/T11 整片验收仍待执行。
 
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/d4_text_delivery.py`
@@ -531,8 +533,8 @@ def request_source_fingerprint(key, tenant_id, initiator_id, request):
 - Modify: `backend/app/api/agent_runtime.py`
 - Modify: `backend/app/schemas/agent_d4_text.py`
 
-- [ ] RED：来源B证明替换A但旧P/T仅A，初检就拒，root/node内容读取计数0；通过初检但RR后/编码后撤权或改proof/坐标时最终拒，正文/摘要/计数均不返回，receipt/audit不新增成功记录。
-- [ ] 固定服务顺序：
+- [x] RED：来源B证明替换A但旧P/T仅A，初检就拒，root/node内容读取计数0；通过初检但RR后/编码后撤权或改proof/坐标时最终拒，正文/摘要/计数均不返回，receipt/audit不新增成功记录。
+- [x] 固定服务顺序：
 
 ```python
 async def get_d4_root_cause_text(db, identity):
@@ -542,22 +544,27 @@ async def get_d4_root_cause_text(db, identity):
     snapshot = await build_root_candidate(binding=current.binding, state=state)
     release = encode_bounded_release(current, snapshot, limit=256 * 1024)
     current = await runtime_access.lock_runtime_identity(db, current)
+    # 锁定 CAPA/FMEA 父行直到提交；可变授权行使用 NOWAIT 避免锁序反转。
+    await lock_source_parents_and_authority_inputs(db, current, state)
     latest = await load_current_source_state(db, report_id=current.task.target_capa_id)
     await require_current_text_authority(db, current, latest)
     await verify_release_is_current(db, current, latest, snapshot)
+    # 提交前再次刷新身份、来源及授权，确认与快照一致。
+    current, latest = await recheck_identity_source_and_authority(db, current, state)
     add_restricted_receipt_and_audit(db, current, latest, release)
     await db.commit()
     return release.response
 ```
 
-`require_current_text_authority`装载当前父grants/两个旁表并走统一authorize与来源Owner检查，不在这里复制角色判断。`build_root_candidate`独立连接先设置RR/READ ONLY，再绑定captured namespace/generation，只preflight字节后select单字段、既有pure redactor。`encode_bounded_release`先分配receipt UUID/aware时间，固定DTO→最终JSON bytes→预算，正文不得事后再次用另一序列化规则变大。
+`require_current_text_authority`装载当前父grants/两个旁表并走统一authorize与来源Owner检查，不在这里复制角色判断。`build_root_candidate`独立连接先设置RR/READ ONLY，再绑定captured namespace/generation，只preflight字节后select单字段、既有pure redactor。`encode_bounded_release`先分配receipt UUID/aware时间，固定DTO→最终JSON bytes→预算，正文不得事后再次用另一序列化规则变大。上述锁和末次重验是示意职责，不是新增函数名合同：实际实现持有 CAPA/FMEA 父行至提交，授权行使用 NOWAIT；锁冲突回滚并返回固定 503 `Delivery unavailable`，不表示授权已通过或被拒。
 
-- [ ] `verify_release_is_current`不加载验证正文/source_ref：select验证ID/结论/updated_at，SQL布尔谓词比较verification.root_cause_text与当前根因的Python `.strip()` 参数、source_ref JSONB与proof；同时proof未invalidated/仍active、revision/field_hmac/源node版本/当前坐标/期限一致。SQL btrim不得处理字段侧Unicode空白。根因当前变大时先预算再取。
-- [ ] null/空根因不能凭空制造passed验证或有效proof；无证明则拒绝。DTO保留严格nullable但不为测试编造空字段事实。词表命中0不降级internal，原预览外发flag不翻转。
-- [ ] HTTP响应 `Cache-Control:no-store`，新DTO仅Root候选＋opaque版本＋local许可；不含词表/验证/FMEA node/来源ID。server/worker错误均不含原文/异常cause；audit名称release_committed不声称接收方已收到。实际事务失败不能提前发正文。
-- [ ] 在正文服务首次可用的本任务提交内，正常API顺序实测：任务已claim且正文GET原本可用 → 管理员撤正文grant → 同一run token正文GET拒绝（不是路由缺失404）→ 仍有任务控制权的用户pause成功并取新epoch → resume拒绝且task/run保持paused、无新run/成功恢复audit → 同用户cancel成功（新key/正确epoch），最终cancelled/stopped、租约清空。pause/cancel区间SQL见证不读root正文或来源节点，不因plugin失权/源失权而被阻止。
-- [ ] 正文服务首次可用时，通过正常 API 与固定接收器验证受限 restart 后的新 run 重新读取当前业务事实并生成新 receipt；旧 receipt 或来源版本不得充当新运行读取凭证，也不得被新运行消费。撤权及原 P/T 范围外换源仍须拒绝，不能使用旧业务结果或模拟 receipt 代替真实读取。
-- [ ] GREEN：字节扩张、坏数据、未知安全标签、同UUID跨tenant、generation维护、所有源/目标授权变化；metadata receipt/event/result/checkpoint不能消费受限receipt UUID。Commit `feat(agent): release bounded D4 root text with final source-scope fencing`。
+- [x] `verify_release_is_current`不加载验证正文/source_ref：select验证ID/结论/updated_at，SQL布尔谓词比较verification.root_cause_text与当前根因的Python `.strip()` 参数、source_ref JSONB与proof；同时proof未invalidated/仍active、revision/field_hmac/源node版本/当前坐标/期限一致。SQL btrim不得处理字段侧Unicode空白。根因当前变大时先预算再取。
+- [x] null/空根因不能凭空制造passed验证或有效proof；无证明则拒绝。DTO保留严格nullable但不为测试编造空字段事实。词表命中0不降级internal，原预览外发flag不翻转。
+- [x] HTTP响应 `Cache-Control:no-store`，新DTO仅Root候选＋opaque版本＋local许可；不含词表/验证/FMEA node/来源ID。server/worker错误均不含原文/异常cause；audit名称release_committed不声称接收方已收到。实际事务失败不能提前发正文。
+- [x] 在正文服务首次可用的本任务提交内，正常API顺序实测：任务已claim且正文GET原本可用 → 管理员撤正文grant → 同一run token正文GET拒绝（不是路由缺失404）→ 仍有任务控制权的用户pause成功并取新epoch → resume拒绝且task/run保持paused、无新run/成功恢复audit → 同用户cancel成功（新key/正确epoch），最终cancelled/stopped、租约清空。pause/cancel区间SQL见证不读root正文或来源节点，不因plugin失权/源失权而被阻止。
+- [x] 正文服务首次可用时，通过正常 API 与固定接收器验证受限 restart 后的新 run 重新读取当前业务事实并生成新 receipt；旧 receipt 或来源版本不得充当新运行读取凭证，也不得被新运行消费。撤权及原 P/T 范围外换源仍须拒绝，不能使用旧业务结果或模拟 receipt 代替真实读取。
+- [x] GREEN：字节扩张、坏数据、未知安全标签、同UUID跨tenant、generation维护、所有源/目标授权变化；metadata receipt/event/result/checkpoint不能消费受限receipt UUID。
+- [ ] 精确本地提交待完成。Commit `feat(agent): release bounded D4 root text with final source-scope fencing`。
 
 ## Task 10: 正常策略真实HTTP、源权限反例与CI必选层
 

@@ -1,13 +1,13 @@
 # CAPA D4 本地正文交付：来源与修订基础
 
-## 当前范围（T2–T8 已验收，本地提交待完成）
+## 当前范围（T2–T9 已验收，T9 本地提交待完成）
 
-Task 2 增加租户本地元数据表；Task 3 实现内部 FMEA 来源访问与根因字段修订。Task 4 在员工验证创建动作接入显式来源声明和证明签发；T5–T7 增加固定本地接收器、消息门禁与独立正文策略槽。T8 已接通显式两层来源授权及受限恢复控制，通过独立规格、质量复核和本地验收；精确本地提交待完成。正文读取服务与新运行真实重读、新 receipt 留待 T9。运行时和正文均默认关闭；迁移成功不是启用许可，也不会创建任何 grant 或提升旧 metadata 能力。本文不提供尚未实现的启用命令。
+Task 2 增加租户本地元数据表；Task 3 实现内部 FMEA 来源访问与根因字段修订。Task 4 在员工验证创建动作接入显式来源声明和证明签发；T5–T7 增加固定本地接收器、消息门禁与独立正文策略槽。T8 已接通显式两层来源授权及受限恢复控制，通过独立规格、质量复核和本地验收，并本地提交 `9195c1f5`。T9 正文读取服务与受限 restart 后重新读取当前事实、新 receipt 已通过独立规格和质量复核及冻结代码回归，精确本地提交待完成。运行时和正文均默认关闭；迁移成功不是启用许可，也不会创建任何 grant 或提升旧 metadata 能力。本文不提供尚未实现的启用命令。
 
 ## 迁移链
 
-- public 候选 head：`20261113_d4_recovery`，前驱 `20261109_d4_text_delivery`；后者前驱为原双分支 no-op merge `20261102_agent_mainline_merge`。
-- tenant 候选 head：`tv008_d4_recovery`，前驱 `tv007_d4_text_delivery`；后者前驱为 `tv006_agent_read_tasks`。
+- public head：`20261113_d4_recovery`，前驱 `20261109_d4_text_delivery`；后者前驱为原双分支 no-op merge `20261102_agent_mainline_merge`。
+- tenant head：`tv008_d4_recovery`，前驱 `tv007_d4_text_delivery`；后者前驱为 `tv006_agent_read_tasks`。
 - public/tenant 使用独立、手写自含且等价的增量 DDL；不从当前 ORM 动态生成、不以 `create_all` 替代迁移。
 - `tv001` 至 `tv007`、业务快照、manifest 和其中冻结 public head 均保持字节不变。
 - tenant 升级沿用原 owner-bound maintenance、同物理连接 session advisory lock、代际更新和全对象 parity；所有旧前驱仍受支持。`delivery_predecessor` 专指 `tv006`，既有 `predecessor`（`tv005`）等状态名不变。
@@ -33,7 +33,7 @@ FMEA 内部来源服务先刷新当前员工、角色、FMEA VIEW、工厂及产
 
 每次实际文本变化产生新修订号和 UUID，同值更新不追加；A→B→A 不复用旧修订，即使字段 HMAC 再次相同。字段 HMAC 区分 NULL 和空串，绑定服务端类型化命名空间与报告 UUID：租户使用真实 tenant UUID，single/public 使用显式 `single_public` 标记。HMAC 不绑定可变的工厂、产品线或 generation；这些当前坐标由后续交付检查承担。`single_public` 不因此获得正文准入。
 
-写入站点测试按文件、所属函数、AST 写入形态及数量维护白名单；同一文件新增写入口也必须显式复核。动态编辑另有业务行为测试。上述修订不是来源完整性证明、脱敏认证或任何插件授权；显式证明签发见下节 Task 4，正文交付仍待后续任务。
+写入站点测试按文件、所属函数、AST 写入形态及数量维护白名单；同一文件新增写入口也必须显式复核。动态编辑另有业务行为测试。上述修订不是来源完整性证明、脱敏认证或任何插件授权；显式证明签发见下节 Task 4，T9 正文交付候选及验收状态见下文。
 
 ## 显式来源声明与证明（Task 4）
 
@@ -51,7 +51,17 @@ FMEA 内部来源服务先刷新当前员工、角色、FMEA VIEW、工厂及产
 
 新 public/tenant 增量自含创建三张同构 tenant-local 表：`agent_d4_recovery_checkpoints` 保存任务、运行、授权引用、固定协议/入口和已确认水位等控制坐标；`agent_d4_recovery_restarts` 将一次控制与原、新运行及固定入口消息关联；`agent_d4_task_parent_grants` 将正文 task grant 固定绑定到单个同时覆盖目标和来源的 plugin grant。checkpoint 不保存正文、模型上下文或业务结果；旧 receipt 和来源版本不能成为新运行读取凭证。
 
-用户显式 restart 后，平台重新检查当前身份、准入、原父 grant、P/T 和当前来源，在一个事务内使旧运行凭据失效并创建新运行与固定入口。新凭据只通过正常 claim 签发；已确认水位不回退。旧 metadata checkpoint 与新受限 checkpoint 按可信任务类型隔离，不互相回退。此处只建立安全重开控制，T9 才能以真实正文服务验证新运行重读当前事实、获得新 receipt，且旧 receipt 不被消费；它不是业务回滚或 Agent 记忆恢复。
+用户显式 restart 后，平台重新检查当前身份、准入、原父 grant、P/T 和当前来源，在一个事务内使旧运行凭据失效并创建新运行与固定入口。新凭据只通过正常 claim 签发；已确认水位不回退。旧 metadata checkpoint 与新受限 checkpoint 按可信任务类型隔离，不互相回退。T9 已通过正常 API 与固定接收器见证新运行重读当前事实并获得新 receipt，旧 receipt 不被新运行消费。这是固定入口重新执行，不是业务回滚或 Agent 记忆恢复。
+
+## 受限正文交付（T9）
+
+`GET /api/agent/runtime/capa/d4/root-cause-text` 在真实 dev 租户、本地受信策略和当前运行身份下，先检查执行人、目标和 FMEA 来源、固定父 grant 与 P/T 精确交集。随后在独立只读、可重复读事务中预算并读取单个根因字段，应用既有规则生成候选，并按最终 JSON 字节执行 256 KiB 上限；提交前重验当前授权、修订、证明、来源节点及坐标。响应是 `restricted`、`masked` 的本地插件候选，`model_delivery_allowed=false`，`Cache-Control: no-store`，不输出词表、验证或 FMEA 节点内容和来源 ID。员工完整性声明是业务事实，不是降敏批准；零词表命中也不改变数据等级。
+
+每次读取在编码前生成独立 receipt UUID 和时间，并将最终投影摘要绑定到 receipt；受限 receipt 与 `release_committed` 审计同事务提交后才返回正文。该审计仅表示服务端提交，不证明接收方收到或使用；旧 metadata 的 receipt/event/result/checkpoint 不消费受限 receipt，旧 receipt 也不是新运行读取凭证。
+
+为保证最终检查和提交之间授权及来源不被改变，交付持有 CAPA/FMEA 父行锁至提交，并对员工、角色、关联权限及 grant/scope 等可变授权行使用 NOWAIT。相关锁冲突会回滚并返回固定 `503 {"detail":"Delivery unavailable"}`，可在冲突结束后重试；它不表示授权结论。来源或授权不可用时服务返回固定 `403 {"detail":"Source unavailable"}`；既有运行身份依赖可能更早拒绝请求。其他交付异常也回滚并返回固定 503；失败不返回正文或提交成功 receipt/审计。NOWAIT 仅用于上述授权行，并不表示其他锁都不等待。
+
+T9 实现及锁竞争修复已通过独立规格和质量复核；冻结综合回归 144 passed / 6 warnings、旧链 181 passed / 6 warnings，均无 skip。精确本地提交待完成；这些结果不代替 T10/T11 整片验收。
 
 ## 回退与证据保留
 
