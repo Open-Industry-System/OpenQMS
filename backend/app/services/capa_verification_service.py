@@ -121,7 +121,8 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         return existing, getattr(capa, field) or ""
 
     # The parent guard already holds the row lock and returned fresh data.
-    current = getattr(capa, field) or ""
+    previous = getattr(capa, field)
+    current = previous or ""
     new_value = f"{current}\n{req.adopted_text}" if current else req.adopted_text
     setattr(capa, field, new_value)
     adoption = CapaAIAdoption(
@@ -143,6 +144,9 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     if field in capa_service.EMBEDDING_FIELDS:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
     try:
+        if field == "d4_root_cause" and new_value != previous:
+            from app.services.capa_d4_provenance import record_root_revision
+            await record_root_revision(db, report_id=capa.report_id, actor_id=actor_id, write_path="capa.adopt")
         await db.commit()
     except IntegrityError:
         # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）

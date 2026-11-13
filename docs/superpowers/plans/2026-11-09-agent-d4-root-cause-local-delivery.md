@@ -314,9 +314,9 @@ def create_scope_table(op, sa, pg, name, parent_column, parent_table):
 - Modify: `backend/app/services/audit_service.py`
 - Modify: `backend/app/services/capa_current_access.py`
 
-- [ ] RED：同一CAPA EDIT/no FMEA VIEW员工、同合法结构的真实/虚构节点，`visible_fmea_source`均固定SourceUnavailable；spy节点读取0。另测FMEA VIEW但对象越范围、不存在及不确定，响应不可区分。
-- [ ] 实现“权限→标量可见性→关联/坐标→节点”。来源helper的查询先过滤可见factory/PL，只select FMEA id/factory/PL；不能先用旧 `_normalize_and_validate_source_ref` 查图再补权限。诊断前/签发前重新核可见性。
-- [ ] 有界节点SQL代码形态：
+- [x] RED：同一CAPA EDIT/no FMEA VIEW员工、同合法结构的真实/虚构节点，`visible_fmea_source`均固定SourceUnavailable；spy节点读取0。另测FMEA VIEW但对象越范围、不存在及不确定，响应不可区分。
+- [x] 实现“权限→标量可见性→关联/坐标→节点”。来源helper的查询先过滤可见factory/PL，只select FMEA id/factory/PL；不能先用旧 `_normalize_and_validate_source_ref` 查图再补权限。诊断前/签发前重新核可见性。
+- [x] 有界节点SQL代码形态：
 
 ```sql
 WITH nodes AS (
@@ -331,7 +331,7 @@ SELECT count(*), max(octet_length(n::text)) FROM nodes;
 
 先确认唯一且<=64KiB，再仅取该node，检查type=FailureCause；不得加载FMEADocument整ORM/graph。HMAC规范：`json.dumps(node,sort_keys=True,separators=(',', ':'),ensure_ascii=False,allow_nan=False).encode('utf-8')`，前置规格域串和换行；未知/重复/过大拒绝，不输出node。
 
-- [ ] 根因字段HMAC与交付source_version**分开**：2026-11-11用户明确批准类型化命名空间补充。修订表field_hmac只绑定服务端命名空间（tenant真实UUID或显式single_public标记）、report UUID及原始text（null与空串区分），不绑定会改变的factory/PL、tenant generation、来源/规则，以免合法坐标变化被误报为“未记录文本写入”；交付source_version另覆盖规格所有当前坐标/修订/原文。不得用None/零UUID/UUID5伪装租户或从HTTP取身份，也不跳过single/public修订；single_public不增加正文准入。
+- [x] 根因字段HMAC与交付source_version**分开**：2026-11-11用户明确批准类型化命名空间补充。修订表field_hmac只绑定服务端命名空间（tenant真实UUID或显式single_public标记）、report UUID及原始text（null与空串区分），不绑定会改变的factory/PL、tenant generation、来源/规则，以免合法坐标变化被误报为“未记录文本写入”；交付source_version另覆盖规格所有当前坐标/修订/原文。不得用None/零UUID/UUID5伪装租户或从HTTP取身份，也不跳过single/public修订；single_public不增加正文准入。
 
 ```python
 import hashlib, hmac, json
@@ -345,9 +345,9 @@ def field_hmac(key, namespace, report_id, text):
                     hashlib.sha256).hexdigest()
 ```
 
-- [ ] 在CAPA父锁下按report取最新修订，实际text变化后追加 `revision_no+1`/新UUID；helper不commit。普通update动态循环先识别d4实际变化，业务mutate/embedding原流程不改，提交前记录；adopt在追加字段后记录；审核发现建单在获得report_id后记录初始text。若该旧建单路径因原有工厂约束不能成功，记录真实失败，单独核必需坐标传递，不假装通过或绕过工厂校验。
-- [ ] 测试完整A→B→A：由普通PUT、adopt、正常建单分别观察修订序号/UUID/HMAC；同值no-op不追加。静态测试只扫描services/api字面量写站点白名单，seeds/tests排除；动态setattr用专门行为测试；签发bootstrap为第四路径而非静态字面量写检测。
-- [ ] GREEN：上述DB及无网络site-contract测试；旧CAPA业务/embedding调用次数断言保持，Commit `feat(capa): track root-field revisions and authorize source visibility first`。
+- [x] 在CAPA父锁下按report取最新修订，实际text变化后追加 `revision_no+1`/新UUID；helper不commit。普通update动态循环先识别d4实际变化，业务mutate/embedding原流程不改，提交前记录；adopt在追加字段后记录；审核发现建单在获得report_id后记录初始text。若该旧建单路径因原有工厂约束不能成功，记录真实失败，单独核必需坐标传递，不假装通过或绕过工厂校验。
+- [x] 测试完整A→B→A：由普通PUT、adopt、正常建单分别观察修订序号/UUID/HMAC；同值no-op不追加。静态测试只扫描services/api字面量写站点白名单，seeds/tests排除；动态setattr用专门行为测试；签发bootstrap为第四路径而非静态字面量写检测。
+- [x] GREEN：上述DB及无网络site-contract测试；旧CAPA业务/embedding调用次数断言保持，Commit `feat(capa): track root-field revisions and authorize source visibility first`。
 
 ## Task 4: 同一验证动作显式签发及不可复活
 
