@@ -45,7 +45,8 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         )):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
-        if (settings.AGENT_LOCAL_TRIAL_MODE == "local_metadata" and is_local_trial_path(path)
+        if ((settings.AGENT_LOCAL_TRIAL_MODE == "local_metadata"
+             or settings.AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED) and is_local_trial_path(path)
                 and not local_trial_peer_allowed(request)):
             return JSONResponse(status_code=403, content={"detail": "Access denied"})
 

@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-11-13 T7 双复核通过**：新增独立正文策略槽和服务端精确 admission 选择，策略快照从 app state 进入 DB session；单独 peer gate、受信 profile 投递声明和 HMAC 绑定不扩展旧 metadata。为接入既有选择调用，最小修改计划清单外 `task_service.trial_for_target`；更新 T1 对新 profile 未知的过时断言，保留 baseline DENY。正文-only 仍不能通过旧 summary/grant ready 防线，未使正文可 claim。规格复核指出旧 metadata 的 restricted/raw 消息声明及正文 token 截期/重启绑定测试缺失，已补并复审通过；质量复核通过。最终纯组合 **213 passed /3 warnings**；修正声明之前专用库旧链 **97 passed /4 warnings**、策略路径修复后 admission **8 passed /4 warnings**，不称为最终完整 DB 运行。祖先 symlink 真实 RED 后改逐组件 no-follow；文本 token/绑定测试使用内部接缝而非真实 claim。T8 首次可 claim 的真实 HTTP 消息哨兵仍为强制提交门禁；不启生产或模型。
+
 > **2026-11-13 T6 双复核通过**：新增服务端固定启动消息门禁，在最终身份/准入刷新后、消息 claim 标记或审计、history 输出及真实批次 ACK 水位变更之前检查全部相关消息；旧 profile 语义不变，未开放正文准入。独立规格和质量复核通过，无未关闭 Critical/Important。纯合同真实 RED **4 failed → 4 passed**；Lead 当前独立纯检查 **4 passed /3 warnings**，专用库消息与 checkpoint 回归 **89 passed /4 warnings /239.99s，exit0**（`test-1794541243132929000.log`），其中五个负向及固定字面量正向使用服务端身份 seam 注入未来 profile，不代表真实准入。首次可 claim 的真实 API 哨兵见证仍是 T8 必须条件；下一任务 T7，正文与生产默认关闭。
 
 > **2026-11-13 T5 双复核通过**：接续已有固定 stdlib 接收器及受监督启动器草稿，独立规格与质量复核均通过，未发现未关闭 Critical/Important。Lead 在获准的自有数字回环环境独立运行两份 CLI 测试 **104 passed /7.89s**；先前误用 `check-ci-pure.py` 的 74 failed /30 passed 为框架主动禁止 socket，不作为行为证据；沙箱内绑定拒绝的 77 failed /27 passed 同属环境限制。接收器 SHA256 `3a2dfa9712c2ffebc62c26da0c4c03192be4ec905d1ee83e3ae198bfab51fa21`，启动器 `3d4bff2ff2e633eb2da8d6e80a52f68c4d6adb1dd5cbb187b190f9a6a5b961da`；SDK 传输差异见[对照文档](docs/development/d4-text-receiver-wire.md)。此为本地 wire 验证，正常策略真实 API 闭环仍待 T10；下一任务 T6 消息门禁，必须先于准入，不启生产或模型。

@@ -87,7 +87,7 @@ def test_body_baseline_deny_and_legacy_profile_does_not_expand():
     assert set(_LOCAL_METADATA_CAPABILITIES) == {
         'capa.d4.summary.masked.v1', 'capa.d4.candidate.propose.v1'}
     assert get_capability(BODY, profile='local_metadata_v1') is None
-    assert get_capability(BODY, profile='local_d4_root_cause_text_v1') is None
+    assert get_capability(BODY, profile='local_d4_root_cause_text_v1').approval_floor == ApprovalFloor.DIRECT
     assert get_capability('capa.d4.summary.masked.v1').approval_floor == ApprovalFloor.DENY
     assert get_capability('capa.d4.summary.masked.v1', profile='local_metadata_v1').approval_floor == ApprovalFloor.DIRECT
     assert get_capability('capa.d4.candidate.propose.v1').approval_floor == ApprovalFloor.DENY

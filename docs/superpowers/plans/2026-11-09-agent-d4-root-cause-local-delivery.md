@@ -454,14 +454,14 @@ def require_profile_message_contents(profile, rows):
 - Modify: `backend/app/services/agent/permissions/catalog.py`
 - Modify: `backend/app/services/agent_runtime/run_auth.py`
 
-- [ ] RED：text slot缺失/错误类型/词表泄漏/错worker/hash/非dev/过期/重复JSON键/符号链接/不安全权限均不可准入；同时开启两个slot也不串安装或profile。由T5真实hash作正向，不自动接受当前文件的任意hash。
-- [ ] 准入前置：依赖已完成并双复核的T6消息门禁；缺任一路径的门禁调用就保持正文profile不可准入/消息不可交付，不能落入legacy分支。首次实际允许claim时同提交见证敏感非字面量在claim/reclaim/history/ACK均不出站且状态不推进（若本任务仍因共享授权未打通而不可claim，最晚T8首次打通时实测，不伪造token冒充）。
-- [ ] 固定平台绑定：metadata profile最低summary保持旧集合；text profile最低仅正文cap。baseline全DENY，profile目录只提升已准入的context，不把整个新增CAPA目录盲spread到旧profile。FMEA来源声明留内部，不出get_capability/manifest。
-- [ ] lifespan分别装两个frozen policy，`get_db`只从实际app.state附到session.info；缺引用用EMPTY，不读环境文件/不在每个请求reload。文字词表只存在text slot；binding字段兼容 `TrialAdmission.binding_sha256`，新值为HMAC-SHA256，不把私有词表的plain SHA暴露在token/日志。
-- [ ] `select_runtime_admission(db, installation, executor_id, coordinates)`逐个检查两个独立slot，匹配具体安装/key/version/hash；未知/冲突failclosed，不从HTTP profile名选择。Run token绑定该admission，每次重验比较binding和到期；租约clip不延长。
-- [ ] 本任务只加载第二slot/绑定，尚未完成T8的正文grant/ready路径；正文安装仅声明body能力时必须仍不能claim，不临时借授summary开门。若任一接线已经令其可claim，必须在本提交提前引入T8早期harness及全部消息负向验收，否则回退准入，不能延期。
-- [ ] peer gate由“metadata有效本地模式或text启用”驱动相关agent路径，保留旧metadata路径关闭语义；newGET还需自身flag和dev。拒forwarded，HTTPS不降级。SourceDeclaration业务入口只新分支使用真实peer上下文，不封锁无声明原业务调用。
-- [ ] GREEN：两个slot交叉错凭据、轮换/永久撤销/重启策略binding变化、元数据旧fixedhash与Capabilities不增加正文。Commit `feat(agent): bind independent local text admission to module contracts`。
+- [x] RED：text slot缺失/错误类型/词表泄漏/错worker/hash/非dev/过期/重复JSON键/符号链接/不安全权限均不可准入；同时开启两个slot也不串安装或profile。由T5真实hash作正向，不自动接受当前文件的任意hash。
+- [x] 准入前置：依赖已完成并双复核的T6消息门禁；缺任一路径的门禁调用就保持正文profile不可准入/消息不可交付，不能落入legacy分支。首次实际允许claim时同提交见证敏感非字面量在claim/reclaim/history/ACK均不出站且状态不推进（若本任务仍因共享授权未打通而不可claim，最晚T8首次打通时实测，不伪造token冒充）。
+- [x] 固定平台绑定：metadata profile最低summary保持旧集合；text profile最低仅正文cap。baseline全DENY，profile目录只提升已准入的context，不把整个新增CAPA目录盲spread到旧profile。FMEA来源声明留内部，不出get_capability/manifest。
+- [x] lifespan分别装两个frozen policy，`get_db`只从实际app.state附到session.info；缺引用用EMPTY，不读环境文件/不在每个请求reload。文字词表只存在text slot；binding字段兼容 `TrialAdmission.binding_sha256`，新值为HMAC-SHA256，不把私有词表的plain SHA暴露在token/日志。
+- [x] `select_runtime_admission(db, installation, executor_id, coordinates)`逐个检查两个独立slot，匹配具体安装/key/version/hash；未知/冲突failclosed，不从HTTP profile名选择。Run token绑定该admission，每次重验比较binding和到期；租约clip不延长。
+- [x] 本任务只加载第二slot/绑定，尚未完成T8的正文grant/ready路径；正文安装仅声明body能力时必须仍不能claim，不临时借授summary开门。若任一接线已经令其可claim，必须在本提交提前引入T8早期harness及全部消息负向验收，否则回退准入，不能延期。
+- [x] peer gate由“metadata有效本地模式或text启用”驱动相关agent路径，保留旧metadata路径关闭语义；newGET还需自身flag和dev。拒forwarded，HTTPS不降级。SourceDeclaration业务入口只新分支使用真实peer上下文，不封锁无声明原业务调用。
+- [x] GREEN：两个slot交叉错凭据、轮换/永久撤销/重启策略binding变化、元数据旧fixedhash与Capabilities不增加正文。Commit `feat(agent): bind independent local text admission to module contracts`。
 
 ## Task 8: 两层范围持久化与统一授权/目录/控制
 
@@ -633,4 +633,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T6 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T7 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。

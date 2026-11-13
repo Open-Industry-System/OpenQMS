@@ -18,7 +18,7 @@ from app.services.agent.permissions.catalog import get_capability
 from app.services.agent.permissions.types import AccessAttempt, ApprovalFloor, Grant
 from app.services.capa_current_access import require_business_namespace, current_capa_access, capa_target_filters
 from app.services.agent_runtime import task_updates
-from app.services.agent_runtime.trial_policy import EMPTY_POLICY, select_admission
+from app.services.agent_runtime.deployment_profiles import select_runtime_admission
 
 TARGET_SUMMARY = "capa.d4.summary.masked.v1"
 
@@ -85,10 +85,7 @@ async def list_for_initiator(db: AsyncSession, scope: RequestScope, page: int,
 
 
 def trial_for_target(db, installation, executor_user_id, target):
-    return select_admission(db.info.get("agent_local_trial_policy", EMPTY_POLICY),
-        binding=db.info.get("tenant_binding"), installation=installation,
-        executor_user_id=executor_user_id, report_id=target.report_id,
-        factory_id=target.factory_id, product_line_code=target.product_line_code, now=datetime.now(UTC))
+    return select_runtime_admission(db, installation, executor_user_id, target, now=datetime.now(UTC))
 
 
 def _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grants, *, trial=None):
