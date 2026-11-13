@@ -1,6 +1,6 @@
 # D4 本地正文接收器的受限恢复检查点
 
-**状态：合同和 T8 实现已通过独立规格、质量复核与本地验收；本地提交待完成。** 本文补充已批准的 [D4 本地交付规格](2026-11-08-agent-d4-root-cause-local-delivery-design.md)，仅为固定只读正文接收器定义用户显式 restart；T8 在本合同实现和验收前不签收。用户授权按本合同设计、复核、实施，未授权生产、模型、通用 Agent 记忆或扩大来源范围。
+**状态：合同及 T8 已通过独立规格、质量复核与本地验收，提交 `9195c1f5`；T9 已实证重读及新 receipt，T11 本地门禁通过、资源清理待完成。** 本文补充已批准的 [D4 本地交付规格](2026-11-08-agent-d4-root-cause-local-delivery-design.md)，仅为固定只读正文接收器定义用户显式 restart；T8 在本合同实现和验收前不签收。用户授权按本合同设计、复核、实施，未授权生产、模型、通用 Agent 记忆或扩大来源范围。
 
 ## 1. 语义与隔离
 
@@ -34,6 +34,8 @@ public/tenant 两条 Alembic 增量分别自 `20261109_d4_text_delivery` / `tv00
 
 原 run 标记 stopped、epoch 加一并清 lease/claim；新建同 task、同 installation/version 的 pending run，server UUID、epoch 0、无 token/lease，复制 checkpoint 水位；创建新关联、控制记录、必要固定入口消息、任务更新指针和不含正文的审计，同一事务提交。旧运行凭据因旧 run 状态/epoch 立即失效；新凭据仅在新运行按现有正常 claim 完成所有当前校验后签发，受策略及租约期限约束。任意失败全部回滚；只识别明确约束的预期并发竞争，未知数据库异常不伪装幂等成功。并发同 key 通过 task 锁和持久原请求比较返回同一个新 run；不同 key 或相同 checkpoint 的竞争最多一个成功，另一个冲突。提交后丢响应的相同 key 可查询或重试恢复结果，不再次执行副作用。
 
+checkpoint 和 restart 的末次控制权或授权重验至事务提交受锁围栏保护；恢复在读取或锁定来源前先核来源可见性，避免无权对象的忙闲侧信道。pause/cancel、blocked cancel 及重放也在最终控制权复核至提交间受围栏保护，不依赖正文/FMEA/grant，也不读取正文或来源节点。并发权限维护冲突可返回固定脱敏 503 并回滚，该边界也适用于旧 metadata；不意味着所有锁均不等待。恢复对既有 proof、revision、verification 历史元数据逐行加锁，成本随历史线性增长，尚无大历史性能验证。
+
 ## 4. 固定入口与消息水位
 
 现有 T5 固定接收器每次要求六操作中的消息 claim 返回一条未接受的 `deliver_d4_root_cause_candidate_v1`，故只复制已确认水位会在原启动消息已 ACK 时得不到入口。不能回退水位、重放已接受批次或伪造 ACK；在 restart 的同一事务按服务端固定字面量产生入口：
@@ -55,8 +57,8 @@ checkpoint 创建在同一事务分配现有 `agent_task_updates` 的 `kind='che
 
 先以真实 PostgreSQL RED→GREEN 测试独立类型及迁移：public/tenant 空库与前驱升级、parity、空回退重升、任一新表非空回退拒绝；旧冻结对象和 checkpoint/receipt 使用不变。另一类型表独有的 UUID 不被接收；两表相同 UUID 时仅服务器指定类型的合法行可被解析，不作无法判别的调用者意图断言。正文模式不回退旧 checkpoint，旧 metadata 不回退新 checkpoint；其他租户/代际、任务、运行、用户、工厂/产品线或过期 epoch 的 ID 一律拒绝且无写入。
 
-正常授权 API + 自有数字回环真实运行：两种位置（启动消息未 ACK、已 ACK）暂停、创建 checkpoint、restart、新 run claim；新 run 的固定入口经过真实消息门禁，旧 epoch batch/旧 token 拒绝，新消息唯一且水位不倒退。T9 正文服务首次可用时再验证完整接收器真实重新读取当前业务事实并获得新 receipt，旧 receipt 未被消费；T8 不以未实现正文 GET 或虚构 receipt 声称完整读取。测试运行可使用当前固定 T5 worker，通过启动器与真实协议；不能使用 fake DIRECT/TRUSTED 补丁代替正常授权。
+正常授权 API + 自有数字回环真实运行：两种位置（启动消息未 ACK、已 ACK）暂停、创建 checkpoint、restart、新 run claim；新 run 的固定入口经过真实消息门禁，旧 epoch batch/旧 token 拒绝，新消息唯一且水位不倒退。T9 已验证完整接收器真实重新读取当前业务事实并获得新 receipt，旧 receipt 未被消费；T8 的入口测试不单独证明正文读取。测试运行可使用当前固定 T5 worker，通过启动器与真实协议；不能使用 fake DIRECT/TRUSTED 补丁代替正常授权。
 
 覆盖相同 key 重复点击（含丢响应后、当前 run 已换）返回原结果且只一个 control、新 run 与新入口；两个真实事务同 key 与不同 key 并发、checkpoint 双消费、错误参数与其他唯一约束错误；旧 token 在 pause/restart 后拒绝，新凭据只能正常 claim 后取得。分别撤用户控制权、正文 grant、插件、FMEA VIEW、P/T、tenant generation 和策略；在用户保有控制权时，失效正文策略或 grant 后仍能识别任务并创建控制位置、pause/cancel 仍可用，restart 拒绝且不创建 run/checkpoint关联/消息/成功审计。checkpoint 创建的真实双事务测试在初次权限检查后撤销用户控制权，必须拒绝且无 checkpoint、pointer 或成功审计；并发改变 task/run/epoch 或消息水位亦须拒绝，不能靠插件或 FMEA 权限代替用户最终重验。真实 API 创建无 grant、无 run 的 blocked 正文任务后，仍有任务控制权的用户可成功 cancel；检查没有新 run、正文 grant 或来源授权旁表。证明 A→B 且旧 P/T 仅 A 时拒绝、P/T 与父 grant 在重开前后逐字不变，不以可读 B 或新 proof 自动授 B。验证未接受旧批次不能跨 epoch ACK、任一额外/非法消息无内容泄露/无状态推进、同 task 的成功审计和更新指针原子性；构造大量已接受历史及超大非法消息，SQL 见证仅输出有界标量和至多一条必要消息 ID，不选择或回传消息正文，所有响应、异常、日志和审计均不含其哨兵。真实 API 活动列表覆盖受限 checkpoint 与 restart 控制物化、分页及最后权限重验；旧 metadata 活动形状不变；正常 claim 检查新旧 `has_resume_checkpoint` 精确行为，伪造或损坏的关联 fail closed。事务级故障注入覆盖停止旧 run、创建新 run、追加消息、控制记录及审计前后的 rollback；输出、日志和审计均不含正文、token、节点或词表。
 
-实现采用独立聚焦子任务先迁移/模型、再 checkpoint 和 restart、再消息固定入口/真实 API，逐任务规格复核→质量复核；T8 本地验收已通过；精确本地提交后按原计划进入 T9。确认当前独占测试资源身份后串行运行；不访问或清理其他任务资源，不推送、合并、部署或启用生产、模型。
+实现采用独立聚焦子任务先迁移/模型、再 checkpoint 和 restart、再消息固定入口/真实 API，逐任务规格复核→质量复核；T8 已本地提交 `9195c1f5`，T9 已本地提交 `be232bfe`。确认当前独占测试资源身份后串行运行；不访问或清理其他任务资源，不推送、合并、部署或启用生产、模型。

@@ -195,7 +195,7 @@ async def test_early_guard_has_zero_tenant_auth_db_body_or_downstream_access(mon
 
 
 @pytest.mark.asyncio
-async def test_new_flag_does_not_disable_metadata_and_does_not_create_text_handler(monkeypatch):
+async def test_new_flag_does_not_disable_metadata_and_registers_exact_text_handler(monkeypatch):
     from app.core import tenant_context as tenant
     monkeypatch.setattr(tenant.settings, 'TENANT_MODE', 'single')
     monkeypatch.setattr(tenant.settings, 'AGENT_TASK_RUNTIME_ENABLED', True)
@@ -210,15 +210,11 @@ async def test_new_flag_does_not_disable_metadata_and_does_not_create_text_handl
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
         assert (await client.get('/api/agent/runtime/capa/context')).json() == {'metadata': True}
 
-    from app.api.agent_runtime import router
-    monkeypatch.setattr(tenant.settings, 'TENANT_MODE', 'dev')
-    monkeypatch.setitem(tenant.settings.__dict__, 'AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED', True)
-    runtime_app = FastAPI()
-    runtime_app.include_router(router)
-    # Exercise the actual production router, with no dependency overrides. This
-    # checks handler absence, not production tenant/auth isolation (tested above).
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=runtime_app), base_url='http://test') as client:
-        for suffix in ('', '/'):
-            response = await client.request('GET', PATH+suffix+'?view=raw&unknown=1',
-                json={'field': 'd2_description', 'raw': True})
-            assert response.status_code == 404
+    from app.api.agent_runtime import d4_root_cause_text, router
+    # T9 installs the actual handler; registration is not authorization.
+    # Real early 404, tenant/credential checks and authorized delivery are
+    # exercised separately through their respective middleware and HTTP tests.
+    routes = [route for route in router.routes if route.path == PATH]
+    assert len(routes) == 1
+    assert routes[0].methods == {'GET'}
+    assert routes[0].endpoint is d4_root_cause_text

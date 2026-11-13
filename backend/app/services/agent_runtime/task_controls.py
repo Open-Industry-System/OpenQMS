@@ -109,6 +109,14 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             await db.scalar(select(AgentRun).where(AgentRun.run_id == run.run_id).with_for_update()
                 .execution_options(populate_existing=True))
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
+    if request.action in {'pause', 'cancel'}:
+        # Stopping is controlled solely by the current task owner.  Fence that
+        # authority for every profile, including blocked tasks and replays,
+        # without classifying the task or requiring plugin/source permission.
+        from app.services.agent_runtime.control_authority_fence import lock_control_target, lock_employee_acl
+        await lock_control_target(db, task)
+        await lock_employee_acl(db, (scope.user.user_id,), control_only=True)
+        task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
     with db.no_autoflush:
         previous = await db.scalar(select(AgentTaskControl).where(
             AgentTaskControl.task_id == task_id, AgentTaskControl.key == request.idempotency_key)
@@ -118,6 +126,10 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
     if previous is not None:
         if not await _same_control(db, task, previous, request):
             raise ValueError("Control key reused with different arguments")
+        if previous.action == 'restart' and previous.checkpoint_id is None:
+            from app.services.agent_runtime.control_authority_fence import lock_control_target, lock_employee_acl
+            await lock_control_target(db, task)
+            await lock_employee_acl(db, (scope.user.user_id,), control_only=True)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
         if previous.action == 'restart' and previous.checkpoint_id is None:
             from app.services.agent_runtime import d4_recovery
@@ -159,6 +171,35 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
         await _resume_authority(db, task, run, installation)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
+        from app.services.agent_runtime import d4_recovery
+        if await d4_recovery.is_text_task(db, task):
+            from app.services.agent_runtime.control_authority_fence import (
+                lock_control_target, lock_employee_acl, lock_restart_grants, lock_restart_source,
+                require_restart_target_source,
+            )
+            # Pin the target first, then reject a replaced source without
+            # querying or locking the unapproved FMEA.
+            await lock_control_target(db, task)
+            await require_restart_target_source(db, task, restart_authority.current_source)
+            await lock_employee_acl(db, (scope.user.user_id, task.executor_user_id))
+            task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
+            pre_source = await _resume_authority(db, task, run, installation)
+            if (pre_source.trial != restart_authority.trial
+                    or pre_source.current_source != restart_authority.current_source
+                    or pre_source.source_grant_pairs != restart_authority.source_grant_pairs):
+                raise PermissionError('Recovery unavailable')
+            # Source lock is NOWAIT: if an FMEA writer holds it and then
+            # writes a user-linked audit, we release our ACL locks promptly.
+            await lock_restart_source(db, task, pre_source.current_source)
+            await lock_restart_grants(db, task, installation)
+            # No locks grant authority; current user, deployment and source
+            # permissions are reloaded before any control mutation.
+            task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
+            fenced = await _resume_authority(db, task, run, installation)
+            if (fenced.trial != restart_authority.trial
+                    or fenced.current_source != restart_authority.current_source
+                    or fenced.source_grant_pairs != restart_authority.source_grant_pairs):
+                raise PermissionError('Recovery unavailable')
     text_restart = False
     position = None
     checkpoint = None

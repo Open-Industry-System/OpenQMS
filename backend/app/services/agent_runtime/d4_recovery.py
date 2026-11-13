@@ -115,6 +115,11 @@ async def create_checkpoint(db, scope, task_id, run_id, expected_epoch):
             await db.scalar(select(AgentRun).where(AgentRun.run_id == run.run_id).with_for_update())
     if installation is None:
         raise PermissionError('Recovery unavailable')
+    # Only current task-control authority is needed; no grant, FMEA or node
+    # access is introduced by the control-only checkpoint.
+    from app.services.agent_runtime.control_authority_fence import lock_control_target, lock_employee_acl
+    await lock_control_target(db, task)
+    await lock_employee_acl(db, (scope.user.user_id,), control_only=True)
     task, run = await _fresh_authority(db, scope, task_id, task_binding, run_binding)
     if (run is None or run.run_id != run_id or task.status != 'paused' or run.status != 'paused'
             or run.lease_epoch != expected_epoch):

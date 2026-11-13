@@ -15,7 +15,7 @@ from app.schemas.agent_control import (TaskControl, TaskControlOut, ActivityHTTP
 from app.schemas.agent_runtime import RuntimeResultOut, ReadonlyCheckpointView
 from app.schemas.agent_d4_recovery import D4RecoveryCreate, D4RecoveryView
 from app.schemas.agent_task import TaskCreate, TaskList, TaskMessageAccepted, TaskMessageCreate, TaskOut
-from app.services.agent_runtime import message_queue, task_service, readonly_delivery, task_controls, checkpoint_service, task_reads, d4_recovery
+from app.services.agent_runtime import message_queue, task_service, readonly_delivery, task_controls, checkpoint_service, task_reads, d4_recovery, control_authority_fence
 
 
 class _RecoveryAccessLogFilter(logging.Filter):
@@ -69,6 +69,8 @@ async def create_d4_recovery_checkpoint(task_id: str, request: Request,
         raise HTTPException(status_code=422, detail='Invalid request') from None
     try:
         return await d4_recovery.create_checkpoint(db, scope, identifier, body.run_id, body.expected_epoch)
+    except control_authority_fence.ControlFenceBusy:
+        raise HTTPException(status_code=503, detail='Recovery unavailable') from None
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
 
@@ -158,6 +160,8 @@ async def control_task(task_id: UUID, body: TaskControl,
                        scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):
     try:
         return await task_controls.control_task(db, scope, task_id, body)
+    except control_authority_fence.ControlFenceBusy:
+        raise HTTPException(status_code=503, detail='Recovery unavailable') from None
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
 

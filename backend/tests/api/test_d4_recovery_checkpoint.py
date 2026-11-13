@@ -145,7 +145,8 @@ async def test_checkpoint_after_grant_revocation_is_control_only(d4_text_server,
 
 
 async def test_checkpoint_rechecks_control_after_position_read(d4_text_server, monkeypatch):
-    from sqlalchemy import func, select, update
+    from sqlalchemy import func, select, text, update
+    from sqlalchemy.exc import DBAPIError
     from app.models.agent_d4_recovery import D4RecoveryCheckpoint
     from app.models.role import RolePermission
     from app.services.agent_runtime import d4_recovery
@@ -164,9 +165,16 @@ async def test_checkpoint_rechecks_control_after_position_read(d4_text_server, m
         calls += 1
         if calls == 2:
             async with c.session() as other:
-                await other.execute(update(RolePermission).where(RolePermission.role_id == c.role_id,
-                    RolePermission.module == 'capa').values(permission_level=0))
-                await other.commit()
+                await other.execute(text("SET LOCAL lock_timeout = '200ms'"))
+                try:
+                    await other.execute(update(RolePermission).where(RolePermission.role_id == c.role_id,
+                        RolePermission.module == 'capa').values(permission_level=0))
+                    await other.commit()
+                except DBAPIError as exc:
+                    assert getattr(exc.orig, 'sqlstate', None) == '55P03'
+                else:
+                    raise AssertionError('concurrent control revocation unexpectedly committed')
+            raise RuntimeError('synthetic checkpoint rollback after permission lock conflict')
         return result
     async with httpx.AsyncClient(base_url=c.text_base_url, timeout=15) as client:
         claim = await client.post('/api/agent/runtime/claim', headers={'X-Tenant-ID': c.slug}, json={
@@ -179,7 +187,7 @@ async def test_checkpoint_rechecks_control_after_position_read(d4_text_server, m
         monkeypatch.setattr(d4_recovery, 'validate_message_position', revoke_after_last_position)
         response = await client.post(f'/api/agent/tasks/{task_id}/d4-recovery-checkpoints', headers=headers,
             json={'run_id': claim.json()['run_id'], 'expected_epoch': pause.json()['lease_epoch']})
-        assert response.status_code == 403, response.text
+        assert response.status_code == 500, response.text
         async with c.session() as db:
             assert await db.scalar(select(func.count()).select_from(D4RecoveryCheckpoint)) == 0
 
@@ -320,7 +328,8 @@ async def test_large_history_uses_scalar_queries_and_never_falls_back_to_old_che
 
 
 async def test_checkpoint_rechecks_control_after_pointer_flush(d4_text_server, monkeypatch):
-    from sqlalchemy import func, select, update
+    from sqlalchemy import func, select, text, update
+    from sqlalchemy.exc import DBAPIError
     from app.models.agent_d4_recovery import D4RecoveryCheckpoint
     from app.models.agent_readonly_control import AgentTaskUpdate
     from app.models.audit import AuditLog
@@ -337,10 +346,16 @@ async def test_checkpoint_rechecks_control_after_pointer_flush(d4_text_server, m
     async def revoke_after_pointer(*args, **kwargs):
         result = await original(*args, **kwargs)
         async with c.session() as other:
-            await other.execute(update(RolePermission).where(RolePermission.role_id == c.role_id,
-                RolePermission.module == 'capa').values(permission_level=0))
-            await other.commit()
-        return result
+            await other.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            try:
+                await other.execute(update(RolePermission).where(RolePermission.role_id == c.role_id,
+                    RolePermission.module == 'capa').values(permission_level=0))
+                await other.commit()
+            except DBAPIError as exc:
+                assert getattr(exc.orig, 'sqlstate', None) == '55P03'
+            else:
+                raise AssertionError('concurrent control revocation unexpectedly committed')
+        raise RuntimeError('synthetic checkpoint rollback after permission lock conflict')
     async with httpx.AsyncClient(base_url=c.text_base_url, timeout=15) as client:
         claim = await client.post('/api/agent/runtime/claim', headers={'X-Tenant-ID': c.slug}, json={
             'installation_id': str(c.text_id), 'secret': c.text_secret, 'request_key': uuid4().hex})
@@ -355,7 +370,7 @@ async def test_checkpoint_rechecks_control_after_pointer_flush(d4_text_server, m
         monkeypatch.setattr(d4_recovery.task_updates, 'append_update', revoke_after_pointer)
         response = await client.post(f'/api/agent/tasks/{task_id}/d4-recovery-checkpoints', headers=headers,
             json={'run_id': claim.json()['run_id'], 'expected_epoch': pause.json()['lease_epoch']})
-        assert response.status_code == 403, response.text
+        assert response.status_code == 500, response.text
         async with c.session() as db:
             assert await db.scalar(select(func.count()).select_from(D4RecoveryCheckpoint)) == 0
             assert (await db.scalar(select(func.count()).select_from(AgentTaskUpdate)),

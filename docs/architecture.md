@@ -176,6 +176,8 @@ R4a 的元数据本地受控试用已实现：lifespan 一次加载严格安全�
 
 R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收口既有当前 namespace/角色/对象范围，运行时旧入口保留；纯规则与显式字面词只处理三个D4正文位置，输出固定restricted/未批准降敏/外发关闭。预览服务先验证预算再在捕获租户的独立RR/READ ONLY快照读取显式字段，明确FMEA引用重验当前源权限/坐标/节点，仅返回有权来源元数据，不加载图/标题/附件。源版本用域分离HMAC；最终重查当前权限和源版本后只提交安全审计，不写原文/状态/outbox。三个普通用户接口受独立默认关闭开关和内容安全输入/错误边界保护，运行凭据不适用。只读组件不缓存正文或词语，2秒可见校验、30秒本地最长生命周期，失权/不确定/关闭隐藏时撤回私密内容及词语；旧响应按身份/目标/请求轮次隔离。实际员工API/Chromium已贯通；完整冻结证据见[R4b-1台账](superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)，操作与规则限制见[员工预览指南](development/capa-d4-text-preview.md)。不扩展R4a插件目录或任何正文/模型外发，附件/SDK/部署与正式降敏门禁仍独立。
 
+R4b D4 根因本地受控交付在默认关闭的独立 dev、真实回环 profile 下，以员工显式完整性声明、受控修订和 FMEA 来源验证为基础；插件与任务各自保存精确来源范围，并固定同一父 grant。固定只读接收器经过消息门禁读取单字段 RR/READ ONLY 有界脱敏候选，最终重验并提交独立 restricted receipt，未授模型或生产外发。用户显式的受限 restart 只保存控制坐标，从固定入口重新执行、重读当前事实并生成新 receipt；不恢复 Agent 记忆、不借旧 receipt 或扩大原授权。checkpoint/restart 与停止控制有提交前权限围栏，来源先核可见性；并发权限维护可能使旧 metadata 停止控制短暂返回 503。恢复对历史证明、修订和验证元数据逐行加锁，随历史线性增长，尚无大历史性能证据。范围、证据及资源保留状态见[本地交付指南](development/capa-d4-local-text-delivery.md)，恢复合同见[受限恢复规格](superpowers/specs/2026-11-13-agent-d4-restricted-restart-design.md)。
+
 独立元数据 Python SDK 已实现冻结 DTO/严格 codec/stdlib 同步 transport 与十操作 client，Python ≥3.11、零运行时依赖，不导入后端或访问数据库。服务端仍逐次授权，SDK 不缓存权限、解析 run token、自动重试/续租或执行消息；单调 deadline 覆盖整次操作，finish 可能已发送而缺完整确认时仅报告 unknown 并本地阻止重发。独立 unit/自有回环/实际 wheel 隔离安装以及 normal-policy 真实 HTTP fixture 已分阶段验收；Make/自动 CI 接线已双复核，冻结提交的完整本地组合门禁已通过；远端 CI 未执行，自有测试资源已在精确所有权及零其他client/测试进程核验后清理。SDK 不改变固定 worker/hash/profile/catalog 或生产准入，不开放正文附件外发、模型调用或 R5 业务写；见[SDK 交接与限制](development/agent-metadata-python-sdk.md)和[SDK README](../sdk/python/README.md)。
 
 ### 4.7 租户事务与独立迁移

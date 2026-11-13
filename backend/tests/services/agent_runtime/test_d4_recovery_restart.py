@@ -178,13 +178,24 @@ async def test_concurrent_restart_consumes_checkpoint_once(d4_text_server, same_
     'plugin', 'fmea', 'plugin_scope', 'task_scope', 'policy', 'user', 'generation',
     'swap_scope_during_commit', 'swap_scope_before_snapshot'])
 async def test_restart_refusal_or_fault_leaves_original_position(d4_text_server, monkeypatch, failure):
-    from sqlalchemy import func, select
+    from sqlalchemy import func, select, text, update
+    from sqlalchemy.exc import DBAPIError
     from app.models.agent_d4_recovery import D4RecoveryRestart
     from app.models.agent_readonly_control import AgentTaskControl
     from app.models.agent_task import AgentRun, AgentTask
     from app.services.agent_runtime import task_updates
     from uuid import UUID
     c = d4_text_server
+    async def assert_locked(statement):
+        async with c.session() as other:
+            await other.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            try:
+                await other.execute(statement)
+                await other.commit()
+            except DBAPIError as exc:
+                assert getattr(exc.orig, 'sqlstate', None) == '55P03'
+                return
+        raise AssertionError('concurrent authority write unexpectedly committed')
     created = await c.client.post('/api/agent/tasks', json={
         'report_id': str(c.report_id), 'installation_id': str(c.text_id),
         'request_key': uuid4().hex, 'initial_text': START_MESSAGE,
@@ -218,12 +229,10 @@ async def test_restart_refusal_or_fault_leaves_original_position(d4_text_server,
             async def revoke_after_control(db, *, task_id, kind, object_id):
                 result = await original(db, task_id=task_id, kind=kind, object_id=object_id)
                 if kind == 'control':
-                    from sqlalchemy import update
                     from app.models.agent_plugin import AgentPluginGrant
-                    async with c.session() as other:
-                        await other.execute(update(AgentPluginGrant).where(
-                            AgentPluginGrant.grant_id == c.text_grant_id).values(enabled=False))
-                        await other.commit()
+                    await assert_locked(update(AgentPluginGrant).where(
+                        AgentPluginGrant.grant_id == c.text_grant_id).values(enabled=False))
+                    raise RuntimeError('synthetic restart rollback after lock conflict')
                 return result
             monkeypatch.setattr(task_updates, 'append_update', revoke_after_control)
         elif failure == 'source_swap':
@@ -257,22 +266,12 @@ async def test_restart_refusal_or_fault_leaves_original_position(d4_text_server,
                 source.graph_data = {'nodes': [{'id': 'cause-A', 'type': 'FailureCause'},
                                                {'id': 'cause-B', 'type': 'FailureCause'}], 'edges': []}
                 await other.commit()
-            changed = False
             async def change_authority():
-                nonlocal changed
-                if not changed:
-                    changed = True
-                    proof = await c.admin.post(f'/api/capa/{c.report_id}/root-cause-verifications', json={
-                        'root_cause_text': 'synthetic candidate', 'method': 'measurement', 'conclusion': 'passed',
-                        'source_ref': {'fmea_id': str(c.fmea_id), 'cause_node_id': 'cause-B'},
-                        'source_declaration': {'declares_complete_coverage': True}})
-                    assert proof.status_code == 200 and proof.json()['source_proof_issued']
-                    async with c.session() as other:
-                        await other.execute(update(AgentPluginDerivedSourceScope).where(
-                            AgentPluginDerivedSourceScope.plugin_grant_id == c.text_grant_id).values(cause_node_id='cause-B'))
-                        await other.execute(update(AgentTaskDerivedSourceScope).where(
-                            AgentTaskDerivedSourceScope.target_report_id == c.report_id).values(cause_node_id='cause-B'))
-                        await other.commit()
+                await assert_locked(update(AgentPluginDerivedSourceScope).where(
+                    AgentPluginDerivedSourceScope.plugin_grant_id == c.text_grant_id).values(cause_node_id='cause-B'))
+                await assert_locked(update(AgentTaskDerivedSourceScope).where(
+                    AgentTaskDerivedSourceScope.target_report_id == c.report_id).values(cause_node_id='cause-B'))
+                raise RuntimeError('synthetic restart rollback after scope lock conflict')
             if failure == 'swap_scope_during_commit':
                 original = task_updates.append_update
                 async def swap_after_control(db, *, task_id, kind, object_id):
@@ -349,17 +348,11 @@ async def test_restart_refusal_or_fault_leaves_original_position(d4_text_server,
                     restored = await conn.execute(text('UPDATE public.tenants SET generation=:generation WHERE id=:id AND generation=:next'),
                         {'id': c.binding.tenant_id, 'generation': c.binding.generation, 'next': c.binding.generation + 1})
                     assert restored.rowcount == 1
-        assert result.status_code in ((500,) if failure == 'rollback' else (403, 404)), result.text
+        rollback_cases = ('rollback', 'during_commit', 'swap_scope_during_commit', 'swap_scope_before_snapshot')
+        assert result.status_code in ((500,) if failure in rollback_cases else (403, 404)), result.text
         # Only changes made by the independent concurrent actor are allowed;
         # restart itself must leave every other scope field, grant field, message,
         # watermark and control audit untouched.
-        if failure == 'during_commit':
-            assert len(before['parent']) == 1
-            before['parent'][0]['enabled'] = False
-        if failure in ('swap_scope_during_commit', 'swap_scope_before_snapshot'):
-            assert len(before['plugin_scopes']) == len(before['task_scopes']) == 1
-            before['plugin_scopes'][0]['cause_node_id'] = 'cause-B'
-            before['task_scopes'][0]['cause_node_id'] = 'cause-B'
         assert await snapshot() == before
         async with c.session() as db:
             task = await db.get(AgentTask, UUID(task_id))
@@ -488,7 +481,8 @@ async def test_restart_write_fault_rolls_back_all_effects(d4_text_server, statem
 
 @pytest.mark.parametrize('path', ['claim', 'replay'])
 async def test_final_restart_mapping_read_rechecks_authority(d4_text_server, monkeypatch, path):
-    from sqlalchemy import update
+    from sqlalchemy import text, update
+    from sqlalchemy.exc import DBAPIError
     from app.models.agent_plugin import AgentPluginGrant
     from app.models.role import RolePermission
     from app.services.agent_runtime import d4_recovery
@@ -522,8 +516,15 @@ async def test_final_restart_mapping_read_rechecks_authority(d4_text_server, mon
                         await other.execute(update(AgentPluginGrant).where(
                             AgentPluginGrant.grant_id == c.text_grant_id).values(enabled=False))
                     else:
-                        await other.execute(update(RolePermission).where(
-                            RolePermission.role_id == c.role_id, RolePermission.module == 'capa').values(permission_level=0))
+                        await other.execute(text("SET LOCAL lock_timeout = '200ms'"))
+                        try:
+                            await other.execute(update(RolePermission).where(
+                                RolePermission.role_id == c.role_id, RolePermission.module == 'capa').values(permission_level=0))
+                            await other.commit()
+                        except DBAPIError as exc:
+                            assert getattr(exc.orig, 'sqlstate', None) == '55P03'
+                            return value
+                        raise AssertionError('concurrent control revocation unexpectedly committed')
                     await other.commit()
             return value
         monkeypatch.setattr(d4_recovery, 'restart_mapping', revoke_after_mapping)
@@ -534,6 +535,12 @@ async def test_final_restart_mapping_read_rechecks_authority(d4_text_server, mon
             # 401 is reserved for an already-issued run credential.
             assert denied.status_code == 403
         else:
+            replay = await client.post(f'/api/agent/tasks/{task_id}/control', headers=headers, json=body)
+            assert replay.status_code == 200 and replay.json()['run_id'] == result.json()['run_id']
+            async with c.session() as other:
+                await other.execute(update(RolePermission).where(
+                    RolePermission.role_id == c.role_id, RolePermission.module == 'capa').values(permission_level=0))
+                await other.commit()
             denied = await client.post(f'/api/agent/tasks/{task_id}/control', headers=headers, json=body)
             assert denied.status_code in (403, 404)
         assert revoked
@@ -541,7 +548,8 @@ async def test_final_restart_mapping_read_rechecks_authority(d4_text_server, mon
 
 @pytest.mark.parametrize('module', ['capa', 'fmea'])
 async def test_restart_rechecks_user_permissions_after_last_snapshot(d4_text_server, monkeypatch, module):
-    from sqlalchemy import func, select, update
+    from sqlalchemy import func, select, text, update
+    from sqlalchemy.exc import DBAPIError
     from app.models.agent_d4_recovery import D4RecoveryRestart
     from app.models.agent_task import AgentRun
     from app.models.role import RolePermission
@@ -569,16 +577,23 @@ async def test_restart_rechecks_user_permissions_after_last_snapshot(d4_text_ser
             calls += 1
             if calls == 3:
                 async with c.session() as other:
-                    await other.execute(update(RolePermission).where(RolePermission.role_id == c.role_id,
-                        RolePermission.module == module).values(permission_level=0))
-                    await other.commit()
+                    await other.execute(text("SET LOCAL lock_timeout = '200ms'"))
+                    try:
+                        await other.execute(update(RolePermission).where(RolePermission.role_id == c.role_id,
+                            RolePermission.module == module).values(permission_level=0))
+                        await other.commit()
+                    except DBAPIError as exc:
+                        assert getattr(exc.orig, 'sqlstate', None) == '55P03'
+                    else:
+                        raise AssertionError('concurrent permission revocation unexpectedly committed')
+                raise RuntimeError('synthetic restart rollback after permission lock conflict')
             return value
         monkeypatch.setattr(d4_recovery, 'authorization_snapshot', revoke_after_snapshot)
         denied = await client.post(f'/api/agent/tasks/{task_id}/control', headers=headers, json={
             'action': 'restart', 'run_id': old['run_id'], 'expected_epoch': pause.json()['lease_epoch'],
             'checkpoint_id': cp.json()['checkpoint_id'], 'idempotency_key': uuid4().hex})
         assert calls == 3
-        assert denied.status_code in (403, 404)
+        assert denied.status_code == 500
         async with c.session() as db:
             assert await db.scalar(select(func.count()).select_from(AgentRun).where(AgentRun.task_id == UUID(task_id))) == 1
             assert await db.scalar(select(func.count()).select_from(D4RecoveryRestart).where(D4RecoveryRestart.task_id == UUID(task_id))) == 0

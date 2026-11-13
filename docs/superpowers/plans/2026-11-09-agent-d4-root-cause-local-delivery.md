@@ -568,7 +568,7 @@ async def get_d4_root_cause_text(db, identity):
 
 ## Task 10: 正常策略真实HTTP、源权限反例与CI必选层
 
-T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 6 warnings / 0 skip（22 个 T10、14 个 SDK、3 个旧 CLI），旧 CLI 精确三节点另经 XML 核验，CI pure 307 passed / 3 warnings。本地提交待完成；T11 整片冻结门禁、运维交接与精准清理仍待执行。
+T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 6 warnings / 0 skip（22 个 T10、14 个 SDK、3 个旧 CLI），旧 CLI 精确三节点另经 XML 核验，CI pure 307 passed / 3 warnings。本地提交 `ea7d2814`；T11 整片冻结门禁已通过，精准清理及最终签收仍待完成。
 
 **Files / write scope:**
 - Modify: `backend/tests/e2e/d4_text_local_harness.py`
@@ -600,9 +600,15 @@ T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 
 - [x] 业务只读见证窗口必须在准备业务写（PUT/验证等）完成后、接收器运行前取snapshot；控制动作另记录，不把fixture主动改proof的业务写误算到runtime只读窗口。拒绝链不能只检查stdout，必须检查服务端HTTP response未含原文。
 - [x] 分类契约把上述文件实际collected全部nodes归默认backend；不标live/browser/scanner，不为缺库/工具skip。runner增加精确新suite JUnit检查（按实际参数化后的节点集合固定维护），零选中/缺节点/skip/xfail/xpass不得算成功；SDK已有14mandatory检查保留。合成JUnit反例必须有RED，真实HTTP必须有独立receipt，不能互相替代。
 - [x] GREEN：实际运行新suite＋旧3固定CLI＋原14SDK；另跑CI pure/classification。记录真实selected/pass/skip/warnings，不猜计数。
-- [ ] 精确本地提交待完成。Commit `test(agent): exercise source-bound D4 text delivery under normal local policy`。
+- [x] 本地提交 `ea7d2814`：`test(agent): exercise source-bound D4 text delivery under normal local policy`。
 
 ## Task 11: 冻结完整门禁、运维交接与精准清理
+
+2026-11-14 用户授权先精确本地提交已复核修复、清理器及文档，提交标注“功能验收通过，资源清理未完成”。此项提交不等于 T11 全部签收；下面资源清理项继续未完成。清理入口和保留资源身份见交付指南“保留资源与后续清理入口”。
+
+整片独立规格和质量复核通过；冻结清单一致，最终 `make check` 后端 4537 passed / 4 optional skipped / 19 deselected / 6 warnings，SDK unit 562、loopback 16、wheel 1，前端 tsc/build 通过；browser 11 无 skip，CI pure 307 / 3 warnings，前端 88 文件 741 项和 E2E tsc 通过。首次完整门禁的过时路由测试失败与修复另见 `PROGRESS.md`。远端 CI NOT_RUN，生产、模型与部署未开启。
+
+功能验收已通过，清理独立未完成。挂载归属复审已移除宿主解析daemon路径的错误依据；新私有清理器普通/-O各43项模拟测试及双复核通过。新dry-run实查31容器：1个目标named-volume引用、25个可信排除的其他named-volume引用、7个缺daemon身份依据的未确认bind，结果INDETERMINATE；未知不等于有关或无关，资源保留，不执行apply或修改其他容器。不得将功能通过、旧清理器测试或dry-run拒绝记作资源清理成功，T11最终签收与提交仍待。
 
 **Files / write scope:**
 - Create: `docs/development/capa-d4-local-text-delivery.md`
@@ -610,9 +616,9 @@ T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 
 - Modify: `docs/architecture.md`
 - Modify: `docs/superpowers/plans/2026-11-09-agent-d4-root-cause-local-delivery.md`
 
-- [ ] 先完成整片独立SPEC/quality review，收齐所有Important修正及全部required child结果。核旧worker/hash、SDK树、生产可信集合、默认flag无变化（body新flag仍false）。
-- [ ] 冻结实际tracked present执行文件、newreceiver SHA、sourceScope/proof协议版本、两迁移head、解释器/构建工具版本；执行期间不更新源码/计划勾选。新的轮次只用当前owned PG，不借已清理SDK资源。
-- [ ] 命令顺序（控制器注入登记/URL，不在shell历史拼DSN）：
+- [x] 先完成整片独立SPEC/quality review，收齐所有Important修正及全部required child结果。核旧worker/hash、SDK树、生产可信集合、默认flag无变化（body新flag仍false）。
+- [x] 冻结实际tracked present执行文件、newreceiver SHA、sourceScope/proof协议版本、两迁移head、解释器/构建工具版本；执行期间不更新源码/计划勾选。新的轮次只用当前owned PG，不借已清理SDK资源。
+- [x] 命令顺序（控制器注入登记/URL，不在shell历史拼DSN）：
 
 ```sh
 make check PYTHON_BIN="$PY" SDK_PYTHON_BIN="$PY"
@@ -624,8 +630,8 @@ frontend/node_modules/.bin/tsc -p frontend/tsconfig.e2e.json
 
 SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享安装。保留graph worker/projection两文件既有排除和各layer marker。先重收四层节点，逐条比真实receipt；原4类可选skip单列，不让正文/SDK必选测试skip。普通环境禁provider与E2E_MODE；实际source/memory/进程见证与suite成功不能替代真实权限行为。
 
-- [ ] 本片不改scanner/附件路径，不擅自启动ClamAV或真实provider；远端CI仍未获push/dispatch权限，明确NOT_RUN。若发现实际影响scanner再单独确认范围，不拿历史scanner数字冒充新验收。
-- [ ] 运维文档必须说明：显式来源完整性声明是员工业务事实非降敏；P/T各自来源范围；策略最长1h/close不释放租约；失败显式控制；secret/源版本密钥变化时旧证据不可验证就拒，不自动重签旧字段；无历史正文重放/全局血缘/OS sandbox；只read Root，不把readonly restart叫业务rollback。
+- [x] 本片不改scanner/附件路径，不擅自启动ClamAV或真实provider；远端CI仍未获push/dispatch权限，明确NOT_RUN。若发现实际影响scanner再单独确认范围，不拿历史scanner数字冒充新验收。
+- [x] 运维文档必须说明：显式来源完整性声明是员工业务事实非降敏；P/T各自来源范围；策略最长1h/close不释放租约；失败显式控制；secret/源版本密钥变化时旧证据不可验证就拒，不自动重签旧字段；无历史正文重放/全局血缘/OS sandbox；只read Root，不把readonly restart叫业务rollback。
 - [ ] 全部相关jobs收齐后，当前schema无fixture租户/无其他DB clients/无接收器或本worktree测试进程；核Docker完整ID、container/volume双owner、唯一挂载/soleconsumer后dry-run再apply，只处置本片resource和私有执行凭据，保留镜像/其他服务/证据/工作树。成功枚举确认absent，不能把任意docker非零当不存在。敏感输入不进git或公开artifact。
 - [ ] 最后只追加真实计数、失败/修复、源/包/worker hash、清理结果与剩余R4b/R5/R6/R7限制。文档-only收口核内容/links/diff；若worker实际bytes变了，重核hash与所有依赖，不能用旧准入receipt签新代码。精确本地提交，不推送/合并。
 
@@ -646,4 +652,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T7 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T10 已按实际双复核签收；T11 门禁已通过，清理及最终签收待完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。

@@ -1,6 +1,6 @@
 # D4 受限恢复检查点 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: 使用 superpowers:subagent-driven-development，串行实施并对每个任务依次进行独立规格和质量复核。步骤使用 `- [x]` 跟踪。
+> **For agentic workers:** REQUIRED SUB-SKILL: 使用 superpowers:subagent-driven-development，串行实施并对每个任务依次进行独立规格和质量复核。步骤使用 `- [ ]` 跟踪。
 
 **Goal:** 为固定只读正文接收器提供用户显式、安全重开，并在 T8 签收前验证其不扩大原授权。
 
@@ -17,7 +17,7 @@
 - 数据库焦点执行入口为已登记 `/private/tmp/openqms-d4-text-20261113-RUUaxY/control.py`。每次数据库工作前由控制者运行 `"$PY" -B "$T8_CONTROL" status`，核对完整容器 owner/端点（控制器内 `verify_owned_instance`）、public head、无其他客户端和无残留租户/迁移库；迁移前 head 为 `20261109_d4_text_delivery`，成功 `prepare` 后才应为 `20261113_d4_recovery`，禁止用旧 head 判断新环境。若不成立停止 DB 操作。由控制者代跑以下命令，`PY=/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python`、`T8_CONTROL=/private/tmp/openqms-d4-text-20261113-RUUaxY/control.py`，凭据只由私有控制器注入，不打印 URL。完整 Make gate 可使用第4节私有控制器例外，但必须调用相同 `verify_owned_instance` 核验同一完整 container ID/owner/端点，并传同一登记凭据，不产生第二实例；其余 DB 调用只能走上述控制器。使用同一登记专用实例的 UUID 迁移库；不能重置或清理旧库、其他容器/卷或业务数据。
 - 为每次 DB 命令保存控制器打印的私有日志和退出码。真实 RED 必须是预期行为失败，不是缺 fixture、collection 或连接错误；记录实现前后源码清单。所有共享文件单写者串行，规格 reviewer 不修改；先规格通过再质量复核，重要问题修复并复审后进入下一子任务。
 
-> 状态：合同及分阶段实现已完成独立规格和质量复核；旧 CLI 三项已通过，首次完整后端发现旧测试夹具缺少授权主键，修正并独立复核后正在重跑完整后端。以下勾选保留至逐项证据核对，不代表已完成最终签收。
+> 状态：T8 与受限恢复已通过独立规格、质量及本地验收并提交 `9195c1f5`；T9 已实际验证新运行重读和新 receipt。T11 冻结门禁已通过，资源清理及最终签收仍待；旧失败及修正证据见 `PROGRESS.md`。
 
 ## 1. 模型与双迁移
 
@@ -56,4 +56,4 @@
 - [x] 真实 API 再测并发同/异 key、丢响应重放、用户控制权/插件/父 grant/P/T/FMEA/策略/generation 撤销、A→B 换源、blocked cancel、旧/新 checkpoint 交叉隔离、activity 分页与错关联 fail closed、旧 metadata API/SDK 不扩权；停止 SQL spy 0 根因/节点。每个场景断言全部行数、指针、成功 audit、P/T、消息水位及响应/日志无 sentinel。
 - [x] 运行 `"$PY" -B "$T8_CONTROL" test tests/services/agent_runtime/test_d4_text_grants.py tests/services/agent_runtime/test_d4_task_request_identity.py tests/services/agent_runtime/test_d4_recovery_restart.py tests/api/test_d4_recovery_checkpoint.py tests/e2e/test_d4_text_early_admission.py -q --tb=short -o xfail_strict=true --junitxml=/private/tmp/openqms-d4-text-20261113-RUUaxY/t8-recovery-final.xml`（执行前以 `O_CREAT|O_EXCL` 创建本轮唯一私有 0600 路径或改用新 nonce 路径，禁止覆盖旧证据），记录含参数化的实际 collected node ID 列表，冻结所有新恢复焦点测试实际节点及参数化集合并逐项对照上述 JUnit：缺选/零选、重复、skip、xfail、xpass、failure 或 error 任一禁止通过；不得使用收集替代执行，另记录 warnings。再运行原 T8 受影响旧链及 pure 分类。旧 3 CLI 精确节点为 `tests/e2e/test_agent_local_trial_process.py` 的 `test_normal_policy_real_cli_rounds_same_run_resume_and_checkpoint_new_run`、`test_cli_permanent_revoke_between_actual_rounds_prevents_later_delivery`、`test_actual_tcp_forwarded_identity_is_rejected_before_invalid_tenant_or_body`；SDK 为 `tests/e2e/test_agent_sdk_process.py` 中 `capa_outcome_runner.SDK_PROCESS_NAMES` 的精确14节点（含9个 finish fault 参数）。构建当前 SDK wheel 并使用 Makefile 的真实 `check-backend` recipe 和 `capa_outcome_runner.py api --pytest-target tests` 受控执行：在私有 0700 controller 中以已核 `verify_owned_instance(env)` 的同一白名单 env 启动 `make check-backend PYTHON_BIN="$PY" SDK_PYTHON_BIN="$PY"`，`OPENQMS_TEST_RESOURCE_FILE`、`TEST_DATABASE_URL`、`DATABASE_URL`、`PG15_CONTAINER` 从私有凭据装配，不在 shell argv/输出打印；Make 在本轮私有 artifact 目录调用 `sdk/python/scripts/build-wheel.py` 验 hash 并设置 `OPENQMS_SDK_WHEEL`，runner 的 `_require_sdk_process_success` 必须核实精确14节点。对3 CLI 另运行 `"$PY" -B "$T8_CONTROL" test tests/e2e/test_agent_local_trial_process.py -q --tb=short -o xfail_strict=true --junitxml=/private/tmp/openqms-d4-text-20261113-RUUaxY/t8-cli.xml`（同样用新 nonce 私有路径，不覆盖旧证据）；用 XML 解析断言文件中三名节点集合精确相等、各一次且无 skipped/failure/error（xfail 记 skipped，严格 xpass 为失败）。14 SDK 由 runner 的私有 JUnit 和 hook 验证，17节点任何 skip/xfail/xpass 均失败；另记录完整 backend 允许的既有非必选 skip。不得用当前 `control.py test` 直接跑 SDK（其 env 不注入 wheel）。若测试节点不存在，先定位真实路径并说明，不把 collect 当通过。
 - [x] 对冻结实际 diff 做 T8 全体独立规格→质量复核；每项 findings 关毕后按变更重跑适当测试。核正文默认关闭、T6 四出站门禁、blocked 指纹和受限 stop，核 T5 receiver SHA 不变。T9 中记录强制补测新 run 重新读取当前正文并生成新 receipt、旧 receipt 不消费，不把 T8 入口测试说成全文交付。
-- [ ] `git diff --check`、核文档链接与保护资产；`PROGRESS.md` 如实记录当前证据、失败及剩余限制。精确暂存本任务的 T8 + 新 checkpoint 所有文件及对应文档，单个本地提交 `feat(agent): intersect explicit plugin and task derived-source scopes`；不得包含无关文件、合并、推送、部署或开生产/模型。
+- [x] `git diff --check`、核文档链接与保护资产；`PROGRESS.md` 如实记录当前证据、失败及剩余限制。精确暂存本任务的 T8 + 新 checkpoint 所有文件及对应文档，单个本地提交 `feat(agent): intersect explicit plugin and task derived-source scopes`；不得包含无关文件、合并、推送、部署或开生产/模型。
