@@ -387,8 +387,8 @@ source_declaration: SourceDeclaration | None = None
 - Create: `backend/tests/cli/test_d4_text_launcher.py`
 - Create: `backend/tests/e2e/d4_text_wire_fixture.py`
 
-- [ ] RED：假协议/自有loopback服务器见证只有六个固定operation：claim/capabilities/messages claim/body/ACK/finish；非固定消息、wrong run/report/recipient、错误安全枚举、旧internal投影都停止且不ACK/finish。
-- [ ] 固定流程代码骨架（每个`wire`方法由同文件固定路由实现，不作为通用HTTP导出）：
+- [x] RED：假协议/自有loopback服务器见证只有六个固定operation：claim/capabilities/messages claim/body/ACK/finish；非固定消息、wrong run/report/recipient、错误安全枚举、旧internal投影都停止且不ACK/finish。
+- [x] 固定流程代码骨架（每个`wire`方法由同文件固定路由实现，不作为通用HTTP导出）：
 
 ```python
 def receive_once(wire, config):
@@ -407,12 +407,12 @@ def receive_once(wire, config):
 
 异常统一在顶层转换固定安全码，不把原始异常/response挂cause、repr或输出。上述函数不捕获后再自动补finish。未完整确认读取仅输出unconfirmed，不声称未生成receipt或从未发出字节。
 
-- [ ] stdlib传输实现固定origin/tenant/header/operation表；直接numeric socket，不解析外部DNS，不跟随URL/3xx，不用代理/netrc/cookie。TLS证书正常验证。每操作编码前建monotonic D=10s，每次connect/TLS/send/rawread/JSON/schema/最终返回前都用剩余时间。不得把socket多次read各10秒冒充整体deadline；原始IO之上才buffer。
-- [ ] 复用SDK已审算法作为源码参照，但**不运行时import SDK**：拷贝/收窄前列出每个deadline/framing/budget差异并复核；至少将SDK旧loopback慢滴、TE尾OWS、分块/CL冲突、读限界、partial send、TLS makefile IO引用及晚decode反例改为本接收器用例。新fixture仅numeric自有端口，不递归运行SDK suite。
-- [ ] 请求<=64KiB、正文响应<=256KiB；头部单独有界，不无限读trailer/超多header。重复JSON键/NaN/坏UTF-8/错标签拒绝。finish可能发送后未获完整确认→unknown且一次调用；明确拒绝不猜全局终态。
-- [ ] 启动器读取0600配置（origin/tenant/installation/secret/request_key/expected_report_id），校验origin/源文件hash；只把必要配置写child stdin，`-I -S -B`、repo外cwd、私有HOME/TMPDIR、无环境/argv秘密。max60秒；自己的new session/PGID在正常/异常/leader提前退出路径都TERM/grace/KILL/wait，不杀未知进程。
-- [ ] GREEN：测试HTTP调用数、ACK水位与finish次数；stdout/stderr/argv/env/文件/异常sentinel不含正文/词表/secret/token。审计子进程网络仅固定回环，不称OS sandbox。
-- [ ] 独立review定稿后实算SHA256，记录该提交的worker bytes。Commit `feat(agent): add fixed local D4 text receiver and supervised launcher`。
+- [x] stdlib传输实现固定origin/tenant/header/operation表；直接numeric socket，不解析外部DNS，不跟随URL/3xx，不用代理/netrc/cookie。TLS证书正常验证。每操作编码前建monotonic D=10s，每次connect/TLS/send/rawread/JSON/schema/最终返回前都用剩余时间。不得把socket多次read各10秒冒充整体deadline；原始IO之上才buffer。
+- [x] 复用SDK已审算法作为源码参照，但**不运行时import SDK**：拷贝/收窄前列出每个deadline/framing/budget差异并复核；至少将SDK旧loopback慢滴、TE尾OWS、分块/CL冲突、读限界、partial send、TLS makefile IO引用及晚decode反例改为本接收器用例。新fixture仅numeric自有端口，不递归运行SDK suite。
+- [x] 请求<=64KiB、正文响应<=256KiB；头部单独有界，不无限读trailer/超多header。重复JSON键/NaN/坏UTF-8/错标签拒绝。finish可能发送后未获完整确认→unknown且一次调用；明确拒绝不猜全局终态。
+- [x] 启动器读取0600配置（origin/tenant/installation/secret/request_key/expected_report_id），校验origin/源文件hash；只把必要配置写child stdin，`-I -S -B`、repo外cwd、私有HOME/TMPDIR、无环境/argv秘密。max60秒；自己的new session/PGID在正常/异常/leader提前退出路径都TERM/grace/KILL/wait，不杀未知进程。
+- [x] GREEN：测试HTTP调用数、ACK水位与finish次数；stdout/stderr/argv/env/文件/异常sentinel不含正文/词表/secret/token。审计子进程网络仅固定回环，不称OS sandbox。
+- [x] 独立review定稿后实算SHA256，记录该提交的worker bytes。Commit `feat(agent): add fixed local D4 text receiver and supervised launcher`。
 
 ## Task 6: 固定启动消息的服务端门禁
 
@@ -633,4 +633,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T4 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T5 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
