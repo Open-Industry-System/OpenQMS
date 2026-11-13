@@ -16,7 +16,8 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv007_d4_text_delivery"
+REVISION = "tv008_d4_recovery"
+RECOVERY_PREDECESSOR_REVISION = "tv007_d4_text_delivery"
 DELIVERY_PREDECESSOR_REVISION = "tv006_agent_read_tasks"
 PREDECESSOR_REVISION = "tv005_agent_task_attachments"
 EARLIER_PREDECESSOR_REVISION = "tv004_agent_readonly_controls"
@@ -157,6 +158,8 @@ class MaintenanceContext:
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
             if versions == [REVISION]:
                 result = "current"
+            elif versions == [RECOVERY_PREDECESSOR_REVISION]:
+                result = "recovery_predecessor"
             elif versions == [DELIVERY_PREDECESSOR_REVISION]:
                 result = "delivery_predecessor"
             elif versions == [PREDECESSOR_REVISION]:
@@ -632,7 +635,7 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current", "ancestor", "delivery_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor", "core_predecessor"}:
+    elif state not in {"empty", "current", "ancestor", "recovery_predecessor", "delivery_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor", "core_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
@@ -642,8 +645,9 @@ async def migrate_if_needed(maintenance: MaintenanceContext, attempt: Maintenanc
         if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")
         await maintenance.run_migration(REVISION)
-    elif state in {"delivery_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor", "core_predecessor"}:
+    elif state in {"recovery_predecessor", "delivery_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor", "core_predecessor"}:
         predecessor = {
+            "recovery_predecessor": RECOVERY_PREDECESSOR_REVISION,
             "delivery_predecessor": DELIVERY_PREDECESSOR_REVISION,
             "predecessor": PREDECESSOR_REVISION,
             "earlier_predecessor": EARLIER_PREDECESSOR_REVISION,

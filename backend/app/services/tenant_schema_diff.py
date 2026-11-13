@@ -161,18 +161,20 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
                      or (key[0] == "function" and f"FUNCTION:{key[1]}" in keys)
                      or (key[0] == "text_search_config" and f"TEXT SEARCH CONFIGURATION:{key[1]}" in keys)}
     if predecessor is not None:
-        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks"} or baseline_only:
+        if predecessor not in {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks", "tv007_d4_text_delivery"} or baseline_only:
             raise ValueError("Unsupported schema predecessor")
         # The reference is current public; remove only the reviewed cumulative
         # additions after this exact predecessor. The tenant remains unfiltered.
-        added_tables = {
-            "capa_d4_root_cause_revisions", "capa_d4_root_cause_source_proofs",
-            "agent_restricted_projection_receipts", "agent_plugin_derived_source_scopes",
-            "agent_task_derived_source_scopes", "agent_task_source_requests",
-        }
-        if predecessor != "tv006_agent_read_tasks":
+        added_tables = {"agent_d4_recovery_checkpoints", "agent_d4_recovery_restarts", "agent_d4_task_parent_grants"}
+        if predecessor != "tv007_d4_text_delivery":
+            added_tables |= {
+                "capa_d4_root_cause_revisions", "capa_d4_root_cause_source_proofs",
+                "agent_restricted_projection_receipts", "agent_plugin_derived_source_scopes",
+                "agent_task_derived_source_scopes", "agent_task_source_requests",
+            }
+        if predecessor not in {"tv006_agent_read_tasks", "tv007_d4_text_delivery"}:
             added_tables.add("agent_read_tasks")
-        if predecessor not in {"tv005_agent_task_attachments", "tv006_agent_read_tasks"}:
+        if predecessor not in {"tv005_agent_task_attachments", "tv006_agent_read_tasks", "tv007_d4_text_delivery"}:
             added_tables.add("agent_task_attachments")
         if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
             added_tables |= {"agent_task_controls", "agent_readonly_checkpoints",

@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
+from app.schemas.agent_d4_text import DerivedSourceScopeInput
 
 
 class TaskCreate(BaseModel):
@@ -13,6 +14,7 @@ class TaskCreate(BaseModel):
     installation_id: UUID
     request_key: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=100)]
     initial_text: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=10000)]
+    derived_source_scope: DerivedSourceScopeInput | None = None
 
 
 class TaskOut(BaseModel):

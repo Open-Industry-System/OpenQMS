@@ -465,6 +465,8 @@ def require_profile_message_contents(profile, rows):
 
 ## Task 8: 两层范围持久化与统一授权/目录/控制
 
+正文 restart 按用户批准的[受限恢复合同](../specs/2026-11-13-agent-d4-restricted-restart-design.md)及[补充计划](2026-11-13-agent-d4-restricted-restart.md)实施并纳入 T8 签收：独立控制位置、restart 映射与固定父 grant 绑定三表，不能复用旧 metadata checkpoint。T8 已通过独立规格、质量复核及本地验收；精确本地提交待完成，T9 的正文重读与新 receipt 仍待实现和验收。
+
 **Files / write scope:**
 - Create: `backend/app/services/agent_runtime/derived_source_grants.py`
 - Create: `backend/tests/services/agent_runtime/test_d4_text_grants.py`
@@ -483,11 +485,11 @@ def require_profile_message_contents(profile, rows):
 - Modify: `backend/app/services/agent_runtime/task_controls.py`
 - Modify: `backend/app/services/capa_current_access.py`
 
-- [ ] RED：执行人有A/B读取权、同报告/工厂/PL，分别P=A/T=B、P=B/T=A/S=B均deny；P=B/T=B/S=B才可在其它条件满足时allow。缺P/T不能是ALL，不能从不同grant拼目标和源。
-- [ ] `AccessAttempt`新增kw-only来源输入（current/plugin/task），默认None。`authorize`从可信内部contract判断该cap是否必须来源；保留原canonical spec比对、身份/工厂/PL/父grant期限检查后，正文必须调用T1的精确范围谓词；metadata无来源依赖仍走旧语义。调用者不能用伪CapabilitySpec或请求字段关闭该要求。
-- [ ] `PluginGrantCreate.derived_source_scope`、`TaskCreate.derived_source_scope`可选严格DTO。对正文启用/可运行创建必填；旧metadata请求缺字段不改变结果。服务校验target_report_id与父对象范围一致，source_module/projection由代码声明补齐，不能接受用户自报等级。新的范围创建/启用也先源可见性后节点诊断。
-- [ ] 管理员范围P只来自显式输入，不从当前proof填。T只来自任务发起者显式输入；在同一父grant既覆盖目标又覆盖源时才派生task grant并写T旁表。为父grant先flush取得server UUID，旁表FK必须绑定同一个父grant。缺任何层则既有blocked状态/无可运行run，不自动匹配当前proof。
-- [ ] **请求身份与权限分离**：新增模型 `AgentTaskSourceRequest`（T2请求指纹表）及 helper `request_source_fingerprint(key, tenant_id, initiator_id, request)`。字段和函数完整定义如下；该函数放在 `derived_source_grants.py` 或task请求身份叶子helper，不查询grants/proof：
+- [x] RED：执行人有A/B读取权、同报告/工厂/PL，分别P=A/T=B、P=B/T=A/S=B均deny；P=B/T=B/S=B才可在其它条件满足时allow。缺P/T不能是ALL，不能从不同grant拼目标和源。
+- [x] `AccessAttempt`新增kw-only来源输入（current/plugin/task），默认None。`authorize`从可信内部contract判断该cap是否必须来源；保留原canonical spec比对、身份/工厂/PL/父grant期限检查后，正文必须调用T1的精确范围谓词；metadata无来源依赖仍走旧语义。调用者不能用伪CapabilitySpec或请求字段关闭该要求。
+- [x] `PluginGrantCreate.derived_source_scope`、`TaskCreate.derived_source_scope`可选严格DTO。对正文启用/可运行创建必填；旧metadata请求缺字段不改变结果。服务校验target_report_id与父对象范围一致，source_module/projection由代码声明补齐，不能接受用户自报等级。新的范围创建/启用也先源可见性后节点诊断。
+- [x] 管理员范围P只来自显式输入，不从当前proof填。T只来自任务发起者显式输入；在同一父grant既覆盖目标又覆盖源时才派生task grant并写T旁表。为父grant先flush取得server UUID，旁表FK必须绑定同一个父grant。缺任何层则既有blocked状态/无可运行run，不自动匹配当前proof。
+- [x] **请求身份与权限分离**：新增模型 `AgentTaskSourceRequest`（T2请求指纹表）及 helper `request_source_fingerprint(key, tenant_id, initiator_id, request)`。字段和函数完整定义如下；该函数放在 `derived_source_grants.py` 或task请求身份叶子helper，不查询grants/proof：
 
 ```python
 import hashlib, hmac, json
@@ -509,16 +511,16 @@ def request_source_fingerprint(key, tenant_id, initiator_id, request):
 ```
 
 按规范请求（固定格式版本、tenant/initiator、report、installation、initial_text、显式source_scope或null）生成域分离HMAC-SHA256；仅存digest/格式版本，不存第二份原文。不能用proof digest、当前grant或最新source替代请求指纹。
-- [ ] 每个正文任务在同一Task创建savepoint内保存不可变请求指纹，**包括blocked任务**。缺长期grant但请求/用户资格合法时，保存blocked Task、原始消息与指纹；不产生正文task grant、授权来源旁表或pending run。指纹不是T、不参与authorize，不得从中补授权。安装的请求类型由受信绑定声明识别，不因本次不ready而漏存。
-- [ ] `_existing`及唯一键竞争恢复分支使用原请求参数比对＋该fingerprint：同key同A返回原Task（即使后来有grant也不升级原blocked任务）；同key换B固定409，不能重算或覆盖指纹。仅识别 `uq_agent_task_initiator_request` 的23505为竞争，rollback savepoint后重读胜出Task及已原子提交的指纹，再做同样比较。其它IntegrityError不伪装幂等。旧metadata调用不需指纹；正文历史行缺指纹或格式不可验证时failclosed，不从当前proof补签。
-- [ ] 新增 `backend/tests/services/agent_runtime/test_d4_task_request_identity.py` 的三项强制用例：blocked(A)同key/A返回同task_id且授权/运行行数仍0；同key/B→409且指纹未变；两个真实事务并发同key创建，唯一键竞争后同源返回同Task、异源409且仅一份指纹。
-- [ ] 目录只提供发现结果：共享身份/插件范围谓词过滤可见安装，不创建/存储T，不将发现结果当执行AccessDecision。Task create/ready/claim/verify及resume/restart完整检查持久化P/T及当前source；不得改旁表，restart新epoch仍原范围。更换源要新grant/新任务，不帮扩域。
-- [ ] **停止操作不是恢复操作**：保留 `task_controls._user_authority` 只核当前用户的任务归属、CAPA/工厂/PL/租户及run位置控制权；pause/cancel不能调用正文 `authorize_task`/`_resume_authority`、不能依赖plugin enabled/body grant/P/T/proof/FMEA VIEW，也不加载正文或来源节点。完整源重验仅放resume/restart；不能把新源权限检查塞进共享用户控制权函数，导致撤权后无法停止。用户自身失去任务控制权仍须拒绝，不能借“停止”扩大权限。
-- [ ] `_require_grant_enableable`、ready/required集合、runtime授权从T7的平台profile绑定取最低集合，不再额外硬要求summary。旧 `readonly_delivery._recognized_source`、旧checkpoint、legacy `agent_read_tasks` 的summary/internal限制保持，不泛化。
-- [ ] 仅改runtime共享 `_target`、registry目标读取、目录授权定位为标量；不要替换业务写函数所需的全ORM `current_capa_target`。checkpoint历史只用factory_id的调用方也验证。
-- [ ] 先在本任务创建正常配置的 `d4_text_local_harness.py` 与早期验收文件；不等T10才有可用fixture。复用OwnedTrial的租户/生命周期/随机TCP模式，但body安装/策略/来源声明与显式P/T必须走正常API，不能打DIRECT或TRUSTED补丁。早期测试由父controller真实claim并访问消息接口，不宣称已运行T10固定接收器完整闭环。
-- [ ] GREEN之前增加**首次可claim提交**的真实API消息负向见证：即使尚未做T9正文读取服务，当前运行可claim后任意非固定消息仍必须在服务端拒绝（首次/重领/history/ACK），HTTP响应无哨兵、batch/watermark/成功audit不变；没有该证据不提交准入正向。旧metadata3CLI/14SDK回归不获得正文。
-- [ ] 本任务实现并验收pause/cancel与resume/restart权限分离；撤正文grant后先用已存在的受保护capabilities GET验证运行身份拒绝，不能用尚未实现正文GET的404冒充撤权成功。完整的“撤grant→正文GET拒绝→pause成功→resume拒绝→cancel成功”安排在T9正文服务首次可用提交，T10再整合回归。另覆盖FMEA读取权撤销但任务控制权仍在时仍可停止，停止路径0正文/源node读取。Commit `feat(agent): intersect explicit plugin and task derived-source scopes`。
+- [x] 每个正文任务在同一Task创建savepoint内保存不可变请求指纹，**包括blocked任务**。缺长期grant但请求/用户资格合法时，保存blocked Task、原始消息与指纹；不产生正文task grant、授权来源旁表或pending run。指纹不是T、不参与authorize，不得从中补授权。安装的请求类型由受信绑定声明识别，不因本次不ready而漏存。
+- [x] `_existing`及唯一键竞争恢复分支使用原请求参数比对＋该fingerprint：同key同A返回原Task（即使后来有grant也不升级原blocked任务）；同key换B固定409，不能重算或覆盖指纹。仅识别 `uq_agent_task_initiator_request` 的23505为竞争，rollback savepoint后重读胜出Task及已原子提交的指纹，再做同样比较。其它IntegrityError不伪装幂等。旧metadata调用不需指纹；正文历史行缺指纹或格式不可验证时failclosed，不从当前proof补签。
+- [x] 新增 `backend/tests/services/agent_runtime/test_d4_task_request_identity.py` 的三项强制用例：blocked(A)同key/A返回同task_id且授权/运行行数仍0；同key/B→409且指纹未变；两个真实事务并发同key创建，唯一键竞争后同源返回同Task、异源409且仅一份指纹。
+- [x] 目录只提供发现结果：共享身份/插件范围谓词过滤可见安装，不创建/存储T，不将发现结果当执行AccessDecision。Task create/ready/claim/verify及resume/restart完整检查持久化P/T及当前source；不得改旁表，restart新epoch仍原范围。更换源要新grant/新任务，不帮扩域。
+- [x] **停止操作不是恢复操作**：保留 `task_controls._user_authority` 只核当前用户的任务归属、CAPA/工厂/PL/租户及run位置控制权；pause/cancel不能调用正文 `authorize_task`/`_resume_authority`、不能依赖plugin enabled/body grant/P/T/proof/FMEA VIEW，也不加载正文或来源节点。完整源重验仅放resume/restart；不能把新源权限检查塞进共享用户控制权函数，导致撤权后无法停止。用户自身失去任务控制权仍须拒绝，不能借“停止”扩大权限。
+- [x] `_require_grant_enableable`、ready/required集合、runtime授权从T7的平台profile绑定取最低集合，不再额外硬要求summary。旧 `readonly_delivery._recognized_source`、旧checkpoint、legacy `agent_read_tasks` 的summary/internal限制保持，不泛化。
+- [x] 仅改runtime共享 `_target`、registry目标读取、目录授权定位为标量；不要替换业务写函数所需的全ORM `current_capa_target`。checkpoint历史只用factory_id的调用方也验证。
+- [x] 先在本任务创建正常配置的 `d4_text_local_harness.py` 与早期验收文件；不等T10才有可用fixture。复用OwnedTrial的租户/生命周期/随机TCP模式，但body安装/策略/来源声明与显式P/T必须走正常API，不能打DIRECT或TRUSTED补丁。早期测试由父controller真实claim并访问消息接口，不宣称已运行T10固定接收器完整闭环。
+- [x] GREEN之前增加**首次可claim提交**的真实API消息负向见证：即使尚未做T9正文读取服务，当前运行可claim后任意非固定消息仍必须在服务端拒绝（首次/重领/history/ACK），HTTP响应无哨兵、batch/watermark/成功audit不变；没有该证据不提交准入正向。旧metadata3CLI/14SDK回归不获得正文。
+- [ ] 本任务已实现并验收 pause/cancel 与 resume/restart 权限分离，以下本地提交待完成；撤正文grant后先用已存在的受保护capabilities GET验证运行身份拒绝，不能用尚未实现正文GET的404冒充撤权成功。完整的“撤grant→正文GET拒绝→pause成功→resume拒绝→cancel成功”安排在T9正文服务首次可用提交，T10再整合回归。另覆盖FMEA读取权撤销但任务控制权仍在时仍可停止，停止路径0正文/源node读取。Commit `feat(agent): intersect explicit plugin and task derived-source scopes`。
 
 ## Task 9: 正文快照与最终交付服务
 
@@ -554,6 +556,7 @@ async def get_d4_root_cause_text(db, identity):
 - [ ] null/空根因不能凭空制造passed验证或有效proof；无证明则拒绝。DTO保留严格nullable但不为测试编造空字段事实。词表命中0不降级internal，原预览外发flag不翻转。
 - [ ] HTTP响应 `Cache-Control:no-store`，新DTO仅Root候选＋opaque版本＋local许可；不含词表/验证/FMEA node/来源ID。server/worker错误均不含原文/异常cause；audit名称release_committed不声称接收方已收到。实际事务失败不能提前发正文。
 - [ ] 在正文服务首次可用的本任务提交内，正常API顺序实测：任务已claim且正文GET原本可用 → 管理员撤正文grant → 同一run token正文GET拒绝（不是路由缺失404）→ 仍有任务控制权的用户pause成功并取新epoch → resume拒绝且task/run保持paused、无新run/成功恢复audit → 同用户cancel成功（新key/正确epoch），最终cancelled/stopped、租约清空。pause/cancel区间SQL见证不读root正文或来源节点，不因plugin失权/源失权而被阻止。
+- [ ] 正文服务首次可用时，通过正常 API 与固定接收器验证受限 restart 后的新 run 重新读取当前业务事实并生成新 receipt；旧 receipt 或来源版本不得充当新运行读取凭证，也不得被新运行消费。撤权及原 P/T 范围外换源仍须拒绝，不能使用旧业务结果或模拟 receipt 代替真实读取。
 - [ ] GREEN：字节扩张、坏数据、未知安全标签、同UUID跨tenant、generation维护、所有源/目标授权变化；metadata receipt/event/result/checkpoint不能消费受限receipt UUID。Commit `feat(agent): release bounded D4 root text with final source-scope fencing`。
 
 ## Task 10: 正常策略真实HTTP、源权限反例与CI必选层

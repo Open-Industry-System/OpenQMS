@@ -46,7 +46,8 @@ async def _resume_authority(db, task, run, installation):
         raise PermissionError("Plugin installation unavailable")
     authority = await runtime_access.authorize_task(db, task, installation)
     runtime_access.require_installation_delivery(db.info.get("tenant_binding"), installation,
-        "restricted", "raw", controlled_egress=True, trial=authority.trial)
+        "restricted", "raw", controlled_egress=True, trial=authority.trial, delivery_kind='message')
+    return authority
 
 
 def _control_result(operation, task, run):
@@ -54,6 +55,19 @@ def _control_result(operation, task, run):
         task_status=task.status, run_id=None if run is None else run.run_id,
         run_status=None if run is None else run.status,
         lease_epoch=None if run is None else run.lease_epoch)
+
+
+async def _same_control(db, task, previous, request):
+    if (previous.action != request.action or previous.run_id != request.run_id
+            or previous.expected_epoch != request.expected_epoch):
+        return False
+    if previous.action == 'restart' and previous.checkpoint_id is None:
+        from app.models.agent_d4_recovery import D4RecoveryRestart
+        link = await db.scalar(select(D4RecoveryRestart).where(
+            D4RecoveryRestart.control_id == previous.control_id,
+            D4RecoveryRestart.task_id == task.task_id).execution_options(populate_existing=True))
+        return link is not None and link.checkpoint_id == request.checkpoint_id
+    return previous.checkpoint_id == request.checkpoint_id
 
 
 async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
@@ -86,9 +100,7 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             AgentTaskControl.task_id == task_id, AgentTaskControl.key == request.idempotency_key)
             .execution_options(populate_existing=True))
     if previous is not None:
-        if (previous.action != request.action or previous.run_id != request.run_id
-                or previous.expected_epoch != request.expected_epoch
-                or previous.checkpoint_id != request.checkpoint_id):
+        if not await _same_control(db, task, previous, request):
             raise ValueError("Control key reused with different arguments")
         run_binding = _run_binding(await _current_run(db, task_id))
     task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
@@ -104,11 +116,19 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
     # Current user authority is required even on retries. Compare the original
     # request before checking present state/epoch; retries cannot repeat effects.
     if previous is not None:
-        if (previous.action != request.action or previous.run_id != request.run_id
-                or previous.expected_epoch != request.expected_epoch or previous.checkpoint_id != request.checkpoint_id):
+        if not await _same_control(db, task, previous, request):
             raise ValueError("Control key reused with different arguments")
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
-        result = _control_result(previous, task, run)
+        if previous.action == 'restart' and previous.checkpoint_id is None:
+            from app.services.agent_runtime import d4_recovery
+            original = await db.scalar(select(AgentRun).where(
+                AgentRun.run_id == previous.resulting_run_id).execution_options(populate_existing=True))
+            if original is None or await d4_recovery.restart_mapping(db, task, original) is None:
+                raise PermissionError('Recovery unavailable')
+            task, _ = await _user_authority(db, scope, task_id, task_binding, run_binding)
+            result = _control_result(previous, task, original)
+        else:
+            result = _control_result(previous, task, run)
         await db.commit()
         return result
     if task.status in {"completed", "failed", "cancelled"}:
@@ -135,19 +155,34 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
     # the user's current business authority and work with disabled plugins.
     task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
     if request.action in {"resume", "restart"}:
-        await _resume_authority(db, task, run, installation)
+        restart_authority = await _resume_authority(db, task, run, installation)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
         await _resume_authority(db, task, run, installation)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
+    text_restart = False
+    position = None
+    checkpoint = None
     if request.action == "restart":
-        from app.services.agent_runtime import checkpoint_service
-        await checkpoint_service.require_restart_checkpoint(db, scope, task, run, request.checkpoint_id)
+        from app.services.agent_runtime import checkpoint_service, d4_recovery
+        text_restart = await d4_recovery.is_text_task(db, task)
+        if text_restart:
+            checkpoint, position = await d4_recovery.require_restart_position(db, scope, task, run, request.checkpoint_id)
+        else:
+            await checkpoint_service.require_restart_checkpoint(db, scope, task, run, request.checkpoint_id)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
         await _resume_authority(db, task, run, installation)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
+        if text_restart:
+            original_source_authority = await d4_recovery.authorization_snapshot(db, task, installation)
+            verified = await _resume_authority(db, task, run, installation)
+            if (verified.trial != restart_authority.trial
+                    or verified.current_source != restart_authority.current_source
+                    or verified.source_grant_pairs != restart_authority.source_grant_pairs
+                    or await d4_recovery.authorization_snapshot(db, task, installation) != original_source_authority):
+                raise PermissionError('Recovery unavailable')
     operation = AgentTaskControl(control_id=uuid4(), task_id=task_id,
         run_id=request.run_id, expected_epoch=request.expected_epoch,
-        key=request.idempotency_key, action=request.action, checkpoint_id=request.checkpoint_id,
+        key=request.idempotency_key, action=request.action, checkpoint_id=None if text_restart else request.checkpoint_id,
         resulting_run_id=None if run is None else run.run_id)
     try:
         task.status = task_after
@@ -157,15 +192,37 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             run.lease_expires_at = None
             run.claim_key = None
         if request.action == "restart":
+            old_run = run
             # Release the old nonterminal unique-index position before inserting
             # its replacement. Both remain in this single task transaction.
             await db.flush()
             run = AgentRun(run_id=uuid4(), task_id=task_id, installation_id=installation.installation_id,
                 plugin_version=installation.plugin_version, status="pending", lease_epoch=0,
                 claim_key=None, lease_expires_at=None, accepted_message_seq=run.accepted_message_seq,
-                resume_checkpoint_id=request.checkpoint_id)
+                resume_checkpoint_id=None if text_restart else request.checkpoint_id)
             db.add(run)
             operation.resulting_run_id = run.run_id
+            if text_restart:
+                from app.models.agent_d4_recovery import D4RecoveryRestart
+                from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
+                if await d4_recovery.validate_message_position(db, task_id, checkpoint.accepted_message_seq) != position:
+                    raise ValueError('Recovery position unavailable')
+                if position:
+                    message_id = position[0]
+                else:
+                    message_id = uuid4()
+                    db.add(AgentTaskMessage(message_id=message_id, task_id=task_id,
+                        sequence=checkpoint.accepted_message_seq + 1, author_id=scope.user.user_id,
+                        content=START_MESSAGE, sensitivity='restricted', state='queued',
+                        idempotency_key='d4-restart:' + str(operation.control_id)))
+                    await db.flush()
+                    await task_updates.append_update(db, task_id=task_id, kind='message', object_id=message_id)
+                # The control's resulting_run_id FK must reference an inserted run.
+                await db.flush()
+                db.add(operation)
+                await db.flush()
+                db.add(D4RecoveryRestart(control_id=operation.control_id, checkpoint_id=checkpoint.checkpoint_id,
+                    task_id=task_id, old_run_id=old_run.run_id, new_run_id=run.run_id, start_message_id=message_id))
         # Redelivery clears only unaccepted proof. Terminal cancellation preserves
         # queued/claimed distinctions and original batch/epoch evidence.
         if request.action in {"pause", "resume", "restart"}:
@@ -181,6 +238,42 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
                 "lease_epoch": None if run is None else run.lease_epoch,
                 **({"resulting_run_id": str(run.run_id)} if request.action == "restart" else {})}))
         await task_updates.append_update(db, task_id=task_id, kind="control", object_id=operation.control_id)
+        if text_restart:
+            # Flush all side effects before the last fresh authorization. The
+            # caller owns installation/task/run locks; failure rolls all back.
+            await db.flush()
+            task = await task_service.get_task_for_view(db, scope, task_id)
+            if _task_binding(task) != task_binding:
+                raise PermissionError('Recovery unavailable')
+            installation = await db.scalar(select(AgentPluginInstallation).where(
+                AgentPluginInstallation.installation_id == installation_id).execution_options(populate_existing=True))
+            if installation is None or not installation.enabled or installation.plugin_version != run.plugin_version:
+                raise PermissionError('Recovery unavailable')
+            authority = await runtime_access.authorize_task(db, task, installation)
+            if authority.trial != restart_authority.trial:
+                raise PermissionError('Recovery unavailable')
+            if await d4_recovery.restart_mapping(db, task, run) is None:
+                raise PermissionError('Recovery unavailable')
+            position_now = await d4_recovery.validate_message_position(db, task_id, checkpoint.accepted_message_seq)
+            if position_now is None or position_now[0] != message_id:
+                raise PermissionError('Recovery unavailable')
+            # Re-admit both the user and runtime after the final message read.
+            task = await task_service.get_task_for_view(db, scope, task_id)
+            if _task_binding(task) != task_binding:
+                raise PermissionError('Recovery unavailable')
+            final = await runtime_access.authorize_task(db, task, installation)
+            if (final.trial != restart_authority.trial or final.current_source != restart_authority.current_source
+                    or final.source_grant_pairs != restart_authority.source_grant_pairs):
+                raise PermissionError('Recovery unavailable')
+            if await d4_recovery.authorization_snapshot(db, task, installation) != original_source_authority:
+                raise PermissionError('Recovery unavailable')
+            # Roles and business memberships do not share our task lock. A
+            # revocation during the final source snapshot must still fail.
+            task, current_run = await _user_authority(db, scope, task_id, task_binding, _run_binding(run))
+            final = await _resume_authority(db, task, current_run, installation)
+            if (final.trial != restart_authority.trial or final.current_source != restart_authority.current_source
+                    or final.source_grant_pairs != restart_authority.source_grant_pairs):
+                raise PermissionError('Recovery unavailable')
         result = _control_result(operation, task, run)
         await db.commit()
     except Exception:

@@ -22,7 +22,7 @@ def authority_data(mode='ALL', factories='limited', group=False):
         levels[Module.GROUP] = PermissionLevel.ADMIN
     factory_scope = FactoryScope(None if factories == 'all' else [target.factory_id], target.factory_id)
     lines = ProductLineScope(mode, ['LINE'] if mode == 'EXPLICIT' else None)
-    plugin = NS(capability_id=SUMMARY, factory_ids=[str(target.factory_id)],
+    plugin = NS(grant_id=uuid4(), capability_id=SUMMARY, factory_ids=[str(target.factory_id)],
         object_ids=[str(target.report_id)], product_line_codes=['LINE'], expires_at=None, enabled=True)
     trial = NS(profile='local_metadata_v1', expires_at=datetime.now(UTC) + timedelta(hours=1))
     manifest = PluginManifest(protocol_versions=['1'], required_capabilities=[SUMMARY])
@@ -81,7 +81,8 @@ async def test_runtime_adapter_uses_current_access_not_old_user_role(monkeypatch
     user = NS(user_id=uuid4())  # No cached role or bypass attributes.
     task = NS(executor_user_id=user.user_id, target_capa_id=target.report_id, factory_id=target.factory_id, task_id=uuid4())
     installation = NS(installation_id=uuid4(), manifest=manifest.model_dump())
-    db = ReadDB(user, [[plugin], [plugin]])
+    task_grant = NS(**{**vars(plugin), 'grant_id': uuid4()})
+    db = ReadDB(user, [[plugin], [task_grant]])
     fresh_calls, seen = [], []
     async def fresh(db, stale):
         fresh_calls.append(stale)

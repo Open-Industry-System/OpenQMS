@@ -11,6 +11,8 @@ from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.tenant_transaction import TenantBinding
 from app.models.agent_plugin import AgentPluginGrant, AgentPluginInstallation
 from app.models.agent_task import AgentRun, AgentTask, AgentTaskGrant
+from app.models.agent_d4_recovery import D4TaskParentGrant
+from app.models.agent_derived_source import AgentPluginDerivedSourceScope, AgentTaskDerivedSourceScope
 from app.models.user import User
 from app.schemas.agent_plugin import PluginManifest
 from app.schemas.agent_runtime import RuntimeCapabilities, RuntimeCapability
@@ -20,6 +22,8 @@ from app.services.agent.permissions.delivery import DeliveryAttempt, can_deliver
 from app.services.agent.permissions.types import AccessAttempt, ApprovalFloor, Grant
 from app.services.agent_runtime import run_auth, task_service
 from app.services.agent_runtime.trial_policy import TrialAdmission
+from app.services.agent_runtime.deployment_profiles import PROFILES, TEXT_CAPABILITY
+from app.services.agent_runtime.derived_source_grants import current_source_for_target, scope_from_row
 
 # Only deployment-owned policy can permit egress. Neither headers nor plugin
 # manifests can add a tuple. Production remains empty and canonical CAPA DENY.
@@ -32,6 +36,8 @@ class TaskAuthority:
     capabilities: tuple[RuntimeCapability, ...]
     target_product_line_code: str
     trial: TrialAdmission | None
+    current_source: object | None = None
+    source_grant_pairs: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -85,7 +91,21 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
             .execution_options(populate_existing=True))).all())
     trial = task_service.trial_for_target(db, installation, task.executor_user_id, target)
     profile = "baseline" if trial is None else trial.profile
+    current_source = await current_source_for_target(db, placeholder, target) if profile == 'local_d4_root_cause_text_v1' else None
+    with db.no_autoflush:
+        plugin_sources = list((await db.scalars(select(AgentPluginDerivedSourceScope).where(
+            AgentPluginDerivedSourceScope.plugin_grant_id.in_([row.grant_id for row in plugins]))
+            .execution_options(populate_existing=True))).all()) if current_source else []
+        task_sources = list((await db.scalars(select(AgentTaskDerivedSourceScope).where(
+            AgentTaskDerivedSourceScope.task_grant_id.in_([row.grant_id for row in tasks]))
+            .execution_options(populate_existing=True))).all()) if current_source else []
+    with db.no_autoflush:
+        parents = dict((await db.execute(select(D4TaskParentGrant.task_grant_id, D4TaskParentGrant.plugin_grant_id)
+            .where(D4TaskParentGrant.task_grant_id.in_([row.grant_id for row in tasks])))).all()) if current_source else {}
+    p_scopes = {row.plugin_grant_id: scope_from_row(row) for row in plugin_sources}
+    t_scopes = {row.task_grant_id: scope_from_row(row) for row in task_sources}
     decisions = []
+    source_grant_pairs = []
     required = set(manifest.required_capabilities)
     for capability in sorted(required | set(manifest.optional_capabilities)):
         spec = get_capability(capability, profile=profile)
@@ -101,22 +121,31 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
                 for grant in tasks:
                     if grant.capability_id != capability:
                         continue
+                    if capability == TEXT_CAPABILITY and parents.get(grant.grant_id) != plugin.grant_id:
+                        continue
                     decision = authorize(AccessAttempt(spec, levels,
                         None if factories.accessible_factory_ids is None else frozenset(factories.accessible_factory_ids),
                         None if lines.mode == "ALL" else frozenset(lines.codes or []),
                         _grant(plugin), _grant(grant), target.factory_id, target.report_id,
                         target.product_line_code, datetime.now(UTC),
-                        identity_bypass_row_level_security=lines.mode == "ALL", catalog_profile=profile))
-                    allowed = allowed or (decision.allowed and decision.approval_floor == ApprovalFloor.DIRECT)
+                        identity_bypass_row_level_security=lines.mode == "ALL", catalog_profile=profile,
+                        current_source=current_source, plugin_source_scope=p_scopes.get(plugin.grant_id),
+                        task_source_scope=t_scopes.get(grant.grant_id)))
+                    accepted = decision.allowed and decision.approval_floor == ApprovalFloor.DIRECT
+                    allowed = allowed or accepted
+                    if accepted and capability == TEXT_CAPABILITY:
+                        source_grant_pairs.append((plugin.grant_id, grant.grant_id))
         decisions.append(RuntimeCapability(id=capability, allowed=allowed,
             required=capability in required, projection=spec.projection if spec.projection in {"masked", "raw"} else None))
-    if (task_service.TARGET_SUMMARY not in required
+    minimum = PROFILES[profile].required if profile in PROFILES else frozenset({task_service.TARGET_SUMMARY})
+    if (not minimum <= required
             or any(item.required and not item.allowed for item in decisions)):
         raise PermissionError(run_auth.INVALID_TOKEN)
     # Preserve the actual scalar used in ALL canonical grant decisions. A later
     # target reread may see a different product line without reauthorizing it.
     return TaskAuthority(RequestScope(factories, target.factory_id, lines, user),
-        tuple(decisions), target.product_line_code, trial)
+        tuple(decisions), target.product_line_code, trial, current_source,
+        tuple(sorted(source_grant_pairs, key=lambda pair: (str(pair[0]), str(pair[1])))))
 
 
 async def verify_runtime_identity(db: AsyncSession, token: str,
@@ -174,14 +203,14 @@ def require_capability(identity: RuntimeIdentity, capability_id: str) -> None:
 
 
 def require_delivery(identity: RuntimeIdentity, data_class: str, projection: str,
-                     *, controlled_egress: bool = False) -> None:
+                     *, controlled_egress: bool = False, delivery_kind: str = 'context') -> None:
     require_installation_delivery(identity.binding, identity.installation, data_class, projection,
-        controlled_egress=controlled_egress, trial=identity.trial)
+        controlled_egress=controlled_egress, trial=identity.trial, delivery_kind=delivery_kind)
 
 
 def require_installation_delivery(binding: TenantBinding | None, plugin: AgentPluginInstallation,
                                   data_class: str, projection: str, *, controlled_egress: bool = False,
-                                  trial: TrialAdmission | None = None) -> None:
+                                  trial: TrialAdmission | None = None, delivery_kind: str = 'context') -> None:
     """Server deployment policy, usable before a paused Run can acquire a JWT.
 
     The caller must independently resolve current task/plugin authority. This
@@ -190,13 +219,15 @@ def require_installation_delivery(binding: TenantBinding | None, plugin: AgentPl
     tenant_id = "single" if binding is None else str(binding.tenant_id)
     trusted = (tenant_id, plugin.installation_id, plugin.plugin_version) in TRUSTED_DELIVERY_DEPLOYMENTS
     if trial is not None:
-        trusted = (trial.profile == "local_metadata_v1" and isinstance(binding, TenantBinding)
+        trusted = (trial.profile in PROFILES and isinstance(binding, TenantBinding)
             and binding.mode == "business" and trial.installation_id == plugin.installation_id
             and trial.expires_at > datetime.now(UTC))
-    allowed = frozenset({
-        ("internal", "masked", "plugin", str(plugin.installation_id)),
-        ("restricted", "raw", "plugin", str(plugin.installation_id)),
-    }) if trusted else frozenset()
+    legacy = {('context', 'internal', 'masked'), ('message', 'restricted', 'raw')}
+    allowed = frozenset((classification, form, 'plugin', str(plugin.installation_id))
+        for kind, classification, form in legacy if kind == delivery_kind) if trusted else frozenset()
+    if trusted and trial is not None:
+        allowed = frozenset((classification, form, 'plugin', str(plugin.installation_id))
+                            for kind, classification, form in PROFILES[trial.profile].deliveries if kind == delivery_kind)
     if not can_deliver(DeliveryAttempt(data_class, projection, str(plugin.installation_id),
             "plugin", allowed, controlled_egress)):
         raise PermissionError("Delivery unavailable")

@@ -150,8 +150,8 @@ async def test_tenant_attachment_delta_matches_current_public_schema(disposable_
                 },
             )
         async with maintenance_connection(engine, attempt) as maintenance:
-            assert await maintenance.run_migration("tv007_d4_text_delivery") == (
-                "tv007_d4_text_delivery"
+            assert await maintenance.run_migration("tv008_d4_recovery") == (
+                "tv008_d4_recovery"
             )
         async with engine.connect() as connection:
             assert await connection.scalar(

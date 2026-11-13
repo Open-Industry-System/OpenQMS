@@ -167,6 +167,6 @@ def test_single_alembic_head(mig_db_url):
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     # Both published Agent branches are retained beneath this no-op merge.
-    assert heads == ["20261109_d4_text_delivery"], (
-        f"expected single head 20261109_d4_text_delivery, got {heads}"
+    assert heads == ["20261113_d4_recovery"], (
+        f"expected single head 20261113_d4_recovery, got {heads}"
     )

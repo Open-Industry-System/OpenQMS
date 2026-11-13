@@ -190,7 +190,7 @@ async def test_delivery_policy_empty_and_manifest_cannot_self_certify(db, pendin
     access().require_delivery(identity, "internal", "masked")
     with pytest.raises(PermissionError):
         access().require_delivery(identity, "restricted", "masked")
-    access().require_delivery(identity, "restricted", "raw", controlled_egress=True)
+    access().require_delivery(identity, "restricted", "raw", controlled_egress=True, delivery_kind='message')
     with pytest.raises(PermissionError):
         access().require_delivery(identity, "internal", "raw")
 
@@ -337,12 +337,12 @@ async def test_trusted_restricted_raw_task_delivery_needs_controlled_egress(db, 
     result = await claim(db, pending)
     identity = await access().verify_runtime_identity(db, result.token, None)
     with pytest.raises(PermissionError):
-        access().require_delivery(identity, "restricted", "raw", controlled_egress=True)
+        access().require_delivery(identity, "restricted", "raw", controlled_egress=True, delivery_kind='message')
     monkeypatch.setattr(access(), "TRUSTED_DELIVERY_DEPLOYMENTS", frozenset({
         ("single", pending[2].installation_id, pending[2].plugin_version)}))
     with pytest.raises(PermissionError):
-        access().require_delivery(identity, "restricted", "raw")
-    access().require_delivery(identity, "restricted", "raw", controlled_egress=True)
+        access().require_delivery(identity, "restricted", "raw", delivery_kind='message')
+    access().require_delivery(identity, "restricted", "raw", controlled_egress=True, delivery_kind='message')
     with pytest.raises(PermissionError):
         access().require_delivery(identity, "restricted", "masked", controlled_egress=True)
 

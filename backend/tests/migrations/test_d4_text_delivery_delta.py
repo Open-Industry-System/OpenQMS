@@ -2,7 +2,6 @@
 import asyncio
 import hashlib
 from pathlib import Path
-import subprocess
 import uuid
 
 import pytest
@@ -31,16 +30,25 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_frozen_tenant_sources_and_snapshot_are_byte_unchanged():
-    paths = sorted((ROOT / "alembic_tenant/versions").glob("tv00[1-6]_*.py"))
-    paths += sorted((ROOT / "alembic_tenant/snapshot").glob("*.py"))
-    paths += [ROOT / "alembic_tenant/snapshot/manifest.json"]
+    # SHA-256 values independently verified against T1 signoff 286d8e9f.
+    # No git history is required in a shallow CI checkout.
+    expected = {
+        'alembic_tenant/versions/tv001_business_snapshot.py': 'a6450f9db5ed8a60e781932a3141fa9a0fb098ac0d7e46aac08a9e815d40df86',
+        'alembic_tenant/versions/tv002_agent_task_core.py': 'fea1e2a6c2a417beee4b30eae7c82c3fd4aba893f10e3134e3fde9f07aec4192',
+        'alembic_tenant/versions/tv003_agent_readonly_delivery.py': '60dd0e4aa4902420ae533313e3ffef64acbc8d8b3b657f0e46f8569703cb5f42',
+        'alembic_tenant/versions/tv004_agent_readonly_controls.py': 'e7572324e47bdc209e43cdbb9d5b22ebaa269a655cd5fdcc8216d45453736086',
+        'alembic_tenant/versions/tv005_agent_task_attachments.py': 'f93116fa552b29ed2d6154c3d847ade679e57ee58853a399e1b8288c043ae9c6',
+        'alembic_tenant/versions/tv006_agent_read_tasks.py': '7992fc048151ae638e671f49a5f4e358c003061adfb2badbb8f051f3bf43217a',
+        'alembic_tenant/snapshot/business_20260927.py': 'adc4cdf379bc23994245f5c57aa118fce8a8323437a529d63d8a04c088658dbb',
+        'alembic_tenant/snapshot/manifest.json': '6bafeb41f15069a422b7d8e1f366e74bede9c4558959a2b799c5b01745bc296f',
+    }
+    paths = set((ROOT / 'alembic_tenant/versions').glob('tv00[1-6]_*.py'))
+    paths.update((ROOT / 'alembic_tenant/snapshot').glob('*.py'))
+    paths.update((ROOT / 'alembic_tenant/snapshot').glob('*.json'))
+    assert {str(path.relative_to(ROOT)) for path in paths} == set(expected)
     for path in paths:
-        relative = path.relative_to(ROOT.parent)
-        original = subprocess.run(
-            ["git", "show", f"286d8e9f5d99a0e831729f8984117b6e9a469a25:{relative}"],
-            cwd=ROOT.parent, capture_output=True, check=True,
-        ).stdout
-        assert hashlib.sha256(path.read_bytes()).digest() == hashlib.sha256(original).digest()
+        relative = str(path.relative_to(ROOT))
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == expected[relative], relative
 
 
 @pytest.mark.parametrize("ancestor", [None, "20260929_agent_read_task", "20261009_agent_task_attachments", PARENT])
@@ -48,7 +56,7 @@ def test_public_upgrade_registers_six_metadata_only_tables(mig_db_url, ancestor)
     config = _migration_config(mig_db_url)
     if ancestor:
         command.upgrade(config, ancestor)
-    command.upgrade(config, "head")
+    command.upgrade(config, PUBLIC)
     engine = _sync_engine(mig_db_url)
     try:
         with engine.connect() as conn:
@@ -91,11 +99,10 @@ def test_models_are_tenant_local_metadata_with_named_objects():
 ])
 async def test_all_reviewed_tenant_ancestors_upgrade_with_full_parity(mig_db_url, monkeypatch, ancestor, public_head):
     config = _migration_config(mig_db_url)
-    await asyncio.to_thread(command.upgrade, config, "head" if ancestor is None else public_head)
+    await asyncio.to_thread(command.upgrade, config, PUBLIC if ancestor is None else public_head)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, "engine", engine)
-    if ancestor:
-        monkeypatch.setattr(tenant_migrator, "REVISION", ancestor)
+    monkeypatch.setattr(tenant_migrator, "REVISION", ancestor or TENANT)
     try:
         tenant = await tenant_migrator.provision_new(TenantCreateRequest(
             name="D4 delta", slug="d4-" + uuid.uuid4().hex[:12],
@@ -103,7 +110,7 @@ async def test_all_reviewed_tenant_ancestors_upgrade_with_full_parity(mig_db_url
         ))
         generation = tenant.generation
         if ancestor:
-            await asyncio.to_thread(command.upgrade, config, "head")
+            await asyncio.to_thread(command.upgrade, config, PUBLIC)
             monkeypatch.setattr(tenant_migrator, "REVISION", TENANT)
             tenant = await tenant_migrator.resume_tenant(tenant.id)
             assert tenant.generation == generation + 1
@@ -124,7 +131,7 @@ async def test_all_reviewed_tenant_ancestors_upgrade_with_full_parity(mig_db_url
 
 def test_empty_public_delta_can_downgrade_and_reapply(mig_db_url):
     config = _migration_config(mig_db_url)
-    command.upgrade(config, "head")
+    command.upgrade(config, PUBLIC)
     engine = _sync_engine(mig_db_url)
     try:
         with engine.connect() as conn:
@@ -132,7 +139,7 @@ def test_empty_public_delta_can_downgrade_and_reapply(mig_db_url):
         command.downgrade(config, PARENT)
         with engine.connect() as conn:
             assert not TABLES & set(sa.inspect(conn).get_table_names())
-        command.upgrade(config, "head")
+        command.upgrade(config, PUBLIC)
         with engine.connect() as conn:
             assert TABLES <= set(sa.inspect(conn).get_table_names())
     finally:
@@ -234,7 +241,7 @@ def _snapshot_delivery_and_history(conn, schema):
 @pytest.mark.parametrize("name", sorted(TABLES))
 def test_public_populated_delta_refuses_downgrade_atomically(mig_db_url, name):
     config = _migration_config(mig_db_url)
-    command.upgrade(config, "head")
+    command.upgrade(config, PUBLIC)
     engine = _sync_engine(mig_db_url)
     try:
         with engine.begin() as conn:
@@ -254,9 +261,10 @@ def test_public_populated_delta_refuses_downgrade_atomically(mig_db_url, name):
 @pytest.mark.parametrize("name", sorted(TABLES))
 async def test_tenant_populated_delta_refuses_downgrade_atomically(mig_db_url, monkeypatch, name):
     config = _migration_config(mig_db_url)
-    await asyncio.to_thread(command.upgrade, config, "head")
+    await asyncio.to_thread(command.upgrade, config, PUBLIC)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, "engine", engine)
+    monkeypatch.setattr(tenant_migrator, "REVISION", TENANT)
     try:
         tenant = await tenant_migrator.provision_new(TenantCreateRequest(
             name="D4 evidence", slug="d4-evidence-" + uuid.uuid4().hex[:10],
@@ -280,7 +288,7 @@ async def test_tenant_populated_delta_refuses_downgrade_atomically(mig_db_url, m
 def test_real_postgres_matches_models_and_enforces_proof_history(mig_db_url):
     from sqlalchemy.exc import IntegrityError
     config = _migration_config(mig_db_url)
-    command.upgrade(config, "head")
+    command.upgrade(config, PUBLIC)
     engine = _sync_engine(mig_db_url)
     try:
         with engine.begin() as conn:
@@ -330,7 +338,7 @@ def test_real_postgres_matches_models_and_enforces_proof_history(mig_db_url):
 def test_other_metadata_constraints_and_grant_uniqueness(mig_db_url, name):
     from sqlalchemy.exc import IntegrityError
     config = _migration_config(mig_db_url)
-    command.upgrade(config, "head")
+    command.upgrade(config, PUBLIC)
     engine = _sync_engine(mig_db_url)
     try:
         with engine.begin() as conn:

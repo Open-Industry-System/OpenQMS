@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from app.schemas.agent_runtime import (RuntimeSourceOut, RuntimeEventPayload,
     RuntimeResultOut, ReadonlyCheckpointView)
+from app.schemas.agent_d4_recovery import D4RecoveryView
 
 TaskStatus = Literal["blocked_capability", "ready", "paused", "completed", "failed", "cancelled"]
 RunStatus = Literal["pending", "active", "paused", "stopped", "completed", "failed"]
@@ -208,7 +209,7 @@ class ActivityResult(ActivityItemBase):
 
 class ActivityCheckpoint(ActivityItemBase):
     kind: Literal["checkpoint"]
-    data: ReadonlyCheckpointView
+    data: ReadonlyCheckpointView | D4RecoveryView
 
 
 ActivityItem = Annotated[ActivityMessage | ActivityAck | ActivityRun | ActivityControl

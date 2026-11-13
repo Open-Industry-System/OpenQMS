@@ -28,7 +28,7 @@ def test_merge_upgrade_preserves_both_agent_table_families(mig_db_url, predecess
     engine = sa.create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
     try:
         with engine.connect() as connection:
-            assert connection.scalars(sa.text("SELECT version_num FROM public.alembic_version")).all() == ["20261109_d4_text_delivery"]
+            assert connection.scalars(sa.text("SELECT version_num FROM public.alembic_version")).all() == ["20261113_d4_recovery"]
             inspector = sa.inspect(connection)
             tables = set(inspector.get_table_names(schema="public"))
             assert {

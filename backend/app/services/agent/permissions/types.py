@@ -4,6 +4,7 @@ from enum import IntEnum
 from uuid import UUID
 
 from app.core.permissions import Module, PermissionLevel
+from .derived_sources import DerivedSourceScope
 
 
 class ApprovalFloor(IntEnum):
@@ -49,6 +50,9 @@ class AccessAttempt:
     now: datetime
     identity_bypass_row_level_security: bool = False
     catalog_profile: str = field(default="baseline", kw_only=True)
+    current_source: DerivedSourceScope | None = field(default=None, kw_only=True)
+    plugin_source_scope: DerivedSourceScope | None = field(default=None, kw_only=True)
+    task_source_scope: DerivedSourceScope | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)

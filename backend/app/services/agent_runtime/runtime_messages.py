@@ -15,7 +15,7 @@ from app.services.agent_runtime.message_delivery_policy import require_profile_m
 def _delivery(identity: RuntimeIdentity) -> None:
     # Original user text is restricted/raw, never a masked projection. Egress
     # authority comes exclusively from the current server deployment tuple.
-    runtime_access.require_delivery(identity, "restricted", "raw", controlled_egress=True)
+    runtime_access.require_delivery(identity, "restricted", "raw", controlled_egress=True, delivery_kind='message')
 
 
 def _require_profile_messages(identity: RuntimeIdentity, rows) -> None:

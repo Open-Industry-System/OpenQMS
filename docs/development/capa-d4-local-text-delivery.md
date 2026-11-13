@@ -1,15 +1,15 @@
 # CAPA D4 本地正文交付：来源与修订基础
 
-## 当前范围（Task 2、Task 3、Task 4 已签收）
+## 当前范围（T2–T8 已验收，本地提交待完成）
 
-Task 2 增加租户本地元数据表；Task 3 实现内部 FMEA 来源访问与根因字段修订。Task 4 在员工验证创建动作接入显式来源声明和证明签发；不提供正文交付、插件来源授权或任务准入。运行时仍默认关闭；迁移成功不是启用许可，也不会创建任何 grant 或提升旧 metadata 能力。本文不提供尚未实现的启用命令。
+Task 2 增加租户本地元数据表；Task 3 实现内部 FMEA 来源访问与根因字段修订。Task 4 在员工验证创建动作接入显式来源声明和证明签发；T5–T7 增加固定本地接收器、消息门禁与独立正文策略槽。T8 已接通显式两层来源授权及受限恢复控制，通过独立规格、质量复核和本地验收；精确本地提交待完成。正文读取服务与新运行真实重读、新 receipt 留待 T9。运行时和正文均默认关闭；迁移成功不是启用许可，也不会创建任何 grant 或提升旧 metadata 能力。本文不提供尚未实现的启用命令。
 
 ## 迁移链
 
-- public 新 head：`20261109_d4_text_delivery`，前驱为原双分支 no-op merge `20261102_agent_mainline_merge`。
-- tenant 新 head：`tv007_d4_text_delivery`，前驱 `tv006_agent_read_tasks`。
+- public 候选 head：`20261113_d4_recovery`，前驱 `20261109_d4_text_delivery`；后者前驱为原双分支 no-op merge `20261102_agent_mainline_merge`。
+- tenant 候选 head：`tv008_d4_recovery`，前驱 `tv007_d4_text_delivery`；后者前驱为 `tv006_agent_read_tasks`。
 - public/tenant 使用独立、手写自含且等价的增量 DDL；不从当前 ORM 动态生成、不以 `create_all` 替代迁移。
-- `tv001` 至 `tv006`、业务快照、manifest 和其中冻结 public head 均保持字节不变。
+- `tv001` 至 `tv007`、业务快照、manifest 和其中冻结 public head 均保持字节不变。
 - tenant 升级沿用原 owner-bound maintenance、同物理连接 session advisory lock、代际更新和全对象 parity；所有旧前驱仍受支持。`delivery_predecessor` 专指 `tv006`，既有 `predecessor`（`tv005`）等状态名不变。
 
 ## 六张表
@@ -21,7 +21,7 @@ Task 2 增加租户本地元数据表；Task 3 实现内部 FMEA 来源访问与
 | `agent_restricted_projection_receipts` | 独立 restricted 投影回执元数据，无正文，不接入旧 internal 回执链 |
 | `agent_plugin_derived_source_scopes` | 插件 grant 的精确派生来源旁表，不代表 ALL 或额外 FMEA 权限 |
 | `agent_task_derived_source_scopes` | 任务 grant 的精确派生来源旁表，无独立 enabled 开关 |
-| `agent_task_source_requests` | task 主键与不可变请求身份指纹，仅身份而非授权；本阶段无服务写入，后续任务才接入 blocked 请求记录 |
+| `agent_task_source_requests` | task 主键与不可变请求身份指纹，仅身份而非授权；正文任务包括 blocked 请求均记录不可变指纹，blocked 不产生正文 task grant 或运行 |
 
 全部属于 `TenantBase`，无 `tenant_id`，未加入平台表或 parity 排除集合。新外键明确 `RESTRICT`，包括 proof 到实际 `capa_root_cause_verification.verification_id`；源 FMEA/节点不新增删除阻塞外键，`superseded_by` 仅保存历史 UUID，不自引用。时间字段均为 timezone-aware，普通新主键由 Python UUIDv4 生成（请求旁表复用 task 主键）。
 
@@ -47,13 +47,19 @@ FMEA 内部来源服务先刷新当前员工、角色、FMEA VIEW、工厂及产
 
 成功 PATCH 不补发证明，在同一事务永久设置引用证明的 `invalidated_at`，包括空更新、同时间戳及同事务 A→B→A，防止旧证明复活。D4→D5、D8/归档保护及未审补充规则沿用原业务逻辑。签发失败回滚验证、修订、证明和审计；未增加删除路由或改变证据 RESTRICT 约束。
 
+## 受限恢复与父授权绑定（T8）
+
+新 public/tenant 增量自含创建三张同构 tenant-local 表：`agent_d4_recovery_checkpoints` 保存任务、运行、授权引用、固定协议/入口和已确认水位等控制坐标；`agent_d4_recovery_restarts` 将一次控制与原、新运行及固定入口消息关联；`agent_d4_task_parent_grants` 将正文 task grant 固定绑定到单个同时覆盖目标和来源的 plugin grant。checkpoint 不保存正文、模型上下文或业务结果；旧 receipt 和来源版本不能成为新运行读取凭证。
+
+用户显式 restart 后，平台重新检查当前身份、准入、原父 grant、P/T 和当前来源，在一个事务内使旧运行凭据失效并创建新运行与固定入口。新凭据只通过正常 claim 签发；已确认水位不回退。旧 metadata checkpoint 与新受限 checkpoint 按可信任务类型隔离，不互相回退。此处只建立安全重开控制，T9 才能以真实正文服务验证新运行重读当前事实、获得新 receipt，且旧 receipt 不被消费；它不是业务回滚或 Agent 记忆恢复。
+
 ## 回退与证据保留
 
-正文 profile 的消息门禁要求每条出站消息等于固定启动字面量；领取、历史和确认路径在最终身份刷新后检查实际消息，拒绝时不改变批次、水位或成功审计。该门禁本身不开放正文准入；首次可领取的真实 HTTP 哨兵验收仍在后续任务。
+正文 profile 的消息门禁要求每条出站消息等于固定启动字面量；领取、历史和确认路径在最终身份刷新后检查实际消息，拒绝时不改变批次、水位或成功审计。该门禁本身不开放正文准入；T8 使用正常配置真实 HTTP 验证领取、重领、历史和确认的消息哨兵。
 
-正文与 metadata 使用独立的本地策略槽，启动时分别加载冻结快照；请求仅从服务端绑定匹配安装、执行人和业务坐标，正文策略绑定使用 HMAC。现阶段正文所需来源授权尚未接通，独立策略槽不使正文任务可领取。
+正文与 metadata 使用独立的本地策略槽，启动时分别加载冻结快照；请求仅从服务端绑定匹配安装、执行人和业务坐标，正文策略绑定使用 HMAC。T8 按显式插件来源范围 P、任务来源范围 T 与当前来源的交集检查，不能由 proof 或请求指纹推导或扩大授权；多个父 grant 不可拼接，固定绑定的父 grant 缺失或撤销时拒绝。撤销正文授权后，有任务控制权的员工仍可 pause/cancel；resume/restart 则重验完整准入和来源权限。
 
-两条新 migration 在任何 DROP 前逐表检查：六张表任意一张有记录即拒绝 downgrade，事务保留版本、六表、证据和旧记录。仅六表全空时允许沿既有历史链回退/重新升级。不自动删除证据，不提供清库或强制回退入口。
+`20261109_d4_text_delivery` / `tv007_d4_text_delivery` 在任何 DROP 前检查原六张表，任意一张有记录即拒绝 downgrade。`20261113_d4_recovery` / `tv008_d4_recovery` 同样在任何 DROP 前检查下述三张新表，任一有记录即拒绝回退；只有该增量的三表均为空才可回退该增量，继续回退还需满足原六表守卫。不自动删除证据，不提供清库或强制回退入口。
 
 维护前提：tenant 必须使用既有 owner-bound 排他维护锁路径，正常业务事务遵守 shared advisory 锁；普通 public Alembic 不持该租户锁，只用于本片离线、无并发 writer 的受控维护。EXISTS 不是写排他锁，不提供在线 public 并发回退安全保证，也不认证生产回退。
 
