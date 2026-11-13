@@ -423,8 +423,8 @@ def receive_once(wire, config):
 - Modify: `backend/tests/services/agent_runtime/test_runtime_messages.py`
 - Modify: `backend/tests/services/agent_runtime/test_readonly_checkpoints.py`
 
-- [ ] RED：新profile队列中放敏感非字面量sentinel；分别初领、同批重试、旧epoch重领、accepted history、ACK真实batch，所有响应不含sentinel且批次/水位/成功audit不变。
-- [ ] 在叶子模块 `message_delivery_policy.py` 定义唯一共用检查；消息服务仅从最终刷新后的服务端admission取profile再传入（不从请求取值），T7平台profile绑定导入该叶子常量，避免循环导入。此任务不开放任何正文安装：
+- [x] RED：新profile队列中放敏感非字面量sentinel；分别初领、同批重试、旧epoch重领、accepted history、ACK真实batch，所有响应不含sentinel且批次/水位/成功audit不变。
+- [x] 在叶子模块 `message_delivery_policy.py` 定义唯一共用检查；消息服务仅从最终刷新后的服务端admission取profile再传入（不从请求取值），T7平台profile绑定导入该叶子常量，避免循环导入。此任务不开放任何正文安装：
 
 ```python
 TEXT_PROFILE = 'local_d4_root_cause_text_v1'
@@ -439,7 +439,7 @@ def require_profile_message_contents(profile, rows):
 
 真正调用前仍是现有完整身份/准入/投递重验；新profile缺开关/peer/策略不得降级走legacy。claim在最终刷新后、清旧markers/新claimed/audit前调用；history在最后授权后、DTO构造前调用；ACK在加载真实batch及最终授权后、改accepted/watermark前调用。不挑掉非法消息，不跳seq，不只校验initial_text，不仅靠limit1。
 
-- [ ] 在尚未提供正文准入时，用纯predicate及服务插入点契约证明固定/非固定输入差分，明确不是新profile真实准入成功；旧profile自由输入/partial ACK/retry/history after99/epoch批次证明均保持。T7/T8首次实际可claim的同一提交必须另完成真实API哨兵测试，不准以此任务的纯测试代签。Commit `fix(agent): validate text-receiver inputs before message egress`。
+- [x] 在尚未提供正文准入时，用纯predicate及服务插入点契约证明固定/非固定输入差分，明确不是新profile真实准入成功；旧profile自由输入/partial ACK/retry/history after99/epoch批次证明均保持。T7/T8首次实际可claim的同一提交必须另完成真实API哨兵测试，不准以此任务的纯测试代签。Commit `fix(agent): validate text-receiver inputs before message egress`。
 
 ## Task 7: 第二策略槽与模块声明驱动的平台准入
 
@@ -633,4 +633,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T5 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T6 checkbox已按实际双复核签收，其余未完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。

@@ -1,5 +1,7 @@
 # OpenQMS 开发进度
 
+> **2026-11-13 T6 双复核通过**：新增服务端固定启动消息门禁，在最终身份/准入刷新后、消息 claim 标记或审计、history 输出及真实批次 ACK 水位变更之前检查全部相关消息；旧 profile 语义不变，未开放正文准入。独立规格和质量复核通过，无未关闭 Critical/Important。纯合同真实 RED **4 failed → 4 passed**；Lead 当前独立纯检查 **4 passed /3 warnings**，专用库消息与 checkpoint 回归 **89 passed /4 warnings /239.99s，exit0**（`test-1794541243132929000.log`），其中五个负向及固定字面量正向使用服务端身份 seam 注入未来 profile，不代表真实准入。首次可 claim 的真实 API 哨兵见证仍是 T8 必须条件；下一任务 T7，正文与生产默认关闭。
+
 > **2026-11-13 T5 双复核通过**：接续已有固定 stdlib 接收器及受监督启动器草稿，独立规格与质量复核均通过，未发现未关闭 Critical/Important。Lead 在获准的自有数字回环环境独立运行两份 CLI 测试 **104 passed /7.89s**；先前误用 `check-ci-pure.py` 的 74 failed /30 passed 为框架主动禁止 socket，不作为行为证据；沙箱内绑定拒绝的 77 failed /27 passed 同属环境限制。接收器 SHA256 `3a2dfa9712c2ffebc62c26da0c4c03192be4ec905d1ee83e3ae198bfab51fa21`，启动器 `3d4bff2ff2e633eb2da8d6e80a52f68c4d6adb1dd5cbb187b190f9a6a5b961da`；SDK 传输差异见[对照文档](docs/development/d4-text-receiver-wire.md)。此为本地 wire 验证，正常策略真实 API 闭环仍待 T10；下一任务 T6 消息门禁，必须先于准入，不启生产或模型。
 
 > **2026-11-13 T4 双复核与当前回归通过**：独立规格复核发现最后来源重验与签发之间的撤权窗口；真实双事务先见 200 而非403，修复后通过。质量复核再发现修订冲突和文本不匹配诊断期间撤权分别返回409/200；两项真实 RED 后补诊断前重验，另覆盖已有 proof 冲突。最终规格复审及质量复审通过，无未关闭 Critical/Important。测试夹具一次 rollback 后访问过期 ORM 触发 `MissingGreenlet`，改为先保存 UUID 并在新事务计数后，三项撤权测试 **3 passed**，已有 proof 冲突 **1 passed**。当前代码独占库新鲜 `tests/capa` **1276 passed /6 warnings /388.58s，exit0**（日志 `test-1794540341431944000.log`），离线写站点及合同 **111 passed /3 warnings**；运行前专用库客户端、临时租户及迁移库均0。此前一次 34 项焦点与另一执行者测试重叠，不作隔离验收证据。未跑完整 make check/前端/远端 CI，不代表整片验收；下一任务 T5，保留其已有未提交草稿，消息门禁仍须先于准入。
