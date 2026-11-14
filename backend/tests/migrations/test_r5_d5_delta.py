@@ -188,6 +188,7 @@ def test_measure_source_and_staff_receipt_uniqueness(mig_db_url):
 
 @pytest.mark.asyncio
 async def test_tenant_empty_downgrade_and_populated_guard(mig_db_url, monkeypatch):
+    monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT)
     await asyncio.to_thread(command.upgrade, _migration_config(mig_db_url), PUBLIC)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, 'engine', engine)

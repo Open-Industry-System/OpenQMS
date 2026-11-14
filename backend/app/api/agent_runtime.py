@@ -1,4 +1,11 @@
 """Default-off plugin runtime endpoints; business admission belongs to services."""
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
+from app.services.agent_runtime import d5_commands
+from app.schemas.agent_d5_command import D5Command
+from app.services.capa_review_guard import ReviewedContentLocked
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,3 +130,20 @@ async def message_history(query: MessageHistoryHTTPQuery = Query(), identity=Dep
         return await runtime_messages.get_message_history(db, identity, query.after_sequence, query.limit)
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
+
+
+@router.post("/capa/d5/proposals")
+async def d5_proposal_command(body: D5Command, identity=Depends(get_runtime_identity),
+                              db: AsyncSession = Depends(get_db)):
+    try:
+        result = await d5_commands.save_proposal(db, identity, body)
+        return JSONResponse(jsonable_encoder(result), headers={'Cache-Control': 'no-store'})
+    except PermissionError:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='D5 command unavailable', headers={'Cache-Control': 'no-store'}) from None
+    except (ValueError, ReviewedContentLocked):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='D5 command conflict', headers={'Cache-Control': 'no-store'}) from None
+    except DBAPIError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='D5 command retry required', headers={'Cache-Control': 'no-store'}) from None

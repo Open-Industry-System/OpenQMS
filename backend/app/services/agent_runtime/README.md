@@ -19,3 +19,10 @@ validation/recovery failures leave attachments closed for that process. The fixe
 aggregate-only maintenance pass without accepting paths, tenants, or wildcards.
 
 These primitives are not routes and do not enable attachment upload, plugin/model delivery, or lifecycle behavior.
+
+
+## R5 D5 命令（T4 内部服务，准入未开放）
+
+`d5_commands.save_proposal` 从签名 run 重新解析目标，沿用安装→任务→运行锁，随后锁 CAPA、完整来源父行和当期 ACL。保存、并列备选及明确替代在同一事务内写建议、任务序号、命令账本和引用审计。`POST /api/agent/runtime/capa/d5/proposals` 已登记但 `model_d5_proposal_v1` 不在 profile 目录，默认拒绝；metadata、R4b 与员工凭据均不获得写能力。
+
+来源闭环与重试合同见 [R5 D5 建议服务说明](../../../../docs/development/capa-d5-proposals.md)。T6/T7 必须接入真实部署绑定、完整工具/消息释放和模型出口后才能开放。T4 的真实数据库测试只替代最终 R5 准入条件，仍执行签名 run、既有 canonical 安装/任务来源授权及实时 ACL；没有调用模型。

@@ -59,10 +59,12 @@ dbtest() { (cd backend && "$PY" -B -m tests.ci.pytest_bootstrap "$@" -q --tb=sho
 
 ### T4　实现 Agent 保存、更正与并列备选
 
-- [ ] 新增 `backend/tests/services/agent_runtime/test_d5_commands.py`，从服务端运行身份建立 A 报告、B 报告及两个来源。测试改目标、同 key 改正文、并发重复、响应丢失重试、暂停、运行换代、换源和撤权。运行 `dbtest tests/services/agent_runtime/test_d5_commands.py`。
-- [ ] 在 `capa_agent_capabilities.py` 声明保存/替代能力，新增 `backend/app/services/agent_runtime/d5_commands.py` 与 `backend/app/services/capa_d5_proposals.py`。建议命令输入为 command_key、text、operation 和可选 predecessor_id、correction_message_id。目标只来自当前 run。由平台封装受信依据：绑定已实际交付给本任务的 D4 修订、proof 及工具结果来源，复核它们与当前事实一致。聊天或其他输入若引入无法界定读取范围的额外资料，允许按任务策略调用模型，但拒绝把该结果保存为报告共享材料。
-- [ ] 锁顺序复用 R4b 安装→任务→运行及权限围栏，再锁 CAPA 父行和目标建议，重查阶段/来源/ACL。按规范输入 HMAC 比对幂等键；同 task 锁内分配序号。一次事务写建议、账本及安全审计。仅同一任务内的待审版本可替代；服务端核对当前任务的明确更正消息与指定前版（侧栏可附结构化更正意图）。创建新版本及更改旧状态原子完成。备选使用独立 key，无 predecessor。重复响应按当前权限返回引用。
-- [ ] 将同一逻辑挂到 `backend/app/api/agent_runtime.py` 与 `agent_runtime/routes.py` 的 R5 专属命令，待 T6 准入才可领取。验证缺 run token、其他 profile、过期 token 均拒绝。已有 D4 和 R4b 的命令能力不扩大。复跑焦点并提交 `feat(agent): save and replace source-bound D5 proposals atomically`。
+- [x] 新增 `backend/tests/services/agent_runtime/test_d5_commands.py`，从服务端运行身份建立 A 报告、B 报告及两个来源。测试改目标、同 key 改正文、并发重复、响应丢失重试、暂停、运行换代、换源和撤权。运行 `dbtest tests/services/agent_runtime/test_d5_commands.py`。
+- [x] 在 `capa_agent_capabilities.py` 声明默认 DENY 的保存/替代能力，新增 `backend/app/services/agent_runtime/d5_commands.py` 与 `backend/app/services/capa_d5_proposals.py`。建议命令输入为 command_key、text、operation 和可选 predecessor_id、correction_message_id。目标只来自当前 run。由平台封装受信依据：绑定已实际交付给本任务的 D4 修订、proof 及工具结果来源，复核它们与当前事实一致。聊天或其他输入若引入无法界定读取范围的额外资料，允许按任务策略调用模型，但拒绝把该结果保存为报告共享材料。
+- [x] 锁顺序复用 R4b 安装→任务→运行及权限围栏，再锁 CAPA 父行和目标建议，重查阶段/来源/ACL。按规范输入 HMAC 比对幂等键；同 task 锁内分配序号。一次事务写建议、账本及安全审计。仅同一任务内的待审版本可替代；服务端核对当前任务的明确更正消息与指定前版（侧栏可附结构化更正意图）。创建新版本及更改旧状态原子完成。备选使用独立 key，无 predecessor。重复响应按当前权限返回引用。
+- [x] 将同一逻辑挂到 `backend/app/api/agent_runtime.py` 与 `agent_runtime/routes.py` 的 R5 专属命令，待 T6 准入才可领取。验证缺 run token、其他 profile、过期 token 均拒绝。已有 D4 和 R4b 的命令能力不扩大。复跑焦点并提交 `feat(agent): save and replace source-bound D5 proposals atomically`。
+
+T4 必要增量：R4b 回执只有不可逆投影摘要，不能还原实际释放时的 revision/proof 或完整工具来源。新增独立 `agent_d5_basis_receipts` 与 `agent_d5_command_basis`，配对 delta `20261114_r5_d5_basis` / `tv011_r5_d5_basis`，前驱分别为 T1 的两个 head；不修改已发布历史或 R4b 回执合同。内存快照由服务端实际读取正文及工具节点后封存，释放前锁后重核同一快照；持久层仅保存位置、完整来源版本和 HMAC。命令规范请求固定首次服务端回执 ID 集合，重放使用原集合。T6/T7 负责将此内部钩子接到真实 R5 准入及平台模型出口；T4 无模型交付证据。验证包括 public/tenant 升级、同构/约束、前驱识别及非空降级拒绝。
 
 ### T5　实现员工动作与检查点后的部分撤回
 
@@ -75,7 +77,7 @@ dbtest() { (cd backend && "$PY" -B -m tests.ci.pytest_bootstrap "$@" -q --tb=sho
 
 - [ ] 新增 `backend/tests/services/agent_runtime/test_r5_model_binding.py`。两个测试接收方 A/B 各自记录合成哨兵；选 A 时 B 的接收次数必须为零。覆盖禁用、撤销、配置换代、重定向、插件传 URL、旧任务 key 换部署和 restart。运行 `dbtest tests/services/agent_runtime/test_r5_model_binding.py`。
 - [ ] 实施选择为**平台管理模型调用出口**：管理员配置并批准不可变的部署版本（租户、模型标识、本地或云端服务地址、凭据引用、启用状态），插件只提交任务上下文与推理请求。复用 backend/app/services/agent/provider_adapter.py 的工具协议编码与响应解析，增加按已核实部署构造 client 的入口，避开默认配置选路。服务端根据当前 task binding 解析唯一实际接收方、校验证书与允许地址、拒绝重定向及隐式 fallback。凭据由平台在出站时注入。受控插件执行环境仅允许调用所需平台入口，网络验收包含尝试直接访问另一个测试接收方。
-- [ ] 新建 `backend/app/models/agent_model_deployment.py`、`backend/app/services/agent_runtime/model_egress.py`，在 `deployment_profiles.py`、`plugin_registry.py`、`task_service.py`、`runtime_access.py`、`run_auth.py` 接线；为部署和唯一 task binding 新建配对 public/tenant 迁移，前驱取 T1 的新 head，补同构/非空降级保护。管理员登记、撤销、用户可选列表与任务创建都按租户和现有 admin/task 权限判断。实际送出前重验 run、部署版本与全部被使用业务资料的当前权限；已获准的任务上下文可整体发送。元数据/日志只含授权决定、接收方版本、运行与安全计数。
+- [ ] 新建 `backend/app/models/agent_model_deployment.py`、`backend/app/services/agent_runtime/model_egress.py`，在 `deployment_profiles.py`、`plugin_registry.py`、`task_service.py`、`runtime_access.py`、`run_auth.py` 接线；为部署和唯一 task binding 新建配对 public/tenant 迁移，前驱取 T4 的实际新 head `20261114_r5_d5_basis` / `tv011_r5_d5_basis`（实施时再次核实），补同构/非空降级保护。管理员登记、撤销、用户可选列表与任务创建都按租户和现有 admin/task 权限判断。实际送出前重验 run、部署版本与全部被使用业务资料的当前权限；已获准的任务上下文可整体发送。元数据/日志只含授权决定、接收方版本、运行与安全计数。
 - [ ] 通过真实 HTTP 见证实际接收方、投递前撤权、切换部署后无隐式复用或旧聊天转移；复跑迁移、旧固定接收器和消息门禁测试。提交 `feat(agent): bind model egress to the selected deployment per task`。
 
 ### T7　受控模型插件与多轮消息

@@ -19,7 +19,8 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv010_r5_d5_proposals"
+REVISION = "tv011_r5_d5_basis"
+R5_BASIS_PREDECESSOR_REVISION = "tv010_r5_d5_proposals"
 R5_PREDECESSOR_REVISION = "tv009_r4b_main_merge"
 CHARACTERISTIC_PREDECESSOR_REVISION = "tv007_characteristic_refs"
 RECOVERY_HEAD_REVISION = "tv008_d4_recovery"
@@ -166,6 +167,8 @@ class MaintenanceContext:
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
             if versions == [REVISION]:
                 result = "current"
+            elif versions == [R5_BASIS_PREDECESSOR_REVISION]:
+                result = "r5_basis_predecessor"
             elif versions == [R5_PREDECESSOR_REVISION]:
                 result = "r5_predecessor"
             elif versions == [CHARACTERISTIC_PREDECESSOR_REVISION]:
@@ -655,7 +658,7 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current", "ancestor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state not in {"empty", "current", "ancestor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
@@ -665,8 +668,9 @@ async def migrate_if_needed(maintenance: MaintenanceContext, attempt: Maintenanc
         if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")
         await maintenance.run_migration(REVISION)
-    elif state in {"r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state in {"r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         predecessor = {
+            "r5_basis_predecessor": R5_BASIS_PREDECESSOR_REVISION,
             "r5_predecessor": R5_PREDECESSOR_REVISION,
             "characteristic_predecessor": CHARACTERISTIC_PREDECESSOR_REVISION,
             "recovery_head": RECOVERY_HEAD_REVISION,
