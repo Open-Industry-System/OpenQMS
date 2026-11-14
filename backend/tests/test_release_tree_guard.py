@@ -26,6 +26,12 @@ def _manifest_line(path: str, payload: bytes, mode: str = "100644") -> str:
     return f"{mode} {hashlib.sha256(payload).hexdigest()}  {path}\n"
 
 
+def _write_deployable(path: Path, payload: bytes) -> None:
+    """Model a Git 100644 file regardless of the acceptance runner's umask."""
+    path.write_bytes(payload)
+    path.chmod(0o644)
+
+
 def _write_manifest(root: Path, paths: list[str]) -> Path:
     result = _run(
         "create",
@@ -44,7 +50,7 @@ def test_script_creates_sorted_deterministic_manifest_and_verifies_tree(tmp_path
     (tmp_path / "z.txt").chmod(0o755)
     nested = tmp_path / "dir"
     nested.mkdir()
-    (nested / "a.txt").write_bytes(b"first")
+    _write_deployable(nested / "a.txt", b"first")
 
     first = _run(
         "create",
@@ -89,7 +95,7 @@ def test_verify_rejects_modified_missing_and_extra_files_with_fixed_errors(
     tmp_path, mutation, expected_error
 ):
     tracked = tmp_path / "tracked.txt"
-    tracked.write_bytes(b"original")
+    _write_deployable(tracked, b"original")
     manifest = _write_manifest(tmp_path, ["tracked.txt"])
 
     if mutation == "modified":
@@ -110,7 +116,7 @@ def test_verify_rejects_modified_missing_and_extra_files_with_fixed_errors(
 
 
 def test_verify_excludes_only_persistent_runtime_state(tmp_path):
-    (tmp_path / "tracked.txt").write_bytes(b"tracked")
+    _write_deployable(tmp_path / "tracked.txt", b"tracked")
     manifest = _write_manifest(tmp_path, ["tracked.txt"])
     (tmp_path / ".env.production").write_bytes(b"SECRET=value\n")
     (tmp_path / ".release-sha").write_text("a" * 40 + "\n")
@@ -233,7 +239,7 @@ def test_verify_rejects_wrong_type_reserved_runtime_paths(
     tmp_path, reserved_name, wrong_kind
 ):
     tracked = tmp_path / "tracked.txt"
-    tracked.write_bytes(b"tracked")
+    _write_deployable(tracked, b"tracked")
     created = _run(
         "create",
         "--root",
@@ -267,7 +273,7 @@ def test_verify_rejects_wrong_type_reserved_runtime_paths(
 
 
 def test_verify_rejects_symlink_as_extra_deployable_path(tmp_path):
-    (tmp_path / "tracked.txt").write_bytes(b"tracked")
+    _write_deployable(tmp_path / "tracked.txt", b"tracked")
     manifest = _write_manifest(tmp_path, ["tracked.txt"])
     outside = tmp_path.parent / "outside.txt"
     outside.write_bytes(b"outside")

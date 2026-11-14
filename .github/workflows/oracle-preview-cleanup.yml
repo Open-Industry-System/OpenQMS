@@ -1,0 +1,52 @@
+name: Oracle preview cleanup
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: oracle-preview-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: vars.ORACLE_AUTODEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: oracle-preview
+    steps:
+      # Metadata only: never check out or execute the PR head or merge tree.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          persist-credentials: false
+      - name: Set up optional private transport
+        if: vars.ORACLE_USE_TAILSCALE == 'true'
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:openqms-deploy
+      - name: Cleanup closed preview using trusted metadata helper
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_PR: ${{ github.event.pull_request.number }}
+          ORACLE_SSH_TARGET: ${{ vars.ORACLE_SSH_TARGET }}
+          DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS"
+          export ORACLE_SSH_KEY="$RUNNER_TEMP/oracle-key"
+          export ORACLE_KNOWN_HOSTS="$RUNNER_TEMP/oracle-known-hosts"
+          trap 'rm -f "$ORACLE_SSH_KEY" "$ORACLE_KNOWN_HOSTS"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$ORACLE_SSH_KEY"
+          printf '%s\n' "$KNOWN_HOSTS" > "$ORACLE_KNOWN_HOSTS"
+          unset DEPLOY_KEY KNOWN_HOSTS
+          python3 scripts/deploy-oracle-preview.py --cleanup "$PREVIEW_PR"

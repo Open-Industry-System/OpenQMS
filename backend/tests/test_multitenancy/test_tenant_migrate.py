@@ -1,4 +1,5 @@
 """CLI delegates tenant changes to the owner-bound coordinator."""
+import logging
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -47,7 +48,12 @@ async def test_unknown_tenant_fails_closed(monkeypatch):
 
 def test_cli_sanitizes_unexpected_orchestration_failure(monkeypatch, caplog):
     monkeypatch.setattr(tenant_migrate, "main", AsyncMock(side_effect=RuntimeError("credential-bearing detail")))
-    assert tenant_migrate.run_cli(all_tenants=True, slug=None) == 1
+    # Earlier Alembic fileConfig calls disable existing application loggers.
+    # Configure this test's real capture explicitly and restore it afterward.
+    monkeypatch.setattr(tenant_migrate.logger, "disabled", False)
+    monkeypatch.setattr(tenant_migrate.logger, "propagate", True)
+    with caplog.at_level(logging.ERROR, logger=tenant_migrate.logger.name):
+        assert tenant_migrate.run_cli(all_tenants=True, slug=None) == 1
     assert "tenant migration orchestration failed" in caplog.text
     assert "credential-bearing" not in caplog.text
 

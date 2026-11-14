@@ -224,6 +224,7 @@ export REMOTE_IMAGE_VERIFY='revision_label='\''{{ index .Config.Labels "org.open
 unset TEST_DATABASE_URL
 test -z "${TEST_DATABASE_URL+x}"
 export OPENQMS_TEST_RESOURCE_FILE='<owner-only-registration-file>'
+export PG15_CONTAINER="$("$RELEASE_STAGE/backend/.venv/bin/python" -c 'import json,os; print(json.load(open(os.environ["OPENQMS_TEST_RESOURCE_FILE"]))["container_id"])')"
 export LOCAL_TEST_PGUSER='<local-test-user>'
 export LOCAL_TEST_PGPASSWORD='<local-test-password>'
 export LOCAL_TEST_PGHOST=127.0.0.1
@@ -360,6 +361,12 @@ git checkout '<previous-release-tag>'
 Named volumes must remain intact. Database migrations may be irreversible. If old code is incompatible with the new schema, roll forward or use a validated backup plus a migration-specific restore plan; volume deletion is never a rollback strategy.
 
 ---
+
+### 1.5 PR previews and automated production deployment
+
+See [automation setup](../oracle-automation.md), [trusted controller bootstrap](../oracle-production-setup.md), and [preview isolation](../oracle-preview-setup.md). The interactive release wrapper remains the manual entry point. Automation uses a root-installed controller with the same environment, source, image and database guards, and calls the serial `make deploy-release` sequence. Full checks run in credential-free CI; the privileged check phase revalidates exact-SHA successful receipts. Backend ordinary skips remain reported as skipped; browser gates require zero skips.
+
+Both automation switches start disabled. Server bootstrap, separate role-restricted SSH keys, GitHub Environments and a verified lifecycle rehearsal are required before enabling them. Production remains `qms.smartindustry.world`; previews use `pr-<number>.preview.openqms.smartindustry.world`.
 
 ## 2. Local Development Environment
 

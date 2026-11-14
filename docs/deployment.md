@@ -224,6 +224,7 @@ export REMOTE_IMAGE_VERIFY='revision_label='\''{{ index .Config.Labels "org.open
 unset TEST_DATABASE_URL
 test -z "${TEST_DATABASE_URL+x}"
 export OPENQMS_TEST_RESOURCE_FILE='<owner-only-registration-file>'
+export PG15_CONTAINER="$("$RELEASE_STAGE/backend/.venv/bin/python" -c 'import json,os; print(json.load(open(os.environ["OPENQMS_TEST_RESOURCE_FILE"]))["container_id"])')"
 export LOCAL_TEST_PGUSER='<local-test-user>'
 export LOCAL_TEST_PGPASSWORD='<local-test-password>'
 export LOCAL_TEST_PGHOST=127.0.0.1
@@ -360,6 +361,12 @@ git checkout '<previous-release-tag>'
 命名卷必须保留。数据库迁移未必可逆；若旧代码不兼容新 schema，应前滚修复或依据已验证备份与迁移 runbook 恢复，不能用删除卷代替恢复策略。
 
 ---
+
+### 1.5 PR 预览与生产自动部署
+
+配置见[自动部署指南](oracle-automation.md)、[受限控制器安装](oracle-production-setup.md)及[预览隔离](oracle-preview-setup.md)。交互式发布仍使用生产包装器；自动化由 root 安装的受限控制器执行同等环境、源码、镜像及数据库校验，并调用串行 `make deploy-release`。完整检查在没有部署凭据的 CI 中运行，发布阶段重新核对准确提交的成功收据。后端普通跳过仍如实记录为 skipped，浏览器门禁要求零跳过。
+
+生产与预览开关初始关闭。启用前必须完成服务器控制器安装、两套角色受限 SSH 密钥、GitHub Environment 及实际生命周期验收。生产域名保持 `qms.smartindustry.world`，预览使用 `pr-<编号>.preview.openqms.smartindustry.world`。
 
 ## 2. 本地开发环境
 

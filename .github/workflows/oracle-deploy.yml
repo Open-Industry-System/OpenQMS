@@ -1,0 +1,102 @@
+name: Oracle deployment
+
+on:
+  workflow_run:
+    workflows: [Test OpenQMS]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+# Never interrupt an active migration. Host flock additionally serializes cleanup
+# and previews with releases. Eligibility is re-evaluated after queueing.
+concurrency:
+  group: oracle-deployment
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: github.event.workflow_run.conclusion == 'success' && vars.ORACLE_AUTODEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      kind: ${{ steps.plan.outputs.kind }}
+      pr: ${{ steps.plan.outputs.pr }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          persist-credentials: false
+      - id: plan
+        name: Verify current CI, permissions and safe receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          python3 trusted/scripts/oracle-ci-gate.py --run-id "$RUN_ID" > plan.json
+          python3 - <<'PY'
+          import json, os
+          plan = json.load(open('plan.json'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              for key in ('sha', 'kind', 'pr'):
+                  print(f'{key}={plan[key]}', file=output)
+          PY
+
+  deploy:
+    if: needs.authorize.outputs.kind == 'production' || vars.ORACLE_PREVIEW_ENABLED == 'true'
+    needs: authorize
+    runs-on: ubuntu-24.04
+    environment: oracle-${{ needs.authorize.outputs.kind }}
+    env:
+      RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+      RELEASE_KIND: ${{ needs.authorize.outputs.kind }}
+      PREVIEW_PR: ${{ needs.authorize.outputs.pr }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Set up optional private transport
+        if: vars.ORACLE_USE_TAILSCALE == 'true'
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:openqms-deploy
+      - name: Prepare pinned SSH identity
+        env:
+          DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/oracle-key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/oracle-known-hosts"
+      - name: Deploy exact tested source through trusted controller
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORACLE_SSH_TARGET: ${{ vars.ORACLE_SSH_TARGET }}
+        run: |
+          set -euo pipefail
+          export ORACLE_SSH_KEY="$RUNNER_TEMP/oracle-key"
+          export ORACLE_KNOWN_HOSTS="$RUNNER_TEMP/oracle-known-hosts"
+          export ORACLE_REVALIDATE_CMD="python3 '$GITHUB_WORKSPACE/trusted/scripts/oracle-ci-gate.py' --run-id '$RUN_ID' --expected-sha '$RELEASE_SHA' --expected-kind '$RELEASE_KIND' --expected-pr '$PREVIEW_PR' --check-only"
+          bash -euo pipefail -c "$ORACLE_REVALIDATE_CMD"
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" fetch --no-tags origin "$RELEASE_SHA"
+          bash scripts/deploy-oracle-release.sh
+      - name: Remove runner credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/oracle-key" "$RUNNER_TEMP/oracle-known-hosts"

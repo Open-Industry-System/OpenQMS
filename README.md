@@ -276,6 +276,7 @@ export REMOTE_IMAGE_VERIFY='revision_label='\''{{ index .Config.Labels "org.open
 unset TEST_DATABASE_URL
 test -z "${TEST_DATABASE_URL+x}"
 export OPENQMS_TEST_RESOURCE_FILE='<owner-only-registration-file>'
+export PG15_CONTAINER="$("$RELEASE_STAGE/backend/.venv/bin/python" -c 'import json,os; print(json.load(open(os.environ["OPENQMS_TEST_RESOURCE_FILE"]))["container_id"])')"
 export LOCAL_TEST_PGUSER='<local-test-user>'
 export LOCAL_TEST_PGPASSWORD='<local-test-password>'
 export LOCAL_TEST_PGHOST=127.0.0.1
@@ -425,3 +426,4 @@ git checkout '<previous-release-tag>'
 ## 许可证
 
 MIT License — 详见 [LICENSE](LICENSE)。
+自动部署配置与验收见 [Oracle CI/CD 指南](docs/oracle-automation.md)；生产与预览启用状态以 PROGRESS.md 的实际执行记录为准。

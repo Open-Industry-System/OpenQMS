@@ -142,10 +142,12 @@
 
 ### 2026-11-14 — Oracle 生产基线与自动部署集成（进行中）
 
-- 独立工作树 `/Users/sam/.codex/worktrees/oracle-cicd/OpenQMS`，分支 `integration/oracle-cicd-20261114`，从 main `2dbb84b1` 合入线上 `d8648c15`；全部文本冲突已解决，生产尚未切换。
-- 保留 main 的租户协调器、冻结快照与业务行为，加入 `20261114_production_merge` 和租户 `tv010_refresh_sessions`；两条公共迁移起点升级及已有用户/刷新会话保留测试 2 项通过。
-- 已验证：生产门禁/身份纯测试 41 项，生产配置/备份/归档等 196 项，更新后的发布文档契约 49 项，真实迁移专项 82 passed / 1 skipped（缺本地 PG15 工具），完整前端 99 文件 / 888 项通过，类型检查与构建通过，SDK 三层通过。独立数据库浏览器验收 11 项全通过；完整 `make check` 运行中。
-- 独占测试资源登记与日志分别位于 `/private/tmp/openqms-oracle-cicd-verification` 和 `/private/tmp/openqms-oracle-cicd-browser`；凭据不进入 Git。自动化代码在临时目录准备，基线通过后才应用；预览域名为 `pr-<编号>.preview.openqms.smartindustry.world`，DNS 和专用部署凭据尚未配置验收。
+- 独立工作树 `/Users/sam/.codex/worktrees/oracle-cicd/OpenQMS`，分支 `integration/oracle-cicd-20261114`，基线合并提交 `198377db`；草稿 [PR #31](https://github.com/Open-Industry-System/OpenQMS/pull/31)。main 为 `2dbb84b1`，线上为 `d8648c15`；服务器版本尚未切换。
+- 保留主线租户协调器和冻结快照，加入公共合并迁移 `20261114_production_merge` 及租户 `tv010_refresh_sessions`。真实迁移专项 82 passed / 1 skipped，缺少 PG15 工具的快照测试另用独占容器补测 1 passed；两条公共升级路径保留已有用户及会话 2 passed。完整前端 888 项、类型检查、构建、SDK 三层和浏览器门禁 11 项通过。
+- 首次完整本地验收未通过：3868 passed / 46 failed / 1322 errors / 5 skipped。途中独占 PostgreSQL 容器停止（exit137、OOMKilled=false，同期多个其他容器也停止），造成连接级联错误；另定位严格 umask077 下归档测试夹具模式及 Alembic 禁用 logger 导致的测试捕获问题。仅修正夹具，29 项在严格 umask 及实际日志配置/逆序执行下通过，生产守卫不变。受中断影响的 111 个模块在新独占容器复验中；不将首次验收计为通过。
+- 已应用受审查的 CI/CD 实现：准确 SHA/收据与权限校验、独立生产/预览角色、受限 SSH 接收器、不可变归档/镜像/数据库身份、备份与失败应用恢复、预览隔离/路由/关闭清理。自动化专项 95 项通过；最终联合 CI/文档/夹具检查 205 项通过。预览初始化在真实受限容器验证全部非 Viewer 账号禁用和密码轮换、刷新会话撤销、Viewer 保留及 CAPA 预检 CLEAN；临时初始化资源已清理。
+- 生产 `qms.smartindustry.world` 与 `*.preview.openqms.smartindustry.world` 均已公共解析至 `150.230.197.45`，现有生产 HTTPS `/api/health` 返回正常。两套新部署密钥仅生成在私有临时目录；尚未写入 GitHub 或服务器，自动部署未启用。公网 SSH 本机连接被关闭，Tailscale 管理连接正常，部署通道仍需 runner 实测。
+- 下一步：完成复验及修正提交上的完整 CI，按实际收据记录结果；安装经验证的受限控制器与角色密钥、配置 GitHub Environment，然后完成实际预览更新/清理和生产发布验收。所有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
 
 
 ### 2026-11-09 — PR #29 main集成验证通过（待推送后远端CI）
