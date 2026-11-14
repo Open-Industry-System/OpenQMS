@@ -156,6 +156,8 @@
 
 - 2026-11-15 本地候选 `dda665cd` 使用官方源后，Oracle ARM64 后端镜像实际构建及无网络假配置下 FastAPI 导入均通过。前端原生构建随后真实暴露 TS2307：主线单元测试引用共享 E2E 诊断辅助源文件，而生产 Docker allowlist 将其排除。仅新增该纯 TypeScript 文件的准确路径例外，保持全部 TypeScript 检查；相邻 E2E API、环境文件、存储状态和私钥仍排除。测试先行及独立复核通过，相关静态组合 210 项 / 4 子测试通过；修正后的前端原生构建仍待验证，生产未切换。
 
+- 2026-11-15 前端共享辅助文件例外已在真实 Docker 构建验证有效：完整 TypeScript 通过、Vite 转换 6852 模块，随后 chunk 渲染触及专用构建器 2 GiB 上限（SIGKILL，cgroup oom_kill=1；宿主机仍约9.5GiB可用）。同一 Node20 ARM64 RUN 实测默认总堆 2096 MiB，设置老生代 1536 MiB 后总堆 1584 MiB。仅在 Docker 的 Node 构建阶段增加该老生代预算，保留 2 GiB 构建器上限、完整类型检查和独立最终 Caddy 阶段。测试先行及独立复核通过，相关静态组合 211 项 / 4 子测试通过；完整原生构建与 OOM 计数不增验证仍待完成。
+
 - 下一步：完成修正提交上的完整 CI，按实际收据记录结果；安装经验证的受限控制器与角色密钥、配置 GitHub Environment，然后完成实际预览更新/清理和生产发布验收。所有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
 
 

@@ -5,6 +5,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ ./
+ENV NODE_OPTIONS=--max-old-space-size=1536
 
 ARG VITE_PUBLIC_DEMO_ENABLED=false
 ARG VITE_PUBLIC_DEMO_USERNAME=
