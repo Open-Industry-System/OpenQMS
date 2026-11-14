@@ -568,7 +568,7 @@ async def get_d4_root_cause_text(db, identity):
 
 ## Task 10: 正常策略真实HTTP、源权限反例与CI必选层
 
-T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 6 warnings / 0 skip（22 个 T10、14 个 SDK、3 个旧 CLI），旧 CLI 精确三节点另经 XML 核验，CI pure 307 passed / 3 warnings。本地提交 `ea7d2814`；T11 整片冻结门禁已通过，精准清理及最终签收仍待完成。
+T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 6 warnings / 0 skip（22 个 T10、14 个 SDK、3 个旧 CLI），旧 CLI 精确三节点另经 XML 核验，CI pure 307 passed / 3 warnings。本地提交 `ea7d2814`；T11 功能验收完成，清理待办（R4B-CLEANUP-01）。
 
 **Files / write scope:**
 - Modify: `backend/tests/e2e/d4_text_local_harness.py`
@@ -602,13 +602,13 @@ T10 已通过独立规格和质量复核；当前 wheel gate 实际 39 passed / 
 - [x] GREEN：实际运行新suite＋旧3固定CLI＋原14SDK；另跑CI pure/classification。记录真实selected/pass/skip/warnings，不猜计数。
 - [x] 本地提交 `ea7d2814`：`test(agent): exercise source-bound D4 text delivery under normal local policy`。
 
-## Task 11: 冻结完整门禁、运维交接与精准清理
+## Task 11: 冻结完整门禁、运维交接与精准清理（功能验收完成，清理待办）
 
-2026-11-14 用户授权先精确本地提交已复核修复、清理器及文档，提交标注“功能验收通过，资源清理未完成”。此项提交不等于 T11 全部签收；下面资源清理项继续未完成。清理入口和保留资源身份见交付指南“保留资源与后续清理入口”。
+2026-11-14 按用户明确指示调整收尾：**功能交付单独签收，T11 标为“功能验收完成，清理待办”**，不标为全部完成。保留已通过的测试、独立规格/质量复核与本地提交 `d49d45c6`、`486451e5`。资源清理独立延期跟踪为 **R4B-CLEANUP-01（待办）**；容器、卷、诊断容器、私有凭据/登记文件、阻塞原因及恢复条件见[交付指南](../../development/capa-d4-local-text-delivery.md#保留资源与后续清理入口)。本次仅文档调整，不产生新的功能测试或资源状态证据。
 
 整片独立规格和质量复核通过；冻结清单一致，最终 `make check` 后端 4537 passed / 4 optional skipped / 19 deselected / 6 warnings，SDK unit 562、loopback 16、wheel 1，前端 tsc/build 通过；browser 11 无 skip，CI pure 307 / 3 warnings，前端 88 文件 741 项和 E2E tsc 通过。首次完整门禁的过时路由测试失败与修复另见 `PROGRESS.md`。远端 CI NOT_RUN，生产、模型与部署未开启。
 
-功能验收已通过，清理独立未完成。挂载归属复审已移除宿主解析daemon路径的错误依据；新私有清理器普通/-O各43项模拟测试及双复核通过。新dry-run实查31容器：1个目标named-volume引用、25个可信排除的其他named-volume引用、7个缺daemon身份依据的未确认bind，结果INDETERMINATE；未知不等于有关或无关，资源保留，不执行apply或修改其他容器。不得将功能通过、旧清理器测试或dry-run拒绝记作资源清理成功，T11最终签收与提交仍待。
+功能验收完成，清理待办。挂载归属复审已移除宿主解析daemon路径的错误依据；诊断清理器普通/-O各55项模拟测试及独立规格、质量复核通过。最近一次dry-run实查32容器：2个目标named-volume引用（含诊断容器）、25个排除的其他named-volume引用、10个未确认bind（原7+probe3），结果INDETERMINATE。资源保留，不执行apply或修改其他容器。此为已有证据，未因本次文档签收重新运行；清理拒绝不记作清理成功。
 
 **Files / write scope:**
 - Create: `docs/development/capa-d4-local-text-delivery.md`
@@ -633,7 +633,7 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 - [x] 本片不改scanner/附件路径，不擅自启动ClamAV或真实provider；远端CI仍未获push/dispatch权限，明确NOT_RUN。若发现实际影响scanner再单独确认范围，不拿历史scanner数字冒充新验收。
 - [x] 运维文档必须说明：显式来源完整性声明是员工业务事实非降敏；P/T各自来源范围；策略最长1h/close不释放租约；失败显式控制；secret/源版本密钥变化时旧证据不可验证就拒，不自动重签旧字段；无历史正文重放/全局血缘/OS sandbox；只read Root，不把readonly restart叫业务rollback。
 - [ ] 全部相关jobs收齐后，当前schema无fixture租户/无其他DB clients/无接收器或本worktree测试进程；核Docker完整ID、container/volume双owner、唯一挂载/soleconsumer后dry-run再apply，只处置本片resource和私有执行凭据，保留镜像/其他服务/证据/工作树。成功枚举确认absent，不能把任意docker非零当不存在。敏感输入不进git或公开artifact。
-- [ ] 最后只追加真实计数、失败/修复、源/包/worker hash、清理结果与剩余R4b/R5/R6/R7限制。文档-only收口核内容/links/diff；若worker实际bytes变了，重核hash与所有依赖，不能用旧准入receipt签新代码。精确本地提交，不推送/合并。
+- [x] 功能交付收口：追加真实计数、失败/修复、源/包/worker hash与剩余R4b/R5/R6/R7限制；清理明确延期为R4B-CLEANUP-01，未记作清理成功。文档-only收口核内容/links/diff；若worker实际bytes变了，重核hash与所有依赖，不能用旧准入receipt签新代码。精确本地提交，不推送/合并。
 
 ## 3. 自审覆盖矩阵与执行签收
 
@@ -652,4 +652,4 @@ SDK三层与backend current-wheel供应使用既有Make，不改pin、不共享�
 | 固定stdlib执行物/依赖身份、D10s/会话60s/unknown | T5、T7、T10 |
 | 正常配置真实TCP、旧SDK/CLI回归、分层证据/资源清理 | T10、T11 |
 
-本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T10 已按实际双复核签收；T11 门禁已通过，清理及最终签收待完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
+本计划按用户审阅修订了消息门禁前置、blocked请求指纹及撤权停止验收；这是计划层修订，不改变已批准v6的授权语义，不新增业务审批或正文存储。R2已获执行确认；T1–T10 已按实际双复核签收；T11 功能验收完成，清理待办（R4B-CLEANUP-01），不标为全部完成；每Task为独立commit/复核关口，不把用户对规格的批准扩大为生产、模型、附件或R5业务写授权。
