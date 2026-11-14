@@ -40,6 +40,16 @@ async def main(all_tenants: bool = False, slug: str | None = None,
         await resume_tenant(tenant.id, bootstrap_request=bootstrap)
 
 
+def run_cli(*, all_tenants: bool, slug: str | None, admin_email: str | None = None) -> int:
+    """Keep coordinator failures and bootstrap values out of CLI output."""
+    try:
+        asyncio.run(main(all_tenants=all_tenants, slug=slug, admin_email=admin_email))
+    except Exception:
+        logger.error("tenant migration orchestration failed")
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Migrate tenant schemas via locked coordinator")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -50,4 +60,4 @@ if __name__ == "__main__":
     if args.admin_email and not args.slug:
         parser.error("--admin-email requires --slug")
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main(all_tenants=args.all, slug=args.slug, admin_email=args.admin_email))
+    raise SystemExit(run_cli(all_tenants=args.all, slug=args.slug, admin_email=args.admin_email))

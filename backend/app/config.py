@@ -68,9 +68,14 @@ class Settings(BaseSettings):
     @field_validator("SECRET_KEY")
     @classmethod
     def reject_default_secret(cls, v: str) -> str:
-        if v == "dev-secret-key-change-in-production":
+        normalized = v.strip()
+        if not normalized or normalized in {
+            "dev-secret-key-change-in-production",
+            "change-me-in-production",
+            "REQUIRED_GENERATED_ON_SERVER",
+        }:
             raise ValueError(
-                "SECRET_KEY must be changed from the default value. "
+                "SECRET_KEY must be set to a non-placeholder value. "
                 "Set it via the SECRET_KEY environment variable or in your .env file."
             )
         return v

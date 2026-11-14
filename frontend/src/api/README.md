@@ -44,8 +44,8 @@ remaining files are per-domain function bundles, named after the
 backend route prefix.
 
 - **Shared client** — `client.ts`. Axios instance with `baseURL: "/api"`,
-  request/response interceptors, 401 refresh queue, 503/410 tenant
-  redirects.
+  request/response interceptors, shared-promise 401 refresh recovery,
+  503/410 tenant redirects.
 - **Auth & tenancy** — `auth.ts` (login / refresh / me / users /
   factories), `group.ts`, `productLine.ts`, `productType.ts`, `admin.ts`,
   `aiConfig.ts`, `logs.ts`.
@@ -64,8 +64,10 @@ backend route prefix.
 
 ## Public Interface
 
-Consumers are `pages/`, `components/`, `hooks/`, and `store/`. Every
-function returns the parsed JSON body typed against `types/index.ts`.
+Consumers are `pages/`, `components/`, `hooks/`, and `store/`. Domain
+functions return the parsed JSON body typed against `types/index.ts`;
+`auth.getMe()` additionally pairs its user body with the successful response
+config's Bearer token so the store can verify the exact auth generation.
 
 - **Shape** — `export async function verbThing(...): Promise<Thing>` or
   `Promise<PaginatedResponse<Thing>>`. List endpoints take a typed
@@ -96,14 +98,23 @@ function returns the parsed JSON body typed against `types/index.ts`.
   injects `X-Tenant-ID` from `localStorage["tenant_slug"]` so the dev
   proxy can route to a tenant. Production relies on host-based routing
   and ignores this header.
-- **401 refresh is queued, not retried in parallel.** A single in-flight
-  refresh is guarded by `isRefreshing`; concurrent 401s are parked on
-  `refreshSubscribers` and replayed with the new token. `/auth/login`
-  401s short-circuit (no refresh) so the login form can surface the
-  error.
-- **403 silently re-syncs the user** by calling `/auth/me` and updating
-  the auth store, then propagating the rejection. Pages must still
-  handle the rejection.
+- **401 refresh shares one promise.** Each non-login 401 marks its request
+  `_retry` and awaits the same `tryRefreshToken()` promise. Before every
+  dispatch, the interceptor rejects a store/storage token mismatch with a typed
+  generation-change error after calling `syncStoredAccessToken()`, so stores
+  treat that pre-dispatch result as reconciliation rather than a failed auth
+  request. This prevents an idle-tab change from sending a request with another
+  user's token. Replay is permitted only when the
+  initiating Bearer and returned JWT are both valid and have decodable, equal
+  `sub` identities; malformed, expired, or mismatched tokens reject without
+  replaying as another user. Explicit request `Authorization` headers are
+  preserved. A `null` unowned refresh conditionally clears only the still-current
+  request token; an abandoned owned refresh rejects its unrelated waiters without clearing credentials; `/auth/login` and `/auth/refresh` 401s never recurse.
+- **403 hydration is generation-guarded.** A non-`/auth/me` 403 delegates to
+  `authStore.fetchUser()` so complete user/factory slices update together.
+  `/auth/me` 403s reject directly, preventing recursive re-sync requests; a
+  request/store/storage generation mismatch synchronizes and rejects before
+  stale user data can apply.
 - **No FastAPI imports, no schema duplication.** Request and response
   types live in `types/index.ts`; this layer only imports them.
 

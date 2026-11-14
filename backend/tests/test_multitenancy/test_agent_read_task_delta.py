@@ -6,7 +6,7 @@ import pytest
 from app.core.tenant_transaction import TenantUnavailable
 from app.services import tenant_migrator, tenant_schema_diff
 
-TARGET = "tv009_r4b_main_merge"
+TARGET = "tv010_refresh_sessions"
 
 
 def test_read_tasks_are_reviewed_current_target():
@@ -17,12 +17,13 @@ def test_read_tasks_are_reviewed_current_target():
     assert tenant_migrator.PREDECESSOR_REVISION == "tv004_agent_readonly_controls"
     assert tenant_migrator.DELIVERY_PREDECESSOR_REVISION == "tv006_agent_read_tasks"
     assert tenant_migrator.RECOVERY_PREDECESSOR_REVISION == "tv007_d4_text_delivery"
-    assert REVIEWED_REVISIONS[-4:] == ("tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", TARGET)
+    assert REVIEWED_REVISIONS[-5:] == ("tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge", TARGET)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state,predecessor", [
     ("empty", None),
+    ("refresh_predecessor", "tv009_r4b_main_merge"),
     ("characteristic_predecessor", "tv007_characteristic_refs"),
     ("recovery_head", "tv008_d4_recovery"),
     ("recovery_predecessor", "tv007_d4_text_delivery"),
@@ -93,3 +94,22 @@ async def test_tv005_parity_keeps_existing_attachment_objects(monkeypatch):
     )
     assert [(diff.object_type, diff.object_key) for diff in differences] == [
         ("table", "agent_task_attachments")]
+
+
+@pytest.mark.asyncio
+async def test_refresh_predecessor_only_filters_new_public_table(monkeypatch):
+    existing = ("column", "control_plan_items.source_characteristic_ref")
+    added = {("table", "user_refresh_sessions"): "table",
+             ("column", "user_refresh_sessions.token_hash"): "varchar64",
+             ("constraint", "user_refresh_sessions.user_refresh_sessions_user_id_fkey"): "tenant fk",
+             ("index", "user_refresh_sessions.ix_user_refresh_sessions_user_id"): "index"}
+    objects = {"public": {existing: "jsonb", **added}, "tenant_delta": {existing: "jsonb"}}
+    async def load(connection, schema):
+        return objects[schema]
+    monkeypatch.setattr(tenant_schema_diff, "_objects", load)
+    compare = tenant_schema_diff.compare_business_schema
+    manifest = tenant_schema_diff.load_snapshot_manifest()
+    assert await compare(None, "public", "tenant_delta", manifest, predecessor="tv009_r4b_main_merge") == []
+    assert await compare(None, "public", "tenant_delta", manifest)
+    objects["tenant_delta"][("table", "user_refresh_sessions")] = "partial"
+    assert await compare(None, "public", "tenant_delta", manifest, predecessor="tv009_r4b_main_merge")

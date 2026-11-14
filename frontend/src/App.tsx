@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Spin } from "antd";
+import { classifyToken } from "./utils/jwt";
 import { useAuthStore } from "./store/authStore";
 import { usePermission } from "./hooks/usePermission";
 import type { ModuleKey } from "./hooks/usePermission";
@@ -86,38 +87,57 @@ const UserManagementPage = lazy(() => import("./pages/admin/UserManagementPage")
 const LogManagementPage = lazy(() => import("./pages/admin/LogManagementPage"));
 const ReviewSkillsPage = lazy(() => import("./pages/admin/ReviewSkillsPage"));
 
-function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.exp * 1000 < Date.now();
-  } catch {
-    return true;
-  }
-}
-
 function ProtectedRoute({ children, requiredModule, requireAdmin }: { children: React.ReactNode; requiredModule?: ModuleKey; requireAdmin?: boolean }) {
   const token = useAuthStore((s) => s.token);
-  const _loading = useAuthStore((s) => s.loading);
+  const loading = useAuthStore((s) => s.loading);
   const fetchUser = useAuthStore((s) => s.fetchUser);
+  const tryRefreshToken = useAuthStore((s) => s.tryRefreshToken);
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const { canView, isAdmin } = usePermission();
+  const refreshAttemptedToken = useRef<string | null>(null);
+  const refreshInFlight = useRef(false);
+  const tokenState = classifyToken(token);
 
   useEffect(() => {
-    if (token && !user) fetchUser();
-  }, [token, user, fetchUser]);
+    const logoutIfCurrent = (candidate: string) => {
+      const storedToken = localStorage.getItem("access_token");
+      if (useAuthStore.getState().token === candidate && (!storedToken || storedToken === candidate)) logout();
+    };
 
-  if (token && !user) {
+    if (tokenState === "malformed") {
+      if (token) logoutIfCurrent(token);
+    } else if (tokenState === "expired" && token) {
+      if (refreshInFlight.current || refreshAttemptedToken.current === token) return;
+      refreshAttemptedToken.current = token;
+      refreshInFlight.current = true;
+      void tryRefreshToken().then((refreshedToken) => {
+        refreshInFlight.current = false;
+        if (!refreshedToken || classifyToken(refreshedToken) !== "valid") {
+          logoutIfCurrent(refreshedToken ?? token);
+        }
+
+        const latest = useAuthStore.getState();
+        if (classifyToken(latest.token) === "valid" && !latest.user) void latest.fetchUser();
+      }).catch(() => {
+        refreshInFlight.current = false;
+        logoutIfCurrent(token);
+      });
+    } else if (tokenState === "valid" && !user && !loading && !refreshInFlight.current) {
+      fetchUser();
+    }
+  }, [token, tokenState, user, loading, fetchUser, tryRefreshToken, logout]);
+
+  if (tokenState === "missing" || tokenState === "malformed") {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (tokenState === "expired" || !user) {
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+      <div aria-busy="true" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
         <Spin size="large" />
       </div>
     );
-  }
-
-  if (!token || isTokenExpired(token)) {
-    if (token && isTokenExpired(token)) logout();
-    return <Navigate to="/login" replace />;
   }
 
   if (requiredModule && !canView(requiredModule)) return <Navigate to="/dashboard" replace />;

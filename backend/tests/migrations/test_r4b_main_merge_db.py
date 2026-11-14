@@ -15,8 +15,8 @@ from tests.migrations.test_agent_task_core import _migration_config, _sync_engin
 from tests.migrations.test_characteristic_refs import _seed_pre_upgrade_rows
 from tests.migrations.test_d4_recovery_delta import _seed_recovery
 
-PUBLIC_HEAD = '20261114_r4b_main_merge'
-TENANT_HEAD = 'tv009_r4b_main_merge'
+PUBLIC_HEAD = '20261114_production_merge'
+TENANT_HEAD = 'tv010_refresh_sessions'
 
 
 @pytest.mark.parametrize('source', [None, '20261108_merge_characteristics', '20261113_d4_recovery'])
@@ -67,3 +67,32 @@ async def test_empty_tenant_created_at_merged_revision_has_full_parity(mig_db_ur
             assert await maintenance.compare_schema('public', load_snapshot_manifest()) == []
     finally:
         await engine.dispose()
+
+
+@pytest.mark.parametrize("source", ["20260913_user_refresh_sessions", "20261114_r4b_main_merge"])
+def test_production_merge_preserves_both_deployed_histories(mig_db_url, source):
+    config = _migration_config(mig_db_url)
+    command.upgrade(config, source)
+    engine = _sync_engine(mig_db_url)
+    user_id, role_id, session_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    try:
+        with engine.begin() as conn:
+            conn.execute(sa.text("INSERT INTO role_definitions (id,role_key,name_zh,name_en) VALUES (:id,:key,'合并验证','Merge validation')"),
+                         {"id": role_id, "key": uuid.uuid4().hex[:25]})
+            conn.execute(sa.text("INSERT INTO users (user_id,username,password_hash,role_id,legacy_role,is_active) VALUES (:id,:name,'preserved-password-hash',:role,'viewer',true)"),
+                         {"id": user_id, "name": uuid.uuid4().hex, "role": role_id})
+            if source == "20260913_user_refresh_sessions":
+                conn.execute(sa.text("INSERT INTO user_refresh_sessions (session_id,user_id,token_hash,expires_at) VALUES (:id,:user,:hash,now() + interval '1 day')"),
+                             {"id": session_id, "user": user_id, "hash": "a" * 64})
+                old_session = conn.scalar(sa.text("SELECT to_jsonb(s) FROM user_refresh_sessions s WHERE session_id=:id"), {"id": session_id})
+            old_user = conn.scalar(sa.text("SELECT to_jsonb(u) FROM users u WHERE user_id=:id"), {"id": user_id})
+        command.upgrade(config, PUBLIC_HEAD)
+        command.upgrade(config, PUBLIC_HEAD)
+        with engine.connect() as conn:
+            assert conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == PUBLIC_HEAD
+            assert conn.scalar(sa.text("SELECT to_jsonb(u) FROM users u WHERE user_id=:id"), {"id": user_id}) == old_user
+            if source == "20260913_user_refresh_sessions":
+                assert conn.scalar(sa.text("SELECT to_jsonb(s) FROM user_refresh_sessions s WHERE session_id=:id"), {"id": session_id}) == old_session
+            assert {"user_refresh_sessions", "agent_read_tasks", "agent_task_attachments", "agent_d4_recovery_checkpoints"} <= set(sa.inspect(conn).get_table_names())
+    finally:
+        engine.dispose()

@@ -151,7 +151,7 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     reference = await _objects(connection, reference_schema)
     # Only historical reference shapes exclude the two reviewed later columns.
     # Current parity and the tenant side remain complete and fail closed.
-    if baseline_only or (predecessor is not None and predecessor != "tv007_characteristic_refs"):
+    if baseline_only or (predecessor is not None and predecessor not in {"tv007_characteristic_refs", "tv009_r4b_main_merge"}):
         later_columns = {("column", "control_plan_items.source_characteristic_ref"),
                          ("column", "special_characteristics.source_characteristic_id")}
         reference = {key: value for key, value in reference.items() if key not in later_columns}
@@ -167,18 +167,20 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
                      or (key[0] == "function" and f"FUNCTION:{key[1]}" in keys)
                      or (key[0] == "text_search_config" and f"TEXT SEARCH CONFIGURATION:{key[1]}" in keys)}
     if predecessor is not None:
-        known = {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks", "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery"}
+        known = {"tv002_agent_task_core", "tv003_agent_readonly_delivery", "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks", "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge"}
         if predecessor not in known or baseline_only:
             raise ValueError("Unsupported schema predecessor")
         # Filter only the public reference; tenant objects remain fully visible.
         recovery_tables = {"agent_d4_recovery_checkpoints", "agent_d4_recovery_restarts", "agent_d4_task_parent_grants"}
         text_tables = {"capa_d4_root_cause_revisions", "capa_d4_root_cause_source_proofs", "agent_restricted_projection_receipts", "agent_plugin_derived_source_scopes", "agent_task_derived_source_scopes", "agent_task_source_requests"}
-        added_tables = set() if predecessor == "tv008_d4_recovery" else recovery_tables.copy()
-        if predecessor not in {"tv007_d4_text_delivery", "tv008_d4_recovery"}:
+        added_tables = {"user_refresh_sessions"}
+        if predecessor not in {"tv008_d4_recovery", "tv009_r4b_main_merge"}:
+            added_tables |= recovery_tables
+        if predecessor not in {"tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge"}:
             added_tables |= text_tables
-        if predecessor not in {"tv006_agent_read_tasks", "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery"}:
+        if predecessor not in {"tv006_agent_read_tasks", "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge"}:
             added_tables.add("agent_read_tasks")
-        if predecessor not in {"tv005_agent_task_attachments", "tv006_agent_read_tasks", "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery"}:
+        if predecessor not in {"tv005_agent_task_attachments", "tv006_agent_read_tasks", "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge"}:
             added_tables.add("agent_task_attachments")
         if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
             added_tables |= {"agent_task_controls", "agent_readonly_checkpoints",

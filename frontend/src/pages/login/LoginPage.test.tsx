@@ -10,6 +10,19 @@ vi.mock("../../store/authStore", () => ({
   useAuthStore: (selector: (state: { login: typeof login }) => unknown) => selector({ login }),
 }));
 
+const accounts = [
+  { role: "Viewer", username: "viewer", password: "viewer-sentinel" },
+  { role: "Quality engineer", username: "engineer", password: "engineer-sentinel" },
+  { role: "Manager", username: "manager", password: "manager-sentinel" },
+];
+
+function configureMultiRoleDemo() {
+  vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
+  vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", accounts[0].username);
+  vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", accounts[0].password);
+  vi.stubEnv("VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS", JSON.stringify(accounts.slice(1).reverse().map(({ username, password }) => ({ username, password }))));
+}
+
 function renderLogin(path = "/login?demo=viewer") {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -20,86 +33,70 @@ function renderLogin(path = "/login?demo=viewer") {
 
 beforeEach(async () => {
   vi.unstubAllEnvs();
-  vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "false");
-  vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "");
-  vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "");
   vi.clearAllMocks();
   await i18n.changeLanguage("en-US");
 });
 
-describe("LoginPage public Viewer demo", () => {
+describe("LoginPage public demo", () => {
   it("shows no credentials when public demo is disabled", () => {
-    vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "disabled-demo");
-    vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "disabled-password");
     renderLogin();
-    expect(screen.queryByText("disabled-demo")).not.toBeInTheDocument();
-    expect(screen.queryByText("disabled-password")).not.toBeInTheDocument();
-    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/default account/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("viewer-sentinel")).not.toBeInTheDocument();
+    expect(screen.queryByText("admin-sentinel")).not.toBeInTheDocument();
   });
 
-  it("fails closed when enabled config is incomplete", () => {
+  it("fails closed when enabled Viewer config is incomplete", () => {
     vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
-    vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "incomplete-viewer");
-    vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "");
+    vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "viewer");
     renderLogin();
-    expect(screen.queryByText("incomplete-viewer")).not.toBeInTheDocument();
-    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
   });
 
-  it("shows configured Viewer credentials only on the demo route", () => {
+  it("keeps Viewer-only credentials limited to the demo URL", () => {
     vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
     vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "readonly-demo");
     vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "public-readonly-password");
-    renderLogin();
+
+    const { unmount } = renderLogin("/login");
+    expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
+    unmount();
+
+    renderLogin("/login?demo=viewer");
     expect(screen.getByText("readonly-demo")).toBeInTheDocument();
     expect(screen.getByText("public-readonly-password")).toBeInTheDocument();
-    expect(screen.getByText(/read-only demo/i)).toBeInTheDocument();
+    expect(screen.getByText(/viewer read-only demo/i)).toBeInTheDocument();
   });
 
-  it("fills but does not submit the Viewer credentials", () => {
-    vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
-    vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "readonly-demo");
-    vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "public-readonly-password");
-    renderLogin();
-    fireEvent.click(screen.getByRole("button", { name: /use viewer account/i }));
-    expect(screen.getByPlaceholderText("Username")).toHaveValue("readonly-demo");
-    expect(screen.getByPlaceholderText("Password")).toHaveValue("public-readonly-password");
+  it.each(["/login", "/login?demo=viewer"])("shows only the three approved public accounts on %s when fully configured", (path) => {
+    configureMultiRoleDemo();
+    renderLogin(path);
+
+    expect(screen.getByText("Shared writable demo")).toBeInTheDocument();
+    for (const account of accounts) {
+      expect(screen.getByText(account.role)).toBeInTheDocument();
+      expect(screen.getByText(account.username)).toBeInTheDocument();
+      expect(screen.getByText(account.password)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("admin")).not.toBeInTheDocument();
+    expect(screen.queryByText("groupadmin")).not.toBeInTheDocument();
+  });
+
+  it("prefills every multi-role account without invoking login", () => {
+    configureMultiRoleDemo();
+    renderLogin("/login");
+
+    for (const account of accounts) {
+      fireEvent.click(screen.getByRole("button", { name: `Use ${account.role} account` }));
+      expect(screen.getByPlaceholderText("Username")).toHaveValue(account.username);
+      expect(screen.getByPlaceholderText("Password")).toHaveValue(account.password);
+    }
     expect(login).not.toHaveBeenCalled();
   });
 
-  it("does not expose demo credentials on a normal login URL", () => {
-    vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
-    vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "readonly-demo");
-    vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "public-readonly-password");
+  it("localizes the shared writable-demo warning", async () => {
+    configureMultiRoleDemo();
+    await i18n.changeLanguage("zh-CN");
     renderLogin("/login");
-    expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
-    expect(screen.queryByText("public-readonly-password")).not.toBeInTheDocument();
-    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
-  });
 
-  it("does not expose demo credentials with extra query parameters", () => {
-    vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
-    vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "readonly-demo");
-    vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "public-readonly-password");
-    renderLogin("/login?demo=viewer&next=%2Fdashboard");
-    expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
-    expect(screen.queryByText("public-readonly-password")).not.toBeInTheDocument();
-    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
-  });
-
-  it("does not expose demo credentials with repeated demo parameters", () => {
-    vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
-    vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", "readonly-demo");
-    vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", "public-readonly-password");
-    renderLogin("/login?demo=viewer&demo=viewer");
-    expect(screen.queryByText("readonly-demo")).not.toBeInTheDocument();
-    expect(screen.queryByText("public-readonly-password")).not.toBeInTheDocument();
-    expect(screen.queryByText("Viewer read-only demo")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /use viewer account/i })).not.toBeInTheDocument();
+    expect(screen.getByText("其他访问者可以修改共享演示数据。请勿输入真实或个人数据。")).toBeInTheDocument();
   });
 });

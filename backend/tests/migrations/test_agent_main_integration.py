@@ -7,8 +7,8 @@ from alembic.script import ScriptDirectory
 
 from app.services import tenant_migrator, tenant_schema_diff
 
-PUBLIC_HEAD = "20261114_r4b_main_merge"
-TENANT_HEAD = "tv009_r4b_main_merge"
+PUBLIC_HEAD = "20261114_production_merge"
+TENANT_HEAD = "tv010_refresh_sessions"
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -19,7 +19,7 @@ def test_integrated_public_head_retains_both_existing_branches():
     assert script.get_heads() == [PUBLIC_HEAD]
     revisions = {rev.revision for rev in script.walk_revisions()}
     assert {"20260929_agent_read_task", "20261009_agent_task_attachments"} <= revisions
-    assert set(script.get_revision(PUBLIC_HEAD).down_revision) == {
+    assert set(script.get_revision("20261114_r4b_main_merge").down_revision) == {
         "20261108_merge_characteristics", "20261113_d4_recovery",
     }
 
@@ -34,7 +34,7 @@ def test_integrated_tenant_head_is_reviewed_and_preserves_frozen_chain():
     assert REVIEWED_REVISIONS == (
         "tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery",
         "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks",
-        "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", TENANT_HEAD,
+        "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge", TENANT_HEAD,
     )
     assert tenant_migrator.REVISION == TENANT_HEAD
 

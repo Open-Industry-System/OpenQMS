@@ -1,5 +1,7 @@
 import axios from "axios";
 import { capaRequestOwner } from "./capaRequestOwnership";
+import { AuthGenerationChangedError } from "../utils/authGeneration";
+import { classifyToken, getTokenSubject } from "../utils/jwt";
 import { useAuthStore } from "../store/authStore";
 
 const client = axios.create({
@@ -11,30 +13,47 @@ const client = axios.create({
 // Excluded: auth, group, product-lines, factories (management endpoints)
 // NOTE: baseURL is "/api", so config.url is relative (e.g. "/auth/login", "/group/dashboard")
 const FACTORY_ID_EXCLUDE_PREFIXES = ["/auth/", "/group/", "/product-lines", "/factories", "/agent/tasks"];
+
 const isD4TextPreview = (url?: string) => /^\/capa\/[^/]+\/d4-text-preview(?:\/availability|\/version)?\/?$/.test(url ?? "");
 
 const isOutcomePrivateRequest = (url?: string, method?: string) =>
   /^\/capa\/[^/]+\/outcome-review\/?$/.test(url ?? "")
   || (method?.toLowerCase() === "post" && /^\/capa\/[^/]+\/advance\/?$/.test(url ?? ""));
 
-// Guard against concurrent refresh attempts
-let isRefreshing = false;
-let refreshSubscribers: Array<(token: string | null) => void> = [];
+// Shared by every request that receives a 401 while refresh is in flight.
+let refreshPromise: Promise<string | null> | null = null;
+let refreshOwned = false;
 
-function settleRefreshSubscribers(token: string | null) {
-  refreshSubscribers.forEach((cb) => cb(token));
-  refreshSubscribers = [];
+function bearerToken(headers: { Authorization?: unknown; get?: (name: string) => unknown }) {
+  const authorization = headers.get?.("Authorization") ?? headers.Authorization;
+  return typeof authorization === "string" && authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : null;
 }
 
-function addRefreshSubscriber(cb: (token: string | null) => void) {
-  refreshSubscribers.push(cb);
+function rejectForCurrentSession(error: unknown, request: { headers: { Authorization?: unknown; get?: (name: string) => unknown } }) {
+  const requestToken = bearerToken(request.headers);
+  const storedToken = localStorage.getItem("access_token");
+  if (storedToken === requestToken) {
+    useAuthStore.getState().logout();
+    window.location.href = "/login";
+  } else if (!storedToken) {
+    window.location.href = "/login";
+  }
+  return Promise.reject(error);
 }
 
 client.interceptors.request.use((config) => {
   const owner = capaRequestOwner(config.signal);
   if (owner && !owner()) throw new axios.CanceledError("CAPA view invalidated");
+  const authState = useAuthStore.getState();
   const token = localStorage.getItem("access_token");
-  if (token) {
+  if (authState.token !== token) {
+    authState.syncStoredAccessToken();
+    return Promise.reject(new AuthGenerationChangedError());
+  }
+
+  if (token && !bearerToken(config.headers)) {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
@@ -78,6 +97,8 @@ client.interceptors.response.use(
       return Promise.reject(error);
     }
 
+
+
     if (error.response?.status === 503 && error.response?.data?.detail?.tenant_suspended) {
       window.location.href = "/tenant-suspended";
       return;
@@ -96,68 +117,65 @@ client.interceptors.response.use(
       if (originalRequest.url?.includes("/auth/login")) {
         return Promise.reject(error);
       }
-      // Don't retry refresh endpoint or already-retried requests
-      if (originalRequest.url?.includes("/auth/refresh") || originalRequest._retry) {
-        useAuthStore.getState().logout();
-        window.location.href = "/login";
+      // A refresh request must reject back to tryRefreshToken(), which owns
+      // generation-aware state cleanup. Retried requests fail closed.
+      if (originalRequest.url?.includes("/auth/refresh")) {
+        return Promise.reject(error);
+      }
+      if (originalRequest._retry) {
+        return rejectForCurrentSession(error, originalRequest);
+      }
+
+      const initiatingToken = bearerToken(originalRequest.headers);
+      originalRequest._retry = true;
+      // Owned views never wait for or replay another view's refresh.
+      if (owner && refreshPromise) return Promise.reject(error);
+      if (!refreshPromise) {
+        refreshOwned = Boolean(owner);
+        refreshPromise = (owner
+          ? useAuthStore.getState().tryRefreshToken(owner, originalRequest.signal)
+          : useAuthStore.getState().tryRefreshToken())
+          .catch(() => null)
+          .finally(() => { refreshPromise = null; });
+      }
+
+      const joinedOwnedRefresh = refreshOwned;
+      const newToken = await refreshPromise;
+      // Token rotation invalidates the originating CAPA view. Never replay its action.
+      if (owner) return Promise.reject(error);
+      if (!newToken) return joinedOwnedRefresh ? Promise.reject(error) : rejectForCurrentSession(error, originalRequest);
+
+      const initiatingSubject = getTokenSubject(initiatingToken);
+      const refreshedSubject = getTokenSubject(newToken);
+      if (
+        classifyToken(newToken) !== "valid"
+        || !initiatingSubject
+        || !refreshedSubject
+        || initiatingSubject !== refreshedSubject
+      ) {
         return Promise.reject(error);
       }
 
-      if (!isRefreshing) {
-        isRefreshing = true;
-        try {
-          const newToken = await (owner
-            ? useAuthStore.getState().tryRefreshToken(owner, originalRequest.signal)
-            : useAuthStore.getState().tryRefreshToken());
-          isRefreshing = false;
-          if (owner) {
-            // A successful refresh invalidates the old CAPA credential/view. Only the
-            // still-installed refresh may release existing unrelated subscribers.
-            if (newToken && useAuthStore.getState().token === newToken && localStorage.getItem("access_token") === newToken) {
-              settleRefreshSubscribers(newToken);
-            } else {
-              // An abandoned owned refresh must also settle unrelated waiters.
-              settleRefreshSubscribers(null);
-            }
-            return Promise.reject(error);
-          }
-          if (newToken) {
-            settleRefreshSubscribers(newToken);
-            // Retry the original request with the new token
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            return client(originalRequest);
-          }
-        } catch {
-          isRefreshing = false;
-          if (owner) settleRefreshSubscribers(null);
-          if (owner && !owner()) return Promise.reject(error);
-          useAuthStore.getState().logout();
-          window.location.href = "/login";
-          return Promise.reject(error);
-        }
-        isRefreshing = false;
-      }
-
-      // An owned CAPA view must settle on a denial, not wait on another session's
-      // refresh or replay its old action. Other routes retain the existing queue.
-      if (owner) return Promise.reject(error);
-
-      // Queue pending requests while refresh is in flight
-      return new Promise((resolve, reject) => {
-        addRefreshSubscriber((token: string | null) => {
-          if (token === null) { reject(error); return; }
-          originalRequest.headers.Authorization = `Bearer ${token}`;
-          resolve(client(originalRequest));
-        });
-      });
+      originalRequest.headers.Authorization = `Bearer ${newToken}`;
+      return client(originalRequest);
     }
 
     if (error.response?.status === 403) {
-      try {
-        const resp = await (owner ? client.get("/auth/me", { signal: originalRequest.signal }) : client.get("/auth/me"));
-        if (!owner || owner()) useAuthStore.getState().setUser(resp.data);
-      } catch {
-        // refresh failed — ignore, user stays with stale state
+      if (originalRequest.url?.includes("/auth/me")) return Promise.reject(error);
+
+      if (owner) {
+        try {
+          const response = await client.get("/auth/me", { signal: originalRequest.signal });
+          if (owner()) useAuthStore.getState().setUser(response.data);
+        } catch { /* The originating view retains its denial. */ }
+        return Promise.reject(error);
+      }
+      const authState = useAuthStore.getState();
+      const storedToken = localStorage.getItem("access_token");
+      if (authState.token !== storedToken) {
+        authState.syncStoredAccessToken();
+      } else if (bearerToken(originalRequest.headers) === authState.token) {
+        await authState.fetchUser();
       }
     }
     return Promise.reject(error);

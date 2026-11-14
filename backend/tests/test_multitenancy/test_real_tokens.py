@@ -91,6 +91,22 @@ def test_refresh_token_without_tenant_id():
     assert payload["type"] == "refresh"
 
 
+def test_refresh_token_with_session_claims_gets_unique_token_ids():
+    user_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+
+    first_token, _ = create_refresh_token(user_id, session_id=session_id)
+    second_token, _ = create_refresh_token(user_id, session_id=session_id)
+
+    first_payload = decode_refresh_token(first_token)
+    second_payload = decode_refresh_token(second_token)
+    assert first_payload is not None
+    assert second_payload is not None
+    assert first_payload["sid"] == second_payload["sid"] == session_id
+    assert first_payload["jti"] != second_payload["jti"]
+    assert first_token != second_token
+
+
 def test_access_token_without_tenant_id_has_no_iss_aud():
     """Single-tenant mode access tokens must not have iss/aud claims."""
     token = create_access_token({"sub": str(uuid.uuid4())})
