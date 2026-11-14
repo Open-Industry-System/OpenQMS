@@ -1,11 +1,10 @@
-"""Value types for the module Agent permission kernel."""
-
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
 from uuid import UUID
 
 from app.core.permissions import Module, PermissionLevel
+from .derived_sources import DerivedSourceScope
 
 
 class ApprovalFloor(IntEnum):
@@ -51,6 +50,9 @@ class AccessAttempt:
     now: datetime
     catalog_profile: str = "baseline"
     identity_bypass_row_level_security: bool = False
+    current_source: DerivedSourceScope | None = field(default=None, kw_only=True)
+    plugin_source_scope: DerivedSourceScope | None = field(default=None, kw_only=True)
+    task_source_scope: DerivedSourceScope | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)

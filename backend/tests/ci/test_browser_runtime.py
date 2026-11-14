@@ -57,6 +57,54 @@ def test_browser_environment_allows_each_controller_runtime_set(runtime):
     assert env == {'PATH': '/safe', 'HOME': '/owned', 'NO_PROXY': '*', 'no_proxy': '*', **runtime}
 
 
+def test_browser_environment_preserves_explicit_source_for_node_child(tmp_path, monkeypatch):
+    explicit = executable(tmp_path / 'explicit-chromium')
+    alias = tmp_path / 'chromium-alias'
+    alias.symlink_to(explicit)
+    monkeypatch.setattr(browser_runtime.subprocess, 'run',
+                        lambda *_args, **_kwargs: pytest.fail('must not consult the default browser cache'))
+    source = {'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(alias), 'PATH': '/safe',
+              'DATABASE_URL': 'fake-db', 'LLM_API_KEY': 'fake-secret',
+              'NODE_OPTIONS': 'unsafe', 'OPENQMS_AGENT_BROWSER_UNREVIEWED': 'unsafe'}
+
+    selected = resolve_browser(tmp_path / 'absent-cache', source)
+    child = browser_environment(source, {'AGENT_BROWSER_SCENARIO': 'lifecycle'})
+
+    assert child == {'PATH': '/safe', 'NO_PROXY': '*', 'no_proxy': '*',
+                     'AGENT_BROWSER_SCENARIO': 'lifecycle',
+                     'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(selected)}
+    assert resolve_browser(tmp_path / 'absent-cache', child) == selected
+
+
+@pytest.mark.parametrize('runtime_browser', ['other', 'alias', 'empty'])
+def test_browser_environment_keeps_explicit_source_over_runtime(tmp_path, runtime_browser):
+    explicit = executable(tmp_path / 'explicit-chromium')
+    other = executable(tmp_path / 'other-chromium')
+    alias = tmp_path / 'chromium-alias'
+    alias.symlink_to(explicit)
+    runtime = {'other': str(other), 'alias': str(alias), 'empty': ''}[runtime_browser]
+
+    child = browser_environment({'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(alias)},
+                                {'OPENQMS_AGENT_BROWSER_EXECUTABLE': runtime})
+
+    assert child['OPENQMS_AGENT_BROWSER_EXECUTABLE'] == str(explicit.resolve())
+
+
+@pytest.mark.parametrize('invalid', ['missing', 'not-executable', 'directory', 'empty'])
+def test_browser_environment_rejects_invalid_source_without_runtime_fallback(tmp_path, monkeypatch, invalid):
+    nonexecutable = tmp_path / 'not-executable'
+    nonexecutable.write_text('not executable')
+    valid = executable(tmp_path / 'valid-runtime-chromium')
+    source = {'missing': str(tmp_path / 'missing'), 'not-executable': str(nonexecutable),
+              'directory': str(tmp_path), 'empty': ''}[invalid]
+    monkeypatch.setattr(browser_runtime.subprocess, 'run',
+                        lambda *_args, **_kwargs: pytest.fail('invalid explicit source must not fall back'))
+
+    with pytest.raises(FileNotFoundError, match='explicit Chromium executable'):
+        browser_environment({'OPENQMS_AGENT_BROWSER_EXECUTABLE': source},
+                            {'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(valid)})
+
+
 def test_browser_environment_rejects_unknown_runtime_key():
     with pytest.raises(ValueError, match='not allowed'):
         browser_environment({'PATH': '/safe'}, {'AGENT_BROWSER_UNREVIEWED': 'unsafe'})
@@ -69,11 +117,13 @@ def test_resolve_browser_prefers_valid_explicit_executable(tmp_path, monkeypatch
     assert resolve_browser(tmp_path, {'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(explicit)}) == explicit
 
 
-def test_resolve_browser_rejects_invalid_explicit_path_without_fallback(tmp_path, monkeypatch):
+@pytest.mark.parametrize('explicit', ['missing', ''])
+def test_resolve_browser_rejects_invalid_explicit_path_without_fallback(tmp_path, monkeypatch, explicit):
     monkeypatch.setattr(browser_runtime.subprocess, 'run',
                         lambda *_args, **_kwargs: pytest.fail('must not fall back from invalid explicit path'))
+    path = str(tmp_path / explicit) if explicit else ''
     with pytest.raises(FileNotFoundError, match='explicit Chromium executable'):
-        resolve_browser(tmp_path, {'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(tmp_path / 'missing')})
+        resolve_browser(tmp_path, {'OPENQMS_AGENT_BROWSER_EXECUTABLE': path})
 
 
 def test_resolve_browser_uses_project_playwright_executable(tmp_path, monkeypatch):

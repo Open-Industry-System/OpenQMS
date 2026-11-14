@@ -118,7 +118,7 @@ def test_tenant_characteristic_delta_matches_public_and_preserves_predecessor():
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "alembic_tenant"))
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["tv007_characteristic_refs"]
+    assert script.get_heads() == ["tv009_r4b_main_merge"]
     assert script.get_revision("tv007_characteristic_refs").down_revision == "tv006_agent_read_tasks"
     def ddl(path, action):
         output = io.StringIO()

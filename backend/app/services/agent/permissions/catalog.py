@@ -4,12 +4,19 @@ from types import MappingProxyType
 
 from app.services.capa_agent_capabilities import CAPA_CAPABILITIES
 from .types import ApprovalFloor, CapabilitySpec
+from app.services.agent_runtime.message_delivery_policy import TEXT_PROFILE
 
 
 _LOCAL_METADATA_CAPABILITIES = MappingProxyType({
-    **CAPA_CAPABILITIES,
+    "capa.d4.candidate.propose.v1": CAPA_CAPABILITIES["capa.d4.candidate.propose.v1"],
     "capa.d4.summary.masked.v1": replace(CAPA_CAPABILITIES["capa.d4.summary.masked.v1"],
         approval_floor=ApprovalFloor.DIRECT),
+})
+
+
+_LOCAL_TEXT_CAPABILITIES = MappingProxyType({
+    "capa.d4.root_cause_candidate.masked.v1": replace(
+        CAPA_CAPABILITIES["capa.d4.root_cause_candidate.masked.v1"], approval_floor=ApprovalFloor.DIRECT),
 })
 
 
@@ -18,4 +25,6 @@ def get_capability(id: str, *, profile: str = "baseline") -> CapabilitySpec | No
         return CAPA_CAPABILITIES.get(id)
     if profile == "local_metadata_v1":
         return _LOCAL_METADATA_CAPABILITIES.get(id)
+    if profile == TEXT_PROFILE:
+        return _LOCAL_TEXT_CAPABILITIES.get(id)
     return None

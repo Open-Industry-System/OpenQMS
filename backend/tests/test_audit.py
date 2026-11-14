@@ -184,7 +184,7 @@ async def test_cancel_audit_plan_invalid_status():
 
 
 @pytest.mark.asyncio
-async def test_create_capa_from_finding_success():
+async def test_create_capa_from_finding_success(monkeypatch):
     db = create_mock_db()
     user_id = uuid.uuid4()
     finding = AuditFinding(
@@ -195,6 +195,14 @@ async def test_create_capa_from_finding_success():
         due_date=date.today(),
         capa_ref_id=None
     )
+
+    finding.audit_id = uuid.uuid4()
+    finding.factory_id = uuid.uuid4()
+    db.scalar = AsyncMock(return_value="AUDIT-LINE")
+    # This unit checks mapping; real revision transactions are covered by T3 DB tests.
+    from app.services import capa_d4_provenance
+    record_revision = AsyncMock()
+    monkeypatch.setattr(capa_d4_provenance, "record_root_revision", record_revision)
 
     # Mock count for CAPA doc number generation
     mock_result = MagicMock()
@@ -207,6 +215,9 @@ async def test_create_capa_from_finding_success():
     assert capa.d2_description == "严重不符合项描述"
     assert capa.status == "D1_TEAM"
     assert capa.created_by == user_id
+    assert capa.factory_id == finding.factory_id
+    assert capa.product_line_code == "AUDIT-LINE"
+    record_revision.assert_awaited_once()
     assert finding.capa_ref_id == capa.report_id
     assert db.add.called
     assert db.commit.called

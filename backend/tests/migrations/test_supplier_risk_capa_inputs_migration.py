@@ -166,9 +166,8 @@ def test_single_alembic_head():
     cfg = _cfg("postgresql+asyncpg://unused/metadata_only")
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    # Additive merge keeps both previously shipped Agent branches reachable.
-    assert heads == ["20261108_merge_characteristics"], (
-        f"expected single head 20261108_merge_characteristics, got {heads}"
+    assert heads == ["20261114_r4b_main_merge"], (
+        f"expected single head 20261114_r4b_main_merge, got {heads}"
     )
 
     ancestry = {revision.revision for revision in script.walk_revisions()}

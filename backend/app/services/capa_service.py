@@ -388,6 +388,9 @@ async def update_capa(
 
     if embedding_changed:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
+    if "d4_root_cause" in changed_fields:
+        from app.services.capa_d4_provenance import record_root_revision
+        await record_root_revision(db, report_id=capa.report_id, actor_id=user_id, write_path="capa.update")
     await db.commit()
     await db.refresh(capa)
     return capa

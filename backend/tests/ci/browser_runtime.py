@@ -33,16 +33,25 @@ _PLAYWRIGHT_EXECUTABLE = (
 
 
 def browser_environment(source: Mapping[str, str], runtime: Mapping[str, str]) -> dict[str, str]:
-    """Build the complete Node environment from fixed system and runtime allowlists."""
+    """Build the Node allowlist, retaining the validated source browser over runtime.
+
+    Only the explicit browser key is inherited beyond SYSTEM_KEYS. Invalid source
+    paths fail rather than falling back, including when runtime supplies a browser.
+    """
     unknown = set(runtime) - RUNTIME_KEYS
     if unknown:
         raise ValueError('browser runtime key is not allowed: ' + ', '.join(sorted(unknown)))
-    return {
+    environment = {
         **{key: value for key, value in source.items() if key in SYSTEM_KEYS},
         'NO_PROXY': '*',
         'no_proxy': '*',
         **runtime,
     }
+    key = 'OPENQMS_AGENT_BROWSER_EXECUTABLE'
+    if key in source:
+        explicit = _executable(Path(source[key]).expanduser().resolve(), 'explicit Chromium executable')
+        environment[key] = str(explicit)
+    return environment
 
 
 def _executable(path: Path, description: str) -> Path:
@@ -57,9 +66,9 @@ def resolve_browser(frontend: Path, source: Mapping[str, str]) -> Path:
     This function never downloads a browser. An invalid explicit path is an error and
     deliberately does not fall back to a different executable.
     """
-    explicit = source.get('OPENQMS_AGENT_BROWSER_EXECUTABLE')
-    if explicit:
-        return _executable(Path(explicit).expanduser().resolve(), 'explicit Chromium executable')
+    key = 'OPENQMS_AGENT_BROWSER_EXECUTABLE'
+    if key in source:
+        return _executable(Path(source[key]).expanduser().resolve(), 'explicit Chromium executable')
     try:
         resolved = subprocess.run(
             ['node', '-e', _PLAYWRIGHT_EXECUTABLE],

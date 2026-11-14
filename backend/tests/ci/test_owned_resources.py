@@ -267,10 +267,10 @@ def test_prepare_database_orders_instance_create_target_identity_and_migration(m
 def test_database_connector_converts_sqlalchemy_driver_url_for_psycopg(monkeypatch):
     captured = []
     monkeypatch.setitem(__import__('sys').modules, 'psycopg', SimpleNamespace(
-        connect=lambda url: captured.append(url) or object(),
+        connect=lambda url, **kwargs: captured.append((url, kwargs)) or object(),
     ))
     owned_resources._connect('postgresql+psycopg://qms:qms@127.0.0.1:61935/postgres')
-    assert captured == ['postgresql://qms:qms@127.0.0.1:61935/postgres']
+    assert captured == [('postgresql://qms:qms@127.0.0.1:61935/postgres', {'hostaddr': '127.0.0.1'})]
 
 
 def test_database_creation_uses_admin_autocommit(monkeypatch):
@@ -310,10 +310,10 @@ def test_rejects_unexpected_ci_or_registered_image(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('target_host,binding', [
-    ('localhost', '0.0.0.0'), ('localhost', '::'),
+    ('localhost', '0.0.0.0'),
     ('127.0.0.1', '0.0.0.0'), ('::1', '::'),
-    ('localhost', '127.0.0.1'), ('localhost', '::1'),
-    ('127.0.0.1', 'localhost'), ('::1', 'localhost'),
+    ('localhost', '127.0.0.1'),
+    ('127.0.0.1', 'localhost'),
 ])
 def test_ci_accepts_loopback_target_on_compatible_service_binding(monkeypatch, target_host, binding):
     source = {
@@ -332,6 +332,8 @@ def test_ci_accepts_loopback_target_on_compatible_service_binding(monkeypatch, t
     ('127.0.0.1', '::1', '61935'), ('::1', '127.0.0.1', '61935'),
     ('localhost', '198.51.100.7', '61935'), ('localhost', '0.0.0.0', '5432'),
     ('localhost', '', '61935'),
+    ('localhost', '::', '61935'), ('localhost', '::1', '61935'),
+    ('::1', 'localhost', '61935'),
 ])
 def test_ci_rejects_incompatible_or_wrong_service_binding(monkeypatch, target_host, binding, port):
     source = {

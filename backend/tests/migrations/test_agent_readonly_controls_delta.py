@@ -21,8 +21,8 @@ from tests.migrations.test_agent_task_core import _migration_config, _sync_engin
 
 PUBLIC = "20261001_agent_readonly_controls"
 CONTROLS_TENANT = "tv004_agent_readonly_controls"
-LATEST = "tv007_characteristic_refs"
-HEAD = "20261108_merge_characteristics"
+LATEST = "tv009_r4b_main_merge"
+HEAD = "20261114_r4b_main_merge"
 PARENT = "20260930_agent_readonly_delivery"
 TABLES = {"agent_task_controls", "agent_readonly_checkpoints", "agent_checkpoint_receipts", "agent_task_updates"}
 COLUMNS = {
@@ -60,6 +60,9 @@ def test_reviewed_heads_and_static_equivalent_deltas(mig_db_url):
         CONTROLS_TENANT,
         "tv005_agent_task_attachments",
         "tv006_agent_read_tasks",
+        "tv007_characteristic_refs",
+        "tv007_d4_text_delivery",
+        "tv008_d4_recovery",
         LATEST,
     )
     root = Path(__file__).resolve().parents[2]
@@ -170,17 +173,18 @@ async def test_tv002_to_tv005_to_tv002_to_tv005_preserves_two_historical_task_hi
             first = await conn.run_sync(lambda sync: _seed_history(sync, tenant.schema_name, True, False))
             second = await conn.run_sync(lambda sync: _seed_history(sync, tenant.schema_name, True, False))
             before = await conn.run_sync(lambda sync: _history_rows(sync, tenant.schema_name, True, False))
-        await asyncio.to_thread(command.upgrade, config, "head")
-        monkeypatch.setattr(tenant_migrator, "REVISION", LATEST)
+        # This cycle intentionally remains the published tv005 contract.
+        await asyncio.to_thread(command.upgrade, config, "20261009_agent_task_attachments")
+        monkeypatch.setattr(tenant_migrator, "REVISION", "tv005_agent_task_attachments")
         tenant = await tenant_migrator.resume_tenant(tenant.id)
         async with engine.connect() as conn:
-            assert await conn.scalar(sa.text(f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == LATEST
+            assert await conn.scalar(sa.text(f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == "tv005_agent_task_attachments"
             assert await conn.run_sync(lambda sync: _history_rows(sync, tenant.schema_name, True, False)) == before
             await conn.run_sync(lambda sync: _assert_backfill(sync, tenant.schema_name, first, True, False))
             await conn.run_sync(lambda sync: _assert_backfill(sync, tenant.schema_name, second, True, False))
         async with tenant_migrator.maintenance_connection(engine, tenant.id) as maintenance:
             await maintenance.run_downgrade("tv002_agent_task_core")
-            await maintenance.run_migration(LATEST)
+            await maintenance.run_migration("tv005_agent_task_attachments")
             assert await maintenance.compare_schema("public", load_snapshot_manifest()) == []
         async with engine.connect() as conn:
             assert await conn.run_sync(lambda sync: _history_rows(sync, tenant.schema_name, True, False)) == before
@@ -209,18 +213,18 @@ async def test_nonempty_known_ancestors_upgrade_parity_and_owned_downgrade(mig_d
             ids = await conn.run_sync(lambda sync: _seed_history(sync,tenant.schema_name,runtime,outputs))
             second_ids = await conn.run_sync(lambda sync: _seed_history(sync,tenant.schema_name,runtime,outputs))
             before = await conn.run_sync(lambda sync: _history_rows(sync,tenant.schema_name,runtime,outputs))
-        await asyncio.to_thread(command.upgrade,config,"head")
-        monkeypatch.setattr(tenant_migrator,"REVISION",LATEST)
+        await asyncio.to_thread(command.upgrade,config,"20261009_agent_task_attachments")
+        monkeypatch.setattr(tenant_migrator,"REVISION","tv005_agent_task_attachments")
         tenant = await tenant_migrator.resume_tenant(tenant.id)
         async with engine.connect() as conn:
-            assert await conn.scalar(sa.text(f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == LATEST
+            assert await conn.scalar(sa.text(f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == "tv005_agent_task_attachments"
             assert await compare_business_schema(conn,"public",tenant.schema_name,load_snapshot_manifest()) == []
             assert await conn.run_sync(lambda sync: _history_rows(sync,tenant.schema_name,runtime,outputs)) == before
             await conn.run_sync(lambda sync: _assert_backfill(sync,tenant.schema_name,ids,runtime,outputs))
             await conn.run_sync(lambda sync: _assert_backfill(sync,tenant.schema_name,second_ids,runtime,outputs))
         async with tenant_migrator.maintenance_connection(engine,tenant.id) as maintenance:
             await maintenance.run_downgrade("tv003_agent_readonly_delivery")
-            await maintenance.run_migration(LATEST)
+            await maintenance.run_migration("tv005_agent_task_attachments")
             assert await maintenance.compare_schema("public",load_snapshot_manifest()) == []
         async with engine.connect() as conn:
             assert await conn.run_sync(lambda sync: _history_rows(sync,tenant.schema_name,runtime,outputs)) == before
@@ -247,7 +251,7 @@ async def test_predecessor_damage_is_rejected_before_any_control_ddl(mig_db_url,
             statements = {"extra":f'CREATE TABLE "{schema}".unexpected (id int)',"missing":f'ALTER TABLE "{schema}".users DROP COLUMN display_name',"partial":f'CREATE TABLE "{schema}".agent_task_controls (control_id uuid PRIMARY KEY)'}
             statements["partial_column"] = (f'ALTER TABLE "{schema}".users ADD r3_partial integer' if ancestor == "tv001_business_snapshot" else f'ALTER TABLE "{schema}".agent_runs ADD resume_checkpoint_id uuid')
             await conn.execute(sa.text(statements[damage]))
-        await asyncio.to_thread(command.upgrade,config,"head")
+        await asyncio.to_thread(command.upgrade,config,"20261009_agent_task_attachments")
         monkeypatch.setattr(tenant_migrator,"REVISION",LATEST)
         with pytest.raises(TenantUnavailable,match="partial"):
             await tenant_migrator.resume_tenant(tenant.id)

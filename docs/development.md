@@ -219,17 +219,22 @@ npm run dev      # 开发服务器（:5173，代理 /api → :8000）
 后端使用 pytest，前端使用 TypeScript/Vite 与 Vitest。常规一致性检查从仓库根目录运行：
 
 ```bash
-make check-backend       # 已核验 PostgreSQL 上的 deterministic backend 层
+make check-sdk SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # 独立 SDK 三层
+make check-backend SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # 已核验 PostgreSQL + 当前 SDK wheel
 make check-frontend-tsc  # 类型检查
 make check-frontend-build # 生产构建
-make check               # backend + tsc + build
+make check SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # SDK + backend + tsc + build
 ```
 
-`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。它只允许 `not ci_browser
+SDK 的 `SDK_PYTHON_BIN` 默认 `python3`，与 backend 的 `PYTHON_BIN` 独立；须由调用者提供 Python ≥3.11、pytest、pip 与实际 setuptools==79.0.1，检查入口不会安装或放宽构建版本。`check-sdk-unit`、`check-sdk-loopback`、`check-sdk-wheel` 可独立执行，无数据库/backend requirements 依赖；`check-sdk` 聚合三层。backend 检查先离线构建当前源码 wheel，验证构建 JSON 返回的实际路径和 SHA256，再用专用 `OPENQMS_SDK_WHEEL` 传给真实 HTTP fixture；缺 wheel 不 skip。构建/安装与测试证据写入本次私有子目录，可通过 `SDK_ARTIFACT_ROOT` 指定父目录。详见[SDK 使用与安全边界](../sdk/python/README.md)。
+
+`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。后端层只允许 `not ci_browser
 and not live_provider and not real_scanner`；graph worker/projection 的既有两项排除仍由
 Make 参数显式传递。可通过 `python scripts/check-ci-pure.py tests/ci/
-tests/e2e/test_capa_outcome_runner.py -q -rA` 运行导入、收集、执行全程禁止网络的 CI
-基础设施纯测试。
+tests/e2e/test_capa_outcome_runner.py -q -rA` 运行 CI 基础设施纯测试。pure 模式要求
+collection 不探测数据库，误用 DB fixture 明确失败而非转成 skip；导入前禁隐式 dotenv，
+并对 Python 网络及项目已知数据库入口设置拒绝保护，已知 pytest 子进程沿同一 bootstrap。
+这不是任意 shell、Node、原生代码或不可信程序的通用 OS 网络沙箱，不得据此执行未知外部程序。
 
 前端依赖使用 `npm ci`，变更锁文件后须在 CI 的 Node 20/npm 10 环境复验；不能以已有 `node_modules` 的构建通过代替干净安装。发布诊断 `doc-gate-preflight` 和迁移 `deploy-migrate` 保留调用方 `SECRET_KEY`，未提供时不生成空值覆盖 `.env`；仅在调用方未提供非空密钥时接受显式 `PYTEST_SECRET_KEY` 作为旧接口兼容，不在这些入口新增生产默认密钥。
 
@@ -244,6 +249,13 @@ tests/e2e/test_capa_outcome_runner.py -q -rA` 运行导入、收集、执行全�
 `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` 必须移除而非置空，应用 provider 配置仍
 显式禁用。不得由旧注册、
 `run-owned.py`、固定 `/Users/` 路径或环境文件推断资源。
+
+本地资源核验在 Docker inspect 或 DB I/O 前拒绝额外的 `PGHOSTADDR`、`PGSERVICE`、
+`PGSERVICEFILE`、`PGSYSCONFDIR` 和 `PGOPTIONS`，实际 libpq 连接还固定数字回环地址。
+`localhost` 使用 IPv4 回环；仅 IPv6 的实例应显式使用 `::1`。普通测试迁移前置与测试 recipe
+共用测试专用 `SECRET_KEY` fallback，并保留调用者显式值；`doc-gate-preflight` 和
+`deploy-migrate` 则必须显式提供实际 `SECRET_KEY`，不继承测试 fallback 或旧 `PYTEST_SECRET_KEY`。
+本说明不授权执行部署命令。
 
 本地 source export 只复制当前 tracked present source 与明确列出的 CI 实现文件，
 不复制 `.git`、`.env*`、`.superpowers`、`.codegraph`、cache、`node_modules` 或旧 owned

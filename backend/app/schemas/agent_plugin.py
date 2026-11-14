@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, StringConstraints
+from app.schemas.agent_d4_text import DerivedSourceScopeInput
 
 CapabilityID = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=160)]
 PluginKey = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=100)]
@@ -72,6 +73,7 @@ class PluginGrantCreate(BaseModel):
     object_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=100)
     expires_at: AwareDatetime | None = None
     enabled: StrictBool = False
+    derived_source_scope: DerivedSourceScopeInput | None = None
 
 
 class PluginGrantOut(BaseModel):

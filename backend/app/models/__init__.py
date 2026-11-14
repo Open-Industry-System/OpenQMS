@@ -23,6 +23,11 @@ from app.models.agent_task import AgentTask, AgentRun, AgentTaskGrant, AgentTask
 from app.models.agent_task_attachment import AgentTaskAttachment
 from app.models.agent_review_skill import AgentReviewSkill
 from app.models.agent_read_task import AgentReadTask
+from app.models.capa_d4_delivery import (
+    CapaD4RootCauseRevision, CapaD4RootCauseSourceProof, AgentRestrictedProjectionReceipt,
+)
+from app.models.agent_derived_source import AgentPluginDerivedSourceScope, AgentTaskDerivedSourceScope
+from app.models.agent_task_request import AgentTaskSourceRequest
 from app.models.audit import AuditLog
 from app.models.login_audit_log import LoginAuditLog
 from app.models.system_log import SystemLog
@@ -157,7 +162,10 @@ __all__ = [
     "AgentTask", "AgentRun", "AgentTaskGrant", "AgentTaskMessage", "AgentTaskAttachment",
     "AgentCheckpointReceipt", "AgentReadonlyCheckpoint", "AgentTaskControl", "AgentTaskUpdate",
     "AgentEventReceipt", "AgentProjectionReceipt", "AgentResult", "AgentResultReceipt", "AgentRunEvent",
-    "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentPluginGrant", "AgentPluginInstallation", "AgentSession", "AgentToolCall", "AgentReadTask",
+    "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentPluginGrant", "AgentPluginInstallation", "AgentSession", "AgentToolCall",
+    "AgentReadTask", "CapaD4RootCauseRevision", "CapaD4RootCauseSourceProof",
+    "AgentRestrictedProjectionReceipt", "AgentPluginDerivedSourceScope",
+    "AgentTaskDerivedSourceScope", "AgentTaskSourceRequest",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
     "AuditProgram", "AuditPlan", "AuditFinding", "AuditChecklistTemplate", "AuditProgramTargetFactory",
     "InspectionCharacteristic", "SampleBatch", "SampleValue", "SPCAlarm", "ControlLimitSnapshot",
@@ -238,3 +246,4 @@ __all__ = [
     "TenantMigration",
     "TenantAttachmentStorageDisposal",
 ]
+from app.models.agent_d4_recovery import D4RecoveryCheckpoint, D4RecoveryRestart, D4TaskParentGrant

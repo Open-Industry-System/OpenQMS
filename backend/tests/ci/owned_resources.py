@@ -70,7 +70,16 @@ def _validated_url(source: Mapping[str, str]) -> tuple[URL, str]:
     return url, async_url
 
 
+def _reject_libpq_overrides(source: Mapping[str, str]) -> None:
+    keys = ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGSYSCONFDIR', 'PGOPTIONS')
+    supplied = [key for key in keys if source.get(key)]
+    if supplied:
+        raise ValueError('unverified libpq settings are not allowed: ' + ', '.join(supplied))
+
+
 def _validate_legacy_settings(source: Mapping[str, str], url: URL, async_url: str) -> None:
+    _reject_libpq_overrides(source)
+    _reject_libpq_overrides(os.environ)
     expected = {
         'PGHOST': url.host,
         'PGPORT': str(url.port),
@@ -139,15 +148,21 @@ def _registration(source: Mapping[str, str]) -> tuple[str, dict, bool]:
     return str(data['container']), data, False
 
 
+def canonical_loopback_host(host: str) -> str:
+    """Use one numeric address for inspect, both drivers and migration tools."""
+    addresses = {'127.0.0.1': '127.0.0.1', 'localhost': '127.0.0.1', '::1': '::1'}
+    if host not in addresses:
+        raise ValueError('verified loopback database host required')
+    return addresses[host]
+
+
 def _compatible_binding(target_host: str, binding_host: str) -> bool:
-    # Docker service ports may publish on a wildcard. Only the already-approved
-    # loopback target can use it, and numeric targets must retain their family.
+    # localhost is IPv4. An IPv6-only published endpoint requires explicit ::1.
     allowed = {
         '127.0.0.1': {'127.0.0.1', 'localhost', '0.0.0.0'},
-        '::1': {'::1', 'localhost', '::'},
-        'localhost': {'localhost', '127.0.0.1', '::1', '0.0.0.0', '::'},
+        '::1': {'::1', '::'},
     }
-    return binding_host in allowed.get(target_host, set())
+    return binding_host in allowed[canonical_loopback_host(target_host)]
 
 
 def _verify_container(container: str, registration: dict, is_ci: bool, url: URL) -> str:
@@ -173,7 +188,8 @@ def _verify_container(container: str, registration: dict, is_ci: bool, url: URL)
     if any(labels.get(key) != value for key, value in expected.items()):
         raise ValueError('container ownership labels do not match')
 
-    if not is_ci and (str(registration['host']) != url.host or int(registration['port']) != url.port):
+    if not is_ci and (canonical_loopback_host(str(registration['host'])) != canonical_loopback_host(url.host)
+                      or int(registration['port']) != url.port):
         raise ValueError('registration endpoint does not match test database URL')
     mappings = inspected.get('ports', {}).get('5432/tcp') or []
     if not any(_compatible_binding(url.host, entry.get('HostIp')) and entry.get('HostPort') == str(url.port) for entry in mappings):
@@ -192,6 +208,8 @@ def verify_owned_instance(source: Mapping[str, str]) -> VerifiedTestTarget:
     ):
         raise ValueError('registration database does not match test database URL')
     container_id = _verify_container(container, registration, is_ci, url)
+    url = url.set(host=canonical_loopback_host(url.host))
+    async_url = url.set(drivername='postgresql+asyncpg').render_as_string(hide_password=False)
     admin_url = url.set(drivername='postgresql+psycopg', database='postgres').render_as_string(hide_password=False)
     return VerifiedTestTarget(
         container_id=container_id,
@@ -206,9 +224,14 @@ def verify_owned_instance(source: Mapping[str, str]) -> VerifiedTestTarget:
 
 
 def _connect(url: str):
+    _reject_libpq_overrides(os.environ)
+    parsed = make_url(url).set(drivername='postgresql')
+    address = canonical_loopback_host(parsed.host)
     import psycopg
-    connection_url = make_url(url).set(drivername='postgresql').render_as_string(hide_password=False)
-    return psycopg.connect(connection_url)
+
+    # URI and libpq hostaddr agree with the numeric endpoint verified above.
+    connection_url = parsed.set(host=address).render_as_string(hide_password=False)
+    return psycopg.connect(connection_url, hostaddr=address)
 
 
 def _check_identity(connection, expected_database: str, expected_username: str, description: str) -> None:

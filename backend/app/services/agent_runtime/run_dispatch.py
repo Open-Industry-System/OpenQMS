@@ -86,9 +86,28 @@ async def claim_run(db: AsyncSession, binding: TenantBinding | None, installatio
         run.lease_expires_at = min(run.lease_expires_at, authority.trial.expires_at)
     tenant_id = "single" if binding is None else str(binding.tenant_id)
     generation = 0 if binding is None else binding.generation
+    from app.services.agent_runtime import d4_recovery
+    is_text = await d4_recovery.is_text_task(db, task)
+    mapping = await d4_recovery.restart_mapping(db, task, run)
+    if (is_text and run.resume_checkpoint_id is not None) or (not is_text and mapping is not None):
+        raise PermissionError(run_auth.INVALID_TOKEN)
+    if is_text and mapping is None:
+        # Only a task's first run may lack the typed recovery association.
+        # Missing/corrupt mappings must not silently turn a restart into a first run.
+        with db.no_autoflush:
+            other_run = await db.scalar(select(AgentRun.run_id).where(
+                AgentRun.task_id == task.task_id, AgentRun.run_id != run.run_id).limit(1))
+        if other_run is not None:
+            raise PermissionError(run_auth.INVALID_TOKEN)
+    # Association checks involve database awaits after the earlier authority
+    # read; refresh before minting any credential.
+    final = await runtime_access.authorize_task(db, task, plugin)
+    if final.trial != authority.trial or (final.trial is not None and final.trial.expires_at <= datetime.now(UTC)):
+        raise PermissionError(run_auth.INVALID_TOKEN)
     token = run_auth.issue_run_token(run, plugin, tenant_id, generation, trial=authority.trial)
     result = RunClaimOut(run_id=run.run_id, task_id=task.task_id, token=token,
         lease_epoch=run.lease_epoch, lease_expires_at=run.lease_expires_at,
-        accepted_message_seq=run.accepted_message_seq, has_resume_checkpoint=run.resume_checkpoint_id is not None)
+        accepted_message_seq=run.accepted_message_seq,
+        has_resume_checkpoint=mapping is not None if is_text else run.resume_checkpoint_id is not None)
     await db.commit()
     return result

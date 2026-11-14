@@ -7,8 +7,8 @@ from alembic.script import ScriptDirectory
 
 from app.services import tenant_migrator, tenant_schema_diff
 
-PUBLIC_HEAD = "20261108_merge_characteristics"
-TENANT_HEAD = "tv007_characteristic_refs"
+PUBLIC_HEAD = "20261114_r4b_main_merge"
+TENANT_HEAD = "tv009_r4b_main_merge"
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -20,7 +20,7 @@ def test_integrated_public_head_retains_both_existing_branches():
     revisions = {rev.revision for rev in script.walk_revisions()}
     assert {"20260929_agent_read_task", "20261009_agent_task_attachments"} <= revisions
     assert set(script.get_revision(PUBLIC_HEAD).down_revision) == {
-        "20261101_char_refs", "20261103_merge_agent_foundations",
+        "20261108_merge_characteristics", "20261113_d4_recovery",
     }
 
 
@@ -33,7 +33,8 @@ def test_integrated_tenant_head_is_reviewed_and_preserves_frozen_chain():
     assert script.get_heads() == [TENANT_HEAD]
     assert REVIEWED_REVISIONS == (
         "tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery",
-        "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks", TENANT_HEAD,
+        "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks",
+        "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", TENANT_HEAD,
     )
     assert tenant_migrator.REVISION == TENANT_HEAD
 
@@ -132,7 +133,7 @@ async def test_tv005_damage_refuses_before_running_any_delta():
 
 
 @pytest.mark.requires_db
-@pytest.mark.parametrize("source", ["20260929_agent_read_task", "20261009_agent_task_attachments"])
+@pytest.mark.parametrize("source", [None, "20260929_agent_read_task", "20261009_agent_task_attachments", "20261108_merge_characteristics", "20261113_d4_recovery"])
 def test_each_existing_public_branch_upgrades_to_integrated_head(mig_db_url, source):
     import sqlalchemy as sa
     from alembic import command
@@ -140,7 +141,8 @@ def test_each_existing_public_branch_upgrades_to_integrated_head(mig_db_url, sou
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "alembic"))
     cfg.set_main_option("sqlalchemy.url", mig_db_url)
-    command.upgrade(cfg, source)
+    if source is not None:
+        command.upgrade(cfg, source)
     command.upgrade(cfg, PUBLIC_HEAD)
     engine = sa.create_engine(mig_db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://"))
     try:
@@ -153,7 +155,7 @@ def test_each_existing_public_branch_upgrades_to_integrated_head(mig_db_url, sou
 
 @pytest.mark.requires_db
 @pytest.mark.asyncio
-@pytest.mark.parametrize("predecessor,public_predecessor", [("tv005_agent_task_attachments", "20261009_agent_task_attachments"), ("tv006_agent_read_tasks", "20261103_merge_agent_foundations")])
+@pytest.mark.parametrize("predecessor,public_predecessor", [("tv005_agent_task_attachments", "20261009_agent_task_attachments"), ("tv006_agent_read_tasks", "20261103_merge_agent_foundations"), ("tv007_characteristic_refs", "20261108_merge_characteristics"), ("tv008_d4_recovery", "20261113_d4_recovery")])
 async def test_owned_upgrade_parity_and_roundtrip_preserve_existing_history(mig_db_url, monkeypatch, predecessor, public_predecessor):
     import asyncio
     from uuid import uuid4
@@ -184,9 +186,11 @@ async def test_owned_upgrade_parity_and_roundtrip_preserve_existing_history(mig_
         tenant = await tenant_migrator.resume_tenant(tenant.id)
         async with tenant_migrator.maintenance_connection(engine, tenant.id) as maintenance:
             assert await maintenance.compare_schema("public", tenant_schema_diff.load_snapshot_manifest()) == []
-            await maintenance.run_downgrade(predecessor)
+            rollback_target = ("tv006_agent_read_tasks" if predecessor in {
+                "tv007_characteristic_refs", "tv008_d4_recovery"} else predecessor)
+            await maintenance.run_downgrade(rollback_target)
             assert await maintenance.compare_schema("public", tenant_schema_diff.load_snapshot_manifest(),
-                                                     predecessor=predecessor) == []
+                                                     predecessor=rollback_target) == []
             await maintenance.run_migration(TENANT_HEAD)
             assert await maintenance.compare_schema("public", tenant_schema_diff.load_snapshot_manifest()) == []
         async with engine.connect() as connection:

@@ -3,6 +3,7 @@ RUNTIME_ROUTES = frozenset({
     ("POST", "/api/agent/runtime/claim"),
     ("GET", "/api/agent/runtime/capabilities"),
     ("GET", "/api/agent/runtime/capa/context"),
+    ("GET", "/api/agent/runtime/capa/d4/root-cause-text"),
     ("POST", "/api/agent/runtime/messages/claim"),
     ("POST", "/api/agent/runtime/messages/ack"),
     ("POST", "/api/agent/runtime/events"),

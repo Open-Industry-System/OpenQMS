@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools==79.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openqms-agent-sdk"
+version = "0.1.0"
+description = "Independent metadata-only OpenQMS runtime protocol SDK"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["openqms_agent_sdk*"]

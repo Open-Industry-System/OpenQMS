@@ -776,6 +776,15 @@ async def create_capa_from_finding(
     if finding.capa_ref_id is not None:
         raise ValueError("finding already has an associated CAPA")
 
+    # Inherit coordinates from the real finding and its owning audit plan;
+    # do not rely on the CAPA model's default product line.
+    product_line_code = await db.scalar(select(AuditPlan.product_line_code).where(
+        AuditPlan.audit_id == finding.audit_id,
+        AuditPlan.factory_id == finding.factory_id,
+    ))
+    if finding.factory_id is None or product_line_code is None:
+        raise ValueError("audit finding coordinates unavailable")
+
     year = datetime.now().year
     doc_no = await _generate_8d_no(db, year)
     title = f"【审核发现】{finding.clause_ref or ''} - {finding.description[:50]}"
@@ -784,6 +793,8 @@ async def create_capa_from_finding(
     capa = CAPAEightD(
         document_no=doc_no,
         title=title,
+        factory_id=finding.factory_id,
+        product_line_code=product_line_code,
         status="D1_TEAM",
         severity=severity,
         d2_description=finding.description,
@@ -795,6 +806,9 @@ async def create_capa_from_finding(
 
     # Flush to get capa.report_id before linking
     await db.flush()
+
+    from app.services.capa_d4_provenance import record_root_revision
+    await record_root_revision(db, report_id=capa.report_id, actor_id=user_id, write_path="audit.finding")
 
     finding.capa_ref_id = capa.report_id
 

@@ -17,6 +17,7 @@ from app.main import app
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaAIAdoption, CapaD7NodeAction, CapaRootCauseVerification
 from app.models.capa_lesson import CapaLessonLearned
+from app.models.capa_d4_delivery import CapaD4RootCauseRevision
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgAudit, CapaDocgDecision
 from app.models.document_embedding import DocumentEmbedding, EmbeddingSyncOutbox
 from app.models.factory import Factory, UserFactory
@@ -237,6 +238,7 @@ async def review_case(sessionmaker, monkeypatch):
             await db.execute(delete(CapaD7NodeAction).where(CapaD7NodeAction.capa_id == report_id))
             await db.execute(delete(CapaRootCauseVerification).where(
                 CapaRootCauseVerification.capa_id == report_id))
+            await db.execute(delete(CapaD4RootCauseRevision).where(CapaD4RootCauseRevision.report_id == report_id))
             await db.execute(delete(CAPAEightD).where(CAPAEightD.report_id == report_id))
             await db.execute(delete(UserProductLine).where(UserProductLine.user_id == actor_id))
             await db.execute(delete(UserFactory).where(UserFactory.user_id == actor_id))
