@@ -190,7 +190,7 @@ R4b D4 根因本地受控交付在默认关闭的独立 dev、真实回环 profi
 
 租户维护通过固定物理连接持有会话级排他锁；同一连接建立 attempt、递增 generation、执行独立 Alembic 链和原子 seed。维护事务验证 PID、attempt、generation 与锁所有权，不再申请业务共享锁。public 平台迁移与租户迁移分别记账，租户基线 `tv001_business_snapshot` 为冻结 DDL；激活前检查对象级 schema parity、seed 和隔离。
 
-普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv009_r4b_main_merge`，合并 `tv007_characteristic_refs` 与 `tv008_d4_recovery`。特性分支在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv005 和冻结 snapshot 不改写；tv006保留main已发布字节，与R4b仅说明首行不同（非DDL差异），两来源hash与语义等价另测。public 新增无DDL `20261114_r4b_main_merge` 汇合 main 特性与 R4b 恢复两head，保留全部已发布节点。完整旧租户（含两侧旧head）在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列），不隐藏租户侧额外或部分对象。tenant降级还要求每条父路径到达同一目标并在执行后核单版本；合并head仅可降共同祖先tv006及更早，拒绝拆分merge留下多head。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv010_refresh_sessions`，在 `tv009_r4b_main_merge` 汇合 `tv007_characteristic_refs` 与 `tv008_d4_recovery` 后增加按浏览器隔离的 refresh 会话表。特性分支在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv005 和冻结 snapshot 不改写；tv006保留main已发布字节，与R4b仅说明首行不同（非DDL差异），两来源hash与语义等价另测。public 的无DDL `20261114_r4b_main_merge` 汇合 main 特性与 R4b 恢复两head；无DDL `20261114_production_merge` 再合并已部署的 `20260913_user_refresh_sessions` 分支，保留全部已发布节点。完整旧租户（含两侧旧head与 tv009）在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列和 refresh 会话表），不隐藏租户侧额外或部分对象。tenant降级还要求每条父路径到达同一目标并在执行后核单版本；合并head仅可降共同祖先tv006及更早，拒绝拆分merge留下多head。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
 
 ### 4.8 主线旧单报告只读基础与集成边界
 
@@ -371,7 +371,7 @@ D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封�
 | 限制 | 说明 |
 |------|------|
 | 测试覆盖持续完善 | 后端已迁移至 pytest（含 factory_id fixtures、多模块回归与 API 守卫测试），前端使用 vitest 覆盖关键工具与页面；部分历史模块仍需补齐 fixture |
-| 前端未自动刷新 Token | 后端已有 `/api/auth/refresh`，但前端未自动调用，120 分钟后仍需重新登录 |
+| 无状态 access JWT 撤销窗口 | refresh 按浏览器哈希保存并轮换；密码重置撤销 refresh 会话，已签发 access JWT 仍可持续到原过期时间。前端按身份代次协调刷新；CAPA 私有读取拒绝后不重放旧操作。 |
 | 无登录限速 | 登录接口无速率限制 |
 | Redis 未使用 | 已配置但未实现缓存逻辑 |
 | 前端权限守卫不全 | `/knowledge-graph`、`/change-impact`、MES 路由无 `requiredModule` 守卫 |
@@ -395,3 +395,12 @@ backend保留未配置依赖的实际skip，不把它们记为passed。
 远端手动workflow仍要求main、冻结提交与显式管理员配置；本地门禁通过不代表远端已执行、生产已启用，
 也不授权main更新或部署。当前接入与新鲜结果见[CI集成交接](development/agent-ci-integration-gates.md)。
 现有SDK、正文/附件外发及业务写入的未实现部分仍按独立设计与阶段门禁推进。
+
+
+### Oracle 发布控制器与 PR 预览
+
+自动部署由默认分支上的受信任工作流读取 Test OpenQMS 的实际检查结果，验证受检提交、当前主线或 PR 合并引用、作者权限和收据计数。普通测试阶段没有部署凭据；部署阶段不在 runner 上执行 PR 的安装脚本、Makefile、迁移或应用导入。生产与预览使用独立 GitHub Environment 和绑定角色的 SSH 密钥；服务器接收器只允许固定操作并持有发布及操作锁。
+
+自动化控制器与交互式生产包装器分开保存，执行同等环境和身份校验，通过 `make deploy-release` 串行控制目标身份、迁移、准确 CI 结果确认、初始化、预检和发布。应用操作在受资源限制的容器内执行。预览使用独立数据库、密钥、卷和私有网络，只有 web 加入边缘网络；公开账号仅保留只读 Viewer。生产 Caddy 的管理入口为容器内 Unix socket，预览路由经校验后重载。生产迁移前备份，应用发布失败按已锁定镜像恢复，不自动回退数据库。
+
+实现与配置见 [自动部署指南](oracle-automation.md) 和 [服务器控制器](oracle-production-setup.md)。实现存在不代表服务器已安装或开关已启用；执行证据与剩余条件记录在 PROGRESS.md。

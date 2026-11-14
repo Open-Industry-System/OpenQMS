@@ -18,7 +18,7 @@ from app.services.tenant_schema_diff import load_snapshot_manifest, verify_snaps
 REVIEWED_REVISIONS = (
     "tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery",
     "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks",
-    "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge",
+    "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge", "tv010_refresh_sessions",
 )
 
 

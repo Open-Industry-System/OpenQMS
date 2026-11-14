@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -28,9 +29,18 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def create_refresh_token(user_id: str, tenant_id: str | None = None) -> tuple[str, datetime]:
+def create_refresh_token(
+    user_id: str,
+    tenant_id: str | None = None,
+    *,
+    session_id: str | None = None,
+    token_id: str | None = None,
+) -> tuple[str, datetime]:
     expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode = {"sub": user_id, "exp": expire, "type": "refresh"}
+    if session_id:
+        to_encode["sid"] = session_id
+        to_encode["jti"] = token_id or str(uuid.uuid4())
     if tenant_id:
         to_encode["tenant_id"] = tenant_id
         to_encode["iss"] = TENANT_ISSUER
