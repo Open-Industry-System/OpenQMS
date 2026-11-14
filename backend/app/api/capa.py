@@ -62,6 +62,7 @@ from app.schemas.capa_d3 import (
     ProvenanceEntry,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.capa_d5_measure import D5MeasureItem, D5MeasureList, D5ProposalItem, D5ProposalList
 from app.schemas.capa_outcome_review import CapaOutcomeReview
 from app.schemas.capa_ppt import PptExportDetailResponse
 from app.schemas.capa_verification import (
@@ -140,6 +141,64 @@ async def get_outcome_review(
     except (OutcomeReviewConflict, OutcomeReviewLimit) as exc:
         return JSONResponse(status_code=409, content={'detail': str(exc)}, headers=headers)
     return JSONResponse(content=result.model_dump(mode='json'), headers=headers)
+
+
+async def _d5_read_response(db, scope, report_id, *, kind, page=1, page_size=20, item_id=None):
+    from app.core.tenant_transaction import TenantUnavailable
+    from app.services import capa_d5_measures
+
+    headers = {'Cache-Control': 'no-store'}
+    read = getattr(capa_d5_measures, 'read_d5_' + kind)
+    try:
+        result = (await read(db, scope, report_id, item_id) if item_id is not None
+                  else await read(db, scope, report_id, page=page, page_size=page_size))
+    except (PermissionError, TenantUnavailable):
+        return JSONResponse(status_code=403, content={'detail': 'D5 access denied'}, headers=headers)
+    except LookupError:
+        return JSONResponse(status_code=404, content={'detail': 'D5 item unavailable'}, headers=headers)
+    return JSONResponse(content=result.model_dump(mode='json'), headers=headers)
+
+
+@router.get('/{report_id}/d5-proposals', response_model=D5ProposalList)
+async def list_d5_proposals(
+    report_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='proposals', page=page, page_size=page_size)
+
+
+@router.get('/{report_id}/d5-proposals/{proposal_id}', response_model=D5ProposalItem)
+async def get_d5_proposal(
+    report_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='proposal', item_id=proposal_id)
+
+
+@router.get('/{report_id}/d5-measures', response_model=D5MeasureList)
+async def list_d5_measures(
+    report_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='measures', page=page, page_size=page_size)
+
+
+@router.get('/{report_id}/d5-measures/{measure_id}', response_model=D5MeasureItem)
+async def get_d5_measure(
+    report_id: uuid.UUID,
+    measure_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='measure', item_id=measure_id)
 
 
 @router.get("", response_model=CAPAListResponse)

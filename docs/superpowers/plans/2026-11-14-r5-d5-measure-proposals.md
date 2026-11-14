@@ -45,9 +45,9 @@ dbtest() { (cd backend && "$PY" -B -m tests.ci.pytest_bootstrap "$@" -q --tb=sho
 
 ### T2　先交付按措施过滤的读取服务
 
-- [ ] 新增 `backend/tests/capa/test_d5_measure_visibility.py`。用同报告的普通 D5、依据 A 的受限措施、依据 A+B 的受限措施，分别用仅可读报告、可读 A、可读 A+B 的员工执行列表、详情和翻页。没有权限的文本、来源坐标、条数及历史版本均不得出现。fixture 直接准备记录，避免依赖尚未开放的写 API。运行 `dbtest tests/capa/test_d5_measure_visibility.py`。
-- [ ] 新增 `backend/app/services/capa_d5_measures.py`、`backend/app/schemas/capa_d5_measure.py`。为报告视图返回 legacy 文本及有序的可见条目。复用 `capa_current_access.py` 和 `fmea_agent_sources.py` 的当期身份、对象坐标检查；先过滤建议及完整来源集合，再分页、计数、加载正文。过期 proof 影响可采纳性，历史可读性仍按其原始来源和当前权限判断。缺来源元数据的受限条目关闭读取。
-- [ ] 在 `backend/app/api/capa.py` 加报告范围的条目查询；旧报告 DTO 的 `d5_correction` 仅承载历史普通文本。测试同 UUID 跨租户、工厂/产品线转移及已打开页面后撤权；复跑 T2 焦点，通过后提交 `feat(capa): project D5 measures by current source access`。
+- [x] 新增 `backend/tests/capa/test_d5_measure_visibility.py`。用同报告的普通 D5、依据 A 的受限措施、依据 A+B 的受限措施，分别用仅可读报告、可读 A、可读 A+B 的员工执行列表、详情和翻页。没有权限的文本、来源坐标、条数及历史版本均不得出现。fixture 直接准备记录，避免依赖尚未开放的写 API。运行 `dbtest tests/capa/test_d5_measure_visibility.py`。
+- [x] 新增 `backend/app/services/capa_d5_measures.py`、`backend/app/schemas/capa_d5_measure.py`。为报告视图返回 legacy 文本及有序的可见条目。复用 `capa_current_access.py` 和 `fmea_agent_sources.py` 的当期身份、对象坐标检查；先过滤建议及完整来源集合，再分页、计数、加载正文。过期 proof 影响可采纳性，历史可读性仍按其原始来源和当前权限判断。缺来源元数据的受限条目关闭读取。
+- [x] 在 `backend/app/api/capa.py` 加报告范围的条目查询；旧报告 DTO 的 `d5_correction` 仅承载历史普通文本。测试同 UUID 跨租户、工厂/产品线转移及已打开页面后撤权；复跑 T2 焦点，通过后提交 `feat(capa): project D5 measures by current source access`。
 
 ### T3　正式采纳前贯通消费、阶段判断与集中审核
 

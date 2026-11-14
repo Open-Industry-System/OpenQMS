@@ -41,6 +41,18 @@ verb — one module per business concept:
   DAG: recall → fusion → LLM → terminal), `capa_recommendation_service`,
   `capa_draft_service`, `llm_provider`, `llm_fusion_layer`,
   `ai_config_service`, plus the `recommendation_*.py` type/scope helpers.
+- **Source-filtered D5 history** — `capa_d5_measures` uses fresh CAPA identity,
+  tenant and object scope plus FMEA-owned source coordinate checks. Complete
+  original source sets and report/task/run/command/revision/proof associations
+  are checked before count, pagination or body reads, then rechecked before
+  return. Expired proof/node versions mark proposal basis outdated without
+  hiding authorized history. Current basis additionally requires the report
+  FMEA link, exactly one active proof and verification text/source/factory
+  consistency, matching D4 evidence semantics without runtime profile gates.
+  Legacy `d5_correction` remains ordinary text;
+  measures are projected separately. These reads grant no adoption or write
+  permission. The read scans association metadata across a report; large-history
+  performance has not yet been measured.
 - **Employee D4 candidate preview** — `capa_current_access` shares fresh namespace,
   role and object-scope reads with runtime task wrappers; `capa_d4_redaction`
   performs bounded deterministic literal/format replacement only.
