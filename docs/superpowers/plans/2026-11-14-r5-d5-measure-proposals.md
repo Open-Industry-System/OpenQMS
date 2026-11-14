@@ -68,10 +68,10 @@ T4 必要增量：R4b 回执只有不可逆投影摘要，不能还原实际释�
 
 ### T5　实现员工动作与检查点后的部分撤回
 
-- [ ] 新增 `backend/tests/capa/test_d5_staff_actions.py` 及 `backend/tests/services/agent_runtime/test_d5_checkpoint_withdraw.py`。使用两个实际会话竞争采纳/撤回、替代/采纳及撤权；一批三项混入已采纳和已失权项。执行 `dbtest tests/capa/test_d5_staff_actions.py tests/services/agent_runtime/test_d5_checkpoint_withdraw.py`。
-- [ ] 在 `capa_d5_proposals.py` 与 `api/capa.py` 增加员工采纳和填写原因撤回：提交只接受 proposal ID、员工确认的最终文本或原因、幂等键。按 report→proposal 锁定；读取历史需要原来源，采纳另需有效的当前根因 revision/proof、D5 阶段和现有采纳资格。最终文本与原文均保留来源，写正式条目后标已采纳。员工命令按租户、员工、操作 key 防重，绑定规范化参数；T1 同时建员工操作回执并约束唯一键 (actor_id, operation_key)，存参数 HMAC 与动作引用。员工独立于任务生命周期处理报告建议。
-- [ ] 在 `agent_runtime/checkpoint_service.py` 和 `task_controls.py` 的 R5 分支取得同一 task 锁、捕获已提交最大命令序号，边界严格取 `sequence > watermark`。列表含任务及报告匹配且当前可读的对象，撤回项必须仍在这个范围。每项独立事务、独立派生重试键并再次授权；批次中断可按原键重试，已失去读取权返回“当前不可操作”。暂停保留记录，restart 保留任务顺序与绑定，旧检查点不可充当授权。
-- [ ] 验证 D4→D5 正常链、A→B→A 禁采纳、任务结束后同事可处理、已采纳项走受控正式更正、已替代项不会复活。复跑两份焦点及旧停止控制测试，提交 `feat(capa): adopt or withdraw individual D5 proposals`。
+- [x] 新增 `backend/tests/capa/test_d5_staff_actions.py` 及 `backend/tests/services/agent_runtime/test_d5_checkpoint_withdraw.py`。使用两个实际会话竞争采纳/撤回、替代/采纳及撤权；一批三项混入已采纳和已失权项。执行 `dbtest tests/capa/test_d5_staff_actions.py tests/services/agent_runtime/test_d5_checkpoint_withdraw.py`。
+- [x] 在 `capa_d5_proposals.py` 与 `api/capa.py` 增加员工采纳和填写原因撤回：提交只接受 proposal ID、员工确认的最终文本或原因、幂等键。按 report→proposal 锁定；读取历史需要原来源，采纳另需有效的当前根因 revision/proof、D5 阶段和现有采纳资格。最终文本与原文均保留来源，写正式条目后标已采纳。员工命令按租户、员工、操作 key 防重，绑定规范化参数；T1 同时建员工操作回执并约束唯一键 (actor_id, operation_key)，存参数 HMAC 与动作引用。员工独立于任务生命周期处理报告建议。
+- [x] 在 `agent_runtime/checkpoint_service.py` 和 `task_controls.py` 的 R5 分支取得同一 task 锁、捕获已提交最大命令序号，边界严格取 `sequence > watermark`。列表含任务及报告匹配且当前可读的对象，撤回项必须仍在这个范围。每项独立事务、独立派生重试键并再次授权；批次中断可按原键重试，已失去读取权返回“当前不可操作”。暂停保留记录，restart 保留任务顺序与绑定，旧检查点不可充当授权。
+- [x] 验证 D4→D5 正常链、A→B→A 禁采纳、任务结束后同事可处理、已采纳项走受控正式更正、已替代项不会复活。复跑两份焦点及旧停止控制测试，提交 `feat(capa): adopt or withdraw individual D5 proposals`。
 
 ### T6　绑定可选的本地或云端模型部署
 

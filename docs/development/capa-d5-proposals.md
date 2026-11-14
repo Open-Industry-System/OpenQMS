@@ -1,6 +1,6 @@
-# R5 D5 建议命令（T4）
+# R5 D5 建议命令与员工处理（T4–T5）
 
-T4 基于 T3 `284f857c`。当前只提供 CAPA 保存/并列备选/明确替代的原子服务和默认关闭的 runtime 路由。员工采纳、撤回、检查点水位、部署绑定、模型出口与侧栏仍由 T5–T8 实施。没有真实 R5 模型交付或整片验收证据。
+T4 实际提交 `e689b59c`（基于 T3 `284f857c`）；T5 增加员工逐项处理、检查点命令水位和部分撤回。部署绑定、模型出口与侧栏仍由 T6–T8 实施。R5 profile 仍未注册，没有真实 R5 模型交付或整片验收证据。
 
 ## 请求与权限
 
@@ -27,3 +27,20 @@ R4b 的摘要回执继续保留原合同。新 public/tenant 配对迁移 `20261
 规范 HMAC 包含输入、租户/task 命名空间及首次服务端选定的依据回执 ID 集合。同 key 换输入返回冲突；并发同 key、提交后响应丢失均只保留一条命令和建议。后续释放更多上下文不改变原命令身份，原命令回放仍按当前来源授权返回引用。并列备选用新 key 且不指定前版。替代只能处理同 task、同 report 的 pending 项，创建新版和标记旧版 superseded 同事务完成。
 
 测试使用本轮独占 PostgreSQL 资源，唯一替代是尚不存在的 R5 最终准入判定；其余签名凭据、安装/任务来源授权、真实 SQL、当前 ACL、锁与事务均运行生产服务。没有用模拟模型结果冒充真实模型调用。
+
+
+## 员工逐项处理（T5）
+
+`POST /api/capa/{report_id}/d5-proposals/{proposal_id}/adopt` 只接受 `operation_key`、`final_text`；`/withdraw` 只接受 `operation_key`、`reason`。最终文本和原因非空，UTF-8 上限 16 KiB；未知字段拒绝。员工持当前报告 EDIT 和全部原始来源读取权，独立于任务创建者、运行凭据、插件状态及任务是否结束。隐藏与不存在对象均返回通用 404；参数复用和不再待审等冲突返回 409。响应禁止缓存。
+
+服务先核完整来源，再按报告→建议锁定，锁住来源父行和员工权限父行及关联；所有等锁完成后重读权限、状态及依据。采纳另要求报告恰处 D5、最新根因 revision、当前有效 proof 和全部来源节点版本。过期依据仍可按原来源读取或填写原因撤回，不能因文本 A→B→A 而恢复可采纳性。采纳与撤回、替代竞争时只允许一个 pending 状态决定成功；已采纳条目不能通过这些接口覆盖或撤回，继续受正式材料更正及终态规则约束。
+
+正式措施单独保留员工确认文本及操作者，经不可变建议引用继承全部来源；Agent 原文不覆盖。建议状态、正式措施或撤回记录、员工回执及引用审计同事务提交。员工回执唯一键为租户内 `(actor_id, operation_key)`，HMAC 绑定租户、员工、报告、建议、操作和规范请求；同 key 改文本或原因冲突。安全审计只记录引用与动作，不复制原文、最终文本或原因。
+
+## 检查点与部分撤回（T5）
+
+显式 R5 分支 `POST /api/agent/runtime/capa/d5/checkpoints` 接受空对象，由签名运行确定任务、报告及位置。它在与命令相同的 task 行锁下捕获已提交最大命令序号，写入 T1 的 `agent_d5_checkpoint_positions`。该表引用 typed D4 recovery checkpoint；不能把 generic readonly checkpoint ID 填入。首次检查点的水位不可变，重试不会把后来的最大序号纳入旧边界。R4b、metadata 和未绑定 R5 部署的运行不能使用这个分支。
+
+员工可用 `GET /api/agent/tasks/{task_id}/d5-checkpoints/{checkpoint_id}/proposals` 取得同 task、同 report、严格 `sequence > watermark` 且当前完整可读的条目引用与状态。`POST .../proposals/withdraw` 接受 `operation_key`、`reason` 和最多 100 个不重复 `proposal_ids`。每项独立事务、独立派生重试 key，提交时重核边界与员工全部权限。一个条目已采纳不阻止其他合格项撤回；失权或不在范围统一返回 `unavailable`，可读非待审项返回其状态，同 key 改原因返回 `conflict`。批次中断后按原 key 重试不重复留痕；旧检查点只划定范围，不能授权读取或写入。
+
+暂停和重开不重置任务命令序号、不删除原建议或水位，也不复活 withdrawn/superseded 条目。当前生产 R5 仍关闭。现有 D4 的 paused checkpoint epoch 与 active R5 checkpoint epoch 合同保持独立；T6 必须接入持久 R5 部署绑定和相容的暂停/重开准入，保留原始水位，不得静默重捕后来的最大序号或修改旧检查点。T5 的实际旧生命周期测试只证明记录与顺序保留，不宣称生产 R5 restart 已开放。

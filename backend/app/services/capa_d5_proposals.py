@@ -26,6 +26,10 @@ from app.services.capa_d5_measures import _basis_current, _visible_metadata
 from app.services.fmea_agent_sources import visible_fmea_source, failure_cause_version, FAILURE_CAUSE_REFERENCE
 
 UNAVAILABLE = 'D5 command unavailable'
+class D5StaffKeyConflict(ValueError):
+    pass
+
+
 SOURCE_KEYS = {'projection_id', 'factory_id', 'product_line_code', 'fmea_id', 'node_id', 'node_hmac'}
 
 
@@ -414,3 +418,97 @@ async def insert_proposal(db, identity, body, request_hmac, proof, sources, rece
             command_id=str(command_id), proposal_id=str(proposal_id), sequence=sequence,
             operation=body.operation)))
     return dict(proposal_id=proposal_id, state='pending', command_id=command_id)
+
+
+async def _staff_metadata(db, scope, report_id, proposal_id):
+    """Employee permission only; task/run grants never authorize staff actions."""
+    from app.core.permissions import Module, PermissionLevel
+    from app.services.capa_current_access import current_capa_access
+    access = await current_capa_access(db, scope)
+    if access[0].get(Module.CAPA, PermissionLevel.NONE) < PermissionLevel.EDIT:
+        raise PermissionError(UNAVAILABLE)
+    target, rows, sources = await _visible_metadata(db, scope, report_id, access)
+    row = next((row for row in rows if row.proposal_id == proposal_id), None)
+    if row is None:
+        raise LookupError('D5 item unavailable')
+    return target, row, sources[proposal_id]
+
+
+async def staff_action(db, scope, report_id, proposal_id, *, operation, operation_key, value, checkpoint_boundary=None):
+    """Atomically adopt/withdraw one currently readable proposal.
+
+    Report → proposal → source parents → employee authority is the write fence.
+    The only body read for adoption freshness follows complete source admission.
+    Caller owns rollback on rejected requests; successful effects commit together.
+    """
+    from app.schemas.capa_d5_staff import D5Adopt, D5Withdraw
+    from app.models.capa_d5_proposal import CapaD5Measure, CapaD5Withdrawal, CapaD5StaffReceipt
+    from app.models.fmea import FMEADocument
+    from app.services.agent_runtime.control_authority_fence import lock_employee_acl
+    from app.services.capa_review_guard import assert_reviewed_material_mutable
+    from app.state_machines.eightd_state import EightDState
+    if operation not in {'adopt', 'withdraw'}:
+        raise ValueError('D5 operation conflict')
+    request = (D5Adopt(operation_key=operation_key, final_text=value) if operation == 'adopt'
+        else D5Withdraw(operation_key=operation_key, reason=value))
+    await _staff_metadata(db, scope, report_id, proposal_id)
+    await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id == report_id).with_for_update())
+    await db.scalar(select(CapaD5Proposal.proposal_id).where(
+        CapaD5Proposal.proposal_id == proposal_id, CapaD5Proposal.report_id == report_id).with_for_update())
+    target, row, sources = await _staff_metadata(db, scope, report_id, proposal_id)
+    for source_id in sorted({source.fmea_id for source in sources}, key=str):
+        await db.scalar(select(FMEADocument.fmea_id).where(FMEADocument.fmea_id == source_id)
+            .with_for_update(nowait=True))
+    await lock_employee_acl(db, (scope.user.user_id,))
+    target, row, sources = await _staff_metadata(db, scope, report_id, proposal_id)
+    assert_reviewed_material_mutable(target, {'d5_proposals', 'd5_measures'})
+    if checkpoint_boundary is not None:
+        from app.services.agent_runtime.task_controls import require_d5_checkpoint_member
+        await require_d5_checkpoint_member(db, scope, *checkpoint_boundary, report_id, proposal_id)
+    binding = db.info.get('tenant_binding')
+    fingerprint = _digest('openqms.d5.staff.v1', dict(
+        tenant_id=None if binding is None else str(binding.tenant_id), actor_id=str(scope.user.user_id),
+        report_id=str(report_id), proposal_id=str(proposal_id), operation=operation,
+        request=request.model_dump(mode='json')))
+    receipt = await db.scalar(select(CapaD5StaffReceipt).where(
+        CapaD5StaffReceipt.actor_id == scope.user.user_id,
+        CapaD5StaffReceipt.operation_key == operation_key).execution_options(populate_existing=True))
+    if receipt is not None:
+        if not hmac.compare_digest(receipt.request_hmac, fingerprint):
+            raise D5StaffKeyConflict('D5 operation conflict')
+        result = dict(proposal_id=proposal_id, state=row.state)
+        if operation == 'adopt': result['measure_id'] = receipt.measure_id
+        await db.commit()
+        return result
+    if row.state != 'pending':
+        raise ValueError('D5 operation conflict')
+    if operation == 'adopt' and (target.status != EightDState.D5_CORRECTION
+            or not await _basis_current(db, scope, target, row, sources)):
+        raise ValueError('D5 adoption basis or stage conflict')
+    # The final refresh occurs after every potentially waiting lock and basis read.
+    target, row, _ = await _staff_metadata(db, scope, report_id, proposal_id)
+    assert_reviewed_material_mutable(target, {'d5_proposals', 'd5_measures'})
+    if row.state != 'pending': raise ValueError('D5 operation conflict')
+    reference = uuid4()
+    if operation == 'adopt':
+        db.add(CapaD5Measure(measure_id=reference, proposal_id=proposal_id,
+            final_text=value, adopted_by=scope.user.user_id))
+    else:
+        db.add(CapaD5Withdrawal(withdrawal_id=reference, proposal_id=proposal_id,
+            reason=value, actor_id=scope.user.user_id))
+    await db.flush()
+    from sqlalchemy import update
+    await db.execute(update(CapaD5Proposal).where(CapaD5Proposal.proposal_id == proposal_id)
+        .values(state='adopted' if operation == 'adopt' else 'withdrawn'))
+    db.add(CapaD5StaffReceipt(actor_id=scope.user.user_id, operation_key=operation_key,
+        operation=operation, request_hmac=fingerprint, proposal_id=proposal_id,
+        measure_id=reference if operation == 'adopt' else None,
+        withdrawal_id=reference if operation == 'withdraw' else None))
+    db.add(AuditLog(table_name='capa_d5_proposals', record_id=proposal_id,
+        action='D5_PROPOSAL_' + operation.upper(), operated_by=scope.user.user_id,
+        factory_id=target.factory_id, changed_fields=dict(proposal_id=str(proposal_id),
+            operation=operation, reference_id=str(reference))))
+    await db.commit()
+    result = dict(proposal_id=proposal_id, state='adopted' if operation == 'adopt' else 'withdrawn')
+    if operation == 'adopt': result['measure_id'] = reference
+    return result

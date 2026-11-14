@@ -1,4 +1,5 @@
 """Default-off plugin runtime endpoints; business admission belongs to services."""
+from app.schemas.capa_d5_staff import D5CheckpointCreate
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
@@ -147,3 +148,20 @@ async def d5_proposal_command(body: D5Command, identity=Depends(get_runtime_iden
     except DBAPIError:
         await db.rollback()
         raise HTTPException(status_code=409, detail='D5 command retry required', headers={'Cache-Control': 'no-store'}) from None
+
+
+
+
+@router.post('/capa/d5/checkpoints')
+async def save_d5_checkpoint(body: D5CheckpointCreate, identity=Depends(get_runtime_identity),
+        db: AsyncSession = Depends(get_db)):
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await checkpoint_service.save_d5_checkpoint(db, identity)
+        return JSONResponse(jsonable_encoder(result), headers=headers)
+    except (PermissionError, LookupError):
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='D5 checkpoint unavailable', headers=headers) from None
+    except (ValueError, DBAPIError):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='D5 checkpoint conflict', headers=headers) from None

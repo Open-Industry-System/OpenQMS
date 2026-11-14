@@ -1,4 +1,7 @@
 """Default-off, target-bound task creation and instruction queue APIs."""
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from app.schemas.capa_d5_staff import D5BatchWithdraw
 from uuid import UUID
 import logging
 from urllib.parse import unquote, urlsplit
@@ -176,3 +179,25 @@ async def get_checkpoint(task_id: UUID, checkpoint_id: UUID,
         return await checkpoint_service.get_checkpoint_for_view(db, scope, task_id, checkpoint_id)
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
+
+
+
+
+@router.get('/{task_id}/d5-checkpoints/{checkpoint_id}/proposals')
+async def d5_checkpoint_proposals(task_id: UUID, checkpoint_id: UUID,
+        scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await task_controls.d5_checkpoint_candidates(db, scope, task_id, checkpoint_id)
+    except (PermissionError, LookupError):
+        await db.rollback()
+        raise HTTPException(status_code=404, detail='D5 checkpoint unavailable', headers=headers) from None
+    return JSONResponse(jsonable_encoder(result), headers=headers)
+
+
+@router.post('/{task_id}/d5-checkpoints/{checkpoint_id}/proposals/withdraw')
+async def withdraw_d5_checkpoint_proposals(task_id: UUID, checkpoint_id: UUID, body: D5BatchWithdraw,
+        scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):
+    result = await task_controls.withdraw_d5_after_checkpoint(db, scope, task_id, checkpoint_id,
+        proposal_ids=body.proposal_ids, operation_key=body.operation_key, reason=body.reason)
+    return JSONResponse(jsonable_encoder(result), headers={'Cache-Control': 'no-store'})

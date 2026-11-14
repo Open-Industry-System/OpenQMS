@@ -1,4 +1,6 @@
 import uuid
+from fastapi.encoders import jsonable_encoder
+from app.schemas.capa_d5_staff import D5Adopt, D5Withdraw
 from datetime import UTC, datetime
 from typing import Any
 
@@ -2519,3 +2521,44 @@ async def rerun_lateral_route(
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+
+
+async def _d5_staff_response(db, scope, report_id, proposal_id, operation, request):
+    from app.core.tenant_transaction import TenantUnavailable
+    from app.services.capa_d5_proposals import staff_action
+    from app.services.agent_runtime.control_authority_fence import ControlFenceBusy
+    from app.services.capa_review_guard import ReviewedContentLocked
+    from sqlalchemy.exc import DBAPIError
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await staff_action(db, scope, report_id, proposal_id, operation=operation,
+            operation_key=request.operation_key,
+            value=request.final_text if operation == 'adopt' else request.reason)
+    except (PermissionError, LookupError, TenantUnavailable):
+        await db.rollback()
+        return JSONResponse(status_code=404, content={'detail':'D5 item unavailable'}, headers=headers)
+    except ValueError:
+        await db.rollback()
+        return JSONResponse(status_code=409, content={'detail':'D5 operation conflict'}, headers=headers)
+    except (ControlFenceBusy, ReviewedContentLocked):
+        await db.rollback()
+        return JSONResponse(status_code=409, content={'detail':'D5 operation conflict'}, headers=headers)
+    except DBAPIError as exc:
+        await db.rollback()
+        if getattr(exc.orig, 'sqlstate', None) != '55P03': raise
+        return JSONResponse(status_code=409, content={'detail':'D5 operation conflict'}, headers=headers)
+    return JSONResponse(content=jsonable_encoder(result), headers=headers)
+
+
+@router.post('/{report_id}/d5-proposals/{proposal_id}/adopt')
+async def adopt_d5_proposal(report_id: uuid.UUID, proposal_id: uuid.UUID, request: D5Adopt,
+        db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope)):
+    return await _d5_staff_response(db, scope, report_id, proposal_id, 'adopt', request)
+
+
+@router.post('/{report_id}/d5-proposals/{proposal_id}/withdraw')
+async def withdraw_d5_proposal(report_id: uuid.UUID, proposal_id: uuid.UUID, request: D5Withdraw,
+        db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope)):
+    return await _d5_staff_response(db, scope, report_id, proposal_id, 'withdraw', request)

@@ -374,3 +374,112 @@ async def finish_run(db: AsyncSession, identity: RuntimeIdentity, status: str) -
         await db.rollback()
         raise
     return result
+
+
+async def _d5_checkpoint_target(db, scope, task_id, checkpoint_id):
+    """Historical position is a filter, never retained task/source authority."""
+    from app.models.agent_d4_recovery import D4RecoveryCheckpoint
+    from app.models.agent_d5_command import AgentD5CheckpointPosition
+    from app.models.agent_readonly_control import AgentTaskUpdate
+    from app.services.capa_d5_measures import _target
+    row = (await db.execute(select(AgentTask.target_capa_id, AgentTask.factory_id,
+        AgentD5CheckpointPosition.watermark).join(D4RecoveryCheckpoint,
+            D4RecoveryCheckpoint.task_id == AgentTask.task_id)
+        .join(AgentD5CheckpointPosition,
+            (AgentD5CheckpointPosition.checkpoint_id == D4RecoveryCheckpoint.checkpoint_id)
+            & (AgentD5CheckpointPosition.task_id == AgentTask.task_id))
+        .join(AgentRun, (AgentRun.run_id == D4RecoveryCheckpoint.run_id)
+            & (AgentRun.task_id == AgentTask.task_id))
+        .join(AgentTaskUpdate, (AgentTaskUpdate.task_id == AgentTask.task_id)
+            & (AgentTaskUpdate.kind == 'checkpoint')
+            & (AgentTaskUpdate.object_id == D4RecoveryCheckpoint.checkpoint_id)
+            & (AgentTaskUpdate.sequence == D4RecoveryCheckpoint.update_sequence))
+        .where(AgentTask.task_id == task_id,
+            D4RecoveryCheckpoint.checkpoint_id == checkpoint_id))).one_or_none()
+    if row is None: raise LookupError('D5 item unavailable')
+    target = await _target(db, scope, row.target_capa_id)
+    if row.factory_id != target.factory_id: raise LookupError('D5 item unavailable')
+    return target, row.watermark
+
+
+async def require_d5_checkpoint_member(db, scope, task_id, checkpoint_id, report_id, proposal_id):
+    from app.models.agent_d5_command import AgentD5Command
+    from app.models.capa_d5_proposal import CapaD5Proposal
+    target, watermark = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+    if target.report_id != report_id: raise LookupError('D5 item unavailable')
+    found = await db.scalar(select(CapaD5Proposal.proposal_id).join(AgentD5Command,
+        (AgentD5Command.command_id == CapaD5Proposal.command_id)
+        & (AgentD5Command.proposal_id == CapaD5Proposal.proposal_id)
+        & (AgentD5Command.task_id == CapaD5Proposal.task_id))
+        .where(CapaD5Proposal.report_id == report_id, CapaD5Proposal.task_id == task_id,
+            CapaD5Proposal.proposal_id == proposal_id, AgentD5Command.sequence > watermark))
+    if found is None: raise LookupError('D5 item unavailable')
+
+
+async def d5_checkpoint_candidates(db, scope, task_id, checkpoint_id):
+    from app.models.agent_d5_command import AgentD5Command
+    from app.services.capa_d5_measures import _visible_metadata
+    target, watermark = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+    _, visible, _ = await _visible_metadata(db, scope, target.report_id)
+    rows = (await db.execute(select(AgentD5Command.proposal_id, AgentD5Command.sequence).where(
+        AgentD5Command.task_id == task_id, AgentD5Command.sequence > watermark)
+        .order_by(AgentD5Command.sequence))).all()
+    by_id = {row.proposal_id:row for row in visible if row.task_id == task_id}
+    result = [dict(proposal_id=row.proposal_id, state=by_id[row.proposal_id].state,
+        sequence=row.sequence) for row in rows if row.proposal_id in by_id]
+    # Membership and current sources are rechecked after materialization.
+    _, final, _ = await _visible_metadata(db, scope, target.report_id)
+    final_ids = {row.proposal_id for row in final if row.task_id == task_id}
+    return [row for row in result if row['proposal_id'] in final_ids]
+
+
+async def withdraw_d5_after_checkpoint(db, scope, task_id, checkpoint_id, *, proposal_ids, operation_key, reason):
+    """Each requested item owns a transaction and an independently replayable key."""
+    from app.schemas.capa_d5_staff import D5BatchWithdraw
+    from app.services.capa_d5_proposals import staff_action, _staff_metadata, D5StaffKeyConflict
+    from app.services.agent_runtime.d4_text_delivery import _digest
+    from app.services.agent_runtime.control_authority_fence import ControlFenceBusy
+    from app.services.capa_review_guard import ReviewedContentLocked
+    from sqlalchemy.exc import DBAPIError
+    request = D5BatchWithdraw(proposal_ids=proposal_ids, operation_key=operation_key, reason=reason)
+    # Rollback expires the dependency's ORM User. Keep only its trusted actor
+    # UUID across item transactions; every item still resolves live authority.
+    from types import SimpleNamespace
+    scope = SimpleNamespace(user=SimpleNamespace(user_id=scope.user.user_id))
+    outcomes = []
+    for proposal_id in request.proposal_ids:
+        try:
+            target, _ = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+            key = 'd5-batch:' + _digest('openqms.d5.batch-key.v1', dict(
+                operation_key=operation_key, task_id=str(task_id), checkpoint_id=str(checkpoint_id),
+                proposal_id=str(proposal_id)))
+            result = await staff_action(db, scope, target.report_id, proposal_id,
+                operation='withdraw', operation_key=key, value=reason,
+                checkpoint_boundary=(task_id, checkpoint_id))
+            outcomes.append(dict(proposal_id=proposal_id, outcome=result['state']))
+        except (LookupError, PermissionError):
+            await db.rollback()
+            outcomes.append(dict(proposal_id=proposal_id, outcome='unavailable'))
+        except D5StaffKeyConflict:
+            await db.rollback()
+            outcomes.append(dict(proposal_id=proposal_id, outcome='conflict'))
+        except (ValueError, ReviewedContentLocked, ControlFenceBusy):
+            await db.rollback()
+            # A readable adopted/superseded item may disclose that state; an
+            # invisible one always receives the same generic result as missing.
+            try:
+                target, _ = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+                await require_d5_checkpoint_member(db, scope, task_id, checkpoint_id, target.report_id, proposal_id)
+                _, row, _ = await _staff_metadata(db, scope, target.report_id, proposal_id)
+                outcome = row.state if row.state != 'pending' else 'conflict'
+            except (PermissionError, LookupError): outcome = 'unavailable'
+            await db.rollback()
+            outcomes.append(dict(proposal_id=proposal_id, outcome=outcome))
+        except DBAPIError as exc:
+            await db.rollback()
+            if getattr(exc.orig, 'sqlstate', None) != '55P03': raise
+            outcomes.append(dict(proposal_id=proposal_id, outcome='conflict'))
+        except Exception:
+            await db.rollback()
+            raise
+    return outcomes
