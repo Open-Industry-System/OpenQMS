@@ -160,3 +160,49 @@ def test_browser_ordinary_skip_stays_blocked():
     receipt=dict(layer='browser',frozen_sha=SHA,status='PASSED',exit_code=0,command=['pytest'],selected=2,passed=1,skipped=1,failed=0,errors=0,xfailed=0,xpassed=0)
     api.data['/actions/artifacts/2/zip']=archive({'browser-receipt.json':receipt})
     with pytest.raises(ValueError):gate.verify(api,42,REPO)
+
+
+def test_large_authentic_shaped_log_is_accepted_without_reading_it(monkeypatch):
+    import io, json, zipfile
+    api=API()
+    receipt=dict(layer='api',frozen_sha=SHA,status='PASSED',exit_code=0,
+                 command=['python','-m','tests.ci.pytest_bootstrap'],
+                 selected=5243,passed=5239,skipped=4,failed=0,errors=0,xfailed=0,xpassed=0)
+    output=io.BytesIO()
+    with zipfile.ZipFile(output,'w',compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr('api-receipt.json',json.dumps(receipt))
+        z.writestr('api.log',b'x'*9575392)
+    api.data['/actions/artifacts/0/zip']=output.getvalue()
+    actual_read=zipfile.ZipFile.read
+    reads=[]
+    def receipt_read_only(self, name, *args, **kwargs):
+        filename=name.filename if isinstance(name,zipfile.ZipInfo) else name
+        assert filename.endswith('-receipt.json'), 'ignored logs must never be decompressed'
+        reads.append(filename)
+        return actual_read(self,name,*args,**kwargs)
+    monkeypatch.setattr(zipfile.ZipFile,'read',receipt_read_only)
+    assert gate.verify(api,42,REPO)['sha']==SHA
+    assert 'api-receipt.json' in reads
+
+
+def test_oversized_receipt_rejected_before_reading(monkeypatch):
+    import io,zipfile
+    api=API();output=io.BytesIO()
+    with zipfile.ZipFile(output,'w',compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr('api-receipt.json',b' '*(4*1024*1024+1))
+    api.data['/actions/artifacts/0/zip']=output.getvalue()
+    def never_read(*args,**kwargs):raise AssertionError('oversized receipt must not be read')
+    monkeypatch.setattr(zipfile.ZipFile,'read',never_read)
+    with pytest.raises(ValueError,match='oversized artifact entry'):gate.verify(api,42,REPO)
+
+
+@pytest.mark.parametrize('unsafe',['path','symlink'])
+def test_ignored_log_metadata_still_validated(unsafe):
+    import io,stat,zipfile
+    api=API();output=io.BytesIO()
+    with zipfile.ZipFile(output,'w') as z:
+        entry=zipfile.ZipInfo('../api.log' if unsafe=='path' else 'api.log')
+        if unsafe=='symlink':entry.external_attr=(stat.S_IFLNK|0o777)<<16
+        z.writestr(entry,b'ignored')
+    api.data['/actions/artifacts/0/zip']=output.getvalue()
+    with pytest.raises(ValueError,match='unsafe artifact path|symlink artifact entry'):gate.verify(api,42,REPO)

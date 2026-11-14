@@ -128,10 +128,10 @@ def verify(api, run_id, repository):
             artifact_keys=set()
             for entry in archive.infolist():
                 require(not entry.flag_bits & 1 and not stat.S_ISLNK(entry.external_attr >> 16), 'encrypted or symlink artifact entry')
-                require(entry.file_size<=4*1024*1024,'oversized artifact entry')
                 path=PurePosixPath(entry.filename)
                 require(not path.is_absolute() and '..' not in path.parts,'unsafe artifact path')
                 if entry.filename.endswith('-receipt.json'):
+                    require(entry.file_size<=4*1024*1024,'oversized artifact entry')
                     receipt=json.loads(archive.read(entry))
                     key=('frontend',receipt.get('check')) if receipt.get('kind')=='frontend-command' else ('backend',receipt.get('layer'))
                     require(key in expected_keys and key not in artifact_keys, 'receipt artifact provenance mismatch')
