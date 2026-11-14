@@ -16,8 +16,12 @@
 - [x] 逐项解决权限/运行时冲突，审查自动合并及 main 权限修复，不整批选边。
 - [x] 合并 public/tenant 迁移图；保留发布 revision，核对冻结快照及双分支 predecessor parity，补真实三路径与tenant迁移回归。
 - [x] 合并模型注册、Make/CI、测试和文档，保留 PR #29 行为；完成独立规格与质量复核。
-- [ ] 新建本次独立 owner-bound PG15、专属卷、数字回环端点及私有登记；不复用 R4B-CLEANUP-01。先迁移、再冲突焦点测试。
-- [ ] 在候选提交上运行 make check、browser、pure、前端单测/E2E类型及相称附件授权/PR #29门禁；记录失败修复、skip与未运行项。
+- [x] 新建本次独立 owner-bound PG15、专属卷、数字回环端点及私有登记；不复用 R4B-CLEANUP-01。先迁移、再冲突焦点测试。
+- [x] 在候选提交上运行 make check、browser、pure、前端单测/E2E类型及相称附件授权/PR #29门禁；记录失败修复、skip与未运行项。
 - [ ] 精确提交、普通push独立分支、创建draft PR、跟踪自动CI并修复集成失败；最终交接SHA、PR和明确合并判断。
 
 资源清理：R4B-CLEANUP-01继续延期，全部旧资源保留。本次新测试资源另行登记与交接；不删除或修改其他容器/卷，不使用prune。
+
+## 本地验收证据
+
+冻结执行候选78b428d2，1575文件manifest前后相同。make check后端4973通过/4可选skip/19未选/6警告，SDK562+16+1，前端tsc/build；独立browser11无skip、pure321、Vitest822/95文件、E2E类型通过。三条public升级与tenant两旧head/空路径、27 guards真实通过。新资源采用同一独占实例内的qms_test满足main原固定库名守卫；初始库保留。资源残留与哨兵只读核验正常，详情见[交接](../../development/r4b-main-integration.md)。此快照为发布前记录，远端CI不能预写为通过。
