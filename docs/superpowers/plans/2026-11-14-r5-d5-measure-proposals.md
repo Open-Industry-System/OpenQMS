@@ -106,7 +106,7 @@ T8 完成证据（2026-11-14）：最终焦点前端 **118 passed /6 files /8.50
 - [x] 新增 `backend/tests/e2e/test_r5_d5_process.py` 和 `backend/tests/e2e/test_r5_d5_browser.py`。在真实 HTTP/数据库执行：A 报告正向、跨报告拒写、超时重试、换源、最终撤权、明确更正/并列备选、两人协作与竞争、部分回滚、暂停/restart、导出标记隔离及整份审核；旧 metadata 与 R4b 固定执行物另跑回归。结果记录用例名、源版本、测试资源和运行 SHA。
 - [x] 合成服务验证本地/云端两种路由配置、受控插件网络及消息可达性。另在已登记的实际模型部署上用合成质量资料执行本地和云端试用，记录模型部署版本、工具调用与 CAPA 收据，抽查建议是否引用当前根因。如缺某类真实端点或试用凭据，将该类实测明确标为待验证，普通 CI 仍使用确定性对端。
 - [x] 把新用例接入现有 CI 分层、必选节点及凭据隔离，更新 `backend/tests/ci/test_layer_selection.py` 和交付文档。冻结候选后运行 `make check`、`make check-browser`、`"$PY" -B scripts/check-ci-pure.py tests/ci -q`、`(cd frontend && npm test -- --run && npx tsc --noEmit -p tsconfig.e2e.json)`。逐层保存真实通过/跳过/失败及原因。
-- [x] 复核规格第 7 节九个验收场景分别对应 T2/T3/T4/T5/T6/T7/T8 的通过证据；记录新部署的启用/撤销、命令重试、凭据维护、旧字段兼容及本轮资源归属清理。更新 `PROGRESS.md`，准备精确本地提交 `test(agent): verify R5 D5 collaboration end to end`（实际提交待根代理最终批准；提交后写外部metadata seal，不制造自引用提交循环）。功能签收和部署开关分别记录。
+- [x] 复核规格第 7 节九个验收场景分别对应 T2/T3/T4/T5/T6/T7/T8 的通过证据；记录新部署的启用/撤销、命令重试、凭据维护、旧字段兼容及本轮资源归属清理。更新 `PROGRESS.md`，已精确本地提交 `test(agent): verify R5 D5 collaboration end to end`（`acd570dc8edbcdd9f01ddaf694cb9c2ad0785739`；外部metadata seal记录提交与后续doc-only状态收尾，不制造自引用提交循环）。功能签收和部署开关分别记录。
 
 T9 本地自动验收结果（2026-11-15本地日期）：v9冻结38文件经独立SPEC/QUALITY双APPROVED；所有门禁结束后逐项hash及路径集合仍一致，随后仅修改PROGRESS与本计划。fresh `make check` 根exit0／6402.33s：SDK unit562／loopback16／wheel1全部PASS，ordinary API5162 passed／4 skipped／79 deselected／6 warnings，native API58 passed／0 skip，tsc/build exit0。v9完整browser为native2＋portable11全部PASS／0 skip；纯CI268 passed；完整frontend850 passed与E2E tsc exit0保留前端源文件未变的等价证据。固定89必选节点（迁移29＋native API58＋native browser2）按真实PASSED node ID核对无缺失、重复或skip替代。日志、receipt与失败修复详见PROGRESS和私有inventory。
 
@@ -118,7 +118,7 @@ T9 本地自动验收结果（2026-11-15本地日期）：v9冻结38文件经独
 - [ ] **真实CLOUD模型试用：PENDING**。同上；未发现/复用旧密钥，无外部模型调用。
 - [ ] **远端native CI：PENDING／NOT RUN**。支持Darwin的self-hosted runner可用性及正常owner-bound新资源预置待验证；本地完整native层通过不等于远端job已执行。
 
-本地自动功能验收通过；真实模型质量签收和部署启用分别仍待完成。试点默认关闭，保留Darwin/dev/OpenAI兼容和单平台进程限制；未push/合并/部署。T9精确本地提交等待最终批准。
+本地自动功能验收通过；真实模型质量签收和部署启用分别仍待完成。试点默认关闭，保留Darwin/dev/OpenAI兼容和单平台进程限制；未push/合并/部署。T9已精确本地提交 `acd570dc8edbcdd9f01ddaf694cb9c2ad0785739`；本轮后续收尾只更新PROGRESS与计划的完成状态，执行源码不变。
 
 ### 实际实施提交记录
 
@@ -132,7 +132,7 @@ T9 本地自动验收结果（2026-11-15本地日期）：v9冻结38文件经独
 | T6 | `f8870592f8b92cdcde86324569bc843eee076cd5` |
 | T7 | `84f65ecf0b50b8b672c1687fe53a291e82fd99e0` |
 | T8 | `f61669148598dd5e49027645f3c8bfe3f73e0147` |
-| T9 | 已完成本地自动验收及精确提交准备；实际提交待批准，之后由外部metadata seal记录。 |
+| T9 | `acd570dc8edbcdd9f01ddaf694cb9c2ad0785739` |
 
 ## 实施者可直接使用的验收断言
 
