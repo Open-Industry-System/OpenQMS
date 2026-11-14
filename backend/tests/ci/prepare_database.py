@@ -26,7 +26,10 @@ def run_migrations(target: VerifiedTestTarget, database_url: str) -> None:
     environment['DATABASE_URL'] = database_url
     environment['TEST_DATABASE_URL'] = database_url
     subprocess.run(
-        [sys.executable, '-m', 'alembic', 'upgrade', 'head'],
+        [sys.executable, '-c',
+         'from tests.ci.python_isolation import bootstrap; bootstrap(); '
+         'import runpy; runpy.run_module("alembic", run_name="__main__")',
+         'upgrade', 'head'],
         cwd=Path(__file__).resolve().parents[2], env=environment, check=True,
     )
 

@@ -114,6 +114,15 @@ async def lifespan(app: FastAPI):
         tenant_mode=settings.TENANT_MODE, now=datetime.now(UTC),
     )
     logger.info("%s", app.state.agent_local_trial_policy.diagnostic)
+    from app.services.agent_runtime.local_d4_text_policy import load_text_policy
+    app.state.agent_d4_text_policy = load_text_policy(
+        settings.AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE,
+        enabled=settings.AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED,
+        runtime_enabled=settings.AGENT_TASK_RUNTIME_ENABLED,
+        tenant_mode=settings.TENANT_MODE, now=datetime.now(UTC),
+        key=settings.SECRET_KEY.encode("utf-8"),
+    )
+    logger.info("%s", app.state.agent_d4_text_policy.diagnostic)
     await initialize_attachment_runtime(app)
     # Legacy single-tenant bootstrap: create default admin user.
     # In multi-tenant mode, users/role_definitions live in tenant schemas,

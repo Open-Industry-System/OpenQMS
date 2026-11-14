@@ -14,6 +14,43 @@ from app.services.agent_runtime import checkpoint_service, readonly_delivery, ta
 from app.services.agent_runtime.task_controls import _current_run, _task_binding
 
 
+async def _text_discoverable(db, scope, target, manifest, trial, grants, levels, factories, lines):
+    from datetime import UTC, datetime
+    from app.models.agent_derived_source import AgentPluginDerivedSourceScope
+    from app.services.agent.permissions.access import can_discover_source_plugin
+    from app.services.agent.permissions.catalog import get_capability
+    from app.services.agent.permissions.types import AccessAttempt
+    from app.services.agent_runtime.deployment_profiles import TEXT_CAPABILITY
+    from app.services.agent_runtime.derived_source_grants import current_source_for_target, scope_from_row
+    from app.services.agent_runtime.runtime_access import _grant
+    if trial is None or trial.profile != 'local_d4_root_cause_text_v1':
+        return False
+    required = set(manifest.required_capabilities)
+    if required != {TEXT_CAPABILITY}:
+        return False
+    current = await current_source_for_target(db, scope, target)
+    if current is None:
+        return False
+    with db.no_autoflush:
+        rows = list((await db.scalars(select(AgentPluginDerivedSourceScope).where(
+            AgentPluginDerivedSourceScope.plugin_grant_id.in_([grant.grant_id for grant in grants]))
+            .execution_options(populate_existing=True))).all())
+    scopes = {row.plugin_grant_id: scope_from_row(row) for row in rows}
+    spec = get_capability(TEXT_CAPABILITY, profile=trial.profile)
+    for grant in grants:
+        if not grant.enabled or grant.capability_id != TEXT_CAPABILITY:
+            continue
+        attempt = AccessAttempt(spec, levels,
+            None if factories.accessible_factory_ids is None else frozenset(factories.accessible_factory_ids),
+            None if lines.mode == 'ALL' else frozenset(lines.codes or []), _grant(grant), None,
+            target.factory_id, target.report_id, target.product_line_code, datetime.now(UTC),
+            identity_bypass_row_level_security=lines.mode == 'ALL', catalog_profile=trial.profile,
+            current_source=current, plugin_source_scope=scopes.get(grant.grant_id))
+        if can_discover_source_plugin(attempt):
+            return True
+    return False
+
+
 async def _choices(db, scope, report_id):
     levels, factories, lines = await task_service._current_access(db, scope)
     target = await task_service._target(db, report_id, factories, lines)
@@ -33,8 +70,11 @@ async def _choices(db, scope, report_id):
         # R1 canonical intersection with a transient grant description only.
         # Never attach hypothetical Tasks/grants to the session or persist them.
         trial = task_service.trial_for_target(db, plugin, scope.user.user_id, target)
+        these_grants = [row for row in grants if row.installation_id == plugin.installation_id]
         _, ready = task_service._read_grants(None, target, manifest, levels, factories, lines,
-            [row for row in grants if row.installation_id == plugin.installation_id], trial=trial)
+            these_grants, trial=trial)
+        if not ready:
+            ready = await _text_discoverable(db, scope, target, manifest, trial, these_grants, levels, factories, lines)
         if ready:
             choices.append(InstallationChoice(installation_id=plugin.installation_id,
                 plugin_key=plugin.plugin_key, plugin_version=plugin.plugin_version))
@@ -48,7 +88,8 @@ async def list_installations(db, scope, report_id: UUID) -> dict:
     # enabled installation/version/manifest and grants together. A late User
     # permission check alone cannot validate a candidate derived for an old PL.
     with db.no_autoflush:
-        rows = (await db.execute(select(CAPAEightD, AgentPluginInstallation, AgentPluginGrant)
+        rows = (await db.execute(select(CAPAEightD.report_id, CAPAEightD.factory_id,
+            CAPAEightD.product_line_code, CAPAEightD.fmea_ref_id, AgentPluginInstallation, AgentPluginGrant)
             .select_from(CAPAEightD).outerjoin(AgentPluginInstallation,
                 AgentPluginInstallation.enabled.is_(True)).outerjoin(AgentPluginGrant,
                 AgentPluginGrant.installation_id == AgentPluginInstallation.installation_id)
@@ -59,13 +100,13 @@ async def list_installations(db, scope, report_id: UUID) -> dict:
     levels, factories, lines = await task_service._current_access(db, scope)
     if not rows:
         raise LookupError("8D report not found")
-    target = rows[0][0]
+    target = rows[0]
     if ((factories.accessible_factory_ids is not None
             and target.factory_id not in factories.accessible_factory_ids)
             or (lines.mode != "ALL" and target.product_line_code not in (lines.codes or []))):
         raise LookupError("8D report not found")
     plugins, grants = {}, {}
-    for _, plugin, grant in rows:
+    for _, _, _, _, plugin, grant in rows:
         if plugin is not None:
             plugins[plugin.installation_id] = plugin
             if grant is not None:
@@ -77,8 +118,11 @@ async def list_installations(db, scope, report_id: UUID) -> dict:
         except ValidationError:
             continue
         trial = task_service.trial_for_target(db, plugin, scope.user.user_id, target)
+        these_grants = grants.get(plugin_id, [])
         _, ready = task_service._read_grants(None, target, manifest, levels, factories, lines,
-            grants.get(plugin_id, []), trial=trial)
+            these_grants, trial=trial)
+        if not ready:
+            ready = await _text_discoverable(db, scope, target, manifest, trial, these_grants, levels, factories, lines)
         if ready:
             choices.append(InstallationChoice(installation_id=plugin_id,
                 plugin_key=plugin.plugin_key, plugin_version=plugin.plugin_version))
@@ -169,21 +213,38 @@ async def _materialize(db, scope, task, pointer):
         if row.resulting_run_id is not None:
             await _run(db, task, row.resulting_run_id)
         if row.action == "restart":
-            if row.resulting_run_id is None or row.resulting_run_id == row.run_id or row.checkpoint_id is None:
+            if row.resulting_run_id is None or row.resulting_run_id == row.run_id:
                 raise PermissionError("Control unavailable")
-            cp = await checkpoint_service.get_checkpoint_for_view(db, scope, task.task_id, row.checkpoint_id)
+            from app.services.agent_runtime import d4_recovery
+            if await d4_recovery.is_text_task(db, task):
+                result_run = await _run(db, task, row.resulting_run_id)
+                link = await d4_recovery.restart_mapping(db, task, result_run)
+                if link is None or link.control_id != row.control_id:
+                    raise PermissionError('Control unavailable')
+                cp = await d4_recovery.get_checkpoint(db, scope, task.task_id, link.checkpoint_id)
+                checkpoint_id = link.checkpoint_id
+            else:
+                if row.checkpoint_id is None:
+                    raise PermissionError('Control unavailable')
+                cp = await checkpoint_service.get_checkpoint_for_view(db, scope, task.task_id, row.checkpoint_id)
+                checkpoint_id = row.checkpoint_id
             if cp["run_id"] != str(row.run_id):
                 raise PermissionError("Control unavailable")
         elif row.checkpoint_id is not None or row.resulting_run_id != row.run_id:
             raise PermissionError("Control unavailable")
         data = dict(control_id=row.control_id, action=row.action, run_id=row.run_id,
-            resulting_run_id=row.resulting_run_id, checkpoint_id=row.checkpoint_id)
+            resulting_run_id=row.resulting_run_id,
+            checkpoint_id=checkpoint_id if row.action == 'restart' else row.checkpoint_id)
     elif kind == "result":
         data = await readonly_delivery.get_result_for_view(db, scope, task.task_id, object_id)
     elif kind == "event":
         data = await readonly_delivery.get_event_for_view(db, scope, task.task_id, object_id)
     elif kind == "checkpoint":
-        data = await checkpoint_service.get_checkpoint_for_view(db, scope, task.task_id, object_id)
+        from app.services.agent_runtime import d4_recovery
+        if await d4_recovery.is_text_task(db, task):
+            data = await d4_recovery.get_checkpoint(db, scope, task.task_id, object_id)
+        else:
+            data = await checkpoint_service.get_checkpoint_for_view(db, scope, task.task_id, object_id)
         if data["update_sequence"] != pointer.sequence:
             raise PermissionError("Checkpoint association unavailable")
     else:
@@ -222,6 +283,19 @@ async def _final_sources(db, scope, task, items):
                 raise PermissionError("Source unavailable")
         elif kind == "checkpoint" or (kind == "control" and data["checkpoint_id"] is not None):
             checkpoint_id = UUID(str(data["checkpoint_id"]))
+            from app.services.agent_runtime import d4_recovery
+            if await d4_recovery.is_text_task(db, task):
+                if kind == 'checkpoint':
+                    if await d4_recovery.get_checkpoint(db, scope, task.task_id, checkpoint_id) != data:
+                        raise PermissionError('Checkpoint association unavailable')
+                else:
+                    result_run = await _run(db, task, UUID(str(data['resulting_run_id'])))
+                    link = await d4_recovery.restart_mapping(db, task, result_run)
+                    if (link is None or str(link.control_id) != str(data['control_id'])
+                            or link.checkpoint_id != checkpoint_id or str(link.old_run_id) != str(data['run_id'])):
+                        raise PermissionError('Checkpoint association unavailable')
+                    await d4_recovery.get_checkpoint(db, scope, task.task_id, checkpoint_id)
+                continue
             with db.no_autoflush:
                 row = await db.scalar(select(AgentReadonlyCheckpoint).where(
                     AgentReadonlyCheckpoint.checkpoint_id == checkpoint_id)

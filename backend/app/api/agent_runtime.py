@@ -7,7 +7,7 @@ from app.database import get_db
 from app.schemas.agent_control import RuntimeFinish, RuntimeFinishOut
 from app.schemas.agent_runtime import ReadonlyCheckpointCreate, ReadonlyCheckpointOut, MessageHistoryHTTPQuery, MessageHistoryOut
 from app.schemas.agent_runtime import MessageAck, MessageAckOut, MessageBatch, MessageClaim, RunClaim, RunClaimOut, RuntimeCapabilities, CapaContextQuery, RuntimeEventCreate, RuntimeEventOut, RuntimeResultCreate, RuntimeResultOut
-from app.services.agent_runtime import run_dispatch, runtime_access, runtime_messages, readonly_delivery, task_controls, checkpoint_service
+from app.services.agent_runtime import run_dispatch, runtime_access, runtime_messages, readonly_delivery, task_controls, checkpoint_service, d4_text_delivery
 
 router = APIRouter(prefix="/api/agent/runtime", tags=["agent-runtime"],
     dependencies=[Depends(require_task_runtime)])
@@ -66,6 +66,18 @@ async def capa_context(query: CapaContextQuery = Query(), identity=Depends(get_r
         return await readonly_delivery.get_capa_context(db, identity, query.report_id, query.view)
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
+
+
+@router.get("/capa/d4/root-cause-text")
+async def d4_root_cause_text(identity=Depends(get_runtime_identity), db: AsyncSession = Depends(get_db)):
+    try:
+        return await d4_text_delivery.get_d4_root_cause_text(db, identity)
+    except (PermissionError, LookupError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=403, detail="Source unavailable") from None
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail="Delivery unavailable") from None
 
 
 @router.post("/events", response_model=RuntimeEventOut)

@@ -9,12 +9,18 @@ from app.models.audit import AuditLog
 from app.schemas.agent_runtime import MessageAck, MessageAckOut, MessageBatch, MessageClaim, RuntimeMessage
 from app.services.agent_runtime import runtime_access, task_updates
 from app.services.agent_runtime.runtime_access import RuntimeIdentity
+from app.services.agent_runtime.message_delivery_policy import require_profile_message_contents
 
 
 def _delivery(identity: RuntimeIdentity) -> None:
     # Original user text is restricted/raw, never a masked projection. Egress
     # authority comes exclusively from the current server deployment tuple.
-    runtime_access.require_delivery(identity, "restricted", "raw", controlled_egress=True)
+    runtime_access.require_delivery(identity, "restricted", "raw", controlled_egress=True, delivery_kind='message')
+
+
+def _require_profile_messages(identity: RuntimeIdentity, rows) -> None:
+    profile = None if identity.trial is None else identity.trial.profile
+    require_profile_message_contents(profile, rows)
 
 
 def _contiguous(rows, start: int) -> None:
@@ -74,6 +80,7 @@ async def claim_messages(db: AsyncSession, identity: RuntimeIdentity, limit: int
                 raise ValueError("Message state conflicts")
             batch_id = _batch_id(current, rows[0].sequence) if rows else None
     current = await _final_authority(db, current)
+    _require_profile_messages(current, rows)
     if not pending:
         # A newly verified lease may reclaim only unaccepted old markers. History
         # retains both its accepted watermark and the original batch/epoch proof.
@@ -123,6 +130,7 @@ async def ack_messages(db: AsyncSession, identity: RuntimeIdentity,
         if not advancing or advancing[-1].sequence != request.through_sequence:
             raise ValueError("Message acknowledgement conflicts")
     current = await _final_authority(db, current)
+    _require_profile_messages(current, rows)
     if advancing:
         for row in advancing:
             row.state = "accepted"
@@ -179,6 +187,7 @@ async def get_message_history(db: AsyncSession, identity: RuntimeIdentity,
     if rows:
         _contiguous(rows, request.after_sequence + 1)
     current = await _final_authority(db, current)
+    _require_profile_messages(current, rows)
     return MessageHistoryOut(messages=[RuntimeMessage(message_id=row.message_id,
         sequence=row.sequence, content=row.content) for row in rows],
         next_sequence=rows[-1].sequence if rows else accepted,

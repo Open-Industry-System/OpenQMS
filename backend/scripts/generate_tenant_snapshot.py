@@ -31,7 +31,7 @@ class TocEntry:
 def _verified_pg15_container(database_url: str | None = None) -> str:
     """Resolve PG tools only on the explicitly owned server, including fixture DBs."""
     from sqlalchemy.engine import make_url
-    from tests.ci.owned_resources import verify_owned_instance
+    from tests.ci.owned_resources import canonical_loopback_host, verify_owned_instance
 
     source = dict(os.environ)
     recorded = source.get("OPENQMS_MIGRATION_TEST_DATABASE_URL")
@@ -44,7 +44,7 @@ def _verified_pg15_container(database_url: str | None = None) -> str:
     if (
         not candidate.drivername.startswith("postgresql")
         or candidate.query
-        or (candidate.host, candidate.port, candidate.username, candidate.password)
+        or (canonical_loopback_host(candidate.host), candidate.port, candidate.username, candidate.password)
         != (target.host, target.port, target.username, target.password)
         or not candidate.database or not candidate.database.endswith("_test")
         or (candidate.database != target.database and (

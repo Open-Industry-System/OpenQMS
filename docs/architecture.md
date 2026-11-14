@@ -180,13 +180,25 @@ R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收
 
 兼容的内部 `agent_read_tasks`/`agent.read_task_service` 仍限单租户：为当前用户可见的单个 CAPA 创建 24 小时任务，检查时重验当前权限和固定对象范围，支持撤销与审计；没有新增 HTTP、插件或模型入口。其对象级 Grant 不改变 baseline DENY。共享 `capa_agent_projection.build_masked_d4_projection(capa_id, *, binding=None, engine=None)` 仅接受服务端绑定/引擎：单租户显式 public，多租户要求 business binding 并核验当前登记/generation；先设置独立 REPEATABLE READ READ ONLY，再读取固定元数据和同工厂 D4 验证子记录，计算完整稳定摘要，不加载正文/附件/ORM 全量状态。运行路径在最终交付前继续复核当前权限与全部来源。
 
+R4b D4 根因本地受控交付在默认关闭的独立 dev、真实回环 profile 下，以员工显式完整性声明、受控修订和 FMEA 来源验证为基础；插件与任务各自保存精确来源范围，并固定同一父 grant。固定只读接收器经过消息门禁读取单字段 RR/READ ONLY 有界脱敏候选，最终重验并提交独立 restricted receipt，未授模型或生产外发。用户显式的受限 restart 只保存控制坐标，从固定入口重新执行、重读当前事实并生成新 receipt；不恢复 Agent 记忆、不借旧 receipt 或扩大原授权。checkpoint/restart 与停止控制有提交前权限围栏，来源先核可见性；并发权限维护可能使旧 metadata 停止控制短暂返回 503。恢复对历史证明、修订和验证元数据逐行加锁，随历史线性增长，尚无大历史性能证据。范围、证据及资源保留状态见[本地交付指南](development/capa-d4-local-text-delivery.md)，恢复合同见[受限恢复规格](superpowers/specs/2026-11-13-agent-d4-restricted-restart-design.md)。
+
+独立元数据 Python SDK 已实现冻结 DTO/严格 codec/stdlib 同步 transport 与十操作 client，Python ≥3.11、零运行时依赖，不导入后端或访问数据库。服务端仍逐次授权，SDK 不缓存权限、解析 run token、自动重试/续租或执行消息；单调 deadline 覆盖整次操作，finish 可能已发送而缺完整确认时仅报告 unknown 并本地阻止重发。独立 unit/自有回环/实际 wheel 隔离安装以及 normal-policy 真实 HTTP fixture 已分阶段验收；Make/自动 CI 接线已双复核，冻结提交的完整本地组合门禁已通过；远端 CI 未执行，自有测试资源已在精确所有权及零其他client/测试进程核验后清理。SDK 不改变固定 worker/hash/profile/catalog 或生产准入，不开放正文附件外发、模型调用或 R5 业务写；见[SDK 交接与限制](development/agent-metadata-python-sdk.md)和[SDK README](../sdk/python/README.md)。
+
 ### 4.7 租户事务与独立迁移
 
 多租户业务会话在每次事务开始时重新获取共享事务锁，校验 `public.tenants` 的 active 状态、schema 与 generation，然后设置仅含租户 schema 和 `pg_catalog` 的 `SET LOCAL search_path`。跨 commit 的请求和后台任务沿用捕获的 generation；维护或重建后，旧绑定拒绝继续执行。单租户模式显式使用 public；多租户模式不回退 public。
 
 租户维护通过固定物理连接持有会话级排他锁；同一连接建立 attempt、递增 generation、执行独立 Alembic 链和原子 seed。维护事务验证 PID、attempt、generation 与锁所有权，不再申请业务共享锁。public 平台迁移与租户迁移分别记账，租户基线 `tv001_business_snapshot` 为冻结 DDL；激活前检查对象级 schema parity、seed 和隔离。
 
-普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv007_characteristic_refs`，在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv006 和冻结 snapshot 不改写。完整 v1–v6 租户在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列），不隐藏租户侧额外或部分对象。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv009_r4b_main_merge`，合并 `tv007_characteristic_refs` 与 `tv008_d4_recovery`。特性分支在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv005 和冻结 snapshot 不改写；tv006保留main已发布字节，与R4b仅说明首行不同（非DDL差异），两来源hash与语义等价另测。public 新增无DDL `20261114_r4b_main_merge` 汇合 main 特性与 R4b 恢复两head，保留全部已发布节点。完整旧租户（含两侧旧head）在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列），不隐藏租户侧额外或部分对象。tenant降级还要求每条父路径到达同一目标并在执行后核单版本；合并head仅可降共同祖先tv006及更早，拒绝拆分merge留下多head。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+
+### 4.8 主线旧单报告只读基础与集成边界
+
+`backend/app/services/capa_agent_capabilities.py` 持有 CAPA 规范只读声明；默认两能力仍为 `DENY`，summary 必须有明确目标。平台目录仅对服务端受限本地 profile 覆盖 summary 的审批下限，不接受调用方声明降权。无界工厂范围需要 `GROUP ADMIN`，无界产品线需要现场解析的显式行级豁免；豁免不代替工厂、业务模块或两层 grant。审批按能力 owner 模块权限及专门审批授权判定，同时排除执行者与请求发起人自批，`DENY` 不可批准。
+
+主线保留 `AgentReadTask` / `agent_read_tasks` 及 `read_task_service`，它们是独立旧单报告基础，不是 `AgentTask` / `AgentRun` 的替代或迁移版。旧服务仅支持 `TENANT_MODE=single`，创建 24 小时授权、逐次重查范围、撤销及审计，不新增 HTTP/插件/模型入口，也不开放 baseline 能力。公共投影函数沿用运行时的独立 RR/READ ONLY 连接；多租户读取必须有服务器捕获的有效业务绑定，缺绑定不回退 public。
+
+来源标签同时保留 owner、对象、能力、实际投影和版本；历史输出在当前业务 ACL 校验通过后，才生成四键来源授权集合，并在序列化前后再次复核。保存旧 receipt 或 digest 正确不能替代当前来源授权。原两条 public Agent 迁移链由 `20261102_agent_mainline_merge` 显式合并，独立 tenant `tv006_agent_read_tasks` 补齐旧表，不修改冻结基线。详情见[本轮实施计划](superpowers/plans/2026-11-02-agent-main-semantic-integration.md)。
 
 ---
 
@@ -363,3 +375,23 @@ D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封�
 | 无登录限速 | 登录接口无速率限制 |
 | Redis 未使用 | 已配置但未实现缓存逻辑 |
 | 前端权限守卫不全 | `/knowledge-graph`、`/change-impact`、MES 路由无 `requiredModule` 守卫 |
+
+---
+
+## 10. 分层验收与发布边界
+
+测试基础设施通过独立 SDK、backend、确定性 browser、frontend、显式 scanner/live 层执行；`make check`
+组合 SDK、backend 与前端检查，不隐式调用真实模型或扫描器。SDK 分 unit（Python socket audit）、自有 loopback 和实际 wheel 隔离安装三层，独立解释器与零运行时依赖，不要求数据库或 backend requirements；Python audit 不等于 OS 沙箱。backend 层先离线构建当前 SDK wheel，再经专用资源变量显式传给 normal-policy HTTP fixture，不复用旧构建回执。每层根据实际选择、JUnit/hook计数、
+退出码和过滤日志生成收据；显式gate的零选中、skip/xfail/xpass或缺失收据不得算成功。
+backend保留未配置依赖的实际skip，不把它们记为passed。
+
+公共迁移、pytest与受控fixture使用同一已核验PostgreSQL目标。核验涵盖容器完整ID、owner标签、
+镜像、绑定地址/端口及数据库身份；localhost规范为IPv4，IPv6显式使用::1，libpq额外路由参数拒绝，
+核验与实际两种驱动使用同一数字地址。known Python测试入口在应用导入前禁隐式dotenv；pure模式
+不做collection探库并拒绝项目支持的网络/数据库入口，不冒称任意进程的OS沙箱。
+
+普通/browser子进程无模型凭据或E2E_MODE回填；浏览器环境采用固定白名单并严格保留已验证的
+显式Chromium路径。scanner固定镜像、随机自有Compose项目，先导出实际证据再teardown并核余量。
+远端手动workflow仍要求main、冻结提交与显式管理员配置；本地门禁通过不代表远端已执行、生产已启用，
+也不授权main更新或部署。当前接入与新鲜结果见[CI集成交接](development/agent-ci-integration-gates.md)。
+现有SDK、正文/附件外发及业务写入的未实现部分仍按独立设计与阶段门禁推进。

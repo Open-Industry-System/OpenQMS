@@ -121,7 +121,8 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         return existing, getattr(capa, field) or ""
 
     # The parent guard already holds the row lock and returned fresh data.
-    current = getattr(capa, field) or ""
+    previous = getattr(capa, field)
+    current = previous or ""
     new_value = f"{current}\n{req.adopted_text}" if current else req.adopted_text
     setattr(capa, field, new_value)
     adoption = CapaAIAdoption(
@@ -143,6 +144,9 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     if field in capa_service.EMBEDDING_FIELDS:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
     try:
+        if field == "d4_root_cause" and new_value != previous:
+            from app.services.capa_d4_provenance import record_root_revision
+            await record_root_revision(db, report_id=capa.report_id, actor_id=actor_id, write_path="capa.adopt")
         await db.commit()
     except IntegrityError:
         # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）
@@ -160,7 +164,10 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     return adoption, new_value
 
 
-async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user):
+async def create_verification(db: AsyncSession, capa, req: VerificationCreate, user, *, request=None):
+    from app.services import capa_d4_provenance as provenance
+    if req.source_declaration is not None:
+        provenance.require_declaration_context(request)
     actor_id = user.user_id
     capa = await lock_current_material_write(
         db, capa, actor_id, PermissionLevel.EDIT
@@ -169,7 +176,16 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     is_verified = (conclusion == "passed")
     if is_verified:
         _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
-    normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
+    if req.source_declaration is None:
+        normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
+    else:
+        normalized_ref, _ = await provenance.validate_declared_source(db, report=capa, actor_id=actor_id,
+            source_ref=req.source_ref, conclusion=conclusion)
+        try:
+            await provenance.checked_current_revision(db, capa)
+        except provenance.SourceRevisionConflict:
+            await provenance.require_declared_source_visibility(db, capa, actor_id, normalized_ref)
+            raise
     if normalized_ref is not None:
         # Source locks may have waited after parent-lock admission.
         capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
@@ -224,8 +240,19 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     if source_changed:
         db.add(_linkage_audit(capa, capa.fmea_ref_id, normalized_ref["cause_node_id"],
                               _LINKAGE_SOURCE_D4, actor_id))
+    issued = False
+    if req.source_declaration is not None:
+        try:
+            await db.flush()
+            await db.refresh(rec)
+            issued = await provenance.issue_source_proof(db, report=capa, verification=rec,
+                actor_id=actor_id, declaration=req.source_declaration) is not None
+        except Exception:
+            await db.rollback()
+            raise
     await db.commit()
     await db.refresh(rec)
+    rec.source_proof_issued = issued
     return rec
 
 
@@ -339,6 +366,8 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         if rec.source_ref is not None:
             db.add(_linkage_audit(capa, capa.fmea_ref_id, rec.source_ref["cause_node_id"],
                                   _LINKAGE_SOURCE_D4, actor_id))
+    from app.services.capa_d4_provenance import invalidate_verification_proofs
+    await invalidate_verification_proofs(db, vid)
     await db.commit()
     await db.refresh(rec)
     return rec

@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from app.schemas.agent_d4_text import SourceDeclaration
+
 
 class AdoptRequest(BaseModel):
     d_step: Literal["d4", "d5"]
@@ -26,6 +28,7 @@ class VerificationCreate(BaseModel):
     conclusion: Literal["pending", "passed", "failed"] = "pending"
     evidence_attachments: list[dict] = []
     source_ref: dict | None = None
+    source_declaration: SourceDeclaration | None = None
 
     @field_validator("root_cause_text")
     @classmethod
@@ -60,6 +63,10 @@ class VerificationResponse(BaseModel):
     verified_at: datetime | None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
+
+
+class VerificationCreatedResponse(VerificationResponse):
+    source_proof_issued: bool = False
 
 
 class D7NodeActionCreate(BaseModel):

@@ -103,7 +103,9 @@ async def test_projection_is_exact_allowlist_with_canonical_digest(seeded_projec
 
 
 @pytest.mark.asyncio
-async def test_digest_changes_for_child_add_and_conclusion_without_parent_update(seeded_projection, sessionmaker):
+async def test_digest_changes_for_child_add_and_conclusion_without_parent_update(
+    seeded_projection, sessionmaker,
+):
     factory_id, capa_id, verification_id = seeded_projection
     before = await build_masked_d4_projection(capa_id)
     second_id = uuid.uuid4()
@@ -142,6 +144,19 @@ async def test_non_single_mode_without_binding_rejects_before_connection(monkeyp
     monkeypatch.setattr(settings, "TENANT_MODE", mode)
     with pytest.raises(TenantUnavailable, match="business tenant binding required"):
         await build_masked_d4_projection(uuid.uuid4())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["dev", "production"])
+async def test_non_single_mode_rejects_missing_binding_before_connection(monkeypatch, mode):
+    from app.core.tenant_transaction import TenantUnavailable
+
+    def forbidden_connect():
+        raise AssertionError("connection opened before tenant gate")
+
+    monkeypatch.setattr(settings, "TENANT_MODE", mode)
+    with pytest.raises(TenantUnavailable, match="business tenant binding required"):
+        await build_masked_d4_projection(uuid.uuid4(), engine=SimpleNamespace(connect=forbidden_connect))
 
 
 def test_verification_order_does_not_change_digest():

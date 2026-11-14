@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from typing import Mapping, Sequence
+from xml.etree import ElementTree
 
 from tests.ci.acceptance_config import validate_live_configuration
 from tests.ci.gate_results import (
@@ -34,6 +35,7 @@ ROOT = BACKEND_DIR.parent
 PROVIDER_KEYS = frozenset({'LLM_PROVIDER', 'LLM_API_KEY', 'LLM_MODEL', 'LLM_BASE_URL', 'LLM_TIMEOUT'})
 RESOURCE_KEYS = frozenset({
     'OPENQMS_TEST_RESOURCE_FILE', 'PG15_CONTAINER', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB',
+    'OPENQMS_SDK_WHEEL',
 })
 SCANNER_RUNTIME_KEYS = frozenset({
     'AGENT_ATTACHMENT_E2E_STORAGE_ROOT', 'AGENT_ATTACHMENT_E2E_CLAMAV_HOST',
@@ -52,6 +54,8 @@ DEFAULT_TARGETS = {
         'tests/capa/test_capa_outcome_api.py',
         'tests/e2e/test_capa_outcome_review_browser.py',
         'tests/e2e/test_capa_outcome_runner.py',
+        'tests/e2e/test_agent_sdk_process.py',
+        'tests/e2e/test_d4_text_local_process.py',
     ),
     'browser': ('tests/e2e/test_capa_outcome_review_browser.py',),
     'live': ('tests/e2e/test_capa_outcome_review_browser.py',),
@@ -93,6 +97,14 @@ def build_layer_environment(
     env.update({key: source[key] for key in RESOURCE_KEYS if source.get(key)})
     if layer == 'scanner':
         env.update({key: source[key] for key in SCANNER_RUNTIME_KEYS if source.get(key)})
+    # This flag is test authority, not browser/provider environment authority.
+    from tests.ci.python_isolation import PURE_FLAG, is_pure
+
+    if source.get(PURE_FLAG) == '1' or is_pure():
+        env[PURE_FLAG] = '1'
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    if source.get('PYTEST_DISABLE_PLUGIN_AUTOLOAD') == '1':
+        env['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
     env.update(TEST_DATABASE_URL=database_url, DATABASE_URL=database_url, PYTHONPATH=str(BACKEND_DIR))
     if source.get('SECRET_KEY'):
         env['SECRET_KEY'] = source['SECRET_KEY']
@@ -124,8 +136,10 @@ def build_layer_environment(
 def preflight_default_provider_settings(environment: Mapping[str, str], *, python: str | None = None) -> None:
     """Prove ordinary children cannot recover a provider from Settings or an env file."""
     probe = (
+        'from tests.ci.python_isolation import bootstrap; bootstrap(); '
         'from app.config import Settings; '
         'settings = Settings(); '
+        'assert settings.E2E_MODE is False; '
         'assert not settings.LLM_PROVIDER and not settings.LLM_API_KEY and not settings.EMBEDDING_API_KEY'
     )
     isolated = dict(environment)
@@ -140,7 +154,7 @@ def preflight_default_provider_settings(environment: Mapping[str, str], *, pytho
 
 def build_pytest_command(
     layer: str, targets: Sequence[str], junit: Path, hooks: Path, *, python: str | None = None,
-    pytest_args: Sequence[str] = (), pytest_entrypoint: Sequence[str] = ('-m', 'pytest'),
+    pytest_args: Sequence[str] = (), pytest_entrypoint: Sequence[str] = ('-m', 'tests.ci.pytest_bootstrap'),
 ) -> list[str]:
     """Build reusable pytest invocation for CAPA defaults or Task 5 target overrides."""
     if layer not in MARKS or not targets:
@@ -175,6 +189,81 @@ def _require_completed_layer(summary: Mapping[str, int], exit_code: int) -> None
         raise ValueError('layer did not complete successfully')
 
 
+SDK_PROCESS_TARGET = 'tests/e2e/test_agent_sdk_process.py'
+D4_TEXT_PROCESS_TARGET = 'tests/e2e/test_d4_text_local_process.py'
+D4_TEXT_PROCESS_NAMES = frozenset({
+    'test_fixed_text_receiver_normal_http',
+    'test_source_swap_never_widens_old_grants',
+    'test_declaration_denials_hide_node_existence[no-view]',
+    'test_declaration_denials_hide_node_existence[outside-line]',
+    'test_revision_and_verification_changes_fence_old_proofs',
+    'test_text_scope_idempotency_and_restart_do_not_regrant',
+    'test_blocked_task_source_request_replay',
+    'test_revoked_text_grant_does_not_block_stop_controls',
+    'test_first_claimable_text_profile_has_message_gate',
+    'test_text_message_sentinel_never_crosses_tcp',
+    'test_text_budget_and_response_faults_fail_closed',
+    'test_text_finish_commit_without_confirmation_is_unknown',
+    'test_text_current_authority_and_tenant_boundaries[cross-tenant]',
+    'test_text_current_authority_and_tenant_boundaries[generation]',
+    'test_text_current_authority_and_tenant_boundaries[fmea-acl]',
+    'test_text_current_authority_and_tenant_boundaries[role]',
+    'test_text_current_authority_and_tenant_boundaries[source-factory]',
+    'test_text_current_authority_and_tenant_boundaries[source-line]',
+    'test_text_current_authority_and_tenant_boundaries[paused-epoch]',
+    'test_text_current_authority_and_tenant_boundaries[policy]',
+    'test_text_current_authority_and_tenant_boundaries[permanent]',
+    'test_metadata_sdk_and_worker_contracts_remain_unchanged',
+})
+SDK_PROCESS_NAMES = frozenset({
+    'test_installed_sdk_claim_crosses_real_tcp',
+    'test_sdk_ten_operations_sources_idempotency_and_terminal_fence',
+    'test_sdk_report_pause_restart_and_old_receipt_fences',
+    'test_sdk_credentials_cannot_claim_in_another_real_tenant',
+    'test_sdk_admin_grant_withdrawal_and_permanent_revoke',
+} | {
+    f'test_sdk_finish_committed_but_confirmation_unknown[{fault}]'
+    for fault in ('oversize', 'bad_json', 'wrong_run', 'wrong_task', 'wrong_status',
+                  'schema', 'disconnect', 'server_error', 'timeout')
+})
+
+
+def _includes_sdk_process(targets: Sequence[str]) -> bool:
+    sdk = (BACKEND_DIR / SDK_PROCESS_TARGET).resolve()
+    return any(sdk.is_relative_to((BACKEND_DIR / target.split('::', 1)[0]).resolve()) for target in targets)
+
+
+def _includes_d4_text_process(targets: Sequence[str]) -> bool:
+    target = (BACKEND_DIR / D4_TEXT_PROCESS_TARGET).resolve()
+    return any(target.is_relative_to((BACKEND_DIR / item.split('::', 1)[0]).resolve()) for item in targets)
+
+
+def _require_d4_text_process_success(junit: Path, summary: Mapping[str, int]) -> None:
+    root = ElementTree.parse(junit).getroot()
+    cases = [case for case in root.iter('testcase')
+             if case.get('classname') == 'tests.e2e.test_d4_text_local_process']
+    if len(cases) != len(D4_TEXT_PROCESS_NAMES) or {case.get('name') for case in cases} != D4_TEXT_PROCESS_NAMES:
+        raise ValueError('mandatory D4 text process nodes are missing or duplicated')
+    if any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error')):
+        raise ValueError('mandatory D4 text process nodes did not all pass')
+    if summary['xpassed']:
+        raise ValueError('mandatory D4 text process run has XPASS')
+
+
+def _require_sdk_process_success(junit: Path, summary: Mapping[str, int]) -> None:
+    """Require the fixed SDK nodes, not merely fourteen unrelated passing cases."""
+    root = ElementTree.parse(junit).getroot()  # Already validated by summarize_junit.
+    cases = [case for case in root.iter('testcase')
+             if case.get('classname') == 'tests.e2e.test_agent_sdk_process']
+    if len(cases) != len(SDK_PROCESS_NAMES) or {case.get('name') for case in cases} != SDK_PROCESS_NAMES:
+        raise ValueError('mandatory SDK process nodes are missing or duplicated')
+    if any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error')):
+        raise ValueError('mandatory SDK process nodes did not all pass')
+    # JUnit renders non-strict XPASS as a pass; the existing hook supplies this count.
+    if summary['xpassed']:
+        raise ValueError('mandatory SDK process run has XPASS')
+
+
 def _write_receipt(path: Path, receipt: Mapping[str, object]) -> None:
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
     path.chmod(0o600)
@@ -200,7 +289,7 @@ def _progress_message(line: str) -> dict | None:
 def run_pytest_layer(
     *, layer: str, targets: Sequence[str], source: Mapping[str, str], database_url: str, artifacts: Path,
     live_configuration: Mapping[str, str] | None = None, python: str | None = None,
-    pytest_args: Sequence[str] = (), pytest_entrypoint: Sequence[str] = ('-m', 'pytest'),
+    pytest_args: Sequence[str] = (), pytest_entrypoint: Sequence[str] = ('-m', 'tests.ci.pytest_bootstrap'),
 ) -> dict:
     """Run one isolated pytest child and publish only its filtered log and receipt."""
     environment = build_layer_environment(source, database_url, layer, live_configuration)
@@ -260,6 +349,10 @@ def run_pytest_layer(
                     require_gate_success(summary, exit_code)
                 else:
                     _require_completed_layer(summary, exit_code)
+                    if _includes_sdk_process(targets):
+                        _require_sdk_process_success(private_junit, summary)
+                    if _includes_d4_text_process(targets):
+                        _require_d4_text_process_success(private_junit, summary)
             except ValueError:
                 pass
             else:

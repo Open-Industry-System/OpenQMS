@@ -219,6 +219,47 @@ def test_docs_check_covers_test_infrastructure_and_keeps_the_pr_exception() -> N
     assert 'docs/' in script and 'README.md' in script
 
 
+def test_sdk_matrix_is_secretless_dependency_free_and_uploads_only_safe_evidence() -> None:
+    job = _jobs(_load_workflow(AUTOMATIC_PATH))['sdk-checks']
+    assert job['strategy']['matrix']['python-version'] == ['3.11', '3.12', '3.13']
+    assert 'services' not in job and 'continue-on-error' not in job
+    _assert_disabled_provider_environment(job)
+    steps = _named_steps(job)
+    assert steps['Set up SDK Python']['with']['python-version'] == '${{ matrix.python-version }}'
+    install = steps['Install SDK developer tools']
+    assert install['run'].strip() == 'python -m pip install pytest setuptools==79.0.1'
+    check = steps['Run SDK checks']
+    assert 'make check-sdk SDK_PYTHON_BIN=python' in check['run']
+    for step in (install, check):
+        _assert_disabled_provider_environment(step)
+    for text in _strings(job):
+        assert 'requirements.txt' not in text and 'E2E_MODE' not in text
+    upload = steps['Upload SDK safe receipts']
+    assert upload['if'] == 'always()'
+    assert upload['with']['if-no-files-found'] == 'error'
+    assert upload['with']['name'] == 'sdk-checks-${{ matrix.python-version }}-evidence'
+    assert '**/*-receipt.json' in upload['with']['path']
+    assert '*.whl' not in upload['with']['path']
+
+
+def test_backend_explicitly_installs_pinned_sdk_build_tools_before_make() -> None:
+    job = _jobs(_load_workflow(AUTOMATIC_PATH))['backend-tests']
+    steps = _named_steps(job)
+    install = steps['Install SDK developer build tools']
+    assert install['run'].strip() == 'python -m pip install setuptools==79.0.1'
+    _assert_disabled_provider_environment(install)
+    check = steps['Run deterministic backend acceptance']
+    assert 'make check-backend SDK_PYTHON_BIN=python' in check['run']
+    assert _steps(job).index(install) < _steps(job).index(check)
+
+
+def test_docs_code_regex_includes_sdk_changes() -> None:
+    docs = _jobs(_load_workflow(AUTOMATIC_PATH))['docs-check']
+    script = _named_steps(docs)['Verify docs updated alongside code changes']['run']
+    code_line = next(line for line in script.splitlines() if line.strip().startswith('CODE='))
+    assert 'sdk/' in code_line
+
+
 def test_manual_workflow_is_main_only_fixed_choice_and_has_no_cancellation_policy() -> None:
     workflow = _load_workflow(ACCEPTANCE_PATH)
     assert workflow['on'] == {
@@ -298,15 +339,58 @@ def test_manual_summary_requires_requested_successful_receipts_and_marks_other_g
     assert 'continue-on-error' not in '\n'.join(_strings(summary))
 
 
+def _assert_safe_expressions(workflow: Mapping[str, object]) -> None:
+    checked = copy.deepcopy(workflow)
+    sdk = _jobs(checked).get('sdk-checks')
+    if sdk is not None:
+        assert sdk['strategy']['matrix'] == {'python-version': ['3.11', '3.12', '3.13']}
+        steps = _named_steps(sdk)
+        setup = steps['Set up SDK Python']
+        upload = steps['Upload SDK safe receipts']
+        assert setup['uses'] == 'actions/setup-python@v5'
+        assert upload['uses'] == 'actions/upload-artifact@v4'
+        assert setup['with']['python-version'] == '${{ matrix.python-version }}'
+        assert upload['with']['name'] == 'sdk-checks-${{ matrix.python-version }}-evidence'
+        # Exempt only these two validated fields, never the rest of the workflow.
+        setup['with']['python-version'] = '3.11'
+        upload['with']['name'] = 'sdk-checks-3.11-evidence'
+    serialized = '\n'.join(_strings(checked))
+    assert '/Users/' not in serialized
+    expressions = re.findall(r'\$\{\{\s*([^}]+?)\s*}}', serialized)
+    assert expressions
+    for expression in expressions:
+        assert expression.startswith(('github.', 'inputs.', 'needs.', 'steps.', 'vars.', 'secrets.', 'job.', 'env.')) or expression.startswith('toJson(github.')
+    assert '${{' not in re.sub(r'\$\{\{\s*(?:github\.|inputs\.|needs\.|steps\.|vars\.|secrets\.|job\.|env\.|toJson\(github\.)[^}]+}}', '', serialized)
+
+
+@pytest.mark.parametrize('job_name, expression', [
+    ('sdk-checks', '${{ matrix.foo }}'),
+    ('sdk-checks', '${{ matrix.python-version }}'),
+    ('backend-tests', '${{ matrix.python-version }}'),
+    ('backend-tests', "${{ fromJSON('unsafe') }}"),
+    ('backend-tests', '${{ malformed'),
+])
+def test_expression_contract_rejects_unapproved_locations_and_expressions(job_name, expression):
+    workflow = _load_workflow(AUTOMATIC_PATH)
+    workflow['jobs'][job_name]['env']['UNAPPROVED'] = expression
+    with pytest.raises(AssertionError):
+        _assert_safe_expressions(workflow)
+
+
+@pytest.mark.parametrize('matrix', [
+    {'python-version': ['3.11', '3.12']},
+    {'python-version': ['3.11', '3.12', '3.13'], 'foo': ['unsafe']},
+])
+def test_expression_contract_rejects_changed_sdk_matrix(matrix):
+    workflow = _load_workflow(AUTOMATIC_PATH)
+    workflow['jobs']['sdk-checks']['strategy']['matrix'] = matrix
+    with pytest.raises(AssertionError):
+        _assert_safe_expressions(workflow)
+
+
 def test_workflow_expressions_and_artifacts_remain_safe_and_sanitized() -> None:
     for workflow in (_load_workflow(AUTOMATIC_PATH), _load_workflow(ACCEPTANCE_PATH)):
-        serialized = '\n'.join(_strings(workflow))
-        assert '/Users/' not in serialized
-        expressions = re.findall(r'\$\{\{\s*([^}]+?)\s*}}', serialized)
-        assert expressions
-        for expression in expressions:
-            assert expression.startswith(('github.', 'inputs.', 'needs.', 'steps.', 'vars.', 'secrets.', 'job.', 'env.')) or expression.startswith('toJson(github.')
-        assert '${{' not in re.sub(r'\$\{\{\s*(?:github\.|inputs\.|needs\.|steps\.|vars\.|secrets\.|job\.|env\.|toJson\(github\.)[^}]+}}', '', serialized)
+        _assert_safe_expressions(workflow)
         for job in _jobs(workflow).values():
             for step in _steps(job):
                 if str(step.get('uses', '')).startswith('actions/upload-artifact@'):

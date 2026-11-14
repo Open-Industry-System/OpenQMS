@@ -35,17 +35,17 @@ async def require_business_namespace(db):
         raise PermissionError('Business namespace unavailable')
 
 
-async def current_capa_access(db, scope):
+async def current_module_access(db, scope, module, required_level):
     await require_business_namespace(db)
     with db.no_autoflush:
         identity = (await db.execute(select(User.factory_id, User.role_id, RoleDefinition.bypass_row_level_security)
             .join(RoleDefinition, User.role_id == RoleDefinition.id).where(User.user_id == scope.user.user_id,
                 User.is_active.is_(True), RoleDefinition.is_active.is_(True)))).one_or_none()
-        if identity is None: raise PermissionError('Current CAPA VIEW required')
+        if identity is None: raise PermissionError('Current module permission required')
         levels = dict((await db.execute(select(RolePermission.module, RolePermission.permission_level)
             .where(RolePermission.role_id == identity.role_id))).all())
-        if levels.get(Module.CAPA, PermissionLevel.NONE) < PermissionLevel.VIEW:
-            raise PermissionError('Current CAPA VIEW required')
+        if levels.get(module, PermissionLevel.NONE) < required_level:
+            raise PermissionError('Current module permission required')
         factory_ids = list((await db.scalars(select(UserFactory.factory_id).where(UserFactory.user_id == scope.user.user_id))).all())
         line_codes = list((await db.scalars(select(UserProductLine.product_line_code).where(UserProductLine.user_id == scope.user.user_id))).all())
     user = SimpleNamespace(factory_id=identity.factory_id,
@@ -53,6 +53,10 @@ async def current_capa_access(db, scope):
     factories = resolve_factory_scope(user, factory_ids, levels.get(Module.GROUP, PermissionLevel.NONE) >= PermissionLevel.ADMIN)
     lines = resolve_product_line_scope(user, line_codes, factories)
     return levels, factories, lines
+
+
+async def current_capa_access(db, scope):
+    return await current_module_access(db, scope, Module.CAPA, PermissionLevel.VIEW)
 
 
 def capa_target_filters(query, factories, lines):

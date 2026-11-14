@@ -233,7 +233,7 @@ def test_task_grant_derivation_preserves_fresh_explicit_all_lines_scope():
     manifest = PluginManifest(protocol_versions=["1"], required_capabilities=[attempt.spec.id])
     capa = SimpleNamespace(factory_id=attempt.factory_id, report_id=attempt.object_id,
                            product_line_code=attempt.product_line_code)
-    plugin = SimpleNamespace(capability_id=attempt.spec.id, enabled=True,
+    plugin = SimpleNamespace(grant_id=uuid4(), capability_id=attempt.spec.id, enabled=True,
         factory_ids=[str(attempt.factory_id)], object_ids=[str(attempt.object_id)],
         product_line_codes=[attempt.product_line_code], expires_at=None)
     trial = SimpleNamespace(profile="local_metadata_v1", expires_at=attempt.now + timedelta(hours=1))

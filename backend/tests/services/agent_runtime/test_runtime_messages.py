@@ -455,3 +455,76 @@ async def test_final_guard_rechecks_revocation_after_message_read(delivery, oper
                 async with owned.engine.begin() as conn:
                     await conn.execute(text("UPDATE public.tenants SET generation=:generation WHERE id=:id"), {"id": owned.binding.tenant_id, "generation": owned.binding.generation})
     assert await snapshot(owned) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['first', 'retry', 'reclaim', 'history', 'ack'])
+async def test_future_text_profile_blocks_nonliteral_before_message_effects(delivery, monkeypatch, case):
+    """Exercise the service seam, not actual admission of the unimplemented profile."""
+    from types import SimpleNamespace
+    from app.services.agent_runtime.message_delivery_policy import TEXT_PROFILE
+    from app.services.agent_runtime import runtime_messages
+
+    owned = delivery
+    await append(owned, 'sensitive-message-sentinel')
+    batch = None
+    if case != 'first':
+        batch = await claim(owned)
+    if case == 'history':
+        await ack(owned, batch.batch_id, 1)
+    if case == 'reclaim':
+        async with owned.factory(binding=owned.binding) as db:
+            await db.execute(update(AgentRun).where(AgentRun.run_id == owned.run_id).values(
+                lease_expires_at=datetime.now(UTC) - timedelta(seconds=1)))
+            await db.commit()
+        async with owned.factory(binding=owned.binding) as db:
+            renewed = await run_dispatch.claim_run(db, owned.binding, owned.plugin_id, owned.secret, 'text-reclaim')
+        owned.token = renewed.token
+
+    async def observed():
+        state = await snapshot(owned)
+        async with owned.factory(binding=owned.binding) as db:
+            count = await db.scalar(select(func.count()).select_from(AuditLog).where(
+                AuditLog.action.in_(['CLAIM_AGENT_TASK_MESSAGES', 'ACK_AGENT_TASK_MESSAGES'])))
+        return state, count
+
+    before = await observed()
+    final = runtime_messages._final_authority
+    async def text_admission(db, identity):
+        current = await final(db, identity)
+        return replace(current, trial=SimpleNamespace(profile=TEXT_PROFILE))
+    monkeypatch.setattr(runtime_messages, '_final_authority', text_admission)
+    with pytest.raises(PermissionError, match='^Message unavailable$') as error:
+        if case == 'ack':
+            await ack(owned, batch.batch_id, 1)
+        elif case == 'history':
+            async with owned.factory(binding=owned.binding) as db:
+                identity = await runtime_access.verify_runtime_identity(db, owned.token, owned.binding)
+                await runtime_messages.get_message_history(db, identity)
+        else:
+            await claim(owned)
+    assert 'sensitive-message-sentinel' not in str(error.value)
+    assert await observed() == before
+
+
+@pytest.mark.asyncio
+async def test_future_text_profile_delivers_literal_through_claim_ack_and_history(delivery, monkeypatch):
+    """A test seam supplies the future profile; actual admission remains closed."""
+    from types import SimpleNamespace
+    from app.services.agent_runtime.message_delivery_policy import START_MESSAGE, TEXT_PROFILE
+    from app.services.agent_runtime import runtime_messages
+
+    owned = delivery
+    await append(owned, START_MESSAGE)
+    final = runtime_messages._final_authority
+    async def text_admission(db, identity):
+        current = await final(db, identity)
+        return replace(current, trial=SimpleNamespace(profile=TEXT_PROFILE))
+    monkeypatch.setattr(runtime_messages, '_final_authority', text_admission)
+    batch = await claim(owned)
+    assert [message.content for message in batch.messages] == [START_MESSAGE]
+    assert (await ack(owned, batch.batch_id, 1)).accepted_sequence == 1
+    async with owned.factory(binding=owned.binding) as db:
+        identity = await runtime_access.verify_runtime_identity(db, owned.token, owned.binding)
+        page = await runtime_messages.get_message_history(db, identity)
+    assert [message.content for message in page.messages] == [START_MESSAGE]

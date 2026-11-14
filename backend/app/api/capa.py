@@ -4,6 +4,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,7 +67,7 @@ from app.schemas.capa_ppt import PptExportDetailResponse
 from app.schemas.capa_verification import (
     AdoptRequest, AdoptResponse, D7AutoFillRequest, D7AutoFillResponse,
     D7NodeActionCreate, D7NodeActionResponse,
-    VerificationCreate, VerificationResponse, VerificationUpdate,
+    VerificationCreate, VerificationCreatedResponse, VerificationResponse, VerificationUpdate,
 )
 from app.schemas.lessons_learned import LessonsLearnedRequest, LessonsLearnedResponse
 from app.schemas.recommendation_stage import StageRunSchema
@@ -77,6 +79,7 @@ from app.services import capa_doc_gate_service
 from app.services import capa_ppt_review_service, capa_ppt_service, capa_service
 from app.services import capa_scar_service
 from app.services import capa_verification_service
+from app.services.agent.permissions.derived_sources import SourceRevisionConflict, SourceUnavailable
 from app.models.supplier import SupplierSCAR
 from app.services.capa_d7_action_service import ConflictError
 from app.services.capa_current_access import current_capa_actor_target
@@ -87,7 +90,32 @@ from app.services.agent import provider_adapter
 from app.state_machines.eightd_state import EightDState, _linear_next_safe
 from app.utils.pptx import pptx_response
 
-router = APIRouter(prefix="/api/capa", tags=["capa"])
+
+class VerificationDeclarationRoute(APIRoute):
+    """Only the new declaration branch suppresses validation input echoes."""
+    def get_route_handler(self):
+        original = super().get_route_handler()
+        if self.endpoint.__name__ != 'create_verification_ep':
+            return original
+
+        async def handle(request):
+            try:
+                return await original(request)
+            except RequestValidationError as exc:
+                if isinstance(exc.body, dict) and 'source_declaration' in exc.body:
+                    # Pydantic still owns declaration/request structure (422).
+                    # Only a well-formed, present declaration with source_ref's
+                    # object shape as the sole error follows the new 400 table.
+                    errors = exc.errors()
+                    if (exc.body['source_declaration'] is not None and errors
+                            and all(error['loc'] == ('body', 'source_ref') for error in errors)):
+                        raise HTTPException(status_code=400, detail='Invalid source_ref') from None
+                    raise HTTPException(status_code=422, detail='Invalid verification declaration request') from None
+                raise
+        return handle
+
+
+router = APIRouter(prefix="/api/capa", tags=["capa"], route_class=VerificationDeclarationRoute)
 
 D4_RETRY_THRESHOLD = 3
 
@@ -1122,9 +1150,9 @@ async def adopt_recommendation_ep(
     return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
 
 
-@router.post("/{report_id}/root-cause-verifications", response_model=VerificationResponse)
+@router.post("/{report_id}/root-cause-verifications", response_model=VerificationCreatedResponse)
 async def create_verification_ep(
-    report_id: uuid.UUID, req: VerificationCreate,
+    report_id: uuid.UUID, req: VerificationCreate, request: Request,
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
 ):
     level = await get_user_permission(scope.user, Module.CAPA, db)
@@ -1136,14 +1164,18 @@ async def create_verification_ep(
     check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
     try:
-        rec = await capa_verification_service.create_verification(db, capa, req, scope.user)
+        rec = await capa_verification_service.create_verification(db, capa, req, scope.user, request=request)
+    except SourceRevisionConflict:
+        raise HTTPException(status_code=409, detail="Source revision conflict") from None
+    except SourceUnavailable:
+        raise HTTPException(status_code=403, detail="Source unavailable") from None
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except LookupError:
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return VerificationResponse.model_validate(rec)
+    return VerificationCreatedResponse.model_validate(rec)
 
 
 @router.get("/{report_id}/root-cause-verifications", response_model=list[VerificationResponse])

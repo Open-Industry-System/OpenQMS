@@ -181,11 +181,49 @@ async def set_plugin_enabled(db: AsyncSession, actor: User, installation_id: UUI
     return plugin
 
 
-async def _require_grant_enableable(db, plugin, grant) -> None:
+async def _require_grant_enableable(db, plugin, grant, actor=None) -> None:
     baseline = get_capability(grant.capability_id)
     if baseline is not None and baseline.kind == "context" and baseline.approval_floor == ApprovalFloor.DIRECT:
         return
     from app.models.capa import CAPAEightD
+    from app.services.agent_runtime.deployment_profiles import TEXT_CAPABILITY, select_runtime_admission
+    if grant.capability_id == TEXT_CAPABILITY:
+        from types import SimpleNamespace
+        from app.models.agent_derived_source import AgentPluginDerivedSourceScope
+        from app.schemas.agent_d4_text import DerivedSourceScopeInput
+        from app.services.agent_runtime.derived_source_grants import validate_explicit_source, scope_from_row, explicit_source_scope
+        from app.services.agent_runtime.local_d4_text_policy import EMPTY_TEXT_POLICY
+        from app.services.agent_runtime.task_service import _current_access, _target
+        if actor is None or not grant.object_ids or len(grant.object_ids) != 1 or not grant.factory_ids or not grant.product_line_codes:
+            raise ValueError('Capability cannot be enabled')
+        source = getattr(grant, 'derived_source_scope', None)
+        if source is None and getattr(grant, 'grant_id', None) is not None:
+            row = await db.scalar(select(AgentPluginDerivedSourceScope).where(
+                AgentPluginDerivedSourceScope.plugin_grant_id == grant.grant_id)
+                .execution_options(populate_existing=True))
+            if row is not None:
+                source = DerivedSourceScopeInput(target_report_id=row.target_report_id,
+                    fmea_id=row.fmea_id, cause_node_id=row.cause_node_id)
+                if scope_from_row(row) != explicit_source_scope(source.target_report_id, source):
+                    raise ValueError('Capability cannot be enabled')
+        if source is None or UUID(str(grant.object_ids[0])) != source.target_report_id:
+            raise ValueError('Capability cannot be enabled')
+        scope = SimpleNamespace(user=actor)
+        _, factories, lines = await _current_access(db, scope)
+        target = await _target(db, source.target_report_id, factories, lines)
+        if (str(target.factory_id) not in {str(v) for v in grant.factory_ids}
+                or target.product_line_code not in grant.product_line_codes):
+            raise ValueError('Capability cannot be enabled')
+        await validate_explicit_source(db, scope, target, source)
+        if grant.expires_at is None or grant.expires_at.utcoffset() is None or grant.expires_at <= datetime.now(UTC):
+            raise ValueError('Capability cannot be enabled')
+        policy = db.info.get('agent_d4_text_policy', EMPTY_TEXT_POLICY)
+        admitted = [select_runtime_admission(db, plugin, row.executor_user_id, target)
+                    for row in policy.entries]
+        deadlines = [entry.expires_at for entry in admitted if entry is not None and entry.profile == 'local_d4_root_cause_text_v1']
+        if not deadlines or grant.expires_at > min(deadlines):
+            raise ValueError('Capability cannot be enabled')
+        return
     from app.services.agent_runtime.trial_policy import EMPTY_POLICY, TrialPolicy, select_admission
     policy = db.info.get("agent_local_trial_policy", EMPTY_POLICY)
     if (grant.capability_id != "capa.d4.summary.masked.v1" or not isinstance(policy, TrialPolicy)
@@ -195,8 +233,8 @@ async def _require_grant_enableable(db, plugin, grant) -> None:
         raise ValueError("Capability cannot be enabled")
     ids = {UUID(str(value)) for value in grant.object_ids}
     with db.no_autoflush:
-        targets = list((await db.scalars(select(CAPAEightD).where(CAPAEightD.report_id.in_(ids))
-            .execution_options(populate_existing=True))).all())
+        targets = list((await db.execute(select(CAPAEightD.report_id, CAPAEightD.factory_id,
+            CAPAEightD.product_line_code).where(CAPAEightD.report_id.in_(ids)))).all())
     if (len(targets) != len(ids) or {str(target.factory_id) for target in targets}
             != {str(value) for value in grant.factory_ids}
             or {target.product_line_code for target in targets} != set(grant.product_line_codes)):
@@ -236,19 +274,49 @@ async def list_plugin_grants(db: AsyncSession, actor: User, installation_id: UUI
 
 async def create_plugin_grant(db: AsyncSession, actor: User, installation_id: UUID,
                               request: PluginGrantCreate) -> AgentPluginGrant:
+    from types import SimpleNamespace
+    from app.models.agent_derived_source import AgentPluginDerivedSourceScope
+    from app.services.agent_runtime.deployment_profiles import TEXT_CAPABILITY
+    from app.services.agent_runtime.derived_source_grants import validate_explicit_source
+    from app.services.agent_runtime.task_service import _current_access, _target
     await _require_current_admin(db, actor)
     plugin = await _plugin(db, installation_id, lock=True)
     await _require_current_admin(db, actor)
+    declared = None
+    if request.derived_source_scope is not None:
+        if request.capability_id != TEXT_CAPABILITY:
+            raise ValueError('Source scope unsupported')
+        actor_scope = SimpleNamespace(user=actor)
+        _, factories, lines = await _current_access(db, actor_scope)
+        target = await _target(db, request.derived_source_scope.target_report_id, factories, lines)
+        if (request.object_ids is None or target.report_id not in request.object_ids
+                or target.factory_id not in request.factory_ids
+                or request.product_line_codes is None or target.product_line_code not in request.product_line_codes):
+            raise ValueError('Source scope does not match grant')
+        declared = await validate_explicit_source(db, actor_scope, target, request.derived_source_scope)
+    elif request.capability_id == TEXT_CAPABILITY and request.enabled:
+        raise ValueError('Source scope required')
     if request.enabled:
-        await _require_grant_enableable(db, plugin, request)
+        await _require_grant_enableable(db, plugin, request, actor)
     grant = AgentPluginGrant(grant_id=uuid4(), installation_id=installation_id,
         capability_id=request.capability_id, factory_ids=[str(value) for value in request.factory_ids],
         product_line_codes=request.product_line_codes,
         object_ids=None if request.object_ids is None else [str(value) for value in request.object_ids],
         expires_at=request.expires_at, enabled=request.enabled, granted_by=actor.user_id)
     db.add(grant)
+    await db.flush()
+    if declared is not None:
+        db.add(AgentPluginDerivedSourceScope(plugin_grant_id=grant.grant_id,
+            target_report_id=declared.target_report_id, derived_projection_id=declared.derived_projection_id,
+            source_module=declared.source_module.value, source_projection_id=declared.source_projection_id,
+            fmea_id=declared.fmea_id, cause_node_id=declared.cause_node_id, actor_id=actor.user_id))
     _grant_audit(db, actor, grant, "CREATE_PLUGIN_GRANT")
     await db.flush()
+    if declared is not None:
+        await _require_current_admin(db, actor)
+        await validate_explicit_source(db, actor_scope, target, request.derived_source_scope)
+        if request.enabled:
+            await _require_grant_enableable(db, plugin, grant, actor)
     return grant
 
 
@@ -267,8 +335,11 @@ async def set_plugin_grant_enabled(db: AsyncSession, actor: User, installation_i
     if type(enabled) is not bool:
         raise ValueError("enabled must be boolean")
     if enabled:
-        await _require_grant_enableable(db, plugin, grant)
+        await _require_grant_enableable(db, plugin, grant, actor)
     grant.enabled = enabled
     _grant_audit(db, actor, grant, "SET_PLUGIN_GRANT_ENABLED")
     await db.flush()
+    if enabled:
+        await _require_current_admin(db, actor)
+        await _require_grant_enableable(db, plugin, grant, actor)
     return grant

@@ -10,13 +10,11 @@ os.environ['TEST_DATABASE_URL'] = (
 )
 
 
-def reject_network(event, args):
-    if event in {'socket.connect', 'socket.getaddrinfo', 'socket.sendto'}:
-        raise RuntimeError('pure_test_network_forbidden')
-
-
-sys.addaudithook(reject_network)
+os.environ['OPENQMS_CI_PURE'] = '1'
 os.chdir(ROOT / 'backend')
 sys.path.insert(0, str(ROOT / 'backend'))
+from tests.ci.python_isolation import bootstrap
+
+bootstrap()
 import pytest
 raise SystemExit(pytest.main(sys.argv[1:]))

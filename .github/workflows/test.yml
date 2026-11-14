@@ -14,6 +14,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sdk-checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/sdk-checks
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up SDK Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install SDK developer tools
+        env:
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+        run: python -m pip install pytest setuptools==79.0.1
+
+      - name: Run SDK checks
+        env:
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+        run: make check-sdk SDK_PYTHON_BIN=python
+
+      - name: Upload SDK safe receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-checks-${{ matrix.python-version }}-evidence
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/sdk/**/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/sdk/**/*-filtered.log
+          if-no-files-found: error
+
   backend-tests:
     runs-on: ubuntu-latest
     env:
@@ -58,6 +108,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Developer build tool, not a backend or SDK runtime dependency.
+      - name: Install SDK developer build tools
+        env:
+          LLM_PROVIDER: ""
+          LLM_API_KEY: ""
+          LLM_BASE_URL: ""
+          EMBEDDING_PROVIDER: ""
+          EMBEDDING_API_KEY: ""
+        run: python -m pip install setuptools==79.0.1
+
       - name: Prepare verified test database
         env:
           SECRET_KEY: test-secret-key-for-ci-only
@@ -96,7 +156,7 @@ jobs:
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           GITHUB_JOB: backend-tests
           TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
-        run: make check-backend
+        run: make check-backend SDK_PYTHON_BIN=python
 
       - name: D8 doc-gate preflight (against migrated test DB)
         # A clean migrated CI DB must report no broken CP lineage. Deployment
@@ -341,7 +401,7 @@ jobs:
           echo "$CHANGED"
           echo "---"
 
-          CODE=$(echo "$CHANGED" | grep -E '^(backend/app/|frontend/src/|docker-compose\.ya?ml$|(^|.*/)Dockerfile($|\..*)|\.github/workflows/|Makefile$|backend/tests/|frontend/e2e/|frontend/.*playwright.*\.ts$)' || true)
+          CODE=$(echo "$CHANGED" | grep -E '^(backend/app/|frontend/src/|docker-compose\.ya?ml$|(^|.*/)Dockerfile($|\..*)|\.github/workflows/|Makefile$|backend/tests/|sdk/|frontend/e2e/|frontend/.*playwright.*\.ts$)' || true)
           DOCS=$(echo "$CHANGED" | grep -E '^(docs/|AGENTS\.md$|README\.md$|.*/README\.md$)' || true)
 
           if [ -n "$CODE" ] && [ -z "$DOCS" ]; then
