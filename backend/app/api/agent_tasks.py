@@ -201,3 +201,28 @@ async def withdraw_d5_checkpoint_proposals(task_id: UUID, checkpoint_id: UUID, b
     result = await task_controls.withdraw_d5_after_checkpoint(db, scope, task_id, checkpoint_id,
         proposal_ids=body.proposal_ids, operation_key=body.operation_key, reason=body.reason)
     return JSONResponse(jsonable_encoder(result), headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/{task_id}/launch')
+async def launch_model_task(task_id: UUID, scope: RequestScope=Depends(get_request_scope), db: AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime import r5_executor
+    try:
+        pilot = db.info.get('r5_controlled_pilot')
+        if not isinstance(pilot, r5_executor.ControlledPilot):
+            raise PermissionError('Controlled executor unavailable')
+        result = await r5_executor.managed_run(db,scope,task_id,platform_origin=f'http://127.0.0.1:{pilot.platform_port}')
+        return JSONResponse(jsonable_encoder(result), headers={'Cache-Control':'no-store'})
+    except (PermissionError, LookupError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=403,detail='Model launch unavailable',headers={'Cache-Control':'no-store'}) from None
+
+
+@router.get('/{task_id}/workflow')
+async def model_workflow_status(task_id: UUID, scope: RequestScope=Depends(get_request_scope), db: AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime import model_workflow
+    try:
+        result=await model_workflow.status(db,scope,task_id)
+        return JSONResponse(jsonable_encoder(result),headers={'Cache-Control':'no-store'})
+    except (PermissionError, LookupError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=403,detail='Model workflow unavailable',headers={'Cache-Control':'no-store'}) from None

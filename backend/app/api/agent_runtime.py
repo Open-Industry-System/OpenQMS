@@ -176,3 +176,19 @@ async def model_inference(body: model_egress.InferenceRequest, identity=Depends(
     except (PermissionError, LookupError, ValueError):
         await db.rollback()
         raise HTTPException(status_code=403, detail='Model deployment unavailable') from None
+
+
+from app.services.agent_runtime import model_workflow
+
+
+@router.post('/model/tools')
+async def model_tool(body: model_workflow.ToolRequest, identity=Depends(get_runtime_identity), db: AsyncSession=Depends(get_db)):
+    try:
+        result = await model_workflow.execute_tool(db, identity, body)
+        return JSONResponse(jsonable_encoder(result), headers={'Cache-Control':'no-store'})
+    except (PermissionError, LookupError, ValueError, ReviewedContentLocked):
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='Model tool unavailable', headers={'Cache-Control':'no-store'}) from None
+    except (DBAPIError, OSError):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='Retry original issued tool ID', headers={'Cache-Control':'no-store'}) from None

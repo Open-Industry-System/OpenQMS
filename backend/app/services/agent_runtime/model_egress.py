@@ -37,10 +37,11 @@ class DeploymentCreate(BaseModel):
 
 
 class InferenceRequest(BaseModel):
-    # T7 may add bounded tool IDs. Caller body/messages/source coordinates never
-    # cross this API. The current source is derived from the task grant.
+    # Only operation/turn cursors cross this API. Sources and conversation
+    # always come from current server-owned task/run state.
     model_config = ConfigDict(extra='forbid', frozen=True)
-    operation: str = 'propose_d5'
+    operation: Literal['propose_d5', 'workflow'] = 'propose_d5'
+    turn: int = Field(default=0, ge=0, le=8, strict=True)
 
 
 def _namespace(db):
@@ -218,16 +219,29 @@ async def infer(db, identity, request):
     from app.services import capa_d5_proposals
     from app.services.agent import provider_adapter
     request = InferenceRequest.model_validate(request)
-    if request.operation != 'propose_d5': raise ValueError(UNAVAILABLE)
+    if request.operation == 'workflow':
+        from app.services.agent_runtime import model_workflow
+        return await model_workflow.next_turn(db, identity, request.turn)
     current = await runtime_access.lock_runtime_identity(db, identity)
     d5_commands.require_r5_admission(current)
-    row = await task_deployment(db, current.task, lock=True)
     # The only context coordinate comes from CURRENT canonical task authority.
     authority = await runtime_access.authorize_task(db, current.task, current.installation)
     source = authority.current_source
-    if source is None: raise PermissionError(UNAVAILABLE)
+    if source is None or not authority.basis_available: raise PermissionError(UNAVAILABLE)
     snapshot = await capa_d5_proposals.build_d5_context(db, current, source_queries=[
         dict(projection_id=source.source_projection_id, fmea_id=str(source.fmea_id), node_id=source.cause_node_id)])
+    return await send_context(db, current, snapshot=snapshot, messages=[
+        {'role':'system','content':'Propose a D5 corrective measure using only the supplied evidence.'},
+        {'role':'user','content':json.dumps(snapshot.context, ensure_ascii=False)}], tools=[])
+
+
+async def send_context(db, identity, *, snapshot, messages, tools):
+    from app.services.agent_runtime import runtime_access, d5_commands
+    from app.services import capa_d5_proposals
+    from app.services.agent import provider_adapter
+    current = await runtime_access.lock_runtime_identity(db, identity)
+    d5_commands.require_r5_admission(current)
+    row = await task_deployment(db, current.task, lock=True)
     resolver = db.info.get('r5_credential_resolver')
     if not callable(resolver): raise PermissionError(UNAVAILABLE)
     secret = resolver(row.credential_ref)
@@ -237,23 +251,25 @@ async def infer(db, identity, request):
     try:
         # The durable control attempt is separate from usable delivered basis.
         # A crash/unknown response can leave an attempt, never a source grant.
-        await capa_d5_proposals.validate_d5_context_for_release(db, current, snapshot=snapshot)
+        if snapshot is not None:
+            await capa_d5_proposals.validate_d5_context_for_release(db, current, snapshot=snapshot)
         attempt_id = uuid4()
         deployment_id, version = row.deployment_id, row.version
         actor_id, factory_id, run_id, task_id = current.task.executor_user_id, current.task.factory_id, current.run.run_id, current.task.task_id
         db.add(AuditLog(log_id=attempt_id, table_name='agent_model_deployments', record_id=deployment_id,
             action='MODEL_EGRESS_ATTEMPT', operated_by=actor_id, factory_id=factory_id, correlation_id=run_id,
             changed_fields=dict(task_id=str(task_id), run_id=str(run_id), deployment_id=str(deployment_id),
-                version=version, snapshot_hmac=snapshot.signature)))
+                version=version, snapshot_hmac=None if snapshot is None else snapshot.signature)))
         await db.commit()
         # Commit released locks: reacquire and recheck the same snapshot and
         # selected recipient immediately before actual transport sends anything.
-        current, _, _ = await capa_d5_proposals.validate_d5_context_for_release(db, current, snapshot=snapshot)
+        current = await runtime_access.lock_runtime_identity(db, current)
+        if snapshot is not None:
+            current, _, _ = await capa_d5_proposals.validate_d5_context_for_release(db, current, snapshot=snapshot)
         await task_deployment(db, current.task, lock=True)
-        turn = await provider_adapter.chat_with_tools(client, [
-            {'role':'system','content':'Propose a D5 corrective measure using only the supplied evidence.'},
-            {'role':'user','content':json.dumps(snapshot.context, ensure_ascii=False)}], [])
-        await capa_d5_proposals.record_delivered_basis(db, current, snapshot=snapshot)
+        turn = await provider_adapter.chat_with_tools(client, messages, tools)
+        if snapshot is not None:
+            await capa_d5_proposals.record_delivered_basis(db, current, snapshot=snapshot)
         db.add(AuditLog(table_name='agent_model_deployments', record_id=deployment_id,
             action='MODEL_EGRESS_COMPLETED', operated_by=actor_id, factory_id=factory_id, correlation_id=attempt_id,
             changed_fields=dict(task_id=str(task_id), run_id=str(run_id), deployment_id=str(deployment_id), version=version)))

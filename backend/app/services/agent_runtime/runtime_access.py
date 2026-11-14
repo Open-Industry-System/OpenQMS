@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import Module
 from app.core.deps import RequestScope
 from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.tenant_transaction import TenantBinding
@@ -38,6 +39,7 @@ class TaskAuthority:
     trial: TrialAdmission | None
     current_source: object | None = None
     source_grant_pairs: tuple = ()
+    basis_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -101,15 +103,39 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
     with db.no_autoflush:
         plugin_sources = list((await db.scalars(select(AgentPluginDerivedSourceScope).where(
             AgentPluginDerivedSourceScope.plugin_grant_id.in_([row.grant_id for row in plugins]))
-            .execution_options(populate_existing=True))).all()) if current_source else []
+            .execution_options(populate_existing=True))).all()) if current_source or r5 else []
         task_sources = list((await db.scalars(select(AgentTaskDerivedSourceScope).where(
             AgentTaskDerivedSourceScope.task_grant_id.in_([row.grant_id for row in tasks]))
-            .execution_options(populate_existing=True))).all()) if current_source else []
+            .execution_options(populate_existing=True))).all()) if current_source or r5 else []
     with db.no_autoflush:
         parents = dict((await db.execute(select(D4TaskParentGrant.task_grant_id, D4TaskParentGrant.plugin_grant_id)
-            .where(D4TaskParentGrant.task_grant_id.in_([row.grant_id for row in tasks])))).all()) if current_source else {}
+            .where(D4TaskParentGrant.task_grant_id.in_([row.grant_id for row in tasks])))).all()) if current_source or r5 else {}
     p_scopes = {row.plugin_grant_id: scope_from_row(row) for row in plugin_sources}
     t_scopes = {row.task_grant_id: scope_from_row(row) for row in task_sources}
+    basis_available = current_source is not None
+    if r5 and current_source is None:
+        # R5 chat can survive an absent/obsolete proof, but source permissions
+        # cannot. Only original typed task coordinates and current metadata ACL
+        # are considered here; no quality/node body is read or basis minted.
+        from app.services.fmea_agent_sources import visible_fmea_source
+        from app.services.capa_agent_capabilities import CAPA_D4_ROOT_CAUSE_TEXT_CONTRACT
+        from app.services.agent.permissions.derived_sources import SourceUnavailable
+        contract = CAPA_D4_ROOT_CAUSE_TEXT_CONTRACT
+        candidates = {source for source in t_scopes.values() if source is not None
+            and source.target_report_id == task.target_capa_id
+            and source.fmea_id == target.fmea_ref_id
+            and source.source_module == Module.FMEA
+            and source.derived_projection_id == contract.capability_id
+            and source.source_projection_id == contract.source_projection_id}
+        if len(candidates) == 1:
+            candidate = candidates.pop()
+            try:
+                visible = await visible_fmea_source(db, placeholder, candidate.fmea_id)
+            except SourceUnavailable:
+                visible = None
+            if (visible is not None and visible.factory_id == target.factory_id
+                    and visible.product_line_code == target.product_line_code):
+                current_source = candidate
     decisions = []
     source_grant_pairs = []
     required = set(manifest.required_capabilities)
@@ -151,7 +177,7 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
     # target reread may see a different product line without reauthorizing it.
     return TaskAuthority(RequestScope(factories, target.factory_id, lines, user),
         tuple(decisions), target.product_line_code, trial, current_source,
-        tuple(sorted(source_grant_pairs, key=lambda pair: (str(pair[0]), str(pair[1])))))
+        tuple(sorted(source_grant_pairs, key=lambda pair: (str(pair[0]), str(pair[1])))), basis_available)
 
 
 async def verify_runtime_identity(db: AsyncSession, token: str,

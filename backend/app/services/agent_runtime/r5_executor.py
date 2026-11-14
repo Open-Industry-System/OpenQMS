@@ -124,7 +124,7 @@ def require_managed_claim(db):
         raise PermissionError('Controlled executor required')
 
 
-async def managed_run(db, scope, task_id, *, platform_origin):
+async def _managed_run(db, scope, task_id, *, platform_origin):
     """Employee-triggered platform launch. The run token is never returned.
 
     T7 supplies the approved artifact loop. No remote claim credential can
@@ -136,6 +136,7 @@ async def managed_run(db, scope, task_id, *, platform_origin):
     from app.services.agent_runtime import task_service, model_egress, run_dispatch
     task = await task_service.get_task_for_view(db, scope, task_id)
     row = await model_egress.task_deployment(db, task)
+    actor_id = task.executor_user_id
     pilot = db.info.get('r5_controlled_pilot')
     if not isinstance(pilot, ControlledPilot):
         raise PermissionError('Controlled executor unavailable')
@@ -156,13 +157,25 @@ async def managed_run(db, scope, task_id, *, platform_origin):
     finally:
         db.info.pop('_r5_managed_claim', None)
         db.info.pop('_r5_managed_task', None)
-    request = json.dumps(dict(api_origin=platform_origin, token=result.token,
-        task_id=str(task_id), deployment_id=str(row.deployment_id), tenant_slug=tenant_slug)).encode()
-    # Bytes delivered to stdin only after pins are reverified by run_controlled.
-    process = await asyncio.to_thread(run_controlled, pilot.approval,
-        platform_port=pilot.platform_port, request=request)
-    if process.returncode != 0:
-        raise PermissionError('Controlled executor failed')
+    from app.services.agent_runtime import runtime_access, model_workflow
+    key = (db.info['tenant_binding'].tenant_id, result.run_id, result.lease_epoch)
+    try:
+        current = await runtime_access.verify_runtime_identity(db,result.token,db.info['tenant_binding'])
+        model_workflow.begin_round(current)
+        request = json.dumps(dict(api_origin=platform_origin, token=result.token,
+            task_id=str(task_id), deployment_id=str(row.deployment_id), tenant_slug=tenant_slug)).encode()
+        await db.rollback()
+        # Thread wait does not block runtime/message HTTP. subprocess.run kills
+        # and waits for its own child on timeout before this cleanup executes.
+        process = await asyncio.to_thread(run_controlled, pilot.approval,
+            platform_port=pilot.platform_port, request=request)
+        if process.returncode != 0:
+            raise PermissionError('Controlled executor failed')
+    except Exception:
+        model_workflow._expire(key)
+        await fail_claimed_run(db,task_id=task_id,run_id=result.run_id,
+            lease_epoch=result.lease_epoch,actor_id=actor_id)
+        raise PermissionError('Controlled executor failed') from None
     return dict(task_id=task_id, status='executed')
 
 
@@ -207,3 +220,52 @@ def resolve_credential(reference):
     value=os.environ.get(reference.removeprefix('r5-env:'))
     if not value: raise PermissionError('Model credential unavailable')
     return value
+
+
+# Process-local launch exclusion complements DB claim fencing. A duplicate HTTP
+# retry never starts a second worker holding the same run credential.
+_launches = set()
+
+
+async def managed_run(db, scope, task_id, *, platform_origin):
+    key = (db.info.get('tenant_binding').tenant_id, task_id)
+    if key in _launches:
+        raise ValueError('Model launch already active')
+    _launches.add(key)
+    try:
+        return await _managed_run(db, scope, task_id, platform_origin=platform_origin)
+    finally:
+        _launches.discard(key)
+
+
+async def fail_claimed_run(db, *, task_id, run_id, lease_epoch, actor_id):
+    """Trusted runner cleanup, never an HTTP/runtime capability.
+
+    Stopping our already-finished child needs no business read grant. CAS on the
+    claimed run/epoch preserves a concurrent pause/cancel/restart/new worker.
+    """
+    from sqlalchemy import select
+    from app.models.agent_task import AgentTask, AgentRun
+    from app.models.audit import AuditLog
+    from app.services.agent_runtime import task_service, task_updates
+    await db.rollback()
+    await task_service._require_namespace(db)
+    task = await db.scalar(select(AgentTask).where(AgentTask.task_id==task_id)
+        .with_for_update().execution_options(populate_existing=True))
+    run = await db.scalar(select(AgentRun).where(AgentRun.run_id==run_id,AgentRun.task_id==task_id)
+        .with_for_update().execution_options(populate_existing=True))
+    if (task is None or run is None or task.status!='ready' or run.status!='active'
+            or run.lease_epoch!=lease_epoch or task.executor_user_id!=actor_id):
+        await db.rollback()
+        return
+    task.status='failed'
+    run.status='failed'
+    run.lease_epoch+=1
+    run.lease_expires_at=None
+    run.claim_key=None
+    db.add(AuditLog(table_name='agent_runs',record_id=run_id,action='FINISH_AGENT_RUN',
+        operated_by=actor_id,factory_id=task.factory_id,changed_fields=dict(
+            task_id=str(task_id),run_id=str(run_id),status='failed',lease_epoch=run.lease_epoch,
+            failure_code='managed_child_failed')))
+    await task_updates.append_update(db,task_id=task_id,kind='finish',object_id=run_id)
+    await db.commit()

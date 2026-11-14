@@ -84,9 +84,11 @@ T6 实施选择（2026-11-14，双复核及最终分段焦点通过）：使用�
 
 ### T7　受控模型插件与多轮消息
 
-- [ ] 新增 `backend/tests/e2e/test_r5_model_agent.py` 及 `backend/examples/d5_proposal_agent.py`。用正常部署、真实 HTTP、合成模型响应走「读 D4 → 请求补充 → 下一检查点接受消息 → 保存建议」。运行 `dbtest tests/e2e/test_r5_model_agent.py`。mock 模型仅充当可重复的协议对端。
-- [ ] 新 R5 profile 声明可读上下文和 T4 建议命令，仅受控执行物、安装及 run 可使用。复用 `runtime_messages.py`、`message_queue.py` 的 claim/ACK 与当期鉴权。对旧固定消息 profile 继续执行原字面量门禁。Agent 通过 T6 出口调用实际模型，按工具白名单解析返回；允许零次、一次或多轮查询。试点初值为每轮任务最多 8 次工具调用、总时限 120 秒、单条建议 UTF-8 上限 16 KiB，取消或到限停止新调用；对状态未知的写命令仅以原 key 重放。
-- [ ] 在 `api/agent_runtime.py` 完成“已授权的 D4 读取→当前 run 来源回执→输出保存”的闭环。消息和查询依据缺失时可继续对话；没有足够依据时不生成 CAPA 建议。运行本项加 T4/T6 焦点，提交 `feat(agent): run a model-driven D5 proposal workflow`。
+- [x] 新增 `backend/tests/e2e/test_r5_model_agent.py` 及 `backend/examples/d5_proposal_agent.py`。用正常部署、真实 HTTP、合成模型响应走「读 D4 → 请求补充 → 下一检查点接受消息 → 保存建议」。运行 `dbtest tests/e2e/test_r5_model_agent.py`。mock 模型仅充当可重复的协议对端。
+- [x] 新 R5 profile 声明可读上下文和 T4 建议命令，仅受控执行物、安装及 run 可使用。复用 `runtime_messages.py`、`message_queue.py` 的 claim/ACK 与当期鉴权。对旧固定消息 profile 继续执行原字面量门禁。Agent 通过 T6 出口调用实际模型，按工具白名单解析返回；允许零次、一次或多轮查询。试点初值为每轮任务最多 8 次工具调用、总时限 120 秒、单条建议 UTF-8 上限 16 KiB，取消或到限停止新调用；对状态未知的写命令仅以原 key 重放。
+- [x] 在 `api/agent_runtime.py` 完成“已授权的 D4 读取→当前 run 来源回执→输出保存”的闭环。消息和查询依据缺失时可继续对话；没有足够依据时不生成 CAPA 建议。运行本项加 T4/T6 焦点，提交 `feat(agent): run a model-driven D5 proposal workflow`。
+
+T7 实施结果（2026-11-14）：实际标准库执行物沿用受控沙箱；员工明确 launch，服务端保留模型历史/工具参数并签发调用 ID。补充原文在本轮全部工具结果后追加；持久检查点要求同一签名快照已实际交付模型并提交 basis，交付前仅使用消息接受边界，不伪造来源回执。未知写仅重放原 ID/key，失败按原 run/epoch 回收并保留并发取消/暂停。独立 SPEC、QUALITY 均 APPROVED；冻结 v3 前后11文件一致，最终 T7+T6绑定+选定 T4/旧消息鉴权焦点 **67 passed /0 skip /6 warnings /343.52s /exit0**（`run-1794648115011610000.log`）。前期18轮证据分别记录，不叠加为最终通过。T8/T9、真实模型试用未完成，部署限制见 [模型出口合同](../../development/r5-model-egress.md)。
 
 ### T8　侧栏及报告协作界面
 

@@ -321,6 +321,9 @@ async def require_bounded_messages(db, identity, body):
             content = json.loads(message.content, object_pairs_hook=unique_object)
         except (ValueError, TypeError):
             raise PermissionError(UNAVAILABLE) from None
+        if (content == {'intent':'continue_d5','additional_context':'none'}
+                and message.state == 'accepted' and message.author_id == identity.task.executor_user_id):
+            continue
         if (not isinstance(content, dict) or set(content) != {'intent', 'predecessor_id'}
                 or content['intent'] != 'replace_d5' or message.state != 'accepted'
                 or message.author_id != identity.task.executor_user_id):
