@@ -23,11 +23,9 @@ from tests.ci.browser_runtime import browser_environment, resolve_browser
 from tests.services.agent_runtime.test_r5_model_binding import r5_case, d4_text_local_trial, owned_local_trial, _managed_claim
 from tests.e2e.agent_local_trial_harness import PASSWORD
 
-pytestmark = [pytest.mark.requires_db, pytest.mark.ci_browser]
+pytestmark = [pytest.mark.ci_r5_native, pytest.mark.requires_db, pytest.mark.ci_browser]
 
-@pytest.mark.asyncio
-async def test_real_two_role_R5_sidebar_and_report_collaboration(r5_case,tmp_path):
-    c=r5_case
+async def run_r5_ui(c,tmp_path,spec='r5-collaboration.spec.ts'):
     from app.api import product_line, fmea, knowledge
     for router in (product_line.router,fmea.router,knowledge.router): c.app.include_router(router)
     await _managed_claim(c)
@@ -85,18 +83,28 @@ async def test_real_two_role_R5_sidebar_and_report_collaboration(r5_case,tmp_pat
                 await asyncio.sleep(.05)
             else:pytest.fail('Owned Vite did not start')
         env=browser_environment(os.environ,{'BACKEND_URL':backend,'AGENT_BACKEND_URL':backend,'AGENT_BROWSER_URL':f'http://127.0.0.1:{port}','AGENT_BROWSER_TENANT':c.slug,'AGENT_BROWSER_REPORT':str(c.report_id),'AGENT_BROWSER_TASK':str(c.task_id),'AGENT_HARNESS_NONCE':nonce,'AGENT_BROWSER_LOGIN':json.dumps({'username':'trial-executor','password':PASSWORD,'installation':str(c.r5_id),'model_b':model_b.json()['deployment_id'],'proposal':proposal,'checkpoint':checkpoint.json()['checkpoint_id']}),'OUTCOME_APPROVER_LOGIN':json.dumps({'username':'t8-colleague','password':PASSWORD,'user_id':str(colleague_id)}),'AGENT_BROWSER_ARTIFACTS':str(tmp_path/'playwright'),'OPENQMS_AGENT_BROWSER_EXECUTABLE':str(chromium)})
-        browser=await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/@playwright/test/cli.js'),'test','--config','playwright.agent.config.ts','r5-collaboration.spec.ts',cwd=frontend,env=env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        browser=await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/@playwright/test/cli.js'),'test','--config','playwright.agent.config.ts',spec,cwd=frontend,env=env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         stdout,stderr=await asyncio.wait_for(browser.communicate(),180)
         (tmp_path/'browser.log').write_bytes(stdout+stderr)
         assert browser.returncode==0,(stdout+stderr).decode()
         assert b'1 passed' in stdout and b'skipped' not in stdout
         async with c.session() as db:
             messages=list(await db.scalars(select(AgentTaskMessage).where(AgentTaskMessage.task_id==c.task_id)))
-            assert any(m.content=='T8 Enter stays A' for m in messages)
+            if spec=='r5-collaboration.spec.ts':
+                assert any(m.content=='T8 Enter stays A' for m in messages)
+            else:
+                assert any(json.loads(m.content).get('predecessor_id')==proposal for m in messages if m.content.startswith('{'))
             bindings=list(await db.scalars(select(AgentTaskModelBinding)))
-            assert any(str(b.deployment_id)==model_b.json()['deployment_id'] and b.task_id!=c.task_id for b in bindings)
+            if spec=='r5-collaboration.spec.ts':
+                assert any(str(b.deployment_id)==model_b.json()['deployment_id'] and b.task_id!=c.task_id for b in bindings)
             measure=await db.scalar(select(CapaD5Measure).where(CapaD5Measure.proposal_id==proposal))
-            assert measure.final_text=='T8 同事确认最终措施' and measure.adopted_by==colleague_id
+            if spec=='r5-collaboration.spec.ts':
+                assert measure.final_text=='T8 同事确认最终措施' and measure.adopted_by==colleague_id
+            else:
+                from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5Withdrawal
+                assert measure is None
+                assert (await db.get(CapaD5Proposal, __import__('uuid').UUID(proposal))).state=='withdrawn'
+                assert (await db.scalar(select(CapaD5Withdrawal))).reason=='T9 selected withdrawal'
         assert len(c.witness.a.bodies)==1 and c.witness.b.bodies==[]
         print('CHROMIUM_REAL: two roles, bound A / new B / Enter A / colleague adoption after finish; real HTTP; loopback only')
     finally:
@@ -107,3 +115,8 @@ async def test_real_two_role_R5_sidebar_and_report_collaboration(r5_case,tmp_pat
             except asyncio.TimeoutError:vite.kill();await vite.wait()
         log.close()
         (tmp_path/'owned-processes.json').write_text(json.dumps({'vite_pid':vite.pid if vite else None,'vite_exit':vite.returncode if vite else None,'browser_pid':browser.pid if browser else None,'browser_exit':browser.returncode if browser else None}))
+
+
+@pytest.mark.asyncio
+async def test_real_two_role_R5_sidebar_and_report_collaboration(r5_case,tmp_path):
+    await run_r5_ui(r5_case,tmp_path)

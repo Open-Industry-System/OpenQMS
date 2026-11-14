@@ -415,3 +415,35 @@ jobs:
           fi
 
           echo "Docs check passed."
+
+
+  r5-native:
+    # Required Darwin sandbox pilot. Runner hook must provision a NEW dedicated
+    # PG15 resource and owner-only job-bound bundle for every job (see docs/e2e).
+    # No runner or missing bundle leaves this check unavailable/failed, not green.
+    runs-on: [self-hosted, macOS, openqms-r5-sandbox]
+    timeout-minutes: 45
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/r5-native
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run mandatory R5 native API and Chromium acceptance
+        run: |
+          cd backend
+          python3 -B -m tests.ci.r5_native_gate "$RUNNER_TEMP/openqms-r5-native-job.json"
+      - name: Upload native safe receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-native-evidence
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
+          if-no-files-found: error

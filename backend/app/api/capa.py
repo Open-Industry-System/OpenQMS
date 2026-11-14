@@ -1157,7 +1157,7 @@ async def draft_capa_step(
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     if step not in {"d2", "d3", "d4", "d5", "d6", "d7", "d8"}:
         raise HTTPException(status_code=400, detail="无效的步骤")
-    result = await generate_draft(db, report_id, step, req, scope.user, request)
+    result = await generate_draft(db, report_id, step, req, scope.user, request, scope=scope)
     return DraftResponse(**result)
 
 

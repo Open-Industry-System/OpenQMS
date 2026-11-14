@@ -1,6 +1,8 @@
 """Real managed artifact and deterministic HTTP model, never real credentials."""
 from pathlib import Path
 import pytest
+
+pytestmark = pytest.mark.ci_r5_native
 from tests.services.agent_runtime.test_r5_model_binding import r5_case, _managed_claim as claim_without_workflow
 from tests.e2e.d4_text_local_harness import d4_text_local_trial, owned_local_trial
 

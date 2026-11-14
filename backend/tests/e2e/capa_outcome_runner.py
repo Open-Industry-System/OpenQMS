@@ -43,8 +43,10 @@ SCANNER_RUNTIME_KEYS = frozenset({
     'AGENT_ATTACHMENT_BROWSER_NONCE',
 })
 MARKS = {
-    'api': 'not ci_browser and not live_provider and not real_scanner',
-    'browser': 'ci_browser and not live_provider and not real_scanner',
+    'api': 'not ci_browser and not ci_r5_native and not live_provider and not real_scanner',
+    'browser': 'ci_browser and not ci_r5_native and not live_provider and not real_scanner',
+    'r5-api': 'ci_r5_native and not ci_browser and not live_provider and not real_scanner',
+    'r5-browser': 'ci_r5_native and ci_browser and not live_provider and not real_scanner',
     'live': 'live_provider',
     'scanner': 'real_scanner and not live_provider',
 }
@@ -60,6 +62,28 @@ DEFAULT_TARGETS = {
     'browser': ('tests/e2e/test_capa_outcome_review_browser.py',),
     'live': ('tests/e2e/test_capa_outcome_review_browser.py',),
 }
+
+
+from tests.ci.r5_required import R5_REQUIRED
+for _layer, _classes in R5_REQUIRED.items():
+    DEFAULT_TARGETS.setdefault(_layer, ())
+    DEFAULT_TARGETS[_layer] += tuple(name.replace('.', '/')+'.py' for name in _classes)
+
+
+def _require_r5_success(junit, summary, layer, targets):
+    """Require exact executed R5 nodes for each selected file, including no skip."""
+    root=ElementTree.parse(junit).getroot()
+    for classname,names in R5_REQUIRED.get(layer,{}).items():
+        file=(BACKEND_DIR / (classname.replace('.', '/')+'.py')).resolve()
+        if not any(file.is_relative_to((BACKEND_DIR/target.split('::',1)[0]).resolve()) for target in targets):
+            continue
+        cases=[case for case in root.iter('testcase') if case.get('classname')==classname]
+        if len(cases)!=len(names) or {case.get('name') for case in cases}!=set(names):
+            raise ValueError('mandatory R5 nodes are missing, substituted or duplicated')
+        if any(case.find(tag) is not None for case in cases for tag in ('skipped','failure','error')):
+            raise ValueError('mandatory R5 nodes did not all execute successfully')
+        if summary['xpassed']:
+            raise ValueError('mandatory R5 run has XPASS')
 
 
 def child_environment(source=None):
@@ -90,7 +114,7 @@ def build_layer_environment(
     if layer not in MARKS:
         raise ValueError(f'unsupported acceptance layer: {layer}')
     env = child_environment(source)
-    if layer in {'browser', 'live', 'scanner'} and source.get('OPENQMS_AGENT_BROWSER_EXECUTABLE'):
+    if layer in {'browser', 'r5-browser', 'live', 'scanner'} and source.get('OPENQMS_AGENT_BROWSER_EXECUTABLE'):
         from tests.ci.browser_runtime import resolve_browser
 
         env['OPENQMS_AGENT_BROWSER_EXECUTABLE'] = str(resolve_browser(ROOT / 'frontend', source))
@@ -345,7 +369,8 @@ def run_pytest_layer(
         else:
             receipt.update(summary, exit_code=exit_code)
             try:
-                if layer in {'browser', 'live', 'scanner'}:
+                _require_r5_success(private_junit, summary, layer, targets)
+                if layer in {'browser', 'r5-browser', 'live', 'scanner'}:
                     require_gate_success(summary, exit_code)
                 else:
                     _require_completed_layer(summary, exit_code)
@@ -388,7 +413,7 @@ def _live_configuration(source: Mapping[str, str], profile: Path | None) -> dict
 
 def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('api', 'browser', 'live', 'acceptance'))
+    parser.add_argument('mode', choices=('api', 'browser', 'r5-api', 'r5-browser', 'live', 'acceptance'))
     parser.add_argument('--test-profile', type=Path, help='explicit non-interpolated live provider profile')
     parser.add_argument('--pytest-target', action='append', dest='targets', help='override default target; repeatable')
     parser.add_argument('--pytest-arg', action='append', dest='pytest_args', help='additional pytest option; repeatable')
@@ -400,19 +425,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     from tests.ci.browser_runtime import resolve_browser
     from tests.ci.owned_resources import artifact_directory, verify_owned_database, verify_owned_instance
 
+    if args.mode.startswith('r5-') and sys.platform!='darwin':
+        raise ValueError('R5 native gate requires Darwin sandbox-exec; unsupported hosts deny')
     source = dict(os.environ)
     target = verify_owned_instance(source)
     database_url = verify_owned_database(target)
     artifacts = artifact_directory(source)
     layers = ('api', 'browser', 'live') if args.mode == 'acceptance' else (args.mode,)
     live = _live_configuration(source, args.test_profile) if 'live' in layers else None
-    ordinary_layers = [layer for layer in layers if layer in {'api', 'browser'}]
+    ordinary_layers = [layer for layer in layers if layer in {'api', 'browser', 'r5-api', 'r5-browser'}]
     if ordinary_layers:
         preflight_default_provider_settings(
             build_layer_environment(source, database_url, ordinary_layers[0]),
             python=source.get('OPENQMS_OUTCOME_PYTHON'),
         )
-    if any(layer in {'browser', 'live'} for layer in layers):
+    if any(layer in {'browser', 'r5-browser', 'live'} for layer in layers):
         resolve_browser(ROOT / 'frontend', source)
 
     receipts = []

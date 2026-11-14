@@ -1,0 +1,27 @@
+import {test,expect} from '@playwright/test';
+const details=JSON.parse(process.env.AGENT_BROWSER_LOGIN!);
+const report=process.env.AGENT_BROWSER_REPORT!,task=process.env.AGENT_BROWSER_TASK!;
+test('explicit correction intent and selected checkpoint withdrawal persist',async({page,context})=>{
+  const origins=new Set([new URL(process.env.AGENT_BACKEND_URL!).origin,new URL(process.env.AGENT_BROWSER_URL!).origin]);
+  await context.route('**/*',route=>{const url=route.request().url();return url.startsWith('data:')||origins.has(new URL(url).origin)?route.continue():route.abort();});
+  await context.addInitScript(tenant=>{localStorage.setItem('tenant_slug',tenant);localStorage.setItem('openqms_locale','zh-CN');},process.env.AGENT_BROWSER_TENANT!);
+  await page.goto('/login');await page.locator('#username').fill(details.username);await page.locator('#password').fill(details.password);await page.locator('button[type=submit]').click();await expect(page).toHaveURL(/dashboard/);
+  await page.goto(`/capa/${report}`);await page.getByRole('button',{name:'Agent 任务',exact:true}).click();
+  await page.getByLabel('选择任务',{exact:true}).selectOption(task);
+  await page.getByLabel('更正当前任务建议',{exact:true}).selectOption(details.proposal);
+  const correction=page.waitForResponse(r=>r.url().endsWith(`/api/agent/tasks/${task}/messages`)&&r.request().method()==='POST');
+  await page.getByRole('button',{name:'明确更正选中建议',exact:true}).click();
+  const message=await correction;expect(message.status()).toBe(202);
+  expect(JSON.parse(message.request().postDataJSON().content)).toEqual({intent:'replace_d5',predecessor_id:details.proposal});
+  await page.getByLabel('选择处理范围检查点',{exact:true}).selectOption(details.checkpoint);
+  const sidebar=page.getByRole('dialog');
+  const selected=sidebar.getByLabel(`选择建议 ${details.proposal}`,{exact:true});await selected.check();
+  await sidebar.getByLabel('批量撤回原因',{exact:true}).fill('T9 selected withdrawal');
+  const withdraw=page.waitForResponse(r=>r.url().endsWith(`/d5-checkpoints/${details.checkpoint}/proposals/withdraw`));
+  await sidebar.getByRole('button',{name:'撤回选中建议',exact:true}).click();
+  const result=await withdraw;expect(result.status()).toBe(200);expect(await result.json()).toEqual([{proposal_id:details.proposal,outcome:'withdrawn'}]);
+  await expect(sidebar.getByText(`${details.proposal}：withdrawn`,{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'关闭任务侧栏',exact:true}).click();await page.reload();
+  await expect(page.getByText('已撤回',{exact:true})).toBeVisible();
+  await expect(page.getByLabel(`最终措施 ${details.proposal}`,{exact:true})).toHaveCount(0);
+});

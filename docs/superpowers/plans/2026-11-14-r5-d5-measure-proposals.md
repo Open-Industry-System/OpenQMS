@@ -51,11 +51,13 @@ dbtest() { (cd backend && "$PY" -B -m tests.ci.pytest_bootstrap "$@" -q --tb=sho
 
 ### T3　正式采纳前贯通消费、阶段判断与集中审核
 
-- [ ] 在 `backend/tests/capa/test_d5_consumers.py` 和 `test_d5_outcome_fence.py` 注入唯一哨兵文本。逐个覆盖报告详情、PPT、D5→D6、D8 材料和决定、知识派生、嵌入与后台同步。在只有受限正式措施且旧字段为空的合法报告上做正向阶段验收。执行 `dbtest tests/capa/test_d5_consumers.py tests/capa/test_d5_outcome_fence.py`。
-- [ ] 核对 `rg -n 'd5_correction' backend/app frontend/src` 的实际消费者。修改 `capa_service.py`、`capa_ppt_service.py`、`capa_doc_gate_service.py`、`capa_review_guard.py`、`capa_outcome_review.py` 与需要接线的路由。阶段服务按业务资格检查实际正式措施；员工展示使用 T2 投影。要求完整材料的文档生成或审核在缺任何一条来源权限时拒绝，不将局部视图误标完整。需要模型的既有业务流程同样核接收方许可。
-- [ ] 将正式条目 ID、最终文本版本及完整来源绑定加入审核快照和最终批准复核。在 CAPA 父锁下重取全部材料，复用现有审批资格、轮次与版本围栏。材料或 ACL 在等锁时变化，旧审核请求失败。结案/归档后普通写入口与 Agent/员工新入口使用相同终态保护。
-- [ ] 核对 `embedding_sync_worker.py`、`knowledge_sink_service.py`、`lessons_learned/sources/historical_capa.py`、`recommendation_sources.py`、`capa_d7_action_service.py`。对不能保存条目级 ACL 的索引/下游派生仅消费允许的 legacy 内容；必须完整才能有意义的操作明确返回不可用。给每个路径记录“作用域投影/受控完整读取/排除受限内容”及用例；存在未保护的正文路径时采纳能力保持关闭。
-- [ ] 复跑本项及 `dbtest tests/capa/test_capa_outcome_decision.py tests/capa/test_capa_review_concurrency.py tests/capa/test_capa_ppt_api.py`。提交 `feat(capa): carry D5 item restrictions through review and downstream reads`。
+- [x] 在 `backend/tests/capa/test_d5_consumers.py` 和 `test_d5_outcome_fence.py` 注入唯一哨兵文本。逐个覆盖报告详情、PPT、D5→D6、D8 材料和决定、知识派生、嵌入与后台同步。在只有受限正式措施且旧字段为空的合法报告上做正向阶段验收。执行 `dbtest tests/capa/test_d5_consumers.py tests/capa/test_d5_outcome_fence.py`。
+- [x] 核对 `rg -n 'd5_correction' backend/app frontend/src` 的实际消费者。修改 `capa_service.py`、`capa_ppt_service.py`、`capa_doc_gate_service.py`、`capa_review_guard.py`、`capa_outcome_review.py` 与需要接线的路由。阶段服务按业务资格检查实际正式措施；员工展示使用 T2 投影。要求完整材料的文档生成或审核在缺任何一条来源权限时拒绝，不将局部视图误标完整。需要模型的既有业务流程同样核接收方许可。
+- [x] 将正式条目 ID、最终文本版本及完整来源绑定加入审核快照和最终批准复核。在 CAPA 父锁下重取全部材料，复用现有审批资格、轮次与版本围栏。材料或 ACL 在等锁时变化，旧审核请求失败。结案/归档后普通写入口与 Agent/员工新入口使用相同终态保护。
+- [x] 核对 `embedding_sync_worker.py`、`knowledge_sink_service.py`、`lessons_learned/sources/historical_capa.py`、`recommendation_sources.py`、`capa_d7_action_service.py`。对不能保存条目级 ACL 的索引/下游派生仅消费允许的 legacy 内容；必须完整才能有意义的操作明确返回不可用。给每个路径记录“作用域投影/受控完整读取/排除受限内容”及用例；存在未保护的正文路径时采纳能力保持关闭。
+- [x] 复跑本项及 `dbtest tests/capa/test_capa_outcome_decision.py tests/capa/test_capa_review_concurrency.py tests/capa/test_capa_ppt_api.py`。提交 `feat(capa): carry D5 item restrictions through review and downstream reads`。
+
+T3 状态补齐（2026-11-15）：实际已接受提交 `284f857cd84baa4b55d10f084ed6f8a94d0c6b74` 经双复核完成；本轮完整ordinary API再次执行消费者/审核/派生回归。T9另修复legacy草拟路由guard的审计和HTTP异常映射缺口，实际TCP RED500后GREEN403并验证无provider调用。
 
 ### T4　实现 Agent 保存、更正与并列备选
 
@@ -101,10 +103,36 @@ T8 完成证据（2026-11-14）：最终焦点前端 **118 passed /6 files /8.50
 
 ### T9　发布前验收与交接
 
-- [ ] 新增 `backend/tests/e2e/test_r5_d5_process.py` 和 `backend/tests/e2e/test_r5_d5_browser.py`。在真实 HTTP/数据库执行：A 报告正向、跨报告拒写、超时重试、换源、最终撤权、明确更正/并列备选、两人协作与竞争、部分回滚、暂停/restart、导出标记隔离及整份审核；旧 metadata 与 R4b 固定执行物另跑回归。结果记录用例名、源版本、测试资源和运行 SHA。
-- [ ] 合成服务验证本地/云端两种路由配置、受控插件网络及消息可达性。另在已登记的实际模型部署上用合成质量资料执行本地和云端试用，记录模型部署版本、工具调用与 CAPA 收据，抽查建议是否引用当前根因。如缺某类真实端点或试用凭据，将该类实测明确标为待验证，普通 CI 仍使用确定性对端。
-- [ ] 把新用例接入现有 CI 分层、必选节点及凭据隔离，更新 `backend/tests/ci/test_layer_selection.py` 和交付文档。冻结候选后运行 `make check`、`make check-browser`、`"$PY" -B scripts/check-ci-pure.py tests/ci -q`、`(cd frontend && npm test -- --run && npx tsc --noEmit -p tsconfig.e2e.json)`。逐层保存真实通过/跳过/失败及原因。
-- [ ] 复核规格第 7 节九个验收场景分别对应 T2/T3/T4/T5/T6/T7/T8 的通过证据；记录新部署的启用/撤销、命令重试、凭据维护、旧字段兼容及本轮资源归属清理。更新 `PROGRESS.md`，提交 `test(agent): verify R5 D5 collaboration end to end`。功能签收和部署开关分别记录。
+- [x] 新增 `backend/tests/e2e/test_r5_d5_process.py` 和 `backend/tests/e2e/test_r5_d5_browser.py`。在真实 HTTP/数据库执行：A 报告正向、跨报告拒写、超时重试、换源、最终撤权、明确更正/并列备选、两人协作与竞争、部分回滚、暂停/restart、导出标记隔离及整份审核；旧 metadata 与 R4b 固定执行物另跑回归。结果记录用例名、源版本、测试资源和运行 SHA。
+- [x] 合成服务验证本地/云端两种路由配置、受控插件网络及消息可达性。另在已登记的实际模型部署上用合成质量资料执行本地和云端试用，记录模型部署版本、工具调用与 CAPA 收据，抽查建议是否引用当前根因。如缺某类真实端点或试用凭据，将该类实测明确标为待验证，普通 CI 仍使用确定性对端。
+- [x] 把新用例接入现有 CI 分层、必选节点及凭据隔离，更新 `backend/tests/ci/test_layer_selection.py` 和交付文档。冻结候选后运行 `make check`、`make check-browser`、`"$PY" -B scripts/check-ci-pure.py tests/ci -q`、`(cd frontend && npm test -- --run && npx tsc --noEmit -p tsconfig.e2e.json)`。逐层保存真实通过/跳过/失败及原因。
+- [x] 复核规格第 7 节九个验收场景分别对应 T2/T3/T4/T5/T6/T7/T8 的通过证据；记录新部署的启用/撤销、命令重试、凭据维护、旧字段兼容及本轮资源归属清理。更新 `PROGRESS.md`，准备精确本地提交 `test(agent): verify R5 D5 collaboration end to end`（实际提交待根代理最终批准；提交后写外部metadata seal，不制造自引用提交循环）。功能签收和部署开关分别记录。
+
+T9 本地自动验收结果（2026-11-15本地日期）：v9冻结38文件经独立SPEC/QUALITY双APPROVED；所有门禁结束后逐项hash及路径集合仍一致，随后仅修改PROGRESS与本计划。fresh `make check` 根exit0／6402.33s：SDK unit562／loopback16／wheel1全部PASS，ordinary API5162 passed／4 skipped／79 deselected／6 warnings，native API58 passed／0 skip，tsc/build exit0。v9完整browser为native2＋portable11全部PASS／0 skip；纯CI268 passed；完整frontend850 passed与E2E tsc exit0保留前端源文件未变的等价证据。固定89必选节点（迁移29＋native API58＋native browser2）按真实PASSED node ID核对无缺失、重复或skip替代。日志、receipt与失败修复详见PROGRESS和私有inventory。
+
+前一完整尝试因原登记PG未知原因fast shutdown/exit137中断，证据保留且不计全通过。核实全部归属后只恢复同一容器/volume；当前资源generation2、端口58045（原65176），健康检查和受影响smoke5 passed后从头完整执行上述make。owner仍为 `b3194303f91249b12ca03470`；资源按授权保留，未清理其他资源或R4B-CLEANUP-01。
+
+### 尚未执行的独立验收与启用
+
+- [ ] **真实LOCAL模型试用：PENDING**。无已登记真实端点和专用试用凭据；合成LOCAL路由和受控网络证据不替代真实试用。
+- [ ] **真实CLOUD模型试用：PENDING**。同上；未发现/复用旧密钥，无外部模型调用。
+- [ ] **远端native CI：PENDING／NOT RUN**。支持Darwin的self-hosted runner可用性及正常owner-bound新资源预置待验证；本地完整native层通过不等于远端job已执行。
+
+本地自动功能验收通过；真实模型质量签收和部署启用分别仍待完成。试点默认关闭，保留Darwin/dev/OpenAI兼容和单平台进程限制；未push/合并/部署。T9精确本地提交等待最终批准。
+
+### 实际实施提交记录
+
+| 项目 | 实际本地提交 |
+|---|---|
+| T1 | `c0cd8abfe3814f6f94dbcb05c2a4be074dbb389d` |
+| T2 | `e4e8f39ba43c8d346aa8e3a0521c1c656b614b80` |
+| T3 | `284f857cd84baa4b55d10f084ed6f8a94d0c6b74` |
+| T4 | `e689b59ccce17e7a095dbe279b646903676643b5` |
+| T5 | `86cfd90580677fb1c7f1dcce9a7b2decd1411625` |
+| T6 | `f8870592f8b92cdcde86324569bc843eee076cd5` |
+| T7 | `84f65ecf0b50b8b672c1687fe53a291e82fd99e0` |
+| T8 | `f61669148598dd5e49027645f3c8bfe3f73e0147` |
+| T9 | 已完成本地自动验收及精确提交准备；实际提交待批准，之后由外部metadata seal记录。 |
 
 ## 实施者可直接使用的验收断言
 

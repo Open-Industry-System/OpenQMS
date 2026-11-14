@@ -235,18 +235,14 @@ async def generate_draft(
     req: DraftRequest,
     user: User,
     request: Request,
+    *, scope=None,
 ) -> dict:
     from app.services.capa_d5_measures import require_legacy_d5_only
-    await require_legacy_d5_only(db, report_id)
     start_time = time.time()
 
     from app.services.agent import provider_adapter
     from app.services.agent.provider_adapter import ProviderNotConfiguredError
-    try:
-        pc = await provider_adapter.build_client(db)
-    except ProviderNotConfiguredError:
-        pc = None
-    llm_model_name = (pc.model if pc else None) or settings.LLM_MODEL or "unknown"
+    llm_model_name = settings.LLM_MODEL or "unknown"
 
     # DB-backed timeout (admin-configurable via /admin/ai-config), falling back to
     # the env default when app.state lacks it (startup, background tasks, tests).
@@ -317,8 +313,24 @@ async def generate_draft(
             audit_status_code = 404
             raise HTTPException(status_code=404, detail="CAPA 报告不存在")
 
-        # 2. 产品线隔离
+        # Authorize the actual report before checking protected material.
+        if scope is not None:
+            from app.core.factory_scope import check_factory_access, check_product_line_access
+            check_factory_access(capa.factory_id, scope)
+            check_product_line_access(capa.product_line_code, scope)
         await enforce_product_line_access(user, capa.product_line_code, db)
+        try:
+            await require_legacy_d5_only(db, report_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="D5_FULL_MATERIAL_UNAVAILABLE") from exc
+
+        # No provider configuration or cached/model output is consulted for
+        # item-protected formal material in this legacy recipient flow.
+        try:
+            pc = await provider_adapter.build_client(db)
+        except ProviderNotConfiguredError:
+            pc = None
+        llm_model_name = (pc.model if pc else None) or settings.LLM_MODEL or "unknown"
 
         # 3. 检查缓存（在权限校验之后）
         if cache_key in _draft_cache:

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import json
 import time
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -124,7 +124,7 @@ def _specs():
         ('request_supplement','Ask the employee a question and wait at a checkpoint.',
             {'type':'object','properties':{'question':{'type':'string','minLength':1,'maxLength':2000}},'required':['question'],'additionalProperties':False}),
         ('save_proposal','Save a D5 proposal only with current delivered evidence and bounded employee intent.',
-            {'type':'object','properties':{'text':{'type':'string','minLength':1,'maxLength':16384}},'required':['text'],'additionalProperties':False})]
+            {'type':'object','properties':{'text':{'type':'string','minLength':1,'maxLength':16384},'operation':{'type':'string','enum':['save','alternative','replace']}},'required':['text'],'additionalProperties':False})]
     from app.services.agent.provider_adapter import tools_schema_for
     return tools_schema_for(SimpleNamespace(provider='openai'), [SimpleNamespace(name=n,description=d,param_schema=p) for n,d,p in definitions])
 
@@ -143,7 +143,7 @@ def _validate_calls(calls, remaining):
         elif name == 'request_supplement':
             valid = set(args)=={'question'} and isinstance(args['question'],str) and 1<=len(args['question'].encode())<=2000
         elif name == 'save_proposal':
-            valid = set(args)=={'text'} and isinstance(args['text'],str) and bool(args['text'].strip()) and len(args['text'].encode())<=16384
+            valid = {'text'} <= set(args) <= {'text','operation'} and args.get('operation','save') in ('save','alternative','replace') and isinstance(args['text'],str) and bool(args['text'].strip()) and len(args['text'].encode())<=16384
         else:
             valid = False
         if not valid:
@@ -183,8 +183,32 @@ async def next_turn(db, identity, turn):
         stored = []
         issued = []
         for call in model_calls:
+            # Resolve the employee's explicit target at issuance, never when a
+            # delayed tool executes. The model cannot supply either identifier.
+            correction = None
+            if call['name']=='save_proposal' and call['arguments'].get('operation')=='replace':
+                current=await _current(db,current)
+                if current.run.accepted_message_seq != state.accepted:
+                    raise PermissionError(UNAVAILABLE)
+                message=await db.scalar(select(AgentTaskMessage).where(
+                    AgentTaskMessage.task_id==current.task.task_id,
+                    AgentTaskMessage.sequence==state.accepted,
+                    AgentTaskMessage.state=='accepted'))
+                try:
+                    intent=json.loads(message.content)
+                    if set(intent)!={'intent','predecessor_id'} or intent['intent']!='replace_d5':
+                        raise ValueError(UNAVAILABLE)
+                    predecessor=UUID(intent['predecessor_id'])
+                except (AttributeError, TypeError, ValueError, KeyError):
+                    raise PermissionError(UNAVAILABLE) from None
+                from app.schemas.agent_d5_command import D5Command
+                command=D5Command(command_key='issuance',text=call['arguments']['text'],operation='replace',
+                    predecessor_id=predecessor,correction_message_id=message.message_id)
+                await capa_d5_proposals.require_bounded_messages(db,current,command)
+                correction={'predecessor_id':predecessor,'correction_message_id':message.message_id,
+                    'accepted_sequence':state.accepted}
             identifier = uuid4().hex
-            state.calls[identifier] = dict(name=call['name'], arguments=call['arguments'], model_id=call['id'])
+            state.calls[identifier] = dict(name=call['name'], arguments=call['arguments'], model_id=call['id'], correction=correction)
             issued.append({'id':identifier, 'name':call['name']})
             stored.append({'id':call['id'],'type':'function','function':{'name':call['name'],'arguments':json.dumps(call['arguments'],ensure_ascii=False)}})
         assistant = {'role':'assistant','content':response['content'] or None}
@@ -262,7 +286,12 @@ async def execute_tool(db, identity, request):
             from app.schemas.agent_d5_command import D5Command
             # The same opaque issued ID always maps to this original write key.
             state.uncertain_id=request.call_id
-            saved=await d5_commands.save_proposal(db,current,D5Command(command_key='r5:'+request.call_id,text=args['text']))
+            correction=call['correction']
+            if correction is not None and current.run.accepted_message_seq != correction['accepted_sequence']:
+                raise PermissionError(UNAVAILABLE)
+            binding={key:value for key,value in (correction or {}).items() if key!='accepted_sequence'}
+            saved=await d5_commands.save_proposal(db,current,D5Command(command_key='r5:'+request.call_id,
+                text=args['text'],operation=args.get('operation','save'),**binding))
             result={'status':'saved','proposal_id':str(saved.proposal_id) if hasattr(saved,'proposal_id') else str(saved['proposal_id'])}
         state.uncertain_id=None
         call['result']=result

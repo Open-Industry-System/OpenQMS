@@ -57,7 +57,7 @@ async def test_read_task_delta_owned_tenant_paths(mig_db_url, monkeypatch, exist
             ))).scalars().all() == original
             assert await connection.scalar(text(
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'
-            )) == "tv009_r4b_main_merge"
+            )) == target
         # The same owner-bound connection performs full parity and the reviewed
         # rollback/reapply; no legacy public-chain tenant runner is involved.
         async with tenant_migrator.maintenance_connection(engine, tenant.id) as maintenance:
@@ -79,6 +79,10 @@ async def test_read_task_delta_owned_tenant_paths(mig_db_url, monkeypatch, exist
             assert await maintenance.schema_state() == "recovery_head"
             assert await maintenance.compare_schema("public", load_snapshot_manifest(), predecessor="tv008_d4_recovery") == []
             await maintenance.run_migration("tv009_r4b_main_merge")
+            assert await maintenance.schema_state() == "r5_predecessor"
+            assert await maintenance.compare_schema(
+                "public", load_snapshot_manifest(), predecessor="tv009_r4b_main_merge") == []
+            assert await maintenance.run_migration(target) == target
             assert await maintenance.schema_state() == "current"
             assert await maintenance.compare_schema("public", load_snapshot_manifest()) == []
     finally:

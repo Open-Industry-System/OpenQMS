@@ -210,3 +210,50 @@ page-error and HTTP failure records remain intact; CP collaboration404 and all
 other unexpected404/500 still fail. Existing intentional PFMEA409 handling is
 unchanged. The diagnostic helper lives only in `frontend/e2e/helpers/` and is
 shared with focused unit tests, not shipped as application behavior.
+
+
+### R5 D5 必选验收
+
+R5 过程/模型/迁移节点列在 `backend/tests/ci/r5_required.py`，portable api 必须执行迁移，r5-api 必须执行原生过程/模型；
+`test_r5_d5_ui.py` 与 `test_r5_d5_browser.py` 在 r5-browser 层执行各自真实 Chromium spec。
+runner 按 JUnit classname/name 核对固定节点集合、重复、失败及跳过，不能用收集成功或
+普通层其他通过项替代。选择整个 tests 或相应文件时合同生效；单独节点调试应直接用
+pytest_bootstrap，不以部分调试收据作为整层通过。修改参数化节点时同步更新固定目录和
+`test_layer_selection.py` 的实际收集/分层校验。
+
+普通 API/browser child 使用现有环境白名单，清空 provider/embedding 配置，丢弃 R5 平台
+凭据和私有 pilot 路径；R5 fixture 仅创建合成回环模型和专用短期沙箱批准，不读取真实
+部署配置。受控沙箱实际执行依赖 Darwin 的 sandbox-exec；不支持的主机继续拒绝，不能
+以 skip 代替 R5 通过。当前 Ubuntu CI 不构成 Darwin 试点执行证据；完整 R5 门禁须在
+已登记专用 PostgreSQL、已安装 Chromium 和 Darwin 执行器的授权主机运行。
+
+新层复跑仍用同一验证资源、串行数据库验收。原始 HTTP/浏览器日志、临时证书、数据库
+连接和策略文件保留在私有目录；交付记录只含命令、节点、计数、版本和安全控制引用。
+真实 LOCAL/CLOUD 模型试用均待登记端点和专用凭据，不因确定性回环通过而勾选。
+
+
+`ci_r5_native` 明确分离原生测试。portable api/browser 都排除此标记；专门
+`r5-api`/`r5-browser` 用固定目录逐项要求真实执行。Darwin 上 `make check` 自动加
+`check-r5-api`，`make check-browser` 自动加 `check-r5-browser`，也可用
+`make check-r5-native` 串行运行两层。unsupported host 的显式 native 入口直接失败，
+不访问数据库或做环境跳过；其行为有离线测试。
+
+GitHub 工作流增加 required `r5-native` self-hosted/macOS/openqms-r5-sandbox job。
+runner/hook 配置与远端执行 **PENDING / NOT RUN**：需要维护者配置此专用 runner，
+预装项目依赖、setuptools79.0.1、Node、Chromium、sandbox-exec、Docker 与缓存 PG15；
+每个 job 的 hook 必须新建独占 PG15 实例，并在 `$RUNNER_TEMP/openqms-r5-native-job.json`
+写 owner-only（0600）JSON：`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`、`GITHUB_JOB`、
+`created_unix`、`owner_nonce`、`OPENQMS_TEST_RESOURCE_FILE`、`TEST_DATABASE_URL`。
+登记文件仍按现有 owned_resources 合同核容器完整 ID、owner 标签、镜像、回环端口与
+专用测试库。bundle 必须匹配实际 job，15分钟内创建，owner 与登记一致；不接受共享或
+历史资源回退。入口不读取 dotenv/真实 provider，不搜索资源、不创建或删除资源；
+每轮 hook 按自身生命周期保留或精确处置所登记资源。未配置 runner 不等于已通过。
+仅上传现有过滤日志和控制收据，bundle/登记/凭据/原始截图不上传。
+
+
+本轮专属库允许按已登记 owner 使用随机 `*_test` 名称；embedding/独立事务测试 helper
+保留原显式 `qms_test` 配置，并只对其他名称走现有容器归属及实际数据库身份双重核验。
+这不改变 characteristic 浏览器 bootstrap 的专用端点限制。`mig_db_url` 在创建自己的
+`qms_migtest_<32hex>_test` 后暂设 DATABASE_URL 时，helper 仅对与已登记父库同
+连接身份、无 query、相同 driver 且精确匹配 recorded URL 的情况，用验证副本恢复父库
+配置；不重写实际环境、不允许任意 sibling DB，不删除任何连接/名称或 libpq 保护。

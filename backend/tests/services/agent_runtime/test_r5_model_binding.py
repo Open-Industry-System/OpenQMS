@@ -81,6 +81,8 @@ async def _model_http_witness(redirect=False,tls=None):
 
 import pytest
 
+pytestmark = pytest.mark.ci_r5_native
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('redirect',[False,True])

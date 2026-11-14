@@ -7,8 +7,8 @@ import subprocess
 import pytest
 import yaml
 
-BACKEND = 'not ci_browser and not live_provider and not real_scanner'
-BROWSER = 'ci_browser and not live_provider and not real_scanner'
+BACKEND = 'not ci_browser and not ci_r5_native and not live_provider and not real_scanner'
+BROWSER = 'ci_browser and not ci_r5_native and not live_provider and not real_scanner'
 LIVE = 'live_provider'
 SCANNER = 'real_scanner and not live_provider'
 
@@ -22,6 +22,15 @@ TARGETS = (
     'tests/e2e/test_capa_outcome_review_browser.py',
     'tests/e2e/test_agent_task_attachment_browser.py',
     'tests/e2e/test_agent_task_attachment_process.py',
+    'tests/e2e/test_r5_model_agent.py',
+    'tests/e2e/test_r5_d5_process.py',
+    'tests/services/agent_runtime/test_r5_model_binding.py',
+    'tests/migrations/test_r5_d5_delta.py',
+    'tests/migrations/test_r5_d5_basis_delta.py',
+    'tests/migrations/test_r5_model_delta.py',
+    'tests/e2e/test_r5_d5_ui.py',
+    'tests/e2e/test_r5_d5_browser.py',
+
 )
 
 BROWSER_NODES = (
@@ -100,6 +109,7 @@ def layer(item: pytest.Item) -> str:
         return 'live'
     if 'real_scanner' in marks:
         return 'scanner'
+    if 'ci_r5_native' in marks:return 'r5-browser' if 'ci_browser' in marks else 'r5-api'
     return 'browser' if 'ci_browser' in marks else 'backend'
 
 
@@ -168,7 +178,7 @@ def test_fixed_nodes_have_the_expected_ci_layer(collected_items: list[pytest.Ite
 def test_layers_partition_the_fixed_collected_suite(collected_items: list[pytest.Item]) -> None:
     layers = {
         name: {item.nodeid for item in collected_items if layer(item) == name}
-        for name in ('backend', 'browser', 'live', 'scanner')
+        for name in ('backend', 'browser', 'r5-api', 'r5-browser', 'live', 'scanner')
     }
     all_nodeids = {item.nodeid for item in collected_items}
 
@@ -186,6 +196,8 @@ def test_marker_selection_expressions_match_the_fixed_layers(collected_items: li
         BROWSER: 'browser',
         LIVE: 'live',
         SCANNER: 'scanner',
+        'ci_r5_native and not ci_browser and not live_provider and not real_scanner':'r5-api',
+        'ci_r5_native and ci_browser and not live_provider and not real_scanner':'r5-browser',
     }
     for expression, expected_layer in expected.items():
         collector = ItemCollector()
@@ -329,3 +341,76 @@ def test_default_api_acceptance_selects_all_fourteen_sdk_nodes_without_optional_
     assert _nodeids(collector.items, 'tests/e2e/test_agent_sdk_process.py::') == set(SDK_PROCESS_BACKEND_NODES)
     for node in SDK_PROCESS_BACKEND_NODES:
         _assert_layer(collector.items, 'backend', node)
+
+
+def test_r5_required_execution_checks_reject_missing_skipped_and_duplicate_nodes(tmp_path):
+    from tests.e2e import capa_outcome_runner as runner
+    assert hasattr(runner, '_require_r5_success'), 'R5 has no mandatory execution receipt contract'
+    from xml.etree import ElementTree as ET
+    assert runner.R5_REQUIRED['r5-browser']
+    for mode in ('api','r5-api','r5-browser'):
+        expected=runner.R5_REQUIRED[mode]
+        assert expected
+        root=ET.Element('testsuite')
+        for classname,names in expected.items():
+            for name in names:
+                ET.SubElement(root,'testcase',classname=classname,name=name)
+        path=tmp_path/'r5.xml'
+        ET.ElementTree(root).write(path)
+        runner._require_r5_success(path,{'xpassed':0},mode,('tests',))
+        first=list(root)[0]
+        ET.SubElement(first,'skipped')
+        ET.ElementTree(root).write(path)
+        with pytest.raises(ValueError):runner._require_r5_success(path,{'xpassed':0},mode,('tests',))
+        first.remove(list(first)[0]);root.remove(first)
+        ET.ElementTree(root).write(path)
+        with pytest.raises(ValueError):runner._require_r5_success(path,{'xpassed':0},mode,('tests',))
+        root.append(first);root.append(first)
+        ET.ElementTree(root).write(path)
+        with pytest.raises(ValueError):runner._require_r5_success(path,{'xpassed':0},mode,('tests',))
+
+
+def test_r5_default_targets_and_marker_contract_cover_actual_process_browser_and_migrations():
+    from tests.e2e import capa_outcome_runner as runner
+    assert hasattr(runner,'R5_REQUIRED'), 'R5 missing required node catalog'
+    for mode in ('api','r5-api','r5-browser'):
+        for classname in runner.R5_REQUIRED[mode]:
+            target=classname.replace('.','/')+'.py'
+            assert target in runner.DEFAULT_TARGETS[mode]
+    assert 'tests.e2e.test_r5_d5_ui' in runner.R5_REQUIRED['r5-browser']
+    assert 'tests.e2e.test_r5_d5_browser' in runner.R5_REQUIRED['r5-browser']
+    for name in ('test_r5_d5_process','test_r5_model_agent'):
+        assert 'tests.e2e.'+name in runner.R5_REQUIRED['r5-api']
+
+
+def test_fixed_r5_catalog_matches_collection_and_required_layer(collected_items):
+    from tests.ci.r5_required import R5_REQUIRED
+    for mode,classes in R5_REQUIRED.items():
+        for classname,names in classes.items():
+            prefix=classname.replace('.','/')+'.py::'
+            assert _nodeids(collected_items,prefix)=={prefix+name for name in names}
+            for name in names:_assert_layer(collected_items,'backend' if mode=='api' else mode,prefix+name)
+
+
+def test_r5_platform_credentials_and_pilot_configuration_never_enter_ordinary_children():
+    from tests.e2e.capa_outcome_runner import build_layer_environment
+    from tests.ci.browser_runtime import browser_environment
+    private={'R5_MODEL_CREDENTIAL_SYNTHETIC':'private-key-sentinel',
+             'AGENT_R5_MODEL_PILOT_FILE':'private-policy-sentinel',
+             'AGENT_R5_MODEL_PILOT_ENABLED':'true','OPENAI_API_KEY':'provider-sentinel'}
+    for layer in ('api','browser','r5-api','r5-browser'):
+        env=build_layer_environment(private,'postgresql+asyncpg://u:p@127.0.0.1:1/r5_test',layer)
+        assert not any('sentinel' in value for value in env.values())
+        assert not any(key.startswith(('R5_MODEL_CREDENTIAL_','AGENT_R5_')) for key in env)
+        assert not any('sentinel' in value for value in browser_environment(private,{}).values())
+
+
+def test_r5_workflow_uses_required_supported_host_and_explicit_job_bundle():
+    root=Path(__file__).resolve().parents[3]
+    job=yaml.safe_load((root/'.github/workflows/test.yml').read_text())['jobs']['r5-native']
+    assert job['runs-on']==['self-hosted','macOS','openqms-r5-sandbox']
+    command=next(step['run'] for step in job['steps'] if step.get('name','').startswith('Run mandatory R5'))
+    assert 'tests.ci.r5_native_gate' in command and '$RUNNER_TEMP/openqms-r5-native-job.json' in command
+    assert 'continue-on-error' not in job
+    native=_make_dry_run('check-r5-native')
+    assert 'r5-api' in native and 'r5-browser' in native

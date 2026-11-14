@@ -162,11 +162,27 @@ def qualify_test_vector_namespace(db, monkeypatch):
 @pytest.mark.parametrize('consumer', ['draft', 'd7-auto-fill', 'ppt-model'])
 async def test_existing_consumers_without_item_acl_refuse_full_material(d5_case, consumer):
     c = d5_case
+    if consumer == 'draft':
+        from fastapi import HTTPException
+        from uuid import uuid4
+        from app.schemas.capa_draft import DraftRequest
+        from app.services.capa_draft_service import generate_draft
+        from app.models.user import User
+        from app.core.deps import RequestScope
+        from app.core.factory_scope import FactoryScope, ProductLineScope
+        actor = await c.db.get(User, c.actors[2].user.user_id)
+        scope = RequestScope(user=actor, effective_factory_id=c.report.factory_id,
+            factory_scope=FactoryScope([c.report.factory_id], c.report.factory_id),
+            pl_scope=ProductLineScope('ALL', None))
+        with pytest.raises(HTTPException) as caught:
+            await generate_draft(c.db, c.report.report_id, 'd6',
+                DraftRequest(format='structured', request_id=str(uuid4())),
+                scope.user, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())), scope=scope)
+        assert caught.value.status_code == 403
+        assert caught.value.detail == 'D5_FULL_MATERIAL_UNAVAILABLE'
+        return
     with pytest.raises(PermissionError, match='D5_FULL_MATERIAL_UNAVAILABLE'):
-        if consumer == 'draft':
-            from app.services.capa_draft_service import generate_draft
-            await generate_draft(c.db, c.report.report_id, 'd6', None, None, None)
-        elif consumer == 'd7-auto-fill':
+        if consumer == 'd7-auto-fill':
             from app.services.capa_d7_action_service import auto_fill_d7
             c.report.status = 'D7_PREVENTION'
             await c.db.commit()
