@@ -92,8 +92,12 @@ if ! docker network inspect openqms-preview-edge >/dev/null 2>&1; then
 fi
 # Resource-bounded isolated preview builder; no production app resources are reset.
 if ! docker buildx inspect openqms-preview-builder >/dev/null 2>&1; then
-  docker buildx create --name openqms-preview-builder --driver docker-container --driver-opt memory=2g,cpu-quota=200000 >/dev/null
+  docker buildx create --name openqms-preview-builder --driver docker-container --driver-opt memory=2g >/dev/null
 fi
 docker buildx inspect --bootstrap openqms-preview-builder >/dev/null
+# NanoCPUs cannot be applied while an older bootstrap's positive CFS quota remains.
+if [[ $(docker inspect --format '{{.HostConfig.CpuQuota}}' buildx_buildkit_openqms-preview-builder0) -gt 0 ]]; then
+  docker update --cpu-quota -1 buildx_buildkit_openqms-preview-builder0 >/dev/null
+fi
 docker update --cpus 2 --memory 2g --pids-limit 512 buildx_buildkit_openqms-preview-builder0 >/dev/null
 printf '%s\n' 'Trusted Oracle controller installed; install separate restricted public keys before enabling workflows.'
