@@ -19,13 +19,13 @@ from app.services.capa_current_access import current_capa_access, current_capa_t
 from app.services import fmea_agent_sources
 
 
-async def _target(db, scope, report_id):
-    _, factories, lines = await current_capa_access(db, scope)
+async def _target(db, scope, report_id, access=None):
+    _, factories, lines = access if access is not None else await current_capa_access(db, scope)
     return await current_capa_target_metadata(db, report_id, factories, lines)
 
 
-async def _visible_metadata(db, scope, report_id):
-    target = await _target(db, scope, report_id)
+async def _visible_metadata(db, scope, report_id, access=None):
+    target = await _target(db, scope, report_id, access)
     p, command = CapaD5Proposal, AgentD5Command
     proof, revision = CapaD4RootCauseSourceProof, CapaD4RootCauseRevision
     # Independent foreign keys establish existence only. Every association must
@@ -81,7 +81,19 @@ async def _visible_metadata(db, scope, report_id):
                 break
             if source.fmea_id not in source_cache:
                 try:
-                    source_cache[source.fmea_id] = await fmea_agent_sources.visible_fmea_source(db, scope, source.fmea_id)
+                    if access is None:
+                        source_cache[source.fmea_id] = await fmea_agent_sources.visible_fmea_source(db, scope, source.fmea_id)
+                    else:
+                        from app.models.fmea import FMEADocument
+                        from app.core.permissions import Module, PermissionLevel
+                        levels, factories, lines = access
+                        current = (await db.execute(select(FMEADocument.factory_id,
+                            FMEADocument.product_line_code).where(FMEADocument.fmea_id == source.fmea_id))).one_or_none()
+                        source_cache[source.fmea_id] = current if (
+                            levels.get(Module.FMEA, PermissionLevel.NONE) >= PermissionLevel.VIEW
+                            and current is not None
+                            and (factories.accessible_factory_ids is None or current.factory_id in factories.accessible_factory_ids)
+                            and (lines.mode == 'ALL' or current.product_line_code in (lines.codes or []))) else None
                 except SourceUnavailable:
                     source_cache[source.fmea_id] = None
             current = source_cache[source.fmea_id]
@@ -223,3 +235,82 @@ async def read_d5_proposal(db, scope, report_id, proposal_id):
 
 async def read_d5_measure(db, scope, report_id, measure_id):
     return await _read(db, scope, report_id, kind='measures', item_id=measure_id)
+
+
+async def _formal_ids(db, report_id):
+    # Compare against the raw persisted set. An invalid association is a reason
+    # to refuse complete material, never permission to silently omit a measure.
+    with db.no_autoflush:
+        return (await db.execute(select(CapaD5Measure.measure_id, CapaD5Measure.proposal_id)
+            .join(CapaD5Proposal, CapaD5Proposal.proposal_id == CapaD5Measure.proposal_id)
+            .where(CapaD5Proposal.report_id == report_id).order_by(CapaD5Measure.measure_id))).all()
+
+
+async def require_legacy_d5_only(db, report_id):
+    """Flows without item ACL/recipient support cannot claim complete material."""
+    if await _formal_ids(db, report_id):
+        raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+
+
+async def full_d5_material(db, capa, *, scope=None, access=None):
+    """Controlled, complete internal snapshot; never an employee list response.
+
+    The caller provides live authority and holds the CAPA parent for decisions.
+    Source scope may include other product lines, unlike legacy D4 references.
+    """
+    formal = await _formal_ids(db, capa.report_id)
+    if not formal:
+        return []
+    if scope is not None:
+        access = await current_capa_access(db, scope)
+    if access is None:
+        raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    _, rows, sources = await _visible_metadata(db, scope, capa.report_id, access)
+    by_id = {row.proposal_id: row for row in rows if row.state == 'adopted'}
+    if any(item.proposal_id not in by_id for item in formal):
+        raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    signature = _signature(rows, sources)
+    import hashlib
+    import hmac
+    from app.config import settings
+    material = []
+    for item in formal:
+        row = by_id[item.proposal_id]
+        body = (await db.execute(select(CapaD5Measure.final_text, CapaD5Measure.adopted_by,
+            CapaD5Measure.adopted_at).where(CapaD5Measure.measure_id == item.measure_id))).one()
+        material.append(dict(measure_id=str(item.measure_id), proposal_id=str(item.proposal_id),
+            final_text=body.final_text, adopted_by=str(body.adopted_by), adopted_at=body.adopted_at.isoformat(),
+            text_version=hmac.new(settings.SECRET_KEY.encode(), b'openqms.d5.measure.v1\0'
+                + item.measure_id.bytes + body.final_text.encode(), hashlib.sha256).hexdigest(),
+            revision_id=str(row.revision_id), proof_id=str(row.proof_id),
+            sources=sorted([dict(source_id=str(s.source_id), projection_id=s.projection_id,
+                factory_id=str(s.factory_id), product_line_code=s.product_line_code,
+                fmea_id=str(s.fmea_id), node_id=s.node_id, node_hmac=s.node_hmac)
+                for s in sources[item.proposal_id]], key=lambda s: s['source_id'])))
+    if scope is not None:
+        access = await current_capa_access(db, scope)
+    _, latest, latest_sources = await _visible_metadata(db, scope, capa.report_id, access)
+    if signature != _signature(latest, latest_sources) or formal != await _formal_ids(db, capa.report_id):
+        raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    return material
+
+
+async def has_formal_d5(db, capa):
+    """Business completeness is independent of an employee's filtered view."""
+    if (capa.d5_correction or '').strip():
+        return True
+    from types import SimpleNamespace
+    from app.core.permissions import Module, PermissionLevel
+    # Qualification is server-owned and does not use an employee's projected
+    # item count. Association/source integrity still applies to actual measures.
+    business_access = ({Module.FMEA: PermissionLevel.VIEW},
+        SimpleNamespace(accessible_factory_ids=None), SimpleNamespace(mode='ALL'))
+    _, rows, _ = await _visible_metadata(db, None, capa.report_id, business_access)
+    valid = {row.proposal_id for row in rows if row.state == 'adopted'}
+    return any(item.proposal_id in valid for item in await _formal_ids(db, capa.report_id))
+
+
+def complete_d5_text(legacy, material):
+    if not material:
+        return legacy
+    return '\n'.join([value for value in [legacy, *(row['final_text'] for row in material)] if value])

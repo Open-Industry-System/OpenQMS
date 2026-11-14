@@ -236,6 +236,8 @@ async def generate_draft(
     user: User,
     request: Request,
 ) -> dict:
+    from app.services.capa_d5_measures import require_legacy_d5_only
+    await require_legacy_d5_only(db, report_id)
     start_time = time.time()
 
     from app.services.agent import provider_adapter

@@ -892,6 +892,7 @@ describe("CAPADetailPage knowledge sink card", () => {
     vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({
       report_id: "test-report-id", status: "D8_APPROVAL_PENDING", contract: "capa.outcome-review.v1",
       review_round_id: "00000000-0000-4000-8000-000000000002", revision: "a".repeat(64), binding_status: "pending",
+      d5_measures: [],
       core: { d4_root_cause: "root", d5_correction: "implemented", d6_verification: "tested", d7_prevention: "prevention" },
       verifications: [], d7_actions: [], documents: [], decision: null,
       doc_gate: { decision_id: "00000000-0000-4000-8000-000000000003", analysis_id: "00000000-0000-4000-8000-000000000004",
@@ -1007,6 +1008,7 @@ describe("Task 5 reviewed outcome integration", () => {
   const review = {
     report_id: "test-report-id", status: "D8_APPROVAL_PENDING", contract: "capa.outcome-review.v1",
     review_round_id: "00000000-0000-4000-8000-000000000002", revision: "a".repeat(64), binding_status: "pending",
+    d5_measures: [],
     core: { d4_root_cause: "根因", d5_correction: "实际纠正措施", d6_verification: "实施后复测合格", d7_prevention: "预防复发" },
     verifications: [], d7_actions: [], documents: [], decision: null,
       doc_gate: { decision_id: "00000000-0000-4000-8000-000000000003", analysis_id: "00000000-0000-4000-8000-000000000004",

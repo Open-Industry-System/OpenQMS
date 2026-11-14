@@ -313,6 +313,8 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
     capa = await _lock_d7_material_write(
         db, capa, user.user_id, PermissionLevel.EDIT
     )
+    from app.services.capa_d5_measures import require_legacy_d5_only
+    await require_legacy_d5_only(db, capa.report_id)
     if not capa.d5_correction:
         raise ValueError("D5 永久措施为空，无法自动回填")
     if req.fmea_id is None or not req.failure_cause_node_id:

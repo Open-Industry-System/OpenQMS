@@ -257,3 +257,14 @@ metadata; the existing factory-only resolver remains available for FMEA admissio
 The API preserves FMEA checks and applies Planning VIEW plus effective/accessible
 factory and product-line intersection for CP presence. Unsupported/missing
 objects fail closed; presence is never used as document access authority.
+
+### R5 D5 consumer boundary
+
+Formal D5 measures are separate from legacy `d5_correction`. Employee reads use
+`capa_d5_measures` projections; complete exports/reviews compare the raw formal
+set and require every original source. Outcome snapshots bind measure identity,
+final-text version and complete source coordinates under the existing decision
+fences. Legacy indexes and knowledge consumers exclude formal text. Existing
+model flows without an item recipient contract fail closed when measures exist.
+See [consumer policy](../../../docs/development/capa-d5-consumers.md) for every
+consumer, test evidence and the known tenant vector namespace limitation.

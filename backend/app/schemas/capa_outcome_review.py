@@ -19,6 +19,28 @@ class OutcomeCore(OutcomeModel):
     d7_prevention: str | None = Field(repr=False)
 
 
+class OutcomeD5Source(OutcomeModel):
+    source_id: UUID
+    projection_id: str
+    factory_id: UUID
+    product_line_code: str
+    fmea_id: UUID
+    node_id: str
+    node_hmac: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class OutcomeD5Measure(OutcomeModel):
+    measure_id: UUID
+    proposal_id: UUID
+    final_text: str = Field(repr=False)
+    text_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    adopted_by: UUID
+    adopted_at: datetime
+    revision_id: UUID
+    proof_id: UUID
+    sources: list[OutcomeD5Source] = Field(repr=False)
+
+
 class OutcomeDocumentRef(OutcomeModel):
     module: Literal["fmea", "planning"]
     object_id: UUID
@@ -66,6 +88,7 @@ class CapaOutcomeReview(OutcomeModel):
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     binding_status: Literal["pending", "verified", "legacy_unversioned", "unverifiable"]
     core: OutcomeCore = Field(repr=False)
+    d5_measures: list[OutcomeD5Measure] = Field(default_factory=list, repr=False)
     verifications: list[VerificationResponse] = Field(repr=False)
     d7_actions: list[D7NodeActionResponse] = Field(repr=False)
     doc_gate: OutcomeDocGate | None = Field(repr=False)
