@@ -247,3 +247,6 @@ __all__ = [
     "TenantAttachmentStorageDisposal",
 ]
 from app.models.agent_d4_recovery import D4RecoveryCheckpoint, D4RecoveryRestart, D4TaskParentGrant
+
+from app.models.agent_d5_command import AgentD5Command, AgentD5CheckpointPosition
+from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5ProposalSource, CapaD5Measure, CapaD5Withdrawal, CapaD5StaffReceipt
