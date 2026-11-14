@@ -95,9 +95,12 @@ if ! docker buildx inspect openqms-preview-builder >/dev/null 2>&1; then
   docker buildx create --name openqms-preview-builder --driver docker-container --driver-opt memory=2g >/dev/null
 fi
 docker buildx inspect --bootstrap openqms-preview-builder >/dev/null
-# NanoCPUs cannot be applied while an older bootstrap's positive CFS quota remains.
-if [[ $(docker inspect --format '{{.HostConfig.CpuQuota}}' buildx_buildkit_openqms-preview-builder0) -gt 0 ]]; then
-  docker update --cpu-quota -1 buildx_buildkit_openqms-preview-builder0 >/dev/null
+# Noncanonical CFS fields can override NanoCPUs at runtime even when inspect looks bounded.
+quota=$(docker inspect --format '{{.HostConfig.CpuQuota}}' buildx_buildkit_openqms-preview-builder0)
+period=$(docker inspect --format '{{.HostConfig.CpuPeriod}}' buildx_buildkit_openqms-preview-builder0)
+if [[ "$quota" != 0 || "$period" != 0 ]]; then
+  echo 'preview builder has legacy CFS settings; administrator must review and recreate this dedicated builder' >&2
+  exit 1
 fi
 docker update --cpus 2 --memory 2g --pids-limit 512 buildx_buildkit_openqms-preview-builder0 >/dev/null
 printf '%s\n' 'Trusted Oracle controller installed; install separate restricted public keys before enabling workflows.'

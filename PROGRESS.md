@@ -145,9 +145,10 @@
 - 独立工作树 `/Users/sam/.codex/worktrees/oracle-cicd/OpenQMS`，分支 `integration/oracle-cicd-20261114`，基线合并提交 `198377db`；草稿 [PR #31](https://github.com/Open-Industry-System/OpenQMS/pull/31)。main 为 `2dbb84b1`，线上为 `d8648c15`；服务器版本尚未切换。
 - 保留主线租户协调器和冻结快照，加入公共合并迁移 `20261114_production_merge` 及租户 `tv010_refresh_sessions`。真实迁移专项 82 passed / 1 skipped，缺少 PG15 工具的快照测试另用独占容器补测 1 passed；两条公共升级路径保留已有用户及会话 2 passed。完整前端 888 项、类型检查、构建、SDK 三层和浏览器门禁 11 项通过。
 - 首次完整本地验收未通过：3868 passed / 46 failed / 1322 errors / 5 skipped。途中独占 PostgreSQL 容器停止（exit137、OOMKilled=false，同期多个其他容器也停止），造成连接级联错误；另定位严格 umask077 下归档测试夹具模式及 Alembic 禁用 logger 导致的测试捕获问题。仅修正夹具，29 项在严格 umask 及实际日志配置/逆序执行下通过，生产守卫不变。受中断影响的 111 个模块已在新独占容器复验 1635 passed / 0 failed / 0 errors / 0 skipped；不将首次验收计为通过。
-- 已应用受审查的 CI/CD 实现：准确 SHA/收据与权限校验、独立生产/预览角色、受限 SSH 接收器、不可变归档/镜像/数据库身份、备份与失败应用恢复、预览隔离/路由/关闭清理。自动化专项 95 项通过；最终联合 CI/文档/夹具检查 205 项通过。预览初始化在真实受限容器验证全部非 Viewer 账号禁用和密码轮换、刷新会话撤销、Viewer 保留及 CAPA 预检 CLEAN；临时初始化资源已清理。
-- 生产 `qms.smartindustry.world` 与 `*.preview.openqms.smartindustry.world` 均已公共解析至 `150.230.197.45`，现有生产 HTTPS `/api/health` 返回正常。两套新部署密钥仅生成在私有临时目录；尚未写入 GitHub 或服务器，自动部署未启用。公网 SSH 的 GitHub runner 无凭据握手探测已成功（运行 43608105578），本机公网连接受限；Tailscale 管理连接正常。临时诊断分支已清理，专用角色认证仍待安装后验收。
-- 安装前真实 Docker 兼容性验证发现旧 CPU quota 与 NanoCPUs 配置冲突；安装器已移除首次 quota 并在旧配置存在时清除其正 quota，再统一设置 NanoCPUs。独立未启动容器中全新/旧 quota、首次/重复四条路径实测通过，相关控制器 33 项通过；探测资源均已清理。
+- 已应用受审查的 CI/CD 实现：准确 SHA/收据与权限校验、独立生产/预览角色、受限 SSH 接收器、不可变归档/镜像/数据库身份、备份与失败应用恢复、预览隔离/路由/关闭清理。自动化专项 97 项通过；最终联合 CI/文档/夹具检查 207 项及 4 个子测试通过。预览初始化在真实受限容器验证全部非 Viewer 账号禁用和密码轮换、刷新会话撤销、Viewer 保留及 CAPA 预检 CLEAN；临时初始化资源已清理。
+- 生产 `qms.smartindustry.world` 与 `*.preview.openqms.smartindustry.world` 均已公共解析至 `150.230.197.45`，现有生产 HTTPS `/api/health` 返回正常。两套新部署密钥仅生成在私有临时目录；GitHub Environment 的 main 限制及关闭的开关已准备，私钥上传因自动审批要求具体目的地授权而暂停，等待所有者明确确认。密钥尚未写入 GitHub 或服务器，自动部署未启用。公网 SSH 的 GitHub runner 无凭据握手探测已成功（运行 43608105578），本机公网连接受限；Tailscale 管理连接正常。临时诊断分支已清理，专用角色认证仍待安装后验收。
+- 2026-11-15 内核补验确认旧 CFS 字段可能覆盖 NanoCPUs：旧 `CpuQuota=-1` 配合 NanoCPU 字段时，首次/重启可显示 `cpu.max=max`。最终安装器和发布控制器只接受 `CpuQuota=0`、`CpuPeriod=0`，拒绝自动转换旧状态；现有服务器尚无该专用构建器。标准新建配置首次启动、运行中重复配置及重启均实测 `cpu.max=200000 100000`，所有临时探测容器已清理。相关拒绝/正常构建路径回归和独立审查通过。
+
 - 下一步：完成修正提交上的完整 CI，按实际收据记录结果；安装经验证的受限控制器与角色密钥、配置 GitHub Environment，然后完成实际预览更新/清理和生产发布验收。所有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
 
 

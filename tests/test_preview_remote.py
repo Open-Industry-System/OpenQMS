@@ -92,6 +92,32 @@ class PreviewRemoteTests(unittest.TestCase):
             self.assertEqual(subprocess.call_args.args[0],['docker','rm','-f','e'*64])
         self.assertEqual(m.signal.getsignal(m.signal.SIGHUP),old)
 
+    def test_legacy_cpu_quota_metadata_rejected_before_build(self):
+        # A real Docker legacy-quota -> NanoCpus update left cpu.max unlimited
+        # even though NanoCpus reported two CPUs. Reject every mixed mode.
+        for quota, period in [(-1,0), (200000,0), (0,100000), (200000,100000)]:
+            with self.subTest(quota=quota,period=period):
+                obj = release()
+                config = {'Memory':2147483648,'NanoCpus':2000000000,
+                          'PidsLimit':512,'CpuQuota':quota,'CpuPeriod':period}
+                inspected = Mock(stdout=json.dumps([{'HostConfig':config}]))
+                with patch.object(obj,'verify'), patch.object(obj,'provision'), patch.object(m.prod,'digest',return_value='same'), patch.object(m.prod,'run',return_value=inspected) as docker, patch.object(obj,'image_ids'), patch.object(obj,'compose'):
+                    with self.assertRaisesRegex(ValueError,'bounded preview builder'):
+                        obj.build()
+                    self.assertEqual(len(docker.call_args_list),1)
+                    self.assertEqual(docker.call_args.args[0],['docker','inspect','buildx_buildkit_openqms-preview-builder0'])
+
+    def test_canonical_nanocpus_builder_runs_builds(self):
+        obj = release()
+        config = {'Memory':2147483648,'NanoCpus':2000000000,
+                  'PidsLimit':512,'CpuQuota':0,'CpuPeriod':0}
+        inspected = Mock(stdout=json.dumps([{'HostConfig':config}]))
+        images = {'backend':'sha256:'+'a'*64,'web':'sha256:'+'b'*64}
+        with patch.object(obj,'verify'), patch.object(obj,'provision'), patch.object(m.prod,'digest',return_value='same'), patch.object(m.prod,'run',return_value=inspected) as docker, patch.object(obj,'image_ids',return_value=images), patch.object(obj,'compose'):
+            self.assertEqual(obj.build(),images)
+            builds=[call for call in docker.call_args_list if call.args[0][:3]==['docker','buildx','build']]
+            self.assertEqual(len(builds),2)
+
     def test_bad_runtime_image_never_publishes_route(self):
         obj = release()
         images = {'backend':'sha256:'+'a'*64,'web':'sha256:'+'b'*64}
