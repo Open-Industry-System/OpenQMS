@@ -1,6 +1,6 @@
 # Oracle preview setup and verification
 
-Use the shared `deploy-oracle-release.py` guarded release pipeline in its built-in preview mode, backed by `oracle-preview-remote.py::PreviewRelease`. `deploy-oracle-preview.py --cleanup N` supports trusted closed-PR cleanup. No live Oracle, DNS, TLS or preview lifecycle execution has been claimed.
+Use the shared `deploy-oracle-release.py` guarded release pipeline in its built-in preview mode, backed by `oracle-preview-remote.py::PreviewRelease`. `deploy-oracle-preview.py --cleanup N` supports trusted closed-PR cleanup. Build and runtime-network prerequisites have been verified on Oracle; live application rollout, preview TLS issuance and the full preview lifecycle remain pending.
 
 ## Trusted host installation
 
