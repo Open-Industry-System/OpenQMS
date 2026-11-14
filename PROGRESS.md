@@ -140,6 +140,14 @@
 
 以下授权与验证属于原 CI 分支，不扩展为本集成分支的推送、部署或生产授权。
 
+### 2026-11-14 — Oracle 生产基线与自动部署集成（进行中）
+
+- 独立工作树 `/Users/sam/.codex/worktrees/oracle-cicd/OpenQMS`，分支 `integration/oracle-cicd-20261114`，从 main `2dbb84b1` 合入线上 `d8648c15`；全部文本冲突已解决，生产尚未切换。
+- 保留 main 的租户协调器、冻结快照与业务行为，加入 `20261114_production_merge` 和租户 `tv010_refresh_sessions`；两条公共迁移起点升级及已有用户/刷新会话保留测试 2 项通过。
+- 已验证：生产门禁/身份纯测试 41 项，生产配置/备份/归档等 196 项，更新后的发布文档契约 49 项，真实迁移专项 82 passed / 1 skipped（缺本地 PG15 工具），完整前端 99 文件 / 888 项通过，类型检查与构建通过，SDK 三层通过。独立数据库浏览器验收 11 项全通过；完整 `make check` 运行中。
+- 独占测试资源登记与日志分别位于 `/private/tmp/openqms-oracle-cicd-verification` 和 `/private/tmp/openqms-oracle-cicd-browser`；凭据不进入 Git。自动化代码在临时目录准备，基线通过后才应用；预览域名为 `pr-<编号>.preview.openqms.smartindustry.world`，DNS 和专用部署凭据尚未配置验收。
+
+
 ### 2026-11-09 — PR #29 main集成验证通过（待推送后远端CI）
 
 - 六处冲突保留双方有效改动；增量public merge head与tenant tv007、当前/历史parity、CAPA命名空间及锁顺序、测试隔离和CP协作权限已完成独立复审。复审发现的旧current-head测试遗漏已关闭，无剩余阻塞发现。
@@ -327,8 +335,21 @@
 **当前阶段**: PR #26 自批回归修复与 `main` 整合已完成本地验证，提交推送后检查远端 CI 与复审
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
+**更新日期**: 2026-09-19
+**当前工作分支**: `worktree-oracle-production-deploy`
+**Oracle 已部署不可变版本**: `ac84e158ec2cf44252a078cdaa48c3d40483101a`（后三账号 UI 与生产构建提交尚未重新部署）
 
-详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+详细路线图见 `docs/ROADMAP.md`；下文保留此前各阶段的历史记录。
+
+## Oracle A1 公开演示部署（2026-09-18）
+
+- **已部署运行状态**：Namecheap BasicDNS 的 `qms` A 记录解析到 `150.230.197.45`，`http://qms.smartindustry.world/` 返回 308，公网 `https://qms.smartindustry.world/api/health` 返回 200；Let's Encrypt YE2 证书的 SAN 包含域名，有效期至 2026-12-16。PostgreSQL、Redis、Neo4j、backend、web 的配置健康检查通过；graph-worker 运行中但没有 Docker healthcheck。Caddy 在主机发布 80/443，PostgreSQL 仅绑定 `127.0.0.1:5432`；公网 SSH 22 按所有者决定暂保留。Mac 的 OpenClash 使 `nc` 对保留地址的不存在端口也报 open，因此其端口扫描不能证明内部服务公网可达。
+- **发布门禁与浏览器**：已部署版本的不可变归档/OCI revision、目标身份、迁移、独立测试库完整检查（2172 passed / 43 skipped / 3 xfailed / 2 xpassed / 3 warnings；前端构建 6837 modules）、preflight CLEAN（0 breaks）和串行 rollout 通过。首次发布已静默 seed，后续未再次 seed，`15432` 隧道已关闭。公网浏览器验证 320/390/1440px 无横向溢出、中文/English、Viewer 只填表再登录、未登录仪表盘跳转、嵌套路由刷新、已登录公开首页和无控制台错误/混合内容；私网双 Viewer refresh 独立轮换/重放拒绝、Viewer PATCH 403、代理限流与重启后数据持久性也通过。
+- **备份**：systemd 每日 timer 已启用；手动生成一个 mode `0600` 的非空 PostgreSQL dump 并通过 `pg_restore --list` 校验。备份仍在同一主机，尚无异地副本。
+- **演示账号决策**：公开登录最终只展示 `viewer`、`engineer`、`manager`；`admin` 与同为管理员角色的 `groupadmin` 保持私密，避免访客进入用户管理修改密码与权限。Engineer 的 `user_mgmt` 为 0，Manager 仅为 VIEW=1，均不能修改账号；两者仍可修改共享质量数据。没有自动重置，不得输入真实数据或真实 API 密钥。当前已部署登录页仍只展示 Viewer；三账号 UI 和可选构建输入已在本地完成，**尚未发布**。
+- **边界**：主机防火墙 80/443 已精确持久化且原文件备份；OCI 公共子网 80/443 已由用户添加，公网 22 未删除。没有 push、PR 或 merge。临时非公开用户密码重置的全 refresh 会话撤销线上验收、可信外部网络的内部端口关闭扫描、异地备份及全分支最终复核仍未完成。
+
+**下一步**：重新验证三账号解析、禁用构建无泄漏、完整本地门禁和评审；随后按不可变归档流程发布，并在公网确认三账号可登录且 Engineer/Manager 对用户修改接口仍返回 403。最后处理异地备份、保留公网 22 的风险与分支交接。
 
 ### 2026-11-09 — PR29 latest-main整合本地验证完成，待parent最终集成
 
@@ -487,6 +508,9 @@
 ---
 
 ## 独立租户迁移与 Agent 接入（2026-10-01）
+> **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
+
+## 系统级 E2E 测试套件（M0+M1，已落地）
 
 - **已实现**：逐事务租户/generation 绑定、全局功能失败关闭、独立静态迁移链与对象级 parity、固定物理连接维护锁、原子 seed 和同租户恢复；插件安装与长期授权表默认禁用。规格及实施记录见[租户设计](docs/superpowers/specs/2026-09-27-independent-tenant-migration-design.md)、[租户计划](docs/superpowers/plans/2026-09-27-independent-tenant-migration.md)。
 - **本轮改动**：精确测试清单、观察 Compose/数据库排空、同一锁所有者重建、跨 schema 依赖拒绝、失败恢复与完整空租户插件表验收。独立规格复核发现并修复了 owner claim 清除未完成重建标记的问题；规格与代码质量复核均通过，无未解决的重要问题。
@@ -2263,3 +2287,15 @@ and all test profile/evidence files; the worktree remains user-dirty afterward.
 - 独立小范围复核Approved，无Critical/Important/Minor。证据在本工作树私有`.superpowers/mes-xfail-fix-20261101/`；原检查的3xfail2xpass及展开2failed2passed1teardown error记录在另一私有检查目录，均保留。
 - 仅使用本轮明确获授权的缓存固定pgvector镜像与随机_test库、回环端口。核验owner/专属卷/网络及零连接后，临时项目已删除，容器/卷/网络剩余均0；没有恢复旧CAPA环境或使用共享/种子/生产库。一次迁移后的正常停机请求来源未确定，已核验并恢复同一容器/卷，无数据重置。
 - 首次整改交接时未跑全站make check、未提交/push/merge/deploy；后续用户已授权按现行设计核对后独立提交并仅推功能分支，不创建PR/合并/部署。此改动作为后续测试维护差异审阅，不覆盖已完成CAPA阶段的原始冻结/验收收据。
+---
+
+## Oracle 生产部署 master plan — Task 11（2026-09-14）
+
+- [x] 新增 `scripts/backup-postgres.sh`：仅经 authoritative `production-compose.sh` 执行 `pg_dump -Fc` / container-local `pg_restore --list`，私有 partial、空文件拒绝、原子不覆盖发布、成功后七日窄范围保留、信号/失败清理与固定无敏感输出。
+- [x] 新增 `openqms-backup.service` / `.timer`（ubuntu oneshot；每日 03:17、Persistent、10m 随机延迟）。
+- [x] README 与中英部署 runbook 统一为固定项目名 `openqms` 的生产包装器命令；补齐 Oracle ARM64/Tailscale、Cloudflare DNS-only、Caddy trusted proxy、identity/check/initialize/preflight/rollout、密码轮换、Viewer 公共值、备份/恢复/回滚边界；移除生产直连 Compose、自动刷新旧说法与删除卷建议。
+- [x] ADR-0005 由 ADR-0014 supersede；记录 per-browser hashed rotating refresh session、replay/legacy/password-reset/audit 边界。
+- [x] RED→GREEN：初始 backup 14 tests / docs 12 tests；正式 review round 2 后 backup 20 tests / release-tree 24 tests / docs 44 tests，并扩充 wrapper/Compose/Dockerfile/web provenance regressions；coordinator 要求矩阵 198 passed，agent-expanded 最终矩阵实际 221 passed；Python compile、shell syntax、runbook Bash parse、两层 shell fake-Docker OCI 模板 pass/fail、stale-doc static check、`git diff --check` 通过。
+- [x] 正式 review 修复：backup 改为 `python3 os.link(..., follow_symlinks=False)` 精确目标原子发布并覆盖现有 file/FIFO/directory/symlink/race；`check-release-tree.py` 使用 deterministic SHA-256 + `100644`/`100755` mode manifest、exact path/hash/mode verifier，并拒绝 reserved runtime name 错误类型；runbook 使用 immutable `RELEASE_SHA` 的 `git archive` 私有 stage，stage 内由 archive manifests 新建 Python 3.11 venv + clean `npm ci`，所有本地 migrate/check/preflight 从 stage 执行；唯一 local test DB URL 显式贯穿首次/nested silent make；`production-compose.sh` 仅接受仓库 `.release-sha` 并清除 ambient override，Compose 将 SHA 传入 backend/web OCI revision label、graph-worker 复用 backend build；manifest/marker/build/label/ID 在单一 fail-closed SSH 中绑定，target identity（迁移前）、initialize、rollout 重复 tree/marker/tag ID/revision gate；并保留 `15432` target tunnel、Tailnet HTTP probe、持续运行 rollback、nonrecursive backup guard、README dev-only 与 `E2E_MODE=false`。
+
+**下一步（2026-09-19）**：以上 Task 11 为历史实施记录；最新 Oracle 公网状态和当前三账号演示 UI 发布门禁以文件开头的「Oracle A1 公开演示部署」为准。不得把本地新 UI 提交误报为已部署；`admin` 与 `groupadmin` 保持私密，无需恢复默认演示登录。

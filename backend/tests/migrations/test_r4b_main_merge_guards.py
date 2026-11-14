@@ -16,8 +16,8 @@ from tests.migrations.test_characteristic_refs import _seed_pre_upgrade_rows
 from tests.migrations.test_d4_text_delivery_delta import _seed_delivery_row, TABLES as TEXT_TABLES
 from tests.migrations.test_d4_recovery_delta import _seed_recovery, TABLES as RECOVERY_TABLES
 
-PUBLIC = '20261114_r4b_main_merge'
-TENANT = 'tv009_r4b_main_merge'
+PUBLIC = '20261114_production_merge'
+TENANT = 'tv010_refresh_sessions'
 CHAR = 'tv007_characteristic_refs'
 RECOVERY = 'tv008_d4_recovery'
 BASE = 'tv006_agent_read_tasks'

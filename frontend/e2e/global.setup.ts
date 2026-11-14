@@ -30,7 +30,8 @@ export default async function globalSetup() {
   try {
     await getSeedState();
   } catch (e) {
-    throw new Error(`[e2e] seed-state unreachable: is the e2e stack up and seeded? (${String(e)})`);
+    const message = `[e2e] seed-state unreachable: is the e2e stack up and seeded? (${String(e)})`;
+    throw new Error(message, { cause: e });
   }
 
   // 3. UI login per role → storageState.
