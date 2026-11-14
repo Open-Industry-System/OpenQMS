@@ -186,6 +186,133 @@ def paths_intersect(first: str, second: str) -> bool:
             or second.startswith(first.rstrip('/') + '/'))
 
 
+def _daemon_mount_path(value: str) -> str:
+    """Decode Linux mountinfo's documented escapes without consulting the host."""
+    require(isinstance(value, str) and value, 'invalid mount path')
+    escapes = {'040': ' ', '011': '\t', '012': '\n', '134': '\\'}
+    pieces = []
+    index = 0
+    while index < len(value):
+        if value[index] != '\\':
+            pieces.append(value[index])
+            index += 1
+            continue
+        token = value[index + 1:index + 4]
+        require(token in escapes, 'unknown mountinfo escape')
+        pieces.append(escapes[token])
+        index += 4
+    path = ''.join(pieces)
+    require(path.startswith('/') and '\x00' not in path and posixpath.normpath(path) == path,
+            'invalid daemon mount path')
+    return path
+
+
+def _linux_device_number(major: int, minor: int) -> int:
+    # Linux dev_t encoding; this controller may run on a non-Linux host where
+    # os.makedev uses a different platform encoding.
+    require(0 <= major <= 0xffffffff and 0 <= minor <= 0xffffffff, 'invalid device number')
+    return ((major & 0xfff) << 8) | ((major & ~0xfff) << 32) | (minor & 0xff) | ((minor & ~0xff) << 12)
+
+
+def diagnose_daemon_mount_relation(mountinfo_text: str, stat_text: str, source_mountpoint: str,
+                                   target_mountpoint: str, *, evidence_binding: dict,
+                                   expected_binding: dict) -> dict:
+    """Interpret supplied probe data for diagnostics only, never for deletion.
+
+    Binding labels are compared but not independently authenticated.  There is
+    no live collector in this controller: even matching labels or a positive
+    conclusion cannot change a bind's cleanup classification or READY state.
+    """
+    def result(relation: str, reason: str) -> dict:
+        return {'relation': relation, 'reason': reason, 'authorization_eligible': False}
+
+    try:
+        binding_keys = {'daemon_id', 'probe_id', 'volume_name', 'source_ref', 'capture_id'}
+        require(isinstance(evidence_binding, dict) and isinstance(expected_binding, dict)
+                and set(evidence_binding) == binding_keys and evidence_binding == expected_binding,
+                'capture binding mismatch')
+        require(all(isinstance(value, str) and 0 < len(value) <= 256 for value in evidence_binding.values())
+                and re.fullmatch(r'[0-9a-f]{64}', evidence_binding['probe_id']) is not None
+                and evidence_binding['volume_name'] == VOLUME, 'invalid capture binding')
+        require(isinstance(mountinfo_text, str) and len(mountinfo_text) <= 2 * 1024 * 1024
+                and isinstance(stat_text, str) and len(stat_text) <= 128 * 1024, 'invalid evidence size')
+        source_mountpoint = _daemon_mount_path(source_mountpoint)
+        target_mountpoint = _daemon_mount_path(target_mountpoint)
+        entries = []
+        seen_ids = set()
+        for line in mountinfo_text.splitlines():
+            left, separator, right = line.partition(' - ')
+            fields, tail = left.split(), right.split()
+            require(bool(separator) and len(fields) >= 6 and len(tail) >= 3,
+                    'invalid mountinfo line')
+            require(fields[0].isdigit() and fields[1].isdigit() and fields[0] not in seen_ids,
+                    'invalid mountinfo identity')
+            seen_ids.add(fields[0])
+            device = re.fullmatch(r'(\d+):(\d+)', fields[2])
+            require(device is not None, 'invalid mountinfo device')
+            entries.append({'device': (int(device.group(1)), int(device.group(2))),
+                            'root': _daemon_mount_path(fields[3]),
+                            'mountpoint': _daemon_mount_path(fields[4]), 'filesystem': tail[0]})
+        require(entries, 'empty mountinfo')
+        stats = {}
+        for line in stat_text.splitlines():
+            fields = line.rsplit(None, 3)
+            require(len(fields) == 4, 'invalid stat line')
+            path, device, inode, mode = fields
+            require(path.startswith('/') and '\x00' not in path and posixpath.normpath(path) == path
+                    and device.isdigit() and inode.isdigit() and re.fullmatch(r'[0-9a-fA-F]+', mode),
+                    'invalid stat fields')
+            require(path not in stats and int(inode) > 0 and (int(mode, 16) & 0o170000) == 0o040000,
+                    'ambiguous or non-directory stat')
+            stats[path] = int(device)
+        source = [item for item in entries if item['mountpoint'] == source_mountpoint]
+        target = [item for item in entries if item['mountpoint'] == target_mountpoint]
+        require(len(source) == len(target) == 1, 'missing or stacked probe mount')
+        source, target = source[0], target[0]
+
+        def reliable(item: dict) -> bool:
+            return (item['filesystem'] == 'ext4'
+                    and stats.get(item['mountpoint']) == _linux_device_number(*item['device']))
+
+        if (not reliable(source) or not reliable(target) or source['device'] != target['device']
+                or source['filesystem'] != target['filesystem']):
+            return result('INDETERMINATE', 'filesystem_or_device_unverified')
+        nested = [item for item in entries if item is not source and item is not target
+                  and (item['mountpoint'].startswith(source_mountpoint.rstrip('/') + '/')
+                       or item['mountpoint'].startswith(target_mountpoint.rstrip('/') + '/'))]
+        for item in nested:
+            if (not reliable(item) or item['device'] != source['device']
+                    or item['filesystem'] != source['filesystem']):
+                return result('INDETERMINATE', 'nested_mount_unverified')
+        if paths_intersect(source['root'], target['root']) or paths_intersect(source_mountpoint, target_mountpoint):
+            return result('RELATED', 'same_device_overlapping_root_or_mount')
+        for item in nested:
+            opposing = target['root'] if item['mountpoint'].startswith(source_mountpoint.rstrip('/') + '/') else source['root']
+            if paths_intersect(item['root'], opposing):
+                return result('RELATED', 'verified_nested_alias')
+        if nested:
+            return result('INDETERMINATE', 'nested_mount_present')
+        return result('CONFIRMED_UNRELATED', 'same_verified_device_disjoint_roots_no_nested_mount')
+    except (KeyError, TypeError, ValueError, OverflowError, RuntimeError):
+        return result('INDETERMINATE', 'invalid_or_unmatched_diagnostic_evidence')
+
+
+def attach_mount_diagnostic(audit: dict, container_id: str, source: str, diagnostic: dict) -> dict:
+    """Return a diagnostic annotation without changing any cleanup decision."""
+    require(isinstance(diagnostic, dict) and diagnostic.get('authorization_eligible') is False
+            and diagnostic.get('relation') in ('RELATED', 'CONFIRMED_UNRELATED', 'INDETERMINATE'),
+            'invalid diagnostic annotation')
+    copied = json.loads(json.dumps(audit))
+    references = copied.get('references') if isinstance(copied, dict) else None
+    require(isinstance(references, list), 'invalid mount audit')
+    matches = [item for item in references if isinstance(item, dict) and item.get('type') == 'bind'
+               and item.get('container_id') == container_id and item.get('source') == source
+               and item.get('classification') == 'indeterminate']
+    require(len(matches) == 1, 'ambiguous bind diagnostic target')
+    matches[0]['diagnostic'] = json.loads(json.dumps(diagnostic))
+    return copied
+
+
 def volume_consumers(inventory: dict[str, str], mountpoint: str) -> set[str]:
     global LAST_MOUNT_AUDIT
     # A failed fresh enumeration must never report a stale prior inventory.

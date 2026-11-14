@@ -193,6 +193,126 @@ class CleanupMockTests(unittest.TestCase):
              mock.patch.object(guard, 'inspect_volume', return_value={'name': guard.VOLUME, 'mountpoint': '/daemon/owned/data'}):
             self.assertEqual(guard.volume_consumers({owner: 'owner', other: 'other'}, '/daemon/owned/data'), {owner, other})
 
+    def daemon_binding(self, *, capture='capture-1'):
+        return {'daemon_id': 'test-daemon', 'probe_id': 'a' * 64,
+                'volume_name': guard.VOLUME, 'source_ref': 'source-1', 'capture_id': capture}
+
+    def daemon_relation(self, mounts, stats, *, observed=None, expected=None):
+        parser = getattr(guard, 'diagnose_daemon_mount_relation', None)
+        self.assertTrue(callable(parser), 'diagnostic mountinfo parser is missing')
+        binding = self.daemon_binding()
+        return parser(mounts, stats, '/probe/src', '/probe/target',
+                      evidence_binding=observed if observed is not None else binding,
+                      expected_binding=expected if expected is not None else binding)
+
+    def diagnostic_input(self, *, source_root='/tree/a', target_root='/tree/b', source_dev='8:1',
+                         target_dev='8:1', fs='ext4', source_stat=2049, target_stat=2049, nested=()):
+        lines = [f'10 1 {source_dev} {source_root} /probe/src ro - {fs} /dev/test ro',
+                 f'11 1 {target_dev} {target_root} /probe/target ro - {fs} /dev/test ro']
+        stat_lines = [f'/probe/src {source_stat} 1 41ed', f'/probe/target {target_stat} 2 41ed']
+        for ident, root, point, device, filesystem, stat_device in nested:
+            lines.append(f'{ident} 10 {device} {root} {point} ro - {filesystem} /dev/test ro')
+            stat_lines.append(f'{point} {stat_device} 3 41ed')
+        return '\n'.join(lines), '\n'.join(stat_lines)
+
+    def test_daemon_diagnostic_same_root_and_ancestor_are_related(self):
+        for target in ('/tree/a', '/tree/a/child', '/tree'):
+            with self.subTest(target=target):
+                mounts, stats = self.diagnostic_input(target_root=target)
+                result = self.daemon_relation(mounts, stats)
+                self.assertEqual(result['relation'], 'RELATED')
+                self.assertFalse(result['authorization_eligible'])
+
+    def test_daemon_diagnostic_same_device_disjoint_ordinary_fs_is_confirmed_unrelated(self):
+        mounts, stats = self.diagnostic_input()
+        result = self.daemon_relation(mounts, stats)
+        self.assertEqual(result['relation'], 'CONFIRMED_UNRELATED')
+        self.assertFalse(result['authorization_eligible'])
+
+    def test_daemon_diagnostic_nested_alias_is_related(self):
+        nested = [(12, '/tree/b/child', '/probe/src/submount', '8:1', 'ext4', 2049)]
+        mounts, stats = self.diagnostic_input(nested=nested)
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'RELATED')
+
+    def test_daemon_diagnostic_disjoint_nested_mount_is_indeterminate(self):
+        nested = [(12, '/tree/c', '/probe/src/submount', '8:1', 'ext4', 2049)]
+        mounts, stats = self.diagnostic_input(nested=nested)
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'INDETERMINATE')
+
+    def test_daemon_diagnostic_unverified_nested_mount_cannot_be_hidden_by_same_root(self):
+        nested = [(12, '/tree/a/deep', '/probe/src/submount', '8:1', 'fakeowner', 2049)]
+        mounts, stats = self.diagnostic_input(target_root='/tree/a', nested=nested)
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'INDETERMINATE')
+
+    def test_daemon_diagnostic_all_nested_mounts_must_be_verified_before_alias(self):
+        nested = [(12, '/tree/b/child', '/probe/src/alias', '8:1', 'ext4', 2049),
+                  (13, '/tree/c', '/probe/src/unknown', '8:1', 'fakeowner', 2049)]
+        mounts, stats = self.diagnostic_input(nested=nested)
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'INDETERMINATE')
+
+    def test_daemon_diagnostic_different_devices_are_indeterminate(self):
+        mounts, stats = self.diagnostic_input(target_dev='8:2', target_stat=2050)
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'INDETERMINATE')
+
+    def test_daemon_diagnostic_proxy_filesystem_is_indeterminate(self):
+        mounts, stats = self.diagnostic_input(source_root='/tree/a', target_root='/tree/a', fs='fakeowner')
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'INDETERMINATE')
+
+    def test_daemon_diagnostic_stat_device_mismatch_is_indeterminate(self):
+        mounts, stats = self.diagnostic_input(source_dev='0:46', target_dev='0:46', fs='fakeowner',
+                                              source_stat=43, target_stat=43)
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'INDETERMINATE')
+        mounts, stats = self.diagnostic_input(source_stat=43)
+        self.assertEqual(self.daemon_relation(mounts, stats)['relation'], 'INDETERMINATE')
+
+    def test_daemon_diagnostic_missing_or_unknown_evidence_is_indeterminate(self):
+        mounts, stats = self.diagnostic_input()
+        for bad_mounts, bad_stats in [('', stats), (mounts, ''), (mounts.replace('ext4', 'unknownfs'), stats),
+                                     (mounts + '\nmalformed', stats)]:
+            with self.subTest(mountinfo=bool(bad_mounts), stats=bool(bad_stats)):
+                self.assertEqual(self.daemon_relation(bad_mounts, bad_stats)['relation'], 'INDETERMINATE')
+
+    def test_daemon_diagnostic_stale_capture_never_becomes_authoritative(self):
+        mounts, stats = self.diagnostic_input(source_root='/same', target_root='/same')
+        result = self.daemon_relation(mounts, stats, observed=self.daemon_binding(capture='old'),
+                                      expected=self.daemon_binding(capture='new'))
+        self.assertEqual(result['relation'], 'INDETERMINATE')
+        self.assertFalse(result['authorization_eligible'])
+        source = '/daemon/synthetic/stale'
+        audit = {'counts': {'related': 0, 'excluded': 0, 'indeterminate': 1},
+                 'references': [{'container_id': 'f' * 64, 'type': 'bind', 'source': source,
+                                 'classification': 'indeterminate'}]}
+        attach = getattr(guard, 'attach_mount_diagnostic', None)
+        self.assertTrue(callable(attach), 'diagnostic-only audit attachment is missing')
+        annotated = attach(audit, 'f' * 64, source, result)
+        self.assertEqual(annotated['counts'], audit['counts'])
+        self.assertEqual(annotated['references'][0]['classification'], 'indeterminate')
+
+    def test_diagnostic_unrelated_never_authorizes_bind_and_probe_named_volume_counts(self):
+        mounts, stats = self.diagnostic_input()
+        owner, probe, foreign = guard.CONTAINER_ID, '6e92a22ca560eacd0db2c6238eca6e6ca3d47b2f1b9597751db3a743d6fe89a2', 'f' * 64
+        source = '/daemon/synthetic/source'
+        def references(*args):
+            if args[-1] in (owner, probe):
+                return json.dumps([{'Type': 'volume', 'Name': guard.VOLUME, 'Source': '/daemon/owned/data'}])
+            return json.dumps([{'Type': 'bind', 'Source': source}])
+        with mock.patch.object(guard, 'command', side_effect=references), \
+             mock.patch.object(guard, 'inspect_volume', return_value={'name': guard.VOLUME, 'mountpoint': '/daemon/owned/data'}):
+            with self.assertRaises(RuntimeError) as caught:
+                guard.volume_consumers({owner: 'owner', probe: 'probe', foreign: 'foreign'}, '/daemon/owned/data')
+        audit = caught.exception.audit
+        self.assertEqual(audit['counts'], {'related': 2, 'excluded': 0, 'indeterminate': 1})
+        diagnostic = self.daemon_relation(mounts, stats)
+        attach = getattr(guard, 'attach_mount_diagnostic', None)
+        self.assertTrue(callable(attach), 'diagnostic-only audit attachment is missing')
+        annotated = attach(audit, foreign, source, diagnostic)
+        self.assertEqual(annotated['counts'], audit['counts'])
+        self.assertNotIn('diagnostic', next(item for item in audit['references'] if item['type'] == 'bind'))
+        bind = next(item for item in annotated['references'] if item['type'] == 'bind')
+        self.assertEqual(bind['diagnostic']['relation'], 'CONFIRMED_UNRELATED')
+        self.assertFalse(bind['diagnostic']['authorization_eligible'])
+        self.assertEqual(bind['classification'], 'indeterminate')
+
     def test_distinct_verified_named_volume_is_excluded_by_identity(self):
         owner, other = guard.CONTAINER_ID, 'f' * 64
         def mounts(*args):

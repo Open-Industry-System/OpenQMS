@@ -15,6 +15,12 @@ Task 2 增加租户本地元数据表；Task 3 实现内部 FMEA 来源访问与
 
 仓库入口为 `scripts/maintenance/r4b_20261113_cleanup.py`，只绑定上述资源。后续在 Docker daemon 所在环境获得可信的 bind 身份证据后，先审查并补测对应证据验证，再运行 `python scripts/maintenance/r4b_20261113_cleanup.py dry-run`。现有版本不具备 bind 排除证据，预期返回 INDETERMINATE；不得直接跳至 `apply`、删除守卫或仅按路径差异放行。独立模拟测试入口为同目录 `test_r4b_20261113_cleanup.py`。不修改或停止其他容器。
 
+## daemon 侧只读诊断与证据限制
+
+2026-11-14 经用户批准执行最小只读诊断，容器 `6e92a22ca560eacd0db2c6238eca6e6ca3d47b2f1b9597751db3a743d6fe89a2`（owner/name `openqms-r4b-bind-audit-20261114-441c9e1513ed`）已退出且保留，也必须计为目标卷使用者。一个原Source被daemon以不存在拒绝，未补建或替换；其余3个唯一Source为fakeowner代理FS，mountinfo与stat设备身份不一致，目标卷为ext4；当前证据不能排除底层别名，原7引用仍未确认。新dry-run检查32容器，记录2个目标named引用、25个其他named引用排除、10个未确认bind（含诊断容器新增3个），未删除任何资源。
+
+私有证据：`daemon-bind-probe-6e92a22c-output.txt`、`daemon-bind-probe-6e92a22c-receipt.json`（配置/daemon/时间及输出hash）、`daemon-bind-probe-analysis-6e92a22c.json`、`t11-mount-audit-with-probe-diagnostic.json` 与新dry-run `t11-owned-cleanup-failure-1794617088009033000.json`。清理器的纯解析器和audit附注仅供诊断，永不改变清理分类或READY，当前普通/-O各55项隔离测试通过；同FS路径别名/确认无关与代理身份未知均有反例。标签相同不证明采集真实或fresh。未来若接入删除授权，必须另行设计可信实时采集、重新核验全部原引用及使用者并独立复审，不得直接消费这些历史文件放行；诊断容器保留期间也不能被静默忽略。本轮不执行删除。
+
 ## 迁移链
 
 - public head：`20261113_d4_recovery`，前驱 `20261109_d4_text_delivery`；后者前驱为原双分支 no-op merge `20261102_agent_mainline_merge`。
@@ -96,6 +102,6 @@ T10 在本地真实数字回环 HTTP 和正常策略下验证固定接收器、�
 
 ## 验证边界
 
-验收使用独占登记 PostgreSQL 15，串行 fixture 临时迁移库；不创建额外容器/卷，不连接业务实例，不调用 provider。焦点测试覆盖空库、两个旧 public 分支、原 merge、tenant empty 与 tv001–tv006 前向升级、全 parity、空回退重升及逐表非空拒绝回退。T11 冻结门禁：后端 4537 passed / 4 optional skipped / 19 deselected / 6 warnings，SDK unit 562、loopback 16、wheel 1，前端类型检查和构建通过；browser 11 无 skip，CI pure 307 / 3 warnings，前端 88 文件 741 项及 E2E 类型检查通过。冻结清单验证一致。此前首次完整门禁失败与修复记录见项目进度，不能以其代替最终结果。
+功能验收使用独占登记 PostgreSQL 15，串行 fixture 临时迁移库；功能测试未创建额外容器/卷，不连接业务实例，不调用 provider。后续单独授权的只读诊断容器见上文。焦点测试覆盖空库、两个旧 public 分支、原 merge、tenant empty 与 tv001–tv006 前向升级、全 parity、空回退重升及逐表非空拒绝回退。T11 冻结门禁：后端 4537 passed / 4 optional skipped / 19 deselected / 6 warnings，SDK unit 562、loopback 16、wheel 1，前端类型检查和构建通过；browser 11 无 skip，CI pure 307 / 3 warnings，前端 88 文件 741 项及 E2E 类型检查通过。冻结清单验证一致。此前首次完整门禁失败与修复记录见项目进度，不能以其代替最终结果。
 
-功能验收已通过，资源清理独立保持未完成。挂载归属复审修正了用宿主路径解析判断 daemon bind 身份的方法错误；当前私有清理器普通/-O各43项模拟测试及独立规格、质量复核通过。新只读 dry-run 枚举31个容器：准确确认1个目标命名卷引用、排除25个其他已核实名卷引用，7个bind缺少可信daemon文件系统身份而为未确认，既不判相关也不判无关。结果 INDETERMINATE，保留本任务容器、卷与凭据，不执行删除、不修改或停止其他容器。远端 CI 为 NOT_RUN；生产、模型、外发及部署未开启。受限本地 D4 以外的正文/附件或外发与正式降敏批准仍独立，R5 命令账本/补偿、R6 正式替换及 R7 第二插件未完成。
+功能验收已通过，资源清理独立保持未完成。挂载归属复审修正了用宿主路径解析判断 daemon bind 身份的方法错误；此前清理器普通/-O各43项模拟测试通过，旧只读 dry-run 枚举31个容器（1个目标命名卷引用、25个其他命名卷引用排除、7个bind未确认）。本轮新增纯诊断解析器与附注后，普通/-O各55项隔离测试及独立规格、质量复核通过；新dry-run为32个容器、2个目标命名卷引用、25个其他命名卷引用排除、10个bind未确认。诊断证据不具删除授权，原7个bind身份仍未确认，既不判相关也不判无关。结果 INDETERMINATE，保留本任务容器、卷与凭据，不执行删除、不修改或停止其他容器。远端 CI 为 NOT_RUN；生产、模型、外发及部署未开启。受限本地 D4 以外的正文/附件或外发与正式降敏批准仍独立，R5 命令账本/补偿、R6 正式替换及 R7 第二插件未完成。
