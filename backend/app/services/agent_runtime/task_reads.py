@@ -23,10 +23,10 @@ async def _text_discoverable(db, scope, target, manifest, trial, grants, levels,
     from app.services.agent_runtime.deployment_profiles import TEXT_CAPABILITY
     from app.services.agent_runtime.derived_source_grants import current_source_for_target, scope_from_row
     from app.services.agent_runtime.runtime_access import _grant
-    if trial is None or trial.profile != 'local_d4_root_cause_text_v1':
+    if trial is None or trial.profile not in {'local_d4_root_cause_text_v1','model_d5_proposal_v1'}:
         return False
     required = set(manifest.required_capabilities)
-    if required != {TEXT_CAPABILITY}:
+    if trial.profile == 'local_d4_root_cause_text_v1' and required != {TEXT_CAPABILITY}:
         return False
     current = await current_source_for_target(db, scope, target)
     if current is None:
@@ -36,6 +36,10 @@ async def _text_discoverable(db, scope, target, manifest, trial, grants, levels,
             AgentPluginDerivedSourceScope.plugin_grant_id.in_([grant.grant_id for grant in grants]))
             .execution_options(populate_existing=True))).all())
     scopes = {row.plugin_grant_id: scope_from_row(row) for row in rows}
+    if trial.profile == 'model_d5_proposal_v1':
+        _, ready = task_service._read_grants(None, target, manifest, levels, factories, lines, grants, trial=trial,
+            current_source=current, requested_source=current, plugin_source_scopes=scopes)
+        return ready
     spec = get_capability(TEXT_CAPABILITY, profile=trial.profile)
     for grant in grants:
         if not grant.enabled or grant.capability_id != TEXT_CAPABILITY:

@@ -1,5 +1,31 @@
 # OpenQMS 开发进度
 
+> **2026-11-14 R5 T6 最终双复核与分段焦点通过，获准精确本地提交**：候选基于 T5 `86cfd90580677fb1c7f1dcce9a7b2decd1411625`，43 文件冻结 `t6-freeze-v1.json` SHA256 `9ba0c9c1fdce5810c79fa13ac248af951c969a369fc24ebd2261d63c8b26760e`，独立最终 SPEC 与 QUALITY 均 APPROVED，无 Critical/Important。最终回归前后复核全部43文件一致；期间只有 T4 的“R5 profile 尚不存在”过时断言改为精确 R5 最小能力及 DIRECT 声明，baseline DENY、旧 metadata/R4b profile 不含命令的断言全部保留，生产代码未改。44 文件 test-only manifest SHA256 `a2f828ab32db54f84bec9df6a7d1500184d7dc6b87a39b087b60b8ca712e993d` 在完整续跑后再次核对一致。
+>
+> 第一次冻结后23文件焦点实际 **150 passed /1 failed /1 skipped /6 warnings /520.67s，exit2**（`run-1794644578735566000.log`）：全部 T6 模型/实际受控网络/TLS 与新迁移、当前 heads/parity、前段 T4 命令已完成，唯一失败是上述过时断言。仅向核实的本轮 pytest41053（runner41040）发 SIGINT 取得摘要；未停止其他进程。该轮明确中断，不冒充整轮通过。唯一 skip 来自 `test_tenant_schema_parity.py` 旧快照重新导出：无 PG15_CONTAINER/pg_dump，未安装/拉取工具；不作为 T6 模型验收。
+>
+> 修正后只续跑该断言、未核实的 T4 命令尾部、T5 全部员工/检查点文件、相关旧消息/鉴权/7项停止控制、D4 检查点/重开/最终围栏/请求身份及两份旧固定 CLI，实际 **398 passed /0 failed /0 skipped /6 warnings /906.15s（15:06），exit0**（`run-1794645193021769000.log`）。没有重跑已完成的 T6/迁移部分，没有把两段的重复用例简单相加成“全量通过”。精确 argv、两段退出码/计数/原因及日志 SHA256 在 `/private/tmp/openqms-r5-d5-20261114-r3iyx1ce/t6-validation-inventory.json`。现有6 warnings 为 pytest/logfire、Pydantic 和 websockets/uvicorn 弃用。
+>
+> 仅完成 T6 并精确本地提交，不 push/合并/部署。受控模型试点仍默认关闭且仅 Darwin/dev/OpenAI 兼容协议；真实本地/云端模型试用、T7 实际插件循环/触发接线、T8 UI、T9 整片完整门禁仍待后续，不以合成对端或本次焦点代替。未运行完整 make check、前端/浏览器或远端 CI。原失败/中断日志、所有策略/凭据/证书均不入提交，专用核心资源保留给下一任务，不处理其他资源。
+
+
+> **2026-11-14 R5 T6 实现候选冻结，待独立最终 SPEC/QUALITY 与最终焦点回归**：基于 T5 实际提交 `86cfd90580677fb1c7f1dcce9a7b2decd1411625`。T5 的 **91 passed /6 warnings /0 skip /365.97s**（`run-1794641465891775000.log`）是前置证据，不算本项结果。T6 新增不可变管理员批准模型版本、唯一任务绑定与配对增量 `20261114_r5_models` / `tv012_r5_models`，实际前驱为 T4 `20261114_r5_d5_basis` / `tv011_r5_d5_basis`；原迁移不改。模型列表/批准/撤销按当期租户/员工/管理员权限，任务创建 key 换模型 409，任务创建/详情/列表返回原绑定 ID/显示名/版本，撤销后历史仍可见。独立 SQL 触发器禁止配置/绑定改写、删除或撤销后重启，非空降级拒绝。合同与部署步骤见 [R5 模型出口](docs/development/r5-model-egress.md)。
+>
+> 受控执行选择为默认关闭的 **Darwin dev 试点**：平台私有策略固定执行物/解释器/启动器及租户/安装轮次/端口/有效期；不支持的系统和无配置均关闭。专用 R5 的普通 secret claim 被拒绝，只有平台内部 managed claim 能把短时 token 经 stdin 交给独立 `sandbox-exec` 子进程。最小环境和 OS 默认拒绝策略只开放核实文件/运行库和唯一平台回环端口，未放宽旧 R4b 启动器。实际模型 HTTP 由平台绑定唯一部署，数字 IP 固定连接、原 Host/SNI、正常证书校验、无代理/重定向/默认模型/fallback/retry，凭据仅由平台按专用引用注入。只允许严格推理操作；原始正文、messages、URL 或任意来源坐标不能由插件传入。
+>
+> T4 最小增量只提取原签名快照的锁后校验；`MODEL_EGRESS_ATTEMPT` 安全审计先持久化，提交后重新取得完整当期身份/来源/ACL/部署围栏。仅成功模型协议轮次后写可用来源回执并同事务完成审计，提交早于模型输出响应。失败/未知/丢失响应无可用来源回执，不凭尝试允许共享保存。R5 恢复按持久绑定分类，原 active checkpoint/命令水位不修改或重捕；已接受的后来消息保留为当前前缀，restart 从当前下一队列位置继续，绑定和任务序号保留。旧 D4 的固定消息/精确 paused epoch 规则不变。撤销模型/来源后 pause/cancel 仍按当前控制者权限可用，resume/restart/claim/出口重新授权。
+>
+> 本轮仅串行使用登记 owner `b3194303f91249b12ca03470`、私有目录 `/private/tmp/openqms-r5-d5-20261114-r3iyx1ce`、数字 `127.0.0.1:65176`；合成 A/B/TLS/平台监听均由测试临时创建并回收，没有使用集成资源或 R4B-CLEANUP-01。解释器均 `/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python -B`，实际 runner 为该私有目录的 `run.py test <节点> -q --tb=short`。`run.py prepare` 仅升级此独占测试数据库新 public delta，exit0（`run-1794642804953475000.log`）。无真实模型配置/凭据读取或外部模型调用；本地/云端真实模型试用留待 T9，不以确定性对端冒充。
+>
+> 真实 TDD/焦点：缺受控执行器 **1 failed**（`run-1794642121378773000.log`）；缺模型持久结构 **1 failed**（`run-1794642331182110000.log`）；实际 Darwin A 可达/B 拒绝且未批准文件拒读 **2 passed**（`run-1794642283246180000.log`）。策略初次数字 IP 选择器被 Darwin 解析器拒绝；改其要求的 localhost:port 选择器后，连接本身仍是数字回环。严格文件策略的 Python 根目录只读与 /var→/private 路径问题分别经定点 sandbox 拒绝诊断、规范路径修正；未开启全目录正文或 broad mach 权限。可信正文入口缺失 RED（`run-1794642413355173000.log`）和 managed-only claim 缺失 RED（`run-1794642568832931000.log`）均保留。实际 admin/task HTTP 成功，远程 claim403、同 key 换 B409，**1 passed**（`run-1794642985890856000.log`）。首次夹具两项 setup 错误为漏登记 tenant delta 与最小 HTTP harness 漏新 router，修复且不改安全断言。
+>
+> 实际平台→A、B0 及投递前部署/来源/策略 generation/执行物/地址保护 **6 passed /6 warnings /36.28s**（`run-1794643040599175000.log`）。HTTPS 指定 IP 仍保留真实 hostname Host/SNI，测试私有 CA 成功、生产 verify=True 拒绝不可信证书且 HTTP 正文0、B0，**2 passed /4 warnings /2.24s**（`run-1794643491471480000.log`）。首版只公开支持已验证的 OpenAI 兼容协议，不宣称 Anthropic 分支。任务绑定显示缺失有效 RED（`run-1794643355337873000.log`）后通过（`run-1794643401144643000.log`）。管理员重复版本最初返回500有效 RED，savepoint/命名唯一键转换409后，本项完整当时焦点＋真实模型迁移约束/回退/parity **26 passed /6 warnings /78.99s /exit0**（`run-1794643742056650000.log`）；这轮在随后收据/消息适配修订之前，不代替最终冻结回归。
+>
+> 后续必要修订：active CP→paused 请求有效409 RED（`run-1794643195161117000.log`）；显式 R5 适配后通过（`run-1794643312820324000.log`）。发送失败缺持久尝试有效 RED（`run-1794643935682549000.log`）；尝试与可用 basis 分开后失败/成功/生命周期 **3 passed /6 warnings /21.52s**（`run-1794644020780059000.log`）。强化的 checkpoint 后真实消息 claim/ACK 与 managed child 链 **2 failed**（`run-1794644129173428000.log`）：前者暴露旧前缀比较不兼容，后者缺平台 stdin 的 tenant_slug。修复后旧 CP 水位1/后来命令2、当期接受前缀2、pause/restart/managed reclaim 同部署已通过；同轮 managed child 暴露 unqualified tenants 查询在 tenant-only namespace 不存在，改成明确 public.tenants（`run-1794644221534239000.log`：1 passed/1 failed）。最终实际子进程直连 B 拒绝、经唯一平台 HTTP 调 A 成功、B0，**1 passed /6 warnings /7.47s /exit0**（`run-1794644367463397000.log`）。初版 checkpoint201、SDK redirect 异常类型及漏导入的错误均作为夹具/开发错误保留，不冒充安全反例。
+>
+> 当前未提交，T6 最终 SPEC/QUALITY 和冻结后精确回归尚待；T6 checkbox 保留未完成。未跑完整 make check/前端/浏览器/远端 CI，T7 插件循环/触发接线、T8 和 T9 尚未实现，不宣称生产或整片开放。6 warnings 为既有 pytest/logfire、Pydantic、websockets/uvicorn 弃用。最终 scoped 回归在独立复核后执行；不做可选全量重跑。
+
+
 > **2026-11-14 R5 T5 修正版双复核与最终焦点通过**：基于 T4 实际提交 `e689b59ccce17e7a095dbe279b646903676643b5`，其最终证据为 **224 passed、0 skip、6 warnings、289.38秒**（`run-1794639391365208000.log`）；不把该结果算作 T5 验证。T5 增加员工采纳/原因撤回及 actor/key 参数 HMAC 回执，报告→建议→全来源→员工 ACL 围栏后重新授权，采纳要求当前 D5、最新根因 revision/有效 proof/全部节点版本。正式文本保留原始建议的完整来源，正文和原因只留 CAPA 受控记录，状态/措施或撤回/回执/引用审计同事务。员工不依赖旧任务运行授权，任务结束后同事仍可按当前权限处理。已采纳条目不允许由这两个接口改写或撤回，沿用正式材料受控路径与终态保护。
 >
 > 显式 R5 runtime 检查点分支在与命令相同的 task 锁下写 typed D4 recovery checkpoint 和 T1 水位；同 run/epoch 首次水位不可变。员工候选及批量撤回严格同 task/report 且 `sequence > watermark`，旧水位不授权。每项独立事务/派生 key 和当前权限重核，已采纳和失权项不阻止其他合格项；中断后原 key 可重试，同 key 改原因冲突。R4b/metadata 不继承新分支。现有 D4 paused epoch 规则未改；T6 仍须完成持久 R5 部署绑定和相容的暂停/重开准入，保留原始水位，不能静默重捕。当前实际生命周期用例仅证明顺序及记录保留，不宣称生产 R5 restart 开放。合同见 [D5 命令与员工处理](docs/development/capa-d5-proposals.md)。

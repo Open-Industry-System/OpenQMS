@@ -208,6 +208,8 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
         text_restart = await d4_recovery.is_text_task(db, task)
         if text_restart:
             checkpoint, position = await d4_recovery.require_restart_position(db, scope, task, run, request.checkpoint_id)
+            from app.services.agent_runtime import model_egress
+            restart_message_watermark = run.accepted_message_seq if await model_egress.is_r5_task(db, task) else checkpoint.accepted_message_seq
         else:
             await checkpoint_service.require_restart_checkpoint(db, scope, task, run, request.checkpoint_id)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
@@ -246,14 +248,14 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             if text_restart:
                 from app.models.agent_d4_recovery import D4RecoveryRestart
                 from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
-                if await d4_recovery.validate_message_position(db, task_id, checkpoint.accepted_message_seq) != position:
+                if await d4_recovery.validate_message_position(db, task_id, restart_message_watermark) != position:
                     raise ValueError('Recovery position unavailable')
                 if position:
                     message_id = position[0]
                 else:
                     message_id = uuid4()
                     db.add(AgentTaskMessage(message_id=message_id, task_id=task_id,
-                        sequence=checkpoint.accepted_message_seq + 1, author_id=scope.user.user_id,
+                        sequence=restart_message_watermark + 1, author_id=scope.user.user_id,
                         content=START_MESSAGE, sensitivity='restricted', state='queued',
                         idempotency_key='d4-restart:' + str(operation.control_id)))
                     await db.flush()
@@ -295,7 +297,7 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
                 raise PermissionError('Recovery unavailable')
             if await d4_recovery.restart_mapping(db, task, run) is None:
                 raise PermissionError('Recovery unavailable')
-            position_now = await d4_recovery.validate_message_position(db, task_id, checkpoint.accepted_message_seq)
+            position_now = await d4_recovery.validate_message_position(db, task_id, restart_message_watermark)
             if position_now is None or position_now[0] != message_id:
                 raise PermissionError('Recovery unavailable')
             # Re-admit both the user and runtime after the final message read.

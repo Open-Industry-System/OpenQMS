@@ -75,10 +75,12 @@ T4 必要增量：R4b 回执只有不可逆投影摘要，不能还原实际释�
 
 ### T6　绑定可选的本地或云端模型部署
 
-- [ ] 新增 `backend/tests/services/agent_runtime/test_r5_model_binding.py`。两个测试接收方 A/B 各自记录合成哨兵；选 A 时 B 的接收次数必须为零。覆盖禁用、撤销、配置换代、重定向、插件传 URL、旧任务 key 换部署和 restart。运行 `dbtest tests/services/agent_runtime/test_r5_model_binding.py`。
-- [ ] 实施选择为**平台管理模型调用出口**：管理员配置并批准不可变的部署版本（租户、模型标识、本地或云端服务地址、凭据引用、启用状态），插件只提交任务上下文与推理请求。复用 backend/app/services/agent/provider_adapter.py 的工具协议编码与响应解析，增加按已核实部署构造 client 的入口，避开默认配置选路。服务端根据当前 task binding 解析唯一实际接收方、校验证书与允许地址、拒绝重定向及隐式 fallback。凭据由平台在出站时注入。受控插件执行环境仅允许调用所需平台入口，网络验收包含尝试直接访问另一个测试接收方。
-- [ ] 新建 `backend/app/models/agent_model_deployment.py`、`backend/app/services/agent_runtime/model_egress.py`，在 `deployment_profiles.py`、`plugin_registry.py`、`task_service.py`、`runtime_access.py`、`run_auth.py` 接线；为部署和唯一 task binding 新建配对 public/tenant 迁移，前驱取 T4 的实际新 head `20261114_r5_d5_basis` / `tv011_r5_d5_basis`（实施时再次核实），补同构/非空降级保护。管理员登记、撤销、用户可选列表与任务创建都按租户和现有 admin/task 权限判断。实际送出前重验 run、部署版本与全部被使用业务资料的当前权限；已获准的任务上下文可整体发送。元数据/日志只含授权决定、接收方版本、运行与安全计数。
-- [ ] 通过真实 HTTP 见证实际接收方、投递前撤权、切换部署后无隐式复用或旧聊天转移；复跑迁移、旧固定接收器和消息门禁测试。提交 `feat(agent): bind model egress to the selected deployment per task`。
+- [x] 新增 `backend/tests/services/agent_runtime/test_r5_model_binding.py`。两个测试接收方 A/B 各自记录合成哨兵；选 A 时 B 的接收次数必须为零。覆盖禁用、撤销、配置换代、重定向、插件传 URL、旧任务 key 换部署和 restart。运行 `dbtest tests/services/agent_runtime/test_r5_model_binding.py`。
+- [x] 实施选择为**平台管理模型调用出口**：管理员配置并批准不可变的部署版本（租户、模型标识、本地或云端服务地址、凭据引用、启用状态），插件只提交任务上下文与推理请求。复用 backend/app/services/agent/provider_adapter.py 的工具协议编码与响应解析，增加按已核实部署构造 client 的入口，避开默认配置选路。服务端根据当前 task binding 解析唯一实际接收方、校验证书与允许地址、拒绝重定向及隐式 fallback。凭据由平台在出站时注入。受控插件执行环境仅允许调用所需平台入口，网络验收包含尝试直接访问另一个测试接收方。
+- [x] 新建 `backend/app/models/agent_model_deployment.py`、`backend/app/services/agent_runtime/model_egress.py`，在 `deployment_profiles.py`、`plugin_registry.py`、`task_service.py`、`runtime_access.py`、`run_auth.py` 接线；为部署和唯一 task binding 新建配对 public/tenant 迁移，前驱取 T4 的实际新 head `20261114_r5_d5_basis` / `tv011_r5_d5_basis`（实施时再次核实），补同构/非空降级保护。管理员登记、撤销、用户可选列表与任务创建都按租户和现有 admin/task 权限判断。实际送出前重验 run、部署版本与全部被使用业务资料的当前权限；已获准的任务上下文可整体发送。元数据/日志只含授权决定、接收方版本、运行与安全计数。
+- [x] 通过真实 HTTP 见证实际接收方、投递前撤权、切换部署后无隐式复用或旧聊天转移；复跑迁移、旧固定接收器和消息门禁测试。提交 `feat(agent): bind model egress to the selected deployment per task`。
+
+T6 实施选择（2026-11-14，双复核及最终分段焦点通过）：使用默认关闭的 Darwin `sandbox-exec` 受控试点，其他主机拒绝准入。私有平台策略固定实际执行物/解释器/启动器及安装轮次；普通远程 claim 不可取得 R5 run token。平台只将 token/可信任务元数据经 stdin 交给 OS 默认拒绝的子进程，仅允许连接策略登记的唯一平台回环端口。模型部署支持本地/云端 OpenAI 兼容协议，实际出站固定批准 IP，保留 Host/SNI、正常证书验证，无代理/重定向/默认选路/备用接收方。详细合同与真实合成 HTTP/TLS/直连拒绝证据见 [R5 模型出口](../../development/r5-model-egress.md) 和 PROGRESS；真实模型试用仍待 T9。T4 来源校验被提取为无回执的校验入口：先持久化控制审计尝试，再锁后重核；只有成功模型协议轮次才提交可用 basis，失败/未知不能凭尝试保存。R5 paused/restart 适配保留原命令水位和当前已接受消息前缀，旧 D4 精确 paused 规则保留。此说明不提前完成 T7 插件循环。
 
 ### T7　受控模型插件与多轮消息
 

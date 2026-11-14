@@ -200,3 +200,21 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     if len(text.encode()) > MAX_RESPONSE_BYTES:
         raise ValueError("LLM response too large")
     return extract_json(text)
+
+
+def build_deployment_client(provider: str, model: str, base_url: str, credential: str, *, transport) -> ProviderClient:
+    """R5 exact approved recipient. Never read default AI config or retry/fallback."""
+    import httpx
+    http_client = httpx.AsyncClient(transport=transport, follow_redirects=False,
+        trust_env=False, timeout=30)
+    if provider == 'openai':
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=credential, base_url=base_url,
+            http_client=http_client, max_retries=0)
+    elif provider == 'anthropic':
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=credential, base_url=base_url,
+            http_client=http_client, max_retries=0)
+    else:
+        raise ProviderNotConfiguredError('Unsupported approved model protocol')
+    return ProviderClient(provider=provider, client=client, model=model)

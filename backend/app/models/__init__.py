@@ -252,3 +252,5 @@ from app.models.agent_d5_command import AgentD5Command, AgentD5CheckpointPositio
 from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5ProposalSource, CapaD5Measure, CapaD5Withdrawal, CapaD5StaffReceipt
 
 from app.models.agent_d5_basis import AgentD5BasisReceipt, AgentD5CommandBasis
+
+from app.models.agent_model_deployment import AgentModelDeployment, AgentTaskModelBinding

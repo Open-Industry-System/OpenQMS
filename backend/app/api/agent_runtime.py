@@ -17,6 +17,8 @@ from app.schemas.agent_runtime import ReadonlyCheckpointCreate, ReadonlyCheckpoi
 from app.schemas.agent_runtime import MessageAck, MessageAckOut, MessageBatch, MessageClaim, RunClaim, RunClaimOut, RuntimeCapabilities, CapaContextQuery, RuntimeEventCreate, RuntimeEventOut, RuntimeResultCreate, RuntimeResultOut
 from app.services.agent_runtime import run_dispatch, runtime_access, runtime_messages, readonly_delivery, task_controls, checkpoint_service, d4_text_delivery
 
+from app.services.agent_runtime import model_egress
+
 router = APIRouter(prefix="/api/agent/runtime", tags=["agent-runtime"],
     dependencies=[Depends(require_task_runtime)])
 
@@ -165,3 +167,12 @@ async def save_d5_checkpoint(body: D5CheckpointCreate, identity=Depends(get_runt
     except (ValueError, DBAPIError):
         await db.rollback()
         raise HTTPException(status_code=409, detail='D5 checkpoint conflict', headers=headers) from None
+
+
+@router.post('/model/infer')
+async def model_inference(body: model_egress.InferenceRequest, identity=Depends(get_runtime_identity), db: AsyncSession = Depends(get_db)):
+    try:
+        return await model_egress.infer(db, identity, body)
+    except (PermissionError, LookupError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='Model deployment unavailable') from None

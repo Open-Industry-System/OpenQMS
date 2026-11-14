@@ -203,12 +203,11 @@ def _digest_node(node):
         hashlib.sha256).hexdigest()
 
 
-async def record_delivered_basis(db, identity, *, snapshot):
-    """Final release fence, called BEFORE egress sends snapshot.context.
+async def validate_d5_context_for_release(db, identity, *, snapshot):
+    """Lock and revalidate the EXACT signed snapshot; this creates no receipt.
 
-    Commit this receipt before releasing exactly the sealed body; a receipt
-    proves authorized release, not network delivery/recipient acknowledgement.
-    No coordinate-only receipt creation is supported.
+    The model egress uses it immediately before outbound under current source,
+    installation, task, run and ACL fences. A control attempt is not basis.
     """
     from app.services.agent_runtime import d5_commands, runtime_access
     from app.services.agent_runtime.d4_text_delivery import _lock_authority_inputs
@@ -242,6 +241,17 @@ async def record_delivered_basis(db, identity, *, snapshot):
             db, current.scope, target, SimpleNamespace(proof_id=proof.proof_id, revision_id=proof.revision_id),
             [SimpleNamespace(**(source | {'fmea_id': UUID(source['fmea_id'])})) for source in sources]):
         raise PermissionError(UNAVAILABLE)
+    return current, expected, sources
+
+
+async def record_delivered_basis(db, identity, *, snapshot):
+    """Record usable source basis only after a successful exact-context round.
+
+    The platform gateway holds release fences while calling the model, then
+    records this receipt and commits before returning the model output. Unknown
+    or failed sends create no usable basis. This is not a provider ACK claim.
+    """
+    current, expected, sources = await validate_d5_context_for_release(db, identity, snapshot=snapshot)
     receipt = AgentD5BasisReceipt(receipt_id=uuid4(), **{key: UUID(value) if key.endswith('_id') else value
         for key, value in expected.items() if key != 'tenant_id'}, sources=sources)
     receipt.basis_hmac = _digest('openqms.d5.delivered-basis.v1', _receipt_payload(receipt, current.binding.tenant_id))

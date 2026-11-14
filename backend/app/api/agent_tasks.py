@@ -93,7 +93,7 @@ async def create_task(body: TaskCreate, scope: RequestScope = Depends(get_reques
                       db: AsyncSession = Depends(get_db)):
     try:
         return await task_service.create_task(db, scope, body.report_id, body.installation_id,
-            body.request_key, body.initial_text, derived_source_scope=body.derived_source_scope)
+            body.request_key, body.initial_text, derived_source_scope=body.derived_source_scope, model_deployment_id=body.model_deployment_id)
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
 
