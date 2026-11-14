@@ -117,6 +117,15 @@ class PreviewRemoteTests(unittest.TestCase):
             self.assertEqual(obj.build(),images)
             builds=[call for call in docker.call_args_list if call.args[0][:3]==['docker','buildx','build']]
             self.assertEqual(len(builds),2)
+            backend,web=[call.args[0] for call in builds]
+            def build_args(argv):
+                return [argv[i+1] for i,value in enumerate(argv) if value=='--build-arg']
+            self.assertIn('PIP_INDEX_URL=https://pypi.org/simple',build_args(backend))
+            self.assertFalse(any(arg.startswith('PIP_INDEX_URL=') for arg in build_args(web)))
+            self.assertIn('RELEASE_SHA='+obj.sha,build_args(backend))
+            self.assertIn('RELEASE_SHA='+obj.sha,build_args(web))
+            self.assertEqual(backend[-1],str(obj.source/'backend'))
+            self.assertEqual(web[-1],str(obj.source/'.'))
 
     def test_bad_runtime_image_never_publishes_route(self):
         obj = release()

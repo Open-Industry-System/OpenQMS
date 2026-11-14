@@ -124,7 +124,8 @@ class PreviewRelease:
         if not (0 < builder.get('Memory',0) <= 2147483648 and 0 < builder.get('NanoCpus',0) <= 2000000000 and 0 < builder.get('PidsLimit',0) <= 512 and builder.get('CpuQuota') == 0 and builder.get('CpuPeriod') == 0):
             raise ValueError('bounded preview builder required')
         for kind, dockerfile, context in [('backend','backend/Dockerfile','backend'),('web','frontend/Dockerfile.prod','.')]:
-            prod.run(['docker','buildx','build','--builder','openqms-preview-builder','--load','--label','org.opencontainers.image.revision='+self.sha,'--build-arg','RELEASE_SHA='+self.sha,'-t',self.tags()[kind],'-f',str(self.source / dockerfile),str(self.source / context)])
+            build_args = ['--build-arg', 'PIP_INDEX_URL=https://pypi.org/simple'] if kind == 'backend' else []
+            prod.run(['docker','buildx','build','--builder','openqms-preview-builder','--load','--label','org.opencontainers.image.revision='+self.sha,'--build-arg','RELEASE_SHA='+self.sha,*build_args,'-t',self.tags()[kind],'-f',str(self.source / dockerfile),str(self.source / context)])
         ids = self.image_ids()
         self.compose('up','-d','--wait','--wait-timeout','240','db','redis','neo4j',images=ids)
         return ids
