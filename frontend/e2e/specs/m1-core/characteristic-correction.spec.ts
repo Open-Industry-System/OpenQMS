@@ -1,7 +1,7 @@
 import { isDisabledAgentProbe, isDisabledAgentProbeConsole, unexpectedCharacteristicFailures, type HttpFailure } from "../../helpers/characteristic-diagnostics";
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { test, expect, type Page, type APIRequestContext, type APIResponse } from '@playwright/test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 // Test-only account manifest, produced by the guarded bootstrap, not app.seed.
@@ -41,7 +41,7 @@ with psycopg.connect(url.replace('postgresql+asyncpg://', 'postgresql://')) as c
 `, fmeaId, versionId, resolve('../backend')], { encoding: 'utf8' }).trim(), { timeout: 15_000 }).toBe('completed');
 }
 
-async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
+async function json(response: Pick<APIResponse, 'ok' | 'status' | 'text' | 'json'>) {
   expect(response.ok(), `${response.status()} ${await response.text()}`).toBeTruthy();
   return response.json();
 }
