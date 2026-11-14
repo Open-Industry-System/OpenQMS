@@ -8,6 +8,9 @@ from pydantic import BaseModel
 
 class D5ProposalItem(BaseModel):
     proposal_id: UUID
+    task_id: UUID
+    can_adopt: bool
+    can_withdraw: bool
     original_text: str
     state: Literal['pending', 'adopted', 'withdrawn', 'superseded']
     basis_current: bool

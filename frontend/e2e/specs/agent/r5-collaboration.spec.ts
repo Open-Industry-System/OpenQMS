@@ -1,0 +1,58 @@
+import {test,expect,type Page,type BrowserContext} from '@playwright/test';
+const details=JSON.parse(process.env.AGENT_BROWSER_LOGIN!);
+const colleague=JSON.parse(process.env.OUTCOME_APPROVER_LOGIN!);
+const report=process.env.AGENT_BROWSER_REPORT!, task=process.env.AGENT_BROWSER_TASK!;
+async function login(page:Page,context:BrowserContext,credentials:{username:string;password:string}){
+  const origins=new Set([new URL(process.env.AGENT_BACKEND_URL!).origin,new URL(process.env.AGENT_BROWSER_URL!).origin]);
+  await context.route('**/*',route=>{const url=route.request().url();return url.startsWith('data:') || origins.has(new URL(url).origin)?route.continue():route.abort();});
+  await context.addInitScript(tenant=>{localStorage.setItem('tenant_slug',tenant);localStorage.setItem('openqms_locale','zh-CN');},process.env.AGENT_BROWSER_TENANT!);
+  await page.goto('/login');await page.locator('#username').fill(credentials.username);await page.locator('#password').fill(credentials.password);
+  await page.locator('button[type=submit]').click();await expect(page).toHaveURL(/dashboard/);
+  await page.goto(`/capa/${report}`);
+}
+test('two roles collaborate on R5 proposals with immutable sidebar recipients',async({page,context,browser})=>{
+  await login(page,context,details);
+  await page.getByRole('button',{name:'Agent 任务',exact:true}).click();
+  await page.getByLabel('选择任务',{exact:true}).selectOption(task);
+  await expect(page.getByText('当前接收方：synthetic A · 1',{exact:true})).toBeVisible();
+  await page.getByLabel('选择处理范围检查点',{exact:true}).selectOption(details.checkpoint);
+  await expect(page.getByRole('region',{name:'检查点部分撤回'})).toBeVisible();
+  await page.getByRole('button',{name:'关闭任务侧栏',exact:true}).click();
+  await page.getByRole('button',{name:'以本报告创建任务',exact:true}).click();
+  await page.getByLabel('插件安装',{exact:true}).selectOption(details.installation);
+  await page.getByLabel('新任务模型',{exact:true}).selectOption(details.model_b);
+  await page.getByLabel('追加指令',{exact:true}).fill('T8 Enter stays A');
+  const append=page.waitForResponse(r=>r.url().endsWith(`/api/agent/tasks/${task}/messages`) && r.request().method()==='POST');
+  await page.getByLabel('追加指令',{exact:true}).press('Enter');expect((await append).status()).toBe(202);
+  await expect(page.getByText('当前接收方：synthetic A · 1',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'补充给 synthetic A',exact:true})).toBeDisabled();
+  await page.getByLabel('初始指令',{exact:true}).fill('T8 explicit new B');
+  const created=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/agent/tasks' && r.request().method()==='POST');
+  await page.getByRole('button',{name:'用 synthetic B · 1 开始新任务（仅根据当前根因）',exact:true}).click();
+  const response=await created;expect(response.status()).toBe(201);expect(response.request().postDataJSON().initial_text).toBe('deliver_d4_root_cause_candidate_v1');expect((await response.json()).model_deployment.deployment_id).toBe(details.model_b);
+  await expect(page.getByText('当前接收方：synthetic B · 1',{exact:true})).toBeVisible();
+  const finished=await page.request.post(`${process.env.AGENT_BACKEND_URL}/__t8_ui/complete`,{headers:{'X-Acceptance-Nonce':process.env.AGENT_HARNESS_NONCE!,'X-Tenant-ID':process.env.AGENT_BROWSER_TENANT!},data:{}});expect(finished.status(),await finished.text()).toBe(200);
+  const second=await browser.newContext();const coworker=await second.newPage();
+  try{
+    await login(coworker,second,colleague);
+    const panel=coworker.getByText('Agent D5 建议',{exact:true});await expect(panel).toBeVisible();
+    await expect(coworker.locator('p').filter({hasText:/^T8 Agent 原文$/})).toBeVisible();
+    await coworker.getByLabel(`最终措施 ${details.proposal}`,{exact:true}).fill('T8 同事确认最终措施');
+    const adopted=coworker.waitForResponse(r=>r.url().endsWith(`/d5-proposals/${details.proposal}/adopt`));
+    await coworker.getByRole('button',{name:`采纳 ${details.proposal}`,exact:true}).click();expect((await adopted).status()).toBe(200);
+    await expect(coworker.getByText('已采纳',{exact:true})).toBeVisible();
+    await expect(coworker.getByText('T8 同事确认最终措施',{exact:true})).toBeVisible();
+    await expect(coworker.getByText(new RegExp(`采纳人 ${colleague.user_id}`))).toBeVisible();
+    await coworker.reload();
+    await expect(coworker.getByText('T8 同事确认最终措施',{exact:true})).toBeVisible();
+    await expect(coworker.locator('p').filter({hasText:/^T8 Agent 原文$/})).toBeVisible();
+    await page.getByRole('button',{name:'关闭任务侧栏',exact:true}).click();
+    await page.getByRole('button',{name:'刷新建议',exact:true}).click();
+    await expect(page.getByText('已采纳',{exact:true})).toBeVisible();
+    await expect(page.getByText('T8 同事确认最终措施',{exact:true})).toBeVisible();
+    const revoked=await coworker.request.post(`${process.env.AGENT_BACKEND_URL}/__t8_ui/revoke-source`,{headers:{'X-Acceptance-Nonce':process.env.AGENT_HARNESS_NONCE!,'X-Tenant-ID':process.env.AGENT_BROWSER_TENANT!},data:{}});expect(revoked.status()).toBe(200);
+    await coworker.getByRole('button',{name:'刷新建议',exact:true}).click();
+    await expect(coworker.getByText('T8 同事确认最终措施',{exact:true})).toHaveCount(0);
+    await expect(coworker.locator('p').filter({hasText:/^T8 Agent 原文$/})).toHaveCount(0);
+  }finally{await second.close();}
+});

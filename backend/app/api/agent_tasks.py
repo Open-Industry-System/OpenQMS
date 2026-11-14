@@ -183,6 +183,18 @@ async def get_checkpoint(task_id: UUID, checkpoint_id: UUID,
 
 
 
+@router.get('/{task_id}/d5-checkpoints')
+async def list_d5_checkpoints(task_id: UUID, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+        scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await task_controls.d5_checkpoint_history(db, scope, task_id, page=page, page_size=page_size)
+    except (PermissionError, LookupError):
+        await db.rollback()
+        raise HTTPException(status_code=404, detail='D5 checkpoint unavailable', headers=headers) from None
+    return JSONResponse(jsonable_encoder(result), headers=headers)
+
+
 @router.get('/{task_id}/d5-checkpoints/{checkpoint_id}/proposals')
 async def d5_checkpoint_proposals(task_id: UUID, checkpoint_id: UUID,
         scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):

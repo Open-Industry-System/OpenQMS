@@ -485,3 +485,48 @@ async def withdraw_d5_after_checkpoint(db, scope, task_id, checkpoint_id, *, pro
             await db.rollback()
             raise
     return outcomes
+
+
+async def d5_checkpoint_history(db, scope, task_id, *, page=1, page_size=20):
+    """Current-reader, typed R5 checkpoint references; never command positions."""
+    from app.core.tenant_transaction import TenantBinding
+    from app.models.agent_d4_recovery import D4RecoveryCheckpoint
+    from app.models.agent_d5_command import AgentD5CheckpointPosition
+    from app.models.agent_model_deployment import AgentTaskModelBinding
+    from app.models.agent_readonly_control import AgentTaskUpdate
+    from app.models.agent_task import AgentTaskGrant
+    from app.services.capa_d5_measures import _target
+    if page < 1 or not 1 <= page_size <= 100:
+        raise ValueError('Invalid pagination')
+    binding = db.info.get('tenant_binding')
+    if not isinstance(binding, TenantBinding) or binding.mode != 'business':
+        raise PermissionError('D5 checkpoint unavailable')
+    task = (await db.execute(select(AgentTask.task_id, AgentTask.target_capa_id, AgentTask.factory_id)
+        .join(AgentTaskModelBinding, AgentTaskModelBinding.task_id == AgentTask.task_id)
+        .where(AgentTask.task_id == task_id))).one_or_none()
+    if task is None:
+        raise LookupError('D5 checkpoint unavailable')
+    target = await _target(db, scope, task.target_capa_id)
+    if target.factory_id != task.factory_id:
+        raise LookupError('D5 checkpoint unavailable')
+    cp = D4RecoveryCheckpoint
+    query = (select(cp.checkpoint_id, cp.run_id, cp.created_at)
+        .join(AgentD5CheckpointPosition, (AgentD5CheckpointPosition.checkpoint_id == cp.checkpoint_id)
+            & (AgentD5CheckpointPosition.task_id == cp.task_id))
+        .join(AgentRun, (AgentRun.run_id == cp.run_id) & (AgentRun.task_id == cp.task_id))
+        .join(AgentTaskGrant, (AgentTaskGrant.grant_id == cp.task_grant_id)
+            & (AgentTaskGrant.task_id == cp.task_id))
+        .join(AgentTaskUpdate, (AgentTaskUpdate.task_id == cp.task_id)
+            & (AgentTaskUpdate.kind == 'checkpoint') & (AgentTaskUpdate.object_id == cp.checkpoint_id)
+            & (AgentTaskUpdate.sequence == cp.update_sequence))
+        .where(cp.task_id == task_id, cp.tenant_generation == binding.generation,
+            cp.protocol == 'd4-recovery.v1', cp.resume_position == 'restart_from_start'))
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = (await db.execute(query.order_by(cp.created_at.desc(), cp.checkpoint_id.desc())
+        .offset((page - 1) * page_size).limit(page_size))).all()
+    for row in rows:
+        await _d5_checkpoint_target(db, scope, task_id, row.checkpoint_id)
+    fresh = await _target(db, scope, task.target_capa_id)
+    if fresh.factory_id != target.factory_id or fresh.product_line_code != target.product_line_code:
+        raise PermissionError('D5 checkpoint unavailable')
+    return dict(items=[dict(row._mapping) for row in rows], total=total, page=page, page_size=page_size)

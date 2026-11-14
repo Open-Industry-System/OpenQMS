@@ -400,3 +400,47 @@ async def test_actual_managed_child_cannot_reach_B_but_calls_platform_model_A(r5
         result=await r5_executor.managed_run(db,SimpleNamespace(user=actor),UUID(created.json()['task_id']),platform_origin=str(c.client.base_url).rstrip('/'))
         assert result['status']=='executed'
     assert len(c.witness.a.bodies)==1 and c.witness.b.bodies==[]
+
+@pytest.mark.asyncio
+async def test_R5_checkpoint_history_is_paged_typed_current_and_keeps_original_positions(r5_case):
+    from sqlalchemy import select
+    from app.models.agent_d5_command import AgentD5CheckpointPosition
+    from app.models.role import RolePermission
+    c=r5_case
+    await _managed_claim(c)
+    headers={'Authorization':'Bearer '+c.token}
+    inferred=await c.client.post('/api/agent/runtime/model/infer',json={},headers=headers)
+    assert inferred.status_code==200,inferred.text
+    first=await c.client.post('/api/agent/runtime/capa/d5/checkpoints',json={},headers=headers)
+    assert first.status_code==200,first.text
+    checkpoint_id=first.json()['checkpoint_id']
+    history=await c.client.get(f'/api/agent/tasks/{c.task_id}/d5-checkpoints',params={'page':1,'page_size':1})
+    assert history.status_code==200,history.text
+    assert history.headers['cache-control']=='no-store'
+    assert history.json()['items']==[{'checkpoint_id':checkpoint_id,'run_id':str(c.run_id),'created_at':history.json()['items'][0]['created_at']}]
+    assert set(history.json())=={'items','total','page','page_size'}
+    assert history.json()['total']==1
+    assert (await c.client.get(f'/api/agent/tasks/{__import__("uuid").uuid4()}/d5-checkpoints')).status_code==404
+    from app.models.agent_d4_recovery import D4RecoveryCheckpoint
+    async with c.session() as db:
+        await db.execute(__import__('sqlalchemy').update(D4RecoveryCheckpoint).where(D4RecoveryCheckpoint.checkpoint_id==__import__('uuid').UUID(checkpoint_id)).values(tenant_generation=c.binding.generation+1))
+        await db.commit()
+    assert (await c.client.get(f'/api/agent/tasks/{c.task_id}/d5-checkpoints')).json()['items']==[]
+    async with c.session() as db:
+        await db.execute(__import__('sqlalchemy').update(D4RecoveryCheckpoint).where(D4RecoveryCheckpoint.checkpoint_id==__import__('uuid').UUID(checkpoint_id)).values(tenant_generation=c.binding.generation))
+        await db.commit()
+    assert 'watermark' not in history.text and 'text' not in history.text
+    assert (await c.client.get(f'/api/agent/tasks/{c.task_id}/d5-checkpoints',params={'page':2,'page_size':1})).json()['items']==[]
+    claimed=await c.client.post('/api/agent/runtime/messages/claim',json={'limit':10},headers=headers)
+    ack=await c.client.post('/api/agent/runtime/messages/ack',json={'batch_id':claimed.json()['batch_id'],'through_sequence':1},headers=headers)
+    assert ack.status_code==200,ack.text
+    finished=await c.client.post('/api/agent/runtime/finish',json={'status':'completed'},headers=headers)
+    assert finished.status_code==200,finished.text
+    assert (await c.client.get(f'/api/agent/tasks/{c.task_id}/d5-checkpoints')).json()['items'][0]['checkpoint_id']==checkpoint_id
+    async with c.session() as db:
+        await db.execute(__import__('sqlalchemy').update(RolePermission).where(RolePermission.role_id==c.role_id,RolePermission.module=='capa').values(permission_level=0))
+        await db.commit()
+    assert (await c.client.get(f'/api/agent/tasks/{c.task_id}/d5-checkpoints')).status_code in (403,404)
+    async with c.session() as db:
+        position=await db.scalar(select(AgentD5CheckpointPosition).where(AgentD5CheckpointPosition.checkpoint_id==__import__('uuid').UUID(checkpoint_id)))
+        assert position.watermark==first.json()['command_watermark']

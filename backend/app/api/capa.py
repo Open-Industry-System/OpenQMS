@@ -2,7 +2,7 @@ import uuid
 from fastapi.encoders import jsonable_encoder
 from app.schemas.capa_d5_staff import D5Adopt, D5Withdraw
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -145,7 +145,7 @@ async def get_outcome_review(
     return JSONResponse(content=result.model_dump(mode='json'), headers=headers)
 
 
-async def _d5_read_response(db, scope, report_id, *, kind, page=1, page_size=20, item_id=None):
+async def _d5_read_response(db, scope, report_id, *, kind, page=1, page_size=20, item_id=None, task_id=None, state=None):
     from app.core.tenant_transaction import TenantUnavailable
     from app.services import capa_d5_measures
 
@@ -153,7 +153,8 @@ async def _d5_read_response(db, scope, report_id, *, kind, page=1, page_size=20,
     read = getattr(capa_d5_measures, 'read_d5_' + kind)
     try:
         result = (await read(db, scope, report_id, item_id) if item_id is not None
-                  else await read(db, scope, report_id, page=page, page_size=page_size))
+                  else await read(db, scope, report_id, page=page, page_size=page_size,
+                      **({'task_id': task_id, 'state': state} if kind == 'proposals' else {})))
     except (PermissionError, TenantUnavailable):
         return JSONResponse(status_code=403, content={'detail': 'D5 access denied'}, headers=headers)
     except LookupError:
@@ -166,10 +167,12 @@ async def list_d5_proposals(
     report_id: uuid.UUID,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
+    task_id: uuid.UUID | None = Query(None),
+    state: Literal['pending'] | None = Query(None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    return await _d5_read_response(db, scope, report_id, kind='proposals', page=page, page_size=page_size)
+    return await _d5_read_response(db, scope, report_id, kind='proposals', page=page, page_size=page_size, task_id=task_id, state=state)
 
 
 @router.get('/{report_id}/d5-proposals/{proposal_id}', response_model=D5ProposalItem)

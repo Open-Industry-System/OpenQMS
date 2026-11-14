@@ -92,10 +92,12 @@ T7 实施结果（2026-11-14）：实际标准库执行物沿用受控沙箱；�
 
 ### T8　侧栏及报告协作界面
 
-- [ ] 在 `frontend/src/components/agent/AgentSidebar.test.tsx` 和新增 `frontend/src/components/capa/D5ProposalPanel.test.tsx` 写交互测试：甲任务中选择乙，Enter 补充给甲，显式新任务才用乙；任务结束后同事仍可处理。运行 `(cd frontend && npm test -- --run src/components/agent/AgentSidebar.test.tsx src/components/capa/D5ProposalPanel.test.tsx)`。
-- [ ] 修改 `frontend/src/api/agentTasks.ts`、`frontend/src/types/agentTask.ts`、`AgentSidebar.tsx`，分开维护当前任务绑定与新任务选择器，显示真实接收方。切换租户、报告、用户或请求版本时丢弃迟到响应；禁用部署不可静默改选并重发旧上下文。
-- [ ] 新增报告建议面板并接入 `frontend/src/pages/capa/CAPADetailPage.tsx`。展示待审、依据过时、已撤回、已替代和已采纳项；允许编辑最终文本、输入撤回原因、逐项勾选、多结果回显。按钮使用服务端资格，冲突或撤权后刷新项目，清除不可见旧文本。原有 `D5RecPanel.tsx` 的 legacy 建议保留原流程。
-- [ ] 复跑组件测试、`make check-frontend`，再以两个浏览器角色验证侧栏与列表一致。提交 `feat(ui): select task models and collaborate on D5 proposals`。
+- [x] 在 `frontend/src/components/agent/AgentSidebar.test.tsx` 和新增 `frontend/src/components/capa/D5ProposalPanel.test.tsx` 写交互测试：甲任务中选择乙，Enter 补充给甲，显式新任务才用乙；任务结束后同事仍可处理。运行 `(cd frontend && npm test -- --run src/components/agent/AgentSidebar.test.tsx src/components/capa/D5ProposalPanel.test.tsx)`。
+- [x] 修改 `frontend/src/api/agentTasks.ts`、`frontend/src/types/agentTask.ts`、`AgentSidebar.tsx`，分开维护当前任务绑定与新任务选择器，显示真实接收方。切换租户、报告、用户或请求版本时丢弃迟到响应；禁用部署不可静默改选并重发旧上下文。
+- [x] 新增报告建议面板并接入 `frontend/src/pages/capa/CAPADetailPage.tsx`。展示待审、依据过时、已撤回、已替代和已采纳项；允许编辑最终文本、输入撤回原因、逐项勾选、多结果回显。按钮使用服务端资格，冲突或撤权后刷新项目，清除不可见旧文本。原有 `D5RecPanel.tsx` 的 legacy 建议保留原流程。
+- [x] 复跑组件测试、`make check-frontend-tsc` / `make check-frontend-build`，再以两个浏览器角色验证侧栏与列表一致。提交 `feat(ui): select task models and collaborate on D5 proposals`。
+
+T8 完成证据（2026-11-14）：最终焦点前端 **118 passed /6 files /8.50s**；v1 服务端 staff/visibility **52 passed /4 warnings /134.24s**；v4 新更正筛选＋原可见性 **31 passed /0 skip /4 warnings /83.39s**（`run-1794651248547395000.log`）；v3 安装 Chromium 两角色实际 HTTP **1 passed /0 skip /6 warnings /21.50s**（`run-1794650823146484000.log`），包含实际 A 绑定、选择 B 后 Enter A、显式根因新任务 B、正常结束后同事采纳与双方状态一致。tsc/E2E tsc/build 均 exit0；v4 冻结26文件（`f9a3be628b09846a74f7b5b52c42e1826bb04ccbbb64bf992557ca19ab267500`）独立 SPEC/QUALITY 均 APPROVED，获准精确本地提交；生产文件核对一致，仅完成记录变化；T9 全片和真实模型试用未完成。
 
 ### T9　发布前验收与交接
 

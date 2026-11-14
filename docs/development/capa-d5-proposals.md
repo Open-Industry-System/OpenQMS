@@ -44,3 +44,17 @@ R4b 的摘要回执继续保留原合同。新 public/tenant 配对迁移 `20261
 员工可用 `GET /api/agent/tasks/{task_id}/d5-checkpoints/{checkpoint_id}/proposals` 取得同 task、同 report、严格 `sequence > watermark` 且当前完整可读的条目引用与状态。`POST .../proposals/withdraw` 接受 `operation_key`、`reason` 和最多 100 个不重复 `proposal_ids`。每项独立事务、独立派生重试 key，提交时重核边界与员工全部权限。一个条目已采纳不阻止其他合格项撤回；失权或不在范围统一返回 `unavailable`，可读非待审项返回其状态，同 key 改原因返回 `conflict`。批次中断后按原 key 重试不重复留痕；旧检查点只划定范围，不能授权读取或写入。
 
 暂停和重开不重置任务命令序号、不删除原建议或水位，也不复活 withdrawn/superseded 条目。当前生产 R5 仍关闭。现有 D4 的 paused checkpoint epoch 与 active R5 checkpoint epoch 合同保持独立；T6 必须接入持久 R5 部署绑定和相容的暂停/重开准入，保留原始水位，不得静默重捕后来的最大序号或修改旧检查点。T5 的实际旧生命周期测试只证明记录与顺序保留，不宣称生产 R5 restart 已开放。
+
+## T8 报告协作界面（2026-11-14）
+
+报告详情新增独立的「Agent D5 建议」面板，legacy `D5RecPanel` 继续原流程。建议列表返回当前读者完整可读的条目、原文、状态、依据新鲜度、所属 task_id 和服务端 `can_adopt` / `can_withdraw`。资格根据当期 CAPA EDIT、完整来源读取、pending 状态、报告阶段及终态保护计算；它是呈现提示，提交仍经过 T5 全部锁与授权围栏。任务结束不影响符合条件的同事处理。
+
+员工编辑最终措施后采纳，或填写原因撤回；原建议正文保留。侧栏提供实际任务检查点的分页目录，员工明确选择处理范围后，提供其后建议的逐项勾选和部分撤回，逐项显示 withdrawn/adopted/superseded/unavailable/conflict。未知写状态保留原 key 与正文供显式重试；冲突或撤权刷新并清除不可见原文及草稿。报告、用户、租户、凭据和请求作用域变化使旧响应失效。界面按两秒轮询更新可见条目，不把列表资格当作写权限。
+
+T8 的真实安装 Chromium 走查使用独占 R5 PostgreSQL、实际 HTTP 登录、两个员工角色及确定性回环接收方：当前 A 绑定显示、选择新 B 后 Enter 仍发送 A、显式新任务保存 B 绑定、正常 claim/ACK/finish A 后同事编辑并采纳、双方刷新看到已采纳。该证据不代表真实本地/云端模型试用或 T9 整片验收。
+
+T8 复核修正：正式措施通过原 T2 `GET /api/capa/{report_id}/d5-measures` 单独分页读取，显示与原建议的引用、员工最终文本、采纳人和时间；任务结束及页面重新加载后仍显示，不把本地编辑值作为正式材料。来源失权会清除原文、最终文本和草稿。未知写回执保留的重试仅在该目标仍可见、pending 且对应服务端资格仍有效时存在；成功过滤、资格变化及读取失败均清空待重试正文。
+
+`GET /api/agent/tasks/{task_id}/d5-checkpoints?page=1&page_size=20` 是当前读者作用域内的 R5 历史检查点引用目录（最大页大小100）。响应仅含 checkpoint_id、run_id、created_at 及分页元数据，禁止缓存；不返回命令水位、正文或来源坐标。服务验证持久 R5 task/model 绑定、同 task 的运行、授权、更新指针、typed recovery 协议与当期租户 generation，并复核 T5 报告范围。已结束任务仍可读取有当前权限的历史引用；选择旧检查点不修改其水位，候选和写操作继续各自重新校验完整原始来源与员工权限。
+
+更正选择器使用同一报告建议端点的可选 `task_id` 和 `state=pending` 查询，服务端先完成全部原始来源可见性筛选，再按任务/待审状态筛选并计算总数、分页及读取正文。默认不带筛选的报告列表合同保留。侧栏每页最多20条，明确上一页/下一页选择，用户/租户/凭据/任务/请求版本变化取消旧读取；不扫描无限历史，也不会把较早其他任务项目当作当前更正目标。

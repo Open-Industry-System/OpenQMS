@@ -226,3 +226,61 @@ async def test_unauthorized_staff_never_reads_any_body(staff_case):
             await staff_action(c.db, c.actors[1], c.report.report_id, c.proposals[1],
                 operation='adopt', operation_key='denied', value='final')
     assert not any('original_text' in statement or 'final_text' in statement or 'capa_eightd.d4_root_cause' in statement or 'graph_data' in statement for statement in spy.statements)
+
+@pytest.mark.asyncio
+async def test_reader_projection_qualifies_current_employee_and_task_target(staff_case):
+    from app.services.capa_d5_measures import read_d5_proposals
+    c = staff_case
+    page = await read_d5_proposals(c.db, c.scope, c.report.report_id)
+    item = page.items[0]
+    assert item.task_id == c.task_id
+    assert item.can_adopt and item.can_withdraw
+    await c.db.execute(update(RolePermission).where(RolePermission.role_id == c.scope.role_id,
+        RolePermission.module == 'capa').values(permission_level=1))
+    await c.db.commit()
+    item = (await read_d5_proposals(c.db,c.scope,c.report.report_id)).items[0]
+    assert not item.can_adopt and not item.can_withdraw
+
+
+@pytest.mark.asyncio
+async def test_correction_task_and_pending_filters_precede_visible_count_and_paging(staff_case):
+    from datetime import UTC, datetime, timedelta
+    from app.models.agent_task import AgentRun
+    from app.models.agent_d5_command import AgentD5Command
+    from app.models.capa_d5_proposal import CapaD5ProposalSource
+    from app.services.capa_d5_measures import read_d5_proposals
+    c=staff_case
+    other=AgentTask(initiator_id=c.user_id,executor_user_id=c.user_id,preferred_installation_id=c.plugin_id,target_capa_id=c.report.report_id,factory_id=c.report.factory_id,request_key=uuid4().hex,status='completed')
+    c.db.add(other);await c.db.flush()
+    run=AgentRun(task_id=other.task_id,installation_id=c.plugin_id,plugin_version='1.0.0',status='completed')
+    c.db.add(run);await c.db.flush()
+    template=await c.db.scalar(select(CapaD5ProposalSource).where(CapaD5ProposalSource.proposal_id==c.proposals[0]))
+    source={name:getattr(template,name) for name in ('projection_id','factory_id','product_line_code','fmea_id','node_id','node_hmac')}
+    for index in range(39):
+        old=index<20
+        task_id=other.task_id if old else c.task_id
+        command_id,proposal_id=uuid4(),uuid4()
+        c.db.add(AgentD5Command(command_id=command_id,proposal_id=proposal_id,task_id=task_id,run_id=run.run_id if old else c.run_id,operation='save',command_key=uuid4().hex,request_hmac='b'*64,sequence=index+3))
+        await c.db.flush()
+        c.db.add(CapaD5Proposal(proposal_id=proposal_id,report_id=c.report.report_id,task_id=task_id,original_text='old other-task' if old else 'current pending',revision_id=c.revision.revision_id,proof_id=c.proof.proof_id,state='pending',command_id=command_id,created_by=c.user_id,created_at=datetime.now(UTC)-timedelta(days=1) if old else datetime.now(UTC)))
+        await c.db.flush();c.db.add(CapaD5ProposalSource(proposal_id=proposal_id,**source))
+    await c.db.commit()
+    first=await read_d5_proposals(c.db,c.scope,c.report.report_id,task_id=c.task_id,state='pending',page=1,page_size=20)
+    second=await read_d5_proposals(c.db,c.scope,c.report.report_id,task_id=c.task_id,state='pending',page=2,page_size=20)
+    assert first.total==second.total==21 and len(first.items)==20 and len(second.items)==1
+    assert all(item.task_id==c.task_id and item.state=='pending' for item in first.items+second.items)
+    restricted=await read_d5_proposals(c.db,c.actors[1],c.report.report_id,task_id=c.task_id,state='pending',page=1,page_size=20)
+    assert restricted.total==20 and len(restricted.items)==20
+    await c.db.execute(update(CapaD5Proposal).where(CapaD5Proposal.proposal_id==c.proposals[0]).values(state='withdrawn'))
+    await c.db.commit()
+    assert (await read_d5_proposals(c.db,c.scope,c.report.report_id,task_id=c.task_id,state='pending')).total==20
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from app.api.capa import router
+    from app.database import get_db
+    from app.core.deps import get_request_scope
+    app=FastAPI();app.include_router(router);app.dependency_overrides[get_db]=lambda:c.db;app.dependency_overrides[get_request_scope]=lambda:c.scope
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+        response=await client.get(f'/api/capa/{c.report.report_id}/d5-proposals',params={'task_id':str(c.task_id),'state':'pending','page_size':20})
+        assert response.status_code==200,response.text
+        assert response.json()['total']==20 and all(item['task_id']==str(c.task_id) and item['state']=='pending' for item in response.json()['items'])

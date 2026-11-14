@@ -18,7 +18,7 @@ function Sources({ sources }: {
     <div>数据级别 {source.data_class}</div>
   </li>)}</ul>;
 }
-function Row({ item, page, pending, onControl }: Pick<Props, "page" | "pending" | "onControl"> & {
+function Row({ item, task, page, pending, onControl }: Pick<Props, "task" | "page" | "pending" | "onControl"> & {
   item: ActivityItem;
 }) {
   switch (item.kind) {
@@ -26,7 +26,7 @@ function Row({ item, page, pending, onControl }: Pick<Props, "page" | "pending" 
       const terminal = page.task_status === "failed" || page.task_status === "cancelled";
       const state = item.data.state === "received" ? "已确认接收" : `${item.data.state === "queued" ? "排队中" : "已领取"}${terminal ? "：终止时未确认接收（不代表已处理）" : ""}`;
       return <>
-        <p>{item.data.content}</p>
+        <p>{task.model_deployment && item.data.content === "deliver_d4_root_cause_candidate_v1" ? "仅根据当前根因创建建议任务" : item.data.content}</p>
         <span>{state}</span>
       </>;
     }
@@ -62,6 +62,11 @@ function Row({ item, page, pending, onControl }: Pick<Props, "page" | "pending" 
     </>;
     case "checkpoint": {
       const cp = item.data;
+      if ('checkpoint_type' in cp) return <>
+        <h4>任务检查点 {cp.checkpoint_id}</h4>
+        <p>检查点运行 {cp.run_id} · {cp.created_at}</p>
+        <p>检查点用于界定后续建议的处理范围，不恢复模型内部记忆。</p>
+      </>;
       const sameRun = page.task_status === "paused" && page.run_status === "paused" && cp.run_id === page.run_id;
       const eligible = sameRun && cp.is_latest && cp.prefix_eligible;
       return <>
@@ -98,7 +103,7 @@ export default function AgentActivity({ task, page, pending, onControl }: Props)
     </div>
     <ol data-testid="agent-activity-window">{page.items.map(item => <li key={item.sequence} data-sequence={item.sequence}>
       <time>{item.created_at}</time>
-      <Row item={item} page={page} pending={pending} onControl={onControl} />
+      <Row item={item} task={task} page={page} pending={pending} onControl={onControl} />
     </li>)}</ol>
   </section>;
 }

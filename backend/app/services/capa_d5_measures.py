@@ -167,9 +167,15 @@ def _page(rows, page, page_size):
     return rows[(page - 1) * page_size:page * page_size]
 
 
-async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=None):
-    target, rows, sources = await _visible_metadata(db, scope, report_id)
+async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=None, task_id=None, state=None):
+    access = await current_capa_access(db, scope)
+    target, rows, sources = await _visible_metadata(db, scope, report_id, access)
     initial_signature = _signature(rows, sources)
+    # Reader visibility precedes selector filters, counts, pages and body reads.
+    if task_id is not None:
+        rows = [row for row in rows if row.task_id == task_id]
+    if state is not None:
+        rows = [row for row in rows if row.state == state]
     if kind == 'measures':
         with db.no_autoflush:
             measures = (await db.execute(select(CapaD5Measure.measure_id, CapaD5Measure.proposal_id).where(
@@ -194,17 +200,25 @@ async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=Non
             else:
                 original_text = await db.scalar(select(CapaD5Proposal.original_text).where(
                     CapaD5Proposal.proposal_id == row.proposal_id))
-                items.append(D5ProposalItem(proposal_id=row.proposal_id, original_text=original_text,
-                    state=row.state, created_at=row.created_at,
-                    basis_current=await _basis_current(db, scope, target, row, sources[row.proposal_id])))
+                from app.core.permissions import Module, PermissionLevel
+                from app.services.capa_review_guard import REVIEWED_STATES
+                basis_current = await _basis_current(db, scope, target, row, sources[row.proposal_id])
+                can_withdraw = (access[0].get(Module.CAPA, PermissionLevel.NONE) >= PermissionLevel.EDIT
+                    and row.state == 'pending' and target.status not in REVIEWED_STATES)
+                items.append(D5ProposalItem(proposal_id=row.proposal_id, task_id=row.task_id,
+                    original_text=original_text, state=row.state, created_at=row.created_at,
+                    basis_current=basis_current, can_withdraw=can_withdraw,
+                    can_adopt=can_withdraw and target.status == 'D5_CORRECTION' and basis_current))
     legacy = None
     if kind == 'measures' and item_id is None:
         with db.no_autoflush:
             legacy = await db.scalar(select(CAPAEightD.d5_correction).where(CAPAEightD.report_id == report_id))
     # A page or detail is not a retained authority token. Recheck after loading
     # bodies as well; any changed membership requires a fresh projection.
-    latest_target, latest_rows, latest_sources = await _visible_metadata(db, scope, report_id)
-    if (latest_target.factory_id != target.factory_id
+    latest_access = await current_capa_access(db, scope)
+    latest_target, latest_rows, latest_sources = await _visible_metadata(db, scope, report_id, latest_access)
+    if (latest_access != access or latest_target.status != target.status
+            or latest_target.factory_id != target.factory_id
             or latest_target.product_line_code != target.product_line_code
             or _signature(latest_rows, latest_sources) != initial_signature):
         raise PermissionError('D5 view changed; refresh required')
@@ -221,8 +235,8 @@ def _signature(rows, sources):
         for s in sources[row.proposal_id])) for row in rows]
 
 
-async def read_d5_proposals(db, scope, report_id, *, page=1, page_size=20):
-    return await _read(db, scope, report_id, kind='proposals', page=page, page_size=page_size)
+async def read_d5_proposals(db, scope, report_id, *, page=1, page_size=20, task_id=None, state=None):
+    return await _read(db, scope, report_id, kind='proposals', page=page, page_size=page_size, task_id=task_id, state=state)
 
 
 async def read_d5_measures(db, scope, report_id, *, page=1, page_size=20):
