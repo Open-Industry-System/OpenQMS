@@ -100,7 +100,9 @@ def cleanup(pr):
             identity = item.get('Id') if kind != 'volume' else item.get('Name')
             if kind == 'container':
                 run('docker', 'container', 'stop', identity)
-            run('docker', kind, 'rm', identity)
+                run('docker', kind, 'rm', '--volumes', identity)
+            else:
+                run('docker', kind, 'rm', identity)
     # Revoke this stack's secrets and free its fixed loopback slot only after
     # every owned container/volume/network has been removed successfully.
     secret = Path('/var/lib/openqms-previews') / ('pr-' + pr) / 'preview.env'
