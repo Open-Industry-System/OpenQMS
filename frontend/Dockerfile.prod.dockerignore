@@ -48,6 +48,7 @@ frontend/.env.*
 **/blob-report/**
 frontend/e2e
 frontend/e2e/**
+!frontend/e2e/helpers/characteristic-diagnostics.ts
 **/*.log
 .git
 .git/**
