@@ -18,7 +18,7 @@
 - [x] 合并模型注册、Make/CI、测试和文档，保留 PR #29 行为；完成独立规格与质量复核。
 - [x] 新建本次独立 owner-bound PG15、专属卷、数字回环端点及私有登记；不复用 R4B-CLEANUP-01。先迁移、再冲突焦点测试。
 - [x] 在候选提交上运行 make check、browser、pure、前端单测/E2E类型及相称附件授权/PR #29门禁；记录失败修复、skip与未运行项。
-- [ ] 精确提交、普通push独立分支、创建draft PR、跟踪自动CI并修复集成失败；最终交接SHA、PR和明确合并判断。
+- [x] 精确提交、普通push独立分支并创建[draft PR #30](https://github.com/Open-Industry-System/OpenQMS/pull/30)，自动CI已触发；逐轮检查/修复及最终head、CI与合并判断在PR和最终交接实时记录，不在计划快照中预写结果。
 
 资源清理：R4B-CLEANUP-01继续延期，全部旧资源保留。本次新测试资源另行登记与交接；不删除或修改其他容器/卷，不使用prune。
 

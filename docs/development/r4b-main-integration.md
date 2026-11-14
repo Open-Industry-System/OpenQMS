@@ -73,4 +73,4 @@ frontend/node_modules/.bin/tsc -p frontend/tsconfig.e2e.json
 
 **R4B-CLEANUP-01继续延期**：原测试容器/卷、诊断容器、凭据及daemon bind身份阻塞全部保留，未用于本轮测试；见[延期清理清单](capa-d4-local-text-delivery.md#保留资源与后续清理入口)。功能签收与资源清理仍分开，T11保持“功能验收完成，清理待办”。
 
-发布前再次fetch确认origin/main仍为5b712d94，远端同名集成分支未占用。本地独立规格、质量复核均通过，包括真实迁移暴露的单head回退修正再复核。接下来只普通推送独立分支、创建面向main的草稿PR，并在PR跟踪实际自动CI；最终合并由用户决定。
+发布前再次fetch确认origin/main仍为5b712d94，远端同名集成分支未占用。本地独立规格、质量复核均通过，包括真实迁移暴露的单head回退修正再复核。已普通推送独立分支并创建[草稿PR #30](https://github.com/Open-Industry-System/OpenQMS/pull/30)，base为main、draft=true、GitHub报告mergeable。连接器创建返回403后，使用本机现有gh授权完成，不提升权限。首轮Test OpenQMS已自动触发；CI逐轮状态与最终head以PR动态结果为准，此文档只记录已发生的发布事实，不把本地通过或早先head的CI冒充最终远端结果。最终合并由用户决定，未合并/部署/启用生产或模型。
