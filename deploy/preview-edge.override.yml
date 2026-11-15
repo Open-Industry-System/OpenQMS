@@ -1,0 +1,14 @@
+# One-time production Compose override. Keep existing internal fixed IP intact.
+services:
+  web:
+    networks:
+      openqms_internal:
+        ipv4_address: 172.30.0.10
+      preview_edge: {}
+    volumes:
+      - /etc/openqms/preview-routes:/etc/openqms/preview-routes:ro
+      - /etc/openqms/production-edge-Caddyfile:/etc/caddy/Caddyfile:ro
+networks:
+  preview_edge:
+    external: true
+    name: openqms-preview-edge

@@ -140,6 +140,7 @@ from app.models.tenant_attachment_disposal import TenantAttachmentStorageDisposa
 from app.models.tenant_migration import TenantMigration  # noqa: F401
 from app.models.user import User
 from app.models.user_dashboard_layout import UserDashboardLayout
+from app.models.user_refresh_session import UserRefreshSession
 
 from .plm import (
     PLMBOM,
@@ -154,7 +155,7 @@ from .plm import (
 )
 
 __all__ = [
-    "User", "FMEADocument", "CAPAEightD", "CapaLessonLearned", "AuditLog",
+    "User", "UserRefreshSession", "FMEADocument", "CAPAEightD", "CapaLessonLearned", "AuditLog",
     "CapaD3ImportRun", "CapaD3ContainmentSnapshot", "CapaD3ImpactReport",
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
     "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",

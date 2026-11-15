@@ -19,19 +19,21 @@ from app.services.tenant_schema_diff import load_snapshot_manifest
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("existing", [False, True], ids=["fresh", "tv005-existing"])
-async def test_read_task_delta_owned_tenant_paths(mig_db_url, monkeypatch, existing):
+@pytest.mark.parametrize("predecessor", [None, "tv005_agent_task_attachments", "tv009_r4b_main_merge"], ids=["fresh", "tv005-existing", "tv009-existing"])
+async def test_read_task_delta_owned_tenant_paths(mig_db_url, monkeypatch, predecessor):
+    existing = predecessor is not None
     root = Path(__file__).resolve().parents[2]
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
     config.set_main_option("sqlalchemy.url", mig_db_url)
     await asyncio.to_thread(command.upgrade, config,
-                            "20261009_agent_task_attachments" if existing else "head")
+                            ({"tv005_agent_task_attachments": "20261009_agent_task_attachments",
+                              "tv009_r4b_main_merge": "20261114_r4b_main_merge"}.get(predecessor, "head")))
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, "engine", engine)
     target = tenant_migrator.REVISION
     if existing:
-        monkeypatch.setattr(tenant_migrator, "REVISION", "tv005_agent_task_attachments")
+        monkeypatch.setattr(tenant_migrator, "REVISION", predecessor)
     try:
         tenant = await tenant_migrator.provision_new(TenantCreateRequest(
             name="Read task delta", slug="read-delta-" + uuid.uuid4().hex[:12],
@@ -43,7 +45,7 @@ async def test_read_task_delta_owned_tenant_paths(mig_db_url, monkeypatch, exist
                 f'SELECT to_jsonb(u) FROM "{schema}".users u ORDER BY user_id'
             ))).scalars().all()
             assert bool(await connection.scalar(text("SELECT to_regclass(:name)"),
-                                               {"name": f"{schema}.agent_read_tasks"})) is not existing
+                                               {"name": f"{schema}.user_refresh_sessions"})) is not existing
         if existing:
             generation = tenant.generation
             await asyncio.to_thread(command.upgrade, config, "head")

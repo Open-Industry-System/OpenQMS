@@ -14,8 +14,8 @@ Two files, one store each.
 
 - `authStore.ts` — `useAuthStore`. Holds `user`, `token`,
   `factoryScope`, `factories`, `currentFactoryId`, `loading`. Exposes
-  `login(username, password)`, `logout()`, `fetchUser()`, `setUser()`,
-  `setCurrentFactoryId()`, `tryRefreshToken()`. Initialises `token`
+  `login(username, password)`, `logout()`, `fetchUser()`,
+  `syncStoredAccessToken()`, `setCurrentFactoryId()`, `tryRefreshToken()`. Initialises `token`
   from `localStorage["access_token"]` so a reload keeps the session.
 - `productLineStore.ts` — `useProductLineStore`. Holds `productLines`
   and the currently-selected `selected` product-line code. Exposes
@@ -39,9 +39,35 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   which POSTs `/auth/login`, persists `access_token`, `refresh_token`,
   and the default `current_factory_id` to `localStorage`, then sets
   the store.
-- **Initial hydration** — `ProtectedRoute` in `App.tsx` calls
-  `fetchUser()` when a token exists but `user` is null
-  (e.g. after a page reload).
+- **Initial hydration** — `ProtectedRoute` in `App.tsx` classifies the stored
+  JWT before starting user hydration: missing and malformed tokens navigate to
+  login (the malformed case clears auth in an effect); expired, structurally
+  valid tokens remain on an `aria-busy` spinner while exactly one
+  `tryRefreshToken()` call runs for that token, including StrictMode; valid
+  tokens with no user call `fetchUser()`.
+- **Refresh generation guard** — `tryRefreshToken()` captures the request
+  refresh token and accepts a current-generation response only when its access
+  token classifies as valid. Both `fetchUser()` and `tryRefreshToken()`
+  reconcile storage before starting network work; a typed pre-dispatch
+  generation-change rejection synchronizes and returns without treating the
+  newer session as a failed refresh. The store exposes
+  `syncStoredAccessToken()`, and one central browser `storage` listener invokes
+  it for idle tabs. A different valid stored token clears in-memory user/factory
+  state for a `/auth/me` bootstrap; an invalid stored token is removed while
+  its refresh token is preserved. Matching store/storage tokens retain same-tab
+  login state.
+- **Owned CAPA refresh** — optional owner and abort signal bind refresh to the originating view. The store checks the owner before starting work and before installing or clearing credentials; an abandoned view cannot change a replacement session. Owned actions never replay after rotation, and abandoned owned refreshes settle unrelated waiters with rejection without logging out the current session.
+- **User hydration generation guard** — `fetchUser()` reconciles storage before
+  capturing its access token. A typed pre-dispatch generation-change rejection
+  re-synchronizes and returns without logout; later login or cross-tab changes
+  likewise preserve/adopt the newer generation instead of applying stale
+  `/auth/me` success or failure. If the 401 interceptor refreshes that request
+  to a valid token with the same decodable subject, its successful replay may
+  hydrate the user/factory slices only when the response config confirms that
+  exact current Bearer token; an unrelated same-subject token change
+  re-bootstraps, and a newer same-tab login user remains untouched.
+  Each hydration operation owns its loading state, so an older completion
+  cannot apply data or release loading for a newer bootstrap.
 
 ## Conventions & Constraints
 
@@ -54,20 +80,15 @@ Consumers are `App.tsx`, `components/layout/AppLayout`, hooks
   if you rename them in the store.
 - **JWT lives in localStorage, not store-only.** Both the store and
   `localStorage` are written together inside `login`, `logout`,
-  `fetchUser`, and `tryRefreshToken`. `App.tsx` reads `localStorage` at
-  startup to seed `token`, and `ProtectedRoute` validates expiry
-  client-side via `JSON.parse(atob(token.split('.')[1])).exp`.
-- **Refresh is awaited by the axios interceptor.** `tryRefreshToken()`
-  is invoked from `api/client.ts` 401 handling. It returns the new
-  access token or `null`; the interceptor queues retried requests
-  while the refresh is in flight. Failure path calls `logout()` and
-  the interceptor redirects to `/login`.
-- **Optional CAPA refresh ownership.** `tryRefreshToken(isCurrent?, signal?)`
-  carries an explicitly owned view through the existing auth request and rechecks
-  both its lifetime and original refresh credential before storing tokens or
-  logging out. A late A response cannot alter B. Calls without an owner keep the
-  existing policy; this adds no global auth state machine, token rotation protocol
-  or business-data store. No CAPA result content is persisted here.
+  `fetchUser`, and `tryRefreshToken`. `App.tsx` seeds `token` from
+  `localStorage`; `utils/jwt.ts` performs base64url JWT payload validation
+  before route bootstrap or refresh replay decisions.
+- **Refresh is generation-safe.** `tryRefreshToken()` is invoked from
+  `api/client.ts` 401 handling and returns the new access token or `null`.
+  A true failure clears the access token, refresh token, factory selection,
+  user, scopes, and loading state; a stale cross-tab response adopts the
+  stored token and clears stale identity-derived fields for re-bootstrap
+  rather than overwriting a newer session.
 - **`current_factory_id` is the single source for tenant scoping.**
   Set on login from `user.factory_scope.default_factory_id`, updated
   via `setCurrentFactoryId(factoryId)` when the header selector

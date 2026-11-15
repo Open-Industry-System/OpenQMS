@@ -27,13 +27,15 @@ Task 2 增加租户本地元数据表；Task 3 实现内部 FMEA 来源访问与
 
 私有证据：`daemon-bind-probe-6e92a22c-output.txt`、`daemon-bind-probe-6e92a22c-receipt.json`（配置/daemon/时间及输出hash）、`daemon-bind-probe-analysis-6e92a22c.json`、`t11-mount-audit-with-probe-diagnostic.json` 与新dry-run `t11-owned-cleanup-failure-1794617088009033000.json`。清理器的纯解析器和audit附注仅供诊断，永不改变清理分类或READY，当前普通/-O各55项隔离测试通过；同FS路径别名/确认无关与代理身份未知均有反例。标签相同不证明采集真实或fresh。未来若接入删除授权，必须另行设计可信实时采集、重新核验全部原引用及使用者并独立复审，不得直接消费这些历史文件放行；诊断容器保留期间也不能被静默忽略。本轮不执行删除。
 
-## 迁移链
+## R4b 签收迁移基线
 
-- public head：`20261113_d4_recovery`，前驱 `20261109_d4_text_delivery`；后者前驱为原双分支 no-op merge `20261102_agent_mainline_merge`。
-- tenant head：`tv008_d4_recovery`，前驱 `tv007_d4_text_delivery`；后者前驱为 `tv006_agent_read_tasks`。
+以下是dcda1d55签收切片的历史head；主线集成现通过无DDL merge收敛为public `20261114_r4b_main_merge` / tenant `tv009_r4b_main_merge`。三路径、tenant分支与parity实测见[主线集成交接](r4b-main-integration.md)。旧revision ID、DDL和冻结snapshot保留；tv006采用main已发布字节，与原R4b仅首行docstring不同，双方hash和AST等价已验证，不能称其字节相同。
+
+- R4b签收public head：`20261113_d4_recovery`，前驱 `20261109_d4_text_delivery`；后者前驱为原双分支 no-op merge `20261102_agent_mainline_merge`。
+- R4b签收tenant head：`tv008_d4_recovery`，前驱 `tv007_d4_text_delivery`；后者前驱为 `tv006_agent_read_tasks`。
 - public/tenant 使用独立、手写自含且等价的增量 DDL；不从当前 ORM 动态生成、不以 `create_all` 替代迁移。
-- `tv001` 至 `tv007`、业务快照、manifest 和其中冻结 public head 均保持字节不变。
-- tenant 升级沿用原 owner-bound maintenance、同物理连接 session advisory lock、代际更新和全对象 parity；所有旧前驱仍受支持。`delivery_predecessor` 专指 `tv006`，既有 `predecessor`（`tv005`）等状态名不变。
+- 原R4b签收阶段冻结`tv001`至`tv007`与业务快照、manifest；当前集成中除上述tv006说明行选择外，其余旧DDL/快照/manifest及其中冻结public head保持原样，不重生成历史。
+- tenant 升级沿用原 owner-bound maintenance、同物理连接 session advisory lock、代际更新和全对象 parity；所有旧前驱仍受支持。`delivery_predecessor` 专指 `tv006`。原R4b签收分支曾以`predecessor`表示tv005；当前集成保留main状态映射：`latest_predecessor`=tv005、`predecessor`=tv004、`earlier_predecessor`=tv003、`earliest_predecessor`=tv002，另明确识别特性与恢复两旧head，不按历史R4b别名调用。
 
 ## 六张表
 

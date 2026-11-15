@@ -67,6 +67,16 @@ vi.mock("../../api/capa", async () => {
   };
 });
 vi.mock("../../api/capaDraft");
+// This page suite owns its API fixtures. R5 panel behavior and real-client
+// credential synchronization are covered by their dedicated composition suites.
+vi.mock("../../api/d5Proposals", () => ({
+  listD5Proposals: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 }),
+  listD5Measures: vi.fn().mockResolvedValue({ legacy_text: null, items: [], total: 0, page: 1, page_size: 20 }),
+  checkpointProposals: vi.fn().mockResolvedValue([]),
+  adoptD5Proposal: vi.fn(),
+  withdrawD5Proposal: vi.fn(),
+  withdrawCheckpointProposals: vi.fn(),
+}));
 vi.mock("../../api/knowledge", () => ({
   findCapaKnowledgeEntry: vi.fn().mockResolvedValue(null),
   listKnowledgeEntries: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50 }),

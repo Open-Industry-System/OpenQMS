@@ -1,165 +1,376 @@
 # 部署指南
 
-本文档介绍如何部署 OpenQMS，包括 Docker Compose（推荐）和本地开发环境两种方式。
+本文档分为 Oracle ARM64 生产部署与本地开发。生产环境命令以仓库当前脚本为唯一准则；本地开发才可直接使用普通 Docker Compose。
 
 ---
 
-## 1. Docker Compose 部署（推荐）
+## 1. Oracle ARM64 生产部署
 
-### 1.1 前提条件
+### 1.1 固定目标与拓扑
 
-| 依赖 | 最低版本 | 说明 |
-|------|----------|------|
-| Docker | 20.10+ | 容器运行时 |
-| Docker Compose | v2.0+ | 服务编排 |
-| 可用内存 | 4 GB+ | PostgreSQL + Neo4j + Ollama 各需 256–512 MB |
+| 项目 | 生产约束 |
+|------|----------|
+| 公网域名 | `qms.smartindustry.world` |
+| 计算节点 | Oracle Cloud Ampere ARM64 单机 |
+| 租户/测试模式 | `TENANT_MODE=single`、`E2E_MODE=false`，单租户且生产禁用 E2E 端点 |
+| 管理面 | Tailscale SSH 与私网验收 |
+| 公网入口 | Namecheap BasicDNS `qms` A → `150.230.197.45` → Caddy `80/443` |
+| 数据服务 | PostgreSQL 15、Redis 7、Neo4j 5 |
+| 应用服务 | backend、graph-worker、web/Caddy |
+| AI | 初始不部署 Ollama；此公开可写演示实例不得配置真实 LLM/Embedding API 密钥 |
 
-### 1.2 配置
+Caddy 在固定生产网段中使用 `172.30.0.10`，backend 的 `--forwarded-allow-ips` 只信任这个地址。这是登录限流与来源 IP 判断的 trusted-proxy 边界。不要随意改变 `172.30.0.0/24`、Caddy 地址或信任列表；若确需调整，必须重新运行代理探针。
 
-项目根目录提供 `.env.example`，生产环境请复制并修改：
+`/` 是路由保护约定的唯一显式公开例外；`/login` 是认证入口。`/dashboard` 与所有质量业务路由继续由 `ProtectedRoute`、RBAC、工厂和产品线范围保护。公开首页不等于公开业务数据。access JWT 有效期为 120 分钟；密码重置会撤销 refresh 会话，但已签发的无状态 access JWT 最长仍可能持续到原过期时间。
 
-```bash
-cp .env.example .env
+### 1.2 环境文件与生产包装器
+
+根目录 `.env` / `.env.production` 供 Compose 读取。服务器首次部署使用 `init-production-env.sh` 原子生成权限为 `0600` 的 `.env.production`，不要把真实生成值、DSN、私钥内容复制到文档、工单或聊天中。
+
+生成后，**所有生产 Compose 命令**都必须使用：
+
+```text
+./scripts/production-compose.sh <subcommand> ...
 ```
 
-关键环境变量：
+包装器固定项目名 `openqms`、仓库项目目录、`.env.production` 和 `docker-compose.prod.yml`，并清除 ambient 环境覆盖，防止当前 shell 的同名变量替换已验证的生产值。不得绕过包装器手工拼接 Compose 参数。
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `DATABASE_URL` | `postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms` | 数据库连接（Docker 内部） |
-| `REDIS_URL` | `redis://redis:6379/0` | Redis 连接 |
-| `SECRET_KEY` | `openqms-local-dev-2026-jwt-signing-key` | **JWT 签名密钥，生产环境必须修改** |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `120` | Token 过期时间（分钟） |
-
-> ⚠️ `SECRET_KEY` 在生产环境必须替换为随机长字符串，否则存在安全风险。
-
-### 1.3 强制发布入口（migrate → check → preflight → rollout）
-
-发布到任何非本地环境时，**只允许** `make deploy-release`。禁止先
-`docker compose up` 启动 backend/frontend 再补迁移/preflight——那会让新代码
-在旧 schema / 未清门禁的库上接流量。
+Mac 运维仓库先 checkout 不可变 release，并要求 tracked 工作区与暂存区均匹配 HEAD；无关 untracked 计划/参考文件不参与部署身份。首次部署不使用远端删除同步。部署字节只从 `git archive "$RELEASE_SHA"` 提取到权限 `0700` 的私有 stage，不再从可变 working tree 读取；path stream 同样来自 `git ls-tree` commit object。manifest 为每个 tracked 路径记录 SHA-256 与 Git 相关模式 `100644`/`100755`，并拒绝 symlink/不安全路径。Oracle 验证 manifest 本身、verifier、所有 tracked 文件 hash/mode 与完整 deployable path set；唯一排除项是持久运行时状态 `.env.production`、`backups/`、`.release-sha` 和 `.release-manifest`。额外/遗留 source、config 或 script 会 fail closed。内容验证成功后才把非敏感 `RELEASE_SHA` 写入 marker 并读回；stage 在正常完成、EXIT 或信号时清理：
 
 ```bash
-# 0) 仅启动基础设施（db/redis/neo4j），不要 up backend/frontend
-docker compose up -d db redis neo4j
-docker compose ps   # 等 healthy
-
-# 1) 唯一非本地发布入口。DATABASE_URL 必须指向【本环境真实库】；
-#    TEST_DATABASE_URL 必须指向不同的测试库。
-#    ROLLOUT_CMD 是受信任的运维命令，仅在前三步全部成功后同步执行。
-DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms \
-  TEST_DATABASE_URL=postgresql+asyncpg://qms:...@localhost:5432/qms_test \
-  ROLLOUT_CMD='docker compose up -d backend frontend' \
-  make deploy-release
-# 内部严格串行执行：alembic upgrade head → pytest/tsc/build →
-# doc-gate preflight → rollout。任一步失败都会立即终止后续步骤。
-
-# （仅首次/演示）docker compose exec backend python -m app.seed
+set +x
+set -euo pipefail
+cd '<local-openqms-checkout>'
+export LOCAL_RELEASE_REPO=$(pwd -P)
+git checkout --detach '<immutable-release-sha>'
+git diff --quiet
+git diff --cached --quiet
+export RELEASE_SHA=$(git rev-parse HEAD)
+export ORACLE_SSH_TARGET=ubuntu@100.84.141.70
+export ORACLE_SSH_KEY="$HOME/.ssh/<private-key-file>"
+RELEASE_STAGE=""
+cleanup_release_stage() {
+  if [[ -n "$RELEASE_STAGE" ]]; then
+    rm -rf -- "$RELEASE_STAGE"
+    RELEASE_STAGE=""
+  fi
+}
+handle_release_signal() {
+  trap - HUP INT TERM QUIT
+  cleanup_release_stage
+  exit 1
+}
+trap cleanup_release_stage EXIT
+trap handle_release_signal HUP INT TERM QUIT
+RELEASE_STAGE=$(mktemp -d)
+chmod 700 "$RELEASE_STAGE"
+RELEASE_MANIFEST="$RELEASE_STAGE/.release-manifest"
+umask 022
+git archive --format=tar "$RELEASE_SHA" | tar -xf - -C "$RELEASE_STAGE"
+git ls-tree -r -z --name-only "$RELEASE_SHA" | \
+  python3 "$RELEASE_STAGE/scripts/check-release-tree.py" create --root "$RELEASE_STAGE" \
+  > "$RELEASE_MANIFEST"
+git ls-tree -r -z --name-only "$RELEASE_SHA" | \
+  rsync --from0 --files-from=- -a \
+    -e "ssh -i $ORACLE_SSH_KEY" \
+    "$RELEASE_STAGE/" "$ORACLE_SSH_TARGET:/opt/openqms/"
+scp -i "$ORACLE_SSH_KEY" \
+  "$RELEASE_MANIFEST" \
+  "$ORACLE_SSH_TARGET:/opt/openqms/.release-manifest"
+export RELEASE_MANIFEST_SHA=$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$RELEASE_MANIFEST")
+export RELEASE_GUARD_SHA=$(python3 -c 'import hashlib, pathlib, sys; print(hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest())' "$RELEASE_STAGE/scripts/check-release-tree.py")
+export REMOTE_RELEASE_VERIFY='test "$(sha256sum .release-manifest | cut -d " " -f1)" = "'"$RELEASE_MANIFEST_SHA"'" && test "$(sha256sum scripts/check-release-tree.py | cut -d " " -f1)" = "'"$RELEASE_GUARD_SHA"'" && python3 scripts/check-release-tree.py verify --root . --manifest .release-manifest >/dev/null'
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+  "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+printf '%s\n' "$RELEASE_SHA" | \
+  ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+    'cat > /opt/openqms/.release-sha'
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+command -v python3.11 >/dev/null
+command -v node >/dev/null
+command -v npm >/dev/null
+test "$(python3.11 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" = "3.11"
+test "$(node -p 'process.versions.node.split(".")[0]')" = "20"
+python3.11 -m venv "$RELEASE_STAGE/backend/.venv"
+"$RELEASE_STAGE/backend/.venv/bin/python" -m pip install \
+  --disable-pip-version-check --no-input \
+  -r "$RELEASE_STAGE/backend/requirements.txt" \
+  --index-url https://pypi.org/simple
+"$RELEASE_STAGE/backend/.venv/bin/python" -m pip install --index-url https://pypi.org/simple pytest setuptools==79.0.1
+(cd "$RELEASE_STAGE/frontend" && npm ci)
 ```
 
-`make deploy-release` 包含 rollout 且全程串行；成功信息只会在 rollout 完成后输出。
-启动前会拒绝缺失的 `TEST_DATABASE_URL`。数据库身份 guard 会先规范化两个 DSN
-（忽略 async/sync driver 差异、loopback 别名与 query 顺序），再用只读 psycopg
-连接核对 server address/port、database name 与 database OID；任一层确认同库或无法
-可靠取得 live identity 都会在迁移前 fail closed。该 guard 没有命令覆盖开关，不能跳过。
-guard 仅从环境读取两个 DSN，不会把含密码的连接串放入子进程命令行。
-迁移、preflight 与 rollout 仅收到目标库 `DATABASE_URL`（且不暴露
-`TEST_DATABASE_URL`）；check 同时将 `DATABASE_URL` 和 `TEST_DATABASE_URL` 指向测试库。
-危险的组合目标 `deploy-check` 已移除。独立诊断应分别运行 `make check`，以及对目标库
-运行 `make doc-gate-preflight`，不得把两者作为可并行的发布入口。
-preflight 扫描所有 open CAPA 的 CP item_id 血缘断链——若存在 `blocked_modify`
-key_point（baseline item_id 在 latest 中消失）、`stale_analysis` 或
-`invalid_waiver`，exit 1 阻止部署。
-
-**处置（结构化 waiver，非泛化旁路）**：
-1. 优先：用 item_id 保留路径重新保存 CP → 降级并重新生成 analysis → 重跑 audit；
-2. 若确认 delete+add 为有意断链：`POST /capa/{id}/doc-gate/waiver`
-   ```json
-   {"reason":"...", "items":[{"doc_type":"control_plan","doc_id":"...","target_key":"...","field":"..."}]}
-   ```
-   需 APPROVE；服务端要求**同批次全部阻塞项**均被 items 覆盖（不可豁免的
-   FMEA/pending_update/incomplete 会拒绝整单）；校验 live latest 仍缺 target_key
-   并绑定 `latest_version_id/sha256`——后续 CP 版本漂移会让 C8/preflight 失效。
-
-单元 CI 只跑 `make check`，**不含**数据 preflight。详见
-`backend/app/services/capa_doc_gate_preflight.py`。
-
-### 1.4 本地/首次初始化（开发）
-
-后端镜像默认使用 Debian 官方软件源。中国大陆网络环境可在首次启动前选择 TUNA 镜像加速构建：
+本地迁移代码、测试/preflight 与远端容器必须来自这个同一不可变 release。以下命令在 **Oracle 主机 `/opt/openqms` shell** 执行：
 
 ```bash
-docker compose build --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn backend graph-worker
+cd /opt/openqms
+SITE_ADDRESS=qms.smartindustry.world \
+  TAILSCALE_IP='<tailscale-ip>' \
+  OUTPUT_PATH=.env.production \
+  ./scripts/init-production-env.sh
+./scripts/production-compose.sh config --quiet
+./scripts/production-compose.sh up -d db redis neo4j
+./scripts/production-compose.sh ps
 ```
 
-```bash
-# 先启动数据库和基础设施；此时不要启动依赖业务表的应用进程
-docker compose up -d db redis neo4j
-# one-off backend 不要求常驻 backend 容器已经运行
-docker compose run --rm backend alembic upgrade head
-docker compose run --rm backend python -m app.seed
-# 数据库准备完成后再启动完整应用栈
-docker compose up -d
-```
+`.env.production` 内部服务 DSN 使用 Compose 主机名，例如 PostgreSQL 为 `db:5432`。主机上的迁移、identity 和 preflight 通过 SSH 隧道访问同一实例时，应使用 `127.0.0.1:<tunnel-port>`；两者文本不同，但运行时数据库身份必须一致。
 
-### 1.5 访问
+### 1.3 公开演示账号与独立 Vite
 
-| 服务 | 地址 |
-|------|------|
-| 前端 | http://localhost:5173 |
-| 后端 API | http://localhost:8000/api |
-| Swagger UI | http://localhost:8000/docs |
-| ReDoc | http://localhost:8000/redoc |
-| Neo4j Browser | http://localhost:7474 |
+生产 web 构建默认只公开 Viewer：
 
-### 1.6 默认账号
-
-| 用户名 | 密码 | 角色 |
-|--------|------|------|
-| `admin` | `Admin@2026` | 系统管理员 |
-| `engineer` | `Engineer@2026` | 现场质量工程师 |
-| `manager` | `Manager@2026` | 质量经理 |
-| `viewer` | `Viewer@2026` | 只读用户 |
-| `groupadmin` | `GroupAdmin@2026` | 系统管理员（集团） |
-
-> 上述种子账号仅用于本地开发。公开部署不得暴露这些凭据，并应为所有实际账号设置独立密码。
-
-### 1.7 公开 Viewer 演示
-
-Viewer 演示入口默认关闭。需要在一次性、可丢弃的演示环境中启用时，可使用以下配置作为模板：
-
-```dotenv
+```env
 VITE_PUBLIC_DEMO_ENABLED=true
-VITE_PUBLIC_DEMO_USERNAME=viewer-demo
-VITE_PUBLIC_DEMO_PASSWORD=change-me-viewer-demo-only
+VITE_PUBLIC_DEMO_USERNAME=viewer
+VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 ```
 
-示例密码 `change-me-viewer-demo-only` 是刻意设置的无效文档占位值，不是仓库密钥；运维人员必须将其替换为专用 Viewer 演示账号的密码。
+浏览器可见的 Viewer 值是只读演示凭据，不是 secret。`VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 是**可选且默认留空**的公开构建输入；本实例只允许 `engineer` 与 `manager` 两个额外账号。编辑服务器现有 mode `0600` 的 `.env.production` 时，若已有该键则替换已有空值；仅当旧文件缺少该键才追加以下完整单行 JSON，绝不生成重复键。`admin` 与 `groupadmin` 保持私密，不得写入该变量。不要重写数据库、JWT 或其他生成密钥，也不要把文件内容打印到终端/工单：
 
-- 这三个值由 Vite 读取并嵌入浏览器收到的 JavaScript，因此不能作为秘密保存。
-- 只能在可丢弃的演示环境中使用专用 Viewer 账号；绝不能使用生产账号或 Admin、Manager、Engineer 凭据。
-- 即使 `VITE_PUBLIC_DEMO_ENABLED=true`，缺少用户名或密码也会关闭演示 UI。
-- Docker Compose 从项目根目录的 `.env` 读取这些变量，并传给前端容器。
-- 单独运行 `cd frontend && npm run dev` 时，Vite 不会加载项目根目录的 `.env`；请将 `VITE_PUBLIC_DEMO_*` 写入不跟踪的 `frontend/.env.local`，或在启动进程的环境中导出。
-- 修改 Vite 变量后必须重启开发服务器；已构建的部署必须重新构建前端。
-- 多角色公开演示需要隔离租户、自动重置、写入限流和危险操作控制，本次变更未启用该能力。
+```env
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"}]
+```
 
-### 1.8 停止与重启
+新版本包装器允许该键缺失或为空，故可先从不可变归档同步新源码并核验清单，再编辑 `.env.production`，在构建 web 镜像前执行 `./scripts/production-compose.sh config --quiet` 校验。缺失 JSON 时沿用 Viewer-only；非空 JSON 必须恰好包含 Engineer 与 Manager，否则前端 fail closed，不显示任何演示凭据。配置完整时，正常 `/login` 与 `/login?demo=viewer` 都展示 Viewer、Engineer、Manager；点击只填入，不自动登录。Engineer 的 `user_mgmt` 为 0，Manager 仅为 VIEW=1，均不能修改其他账号密码；两者仍可修改共享质量数据。没有自动重置，**不得录入真实数据或真实 API 密钥**。其他正式生产环境仍须轮换演示密码并保持该可选值为空。
+
+根目录 `.env` / `.env.production` 只由 Compose 使用；独立 Vite 读取 `frontend/.env*`。本地独立运行或构建公开首页时，可写入 `frontend/.env.local`：
 
 ```bash
-# 停止所有服务
-docker compose down
-
-# 停止并删除数据卷（重置数据库）
-docker compose down -v
-
-# 重启单个服务
-docker compose restart backend
+cat > frontend/.env.local <<'EOF'
+VITE_PUBLIC_DEMO_ENABLED=true
+VITE_PUBLIC_DEMO_USERNAME=viewer
+VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
+EOF
+npm --prefix frontend run dev
 ```
 
+也可在构建前导出。关闭演示登录时，必须同时提供 `false` 和全部空凭据值，避免旧 shell 值进入 bundle：
+
+```bash
+VITE_PUBLIC_DEMO_ENABLED=false \
+VITE_PUBLIC_DEMO_USERNAME= \
+VITE_PUBLIC_DEMO_PASSWORD= \
+VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS= \
+  npm --prefix frontend run build
+```
+
+### 1.4 首次发布顺序
+
+#### A. 准备与基础设施
+
+1. 在 Mac 运维仓库按 1.2 锁定并同步同一 `RELEASE_SHA`，再在 Oracle `/opt/openqms` 初始化该 release。
+2. 生成 `.env.production`，检查 `./scripts/production-compose.sh config --quiet`。
+3. 仅启动 `db redis neo4j`，等待 `healthy`；此时不要提前启动 backend/web。
+4. 在 Mac 运维机的专用终端建立 Oracle 目标隧道；本地端口固定为 `15432`，避免覆盖本机 PostgreSQL `5432`。
+
+```bash
+ssh -N \
+  -i "$HOME/.ssh/<private-key-file>" \
+  -L 15432:127.0.0.1:5432 \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  ubuntu@100.84.141.70
+```
+
+#### B. 目标库、测试库与运行时身份门禁
+
+以下命令在**执行 1.2 同步并保留 `RELEASE_SHA`/`RELEASE_STAGE` 的 Mac 运维终端**执行。先 `cd "$RELEASE_STAGE"`，因此 migrate、check、preflight 与 target identity 的本地代码均来自不可变 archive。stage 要求 Python 3.11、Node 20 与 npm，并从 archive 自己的 `backend/requirements.txt` 创建全新 venv、从 `frontend/package-lock.json` clean `npm ci`；不复用原 checkout 的 `.venv`、`node_modules`、未跟踪或随后变化的源码。
+
+`DATABASE_URL` 经本地 `15432` 隧道指向 Oracle `qms`。先清除并拒绝 hostile ambient `TEST_DATABASE_URL`，再为 Mac 上本任务独占 PostgreSQL 容器内已登记的 `qms_test` 数据库构造、导出实际 URL；这个 URL 与 `TEST_DB`/`PG*` 参数必须在首次 silent `make check-test-db` 和 nested `make check` 中完全相同。两个数据库在 distinct guard 前都必须存在且可达，绝不回落创建或迁移默认 `qms_test`。本地用户名/密码为非生产占位符；关闭 xtrace 且使用 silent make，任何本地或生产密码都不得打印。
+
+Oracle manifest 验证和 wrapper build 成功后，直接用 `docker image inspect` 读取新构建的 `openqms-backend:prod` / `openqms-web:prod` 非敏感 sha256 ID；不能使用只列出已创建容器所用镜像的 Compose `images -q`。graph-worker 共用 backend tag。将 ID 设为 readonly/exported 并与当前 `RELEASE_SHA` 关联；后续远端 image guard 比较当前 tag ID，任何重建/替换都会在迁移前 fail closed。
+
+```bash
+cd "$RELEASE_STAGE"
+test "$(git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY"
+REMOTE_RELEASE_SHA=$(ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" 'cat /opt/openqms/.release-sha')
+test "$REMOTE_RELEASE_SHA" = "$RELEASE_SHA"
+
+read -r BACKEND_IMAGE_ID WEB_IMAGE_ID <<< "$(
+  ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" \
+    bash -s -- "$RELEASE_SHA" "$RELEASE_MANIFEST_SHA" "$RELEASE_GUARD_SHA" <<'REMOTE_BUILD'
+set -euo pipefail
+release_sha=$1
+manifest_sha=$2
+guard_sha=$3
+cd /opt/openqms
+test "$(sha256sum .release-manifest | cut -d " " -f1)" = "$manifest_sha"
+test "$(sha256sum scripts/check-release-tree.py | cut -d " " -f1)" = "$guard_sha"
+python3 scripts/check-release-tree.py verify --root . --manifest .release-manifest >/dev/null
+test "$(cat .release-sha)" = "$release_sha"
+./scripts/production-compose.sh build >/dev/null
+revision_label='{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+backend_id=$(docker image inspect openqms-backend:prod --format '{{.Id}}')
+web_id=$(docker image inspect openqms-web:prod --format '{{.Id}}')
+backend_revision=$(docker image inspect openqms-backend:prod --format "$revision_label")
+web_revision=$(docker image inspect openqms-web:prod --format "$revision_label")
+[[ "$backend_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$web_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+test "$backend_revision" = "$release_sha"
+test "$web_revision" = "$release_sha"
+printf '%s %s\n' "$backend_id" "$web_id"
+REMOTE_BUILD
+)"
+[[ "$BACKEND_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$WEB_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]
+readonly BACKEND_IMAGE_ID WEB_IMAGE_ID
+export BACKEND_IMAGE_ID WEB_IMAGE_ID
+export REMOTE_IMAGE_VERIFY='revision_label='\''{{ index .Config.Labels "org.opencontainers.image.revision" }}'\'' && test "$(docker image inspect openqms-backend:prod --format "{{.Id}}")" = "'"$BACKEND_IMAGE_ID"'" && test "$(docker image inspect openqms-web:prod --format "{{.Id}}")" = "'"$WEB_IMAGE_ID"'" && test "$(docker image inspect openqms-backend:prod --format "$revision_label")" = "'"$RELEASE_SHA"'" && test "$(docker image inspect openqms-web:prod --format "$revision_label")" = "'"$RELEASE_SHA"'"'
+
+unset TEST_DATABASE_URL
+test -z "${TEST_DATABASE_URL+x}"
+export OPENQMS_TEST_RESOURCE_FILE='<owner-only-registration-file>'
+export PG15_CONTAINER="$("$RELEASE_STAGE/backend/.venv/bin/python" -c 'import json,os; print(json.load(open(os.environ["OPENQMS_TEST_RESOURCE_FILE"]))["container_id"])')"
+export LOCAL_TEST_PGUSER='<local-test-user>'
+export LOCAL_TEST_PGPASSWORD='<local-test-password>'
+export LOCAL_TEST_PGHOST=127.0.0.1
+export LOCAL_TEST_PGPORT='<registered-loopback-port>'
+export LOCAL_TEST_PASSWORD_ENCODED=$(LOCAL_TEST_PGPASSWORD="$LOCAL_TEST_PGPASSWORD" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["LOCAL_TEST_PGPASSWORD"], safe=""))')
+export RELEASE_GATE_DB="qms_test"
+export TEST_DATABASE_URL="postgresql+asyncpg://${LOCAL_TEST_PGUSER}:${LOCAL_TEST_PASSWORD_ENCODED}@${LOCAL_TEST_PGHOST}:${LOCAL_TEST_PGPORT}/${RELEASE_GATE_DB}"
+PGUSER="$LOCAL_TEST_PGUSER" \
+PGPASSWORD="$LOCAL_TEST_PGPASSWORD" \
+PGHOST="$LOCAL_TEST_PGHOST" \
+PGPORT="$LOCAL_TEST_PGPORT" \
+TEST_DB="$RELEASE_GATE_DB" \
+TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+  make --silent check-test-db TEST_DB="$RELEASE_GATE_DB"
+export DATABASE_URL='postgresql+asyncpg://qms:<url-encoded-production-password>@127.0.0.1:15432/qms'
+export ORACLE_APP_DIR=/opt/openqms
+```
+
+远程身份脚本通过 SSH 在 Oracle 主机执行 `./scripts/production-compose.sh exec -T db ...`，比较 PostgreSQL system identifier、database name 和 OID。这个 `TARGET_IDENTITY_CMD` 在任何迁移之前运行且不可跳过。
+
+
+Release test database ownership: provision a dedicated pgvector/pgvector:pg15 Docker container with a random `openqms.owner` label and a loopback-only published port. Before executing this block, prepare a mode 0600 JSON registration with `container`, full `container_id`, `owner_nonce` matching that label, `image`, `host`, `port`, `test_database` set to `qms_test` matching RELEASE_GATE_DB, and `application_database` set to `postgres`. Set OPENQMS_TEST_RESOURCE_FILE to that file and LOCAL_TEST_PG* to that exact container. Do not register a business database or another task's container. `make check-test-db` verifies the registration before creating/migrating the test database; it must succeed before `make deploy-release` touches the target. Current full acceptance fixtures require `qms_test`; use that name only inside the dedicated container. Never use a shared qms_test instance. SDK build tooling is pinned in the stage venv and CHECK_CMD explicitly selects that interpreter.
+
+#### C. 串行 release 与初始化
+
+`deploy-release.sh` 的固定顺序是：distinct DB guard → target identity → migrate → tenant migrate（若配置）→ check → initialize → preflight → rollout。任一步失败即停止。
+
+首次部署通过 `INITIALIZE_CMD` seed；release 脚本保证 initializer 在 preflight 前执行。`--no-print-credentials` 防止 privileged 演示密码出现在日志。后续发布若数据已初始化，可省略 `INITIALIZE_CMD`。`deploy-release.sh` 在 Mac 运维机求值命令字符串，因此 initializer 与 rollout 必须显式 SSH 到 Oracle、切换到 `/opt/openqms` 并调用远端包装器，不能调用 Mac 本地 Compose。
+
+继续在 `RELEASE_STAGE` 中执行。`TARGET_IDENTITY_CMD` 会先在 Oracle 复验 manifest/tree/mode、marker 与 backend/web image ID，再运行数据库 identity，因而镜像或源码漂移会在 migrate 前阻断。initializer 与 rollout 同样先重复全部远端门禁，最后才调用包装器：
+
+```bash
+export CHECK_CMD='PGUSER="$LOCAL_TEST_PGUSER" PGPASSWORD="$LOCAL_TEST_PGPASSWORD" PGHOST="$LOCAL_TEST_PGHOST" PGPORT="$LOCAL_TEST_PGPORT" TEST_DB="$RELEASE_GATE_DB" TEST_DATABASE_URL="$TEST_DATABASE_URL" make --silent -C "$REPO_ROOT" check SDK_PYTHON_BIN="$PYTHON_BIN"'
+export TARGET_IDENTITY_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY" && "$PYTHON_BIN" "$REPO_ROOT/scripts/check-oracle-target-database.py"'
+export INITIALIZE_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY && ./scripts/production-compose.sh run --rm --no-deps backend python -m app.seed --no-print-credentials"'
+export ROLLOUT_CMD='ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY && ./scripts/production-compose.sh up -d --wait backend graph-worker web"'
+test "$(git -C "$LOCAL_RELEASE_REPO" rev-parse HEAD)" = "$RELEASE_SHA"
+ssh -i "$ORACLE_SSH_KEY" "$ORACLE_SSH_TARGET" "cd /opt/openqms && $REMOTE_RELEASE_VERIFY && test \"\$(cat .release-sha)\" = \"$RELEASE_SHA\" && $REMOTE_IMAGE_VERIFY"
+TENANT_MODE=single make deploy-release
+cleanup_release_stage
+trap - EXIT HUP INT TERM QUIT
+```
+
+不要把 migrate、check、preflight 和 rollout 拆成可并行命令。`deploy-release.sh` 从 stage 中推导 `REPO_ROOT`，默认 migrate/preflight 因此读取 archive 代码；显式 `CHECK_CMD` 将同一 `TEST_DATABASE_URL`、`TEST_DB` 与 `PG*` 传给 nested make。`DATABASE_URL` 只用于目标迁移/preflight，check 阶段把 `DATABASE_URL` 与 `TEST_DATABASE_URL` 都绑定到该唯一隔离测试库；rollout 不接收这两个主机 DSN。
+
+#### D. 私网验收、共享演示账号、代理探针与公网
+
+1. 先经 Tailscale 地址验收 `/`、`/login`、管理员登录、业务权限和 health。
+2. 公开登录页只展示 `viewer`、`engineer`、`manager`。`admin` 与同为管理员角色的 `groupadmin` 保持私密，防止访客进入用户管理并修改其他账号密码；不得将其凭据写入 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS`。Engineer 没有用户管理权限，Manager 只有查看权限，但两者仍能修改共享质量业务数据；没有自动重置，不得输入真实数据或真实 API 密钥。
+3. 在 **Oracle 主机**用当前公开 Viewer 密码运行代理/限流探针，明确命中 Tailnet `http://100.84.141.70` site。脚本内部使用固定生产包装器，并验证独立客户端配额与伪造 `X-Forwarded-For` 场景。不要在证书签发前用公网域名的默认 HTTP 探针，否则 Caddy 的 308 HTTPS 重定向会让 401 断言失败。
+4. Namecheap BasicDNS 的 `qms` A 记录指向 `150.230.197.45`；由 Caddy 直接申请和终止 HTTPS，不使用 Cloudflare 代理。
+5. 验收公网 `https://qms.smartindustry.world/`、`/login`、API health 与权限；若对公网域名重跑代理探针，必须设置 `SITE_SCHEME=https`。
+6. 公网 SSH 22 当前按所有者选择保留；以后如需关闭，先验证 HTTPS 与 Tailscale 私网 SSH，再单独授权变更 OCI 入站规则，主机 sshd 不关闭。
+
+以下命令在 Oracle 主机 `/opt/openqms` shell 执行：
+
+```bash
+COMPOSE_FILE=/opt/openqms/docker-compose.prod.yml \
+SITE_HOST=100.84.141.70 \
+SITE_SCHEME=http \
+LOGIN_PASSWORD=Viewer@2026 \
+  ./scripts/check-proxy-rate-limit.sh
+./scripts/production-compose.sh ps
+./scripts/production-compose.sh logs --tail=200 backend web
+./scripts/production-compose.sh restart backend
+```
+
+### 1.5 日常运维
+
+以下命令在 Oracle 主机 `/opt/openqms` shell 执行：
+
+```bash
+./scripts/production-compose.sh ps
+./scripts/production-compose.sh logs --tail=200 backend graph-worker web
+./scripts/production-compose.sh logs -f backend
+./scripts/production-compose.sh restart backend
+./scripts/production-compose.sh exec -T backend python -m app.seed --help
+```
+
+所有 `exec` 示例同样经过包装器。`.env.production` 不应 `source` 进交互 shell。
+
+### 1.6 PostgreSQL 备份
+
+`backup-postgres.sh` 默认使用：
+
+- `OPENQMS_DIR=/opt/openqms`
+- `BACKUP_DIR=/opt/openqms/backups/postgres`
+- `RETENTION_DAYS=7`
+
+脚本经 `$OPENQMS_DIR/scripts/production-compose.sh exec -T db` 执行 `pg_dump -Fc`，写入同目录私有 partial；拒绝空文件，在容器内运行 `pg_restore --list` 后才原子发布。只有发布成功后才清理超过保留期的常规 `*.dump`；symlink、partial 与无关文件不删除。
+
+在 **Oracle 主机 `/opt/openqms` shell** 安装每日 `03:17`、可补跑、带随机延迟的 timer：
+
+```bash
+sudo install -m 0644 deploy/openqms-backup.service /etc/systemd/system/openqms-backup.service
+sudo install -m 0644 deploy/openqms-backup.timer /etc/systemd/system/openqms-backup.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now openqms-backup.timer
+sudo systemctl list-timers openqms-backup.timer
+```
+
+手动运行并验证最新文件：
+
+```bash
+sudo -u ubuntu OPENQMS_DIR=/opt/openqms \
+  BACKUP_DIR=/opt/openqms/backups/postgres \
+  RETENTION_DAYS=7 \
+  /opt/openqms/scripts/backup-postgres.sh
+sudo systemctl status openqms-backup.service
+sudo -u ubuntu find /opt/openqms/backups/postgres -maxdepth 1 -type f -name '*.dump' -ls
+latest=$(find /opt/openqms/backups/postgres -maxdepth 1 -type f -name '*.dump' | sort | tail -1)
+test -n "$latest"
+./scripts/production-compose.sh exec -T db pg_restore --list < "$latest" >/dev/null
+```
+
+备份只覆盖 PostgreSQL，不覆盖 Neo4j、Caddy 数据卷、`.env.production` 或外部 AI 配置。把 dump 复制到受控异机存储并验证保留策略；不要在日志中输出 DSN 或密码。
+
+### 1.7 恢复演练与回滚
+
+恢复前停止写入并保存当前状态。`pg_restore` 必须先恢复到**新的空数据库**，完成 schema/数据/应用验收后再制定切换；不要直接覆盖正在运行的生产库。custom-format dump 不等同于全机快照，Neo4j 可从 PostgreSQL 真源重建，但应单独规划时间。
+
+代码回滚先在 **Mac 仓库**切换到已验证 release，并按 Task 14 使用的同一受控 rsync 流程把源码同步到 `/opt/openqms`；随后在 **Oracle 主机**重建应用服务：
+
+```bash
+# Mac 仓库：切换版本并完成受控源码同步
+git checkout '<previous-release-tag>'
+
+# Oracle 主机 /opt/openqms：同步完成后重建并保持运行
+./scripts/production-compose.sh config --quiet
+./scripts/production-compose.sh up -d --build backend graph-worker web
+./scripts/production-compose.sh ps
+```
+
+命名卷必须保留。数据库迁移未必可逆；若旧代码不兼容新 schema，应前滚修复或依据已验证备份与迁移 runbook 恢复，不能用删除卷代替恢复策略。
+
 ---
+
+### 1.5 PR 预览与生产自动部署
+
+配置见[自动部署指南](oracle-automation.md)、[受限控制器安装](oracle-production-setup.md)及[预览隔离](oracle-preview-setup.md)。交互式发布仍使用生产包装器；自动化由 root 安装的受限控制器执行同等环境、源码、镜像及数据库校验，并调用串行 `make deploy-release`。完整检查在没有部署凭据的 CI 中运行，发布阶段重新核对准确提交的成功收据。后端普通跳过仍如实记录为 skipped，浏览器门禁要求零跳过。
+
+生产与预览开关初始关闭。启用前必须完成服务器控制器安装、两套角色受限 SSH 密钥、GitHub Environment 及实际生命周期验收。生产域名保持 `qms.smartindustry.world`，预览使用 `pr-<编号>.preview.openqms.smartindustry.world`。
 
 ## 2. 本地开发环境
+
+以下命令仅用于开发，不适用于生产。
 
 ### 2.1 前提条件
 
@@ -170,70 +381,54 @@ docker compose restart backend
 | PostgreSQL | 15+ |
 | Redis | 7+ |
 
-### 2.2 后端
+### 2.2 Docker 开发栈
+
+```bash
+docker compose up -d
+docker compose exec backend alembic upgrade head
+docker compose exec backend python -m app.seed
+docker compose ps
+```
+
+停止开发栈可运行 `docker compose down`。需要重置开发数据时，应先确认命名卷并采取显式、可审计的删除操作；不要把生产回滚方法用于开发重置，反之亦然。
+
+### 2.3 本地后端
 
 ```bash
 cd backend
 pip install -r requirements.txt
-
-# 配置环境变量
-cp ../.env.example .env
-# 编辑 .env 中的 DATABASE_URL 和 REDIS_URL 指向本地服务
-
-# 数据库迁移
 alembic upgrade head
-
-# 导入演示数据
 python -m app.seed
-
-# 启动开发服务器
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 2.3 前端
+本地 DSN 使用 `localhost`，容器 DSN 使用服务名 `db`。测试必须设置独立 `TEST_DATABASE_URL`，推荐通过 `make check` 运行完整检查。
+
+### 2.4 本地前端
 
 ```bash
 cd frontend
 npm install
-
-# 启动开发服务器（自动代理 /api → localhost:8000）
 npm run dev
+npm run build
 ```
 
-前端默认运行在 `http://localhost:5173`，通过 Vite 代理将 `/api` 请求转发到后端。
-
-### 2.4 环境变量
-
-本地开发时，后端读取项目根目录或 `backend/` 目录下的 `.env` 文件：
-
-```env
-DATABASE_URL=postgresql+asyncpg://qms:qms_dev_2026@localhost:5432/qms
-REDIS_URL=redis://localhost:6379/0
-SECRET_KEY=change-me-in-production
-ACCESS_TOKEN_EXPIRE_MINUTES=120
-```
+Vite 默认在 `http://localhost:5173`，将 `/api` 代理到 `localhost:8000`。公开演示构建值的文件边界见 1.3。
 
 ---
 
-## 3. 数据库迁移
+## 3. 数据库迁移约定
 
-Alembic 管理所有数据库 schema 变更。
+Alembic 迁移文件为手写。开发环境可运行：
 
 ```bash
-# 应用所有待执行的迁移
-alembic upgrade head
-
-# 查看当前版本
+cd backend
 alembic current
-
-# 查看迁移历史
 alembic history
-
-# 回退一个版本
-alembic downgrade -1
+alembic upgrade head
 ```
 
-> ⚠️ 迁移文件为手写（非自动生成），请勿使用 `alembic revision --autogenerate` 覆盖现有迁移。
+生产环境不得绕过 1.4 的 identity 与 `make deploy-release` 串行门禁单独执行迁移。
 
 ---
 
@@ -241,37 +436,20 @@ alembic downgrade -1
 
 ### 4.1 数据库连接失败
 
-```
-sqlalchemy.exc.OperationalError: connection refused
-```
+- 容器内确认主机名为 `db`，主机隧道确认是 `127.0.0.1` 和正确端口。
+- 生产状态使用 `./scripts/production-compose.sh ps db`，日志使用 `./scripts/production-compose.sh logs db`。
+- 不要在错误报告中粘贴完整 DSN。
 
-- 检查 PostgreSQL 是否运行：`docker compose ps db`
-- 检查 `DATABASE_URL` 中的主机名是否正确（Docker 内用 `db`，本地用 `localhost`）
-- 确认 `qms` 数据库已创建
+### 4.2 HTTPS 或代理来源异常
 
-### 4.2 前端代理 404
+- 确认 Namecheap BasicDNS 的 `qms` A 记录解析到 Oracle 公网 IP，Caddy 证书有效。
+- 确认 Caddy 仍为 `172.30.0.10`，backend 只信任该地址。
+- 修改网络后重跑 `check-proxy-rate-limit.sh`。
 
-- 确认后端运行在 `localhost:8000`
-- 检查 `frontend/vite.config.ts` 中的 proxy 配置
-- Docker 环境下前端通过 `BACKEND_URL` 环境变量指向后端
+### 4.3 AI 推荐不可用
 
-### 4.3 Neo4j 连接失败
+生产栈有意省略 Ollama。先确认核心质量流程正常，再由管理员在 AI 配置页填写外部提供商；不要把 API key 写入本文档。
 
-- 检查 Neo4j 容器是否 `healthy`：`docker compose ps neo4j`
-- 知识图谱功能依赖 Neo4j，如不需要可忽略该错误
-- 浏览器访问 `http://localhost:7474` 验证 Neo4j Browser 可用
+### 4.4 Timer 未执行
 
-### 4.4 种子数据报错 "Already seeded"
-
-表示数据库已有种子数据，跳过即可。如需重置：
-
-```bash
-docker compose down -v    # 删除数据卷
-docker compose up -d      # 重新启动
-docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.seed
-```
-
-### 4.5 Ollama 内存不足
-
-Ollama 容器默认限制 2 GB 内存。如需运行大模型，调整 `docker-compose.yml` 中 `ollama` 服务的 `memory` 限制，或禁用 AI 推荐功能。
+检查 `systemctl list-timers openqms-backup.timer` 和 `systemctl status openqms-backup.service`。手动脚本也失败时，先确认 `/opt/openqms/.env.production` 可读且生产包装器验证通过；不要改成直接 Compose 以绕过验证。

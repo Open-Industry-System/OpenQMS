@@ -416,7 +416,6 @@ jobs:
 
           echo "Docs check passed."
 
-
   r5-native:
     # Required Darwin sandbox pilot. Runner hook must provision a NEW dedicated
     # PG15 resource and owner-only job-bound bundle for every job (see docs/e2e).
@@ -447,3 +446,21 @@ jobs:
             ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
             ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
           if-no-files-found: error
+
+  oracle-automation-checks:
+    runs-on: ubuntu-24.04
+    env:
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tests

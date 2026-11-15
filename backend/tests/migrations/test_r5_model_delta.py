@@ -68,7 +68,7 @@ async def test_current_tenant_models_match_public(mig_db_url,monkeypatch):
     from app.services.tenant_schema_diff import compare_business_schema,load_snapshot_manifest
     from app.schemas.platform import TenantCreateRequest
     await asyncio.to_thread(command.upgrade,_migration_config(mig_db_url),PUBLIC)
-    engine=create_async_engine(mig_db_url,poolclass=NullPool);monkeypatch.setattr(tenant_migrator,'engine',engine)
+    engine=create_async_engine(mig_db_url,poolclass=NullPool);monkeypatch.setattr(tenant_migrator,'engine',engine);monkeypatch.setattr(tenant_migrator,'REVISION',TENANT)
     try:
         tenant=await tenant_migrator.provision_new(TenantCreateRequest(name='Model parity',slug='model-'+uuid.uuid4().hex[:10],admin_email='model@example.test',admin_password='D4TestPassword123'))
         async with engine.connect() as db:

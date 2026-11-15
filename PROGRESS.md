@@ -1,5 +1,9 @@
 # OpenQMS 开发进度
 
+> **2026-11-15 R5 当前主线集成进行中（用户已授权推送与草稿PR）**：实际 fetch `origin/main=dae0892f3be6f15ea297bd0d2659308029cd4d23`，在 R5 `73ad865c` 合入 R4b #30、Oracle #31 和 refresh-session 主线改动。新增 public `20261115_r5_main_merge`、tenant `tv013_r5_main_merge`，各合并两侧已发布 head，不改写历史迁移；严格租户前驱同构比较只过滤 public 参考侧。实际焦点数据库32通过、纯检查297通过；前端旧夹具遗漏D5 API隔离先复现，修正后相关100通过。完整迁移/认证回归正在本轮独占R5资源串行执行，合并前完整make结果不冒充本轮。主线独有109文件中108字节一致，另1仅当前head测试调整；已发布迁移均未改写。详见 [集成记录](docs/development/r5-main-integration.md)。
+>
+> 原生macOS R5 runner清单实际为0，不能声称该远端检查已执行；推送/草稿PR及普通CI实际结果待记录。真实LOCAL/CLOUD仍PENDING，已准备[合成试用和工程师评价安排](docs/development/r5-real-model-trials.md)，待批准部署/专用凭据引用及工程师确认。未合并PR、部署或生产启用，未操作R4B-CLEANUP-01。
+
 > **2026-11-15（本地日期）R5 T9 本地自动验收通过并已精确本地提交**：基于 T8 `f61669148598dd5e49027645f3c8bfe3f73e0147`，最终执行候选 v9 的38文件 SHA256 清单 `5dcde6d24f6e20e9f71015f2702a403ca4618000a2402209a146e36eafbd6c5c` 已获独立 SPEC/QUALITY 双 APPROVED，无未解决 Critical/Important。全部门禁结束后38文件逐项 hash 及 changed/untracked 路径集合仍完全一致，`git diff --check` 无输出；此后只更新本进度和实施计划，生产、测试及CI执行文件不变。T1–T8实际提交见计划，T3遗留未勾选状态已按已接受提交及本轮真实回归补齐。T9实际本地提交为 `acd570dc8edbcdd9f01ddaf694cb9c2ad0785739`（39文件）；当前状态收尾仅更新本进度和计划，执行源码与已验收提交一致。未push/合并/部署。
 >
 > **提交后源码元数据复核**：根代理核对 public `20261114_r5_models` 与 tenant `tv012_r5_models` 均为single head，T1–T9九项实际提交吻合。首次未显式注入环境的metadata命令：public检查成功，tenant因Settings默认SECRET_KEY校验失败而exit1；加入明确synthetic-only SECRET_KEY后同一metadata检查exit0。此为无DB连接的源码/环境诊断，不计作DB或应用测试通过，不影响已完成完整门禁；失败及修正如实记录。
@@ -153,6 +157,10 @@
 >
 > 剩余边界：T1 仅提供持久结构，不开放建议保存/采纳/模型能力。跨 task/report/run/revision/proof 及检查点归属的一致性由 T4/T5 在可信身份及父锁下复核；此处 FK 只证明被引用对象存在，不把独立 FK 当复合授权约束。独立规格复核与质量复核均 APPROVED，无未解决重要问题；T1 已提交 `c0cd8abf`；主执行者提交后重跑迁移焦点 **17 passed/4 warnings**（44.12秒、exit0，`run-1794633842496883000.log`）。T2 已实现并经双复核与当前54项焦点通过，T3–T9 尚未实施。完整 `make check` 未运行，不能用焦点结果代替整片验收。
 
+> **2026-11-14 R4b 集成草稿PR已发布**：已普通推送独立分支`integration/r4b-main-20261114`并创建[草稿PR #30](https://github.com/Open-Industry-System/OpenQMS/pull/30)，base仍为main `5b712d94`，GitHub报告mergeable且draft=true；未合并main。首轮自动Test OpenQMS已触发，逐轮CI状态与最终实际head以PR动态记录及最终交接为准，不在此预写通过。执行候选`78b428d2`的本地完整门禁与资源证据见下一条/集成交接；后续仅文档记录发布事实，1575执行文件指纹保持一致。GitHub连接器创建PR受403集成权限限制，已用本机现有gh授权完成同一草稿请求，未提升权限。旧R4B-CLEANUP-01继续延期，新专用验收实例保留用于PR迭代。
+
+> **2026-11-14 R4b 主线集成发布前本地验收完成**：origin/main刷新仍为`5b712d94`，独立分支`integration/r4b-main-20261114`合入已签收`dcda1d55`，17处冲突逐段解决；集成merge `ebc502c2`、最终执行候选`78b428d2`。保留main权限/PR #29与R4b双层来源、默认拒绝、消息门禁、受限恢复、撤权后停止；public/tenant分别新增无DDL merge至20261114/tv009，真实发现并修复merge拆分多head降级问题，独立规格/质量复审通过。新独占实例内public三路径、tenant空建/双旧head有值升级/full parity/27 guards均通过。当前`make check`真实exit0：**backend4973通过/4可选skip/19未选/6警告**，SDK **562+16+1**，前端tsc/build通过；真实browser **11通过/0skip/6警告**，pure **321通过/3警告**，Vitest **95文件822通过**，E2E类型通过，清理器普通/-O各55隔离测试通过。1575执行文件前后指纹一致（manifest SHA256 `27bcbdf738c63787934a29877ea608c08997a8e54b10d715fcd931f1a87a70bd`）；具体收据、工具差异、skip和未运行层见[集成交接](docs/development/r4b-main-integration.md)。主库为本次独占实例`127.0.0.1:62563/qms_test`，原初始测试库仍保留；因main旧夹具精确库名要求而调整登记，未放宽守卫，PR #29事务27通过。验收后迁移临时库/其他客户端/tenant登记/schema均0，哨兵不变。旧 **R4B-CLEANUP-01**仍延期，全部旧资源未用于本轮；T11仍“功能验收完成，清理待办”。下一步普通push独立分支并创建草稿PR、跟踪实际CI，不写main/不合并/不部署或启模型。
+
 > **2026-11-14 R4b 主线集成进行中**：已刷新 origin/main=`5b712d94ed08412a6c3d92e4dca2d9193b5959d3`，在应用创建的独立工作树 `/Users/sam/.codex/worktrees/0cd0/OpenQMS`、分支 `integration/r4b-main-20261114` 合入已签收 `dcda1d55`。实际17冲突逐段处理，保留main权限修复/PR #29与R4b消息门禁、双层来源、恢复及停止边界。新独占PG owner=`26a2159e6e037e8d9e421c06`，端点 `127.0.0.1:62563`；完整身份/私有登记、冲突决策和验证记录见[集成交接](docs/development/r4b-main-integration.md)。旧R4B-CLEANUP-01全部保留，不用于本轮。纯权限当前150通过，CI pure321通过/3警告；迁移首轮72通过/2失败揭示merge拆分多head回退缺口，新增DDL前全部父路径/提交前单版本守卫并补真实回归；旧版本配对RED2后5通过、迁移state矩阵RED9后17通过。迁移/tenant整组中间378通过/5旧head断言失败/1工具skip，5断言修正后单独5通过；PG15工具现绑定本次容器ID重跑快照，运行时/附件/PR29焦点正在执行，尚不声称完整候选、远端CI或可合并。
 
 > **2026-11-14 收尾方式调整：T11 功能验收完成，清理待办**：依用户明确指示，功能交付单独签收，保留此前完整门禁、独立规格/质量复核及本地提交记录（T11修复 `d49d45c6`、诊断清理器 `486451e5`）；不以延期清理否定功能验收，也不将T11标为全部完成。资源清理另登记为 **R4B-CLEANUP-01（待办）**，由本任务后续维护者承接；清单、凭据文件名、阻塞原因及恢复清理条件见[交付指南](docs/development/capa-d4-local-text-delivery.md#保留资源与后续清理入口)。本轮仅调整文档，未运行Docker、未删除资源或修改执行代码；既有测试证据保持原日期和范围，未宣称重新验证功能。
@@ -288,6 +296,29 @@
 ## CI 原分支交付记录
 
 以下授权与验证属于原 CI 分支，不扩展为本集成分支的推送、部署或生产授权。
+
+### 2026-11-14 — Oracle 生产基线与自动部署集成（进行中）
+
+- 独立工作树 `/Users/sam/.codex/worktrees/oracle-cicd/OpenQMS`，分支 `integration/oracle-cicd-20261114`，基线合并提交 `198377db`；草稿 [PR #31](https://github.com/Open-Industry-System/OpenQMS/pull/31)。main 为 `2dbb84b1`，线上为 `d8648c15`；服务器版本尚未切换。
+- 保留主线租户协调器和冻结快照，加入公共合并迁移 `20261114_production_merge` 及租户 `tv010_refresh_sessions`。真实迁移专项 82 passed / 1 skipped，缺少 PG15 工具的快照测试另用独占容器补测 1 passed；两条公共升级路径保留已有用户及会话 2 passed。完整前端 888 项、类型检查、构建、SDK 三层和浏览器门禁 11 项通过。
+- 首次完整本地验收未通过：3868 passed / 46 failed / 1322 errors / 5 skipped。途中独占 PostgreSQL 容器停止（exit137、OOMKilled=false，同期多个其他容器也停止），造成连接级联错误；另定位严格 umask077 下归档测试夹具模式及 Alembic 禁用 logger 导致的测试捕获问题。仅修正夹具，29 项在严格 umask 及实际日志配置/逆序执行下通过，生产守卫不变。受中断影响的 111 个模块已在新独占容器复验 1635 passed / 0 failed / 0 errors / 0 skipped；不将首次验收计为通过。
+- 已应用受审查的 CI/CD 实现：准确 SHA/收据与权限校验、独立生产/预览角色、受限 SSH 接收器、不可变归档/镜像/数据库身份、备份与失败应用恢复、预览隔离/路由/关闭清理。自动化专项 97 项通过；最终联合 CI/文档/夹具检查 207 项及 4 个子测试通过。预览初始化在真实受限容器验证全部非 Viewer 账号禁用和密码轮换、刷新会话撤销、Viewer 保留及 CAPA 预检 CLEAN；临时初始化资源已清理。
+- 生产 `qms.smartindustry.world` 与 `*.preview.openqms.smartindustry.world` 均已公共解析至 `150.230.197.45`，现有生产 HTTPS `/api/health` 返回正常。两套新部署密钥仅生成在私有临时目录；GitHub Environment 的 main 限制及关闭的开关已准备，私钥上传因自动审批要求具体目的地授权而暂停，等待所有者明确确认。密钥尚未写入 GitHub 或服务器，自动部署未启用。公网 SSH 的 GitHub runner 无凭据握手探测已成功（运行 43608105578），本机公网连接受限；Tailscale 管理连接正常。临时诊断分支已清理，专用角色认证仍待安装后验收。
+- 2026-11-15 内核补验确认旧 CFS 字段可能覆盖 NanoCPUs：旧 `CpuQuota=-1` 配合 NanoCPU 字段时，首次/重启可显示 `cpu.max=max`。最终安装器和发布控制器只接受 `CpuQuota=0`、`CpuPeriod=0`，拒绝自动转换旧状态；现有服务器尚无该专用构建器。标准新建配置首次启动、运行中重复配置及重启均实测 `cpu.max=200000 100000`，所有临时探测容器已清理。相关拒绝/正常构建路径回归和独立审查通过。
+
+- 2026-11-15 候选 `f6364ff2` 的完整 GitHub CI 运行 `43615806595` 八项作业全部成功，真实 API 收据为 5243 selected / 5239 passed / 4 skipped，浏览器 11 passed。部署资格读取器随后真实暴露兼容缺口：9,575,392 字节日志被误套用于收据的 4 MiB 单项限制（收据仅 759 字节，归档总展开量 9,576,151 字节）。已测试先行修正为仅限制实际读取的收据，日志始终不读取/解压；32 MiB 下载与总展开量、条目数量及全部条目的路径/加密/符号链接检查保持不变。真实同一 CI 资格核验已通过，独立门禁回归 40 项通过；主执行者自动化 101 项及严格 umask077 下相关静态合同组合 206 项 / 4 子测试通过（不加载应用/数据库夹具）；该修正后的新 SHA 仍须重新完成完整 CI，尚未合入 main。
+- 2026-11-15 Oracle 已预置专用构建器与 build/edge 两个网络及持久化防火墙服务，无 Docker daemon 重启。构建器实际日志 5 MiB × 2、2 CPU / 2 GiB / 512 PIDs，重启后内核限制保持。真实构建及运行命名空间验证公共 DNS/HTTPS 和 edge 原点 8080 可用、宿主机发布端口回复可用，宿主机/生产数据库/Tailscale 管理地址/OCI 元数据不可达；随机所有权探测容器均清理。原生产六服务、HTTPS health 与备份定时器仍正常。受限控制器/角色公钥尚未安装，私钥上传仍待准确目的地授权，自动发布关闭。
+
+- 2026-11-15 等待 CI 时补做 Oracle 原生 ARM64 构建，实际发现预览后端沿用开发 Dockerfile 的默认 PyPI 镜像而连接失败。同一受限构建命名空间对比确认该镜像 `101.6.15.130` 不可达，官方 `pypi.org` 返回 200；生产 Compose 已显式使用官方源。最小修正仅给预览后端传递相同的 `PIP_INDEX_URL=https://pypi.org/simple`，前端参数和开发默认值不变，保留全部隔离/资源/来源守卫。测试先行与独立复核通过；原生完整构建/离线运行验证及最终准确 SHA 完整 CI 仍待完成，尚未推送本修正或合并/上线。
+
+- 2026-11-15 本地候选 `dda665cd` 使用官方源后，Oracle ARM64 后端镜像实际构建及无网络假配置下 FastAPI 导入均通过。前端原生构建随后真实暴露 TS2307：主线单元测试引用共享 E2E 诊断辅助源文件，而生产 Docker allowlist 将其排除。仅新增该纯 TypeScript 文件的准确路径例外，保持全部 TypeScript 检查；相邻 E2E API、环境文件、存储状态和私钥仍排除。测试先行及独立复核通过，相关静态组合 210 项 / 4 子测试通过；修正后的前端原生构建仍待验证，生产未切换。
+
+- 2026-11-15 前端共享辅助文件例外已在真实 Docker 构建验证有效：完整 TypeScript 通过、Vite 转换 6852 模块，随后 chunk 渲染触及专用构建器 2 GiB 上限（SIGKILL，cgroup oom_kill=1；宿主机仍约9.5GiB可用）。同一 Node20 ARM64 RUN 实测默认总堆 2096 MiB，设置老生代 1536 MiB 后总堆 1584 MiB。仅在 Docker 的 Node 构建阶段增加该老生代预算，保留 2 GiB 构建器上限、完整类型检查和独立最终 Caddy 阶段。测试先行及独立复核通过，相关静态组合 211 项 / 4 子测试通过；完整原生构建与 OOM 计数不增验证仍待完成。
+
+- 2026-11-15 原生验证完成：后端 `dda665cd` 的 ARM64 镜像与离线 FastAPI 导入通过；前端 `50ba88c9` 的 ARM64 生产镜像、Caddy2.11.9/静态资源检查通过，2 GiB / 2 CPU 上限保持，构建器 OOM-kill 计数 1→1，探测容器和标签清理完成。关闭清理另发现 Redis/data、Neo4j/logs 自动匿名卷不继承自定义服务标签；实际 Oracle Compose 独占空卷探测验证 `container rm --volumes` 删除匿名卷而保留命名卷，全部探测资源已清理。仅给已核实归属的预览容器删除增加该选项，命名卷仍独立校验/删除，路由先撤除、秘密最后撤销及外来资源拒绝不变；相关静态组合 211 项 / 4 子测试通过，独立复核通过。main 刷新仍为 `2dbb84b1`，最终修正待推送后完成准确 SHA 全量 CI；受限控制器/公钥尚未安装，私钥写入 GitHub 的专项授权仍待答复，自动部署关闭，生产原版本健康。
+
+- 下一步：完成修正提交上的完整 CI，按实际收据记录结果；安装经验证的受限控制器与角色密钥、配置 GitHub Environment，然后完成实际预览更新/清理和生产发布验收。所有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
+
 
 ### 2026-11-09 — PR #29 main集成验证通过（待推送后远端CI）
 
@@ -476,8 +507,21 @@
 **当前阶段**: PR #26 自批回归修复与 `main` 整合已完成本地验证，提交推送后检查远端 CI 与复审
 
 > **历史背景（2026-07-08）**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。该实现工作及 US-E2E-02 FMEA 生命周期工作均已合入，以下保留的故事细节仅供历史追溯，不是当前开发分支的待办。
+**更新日期**: 2026-09-19
+**当前工作分支**: `worktree-oracle-production-deploy`
+**Oracle 已部署不可变版本**: `ac84e158ec2cf44252a078cdaa48c3d40483101a`（后三账号 UI 与生产构建提交尚未重新部署）
 
-详细路线图见 `docs/ROADMAP.md`，本文件为当前阶段的快速看板。
+详细路线图见 `docs/ROADMAP.md`；下文保留此前各阶段的历史记录。
+
+## Oracle A1 公开演示部署（2026-09-18）
+
+- **已部署运行状态**：Namecheap BasicDNS 的 `qms` A 记录解析到 `150.230.197.45`，`http://qms.smartindustry.world/` 返回 308，公网 `https://qms.smartindustry.world/api/health` 返回 200；Let's Encrypt YE2 证书的 SAN 包含域名，有效期至 2026-12-16。PostgreSQL、Redis、Neo4j、backend、web 的配置健康检查通过；graph-worker 运行中但没有 Docker healthcheck。Caddy 在主机发布 80/443，PostgreSQL 仅绑定 `127.0.0.1:5432`；公网 SSH 22 按所有者决定暂保留。Mac 的 OpenClash 使 `nc` 对保留地址的不存在端口也报 open，因此其端口扫描不能证明内部服务公网可达。
+- **发布门禁与浏览器**：已部署版本的不可变归档/OCI revision、目标身份、迁移、独立测试库完整检查（2172 passed / 43 skipped / 3 xfailed / 2 xpassed / 3 warnings；前端构建 6837 modules）、preflight CLEAN（0 breaks）和串行 rollout 通过。首次发布已静默 seed，后续未再次 seed，`15432` 隧道已关闭。公网浏览器验证 320/390/1440px 无横向溢出、中文/English、Viewer 只填表再登录、未登录仪表盘跳转、嵌套路由刷新、已登录公开首页和无控制台错误/混合内容；私网双 Viewer refresh 独立轮换/重放拒绝、Viewer PATCH 403、代理限流与重启后数据持久性也通过。
+- **备份**：systemd 每日 timer 已启用；手动生成一个 mode `0600` 的非空 PostgreSQL dump 并通过 `pg_restore --list` 校验。备份仍在同一主机，尚无异地副本。
+- **演示账号决策**：公开登录最终只展示 `viewer`、`engineer`、`manager`；`admin` 与同为管理员角色的 `groupadmin` 保持私密，避免访客进入用户管理修改密码与权限。Engineer 的 `user_mgmt` 为 0，Manager 仅为 VIEW=1，均不能修改账号；两者仍可修改共享质量数据。没有自动重置，不得输入真实数据或真实 API 密钥。当前已部署登录页仍只展示 Viewer；三账号 UI 和可选构建输入已在本地完成，**尚未发布**。
+- **边界**：主机防火墙 80/443 已精确持久化且原文件备份；OCI 公共子网 80/443 已由用户添加，公网 22 未删除。没有 push、PR 或 merge。临时非公开用户密码重置的全 refresh 会话撤销线上验收、可信外部网络的内部端口关闭扫描、异地备份及全分支最终复核仍未完成。
+
+**下一步**：重新验证三账号解析、禁用构建无泄漏、完整本地门禁和评审；随后按不可变归档流程发布，并在公网确认三账号可登录且 Engineer/Manager 对用户修改接口仍返回 403。最后处理异地备份、保留公网 22 的风险与分支交接。
 
 ### 2026-11-09 — PR29 latest-main整合本地验证完成，待parent最终集成
 
@@ -636,6 +680,9 @@
 ---
 
 ## 独立租户迁移与 Agent 接入（2026-10-01）
+> **2026-07-08 更新**：US-E2E-01 已从单文件 v7 升级为 **epic 合集 v8.1 定稿**（`docs/user-stories/US-E2E-01-capa-8d-closed-loop/`，README + 10 子故事，经 3 轮评审修订）。配套 gap analysis 已完成（`docs/superpowers/specs/2026-07-08-us-e2e-01-gap-analysis.md`）。原 v6 缺口清单（11 项已完成）对应 v7 范围，v8.1 扩展为 10 子故事后的待办见文末「US-E2E-01 v8.1 待办任务」。
+
+## 系统级 E2E 测试套件（M0+M1，已落地）
 
 - **已实现**：逐事务租户/generation 绑定、全局功能失败关闭、独立静态迁移链与对象级 parity、固定物理连接维护锁、原子 seed 和同租户恢复；插件安装与长期授权表默认禁用。规格及实施记录见[租户设计](docs/superpowers/specs/2026-09-27-independent-tenant-migration-design.md)、[租户计划](docs/superpowers/plans/2026-09-27-independent-tenant-migration.md)。
 - **本轮改动**：精确测试清单、观察 Compose/数据库排空、同一锁所有者重建、跨 schema 依赖拒绝、失败恢复与完整空租户插件表验收。独立规格复核发现并修复了 owner claim 清除未完成重建标记的问题；规格与代码质量复核均通过，无未解决的重要问题。
@@ -2412,3 +2459,15 @@ and all test profile/evidence files; the worktree remains user-dirty afterward.
 - 独立小范围复核Approved，无Critical/Important/Minor。证据在本工作树私有`.superpowers/mes-xfail-fix-20261101/`；原检查的3xfail2xpass及展开2failed2passed1teardown error记录在另一私有检查目录，均保留。
 - 仅使用本轮明确获授权的缓存固定pgvector镜像与随机_test库、回环端口。核验owner/专属卷/网络及零连接后，临时项目已删除，容器/卷/网络剩余均0；没有恢复旧CAPA环境或使用共享/种子/生产库。一次迁移后的正常停机请求来源未确定，已核验并恢复同一容器/卷，无数据重置。
 - 首次整改交接时未跑全站make check、未提交/push/merge/deploy；后续用户已授权按现行设计核对后独立提交并仅推功能分支，不创建PR/合并/部署。此改动作为后续测试维护差异审阅，不覆盖已完成CAPA阶段的原始冻结/验收收据。
+---
+
+## Oracle 生产部署 master plan — Task 11（2026-09-14）
+
+- [x] 新增 `scripts/backup-postgres.sh`：仅经 authoritative `production-compose.sh` 执行 `pg_dump -Fc` / container-local `pg_restore --list`，私有 partial、空文件拒绝、原子不覆盖发布、成功后七日窄范围保留、信号/失败清理与固定无敏感输出。
+- [x] 新增 `openqms-backup.service` / `.timer`（ubuntu oneshot；每日 03:17、Persistent、10m 随机延迟）。
+- [x] README 与中英部署 runbook 统一为固定项目名 `openqms` 的生产包装器命令；补齐 Oracle ARM64/Tailscale、Cloudflare DNS-only、Caddy trusted proxy、identity/check/initialize/preflight/rollout、密码轮换、Viewer 公共值、备份/恢复/回滚边界；移除生产直连 Compose、自动刷新旧说法与删除卷建议。
+- [x] ADR-0005 由 ADR-0014 supersede；记录 per-browser hashed rotating refresh session、replay/legacy/password-reset/audit 边界。
+- [x] RED→GREEN：初始 backup 14 tests / docs 12 tests；正式 review round 2 后 backup 20 tests / release-tree 24 tests / docs 44 tests，并扩充 wrapper/Compose/Dockerfile/web provenance regressions；coordinator 要求矩阵 198 passed，agent-expanded 最终矩阵实际 221 passed；Python compile、shell syntax、runbook Bash parse、两层 shell fake-Docker OCI 模板 pass/fail、stale-doc static check、`git diff --check` 通过。
+- [x] 正式 review 修复：backup 改为 `python3 os.link(..., follow_symlinks=False)` 精确目标原子发布并覆盖现有 file/FIFO/directory/symlink/race；`check-release-tree.py` 使用 deterministic SHA-256 + `100644`/`100755` mode manifest、exact path/hash/mode verifier，并拒绝 reserved runtime name 错误类型；runbook 使用 immutable `RELEASE_SHA` 的 `git archive` 私有 stage，stage 内由 archive manifests 新建 Python 3.11 venv + clean `npm ci`，所有本地 migrate/check/preflight 从 stage 执行；唯一 local test DB URL 显式贯穿首次/nested silent make；`production-compose.sh` 仅接受仓库 `.release-sha` 并清除 ambient override，Compose 将 SHA 传入 backend/web OCI revision label、graph-worker 复用 backend build；manifest/marker/build/label/ID 在单一 fail-closed SSH 中绑定，target identity（迁移前）、initialize、rollout 重复 tree/marker/tag ID/revision gate；并保留 `15432` target tunnel、Tailnet HTTP probe、持续运行 rollback、nonrecursive backup guard、README dev-only 与 `E2E_MODE=false`。
+
+**下一步（2026-09-19）**：以上 Task 11 为历史实施记录；最新 Oracle 公网状态和当前三账号演示 UI 发布门禁以文件开头的「Oracle A1 公开演示部署」为准。不得把本地新 UI 提交误报为已部署；`admin` 与 `groupadmin` 保持私密，无需恢复默认演示登录。

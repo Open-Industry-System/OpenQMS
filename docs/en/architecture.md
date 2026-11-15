@@ -13,7 +13,7 @@ This document describes the OpenQMS system architecture, permission model, data 
 | Database | PostgreSQL 15 | JSONB graph model storage, GIN index |
 | Cache | Redis 7 | Configured, caching logic not yet implemented |
 | Knowledge Graph | Neo4j 5 Community | FMEA/CP association visualization and intelligent recommendations |
-| AI | Ollama | Local LLM inference for recommendation engine |
+| AI | External provider configuration | Production starts without Ollama; LLM/embedding providers are configured later in the admin UI |
 | Frontend | React 18 / TypeScript 5.6 | Single-page application |
 | Build | Vite 5.4 | Dev server + proxy |
 | UI Framework | Ant Design 5.21 | Chinese localization |
@@ -100,6 +100,16 @@ FastAPI (:8000)
 - The Service layer handles all business logic and manually writes `AuditLog`.
 - The Service layer raises `ValueError`; the API layer converts it to `HTTPException`.
 - List endpoints uniformly return `{ items, total, page, page_size }`.
+
+### 3.1 Authentication session lifecycle
+
+The public `/` route is an explicit exception to the route-protection convention. `/login` is the authentication entry; the application layout and every business route remain behind `ProtectedRoute` and, where applicable, module permissions.
+
+Access JWTs remain stateless and expire after 120 minutes. Each browser login creates an independent refresh session with a stable session identity. Successful refresh rotates the credential and extends its expiry on a rolling, inactivity-based basis; replaying an older generation is rejected. Password reset revokes refresh sessions, while an already-issued access JWT can remain valid until its existing 120-minute expiry.
+
+The Axios client performs automatic refresh for eligible `401` responses, coalesces concurrent refresh attempts, and replays a request only when the refreshed token has the same authenticated identity as the initiating token. A different identity or unusable token fails closed. Cross-tab storage events synchronize the winning authentication generation and clear identity-derived state from the losing tab. The store then calls `/auth/me` to safely rehydrate the user, permissions, factory scope, and product-line scope for the current access token; stale responses cannot overwrite a newer login.
+
+Refresh-session rows are authentication security state rather than quality/business CRUD records. Login outcomes remain in `LoginAuditLog`; token rotation is intentionally not duplicated in the business `AuditLog`.
 
 ---
 
@@ -244,7 +254,7 @@ All API endpoint paths start with `/api/`. Authentication uses Bearer Token (JWT
 | Limitation | Description |
 |------------|-------------|
 | No test framework | ~~Backend uses manual `test_schema.py`; frontend has no tests~~ Backend migrated to pytest (factory_id fixtures, multi-module regression, API guard tests); frontend covered by vitest for key utils/pages; some legacy modules still need fixture backfill |
-| Frontend does not auto-refresh tokens | Backend has `/api/auth/refresh`, but the frontend does not call it automatically; users must re-login after 120 minutes |
+| Refresh session lifetime | Refresh expiry is rolling and inactivity-based; expired, revoked, or replayed generations require login |
 | No login rate limiting | Login endpoint has no rate limiting |
 | Redis not used | Configured but caching logic is not implemented |
 | Incomplete frontend route guards | `/knowledge-graph`, `/change-impact`, and MES routes lack `requiredModule` guards |

@@ -1,0 +1,223 @@
+services:
+  db:
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      openqms_internal:
+        ipv4_address: 172.30.0.30
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    user: redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command:
+      - sh
+      - -eu
+      - -c
+      - |
+        umask 077
+        config=$$(mktemp /tmp/openqms-redis.conf.XXXXXX)
+        trap 'rm -f "$$config"' EXIT HUP INT TERM
+        printf 'appendonly yes\nrequirepass %s\n' "$$REDIS_PASSWORD" > "$$config"
+        chmod 600 "$$config"
+        exec redis-server "$$config"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q '^PONG$'"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      openqms_internal:
+        ipv4_address: 172.30.0.40
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  neo4j:
+    image: neo4j:5-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
+      NEO4J_server_memory_pagecache_size: 128M
+      NEO4J_server_memory_heap_initial__size: 256M
+      NEO4J_server_memory_heap_max__size: 512M
+    volumes:
+      - neo4j_data_prod:/data
+    healthcheck:
+      test: ["CMD-SHELL", "NEO4J_USERNAME=\"$${NEO4J_AUTH%%/*}\" NEO4J_PASSWORD=\"$${NEO4J_AUTH#*/}\" cypher-shell 'RETURN 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      openqms_internal:
+        ipv4_address: 172.30.0.50
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: openqms-backend:prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        RELEASE_SHA: ${RELEASE_SHA}
+        PIP_INDEX_URL: https://pypi.org/simple
+    restart: unless-stopped
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips=172.30.0.10
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS}
+      ALGORITHM: ${ALGORITHM}
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_DATABASE: ${NEO4J_DATABASE}
+      GRAPH_REPOSITORY: ${GRAPH_REPOSITORY}
+      TENANT_MODE: ${TENANT_MODE}
+      E2E_MODE: ${E2E_MODE}
+      LLM_PROVIDER: ${LLM_PROVIDER}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      openqms_internal:
+        ipv4_address: 172.30.0.20
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  graph-worker:
+    image: openqms-backend:prod
+    restart: unless-stopped
+    command:
+      - python
+      - -m
+      - app.services.graph_sync_worker
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      SECRET_KEY: ${SECRET_KEY}
+      NEO4J_URI: ${NEO4J_URI}
+      NEO4J_USER: ${NEO4J_USER}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD}
+      NEO4J_DATABASE: ${NEO4J_DATABASE}
+      GRAPH_REPOSITORY: ${GRAPH_REPOSITORY}
+      TENANT_MODE: ${TENANT_MODE}
+      E2E_MODE: ${E2E_MODE}
+    depends_on:
+      db:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    networks:
+      openqms_internal:
+        ipv4_address: 172.30.0.60
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web:
+    image: openqms-web:prod
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        RELEASE_SHA: ${RELEASE_SHA}
+        VITE_PUBLIC_DEMO_ENABLED: ${VITE_PUBLIC_DEMO_ENABLED}
+        VITE_PUBLIC_DEMO_USERNAME: ${VITE_PUBLIC_DEMO_USERNAME}
+        VITE_PUBLIC_DEMO_PASSWORD: ${VITE_PUBLIC_DEMO_PASSWORD}
+        VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS: ${VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS:-}
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+      TAILSCALE_IP: ${TAILSCALE_IP}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      openqms_internal:
+        ipv4_address: 172.30.0.10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  openqms_internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  pgdata_prod:
+  neo4j_data_prod:
+  caddy_data:
+  caddy_config:

@@ -1,12 +1,16 @@
-import { afterEach, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, it, expect, vi } from "vitest";
 import client from "./client";
+import { useAuthStore } from "../store/authStore";
+const userToken = `e30.${btoa(JSON.stringify({ sub: "user-only", exp: 4102444800 }))}.signature`;
+beforeEach(() => { localStorage.clear(); useAuthStore.setState({ token: null, user: null }); });
 const adapter = client.defaults.adapter;
 afterEach(() => {
   client.defaults.adapter = adapter;
   localStorage.clear();
 });
 it("Agent user GET excludes factory scope while business GET retains factory injection", async () => {
-  localStorage.setItem("access_token", "user-only");
+  localStorage.setItem("access_token", userToken);
+  useAuthStore.setState({ token: userToken });
   localStorage.setItem("current_factory_id", "factory-A");
   const seen: any[] = [];
   client.defaults.adapter = vi.fn(async (config) => {
@@ -24,7 +28,7 @@ it("Agent user GET excludes factory scope while business GET retains factory inj
   await client.get("/capa");
   expect(seen[0].params?.factory_id).toBeUndefined();
   expect(seen[1].params).toEqual({ page_size: 50 });
-  expect(seen[0].headers.Authorization).toBe("Bearer user-only");
+  expect(seen[0].headers.Authorization).toBe(`Bearer ${userToken}`);
   expect(seen[2].params.factory_id).toBe("factory-A");
 });
 it.each([401, 403])("Agent %s is rejected immediately so restricted visible content can be withdrawn", async (status) => {

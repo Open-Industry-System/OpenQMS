@@ -1,5 +1,9 @@
 FROM python:3.11-slim
 
+ARG RELEASE_SHA
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+LABEL org.opencontainers.image.revision=$RELEASE_SHA
+
 WORKDIR /app
 
 ARG DEBIAN_MIRROR=deb.debian.org
@@ -9,8 +13,7 @@ RUN sed -i "s|deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN python -m pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt
 
 COPY . .
 

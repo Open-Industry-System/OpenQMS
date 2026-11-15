@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { isAuthGenerationChangedError } from "../utils/authGeneration";
+import { classifyToken, getTokenSubject } from "../utils/jwt";
 import type { User, FactoryScope, Factory } from "../types";
 import { login as apiLogin, getMe, refreshToken as apiRefreshToken } from "../api/auth";
 
@@ -12,12 +14,45 @@ interface AuthState {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   fetchUser: () => Promise<void>;
+  syncStoredAccessToken: () => string | null;
   setUser: (user: User | null) => void;
   setCurrentFactoryId: (factoryId: string | null) => void;
   tryRefreshToken: (isCurrent?: () => boolean, signal?: AbortSignal) => Promise<string | null>;
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set, get) => {
+  let activeFetchOperation: symbol | null = null;
+
+  const syncStoredAccessToken = () => {
+    const accessToken = localStorage.getItem("access_token");
+    if (accessToken === get().token) return accessToken;
+
+    activeFetchOperation = null;
+
+    if (accessToken && classifyToken(accessToken) !== "valid") {
+      if (localStorage.getItem("access_token") === accessToken) localStorage.removeItem("access_token");
+      set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
+      return null;
+    }
+
+    set({ user: null, token: accessToken, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
+    return accessToken;
+  };
+
+  const applyUser = (user: User) => {
+    const factoryId = user.factory_scope?.default_factory_id || null;
+    if (factoryId) localStorage.setItem("current_factory_id", factoryId);
+    else localStorage.removeItem("current_factory_id");
+    set({
+      user,
+      loading: false,
+      factoryScope: user.factory_scope ?? null,
+      factories: user.factories ?? [],
+      currentFactoryId: factoryId,
+    });
+  };
+
+  return ({
   user: null,
   token: localStorage.getItem("access_token"),
   loading: false,
@@ -32,9 +67,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const factoryId = resp.user.factory_scope?.default_factory_id || null;
     if (factoryId) localStorage.setItem("current_factory_id", factoryId);
     else localStorage.removeItem("current_factory_id");
+    activeFetchOperation = null;
     set({
       user: resp.user,
       token: resp.access_token,
+      loading: false,
       factoryScope: resp.user.factory_scope ?? null,
       factories: resp.user.factories ?? [],
       currentFactoryId: factoryId,
@@ -42,39 +79,81 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    activeFetchOperation = null;
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("current_factory_id");
-    set({ user: null, token: null, factoryScope: null, factories: [], currentFactoryId: null });
+    set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
   },
 
   fetchUser: async () => {
-    const token = localStorage.getItem("access_token");
-    if (!token) return;
+    const previousToken = get().token;
+    const accessToken = syncStoredAccessToken();
+    if (accessToken !== previousToken || !accessToken) return;
+
+    const fetchOperation = Symbol();
+    activeFetchOperation = fetchOperation;
+    const releaseLoading = () => {
+      if (activeFetchOperation !== fetchOperation) return;
+      activeFetchOperation = null;
+      set({ loading: false });
+    };
+    const applyFetchedUser = (user: User) => {
+      if (activeFetchOperation !== fetchOperation) return;
+      activeFetchOperation = null;
+      applyUser(user);
+    };
+
     try {
       set({ loading: true });
-      const user = await getMe();
-      const factoryId = user.factory_scope?.default_factory_id || null;
-      if (factoryId) localStorage.setItem("current_factory_id", factoryId);
-      else localStorage.removeItem("current_factory_id");
-      set({
-        user,
-        loading: false,
-        factoryScope: user.factory_scope ?? null,
-        factories: user.factories ?? [],
-        currentFactoryId: factoryId,
-      });
-    } catch {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("current_factory_id");
-      set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
+      const { user, requestAccessToken } = await getMe();
+      const storedToken = localStorage.getItem("access_token");
+      if (storedToken !== accessToken) {
+        const currentState = get();
+        const capturedSubject = getTokenSubject(accessToken);
+        if (
+          requestAccessToken === storedToken
+          && storedToken
+          && classifyToken(storedToken) === "valid"
+          && capturedSubject
+          && getTokenSubject(storedToken) === capturedSubject
+        ) {
+          if (currentState.token !== storedToken) syncStoredAccessToken();
+          const latestState = get();
+          if (
+            localStorage.getItem("access_token") === storedToken
+            && latestState.token === storedToken
+          ) {
+            applyFetchedUser(user);
+            return;
+          }
+        }
+
+        syncStoredAccessToken();
+        releaseLoading();
+        return;
+      }
+
+      applyFetchedUser(user);
+    } catch (error) {
+      if (isAuthGenerationChangedError(error)) {
+        syncStoredAccessToken();
+        releaseLoading();
+        return;
+      }
+      if (localStorage.getItem("access_token") !== accessToken) {
+        syncStoredAccessToken();
+        releaseLoading();
+        return;
+      }
+      if (activeFetchOperation !== fetchOperation) return;
+      get().logout();
     }
   },
 
-  setUser: (user) => {
-    set({ user });
-  },
+  syncStoredAccessToken,
+
+  setUser: (user) => { set({ user }); },
 
   setCurrentFactoryId: (factoryId) => {
     if (factoryId) localStorage.setItem("current_factory_id", factoryId);
@@ -83,22 +162,45 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   tryRefreshToken: async (isCurrent, signal) => {
-    const refresh_token = localStorage.getItem("refresh_token");
-    if (!refresh_token) return null;
-    const owns = () => !isCurrent || (isCurrent() && localStorage.getItem("refresh_token") === refresh_token);
+    if (isCurrent && !isCurrent()) return null;
+    const previousToken = get().token;
+    const adoptedToken = syncStoredAccessToken();
+    if (adoptedToken !== previousToken) return adoptedToken;
+
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (!refreshToken) return null;
+
+    const owns = () => !isCurrent || (isCurrent() && localStorage.getItem("refresh_token") === refreshToken);
     if (!owns()) return null;
     try {
-      const resp = await (isCurrent ? apiRefreshToken(refresh_token, signal) : apiRefreshToken(refresh_token));
+      const resp = await (isCurrent ? apiRefreshToken(refreshToken, signal) : apiRefreshToken(refreshToken));
       if (!owns()) return null;
+      if (localStorage.getItem("refresh_token") !== refreshToken) return syncStoredAccessToken();
+      if (classifyToken(resp.access_token) !== "valid") {
+        get().logout();
+        return null;
+      }
+
       localStorage.setItem("access_token", resp.access_token);
       localStorage.setItem("refresh_token", resp.refresh_token);
       set({ token: resp.access_token });
       return resp.access_token;
-    } catch {
-      // Only the originating live CAPA session may clear credentials on failure.
-      // Calls without an owner retain the existing refresh policy.
-      if (owns()) get().logout();
+    } catch (error) {
+      if (!owns()) return null;
+      if (isAuthGenerationChangedError(error)) return syncStoredAccessToken();
+      if (localStorage.getItem("refresh_token") !== refreshToken) return syncStoredAccessToken();
+      get().logout();
       return null;
     }
   },
-}));
+  });
+});
+
+const storageListener = (event: StorageEvent) => {
+  if (event.key === "access_token" || event.key === null) useAuthStore.getState().syncStoredAccessToken();
+};
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", storageListener);
+  if (import.meta.hot) import.meta.hot.dispose(() => window.removeEventListener("storage", storageListener));
+}

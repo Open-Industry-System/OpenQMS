@@ -1,0 +1,35 @@
+{
+	admin off
+}
+
+(openqms_app) {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+	}
+}
+
+{$SITE_ADDRESS} {
+	import openqms_app
+}
+
+http://{$TAILSCALE_IP} {
+	import openqms_app
+}
+
+:8080 {
+	import openqms_app
+}
