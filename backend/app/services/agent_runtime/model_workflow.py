@@ -112,7 +112,16 @@ async def _messages(db, current, state):
         AgentTaskMessage.state=='accepted', AgentTaskMessage.sequence>state.accepted,
         AgentTaskMessage.sequence<=current.run.accepted_message_seq).order_by(AgentTaskMessage.sequence)))
     for row in rows:
-        state.messages.append({'role':'user','content':row.content})
+        content = row.content
+        if content == 'deliver_d4_root_cause_candidate_v1':
+            # Keep the accepted original marker and explain the employee's
+            # fixed sidebar action. The model still chooses its own steps.
+            content += ('\nEmployee request: Using only the current authorized D4 root cause '
+                'and its source evidence, generate actionable D5 corrective-measure proposals '
+                'and save suitable proposals to this report using save_proposal for employee review. '
+                'Plan the steps yourself and ask for clarification when needed. '
+                'Saved proposals require separate employee adoption.')
+        state.messages.append({'role':'user','content':content})
     state.accepted = current.run.accepted_message_seq
 
 

@@ -203,3 +203,6 @@ async def test_actual_responses_root_only_sidebar_request_reads_then_saves(r5_ca
         rows = list(await db.scalars(select(CapaD5Proposal).where(CapaD5Proposal.task_id == UUID(task))))
         assert len(rows) == 1 and rows[0].original_text == 'Root-only actual Responses measure'
     assert len(c.witness.a.bodies) == 3 and c.witness.b.bodies == []
+    initial = next(m['content'] for m in c.witness.a.bodies[0]['input'] if m.get('role') == 'user')
+    assert initial.startswith('deliver_d4_root_cause_candidate_v1')
+    assert 'save_proposal' in initial and 'employee review' in initial

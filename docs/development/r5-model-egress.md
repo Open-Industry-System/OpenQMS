@@ -112,3 +112,7 @@ delivery batch、完整来源及 CAPA 锁下验证明确意图、pending 前版�
 本轮不读取或复用历史密钥，未调用外部模型；合成回环 A/B、合成 TLS 与受控沙箱证据
 不替代真实模型建议质量抽查。功能验证与部署开关分别记录，Darwin/dev 默认关闭和单平台
 进程限制不变；未声称支持 Linux 受控执行或分布式恢复。
+
+### Root-only sidebar intent
+
+The existing exact `deliver_d4_root_cause_candidate_v1` action means generating suitable D5 proposals from current authorized D4/source evidence and saving them to this report for employee review. With no client source coordinates, only R5 binds the unique current visible proof through the existing source validator and authorization intersection. The model receives the original marker plus this fixed action meaning, chooses its own steps and may clarify. Raw accepted messages remain unchanged in storage; free chat, explicit coordinates and R4b contracts are unchanged. Saved proposals require independent employee adoption.

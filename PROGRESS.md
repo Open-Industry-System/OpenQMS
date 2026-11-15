@@ -1,5 +1,11 @@
 # OpenQMS 开发进度
 
+> **2026-11-15 CLOUD真实链路通过，人工质量结论仍待签收**：同一正常app、独立合成报告与用户批准的gpt-6.1-terra/Responses。第一次真实调用2次完成、1basis、0建议，明确CHAIN_INCOMPLETE；固定root-only标记缺乏生成保存的业务语义。先以真实provider输入断言RED1失败（run-1794737347651793000.log，28.32s），仅该精确标记保留原文并追加固定员工目标；Agent仍自主规划/澄清/选工具，另行员工采纳，权限及保存围栏不变。独立SPEC/QUALITY再次APPROVED。Responses+保留Chat完整相关36通过（run-1794737397191751000.log，281.04s）。第二次新任务真实Chromium侧栏闭环成功：2026-11-15 10:11:55–10:12:19 UTC；3次真实egress完成、2basis、1pending建议、1逐条来源、0正式措施，basis_current=true、任务completed、原始START仍保留。
+>
+> 报告`878341b6-0928-47a9-aa31-743e9a570ddd`、任务`8a5d9bb8-2e6b-4f13-b11e-41d7a6fbb085`、建议`b67ed3a6-abc8-4b9b-9b96-4f03aedbf57c`；正常管理员登记的部署`62066977-14f5-4719-8c49-21688236301d`/r5-trial-20261115。私有cloud-chain-evidence.json和真实页面截图保留，建议原文及人工评判安排见[真实试用记录](docs/development/r5-real-model-trials.md)。合成D4/FMEA直接初始化夹具，后续来源声明走正常HTTP；不声称D1–D3流程验收。无SDK/HTTP替身、人工补写或自动采纳，密钥仅后端；试用服务器已结束，独占数据库及卷保留。LOCAL缺部署，QE待用户指定和评价，不能宣称质量已签收。
+>
+> 第2次make因上述语义修复再次明确中断，核实专属pytest83992后SIGINT，根exit2/128.81s（responses-check-1794737209027571000.log），非通过。当前纯CI268通过（24.08s）、前端完整重跑916通过/101files（40.94s）、E2E类型exit0。最新main根自动化首次因沙箱loopback权限4失败115通过，提权原样复验119通过、16subtests（4.43s），无远端部署。最新main独有15个非PROGRESS路径与origin/main逐字节一致。下一步从新冻结提交完整make check及browser，不累加中断轮为完整结果。
+
 > **2026-11-15 Responses 已提交并推送，真实侧栏准入缺口修复**：独立双复核31文件后精确提交/推送 `d542d3a6a65bdee9d187c333e2a735a5d5e719a1`，远端run43701830577已实际启动普通CI，native job132774448655仍queued。再次fetch发现main更新为`d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，无冲突合并为`9941d647`；16项主线发布/preview修复全部保留，双方进度记录保留，业务/前端/SDK与合并前完全一致，迁移head不变。
 >
 > 新鲜browser完整exit0（responses-browser-1794736515177065000.log，206.77s）：原生2通过0skip，普通11通过0skip；启动时冻结字段为6f72且源码含已复核Responses候选，执行源码与随后d542一致，明确不冒充干净d542启动。纯CI268通过（46.94s）；私有通用helper首次在无Docker权限的pure模式误做资源核验而exit1，随后移除非DB模式多余核验重跑。前端全量915通过1超时（54.18s，PFMEAWizard旧5000ms），原样焦点10通过（8.17s），完整重跑待办。
