@@ -153,3 +153,7 @@ def assert_checkpoint_selection(selected, command_seq, watermark):
 ```
 
 首次代码提交范围为 T1。其余任务按依赖从已验收提交接续，不把文档中的预期计数作为已运行结果。
+
+## 2026-11-15 已批准的 Responses 后续增量
+
+T1–T9历史提交和验收记录保留。用户新增批准 `gpt-6.1-terra` 独立Responses适配，实际提交 `d542d3a6`、主线合并 `9941d647`、侧栏来源修复 `095ef940`、入口目标修复 `2b5530c3`，每个实现增量均经独立SPEC/QUALITY复核并精确提交。最终干净2b源码完成新鲜完整make check及browser；API5465通过4跳过、原生API68通过0skip、browser13通过0skip，107必选节点逐个实际执行通过。所有失败/中断及修复均独立保留，详见PROGRESS和迁移ledger。真实CLOUD侧栏读取D4→生成→报告保存1条pending建议，用户指定sam评价“可用”；无自动采纳或整份审批。LOCAL由用户明确保留待验证；远端macOS runner仍待实际执行，不能由本地结果代替。
