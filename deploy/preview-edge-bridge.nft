@@ -1,0 +1,11 @@
+# Same-bridge frames can bypass iptables when br_netfilter is not loaded.
+# This table affects only traffic bridged between br-oq-edge peers.
+table bridge openqms_preview_edge {
+    chain forward {
+        type filter hook forward priority 0; policy accept;
+        meta ibrname "br-oq-edge" meta obrname "br-oq-edge" ether type arp accept
+        meta ibrname "br-oq-edge" meta obrname "br-oq-edge" ether type ip ct state established,related accept
+        meta ibrname "br-oq-edge" meta obrname "br-oq-edge" ether type ip tcp dport 8080 accept
+        meta ibrname "br-oq-edge" meta obrname "br-oq-edge" counter drop
+    }
+}

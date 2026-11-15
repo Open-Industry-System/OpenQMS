@@ -10,7 +10,7 @@ install -d -m 0755 /usr/local/lib/openqms
 controller=$(mktemp -d /usr/local/lib/openqms/.oracle-production.XXXXXXXX)
 trap 'if [[ -n "${controller:-}" && -d "$controller" ]]; then rm -rf -- "$controller"; fi' EXIT
 install -d -m 0755 "$controller/scripts" "$controller/deploy"
-files=(scripts/oracle-production-remote.py scripts/check-release-tree.py docker-compose.prod.yml deploy/preview-edge.override.yml deploy/production-edge-Caddyfile compose.preview.yml scripts/oracle-preview-remote.py scripts/oracle-preview.py scripts/oracle-preview-initialize.py deploy/preview-Caddyfile)
+files=(scripts/oracle-production-remote.py scripts/check-release-tree.py docker-compose.prod.yml deploy/preview-edge.override.yml deploy/production-edge-Caddyfile compose.preview.yml scripts/oracle-preview-remote.py scripts/oracle-preview.py scripts/oracle-preview-initialize.py scripts/oracle-preview-db-tunnel.py deploy/preview-Caddyfile)
 for name in "${files[@]}"; do
   [[ -f "$repo/$name" && ! -L "$repo/$name" ]] || { echo 'trusted controller file unavailable' >&2; exit 1; }
   install -m 0644 "$repo/$name" "$controller/$name"
