@@ -111,13 +111,13 @@ def _assert_disabled_provider_environment(step: Mapping[str, object]) -> None:
     assert 'E2E_MODE' not in env
 
 
-def test_automatic_workflow_is_secretless_on_branch_pushes_and_main_pull_requests() -> None:
+def test_automatic_workflow_is_secretless_on_main_pushes_and_main_pull_requests() -> None:
     workflow = _load_workflow(AUTOMATIC_PATH)
     triggers = workflow['on']
     assert isinstance(triggers, Mapping)
     push = triggers.get('push')
     pull_request = triggers.get('pull_request')
-    assert isinstance(push, Mapping) and push.get('branches') == ['**']
+    assert isinstance(push, Mapping) and push.get('branches') == ['main']
     assert 'tags' not in push
     assert isinstance(pull_request, Mapping) and pull_request.get('branches') == ['main']
     assert workflow.get('permissions') == {'contents': 'read'}
@@ -139,7 +139,7 @@ def test_backend_uses_a_verified_random_port_database_before_every_database_cons
     backend = _jobs(_load_workflow(AUTOMATIC_PATH))['backend-tests']
     _postgres_environment(backend, 'backend-tests')
     steps = _named_steps(backend)
-    prepare = steps['Prepare verified test database']
+    prepare = steps['Run deterministic backend acceptance']
     required_env = {
         'PG15_CONTAINER': '${{ job.services.postgres.id }}',
         'GITHUB_RUN_ID': '${{ github.run_id }}',
@@ -149,7 +149,12 @@ def test_backend_uses_a_verified_random_port_database_before_every_database_cons
     }
     assert isinstance(prepare.get('env'), Mapping)
     assert {key: prepare['env'].get(key) for key in required_env} == required_env
-    assert 'python -m tests.ci.prepare_database' in str(prepare.get('run', ''))
+    assert 'make check-backend' in str(prepare.get('run', ''))
+    assert 'Prepare verified test database' not in steps
+    # The unchanged Make prerequisite owns preparation, including from empty DB.
+    makefile = (ROOT / 'Makefile').read_text()
+    assert 'check-backend: check-test-db' in makefile
+    assert '-m tests.ci.prepare_database' in makefile
     _assert_disabled_provider_environment(prepare)
     prepare_index = _steps(backend).index(prepare)
     for step in _steps(backend)[prepare_index + 1:]:
@@ -429,3 +434,59 @@ def test_real_evidence_has_explicit_roots_always_uploads_and_sha_binding():
     assert 'tests.ci.acceptance_evidence cleanup' in makefile
     assert '--name "$$project-process"' in makefile
     assert 'run --rm --no-deps agent-attachment-e2e' not in makefile
+
+
+def test_pr_pip_caches_cover_manifests_without_replacing_installation():
+    jobs = _jobs(_load_workflow(AUTOMATIC_PATH))
+    for name in ('backend-tests', 'browser-protection'):
+        steps = _named_steps(jobs[name])
+        setup = steps['Set up Python']['with']
+        assert setup['cache'] == 'pip'
+        paths = setup['cache-dependency-path'].splitlines()
+        expected = (['backend/requirements.txt', 'sdk/python/pyproject.toml', '.github/workflows/test.yml']
+                    if name == 'backend-tests' else ['backend/requirements.txt'])
+        assert paths == expected
+        assert all((ROOT / path).is_file() for path in paths)
+        install = steps['Install dependencies' if name == 'backend-tests' else 'Install backend dependencies']['run']
+        assert 'python -m pip install --upgrade pip' in install
+        assert 'pip install -r requirements.txt' in install
+    assert steps['Set up Python']['with']['python-version'] == '3.12'
+    assert 'setuptools==79.0.1' in _named_steps(jobs['backend-tests'])['Install SDK developer build tools']['run']
+
+
+@pytest.mark.parametrize('event,branch,action,expected', [
+    ('pull_request', 'main', 'opened', True),
+    ('pull_request', 'main', 'synchronize', True),
+    ('pull_request', 'main', 'reopened', True),
+    ('pull_request', 'main', 'closed', False),
+    ('pull_request', 'develop', 'opened', False),
+    ('push', 'main', None, True),
+    ('push', 'feature/r5-d5-proposals', None, False),
+    ('push', 'feature/unopened-pr', None, False),
+    ('push', 'integration/agent-main', None, False),
+    ('tag', 'v1.0.0', None, False),
+])
+def test_literal_branch_event_matrix(event, branch, action, expected):
+    workflow = _load_workflow(AUTOMATIC_PATH)
+    triggers = workflow['on']
+    # Literal branches only: no custom glob emulator or production event router.
+    assert triggers == {'push': {'branches': ['main']}, 'pull_request': {'branches': ['main']}}
+    matched = event in triggers and branch in triggers[event]['branches']
+    if event == 'pull_request':
+        matched = matched and action in ('opened', 'synchronize', 'reopened')
+    assert matched is expected
+
+
+def test_pr_jobs_keep_merge_candidate_checkout_and_failure_semantics():
+    workflow = _load_workflow(AUTOMATIC_PATH)
+    assert workflow['name'] == 'Test OpenQMS'
+    for name, job in _jobs(workflow).items():
+        assert 'continue-on-error' not in job
+        if name == 'docs-check':
+            assert job['if'] == "github.event_name == 'pull_request'"
+        else:
+            assert 'if' not in job
+        for step in _steps(job):
+            assert 'continue-on-error' not in step
+            if str(step.get('uses', '')).startswith('actions/checkout@'):
+                assert 'ref' not in step.get('with', {}), 'PR must use the default merge candidate'
