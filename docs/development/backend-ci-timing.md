@@ -144,3 +144,5 @@ backend-tests 和 browser-protection 的 `actions/setup-python@v5` 使用 `cache
 用户在本地验收结束后授权将本批提交、推送并单独开PR；前文“本轮未push/未提交”是初轮验收快照，发布状态以PROGRESS后续条目为准。送审前再次核对main仍为d3c0ada8，main生效rules为空，ruleset17638580没有required checks，可见self-hosted runner总数仍为0；未改管理设置。
 
 setup占当前本地execution约64%，这是阶段分配而不是预计节省比例，也不能归因到某个具体fixture。下一批先按耗时测试组度量fixture调用次数、单次与累计成本，再选累计最高项做对照；验收既看整组耗时，也核验数据库状态隔离与顺序独立性。本批PR不包含这些实现，可与R6 Task1并行；R6只以开工时实际合入的CI入口/提交为依据。
+
+发布记录：代码提交 `0998be8b` 已push并创建非草稿 [PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36)。创建PR的完整head查询只有 Test OpenQMS run43725914972（pull_request），无push运行；远端尚未完成，缓存/阶段耗时以实际日志后续核对，不使用本地数据代填。

@@ -1,7 +1,8 @@
 # OpenQMS 开发进度
 
-### 2026-11-15 — CI 独立 PR 送审准备（后续授权）
+### 2026-11-15 — CI 独立 PR 已送审（后续授权）
 
+- 已提交 `0998be8b` 并普通push独立分支，创建非草稿 [PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36)（main ← codex/backend-ci-baseline），未合并。首个head对应 Test OpenQMS run43725914972，event=pull_request，按完整SHA查询仅此一套，无push运行；完整远端CI当时仍in_progress，不提前记通过。补录此发布事实的文档提交用于核验已开PR追加提交场景。
 - 用户已授权提交、推送本批CI改动并单独开PR；上一阶段“不提交/不push”记录为当时本地验收状态。当前main复核仍为d3c0ada8，执行代码与已通过完整验收的1073文件manifest一致；送审前pure350通过/3既有warnings，actionlint及diff检查通过，不重复运行76分钟后端。
 - 再次只读核对：main protected=false、required contexts/checks为空；生效rules=[]，ruleset17638580仍仅deletion/non_fast_forward且ref include/exclude为空；没有required_status_checks。可见self-hosted runner总数0，没有匹配openqms-r5-sandbox的runner。未更改保护设置、runner或R5门禁；不能把检查名保留当成强制阻断已生效。
 - PR描述将明确main PR创建/更新完整验证、main合并后push继续运行、未开PR的功能分支push不再运行。远端验收重点为同一PR追加提交只有一个pull_request运行、实际merge候选SHA、缓存命中/冷热及阶段耗时；尚未得到远端结果前不预写通过。
