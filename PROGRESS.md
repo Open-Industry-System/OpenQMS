@@ -1,5 +1,9 @@
 # OpenQMS 开发进度
 
+> **2026-11-15 R6 入口切换设计待文档复审**：已在独立 worktree `/Users/sam/.codex/worktrees/r6-entry-switch-design/OpenQMS`、分支 `codex/r6-entry-switch-design` 编写 [R6 D4/D5 推荐入口切换设计](docs/superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md)。实时核对 main 为 `d3c0ada8`；R5 PR #33 仍 open/draft、未合并，设计从其 head `75fcc517` 建立，执行源码依据为已验证的 `2b5530c3`，两者仅四份文档有差异。旧动作到页面/API/服务/存储/审计及调用方已盘点：旧 D4 确实生成候选并可追加/替换正式根因，R5 只读已有 D4 生成 D5，不能视为等价覆盖。用户已选择补齐受控 D4 候选与员工确认后再整体切换，不允许 Agent 直接修改正式根因。规格另列来源核对 UI、受限 D4 正文读取/继承、正式措施更正、旧请求排空与手工版本保护、安全兼容回退门槛；当前 main 和原样 R5 均不能直接作为带新数据的安全回退目标。
+>
+> **下一步仅文档复审**：确认受限 D4 的整段来源限制、无现有证明时的手工 D5 路径、正式更正交付下限与切换停止受理窗口。R5 既有证据与 R6 待实测已分开，Terra pending 仅证明生成保存。尚未实施 R6、编实施计划、停用入口、迁移业务数据、推送或部署；未重跑 R5 测试。CI 优化由另一 Agent 负责，R7 后续。根工作区及 PR #33 改动保留，本轮仅修改此进度指针与设计规格。
+
 > **2026-11-15 远端执行源码普通CI全部成功，保留原生macOS排队限制**：最终实现`2b5530c3`的[run43703339877](https://github.com/Open-Industry-System/OpenQMS/actions/runs/43703339877)普通八个job已全部实际success（SDK3.11/3.12/3.13、frontend、Oracle、docs、browser、backend）。backend job132779100196实际receipt：**5465通过/4跳过/89 deselected/0failed/0errors/12428warnings/7526.10s/exit0**；12:23:57 UTC完成验收，随后D8 preflight、engine imports及上传、清理步骤success。browser job132779100049实际**11通过/0skip/0failed/1231warnings/222.04s/exit0**。两层frozen SHA为GitHub测试合并`031967b9`，连接器实际compare与2b文件diff为空；收尾再次核对main仍d3c0ada8、behind_by=0。原生job132779100288仍queued/steps=null，runner清单最近实读0，不能声称远端Darwin已执行或整个workflow已完成。
 >
 > 进度显示限制已核明：公开runner只接受ASCII测试标识，第4574个含中文名称被过滤后顺序号不再前进，故UI公开进度最后停在4573；实际子日志、JUnit和最终receipt继续完成。已用本地完整运行与远端最终收据双向验证，不将公开进度停顿误判为测试挂起。完成日志端点在运行中曾返回404，结束后成功取得真实receipt；没有取消/重启这一轮。私有 `responses-remote-ci-evidence.json`保留源SHA、测试合并SHA及最终receipt。收尾四文档本地提交为`2bba120d36292967f5f580775577961427815486`，执行源码仍与2b一致；本条仅补录已完成CI结果，推送后新文档run须单独显示，不用已完成源码run冒充新提交执行。
