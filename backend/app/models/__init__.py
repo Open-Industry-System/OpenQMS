@@ -255,3 +255,10 @@ from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5ProposalSource, Ca
 from app.models.agent_d5_basis import AgentD5BasisReceipt, AgentD5CommandBasis
 
 from app.models.agent_model_deployment import AgentModelDeployment, AgentTaskModelBinding
+
+from app.models.capa_r6 import (
+    CapaR6MaterialVersion, CapaR6EntrySwitch, CapaR6ReportSnapshot, CapaR6SourceOrigin,
+    AgentD4CandidateCommand, AgentD4CandidateCheckpointPosition, CapaD4Candidate,
+    CapaD4CandidateSource, CapaR6RootRevisionBody, CapaR6RootRevisionSource,
+    CapaD5MeasureRevision, CapaR6StaffReceipt, CapaR6RootDeliveryBinding,
+)

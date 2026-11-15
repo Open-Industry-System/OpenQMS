@@ -166,8 +166,8 @@ def test_single_alembic_head():
     cfg = _cfg("postgresql+asyncpg://unused/metadata_only")
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
-    assert heads == ["20261115_r5_responses"], (
-        f"expected single head 20261115_r5_responses, got {heads}"
+    assert heads == ["20261115_r6_entry_contracts"], (
+        f"expected single head 20261115_r6_entry_contracts, got {heads}"
     )
 
     ancestry = {revision.revision for revision in script.walk_revisions()}

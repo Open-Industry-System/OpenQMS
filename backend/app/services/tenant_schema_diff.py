@@ -149,6 +149,36 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     strict_tenant_search_path_sql(tenant_schema)
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
+    if baseline_only or predecessor is not None:
+        # Reviewed R6 additions are filtered only from the canonical reference.
+        # A historical tenant with even one partial R6 object remains different.
+        r6_tables = {'capa_r6_material_versions', 'capa_r6_entry_switches', 'capa_r6_report_snapshots',
+                     'capa_r6_source_origins', 'agent_d4_candidate_commands',
+                     'agent_d4_candidate_checkpoint_positions', 'capa_d4_candidates',
+                     'capa_d4_candidate_sources', 'capa_r6_root_revision_bodies',
+                     'capa_r6_root_revision_sources', 'capa_d5_measure_revisions',
+                     'capa_r6_staff_receipts', 'capa_r6_root_delivery_bindings'}
+        r6_functions = {'r6_immutable_history', 'r6_material_monotonic', 'r6_candidate_transition',
+                        'r6_validate_origin', 'r6_validate_correction', 'r6_preserve_adoption',
+                        'r6_complete_candidate_sources', 'r6_complete_root_sources', 'r6_root_history_order'}
+        r6_existing = {
+            ('constraint', 'agent_tasks.uq_r6_task_report'), ('index', 'agent_tasks.uq_r6_task_report'),
+            ('constraint', 'agent_runs.uq_r6_run_task'), ('index', 'agent_runs.uq_r6_run_task'),
+            ('constraint', 'agent_task_messages.uq_r6_message_task'), ('index', 'agent_task_messages.uq_r6_message_task'),
+            ('constraint', 'capa_d4_root_cause_revisions.uq_r6_root_report'), ('index', 'capa_d4_root_cause_revisions.uq_r6_root_report'),
+            ('constraint', 'agent_d5_basis_receipts.uq_r6_basis_root'), ('index', 'agent_d5_basis_receipts.uq_r6_basis_root'),
+            ('constraint', 'agent_d4_recovery_checkpoints.uq_r6_checkpoint_task'), ('index', 'agent_d4_recovery_checkpoints.uq_r6_checkpoint_task'),
+            ('trigger', 'capa_d5_measures.r6_preserve_adoption'),
+        }
+        reference = {key: value for key, value in reference.items()
+                     if key not in r6_existing
+                     and not (key[0] == 'function' and key[1].split('(', 1)[0] in r6_functions)
+                     and not (key[0] in {'table', 'column', 'constraint', 'index', 'trigger'}
+                              and key[1].split('.', 1)[0] in r6_tables)}
+    has_responses = predecessor == 'tv014_r5_responses'
+    if has_responses:
+        # The full R5 merge shape is identical apart from the explicit protocol.
+        predecessor = 'tv013_r5_main_merge'
     # Only historical reference shapes exclude the two reviewed later columns.
     # Current parity and the tenant side remain complete and fail closed.
     if baseline_only or (predecessor is not None and predecessor not in {"tv007_characteristic_refs", "tv009_r4b_main_merge", "tv010_r5_d5_proposals", "tv011_r5_d5_basis", "tv012_r5_models", "tv010_refresh_sessions", "tv013_r5_main_merge"}):
@@ -195,6 +225,8 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
             ("column", "agent_model_deployments.api_protocol"),
             ("constraint", "agent_model_deployments.ck_model_deployment_api_protocol"),
         }
+        if has_responses:
+            added_objects = set()
         if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
             added_objects |= {
                 ("column", "agent_runs.resume_checkpoint_id"),

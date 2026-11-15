@@ -151,9 +151,9 @@ Task 9 冻结两构建并登记 exercise_input（含已实现的测试入口）�
 **文件**：新增 §2 模型/Schema、上述配对迁移、`backend/tests/capa/r6_support.py`、`test_r6_support.py`、`backend/tests/migrations/test_r6_entry_contracts.py`；修改 `backend/app/models/__init__.py`、`backend/app/services/tenant_migrator.py`、`tenant_schema_diff.py` 及当前 snapshot/head 断言；新增报告输入绑定 sidecar，保持旧 R5 receipt 序列化与 proof 类型不变。
 
 - [ ] 记录解释器、资源 owner/容器/卷/租户、public/tenant 实际前驱、源码 SHA；运行已有 `make check` 与 `make check-browser` 建立当前基线，未通过先归因，不用 R5 历史统计代替。
-- [ ] 写 RED：从空库和 R5 非空库升级均可；非空新版本拒绝 destructive downgrade；同 command/operation_key 不重复；跨报告关联和缺来源拒绝；public/tenant 同构，部分结构不被当合法前驱。
-- [ ] 实现仅追加迁移与模型，参照 `test_r5_d5_delta.py` 的 `mig_db_url`、`_migration_config`、tenant migrator。来源/正文不可变关系与 FK 使用 RESTRICT；新 D4/更正表禁止原位覆写，不创建用户/部署授权。
-- [ ] 创建 r6_support 场景工具：复用 `committed_runtime`，提供有 EDIT/仅 VIEW/另一 EDIT/撤权读者，报告同源与 A＋B、跨工厂/tenant，正常登录 HTTP 客户端。`case.actor(mode)` 提供当前角色与独立会话撤权操作，`case.report()` 读报告，`case.candidate()` 经 CAPA 保存待审项，`case.confirm(body, actor)` 调新确认路由，`case.measure()` 经 R5 adopt 创建版本 0，`case.correct(body, actor)` 调更正路由，`case.snapshot()` 返回正文/修订/措施/决定/审计数量供无副作用断言；仅生成已审/终态初始夹具可直接 seed，主链不借用它冒充正常流转。
+- [x] 写 RED：从空库和 R5 非空库升级均可；非空新版本拒绝 destructive downgrade；同 command/operation_key 不重复；跨报告关联和缺来源拒绝；public/tenant 同构，部分结构不被当合法前驱。
+- [x] 实现仅追加迁移与模型，参照 `test_r5_d5_delta.py` 的 `mig_db_url`、`_migration_config`、tenant migrator。来源/正文不可变关系与 FK 使用 RESTRICT；新 D4/更正表禁止原位覆写，不创建用户/部署授权。
+- [x] 创建 r6_support 场景工具：复用 `committed_runtime`，提供有 EDIT/仅 VIEW/另一 EDIT/撤权读者，报告同源与 A＋B、跨工厂/tenant，正常登录 HTTP 客户端。`case.actor(mode)` 提供当前角色与独立会话撤权操作，`case.report()` 读报告，`case.candidate()` 经 CAPA 保存待审项，`case.confirm(body, actor)` 调新确认路由，`case.measure()` 经 R5 adopt 创建版本 0，`case.correct(body, actor)` 调更正路由，`case.snapshot()` 返回正文/修订/措施/决定/审计数量供无副作用断言；仅生成已审/终态初始夹具可直接 seed，主链不借用它冒充正常流转。
 - [ ] GREEN 后以 `feat(capa): add R6 source and correction persistence contracts` 精确提交，记录迁移真实 revision 与兼容前驱；运行结果写台账。
 
 ```bash
@@ -164,6 +164,8 @@ cd backend
 `r6_support.py` 的 fixture 通过 `backend/tests/capa/conftest.py` 显式导入注册为 `r6_case`，进程测试在自己的 conftest 引入同一工具；不得把内存客户端成功当作独立进程证据。
 
 **通过标准**：两链唯一 head、全新与非空升级、重复升级、同构、约束/隔离实际 passed；原始报告文本/R5采纳/旧审计逐项未改变。若迁移 runner 不接受新 head，先补当前迁移器合同而不是跳过比对。
+
+Task 1 专项实现和双复审结果见 [实施台账](../../development/r6-entry-switch.md)。完整冻结 make/browser 基线尚待结束，不勾选完整基线项。
 
 ### Task 2：正式 D4 来源继承与员工读取围栏（批 A）
 
