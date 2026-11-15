@@ -164,7 +164,12 @@
 
 - 2026-11-15 所有者明确授权后，两把专用 SSH 私钥及公开主机 pin 已分别加密写入 `oracle-production`、`oracle-preview` Environment，元数据已核实；原管理员私钥未上传。main CI `43641919458` 与预览 PR CI `43642288934` 均成功，实际发布资格门禁均通过。首次生产自动发布 `43652437339` 在切换前失败：归档、发布前备份、镜像构建已完成，原生产 `d8648c15` 六服务继续健康，数据库仍在 `20260913_user_refresh_sessions`，未完成新版本迁移或上线。
 - 2026-11-15 本机可信流程逐步复现定位到临时 runner 的 Python 单文件链接丢失虚拟环境，真实身份守卫报 `ModuleNotFoundError: sqlalchemy`。最小修正改为链接完整 `trusted-venv` 目录；实际 `deploy()` 设置＋真实无网络虚拟环境依赖导入的回归测试先失败、后通过，相关编排/CI/预览/初始化共 87 passed。诊断期间本机 TLS 瞬断、临时路径及管理员导入生成的单份 pyc 均单独识别处理；pyc 已准确移除，可信服务器源码未改。两个发布开关重新关闭，修复待完整 CI 与实际 workflow 验收。
-- 下一步：验证并集成 runner 虚拟环境修复，再完成自动生产发布、备份服务切换、预览 TLS/只读/重新发布/关闭清理验收。main 更新后重新生成预览合并提交并跑准确 SHA CI；临时 PR #32 不合并。所有私有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
+- 2026-11-15 生产自动发布已实际完成：runner 修复 [PR #34](https://github.com/Open-Industry-System/OpenQMS/pull/34) 合入 main `7d349811`；合并前部署专项/前端/SDK/浏览器/文档及独立复核通过，未结束的 PR 后端检查取消，不计为通过。随后 main 完整 CI `43670385318` 成功、真实资格门禁通过，生产 workflow `43677695515` 成功。实际发布指针、源码/控制器清单、后端/worker/web OCI 版本、HTTPS、Viewer 只读/写入拒绝及 refresh 轮换/重用拒绝全部通过；私有备份权限及 pg_restore 验证通过。备份服务已切换 root 当前发布控制器，立即备份成功，原 timer 活跃且时间计划保留。
+- 2026-11-15 预览 PR32 已更新到 main `7d349811`，head `9e93f5d2`、merge `77b29fd5`，完整 CI `43670437816` 及实际资格门禁成功。首次预览 workflow `43676017348` 在迁移前失败：Docker 对仅接 internal 网络的 DB 请求绑定 `127.0.0.1:25432`，实际 `NetworkSettings.Ports` 却为 null；凭据/端口守卫正确拒绝，DB 无迁移表，路由未开放。生产 HTTPS 复核正常，预览开关已关，生产自动发布继续启用。
+- 2026-11-15 最小兼容修正保留 DB/backend 单独私网：独立固定 digest 的可信 Python 转发容器，仅转发自身 `db:5432`，无应用环境/密码，非 root、只读、0.25 CPU/64MiB/64PIDs、8 连接与固定超时；实际镜像/归属/网络/安全/挂载/端口均严格校验。其 helper 加入控制器清单和安装器；容器禁止自动重启，预览 release 操作核验实际 nft 四条桥过滤语义，避免启动时绕过隔离前提。
+- 2026-11-15 Oracle nonce 现场测试先真实暴露同桥 TCP5432 绕过 iptables（br_netfilter 未加载），失败后 nonce 容器/卷/网络已核实为零。已安装独立、仅匹配 `br-oq-edge` 的 nft bridge 表及专用持久启动单元，原子重复应用通过，旧 IP 规则、全局 bridge hook 和生产容器不变。最终 `restart:no` 配置再次实际通过 HTTP8080 正向、同/跨 PR 与生产 Web 到代理5432拒绝、代理到宿主/生产 DB/metadata 拒绝，以及专用 SSH→转发器→私有 PostgreSQL 身份比对。全部 nonce 资源清理，生产六容器/发布指针、既有 PR32 与共享 edge 不变；未重启 Docker daemon或重置业务卷。
+- 2026-11-15 本地部署专项全部 **119 passed / 16 subtests passed**；真实 TCP 1MiB 二进制、server-first、half-close、失败与容量，以及实际 Oracle nft JSON 缺失/改桥/改端口/放宽状态等失败关闭回归通过。独立实现与现场脚本审查无阻塞，独立相关检查 23 passed / 16 subtests passed。兼容修正尚待合入 main、更新受信控制器及准确 SHA 完整 CI；正式预览 TLS/只读/重复发布/关闭清理尚未验收。
+- 下一步：集成预览 DB 转发兼容修正，从受审 main 更新 root 控制器（保持现有两把角色公钥），并行完成新 main 与更新后的 PR32 完整 CI，完成真实预览 workflow/TLS/只读/重复发布/关闭清理。临时 PR32 永不合并；生产当前已实际发布 `7d349811`，备份及健康正常。所有私有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
 
 
 ### 2026-11-09 — PR #29 main集成验证通过（待推送后远端CI）

@@ -38,12 +38,34 @@ services:
       POSTGRES_USER: qms
       POSTGRES_DB: qms_preview
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
-    ports: ["127.0.0.1:${PREVIEW_DB_PORT:?}:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: [CMD-SHELL, 'pg_isready -U qms -d qms_preview']
       interval: 5s
       timeout: 5s
+      retries: 20
+  db-tunnel:
+    <<: *bounded
+    # Only a guarded deployment starts this diagnostic proxy after a reboot.
+    restart: 'no'
+    # A private-only Docker network does not publish ports. Keep PostgreSQL
+    # private and expose only this fixed, credential-free forwarding process.
+    image: python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
+    user: '65534:65534'
+    read_only: true
+    cpus: 0.25
+    mem_limit: 64m
+    pids_limit: 64
+    entrypoint: [python, -I, -B, /run/openqms-preview-db-tunnel.py]
+    volumes: ["${PREVIEW_TUNNEL_PATH:?}:/run/openqms-preview-db-tunnel.py:ro"]
+    ports: ["127.0.0.1:${PREVIEW_DB_PORT:?}:5432"]
+    networks: [private, edge]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -I, -B, -c, "import socket; socket.create_connection(('127.0.0.1',5432),timeout=2).close()"]
+      interval: 5s
+      timeout: 3s
       retries: 20
   redis:
     <<: *bounded

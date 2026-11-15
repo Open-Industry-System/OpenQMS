@@ -20,7 +20,7 @@ import time
 from urllib.parse import quote
 
 TRUSTED = Path(__file__).resolve().parents[1]
-CONTROLLER_FILES = ('scripts/oracle-production-remote.py', 'scripts/check-release-tree.py', 'docker-compose.prod.yml', 'deploy/preview-edge.override.yml', 'deploy/production-edge-Caddyfile', 'compose.preview.yml', 'scripts/oracle-preview-remote.py', 'scripts/oracle-preview.py', 'scripts/oracle-preview-initialize.py', 'deploy/preview-Caddyfile')
+CONTROLLER_FILES = ('scripts/oracle-production-remote.py', 'scripts/check-release-tree.py', 'docker-compose.prod.yml', 'deploy/preview-edge.override.yml', 'deploy/production-edge-Caddyfile', 'compose.preview.yml', 'scripts/oracle-preview-remote.py', 'scripts/oracle-preview.py', 'scripts/oracle-preview-initialize.py', 'scripts/oracle-preview-db-tunnel.py', 'deploy/preview-Caddyfile')
 
 
 def run(argv, *, env=None, cwd=None, data=None):

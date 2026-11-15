@@ -22,6 +22,7 @@ def load(name, filename):
 prod = load('preview_prod_contract', 'oracle-production-remote.py')
 helper = load('preview_routes', 'oracle-preview.py')
 BASE = Path('/var/lib/openqms-previews')
+TUNNEL_IMAGE = 'python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535'
 
 class PreviewRelease:
     def __init__(self, pr, sha, manifest_hash, controller_hash):
@@ -52,6 +53,36 @@ class PreviewRelease:
             raise ValueError('trusted controller file set changed')
         prod.run(['python3', str(self.control / 'scripts/check-release-tree.py'), 'verify', '--root', str(self.source), '--manifest', str(self.source / '.release-manifest')])
         if prod.regular(self.source / '.release-sha').read_text() != self.sha + '\n': raise ValueError('release marker changed')
+        self.require_edge_filter()
+
+    def require_edge_filter(self):
+        # Ordering Before=Docker alone does not make its startup fail closed.
+        # Check the live policy before any preview operation, not only its file.
+        active = prod.run(['systemctl','is-active','openqms-preview-edge-bridge-firewall.service']).stdout
+        if active.strip() != b'active':
+            raise ValueError('preview bridge filtering service unavailable')
+        objects = json.loads(prod.run(['nft','--json','list','table','bridge','openqms_preview_edge']).stdout)['nftables']
+        tables = [item['table'] for item in objects if 'table' in item]
+        chains = [item['chain'] for item in objects if 'chain' in item]
+        rules = [item['rule'] for item in objects if 'rule' in item]
+        if len(tables) != 1 or tables[0].get('family') != 'bridge' or tables[0].get('name') != 'openqms_preview_edge' or len(chains) != 1 or len(rules) != 4:
+            raise ValueError('preview bridge filtering inventory changed')
+        chain = chains[0]
+        if any(chain.get(key) != value for key,value in dict(family='bridge',table='openqms_preview_edge',name='forward',type='filter',hook='forward',prio=0,policy='accept').items()):
+            raise ValueError('preview bridge filtering hook changed')
+        def match(left, right, op='=='):
+            return {'match':{'op':op,'left':left,'right':right}}
+        scope = [match({'meta':{'key':key}},'br-oq-edge') for key in ('ibrname','obrname')]
+        ipv4 = match({'payload':{'protocol':'ether','field':'type'}},'ip')
+        expected = [
+            scope+[match({'payload':{'protocol':'ether','field':'type'}},'arp'),{'accept':None}],
+            scope+[ipv4,match({'ct':{'key':'state'}},['established','related'],'in'),{'accept':None}],
+            scope+[ipv4,match({'payload':{'protocol':'tcp','field':'dport'}},8080),{'accept':None}],
+            scope+[{'drop':None}],
+        ]
+        for rule, expressions in zip(rules, expected):
+            if any(rule.get(key) != value for key,value in dict(family='bridge',table='openqms_preview_edge',chain='forward').items()) or [expr for expr in rule['expr'] if set(expr) != {'counter'}] != expressions:
+                raise ValueError('preview bridge filtering rules changed')
 
     def settings(self):
         path = prod.regular(self.project / 'preview.env')
@@ -101,7 +132,7 @@ class PreviewRelease:
 
     def compose_command(self, args, images=None):
         self.verify()
-        env = {'PATH': os.environ['PATH'], **self.settings(), 'PR_NUMBER':self.pr, 'PREVIEW_INITIALIZER_PATH':str(self.control / 'scripts/oracle-preview-initialize.py')}
+        env = {'PATH': os.environ['PATH'], **self.settings(), 'PR_NUMBER':self.pr, 'PREVIEW_INITIALIZER_PATH':str(self.control / 'scripts/oracle-preview-initialize.py'), 'PREVIEW_TUNNEL_PATH':str(self.control / 'scripts/oracle-preview-db-tunnel.py')}
         ids = images or self.tags()
         env.update(BACKEND_IMAGE=ids['backend'], WEB_IMAGE=ids['web'])
         return ['docker','compose','--project-name','openqms-pr-'+self.pr,'--project-directory',str(self.source),'--env-file',str(self.project / 'preview.env'),'-f',str(self.control / 'compose.preview.yml'),*args], env
@@ -127,7 +158,7 @@ class PreviewRelease:
             build_args = ['--build-arg', 'PIP_INDEX_URL=https://pypi.org/simple'] if kind == 'backend' else []
             prod.run(['docker','buildx','build','--builder','openqms-preview-builder','--load','--label','org.opencontainers.image.revision='+self.sha,'--build-arg','RELEASE_SHA='+self.sha,*build_args,'-t',self.tags()[kind],'-f',str(self.source / dockerfile),str(self.source / context)])
         ids = self.image_ids()
-        self.compose('up','-d','--wait','--wait-timeout','240','db','redis','neo4j',images=ids)
+        self.compose('up','-d','--wait','--wait-timeout','240','db','redis','neo4j','db-tunnel',images=ids)
         return ids
 
     def db_container(self):
@@ -135,14 +166,41 @@ class PreviewRelease:
         matches = [row for row in rows if helper.labels(row,'container').get('com.docker.compose.service') == 'db']
         if len(matches) != 1 or not helper.owned(helper.labels(matches[0],'container'),self.pr) or not matches[0]['State']['Running']:
             raise ValueError('preview database runtime identity failed')
+        network = matches[0]['NetworkSettings']
+        if set(network['Networks']) != {'openqms-pr-'+self.pr+'_private'} or any(network['Ports'].values()) or matches[0]['HostConfig'].get('PortBindings'):
+            raise ValueError('preview database must remain private without published ports')
         return matches[0]
+
+    def tunnel_container(self):
+        rows = helper.resources('container', self.pr)
+        matches = [row for row in rows if helper.labels(row,'container').get('com.docker.compose.service') == 'db-tunnel']
+        if len(matches) != 1:
+            raise ValueError('unique preview database tunnel required')
+        item = matches[0]
+        config, host, network = item['Config'], item['HostConfig'], item['NetworkSettings']
+        if not helper.owned(helper.labels(item,'container'),self.pr) or not item['State']['Running'] or item['State'].get('Health',{}).get('Status') != 'healthy':
+            raise ValueError('preview database tunnel runtime identity failed')
+        if config.get('Image') != TUNNEL_IMAGE or item['Image'] != json.loads(prod.run(['docker','image','inspect',TUNNEL_IMAGE]).stdout)[0]['Id']:
+            raise ValueError('preview database tunnel image changed')
+        if config.get('User') != '65534:65534' or config.get('Entrypoint') != ['python','-I','-B','/run/openqms-preview-db-tunnel.py'] or not host.get('ReadonlyRootfs') or host.get('Privileged') or host.get('CapDrop') != ['ALL'] or 'no-new-privileges:true' not in host.get('SecurityOpt',[]) or host.get('RestartPolicy',{}).get('Name') != 'no':
+            raise ValueError('preview database tunnel isolation changed')
+        if not (0 < host.get('Memory',0) <= 67108864 and 0 < host.get('NanoCpus',0) <= 250000000 and 0 < host.get('PidsLimit',0) <= 64 and host.get('CpuQuota') == 0 and host.get('CpuPeriod') == 0):
+            raise ValueError('preview database tunnel resource bounds changed')
+        if set(network['Networks']) != {'openqms-pr-'+self.pr+'_private','openqms-preview-edge'}:
+            raise ValueError('preview database tunnel networks changed')
+        mounts = item.get('Mounts',[])
+        if len(mounts) != 1 or mounts[0].get('Type') != 'bind' or mounts[0].get('Source') != str(self.control / 'scripts/oracle-preview-db-tunnel.py') or mounts[0].get('Destination') != '/run/openqms-preview-db-tunnel.py' or mounts[0].get('RW'):
+            raise ValueError('preview database tunnel helper mount changed')
+        binding = {'5432/tcp':[{'HostIp':'127.0.0.1','HostPort':self.settings()['PREVIEW_DB_PORT']}]}
+        if network['Ports'] != binding or host.get('PortBindings') != binding:
+            raise ValueError('preview target tunnel endpoint changed')
+        return item
 
     def credentials(self):
         self.verify()
-        db = self.db_container()
+        self.db_container()
+        self.tunnel_container()
         values = self.settings()
-        if db['NetworkSettings']['Ports'].get('5432/tcp') != [{'HostIp':'127.0.0.1','HostPort':values['PREVIEW_DB_PORT']}]:
-            raise ValueError('preview target tunnel endpoint changed')
         return dict(POSTGRES_USER='qms', POSTGRES_DB='qms_preview', POSTGRES_PASSWORD=values['POSTGRES_PASSWORD'], FORWARD_PORT=int(values['PREVIEW_DB_PORT']))
 
     def identity(self, expected):
