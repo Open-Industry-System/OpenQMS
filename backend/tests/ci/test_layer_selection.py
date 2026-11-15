@@ -23,11 +23,13 @@ TARGETS = (
     'tests/e2e/test_agent_task_attachment_browser.py',
     'tests/e2e/test_agent_task_attachment_process.py',
     'tests/e2e/test_r5_model_agent.py',
+    'tests/e2e/test_r5_responses_agent.py',
     'tests/e2e/test_r5_d5_process.py',
     'tests/services/agent_runtime/test_r5_model_binding.py',
     'tests/migrations/test_r5_d5_delta.py',
     'tests/migrations/test_r5_d5_basis_delta.py',
     'tests/migrations/test_r5_model_delta.py',
+    'tests/migrations/test_r5_responses_delta.py',
     'tests/e2e/test_r5_d5_ui.py',
     'tests/e2e/test_r5_d5_browser.py',
 
@@ -379,7 +381,7 @@ def test_r5_default_targets_and_marker_contract_cover_actual_process_browser_and
             assert target in runner.DEFAULT_TARGETS[mode]
     assert 'tests.e2e.test_r5_d5_ui' in runner.R5_REQUIRED['r5-browser']
     assert 'tests.e2e.test_r5_d5_browser' in runner.R5_REQUIRED['r5-browser']
-    for name in ('test_r5_d5_process','test_r5_model_agent'):
+    for name in ('test_r5_d5_process','test_r5_model_agent','test_r5_responses_agent'):
         assert 'tests.e2e.'+name in runner.R5_REQUIRED['r5-api']
 
 

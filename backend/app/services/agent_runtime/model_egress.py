@@ -30,6 +30,7 @@ class DeploymentCreate(BaseModel):
     version: str = Field(min_length=1, max_length=40)
     kind: str
     provider: Literal['openai']
+    api_protocol: Literal['chat_completions', 'responses'] = 'chat_completions'
     model: str = Field(min_length=1, max_length=100)
     base_url: str = Field(repr=False)
     allowed_addresses: list[str] = Field(min_length=1, max_length=10, repr=False)
@@ -55,9 +56,21 @@ def _namespace(db):
 def _digest(db, row):
     from app.config import settings
     data = {key: str(getattr(row, key)) if key.endswith('_id') or key == 'created_by' else getattr(row, key) for key in CONFIG_FIELDS}
+    protocol = _api_protocol(row)
+    if protocol == 'responses':
+        data['api_protocol'] = protocol
     data['tenant_id'] = str(_namespace(db).tenant_id)
     raw = json.dumps(data, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
     return hmac.new(settings.SECRET_KEY.encode(), b'openqms.r5.model-deployment.v1\n'+raw, hashlib.sha256).hexdigest()
+
+
+def _api_protocol(row):
+    # Existing approvals retain their exact v1 HMAC. The immutable row trigger
+    # protects the new column; switching either direction changes/rejects HMAC.
+    protocol = getattr(row, 'api_protocol', 'chat_completions')
+    if protocol not in {'chat_completions', 'responses'} or (protocol == 'responses' and row.provider != 'openai'):
+        raise PermissionError(UNAVAILABLE)
+    return protocol
 
 
 def _addresses(base_url):
@@ -191,7 +204,9 @@ class PinnedTransport(httpx.AsyncBaseTransport):
     """No DNS at connect time, redirects, proxies, retries or alternate host."""
     def __init__(self, row):
         self.origin = httpx.URL(row.base_url)
-        self.endpoint = self.origin.path.rstrip('/') + ('/chat/completions' if row.provider == 'openai' else '/messages')
+        protocol = _api_protocol(row)
+        suffix = '/responses' if protocol == 'responses' else ('/chat/completions' if row.provider == 'openai' else '/messages')
+        self.endpoint = self.origin.path.rstrip('/') + suffix
         self.address = sorted(row.allowed_addresses)[0]
         self.transport = httpx.AsyncHTTPTransport(verify=True, retries=0, trust_env=False)
 
@@ -230,9 +245,12 @@ async def infer(db, identity, request):
     if source is None or not authority.basis_available: raise PermissionError(UNAVAILABLE)
     snapshot = await capa_d5_proposals.build_d5_context(db, current, source_queries=[
         dict(projection_id=source.source_projection_id, fmea_id=str(source.fmea_id), node_id=source.cause_node_id)])
-    return await send_context(db, current, snapshot=snapshot, messages=[
+    result = await send_context(db, current, snapshot=snapshot, messages=[
         {'role':'system','content':'Propose a D5 corrective measure using only the supplied evidence.'},
         {'role':'user','content':json.dumps(snapshot.context, ensure_ascii=False)}], tools=[])
+    # Provider continuation is platform-only, never an inference HTTP DTO.
+    result.pop('response_items', None)
+    return result
 
 
 async def send_context(db, identity, *, snapshot, messages, tools):
@@ -246,8 +264,10 @@ async def send_context(db, identity, *, snapshot, messages, tools):
     if not callable(resolver): raise PermissionError(UNAVAILABLE)
     secret = resolver(row.credential_ref)
     if not isinstance(secret, str) or not secret: raise PermissionError(UNAVAILABLE)
-    client = provider_adapter.build_deployment_client(row.provider, row.model, row.base_url, secret,
-        transport=PinnedTransport(row))
+    options = {'transport': PinnedTransport(row)}
+    if _api_protocol(row) == 'responses':
+        options['api_protocol'] = 'responses'
+    client = provider_adapter.build_deployment_client(row.provider, row.model, row.base_url, secret, **options)
     try:
         # The durable control attempt is separate from usable delivered basis.
         # A crash/unknown response can leave an attempt, never a source grant.
@@ -274,7 +294,10 @@ async def send_context(db, identity, *, snapshot, messages, tools):
             action='MODEL_EGRESS_COMPLETED', operated_by=actor_id, factory_id=factory_id, correlation_id=attempt_id,
             changed_fields=dict(task_id=str(task_id), run_id=str(run_id), deployment_id=str(deployment_id), version=version)))
         await db.commit()
-        return dict(content=turn.content, tool_calls=turn.tool_calls, deployment_id=deployment_id, version=version)
+        result = dict(content=turn.content, tool_calls=turn.tool_calls, deployment_id=deployment_id, version=version)
+        if getattr(turn, 'response_items', None) is not None:
+            result['response_items'] = turn.response_items
+        return result
     except Exception:
         await db.rollback()
         raise PermissionError(UNAVAILABLE) from None

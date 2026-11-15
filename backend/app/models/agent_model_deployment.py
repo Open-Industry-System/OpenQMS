@@ -13,6 +13,7 @@ class AgentModelDeployment(TenantBase):
         sa.Column('tenant_generation', sa.BigInteger(), nullable=False),
         sa.Column('kind', sa.String(10), nullable=False),
         sa.Column('provider', sa.String(20), nullable=False),
+        sa.Column('api_protocol', sa.String(30), nullable=False, server_default=sa.text("'chat_completions'")),
         sa.Column('model', sa.String(100), nullable=False),
         sa.Column('base_url', sa.Text(), nullable=False),
         sa.Column('allowed_addresses', JSONB(), nullable=False),
@@ -24,6 +25,7 @@ class AgentModelDeployment(TenantBase):
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint('name', 'version', name='uq_model_deployment_version'),
         sa.CheckConstraint("kind IN ('local','cloud') AND provider IN ('openai','anthropic')", name='ck_model_deployment_protocol'),
+        sa.CheckConstraint("api_protocol IN ('chat_completions','responses') AND (api_protocol <> 'responses' OR provider = 'openai')", name='ck_model_deployment_api_protocol'),
         sa.CheckConstraint('tenant_generation >= 0', name='ck_model_deployment_generation'),
         sa.CheckConstraint("config_hmac ~ '^[0-9a-f]{64}$'", name='ck_model_deployment_hmac'),
     )

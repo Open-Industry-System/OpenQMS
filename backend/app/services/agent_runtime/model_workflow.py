@@ -212,6 +212,8 @@ async def next_turn(db, identity, turn):
             issued.append({'id':identifier, 'name':call['name']})
             stored.append({'id':call['id'],'type':'function','function':{'name':call['name'],'arguments':json.dumps(call['arguments'],ensure_ascii=False)}})
         assistant = {'role':'assistant','content':response['content'] or None}
+        if response.get('response_items') is not None:
+            assistant['_responses_output'] = response['response_items']
         if stored:
             assistant['tool_calls'] = stored
         state.messages.append(assistant)

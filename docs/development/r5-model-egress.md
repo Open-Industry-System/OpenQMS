@@ -1,5 +1,36 @@
 # R5 任务模型与受控出口（Darwin 试点）
 
+## 2026-11-15 Responses 增量（用户已明确批准，验收进行中）
+
+用户为云端合成试用指定 `gpt-6.1-terra`，提供专用凭据，并批准新增独立 Responses 适配。
+官方模型文档要求其工具调用使用 Responses API；模型元数据只读预检200不代表生成或质量试用完成。
+
+`POST /api/agent/models` 新增显式 `api_protocol`：`chat_completions`（默认）或 `responses`。
+provider 仍为 `openai`；协议不根据模型名称自动切换。旧批准版本补默认Chat，原配置HMAC
+序列化保持字节不变；Responses把协议纳入HMAC。数据库原不可变行触发器同时保护新字段，
+已有部署不能改协议，必须批准新版本、新任务；旧任务不改接收方或协议。
+
+新增配对迁移 `20261115_r5_responses` / `tv014_r5_responses`，前驱为实际集成head
+`20261115_r5_main_merge` / `tv013_r5_main_merge`。仅加默认列与约束，不改写已发布迁移或旧HMAC。
+存在Responses部署时降级原子拒绝；只有Chat时可移除增量。旧租户升级的差异过滤仅作用于public
+参考侧新增协议列/约束，tenant侧部分结构仍拒绝。
+
+Responses SDK请求仅允许批准地址的`/responses`，沿用IP固定、Host/SNI、TLS校验、无代理/
+重定向/重试；Chat仍仅允许`/chat/completions`。平台使用`store=false`、完整手动回放，
+不使用`previous_response_id`。完整typed输出（含encrypted reasoning、phase、call_id）只在
+现有有界服务器round内存保存，随原到期/终止清理；不进入数据库、控制审计、插件/员工DTO。
+`propose_d5`显式剔除内部续接字段；workflow只返回原有文本与服务器签发的调用ID。
+
+仅四个原业务工具，无OpenAI hosted tools。工具使用`strict=false`保留现有可选operation语义，
+现有服务器校验仍执行；不完整/失败/未知typed输出、缺加密推理项、畸形参数或重复调用拒绝。
+私有typed输出每轮256KiB上限，保留原30秒HTTP/120秒round/8工具/16KiB建议预算，不新设token上限。
+Terra沿用medium推理与medium文字详略的普通设置，其他显式Responses模型不强加不兼容控制项。
+不新增流式UI、WebSocket、托管会话或并行工具执行；`store=false`不等于账号级ZDR保证。
+
+参考：[Terra模型](https://developers.openai.com/api/docs/models/gpt-6.1-terra)、
+[Responses函数调用](https://developers.openai.com/api/docs/guides/function-calling)。
+完整范围、逐项能力评估与验收状态见根目录`TEMP-openai-migration-ledger.md`。
+
 2026-11-14，T6 独立双复核及分段焦点验证通过，部署仍默认关闭。首版支持本地或云端 **OpenAI 兼容协议**；真实本地/云端模型试用留待 T9，确定性接收方不代表真实模型验收。
 
 ## 管理和员工接口

@@ -1,5 +1,11 @@
 # OpenQMS 开发进度
 
+> **2026-11-15 R5 Responses增量实施中（用户已明确批准）**：用户指定gpt-6.1-terra，专用凭据已在主仓库ignored、600权限文件安全配置；本地resolver通过，只读模型元数据GET200且ID匹配，未发送真实生成。官方要求该模型工具调用使用Responses，用户已批准独立适配。新增显式api_protocol默认Chat，旧HMAC原样保持，Responses协议入签名；新配对head为20261115_r5_responses / tv014_r5_responses，旧迁移不改写。typed推理/phase/工具回放仅在原round内存，stateless store=false，继续原来源/接收方/幂等围栏。
+>
+> 实际RED：适配器16失败、协议/HMAC/新head3失败；初步适配后19纯检查通过，迁移约束6通过。真实受控插件集成先launch拒绝，最小重现确认出站层仍只允许Chat路径；新增pinning单项RED后按批准协议严格选唯一responses路径。后续2通过1失败仅为撤权测试应匹配既有凭据门禁401而非403，生产权限未放宽；校正后5项Responses实际HTTP/受控artifact/DB通过（run-1794735111801079000.log，42.23s）。固定CI目录已扩为102节点，纯合同当前315通过；完整迁移/read-task/旧provider预检527通过、2跳过（run-1794735335887883000.log，729.07s）；增强phase回放及新迁移13通过（run-1794736450733978000.log，49.45s）。独立SPEC/QUALITY均静态APPROVED，无Critical/Important；完整门禁仍在运行，不以焦点替代。细节见TEMP-openai-migration-ledger.md。
+>
+> 当前远端基线6f72c971普通CI已全部success：API5439通过4跳过、browser11通过0跳过，原生macOS仍queued无runner；这不代表未提交Responses代码已验收。CLOUD实际生成/报告保存与人工QE判断仍待，LOCAL端点未提供。无生产启用、PR合并或部署；R4B资源未操作。
+
 > **2026-11-15 R5 当前主线已整合并推送，草稿PR #33已创建**：实际 fetch `origin/main=dae0892f3be6f15ea297bd0d2659308029cd4d23`，在 R5 `73ad865c` 合入 R4b #30、Oracle #31 和 refresh-session 主线改动。新增 public `20261115_r5_main_merge`、tenant `tv013_r5_main_merge`，各合并两侧已发布 head，不改写历史迁移；严格租户前驱同构比较只过滤 public 参考侧。实际焦点数据库32通过、纯检查297通过；前端旧夹具遗漏D5 API隔离先复现，修正后相关100通过。完整迁移/read-task/认证回归307通过、1项PG15工具skip；显式指定同一登记PG15容器后snapshot单项补验通过。前端完整复跑916通过，类型/E2E类型与build通过。当前合并版本Darwin原生59通过＋另一文件侧栏两角色UI独立1通过，均0skip，分批记录不冒充一次完整make。所有DB验收串行；合并前完整make不冒充本轮。主线独有109文件中108字节一致，另1仅当前head测试调整；已发布迁移均未改写。详见 [集成记录](docs/development/r5-main-integration.md)。
 >
 > 原生macOS R5 runner清单实际为0，不能声称该远端检查已执行；已推送合并 `dcd9812ec5040bca86c7af82de28ecacf3848cc9` 并创建[草稿PR #33](https://github.com/Open-Industry-System/OpenQMS/pull/33)。首个PR run43668221844 的SDK三版本/前端/Oracle/docs已success，browser实际11通过0skip；backend真实验收仍in_progress，r5-native实际queued/steps=null。PR测试合并树与本地相同，不能宣称全部远端检查通过；后续doc-only收尾重触发CI，以PR检查页为最新状态。真实LOCAL/CLOUD仍PENDING，已准备[合成试用和工程师评价安排](docs/development/r5-real-model-trials.md)，待批准部署/专用凭据引用及工程师确认。未合并PR、部署或生产启用，未操作R4B-CLEANUP-01。
