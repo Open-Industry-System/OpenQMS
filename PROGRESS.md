@@ -160,7 +160,11 @@
 
 - 2026-11-15 原生验证完成：后端 `dda665cd` 的 ARM64 镜像与离线 FastAPI 导入通过；前端 `50ba88c9` 的 ARM64 生产镜像、Caddy2.11.9/静态资源检查通过，2 GiB / 2 CPU 上限保持，构建器 OOM-kill 计数 1→1，探测容器和标签清理完成。关闭清理另发现 Redis/data、Neo4j/logs 自动匿名卷不继承自定义服务标签；实际 Oracle Compose 独占空卷探测验证 `container rm --volumes` 删除匿名卷而保留命名卷，全部探测资源已清理。仅给已核实归属的预览容器删除增加该选项，命名卷仍独立校验/删除，路由先撤除、秘密最后撤销及外来资源拒绝不变；相关静态组合 211 项 / 4 子测试通过，独立复核通过。main 刷新仍为 `2dbb84b1`，最终修正待推送后完成准确 SHA 全量 CI；受限控制器/公钥尚未安装，私钥写入 GitHub 的专项授权仍待答复，自动部署关闭，生产原版本健康。
 
-- 下一步：完成修正提交上的完整 CI，按实际收据记录结果；安装经验证的受限控制器与角色密钥、配置 GitHub Environment，然后完成实际预览更新/清理和生产发布验收。所有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
+- 2026-11-15 主线集成与受限控制器已完成：最终 `a365dedd` 全量 CI `43634829612` 成功，真实资格门禁校验通过；[PR #31](https://github.com/Open-Industry-System/OpenQMS/pull/31) 已普通合并为 main `dae0892f`，实际合并树与受测合并树一致。已从 main 安装 root 拥有控制器、专用部署账号及两把受限角色公钥；安装哈希/所有权/纯模块导入/接口/生产配置格式复核通过，生产和预览密钥的合法租约、任意命令/跨角色/越界端口拒绝均实际通过。现有生产 HTTPS health 正常，应用尚未切换。临时仅说明草稿 [PR #32](https://github.com/Open-Industry-System/OpenQMS/pull/32) 已创建（`codex/oracle-preview-smoke-20261115-685ebc53`），与 main 并行验收：main CI `43641919458`、预览 PR CI `43642288934` 仍执行中。两个 Environment 均限制 main 且无部署 Secrets，两个自动部署开关 false；私钥加密写入准确 GitHub Environment 的专项授权仍待答复。正式生产/预览发布、TLS、只读账号与关闭清理的 workflow 验收尚未完成。
+
+- 2026-11-15 所有者明确授权后，两把专用 SSH 私钥及公开主机 pin 已分别加密写入 `oracle-production`、`oracle-preview` Environment，元数据已核实；原管理员私钥未上传。main CI `43641919458` 与预览 PR CI `43642288934` 均成功，实际发布资格门禁均通过。首次生产自动发布 `43652437339` 在切换前失败：归档、发布前备份、镜像构建已完成，原生产 `d8648c15` 六服务继续健康，数据库仍在 `20260913_user_refresh_sessions`，未完成新版本迁移或上线。
+- 2026-11-15 本机可信流程逐步复现定位到临时 runner 的 Python 单文件链接丢失虚拟环境，真实身份守卫报 `ModuleNotFoundError: sqlalchemy`。最小修正改为链接完整 `trusted-venv` 目录；实际 `deploy()` 设置＋真实无网络虚拟环境依赖导入的回归测试先失败、后通过，相关编排/CI/预览/初始化共 87 passed。诊断期间本机 TLS 瞬断、临时路径及管理员导入生成的单份 pyc 均单独识别处理；pyc 已准确移除，可信服务器源码未改。两个发布开关重新关闭，修复待完整 CI 与实际 workflow 验收。
+- 下一步：验证并集成 runner 虚拟环境修复，再完成自动生产发布、备份服务切换、预览 TLS/只读/重新发布/关闭清理验收。main 更新后重新生成预览合并提交并跑准确 SHA CI；临时 PR #32 不合并。所有私有日志与资源登记在 `/private/tmp/openqms-oracle-cicd-verification`，凭据不进入 Git。
 
 
 ### 2026-11-09 — PR #29 main集成验证通过（待推送后远端CI）

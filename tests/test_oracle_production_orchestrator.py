@@ -51,6 +51,61 @@ def test_failed_revalidation_never_executes_source_or_ssh(tmp_path, local_config
     assert 'private fake key' not in result.stdout + result.stderr
 
 
+def test_temporary_release_runner_imports_trusted_virtualenv_dependency(local_config, monkeypatch):
+    """Exercise deploy's actual runner setup with a real, network-free venv."""
+    import types
+    local = module('deploy-oracle-release')
+    config = dict(local_config, RELEASE_SHA=subprocess.check_output(
+        ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip())
+    monkeypatch.setattr(local, 'validate', lambda env: config.copy())
+    monkeypatch.setattr(local, 'revalidate', lambda context: None)
+    monkeypatch.setattr(local, 'create_test_database', lambda context, private: context.update(
+        test_url='postgresql://test-only', resource=str(private / 'test-resource.json')))
+    monkeypatch.setattr(local, 'cleanup_test', lambda context: None)
+    lease = types.SimpleNamespace(stdin=types.SimpleNamespace(close=lambda: None), wait=lambda **kwargs: 0)
+    monkeypatch.setattr(local, 'acquire_lease', lambda context: lease)
+    monkeypatch.setattr(local, 'remote', lambda context, action, **kwargs: json.dumps(
+        NEW if action == 'build' else {
+            'POSTGRES_USER': 'test', 'POSTGRES_PASSWORD': 'fake', 'POSTGRES_DB': 'test'
+        }).encode())
+
+    def tunnel(argv, **kwargs):
+        Path(argv[argv.index('-S') + 1]).touch()
+        return types.SimpleNamespace(poll=lambda: None, terminate=lambda: None, wait=lambda **kwargs: 0)
+
+    # Only the tunnel is simulated; venv creation and Python imports are real.
+    monkeypatch.setattr(local, 'subprocess', types.SimpleNamespace(
+        Popen=tunnel, run=subprocess.run, DEVNULL=subprocess.DEVNULL,
+        TimeoutExpired=subprocess.TimeoutExpired))
+    original_run = local.run
+
+    class RunnerObserved(Exception):
+        pass
+
+    def run(argv, **kwargs):
+        if argv[:3] == ['python3.11', '-m', 'venv']:
+            subprocess.run([sys.executable, '-m', 'venv', '--without-pip', argv[3]], check=True)
+            python = Path(argv[3]) / 'bin/python'
+            site = subprocess.check_output([str(python), '-c',
+                'import sysconfig; print(sysconfig.get_path("purelib"))'], text=True).strip()
+            (Path(site) / 'openqms_release_dependency_probe.py').write_text('VALUE = 42\n')
+            return b''
+        if argv[1:4] == ['-m', 'pip', 'install']:
+            return b''  # The fixture dependency is already installed without network access.
+        if argv[0] == 'make':
+            runner = Path(argv[argv.index('-C') + 1])
+            result = subprocess.run([str(runner / 'backend/.venv/bin/python'), '-c',
+                'from openqms_release_dependency_probe import VALUE; assert VALUE == 42'],
+                capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+            raise RunnerObserved
+        return original_run(argv, **kwargs)
+
+    local.run = run
+    with pytest.raises(RunnerObserved):
+        local.deploy()
+
+
 @pytest.mark.parametrize('raw', ['id', 'stage ../x x y', f'rollout {SHA} ' + 'b'*64 + ' ' + 'c'*64, f'verify {SHA} ' + 'b'*64 + ' ' + 'c'*64 + ' extra', f'build {SHA} ' + 'b'*64 + ' ' + 'c'*64 + '; id'])
 def test_forced_receiver_rejects_extra_commands_before_controller_load(raw):
     result = subprocess.run([sys.executable, str(ROOT / 'scripts/oracle-deploy-receiver.py'), raw], capture_output=True, text=True)

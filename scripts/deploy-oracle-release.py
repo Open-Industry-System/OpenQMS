@@ -265,8 +265,10 @@ def deploy():
             # and provide all phase commands explicitly; candidate deployment scripts never run.
             runner = private / 'runner'
             (runner / 'scripts').mkdir(parents=True)
-            (runner / 'backend/.venv/bin').mkdir(parents=True)
-            (runner / 'backend/.venv/bin/python').symlink_to(context['python'])
+            (runner / 'backend').mkdir()
+            # Python locates pyvenv.cfg beside the invoked environment. Linking
+            # only its executable loses that environment's installed packages.
+            (runner / 'backend/.venv').symlink_to(private / 'trusted-venv', target_is_directory=True)
             for name in ('deploy-release.sh', 'check-distinct-databases.py', 'database_identity.py'):
                 shutil.copy2(TRUSTED / 'scripts' / name, runner / 'scripts' / name)
             makefile = runner / 'Release.mk'
