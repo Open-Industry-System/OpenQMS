@@ -11,6 +11,28 @@ spec.loader.exec_module(m)
 
 def release(): return m.PreviewRelease('12','a'*40,'b'*64,'c'*64)
 
+TUNNEL_IMAGE = 'python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535'
+
+def database_and_tunnel(obj):
+    def labels(service):
+        return {'com.docker.compose.service':service,'openqms.preview.pr':'12','com.docker.compose.project':'openqms-pr-12'}
+    private = 'openqms-pr-12_private'
+    binding = {'5432/tcp':[{'HostIp':'127.0.0.1','HostPort':'25432'}]}
+    db = {'Id':'d'*64,'Config':{'Labels':labels('db')},'State':{'Running':True},
+          'HostConfig':{'PortBindings':{}},'NetworkSettings':{'Ports':{'5432/tcp':None},'Networks':{private:{}}}}
+    tunnel = {'Id':'e'*64,'Image':'sha256:'+'f'*64,
+              'Config':{'Labels':labels('db-tunnel'),'Image':TUNNEL_IMAGE,'User':'65534:65534',
+                        'Entrypoint':['python','-I','-B','/run/openqms-preview-db-tunnel.py']},
+              'State':{'Running':True,'Health':{'Status':'healthy'}},
+              'HostConfig':{'PortBindings':binding,'ReadonlyRootfs':True,'Privileged':False,
+                            'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],
+                            'Memory':67108864,'NanoCpus':250000000,'PidsLimit':64,'CpuQuota':0,'CpuPeriod':0,
+                            'RestartPolicy':{'Name':'no'}},
+              'NetworkSettings':{'Ports':binding,'Networks':{private:{},'openqms-preview-edge':{}}},
+              'Mounts':[{'Type':'bind','Source':str(obj.control/'scripts/oracle-preview-db-tunnel.py'),
+                         'Destination':'/run/openqms-preview-db-tunnel.py','RW':False}]}
+    return db,tunnel
+
 class PreviewRemoteTests(unittest.TestCase):
     def test_capacity_rejection_creates_no_secrets(self):
         obj = release()
@@ -37,8 +59,40 @@ class PreviewRemoteTests(unittest.TestCase):
     def test_credentials_rejects_prod_port_or_public_bind(self):
         obj = release()
         for port in [{'HostIp':'127.0.0.1','HostPort':'5432'}, {'HostIp':'0.0.0.0','HostPort':'25432'}]:
-            with patch.object(obj,'verify'), patch.object(obj,'settings',return_value={'PREVIEW_DB_PORT':'25432','POSTGRES_PASSWORD':'x'}), patch.object(obj,'db_container',return_value={'NetworkSettings':{'Ports':{'5432/tcp':[port]}}}):
+            db,tunnel = database_and_tunnel(obj)
+            tunnel['NetworkSettings']['Ports']={'5432/tcp':[port]}
+            with patch.object(obj,'verify'), patch.object(obj,'settings',return_value={'PREVIEW_DB_PORT':'25432','POSTGRES_PASSWORD':'x'}), patch.object(m.helper,'resources',return_value=[db,tunnel]), patch.object(m.prod,'run',return_value=Mock(stdout=json.dumps([{'Id':tunnel['Image']}]))):
                 with self.assertRaises(ValueError): obj.credentials()
+
+    def test_private_database_uses_separate_verified_loopback_tunnel(self):
+        obj=release();db,tunnel=database_and_tunnel(obj)
+        with patch.object(obj,'verify'), patch.object(obj,'settings',return_value={'PREVIEW_DB_PORT':'25432','POSTGRES_PASSWORD':'x'}), patch.object(m.helper,'resources',return_value=[db,tunnel]), patch.object(m.prod,'run',return_value=Mock(stdout=json.dumps([{'Id':tunnel['Image']}]))):
+            result=obj.credentials()
+        self.assertEqual(result,dict(POSTGRES_USER='qms',POSTGRES_DB='qms_preview',POSTGRES_PASSWORD='x',FORWARD_PORT=25432))
+
+    def test_database_cannot_join_edge_or_publish_its_own_port(self):
+        for change in ('edge','port'):
+            obj=release();db,tunnel=database_and_tunnel(obj)
+            if change=='edge':db['NetworkSettings']['Networks']['openqms-preview-edge']={}
+            else:db['NetworkSettings']['Ports']={'5432/tcp':[{'HostIp':'127.0.0.1','HostPort':'25432'}]}
+            with self.subTest(change=change), patch.object(m.helper,'resources',return_value=[db,tunnel]):
+                with self.assertRaises(ValueError):obj.db_container()
+
+    def test_tunnel_rejects_changed_identity_networks_mounts_and_isolation(self):
+        for change in ('owner','image','networks','mount','user','entrypoint','privileged','memory','quota','restart'):
+            obj=release();db,tunnel=database_and_tunnel(obj)
+            if change=='owner':tunnel['Config']['Labels']['com.docker.compose.project']='openqms'
+            elif change=='image':tunnel['Image']='sha256:'+'0'*64
+            elif change=='networks':tunnel['NetworkSettings']['Networks']['openqms_openqms_internal']={}
+            elif change=='mount':tunnel['Mounts'][0]['RW']=True
+            elif change=='user':tunnel['Config']['User']='root'
+            elif change=='entrypoint':tunnel['Config']['Entrypoint']=['sh','-c','arbitrary']
+            elif change=='privileged':tunnel['HostConfig']['Privileged']=True
+            elif change=='memory':tunnel['HostConfig']['Memory']=0
+            elif change=='quota':tunnel['HostConfig']['CpuQuota']=-1
+            elif change=='restart':tunnel['HostConfig']['RestartPolicy']['Name']='unless-stopped'
+            with self.subTest(change=change), patch.object(obj,'verify'), patch.object(obj,'settings',return_value={'PREVIEW_DB_PORT':'25432','POSTGRES_PASSWORD':'x'}), patch.object(m.helper,'resources',return_value=[db,tunnel]), patch.object(m.prod,'run',return_value=Mock(stdout=json.dumps([{'Id':'sha256:'+'f'*64}]))):
+                with self.assertRaises(ValueError):obj.credentials()
 
     def test_receiver_dispatches_bounded_target_operations(self):
         receiver_spec = importlib.util.spec_from_file_location('receiver_dispatch', Path(__file__).resolve().parents[1] / 'scripts/oracle-deploy-receiver.py')
