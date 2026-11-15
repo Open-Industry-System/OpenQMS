@@ -1,5 +1,17 @@
 # OpenQMS 开发进度
 
+### 2026-11-16 — 慢 fixture 独立优化（本地完成）
+
+- 从最新 origin/main `193746ab` 建立独立 worktree /tmp/openqms-slow-fixtures，分支 codex/slow-fixture-optimization；保留原main、R5/R6及其他工作区。main保护设置与文档另在 codex/main-merge-protection（本地ce3b1acc）独立交付，未混入本分支。
+- 实测两个慢模块74项：sample29次累计53.41秒、均值1.842秒，为本组最高；rebuild_db30次累计48.59秒，均值1.620秒。按累计成本优化这条真实租户初始化/public迁移setup链，未声称定位了全后端最高fixture。
+- 每模块真实public迁移＋provision_new/租户迁移/seed一次，源模板禁连接；每项函数级独立克隆、NullPool engine、新Tenant对象和请求深拷贝，实际重建/恢复/故障注入/锁/隔离断言不变。原 mig_db_url、所有迁移专用测试、生产代码、Make/workflow/版本校验/所有覆盖和门禁未改；不分片、不按改动选测试、不放宽密码哈希。
+- 同一独占PG15、同解释器/相同74项：外层262.91→166.97秒，pytest收据261.47→165.49秒，execution256.95→161.45秒；重建模块setup102.81→8.20秒，call44.59→44.91秒。未改迁移模块总计108.35→107.31秒。sample累计53.41→0.99秒，rebuild_db48.59→2.86秒，新增模板初始化4.33秒。两轮74 passed /0 skip/deselected/failed，exit0，4项既有warnings；原测试函数/参数/marker/断言AST相同。
+- 新增真实提交污染/独立数据库/请求隔离与失败清理回归：正序4 passed；完整原组＋新回归反序78 passed，exit0。源码1075文件指纹在计时/反序期间一致。随后补pure前置拒绝（先1 failed再修正），最终pure351 passed /3 warnings；正式runner默认pytest入口43 passed /4 warnings /exit0，无诊断计时插件；独立故意失败探针1 failed，收据FAILED/exit1，失败未被吞。
+- 本地macOS/arm64、Python3.11.15/pytest9.0.3；依赖预装，无pip冷热实验；系统/数据库缓存未受控。未跑优化后完整后端或远端Actions，不能把本地组级差异推算为整套CI节省比例或PR等待时间改善。更多口径、调用次数与均值/最大值见 docs/development/slow-fixture-optimization.md。
+- 资源收尾已完成：只剩postgres/qms_test及系统template库，额外客户端0；核验容器ID/owner/image及卷唯一消费者后，仅删除本任务容器及1个专属匿名卷，回读均不存在；凭据文件已删除，非敏感日志/收据保留。最终diff/syntax检查通过。
+- 本批仅本地交付，不push/开PR/合并；下一次PR应读取同类runner整组/全套耗时、计数、缓存冷热及数据库清理。下一优先仍为重复fixture准备，不立即拆两个PG job；有意覆盖空库/旧revision的测试不能套用最新head模板。
+
+
 ### 2026-11-15 — CI 独立 PR 已送审（后续授权）
 
 - 已提交 `0998be8b` 并普通push独立分支，创建非草稿 [PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36)（main ← codex/backend-ci-baseline），未合并。首个head对应 Test OpenQMS run43725914972，event=pull_request，按完整SHA查询仅此一套，无push运行；完整远端CI当时仍in_progress，不提前记通过。补录此发布事实的文档提交用于核验已开PR追加提交场景。
