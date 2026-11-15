@@ -117,7 +117,10 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
     capa_id = capa.report_id  # 捕获标量，供 IntegrityError handler 在 rollback（expire capa）后使用
     existing = await _find_existing_adoption(db, capa_id, req)
     if existing is not None:
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, actor_id, capa.report_id)
         await db.refresh(capa)
+        await authorize_root(db, actor_id, capa.report_id)
         return existing, getattr(capa, field) or ""
 
     # The parent guard already holds the row lock and returned fresh data.
@@ -137,7 +140,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         action="ADOPT_RECOMMENDATION",
         changed_fields={
             "d_step": req.d_step, "source": req.source, "stage_index": req.stage_index,
-            "adopted_text": req.adopted_text, "item_ref": req.item_ref,
+            "adopted_text": {"changed": True} if req.d_step == "d4" else req.adopted_text, "item_ref": req.item_ref,
         },
         operated_by=actor_id, factory_id=capa.factory_id,
     ))
@@ -147,6 +150,11 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         if field == "d4_root_cause" and new_value != previous:
             from app.services.capa_d4_provenance import record_root_revision
             await record_root_revision(db, report_id=capa.report_id, actor_id=actor_id, write_path="capa.adopt")
+        else:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
         await db.commit()
     except IntegrityError:
         # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）
@@ -155,12 +163,17 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         existing = await _find_existing_adoption(db, capa_id, req)
         if existing is None:
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
-        capa = await lock_capa_parent(db, capa_id)
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, actor_id, capa_id)
+        capa = await lock_capa_parent(db, capa_id, actor_id=actor_id)
         capa = await lock_current_material_write(
             db, capa, actor_id, PermissionLevel.EDIT
         )
         return existing, getattr(capa, field) or ""
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, actor_id, capa.report_id)
     await db.refresh(adoption)
+    await authorize_root(db, actor_id, capa.report_id)
     return adoption, new_value
 
 
@@ -212,7 +225,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_PASSED",
             changed_fields={"verification_id": str(vid),
-                            "root_cause_text": req.root_cause_text, "method": req.method,
+                            "root_cause_text": {"changed": True}, "method": req.method,
                             "source_ref": normalized_ref},
             operated_by=actor_id, factory_id=capa.factory_id,
         ))
@@ -223,7 +236,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
             changed_fields={"verification_id": str(vid),
-                            "root_cause_text": req.root_cause_text, "method": req.method,
+                            "root_cause_text": {"changed": True}, "method": req.method,
                             "retry_count": capa.d4_retry_count, "source_ref": normalized_ref},
             operated_by=actor_id, factory_id=capa.factory_id,
         ))
@@ -250,19 +263,33 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         except Exception:
             await db.rollback()
             raise
+    from app.services.capa_d4_material import bump_material, authorize_root
+    await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await bump_material(db, capa.report_id)
     await db.commit()
+    await authorize_root(db, actor_id, capa.report_id)
     await db.refresh(rec)
+    await authorize_root(db, actor_id, capa.report_id)
     rec.source_proof_issued = issued
     return rec
 
 
-async def list_verifications(db: AsyncSession, capa):
+async def list_verifications(db: AsyncSession, capa, *, actor_id=None):
+    from app.services.capa_d4_material import root_metadata, authorize_root
+    _, sources = await root_metadata(db, capa.report_id)
+    if sources and actor_id is None:
+        raise PermissionError('D4_MATERIAL_UNAVAILABLE')
+    if actor_id is not None:
+        await authorize_root(db, actor_id, capa.report_id)
     result = await db.execute(
         select(CapaRootCauseVerification)
         .where(CapaRootCauseVerification.capa_id == capa.report_id,
                CapaRootCauseVerification.factory_id == capa.factory_id)
         .order_by(CapaRootCauseVerification.created_at.desc()))
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    if actor_id is not None:
+        await authorize_root(db, actor_id, capa.report_id)
+    return rows
 
 
 async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpdate, user):
@@ -320,7 +347,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         passed_fields = {
             "verification_id": str(vid),
             "method": rec.method,
-            "root_cause_text": rec.root_cause_text,
+            "root_cause_text": {"changed": True},
             "retry_count": capa.d4_retry_count,
             "source_ref": rec.source_ref,
         }
@@ -339,7 +366,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         passed_fields = {
             "verification_id": str(vid),
             "method": rec.method,
-            "root_cause_text": rec.root_cause_text,
+            "root_cause_text": {"changed": True},
             "source_ref": rec.source_ref,
         }
         if source_ref_changed:
@@ -368,6 +395,11 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
                                   _LINKAGE_SOURCE_D4, actor_id))
     from app.services.capa_d4_provenance import invalidate_verification_proofs
     await invalidate_verification_proofs(db, vid)
+    from app.services.capa_d4_material import bump_material, authorize_root
+    await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await bump_material(db, capa.report_id)
     await db.commit()
+    await authorize_root(db, actor_id, capa.report_id)
     await db.refresh(rec)
+    await authorize_root(db, actor_id, capa.report_id)
     return rec

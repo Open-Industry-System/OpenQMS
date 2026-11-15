@@ -28,6 +28,7 @@ async def list_capas(
     pending_action: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
+    actor_id=None,
 ) -> tuple[list[CAPAEightD], int]:
     from datetime import datetime
     now = datetime.now(UTC)
@@ -72,8 +73,19 @@ async def list_capas(
     query = query.order_by(CAPAEightD.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
 
+    if actor_id is not None:
+        from app.services.capa_d4_material import authorize_root
+        identifiers = list((await db.scalars(query.with_only_columns(CAPAEightD.report_id))).all())
+        for identifier in identifiers:
+            await authorize_root(db, actor_id, identifier)
+        # The original page can move during source authorization. Materialize
+        # only the identifiers that were admitted, in that frozen order.
+        query = query.where(CAPAEightD.report_id.in_(identifiers)).offset(None).limit(None)
     result = await db.execute(query)
     items = list(result.scalars().all())
+    if actor_id is not None:
+        by_id = {item.report_id: item for item in items}
+        items = [by_id[identifier] for identifier in identifiers if identifier in by_id]
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -240,6 +252,11 @@ async def update_capa(
     capa = await lock_current_material_write(
         db, capa, user_id, PermissionLevel.EDIT, set(update_data)
     )
+    from app.services.capa_d4_material import material_version
+    update_data = dict(update_data)
+    expected = update_data.pop("expected_material_version", None)
+    if expected is not None and expected != await material_version(db, capa.report_id):
+        raise ValueError("CAPA_MATERIAL_CHANGED")
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         await current_capa_actor_product_line(
             db, user_id, capa.factory_id, update_data["product_line_code"], PermissionLevel.EDIT
@@ -368,7 +385,8 @@ async def update_capa(
             table_name="capa_eightd",
             record_id=capa.report_id,
             action="UPDATE",
-            changed_fields=changed_fields,
+            changed_fields={key: ({"changed": True} if key == "d4_root_cause" else value)
+                            for key, value in changed_fields.items()},
             operated_by=user_id,
             factory_id=capa.factory_id,
         )
@@ -388,10 +406,20 @@ async def update_capa(
 
     if embedding_changed:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
+    from app.services.capa_d4_material import snapshot_report_input
+    for field, kind in (("d2_description", "d2"), ("d3_interim", "d3")):
+        if field in changed_fields:
+            await snapshot_report_input(db, capa, kind)
     if "d4_root_cause" in changed_fields:
         from app.services.capa_d4_provenance import record_root_revision
         await record_root_revision(db, report_id=capa.report_id, actor_id=user_id, write_path="capa.update")
+    elif changed_fields and not {"d2_description", "d3_interim"}.intersection(changed_fields):
+        from app.services.capa_d4_material import bump_material
+        await bump_material(db, capa.report_id)
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, user_id, capa.report_id, PermissionLevel.EDIT)
     await db.commit()
+    await authorize_root(db, user_id, capa.report_id)
     await db.refresh(capa)
     return capa
 
@@ -657,7 +685,7 @@ async def advance_capa(
     from app.services.capa_review_guard import lock_capa_parent
     report_id = capa.report_id
     await current_capa_actor_target(db, user_id, report_id, PermissionLevel.EDIT)
-    capa = await lock_capa_parent(db, report_id)
+    capa = await lock_capa_parent(db, report_id, actor_id=user_id)
 
     current = EightDState(capa.status)
     target = req.target_state
@@ -879,7 +907,13 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         # the core HMAC. Retained locks still fence every material/source writer.
         await db.flush()
         await revalidate_decision()
+    from app.services.capa_d4_material import authorize_root, bump_material
+    required = PermissionLevel.APPROVE if current in {
+        EightDState.D8_APPROVAL_PENDING, EightDState.D8_CLOSURE} else PermissionLevel.EDIT
+    await authorize_root(db, user_id, report_id, required)
+    await bump_material(db, report_id)
     await db.commit()  # existing commit includes outbox
+    await authorize_root(db, user_id, report_id)
     await db.refresh(capa)
     return capa
 
@@ -938,7 +972,12 @@ async def link_fmea(
             },
             operated_by=user_id, factory_id=capa.factory_id,
         ))
+    from app.services.capa_d4_material import authorize_root, bump_material
+    await authorize_root(db, user_id, capa.report_id, PermissionLevel.EDIT)
+    if ref_changed or node_changed:
+        await bump_material(db, capa.report_id)
     await db.commit()
+    await authorize_root(db, user_id, capa.report_id)
     await db.refresh(capa)
     return capa
 

@@ -17,7 +17,7 @@ def _bounds(filters: dict[str, Any]):
     return start, end
 
 
-async def list_audit_logs(db: AsyncSession, filters: dict[str, Any], page: int, page_size: int):
+async def list_audit_logs(db: AsyncSession, filters: dict[str, Any], page: int, page_size: int, *, actor_id=None):
     table_name = filters.get("table_name")
     action = filters.get("action")
     operated_by = filters.get("operated_by")  # username
@@ -35,9 +35,27 @@ async def list_audit_logs(db: AsyncSession, filters: dict[str, Any], page: int, 
     if end:
         stmt = stmt.where(AuditLog.operated_at <= end)
 
-    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    # Historical before/after remains honest at rest. Current root restrictions
+    # apply before selecting any audit payload, even for administrator readers.
+    from app.services.capa_d4_material import root_metadata, authorize_root
+    coordinates = (await db.execute(stmt.with_only_columns(
+        AuditLog.log_id, AuditLog.table_name, AuditLog.record_id)
+        .order_by(AuditLog.operated_at.desc(), AuditLog.log_id.desc())
+        .limit(page_size).offset((page - 1) * page_size))).all()
+    capa_ids = {record_id for _, table, record_id in coordinates if table == 'capa_eightd'}
+    page_ids = [log_id for log_id, _, _ in coordinates]
+    async def authorize_audits():
+        for report_id in capa_ids:
+            _, sources = await root_metadata(db, report_id)
+            if sources:
+                if actor_id is None:
+                    raise PermissionError('D4_MATERIAL_UNAVAILABLE')
+                await authorize_root(db, actor_id, report_id)
+    await authorize_audits()
+    total = (await db.execute(select(func.count()).select_from(
+        stmt.with_only_columns(AuditLog.log_id).subquery()))).scalar_one()
     rows = (await db.execute(
-        stmt.order_by(AuditLog.operated_at.desc()).limit(page_size).offset((page - 1) * page_size)
+        stmt.where(AuditLog.log_id.in_(page_ids)).order_by(AuditLog.operated_at.desc(), AuditLog.log_id.desc())
     )).all()
 
     items = []
@@ -54,6 +72,7 @@ async def list_audit_logs(db: AsyncSession, filters: dict[str, Any], page: int, 
             "old_values": log.old_values,
             "new_values": log.new_values,
         })
+    await authorize_audits()
     return items, total
 
 

@@ -154,7 +154,7 @@ Task 9 冻结两构建并登记 exercise_input（含已实现的测试入口）�
 - [x] 写 RED：从空库和 R5 非空库升级均可；非空新版本拒绝 destructive downgrade；同 command/operation_key 不重复；跨报告关联和缺来源拒绝；public/tenant 同构，部分结构不被当合法前驱。
 - [x] 实现仅追加迁移与模型，参照 `test_r5_d5_delta.py` 的 `mig_db_url`、`_migration_config`、tenant migrator。来源/正文不可变关系与 FK 使用 RESTRICT；新 D4/更正表禁止原位覆写，不创建用户/部署授权。
 - [x] 创建 r6_support 场景工具：复用 `committed_runtime`，提供有 EDIT/仅 VIEW/另一 EDIT/撤权读者，报告同源与 A＋B、跨工厂/tenant，正常登录 HTTP 客户端。`case.actor(mode)` 提供当前角色与独立会话撤权操作，`case.report()` 读报告，`case.candidate()` 经 CAPA 保存待审项，`case.confirm(body, actor)` 调新确认路由，`case.measure()` 经 R5 adopt 创建版本 0，`case.correct(body, actor)` 调更正路由，`case.snapshot()` 返回正文/修订/措施/决定/审计数量供无副作用断言；仅生成已审/终态初始夹具可直接 seed，主链不借用它冒充正常流转。
-- [ ] GREEN 后以 `feat(capa): add R6 source and correction persistence contracts` 精确提交，记录迁移真实 revision 与兼容前驱；运行结果写台账。
+- [x] GREEN 后以 `feat(capa): add R6 source and correction persistence contracts` 精确提交，记录迁移真实 revision 与兼容前驱；运行结果写台账。
 
 ```bash
 cd backend
@@ -173,10 +173,10 @@ Task 1 专项实现和双复审结果见 [实施台账](../../development/r6-ent
 
 **文件**：新增 `capa_d4_material.py`；修改 `capa_d4_provenance.py`、`capa_service.py`、`capa_verification_service.py`、`capa_d4_text_preview.py`、`capa_outcome_review.py`、`backend/app/api/capa.py`、`schemas/capa.py`；新增 `backend/tests/capa/test_r6_d4_material.py`。
 
-- [ ] RED 覆盖 A→A＋B→手工替换/清空仍 A＋B、来源缺损失败关闭、旧未声明历史保留、VIEW 无正文写权限、跨租户同 UUID；检验报告详情/列表/更新响应、验证 root_cause_text、预览与审计 before/after 不泄露。
-- [ ] 实现从源元数据先判权限再取正文；`read_root` 必须在返回前再判当前资格，不能依赖 ORM 已加载对象。普通手工更新父行锁后重验 EDIT、完整旧来源、材料版本，调用 `record_root_revision` 时原集合∪新增来源；新修订正文快照受同一集合保护，计数原子递增。
-- [ ] 集中审核读取同时携带 D4 来源版本和材料版本；完整材料缺权直接拒绝，不能删除字段再批准。审计公开读取先判来源，日志不放受限正文。
-- [ ] GREEN 后提交 `feat(capa): preserve D4 source restrictions across manual revisions`；确认当前 R4b 预览/证明与手工流程回归没有被权限捷径替代。
+- [x] RED 覆盖 A→A＋B→手工替换/清空仍 A＋B、来源缺损失败关闭、旧未声明历史保留、VIEW 无正文写权限、跨租户同 UUID；检验报告详情/列表/更新响应、验证 root_cause_text、预览与审计 before/after 不泄露。
+- [x] 实现从源元数据先判权限再取正文；`read_root` 必须在返回前再判当前资格，不能依赖 ORM 已加载对象。普通手工更新父行锁后重验 EDIT、完整旧来源、材料版本，调用 `record_root_revision` 时原集合∪新增来源；新修订正文快照受同一集合保护，计数原子递增。
+- [x] 集中审核读取同时携带 D4 来源版本和材料版本；完整材料缺权直接拒绝，不能删除字段再批准。审计公开读取先判来源，日志不放受限正文。
+- [x] GREEN 后提交 `feat(capa): preserve D4 source restrictions across manual revisions`；确认当前 R4b 预览/证明与手工流程回归没有被权限捷径替代。
 
 核心不变量：
 
@@ -194,6 +194,8 @@ cd backend
 ```
 
 **通过标准**：两个员工的每个响应/审计/history 视图符合权限；仅允许当前有权者修改且版本正确，旧正文从未被迁移伪装为受控候选。
+
+Task 2 最终 203 项验证及独立双复审通过，证据与编辑令牌/审核内容版本的区分见 [实施台账](../../development/r6-entry-switch.md#task-2-来源继承与员工读取围栏已验证)。
 
 ### Task 3：D4 派生、全部模型出口与旧草稿返回围栏（批 A）
 

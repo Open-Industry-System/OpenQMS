@@ -168,7 +168,10 @@ def _admit(snapshot, levels, factories, lines):
 async def _current(db, scope, report_id):
     levels, factories, lines = await current_capa_access(db, scope)
     target = await _target_meta(db, report_id, factories, lines)
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, scope.user.user_id, report_id)
     snapshot = await read_snapshot(report_id, binding=db.info.get('tenant_binding'))
+    await authorize_root(db, scope.user.user_id, report_id)
     _admit(snapshot, levels, factories, lines)
     if (snapshot.factory_id, snapshot.product_line_code) != (target.factory_id, target.product_line_code):
         raise PreviewConflict()

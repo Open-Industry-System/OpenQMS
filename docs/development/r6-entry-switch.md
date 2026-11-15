@@ -6,7 +6,7 @@
 
 - 实施起点 `codex/r6-entry-switch-design@f03fc01b0ef9a30a85da1917c8fa8ed81fcaa9f9`，开工工作区干净。R5 PR #33 实读仍 open/draft、未合并，head `75fcc51765bd3b6b739695178a399bfa01806574`，main `d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，未发生影响计划的基线变化。
 - 解释器 `/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python`，setuptools `79.0.1`。前端在本 worktree 和冻结基线各自按 lockfile `npm ci`，不复制依赖。离线 npm 因缺缓存失败，随后联网按锁安装成功；不改 package lock 或运行代码。
-- Task 1 数据合同实现、223 项专项验证及独立 SPEC/QUALITY 复审已通过；完整冻结基线仍运行，浏览器基线待其结束后串行执行。Task 2 开始；尚未签收整体或切换资格。
+- Task 1 数据合同实现、223 项专项验证及独立 SPEC/QUALITY 复审已通过；完整冻结基线仍运行，浏览器基线待其结束后串行执行。Task 2 最终整组验证与双复审通过，准备 Task 3；尚未签收整体或切换资格。
 
 ## 独占测试资源
 
@@ -45,3 +45,12 @@
 
 - 最终当前源码专项 **223 passed /0 failed /0 errors /0 skipped /4 既有 warnings；exit0；618.02s**，`run-1794754150890729000.log`：包含全部 54 个新 R6 合同/夹具用例、FK 实际列与目标比对，以及 R5 员工采纳/可见性/消费者/审核材料与 D4 历史回归。原始采纳文本不可覆写，旧审核材料失效用例仍走合法业务写入。`git diff --check` 通过。此前 202 项结果发生在复审修正前，不替代此最终结果。
 - 配对 head 为 public `20261115_r6_entry_contracts`、tenant `tv015_r6_entry_contracts`，前驱分别为 `20261115_r5_responses`、`tv014_r5_responses`。新持久化表仍未接通候选生成等业务入口；后续任务继续按计划实施。
+
+## Task 2 来源继承与员工读取围栏（已验证）
+
+- Task 1 本地提交为 `7899e167`；Task 2 在其上实现，未推送。元数据先鉴权，再选择受限正文；读取返回前及写入锁等待后复核当前身份与完整来源。新写入 `r6:` 路径要求正文绑定；有前代绑定而最新缺失也拒绝，不将损坏的新历史当旧未声明记录。
+- 手工追加、替换、清空均保留全部来源。D2/D3 每次实际修改保存独立字段版本，A→B→A 不恢复旧输入资格；当前读取权限与来源新鲜度分别处理。
+- 通用编辑令牌与审核内容版本分开：编辑令牌绑定租户、报告、递增计数和切换 epoch，实际写入（含关联 FMEA、阶段推进）都会使旧令牌失效。审核内容 HMAC 绑定实际材料、审核轮次、不可变 D4 修订及完整来源，不纳入纯状态变化的通用计数，避免审批自身使已保存回执失效。真正的旧 v1 历史形状和已保存事实不重写；Task 6 更正修订将另纳入 v2 内容版本。
+- 独立 SPEC 发现并修正 API 隐式正文读取、阶段推进锁后撤权、材料计数遗漏；独立 QUALITY 发现并修正报告列表二次分页竞态与审计整份历史鉴权。两者复审均 APPROVED。报告/审计载荷只读取固定已鉴权页 ID；审计计数单独读取元数据。
+- 已补真实跨租户同报告 UUID、损坏来源、实际受限验证/预览/审计、真实父锁等待期间撤权、并发分页插入与跨页权限用例。早期有效 RED 为缺少材料服务；中间 149 passed 与后续 156 passed/1 failed 均只代表当时源码，后者的 metadata-only availability 断言已替换为实际预览正文路径。
+- `run-1794756360185481000.log` 为 **200 passed /1 failed /9 errors**，不是通过：SQL spy 误匹配元数据表名，以及测试清理被新 RESTRICT 外键阻止。仅修正列级断言和 fixture-owned 事务局部清理；生产约束未放宽，独立 QUALITY 对夹具修正亦 APPROVED。最终整组 `run-1794756651088742000.log` 已完成：**203 passed /0 failed /0 errors /0 skipped；254.62s；exit0**，receipt `api-20261115T153051686874-receipt.json`。包含所有修正后的生产代码与测试；`compileall`、`git diff --check` 通过。SPEC、QUALITY 及夹具定向复审 APPROVED，Task 2 专项签收；完整基线与后续 Tasks 3–11 尚未签收。

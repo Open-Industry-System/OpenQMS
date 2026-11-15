@@ -91,7 +91,19 @@ async def test_empty_rejection_reason_still_rejected(review_http_client, review_
 
 
 @pytest.mark.asyncio
-async def test_actual_approval_receipt_reader_and_archive(review_http_client, review_case, decision_provider):
+@pytest.mark.parametrize('r6_bound', [False, True])
+async def test_actual_approval_receipt_reader_and_archive(review_http_client, review_case, decision_provider, r6_bound):
+    from app.services.capa_d4_material import material_version
+    if r6_bound:
+        from app.services.capa_d4_provenance import record_root_revision
+        from app.services.capa_review_guard import lock_capa_parent
+        async with review_case.session_factory() as db:
+            await lock_capa_parent(db, review_case.report_id, actor_id=review_case.actor_id)
+            await record_root_revision(db, report_id=review_case.report_id,
+                actor_id=review_case.actor_id, write_path='approval_fixture')
+            await db.commit()
+    async with review_case.session_factory() as db:
+        before_token = await material_version(db, review_case.report_id)
     seen = await expectation(review_case)
     response = await review_http_client.post(f'/api/capa/{review_case.report_id}/advance',
         json={'target_state': 'D8_CLOSURE', **seen})
@@ -103,6 +115,8 @@ async def test_actual_approval_receipt_reader_and_archive(review_http_client, re
         assert set(receipt) == {'contract', 'round_id', 'revision', 'doc_decision_id', 'source_versions'}
         assert receipt['revision'] == seen['expected_outcome_revision']
         assert receipt['round_id'] == seen['expected_review_round_id']
+    async with review_case.session_factory() as db:
+        assert await material_version(db, review_case.report_id) != before_token
     result = await read(review_case)
     assert result.binding_status == 'verified'
     assert result.decision.action == 'approved'

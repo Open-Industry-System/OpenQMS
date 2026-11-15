@@ -1,6 +1,6 @@
 # OpenQMS 开发进度
 
-> **2026-11-15 R6 Task 1 数据合同专项及双复审通过，继续全任务实施**：用户已授权 Tasks 1–11，不动 CI 优化、不推送、合并或部署。Task 1 配对迁移、完整来源/不可变历史合同和正常登录夹具完成，最终专项 **223 passed /0skip /0fail**，独立 SPEC 与 QUALITY 均通过。配对新 head 为 `20261115_r6_entry_contracts` / `tv015_r6_entry_contracts`；R5 PR #33 仍 open/draft、head `75fcc517`，main `d3c0ada8`。两套 owner-bound PG15 分离冻结基线与实施测试；完整冻结 make 仍运行，browser 待串行执行，不以专项替代全量签收。继续 Task 2 来源继承与员工读取保护。证据和复审修正见 [R6 台账](docs/development/r6-entry-switch.md)。后续真实模型按用户确认复用 R5 获准部署与凭据，密钥不进入普通测试或 Git。
+> **2026-11-15 R6 Task 1 数据合同专项及双复审通过，继续全任务实施**：用户已授权 Tasks 1–11，不动 CI 优化、不推送、合并或部署。Task 1 配对迁移、完整来源/不可变历史合同和正常登录夹具完成，最终专项 **223 passed /0skip /0fail**，独立 SPEC 与 QUALITY 均通过。配对新 head 为 `20261115_r6_entry_contracts` / `tv015_r6_entry_contracts`；R5 PR #33 仍 open/draft、head `75fcc517`，main `d3c0ada8`。两套 owner-bound PG15 分离冻结基线与实施测试；完整冻结 make 仍运行，browser 待串行执行，不以专项替代全量签收。Task 2 来源继承、员工读写/预览/验证/审计保护亦已完成，最终 **203 passed /0skip /0fail /0errors**；独立 SPEC、QUALITY 和测试夹具复审均通过。继续 Task 3 的派生、模型出口与旧草稿保护。证据和复审修正见 [R6 台账](docs/development/r6-entry-switch.md)。后续真实模型按用户确认复用 R5 获准部署与凭据，密钥不进入普通测试或 Git。
 
 > **2026-11-15 R6 计划复审三项 P1 已定向修订，仍待复审**：[实施计划](docs/superpowers/plans/2026-11-15-r6-d4-d5-entry-switch.md)基于 `917422ec` 修正 Task 8 为独立短事务先持久关准入、再等待排空锁，补长事务超时/运维退出后拒新请求及新进程接续；§2.2 冻结本报告 K2/K3＋单 FMEA A 的正向与增加 B 的零交付样例，明确原 proof 仍须覆盖整段正式根因，报告输入追溯须补 R6 绑定/receipt sidecar，Task 3–5 先验可放行主链再做真实模型验收；§2.3 区分隔离演练输入与 C9/C10 后生成的正式放行清单，真实切换命令演练不再依赖最终清单，演练文书不能用于正式环境。四项产品决定和正式更正上线必需条件不变；本轮仅修订计划与进度，未执行测试/迁移/实施，Task 1 未开始，无推送、合并或部署。
 

@@ -96,7 +96,9 @@ async def current_capa_actor_product_line(
 
 
 async def current_capa_actor_target(db, actor_id, report_id, required_level: PermissionLevel) -> CAPAEightD:
-    """Resolve fresh CAPA access from the server-side actor identity only."""
+    """Resolve fresh CAPA access and complete root authority before ORM bodies."""
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, actor_id, report_id, required_level)
     levels, factories, lines = await current_capa_access(
         db, SimpleNamespace(user=SimpleNamespace(user_id=actor_id))
     )

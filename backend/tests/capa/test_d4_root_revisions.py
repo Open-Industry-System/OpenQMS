@@ -46,7 +46,7 @@ async def test_update_a_b_a_same_value_and_existing_side_effects(db, default_fac
     assert [r.revision_no for r in rows] == [1, 2, 3]
     assert len({r.revision_id for r in rows}) == 3
     assert rows[0].field_hmac == rows[2].field_hmac != rows[1].field_hmac
-    assert all(r.actor_id == admin_user.user_id and r.write_path == 'capa.update' for r in rows)
+    assert all(r.actor_id == admin_user.user_id and r.write_path == 'r6:capa.update' for r in rows)
     assert embedding.await_count == 3
     assert report.status == 'D4_ROOT_CAUSE'
     audits = list((await db.scalars(select(AuditLog).where(AuditLog.record_id == report.report_id))).all())
@@ -63,7 +63,7 @@ async def test_adopt_revision_only_for_d4_real_append_and_not_retry_or_d5(db, de
     second, _ = await capa_verification_service.adopt_recommendation(db, report, request, admin_user)
     assert first.adoption_id == second.adoption_id
     rows = await revisions(db, report)
-    assert len(rows) == 1 and rows[0].write_path == 'capa.adopt'
+    assert len(rows) == 1 and rows[0].write_path == 'r6:capa.adopt'
     report.status = 'D5_CORRECTION'
     await db.flush()
     await capa_verification_service.adopt_recommendation(db, report,
@@ -195,7 +195,7 @@ async def test_audit_finding_initial_revision_and_a_b_a(db, default_factory, adm
     report = await create_capa_from_finding(db, finding, admin_user.user_id)
     assert report.factory_id == finding.factory_id and report.product_line_code == plan.product_line_code
     rows = await revisions(db, report)
-    assert len(rows) == 1 and rows[0].write_path == 'audit.finding'
+    assert len(rows) == 1 and rows[0].write_path == 'r6:audit.finding'
     await capa_service.update_capa(db, report, {'d4_root_cause': 'B'}, admin_user.user_id)
     await capa_service.update_capa(db, report, {'d4_root_cause': 'A'}, admin_user.user_id)
     rows = await revisions(db, report)

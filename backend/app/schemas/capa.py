@@ -17,6 +17,7 @@ class CAPACreate(BaseModel):
 
 
 class CAPAUpdate(BaseModel):
+    expected_material_version: str | None = None
     title: str | None = None
     d1_team: list[dict] | None = None
     d2_description: str | None = None
@@ -69,6 +70,7 @@ class SupplierRiskInputProjection(BaseModel):
 
 
 class CAPAResponse(BaseModel):
+    material_version: str | None = None
     report_id: uuid.UUID
     document_no: str
     title: str

@@ -377,6 +377,8 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
 
 async def collect_outcome_material(db, capa) -> dict:
     await require_business_namespace(db)
+    from app.services.capa_d4_material import root_review_material
+    d4_material = await root_review_material(db, capa.report_id, db.info.get("outcome_read_access"))
     from app.services.capa_d5_measures import full_d5_material
     d5_material = await full_d5_material(db, capa, access=db.info.get('outcome_read_access'))
     fields = _columns(CAPAEightD, _CORE)
@@ -387,6 +389,11 @@ async def collect_outcome_material(db, capa) -> dict:
         report_id=str(capa.report_id), factory_id=str(capa.factory_id), product_line_code=capa.product_line_code,
         round_id=_normal(await resolve_review_round(db, capa)), core=core, verifications=[],
         d7_actions=[], doc_gate=None, source_versions=[])
+    if d4_material is not None:
+        # Workflow/edit counters change on decisions too; immutable outcome
+        # content binds root revision and complete origins, not that counter.
+        material["d4_material"] = {key: value for key, value in d4_material.items()
+                                   if key != "material_version"}
     if d5_material:
         material['d5_measures'] = d5_material
     _check_size(material)
@@ -442,6 +449,8 @@ async def require_outcome_expectation(db, scope, capa, req) -> dict:
     from app.services.capa_review_guard import OutcomeReviewRequired
 
     async def access_now():
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, scope.user.user_id, capa.report_id)
         access = await current_capa_access(db, scope)
         if access[0].get(Module.CAPA, PermissionLevel.NONE) < PermissionLevel.APPROVE:
             raise PermissionError('Current CAPA APPROVE required')
@@ -489,7 +498,7 @@ async def apply_outcome_expectation(db, capa, req, actor_id) -> dict:
     scope = SimpleNamespace(user=SimpleNamespace(user_id=UUID(str(actor_id))))
     report_id = capa.report_id
     await current_capa_actor_target(db, scope.user.user_id, report_id, PermissionLevel.APPROVE)
-    capa = await lock_capa_parent(db, report_id)
+    capa = await lock_capa_parent(db, report_id, actor_id=actor_id, required_level=PermissionLevel.APPROVE)
     if capa.status != 'D8_APPROVAL_PENDING':
         raise OutcomeReviewConflict()
     receipt = await require_outcome_expectation(db, scope, capa, req)
@@ -535,6 +544,8 @@ async def apply_outcome_expectation(db, capa, req, actor_id) -> dict:
 
 
 async def _admission(db, scope, report_id):
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, scope.user.user_id, report_id)
     access = await current_capa_access(db, scope)
     target = await current_capa_target_metadata(db, report_id, access[1], access[2])
     if target.status not in _ALLOWED_STATES:
@@ -684,4 +695,6 @@ async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
             raise OutcomeReviewConflict()
         for source in final['source_versions']:
             await _source_access(db, last_target, (source['module'], source['object_id']), last_access, d5_material=material.get('d5_measures', []))
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, scope.user.user_id, report_id)
         return output
