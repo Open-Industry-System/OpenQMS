@@ -1,5 +1,24 @@
 # OpenQMS 开发进度
 
+### 2026-11-15 — CI 独立 PR 送审准备（后续授权）
+
+- 用户已授权提交、推送本批CI改动并单独开PR；上一阶段“不提交/不push”记录为当时本地验收状态。当前main复核仍为d3c0ada8，执行代码与已通过完整验收的1073文件manifest一致；送审前pure350通过/3既有warnings，actionlint及diff检查通过，不重复运行76分钟后端。
+- 再次只读核对：main protected=false、required contexts/checks为空；生效rules=[]，ruleset17638580仍仅deletion/non_fast_forward且ref include/exclude为空；没有required_status_checks。可见self-hosted runner总数0，没有匹配openqms-r5-sandbox的runner。未更改保护设置、runner或R5门禁；不能把检查名保留当成强制阻断已生效。
+- PR描述将明确main PR创建/更新完整验证、main合并后push继续运行、未开PR的功能分支push不再运行。远端验收重点为同一PR追加提交只有一个pull_request运行、实际merge候选SHA、缓存命中/冷热及阶段耗时；尚未得到远端结果前不预写通过。
+- 慢fixture另开后续批次：setup2927.02秒约占执行循环64%，只能确定调查方向；先按测试组统计fixture调用次数、单次及累计耗时，再选择累计成本最高项做整组前后对照，同时验证数据库状态隔离和顺序独立性。本批不实施fixture优化或分片。可与R6 Task1并行，R6开工时核对实际合入的CI入口和基线SHA，不从尚未合入的PR推断主线状态。
+
+
+### 2026-11-15 — PR CI 去重与后端计时（本地验收完成，未发布）
+
+- 最新 fetch 的 `origin/main` 与 `FETCH_HEAD` 均为 `d3c0ada8`；工作树 `/Users/sam/.codex/worktrees/backend-ci-baseline/OpenQMS`，分支 `codex/backend-ci-baseline`。PR #33 / `feature/r5-d5-proposals`（75fcc517）的 Responses/R5 改动及原根工作区均未修改。
+- 已核对 PR #33 两套运行（push 43714113498 / PR 43714120965）与实际 merge checkout `1d3cadc…`。Test OpenQMS 的 push 从所有分支收敛到 main，保留 main PR 默认事件、默认合并候选 checkout、同 PR 取消、检查名与失败语义。未开 PR 的功能分支和其他非 main push 不再运行该 workflow，tag 仍不运行。样本未来每次更新少派发7个 Linux job及1个排队 native job；现有远端运行未取消，本轮配置未发布。
+- **门禁配置事实**：API main protected=false，传统保护404，生效分支规则为空；ruleset17638580没有 required checks。GitHub Actions检查来源15368保持，但不能声称管理员已配置失败阻断合并。self-hosted runner API返回0，PR #33的r5-native仍queued；保留其feature专有native门禁，不通过skip/换runner绕过，等待问题与减少重复占用分开。
+- 主线 backend 显式 prepare 与 Make check-test-db 均执行身份校验/建库检查/迁移，第二次有实际进程与连接开销；manual只做Schema/SPC计算且在pure guard下通过。因此删除前置独立prepare，保留正常Make从空库准备、runner再校验、手工检查与后续preflight。后端/浏览器新增pip下载缓存，安装与SDK版本检查保留，缓存不包含DB/凭据/测试状态。
+- 已有单次 pytest collection/execution及top20 setup/call/teardown计时，写入既有过滤log，receipt不变；诊断损坏/日志失败不改变原测试退出码。最终 CI pure **350 passed /3 warnings**，actionlint1.7.7与diff检查通过，0/1/2退出路径及未登记实例Make exit2已验证；只读复核通过。
+- 成功PR历史基线：PR run43686875078，head13d1ac1b、实际merge3d95cb91，Ubuntu26.04/Python3.12.16；backend排队2秒、执行6134秒，依赖17+2秒、首次准备7秒、重复约1.46秒、pytest子进程6071.36秒，phase分项未测得。独占PG15本地重复准备1.358/0.916秒。没有同提交/同runner的优化后Actions或pip冷热实测，不推算收益比例。
+- 最终空库正常 `make check-backend` **5269 passed /4 skipped /19 deselected /6 warnings，exit0**，新增29项CI回归，既有排除不变；D8 preflight CLEAN/0 breaks和8个引擎import均exit0。Make4612.65秒、pytest子进程4608.58秒，collection5.63秒/execution4574.43秒；setup2927.02秒/call1391.27秒/teardown253.25秒，**下一步优先慢fixture**（如tenant rebuild某例setup13.08秒而call0.12秒），不先拆两个PG job。此前因应用更新在第2207项中断的运行未计作通过。1073个执行文件前后集合/指纹一致（manifest `f1e7dfee23be245fe3815074ccd6d826e4625c95a8e1c637b995fcdf3a4645c7`）；本地receipt标识为d3c0ada8+local-ci-optimization，并非实际commit，同Actions不同runner/版本，不能换算优化比例。专用PG/唯一自有卷及凭据已精确清理，其他资源未动；日志/收据在本机/tmp/openqms-ci-baseline-local，工作树保留未提交。详细基线、事件矩阵、保护规则、验证口径和下一次PR指标见[CI证据](docs/development/backend-ci-timing.md)。未分片、未减测试、未push或merge。
+
+
 > **2026-11-14 R4b 集成草稿PR已发布**：已普通推送独立分支`integration/r4b-main-20261114`并创建[草稿PR #30](https://github.com/Open-Industry-System/OpenQMS/pull/30)，base仍为main `5b712d94`，GitHub报告mergeable且draft=true；未合并main。首轮自动Test OpenQMS已触发，逐轮CI状态与最终实际head以PR动态记录及最终交接为准，不在此预写通过。执行候选`78b428d2`的本地完整门禁与资源证据见下一条/集成交接；后续仅文档记录发布事实，1575执行文件指纹保持一致。GitHub连接器创建PR受403集成权限限制，已用本机现有gh授权完成同一草稿请求，未提升权限。旧R4B-CLEANUP-01继续延期，新专用验收实例保留用于PR迭代。
 
 > **2026-11-14 R4b 主线集成发布前本地验收完成**：origin/main刷新仍为`5b712d94`，独立分支`integration/r4b-main-20261114`合入已签收`dcda1d55`，17处冲突逐段解决；集成merge `ebc502c2`、最终执行候选`78b428d2`。保留main权限/PR #29与R4b双层来源、默认拒绝、消息门禁、受限恢复、撤权后停止；public/tenant分别新增无DDL merge至20261114/tv009，真实发现并修复merge拆分多head降级问题，独立规格/质量复审通过。新独占实例内public三路径、tenant空建/双旧head有值升级/full parity/27 guards均通过。当前`make check`真实exit0：**backend4973通过/4可选skip/19未选/6警告**，SDK **562+16+1**，前端tsc/build通过；真实browser **11通过/0skip/6警告**，pure **321通过/3警告**，Vitest **95文件822通过**，E2E类型通过，清理器普通/-O各55隔离测试通过。1575执行文件前后指纹一致（manifest SHA256 `27bcbdf738c63787934a29877ea608c08997a8e54b10d715fcd931f1a87a70bd`）；具体收据、工具差异、skip和未运行层见[集成交接](docs/development/r4b-main-integration.md)。主库为本次独占实例`127.0.0.1:62563/qms_test`，原初始测试库仍保留；因main旧夹具精确库名要求而调整登记，未放宽守卫，PR #29事务27通过。验收后迁移临时库/其他客户端/tenant登记/schema均0，哨兵不变。旧 **R4B-CLEANUP-01**仍延期，全部旧资源未用于本轮；T11仍“功能验收完成，清理待办”。下一步普通push独立分支并创建草稿PR、跟踪实际CI，不写main/不合并/不部署或启模型。

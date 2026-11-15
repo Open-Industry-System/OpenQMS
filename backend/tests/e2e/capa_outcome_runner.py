@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -286,6 +287,36 @@ def _progress_message(line: str) -> dict | None:
     return message
 
 
+
+def _publish_pytest_timing(private_hooks: Path, log_path: Path, secrets: Sequence[str]) -> None:
+    """Best-effort diagnostics must never determine the acceptance outcome."""
+    def seconds(value):
+        if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+            raise ValueError('invalid timing duration')
+        return value
+
+    try:
+        timing = json.loads(private_hooks.read_text()).get('timing')
+        if timing is None:
+            return
+        # Publish only the documented fields, never arbitrary private hook data.
+        public = {key: seconds(timing[key]) for key in ('collection_seconds', 'execution_seconds')}
+        public['phase_seconds'] = {phase: seconds(timing['phase_seconds'][phase])
+                                   for phase in ('setup', 'call', 'teardown')}
+        public['slowest_tests'] = [
+            {'test': redact(row['test'].split('[', 1)[0], secrets),
+             **{phase: seconds(row[phase]) for phase in ('setup', 'call', 'teardown', 'total')}}
+            for row in timing['slowest_tests'][:20]
+        ]
+        timing_line = 'OPENQMS_GATE_TIMING ' + json.dumps(public, sort_keys=True)
+        with log_path.open('a') as log:
+            log.write(timing_line + '\n')
+        print(timing_line, flush=True)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        # Missing/corrupt diagnostics or an unavailable log sink do not turn
+        # passing tests into failures, or hide the original failing exit code.
+        return
+
 def run_pytest_layer(
     *, layer: str, targets: Sequence[str], source: Mapping[str, str], database_url: str, artifacts: Path,
     live_configuration: Mapping[str, str] | None = None, python: str | None = None,
@@ -344,6 +375,7 @@ def run_pytest_layer(
             receipt['exit_code'] = exit_code
         else:
             receipt.update(summary, exit_code=exit_code)
+            _publish_pytest_timing(private_hooks, log_path, secrets)
             try:
                 if layer in {'browser', 'live', 'scanner'}:
                     require_gate_success(summary, exit_code)

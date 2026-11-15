@@ -277,7 +277,7 @@ Chromium jobs（自动 browser-protection、手动 live-capa/scanner）固定 `u
 
 验收子进程实时输出逐用例 start/finish 诊断，只含源测试标识和序号，不包含参数 ID/正文。父进程验证精确 JSON 结构与连续配对序列，重新构造并脱敏后才镜像到控制台，拒绝前缀碰撞、捕获输出回放和嵌套进度；这不是身份认证或成功收据。单用例120秒未完成时 pytest 保存线程堆栈，**不**因此跳过、提前通过或延长执行上限。超时取消必须核对最后 start/finish、堆栈和实际计数，不得将缺失最终收据当成通过。
 
-自动 job 使用无密钥 all-branch push 与 main PR，`contents: read`、checkout
+自动 job 使用无密钥 main push 与 main PR（功能分支 push 不再重复触发；未开 PR 的功能分支也不运行 Test OpenQMS），`contents: read`、checkout
 `persist-credentials: false`。`workflow_dispatch` 的 live/scanner 只在 `main`，固定
 选项和 main-only 预检：先检查 event/ref/gate 并冻结 main SHA，才由下游 job
 使用该 SHA。workflow_dispatch 文件必须先正式进入默认分支 main；仅 live job 使用 `ci-acceptance` Environment 与模型配置，scanner 不读取
