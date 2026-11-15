@@ -139,7 +139,8 @@ async def test_preflight_reports_modify_target_absent_from_latest(db, capa_d8_ga
     kps = [{"target_kind": "cp_item", "expected_action": "modify",
             "field": "control_method", "target_key": "old-id"}]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert any(b["blocked_modify_target_key"] == "old-id" for b in breaks)
 
 
@@ -156,7 +157,8 @@ async def test_preflight_does_not_report_delete_target_absent(db, capa_d8_gate):
     kps = [{"target_kind": "cp_item", "expected_action": "delete",
             "field": "control_method", "target_key": "old-id"}]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert breaks == []
 
 
@@ -177,7 +179,8 @@ async def test_preflight_partial_shared_id_reports_only_blocked_modify(db, capa_
          "field": "control_method", "target_key": "B"},
     ]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert {b["blocked_modify_target_key"] for b in breaks} == {"B"}
 
 
@@ -196,7 +199,8 @@ async def test_preflight_skips_terminal_capa(db, capa_d8_gate):
     kps = [{"target_kind": "cp_item", "expected_action": "modify",
             "field": "control_method", "target_key": "old-id"}]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert breaks == []
 
 

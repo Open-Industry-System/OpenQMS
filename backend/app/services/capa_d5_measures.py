@@ -31,7 +31,7 @@ async def _visible_metadata(db, scope, report_id, access=None):
     # Independent foreign keys establish existence only. Every association must
     # match this report, task and command before any proposal text is selected.
     query = (select(p.proposal_id, p.state, p.created_at, p.revision_id, p.proof_id,
-                    p.task_id, p.predecessor_id, p.correction_message_id,
+                    p.task_id, p.predecessor_id, p.correction_message_id, revision.write_path,
                     proof.factory_id, proof.product_line_code, proof.source_projection_id,
                     proof.fmea_id, proof.cause_node_id, proof.node_hmac)
         .join(command, (command.command_id == p.command_id) & (command.proposal_id == p.proposal_id)
@@ -102,6 +102,37 @@ async def _visible_metadata(db, scope, report_id, access=None):
                 allowed = False
                 break
         if allowed:
+            from app.models.capa_r6 import CapaR6RootRevisionBody
+            controlled = await db.scalar(select(CapaR6RootRevisionBody.revision_id).where(
+                CapaR6RootRevisionBody.revision_id == row.revision_id,
+                CapaR6RootRevisionBody.binding_state == 'controlled'))
+            if controlled is None and row.write_path.startswith('r6:'):
+                any_binding = await db.scalar(select(CapaR6RootRevisionBody.revision_id).where(
+                    CapaR6RootRevisionBody.revision_id == row.revision_id))
+                if any_binding is None:
+                    continue
+            from app.services.capa_r6_delivery import task_requires_r6_sidecar
+            try:
+                r6_required = await task_requires_r6_sidecar(db, row.task_id)
+            except PermissionError:
+                continue
+            if controlled is not None or r6_required:
+                from app.models.agent_d5_basis import AgentD5BasisReceipt, AgentD5CommandBasis
+                from app.services.capa_r6_delivery import validate_root_delivery_binding
+                receipts = list(await db.scalars(select(AgentD5BasisReceipt).join(AgentD5CommandBasis,
+                    AgentD5CommandBasis.receipt_id == AgentD5BasisReceipt.receipt_id).join(AgentD5Command,
+                    AgentD5Command.command_id == AgentD5CommandBasis.command_id).where(
+                    AgentD5Command.proposal_id == row.proposal_id)))
+                if not receipts:
+                    continue
+                try:
+                    for receipt in receipts:
+                        if (receipt.report_id != report_id or receipt.revision_id != row.revision_id
+                                or receipt.proof_id != row.proof_id or receipt.task_id != row.task_id):
+                            raise PermissionError('D4 delivery binding unavailable')
+                        await validate_root_delivery_binding(db, receipt, db.info['tenant_binding'].tenant_id, scope=scope)
+                except PermissionError:
+                    continue
             visible.append(row)
             source_sets[row.proposal_id] = all_sources
     return target, visible, source_sets
@@ -115,6 +146,27 @@ async def _basis_current(db, scope, target, row, sources):
     binding = db.info.get('tenant_binding')
     if binding is None:
         return False
+    if scope is not None:
+        from app.services.capa_d4_material import require_root_freshness
+        try:
+            await require_root_freshness(db, scope.user.user_id, target.report_id)
+        except (PermissionError, LookupError):
+            return False
+    if getattr(row, 'proposal_id', None) is not None:
+        from app.services.capa_r6_delivery import task_requires_r6_sidecar, validate_root_delivery_binding
+        from app.models.agent_d5_basis import AgentD5BasisReceipt, AgentD5CommandBasis
+        try:
+            if await task_requires_r6_sidecar(db, row.task_id):
+                receipts = list(await db.scalars(select(AgentD5BasisReceipt).join(AgentD5CommandBasis,
+                    AgentD5CommandBasis.receipt_id == AgentD5BasisReceipt.receipt_id).join(AgentD5Command,
+                    AgentD5Command.command_id == AgentD5CommandBasis.command_id).where(
+                    AgentD5Command.proposal_id == row.proposal_id)))
+                if not receipts:
+                    return False
+                for receipt in receipts:
+                    await validate_root_delivery_binding(db, receipt, binding.tenant_id, scope=scope, fresh=True)
+        except (PermissionError, LookupError):
+            return False
     with db.no_autoflush:
         proof = await db.scalar(select(CapaD4RootCauseSourceProof).where(
             CapaD4RootCauseSourceProof.proof_id == row.proof_id).execution_options(populate_existing=True))
@@ -264,6 +316,8 @@ async def require_legacy_d5_only(db, report_id):
     """Flows without item ACL/recipient support cannot claim complete material."""
     if await _formal_ids(db, report_id):
         raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, report_id)
 
 
 async def full_d5_material(db, capa, *, scope=None, access=None):

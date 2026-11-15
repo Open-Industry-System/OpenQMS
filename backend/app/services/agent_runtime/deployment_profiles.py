@@ -20,6 +20,7 @@ class DeploymentProfile:
 PROFILES = MappingProxyType({
     METADATA_PROFILE: DeploymentProfile(frozenset({'capa.d4.summary.masked.v1'}), frozenset({('context', 'internal', 'masked'), ('message', 'restricted', 'raw')})),
     'model_d5_proposal_v1': DeploymentProfile(frozenset({TEXT_CAPABILITY, 'capa.d5.proposal.save.v1'}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),
+    'model_d5_proposal_r6_v1': DeploymentProfile(frozenset({TEXT_CAPABILITY, 'capa.d5.proposal.save.v1', 'capa.d2.snapshot.v1', 'capa.d3.snapshot.v1'}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),
     TEXT_PROFILE: DeploymentProfile(frozenset({TEXT_CAPABILITY}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),
 })
 
@@ -39,7 +40,7 @@ def select_runtime_admission(db, installation, executor_id, coordinates, *, now=
         except (PermissionError, OSError, ValueError):
             return None
         fingerprint = pilot.fingerprint()
-        return TrialAdmission('model_d5_proposal_v1', fingerprint, pilot.expires_at, installation.installation_id)
+        return TrialAdmission(pilot.profile, fingerprint, pilot.expires_at, installation.installation_id)
     metadata = select_admission(db.info.get('agent_local_trial_policy', EMPTY_POLICY),
         binding=binding, installation=installation, executor_user_id=executor_id,
         report_id=coordinates.report_id, factory_id=coordinates.factory_id,

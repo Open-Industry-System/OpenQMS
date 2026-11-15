@@ -248,6 +248,8 @@ async def _assemble_linkage(db: AsyncSession, capa: CAPAEightD) -> dict:
 
 
 async def _assemble_deterministic_fields(db: AsyncSession, capa: CAPAEightD) -> dict:
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa.report_id)
     d3 = await _assemble_d3(db, capa)
     d4 = await _assemble_d4(db, capa)
     d7 = await _assemble_d7(db, capa)
@@ -365,6 +367,23 @@ async def sink_capa_on_close(
     manual: bool = False,
 ) -> KnowledgeEntry:
     """Fail-closed knowledge sink. Does not commit and does not mutate capa.status."""
+    from types import SimpleNamespace
+    from app.core.permissions import PermissionLevel
+    from app.services.capa_d4_material import legacy_capa_read_binding
+    actor = SimpleNamespace(user_id=user_id)
+    report_id = capa.report_id
+    initial_binding = await legacy_capa_read_binding(db, actor, report_id,
+        required_level=PermissionLevel.EDIT)
+
+    async def fence(*, lock=False):
+        if lock:
+            await db.execute(select(CAPAEightD.report_id).where(
+                CAPAEightD.report_id == report_id).with_for_update())
+        current = await legacy_capa_read_binding(db, actor, report_id,
+            required_level=PermissionLevel.EDIT)
+        if current != initial_binding:
+            raise PermissionError("D4_MATERIAL_CHANGED: continue manual D5")
+
     # 1. LLM availability
     try:
         pc = await provider_adapter.build_client(db)
@@ -382,11 +401,16 @@ async def sink_capa_on_close(
 
     # 3. LLM summary + tags
     prompt = _build_prompt(capa, fields)
+    await fence()
     try:
-        raw = await provider_adapter.complete_json(pc, prompt, _LLM_RESPONSE_SCHEMA)
+        raw = await provider_adapter.with_delivery_guard(fence,
+            lambda: provider_adapter.complete_json(pc, prompt, _LLM_RESPONSE_SCHEMA))
+    except PermissionError:
+        raise
     except Exception as e:
         raise KnowledgeSinkFailedError(f"LLM 调用失败: {e}", reason="llm_failed") from e
 
+    await fence(lock=True)
     if not isinstance(raw, dict):
         raise KnowledgeSinkFailedError("LLM 返回非对象", reason="llm_failed")
 
@@ -520,4 +544,5 @@ async def sink_capa_on_close(
         )
     )
 
+    await fence()
     return entry

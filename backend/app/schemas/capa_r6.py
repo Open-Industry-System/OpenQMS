@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.schemas.agent_d5_command import D5Command
 
 
-class _R6Command(BaseModel):
+from app.schemas.database_text import DatabaseTextInput
+
+class _R6Command(DatabaseTextInput):
     model_config = ConfigDict(extra='forbid')
     operation_key: str = Field(min_length=1, max_length=128, pattern=r'^[A-Za-z0-9._:-]+$')
     expected_material_version: str = Field(min_length=1, max_length=512)
@@ -53,7 +55,7 @@ class D4CandidateCommand(D5Command):
         return values
 
 
-class _SourceCoordinate(BaseModel):
+class _SourceCoordinate(DatabaseTextInput):
     model_config = ConfigDict(extra='forbid')
     object_id: UUID
     version: str = Field(min_length=1, max_length=128)

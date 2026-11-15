@@ -176,7 +176,8 @@ async def r6_case(committed_runtime, monkeypatch):
         case.slug = await connection.scalar(text('SELECT slug FROM public.tenants WHERE id=:id'), {'id': case.binding.tenant_id})
     # Each fixture gets a distinct synthetic client IP, preserving the real
     # rate limiter without exhausting another fixture's per-IP budget.
-    ip = '192.0.2.' + str(int(uuid4().hex[:2], 16))
+    from ipaddress import IPv6Address
+    ip = str(IPv6Address(case.binding.tenant_id.int))
     async with AsyncExitStack() as stack:
         for mode, user_id, role_id, username in actor_rows:
             client = await stack.enter_async_context(AsyncClient(

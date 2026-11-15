@@ -123,16 +123,31 @@ async def trigger_scar_from_capa(
     due_date: date | None = None,
     affected_batches: list[str] | None = None,
 ) -> SupplierSCAR:
-    await load_capa_visible_or_404(db, report_id, scope)
-
-    # FOR UPDATE + populate_existing so concurrent triggers see the bound scar_ref_id
-    result = await db.execute(
-        select(CAPAEightD)
-        .where(CAPAEightD.report_id == report_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    capa = result.scalar_one()
+    from types import SimpleNamespace
+    from app.core.permissions import PermissionLevel
+    from app.services.capa_d4_material import legacy_capa_read_binding, bump_material
+    from app.services.agent_runtime.control_authority_fence import lock_employee_acl
+    actor = SimpleNamespace(user_id=user_id)
+    async def binding():
+        current = await legacy_capa_read_binding(db, actor, report_id, required_level=PermissionLevel.EDIT)
+        target = (await db.execute(select(CAPAEightD.factory_id, CAPAEightD.product_line_code)
+            .where(CAPAEightD.report_id == report_id))).one_or_none()
+        if target is None or not is_factory_visible(target.factory_id, scope):
+            raise LookupError('8D report not found')
+        check_product_line_access(target.product_line_code, scope)
+        return current
+    initial = await binding()
+    # A waiting lock must not fetch a newly controlled body into this outlet.
+    await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id == report_id).with_for_update())
+    await lock_employee_acl(db, (user_id,))
+    current = await binding()
+    linked = await db.scalar(select(CAPAEightD.scar_ref_id).where(CAPAEightD.report_id == report_id))
+    if linked is not None:
+        raise ValueError('该 8D 已关联 SCAR')
+    if current != initial:
+        raise PermissionError('D4_MATERIAL_CHANGED')
+    capa = await db.scalar(select(CAPAEightD).where(CAPAEightD.report_id == report_id)
+        .execution_options(populate_existing=True))
 
     check_product_line_access(capa.product_line_code, scope)  # HTTPException 403
 
@@ -186,6 +201,8 @@ async def trigger_scar_from_capa(
                 },
             )
         )
+        await bump_material(db, report_id)
+        committed_binding = await binding()
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
@@ -194,4 +211,9 @@ async def trigger_scar_from_capa(
             raise ValueError("该 8D 已关联 SCAR") from e
         raise
 
-    return await scar_service.get_scar(db, scar.scar_id)
+    if await binding() != committed_binding:
+        raise PermissionError('D4_MATERIAL_CHANGED')
+    result = await scar_service.get_scar(db, scar.scar_id)
+    if await binding() != committed_binding:
+        raise PermissionError('D4_MATERIAL_CHANGED')
+    return result

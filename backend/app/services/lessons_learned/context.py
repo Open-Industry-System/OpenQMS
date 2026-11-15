@@ -15,6 +15,7 @@ class LessonsLearnedContext:
     product_line_code: str
     user_product_lines: list[str] | None  # None = admin (all PLs)
     fmea_ref_id: uuid.UUID | None = None
+    actor_id: uuid.UUID | None = None
 
     def pl_hash_for_cache(self) -> str:
         """Return a stable string for cache key hashing.

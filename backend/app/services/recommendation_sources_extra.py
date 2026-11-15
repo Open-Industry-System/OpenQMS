@@ -1,3 +1,4 @@
+from app.services.egress_guard import with_delivery_guard
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from app.models.supplier import SupplierSCAR
 from app.services import spc_service, supplier_quality_service
 from app.services.embedding_provider import EmbeddingProvider
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
+from app.services.capa_d4_material import ordinary_capa_predicate, require_legacy_context
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +426,10 @@ class SameTypeProductKBSource:
         if not query_text or not query_text.strip():
             return []
 
-        query_vector = await self.embedding.embed([query_text])
+        await require_legacy_context(self.db, context)
+        query_vector = await with_delivery_guard(lambda: require_legacy_context(self.db, context),
+            lambda: self.embedding.embed([query_text]))
+        await require_legacy_context(self.db, context)
         if not query_vector:
             return []
 
@@ -631,7 +636,10 @@ class LessonsLearnedSource:
         if not query_text or not query_text.strip():
             return []
 
-        query_vector = await self.embedding.embed([query_text])
+        await require_legacy_context(self.db, context)
+        query_vector = await with_delivery_guard(lambda: require_legacy_context(self.db, context),
+            lambda: self.embedding.embed([query_text]))
+        await require_legacy_context(self.db, context)
         if not query_vector:
             return []
 
@@ -665,6 +673,7 @@ class LessonsLearnedSource:
               AND de.factory_id = :factory_id
               AND lesson.factory_id = :factory_id
               AND capa.factory_id = :factory_id
+              AND {ordinary_capa_predicate('capa.report_id')}
               {pl_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
@@ -762,7 +771,10 @@ class KnowledgeEntrySource:
         if not query_text or not str(query_text).strip():
             return []
 
-        query_vector = await self.embedding.embed([query_text])
+        await require_legacy_context(self.db, context)
+        query_vector = await with_delivery_guard(lambda: require_legacy_context(self.db, context),
+            lambda: self.embedding.embed([query_text]))
+        await require_legacy_context(self.db, context)
         if not query_vector:
             return []
 
@@ -776,7 +788,7 @@ class KnowledgeEntrySource:
 
         # Mirror LessonsLearnedSource: de + entry factory_id; current CAPA PL only.
         stmt = text(
-            """
+            f"""
             SELECT de.id AS embedding_id,
                    de.entity_id AS entry_id,
                    de.chunk_text,
@@ -795,6 +807,7 @@ class KnowledgeEntrySource:
               AND entry.product_line_code = :pl
               AND entry.status = 'active'
               AND entry.embedding_status = 'ready'
+              AND (entry.source_type <> 'capa' OR ({ordinary_capa_predicate('entry.source_id')}))
               AND de.product_line_code = :pl
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit

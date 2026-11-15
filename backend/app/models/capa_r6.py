@@ -86,6 +86,8 @@ class CapaR6SourceOrigin(TenantBase):
         sa.Column('module', sa.String(16), nullable=False), _id('object_id'),
         sa.Column('projection_id', sa.String(160), nullable=False),
         sa.Column('version', sa.String(128), nullable=False),
+        sa.Column('source_version_counter', sa.BigInteger(), nullable=True),
+        sa.CheckConstraint("source_version_counter IS NULL OR (kind = 'fmea_projection' AND source_version_counter >= 0)", name='ck_r6_source_version_counter'),
         _id('factory_id', 'factories.id'),
         sa.Column('product_line_code', sa.String(20), nullable=False),
         _id('snapshot_id', nullable=True),

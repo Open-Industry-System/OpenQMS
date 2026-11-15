@@ -18,6 +18,7 @@ from app.models.audit import AuditLog
 from app.services.agent_runtime.r5_executor import ExecutorApproval
 
 R5_PROFILE = 'model_d5_proposal_v1'
+R6_PROFILE = 'model_d5_proposal_r6_v1'
 R5_PLUGIN_KEY = 'openqms.controlled-d5-model'
 UNAVAILABLE = 'Model deployment unavailable'
 CONFIG_FIELDS = ('deployment_id', 'name', 'version', 'tenant_generation', 'kind', 'provider',
@@ -96,8 +97,19 @@ def _approval(db):
 
 
 def _pins(db, approval):
-    return dict(policy_sha256=db.info['r5_controlled_pilot'].fingerprint(), artifact_sha256=approval.artifact_sha256, interpreter_sha256=approval.interpreter_sha256,
+    pilot = db.info['r5_controlled_pilot']
+    pins = dict(policy_sha256=pilot.fingerprint(), artifact_sha256=approval.artifact_sha256, interpreter_sha256=approval.interpreter_sha256,
         launcher_sha256=approval.launcher_sha256)
+    if pilot.profile == R6_PROFILE:
+        pins['profile'] = R6_PROFILE
+    return pins
+
+
+def deployment_profile(row):
+    profile = row.executor_pins.get('profile', R5_PROFILE)
+    if profile not in {R5_PROFILE, R6_PROFILE}:
+        raise PermissionError(UNAVAILABLE)
+    return profile
 
 
 async def register_deployment(db, actor, request):
@@ -257,8 +269,10 @@ async def send_context(db, identity, *, snapshot, messages, tools):
     from app.services.agent_runtime import runtime_access, d5_commands
     from app.services import capa_d5_proposals
     from app.services.agent import provider_adapter
+    from app.services.capa_r6_delivery import require_current_root_use
     current = await runtime_access.lock_runtime_identity(db, identity)
     d5_commands.require_r5_admission(current)
+    await require_current_root_use(db, current)
     row = await task_deployment(db, current.task, lock=True)
     resolver = db.info.get('r5_credential_resolver')
     if not callable(resolver): raise PermissionError(UNAVAILABLE)
@@ -284,10 +298,13 @@ async def send_context(db, identity, *, snapshot, messages, tools):
         # Commit released locks: reacquire and recheck the same snapshot and
         # selected recipient immediately before actual transport sends anything.
         current = await runtime_access.lock_runtime_identity(db, current)
+        await require_current_root_use(db, current)
         if snapshot is not None:
             current, _, _ = await capa_d5_proposals.validate_d5_context_for_release(db, current, snapshot=snapshot)
         await task_deployment(db, current.task, lock=True)
-        turn = await provider_adapter.chat_with_tools(client, messages, tools)
+        from app.services.egress_guard import suppress_sdk_payload_logs
+        with suppress_sdk_payload_logs():
+            turn = await provider_adapter.chat_with_tools(client, messages, tools)
         if snapshot is not None:
             await capa_d5_proposals.record_delivered_basis(db, current, snapshot=snapshot)
         db.add(AuditLog(table_name='agent_model_deployments', record_id=deployment_id,
@@ -297,12 +314,19 @@ async def send_context(db, identity, *, snapshot, messages, tools):
         result = dict(content=turn.content, tool_calls=turn.tool_calls, deployment_id=deployment_id, version=version)
         if getattr(turn, 'response_items', None) is not None:
             result['response_items'] = turn.response_items
-        return result
     except Exception:
         await db.rollback()
         raise PermissionError(UNAVAILABLE) from None
     finally:
         await client.client.close()
+    # Closing an actual transport is an await too. Historical delivery remains
+    # committed, while a revoked employee receives no derived response.
+    current = await runtime_access.refresh_runtime_identity(db, current)
+    await require_current_root_use(db, current)
+    await task_deployment(db, current.task)
+    if snapshot is not None:
+        await capa_d5_proposals.validate_d5_context_for_release(db, current, snapshot=snapshot)
+    return result
 
 
 async def project_binding(db, task):

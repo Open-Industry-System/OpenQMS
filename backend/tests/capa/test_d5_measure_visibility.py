@@ -219,7 +219,22 @@ async def test_malformed_associations_fail_closed(d5_case, malformed):
         c.db.add(task)
         await c.db.flush()
         if malformed == 'revision-report':
-            c.revision.report_id = other_report.report_id
+            from sqlalchemy import text
+            from sqlalchemy.exc import IntegrityError
+            # New R6 bindings forbid this corruption through a normal write.
+            with pytest.raises(IntegrityError, match='capa_r6_root_revision_bodies_revision_id_report_id_fkey'):
+                async with c.db.begin_nested():
+                    await c.db.execute(update(CapaD4RootCauseRevision).where(
+                        CapaD4RootCauseRevision.revision_id == c.revision.revision_id
+                    ).values(report_id=other_report.report_id))
+            # Model an imported historical broken association in this owned row
+            # only. Real authorization/reads run after normal triggers resume.
+            await c.db.execute(text('SET LOCAL session_replication_role = replica'))
+            changed = await c.db.execute(update(CapaD4RootCauseRevision).where(
+                CapaD4RootCauseRevision.revision_id == c.revision.revision_id
+            ).values(report_id=other_report.report_id))
+            assert changed.rowcount == 1
+            await c.db.execute(text('SET LOCAL session_replication_role = origin'))
         elif malformed == 'command-task':
             await c.db.execute(update(AgentD5Command).values(task_id=task.task_id))
         elif malformed == 'command-proposal':
@@ -228,7 +243,10 @@ async def test_malformed_associations_fail_closed(d5_case, malformed):
         else:
             await c.db.execute(update(AgentRun).where(AgentRun.run_id == c.run_id).values(task_id=task.task_id))
     await c.db.commit()
-    assert (await read_d5_measures(c.db, c.actors[2], c.report.report_id)).total == (1 if malformed == 'command-proposal' else 0)
+    with SQLSpy(await c.db.connection()) as spy:
+        assert (await read_d5_measures(c.db, c.actors[2], c.report.report_id)).total == (1 if malformed == 'command-proposal' else 0)
+    if malformed != 'command-proposal':
+        assert not any('final_text' in sql for sql in spy.statements)
 
 
 @pytest.mark.asyncio

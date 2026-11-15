@@ -46,7 +46,7 @@ async def test_generate_impact_analysis_done_success(db, capa_d8_gate_with_docs,
     result = await capa_doc_gate_service.generate_impact_analysis(db, capa, user.user_id)
     assert result["status"] == "done"
     analysis = await db.scalar(
-        select(CapaDocgAnalysis).where(CapaDocgAnalysis.is_current == True)
+        select(CapaDocgAnalysis).where(CapaDocgAnalysis.is_current == True, CapaDocgAnalysis.capa_id == capa.report_id)
     )
     assert analysis.status == "done"
     assert analysis.affected_docs is not None and len(analysis.affected_docs) > 0
@@ -125,7 +125,9 @@ async def test_confirm_no_affected_passes_empty_list(db, capa_with_empty_done_an
     result = await capa_doc_gate_service.confirm_no_affected(db, capa, user.user_id)
     assert result["decision"] == "passed"
     assert result["no_affected_confirmed"] is True
-    dec = (await db.execute(select(CapaDocgDecision))).scalar_one()
+    dec = (await db.execute(select(CapaDocgDecision).join(CapaDocgAnalysis,
+        CapaDocgDecision.analysis_id == CapaDocgAnalysis.analysis_id).where(
+        CapaDocgAnalysis.capa_id == capa.report_id))).scalar_one()
     assert dec.no_affected_confirmed is True
 
 

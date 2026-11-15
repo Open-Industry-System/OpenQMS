@@ -66,6 +66,11 @@ async def fetch_chunks(db: AsyncSession, events: list[dict]) -> list[dict]:
     for event in events:
         entity_type = event["entity_type"]
         entity_id = event["entity_id"]
+        from app.services.capa_d4_material import require_legacy_embedding_source
+        try:
+            await require_legacy_embedding_source(db, entity_type, entity_id)
+        except PermissionError:
+            continue
 
         if entity_type == "fmea_node":
             result = await db.execute(
@@ -377,23 +382,92 @@ async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
 
     logger.info(f"Processing {len(events)} embedding events")
 
+    parent_bindings = ()
     try:
+        from app.services.capa_d4_material import require_legacy_embedding_source
+        from app.services.embedding_outbox import delete_embeddings_for_entity
+        for event in events:
+            try:
+                await require_legacy_embedding_source(db, event['entity_type'], event['entity_id'])
+            except PermissionError:
+                await delete_embeddings_for_entity(db, event['entity_type'], event['entity_id'])
         chunks = await fetch_chunks(db, events)
         if not chunks:
             await mark_completed(db, [str(e["id"]) for e in events])
             return events
 
-        # Batch embed all chunks in a single API call
+        # Freeze server-owned input parents before any provider request. Each
+        # physical attempt/error checks a new READ COMMITTED statement snapshot.
+        from app.services.capa_d4_material import (embedding_source_report_id, material_version,
+            require_legacy_root_only, require_current_egress_statement)
+        parents = set()
+        for chunk in chunks:
+            parent = await embedding_source_report_id(db, chunk['entity_type'], chunk['entity_id'])
+            if parent is not None:
+                parents.add(parent)
+        parent_bindings = tuple([(parent, await material_version(db, parent)) for parent in sorted(parents, key=str)])
+        async def embedding_fence():
+            await require_current_egress_statement(db)
+            for parent, original in parent_bindings:
+                await require_legacy_root_only(db, parent)
+                if await material_version(db, parent) != original:
+                    raise PermissionError('SourceUnavailable')
+        from app.services.egress_guard import with_delivery_guard
         texts = [c["chunk_text"] for c in chunks]
-        vectors = await provider.embed(texts)
-
-        await upsert_embeddings(db, chunks, vectors, provider.model_name)
+        try:
+            vectors = (await with_delivery_guard(embedding_fence, lambda: provider.embed(texts))
+                if parent_bindings else await provider.embed(texts))
+        except PermissionError:
+            # No vector was accepted. Cancel newly controlled input events;
+            # unrelated changed inputs retry with metadata-only failure state.
+            cancelled = []
+            for event in events:
+                try:
+                    await require_legacy_embedding_source(db, event['entity_type'], event['entity_id'])
+                except PermissionError:
+                    await delete_embeddings_for_entity(db, event['entity_type'], event['entity_id'])
+                    cancelled.append(event['id'])
+                else:
+                    await mark_failed(db, str(event['id']), 'SourceUnavailable', event.get('retry_count', 0),
+                        event.get('max_attempts', 5), entity_type=event.get('entity_type'),
+                        entity_id=event.get('entity_id'), content_hash=event.get('content_hash'))
+            if cancelled:
+                await db.execute(update(EmbeddingSyncOutbox).where(EmbeddingSyncOutbox.id.in_(cancelled))
+                    .values(status='cancelled', last_error='SourceUnavailable', processed_at=datetime.now(UTC)))
+                await db.commit()
+            return events
+        # A network await may outlive origin inheritance. Lock report parents
+        # in one stable order before rechecking and writing ordinary copies;
+        # later inheritance then queues invalidation after this commit.
+        from sqlalchemy import select
+        from app.models.capa import CAPAEightD
+        from app.services.capa_d4_material import embedding_source_report_id
+        parents = set()
+        for chunk in chunks:
+            report_id = await embedding_source_report_id(db, chunk['entity_type'], chunk['entity_id'])
+            if report_id is not None:
+                parents.add(report_id)
+        if parents:
+            await db.execute(select(CAPAEightD.report_id).where(CAPAEightD.report_id.in_(parents))
+                .order_by(CAPAEightD.report_id).with_for_update())
+        retained, retained_vectors = [], []
+        for chunk, vector in zip(chunks, vectors):
+            try:
+                await require_legacy_embedding_source(db, chunk['entity_type'], chunk['entity_id'])
+            except PermissionError:
+                await delete_embeddings_for_entity(db, chunk['entity_type'], chunk['entity_id'])
+                continue
+            retained.append(chunk)
+            retained_vectors.append(vector)
+        await upsert_embeddings(db, retained, retained_vectors, provider.model_name)
         await mark_completed(db, [str(e["id"]) for e in events])
 
         logger.info(f"Embedded {len(chunks)} chunks from {len(events)} events")
         return events
     except Exception as e:
-        logger.error(f"Batch error: {e}", exc_info=True)
+        from app.services.egress_guard import safe_provider_error
+        error = safe_provider_error(e) if parent_bindings else e
+        logger.error("Batch error: %s", error, exc_info=not bool(parent_bindings))
         # claim_batch already committed status=processing. Roll back any
         # failed in-batch work (upsert mid-tx abort) so mark_failed can commit.
         # Pure-Python failures (e.g. provider.embed) leave the session healthy;
@@ -405,7 +479,7 @@ async def process_batch_once(db: AsyncSession, provider) -> list[dict] | None:
         for event in events:
             try:
                 await mark_failed(
-                    db, str(event["id"]), str(e),
+                    db, str(event["id"]), str(error),
                     event.get("retry_count", 0), event.get("max_attempts", 5),
                     entity_type=event.get("entity_type"),
                     entity_id=event.get("entity_id"),

@@ -40,6 +40,8 @@ def recommendation_fingerprint(
 
 
 async def _compute_current_d7_recs(db: AsyncSession, capa) -> list[dict]:
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa.report_id)
     # 复用 D7 recommend 端点的 fmea_docs 预加载方式（canonical scope: capa 自己的工厂+产品线），
     # 重算当前 D7 推荐集。record + gate 均调此函数，确保 key/hash 一致。
     from app.services.capa_service import get_d7_recommendations

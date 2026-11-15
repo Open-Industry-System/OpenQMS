@@ -12,6 +12,8 @@ from app.schemas.search import (
     SemanticSearchResponse,
 )
 from app.services.search_service import SearchService
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -40,14 +42,19 @@ async def semantic_search(
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 knowledge_graph 模块的 VIEW 权限")
     parsed_types = entity_types.split(",") if entity_types else None
-    return await service.semantic_search(
-        query=q,
-        user=user,
-        product_line_code=product_line_code,
-        product_type_code=product_type_code,
-        entity_types=parsed_types,
-        limit=limit,
-    )
+    try:
+        res = await service.semantic_search(
+            query=q,
+            user=user,
+            product_line_code=product_line_code,
+            product_type_code=product_type_code,
+            entity_types=parsed_types,
+            limit=limit,
+        )
+        await service.require_current_capa_sources(user, res.results)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_SEARCH_MATERIAL_UNAVAILABLE", headers={"Cache-Control": "no-store"}) from None
+    return JSONResponse(content=jsonable_encoder(res), headers={"Cache-Control": "no-store"})
 
 
 @router.post("/ask", response_model=QAResponse)
@@ -68,16 +75,20 @@ async def ask_question(
     if not service.embedding:
         raise HTTPException(status_code=503, detail="搜索服务未配置（无 embedding provider）")
     from app.core.tenant import tenant_schema
-    res = await service.ask(
-        question=body.question,
-        user=user,
-        tenant_schema=tenant_schema(request),
-        product_line_code=body.product_line_code,
-        product_type_code=body.product_type_code,
-        max_context_chunks=body.max_context_chunks,
-    )
-    await db.commit()
-    return res
+    try:
+        res = await service.ask(
+            question=body.question,
+            user=user,
+            tenant_schema=tenant_schema(request),
+            product_line_code=body.product_line_code,
+            product_type_code=body.product_type_code,
+            max_context_chunks=body.max_context_chunks,
+        )
+        await db.commit()
+        await service.require_current_capa_sources(user, res.sources)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_SEARCH_MATERIAL_UNAVAILABLE", headers={"Cache-Control": "no-store"}) from None
+    return JSONResponse(content=jsonable_encoder(res), headers={"Cache-Control": "no-store"})
 
 
 @router.post("/reindex", response_model=ReindexResponse)

@@ -10,15 +10,17 @@
 
 ---
 
-日期：2026-11-15。状态：**计划待复审，所有任务未执行**。基线：[已确认规格](../specs/2026-11-15-r6-d4-d5-entry-switch-design.md)，包含 `edcc3322` 的三项 P1 修订及本轮明确的四项产品决定。产品已确认、实现未完成、运行验收未发生分别记账。2026-11-15 对 `917422ec` 的三项 P1 计划反馈已作定向修订（§2.2、§2.3、Task 8），仍待计划复审，未开始 Task 1。本轮只改文档；不执行迁移、实施、入口切换、推送、合并或部署。CI 优化由另一 Agent 负责，R7 不在本计划内。
+日期：2026-11-15，执行状态更新：2026-11-16。**计划经用户授权，已从 `f03fc01b` 开始全部 Tasks 1–11。** Tasks 1/2 已实现、验证并本地提交；Task 3 实现、各分层及逐次独立规格和质量复审已通过，准备本地提交并继续 Task 4；后续任务待执行。产品已确认、实现完成与运行验收分别记账，实际结果见 [实施台账](../../development/r6-entry-switch.md)。原计划包含 `edcc3322` 的三项 P1 规格修订、四项产品决定，以及对 `917422ec` 的三项 P1 计划修订；保留这些依据，不将历史“仅文档”授权范围误用于当前已授权实施。仍不切换用户环境、不推送、合并或部署；CI 优化由另一 Agent 负责，R7 不在本计划内。
 
 ## 1. 基线、现状与执行准备
 
-- 工作树 `/Users/sam/.codex/worktrees/r6-entry-switch-design/OpenQMS`，分支 `codex/r6-entry-switch-design`；开工 HEAD `edcc3322`，工作区干净，既有文档提交保留。
-- 实时连接器核对 [PR #33](https://github.com/Open-Industry-System/OpenQMS/pull/33)：open/draft、未合并，head `75fcc51765bd3b6b739695178a399bfa01806574`；main `d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，与规格基线相同，**本轮没有集成变化引起的重排**。R5 已验证执行源码仍 `2b5530c3`；PR head 仅补文档，不能把临时 merge commit 当 main。
-- 静态解析迁移 revision/down_revision（含带类型的赋值），public 唯一 head `20261115_r5_responses`，tenant 唯一 head `tv014_r5_responses`；未连接数据库，不证明运行环境已升级。R6 新 revision 只追加，不改写历史迁移。
+- 工作树 `/Users/sam/.codex/worktrees/r6-entry-switch-design/OpenQMS`，分支 `codex/r6-entry-switch-design`；设计计划编写时 HEAD `edcc3322`，实施从获准的 `f03fc01b` 开始，保留既有文档提交和工作区。
+- 计划编写时连接器核对 [PR #33](https://github.com/Open-Industry-System/OpenQMS/pull/33)：open/draft、未合并，head `75fcc51765bd3b6b739695178a399bfa01806574`；main `d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，与规格基线相同，**本轮没有集成变化引起的重排**。R5 已验证执行源码仍 `2b5530c3`；PR head 仅补文档，不能把临时 merge commit 当 main。
+- 计划编写时静态解析迁移 revision/down_revision（含带类型的赋值），public 唯一 head `20261115_r5_responses`，tenant 唯一 head `tv014_r5_responses`；未连接数据库，不证明运行环境已升级。R6 新 revision 只追加，不改写历史迁移。
 - 本树缺根 AGENTS.md；已读主工作区同名文件及本会话替代指令、PROGRESS、维护约定、DECISIONS 与运行时路线图。CodeGraph 工具本会话不可用，使用定向文件读取；实施时若工具恢复，结构追踪优先用它。
 - 执行前再次核对 main/PR/head/工作区；若 R5 或 CI 分层改变，先列出真实 diff：迁移前驱/同构规则、测试 runner 参数/必选节点、部署协议、API/服务签名与读路径分别更新到本计划，重验受影响基线。不得直接把本计划中的前驱接到另一 head，也不得混入 CI Agent 的改动。
+
+执行复核（2026-11-16）：PR #33 仍 open/draft、head `75fcc517`；实际 main 已因独立 CI PR #36 推进到 `193746ab`。11 文件差异仅 CI、可选耗时诊断、测试和文档，无业务源码/SDK/迁移变化，任务依赖与数据合同无须重排。本树不拉入该 CI 工作；现有收据对应本树实际 runner，不声称已经验证新主线 CI，细节与原始 SHA 见台账。
 
 ### 1.1 已核对的实际入口和缺口
 
@@ -121,11 +123,13 @@ class D5Correct(BaseModel):
 | 外部 A/a@hA | 员工与每个 D4/D5 执行身份对 A 都有 FMEA VIEW、F/L 范围和明确 projection/node grant，安装/任务派生范围均包含 A/a；接收方有交付许可 | 原有 R5 支持的单节点来源范围与新鲜、完整正文覆盖声明 proof P |
 | 根因验证 | 员工对 r1 正文完成独立验证记录 V，验证正文匹配 r1，结论 passed；按正常声明服务签发 P，绑定 R/r1/V/field_hmac/A/a@hA/tenant generation，唯一 active、未失效 | P 的 `declares_complete_coverage=true` 语义不变：员工明确声明 A/a 覆盖整段正式根因，不是只覆盖部分文字。P 不宣称候选生成时所有输入快照都来自 A，K2/K3 的输入追溯与交付资格由 I 单独绑定 |
 
-D5 每次交付前需同时验证 `I + P + 当前全部权限/接收方`：K2/K3 是已知本报告输入、仅由 R 的当前读范围及精确投影授权覆盖；P 匹配唯一外部来源 A/a、当前修订与验证。已有快照可按原版本追溯，后续 D2/D3 输入改变时本轮 delivery binding 失效，重读并重新形成候选/验证，不把当前正文倒填到旧快照。集合对照必须满足 `root_origins = {K2,K3,A/a}`、`report_inputs(I)={K2,K3}`、`external_origins(root)={primary(P)}`，并核源版本；交付完成才记录 receipt，才可保存待审 D5。没有 I、损坏 I、仅 CAPA 读权而无投影交付权、接收方未批准均不得放行。
+D5 每次交付前需同时验证 `I + P + 当前全部权限/接收方`：K2/K3 是已知本报告输入、仅由 R 的当前读范围及精确投影授权覆盖；P 匹配唯一外部来源 A/a、当前修订与验证。已有快照可按原版本追溯，后续 D2/D3 输入改变时本轮 delivery binding 失效，按当前支持的候选/验证合同重新取证；完整继承集合仍不能表达有效当前证明时继续手工 D5，不移除旧限制，也不把当前正文倒填到旧快照。集合对照必须满足 `root_origins = {K2,K3,A/a}`、`report_inputs(I)={K2,K3}`、`external_origins(root)={primary(P)}`，并核源版本；交付完成才记录 receipt，才可保存待审 D5。没有 I、损坏 I、仅 CAPA 读权而无投影交付权、接收方未批准均不得放行。
 
 **必要的 R6 适配，不是已有 R5 能力**：静态源码的 `capa_d5_proposals.SOURCE_KEYS/_source` 仅接受 FMEA 坐标，不能原样装入 K2/K3。Task 1 为现有 AgentD5BasisReceipt 增加 R6 报告输入绑定 sidecar（表 `capa_r6_root_delivery_bindings`，以 receipt_id 引用，记录 r1、完整来源摘要、K2/K3 绑定和签名）；Task 3 新建带 `root_input_binding` 的 R6 签名交付 envelope，最终授权时校验 I、P 和所有源，然后原子记录原 R5 receipt 与 sidecar。不得把原 R5 的“整段根因完整覆盖”声明缩成“仅覆盖外部来源”：只有正向样例的正式全文均受 A 支持时才可如实签发 P；有 K2/K3 独立结论却不受 A 支持时，该样例不能签 P、继续阻塞交付。原 R5 proof 类型、声明语义、SOURCE_KEYS 和历史 receipt 不改写；R6 受控根因的保存/重试/历史再授权必须查 sidecar，不能只见旧 receipt 就认完整。具体模型收到什么由平台构造，插件不能补写 I 或正文。Task 4/5 把真实候选及员工确认接到这一合同，不能只用人工拼 sidecar 的夹具签收。
 
 **负向 C3-NEG**：保留 K2/K3/A，再交付第二个 FMEA 文档 B 的原因 b@hB 并追加其候选，正式根因继承 `{K2,K3,A/a,B/b}`；正常 proof 仍只能指关联 A/a（另测仅 B 权限/接收方缺 A）。即使员工对二者都有 VIEW，单主 proof 也不能覆盖两项外部来源；在取正文交给插件/模型前拒绝，受控出口捕获的 D4 字节为零、首次模型调用为零，提示手工 D5。不得把 B 重标为本报告输入，也不得去掉 A 或 K2/K3。
+
+**执行前置适配记录**：真实目录 RED 已确认原 R5 无 K2/K3 精确能力；独立技术复审采用新增默认 DENY 的快照能力及服务端显式 R6 profile，原 v1/证明/pins 兼容保留。两侧精确 object_ids、不可变部署 profile 和 sidecar 的边界见 [Task 3 台账](../../development/r6-entry-switch.md#task-3-前置技术适配实现已复审运行验收中)，仍须下述正负运行验收，不以方案复审代替。
 
 **提前否决门槛**：Task 3 必须以真实服务构造的 I/P 和可控接收器证明 C3-POS 成功、C3-NEG 零交付；Task 4/5 再经实际候选保存→员工确认→正常验证签发重跑该对样例。只有正向也通过，才进入 Task 9 的真实模型主链。若当前投影/授权接口不能构造 I，先在 Task 3 修订并复审技术适配，不以 mock 授权、删来源或延期到 Task 9 解决；四项产品决定保持不变。
 
@@ -150,7 +154,7 @@ Task 9 冻结两构建并登记 exercise_input（含已实现的测试入口）�
 
 **文件**：新增 §2 模型/Schema、上述配对迁移、`backend/tests/capa/r6_support.py`、`test_r6_support.py`、`backend/tests/migrations/test_r6_entry_contracts.py`；修改 `backend/app/models/__init__.py`、`backend/app/services/tenant_migrator.py`、`tenant_schema_diff.py` 及当前 snapshot/head 断言；新增报告输入绑定 sidecar，保持旧 R5 receipt 序列化与 proof 类型不变。
 
-- [ ] 记录解释器、资源 owner/容器/卷/租户、public/tenant 实际前驱、源码 SHA；运行已有 `make check` 与 `make check-browser` 建立当前基线，未通过先归因，不用 R5 历史统计代替。
+- [x] 记录解释器、资源 owner/容器/卷/租户、public/tenant 实际前驱、源码 SHA；运行已有 `make check` 与 `make check-browser` 建立当前基线，未通过先归因，不用 R5 历史统计代替。
 - [x] 写 RED：从空库和 R5 非空库升级均可；非空新版本拒绝 destructive downgrade；同 command/operation_key 不重复；跨报告关联和缺来源拒绝；public/tenant 同构，部分结构不被当合法前驱。
 - [x] 实现仅追加迁移与模型，参照 `test_r5_d5_delta.py` 的 `mig_db_url`、`_migration_config`、tenant migrator。来源/正文不可变关系与 FK 使用 RESTRICT；新 D4/更正表禁止原位覆写，不创建用户/部署授权。
 - [x] 创建 r6_support 场景工具：复用 `committed_runtime`，提供有 EDIT/仅 VIEW/另一 EDIT/撤权读者，报告同源与 A＋B、跨工厂/tenant，正常登录 HTTP 客户端。`case.actor(mode)` 提供当前角色与独立会话撤权操作，`case.report()` 读报告，`case.candidate()` 经 CAPA 保存待审项，`case.confirm(body, actor)` 调新确认路由，`case.measure()` 经 R5 adopt 创建版本 0，`case.correct(body, actor)` 调更正路由，`case.snapshot()` 返回正文/修订/措施/决定/审计数量供无副作用断言；仅生成已审/终态初始夹具可直接 seed，主链不借用它冒充正常流转。
@@ -165,7 +169,7 @@ cd backend
 
 **通过标准**：两链唯一 head、全新与非空升级、重复升级、同构、约束/隔离实际 passed；原始报告文本/R5采纳/旧审计逐项未改变。若迁移 runner 不接受新 head，先补当前迁移器合同而不是跳过比对。
 
-Task 1 专项实现和双复审结果见 [实施台账](../../development/r6-entry-switch.md)。完整冻结 make/browser 基线尚待结束，不勾选完整基线项。
+Task 1 专项实现和双复审结果见 [实施台账](../../development/r6-entry-switch.md)。完整冻结 make/browser 均 exit0，源身份、各层收据与日志摘要已补台账；不替代新 R6 最终全量。
 
 ### Task 2：正式 D4 来源继承与员工读取围栏（批 A）
 
@@ -201,15 +205,17 @@ Task 2 最终 203 项验证及独立双复审通过，证据与编辑令牌/审�
 
 **依赖**：Task 2；该任务是 D4 候选采纳开放前的硬前置。
 
-**文件**：修改 `capa_d5_proposals.py` build_d5_context/validate_d5_context_for_release、`agent_runtime/d4_text_delivery.py`、`model_egress.py`、`capa_draft_service.py`、`capa_ppt_service.py`、`embedding_sync_worker.py`、`embedding_backfill.py`、`search_service.py`、`knowledge_sink_service.py`、`capa_lateral_diffusion_service.py`、`capa_scar_service.py`、`capa_d7_action_service.py`、`capa_ppt_review_service.py`、`capa_doc_gate_service.py`、`recommendation_sources.py`、`recommendation_sources_extra.py`、`lessons_learned/sources/historical_capa.py`；新增 `backend/tests/capa/test_r6_d4_consumers.py`、`test_r6_draft_release.py`、`backend/tests/services/agent_runtime/test_r6_d4_delivery.py`。
+**文件**：新增 `services/capa_r6_delivery.py`、`capa_legacy_cache.py`、通用 `egress_guard.py` 与 `schemas/database_text.py`；同步精确能力目录、服务端 pilot/profile 准入、不可变部署读取及正常 CAPA 输入校验。保护直接 `api/knowledge.py` 和经 retriever 间接消费历史 CAPA 的经验/FMEA 推荐服务与缓存。追加配对来源代际迁移 `20261116_r6_source_epoch` / `tv016_r6_source_epoch`（前驱为 Task 1 两链），新增对应迁移测试并同步实际 current-head/同构检查；修改 `models/capa_r6.py` 及源新鲜度服务，保持已发布迁移不变。修改 `capa_d5_proposals.py` build_d5_context/validate_d5_context_for_release、`agent_runtime/d4_text_delivery.py`、`model_egress.py`、`capa_draft_service.py`、`log_service.py`、`dashboard_service.py`、`capa_ppt_service.py`、`embedding_sync_worker.py`、`embedding_backfill.py`、`search_service.py`、`knowledge_sink_service.py`、`capa_lateral_diffusion_service.py`、`capa_scar_service.py`、`capa_d7_action_service.py`、`capa_ppt_review_service.py`、`capa_doc_gate_service.py`、`recommendation_sources.py`、`recommendation_sources_extra.py`、`lessons_learned/sources/historical_capa.py`；新增 `backend/tests/capa/test_r6_d4_consumers.py`、`test_r6_draft_release.py`、`backend/tests/services/agent_runtime/test_r6_d4_delivery.py`。
 
-- [ ] RED：仅受限 D4/零受限 D5 的报告，各仍开放草稿步骤处于合法阶段，未许可接收方调用数为零；初次生成、同键在途等候、同 request_id 缓存命中三条返回路径中途撤权均零 content/structured_data/摘要。
-- [ ] RED：D4 A＋B、proof 仅 B，只有 B 权限的运行不可接收正文；contract 无法表达 A＋B 时全部有权也拒绝；D4/FMEA ABA、重启、每轮模型调用均重新检查。测试捕获模型实际请求而不只断言 save 失败。
-- [ ] 先冻结并写 C3-POS/C3-NEG 确定性 RED（§2.2）：前者不得因为 K2/K3 无法塞进 R5 sources 而失败，后者不得放行。实现服务端报告输入绑定 I、R6 签名 envelope、receipt sidecar 与保存/重放核对；不得用手工签名或 mock authorize 得到 GREEN。
-- [ ] 实现 `require_root_delivery`：正式修订、继承集合、proof 修订/支持范围、执行身份×安装×任务与实际接收方共同核对；R5 首片仅接受其支持的完整绑定，不能把额外继承源偷塞进已声明完整的单源 proof。返回可解释“继续手工 D5”，不提供正文。
-- [ ] 草稿构造 prompt 前核交付，结果绑定来源/修订/接收方；缓存命中前与所有 await 结束返回前复核。原进程缓存无绑定就失效；缓存持有者和同键等候者各按当前资格判断。合法调用后撤权不能撤销已交付事实，但不得再返回派生结果。
-- [ ] 无法承载限制的旧派生路径对含受限 D4 的报告拒绝，不移除来源后继续生成。受限 D4 不进入普通 embedding/search/知识副本；单调继承前遗留普通索引在有权事务中入 outbox 失效，查询阶段亦过滤，不能等异步清理完成才生效。未受限历史原行为保留。
-- [ ] 逐项核对 §1.1 和上列消费文件，记录每个出口“按来源读取/拒绝/不消费”；用 SQL/模型请求捕获与双读者响应证明。GREEN 后提交 `fix(capa): fence D4 derived content and legacy draft release`。
+- [x] RED：仅受限 D4/零受限 D5 的报告，各仍开放草稿步骤处于合法阶段，未许可接收方调用数为零；初次生成、同键在途等候、同 request_id 缓存命中三条返回路径中途撤权均零 content/structured_data/摘要。
+- [x] RED：D4 A＋B、proof 仅 B，只有 B 权限的运行不可接收正文；contract 无法表达 A＋B 时全部有权也拒绝；D4/FMEA ABA、重启、每轮模型调用均重新检查。测试捕获模型实际请求而不只断言 save 失败。
+- [x] 先冻结并写 C3-POS/C3-NEG 确定性 RED（§2.2）：前者不得因为 K2/K3 无法塞进 R5 sources 而失败，后者不得放行。实现服务端报告输入绑定 I、R6 签名 envelope、receipt sidecar 与保存/重放核对；不得用手工签名或 mock authorize 得到 GREEN。
+- [x] 实现持久 FMEA 捕获代际：新增 nullable source_version_counter，不回填旧来源；数据库统一保证图/范围修改推进 lock_version，保留业务已有递增并拒绝倒退。锁源父行后读取同一当前节点指纹/代际；多源有序锁、签名区分 NULL 与 0、当前交付/重启核对。旧缺代际来源只读历史，当前新用途失败关闭。实测正常更新及曾遗漏计数的合法写入 A→B→A、上下文重建、零外发；非空升级保留真实旧值，两链同构，任意来源 Origin 或依赖代际的 RootDeliveryBinding 非空均在首个 DDL 前禁止拆除此保护的 downgrade；包括 legacy_root、Origins=0 但已有交付 sidecar 的真实状态，拒绝后 Schema/版本/数据不变。
+- [x] 实现 `require_root_delivery`：正式修订、继承集合、proof 修订/支持范围、执行身份×安装×任务与实际接收方共同核对；R5 首片仅接受其支持的完整绑定，不能把额外继承源偷塞进已声明完整的单源 proof。返回可解释“继续手工 D5”，不提供正文。
+- [x] 草稿构造 prompt 前核交付，结果绑定来源/修订/接收方；缓存命中前与所有 await 结束返回前复核。原进程缓存无绑定就失效；缓存持有者和同键等候者各按当前资格判断。合法调用后撤权不能撤销已交付事实，但不得再返回派生结果。
+- [x] 模型格式错误的响应/审计不得包含 Pydantic input_value 等正文，保留安全 422 类别。旧 `AI_DRAFT.error` 无可靠来源绑定时，SQL 投影固定为详情未核实，异常 JSON scalar/array 不送入应用；原存储和非目标审计保留。audit 固定页 IDs/count、正文前/返回前授权不变，dashboard 只选实际返回的 metadata。以源 GET403、实际 HTTP、旧数据及 SQL 见证检查响应/审计/日志与分页撤权，不用新写入安全替代历史保护。
+- [x] 无法承载限制的旧派生路径对含受限 D4 的报告拒绝，不移除来源后继续生成。受限 D4 不进入普通 embedding/search/知识副本；单调继承前遗留普通索引在有权事务中入 outbox 失效，查询阶段亦过滤，不能等异步清理完成才生效。未受限历史原行为保留。
+- [x] 逐项核对 §1.1 和上列消费文件，记录每个出口“按来源读取/拒绝/不消费”；用 SQL/模型请求捕获与双读者响应证明。GREEN 后提交 `fix(capa): fence D4 derived content and legacy draft release`。
 
 ```bash
 cd backend
@@ -217,6 +223,8 @@ cd backend
 ```
 
 **通过标准**：C3-POS 由真实授权服务构造 I/P、可控接收器实际收到完整获准正文并形成一致 receipt/sidecar；C3-NEG 正文零交付且首次模型调用零次；缺失/损坏/旧版绑定同样拒绝。C3-POS 不通过即停止后续工作流接入，先复审技术适配。交付前拒绝用例模型调用零次；返回期撤权用例无派生正文；所有列出的导出/审核/索引/派生路径有受限 D4 反例，新任务与旧草稿都无旁路。
+
+Task 3 分层验证及逐次独立 SPEC/QUALITY 全部完成：生产目录摘要 `8db32bbb…`，原生默认 68 最终全通过；A/B/C/迁移/read-task 与增量隐私修正按各自真实运行分开登记，失败/中断仍保留，不加总冒充一次全量。完整源摘要、收据和历史错误 SQL 投影证据见 [实施台账](../../development/r6-entry-switch.md)。R6 最终全量仍在 Task 11。
 
 ### Task 4：空 D4 的持久候选生成、命令与检查点（批 B）
 
@@ -286,6 +294,7 @@ cd backend
 - [ ] **RED 正常更正**：有 EDIT 和全部来源权的同事在 D5/D6/D7_PREVENTION 更正指定 measure；API 当前文本改变，原 proposal.original_text、measure.final_text（采纳时文本）、adopted_by/at 不变；一行 revision、一份 receipt、一条更正审计与递增材料版本。空原因、越界文本、无 EDIT、错报告、伪造来源/版本均拒绝。
 - [ ] **RED 竞争与撤权**：两个独立会话读取同 measure_version/material_version 后同步提交，各用独立 key，恰好一份成功、一份 409；使用屏障强制两种先后。打开更正页后撤 EDIT/来源权，锁等待后提交亦失败，零新 revision/receipt/成功审计。成功响应丢失同 key 重试不重复，参数改变 409，撤权后重试无受限回执。
 - [ ] **RED 审核与终态**：审核人取旧 expectation；按已有 D8 驳回路径回 D7_PREVENTION，员工更正，再完成原阶段/门禁回到审核，旧 expectation 被拒；新材料包含当前文本+修订 ID/号+完整来源。D7_COMPLETED、D8_GATE_PENDING、D8_APPROVAL_PENDING 禁止直接更正；D8_CLOSURE/ARCHIVED 冻结，不增加新的退回边。已批准旧快照不被新版本改写；既有 v1 审核回执在兼容构建仍可受控读取，v1 expectation 不可批准含 R6 修订的 v2 材料。
+- [ ] **材料版本完整性**：结合 Task 3 新增来源代际，确认更正表单的材料令牌覆盖当前审阅材料及全部来源的当前版本；逐项核对 R5 采纳、D7 确认/操作、验证和文档门禁等实际材料写入，不能只比较报告主表或措施版本。来源在开页后变化时旧提交冲突；刷新并重新核对后仍可按人工更正规则处理，历史原始来源不被伪装成新证明。无变化重试不制造新材料版本。
 - [ ] **实现事务**：取元数据并做准入；锁报告、措施、完整来源父对象、员工 ACL；等待后再次读取当前身份和来源。相同 receipt 的授权重放先于期望版本检查，否则自己的成功重试会因新版本失败；receipt 不存在才比较两个预期版本并插入下一 immutable revision，递增报告材料版本、写 receipt/audit、commit。对新请求，读取当前最新更正需在锁内，unique revision_no 作为最终兜底，冲突事务完整回滚。
 - [ ] **实现当前/历史读取与材料**：`current_measure` 在完整来源资格后解析版本 0 或最新更正；普通列表/详情、导出、完整审核、派生消费者统一解析，不留直接读旧 `final_text` 的输出路径。公开 DTO 的 `final_text` 始终表示当前有效文本，增加 `current_version` 和 `adopted_text`（采纳时原文），底层 `CapaD5Measure.final_text` 仍是不可变采纳事实；不让旧 API 消费方因读取旧字段而看到过期正文；历史返回按当前来源权限过滤且 no-store。`full_d5_material` 的 text_version 纳入修订号/ID，即使当前文本 A→B→A 也不同；审核对材料版本/完整来源锁后复验。新增 v2 构建/校验分支，保留严格只读 v1 历史解析；不能直接修改全局 CONTRACT 后让旧已批准轮次失去身份。
 - [ ] **GREEN**：原 R5 adopt/withdraw/完整材料回归通过；新增更正权限、并发、审核反例与原子回执全部实际通过，精确提交 `feat(capa): version corrections to adopted restricted D5 measures`。
@@ -377,6 +386,8 @@ npm test -- --run src/pages/capa/CAPADetailPage.r6.test.tsx src/api/capa.test.ts
 ### Task 9：同一合成 8D 的完整员工、模型与浏览器链（批 E）
 
 **依赖**：Tasks 1–8；独占隔离环境、获准具体模型部署、正常员工测试身份和 provider profile 均已登记。缺少资源的场景标未执行，不能替身替代真实交付签收。
+
+**实施新查明的产品前置**：[规格 §12 本地结案草案](../specs/2026-11-15-r6-d4-d5-entry-switch-design.md#12-受限报告本地结案方案待用户确认未授权实施)待用户确认；现有强制模型分析/经验/知识/横向传播在受限报告上被正确拒绝。确认推荐项后，先补充并复审独立本地手工门禁批次，再执行本任务的正常结案；若选择继续阻塞，主链与同份已批准数据回退不能签收。原四项决定不变，不能以 seed 分析、跳过门禁、假 `done` 或忽略供应商风险正文 outbox 消除这个前置。
 
 **文件**：新增 `backend/tests/e2e/test_r6_entry_switch_process.py`、`test_r6_entry_switch_browser.py`、`test_r6_live_chain.py`、`frontend/e2e/specs/capa/r6-entry-switch.spec.ts`；复用 `tests/e2e/test_r5_d5_process.py`、`test_r5_d5_ui.py` 的启动方式和当前资源守卫，扩展 `backend/tests/capa/r6_support.py`。新增用例归现有层，必选清单接口与 CI 负责 Agent 协调，不顺手重构 runner。
 

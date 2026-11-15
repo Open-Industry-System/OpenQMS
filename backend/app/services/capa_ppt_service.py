@@ -58,6 +58,13 @@ def _format_team_member(m) -> str:
 
 async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) -> PptContent:
     """从落库数据组装 PptContent（不渲染 pptx）。"""
+    from app.services.capa_d4_material import read_root, require_legacy_root_only
+    if scope is None:
+        await require_legacy_root_only(db, capa_id)
+    else:
+        await read_root(db, scope.user.user_id, capa_id)
+    from app.services.capa_d4_material import material_version
+    root_version = await material_version(db, capa_id)
     capa = await db.get(CAPAEightD, capa_id)
     if capa is None:
         raise ValueError("CAPA 不存在")
@@ -135,6 +142,12 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) 
     # Later material queries may wait after the initial D5 projection.
     if material != await full_d5_material(db, capa, scope=scope):
         raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    if scope is None:
+        await require_legacy_root_only(db, capa_id)
+    else:
+        await read_root(db, scope.user.user_id, capa_id)
+    if root_version != await material_version(db, capa_id):
+        raise PermissionError('D4_FULL_MATERIAL_UNAVAILABLE')
     return PptContent(
         capa_id=capa_id, pages=pages,
         linked_fmea_node=linked_fmea_node, linked_scars=linked_scars,

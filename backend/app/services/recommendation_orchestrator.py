@@ -83,7 +83,7 @@ class RecommendationOrchestrator:
     def __init__(self, db, pc, embedding_provider, llm_timeout: float | None = None):
         self.db = db; self.pc = pc; self.embedding = embedding_provider
         self.fusion = FusionEngine()
-        self.llm_layer = LLMFusionLayer(pc, timeout=llm_timeout)
+        self.llm_layer = LLMFusionLayer(pc, timeout=llm_timeout, db=db)
         self.d5_control_expander = FMEAControlExpander()   # D5 stage 2 派生处理器（决策 15）
         self._sources = self._build_sources()   # source_kind -> instance（D5 stage 2 不在此列，派生）
         # R10-修复：不在构造时 fail-fast 校验协议——避免单源配置错误导致所有 D4/D5 请求硬失败（含 D4-only 源本应 skipped 的 D5 请求）。
@@ -144,9 +144,12 @@ class RecommendationOrchestrator:
         return violations
 
     async def run(self, context, *, user, report_id, factory_id, tenant_schema) -> RecommendationResult:
+        from app.services.capa_d4_material import legacy_recommendation_binding
+        initial_binding = await legacy_recommendation_binding(self.db, user, report_id)
         # 顶部 BLOCKED 判定（AI_REQUIRED=true，故事契约不可降级）
         if self.pc is None:
             return RecommendationResult(items=[], stages=self._blocked_stages(), blocked=True)
+        context.actor_id, context.material_version = user.user_id, initial_binding
 
         stages: list[StageRun] = []
         all_candidates: list[RecommendationCandidate] = []
@@ -190,11 +193,14 @@ class RecommendationOrchestrator:
                     logger.warning(f"D5 stage 2 FMEAControlExpander failed: {e}")
                     stages.append(StageRun(2, spec.name, "fmea_graph", "error", error=str(e)[:200]))
 
+        from app.services.capa_d4_material import capture_legacy_candidate_bindings, require_legacy_candidate_bindings
+        source_bindings = await capture_legacy_candidate_bindings(self.db, all_candidates, actor=user)
         # ── Fusion（既有序：fusion 在 LLM 之前，R2-修复顺序）──
         fused = self.fusion.merge(all_candidates, context)
 
         # ── Stage 11 LLM enrich over FUSED（不是 raw，保既有合约，R2-修复）──
         spec11 = next(s for s in STAGE_PLAN if s.index == 11)
+        await require_legacy_candidate_bindings(self.db, source_bindings, actor=user)
         stage11, enriched = await self._exec_llm_stage(spec11, fused, context)
         stages.append(stage11)
         fused = enriched   # LLM 增强后的 fused 集
@@ -205,7 +211,10 @@ class RecommendationOrchestrator:
 
         # 按 index 排序，保证显示顺序 1..12
         stages.sort(key=lambda s: s.index)
-        return RecommendationResult(items=fused, stages=stages)
+        if initial_binding != await legacy_recommendation_binding(self.db, user, report_id):
+            raise PermissionError('D4_RECOMMENDATION_MATERIAL_CHANGED')
+        await require_legacy_candidate_bindings(self.db, source_bindings, actor=user)
+        return RecommendationResult(items=fused, stages=stages, source_bindings=source_bindings)
 
     def _blocked_stages(self) -> list[StageRun]:
         """pc=None 时构造 12 行结构化 BLOCKED 状态（stage 1 done、stage 11 blocked、其余 skipped）。"""
@@ -377,6 +386,8 @@ class RecommendationOrchestrator:
         return cands
 
     async def _exec_llm_stage(self, spec, fused, context) -> tuple[StageRun, list[RecommendationCandidate]]:
+        from app.services.capa_d4_material import require_legacy_context
+        await require_legacy_context(self.db, context)
         # LLM enrich over FUSED 集（保既有 fusion→LLM 顺序，R2-修复）；返回 (StageRun, 增强后候选)
         if self.pc is None:
             return StageRun(spec.index, spec.name, "llm", "skipped", summary="未配置 LLM",
@@ -397,6 +408,8 @@ class RecommendationOrchestrator:
                             hit_count=len(returned_cands),
                             summary=f"attempted={outcome.attempted} succeeded={outcome.succeeded} failed={outcome.failed}",
                             llm_attempted=outcome.attempted, llm_succeeded=outcome.succeeded, llm_failed=outcome.failed), returned_cands
+        except PermissionError:
+            raise
         except Exception as e:
             # R3+R4+R5-修复：LLMFusionLayer.enrich 已硬化为 catch-all（见下），正常不会抛——此 except 仅兜底
             # 意外的非 LLM 调用错误（如 prompt 构造 bug），此时无 provider 调用完成，attempted=0 诚实，不审计。

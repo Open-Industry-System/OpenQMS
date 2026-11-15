@@ -115,7 +115,7 @@ def _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grant
             continue
         spec = get_capability(plugin_grant.capability_id, profile=profile)
         if (plugin_grant.capability_id not in declared or not plugin_grant.enabled
-                or spec is None or (spec.kind != 'context' and not (profile == 'model_d5_proposal_v1' and spec.kind == 'command'))
+                or spec is None or (spec.kind != 'context' and not (profile in {'model_d5_proposal_v1', 'model_d5_proposal_r6_v1'} and spec.kind == 'command'))
                 or spec.approval_floor != ApprovalFloor.DIRECT):
             continue
         try:

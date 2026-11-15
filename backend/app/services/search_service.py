@@ -11,6 +11,7 @@ from app.config import settings
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.models.user import User
 from app.schemas.search import QAResponse, QASource, SearchResultItem, SemanticSearchResponse
+from app.services.capa_d4_material import ordinary_capa_predicate
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,12 @@ class SearchService:
     def __init__(self, db: AsyncSession, embedding_provider=None):
         self.db = db
         self.embedding = embedding_provider
+
+    async def require_current_capa_sources(self, user, sources):
+        from app.services.capa_d4_material import legacy_capa_read_binding
+        for source in sources:
+            if source.entity_type == 'capa':
+                await legacy_capa_read_binding(self.db, user, source.entity_id)
 
     async def _get_user_product_lines(self, user: User) -> list[str] | None:
         """Get product lines the user has access to. Returns None for admin (all)."""
@@ -162,6 +169,7 @@ class SearchService:
             return SemanticSearchResponse(results=[], total=0, query_time_ms=elapsed)
 
         filters.append("entity_type = ANY(:entity_types)")
+        filters.append(f"(entity_type <> 'capa' OR ({ordinary_capa_predicate('entity_id')}))")
         params["entity_types"] = allowed
 
         where_clause = " AND ".join(filters) if filters else "TRUE"
@@ -233,6 +241,9 @@ class SearchService:
         results = []
         for item_id in sorted_ids:
             item = item_map[item_id]
+            if item['entity_type'] == 'capa':
+                from app.services.capa_d4_material import legacy_capa_read_binding
+                await legacy_capa_read_binding(self.db, user, item['entity_id'])
             item["score"] = round(scores[item_id], 4)
             results.append(SearchResultItem(**item))
 
@@ -284,8 +295,17 @@ class SearchService:
                 chunk_text=r.chunk_text,
                 relevance_score=r.score,
             ))
+        from app.services.capa_d4_material import legacy_capa_read_binding
+        bindings = {str(source.entity_id): await legacy_capa_read_binding(self.db, user, source.entity_id)
+                    for source in sources if source.entity_type == 'capa'}
+        async def check_sources():
+            for source in sources:
+                if source.entity_type == 'capa' and bindings[str(source.entity_id)] != await legacy_capa_read_binding(
+                        self.db, user, source.entity_id):
+                    raise PermissionError('D4_SEARCH_MATERIAL_CHANGED')
 
         if pc is None:
+            await check_sources()
             elapsed = int((time.monotonic() - start) * 1000)
             answer_parts = ["未配置 LLM，无法生成智能回答。以下是相关搜索结果：\n"]
             for i, s in enumerate(sources, 1):
@@ -318,6 +338,7 @@ class SearchService:
 {{"answer": "你的回答内容"}}"""
 
         try:
+            await check_sources()
             rag_schema = {
                 "type": "object",
                 "properties": {
@@ -325,7 +346,9 @@ class SearchService:
                 },
                 "required": ["answer"],
             }
-            llm_response = await provider_adapter.complete_json(pc, prompt, rag_schema)
+            llm_response = await provider_adapter.with_delivery_guard(check_sources,
+                lambda: provider_adapter.complete_json(pc, prompt, rag_schema))
+            await check_sources()
             answer = llm_response.get("answer", "生成回答失败。")
             await self._write_rag_audit(
                 user=user,
@@ -335,7 +358,10 @@ class SearchService:
                 status="success",
                 model=pc.model,
             )
+        except PermissionError:
+            raise
         except Exception as e:
+            await check_sources()
             logger.error(f"LLM call failed: {e}")
             answer = f"LLM 调用失败: {e}"
             await self._write_rag_audit(
@@ -348,6 +374,7 @@ class SearchService:
                 error=str(e),
             )
 
+        await check_sources()
         elapsed = int((time.monotonic() - start) * 1000)
         return QAResponse(
             answer=answer,

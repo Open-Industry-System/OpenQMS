@@ -150,6 +150,16 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
     if baseline_only or predecessor is not None:
+        epoch_objects = {('column', 'capa_r6_source_origins.source_version_counter'),
+            ('constraint', 'capa_r6_source_origins.ck_r6_source_version_counter'),
+            ('trigger', 'fmea_documents.r6_fmea_source_epoch'),
+            ('function', 'r6_fmea_source_epoch()')}
+        reference = {key: value for key, value in reference.items() if key not in epoch_objects}
+    if predecessor == 'tv015_r6_entry_contracts':
+        # This predecessor already owns ALL R6 contracts. Only the new epoch
+        # delta is absent; partial tenant deltas remain visible and fail closed.
+        predecessor = None
+    if baseline_only or predecessor is not None:
         # Reviewed R6 additions are filtered only from the canonical reference.
         # A historical tenant with even one partial R6 object remains different.
         r6_tables = {'capa_r6_material_versions', 'capa_r6_entry_switches', 'capa_r6_report_snapshots',

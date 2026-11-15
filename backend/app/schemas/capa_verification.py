@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from app.schemas.agent_d4_text import SourceDeclaration
 
 
-class AdoptRequest(BaseModel):
+from app.schemas.database_text import DatabaseTextInput
+
+class AdoptRequest(DatabaseTextInput):
     d_step: Literal["d4", "d5"]
     adopted_text: str
     source: str
@@ -20,7 +22,7 @@ class AdoptResponse(BaseModel):
     field_value: str
 
 
-class VerificationCreate(BaseModel):
+class VerificationCreate(DatabaseTextInput):
     model_config = ConfigDict(extra="forbid")
     root_cause_text: str
     method: Literal["measurement", "observation", "reproduction"] | None = None
@@ -40,7 +42,7 @@ class VerificationCreate(BaseModel):
         return v.strip()
 
 
-class VerificationUpdate(BaseModel):
+class VerificationUpdate(DatabaseTextInput):
     model_config = ConfigDict(extra="forbid")
     method: Literal["measurement", "observation", "reproduction"] | None = None
     result: str | None = None
@@ -69,7 +71,7 @@ class VerificationCreatedResponse(VerificationResponse):
     source_proof_issued: bool = False
 
 
-class D7NodeActionCreate(BaseModel):
+class D7NodeActionCreate(DatabaseTextInput):
     action: Literal["confirmed", "skipped"]
     fmea_id: uuid.UUID | None = None  # 规则引擎兜底推荐无关联 FMEA
     failure_mode_node_id: str  # FMEA 节点 id 或合成 key（rule:<hash>）
@@ -78,7 +80,7 @@ class D7NodeActionCreate(BaseModel):
     reason: str | None = None
 
 
-class D7AutoFillRequest(BaseModel):
+class D7AutoFillRequest(DatabaseTextInput):
     fmea_id: uuid.UUID | None = None
     failure_mode_node_id: str
     failure_cause_node_id: str

@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit import AuditLog
@@ -23,7 +23,20 @@ async def list_audit_logs(db: AsyncSession, filters: dict[str, Any], page: int, 
     operated_by = filters.get("operated_by")  # username
     start, end = _bounds(filters)
 
-    stmt = select(AuditLog, User.username).outerjoin(User, AuditLog.operated_by == User.user_id)
+    # Unbound historical draft errors can echo FMEA input. Project in SQL;
+    # preserve the original record at rest without reading that freeform text.
+    unverified = func.jsonb_build_object('error', '历史错误详情未核实',
+        'error_code', 'DRAFT_ERROR_DETAILS_UNVERIFIED')
+    object_fields = case((AuditLog.changed_fields['error'].astext.is_not(None),
+        AuditLog.changed_fields.op('-')('error').op('||')(unverified)), else_=AuditLog.changed_fields)
+    draft_fields = case((func.jsonb_typeof(AuditLog.changed_fields) == 'object', object_fields),
+        else_=unverified)
+    projected_fields = case((AuditLog.action == 'AI_DRAFT', draft_fields),
+        else_=AuditLog.changed_fields).label('changed_fields')
+    stmt = select(AuditLog.log_id, AuditLog.table_name, AuditLog.record_id, AuditLog.action,
+        projected_fields, AuditLog.old_values, AuditLog.new_values, AuditLog.ip_address,
+        AuditLog.operated_at, User.username.label('username')).outerjoin(
+            User, AuditLog.operated_by == User.user_id)
     if table_name:
         stmt = stmt.where(AuditLog.table_name == table_name)
     if action:
@@ -59,13 +72,13 @@ async def list_audit_logs(db: AsyncSession, filters: dict[str, Any], page: int, 
     )).all()
 
     items = []
-    for log, username in rows:
+    for log in rows:
         items.append({
             "log_id": str(log.log_id),
             "table_name": log.table_name,
             "record_id": str(log.record_id),
             "action": log.action,
-            "operated_by": username,
+            "operated_by": log.username,
             "ip_address": log.ip_address,
             "operated_at": log.operated_at.isoformat() if log.operated_at else None,
             "changed_fields": log.changed_fields,

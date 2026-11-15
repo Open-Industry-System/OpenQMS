@@ -93,16 +93,21 @@ class ControlledPilot:
     plugin_version: str
     platform_port: int
     expires_at: object
+    profile: str = 'model_d5_proposal_v1'
 
     def fingerprint(self):
         from dataclasses import asdict
         data=asdict(self)
+        if self.profile == 'model_d5_proposal_v1':
+            data.pop('profile')
         data['approval']={key:str(value) for key,value in data['approval'].items()}
         return hashlib.sha256(json.dumps(data,sort_keys=True,default=str,separators=(',',':')).encode()).hexdigest()
 
     def verify(self, binding, installation):
         from datetime import UTC, datetime
         from app.core.tenant_transaction import TenantBinding
+        if self.profile not in {'model_d5_proposal_v1', 'model_d5_proposal_r6_v1'}:
+            raise PermissionError('Controlled executor unavailable')
         self.approval.verify()
         if (not isinstance(binding, TenantBinding) or binding.mode != 'business'
                 or binding.tenant_id != self.tenant_id or binding.generation != self.tenant_generation
@@ -195,7 +200,10 @@ def load_controlled_pilot(path, *, enabled, runtime_enabled, tenant_mode):
         data=json.loads(_read_policy(path),object_pairs_hook=_unique_keys)
         expected={'schema_version','artifact','artifact_sha256','interpreter','interpreter_sha256','launcher_sha256',
             'tenant_id','tenant_generation','installation_id','credential_epoch','plugin_version','platform_port','expires_at'}
-        if set(data)!=expected or type(data['schema_version']) is not int or data['schema_version']!=1:
+        if (type(data.get('schema_version')) is not int
+                or not (data['schema_version'] == 1 and set(data) == expected
+                    or data['schema_version'] == 2 and set(data) == expected | {'profile'}
+                    and data['profile'] == 'model_d5_proposal_r6_v1')):
             return None
         for name in ('tenant_generation','credential_epoch','platform_port'):
             if type(data[name]) is not int or data[name]<0: return None
@@ -207,7 +215,8 @@ def load_controlled_pilot(path, *, enabled, runtime_enabled, tenant_mode):
             Path(data['interpreter']).resolve(strict=True),data['interpreter_sha256'],data['launcher_sha256'])
         approval.verify()
         return ControlledPilot(approval,UUID(data['tenant_id']),data['tenant_generation'],UUID(data['installation_id']),
-            data['credential_epoch'],data['plugin_version'],data['platform_port'],expiry)
+            data['credential_epoch'],data['plugin_version'],data['platform_port'],expiry,
+            profile=data.get('profile', 'model_d5_proposal_v1'))
     except (OSError,ValueError,TypeError,KeyError,PermissionError):
         return None
 

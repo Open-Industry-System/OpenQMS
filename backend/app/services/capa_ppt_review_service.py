@@ -85,12 +85,22 @@ async def review_and_correct(
     db: AsyncSession, capa_id: uuid.UUID, pc, tenant_schema: str, *, scope=None,
 ) -> tuple[PptContent, ReviewResult]:
     """生成 → 审查 → 校正闭环，3 轮上限。pc=None 表示 LLM 未配置。返回 (content, review)。"""
+    from app.services.capa_d4_material import authorize_root, require_legacy_root_only, material_version
+    from app.services.capa_d5_measures import require_legacy_d5_only
+    root_version = await material_version(db, capa_id)
+    async def fence():
+        if pc is not None:
+            await require_legacy_d5_only(db, capa_id)
+        if scope is None:
+            await require_legacy_root_only(db, capa_id)
+        else:
+            await authorize_root(db, scope.user.user_id, capa_id)
+        if root_version != await material_version(db, capa_id):
+            raise PermissionError('D4_FULL_MATERIAL_UNAVAILABLE')
+    await fence()
     capa = await capa_service.get_capa(db, capa_id)
     if capa is None:
         raise ValueError("CAPA 不存在")
-    from app.services.capa_d5_measures import require_legacy_d5_only
-    if pc is not None:
-        await require_legacy_d5_only(db, capa_id)
     content = await capa_ppt_service.generate_content(db, capa_id, scope=scope)
 
     # 1. 内置规则校验（不耗 LLM 轮次）
@@ -103,14 +113,17 @@ async def review_and_correct(
     # 残留规则 issues = 结构/数据缺口，校正（重新查数据，§46）无法补全 → needs_review 并暴露报告；
     # 不静默 skipped，也不耗 LLM 轮次（数据缺失 LLM 亦无法修复，跑 3 轮等同空耗）。
     if rule_issues:
+        await fence()
         return content, ReviewResult("needs_review", 0, {"issues": rule_issues, "suggestions": []})
 
     # 2. 无规则 issues：LLM 未配置 → 跳过 sub-agent 审查
     if pc is None:
+        await fence()
         return content, ReviewResult("skipped", 0, None)
 
     # 3. LLM 审查闭环（3 轮上限）
     skill = await agent_review_skill_service.get_by_name(db, tenant_schema, "capa_ppt_review")
+    await fence()
     if skill is None:
         # skill 未配置/未 seed —— 不掩盖成 "LLM 调用异常"，直接报具体配置问题
         return content, ReviewResult("needs_review", 0, {
@@ -122,7 +135,9 @@ async def review_and_correct(
     for round_idx in range(1, 4):
         # 审查闭环异常（超时/鉴权/响应格式）属故事 §92 FAILED 条件，不在此吞掉降级为 needs_review；
         # 让异常上抛，由 API 层转为 500。LLM 未配置（ProviderNotConfigured）已在 API 层 pc=None 处理为 skipped。
-        review = await _subagent_review(pc, skill, content)
+        await fence()
+        review = await provider_adapter.with_delivery_guard(fence, lambda: _subagent_review(pc, skill, content))
+        await fence()
         last_report = review.report
         if review.passed:
             if corrected:
@@ -135,7 +150,10 @@ async def review_and_correct(
                 return content, ReviewResult("needs_review", round_idx, last_report)
             return content, ReviewResult("passed", round_idx, last_report)
         if round_idx < 3:
-            corrected_content = await _correct_by_suggestions(pc, skill, content, review.suggestions)
+            await fence()
+            corrected_content = await provider_adapter.with_delivery_guard(fence,
+                lambda: _correct_by_suggestions(pc, skill, content, review.suggestions))
+            await fence()
             # 仅当校正产生了「新内容且通过规则校验」才采用并标记 corrected（回退原内容不计）
             if corrected_content is not content and not capa_ppt_service._validate_ppt_content(corrected_content, capa):
                 content = corrected_content
@@ -246,5 +264,7 @@ async def _correct_by_suggestions(pc, skill, content, suggestions) -> PptContent
     """
     try:
         return await _subagent_correct(pc, skill, content, suggestions)
+    except PermissionError:
+        raise
     except Exception:
         return content

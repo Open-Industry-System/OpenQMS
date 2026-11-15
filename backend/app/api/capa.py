@@ -393,10 +393,13 @@ async def capa_capabilities(
     }
 
 
-async def _authorize_capa_root(db, scope, report_id):
-    from app.services.capa_d4_material import authorize_root
+async def _authorize_capa_root(db, scope, report_id, *, allow_controlled=True):
+    from app.services.capa_d4_material import authorize_root, require_legacy_root_only
     try:
-        return await authorize_root(db, scope.user.user_id, report_id)
+        authority = await authorize_root(db, scope.user.user_id, report_id)
+        if not allow_controlled:
+            await require_legacy_root_only(db, report_id)
+        return authority
     except PermissionError:
         raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     except LookupError:
@@ -559,6 +562,8 @@ async def trigger_scar(
             due_date=body.due_date,
             affected_batches=body.affected_batches,
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -758,6 +763,8 @@ async def advance_capa(
         raise HTTPException(status_code=403, detail="CAPA_OUTCOME_REVIEW_ACCESS_DENIED")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     except KnowledgeSinkBlockedError as e:
         raise HTTPException(
             status_code=422,
@@ -956,7 +963,7 @@ async def get_d4_fmea_recommendations(
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    await _authorize_capa_root(db, scope, report_id)
+    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1018,14 +1025,23 @@ async def get_d4_fmea_recommendations(
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(
-        context,
-        user=scope.user,
-        report_id=report_id,
-        factory_id=capa.factory_id,
-        tenant_schema=tenant_schema(request),
-    )
+    try:
+        result = await pipeline.recommend(
+            context,
+            user=scope.user,
+            report_id=report_id,
+            factory_id=capa.factory_id,
+            tenant_schema=tenant_schema(request),
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     await db.commit()
+    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
+    from app.services.capa_d4_material import require_legacy_candidate_bindings
+    try:
+        await require_legacy_candidate_bindings(db, result.source_bindings, actor=scope.user)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     if result.blocked:
         raise HTTPException(
             status_code=422,
@@ -1052,7 +1068,7 @@ async def get_d5_fmea_recommendations(
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    await _authorize_capa_root(db, scope, report_id)
+    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1114,14 +1130,23 @@ async def get_d5_fmea_recommendations(
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(
-        context,
-        user=scope.user,
-        report_id=report_id,
-        factory_id=capa.factory_id,
-        tenant_schema=tenant_schema(request),
-    )
+    try:
+        result = await pipeline.recommend(
+            context,
+            user=scope.user,
+            report_id=report_id,
+            factory_id=capa.factory_id,
+            tenant_schema=tenant_schema(request),
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     await db.commit()
+    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
+    from app.services.capa_d4_material import require_legacy_candidate_bindings
+    try:
+        await require_legacy_candidate_bindings(db, result.source_bindings, actor=scope.user)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     if result.blocked:
         raise HTTPException(
             status_code=422,
@@ -1229,12 +1254,16 @@ async def get_capa_lessons(
 
     embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
-    result = await service.recommend(
-        report_id, "capa", req.problem_description if req else None, scope.user,
-        skip_fmea_sources=not has_fmea_view,
-    )
-    await db.commit()
-    return result
+    try:
+        result = await service.recommend(
+            report_id, "capa", req.problem_description if req else None, scope.user,
+            skip_fmea_sources=not has_fmea_view,
+        )
+        await db.commit()
+        await service.require_current_release()
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE", headers={'Cache-Control': 'no-store'}) from None
+    return JSONResponse(content=jsonable_encoder(result), headers={'Cache-Control': 'no-store'})
 
 
 @router.post("/{report_id}/adopt-recommendation", response_model=AdoptResponse)
@@ -1443,6 +1472,8 @@ async def sink_knowledge(
     try:
         entry = await sink_capa_on_close(db, capa, scope.user.user_id, manual=True)
         await db.commit()
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     except KnowledgeSinkBlockedError as e:
         raise HTTPException(
             status_code=422,
@@ -1505,10 +1536,10 @@ async def export_ppt(
 
     # 审查闭环 + 渲染：审查闭环异常（非 LLM 缺失）/ 渲染失败均属故事 §92 FAILED 条件 → 500，不落 export
     try:
-        from app.services.capa_d5_measures import _formal_ids
-        kwargs = {'scope': scope} if await _formal_ids(db, report_id) else {}
+        from app.services.capa_d4_material import material_version
+        export_material_version = await material_version(db, report_id)
         content, review = await capa_ppt_review_service.review_and_correct(
-            db, report_id, pc, tenant, **kwargs,
+            db, report_id, pc, tenant, scope=scope,
         )
         # 最终渲染一次（审查后 review_status 已知）
         meta = capa_ppt_service.ExportMeta(
@@ -1539,7 +1570,11 @@ async def export_ppt(
     ))
     await db.commit()
 
+    await _authorize_capa_root(db, scope, report_id)
+    if await material_version(db, report_id) != export_material_version:
+        raise HTTPException(403, "D4_MATERIAL_UNAVAILABLE")
     headers = {
+        "Cache-Control": "no-store",
         "X-PPT-Review-Status": review.status,
         "X-PPT-Review-Rounds": str(review.rounds),
         "X-PPT-Export-Id": str(export_id),

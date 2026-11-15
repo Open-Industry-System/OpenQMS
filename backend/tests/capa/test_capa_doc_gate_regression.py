@@ -530,6 +530,8 @@ async def test_version_creation_waits_for_waiver_decision_commit(sessionmaker):
             writer_task.cancel()
             await asyncio.gather(writer_task, return_exceptions=True)
         async with sessionmaker() as cleanup:
+            # LOCAL teardown privilege applies only to fixture-owned rows below.
+            await cleanup.execute(text("SET LOCAL session_replication_role = replica"))
             await cleanup.execute(text(
                 "ALTER TABLE control_plan_versions DISABLE TRIGGER trg_cp_version_no_update"
             ))
@@ -540,6 +542,7 @@ async def test_version_creation_waits_for_waiver_decision_commit(sessionmaker):
                 "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
                 "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
                 "DELETE FROM control_plans WHERE cp_id=:cpid",
+                "DELETE FROM capa_r6_material_versions WHERE report_id=:cid",
                 "DELETE FROM capa_eightd WHERE report_id=:cid",
                 "DELETE FROM users WHERE user_id=:uid",
                 "DELETE FROM role_definitions WHERE id=:rid",
@@ -637,9 +640,12 @@ async def test_gate_waits_for_concurrent_latest_decision_writer(sessionmaker):
             gate_task.cancel()
             await asyncio.gather(gate_task, return_exceptions=True)
         async with sessionmaker() as cleanup:
+            # LOCAL teardown privilege applies only to fixture-owned rows below.
+            await cleanup.execute(text("SET LOCAL session_replication_role = replica"))
             for statement in (
                 "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
                 "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM capa_r6_material_versions WHERE report_id=:cid",
                 "DELETE FROM capa_eightd WHERE report_id=:cid",
                 "DELETE FROM product_lines WHERE code=:plcode",
                 "DELETE FROM users WHERE user_id=:uid",
@@ -836,6 +842,8 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
             return_exceptions=True,
         )
         async with sessionmaker() as cleanup:
+            # LOCAL teardown privilege applies only to fixture-owned rows below.
+            await cleanup.execute(text("SET LOCAL session_replication_role = replica"))
             await cleanup.execute(text(
                 "ALTER TABLE control_plan_versions DISABLE TRIGGER trg_cp_version_no_update"
             ))
@@ -846,6 +854,7 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
                 "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
                 "DELETE FROM control_plan_versions WHERE cp_id=:cpid",
                 "DELETE FROM control_plans WHERE cp_id=:cpid",
+                "DELETE FROM capa_r6_material_versions WHERE report_id=:cid",
                 "DELETE FROM capa_eightd WHERE report_id=:cid",
                 "DELETE FROM user_product_lines WHERE user_id=:uid",
                 "DELETE FROM user_factories WHERE user_id=:uid",
@@ -1000,11 +1009,14 @@ async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
             return_exceptions=True,
         )
         async with sessionmaker() as cleanup:
+            # LOCAL teardown privilege applies only to fixture-owned rows below.
+            await cleanup.execute(text("SET LOCAL session_replication_role = replica"))
             for statement in (
                 "DELETE FROM audit_logs WHERE operated_by=:uid",
                 "DELETE FROM control_plans WHERE document_no=:cpdoc",
                 "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
                 "DELETE FROM capa_docg_analysis WHERE analysis_id=:aid",
+                "DELETE FROM capa_r6_material_versions WHERE report_id=:cid",
                 "DELETE FROM capa_eightd WHERE report_id=:cid",
                 "DELETE FROM user_product_lines WHERE user_id=:uid",
                 "DELETE FROM user_factories WHERE user_id=:uid",
@@ -1106,6 +1118,8 @@ async def test_control_plan_move_into_candidate_scope_waits_for_scope_lock(
             writer_task.cancel()
             await asyncio.gather(writer_task, return_exceptions=True)
         async with sessionmaker() as cleanup:
+            # LOCAL teardown privilege applies only to fixture-owned rows below.
+            await cleanup.execute(text("SET LOCAL session_replication_role = replica"))
             for statement in (
                 "DELETE FROM audit_logs WHERE operated_by=:uid",
                 "DELETE FROM control_plans WHERE cp_id=:cpid",

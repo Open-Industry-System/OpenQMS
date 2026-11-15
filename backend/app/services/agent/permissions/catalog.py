@@ -29,6 +29,12 @@ def get_capability(id: str, *, profile: str = "baseline") -> CapabilitySpec | No
         if id in {'capa.d4.root_cause_candidate.masked.v1', 'capa.d5.proposal.save.v1', 'capa.d5.proposal.replace.v1'}:
             return replace(CAPA_CAPABILITIES[id], approval_floor=ApprovalFloor.DIRECT)
         return None
+    if profile == 'model_d5_proposal_r6_v1':
+        if id in {'capa.d2.snapshot.v1', 'capa.d3.snapshot.v1',
+                  'capa.d4.root_cause_candidate.masked.v1',
+                  'capa.d5.proposal.save.v1', 'capa.d5.proposal.replace.v1'}:
+            return replace(CAPA_CAPABILITIES[id], approval_floor=ApprovalFloor.DIRECT)
+        return None
     if profile == TEXT_PROFILE:
         return _LOCAL_TEXT_CAPABILITIES.get(id)
     return None

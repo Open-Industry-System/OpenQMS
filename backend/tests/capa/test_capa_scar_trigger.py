@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.deps import get_current_user, get_db, get_request_scope
 from app.core.factory_scope import FactoryScope, ProductLineScope
@@ -1086,6 +1086,8 @@ async def _committed_scar_trigger_fixtures(sessionmaker):
         )
         s.add(user)
         await s.flush()
+        s.add(RolePermission(role_id=role.id, module=Module.CAPA, permission_level=PermissionLevel.EDIT))
+        await s.flush()
         supplier = Supplier(
             supplier_id=uuid.uuid4(),
             supplier_no=f"SUP-ST-{factory_id.hex[:8]}",
@@ -1121,9 +1123,12 @@ async def _committed_scar_trigger_fixtures(sessionmaker):
 async def _teardown_committed_fixtures(sessionmaker, fx, *, extra_scar_ids=None, extra_capa_ids=None):
     """Delete committed rows in FK-safe order so concurrent tests don't pollute the shared DB."""
     async with sessionmaker() as s:
+        # Only this fixture-owned cleanup transaction may remove immutable history.
+        await s.execute(text("SET LOCAL session_replication_role = replica"))
         from sqlalchemy import delete as sa_delete
         from app.models.supplier import SupplierSCAR
         from app.models.audit import AuditLog
+        from app.models.capa_r6 import CapaR6MaterialVersion
         # SCARs (cascade clears capa.scar_ref_id via SET NULL)
         for sid in (extra_scar_ids or []):
             await s.execute(sa_delete(SupplierSCAR).where(SupplierSCAR.scar_id == sid))
@@ -1131,8 +1136,10 @@ async def _teardown_committed_fixtures(sessionmaker, fx, *, extra_scar_ids=None,
         await s.execute(sa_delete(SupplierSCAR).where(SupplierSCAR.capa_ref_id == fx["capa_id"]))
         for cid in (extra_capa_ids or []):
             await s.execute(sa_delete(AuditLog).where(AuditLog.record_id == cid))
+            await s.execute(sa_delete(CapaR6MaterialVersion).where(CapaR6MaterialVersion.report_id == cid))
             await s.execute(sa_delete(CAPAEightD).where(CAPAEightD.report_id == cid))
         await s.execute(sa_delete(AuditLog).where(AuditLog.record_id == fx["capa_id"]))
+        await s.execute(sa_delete(CapaR6MaterialVersion).where(CapaR6MaterialVersion.report_id == fx["capa_id"]))
         await s.execute(sa_delete(CAPAEightD).where(CAPAEightD.report_id == fx["capa_id"]))
         await s.execute(sa_delete(Supplier).where(Supplier.supplier_id == fx["supplier_id"]))
         from app.models.role import UserProductLine, RolePermission

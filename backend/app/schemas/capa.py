@@ -7,7 +7,9 @@ from app.schemas.recommendation_stage import StageRunSchema
 from app.state_machines.eightd_state import EightDState
 
 
-class CAPACreate(BaseModel):
+from app.schemas.database_text import DatabaseTextInput
+
+class CAPACreate(DatabaseTextInput):
     title: str
     document_no: str
     severity: str = "general"
@@ -16,7 +18,7 @@ class CAPACreate(BaseModel):
     supplier_id: uuid.UUID | None = None
 
 
-class CAPAUpdate(BaseModel):
+class CAPAUpdate(DatabaseTextInput):
     expected_material_version: str | None = None
     title: str | None = None
     d1_team: list[dict] | None = None
@@ -35,7 +37,7 @@ class CAPAUpdate(BaseModel):
     supplier_id: uuid.UUID | None = None
 
 
-class CAPATriggerScarRequest(BaseModel):
+class CAPATriggerScarRequest(DatabaseTextInput):
     supplier_id: uuid.UUID
     description: str | None = None
     requested_action: str | None = None

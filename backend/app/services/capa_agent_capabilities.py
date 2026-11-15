@@ -19,6 +19,8 @@ D5_REPLACE_CAPABILITY = "capa.d5.proposal.replace.v1"
 
 CAPA_CAPABILITIES = MappingProxyType({
     spec.id: spec for spec in (
+        CapabilitySpec('capa.d2.snapshot.v1', Module.CAPA, 'context', PermissionLevel.VIEW, ApprovalFloor.DENY, 'masked', target_required=True),
+        CapabilitySpec('capa.d3.snapshot.v1', Module.CAPA, 'context', PermissionLevel.VIEW, ApprovalFloor.DENY, 'masked', target_required=True),
         CapabilitySpec(D5_SAVE_CAPABILITY, Module.CAPA, "command", PermissionLevel.EDIT, ApprovalFloor.DENY, "none", target_required=True),
         CapabilitySpec(D5_REPLACE_CAPABILITY, Module.CAPA, "command", PermissionLevel.EDIT, ApprovalFloor.DENY, "none", target_required=True),
         CapabilitySpec("capa.d4.summary.masked.v1", Module.CAPA, "context", PermissionLevel.VIEW, ApprovalFloor.DENY, "masked", target_required=True),

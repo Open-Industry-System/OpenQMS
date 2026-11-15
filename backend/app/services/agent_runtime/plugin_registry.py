@@ -189,7 +189,7 @@ async def _require_grant_enableable(db, plugin, grant, actor=None) -> None:
         if not isinstance(pilot, ControlledPilot):
             raise ValueError('Capability cannot be enabled')
         pilot.verify(db.info.get('tenant_binding'), plugin)
-        spec = get_capability(grant.capability_id, profile=model_egress.R5_PROFILE)
+        spec = get_capability(grant.capability_id, profile=pilot.profile)
         if (spec is None or not grant.object_ids or len(grant.object_ids) != 1
                 or not grant.factory_ids or not grant.product_line_codes
                 or grant.expires_at is None or grant.expires_at <= datetime.now(UTC)

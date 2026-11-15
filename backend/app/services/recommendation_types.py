@@ -30,6 +30,8 @@ class RecommendationContext:
     # 预加载的共享数据（避免每个 Source 重复查库）
     fmea_docs: list[dict[str, Any]] | None = None
     linked_fmea: dict[str, Any] | None = None
+    actor_id: uuid.UUID | None = None
+    material_version: str | None = None
 
 
 @dataclass
@@ -128,3 +130,4 @@ class RecommendationResult:
     items: list[RecommendationCandidate]
     stages: list[StageRun] = field(default_factory=list)
     blocked: bool = False
+    source_bindings: tuple = field(default=(), repr=False)

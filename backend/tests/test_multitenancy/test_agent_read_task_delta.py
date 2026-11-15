@@ -6,7 +6,7 @@ import pytest
 from app.core.tenant_transaction import TenantUnavailable
 from app.services import tenant_migrator, tenant_schema_diff
 
-TARGET = "tv015_r6_entry_contracts"
+TARGET = "tv016_r6_source_epoch"
 
 
 def test_read_tasks_are_reviewed_current_target():
@@ -17,8 +17,8 @@ def test_read_tasks_are_reviewed_current_target():
     assert tenant_migrator.PREDECESSOR_REVISION == "tv004_agent_readonly_controls"
     assert tenant_migrator.DELIVERY_PREDECESSOR_REVISION == "tv006_agent_read_tasks"
     assert tenant_migrator.RECOVERY_PREDECESSOR_REVISION == "tv007_d4_text_delivery"
-    assert REVIEWED_REVISIONS[-11:] == ("tv007_characteristic_refs", "tv007_d4_text_delivery",
-        "tv008_d4_recovery", "tv009_r4b_main_merge", "tv010_refresh_sessions", "tv010_r5_d5_proposals", "tv011_r5_d5_basis", "tv012_r5_models", "tv013_r5_main_merge", "tv014_r5_responses", TARGET)
+    assert REVIEWED_REVISIONS[-12:] == ("tv007_characteristic_refs", "tv007_d4_text_delivery",
+        "tv008_d4_recovery", "tv009_r4b_main_merge", "tv010_refresh_sessions", "tv010_r5_d5_proposals", "tv011_r5_d5_basis", "tv012_r5_models", "tv013_r5_main_merge", "tv014_r5_responses", "tv015_r6_entry_contracts", TARGET)
 
 
 @pytest.mark.asyncio

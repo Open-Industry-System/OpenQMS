@@ -33,7 +33,7 @@ def test_r6_pair_has_exact_reviewed_parents_and_unique_heads():
     public = (root / f'alembic/versions/{PUBLIC}.py').read_text()
     tenant = (root / f'alembic_tenant/versions/{TENANT}.py').read_text()
     assert public.replace(PUBLIC, TENANT).replace(PARENT, TENANT_PARENT) == tenant
-    for directory, expected in [('alembic', PUBLIC), ('alembic_tenant', TENANT)]:
+    for directory, expected in [('alembic', '20261116_r6_source_epoch'), ('alembic_tenant', 'tv016_r6_source_epoch')]:
         config = Config()
         config.set_main_option('script_location', str(root / directory))
         assert ScriptDirectory.from_config(config).get_heads() == [expected]
@@ -121,7 +121,7 @@ def test_empty_and_nonempty_r5_upgrade_is_additive_and_repeatable(mig_db_url, an
 
 def test_r6_models_match_actual_columns_foreign_keys_and_uniques(mig_db_url):
     from app.database import TenantBase
-    command.upgrade(_migration_config(mig_db_url), PUBLIC)
+    command.upgrade(_migration_config(mig_db_url), 'head')
     engine = _sync_engine(mig_db_url)
     try:
         with engine.connect() as conn:
@@ -499,6 +499,7 @@ async def test_owned_tenant_empty_downgrade_and_populated_atomic_guard(mig_db_ur
     from sqlalchemy.pool import NullPool
     from app.schemas.platform import TenantCreateRequest
     from app.services import tenant_migrator
+    monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT)
     config = _migration_config(mig_db_url)
     await asyncio.to_thread(command.upgrade, config, PUBLIC)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)

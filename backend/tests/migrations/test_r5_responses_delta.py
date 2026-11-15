@@ -63,7 +63,7 @@ def test_paired_protocol_deltas_preserve_published_parents_and_single_heads():
     for directory in ('alembic', 'alembic_tenant'):
         config = Config(); config.set_main_option('script_location', str(root / directory))
         assert ScriptDirectory.from_config(config).get_heads() == [
-            '20261115_r6_entry_contracts' if directory == 'alembic' else 'tv015_r6_entry_contracts']
+            '20261116_r6_source_epoch' if directory == 'alembic' else 'tv016_r6_source_epoch']
 
 
 @pytest.mark.asyncio

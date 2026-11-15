@@ -130,6 +130,8 @@ def _cp_item_key(it: ControlPlanItem) -> str:
 
 
 async def build_source_snapshot(db, capa: CAPAEightD) -> SourceSnapshot:
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa.report_id)
     src_pl_row = await db.scalar(
         select(ProductLine).where(ProductLine.code == capa.product_line_code)
     )
@@ -457,9 +459,25 @@ def _merge_llm_suggestions(similar: list[dict], by_type: dict) -> list[dict]:
 
 async def run_lateral_diffusion_check(db, capa, user_id) -> None:
     """D8 close-path fail-closed lateral check. Empty hits skip LLM; hits require LLM."""
+    from types import SimpleNamespace
+    from app.core.permissions import PermissionLevel
+    from app.services.capa_d4_material import legacy_capa_read_binding
+    actor = SimpleNamespace(user_id=user_id)
+    report_id = capa.report_id
+    initial_binding = await legacy_capa_read_binding(db, actor, report_id,
+        required_level=PermissionLevel.EDIT)
+    async def fence(*, lock=False):
+        if lock:
+            await db.execute(select(CAPAEightD.report_id).where(
+                CAPAEightD.report_id == report_id).with_for_update())
+        if await legacy_capa_read_binding(db, actor, report_id,
+                required_level=PermissionLevel.EDIT) != initial_binding:
+            raise PermissionError("D4_MATERIAL_CHANGED: continue manual D5")
     try:
         snap = await build_source_snapshot(db, capa)
         hits = await match_criteria(db, snap)
+    except PermissionError:
+        raise
     except Exception as e:
         raise LateralFailedError(f"lateral matching failed: {e}") from e
 
@@ -471,10 +489,16 @@ async def run_lateral_diffusion_check(db, capa, user_id) -> None:
             pc = await build_client(db)
         except ProviderNotConfiguredError as e:
             raise LateralBlockedError(f"LLM not configured: {e}") from e
+        await fence()
         try:
-            result = await complete_json(pc, _build_prompt(capa, similar), LATERAL_SCHEMA)
+            from app.services.agent.provider_adapter import with_delivery_guard
+            result = await with_delivery_guard(fence,
+                lambda: complete_json(pc, _build_prompt(capa, similar), LATERAL_SCHEMA))
+        except PermissionError:
+            raise
         except Exception as e:
             raise LateralFailedError(f"LLM call failed: {e}") from e
+        await fence()
         if not isinstance(result, dict):
             raise LateralFailedError("LLM returned non-object")
         by_type = {
@@ -492,6 +516,7 @@ async def run_lateral_diffusion_check(db, capa, user_id) -> None:
     else:
         llm_status = "skipped"
 
+    await fence(lock=True)
     check_id = _check_id_for(capa.report_id)
     existing = await db.get(CapaLateralDiffusionCheck, check_id)
     if existing:
@@ -654,6 +679,11 @@ def _make_notif(check, capa, sp, pl, user, decision, status, skip_reason, now, u
 
 
 async def _build_projection(db, capa_id) -> dict | None:
+    from app.services.capa_d4_material import require_legacy_root_only
+    try:
+        await require_legacy_root_only(db, capa_id)
+    except PermissionError:
+        return None
     check = (
         await db.execute(
             select(CapaLateralDiffusionCheck).where(
@@ -670,6 +700,10 @@ async def _build_projection(db, capa_id) -> dict | None:
             .order_by(CapaLateralNotification.created_at)
         )
     ).scalars().all()
+    try:
+        await require_legacy_root_only(db, capa_id)
+    except PermissionError:
+        return None
     decision = None
     if notifs:
         decision = "notified" if any(n.decision == "notified" for n in notifs) else "skipped"
@@ -696,6 +730,8 @@ async def _build_projection(db, capa_id) -> dict | None:
 
 async def decide_lateral(db, capa_id, req, user_id) -> dict:
     capa, check = await _lock_capa_and_check(db, capa_id)
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa_id)
     if check is None:
         raise ValueError("no lateral check")
     has_notif = (
@@ -800,6 +836,8 @@ async def decide_lateral(db, capa_id, req, user_id) -> dict:
 
 async def rerun_lateral(db, capa_id, user_id) -> dict:
     capa, check = await _lock_capa_and_check(db, capa_id)
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa_id)
     check_id = _check_id_for(capa_id)
     if check is not None:
         has_notif = (
@@ -828,6 +866,8 @@ async def rerun_lateral(db, capa_id, user_id) -> dict:
                 await db.flush()
         except IntegrityError:
             capa, check = await _lock_capa_and_check(db, capa_id)
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa_id)
     await run_lateral_diffusion_check(db, capa, user_id)
     await db.flush()
     return await _build_projection(db, capa_id)

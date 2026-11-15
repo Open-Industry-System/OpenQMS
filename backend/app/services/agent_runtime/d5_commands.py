@@ -25,7 +25,7 @@ R5_PROFILE = 'model_d5_proposal_v1'
 def require_r5_admission(identity, operation='save'):
     # No R5 profile exists in T4. T6 owns admitting a deployment-bound run;
     # neither metadata installs nor R4b fixed receivers may inherit these writes.
-    if (R5_PROFILE not in PROFILES or identity.trial is None or identity.trial.profile != R5_PROFILE
+    if (R5_PROFILE not in PROFILES or identity.trial is None or identity.trial.profile not in {R5_PROFILE, 'model_d5_proposal_r6_v1'}
             or not isinstance(identity.binding, TenantBinding) or identity.binding.mode != 'business'):
         raise PermissionError(proposals.UNAVAILABLE)
     runtime_access.require_capability(identity, D5_SAVE_CAPABILITY)

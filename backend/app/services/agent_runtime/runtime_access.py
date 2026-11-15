@@ -94,12 +94,13 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
     from app.services.agent_runtime import model_egress
     r5 = await model_egress.is_r5_task(db, task)
     if r5:
-        await model_egress.task_deployment(db, task)
+        deployment = await model_egress.task_deployment(db, task)
+        expected_profile = model_egress.deployment_profile(deployment)
     trial = task_service.trial_for_target(db, installation, task.executor_user_id, target)
-    if r5 and (trial is None or trial.profile != model_egress.R5_PROFILE):
+    if r5 and (trial is None or trial.profile != expected_profile):
         raise PermissionError(run_auth.INVALID_TOKEN)
     profile = "baseline" if trial is None else trial.profile
-    current_source = await current_source_for_target(db, placeholder, target) if profile in {'local_d4_root_cause_text_v1', 'model_d5_proposal_v1'} else None
+    current_source = await current_source_for_target(db, placeholder, target) if profile in {'local_d4_root_cause_text_v1', 'model_d5_proposal_v1', 'model_d5_proposal_r6_v1'} else None
     with db.no_autoflush:
         plugin_sources = list((await db.scalars(select(AgentPluginDerivedSourceScope).where(
             AgentPluginDerivedSourceScope.plugin_grant_id.in_([row.grant_id for row in plugins]))
@@ -146,7 +147,7 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
                 raise PermissionError(run_auth.INVALID_TOKEN)
             continue  # only server-owned canonical specs belong in the response
         allowed = False
-        if (spec.kind == "context" or profile == "model_d5_proposal_v1" and spec.kind == "command") and spec.approval_floor == ApprovalFloor.DIRECT:
+        if (spec.kind == "context" or profile in {"model_d5_proposal_v1", "model_d5_proposal_r6_v1"} and spec.kind == "command") and spec.approval_floor == ApprovalFloor.DIRECT:
             for plugin in plugins:
                 if plugin.capability_id != capability:
                     continue

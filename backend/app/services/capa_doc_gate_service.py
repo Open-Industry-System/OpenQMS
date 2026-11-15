@@ -49,9 +49,12 @@ async def _lock_doc_gate_write(
     required_level: PermissionLevel = PermissionLevel.EDIT,
 ) -> CAPAEightD:
     """Authorize, lock, and validate CAPA material before D8 gate mutation."""
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa.report_id)
     capa = await lock_current_material_write(
         db, capa, user_id, required_level
     )
+    await require_legacy_root_only(db, capa.report_id)
     if capa.status != "D8_GATE_PENDING":
         raise ValueError("当前状态不可写入文档门禁")
     from types import SimpleNamespace
@@ -72,11 +75,20 @@ async def generate_impact_analysis(db: AsyncSession, capa: CAPAEightD, user_id: 
 
 async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD) -> dict | None:
     """Return latest analysis (incl failed) for this capa. ORDER BY created_at DESC, analysis_id DESC."""
+    from app.services.capa_d4_material import require_legacy_root_only
+    try:
+        await require_legacy_root_only(db, capa.report_id)
+    except PermissionError:
+        return None
     row = await db.scalar(
         select(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id == capa.report_id)
         .order_by(CapaDocgAnalysis.created_at.desc(), CapaDocgAnalysis.analysis_id.desc()).limit(1)
     )
     if row is None:
+        return None
+    try:
+        await require_legacy_root_only(db, capa.report_id)
+    except PermissionError:
         return None
     return {"analysis_id": str(row.analysis_id), "status": row.status, "affected_docs": row.affected_docs,
             "error": row.error, "is_current": row.is_current}
@@ -146,7 +158,7 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
     db.add(analysis)
     await db.flush()
     response = {"status": "phase1_done", "analysis_id": str(analysis.analysis_id),
-                "attempt_token": attempt_token, "client": client}
+                "attempt_token": attempt_token, "client": client, "actor_id": user_id}
     await db.commit()
     return response
 
@@ -156,6 +168,16 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
 # ---------------------------------------------------------------------------
 
 async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
+    from types import SimpleNamespace
+    from app.services.capa_d4_material import legacy_capa_read_binding
+    actor = SimpleNamespace(user_id=p1["actor_id"])
+    report_id = capa.report_id
+    initial_binding = await legacy_capa_read_binding(db, actor, report_id,
+        required_level=PermissionLevel.EDIT)
+    async def fence():
+        if await legacy_capa_read_binding(db, actor, report_id,
+                required_level=PermissionLevel.EDIT) != initial_binding:
+            raise PermissionError("D4_MATERIAL_CHANGED: continue manual D5")
     capa = await _fresh_capa_phase(db, capa)
     candidates = await _build_allowlist(db, capa)
     input_hash = _compute_input_hash(capa, candidates)
@@ -164,10 +186,18 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
     # Commit any autobegun read txn before calling LLM
     await db.commit()
     pc = p1["client"]
+    async def request_fence():
+        await fence()
+        await db.commit()
+    await fence()
     try:
-        raw = await provider_adapter.complete_json(pc, prompt, _RESPONSE_SCHEMA)
+        raw = await provider_adapter.with_delivery_guard(request_fence,
+            lambda: provider_adapter.complete_json(pc, prompt, _RESPONSE_SCHEMA))
+    except PermissionError:
+        raise
     except Exception as e:
         return {"llm_error": str(e)}
+    await fence()
     # complete_json may return non-dict (array/null) if provider ignores schema —
     # convert to llm_error so phase3 CAS marks failed instead of leaving running.
     if not isinstance(raw, dict):

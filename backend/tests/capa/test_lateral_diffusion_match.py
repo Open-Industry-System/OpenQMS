@@ -15,7 +15,7 @@ from app.models.iqc_inspection import IqcInspection
 from app.models.iqc_material import IqcMaterial
 from app.models.product_line import ProductLine
 from app.models.product_type import ProductType
-from app.models.role import RoleDefinition
+from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.supplier import Supplier
 from app.models.user import User
 from app.services.capa_lateral_diffusion_service import (
@@ -159,6 +159,7 @@ async def _seed_base(db, suffix: str):
         factory_id=factory.id,
     )
     db.add(user)
+    db.add(RolePermission(role_id=role.id, module="capa", permission_level=3))
     await db.flush()
     return factory, user
 
@@ -189,6 +190,9 @@ async def _make_pl(db, code: str, factory_id, product_type_code: str | None = No
 
 
 async def _make_capa(db, factory_id, user_id, pl_code: str, *, supplier_id=None, fmea_ref_id=None, status="D8_CLOSURE"):
+    if await db.scalar(select(UserProductLine.user_id).where(
+            UserProductLine.user_id == user_id, UserProductLine.product_line_code == pl_code)) is None:
+        db.add(UserProductLine(user_id=user_id, product_line_code=pl_code))
     capa = CAPAEightD(
         report_id=uuid.uuid4(),
         document_no=f"8D-LAT-{uuid.uuid4().hex[:8]}",

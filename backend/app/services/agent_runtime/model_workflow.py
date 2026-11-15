@@ -102,6 +102,8 @@ async def _current(db, identity, *, lock=True):
     current = await (runtime_access.lock_runtime_identity(db, identity) if lock else runtime_access.refresh_runtime_identity(db, identity))
     d5_commands.require_r5_admission(current)
     await model_egress.task_deployment(db, current.task, lock=lock)
+    from app.services.capa_r6_delivery import require_current_root_use
+    await require_current_root_use(db, current)
     return current
 
 

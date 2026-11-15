@@ -75,6 +75,10 @@ def authorize(attempt: AccessAttempt) -> AccessDecision:
     decision = _intersect_scopes(attempt)
     if not decision.allowed:
         return decision
+    if declared.id in {'capa.d2.snapshot.v1', 'capa.d3.snapshot.v1'}:
+        exact = frozenset({attempt.object_id})
+        if attempt.plugin_grant.object_ids != exact or attempt.task_grant.object_ids != exact:
+            return AccessDecision(False, 'exact report input grant required', declared.approval_floor)
     from app.services.capa_agent_capabilities import CAPA_D4_ROOT_CAUSE_TEXT_CONTRACT
     from .derived_sources import source_intersection_covers
     contract = CAPA_D4_ROOT_CAUSE_TEXT_CONTRACT
