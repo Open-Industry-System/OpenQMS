@@ -1,10 +1,18 @@
 # OpenQMS 开发进度
 
+> **2026-11-15 Responses 已提交并推送，真实侧栏准入缺口修复**：独立双复核31文件后精确提交/推送 `d542d3a6a65bdee9d187c333e2a735a5d5e719a1`，远端run43701830577已实际启动普通CI，native job132774448655仍queued。再次fetch发现main更新为`d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，无冲突合并为`9941d647`；16项主线发布/preview修复全部保留，双方进度记录保留，业务/前端/SDK与合并前完全一致，迁移head不变。
+>
+> 新鲜browser完整exit0（responses-browser-1794736515177065000.log，206.77s）：原生2通过0skip，普通11通过0skip；启动时冻结字段为6f72且源码含已复核Responses候选，执行源码与随后d542一致，明确不冒充干净d542启动。纯CI268通过（46.94s）；私有通用helper首次在无Docker权限的pure模式误做资源核验而exit1，随后移除非DB模式多余核验重跑。前端全量915通过1超时（54.18s，PFMEAWizard旧5000ms），原样焦点10通过（8.17s），完整重跑待办。
+>
+> CLOUD独立登记owner`64c16ba92ff0d29b954b9016`，container`4d67e24f03bd3c194f05456d792591f7dccdfc8d207e2c04fd9e5b1f16e7edd9`、volume`openqms-r5-cloud-64c16ba92ff0d29b954b9016-data`、port64397、test DB`qms_r5_cloud_64c16ba92ff0_test`；私有目录`/private/tmp/openqms-r5-cloud-20261115-_do6b9n4`，不与普通R5数据库共享。同一正常app/真实HTTP来源证明和不可变Responses部署已成功登记。准备首轮因既有来源声明开关未设被403，按原本机试点合同补齐环境后成功；没有放宽生产代码。首次Chromium实际侧栏选型/创建201但status=blocked_capability，启动disabled，**无模型生成**。原因是root-only按钮未传scope而服务未绑定当前proof；不得把创建当闭环。
+>
+> 先以真实UI请求形状复现RED1失败（run-1794737036091820000.log），仅R5精确root-only意图、无显式scope且唯一当前可见proof时复用原validate_explicit_source，再走原授权交集。自由聊天、R4b、显式scope及旧request-key不改投。新增正向/撤proof/撤grant/freechat和真实受控read-save，最终10通过（run-1794737073408161000.log，76.25s）；UI补ready断言，固定目录107节点。新修复获独立SPEC/QUALITY静态APPROVED，无Critical/Important。旧make于专属pytest78262先SIGINT、未退出再SIGTERM，根exit2/275.88s（responses-check-1794736750284150000.log），是明确中断，不是完整通过；修复提交后从头重跑。
+
 > **2026-11-15 R5 Responses增量实施中（用户已明确批准）**：用户指定gpt-6.1-terra，专用凭据已在主仓库ignored、600权限文件安全配置；本地resolver通过，只读模型元数据GET200且ID匹配，未发送真实生成。官方要求该模型工具调用使用Responses，用户已批准独立适配。新增显式api_protocol默认Chat，旧HMAC原样保持，Responses协议入签名；新配对head为20261115_r5_responses / tv014_r5_responses，旧迁移不改写。typed推理/phase/工具回放仅在原round内存，stateless store=false，继续原来源/接收方/幂等围栏。
 >
 > 实际RED：适配器16失败、协议/HMAC/新head3失败；初步适配后19纯检查通过，迁移约束6通过。真实受控插件集成先launch拒绝，最小重现确认出站层仍只允许Chat路径；新增pinning单项RED后按批准协议严格选唯一responses路径。后续2通过1失败仅为撤权测试应匹配既有凭据门禁401而非403，生产权限未放宽；校正后5项Responses实际HTTP/受控artifact/DB通过（run-1794735111801079000.log，42.23s）。固定CI目录已扩为102节点，纯合同当前315通过；完整迁移/read-task/旧provider预检527通过、2跳过（run-1794735335887883000.log，729.07s）；增强phase回放及新迁移13通过（run-1794736450733978000.log，49.45s）。独立SPEC/QUALITY均静态APPROVED，无Critical/Important；完整门禁仍在运行，不以焦点替代。细节见TEMP-openai-migration-ledger.md。
 >
-> 当前远端基线6f72c971普通CI已全部success：API5439通过4跳过、browser11通过0跳过，原生macOS仍queued无runner；这不代表未提交Responses代码已验收。CLOUD实际生成/报告保存与人工QE判断仍待，LOCAL端点未提供。无生产启用、PR合并或部署；R4B资源未操作。
+> 当前远端基线6f72c971普通CI已全部success：API5439通过4跳过、browser11通过0跳过，原生macOS仍queued无runner；这不代表后续Responses提交已验收。CLOUD实际生成/报告保存与人工QE判断仍待，LOCAL端点未提供。无生产启用、PR合并或部署；R4B资源未操作。
 
 > **2026-11-15 R5 当前主线已整合并推送，草稿PR #33已创建**：实际 fetch `origin/main=dae0892f3be6f15ea297bd0d2659308029cd4d23`，在 R5 `73ad865c` 合入 R4b #30、Oracle #31 和 refresh-session 主线改动。新增 public `20261115_r5_main_merge`、tenant `tv013_r5_main_merge`，各合并两侧已发布 head，不改写历史迁移；严格租户前驱同构比较只过滤 public 参考侧。实际焦点数据库32通过、纯检查297通过；前端旧夹具遗漏D5 API隔离先复现，修正后相关100通过。完整迁移/read-task/认证回归307通过、1项PG15工具skip；显式指定同一登记PG15容器后snapshot单项补验通过。前端完整复跑916通过，类型/E2E类型与build通过。当前合并版本Darwin原生59通过＋另一文件侧栏两角色UI独立1通过，均0skip，分批记录不冒充一次完整make。所有DB验收串行；合并前完整make不冒充本轮。主线独有109文件中108字节一致，另1仅当前head测试调整；已发布迁移均未改写。详见 [集成记录](docs/development/r5-main-integration.md)。
 >

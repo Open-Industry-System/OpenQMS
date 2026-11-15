@@ -155,3 +155,51 @@ async def test_responses_propose_d5_http_never_returns_opaque_provider_items(r5_
     assert response.json()['content']=='Synthetic inference text only'
     assert 'response_items' not in response.json() and PRIVATE not in response.text
     assert len(c.witness.a.bodies)==1 and c.witness.b.bodies==[]
+
+
+@pytest.mark.parametrize('case', ['valid', 'proof_revoked', 'grant_revoked', 'free_chat'])
+async def test_root_only_sidebar_intent_derives_only_current_approved_source(r5_case, case):
+    from app.models.agent_plugin import AgentPluginGrant
+    from app.models.capa_d4_delivery import CapaD4RootCauseSourceProof
+    from app.models.agent_task import AgentTaskGrant
+    c = r5_case
+    await actual_agent(c)
+    body = dict(c.create_body)
+    body.pop('derived_source_scope')
+    if case == 'free_chat': body['initial_text'] = 'ordinary chat without declared source'
+    if case in {'proof_revoked', 'grant_revoked'}:
+        async with c.session() as db:
+            if case == 'proof_revoked':
+                await db.execute(update(CapaD4RootCauseSourceProof).values(status='superseded'))
+            else:
+                await db.execute(update(AgentPluginGrant).where(AgentPluginGrant.installation_id == c.r5_id,
+                    AgentPluginGrant.capability_id == 'capa.d4.root_cause_candidate.masked.v1').values(enabled=False))
+            await db.commit()
+    response = await c.client.post('/api/agent/tasks', json=body)
+    assert response.status_code == 201, response.text
+    expected = 'ready' if case == 'valid' else 'blocked_capability'
+    assert response.json()['status'] == expected
+    repeated = await c.client.post('/api/agent/tasks', json=body)
+    assert repeated.status_code == 201 and repeated.json()['task_id'] == response.json()['task_id']
+    async with c.session() as db:
+        count = await db.scalar(select(func.count()).select_from(AgentTaskGrant).where(
+            AgentTaskGrant.task_id == UUID(response.json()['task_id']),
+            AgentTaskGrant.capability_id == 'capa.d4.root_cause_candidate.masked.v1'))
+        assert count == (1 if case == 'valid' else 0)
+    assert c.witness.a.bodies == c.witness.b.bodies == []
+
+
+async def test_actual_responses_root_only_sidebar_request_reads_then_saves(r5_case):
+    c = r5_case
+    await responses_agent(c, [call('read_d4'), call('save_proposal', {'text':'Root-only actual Responses measure'}, 'save'), {'content':'done'}])
+    body = dict(c.create_body)
+    body.pop('derived_source_scope')
+    created = await c.client.post('/api/agent/tasks', json=body)
+    assert created.status_code == 201 and created.json()['status'] == 'ready', created.text
+    task = created.json()['task_id']
+    launch = await c.client.post(f'/api/agent/tasks/{task}/launch', timeout=130)
+    assert launch.status_code == 200, launch.text
+    async with c.session() as db:
+        rows = list(await db.scalars(select(CapaD5Proposal).where(CapaD5Proposal.task_id == UUID(task))))
+        assert len(rows) == 1 and rows[0].original_text == 'Root-only actual Responses measure'
+    assert len(c.witness.a.bodies) == 3 and c.witness.b.bodies == []

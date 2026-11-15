@@ -29,7 +29,7 @@ test('two roles collaborate on R5 proposals with immutable sidebar recipients',a
   await page.getByLabel('初始指令',{exact:true}).fill('T8 explicit new B');
   const created=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/agent/tasks' && r.request().method()==='POST');
   await page.getByRole('button',{name:'用 synthetic B · 1 开始新任务（仅根据当前根因）',exact:true}).click();
-  const response=await created;expect(response.status()).toBe(201);expect(response.request().postDataJSON().initial_text).toBe('deliver_d4_root_cause_candidate_v1');expect((await response.json()).model_deployment.deployment_id).toBe(details.model_b);
+  const response=await created;expect(response.status()).toBe(201);expect(response.request().postDataJSON().initial_text).toBe('deliver_d4_root_cause_candidate_v1');const createdTask=await response.json();expect(createdTask.model_deployment.deployment_id).toBe(details.model_b);expect(createdTask.status).toBe('ready');
   await expect(page.getByText('当前接收方：synthetic B · 1',{exact:true})).toBeVisible();
   const finished=await page.request.post(`${process.env.AGENT_BACKEND_URL}/__t8_ui/complete`,{headers:{'X-Acceptance-Nonce':process.env.AGENT_HARNESS_NONCE!,'X-Tenant-ID':process.env.AGENT_BROWSER_TENANT!},data:{}});expect(finished.status(),await finished.text()).toBe(200);
   const second=await browser.newContext();const coworker=await second.newPage();

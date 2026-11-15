@@ -67,3 +67,7 @@ Routine settings follow the selected model's normal behavior and the user's stan
 ## Outcome
 
 Independent static SPEC and QUALITY reviews approved the frozen 31-file candidate; no unresolved Critical/Important. Focused verification passed; complete gates are running. Implementation and complete acceptance remain distinct. No live generation, approved Responses deployment or human quality acceptance claimed. LOCAL endpoint and real engineer evaluation pending. Credential plaintext stays outside Git/logs/UI/plugin environment.
+
+## Real sidebar preparation finding
+
+The first normal-app Chromium trial selected the approved deployment and created a task, but root-only creation lacked an explicit source coordinate and stayed blocked_capability. No generation was called. RED regression reproduced the omission. The explicit root-only R5 intent now binds the unique current visible proof through the existing source validator and unchanged authorization intersection; free chat, R4b and explicit scopes remain unchanged. Ten deterministic actual HTTP/sandbox cases passed, independent SPEC/QUALITY approved. The interrupted full make is recorded as incomplete; restart on the next precise commit. Latest main d3c0ada8 retained via 9941d647; both migration heads remain singular.

@@ -222,6 +222,13 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
     task_id = uuid4()
     trial = trial_for_target(db, plugin, scope.user.user_id, capa)
     current_source = await current_source_for_target(db, scope, capa) if is_text else None
+    # The sidebar's explicit root-only action has no client-supplied source
+    # coordinates. Bind it to the one current visible proof, then apply the
+    # same source validation and plugin/task intersection as an explicit input.
+    # Free chat and the older text profile retain their existing contracts.
+    if (is_r5 and request.initial_text == 'deliver_d4_root_cause_candidate_v1'
+            and request.derived_source_scope is None and current_source is not None):
+        requested_source = await validate_explicit_source(db, scope, capa, current_source)
     grants, ready = _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grants, trial=trial,
         current_source=current_source, requested_source=requested_source,
         plugin_source_scopes={row.plugin_grant_id: scope_from_row(row) for row in source_rows})

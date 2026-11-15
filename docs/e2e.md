@@ -214,8 +214,8 @@ shared with focused unit tests, not shipped as application behavior.
 
 ### R5 D5 必选验收
 
-2026-11-15 Responses增量：固定目录新增配对协议迁移/兼容性8节点及原生Responses链路5节点，
-当前为portable migration37、native API63、native browser2，共102必选节点。普通CI仍使用
+2026-11-15 Responses增量：固定目录新增配对协议迁移/兼容性8节点及原生Responses链路10节点，
+当前为portable migration37、native API68、native browser2，共107必选节点。普通CI仍使用
 确定性模型；真实OpenAI专用凭据只注入经批准的独立CLOUD试用后端，不能进入CI、Vite或插件环境。
 
 R5 过程/模型/迁移节点列在 `backend/tests/ci/r5_required.py`，portable api 必须执行迁移，r5-api 必须执行原生过程/模型；
