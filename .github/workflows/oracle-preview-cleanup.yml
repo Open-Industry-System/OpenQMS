@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  issues: write
 
 concurrency:
   group: oracle-preview-cleanup-${{ github.event.pull_request.number }}
@@ -14,7 +15,6 @@ concurrency:
 
 jobs:
   cleanup:
-    if: vars.ORACLE_AUTODEPLOY_ENABLED == 'true'
     runs-on: ubuntu-24.04
     environment: oracle-preview
     steps:
@@ -31,7 +31,8 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:openqms-deploy
-      - name: Cleanup closed preview using trusted metadata helper
+      - id: cleanup
+        name: Cleanup closed preview using trusted metadata helper
         working-directory: trusted
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,3 +51,11 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > "$ORACLE_KNOWN_HOSTS"
           unset DEPLOY_KEY KNOWN_HOSTS
           python3 scripts/deploy-oracle-preview.py --cleanup "$PREVIEW_PR"
+      - name: Notify PR of cleanup outcome
+        if: always() && steps.cleanup.outcome != 'skipped'
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_PR: ${{ github.event.pull_request.number }}
+          CLEANUP_RESULT: ${{ steps.cleanup.outcome }}
+        run: python3 scripts/pr-preview-acceptance.py --cleanup-pr "$PREVIEW_PR" --cleanup-result "$CLEANUP_RESULT"

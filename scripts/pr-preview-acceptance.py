@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Trusted metadata-only PR plan and human preview acceptance statuses."""
+import argparse
 import hashlib
 import io
 import json
@@ -12,6 +13,7 @@ PLAN = 'PR test plan'
 ACCEPT = 'Preview human acceptance'
 START = '<!-- preview-test-plan:start -->'
 END = '<!-- preview-test-plan:end -->'
+NOTICE = '<!-- openqms-preview-notice -->'
 
 
 def test_plan(body):
@@ -72,6 +74,48 @@ class API:
                        input=json.dumps(payload).encode(), stdout=subprocess.DEVNULL, check=True)
 
 
+    def notice(self, number, body, create=True):
+        comments = self.pages(f'/issues/{number}/comments')
+        owned = [c for c in comments if c.get('user', {}).get('login') == 'github-actions[bot]'
+                 and c.get('user', {}).get('type') == 'Bot' and (c.get('body') or '').startswith(NOTICE)]
+        if len(owned) > 1:
+            raise ValueError('Duplicate preview notices; refusing ambiguous update')
+        if owned and owned[0]['body'] == body:
+            return
+        if not owned and not create:
+            return
+        path = f'/issues/comments/{owned[0]["id"]}' if owned else f'/issues/{number}/comments'
+        method = 'PATCH' if owned else 'POST'
+        subprocess.run(['gh', 'api', '--method', method, f'repos/{self.repo}{path}', '--input', '-'],
+                       input=json.dumps(dict(body=body)).encode(), stdout=subprocess.DEVNULL, check=True)
+
+
+def ready_notice(pr, run, digest):
+    number = pr['number']
+    sha = pr['head']['sha']
+    url = f'https://pr-{number}.preview.openqms.smartindustry.world'
+    command = f'/preview-accept {sha} {run["id"]} {digest}'
+    return (f'{NOTICE}\n### 测试环境已就绪\n\n'
+            f'- 测试地址：{url}\n- 当前提交：`{sha}`\n'
+            f'- 实际部署版本：`{pr["merge_commit_sha"]}`\n'
+            f'- [发布记录](https://github.com/{run["repository"]["full_name"]}/actions/runs/{run["id"]})\n\n'
+            f'请按 PR 描述中的验收计划逐项测试；完成后发表新评论，复制以下命令并另附实际结果或截图链接：\n\n'
+            f'```text\n{command}\n```\n\n'
+            '更新提交或验收计划后需重新确认。合并或关闭 PR 后，预览资源会自动释放。')
+
+
+def cleanup_notice(api, number, result):
+    pr = api.get(f'/pulls/{number}')
+    if pr['state'] != 'closed':
+        raise ValueError('PR reopened; refusing stale cleanup notification')
+    if result == 'success':
+        text = '预览资源已释放\n\nPR 已合并或关闭。预览路由、容器、数据卷、私网及预览 secret 文件的清理流程已完成，测试地址已停用。生产环境与共享基础设施保留。'
+    else:
+        text = '预览资源清理未完成\n\n自动清理失败或中断，请检查清理工作流并重试；当前不能确认资源已释放。'
+    run_url = os.environ['GITHUB_SERVER_URL']+'/'+api.repo+'/actions/runs/'+os.environ['GITHUB_RUN_ID']
+    api.notice(number, f'{NOTICE}\n### {text}\n\n[清理记录]({run_url})')
+
+
 def publication(api, pr):
     # Only main's successful trusted deployment workflow may attest publication.
     runs = api.get('/actions/workflows/oracle-deploy.yml/runs?status=success&per_page=100')['workflow_runs']
@@ -100,7 +144,12 @@ def reconcile(api, pr, summary):
     sha = pr['head']['sha']
     api.status(sha, PLAN, 'pending', '正在检查 PR 验收计划')
     api.status(sha, ACCEPT, 'pending', '等待当前预览部署和人工验收')
-    digest = test_plan(pr.get('body'))
+    waiting = f'{NOTICE}\n### 等待当前版本的测试环境与验收\n\n当前提交：`{sha}`。先前预览通知不能作为当前版本的验收依据；请等待发布完成。'
+    try:
+        digest = test_plan(pr.get('body'))
+    except ValueError:
+        api.notice(pr['number'], waiting, create=False)
+        raise
     api.status(sha, PLAN, 'success', '影响范围、操作步骤、预期结果和权限回归检查齐全')
     run = publication(api, pr)
     lifecycle = [event['created_at'] for event in api.pages(f'/issues/{pr["number"]}/timeline')
@@ -108,8 +157,13 @@ def reconcile(api, pr, summary):
     if run is not None and lifecycle and run['updated_at'] <= max(lifecycle):
         run = None
     if run is None:
+        api.notice(pr['number'], waiting, create=False)
         summary.append(f'PR #{pr["number"]}: 等待当前提交预览发布成功。')
         return
+    fresh = api.get(f'/pulls/{pr["number"]}')
+    if fresh['state'] != 'open' or fresh['head']['sha'] != sha or fresh['merge_commit_sha'] != pr['merge_commit_sha'] or test_plan(fresh.get('body')) != digest:
+        raise ValueError('PR changed before publication notification')
+    api.notice(pr['number'], ready_notice(pr, run, digest))
     command = f'/preview-accept {sha} {run["id"]} {digest}'
     summary.append(f'PR #{pr["number"]}: https://pr-{pr["number"]}.preview.openqms.smartindustry.world\n\n逐项测试后评论以下命令，并另写实际结果/截图链接：\n\n```text\n{command}\n```')
     independent = os.environ.get('REQUIRE_INDEPENDENT_REVIEWER') == 'true'
@@ -127,7 +181,16 @@ def reconcile(api, pr, summary):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cleanup-pr', type=int)
+    parser.add_argument('--cleanup-result', choices=['success', 'failure', 'cancelled'])
+    args = parser.parse_args()
     api = API()
+    if args.cleanup_pr is not None:
+        if args.cleanup_pr <= 0 or args.cleanup_result is None:
+            parser.error('positive PR and cleanup outcome required')
+        cleanup_notice(api, args.cleanup_pr, args.cleanup_result)
+        return
     summary = []
     for pr in api.pages('/pulls?state=open&base=main'):
         try:
