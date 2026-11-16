@@ -45,6 +45,8 @@ T6 基础入口 `POST /api/agent/runtime/model/infer` 接受严格的 `operation
 
 ## 默认关闭的执行环境
 
+macOS试点的原生API/Chromium验收现使用独立手动工作流 `r5-native.yml`，只接受main的workflow_dispatch；常规Linux PR检查继续验证通用迁移、权限和服务行为。操作与runner要求见[验收说明](../e2e.md)。此CI分层调整不新增Linux受控沙箱能力，macOS试点启用前仍需取得真实原生验收成功证据。
+
 `AGENT_R5_CONTROLLED_ENABLED=false` 为默认值。启用仍要求 dev 租户模式、任务 runtime、Darwin 的 `/usr/bin/sandbox-exec` 和平台私有 `AGENT_R5_CONTROLLED_POLICY_FILE` 全部合格。Linux 等其他主机当前不支持，不回退到普通 Python 进程、旧 R4b 启动器或远程插件声明。
 
 私有策略目录必须 0700，文件为当前平台进程所有的 0400/0600 普通文件；路径组件拒绝符号链接。策略 JSON 精确包含：schema_version=1、artifact、artifact_sha256、interpreter、interpreter_sha256、launcher_sha256、tenant_id、tenant_generation、installation_id、credential_epoch、plugin_version、platform_port、expires_at。哈希由管理员核对实际执行物、解释器与本版 `r5_executor.py` 后登记。策略不含模型凭据；改执行物、解释器、启动器、租户 generation、安装凭据轮次或策略都会拒绝旧准入。完整策略指纹被批准的模型版本和 run token 共同固定。

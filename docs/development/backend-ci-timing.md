@@ -146,3 +146,31 @@ backend-tests 和 browser-protection 的 `actions/setup-python@v5` 使用 `cache
 setup占当前本地execution约64%，这是阶段分配而不是预计节省比例，也不能归因到某个具体fixture。下一批先按耗时测试组度量fixture调用次数、单次与累计成本，再选累计最高项做对照；验收既看整组耗时，也核验数据库状态隔离与顺序独立性。本批PR不包含这些实现，可与R6 Task1并行；R6只以开工时实际合入的CI入口/提交为依据。
 
 发布记录：代码提交 `0998be8b` 已push并创建非草稿 [PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36)。创建PR的完整head查询只有 Test OpenQMS run43725914972（pull_request），无push运行；远端尚未完成，缓存/阶段耗时以实际日志后续核对，不使用本地数据代填。
+
+## 2026-11-16：独立测试精简 PR #39
+
+[PR #39](https://github.com/Open-Industry-System/OpenQMS/pull/39)从已合入CI入口的main `193746ab`单独提取测试精简改动，不包含尚未合并的慢fixture PR #37。原测试精简提交bb20ad93及其分支保留；本PR初始代码提交为80ed154f，后续只补本文档与验收记录。
+
+本批移除16项已证明重复或无实际执行的用例，并保留对应业务边界：重复CAPA/SCAR拒绝、重复D4 TCP别名、相同浏览器参数、重复工厂范围断言及无调用／无断言的IQC空壳。D4保留的必测用例仍运行first/retry/old_epoch/history/ack五场景；runner和独立期望名单只移除重复别名，不放宽缺失、跳过或失败校验。简单schema字段回显并入实际草稿生成测试。逐项删除到保留用例的映射见[PROGRESS.md](../../PROGRESS.md)。
+
+供应商脚本改为标准assert／pytest.raises，保留22项测试及评分阈值、扣分上限／零下限和状态转换。原手工helper只累计失败，pytest会误报成功；四类内存故障（错误评分、错误转换、未抛预期异常、异常类型错误）改前exit0、改后均exit1。AST证明输入／预期保留，只去掉一次重复满分调用；源码净减少74行。本次精简既不通过循环隐藏用例数，也不删除安全、隔离或并发业务边界。
+
+main独立分支本地CI辅助及相关pure集合458 passed／3 warnings／exit0；原精简分支独占PG/API验证82 passed／0 skipped／exit0，专属容器、卷与凭据已清理。5285是此前804f8551成功PR的历史选中数，16项约0.30%；本PR的实际总数以当前远端收据为准。没有精简后全量耗时对照或pip冷热实验，不据用例数量／本地毫秒差推算CI节省。
+
+main生效规则在2026-11-16重新读取：要求PR，并严格要求来源GitHub Actions app15368的backend-tests、browser-protection、frontend-checks、sdk-checks (3.11/3.12/3.13)、docs-check、oracle-automation-checks八项成功。这是前文2026-11-15快照之后的设置状态；本PR不修改规则。用户已授权CI通过后合并，仍须核对当前head、main和GitHub生成的合并候选，不能复用#37的旧CI结果。
+
+首次run43827872305的docs-check因只有PROGRESS变动而失败，本文补足真实文档说明；不加跳过标签、不改workflow或检查来源。新增提交后由既有同PR concurrency取消旧运行，等待新一套完整PR检查。合并后的main push仍按现有配置独立验证。
+
+### PR #39 等待期间 main 合入 R5 后的基线更新
+
+main随后合入PR #33，推进至`f8b8d9885441408503447c0ffa1aceb9f6b1060e`；此前基于193746ab的run43828123586不能替代最新合并候选的检查。PR #39正常合并最新main，只解决PROGRESS顶部并发记录冲突。R5修改涉及的runner、layer_selection和草稿服务测试均完成自动合并，复核相对新main仍只保留本批原有测试精简差异。
+
+新main的workflow新增`r5-native`：`[self-hosted, macOS, openqms-r5-sandbox]`，要求每job独占PG15和绑定到job的受控bundle，运行原生API及Chromium验收。PR #39保留该job及其runner标签、命令、超时和完整R5必测名单；workflow、Makefile与r5_required.py相对新main无差异。2026-11-16重新读取的生效ruleset仍列前述8项必需检查，但本任务同时保留并等待适用的R5原生验收，不以管理绕过或删除job满足合并条件。
+
+仓库runner API当前返回`total_count=0`。若新运行的r5-native因此排队，则缺少匹配runner及其任务绑定环境是外部未满足项；本批不降低门禁、不复用其他测试数据库，也不把旧基线7项成功算作新基线通过。需要先具备匹配runner后，才能取得完整CI结果并执行用户授权的条件合并。
+
+### 用户调整：macOS试点独立手动验收
+
+用户明确目标为Linux部署，并授权将macOS试点从普通PR移出。`Test OpenQMS`保留原来的main push／main PR触发、同PR过期取消和8项受保护检查；不再自动派发r5-native。R5原生测试移入`.github/workflows/r5-native.yml`，只通过main上的workflow_dispatch显式运行，采用preflight冻结的dispatch SHA；其他ref／事件在分配native runner前失败。
+
+原native job的标签、45分钟超时、owner-only且绑定job的独占PG15 bundle、命令、原生API/Chromium固定测试目录和安全收据不变。没有runner／有效bundle仍不能得到试点成功；常规Linux CI不冒充macOS试点已通过。Linux受控执行器尚未实现，AGENT_R5_CONTROLLED_ENABLED默认关闭保持原样。此授权调整取代上文把native作为每次PR都需完成的旧合并条件；main现有8项GitHub Actions规则不需要修改。

@@ -1,0 +1,56 @@
+name: R5 macOS pilot acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      frozen_sha: ${{ steps.freeze.outputs.frozen_sha }}
+    steps:
+      - name: Verify manual main dispatch and freeze SHA
+        id: freeze
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]
+          [ "$GITHUB_REF" = refs/heads/main ]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          echo "frozen_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+  r5-native:
+    needs: [preflight]
+    # Darwin pilot acceptance. Runner hook must provision a NEW dedicated
+    # PG15 resource and owner-only job-bound bundle for every job (see docs/e2e).
+    # No runner or missing bundle leaves this trial unavailable/failed, not green.
+    runs-on: [self-hosted, macOS, openqms-r5-sandbox]
+    timeout-minutes: 45
+    env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/r5-native
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.frozen_sha }}
+          persist-credentials: false
+      - name: Run mandatory R5 native API and Chromium acceptance
+        run: |
+          cd backend
+          python3 -B -m tests.ci.r5_native_gate "$RUNNER_TEMP/openqms-r5-native-job.json"
+      - name: Upload native safe receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-native-evidence
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
+          if-no-files-found: error

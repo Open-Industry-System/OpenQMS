@@ -64,10 +64,3 @@ async def test_gate_counts_toward_response_budget(review_case, monkeypatch):
         with pytest.raises(service.OutcomeReviewLimit):
             await service._dto(db, await review_case.report(db), material)
         await db.rollback()
-
-
-@pytest.mark.asyncio
-async def test_gate_does_not_bypass_current_authority(review_case):
-    await review_case.set_capa_level(0)
-    with pytest.raises(PermissionError):
-        await read(review_case)

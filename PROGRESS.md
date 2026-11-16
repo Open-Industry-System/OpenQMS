@@ -1,3 +1,8 @@
+### 2026-11-16：同步 PR #39 的 CI 与测试整理
+
+- 保留全部安全修复、SDK 兼容测试与 Oracle PyYAML 依赖；同步主分支手动 R5 验收工作流及重复测试整理。
+- 同步后实际验证：CI 契约与连接器测试 195 passed，工厂隔离及权限范围测试 110 passed；最终提交继续执行原生 R5 验收与全部必需 CI 检查。
+
 # OpenQMS 开发进度
 
 
@@ -15,6 +20,69 @@
 - 自有主验收PG容器及卷已精确清理，客户端和资源余量均0；临时凭据删除，日志与工作树保留。
 - 下一步：按授权评审和集成独立修复分支；部署前迁移平台限流表、通过私密CLI重置管理员、重新输入MES目标绑定凭据并声明ERP出口策略。根安装的生产控制器须经过既有人工安装流程更新；未执行远端安装、部署或合并。
 - 已按后续授权提交并推送 `dc966fee`，创建非草稿PR #38（main ← fix/security-scan-20261116），未合并或部署。首轮CI中Oracle自动化因新YAML语义测试缺少PyYAML失败，其他已结束项通过、后端仍在运行；补齐该作业测试依赖，隔离环境123项及16子测试通过，远端重跑结果另核。
+### 2026-11-16 — macOS R5试点改为独立手动验收
+
+- 验证：CI辅助及相关pure集合474 passed／3 warnings／exit0，29.41秒；手动main dispatch可冻结SHA，feature ref／非手动事件／非法SHA均失败且无输出。首次边界测试捕获本机旧Bash对compound conditional的errexit差异（473 passed／1 failed），已为SHA校验加入显式exit1并完整复测。actionlint1.7.7校验两个workflow通过，临时配置仅声明保留的自托管标签openqms-r5-sandbox；未忽略其他诊断。
+- YAML对象对照证明普通workflow仅移除native job，其余触发／job配置完全一致；独立native job除新增preflight依赖与固定checkout SHA外，命令、env、timeout及收据配置与原job一致。证据位于/tmp/openqms-pruning-merge/manual-r5-*.xml／log；原生试点未实际执行，不记为通过。
+- 用户明确不部署macOS，并授权调整适用范围。将r5-native从普通Test OpenQMS移动到独立r5-native.yml，仅main上的workflow_dispatch可进入；普通main PR／main push保留8项原有GitHub Actions检查、名称、失败状态及同PR取消策略。这个明确授权取代此前保留无条件native PR job的约束；没有修改分支保护设置。
+- 独立Ubuntu preflight验证事件、main ref与SHA格式，再由native job checkout精确冻结SHA，防止feature ref直接进入自托管执行器。保留macOS/openqms-r5-sandbox标签、45分钟超时、原API＋Chromium命令、固定必测名单、job绑定独占PG15/bundle检查和安全收据。原生验收缺runner会等待、缺bundle或不支持平台仍失败，不把未运行记为试点通过。
+- 不修改R5运行时代码或默认关闭开关；不新增Linux沙箱支持。更新docs/e2e.md和R5执行边界说明，明确手动试点验收与Linux常规CI的责任。PR #39继续承载本批测试精简与本次CI适用范围调整，慢fixture PR #37保留独立。
+
+### 2026-11-16 — PR #39 同步 R5 已合入基线
+
+- 合入新main后的CI辅助与相关pure集合469 passed／3 warnings／exit0，32.59秒；diff检查通过。测试精简改动相对f8b8d988仍限原测试文件和文档；最新main的生产代码、迁移、workflow、Makefile及R5门禁名单未被本批覆盖。
+- 最新workflow新增r5-native原生API/Chromium验收，保留self-hosted/macOS/openqms-r5-sandbox标签及完整R5必测集合；相对新main workflow／Makefile／r5_required.py无差异。仓库API返回可见runner总数0；若因此排队，缺少runner为外部未满足项，不将旧CI结果视为新基线通过，不降低门禁或绕过合并条件。
+- CI等待期间main合入PR #33，实际main推进至f8b8d9885441408503447c0ffa1aceb9f6b1060e。原PR #39运行43828123586基于旧main193746ab，不能作为新基线合并依据。正常合入最新main后重新验收，不强推、不绕过严格检查。
+- 冲突仅PROGRESS顶部并发追加记录；保留main最新R5记录与本批精简证据。runner、layer_selection及草稿服务测试代码自动合并，需复核重复D4别名仍移除、R5名单／native门禁完整保留。workflow与Makefile使用main的完整新增能力，不削弱R5。
+
+### 2026-11-16 — 测试精简独立 main PR 交付
+
+- 已创建PR #39，初始head80ed154f；移植后本地458 passed／3 warnings／exit0。首轮run43827872305的docs-check因PROGRESS不在文档匹配范围而失败；已补docs/development/backend-ci-timing.md，保留失败，不使用跳过标签；新增提交将触发新的完整PR检查。
+- 用户授权“CI没问题的话就合并”。推送后的测试精简分支尚无PR，其父分支慢fixture PR #37仍未合并。为保持本批范围独立，从远端main实际提交193746abb7c1eb9d196ef3997b6b91767490e3d1建立`codex/test-suite-pruning-main`，仅移植bb20ad93；不合入#37的数据库模板及逐模块计时改动，也不改其分支或工作区。
+- 移植仅PROGRESS顶部历史上下文冲突，保留main原有进度并加入下方三批审核证据。代码差异限测试及对应runner重复别名，不改工作流、生产代码或数据库fixture。5285为原804f8551成功PR样本的分母，16项删除的历史比例保持约0.30%；此次main独立PR的实际总数以新CI收据为准。
+- 远端main有效ruleset已核实：strict required checks来自GitHub Actions app15368，包含backend-tests、browser-protection、frontend-checks、sdk-checks (3.11/3.12/3.13)、docs-check、oracle-automation-checks八项。通过新的main PR完整检查并复核实际head与合并候选后才合并；不以父分支旧CI替代本PR检查。
+
+### 2026-11-16 — 第三批简化：供应商测试统一pytest断言（本地）
+
+- 沿用独立`codex/test-suite-pruning`，保留已有两批改动。继续审查时优先处理第二批已记录的供应商脚本断言缺陷；本批仅新增修改`backend/tests/test_supplier.py`与本进度，不改生产代码、数据库fixture或CI门禁。
+- 删除手工check/check_raises、全局通过／失败计数与22项手工执行清单，直接使用52个assert、4个pytest.raises及统一pytest脚本入口。净减少74行；保留22项测试名称及评分A/B/C/D阈值、扣分上限、零下限、组合扣分、合法／非法状态转换的原输入与预期。去掉grade_a中一次已由perfect_score完整覆盖的满分调用；不是将多个用例塞入循环压低数量。本批不另减用例，累计仍删除16/5285（约0.30%）。
+- 原helper只累计失败，pytest不会据此失败：错误评分、错误合法转换、预期异常未抛出、抛出错误异常类型四个私有故障探针，在改前均错误exit0；改后分别触发assert／DID NOT RAISE／RuntimeError，均正确exit1。故障只修改独立子进程内导入引用，无生产源码注入或落盘修改。
+- AST逐项证明22项测试在标准断言转换后主体一致，唯一有意减少为上述重复满分调用／断言；完整证明见`/tmp/openqms-test-pruning-round3/coverage-equivalence.json`。原check53处转换后删除重复1处，check_raises4处均保留对应异常类型与被测调用。
+- 正常pure入口改前22 passed／3 warnings／0.02秒，改后22 passed／3 warnings／0.03秒，均exit0；原独立脚本入口也22 passed／3 warnings／exit0（通过pure bootstrap和禁用数据库的配置执行）。依赖预装、没有pip安装／冷热实验；没有全量后端或新远端Actions结果，不据微小本地时差推算提速。
+- 证据目录`/tmp/openqms-test-pruning-round3/`：before／after正常JUnit与日志、四类before／after故障JUnit及mutations.json、原源码快照、AST证明、standalone.json。diff检查通过；本批无需PostgreSQL，不使用共享库。未提交、push或merge，保留前两批444项辅助／相关pure检查和82项真实PG/API验证的独立收据。
+
+### 2026-11-16 — 第二批低价值用例审核与精简（本地）
+
+- 在原独立 `codex/test-suite-pruning` worktree继续，基线仍为804f8551。CodeGraph工具本会话不可用，使用AST候选扫描后逐项核对源码、fixture、真实调用及保留断言；没有按测试数量、函数长度或只有一个assert机械删用例。
+- 本批新增删除10项：IQC空壳1项、重复工厂范围用例7项、合并字段回显覆盖2项。累计两批16/5285=0.3027%（约0.30%）。5285是既有远端后端选中数；精简后全量尚未运行，不能把这个比例当作全库低价值用例最终占比或耗时收益。
+
+| 删除用例（模块） | 保留覆盖／依据 |
+|---|---|
+| `test_request_reinspect_creates_clone`（iqc_inspection_service） | 原代码仅建mock并在patch内pass，不调用服务、不作断言；即使把复检服务替换为必定抛错，原用例仍1 passed。保留真实调用服务的复检状态／结果校验；不宣称原空壳证明过克隆成功。 |
+| `test_factory_invariant_product_line_mismatch`（factory_isolation） | factory_scope的`TestValidateFactoryInvariant.test_product_line_code_inconsistent_raises`保留同产品线不匹配与ValueError断言。 |
+| `test_factory_invariant_product_line_match`（factory_isolation） | 同类`test_product_line_code_consistent`保留匹配不抛错，显式设supplier_id=None避免MagicMock意外进入供应商分支。 |
+| `test_factory_invariant_no_product_line_no_error`（factory_isolation） | 同类`test_no_product_line_code_no_error`保留无产品线／供应商的空操作，增加execute未被await断言。 |
+| `test_single_factory_user_locked_even_with_bypass`（factory_isolation） | 同模块`test_bypass_without_group_still_locked_to_factory`及`test_bypass_does_not_grant_cross_factory_product_lines`共同保留工厂锁定、产品线ALL、越权403和实际查询过滤断言。 |
+| `test_multi_factory_user_default_factory`（factory_isolation） | 同模块`test_group_viewer_sees_assigned_factories`已有相同输入及默认工厂断言，并进一步检查允许／拒绝访问。 |
+| `test_multi_factory_user_default_from_first_user_factory`（factory_isolation） | factory_scope的`test_group_viewer_no_factory_id_with_user_factories`已有相同分支、两个不同UUID及首项回退断言。 |
+| `test_group_admin_default_factory_is_user_factory`（factory_isolation） | 同模块`test_bypass_with_group_admin_sees_all_factories`增加默认工厂仍取用户自身、非user_factories首项的断言；unit的`test_group_admin_ignores_user_factories`也检查这一默认值。保留bypass=True和False两种输入。 |
+| `test_draft_response_fields`（capa_draft_schema） | 将DraftResponse.model_validate并入既有真实generate_draft成功测试，检查实际响应的step，代替只构造固定对象再读取自身输入。 |
+| `test_paragraph_llm_output`（capa_draft_schema） | 保留真实generate_draft段落成功测试：经过ParagraphLLMOutput.model_validate，检查真实content、structured_data和step。extra=forbid独立请求边界仍保留。 |
+
+- 保留不同业务状态／端点／供应商与SPC来源、空值／非法值／权限拒绝及并发边界；不因AST仅字符串不同认定重复。另发现旧`test_supplier.py`的check/check_raises只累计失败、在pytest下未抛错，此为断言有效性修复候选；其评分边界有独立价值，本批没有删除或冒充其有效验收。
+- 同一受影响pure集合删前97 passed／删后87 passed，均3项既有warnings、exit0；两次pytest显示均0.28秒，依赖预装，无pip冷热实验，不能据此推算后端job收益。最初误将草稿服务整个模块置于pure入口，另两项未改DB测试被数据库隔离守卫拒绝（116 passed／2 errors）；保留before.log，不当作通过，随后仅选择本批修改的成功类。未放宽DB隔离、跳过策略或测试退出码。
+- 最终合并执行相关模块与CI辅助检查：444 passed／3 warnings／exit0，35.28秒；无skip/xfail，git diff --check通过。
+- 私有子进程中注入5类故障（放过工厂不匹配、GROUP默认工厂取错、多工厂回退丢失、响应step字段消失、段落content字段消失），保留用例全部如期失败，exit1；原IQC空壳在服务必定抛错时仍exit0，支持其删除依据。故障仅驻留各子进程内存，未写入生产源码。factory_isolation原独立脚本入口也14 passed／0 failed、exit0。
+- 详细本地证据：`/tmp/openqms-test-pruning-round2/`的before-pure／after-pure／final-pure日志与JUnit、mutations.json和各故障日志、standalone.json；先前6项的82项真实PG/API验证及资源清理证据仍保留。本批新增改动为无数据库测试，不使用共享实例。本轮没有新全量后端或远端Actions结果，没有push或merge；门禁工作流及job名称未改。
+
+### 2026-11-16 — 保守精简重复测试（本地验证）
+
+- 按用户选择，仅删除已证明重复或低价值且不损失业务边界的用例。基线804f8551；独立worktree `/tmp/openqms-test-pruning`，不修改冻结的全量A/B工作区。
+- 近期成功PR后端选择5285项（5281 passed /4 skipped /19 deselected）；源文件377个、AST测试函数定义3347个，参数化展开后用例数更多。已确认并删除6项重复覆盖，占5285项的0.1135%（约0.11%）；不是全库“重复＋低价值”的最终比例，也不代表耗时收益。
+- 删除→保留：SCAR模块的 `test_pl_change_blocked_when_scar_linked` → `test_update_linked_capa_product_line_forbidden`；`test_link_capa_capa_pl_denied_403` → `test_link_capa_scar_pl_denied_403`；outcome_doc_gate的 `test_gate_does_not_bypass_current_authority` → outcome_review的 `test_live_capa_revocation_denies_even_with_stale_scope`；verification_service的 `test_create_verification_rejects_verified_without_details` → verification_conclusion的 `test_passed_requires_details_on_create`；D4 local_process的 `test_text_message_sentinel_never_crosses_tcp` → 同模块 `test_first_claimable_text_profile_has_message_gate`；browser_runtime允许集合参数中完全相同的重复字典删除一行。
+- 前五组测试主体/参数/装饰器AST等价，核对使用的fixture和导入；verification两侧建CAPA helper的文档编号不同，但状态和校验输入相同。D4保留的必测用例仍完整遍历first/retry/old_epoch/history/ack五场景；仅同步移除runner及独立契约中的重复别名，缺失/跳过/失败校验不变。工作流、job名和8项合并门禁不变。
+- 正常pure入口：357 passed /3 warnings；正式API runner验证受影响与保留模块：82 passed /0 skipped/failed/deselected，exit0，pytest收据174.74秒。未运行精简后全量，不推算整套节省。独占PG15身份校验与迁移通过；收尾核验零额外连接，仅移除登记容器及1个专属卷，凭据删除。证据 `/tmp/openqms-test-pruning-evidence/{result.json,cleanup-result.json,validation.log}`，pure日志 `/tmp/openqms-pruning-pure.log`；diff检查通过。
+- 全量受控对照暂停：A为5280 passed /5 skipped，make4326.03秒；B为5279 passed /5 skipped /1 failed，make4398.99秒，失败为未改动的 `test_concurrent_first_sink_unique_race` 唯一键并发冲突。该业务边界测试保留，不将失败对照称为性能验收通过。远端804f8551现有CI后端73分41秒、pip精确键热缓存、8项检查成功；这与本地精简后结果分开记录。
 
 > **2026-11-16 最终合并候选本机验收通过**：主线整合实际提交`880313ea7e705000255514e067076946b3732ddf`已推送，GitHub已确认无冲突。本机同一干净提交串行`make check-r5-native PYTHON_BIN=/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python SDK_PYTHON_BIN=/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python` exit0/569.86s，native API68通过0skip（522.34s）、browser2通过0skip（44.79s）；源SHA绑定正确，70必选PASSED逐项恰好一次，新增阶段计时输出实际生成。日志`merge-20261116-native-1794810124156203000.log` SHA256`351b46fdd73547e1bce5a350eb318c14c1addccc742d5df0e1e9a879bc8ca02a`；证明`merge-20261116-native-proof.json`保留在原R5私有目录。纯CI297、运行器合同64通过，独立SPEC/QUALITY静态APPROVED；业务/迁移/前端/SDK与75fcc保持一致，public20261115_r5_responses、tenanttv014_r5_responses仍各一个head。
 >
