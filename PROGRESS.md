@@ -1,5 +1,13 @@
 # OpenQMS 开发进度
 
+### 2026-11-16 — macOS R5试点改为独立手动验收
+
+- 验证：CI辅助及相关pure集合474 passed／3 warnings／exit0，29.41秒；手动main dispatch可冻结SHA，feature ref／非手动事件／非法SHA均失败且无输出。首次边界测试捕获本机旧Bash对compound conditional的errexit差异（473 passed／1 failed），已为SHA校验加入显式exit1并完整复测。actionlint1.7.7校验两个workflow通过，临时配置仅声明保留的自托管标签openqms-r5-sandbox；未忽略其他诊断。
+- YAML对象对照证明普通workflow仅移除native job，其余触发／job配置完全一致；独立native job除新增preflight依赖与固定checkout SHA外，命令、env、timeout及收据配置与原job一致。证据位于/tmp/openqms-pruning-merge/manual-r5-*.xml／log；原生试点未实际执行，不记为通过。
+- 用户明确不部署macOS，并授权调整适用范围。将r5-native从普通Test OpenQMS移动到独立r5-native.yml，仅main上的workflow_dispatch可进入；普通main PR／main push保留8项原有GitHub Actions检查、名称、失败状态及同PR取消策略。这个明确授权取代此前保留无条件native PR job的约束；没有修改分支保护设置。
+- 独立Ubuntu preflight验证事件、main ref与SHA格式，再由native job checkout精确冻结SHA，防止feature ref直接进入自托管执行器。保留macOS/openqms-r5-sandbox标签、45分钟超时、原API＋Chromium命令、固定必测名单、job绑定独占PG15/bundle检查和安全收据。原生验收缺runner会等待、缺bundle或不支持平台仍失败，不把未运行记为试点通过。
+- 不修改R5运行时代码或默认关闭开关；不新增Linux沙箱支持。更新docs/e2e.md和R5执行边界说明，明确手动试点验收与Linux常规CI的责任。PR #39继续承载本批测试精简与本次CI适用范围调整，慢fixture PR #37保留独立。
+
 ### 2026-11-16 — PR #39 同步 R5 已合入基线
 
 - 合入新main后的CI辅助与相关pure集合469 passed／3 warnings／exit0，32.59秒；diff检查通过。测试精简改动相对f8b8d988仍限原测试文件和文档；最新main的生产代码、迁移、workflow、Makefile及R5门禁名单未被本批覆盖。

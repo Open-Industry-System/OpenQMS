@@ -168,3 +168,9 @@ main随后合入PR #33，推进至`f8b8d9885441408503447c0ffa1aceb9f6b1060e`；�
 新main的workflow新增`r5-native`：`[self-hosted, macOS, openqms-r5-sandbox]`，要求每job独占PG15和绑定到job的受控bundle，运行原生API及Chromium验收。PR #39保留该job及其runner标签、命令、超时和完整R5必测名单；workflow、Makefile与r5_required.py相对新main无差异。2026-11-16重新读取的生效ruleset仍列前述8项必需检查，但本任务同时保留并等待适用的R5原生验收，不以管理绕过或删除job满足合并条件。
 
 仓库runner API当前返回`total_count=0`。若新运行的r5-native因此排队，则缺少匹配runner及其任务绑定环境是外部未满足项；本批不降低门禁、不复用其他测试数据库，也不把旧基线7项成功算作新基线通过。需要先具备匹配runner后，才能取得完整CI结果并执行用户授权的条件合并。
+
+### 用户调整：macOS试点独立手动验收
+
+用户明确目标为Linux部署，并授权将macOS试点从普通PR移出。`Test OpenQMS`保留原来的main push／main PR触发、同PR过期取消和8项受保护检查；不再自动派发r5-native。R5原生测试移入`.github/workflows/r5-native.yml`，只通过main上的workflow_dispatch显式运行，采用preflight冻结的dispatch SHA；其他ref／事件在分配native runner前失败。
+
+原native job的标签、45分钟超时、owner-only且绑定job的独占PG15 bundle、命令、原生API/Chromium固定测试目录和安全收据不变。没有runner／有效bundle仍不能得到试点成功；常规Linux CI不冒充macOS试点已通过。Linux受控执行器尚未实现，AGENT_R5_CONTROLLED_ENABLED默认关闭保持原样。此授权调整取代上文把native作为每次PR都需完成的旧合并条件；main现有8项GitHub Actions规则不需要修改。

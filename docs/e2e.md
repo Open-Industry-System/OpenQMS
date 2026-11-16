@@ -242,8 +242,24 @@ pytest_bootstrap，不以部分调试收据作为整层通过。修改参数化�
 `make check-r5-native` 串行运行两层。unsupported host 的显式 native 入口直接失败，
 不访问数据库或做环境跳过；其行为有离线测试。
 
-GitHub 工作流增加 required `r5-native` self-hosted/macOS/openqms-r5-sandbox job。
-runner/hook 配置与远端执行 **PENDING / NOT RUN**：需要维护者配置此专用 runner，
+R5 macOS试点使用独立手动工作流 `.github/workflows/r5-native.yml`（`R5 macOS pilot acceptance`），
+只接受main上的 `workflow_dispatch`；普通PR及main push的 `Test OpenQMS` 不再派发此job。
+普通Linux后端、浏览器、迁移、权限及SDK检查继续运行，既有8项PR必需检查保持不变。
+这项调整针对部署目标为Linux的常规CI，不改变R5受控执行器仍限Darwin/dev、默认关闭的边界。
+
+工作流进入main后，需要验收macOS试点时手动运行：
+
+```bash
+gh workflow run r5-native.yml --ref main --repo Open-Industry-System/OpenQMS
+```
+
+Ubuntu preflight校验事件、main ref和SHA格式，冻结本次dispatch的main提交；通过后才可分配
+`[self-hosted, macOS, openqms-r5-sandbox]`，checkout精确冻结SHA。feature分支dispatch会失败，
+不会将其代码送入native runner。手动工作流保留 `r5-native` job名、45分钟超时、原生API＋Chromium
+完整固定目录、job绑定独占PG15及失败／缺失／skip拒绝语义；没有匹配runner会等待，缺少bundle会失败。
+手动试点验收是独立结果，普通Linux CI成功不代表macOS原生验收成功，也不代表Linux沙箱已实现。
+
+runner/hook 配置与远端原生执行仍为 **PENDING / NOT RUN**：需要维护者配置此专用 runner，
 预装项目依赖、setuptools79.0.1、Node、Chromium、sandbox-exec、Docker 与缓存 PG15；
 每个 job 的 hook 必须新建独占 PG15 实例，并在 `$RUNNER_TEMP/openqms-r5-native-job.json`
 写 owner-only（0600）JSON：`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`、`GITHUB_JOB`、
