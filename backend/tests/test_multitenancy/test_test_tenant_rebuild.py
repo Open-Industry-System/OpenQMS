@@ -1,15 +1,12 @@
-"""Test-only destructive maintenance on databases owned by mig_db_url, never qms_test."""
+"""Test-only destructive maintenance on owned fixture clones, never qms_test."""
 import asyncio
 import importlib.util
 import json
 import uuid
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
@@ -17,30 +14,58 @@ from sqlalchemy.pool import NullPool
 from app.core.tenant_transaction import TenantBinding, TenantUnavailable, bind_business_transaction
 from app.schemas.platform import TenantCreateRequest
 from app.services import tenant_migrator
+from tests.ci.database_template import fixture_database, freeze_template
+from tests.ci.prepare_database import run_migrations
 
 
-@pytest_asyncio.fixture
-async def rebuild_db(mig_db_url, monkeypatch):
-    cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
-    cfg.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", mig_db_url)
-    await asyncio.to_thread(command.upgrade, cfg, "head")
-    engine = create_async_engine(mig_db_url, poolclass=NullPool)
-    monkeypatch.setattr(tenant_migrator, "engine", engine)
-    monkeypatch.setenv("ALLOW_TEST_TENANT_REBUILD", "1")
+@pytest.fixture(scope="module")
+def rebuild_template():
+    """Run real public/tenant migrations and seed once; tests only clone it."""
+    import os
     from app.config import settings
-    monkeypatch.setattr(settings, "TENANT_MODE", "dev")
-    try:
-        yield engine
-    finally:
-        await engine.dispose()
+
+    with fixture_database(os.environ) as template:
+        run_migrations(template, template.async_url)
+        request = TenantCreateRequest(name="Disposable rebuild", slug="reset-" + uuid.uuid4().hex[:12],
+                                     admin_email="admin@example.test", admin_password="private-reset-secret")
+
+        async def prepare():
+            engine = create_async_engine(template.async_url, poolclass=NullPool)
+            try:
+                with pytest.MonkeyPatch.context() as patch:
+                    patch.setattr(tenant_migrator, "engine", engine)
+                    patch.setattr(settings, "TENANT_MODE", "dev")
+                    return (await tenant_migrator.provision_new(request)).id
+            finally:
+                await engine.dispose()
+
+        tenant_id = asyncio.run(prepare())
+        freeze_template(template)
+        yield template, request, tenant_id
 
 
 @pytest_asyncio.fixture
-async def sample(rebuild_db):
-    request = TenantCreateRequest(name="Disposable rebuild", slug="reset-" + uuid.uuid4().hex[:12],
-                                 admin_email="admin@example.test", admin_password="private-reset-secret")
-    tenant = await tenant_migrator.provision_new(request)
+async def rebuild_db(rebuild_template, monkeypatch):
+    import os
+    from app.config import settings
+
+    with fixture_database(os.environ, template=rebuild_template[0]) as database:
+        monkeypatch.setenv("DATABASE_URL", database.async_url)
+        monkeypatch.setenv("OPENQMS_MIGRATION_TEST_DATABASE_URL", database.async_url)
+        engine = create_async_engine(database.async_url, poolclass=NullPool)
+        monkeypatch.setattr(tenant_migrator, "engine", engine)
+        monkeypatch.setenv("ALLOW_TEST_TENANT_REBUILD", "1")
+        monkeypatch.setattr(settings, "TENANT_MODE", "dev")
+        try:
+            yield engine
+        finally:
+            await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def sample(rebuild_db, rebuild_template):
+    request = rebuild_template[1].model_copy(deep=True)
+    tenant = await tenant_migrator._load_tenant(rebuild_template[2])
     async with rebuild_db.begin() as connection:
         await connection.execute(text(f'CREATE TABLE "{tenant.schema_name}".discard_me (id int)'))
         await connection.execute(text(f'INSERT INTO "{tenant.schema_name}".discard_me VALUES (42)'))

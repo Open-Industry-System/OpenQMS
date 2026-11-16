@@ -11,6 +11,40 @@
 
 # OpenQMS 开发进度
 
+### 2026-11-16 — #37 验收期间同步新安全主线
+
+- baa276aa新基线的验证已完成：pure373 passed／3 warnings／exit0；正常API兼容及隔离组78 passed／0 skipped／exit0，源码与依赖指纹前后不变。该轮独占容器及唯一卷、凭据已核验清理。API CLI wall320.13秒，仅作本轮兼容执行记录，不与d0c7394e的旧配置跨基线归因比较；完整新CI按当前候选重新派发。
+- main已由另一路合入安全PR #38，更新至baa276aac5772ec3a1ec3178da77f30a93cea3f6；并非#37依赖#38才能开始，而是等待期间共享基线再次变化。正常合入最新main，仅PROGRESS并发记录需要处理，保留全部安全修复和两侧记录，不复制旧workflow覆盖新主线。
+- d0c7394e上的同组A/B、B/A已完成四轮，每轮78 passed／0 skipped／exit0且集合摘要相同。原配置setup为374.60／338.54秒，优化为146.74／117.60秒；重建模块原203.56／194.90秒，优化17.92／14.14秒。四套独占容器、卷及凭据均核验清理；未改模块仍有漂移，不归因整套提速。原始数据留在/tmp/openqms-pr37-followup/。
+- 上述数据属于d0c7394e代码快照；安全主线新增public迁移及schema差异过滤，不能把旧运行43889695917当作新候选验收。新基线需补正常API隔离组兼容验证和新的完整CI；原全量A/B失败记录继续保留，不删除知识沉淀并发测试。安全主线已独立修复其竞态，本批不覆盖该修复。
+
+### 2026-11-16 — 优先处理慢fixture PR #37，同步最新main
+
+- 新基线验证：CI基础设施＋runner pure 373 passed／3 warnings／exit0；正常API CLI串行同组78项A/B均78 passed／0 skipped／exit0，集合摘要一致。setup总计374.60→146.74秒，重建模块203.56→17.92秒；API CLI wall565.22→347.88秒（prepare与wheel构建不计入）。两边源码与依赖指纹前后不变，唯一执行源码差异为原fixture／克隆fixture文件；真实提交污染与异常清理回归均通过，两个专属容器和各1卷已验证清理、凭据已删除。
+- 同组未改迁移模块call101.26→89.91秒、主机load也有波动，正在补B/A反向对照；不据这对wall或旧CI差异判断整套收益。新CI将提供实际main合并候选的全量模块诊断与后端job时长。
+- 用户要求优先处理#37；与安全修复#38没有先后依赖。使用新的隔离worktree `/tmp/openqms-pr37-main-sync`，起点为PR真实head804f8551；保留原fixture分支、冻结的计时／对照工作区及其他PR改动。
+- 正常合入实际main d0c7394e4cda7bc73014051676f20e8c0c536780（已包含R5与#39测试精简／macOS手动验收）。仅PROGRESS顶部并发记录冲突；保留两侧进度。保留最新main的普通8项检查、独立macOS手动工作流、R5固定目录及测试精简，不复制旧workflow覆盖新main。
+- 原804f8551的远端8项通过属于旧基线，不能代替本次验收。此前本地全量A为5280 passed／5 skipped，B为5279 passed／5 skipped／1 failed，失败为未改动的knowledge_sink并发唯一键冲突；这一对照不算性能验收通过。新基线按实际验证记录结果，不预写整套提速。
+
+### 2026-11-16 — 补单次全量逐模块计时与受控对照（进行中）
+
+- 独立worktree /tmp/openqms-module-timing，起点a0f291be。新增每测试源模块selected/setup/call/teardown和集合顺序SHA256；沿用一次收集/执行、原receipt与失败退出码、既有脱敏log。pure358 passed /3 warnings，phase守恒与成功/失败/收集失败出口覆盖通过。
+- 将为PR #37追加计时补丁，保留main未合并及既有8项门禁；同时同机/同解释器依赖、每轮全新独占PG15，以正常make check-backend串行A/B全量。两侧同一测试集合、同一计时与公共模板初始化，仅对照侧恢复旧rebuild_db/sample（不复用模板），保留所有新隔离回归。控制源码差异和集合摘要将落盘；如未改模块明显漂移再反向复测。
+- 计划和口径见docs/development/backend-module-timing.md；全量及远端结果待运行，不预记通过/收益。原a0 PR的84分42秒热缓存与70分05秒冷缓存不能当受控对照。
+
+
+### 2026-11-16 — 慢 fixture 独立优化（本地完成）
+
+- 从最新 origin/main `193746ab` 建立独立 worktree /tmp/openqms-slow-fixtures，分支 codex/slow-fixture-optimization；保留原main、R5/R6及其他工作区。main保护设置与文档另在 codex/main-merge-protection（本地ce3b1acc）独立交付，未混入本分支。
+- 实测两个慢模块74项：sample29次累计53.41秒、均值1.842秒，为本组最高；rebuild_db30次累计48.59秒，均值1.620秒。按累计成本优化这条真实租户初始化/public迁移setup链，未声称定位了全后端最高fixture。
+- 每模块真实public迁移＋provision_new/租户迁移/seed一次，源模板禁连接；每项函数级独立克隆、NullPool engine、新Tenant对象和请求深拷贝，实际重建/恢复/故障注入/锁/隔离断言不变。原 mig_db_url、所有迁移专用测试、生产代码、Make/workflow/版本校验/所有覆盖和门禁未改；不分片、不按改动选测试、不放宽密码哈希。
+- 同一独占PG15、同解释器/相同74项：外层262.91→166.97秒，pytest收据261.47→165.49秒，execution256.95→161.45秒；重建模块setup102.81→8.20秒，call44.59→44.91秒。未改迁移模块总计108.35→107.31秒。sample累计53.41→0.99秒，rebuild_db48.59→2.86秒，新增模板初始化4.33秒。两轮74 passed /0 skip/deselected/failed，exit0，4项既有warnings；原测试函数/参数/marker/断言AST相同。
+- 新增真实提交污染/独立数据库/请求隔离与失败清理回归：正序4 passed；完整原组＋新回归反序78 passed，exit0。源码1075文件指纹在计时/反序期间一致。随后补pure前置拒绝（先1 failed再修正），最终pure351 passed /3 warnings；正式runner默认pytest入口43 passed /4 warnings /exit0，无诊断计时插件；独立故意失败探针1 failed，收据FAILED/exit1，失败未被吞。
+- 本地macOS/arm64、Python3.11.15/pytest9.0.3；依赖预装，无pip冷热实验；系统/数据库缓存未受控。未跑优化后完整后端或远端Actions，不能把本地组级差异推算为整套CI节省比例或PR等待时间改善。更多口径、调用次数与均值/最大值见 docs/development/slow-fixture-optimization.md。
+- 资源收尾已完成：只剩postgres/qms_test及系统template库，额外客户端0；核验容器ID/owner/image及卷唯一消费者后，仅删除本任务容器及1个专属匿名卷，回读均不存在；凭据文件已删除，非敏感日志/收据保留。最终diff/syntax检查通过。
+- 本批仅本地交付，不push/开PR/合并；下一次PR应读取同类runner整组/全套耗时、计数、缓存冷热及数据库清理。下一优先仍为重复fixture准备，不立即拆两个PG job；有意覆盖空库/旧revision的测试不能套用最新head模板。
+
+
 
 ### 2026-11-16 — Daybreak 17 项安全修复（独立工作树）
 

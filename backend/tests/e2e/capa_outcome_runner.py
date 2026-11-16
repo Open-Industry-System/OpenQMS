@@ -331,10 +331,26 @@ def _publish_pytest_timing(private_hooks: Path, log_path: Path, secrets: Sequenc
              **{phase: seconds(row[phase]) for phase in ('setup', 'call', 'teardown', 'total')}}
             for row in timing['slowest_tests'][:20]
         ]
+        selection = timing.get('selection_sha256')
+        if selection is not None:
+            if not isinstance(selection, str) or not re.fullmatch(r'[0-9a-f]{64}', selection):
+                raise ValueError('invalid selection digest')
+            public['selection_sha256'] = selection
+        module_lines = []
+        for row in timing.get('modules', []):
+            if type(row['selected']) is not int or row['selected'] < 0:
+                raise ValueError('invalid module count')
+            module = {'module': redact(row['module'].split('[', 1)[0], secrets),
+                      'selected': row['selected'],
+                      'phase_seconds': {phase: seconds(row['phase_seconds'][phase])
+                                        for phase in ('setup', 'call', 'teardown')}}
+            module_lines.append('OPENQMS_GATE_MODULE_TIMING ' + json.dumps(module, sort_keys=True))
         timing_line = 'OPENQMS_GATE_TIMING ' + json.dumps(public, sort_keys=True)
         with log_path.open('a') as log:
-            log.write(timing_line + '\n')
+            log.write('\n'.join([timing_line, *module_lines]) + '\n')
         print(timing_line, flush=True)
+        for line in module_lines:
+            print(line, flush=True)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         # Missing/corrupt diagnostics or an unavailable log sink do not turn
         # passing tests into failures, or hide the original failing exit code.
