@@ -678,7 +678,7 @@ def _make_notif(check, capa, sp, pl, user, decision, status, skip_reason, now, u
     )
 
 
-async def _build_projection(db, capa_id) -> dict | None:
+async def _build_projection(db, capa_id, *, fresh=False) -> dict | None:
     from app.services.capa_d4_material import require_legacy_root_only
     try:
         await require_legacy_root_only(db, capa_id)
@@ -688,7 +688,7 @@ async def _build_projection(db, capa_id) -> dict | None:
         await db.execute(
             select(CapaLateralDiffusionCheck).where(
                 CapaLateralDiffusionCheck.capa_id == capa_id
-            )
+            ).execution_options(populate_existing=fresh)
         )
     ).scalar_one_or_none()
     if not check:
@@ -698,6 +698,7 @@ async def _build_projection(db, capa_id) -> dict | None:
             select(CapaLateralNotification)
             .where(CapaLateralNotification.capa_id == capa_id)
             .order_by(CapaLateralNotification.created_at)
+            .execution_options(populate_existing=fresh)
         )
     ).scalars().all()
     try:

@@ -95,8 +95,9 @@ async def list_capas(
     return items, total
 
 
-async def get_capa(db: AsyncSession, report_id: uuid.UUID) -> CAPAEightD | None:
-    result = await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == report_id))
+async def get_capa(db: AsyncSession, report_id: uuid.UUID, *, fresh: bool = False) -> CAPAEightD | None:
+    result = await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == report_id)
+        .execution_options(populate_existing=fresh))
     return result.scalar_one_or_none()
 
 

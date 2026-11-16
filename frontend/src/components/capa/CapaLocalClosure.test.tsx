@@ -1,4 +1,4 @@
-import {render,screen,fireEvent,waitFor,cleanup} from '@testing-library/react';
+import {render,screen,fireEvent,waitFor,cleanup,act} from '@testing-library/react';
 import {it,expect,vi,beforeEach,afterEach} from 'vitest';
 import CapaLocalClosure from './CapaLocalClosure';
 import * as api from '../../api/capaR6';
@@ -7,6 +7,21 @@ vi.mock('../../api/capa',()=>({getDocGateDecision:vi.fn().mockResolvedValue({dec
 const record={revision_id:'revision',revision_no:1,reason:'独立现场核对',text:'本地预防',basis:'实物试验',analysis_id:null,analysis_method:null,channels:null,input_bindings:{},candidates:[],sources:[]};
 const form={eligible:true,can_edit:true,can_save_prevention:true,can_save_manual_analysis:true,can_review_propagation:true,can_waive:false,material_version:'local-form',prevention:record,manual_analysis:null,propagation:null};
 beforeEach(()=>{vi.clearAllMocks();vi.mocked(api.getLocalClosure).mockResolvedValue(form);vi.mocked(api.getManualCatalog).mockResolvedValue({material_version:'local-form',items:[]});});afterEach(cleanup);
+it('publishes unknown on load, refresh failure and credential-owned clearing, then recovers ordinary false',async()=>{
+ const classify=vi.fn();let resolve!:(value:any)=>void;
+ vi.mocked(api.getLocalClosure).mockReturnValue(new Promise(value=>{resolve=value;}));
+ render(<CapaLocalClosure capaId="report" status="D7_PREVENTION" onEligibility={classify}/>);
+ await waitFor(()=>expect(classify).toHaveBeenLastCalledWith(null));
+ await act(async()=>resolve(form));
+ await waitFor(()=>expect(classify).toHaveBeenLastCalledWith(true));
+ vi.mocked(api.getLocalClosure).mockRejectedValue(new Error('source unavailable'));
+ fireEvent.click(screen.getByRole('button',{name:'刷新本地材料'}));
+ await waitFor(()=>expect(classify).toHaveBeenLastCalledWith(null));
+ await screen.findByText('材料不可用，旧文本及版本已清除。');
+ vi.mocked(api.getLocalClosure).mockResolvedValue({...form,eligible:false});
+ fireEvent.click(screen.getByRole('button',{name:'刷新本地材料'}));
+ await waitFor(()=>expect(classify).toHaveBeenLastCalledWith(false));
+});
 it('saves controlled prevention and never generic PUT copies',async()=>{
  render(<CapaLocalClosure capaId="report" status="D7_PREVENTION"/>);
  fireEvent.change(await screen.findByLabelText('本地预防措施'),{target:{value:'预防现场措施'}});

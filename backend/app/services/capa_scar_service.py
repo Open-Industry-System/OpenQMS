@@ -33,13 +33,13 @@ async def load_capa_visible_or_404(
     return capa
 
 
-async def load_d3_affected_lots(db: AsyncSession, capa_id: uuid.UUID) -> list[str]:
+async def load_d3_affected_lots(db: AsyncSession, capa_id: uuid.UUID, *, fresh: bool = False) -> list[str]:
     """Current import run → current impact report → batches[].lot_no (non-empty, unique, order preserved)."""
     run = await db.scalar(
         select(CapaD3ImportRun).where(
             CapaD3ImportRun.capa_id == capa_id,
             CapaD3ImportRun.is_current == True,  # noqa: E712
-        )
+        ).execution_options(populate_existing=fresh)
     )
     if run is None:
         return []
@@ -47,7 +47,7 @@ async def load_d3_affected_lots(db: AsyncSession, capa_id: uuid.UUID) -> list[st
         select(CapaD3ImpactReport).where(
             CapaD3ImpactReport.run_id == run.run_id,
             CapaD3ImpactReport.is_current == True,  # noqa: E712
-        )
+        ).execution_options(populate_existing=fresh)
     )
     if report is None or not report.batches:
         return []

@@ -5,7 +5,7 @@ import * as api from '../../api/capaR6';
 import {getDocGateDecision,getDocGateAudit} from '../../api/capa';
 import {useCapaCredentialIdentity} from './useCapaViewRequests';
 import {boundedR6,useR6Resource} from './useR6Resource';
-interface Props{capaId:string;status:string;onChanged?:()=>void;onEligibility?:(eligible:boolean)=>void;}
+interface Props{capaId:string;status:string;onChanged?:()=>void;onEligibility?:(eligible:boolean|null)=>void;}
 export default function CapaLocalClosure(props:Props){const {identity}=useCapaCredentialIdentity();return <Local key={identity+props.capaId+props.status} {...props}/>;}
 function Local({capaId,status,onChanged,onEligibility}:Props){
  const {t}=useTranslation('capa');
@@ -23,7 +23,7 @@ function Local({capaId,status,onChanged,onEligibility}:Props){
  const [deferReason,setDeferReason]=useState('');const [owner,setOwner]=useState('');const [deadline,setDeadline]=useState('');
  const [waiverReason,setWaiverReason]=useState('');const [waivers,setWaivers]=useState<Record<string,Record<string,unknown>>>({});
  useEffect(()=>{setText('');setBasis('');setReason('');setManualReason('');setDocs({});setEmpty(false);setPropagation('');setDeferReason('');setOwner('');setDeadline('');setWaiverReason('');setWaivers({});},[resource.cleared]);
- useEffect(()=>{if(resource.data)onEligibility?.(resource.data.form.eligible);},[resource.data?.form.eligible,onEligibility]);
+ useEffect(()=>{onEligibility?.(resource.data?resource.data.form.eligible:null);},[resource.data?.form.eligible,onEligibility]);
  const data=resource.data;const form=data?.form;const editable=form?.can_edit===true;const disabled=resource.busy||!!resource.retry;
  const gate=status==='D8_GATE_PENDING';const analysis=form?.manual_analysis;
  function save(kind:'local-prevention'|'manual-doc-analysis'|'propagation-review',fields:Record<string,unknown>){if(!form)return;const body={operation_key:crypto.randomUUID(),expected_material_version:form.material_version,...fields};void resource.execute(async signal=>{await api.saveLocal(capaId,kind,body,signal);onChanged?.();});}

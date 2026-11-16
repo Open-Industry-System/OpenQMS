@@ -369,9 +369,35 @@ async def test_normal_detail_never_pairs_old_local_body_with_new_material_token(
         return result
     monkeypatch.setattr(local,'prevention_text',interleaved)
     response=await c.client.get(c.root)
-    assert response.status_code==409,response.text
+    assert response.status_code==200,response.text
+    assert response.json()['d7_prevention']=='new local body'
     refreshed=await c.client.get(c.root)
     assert refreshed.status_code==200 and refreshed.json()['d7_prevention']=='new local body',refreshed.text
+    assert response.json()['material_version']==refreshed.json()['material_version']
+
+
+@pytest.mark.asyncio
+async def test_normal_detail_still_rejects_two_unstable_local_projections(local_case,monkeypatch):
+    from app.services import capa_r6_local_closure as local
+    c=local_case
+    assert (await save_prevention(c)).status_code==200
+    original=local.prevention_text
+    attempts=0
+    async def interleaved(db,actor_id,report_id,default=None):
+        nonlocal attempts
+        result=await original(db,actor_id,report_id,default)
+        attempts+=1
+        form=await local_form(c)
+        saved=await c.other_client.post(c.root+'/local-prevention',json=dict(operation_key=f'unstable-read-{attempts}',
+            expected_material_version=form['material_version'],text=f'new local body {attempts}',
+            reason='normal employee concurrent update',basis='current authorized basis'))
+        assert saved.status_code==200,saved.text
+        return result
+    monkeypatch.setattr(local,'prevention_text',interleaved)
+    response=await c.client.get(c.root)
+    assert response.status_code==409 and response.json()=={'detail':'CAPA_MATERIAL_CHANGED'}
+    assert attempts==2
+    assert (await local_form(c))['prevention']['text']=='new local body 2'
 
 
 @pytest.mark.asyncio

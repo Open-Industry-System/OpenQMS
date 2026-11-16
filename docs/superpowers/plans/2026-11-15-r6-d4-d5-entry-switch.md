@@ -470,7 +470,7 @@ Task7最终44路径冻结v4，独立SPEC及fresh QUALITY全部发现修复并复
 - [x] **可信旧capture与已知来源继承**：复用经早审追加023不可变capture保存完整pre-fusion CAPA＋FMEA S，HMAC绑定真实namespace/generation/report/stage/精确item与来源，新旧unknown/empty分明；新preT采纳绑定canonical captureID且幂等，锁后完整来源/新鲜度复验。其后D4/legacyD5按字段保留known S限制与当前权限，不伪proof；metadata-before-body、SQL批量排除、历史/审核/导出/embedding/cache/provider/inflight及新audit均受保护，manual替换不降权，历史正常source编辑不因采纳时strict freshness而永久拒读。不把legacy D5 B扩到无关R5条目A/Rootonly；旧unknown行不回填，newunbound须重新生成，switched仍先410。补损坏/变参重复/撤权/批量外发零正文反例及完整受影响回归。
 - [x] switched 后 `GET d4/d5-fmea-recommendations`、`POST adopt-recommendation`、`POST draft/d4|d5` 不再调用旧实现；内部工具同样受服务层检查。普通 PUT D4/D5 必须携带当前材料/epoch 令牌，旧缓存或旧会话标识不可通过；字段更新仍走原 CAPA 服务与来源继承。D2/D3/D6/D7/D8 草稿按 Task 3 安全围栏保留。
 - [x] 前端按服务端 phase 切除旧推荐面板/D4D5 草稿/AI undo，书签仍打开原报告；legacy 仅用于切换前兼容阶段，switched 状态不可被 feature flag 或回退改回 legacy。断生成单独控制，不恢复旧入口。
-- [x] GREEN已通过，待精确本地提交 `feat(capa): drain legacy recommendation writes before entry switch`，真正 switch 子命令在隔离演练使用 §2.3 的 exercise_input，在正式环境使用 release_manifest＋独立上线授权；二者走同一状态机但目的和目标校验不可互换。不得直接 UPDATE 状态表替代切换命令，不自动执行用户环境操作。
+- [x] GREEN已通过，已精确本地提交 `c6b0a2cdff8c53bd7b6cb6fa2d8ccb9924f22220`（`feat(capa): drain legacy recommendation writes before entry switch`，89路径；提交后干净），真正 switch 子命令在隔离演练使用 §2.3 的 exercise_input，在正式环境使用 release_manifest＋独立上线授权；二者走同一状态机但目的和目标校验不可互换。不得直接 UPDATE 状态表替代切换命令，不自动执行用户环境操作。
 
 ```bash
 cd backend
@@ -492,12 +492,13 @@ npm test -- --run src/pages/capa/CAPADetailPage.r6.test.tsx src/api/capa.test.ts
 
 **文件**：新增 `backend/tests/e2e/test_r6_entry_switch_process.py`、`test_r6_entry_switch_browser.py`、`test_r6_live_chain.py`、`frontend/e2e/specs/capa/r6-entry-switch.spec.ts`；复用 `tests/e2e/test_r5_d5_process.py`、`test_r5_d5_ui.py` 的启动方式和当前资源守卫，扩展 `backend/tests/capa/r6_support.py`。新增用例归现有层，必选清单接口与 CI 负责 Agent 协调，不顺手重构 runner。
 
-- [ ] 在首次演练前冻结候选/兼容构建并登记 §2.3 exercise_input；真实命令在独占环境从 legacy→持久 draining→switched，保存准入关闭/排空/T 收据。输入不要求尚未产生的 C9/C10，不能直接改数据库状态；Task 10 复用此输入启动同份数据兼容演练。
-- [ ] RED 先用受控对端稳定复现缺失业务合同，再使用正常应用/真实模型执行 §2.2 C3-POS 的具体主链：从本报告 K2/K3 与单一外部 A/a、空 D4 开始，模型保存候选；员工核对来源并确认；现场验证记录 V 与声明签发 P；核对完整继承集合仍为 K2/K3/A，I 与 P 共同覆盖且逐项授权有效。D5 同任务保存两条待审建议，均在可定位检查点之后。
-- [ ] 同事修改措辞采纳 A，从正常“更正”入口更正 A 一次；保留原始建议/采纳时文本/更正当前文本和版本。B 按检查点撤回，夹入已采纳 A 的过期选择返回逐项状态；任务结束和刷新后状态一致。
-- [ ] 正常员工完成后续 D6、Task 6B 本地 D7/人工文档门禁/审批前传播不执行审阅与整份结果审核，验证材料包含更正后 A 及版本、无 B 正式措施；沿原权限完成批准，核对真实审计/版本/命令/证明引用。人工现场验证与模型生成分别记录，不用直接 seed D4/proof 的路径冒充此链。
-- [ ] 执行完整反例：C6 两写者/撤权/旧审核 expectation、VIEW/撤 EDIT、D4 A＋B 零交付、旧草稿首次/缓存/在途撤权、终态、同 UUID 隔离、切换竞争/未知提交重试；实际 UI 与 API 身份均有证据。
-- [ ] GREEN 后提交 `test(r6): cover one 8D from D4 candidates through corrected D5 review`；保存可重开的同一份数据用于 Task 10，记录测试数据 hash/版本与私有资源身份，不清理该专属卷。
+- [x] 在首次演练前冻结候选/兼容构建并登记 §2.3 exercise_input；真实命令在独占环境从 legacy→持久 draining→switched，保存准入关闭/排空/T 收据。输入不要求尚未产生的 C9/C10，不能直接改数据库状态；Task 10 复用此输入启动同份数据兼容演练。
+- [x] RED 先用受控对端稳定复现缺失业务合同，再使用正常应用/真实模型执行 §2.2 C3-POS 的具体主链：从本报告 K2/K3 与单一外部 A/a、空 D4 开始，模型保存候选；员工核对来源并确认；现场验证记录 V 与声明签发 P；核对完整继承集合仍为 K2/K3/A，I 与 P 共同覆盖且逐项授权有效。D5 同任务保存两条待审建议，均在可定位检查点之后。
+- [x] 同事修改措辞采纳 A，从正常“更正”入口更正 A 一次；保留原始建议/采纳时文本/更正当前文本和版本。B 按检查点撤回，夹入已采纳 A 的过期选择返回逐项状态；任务结束和刷新后状态一致。
+- [x] 正常员工完成后续 D6、Task 6B 本地 D7/人工文档门禁/审批前传播不执行审阅与整份结果审核，验证材料包含更正后 A 及版本、无 B 正式措施；沿原权限完成批准，核对真实审计/版本/命令/证明引用。人工现场验证与模型生成分别记录，不用直接 seed D4/proof 的路径冒充此链。
+- [x] 执行完整反例：C6 两写者/撤权/旧审核 expectation、VIEW/撤 EDIT、D4 A＋B 零交付、旧草稿首次/缓存/在途撤权、终态、同 UUID 隔离、切换竞争/未知提交重试；实际 UI 与 API 身份均有证据。
+- [x] GREEN及独立双复审通过，已保存可重开的同一份数据用于Task10，记录hash/版本与私有资源身份，不清理专属卷。
+- [ ] 精确本地提交（实际范围含侧栏/读取集成修正，拟 `feat(capa): complete R6 sidebar workflow and protected report reads`）；实际SHA完成后另记，不提前宣称提交。
 
 ```bash
 cd backend
@@ -509,6 +510,18 @@ cd backend
 前端脚本由上述 browser 测试复用现有正常应用启动器和 Playwright harness 执行，后端浏览器目标不能只测试 API 而未运行该脚本。
 
 **通过标准/证据 C9**：同一 report_id 的真实模型输入/输出交付记录、员工确认/验证/proof/采纳/更正/撤回/审批及 C6B 本地门禁/传播未执行事实一一可追溯；主链模型测试无替身，反例可用可控出口证明零调用。真实模型未保存建议即链不完整；Terra R5 单条 pending 不替代此验收。
+
+**执行证据方法补充（2026-11-17，执行前经独立SPEC原则认可；具体方案、源码及结果现均已复审通过，见下方最终收口）**：真实模型已完成、待审建议已持久保存，而外部人工复核记录因操作超时导致原测试失败时，可在**同一报告、同一原冻结运行代码/配置/策略/SDK/执行物及原9份执行文件完全不变**的前提下，另冻结一个只执行后续正常员工动作的操作驱动，继续核对来源、采纳/更正/撤回、本地门禁、审批和导出。原失败收据必须保留FAILED；新驱动有独立摘要、入口状态与允许端点清单和独立继续执行收据。C9只可标为“同报告顺序组合证据通过”，不能改称一轮新鲜完整pytest通过，不能把不同报告或失败轮次的成功片段拼接。
+
+继续执行前核对：原模型真实交付/命令、D4和D5完成任务、准确A/B仍待审且D5采纳决定为零（先前D4确认必须保留）、当前完整I/P/来源/检查点、实际建议原文与语义复核记录摘要；禁止创建/启动任务、消息补充或模型端点，新驱动仅走既有员工UI动作，前后必须证明模型交付和模型命令计数不增加、建议原文不变及所有原冻结身份零漂移。任何原模型阶段代码、配置、SDK、执行物或原9文件变化都不适用此补充，须重新执行受影响的真实模型链。临时进程PID/启动时间可在同冻结构建和原配置重启时变化，须另签真实实例登记并通过既有verify_inventory与只读status核验，不能改写原模型阶段身份或重做切换。该方法验证“任务结束后处理持久待审项”的既有产品能力，不新增产品权限或跳过业务门禁；生产放行仍另行授权。
+
+
+
+**Task9最终执行收口（2026-11-17）**：实现及全增量SPEC、最终同报告真实组合证据SPEC、全新QUALITY均APPROVED，无未解决发现；待精确本地提交，随后全新Task10继续。真实原始live303.27s仍0PASS/1FAIL，v1–v4继续收据仍FAILED；v5只读PASS13.724s/COMPOSED_PASS，9实际模型请求/18条模型egress审计、2模型保存命令不变，新增调用0。唯一A及一次更正/B撤回/手工D5/4NOT_EXECUTED/审批verified/PPT同一报告一致，未种入Root/proof/passed analysis。
+
+实际集成补正包括：D4侧栏canonical marker、两个新profile的规范来源/授权交集安装发现与异步PK/xmin防ABA、D7分类三态/作用域/同步失效/每次弹窗意图、GET限定一次完整一致读取重试与关联对象刷新、所有共享报告响应入口/出口完整D4/D5来源重验。均有实际RED与独立SPEC→QUALITY；不改已应用DDL/SDK/CI优化。控制模型真实应用/managed worker/Chromium完整双场景2PASS/0skip；新目录28/旧task_reads40/投影与来源11/local_closure20/entry_switch24/原生D4相关11/前端正确5文件120分别通过，不能相加冒充一次全量。扩大API211的210PASS/1FAIL保留，旧首次409oracle由整份20项补证；原83前端仅3实际匹配文件，最终120才含实际DocGate。
+
+执行基线`c6b0a2cd`＋完整manifest，运行1188＋执行9＋操作3＝1200文件零漂移，构建`2995115728be2af133aa694aa6c37b56a844f838c0e1cf7f1b29c6194bc03b09`，未伪造未来提交；实际Git提交完成后另记内容等价。最终交接`/private/tmp/openqms-r6-c9/task9-final-handoff.json` SHA`dcb09eee1cb6c46eba81d9b9cd473a29b658c29ef1dd816557a8630a14bc46a2`。同份真实报告已结案、Task10可编辑对照仍D6且未动，owner64323空闲/0其他连接，29已登记进程均退出。真实兼容和最终全量仍由10/11签收，最新main整合/远端CI/正式放行不在本轮冒称完成。详见[台账](../../development/r6-entry-switch.md)。
 
 ### Task 10：核对兼容构建并用含更正历史的同份数据演练回退（批 E）
 
@@ -617,3 +630,5 @@ R5 `2b5530c3` 的完整检查、原生 API/浏览器、来源可见性、ABA/pro
 ## 6. 2026-11-15 计划定向复审修订（三项 P1）
 
 本次静态修订将持久关准入与等待旧事务分离，补 C8-TIMEOUT/进程退出后恢复；冻结 C3-POS/C3-NEG 与报告输入绑定/R5 proof 的职责，并在 Task 3–5 先做可执行性门禁；区分仅限隔离环境的 exercise_input 与 C9/C10 完成后才生成的 release_manifest，演练用真实命令，禁止直接改数据库状态。四项产品决定不变。以上记录2026-11-15修订时点，当时未运行测试或迁移、Task1未开始。其后用户已批准全部执行；当前事实见各任务及§5执行登记，历史修订记录不代替运行验收。
+
+**Task9执行前远端更新（2026-11-17）**：R5 PR33仍merge `f8b8d988`、head `d06f63dd`；main现为`baa276aa`，新增PR38安全及PR39测试/CI整理。本轮保留`c6b0a2cd`本地执行基线，不导入无关CI/安全改动。将来整合须追加public安全head/R6 head合流，保留tenant024和parity排除，并对factory_scope空集合、认证/refresh/logout、身份初始化与附件安全重新验收；本次C9–C11不能充最新main证据。详见[台账基线复核](../../development/r6-entry-switch.md)。

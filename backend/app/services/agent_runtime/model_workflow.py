@@ -126,6 +126,17 @@ async def _messages(db, current, state):
                 'and save suitable proposals to this report using save_proposal for employee review. '
                 'Plan the steps yourself and ask for clarification when needed. '
                 'Saved proposals require separate employee adoption.')
+            if current.trial is not None and current.trial.profile == model_egress.R6_PROFILE:
+                # The fixed entry, rather than arbitrary employee prose, owns
+                # this source-free R6 review plan. All evidence/save checks
+                # remain independent of these model instructions.
+                content += ('\nR6 review plan: First read_d4. On a later turn, after the evidence '
+                    'has been delivered, use request_supplement to ask the employee whether to '
+                    'continue without additional source context. Wait for the structured '
+                    'continue_d5 response with additional_context none before saving. Then save '
+                    'exactly two independently reviewable corrective-measure proposals using '
+                    'save_proposal, grounded only in the authorized evidence, and finish. '
+                    'Do not invent facts, verification results, or employee adoption.')
         state.messages.append({'role':'user','content':content})
     state.accepted = current.run.accepted_message_seq
 

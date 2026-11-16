@@ -131,7 +131,17 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   const [lessonsData, setLessonsData] = useState<LessonsLearnedResponse | null>(null);
   const lessonsShownRef = useRef(false);
 
-  const [localClosureEligible,setLocalClosureEligible]=useState(false);
+  const localClosureOwner=useMemo(()=>({}),[id,credentialIdentity,capa?.status]);
+  const localClosureOwnerRef=useRef(localClosureOwner);localClosureOwnerRef.current=localClosureOwner;
+  const [localClosureClassification,setLocalClosureClassification]=useState<{owner:object;value:boolean|null}|null>(null);
+  const localClosureEligible=localClosureClassification?.owner===localClosureOwner?localClosureClassification.value:null;
+  const localClosureEligibilityRef=useRef(localClosureEligible);localClosureEligibilityRef.current=localClosureEligible;
+  const onLocalClosureEligibility=useCallback((value:boolean|null)=>{
+    if(localClosureOwnerRef.current!==localClosureOwner)return;
+    localClosureEligibilityRef.current=value;
+    if(value!==false){d7SkipIntentRef.current=null;setD7SkipIntent(null);setD7SkipDialogOpen(false);setD7SkipReasons({});}
+    setLocalClosureClassification({owner:localClosureOwner,value});
+  },[localClosureOwner]);
   const [pptLoading, setPptLoading] = useState(false);
   const [reviewReport, setReviewReport] = useState<any>(null);
 
@@ -225,7 +235,10 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   const [allD7Confirmed, setAllD7Confirmed] = useState(true);
   const [d7UnconfirmedItems, setD7UnconfirmedItems] = useState<D7UnconfirmedItem[]>([]);
   const [d7SkipDialogOpen, setD7SkipDialogOpen] = useState(false);
+  const [d7SkipIntent,setD7SkipIntent]=useState<object|null>(null);
+  const d7SkipIntentRef=useRef<object|null>(null);
   const [d7SkipReasons, setD7SkipReasons] = useState<Record<string, string>>({});
+  useEffect(()=>{if(localClosureEligible!==false){d7SkipIntentRef.current=null;setD7SkipIntent(null);setD7SkipDialogOpen(false);setD7SkipReasons({});}},[localClosureOwner,localClosureEligible]);
 
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -714,8 +727,10 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
   const handleAdvance = async () => {
     if (!id || !credentialsCurrent() || !coreEditable || capa?.status === "D8_APPROVAL_PENDING") return;
+    if(capa?.status==="D7_PREVENTION"&&(localClosureOwnerRef.current!==localClosureOwner||localClosureEligible===null))return;
     // D7_PREVENTION 未全确认 → skip 对话框
-    if (capa?.status === "D7_PREVENTION" && !allD7Confirmed) {
+    if (capa?.status === "D7_PREVENTION" && localClosureEligible===false && !allD7Confirmed) {
+      const intent={};d7SkipIntentRef.current=intent;setD7SkipIntent(intent);
       setD7SkipDialogOpen(true);
       return;
     }
@@ -738,8 +753,11 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     } finally { request.finish(); }
   };
 
-  const handleD7SkipConfirm = async () => {
-    if (!id || !credentialsCurrent() || !coreEditable || capa?.status !== "D7_PREVENTION") return;
+  const handleD7SkipConfirm = async (intent:object|null) => {
+    if (!id || !credentialsCurrent() || !coreEditable || capa?.status !== "D7_PREVENTION"
+      || localClosureOwnerRef.current!==localClosureOwner || localClosureEligibilityRef.current!==false
+      || !intent || d7SkipIntentRef.current!==intent) return;
+    d7SkipIntentRef.current=null;
     const request = requests.begin();
     setD7SkipDialogOpen(false);
 
@@ -1005,7 +1023,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
             </Button>
           )}
           {!["D8_GATE_PENDING", "D8_APPROVAL_PENDING", "D8_CLOSURE"].includes(capa.status) && (
-            <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance} data-e2e="capa-advance">
+            <Button type="primary" icon={<ArrowRightOutlined />} disabled={capa.status==="D7_PREVENTION"&&localClosureEligible===null} onClick={handleAdvance} data-e2e="capa-advance">
               {t("actions.advance", "推进下一步")}
             </Button>
           )}
@@ -1051,7 +1069,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
           )}
           <D5ProposalPanel capaId={id!} onChanged={() => refreshCapa()} />
           {capa.status==="D4_ROOT_CAUSE"&&<D4CandidatePanel capaId={id!} onChanged={()=>refreshCapa()}/>}
-          {["D7_PREVENTION","D7_COMPLETED","D8_GATE_PENDING"].includes(capa.status)&&<CapaLocalClosure capaId={id!} status={capa.status} onChanged={()=>refreshCapa()} onEligibility={setLocalClosureEligible}/>}
+          {["D7_PREVENTION","D7_COMPLETED","D8_GATE_PENDING"].includes(capa.status)&&<CapaLocalClosure capaId={id!} status={capa.status} onChanged={()=>refreshCapa()} onEligibility={onLocalClosureEligibility}/>}
           {capa.status !== "D8_APPROVAL_PENDING" && <DataCard title={t("detail.currentStepDetails", "当前步骤详情")}>
             {capa.status === "D1_TEAM" && (
               <div>
@@ -1231,7 +1249,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                   <Form.Item label={renderLabelWithDraft("d7", t("fields.d7Label", "预防复发措施"))}>
                     <TextArea
                       rows={4}
-                      disabled={localClosureEligible || capa.status !== "D7_PREVENTION" || !canEdit('capa')}
+                      disabled={localClosureEligible!==false || capa.status !== "D7_PREVENTION" || !canEdit('capa')}
                       value={localData.d7_prevention || ""}
                       onChange={(e) => setLocalData({ ...localData, d7_prevention: e.target.value })}
                       onBlur={() => handleUpdate("d7_prevention", localData.d7_prevention)}
@@ -1242,8 +1260,8 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                 <D7RecPanel
                   capaId={id!}
                   d5Correction={localData.d5_correction}
-                  canAdopt={!localClosureEligible && capa.status === "D7_PREVENTION" && canEdit('capa')}
-                  canAutoFill={!localClosureEligible && capa.status === "D7_PREVENTION" && canEdit('fmea')}
+                  canAdopt={localClosureEligible===false && capa.status === "D7_PREVENTION" && canEdit('capa')}
+                  canAutoFill={localClosureEligible===false && capa.status === "D7_PREVENTION" && canEdit('fmea')}
                   onConfirmationChange={(allConfirmed, unconfirmed) => {
                     setAllD7Confirmed(allConfirmed);
                     setD7UnconfirmedItems(unconfirmed);
@@ -1532,9 +1550,9 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
       <Modal
         title={t("d7.skipDialogTitle", "⚠️ 以下 FMEA 节点尚未确认")}
-        open={d7SkipDialogOpen && coreEditable && capa.status === "D7_PREVENTION"}
-        onOk={handleD7SkipConfirm}
-        onCancel={() => setD7SkipDialogOpen(false)}
+        open={d7SkipDialogOpen && coreEditable && capa.status === "D7_PREVENTION" && localClosureEligible===false}
+        onOk={()=>handleD7SkipConfirm(d7SkipIntent)}
+        onCancel={() => {d7SkipIntentRef.current=null;setD7SkipIntent(null);setD7SkipDialogOpen(false);}}
         okText={t("d7.skipConfirm", "确认跳过并推进")}
         cancelText={tc("actions.cancel", "取消")}
         width={600}

@@ -483,7 +483,8 @@ it('separates D4 analysis creation using only server-approved D4 profile and fix
  fireEvent.change(await screen.findByLabelText('D4 输入 FMEA'),{target:{value:a}});
  fireEvent.change(await screen.findByLabelText('D4 输入原因节点'),{target:{value:'cause-A'}});
  fireEvent.click(screen.getByRole('button',{name:'开始 D4 根因分析候选任务'}));
- await waitFor(()=>expect(api.createTask).toHaveBeenCalledWith({report_id:a,installation_id:a,model_deployment_id:b,request_key:expect.any(String),initial_text:'deliver_d4_root_cause_candidate_v1',derived_source_scope:{target_report_id:a,fmea_id:a,cause_node_id:'cause-A'}},expect.any(AbortSignal)));
+ // capa_d4_candidates.START_MESSAGE is the server's fixed D4 wire contract.
+ await waitFor(()=>expect(api.createTask).toHaveBeenCalledWith({report_id:a,installation_id:a,model_deployment_id:b,request_key:expect.any(String),initial_text:'analyze_d4_candidate_v1',derived_source_scope:{target_report_id:a,fmea_id:a,cause_node_id:'cause-A'}},expect.any(AbortSignal)));
  expect(screen.getByText(/新增事实请先维护 D2\/D3\/FMEA/)).toBeInTheDocument();
 });
 

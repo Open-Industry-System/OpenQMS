@@ -627,3 +627,93 @@ Task8实现、分层验证与独立SPEC→fresh QUALITY复审已通过；85非�
 初始CAPA完整1702组1643PASS/59FAIL，以及后续496组486PASS/10FAIL、562组538PASS/24FAIL、312组311PASS/1FAIL、原生128组126PASS/2FAIL的原始收据与失败均保留。对应逐PASSED节点闭环清单分别为`task8-first-full-failure-map.json`（59/59）、`api-20261116T142500657923-closure-map.json`（10/10）、`api-20261116T145357170754-closure-map.json`（24/24）、`api-20261116T140213877650-closure-map.json`（1/1）、`r5-api-20261116T155937893723-closure-map.json`（2/2）。具体RED/诊断及修复沿用前文，不能把多轮补证算作一次全新完整make。
 
 全部已知测试进程已退出、owned wrapper PID为空，58064资源空闲交回父代理；public早期合成夹具1actor/2reports/2immutable counters保留，public切换账本为0，不删除immutable历史或重置状态。Tasks9/10应新建第三套独占环境并保留同份更正/批准数据；Task11负责最终新鲜全量及明确R6原生必选。尚无真实R6云模型调用、两个实际应用/构建兼容签收或正式放行资格。
+
+Task8最终精确本地提交`c6b0a2cdff8c53bd7b6cb6fa2d8ccb9924f22220`（85非文档＋4相关文档＝89路径）；父核暂存blob与冻结逐项一致，提交后工作树为空。全新Task9实施者已接手；后续9→10→11继续，不停在Task8交接。
+
+
+### 2026-11-17 Task9前远端基线复核（只读，不自动集成）
+
+GitHub实际读取：PR33仍closed/merged，head `d06f63dd9d3d687a26ea5714b39a54f14671a01f`，merge `f8b8d9885441408503447c0ffa1aceb9f6b1060e`，merged_at 2026-11-16T08:40:48Z。当前main已为`baa276aac5772ec3a1ec3178da77f30a93cea3f6`，比该merge多13提交，含PR38安全修复、PR39测试精简与独立原生CI调整；这次变化已不只是此前11文件CI/诊断差异。只读比较元数据保存于`/private/tmp/openqms-r6-ky7vrez_/task9-remote-baseline-metadata.json`。
+
+本轮保持Task8提交`c6b0a2cd`为Task9执行基线，不合并/变基或导入其他Agent的CI与无关修复。具体后续集成影响：public新增`20261116_platform_login_limits`和合流`20261116_security_main_merge`（承接R5 responses），与本树R6 public24分支必须将来追加合流迁移，不改任一已发布DDL；tenant本树024不能伪称含public登录表，parity排除需保留两边。factory_scope的EXPLICIT空集合、对象/创建来源权限，普通认证的已公开管理员密码拒绝及refresh/logout轮换，需在将来集成源码重新验证，不能用本次旧基线收据签收。main启动移除默认管理员自动创建，正常试用须明确专用身份；本轮合成身份不代表未来生产管理员初始化。main知识沉淀新增事务级锁，本轮受限传播NOT_EXECUTED路径仍不得调用该服务；附件安全变化需与既有受控runtime入口保留。
+
+Task11须记录本地执行源码与远端CI/合并源码的关系；本轮无push，故不声称远端CI或最新main兼容通过。最新main整合及其相应迁移/权限回归作为后续集成前置单列，不在本轮暗中扩大范围。
+
+### Task9首轮真实试跑与有界意图（进行中，未签C9）
+
+第三套资源owner `07fd6a7bd49a49127111964febe569e8b34cd301`，loopback64323，独占容器/卷及私有登记`/private/tmp/openqms-r6-c9`；public/tenant正常迁移024。初次真实Terra已生成D4候选，经Chromium员工确认、正常HTTP验证/证明和推进D5；D5到达真实检查点后launch403，首轮live为0通过1失败（78.72s），零D5建议/保存命令。原因是试验把自由文字附在固定START及继续回复中，现有`require_bounded_messages`正确拒绝；不是已完成主链。原失败报告/任务/证明/检查点保留，不重置或改造为成功。
+
+独立Task9早期SPEC已批准仅R6固定启动语义的技术对齐：exact START wire不变，在服务端按已绑定R6 profile扩展来源无关的检查点及两条建议规划，R5提示逐字保持。结构化continue、自由文字拒绝、完整来源/证明/每次模型交付/命令幂等均不放宽；模型仍须真实生成两条并实际保存。受控RED/GREEN和既有权限回归后重新冻结两构建/执行配置及演练登记，并以新合成主报告重跑完整真实链；提示构造测试不等于模型执行证据。此处记录技术选择及进行中事实，不签C9/C10、不构造正式放行批准。
+
+### Task9重冻结试跑与全链页面复审（进行中）
+
+最小11行R6-only固定提示修正后，受控实际managed对端及完整旧R5模型工具文件30PASS/0skip（270.95s）；API保护136PASS/0skip（847.87s，启动于提示修正前，保护代码依赖未变；与native曾在不同夹具租户重叠，事实保留）；随后串行同UUID隔离2、旧R5完整process8及浏览器入口1分别通过。旧R5单节点虽然PASS，wrapper因登记文件必选不完整仍FAILED；后续整文件8通过，原失败不改写。副本及来源哈希映射在`/private/tmp/openqms-r6-c9/receipt-copies.json`，不把分组相加冒充新鲜全量。
+
+重冻结runtime1187摘要`27e0dbcdde5667083c4d26e26a8b6f435617090e38fdc558150ff21b99e216d4`，构建`9dc22f9b6ae4eee7579119b3a94d691f68d2338d136959ae29ac7703f6b1560a`；这是base c6b＋精确manifest构建身份，不是尚未产生的Git提交。该次真实Terra已从新报告空D4生成候选，VIEW浏览器、QE确认、正常V/P及推进D5通过，检查点后实际保存两条pending建议。独立全源码SPEC随后发现页面证据不足，故未签发人工语义复核继续文件，采纳前停止；live在复核等待期限后0PASS/1FAIL（238.69s，120s faulthandler仅诊断，不是provider重试）。已保存`final/d5-model.json`及该次租户/报告/两条建议，零正式措施、采纳、更正或结案；这一轮仅生成环节证据，不能签C9。
+
+独立SPEC要求先补全：员工真实打开候选及建议依据详情；普通手工D5经当前版本PUT与受限A共存并保留；同任务侧栏选择检查点/B/原因执行撤回并核已采纳A逐项结果；丢弃采纳成功响应后同key重放只产生一份措施/决定/业务审计。最终断言须精确核对A唯一正式条目、B撤回、原建议/原采纳/当前更正/历史、普通D5及当前文本进入审核/导出，证据限定当前report/task，完整I/P覆盖显式K2/K3/A。实施者还将D6、本地D7/人工文档分析/独立空影响确认、传播NOT_EXECUTED审阅和批准接入实际页面步骤。先用受控对端+正常应用/浏览器全链排查脚本，再完整source复审、重冻登记和新主报告真实模型全链；不再盲目付费重试，不把API事后读取当员工事前核对。
+
+### Task9受控全页面执行补正（仍待最终C9）
+
+补齐A–D及完整正常页面步骤后，独立SPEC源码复核无剩余阻塞；执行仍单独待验。受控第一轮实际已显示三项来源，但测试使用URL.endsWith漏掉正常factory_id参数，修正为路径匹配并加20s单步deadline（整phase120不变）；原失败保留。第二轮已通过真实依据查看、采纳响应丢失/精确重试、手工D5、更正及历史、同任务侧栏B撤回/逐项API结果，D5→D6正常200后因响应在capa.status而非顶层status使oracle失败；仅修测试。该报告原样保留在D6_VERIFICATION，可作为Task10单独可编辑对照；它是受控模型正常创建的数据，不是最终Terra主报告，不克隆批准回执或解冻结案报告。
+
+第三轮进一步正常完成D6、本地D7人工预防和传播NOT_EXECUTED保存，发现真实UI集成缺口：header推进仍弹出旧FMEA未确认节点跳过窗口，尽管localClosureEligible=true且旧节点操作已禁用。没有点击skip或伪造确认。证据`/private/tmp/openqms-r6-c9/run-1794850510814550000.log`及受控目录`final/controlled-ui-11052ae7f3184862bfa05d1c83a5cc29`。独立早期SPEC已批准最小条件修正：仅旧D7未确认modal判定增加!localClosureEligible；服务端既有当前本地预防/传播确认、完整来源/版本/状态门禁不变。先验证eligible普通D7_COMPLETED请求无skip参数/旧modal、noneligible仍走原modal及后台拒绝未满足本地门禁，再跑受影响完整前端文件/类型/构建与受控全页面链，重冻后才再次真实模型。当前不再是只有model_workflow提示改动，新增这项已复审的前端修复，尚未签完整C9。
+
+### Task9分类竞态与完整报告读取补正（最终整链仍待）
+
+分类从boolean升级为unknown/eligible/ordinary三态，按当前报告、凭据与阶段的单调owner绑定；未知/刷新失败时禁用D7推进和旧动作，旧modal关闭并销毁每次打开的意图，确认时读取当前分类/owner/意图，避免Ant Modal动画期间旧onOk捕获false后继续提交。5项预期RED及真实旧footer提交RED保留，最终受影响整文件83通过，应用/E2E类型及构建通过。完整受控诊断第10轮正常完成D8_CLOSURE，PPT按钮图标前缀locator修正后实际Chromium本地export200并保存文件；这些仍是分段诊断，不能相加签完整C9。正常浏览器会话按员工0600保存并复用单一owned frontend origin/strictPort；登录限流和认证策略不变。保存响应等待finished/body及真实已保存值后才显式刷新。
+
+控制第9轮的并发报告GET409造成更正响应取消，但更正已提交；未捕获其确切409正文，静态路径指出GET材料版本冲突，104次后续正常并发读取均200，不能伪造重复复现。另用真实独立租户事务精确复现原有版本取样边界缺陷：中途提交报告标题和供应商名称及计数更新，原GET仍200返回旧标题；请求内已缓存的供应商对象也会保持旧值。GET改为最多两次完整只读尝试，仅第一次确切CAPA_MATERIAL_CHANGED重读；每次当前授权后、fresh报告读取前取版本，完整投影/关联实体显式刷新，最终授权和版本围栏不变。其他409/403/404原样，不重放任何业务写入，不expire当前员工/Scope造成隐式IO。
+
+进一步真实D5-only新capture/正常采纳、D4空的反例证明：来源撤权可不改变材料版本，旧最终Root-only鉴权返回200泄出D5。共享响应构造器现于复制字段前及最终版本检查前均调用当前D4/Root与D5 bound-source授权，覆盖GET、列表及创建/PUT/推进等响应；撤权优先403无正文。实际LIST/已提交PUT的撤权RED与entry-denial保留，PUT合法提交的行及一次UPDATE审计不被谎称回滚，也不重放。最终新整组11PASS/0skip（37.27s）；扩大原保护、legacy capture、Root材料、本地门禁/PPT等API回归仍待结束。所有原RED/无效runner mode/工具超时及源码适用范围保留在私有收据，不合并冒充全量。
+
+实际切换脚本补入status→close→renew→finish→status，独立SPEC源码通过。exercise-initial.json保留原字节，续期以同operation/exercise/目标/配置、原canonical digest及实际close epoch绑定并独立登记新摘要。exercise-authority-chain.json只证明提议和授权，接受事实必须由真实renew/finish/status收据共同确认；最终C9/C10须分别记录ORIGINAL exercise与CURRENT accepted renewed摘要。后续本地提交改变Git HEAD不改变冻结执行物：验证器校验签名source_revision及精确文件/执行物/配置/Schema，不动态依赖当前HEAD，交接保留真实c6b＋manifest执行身份及随后提交的内容等价证明，不改写不可变部署/证明/收据。
+
+### Task9完整受控双场景与事件元数据核对（未签C9）
+
+新目录规范来源发现与防ABA原生28PASS/0skip，既有task_reads整文件40PASS/0skip；正确5份前端文件（包含实际`components/capa/__tests__/DocGatePanel.test.tsx`与完整Sidebar）120PASS/0skip，app/E2E类型及build通过，前述83仅覆盖当时实际匹配的3份文件，不能冒称含DocGate。稳定执行源下切换整文件24PASS/0skip256.53s，D4管理执行/协议/有界补充原生11PASS/0skip127.92s。扩大API原211组仍为210PASS/1FAIL：旧首次409期待已改为当前正文/令牌断言，本地门禁整文件20PASS并保留持续不稳定409；不改写原211失败。
+
+实际新侧栏暴露的D4固定指令与后端不一致已通过canonical unit及真实UI create201ready→launch403 RED复现；最小修正仅D4使用analyze_d4_candidate_v1，D5原wire逐字保持。目录原来忽略新profiles且D4错误依赖证明，新增source_discovery复用同创建的规范来源验证/完整grant交集。异步前后同命名空间、定序PK/xmin快照覆盖全部实际咨询的来源及lineage，不读正文/图/词条，不输出源scope map；最后一次await后同步重验精确profile/fingerprint/到期和生成开关，无await后再返回。验证期间撤权、换绑、禁用及最后查询期间关闭准入均有真实反例。
+
+首个冻结受控7/8回合pair实际0PASS/2FAIL142.67s。direct场景已完成同报告真实UI D4/D5创建启动、依据核对、确认/V/P、两条建议、采纳丢响应重试、手工D5、更正/历史、侧栏B撤回、本地D7/人工文档门禁/空影响独立确认/传播不执行、审批结案、本地PPT及主要SQL断言，仅最后MES字段oracle过窄。question场景在模型前prepare失败：前一pytest event loop的全局asyncEngine池未在同loop清理。原报告/所有历史/失败收据保留，不把分段动作算pair全通过或真实C9。
+
+独立SPEC批准仅执行层补正：Exercise teardown之后finally await engine.dispose，保留数据卷/历史；MES严格核对现有五字段capa_id、old_status、new_status、changed_at、product_line_code，匹配实际报告UUID、合法状态、带时区时间和本例产品线，拒绝额外正文。不新增生产wire字段，当前路径不含document_no，不盲目允许它。历史“MES仅ID/status”是概要用语，本轮准确范围为ID/状态/路由标识/状态事件时间；不意味着业务正文传播获准。修订后需重冻、整组重跑再做真实Terra最终C9。
+
+### Task9最终真实模型轮次与操作超时后的同报告继续方案（尚未执行继续）
+
+新final2报告`d331cf97-003b-41a7-8976-36743786d71e`，租户`59f48d77-aead-49ef-a8c8-e68e4834eb43`/generation1，独占旧第三套资源64323。真实CLI完成close1→renew2→switched3，原exercise摘要`6461ef97bc24da0143a84a743e39e4a40fe2d8d20a04c5dd2e11945483569980`，实际接受的续期摘要`75fdbc4875f0d6ee0a68903b9d4d64f79d5aa6bbe0fece14496fa2e5fedf0511`。原1188运行文件摘要`74fc2b2f75005b0c4e25a15f48e4ad63264f81bafcd7769da38bca58b0b1b60e`，构建`2995115728be2af133aa694aa6c37b56a844f838c0e1cf7f1b29c6194bc03b09`，配置`672e4eef5836924d67f4651e03fa0fb7d8d54a45cac76040e29898eed3aa430a`；真实执行为c6b＋精确manifest，不改写成未来Git SHA。精确1200份运行/执行/操作字节另存final2/executed-source。
+
+本轮真实Terra已从两种实际侧栏启动：D4候选→只读/QE依据查看→员工确认→正常V/P，D5检查点后生成两条真实待审建议。实施者晚13.5s写入语义复核文件，错过脚本120s门槛；原真实live收据`openqms-ci-f228rx89`实际0PASS/1FAIL303.27s，必须保留FAILED。没有采纳、更正或结案，模型/来源校验没有失败，不伪装原测试成功，不盲目再次付费生成。实际A为按既有针具检查/更换/记录执行，B为完成复核/跟进，复核记录后续已真实写入，建议原文和待审状态保留。
+
+独立SPEC再次实核原1188运行文件与9执行文件零漂移，原则认可在同一份已持久待审数据上继续**正常员工流程**，验证任务结束后的持久处理能力；具体独立驱动/端点/入口状态方案仍待复审。计划已在C9补充执行证据方法：原失败收据＋单独冻结的员工继续驱动与独立继续收据，只可合成同报告顺序证据，不能称一次新鲜完整pytest通过。前置必须准确核对原模型/命令/I/P/来源/检查点/A/B待审/复核摘要，禁止创建、启动、补充消息和模型调用，前后模型交付/命令数不变、原文不变；任何原运行/配置/策略/SDK/9执行文件漂移均不适用，须重跑受影响真实链。所有旧失败及两份受控完整成功报告继续保留。
+
+## 2026-11-17 Task9最终签收：同报告真实模型＋顺序员工继续证据
+
+最终独立SPEC与全新QUALITY均APPROVED，无Critical/Important/Minor发现；尚待本地精确提交，随后Task10→11。代码、来源保护和正常界面集成已完成；**C9为预先批准并写入计划的同报告COMPOSED_PASS，不是一轮新鲜完整live pytest PASS**。
+
+| 证据 | 精确结果 |
+|---|---|
+| 原真实Terra模型轮次 | 原live0PASS/1FAIL303.27s，员工语义复核记录晚13.5s；真实模型D4＋UI确认/V/P与2条D5已保存。原失败永久保留 |
+| 继续v1 | 6.206s失败、动作前；D4状态oracle错用confirmed，真实canonical为adopted |
+| 继续v2 | 8.492s失败、动作前；只读derived-scope查询误用task_id，实际经task_grant_id关联 |
+| 继续v3 | 17.313s失败；正常查看完整来源后A已采纳并模拟响应丢失。两个固定外部字体GET仍被阻断，误当未知请求使guard失败；B仍待审。真实A/key/丢失响应保留，不重新采纳 |
+| 继续v4 | 81.243s失败；首写仅原body/key精确重放HTTP200/body SHA等于v3结果；正常手工D5、更正、B撤回、本地门禁、审批与PPT均已完成，最后缺少既有export metadata GET allowlist使guard失败。没有重做业务步骤/导出 |
+| 最终v5 | READ_ONLY_VERIFICATION_PASS13.724s，正常认证/GET/只读SQL；不写业务、不重复导出、不调模型。既有PPT/来源/当前及历史/批准/审计/模型不变及清理全部通过 |
+
+真实同报告`d331cf97-003b-41a7-8976-36743786d71e`、租户`59f48d77-aead-49ef-a8c8-e68e4834eb43`/generation1，最终D8_CLOSURE、outcome批准verified；D4任务`5778bd9b-f0e8-46e4-b9bd-a1dbf7b3f82a`、D5任务`7c7d0f1f-3d94-4970-b841-11ab9602cac2`。A建议`6865152e-8177-499e-9e1e-1fcb38ac4cb4`→唯一措施`c93c0088-1e64-43c6-92dc-8ac7e334920e`，更正revision`23e7ee80-9ada-4f93-8766-d770e7024e7a`；B`205c38fe-c656-4ada-8881-6a7139139a01`已撤回。原建议/采纳时文本/当前更正/历史区分、普通D5并存、完整3来源I/P/检查点及4通道NOT_EXECUTED、真实人工文档分析和独立空影响确认、审核与审计全部核对。真实验证记录是合成测试身份经正常API形成的流程证据，不是实际车间质量或用户质量签收。
+
+原模型9次请求全部完成，对应18条尝试/完成egress审计；两个模型保存命令不变。v3原baseline＝v5前＝v5后，继续期间新增模型请求/模型命令为零。新独立驱动的默认拒绝策略从未放行字体外网，两条准确字体URL仅作为“预期拒绝”记录；未知请求一律阻止后续写入。原1188运行＋9执行＋3操作文件1200精确字节及58原始/62外部引用独立双复核零漂移，配置/SDK/权限策略不变。临时PID重启有独立签名登记、verify_inventory与只读status，原exercise未重复切换。
+
+最终交接`/private/tmp/openqms-r6-c9/task9-final-handoff.json` SHA`dcb09eee1cb6c46eba81d9b9cd473a29b658c29ef1dd816557a8630a14bc46a2`；精确1200字节清单`final2/executed-source-manifest.json` SHA`fd3c31c230c70995a738dd8a0fdd8848c6b1e8dde223d4fc3fe50c3ddf70f072`。以下均在该owner目录：
+
+| 最终文件 | SHA256 |
+|---|---|
+| continuation-v5/continuation-receipt.json | 350d3ce88bdc834c7bfc2edaebd8f631aef2d2a117912177058fef5b6e44d69e |
+| continuation-v5/composed-c9-evidence.json | f94516e364f6d6899fd50e92c2ce1e87c67be5ad2a275254fb9c3892009c239f |
+| continuation-v5/c9-evidence.json | 835c2295bff8087991ac3a389783af7b47c0959bfb5cc9770513b26a5de0452f |
+| continuation-v5/approved.pptx | ef3bb2380da49dfc5157f0f09c5e614d039a3e74ff9817ad067ca8d1fe939abc |
+| continuation-v5/restart-registration.json | c59f492656779606caad20cdc62f6f2f07f9f4808817cf2ded49fd9cd90164c3 |
+
+同一轮受控完整双场景2PASS/0skip257.34s（7/8对端回合），source discovery28、旧task_reads40、GET投影/来源11、local_closure20、entry_switch24、D4相关原生11、前端正确5文件120及类型/构建分别PASS；旧扩大API210PASS/1FAIL不改写，旧83前端作用域按前文纠正。最终全量由Task11新鲜执行，不把这些分组相加。Task10使用本报告已结案数据读核与源保护，另用仍D6的控制报告`a12167c3-cb1a-4b08-8ef3-e610544b18e2`测试genoff下正常更正；该控制未改动，准确元数据`final/controlled-ui-e1a090cb8f36480abb402fb4b3d78ba8/task10-editable-control.json` SHA`26595ae81004a776f6bbf91b29854438b39fc348de7be8ddcc004b132cdb3838`。
+
+29个登记PID均不再存活，64323真实owner/image/container/volume核验、其他连接0、资源空闲交回。不清理同份报告/卷，不推送/合并/部署/用户环境切换，不导入其他Agent的CI或最新main安全更改。R6-safe实际compat与最终全量仍待10/11，原样main/R5仍不是安全回退版本。

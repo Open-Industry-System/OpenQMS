@@ -29,6 +29,25 @@ from tests.services.agent_runtime.conftest import committed_runtime  # noqa: F40
 PASSWORD = 'R6SyntheticActorPassword123!'
 
 
+def registered_exercise_environment(source):
+    """Resolve only the preserved C9 directory bound to its owner registration.
+
+    The real process lane is distinct from ``r6_case``'s ASGI transport. This
+    accessor carries configuration, never an application/dependency override.
+    """
+    import json
+    from pathlib import Path
+    registration = Path(source['OPENQMS_TEST_RESOURCE_FILE'])
+    resource = json.loads(registration.read_text())
+    directory = Path(resource['r6_exercise_directory'])
+    if directory.resolve() != registration.parent.resolve():
+        raise ValueError('exercise directory must belong to registered owner')
+    environment = json.loads((directory / 'environment.json').read_text())
+    if Path(environment['OPENQMS_TEST_RESOURCE_FILE']).resolve() != registration.resolve():
+        raise ValueError('exercise resource mismatch')
+    return resource, directory, environment
+
+
 class R6Actor:
     def __init__(self, case, *, user_id, role_id, username, client):
         self.case = case

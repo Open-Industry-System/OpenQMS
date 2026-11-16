@@ -16,7 +16,7 @@ ROOT=Path(__file__).resolve().parents[3]
 
 
 
-async def owned_cli(case,tmp_path):
+async def owned_cli(case,tmp_path, *, runtime_pid=None, deployment_config=None, expiry_minutes=15):
     # This integration lane is intentionally explicit: an unknown environment
     # is refused, never treated as an exercise just because its DB ends _test.
     resource_path=os.environ['OPENQMS_TEST_RESOURCE_FILE']
@@ -27,7 +27,7 @@ async def owned_cli(case,tmp_path):
     namespace=dict(tenant_id=str(case.binding.tenant_id),schema=case.binding.schema_name,generation=case.binding.generation)
     config=tmp_path/'config.json'
     config.write_text(json.dumps({'deployment_role':'synthetic_exercise','owner':resource['owner_nonce'],
-        'environment_id':environment_id,'tenant':namespace}))
+        'environment_id':environment_id,'tenant':namespace, **({'execution':deployment_config} if deployment_config else {})}))
     async with case.session() as db:
         actual=(await db.execute(text('SELECT current_database(),current_user,(pg_control_system()).system_identifier::text'))).one()
         public=await db.scalar(text('SELECT version_num FROM public.alembic_version'))
@@ -49,9 +49,10 @@ async def owned_cli(case,tmp_path):
         owner=resource['owner_nonce'],database=actual[0],database_role=actual[1],system_identifier=actual[2],
         tenant=namespace,public_head=public,tenant_head=tenant,candidate_build=build,compatible_build=build,
         source_manifest=digest(sources),config_digest=config_digest)
-    observed=subprocess.check_output(['ps','-p',str(os.getpid()),'-o','lstart=','-o','command='],text=True).strip()
+    launch_pid=runtime_pid or os.getpid()
+    observed=subprocess.check_output(['ps','-p',str(launch_pid),'-o','lstart=','-o','command='],text=True).strip()
     launch_key=uuid4().hex+uuid4().hex
-    launch=dict(pid=os.getpid(),start=observed[:24],command_digest=hashlib.sha256(observed.encode()).hexdigest(),
+    launch=dict(pid=launch_pid,start=observed[:24],command_digest=hashlib.sha256(observed.encode()).hexdigest(),
         build=build,role='server',deployment_role='synthetic_exercise',owner=target['owner'],executable=executable,
         executable_digest=executable_digest,config_digest=config_digest)
     launch['signature']=hmac.new(launch_key.encode(),digest(launch).encode(),hashlib.sha256).hexdigest()
@@ -65,7 +66,7 @@ async def owned_cli(case,tmp_path):
     sign()
     document=tmp_path/'exercise.json'
     document.write_text(json.dumps(dict(version=1,kind='exercise_input',purpose='r6-rehearsal.v1',
-        exercise_id=str(uuid4()),expires_at=(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat(),target=target,initial_epoch=0)))
+        exercise_id=str(uuid4()),expires_at=(datetime.now(timezone.utc)+timedelta(minutes=expiry_minutes)).isoformat(),target=target,initial_epoch=0)))
     from app.services.capa_switch_evidence import Document
     def authorize_document(value):
         canonical=Document.model_validate(value).model_dump(mode='json',by_alias=True)

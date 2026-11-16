@@ -408,20 +408,22 @@ async def _authorize_capa_root(db, scope, report_id, *, allow_controlled=True):
         raise HTTPException(status_code=404, detail="8D report not found") from None
 
 
-async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, actor_id=None) -> CAPAResponse:
+async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, actor_id=None, *, material_fence=None, fresh=False) -> CAPAResponse:
     """Build CAPAResponse with scar / d3 lots / supplier_risk_input / supplier label projections."""
     from app.services.capa_d4_material import read_root
+    from app.services.capa_legacy_capture import authorize_bound_sources
     if actor_id is None:
         raise PermissionError("Current actor required")
     try:
         root = await read_root(db, actor_id, capa.report_id)
+        await authorize_bound_sources(db, actor_id, capa.report_id, d_step='d5')
     except PermissionError:
         raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     values = {name: getattr(capa, name) for name in CAPAResponse.model_fields
               if name != "d4_root_cause" and hasattr(capa, name)}
     values["d4_root_cause"] = root
     from app.services.capa_d4_material import material_version
-    projection_version=await material_version(db,capa.report_id)
+    projection_version=material_fence if material_fence is not None else await material_version(db,capa.report_id)
     from app.services.capa_r6_local_closure import prevention_text
     values["d7_prevention"] = await prevention_text(db,actor_id,capa.report_id,values.get("d7_prevention"))
     resp = CAPAResponse.model_validate(values)
@@ -431,7 +433,7 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, ac
     resp.entry_phase, resp.entry_epoch = entry.state, entry.epoch
     linked = None
     if capa.scar_ref_id is not None:
-        scar = await db.get(SupplierSCAR, capa.scar_ref_id)
+        scar = await db.get(SupplierSCAR, capa.scar_ref_id, populate_existing=fresh)
         if scar is not None:
             linked = LinkedScarSchema(
                 scar_id=scar.scar_id,
@@ -439,13 +441,13 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, ac
                 status=scar.status,
                 supplier_id=scar.supplier_id,
             )
-    lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id)
+    lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id, fresh=fresh)
 
     supplier_no = None
     supplier_name = None
     if capa.supplier_id is not None:
         from app.models.supplier import Supplier
-        sup = await db.get(Supplier, capa.supplier_id)
+        sup = await db.get(Supplier, capa.supplier_id, populate_existing=fresh)
         if sup is not None:
             # Scope: only expose label if same factory (row already CAPA-scoped)
             if sup.factory_id == capa.factory_id:
@@ -459,12 +461,13 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, ac
     inp = (
         await db.execute(
             select(SupplierRiskCapaInput).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+            .execution_options(populate_existing=fresh)
         )
     ).scalar_one_or_none()
     if inp is not None:
         linked_alert = None
         if inp.linked_alert_id is not None:
-            alert = await db.get(SupplierRiskAlert, inp.linked_alert_id)
+            alert = await db.get(SupplierRiskAlert, inp.linked_alert_id, populate_existing=fresh)
             if alert is not None:
                 linked_alert = {
                     "alert_id": str(alert.alert_id),
@@ -486,10 +489,11 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, ac
         )
 
     from app.services.capa_lateral_diffusion_service import _build_projection
-    lateral_diffusion = await _build_projection(db, capa.report_id)
+    lateral_diffusion = await _build_projection(db, capa.report_id, fresh=fresh)
 
     try:
         resp.d4_root_cause = await read_root(db, actor_id, capa.report_id)
+        await authorize_bound_sources(db, actor_id, capa.report_id, d_step='d5')
     except PermissionError:
         raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     if projection_version!=await material_version(db,capa.report_id):
@@ -539,15 +543,30 @@ async def get_capa(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    level = await get_user_permission(scope.user, Module.CAPA, db)
-    if level < PermissionLevel.VIEW:
-        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
-    await _authorize_capa_root(db, scope, report_id)
-    capa = await capa_service.get_capa(db, report_id)
-    if capa is None or not is_factory_visible(capa.factory_id, scope):
-        raise HTTPException(status_code=404, detail="8D report not found")
-    check_product_line_access(capa.product_line_code, scope)
-    return await _capa_response_with_projections(db, capa, scope.user.user_id)
+    from app.services.capa_d4_material import material_version
+    for attempt in range(2):
+        level = await get_user_permission(scope.user, Module.CAPA, db)
+        if level < PermissionLevel.VIEW:
+            raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+        await _authorize_capa_root(db, scope, report_id)
+        # Fence every body read, including the report itself. A retry refreshes
+        # only projected business rows; actor/scope objects are never expired.
+        before = await material_version(db, report_id)
+        report = await capa_service.get_capa(db, report_id, fresh=True)
+        if report is None or not is_factory_visible(report.factory_id, scope):
+            raise HTTPException(status_code=404, detail="8D report not found")
+        check_product_line_access(report.product_line_code, scope)
+        try:
+            result = await _capa_response_with_projections(db, report, scope.user.user_id,
+                material_fence=before, fresh=True)
+            # Root-only authorization omits known legacy D5-only sources.
+            await _authorize_capa_root(db, scope, report_id)
+            if before != await material_version(db, report_id):
+                raise HTTPException(409, 'CAPA_MATERIAL_CHANGED', headers={'Cache-Control':'no-store'})
+            return result
+        except HTTPException as exc:
+            if attempt or exc.status_code != 409 or exc.detail != 'CAPA_MATERIAL_CHANGED':
+                raise
 
 
 @router.post("/{report_id}/trigger-scar", response_model=scar_schemas.SCARResponse)
