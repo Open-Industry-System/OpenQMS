@@ -1,5 +1,12 @@
 # OpenQMS 开发进度
 
+### 2026-11-16 — 补单次全量逐模块计时与受控对照（进行中）
+
+- 独立worktree /tmp/openqms-module-timing，起点a0f291be。新增每测试源模块selected/setup/call/teardown和集合顺序SHA256；沿用一次收集/执行、原receipt与失败退出码、既有脱敏log。pure356 passed /3 warnings，phase守恒与成功/失败/收集失败出口覆盖通过。
+- 将为PR #37追加计时补丁，保留main未合并及既有8项门禁；同时同机/同解释器依赖、每轮全新独占PG15，以正常make check-backend串行A/B全量。两侧同一测试集合、同一计时与公共模板初始化，仅对照侧恢复旧rebuild_db/sample（不复用模板），保留所有新隔离回归。控制源码差异和集合摘要将落盘；如未改模块明显漂移再反向复测。
+- 计划和口径见docs/development/backend-module-timing.md；全量及远端结果待运行，不预记通过/收益。原a0 PR的84分42秒热缓存与70分05秒冷缓存不能当受控对照。
+
+
 ### 2026-11-16 — 慢 fixture 独立优化（本地完成）
 
 - 从最新 origin/main `193746ab` 建立独立 worktree /tmp/openqms-slow-fixtures，分支 codex/slow-fixture-optimization；保留原main、R5/R6及其他工作区。main保护设置与文档另在 codex/main-merge-protection（本地ce3b1acc）独立交付，未混入本分支。
