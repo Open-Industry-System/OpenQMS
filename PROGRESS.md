@@ -2,6 +2,7 @@
 
 ### 2026-11-16 — 测试精简独立 main PR 交付
 
+- 已创建PR #39，初始head80ed154f；移植后本地458 passed／3 warnings／exit0。首轮run43827872305的docs-check因PROGRESS不在文档匹配范围而失败；已补docs/development/backend-ci-timing.md，保留失败，不使用跳过标签；新增提交将触发新的完整PR检查。
 - 用户授权“CI没问题的话就合并”。推送后的测试精简分支尚无PR，其父分支慢fixture PR #37仍未合并。为保持本批范围独立，从远端main实际提交193746abb7c1eb9d196ef3997b6b91767490e3d1建立`codex/test-suite-pruning-main`，仅移植bb20ad93；不合入#37的数据库模板及逐模块计时改动，也不改其分支或工作区。
 - 移植仅PROGRESS顶部历史上下文冲突，保留main原有进度并加入下方三批审核证据。代码差异限测试及对应runner重复别名，不改工作流、生产代码或数据库fixture。5285为原804f8551成功PR样本的分母，16项删除的历史比例保持约0.30%；此次main独立PR的实际总数以新CI收据为准。
 - 远端main有效ruleset已核实：strict required checks来自GitHub Actions app15368，包含backend-tests、browser-protection、frontend-checks、sdk-checks (3.11/3.12/3.13)、docs-check、oracle-automation-checks八项。通过新的main PR完整检查并复核实际head与合并候选后才合并；不以父分支旧CI替代本PR检查。

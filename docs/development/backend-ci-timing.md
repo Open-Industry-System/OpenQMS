@@ -146,3 +146,17 @@ backend-tests 和 browser-protection 的 `actions/setup-python@v5` 使用 `cache
 setup占当前本地execution约64%，这是阶段分配而不是预计节省比例，也不能归因到某个具体fixture。下一批先按耗时测试组度量fixture调用次数、单次与累计成本，再选累计最高项做对照；验收既看整组耗时，也核验数据库状态隔离与顺序独立性。本批PR不包含这些实现，可与R6 Task1并行；R6只以开工时实际合入的CI入口/提交为依据。
 
 发布记录：代码提交 `0998be8b` 已push并创建非草稿 [PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36)。创建PR的完整head查询只有 Test OpenQMS run43725914972（pull_request），无push运行；远端尚未完成，缓存/阶段耗时以实际日志后续核对，不使用本地数据代填。
+
+## 2026-11-16：独立测试精简 PR #39
+
+[PR #39](https://github.com/Open-Industry-System/OpenQMS/pull/39)从已合入CI入口的main `193746ab`单独提取测试精简改动，不包含尚未合并的慢fixture PR #37。原测试精简提交bb20ad93及其分支保留；本PR初始代码提交为80ed154f，后续只补本文档与验收记录。
+
+本批移除16项已证明重复或无实际执行的用例，并保留对应业务边界：重复CAPA/SCAR拒绝、重复D4 TCP别名、相同浏览器参数、重复工厂范围断言及无调用／无断言的IQC空壳。D4保留的必测用例仍运行first/retry/old_epoch/history/ack五场景；runner和独立期望名单只移除重复别名，不放宽缺失、跳过或失败校验。简单schema字段回显并入实际草稿生成测试。逐项删除到保留用例的映射见[PROGRESS.md](../../PROGRESS.md)。
+
+供应商脚本改为标准assert／pytest.raises，保留22项测试及评分阈值、扣分上限／零下限和状态转换。原手工helper只累计失败，pytest会误报成功；四类内存故障（错误评分、错误转换、未抛预期异常、异常类型错误）改前exit0、改后均exit1。AST证明输入／预期保留，只去掉一次重复满分调用；源码净减少74行。本次精简既不通过循环隐藏用例数，也不删除安全、隔离或并发业务边界。
+
+main独立分支本地CI辅助及相关pure集合458 passed／3 warnings／exit0；原精简分支独占PG/API验证82 passed／0 skipped／exit0，专属容器、卷与凭据已清理。5285是此前804f8551成功PR的历史选中数，16项约0.30%；本PR的实际总数以当前远端收据为准。没有精简后全量耗时对照或pip冷热实验，不据用例数量／本地毫秒差推算CI节省。
+
+main生效规则在2026-11-16重新读取：要求PR，并严格要求来源GitHub Actions app15368的backend-tests、browser-protection、frontend-checks、sdk-checks (3.11/3.12/3.13)、docs-check、oracle-automation-checks八项成功。这是前文2026-11-15快照之后的设置状态；本PR不修改规则。用户已授权CI通过后合并，仍须核对当前head、main和GitHub生成的合并候选，不能复用#37的旧CI结果。
+
+首次run43827872305的docs-check因只有PROGRESS变动而失败，本文补足真实文档说明；不加跳过标签、不改workflow或检查来源。新增提交后由既有同PR concurrency取消旧运行，等待新一套完整PR检查。合并后的main push仍按现有配置独立验证。
