@@ -82,32 +82,20 @@ async def test_normal_update_flow_not_blocked_by_c9(db, capa_with_done_analysis_
     await capa_service._d8_doc_gate_gate(db, capa)
 
 
-@pytest.mark.asyncio
-async def test_c9_hash_excludes_latest_version(db, capa_with_done_analysis_and_bumped_doc):
-    """_compute_input_hash must not change when only latest version bumps after analysis."""
-    capa, user = capa_with_done_analysis_and_bumped_doc
-    analysis = await db.scalar(
-        select(CapaDocgAnalysis).where(
-            CapaDocgAnalysis.capa_id == capa.report_id,
-            CapaDocgAnalysis.is_current == True,
-        )
-    )
-    hash_before = analysis.analysis_input_hash
+def test_c9_hash_excludes_latest_version():
+    """Latest-only changes do not invalidate C9; baseline changes still do."""
+    from types import SimpleNamespace
 
-    # Further bump should not change C9
-    fmea = await db.get(FMEADocument, capa.fmea_ref_id)
-    snap = {"nodes": [{"id": "node-1", "type": "ProcessStep", "name": "x"}], "edges": []}
-    await db.execute(text(
-        "INSERT INTO fmea_versions (version_id, fmea_id, factory_id, major_no, minor_no, "
-        "snapshot, sha256_hash, change_summary, change_type, created_by, created_at) "
-        "VALUES (:vid, :fid, :fact, 2, 0, CAST(:snap AS JSONB), "
-        "encode(digest(CAST(:snap AS JSONB)::text, 'sha256'), 'hex'), "
-        "'more', 'major', :uid, NOW())"
-    ), {
-        "vid": uuid.uuid4(), "fid": fmea.fmea_id, "fact": capa.factory_id,
-        "snap": json.dumps(snap), "uid": user.user_id,
-    })
-    await db.flush()
-
-    candidates = await _build_allowlist(db, capa)
-    assert _compute_input_hash(capa, candidates) == hash_before
+    capa = SimpleNamespace(factory_id=uuid.uuid4(), product_line_code="DOCG",
+        d4_root_cause="cause", d5_correction="fix", d7_prevention="prevent",
+        severity="serious", fmea_ref_id=None, fmea_node_id=None)
+    candidate = {"doc_type": "fmea", "doc_id": str(uuid.uuid4()),
+        "baseline_version_id": str(uuid.uuid4()),
+        "baseline_version": {"sha256": "baseline"},
+        "latest_version": {"sha256": "audited"}}
+    before = _compute_input_hash(capa, [candidate])
+    candidate["latest_version"] = {"sha256": "newer"}
+    candidate["latest_version_id"] = str(uuid.uuid4())
+    assert _compute_input_hash(capa, [candidate]) == before
+    candidate["baseline_version"]["sha256"] = "changed baseline"
+    assert _compute_input_hash(capa, [candidate]) != before
