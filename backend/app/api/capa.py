@@ -1295,7 +1295,22 @@ async def adopt_recommendation_ep(
     return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
 
 
-@router.post("/{report_id}/root-cause-verifications", response_model=VerificationCreatedResponse)
+from app.schemas.capa_verification import VerificationSourceResponse, VerificationCreatedSourceResponse
+
+async def _verification_source_response(db,scope,report_id,rec,created=False):
+    from app.services.capa_verification_sources import known_origins,authorize_verifications
+    try:
+        await authorize_verifications(db,report_id,actor_id=scope.user.user_id)
+        origins=await known_origins(db,report_id,rec.verification_id)
+        response=(VerificationCreatedSourceResponse if created else VerificationSourceResponse).model_validate({
+            **VerificationCreatedResponse.model_validate(rec).model_dump(),
+            'known_source_origins':origins[rec.verification_id][1]})
+        await authorize_verifications(db,report_id,actor_id=scope.user.user_id)
+        return response
+    except PermissionError:
+        raise HTTPException(403,'Verification source unavailable') from None
+
+@router.post("/{report_id}/root-cause-verifications", response_model=VerificationCreatedSourceResponse)
 async def create_verification_ep(
     report_id: uuid.UUID, req: VerificationCreate, request: Request,
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
@@ -1322,10 +1337,10 @@ async def create_verification_ep(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await _authorize_capa_root(db, scope, report_id)
-    return VerificationCreatedResponse.model_validate(rec)
+    return await _verification_source_response(db,scope,report_id,rec,created=True)
 
 
-@router.get("/{report_id}/root-cause-verifications", response_model=list[VerificationResponse])
+@router.get("/{report_id}/root-cause-verifications", response_model=list[VerificationSourceResponse])
 async def list_verifications_ep(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
@@ -1345,10 +1360,10 @@ async def list_verifications_ep(
         await db.rollback()
         raise HTTPException(status_code=403, detail='Verification source unavailable') from None
     await _authorize_capa_root(db, scope, report_id)
-    return [VerificationResponse.model_validate(i) for i in items]
+    return [await _verification_source_response(db,scope,report_id,i) for i in items]
 
 
-@router.patch("/{report_id}/root-cause-verifications/{vid}", response_model=VerificationResponse)
+@router.patch("/{report_id}/root-cause-verifications/{vid}", response_model=VerificationSourceResponse)
 async def update_verification_ep(
     report_id: uuid.UUID, vid: uuid.UUID, req: VerificationUpdate,
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
@@ -1371,7 +1386,7 @@ async def update_verification_ep(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await _authorize_capa_root(db, scope, report_id)
-    return VerificationResponse.model_validate(rec)
+    return await _verification_source_response(db,scope,report_id,rec)
 
 
 @router.post("/{report_id}/d7-node-actions", response_model=D7NodeActionResponse)
@@ -1513,10 +1528,13 @@ async def sink_knowledge(
     }
 
 
+from app.schemas.capa_ppt import PptExportRequest
+
 @router.post("/{report_id}/ppt-export")
 async def export_ppt(
     report_id: uuid.UUID,
     request: Request,
+    body: PptExportRequest | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -1538,10 +1556,13 @@ async def export_ppt(
     tenant = tenant_schema(request)
 
     # 解析 LLM provider client（None = 未配置）
-    try:
-        pc = await provider_adapter.build_client(db)
-    except provider_adapter.ProviderNotConfiguredError:
-        pc = None
+    local_mode = body is not None and body.review_mode == 'local'
+    pc = None
+    if not local_mode:
+        try:
+            pc = await provider_adapter.build_client(db)
+        except provider_adapter.ProviderNotConfiguredError:
+            pc = None
 
     # 审查闭环 + 渲染：审查闭环异常（非 LLM 缺失）/ 渲染失败均属故事 §92 FAILED 条件 → 500，不落 export
     try:
@@ -1550,6 +1571,8 @@ async def export_ppt(
         content, review = await capa_ppt_review_service.review_and_correct(
             db, report_id, pc, tenant, scope=scope,
         )
+        if local_mode:
+            review.report = {**(review.report or {}), 'model_review': 'NOT_EXECUTED', 'reason': 'explicit_local_rules'}
         # 最终渲染一次（审查后 review_status 已知）
         meta = capa_ppt_service.ExportMeta(
             export_id=export_id, version=version,

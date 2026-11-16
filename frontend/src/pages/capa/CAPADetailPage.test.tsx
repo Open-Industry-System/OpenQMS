@@ -1268,3 +1268,33 @@ describe("Task 5 reviewed outcome integration", () => {
   });
 
 });
+
+vi.mock('../../api/capaR6',()=>({listD4Candidates:vi.fn().mockResolvedValue({items:[],page:1,page_size:20}),getLocalClosure:vi.fn().mockResolvedValue({eligible:false,can_edit:false,material_version:'m',prevention:null,manual_analysis:null,propagation:null}),getMeasure:vi.fn(),getMeasureHistory:vi.fn(),correctD5:vi.fn()}));
+it('keeps selected formal measure current/history/correction reachable when full report is 403',async()=>{
+ const proposalApi=await import('../../api/d5Proposals');const r6=await import('../../api/capaR6');
+ vi.mocked(capaApi.getCAPA).mockRejectedValue({response:{status:403}});
+ vi.mocked(proposalApi.listD5Measures).mockResolvedValue({legacy_text:null,items:[{measure_id:'a',proposal_id:'p',final_text:'可读措施 A',adopted_by:'employee',adopted_at:'2026-11-16'}],total:1,page:1,page_size:20});
+ vi.mocked(r6.getMeasure).mockResolvedValue({measure_id:'a',proposal_id:'p',final_text:'可读当前 A',adopted_text:'采纳 A',adopted_by:'e',adopted_at:'2026-11-16',current_version:'v',material_version:'m',can_correct:true,correction_revision_id:null,correction_revision_no:0});
+ vi.mocked(r6.getMeasureHistory).mockResolvedValue({measure_id:'a',final_text:'可读当前 A',adopted_text:'采纳 A',adopted_by:'e',adopted_at:'2026-11-16',current_version:'v',corrections:[]});
+ renderPage();fireEvent.click(await screen.findByRole('button',{name:'更正与历史 a'}));
+ expect(await screen.findByLabelText('更正后全文')).toBeInTheDocument();expect(screen.getByText('采纳 A')).toBeInTheDocument();
+});
+it('offers explicit local PPT even when legacy model can be configured',async()=>{
+ vi.mocked(capaApi.getCAPA).mockResolvedValue({...mockCapa,status:'ARCHIVED'} as any);
+ vi.mocked(capaApi.generatePpt).mockResolvedValue({reviewStatus:'skipped',reviewRounds:0,exportId:null});
+ renderPage();fireEvent.click(await screen.findByRole('button',{name:/导出本地规则版 PPT|Export local rules PPT/}));
+ await waitFor(()=>expect(capaApi.generatePpt).toHaveBeenCalledWith('test-report-id',expect.any(AbortSignal),'local'));
+});
+it('withdraws the protected report after local export returns current source 403',async()=>{
+ useAuthStore.setState({user:{user_id:'u',permissions:{capa:4}} as any});
+ vi.mocked(capaApi.getCAPA).mockResolvedValue({...mockCapa,status:'ARCHIVED',title:'protected full report'} as any);
+ vi.mocked(capaApi.generatePpt).mockRejectedValue({response:{status:403}});
+ renderPage();fireEvent.click(await screen.findByRole('button',{name:/导出本地规则版 PPT|Export local rules PPT/}));
+ await waitFor(()=>expect(screen.queryByText('protected full report')).toBeNull());
+});
+it('withdraws protected report material when background current-source admission is revoked',async()=>{
+ vi.mocked(capaApi.getCAPA).mockResolvedValue({...mockCapa,status:'D4_ROOT_CAUSE',title:'protected report revoke'} as any);
+ renderPage();await screen.findByText('protected report revoke');
+ vi.mocked(capaApi.getCAPA).mockRejectedValue({response:{status:403}});
+ await waitFor(()=>expect(screen.queryByText('protected report revoke')).toBeNull(),{timeout:3500});
+});

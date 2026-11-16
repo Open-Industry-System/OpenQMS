@@ -188,7 +188,7 @@ async def selectable_deployments(db, scope):
     for key in ids:
         try: row = await deployment(db, key)
         except (PermissionError, ValueError, OSError): continue
-        out.append(dict(deployment_id=row.deployment_id, name=row.name, version=row.version, kind=row.kind))
+        out.append(dict(deployment_id=row.deployment_id, name=row.name, version=row.version, kind=row.kind,profile=deployment_profile(row)))
     return out
 
 
@@ -346,5 +346,5 @@ async def project_binding(db, task):
         row = None if pin is None else await db.get(AgentModelDeployment, pin.deployment_id, populate_existing=True)
     if pin is not None and (row is None or pin.config_hmac != row.config_hmac or not hmac.compare_digest(row.config_hmac, _digest(db,row))):
         raise PermissionError(UNAVAILABLE)
-    task.model_deployment = None if row is None else dict(deployment_id=row.deployment_id,name=row.name,version=row.version)
+    task.model_deployment = None if row is None else dict(deployment_id=row.deployment_id,name=row.name,version=row.version,profile=deployment_profile(row))
     return task

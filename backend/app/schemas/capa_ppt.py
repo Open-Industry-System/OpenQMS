@@ -11,3 +11,11 @@ class PptExportDetailResponse(BaseModel):
     review_status: str
     review_rounds: int
     review_report: dict | None
+
+
+from typing import Literal
+from pydantic import ConfigDict
+
+class PptExportRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    review_mode: Literal['model','local'] = 'model'

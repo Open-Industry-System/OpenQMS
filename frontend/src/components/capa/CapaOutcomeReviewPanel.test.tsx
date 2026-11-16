@@ -213,3 +213,15 @@ it('shows every formal D5 measure as reviewed material with its source binding',
   expect(section).toHaveTextContent('cause-1');
   expect(section.querySelector('b,input,textarea,a')).toBeNull();
 });
+
+it('strictly distinguishes corrected/local v2 from historical v1 and renders nonexecution',async()=>{
+ const {isCompleteOutcomeReview}=await import('../../types/capaOutcomeReview');
+ const value:any={...structuredClone(fixture),contract:'capa.outcome-review.v2',local_closure:{eligible:true,prevention:{revision_id:id,revision_no:1,predecessor_id:null,actor_id:id,created_at:'2026-11-16',reason:'local only',text:'local prevention',basis:'physical',analysis_id:null,analysis_method:null,input_bindings:{},candidates:[],channels:null,sources:[]},manual_analysis:null,propagation:{revision_id:source,revision_no:1,predecessor_id:null,actor_id:id,created_at:'2026-11-16',reason:'restricted round',text:null,basis:null,analysis_id:null,analysis_method:null,input_bindings:{},candidates:[],sources:[],channels:{lessons:'NOT_EXECUTED',knowledge:'NOT_EXECUTED',lateral:'NOT_EXECUTED',supplier_risk:'NOT_EXECUTED'}}}};
+ for(const kind of ['prevention','propagation'])Object.assign(value.local_closure[kind],{root_snapshot_revision_id:id,report_snapshot_sources:[{source_id:source,kind:'report_snapshot',module:'capa',object_id:id,projection_id:'capa.d2.snapshot.v1',version:'1',snapshot_id:source,factory_id:id,product_line_code:'line'}]});
+ expect(isCompleteOutcomeReview({...value,local_closure:{...value.local_closure,prevention:{...value.local_closure.prevention,root_snapshot_revision_id:'invalid'}}},id,fixture.status)).toBe(false);
+ expect(isCompleteOutcomeReview(value,id,fixture.status)).toBe(true);
+ expect(isCompleteOutcomeReview({...value,contract:'capa.outcome-review.v1'},id,fixture.status)).toBe(false);
+ expect(isCompleteOutcomeReview({...value,local_closure:{...value.local_closure,prevention:{...value.local_closure.prevention,revision_id:'wrong'}}},id,fixture.status)).toBe(false);
+ vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);render(view());
+ expect(await screen.findByText(/NOT_EXECUTED/)).toBeInTheDocument();
+});

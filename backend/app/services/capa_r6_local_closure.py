@@ -12,7 +12,7 @@ from app.models.fmea import FMEADocument
 from app.models.control_plan import ControlPlan
 from app.models.audit import AuditLog
 from app.services.agent_runtime.d4_text_delivery import _digest
-from app.services.capa_current_access import current_capa_access, current_capa_target_metadata, require_capa_source_access
+from app.services.capa_current_access import current_capa_actor_access, current_capa_access, current_capa_target_metadata, require_capa_source_access
 
 CHANNELS = dict(lessons='NOT_EXECUTED', knowledge='NOT_EXECUTED', lateral='NOT_EXECUTED', supplier_risk='NOT_EXECUTED')
 
@@ -124,7 +124,7 @@ async def candidates_metadata(db,capa,actor_id=None):
             latest=(await db.execute(select(version.version_id,version.sha256_hash).where(vkey==row[0])
                 .order_by(version.major_no.desc(),version.minor_no.desc(),version.created_at.desc(),version.version_id.desc()).limit(1))).one_or_none()
             baseline=(await db.execute(select(version.version_id,version.sha256_hash).where(vkey==row[0],version.created_at<=capa.created_at)
-                .order_by(version.created_at.desc(),version.version_id.desc()).limit(1))).one_or_none()
+                .order_by(version.created_at.desc(),version.major_no.desc(),version.minor_no.desc(),version.version_id.desc()).limit(1))).one_or_none()
             result.append(dict(**source,lock_version=row.lock_version,
                 version_id=None if latest is None else str(latest.version_id),sha256=None if latest is None else latest.sha256_hash,
                 baseline_version_id=None if baseline is None else str(baseline.version_id),
@@ -240,7 +240,21 @@ async def read(db,scope,report_id):
     from app.services.capa_d5_correction_material import complete_material_version
     target,sources=await admit(db,scope,report_id)
     token,current_candidates=await local_form_version(db,scope,report_id,with_candidates=True)
-    result=dict(eligible=await eligible(db,report_id),material_version=token,prevention=None,manual_analysis=None,propagation=None)
+    can_edit=False
+    can_waive=False
+    try:
+        await current_capa_actor_access(db,scope.user.user_id,PermissionLevel.EDIT)
+        can_edit=True
+        try:
+            await current_capa_actor_access(db,scope.user.user_id,PermissionLevel.APPROVE)
+            can_waive=target.status=='D8_GATE_PENDING'
+        except PermissionError: pass
+    except PermissionError: pass
+    result=dict(eligible=await eligible(db,report_id),material_version=token,prevention=None,manual_analysis=None,propagation=None,
+        can_edit=can_edit and target.status in {'D7_PREVENTION','D7_COMPLETED','D8_GATE_PENDING'},can_waive=can_waive,
+        can_save_prevention=can_edit and target.status=='D7_PREVENTION',
+        can_save_manual_analysis=can_edit and target.status=='D8_GATE_PENDING',
+        can_review_propagation=can_edit and target.status in {'D7_PREVENTION','D7_COMPLETED','D8_GATE_PENDING'})
     if target.status=='D8_GATE_PENDING':result['current_candidates']=current_candidates
     for kind in ('prevention','manual_analysis','propagation'):
         row=await latest(db,report_id,kind,body=True)
@@ -492,3 +506,45 @@ async def snapshot_sources(db,report_id,revision_id):
         .where(CapaR6RootRevisionSource.report_id==report_id,CapaR6RootRevisionSource.revision_id==revision_id,
             CapaR6SourceOrigin.report_id==report_id).order_by(CapaR6SourceOrigin.source_id))).mappings().all()
     return [{k:str(v) if isinstance(v,UUID) else v for k,v in row.items()} for row in rows]
+
+
+async def manual_catalog(db,scope,report_id):
+    from app.services.capa_doc_gate_service import _build_allowlist
+    target,_=await admit(db,scope,report_id)
+    if target.status!='D8_GATE_PENDING':raise ValueError('Manual stage changed')
+    token=await local_form_version(db,scope,report_id)
+    from app.services import capa_service
+    capa=await capa_service.get_capa(db,report_id)
+    candidates=await candidates_metadata(db,capa,scope.user.user_id)
+    items=await controlled_manual_candidates(db,capa,candidates,scope.user.user_id)
+    await admit(db,scope,report_id)
+    if token!=await local_form_version(db,scope,report_id):raise ValueError('Local material changed')
+    return dict(material_version=token,items=items)
+
+
+async def controlled_manual_candidates(db,capa,candidates,actor_id):
+    """Only exact admitted parents/baselines may supply manual form targets."""
+    from app.services.capa_doc_gate_service import _cand_from_cp,_cand_from_fmea
+    from app.models.fmea_version import FMEAVersion
+    from app.models.control_plan_version import ControlPlanVersion
+    if candidates!=await candidates_metadata(db,capa,actor_id):raise ValueError('Manual catalog changed')
+    items=[]
+    for item in candidates:
+        await authorize_sources(db,actor_id,[item])
+        planning=item['module']=='planning'
+        model=ControlPlan if planning else FMEADocument
+        key=model.cp_id if planning else model.fmea_id
+        parent=await db.scalar(select(model).where(key==UUID(item['object_id']),
+            model.factory_id==UUID(item['factory_id']),model.product_line_code==item['product_line_code'],
+            model.lock_version==item['lock_version']).execution_options(populate_existing=True))
+        if parent is None:raise PermissionError('Manual source changed')
+        baseline=None
+        if item['baseline_version_id'] is not None:
+            version=ControlPlanVersion if planning else FMEAVersion
+            parent_key=version.cp_id if planning else version.fmea_id
+            baseline=await db.scalar(select(version).where(version.version_id==UUID(item['baseline_version_id']),
+                parent_key==UUID(item['object_id']),version.sha256_hash==item['baseline_sha256']))
+            if baseline is None:raise PermissionError('Manual baseline unavailable')
+        items.append((_cand_from_cp if planning else _cand_from_fmea)(parent,baseline))
+    if candidates!=await candidates_metadata(db,capa,actor_id):raise ValueError('Manual catalog changed')
+    return items

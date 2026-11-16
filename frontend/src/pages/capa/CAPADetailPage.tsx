@@ -22,6 +22,8 @@ import type { CapaOutcomeReview } from "../../types/capaOutcomeReview";
 import D4RecPanel from "../../components/capa/D4RecPanel";
 import D4VerificationCard from "../../components/capa/D4VerificationCard";
 import D4TextRedactionPreview from "../../components/capa/D4TextRedactionPreview";
+import D4CandidatePanel from '../../components/capa/D4CandidatePanel';
+import CapaLocalClosure from '../../components/capa/CapaLocalClosure';
 import D5ProposalPanel from "../../components/capa/D5ProposalPanel";
 import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
@@ -113,6 +115,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   const [lessonsData, setLessonsData] = useState<LessonsLearnedResponse | null>(null);
   const lessonsShownRef = useRef(false);
 
+  const [localClosureEligible,setLocalClosureEligible]=useState(false);
   const [pptLoading, setPptLoading] = useState(false);
   const [reviewReport, setReviewReport] = useState<any>(null);
 
@@ -281,6 +284,21 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     listCapaSupplierOptions({ page_size: 50 }, suppliers.signal).then(res => { if (suppliers.current()) setSuppliers(res.items); })
       .catch(() => { /* labels fall back to UUID */ }).finally(suppliers.finish);
   }, [id, requests]);
+
+  // Reauthorize the full protected body without replacing unsaved editor values.
+  useEffect(()=>{
+    if(!id)return;
+    const timer=setInterval(()=>{
+      if(!currentCapa.current)return;
+      const request=requests.begin();
+      void getCAPA(id,request.signal).catch(error=>{
+        if(request.current()&&[401,403,404,409].includes(error?.response?.status)){
+          setCapa(null);setLocalData({});setFmeas([]);setReviewReport(null);setPptLoading(false);onOutcomeReview(null);requests.invalidate();
+        }
+      }).finally(request.finish);
+    },2000);
+    return()=>clearInterval(timer);
+  },[id,requests,onOutcomeReview]);
 
   useEffect(() => {
     if (capa) {
@@ -758,15 +776,15 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
   const handleRejectSubmit = () => decideOutcome("D7_PREVENTION");
 
-  const handleGeneratePpt = async () => {
+  const handleGeneratePpt = async (mode: "model"|"local" = "model") => {
     if (!capa || !credentialsCurrent()) return;
     const request = requests.begin();
-    setPptLoading(true);
+    setPptLoading(true);setReviewReport(null);
     try {
-      const { reviewStatus, reviewRounds, exportId } = await generatePpt(capa.report_id, request.signal);
+      const { reviewStatus, reviewRounds, exportId } = await generatePpt(capa.report_id, request.signal,mode);
       if (!request.current()) return;
       if (reviewStatus === "skipped") {
-        message.warning(t("capa:ppt.llmNotConfigured"));
+        message.warning(mode==="local"?t("r6.localPptDone"):t("capa:ppt.llmNotConfigured"));
       } else if (reviewStatus === "needs_review") {
         // rounds=0 = 内置规则校验未通过（数据/结构缺口）；>0 = LLM 审查 3 轮仍不合格
         message.warning(reviewRounds > 0
@@ -780,8 +798,10 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       } else {
         message.success(t("capa:ppt.generated", { rounds: reviewRounds }));
       }
-    } catch {
+    } catch(error) {
       if (!request.current()) return;
+      const status=(error as {response?:{status?:number}})?.response?.status;
+      if(status&&[401,403,404,409].includes(status)){setCapa(null);setLocalData({});setFmeas([]);setReviewReport(null);setPptLoading(false);onOutcomeReview(null);requests.invalidate();}
       message.error(t("capa:ppt.generateFailed"));
     } finally {
       if (request.current()) setPptLoading(false);
@@ -892,7 +912,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   };
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
-  if (!capa) return <Empty description={t("messages.capaNotFound", "8D 报告未找到")} />;
+  if (!capa) return <><Empty description={t("messages.capaNotFound", "8D 报告未找到")} /><p>报告正文不可用；可按当前来源权限核对独立正式措施。</p><Button onClick={()=>void refreshCapa().catch(()=>{})}>重新读取报告</Button>{id&&<D5ProposalPanel capaId={id}/>}</>;
 
   const actions = (
     <Space>
@@ -935,9 +955,10 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
         </>
       )}
       {canCreate("capa") && (capa.status === "D8_CLOSURE" || capa.status === "ARCHIVED") && (
-        <Button icon={<FilePptOutlined />} loading={pptLoading} onClick={handleGeneratePpt} data-e2e="capa-ppt">
+        <><Button icon={<FilePptOutlined />} loading={pptLoading} onClick={()=>void handleGeneratePpt()} data-e2e="capa-ppt">
           {t("capa:ppt.generate")}
         </Button>
+        <Button icon={<FilePptOutlined/>} loading={pptLoading} onClick={()=>void handleGeneratePpt('local')}>{t("r6.localPpt")}</Button></>
       )}
     </Space>
   );
@@ -972,6 +993,8 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               credentialIdentity={credentialIdentity} onReviewChange={onOutcomeReview} />
           )}
           <D5ProposalPanel capaId={id!} onChanged={() => refreshCapa()} />
+          {capa.status==="D4_ROOT_CAUSE"&&<D4CandidatePanel capaId={id!} onChanged={()=>refreshCapa()}/>}
+          {["D7_PREVENTION","D7_COMPLETED","D8_GATE_PENDING"].includes(capa.status)&&<CapaLocalClosure capaId={id!} status={capa.status} onChanged={()=>refreshCapa()} onEligibility={setLocalClosureEligible}/>}
           {capa.status !== "D8_APPROVAL_PENDING" && <DataCard title={t("detail.currentStepDetails", "当前步骤详情")}>
             {capa.status === "D1_TEAM" && (
               <div>
@@ -1151,7 +1174,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                   <Form.Item label={renderLabelWithDraft("d7", t("fields.d7Label", "预防复发措施"))}>
                     <TextArea
                       rows={4}
-                      disabled={capa.status !== "D7_PREVENTION" || !canEdit('capa')}
+                      disabled={localClosureEligible || capa.status !== "D7_PREVENTION" || !canEdit('capa')}
                       value={localData.d7_prevention || ""}
                       onChange={(e) => setLocalData({ ...localData, d7_prevention: e.target.value })}
                       onBlur={() => handleUpdate("d7_prevention", localData.d7_prevention)}
@@ -1162,8 +1185,8 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                 <D7RecPanel
                   capaId={id!}
                   d5Correction={localData.d5_correction}
-                  canAdopt={capa.status === "D7_PREVENTION" && canEdit('capa')}
-                  canAutoFill={capa.status === "D7_PREVENTION" && canEdit('fmea')}
+                  canAdopt={!localClosureEligible && capa.status === "D7_PREVENTION" && canEdit('capa')}
+                  canAutoFill={!localClosureEligible && capa.status === "D7_PREVENTION" && canEdit('fmea')}
                   onConfirmationChange={(allConfirmed, unconfirmed) => {
                     setAllD7Confirmed(allConfirmed);
                     setD7UnconfirmedItems(unconfirmed);

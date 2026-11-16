@@ -18,6 +18,7 @@ class D5ProposalItem(BaseModel):
 
 
 class D5MeasureItem(BaseModel):
+    can_correct: bool = False
     measure_id: UUID
     proposal_id: UUID
     final_text: str

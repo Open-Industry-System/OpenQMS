@@ -433,3 +433,39 @@ Task6B新增实际缺口及021方向早审：正常GET投影本地d7后通用PUT
 最终v9为25生产＋24测试49后端路径：生产变更摘要`24ea310d3ed086244a6384d203b79a1a2a75fcd62cb3d19a6b7bc4ce40ebe487`，测试摘要`4be4e0f51a7c0440f5102303b50461ac4bac0ee5636a64dd219cca0f02221a60`，变更集合摘要`1d5f5947f3b29139acf254268bacfee63cbbfd2d557b936a3438f510fecedf73`。这是变更集合，不是全仓生产摘要。生产v4后不变，初始全diff与全部v5–v9测试增量独立SPEC→QUALITY通过；父核49AST/0漂移、六DDL首次应用hash一致。全部测试进程已退出、DB58064正式交还，尚未stage/commit。Task6B具备本地提交条件；Task7正常页面、8真实切换CLI隔离演练、9真模型同一8D、10同份兼容、11最终全量仍待，不具备R6切换资格。
 
 远端再核：R5 PR33已于2026-11-16T08:40:48Z合并，head`d06f63dd9d3d687a26ea5714b39a54f14671a01f`，main/merge`f8b8d9885441408503447c0ffa1aceb9f6b1060e`。从既用75fcc到d06仅11个CI/诊断/测试/文档文件，无app/SDK/migration变化；R5正式集成依赖已满足，目标环境与R6放行条件不因此通过。本树不合入CI Agent变化、本地旧runner收据不冒称新主线CI执行。没有推送、合并、部署或用户环境切换；接续Task7。
+
+Task6B精确54路径已本地提交`3185635917b4528d6e0f6f5de6969a8638acbd50`，提交后工作树为空。146本地链接/21锚点及staged content hash核对通过。已从此基线启动全新Task7实施agent，58064按需独占，父仅文档/复审不DB；接续正常员工UI，不停在6B。
+
+### Task7已启动与只读UI契约早审
+
+基于提交后干净的`31856359`由全新实施agent接手。实际缺口是候选无确认/撤回资格与Root对照、更正无can_correct、本地表单资格、部署D4/D5 profile区分以及真实非empty人工分析无可选target/anchor目录。独立SPEC批准必要只读DTO/confirmation-context/per-action flags/known V origins/recognized profile及local PPT，写入口仍独立权限/版本/终态复核；catalog须D8_GATE阶段、先全部来源授权再精确admitted doc/baseline IDs读body，前后目录版本/权限重验，修正metadata/body旧基线tie-breaker差异，不返整快照。后台首批15passed/0skip（`api-20261116T101357068304-receipt.json`：4 UI DTO＋3local PPT＋8既有PPT），前端新组件首GREEN，native profile真实RED后实现中。源码未冻结、正常页面/侧栏/v1-v2 validator/更广对抗及最终双复审待；不签Task7或C9，未实际调用云模型/无DDL。
+
+### R6 员工操作说明（Task7；真实浏览器整链由Task9验收）
+
+1. 在正常登录后的8D报告页打开Agent侧栏，明确选择D4分析或D5措施及获准部署。D4先维护真实D2/D3事实，再选择有权读取的FMEA与原因节点；任务内补充仅限结构化分析意图，新事实先回业务页面维护。部署未获准或完整来源不足时继续手工维护，不从旧入口绕过。
+2. 在D4候选面板核对候选、依据和版本，通过“查看来源”核实当前可见的来源详情。确认时编辑最终措辞，默认追加；全文替换须核对当前正式根因并明确确认。员工确认不等于根因验证或证明签发，后两者仍在独立验证入口完成。
+3. 在D5建议面板核对依据后逐项采纳。已采纳条目使用正式措施的“更正后全文／更正理由／提交更正”，保留原采纳文本和历次更正；可更正资格由服务端当前权限与阶段决定。整份报告不可读时，已授权的单项措施仍从受控条目入口读取，不能据此读取其它正文。
+4. 受限报告在D7填写本地预防、依据和理由；到文档门禁阶段逐项核对获准候选文档，保存人工分析。空清单须另行明确确认；有影响项按实际文档与检查点审核，延期继续阻塞，豁免仍限原APPROVE权限与规则。审批前审阅并记录经验、知识、横向传播及供应商风险正文输入本轮NOT_EXECUTED的事实和原因。
+5. 正常报告页可显式选择本地规则版PPT，模型未运行不显示AI已通过；来源权限、历史和终态读取校验照常执行。切换报告、身份或业务范围后重新取得材料；403/409及其它已确认拒绝后刷新重核，网络结果未知时仅使用“重试原请求”，保持同一操作键和参数。
+
+此说明对应本批实现中的正常入口，不表示用户环境已切换。旧入口退役、真实浏览器／模型及兼容回退分别由Tasks8–10验收。
+
+Task7最终v3规格复审通过，独立fresh QUALITY已开始：正常员工D4候选/来源/确认、D5逐项更正及历史、D7本地预防/人工文档门禁/四通道NOT_EXECUTED、只读V已知来源及本地PPT已接通。SPEC发现并修复两项真实缺口：新增FMEA/CP检查点缺field导致严格校验必拒；D4候选A→B乱序响应覆盖当前确认表单。均有RED→GREEN；另413明确拒绝清空旧form，未知网络保留原请求key/payload。最终106文件951前端测试、类型检查与Vite构建通过；后端当前UI合同8项、最终writer补证56项及native33项分别通过、0skip，native另25普通节点deselected。早期116组在manual writer临时改为controlled_manual_candidates时执行，最终保留_build_allowlist后以完整56组覆盖，不能把116伪绑定最终writer。v3冻结44路径，生产摘要`d966e4b95c45676ae804dd6b205500926eefe80c1a35b9af76f098c894737e06`、变更集合摘要`ce8b5f1728a4ad824d4a8a7191b85ac4360784f6c37af429809800e13a706ed5`，父与SPEC均核0漂移。最终QUALITY及本地提交待；无DDL/SDK/云模型调用，真实浏览器及双版本切换仍待8–11。
+
+随后fresh QUALITY指出一项Important（v3尚未签收）：验证卡片新增定时刷新有重叠请求，较新403清空后，较旧200仍可能恢复验证正文/known origins。父页有独立请求归属，不能代替卡片内部latest-read围栏；已要求deferred新403→旧200回归及取消/序列化修复，再冻结v4并SPEC增量→QUALITY复核。该静态发现不是已运行测试失败，不能冒称已完成RED。
+
+### Task7最终签收（接续Task8，未签R6整体切换）
+
+QUALITY静态发现已实际RED复现（旧200恢复受限正文，1failed/9passed），随后latest read取消＋请求对象/sequence围栏修复；明确授权拒绝清空rows/form/cause并失效旧请求epoch，含延迟FMEA读取，cleanup取消旧读。focused三文件33passed；最终全前端106文件952passed/0skip/47.28s，类型检查及tsc-b/Vite构建exit0（build13.64s）。日志均保留在owner私有目录，早期前端日志按原字节复制后核摘要，父仅用owner redactor查看；尝试直接读根tmp日志被redactor正确拒绝，未读取raw。
+
+| 最终独立验证 | selected / passed | 收据或owner日志 | 限定范围 |
+| --- | --- | --- | --- |
+| local38＋catalog6＋localPPT4＋旧PPT8 | 56 / 56 | `api-20261116T103648866195-receipt.json` | 最终保留_build_allowlist writer上执行 |
+| 最终UI合同完整文件 | 8 / 8 | `api-20261116T104551558397-receipt.json` | 含新增FMEA/CP严格add grammar正反用例 |
+| 旧R5binding24＋新R6profile1＋D4native8 | 33 / 33 | `r5-api-20261116T103157541637-receipt.json` | 25普通节点deselected，0skip |
+| 最终前端全量 | 952 / 952（106文件） | `artifacts/task7-freeze-v4-frontend-all.log` | 不将旧947/948/951当最终测试版本 |
+| tsc noEmit / tsc-b与Vite | exit0 / exit0 | `artifacts/task7-freeze-v4-{tsc,build}.log` | 父已核构建末尾，最终退出据handoff |
+
+前三组父独立读取安全收据字段核PASSED/exit0/0failed/errors/skipped；API0deselected。原API116组涵盖其它未再修改的后台路径，但当时manual writer曾临时调用controlled_manual_candidates，不能冒充最终writer；最终writer完整local组以56补证，catalog仅readonly精确准入扫描，原writer语义保留。旧native注册文件增加额外节点曾导致pytest25通过而wrapper拒收；保留失败，R6新增profile测试分离独立native文件，最终33由既有runner真实签收，不改CI。每组独立、重叠不相加；frozen_sha为空，以实际基线31856359和冻结文件摘要绑定，不填后续Git SHA。
+
+最终v4为44个backend/frontend路径：生产摘要`7013f93fee614367d375c9a7f81ed28141a756faf1a6855a7f539e4037fa7108`，变更集合摘要`df73e71f7ca9dbef23dffcb40f1cb6f96904b33bac4ab68f25a4048938c852fc`。全diff及v2–v4全部增量按独立SPEC→fresh QUALITY批准，父/SPEC/QUALITY核44文件0漂移；16Python AST通过，020/021/022已应用迁移无变化，无SDK或CI优化改动。另3份父维护文档。实施者最终确认全部已知测试/build进程已退出，DB58064正式交还idle、容器保留；私有`task7-final-handoff.json`与`task7-final-verification.json`均已更新v4，含精确命令/日志/源码绑定和双复审通过。具备本地提交条件，SHA稍后据实补录。Tasks8–11继续：真实切换CLI仅独占演练、真实模型/浏览器同一8D和同份compat均未签；无推送/合并/部署或用户环境切换。

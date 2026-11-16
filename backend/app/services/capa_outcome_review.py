@@ -460,6 +460,8 @@ async def collect_outcome_material(db, capa) -> dict:
         if actor is None: raise PermissionError('Local current actor required')
         local_material=await read_local(db,scope_for_outcome(actor),capa.report_id)
         local_material.pop('material_version',None)
+        for key in list(local_material):
+            if key.startswith('can_'):local_material.pop(key)
     fields = _columns(CAPAEightD, _CORE)
     await _preflight(db, fields, CAPAEightD.report_id == capa.report_id)
     core = _normal(dict((await db.execute(select(*fields).where(

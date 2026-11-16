@@ -83,7 +83,8 @@ async def list_candidates(db, scope, report_id, page=1, page_size=20):
         _,row,_=await candidate_metadata(db,scope.user.user_id,report_id,candidate_id)
         body=(await db.execute(select(CapaD4Candidate.original_text,CapaD4Candidate.supporting,
             CapaD4Candidate.opposing,CapaD4Candidate.missing_information).where(CapaD4Candidate.candidate_id==candidate_id))).one()
-        items.append(dict(candidate_id=candidate_id,state=row.state,version=candidate_version(db,row),
+        flags=await candidate_actions(db,scope,report_id,candidate_id)
+        items.append(dict(**flags,candidate_id=candidate_id,state=row.state,version=candidate_version(db,row),
             material_version=await material_version(db,report_id),**body._asdict()))
     for candidate_id in ids: await candidate_metadata(db,scope.user.user_id,report_id,candidate_id)
     if visible!=await visible_ids(): raise PermissionError('D4 candidate view changed')
@@ -200,3 +201,36 @@ async def withdraw(db,scope,report_id,candidate_id,body):
     result=dict(candidate_id=candidate_id,state='withdrawn')
     await db.commit()
     return result
+
+
+async def candidate_actions(db,scope,report_id,candidate_id):
+    """Hints mirror write admission; every command independently authorizes again."""
+    result=dict(can_confirm=False,can_withdraw=False)
+    try:
+        factories,lines=await current_capa_actor_access(db,scope.user.user_id,PermissionLevel.EDIT)
+        target=await current_capa_target_metadata(db,report_id,factories,lines)
+        _,row,_=await candidate_metadata(db,scope.user.user_id,report_id,candidate_id)
+        from app.services.capa_review_guard import REVIEWED_STATES
+        result['can_withdraw']=row.state=='pending' and target.status not in REVIEWED_STATES
+        if row.state=='pending' and target.status=='D4_ROOT_CAUSE':
+            await authorize_root(db,scope.user.user_id,report_id,PermissionLevel.EDIT)
+            await candidate_metadata(db,scope.user.user_id,report_id,candidate_id,fresh=True)
+            result['can_confirm']=True
+    except (PermissionError,LookupError):
+        pass
+    return result
+
+
+async def confirmation_context(db,scope,report_id,candidate_id):
+    await authorize_root(db,scope.user.user_id,report_id)
+    _,row,_=await candidate_metadata(db,scope.user.user_id,report_id,candidate_id)
+    version=candidate_version(db,row)
+    material=await material_version(db,report_id)
+    current=await read_root(db,scope.user.user_id,report_id)
+    flags=await candidate_actions(db,scope,report_id,candidate_id)
+    await authorize_root(db,scope.user.user_id,report_id)
+    _,after,_=await candidate_metadata(db,scope.user.user_id,report_id,candidate_id)
+    if version!=candidate_version(db,after) or material!=await material_version(db,report_id):
+        raise ConfirmationConflict('D4 material changed')
+    return dict(candidate_id=candidate_id,current_root_text=current,material_version=material,
+        candidate_version=version,can_confirm=flags['can_confirm'])

@@ -2070,6 +2070,7 @@ export interface Verification {
   is_verified: boolean;
   conclusion: VerificationConclusion;
   evidence_attachments: Record<string, unknown>[];
+  known_source_origins?: {kind:"fmea";fmea_id:string;cause_node_id:string;factory_id:string;product_line_code:string}[];
   source_ref: Record<string, unknown> | null;
   verified_by: string | null;
   verified_at: string | null;

@@ -248,7 +248,9 @@ async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=Non
                 from app.services.capa_d5_corrections import current_measure
                 from app.services.capa_d5_correction_material import complete_material_version
                 body = await current_measure(db, keys[row.proposal_id], report_id)
+                from app.core.permissions import Module, PermissionLevel
                 items.append(D5MeasureItem(**body,
+                    can_correct=access[0].get(Module.CAPA, PermissionLevel.NONE) >= PermissionLevel.EDIT and target.status in {'D5_CORRECTION','D6_VERIFICATION','D7_PREVENTION'},
                     material_version=await complete_material_version(db, scope, report_id)))
             else:
                 original_text = await db.scalar(select(CapaD5Proposal.original_text).where(

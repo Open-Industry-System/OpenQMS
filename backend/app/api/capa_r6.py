@@ -120,3 +120,13 @@ async def local_history(report_id:UUID,kind:str,page:int=Query(1,ge=1),page_size
         scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
     from app.services.capa_r6_local_closure import history
     return await call(db,history,scope,report_id,kind,page,page_size)
+
+
+@router.get('/d4-candidates/{candidate_id}/confirmation-context')
+async def confirmation_context(report_id:UUID,candidate_id:UUID,scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    return await call(db,service.confirmation_context,scope,report_id,candidate_id)
+
+@router.get('/manual-doc-catalog')
+async def manual_catalog(report_id:UUID,scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_r6_local_closure import manual_catalog
+    return await call(db,manual_catalog,scope,report_id)

@@ -7,6 +7,7 @@ import AgentSidebar from "./AgentSidebar";
 import type { ActivityPage } from "../../types/agentTask";
 import * as api from "../../api/agentTasks";
 import * as proposals from "../../api/d5Proposals";
+vi.mock('../../api/fmea',()=>({listFMEAs:vi.fn().mockImplementation(async()=>({items:[{fmea_id:a,title:'已授权FMEA',document_no:'F-1'}],total:1,page:1,page_size:20})),getFMEA:vi.fn().mockResolvedValue({graph_data:{nodes:[{id:'cause-A',type:'FailureCause',name:'磨损'}]}})}));
 vi.mock("../../api/d5Proposals",()=>({listD5Proposals:vi.fn(),listTaskD5Proposals:vi.fn(),listD5Measures:vi.fn(),checkpointProposals:vi.fn()}));
 vi.mock("../../api/agentTasks", async () => ({
   ...await vi.importActual("../../api/agentTasks"),
@@ -91,7 +92,7 @@ beforeEach(() => {
   vi.mocked(proposals.listD5Measures).mockResolvedValue({legacy_text:null,items:[],total:0,page:1,page_size:20});
   vi.mocked(proposals.checkpointProposals).mockResolvedValue([]);
   vi.mocked(api.getTaskActivity).mockResolvedValue(page);
-  vi.mocked(api.listModelDeployments).mockResolvedValue({items:[{deployment_id:a,name:"模型甲",version:"1",kind:"local"},{deployment_id:b,name:"模型乙",version:"2",kind:"cloud"}]});
+  vi.mocked(api.listModelDeployments).mockResolvedValue({items:[{deployment_id:a,name:"模型甲",version:"1",kind:"local",profile:"model_d5_proposal_r6_v1"},{deployment_id:b,name:"模型乙",version:"2",kind:"cloud",profile:"model_d5_proposal_r6_v1"}]});
   vi.mocked(api.getTaskWorkflow).mockResolvedValue({status:"waiting",question:"请补充",checkpoint_id:null});
 });
 afterEach(() => {
@@ -220,7 +221,7 @@ describe("global user task sidebar", () => {
     await select();
     view.rerender(<Harness report={b} />);
     act(() => useAuthStore.setState({ currentFactoryId: b }));
-    expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument();
+    await waitFor(()=>expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument());
     act(() => {
       localStorage.setItem("access_token", "jwt2");
       useAuthStore.setState({ token: "jwt2" });
@@ -470,4 +471,41 @@ it('pages current-task pending correction choices rather than being trapped by t
   fireEvent.change(screen.getByLabelText('更正当前任务建议'),{target:{value:b}});
   fireEvent.click(screen.getByRole('button',{name:'明确更正选中建议'}));
   await waitFor(()=>expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:JSON.stringify({intent:'replace_d5',predecessor_id:b}),idempotency_key:expect.any(String)},expect.any(AbortSignal)));
+});
+
+it('separates D4 analysis creation using only server-approved D4 profile and fixed source-neutral intent',async()=>{
+ vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:'openqms.controlled-d5-model',plugin_version:'1'}]});
+ vi.mocked(api.listModelDeployments).mockResolvedValue({items:[{deployment_id:b,name:'D4候选模型',version:'1',kind:'cloud',profile:'model_d4_candidate_v1'}]});
+ vi.mocked(api.createTask).mockReturnValue(new Promise(()=>{}));
+ render(<Harness/>);await screen.findByRole('button',{name:'Agent 任务'});fireEvent.click(screen.getByRole('button',{name:`创建 ${a}`}));
+ fireEvent.change(await screen.findByLabelText('新任务类型'),{target:{value:'d4'}});
+ fireEvent.change(screen.getByLabelText('新任务模型'),{target:{value:b}});
+ fireEvent.change(await screen.findByLabelText('D4 输入 FMEA'),{target:{value:a}});
+ fireEvent.change(await screen.findByLabelText('D4 输入原因节点'),{target:{value:'cause-A'}});
+ fireEvent.click(screen.getByRole('button',{name:'开始 D4 根因分析候选任务'}));
+ await waitFor(()=>expect(api.createTask).toHaveBeenCalledWith({report_id:a,installation_id:a,model_deployment_id:b,request_key:expect.any(String),initial_text:'deliver_d4_root_cause_candidate_v1',derived_source_scope:{target_report_id:a,fmea_id:a,cause_node_id:'cause-A'}},expect.any(AbortSignal)));
+ expect(screen.getByText(/新增事实请先维护 D2\/D3\/FMEA/)).toBeInTheDocument();
+});
+
+it('offers only complete-source R6 D5 deployments for new D5 tasks',async()=>{
+ vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:'openqms.controlled-d5-model',plugin_version:'1'}]});
+ vi.mocked(api.listModelDeployments).mockResolvedValue({items:[{deployment_id:a,name:'旧版部署',version:'1',kind:'cloud',profile:'model_d5_proposal_v1'},{deployment_id:b,name:'完整来源部署',version:'2',kind:'cloud',profile:'model_d5_proposal_r6_v1'}]});
+ render(<Harness/>);await screen.findByRole('button',{name:'Agent 任务'});fireEvent.click(screen.getByRole('button',{name:`创建 ${a}`}));
+ const picker=await screen.findByLabelText('新任务模型');
+ await waitFor(()=>expect(picker).toHaveTextContent('完整来源部署'));
+ expect(picker).not.toHaveTextContent('旧版部署');
+});
+
+it('never paints a late FMEA cause from a previous creation report',async()=>{
+ const fmea=await import('../../api/fmea');let resolve!:(v:any)=>void;
+ vi.mocked(fmea.getFMEA).mockReturnValueOnce(new Promise(r=>resolve=r));
+ vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:'openqms.controlled-d5-model',plugin_version:'1'}]});
+ const view=render(<Harness/>);await screen.findByRole('button',{name:'Agent 任务'});fireEvent.click(screen.getByRole('button',{name:`创建 ${a}`}));
+ fireEvent.change(await screen.findByLabelText('新任务类型'),{target:{value:'d4'}});
+ fireEvent.change(await screen.findByLabelText('D4 输入 FMEA'),{target:{value:a}});
+ await waitFor(()=>expect(fmea.getFMEA).toHaveBeenCalled());
+ view.rerender(<Harness report={b}/>);fireEvent.click(screen.getByRole('button',{name:`创建 ${b}`}));
+ await act(async()=>resolve({graph_data:{nodes:[{id:'old-cause',type:'FailureCause',name:'旧报告受限原因'}]}}));
+ expect(screen.queryByText('旧报告受限原因')).toBeNull();
+ expect(screen.getByLabelText('D4 输入原因节点')).toHaveValue('');
 });

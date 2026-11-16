@@ -110,3 +110,18 @@ class D7NodeActionResponse(BaseModel):
     acted_at: datetime
     status: str
     model_config = ConfigDict(from_attributes=True)
+
+
+class VerificationOrigin(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['fmea']
+    fmea_id: uuid.UUID
+    cause_node_id: str
+    factory_id: uuid.UUID
+    product_line_code: str
+
+class VerificationSourceResponse(VerificationResponse):
+    known_source_origins: list[VerificationOrigin]
+
+class VerificationCreatedSourceResponse(VerificationSourceResponse):
+    source_proof_issued: bool = False

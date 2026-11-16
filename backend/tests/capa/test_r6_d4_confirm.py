@@ -508,3 +508,20 @@ async def test_candidate_page_final_authority_check_suppresses_loaded_body(staff
     response=await c.actor().client.get(f'/api/capa/{c.report_id}/d4-candidates')
     assert response.status_code==403,response.text
     assert 'RESTRICTED-CANDIDATE' not in response.text
+
+@pytest.mark.requires_db
+@pytest.mark.asyncio
+async def test_readonly_confirmation_context_binds_both_versions_and_keeps_view_readable(staff_candidate):
+    c=staff_candidate
+    root=f'/api/capa/{c.report_id}'
+    response=await c.actor('view').client.get(root+f'/d4-candidates/{c.candidate_id}/confirmation-context')
+    assert response.status_code==200,response.text
+    context=response.json()
+    assert context['candidate_id']==str(c.candidate_id)
+    assert context['candidate_version']==c.confirm_body['expected_candidate_version']
+    assert context['material_version']==c.confirm_body['expected_material_version']
+    assert context['can_confirm'] is False
+    await c.actor('view').revoke('fmea')
+    denied=await c.actor('view').client.get(root+f'/d4-candidates/{c.candidate_id}/confirmation-context')
+    assert denied.status_code==403
+    assert 'current_root_text' not in denied.json()
