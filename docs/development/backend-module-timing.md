@@ -21,3 +21,24 @@ PR #37从804f8551正常合入当前main d0c7394e；仅PROGRESS并发记录需要
 此前本地全量A实际5280 passed／5 skipped／exit0，Make4326.03秒；B为5279 passed／5 skipped／1 failed，Make4398.99秒，失败是未改动的test_concurrent_first_sink_unique_race唯一键冲突。两侧集合摘要相同，但失败的B不能签收为成功的性能对照；没有删除该并发测试或放宽退出码。原始证据保留在/tmp/openqms-controlled-backend/，并将PR中过时的“仍在运行”状态改为这一实际结果。
 
 新的R5/main基线与旧804f8551的测试集合不同，旧CI全绿及旧阶段时间不代替本次验收。先在同一台机器、固定解释器／依赖／PG15镜像下对相同重建、迁移及隔离集合重新验证；两轮使用各自独占新实例与相同公共模板初始化，唯一执行源码差异为rebuild_db/sample准备实现。完整后端的模块诊断继续随正常一次全量运行生成，不预写整套收益。
+
+### 当前main同组78项A/B（本地）
+
+代码快照81610bb6：与控制侧同一提交、同一计时代码／共同模板初始化；控制侧仅恢复旧rebuild_db/sample。3个模块分别为重建38项、未改迁移36项、隔离回归4项。集合摘要均为45582b2f2287553eea0c649686a93571fdadde89f88c6205ac1f00da3cb70ef5，两侧78 passed／0 skipped／0 failed／exit0。
+
+| 指标 | 原fixture A | 克隆fixture B |
+|---|---:|---:|
+| setup累计 | 374.60秒 | 146.74秒 |
+| call累计 | 175.87秒 | 188.47秒 |
+| teardown累计 | 6.40秒 | 6.42秒 |
+| 重建模块setup | 203.56秒 | 17.92秒 |
+| 隔离模块setup | 45.45秒 | 9.23秒 |
+| 未改迁移模块setup | 125.59秒 | 119.59秒 |
+| 未改迁移模块call | 101.26秒 | 89.91秒 |
+| API CLI wall（不计另行prepare／wheel构建） | 565.22秒 | 347.88秒 |
+
+两轮都实际提交registry/schema/seed污染、检查下个case独立库／初始状态与请求深拷贝，并验证异常克隆删除及可写模板拒绝。每轮全新独占PG15，固定缓存镜像ID，结束零其他客户端、无残留fixture库，精确移除登记容器与唯一专属卷、移除凭据；before/after清理收据各自保留。
+
+这是macOS同机、同解释器／安装依赖指纹、源码前后指纹一致的局部组对照，不是Actions job；没有pip安装，因此pip冷热未测得。主机不独占，结束load A约15、B约6.7；未改模块call也漂移超过5%，按既定规则正在补反向B/A，不将这次wall差异解释为整套节省。既有本地全量A/B失败记录仍保留；新main全量受控对照未完成。
+
+证据位于/tmp/openqms-pr37-followup/：source-difference.json、comparison.json、before/after/result.json、模块日志与cleanup-result.json。反向对照独立保存在reverse/；不覆盖原始数据。新PR CI仍运行一次正常全量，不因计时添加收集或执行。

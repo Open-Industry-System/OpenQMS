@@ -2,6 +2,8 @@
 
 ### 2026-11-16 — 优先处理慢fixture PR #37，同步最新main
 
+- 新基线验证：CI基础设施＋runner pure 373 passed／3 warnings／exit0；正常API CLI串行同组78项A/B均78 passed／0 skipped／exit0，集合摘要一致。setup总计374.60→146.74秒，重建模块203.56→17.92秒；API CLI wall565.22→347.88秒（prepare与wheel构建不计入）。两边源码与依赖指纹前后不变，唯一执行源码差异为原fixture／克隆fixture文件；真实提交污染与异常清理回归均通过，两个专属容器和各1卷已验证清理、凭据已删除。
+- 同组未改迁移模块call101.26→89.91秒、主机load也有波动，正在补B/A反向对照；不据这对wall或旧CI差异判断整套收益。新CI将提供实际main合并候选的全量模块诊断与后端job时长。
 - 用户要求优先处理#37；与安全修复#38没有先后依赖。使用新的隔离worktree `/tmp/openqms-pr37-main-sync`，起点为PR真实head804f8551；保留原fixture分支、冻结的计时／对照工作区及其他PR改动。
 - 正常合入实际main d0c7394e4cda7bc73014051676f20e8c0c536780（已包含R5与#39测试精简／macOS手动验收）。仅PROGRESS顶部并发记录冲突；保留两侧进度。保留最新main的普通8项检查、独立macOS手动工作流、R5固定目录及测试精简，不复制旧workflow覆盖新main。
 - 原804f8551的远端8项通过属于旧基线，不能代替本次验收。此前本地全量A为5280 passed／5 skipped，B为5279 passed／5 skipped／1 failed，失败为未改动的knowledge_sink并发唯一键冲突；这一对照不算性能验收通过。新基线按实际验证记录结果，不预写整套提速。
