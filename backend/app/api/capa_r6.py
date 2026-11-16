@@ -6,7 +6,7 @@ from starlette.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from app.core.deps import get_request_scope, RequestScope
 from app.database import get_db
-from app.schemas.capa_r6 import D4Confirm
+from app.schemas.capa_r6 import D4Confirm, D5Correct
 from app.schemas.capa_d5_staff import D5Withdraw
 from app.services import capa_sources_view as sources_service
 from app.services.capa_review_guard import ReviewedContentLocked
@@ -80,3 +80,15 @@ async def legacy(report_id:UUID,page:int=Query(1,ge=1),page_size:int=Query(20,ge
 async def withdraw(report_id:UUID,candidate_id:UUID,body:D5Withdraw,
         scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
     return await call(db,service.withdraw,scope,report_id,candidate_id,body)
+
+@router.post('/d5-measures/{measure_id}/corrections')
+async def correct_measure(report_id:UUID,measure_id:UUID,body:D5Correct,
+        scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_d5_corrections import correct
+    return await call(db,correct,scope,report_id,measure_id,body)
+
+@router.get('/d5-measures/{measure_id}/corrections')
+async def measure_history(report_id:UUID,measure_id:UUID,
+        scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_d5_corrections import history
+    return await call(db,history,scope,report_id,measure_id)

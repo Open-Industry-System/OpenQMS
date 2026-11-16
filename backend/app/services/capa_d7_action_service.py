@@ -220,6 +220,9 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
             existing.prevention_control_node_id = pv["prevention_control_node_id"]
             existing.prevention_control_name_before = pv["prevention_control_name_before"]
             existing.prevention_control_name_after = pv["prevention_control_name_after"]
+            if db.is_modified(existing):
+                from app.services.capa_d4_material import bump_material
+                await bump_material(db, capa.report_id)
             await db.commit()
             await db.refresh(existing)
             return existing
@@ -248,6 +251,8 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
         ))
         if old_action == "skipped" and req.action == "confirmed" and req.fmea_id is not None:
             db.add(_d7_linkage_audit(capa, rec, user.user_id))
+        from app.services.capa_d4_material import bump_material
+        await bump_material(db, capa.report_id)
         await db.commit()
         await db.refresh(existing)
         return existing
@@ -278,6 +283,8 @@ async def record_d7_action(db: AsyncSession, capa, req: D7NodeActionCreate, user
     if req.fmea_id is not None and req.action == "confirmed":
         db.add(_d7_linkage_audit(capa, rec, user.user_id))
     capa_id = capa.report_id  # 捕获标量，供 rollback（expire capa）后的重试查询使用
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, capa.report_id)
     try:
         await db.commit()
     except IntegrityError:
@@ -447,6 +454,8 @@ async def auto_fill_d7(db: AsyncSession, capa, req: D7AutoFillRequest, user):
             "failure_cause_node_id": req.failure_cause_node_id,
             "failure_mode_node_id": req.failure_mode_node_id,
         }, user.user_id))
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, capa.report_id)
     try:
         await db.commit()
     except IntegrityError:

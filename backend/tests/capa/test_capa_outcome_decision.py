@@ -175,7 +175,14 @@ async def test_actual_source_receipt_consumed_by_reader_and_reference_collector(
         audit = (await db.scalars(select(AuditLog).where(AuditLog.record_id == review_case.report_id,
             AuditLog.action == 'D8_APPROVED'))).one()
         receipt = audit.changed_fields['outcome_review']
-        material = await collect_outcome_material(db, await review_case.report(db))
+        # The internal collector needs the same live source authority supplied
+        # by the normal outcome reader; a signed receipt is not read permission.
+        from app.services.capa_current_access import current_capa_access
+        db.info['outcome_read_access'] = await current_capa_access(db, await review_case.scope(db))
+        try:
+            material = await collect_outcome_material(db, await review_case.report(db))
+        finally:
+            db.info.pop('outcome_read_access', None)
         assert material['source_versions'] == receipt['source_versions']
         assert {v['module'] for v in receipt['source_versions']} == {'fmea', 'planning'}
         assert await _source_capa_ids(db, 'planning', review_sources.cp_id) == {review_case.report_id}

@@ -6,7 +6,7 @@
 
 - 实施起点 `codex/r6-entry-switch-design@f03fc01b0ef9a30a85da1917c8fa8ed81fcaa9f9`，开工工作区干净。R5 PR #33 实读仍 open/draft、未合并，head `75fcc51765bd3b6b739695178a399bfa01806574`，main `d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，未发生影响计划的基线变化。
 - 解释器 `/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python`，setuptools `79.0.1`。前端在本 worktree 和冻结基线各自按 lockfile `npm ci`，不复制依赖。离线 npm 因缺缓存失败，随后联网按锁安装成功；不改 package lock 或运行代码。
-- Task 1 数据合同实现、223 项专项验证及独立 SPEC/QUALITY 复审已通过；完整冻结 `make check` 与随后串行 `make check-browser` 均已 exit0。Task 2 最终整组验证与双复审通过，Task 3 各分层与独立双复审亦完成，本地提交 `dec122a9beff9f5931d61310bba132479b28e920`；随后启动全新 Task 4 实施 agent；Task 4 现已本地提交41419001；Task 5实现、完整专项与共享分层及独立双复审亦通过，继续 Task 6。尚未签收 R6 整体或切换资格。
+- Task 1 数据合同实现、223 项专项验证及独立 SPEC/QUALITY 复审已通过；完整冻结 `make check` 与随后串行 `make check-browser` 均已 exit0。Task 2 最终整组验证与双复审通过，Task 3 各分层与独立双复审亦完成，本地提交 `dec122a9beff9f5931d61310bba132479b28e920`；随后启动全新 Task 4 实施 agent；Task 4 现已本地提交41419001；Task 5实现、完整专项与共享分层及独立双复审亦通过；Task 6核心更正与专项及独立双复审现已完成，继续6B本地手工门禁。尚未签收 R6 整体或切换资格。
 - 2026-11-16 通过 GitHub 连接器重新核对：R5 [PR #33](https://github.com/Open-Industry-System/OpenQMS/pull/33) 仍 open/draft、未合并，head 仍 `75fcc51765bd3b6b739695178a399bfa01806574`。实际 main 已经由另一 Agent 的 [CI PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36) 推进到 `193746abb7c1eb9d196ef3997b6b91767490e3d1`；PR #33 记录的 base_sha 仍是旧 `d3c0ada8`，不能将其当作 main 当前值。对比实际 11 个变更文件，仅 CI 触发/缓存/耗时诊断、测试和文档，未改变业务源码、SDK 或迁移；runner 新增的是不影响验收结果的可选耗时输出。因此本批业务/数据合同与任务依赖不变，保留本树基线和现有隔离收据，不拉入或改写 CI 工作。最终交接应说明此主线差异，后续整合由对应负责人处理；本轮没有合并或推送。
 
 ## Task 3 分层验证快照
@@ -87,7 +87,7 @@ Task 3 当前分层结果如下，互有重叠，不能加总为一次全量。`
 
 ### Task 3 新查明的两项边界（历史发现；产品状态由后续确认更新）
 
-- 来源 ABA：原 FMEA 节点 HMAC 会在原文恢复时复活；正常更新/回滚已递增 lock_version，但特殊特性删除及 PLM 导入存在遗漏。独立技术 SPEC 复审通过新增 `20261116_r6_source_epoch` / `tv016_r6_source_epoch` 方案：持久 nullable 捕获代际、无历史回填、数据库单调保护、当前用途核对及历史读取分离。新迁移已实现并有定向运行证据，最终迁移整组与实际 head 核验仍待本批完成；不能沿用 Task 1 的头声明本批已完成。决定正文见 [规格 §3.2](../superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#32-d4-新契约目标尚无实现)。
+- 来源 ABA：原 FMEA 节点 HMAC 会在原文恢复时复活；正常更新/回滚已递增 lock_version，但特殊特性删除及 PLM 导入存在遗漏。独立技术 SPEC 复审通过新增 `20261116_r6_source_epoch` / `tv016_r6_source_epoch` 方案：持久 nullable 捕获代际、无历史回填、数据库单调保护、当前用途核对及历史读取分离。新迁移已实现并有定向运行证据，最终迁移整组与实际 head 核验仍待本批完成；不能沿用 Task 1 的头声明本批已完成。决定正文见 [规格 §3.2](../superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#32-d4-新契约tasks-45-已专项验证整链待验收)。
 - 待用户选择的新产品边界：D7 经验提取、D8 强制知识沉淀/横向扩散使用不能继承限制的普通副本；现有文档门禁又要求先完成旧模型影响分析。直接拒绝这些出口会使受限报告不能走完 Task 9 正常审批。已建议受控员工手工影响分析并保留完整审核，将这些传播明确记为受限未执行、留 R7；或保留阻塞直到 R7。当时尚未获得答复；用户随后已确认本地手工门禁/传播明确不执行，见本台账末尾确认记录和 Task 6B。原四项决定不变，不以夹具/静默跳过冒充真实通过。
 - 推荐方案已具体化为 [规格 §12](../superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#12-受限报告本地结案方案用户已确认待实施与运行验收)，发现时为待确认草案，现已获用户确认、待 Task 6B 实施及运行验收：本地人工预防与影响分析、正常文档决定/APPROVE，审批前审阅并标记传播未执行；`deferred` 仍阻塞，waiver 不扩权。源码还确认 D7 会将 `d7_prevention` 复制到供应商风险 outbox，因此本地方案也必须明确阻止这一正文传播，不能只绕过知识/横向服务。C 组期间未修改相关运行代码；§9 四项已确认决定保持。
 
@@ -349,3 +349,41 @@ v8增量SPEC批准并更正资源描述：outcome/review_case是single模式，�
 只读实际DB身份：public head `20261116_r6_verify_origins`，trigger启用状态O；两public函数 `r6_verification_ref_origin(ref jsonb)` 与 `r6_retain_verification_origins()` prosrc逐字匹配冻结19源码，artifact `task5-final-db-identity.json`。测试tenant已按fixture清理，新建tenant19/两链同构由338完整迁移子pytest证明；原wrapper登记失败和修后完整登记成功分开保留。API52耗时256.96s，最终原生8为86.72s，旧R5完整24为97.21s；其余收据对应各自完整组，不宣称整片R6全量已完成。DB58064空闲交回父，容器/卷保留。
 
 下一顺序 `6→6B→7→8→9→10→11`。本批尚未实现正式D5更正或本地D7/人工doc gate，无真实云模型或浏览器/双版本同份数据验收，旧入口未切换；父负责精确本地提交后启动全新Task6实施agent。当前无新增产品待确认问题。
+
+Task 5 精确52路径（47实现/测试＋5相关文档）本地提交 `473e3449e5245e9687dd5b31f2fb80e2eca276c3`，提交后工作树为空。已从该基线启动全新Task 6实施agent，独占实施DB58064；父只维护文档并安排独立复审。继续顺序6→6B→7→8→9→10→11，不推送/合并/部署/用户环境切换，CI优化仍独立。
+
+### Task 6 开始与必要技术早审
+
+独立SPEC已基于实际服务/写路径批准方向（非最终实现）：复用Task1correction表，无DDL；current_measure统一当前值，原采纳final_text/原proposal不改，material按实际contract分支v1/v2严格独立验证，旧历史字节保留。更正按所选measure完整来源授权，全报告token只取元数据/父版本并opaque HMAC，不读隐藏正文或泄隐藏ID；A可读/B隐藏仍可更正A，B变化使A旧表单409。D7同action/reason可改hash/prevention但acted_at不变，需真正changed时bump而no-op不bump；docgate各phase/CAS和集中decision实际mutation均覆盖，完整writer/源锁列表待最终复审。
+
+验证依赖明确分层：Task6先core员工HTTP/版本/并发/终态专项；正常D7/docgate回流受当前安全拒绝阻挡，6B基于v2补本地手工真实回流并补签C6，9/10再整链/兼容，不能以seed新passed分析或阶段跳转伪称正常验收。用户产品决定均不重开。已取得actual current_version缺失业务RED（`run-1794804597553782000.log`），初版更正/current DTO焦点1passed（`run-1794804800455854000.log`），仍在完整TDD、writer及v2审批扩展，不签Task6完成。
+
+Task 6 双文件测试两次automatic approval deadline timeout，均未启动且无安全拒绝理由；不循环盲重试。父评估后缩为单一 `test_r6_d5_corrections.py` 目标获得批准并实际启动，日志 `run-1794805295650206000.log`，测试期间实施agent暂停DB及关联代码变更；资源仍owner607e0a5f…/独占58064，没有替换资源或绕过安全拒绝。测试结果尚待，未宣称GREEN。
+
+父更窄单目标实际完成：`run-1794805295650206000.log`，收据 `api-20261116T050136421197-receipt.json` PASSED，18selected/18passed、0skip/deselected/failed/errors、68.55s、exit0。仅当前初版correction单文件，简化Scope fixture/待加严v2验证不能当normalJWT或完整Task6证据；DB已交回实施agent。后续改为真实app/main tenant middleware/auth/login、多独立client/JWT，补隐藏B、锁等待撤权与全metadata writer/审核，阶段依赖C6 normal-reentry待6B不提前签收。通道两次超时记录保留，此成功不改写原未启动结果。
+
+后续已使用正常 app/main、tenant middleware、登录/JWT 和独立客户端取得18项通过（`run-1794805451035983000.log`；`api-20261116T050411916083-receipt.json`，97.14s、0skip/failed/errors）。该组的原始建议及证明仍为明确控制夹具，不作真实模型主链证据。扩展至23项真实HTTP反例后，current/history并发读取发现旧文本搭配新材料版本的业务RED；正在增加最终revision引用围栏和full material同类验证。严格v2 schema/签名也已取得真实RED（`run-1794805666106357000.log`），修复仍待完整验证。Task6尚未冻结或最终复审；以上阶段结果不能签收C6正常回审、兼容回退或整体切换。
+
+三类revision-ref围栏已定向3passed；严格v1/v2及明确stored-round fixture的审核单文件8passed/0skip（`api-20261116T051350625195-receipt.json`）。更正单文件随后31passed/0skip（`api-20261116T051827249098-receipt.json`，174.99s）；跨措施复用key的SQLSpy真实RED后，分支先验证当前权限/receipt目标与指纹，再查受限定revision metadata，未读另一措施正文。集中补充断言后的最终新文件仍待重跑。旧D5四文件误用r5-api取得0selected/77deselected/exit5（`r5-api-20261116T052144292838-receipt.json`），原样保留且不计通过；正确api层完整四文件77passed/0skip（`api-20261116T052242853879-receipt.json`，284.4s）。D7/docgate首轮74passed后，旧public合成fixture finally直接删CAPA被material counter FK拒绝（`run-1794806901133425000.log`，1failed）；仅按本case清理counter及精确单trigger事务恢复规则修夹具，不改业务约束/历史迁移，不以74项代替整组复验。Task6完整专项、最终双复审尚待。
+
+D7/docgate完整11文件随后167passed/0skip（`api-20261116T053126367147-receipt.json`）；Task6生产及测试冻结v1全diff、v2真实collector权限上下文与v3双JWT各自GET补强，独立SPEC→QUALITY已分别批准，v3的16项摘要0漂移，均仅静态批准。outcome相邻组首次34passed后手工collector缺当前access context，修测试实际权限上下文；重跑85passed后8MiB历史畸形source_ref夹具被19触发器拦在写入阶段，尚未进入读取，不能误记为模型泄漏或超限读取RED。另行静态检查确认known_origins及新token有raw source_ref读取风险，拟补独立SQLSpy反例并改有界SQL坐标/marker投影、完整材料预检顺序；保留NULL旧历史与非法/超界的区分，非法不得变空集。该必要生产增量须新冻结、增量SPEC→QUALITY及受影响完整运行验证；v3批准不覆盖尚未落地的修复。
+
+### Task 6 核心最终签收（继续6B，不是R6最终交接）
+
+受限正式D5更正复用Task1不可变表，不新增DDL；public/tenant head仍为19，历史迁移字节未改。原建议、采纳时最终文本与操作者/时间不变；当前文本由最新修订统一解析，受控历史保留原因/操作者/前驱。当前EDIT、所选措施完整历史来源、条目版本与全报告opaque元数据版本锁后复核；隐藏B不扩大A权限，B的材料/来源变化仍使A旧表单409。同key精确授权重放不重复写，冲突key在读另一措施修订正文前拒绝。审核以明确v2契约绑定更正修订，严格v1历史/签名保持，批准/归档自身不使回执失效。
+
+| 最终独立完整分组 | 实际结果 | 精确收据 | 耗时 |
+| --- | --- | --- | --- |
+| 新更正/审核两文件 | 57 selected / 57 passed | `api-20261116T061149641669-receipt.json` | 265.6s |
+| 既有D5采纳/可见/审核围栏/消费者四文件 | 77 selected / 77 passed | `api-20261116T061808108546-receipt.json` | 288.7s |
+| outcome相邻十一文件 | 239 selected / 239 passed | `api-20261116T055909169673-receipt.json` | 152.12s |
+| R6来源详情/消费者/材料/旧历史四文件 | 100 selected / 100 passed | `api-20261116T060255514984-receipt.json` | 462.05s |
+| D7/docgate实际writer十一文件 | 167 selected / 167 passed | `api-20261116T053126367147-receipt.json` | 13.27s |
+
+五组分别是普通API层真实PASSED，均0skip/deselected/failed/errors、exit0，不相加冒充全量，不以旧77项收据替代来源helper变更后的最后77项。D7/docgate writer在v1后未改，167组证据保留适用；其余受影响组均在最终v5生产上执行。真实JWT/tenant middleware、两个独立客户端各自GET同版本并强制双向调度、锁等待后撤权、丢失响应重放、current/history/full material最终revision引用围栏均有实际断言。原证明/建议为明确控制夹具，stored-round审批夹具只证实核心版本/签名协议，不冒充真模型或6B正常重新回审。
+
+必要读取补强分开留痕：原8MiB/unknown-shape历史坏fixture先被19写入guard正确拒绝，尚未读正文；只在所属隔离事务精确单trigger停用造旧数据并恢复，保留全部原拒绝断言。独立SQLSpy随后真实复现known_origins raw JSON读取及doc_id原样跨driver，修复为有界SQL投影和独立size/shape/container flags；超界/非法不伪装为旧NULL/空集合，合法200来源、空doc数组及control_plan/planning历史别名保持。原六类8MiB/不读正文断言在最终完整239组通过。两次BTree超大索引夹具失败保留；未改索引或生产约束。早先错误native层0选入、自动审批超时、手工collector缺context和finally清理FK等原失败/未启动记录均未改写为通过。
+
+最终冻结v5为13生产＋6测试共19后端文件：变更集合摘要 `c3d67679311fd768ea0ea46c4adf259638e55139e25c9bafd962c5e5221f07a1`，生产变更摘要 `a9e6c85c6eaf956bfde09fa834c332b420b2613d57ab1431bf0f07e50653165c`，测试变更摘要 `c02ec10c8be82fa88320aca784261345a4c20bbbf3df38138e52029bf3a03e1d`；这是本批变更文件摘要，不冒称全仓生产摘要。初始全diff和v2–v5全部增量按独立SPEC→QUALITY复审通过，最终19文件0漂移/AST通过。收据frozen_sha为空，执行身份由基线473e3449＋冻结内容摘要说明，不虚称在尚未产生的后续提交上执行。另5份相关文档，当前总24路径，无迁移/SDK/UI/CI优化改动。PR33仍open/draft/unmerged、head75fcc517，实际main193746ab再次只读核对未变。
+
+Task6 core具备本地提交条件。**C6 normal-reentry仍未签收**：6B须经真实本地D7/manual文档门禁回审证明旧屏拒绝、新屏批准；7补正常员工页面；9同一合成8D/真实模型重跑并签C6/C9；10同份已更正/批准数据验证兼容构建。任何一项缺失均不能切换。继续6B→7→8→9→10→11，不推送、合并、部署或切换用户环境。

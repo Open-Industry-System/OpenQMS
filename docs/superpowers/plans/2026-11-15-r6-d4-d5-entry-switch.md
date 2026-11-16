@@ -10,7 +10,7 @@
 
 ---
 
-日期：2026-11-15，执行状态更新：2026-11-16。**计划经用户授权，已从 `f03fc01b` 开始全部 Tasks 1–11（含用户后续确认追加的 Task 6B）。** Tasks 1/2 已实现、验证并本地提交；Task 3 实现、各分层及逐次独立规格和质量复审已通过，本地提交 `dec122a9`；Task 4 实现、完整专项及共享分层、独立 SPEC→QUALITY 已通过，已本地提交 `41419001`，随后Task 5亦完成实现、完整专项/共享分层和独立双复审，具备本地提交条件；接续Task 6正式更正。产品已确认、实现完成与运行验收分别记账，实际结果见 [实施台账](../../development/r6-entry-switch.md)。原计划包含 `edcc3322` 的三项 P1 规格修订、四项产品决定，以及对 `917422ec` 的三项 P1 计划修订；保留这些依据，不将历史“仅文档”授权范围误用于当前已授权实施。仍不切换用户环境、不推送、合并或部署；CI 优化由另一 Agent 负责，R7 不在本计划内。
+日期：2026-11-15，执行状态更新：2026-11-16。**计划经用户授权，已从 `f03fc01b` 开始全部 Tasks 1–11（含用户后续确认追加的 Task 6B）。** Tasks 1/2 已实现、验证并本地提交；Task 3 实现、各分层及逐次独立规格和质量复审已通过，本地提交 `dec122a9`；Task 4 实现、完整专项及共享分层、独立 SPEC→QUALITY 已通过，已本地提交 `41419001`，随后Task 5亦完成实现、完整专项/共享分层和独立双复审，已本地提交 `473e3449`，提交后干净并启动全新Task 6正式更正实施agent。产品已确认、实现完成与运行验收分别记账，实际结果见 [实施台账](../../development/r6-entry-switch.md)。原计划包含 `edcc3322` 的三项 P1 规格修订、四项产品决定，以及对 `917422ec` 的三项 P1 计划修订；保留这些依据，不将历史“仅文档”授权范围误用于当前已授权实施。仍不切换用户环境、不推送、合并或部署；CI 优化由另一 Agent 负责，R7 不在本计划内。
 
 ## 1. 基线、现状与执行准备
 
@@ -321,15 +321,25 @@ Task 5 实现与最终分层验证、全diff及全部增量 SPEC→QUALITY 均�
 
 **依赖**：Tasks 1–3、5 的受控来源详情。可在不开放新 D4 生成的环境独立验收；不能用联系人说明或通用正文编辑替代。
 
-**文件**：新增 `backend/app/services/capa_d5_corrections.py`；修改 `backend/app/schemas/capa_r6.py`、`api/capa_r6.py`、`services/capa_d5_measures.py`、`capa_d5_proposals.py`、`capa_outcome_review.py`、`capa_service.py`、`capa_ppt_service.py`、`schemas/capa_d5_measure.py`、`schemas/capa_outcome_review.py`；新增 `backend/tests/capa/test_r6_d5_corrections.py`、`test_r6_d5_correction_review.py`；复用 Task 1 更正表，不另建与措施无关的自由文本表。
+**文件**：新增 `backend/app/services/capa_d5_corrections.py`；修改 `backend/app/schemas/capa_r6.py`、`api/capa_r6.py`、`services/capa_d5_measures.py`、`capa_d5_proposals.py`、`capa_outcome_review.py`、`capa_verification_sources.py`、`capa_service.py`、`capa_ppt_service.py`、`schemas/capa_d5_measure.py`、`schemas/capa_outcome_review.py`；新增 `backend/tests/capa/test_r6_d5_corrections.py`、`test_r6_d5_correction_review.py`；复用 Task 1 更正表，不另建与措施无关的自由文本表。
 
-- [ ] **RED 正常更正**：有 EDIT 和全部来源权的同事在 D5/D6/D7_PREVENTION 更正指定 measure；API 当前文本改变，原 proposal.original_text、measure.final_text（采纳时文本）、adopted_by/at 不变；一行 revision、一份 receipt、一条更正审计与递增材料版本。空原因、越界文本、无 EDIT、错报告、伪造来源/版本均拒绝。
-- [ ] **RED 竞争与撤权**：两个独立会话读取同 measure_version/material_version 后同步提交，各用独立 key，恰好一份成功、一份 409；使用屏障强制两种先后。打开更正页后撤 EDIT/来源权，锁等待后提交亦失败，零新 revision/receipt/成功审计。成功响应丢失同 key 重试不重复，参数改变 409，撤权后重试无受限回执。
-- [ ] **RED 审核与终态**：审核人取旧 expectation；按已有 D8 驳回路径回 D7_PREVENTION，员工更正，再完成原阶段/门禁回到审核，旧 expectation 被拒；新材料包含当前文本+修订 ID/号+完整来源。D7_COMPLETED、D8_GATE_PENDING、D8_APPROVAL_PENDING 禁止直接更正；D8_CLOSURE/ARCHIVED 冻结，不增加新的退回边。已批准旧快照不被新版本改写；既有 v1 审核回执在兼容构建仍可受控读取，v1 expectation 不可批准含 R6 修订的 v2 材料。
-- [ ] **材料版本完整性**：结合 Task 3 新增来源代际，确认更正表单的材料令牌覆盖当前审阅材料及全部来源的当前版本；逐项核对 R5 采纳、D7 确认/操作、验证和文档门禁等实际材料写入，不能只比较报告主表或措施版本。来源在开页后变化时旧提交冲突；刷新并重新核对后仍可按人工更正规则处理，历史原始来源不被伪装成新证明。无变化重试不制造新材料版本。
-- [ ] **实现事务**：取元数据并做准入；锁报告、措施、完整来源父对象、员工 ACL；等待后再次读取当前身份和来源。相同 receipt 的授权重放先于期望版本检查，否则自己的成功重试会因新版本失败；receipt 不存在才比较两个预期版本并插入下一 immutable revision，递增报告材料版本、写 receipt/audit、commit。对新请求，读取当前最新更正需在锁内，unique revision_no 作为最终兜底，冲突事务完整回滚。
-- [ ] **实现当前/历史读取与材料**：`current_measure` 在完整来源资格后解析版本 0 或最新更正；普通列表/详情、导出、完整审核、派生消费者统一解析，不留直接读旧 `final_text` 的输出路径。公开 DTO 的 `final_text` 始终表示当前有效文本，增加 `current_version` 和 `adopted_text`（采纳时原文），底层 `CapaD5Measure.final_text` 仍是不可变采纳事实；不让旧 API 消费方因读取旧字段而看到过期正文；历史返回按当前来源权限过滤且 no-store。`full_d5_material` 的 text_version 纳入修订号/ID，即使当前文本 A→B→A 也不同；审核对材料版本/完整来源锁后复验。新增 v2 构建/校验分支，保留严格只读 v1 历史解析；不能直接修改全局 CONTRACT 后让旧已批准轮次失去身份。
-- [ ] **GREEN**：原 R5 adopt/withdraw/完整材料回归通过；新增更正权限、并发、审核反例与原子回执全部实际通过，精确提交 `feat(capa): version corrections to adopted restricted D5 measures`。
+- [x] **RED 正常更正**：有 EDIT 和全部来源权的同事在 D5/D6/D7_PREVENTION 更正指定 measure；API 当前文本改变，原 proposal.original_text、measure.final_text（采纳时文本）、adopted_by/at 不变；一行 revision、一份 receipt、一条更正审计与递增材料版本。空原因、越界文本、无 EDIT、错报告、伪造来源/版本均拒绝。
+- [x] **RED 竞争与撤权**：两个独立会话读取同 measure_version/material_version 后同步提交，各用独立 key，恰好一份成功、一份 409；使用屏障强制两种先后。打开更正页后撤 EDIT/来源权，锁等待后提交亦失败，零新 revision/receipt/成功审计。成功响应丢失同 key 重试不重复，参数改变 409，撤权后重试无受限回执。
+- [x] **RED 审核与终态**：审核人取旧 expectation；按已有 D8 驳回路径回 D7_PREVENTION，员工更正；Task6先验证版本围栏，正常阶段/门禁回流按下述C6分层在6B/9补签，旧 expectation 必须被拒；新材料包含当前文本+修订 ID/号+完整来源。D7_COMPLETED、D8_GATE_PENDING、D8_APPROVAL_PENDING 禁止直接更正；D8_CLOSURE/ARCHIVED 冻结，不增加新的退回边。已批准旧快照不被新版本改写；既有 v1 审核回执在当前构建仍可受控读取（兼容构建由Task10另行实测），v1 expectation 不可批准含 R6 修订的 v2 材料。
+- [x] **来源元数据有界读取**：完整材料令牌及审核前置来源守卫仅从 SQL 投影读取有界来源坐标；历史畸形/超限 source_ref、marker 及文档影响分析/决定中的非法坐标以独立大小/形状/容器标志拒绝，不将 CASE 的 NULL 当成旧 NULL 或空来源。保留原 8MiB 预检和“不读取超限正文”断言，并以 SQLSpy 覆盖拒绝前无 raw JSON 读取、正常200项完整来源不丢失；旧畸形夹具只在隔离事务精确停用单trigger造数并恢复，异常回滚，不改生产约束或历史迁移。
+
+- [x] **材料版本完整性**：结合 Task 3 新增来源代际，确认更正表单的材料令牌覆盖当前审阅材料及全部来源的当前版本；逐项核对 R5 采纳、D7 确认/操作、验证和文档门禁等实际材料写入，不能只比较报告主表或措施版本。来源在开页后变化时旧提交冲突；刷新并重新核对后仍可按人工更正规则处理，历史原始来源不被伪装成新证明。无变化重试不制造新材料版本。
+- [x] **实现事务**：取元数据并做准入；锁报告、措施、完整来源父对象、员工 ACL；等待后再次读取当前身份和来源。相同 receipt 的授权重放先于期望版本检查，否则自己的成功重试会因新版本失败；receipt 不存在才比较两个预期版本并插入下一 immutable revision，递增报告材料版本、写 receipt/audit、commit。对新请求，读取当前最新更正需在锁内，unique revision_no 作为最终兜底，冲突事务完整回滚。
+- [x] **实现当前/历史读取与材料**：`current_measure` 在完整来源资格后解析版本 0 或最新更正；普通列表/详情、导出、完整审核、派生消费者统一解析，不留直接读旧 `final_text` 的输出路径。公开 DTO 的 `final_text` 始终表示当前有效文本，增加 `current_version` 和 `adopted_text`（采纳时原文），底层 `CapaD5Measure.final_text` 仍是不可变采纳事实；不让旧 API 消费方因读取旧字段而看到过期正文；历史返回按当前来源权限过滤且 no-store。`full_d5_material` 的 text_version 纳入修订号/ID，即使当前文本 A→B→A 也不同；审核对材料版本/完整来源锁后复验。新增 v2 构建/校验分支，保留严格只读 v1 历史解析；不能直接修改全局 CONTRACT 后让旧已批准轮次失去身份。
+- [x] **GREEN**：原 R5 adopt/withdraw/完整材料回归通过；新增更正权限、并发、审核反例与原子回执全部实际通过，具备以 `feat(capa): version corrections to adopted restricted D5 measures` 本地提交的条件；实际提交SHA另行据实记录。
+
+**实施技术合同（Task6 core实现、专项及独立SPEC→QUALITY通过；整链待6B/9/10）**：复用现有correction表，当前不新增DDL。当前值解析统一v0原采纳或最新immutable correction，公开final_text为当前值、adopted_text为原采纳事实；历史原列/建议不改。只有更正材料引入revision ID/no和新的text_version域；outcome按material.contract选择严格v1/v2独立schema/domain/receipt/DTO，不全局替换CONTRACT而使旧签名失效，6B新本地材料后续也须触发v2。
+
+更正的来源授权与全报告乐观版本分离：当前CAPA EDIT/报告对象范围＋所选措施完整历史来源（包括原proposal绑定的历史Root origins/sidecar），不把当前Root或别的不可读B当所选A的权限替代；任何实际显示当前Root/验证等正文另行按其权限。全报告材料令牌内部仅收元数据并opaque HMAC，不读取隐藏正文、不返回隐藏来源ID、不把元数据遍历当read grant。覆盖全部formal/latest correction、每条原proposal历史Root/currentRoot、V的id/updated_at/known origins、D7字段对应版本与docgate analysis/decision及其全部来源父版本/范围；affected_docs JSON仅SQL提取doc_type/doc_id，不整块读取私有分析。A可读/B隐藏仍可更正A，但B材料或来源变化须使A旧表单409。缺失/未知父元数据明确sentinel或安全拒，不伪空集合。
+
+writer核对发现D7同action/reason重试分支可能实际改recommendation_hash/prevention字段却不动acted_at，必须实际changed才bump/no-op不bump；insert/change/auto_fill亦覆盖。docgate decision集中_insert_decision，analysis phase1 demote/stale/failed/running及phase3 CAS done/failed每个真实commit变化均覆盖完整元组或counter，R5adopt等实际缺失bump同步补；不要把审批/转换通用counter加入签名材料导致批准自失效。锁顺序、oldv1历史身份与新v2校验已通过本批专项及独立双复审；正常门禁回流与兼容构建仍分别由6B/9和10验收。
+
+**C6验收分层与6B依赖消环**：受限Root/D5旧D7/model文档门禁目前按来源安全拒绝，本地正常回流由后续6B实现。Task6 core先在明确既有D8轮次夹具上走正常员工HTTP reject/correct，验证版本围栏、v2材料、并发/撤权/终态；不能seed新的passed analysis或跳门禁宣称完成正常回审。Task6可提交core实现及专项双复审，但 **C6 normal-reentry证据保持未签收**；Task6B基于v2补正常本地D7/manual gate→review旧屏拒绝/新屏批准，Task9同一8D再签C6/C9，Task10验证同份更正历史兼容。该依赖不使正式更正降为非上线必需，也不解除任何旧安全拒绝。
 
 事务顺序示意（每个操作都在上列服务内实现，不能让路由直接写表）：
 
@@ -367,6 +377,10 @@ cd backend
 ```
 
 **通过标准/证据编号 C6**：上述正常更正、两写者唯一生效、撤权后零写入、旧审核画面不能批准、终态冻结五组均有新鲜数据库/HTTP证据；Task 10 还须证明相同更正数据在兼容构建中完整读取。任何一组缺失均不得标记 R6 可上线。
+
+Task 6 core 已完成：新增更正/审核57、既有D5四文件77、outcome十一文件239、R6读取四文件100、D7/docgate十一文件167，分别实际PASSED且均0skip。冻结v5包含13生产＋6测试共19后端路径（生产变更摘要 `a9e6c85c…`、测试摘要 `c02ec10c…`），全diff及全部增量按SPEC→QUALITY复审通过，无DDL/SDK/UI/CI优化变更。全部失败、夹具修正、真实SQLSpy RED/GREEN及精确收据见[台账](../../development/r6-entry-switch.md)。
+
+- [ ] **C6整链及兼容补签**：6B正常本地D7/manual gate重新回审、7正常员工页面、9同一8D主链及10兼容构建仍待，不以本批stored-round夹具签收正常结案或整体切换；正式更正保持上线阻塞条件。
 
 ### Task 6B：受限报告本地手工门禁与明确不执行传播（批 C，独立上线阻塞任务）
 

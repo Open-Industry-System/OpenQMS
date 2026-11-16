@@ -1,7 +1,8 @@
 """Known verification read restrictions; neither proof nor historic attestation."""
 from types import SimpleNamespace
 from uuid import UUID
-from sqlalchemy import select
+from sqlalchemy import Text, and_, case, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from app.core.permissions import Module, PermissionLevel
 from app.models.capa import CapaRootCauseVerification
 from app.models.fmea import FMEADocument
@@ -33,27 +34,77 @@ def validate_origins(value):
     return result
 
 
+# Valid markers have at most 200 entries. Even worst-case JSON escaping is
+# <200*(72 UUID bytes + 128*6 cause bytes + 20*6 line bytes + 128 syntax bytes),
+# or 217600 bytes. 256 KiB preserves every valid marker while bounding legacy
+# corruption. Size/shape flags remain separate from the nullable projection.
+MAX_ORIGIN_METADATA_BYTES=256*1024
+MAX_REF_METADATA_BYTES=4096
+_UUID_PATTERN=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+
+def _origin_shape(value):
+    fields={key:value[key] for key in KEYS}
+    expected=func.jsonb_build_object(*[item for key in sorted(KEYS) for item in (key,fields[key])])
+    return and_(func.jsonb_typeof(value)=='object',value==expected,
+        *[func.jsonb_typeof(fields[key])=='string' for key in KEYS],
+        fields['kind'].astext=='fmea',fields['fmea_id'].astext.op('~')(_UUID_PATTERN),
+        fields['factory_id'].astext.op('~')(_UUID_PATTERN),
+        func.char_length(fields['cause_node_id'].astext).between(1,128),
+        func.btrim(fields['cause_node_id'].astext)!='',
+        func.char_length(fields['product_line_code'].astext).between(1,20),
+        func.btrim(fields['product_line_code'].astext)!='')
+
+
 async def known_origins(db,report_id,verification_id=None):
-    query=select(CapaRootCauseVerification.verification_id,CapaRootCauseVerification.factory_id,
-        CapaRootCauseVerification.source_ref,CapaRootCauseVerification.r6_source_origins).where(CapaRootCauseVerification.capa_id==report_id)
-    if verification_id is not None: query=query.where(CapaRootCauseVerification.verification_id==verification_id)
+    model=CapaRootCauseVerification
+    ref=model.source_ref
+    marker=model.r6_source_origins
+    ref_absent=or_(ref.is_(None),func.jsonb_typeof(ref)=='null')
+    ref_size=func.coalesce(func.octet_length(cast(ref,Text)),0)<=MAX_REF_METADATA_BYTES
+    ref_shape=and_(func.jsonb_typeof(ref)=='object',
+        func.jsonb_typeof(ref['fmea_id'])=='string',func.jsonb_typeof(ref['cause_node_id'])=='string',
+        ref==func.jsonb_build_object('fmea_id',ref['fmea_id'],'cause_node_id',ref['cause_node_id']),
+        ref['fmea_id'].astext.op('~')(_UUID_PATTERN),
+        func.char_length(ref['cause_node_id'].astext).between(1,128),
+        func.btrim(ref['cause_node_id'].astext)!='')
+    ref_valid=and_(ref_size,ref_shape)
+    marker_absent=or_(marker.is_(None),func.jsonb_typeof(marker)=='null')
+    marker_size=func.coalesce(func.octet_length(cast(marker,Text)),0)<=MAX_ORIGIN_METADATA_BYTES
+    array=case((func.jsonb_typeof(marker)=='array',marker),else_=cast([],JSONB))
+    elements=func.jsonb_array_elements(array).table_valued('value').alias('known_origin')
+    item_shape=_origin_shape(cast(elements.c.value,JSONB))
+    invalid_item=(select(1).select_from(elements)
+        .where(or_(~item_shape,item_shape.is_(None))).correlate(model).exists())
+    marker_shape=or_(marker_absent,and_(func.jsonb_typeof(marker)=='array',
+        func.jsonb_array_length(array)<=200,~invalid_item))
+    query=(select(model.verification_id,model.factory_id,
+        marker_size.label('marker_size_ok'),marker_shape.label('marker_shape_ok'),
+        case((and_(marker_size,marker_shape),marker),else_=None).label('origins'),
+        ref_absent.label('ref_absent'),ref_size.label('ref_size_ok'),ref_shape.label('ref_shape_ok'),
+        case((ref_valid,ref['fmea_id'].astext),else_=None).label('source_fmea_id'),
+        case((ref_valid,ref['cause_node_id'].astext),else_=None).label('source_node_id'))
+        .where(model.capa_id==report_id))
+    if verification_id is not None: query=query.where(model.verification_id==verification_id)
     rows=(await db.execute(query)).all()
     result={}
     for row in rows:
-        origins=validate_origins(row.r6_source_origins)
-        ref=row.source_ref
-        if ref is not None:
-            if (type(ref) is not dict or set(ref)!={'fmea_id','cause_node_id'} or type(ref['fmea_id']) is not str
-                    or type(ref['cause_node_id']) is not str or not ref['cause_node_id'].strip() or len(ref['cause_node_id'])>128):
+        if row.marker_size_ok is not True or row.marker_shape_ok is not True:
+            raise PermissionError(UNAVAILABLE)
+        origins=validate_origins(row.origins)
+        if not row.ref_absent:
+            if row.ref_size_ok is not True or row.ref_shape_ok is not True:
                 raise PermissionError(UNAVAILABLE)
             try:
-                source_id=UUID(ref['fmea_id'])
-                if str(source_id)!=ref['fmea_id']: raise ValueError()
+                source_id=UUID(row.source_fmea_id)
+                if str(source_id)!=row.source_fmea_id: raise ValueError()
             except (ValueError,TypeError): raise PermissionError(UNAVAILABLE) from None
+            if (type(row.source_node_id) is not str or not row.source_node_id.strip()
+                    or len(row.source_node_id)>128): raise PermissionError(UNAVAILABLE)
             parent=(await db.execute(select(FMEADocument.factory_id,FMEADocument.product_line_code)
                 .where(FMEADocument.fmea_id==source_id))).one_or_none()
             if parent is None: raise PermissionError(UNAVAILABLE)
-            current=dict(kind='fmea',fmea_id=str(source_id),cause_node_id=ref['cause_node_id'],
+            current=dict(kind='fmea',fmea_id=str(source_id),cause_node_id=row.source_node_id,
                 factory_id=str(parent.factory_id),product_line_code=parent.product_line_code)
             if current not in origins: origins=origins+[current]
         result[row.verification_id]=(row.factory_id,origins)

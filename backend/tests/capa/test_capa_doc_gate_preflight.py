@@ -419,6 +419,18 @@ async def test_preflight_rejects_waiver_replaced_after_validation(
                 "ALTER TABLE control_plan_versions "
                 "DISABLE TRIGGER trg_cp_version_no_update"
             ))
+            # This committed synthetic case now creates a monotonic R6 form
+            # counter through the normal gate writer. Remove only its counter
+            # during teardown; transactional DDL restores the guard on error.
+            await cleanup.execute(text(
+                "ALTER TABLE capa_r6_material_versions DISABLE TRIGGER r6_material_monotonic"
+            ))
+            await cleanup.execute(text(
+                "DELETE FROM capa_r6_material_versions WHERE report_id=:cid"
+            ), {"cid": capa_id})
+            await cleanup.execute(text(
+                "ALTER TABLE capa_r6_material_versions ENABLE TRIGGER r6_material_monotonic"
+            ))
             for statement in (
                 "DELETE FROM audit_logs WHERE factory_id=:fid",
                 "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",

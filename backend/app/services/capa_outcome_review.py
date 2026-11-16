@@ -35,6 +35,7 @@ from app.services.capa_review_guard import OutcomeReviewConflict, OutcomeReviewL
 from app.services.version_service import verify_cp_version, verify_fmea_version
 
 CONTRACT = 'capa.outcome-review.v1'
+CORRECTION_CONTRACT = 'capa.outcome-review.v2'
 MAX_OUTCOME_REVIEW_BYTES = 8 * 1024 * 1024
 BATCH_SIZE = 100
 _ALLOWED_STATES = REVIEWED_STATES | {'D8_APPROVAL_PENDING'}
@@ -82,8 +83,24 @@ def _check_size(value):
 
 
 def outcome_revision(material: dict) -> str:
-    return hmac.new(settings.SECRET_KEY.encode(),
-        b'openqms.capa.outcome-review.v1\0' + _encoded(material), hashlib.sha256).hexdigest()
+    contract = material.get('contract', CONTRACT)
+    corrected = any('correction_revision_id' in row or 'correction_revision_no' in row
+                    for row in material.get('d5_measures', []))
+    if contract not in {CONTRACT, CORRECTION_CONTRACT} or (contract == CONTRACT and corrected):
+        raise ValueError('Outcome contract mismatch')
+    if contract == CORRECTION_CONTRACT:
+        for row in material.get('d5_measures', []):
+            if 'correction_revision_id' in row or 'correction_revision_no' in row:
+                try:
+                    revision_id = row['correction_revision_id']
+                    if type(revision_id) is not str or str(UUID(revision_id)) != revision_id:
+                        raise ValueError
+                    if type(row['correction_revision_no']) is not int or row['correction_revision_no'] < 1:
+                        raise ValueError
+                except (KeyError, TypeError, ValueError, AttributeError):
+                    raise ValueError('Outcome correction identity invalid') from None
+    domain = b'openqms.capa.outcome-review.v2\0' if contract == CORRECTION_CONTRACT else b'openqms.capa.outcome-review.v1\0'
+    return hmac.new(settings.SECRET_KEY.encode(), domain + _encoded(material), hashlib.sha256).hexdigest()
 
 
 def _tenant_identity(db):
@@ -161,7 +178,7 @@ def _receipt(audit):
 
 
 def _receipt_round(receipt):
-    if type(receipt) is not dict or receipt.get('contract') != CONTRACT:
+    if type(receipt) is not dict or receipt.get('contract') not in {CONTRACT, CORRECTION_CONTRACT}:
         return None
     try:
         return UUID(receipt['round_id'])
@@ -225,7 +242,7 @@ def _receipt_matches_material(receipt, material):
     """A signature authenticates material, not a damaged receipt envelope."""
     if (type(receipt) is not dict or set(receipt) != {
             'contract', 'round_id', 'revision', 'doc_decision_id', 'source_versions'}
-            or receipt['contract'] != CONTRACT or type(receipt['source_versions']) is not list
+            or receipt['contract'] != material['contract'] or type(receipt['source_versions']) is not list
             or type(receipt['revision']) is not str
             or re.fullmatch('[0-9a-f]{64}', receipt['revision']) is None
             or material['doc_gate'] is None):
@@ -252,7 +269,10 @@ async def _controlled_version(db, capa, key, ref):
     else:
         query = query.order_by(model.major_no.desc(), model.minor_no.desc(), model.created_at.desc(), model.version_id.desc()).limit(1)
     version = (await db.execute(query)).one_or_none()
-    if version is None or version.factory_id != capa.factory_id or (ref and version.sha256_hash != ref['sha256']):
+    parent = FMEADocument if module == 'fmea' else ControlPlan
+    parent_key = parent.fmea_id if module == 'fmea' else parent.cp_id
+    parent_factory = await db.scalar(select(parent.factory_id).where(parent_key == _uuid(object_id)))
+    if version is None or version.factory_id != parent_factory or (ref and version.sha256_hash != ref['sha256']):
         raise OutcomeReviewConflict()
     # Reuse the existing PG/legacy-compact integrity validator, but only after
     # metadata preflight. Never load current graph_data or CP items.
@@ -276,6 +296,26 @@ async def _node(db, ref, node_id, node_type=None):
         raise OutcomeReviewConflict()
 
 
+async def _r6_source_coordinates(db, report_id):
+    """Stored restrictions for Root, inherited measure roots and known V sources."""
+    from app.services.capa_d4_material import root_metadata
+    from app.services.capa_verification_sources import known_origins
+    from app.models.capa_r6 import CapaR6SourceOrigin, CapaR6RootRevisionSource
+    from app.models.capa_d5_proposal import CapaD5Measure, CapaD5Proposal
+    _, origins = await root_metadata(db, report_id)
+    historic = list(await db.scalars(select(CapaR6SourceOrigin)
+        .join(CapaR6RootRevisionSource, CapaR6RootRevisionSource.source_id == CapaR6SourceOrigin.source_id)
+        .join(CapaD5Proposal, CapaD5Proposal.revision_id == CapaR6RootRevisionSource.revision_id)
+        .join(CapaD5Measure, CapaD5Measure.proposal_id == CapaD5Proposal.proposal_id)
+        .where(CapaD5Proposal.report_id == report_id)))
+    coordinates = [dict(fmea_id=str(source.fmea_id), factory_id=str(source.factory_id),
+        product_line_code=source.product_line_code) for source in [*origins,*historic] if source.fmea_id]
+    coordinates.extend(dict(fmea_id=source['fmea_id'], factory_id=source['factory_id'],
+        product_line_code=source['product_line_code']) for _, sources in (await known_origins(db, report_id)).values()
+        for source in sources)
+    return coordinates
+
+
 async def _source_access(db, capa, key, access, *, lock=False, d5_material=()):
     module, identifier = key
     model = FMEADocument if module == 'fmea' else ControlPlan
@@ -286,7 +326,8 @@ async def _source_access(db, capa, key, access, *, lock=False, d5_material=()):
     source = (await db.execute(query)).one_or_none()
     if access is not None:
         target = capa
-        matches = [s for row in d5_material for s in row['sources']
+        matches = [s for s in [*(s for row in d5_material for s in row['sources']),
+            *await _r6_source_coordinates(db, capa.report_id)]
             if module == 'fmea' and s['fmea_id'] == identifier]
         if matches:
             from types import SimpleNamespace
@@ -357,6 +398,9 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
                 reference(row['fmea_id'], row['prevention_control_node_id'], 'PreventionControl')
     d5_keys = {('fmea', source['fmea_id']) for row in d5_material for source in row['sources']}
     required.update(d5_keys)
+    if any('correction_revision_id' in row for row in d5_material):
+        required.update(('fmea', source['fmea_id'])
+            for source in await _r6_source_coordinates(db, capa.report_id))
     result = {}
     for key in sorted(required):
         # A version receipt never grants current source-module authority.
@@ -389,7 +433,7 @@ async def collect_outcome_material(db, capa) -> dict:
     await _preflight(db, fields, CAPAEightD.report_id == capa.report_id)
     core = _normal(dict((await db.execute(select(*fields).where(
         CAPAEightD.report_id == capa.report_id))).mappings().one()))
-    material = OutcomeMaterial(contract=CONTRACT, tenant_identity=_tenant_identity(db),
+    material = OutcomeMaterial(contract=CORRECTION_CONTRACT if any('correction_revision_id' in row for row in d5_material) else CONTRACT, tenant_identity=_tenant_identity(db),
         report_id=str(capa.report_id), factory_id=str(capa.factory_id), product_line_code=capa.product_line_code,
         round_id=_normal(await resolve_review_round(db, capa)), core=core, verifications=[],
         d7_actions=[], doc_gate=None, source_versions=[])
@@ -401,6 +445,10 @@ async def collect_outcome_material(db, capa) -> dict:
     if d5_material:
         material['d5_measures'] = d5_material
     from app.services.capa_verification_sources import authorize_verifications
+    # Legacy source_ref may contain free JSON. Check sizes before source
+    # metadata admission, without selecting either legacy JSON value.
+    await _preflight(db,[CapaRootCauseVerification.source_ref,CapaRootCauseVerification.r6_source_origins],
+        CapaRootCauseVerification.capa_id==capa.report_id)
     await authorize_verifications(db,capa.report_id,access=db.info.get('outcome_read_access'))
     _check_size(material)
     remaining = MAX_OUTCOME_REVIEW_BYTES - len(_encoded(material))
@@ -488,7 +536,7 @@ async def require_outcome_expectation(db, scope, capa, req) -> dict:
     for source in material['source_versions']:
         await _source_access(db, capa, (source['module'], source['object_id']), access, d5_material=material.get('d5_measures', []))
     await require_business_namespace(db)
-    return dict(contract=CONTRACT, round_id=material['round_id'], revision=revision,
+    return dict(contract=material['contract'], round_id=material['round_id'], revision=revision,
         doc_decision_id=material['doc_gate']['decision_id'], source_versions=material['source_versions'])
 
 
@@ -588,7 +636,7 @@ async def _dto(db, capa, material):
         AuditLog.factory_id == capa.factory_id, AuditLog.action == 'UPDATE',
         AuditLog.changed_fields.has_key('d8_closure'),
     ).order_by(AuditLog.operated_at.desc(), AuditLog.log_id.desc()).limit(1))).one_or_none()
-    output = CapaOutcomeReview(report_id=capa.report_id, status=capa.status,
+    output = CapaOutcomeReview(report_id=capa.report_id, status=capa.status, contract=material['contract'],
         review_round_id=material['round_id'], revision=revision, binding_status=binding_status,
         core={key: material['core'][key] for key in _CORE[:4]},
         d5_measures=material.get('d5_measures', []),

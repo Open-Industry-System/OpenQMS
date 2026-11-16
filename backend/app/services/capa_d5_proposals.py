@@ -563,6 +563,8 @@ async def staff_action(db, scope, report_id, proposal_id, *, operation, operatio
         action='D5_PROPOSAL_' + operation.upper(), operated_by=scope.user.user_id,
         factory_id=target.factory_id, changed_fields=dict(proposal_id=str(proposal_id),
             operation=operation, reference_id=str(reference))))
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, report_id)
     await db.commit()
     result = dict(proposal_id=proposal_id, state='adopted' if operation == 'adopt' else 'withdrawn')
     if operation == 'adopt': result['measure_id'] = reference

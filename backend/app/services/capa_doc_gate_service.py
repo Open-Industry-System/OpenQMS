@@ -105,19 +105,22 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
     await require_legacy_d5_only(db, capa.report_id)
     # The parent lock is retained through phase 1's small transaction.
     # Demote old current (fail-closed: before credential check)
-    await db.execute(
+    demoted = await db.execute(
         update(CapaDocgAnalysis)
         .where(CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True)
         .values(is_current=False)
     )
     # Stale recovery: CAS running older than 2x threshold -> failed
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_THRESHOLD_SECONDS * 2)
-    await db.execute(
+    recovered = await db.execute(
         update(CapaDocgAnalysis)
         .where(CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.status == "running",
                CapaDocgAnalysis.started_at < cutoff)
         .values(status="failed", error="stale", completed_at=datetime.now(timezone.utc))
     )
+    if demoted.rowcount or recovered.rowcount:
+        from app.services.capa_d4_material import bump_material
+        await bump_material(db, capa.report_id)
     # Existing running -> return retry_after
     existing = await db.scalar(
         select(CapaDocgAnalysis).where(
@@ -146,6 +149,8 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
             },
             operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
         ))
+        from app.services.capa_d4_material import bump_material
+        await bump_material(db, capa.report_id)
         await db.commit()
         raise ValueError("BLOCKED: 无 LLM 凭证")
     # Create running
@@ -159,6 +164,8 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
     await db.flush()
     response = {"status": "phase1_done", "analysis_id": str(analysis.analysis_id),
                 "attempt_token": attempt_token, "client": client, "actor_id": user_id}
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, capa.report_id)
     await db.commit()
     return response
 
@@ -228,6 +235,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
             .values(status="failed", error=phase2["llm_error"], completed_at=now)
         )
         if res.rowcount > 0:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
                 changed_fields={
@@ -259,6 +268,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
             .values(status="failed", error="input_changed", completed_at=now)
         )
         if res.rowcount > 0:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
                 changed_fields={
@@ -281,6 +292,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
             .values(status="failed", error=affected, completed_at=now)
         )
         if res.rowcount > 0:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
                 changed_fields={
@@ -304,6 +317,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
     )
     if res.rowcount == 0:
         return {"status": "superseded"}
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, capa.report_id)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
         changed_fields={"affected_doc_count": len(affected), "llm_available": True, "status": "done"},
@@ -942,6 +957,8 @@ async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, 
             scope=SimpleNamespace(user=SimpleNamespace(user_id=user_id)))
         if _compute_input_hash(current, candidates) != identity.analysis_input_hash:
             raise ValueError("分析输入已变更，请重新生成影响分析")
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, identity.capa_id)
     db.add(CapaDocgDecision(
         analysis_id=analysis_id, audit_run_id=audit_run_id,
         revision=(max_rev if max_rev is not None else -1) + 1,

@@ -82,16 +82,11 @@ async def source_details(db,scope,report_id,kind,item_id):
         result['original_text']=await db.scalar(select(CapaD5Proposal.original_text).where(CapaD5Proposal.proposal_id==row.proposal_id))
         result['state']=row.state
         if kind=='d5-measure':
-            from app.models.capa_r6 import CapaD5MeasureRevision
-            result['adopted_text']=await db.scalar(select(CapaD5Measure.final_text).where(CapaD5Measure.measure_id==item_id))
-            revision=(await db.execute(select(CapaD5MeasureRevision.revision_id,CapaD5MeasureRevision.revision_no,
-                CapaD5MeasureRevision.report_id).where(CapaD5MeasureRevision.measure_id==item_id)
-                .order_by(CapaD5MeasureRevision.revision_no.desc()).limit(1))).one_or_none()
-            if revision is not None and revision.report_id!=report_id: raise PermissionError('Measure history unavailable')
-            result['revision_id']=None if revision is None else revision.revision_id
-            result['revision_no']=0 if revision is None else revision.revision_no
-            result['final_text']=result['adopted_text'] if revision is None else await db.scalar(select(CapaD5MeasureRevision.final_text)
-                .where(CapaD5MeasureRevision.revision_id==revision.revision_id,CapaD5MeasureRevision.report_id==report_id))
+            from app.services.capa_d5_corrections import current_measure
+            current = await current_measure(db,item_id,report_id)
+            result.update(current)
+            result['revision_id']=current['correction_revision_id']
+            result['revision_no']=current['correction_revision_no']
     for source in sources:
         entry=dict(source_id=source.source_id,kind=source.kind,projection_id=source.projection_id,
             version=source.version,current_state='current',evidence=None,
@@ -143,13 +138,13 @@ async def source_details(db,scope,report_id,kind,item_id):
                 current=await db.scalar(select(CapaR6ReportSnapshot.version).where(CapaR6ReportSnapshot.report_id==report_id,
                     CapaR6ReportSnapshot.kind==snapshot.kind).order_by(CapaR6ReportSnapshot.version.desc()).limit(1))
                 if str(current)!=source.version: entry['current_state']='stale'
-    if kind=='d5-measure':
-        final_revision=await db.scalar(select(CapaD5MeasureRevision.revision_id).where(CapaD5MeasureRevision.measure_id==item_id)
-            .order_by(CapaD5MeasureRevision.revision_no.desc()).limit(1))
-        if final_revision!=result['revision_id']: raise PermissionError('Measure changed')
     result['proof']=await proof_metadata(db,scope,report_id,kind,row)
     after,latest=await item_metadata(db,scope,report_id,kind,item_id)
     if before!=_signature(after,latest): raise PermissionError('Item changed')
+    if kind=='d5-measure':
+        from app.services.capa_d5_corrections import current_measure_version
+        if result['current_version']!=await current_measure_version(db,item_id,report_id):
+            raise PermissionError('Measure history changed')
     return result
 
 

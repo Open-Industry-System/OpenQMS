@@ -245,10 +245,11 @@ async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=Non
     for row in selected:
         with db.no_autoflush:
             if kind == 'measures':
-                body = (await db.execute(select(CapaD5Measure.measure_id, CapaD5Measure.proposal_id,
-                    CapaD5Measure.final_text, CapaD5Measure.adopted_by, CapaD5Measure.adopted_at).where(
-                    CapaD5Measure.measure_id == keys[row.proposal_id]))).one()
-                items.append(D5MeasureItem(**body._mapping))
+                from app.services.capa_d5_corrections import current_measure
+                from app.services.capa_d5_correction_material import complete_material_version
+                body = await current_measure(db, keys[row.proposal_id], report_id)
+                items.append(D5MeasureItem(**body,
+                    material_version=await complete_material_version(db, scope, report_id)))
             else:
                 original_text = await db.scalar(select(CapaD5Proposal.original_text).where(
                     CapaD5Proposal.proposal_id == row.proposal_id))
@@ -274,6 +275,11 @@ async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=Non
             or latest_target.product_line_code != target.product_line_code
             or _signature(latest_rows, latest_sources) != initial_signature):
         raise PermissionError('D5 view changed; refresh required')
+    if kind == 'measures':
+        from app.services.capa_d5_corrections import current_measure_version
+        for item in items:
+            if item.current_version != await current_measure_version(db, item.measure_id, report_id):
+                raise PermissionError('D5 measure changed; refresh required')
     if item_id is not None:
         return items[0]
     if kind == 'measures':
@@ -342,10 +348,14 @@ async def full_d5_material(db, capa, *, scope=None, access=None):
     import hmac
     from app.config import settings
     material = []
+    measure_versions = {}
     for item in formal:
         row = by_id[item.proposal_id]
-        body = (await db.execute(select(CapaD5Measure.final_text, CapaD5Measure.adopted_by,
-            CapaD5Measure.adopted_at).where(CapaD5Measure.measure_id == item.measure_id))).one()
+        from app.services.capa_d5_corrections import current_measure
+        from types import SimpleNamespace
+        current = await current_measure(db, item.measure_id, capa.report_id)
+        body = SimpleNamespace(**current)
+        measure_versions[item.measure_id] = current['current_version']
         material.append(dict(measure_id=str(item.measure_id), proposal_id=str(item.proposal_id),
             final_text=body.final_text, adopted_by=str(body.adopted_by), adopted_at=body.adopted_at.isoformat(),
             text_version=hmac.new(settings.SECRET_KEY.encode(), b'openqms.d5.measure.v1\0'
@@ -355,11 +365,22 @@ async def full_d5_material(db, capa, *, scope=None, access=None):
                 factory_id=str(s.factory_id), product_line_code=s.product_line_code,
                 fmea_id=str(s.fmea_id), node_id=s.node_id, node_hmac=s.node_hmac)
                 for s in sources[item.proposal_id]], key=lambda s: s['source_id'])))
+        if current['correction_revision_id'] is not None:
+            material[-1].update(correction_revision_id=str(current['correction_revision_id']),
+                correction_revision_no=current['correction_revision_no'], adopted_text=current['adopted_text'])
+            material[-1]['text_version'] = hmac.new(settings.SECRET_KEY.encode(),
+                b'openqms.r6.d5.measure.v2\0' + item.measure_id.bytes
+                + current['correction_revision_id'].bytes + str(current['correction_revision_no']).encode()
+                + body.final_text.encode(), hashlib.sha256).hexdigest()
     if scope is not None:
         access = await current_capa_access(db, scope)
     _, latest, latest_sources = await _visible_metadata(db, scope, capa.report_id, access)
     if signature != _signature(latest, latest_sources) or formal != await _formal_ids(db, capa.report_id):
         raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    from app.services.capa_d5_corrections import current_measure_version
+    for measure_id, version in measure_versions.items():
+        if version != await current_measure_version(db, measure_id, capa.report_id):
+            raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
     return material
 
 
