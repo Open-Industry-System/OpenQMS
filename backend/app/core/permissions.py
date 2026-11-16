@@ -8,7 +8,7 @@ from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import TENANT_AUDIENCE, TENANT_ISSUER, verify_token
+from app.core.security import TENANT_AUDIENCE, TENANT_ISSUER, has_published_admin_password, verify_token
 from app.database import get_db
 from app.models.role import RolePermission
 from app.models.user import User
@@ -110,6 +110,8 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if has_published_admin_password(user):
+        raise HTTPException(status_code=401, detail="管理员密码须通过私密初始化命令更换")
     return user
 
 

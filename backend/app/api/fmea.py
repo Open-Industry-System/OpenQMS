@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import authorize_object, check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.core.tenant import tenant_schema
 from app.database import get_db
@@ -54,6 +54,7 @@ async def list_fmeas(
         pending=pending,
         allowed_product_line_codes=allowed_pls,
         factory_id=scope.effective_factory_id,
+        accessible_factory_ids=scope.factory_scope.accessible_factory_ids,
         fmea_type=fmea_type,
         search=search,
     )
@@ -75,6 +76,7 @@ async def create_fmea(
     if level < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 CREATE 权限")
     try:
+        check_product_line_access(req.product_line_code, scope)
         factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
         check_factory_access(factory_id, scope)
         fmea = await fmea_service.create_fmea(
@@ -93,6 +95,8 @@ async def get_fmea(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
@@ -115,6 +119,11 @@ async def update_fmea(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
+    if req.product_line_code is not None:
+        destination_factory = await resolve_create_factory_id(db, scope, req.product_line_code)
+        check_factory_access(destination_factory, scope)
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
@@ -140,7 +149,7 @@ async def update_fmea(
             db, fmea, req.title, graph_dict, scope.user.user_id, req.product_line_code,
             lock_version=req.lock_version,
             confirmed_latest_lock_version=req.confirmed_latest_lock_version,
-            adoptions=req.adoptions,
+            adoptions=req.adoptions, scope=scope,
         )
     except ValueError as e:
         error_msg = str(e)
@@ -193,6 +202,8 @@ async def delete_fmea(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
@@ -208,7 +219,7 @@ async def delete_fmea(
     # Only allow deleting draft or rework (rejected) FMEAs
     if fmea.status not in ("draft", "rework"):
         raise HTTPException(status_code=400, detail="只能删除草稿或返工状态的FMEA")
-    await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id)
+    await fmea_service.delete_fmea(db, fmea_id, scope.user.user_id, scope=scope)
 
 
 async def require_transition_permission(
@@ -233,6 +244,8 @@ async def transition_fmea(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(require_transition_permission),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
@@ -242,7 +255,7 @@ async def transition_fmea(
         if wizard_scope.get("wizard_completed") is not True:
             raise HTTPException(status_code=422, detail="向导未完成，不能提交评审")
     try:
-        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id, req.reason)
+        fmea = await fmea_service.transition_fmea(db, fmea, req.target_status, scope.user.user_id, req.reason, scope=scope)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return FMEAResponse.model_validate(fmea)
@@ -309,6 +322,8 @@ async def recommend(
     graph_repo: FMEAGraphRepository = Depends(get_graph_repository),
 ):
     # Permission check
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
@@ -371,6 +386,8 @@ async def get_fmea_graph(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
@@ -392,6 +409,8 @@ async def severity_warnings(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
@@ -417,6 +436,8 @@ async def get_fmea_lessons(
     scope: RequestScope = Depends(get_request_scope),
 ):
     """Get lessons learned recommendations for a newly created FMEA."""
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     level = await get_user_permission(scope.user, Module.FMEA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")

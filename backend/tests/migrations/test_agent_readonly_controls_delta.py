@@ -22,7 +22,7 @@ from tests.migrations.test_agent_task_core import _migration_config, _sync_engin
 PUBLIC = "20261001_agent_readonly_controls"
 CONTROLS_TENANT = "tv004_agent_readonly_controls"
 LATEST = "tv010_refresh_sessions"
-HEAD = "20261114_production_merge"
+HEAD = "20261116_platform_login_limits"
 PARENT = "20260930_agent_readonly_delivery"
 TABLES = {"agent_task_controls", "agent_readonly_checkpoints", "agent_checkpoint_receipts", "agent_task_updates"}
 COLUMNS = {

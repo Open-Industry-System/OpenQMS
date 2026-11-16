@@ -6,6 +6,8 @@
 
 `clamav_scan.py` is an internal ClamAV `zINSTREAM` wire client. It sends `zVERSIONCOMMANDS\0`, then `zINSTREAM\0` and big-endian chunk frames ending in a zero-length frame. It uses one bounded 60-second-or-less exchange, accepts only a strict single `OK`, `FOUND`, or `ERROR` result, and collapses connection, timeout, malformed, and daemon-error cases to `unavailable` without exposing daemon failure text.
 
+`task_attachments.py` commits per-task and per-user inflight quotas before receiving client input. Bounded staging owns no scanner slot; the scanner slot is acquired only after the complete local staging descriptor can be rewound. A separate short metadata lock coordinates staging creation with recovery snapshots and orphan sweeps. Recovery preserves live reservations and expired reservations cannot resume into publication. Busy scanner admission removes staged bytes and releases quota rather than retaining an unbounded queue.
+
 `attachment_recovery.py` is platform/maintenance-only reconciliation. It serializes
 with the attachment pipeline, finishes only durable `promoting`, expired
 `scanning`, and `purging` metadata states in the exact current live namespace,

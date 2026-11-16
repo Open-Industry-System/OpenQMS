@@ -212,7 +212,7 @@ async def import_samples(
 
     from fastapi.responses import JSONResponse
 
-    from app.utils.excel import MAX_UPLOAD_BYTES, ExcelParseError, parse_upload
+    from app.utils.excel import ExcelParseError, parse_upload, read_upload_bounded
 
     level = await get_user_permission(scope.user, Module.SPC, db)
     if level < PermissionLevel.CREATE:
@@ -223,9 +223,7 @@ async def import_samples(
         raise HTTPException(status_code=404, detail="inspection characteristic not found")
     _check_factory_access(ic, scope)
 
-    raw = await file.read()
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="文件超过 10MB 限制")
+    raw = await read_upload_bounded(file)
 
     if ic.chart_type in ("p", "np", "c", "u"):
         header_mapping = {"批次号*": "batch_no", "采样时间*": "sampled_at", "检验数": "inspected_count", "缺陷数": "defect_count"}

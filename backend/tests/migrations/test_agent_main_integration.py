@@ -7,7 +7,7 @@ from alembic.script import ScriptDirectory
 
 from app.services import tenant_migrator, tenant_schema_diff
 
-PUBLIC_HEAD = "20261114_production_merge"
+PUBLIC_HEAD = "20261116_platform_login_limits"
 TENANT_HEAD = "tv010_refresh_sessions"
 ROOT = Path(__file__).resolve().parents[2]
 

@@ -72,11 +72,9 @@ async def import_suppliers(
 
     from fastapi.responses import JSONResponse
 
-    from app.utils.excel import MAX_UPLOAD_BYTES, ExcelParseError, parse_upload
+    from app.utils.excel import ExcelParseError, parse_upload, read_upload_bounded
 
-    raw = await file.read()
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="文件超过 10MB 限制")
+    raw = await read_upload_bounded(file)
 
     header_mapping = {
         "名称*": "name", "简称*": "short_name",

@@ -404,3 +404,23 @@ m.main()
                 process.terminate()
                 process.wait(timeout=5)
     assert deleted.read_text() == '17'
+
+
+@pytest.mark.parametrize('configured', [None, '', '{"https://erp.factory.example":["10.20.30.15/32"]}'])
+def test_production_controller_propagates_only_file_erp_policy_with_safe_legacy_default(host, monkeypatch, configured):
+    helper, release, *_ = host
+    envfile = helper.APP / '.env.production'
+    if configured is not None:
+        envfile.write_text(envfile.read_text() + f'ERP_ALLOWED_ORIGINS={configured}\n')
+    monkeypatch.setenv('ERP_ALLOWED_ORIGINS', '{"https://ambient.invalid":["0.0.0.0/0"]}')
+    expected = configured or '{}'
+    assert helper.settings()['ERP_ALLOWED_ORIGINS'] == expected
+    calls = []
+    def record(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, b'', b'')
+    monkeypatch.setattr(helper, 'run', record)
+    release.compose('config')
+    compose = next(options for argv,options in calls if argv[:2] == ['docker','compose'])
+    assert compose['env']['ERP_ALLOWED_ORIGINS'] == expected
+    assert 'DATABASE_URL' not in compose['env']

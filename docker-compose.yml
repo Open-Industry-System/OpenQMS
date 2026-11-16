@@ -35,6 +35,7 @@ services:
     volumes:
       - ./backend:/app
     environment:
+      ERP_ALLOWED_ORIGINS: ${ERP_ALLOWED_ORIGINS:-{}}
       DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@db:5432/qms
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: openqms-local-dev-2026-jwt-signing-key

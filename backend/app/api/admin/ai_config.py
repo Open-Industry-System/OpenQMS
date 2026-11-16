@@ -43,7 +43,10 @@ async def update_ai_config(
 ):
     """Update AI / LLM configuration and recreate providers."""
     _require_single_tenant_ai_config()
-    return await ai_config_service.update_ai_config(db, req, user.user_id, request.app.state)
+    try:
+        return await ai_config_service.update_ai_config(db, req, user.user_id, request.app.state)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/ai-config/test", response_model=AIConfigTestResultSchema)

@@ -14,7 +14,7 @@ from tests.conftest import _test_db_url
 
 
 REV = "20260913_user_refresh_sessions"
-PUBLIC_HEAD = "20261114_production_merge"
+PUBLIC_HEAD = "20261116_platform_login_limits"
 DOWN_REV = "20260727_warranty_factory_id"
 TABLE = "user_refresh_sessions"
 OLD_FILENAME = "20260913_user_refresh_sessions.py"
@@ -435,7 +435,8 @@ def test_filename_convention_and_single_head():
 
     script = ScriptDirectory.from_config(_cfg("postgresql+psycopg://unused"))
     assert script.get_heads() == [PUBLIC_HEAD]
-    assert set(script.get_revision(PUBLIC_HEAD).down_revision) == {
+    assert script.get_revision(PUBLIC_HEAD).down_revision == "20261114_production_merge"
+    assert set(script.get_revision("20261114_production_merge").down_revision) == {
         "20261114_r4b_main_merge", REV,
     }
     assert REV in {revision.revision for revision in script.walk_revisions()}

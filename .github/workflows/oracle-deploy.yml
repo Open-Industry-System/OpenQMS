@@ -25,7 +25,7 @@ jobs:
       kind: ${{ steps.plan.outputs.kind }}
       pr: ${{ steps.plan.outputs.pr }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: trusted
@@ -56,25 +56,34 @@ jobs:
       PREVIEW_PR: ${{ needs.authorize.outputs.pr }}
       RUN_ID: ${{ github.event.workflow_run.id }}
     steps:
-      - uses: actions/checkout@v4
+      - id: trusted-source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: trusted
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
       - name: Set up optional private transport
         if: vars.ORACLE_USE_TAILSCALE == 'true'
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:openqms-deploy
+      - name: Restore trusted source before introducing deployment secrets
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.trusted-source.outputs.commit }}
+          path: trusted
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
       - name: Prepare pinned SSH identity
         env:
           DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}

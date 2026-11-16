@@ -4,7 +4,7 @@ import time
 import uuid
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,8 @@ from app.core.permissions import Module, PermissionLevel, require_permission
 from app.core.product_line_filter import get_user_product_line_codes
 from app.core.security import (
     create_access_token,
+    PUBLISHED_DEMO_PASSWORDS,
+    has_published_admin_password,
     decode_refresh_token,
     hash_password,
     verify_password,
@@ -37,6 +39,7 @@ from app.services.permission_service import get_role_permissions
 from app.services.refresh_session_service import (
     issue_refresh_session,
     rotate_refresh_session,
+    revoke_refresh_session,
     upgrade_legacy_refresh_token,
 )
 
@@ -156,6 +159,21 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
         ))
         await db.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
+    from app.config import settings
+    if (not settings.E2E_MODE and user.role_definition.bypass_row_level_security
+            and req.password in PUBLISHED_DEMO_PASSWORDS):
+        db.add(LoginAuditLog(
+            username=user.username, user_id=user.user_id, success=False,
+            failure_reason="Published administrator password requires private reset",
+            ip_address=client_ip, user_agent=user_agent,
+        ))
+        # Invalidate existing refresh families as well as denying a new login.
+        from app.services.refresh_session_service import revoke_all_refresh_sessions
+        await revoke_all_refresh_sessions(db, user.user_id)
+        user.refresh_token = None
+        user.refresh_token_expires = None
+        await db.commit()
+        raise HTTPException(status_code=403, detail="管理员密码须通过私密初始化命令更换")
     # Build JWT payload — include tenant_id when request has a resolved tenant
     tenant = getattr(request.state, "tenant", None)
     token_data = {
@@ -302,6 +320,14 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account deactivated")
 
+    if has_published_admin_password(user):
+        from app.services.refresh_session_service import revoke_all_refresh_sessions
+        await revoke_all_refresh_sessions(db, user.user_id)
+        user.refresh_token = None
+        user.refresh_token_expires = None
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
     # Preserve multi-tenant claims in refreshed tokens. Prefer the signed claim;
     # request-resolved tenant is only needed while upgrading legacy tokens.
     tenant = getattr(request.state, "tenant", None)
@@ -316,6 +342,8 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
             tenant_id=tenant_id,
         )
     if rotated is None:
+        # Replay revocation must survive the dependency rollback on a 401.
+        await db.commit()
         logger.warning("AUTH_REFRESH_INVALID user_id=%s ip=%s", user_id, client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     new_refresh, _new_expires = rotated
@@ -331,3 +359,12 @@ async def refresh_token(req: RefreshTokenRequest, request: Request, db: AsyncSes
     await db.commit()
     logger.info("AUTH_REFRESH_SUCCESS user_id=%s ip=%s", user.user_id, client_ip)
     return RefreshTokenResponse(access_token=new_access, refresh_token=new_refresh)
+
+
+@router.post("/logout", status_code=204)
+async def logout(req: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
+    payload = decode_refresh_token(req.refresh_token)
+    if payload is not None:
+        await revoke_refresh_session(db, req.refresh_token, payload)
+        await db.commit()
+    return Response(status_code=204)

@@ -17,7 +17,7 @@ def _scripts(directory):
 
 def test_public_head_merges_both_published_agent_branches():
     scripts = _scripts("alembic")
-    assert scripts.get_heads() == ["20261114_production_merge"]
+    assert scripts.get_heads() == ["20261116_platform_login_limits"]
     assert scripts.get_revision("20261113_d4_recovery").down_revision == "20261109_d4_text_delivery"
     assert scripts.get_revision("20261109_d4_text_delivery").down_revision == MERGE
     merge = scripts.get_revision(MERGE)

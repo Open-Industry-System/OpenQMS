@@ -5,7 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
 from typing import Any
+from xml.etree import ElementTree
 
+from fastapi import HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -19,13 +21,20 @@ HEADER_ALIGN = Alignment(horizontal="center", vertical="center")
 MAX_EXPORT_ROWS = 10000
 MAX_IMPORT_ROWS = 5000
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_ZIP_ENTRIES = 1000
+MAX_ZIP_ENTRY_BYTES = 8 * 1024 * 1024
+MAX_ZIP_TOTAL_BYTES = 32 * 1024 * 1024
+MAX_ZIP_COMPRESSION_RATIO = 200
+MAX_IMPORT_COLUMNS = 256
+MAX_IMPORT_CELLS = 250000
+MAX_IMPORT_SHEETS = 16
 
 
 def create_workbook(sheet_name: str, headers: list[str]) -> tuple[Workbook, Worksheet]:
     wb = Workbook()
     ws = wb.active
     ws.title = sheet_name
-    ws.append(headers)
+    append_row(ws, headers)
     for cell in ws[1]:
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
@@ -35,6 +44,26 @@ def create_workbook(sheet_name: str, headers: list[str]) -> tuple[Workbook, Work
 
 def append_row(ws: Worksheet, values: list[Any]) -> None:
     ws.append(values)
+    # openpyxl infers a leading '=' as a formula. Export business strings literally.
+    for cell in ws[ws.max_row]:
+        if isinstance(cell.value, str):
+            cell.data_type = "s"
+
+
+def csv_safe_value(value: Any) -> Any:
+    """Neutralize spreadsheet formula prefixes without converting numeric values."""
+    if isinstance(value, str) and (
+        value.startswith(("\t", "\r", "\n")) or value.lstrip().startswith(("=", "+", "-", "@"))
+    ):
+        return "'" + value
+    return value
+
+
+async def read_upload_bounded(file: UploadFile) -> bytes:
+    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="文件超过 10MB 限制")
+    return raw
 
 
 def auto_width(ws: Worksheet, min_width: int = 10, max_width: int = 40) -> None:
@@ -63,7 +92,7 @@ def excel_response(excel_bytes: bytes, filename: str) -> StreamingResponse:
 def create_template(headers: list[str], sheet_name: str, example_row: list[Any] | None = None) -> bytes:
     wb, ws = create_workbook(sheet_name, headers)
     if example_row:
-        ws.append(example_row)
+        append_row(ws, example_row)
     return workbook_to_bytes(wb)
 
 
@@ -83,6 +112,63 @@ class ExcelParseError(Exception):
     pass
 
 
+def _validate_archive(file_bytes: bytes) -> None:
+    """Budget expansion and worksheet dimensions before openpyxl allocates objects."""
+    from openpyxl.utils.cell import coordinate_from_string, column_index_from_string, range_boundaries
+
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise ExcelParseError("文件超过 10MB 限制")
+    with zipfile.ZipFile(BytesIO(file_bytes)) as archive:
+        entries = archive.infolist()
+        if len(entries) > MAX_ZIP_ENTRIES or len({i.filename for i in entries}) != len(entries):
+            raise ExcelParseError("工作簿 ZIP 条目过多或重复")
+        total = 0
+        for entry in entries:
+            total += entry.file_size
+            if (entry.file_size > MAX_ZIP_ENTRY_BYTES or total > MAX_ZIP_TOTAL_BYTES
+                    or entry.file_size > MAX_ZIP_COMPRESSION_RATIO * max(1, entry.compress_size)):
+                raise ExcelParseError("工作簿解压大小或压缩比超过限制")
+        sheets = [e for e in entries if e.filename.startswith("xl/worksheets/") and e.filename.endswith(".xml")]
+        if len(sheets) > MAX_IMPORT_SHEETS:
+            raise ExcelParseError("工作表数量超过限制")
+        cell_count = 0
+        for entry in entries:
+            if not entry.filename.endswith((".xml", ".rels")):
+                continue
+            # Bounded by metadata above; reject entity declarations in every XML part.
+            xml = archive.read(entry)
+            upper = xml.upper().replace(b"\x00", b"")
+            if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+                raise ExcelParseError("工作簿不允许 XML 实体声明")
+            # Inspect all XML parts: relationship targets can use nonstandard paths.
+            rows = 0
+            row_cells = 0
+            for _, element in ElementTree.iterparse(BytesIO(xml), events=("end",)):
+                tag = element.tag.rsplit("}", 1)[-1]
+                if tag == "dimension":
+                    _, _, max_col, max_row = range_boundaries(element.attrib["ref"])
+                    if max_col > MAX_IMPORT_COLUMNS or max_row > MAX_IMPORT_ROWS + 1:
+                        raise ExcelParseError("工作表行数或列数超过限制")
+                elif tag == "row":
+                    rows += 1
+                    row_cells = 0
+                    if rows > MAX_IMPORT_ROWS + 1 or int(element.attrib.get("r", rows)) > MAX_IMPORT_ROWS + 1:
+                        raise ExcelParseError("导入行数超过限制")
+                elif tag == "c":
+                    cell_count += 1
+                    row_cells += 1
+                    if row_cells > MAX_IMPORT_COLUMNS:
+                        raise ExcelParseError("工作表列数超过限制")
+                    ref = element.attrib.get("r")
+                    if ref:
+                        col, row = coordinate_from_string(ref)
+                        if column_index_from_string(col) > MAX_IMPORT_COLUMNS or row > MAX_IMPORT_ROWS + 1:
+                            raise ExcelParseError("工作表单元格范围超过限制")
+                    if cell_count > MAX_IMPORT_CELLS:
+                        raise ExcelParseError("工作簿单元格数量超过限制")
+                element.clear()
+
+
 def parse_upload(
     file_bytes: bytes,
     header_mapping: dict[str, str],
@@ -92,12 +178,17 @@ def parse_upload(
     try:
         from openpyxl import load_workbook
         from openpyxl.utils.exceptions import InvalidFileException
-        wb = load_workbook(BytesIO(file_bytes), read_only=True)
-    except (zipfile.BadZipFile, OSError, InvalidFileException) as e:
+        _validate_archive(file_bytes)
+        wb = load_workbook(BytesIO(file_bytes), read_only=True, keep_links=False)
+    except (zipfile.BadZipFile, OSError, InvalidFileException, ElementTree.ParseError, ValueError, KeyError) as e:
         raise ExcelParseError(f"文件格式无效，仅支持 .xlsx 格式: {e}")
 
     try:
+        if sheet_index < 0 or sheet_index >= len(wb.worksheets):
+            raise ExcelParseError("工作表不存在")
         ws = wb.worksheets[sheet_index]
+        if (ws.max_row or 0) > MAX_IMPORT_ROWS + 1 or (ws.max_column or 0) > MAX_IMPORT_COLUMNS:
+            raise ExcelParseError("工作表行数或列数超过限制")
         header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
 
         col_map: dict[int, str] = {}
@@ -118,6 +209,8 @@ def parse_upload(
 
         rows = []
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            if row_idx > MAX_IMPORT_ROWS + 1:
+                raise ExcelParseError("导入行数超过限制")
             record = {}
             all_none = True
             for col_idx, internal_key in col_map.items():

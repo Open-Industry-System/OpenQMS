@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import authorize_object, check_factory_access, check_product_line_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.database import get_db
 from app.schemas.control_plan import (
@@ -50,6 +50,7 @@ async def list_control_plans(
     result = await control_plan_service.list_control_plans(
         db, page, page_size, product_line,
         factory_id=scope.effective_factory_id, allowed_product_lines=allowed_pls,
+        accessible_factory_ids=scope.factory_scope.accessible_factory_ids,
     )
     return ControlPlanListResponse(
         items=[ControlPlanResponse.model_validate(cp) for cp in result["items"]],
@@ -69,6 +70,7 @@ async def create_control_plan(
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要计划模块的 CREATE 权限")
     try:
+        check_product_line_access(req.product_line_code, scope)
         factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
         check_factory_access(factory_id, scope)
         cp = await control_plan_service.create_control_plan(db, req, scope.user.user_id, factory_id=factory_id)
@@ -85,6 +87,8 @@ async def get_control_plan(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
@@ -99,6 +103,11 @@ async def update_control_plan(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
+    if req.product_line_code is not None:
+        destination_factory = await resolve_create_factory_id(db, scope, req.product_line_code)
+        check_factory_access(destination_factory, scope)
     level_perm = await get_user_permission(scope.user, Module.PLANNING, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要计划模块的 CREATE 权限")
@@ -107,7 +116,7 @@ async def update_control_plan(
         raise HTTPException(status_code=404, detail="控制计划不存在")
     _check_factory_access(cp, scope)
     try:
-        cp = await control_plan_service.update_control_plan(db, cp, req, scope.user.user_id)
+        cp = await control_plan_service.update_control_plan(db, cp, req, scope.user.user_id, scope=scope)
     except ValueError as e:
         error_msg = str(e)
         if error_msg == "lock_version_mismatch":
@@ -144,6 +153,8 @@ async def delete_control_plan(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     level_perm = await get_user_permission(scope.user, Module.PLANNING, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要计划模块的 CREATE 权限")
@@ -152,7 +163,7 @@ async def delete_control_plan(
         raise HTTPException(status_code=404, detail="控制计划不存在")
     _check_factory_access(cp, scope)
     check_product_line_access(cp.product_line_code, scope)
-    await control_plan_service.delete_control_plan(db, cp, scope.user.user_id)
+    await control_plan_service.delete_control_plan(db, cp, scope.user.user_id, scope=scope)
     return {"message": "已删除"}
 
 
@@ -164,6 +175,8 @@ async def preview_import_from_fmea(
     scope: RequestScope = Depends(get_request_scope),
 ):
     """Read-only approved-snapshot import preview; digest does not confer authority."""
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     try:
         return await control_plan_service.preview_import_from_fmea(db, cp_id, req, scope)
     except control_plan_service.CharacteristicImportError as exc:
@@ -184,6 +197,8 @@ async def import_from_fmea(
     selected_candidate_keys. Refresh preview on 409; no latest-source fallback.
     Existing rows are returned unchanged; editing/synchronizing is a separate flow.
     """
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     try:
         items = await control_plan_service.import_from_fmea(
             db, cp_id, req, scope.user.user_id, scope=scope,
@@ -200,6 +215,8 @@ async def stale_check(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
@@ -219,6 +236,8 @@ async def approve_control_plan(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     level_perm = await get_user_permission(scope.user, Module.PLANNING, db)
     if level_perm < PermissionLevel.APPROVE:
         raise HTTPException(status_code=403, detail="需要计划模块的 APPROVE 权限")
@@ -227,7 +246,7 @@ async def approve_control_plan(
         raise HTTPException(status_code=404, detail="控制计划不存在")
     _check_factory_access(cp, scope)
     try:
-        cp = await control_plan_service.approve_control_plan(db, cp, scope.user.user_id)
+        cp = await control_plan_service.approve_control_plan(db, cp, scope.user.user_id, scope=scope)
     except control_plan_service.CharacteristicImportError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except ValueError as e:
@@ -247,12 +266,14 @@ async def sync_csr_endpoint(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, plan_id, Module.PLANNING)
     level_perm = await get_user_permission(scope.user, Module.PLANNING, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要计划模块的 CREATE 权限")
     try:
         plan = await control_plan_service.sync_csr_to_control_plan(
-            db, plan_id, req.customer_ids, scope.user.user_id
+            db, plan_id, req.customer_ids, scope.user.user_id, scope=scope
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

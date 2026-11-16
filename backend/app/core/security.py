@@ -1,4 +1,5 @@
 import uuid
+from functools import lru_cache
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
@@ -35,8 +36,9 @@ def create_refresh_token(
     *,
     session_id: str | None = None,
     token_id: str | None = None,
+    expires_at: datetime | None = None,
 ) -> tuple[str, datetime]:
-    expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = expires_at or (datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
     to_encode = {"sub": user_id, "exp": expire, "type": "refresh"}
     if session_id:
         to_encode["sid"] = session_id
@@ -119,3 +121,23 @@ TENANT_ISSUER = "openqms-tenant"
 PLATFORM_ISSUER = "openqms-platform"
 TENANT_AUDIENCE = "openqms-tenant"
 PLATFORM_AUDIENCE = "openqms-platform"
+
+
+PUBLISHED_DEMO_PASSWORDS = frozenset({
+    "Admin@2026", "GroupAdmin@2026", "Engineer@2026", "Manager@2026", "Viewer@2026",
+})
+
+
+@lru_cache(maxsize=128)
+def _published_password_hash(password_hash: str) -> bool:
+    """Bind the bounded cache to the salted hash; resets naturally miss it."""
+    try:
+        return any(verify_password(password, password_hash) for password in PUBLISHED_DEMO_PASSWORDS)
+    except ValueError:
+        return True  # A malformed privileged password hash cannot authorize access.
+
+
+def has_published_admin_password(user) -> bool:
+    return (not settings.E2E_MODE
+            and user.role_definition.bypass_row_level_security is True
+            and _published_password_hash(user.password_hash))

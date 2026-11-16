@@ -64,12 +64,10 @@ from app.api.supplier_risk import router as supplier_risk_router
 from app.api.supply_chain_risk_map import router as supply_chain_risk_map_router
 from app.api.version import router as version_router
 from app.config import settings
+from app.core.import_body_limit import ImportBodyLimitMiddleware
 from app.core.logging_handler import DBLogHandler, start_log_drainer
-from app.core.security import hash_password
 from app.core.tenant_context import TenantContextMiddleware
 from app.database import async_session, get_tenant_aware_session, run_for_each_tenant, tenant_async_session
-from app.models.role import RoleDefinition
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -124,32 +122,8 @@ async def lifespan(app: FastAPI):
     )
     logger.info("%s", app.state.agent_d4_text_policy.diagnostic)
     await initialize_attachment_runtime(app)
-    # Legacy single-tenant bootstrap: create default admin user.
-    # In multi-tenant mode, users/role_definitions live in tenant schemas,
-    # so running this against the public schema would fail after platform-only
-    # migrations. Tenant seeding happens during provisioning instead.
-    if settings.TENANT_MODE == "single":
-        async with async_session() as db:
-            result = await db.execute(select(User).where(User.username == "admin"))
-            if not result.scalar_one_or_none():
-                try:
-                    admin_role_result = await db.execute(select(RoleDefinition).where(RoleDefinition.role_key == "admin"))
-                    admin_role = admin_role_result.scalar_one_or_none()
-                    if admin_role:
-                        db.add(User(
-                            username="admin",
-                            password_hash=hash_password("Admin@2026"),
-                            display_name="系统管理员",
-                            role_id=admin_role.id,
-                        ))
-                        await db.commit()
-                    else:
-                        print("WARNING: admin role not found in role_definitions. Run migrations and seed.")
-                except Exception:
-                    # role_definitions table may not exist yet (migration not run)
-                    # Rollback failed transaction and skip admin creation
-                    await db.rollback()
-                    print("WARNING: role_definitions table not found. Run 'alembic upgrade head' and seed before using the permission system.")
+    # Accounts are created only by the host-invoked private bootstrap CLI or
+    # explicit demo seeding. Startup must never publish an installation secret.
 
     # Initialize LLM + embedding providers from the persisted AI config (DB),
     # falling back to env defaults. This way a provider configured via the AI
@@ -551,6 +525,7 @@ register_capa_review_errors(app)
 app.state.tenant_domain = settings.TENANT_DOMAIN
 
 app.add_middleware(TenantContextMiddleware)
+app.add_middleware(ImportBodyLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

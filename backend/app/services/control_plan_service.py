@@ -114,7 +114,8 @@ async def get_control_plan(db: AsyncSession, cp_id: uuid.UUID) -> ControlPlan | 
 
 async def list_control_plans(
     db: AsyncSession, page: int = 1, page_size: int = 20, product_line: str | None = None,
-    factory_id: uuid.UUID | None = None, allowed_product_lines: list[str] | None = None,
+    factory_id: uuid.UUID | None = None,
+    accessible_factory_ids: list[uuid.UUID] | None = None, allowed_product_lines: list[str] | None = None,
 ) -> dict:
     """Return paginated list of control plans."""
     query = (
@@ -127,6 +128,9 @@ async def list_control_plans(
     if product_line:
         query = query.where(ControlPlan.product_line_code == product_line)
         count_query = count_query.where(ControlPlan.product_line_code == product_line)
+    if accessible_factory_ids is not None:
+        query = query.where(ControlPlan.factory_id.in_(accessible_factory_ids))
+        count_query = count_query.where(ControlPlan.factory_id.in_(accessible_factory_ids))
     if factory_id:
         query = query.where(ControlPlan.factory_id == factory_id)
         count_query = count_query.where(ControlPlan.factory_id == factory_id)
@@ -155,6 +159,7 @@ async def update_control_plan(
     cp: ControlPlan,
     data: ControlPlanUpdate,
     user_id: uuid.UUID,
+    scope=None,
 ) -> ControlPlan:
     """Update control plan fields. Blocks update if status is approved."""
     if cp.status == "approved":
@@ -179,6 +184,16 @@ async def update_control_plan(
         .execution_options(populate_existing=True)
     )
     fresh = result.scalar_one()
+    if scope is not None:
+        from app.core.factory_scope import check_factory_access, check_product_line_access
+        check_factory_access(fresh.factory_id, scope)
+        check_product_line_access(fresh.product_line_code, scope)
+        if requested_product_line is not None:
+            check_product_line_access(requested_product_line, scope)
+            from app.core.factory_scope import resolve_create_factory_id
+            destination_factory = await resolve_create_factory_id(db, scope, requested_product_line)
+            if destination_factory != fresh.factory_id:
+                raise ValueError("产品线必须属于当前工厂")
     if (
         requested_product_line is not None
         and fresh.product_line_code != observed_product_line
@@ -391,7 +406,7 @@ async def update_control_plan(
 
 
 async def delete_control_plan(
-    db: AsyncSession, cp: ControlPlan, user_id: uuid.UUID
+    db: AsyncSession, cp: ControlPlan, user_id: uuid.UUID, scope=None
 ) -> None:
     """Delete a control plan and log the action."""
     from app.services.capa_review_source_guard import (
@@ -418,6 +433,10 @@ async def delete_control_plan(
     ):
         raise ValueError("product_line_changed_again")
 
+    if scope is not None:
+        from app.core.factory_scope import check_factory_access, check_product_line_access
+        check_factory_access(fresh.factory_id, scope)
+        check_product_line_access(fresh.product_line_code, scope)
     cp_id = fresh.cp_id
     await assert_source_references_unchanged(db, "control_plan", cp_id, locked_capa_ids)
     await db.delete(fresh)
@@ -435,9 +454,14 @@ async def delete_control_plan(
 
 
 async def approve_control_plan(
-    db: AsyncSession, cp: ControlPlan, user_id: uuid.UUID
+    db: AsyncSession, cp: ControlPlan, user_id: uuid.UUID, scope=None
 ) -> ControlPlan:
     """Approve a control plan. Validates all referenced gauges are active and calibrated."""
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        cp = await authorize_object(db, scope, ControlPlan, cp.cp_id, Module.PLANNING, lock=True)
+        await db.refresh(cp, attribute_names=["items"])
     if cp.status == "approved":
         raise ValueError("Control plan is already approved.")
 
@@ -465,6 +489,8 @@ async def approve_control_plan(
 
     await db.commit()
     await db.refresh(cp)
+    if scope is not None:
+        await db.refresh(cp, attribute_names=["items"])
     return cp
 
 
@@ -934,6 +960,7 @@ async def sync_csr_to_control_plan(
     plan_id: uuid.UUID,
     customer_ids: list[uuid.UUID],
     user_id: uuid.UUID,
+    scope=None,
 ):
     from app.models.audit import AuditLog
     from app.models.control_plan import ControlPlan
@@ -948,6 +975,14 @@ async def sync_csr_to_control_plan(
     # 2. Query customer CSR
     result = await db.execute(select(Customer).where(Customer.customer_id.in_(customer_ids)))
     customers = result.scalars().all()
+
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        plan = await authorize_object(db, scope, ControlPlan, plan_id, Module.PLANNING, lock=True)
+        customers = []
+        for customer_id in sorted(set(customer_ids)):
+            customers.append(await authorize_object(db, scope, Customer, customer_id, Module.CUSTOMER_QUALITY, lock=True))
 
     # 3. Build CSR map keyed by (source_customer_id, title)
     new_csr_map: dict[tuple, dict] = {}

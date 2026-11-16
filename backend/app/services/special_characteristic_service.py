@@ -71,6 +71,7 @@ async def list_special_characteristics(
     approval_status: str | None = None,
     suggested_only: bool = False,
     factory_id: uuid.UUID | None = None,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
     allowed_product_lines: list[str] | None = None,
 ) -> SCListResponse:
     query = select(SpecialCharacteristic).order_by(SpecialCharacteristic.created_at.desc())
@@ -86,6 +87,8 @@ async def list_special_characteristics(
         query = query.where(SpecialCharacteristic.safety_approval_status == approval_status)
     if suggested_only:
         query = query.where(SpecialCharacteristic.is_safety_suggested == True)
+    if accessible_factory_ids is not None:
+        query = query.where(SpecialCharacteristic.factory_id.in_(accessible_factory_ids))
     if factory_id:
         query = query.where(SpecialCharacteristic.factory_id == factory_id)
     if allowed_product_lines is not None:
@@ -97,7 +100,11 @@ async def list_special_characteristics(
     return SCListResponse(items=[_to_response(i) for i in items], total=total, page=page, page_size=page_size)
 
 
-async def get_special_characteristic(db: AsyncSession, sc_id: uuid.UUID) -> SCResponse | None:
+async def get_special_characteristic(db: AsyncSession, sc_id: uuid.UUID, scope=None) -> SCResponse | None:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     item = result.scalar_one_or_none()
     return _to_response(item) if item else None
@@ -159,8 +166,11 @@ async def prepare_special_characteristic(
 
 
 async def update_special_characteristic(
-    db: AsyncSession, sc_id: uuid.UUID, data: SCUpdate, user_id: uuid.UUID,
-) -> SCResponse | None:
+    db: AsyncSession, sc_id: uuid.UUID, data: SCUpdate, user_id: uuid.UUID, scope=None) -> SCResponse | None:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     item = result.scalar_one_or_none()
     if not item:
@@ -177,7 +187,11 @@ async def update_special_characteristic(
     return _to_response(item)
 
 
-async def delete_special_characteristic(db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+async def delete_special_characteristic(db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID, scope=None) -> bool:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     item = result.scalar_one_or_none()
     if not item:
@@ -524,8 +538,12 @@ async def sync_to_cp(db: AsyncSession, cp_id: uuid.UUID, user_id: uuid.UUID, *, 
     return updated
 
 
-async def get_matrix(db: AsyncSession, product_line: str | None = None, factory_id: uuid.UUID | None = None) -> MatrixResponse:
+async def get_matrix(db: AsyncSession, product_line: str | None = None, factory_id: uuid.UUID | None = None, scope=None) -> MatrixResponse:
     query = select(SpecialCharacteristic).order_by(SpecialCharacteristic.created_at)
+    if scope is not None:
+        from app.core.factory_scope import apply_scope_filter
+        query = apply_scope_filter(query, SpecialCharacteristic, "special_characteristic", scope.factory_scope,
+                                   scope.effective_factory_id, scope.pl_scope, scope.user, db)
     if product_line:
         query = query.where(SpecialCharacteristic.product_line_code == product_line)
     if factory_id:
@@ -598,7 +616,11 @@ async def check_severity_compliance(db: AsyncSession, fmea_id: uuid.UUID) -> lis
     return warnings
 
 
-async def update_msa_status(db: AsyncSession, sc_id: uuid.UUID, grr_percent: float) -> SCResponse | None:
+async def update_msa_status(db: AsyncSession, sc_id: uuid.UUID, grr_percent: float, scope=None) -> SCResponse | None:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     sc = result.scalar_one_or_none()
     if not sc:
@@ -838,8 +860,11 @@ def _to_response(sc: SpecialCharacteristic) -> SCResponse:
 
 
 async def safety_submit(
-    db: AsyncSession, sc_id: uuid.UUID, data: SafetySubmitRequest, user_id: uuid.UUID
-) -> SCResponse:
+    db: AsyncSession, sc_id: uuid.UUID, data: SafetySubmitRequest, user_id: uuid.UUID, scope=None) -> SCResponse:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     sc = result.scalar_one_or_none()
     if not sc:
@@ -876,8 +901,11 @@ async def safety_submit(
 
 
 async def safety_approve(
-    db: AsyncSession, sc_id: uuid.UUID, data: SafetyApprovalAction, user_id: uuid.UUID
-) -> SCResponse:
+    db: AsyncSession, sc_id: uuid.UUID, data: SafetyApprovalAction, user_id: uuid.UUID, scope=None) -> SCResponse:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     sc = result.scalar_one_or_none()
     if not sc:
@@ -898,8 +926,11 @@ async def safety_approve(
 
 
 async def safety_reject(
-    db: AsyncSession, sc_id: uuid.UUID, data: SafetyApprovalAction, user_id: uuid.UUID
-) -> SCResponse:
+    db: AsyncSession, sc_id: uuid.UUID, data: SafetyApprovalAction, user_id: uuid.UUID, scope=None) -> SCResponse:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     sc = result.scalar_one_or_none()
     if not sc:
@@ -920,8 +951,11 @@ async def safety_reject(
 
 
 async def safety_confirm(
-    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID
-) -> SCResponse:
+    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID, scope=None) -> SCResponse:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     sc = result.scalar_one_or_none()
     if not sc:
@@ -938,8 +972,11 @@ async def safety_confirm(
 
 
 async def safety_dismiss(
-    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID
-) -> SCResponse:
+    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID, scope=None) -> SCResponse:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     sc = result.scalar_one_or_none()
     if not sc:
@@ -954,8 +991,11 @@ async def safety_dismiss(
 
 
 async def safety_cancel(
-    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID
-) -> SCResponse:
+    db: AsyncSession, sc_id: uuid.UUID, user_id: uuid.UUID, scope=None) -> SCResponse:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     result = await db.execute(select(SpecialCharacteristic).where(SpecialCharacteristic.sc_id == sc_id))
     sc = result.scalar_one_or_none()
     if not sc:
@@ -1012,8 +1052,11 @@ async def _create_audit(db: AsyncSession, action: str, record_id: uuid.UUID, use
 
 
 async def get_sc_references(
-    db: AsyncSession, sc_id: str
-) -> list[dict]:
+    db: AsyncSession, sc_id: str, scope=None) -> list[dict]:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     from app.models.special_characteristic_link import SpecialCharacteristicLink
     q = select(SpecialCharacteristicLink).where(
         SpecialCharacteristicLink.sc_id == sc_id
@@ -1034,8 +1077,11 @@ async def add_sc_reference(
     sc_id: str,
     source_type: str,
     source_id: str,
-    source_item_id: str,
-) -> None:
+    source_item_id: str, scope=None) -> None:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     from app.models.special_characteristic_link import SpecialCharacteristicLink
     link = SpecialCharacteristicLink(
         sc_id=sc_id,

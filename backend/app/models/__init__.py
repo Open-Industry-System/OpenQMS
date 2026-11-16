@@ -248,3 +248,5 @@ __all__ = [
     "TenantAttachmentStorageDisposal",
 ]
 from app.models.agent_d4_recovery import D4RecoveryCheckpoint, D4RecoveryRestart, D4TaskParentGrant
+
+from app.models.platform_login_attempt import PlatformLoginAttempt

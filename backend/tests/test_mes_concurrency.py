@@ -177,7 +177,7 @@ async def admin_user(db: AsyncSession):
             await db.flush()
         user = User(
             username="test_mes_admin",
-            password_hash=hash_password("Admin@2026"),
+            password_hash=hash_password("MesFixtureOnly@2026!"),
             display_name="Test MES Admin",
             role_id=admin_role.id,
             legacy_role="admin",
@@ -186,6 +186,10 @@ async def admin_user(db: AsyncSession):
         )
         db.add(user)
         await db.flush()
+    else:
+        # This module intentionally reuses a committed fixture across runs.
+        # Keep a prior run's published demo password out of real auth tests.
+        user.password_hash = hash_password("MesFixtureOnly@2026!")
 
     # Ensure product line exists
     result = await db.execute(select(ProductLine).where(ProductLine.code == "DC-DC-100"))
