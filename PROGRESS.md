@@ -1,5 +1,28 @@
 # OpenQMS 开发进度
 
+> **2026-11-16 PR #33合并准备**：用户明确授权解决问题直至合并。当前合入最新main `193746abb7c1eb9d196ef3997b6b91767490e3d1`（#36，CI去重与阶段计时）；仅PROGRESS发生文本冲突，双方记录完整保留。CI workflow、runner、收集合同自动合并后保留R5必选目录与原生严格门禁，业务/前端/迁移文件不变。main规则要求8项普通检查，远端r5-native非必需但继续如实标记未执行；将重新做本机原生验收，不取消或豁免必需检查。候选纯CI297通过（responses-pure-1794809880263133000.log，32.12s）、运行器合同64通过（run-1794809965486231000.log，5.58s），独立SPEC/QUALITY均静态APPROVED；本机native及本轮远端CI尚待完成；已只读确认ORACLE_AUTODEPLOY_ENABLED=true，最终合并前需处理既有“部署另行授权”边界；当前未进行部署或更改开关。原资源及R4B-CLEANUP-01均不清理。
+
+### 2026-11-15 — CI 独立 PR 已送审（后续授权）
+
+- 已提交 `0998be8b` 并普通push独立分支，创建非草稿 [PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36)（main ← codex/backend-ci-baseline），未合并。首个head对应 Test OpenQMS run43725914972，event=pull_request，按完整SHA查询仅此一套，无push运行；完整远端CI当时仍in_progress，不提前记通过。补录此发布事实的文档提交用于核验已开PR追加提交场景。
+- 用户已授权提交、推送本批CI改动并单独开PR；上一阶段“不提交/不push”记录为当时本地验收状态。当前main复核仍为d3c0ada8，执行代码与已通过完整验收的1073文件manifest一致；送审前pure350通过/3既有warnings，actionlint及diff检查通过，不重复运行76分钟后端。
+- 再次只读核对：main protected=false、required contexts/checks为空；生效rules=[]，ruleset17638580仍仅deletion/non_fast_forward且ref include/exclude为空；没有required_status_checks。可见self-hosted runner总数0，没有匹配openqms-r5-sandbox的runner。未更改保护设置、runner或R5门禁；不能把检查名保留当成强制阻断已生效。
+- PR描述将明确main PR创建/更新完整验证、main合并后push继续运行、未开PR的功能分支push不再运行。远端验收重点为同一PR追加提交只有一个pull_request运行、实际merge候选SHA、缓存命中/冷热及阶段耗时；尚未得到远端结果前不预写通过。
+- 慢fixture另开后续批次：setup2927.02秒约占执行循环64%，只能确定调查方向；先按测试组统计fixture调用次数、单次及累计耗时，再选择累计成本最高项做整组前后对照，同时验证数据库状态隔离和顺序独立性。本批不实施fixture优化或分片。可与R6 Task1并行，R6开工时核对实际合入的CI入口和基线SHA，不从尚未合入的PR推断主线状态。
+
+
+### 2026-11-15 — PR CI 去重与后端计时（本地验收完成，未发布）
+
+- 最新 fetch 的 `origin/main` 与 `FETCH_HEAD` 均为 `d3c0ada8`；工作树 `/Users/sam/.codex/worktrees/backend-ci-baseline/OpenQMS`，分支 `codex/backend-ci-baseline`。PR #33 / `feature/r5-d5-proposals`（75fcc517）的 Responses/R5 改动及原根工作区均未修改。
+- 已核对 PR #33 两套运行（push 43714113498 / PR 43714120965）与实际 merge checkout `1d3cadc…`。Test OpenQMS 的 push 从所有分支收敛到 main，保留 main PR 默认事件、默认合并候选 checkout、同 PR 取消、检查名与失败语义。未开 PR 的功能分支和其他非 main push 不再运行该 workflow，tag 仍不运行。样本未来每次更新少派发7个 Linux job及1个排队 native job；现有远端运行未取消，本轮配置未发布。
+- **门禁配置事实**：API main protected=false，传统保护404，生效分支规则为空；ruleset17638580没有 required checks。GitHub Actions检查来源15368保持，但不能声称管理员已配置失败阻断合并。self-hosted runner API返回0，PR #33的r5-native仍queued；保留其feature专有native门禁，不通过skip/换runner绕过，等待问题与减少重复占用分开。
+- 主线 backend 显式 prepare 与 Make check-test-db 均执行身份校验/建库检查/迁移，第二次有实际进程与连接开销；manual只做Schema/SPC计算且在pure guard下通过。因此删除前置独立prepare，保留正常Make从空库准备、runner再校验、手工检查与后续preflight。后端/浏览器新增pip下载缓存，安装与SDK版本检查保留，缓存不包含DB/凭据/测试状态。
+- 已有单次 pytest collection/execution及top20 setup/call/teardown计时，写入既有过滤log，receipt不变；诊断损坏/日志失败不改变原测试退出码。最终 CI pure **350 passed /3 warnings**，actionlint1.7.7与diff检查通过，0/1/2退出路径及未登记实例Make exit2已验证；只读复核通过。
+- 成功PR历史基线：PR run43686875078，head13d1ac1b、实际merge3d95cb91，Ubuntu26.04/Python3.12.16；backend排队2秒、执行6134秒，依赖17+2秒、首次准备7秒、重复约1.46秒、pytest子进程6071.36秒，phase分项未测得。独占PG15本地重复准备1.358/0.916秒。没有同提交/同runner的优化后Actions或pip冷热实测，不推算收益比例。
+- 最终空库正常 `make check-backend` **5269 passed /4 skipped /19 deselected /6 warnings，exit0**，新增29项CI回归，既有排除不变；D8 preflight CLEAN/0 breaks和8个引擎import均exit0。Make4612.65秒、pytest子进程4608.58秒，collection5.63秒/execution4574.43秒；setup2927.02秒/call1391.27秒/teardown253.25秒，**下一步优先慢fixture**（如tenant rebuild某例setup13.08秒而call0.12秒），不先拆两个PG job。此前因应用更新在第2207项中断的运行未计作通过。1073个执行文件前后集合/指纹一致（manifest `f1e7dfee23be245fe3815074ccd6d826e4625c95a8e1c637b995fcdf3a4645c7`）；本地receipt标识为d3c0ada8+local-ci-optimization，并非实际commit，同Actions不同runner/版本，不能换算优化比例。专用PG/唯一自有卷及凭据已精确清理，其他资源未动；日志/收据在本机/tmp/openqms-ci-baseline-local，工作树保留未提交。详细基线、事件矩阵、保护规则、验证口径和下一次PR指标见[CI证据](docs/development/backend-ci-timing.md)。未分片、未减测试、未push或merge。
+
+
+
 > **2026-11-15 远端执行源码普通CI全部成功，保留原生macOS排队限制**：最终实现`2b5530c3`的[run43703339877](https://github.com/Open-Industry-System/OpenQMS/actions/runs/43703339877)普通八个job已全部实际success（SDK3.11/3.12/3.13、frontend、Oracle、docs、browser、backend）。backend job132779100196实际receipt：**5465通过/4跳过/89 deselected/0failed/0errors/12428warnings/7526.10s/exit0**；12:23:57 UTC完成验收，随后D8 preflight、engine imports及上传、清理步骤success。browser job132779100049实际**11通过/0skip/0failed/1231warnings/222.04s/exit0**。两层frozen SHA为GitHub测试合并`031967b9`，连接器实际compare与2b文件diff为空；收尾再次核对main仍d3c0ada8、behind_by=0。原生job132779100288仍queued/steps=null，runner清单最近实读0，不能声称远端Darwin已执行或整个workflow已完成。
 >
 > 进度显示限制已核明：公开runner只接受ASCII测试标识，第4574个含中文名称被过滤后顺序号不再前进，故UI公开进度最后停在4573；实际子日志、JUnit和最终receipt继续完成。已用本地完整运行与远端最终收据双向验证，不将公开进度停顿误判为测试挂起。完成日志端点在运行中曾返回404，结束后成功取得真实receipt；没有取消/重启这一轮。私有 `responses-remote-ci-evidence.json`保留源SHA、测试合并SHA及最终receipt。收尾四文档本地提交为`2bba120d36292967f5f580775577961427815486`，执行源码仍与2b一致；本条仅补录已完成CI结果，推送后新文档run须单独显示，不用已完成源码run冒充新提交执行。

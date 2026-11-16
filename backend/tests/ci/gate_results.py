@@ -76,8 +76,12 @@ _HOOK_STATE: dict[str, Any] = {}
 
 
 def pytest_sessionstart(session) -> None:
+    from tests.ci.gate_timing import GateTiming
+
+    session.config.pluginmanager.register(GateTiming(_HOOK_STATE), 'openqms-gate-timing')
     _HOOK_STATE.clear()
-    _HOOK_STATE.update(selected=0, deselected=0, outcomes={}, warnings=0)
+    _HOOK_STATE.update(selected=0, deselected=0, outcomes={}, warnings=0,
+                       collection_seconds=0.0, execution_seconds=0.0, durations={})
 
 
 def _progress(event: str, nodeid: str) -> None:
@@ -109,6 +113,8 @@ def pytest_deselected(items) -> None:
 
 
 def pytest_runtest_logreport(report) -> None:
+    phases = _HOOK_STATE['durations'].setdefault(report.nodeid, dict(setup=0.0, call=0.0, teardown=0.0))
+    phases[report.when] = report.duration
     outcomes: dict[str, str] = _HOOK_STATE['outcomes']
     if report.when == 'call':
         if getattr(report, 'wasxfail', None):
@@ -132,6 +138,19 @@ def pytest_terminal_summary(terminalreporter) -> None:
     summary['warnings'] = _HOOK_STATE['warnings']
     for outcome in ('passed', 'failed', 'errors', 'skipped', 'xfailed', 'xpassed'):
         summary[outcome] = len(terminalreporter.stats.get(outcome, ()))
+    # Sort by combined phase duration; strip parameter values before publication.
+    durations = _HOOK_STATE['durations']
+    summary['timing'] = {
+        'collection_seconds': round(_HOOK_STATE['collection_seconds'], 6),
+        'execution_seconds': round(_HOOK_STATE['execution_seconds'], 6),
+        'phase_seconds': {phase: round(sum(row[phase] for row in durations.values()), 6)
+                          for phase in ('setup', 'call', 'teardown')},
+        'slowest_tests': [
+            {'test': nodeid.split('[', 1)[0], 'total': round(sum(phases.values()), 6),
+             **{phase: round(seconds, 6) for phase, seconds in phases.items()}}
+            for nodeid, phases in sorted(durations.items(), key=lambda item: sum(item[1].values()), reverse=True)[:20]
+        ],
+    }
     output = Path(destination)
     output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     output.write_text(json.dumps(summary, sort_keys=True) + '\n')

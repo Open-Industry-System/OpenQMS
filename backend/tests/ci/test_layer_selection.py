@@ -303,8 +303,8 @@ def test_backend_workflow_uses_verified_prepare_and_deterministic_make_path() ->
         'GITHUB_JOB': 'backend-tests',
         "TEST_DATABASE_URL": "postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test",
     }
-    assert {key: steps['Prepare verified test database']['env'][key] for key in required_env} == required_env
-    assert 'python -m tests.ci.prepare_database' in steps['Prepare verified test database']['run']
+    assert 'Prepare verified test database' not in steps
+    assert 'check-backend: check-test-db' in (root / 'Makefile').read_text()
     assert {key: steps['Run deterministic backend acceptance']['env'][key] for key in required_env} == required_env
     assert 'make check-backend' in steps['Run deterministic backend acceptance']['run']
     assert all('alembic upgrade head' not in step.get('run', '') for step in backend['steps'])
