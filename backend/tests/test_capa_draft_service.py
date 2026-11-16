@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import app.services.capa_draft_service as capa_draft_service
 from app.config import settings
-from app.schemas.capa_draft import DraftRequest, STEP_SCHEMA_MAP
+from app.schemas.capa_draft import DraftRequest, DraftResponse, STEP_SCHEMA_MAP
 from app.services.agent import provider_adapter
 from app.services.capa_draft_service import (
     generate_draft,
@@ -100,7 +100,8 @@ class TestGenerateDraftSuccess:
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         resp = await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
 
-        assert resp["step"] == "d2"
+        # Validate the actual generated payload against the API response contract.
+        assert DraftResponse.model_validate(resp).step == "d2"
         assert "request_id" in resp
         assert resp["content"].startswith("问题陈述")
         assert resp["structured_data"]["problem_statement"] == "陈述"

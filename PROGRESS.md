@@ -1,5 +1,47 @@
 # OpenQMS 开发进度
 
+### 2026-11-16 — 第三批简化：供应商测试统一pytest断言（本地）
+
+- 沿用独立`codex/test-suite-pruning`，保留已有两批改动。继续审查时优先处理第二批已记录的供应商脚本断言缺陷；本批仅新增修改`backend/tests/test_supplier.py`与本进度，不改生产代码、数据库fixture或CI门禁。
+- 删除手工check/check_raises、全局通过／失败计数与22项手工执行清单，直接使用52个assert、4个pytest.raises及统一pytest脚本入口。净减少74行；保留22项测试名称及评分A/B/C/D阈值、扣分上限、零下限、组合扣分、合法／非法状态转换的原输入与预期。去掉grade_a中一次已由perfect_score完整覆盖的满分调用；不是将多个用例塞入循环压低数量。本批不另减用例，累计仍删除16/5285（约0.30%）。
+- 原helper只累计失败，pytest不会据此失败：错误评分、错误合法转换、预期异常未抛出、抛出错误异常类型四个私有故障探针，在改前均错误exit0；改后分别触发assert／DID NOT RAISE／RuntimeError，均正确exit1。故障只修改独立子进程内导入引用，无生产源码注入或落盘修改。
+- AST逐项证明22项测试在标准断言转换后主体一致，唯一有意减少为上述重复满分调用／断言；完整证明见`/tmp/openqms-test-pruning-round3/coverage-equivalence.json`。原check53处转换后删除重复1处，check_raises4处均保留对应异常类型与被测调用。
+- 正常pure入口改前22 passed／3 warnings／0.02秒，改后22 passed／3 warnings／0.03秒，均exit0；原独立脚本入口也22 passed／3 warnings／exit0（通过pure bootstrap和禁用数据库的配置执行）。依赖预装、没有pip安装／冷热实验；没有全量后端或新远端Actions结果，不据微小本地时差推算提速。
+- 证据目录`/tmp/openqms-test-pruning-round3/`：before／after正常JUnit与日志、四类before／after故障JUnit及mutations.json、原源码快照、AST证明、standalone.json。diff检查通过；本批无需PostgreSQL，不使用共享库。未提交、push或merge，保留前两批444项辅助／相关pure检查和82项真实PG/API验证的独立收据。
+
+### 2026-11-16 — 第二批低价值用例审核与精简（本地）
+
+- 在原独立 `codex/test-suite-pruning` worktree继续，基线仍为804f8551。CodeGraph工具本会话不可用，使用AST候选扫描后逐项核对源码、fixture、真实调用及保留断言；没有按测试数量、函数长度或只有一个assert机械删用例。
+- 本批新增删除10项：IQC空壳1项、重复工厂范围用例7项、合并字段回显覆盖2项。累计两批16/5285=0.3027%（约0.30%）。5285是既有远端后端选中数；精简后全量尚未运行，不能把这个比例当作全库低价值用例最终占比或耗时收益。
+
+| 删除用例（模块） | 保留覆盖／依据 |
+|---|---|
+| `test_request_reinspect_creates_clone`（iqc_inspection_service） | 原代码仅建mock并在patch内pass，不调用服务、不作断言；即使把复检服务替换为必定抛错，原用例仍1 passed。保留真实调用服务的复检状态／结果校验；不宣称原空壳证明过克隆成功。 |
+| `test_factory_invariant_product_line_mismatch`（factory_isolation） | factory_scope的`TestValidateFactoryInvariant.test_product_line_code_inconsistent_raises`保留同产品线不匹配与ValueError断言。 |
+| `test_factory_invariant_product_line_match`（factory_isolation） | 同类`test_product_line_code_consistent`保留匹配不抛错，显式设supplier_id=None避免MagicMock意外进入供应商分支。 |
+| `test_factory_invariant_no_product_line_no_error`（factory_isolation） | 同类`test_no_product_line_code_no_error`保留无产品线／供应商的空操作，增加execute未被await断言。 |
+| `test_single_factory_user_locked_even_with_bypass`（factory_isolation） | 同模块`test_bypass_without_group_still_locked_to_factory`及`test_bypass_does_not_grant_cross_factory_product_lines`共同保留工厂锁定、产品线ALL、越权403和实际查询过滤断言。 |
+| `test_multi_factory_user_default_factory`（factory_isolation） | 同模块`test_group_viewer_sees_assigned_factories`已有相同输入及默认工厂断言，并进一步检查允许／拒绝访问。 |
+| `test_multi_factory_user_default_from_first_user_factory`（factory_isolation） | factory_scope的`test_group_viewer_no_factory_id_with_user_factories`已有相同分支、两个不同UUID及首项回退断言。 |
+| `test_group_admin_default_factory_is_user_factory`（factory_isolation） | 同模块`test_bypass_with_group_admin_sees_all_factories`增加默认工厂仍取用户自身、非user_factories首项的断言；unit的`test_group_admin_ignores_user_factories`也检查这一默认值。保留bypass=True和False两种输入。 |
+| `test_draft_response_fields`（capa_draft_schema） | 将DraftResponse.model_validate并入既有真实generate_draft成功测试，检查实际响应的step，代替只构造固定对象再读取自身输入。 |
+| `test_paragraph_llm_output`（capa_draft_schema） | 保留真实generate_draft段落成功测试：经过ParagraphLLMOutput.model_validate，检查真实content、structured_data和step。extra=forbid独立请求边界仍保留。 |
+
+- 保留不同业务状态／端点／供应商与SPC来源、空值／非法值／权限拒绝及并发边界；不因AST仅字符串不同认定重复。另发现旧`test_supplier.py`的check/check_raises只累计失败、在pytest下未抛错，此为断言有效性修复候选；其评分边界有独立价值，本批没有删除或冒充其有效验收。
+- 同一受影响pure集合删前97 passed／删后87 passed，均3项既有warnings、exit0；两次pytest显示均0.28秒，依赖预装，无pip冷热实验，不能据此推算后端job收益。最初误将草稿服务整个模块置于pure入口，另两项未改DB测试被数据库隔离守卫拒绝（116 passed／2 errors）；保留before.log，不当作通过，随后仅选择本批修改的成功类。未放宽DB隔离、跳过策略或测试退出码。
+- 最终合并执行相关模块与CI辅助检查：444 passed／3 warnings／exit0，35.28秒；无skip/xfail，git diff --check通过。
+- 私有子进程中注入5类故障（放过工厂不匹配、GROUP默认工厂取错、多工厂回退丢失、响应step字段消失、段落content字段消失），保留用例全部如期失败，exit1；原IQC空壳在服务必定抛错时仍exit0，支持其删除依据。故障仅驻留各子进程内存，未写入生产源码。factory_isolation原独立脚本入口也14 passed／0 failed、exit0。
+- 详细本地证据：`/tmp/openqms-test-pruning-round2/`的before-pure／after-pure／final-pure日志与JUnit、mutations.json和各故障日志、standalone.json；先前6项的82项真实PG/API验证及资源清理证据仍保留。本批新增改动为无数据库测试，不使用共享实例。本轮没有新全量后端或远端Actions结果，没有push或merge；门禁工作流及job名称未改。
+
+### 2026-11-16 — 保守精简重复测试（本地验证）
+
+- 按用户选择，仅删除已证明重复或低价值且不损失业务边界的用例。基线804f8551；独立worktree `/tmp/openqms-test-pruning`，不修改冻结的全量A/B工作区。
+- 近期成功PR后端选择5285项（5281 passed /4 skipped /19 deselected）；源文件377个、AST测试函数定义3347个，参数化展开后用例数更多。已确认并删除6项重复覆盖，占5285项的0.1135%（约0.11%）；不是全库“重复＋低价值”的最终比例，也不代表耗时收益。
+- 删除→保留：SCAR模块的 `test_pl_change_blocked_when_scar_linked` → `test_update_linked_capa_product_line_forbidden`；`test_link_capa_capa_pl_denied_403` → `test_link_capa_scar_pl_denied_403`；outcome_doc_gate的 `test_gate_does_not_bypass_current_authority` → outcome_review的 `test_live_capa_revocation_denies_even_with_stale_scope`；verification_service的 `test_create_verification_rejects_verified_without_details` → verification_conclusion的 `test_passed_requires_details_on_create`；D4 local_process的 `test_text_message_sentinel_never_crosses_tcp` → 同模块 `test_first_claimable_text_profile_has_message_gate`；browser_runtime允许集合参数中完全相同的重复字典删除一行。
+- 前五组测试主体/参数/装饰器AST等价，核对使用的fixture和导入；verification两侧建CAPA helper的文档编号不同，但状态和校验输入相同。D4保留的必测用例仍完整遍历first/retry/old_epoch/history/ack五场景；仅同步移除runner及独立契约中的重复别名，缺失/跳过/失败校验不变。工作流、job名和8项合并门禁不变。
+- 正常pure入口：357 passed /3 warnings；正式API runner验证受影响与保留模块：82 passed /0 skipped/failed/deselected，exit0，pytest收据174.74秒。未运行精简后全量，不推算整套节省。独占PG15身份校验与迁移通过；收尾核验零额外连接，仅移除登记容器及1个专属卷，凭据删除。证据 `/tmp/openqms-test-pruning-evidence/{result.json,cleanup-result.json,validation.log}`，pure日志 `/tmp/openqms-pruning-pure.log`；diff检查通过。
+- 全量受控对照暂停：A为5280 passed /5 skipped，make4326.03秒；B为5279 passed /5 skipped /1 failed，make4398.99秒，失败为未改动的 `test_concurrent_first_sink_unique_race` 唯一键并发冲突。该业务边界测试保留，不将失败对照称为性能验收通过。远端804f8551现有CI后端73分41秒、pip精确键热缓存、8项检查成功；这与本地精简后结果分开记录。
+
 ### 2026-11-16 — 补单次全量逐模块计时与受控对照（进行中）
 
 - 独立worktree /tmp/openqms-module-timing，起点a0f291be。新增每测试源模块selected/setup/call/teardown和集合顺序SHA256；沿用一次收集/执行、原receipt与失败退出码、既有脱敏log。pure358 passed /3 warnings，phase守恒与成功/失败/收集失败出口覆盖通过。

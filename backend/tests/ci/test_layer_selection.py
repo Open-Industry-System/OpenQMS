@@ -68,7 +68,6 @@ D4_TEXT_BACKEND_NAMES = (
     'test_blocked_task_source_request_replay',
     'test_revoked_text_grant_does_not_block_stop_controls',
     'test_first_claimable_text_profile_has_message_gate',
-    'test_text_message_sentinel_never_crosses_tcp',
     'test_text_budget_and_response_faults_fail_closed',
     'test_text_finish_commit_without_confirmation_is_unknown',
     'test_text_current_authority_and_tenant_boundaries[cross-tenant]',
