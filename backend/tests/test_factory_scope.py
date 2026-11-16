@@ -128,6 +128,7 @@ class TestResolveFactoryScope:
         user = make_user(factory_id=F1)
         result = resolve_factory_scope(user, user_factory_ids=[F2, F3], has_group_admin=True)
         assert result.accessible_factory_ids is None
+        assert result.default_factory_id == F1
 
     def test_no_factory_no_user_factories_empty_access(self):
         """No factory_id, no user_factories → accessible=[] (no data access)."""
@@ -660,7 +661,7 @@ class TestValidateFactoryInvariant:
         db = AsyncMock()
 
         await validate_factory_invariant(record, db)
-        # Should not raise
+        db.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_product_line_code_consistent(self):
@@ -669,6 +670,7 @@ class TestValidateFactoryInvariant:
         record.factory_id = F1
         record.product_line_code = "DC-DC-100"
         record.product_line = None
+        record.supplier_id = None
 
         db = make_db_mock(factory_id_result=F1)
 

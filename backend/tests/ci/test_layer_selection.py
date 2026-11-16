@@ -79,7 +79,6 @@ D4_TEXT_BACKEND_NAMES = (
     'test_blocked_task_source_request_replay',
     'test_revoked_text_grant_does_not_block_stop_controls',
     'test_first_claimable_text_profile_has_message_gate',
-    'test_text_message_sentinel_never_crosses_tcp',
     'test_text_budget_and_response_faults_fail_closed',
     'test_text_finish_commit_without_confirmation_is_unknown',
     'test_text_current_authority_and_tenant_boundaries[cross-tenant]',
@@ -407,9 +406,9 @@ def test_r5_platform_credentials_and_pilot_configuration_never_enter_ordinary_ch
         assert not any('sentinel' in value for value in browser_environment(private,{}).values())
 
 
-def test_r5_workflow_uses_required_supported_host_and_explicit_job_bundle():
+def test_r5_manual_workflow_keeps_supported_host_and_explicit_job_bundle():
     root=Path(__file__).resolve().parents[3]
-    job=yaml.safe_load((root/'.github/workflows/test.yml').read_text())['jobs']['r5-native']
+    job=yaml.safe_load((root/'.github/workflows/r5-native.yml').read_text())['jobs']['r5-native']
     assert job['runs-on']==['self-hosted','macOS','openqms-r5-sandbox']
     command=next(step['run'] for step in job['steps'] if step.get('name','').startswith('Run mandatory R5'))
     assert 'tests.ci.r5_native_gate' in command and '$RUNNER_TEMP/openqms-r5-native-job.json' in command
