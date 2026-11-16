@@ -92,3 +92,12 @@ PR #38首轮 `Test OpenQMS`（run `43827639514`）的 `oracle-automation-checks`
 隔离环境精确复现4 failed /48 passed。测试现在沿用项目既有的SDK传输识别方式，为实际默认HTTP客户端匹配MockTransport与Response；生产代码、SDK依赖范围及所有密钥断言均保持不变。OpenAI2.41.1与3.51.0环境分别运行连接器安全和运行器合同，共116项均通过，启用纯测试网络禁止保护，未请求真实提供商。新提交仍须等待远端必需检查完成后才合并。
 
 新版SDK的本机R5 API验收另得到67 passed /1 failed：重定向保护实际抛出 `PermissionError(Model deployment unavailable)`，SDK2会包装成APIConnectionError，而SDK3直接保留该异常。仅调整原生测试兼容这两种形式，并新增对根因类型和固定拒绝原因的断言；继续保留目标A请求恰好一次、目标B请求为零的原断言。SDK2/3分别2项通过；完整新版原生门禁将在新head重新执行，不将67项通过当作整轮成功。
+
+
+## 最终 CI 的知识沉淀并发修复
+
+同步主线 PR #39 后的运行 `43861209312` 完整后端结果为5652 passed /1 failed /4 skipped /89 deselected（5568.66秒）；7项其他必需检查通过，先前4项SDK密钥断言全部通过。唯一失败 `test_concurrent_first_sink_unique_race` 在本任务独占PG15上复现：同一CAPA首次并发沉淀同时受主键及来源唯一键约束，只对主键使用ON CONFLICT无法吸收来源索引的并发冲突。证据产物SHA256为 `d70f28baebc4bd3b05e7e477e4834acd76c835d29c11c297b518e858bee94d1b`。
+
+知识沉淀现在在生成摘要后、写入前，按确定性知识条目UUID获取事务级advisory锁，提交或回滚自动释放。同源持久化串行，其他来源及摘要生成仍可并行；保留原子upsert、条目状态、outbox取消与重建、审计及外层关闭事务。无新增DDL或配置。
+
+原并发测试扩展为2/4独立会话，覆盖全部提交及首写者回滚；同步摘要完成后竞争写入，保留唯一条目和无IntegrityError断言，并核验最终内容哈希、唯一pending outbox、取消数量及审计与已提交事务数量一致。知识沉淀及CAPA关闭决策相关实际48项通过，0失败/跳过。修复后仍需最终提交的完整必需CI通过才可合并。

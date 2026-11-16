@@ -408,10 +408,16 @@ async def sink_capa_on_close(
     content_hash = hashlib.sha256(embedding_text.encode()).hexdigest()
     now = datetime.now(UTC)
 
-    # 5. Atomic upsert ON CONFLICT (entry_id PK).
-    # entry_id is deterministic (uuid5 of capa id), so concurrent first-sinks
-    # collide on PK first; arbitrating on source unique alone still raises
-    # knowledge_entries_pkey under race. Do NOT overwrite status.
+    # 5. Serialize persistence for this source until the caller commits or
+    # rolls back. Concurrent first inserts can conflict on either the PK or
+    # the source unique index; ON CONFLICT only arbitrates one of them.
+    # Acquire after the LLM call so unrelated sources and summary generation
+    # remain concurrent. The deterministic UUID also namespaces the lock.
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": int.from_bytes(entry_id.bytes[:8], "big", signed=True)},
+    )
+    # Atomic upsert ON CONFLICT (entry_id PK). Do NOT overwrite status.
     upsert_stmt = (
         pg_insert(KnowledgeEntry)
         .values(
