@@ -49,6 +49,8 @@ if [[ ! -r "$ENV_FILE" ]]; then
   fail "error: production environment file is not readable"
 fi
 
+unset ERP_ALLOWED_ORIGINS seen_ERP_ALLOWED_ORIGINS value_ERP_ALLOWED_ORIGINS
+
 production_keys=(
   SITE_ADDRESS
   TAILSCALE_IP
@@ -94,7 +96,7 @@ is_production_key() {
     GRAPH_REPOSITORY|TENANT_MODE|E2E_MODE|LLM_PROVIDER|LLM_API_KEY|LLM_MODEL|\
     LLM_BASE_URL|EMBEDDING_PROVIDER|EMBEDDING_API_KEY|EMBEDDING_MODEL|\
     EMBEDDING_BASE_URL|VITE_PUBLIC_DEMO_ENABLED|VITE_PUBLIC_DEMO_USERNAME|\
-    VITE_PUBLIC_DEMO_PASSWORD|VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS)
+    VITE_PUBLIC_DEMO_PASSWORD|VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS|ERP_ALLOWED_ORIGINS)
       return 0
       ;;
     *)
@@ -182,6 +184,12 @@ if [[ "$value_REDIS_URL" != "$expected_redis_url" ]]; then
   fail "error: invalid internal Redis URL"
 fi
 
+erp_allowed_origins='{}'
+if [[ "${seen_ERP_ALLOWED_ORIGINS:-}" == "1" && -n "${value_ERP_ALLOWED_ORIGINS:-}" ]]; then
+  erp_allowed_origins=$value_ERP_ALLOWED_ORIGINS
+fi
+unset ERP_ALLOWED_ORIGINS seen_ERP_ALLOWED_ORIGINS value_ERP_ALLOWED_ORIGINS
+
 for key in "${production_keys[@]}"; do
   unset "seen_${key}" "value_${key}"
 done
@@ -191,7 +199,7 @@ unset VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS seen_VITE_PUBLIC_DEMO_ADDITIONAL_ACCO
 unset COMPOSE_FILE COMPOSE_ENV_FILES COMPOSE_PROJECT_NAME OPENQMS_ENV_FILE
 unset RELEASE_MARKER
 
-exec env RELEASE_SHA="$RELEASE_SHA" docker compose \
+exec env RELEASE_SHA="$RELEASE_SHA" ERP_ALLOWED_ORIGINS="$erp_allowed_origins" docker compose \
   --project-name openqms \
   --project-directory "$REPO_ROOT" \
   --env-file "$ENV_FILE" \

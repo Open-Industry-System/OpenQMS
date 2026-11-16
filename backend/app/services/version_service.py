@@ -172,12 +172,17 @@ async def create_fmea_version(
     change_type: str,
     change_summary: str | None,
     user_id: uuid.UUID,
+    scope=None,
 ) -> FMEAVersion:
     """Snapshot the current FMEA graph_data as a new version.
 
     * ``change_type == "approve"`` bumps major_no, resets minor_no to 0.
     * All other types bump minor_no.
     """
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        fmea = await authorize_object(db, scope, FMEADocument, fmea.fmea_id, Module.FMEA, lock=True)
     version = await _create_fmea_version_no_commit(db, fmea, change_type, change_summary, user_id)
     await db.commit()
     return version
@@ -382,8 +387,13 @@ async def create_cp_version(
     change_summary: str | None,
     user_id: uuid.UUID,
     source_fmea_version_id: uuid.UUID | None = None,
+    scope=None,
 ) -> ControlPlanVersion:
     """Compatibility wrapper retaining the existing committing behavior."""
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        cp = await authorize_object(db, scope, ControlPlan, cp.cp_id, Module.PLANNING, lock=True)
     version = await stage_cp_version(
         db, cp, change_type, change_summary, user_id, source_fmea_version_id,
     )
@@ -470,12 +480,17 @@ async def rollback_fmea(
     reason: str,
     user_id: uuid.UUID,
     expected_lock_version: int | None = None,
+    scope=None,
 ) -> FMEAVersion:
     """Roll back an FMEA document's graph_data to a previous version.
 
     Only allowed when the FMEA status is ``draft``.
     Creates a new version recording the rollback.
     """
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        fmea = await authorize_object(db, scope, FMEADocument, fmea.fmea_id, Module.FMEA, lock=True)
     if fmea.status != "draft":
         raise ValueError("Rollback is only allowed when FMEA status is draft.")
 
@@ -551,12 +566,17 @@ async def rollback_control_plan(
     reason: str,
     user_id: uuid.UUID,
     expected_lock_version: int | None = None,
+    scope=None,
 ) -> ControlPlanVersion:
     """Roll back a Control Plan to a previous version.
 
     Only allowed when status is ``draft``.
     Restores header fields and upserts items preserving original item_id UUIDs.
     """
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        cp = await authorize_object(db, scope, ControlPlan, cp.cp_id, Module.PLANNING, lock=True)
     if cp.status != "draft":
         raise ValueError("Rollback is only allowed when control plan status is draft.")
 

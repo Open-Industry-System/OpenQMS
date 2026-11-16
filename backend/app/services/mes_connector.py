@@ -24,7 +24,8 @@ from app.schemas.mes import (
     MESIngestProductionOrder,
     MESIngestScrapRecord,
 )
-from app.services.mes_crypto import decrypt_credential
+from app.services.mes_crypto import decrypt_bound_credential
+from app.services.connector_security import credential_context, canonical_origin, validate_endpoint_path
 
 # ---------------------------------------------------------------------------
 # Schema mapping for validation
@@ -241,13 +242,13 @@ class RESTMESConnector(MESConnector):
         elif self._auth_type == "bearer":
             token = ac.get("token")
             if not token and ac.get("token_encrypted"):
-                token = decrypt_credential(ac["token_encrypted"])
+                token = decrypt_bound_credential(ac["token_encrypted"], credential_context(self._config))
             if token:
                 headers["Authorization"] = f"Bearer {token}"
         elif self._auth_type == "api_key":
             key = ac.get("inbound_api_key") or ac.get("outbound_api_key")
             if not key and ac.get("outbound_api_key_encrypted"):
-                key = decrypt_credential(ac["outbound_api_key_encrypted"])
+                key = decrypt_bound_credential(ac["outbound_api_key_encrypted"], credential_context(self._config))
             if key:
                 headers["X-API-Key"] = key
         return headers
@@ -259,10 +260,10 @@ class RESTMESConnector(MESConnector):
         ac = self._auth_config
         username = ac.get("username")
         if not username and ac.get("username_encrypted"):
-            username = decrypt_credential(ac["username_encrypted"])
+            username = decrypt_bound_credential(ac["username_encrypted"], credential_context(self._config))
         password = ac.get("password")
         if not password and ac.get("password_encrypted"):
-            password = decrypt_credential(ac["password_encrypted"])
+            password = decrypt_bound_credential(ac["password_encrypted"], credential_context(self._config))
         if username and password:
             return (username, password)
         return None
@@ -310,6 +311,8 @@ class RESTMESConnector(MESConnector):
         json_body: dict | None = None,
     ) -> dict:
         """Execute HTTP request with retry logic."""
+        canonical_origin(self._base_url)
+        validate_endpoint_path(path)
         url = f"{self._base_url}{path}"
         headers = self._resolve_auth()
         auth = self._auth_for_httpx()
@@ -326,6 +329,7 @@ class RESTMESConnector(MESConnector):
                     json=json_body,
                     headers=headers,
                     auth=auth,
+                    follow_redirects=False,
                 )
                 resp.raise_for_status()
                 return resp.json()

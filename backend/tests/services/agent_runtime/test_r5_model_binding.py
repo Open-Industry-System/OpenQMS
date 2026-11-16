@@ -89,14 +89,19 @@ pytestmark = pytest.mark.ci_r5_native
 async def test_actual_http_approved_A_is_only_recipient(redirect):
     from types import SimpleNamespace
     from app.services.agent import provider_adapter
-    from app.services.agent_runtime.model_egress import PinnedTransport
+    from app.services.agent_runtime.model_egress import PinnedTransport, UNAVAILABLE
     c=await _model_http_witness(redirect)
     row=SimpleNamespace(base_url='http://127.0.0.1:'+str(c.a.server_port)+'/v1',provider='openai',allowed_addresses=['127.0.0.1'])
     pc=provider_adapter.build_deployment_client('openai','synthetic',row.base_url,'synthetic-no-real-credential',transport=PinnedTransport(row))
     try:
         if redirect:
-            with pytest.raises(__import__('openai').APIConnectionError):
+            # SDK 2 wraps transport denials; SDK 3 preserves PermissionError.
+            connection_error = __import__('openai').APIConnectionError
+            with pytest.raises((connection_error, PermissionError)) as rejected:
                 await provider_adapter.chat_with_tools(pc,[{'role':'user','content':'synthetic-A-sentinel'}],[])
+            denial = rejected.value.__cause__ if isinstance(rejected.value, connection_error) else rejected.value
+            assert isinstance(denial, PermissionError)
+            assert str(denial) == UNAVAILABLE
         else:
             result=await provider_adapter.chat_with_tools(pc,[{'role':'user','content':'synthetic-A-sentinel'}],[])
             assert result.content=='synthetic D5'

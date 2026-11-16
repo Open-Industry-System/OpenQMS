@@ -5,6 +5,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.connector_security import canonical_origin, validate_endpoint_path
+
 # ---------------------------------------------------------------------------
 # Connection schemas
 # ---------------------------------------------------------------------------
@@ -83,7 +85,12 @@ class RESTRetryConfig(BaseModel):
 class RESTEndpointConfig(BaseModel):
     path: str = Field(..., min_length=1)
     cursor_field: Optional[str] = None
-    method: str = "GET"
+    method: Literal["GET", "POST"] = "GET"
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        return validate_endpoint_path(value)
     pagination: Optional[RESTPaginationConfig] = None
     response_path: Optional[str] = None
 
@@ -97,6 +104,14 @@ class RESTConfig(BaseModel):
     endpoints: dict[str, RESTEndpointConfig] = Field(default_factory=dict)
     field_mapping: dict[str, str] = Field(default_factory=dict)
     retention: Optional[dict] = Field(default=None)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+        canonical_origin(value)
+        validate_endpoint_path(urlsplit(value).path or "/")
+        return value
 
     @field_validator("endpoints")
     @classmethod

@@ -43,6 +43,7 @@ REQUIRED_ENV_KEYS = {
     "EMBEDDING_API_KEY",
     "EMBEDDING_MODEL",
     "EMBEDDING_BASE_URL",
+    "ERP_ALLOWED_ORIGINS",
     "VITE_PUBLIC_DEMO_ENABLED",
     "VITE_PUBLIC_DEMO_USERNAME",
     "VITE_PUBLIC_DEMO_PASSWORD",
@@ -383,6 +384,7 @@ def test_static_production_stack_contract():
                 "EMBEDDING_API_KEY",
                 "EMBEDDING_MODEL",
                 "EMBEDDING_BASE_URL",
+                "ERP_ALLOWED_ORIGINS",
             )
         },
     )
@@ -483,6 +485,7 @@ def test_production_env_example_and_gitignore_contract():
     assert values["E2E_MODE"] == "false"
     assert values["LLM_PROVIDER"] == ""
     assert values["EMBEDDING_PROVIDER"] == ""
+    assert values["ERP_ALLOWED_ORIGINS"] == "{}"
     assert values["VITE_PUBLIC_DEMO_ENABLED"] == "true"
     assert values["VITE_PUBLIC_DEMO_USERNAME"] == "viewer"
     assert values["VITE_PUBLIC_DEMO_PASSWORD"] == "Viewer@2026"
@@ -613,6 +616,7 @@ def test_rendered_production_compose_contract(tmp_path):
         "EMBEDDING_API_KEY",
         "EMBEDDING_MODEL",
         "EMBEDDING_BASE_URL",
+        "ERP_ALLOWED_ORIGINS",
     )
     _assert_exact_environment(
         services["backend"]["environment"],
@@ -778,3 +782,19 @@ def test_rendered_compose_ignores_ambient_test_credentials(tmp_path, monkeypatch
     )
     assert ambient_database_url not in rendered_environments
     assert ambient_secret not in rendered_environments
+
+
+@pytest.mark.skipif(not _compose_cli_available(), reason="Docker Compose CLI unavailable")
+@pytest.mark.parametrize('policy', [None, '', '{"https://erp.factory.example":["10.20.30.15/32"]}'])
+def test_local_compose_passes_optional_erp_policy_only_to_backend(tmp_path, policy):
+    envfile = tmp_path / 'synthetic.env'
+    envfile.write_text('' if policy is None else f'ERP_ALLOWED_ORIGINS={policy}\n')
+    environment = {key: value for key,value in os.environ.items() if key in ('PATH','HOME','DOCKER_HOST','DOCKER_CONTEXT')}
+    environment['AGENT_ATTACHMENT_BROWSER_NONCE'] = 'synthetic-config-only-nonce'
+    result = subprocess.run(['docker','compose','--project-directory',str(ROOT),'--env-file',str(envfile),
+        '-f',str(ROOT / 'docker-compose.yml'),'config','--format','json'],
+        env=environment,capture_output=True,text=True,timeout=15)
+    assert result.returncode == 0
+    services = json.loads(result.stdout)['services']
+    assert services['backend']['environment']['ERP_ALLOWED_ORIGINS'] == (policy or '{}')
+    assert 'ERP_ALLOWED_ORIGINS' not in services['graph-worker']['environment']

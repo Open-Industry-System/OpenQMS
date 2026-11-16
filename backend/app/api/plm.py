@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import apply_integration_scope, check_product_line_access, check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import (
     Module,
     PermissionLevel,
@@ -65,8 +65,22 @@ async def _resolve_change_order_product_line(
     return conn_result.scalar_one_or_none()
 
 
-def _check_factory_access(entity, scope: RequestScope, detail: str = "PLM connection not found"):
+async def _check_factory_access(entity, scope: RequestScope, db: AsyncSession, detail: str = "PLM connection not found"):
     """Wrapper around centralized check_factory_access that raises 404 (information hiding)."""
+    product_line = getattr(entity, "product_line_code", None)
+    if not isinstance(entity, PLMConnection) and getattr(entity, "connection_id", None):
+        parent = await db.get(PLMConnection, entity.connection_id)
+        if parent is None:
+            raise HTTPException(status_code=404, detail="对象不存在")
+        await _check_factory_access(parent, scope, db)
+        if product_line is None:
+            product_line = parent.product_line_code
+    try:
+        check_product_line_access(product_line, scope)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="对象不存在")
+    if scope.effective_factory_id is not None and entity.factory_id != scope.effective_factory_id:
+        raise HTTPException(status_code=404, detail=detail)
     if not hasattr(entity, "factory_id") or entity.factory_id is None:
         return
     try:
@@ -76,19 +90,7 @@ def _check_factory_access(entity, scope: RequestScope, detail: str = "PLM connec
 
 
 def _apply_scope_filter(query, scope: RequestScope, model, pl_column: str = "product_line_code"):
-    """Apply factory + product line filtering to a query based on scope."""
-    if scope.pl_scope.mode == "NONE":
-        return query.where(False)
-    if scope.effective_factory_id:
-        query = query.where(model.factory_id == scope.effective_factory_id)
-    elif scope.factory_scope.accessible_factory_ids is not None:
-        if scope.factory_scope.accessible_factory_ids:
-            query = query.where(model.factory_id.in_(scope.factory_scope.accessible_factory_ids))
-        else:
-            query = query.where(False)
-    if scope.pl_scope.mode == "EXPLICIT":
-        query = query.where(getattr(model, pl_column).in_(scope.pl_scope.codes))
-    return query
+    return apply_integration_scope(query, model, PLMConnection, scope)
 
 
 def _plm_part_response(
@@ -141,6 +143,7 @@ async def create_connection(
     if scope.pl_scope.mode == "EXPLICIT" and req.product_line_code not in scope.pl_scope.codes:
         raise HTTPException(status_code=403, detail="无权访问该产品线")
 
+    check_product_line_access(req.product_line_code, scope)
     factory_id = await resolve_create_factory_id(db, scope, product_line_code=req.product_line_code)
     check_factory_access(factory_id, scope)
     conn = PLMConnection(
@@ -204,7 +207,7 @@ async def get_connection(
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    _check_factory_access(conn, scope, detail="PLM connection not found")
+    await _check_factory_access(conn, scope, db, detail="PLM connection not found")
     return schemas.PLMConnectionResponse.model_validate(conn)
 
 
@@ -224,7 +227,15 @@ async def update_connection(
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    _check_factory_access(conn, scope, detail="PLM connection not found")
+    await _check_factory_access(conn, scope, db, detail="PLM connection not found")
+
+    if "product_line_code" in req.model_fields_set:
+        check_product_line_access(req.product_line_code, scope)
+    if req.product_line_code is not None:
+        destination_factory = await resolve_create_factory_id(db, scope, req.product_line_code)
+        check_factory_access(destination_factory, scope)
+        if destination_factory != conn.factory_id:
+            raise HTTPException(status_code=403, detail="产品线必须属于当前工厂")
 
     data = req.model_dump(exclude_unset=True)
     if "connector_type" in data:
@@ -261,7 +272,7 @@ async def delete_connection(
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    _check_factory_access(conn, scope, detail="PLM connection not found")
+    await _check_factory_access(conn, scope, db, detail="PLM connection not found")
 
     await db.delete(conn)
     await db.commit()
@@ -282,7 +293,7 @@ async def test_connection(
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    _check_factory_access(conn, scope, detail="PLM connection not found")
+    await _check_factory_access(conn, scope, db, detail="PLM connection not found")
 
     return await test_plm_connection(conn, db)
 
@@ -302,7 +313,7 @@ async def manual_sync(
     conn = result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    _check_factory_access(conn, scope, detail="PLM connection not found")
+    await _check_factory_access(conn, scope, db, detail="PLM connection not found")
 
     count = await PLMSyncService.manual_sync(db, connection_id)
     return {"synced_jobs": count}
@@ -403,7 +414,7 @@ async def get_part(
     part = result.scalar_one_or_none()
     if part is None:
         raise HTTPException(status_code=404, detail="Part not found")
-    _check_factory_access(part, scope, detail="Part not found")
+    await _check_factory_access(part, scope, db, detail="Part not found")
     links_result = await db.execute(
         select(PLMPartSCLink).where(PLMPartSCLink.part_id == part.part_id)
     )
@@ -480,7 +491,7 @@ async def get_bom_tree(
     conn = conn_result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    _check_factory_access(conn, scope, detail="PLM connection not found")
+    await _check_factory_access(conn, scope, db, detail="PLM connection not found")
 
     # Fetch all BOM rows for this connection
     bom_result = await db.execute(
@@ -612,7 +623,7 @@ async def get_change_order(
     co = result.scalar_one_or_none()
     if co is None:
         raise HTTPException(status_code=404, detail="Change order not found")
-    _check_factory_access(co, scope, detail="Change order not found")
+    await _check_factory_access(co, scope, db, detail="Change order not found")
     return schemas.PLMChangeOrderResponse.model_validate(co)
 
 
@@ -718,7 +729,7 @@ async def link_part_to_fmea(
     part = part_result.scalar_one_or_none()
     if part is None:
         raise HTTPException(status_code=404, detail="Part not found")
-    _check_factory_access(part, scope, detail="Part not found")
+    await _check_factory_access(part, scope, db, detail="Part not found")
 
     # Resolve part product line
     part_plc = part.product_line_code
@@ -739,7 +750,7 @@ async def link_part_to_fmea(
     fmea = await get_fmea(db, req.fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    _check_factory_access(fmea, scope, detail="FMEA not found")
+    await _check_factory_access(fmea, scope, db, detail="FMEA not found")
 
     # Enforce PL access on FMEA
     if scope.pl_scope.mode == "EXPLICIT" and fmea.product_line_code and fmea.product_line_code not in scope.pl_scope.codes:
@@ -807,7 +818,7 @@ async def confirm_part_sc(
     part = part_result.scalar_one_or_none()
     if part is None:
         raise HTTPException(status_code=404, detail="Part not found")
-    _check_factory_access(part, scope, detail="Part not found")
+    await _check_factory_access(part, scope, db, detail="Part not found")
 
     part_plc = part.product_line_code
     if part_plc is None:
@@ -826,7 +837,7 @@ async def confirm_part_sc(
     fmea = await get_fmea(db, req.fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    _check_factory_access(fmea, scope, detail="FMEA not found")
+    await _check_factory_access(fmea, scope, db, detail="FMEA not found")
 
     # Enforce PL access on FMEA
     if scope.pl_scope.mode == "EXPLICIT" and fmea.product_line_code and fmea.product_line_code not in scope.pl_scope.codes:
@@ -934,7 +945,7 @@ async def trigger_impact_analysis(
     co = co_result.scalar_one_or_none()
     if co is None:
         raise HTTPException(status_code=404, detail="Change order not found")
-    _check_factory_access(co, scope, detail="Change order not found")
+    await _check_factory_access(co, scope, db, detail="Change order not found")
 
     # Upsert impact task
     from datetime import datetime
@@ -1009,13 +1020,13 @@ async def import_bom_to_fmea(
     conn = conn_result.scalar_one_or_none()
     if conn is None:
         raise HTTPException(status_code=404, detail="PLM connection not found")
-    _check_factory_access(conn, scope, detail="PLM connection not found")
+    await _check_factory_access(conn, scope, db, detail="PLM connection not found")
 
     # Verify FMEA
     fmea = await get_fmea(db, req.fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
-    _check_factory_access(fmea, scope, detail="FMEA not found")
+    await _check_factory_access(fmea, scope, db, detail="FMEA not found")
 
     # Product line match: connection vs FMEA
     if conn.product_line_code != fmea.product_line_code:

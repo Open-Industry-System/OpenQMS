@@ -135,10 +135,10 @@ def apply_scope_filter(
         pl_field = _get_product_line_field(model, module)
         if pl_field:
             query = query.where(False)
-    elif pl_scope.mode == "EXPLICIT" and pl_scope.codes:
+    elif pl_scope.mode == "EXPLICIT":
         pl_field = _get_product_line_field(model, module)
         if pl_field:
-            query = query.where(pl_field.in_(pl_scope.codes))
+            query = query.where(pl_field.in_(pl_scope.codes or []))
     # ALL mode: no product line filter
 
     return query
@@ -400,6 +400,8 @@ async def resolve_create_factory_id(
 
     Raises ValueError if none can be determined.
     """
+    if product_line_code is not None:
+        check_product_line_access(product_line_code, scope)
     # 1. Product-line-derived (covers most record types)
     if product_line_code:
         from app.models.product_line import ProductLine
@@ -470,3 +472,36 @@ def check_product_line_access(product_line_code: str | None, scope: "RequestScop
         return
     if pl.mode == "NONE" or product_line_code is None or pl.codes is None or product_line_code not in pl.codes:
         raise HTTPException(status_code=403, detail="目标对象不在可访问产品线内")
+
+async def authorize_object(db, scope, model, identity, module, level=None, *, lock=False):
+    """Resolve live objects within the request scope before reading or mutating."""
+    from app.core.permissions import PermissionLevel, get_user_permission
+    required = PermissionLevel.VIEW if level is None else level
+    if await get_user_permission(scope.user, module, db) < required:
+        raise HTTPException(status_code=403, detail="权限不足")
+    query = select(model).where(list(model.__table__.primary_key.columns)[0] == identity)
+    query = apply_scope_filter(query, model, module, scope.factory_scope,
+                               scope.effective_factory_id, scope.pl_scope, scope.user, db)
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    obj = (await db.execute(query)).scalar_one_or_none()
+    if obj is None:
+        raise HTTPException(status_code=404, detail="对象不存在")
+    return obj
+
+
+def apply_integration_scope(query, model, parent, scope):
+    """Match direct-object authorization, including inherited child product lines."""
+    from sqlalchemy import func
+    query = apply_scope_filter(query, parent, "erp" if parent.__tablename__.startswith("erp") else "plm",
+                               scope.factory_scope, scope.effective_factory_id, scope.pl_scope, scope.user, None)
+    if model is parent:
+        return query
+    query = query.join(parent, model.connection_id == parent.connection_id)
+    if scope.effective_factory_id is not None:
+        query = query.where(model.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        query = query.where(model.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+    if scope.pl_scope.mode == "EXPLICIT":
+        query = query.where(func.coalesce(model.product_line_code, parent.product_line_code).in_(scope.pl_scope.codes or []))
+    return query

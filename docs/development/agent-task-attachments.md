@@ -12,7 +12,7 @@ R4b-2 附件默认关闭：`AGENT_TASK_RUNTIME_ENABLED` 和
 
 ## 限制和数据边界
 
-- 每文件最大 20 MiB；同任务最多 5 个 `scanning`、`promoting` 或 `available` 附件；保留期 168 小时。
+- 每文件最大 20 MiB；同任务最多 5 个 `scanning`、`promoting` 或 `available` 附件；同一租户用户跨任务最多 5 个未过期 `scanning` 或 `promoting` 上传；保留期 168 小时。
 - 只允许 `.pdf`、`.png`、`.jpg`、`.jpeg`、`.txt`、`.csv`、`.docx`、`.xlsx`；扩展名不是安全结论。
 - 只有扫描完成且状态为 `available` 的文件可通过受权后端流下载。响应固定为 attachment、octet-stream、nosniff、no-store。
 - 文件、路径、存储键、下载 URL、解析结果和字节绝不发送给插件、模型、worker、消息、结果、检查点或浏览器持久化。
@@ -22,6 +22,8 @@ R4b-2 附件默认关闭：`AGENT_TASK_RUNTIME_ENABLED` 和
 
 受控 profile 使用 `clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c`。
 `docker/clamav/clamd.conf` 固定 20 MiB 流/文件/扫描限制、加密和超限告警、单线程/队列。验收必须记录 daemon/definitions 版本，并以真实 `VERSIONCOMMANDS` 与 EICAR `FOUND` 证明，不得以 always-clean fake 代替。
+
+上传先提交用户/任务配额预留，再在私有 staging 中完整接收有大小和期限限制的字节。客户端流接收期间不占用全局 scanner 槽；完整 staging 描述符回卷后才申请该槽，并从本地文件发送 ClamAV。槽忙时返回 `503 ATTACHMENT_CAPACITY_BUSY`，清理 staging 并释放配额；不保留无界扫描队列。对账与新 staging 文件创建通过独立的短元数据锁协调，不锁住未过期上传流；到期回收后的上传即使恢复传输也不能重新发布。
 
 EICAR、加密或超限启发式命中为 `422 ATTACHMENT_MALWARE_REJECTED`；scanner 超时、不可达或协议错误为 `503 ATTACHMENT_SCANNER_UNAVAILABLE`。两者删除 staging、保留最小失败记录以追踪，且没有可下载对象。权限/任务/坐标变化拒绝或撤回访问；列表、下载、删除和提升均重新核验当前事实。下载在 clean 文件完整性校验后，再次读取当前身份、权限和目标绑定，并刷新附件状态、期限及存储/内容标识；并发撤权、目标重绑、过期或元数据变化时不交付描述符。最终检查、审计提交失败或请求取消时关闭已打开文件，审计提交异常还回滚未完成事务，避免后续误记成功下载。
 

@@ -26,7 +26,7 @@ class AIConfigUpdate(BaseModel):
     """Fields an admin can update from the UI."""
 
     llm_provider: str = ""
-    llm_api_key: str = ""  # send empty to keep current; send new value to update
+    llm_api_key: str = ""  # masked keeps saved key on same-origin save; tests require explicit key
     llm_model: str = ""
     llm_base_url: str = ""
     llm_timeout: int = Field(default=5, ge=1, le=120)
@@ -34,7 +34,7 @@ class AIConfigUpdate(BaseModel):
     report_llm_timeout: int = Field(default=10, ge=1, le=120)
 
     embedding_provider: str = ""
-    embedding_api_key: str = ""  # send empty to keep current; send new value to update
+    embedding_api_key: str = ""  # masked keeps saved key on same-origin save; tests require explicit key
     embedding_model: str = ""
     embedding_base_url: str = ""
     embedding_dimensions: int = Field(default=1536, ge=1, le=4096)

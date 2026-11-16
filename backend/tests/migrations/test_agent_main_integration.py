@@ -7,7 +7,7 @@ from alembic.script import ScriptDirectory
 
 from app.services import tenant_migrator, tenant_schema_diff
 
-PUBLIC_HEAD = "20261115_r5_responses"
+PUBLIC_HEAD = "20261116_security_main_merge"
 TENANT_HEAD = "tv014_r5_responses"
 ROOT = Path(__file__).resolve().parents[2]
 

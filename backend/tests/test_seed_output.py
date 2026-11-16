@@ -18,10 +18,12 @@ def test_production_seed_summary_omits_all_credentials(capsys):
         assert password not in combined
 
 
-def test_development_seed_summary_keeps_existing_hint(capsys):
+def test_development_seed_summary_has_no_public_admin_credentials(capsys):
     seed_module.print_seed_summary(print_credentials=True)
     output = capsys.readouterr().out
-    assert "admin/Admin@2026" in output
+    assert "Admin@2026" not in output
+    assert "GroupAdmin@2026" not in output
+    assert "bootstrap_admin" in output
 
 
 def test_parse_args_no_print_credentials():

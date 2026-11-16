@@ -49,7 +49,7 @@ async def admin_user(db, default_factory):
     user = User(
         user_id=uuid4(), username="test_admin_riskmap",
         display_name="Admin RiskMap",
-        password_hash=hash_password("Admin@2026"),
+        password_hash=hash_password("RiskFixtureOnly@2026!"),
         role_id=role.id, legacy_role="admin", is_active=True,
         factory_id=default_factory.id,
     )
@@ -83,7 +83,7 @@ async def viewer_user(db, default_factory):
     user = User(
         user_id=uuid4(), username="test_viewer_riskmap",
         display_name="Viewer RiskMap",
-        password_hash=hash_password("Viewer@2026"),
+        password_hash=hash_password("ViewerFixtureOnly@2026!"),
         role_id=role.id, legacy_role="viewer", is_active=True,
         factory_id=default_factory.id,
     )

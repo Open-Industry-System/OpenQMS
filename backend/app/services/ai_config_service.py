@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.services.connector_security import canonical_origin
 from app.core.tenant_transaction import require_single_tenant_global_feature
 from app.models.audit import AuditLog
 from app.models.system_setting import SystemSetting
@@ -131,6 +132,45 @@ async def update_ai_config(
     changed_fields: dict[str, Any] = {}
 
     payload = update.model_dump()
+    # Match the provider factories' URL/provider/key fallback rules before any
+    # write. An empty DB value falls back to env; masked keys retain DB/env.
+    current = {key: _coerce(key, existing[key].value) if key in existing else None
+               for key in AI_CONFIG_KEYS}
+    current = {key: value if value not in (None, "") else _env_default(key)
+               for key, value in current.items()}
+    proposed = {}
+    for key, value in payload.items():
+        if key in _KEYS_NEVER_LOGGED and value == MASKED_VALUE:
+            proposed[key] = current[key]
+        else:
+            proposed[key] = value if value not in (None, "") else _env_default(key)
+
+    def destinations(values):
+        llm_provider = values["llm_provider"]
+        llm_url = values["llm_base_url"] or "https://api.openai.com"
+        if llm_provider == "claude":
+            llm_url = "https://api.anthropic.com"
+        # Embedding factory strips both explicit and fallback provider names;
+        # LLM factory compares its own name verbatim. Match both consumers.
+        emb_provider = values["embedding_provider"].strip() or llm_provider.strip()
+        emb_url = values["embedding_base_url"] or values["llm_base_url"] or "https://api.openai.com"
+        return {
+            "llm": (llm_provider, canonical_origin(llm_url)),
+            "embedding": (emb_provider, canonical_origin(emb_url)),
+        }
+
+    old_destinations, new_destinations = destinations(current), destinations(proposed)
+    for prefix in ("llm", "embedding"):
+        old_destination, new_destination = old_destinations[prefix], new_destinations[prefix]
+        # Local providers do not consume API keys. For OpenAI embeddings an
+        # empty embedding key falls back to LLM_API_KEY, also checked here.
+        secret_key = prefix + "_api_key"
+        if prefix == "embedding" and not proposed[secret_key]:
+            secret_key = "llm_api_key"
+        if (old_destination != new_destination and proposed[secret_key]
+                and new_destination[0] in ("openai", "claude")
+                and payload[secret_key] in (None, "", MASKED_VALUE)):
+            raise ValueError("Changing an AI provider origin requires explicit API key re-entry")
     for key in AI_CONFIG_KEYS:
         value = payload.get(key)
 
@@ -280,7 +320,7 @@ class AIConfigTestResult:
 async def _build_effective_snapshot(
     db: AsyncSession, update: AIConfigUpdate
 ) -> Any:
-    """Merge submitted values with stored/env values, resolving the masked API key."""
+    """Resolve non-secret settings; tests use only explicitly entered API keys."""
     result = await db.execute(select(SystemSetting).where(SystemSetting.key.in_(AI_CONFIG_KEYS)))
     rows = {row.key: row.value for row in result.scalars().all()}
 
@@ -288,10 +328,8 @@ async def _build_effective_snapshot(
     payload = update.model_dump()
     for key in AI_CONFIG_KEYS:
         submitted = payload.get(key)
-        if key in ("llm_api_key", "embedding_api_key") and submitted == MASKED_VALUE:
-            # Keep the stored key (or env default).
-            stored = _coerce(key, rows.get(key))
-            effective[key] = stored if stored not in (None, "") else _env_default(key)
+        if key in ("llm_api_key", "embedding_api_key"):
+            effective[key] = "" if submitted in (None, "", MASKED_VALUE) else submitted
             continue
         if submitted in (None, ""):
             stored = _coerce(key, rows.get(key))
@@ -323,7 +361,9 @@ async def test_ai_config(
         if provider is None:
             llm_result = ProviderTestResult(
                 ok=False,
-                detail="未配置 LLM Provider（纯规则引擎模式，无需测试）",
+                detail=("测试需要重新输入 API Key，不会使用已保存的密钥"
+                        if snapshot.LLM_PROVIDER in ("openai", "claude") and not snapshot.LLM_API_KEY
+                        else "未配置 LLM Provider（纯规则引擎模式，无需测试）"),
             )
         else:
             start = time.perf_counter()
@@ -357,7 +397,10 @@ async def test_ai_config(
         if provider is None:
             emb_result = ProviderTestResult(
                 ok=False,
-                detail="未配置 Embedding Provider",
+                detail=("测试需要重新输入 API Key，不会使用已保存的密钥"
+                        if (snapshot.EMBEDDING_PROVIDER or snapshot.LLM_PROVIDER) == "openai"
+                        and not (snapshot.EMBEDDING_API_KEY or snapshot.LLM_API_KEY)
+                        else "未配置 Embedding Provider"),
             )
         else:
             start = time.perf_counter()

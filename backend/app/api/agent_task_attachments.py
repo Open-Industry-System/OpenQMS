@@ -301,8 +301,8 @@ async def upload(
     db: AsyncSession = Depends(get_db),
 ):
     try:
+        boundary = _multipart_boundary(request.headers.get("content-type"))
         async with await task_attachments.reserve_upload(db, scope, task_id) as reservation:
-            boundary = _multipart_boundary(request.headers.get("content-type"))
             metadata = task_attachments.AttachmentUploadMetadata()
             async with asyncio.timeout(_UPLOAD_DEADLINE_SECONDS):
                 view = await task_attachments.receive_and_scan(

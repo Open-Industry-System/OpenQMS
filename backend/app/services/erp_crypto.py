@@ -59,14 +59,45 @@ def decrypt_credential(ciphertext: str) -> str:
 def sanitize_config(config: dict) -> dict:
     """Sanitize config for API responses.
 
-    Whitelist strategy: remove entire auth_config (all credential fields are sensitive).
-    Also scrub any top-level keys ending with _encrypted or _hash.
+    Only typed, allowlisted business settings are returned. Legacy unsafe URL
+    fields and unknown or credential-bearing nested fields are omitted.
     """
+    from app.schemas.erp import RESTConfig, RESTEndpointConfig
+
+    # Parse each field separately so legacy invalid fields can be omitted while
+    # preserving the valid business settings. Pydantic drops unknown nested keys.
     sanitized = {}
-    for key, value in config.items():
-        if key == "auth_config":
+    for key in ("base_url", "timeout", "retry", "auth_type"):
+        if key not in config:
             continue
-        if key.endswith("_encrypted") or key.endswith("_hash"):
+        try:
+            candidate = {"base_url": "https://redacted.invalid", key: config[key]}
+            parsed = RESTConfig.model_validate(candidate)
+            sanitized[key] = parsed.model_dump(exclude_none=True).get(key)
+        except (ValueError, TypeError):
             continue
-        sanitized[key] = value
+    endpoints = {}
+    raw_endpoints = config.get("endpoints")
+    if isinstance(raw_endpoints, dict):
+        known_endpoints = {"suppliers", "customers", "materials", "locations", "purchase_orders",
+                           "sales_orders", "inventory_balances", "shipments", "cost_records", "push_event"}
+        for name, endpoint in raw_endpoints.items():
+            if name not in known_endpoints:
+                continue
+            try:
+                endpoints[name] = RESTEndpointConfig.model_validate(endpoint).model_dump(exclude_none=True)
+            except (ValueError, TypeError):
+                continue
+    sanitized["endpoints"] = endpoints
+    # Mapping targets are actual business columns, not arbitrary secret fields.
+    from app.models.erp import (ERPSupplier, ERPCustomer, ERPMaterial, ERPLocation,
+                                ERPPurchaseOrder, ERPSalesOrder, ERPInventoryBalance,
+                                ERPShipment, ERPCostRecord)
+    mapping_targets = {column.name for model in (ERPSupplier, ERPCustomer, ERPMaterial, ERPLocation,
+                       ERPPurchaseOrder, ERPSalesOrder, ERPInventoryBalance, ERPShipment, ERPCostRecord)
+                       for column in model.__table__.columns}
+    mapping = config.get("field_mapping")
+    if isinstance(mapping, dict):
+        sanitized["field_mapping"] = {key: value for key, value in mapping.items()
+                                      if key in mapping_targets and isinstance(value, str)}
     return sanitized

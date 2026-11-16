@@ -11,7 +11,7 @@ from app.core.tenant_utils import strict_tenant_search_path_sql
 from app.core.tenant_sql_tokens import rewrite_qualifiers, scan_sql
 
 MANIFEST_PATH = Path(__file__).resolve().parents[2] / "alembic_tenant/snapshot/manifest.json"
-EXCLUDED = frozenset({"tenants", "tenant_migrations", "tenant_attachment_storage_disposals", "platform_admin_users", "reference_templates",
+EXCLUDED = frozenset({"tenants", "tenant_migrations", "tenant_attachment_storage_disposals", "platform_login_attempts", "platform_admin_users", "reference_templates",
                       "alembic_version", "tenant_schema_version"})
 
 

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import authorize_object, check_product_line_access, check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.database import get_db
 from app.models.special_characteristic import SpecialCharacteristic as SCModel
@@ -49,6 +49,8 @@ async def list_scs(
     scope: RequestScope = Depends(get_request_scope),
 ):
     # Product line scope filtering
+    if await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要特殊特性模块的 VIEW 权限")
     if scope.pl_scope.mode == "NONE":
         return SCListResponse(items=[], total=0, page=page, page_size=page_size)
     allowed_pls = scope.pl_scope.codes if scope.pl_scope.mode == "EXPLICIT" else None
@@ -56,6 +58,7 @@ async def list_scs(
         db, sc_type, product_line, source_type, page, page_size,
         safety_related_only, approval_status, suggested_only,
         factory_id=scope.effective_factory_id, allowed_product_lines=allowed_pls,
+        accessible_factory_ids=scope.factory_scope.accessible_factory_ids,
     )
 
 
@@ -65,7 +68,9 @@ async def get_matrix(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    return await sc_svc.get_matrix(db, product_line, factory_id=scope.effective_factory_id)
+    if await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db) < PermissionLevel.VIEW:
+        raise HTTPException(status_code=403, detail="需要特殊特性模块的 VIEW 权限")
+    return await sc_svc.get_matrix(db, product_line, factory_id=scope.effective_factory_id, scope=scope)
 
 
 @router.get("/traceability/{sc_id}")
@@ -74,6 +79,8 @@ async def get_traceability(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     try:
         return await sc_svc.get_traceability_chain(db, sc_id, scope=scope)
     except ValueError as e:
@@ -98,7 +105,9 @@ async def get_sc_references(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    return await sc_svc.get_sc_references(db, sc_id)
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
+    return await sc_svc.get_sc_references(db, sc_id, scope=scope)
 
 
 @router.get("/{sc_id}", response_model=SCResponse)
@@ -107,7 +116,9 @@ async def get_sc(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    result = await sc_svc.get_special_characteristic(db, sc_id)
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
+    result = await sc_svc.get_special_characteristic(db, sc_id, scope=scope)
     if not result:
         raise HTTPException(404, "Special characteristic not found")
     _check_factory_access(result, scope)
@@ -123,6 +134,7 @@ async def create_sc(
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
+    check_product_line_access(data.product_line_code, scope)
     factory_id = await resolve_create_factory_id(db, scope, product_line_code=data.product_line_code)
     check_factory_access(factory_id, scope)
     result = await sc_svc.create_special_characteristic(db, data, scope.user.user_id, factory_id=factory_id)
@@ -143,10 +155,12 @@ async def update_sc(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
-    result = await sc_svc.update_special_characteristic(db, sc_id, data, scope.user.user_id)
+    result = await sc_svc.update_special_characteristic(db, sc_id, data, scope.user.user_id, scope=scope)
     if not result:
         raise HTTPException(404, "Special characteristic not found")
     _check_factory_access(result, scope)
@@ -159,15 +173,17 @@ async def delete_sc(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
     # Fetch first to check factory access
-    existing = await sc_svc.get_special_characteristic(db, sc_id)
+    existing = await sc_svc.get_special_characteristic(db, sc_id, scope=scope)
     if not existing:
         raise HTTPException(404, "Special characteristic not found")
     _check_factory_access(existing, scope)
-    ok = await sc_svc.delete_special_characteristic(db, sc_id, scope.user.user_id)
+    ok = await sc_svc.delete_special_characteristic(db, sc_id, scope.user.user_id, scope=scope)
     if not ok:
         raise HTTPException(404, "Special characteristic not found")
     return {"detail": "deleted"}
@@ -216,10 +232,12 @@ async def msa_callback(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
-    result = await sc_svc.update_msa_status(db, sc_id, grr_percent)
+    result = await sc_svc.update_msa_status(db, sc_id, grr_percent, scope=scope)
     if not result:
         raise HTTPException(404, "Special characteristic not found")
     _check_factory_access(result, scope)
@@ -233,11 +251,13 @@ async def safety_submit(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
     try:
-        result = await sc_svc.safety_submit(db, sc_id, data, scope.user.user_id)
+        result = await sc_svc.safety_submit(db, sc_id, data, scope.user.user_id, scope=scope)
         _check_factory_access(result, scope)
         return result
     except ValueError as e:
@@ -251,11 +271,13 @@ async def safety_approve(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.APPROVE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 APPROVE 权限")
     try:
-        result = await sc_svc.safety_approve(db, sc_id, data, scope.user.user_id)
+        result = await sc_svc.safety_approve(db, sc_id, data, scope.user.user_id, scope=scope)
         _check_factory_access(result, scope)
         return result
     except ValueError as e:
@@ -269,11 +291,13 @@ async def safety_reject(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.APPROVE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 APPROVE 权限")
     try:
-        result = await sc_svc.safety_reject(db, sc_id, data, scope.user.user_id)
+        result = await sc_svc.safety_reject(db, sc_id, data, scope.user.user_id, scope=scope)
         _check_factory_access(result, scope)
         return result
     except ValueError as e:
@@ -286,11 +310,13 @@ async def safety_confirm(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
     try:
-        result = await sc_svc.safety_confirm(db, sc_id, scope.user.user_id)
+        result = await sc_svc.safety_confirm(db, sc_id, scope.user.user_id, scope=scope)
         _check_factory_access(result, scope)
         return result
     except ValueError as e:
@@ -303,11 +329,13 @@ async def safety_dismiss(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.CREATE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 CREATE 权限")
     try:
-        result = await sc_svc.safety_dismiss(db, sc_id, scope.user.user_id)
+        result = await sc_svc.safety_dismiss(db, sc_id, scope.user.user_id, scope=scope)
         _check_factory_access(result, scope)
         return result
     except ValueError as e:
@@ -320,11 +348,13 @@ async def safety_cancel(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.special_characteristic import SpecialCharacteristic
+    await authorize_object(db, scope, SpecialCharacteristic, sc_id, Module.SPECIAL_CHARACTERISTIC)
     level_perm = await get_user_permission(scope.user, Module.SPECIAL_CHARACTERISTIC, db)
     if level_perm < PermissionLevel.APPROVE:
         raise HTTPException(status_code=403, detail="需要特殊特性模块的 APPROVE 权限")
     try:
-        result = await sc_svc.safety_cancel(db, sc_id, scope.user.user_id)
+        result = await sc_svc.safety_cancel(db, sc_id, scope.user.user_id, scope=scope)
         _check_factory_access(result, scope)
         return result
     except ValueError as e:

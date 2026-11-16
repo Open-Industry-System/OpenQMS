@@ -499,8 +499,12 @@ async def test_manual_resink_resets_pending(
 
 
 @pytest.mark.asyncio
-async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
-    """Two concurrent first-sinks on separate sessions resolve to one row.
+@pytest.mark.parametrize("worker_count", [2, 4])
+@pytest.mark.parametrize("rollback_first", [False, True])
+async def test_concurrent_first_sink_unique_race(
+    sessionmaker, monkeypatch, worker_count, rollback_first
+):
+    """Concurrent first-sinks on separate sessions resolve to one row.
 
     Uses true asyncio.gather + two AsyncSessions (not sequential double-sink)
     so the unique race is real; ON CONFLICT must absorb the loser without
@@ -579,6 +583,7 @@ async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
 
     call_n = {"n": 0}
     call_lock = asyncio.Lock()
+    summaries_ready = asyncio.Event()
 
     async def ok_client(db_):
         return _fake_pc()
@@ -587,6 +592,9 @@ async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
         async with call_lock:
             call_n["n"] += 1
             n = call_n["n"]
+            if n == worker_count:
+                summaries_ready.set()
+        await summaries_ready.wait()
         return _ok_llm_result(
             lesson_summary=f"并发摘要{n}",
             tags=["a", "b", f"t{n}"],
@@ -603,20 +611,27 @@ async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
     errors: list = []
     ready_count = 0
     both_ready = asyncio.Event()
+    rolled_back = False
 
     async def worker():
-        nonlocal ready_count
+        nonlocal ready_count, rolled_back
         async with sessionmaker() as s:
             capa = await s.get(CAPAEightD, capa_id)
             assert capa is not None
             ready_count += 1
-            if ready_count == 2:
+            if ready_count == worker_count:
                 both_ready.set()
             await both_ready.wait()
             try:
                 entry = await sink_capa_on_close(s, capa, user_id, manual=True)
-                await s.commit()
-                results.append(("ok", entry.entry_id))
+                entry_id = entry.entry_id
+                if rollback_first and not rolled_back:
+                    rolled_back = True
+                    await s.rollback()
+                    results.append(("rolled_back", entry_id))
+                else:
+                    await s.commit()
+                    results.append(("ok", entry_id))
             except IntegrityError as e:
                 await s.rollback()
                 errors.append(e)
@@ -627,7 +642,9 @@ async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
                 results.append(("error", type(e).__name__))
 
     try:
-        await asyncio.wait_for(asyncio.gather(worker(), worker()), timeout=30.0)
+        await asyncio.wait_for(
+            asyncio.gather(*(worker() for _ in range(worker_count))), timeout=30.0
+        )
 
         assert not any(r[0] == "integrity" for r in results), (
             f"unhandled IntegrityError in concurrent sink: {errors}"
@@ -635,9 +652,12 @@ async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
         assert not any(r[0] == "error" for r in results), (
             f"unexpected sink errors: {results} / {errors}"
         )
-        assert len(results) == 2
-        assert all(r[0] == "ok" for r in results)
-        assert results[0][1] == results[1][1]
+        assert len(results) == worker_count
+        committed_count = worker_count - int(rollback_first)
+        assert sum(r[0] == "ok" for r in results) == committed_count
+        assert sum(r[0] == "rolled_back" for r in results) == int(rollback_first)
+        assert len({r[1] for r in results}) == 1
+        assert call_n["n"] == worker_count
 
         async with sessionmaker() as s:
             rows = (
@@ -653,6 +673,22 @@ async def test_concurrent_first_sink_unique_race(sessionmaker, monkeypatch):
             assert rows[0].embedding_id is None
             assert rows[0].status == "active"
             assert rows[0].fields["lesson_summary"].startswith("并发摘要")
+            assert rows[0].content_hash == hashlib.sha256(
+                rows[0].embedding_text.encode()
+            ).hexdigest()
+            outbox = (await s.execute(text(
+                "SELECT status, content_hash FROM embedding_sync_outbox "
+                "WHERE entity_type = 'knowledge_entry' AND entity_id = :id"
+            ), {"id": rows[0].entry_id})).mappings().all()
+            assert len(outbox) == committed_count
+            assert sum(row["status"] == "cancelled" for row in outbox) == committed_count - 1
+            assert [row["content_hash"] for row in outbox if row["status"] == "pending"] == [
+                rows[0].content_hash
+            ]
+            audits = (await s.scalars(select(AuditLog).where(
+                AuditLog.record_id == capa_id, AuditLog.action == "KNOWLEDGE_SUNK"
+            ))).all()
+            assert len(audits) == committed_count
     finally:
         async with sessionmaker() as s:
             entry_ids = (

@@ -1680,9 +1680,9 @@ def print_seed_summary(*, print_credentials: bool) -> None:
     print("Seed data created successfully!")
     if print_credentials:
         print(
-            "Users: admin/Admin@2026, engineer/Engineer@2026, "
-            "manager/Manager@2026, viewer/Viewer@2026, "
-            "groupadmin/GroupAdmin@2026"
+            "Demo users: engineer/Engineer@2026, manager/Manager@2026, viewer/Viewer@2026. "
+            "Initialize admin/groupadmin privately: python -m app.cli.bootstrap_admin "
+            "--username admin --replace-existing"
         )
 
 
@@ -1810,13 +1810,13 @@ async def seed(*, print_credentials: bool = True):
         role_result = await db.execute(select(RoleDefinition))
         roles = {r.role_key: r.id for r in role_result.scalars().all()}
 
-        # Admin user (may already exist from lifespan bootstrap)
+        # Admin identity for demo record ownership; login requires private bootstrap.
         admin_result = await db.execute(select(User).where(User.username == "admin"))
         admin = admin_result.scalar_one_or_none()
         if not admin:
             admin = User(
                 username="admin", display_name="系统管理员",
-                password_hash=hash_password("Admin@2026"),
+                password_hash=hash_password(secrets.token_urlsafe(36)),
                 role_id=roles["admin"], legacy_role="admin",
             )
             db.add(admin)
@@ -2518,7 +2518,7 @@ async def seed(*, print_credentials: bool = True):
             username="groupadmin",
             display_name="集团管理员",
             email="groupadmin@qms.example.com",
-            password_hash=hash_password("GroupAdmin@2026"),
+            password_hash=hash_password(secrets.token_urlsafe(36)),
             role_id=admin.role_id,  # same role as admin
             legacy_role="admin",
             is_active=True,

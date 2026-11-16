@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 
 from app.core.security import (
@@ -13,8 +13,12 @@ router = APIRouter()
 
 
 @router.post("/auth/login", response_model=PlatformLoginResponse)
-async def platform_login(request: PlatformLoginRequest, db=Depends(get_platform_db)):
+async def platform_login(request: PlatformLoginRequest, http_request: Request, db=Depends(get_platform_db)):
     """Platform admin login — authenticates against platform_admin_users in public schema."""
+    from app.services.platform_login_limiter import consume_login_attempt
+    client_ip = http_request.client.host if http_request.client else "unknown"
+    if not await consume_login_attempt(db, request.email, client_ip):
+        raise HTTPException(status_code=429, detail="Too many login attempts", headers={"Retry-After": "300"})
     result = await db.execute(
         select(PlatformAdminUser).where(PlatformAdminUser.email == request.email)
     )
