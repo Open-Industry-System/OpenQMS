@@ -100,6 +100,9 @@ def begin_round(identity):
 
 async def _current(db, identity, *, lock=True):
     current = await (runtime_access.lock_runtime_identity(db, identity) if lock else runtime_access.refresh_runtime_identity(db, identity))
+    if current.trial is not None and current.trial.profile == model_egress.D4_PROFILE:
+        from app.services.capa_d4_candidates import current_inputs
+        return await current_inputs(db,current,lock=lock)
     d5_commands.require_r5_admission(current)
     await model_egress.task_deployment(db, current.task, lock=lock)
     from app.services.capa_r6_delivery import require_current_root_use
@@ -234,6 +237,9 @@ async def next_turn(db, identity, turn):
 
 
 async def execute_tool(db, identity, request):
+    if identity.trial is not None and identity.trial.profile == model_egress.D4_PROFILE:
+        from app.services.agent_runtime import d4_candidate_workflow
+        return await d4_candidate_workflow.execute_tool(db, identity, request)
     current = await _current(db, identity, lock=False)
     state = _round(current)
     async with state.lock:
@@ -332,5 +338,9 @@ async def status(db, scope, task_id):
     current=await runtime_access.verify_runtime_identity(db,state.token,db.info['tenant_binding'])
     current=await _current(db,current)
     if state.snapshot is not None:
-        await capa_d5_proposals.validate_d5_context_for_release(db,current,snapshot=state.snapshot)
+        if current.trial is not None and current.trial.profile == model_egress.D4_PROFILE:
+            from app.services.capa_d4_candidates import validate_snapshot
+            await validate_snapshot(db,current,state.snapshot)
+        else:
+            await capa_d5_proposals.validate_d5_context_for_release(db,current,snapshot=state.snapshot)
     return {'status':'waiting' if state.question else 'running','question':state.question,'checkpoint_id':state.checkpoint_id}

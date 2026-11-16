@@ -61,7 +61,8 @@ async def require_current_capa_view(db: AsyncSession, scope: RequestScope,
     return await _target(db, report_id, factories, lines)
 
 
-async def get_task_for_view(db: AsyncSession, scope: RequestScope, task_id: UUID) -> AgentTask:
+async def get_task_for_control(db: AsyncSession, scope: RequestScope, task_id: UUID) -> AgentTask:
+    """Owner/namespace/target and immutable receiver metadata, never bodies."""
     _, factories, lines = await _current_access(db, scope)
     with db.no_autoflush:
         task = await db.scalar(select(AgentTask).where(AgentTask.task_id == task_id,
@@ -76,6 +77,13 @@ async def get_task_for_view(db: AsyncSession, scope: RequestScope, task_id: UUID
     return await project_binding(db, task)
 
 
+async def get_task_for_view(db: AsyncSession, scope: RequestScope, task_id: UUID) -> AgentTask:
+    task = await get_task_for_control(db, scope, task_id)
+    from app.services.capa_d4_candidates import authorize_task_history
+    await authorize_task_history(db, scope.user.user_id, task)
+    return task
+
+
 async def list_for_initiator(db: AsyncSession, scope: RequestScope, page: int,
                               page_size: int) -> dict:
     if type(page) is not int or page < 1 or type(page_size) is not int or not 1 <= page_size <= 100:
@@ -87,13 +95,28 @@ async def list_for_initiator(db: AsyncSession, scope: RequestScope, page: int,
         .where(AgentTask.initiator_id == scope.user.user_id,
             AgentTask.executor_user_id == scope.user.user_id), factories, lines)
     with db.no_autoflush:
-        total = await db.scalar(select(func.count()).select_from(query.subquery()))
-        items = list((await db.scalars(query.order_by(AgentTask.created_at.desc(), AgentTask.task_id)
-            .offset((page - 1) * page_size).limit(page_size)
+        candidates = list((await db.scalars(query.order_by(AgentTask.created_at.desc(), AgentTask.task_id)
             .execution_options(populate_existing=True))).all())
     from app.services.agent_runtime.model_egress import project_binding
-    items = [await project_binding(db, item) for item in items]
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    from app.services.capa_d4_candidates import authorize_task_history
+    visible = []
+    for item in candidates:
+        try:
+            await authorize_task_history(db, scope.user.user_id, item)
+            item = await project_binding(db, item)
+            await authorize_task_history(db, scope.user.user_id, item)
+        except (PermissionError, LookupError):
+            continue
+        visible.append(item)
+    # Paginate only the authorized collection; hidden inputs add no count.
+    final = []
+    for item in visible:
+        try:
+            await authorize_task_history(db, scope.user.user_id, item)
+        except (PermissionError, LookupError):
+            continue
+        final.append(item)
+    return {"items": final[(page-1)*page_size:page*page_size], "total": len(final), "page": page, "page_size": page_size}
 
 
 def trial_for_target(db, installation, executor_user_id, target):
@@ -115,7 +138,7 @@ def _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grant
             continue
         spec = get_capability(plugin_grant.capability_id, profile=profile)
         if (plugin_grant.capability_id not in declared or not plugin_grant.enabled
-                or spec is None or (spec.kind != 'context' and not (profile in {'model_d5_proposal_v1', 'model_d5_proposal_r6_v1'} and spec.kind == 'command'))
+                or spec is None or (spec.kind != 'context' and not (profile in {'model_d5_proposal_v1', 'model_d5_proposal_r6_v1', 'model_d4_candidate_v1'} and spec.kind == 'command'))
                 or spec.approval_floor != ApprovalFloor.DIRECT):
             continue
         try:
@@ -141,7 +164,7 @@ def _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grant
         row = AgentTaskGrant(task_id=task_id, capability_id=spec.id,
             factory_ids=[str(capa.factory_id)], product_line_codes=[capa.product_line_code],
             object_ids=[str(capa.report_id)], access_kind="read", expires_at=plugin_grant.expires_at)
-        row._source_scope = requested_source if spec.id == 'capa.d4.root_cause_candidate.masked.v1' else None
+        row._source_scope = requested_source if spec.id in {'capa.d4.root_cause_candidate.masked.v1', 'capa.d4.fmea_input.masked.v1'} else None
         row._parent_grant_id = plugin_grant.grant_id if row._source_scope is not None else None
         derived.append(row)
         covered.add(spec.id)
@@ -178,8 +201,12 @@ async def _existing(db, user_id, request_key, report_id, installation_id, initia
     existing_model = await db.get(AgentTaskModelBinding, task.task_id, populate_existing=True)
     if (None if existing_model is None else existing_model.deployment_id) != model_deployment_id:
         raise ValueError('Request key reused with different model deployment')
+    from app.services.capa_d4_candidates import authorize_task_history
+    await authorize_task_history(db, user_id, task)
     from app.services.agent_runtime.model_egress import project_binding
-    return await project_binding(db, task)
+    task = await project_binding(db, task)
+    await authorize_task_history(db, user_id, task)
+    return task
 
 
 async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
@@ -210,8 +237,12 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
         request.report_id, request.installation_id, request.initial_text, fingerprint, request.model_deployment_id)
     if existing is not None:
         return existing
+    source_validator = validate_explicit_source
+    if selected_model is not None and model_egress.deployment_profile(selected_model) == model_egress.D4_PROFILE:
+        from app.services.agent_runtime.derived_source_grants import validate_d4_input_source
+        source_validator = validate_d4_input_source
     if is_text and request.derived_source_scope is not None:
-        requested_source = await validate_explicit_source(db, scope, capa, request.derived_source_scope)
+        requested_source = await source_validator(db, scope, capa, request.derived_source_scope)
     with db.no_autoflush:
         plugin_grants = list((await db.scalars(select(AgentPluginGrant)
             .where(AgentPluginGrant.installation_id == plugin.installation_id)
@@ -221,7 +252,10 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
             .execution_options(populate_existing=True))).all()) if is_text else []
     task_id = uuid4()
     trial = trial_for_target(db, plugin, scope.user.user_id, capa)
-    current_source = await current_source_for_target(db, scope, capa) if is_text else None
+    if selected_model is not None and model_egress.deployment_profile(selected_model) == model_egress.D4_PROFILE:
+        current_source = requested_source
+    else:
+        current_source = await current_source_for_target(db, scope, capa) if is_text else None
     # The sidebar's explicit root-only action has no client-supplied source
     # coordinates. Bind it to the one current visible proof, then apply the
     # same source validation and plugin/task intersection as an explicit input.
@@ -307,5 +341,7 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
             from app.services.agent_runtime.runtime_access import authorize_task
             await authorize_task(db, task, current_plugin)
     await db.commit()
+    from app.services.capa_d4_candidates import authorize_task_history
+    await authorize_task_history(db, scope.user.user_id, task)
     from app.services.agent_runtime.model_egress import project_binding
     return await project_binding(db, task)

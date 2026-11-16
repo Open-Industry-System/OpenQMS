@@ -24,7 +24,7 @@ def test_single_head_preserves_both_published_parents(directory, head, parents):
     config = Config()
     config.set_main_option("script_location", str(ROOT / directory))
     graph = ScriptDirectory.from_config(config)
-    assert graph.get_heads() == ["20261116_r6_source_epoch" if directory == "alembic" else "tv016_r6_source_epoch"]
+    assert graph.get_heads() == ["20261116_r6_d4_withdraw" if directory == "alembic" else "tv018_r6_d4_withdraw"]
     assert set(graph.get_revision(head).down_revision) == parents
     assert parents <= {revision.revision for revision in graph.walk_revisions()}
 

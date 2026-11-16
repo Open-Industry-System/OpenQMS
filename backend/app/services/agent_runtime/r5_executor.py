@@ -106,7 +106,7 @@ class ControlledPilot:
     def verify(self, binding, installation):
         from datetime import UTC, datetime
         from app.core.tenant_transaction import TenantBinding
-        if self.profile not in {'model_d5_proposal_v1', 'model_d5_proposal_r6_v1'}:
+        if self.profile not in {'model_d5_proposal_v1', 'model_d5_proposal_r6_v1', 'model_d4_candidate_v1'}:
             raise PermissionError('Controlled executor unavailable')
         self.approval.verify()
         if (not isinstance(binding, TenantBinding) or binding.mode != 'business'
@@ -167,8 +167,7 @@ async def _managed_run(db, scope, task_id, *, platform_origin):
     try:
         current = await runtime_access.verify_runtime_identity(db,result.token,db.info['tenant_binding'])
         model_workflow.begin_round(current)
-        request = json.dumps(dict(api_origin=platform_origin, token=result.token,
-            task_id=str(task_id), deployment_id=str(row.deployment_id), tenant_slug=tenant_slug)).encode()
+        request = json.dumps(managed_launch_payload(row,result,platform_origin=platform_origin,tenant_slug=tenant_slug)).encode()
         await db.rollback()
         # Thread wait does not block runtime/message HTTP. subprocess.run kills
         # and waits for its own child on timeout before this cleanup executes.
@@ -203,7 +202,7 @@ def load_controlled_pilot(path, *, enabled, runtime_enabled, tenant_mode):
         if (type(data.get('schema_version')) is not int
                 or not (data['schema_version'] == 1 and set(data) == expected
                     or data['schema_version'] == 2 and set(data) == expected | {'profile'}
-                    and data['profile'] == 'model_d5_proposal_r6_v1')):
+                    and data['profile'] in {'model_d5_proposal_r6_v1', 'model_d4_candidate_v1'})):
             return None
         for name in ('tenant_generation','credential_epoch','platform_port'):
             if type(data[name]) is not int or data[name]<0: return None
@@ -278,3 +277,14 @@ async def fail_claimed_run(db, *, task_id, run_id, lease_epoch, actor_id):
             failure_code='managed_child_failed')))
     await task_updates.append_update(db,task_id=task_id,kind='finish',object_id=run_id)
     await db.commit()
+
+
+def managed_launch_payload(row,claim,*,platform_origin,tenant_slug):
+    from app.services.agent_runtime import model_egress
+    payload=dict(api_origin=platform_origin,token=claim.token,task_id=str(claim.task_id),
+        deployment_id=str(row.deployment_id),tenant_slug=tenant_slug)
+    if model_egress.deployment_profile(row)==model_egress.D4_PROFILE:
+        payload.update(protocol='r6.d4.launch.v1',profile=model_egress.D4_PROFILE,run_id=str(claim.run_id),
+            lease_epoch=claim.lease_epoch,lease_expires_at=claim.lease_expires_at.isoformat(),
+            accepted_message_seq=claim.accepted_message_seq,has_resume_checkpoint=claim.has_resume_checkpoint)
+    return payload

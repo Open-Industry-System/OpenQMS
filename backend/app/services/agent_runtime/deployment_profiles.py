@@ -18,6 +18,7 @@ class DeploymentProfile:
 
 
 PROFILES = MappingProxyType({
+    'model_d4_candidate_v1': DeploymentProfile(frozenset({'capa.d2.snapshot.v1', 'capa.d3.snapshot.v1', 'capa.d4.candidate.propose.v1', 'capa.d4.fmea_input.masked.v1'}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),
     METADATA_PROFILE: DeploymentProfile(frozenset({'capa.d4.summary.masked.v1'}), frozenset({('context', 'internal', 'masked'), ('message', 'restricted', 'raw')})),
     'model_d5_proposal_v1': DeploymentProfile(frozenset({TEXT_CAPABILITY, 'capa.d5.proposal.save.v1'}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),
     'model_d5_proposal_r6_v1': DeploymentProfile(frozenset({TEXT_CAPABILITY, 'capa.d5.proposal.save.v1', 'capa.d2.snapshot.v1', 'capa.d3.snapshot.v1'}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),

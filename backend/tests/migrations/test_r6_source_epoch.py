@@ -22,7 +22,8 @@ def test_source_epoch_pair_preserves_published_parents():
         assert (root / directory / 'versions' / f'{revision}.py').exists(), 'R6 capture epoch migration missing'
         cfg = Config()
         cfg.set_main_option('script_location', str(root / directory))
-        assert ScriptDirectory.from_config(cfg).get_heads() == [revision]
+        expected = '20261116_r6_d4_withdraw' if directory == 'alembic' else 'tv018_r6_d4_withdraw'
+        assert ScriptDirectory.from_config(cfg).get_heads() == [expected]
     public = (root / 'alembic/versions' / f'{PUBLIC}.py').read_text()
     tenant = (root / 'alembic_tenant/versions' / f'{TENANT}.py').read_text()
     assert public.replace(PUBLIC, TENANT).replace(PARENT, TENANT_PARENT) == tenant
@@ -123,7 +124,7 @@ async def test_nonempty_old_r6_tenant_upgrades_with_null_epochs_and_exact_parity
                     return db.execute(sa.text('SELECT to_jsonb(s) FROM capa_r6_source_origins s ORDER BY source_id')).scalars().all()
                 before = await setup.run_sync(seed)
             await maintenance.run_migration(TENANT)
-            assert await maintenance.schema_state() == 'current'
+            assert await maintenance.schema_state() == 'r6_epoch_predecessor'
             assert await maintenance.compare_schema('public', load_snapshot_manifest()) == []
             with pytest.raises(RuntimeError, match='R6 source evidence exists'):
                 await maintenance.run_downgrade(TENANT_PARENT)

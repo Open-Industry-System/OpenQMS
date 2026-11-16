@@ -14,14 +14,14 @@ def scripts(name):
 
 def test_public_merge_preserves_both_published_heads():
     graph = scripts('alembic')
-    assert graph.get_heads() == ['20261116_r6_source_epoch']
+    assert graph.get_heads() == ['20261116_r6_d4_withdraw']
     assert set(graph.get_revision('20261114_r4b_main_merge').down_revision) == {
         '20261108_merge_characteristics', '20261113_d4_recovery'}
 
 
 def test_tenant_merge_preserves_both_published_heads():
     graph = scripts('alembic_tenant')
-    assert graph.get_heads() == ['tv016_r6_source_epoch']
+    assert graph.get_heads() == ['tv018_r6_d4_withdraw']
     assert set(graph.get_revision('tv009_r4b_main_merge').down_revision) == {
         'tv007_characteristic_refs', 'tv008_d4_recovery'}
 

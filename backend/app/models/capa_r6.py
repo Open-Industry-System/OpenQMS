@@ -235,6 +235,48 @@ class CapaR6RootDeliveryBinding(TenantBase):
         sa.CheckConstraint("jsonb_typeof(input_bindings) = 'array'", name='ck_r6_delivery_inputs'), _created())
 
 
+class AgentD4InputReceipt(TenantBase):
+    __table__ = sa.Table('agent_d4_input_receipts', TenantBase.metadata,
+        _id('receipt_id', primary_key=True), _id('report_id'), _id('task_id'), _id('run_id'),
+        _id('executor_id', 'users.user_id'), _id('installation_id', 'agent_plugin_installations.installation_id'),
+        _id('deployment_id', 'agent_model_deployments.deployment_id'),
+        sa.Column('lease_epoch', sa.BigInteger(), nullable=False),
+        sa.Column('tenant_generation', sa.BigInteger(), nullable=False),
+        sa.Column('deployment_config_hmac', sa.String(64), nullable=False),
+        sa.Column('source_count', sa.Integer(), nullable=False),
+        sa.Column('input_versions', JSONB(), nullable=False),
+        sa.Column('receipt_hmac', sa.String(64), nullable=False),
+        sa.ForeignKeyConstraint(['task_id', 'report_id'], ['agent_tasks.task_id', 'agent_tasks.target_capa_id'], ondelete='RESTRICT'),
+        sa.ForeignKeyConstraint(['run_id', 'task_id'], ['agent_runs.run_id', 'agent_runs.task_id'], ondelete='RESTRICT'),
+        sa.UniqueConstraint('receipt_id', 'report_id', name='uq_d4_input_report'),
+        sa.UniqueConstraint('receipt_id', 'report_id', 'task_id', 'run_id', name='uq_d4_input_target'),
+        sa.CheckConstraint('lease_epoch >= 0 AND tenant_generation >= 0 AND source_count BETWEEN 3 AND 64', name='ck_d4_input_counts'),
+        sa.CheckConstraint("deployment_config_hmac ~ '^[0-9a-f]{64}$' AND receipt_hmac ~ '^[0-9a-f]{64}$' AND jsonb_typeof(input_versions) = 'object'", name='ck_d4_input_hmac'), _created())
+
+
+class AgentD4InputReceiptSource(TenantBase):
+    __table__ = sa.Table('agent_d4_input_receipt_sources', TenantBase.metadata,
+        _id('receipt_id', primary_key=True), _id('report_id'), _id('source_id', primary_key=True),
+        sa.ForeignKeyConstraint(['receipt_id', 'report_id'], ['agent_d4_input_receipts.receipt_id', 'agent_d4_input_receipts.report_id'], ondelete='RESTRICT'),
+        sa.ForeignKeyConstraint(['source_id', 'report_id'], ['capa_r6_source_origins.source_id', 'capa_r6_source_origins.report_id'], ondelete='RESTRICT'), _created())
+
+
+class AgentD4CommandInput(TenantBase):
+    __table__ = sa.Table('agent_d4_command_inputs', TenantBase.metadata,
+        _id('command_id', primary_key=True), _id('receipt_id', primary_key=True),
+        _id('report_id'), _id('task_id'), _id('run_id'),
+        sa.ForeignKeyConstraint(['command_id', 'report_id', 'task_id', 'run_id'], ['agent_d4_candidate_commands.command_id', 'agent_d4_candidate_commands.report_id', 'agent_d4_candidate_commands.task_id', 'agent_d4_candidate_commands.run_id'], ondelete='RESTRICT'),
+        sa.ForeignKeyConstraint(['receipt_id', 'report_id', 'task_id', 'run_id'], ['agent_d4_input_receipts.receipt_id', 'agent_d4_input_receipts.report_id', 'agent_d4_input_receipts.task_id', 'agent_d4_input_receipts.run_id'], ondelete='RESTRICT'), _created())
+
+
+class CapaD4CandidateWithdrawal(TenantBase):
+    __table__ = sa.Table('capa_d4_candidate_withdrawals', TenantBase.metadata,
+        _id('receipt_id', 'capa_r6_staff_receipts.receipt_id', primary_key=True),
+        _id('candidate_id'), _id('report_id'), sa.Column('reason', sa.Text(), nullable=False),
+        sa.ForeignKeyConstraint(['candidate_id', 'report_id'], ['capa_d4_candidates.candidate_id', 'capa_d4_candidates.report_id'], ondelete='RESTRICT'),
+        _text_check('reason', 'ck_d4_withdraw_reason'), _created())
+
+
 R6_TABLES = tuple(table.name for table in TenantBase.metadata.tables.values()
-                  if table.name.startswith(('capa_r6_', 'agent_d4_candidate_', 'capa_d4_candidate'))
+                  if table.name.startswith(('capa_r6_', 'agent_d4_candidate_', 'agent_d4_input_', 'agent_d4_command_inputs', 'capa_d4_candidate'))
                   or table.name == 'capa_d5_measure_revisions')

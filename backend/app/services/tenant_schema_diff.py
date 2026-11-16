@@ -150,6 +150,17 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
     if baseline_only or predecessor is not None:
+        reference = {key: value for key, value in reference.items()
+            if key[1].split('.')[0] != 'capa_d4_candidate_withdrawals' and key != ('function', 'r6_validate_d4_withdrawal()')}
+    if predecessor == 'tv017_r6_d4_inputs':
+        predecessor = None
+    if baseline_only or predecessor is not None:
+        input_tables = {'agent_d4_input_receipts', 'agent_d4_input_receipt_sources', 'agent_d4_command_inputs'}
+        reference = {key: value for key, value in reference.items()
+            if key[1].split('.')[0] not in input_tables and key != ('function', 'r6_complete_d4_inputs()')}
+    if predecessor == 'tv016_r6_source_epoch':
+        predecessor = None
+    if baseline_only or predecessor is not None:
         epoch_objects = {('column', 'capa_r6_source_origins.source_version_counter'),
             ('constraint', 'capa_r6_source_origins.ck_r6_source_version_counter'),
             ('trigger', 'fmea_documents.r6_fmea_source_epoch'),

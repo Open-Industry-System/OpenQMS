@@ -19,6 +19,7 @@ from app.services.agent_runtime.r5_executor import ExecutorApproval
 
 R5_PROFILE = 'model_d5_proposal_v1'
 R6_PROFILE = 'model_d5_proposal_r6_v1'
+D4_PROFILE = 'model_d4_candidate_v1'
 R5_PLUGIN_KEY = 'openqms.controlled-d5-model'
 UNAVAILABLE = 'Model deployment unavailable'
 CONFIG_FIELDS = ('deployment_id', 'name', 'version', 'tenant_generation', 'kind', 'provider',
@@ -42,7 +43,7 @@ class InferenceRequest(BaseModel):
     # Only operation/turn cursors cross this API. Sources and conversation
     # always come from current server-owned task/run state.
     model_config = ConfigDict(extra='forbid', frozen=True)
-    operation: Literal['propose_d5', 'workflow'] = 'propose_d5'
+    operation: Literal['propose_d5', 'propose_d4', 'workflow'] = 'propose_d5'
     turn: int = Field(default=0, ge=0, le=8, strict=True)
 
 
@@ -100,14 +101,14 @@ def _pins(db, approval):
     pilot = db.info['r5_controlled_pilot']
     pins = dict(policy_sha256=pilot.fingerprint(), artifact_sha256=approval.artifact_sha256, interpreter_sha256=approval.interpreter_sha256,
         launcher_sha256=approval.launcher_sha256)
-    if pilot.profile == R6_PROFILE:
-        pins['profile'] = R6_PROFILE
+    if pilot.profile in {R6_PROFILE, D4_PROFILE}:
+        pins['profile'] = pilot.profile
     return pins
 
 
 def deployment_profile(row):
     profile = row.executor_pins.get('profile', R5_PROFILE)
-    if profile not in {R5_PROFILE, R6_PROFILE}:
+    if profile not in {R5_PROFILE, R6_PROFILE, D4_PROFILE}:
         raise PermissionError(UNAVAILABLE)
     return profile
 
@@ -246,6 +247,15 @@ async def infer(db, identity, request):
     from app.services import capa_d5_proposals
     from app.services.agent import provider_adapter
     request = InferenceRequest.model_validate(request)
+    if identity.trial is not None and identity.trial.profile == D4_PROFILE:
+        from app.services.agent_runtime import d4_candidate_workflow
+        if request.operation == 'workflow':
+            return await d4_candidate_workflow.next_turn(db, identity, request.turn)
+        if request.operation != 'propose_d4':
+            raise PermissionError(UNAVAILABLE)
+        return await d4_candidate_workflow.infer(db, identity)
+    if request.operation == 'propose_d4':
+        raise PermissionError(UNAVAILABLE)
     if request.operation == 'workflow':
         from app.services.agent_runtime import model_workflow
         return await model_workflow.next_turn(db, identity, request.turn)

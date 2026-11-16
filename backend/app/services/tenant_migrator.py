@@ -19,7 +19,9 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv016_r6_source_epoch"
+REVISION = "tv018_r6_d4_withdraw"
+R6_INPUT_PREDECESSOR_REVISION = "tv017_r6_d4_inputs"
+R6_EPOCH_PREDECESSOR_REVISION = "tv016_r6_source_epoch"
 R6_CONTRACT_PREDECESSOR_REVISION = "tv015_r6_entry_contracts"
 R5_RESPONSES_PREDECESSOR_REVISION = "tv014_r5_responses"
 R5_MERGE_PREDECESSOR_REVISION = "tv013_r5_main_merge"
@@ -173,6 +175,10 @@ class MaintenanceContext:
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
             if versions == [REVISION]:
                 result = "current"
+            elif versions == [R6_INPUT_PREDECESSOR_REVISION]:
+                result = "r6_input_predecessor"
+            elif versions == [R6_EPOCH_PREDECESSOR_REVISION]:
+                result = "r6_epoch_predecessor"
             elif versions == [R6_CONTRACT_PREDECESSOR_REVISION]:
                 result = "r6_contract_predecessor"
             elif versions == [R5_RESPONSES_PREDECESSOR_REVISION]:
@@ -676,7 +682,7 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current", "ancestor", "r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state not in {"empty", "current", "ancestor", "r6_input_predecessor", "r6_epoch_predecessor", "r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
@@ -686,8 +692,10 @@ async def migrate_if_needed(maintenance: MaintenanceContext, attempt: Maintenanc
         if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")
         await maintenance.run_migration(REVISION)
-    elif state in {"r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state in {"r6_input_predecessor", "r6_epoch_predecessor", "r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         predecessor = {
+            'r6_input_predecessor': R6_INPUT_PREDECESSOR_REVISION,
+            'r6_epoch_predecessor': R6_EPOCH_PREDECESSOR_REVISION,
             'r6_contract_predecessor': R6_CONTRACT_PREDECESSOR_REVISION,
             "r5_responses_predecessor": R5_RESPONSES_PREDECESSOR_REVISION,
             "r5_merge_predecessor": R5_MERGE_PREDECESSOR_REVISION,

@@ -297,8 +297,11 @@ async def create_plugin_grant(db: AsyncSession, actor: User, installation_id: UU
     plugin = await _plugin(db, installation_id, lock=True)
     await _require_current_admin(db, actor)
     declared = None
+    if request.capability_id == 'capa.d4.fmea_input.masked.v1':
+        from app.services.agent_runtime.derived_source_grants import validate_d4_input_source
+        validate_explicit_source = validate_d4_input_source
     if request.derived_source_scope is not None:
-        if request.capability_id != TEXT_CAPABILITY:
+        if request.capability_id not in {TEXT_CAPABILITY, 'capa.d4.fmea_input.masked.v1'}:
             raise ValueError('Source scope unsupported')
         actor_scope = SimpleNamespace(user=actor)
         _, factories, lines = await _current_access(db, actor_scope)
@@ -308,7 +311,7 @@ async def create_plugin_grant(db: AsyncSession, actor: User, installation_id: UU
                 or request.product_line_codes is None or target.product_line_code not in request.product_line_codes):
             raise ValueError('Source scope does not match grant')
         declared = await validate_explicit_source(db, actor_scope, target, request.derived_source_scope)
-    elif request.capability_id == TEXT_CAPABILITY and request.enabled:
+    elif request.capability_id in {TEXT_CAPABILITY, 'capa.d4.fmea_input.masked.v1'} and request.enabled:
         raise ValueError('Source scope required')
     if request.enabled:
         await _require_grant_enableable(db, plugin, request, actor)

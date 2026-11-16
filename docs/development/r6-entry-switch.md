@@ -6,7 +6,7 @@
 
 - 实施起点 `codex/r6-entry-switch-design@f03fc01b0ef9a30a85da1917c8fa8ed81fcaa9f9`，开工工作区干净。R5 PR #33 实读仍 open/draft、未合并，head `75fcc51765bd3b6b739695178a399bfa01806574`，main `d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，未发生影响计划的基线变化。
 - 解释器 `/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python`，setuptools `79.0.1`。前端在本 worktree 和冻结基线各自按 lockfile `npm ci`，不复制依赖。离线 npm 因缺缓存失败，随后联网按锁安装成功；不改 package lock 或运行代码。
-- Task 1 数据合同实现、223 项专项验证及独立 SPEC/QUALITY 复审已通过；完整冻结 `make check` 与随后串行 `make check-browser` 均已 exit0。Task 2 最终整组验证与双复审通过，Task 3 各分层与独立双复审亦完成；继续 Task 4。尚未签收 R6 整体或切换资格。
+- Task 1 数据合同实现、223 项专项验证及独立 SPEC/QUALITY 复审已通过；完整冻结 `make check` 与随后串行 `make check-browser` 均已 exit0。Task 2 最终整组验证与双复审通过，Task 3 各分层与独立双复审亦完成，本地提交 `dec122a9beff9f5931d61310bba132479b28e920`；随后启动全新 Task 4 实施 agent；Task 4 现已实现、完整专项及共享分层、独立双复审通过，继续 Task 5。尚未签收 R6 整体或切换资格。
 - 2026-11-16 通过 GitHub 连接器重新核对：R5 [PR #33](https://github.com/Open-Industry-System/OpenQMS/pull/33) 仍 open/draft、未合并，head 仍 `75fcc51765bd3b6b739695178a399bfa01806574`。实际 main 已经由另一 Agent 的 [CI PR #36](https://github.com/Open-Industry-System/OpenQMS/pull/36) 推进到 `193746abb7c1eb9d196ef3997b6b91767490e3d1`；PR #33 记录的 base_sha 仍是旧 `d3c0ada8`，不能将其当作 main 当前值。对比实际 11 个变更文件，仅 CI 触发/缓存/耗时诊断、测试和文档，未改变业务源码、SDK 或迁移；runner 新增的是不影响验收结果的可选耗时输出。因此本批业务/数据合同与任务依赖不变，保留本树基线和现有隔离收据，不拉入或改写 CI 工作。最终交接应说明此主线差异，后续整合由对应负责人处理；本轮没有合并或推送。
 
 ## Task 3 分层验证快照
@@ -22,7 +22,7 @@ Task 3 当前分层结果如下，互有重叠，不能加总为一次全量。`
 | C：基础材料/D5/普通 runtime | `e059…` | 最终 1026 passed/0skip、24 deselected；原生层另验 |
 | D：迁移/read-task；原生 R5 | `8db32bbb…` | 迁移331 passed，读任务22 passed/双审；原生最终默认68 passed/0skip |
 
-另发现的草稿格式错误已以实际 HTTP/审计 RED2 复现，安全固定 422 修正的完整草稿组 75 passed；无来源绑定的历史错误查询投影仍待验证和最终复审。源数据、授权、正文与审计的新问题须先修正、验证和复审，再签收 Task 3。
+另发现的草稿格式错误已以实际 HTTP/审计 RED2 复现，安全固定 422 修正的完整草稿组 75 passed；该快照时点的无来源绑定历史错误查询投影尚待验证，后续已由增量验证及双复审签收（见下文最终 Task 3 记录）。源数据、授权、正文与审计的新问题须先修正、验证和复审，再签收 Task 3。
 
 ## 独占测试资源
 
@@ -85,11 +85,11 @@ Task 3 当前分层结果如下，互有重叠，不能加总为一次全量。`
 - make 日志 SHA256 `60b6e51f1dffa704b4a00e4c4bcfdc56c2524e5e0a8bdd1fa321717e2ea59b3e`；browser 日志 SHA256 `cfcda5ffb63753f603c4e986b58bbc78f822d3bc1e0d8a3ac1b0693715e1aed4`。
 - 外层收据为 `api-20261115T140438750465`、`r5-api-20261115T154143192332`、`r5-browser-20261115T155052944459`、`browser-20261115T155138207752`（均 `-receipt.json`）。普通4skip 沿用 Redis/专用 E2E 条件；没有跳过原生 R5 必选层，也未修改 CI。此处仅签收实施前冻结基线，Tasks 1/2 的新代码分别依据其专项与独立复审，R6 最终全量仍在 Task 11。
 
-### Task 3 新查明的两项边界
+### Task 3 新查明的两项边界（历史发现；产品状态由后续确认更新）
 
 - 来源 ABA：原 FMEA 节点 HMAC 会在原文恢复时复活；正常更新/回滚已递增 lock_version，但特殊特性删除及 PLM 导入存在遗漏。独立技术 SPEC 复审通过新增 `20261116_r6_source_epoch` / `tv016_r6_source_epoch` 方案：持久 nullable 捕获代际、无历史回填、数据库单调保护、当前用途核对及历史读取分离。新迁移已实现并有定向运行证据，最终迁移整组与实际 head 核验仍待本批完成；不能沿用 Task 1 的头声明本批已完成。决定正文见 [规格 §3.2](../superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#32-d4-新契约目标尚无实现)。
-- 待用户选择的新产品边界：D7 经验提取、D8 强制知识沉淀/横向扩散使用不能继承限制的普通副本；现有文档门禁又要求先完成旧模型影响分析。直接拒绝这些出口会使受限报告不能走完 Task 9 正常审批。已建议受控员工手工影响分析并保留完整审核，将这些传播明确记为受限未执行、留 R7；或保留阻塞直到 R7。尚未获得答复，不改已确认四项决定，不以夹具/静默跳过冒充真实通过。
-- 推荐方案已具体化为 [规格 §12](../superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#12-受限报告本地结案方案待用户确认未授权实施)，仍是未确认、未授权实施的草案：本地人工预防与影响分析、正常文档决定/APPROVE，审批前审阅并标记传播未执行；`deferred` 仍阻塞，waiver 不扩权。源码还确认 D7 会将 `d7_prevention` 复制到供应商风险 outbox，因此批准本地方案时也必须明确阻止这一正文传播，不能只绕过知识/横向服务。C 组期间未修改相关运行代码；§9 四项已确认决定保持。
+- 待用户选择的新产品边界：D7 经验提取、D8 强制知识沉淀/横向扩散使用不能继承限制的普通副本；现有文档门禁又要求先完成旧模型影响分析。直接拒绝这些出口会使受限报告不能走完 Task 9 正常审批。已建议受控员工手工影响分析并保留完整审核，将这些传播明确记为受限未执行、留 R7；或保留阻塞直到 R7。当时尚未获得答复；用户随后已确认本地手工门禁/传播明确不执行，见本台账末尾确认记录和 Task 6B。原四项决定不变，不以夹具/静默跳过冒充真实通过。
+- 推荐方案已具体化为 [规格 §12](../superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#12-受限报告本地结案方案用户已确认待实施与运行验收)，发现时为待确认草案，现已获用户确认、待 Task 6B 实施及运行验收：本地人工预防与影响分析、正常文档决定/APPROVE，审批前审阅并标记传播未执行；`deferred` 仍阻塞，waiver 不扩权。源码还确认 D7 会将 `d7_prevention` 复制到供应商风险 outbox，因此本地方案也必须明确阻止这一正文传播，不能只绕过知识/横向服务。C 组期间未修改相关运行代码；§9 四项已确认决定保持。
 
 ### Task 3 定向验收进展（非最终签收）
 
@@ -142,7 +142,7 @@ C 首轮 `run-1794774090924158000.log` 出现失败后，核对 owner/精确命�
 | `search_service.py`、`recommendation_sources*.py`、`lessons_learned/sources/historical_capa.py`、`retriever_executions.py`、`api/knowledge.py` | 普通搜索/历史 CAPA/RAG/知识正文读取前过滤元数据；详情、计数和列表使用受控来源规则，分页返回前复验 |
 | `recommendation_orchestrator.py`、`hybrid_recommendation_pipeline.py`、`llm_fusion_layer.py`、`recommendation_service.py`、`lessons_learned/service.py`；`capa_legacy_cache.seal_cache/load_cache` | 受限目标不走旧生成；间接输入报告 S 的实际绑定随生成、缓存、fallback、审计和返回保存，不能因目标 R 未受限或模型省略来源而丢掉 S。旧未绑定缓存作 miss |
 | `capa_scar_service.trigger_scar_from_capa` | 新复制在锁后按当前 EDIT/来源复验，受限正文不能进入无来源绑定的 SCAR 副本；真正历史已发布快照按既有 ACL 保留，不伪造新来源事实 |
-| `capa_d7_action_service.py`、`capa_doc_gate_service.generate_impact_analysis`、`knowledge_sink_service.sink_capa_on_close`、`capa_lateral_diffusion_service.py`、`capa_lessons_service.py` | 不能继承限制的模型分析、FMEA/知识/经验/横向副本拒绝；这会阻断原强制结案链，待用户确认本地手工门禁或继续阻塞的产品边界，不以静默跳过作为通过 |
+| `capa_d7_action_service.py`、`capa_doc_gate_service.generate_impact_analysis`、`knowledge_sink_service.sink_capa_on_close`、`capa_lateral_diffusion_service.py`、`capa_lessons_service.py` | 不能继承限制的模型分析、FMEA/知识/经验/横向副本拒绝；这会阻断原强制结案链，用户已确认由 Task 6B 补本地手工门禁和传播明确不执行，当前仍安全拒绝直至该任务验收，不以静默跳过作为通过 |
 | 通用 `egress_guard.py`、`agent/provider_adapter.py`、`embedding_provider.py` | 对受保护调用的每次实际 HTTP 发送（含手动格式重试）复验；关闭 SDK 隐式重试与重定向，嵌套 guard 组合并恢复，错误日志不回显受限模型请求正文 |
 
 本表记录实现位置与预期处理，不替代最终分层结果，也不声称 R7 已完成。Task 6 尚须把正式措施的当前更正版本接入这些保留读取路径；Task 8 尚须处理旧采纳草稿原始来源绑定、准入与切换屏障。
@@ -196,6 +196,82 @@ C 首轮 `run-1794774090924158000.log` 出现失败后，核对 owner/精确命�
 
 `run-1794780986165027000.log`：**68 selected/68 passed/0 failed/0 errors/0 skipped/0 deselected，exit0，462.61s，6 既有 warnings**。完整收据 `artifacts/r5-api-20261115T221626793402-receipt.json` 的 status=PASSED/exit_code=0，默认全清单无 override。收据 frozen_sha 字段为空；源码身份由运行前后稳定的生产目录摘要 `8db32bbbaddab0e925ac7da4cf2bb28e238067f1f3560b825e2d9bce11775729` 单独核对，不声称收据已绑定提交 SHA。
 
-先前定向两节点 pytest 为 2 passed/0skip，但 required coverage 正确判缺 66 而 mode 整体 exit1/statusFAILED（`run-1794780728118070000.log`，receipt `r5-api-20261115T221208751247-receipt.json`），该次不是 native 签收。最后仅两测试合同修正的 SPEC 后 QUALITY 均 APPROVED，再由上述默认 68 全通过。
+先前定向两节点 pytest 为 2 passed/0skip，但 required coverage 正确判所选已登记文件的必选节点不完整，mode 整体 exit1/statusFAILED（`run-1794780728118070000.log`，receipt `r5-api-20261115T221208751247-receipt.json`），该次不是 native 签收。最后仅两测试合同修正的 SPEC 后 QUALITY 均 APPROVED，再由上述默认 68 全通过。
 
-本批全部生产差异均经过初始全树及增量独立 SPEC→QUALITY 复审，无待修问题；609 个生产/迁移 Python 文件 AST 通过，622 文件内容摘要稳定，diff 格式及相关文档链接检查通过。当前 107 路径均属于本批 backend 或相关文档，无 CI/SDK 修改。Task 3 具备本地提交条件，后续按计划继续空 D4 候选与员工确认。Task 4/5 仍须经真实候选服务重跑 C3-POS/NEG；Task 9/10 真模型、员工完整主链和兼容回退、Task 11 全量仍未执行，不能以本批通过签署 R6 可切换。受限报告本地结案 §12 产品草案仍待用户确认。
+本批全部生产差异均经过初始全树及增量独立 SPEC→QUALITY 复审，无待修问题；609 个生产/迁移 Python 文件 AST 通过，622 文件内容摘要稳定，diff 格式及相关文档链接检查通过。当前 107 路径均属于本批 backend 或相关文档，无 CI/SDK 修改。Task 3 具备本地提交条件，后续按计划继续空 D4 候选与员工确认。Task 4/5 仍须经真实候选服务重跑 C3-POS/NEG；Task 9/10 真模型、员工完整主链和兼容回退、Task 11 全量仍未执行，不能以本批通过签署 R6 可切换。该 Task 3 签收时点的 §12 尚待确认；用户后续已确认本地手工门禁/传播明确不执行，当前以本台账末尾确认记录和 Task 6B 为准。
+
+
+## Task 4 已启动（技术合同核对中）
+
+Task 3 已本地提交 **`dec122a9beff9f5931d61310bba132479b28e920`**，提交时 107 个文件、4996 insertions/385 deletions；父独立按路径 UTF-8＋NUL＋文件字节＋NUL 规则复算 tracked∪untracked 622 个生产/迁移文件，摘要仍为 `8db32bbb…`，与已验运行一致。Git 索引/提交组合命令曾因自动审批超时未启动；核对索引为空、分开执行窄 `git add` 与 `git commit` 后均获准成功，无推送、合并或部署。新 agent 已确认干净起点并接手 Task 4，父继续维护文档。
+
+首先核对空正式 D4 时的服务端输入交付凭据：现有 AgentD5BasisReceipt 必须有 root revision/proof，不能伪造这些事实供候选生成。拟新增合同如需持久化表，先给出 schema/HMAC/实际来源、历史读取与 profile 权限方案并独立技术复审，再追加新配对迁移；已提交的 Task 1/3 迁移保持。D4RecoveryCheckpoint 现有控制位置无 Root/P FK，可复用。新任务仅生成受控 pending 候选；员工确认、验证与证明仍是独立动作，§12 产品待答不阻塞本任务。
+
+
+### Task 4 输入凭据与 FMEA 通道技术复审
+
+独立技术 SPEC 已批准上述空 Root 独立凭据方向，并补明确边界：新 `capa.d4.fmea_input.masked.v1` 默认 DENY/只给新 D4 profile，旧 TEXT 仍只按原正式 Root/P 合同；scope 表没有 TEXT literal CHECK，可复用原类型/存储/parent-grant，无须修改已发布表迁移。新 D4 专用来源 validator 支持明确批准的 B＋当前同 T/F/L/VIEW/node 版本，旧助手的关联限制保持。实现者开始三表配对追加迁移，尚未签收实现或数据库验收。
+
+已发生的有效 RED：新 profile 缺失、独立三表缺失、新 FMEA cap、命令 DTO 缺失；部署 setup403/直接 pytest 的资源 guard 拒绝另记，不能冒充业务 RED。小范围 profile/SDK codec 已有局部 GREEN，不代表 SDK 三层或空 Root 服务通过。此前把 TEXT 当 FMEA 输入通道的初步建议未采用；generic read_d4 不得借新 cap 获得 Root 正文。独立进程仅收 read ack，服务端保存后续实际交付 receipt，结果/任务视图在 candidate save 之前也须来源鉴权，审计不存这些正文。
+
+
+### Task 4 撤回原因与 SDK managed 入口补充（已技术复审）
+
+初版 17 已在独占 public prepare，新增原因表另追加 18/tv018，避免原位改变已应用 17。独立 SPEC 批准 immutable 受限原因 sidecar，并以复合坐标或等价 trigger 核 StaffReceipt kind/候选/报告，原因与 receipt/状态/成功审计同事务、同 key 不同 reason 冲突；旧历史不回填，control/activity/audit 仅 refs。当前 checkpoint/水位/逐项 reason 仅焦点 GREEN，完整权限/并发/原因关联与迁移验收仍待。
+
+公开 SDK attach 窄方案及单 artifact 内存 bundle 均已独立技术 SPEC 批准。旧 SDK 无 managed attach，仅 claim；新 D4 严格 launch metadata 不增加权限，旧 R5/R4b wire 不变。嵌入纯 SDK 模块、exact loader/固定 synthetic 名称，完整批准 artifact hash 覆盖这些源和循环，无 workspace/site-packages 读权或 sandbox 放宽。首个真实 managed SDK 进程焦点已 GREEN，但 SDK 正式三层首次存在 12 个通用 fixture/映射失败与源内生成 cache 导致的 build 拒绝；这些不算完成，builder/隔离 guard 未放宽，正在修正与重跑。
+
+自审捕获的 prepared context 漂移、模型 await 后 round 超时、撤权后任务列表/计数外露均有有效 RED；修正焦点与完整组合仍待，不能以早期 16/3/1 等局部 GREEN 签收 Task 4。真正空 Root 初始夹具已改为新建无 RootRevision/verification/proof 的报告，旧 harness 历史报告保持不删；后续整组必须重验此零事实初始状态。
+
+
+Task 4 SDK 正式三层最新 `run-1794784747839489000.log` **exit0**：unit **604 passed/0skip**、owned-loopback **17 passed/0skip**、isolated-wheel **1 实际 probe PASS**，共同 source_hash `7f617004de9c5bdfac55ed623ee984c5367da2b28f6940ec4c920ee4c45a257a`，收据目录 `artifacts/sdk/sdk-all-RqKdPF/sdk-check-m8osq815`。prepared context 漂移/await 后超时/撤权任务列表三项自审修正焦点 `run-1794784629872151000.log` **3 passed/0skip，21.79s**。这些是本轮部分通过结果，仍待最终完整服务/迁移/Responses/异常场景和独立双复审，不预签 Task 4。checkpoint 批撤回冲突遵循原 R5 逐项语义：整体 200＋该项 conflict，不回滚其他已提交项；后续 Task 5 单项 API 才用 HTTP409。
+
+
+Task 4 managed launch 一致性补强：原有效 UUID 但错误 task metadata 的真实反例仍能返回模型，已加新 D4 SDK 固定完整 task/run/epoch/deployment pins；这是非授权一致性检查，先验证真实 token/namespace/Run metadata，再核 immutable binding/profile，最后进入 source authority。新 wire 扩展仅 D4，旧 R5/R4b 无 headers 合同保持。错误绑定焦点与旧 R5 validator 局部遮蔽回归、多消息更正、独立 B 输入等组合 `run-1794785830366104000.log` **8 passed/0skip，53.39s**。
+
+新版 pins 修改后的 SDK 三层 `run-1794786505419120000.log` 已 PASS，收据目录 `artifacts/sdk/sdk-all-IXj8sX/sdk-check-y4zf57v0`，精确结果为 **unit604/loopback17/wheel1 PASS，全部0fail/0error/0skip，exit0**，同 source_hash **`3b6190fbd3c265c6fdf699aacae258472b4279ed0073f688bb7c5a1a1feedc19`**；不能沿用早期 `7f617…` 摘要。Chat/Responses × SDK/stdlib 实际进程及历史/原因组合 `run-1794786254132705000.log` **6 passed/0skip，59.58s**。正常 SDK 补充主链、真实 PostgreSQL 锁等待后撤权与返回末端源权限仍在焦点验证；未冻结、未请求最终复审。
+
+
+正常 SDK 补充主链的两次运行仍是失败，不计成功：`run-1794786683703055000.log` 的 strict peer 布尔诊断确认 accepted user 消息排在 pending tool result 之前；deferred user 顺序修正后，`run-1794786931641437000.log` 已通过工具协议但最后同 epoch checkpoint 重试仍 PermissionError，因原 accepted 位置与推进后位置被错误要求相等。拟只允许原位置≤当前位置并返回原不可变 checkpoint/水位，任务/run/epoch 绑定不放松；仍待实际 GREEN。source ACL 撤销后的 metadata-only pause/cancel 与完整授权 resume/restart 正在独立 TDD，不把普通正文 guard 直接复用于停止控制。
+
+
+Task 4 补充/控制/末端围栏焦点 `run-1794787486250855000.log` **6 passed/0skip，exit0，54.21s**：真正嵌入 SDK 补充→accepted continue→合法工具序列→保存→原 checkpoint 水位0→finish；来源 VIEW 撤回后 nonowner 拒绝、owner 可 pause/paused-checkpoint/cancel而 resume 拒绝且无来源正文 SQL；真实 PostgreSQL 报告锁等待后撤权，释放后无 D2/D3/node 正文 SELECT，0 model/receipt/candidate；合法 HTTP 后撤权保留真实实际交付 receipt，派生正文返回为零；伪跨 tenant 在 business SQL 前拒绝；公开 SDK 直接候选 POST＋同 key 重放＋checkpoint/finish 真实合同。上述均已实际通过，不以相互重叠项计总数。坏 launch 真实进程、完整 Task4/native、迁移同构与旧共享路径仍待后续验收。
+
+
+分层补核：现有 runner `_require_r5_success` 按 targets 实际匹配到的已登记文件检查其完整必选集合；并非任意自定义 native 目标都强制默认 68。Task 3 两节点失败是所选 `test_r5_d5_process.py` 未覆盖该文件完整必选集合，不是新 R6 文件也必须附带 68；其后默认 68 最终确已成功。Task 4 可用已有 `r5-api --pytest-target` 对新文件的 ci_r5_native 节点独立签收；必要 R5 回归如选登记文件，就完整运行该文件所有必选节点。全部沿用既有 runner/guard，不改 CI 分层。
+
+
+Task 4 实际分层进一步核实：d4_case 不仅在 child launch 时依赖 Darwin，其 ExecutorApproval.verify 本身也要求真实 `sandbox-exec`。所有依赖该批准的服务/HTTP/进程节点归 ci_r5_native＋requires_db；普通 API 保留无批准依赖的纯 kernel/DTO/metadata/launch 合同。独立原生 target 按已有 runner 执行，分别登记两层计数，不以假批准绕开平台约束。计划 Task 4 已补真实 native 命令，Task 11 需显式运行新增原生节点；旧默认 68 仅继续证明原 R5 基线。
+
+
+### 2026-11-16：用户确认受限报告本地结案合同
+
+用户明确确认“本地手工门禁，受限传播明确不执行”。规格 §12 已从待确认改为用户已确认，ADR-0019 仅索引决定正文；新增独立 Task 6B，在正式更正 Task 6 后、正常入口 Task 7 和完整链 Task 9 前实施及双复审。文档延期仍阻塞、狭义 waiver/APPROVE 不扩大；经验/知识/横向/供应商风险正文传播审批前明确不执行，批准后可追溯、不补发。新任务的实现和运行验收均尚未执行，Task 4 继续，不以产品确认提前签收主链或回退。
+
+§12/Task 6B 文档增量独立规格复审已批准（首次指出 Task 7 UI/测试接单不足及台账历史状态矛盾，均定向修正后 APPROVED）。132 个现有本地链接检查无缺失，diffcheck 通过；此结论仅针对文档合同，不签收 Task 6B 实现。
+
+Task 4 代际历史反例 `run-1794788198649243000.log` 真实 1 failed；最小修正后 `run-1794788396220717000.log` 1 passed/0skip、9.15s：当前 gen2 员工绑定读取 gen1 历史，原 receipt.gen 保持1；fresh reuse/旧 token 拒绝且历史不依赖 DNS。实施 agent 已冻结 v1（生产647文件摘要 `e9b63891cba086a91bf18f68e76345e18332b46095e64e45c6726c2492c3da0a`，11变更测试摘要 `9dadc80d69cd0713fbe6306b180dc690bd90b1a18c0e21167c66dd1c192cc188`），完整分层运行及最终全 diff SPEC 已开始，尚未签收。
+
+Task 4 冻结 v1 普通 API 完整层 `run-1794788686547468000.log` exit0：7 selected/7 passed、46 deselected、0skip/0failed/error、3.19s；receipt `api-20261116T002447254429-receipt.json`。46 项依赖真实批准部署的 HTTP/managed 用例正在独立原生层执行，不能以此 API 收据声称其已通过。
+
+Task 4 最终全 diff 静态 SPEC→QUALITY 均 APPROVED、无阻塞问题；两名独立 reviewer 均逐项核验冻结658文件 SHA256，0漂移。复审读取真实候选/交付/检查点/撤回、授权/代际、17/18迁移、SDK内存单 artifact 路径，均未占用 DB 或修改文件。运行分层仍在继续，静态批准不替代完整 GREEN。
+
+Task 4 冻结 v1 独立原生完整层 `run-1794788796266151000.log` exit0，receipt `r5-api-20261116T002636968713-receipt.json`：46 selected/46 passed、7 deselected、0skip/failed/error、372.57s。覆盖真实批准部署/HTTP、SDK 与 stdlib Chat/Responses 进程、控制/锁后撤权/坏 envelope/代际历史。普通 API 7 与原生 46 为不同层，分别签收；不与历史焦点相加为某次运行统计。迁移/current parity、共享 runtime 与原 R5 默认68仍待本批验证。
+
+Task 4 完整迁移组首轮 `run-1794789351726771000.log` 在 27 passed 后因 `test_agent_main_integration` 的当前 head 仍断言16而实际追加到18失败，已按 `-x` 停止；不是 DDL 失败，亦不签收整组。拟只同步真实 current-head/祖先断言，保留历史16/17目标测试与保护；生产647冻结不变，测试增量须独立复审并重跑迁移。
+
+迁移测试增量 v2：11 个迁移文件只同步 current head/完整链与16的 predecessor 分类，独立 SPEC→QUALITY 内容复核均批准；完整迁移第2轮 `run-1794789538717437000.log` 28 passed 后发现 `test_agent_main_integration` 的 REVIEWED_REVISIONS 用 TENANT_HEAD 代末尾、漏显式16/17，已停止并修元组。QUALITY 同时发现此文件超出 v2 manifest 字节，当前内容核对正确，待 v3 新清单和增量复核；生产647摘要不变。先跑完整失败文件＋新17/18＋历史16焦点，再重跑完整迁移；两次失败均不计整组成功。
+
+迁移焦点完整文件 `test_agent_main_integration.py`＋`test_r6_d4_inputs.py`＋`test_r6_source_epoch.py` 在 `run-1794789616671388000.log` 25 passed/0skip/0deselected、53.65s、exit0。v3 仅补 integration 元组16/17；21测试摘要 `59bb24adf4bcc1b15b0b5061ad6eb78cebc1a0297d8c4266c520361d578426d3`，生产647摘要仍 `e9b63891cba086a91bf18f68e76345e18332b46095e64e45c6726c2492c3da0a`。增量独立 SPEC→QUALITY 均 APPROVED，668 文件逐 SHA256 匹配、0漂移；父独立核对一致。完整迁移与共享回归仍待，未签收整批。
+
+Task 4 最终完整迁移组 `tests/migrations -q --tb=short -x`：`run-1794789772674014000.log` **334 passed/0failed/0skip/0deselected、824.24s、exit0**，包括新迁移、历史升级/降级及 tenant parity。此前27/28处停止的失败轮次分别保留，不混算。接续共享普通 runtime 五个完整文件与旧 R5 默认68，尚未签收整批。
+
+Task 4 共享普通 runtime 五个完整文件（`test_task_service.py`、`test_runtime_access.py`、`test_task_reads.py`、`test_task_controls.py`、`test_run_auth.py`）在 `run-1794790631126191000.log` exit0：**223 selected/223 passed、0deselected/0skip/0failed/error、360.81s**，receipt `api-20261116T005711796790-receipt.json`。接续最后的旧 R5 默认完整原生68，不改筛选/mandatory guard。
+
+Task 4 最终静态核对：v3 668文件0漂移、654 Python AST通过、diffcheck通过；单artifact `--check` 通过，SHA256 `0bad0c630ed2b611cc7ea0d00ff3aff89c81edeec9e21dfb74a2332005eb5991`。旧 R5 默认原生68已在 `run-1794791023573511000.log` 实际运行，尚未返回最终结果；此静态记录不提前签收该组。
+
+### Task 4 最终签收（继续全任务，不是 R6 最终交接）
+
+默认旧原生完整组 `run-1794791023573511000.log` exit0：**68 selected/68 passed、0deselected/0skip/0failed/error、472.87s**，receipt `r5-api-20261116T010344273648-receipt.json`。所有既定分层已通过；私有 `task4-final-verification.json` 保存完整命令、层级结果、收据与两次迁移测试旧断言失败，不将重叠焦点加总冒充单次全量。生产647、测试21、SDK与artifact摘要均如上，668文件0漂移；独立全diff及增量 SPEC→QUALITY 均批准，最终654 Python AST/差异/打包检查通过。DB交还空闲，父负责本地精确提交；下一 Task 5 仍须经真实候选→员工确认→正常验证/proof重跑 C3-POS/NEG。正式更正6、本地门禁6B及其正常UI、切换/真模型/双版本/最终全量尚待，不具备R6切换资格。
+
+父已只读核对四份最终 gate receipt 均 `PASSED`、exit0，selected/passed/deselected/skip/fail/error与上述逐层记录一致；其 `frozen_sha` 均为空，执行源码以独立 v3 内容清单证明，不能声称在尚未产生的 Task 4 Git提交上启动。SDK summary 源摘要为 `3b6190fb…`、unit/loopback/wheel均PASS，0skip/fail；public/tenant迁移层为直接pytest日志证据，无虚构gate receipt。收据位于本批独占私有根的 `artifacts/`，未进入Git。

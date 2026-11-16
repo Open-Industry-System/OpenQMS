@@ -248,7 +248,13 @@ class Resolver:
 
 
 class Transport:
-    def __init__(self, config):
+    def __init__(self, config, *, launch=None):
+        if launch is not None:
+            from .models import ManagedLaunch
+            if type(launch) is not ManagedLaunch or config.base_url!=launch.api_origin or config.tenant_slug!=launch.tenant_slug:
+                raise ConfigError('config',kind='invalid_request')
+            launch.__post_init__()
+        self._launch=launch
         self._config = config
         self._resolver = Resolver()
         self._closed = False
@@ -304,6 +310,10 @@ class Transport:
             if type(token) is not str or not token or any(ord(c) <= 32 or ord(c) >= 127 for c in token):
                 raise ValidationError(operation, kind='invalid_request')
             headers['Authorization'] = 'Bearer ' + token
+        if self._launch is not None:
+            self._launch.__post_init__()
+            headers.update({'X-OpenQMS-Task':str(self._launch.task_id),'X-OpenQMS-Run':str(self._launch.run_id),
+                'X-OpenQMS-Lease':str(self._launch.lease_epoch),'X-OpenQMS-Deployment':str(self._launch.deployment_id)})
         return method, path, headers
 
     def exchange(self, operation, *, token, request, deadline):

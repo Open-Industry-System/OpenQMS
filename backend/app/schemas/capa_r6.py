@@ -42,15 +42,15 @@ class D5Correct(_R6Command):
 
 class D4CandidateCommand(D5Command):
     """Runtime input; complete origins/input versions come from delivered receipts."""
-    supporting: list[str] = Field(default_factory=list, max_length=100)
-    opposing: list[str] = Field(default_factory=list, max_length=100)
-    missing_information: list[str] = Field(default_factory=list, max_length=100)
+    supporting: list[str] = Field(default_factory=list, max_length=20)
+    opposing: list[str] = Field(default_factory=list, max_length=20)
+    missing_information: list[str] = Field(default_factory=list, max_length=20)
 
     @field_validator('supporting', 'opposing', 'missing_information')
     @classmethod
     def bounded_evidence(cls, values: list[str]) -> list[str]:
         for value in values:
-            if not value.strip() or len(value.encode('utf-8')) > 16384:
+            if not value.strip() or len(value.encode('utf-8')) > 2000:
                 raise ValueError('Invalid D4 candidate evidence')
         return values
 
