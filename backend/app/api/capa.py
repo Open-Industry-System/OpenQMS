@@ -397,6 +397,8 @@ async def _authorize_capa_root(db, scope, report_id, *, allow_controlled=True):
     from app.services.capa_d4_material import authorize_root, require_legacy_root_only
     try:
         authority = await authorize_root(db, scope.user.user_id, report_id)
+        from app.services.capa_legacy_capture import authorize_bound_sources
+        await authorize_bound_sources(db,scope.user.user_id,report_id,d_step="d5")
         if not allow_controlled:
             await require_legacy_root_only(db, report_id)
         return authority
@@ -424,6 +426,9 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, ac
     values["d7_prevention"] = await prevention_text(db,actor_id,capa.report_id,values.get("d7_prevention"))
     resp = CAPAResponse.model_validate(values)
     resp.material_version = projection_version
+    from app.services.capa_entry_switch import status as entry_status
+    entry = await entry_status(db)
+    resp.entry_phase, resp.entry_epoch = entry.state, entry.epoch
     linked = None
     if capa.scar_ref_id is not None:
         scar = await db.get(SupplierSCAR, capa.scar_ref_id)
@@ -968,11 +973,18 @@ async def get_d4_fmea_recommendations(
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    from app.services.capa_entry_switch import admit
+    await admit(db, 'legacy')
+    from app.services.capa_d4_material import require_legacy_root_only
+    try:
+        await require_legacy_root_only(db, report_id)
+    except PermissionError:
+        raise HTTPException(403, "D4_MATERIAL_UNAVAILABLE") from None
 
     allowed_pls = _resolve_allowed_pls(scope)
     if allowed_pls is not None and not allowed_pls:
@@ -993,7 +1005,7 @@ async def get_d4_fmea_recommendations(
     # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code, "factory_id": str(f.factory_id), "lock_version": f.lock_version}
         for f in fmea_result.scalars().all()
     ]
 
@@ -1041,7 +1053,8 @@ async def get_d4_fmea_recommendations(
     except PermissionError:
         raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     await db.commit()
-    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
+    await _authorize_capa_root(db, scope, report_id)
+    await admit(db, "legacy")
     from app.services.capa_d4_material import require_legacy_candidate_bindings
     try:
         await require_legacy_candidate_bindings(db, result.source_bindings, actor=scope.user)
@@ -1073,11 +1086,18 @@ async def get_d5_fmea_recommendations(
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
-    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    from app.services.capa_entry_switch import admit
+    await admit(db, 'legacy')
+    from app.services.capa_d4_material import require_legacy_root_only
+    try:
+        await require_legacy_root_only(db, report_id)
+    except PermissionError:
+        raise HTTPException(403, "D4_MATERIAL_UNAVAILABLE") from None
 
     allowed_pls = _resolve_allowed_pls(scope)
     if allowed_pls is not None and not allowed_pls:
@@ -1098,7 +1118,7 @@ async def get_d5_fmea_recommendations(
     # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code, "factory_id": str(f.factory_id), "lock_version": f.lock_version}
         for f in fmea_result.scalars().all()
     ]
 
@@ -1146,7 +1166,8 @@ async def get_d5_fmea_recommendations(
     except PermissionError:
         raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     await db.commit()
-    await _authorize_capa_root(db, scope, report_id, allow_controlled=False)
+    await _authorize_capa_root(db, scope, report_id)
+    await admit(db, "legacy")
     from app.services.capa_d4_material import require_legacy_candidate_bindings
     try:
         await require_legacy_candidate_bindings(db, result.source_bindings, actor=scope.user)
@@ -1210,8 +1231,11 @@ async def draft_capabilities(
         "D8_APPROVAL_PENDING": [],
     }
 
+    from app.services.capa_entry_switch import status as entry_status
+    phase = (await entry_status(db)).state
     return {
-        "available_steps": status_to_steps.get(current_status, []),
+        "available_steps": [step for step in status_to_steps.get(current_status, [])
+            if step not in {"d4", "d5"} or phase == "legacy"],
         "current_step": current_status,
     }
 
@@ -1284,6 +1308,8 @@ async def adopt_recommendation_ep(
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    from app.services.capa_entry_switch import admit
+    await admit(db, 'legacy')
     check_product_line_access(capa.product_line_code, scope)
     try:
         adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)

@@ -469,3 +469,161 @@ QUALITY静态发现已实际RED复现（旧200恢复受限正文，1failed/9pass
 前三组父独立读取安全收据字段核PASSED/exit0/0failed/errors/skipped；API0deselected。原API116组涵盖其它未再修改的后台路径，但当时manual writer曾临时调用controlled_manual_candidates，不能冒充最终writer；最终writer完整local组以56补证，catalog仅readonly精确准入扫描，原writer语义保留。旧native注册文件增加额外节点曾导致pytest25通过而wrapper拒收；保留失败，R6新增profile测试分离独立native文件，最终33由既有runner真实签收，不改CI。每组独立、重叠不相加；frozen_sha为空，以实际基线31856359和冻结文件摘要绑定，不填后续Git SHA。
 
 最终v4为44个backend/frontend路径：生产摘要`7013f93fee614367d375c9a7f81ed28141a756faf1a6855a7f539e4037fa7108`，变更集合摘要`df73e71f7ca9dbef23dffcb40f1cb6f96904b33bac4ab68f25a4048938c852fc`。全diff及v2–v4全部增量按独立SPEC→fresh QUALITY批准，父/SPEC/QUALITY核44文件0漂移；16Python AST通过，020/021/022已应用迁移无变化，无SDK或CI优化改动。另3份父维护文档。实施者最终确认全部已知测试/build进程已退出，DB58064正式交还idle、容器保留；私有`task7-final-handoff.json`与`task7-final-verification.json`均已更新v4，含精确命令/日志/源码绑定和双复审通过。具备本地提交条件，SHA稍后据实补录。Tasks8–11继续：真实切换CLI仅独占演练、真实模型/浏览器同一8D和同份compat均未签；无推送/合并/部署或用户环境切换。
+
+Task7精确47路径已本地提交`d14d9a67868078ca5a808868be57ccb9ed4f3cb5`（1282新增/85删除），提交后工作树为空，149本地链接/21锚点与47暂存blob摘要逐项核对通过。首次复合暂存命令自动审批到期未执行，不当成风险拒绝或业务失败；允许的一次窄化git add重试成功，随后本地commit成功。已启动全新Task8实施者，DB58064按需独占，父仅文档/复审不DB；接续持久关准入/排空恢复/旧入口退役，无push/merge/deploy或用户环境切换。
+
+### Task8已启动与切换合同早审
+
+全新实施者基于干净`d14d9a67`独占58064，开始实际写路径与TDD。现有append-only `capa_r6_entry_switches`支持空表legacy/epoch0→独立短事务追加draining/epoch1→排空后追加switched/epoch2，无需为状态机新增DDL。独立SPEC批准方向但保留必要条件：独立nonblocking operator协调锁与business shared锁分域；close提交后再等exclusive，超时/退出不撤销draining；业务只缓存同一实际root transaction准入、内部commit后的新事务重读fresh READ COMMITTED；T前核清实际事务结果/审计，不把锁空当已核清。演练/正式文书仅声明expected，实际环境/owner/DB代际/build/role/旧实例停用和结果清单须由受信adapter验证，_test后缀或输入boolean均不足。状态机真实并发/CLI尚待运行；legacy sourceS在pipeline到cache/adopt间的可信绑定仍在核实，如必要追加023须先技术早审，不能改已应用DDL。
+
+Task8首批真实业务RED已复现：switched下旧无版本PUT仍200、五个旧route未按预期410；补业务/route准入后正常员工API边界首GREEN6/6（`api-20261116T110619980380-receipt.json`）。此组仅边界fixture，不代替真实close/drain/CLI证据。独立committed演练将使用专属provisioned tenant/schema，不靠外层rollback或重置immutable ledger恢复。trustedS拟追加023仍在早审，未写/应用；权威resource/build/inventory adapter和完整并发/恢复用例实施中，尚不签Task8。
+
+023实际public/tenant字节结构早审通过，补ORM后parity复核仍待，未prepare。早审另发现switch实现不能把lifetime全部admission超过1000当永久无法切换，也不能等排空后仅复用旧TenantBinding代际；实施者接受，拟用真实原子completion/aborted结果加count/digest汇总，并追加>1000历史与等待期间代际变化反例。上述为实施中的静态发现/技术修正，不冒称已运行通过。
+
+023 actual pair＋ORM独立SPEC准prepare后，独占public首次prepare exit0（`run-1794827554363359000.log`），public从22→`20261116_r6_legacy_capture`。父记录成功后public SHA256 `35cc07bf496fb6fc81eeef19c365e1105d9c0b33ebe45c43ac748acfff94f51c`、tenant源码SHA256 `60bf8400a1a56473002e24b47af5449298c60d85b931946a46e0994b7128c10c`；此后pair保持immutable，后续DDL修复只能追加配对版本。父核020/021/022六DDL0漂移。tenant `tv023_r6_legacy_capture`已源码/parity早审，正常provision实测待下一API组，不把public成功代替tenant运行证据；完整migration/history/parity与Task8runtime仍待。
+
+正常tenant provision已真实从tv022→`tv023_r6_legacy_capture`（`run-1794827909071039000.log`），23pair与已冻结摘要一致。同组独立RED是无可信绑定旧候选实际200而非409（`api-20261116T111829570997-receipt.json` selected1/failed1），不把tenant成功升级冒称业务测试通过。trustedS runtime及实际CLI已写，双连接timeout/结果恢复、kill/PGblocking、完整capture/R5身份与前端接线待。早审实际adapter新增三项Important：缺exercise_id/expiry且purpose被重写；build标识未绑定确切完整执行物/来源/config、source清单可任意单文件；Dockerowner/DBrole不能证明应用合成环境role。已要求真实build/launch收据、完整冻结manifest/当前PIDstart与隔离部署role绑定及错误purpose/过期/构建不符反例；未签最终C8。
+
+Task8实际CLI/API首组10项取得9pass/1fail（`api-20261116T111856576970`）：真实close→finish等待超时→新HTTP503→旧writer commit→fresh process finish/幂等接续通过；rollback分支事务状态查询SQLSTATE22000仍失败，保留诊断，不用未知状态伪settled。前端正常页switched隐藏旧D4/草稿、手工材料/epoch显式提交及API完整组14passed（`task8-green-v2.log`），未代全前端。I1错误purpose/缺expiry/exerciseid仍接受已真实RED（`api-20261116T112251467211`）；I2/I3构建/launch与应用role权威绑定实施中。capture7新用例、kill/PGblocking及R5inflight与全回归仍待。
+
+rollback分支SQLSTATE22000已定位为asyncpg的xid8参数类型（str而非int），不是数据库未知事务结果；只修绑定为int(xid)，继续要求PG真实outcome及原子completion audit，临时私有instrument已移除。完整重跑尚待，不能把诊断成功代替测试通过。V/P为保留安全人工能力，正常proof创建/更新合同不改，switched正常场景回归待覆盖。
+
+修正xid8类型后fresh18组真实PASSED/selected18、0skip/deselected/fail/errors、exit0/88.42s（`api-20261116T112807616397-receipt.json`，父独立核安全字段）。涵盖真实CLI commit及rollback timeout/resume/replay、capture条目/文本/来源版本/撤权/目标变化与DB immutable UPDATE/DELETE。frozen_sha为空，当前为实施中源码，不伪绑后续提交。I1已补strict purpose/exercise_id/timezone expiry；I2完整固定runtime roots内容摘要与source/executable/config/schema构建artifact；I3独立签名launch/PIDstart/command/executable/build/config/owner/deploymentrole与syntheticlease及实际Dockerowner/loopback绑定，现交SPEC定向复核，不能先冒称验收。另expanded27组正在覆盖kill/PGblocking/7authority反例和partial beforeAdopt，R5inflight/完整回归仍待。
+
+expanded27随后真实PASSED/selected27、0skip/deselected/failed/errors、exit0/196.77s（`api-20261116T113157053675-receipt.json`，父核安全字段）：包含真实PGblocking、kill operator后新HTTP503及fresh resume、7authority反例，以及beforeAdopt PUT已提交→真实switch→POST410保留部分历史。此时purpose literals仍为实施中旧值，随后对齐固定r6-rehearsal.v1/r6-release.v1须重跑受影响完整文件，不把旧27冒绑最终源码。adapter合成fixture由实际pytest/ASGI进程及同一candidate/compat artifact证状态机，不代Task9/10真实双进程/双构建兼容验收。继续加强真实业务服务暂停commit场景、R5inflight及独立genoff保持manual/history/phase不回退，整批未签。
+
+Task8新R5 inflight原生独立组2/2PASSED、0skip/deselected/failed/errors（`r5-api-20261116T113910852918-receipt.json`）：实际CLI drain/switch后旧model binding/profile/receipt/run/lease身份不变，原command授权重放一次，新兼容command继续原run。R6_GENERATION_ENABLED=False实际infer先RED200而非503，修后拒新infer、已有pending withdraw及普通manual PUT仍200（仅scripted localhost provider，无真实云模型）。purpose code/fixture已对齐r6-rehearsal.v1 / r6-release.v1；需最终重跑。正式文书另实际RED：仅c9/c10字符串可被接受，当前正补完整release绑定/schema与独立批准身份/registryartifact匹配；不把尚未验收的formalmanifest当放行。manualconflict UI及更强真实业务暂停commit/完整回归仍待。
+
+Task8必要过期恢复合同早审通过（待实施/运行验收）：显式renew同operation、旧docdigest/draining epoch与固定全部目标构建身份，仅新expiry+resume_of，受信登记准确新digest（formal另新独立批准）。独立短txn/nonblocking operator追加draining→draining及old/newdigest/epoch/actor审计；不要求expired前文书变valid、不resetlegacy、不等exclusive。同文书unknowncommit幂等先认持久newdigest，竞争仅一胜；旧finish等待后见续期epoch/digest变化拒，不承借新authority。已同步规格§6/计划§2.3与C8-RENEW，四项及§12产品决定不变。
+
+父随后读取新收据`api-20261116T114309730985`：28/28PASSED、0skip/deselected/failed/errors、exit0/200.72s。当前仍是renew等增量前的完整组，具体源码适用待实施者最终绑定，不冒称最终Task8生产或续期已受测；最终freeze后仍须足量回归与双复审。
+
+实施者补充28组源码适用：已对齐准确purpose、强化formal binding拒绝仅双hash字符串；并将早期raw SQL writer换成真实`capa_service.update_capa`在原commit前暂停，实际核对正文/Root revision/UPDATE audit与PGblocking、kill、commit/rollback/resume，仍为28PASS。其后renew实现及新capture canonical idempotency正跑targeted RED/GREEN；需服务端将captureID绑定真实旧adoption历史，防client metadata变参造成重复或丢完整S链，并按当前来源受权读历史。生产尚未最终冻结，不以旧28签后续增量；准备冻结后SPEC只读与串行完整回归并行。
+
+已确认known legacy capture S必须跨后续正式文本/历史/派生保留，而非preT验权后丢link。无新DDL的授权继承方向经独立SPEC批准：仅new bound adoption，按D4/legacyD5字段分域，不扩大至无关R5独立措施A或Root-only读取；source capture/adoption metadata先行授权，ordinary_capa_predicate须SQL排除后再批量取正文，embedding/export/cache/provider/inflight及新adoption audit文字均受保护。采纳时严格freshness与之后历史current-authority分开，正常来源编辑不能永久封死有权历史；manual替换不脱离已知限制；完整S不能被旧R5证明表达时正文出服务端前拒，不造R6proof/origin。未知旧历史仍unattested。此项runtime实现/全回归待，未签Task8。
+
+Task8首版候选源码freeze v1已生成，独立最终SPEC全diff只读复审与串行回归并行。父核1185 runtime-tree文件摘要`095f01b269fd0a02b83d1b33871cbc716521ea8efa1fefcff1f70d7b11bd1dd2`和60本批non-doc路径均0漂移，55个Python AST通过；这是runtime-tree摘要（含其目录中的测试），不冒称纯生产摘要。knownS回归强度检查临时撤guard确实200而非403，finally恢复`capa_legacy_capture.py`原字节SHA256 `15e9367856bbf8a12a6a6ede10e6854d520e125502d60ce4284402dab32dfaf7`后才冻结；明确不是初始TDD，未删source事实或改DDL。postrestore GREEN及renew竞争、genchange/>1000、完整受影响回归仍待，未签Task8；若生产再改须重新冻结/增量复审。
+
+最终SPEC v1尚未批准，发现两项Important：①文书仅CLI等待前校验expiry，finish等待跨expiry后仍可能T，须服务层authority-use/等待后/append前重验；②前端409时observedEntryPhase=legacy持续覆盖随后refreshed switched报告，旧AIpreview可借新epoch/material经PUT提交，须同步accepted report/phase/epoch并在学习非legacy后清空/禁用旧preview/panels/undo。实施者已承接真实RED→修复，v1将被v2取代，完整回归待当前组结束后基于修复版跑，不签v1。
+
+最终SPEC第三项Important：新knowncaptureS未完整纳入local6B source_coordinates/eligible，典型无R6origins/formal/local的boundlegacyadoption eligibleFalse而旧D7/D8 guard已拒，造成授权员工无法正常手工结案；outcome source_versions仅在独立D5更正存在时才收capture parents，漏普通knowncapture审核版本绑定。已要求真实knownsources进入local/manual完整材料/资格，normalD7→manualgate→review及来源变化旧屏拒，不能造proof/origin或以永久阻断当manualfallback。若现有typed持久合同确需新DDL，先早审追加24，不改已应用23；目前仍实施修复未签收。
+
+**I3复核纠正**：独立SPEC在完整调用链复读后撤回上述广泛FMEA资格与版本漏收判断：`_r6_source_coordinates→local.source_coordinates→eligible`已包含实际FMEA captures，`_source_versions`后段亦无条件经local source_coordinates收父版本，无须重复更改此合同。I3唯一有效剩余是CAPA-only/零FMEA且无R6origins的known capture：semantic_inputs已有CAPA完整材料，但local资格/witness入口不可达，仍需安全可用正常结案路径。父已同步实施者与状态，不把被撤回的静态误报记为业务RED；I1/I2独立仍有效。
+
+CAPA-only有效I3拟追加024技术方向经独立SPEC批准，actual pair/ORM仍须字节审后才apply：local_sources显式真实CAPA来源列与module约束，旧FMEA/planning null兼容、原immutable/count保护保持；CAPA source_count>0不造022 Root witness/FMEA/proof/docversion。原capture-time CAPA scope须真实保存，缺失旧行不按当前scope回填；当前完整来源metadata-before-body、cycle/depth安全遍历及sorted/NOWAIT父锁、等待后token/权限重验，CAPA不进入文档candidate/version resolver。要求正常CAPA-only采纳→local D7/manual D8、撤权/来源改/旧form/cycle及旧6B回归。提出source_capa FK RESTRICT仍需实际核对既有wholeCAPA可删除范围，不默改已有删除合同；尚无024应用。
+
+024删除兼容实际核对：当前无生产CAPA DELETE route/service，raw whole-CAPA删除仍为历史/fixture既有行为；新增sourceCAPA RESTRICT确会增加新pin。实施者提出保留原语义的typed UUID＋module/object_id约束、不新增sourceCAPA FK变体（待SPEC）：写时真实parent存在/scope/currentfullsource在父锁下验证，immutable UUID/captureHMAC保留；来源之后不存在则current read/gate/approve failclosed，不把缺源当空、也不SETNULL/cascade改不可变证据。无产品删除权限扩张或新限制，pair尚待早审通过后写/复核。
+
+I1真实RED（等待跨文书expiry仍finish exit0而非拒）修复服务层后，fresh13/13PASSED、0skip/deselected/fail/errors、exit0/87.61s（`api-20261116T121539352221-receipt.json`，父核），包含过期finish拒→新validrenew→恢复及knownS/canonical/currentauth-vs-freshness；这是024前定向组非最终全量。I2真实前端RED是legacy409→switched refresh后产生第二次PUT（应仅第一次），已以monotonic phase/synchronized acceptCapa＋writerorigin防御修复，71组件组运行待结果。
+
+024 actual pair＋ORM字节/类型/nullability/命名CHECK/23→24链/Down保护经SPEC通过，可ownedprepare；两nullable source_capa_id UUID、source_capa_created_at timestamptz及modulecapa iff非空/ID相等，旧FMEA/planning两列NULL；不新增sourceCAPAFK，原report/revision/factory FK不改。旧immutable/count/022snapshot函数原样保留，非空CAPA身份记录Down拒；尚未实际prepare成功，预应用hash仅作待核，不当成功摘要。
+
+024独占public首次prepare exit0（`run-1794831700721957000.log`），public head为`20261116_r6_local_capa_sources`。父冻结成功后pair SHA256：public `47648e8ac7278e2741d3d5e3f615137fb1d5053d9cd3051025b072f8dcd15e0e`、tenant `b0635662f04da991c7d3c90b8566fdd1cbbf360b1f684c9bffae905a5d2198ad`，此后24同样immutable，后续DDL修复必须追加配对版本。tenant tv024正常provision尚待，不以public代替。I2新测试已不产生第二次unsafe PUT，但隐藏Antd modal仍缓存旧正文，实施者另补物理卸载并重跑，不能只签按钮不可点击而留受限旧内容。
+
+正常tenant已真实provision至tv024（`run-1794831919718446000.log`），24pair摘要未变；同组I3 actual RED是正常CAPA-only采纳→人工验证/手工D5→D7后local eligible仍false（`api-20261116T122520698115` selected1/failed1），不是迁移失败或假源fixture。runtime真实CAPA typed来源仍在补。另确认CAPA parent此前generic material_version含tenant switch_epoch会令批准业务签名随cutover/renew变化，v2改为独立排除此行政状态的semantic fingerprint；仅真实非空knowncaptures才新增local binding键，空集合保持既有6B/v1/v2签名shape。需normal已批准CAPA-only跨真实switch/renew仍verified及旧无capture local回归，未以实现说明代替结果。规格/计划已同步。
+
+I2真实unsafe PUT（2调用而非1）修复后前端完整CAPADetailPage既有＋new R6＋capaAPI组79/79passed（`task8-phase-green-v2.log`）：accepted CAPA观察monotonic phase，迟到legacy不能降级已学习nonlegacy，旧D4/D5 preview清空/物理卸载，legacy_ai writer origin在附当前token前被拒。source typed CAPA/module/incarnation与业务semantic排除entryepoch已实现，当前开始正常CAPA-only手工链GREEN，不先当完成。024 bytes保持immutable；最终全前端/fullgroups与v2复审仍待。
+
+024 runtime已实际让CAPA-only正常链进入eligible/local prevention/propagation/D7Completed/D8Gate/manual分析，确无FMEA或Root witness；最终confirm/approve/跨实际CLI close-renew-switch验证receipt仍在跑。case中test直接读可选root_snapshot_revision_id KeyError已改.get以断言真实不存在，不造字段。另两反例GREEN：whole source CAPA删除无新pin，local immutable bytes未改，删源读拒、同UUID重建且真实created_at不同仍拒；源CAPA允许的D8补充编辑后旧manual form409、历史保留，刷新新表单可正常追加。不是整批最终组，等待最终positive和freezev2/完整回归。
+
+CAPA-only正向整链已真实GREEN（`api-20261116T123515641300-receipt.json` selected1/passed1/0skip/deselected/fail/errors、exit0/19.15s，父核）：正常legacy采纳→人工V→manual D5/D6及正常D5/D6/D7推进→本地prevention/propagation→D7complete/D8gate→人工分析（无FMEA/Root witness）→独立空清单确认→review/approve，再actualCLI close→renew→switch，同已批准report的binding_status仍verified。源删除/同UUID重建及合法源补充编辑旧form两反例亦GREEN（此前2pass/1optional-keytestfail已保留，最终正链修.get而不造witness）。仅控制provider与合成输入，不冒称Task9真云模型/实际双部署。
+
+Task8 production candidate freeze v2完成：1187 runtime-tree digest `8b9e644033ea185aec2366a0722f8f292b36e050a956eaca67fbc4d0c770cce5`、63本批non-doc路径，父核两集合0漂移、58Python AST通过。最终SPEC增量与串行完整primary suite并行，后续尚有完整migration/R6/legacyrecommendation/native/frontend等回归与fresh QUALITY；不得以旧v1/28或本正链一例签最终Task8。源码再变须重新冻结和复审。
+
+最终SPEC v2生产增量APPROVED：I1服务require_live_evidence与等待后/append前重验、I2monotonic accepted phase/legacy_ai writer/物理卸载、I3真实CAPA24/原scope＋created_at身份/锁后权限/local semantic排除entryepoch及empty旧shape均对齐，63变更hash0漂移。整体Task8验收仍缺competing renew、等待中旧finish被renew作废、wait期间tenant generation变化三个明确反例及完整回归；已要求补实施/运行与测试增量复审，不以source批准签整任务。fresh QUALITY待测试义务补齐后触发。
+
+三条缺失反例已补test-only并经SPEC结构复核：两独立注册文书真实CLI竞争续期仅一胜/单audit/重放/finish；真实业务writer持shared并确认PGblocking后renew，释放原writer，旧finish拒而新docfinish；wait期间真实public tenant generation变更，原writer正常结束不kill，旧finish及旧binding新进程均拒，正确新binding只读真实draining/noFinishAudit。完整source/SPEC结构已APPROVED，可进入fresh QUALITY；实际三targets运行与完整primary/broad回归、v3测试hash仍待。全新QUALITY已启动，未签最终Task8。
+
+第二版完整primary四文件组真实PASSED（`api-20261116T123757820721-receipt.json` selected40/passed40、0skip/deselected/failed/errors、exit0/330.22s，父safe字段核对），覆盖原已收集切换/legacycapture/manualversions/releasemanifest全组，含1001实际独立admissions。该组收集后另追加三必要测试，不把40收据虚称覆盖新三例或最终testhash；新增三targets将独立串行补证。fresh QUALITY已在只读全diff，完整migration/R6/legacy/native/frontend受影响回归仍待。
+
+Fresh QUALITY新增Important（未批准整任务）：`_record_admission`持原业务connection/shared锁时，从同一有界`db.bind`池再借独立witness连接，primary并发占满时互等第二连接会使健康DB超时。已要求实际pool饱和RED与独立有界见证预算/保留路径，不无界建engine/连接；tenant binding、independent start durability、atomic原业务completion及pool lifecycle不变。当前三并发v2组可先正常结束，之后pool修复/新freeze再跑完整affected，避免把v2收据绑新生产。
+
+三新增真实CLI/PG并发反例独立组已3/3PASSED、0skip/deselected/fail/errors、exit0/29.43s（`api-20261116T124744393474`，父核）。Q1真实有界primary pool2/overflow0/0.2s饱和RED后，独立lazy witness预算1/overflow0/5s实现；原configured creator保持SSL等配置不打印URL，RESETsearch_path与原TenantSession registry/gen校验保留，parent dispose清独立池。初GREEN1 `api-20261116T124914055501`；增强同target最后GREEN1 `api-20261116T124957185733`验证2primary同时持有仍并发准入、独立2starts/0completion、随后1commit/1rollback、错gen拒后正确binding复用及dispose池空。两收据独立不叠加，父safe字段核均0skip/errors。
+
+v3 runtime-tree 1187摘要`974b9e5a543944350781749e80261b7853673917846d02b174b1064814b669c3`，63变更hash0漂移；唯一生产delta为capa_entry_switch.py，独立SPEC增量APPROVED，QUALITY Q1复审中。full CAPA目录＋manifest组串行推进中（`run-1794833423246862000.log`），其后完整migration含新增23/24 bounds/typed/noFK/immutable/nonemptyDown测试、recommendation/native等；test-only增量最终再冻结。前端affected26文件262passed、build exit0；changed lint exit0但8warnings，whole lint exit1有4errors位于未改e2e/auth.ts、characteristic-correction.spec.ts两处与FMEAEditorPage.tsx，保留限制不冒称整仓lint通过。最终全部receipt与源码等价核待，不签Task8。
+
+Fresh QUALITY Q1增量source APPROVED，独立核v3生产0漂移，无新Critical/Important；reserved witness独立预算解除循环等池，namespace/gen/RESETpath/dispose及真实饱和回归充分。当前实现单连接串行、5s见证checkout超时，复用SQLAlchemy private `_creator`保既有connect_args，依赖升级须保留此回归；不把此维护注意伪称当前失败或无界预算。整体批准仍待完整serial验证及最终test freeze。新增test-only 23/24 storage-contract与switched正常D4候选→员工确认→V/proof→PATCH原生路径待nextserial组，须逐项新证据/测试增量复核，不把此前40＋3收据伪绑定新测试。
+
+### 运维命令接口（Task8代码已复审；用户环境未执行）
+
+当前受控客户端为`backend/scripts/r6-entry-switch.py`，不传子命令时只读status。受信部署提供`R6_SWITCH_AUTHORITY_FILE/KEY`及实际连接配置；操作输入只声明expected，不代替签名登记、当前DB/租户代际、实际进程/构建和结果核清。此处不给未产生的正式构建或授权填值。
+
+1. `status --tenant <实际租户UUID>`只读持久state/epoch/operation_ref。首次操作前核对独占演练`r6-rehearsal.v1`或正式`r6-release.v1`文书与准确目标；演练文书不能用于正式/未知环境。
+2. `close --tenant <UUID> --actor <获准操作者UUID> --operation <持久操作UUID> --document <受信文书路径>`独立提交停止准入；仅成功提交后返回持久引用。
+3. `finish`带同一组目标/actor/operation/document参数及`--timeout-ms`等排空并核清结果后完成切换。exit2表示仍待排空，不表示旧事务已回滚；exit1拒绝或结果未知时先status查真实事实，不重开legacy或换operation盲重放。
+4. 关闭后文书过期，通过独立签发、登记准确摘要的新文书执行`renew`，同operation和resume_of绑定旧摘要/当前draining epoch；续期只追加draining新版本。随后新进程使用最新文书finish；旧等待者不能继承新授权。
+5. 故障停止R6新生成由`R6_GENERATION_ENABLED=False`的已登记进程配置控制，须核实际API/worker生效；不会把switched改回legacy，已有受权撤回、更正、手工及历史读取仍按服务合同提供。部署回退只到Task9/10登记并验收的compat，保持新Schema及已采纳/已更正数据，不执行schema downgrade。
+
+本接口说明不等于正式放行。C9/C10真实双进程、同数据兼容与最终全量仍待后续任务，正式目标和独立部署授权另行具备；本轮不执行用户环境命令。
+
+Postv3 test-only结构复审发现reverse-cycle fixture无法走到所称adopt：生成capture时已有knownCAPA材料先被真实legacy-delivery guard拒。已诚实改为验证此pre-generation拒绝及零新capture/adoption/业务audit/Root变化，不造合法capture、不绕guard或冒称reverse POST已测。23另新增one-item JSON>256KiB负例，原1001smallitems只证数量边界；24typed/noFK/down与switched native V/P结构已对齐。修后test-only增量复核/实际运行待，生产v3不变，原full组继续原已收集集合。
+
+修正版postv3三test文件当前hash经SPEC及fresh QUALITY结构复核均APPROVED，无Critical/Important；真实pre-generation拒绝零副作用、23数量/字节分离、24typed/noFK/down和switched正常V/P route目的明确。实际serial执行仍排队当前full组后，未签runtime PASS。v3全1187及已应用23/24pair再次0漂移，当前材料/来源继承回归在推进，无生产/DDL更改。
+
+**首次完整CAPA v3失败，保留原结果**：`api-20261116T125023849664-receipt.json` selected1702、1643passed/59failed/0skip/8deselected、exit1/2309.26s（父safe字段核）。不把此组记PASS，也不把59全归夹具：已有旧裸采纳positive和操作见证snapshot合同差异，另实际出现public test DB的cached witness跨event-loop RuntimeError，terminal/wait失败亦待逐项诊断。原完整日志保留，当前进程已退出；运行问题须复现/修复/新freeze与SPEC→QUALITY增量，再受影响完整组补验。当前生产v3虽静态双审通过，仍未通过整体运行验收，Task8未完成。
+
+59项中runtime根因已定位：原global/public测试引擎采用NullPool以支持不同function event loop，但新见证clone强制QueuePool，缓存前loop asyncpg连接导致真实RuntimeError。非assertion夹具问题。拟镜像原NullPool策略并保独立全局有界witness预算1（非阻塞协作获取/monotonic超时/取消finally释放）；普通pooled origin仍reservedpool1，SSL creator/tenant/reset/gen/dispose合同不改。真实两不同loop共享NullPool origin先RED→修复→GREEN，再跑饱和与剩余phase/wait分类；须新freeze和双审，不将其余59未诊断项先算已解决。
+
+跨loop真实RED收据`api-20261116T133205131270` selected2/1pass1fail/0skip/deselected、exit1/12.52s，第一loop通过、第二loop RuntimeError。修复镜像NullPool＋per-origin普通Lock有界预算1、非阻塞协作等待/monotonic5s/finally释放；普通pooled origin保持reserved1/0/5，configuredcreator/reset/tenant/gen/dispose不变。fresh3/3PASSED、0skip/deselected/fail/errors、exit0/16.21s（`api-20261116T133301884273`，父核）覆盖跨loop与饱和隔离/清理。新增真实PG holder/waiter取消后新准入可commit测试结构已过，实际运行待；不kill已准入业务writer冒排空。
+
+v4 runtime-tree1187摘要`908078e804142314039b67a74366e1a812e5fb37230b8298f6e19aa9948771da`，65non-doc变更，唯一productiondelta仍entry_switch.py；父runtime0漂移、SPEC全部变更hash0漂移。v4 SPEC增量APPROVED，QUALITY增量复审中。首次full59中其余phase/wait及fixture差异仍逐项诊断，不把3GREEN冒称全部59修复或整组通过。
+
+v4 source/test结构双审均APPROVED后，受影响完整subset `api-20261116T133442455757`为54passed/10failed（selected64、0skip/deselected），不是通过组。cross-loop/取消/饱和及旧D4/D5推荐完整组通过；8phase-wait＋2visibility mapping仍失败，正用boundary-or-task-failure helper获取真实早期异常，未将其归免或统一改任意早失败。是否为既有合法guard导致旧fixture不可达须据trace核实，provider-inflight/lock/revoke本意仍须真实可达路径或明确替代证据；完整migration/reco/native待。
+
+后续两精确等待case诊断`api-20261116T133848454746`均在既有6B `_d8_doc_gate_gate`以“受限报告请先完成人工文档影响分析”早期ValueError拒，非Task8 pool问题。普通provider并发fixture现从一开始以真实FMEA/CP gate版本引用、不创建known verification attestation，断言local eligibleFalse；受限D7分支保原known验证源和manualguard/0provider，未删除或清空immutable来源。原provider等待、真实PG父锁、撤权/rollback/顺序断言保留，增强boundary helper只用于暴露真实早期异常。完整concurrency文件正在重跑（`run-1794836459793268000.log`）；不把两诊断泛化其余10或visibility两例，结果仍待。
+
+完整concurrency重跑`api-20261116T134100553916` 51passed/1failed（selected52），原真实provider等待/撤权、ordered PG锁与generation wait均通过。唯一D8 source-version在真实FMEA gate source变化后按既有“文档已变更，请重新审核”stale ValueError先拒，拟精确匹配该原因并保wait/PGblock/zeroeffects，随后完整52再跑。两visibility mapping已按unchanged `egress_guard.with_delivery_guard`诊断：physicalprovider后任何guard LookupError被安全统一为PermissionError D4_DELIVERY_UNAVAILABLE/API403，非preprovider404；只改精确post403，preprovider404/0calls保持，post调用数/不返正文/业务snapshot保持，不宽泛403或404。完整source相关文件补验及最终双审仍待。
+
+真实rollback恢复用例发现新的runtime漏洞：legacy adoption IntegrityError handler rollback后直接_find_existing/lock_capa_parent，新事务未重准入。须fresh namespace/当前actor/target＋完整source metadata授权、admit legacy后再历史bodylookup/parentlock，等待后再验当前权限；若rollback间发生switched须410，draining拒。授权同capture真实成功history的幂等重放先于新写strict freshness，否则自己/competitor成功后target变动会误拒；canonical/HMAC仍校验。新增实际PG唯一约束冲突＋genuine competitor同capture成功及rollback→switch→retry410，不能forge capture/history或重置targetmaterial。此为真实生产修复，需新freeze/双审，不归fixture。
+
+回滚gap真实回归强度RED已证明v4：`api-20261116T135549335601` selected2/0pass2fail，真实PK violation→原事务rollback→competitor真采纳同capture→actualCLI draining/switched→原请求恢复，旧handler未给503/410而返回existing adoption。不是声称已发生新formal commit，而是新事务旧写口绕过当前准入。测试前验证exactv4 service字节，finally恢复provisional guard hash `dba8f438052b53aef3e66dbe7427f6efbede7d588c72ebd02f321f156f8fa195`；未伪造capture/history/model或改source事实/DDL。正在完成metadata-only current-auth→重新admit→parent/source/ACL锁后重验→existing正文，SQL-before-body断言保留，新v5待。
+
+回滚六真实场景freshGREEN（`api-20261116T135858055689` selected6/passed6、0skip/deselected/fail/errors、exit0/36.18s，父核），含actualPK失败/rollback、真competitor同capture成功、当前授权/terminal/invisible真实parentwait、实际CLI draining503/switched410、SQL禁止重试等待前raw adoption/Root body。v5 runtime-tree1187摘要`89fa79f94d1e26607d1c91ed88c26b5ef8c698be814245f640cf9fe9bd9955b9`，76non-doc变更；source及fixture增量SPEC APPROVED/hash0漂移，QUALITY增量中，11完整affected文件组在跑（`run-1794837733406040000.log`）。
+
+授权/锁说明收口：v5 retry helper为current namespace/actor/fullS metadata授权→fresh legacy准入→target/source父锁与等待后live ACL复核→私有existing/Root正文，未新增explicit employee ACL-row lock；之前概括“ACL锁”不作代码事实。授权existing重放仍先于新写strictfreshness，但后于当前权限与source/target等待重验，history不重捕获。ordinary fixture真实FMEA/CP从开始不造knownV、restricted分支保留源，rule positive真实servercapture且assert真正empty externalS；snapshot只排switch表R6_ENTRY_ADMITTED、保COMMITTED及全部业务audit，精确错误映射/原并发目的均经SPEC核。其余完整运行与migration/reco/native仍待。
+
+v5 source/fixture双审后11完整affected文件组`api-20261116T140213877650` selected312、311passed/1failed/0skip/8native deselected、exit1/494.09s（父核）。capture/replay/source-lock/version-vs-auth、真实rollback6、concurrency52、visibility mapping、atomic snapshot及旧positive API/service/Root全部通过；唯一旧public TOCTOU fixture teardown尝试删除immutable R6 material counter被拒，不是核心行为失败，但组仍exit1不改写。拟将整份真实双事务case迁到正常provisioned专属tenant、最后drop-owned-schema清理，保原锁/当前权限目的，不disable trigger或删不可变事实。原public合成残留按owner private ID清单保留/隔离，不能改业务状态、伪归档或reset历史藏数据；必要时fresh独占资源跑freshpublic组并保旧卷。fixture增量及完整补验待。
+
+TOCTOU整文件迁正常ownTenant/drop-schema后5/5PASSED、0skip/deselected/fail/errors（`api-20261116T141538993103` exit0/9.73s，父核），未禁trigger或删除counter。原case实际为两独立**顺序**事务＋旧ORM identity map，原本没有SQLSpy或PGblocking断言；先前“保留原锁观察”泛称不作事实。新增distinct backend PID及schema-qualified兼容raw-body/FORUPDATE观察positive control，并为真实rollback6 absence检查补可命中正控，沿既有SQL metadata/hash与原始正文区分规则，之后完整相关files再验/测试增量双审。生产v5无改动，public残留仅owner read-only清单待。
+
+最新正控整组`api-20261116T142240170466` selected12/passed12、0skip/deselected/fail/errors、exit0/45.38s（父核）：整TOCTOU5＋真实rollback6＋独立read-only inventory probe1；探针不冒充业务验收。新增SQL observer positive controls确保正文/parent FORUPDATE实际命中，schema-qualified且metadata/hash投影与raw正文区分，absence断言不vacuous。owner private `task8-public-fixture-inventory.json`仅列1合成public actor/2reports/2immutable counters，public switch ledger0；事实原样保留，无业务/source/phase修改，临时probe已移私有文件。
+
+v6 test-only冻结仍1187 runtime摘要`89fa79f9…`及76变更paths，生产v5不变；SPEC fixture强度增量中。完整tests/migrations＋whole reviewed_writes/post_review_fixes已单组串行启动（`run-1794839100190315000.log`），推荐/原生其后。父diff-check发现post_review_fixes182/188/201仅空白行尾空格，已要求去除，最终testhash需更新，AST等价不据此重跑无关组。整Task8仍待后续完整receipts/最终冻结与交还。
+
+完整tests/migrations＋两个完整reviewed_writes/TOCTOU组`api-20261116T142500657923` selected496、486passed/10failed/0skip/deselected、exit1/1436.44s（父核），保原失败。trace十项为旧currentHEAD/ancestor断言期待19或链遗漏23/24，未见DDL/runtime失败；23/24storage及两个完整写入文件均实际通过。只同步真正current head/完整祖先链的4个受影响测试文件，显式target19/22/23历史升级、损坏拒绝与已发布迁移合同不改，不动10个已应用DDL。完整4file重跑及testdelta双审待，其余已过节点保原source等价限定，不改原496收据为PASS。
+
+v8四migration-test增量经SPEC→fresh QUALITY均结构APPROVED/hash一致：mainline DB仅最终alembicversion19→24，supplier风险仅current head/message19→24，refreshsessions仅PUBLIC_HEAD常量（REV/DOWN_REV/发布filename不变），graph currentheads22→24且精确祖先集合追加23/24；历史19/22/23 targets、prior published edges及损坏/upgrade/down断言未弱化。79变更paths、1187runtime仍v5`89fa79…`，无production/DDL变更。完整4file recheck运行中（`run-1794840629772548000.log`），未用结构批准代运行PASS，推荐/API/native及最终冻结仍待。
+
+完整四migration files重跑真实20/20PASSED、0skip/deselected/fail/errors、exit0/23.07s（`api-20261116T145030630925`，父核），先前10个currentHEAD/ancestor失败均有实际后续pass；完整496组仍保486pass/10fail原exit1，历史DDL不变。接续sole27target普通API层：完整singular/plural recommendation目录、hybrid/recommendation/draft服务/API/schema、实际D4/D5推荐API文件及受影响task/service/control/D4/D5 runtime API文件（`run-1794840835156162000.log`）。native按既有marker分层排除后另组真实执行，无真云模型调用；最终收据/原生/冻结交还仍待。
+
+27targets推荐/草稿/runtime普通API组首跑失败：`api-20261116T145357170754-receipt.json` selected562、538passed/24failed/0skip/46native deselected、exit1/2108.15s（child pytest2088.65s，父核）。原日志/收据保留，失败含task_controls竞争/finalauth及D4旧texttoken policy变化，必须按实际trace分类，不先全归operational audit fixture；亦核CAPA准入不可无意扩大到其它模块任务（R7未开展）。前述outerprogress99停滞为旧runnerASCII名称过滤/sequence转发问题，child真实完整跑完，不改CIrunner；曾误把log路径作Python脚本触发即时报SyntaxError，无代码/数据/状态改变，已改回仅owner redactor，不把工具误用算业务RED。当前原生及最终交还待，Task8未完成。
+
+定向SPEC复核将scope问题缩小：create_task仅R5_PLUGIN_KEY路径走新增门禁，AgentTask schema/_target均CAPA绑定，未证实R7/其它module传播。真实coupling是control_task resume/restart在读installation/profile前无条件admit current，连既有readonly/旧text profile也加CAPA推荐屏障，draining使安全readonly控制503；相关readonly失败trace为额外R6_ENTRY_ADMITTED而非权限绕过。已要求按server immutable profile/capability识别推荐writer、在business父锁前准入，readonly安全恢复不受此暂停、未知可写profile不依赖client自报绕过；真实draining readonly resume/restart正例与writer503/锁顺序负例，需新productionfreeze/双审。其它24 failures仍按实际诊断，不概括为同一根因。
+
+新API24失败精确分类：9 task_controls过宽profile屏障/额外见证、1旧textpolicy实际校验顺序；推荐14＝1旧裸adopt、8纯Mock（thin2/plural1/hybrid5）、1伪历史CAPA非法UUID、4真实SQL audit fixture缺目标report。真实readonly actualCLI draining→switched resume原RED503修后GREEN，旧textpolicy currenttrial binding现先拒InvalidRunCredential再碰privatehistory；定向`api-20261116T155016021139`2/2PASSED、0skip/deselected/fail/errors、exit0/9.72s（父核）。纯Mock adapter只unit显式optin/非AsyncSession，真SQL保原guard；S=None仍unknown，SQL正例建真report、rule candidate真servercapture、UUID用真UUID，不造source验证。
+
+v9冻结1187 runtime摘要`1c019eb0d34d347410496f31c6d2e79ceccc3f0a4db77524b91d82cc6e0a0bad`、85变更paths；精确delta 8files（2生产/6tests）见private task8-v9-delta.json。SPEC增量APPROVED/85hash0漂移：control由实际写grant D4propose/D5save/replace或immutableR5binding/专用installation识别writer，business锁前准入；readonly和oldtext context controls不进CAPA推荐屏障，未知权限仍canonical runtime auth拒，writer服务本身继续门禁。旧text preview明确readonly/noformalapply，不自动给manual PUT补epoch，CAPA/D5正式Root写仍受current版本/retired服务保护。runtime_access先currenttrialbinding再私有input receipt/history，不放松当前授权。新writer native503-beforeANYFORUPDATE与samebinding switchedresume结构已过、实测待；complete affected API组正在串行运行（run-1794844525448997000.log），QUALITY增量中，未签Task8。
+
+完整native首组保失败事实：`r5-api-20261116T155937893723` selected128、126passed/2failed/0skip/1738ordinary deselected、exit1/1074.86s（child1068.46s），新normal switched D4确认/V/P/PATCH实际PASS。两项精确test-only修正：disabled installation按unchanged run_auth先InvalidRunCredential→exact401，保zeroextraprovider/原授权history/sameonlyrun/oneD5cmd；directservice switched resume补HTTP依赖本已注入的c.session_info既有ControlledPilot，此pilot由真实fixtureartifact+sys.executable的ExecutorApproval.approve生成且绑tenant/gen/install/version/expiry/resolver，不新bool/不伪批准/不改guard。
+
+完整inflight file最终5/5PASSED、0skip/deselected/fail/errors（`r5-api-20261116T161902751747` exit0/61.32s，父核），含实际draining writer503早于ANYFORUPDATE→switched同immutablebinding resume、normal D4/V/P/PATCH再次通过、oldcompatible run IDs、genoff保manual/withdraw及disabledinstall401/原history。v10仅该testfile oracle/context字节，runtime1187与v9完全相同；SPEC增量APPROVED，QUALITY增量中。native其余完整文件126原PASS有明确source适用界限，不把原128 exit1改成全PASS；两失败后续确切node映射/最终drift与资源idle交还待收口，不再启动DB组。C9真实云模型/双部署验收与C11最终新全量仍后续。
+
+
+## 2026-11-17 Task8最终收口（仅C8机制，不签C9/C10）
+
+Task8实现、分层验证与独立SPEC→fresh QUALITY复审已通过；85非文档路径冻结v10，1187执行文件摘要`1c019eb0d34d347410496f31c6d2e79ceccc3f0a4db77524b91d82cc6e0a0bad`，父核源码与10份已应用DDL均0漂移。独立短事务先持久关闭准入、原事务共享锁排空、提交/回滚审计核清、显式安全续期、旧入口410和当前手工版本保护已实现；023可信旧capture与024真实CAPA来源继承保护已配对应用于独占测试库。真实双应用/两个构建和同份更正数据兼容验收仍待Tasks9/10，Task11新鲜全量仍待；本批机制测试不能签C9/C10或用户环境切换。
+
+最终私有交接`/private/tmp/openqms-r6-ky7vrez_/task8-final-handoff.json` SHA256 `4cad72c7a92afc7a8f825c4db8f41c02d6dbac8b2bca141661bec07ac59edac3`；验证`task8-final-verification.json` SHA256 `23ab818eae5d6fede349542aa420cb3df27cc2869a09770dc25e2b6abc69b7bd`；28项证据清单`task8-evidence-manifest.json` SHA256 `6610acf87857794768c57d310e5455daca8d6c07e268bce09f11ce776212197d`。均为元数据，不含密钥/正文；源码冻结`task8-source-freeze-v10.json`。生产v9与v10相同，最后仅inflight测试oracle/session context修正。
+
+| 实际执行组 | 结果及适用范围 |
+|---|---|
+| 推荐/runtime受影响完整文件 | `api-20261116T155526390799`，180PASS/0skip/0deselect，最终源码 |
+| 最终inflight原生整文件 | `r5-api-20261116T161902751747`，5PASS/0skip/0deselect，最终源码 |
+| 原生128组 | `r5-api-20261116T155937893723`，126PASS/2FAIL/0skip；两处仅测试修正后以上整文件5通过，原收据仍失败；其余完整文件在相同执行源码通过，不相加冒充新鲜全量 |
+| 迁移受影响4整文件 | `api-20261116T145030630925`，20PASS/0skip/0deselect；仅更新current-head/ancestor断言，不改历史迁移 |
+| TOCTOU/真实rollback/只读清单 | `api-20261116T142240170466`，12PASS；其中只读清单probe1非业务验收 |
+| 前端 | 受影响26文件262PASS；build通过；510运行文件相对该次测试冻结无变化。scoped lint0/8warnings，全仓lint1/4errors在未改文件，不能签全仓lint通过 |
+
+初始CAPA完整1702组1643PASS/59FAIL，以及后续496组486PASS/10FAIL、562组538PASS/24FAIL、312组311PASS/1FAIL、原生128组126PASS/2FAIL的原始收据与失败均保留。对应逐PASSED节点闭环清单分别为`task8-first-full-failure-map.json`（59/59）、`api-20261116T142500657923-closure-map.json`（10/10）、`api-20261116T145357170754-closure-map.json`（24/24）、`api-20261116T140213877650-closure-map.json`（1/1）、`r5-api-20261116T155937893723-closure-map.json`（2/2）。具体RED/诊断及修复沿用前文，不能把多轮补证算作一次全新完整make。
+
+全部已知测试进程已退出、owned wrapper PID为空，58064资源空闲交回父代理；public早期合成夹具1actor/2reports/2immutable counters保留，public切换账本为0，不删除immutable历史或重置状态。Tasks9/10应新建第三套独占环境并保留同份更正/批准数据；Task11负责最终新鲜全量及明确R6原生必选。尚无真实R6云模型调用、两个实际应用/构建兼容签收或正式放行资格。

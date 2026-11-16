@@ -148,6 +148,8 @@ D5 每次交付前需同时验证 `I + P + 当前全部权限/接收方`：K2/K3
 
 Task 9 冻结两构建并登记 exercise_input（含已实现的测试入口）→真实命令持久关准入/排空/切换→C9 主链→Task 10 同份更正数据 compat 演练/C10→生成 release_manifest→Task 11 完整冻结复核。Task 10 不倒过来要求尚未生成的 release_manifest 启动演练。执行代码/构建摘要改变时重签 exercise_input 并重跑受影响 C9/C10；后续仅写文档仍记录实际源码和执行物对应关系，不能伪称两者 SHA 相同。
 
+文书续期仅使用显式`resume_of={operation_ref, previous_document_digest, draining_epoch}`，新文书准确摘要须受信登记授权；保留同一exercise_id/purpose/目标/代际/构建/Schema/原initial_epoch，正式文书另需新独立批准。只有有效期与续期关联可变，过期前文书按持久摘要核对而不要求恢复有效。
+
 同一 exercise_id 的初始 legacy/epoch 只在首次操作时匹配；持久开始记录把恢复预期推进到 draining，新进程从真实状态接续核对，不把状态重置 legacy。拒绝反例包括：将 exercise_input 发往正式环境/另一独占资源/不同代际、伪造隔离标识、过期/重复改变参数、换构建不重验；以及把没有 C9/C10 的文书当 release_manifest 使用。以上均应在状态变更前失败、无 switch 审计。
 
 ## 3. 分批执行与验收
@@ -448,7 +450,7 @@ cd ../backend
 
 **通过标准/证据 C7**：通过正常登录报告页即可完成依据核对、修改措辞确认、更正及历史查询、本地预防、manual 分析、独立空清单确认及审批前传播未执行审阅；上述界面均覆盖陈旧材料/开页后撤权拒绝；模型已配置时仍可显式本地导出（0模型调用、无权仍拒、未运行不标AI passed），无手写 SQL 或管理员旁路；真实 Chromium 留 Task 9。
 
-Task7最终44路径冻结v4，独立SPEC及fresh QUALITY全部发现修复并复核通过，0漂移；106文件952前端测试、tsc及Vite构建真实通过。后端最终writer补证56、严格UI合同8及native33分别PASS/0skip；native另25普通节点deselected，旧116组不绑定最终writer。无DDL/SDK/CI优化改动。正常员工组件及API专项通过，真实Chromium/模型同一8D仍待Task9；不因本批通过签C9或双版本切换。精确命令、源码摘要、RED及收据见[台账](../../development/r6-entry-switch.md)。具备本地提交条件，实际SHA提交后补录，接续Task8。
+Task7最终44路径冻结v4，独立SPEC及fresh QUALITY全部发现修复并复核通过，0漂移；106文件952前端测试、tsc及Vite构建真实通过。后端最终writer补证56、严格UI合同8及native33分别PASS/0skip；native另25普通节点deselected，旧116组不绑定最终writer。无DDL/SDK/CI优化改动。正常员工组件及API专项通过，真实Chromium/模型同一8D仍待Task9；不因本批通过签C9或双版本切换。精确命令、源码摘要、RED及收据见[台账](../../development/r6-entry-switch.md)。已本地提交`d14d9a67868078ca5a808868be57ccb9ed4f3cb5`，提交后工作树为空；全新Task8实施者已接手独占58064。
 
 ### Task 8：手工版本、旧 API 退役与跨实例排空屏障（批 D）
 
@@ -456,16 +458,19 @@ Task7最终44路径冻结v4，独立SPEC及fresh QUALITY全部发现修复并复
 
 **文件**：新增 `capa_entry_switch.py`、`scripts/r6-entry-switch.py`（受控运维客户端，默认只读状态）；修改 `api/capa.py`、`capa_service.py`、`capa_verification_service.py`、`capa_draft_service.py`、`schemas/capa.py`、`agent_runtime/d5_commands.py`、`d4_candidate_workflow.py`、`task_controls.py`、`frontend/src/api/capa.ts`、`api/capaDraft.ts`、`pages/capa/CAPADetailPage.tsx`；新增 `backend/tests/capa/test_r6_entry_switch.py`、`backend/tests/ci/test_r6_release_manifest.py`（§2.3 两种文书校验）、`test_r6_manual_versions.py`、`backend/tests/services/agent_runtime/test_r6_inflight_tasks.py`、`frontend/src/pages/capa/CAPADetailPage.r6.test.tsx`。
 
-- [ ] RED：旧采纳/生成四类端点在 switched 经身份/报告校验后 410，匿名/无权限不能枚举；缺材料版本的旧预览 PUT 被拒；刷新后的普通手工编辑合法，冲突无覆盖。测试旧面板 beforeAdopt PUT 先成功、POST 后跨 T 的部分提交保留真实历史。
-- [ ] RED：两个实际数据库连接控制“旧提交先/切换先”顺序，屏障前已准入写可原子成功或回滚，屏障后新旧推荐写暂拒；响应丢失和任务命令重放无双采纳。兼容 R5 run 继续原 command/run；不兼容安装/租约明确阻塞、旧令牌失效、新运行重读来源，不复制聊天或迁移插件内存。
-- [ ] **先持久关闭新准入**：tenant-local 切换行 `(state=legacy|draining|switched, epoch, actor, evidence_ref)` 由独立短事务把 legacy→draining、递增 epoch 并写操作审计，**提交完成后**才开始等排空；此短事务不取得排空 exclusive advisory 锁。业务请求仅非锁定读该行，不更新它、不持有该行锁到业务结束，避免旧长事务阻塞关闭。未确认关闭提交的进程不宣称已停止受理；重启先重读真实状态/操作引用核清提交结果。
-- [ ] **准入线性化与排空锁分开**：推荐/候选/采纳/更正写和 D4/D5 手工 PUT 在任何业务父行锁前取得同键事务级 shared advisory 排空锁，再以 READ COMMITTED 的新语句快照从数据库读取切换行（不用 ORM 缓存或 RR 旧快照）；该次读定义准入时点。读到 legacy 的请求为已准入，持 shared 到原业务事务结束；读到 draining 的请求立即拒绝并回滚释放 shared；读到 switched 时按 kind 拒绝旧推荐/无版本旧 PUT，仅对当前允许的新命令和带有效材料/epoch 的手工操作准入，不能把整个 switched 状态误当停服。关闭事务不等待这些 shared，因此已持锁的旧事务仍可结束，新的请求即便运维等待超时也读到持久 draining。关闭提交后才输出可恢复的 drain operation_ref；关闭前中断只报告关闭结果未确认，不能把尚未提交的关闭当成已生效。无法保证准入读的隔离级别/新鲜度时拒绝写入，不沿用旧快照。
-- [ ] **后等待/恢复**：仅在关闭提交后等待 exclusive 排空锁；draining 拒绝新推荐写并暂缓 D4/D5 正文提交，其他已验证安全手工能力按原合同继续。取得 exclusive 证明此前持 shared 的业务事务已结束，再核对状态/epoch/运行实例和每个提交结果，以短事务置 switched 并记录 T；不能把“锁空”代替业务结果核清。等待超时、运维进程退出或结果未知均不把已提交 draining 回滚到 legacy。新运维进程用同一持久操作引用继续，租户代际变化须重新核对，不能重放另一 tenant 的操作。
-- [ ] **新增长事务反例 C8-TIMEOUT**：连接 A 在关闭前准入并持 shared 不提交；运维连接 B 完成关闭事务后等 exclusive 超时（另测关闭提交后杀掉 B 进程）。断言真实切换行为 draining，A 仍持锁期间新 HTTP 请求被拒、无新增业务审计；释放 A 并核其提交/回滚后，新运维进程 C 读取同一操作引用完成排空和切换。覆盖准入读在关闭提交前/后的两种调度，不以取消连接 A 缩短等待冒充恢复。
-- [ ] **旧二进制不能靠新锁约束**：运维流程先将全部服务/worker 替换到会执行此屏障的兼容构建并核实例清单/版本，停止旧实例新流量且等待其请求和事务确定。旧构建仍可达则 finish_switch 拒绝；数据库锁不是旧实例排空证据。共享锁必须在原业务事务内，不能路由提前 commit 后释放围栏。
-- [ ] switched 后 `GET d4/d5-fmea-recommendations`、`POST adopt-recommendation`、`POST draft/d4|d5` 不再调用旧实现；内部工具同样受服务层检查。普通 PUT D4/D5 必须携带当前材料/epoch 令牌，旧缓存或旧会话标识不可通过；字段更新仍走原 CAPA 服务与来源继承。D2/D3/D6/D7/D8 草稿按 Task 3 安全围栏保留。
-- [ ] 前端按服务端 phase 切除旧推荐面板/D4D5 草稿/AI undo，书签仍打开原报告；legacy 仅用于切换前兼容阶段，switched 状态不可被 feature flag 或回退改回 legacy。断生成单独控制，不恢复旧入口。
-- [ ] GREEN 后提交 `feat(capa): drain legacy recommendation writes before entry switch`，真正 switch 子命令在隔离演练使用 §2.3 的 exercise_input，在正式环境使用 release_manifest＋独立上线授权；二者走同一状态机但目的和目标校验不可互换。不得直接 UPDATE 状态表替代切换命令，不自动执行用户环境操作。
+- [x] RED：旧采纳/生成四类端点在 switched 经身份/报告校验后 410，匿名/无权限不能枚举；缺材料版本的旧预览 PUT 被拒；刷新后的普通手工编辑合法，冲突无覆盖。测试旧面板 beforeAdopt PUT 先成功、POST 后跨 T 的部分提交保留真实历史。
+- [x] RED：两个实际数据库连接控制“旧提交先/切换先”顺序，屏障前已准入写可原子成功或回滚，屏障后新旧推荐写暂拒；响应丢失和任务命令重放无双采纳。兼容 R5 run 继续原 command/run；不兼容安装/租约明确阻塞、旧令牌失效、新运行重读来源，不复制聊天或迁移插件内存。
+- [x] **先持久关闭新准入**：tenant-local 切换行 `(state=legacy|draining|switched, epoch, actor, evidence_ref)` 由独立短事务把 legacy→draining、递增 epoch 并写操作审计，**提交完成后**才开始等排空；此短事务不取得排空 exclusive advisory 锁。业务请求仅非锁定读该行，不更新它、不持有该行锁到业务结束，避免旧长事务阻塞关闭。未确认关闭提交的进程不宣称已停止受理；重启先重读真实状态/操作引用核清提交结果。
+- [x] **准入线性化与排空锁分开**：推荐/候选/采纳/更正写和 D4/D5 手工 PUT 在任何业务父行锁前取得同键事务级 shared advisory 排空锁，再以 READ COMMITTED 的新语句快照从数据库读取切换行（不用 ORM 缓存或 RR 旧快照）；该次读定义准入时点。读到 legacy 的请求为已准入，持 shared 到原业务事务结束；读到 draining 的请求立即拒绝并回滚释放 shared；读到 switched 时按 kind 拒绝旧推荐/无版本旧 PUT，仅对当前允许的新命令和带有效材料/epoch 的手工操作准入，不能把整个 switched 状态误当停服。关闭事务不等待这些 shared，因此已持锁的旧事务仍可结束，新的请求即便运维等待超时也读到持久 draining。关闭提交后才输出可恢复的 drain operation_ref；关闭前中断只报告关闭结果未确认，不能把尚未提交的关闭当成已生效。无法保证准入读的隔离级别/新鲜度时拒绝写入，不沿用旧快照。
+- [x] **后等待/恢复**：仅在关闭提交后等待 exclusive 排空锁；draining 拒绝新推荐写并暂缓 D4/D5 正文提交，其他已验证安全手工能力按原合同继续。取得 exclusive 证明此前持 shared 的业务事务已结束，再核对状态/epoch/运行实例和每个提交结果，以短事务置 switched 并记录 T；不能把“锁空”代替业务结果核清。等待超时、运维进程退出或结果未知均不把已提交 draining 回滚到 legacy。新运维进程用同一持久操作引用继续，租户代际变化须重新核对，不能重放另一 tenant 的操作。
+- [x] **过期后安全续期 C8-RENEW**：close持久后原文书过期，finish仍拒绝；`renew`以独立短事务、nonblocking operator锁和锁后当前身份/实际代际复核，追加draining新epoch及旧/新docdigest/操作者审计，不等exclusive、不恢复legacy。当前持久新digest/opref先于旧resumeepoch核验，支持响应未知重放；两份不同续期竞争仅一胜。旧doc的等待中finish见epoch/digest变化须拒，不可静默借新授权。正常新运维进程凭受信续期文书可接续；错误opref/epoch/目标/构建/代际/purpose、未登记摘要及过期新文书均拒。实现与独立SPEC早审后补实际完整测试，不能直接SQL改状态。
+- [x] **新增长事务反例 C8-TIMEOUT**：连接 A 在关闭前准入并持 shared 不提交；运维连接 B 完成关闭事务后等 exclusive 超时（另测关闭提交后杀掉 B 进程）。断言真实切换行为 draining，A 仍持锁期间新 HTTP 请求被拒、无新增业务审计；释放 A 并核其提交/回滚后，新运维进程 C 读取同一操作引用完成排空和切换。覆盖准入读在关闭提交前/后的两种调度，不以取消连接 A 缩短等待冒充恢复。
+- [x] **旧二进制不能靠新锁约束**：运维流程先将全部服务/worker 替换到会执行此屏障的兼容构建并核实例清单/版本，停止旧实例新流量且等待其请求和事务确定。旧构建仍可达则 finish_switch 拒绝；数据库锁不是旧实例排空证据。共享锁必须在原业务事务内，不能路由提前 commit 后释放围栏。
+- [x] **CAPA-only手工结案与签名稳定**：024配对迁移追加真实CAPA来源ID/创建时间及module约束，不新增source删除FK；旧FMEA/CP行保持NULL、原immutable/count合同不改。原S保存真实capture-time scope/incarnation，missing旧值不回填，来源删/重建/移动时正文前拒且不改证据。正常CAPA-only采纳→人工V/D5→local D7/manual D8→审批须通过，不造FMEA/Root proof/docversion；撤权/旧form/cycle/删除无pin及全部旧6B回归。CAPA parent业务semantic版本排除cutover/renew epoch与生成配置，空capture集合不改变既有签名shape；实际已批准v1/v2或local报告跨切换/续期仍验证历史receipt，手工PUT另验entry_epoch不混域。
+- [x] **可信旧capture与已知来源继承**：复用经早审追加023不可变capture保存完整pre-fusion CAPA＋FMEA S，HMAC绑定真实namespace/generation/report/stage/精确item与来源，新旧unknown/empty分明；新preT采纳绑定canonical captureID且幂等，锁后完整来源/新鲜度复验。其后D4/legacyD5按字段保留known S限制与当前权限，不伪proof；metadata-before-body、SQL批量排除、历史/审核/导出/embedding/cache/provider/inflight及新audit均受保护，manual替换不降权，历史正常source编辑不因采纳时strict freshness而永久拒读。不把legacy D5 B扩到无关R5条目A/Rootonly；旧unknown行不回填，newunbound须重新生成，switched仍先410。补损坏/变参重复/撤权/批量外发零正文反例及完整受影响回归。
+- [x] switched 后 `GET d4/d5-fmea-recommendations`、`POST adopt-recommendation`、`POST draft/d4|d5` 不再调用旧实现；内部工具同样受服务层检查。普通 PUT D4/D5 必须携带当前材料/epoch 令牌，旧缓存或旧会话标识不可通过；字段更新仍走原 CAPA 服务与来源继承。D2/D3/D6/D7/D8 草稿按 Task 3 安全围栏保留。
+- [x] 前端按服务端 phase 切除旧推荐面板/D4D5 草稿/AI undo，书签仍打开原报告；legacy 仅用于切换前兼容阶段，switched 状态不可被 feature flag 或回退改回 legacy。断生成单独控制，不恢复旧入口。
+- [x] GREEN已通过，待精确本地提交 `feat(capa): drain legacy recommendation writes before entry switch`，真正 switch 子命令在隔离演练使用 §2.3 的 exercise_input，在正式环境使用 release_manifest＋独立上线授权；二者走同一状态机但目的和目标校验不可互换。不得直接 UPDATE 状态表替代切换命令，不自动执行用户环境操作。
 
 ```bash
 cd backend
@@ -475,6 +480,9 @@ npm test -- --run src/pages/capa/CAPADetailPage.r6.test.tsx src/api/capa.test.ts
 ```
 
 **通过标准/证据 C8**：有 C8-TIMEOUT 关闭持久化、长事务超时/运维退出后拒新请求及新进程接续证据，演练文书在正式/未知环境拒绝；有真实双连接竞争证据、旧页面/直接 API/PUT/工具反例和 in-flight R5 身份证据；未确定的事务不使 T 成立，已提交结果/审计不丢。不得在 Task 8 实际切换用户环境。
+
+
+**2026-11-17执行收口**：Task8实现、分层验证与独立SPEC→fresh QUALITY复审已通过；85非文档路径冻结v10，1187执行文件摘要`1c019eb0d34d347410496f31c6d2e79ceccc3f0a4db77524b91d82cc6e0a0bad`，父核源码与10份已应用DDL均0漂移。独立短事务先持久关闭准入、原事务共享锁排空、提交/回滚审计核清、显式安全续期、旧入口410和当前手工版本保护已实现；023可信旧capture与024真实CAPA来源继承保护已配对应用于独占测试库。真实双应用/两个构建和同份更正数据兼容验收仍待Tasks9/10，Task11新鲜全量仍待；本批机制测试不能签C9/C10或用户环境切换。 机制验收使用真实CLI `status|close|renew|finish`；计划中的drain/switch指同一状态机动作，不另有绕过入口。首次40、最终受影响180、原生完整inflight5、迁移20及12项TOCTOU/rollback/只读清单组分开记录；原生128组为126通过2失败后整文件5补证，不伪装全轮通过。完整失败映射、源码适用资格和具体收据见[台账](../../development/r6-entry-switch.md)。
 
 ### Task 9：同一合成 8D 的完整员工、模型与浏览器链（批 E）
 
@@ -594,8 +602,8 @@ R5 `2b5530c3` 的完整检查、原生 API/浏览器、来源可见性、ABA/pro
 
 | 字段 | 当前事实 | 负责任务 |
 |---|---|---|
-| 执行集成源码 SHA、解释器与资源 owner | Task1基于f03fc01b建独占基线；当前已提交31856359，独占实施资源58064/owner607e0a5f9862952b7172c2d2，解释器见台账 | 1 |
-| R6 public/tenant 实际迁移 head 与升级收据 | 当前20261116_r6_local_snapshot / tv022_r6_local_snapshot，20/21/22成功应用后immutable，完整167 migration/parity通过 | 1、3–6B |
+| 执行集成源码 SHA、解释器与资源 owner | Task1基于f03fc01b建独占基线；当前已提交d14d9a67，独占实施资源58064/owner607e0a5f9862952b7172c2d2，解释器见台账 | 1 |
+| R6 public/tenant 实际迁移 head 与升级收据 | 当前20261116_r6_local_capa_sources / tv024_r6_local_capa_sources已在独占环境升级/provision；20–24成功应用后immutable；此前22完整167 migration/parity通过，23/24完整回归仍待 | 1、3–6B |
 | C6 正式更正/审核、C7 正常 UI | Task6/6B核心及正常API回审通过；Task7冻结v4最终SPEC及fresh QUALITY通过，106文件952前端测试及专项通过；同一8D浏览器/真模型及compat仍待 | 6、6B、7、9、10 |
 | C8 关闭提交、超时/退出恢复、旧实例/准入写排空及 T 记录 | 未实施、未切换 | 8；正式环境另授权 |
 | C9 主链报告/任务/建议/更正/审计引用 | 未执行 | 9 |

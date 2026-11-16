@@ -105,6 +105,8 @@ async def require_root_delivery(db, identity, target, proof):
     """No protected body until full origins, exact grants and recipient agree."""
     from app.services.agent_runtime import runtime_access, model_egress
     revision, sources = await authorize_root(db, identity.task.executor_user_id, target.report_id)
+    from app.services.capa_legacy_capture import require_ordinary_capture_material
+    await require_ordinary_capture_material(db,target.report_id)
     r6 = identity.trial is not None and identity.trial.profile == model_egress.R6_PROFILE
     if not sources and not r6:
         return None

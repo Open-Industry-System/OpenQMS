@@ -39,6 +39,8 @@ async def _edit_metadata(db, identity):
 
 
 async def save_proposal(db, identity, body: D5Command):
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     current = await runtime_access.lock_runtime_identity(db, identity)
     require_r5_admission(current, body.operation)
     await _edit_metadata(db, current)
@@ -95,6 +97,8 @@ async def save_proposal(db, identity, body: D5Command):
         if not hmac.compare_digest(existing.request_hmac, request_hmac):
             raise ValueError('D5 command conflict')
     else:
+        from app.services.capa_entry_switch import require_generation_enabled
+        require_generation_enabled()
         await proposals.require_bounded_messages(db, current, body)
         proof, sources = await proposals.delivered_sources(db, current)
         result = await proposals.insert_proposal(db, current, body, request_hmac, proof, sources, receipt_ids)

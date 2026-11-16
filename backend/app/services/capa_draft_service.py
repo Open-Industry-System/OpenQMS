@@ -317,6 +317,9 @@ async def generate_draft(
             await require_current_egress_statement(db)
             factories, lines = await current_capa_actor_access(db, user.user_id, PermissionLevel.EDIT)
             await current_capa_target_metadata(db, report_id, factories, lines)
+            if step in {"d4", "d5"}:
+                from app.services.capa_entry_switch import admit
+                await admit(db, "legacy")
             await require_legacy_d5_only(db, report_id)
             await _require_fmea_context_bindings(db, user, fmea_bindings)
             return await material_version(db, report_id)

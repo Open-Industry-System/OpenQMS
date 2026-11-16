@@ -147,6 +147,10 @@ async def authorize_sources(db, actor_id, report_id, sources, *, fresh=False):
 
 
 async def build_context(db, identity):
+    from app.services.capa_entry_switch import require_generation_enabled
+    require_generation_enabled()
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     current = await runtime_access.lock_runtime_identity(db, identity)
     require_admission(current)
     await _metadata(db, current)
@@ -296,6 +300,8 @@ def reference(candidate, command):
 
 
 async def save_candidate(db, identity, body):
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     current = await runtime_access.lock_runtime_identity(db, identity)
     require_admission(current)
     await _metadata(db, current)
@@ -304,6 +310,8 @@ async def save_candidate(db, identity, body):
         AgentD4CandidateCommand.command_key == body.command_key))
     receipt_query = select(AgentD4InputReceipt).where(AgentD4InputReceipt.task_id == current.task.task_id)
     if existing is None:
+        from app.services.capa_entry_switch import require_generation_enabled
+        require_generation_enabled()
         receipt_query = receipt_query.where(AgentD4InputReceipt.run_id == current.run.run_id,
             AgentD4InputReceipt.lease_epoch == current.run.lease_epoch)
     else:
@@ -393,6 +401,8 @@ async def save_candidate(db, identity, body):
 
 
 async def current_inputs(db, identity, *, snapshot=None, lock=False):
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     current = await (runtime_access.lock_runtime_identity(db, identity) if lock else runtime_access.refresh_runtime_identity(db, identity))
     require_admission(current)
     await _metadata(db, current)

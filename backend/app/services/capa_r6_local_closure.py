@@ -33,11 +33,12 @@ async def source_coordinates(db, report_id, *, retained=True):
         CapaD5Measure.proposal_id==CapaD5Proposal.proposal_id).where(CapaD5Proposal.report_id==report_id))).all()
     values.extend(dict(module='fmea',object_id=str(s.fmea_id),factory_id=str(s.factory_id),
         product_line_code=s.product_line_code) for s in rows)
+    from app.services.capa_legacy_capture import known_capa_coordinates
+    values.extend(await known_capa_coordinates(db,report_id))
     if retained:
-        rows = (await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code)
+        rows = (await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code,Source.source_capa_id,Source.source_capa_created_at)
             .where(Source.report_id==report_id).distinct())).all()
-        values.extend(dict(module=s.module,object_id=str(s.object_id),factory_id=str(s.factory_id),
-            product_line_code=s.product_line_code) for s in rows)
+        values.extend(source_metadata(s) for s in rows)
     result={}
     for source in values:
         key=(source['module'],source['object_id'])
@@ -56,6 +57,9 @@ async def eligible(db, report_id):
 async def authorize_sources(db, actor_id, sources):
     access = await current_capa_access(db,scope_for(actor_id))
     for s in sources:
+        if s['module']=='capa':
+            await authorize_capa_source(db,actor_id,s,access)
+            continue
         model=FMEADocument if s['module']=='fmea' else ControlPlan
         identity=model.fmea_id if s['module']=='fmea' else model.cp_id
         row=(await db.execute(select(model.factory_id,model.product_line_code).where(identity==UUID(s['object_id'])))).one_or_none()
@@ -65,11 +69,10 @@ async def authorize_sources(db, actor_id, sources):
 
 
 async def authorize_local_sources(db,actor_id,report_id):
-    rows=(await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code)
+    rows=(await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code,Source.source_capa_id,Source.source_capa_created_at)
         .where(Source.report_id==report_id).distinct())).all()
     if rows:
-        await authorize_sources(db,actor_id,[dict(module=r.module,object_id=str(r.object_id),
-            factory_id=str(r.factory_id),product_line_code=r.product_line_code) for r in rows])
+        await authorize_sources(db,actor_id,[source_metadata(r) for r in rows])
 
 
 async def _complete_admission(db,scope,report_id,level=PermissionLevel.VIEW):
@@ -105,6 +108,8 @@ async def authorize_local_current_sources(db,actor_id,report_id):
 async def admit(db,scope,report_id,level=PermissionLevel.VIEW):
     from app.services.capa_d4_material import authorize_root
     await authorize_root(db,scope.user.user_id,report_id,level)
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    await authorize_bound_sources(db,scope.user.user_id,report_id,d_step="d5")
     return await _complete_admission(db,scope,report_id,level)
 
 
@@ -168,16 +173,28 @@ async def semantic_inputs(db,capa,sources):
         .where(CapaRootCauseVerification.capa_id==capa.report_id).order_by(CapaRootCauseVerification.verification_id))).all()
     parents=[]
     for s in sources:
+        if s['module']=='capa':
+            from app.services.capa_d4_material import material_version
+            from app.services.capa_legacy_capture import capa_metadata,assert_capa_identity
+            parent=await capa_metadata(db,UUID(s['object_id']))
+            assert_capa_identity({'created_at':s.get('created_at'),'factory_id':s['factory_id'],'product_line':s['product_line_code']},parent)
+            parents.append(['capa',s['object_id'],parent.created_at.isoformat(),str(parent.factory_id),parent.product_line_code,
+                await material_version(db,UUID(s['object_id']),include_entry_epoch=False)])
+            continue
         model=FMEADocument if s['module']=='fmea' else ControlPlan
         key=model.fmea_id if s['module']=='fmea' else model.cp_id
         row=(await db.execute(select(model.lock_version,model.factory_id,model.product_line_code).where(key==UUID(s['object_id'])))).one_or_none()
         if row is None: raise PermissionError('Local source unavailable')
         parents.append([s['module'],s['object_id'],row.lock_version,str(row.factory_id),row.product_line_code])
     def normal(rows):return [[v.isoformat() if hasattr(v,'isoformat') else str(v) for v in row] for row in rows]
-    return dict(root_revision_id=None if revision is None else str(revision.revision_id),
+    from app.services.capa_legacy_capture import current_capture_material
+    captured = await current_capture_material(db,capa.report_id)
+    result = dict(root_revision_id=None if revision is None else str(revision.revision_id),
         root_origin_ids=sorted(str(o.source_id) for o in origins),
         core={k: getattr(capa,k) for k in ('d4_root_cause','d5_correction','d6_verification','severity','product_line_code')},
         measures=normal(measures),corrections=normal(corrections),verifications=normal(verifications),parents=parents)
+    if captured:result['legacy_captures']=captured
+    return result
 
 
 async def binding(db,capa,kind,sources,candidates):
@@ -208,9 +225,9 @@ async def require_current(db,capa,kind,actor_id):
     candidates=await candidates_metadata(db,capa,actor_id) if kind=='manual_analysis' else []
     # Binding at creation uses complete candidate sources as inherited inputs.
     if kind=='manual_analysis':
-        own=(await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code)
+        own=(await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code,Source.source_capa_id,Source.source_capa_created_at)
             .where(Source.revision_id==row.revision_id))).all()
-        sources=[dict(module=s.module,object_id=str(s.object_id),factory_id=str(s.factory_id),product_line_code=s.product_line_code) for s in own]
+        sources=[source_metadata(s) for s in own]
         # New candidates must participate in both membership and source binding.
         by_key={(s['module'],s['object_id']):s for s in sources}
         for s in candidates:by_key[(s['module'],s['object_id'])]={k:s[k] for k in ('module','object_id','factory_id','product_line_code')}
@@ -266,12 +283,12 @@ async def read(db,scope,report_id):
                     CapaDocgAnalysis.llm_available.is_(False),
                     CapaDocgAnalysis.affected_docs==row.input_bindings.get('affected_docs')))
                 if valid is None:raise PermissionError('Manual material unavailable')
-            refs=(await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code)
+            refs=(await db.execute(select(Source.module,Source.object_id,Source.factory_id,Source.product_line_code,Source.source_capa_id,Source.source_capa_created_at)
                 .where(Source.revision_id==row.revision_id).order_by(Source.module,Source.object_id))).all()
             result[kind]=dict(revision_id=str(row.revision_id),revision_no=row.revision_no,predecessor_id=None if row.predecessor_id is None else str(row.predecessor_id),
                 actor_id=str(row.actor_id),created_at=row.created_at.isoformat(),reason=row.reason,text=row.text,basis=row.basis,
                 input_bindings=row.input_bindings,candidates=row.candidates,channels=row.channels,
-                sources=[dict(module=s.module,object_id=str(s.object_id),factory_id=str(s.factory_id),product_line_code=s.product_line_code) for s in refs],
+                sources=[source_metadata(s) for s in refs],
                 analysis_id=None if row.analysis_id is None else str(row.analysis_id),analysis_method='manual' if kind=='manual_analysis' else None)
             if row.root_snapshot_revision_id is not None:
                 result[kind]['root_snapshot_revision_id']=str(row.root_snapshot_revision_id)
@@ -332,7 +349,7 @@ async def save(db,scope,report_id,kind,body):
     merged={(s['module'],s['object_id']):s for s in sources}
     for s in candidates:merged[(s['module'],s['object_id'])]={k:s[k] for k in ('module','object_id','factory_id','product_line_code')}
     sources=sorted(merged.values(),key=lambda s:(s['module'],s['object_id']))
-    await lock_version_parents_in_order(db,[('control_plan' if s['module']=='planning' else 'fmea',UUID(s['object_id'])) for s in sources])
+    await lock_sources(db,sources)
     await lock_employee_acl(db,(actor_id,))
     target,_=await admit(db,scope,report_id,PermissionLevel.EDIT)
     await authorize_sources(db,actor_id,sources)
@@ -378,7 +395,12 @@ async def save(db,scope,report_id,kind,body):
         root_snapshot_revision_id=UUID(inputs['root_revision_id']) if not sources else None)
     db.add(row)
     await db.flush()
-    for s in sources:db.add(Source(revision_id=row.revision_id,report_id=report_id,**{**s,'object_id':UUID(s['object_id']),'factory_id':UUID(s['factory_id'])}))
+    for s in sources:
+        values={key:s[key] for key in ('module','object_id','factory_id','product_line_code')}
+        values.update(object_id=UUID(s['object_id']),factory_id=UUID(s['factory_id']))
+        if s['module']=='capa':
+            values.update(source_capa_id=UUID(s['object_id']),source_capa_created_at=datetime.fromisoformat(s['created_at'].replace('Z','+00:00')))
+        db.add(Source(revision_id=row.revision_id,report_id=report_id,**values))
     db.add(AuditLog(table_name='capa_eightd',record_id=report_id,action='R6_LOCAL_RECORDED',operated_by=actor_id,factory_id=capa.factory_id,
         changed_fields=dict(revision_id=str(row.revision_id),kind=kind,revision_no=row.revision_no)))
     await bump_material(db,report_id)
@@ -404,7 +426,7 @@ async def lock_transition_sources(db,capa,actor_id):
         .order_by(CapaDocgAnalysis.analysis_id).with_for_update())
     await lock_candidate_scopes(db,[(capa.factory_id,capa.product_line_code)])
     sources=await source_coordinates(db,capa.report_id)
-    await lock_version_parents_in_order(db,[('control_plan' if s['module']=='planning' else 'fmea',UUID(s['object_id'])) for s in sources])
+    await lock_sources(db,sources)
     await lock_employee_acl(db,(actor_id,))
     await admit(db,scope_for(actor_id),capa.report_id,PermissionLevel.EDIT)
 
@@ -548,3 +570,37 @@ async def controlled_manual_candidates(db,capa,candidates,actor_id):
         items.append((_cand_from_cp if planning else _cand_from_fmea)(parent,baseline))
     if candidates!=await candidates_metadata(db,capa,actor_id):raise ValueError('Manual catalog changed')
     return items
+
+
+def source_metadata(row):
+    value=dict(module=row.module,object_id=str(row.object_id),factory_id=str(row.factory_id),product_line_code=row.product_line_code)
+    if row.module=='capa':
+        if row.source_capa_id!=row.object_id or row.source_capa_created_at is None:raise PermissionError('Local CAPA identity unavailable')
+        value['created_at']=row.source_capa_created_at.isoformat()
+    return value
+
+
+async def authorize_capa_source(db,actor_id,source,access):
+    from app.services.capa_legacy_capture import capa_metadata,assert_capa_identity,authorize_bound_sources
+    from app.services.capa_d4_material import authorize_root
+    if access[0].get(Module.CAPA,0)<PermissionLevel.VIEW:raise PermissionError('Local CAPA source unavailable')
+    identifier=UUID(source['object_id'])
+    await current_capa_target_metadata(db,identifier,access[1],access[2])
+    assert_capa_identity({'created_at':source.get('created_at'),'factory_id':source['factory_id'],
+        'product_line':source['product_line_code']},await capa_metadata(db,identifier))
+    stack=db.info.setdefault('r6_local_capa_authorizing',set())
+    if identifier in stack or len(stack)>=32:raise PermissionError('Local CAPA source cycle')
+    stack.add(identifier)
+    try:
+        await authorize_root(db,actor_id,identifier)
+        await authorize_bound_sources(db,actor_id,identifier,d_step='d5')
+    finally:stack.remove(identifier)
+
+
+async def lock_sources(db,sources):
+    from app.services.version_service import lock_version_parents_in_order
+    for source in sorted((source for source in sources if source['module']=='capa'),key=lambda source:source['object_id']):
+        if not await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id==UUID(source['object_id'])).with_for_update(nowait=True)):
+            raise PermissionError('Local CAPA source unavailable')
+    await lock_version_parents_in_order(db,[('control_plan' if source['module']=='planning' else 'fmea',UUID(source['object_id']))
+        for source in sources if source['module'] in {'fmea','planning'}])

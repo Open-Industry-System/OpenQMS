@@ -237,6 +237,10 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
         request.report_id, request.installation_id, request.initial_text, fingerprint, request.model_deployment_id)
     if existing is not None:
         return existing
+    if is_r5:
+        from app.services.capa_entry_switch import admit, require_generation_enabled
+        await admit(db, "current")
+        require_generation_enabled()
     source_validator = validate_explicit_source
     if selected_model is not None and model_egress.deployment_profile(selected_model) == model_egress.D4_PROFILE:
         from app.services.agent_runtime.derived_source_grants import validate_d4_input_source

@@ -5,8 +5,10 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaAIAdoption, CapaRootCauseVerification
 from app.schemas.capa_verification import AdoptRequest, VerificationCreate, VerificationUpdate
 from app.services.capa_verification_service import (
-    adopt_recommendation, create_verification, list_verifications, update_verification,
+    create_verification, list_verifications, update_verification,
 )
+
+from tests.capa.legacy_capture_support import adopt_rule_candidate as adopt_recommendation
 
 pytestmark = pytest.mark.requires_db
 
@@ -24,8 +26,8 @@ async def _make_capa(db, factory_id, user_id, doc_no="8D-ADOPT-001", d4=None):
 @pytest.mark.asyncio
 async def test_adopt_appends_to_existing_d4(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4="已有根因A")
-    req = AdoptRequest(d_step="d4", adopted_text="新根因B", source="fmea_graph",
-                       item_ref={"failure_cause_node_id": "c1"})
+    req = AdoptRequest(d_step="d4", adopted_text="新根因B", source="rule",
+                       item_ref={"entry_id": "rule-c1"})
     adoption, new_value = await adopt_recommendation(db, capa, req, admin_user)
     assert new_value == "已有根因A\n新根因B"
     await db.refresh(capa)
@@ -33,12 +35,12 @@ async def test_adopt_appends_to_existing_d4(db, default_factory, admin_user):
     rows = (await db.execute(select(CapaAIAdoption).where(CapaAIAdoption.capa_id == capa.report_id))).scalars().all()
     assert len(rows) == 1
     assert rows[0].adopted_text == "新根因B"
-    assert rows[0].source == "fmea_graph"
+    assert rows[0].source == "rule"
     assert rows[0].stage_index is None
     audits = (await db.execute(select(AuditLog).where(
         AuditLog.record_id == capa.report_id, AuditLog.action == "ADOPT_RECOMMENDATION"))).scalars().all()
     assert len(audits) == 1
-    assert audits[0].changed_fields["source"] == "fmea_graph"
+    assert audits[0].changed_fields["source"] == "rule"
 
 
 @pytest.mark.asyncio
@@ -55,7 +57,7 @@ async def test_adopt_writes_to_empty_field(db, default_factory, admin_user):
 async def test_adopt_d5_appends_to_d5_correction(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4="rc")
     capa.d5_correction = "措施A"; capa.status = "D5_CORRECTION"; await db.flush()
-    req = AdoptRequest(d_step="d5", adopted_text="措施B", source="historical_capa")
+    req = AdoptRequest(d_step="d5", adopted_text="措施B", source="rule")
     _, new_value = await adopt_recommendation(db, capa, req, admin_user)
     assert new_value == "措施A\n措施B"
 
@@ -64,8 +66,8 @@ async def test_adopt_d5_appends_to_d5_correction(db, default_factory, admin_user
 async def test_adopt_idempotent_same_payload_no_duplicate(db, default_factory, admin_user):
     # 双击/重试同一条推荐：第二次返回既有 adoption，不重复追加 d-step 文本、不新增行、不新增 audit
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4="rc")
-    req = AdoptRequest(d_step="d4", adopted_text="根因B", source="fmea_graph",
-                       item_ref={"failure_cause_node_id": "c1", "fmea_id": "f1"})
+    req = AdoptRequest(d_step="d4", adopted_text="根因B", source="rule",
+                       item_ref={"entry_id": "rule-c1"})
     first, v1 = await adopt_recommendation(db, capa, req, admin_user)
     second, v2 = await adopt_recommendation(db, capa, req, admin_user)
     assert second.adoption_id == first.adoption_id   # 幂等返回既有
@@ -93,10 +95,10 @@ async def test_adopt_idempotent_with_omitted_item_ref(db, default_factory, admin
 async def test_adopt_different_item_ref_not_deduped(db, default_factory, admin_user):
     # 不同 item_ref（不同推荐）应各落一条，不被幂等去重误杀
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4=None)
-    req1 = AdoptRequest(d_step="d4", adopted_text="根因B", source="fmea_graph",
-                         item_ref={"failure_cause_node_id": "c1", "fmea_id": "f1"})
-    req2 = AdoptRequest(d_step="d4", adopted_text="根因B", source="fmea_graph",
-                         item_ref={"failure_cause_node_id": "c2", "fmea_id": "f1"})
+    req1 = AdoptRequest(d_step="d4", adopted_text="根因B", source="rule",
+                         item_ref={"entry_id": "rule-c1"})
+    req2 = AdoptRequest(d_step="d4", adopted_text="根因B", source="rule",
+                         item_ref={"entry_id": "rule-c2"})
     await adopt_recommendation(db, capa, req1, admin_user)
     await adopt_recommendation(db, capa, req2, admin_user)
     rows = (await db.execute(select(CapaAIAdoption).where(CapaAIAdoption.capa_id == capa.report_id))).scalars().all()

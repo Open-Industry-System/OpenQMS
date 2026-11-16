@@ -150,6 +150,21 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
     if baseline_only or predecessor is not None:
+        omitted={('column','capa_r6_local_sources.source_capa_id'),('column','capa_r6_local_sources.source_capa_created_at'),
+                 ('constraint','capa_r6_local_sources.ck_r6_local_capa_identity')}
+        reference={key:value for key,value in reference.items() if key not in omitted}
+        key=('constraint','capa_r6_local_sources.ck_r6_local_source')
+        if key in reference and "'capa'" in reference[key]:
+            value=reference[key];position=value.index("'capa'")
+            comma=value.rfind(',',0,position);closing=value.find(']',position)
+            if comma<0 or closing<0:raise ValueError('Unexpected local source enum catalog')
+            reference[key]=value[:comma]+value[closing:]
+    if predecessor == 'tv023_r6_legacy_capture': predecessor=None
+    if baseline_only or predecessor is not None:
+        reference={key:value for key,value in reference.items()
+            if key[1].split('.')[0]!='capa_r6_legacy_captures' and key!=('function','r6_reject_legacy_capture_mutation()')}
+    if predecessor == 'tv022_r6_local_snapshot': predecessor=None
+    if baseline_only or predecessor is not None:
         witness_objects={('column','capa_r6_local_revisions.root_snapshot_revision_id'),
             ('constraint','capa_r6_local_revisions.fk_r6_local_snapshot_root'),
             ('constraint','capa_r6_local_revisions.ck_r6_local_snapshot_count'),

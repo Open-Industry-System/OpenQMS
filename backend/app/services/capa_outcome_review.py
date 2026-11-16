@@ -328,6 +328,8 @@ async def _r6_source_coordinates(db, report_id):
     coordinates.extend(dict(fmea_id=source['fmea_id'], factory_id=source['factory_id'],
         product_line_code=source['product_line_code']) for _, sources in (await known_origins(db, report_id)).values()
         for source in sources)
+    from app.services.capa_legacy_capture import known_fmea_coordinates
+    coordinates.extend(await known_fmea_coordinates(db,report_id))
     return coordinates
 
 
@@ -420,7 +422,8 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
         required.update(('fmea', source['fmea_id'])
             for source in await _r6_source_coordinates(db, capa.report_id))
     from app.services.capa_r6_local_closure import source_coordinates
-    required.update((s['module'],s['object_id']) for s in await source_coordinates(db,capa.report_id))
+    required.update((s['module'],s['object_id']) for s in await source_coordinates(db,capa.report_id)
+        if s['module'] in {'fmea','planning'})
     result = {}
     for key in sorted(required):
         # A version receipt never grants current source-module authority.

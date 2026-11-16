@@ -195,12 +195,16 @@ class RecommendationOrchestrator:
 
         from app.services.capa_d4_material import capture_legacy_candidate_bindings, require_legacy_candidate_bindings
         source_bindings = await capture_legacy_candidate_bindings(self.db, all_candidates, actor=user)
+        from app.services.capa_legacy_capture import capture_sources
+        trusted_sources = await capture_sources(self.db, all_candidates, context, source_bindings, actor=user)
         # ── Fusion（既有序：fusion 在 LLM 之前，R2-修复顺序）──
         fused = self.fusion.merge(all_candidates, context)
 
         # ── Stage 11 LLM enrich over FUSED（不是 raw，保既有合约，R2-修复）──
         spec11 = next(s for s in STAGE_PLAN if s.index == 11)
         await require_legacy_candidate_bindings(self.db, source_bindings, actor=user)
+        from app.services.capa_legacy_capture import require_sources
+        await require_sources(self.db,trusted_sources,user)
         stage11, enriched = await self._exec_llm_stage(spec11, fused, context)
         stages.append(stage11)
         fused = enriched   # LLM 增强后的 fused 集
@@ -214,7 +218,8 @@ class RecommendationOrchestrator:
         if initial_binding != await legacy_recommendation_binding(self.db, user, report_id):
             raise PermissionError('D4_RECOMMENDATION_MATERIAL_CHANGED')
         await require_legacy_candidate_bindings(self.db, source_bindings, actor=user)
-        return RecommendationResult(items=fused, stages=stages, source_bindings=source_bindings)
+        await require_sources(self.db,trusted_sources,user)
+        return RecommendationResult(items=fused, stages=stages, source_bindings=source_bindings, trusted_source_bindings=trusted_sources)
 
     def _blocked_stages(self) -> list[StageRun]:
         """pc=None 时构造 12 行结构化 BLOCKED 状态（stage 1 done、stage 11 blocked、其余 skipped）。"""

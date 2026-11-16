@@ -18,7 +18,9 @@ def test_append_pairs_preserve_exact_parents_and_tenant_equivalence():
            ('20261116_r6_verify_origins','tv019_r6_verify_origins','20261116_r6_d4_withdraw','tv018_r6_d4_withdraw'),
            ('20261116_r6_local_closure','tv020_r6_local_closure','20261116_r6_verify_origins','tv019_r6_verify_origins'),
            ('20261116_r6_manual_receipts','tv021_r6_manual_receipts','20261116_r6_local_closure','tv020_r6_local_closure'),
-           ('20261116_r6_local_snapshot','tv022_r6_local_snapshot','20261116_r6_manual_receipts','tv021_r6_manual_receipts')]
+           ('20261116_r6_local_snapshot','tv022_r6_local_snapshot','20261116_r6_manual_receipts','tv021_r6_manual_receipts'),
+           ('20261116_r6_legacy_capture','tv023_r6_legacy_capture','20261116_r6_local_snapshot','tv022_r6_local_snapshot'),
+           ('20261116_r6_local_capa_sources','tv024_r6_local_capa_sources','20261116_r6_legacy_capture','tv023_r6_legacy_capture')]
     for public,tenant,parent,tparent in pairs:
         body=(root/'alembic/versions'/f'{public}.py').read_text()
         tbody=(root/'alembic_tenant/versions'/f'{tenant}.py').read_text()

@@ -240,14 +240,14 @@ async def test_022_predecessor_filter_restores_only_reviewed_delta_and_current_i
 @pytest.mark.parametrize('predecessor,state',[
     ('tv017_r6_d4_inputs','r6_input_predecessor'),('tv018_r6_d4_withdraw','r6_withdraw_predecessor'),
     ('tv019_r6_verify_origins','r6_verify_predecessor'),('tv020_r6_local_closure','r6_local_predecessor'),
-    ('tv021_r6_manual_receipts','r6_receipt_predecessor')])
-async def test_actual_nonempty_historical_tenants_upgrade_to_022_without_history_rewrite(mig_db_url,predecessor,state):
+    ('tv021_r6_manual_receipts','r6_receipt_predecessor'),('tv022_r6_local_snapshot','r6_snapshot_predecessor'),('tv023_r6_legacy_capture','r6_capture_predecessor')])
+async def test_actual_nonempty_historical_tenants_upgrade_to_current_without_history_rewrite(mig_db_url,predecessor,state):
     import asyncio
     from sqlalchemy.ext.asyncio import create_async_engine
     from app.core.tenant_transaction import stable_tenant_lock_key
     from app.services.tenant_migrator import MaintenanceAttempt,maintenance_connection,migrate_if_needed
     from app.services.tenant_schema_diff import load_snapshot_manifest
-    await asyncio.to_thread(command.upgrade,_migration_config(mig_db_url),'20261116_r6_local_snapshot')
+    await asyncio.to_thread(command.upgrade,_migration_config(mig_db_url),'head')
     schema='tenant_local_'+uuid4().hex[:12]
     tenant_id,attempt_id=uuid4(),uuid4()
     attempt=MaintenanceAttempt(tenant_id=tenant_id,schema_name=schema,generation=1,attempt_id=attempt_id,
@@ -275,7 +275,7 @@ async def test_actual_nonempty_historical_tenants_upgrade_to_022_without_history
         async with engine.connect() as check:
             after=(await check.execute(sa.text(f'SELECT to_jsonb(s) FROM "{schema}".capa_r6_source_origins s ORDER BY source_id'))).scalars().all()
             assert after==before
-            assert await check.scalar(sa.text(f'SELECT version_num FROM "{schema}".tenant_schema_version'))=='tv022_r6_local_snapshot'
+            assert await check.scalar(sa.text(f'SELECT version_num FROM "{schema}".tenant_schema_version'))=='tv024_r6_local_capa_sources'
     finally:
         async with engine.begin() as cleanup:
             await cleanup.execute(sa.text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))

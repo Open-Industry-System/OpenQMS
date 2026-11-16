@@ -97,6 +97,8 @@ async def confirm(db, scope, report_id, candidate_id, body):
     actor_id=scope.user.user_id
     await authorize_root(db,actor_id,report_id,PermissionLevel.EDIT)
     await candidate_metadata(db,actor_id,report_id,candidate_id)
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id==report_id).with_for_update())
     await db.scalar(select(CapaD4Candidate.candidate_id).where(CapaD4Candidate.candidate_id==candidate_id,
         CapaD4Candidate.report_id==report_id).with_for_update())
@@ -162,6 +164,8 @@ async def withdraw(db,scope,report_id,candidate_id,body):
     factories,lines=await current_capa_actor_access(db,actor_id,PermissionLevel.EDIT)
     await current_capa_target_metadata(db,report_id,factories,lines)
     await candidate_metadata(db,actor_id,report_id,candidate_id)
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id==report_id).with_for_update())
     await db.scalar(select(CapaD4Candidate.candidate_id).where(CapaD4Candidate.candidate_id==candidate_id,
         CapaD4Candidate.report_id==report_id).with_for_update())

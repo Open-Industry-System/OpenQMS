@@ -156,13 +156,31 @@ async def evidence(db,scope,report_id,kind,item_id,source_id):
 
 
 async def legacy_adoptions(db,scope,report_id,page=1,page_size=20):
-    # Historical old text has no attested source set. Preserve its actual actor
-    # and coordinates without inventing optional external evidence or a proof.
+    # Old unbound facts stay unattested. Newly server-bound facts retain their
+    # original S; authorize metadata before loading any adopted text.
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    from uuid import UUID
     await authorize_root(db,scope.user.user_id,report_id)
-    rows=list(await db.scalars(select(CapaAIAdoption).where(CapaAIAdoption.capa_id==report_id)
-        .order_by(CapaAIAdoption.adopted_at,CapaAIAdoption.adoption_id).offset((page-1)*page_size).limit(page_size)))
-    items=[dict(adoption_id=r.adoption_id,d_step=r.d_step,adopted_text=r.adopted_text,source=r.source,
-        stage_index=r.stage_index,item_ref=r.item_ref,adopted_by=r.adopted_by,adopted_at=r.adopted_at,
-        source_status='historical_unattested',source_details=None) for r in rows]
+    metadata=(await db.execute(select(CapaAIAdoption.adoption_id,CapaAIAdoption.d_step,CapaAIAdoption.item_ref)
+        .where(CapaAIAdoption.capa_id==report_id).order_by(CapaAIAdoption.adopted_at,CapaAIAdoption.adoption_id)
+        .offset((page-1)*page_size).limit(page_size))).all()
+    allowed=[]
+    async def admitted(row):
+        if isinstance(row.item_ref,dict) and 'r6_capture_id' in row.item_ref:
+            try:
+                await authorize_bound_sources(db,scope.user.user_id,report_id,d_step=row.d_step,
+                    capture_id=UUID(row.item_ref['r6_capture_id']))
+            except (PermissionError,LookupError,ValueError,TypeError):return False
+        return True
+    for row in metadata:
+        if await admitted(row):allowed.append(row.adoption_id)
+    rows=list(await db.scalars(select(CapaAIAdoption).where(CapaAIAdoption.capa_id==report_id,
+        CapaAIAdoption.adoption_id.in_(allowed)).order_by(CapaAIAdoption.adopted_at,CapaAIAdoption.adoption_id))) if allowed else []
+    items=[]
+    for row in rows:
+        if await admitted(row):
+            items.append(dict(adoption_id=row.adoption_id,d_step=row.d_step,adopted_text=row.adopted_text,source=row.source,
+                stage_index=row.stage_index,item_ref=row.item_ref,adopted_by=row.adopted_by,adopted_at=row.adopted_at,
+                source_status='historical_unattested',source_details=None))
     await authorize_root(db,scope.user.user_id,report_id)
     return dict(items=items,page=page,page_size=page_size)

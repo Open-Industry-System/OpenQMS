@@ -85,6 +85,8 @@ async def correct(db, scope, report_id, measure_id, body):
     from app.services.capa_review_guard import assert_reviewed_material_mutable
     actor_id = scope.user.user_id
     await metadata(db, scope, report_id, measure_id, edit=True)
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     # Admission remains outside the parent lock; the lock is the linearization
     # fence for different operations on the same report, including approvals.
     await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id == report_id).with_for_update())

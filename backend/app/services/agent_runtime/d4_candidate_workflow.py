@@ -19,6 +19,8 @@ def _active(state):
 
 
 async def send_context(db, identity, *, snapshot, messages, tools):
+    from app.services.capa_entry_switch import require_generation_enabled
+    require_generation_enabled()
     current = await candidates.current_inputs(db, identity, snapshot=snapshot, lock=True)
     row = await model_egress.task_deployment(db, current.task, lock=True)
     resolver = db.info.get('r5_credential_resolver')

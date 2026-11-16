@@ -43,10 +43,14 @@ async def lock_capa_parent(db, report_id, *, actor_id=None, required_level=None)
         from app.services.capa_d4_material import authorize_root
         level = required_level if required_level is not None else PermissionLevel.EDIT
         await authorize_root(db, actor_id, report_id, level)
+        from app.services.capa_legacy_capture import authorize_bound_sources
+        await authorize_bound_sources(db,actor_id,report_id,d_step="d5")
         with db.no_autoflush:
             await db.scalar(select(CAPAEightD.report_id).where(
                 CAPAEightD.report_id == report_id).with_for_update())
         await authorize_root(db, actor_id, report_id, level)
+        from app.services.capa_legacy_capture import authorize_bound_sources
+        await authorize_bound_sources(db,actor_id,report_id,d_step="d5")
     with db.no_autoflush:
         capa = await db.scalar(
             select(CAPAEightD)

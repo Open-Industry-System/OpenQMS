@@ -47,6 +47,7 @@ class RecommendationCandidate:
     def to_d4_schema(self) -> dict[str, Any]:
         """转换为 D4Recommendation 响应字典。"""
         result = {
+            "capture_id": self.metadata.get("capture_id"),
             "failure_cause_node_id": self.metadata.get("failure_cause_node_id"),
             "failure_cause_name": self.content,
             "failure_cause_desc": self.metadata.get("failure_cause_desc"),
@@ -81,6 +82,7 @@ class RecommendationCandidate:
         """转换为 D5ExistingControl 响应字典。仅 control 类型候选可用。"""
         if self.metadata.get("control_node_id"):
             return {
+                "capture_id": self.metadata.get("capture_id"),
                 "failure_mode_node_id": self.metadata.get("failure_mode_node_id"),
                 "failure_mode_name": self.metadata.get("failure_mode_name"),
                 "failure_cause_node_id": self.metadata.get("failure_cause_node_id"),
@@ -102,6 +104,7 @@ class RecommendationCandidate:
 
     def to_d5_suggestion_schema(self) -> dict[str, Any]:
         result = {
+            "capture_id": self.metadata.get("capture_id"),
             "content": self.content,
             "category": self.category or "预防措施",
             "basis": self.metadata.get("basis", ""),
@@ -131,3 +134,4 @@ class RecommendationResult:
     stages: list[StageRun] = field(default_factory=list)
     blocked: bool = False
     source_bindings: tuple = field(default=(), repr=False)
+    trusted_source_bindings: list | None = field(default=None, repr=False)

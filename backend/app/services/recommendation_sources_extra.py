@@ -663,7 +663,7 @@ class LessonsLearnedSource:
                    1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity,
                    lesson.lesson_text, lesson.category, lesson.capa_id, lesson.product_line_code,
                    lesson.source_d_step,
-                   capa.document_no AS source_capa_document_no
+                   capa.updated_at AS source_updated_at, capa.document_no AS source_capa_document_no
             FROM document_embeddings de
             JOIN capa_lessons_learned lesson ON de.entity_id = lesson.lesson_id
             JOIN capa_eightd capa ON lesson.capa_id = capa.report_id AND capa.factory_id = lesson.factory_id
@@ -701,6 +701,7 @@ class LessonsLearnedSource:
                     match_reason="经验教训库相似命中",
                     metadata={
                         "source_capa_id": str(source_capa_id),
+                        "source_updated_at": row.source_updated_at,
                         "source_capa_document_no": source_capa_document_no,
                         "lesson_id": str(lesson_id),
                         "source_d_step": row.source_d_step,
@@ -796,6 +797,7 @@ class KnowledgeEntrySource:
                    entry.document_no,
                    entry.source_id,
                    entry.source_type,
+                   (SELECT source_capa.updated_at FROM capa_eightd source_capa WHERE source_capa.report_id=entry.source_id AND entry.source_type='capa') AS source_updated_at,
                    entry.fields,
                    entry.embedding_text,
                    entry.product_line_code
@@ -839,7 +841,8 @@ class KnowledgeEntrySource:
                         "entry_id": entry_id_str,
                         **({"closure_review_scope": "unreviewed_supplement"} if unreviewed else {}),
                         "document_no": row.document_no,
-                        "capa_id": str(row.source_id),
+                        "capa_id": str(row.source_id) if row.source_type=="capa" else None,
+                        "source_updated_at": row.source_updated_at,
                         "embedding_id": str(row.embedding_id),
                         "product_line_code": row.product_line_code,
                         "factory_id": str(fid),

@@ -17,6 +17,40 @@ from tests.capa.test_capa_outcome_decision import decision_provider, expectation
 pytestmark = pytest.mark.requires_db
 
 
+async def boundary_or_failure(event,task,timeout=5):
+    """Surface a failed operation instead of masking it as a boundary timeout."""
+    waiting=asyncio.create_task(event.wait())
+    try:
+        done,_=await asyncio.wait({waiting,task},timeout=timeout,return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            await task
+            raise AssertionError('operation completed before the expected boundary')
+        assert waiting in done,'operation never reached the expected boundary'
+    finally:
+        if not waiting.done():waiting.cancel()
+        await asyncio.gather(waiting,return_exceptions=True)
+
+
+async def bind_ordinary_gate_sources(case,sources):
+    """Real FMEA/CP gate sources on the supported ordinary closure branch.
+
+    Adding a verification source_ref creates retained R6 origins and requires
+    the separate manual branch. Provider-wait tests must not wait for a model
+    call that the restricted manual contract deliberately forbids.
+    """
+    from tests.capa.test_capa_outcome_sources import bind_sources
+    from app.models.capa_doc_gate import CapaDocgAnalysis
+    from app.services.capa_doc_gate_service import _build_allowlist,_compute_input_hash
+    from app.services.capa_r6_local_closure import eligible
+    await bind_sources(case,sources,modules=('planning','fmea'),explicit=False)
+    async with case.session_factory() as db:
+        assert not await eligible(db,case.report_id)
+        capa=await case.report(db)
+        analysis=await db.get(CapaDocgAnalysis,case.owned_ids['analysis_id'])
+        analysis.analysis_input_hash=_compute_input_hash(capa,await _build_allowlist(db,capa))
+        await db.commit()
+
+
 @asynccontextmanager
 async def lock_witness(case, waiter_pid, table='capa_eightd'):
     """Observe execute reaching the real lock request, then PostgreSQL blocking."""
@@ -186,15 +220,23 @@ async def test_role_revoked_during_real_parent_lock_wait(review_case):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('change', ['source_version', 'planning_permission', 'scope'])
 @pytest.mark.parametrize('target', ['D8_CLOSURE', 'D7_PREVENTION'])
-async def test_complete_source_wait_revalidates_version_and_current_access(review_case, review_sources, change, target):
+async def test_complete_source_wait_revalidates_version_and_current_access(review_case, review_sources, change, target,monkeypatch):
     from app.models.fmea import FMEADocument
     from app.models.role import UserProductLine
     from app.services.version_service import create_fmea_version, lock_version_parent
     from tests.capa.test_capa_outcome_decision import bind_decision_sources
     case = review_case
-    await bind_decision_sources(case, review_sources)
+    if target=='D8_CLOSURE':
+        await bind_ordinary_gate_sources(case,review_sources)
+    else:
+        await bind_decision_sources(case, review_sources)
+        from app.services.capa_r6_local_closure import eligible
+        from app.services.agent import provider_adapter
+        async with case.session_factory() as db:assert await eligible(db,case.report_id)
+        async def forbidden_model(*args,**kwargs):raise AssertionError('restricted rejection must not invoke a model')
+        monkeypatch.setattr(provider_adapter,'build_client',forbidden_model)
     seen = await expectation(case)
-    # CP (gate) sorts before explicit FMEA (outside the gate snapshot). Hold
+    # CP (gate) sorts before FMEA (gate or explicit on rejection). Hold
     # only FMEA so the approver has already waited after locking a proper subset.
     async with case.session_factory() as holder, case.session_factory() as approver:
         holder_pid, approver_pid = await pid(holder), await pid(approver)
@@ -203,7 +245,7 @@ async def test_complete_source_wait_revalidates_version_and_current_access(revie
             task = asyncio.create_task(advance_capa(approver, await case.report(approver), case.actor_id,
                 AdvanceRequest(target_state=target, reject_reason='需补足实施证据', **seen)))
             try:
-                await asyncio.wait_for(reached.wait(), 5)
+                await boundary_or_failure(reached, task)
                 await wait_for_pg_blocker(case, approver_pid, holder_pid)
                 if change == 'source_version':
                     await create_fmea_version(holder, await holder.get(FMEADocument, review_sources.fmea_id),
@@ -219,8 +261,11 @@ async def test_complete_source_wait_revalidates_version_and_current_access(revie
                             await revoke.execute(delete(UserProductLine).where(UserProductLine.user_id == case.actor_id))
                         await revoke.commit()
                     await holder.commit()
-                error = OutcomeReviewConflict if change == 'source_version' else (PermissionError, LookupError)
-                with pytest.raises(error):
+                # A source now inside the ordinary gate is rejected by its
+                # exact gate-freshness error before the outer receipt compare.
+                error = ValueError if target=='D8_CLOSURE' and change=='source_version' else (OutcomeReviewConflict if change=='source_version' else (PermissionError,LookupError))
+                match = '文档已变更，请重新审核' if target=='D8_CLOSURE' and change=='source_version' else None
+                with pytest.raises(error,match=match):
                     await asyncio.wait_for(task, 5)
                 await approver.rollback()
             finally:
@@ -240,7 +285,7 @@ async def test_provider_wait_final_authority_failure_rolls_back_every_side_effec
     from app.services.agent import provider_adapter
     from tests.capa.test_capa_outcome_decision import bind_decision_sources
     case = review_case
-    await bind_decision_sources(case, review_sources)
+    await bind_ordinary_gate_sources(case,review_sources)
     seen = await expectation(case)
     called, resume = asyncio.Event(), asyncio.Event()
     complete = provider_adapter.complete_json
@@ -256,7 +301,7 @@ async def test_provider_wait_final_authority_failure_rolls_back_every_side_effec
                 AdvanceRequest(target_state='D8_CLOSURE', **seen))
     task = asyncio.create_task(approve())
     try:
-        await asyncio.wait_for(called.wait(), 5)
+        await boundary_or_failure(called, task)
         async with case.session_factory() as revoke:
             if change == 'actor':
                 await revoke.execute(update(User).where(User.user_id == case.actor_id).values(is_active=False))
@@ -287,7 +332,7 @@ async def test_complete_ordered_source_locks_held_through_provider_and_commit(
     from app.services.version_service import create_fmea_version
     from tests.capa.test_capa_outcome_decision import bind_decision_sources
     case = review_case
-    await bind_decision_sources(case, review_sources)
+    await bind_ordinary_gate_sources(case,review_sources)
     seen = await expectation(case)
     called, resume = asyncio.Event(), asyncio.Event()
     complete = provider_adapter.complete_json
@@ -312,7 +357,7 @@ async def test_complete_ordered_source_locks_held_through_provider_and_commit(
     task = asyncio.create_task(approve())
     writer_task = None
     try:
-        await asyncio.wait_for(called.wait(), 5)
+        await boundary_or_failure(called, task)
         assert len(locks) == 2
         assert 'FROM control_plans' in locks[0]
         assert 'FROM fmea_documents' in locks[1]
@@ -384,7 +429,7 @@ async def test_tenant_admission_revalidated_after_actual_provider_wait(
                 AdvanceRequest(target_state='D8_CLOSURE', **seen))
     task = asyncio.create_task(approve())
     try:
-        await asyncio.wait_for(called.wait(), 5)
+        await boundary_or_failure(called, task)
         async with owned.engine.begin() as conn:
             clause = "status='suspended'" if revocation == 'status' else 'generation=generation+1'
             await conn.execute(text('UPDATE public.tenants SET ' + clause + ' WHERE id=:id'),

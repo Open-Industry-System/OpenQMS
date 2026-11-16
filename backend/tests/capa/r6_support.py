@@ -82,7 +82,11 @@ class R6Case:
             counts = {}
             for table in (*R6_TABLES, 'capa_d5_measures', 'capa_d5_proposals',
                           'capa_d4_root_cause_revisions', 'capa_root_cause_verification', 'audit_logs'):
-                counts[table] = await db.scalar(text(f'SELECT count(*) FROM {table}'))
+                # Independent starts must survive rejected business requests.
+                # Retain every completion witness and every business audit so
+                # a rejected HTTP write cannot hide an accidental commit.
+                where = " WHERE NOT (table_name='capa_r6_entry_switches' AND action='R6_ENTRY_ADMITTED')" if table == 'audit_logs' else ''
+                counts[table] = await db.scalar(text(f'SELECT count(*) FROM {table}{where}'))
             return dict(report=body, counts=counts)
 
     async def candidate(self, body, *, actor='edit', runtime_headers=None):

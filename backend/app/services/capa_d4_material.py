@@ -21,7 +21,9 @@ def origin_digest(ids):
 
 def ordinary_capa_predicate(report_expression):
     """SQL fragments are server-owned identifiers, never caller input."""
-    return f"""NOT EXISTS (SELECT 1 FROM capa_r6_root_revision_bodies r6_body
+    return f"""NOT EXISTS (SELECT 1 FROM capa_ai_adoption r6_known_legacy
+        WHERE r6_known_legacy.capa_id={report_expression} AND r6_known_legacy.item_ref ? 'r6_capture_id')
+        AND NOT EXISTS (SELECT 1 FROM capa_r6_root_revision_bodies r6_body
         WHERE r6_body.report_id = {report_expression} AND r6_body.source_count > 0)
         AND NOT EXISTS (SELECT 1 FROM capa_d4_root_cause_revisions r6_revision
         WHERE r6_revision.report_id = {report_expression}
@@ -78,6 +80,8 @@ async def require_legacy_root_only(db, report_id):
     from app.services.capa_current_access import require_business_namespace
     await require_business_namespace(db)
     _, sources = await root_metadata(db, report_id)
+    from app.services.capa_legacy_capture import require_ordinary_capture_material
+    await require_ordinary_capture_material(db,report_id)
     from app.models.capa_r6 import CapaR6LocalRevision
     local = await db.scalar(select(CapaR6LocalRevision.revision_id).where(CapaR6LocalRevision.report_id==report_id).limit(1))
     if sources or local:
@@ -189,6 +193,8 @@ async def authorize_root(db, actor_id, report_id, required_level=PermissionLevel
     """Authorize target and every inherited source before any protected body SELECT."""
     factories, lines = await current_capa_actor_access(db, actor_id, required_level)
     target = await current_capa_target_metadata(db, report_id, factories, lines)
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    await authorize_bound_sources(db,actor_id,report_id,d_step="d4")
     revision, sources = await root_metadata(db, report_id)
     from app.services.fmea_agent_sources import visible_fmea_source
     scope = SimpleNamespace(user=SimpleNamespace(user_id=actor_id))
@@ -237,7 +243,7 @@ async def bump_material(db, report_id):
     await db.flush()
 
 
-async def material_version(db, report_id):
+async def material_version(db, report_id, *, include_entry_epoch=True):
     from app.services.capa_d4_provenance import current_field_namespace
     namespace = await current_field_namespace(db)
     counter = await db.scalar(select(CapaR6MaterialVersion.counter).where(CapaR6MaterialVersion.report_id == report_id))
@@ -257,11 +263,16 @@ async def material_version(db, report_id):
         else:
             parents.append(dict(kind='present', fmea_id=str(row.fmea_id), epoch=row.lock_version,
                 factory_id=str(row.factory_id), product_line_code=row.product_line_code))
-    value = json.dumps(dict(namespace=namespace, report_id=str(report_id), counter=counter or 0,
-        switch_epoch=epoch or 0, root_revision_id=None if revision is None else str(revision.revision_id),
-        source_ids=sorted(str(source.source_id) for source in sources), source_parents=parents),
-        sort_keys=True, separators=(',', ':')).encode()
-    return hmac.new(settings.SECRET_KEY.encode(), b'openqms.r6.material.v2\n' + value, hashlib.sha256).hexdigest()
+    from app.services.capa_legacy_capture import current_capture_material
+    captured = await current_capture_material(db,report_id)
+    payload=dict(namespace=namespace, report_id=str(report_id), counter=counter or 0,
+        root_revision_id=None if revision is None else str(revision.revision_id),
+        source_ids=sorted(str(source.source_id) for source in sources), source_parents=parents)
+    if include_entry_epoch:payload['switch_epoch']=epoch or 0
+    if captured:payload['legacy_captures']=captured
+    value=json.dumps(payload,sort_keys=True,separators=(',',':')).encode()
+    domain=b'openqms.r6.material.v2\n' if include_entry_epoch else b'openqms.r6.semantic-material.v1\n'
+    return hmac.new(settings.SECRET_KEY.encode(),domain+value,hashlib.sha256).hexdigest()
 
 
 async def append_root_body(db, revision, text, added_source_ids=()):

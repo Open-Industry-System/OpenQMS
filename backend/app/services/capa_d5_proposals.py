@@ -154,6 +154,10 @@ class D5ContextSnapshot:
 
 
 async def build_d5_context(db, identity, *, source_queries):
+    from app.services.capa_entry_switch import require_generation_enabled
+    require_generation_enabled()
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     """Execute authorized context reads and seal EXACT bodies/source versions.
 
     An internal tool dispatcher may request additional supported coordinates;
@@ -227,6 +231,10 @@ def _digest_node(node):
 
 
 async def validate_d5_context_for_release(db, identity, *, snapshot):
+    from app.services.capa_entry_switch import require_generation_enabled
+    require_generation_enabled()
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     """Lock and revalidate the EXACT signed snapshot; this creates no receipt.
 
     The model egress uses it immediately before outbound under current source,
@@ -507,6 +515,8 @@ async def staff_action(db, scope, report_id, proposal_id, *, operation, operatio
     request = (D5Adopt(operation_key=operation_key, final_text=value) if operation == 'adopt'
         else D5Withdraw(operation_key=operation_key, reason=value))
     await _staff_metadata(db, scope, report_id, proposal_id)
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id == report_id).with_for_update())
     await db.scalar(select(CapaD5Proposal.proposal_id).where(
         CapaD5Proposal.proposal_id == proposal_id, CapaD5Proposal.report_id == report_id).with_for_update())

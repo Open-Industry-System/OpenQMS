@@ -9,6 +9,7 @@ from app.schemas.agent_d4_text import SourceDeclaration
 from app.schemas.database_text import DatabaseTextInput
 
 class AdoptRequest(DatabaseTextInput):
+    capture_id: uuid.UUID | None = None
     d_step: Literal["d4", "d5"]
     adopted_text: str
     source: str

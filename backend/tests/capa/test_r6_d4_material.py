@@ -206,7 +206,7 @@ async def test_input_snapshots_detect_aba_and_expected_material_conflict(db, def
 @pytest.mark.asyncio
 async def test_other_manual_material_and_legacy_d5_adopt_bump_counter(db, default_factory, admin_user):
     from app.services.capa_service import update_capa
-    from app.services.capa_verification_service import adopt_recommendation
+    from tests.capa.legacy_capture_support import adopt_rule_candidate as adopt_recommendation
     from app.services.capa_d4_material import material_version
     from app.schemas.capa_verification import AdoptRequest
     report = await make_report(db, default_factory, admin_user)

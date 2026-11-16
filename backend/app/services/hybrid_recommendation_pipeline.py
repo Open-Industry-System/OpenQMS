@@ -44,6 +44,8 @@ class HybridRecommendationPipeline:
         """执行完整推荐管道。"""
         from app.services.capa_d4_material import legacy_recommendation_binding, require_legacy_candidate_bindings
         initial_binding = await legacy_recommendation_binding(self.db, user, report_id)
+        from app.services.capa_entry_switch import admit
+        await admit(self.db, "legacy")
         context.actor_id, context.material_version = user.user_id, initial_binding
         async def require_current():
             if initial_binding != await legacy_recommendation_binding(self.db, user, report_id):
@@ -58,6 +60,9 @@ class HybridRecommendationPipeline:
         await require_current()
         await require_legacy_candidate_bindings(self.db, result.source_bindings, actor=user)
         if not result.blocked:  # BLOCKED 时跳过审计与 cache 写入
+            from app.services.capa_legacy_capture import store
+            await store(self.db, report_id=report_id, actor=user, stage=context.stage, items=result.items,
+                sources=result.trusted_source_bindings, target_material=initial_binding)
             await self._maybe_write_llm_audit(
                 result, context, user, report_id, factory_id, tenant_schema
             )

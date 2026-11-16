@@ -16,6 +16,7 @@ from app.models.capa_d4_delivery import CapaD4RootCauseRevision
 from app.schemas.capa_verification import AdoptRequest
 from app.services import capa_service, capa_verification_service
 from tests.services.agent_runtime.conftest import committed_runtime
+from tests.capa.legacy_capture_support import adopt_rule_candidate
 
 pytestmark = pytest.mark.requires_db
 
@@ -59,14 +60,14 @@ async def test_adopt_revision_only_for_d4_real_append_and_not_retry_or_d5(db, de
     embedding = AsyncMock()
     monkeypatch.setattr(capa_verification_service, 'enqueue_embedding', embedding)
     request = AdoptRequest(d_step='d4', adopted_text='A', source='rule')
-    first, _ = await capa_verification_service.adopt_recommendation(db, report, request, admin_user)
-    second, _ = await capa_verification_service.adopt_recommendation(db, report, request, admin_user)
+    first, _ = await adopt_rule_candidate(db, report, request, admin_user)
+    second, _ = await adopt_rule_candidate(db, report, request, admin_user)
     assert first.adoption_id == second.adoption_id
     rows = await revisions(db, report)
     assert len(rows) == 1 and rows[0].write_path == 'r6:capa.adopt'
     report.status = 'D5_CORRECTION'
     await db.flush()
-    await capa_verification_service.adopt_recommendation(db, report,
+    await adopt_rule_candidate(db, report,
         AdoptRequest(d_step='d5', adopted_text='measure', source='rule'), admin_user)
     assert len(await revisions(db, report)) == 1
     assert embedding.await_count == 2
@@ -75,12 +76,12 @@ async def test_adopt_revision_only_for_d4_real_append_and_not_retry_or_d5(db, de
 @pytest.mark.asyncio
 async def test_adopt_and_update_share_monotonic_revision_history(db, default_factory, admin_user):
     report = await make_report(db, default_factory, admin_user)
-    await capa_verification_service.adopt_recommendation(db, report,
+    await adopt_rule_candidate(db, report,
         AdoptRequest(d_step='d4', adopted_text='A', source='rule'), admin_user)
     await capa_service.update_capa(db, report, {'d4_root_cause': 'B'}, admin_user.user_id)
     # Different item_ref means a real append, not the adoption idempotency key.
     await capa_service.update_capa(db, report, {'d4_root_cause': ''}, admin_user.user_id)
-    await capa_verification_service.adopt_recommendation(db, report,
+    await adopt_rule_candidate(db, report,
         AdoptRequest(d_step='d4', adopted_text='A', source='rule', item_ref={'fixture': 'again'}), admin_user)
     rows = await revisions(db, report)
     assert [r.revision_no for r in rows] == [1, 2, 3, 4]
@@ -230,7 +231,7 @@ async def test_real_commit_and_rollback_keep_root_revision_atomic(committed_runt
             if writer == 'update':
                 await capa_service.update_capa(db, report, {'d4_root_cause': 'B'}, case.user_id)
             else:
-                await capa_verification_service.adopt_recommendation(db, report,
+                await adopt_rule_candidate(db, report,
                     AdoptRequest(d_step='d4', adopted_text='B', source='rule'), user)
         await db.rollback()
     async with case.factory(binding=case.binding) as db:

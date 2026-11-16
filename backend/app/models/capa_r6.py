@@ -320,9 +320,11 @@ class CapaR6LocalSource(TenantBase):
     __table__ = sa.Table('capa_r6_local_sources', TenantBase.metadata,
         _id('revision_id',primary_key=True), _id('report_id'),
         sa.Column('module',sa.String(16),primary_key=True), _id('object_id',primary_key=True),
+        _id('source_capa_id',nullable=True),sa.Column('source_capa_created_at',sa.DateTime(timezone=True),nullable=True),
         _id('factory_id','factories.id'), sa.Column('product_line_code',sa.String(20),nullable=False),
         sa.ForeignKeyConstraint(['revision_id','report_id'],['capa_r6_local_revisions.revision_id','capa_r6_local_revisions.report_id'],ondelete='RESTRICT'),
-        sa.CheckConstraint("module IN ('fmea','planning') AND length(btrim(product_line_code))>0",name='ck_r6_local_source'), _created())
+        sa.CheckConstraint("module IN ('fmea','planning','capa') AND length(btrim(product_line_code))>0",name='ck_r6_local_source'),
+        sa.CheckConstraint("(module='capa' AND source_capa_id IS NOT NULL AND source_capa_created_at IS NOT NULL AND object_id=source_capa_id) OR (module IN ('fmea','planning') AND source_capa_id IS NULL AND source_capa_created_at IS NULL)",name='ck_r6_local_capa_identity'),_created())
 
 R6_TABLES = (*R6_TABLES, 'capa_r6_local_revisions', 'capa_r6_local_sources')
 
@@ -339,3 +341,19 @@ class CapaR6ManualDecisionReceipt(TenantBase):
         sa.CheckConstraint("operation IN ('audit','defer','no_affected','waiver')",name='ck_r6_manual_decision_operation'),
         sa.CheckConstraint("operation_key ~ '^[A-Za-z0-9._:-]{1,128}$' AND request_hmac ~ '^[0-9a-f]{64}$'",name='ck_r6_manual_decision_receipt'),_created())
 R6_TABLES=(*R6_TABLES,'capa_r6_manual_decision_receipts')
+
+
+class CapaR6LegacyCapture(TenantBase):
+    __table__ = sa.Table('capa_r6_legacy_captures', TenantBase.metadata,
+        _id('capture_id', primary_key=True), _id('report_id', 'capa_eightd.report_id'),
+        _id('actor_id', 'users.user_id'), sa.Column('namespace', sa.String(64), nullable=False),
+        _id('tenant_id', nullable=True), sa.Column('tenant_generation', sa.BigInteger(), nullable=False),
+        sa.Column('stage', sa.String(2), nullable=False), sa.Column('text_digest', sa.String(64), nullable=False),
+        sa.Column('target_material', sa.String(128), nullable=False),
+        sa.Column('source_bindings', JSONB(), nullable=False), sa.Column('binding_hmac', sa.String(64), nullable=False),
+        sa.CheckConstraint("(namespace='single:public' AND tenant_id IS NULL AND tenant_generation=0) OR (namespace ~ '^tenant_' AND tenant_id IS NOT NULL AND tenant_generation>=0)", name='ck_r6_legacy_namespace'),
+        sa.CheckConstraint("stage IN ('d4','d5')", name='ck_r6_legacy_stage'),
+        sa.CheckConstraint("text_digest ~ '^[0-9a-f]{64}$' AND binding_hmac ~ '^[0-9a-f]{64}$'", name='ck_r6_legacy_digest'),
+        sa.CheckConstraint('length(target_material)>0', name='ck_r6_legacy_material'),
+        sa.CheckConstraint("jsonb_typeof(source_bindings)='array' AND jsonb_array_length(source_bindings)<=1000 AND octet_length(source_bindings::text)<=262144", name='ck_r6_legacy_sources'), _created())
+R6_TABLES = (*R6_TABLES, 'capa_r6_legacy_captures')

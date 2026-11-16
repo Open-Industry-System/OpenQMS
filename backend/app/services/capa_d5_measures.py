@@ -334,6 +334,8 @@ async def full_d5_material(db, capa, *, scope=None, access=None):
     The caller provides live authority and holds the CAPA parent for decisions.
     Source scope may include other product lines, unlike legacy D4 references.
     """
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    if scope is not None: await authorize_bound_sources(db,scope.user.user_id,capa.report_id,d_step="d5")
     formal = await _formal_ids(db, capa.report_id)
     if not formal:
         return []

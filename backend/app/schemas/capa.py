@@ -19,6 +19,7 @@ class CAPACreate(DatabaseTextInput):
 
 
 class CAPAUpdate(DatabaseTextInput):
+    expected_entry_epoch: int | None = None
     expected_material_version: str | None = None
     title: str | None = None
     d1_team: list[dict] | None = None
@@ -72,6 +73,8 @@ class SupplierRiskInputProjection(BaseModel):
 
 
 class CAPAResponse(BaseModel):
+    entry_phase: str = "legacy"
+    entry_epoch: int = 0
     material_version: str | None = None
     report_id: uuid.UUID
     document_no: str
@@ -140,6 +143,7 @@ class D7RecommendationResponse(BaseModel):
 
 
 class D4Recommendation(BaseModel):
+    capture_id: uuid.UUID | None = None
     failure_cause_node_id: str | None = None
     failure_cause_name: str
     failure_cause_desc: str | None = None
@@ -171,6 +175,7 @@ class D4RecommendationResponse(BaseModel):
 
 
 class D5ExistingControl(BaseModel):
+    capture_id: uuid.UUID | None = None
     failure_mode_node_id: str | None = None
     failure_mode_name: str | None = None
     failure_cause_node_id: str | None = None
@@ -191,6 +196,7 @@ class D5ExistingControl(BaseModel):
 
 
 class D5GeneralSuggestion(BaseModel):
+    capture_id: uuid.UUID | None = None
     content: str
     category: str  # "预防措施" | "探测措施" | "纠正措施"
     basis: str

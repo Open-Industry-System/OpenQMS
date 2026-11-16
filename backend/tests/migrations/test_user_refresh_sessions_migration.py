@@ -14,7 +14,7 @@ from tests.conftest import _test_db_url
 
 
 REV = "20260913_user_refresh_sessions"
-PUBLIC_HEAD = "20261116_r6_verify_origins"
+PUBLIC_HEAD = "20261116_r6_local_capa_sources"
 DOWN_REV = "20260727_warranty_factory_id"
 TABLE = "user_refresh_sessions"
 OLD_FILENAME = "20260913_user_refresh_sessions.py"

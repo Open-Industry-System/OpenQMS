@@ -205,11 +205,11 @@ async def verify_runtime_identity(db: AsyncSession, token: str,
     if task is None or installation is None:
         raise PermissionError(run_auth.INVALID_TOKEN)
     authority = await authorize_task(db, task, installation)
-    from app.services.capa_d4_candidates import authorize_task_history
-    await authorize_task_history(db, task.executor_user_id, task)
     claims = run_auth._claims(token)
     if claims.get("trial_binding_sha256") != (None if authority.trial is None else authority.trial.binding_sha256):
         raise PermissionError(run_auth.INVALID_TOKEN)
+    from app.services.capa_d4_candidates import authorize_task_history
+    await authorize_task_history(db, task.executor_user_id, task)
     return RuntimeIdentity(task, run, installation, binding, authority.scope, authority.capabilities,
         authority.target_product_line_code, token, authority.trial)
 

@@ -14,6 +14,8 @@ from app.schemas.capa_verification import (
 )
 from app.services.capa_review_guard import ReviewedContentLocked
 
+from tests.capa.r6_support import r6_case  # noqa:F401
+
 pytestmark = pytest.mark.requires_db
 
 
@@ -212,14 +214,15 @@ async def test_adoption_existing_result_still_rejects_terminal(review_case, revi
     req = AdoptRequest(d_step="d5", adopted_text="existing adoption", source="manual")
     await review_case.set_status("D5_CORRECTION")
     async with review_case.session_factory() as db:
-        await adopt_recommendation(db, await review_case.report(db), req, await db.get(User, review_case.actor_id))
+        from tests.capa.legacy_capture_support import adopt_rule_candidate
+        await adopt_rule_candidate(db, await review_case.report(db), req, await db.get(User, review_case.actor_id))
     await review_case.set_status(status)
     before = await review_case.snapshot()
     async with review_case.session_factory() as db:
         with pytest.raises(ReviewedContentLocked):
             await adopt_recommendation(db, await review_case.report(db), req, await db.get(User, review_case.actor_id))
         assert await review_case.snapshot(db) == before
-    response = await review_http_client.post(f"/api/capa/{review_case.report_id}/adopt-recommendation", json=req.model_dump())
+    response = await review_http_client.post(f"/api/capa/{review_case.report_id}/adopt-recommendation", json=req.model_dump(mode="json"))
     assert response.status_code == 409, response.text
     assert await review_case.snapshot() == before
 
@@ -356,9 +359,12 @@ async def test_impact_http_maps_revocation_during_real_phase_two(review_case, re
     from app.models.role import UserProductLine
     from app.services.agent import provider_adapter
     entered, release = asyncio.Event(), asyncio.Event()
+    provider_calls=0
     async def local_client(db):
         return SimpleNamespace(model="local-test")
     async def local_network(client, prompt, schema):
+        nonlocal provider_calls
+        provider_calls+=1
         entered.set()
         await asyncio.wait_for(release.wait(), 10)
         if failed:
@@ -381,7 +387,12 @@ async def test_impact_http_maps_revocation_during_real_phase_two(review_case, re
         before = await review_case.snapshot()
         release.set()
         response = await asyncio.wait_for(request, 10)
-        assert response.status_code == (403 if revoke == "permission" else 404), response.text
+        # The physical-delivery guard deliberately normalizes every failed
+        # post-provider authority check to a safe PermissionError (403),
+        # including visibility loss. Pre-provider invisible admission stays404.
+        assert response.status_code == 403,response.text
+        assert provider_calls==1
+        assert response.json()=={'detail':'需要 capa 模块的 EDIT 权限'}
         assert await review_case.snapshot() == before
     finally:
         release.set()
@@ -650,79 +661,97 @@ async def test_d7_actual_open_write_preserves_distinct_source_minima(review_case
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("recovery", ["existing", "revoked", "terminal", "invisible"])
-async def test_adoption_real_rollback_recovers_with_same_session_user(review_case, monkeypatch, recovery):
-    """B1: actual unique violation/rollback expires User; fallback still locks and authorizes."""
+@pytest.mark.parametrize("recovery",["existing","revoked","terminal","invisible","draining","switched"])
+async def test_adoption_real_rollback_recovers_with_same_session_user(r6_case,monkeypatch,recovery,tmp_path):
+    """Real PK failure, rollback, genuine competitor commit and current admission."""
     import asyncio
-    from sqlalchemy import inspect, select, text, delete
-    from app.models.capa import CAPAEightD
+    from sqlalchemy import inspect,select,text,delete,event
+    from app.models.capa import CAPAEightD,CapaAIAdoption
     from app.models.role import UserProductLine
     from app.models.user import User
     from app.services import capa_verification_service as service
-    from tests.capa.outcome_review_support import wait_for_pg_blocker
-    req = AdoptRequest(d_step="d5", adopted_text="persisted rollback adoption", source="manual")
-    await review_case.set_status("D5_CORRECTION")
-    async with review_case.session_factory() as db:
-        adoption, _ = await service.adopt_recommendation(db, await review_case.report(db), req, await db.get(User, review_case.actor_id))
-        adoption_id = adoption.adoption_id
-    reached_recovery, resume = asyncio.Event(), asyncio.Event()
-    original_find = service._find_existing_adoption
-    count = 0
-    same_user = None
-    async def miss_once(db, capa_id, request):
-        nonlocal count
-        count += 1
-        if count == 1:
-            # Only the initial dedupe read misses. The real INSERT and real
-            # commit encounter the existing database unique index; neither
-            # commit nor rollback is replaced with a flush/fake exception.
-            return None
-        assert inspect(same_user).persistent
-        assert inspect(same_user).session is db.sync_session
-        assert inspect(same_user).expired
-        # NullPool returns a new physical backend after real rollback.
-        pids["writer"] = await db.scalar(text("SELECT pg_backend_pid()"))
-        reached_recovery.set()
-        await asyncio.wait_for(resume.wait(), 10)
-        return await original_find(db, capa_id, request)
-    monkeypatch.setattr(service, "_find_existing_adoption", miss_once)
-    pids = {}
+    from tests.capa.outcome_review_support import ReviewCase,wait_for_pg_blocker
+    from tests.capa.legacy_capture_support import bind_rule_candidate,adopt_rule_candidate
+    from tests.capa.r6_switch_support import owned_cli,cli
+    from fastapi import HTTPException
+    c=r6_case
+    case=ReviewCase(c.session,c.report_id,c.actor().user_id,c.factory_id,c.line,uuid.uuid4(),{'role_id':c.actor().role_id})
+    await case.set_status('D5_CORRECTION')
+    async with c.session() as db:
+        actor=await db.get(User,case.actor_id)
+        slot=CAPAEightD(document_no='ROLLBACK-SLOT-'+uuid.uuid4().hex[:8],title='genuine PK occupying adoption',
+            factory_id=c.factory_id,product_line_code=c.line,created_by=case.actor_id,status='D5_CORRECTION')
+        db.add(slot);await db.commit()
+        seed,_=await adopt_rule_candidate(db,slot,AdoptRequest(d_step='d5',adopted_text='independent genuine seed',source='rule'),actor)
+        slot_id=seed.adoption_id
+        req=await bind_rule_candidate(db,await case.report(db),
+            AdoptRequest(d_step='d5',adopted_text='persisted rollback adoption',source='rule'),actor)
+    reached,resume=asyncio.Event(),asyncio.Event()
+    task=None;same_user=None;pids={};after_rollback_sql=[];resumed=False
+    def collide(mapper,connection,adoption):
+        if asyncio.current_task() is task and adoption.capa_id==c.report_id:
+            adoption.adoption_id=slot_id  # Real PG PK violation; never a fake commit.
+    def observe(connection,cursor,statement,parameters,context,executemany):
+        if resumed and asyncio.current_task() is task:after_rollback_sql.append(statement.lower())
+    event.listen(CapaAIAdoption,'before_insert',collide)
+    event.listen(c.runtime.engine.sync_engine,'before_cursor_execute',observe)
     async def writer():
-        nonlocal same_user
-        async with review_case.session_factory() as db:
-            pids["writer"] = await db.scalar(text("SELECT pg_backend_pid()"))
-            same_user = await db.get(User, review_case.actor_id)
-            return await service.adopt_recommendation(db, await review_case.report(db), req, same_user)
-    task = asyncio.create_task(writer())
+        nonlocal same_user,resumed
+        async with c.session() as db:
+            same_user=await db.get(User,case.actor_id)
+            rollback=db.rollback
+            async def paused_rollback():
+                nonlocal resumed
+                await rollback()
+                assert inspect(same_user).persistent and inspect(same_user).expired
+                pids['writer']=await db.scalar(text('SELECT pg_backend_pid()'))
+                reached.set();await resume.wait();resumed=True
+            db.rollback=paused_rollback
+            return await service.adopt_recommendation(db,await case.report(db),req,same_user)
+    task=asyncio.create_task(writer())
     try:
-        await asyncio.wait_for(reached_recovery.wait(), 5)
-        async with review_case.session_factory() as blocker:
-            pid = await blocker.scalar(text("SELECT pg_backend_pid()"))
-            capa = await blocker.scalar(select(CAPAEightD).where(CAPAEightD.report_id == review_case.report_id).with_for_update())
+        await asyncio.wait_for(reached.wait(),5)
+        # This is an actual successful adoption on the same immutable capture,
+        # after the first transaction really aborted. No old fact is backfilled.
+        async with c.session() as db:
+            actual,_=await service.adopt_recommendation(db,await case.report(db),req,await db.get(User,case.actor_id))
+            adoption_id=actual.adoption_id
+        if recovery in {'draining','switched'}:
+            fixture=await owned_cli(c,tmp_path)
+            assert (await cli(fixture,'close'))[0]==0
+            if recovery=='switched':assert (await cli(fixture,'finish'))[0]==0
+            before=await case.snapshot()
             resume.set()
-            await wait_for_pg_blocker(review_case, pids["writer"], pid)
-            if recovery == "revoked":
-                await review_case.set_capa_level(PermissionLevel.VIEW)
-            elif recovery == "terminal":
-                capa.status = "D8_CLOSURE"
-            elif recovery == "invisible":
-                async with review_case.session_factory() as revoker:
-                    await revoker.execute(delete(UserProductLine).where(UserProductLine.user_id == review_case.actor_id))
-                    await revoker.commit()
-            before = await review_case.snapshot(blocker)
-            await blocker.commit()
-        if recovery == "existing":
-            adoption, field_value = await asyncio.wait_for(task, 10)
-            assert adoption.adoption_id == adoption_id
-            assert field_value.count(req.adopted_text) == 1
+            with pytest.raises(HTTPException) as rejected:await asyncio.wait_for(task,10)
+            assert rejected.value.status_code==({'draining':503,'switched':410}[recovery])
+            assert not any('from capa_eightd' in sql and 'for update' in sql for sql in after_rollback_sql)
         else:
-            error = {"revoked": PermissionError, "terminal": ReviewedContentLocked, "invisible": LookupError}[recovery]
-            with pytest.raises(error):
-                await asyncio.wait_for(task, 10)
-        assert count == 2
-        assert await review_case.snapshot() == before
+            async with c.session() as blocker:
+                blocker_pid=await blocker.scalar(text('SELECT pg_backend_pid()'))
+                capa=await blocker.scalar(select(CAPAEightD).where(CAPAEightD.report_id==c.report_id).with_for_update())
+                resume.set();await wait_for_pg_blocker(case,pids['writer'],blocker_pid)
+                assert any('from capa_eightd' in sql and 'for update' in sql for sql in after_rollback_sql)
+                # No private adoption/Root body may be read before this real
+                # parent wait finishes and current authority is rechecked.
+                assert not any('capa_ai_adoption.adopted_text,' in sql or 'capa_eightd.d4_root_cause,' in sql or 'capa_eightd.d5_correction,' in sql for sql in after_rollback_sql)
+                if recovery=='revoked':await case.set_capa_level(PermissionLevel.VIEW)
+                elif recovery=='terminal':capa.status='D8_CLOSURE'
+                elif recovery=='invisible':
+                    async with c.session() as revoke:
+                        await revoke.execute(delete(UserProductLine).where(UserProductLine.user_id==case.actor_id));await revoke.commit()
+                before=await case.snapshot(blocker);await blocker.commit()
+            if recovery=='existing':
+                adopted,value=await asyncio.wait_for(task,10)
+                assert adopted.adoption_id==adoption_id and value.count(req.adopted_text)==1
+                assert any('capa_ai_adoption.adopted_text,' in sql for sql in after_rollback_sql)
+                assert any('capa_eightd.d5_correction,' in sql for sql in after_rollback_sql)
+            else:
+                expected={'revoked':PermissionError,'terminal':ReviewedContentLocked,'invisible':LookupError}[recovery]
+                with pytest.raises(expected):await asyncio.wait_for(task,10)
+        assert await case.snapshot()==before
     finally:
         resume.set()
-        if not task.done():
-            task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        if not task.done():task.cancel()
+        await asyncio.gather(task,return_exceptions=True)
+        event.remove(CapaAIAdoption,'before_insert',collide)
+        event.remove(c.runtime.engine.sync_engine,'before_cursor_execute',observe)

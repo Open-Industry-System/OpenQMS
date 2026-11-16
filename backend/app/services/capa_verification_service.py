@@ -87,26 +87,49 @@ def _assert_verified_has_details(method, result, evidence) -> None:
         raise ValueError("已验证记录须填写验证方法、结果或证据")
 
 
-async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest):
+async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest, actor_id):
     # 幂等去重 key：同 (capa, d_step, source, item_ref, adopted_text)。item_ref 是 JSONB，
     # SQLAlchemy == None 生成 IS NULL、== {} 生成 = '{}'::jsonb，与 ix_capa_ai_adoption_dedupe 的 COALESCE 收口一致
     # 接收标量 capa_id（非 capa 对象）：rollback 会 expire capa，async 下访问 capa.report_id 会 MissingGreenlet
-    return await db.scalar(select(CapaAIAdoption).where(
+    adoption_id = await db.scalar(select(CapaAIAdoption.adoption_id).where(
         CapaAIAdoption.capa_id == capa_id,
         CapaAIAdoption.d_step == req.d_step,
         CapaAIAdoption.source == req.source,
         CapaAIAdoption.adopted_text == req.adopted_text,
         CapaAIAdoption.item_ref == req.item_ref,
     ))
+    if adoption_id is None:return None
+    from app.services.capa_d4_material import authorize_root
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    await authorize_root(db,actor_id,capa_id,PermissionLevel.EDIT)
+    await authorize_bound_sources(db,actor_id,capa_id,d_step='d5')
+    return await db.scalar(select(CapaAIAdoption).where(CapaAIAdoption.adoption_id==adoption_id))
+
+
+async def _lock_adoption_target(db,report_id,actor_id):
+    """Metadata first; body lookup follows all parent waits and live checks."""
+    from app.services.capa_d4_material import authorize_root
+    from app.services.capa_legacy_capture import authorize_bound_sources,lock_current_history_sources
+    from app.services.capa_review_guard import assert_reviewed_material_mutable
+    await authorize_root(db,actor_id,report_id,PermissionLevel.EDIT)
+    await authorize_bound_sources(db,actor_id,report_id,d_step='d5')
+    await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id==report_id).with_for_update())
+    await lock_current_history_sources(db,actor_id,report_id)
+    capa=await current_capa_actor_target(db,actor_id,report_id,PermissionLevel.EDIT)
+    assert_reviewed_material_mutable(capa)
+    return capa
 
 
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
+    from app.services.capa_entry_switch import admit
+    await current_capa_actor_target(db, user.user_id, capa.report_id, PermissionLevel.EDIT)
+    await admit(db, "legacy")
     actor_id = user.user_id  # rollback expires even the persisted User PK
     # This must happen before the idempotency fast-path: returning an existing
     # adoption is still a reviewed-material write admission decision.
-    capa = await lock_current_material_write(
-        db, capa, actor_id, PermissionLevel.EDIT
-    )
+    capa = await _lock_adoption_target(db,capa.report_id,actor_id)
+    from app.services.capa_legacy_capture import canonical_request
+    req = await canonical_request(db, capa, req)
     field = FIELD_MAP[req.d_step]
     # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
     # 若不归一化，pre-query 的 IS NULL 查不到刚插的 JSON null 行，重试会撞 unique index 后 re-raise 500。
@@ -115,7 +138,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         req = req.model_copy(update={"item_ref": {}})
     # 幂等：重复采纳（双击/重试/代理重发）直接返回既有 adoption，不重复追加 d-step 文本、不重复 audit
     capa_id = capa.report_id  # 捕获标量，供 IntegrityError handler 在 rollback（expire capa）后使用
-    existing = await _find_existing_adoption(db, capa_id, req)
+    existing = await _find_existing_adoption(db, capa_id, req, actor_id)
     if existing is not None:
         from app.services.capa_d4_material import authorize_root
         await authorize_root(db, actor_id, capa.report_id)
@@ -123,6 +146,8 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         await authorize_root(db, actor_id, capa.report_id)
         return existing, getattr(capa, field) or ""
 
+    from app.services.capa_legacy_capture import require_capture
+    await require_capture(db, capa, req, user)
     # The parent guard already holds the row lock and returned fresh data.
     previous = getattr(capa, field)
     current = previous or ""
@@ -140,7 +165,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         action="ADOPT_RECOMMENDATION",
         changed_fields={
             "d_step": req.d_step, "source": req.source, "stage_index": req.stage_index,
-            "adopted_text": {"changed": True} if req.d_step == "d4" else req.adopted_text, "item_ref": req.item_ref,
+            "adopted_text": {"changed": True} if req.d_step == "d4" or req.capture_id is not None else req.adopted_text, "item_ref": req.item_ref,
         },
         operated_by=actor_id, factory_id=capa.factory_id,
     ))
@@ -160,15 +185,20 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）
         # rollback 会 expire capa；async 下访问 capa.report_id 会 MissingGreenlet → 用上方捕获的标量 capa_id
         await db.rollback()
-        existing = await _find_existing_adoption(db, capa_id, req)
+        # A rollback ended the admission transaction and released its shared
+        # drain lock. Reauthorize and re-admit before any history/body lookup
+        # or parent lock in this new transaction; a crossed cutover is 410.
+        from app.services.capa_d4_material import authorize_root
+        from app.services.capa_legacy_capture import authorize_bound_sources
+        await authorize_root(db,actor_id,capa_id,PermissionLevel.EDIT)
+        await authorize_bound_sources(db,actor_id,capa_id,d_step='d5')
+        await admit(db, "legacy")
+        capa = await _lock_adoption_target(db,capa_id,actor_id)
+        existing = await _find_existing_adoption(db, capa_id, req, actor_id)
         if existing is None:
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
-        from app.services.capa_d4_material import authorize_root
-        await authorize_root(db, actor_id, capa_id)
-        capa = await lock_capa_parent(db, capa_id, actor_id=actor_id)
-        capa = await lock_current_material_write(
-            db, capa, actor_id, PermissionLevel.EDIT
-        )
+        await authorize_root(db,actor_id,capa_id,PermissionLevel.EDIT)
+        await authorize_bound_sources(db,actor_id,capa_id,d_step='d5')
         return existing, getattr(capa, field) or ""
     from app.services.capa_d4_material import authorize_root
     await authorize_root(db, actor_id, capa.report_id)

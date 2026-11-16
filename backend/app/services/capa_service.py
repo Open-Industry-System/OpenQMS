@@ -78,6 +78,8 @@ async def list_capas(
         identifiers = list((await db.scalars(query.with_only_columns(CAPAEightD.report_id))).all())
         for identifier in identifiers:
             await authorize_root(db, actor_id, identifier)
+            from app.services.capa_legacy_capture import authorize_bound_sources
+            await authorize_bound_sources(db,actor_id,identifier,d_step="d5")
         # The original page can move during source authorization. Materialize
         # only the identifiers that were admitted, in that frozen order.
         query = query.where(CAPAEightD.report_id.in_(identifiers)).offset(None).limit(None)
@@ -247,6 +249,8 @@ async def update_capa(
     update_data: dict,
     user_id: uuid.UUID,
 ) -> CAPAEightD:
+    from app.services.capa_entry_switch import admit, require_manual_version
+    switch = await admit(db, 'manual' if {'d4_root_cause', 'd5_correction'} & set(update_data) else 'safe')
     # Current authority and the report lock precede echo normalization. A
     # projected local D7 echo is no core write, including in terminal reports
     # where the existing contract still permits noncore maintenance.
@@ -254,6 +258,9 @@ async def update_capa(
     capa=await lock_capa_parent(db,capa.report_id,actor_id=user_id,required_level=PermissionLevel.EDIT)
     from app.services.capa_d4_material import material_version
     update_data=dict(update_data)
+    if {'d4_root_cause', 'd5_correction'} & set(update_data):
+        require_manual_version(switch, update_data, await material_version(db, capa.report_id))
+    update_data.pop('expected_entry_epoch', None)
     expected=update_data.pop('expected_material_version',None)
     restricted_d7_change=False
     if 'd7_prevention' in update_data:
@@ -398,7 +405,7 @@ async def update_capa(
             table_name="capa_eightd",
             record_id=capa.report_id,
             action="UPDATE",
-            changed_fields={key: ({"changed": True} if key == "d4_root_cause" else value)
+            changed_fields={key: ({"changed": True} if key in {"d4_root_cause", "d5_correction"} else value)
                             for key, value in changed_fields.items()},
             operated_by=user_id,
             factory_id=capa.factory_id,
