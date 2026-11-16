@@ -120,8 +120,9 @@ def test_invalid_timing_values_are_never_published(tmp_path, capsys, invalid):
     assert not log.exists()
 
 
+@pytest.mark.parametrize('explicit_config', [False, True])
 @pytest.mark.parametrize('body,exit_code', [('pass', 0), ('assert False', 1)])
-def test_module_timings_conserve_phases_and_keep_exit_code(tmp_path, capsys, body, exit_code):
+def test_module_timings_conserve_phases_and_keep_exit_code(tmp_path, capsys, body, exit_code, explicit_config):
     for name,case in [('a', 'pass'), ('b', body)]:
         (tmp_path / f'test_{name}.py').write_text(
             'import pytest, time\n'
@@ -133,7 +134,7 @@ def test_module_timings_conserve_phases_and_keep_exit_code(tmp_path, capsys, bod
         layer='api', targets=[str(tmp_path / 'test_a.py'), str(tmp_path / 'test_b.py')],
         source={'PATH': os.environ['PATH']},
         database_url='postgresql+asyncpg://u:private-module-secret@127.0.0.1:1/module_test',
-        artifacts=artifacts, pytest_args=['--noconftest'])
+        artifacts=artifacts, pytest_args=['--noconftest', *(['-c', str(BACKEND / 'pytest.ini')] if explicit_config else [])])
     assert result['exit_code'] == exit_code
     capsys.readouterr()
     output = next(artifacts.glob('*.log')).read_text()

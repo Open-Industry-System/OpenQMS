@@ -123,7 +123,8 @@ def pytest_runtest_logreport(report) -> None:
     if report.when == 'setup':
         row['selected'] += 1
     row[report.when] += report.duration
-    phases = _HOOK_STATE['durations'].setdefault(report.nodeid, dict(setup=0.0, call=0.0, teardown=0.0))
+    identity = module + '::' + report.nodeid.partition('::')[2]
+    phases = _HOOK_STATE['durations'].setdefault(identity, dict(setup=0.0, call=0.0, teardown=0.0))
     phases[report.when] = report.duration
     outcomes: dict[str, str] = _HOOK_STATE['outcomes']
     if report.when == 'call':

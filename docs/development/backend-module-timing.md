@@ -10,4 +10,6 @@ selection_sha256 对按执行顺序排列的源模块/完整case identity做SHA2
 
 先串行A（原fixture）/B（复用fixture）。记录源码、解释器/依赖、镜像与PG配置指纹、负载样本、正常Make wall、pytest及模块分项；结束核验无残留fixture库与其他客户端，再仅清理该轮资源。依赖预装，两边不测pip冷/热；不清空共享宿主OS缓存，不声称本机CPU独占。若未改模块的call也明显漂移，应补B/A而不是直接归因。此结果不能代替Actions job总耗时，后者仍需新PR run读取。
 
-已完成基础验证：pure356 passed /3既有warnings；模块两项烟测包含成功/失败exit0/1与phase守恒，原collection失败exit2和单次收集保护保留。全量A/B尚未完成，不预写性能结论。原始证据及最终报告将保存在 /tmp/openqms-controlled-backend/，PR描述补录结果，不提前合并。
+已完成基础验证：pure358 passed /3既有warnings；模块两项烟测包含成功/失败exit0/1与phase守恒，原collection失败exit2和单次收集保护保留。全量A/B尚未完成，不预写性能结论。原始证据及最终报告将保存在 /tmp/openqms-controlled-backend/，PR描述补录结果，不提前合并。
+
+补充一致性修正：显式pytest配置下复现不同模块同名测试的短nodeid覆盖旧durations键，导致旧全套phase汇总低估。计时键改为源模块＋case identity；新增显式配置/默认配置的同名用例守恒回归，纯测试358通过。wall time与门禁计数不受该旧缺陷影响。两侧对照使用同一修正，不将旧分项直接当受控基线。
