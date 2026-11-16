@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Drawer } from "antd";
-import { appendTaskMessage, controlTask, createTask, listTaskInstallations, listTasks } from "../../api/agentTasks";
-import type { AgentTask, InstallationChoice, TaskAction, TaskControl, TaskCreate, TaskMessageCreate } from "../../types/agentTask";
+import { appendTaskMessage, controlTask, createTask, listTaskInstallations, listTasks, listModelDeployments, launchTask, getTaskWorkflow, listTaskD5Checkpoints } from "../../api/agentTasks";
+import type { D5CheckpointReference } from "../../api/agentTasks";
+import type { AgentTask, ModelChoice, TaskWorkflow, InstallationChoice, TaskAction, TaskControl, TaskCreate, TaskMessageCreate } from "../../types/agentTask";
+import { listTaskD5Proposals, type D5Proposal } from "../../api/d5Proposals";
+import D5ProposalPanel from "../capa/D5ProposalPanel";
 import AgentActivity from "./AgentActivity";
 import AgentTaskAttachments from "./AgentTaskAttachments";
 import { useAgentTaskContext } from "./AgentTaskContext";
@@ -27,6 +30,21 @@ export default function AgentSidebar() {
     open: ctx?.open ?? false,
     requestEpoch: ctx?.requestEpoch ?? 0
   });
+  const [checkpointPage,setCheckpointPage]=useState(1);
+  const [checkpointTotal,setCheckpointTotal]=useState(0);
+  const [checkpoints,setCheckpoints]=useState<D5CheckpointReference[]>([]);
+  const [selectedCheckpoint,setSelectedCheckpoint]=useState<D5CheckpointReference|null>(null);
+  const [correctionPage,setCorrectionPage]=useState(1);
+  const [correctionTotal,setCorrectionTotal]=useState(0);
+  const [corrections, setCorrections] = useState<D5Proposal[]>([]);
+  const [correctionId, setCorrectionId] = useState("");
+  const [models, setModels] = useState<ModelChoice[]>([]);
+  const [modelId, setModelId] = useState("");
+  const [workflow, setWorkflow] = useState<TaskWorkflow | null>(null);
+  const [launchPending, setLaunchPending] = useState(false);
+  const [launchNotice, setLaunchNotice] = useState("");
+  const launchController = useRef<AbortController | null>(null);
+  const launchBusy = useRef(false);
   const [directoryPage, setDirectoryPage] = useState(1);
   const [directoryTotal, setDirectoryTotal] = useState(0);
   const [tasks, setTasks] = useState<AgentTask[]>([]);
@@ -40,11 +58,12 @@ export default function AgentSidebar() {
   const busy = useRef(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const operationController = useRef<AbortController | null>(null);
-  const sessionKey = JSON.stringify([ctx?.identity, ctx?.selectedTask?.task_id, ctx?.creationReportId]);
+  const sessionKey = JSON.stringify([ctx?.identity, ctx?.credential, ctx?.selectedTask?.task_id, ctx?.creationReportId, ctx?.requestEpoch]);
   const currentSession = useRef(sessionKey);
   currentSession.current = sessionKey;
   useEffect(() => {
     busy.current = false;
+
     operationController.current?.abort();
     setPending(false);
     setRetry(null);
@@ -94,6 +113,75 @@ export default function AgentSidebar() {
       });
     return () => controller.abort();
   }, [ctx?.available, ctx?.identity, ctx?.credential, ctx?.creationReportId]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setModels([]);
+    if (ctx?.available && ctx.open && ctx.creationReportId)
+      void listModelDeployments(controller.signal).then(value => {
+        if (!controller.signal.aborted && ctx.identity === readAgentIdentity()) setModels(value.items);
+      }).catch(() => { if (!controller.signal.aborted) setModels([]); });
+    return () => controller.abort();
+  }, [ctx?.identity, ctx?.credential, ctx?.creationReportId, ctx?.open, ctx?.requestEpoch]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    setWorkflow(null);
+    const poll = async () => {
+      if (!ctx?.open || !ctx.selectedTask?.model_deployment) return;
+      try {
+        const result = await getTaskWorkflow(ctx.selectedTask.task_id, controller.signal);
+        if (!controller.signal.aborted && ctx.identity === readAgentIdentity()) setWorkflow(result);
+      } catch {
+        if (!controller.signal.aborted) { setWorkflow(null); setLaunchNotice("模型状态不可用；请检查当前权限与部署。"); }
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(poll, 1000);
+      }
+    };
+    void poll();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [ctx?.identity, ctx?.credential, ctx?.selectedTask?.task_id, ctx?.selectedTask?.model_deployment, ctx?.open, ctx?.requestEpoch]);
+  async function launch() {
+    if (!ctx?.selectedTask?.model_deployment || launchBusy.current) return;
+    const captured = sessionKey;
+    const controller = new AbortController();
+    launchController.current = controller;
+    launchBusy.current = true; setLaunchPending(true); setLaunchNotice("模型任务运行中");
+    const live = () => !controller.signal.aborted && captured === currentSession.current && ctx.identity === readAgentIdentity();
+    try {
+      await launchTask(ctx.selectedTask.task_id, controller.signal);
+      if (live()) { setLaunchNotice("模型任务已返回"); ctx.refresh(); }
+    } catch {
+      if (live()) { setWorkflow(null); setLaunchNotice("启动尚未确认；请刷新当前任务，不能自动改选模型或重发。"); ctx.refresh(); }
+    } finally { if (!controller.signal.aborted) { launchBusy.current = false; setLaunchPending(false); } }
+  }
+  function send(content: string) {
+    if (!ctx?.selectedTask || !content.trim() || retry || pending) return;
+    void execute({kind:"message",taskId:ctx.selectedTask.task_id,body:{content,idempotency_key:crypto.randomUUID()}});
+  }
+  useEffect(() => {
+    launchBusy.current = false; setLaunchPending(false); setLaunchNotice("");
+    return () => launchController.current?.abort();
+  }, [ctx?.identity, ctx?.credential, ctx?.selectedTask?.task_id]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setCorrections([]); setCorrectionId(""); setCorrectionTotal(0);
+    if(ctx?.open && ctx.selectedTask?.model_deployment)
+      void listTaskD5Proposals(ctx.selectedTask.target_capa_id,ctx.selectedTask.task_id,correctionPage,controller.signal).then(data=>{
+        if(!controller.signal.aborted && ctx.identity === readAgentIdentity()){setCorrections(data.items);setCorrectionTotal(data.total);}
+      }).catch(()=>{if(!controller.signal.aborted) setCorrections([]);});
+    return ()=>controller.abort();
+  },[ctx?.identity,ctx?.credential,ctx?.selectedTask?.task_id,ctx?.selectedTask?.model_deployment,ctx?.open,ctx?.requestEpoch,correctionPage]);
+  useEffect(()=>{setSelectedCheckpoint(null);setCheckpointPage(1);setCorrectionPage(1);},[ctx?.identity,ctx?.credential,ctx?.selectedTask?.task_id]);
+  useEffect(()=>{
+    const controller=new AbortController();
+    setCheckpoints([]);setCheckpointTotal(0);
+    if(ctx?.open && ctx.selectedTask?.model_deployment)
+      void listTaskD5Checkpoints(ctx.selectedTask.task_id,checkpointPage,controller.signal).then(data=>{
+        if(!controller.signal.aborted && ctx.identity===readAgentIdentity()){setCheckpoints(data.items);setCheckpointTotal(data.total);}
+      }).catch(()=>{if(!controller.signal.aborted){setCheckpoints([]);setSelectedCheckpoint(null);}});
+    return ()=>controller.abort();
+  },[ctx?.identity,ctx?.credential,ctx?.selectedTask?.task_id,ctx?.open,ctx?.requestEpoch,checkpointPage,workflow?.checkpoint_id]);
+  useEffect(() => setModelId(""), [ctx?.identity, ctx?.creationReportId]);
   async function execute(op: Operation) {
     if (!ctx || busy.current || ctx.identity !== readAgentIdentity())
       return;
@@ -171,6 +259,11 @@ export default function AgentSidebar() {
   if (!ctx?.available || ctx.identity !== readAgentIdentity())
     return null;
   const page = activity.page;
+  const selectedInstallation = installations?.find(item => item.installation_id === installationId);
+  const needsModel = selectedInstallation?.plugin_key === "openqms.controlled-d5-model";
+  const boundModel = ctx.selectedTask?.model_deployment;
+  const selectedModel = models.find(model=>model.deployment_id===modelId);
+  const newTaskRecipient = selectedModel ? `${selectedModel.name} · ${selectedModel.version}` : "所选模型";
   return <>
     <Button ref={trigger} onClick={() => ctx.setOpen(true)}>Agent 任务</Button>
     <Drawer
@@ -206,6 +299,14 @@ export default function AgentSidebar() {
           onChange={e => setInstallation(e.target.value)}>{installations?.map(choice => <option key={choice.installation_id} value={choice.installation_id}>{choice.plugin_key} · {choice.plugin_version}</option>)}</select>
         </label>
         {installations?.length === 0 && <p>暂无适用于本报告的插件安装，无法创建任务。</p>}
+        {needsModel && <label>新任务模型<select aria-label="新任务模型" value={modelId} disabled={pending || retry !== null} onChange={e => setModelId(e.target.value)}>
+          <option value="">请选择批准的模型版本</option>{models.map(model => <option key={model.deployment_id} value={model.deployment_id}>{model.name} · {model.version} · {model.kind}</option>)}
+        </select><p>新任务独立创建，不转交当前任务的聊天或资料。</p></label>}
+        {needsModel && models.length === 0 && <p>暂无可用的批准模型部署。</p>}
+        {needsModel && <>
+          <Button disabled={pending || retry !== null || !installationId || !models.some(model=>model.deployment_id===modelId)} onClick={()=>void execute({kind:"create",body:{report_id:ctx.creationReportId!,installation_id:installationId,model_deployment_id:modelId,request_key:crypto.randomUUID(),initial_text:"deliver_d4_root_cause_candidate_v1"}})}>{`用 ${newTaskRecipient} 开始新任务（仅根据当前根因）`}</Button>
+          <p>附加资料可用于对话；保存共享建议需要可核对的完整来源。</p>
+        </>}
         <label>初始指令<textarea
           aria-label="初始指令"
           maxLength={10000}
@@ -213,16 +314,42 @@ export default function AgentSidebar() {
           disabled={pending || retry !== null || !installations?.length}
           onChange={e => setInitialText(e.target.value)} />
         </label>
-        <Button disabled={pending || retry !== null || !installationId || !initialText.trim()} onClick={() => void execute({
+        <Button disabled={pending || retry !== null || !installationId || !initialText.trim() || (needsModel && !models.some(model => model.deployment_id === modelId))} onClick={() => void execute({
           kind: "create", body: {
             report_id: ctx.creationReportId!,
             installation_id: installationId,
             request_key: crypto.randomUUID(),
-            initial_text: initialText
+            initial_text: initialText,
+            ...(needsModel ? {model_deployment_id:modelId} : {})
           }
-        })}>创建任务</Button>
+        })}>{needsModel ? `用 ${newTaskRecipient} 开始新任务（自由对话）` : "创建任务"}</Button>
       </section>}
       {ctx.selectedTask && <>
+        {boundModel && <section aria-label="当前任务模型">
+          <p>当前接收方：{boundModel.name} · {boundModel.version}</p>
+          <p>部署版本 {boundModel.deployment_id}</p>
+          <Button disabled={launchPending || page?.task_status !== 'ready' || page?.run_status === 'active'} onClick={() => void launch()}>启动模型任务</Button>
+          <p>{launchNotice}</p>
+          <label>更正当前任务建议<select aria-label="更正当前任务建议" value={correctionId} disabled={pending || retry !== null} onChange={e=>setCorrectionId(e.target.value)}>
+            <option value="">请选择当前任务待审建议</option>{corrections.map(item=><option key={item.proposal_id} value={item.proposal_id}>{item.proposal_id}</option>)}
+          </select></label>
+          <Button disabled={pending || retry !== null || correctionPage<=1} onClick={()=>setCorrectionPage(p=>p-1)}>上一页待更正建议</Button>
+          <Button disabled={pending || retry !== null || correctionPage*20>=correctionTotal} onClick={()=>setCorrectionPage(p=>p+1)}>下一页待更正建议</Button>
+          <Button disabled={pending || retry !== null || !corrections.some(item=>item.proposal_id===correctionId) || ['completed','failed','cancelled'].includes(page?.task_status ?? '')} onClick={()=>send(JSON.stringify({intent:'replace_d5',predecessor_id:correctionId}))}>明确更正选中建议</Button>
+          <p>更正意图只指定前版；并列备选保留原建议。自由聊天含未界定资料时不能保存共享建议。</p>
+          {workflow?.question && <p>{workflow.question}</p>}
+          {workflow?.status && <p>模型状态：{workflow.status}</p>}
+          <label>选择处理范围检查点<select aria-label="选择处理范围检查点" value={selectedCheckpoint?.checkpoint_id??''} onChange={e=>setSelectedCheckpoint(checkpoints.find(cp=>cp.checkpoint_id===e.target.value)??null)}>
+            <option value="">请选择实际任务检查点</option>
+            {selectedCheckpoint && !checkpoints.some(cp=>cp.checkpoint_id===selectedCheckpoint.checkpoint_id) && <option value={selectedCheckpoint.checkpoint_id}>{selectedCheckpoint.created_at} · {selectedCheckpoint.checkpoint_id}</option>}
+            {checkpoints.map(cp=><option key={cp.checkpoint_id} value={cp.checkpoint_id}>{cp.created_at} · {cp.checkpoint_id}</option>)}
+          </select></label>
+          <Button disabled={checkpointPage<=1} onClick={()=>setCheckpointPage(p=>p-1)}>上一页检查点</Button>
+          <Button disabled={checkpointPage*20>=checkpointTotal} onClick={()=>setCheckpointPage(p=>p+1)}>下一页检查点</Button>
+          {selectedCheckpoint && <D5ProposalPanel capaId={ctx.selectedTask.target_capa_id} checkpoint={{taskId:ctx.selectedTask.task_id,checkpointId:selectedCheckpoint.checkpoint_id}} />}
+          <Button disabled={pending || retry !== null || ['completed','failed','cancelled'].includes(page?.task_status ?? '')} onClick={() => send(JSON.stringify({intent:'continue_d5',additional_context:'none'}))}>继续（无额外资料）</Button>
+        </section>}
+
         {activity.status === "interrupted" && <p>连接中断，重试中</p>}
         {activity.status === "denied" && <p>任务访问已失效</p>}
         {activity.status === "loading" && <p>正在读取任务活动</p>}
@@ -240,9 +367,12 @@ export default function AgentSidebar() {
             maxLength={10000}
             value={text}
             disabled={pending || retry !== null || ["completed", "failed", "cancelled"].includes(page.task_status)}
-            onChange={e => setText(e.target.value)} />
+            onChange={e => setText(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !["completed", "failed", "cancelled"].includes(page.task_status)) { e.preventDefault(); send(text); }
+            }} />
           </label>
-          <Button disabled={pending || retry !== null || !text.trim() || ["completed", "failed", "cancelled"].includes(page.task_status)} onClick={() => void execute({ kind: "message", taskId: ctx.selectedTask!.task_id, body: { content: text, idempotency_key: crypto.randomUUID() } })}>发送指令</Button>
+          <Button disabled={pending || retry !== null || !text.trim() || ["completed", "failed", "cancelled"].includes(page.task_status)} onClick={() => void execute({ kind: "message", taskId: ctx.selectedTask!.task_id, body: { content: text, idempotency_key: crypto.randomUUID() } })}>{boundModel ? `补充给 ${boundModel.name}` : "发送指令"}</Button>
         </>}
       </>}
       {retry && <Button disabled={pending} onClick={() => void execute(retry)}>{retry.kind === "message" ? "重试发送原指令" : retry.kind === "control" ? "重试原控制操作" : "重试创建原任务"}</Button>}

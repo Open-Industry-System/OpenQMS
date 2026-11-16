@@ -32,7 +32,11 @@ async def claim_run(db: AsyncSession, binding: TenantBinding | None, installatio
         plugin = await db.scalar(select(AgentPluginInstallation).where(
             AgentPluginInstallation.installation_id == request.installation_id)
             .with_for_update().execution_options(populate_existing=True))
-    plugin = await plugin_registry.verify_plugin_secret(db, request.installation_id, request.secret)
+    from app.services.agent_runtime import r5_executor, model_egress
+    if plugin is not None and plugin.plugin_key == model_egress.R5_PLUGIN_KEY:
+        r5_executor.require_managed_claim(db)
+    else:
+        plugin = await plugin_registry.verify_plugin_secret(db, request.installation_id, request.secret)
     if not plugin.enabled:
         raise PermissionError(run_auth.INVALID_TOKEN)
     await task_service._require_namespace(db)  # recheck after an installation-lock wait
@@ -45,6 +49,7 @@ async def claim_run(db: AsyncSession, binding: TenantBinding | None, installatio
             run = await db.scalar(select(AgentRun).join(AgentTask, AgentTask.task_id == AgentRun.task_id)
                 .where(AgentRun.installation_id == plugin.installation_id,
                     AgentTask.preferred_installation_id == plugin.installation_id, AgentTask.status == "ready",
+                    *([AgentTask.task_id == db.info["_r5_managed_task"]] if "_r5_managed_task" in db.info else []),
                     or_(AgentRun.status == "pending", and_(AgentRun.status == "active", AgentRun.lease_expires_at <= now)))
                 .order_by(AgentRun.created_at, AgentRun.run_id).limit(1)
                 .execution_options(populate_existing=True))
@@ -104,7 +109,8 @@ async def claim_run(db: AsyncSession, binding: TenantBinding | None, installatio
     final = await runtime_access.authorize_task(db, task, plugin)
     if final.trial != authority.trial or (final.trial is not None and final.trial.expires_at <= datetime.now(UTC)):
         raise PermissionError(run_auth.INVALID_TOKEN)
-    token = run_auth.issue_run_token(run, plugin, tenant_id, generation, trial=authority.trial)
+    selected_model = await model_egress.task_deployment(db, task) if plugin.plugin_key == model_egress.R5_PLUGIN_KEY else None
+    token = run_auth.issue_run_token(run, plugin, tenant_id, generation, trial=authority.trial, model_binding=selected_model)
     result = RunClaimOut(run_id=run.run_id, task_id=task.task_id, token=token,
         lease_epoch=run.lease_epoch, lease_expires_at=run.lease_expires_at,
         accepted_message_seq=run.accepted_message_seq,

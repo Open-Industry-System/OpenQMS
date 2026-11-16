@@ -47,6 +47,15 @@ def clear_state(monkeypatch):
     _in_flight.clear()
     # 固定超时，避免环境差异
     monkeypatch.setattr(settings, "CAPA_DRAFT_LLM_TIMEOUT", 15)
+    # These unit doubles represent legacy reports without formal D5 items.
+    # Actual database tests below still execute the real material query.
+    from app.services import capa_d5_measures
+    formal_ids = capa_d5_measures._formal_ids
+    async def _legacy_formal_ids(db_arg, report_id):
+        if isinstance(db_arg, MagicMock):
+            return []
+        return await formal_ids(db_arg, report_id)
+    monkeypatch.setattr(capa_d5_measures, '_formal_ids', _legacy_formal_ids)
     # Default provider_adapter stubs so MagicMock db tests don't crash on build_client.
     async def _default_client(db_arg):
         return _PC()

@@ -160,3 +160,11 @@ main独立分支本地CI辅助及相关pure集合458 passed／3 warnings／exit0
 main生效规则在2026-11-16重新读取：要求PR，并严格要求来源GitHub Actions app15368的backend-tests、browser-protection、frontend-checks、sdk-checks (3.11/3.12/3.13)、docs-check、oracle-automation-checks八项成功。这是前文2026-11-15快照之后的设置状态；本PR不修改规则。用户已授权CI通过后合并，仍须核对当前head、main和GitHub生成的合并候选，不能复用#37的旧CI结果。
 
 首次run43827872305的docs-check因只有PROGRESS变动而失败，本文补足真实文档说明；不加跳过标签、不改workflow或检查来源。新增提交后由既有同PR concurrency取消旧运行，等待新一套完整PR检查。合并后的main push仍按现有配置独立验证。
+
+### PR #39 等待期间 main 合入 R5 后的基线更新
+
+main随后合入PR #33，推进至`f8b8d9885441408503447c0ffa1aceb9f6b1060e`；此前基于193746ab的run43828123586不能替代最新合并候选的检查。PR #39正常合并最新main，只解决PROGRESS顶部并发记录冲突。R5修改涉及的runner、layer_selection和草稿服务测试均完成自动合并，复核相对新main仍只保留本批原有测试精简差异。
+
+新main的workflow新增`r5-native`：`[self-hosted, macOS, openqms-r5-sandbox]`，要求每job独占PG15和绑定到job的受控bundle，运行原生API及Chromium验收。PR #39保留该job及其runner标签、命令、超时和完整R5必测名单；workflow、Makefile与r5_required.py相对新main无差异。2026-11-16重新读取的生效ruleset仍列前述8项必需检查，但本任务同时保留并等待适用的R5原生验收，不以管理绕过或删除job满足合并条件。
+
+仓库runner API当前返回`total_count=0`。若新运行的r5-native因此排队，则缺少匹配runner及其任务绑定环境是外部未满足项；本批不降低门禁、不复用其他测试数据库，也不把旧基线7项成功算作新基线通过。需要先具备匹配runner后，才能取得完整CI结果并执行用户授权的条件合并。

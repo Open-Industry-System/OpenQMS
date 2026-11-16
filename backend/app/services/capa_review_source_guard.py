@@ -38,6 +38,12 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
     ids: set[UUID] = set()
 
     if doc_type == "fmea":
+        from app.models.capa_d5_proposal import CapaD5Measure, CapaD5Proposal, CapaD5ProposalSource
+        ids.update(await db.scalars(select(CapaD5Proposal.report_id)
+            .join(CapaD5Measure, CapaD5Measure.proposal_id == CapaD5Proposal.proposal_id)
+            .join(CapaD5ProposalSource, CapaD5ProposalSource.proposal_id == CapaD5Proposal.proposal_id)
+            .where(CapaD5ProposalSource.fmea_id == doc_id,
+                CapaD5ProposalSource.factory_id == source_factory_id)))
         ids.update(await db.scalars(select(CAPAEightD.report_id).where(
             CAPAEightD.fmea_ref_id == doc_id,
             CAPAEightD.factory_id == source_factory_id,

@@ -18,6 +18,7 @@ const source = '00000000-0000-4000-8000-000000000004';
 const fixture: CapaOutcomeReview = {
   report_id: id, status: 'D8_APPROVAL_PENDING', contract: 'capa.outcome-review.v1',
   review_round_id: '00000000-0000-4000-8000-000000000002', revision: '1'.repeat(64), binding_status: 'pending',
+  d5_measures: [],
   core: { d4_root_cause: '扭矩不足', d5_correction: '更换扭矩控制工具', d6_verification: '实施后复测合格', d7_prevention: '更新点检要求' },
   verifications: [{
     verification_id: '00000000-0000-4000-8000-000000000003', capa_id: id,
@@ -195,4 +196,20 @@ it.each([true, false])('shows supplement audit responsibility or honest null fal
   expect(section).toHaveTextContent(available ? `${source} · 2026-10-24T12:34:56Z` : '— · —');
   expect(section).not.toHaveTextContent('已批准');
   expect(screen.getByTestId('capa-outcome-core')).not.toHaveTextContent(supplement.text);
+});
+
+
+it('shows every formal D5 measure as reviewed material with its source binding', async () => {
+  const value = { ...structuredClone(fixture), d5_measures: [{
+    measure_id: id, proposal_id: source, final_text: '<b>FORMAL D5 SENTINEL</b>',
+    adopted_by: id, adopted_at: '2026-11-14T00:00:00Z', revision_id: id, proof_id: source,
+    text_version: 'a'.repeat(64), sources: [{ source_id: id, projection_id: 'fmea.failure_cause.reference.v1',
+      factory_id: id, product_line_code: 'LINE-A', fmea_id: source, node_id: 'cause-1', node_hmac: 'b'.repeat(64) }],
+  }] };
+  vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);
+  render(view());
+  const section = await screen.findByTestId('capa-outcome-d5');
+  expect(section).toHaveTextContent('<b>FORMAL D5 SENTINEL</b>');
+  expect(section).toHaveTextContent('cause-1');
+  expect(section.querySelector('b,input,textarea,a')).toBeNull();
 });

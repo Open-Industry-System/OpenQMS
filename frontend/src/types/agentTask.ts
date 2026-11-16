@@ -2,7 +2,15 @@
 export type TaskStatus = "blocked_capability" | "ready" | "paused" | "completed" | "failed" | "cancelled";
 export type RunStatus = "pending" | "active" | "paused" | "stopped" | "completed" | "failed";
 export type TaskAction = "pause" | "resume" | "cancel" | "restart";
+export interface ModelDeployment {
+  deployment_id: string;
+  name: string;
+  version: string;
+}
+export interface ModelChoice extends ModelDeployment { kind: "local" | "cloud"; }
+export interface TaskWorkflow { status: string; question: string | null; checkpoint_id: string | null; }
 export interface AgentTask {
+  model_deployment?: ModelDeployment | null;
   task_id: string;
   target_capa_id: string;
   factory_id: string;
@@ -12,6 +20,7 @@ export interface AgentTask {
   updated_at: string;
 }
 export interface TaskCreate {
+  model_deployment_id?: string;
   report_id: string;
   installation_id: string;
   request_key: string;
@@ -87,6 +96,9 @@ export interface ReadonlyCheckpoint {
   is_latest: boolean;
   prefix_eligible: boolean;
 }
+export interface RecoveryCheckpoint {
+  checkpoint_type:"d4_recovery_v1";checkpoint_id:string;task_id:string;run_id:string;lease_epoch:number;tenant_generation:number;accepted_message_seq:number;update_sequence:number;protocol:"d4-recovery.v1";resume_position:"restart_from_start";created_at:string;
+}
 interface ItemBase {
   sequence: number;
   created_at: string;
@@ -150,7 +162,7 @@ export type ActivityItem = ItemBase & ({
   data: RuntimeResult;
 } | {
   kind: "checkpoint";
-  data: ReadonlyCheckpoint;
+  data: ReadonlyCheckpoint | RecoveryCheckpoint;
 });
 export interface ActivityPage {
   task_id: string;

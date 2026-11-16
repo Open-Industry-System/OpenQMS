@@ -86,6 +86,12 @@ def test_api_requires_exact_sdk_junit_nodes_but_preserves_ordinary_skips(
         ET.SubElement(cases, 'testcase', classname='tests.e2e.test_d4_text_local_process', name=name)
     summary['selected'] += len(D4_TEXT_PROCESS_NAMES)
     summary['passed'] += len(D4_TEXT_PROCESS_NAMES)
+    from tests.ci.r5_required import R5_REQUIRED
+    for classname,names in R5_REQUIRED['api'].items():
+        for name in names:
+            ET.SubElement(cases,'testcase',classname=classname,name=name)
+            summary['selected']+=1
+            summary['passed']+=1
     if result in {'skip', 'xfail'}:
         ET.SubElement(cases[0], 'skipped', type='pytest.xfail' if result == 'xfail' else 'pytest.skip')
         summary['passed'] -= 1
@@ -411,7 +417,7 @@ def test_pytest_command_supports_reusable_marked_target_selection(tmp_path):
 
     assert command[:4] == ['/test/python', '-m', 'tests.ci.pytest_bootstrap', 'tests/e2e']
     mark_index = [index for index, value in enumerate(command) if value == '-m'][1]
-    assert command[mark_index + 1] == 'ci_browser and not live_provider and not real_scanner'
+    assert command[mark_index + 1] == 'ci_browser and not ci_r5_native and not live_provider and not real_scanner'
     assert '-rA' in command
     assert '-p' in command and command[command.index('-p') + 1] == 'tests.ci.gate_results'
     assert f'--junitxml={tmp_path / "private.xml"}' in command
@@ -459,7 +465,7 @@ def test_pytest_command_keeps_layer_marker_when_task5_passes_graph_exclusions(tm
     assert '--ignore=tests/test_graph_sync_worker.py' in command
     assert '--ignore=tests/test_graph_projection.py' in command
     mark_index = [index for index, value in enumerate(command) if value == '-m'][1]
-    assert command[mark_index + 1] == 'not ci_browser and not live_provider and not real_scanner'
+    assert command[mark_index + 1] == 'not ci_browser and not ci_r5_native and not live_provider and not real_scanner'
 
 
 def test_run_pytest_layer_consumes_hook_receipt_and_redacts_full_database_url(tmp_path):
