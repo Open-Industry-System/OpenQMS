@@ -8,6 +8,15 @@ in `services/`, and shapes the result into a Pydantic response model.
 No business rules live here — handlers stay thin and delegate. Routers
 are mounted by `app/main.py`.
 
+`GET /api/capa/{report_id}/d5-proposals` and `/d5-measures` provide ordinary
+employee, report-scoped source-filtered reads with `page`/`page_size` (max 200)
+and visible-only totals. Each also supports a detail GET by item UUID. Hidden
+and absent details have the same 404; current permission denial is a fixed 403.
+All responses use `Cache-Control: no-store`. No source coordinates, hidden-item
+counts or history links are exposed. The measures list carries `legacy_text`
+separately; the old report DTO's `d5_correction` retains only legacy text.
+These read-only routes do not enable Agent writes or staff adoption.
+
 `capa_d4_text_preview.py` is an ordinary-employee, default-off readonly
 candidate boundary, separate from plugin runtime credentials. Availability,
 preview POST and source-version GET use current CAPA/source scope. Its local

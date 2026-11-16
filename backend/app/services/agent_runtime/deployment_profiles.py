@@ -19,6 +19,7 @@ class DeploymentProfile:
 
 PROFILES = MappingProxyType({
     METADATA_PROFILE: DeploymentProfile(frozenset({'capa.d4.summary.masked.v1'}), frozenset({('context', 'internal', 'masked'), ('message', 'restricted', 'raw')})),
+    'model_d5_proposal_v1': DeploymentProfile(frozenset({TEXT_CAPABILITY, 'capa.d5.proposal.save.v1'}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),
     TEXT_PROFILE: DeploymentProfile(frozenset({TEXT_CAPABILITY}), frozenset({('context', 'restricted', 'masked'), ('message', 'restricted', 'raw')})),
 })
 
@@ -28,6 +29,17 @@ def select_runtime_admission(db, installation, executor_id, coordinates, *, now=
     from app.core.tenant_transaction import TenantBinding
     now = now or datetime.now(UTC)
     binding = db.info.get('tenant_binding')
+    from app.services.agent_runtime.r5_executor import ControlledPilot
+    pilot = db.info.get('r5_controlled_pilot')
+    if installation.plugin_key == 'openqms.controlled-d5-model':
+        if not settings.AGENT_TASK_RUNTIME_ENABLED or not isinstance(pilot, ControlledPilot):
+            return None
+        try:
+            pilot.verify(binding, installation)
+        except (PermissionError, OSError, ValueError):
+            return None
+        fingerprint = pilot.fingerprint()
+        return TrialAdmission('model_d5_proposal_v1', fingerprint, pilot.expires_at, installation.installation_id)
     metadata = select_admission(db.info.get('agent_local_trial_policy', EMPTY_POLICY),
         binding=binding, installation=installation, executor_user_id=executor_id,
         report_id=coordinates.report_id, factory_id=coordinates.factory_id,

@@ -134,3 +134,8 @@ describe("escaped, provenance-aware activity", () => {
     expect(screen.getByText(/仅最新且消息前缀有效的检查点/)).toBeInTheDocument();
   });
 });
+it('renders recognized R5 source-free start as a business label',()=>{
+  render(<AgentActivity task={{...task,model_deployment:{deployment_id:id,name:'A',version:'1'}}} page={{...base,items:[{sequence:1,created_at:task.created_at,kind:'message',data:{message_id:id,author_id:id,sequence:1,content:'deliver_d4_root_cause_candidate_v1',data_class:'restricted',state:'queued'}}]}} onControl={vi.fn()} pending={false}/>);
+  expect(screen.getByText('仅根据当前根因创建建议任务')).toBeInTheDocument();
+  expect(screen.queryByText('deliver_d4_root_cause_candidate_v1')).toBeNull();
+});

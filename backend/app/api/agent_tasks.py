@@ -1,4 +1,7 @@
 """Default-off, target-bound task creation and instruction queue APIs."""
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from app.schemas.capa_d5_staff import D5BatchWithdraw
 from uuid import UUID
 import logging
 from urllib.parse import unquote, urlsplit
@@ -90,7 +93,7 @@ async def create_task(body: TaskCreate, scope: RequestScope = Depends(get_reques
                       db: AsyncSession = Depends(get_db)):
     try:
         return await task_service.create_task(db, scope, body.report_id, body.installation_id,
-            body.request_key, body.initial_text, derived_source_scope=body.derived_source_scope)
+            body.request_key, body.initial_text, derived_source_scope=body.derived_source_scope, model_deployment_id=body.model_deployment_id)
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
 
@@ -176,3 +179,62 @@ async def get_checkpoint(task_id: UUID, checkpoint_id: UUID,
         return await checkpoint_service.get_checkpoint_for_view(db, scope, task_id, checkpoint_id)
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
+
+
+
+
+@router.get('/{task_id}/d5-checkpoints')
+async def list_d5_checkpoints(task_id: UUID, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+        scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await task_controls.d5_checkpoint_history(db, scope, task_id, page=page, page_size=page_size)
+    except (PermissionError, LookupError):
+        await db.rollback()
+        raise HTTPException(status_code=404, detail='D5 checkpoint unavailable', headers=headers) from None
+    return JSONResponse(jsonable_encoder(result), headers=headers)
+
+
+@router.get('/{task_id}/d5-checkpoints/{checkpoint_id}/proposals')
+async def d5_checkpoint_proposals(task_id: UUID, checkpoint_id: UUID,
+        scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await task_controls.d5_checkpoint_candidates(db, scope, task_id, checkpoint_id)
+    except (PermissionError, LookupError):
+        await db.rollback()
+        raise HTTPException(status_code=404, detail='D5 checkpoint unavailable', headers=headers) from None
+    return JSONResponse(jsonable_encoder(result), headers=headers)
+
+
+@router.post('/{task_id}/d5-checkpoints/{checkpoint_id}/proposals/withdraw')
+async def withdraw_d5_checkpoint_proposals(task_id: UUID, checkpoint_id: UUID, body: D5BatchWithdraw,
+        scope: RequestScope = Depends(get_request_scope), db: AsyncSession = Depends(get_db)):
+    result = await task_controls.withdraw_d5_after_checkpoint(db, scope, task_id, checkpoint_id,
+        proposal_ids=body.proposal_ids, operation_key=body.operation_key, reason=body.reason)
+    return JSONResponse(jsonable_encoder(result), headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/{task_id}/launch')
+async def launch_model_task(task_id: UUID, scope: RequestScope=Depends(get_request_scope), db: AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime import r5_executor
+    try:
+        pilot = db.info.get('r5_controlled_pilot')
+        if not isinstance(pilot, r5_executor.ControlledPilot):
+            raise PermissionError('Controlled executor unavailable')
+        result = await r5_executor.managed_run(db,scope,task_id,platform_origin=f'http://127.0.0.1:{pilot.platform_port}')
+        return JSONResponse(jsonable_encoder(result), headers={'Cache-Control':'no-store'})
+    except (PermissionError, LookupError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=403,detail='Model launch unavailable',headers={'Cache-Control':'no-store'}) from None
+
+
+@router.get('/{task_id}/workflow')
+async def model_workflow_status(task_id: UUID, scope: RequestScope=Depends(get_request_scope), db: AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime import model_workflow
+    try:
+        result=await model_workflow.status(db,scope,task_id)
+        return JSONResponse(jsonable_encoder(result),headers={'Cache-Control':'no-store'})
+    except (PermissionError, LookupError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=403,detail='Model workflow unavailable',headers={'Cache-Control':'no-store'}) from None

@@ -8,18 +8,26 @@ from app.schemas.agent_d4_text import DerivedSourceScopeInput
 
 
 class TaskCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
     report_id: UUID
     installation_id: UUID
     request_key: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=100)]
     initial_text: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=10000)]
     derived_source_scope: DerivedSourceScopeInput | None = None
+    model_deployment_id: UUID | None = None
+
+
+class BoundModelDeployment(BaseModel):
+    deployment_id: UUID
+    name: str
+    version: str
 
 
 class TaskOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
+    model_deployment: BoundModelDeployment | None = None
     task_id: UUID
     target_capa_id: UUID
     factory_id: UUID

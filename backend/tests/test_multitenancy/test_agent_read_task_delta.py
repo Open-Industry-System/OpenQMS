@@ -6,7 +6,7 @@ import pytest
 from app.core.tenant_transaction import TenantUnavailable
 from app.services import tenant_migrator, tenant_schema_diff
 
-TARGET = "tv010_refresh_sessions"
+TARGET = "tv014_r5_responses"
 
 
 def test_read_tasks_are_reviewed_current_target():
@@ -17,13 +17,17 @@ def test_read_tasks_are_reviewed_current_target():
     assert tenant_migrator.PREDECESSOR_REVISION == "tv004_agent_readonly_controls"
     assert tenant_migrator.DELIVERY_PREDECESSOR_REVISION == "tv006_agent_read_tasks"
     assert tenant_migrator.RECOVERY_PREDECESSOR_REVISION == "tv007_d4_text_delivery"
-    assert REVIEWED_REVISIONS[-5:] == ("tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge", TARGET)
+    assert REVIEWED_REVISIONS[-10:] == ("tv007_characteristic_refs", "tv007_d4_text_delivery",
+        "tv008_d4_recovery", "tv009_r4b_main_merge", "tv010_refresh_sessions", "tv010_r5_d5_proposals", "tv011_r5_d5_basis", "tv012_r5_models", "tv013_r5_main_merge", TARGET)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state,predecessor", [
     ("empty", None),
-    ("refresh_predecessor", "tv009_r4b_main_merge"),
+    ("r5_predecessor", "tv009_r4b_main_merge"),
+    ("r5_head", "tv012_r5_models"),
+    ("r5_merge_predecessor", "tv013_r5_main_merge"),
+    ("refresh_head", "tv010_refresh_sessions"),
     ("characteristic_predecessor", "tv007_characteristic_refs"),
     ("recovery_head", "tv008_d4_recovery"),
     ("recovery_predecessor", "tv007_d4_text_delivery"),

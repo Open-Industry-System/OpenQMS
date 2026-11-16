@@ -41,7 +41,7 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
         if not settings.AGENT_TASK_RUNTIME_ENABLED and (path in RUNTIME_PATHS or any(
             path == prefix or path.startswith(prefix + "/")
-            for prefix in ("/api/agent/tasks", "/api/admin/agent-plugins")
+            for prefix in ("/api/agent/tasks", "/api/admin/agent-plugins", "/api/agent/models")
         )):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
 

@@ -168,3 +168,11 @@ registered core container and its exclusive volume (both owned test databases)
 were disposed after fresh identity and zero-use checks. The worktree, user TEST
 profile, user-owned example deletion and all evidence remain preserved.
 No dependency, migration, authority, self-approval, or deployment change is implied.
+
+### R5 D5 outcome material
+
+The outcome review response carries a required `d5_measures` collection separate
+from legacy `core.d5_correction`. The panel renders every measure and its source
+binding as escaped, read-only text; incomplete entries cannot produce a decision
+token. Ordinary report fields remain legacy-only. See the
+[D5 consumer policy](../../../docs/development/capa-d5-consumers.md).

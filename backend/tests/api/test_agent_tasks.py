@@ -56,8 +56,9 @@ async def test_create_list_detail_append_are_safe_and_idempotent(admin_client, s
     assert created.status_code == 201, created.text
     task = created.json()
     assert task['status'] == 'blocked_capability'
+    assert task['model_deployment'] is None
     assert set(task) == {'task_id', 'target_capa_id', 'factory_id', 'preferred_installation_id',
-        'status', 'created_at', 'updated_at'}
+        'status', 'created_at', 'updated_at', 'model_deployment'}
     task_url = '/api/agent/tasks/' + task['task_id']
     assert (await admin_client.get(task_url)).json() == task
     listed = (await admin_client.get('/api/agent/tasks')).json()

@@ -22,6 +22,7 @@ import type { CapaOutcomeReview } from "../../types/capaOutcomeReview";
 import D4RecPanel from "../../components/capa/D4RecPanel";
 import D4VerificationCard from "../../components/capa/D4VerificationCard";
 import D4TextRedactionPreview from "../../components/capa/D4TextRedactionPreview";
+import D5ProposalPanel from "../../components/capa/D5ProposalPanel";
 import D5RecPanel from "../../components/capa/D5RecPanel";
 import D7RecPanel, { type D7UnconfirmedItem } from "../../components/capa/D7RecPanel";
 import D3ContainmentPanel from "../../components/capa/D3ContainmentPanel";
@@ -970,6 +971,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
             </DataCard> : <CapaOutcomeReviewPanel reportId={id!} status={capa.status} canApprove={canApprove("capa")}
               credentialIdentity={credentialIdentity} onReviewChange={onOutcomeReview} />
           )}
+          <D5ProposalPanel capaId={id!} onChanged={() => refreshCapa()} />
           {capa.status !== "D8_APPROVAL_PENDING" && <DataCard title={t("detail.currentStepDetails", "当前步骤详情")}>
             {capa.status === "D1_TEAM" && (
               <div>
