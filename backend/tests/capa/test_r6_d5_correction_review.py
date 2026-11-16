@@ -39,8 +39,8 @@ from tests.capa.test_capa_outcome_decision import decision_provider
 async def stored_review_fixture(c):
     """An explicitly seeded pre-existing D8 round, never normal D7 re-entry.
 
-    Complete D7/local manual gate flow depends on Task6B and remains a later
-    acceptance gate. This fixture exercises actual normal employee review APIs.
+    This stored model fixture is historical input, not proof of current manual
+    gate completion. Tests below re-enter through normal employee commands.
     """
     from tests.capa.test_d5_outcome_fence import outcome_ready
     from sqlalchemy import update
@@ -94,7 +94,7 @@ async def test_normal_reject_then_correct_invalidates_old_expectation(correction
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('corrected',[False,True])
-async def test_stored_round_approval_preserves_its_contract_and_signature(correction_case, decision_provider, corrected):
+async def test_stored_model_round_requires_manual_reentry_before_approval(correction_case, decision_provider, corrected):
     c = correction_case
     if corrected:
         current = (await c.client.get(c.url)).json()
@@ -107,6 +107,32 @@ async def test_stored_round_approval_preserves_its_contract_and_signature(correc
     assert pending.status_code == 200, pending.text
     seen = pending.json()
     assert seen['contract'] == ('capa.outcome-review.v2' if corrected else 'capa.outcome-review.v1')
+    approval = await c.client.post(root+'/advance',json=dict(target_state='D8_CLOSURE',
+        expected_outcome_revision=seen['revision'],expected_review_round_id=seen['review_round_id']))
+    assert approval.status_code == 400, approval.text
+    assert approval.json()['detail'] == '受限报告请先完成人工文档影响分析'
+    unchanged = await c.client.get(root+'/outcome-review')
+    assert unchanged.status_code == 200, unchanged.text
+    assert unchanged.json() == seen
+    assert seen['status'] == 'D8_APPROVAL_PENDING' and seen['binding_status'] == 'pending'
+    rejection = await c.client.post(root+'/advance',json=dict(target_state='D7_PREVENTION',reject_reason='manual re-review required',
+        expected_outcome_revision=seen['revision'],expected_review_round_id=seen['review_round_id']))
+    assert rejection.status_code == 200, rejection.text
+    from tests.capa.test_r6_manual_doc_gate import enter_doc_gate, manual_empty, confirm_empty, save_propagation
+    c.root = root
+    await enter_doc_gate(c, 'stored-review')
+    await manual_empty(c, 'stored-review-manual')
+    confirmed = await confirm_empty(c, 'stored-review-confirm')
+    assert confirmed.status_code == 200, confirmed.text
+    propagated = await save_propagation(c, 'stored-review-propagation')
+    assert propagated.status_code == 200, propagated.text
+    submitted = await c.client.post(root+'/advance',json=dict(target_state='D8_APPROVAL_PENDING'))
+    assert submitted.status_code == 200, submitted.text
+    pending = await c.client.get(root+'/outcome-review')
+    assert pending.status_code == 200, pending.text
+    seen = pending.json()
+    assert seen['contract'] == 'capa.outcome-review.v2'
+    assert seen['d5_measures'][0]['final_text'] == ('v2 reviewed text' if corrected else 'employee final')
     approval = await c.client.post(root+'/advance',json=dict(target_state='D8_CLOSURE',
         expected_outcome_revision=seen['revision'],expected_review_round_id=seen['review_round_id']))
     assert approval.status_code == 200, approval.text

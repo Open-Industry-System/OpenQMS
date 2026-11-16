@@ -27,7 +27,7 @@ pytestmark = pytest.mark.requires_db
 
 
 @pytest_asyncio.fixture
-async def d5_case(committed_runtime):
+async def d5_case(committed_runtime, request):
     c = committed_runtime
     async with c.factory(binding=c.binding) as db:
         report = await db.scalar(select(CAPAEightD))
@@ -49,7 +49,7 @@ async def d5_case(committed_runtime):
         report.fmea_ref_id = docs[0].fmea_id
         verification = CapaRootCauseVerification(capa_id=report.report_id, factory_id=report.factory_id, root_cause_text='root',
             conclusion='passed', is_verified=True,
-            source_ref={'fmea_id': str(docs[0].fmea_id), 'cause_node_id': 'cause'})
+            source_ref=None if getattr(request,'param',None)=='no_verification_origins' else {'fmea_id': str(docs[0].fmea_id), 'cause_node_id': 'cause'})
         db.add(verification)
         await db.flush()
         from app.services.capa_d4_provenance import record_root_revision, verification_version

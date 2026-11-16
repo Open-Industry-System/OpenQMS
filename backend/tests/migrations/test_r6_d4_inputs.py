@@ -14,7 +14,11 @@ from tests.migrations.test_r6_entry_contracts import _seed_r6
 def test_append_pairs_preserve_exact_parents_and_tenant_equivalence():
     root=Path(__file__).resolve().parents[2]
     pairs=[('20261116_r6_d4_inputs','tv017_r6_d4_inputs','20261116_r6_source_epoch','tv016_r6_source_epoch'),
-           ('20261116_r6_d4_withdraw','tv018_r6_d4_withdraw','20261116_r6_d4_inputs','tv017_r6_d4_inputs')]
+           ('20261116_r6_d4_withdraw','tv018_r6_d4_withdraw','20261116_r6_d4_inputs','tv017_r6_d4_inputs'),
+           ('20261116_r6_verify_origins','tv019_r6_verify_origins','20261116_r6_d4_withdraw','tv018_r6_d4_withdraw'),
+           ('20261116_r6_local_closure','tv020_r6_local_closure','20261116_r6_verify_origins','tv019_r6_verify_origins'),
+           ('20261116_r6_manual_receipts','tv021_r6_manual_receipts','20261116_r6_local_closure','tv020_r6_local_closure'),
+           ('20261116_r6_local_snapshot','tv022_r6_local_snapshot','20261116_r6_manual_receipts','tv021_r6_manual_receipts')]
     for public,tenant,parent,tparent in pairs:
         body=(root/'alembic/versions'/f'{public}.py').read_text()
         tbody=(root/'alembic_tenant/versions'/f'{tenant}.py').read_text()

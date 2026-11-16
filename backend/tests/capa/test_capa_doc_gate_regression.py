@@ -791,8 +791,8 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
     original_gate = capa_service._d8_doc_gate_gate
     original_parent_lock = version_service.lock_version_parent
 
-    async def _pause_after_gate(db, capa):
-        await original_gate(db, capa)
+    async def _pause_after_gate(db, capa, **kwargs):
+        await original_gate(db, capa, **kwargs)
         gate_checked.set()
         await allow_transition_commit.wait()
 
@@ -950,8 +950,8 @@ async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
     original_gate = capa_service._d8_doc_gate_gate
     real_scope_lock = getattr(product_line_service, "lock_candidate_scopes", None)
 
-    async def _pause_after_gate(db, capa):
-        await original_gate(db, capa)
+    async def _pause_after_gate(db, capa, **kwargs):
+        await original_gate(db, capa, **kwargs)
         gate_checked.set()
         await allow_transition_commit.wait()
 

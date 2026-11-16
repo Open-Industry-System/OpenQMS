@@ -51,7 +51,7 @@ async def test_model_path_without_item_recipient_contract_is_unavailable(d5_case
     c = d5_case
     c.report.status = 'D8_GATE_PENDING'
     await c.db.commit()
-    with pytest.raises(PermissionError, match='D5_FULL_MATERIAL_UNAVAILABLE'):
+    with pytest.raises(PermissionError, match='^Restricted report requires manual analysis$'):
         await generate_impact_analysis(c.db, c.report, c.user_id)
 
 
@@ -68,8 +68,12 @@ async def test_d5_business_completeness_requires_real_formal_material(d5_case, c
     else:
         await c.db.execute(delete(CapaD5ProposalSource))
     await c.db.commit()
-    with pytest.raises(ValueError):
+    expected = ValueError if change == 'empty' else PermissionError
+    match = None if change == 'empty' else '^Complete formal sources unavailable$'
+    before_status = c.report.status
+    with pytest.raises(expected, match=match):
         await advance_capa(c.db, c.report, c.user_id)
+    assert c.report.status == before_status
 
 
 @pytest.mark.asyncio

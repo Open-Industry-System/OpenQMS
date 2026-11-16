@@ -92,6 +92,10 @@ async def complete_material_version(db, scope, report_id, *, lock=False):
         .where(CapaDocgAnalysis.capa_id == report_id).order_by(CapaDocgDecision.decision_id))).all()
     # Bind all analysis identities, but only current document coordinates.
     required |= await _current_document_keys(db, report_id)
+    from app.models.capa_r6 import CapaR6LocalRevision, CapaR6LocalSource
+    local_rows=(await db.execute(select(CapaR6LocalRevision.revision_id,CapaR6LocalRevision.kind,CapaR6LocalRevision.revision_no,CapaR6LocalRevision.root_snapshot_revision_id).where(CapaR6LocalRevision.report_id==report_id).order_by(CapaR6LocalRevision.revision_id))).all()
+    local_sources=(await db.execute(select(CapaR6LocalSource.revision_id,CapaR6LocalSource.module,CapaR6LocalSource.object_id,CapaR6LocalSource.factory_id,CapaR6LocalSource.product_line_code).where(CapaR6LocalSource.report_id==report_id).order_by(CapaR6LocalSource.revision_id,CapaR6LocalSource.module,CapaR6LocalSource.object_id))).all()
+    required |= {(r.module,str(r.object_id)) for r in local_sources}
     parents = []
     for module, identifier in sorted(required, key=lambda item: ('control_plan' if item[0]=='planning' else item[0], item[1])):
         model = FMEADocument if module == 'fmea' else ControlPlan
@@ -126,5 +130,5 @@ async def complete_material_version(db, scope, report_id, *, lock=False):
             s.source_version_counter,str(s.factory_id),s.product_line_code) for s in [*root_sources,*historic_origins]),
         verification_origins=sorted(v_sources,key=lambda value:str(value)), measures=normal(formal), revisions=normal(revisions),
         verifications=normal([(r.verification_id,r.updated_at) for r in verifications]), actions=normal(actions),
-        analyses=normal(analyses),
+        analyses=normal(analyses), local_revisions=normal(local_rows), local_sources=normal(local_sources),
         decisions=normal([(r.decision_id,r.revision) for r in decisions]), source_parents=parents))

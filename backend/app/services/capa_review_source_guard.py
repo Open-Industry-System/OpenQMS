@@ -35,7 +35,8 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
     )
     if source_factory_id is None:
         raise LookupError("source document not found")
-    ids: set[UUID] = set()
+    from app.models.capa_r6 import CapaR6LocalSource
+    ids: set[UUID] = set(await db.scalars(select(CapaR6LocalSource.report_id).where(CapaR6LocalSource.module == ('planning' if doc_type=='control_plan' else 'fmea'), CapaR6LocalSource.object_id==doc_id)))
 
     if doc_type == "fmea":
         from app.models.capa_r6 import CapaR6RootRevisionSource, CapaR6SourceOrigin

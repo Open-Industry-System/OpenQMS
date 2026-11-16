@@ -96,5 +96,6 @@ class CapaOutcomeReview(OutcomeModel):
     d7_actions: list[D7NodeActionResponse] = Field(repr=False)
     doc_gate: OutcomeDocGate | None = Field(repr=False)
     documents: list[OutcomeDocumentRef]
+    local_closure: dict | None = Field(default=None, repr=False)
     decision: OutcomeDecision | None
     supplement: OutcomeSupplement = Field(repr=False)

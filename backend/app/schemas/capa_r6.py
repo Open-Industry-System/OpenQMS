@@ -86,3 +86,34 @@ class FmeaProjectionOrigin(_SourceCoordinate):
 
 
 SourceOrigin = Annotated[ReportSnapshotOrigin | FmeaProjectionOrigin, Field(discriminator='kind')]
+
+
+class LocalReason(_R6Command):
+    reason: str
+
+    @field_validator('reason')
+    @classmethod
+    def bounded_reason(cls, value):
+        if not value.strip() or len(value.encode('utf-8')) > 16384:
+            raise ValueError('Invalid local reason')
+        return value
+
+
+class LocalPrevention(LocalReason):
+    text: str
+    basis: str
+
+    @field_validator('text','basis')
+    @classmethod
+    def bounded_body(cls, value):
+        if not value.strip() or len(value.encode('utf-8')) > 16384:
+            raise ValueError('Invalid local prevention')
+        return value
+
+
+class ManualDocAnalysis(LocalReason):
+    affected_docs: list[dict] = Field(max_length=100)
+
+
+class ManualDecisionCommand(_R6Command):
+    expected_analysis_id: UUID

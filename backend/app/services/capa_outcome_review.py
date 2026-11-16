@@ -84,10 +84,25 @@ def _check_size(value):
 
 def outcome_revision(material: dict) -> str:
     contract = material.get('contract', CONTRACT)
-    corrected = any('correction_revision_id' in row or 'correction_revision_no' in row
+    corrected = bool(material.get('local_closure')) or any('correction_revision_id' in row or 'correction_revision_no' in row
                     for row in material.get('d5_measures', []))
     if contract not in {CONTRACT, CORRECTION_CONTRACT} or (contract == CONTRACT and corrected):
         raise ValueError('Outcome contract mismatch')
+    local=material.get('local_closure')
+    if local is not None:
+        if type(local) is not dict or local.get('eligible') is not True:
+            raise ValueError('Outcome local material invalid')
+        for kind in ('prevention','manual_analysis','propagation'):
+            row=local.get(kind)
+            if row is None:continue
+            try:
+                identifier=row['revision_id']
+                if type(identifier) is not str or str(UUID(identifier))!=identifier:
+                    raise ValueError()
+                if type(row['revision_no']) is not int or row['revision_no']<1:
+                    raise ValueError()
+            except (KeyError,TypeError,ValueError,AttributeError):
+                raise ValueError('Outcome local revision invalid') from None
     if contract == CORRECTION_CONTRACT:
         for row in material.get('d5_measures', []):
             if 'correction_revision_id' in row or 'correction_revision_no' in row:
@@ -326,9 +341,12 @@ async def _source_access(db, capa, key, access, *, lock=False, d5_material=()):
     source = (await db.execute(query)).one_or_none()
     if access is not None:
         target = capa
+        from app.services.capa_r6_local_closure import source_coordinates
+        local_matches=[s for s in await source_coordinates(db,capa.report_id) if s['module']==module and s['object_id']==identifier]
         matches = [s for s in [*(s for row in d5_material for s in row['sources']),
             *await _r6_source_coordinates(db, capa.report_id)]
             if module == 'fmea' and s['fmea_id'] == identifier]
+        matches += [dict(factory_id=s["factory_id"],product_line_code=s["product_line_code"]) for s in local_matches]
         if matches:
             from types import SimpleNamespace
             coordinates = {(s['factory_id'], s['product_line_code']) for s in matches}
@@ -401,6 +419,8 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
     if any('correction_revision_id' in row for row in d5_material):
         required.update(('fmea', source['fmea_id'])
             for source in await _r6_source_coordinates(db, capa.report_id))
+    from app.services.capa_r6_local_closure import source_coordinates
+    required.update((s['module'],s['object_id']) for s in await source_coordinates(db,capa.report_id))
     result = {}
     for key in sorted(required):
         # A version receipt never grants current source-module authority.
@@ -429,14 +449,28 @@ async def collect_outcome_material(db, capa) -> dict:
     d4_material = await root_review_material(db, capa.report_id, db.info.get("outcome_read_access"))
     from app.services.capa_d5_measures import full_d5_material
     d5_material = await full_d5_material(db, capa, access=db.info.get('outcome_read_access'))
+    from app.services.capa_r6_local_closure import read as read_local, admit as admit_local, source_coordinates, eligible
+    local_material=None
+    from app.models.capa_r6 import CapaR6LocalRevision
+    if await db.scalar(select(CapaR6LocalRevision.revision_id).where(CapaR6LocalRevision.report_id==capa.report_id).limit(1)):
+        access=db.info.get('outcome_read_access')
+        if access is None: raise PermissionError('Local current authority required')
+        # outcome access alone has no actor id; the request stores it explicitly.
+        actor=db.info.get('outcome_actor_id')
+        if actor is None: raise PermissionError('Local current actor required')
+        local_material=await read_local(db,scope_for_outcome(actor),capa.report_id)
+        local_material.pop('material_version',None)
     fields = _columns(CAPAEightD, _CORE)
     await _preflight(db, fields, CAPAEightD.report_id == capa.report_id)
     core = _normal(dict((await db.execute(select(*fields).where(
         CAPAEightD.report_id == capa.report_id))).mappings().one()))
-    material = OutcomeMaterial(contract=CORRECTION_CONTRACT if any('correction_revision_id' in row for row in d5_material) else CONTRACT, tenant_identity=_tenant_identity(db),
+    if local_material and local_material.get("prevention"):
+        core["d7_prevention"]=local_material["prevention"]["text"]
+    material = OutcomeMaterial(contract=CORRECTION_CONTRACT if local_material or any('correction_revision_id' in row for row in d5_material) else CONTRACT, tenant_identity=_tenant_identity(db),
         report_id=str(capa.report_id), factory_id=str(capa.factory_id), product_line_code=capa.product_line_code,
         round_id=_normal(await resolve_review_round(db, capa)), core=core, verifications=[],
         d7_actions=[], doc_gate=None, source_versions=[])
+    if local_material: material['local_closure']=local_material
     if d4_material is not None:
         # Workflow/edit counters change on decisions too; immutable outcome
         # content binds root revision and complete origins, not that counter.
@@ -518,10 +552,14 @@ async def require_outcome_expectation(db, scope, capa, req) -> dict:
     if req is None or req.expected_outcome_revision is None or req.expected_review_round_id is None:
         raise OutcomeReviewRequired()
     previous = db.info.get('outcome_read_access')
+    previous_actor=db.info.get('outcome_actor_id')
     db.info['outcome_read_access'] = access
+    db.info['outcome_actor_id']=scope.user.user_id
     try:
         material = await collect_outcome_material(db, capa)
     finally:
+        if previous_actor is None:db.info.pop('outcome_actor_id',None)
+        else:db.info['outcome_actor_id']=previous_actor
         if previous is None:
             db.info.pop('outcome_read_access', None)
         else:
@@ -567,7 +605,7 @@ async def apply_outcome_expectation(db, capa, req, actor_id) -> dict:
     if req.target_state == 'D8_CLOSURE':
         # Reuse C8/C9/waiver validation and its analysis -> ProductLine -> sorted
         # parent lock order. Explicit references join the SAME sorted set.
-        await _d8_doc_gate_gate(db, capa, additional_parents=parents)
+        await _d8_doc_gate_gate(db, capa, additional_parents=parents,actor_id=actor_id)
     elif req.target_state == 'D7_PREVENTION':
         # Rejection binds the seen gate, but must not require a passing gate to
         # return the report for correction. Use the identical lock ordering.
@@ -639,7 +677,7 @@ async def _dto(db, capa, material):
     output = CapaOutcomeReview(report_id=capa.report_id, status=capa.status, contract=material['contract'],
         review_round_id=material['round_id'], revision=revision, binding_status=binding_status,
         core={key: material['core'][key] for key in _CORE[:4]},
-        d5_measures=material.get('d5_measures', []),
+        d5_measures=material.get('d5_measures', []), local_closure=material.get('local_closure'),
         verifications=[{key: value for key, value in row.items() if key not in {'factory_id', 'updated_at'}}
                        for row in material['verifications']],
         d7_actions=[{key: value for key, value in row.items() if key not in {'factory_id', 'recommendation_hash'}}
@@ -671,6 +709,7 @@ async def _read_snapshot(db, scope, report_id, binding):
             async with AsyncSession(bind=connection, expire_on_commit=False, **kwargs) as snapshot:
                 target, access, signature = await _admission(snapshot, scope, report_id)
                 snapshot.info['outcome_read_access'] = access
+                snapshot.info['outcome_actor_id']=scope.user.user_id
                 material = await collect_outcome_material(snapshot, target)
                 return material, await _dto(snapshot, target, material), signature
 
@@ -708,11 +747,15 @@ async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
                 or signature != final_signature or target.status != current.status or current.status != output.status):
             raise OutcomeReviewConflict()
         previous = db.info.get('outcome_read_access')
+        previous_actor=db.info.get('outcome_actor_id')
         db.info['outcome_read_access'] = current_access
+        db.info['outcome_actor_id']=scope.user.user_id
         try:
             final = await collect_outcome_material(db, current)
             final_output = await _dto(db, current, final)
         finally:
+            if previous_actor is None:db.info.pop('outcome_actor_id',None)
+            else:db.info['outcome_actor_id']=previous_actor
             if previous is None:
                 db.info.pop('outcome_read_access', None)
             else:
@@ -729,13 +772,17 @@ async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
                 or locked_target.status != output.status):
             raise OutcomeReviewConflict()
         previous = db.info.get('outcome_read_access')
+        previous_actor=db.info.get('outcome_actor_id')
         db.info['outcome_read_access'] = locked_access
+        db.info['outcome_actor_id']=scope.user.user_id
         try:
             locked_material = await collect_outcome_material(db, locked_target)
             if not hmac.compare_digest(outcome_revision(material), outcome_revision(locked_material)):
                 raise OutcomeReviewConflict()
             locked_output = await _dto(db, locked_target, locked_material)
         finally:
+            if previous_actor is None:db.info.pop('outcome_actor_id',None)
+            else:db.info['outcome_actor_id']=previous_actor
             if previous is None:
                 db.info.pop('outcome_read_access', None)
             else:
@@ -753,3 +800,8 @@ async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
         from app.services.capa_d4_material import authorize_root
         await authorize_root(db, scope.user.user_id, report_id)
         return output
+
+
+def scope_for_outcome(actor):
+    from types import SimpleNamespace
+    return SimpleNamespace(user=SimpleNamespace(user_id=actor))

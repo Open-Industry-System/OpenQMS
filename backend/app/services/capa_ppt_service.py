@@ -72,6 +72,8 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) 
     from app.services.capa_d5_measures import full_d5_material, complete_d5_text
     material = await full_d5_material(db, capa, scope=scope)
     d5_text = complete_d5_text(capa.d5_correction, material)
+    from app.services.capa_r6_local_closure import prevention_text
+    d7_text = capa.d7_prevention if scope is None else await prevention_text(db,scope.user.user_id,capa_id,capa.d7_prevention)
 
     from app.services.capa_verification_sources import authorize_verifications
     await authorize_verifications(db,capa_id,actor_id=None if scope is None else scope.user.user_id)
@@ -128,7 +130,7 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) 
         PptPage("D5 永久措施", [{"label": "措施", "value": d5_text}]),
         PptPage("D6 实施验证", [{"label": "验证", "value": capa.d6_verification or ""}]),
         PptPage("D7 预防复发", [
-            {"label": "预防", "value": capa.d7_prevention or ""},
+            {"label": "预防", "value": d7_text or ""},
             *[{"label": f"node-action{i+1}", "value": str(a)} for i, a in enumerate(d7_list)],
         ]),
         PptPage("D8 关闭结论", [{"label": "结论", "value": capa.d8_closure or ""}]),

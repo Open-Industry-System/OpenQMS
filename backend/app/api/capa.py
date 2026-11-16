@@ -4,7 +4,7 @@ from app.schemas.capa_d5_staff import D5Adopt, D5Withdraw
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, Body
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
@@ -418,9 +418,12 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, ac
     values = {name: getattr(capa, name) for name in CAPAResponse.model_fields
               if name != "d4_root_cause" and hasattr(capa, name)}
     values["d4_root_cause"] = root
-    resp = CAPAResponse.model_validate(values)
     from app.services.capa_d4_material import material_version
-    resp.material_version = await material_version(db, capa.report_id)
+    projection_version=await material_version(db,capa.report_id)
+    from app.services.capa_r6_local_closure import prevention_text
+    values["d7_prevention"] = await prevention_text(db,actor_id,capa.report_id,values.get("d7_prevention"))
+    resp = CAPAResponse.model_validate(values)
+    resp.material_version = projection_version
     linked = None
     if capa.scar_ref_id is not None:
         scar = await db.get(SupplierSCAR, capa.scar_ref_id)
@@ -484,6 +487,8 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, ac
         resp.d4_root_cause = await read_root(db, actor_id, capa.report_id)
     except PermissionError:
         raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
+    if projection_version!=await material_version(db,capa.report_id):
+        raise HTTPException(status_code=409,detail='CAPA_MATERIAL_CHANGED',headers={'Cache-Control':'no-store'})
     return resp.model_copy(
         update={
             "scar_ref_id": capa.scar_ref_id,
@@ -2356,7 +2361,7 @@ async def doc_gate_get_impact_ep(
 ):
     """GET /doc-gate/impact: latest analysis (incl failed)."""
     capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
-    result = await capa_doc_gate_service.get_latest_analysis(db, capa)
+    result = await capa_doc_gate_service.get_latest_analysis(db, capa, scope.user.user_id)
     if result is None:
         raise HTTPException(status_code=404, detail="尚未生成影响分析")
     return result
@@ -2365,6 +2370,7 @@ async def doc_gate_get_impact_ep(
 @router.post("/{report_id}/doc-gate/audit")
 async def doc_gate_audit_ep(
     report_id: uuid.UUID,
+    body: dict | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -2372,11 +2378,13 @@ async def doc_gate_audit_ep(
     capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
     _assert_d8_gate_stage(capa)
     try:
-        result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id)
+        result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id,manual_command=body)
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # Serialize UUID fields for JSON
@@ -2457,12 +2465,14 @@ async def doc_gate_defer_ep(
         raise HTTPException(status_code=400, detail="owner_id 非法")
     try:
         result = await capa_doc_gate_service.record_defer(
-            db, capa, body.reason, owner_id, body.deadline, scope.user.user_id
+            db, capa, body.reason, owner_id, body.deadline, scope.user.user_id,manual_command=body.model_dump(mode="json",include={'operation_key','expected_material_version','expected_analysis_id'},exclude_none=True)
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2471,6 +2481,7 @@ async def doc_gate_defer_ep(
 @router.post("/{report_id}/doc-gate/confirm-no-affected")
 async def doc_gate_confirm_no_affected_ep(
     report_id: uuid.UUID,
+    body: dict | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -2479,12 +2490,14 @@ async def doc_gate_confirm_no_affected_ep(
     _assert_d8_gate_stage(capa)
     try:
         result = await capa_doc_gate_service.confirm_no_affected(
-            db, capa, scope.user.user_id
+            db, capa, scope.user.user_id,manual_command=body
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2551,12 +2564,14 @@ async def doc_gate_waiver_ep(
             capa,
             body.reason,
             [item.model_dump() for item in body.items],
-            scope.user.user_id,
+            scope.user.user_id,manual_command=body.model_dump(mode="json",include={'operation_key','expected_material_version','expected_analysis_id'},exclude_none=True),
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 APPROVE 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result

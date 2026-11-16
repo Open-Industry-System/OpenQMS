@@ -78,7 +78,9 @@ async def require_legacy_root_only(db, report_id):
     from app.services.capa_current_access import require_business_namespace
     await require_business_namespace(db)
     _, sources = await root_metadata(db, report_id)
-    if sources:
+    from app.models.capa_r6 import CapaR6LocalRevision
+    local = await db.scalar(select(CapaR6LocalRevision.revision_id).where(CapaR6LocalRevision.report_id==report_id).limit(1))
+    if sources or local:
         raise PermissionError('D4_FULL_MATERIAL_UNAVAILABLE: continue manual D5')
 
 
@@ -202,6 +204,8 @@ async def authorize_root(db, actor_id, report_id, required_level=PermissionLevel
                 raise PermissionError('D4_MATERIAL_UNAVAILABLE')
         else:
             raise PermissionError('D4_MATERIAL_UNAVAILABLE')
+    from app.services.capa_r6_local_closure import authorize_local_current_sources
+    await authorize_local_current_sources(db, actor_id, report_id)
     return revision, sources
 
 

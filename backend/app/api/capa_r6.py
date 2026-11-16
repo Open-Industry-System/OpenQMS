@@ -92,3 +92,31 @@ async def measure_history(report_id:UUID,measure_id:UUID,
         scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
     from app.services.capa_d5_corrections import history
     return await call(db,history,scope,report_id,measure_id)
+
+@router.get('/local-closure')
+async def local_closure(report_id:UUID,scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_r6_local_closure import read
+    return await call(db,read,scope,report_id)
+
+from app.schemas.capa_r6 import LocalPrevention, LocalReason, ManualDocAnalysis
+
+@router.post('/local-prevention')
+async def local_prevention(report_id:UUID,body:LocalPrevention,scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_r6_local_closure import save_prevention
+    return await call(db,save_prevention,scope,report_id,body)
+
+@router.post('/manual-doc-analysis')
+async def manual_doc_analysis(report_id:UUID,body:ManualDocAnalysis,scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_r6_local_closure import save_manual
+    return await call(db,save_manual,scope,report_id,body)
+
+@router.post('/propagation-review')
+async def propagation_review(report_id:UUID,body:LocalReason,scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_r6_local_closure import save_propagation
+    return await call(db,save_propagation,scope,report_id,body)
+
+@router.get('/local-closure/history/{kind}')
+async def local_history(report_id:UUID,kind:str,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),
+        scope:RequestScope=Depends(get_request_scope),db=Depends(get_db)):
+    from app.services.capa_r6_local_closure import history
+    return await call(db,history,scope,report_id,kind,page,page_size)

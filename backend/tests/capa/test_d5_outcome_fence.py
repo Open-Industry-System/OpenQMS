@@ -99,6 +99,23 @@ async def outcome_ready(c):
     return analysis
 
 
+async def prepare_d5_manual_round(c):
+    """Real local service re-entry from a controlled historical model round."""
+    from types import SimpleNamespace
+    from app.models.capa import CAPAEightD
+    from tests.capa.test_capa_outcome_decision import prepare_restricted_manual_round
+    report_id = c.report.report_id
+    async def report(db):
+        return await db.get(CAPAEightD, report_id, populate_existing=True)
+    async def scope(db):
+        return c.actors[2]
+    case = SimpleNamespace(report_id=report_id, actor_id=c.actors[2].user.user_id,
+        session_factory=lambda: c.factory(binding=c.binding), report=report, scope=scope)
+    await c.db.rollback()
+    await prepare_restricted_manual_round(case)
+    c.report = await report(c.db)
+
+
 @pytest.mark.asyncio
 async def test_actual_outcome_reader_binds_all_measures_and_sources(d5_case):
     from app.services.capa_outcome_review import read_outcome_review
@@ -215,12 +232,7 @@ async def test_restricted_only_full_material_can_be_approved_and_archived(d5_cas
     await c.db.execute(update(RolePermission).where(RolePermission.role_id == c.actors[2].role_id,
         RolePermission.module == 'capa').values(permission_level=4))
     await c.db.commit()
-    from app.services.capa_doc_gate_service import confirm_no_affected
-    c.report.status = 'D8_GATE_PENDING'
-    await c.db.commit()
-    assert (await confirm_no_affected(c.db, c.report, c.actors[2].user.user_id))['decision'] == 'passed'
-    c.report.status = 'D8_APPROVAL_PENDING'
-    await c.db.commit()
+    await prepare_d5_manual_round(c)
     seen = await read_outcome_review(c.db, c.actors[2], c.report.report_id)
     result = await advance_capa(c.db, c.report, c.actors[2].user.user_id,
         AdvanceRequest(target_state='D8_CLOSURE', expected_outcome_revision=seen.revision,

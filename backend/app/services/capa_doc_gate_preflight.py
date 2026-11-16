@@ -177,9 +177,13 @@ async def scan_tenant_breaks(db: AsyncSession, tenant_schema: str) -> list[dict]
             continue
         analyzed_capa_ids.add(capa.report_id)
         from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
-        candidates = await _build_allowlist(db, capa)
-        current_input_hash = _compute_input_hash(capa, candidates)
-        if current_input_hash != analysis.analysis_input_hash:
+        from app.services.capa_r6_local_closure import require_analysis_fresh
+        stale=False
+        try:
+            await require_analysis_fresh(db,capa,analysis)
+        except (ValueError,PermissionError,LookupError):
+            stale=True
+        if stale:
             breaks.append({
                 "kind": "stale_analysis",
                 "tenant_schema": tenant_schema,

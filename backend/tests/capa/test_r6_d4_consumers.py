@@ -99,7 +99,8 @@ async def test_unsupported_derived_consumers_refuse_root(controlled_root, outlet
     case = controlled_root
     async with case.session() as db:
         report = await db.get(CAPAEightD, case.report_id)
-        with pytest.raises(PermissionError, match='D4'):
+        expected = '^Restricted report requires manual analysis$' if outlet == 'doc_gate' else 'D4'
+        with pytest.raises(PermissionError, match=expected):
             if outlet == 'lateral':
                 from app.services.capa_lateral_diffusion_service import build_source_snapshot
                 await build_source_snapshot(db, report)

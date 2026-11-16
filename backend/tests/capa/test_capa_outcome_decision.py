@@ -161,6 +161,35 @@ async def bind_decision_sources(case, sources):
         await db.commit()
 
 
+async def prepare_restricted_manual_round(case):
+    """Replace an old stored model round through real rejection/local commands."""
+    from app.schemas.capa_r6 import LocalPrevention, LocalReason, ManualDocAnalysis, ManualDecisionCommand
+    from app.services import capa_r6_local_closure as local
+    from app.services.capa_doc_gate_service import confirm_no_affected
+    seen = await expectation(case)
+    async with case.session_factory() as db:
+        await advance_capa(db, await case.report(db), case.actor_id,
+            AdvanceRequest(target_state='D7_PREVENTION', reject_reason='受限来源改走本地人工审核', **seen))
+        scope = await case.scope(db)
+        async def command(schema, key, **values):
+            if issubclass(schema, LocalReason):
+                values['reason'] = '人工复核全部当前输入'
+            return schema(operation_key=key, expected_material_version=await local.local_form_version(db, scope, case.report_id), **values)
+        await local.save_prevention(db, scope, case.report_id,
+            await command(LocalPrevention, 'outcome-local-prevention', text='本地预防措施', basis='当前受限输入'))
+        await local.save_propagation(db, scope, case.report_id, await command(LocalReason, 'outcome-before-gate'))
+        for stage in ('D7_COMPLETED', 'D8_GATE_PENDING'):
+            await advance_capa(db, await case.report(db), case.actor_id, AdvanceRequest(target_state=stage))
+        await local.save_manual(db, scope, case.report_id,
+            await command(ManualDocAnalysis, 'outcome-manual', affected_docs=[]))
+        form = await local.read(db, scope, case.report_id)
+        await confirm_no_affected(db, await case.report(db), case.actor_id,
+            manual_command=await command(ManualDecisionCommand, 'outcome-empty-confirm',
+                expected_analysis_id=form['manual_analysis']['analysis_id']))
+        await local.save_propagation(db, scope, case.report_id, await command(LocalReason, 'outcome-after-manual'))
+        await advance_capa(db, await case.report(db), case.actor_id, AdvanceRequest(target_state='D8_APPROVAL_PENDING'))
+
+
 @pytest.mark.asyncio
 async def test_actual_source_receipt_consumed_by_reader_and_reference_collector(
     review_case, review_sources, decision_provider,
@@ -168,6 +197,7 @@ async def test_actual_source_receipt_consumed_by_reader_and_reference_collector(
     from app.services.capa_review_source_guard import _source_capa_ids
     from app.services.capa_outcome_review import collect_outcome_material
     await bind_decision_sources(review_case, review_sources)
+    await prepare_restricted_manual_round(review_case)
     seen = await expectation(review_case)
     async with review_case.session_factory() as db:
         await advance_capa(db, await review_case.report(db), review_case.actor_id,
@@ -179,26 +209,65 @@ async def test_actual_source_receipt_consumed_by_reader_and_reference_collector(
         # by the normal outcome reader; a signed receipt is not read permission.
         from app.services.capa_current_access import current_capa_access
         db.info['outcome_read_access'] = await current_capa_access(db, await review_case.scope(db))
+        db.info['outcome_actor_id'] = review_case.actor_id
         try:
             material = await collect_outcome_material(db, await review_case.report(db))
         finally:
             db.info.pop('outcome_read_access', None)
+            db.info.pop('outcome_actor_id', None)
         assert material['source_versions'] == receipt['source_versions']
         assert {v['module'] for v in receipt['source_versions']} == {'fmea', 'planning'}
         assert await _source_capa_ids(db, 'planning', review_sources.cp_id) == {review_case.report_id}
-        # Isolate receipt-only lookup inside a rolled-back test transaction; do
-        # not manufacture a receipt or persist changes to reviewed material.
-        capa = await review_case.report(db)
-        capa.fmea_ref_id = None
-        verification = await db.get(CapaRootCauseVerification, review_case.verification_id)
-        verification.source_ref = None
-        await db.flush()
-        assert await _source_capa_ids(db, 'fmea', review_sources.fmea_id) == {review_case.report_id}
-        await db.rollback()
     result = await read(review_case)
     assert result.binding_status == 'verified'
     assert result.revision == seen['expected_outcome_revision']
     assert len(result.documents) == 2
+
+
+@pytest.mark.asyncio
+async def test_ordinary_actual_receipt_is_the_only_reverse_source_path(review_case, review_sources, decision_provider):
+    """A real ordinary approval retains its source even after the core ref clears."""
+    from sqlalchemy import delete, func
+    from app.models.capa_doc_gate import CapaDocgAnalysis
+    from app.models.capa_r6 import CapaR6LocalRevision
+    from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+    from app.services.capa_r6_local_closure import eligible
+    from app.services.capa_review_source_guard import _source_capa_ids
+    async with review_case.session_factory() as db:
+        capa = await review_case.report(db)
+        capa.fmea_ref_id = review_sources.fmea_id
+        verification = await db.get(CapaRootCauseVerification, review_case.verification_id)
+        assert verification.source_ref is None and not verification.r6_source_origins
+        analysis = await db.get(CapaDocgAnalysis, review_case.owned_ids['analysis_id'])
+        analysis.analysis_input_hash = _compute_input_hash(capa, await _build_allowlist(db, capa))
+        assert analysis.analysis_method == 'model'
+        assert not await eligible(db, review_case.report_id)
+        assert await db.scalar(select(func.count()).select_from(CapaR6LocalRevision).where(
+            CapaR6LocalRevision.report_id == review_case.report_id)) == 0
+        await db.commit()
+    seen = await expectation(review_case)
+    async with review_case.session_factory() as db:
+        await advance_capa(db, await review_case.report(db), review_case.actor_id,
+            AdvanceRequest(target_state='D8_CLOSURE', **seen))
+        audit = (await db.scalars(select(AuditLog).where(AuditLog.record_id == review_case.report_id,
+            AuditLog.action == 'D8_APPROVED'))).one()
+        assert any(v['module'] == 'fmea' and v['object_id'] == str(review_sources.fmea_id)
+            for v in audit.changed_fields['outcome_review']['source_versions'])
+        # Diagnostic transaction only: immutable sources are never removed.
+        capa = await review_case.report(db)
+        capa.fmea_ref_id = None
+        await db.flush()
+        assert not await eligible(db, review_case.report_id)
+        # Remove only the actual mutable audit receipt in a rolled-back savepoint.
+        # The counterfactual proves every other reverse-reference path is empty
+        # before the real receipt-only lookup; retaining any hidden path fails it.
+        savepoint = await db.begin_nested()
+        await db.execute(delete(AuditLog).where(AuditLog.log_id == audit.log_id))
+        assert review_case.report_id not in await _source_capa_ids(db, 'fmea', review_sources.fmea_id)
+        await savepoint.rollback()
+        assert await _source_capa_ids(db, 'fmea', review_sources.fmea_id) == {review_case.report_id}
+        await db.rollback()
+    assert (await read(review_case)).binding_status == 'verified'
 
 
 @pytest.mark.asyncio
@@ -261,16 +330,17 @@ async def test_current_cp_version_gate_rechecked_at_approval(review_http_client,
     from app.models.control_plan import ControlPlan
     from app.services.version_service import create_cp_version
     await bind_decision_sources(review_case, review_sources)
+    await prepare_restricted_manual_round(review_case)
     seen = await expectation(review_case)
     async with review_case.session_factory() as db:
         cp = await db.get(ControlPlan, review_sources.cp_id)
         await create_cp_version(db, cp, 'edit', 'new version after reading', review_case.actor_id)
-    # CP is bound to its gate version: the token remains unchanged but C8 must fail.
-    assert await expectation(review_case) == seen
+    # Manual review binds the live version as well as the captured baseline.
+    assert await expectation(review_case) != seen
     response = await review_http_client.post(f'/api/capa/{review_case.report_id}/advance',
         json={'target_state': 'D8_CLOSURE', **seen})
-    assert response.status_code == 400
-    assert response.json()['detail'] == '文档已变更，请重新审核'
+    assert response.status_code == 409
+    assert response.json()['detail'] == 'CAPA_OUTCOME_REVIEW_CHANGED'
 
 
 @pytest.mark.asyncio

@@ -280,3 +280,62 @@ class CapaD4CandidateWithdrawal(TenantBase):
 R6_TABLES = tuple(table.name for table in TenantBase.metadata.tables.values()
                   if table.name.startswith(('capa_r6_', 'agent_d4_candidate_', 'agent_d4_input_', 'agent_d4_command_inputs', 'capa_d4_candidate'))
                   or table.name == 'capa_d5_measure_revisions')
+
+
+class CapaR6LocalRevision(TenantBase):
+    __table__ = sa.Table('capa_r6_local_revisions', TenantBase.metadata,
+        _id('revision_id', primary_key=True), _id('report_id', 'capa_eightd.report_id'),
+        sa.Column('kind', sa.String(24), nullable=False),
+        sa.Column('revision_no', sa.BigInteger(), nullable=False), _id('predecessor_id', nullable=True),
+        _id('actor_id', 'users.user_id'), _id('analysis_id', 'capa_docg_analysis.analysis_id', nullable=True),
+        _id('root_snapshot_revision_id',nullable=True),
+        sa.ForeignKeyConstraint(['root_snapshot_revision_id','report_id'],['capa_r6_root_revision_bodies.revision_id','capa_r6_root_revision_bodies.report_id'],ondelete='RESTRICT',name='fk_r6_local_snapshot_root'),
+        sa.CheckConstraint('(source_count=0) = (root_snapshot_revision_id IS NOT NULL)',name='ck_r6_local_snapshot_count'),
+        sa.Column('operation_key', sa.String(128), nullable=False),
+        sa.Column('request_hmac', sa.String(64), nullable=False),
+        sa.Column('text', sa.Text(), nullable=True), sa.Column('reason', sa.Text(), nullable=False),
+        sa.Column('basis', sa.Text(), nullable=True),
+        sa.Column('input_bindings', JSONB(), nullable=False),
+        sa.Column('candidates', JSONB(), nullable=False), sa.Column('channels', JSONB(none_as_null=True), nullable=True),
+        sa.Column('source_count', sa.Integer(), nullable=False),
+        sa.ForeignKeyConstraint(['predecessor_id','report_id','kind'],
+            ['capa_r6_local_revisions.revision_id','capa_r6_local_revisions.report_id','capa_r6_local_revisions.kind'], ondelete='RESTRICT'),
+        sa.UniqueConstraint('revision_id','report_id','kind',name='uq_r6_local_kind'),
+        sa.UniqueConstraint('revision_id','report_id',name='uq_r6_local_report'),
+        sa.UniqueConstraint('report_id','kind','revision_no',name='uq_r6_local_revision'),
+        sa.UniqueConstraint('predecessor_id',name='uq_r6_local_successor'),
+        sa.UniqueConstraint('actor_id','operation_key',name='uq_r6_local_operation'),
+        sa.UniqueConstraint('analysis_id',name='uq_r6_local_analysis'),
+        sa.CheckConstraint("kind IN ('prevention','manual_analysis','propagation')",name='ck_r6_local_kind'),
+        sa.CheckConstraint("revision_no > 0 AND ((revision_no=1 AND predecessor_id IS NULL) OR (revision_no>1 AND predecessor_id IS NOT NULL))",name='ck_r6_local_predecessor'),
+        sa.CheckConstraint("operation_key ~ '^[A-Za-z0-9._:-]{1,128}$' AND request_hmac ~ '^[0-9a-f]{64}$'",name='ck_r6_local_receipt'),
+        sa.CheckConstraint("(kind='manual_analysis') = (analysis_id IS NOT NULL)",name='ck_r6_local_analysis'),
+        sa.CheckConstraint("(kind='prevention' AND text IS NOT NULL AND basis IS NOT NULL AND octet_length(text)<=16384 AND length(btrim(text))>0 AND octet_length(basis)<=16384 AND length(btrim(basis))>0) OR (kind<>'prevention' AND text IS NULL AND basis IS NULL)",name='ck_r6_local_body'),
+        sa.CheckConstraint("(kind='propagation' AND channels IS NOT NULL AND channels = '{\"lessons\":\"NOT_EXECUTED\",\"knowledge\":\"NOT_EXECUTED\",\"lateral\":\"NOT_EXECUTED\",\"supplier_risk\":\"NOT_EXECUTED\"}'::jsonb) OR (kind<>'propagation' AND channels IS NULL)",name='ck_r6_local_channels'),
+        sa.CheckConstraint("source_count >= 0 AND jsonb_typeof(input_bindings)='object' AND octet_length(input_bindings::text)<=262144 AND jsonb_typeof(candidates)='array' AND octet_length(candidates::text)<=262144",name='ck_r6_local_inputs'),
+        _text_check('reason','ck_r6_local_reason'), _created())
+
+
+class CapaR6LocalSource(TenantBase):
+    __table__ = sa.Table('capa_r6_local_sources', TenantBase.metadata,
+        _id('revision_id',primary_key=True), _id('report_id'),
+        sa.Column('module',sa.String(16),primary_key=True), _id('object_id',primary_key=True),
+        _id('factory_id','factories.id'), sa.Column('product_line_code',sa.String(20),nullable=False),
+        sa.ForeignKeyConstraint(['revision_id','report_id'],['capa_r6_local_revisions.revision_id','capa_r6_local_revisions.report_id'],ondelete='RESTRICT'),
+        sa.CheckConstraint("module IN ('fmea','planning') AND length(btrim(product_line_code))>0",name='ck_r6_local_source'), _created())
+
+R6_TABLES = (*R6_TABLES, 'capa_r6_local_revisions', 'capa_r6_local_sources')
+
+
+class CapaR6ManualDecisionReceipt(TenantBase):
+    __table__=sa.Table('capa_r6_manual_decision_receipts',TenantBase.metadata,
+        _id('receipt_id',primary_key=True),_id('actor_id','users.user_id'),
+        _id('report_id','capa_eightd.report_id'),_id('analysis_id','capa_docg_analysis.analysis_id'),
+        _id('decision_id','capa_docg_decision.decision_id'),
+        sa.Column('operation',sa.String(16),nullable=False),sa.Column('operation_key',sa.String(128),nullable=False),
+        sa.Column('request_hmac',sa.String(64),nullable=False),
+        sa.UniqueConstraint('actor_id','operation_key',name='uq_r6_manual_decision_key'),
+        sa.UniqueConstraint('decision_id',name='uq_r6_manual_decision_result'),
+        sa.CheckConstraint("operation IN ('audit','defer','no_affected','waiver')",name='ck_r6_manual_decision_operation'),
+        sa.CheckConstraint("operation_key ~ '^[A-Za-z0-9._:-]{1,128}$' AND request_hmac ~ '^[0-9a-f]{64}$'",name='ck_r6_manual_decision_receipt'),_created())
+R6_TABLES=(*R6_TABLES,'capa_r6_manual_decision_receipts')

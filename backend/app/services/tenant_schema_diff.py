@@ -150,6 +150,30 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
     if baseline_only or predecessor is not None:
+        witness_objects={('column','capa_r6_local_revisions.root_snapshot_revision_id'),
+            ('constraint','capa_r6_local_revisions.fk_r6_local_snapshot_root'),
+            ('constraint','capa_r6_local_revisions.ck_r6_local_snapshot_count'),
+            ('constraint','capa_r6_local_revisions.r6_validate_local_snapshot_witness'),
+            ('trigger','capa_r6_local_revisions.r6_validate_local_snapshot_witness'),
+            ('function','r6_validate_local_snapshot_witness()')}
+        reference={key:value for key,value in reference.items() if key not in witness_objects}
+        key=('constraint','capa_r6_local_revisions.ck_r6_local_inputs')
+        if key in reference:reference[key]=reference[key].replace('source_count >= 0','source_count > 0')
+    if predecessor == 'tv021_r6_manual_receipts': predecessor=None
+    if baseline_only or predecessor is not None:
+        reference={key:value for key,value in reference.items() if key[1].split('.')[0]!='capa_r6_manual_decision_receipts' and key!=('function','r6_validate_manual_decision_receipt()')}
+    if predecessor == 'tv020_r6_local_closure': predecessor=None
+    if baseline_only or predecessor is not None:
+        local_tables={'capa_r6_local_revisions','capa_r6_local_sources'}
+        reference={key:value for key,value in reference.items() if key[1].split('.')[0] not in local_tables
+            and key not in {('column','capa_docg_analysis.analysis_method'),('constraint','capa_docg_analysis.ck_docg_analysis_method'),('trigger','capa_docg_analysis.r6_complete_local_record'),('constraint','capa_docg_analysis.r6_complete_local_record'),('function','r6_complete_local_record()')}}
+        old_done="c|CHECK (status::text <> 'done'::text OR affected_docs IS NOT NULL AND analysis_input_hash IS NOT NULL AND llm_available = true AND completed_at IS NOT NULL)|false|false"
+        # Historical comparison restores the reviewed pre-020 constraint;
+        # never filters tenant objects, so partial deltas remain visible.
+        key=('constraint','capa_docg_analysis.chk_docg_analysis_done_complete')
+        if key in reference: reference[key]=old_done
+    if predecessor == 'tv019_r6_verify_origins': predecessor=None
+    if baseline_only or predecessor is not None:
         verification_objects = {('column','capa_root_cause_verification.r6_source_origins'),
             ('trigger','capa_root_cause_verification.r6_retain_verification_origins'),
             ('function','r6_retain_verification_origins()'), ('function','r6_verification_ref_origin(ref jsonb)')}

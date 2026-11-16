@@ -461,7 +461,10 @@ async def test_criterion_4_via_iqc_material_binding(db):
 
 @pytest.mark.asyncio
 async def test_d4_source_ref_fmea_included_in_snapshot(db):
-    """D4 verification source_ref.fmea_id must contribute FailureMode texts."""
+    """Internal metadata collection retains a supported D4 FMEA reference.
+
+    Normal restricted closure does not execute lateral propagation.
+    """
     from app.models.capa import CapaRootCauseVerification
 
     factory, user = await _seed_base(db, "d4fm")
@@ -469,22 +472,29 @@ async def test_d4_source_ref_fmea_included_in_snapshot(db):
     fmea = await _make_fmea(
         db, factory.id, user.user_id, "PL-SRC-D4FM", "D4-Only FM Shared"
     )
+    # Supported source identity points to an actual cause, not a mode alias.
+    fmea.graph_data = {
+        'nodes': [*fmea.graph_data['nodes'], {'id': 'cause1', 'type': 'FailureCause', 'name': 'fixture cause'}],
+        'edges': [{'source': 'fm1', 'target': 'cause1', 'type': 'HAS_CAUSE'}],
+    }
     # CAPA has no header fmea_ref_id — only D4 source_ref
     capa = await _make_capa(db, factory.id, user.user_id, "PL-SRC-D4FM", fmea_ref_id=None)
     capa.d4_root_cause = "d4 root"
-    db.add(
-        CapaRootCauseVerification(
-            verification_id=uuid.uuid4(),
-            capa_id=capa.report_id,
-            factory_id=factory.id,
-            root_cause_text="d4 root",
-            conclusion="passed",
-            is_verified=True,
-            verified_by=user.user_id,
-            source_ref={"fmea_id": str(fmea.fmea_id), "node_id": "fm1"},
-        )
+    verification = CapaRootCauseVerification(
+        verification_id=uuid.uuid4(),
+        capa_id=capa.report_id,
+        factory_id=factory.id,
+        root_cause_text="d4 root",
+        conclusion="passed",
+        is_verified=True,
+        verified_by=user.user_id,
+        source_ref={"fmea_id": str(fmea.fmea_id), "cause_node_id": "cause1"},
     )
+    db.add(verification)
     await db.flush()
+    await db.refresh(verification, attribute_names=['r6_source_origins'])
+    assert verification.r6_source_origins == [dict(kind='fmea', fmea_id=str(fmea.fmea_id),
+        cause_node_id='cause1', factory_id=str(factory.id), product_line_code='PL-SRC-D4FM')]
 
     snap = await build_source_snapshot(db, capa)
     assert "d4-only fm shared" in snap.fmea_mode_texts
