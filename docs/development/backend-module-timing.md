@@ -46,3 +46,5 @@ PR #37从804f8551正常合入当前main d0c7394e；仅PROGRESS并发记录需要
 反向B/A已完成：优化setup117.60秒、原配置338.54秒；重建模块14.14／194.90秒；API CLI wall284.71／521.53秒。四轮均78 passed、无skip、集合摘要同一；四套专用容器／卷及凭据均已核验清理。目标setup效果在两个顺序中重复出现，未改模块call／负载仍有漂移，因此不签收整套速度结论。
 
 等待期间main合入安全PR #38，推进至baa276aa，包含public登录限制迁移及tenant_schema_diff排除表更新，也独立修复了历史knowledge_sink并发竞态。上述四轮数据仍属d0c7394e快照；同步安全主线后补正常78项API兼容／隔离验证并重跑当前合并候选CI，不以旧成功结果替代新基线。
+
+baa276aa兼容复核：pure373 passed／3 warnings／exit0，正常API组78 passed／0 skipped／exit0；源码和安装依赖指纹前后一致，专用PG15及唯一卷/凭据已核验清理。API CLI wall320.13秒仅记录当前执行，不与旧d0c7394e快照计算收益。当前PR保持同一fixture实现与计时代码，不覆盖已发布的安全修复；普通8项CI用新的合并候选重新验收。
