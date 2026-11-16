@@ -773,6 +773,8 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         current_rc = (capa.d4_root_cause or "").strip()
         if not current_rc:
             raise ValueError("D4→D5 需先填写根因并验证")
+        from app.services.capa_verification_sources import authorize_verifications
+        await authorize_verifications(db,capa.report_id,actor_id=user_id,lock=True)
         cnt = await db.scalar(select(func.count()).select_from(CapaRootCauseVerification).where(
             CapaRootCauseVerification.capa_id == capa.report_id,
             CapaRootCauseVerification.factory_id == capa.factory_id,
@@ -911,10 +913,17 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
     required = PermissionLevel.APPROVE if current in {
         EightDState.D8_APPROVAL_PENDING, EightDState.D8_CLOSURE} else PermissionLevel.EDIT
     await authorize_root(db, user_id, report_id, required)
+    uses_verification=current==EightDState.D4_ROOT_CAUSE and target==EightDState.D5_CORRECTION
+    if uses_verification:
+        await authorize_verifications(db,report_id,actor_id=user_id)
     await bump_material(db, report_id)
     await db.commit()  # existing commit includes outbox
     await authorize_root(db, user_id, report_id)
+    if uses_verification:
+        await authorize_verifications(db,report_id,actor_id=user_id)
     await db.refresh(capa)
+    if uses_verification:
+        await authorize_verifications(db,report_id,actor_id=user_id)
     return capa
 
 
@@ -1331,7 +1340,7 @@ async def get_capas_by_fmea_node(
             _add(a.capa_id, *hits)
 
     # 3. D4 source_ref
-    vq = select(CapaRootCauseVerification, CAPAEightD).join(
+    vq = select(CapaRootCauseVerification.capa_id).join(
         CAPAEightD, CAPAEightD.report_id == CapaRootCauseVerification.capa_id
     ).where(CapaRootCauseVerification.source_ref["fmea_id"].astext == fmea_id)
     fpv = _factory_predicate(CAPAEightD)
@@ -1339,8 +1348,8 @@ async def get_capas_by_fmea_node(
         vq = vq.where(fpv)
     if fmea_node_id:
         vq = vq.where(CapaRootCauseVerification.source_ref["cause_node_id"].astext == fmea_node_id)
-    for v, c in (await db.execute(vq)).all():
-        _add(c.report_id, "d4_cause")
+    for capa_id in (await db.execute(vq)).scalars().all():
+        _add(capa_id, "d4_cause")
 
     if not sources_by_capa:
         return []

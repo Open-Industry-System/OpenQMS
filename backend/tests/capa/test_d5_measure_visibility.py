@@ -398,8 +398,18 @@ async def test_verification_freshness_matches_established_d4_contract(d5_case, c
         values['factory_id'] = factory.id
     # Preserve the version timestamp to exercise the direct content/coordinate
     # consistency checks used by existing D4 delivery, not version drift alone.
-    await c.db.execute(update(CapaRootCauseVerification).where(
-        CapaRootCauseVerification.verification_id == c.proof.verification_id).values(**values))
+    from sqlalchemy import text, literal_column
+    if change == 'factory':
+        # Identity drift is prohibited by current19; retain the established
+        # reader check for an untouched pre19 bad-coordinate NULL legacy row.
+        await c.db.execute(text('ALTER TABLE capa_root_cause_verification DISABLE TRIGGER r6_retain_verification_origins'))
+        values['r6_source_origins'] = literal_column('NULL')
+    try:
+        await c.db.execute(update(CapaRootCauseVerification).where(
+            CapaRootCauseVerification.verification_id == c.proof.verification_id).values(**values))
+    finally:
+        if change == 'factory':
+            await c.db.execute(text('ALTER TABLE capa_root_cause_verification ENABLE TRIGGER r6_retain_verification_origins'))
     await c.db.commit()
     after = await read_d5_proposals(c.db, c.actors[2], c.report.report_id)
     assert after.total == 2 and all(not item.basis_current for item in after.items)

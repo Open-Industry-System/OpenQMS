@@ -22,7 +22,7 @@ from tests.migrations.test_agent_task_core import _migration_config, _sync_engin
 PUBLIC = "20261001_agent_readonly_controls"
 CONTROLS_TENANT = "tv004_agent_readonly_controls"
 LATEST = "tv009_r4b_main_merge"
-HEAD = "20261116_r6_d4_withdraw"
+HEAD = "20261116_r6_verify_origins"
 PARENT = "20260930_agent_readonly_delivery"
 TABLES = {"agent_task_controls", "agent_readonly_checkpoints", "agent_checkpoint_receipts", "agent_task_updates"}
 COLUMNS = {
@@ -74,6 +74,7 @@ def test_reviewed_heads_and_static_equivalent_deltas(mig_db_url):
         "tv016_r6_source_epoch",
         "tv017_r6_d4_inputs",
         "tv018_r6_d4_withdraw",
+        "tv019_r6_verify_origins",
     )
     root = Path(__file__).resolve().parents[2]
     public = (root / "alembic/versions/20261001_agent_readonly_controls.py").read_text()

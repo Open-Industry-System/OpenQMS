@@ -19,7 +19,7 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv018_r6_d4_withdraw"
+REVISION = "tv019_r6_verify_origins"
 R6_INPUT_PREDECESSOR_REVISION = "tv017_r6_d4_inputs"
 R6_EPOCH_PREDECESSOR_REVISION = "tv016_r6_source_epoch"
 R6_CONTRACT_PREDECESSOR_REVISION = "tv015_r6_entry_contracts"

@@ -238,8 +238,26 @@ async def material_version(db, report_id):
     namespace = await current_field_namespace(db)
     counter = await db.scalar(select(CapaR6MaterialVersion.counter).where(CapaR6MaterialVersion.report_id == report_id))
     epoch = await db.scalar(select(CapaR6EntrySwitch.epoch).order_by(CapaR6EntrySwitch.epoch.desc()).limit(1))
-    value = json.dumps([namespace, str(report_id), counter or 0, epoch or 0], sort_keys=True).encode()
-    return hmac.new(settings.SECRET_KEY.encode(), b'openqms.r6.material.v1\n' + value, hashlib.sha256).hexdigest()
+    # Optimistic employee forms bind the *current* source parents, while immutable
+    # origins retain their historic capture epochs. No graph or body is read.
+    revision, sources = await root_metadata(db, report_id)
+    from app.models.fmea import FMEADocument
+    parents = []
+    for fmea_id in sorted({source.fmea_id for source in sources if source.kind == 'fmea_projection'}, key=str):
+        row = (await db.execute(select(FMEADocument.fmea_id, FMEADocument.lock_version,
+            FMEADocument.factory_id, FMEADocument.product_line_code).where(FMEADocument.fmea_id == fmea_id))).one_or_none()
+        if row is None:
+            parents.append(dict(kind='missing', fmea_id=str(fmea_id)))
+        elif type(row.lock_version) is not int or row.lock_version < 0:
+            raise PermissionError('D4_MATERIAL_UNAVAILABLE')
+        else:
+            parents.append(dict(kind='present', fmea_id=str(row.fmea_id), epoch=row.lock_version,
+                factory_id=str(row.factory_id), product_line_code=row.product_line_code))
+    value = json.dumps(dict(namespace=namespace, report_id=str(report_id), counter=counter or 0,
+        switch_epoch=epoch or 0, root_revision_id=None if revision is None else str(revision.revision_id),
+        source_ids=sorted(str(source.source_id) for source in sources), source_parents=parents),
+        sort_keys=True, separators=(',', ':')).encode()
+    return hmac.new(settings.SECRET_KEY.encode(), b'openqms.r6.material.v2\n' + value, hashlib.sha256).hexdigest()
 
 
 async def append_root_body(db, revision, text, added_source_ids=()):

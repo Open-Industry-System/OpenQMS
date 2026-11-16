@@ -91,10 +91,13 @@ async def review_and_correct(
     async def fence():
         if pc is not None:
             await require_legacy_d5_only(db, capa_id)
+            from app.services.capa_verification_sources import require_legacy_verifications_only
+            await require_legacy_verifications_only(db,capa_id)
         if scope is None:
             await require_legacy_root_only(db, capa_id)
         else:
             await authorize_root(db, scope.user.user_id, capa_id)
+        await capa_ppt_service.authorize_ppt_material(db,capa_id,scope=scope)
         if root_version != await material_version(db, capa_id):
             raise PermissionError('D4_FULL_MATERIAL_UNAVAILABLE')
     await fence()

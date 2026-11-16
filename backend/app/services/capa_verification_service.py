@@ -189,6 +189,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     is_verified = (conclusion == "passed")
     if is_verified:
         _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
+    await _require_verification_source_ref(db, actor_id, req.source_ref)
     if req.source_declaration is None:
         normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
     else:
@@ -202,6 +203,10 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     if normalized_ref is not None:
         # Source locks may have waited after parent-lock admission.
         capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    from app.services.agent_runtime.control_authority_fence import lock_employee_acl
+    await lock_employee_acl(db, (actor_id,))
+    await _require_verification_source_ref(db, actor_id, normalized_ref)
+    capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
     # Pre-generate PK so pending UPDATED audit can reference verification_id
     # before commit (model default would only fire on flush otherwise).
     vid = uuid.uuid4()
@@ -265,13 +270,35 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             raise
     from app.services.capa_d4_material import bump_material, authorize_root
     await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     await bump_material(db, capa.report_id)
     await db.commit()
     await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     await db.refresh(rec)
     await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     rec.source_proof_issued = issued
     return rec
+
+
+async def _require_original_verification_sources(db, capa_id, actor_id, verification_id=None, *, lock=False):
+    from app.services.capa_verification_sources import authorize_verifications
+    return await authorize_verifications(db, capa_id, actor_id=actor_id, verification_id=verification_id, lock=lock)
+
+
+async def _require_verification_source_ref(db, actor_id, ref):
+    if ref is None:
+        return
+    from types import SimpleNamespace
+    from app.services.fmea_agent_sources import visible_fmea_source
+    if actor_id is None or not isinstance(ref, dict) or set(ref) != {'fmea_id', 'cause_node_id'}:
+        raise PermissionError('Verification source unavailable')
+    try:
+        source_id = uuid.UUID(str(ref['fmea_id']))
+    except (ValueError, TypeError):
+        raise PermissionError('Verification source unavailable') from None
+    await visible_fmea_source(db, SimpleNamespace(user=SimpleNamespace(user_id=actor_id)), source_id)
 
 
 async def list_verifications(db: AsyncSession, capa, *, actor_id=None):
@@ -281,6 +308,7 @@ async def list_verifications(db: AsyncSession, capa, *, actor_id=None):
         raise PermissionError('D4_MATERIAL_UNAVAILABLE')
     if actor_id is not None:
         await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id)
     result = await db.execute(
         select(CapaRootCauseVerification)
         .where(CapaRootCauseVerification.capa_id == capa.report_id,
@@ -289,6 +317,7 @@ async def list_verifications(db: AsyncSession, capa, *, actor_id=None):
     rows = list(result.scalars().all())
     if actor_id is not None:
         await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id)
     return rows
 
 
@@ -299,6 +328,13 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     capa = await lock_current_material_write(
         db, capa, actor_id, PermissionLevel.EDIT
     )
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
+    updates = req.model_dump(exclude_unset=True)
+    if 'source_ref' in updates:
+        await _require_verification_source_ref(db, actor_id, updates['source_ref'])
+        new_ref = await _normalize_and_validate_source_ref(db, capa, updates['source_ref'])
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid, lock=True)
+    capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
     # 锁 verification 行，序列化同记录并发跃迁（去重）
     rec = await db.scalar(select(CapaRootCauseVerification).where(
         CapaRootCauseVerification.verification_id == vid,
@@ -311,11 +347,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     updates = req.model_dump(exclude_unset=True)
     old_conclusion = rec.conclusion
     old_source_ref = rec.source_ref
-    if "source_ref" in updates:
-        new_ref = await _normalize_and_validate_source_ref(db, capa, updates["source_ref"])
-        if new_ref is not None:
-            # Do not dirty the child before source waits and current authority.
-            capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     if "method" in updates:
         rec.method = updates["method"]
     if "result" in updates:
@@ -397,9 +429,12 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     await invalidate_verification_proofs(db, vid)
     from app.services.capa_d4_material import bump_material, authorize_root
     await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     await bump_material(db, capa.report_id)
     await db.commit()
     await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     await db.refresh(rec)
     await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     return rec

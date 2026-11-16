@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
-from sqlalchemy import delete, text, update
+from sqlalchemy import delete, text, update, literal_column
 
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
@@ -23,11 +23,19 @@ pytestmark = pytest.mark.requires_db
 async def test_i1_exact_verification_source_requires_nonempty_string_cause(review_case, review_sources, node_id):
     await bind_sources(review_case, review_sources, explicit=True)
     async with review_case.session_factory() as db:
-        await db.execute(update(CapaRootCauseVerification).where(CapaRootCauseVerification.verification_id ==
-            review_case.verification_id).values(source_ref={'fmea_id': str(review_sources.fmea_id), 'cause_node_id': node_id}))
+        # Current19 rejects this write; preserve a pre19 malformed NULL row to
+        # test historical failclosed reads without fabricating known origins.
+        await db.execute(text('ALTER TABLE capa_root_cause_verification DISABLE TRIGGER r6_retain_verification_origins'))
+        try:
+            await db.execute(update(CapaRootCauseVerification).where(CapaRootCauseVerification.verification_id ==
+                review_case.verification_id).values(source_ref={
+                    'fmea_id': str(review_sources.fmea_id), 'cause_node_id': node_id},
+                    r6_source_origins=literal_column('NULL')))
+        finally:
+            await db.execute(text('ALTER TABLE capa_root_cause_verification ENABLE TRIGGER r6_retain_verification_origins'))
         await db.commit()
     before = await review_case.snapshot()
-    with pytest.raises(PermissionError, match='CAPA_OUTCOME_REVIEW_ACCESS_DENIED'):
+    with pytest.raises(PermissionError, match='^Verification sources unavailable$'):
         await read(review_case)
     assert before == await review_case.snapshot()
 

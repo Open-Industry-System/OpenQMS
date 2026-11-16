@@ -22,7 +22,7 @@ def test_source_epoch_pair_preserves_published_parents():
         assert (root / directory / 'versions' / f'{revision}.py').exists(), 'R6 capture epoch migration missing'
         cfg = Config()
         cfg.set_main_option('script_location', str(root / directory))
-        expected = '20261116_r6_d4_withdraw' if directory == 'alembic' else 'tv018_r6_d4_withdraw'
+        expected = '20261116_r6_verify_origins' if directory == 'alembic' else 'tv019_r6_verify_origins'
         assert ScriptDirectory.from_config(cfg).get_heads() == [expected]
     public = (root / 'alembic/versions' / f'{PUBLIC}.py').read_text()
     tenant = (root / 'alembic_tenant/versions' / f'{TENANT}.py').read_text()

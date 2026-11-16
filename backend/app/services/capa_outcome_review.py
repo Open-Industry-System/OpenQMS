@@ -334,6 +334,10 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
         reference(core['fmea_ref_id'], core['fmea_node_id'])
     elif core['fmea_node_id'] is not None:
         raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')
+    from app.services.capa_verification_sources import known_origins
+    for _,origins in (await known_origins(db,capa.report_id)).values():
+        for origin in origins:
+            reference(origin['fmea_id'],origin['cause_node_id'],'FailureCause')
     for row in verifications:
         value = row['source_ref']
         if value is not None:
@@ -396,6 +400,8 @@ async def collect_outcome_material(db, capa) -> dict:
                                    if key != "material_version"}
     if d5_material:
         material['d5_measures'] = d5_material
+    from app.services.capa_verification_sources import authorize_verifications
+    await authorize_verifications(db,capa.report_id,access=db.info.get('outcome_read_access'))
     _check_size(material)
     remaining = MAX_OUTCOME_REVIEW_BYTES - len(_encoded(material))
     verifications = await _rows(db, CapaRootCauseVerification, _VERIFICATIONS,
@@ -440,6 +446,7 @@ async def collect_outcome_material(db, capa) -> dict:
         raise OutcomeReviewLimit()
     material['source_versions'] = sources
     _check_size(material)
+    await authorize_verifications(db,capa.report_id,access=db.info.get('outcome_read_access'))
     return material
 
 

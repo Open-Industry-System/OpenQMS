@@ -158,33 +158,32 @@ async def test_concurrent_revocation_suppresses_diagnostic_or_rolls_back_signing
 
 @pytest.mark.asyncio
 async def test_revocation_after_revision_check_before_signing_rolls_back(proof_case, monkeypatch):
-    """A permission change after source validation must fence the proof write."""
+    """Revocation before ACL acquisition fences the already validated source."""
     from sqlalchemy import func
     from app.models.audit import AuditLog
     from app.models.capa import CapaRootCauseVerification
     from app.models.capa_d4_delivery import CapaD4RootCauseRevision, CapaD4RootCauseSourceProof
-    from app.services import capa_d4_provenance as provenance
+    from app.services.agent_runtime import control_authority_fence as fence
 
     c = proof_case
     report_id, role_id = c.report.report_id, c.user.role_id
-    original = provenance.checked_current_revision
+    original = fence.lock_employee_acl
     calls = 0
 
-    async def revoke_after_check(*args, **kwargs):
+    async def revoke_before_acl(*args, **kwargs):
         nonlocal calls
-        revision = await original(*args, **kwargs)
         calls += 1
-        if calls == 2:
+        if calls == 1:
             async with c.factory(binding=c.binding) as other:
                 await other.execute(update(RolePermission).where(
                     RolePermission.role_id == role_id,
                     RolePermission.module == 'fmea').values(permission_level=0))
                 await other.commit()
-        return revision
+        return await original(*args, **kwargs)
 
-    monkeypatch.setattr(provenance, 'checked_current_revision', revoke_after_check)
+    monkeypatch.setattr(fence, 'lock_employee_acl', revoke_before_acl)
     response = await c.client.post(c.url, json=c.body)
-    assert calls == 2
+    assert calls == 1
     assert response.status_code == 403 and response.content == b'{"detail":"Source unavailable"}'
     async with c.factory(binding=c.binding) as fresh:
         for model, column in [(CapaRootCauseVerification, CapaRootCauseVerification.capa_id),
@@ -192,6 +191,78 @@ async def test_revocation_after_revision_check_before_signing_rolls_back(proof_c
                 (CapaD4RootCauseSourceProof, CapaD4RootCauseSourceProof.report_id),
                 (AuditLog, AuditLog.record_id)]:
             assert await fresh.scalar(select(func.count()).select_from(model).where(column == report_id)) == 0
+
+
+@pytest.mark.asyncio
+async def test_acl_locked_signing_finishes_before_waiting_revocation(proof_case, monkeypatch):
+    """A real competing revocation waits for signing, then protects later reads."""
+    import asyncio
+    from sqlalchemy import text
+    from app.services.agent_runtime import control_authority_fence as fence
+    from app.models.capa import CapaRootCauseVerification
+    from app.models.capa_d4_delivery import CapaD4RootCauseSourceProof
+
+    c = proof_case
+    report_id, role_id = c.report.report_id, c.user.role_id
+    locked, release_request = asyncio.Event(), asyncio.Event()
+    revoke_started, revoke_updated, allow_commit = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original = fence.lock_employee_acl
+    revoke_pid = None
+
+    async def pause_after_real_acl(*args, **kwargs):
+        result = await original(*args, **kwargs)
+        locked.set()
+        await release_request.wait()
+        return result
+
+    async def revoke():
+        nonlocal revoke_pid
+        async with c.factory(binding=c.binding) as other:
+            revoke_pid = await other.scalar(text('SELECT pg_backend_pid()'))
+            revoke_started.set()
+            await other.execute(update(RolePermission).where(
+                RolePermission.role_id == role_id, RolePermission.module == 'fmea'
+            ).values(permission_level=0))
+            revoke_updated.set()
+            await allow_commit.wait()
+            await other.commit()
+
+    async def observe_blocker():
+        async with c.factory(binding=c.binding) as observer:
+            while not await observer.scalar(text('SELECT cardinality(pg_blocking_pids(:pid)) > 0'),
+                                             {'pid': revoke_pid}):
+                await asyncio.sleep(0)
+
+    monkeypatch.setattr(fence, 'lock_employee_acl', pause_after_real_acl)
+    request_task = asyncio.create_task(c.client.post(c.url, json=c.body))
+    revoke_task = None
+    try:
+        await asyncio.wait_for(locked.wait(), 10)
+        revoke_task = asyncio.create_task(revoke())
+        await asyncio.wait_for(revoke_started.wait(), 10)
+        await asyncio.wait_for(observe_blocker(), 10)
+        assert not revoke_updated.is_set()
+        release_request.set()
+        response = await asyncio.wait_for(request_task, 10)
+        assert response.status_code == 200 and response.json()['source_proof_issued'] is True
+        await asyncio.wait_for(revoke_updated.wait(), 10)
+        allow_commit.set()
+        await asyncio.wait_for(revoke_task, 10)
+    finally:
+        release_request.set()
+        allow_commit.set()
+        for task in (request_task, revoke_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(*[task for task in (request_task, revoke_task) if task is not None],
+                             return_exceptions=True)
+    assert (await c.client.get(c.url)).status_code == 403
+    async with c.factory(binding=c.binding) as fresh:
+        verification = await fresh.get(CapaRootCauseVerification, response.json()['verification_id'])
+        proof = await fresh.scalar(select(CapaD4RootCauseSourceProof).where(
+            CapaD4RootCauseSourceProof.report_id == report_id))
+        assert verification.is_verified and verification.root_cause_text == c.body['root_cause_text']
+        assert proof.status == 'active' and proof.invalidated_at is None
 
 
 @pytest.mark.asyncio
@@ -214,14 +285,18 @@ async def test_revocation_during_revision_diagnostic_suppresses_result(proof_cas
     else:
         c.body['root_cause_text'] = 'different text'
     before = await counts(c)
-    original = provenance.checked_current_revision
+    from app.services.agent_runtime import control_authority_fence as fence
+    owner, name = ((provenance, 'checked_current_revision') if diagnostic == 'conflict'
+                   else (fence, 'lock_employee_acl'))
+    original = getattr(owner, name)
     calls = 0
 
     async def revoke_during_check(*args, **kwargs):
         nonlocal calls
         calls += 1
-        # Conflict is found by the first preflight; mismatch by the second check.
-        if calls == (1 if diagnostic == 'conflict' else 2):
+        # A mismatch is diagnosed while ACL is held: revoke before acquisition,
+        # rather than waiting for the held lock from inside the request hook.
+        if calls == 1:
             async with c.factory(binding=c.binding) as other:
                 await other.execute(update(RolePermission).where(
                     RolePermission.role_id == c.user.role_id,
@@ -229,7 +304,7 @@ async def test_revocation_during_revision_diagnostic_suppresses_result(proof_cas
                 await other.commit()
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(provenance, 'checked_current_revision', revoke_during_check)
+    monkeypatch.setattr(owner, name, revoke_during_check)
     response = await c.client.post(c.url, json=c.body)
     assert response.status_code == 403 and response.content == b'{"detail":"Source unavailable"}'
     await c.db.rollback()

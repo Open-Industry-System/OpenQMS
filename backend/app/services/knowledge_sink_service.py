@@ -120,8 +120,8 @@ async def _assemble_d4(db: AsyncSession, capa: CAPAEightD) -> str:
     current = (capa.d4_root_cause or "").strip()
     if not current:
         return ""
-    verif = await db.scalar(
-        select(CapaRootCauseVerification)
+    verif = (await db.execute(
+        select(CapaRootCauseVerification.method,CapaRootCauseVerification.verified_at)
         .where(
             CapaRootCauseVerification.capa_id == capa.report_id,
             CapaRootCauseVerification.factory_id == capa.factory_id,
@@ -133,7 +133,7 @@ async def _assemble_d4(db: AsyncSession, capa: CAPAEightD) -> str:
             CapaRootCauseVerification.created_at.desc(),
         )
         .limit(1)
-    )
+    )).one_or_none()
     if verif is None:
         return current
     bits = [current]
@@ -194,14 +194,14 @@ async def _assemble_linkage(db: AsyncSession, capa: CAPAEightD) -> dict:
         async with db.begin_nested():
             verifs = (
                 await db.execute(
-                    select(CapaRootCauseVerification).where(
+                    select(CapaRootCauseVerification.source_ref).where(
                         CapaRootCauseVerification.capa_id == capa.report_id,
                         CapaRootCauseVerification.factory_id == capa.factory_id,
                     )
                 )
             ).scalars().all()
             for v in verifs:
-                ref = v.source_ref or {}
+                ref = v or {}
                 if isinstance(ref, dict) and ref.get("fmea_id"):
                     _add(ref["fmea_id"])
     except Exception:

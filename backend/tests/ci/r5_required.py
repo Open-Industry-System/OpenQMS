@@ -7,7 +7,7 @@ R5_REQUIRED = {'api': {'tests.migrations.test_r5_responses_delta': [
                          'test_legacy_protocol_objects_are_filtered_only_on_reference[tv013_r5_main_merge]',
                          'test_existing_rows_hmac_and_binding_survive_protocol_migration',
                          'test_nonempty_responses_refuses_downgrade_atomically',
-                         'test_current_tenant_protocol_column_has_full_parity'],
+                         'test_historical_responses_tenant_protocol_column_has_full_parity'],
                      'tests.migrations.test_r5_d5_basis_delta': ['test_basis_receipts_upgrade[None]',
                                                      'test_basis_receipts_upgrade[20261114_r5_d5_proposals]',
                                                      'test_nonempty_basis_downgrade_atomic_refusal',

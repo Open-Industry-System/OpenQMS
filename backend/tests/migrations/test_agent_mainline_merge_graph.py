@@ -17,7 +17,7 @@ def _scripts(directory):
 
 def test_public_head_merges_both_published_agent_branches():
     scripts = _scripts("alembic")
-    assert scripts.get_heads() == ["20261116_r6_d4_withdraw"]
+    assert scripts.get_heads() == ["20261116_r6_verify_origins"]
     assert scripts.get_revision("20261113_d4_recovery").down_revision == "20261109_d4_text_delivery"
     assert scripts.get_revision("20261109_d4_text_delivery").down_revision == MERGE
     merge = scripts.get_revision(MERGE)
@@ -29,12 +29,12 @@ def test_public_head_merges_both_published_agent_branches():
 
 def test_tenant_head_adds_read_tasks_without_replaying_public_history():
     scripts = _scripts("alembic_tenant")
-    assert scripts.get_heads() == ["tv018_r6_d4_withdraw"]
+    assert scripts.get_heads() == ["tv019_r6_verify_origins"]
     assert scripts.get_revision("tv008_d4_recovery").down_revision == "tv007_d4_text_delivery"
     assert scripts.get_revision("tv007_d4_text_delivery").down_revision == "tv006_agent_read_tasks"
     assert scripts.get_revision("tv006_agent_read_tasks").down_revision == "tv005_agent_task_attachments"
     assert {item.revision for item in scripts.walk_revisions()} == {
-        "tv018_r6_d4_withdraw", "tv017_r6_d4_inputs", "tv016_r6_source_epoch", "tv015_r6_entry_contracts", "tv014_r5_responses", "tv013_r5_main_merge", "tv010_refresh_sessions", "tv012_r5_models", "tv011_r5_d5_basis", "tv010_r5_d5_proposals", "tv009_r4b_main_merge", "tv007_characteristic_refs", "tv008_d4_recovery", "tv007_d4_text_delivery", "tv006_agent_read_tasks", "tv005_agent_task_attachments",
+        "tv019_r6_verify_origins", "tv018_r6_d4_withdraw", "tv017_r6_d4_inputs", "tv016_r6_source_epoch", "tv015_r6_entry_contracts", "tv014_r5_responses", "tv013_r5_main_merge", "tv010_refresh_sessions", "tv012_r5_models", "tv011_r5_d5_basis", "tv010_r5_d5_proposals", "tv009_r4b_main_merge", "tv007_characteristic_refs", "tv008_d4_recovery", "tv007_d4_text_delivery", "tv006_agent_read_tasks", "tv005_agent_task_attachments",
         "tv004_agent_readonly_controls", "tv003_agent_readonly_delivery",
         "tv002_agent_task_core", "tv001_business_snapshot",
     }

@@ -44,7 +44,7 @@ def _seed_receipt(db):
 
 def test_receipt_complete_set_immutable_history_and_nonempty_downgrade(mig_db_url):
     cfg=_migration_config(mig_db_url)
-    command.upgrade(cfg,'head')
+    command.upgrade(cfg,'20261116_r6_d4_withdraw')
     engine=_sync_engine(mig_db_url)
     try:
         with engine.begin() as db:

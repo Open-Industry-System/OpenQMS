@@ -150,6 +150,13 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
     if baseline_only or predecessor is not None:
+        verification_objects = {('column','capa_root_cause_verification.r6_source_origins'),
+            ('trigger','capa_root_cause_verification.r6_retain_verification_origins'),
+            ('function','r6_retain_verification_origins()'), ('function','r6_verification_ref_origin(ref jsonb)')}
+        reference = {key:value for key,value in reference.items() if key not in verification_objects}
+    if predecessor == 'tv018_r6_d4_withdraw':
+        predecessor = None
+    if baseline_only or predecessor is not None:
         reference = {key: value for key, value in reference.items()
             if key[1].split('.')[0] != 'capa_d4_candidate_withdrawals' and key != ('function', 'r6_validate_d4_withdrawal()')}
     if predecessor == 'tv017_r6_d4_inputs':

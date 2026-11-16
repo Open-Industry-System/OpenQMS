@@ -144,14 +144,14 @@ async def build_source_snapshot(db, capa: CAPAEightD) -> SourceSnapshot:
     # D4 verification source_ref.fmea_id (same collection as knowledge_sink._assemble_linkage)
     verifs = (
         await db.execute(
-            select(CapaRootCauseVerification).where(
+            select(CapaRootCauseVerification.source_ref).where(
                 CapaRootCauseVerification.capa_id == capa.report_id,
                 CapaRootCauseVerification.factory_id == capa.factory_id,
             )
         )
     ).scalars().all()
     for v in verifs:
-        ref = v.source_ref or {}
+        ref = v or {}
         if isinstance(ref, dict) and ref.get("fmea_id"):
             try:
                 from uuid import UUID as _UUID

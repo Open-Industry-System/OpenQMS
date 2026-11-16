@@ -52,6 +52,8 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
             CapaD7NodeAction.fmea_id == doc_id,
             CapaD7NodeAction.factory_id == source_factory_id,
         )))
+        ids.update(await db.scalars(select(CapaRootCauseVerification.capa_id).where(
+            CapaRootCauseVerification.r6_source_origins.contains([{'fmea_id':str(doc_id)}]))))
         # D4's supported source_ref identity is exactly {fmea_id,cause_node_id}.
         # Extracting text compares malformed JSON safely without UUID casts.
         ids.update(await db.scalars(select(CapaRootCauseVerification.capa_id).where(

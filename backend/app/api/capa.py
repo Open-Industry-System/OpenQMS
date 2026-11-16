@@ -4,7 +4,7 @@ from app.schemas.capa_d5_staff import D5Adopt, D5Withdraw
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
@@ -1334,7 +1334,11 @@ async def list_verifications_ep(
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
-    items = await capa_verification_service.list_verifications(db, capa, actor_id=scope.user.user_id)
+    try:
+        items = await capa_verification_service.list_verifications(db, capa, actor_id=scope.user.user_id)
+    except PermissionError:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='Verification source unavailable') from None
     await _authorize_capa_root(db, scope, report_id)
     return [VerificationResponse.model_validate(i) for i in items]
 
@@ -1573,6 +1577,10 @@ async def export_ppt(
     await _authorize_capa_root(db, scope, report_id)
     if await material_version(db, report_id) != export_material_version:
         raise HTTPException(403, "D4_MATERIAL_UNAVAILABLE")
+    try:
+        await capa_ppt_service.authorize_ppt_material(db,report_id,scope=scope)
+    except PermissionError:
+        raise HTTPException(403,'PPT_MATERIAL_UNAVAILABLE',headers={'Cache-Control':'no-store'}) from None
     headers = {
         "Cache-Control": "no-store",
         "X-PPT-Review-Status": review.status,
@@ -1586,6 +1594,7 @@ async def export_ppt(
 async def get_ppt_export(
     report_id: uuid.UUID,
     export_id: uuid.UUID,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -1597,9 +1606,13 @@ async def get_ppt_export(
     if capa is None:
         raise HTTPException(404, "CAPA 不存在")
     check_factory_access(capa.factory_id, scope)
-    export = await capa_ppt_service.get_export(db, export_id, report_id)
+    try:
+        export = await capa_ppt_service.get_export(db, export_id, report_id,scope=scope)
+    except PermissionError:
+        raise HTTPException(403,'PPT_MATERIAL_UNAVAILABLE',headers={'Cache-Control':'no-store'}) from None
     if export is None:
         raise HTTPException(404, "PPT 生成记录不存在")
+    response.headers['Cache-Control']='no-store'
     return PptExportDetailResponse(
         export_id=str(export.export_id), capa_id=str(export.capa_id),
         generated_at=export.generated_at, generated_by=str(export.generated_by),
