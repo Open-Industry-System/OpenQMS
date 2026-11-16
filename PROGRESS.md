@@ -1,5 +1,9 @@
 # OpenQMS 开发进度
 
+> **2026-11-16 最终合并候选本机验收通过**：主线整合实际提交`880313ea7e705000255514e067076946b3732ddf`已推送，GitHub已确认无冲突。本机同一干净提交串行`make check-r5-native PYTHON_BIN=/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python SDK_PYTHON_BIN=/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python` exit0/569.86s，native API68通过0skip（522.34s）、browser2通过0skip（44.79s）；源SHA绑定正确，70必选PASSED逐项恰好一次，新增阶段计时输出实际生成。日志`merge-20261116-native-1794810124156203000.log` SHA256`351b46fdd73547e1bce5a350eb318c14c1addccc742d5df0e1e9a879bc8ca02a`；证明`merge-20261116-native-proof.json`保留在原R5私有目录。纯CI297、运行器合同64通过，独立SPEC/QUALITY静态APPROVED；业务/迁移/前端/SDK与75fcc保持一致，public20261115_r5_responses、tenanttv014_r5_responses仍各一个head。
+>
+> main仓库ruleset明确要求8项普通CI、严格保持主线最新，审批数量0；r5-native非required，原配置完全保留，仍因无runner未执行，不标绿、不豁免必需检查。最终提交CI及合并结果以PR#33对应head的GitHub checks/merge元数据为准，合并前将核对8项全部success及expected head SHA。Oracle自动部署只在整个Test工作流success后触发；当前native排队使整轮未完成，部署未触发，开关不改动；排队不是未来部署授权门禁，生产环境无人工review门禁，因此最终合并前须由用户明确处理“部署另行授权”与现有自动部署开启的边界。本次记录仅文档变更，执行源码维持880；普通CI旧实现通过不替代新候选实际检查。LOCAL仍按用户决定待验证，sam“可用”的CLOUD评价保留；原R5和CLOUD资源及R4B-CLEANUP-01均不清理。
+
 > **2026-11-16 PR #33合并准备**：用户明确授权解决问题直至合并。当前合入最新main `193746abb7c1eb9d196ef3997b6b91767490e3d1`（#36，CI去重与阶段计时）；仅PROGRESS发生文本冲突，双方记录完整保留。CI workflow、runner、收集合同自动合并后保留R5必选目录与原生严格门禁，业务/前端/迁移文件不变。main规则要求8项普通检查，远端r5-native非必需但继续如实标记未执行；将重新做本机原生验收，不取消或豁免必需检查。候选纯CI297通过（responses-pure-1794809880263133000.log，32.12s）、运行器合同64通过（run-1794809965486231000.log，5.58s），独立SPEC/QUALITY均静态APPROVED；本机native及本轮远端CI尚待完成；已只读确认ORACLE_AUTODEPLOY_ENABLED=true，最终合并前需处理既有“部署另行授权”边界；当前未进行部署或更改开关。原资源及R4B-CLEANUP-01均不清理。
 
 ### 2026-11-15 — CI 独立 PR 已送审（后续授权）
