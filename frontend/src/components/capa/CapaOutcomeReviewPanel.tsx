@@ -69,6 +69,14 @@ export default function CapaOutcomeReviewPanel({ reportId, status, canApprove, c
         <Descriptions column={1} size="small" layout="vertical" items={Object.entries(review.core).map(([key, value]) => ({
           key, label: t(`outcome.core.${key}`), children: <div style={plainStyle}>{value || '—'}</div>,
         }))} />
+        <section data-e2e="capa-outcome-d5">
+          <Divider orientation="left">{t('outcome.d5Measures')}</Divider>
+          {review.d5_measures.map(row => <section key={row.measure_id} style={{ marginBottom: 16 }}>
+            <p style={plainStyle}>{row.final_text}</p>
+            <p style={plainStyle}>{row.measure_id} · {row.adopted_by} · {row.adopted_at}</p>
+            {metadata({ text_version: row.text_version, revision_id: row.revision_id, proof_id: row.proof_id, sources: row.sources })}
+          </section>)}
+        </section>
         <Divider orientation="left">{t('outcome.verifications')}</Divider>
         {review.verifications.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />}
         {review.verifications.map(row => <section key={row.verification_id} style={{ marginBottom: 16 }}>

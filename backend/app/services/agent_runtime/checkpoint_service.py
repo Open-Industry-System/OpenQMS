@@ -158,3 +158,80 @@ async def require_restart_checkpoint(db, scope, task, run, checkpoint_id):
             or not metadata["prefix_eligible"] or metadata["accepted_message_seq"] != run.accepted_message_seq):
         raise ValueError("Checkpoint is not the latest safe position")
     return metadata
+
+
+async def save_d5_checkpoint(db, identity):
+    """Explicit R5 branch: pin the committed task command boundary.
+
+    T1 positions reference typed D4 recovery checkpoints, never generic readonly
+    checkpoints. T6 still owns deployment admission and persisted restart binding.
+    One checkpoint per run/epoch is immutable even after more commands arrive.
+    """
+    from sqlalchemy import func
+    from app.models.agent_d4_recovery import D4RecoveryCheckpoint
+    from app.models.agent_d5_command import AgentD5CheckpointPosition, AgentD5Command
+    from app.models.agent_d5_basis import AgentD5BasisReceipt
+    from app.models.capa import CAPAEightD
+    from app.models.fmea import FMEADocument
+    from app.services import capa_d5_proposals as proposals
+    from app.services.agent_runtime import d5_commands, d4_recovery
+    from app.services.agent_runtime.d4_text_delivery import _lock_authority_inputs
+    current = await runtime_access.lock_runtime_identity(db, identity)
+    d5_commands.require_r5_admission(current)
+    await d5_commands._edit_metadata(db, current)
+    await db.scalar(select(CAPAEightD.report_id).where(
+        CAPAEightD.report_id == current.task.target_capa_id).with_for_update())
+    sources = set()
+    for receipt in await db.scalars(select(AgentD5BasisReceipt).where(
+            AgentD5BasisReceipt.run_id == current.run.run_id)):
+        try: sources.update(UUID(source['fmea_id']) for source in receipt.sources)
+        except (TypeError, ValueError, KeyError): raise PermissionError(proposals.UNAVAILABLE) from None
+    for source in sorted(sources, key=str):
+        await db.scalar(select(FMEADocument.fmea_id).where(FMEADocument.fmea_id == source)
+            .with_for_update(nowait=True))
+    await _lock_authority_inputs(db, current)
+    current = await runtime_access.refresh_runtime_identity(db, current)
+    d5_commands.require_r5_admission(current)
+    await d5_commands._edit_metadata(db, current)
+    await proposals.delivered_sources(db, current)
+    grant = await d4_recovery.recovery_grant(db, current.task, current.run)
+    await runtime_messages.require_accepted_prefix(db, current.task.task_id,
+        current.run.accepted_message_seq, no_claimed=True)
+    existing = await db.scalar(select(D4RecoveryCheckpoint).where(
+        D4RecoveryCheckpoint.task_id == current.task.task_id,
+        D4RecoveryCheckpoint.run_id == current.run.run_id,
+        D4RecoveryCheckpoint.lease_epoch == current.run.lease_epoch).execution_options(populate_existing=True))
+    if existing is not None:
+        position = await db.get(AgentD5CheckpointPosition, existing.checkpoint_id, populate_existing=True)
+        if (position is None or position.task_id != current.task.task_id
+                or existing.task_grant_id != grant.grant_id
+                or existing.tenant_generation != current.binding.generation
+                or existing.accepted_message_seq != current.run.accepted_message_seq):
+            raise ValueError('Checkpoint position conflict')
+    else:
+        identifier = uuid4()
+        pointer = await task_updates.append_update(db, task_id=current.task.task_id,
+            kind='checkpoint', object_id=identifier)
+        existing = D4RecoveryCheckpoint(checkpoint_id=identifier, task_id=current.task.task_id,
+            run_id=current.run.run_id, task_grant_id=grant.grant_id,
+            tenant_generation=current.binding.generation, lease_epoch=current.run.lease_epoch,
+            accepted_message_seq=current.run.accepted_message_seq, update_sequence=pointer.sequence,
+            protocol='d4-recovery.v1', resume_position='restart_from_start',
+            created_by=current.task.executor_user_id)
+        db.add(existing)
+        await db.flush()
+        maximum = await db.scalar(select(func.max(AgentD5Command.sequence)).where(
+            AgentD5Command.task_id == current.task.task_id)) or 0
+        position = AgentD5CheckpointPosition(checkpoint_id=identifier,
+            task_id=current.task.task_id, watermark=maximum)
+        db.add(position)
+        db.add(AuditLog(table_name='agent_d5_checkpoint_positions', record_id=identifier,
+            action='SAVE_AGENT_D5_CHECKPOINT', operated_by=current.task.executor_user_id,
+            factory_id=current.task.factory_id, changed_fields=dict(checkpoint_id=str(identifier),
+                task_id=str(current.task.task_id), run_id=str(current.run.run_id), watermark=maximum)))
+    current = await runtime_access.refresh_runtime_identity(db, current)
+    d5_commands.require_r5_admission(current)
+    await proposals.delivered_sources(db, current)
+    result = dict(d4_recovery._view(existing), command_watermark=position.watermark)
+    await db.commit()
+    return result

@@ -28,7 +28,8 @@ from app.services import control_plan_service as imports, version_service as syn
 from app.services.agent import provider_adapter
 
 pytestmark = pytest.mark.asyncio
-EXTRAS = ('capa_eightd', 'capa_docg_analysis', 'capa_docg_audit', 'capa_docg_decision', 'special_characteristics')
+EXTRAS = ('capa_eightd', 'capa_docg_analysis', 'capa_docg_audit', 'capa_docg_decision',
+          'special_characteristics', 'capa_d5_proposals', 'capa_d5_measures')
 BASE = ('factories', 'product_lines', 'role_definitions', 'users', 'role_permissions',
         'user_factories', 'user_product_lines', 'fmea_documents', 'fmea_versions',
         'control_plans', 'control_plan_items', 'control_plan_versions', 'audit_logs')
@@ -45,7 +46,7 @@ async def sync_tenants(isolated_tenants, monkeypatch):
                     "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
                     "WHERE conrelid=to_regclass(:table) AND contype='f'"), {'table': 'public.'+table})).all()
                 for name, definition in definitions:
-                    definition = re.sub(r'REFERENCES (?:public\.)?([a-z_]+)',
+                    definition = re.sub(r'REFERENCES (?:public\.)?([a-z_][a-z0-9_]*)',
                         lambda m: f'REFERENCES "{schema if m[1] in BASE+EXTRAS else "public"}"."{m[1]}"', definition)
                     await db.execute(text(f'ALTER TABLE "{schema}"."{table}" ADD CONSTRAINT "{name}" {definition}'))
         # Install the reviewed tenant-local guards (strict paths exclude public).

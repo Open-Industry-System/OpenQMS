@@ -53,6 +53,12 @@ def test_literal_root_field_write_sites_are_reviewed():
     expected_write = ast.parse("CAPAEightD(d4_root_cause=finding.root_cause or '')").body[0].value.keywords[0]
     expected = Counter({('services/audit_service.py', 'create_capa_from_finding',
                         ast.dump(expected_write, include_attributes=False)): 1})
+    # This exact T4 bounded read constructs a signed in-memory projection;
+    # it does not write the report field. Keep its shape/multiplicity reviewed
+    # instead of exempting dict constructors or the whole function.
+    projection = ast.parse("dict(d4_root_cause=await _bounded_field(db, target.report_id))").body[0].value.keywords[0]
+    expected[('services/capa_d5_proposals.py', 'build_d5_context',
+              ast.dump(projection, include_attributes=False))] = 1
     assert sites == expected
 
 

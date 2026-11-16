@@ -13,7 +13,7 @@ import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, AsyncMock
 
 from fastapi import HTTPException
 
@@ -24,7 +24,6 @@ from app.core.factory_scope import (
     resolve_product_line_scope,
     resolve_effective_factory_id,
     apply_scope_filter,
-    validate_factory_invariant,
 )
 
 
@@ -54,13 +53,6 @@ def make_db_mock(factory_id_result=None):
     mock_result.scalar_one_or_none.return_value = factory_id_result
     db.execute.return_value = mock_result
     return db
-
-
-def mock_select(*args, **kwargs):
-    """Replace sqlalchemy.select so mock model attributes work."""
-    q = MagicMock()
-    q.where.return_value = q
-    return q
 
 
 # ===================================================================
@@ -179,6 +171,7 @@ def test_bypass_with_group_admin_sees_all_factories():
     group_admin = make_user(factory_id=F1, bypass=True)
     fscope = resolve_factory_scope(group_admin, user_factory_ids=[F2], has_group_admin=True)
     assert fscope.accessible_factory_ids is None
+    assert fscope.default_factory_id == F1
 
     plscope = resolve_product_line_scope(group_admin, user_product_line_codes=[], factory_scope=fscope)
     assert plscope.mode == "ALL"
@@ -319,65 +312,11 @@ def test_pl_scope_explicit_with_group_admin_no_factory_filter():
     model.product_line_code.in_.assert_called_once_with(["DC-DC-100"])
 
 
-# ===================================================================
-# 4. Factory Invariant Tests
-# ===================================================================
-
-def _run_async(coro):
-    """Run an async function synchronously (no current event loop required)."""
-    import asyncio
-    return asyncio.run(coro)
-
-
-def test_factory_invariant_product_line_mismatch():
-    """Creating a record with factory_id that doesn't match product_line's factory → ValueError."""
-    record = MagicMock()
-    record.factory_id = F1  # Record says factory 1
-    record.product_line_code = "DC-DC-100"  # But product line belongs to factory 2
-    record.product_line = None
-    record.supplier_id = None
-
-    db = make_db_mock(factory_id_result=F2)  # Product line belongs to F2
-
-    with patch("app.core.factory_scope.select", side_effect=mock_select):
-        try:
-            _run_async(validate_factory_invariant(record, db))
-            assert False, "Should have raised ValueError"
-        except ValueError as e:
-            assert "factory_id" in str(e)
-
-
-def test_factory_invariant_product_line_match():
-    """Creating a record with factory_id that matches product_line's factory → passes."""
-    record = MagicMock()
-    record.factory_id = F1
-    record.product_line_code = "DC-DC-100"
-    record.product_line = None
-    record.supplier_id = None
-
-    db = make_db_mock(factory_id_result=F1)  # Product line belongs to F1 (match)
-
-    with patch("app.core.factory_scope.select", side_effect=mock_select):
-        _run_async(validate_factory_invariant(record, db))
-        # Should not raise
-
-
-def test_factory_invariant_no_product_line_no_error():
-    """Record with factory_id but no product_line_code → no validation needed, passes."""
-    record = MagicMock()
-    record.factory_id = F1
-    del record.product_line_code
-    record.product_line = None
-    record.supplier_id = None
-
-    db = make_db_mock(factory_id_result=F1)
-
-    _run_async(validate_factory_invariant(record, db))
-    # Should not raise, no execute calls needed
-
+# Factory invariant cases are covered by TestValidateFactoryInvariant in
+# test_factory_scope.py; this module keeps the scope pipeline scenarios.
 
 # ===================================================================
-# 5. Boundary / Edge Cases
+# 4. Boundary / Edge Cases
 # ===================================================================
 
 def test_no_factory_access_returns_empty_scope():
@@ -402,42 +341,6 @@ def test_empty_accessible_factory_ids_with_no_request():
     # When accessible_factory_ids is empty and no request, effective is None
     # but apply_scope_filter will add WHERE FALSE for the empty list
     assert result is None
-
-
-def test_single_factory_user_locked_even_with_bypass():
-    """Single factory user: bypass doesn't change factory scope, only product line scope."""
-    user = make_user(factory_id=F1, bypass=True)
-    fscope = resolve_factory_scope(user, user_factory_ids=[], has_group_admin=False)
-
-    # Factory scope still locked to F1
-    assert fscope.accessible_factory_ids == [F1]
-    eff = resolve_effective_factory_id(fscope, requested_factory_id=None)
-    assert eff == F1
-
-    # Product line scope is ALL (bypass)
-    plscope = resolve_product_line_scope(user, user_product_line_codes=[], factory_scope=fscope)
-    assert plscope.mode == "ALL"
-
-
-def test_multi_factory_user_default_factory():
-    """Multi-factory user: default_factory_id comes from user.factory_id."""
-    user = make_user(factory_id=F1, bypass=False)
-    fscope = resolve_factory_scope(user, user_factory_ids=[F1, F2], has_group_admin=False)
-    assert fscope.default_factory_id == F1  # user's own factory_id is the default
-
-
-def test_multi_factory_user_default_from_first_user_factory():
-    """Multi-factory user without factory_id: default from first user_factory."""
-    user = make_user(factory_id=None, bypass=False)
-    fscope = resolve_factory_scope(user, user_factory_ids=[F2, F3], has_group_admin=False)
-    assert fscope.default_factory_id == F2  # first in the list
-
-
-def test_group_admin_default_factory_is_user_factory():
-    """GROUP ADMIN: default_factory_id is user's own factory_id."""
-    user = make_user(factory_id=F2, bypass=True)
-    fscope = resolve_factory_scope(user, user_factory_ids=[F1], has_group_admin=True)
-    assert fscope.default_factory_id == F2  # not F1 from user_factories
 
 
 def test_group_admin_no_personal_factory():
@@ -467,17 +370,9 @@ if __name__ == "__main__":
         test_pl_scope_explicit_mode_filters_to_codes,
         test_pl_scope_all_mode_no_pl_filter,
         test_pl_scope_explicit_with_group_admin_no_factory_filter,
-        # 4. Factory Invariant
-        test_factory_invariant_product_line_mismatch,
-        test_factory_invariant_product_line_match,
-        test_factory_invariant_no_product_line_no_error,
-        # 5. Boundary / Edge Cases
+        # 4. Boundary / Edge Cases
         test_no_factory_access_returns_empty_scope,
         test_empty_accessible_factory_ids_with_no_request,
-        test_single_factory_user_locked_even_with_bypass,
-        test_multi_factory_user_default_factory,
-        test_multi_factory_user_default_from_first_user_factory,
-        test_group_admin_default_factory_is_user_factory,
         test_group_admin_no_personal_factory,
     ]
 

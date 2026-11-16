@@ -722,6 +722,9 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         except Exception as e:
             raise ValueError("D7 lessons 抽取失败，不可推进，请重试") from e
     elif current == EightDState.D8_GATE_PENDING and target == EightDState.D8_APPROVAL_PENDING:
+        from types import SimpleNamespace
+        from app.services.capa_d5_measures import full_d5_material
+        capa._d5_material = await full_d5_material(db, capa, scope=SimpleNamespace(user=SimpleNamespace(user_id=user_id)))
         await _d8_doc_gate_gate(db, capa)
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
         # Closure side effects remain in the same locked decision transaction.
@@ -750,7 +753,10 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         ))
         if cnt < 1:
             raise ValueError("D4→D5 需当前根因已验证")
-    # D1→D2、D2→D3、D3→D4、D5→D6、D6→D7_PREVENTION、D8→ARCHIVED：无闸口
+    elif current == EightDState.D5_CORRECTION and target == EightDState.D6_VERIFICATION:
+        from app.services.capa_d5_measures import has_formal_d5
+        if not await has_formal_d5(db, capa):
+            raise ValueError("D5→D6 需正式纠正措施")
 
     old_status = capa.status
     capa.status = target.value

@@ -59,6 +59,10 @@ async def is_text_task(db, task):
 
 
 async def validate_message_position(db, task_id, watermark):
+    from app.services.agent_runtime import model_egress, r5_recovery
+    task = await db.get(AgentTask, task_id, populate_existing=True)
+    if task is not None and await model_egress.is_r5_task(db, task):
+        return await r5_recovery.validate_message_position(db, task_id, watermark)
     """Inspect only bounded aggregates and one candidate, never message content."""
     m = AgentTaskMessage
     bad = ((m.content != START_MESSAGE) | (m.sensitivity != 'restricted') |
@@ -103,6 +107,10 @@ async def _fresh_authority(db, scope, task_id, task_binding, run_binding):
 
 
 async def create_checkpoint(db, scope, task_id, run_id, expected_epoch):
+    from app.services.agent_runtime import model_egress, r5_recovery
+    candidate = await task_service.get_task_for_view(db, scope, task_id)
+    if await model_egress.is_r5_task(db, candidate):
+        return await r5_recovery.create_paused_checkpoint(db, scope, task_id, run_id, expected_epoch)
     task = await _owned(db, scope, task_id)
     run = await _current_run(db, task_id)
     task_binding, run_binding = _task_binding(task), _run_binding(run)
@@ -223,6 +231,9 @@ async def get_checkpoint(db, scope, task_id, checkpoint_id):
 
 async def require_restart_position(db, scope, task, run, checkpoint_id):
     """Validate the typed position against the currently paused run."""
+    from app.services.agent_runtime import model_egress, r5_recovery
+    if await model_egress.is_r5_task(db, task):
+        return await r5_recovery.require_restart_position(db, scope, task, run, checkpoint_id)
     await get_checkpoint(db, scope, task.task_id, checkpoint_id)
     with db.no_autoflush:
         row = await db.scalar(select(D4RecoveryCheckpoint).where(
@@ -267,6 +278,9 @@ async def authorization_snapshot(db, task, installation):
 
 async def restart_mapping(db, task, run):
     """Return a strictly associated recovery mapping for a new run, if any."""
+    from app.services.agent_runtime import model_egress, r5_recovery
+    if await model_egress.is_r5_task(db, task):
+        return await r5_recovery.restart_mapping(db, task, run)
     with db.no_autoflush:
         link = await db.scalar(select(D4RecoveryRestart).where(
             D4RecoveryRestart.new_run_id == run.run_id).execution_options(populate_existing=True))

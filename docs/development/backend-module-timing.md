@@ -13,3 +13,11 @@ selection_sha256 对按执行顺序排列的源模块/完整case identity做SHA2
 已完成基础验证：pure358 passed /3既有warnings；模块两项烟测包含成功/失败exit0/1与phase守恒，原collection失败exit2和单次收集保护保留。全量A/B尚未完成，不预写性能结论。原始证据及最终报告将保存在 /tmp/openqms-controlled-backend/，PR描述补录结果，不提前合并。
 
 补充一致性修正：显式pytest配置下复现不同模块同名测试的短nodeid覆盖旧durations键，导致旧全套phase汇总低估。计时键改为源模块＋case identity；新增显式配置/默认配置的同名用例守恒回归，纯测试358通过。wall time与门禁计数不受该旧缺陷影响。两侧对照使用同一修正，不将旧分项直接当受控基线。
+
+## 2026-11-16：优先处理PR #37并同步当前main
+
+PR #37从804f8551正常合入当前main d0c7394e；仅PROGRESS并发记录需要解决冲突。保留main已合入的R5、#39测试精简、8项普通PR门禁和独立macOS手动试点工作流。runner计时发布与R5固定目录逻辑共存，不覆盖新主线配置。
+
+此前本地全量A实际5280 passed／5 skipped／exit0，Make4326.03秒；B为5279 passed／5 skipped／1 failed，Make4398.99秒，失败是未改动的test_concurrent_first_sink_unique_race唯一键冲突。两侧集合摘要相同，但失败的B不能签收为成功的性能对照；没有删除该并发测试或放宽退出码。原始证据保留在/tmp/openqms-controlled-backend/，并将PR中过时的“仍在运行”状态改为这一实际结果。
+
+新的R5/main基线与旧804f8551的测试集合不同，旧CI全绿及旧阶段时间不代替本次验收。先在同一台机器、固定解释器／依赖／PG15镜像下对相同重建、迁移及隔离集合重新验证；两轮使用各自独占新实例与相同公共模板初始化，唯一执行源码差异为rebuild_db/sample准备实现。完整后端的模块诊断继续随正常一次全量运行生成，不预写整套收益。

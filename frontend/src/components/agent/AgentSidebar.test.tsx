@@ -6,6 +6,8 @@ import { AgentTaskProvider, useAgentTaskContext } from "./AgentTaskContext";
 import AgentSidebar from "./AgentSidebar";
 import type { ActivityPage } from "../../types/agentTask";
 import * as api from "../../api/agentTasks";
+import * as proposals from "../../api/d5Proposals";
+vi.mock("../../api/d5Proposals",()=>({listD5Proposals:vi.fn(),listTaskD5Proposals:vi.fn(),listD5Measures:vi.fn(),checkpointProposals:vi.fn()}));
 vi.mock("../../api/agentTasks", async () => ({
   ...await vi.importActual("../../api/agentTasks"),
   getTaskAvailability: vi.fn(),
@@ -14,7 +16,11 @@ vi.mock("../../api/agentTasks", async () => ({
   getTaskActivity: vi.fn(),
   createTask: vi.fn(),
   appendTaskMessage: vi.fn(),
-  controlTask: vi.fn()
+  controlTask: vi.fn(),
+  listModelDeployments: vi.fn(),
+  getTaskWorkflow: vi.fn(),
+  listTaskD5Checkpoints: vi.fn(),
+  launchTask: vi.fn()
 }));
 vi.mock("./AgentTaskAttachments", () => ({
   default: ({ taskId }: { taskId: string }) => <div data-testid="task-attachments">附件任务 {taskId}</div>
@@ -80,7 +86,13 @@ beforeEach(() => {
     page_size: 20
   });
   vi.mocked(api.listTaskInstallations).mockResolvedValue({ items: [{ installation_id: a, plugin_key: "readonly", plugin_version: "1.0" }] });
+  vi.mocked(proposals.listTaskD5Proposals).mockResolvedValue({items:[{proposal_id:b,task_id:a,original_text:"旧建议",state:"pending",basis_current:true,can_adopt:true,can_withdraw:true,created_at:task.created_at}],total:1,page:1,page_size:20});
+  vi.mocked(api.listTaskD5Checkpoints).mockResolvedValue({items:[],total:0,page:1,page_size:20});
+  vi.mocked(proposals.listD5Measures).mockResolvedValue({legacy_text:null,items:[],total:0,page:1,page_size:20});
+  vi.mocked(proposals.checkpointProposals).mockResolvedValue([]);
   vi.mocked(api.getTaskActivity).mockResolvedValue(page);
+  vi.mocked(api.listModelDeployments).mockResolvedValue({items:[{deployment_id:a,name:"模型甲",version:"1",kind:"local"},{deployment_id:b,name:"模型乙",version:"2",kind:"cloud"}]});
+  vi.mocked(api.getTaskWorkflow).mockResolvedValue({status:"waiting",question:"请补充",checkpoint_id:null});
 });
 afterEach(() => {
   cleanup();
@@ -345,4 +357,117 @@ describe("global user task sidebar", () => {
     expect(vi.mocked(api.controlTask).mock.calls[2][1].expected_epoch).toBe(4);
     expect(vi.mocked(api.controlTask).mock.calls[2][1].idempotency_key).not.toBe(vi.mocked(api.controlTask).mock.calls[0][1].idempotency_key);
   });
+});
+
+it("keeps Enter addressed to bound A after selecting B; only explicit new task uses B", async () => {
+  const bound = {...task, model_deployment:{deployment_id:a,name:"模型甲",version:"1"}};
+  vi.mocked(api.listTasks).mockResolvedValue({items:[bound],total:1,page:1,page_size:20});
+  vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:"openqms.controlled-d5-model",plugin_version:"1"}]});
+  vi.mocked(api.appendTaskMessage).mockResolvedValue({message_id:b,sequence:1,state:"accepted"});
+  vi.mocked(api.createTask).mockResolvedValue({...bound,task_id:b,model_deployment:{deployment_id:b,name:"模型乙",version:"2"}});
+  render(<Harness />);
+  await select();
+  fireEvent.change(screen.getByLabelText("选择任务"),{target:{value:a}});
+  await waitFor(() => expect(screen.getByText("当前接收方：模型甲 · 1")).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button",{name:`创建 ${a}`}));
+  await waitFor(() => expect(screen.getByLabelText("新任务模型")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("新任务模型"),{target:{value:b}});
+  fireEvent.change(screen.getByLabelText("追加指令"),{target:{value:"继续甲"}});
+  fireEvent.keyDown(screen.getByLabelText("追加指令"),{key:"Enter",code:"Enter"});
+  await waitFor(() => expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:"继续甲",idempotency_key:expect.any(String)},expect.any(AbortSignal)));
+  fireEvent.change(screen.getByLabelText("初始指令"),{target:{value:"新任务乙"}});
+  fireEvent.click(screen.getByRole("button",{name:"用 模型乙 · 2 开始新任务（自由对话）"}));
+  await waitFor(() => expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({model_deployment_id:b,initial_text:"新任务乙"}),expect.any(AbortSignal)));
+});
+it("polls model questions and accepts supplement while launch is pending",async()=>{
+  vi.mocked(api.getTaskActivity).mockResolvedValue({...page,run_status:"pending"});
+  vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:"模型甲",version:"1"}}],total:1,page:1,page_size:20});
+  vi.mocked(api.launchTask).mockReturnValue(new Promise(()=>{}));
+  render(<Harness />); await select();
+  fireEvent.change(screen.getByLabelText("选择任务"),{target:{value:a}});
+  fireEvent.click(await screen.findByRole("button",{name:"启动模型任务"}));
+  await waitFor(()=>expect(api.launchTask).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText("请补充")).toBeInTheDocument();
+  expect(screen.getByLabelText("追加指令")).toBeEnabled();
+});
+it('sends correction only as explicit source-free intent for a current-task pending proposal',async()=>{
+  vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
+  render(<Harness />); await select();
+  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  fireEvent.change(await screen.findByLabelText('更正当前任务建议'),{target:{value:b}});
+  fireEvent.click(screen.getByRole('button',{name:'明确更正选中建议'}));
+  await waitFor(()=>expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:JSON.stringify({intent:'replace_d5',predecessor_id:b}),idempotency_key:expect.any(String)},expect.any(AbortSignal)));
+});
+it('discards late model options after changing the creation report',async()=>{
+  let resolve!: (v:any)=>void;
+  vi.mocked(api.listModelDeployments).mockReturnValueOnce(new Promise(r=>{resolve=r})).mockResolvedValue({items:[]});
+  vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:'openqms.controlled-d5-model',plugin_version:'1'}]});
+  const view=render(<Harness />);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Agent 任务'})).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button',{name:`创建 ${a}`}));
+  await waitFor(()=>expect(api.listModelDeployments).toHaveBeenCalledTimes(1));
+  view.rerender(<Harness report={b}/>);
+  fireEvent.click(screen.getByRole('button',{name:`创建 ${b}`}));
+  await act(async()=>resolve({items:[{deployment_id:a,name:'迟到旧模型',version:'1',kind:'local'}]}));
+  expect(screen.queryByText(/迟到旧模型/)).toBeNull();
+  expect(screen.getByRole('button',{name:'用 所选模型 开始新任务（自由对话）'})).toBeDisabled();
+});
+it('clears an old model question on workflow denial without switching recipients',async()=>{
+  vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
+  vi.mocked(api.getTaskWorkflow).mockResolvedValueOnce({status:'waiting',question:'受限旧问题',checkpoint_id:null}).mockRejectedValue({response:{status:403}});
+  render(<Harness />);await select();
+  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  await screen.findByText('受限旧问题');
+  await waitFor(()=>expect(screen.queryByText('受限旧问题')).toBeNull(),{timeout:2500});
+  expect(screen.getByText('当前接收方：模型甲 · 1')).toBeInTheDocument();
+  expect(api.launchTask).not.toHaveBeenCalled();
+});
+it('explicit source-free start uses selected approved model without rewriting free initial text',async()=>{
+  vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:'openqms.controlled-d5-model',plugin_version:'1'}]});
+  vi.mocked(api.createTask).mockReturnValue(new Promise(()=>{}));
+  render(<Harness />);
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Agent 任务'})).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button',{name:`创建 ${a}`}));
+  fireEvent.change(await screen.findByLabelText('新任务模型'),{target:{value:b}});
+  fireEvent.change(screen.getByLabelText('初始指令'),{target:{value:'保留自由输入'}});
+  fireEvent.click(screen.getByRole('button',{name:'用 模型乙 · 2 开始新任务（仅根据当前根因）'}));
+  await waitFor(()=>expect(api.createTask).toHaveBeenCalledWith({report_id:a,installation_id:a,model_deployment_id:b,request_key:expect.any(String),initial_text:'deliver_d4_root_cause_candidate_v1'},expect.any(AbortSignal)));
+  expect(screen.getByLabelText('初始指令')).toHaveValue('保留自由输入');
+});
+it('does not offer another launch while the current server run is active',async()=>{
+  vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
+  render(<Harness />);await select();
+  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  expect(await screen.findByRole('button',{name:'启动模型任务'})).toBeDisabled();
+});
+
+it('names the bound recipient on the normal send action',async()=>{
+  vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
+  render(<Harness/>);await select();
+  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  expect(await screen.findByRole('button',{name:'补充给 模型甲'})).toBeInTheDocument();
+});
+it('allows explicitly choosing an earlier checkpoint instead of silently using latest workflow checkpoint',async()=>{
+  vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
+  vi.mocked(api.listTaskD5Checkpoints).mockResolvedValue({items:[{checkpoint_id:b,run_id:run,created_at:task.created_at}],total:1,page:1,page_size:20});
+  vi.mocked(api.getTaskWorkflow).mockResolvedValue({status:'waiting',question:'当前问题',checkpoint_id:run});
+  render(<Harness/>);await select();
+  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  fireEvent.change(await screen.findByLabelText('选择处理范围检查点'),{target:{value:b}});
+  await waitFor(()=>expect(proposals.checkpointProposals).toHaveBeenCalledWith(a,b,expect.any(AbortSignal)));
+  expect(screen.getByLabelText('选择处理范围检查点')).toHaveValue(b);
+});
+
+it('pages current-task pending correction choices rather than being trapped by the first report page',async()=>{
+  vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
+  const current=(id:string)=>({proposal_id:id,task_id:a,original_text:'current',state:'pending' as const,basis_current:true,can_adopt:true,can_withdraw:true,created_at:task.created_at});
+  vi.mocked(proposals.listD5Proposals).mockResolvedValue({items:Array.from({length:20},(_,i)=>({...current(`old-${i}`),task_id:'other-task'})),total:41,page:1,page_size:20});
+  vi.mocked(proposals.listTaskD5Proposals).mockImplementation(async(_report,_task,page)=>({items:page===2?[current(b)]:Array.from({length:20},(_,i)=>current(`current-${i}`)),total:21,page:page??1,page_size:20}));
+  render(<Harness/>);await select();
+  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  fireEvent.click(await screen.findByRole('button',{name:'下一页待更正建议'}));
+  await waitFor(()=>expect(proposals.listTaskD5Proposals).toHaveBeenLastCalledWith(a,a,2,expect.any(AbortSignal)));
+  fireEvent.change(screen.getByLabelText('更正当前任务建议'),{target:{value:b}});
+  fireEvent.click(screen.getByRole('button',{name:'明确更正选中建议'}));
+  await waitFor(()=>expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:JSON.stringify({intent:'replace_d5',predecessor_id:b}),idempotency_key:expect.any(String)},expect.any(AbortSignal)));
 });

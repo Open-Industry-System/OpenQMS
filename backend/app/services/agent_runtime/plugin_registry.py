@@ -182,6 +182,20 @@ async def set_plugin_enabled(db: AsyncSession, actor: User, installation_id: UUI
 
 
 async def _require_grant_enableable(db, plugin, grant, actor=None) -> None:
+    from app.services.agent_runtime import model_egress
+    if plugin.plugin_key == model_egress.R5_PLUGIN_KEY:
+        from app.services.agent_runtime.r5_executor import ControlledPilot
+        pilot = db.info.get('r5_controlled_pilot')
+        if not isinstance(pilot, ControlledPilot):
+            raise ValueError('Capability cannot be enabled')
+        pilot.verify(db.info.get('tenant_binding'), plugin)
+        spec = get_capability(grant.capability_id, profile=model_egress.R5_PROFILE)
+        if (spec is None or not grant.object_ids or len(grant.object_ids) != 1
+                or not grant.factory_ids or not grant.product_line_codes
+                or grant.expires_at is None or grant.expires_at <= datetime.now(UTC)
+                or grant.expires_at > pilot.expires_at):
+            raise ValueError('Capability cannot be enabled')
+        return
     baseline = get_capability(grant.capability_id)
     if baseline is not None and baseline.kind == "context" and baseline.approval_floor == ApprovalFloor.DIRECT:
         return

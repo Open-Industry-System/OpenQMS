@@ -469,6 +469,7 @@
     "failed": "横向扩散失败，可重试"
   },
   "outcome": {
+    "d5Measures": "D5 正式措施",
     "title": "D8 集中成果审核",
     "reload": "重新加载审核材料",
     "round": "审核轮次",

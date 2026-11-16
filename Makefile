@@ -12,8 +12,8 @@ FRONTEND_DIR := frontend
 
 # The runner owns marker selection and private JUnit/hook evidence. These constants
 # document the three layers and are kept identical to its fixed marker contract.
-PYTEST_BACKEND_MARKS := not ci_browser and not live_provider and not real_scanner
-PYTEST_BROWSER_MARKS := ci_browser and not live_provider and not real_scanner
+PYTEST_BACKEND_MARKS := not ci_browser and not ci_r5_native and not live_provider and not real_scanner
+PYTEST_BROWSER_MARKS := ci_browser and not ci_r5_native and not live_provider and not real_scanner
 PYTEST_LIVE_MARKS := live_provider
 PYTEST_IGNORES := --pytest-arg=--ignore=tests/test_graph_sync_worker.py --pytest-arg=--ignore=tests/test_graph_projection.py
 
@@ -57,7 +57,15 @@ help:
 	@echo "  check-frontend-build  — vite build only"
 
 # `check` deliberately excludes browser, live-provider, and real scanner gates.
-check: check-sdk check-backend check-frontend
+R5_NATIVE_API_TARGET := $(if $(filter Darwin,$(shell uname -s)),check-r5-api,)
+R5_NATIVE_BROWSER_TARGET := $(if $(filter Darwin,$(shell uname -s)),check-r5-browser,)
+check: check-sdk check-backend $(R5_NATIVE_API_TARGET) check-frontend
+
+.PHONY: check-r5-api check-r5-browser check-r5-native
+check-r5-native: check-r5-api check-r5-browser
+check-r5-api check-r5-browser: check-test-db
+	cd $(BACKEND_DIR) && SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. \
+		$(CI_RUNNER) $(if $(filter check-r5-api,$@),r5-api,r5-browser)
 
 check-sdk-unit: SDK_LAYER := unit
 check-sdk-loopback: SDK_LAYER := loopback
@@ -81,7 +89,7 @@ check-backend: check-test-db
 	cd $(BACKEND_DIR) && OPENQMS_SDK_WHEEL="$$wheel" SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. \
 		$(CI_RUNNER) api --pytest-target tests $(PYTEST_IGNORES)
 
-check-browser: check-test-db
+check-browser: check-test-db $(R5_NATIVE_BROWSER_TARGET)
 	cd $(BACKEND_DIR) && SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. \
 		$(CI_RUNNER) browser --pytest-target tests $(PYTEST_IGNORES)
 

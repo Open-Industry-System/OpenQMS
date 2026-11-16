@@ -1,6 +1,8 @@
 """Exact dedicated runtime routes; additions must explicitly register admission."""
 RUNTIME_ROUTES = frozenset({
+    ("POST", "/api/agent/runtime/model/infer"),
     ("POST", "/api/agent/runtime/claim"),
+    ("POST", "/api/agent/runtime/capa/d5/proposals"),
     ("GET", "/api/agent/runtime/capabilities"),
     ("GET", "/api/agent/runtime/capa/context"),
     ("GET", "/api/agent/runtime/capa/d4/root-cause-text"),

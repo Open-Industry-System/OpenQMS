@@ -21,6 +21,7 @@ logic — just shape, types, and value-level validation
   `special_characteristic`, `version` (FMEA + CP version snapshots).
 - **CAPA / 8D / SCAR** — `capa` (Create/Update/Response + recommendation
   payloads `D4Recommendation`, `D7Recommendation`), `capa_draft`,
+  `capa_d5_measure` (visible-only proposal/measure pages, separate legacy text),
   `scar`, `change_impact`.
 - **Audit programs** — `audit` (AuditProgram / AuditPlan / AuditFinding
   triplets + checklist templates + stats + customer-audit attachments).

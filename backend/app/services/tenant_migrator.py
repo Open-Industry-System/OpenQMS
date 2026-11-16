@@ -19,8 +19,13 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv010_refresh_sessions"
-REFRESH_PREDECESSOR_REVISION = "tv009_r4b_main_merge"
+REVISION = "tv014_r5_responses"
+R5_MERGE_PREDECESSOR_REVISION = "tv013_r5_main_merge"
+R5_HEAD_REVISION = "tv012_r5_models"
+REFRESH_HEAD_REVISION = "tv010_refresh_sessions"
+R5_MODEL_PREDECESSOR_REVISION = "tv011_r5_d5_basis"
+R5_BASIS_PREDECESSOR_REVISION = "tv010_r5_d5_proposals"
+R5_PREDECESSOR_REVISION = "tv009_r4b_main_merge"
 CHARACTERISTIC_PREDECESSOR_REVISION = "tv007_characteristic_refs"
 RECOVERY_HEAD_REVISION = "tv008_d4_recovery"
 RECOVERY_PREDECESSOR_REVISION = "tv007_d4_text_delivery"
@@ -166,8 +171,18 @@ class MaintenanceContext:
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
             if versions == [REVISION]:
                 result = "current"
-            elif versions == [REFRESH_PREDECESSOR_REVISION]:
-                result = "refresh_predecessor"
+            elif versions == [R5_MERGE_PREDECESSOR_REVISION]:
+                result = "r5_merge_predecessor"
+            elif versions == [R5_HEAD_REVISION]:
+                result = "r5_head"
+            elif versions == [REFRESH_HEAD_REVISION]:
+                result = "refresh_head"
+            elif versions == [R5_MODEL_PREDECESSOR_REVISION]:
+                result = "r5_model_predecessor"
+            elif versions == [R5_BASIS_PREDECESSOR_REVISION]:
+                result = "r5_basis_predecessor"
+            elif versions == [R5_PREDECESSOR_REVISION]:
+                result = "r5_predecessor"
             elif versions == [CHARACTERISTIC_PREDECESSOR_REVISION]:
                 result = "characteristic_predecessor"
             elif versions == [RECOVERY_HEAD_REVISION]:
@@ -655,7 +670,7 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current", "ancestor", "refresh_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state not in {"empty", "current", "ancestor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
@@ -665,9 +680,14 @@ async def migrate_if_needed(maintenance: MaintenanceContext, attempt: Maintenanc
         if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")
         await maintenance.run_migration(REVISION)
-    elif state in {"refresh_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state in {"r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         predecessor = {
-            "refresh_predecessor": REFRESH_PREDECESSOR_REVISION,
+            "r5_merge_predecessor": R5_MERGE_PREDECESSOR_REVISION,
+            "r5_head": R5_HEAD_REVISION,
+            "refresh_head": REFRESH_HEAD_REVISION,
+            "r5_model_predecessor": R5_MODEL_PREDECESSOR_REVISION,
+            "r5_basis_predecessor": R5_BASIS_PREDECESSOR_REVISION,
+            "r5_predecessor": R5_PREDECESSOR_REVISION,
             "characteristic_predecessor": CHARACTERISTIC_PREDECESSOR_REVISION,
             "recovery_head": RECOVERY_HEAD_REVISION,
             "recovery_predecessor": RECOVERY_PREDECESSOR_REVISION,

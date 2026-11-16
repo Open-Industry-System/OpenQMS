@@ -82,3 +82,87 @@ def test_new_integration_endpoint_requires_registered_ownership(tmp_path, monkey
     monkeypatch.setattr(owned_resources, "inspect_container", lambda _: owned_inspection(labels={}))
     with pytest.raises(ValueError, match="ownership labels"):
         require_owned_database(env)
+
+
+def test_embedding_isolation_accepts_only_independently_verified_registered_test_target(monkeypatch):
+    from types import SimpleNamespace
+    from tests.ci import owned_resources
+    from tests.embedding_isolation import require_isolated_test_database
+    url='postgresql+asyncpg://u:p@127.0.0.1:65176/qms_owned_random_test'
+    env={'TEST_DATABASE_URL':url,'OPENQMS_TEST_RESOURCE_FILE':'explicit-owner-registration'}
+    target=SimpleNamespace(async_url=url)
+    seen=[]
+    def instance(source):
+        assert source is env
+        seen.append('instance')
+        return target
+    def database(value):
+        assert value is target
+        seen.append('database')
+        return url
+    monkeypatch.setattr(owned_resources,'verify_owned_instance',instance)
+    monkeypatch.setattr(owned_resources,'verify_owned_database',database)
+    assert require_isolated_test_database(env)==url
+    assert seen==['instance','database']
+
+
+@pytest.mark.parametrize('registered',[False,True])
+def test_embedding_isolation_rejects_unregistered_or_mismatched_test_name_before_io(tmp_path,monkeypatch,registered):
+    from tests.ci import owned_resources
+    from tests.ci.test_owned_resources import registration
+    from tests.embedding_isolation import require_isolated_test_database
+    env={'TEST_DATABASE_URL':'postgresql+asyncpg://qms:qms@127.0.0.1:61935/different_test'}
+    if registered:env['OPENQMS_TEST_RESOURCE_FILE']=str(registration(tmp_path))
+    monkeypatch.setattr(owned_resources,'inspect_container',lambda _:pytest.fail('unowned target reached Docker/DB'))
+    with pytest.raises(ValueError):require_isolated_test_database(env)
+
+
+def test_embedding_registered_migration_switch_validates_base_without_rewriting_environment(monkeypatch):
+    from types import SimpleNamespace
+    from tests.ci import owned_resources
+    from tests.embedding_isolation import require_isolated_test_database
+    base='postgresql+asyncpg://u:p@127.0.0.1:65176/qms_owned_random_test'
+    migration=owned_resources.make_url(base).set(database='qms_migtest_'+'1'*32+'_test').render_as_string(hide_password=False)
+    env={'TEST_DATABASE_URL':base,'DATABASE_URL':migration,'OPENQMS_MIGRATION_TEST_DATABASE_URL':migration,
+         'OPENQMS_TEST_RESOURCE_FILE':'explicit-owner-registration'}
+    target=SimpleNamespace(async_url=base)
+    seen=[]
+    def instance(source):
+        assert source is not env and source['DATABASE_URL']==base
+        assert source['OPENQMS_MIGRATION_TEST_DATABASE_URL']==migration
+        seen.append('instance')
+        return target
+    def database(value):
+        assert value is target
+        seen.append('database')
+        return base
+    monkeypatch.setattr(owned_resources,'verify_owned_instance',instance)
+    monkeypatch.setattr(owned_resources,'verify_owned_database',database)
+    assert require_isolated_test_database(env)==base
+    assert env['DATABASE_URL']==migration and seen==['instance','database']
+
+
+@pytest.mark.parametrize('change',['host','port','user','password','prefix','query','driver','record'])
+def test_embedding_migration_alias_never_authorizes_foreign_or_unrecorded_database(monkeypatch,change):
+    from tests.ci import owned_resources
+    from tests.embedding_isolation import require_isolated_test_database
+    base='postgresql+asyncpg://u:p@127.0.0.1:65176/qms_owned_random_test'
+    good=owned_resources.make_url(base).set(database='qms_migtest_'+'1'*32+'_test')
+    changes={'host':{'host':'203.0.113.19'},'port':{'port':65177},'user':{'username':'other'},
+             'password':{'password':'other'},'prefix':{'database':'unowned_test'},
+             'query':{'query':{'options':'unverified'}},'driver':{'drivername':'postgresql+psycopg'}}
+    bad=good.set(**changes[change]).render_as_string(hide_password=False) if change!='record' else good.set(database='qms_migtest_'+'2'*32+'_test').render_as_string(hide_password=False)
+    env={'TEST_DATABASE_URL':base,'DATABASE_URL':bad,'OPENQMS_MIGRATION_TEST_DATABASE_URL':bad if change!='record' else good.render_as_string(hide_password=False)}
+    monkeypatch.setattr(owned_resources,'inspect_container',lambda _:pytest.fail('foreign migration reached Docker/DB'))
+    with pytest.raises(ValueError):require_isolated_test_database(env)
+
+
+def test_embedding_registered_migration_keeps_libpq_override_denial(monkeypatch):
+    from tests.ci import owned_resources
+    from tests.embedding_isolation import require_isolated_test_database
+    base='postgresql+asyncpg://u:p@127.0.0.1:65176/qms_owned_random_test'
+    migration=owned_resources.make_url(base).set(database='qms_migtest_'+'1'*32+'_test').render_as_string(hide_password=False)
+    env={'TEST_DATABASE_URL':base,'DATABASE_URL':migration,'OPENQMS_MIGRATION_TEST_DATABASE_URL':migration,
+         'PGHOSTADDR':'203.0.113.19'}
+    monkeypatch.setattr(owned_resources,'inspect_container',lambda _:pytest.fail('libpq override reached Docker/DB'))
+    with pytest.raises(ValueError):require_isolated_test_database(env)

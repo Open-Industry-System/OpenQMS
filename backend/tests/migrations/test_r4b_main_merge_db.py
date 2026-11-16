@@ -55,6 +55,9 @@ async def test_empty_tenant_created_at_merged_revision_has_full_parity(mig_db_ur
     await asyncio.to_thread(command.upgrade, config, PUBLIC_HEAD)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, 'engine', engine)
+    # This case deliberately verifies the published R4b merge pair, rather
+    # than mixing its public schema with the later current tenant head.
+    monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT_HEAD)
     try:
         tenant = await tenant_migrator.provision_new(TenantCreateRequest(
             name='Merged migration', slug='merged-' + uuid.uuid4().hex[:12],
@@ -63,7 +66,7 @@ async def test_empty_tenant_created_at_merged_revision_has_full_parity(mig_db_ur
         async with tenant_migrator.maintenance_connection(engine, tenant.id) as maintenance:
             assert await maintenance.schema_state() == 'current'
             assert await maintenance.compare_schema('public', load_snapshot_manifest()) == []
-            await maintenance.run_migration(TENANT_HEAD)
+            assert await maintenance.run_migration(TENANT_HEAD) == TENANT_HEAD
             assert await maintenance.compare_schema('public', load_snapshot_manifest()) == []
     finally:
         await engine.dispose()

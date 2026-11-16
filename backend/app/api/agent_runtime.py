@@ -1,4 +1,12 @@
 """Default-off plugin runtime endpoints; business admission belongs to services."""
+from app.schemas.capa_d5_staff import D5CheckpointCreate
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
+from app.services.agent_runtime import d5_commands
+from app.schemas.agent_d5_command import D5Command
+from app.services.capa_review_guard import ReviewedContentLocked
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +16,8 @@ from app.schemas.agent_control import RuntimeFinish, RuntimeFinishOut
 from app.schemas.agent_runtime import ReadonlyCheckpointCreate, ReadonlyCheckpointOut, MessageHistoryHTTPQuery, MessageHistoryOut
 from app.schemas.agent_runtime import MessageAck, MessageAckOut, MessageBatch, MessageClaim, RunClaim, RunClaimOut, RuntimeCapabilities, CapaContextQuery, RuntimeEventCreate, RuntimeEventOut, RuntimeResultCreate, RuntimeResultOut
 from app.services.agent_runtime import run_dispatch, runtime_access, runtime_messages, readonly_delivery, task_controls, checkpoint_service, d4_text_delivery
+
+from app.services.agent_runtime import model_egress
 
 router = APIRouter(prefix="/api/agent/runtime", tags=["agent-runtime"],
     dependencies=[Depends(require_task_runtime)])
@@ -123,3 +133,62 @@ async def message_history(query: MessageHistoryHTTPQuery = Query(), identity=Dep
         return await runtime_messages.get_message_history(db, identity, query.after_sequence, query.limit)
     except (PermissionError, LookupError, ValueError) as exc:
         raise runtime_error(exc) from None
+
+
+@router.post("/capa/d5/proposals")
+async def d5_proposal_command(body: D5Command, identity=Depends(get_runtime_identity),
+                              db: AsyncSession = Depends(get_db)):
+    try:
+        result = await d5_commands.save_proposal(db, identity, body)
+        return JSONResponse(jsonable_encoder(result), headers={'Cache-Control': 'no-store'})
+    except PermissionError:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='D5 command unavailable', headers={'Cache-Control': 'no-store'}) from None
+    except (ValueError, ReviewedContentLocked):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='D5 command conflict', headers={'Cache-Control': 'no-store'}) from None
+    except DBAPIError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='D5 command retry required', headers={'Cache-Control': 'no-store'}) from None
+
+
+
+
+@router.post('/capa/d5/checkpoints')
+async def save_d5_checkpoint(body: D5CheckpointCreate, identity=Depends(get_runtime_identity),
+        db: AsyncSession = Depends(get_db)):
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await checkpoint_service.save_d5_checkpoint(db, identity)
+        return JSONResponse(jsonable_encoder(result), headers=headers)
+    except (PermissionError, LookupError):
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='D5 checkpoint unavailable', headers=headers) from None
+    except (ValueError, DBAPIError):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='D5 checkpoint conflict', headers=headers) from None
+
+
+@router.post('/model/infer')
+async def model_inference(body: model_egress.InferenceRequest, identity=Depends(get_runtime_identity), db: AsyncSession = Depends(get_db)):
+    try:
+        return await model_egress.infer(db, identity, body)
+    except (PermissionError, LookupError, ValueError):
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='Model deployment unavailable') from None
+
+
+from app.services.agent_runtime import model_workflow
+
+
+@router.post('/model/tools')
+async def model_tool(body: model_workflow.ToolRequest, identity=Depends(get_runtime_identity), db: AsyncSession=Depends(get_db)):
+    try:
+        result = await model_workflow.execute_tool(db, identity, body)
+        return JSONResponse(jsonable_encoder(result), headers={'Cache-Control':'no-store'})
+    except (PermissionError, LookupError, ValueError, ReviewedContentLocked):
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='Model tool unavailable', headers={'Cache-Control':'no-store'}) from None
+    except (DBAPIError, OSError):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='Retry original issued tool ID', headers={'Cache-Control':'no-store'}) from None

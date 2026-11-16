@@ -185,53 +185,6 @@ async def test_close_inspection():
 
 
 @pytest.mark.asyncio
-async def test_request_reinspect_creates_clone():
-    db = create_mock_db()
-    user_id = uuid.uuid4()
-    original = _make_inspection(
-        status="judged",
-        inspection_result="rejected",
-        part_no="PART-001",
-        part_name="测试物料",
-        lot_no="LOT-001",
-    )
-
-    # Mock the count query for suffix
-    mock_count_result = MagicMock()
-    mock_count_result.scalar.return_value = 0
-
-    # Mock flush to assign ID to new inspection
-    async def mock_flush():
-        # Simulate DB assigning ID
-        for call in db.add.call_args_list:
-            obj = call[0][0]
-            if isinstance(obj, IqcInspection) and not hasattr(obj, "_id_assigned"):
-                obj.__dict__["inspection_id"] = uuid.uuid4()
-                obj.__dict__["_id_assigned"] = True
-
-    db.flush.side_effect = mock_flush
-    db.execute.return_value = mock_count_result
-
-    new_insp = _make_inspection(
-        inspection_id=uuid.uuid4(),
-        inspection_no=f"{original.inspection_no}-R1",
-        parent_inspection_id=original.inspection_id,
-        re_inspection=True,
-        status="pending",
-    )
-
-    with patch.object(iqc_inspection_service, "get_inspection", return_value=original):
-        with patch.object(
-            iqc_inspection_service,
-            "get_inspection",
-            side_effect=[original, new_insp],
-        ):
-            # We can't easily test this with dual get_inspection patches,
-            # so test the validation logic separately below
-            pass
-
-
-@pytest.mark.asyncio
 async def test_request_reinspect_validation():
     db = create_mock_db()
 
