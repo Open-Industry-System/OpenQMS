@@ -97,6 +97,27 @@ jobs:
           bash -euo pipefail -c "$ORACLE_REVALIDATE_CMD"
           git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" fetch --no-tags origin "$RELEASE_SHA"
           bash scripts/deploy-oracle-release.sh
+      - name: Record successful preview publication
+        if: env.RELEASE_KIND == 'preview'
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, subprocess
+          pr = json.loads(subprocess.check_output(['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/pulls/{os.environ["PREVIEW_PR"]}']))
+          assert pr['state'] == 'open' and pr['merge_commit_sha'] == os.environ['RELEASE_SHA'], 'PR changed after publication'
+          receipt = dict(repository=os.environ['GITHUB_REPOSITORY'], pr=pr['number'], head=pr['head']['sha'], sha=os.environ['RELEASE_SHA'])
+          with open(os.environ['RUNNER_TEMP'] + '/preview-publication.json', 'w') as output:
+              json.dump(receipt, output)
+          PYTHON
+      - uses: actions/upload-artifact@v4
+        if: env.RELEASE_KIND == 'preview'
+        with:
+          name: preview-publication
+          path: ${{ runner.temp }}/preview-publication.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Remove runner credentials
         if: always()
         run: rm -f "$RUNNER_TEMP/oracle-key" "$RUNNER_TEMP/oracle-known-hosts"
