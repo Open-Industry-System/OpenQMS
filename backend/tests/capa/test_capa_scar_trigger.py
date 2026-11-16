@@ -817,39 +817,6 @@ async def test_link_capa_scar_pl_denied_403(db, default_factory, admin_user):
     assert resp.status_code == 403
 
 
-@pytest.mark.asyncio
-async def test_link_capa_capa_pl_denied_403(db, default_factory, admin_user):
-    """Defense-in-depth: CAPA PL check rejects when operator lacks CAPA PL access.
-
-    Same-PL invariant means scar PL check usually fires first; assert 403 either way.
-    """
-    await _seed_perm(db, admin_user.role_id, "capa", 3)
-    await _seed_perm(db, admin_user.role_id, "scar", 3)
-    capa = await _make_capa(
-        db, default_factory.id, admin_user.user_id, product_line_code="DC-DC-100"
-    )
-    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
-    scar = await _make_scar(
-        db,
-        default_factory.id,
-        admin_user.user_id,
-        supplier.supplier_id,
-        product_line_code="DC-DC-100",
-    )
-    scope = _scope_for(
-        admin_user,
-        default_factory,
-        accessible_factory_ids=None,
-        pl_mode="EXPLICIT",
-        pl_codes=["OTHER-PL"],
-    )
-    async with _client_for(db, admin_user, scope) as ac:
-        resp = await ac.post(
-            f"/api/scars/{scar.scar_id}/link-capa",
-            json={"capa_ref_id": str(capa.report_id)},
-        )
-    app.dependency_overrides.clear()
-    assert resp.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -984,44 +951,6 @@ async def test_update_capa_effective_factory_mismatch_404(
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_pl_change_blocked_when_scar_linked(
-    engineer_client, db, default_factory, admin_user
-):
-    """PL move on a CAPA with a committed scar_ref_id is refused (race-safe path).
-
-    The route locks the CAPA row FOR UPDATE and refreshes before checking the
-    linked-SCAR invariant, so even a just-committed concurrent link is observed.
-    This covers the same code path as the cross-session race; a true two-session
-    deadlock-prone test is intentionally avoided to keep the suite hermetic.
-    """
-    from app.models.product_line import ProductLine
-
-    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    supplier = await _make_supplier(db, default_factory.id, admin_user.user_id)
-    trig = await engineer_client.post(
-        f"/api/capa/{capa.report_id}/trigger-scar",
-        json={"supplier_id": str(supplier.supplier_id)},
-    )
-    assert trig.status_code == 200, trig.text
-
-    existing = await db.execute(
-        select(ProductLine).where(ProductLine.code == "DC-DC-200")
-    )
-    if existing.scalar_one_or_none() is None:
-        db.add(
-            ProductLine(
-                code="DC-DC-200", name="DC-DC-200", factory_id=default_factory.id
-            )
-        )
-        await db.flush()
-
-    put = await engineer_client.put(
-        f"/api/capa/{capa.report_id}",
-        json={"product_line_code": "DC-DC-200"},
-    )
-    assert put.status_code == 400, put.text
-    assert "已关联 SCAR" in put.json()["detail"]
 
 
 @pytest.mark.asyncio

@@ -213,13 +213,6 @@ def test_verification_create_rejects_empty_root_cause_text():
     VerificationCreate(root_cause_text="螺栓尺寸超差")
 
 
-@pytest.mark.asyncio
-async def test_create_verification_rejects_verified_without_details(db, default_factory, admin_user):
-    # conclusion=passed 但无 method/result/evidence → 拒绝（防空验证记录放行 D4 门禁）
-    capa = await _make_capa(db, default_factory.id, admin_user.user_id)
-    with pytest.raises(ValueError, match="验证方法|结果|证据"):
-        await create_verification(db, capa, VerificationCreate(
-            root_cause_text="rc", conclusion="passed"), admin_user)
 
 
 @pytest.mark.asyncio

@@ -188,16 +188,12 @@ async def test_revoked_text_grant_does_not_block_stop_controls(d4_text_server):
 
 @pytest.mark.asyncio
 async def test_first_claimable_text_profile_has_message_gate(d4_text_server):
+    """One mandatory TCP scenario covers all five states and sentinel non-disclosure."""
     from tests.e2e.test_d4_text_early_admission import test_first_claimable_text_profile_has_message_gate as exercise
     for case in ('first', 'retry', 'old_epoch', 'history', 'ack'):
         await exercise(d4_text_server, case)
 
 
-@pytest.mark.asyncio
-async def test_text_message_sentinel_never_crosses_tcp(d4_text_server):
-    from tests.e2e.test_d4_text_early_admission import test_first_claimable_text_profile_has_message_gate as exercise
-    for case in ('first', 'retry', 'old_epoch', 'history', 'ack'):
-        await exercise(d4_text_server, case)
 
 
 @pytest.mark.asyncio
