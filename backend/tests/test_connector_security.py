@@ -1,5 +1,6 @@
 """Connector trust-boundary regressions; no provider/network/database access."""
 import socket
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -14,6 +15,12 @@ from app.services.erp_connector import RESTERPConnector
 from app.services.mes_connector import RESTMESConnector
 from app.services.erp_crypto import sanitize_config
 from app.api import mes
+
+
+def _openai_http_module():
+    # Match the SDK's own client: SDK 2 uses httpx, SDK 3 defaults to httpx2.
+    from openai import DefaultAsyncHttpxClient
+    return import_module(DefaultAsyncHttpxClient.__bases__[0].__module__.split('.')[0])
 
 
 @pytest.mark.parametrize('url', ['https://user:password@erp.example', 'https://erp.example?token=secret', 'https://erp.example/#secret'])
@@ -194,6 +201,7 @@ async def test_ai_save_rejects_reusing_embedding_secret_when_fallback_origin_cha
 @pytest.mark.parametrize('key', ['', '********', 'explicit-synthetic-key'])
 async def test_ai_probe_real_provider_http_boundary_only_receives_explicit_keys(monkeypatch, key):
     from app.services import llm_provider, embedding_provider
+    http = _openai_http_module()
     rows = [SimpleNamespace(key='llm_api_key',value='stored-secret'),SimpleNamespace(key='embedding_api_key',value='stored-secret')]
     db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(scalars=lambda:SimpleNamespace(all=lambda:rows))))
     for attr in ('LLM_API_KEY','EMBEDDING_API_KEY'):
@@ -203,14 +211,14 @@ async def test_ai_probe_real_provider_http_boundary_only_receives_explicit_keys(
         seen.append(request)
         assert request.headers['authorization'] == 'Bearer explicit-synthetic-key'
         if request.url.path.endswith('/embeddings'):
-            return httpx.Response(200,json={'data':[{'embedding':[0.1,0.2], 'index':0}], 'model':'synthetic', 'object':'list'})
-        return httpx.Response(200,json={'id':'synthetic','choices':[{'message':{'role':'assistant','content':'{"ok":true}'},'finish_reason':'stop','index':0}], 'model':'synthetic','object':'chat.completion'})
+            return http.Response(200,json={'data':[{'embedding':[0.1,0.2], 'index':0}], 'model':'synthetic', 'object':'list'})
+        return http.Response(200,json={'id':'synthetic','choices':[{'message':{'role':'assistant','content':'{"ok":true}'},'finish_reason':'stop','index':0}], 'model':'synthetic','object':'chat.completion'})
     def intercept(factory):
         def create(snapshot):
             provider = factory(snapshot)
             if provider:
                 sdk = getattr(provider, "client", None) or provider._client
-                sdk._client._transport = httpx.MockTransport(respond)
+                sdk._client._transport = http.MockTransport(respond)
                 sdk._client._mounts = {}
             return provider
         return create
@@ -290,6 +298,7 @@ async def test_ai_save_normalizes_embedding_provider_like_factory_before_secret_
 async def test_ai_saved_embedding_whitespace_key_is_sent_verbatim_without_hidden_fallback(monkeypatch, explicit_key):
     """Consumer boundary: only provider names are stripped, never secret values."""
     from app.models.system_setting import SystemSetting
+    http = _openai_http_module()
     current = {'llm_provider':'openai', 'llm_base_url':'https://trusted.example', 'llm_api_key':'synthetic-stored-llm',
                'embedding_provider':'openai', 'embedding_base_url':'https://trusted-embedding.example',
                'embedding_api_key':'synthetic-stored-embedding'}
@@ -311,8 +320,8 @@ async def test_ai_saved_embedding_whitespace_key_is_sent_verbatim_without_hidden
         seen = []
         async def respond(request):
             seen.append(request)
-            return httpx.Response(200,json={'data':[{'embedding':[0.1,0.2],'index':0}], 'model':'synthetic','object':'list'})
-        provider._client._client._transport = httpx.MockTransport(respond)
+            return http.Response(200,json={'data':[{'embedding':[0.1,0.2],'index':0}], 'model':'synthetic','object':'list'})
+        provider._client._client._transport = http.MockTransport(respond)
         provider._client._client._mounts = {}
         await provider.embed(['synthetic'])
         assert len(seen) == 1
