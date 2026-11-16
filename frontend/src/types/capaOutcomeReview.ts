@@ -29,6 +29,25 @@ export interface OutcomeDecision {
   operated_at: string;
   audit_id: string;
 }
+export interface OutcomeD5Measure {
+  measure_id: string;
+  proposal_id: string;
+  final_text: string;
+  text_version: string;
+  adopted_by: string;
+  adopted_at: string;
+  revision_id: string;
+  proof_id: string;
+  sources: {
+    source_id: string;
+    projection_id: string;
+    factory_id: string;
+    product_line_code: string;
+    fmea_id: string;
+    node_id: string;
+    node_hmac: string;
+  }[];
+}
 export interface CapaOutcomeReview {
   report_id: string;
   status: string;
@@ -42,6 +61,7 @@ export interface CapaOutcomeReview {
     d6_verification: string | null;
     d7_prevention: string | null;
   };
+  d5_measures: OutcomeD5Measure[];
   verifications: Verification[];
   d7_actions: D7NodeAction[];
   doc_gate: OutcomeDocGate | null;
@@ -69,6 +89,13 @@ export function isCompleteOutcomeReview(v: unknown, reportId: string, status: st
     || !hash(v.revision) || !(v.review_round_id === null || uuid(v.review_round_id))
     || !['pending', 'verified', 'legacy_unversioned', 'unverifiable'].includes(String(v.binding_status))) return false;
   if (!record(v.core) || !fields(v.core, ['d4_root_cause', 'd5_correction', 'd6_verification', 'd7_prevention'], nullableText)) return false;
+  if (!Array.isArray(v.d5_measures) || !v.d5_measures.every(row => record(row)
+    && fields(row, ['measure_id', 'proposal_id', 'adopted_by', 'revision_id', 'proof_id'], uuid)
+    && text(row.final_text) && !!row.final_text.trim() && hash(row.text_version) && text(row.adopted_at)
+    && Array.isArray(row.sources) && row.sources.length > 0 && row.sources.every(source => record(source)
+      && fields(source, ['source_id', 'factory_id', 'fmea_id'], uuid)
+      && source.projection_id === 'fmea.failure_cause.reference.v1'
+      && fields(source, ['product_line_code', 'node_id']) && hash(source.node_hmac)))) return false;
   if (!Array.isArray(v.verifications) || !v.verifications.every(row => record(row)
     && fields(row, ['verification_id', 'capa_id', 'root_cause_text', 'created_at']) && row.capa_id === reportId
     && (row.method === null || ['measurement', 'observation', 'reproduction'].includes(String(row.method)))
@@ -94,6 +121,7 @@ export function isCompleteOutcomeReview(v: unknown, reportId: string, status: st
     && (gate.waiver_items === null || Array.isArray(gate.waiver_items)) && text(gate.decided_at))) return false;
   const documents = v.documents;
   const hasFmea = (id: unknown) => documents.some((doc: unknown) => record(doc) && doc.module === 'fmea' && doc.object_id === id);
+  if (!v.d5_measures.every(row => row.sources.every((source: Record<string, unknown>) => hasFmea(source.fmea_id)))) return false;
   if (!v.verifications.every(row => row.source_ref === null || (record(row.source_ref)
     && Object.keys(row.source_ref).length === 2 && uuid(row.source_ref.fmea_id)
     && text(row.source_ref.cause_node_id) && !!row.source_ref.cause_node_id.trim() && hasFmea(row.source_ref.fmea_id)))

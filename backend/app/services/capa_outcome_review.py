@@ -276,7 +276,7 @@ async def _node(db, ref, node_id, node_type=None):
         raise OutcomeReviewConflict()
 
 
-async def _source_access(db, capa, key, access, *, lock=False):
+async def _source_access(db, capa, key, access, *, lock=False, d5_material=()):
     module, identifier = key
     model = FMEADocument if module == 'fmea' else ControlPlan
     identity = model.fmea_id if module == 'fmea' else model.cp_id
@@ -285,12 +285,22 @@ async def _source_access(db, capa, key, access, *, lock=False):
         query = query.with_for_update(read=True)
     source = (await db.execute(query)).one_or_none()
     if access is not None:
-        require_capa_source_access(*access, Module.FMEA if module == 'fmea' else Module.PLANNING, source, capa)
+        target = capa
+        matches = [s for row in d5_material for s in row['sources']
+            if module == 'fmea' and s['fmea_id'] == identifier]
+        if matches:
+            from types import SimpleNamespace
+            coordinates = {(s['factory_id'], s['product_line_code']) for s in matches}
+            if len(coordinates) != 1:
+                raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')
+            factory_id, line = next(iter(coordinates))
+            target = SimpleNamespace(factory_id=UUID(factory_id), product_line_code=line)
+        require_capa_source_access(*access, Module.FMEA if module == 'fmea' else Module.PLANNING, source, target)
     elif source is None or (source.factory_id, source.product_line_code) != (capa.factory_id, capa.product_line_code):
         raise PermissionError('CAPA_OUTCOME_REVIEW_ACCESS_DENIED')
 
 
-async def _source_versions(db, capa, core, verifications, actions, gate, affected, receipt):
+async def _source_versions(db, capa, core, verifications, actions, gate, affected, receipt, d5_material):
     required, nodes, bound = set(), [], {}
     def add_bound(ref):
         key = (ref['module'], ref['object_id'])
@@ -341,10 +351,12 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
                 reference(row['fmea_id'], row['failure_cause_node_id'], 'FailureCause')
             if row['prevention_control_node_id']:
                 reference(row['fmea_id'], row['prevention_control_node_id'], 'PreventionControl')
+    d5_keys = {('fmea', source['fmea_id']) for row in d5_material for source in row['sources']}
+    required.update(d5_keys)
     result = {}
     for key in sorted(required):
         # A version receipt never grants current source-module authority.
-        await _source_access(db, capa, key, db.info.get('outcome_read_access'))
+        await _source_access(db, capa, key, db.info.get('outcome_read_access'), d5_material=d5_material)
         if capa.status in REVIEWED_STATES and key not in bound:
             # A GET cannot reconstruct the version that an old approval saw.
             raise OutcomeReviewConflict()
@@ -365,6 +377,8 @@ async def _source_versions(db, capa, core, verifications, actions, gate, affecte
 
 async def collect_outcome_material(db, capa) -> dict:
     await require_business_namespace(db)
+    from app.services.capa_d5_measures import full_d5_material
+    d5_material = await full_d5_material(db, capa, access=db.info.get('outcome_read_access'))
     fields = _columns(CAPAEightD, _CORE)
     await _preflight(db, fields, CAPAEightD.report_id == capa.report_id)
     core = _normal(dict((await db.execute(select(*fields).where(
@@ -373,6 +387,8 @@ async def collect_outcome_material(db, capa) -> dict:
         report_id=str(capa.report_id), factory_id=str(capa.factory_id), product_line_code=capa.product_line_code,
         round_id=_normal(await resolve_review_round(db, capa)), core=core, verifications=[],
         d7_actions=[], doc_gate=None, source_versions=[])
+    if d5_material:
+        material['d5_measures'] = d5_material
     _check_size(material)
     remaining = MAX_OUTCOME_REVIEW_BYTES - len(_encoded(material))
     verifications = await _rows(db, CapaRootCauseVerification, _VERIFICATIONS,
@@ -412,7 +428,7 @@ async def collect_outcome_material(db, capa) -> dict:
         raise OutcomeReviewLimit()
     material['doc_gate'] = gate
     receipt = _receipt(await _decision_audit(db, capa)) if capa.status in REVIEWED_STATES else None
-    sources = await _source_versions(db, capa, core, verifications, actions, gate, affected, receipt)
+    sources = await _source_versions(db, capa, core, verifications, actions, gate, affected, receipt, d5_material)
     if len(_encoded(sources)) - 2 > remaining:
         raise OutcomeReviewLimit()
     material['source_versions'] = sources
@@ -454,7 +470,7 @@ async def require_outcome_expectation(db, scope, capa, req) -> dict:
     # after every potentially long collection/lock/provider wait.
     access = await access_now()
     for source in material['source_versions']:
-        await _source_access(db, capa, (source['module'], source['object_id']), access)
+        await _source_access(db, capa, (source['module'], source['object_id']), access, d5_material=material.get('d5_measures', []))
     await require_business_namespace(db)
     return dict(contract=CONTRACT, round_id=material['round_id'], revision=revision,
         doc_decision_id=material['doc_gate']['decision_id'], source_versions=material['source_versions'])
@@ -477,6 +493,8 @@ async def apply_outcome_expectation(db, capa, req, actor_id) -> dict:
     if capa.status != 'D8_APPROVAL_PENDING':
         raise OutcomeReviewConflict()
     receipt = await require_outcome_expectation(db, scope, capa, req)
+    from app.services.capa_d5_measures import full_d5_material
+    capa._d5_material = await full_d5_material(db, capa, scope=scope)
     if req.target_state == 'D7_PREVENTION':
         if not req.reject_reason or not req.reject_reason.strip():
             raise ValueError('驳回需填写理由')
@@ -502,7 +520,8 @@ async def apply_outcome_expectation(db, capa, req, actor_id) -> dict:
         raise OutcomeReviewConflict()
     if req.target_state == 'D8_CLOSURE':
         current_rc = (capa.d4_root_cause or '').strip()
-        if (not current_rc or not (capa.d5_correction or '').strip()
+        from app.services.capa_d5_measures import has_formal_d5
+        if (not current_rc or not await has_formal_d5(db, capa)
                 or not (capa.d6_verification or '').strip()):
             raise ValueError('D8 审批需当前根因、正式措施及验证结果')
         passed = await db.scalar(select(func.count()).select_from(CapaRootCauseVerification).where(
@@ -554,6 +573,7 @@ async def _dto(db, capa, material):
     output = CapaOutcomeReview(report_id=capa.report_id, status=capa.status,
         review_round_id=material['round_id'], revision=revision, binding_status=binding_status,
         core={key: material['core'][key] for key in _CORE[:4]},
+        d5_measures=material.get('d5_measures', []),
         verifications=[{key: value for key, value in row.items() if key not in {'factory_id', 'updated_at'}}
                        for row in material['verifications']],
         d7_actions=[{key: value for key, value in row.items() if key not in {'factory_id', 'recommendation_hash'}}
@@ -589,7 +609,7 @@ async def _read_snapshot(db, scope, report_id, binding):
                 return material, await _dto(snapshot, target, material), signature
 
 
-async def _lock_read_fence(db, scope, report_id, sources):
+async def _lock_read_fence(db, scope, report_id, sources, d5_material=()):
     """Fence normal writers on the request transaction, never the RR/RO one.
 
     Task 2 material/supplement/gate writers lock the CAPA parent first;
@@ -604,7 +624,7 @@ async def _lock_read_fence(db, scope, report_id, sources):
     target, access, _ = await _admission(db, scope, report_id)
     for source in sorted(sources, key=lambda value: (
             'control_plan' if value['module'] == 'planning' else 'fmea', value['object_id'])):
-        await _source_access(db, target, (source['module'], source['object_id']), access, lock=True)
+        await _source_access(db, target, (source['module'], source['object_id']), access, lock=True, d5_material=d5_material)
     return await _admission(db, scope, report_id)
 
 
@@ -638,7 +658,7 @@ async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
         # its core HMAC. Re-read under the existing parent/source write fences;
         # supplements and decision/audit metadata remain outside the core HMAC.
         locked_target, locked_access, locked_signature = await _lock_read_fence(
-            db, scope, report_id, final['source_versions'])
+            db, scope, report_id, final['source_versions'], final.get('d5_measures', []))
         if (db.info.get('tenant_binding') != binding or locked_signature != signature
                 or locked_target.status != output.status):
             raise OutcomeReviewConflict()
@@ -663,5 +683,5 @@ async def read_outcome_review(db, scope, report_id) -> CapaOutcomeReview:
                 or _normal(await resolve_review_round(db, last_target)) != material['round_id']):
             raise OutcomeReviewConflict()
         for source in final['source_versions']:
-            await _source_access(db, last_target, (source['module'], source['object_id']), last_access)
+            await _source_access(db, last_target, (source['module'], source['object_id']), last_access, d5_material=material.get('d5_measures', []))
         return output

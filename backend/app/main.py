@@ -121,6 +121,12 @@ async def lifespan(app: FastAPI):
         key=settings.SECRET_KEY.encode("utf-8"),
     )
     logger.info("%s", app.state.agent_d4_text_policy.diagnostic)
+    from app.services.agent_runtime.r5_executor import load_controlled_pilot, resolve_credential
+    app.state.r5_controlled_pilot = load_controlled_pilot(settings.AGENT_R5_CONTROLLED_POLICY_FILE,
+        enabled=settings.AGENT_R5_CONTROLLED_ENABLED, runtime_enabled=settings.AGENT_TASK_RUNTIME_ENABLED,
+        tenant_mode=settings.TENANT_MODE)
+    app.state.r5_credential_resolver = resolve_credential
+    logger.info('R5_CONTROLLED_READY' if app.state.r5_controlled_pilot else 'R5_CONTROLLED_DISABLED')
     await initialize_attachment_runtime(app)
     # Accounts are created only by the host-invoked private bootstrap CLI or
     # explicit demo seeding. Startup must never publish an installation secret.
@@ -578,6 +584,8 @@ app.include_router(agent_tasks_router)
 app.include_router(agent_task_attachments_router)
 app.include_router(agent_runtime_router)
 app.include_router(admin_agent_plugins_router)
+from app.api.admin.agent_models import router as agent_models_router
+app.include_router(agent_models_router)
 app.include_router(search_router)
 app.include_router(change_impact_router)
 app.include_router(collaboration_router)

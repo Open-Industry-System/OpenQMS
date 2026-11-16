@@ -1,6 +1,7 @@
 """Opt-in isolated PUBLIC databases for exactly three embedding test modules.
 
-The registered runner owns qms_test; mig_db_url owns each separate throwaway DB.
+The runner owns its verified *_test target; mig_db_url owns each throwaway DB.
+Explicit legacy qms_test remains a suite setting, not browser authorization.
 Main's single-tenant CAPA namespace checks stay enabled. Real queues, migrations,
 FKs, immutable/hash guards and commits never touch retained/browser queues.
 """
@@ -21,9 +22,27 @@ from sqlalchemy.pool import NullPool
 def require_isolated_test_database(env):
     """Suite configuration, not authorization to launch the opt-in browser."""
     url = env.get("TEST_DATABASE_URL")
-    if not url or make_url(url).database != "qms_test":
-        raise ValueError("Explicit isolated TEST_DATABASE_URL with database qms_test required")
-    return url
+    if not url:
+        raise ValueError("Explicit isolated TEST_DATABASE_URL required")
+    if make_url(url).database == "qms_test":
+        return url
+    # A different name is not authorized merely by its suffix. Reuse the
+    # registered instance, URL/legacy consistency, and actual database identity
+    # guards before any fixture can create an engine or a disposable schema.
+    source = env
+    recorded = env.get("OPENQMS_MIGRATION_TEST_DATABASE_URL")
+    if recorded and env.get("DATABASE_URL") == recorded:
+        # mig_db_url sets this only after creating its own one-shot database.
+        # Verify the registered parent using a copy; keep the fixture's actual
+        # environment and its independent same-connection/prefix guard intact.
+        base, private = make_url(url), make_url(recorded)
+        if (private.drivername != base.drivername or private.query
+                or private.set(database=base.database) != base
+                or not re.fullmatch(r"qms_migtest_[0-9a-f]{32}_test", private.database or "")):
+            raise ValueError("Embedding migration database does not match the registered target")
+        source = dict(env, DATABASE_URL=url)
+    from tests.ci.owned_resources import verify_owned_instance, verify_owned_database
+    return verify_owned_database(verify_owned_instance(source))
 
 
 @pytest_asyncio.fixture

@@ -208,6 +208,8 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
         text_restart = await d4_recovery.is_text_task(db, task)
         if text_restart:
             checkpoint, position = await d4_recovery.require_restart_position(db, scope, task, run, request.checkpoint_id)
+            from app.services.agent_runtime import model_egress
+            restart_message_watermark = run.accepted_message_seq if await model_egress.is_r5_task(db, task) else checkpoint.accepted_message_seq
         else:
             await checkpoint_service.require_restart_checkpoint(db, scope, task, run, request.checkpoint_id)
         task, run = await _user_authority(db, scope, task_id, task_binding, run_binding)
@@ -246,14 +248,14 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             if text_restart:
                 from app.models.agent_d4_recovery import D4RecoveryRestart
                 from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
-                if await d4_recovery.validate_message_position(db, task_id, checkpoint.accepted_message_seq) != position:
+                if await d4_recovery.validate_message_position(db, task_id, restart_message_watermark) != position:
                     raise ValueError('Recovery position unavailable')
                 if position:
                     message_id = position[0]
                 else:
                     message_id = uuid4()
                     db.add(AgentTaskMessage(message_id=message_id, task_id=task_id,
-                        sequence=checkpoint.accepted_message_seq + 1, author_id=scope.user.user_id,
+                        sequence=restart_message_watermark + 1, author_id=scope.user.user_id,
                         content=START_MESSAGE, sensitivity='restricted', state='queued',
                         idempotency_key='d4-restart:' + str(operation.control_id)))
                     await db.flush()
@@ -295,7 +297,7 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
                 raise PermissionError('Recovery unavailable')
             if await d4_recovery.restart_mapping(db, task, run) is None:
                 raise PermissionError('Recovery unavailable')
-            position_now = await d4_recovery.validate_message_position(db, task_id, checkpoint.accepted_message_seq)
+            position_now = await d4_recovery.validate_message_position(db, task_id, restart_message_watermark)
             if position_now is None or position_now[0] != message_id:
                 raise PermissionError('Recovery unavailable')
             # Re-admit both the user and runtime after the final message read.
@@ -374,3 +376,157 @@ async def finish_run(db: AsyncSession, identity: RuntimeIdentity, status: str) -
         await db.rollback()
         raise
     return result
+
+
+async def _d5_checkpoint_target(db, scope, task_id, checkpoint_id):
+    """Historical position is a filter, never retained task/source authority."""
+    from app.models.agent_d4_recovery import D4RecoveryCheckpoint
+    from app.models.agent_d5_command import AgentD5CheckpointPosition
+    from app.models.agent_readonly_control import AgentTaskUpdate
+    from app.services.capa_d5_measures import _target
+    row = (await db.execute(select(AgentTask.target_capa_id, AgentTask.factory_id,
+        AgentD5CheckpointPosition.watermark).join(D4RecoveryCheckpoint,
+            D4RecoveryCheckpoint.task_id == AgentTask.task_id)
+        .join(AgentD5CheckpointPosition,
+            (AgentD5CheckpointPosition.checkpoint_id == D4RecoveryCheckpoint.checkpoint_id)
+            & (AgentD5CheckpointPosition.task_id == AgentTask.task_id))
+        .join(AgentRun, (AgentRun.run_id == D4RecoveryCheckpoint.run_id)
+            & (AgentRun.task_id == AgentTask.task_id))
+        .join(AgentTaskUpdate, (AgentTaskUpdate.task_id == AgentTask.task_id)
+            & (AgentTaskUpdate.kind == 'checkpoint')
+            & (AgentTaskUpdate.object_id == D4RecoveryCheckpoint.checkpoint_id)
+            & (AgentTaskUpdate.sequence == D4RecoveryCheckpoint.update_sequence))
+        .where(AgentTask.task_id == task_id,
+            D4RecoveryCheckpoint.checkpoint_id == checkpoint_id))).one_or_none()
+    if row is None: raise LookupError('D5 item unavailable')
+    target = await _target(db, scope, row.target_capa_id)
+    if row.factory_id != target.factory_id: raise LookupError('D5 item unavailable')
+    return target, row.watermark
+
+
+async def require_d5_checkpoint_member(db, scope, task_id, checkpoint_id, report_id, proposal_id):
+    from app.models.agent_d5_command import AgentD5Command
+    from app.models.capa_d5_proposal import CapaD5Proposal
+    target, watermark = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+    if target.report_id != report_id: raise LookupError('D5 item unavailable')
+    found = await db.scalar(select(CapaD5Proposal.proposal_id).join(AgentD5Command,
+        (AgentD5Command.command_id == CapaD5Proposal.command_id)
+        & (AgentD5Command.proposal_id == CapaD5Proposal.proposal_id)
+        & (AgentD5Command.task_id == CapaD5Proposal.task_id))
+        .where(CapaD5Proposal.report_id == report_id, CapaD5Proposal.task_id == task_id,
+            CapaD5Proposal.proposal_id == proposal_id, AgentD5Command.sequence > watermark))
+    if found is None: raise LookupError('D5 item unavailable')
+
+
+async def d5_checkpoint_candidates(db, scope, task_id, checkpoint_id):
+    from app.models.agent_d5_command import AgentD5Command
+    from app.services.capa_d5_measures import _visible_metadata
+    target, watermark = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+    _, visible, _ = await _visible_metadata(db, scope, target.report_id)
+    rows = (await db.execute(select(AgentD5Command.proposal_id, AgentD5Command.sequence).where(
+        AgentD5Command.task_id == task_id, AgentD5Command.sequence > watermark)
+        .order_by(AgentD5Command.sequence))).all()
+    by_id = {row.proposal_id:row for row in visible if row.task_id == task_id}
+    result = [dict(proposal_id=row.proposal_id, state=by_id[row.proposal_id].state,
+        sequence=row.sequence) for row in rows if row.proposal_id in by_id]
+    # Membership and current sources are rechecked after materialization.
+    _, final, _ = await _visible_metadata(db, scope, target.report_id)
+    final_ids = {row.proposal_id for row in final if row.task_id == task_id}
+    return [row for row in result if row['proposal_id'] in final_ids]
+
+
+async def withdraw_d5_after_checkpoint(db, scope, task_id, checkpoint_id, *, proposal_ids, operation_key, reason):
+    """Each requested item owns a transaction and an independently replayable key."""
+    from app.schemas.capa_d5_staff import D5BatchWithdraw
+    from app.services.capa_d5_proposals import staff_action, _staff_metadata, D5StaffKeyConflict
+    from app.services.agent_runtime.d4_text_delivery import _digest
+    from app.services.agent_runtime.control_authority_fence import ControlFenceBusy
+    from app.services.capa_review_guard import ReviewedContentLocked
+    from sqlalchemy.exc import DBAPIError
+    request = D5BatchWithdraw(proposal_ids=proposal_ids, operation_key=operation_key, reason=reason)
+    # Rollback expires the dependency's ORM User. Keep only its trusted actor
+    # UUID across item transactions; every item still resolves live authority.
+    from types import SimpleNamespace
+    scope = SimpleNamespace(user=SimpleNamespace(user_id=scope.user.user_id))
+    outcomes = []
+    for proposal_id in request.proposal_ids:
+        try:
+            target, _ = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+            key = 'd5-batch:' + _digest('openqms.d5.batch-key.v1', dict(
+                operation_key=operation_key, task_id=str(task_id), checkpoint_id=str(checkpoint_id),
+                proposal_id=str(proposal_id)))
+            result = await staff_action(db, scope, target.report_id, proposal_id,
+                operation='withdraw', operation_key=key, value=reason,
+                checkpoint_boundary=(task_id, checkpoint_id))
+            outcomes.append(dict(proposal_id=proposal_id, outcome=result['state']))
+        except (LookupError, PermissionError):
+            await db.rollback()
+            outcomes.append(dict(proposal_id=proposal_id, outcome='unavailable'))
+        except D5StaffKeyConflict:
+            await db.rollback()
+            outcomes.append(dict(proposal_id=proposal_id, outcome='conflict'))
+        except (ValueError, ReviewedContentLocked, ControlFenceBusy):
+            await db.rollback()
+            # A readable adopted/superseded item may disclose that state; an
+            # invisible one always receives the same generic result as missing.
+            try:
+                target, _ = await _d5_checkpoint_target(db, scope, task_id, checkpoint_id)
+                await require_d5_checkpoint_member(db, scope, task_id, checkpoint_id, target.report_id, proposal_id)
+                _, row, _ = await _staff_metadata(db, scope, target.report_id, proposal_id)
+                outcome = row.state if row.state != 'pending' else 'conflict'
+            except (PermissionError, LookupError): outcome = 'unavailable'
+            await db.rollback()
+            outcomes.append(dict(proposal_id=proposal_id, outcome=outcome))
+        except DBAPIError as exc:
+            await db.rollback()
+            if getattr(exc.orig, 'sqlstate', None) != '55P03': raise
+            outcomes.append(dict(proposal_id=proposal_id, outcome='conflict'))
+        except Exception:
+            await db.rollback()
+            raise
+    return outcomes
+
+
+async def d5_checkpoint_history(db, scope, task_id, *, page=1, page_size=20):
+    """Current-reader, typed R5 checkpoint references; never command positions."""
+    from app.core.tenant_transaction import TenantBinding
+    from app.models.agent_d4_recovery import D4RecoveryCheckpoint
+    from app.models.agent_d5_command import AgentD5CheckpointPosition
+    from app.models.agent_model_deployment import AgentTaskModelBinding
+    from app.models.agent_readonly_control import AgentTaskUpdate
+    from app.models.agent_task import AgentTaskGrant
+    from app.services.capa_d5_measures import _target
+    if page < 1 or not 1 <= page_size <= 100:
+        raise ValueError('Invalid pagination')
+    binding = db.info.get('tenant_binding')
+    if not isinstance(binding, TenantBinding) or binding.mode != 'business':
+        raise PermissionError('D5 checkpoint unavailable')
+    task = (await db.execute(select(AgentTask.task_id, AgentTask.target_capa_id, AgentTask.factory_id)
+        .join(AgentTaskModelBinding, AgentTaskModelBinding.task_id == AgentTask.task_id)
+        .where(AgentTask.task_id == task_id))).one_or_none()
+    if task is None:
+        raise LookupError('D5 checkpoint unavailable')
+    target = await _target(db, scope, task.target_capa_id)
+    if target.factory_id != task.factory_id:
+        raise LookupError('D5 checkpoint unavailable')
+    cp = D4RecoveryCheckpoint
+    query = (select(cp.checkpoint_id, cp.run_id, cp.created_at)
+        .join(AgentD5CheckpointPosition, (AgentD5CheckpointPosition.checkpoint_id == cp.checkpoint_id)
+            & (AgentD5CheckpointPosition.task_id == cp.task_id))
+        .join(AgentRun, (AgentRun.run_id == cp.run_id) & (AgentRun.task_id == cp.task_id))
+        .join(AgentTaskGrant, (AgentTaskGrant.grant_id == cp.task_grant_id)
+            & (AgentTaskGrant.task_id == cp.task_id))
+        .join(AgentTaskUpdate, (AgentTaskUpdate.task_id == cp.task_id)
+            & (AgentTaskUpdate.kind == 'checkpoint') & (AgentTaskUpdate.object_id == cp.checkpoint_id)
+            & (AgentTaskUpdate.sequence == cp.update_sequence))
+        .where(cp.task_id == task_id, cp.tenant_generation == binding.generation,
+            cp.protocol == 'd4-recovery.v1', cp.resume_position == 'restart_from_start'))
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+    rows = (await db.execute(query.order_by(cp.created_at.desc(), cp.checkpoint_id.desc())
+        .offset((page - 1) * page_size).limit(page_size))).all()
+    for row in rows:
+        await _d5_checkpoint_target(db, scope, task_id, row.checkpoint_id)
+    fresh = await _target(db, scope, task.target_capa_id)
+    if fresh.factory_id != target.factory_id or fresh.product_line_code != target.product_line_code:
+        raise PermissionError('D5 checkpoint unavailable')
+    return dict(items=[dict(row._mapping) for row in rows], total=total, page=page, page_size=page_size)

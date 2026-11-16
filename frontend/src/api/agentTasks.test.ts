@@ -89,3 +89,18 @@ describe("user-only task wrapper", () => {
     }]
   }])("rejects malformed/unknown page fields %j", bad => expect(() => parseActivityPage(bad)).toThrow());
 });
+it('accepts actual TaskOut immutable deployment, strict approved choices and launch timeout',async()=>{
+  const api=await import('./agentTasks');
+  vi.mocked(client.post).mockResolvedValueOnce({data:{...task,model_deployment:{deployment_id:id,name:'A',version:'1'}}});
+  expect((await createTask({report_id:id,installation_id:id,request_key:'k',initial_text:'x',model_deployment_id:id})).model_deployment?.name).toBe('A');
+  vi.mocked(client.get).mockResolvedValue({data:{items:[{deployment_id:id,name:'A',version:'1',kind:'local'}]}});
+  expect((await api.listModelDeployments()).items).toHaveLength(1);
+  vi.mocked(client.post).mockResolvedValueOnce({data:{task_id:id,status:'executed'}});
+  await api.launchTask(id);
+  expect(client.post).toHaveBeenLastCalledWith(`/agent/tasks/${id}/launch`,{},{signal:undefined,timeout:130000});
+});
+
+it('accepts strict control-only D4 recovery checkpoints in actual R5 activity pages',()=>{
+  const cp={checkpoint_type:'d4_recovery_v1',checkpoint_id:id,task_id:id,run_id:id,lease_epoch:1,tenant_generation:1,accepted_message_seq:1,update_sequence:1,protocol:'d4-recovery.v1',resume_position:'restart_from_start',created_at:task.created_at};
+  expect(()=>parseActivityPage({...page,window_end_sequence:1,items:[{kind:'checkpoint',sequence:1,created_at:task.created_at,data:cp}]})).not.toThrow();
+});

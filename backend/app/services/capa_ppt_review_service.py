@@ -82,18 +82,21 @@ class ReviewResult:
 
 
 async def review_and_correct(
-    db: AsyncSession, capa_id: uuid.UUID, pc, tenant_schema: str,
+    db: AsyncSession, capa_id: uuid.UUID, pc, tenant_schema: str, *, scope=None,
 ) -> tuple[PptContent, ReviewResult]:
     """生成 → 审查 → 校正闭环，3 轮上限。pc=None 表示 LLM 未配置。返回 (content, review)。"""
     capa = await capa_service.get_capa(db, capa_id)
     if capa is None:
         raise ValueError("CAPA 不存在")
-    content = await capa_ppt_service.generate_content(db, capa_id)
+    from app.services.capa_d5_measures import require_legacy_d5_only
+    if pc is not None:
+        await require_legacy_d5_only(db, capa_id)
+    content = await capa_ppt_service.generate_content(db, capa_id, scope=scope)
 
     # 1. 内置规则校验（不耗 LLM 轮次）
     rule_issues = capa_ppt_service._validate_ppt_content(content, capa)
     if rule_issues:
-        content = await _correct_by_issues(db, capa_id, rule_issues)
+        content = await _correct_by_issues(db, capa_id, rule_issues, scope=scope)
         # 校正后重新校验；若仍存在（数据缺失无法自动补全，§101 不编造数据），保留以暴露
         rule_issues = capa_ppt_service._validate_ppt_content(content, capa)
 
@@ -225,14 +228,14 @@ def _serialize_content(content) -> str:
     return "\n".join(lines)
 
 
-async def _correct_by_issues(db, capa_id, issues) -> PptContent:
+async def _correct_by_issues(db, capa_id, issues, *, scope=None) -> PptContent:
     """按规则 issues 重组 PptContent：重新查最新落库数据（§46「重新查数据」）。
 
     规则 issues（页数/必填非空/FMEA 一致性）属结构或数据缺口：结构由 generate_content 固定
     产出 11 页（页数 issue 不会触发）；「D 页内容为空」属数据缺失，按 §101「不编造数据」
     不可自动补全 → 残留时由 review_and_correct 短路为 needs_review（不耗 LLM 轮次）。
     """
-    return await capa_ppt_service.generate_content(db, capa_id)
+    return await capa_ppt_service.generate_content(db, capa_id, scope=scope)
 
 
 async def _correct_by_suggestions(pc, skill, content, suggestions) -> PptContent:

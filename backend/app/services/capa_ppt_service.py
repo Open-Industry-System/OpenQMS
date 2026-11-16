@@ -56,11 +56,15 @@ def _format_team_member(m) -> str:
     return str(m)
 
 
-async def generate_content(db: AsyncSession, capa_id: uuid.UUID) -> PptContent:
+async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) -> PptContent:
     """从落库数据组装 PptContent（不渲染 pptx）。"""
     capa = await db.get(CAPAEightD, capa_id)
     if capa is None:
         raise ValueError("CAPA 不存在")
+
+    from app.services.capa_d5_measures import full_d5_material, complete_d5_text
+    material = await full_d5_material(db, capa, scope=scope)
+    d5_text = complete_d5_text(capa.d5_correction, material)
 
     # D4 验证记录（含 evidence_attachments）
     verifs = (await db.execute(select(CapaRootCauseVerification).where(
@@ -112,7 +116,7 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID) -> PptContent:
             *[{"label": f"验证{i+1}", "value": f"{v['method']}/{v['result']}/verified={v['is_verified']}/附件={[a['filename'] for a in v['evidence_attachments']]}"}
               for i, v in enumerate(root_cause_verifications)],
         ]),
-        PptPage("D5 永久措施", [{"label": "措施", "value": capa.d5_correction or ""}]),
+        PptPage("D5 永久措施", [{"label": "措施", "value": d5_text}]),
         PptPage("D6 实施验证", [{"label": "验证", "value": capa.d6_verification or ""}]),
         PptPage("D7 预防复发", [
             {"label": "预防", "value": capa.d7_prevention or ""},
@@ -128,6 +132,9 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID) -> PptContent:
         ]),
         PptPage("生成信息", []),  # 占位，render_pptx 时用 meta + review 填充
     ]
+    # Later material queries may wait after the initial D5 projection.
+    if material != await full_d5_material(db, capa, scope=scope):
+        raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
     return PptContent(
         capa_id=capa_id, pages=pages,
         linked_fmea_node=linked_fmea_node, linked_scars=linked_scars,

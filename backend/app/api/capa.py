@@ -1,6 +1,8 @@
 import uuid
+from fastapi.encoders import jsonable_encoder
+from app.schemas.capa_d5_staff import D5Adopt, D5Withdraw
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -62,6 +64,7 @@ from app.schemas.capa_d3 import (
     ProvenanceEntry,
 )
 from app.schemas.capa_draft import DraftRequest, DraftResponse
+from app.schemas.capa_d5_measure import D5MeasureItem, D5MeasureList, D5ProposalItem, D5ProposalList
 from app.schemas.capa_outcome_review import CapaOutcomeReview
 from app.schemas.capa_ppt import PptExportDetailResponse
 from app.schemas.capa_verification import (
@@ -140,6 +143,67 @@ async def get_outcome_review(
     except (OutcomeReviewConflict, OutcomeReviewLimit) as exc:
         return JSONResponse(status_code=409, content={'detail': str(exc)}, headers=headers)
     return JSONResponse(content=result.model_dump(mode='json'), headers=headers)
+
+
+async def _d5_read_response(db, scope, report_id, *, kind, page=1, page_size=20, item_id=None, task_id=None, state=None):
+    from app.core.tenant_transaction import TenantUnavailable
+    from app.services import capa_d5_measures
+
+    headers = {'Cache-Control': 'no-store'}
+    read = getattr(capa_d5_measures, 'read_d5_' + kind)
+    try:
+        result = (await read(db, scope, report_id, item_id) if item_id is not None
+                  else await read(db, scope, report_id, page=page, page_size=page_size,
+                      **({'task_id': task_id, 'state': state} if kind == 'proposals' else {})))
+    except (PermissionError, TenantUnavailable):
+        return JSONResponse(status_code=403, content={'detail': 'D5 access denied'}, headers=headers)
+    except LookupError:
+        return JSONResponse(status_code=404, content={'detail': 'D5 item unavailable'}, headers=headers)
+    return JSONResponse(content=result.model_dump(mode='json'), headers=headers)
+
+
+@router.get('/{report_id}/d5-proposals', response_model=D5ProposalList)
+async def list_d5_proposals(
+    report_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    task_id: uuid.UUID | None = Query(None),
+    state: Literal['pending'] | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='proposals', page=page, page_size=page_size, task_id=task_id, state=state)
+
+
+@router.get('/{report_id}/d5-proposals/{proposal_id}', response_model=D5ProposalItem)
+async def get_d5_proposal(
+    report_id: uuid.UUID,
+    proposal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='proposal', item_id=proposal_id)
+
+
+@router.get('/{report_id}/d5-measures', response_model=D5MeasureList)
+async def list_d5_measures(
+    report_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='measures', page=page, page_size=page_size)
+
+
+@router.get('/{report_id}/d5-measures/{measure_id}', response_model=D5MeasureItem)
+async def get_d5_measure(
+    report_id: uuid.UUID,
+    measure_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    return await _d5_read_response(db, scope, report_id, kind='measure', item_id=measure_id)
 
 
 @router.get("", response_model=CAPAListResponse)
@@ -1093,7 +1157,7 @@ async def draft_capa_step(
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     if step not in {"d2", "d3", "d4", "d5", "d6", "d7", "d8"}:
         raise HTTPException(status_code=400, detail="无效的步骤")
-    result = await generate_draft(db, report_id, step, req, scope.user, request)
+    result = await generate_draft(db, report_id, step, req, scope.user, request, scope=scope)
     return DraftResponse(**result)
 
 
@@ -1383,8 +1447,10 @@ async def export_ppt(
 
     # 审查闭环 + 渲染：审查闭环异常（非 LLM 缺失）/ 渲染失败均属故事 §92 FAILED 条件 → 500，不落 export
     try:
+        from app.services.capa_d5_measures import _formal_ids
+        kwargs = {'scope': scope} if await _formal_ids(db, report_id) else {}
         content, review = await capa_ppt_review_service.review_and_correct(
-            db, report_id, pc, tenant,
+            db, report_id, pc, tenant, **kwargs,
         )
         # 最终渲染一次（审查后 review_status 已知）
         meta = capa_ppt_service.ExportMeta(
@@ -1392,6 +1458,8 @@ async def export_ppt(
             generated_at=generated_at, generated_by=scope.user.user_id,
         )
         pptx_bytes = capa_ppt_service.render_pptx(content, meta, review.status, review.rounds)
+    except PermissionError:
+        raise HTTPException(403, "D5_FULL_MATERIAL_UNAVAILABLE")
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception:
@@ -2456,3 +2524,44 @@ async def rerun_lateral_route(
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+
+
+async def _d5_staff_response(db, scope, report_id, proposal_id, operation, request):
+    from app.core.tenant_transaction import TenantUnavailable
+    from app.services.capa_d5_proposals import staff_action
+    from app.services.agent_runtime.control_authority_fence import ControlFenceBusy
+    from app.services.capa_review_guard import ReviewedContentLocked
+    from sqlalchemy.exc import DBAPIError
+    headers = {'Cache-Control': 'no-store'}
+    try:
+        result = await staff_action(db, scope, report_id, proposal_id, operation=operation,
+            operation_key=request.operation_key,
+            value=request.final_text if operation == 'adopt' else request.reason)
+    except (PermissionError, LookupError, TenantUnavailable):
+        await db.rollback()
+        return JSONResponse(status_code=404, content={'detail':'D5 item unavailable'}, headers=headers)
+    except ValueError:
+        await db.rollback()
+        return JSONResponse(status_code=409, content={'detail':'D5 operation conflict'}, headers=headers)
+    except (ControlFenceBusy, ReviewedContentLocked):
+        await db.rollback()
+        return JSONResponse(status_code=409, content={'detail':'D5 operation conflict'}, headers=headers)
+    except DBAPIError as exc:
+        await db.rollback()
+        if getattr(exc.orig, 'sqlstate', None) != '55P03': raise
+        return JSONResponse(status_code=409, content={'detail':'D5 operation conflict'}, headers=headers)
+    return JSONResponse(content=jsonable_encoder(result), headers=headers)
+
+
+@router.post('/{report_id}/d5-proposals/{proposal_id}/adopt')
+async def adopt_d5_proposal(report_id: uuid.UUID, proposal_id: uuid.UUID, request: D5Adopt,
+        db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope)):
+    return await _d5_staff_response(db, scope, report_id, proposal_id, 'adopt', request)
+
+
+@router.post('/{report_id}/d5-proposals/{proposal_id}/withdraw')
+async def withdraw_d5_proposal(report_id: uuid.UUID, proposal_id: uuid.UUID, request: D5Withdraw,
+        db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope)):
+    return await _d5_staff_response(db, scope, report_id, proposal_id, 'withdraw', request)

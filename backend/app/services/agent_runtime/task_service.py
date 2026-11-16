@@ -72,7 +72,8 @@ async def get_task_for_view(db: AsyncSession, scope: RequestScope, task_id: UUID
     capa = await _target(db, task.target_capa_id, factories, lines)
     if task.factory_id != capa.factory_id:
         raise LookupError("Task not found")
-    return task
+    from app.services.agent_runtime.model_egress import project_binding
+    return await project_binding(db, task)
 
 
 async def list_for_initiator(db: AsyncSession, scope: RequestScope, page: int,
@@ -90,6 +91,8 @@ async def list_for_initiator(db: AsyncSession, scope: RequestScope, page: int,
         items = list((await db.scalars(query.order_by(AgentTask.created_at.desc(), AgentTask.task_id)
             .offset((page - 1) * page_size).limit(page_size)
             .execution_options(populate_existing=True))).all())
+    from app.services.agent_runtime.model_egress import project_binding
+    items = [await project_binding(db, item) for item in items]
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
@@ -112,7 +115,7 @@ def _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grant
             continue
         spec = get_capability(plugin_grant.capability_id, profile=profile)
         if (plugin_grant.capability_id not in declared or not plugin_grant.enabled
-                or spec is None or spec.kind != "context"
+                or spec is None or (spec.kind != 'context' and not (profile == 'model_d5_proposal_v1' and spec.kind == 'command'))
                 or spec.approval_floor != ApprovalFloor.DIRECT):
             continue
         try:
@@ -158,7 +161,7 @@ async def _installation(db, installation_id):
     return plugin, PluginManifest.model_validate(plugin.manifest)
 
 
-async def _existing(db, user_id, request_key, report_id, installation_id, initial_text, fingerprint=None):
+async def _existing(db, user_id, request_key, report_id, installation_id, initial_text, fingerprint=None, model_deployment_id=None):
     with db.no_autoflush:
         task = await db.scalar(select(AgentTask).where(AgentTask.initiator_id == user_id,
             AgentTask.request_key == request_key).execution_options(populate_existing=True))
@@ -171,18 +174,28 @@ async def _existing(db, user_id, request_key, report_id, installation_id, initia
             or task.preferred_installation_id != installation_id or message != initial_text
             or fingerprint is not None and not matches_request_fingerprint(source_request, fingerprint)):
         raise ValueError("Request key reused with different arguments")
-    return task
+    from app.models.agent_model_deployment import AgentTaskModelBinding
+    existing_model = await db.get(AgentTaskModelBinding, task.task_id, populate_existing=True)
+    if (None if existing_model is None else existing_model.deployment_id) != model_deployment_id:
+        raise ValueError('Request key reused with different model deployment')
+    from app.services.agent_runtime.model_egress import project_binding
+    return await project_binding(db, task)
 
 
 async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
                        installation_id: UUID, request_key: str, initial_text: str,
-                       *, derived_source_scope=None) -> AgentTask:
+                       *, derived_source_scope=None, model_deployment_id=None) -> AgentTask:
     request = TaskCreate(report_id=report_id, installation_id=installation_id,
-        request_key=request_key, initial_text=initial_text, derived_source_scope=derived_source_scope)
+        request_key=request_key, initial_text=initial_text, derived_source_scope=derived_source_scope, model_deployment_id=model_deployment_id)
     levels, factories, lines = await _current_access(db, scope)
     capa = await _target(db, request.report_id, factories, lines)
     plugin, manifest = await _installation(db, request.installation_id)
-    is_text = plugin.plugin_key == TEXT_PLUGIN_KEY
+    from app.services.agent_runtime import model_egress
+    is_r5 = plugin.plugin_key == model_egress.R5_PLUGIN_KEY
+    if is_r5 != (request.model_deployment_id is not None):
+        raise ValueError('Model deployment required only for R5')
+    selected_model = await model_egress.deployment(db, request.model_deployment_id) if is_r5 else None
+    is_text = plugin.plugin_key == TEXT_PLUGIN_KEY or is_r5
     fingerprint = None
     requested_source = None
     if is_text:
@@ -194,7 +207,7 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
     elif request.derived_source_scope is not None:
         raise ValueError('Source scope unsupported')
     existing = await _existing(db, scope.user.user_id, request.request_key,
-        request.report_id, request.installation_id, request.initial_text, fingerprint)
+        request.report_id, request.installation_id, request.initial_text, fingerprint, request.model_deployment_id)
     if existing is not None:
         return existing
     if is_text and request.derived_source_scope is not None:
@@ -209,6 +222,13 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
     task_id = uuid4()
     trial = trial_for_target(db, plugin, scope.user.user_id, capa)
     current_source = await current_source_for_target(db, scope, capa) if is_text else None
+    # The sidebar's explicit root-only action has no client-supplied source
+    # coordinates. Bind it to the one current visible proof, then apply the
+    # same source validation and plugin/task intersection as an explicit input.
+    # Free chat and the older text profile retain their existing contracts.
+    if (is_r5 and request.initial_text == 'deliver_d4_root_cause_candidate_v1'
+            and request.derived_source_scope is None and current_source is not None):
+        requested_source = await validate_explicit_source(db, scope, capa, current_source)
     grants, ready = _read_grants(task_id, capa, manifest, levels, factories, lines, plugin_grants, trial=trial,
         current_source=current_source, requested_source=requested_source,
         plugin_source_scopes={row.plugin_grant_id: scope_from_row(row) for row in source_rows})
@@ -225,6 +245,9 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
         async with db.begin_nested():
             db.add(task)
             await db.flush()
+            if selected_model is not None:
+                from app.models.agent_model_deployment import AgentTaskModelBinding
+                db.add(AgentTaskModelBinding(task_id=task_id, deployment_id=selected_model.deployment_id, config_hmac=selected_model.config_hmac))
             if fingerprint is not None:
                 db.add(AgentTaskSourceRequest(task_id=task_id, request_fingerprint=fingerprint,
                     fingerprint_format='d4-source-request.v1'))
@@ -268,7 +291,7 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
         await require_current_capa_view(db, scope, request.report_id)
         await _installation(db, request.installation_id)
         existing = await _existing(db, scope.user.user_id, request.request_key,
-            request.report_id, request.installation_id, request.initial_text, fingerprint)
+            request.report_id, request.installation_id, request.initial_text, fingerprint, request.model_deployment_id)
         if existing is None:
             raise
         return existing
@@ -284,4 +307,5 @@ async def create_task(db: AsyncSession, scope: RequestScope, report_id: UUID,
             from app.services.agent_runtime.runtime_access import authorize_task
             await authorize_task(db, task, current_plugin)
     await db.commit()
-    return task
+    from app.services.agent_runtime.model_egress import project_binding
+    return await project_binding(db, task)

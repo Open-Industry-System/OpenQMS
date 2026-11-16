@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     AGENT_TASK_ATTACHMENT_CLAMAV_HOST: str = ""
     AGENT_TASK_ATTACHMENT_CLAMAV_PORT: int = Field(default=3310, ge=1, le=65535)
     AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=60)
+    AGENT_R5_CONTROLLED_ENABLED: bool = False
+    AGENT_R5_CONTROLLED_POLICY_FILE: str | None = None
     AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED: bool = False
     AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE: str | None = None
     AGENT_LOCAL_TRIAL_MODE: str = "disabled"

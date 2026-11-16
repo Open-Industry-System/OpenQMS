@@ -10,7 +10,7 @@ from app.services.capa_current_access import (
 
 REVIEWED_STATES = frozenset({"D8_CLOSURE", "ARCHIVED"})
 REVIEWED_FIELDS = frozenset({
-    "d4_root_cause", "d5_correction", "d6_verification", "d7_prevention",
+    "d4_root_cause", "d5_correction", "d5_measures", "d5_proposals", "d6_verification", "d7_prevention",
     "d4_retry_count", "fmea_ref_id", "fmea_node_id", "factory_id",
     "product_line_code", "supplier_id", "severity",
 })

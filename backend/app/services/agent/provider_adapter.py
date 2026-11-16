@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,7 @@ class ProviderClient:
 class AssistantTurn:
     content: str  # assistant text (may be "")
     tool_calls: list[dict]  # [{"name": str, "arguments": dict}]
+    response_items: list[dict] | None = field(default=None, repr=False)
 
 
 class ProviderNotConfiguredError(RuntimeError):
@@ -80,7 +81,7 @@ def tools_schema_for(pc: ProviderClient, tool_specs) -> list[dict]:
     """Convert ToolSpecs to the SDK-native tool schema shape (openai vs anthropic)."""
     out = []
     for spec in tool_specs:
-        if pc.provider == "openai":
+        if pc.provider in {"openai", "openai_responses"}:
             out.append(
                 {
                     "type": "function",
@@ -111,6 +112,9 @@ async def chat_with_tools(
     message in `messages`; the harness (Task 11) passes system prompt separately
     and this function routes it correctly per provider.
     """
+    if pc.provider == "openai_responses":
+        from app.services.agent.responses_adapter import chat_with_tools as responses_turn
+        return await responses_turn(pc, messages, tools)
     if pc.provider == "local":
         raise ProviderNotConfiguredError("local provider does not support tool-calling")
     if pc.provider == "openai":
@@ -160,6 +164,8 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     Both enforce MAX_RESPONSE_BYTES and use extract_json for fenced JSON.
     local: httpx POST {base_url}/api/generate (mirrors legacy LocalProvider.complete).
     """
+    if pc.provider == "openai_responses":
+        raise ProviderNotConfiguredError("Responses deployments use the approved R5 tool-turn route")
     messages = [{"role": "user", "content": prompt}]
     if pc.provider == "openai":
         try:
@@ -200,3 +206,25 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     if len(text.encode()) > MAX_RESPONSE_BYTES:
         raise ValueError("LLM response too large")
     return extract_json(text)
+
+
+def build_deployment_client(provider: str, model: str, base_url: str, credential: str, *, transport,
+                            api_protocol: str = "chat_completions") -> ProviderClient:
+    """R5 exact approved recipient. Never read default AI config or retry/fallback."""
+    import httpx
+    if api_protocol not in {"chat_completions", "responses"} or (api_protocol == "responses" and provider != "openai"):
+        raise ProviderNotConfiguredError('Unsupported approved model protocol')
+    http_client = httpx.AsyncClient(transport=transport, follow_redirects=False,
+        trust_env=False, timeout=30)
+    if provider == 'openai':
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=credential, base_url=base_url,
+            http_client=http_client, max_retries=0)
+    elif provider == 'anthropic':
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=credential, base_url=base_url,
+            http_client=http_client, max_retries=0)
+    else:
+        raise ProviderNotConfiguredError('Unsupported approved model protocol')
+    return ProviderClient(provider="openai_responses" if api_protocol == "responses" else provider,
+                          client=client, model=model)

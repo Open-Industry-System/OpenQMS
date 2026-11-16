@@ -78,3 +78,9 @@ FMEA/控制计划等通过范围约束查询的 UUID 不可见对象返回404，
 PR #38首轮 `Test OpenQMS`（run `43827639514`）的 `oracle-automation-checks` 为122 passed /1 failed /16 subtests passed，失败为预览ERP配置测试导入 `yaml` 时缺少PyYAML；该作业此前只安装pytest。本次在该作业中显式声明 `PyYAML==6.0.3`，保留YAML语义校验和所有业务断言。前端、3个SDK版本、文档、浏览器保护首轮已通过；后端查询时仍在运行，不能提前记为远端全绿。
 
 隔离本地Python3.11.15环境仅安装 `pytest==9.2.0` 与 `PyYAML==6.0.3`，运行 `python -m pytest -q tests -p no:cacheprovider`：123 passed /16 subtests passed，退出0。生产代码及测试断言均未改变；远端Python3.12的重跑结果需另行核实。
+
+## 与最新main整合
+
+用户授权检查无问题后合并PR #38。准备合并时main已前进21个提交至 `f8b8d988`（R5/D5/Responses整合），原PR出现9个文本冲突。模型注册与双方进度记录均保留；公有迁移新增无DDL合并节点 `20261116_security_main_merge`，父节点为 `20261115_r5_responses` 和 `20261116_platform_login_limits`，不重写任何已发布迁移。tenant仍为 `tv014_r5_responses`，平台限流表继续从租户业务投影中排除。
+
+整合后独占PG15空库升级成功；164项迁移/权限/凭据回归通过，包含从主线、安全分支、两个旧head同时存在三种起点升级并保留历史与限流状态。前端102文件/919项单测、类型和生产构建通过。上述结果取代旧代码规模的整合判断，旧完整5434项收据仍只证明原安全修复基线；最终远端CI与本机R5原生结果以PR当前head的检查及交接回执为准。ClamAV已验收的3个附件运行时文件哈希未改变，没有将先前结果冒充新代码实跑。
