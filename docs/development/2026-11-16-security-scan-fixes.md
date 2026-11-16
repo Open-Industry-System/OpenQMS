@@ -72,3 +72,9 @@ FMEA/控制计划等通过范围约束查询的 UUID 不可见对象返回404，
 - 后端5项跳过：1项本机未配置PG15 dump/restore工具、1项Redis不可用、3项显式E2E_MODE未启用。19项按既有门禁标记排除；普通 `make check` 不包含浏览器、真实模型提供商和真实扫描器门禁，ClamAV结果来自单独实跑。未执行真实模型调用、远端CI、云端复扫或部署。
 - 完整后端收据：`/private/tmp/openqms-security-20261116-w1xwf2od/artifacts-final-pass/api-20261116T063607549389-receipt.json`；完整检查日志：`/tmp/openqms-security-final-pass-check.log`。初次失败日志、源码哈希和对照记录均保留，未将失败运行计作通过。
 - 本轮主验收PG容器和卷已按完整ID、owner标签及唯一消费者核对后删除；清理前客户端0、应用哨兵库public表0，删除后容器/卷余量0，临时测试凭据已删除。清理收据：`/private/tmp/openqms-security-20261116-w1xwf2od/cleanup-final.json`。源码、私有验证日志和独立工作树保留；上述验收结束时尚未提交、推送、合并或部署。用户随后授权提交并推送独立修复分支，发布结果以Git记录及交接回执为准；不自动合并或部署。
+
+## PR远端CI跟进
+
+PR #38首轮 `Test OpenQMS`（run `43827639514`）的 `oracle-automation-checks` 为122 passed /1 failed /16 subtests passed，失败为预览ERP配置测试导入 `yaml` 时缺少PyYAML；该作业此前只安装pytest。本次在该作业中显式声明 `PyYAML==6.0.3`，保留YAML语义校验和所有业务断言。前端、3个SDK版本、文档、浏览器保护首轮已通过；后端查询时仍在运行，不能提前记为远端全绿。
+
+隔离本地Python3.11.15环境仅安装 `pytest==9.2.0` 与 `PyYAML==6.0.3`，运行 `python -m pytest -q tests -p no:cacheprovider`：123 passed /16 subtests passed，退出0。生产代码及测试断言均未改变；远端Python3.12的重跑结果需另行核实。

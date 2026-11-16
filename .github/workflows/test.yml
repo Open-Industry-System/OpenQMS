@@ -422,5 +422,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install pytest
+      - name: Install Oracle automation test dependencies
+        run: python -m pip install pytest PyYAML==6.0.3
       - run: python -m pytest -q tests
