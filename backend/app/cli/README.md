@@ -8,6 +8,8 @@ uses normal authenticated HTTP and never performs privileged database writes.
 
 ## File Organisation
 
+- **`bootstrap_admin.py`** — single-tenant operator-only administrator creation/reset with a private terminal prompt; no default administrator password. `--replace-existing` explicitly resets an existing account and revokes refresh sessions. See [security remediation](../../../docs/development/2026-11-16-security-scan-fixes.md).
+
 - **`graph_rebuild.py`** — full Neo4j projection rebuild and GraphSyncOutbox
   recovery; `--retry-failed` resets dead events.
 - **`tenant_migrate.py`** — migrate one or every active tenant and record the

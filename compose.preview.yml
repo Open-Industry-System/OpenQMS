@@ -28,6 +28,8 @@ x-app-env: &app-env
   LLM_API_KEY: ''
   EMBEDDING_PROVIDER: ''
   EMBEDDING_API_KEY: ''
+  # Preview never inherits production manufacturing destinations.
+  ERP_ALLOWED_ORIGINS: '{}'
 services:
   db:
     <<: *bounded

@@ -42,3 +42,7 @@ PR #37从804f8551正常合入当前main d0c7394e；仅PROGRESS并发记录需要
 这是macOS同机、同解释器／安装依赖指纹、源码前后指纹一致的局部组对照，不是Actions job；没有pip安装，因此pip冷热未测得。主机不独占，结束load A约15、B约6.7；未改模块call也漂移超过5%，按既定规则正在补反向B/A，不将这次wall差异解释为整套节省。既有本地全量A/B失败记录仍保留；新main全量受控对照未完成。
 
 证据位于/tmp/openqms-pr37-followup/：source-difference.json、comparison.json、before/after/result.json、模块日志与cleanup-result.json。反向对照独立保存在reverse/；不覆盖原始数据。新PR CI仍运行一次正常全量，不因计时添加收集或执行。
+
+反向B/A已完成：优化setup117.60秒、原配置338.54秒；重建模块14.14／194.90秒；API CLI wall284.71／521.53秒。四轮均78 passed、无skip、集合摘要同一；四套专用容器／卷及凭据均已核验清理。目标setup效果在两个顺序中重复出现，未改模块call／负载仍有漂移，因此不签收整套速度结论。
+
+等待期间main合入安全PR #38，推进至baa276aa，包含public登录限制迁移及tenant_schema_diff排除表更新，也独立修复了历史knowledge_sink并发竞态。上述四轮数据仍属d0c7394e快照；同步安全主线后补正常78项API兼容／隔离验证并重跑当前合并候选CI，不以旧成功结果替代新基线。

@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     SEARCH_VECTOR_WEIGHT: float = 0.7   # weight for vector search in RRF
     SEARCH_FULLTEXT_WEIGHT: float = 0.3 # weight for fulltext search in RRF
 
+    # Exact ERP origins -> deployment-approved resolved CIDRs (JSON env value).
+    ERP_ALLOWED_ORIGINS: dict[str, list[str]] = Field(default_factory=dict)
+
     # E2E test mode: enables /api/e2e/* endpoints. NEVER true in production.
     E2E_MODE: bool = False
 

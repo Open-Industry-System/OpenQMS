@@ -91,12 +91,12 @@ class PrivateAttachmentStorage:
         with self._area_fd(namespace, "staging") as area_fd:
             fd = os.open(
                 self._attachment_name(attachment_id),
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                 0o600,
                 dir_fd=area_fd,
             )
         os.fchmod(fd, 0o600)
-        return os.fdopen(fd, "wb")
+        return os.fdopen(fd, "w+b")
 
     def promote(
         self,

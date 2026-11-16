@@ -822,3 +822,62 @@ async def test_issuance_locks_user_before_cleaning_expired_sessions(sessionmaker
             )
             await cleanup_db.execute(delete(User).where(User.user_id == user_id))
             await cleanup_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_reusing_predecessor_revokes_successor(admin_client, db, default_factory):
+    user = await make_loginable_viewer(db, default_factory, f"reuse_{uuid.uuid4().hex[:8]}")
+    login = await admin_client.post("/api/auth/login", json={"username": user.username, "password": VALID_PASSWORD})
+    original = login.json()["refresh_token"]
+    first = await admin_client.post("/api/auth/refresh", json={"refresh_token": original})
+    assert first.status_code == 200
+    successor = first.json()["refresh_token"]
+    replay = await admin_client.post("/api/auth/refresh", json={"refresh_token": original})
+    assert replay.status_code == 401
+    rejected = await admin_client.post("/api/auth/refresh", json={"refresh_token": successor})
+    assert rejected.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_rotation_does_not_extend_session_absolute_expiry(admin_client, db, default_factory):
+    user = await make_loginable_viewer(db, default_factory, f"expiry_{uuid.uuid4().hex[:8]}")
+    login = await admin_client.post("/api/auth/login", json={"username": user.username, "password": VALID_PASSWORD})
+    original = login.json()["refresh_token"]
+    payload = decode_refresh_token(original)
+    row = await db.get(UserRefreshSession, uuid.UUID(payload["sid"]))
+    absolute_expiry = datetime.now(UTC) + timedelta(minutes=2)
+    row.expires_at = absolute_expiry
+    await db.flush()
+    refreshed = await admin_client.post("/api/auth/refresh", json={"refresh_token": original})
+    assert refreshed.status_code == 200
+    assert row.expires_at == absolute_expiry
+    assert decode_refresh_token(refreshed.json()["refresh_token"])["exp"] == int(absolute_expiry.timestamp())
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_session_server_side(admin_client, db, default_factory):
+    user = await make_loginable_viewer(db, default_factory, f"logout_{uuid.uuid4().hex[:8]}")
+    login = await admin_client.post("/api/auth/login", json={"username": user.username, "password": VALID_PASSWORD})
+    original = login.json()["refresh_token"]
+    assert (await admin_client.post("/api/auth/logout", json={"refresh_token": original})).status_code == 204
+    assert (await admin_client.post("/api/auth/refresh", json={"refresh_token": original})).status_code == 401
+    assert (await admin_client.post("/api/auth/logout", json={"refresh_token": original})).status_code == 204
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["replay", "logout"])
+async def test_legacy_upgrade_keeps_absolute_expiry_and_family_revocation(admin_client, db, default_factory, operation):
+    user = await make_loginable_viewer(db, default_factory, f"legacy_family_{uuid.uuid4().hex[:8]}")
+    legacy, _ = create_refresh_token(str(user.user_id))
+    absolute = datetime.now(UTC) + timedelta(minutes=2)
+    user.refresh_token, user.refresh_token_expires = legacy, absolute
+    await db.flush()
+    upgraded = await admin_client.post("/api/auth/refresh", json={"refresh_token": legacy})
+    assert upgraded.status_code == 200
+    successor = upgraded.json()["refresh_token"]
+    assert decode_refresh_token(successor)["exp"] == int(absolute.timestamp())
+    endpoint = "/api/auth/refresh" if operation == "replay" else "/api/auth/logout"
+    predecessor = await admin_client.post(endpoint, json={"refresh_token": legacy})
+    assert predecessor.status_code == (401 if operation == "replay" else 204)
+    final = await admin_client.post("/api/auth/refresh", json={"refresh_token": successor})
+    assert final.status_code == 401

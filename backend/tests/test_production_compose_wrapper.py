@@ -170,6 +170,7 @@ Path(os.environ["DOCKER_CAPTURE"]).write_text(json.dumps({
     ),
     "docker_host": os.environ.get("DOCKER_HOST"),
     "release_sha": os.environ.get("RELEASE_SHA"),
+    "erp_allowed_origins": os.environ.get("ERP_ALLOWED_ORIGINS"),
 }))
 """
     )
@@ -645,3 +646,16 @@ def test_wrapper_disables_inherited_xtrace_before_parsing_values(tmp_path):
         POISON not in result.stdout + result.stderr,
         "ambient poison leaked under xtrace",
     )
+
+
+@pytest.mark.parametrize("policy", [None, '{"https://erp.internal":["10.20.0.10/32"]}'])
+def test_optional_erp_policy_is_file_controlled_with_closed_legacy_default(tmp_path, policy):
+    text = _env_text()
+    if policy is not None:
+        text += f"ERP_ALLOWED_ORIGINS={policy}\n"
+    result, capture, _ = _run_wrapper(tmp_path, text, "config", extra_env={"ERP_ALLOWED_ORIGINS": POISON})
+    assert result.returncode == 0
+    recorded = json.loads(capture.read_text())
+    assert recorded["erp_allowed_origins"] == (policy if policy is not None else "{}")
+    assert recorded["poison_present"] is False
+    assert result.stdout == result.stderr == ""

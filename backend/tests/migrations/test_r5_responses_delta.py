@@ -60,7 +60,7 @@ def test_paired_protocol_deltas_preserve_published_parents_and_single_heads():
     public = (root / 'alembic/versions/20261115_r5_responses.py').read_text()
     tenant = (root / 'alembic_tenant/versions/tv014_r5_responses.py').read_text()
     assert public.replace(PUBLIC, TENANT).replace(PARENT, TENANT_PARENT) == tenant
-    for directory, expected in [('alembic', PUBLIC), ('alembic_tenant', TENANT)]:
+    for directory, expected in [('alembic', '20261116_security_main_merge'), ('alembic_tenant', TENANT)]:
         config = Config(); config.set_main_option('script_location', str(root / directory))
         assert ScriptDirectory.from_config(config).get_heads() == [expected]
 

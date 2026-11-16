@@ -1,7 +1,7 @@
 """Authorized, scan-gated lifecycle for private agent task attachments.
 
 This service deliberately has no HTTP or multipart knowledge.  A caller reserves
-one bounded slot, streams it through the scanner, and receives only safe
+one bounded task/principal slot, stages bounded input, then scans local bytes for safe
 metadata or a descriptor-backed download handle.
 """
 from __future__ import annotations
@@ -25,6 +25,7 @@ from app.core.tenant_transaction import TenantBinding
 from app.models.agent_task import AgentTask
 from app.models.agent_task_attachment import AgentTaskAttachment
 from app.models.audit import AuditLog
+from app.models.user import User
 from app.services.agent_runtime import attachment_storage, clamav_scan, task_service
 
 
@@ -91,7 +92,7 @@ class ReservedAttachment:
     db: AsyncSession
     scope: RequestScope
     binding: TenantBinding | None
-    lock_connection: AsyncConnection
+    lock_connection: AsyncConnection | None = None
     slot_released: bool = False
 
     async def __aenter__(self) -> ReservedAttachment:
@@ -127,7 +128,7 @@ def _storage() -> attachment_storage.PrivateAttachmentStorage:
 
 
 def _lock_key() -> int:
-    """One process-independent scanner/upload pipeline slot for every task."""
+    """One process-independent scanner/promotion slot, never held for input pacing."""
     return int.from_bytes(
         hashlib.sha256(_LOCK_NAMESPACE.to_bytes(8, "big")).digest()[:8],
         "big",
@@ -135,7 +136,12 @@ def _lock_key() -> int:
     )
 
 
-async def _acquire_slot_lock(db: AsyncSession) -> AsyncConnection:
+def _storage_lock_key() -> int:
+    return int.from_bytes(hashlib.sha256(b"attachment-storage-metadata").digest()[:8], "big", signed=True)
+
+
+async def _acquire_slot_lock(db: AsyncSession, *, key: int | None = None) -> AsyncConnection:
+    key = _lock_key() if key is None else key
     bind = db.bind
     if bind is None or not hasattr(bind, "connect"):
         raise RuntimeError("attachment reservation requires an engine-bound session")
@@ -143,11 +149,11 @@ async def _acquire_slot_lock(db: AsyncSession) -> AsyncConnection:
     try:
         # Session advisory locks are reentrant: pooled lock contamination must
         # be discarded instead of treated as a successful fresh acquisition.
-        preheld = await connection.scalar(text(_PREHELD_LOCK_SQL), {"key": _lock_key()})
+        preheld = await connection.scalar(text(_PREHELD_LOCK_SQL), {"key": key})
         if preheld:
             await connection.invalidate()
             raise RuntimeError("attachment pipeline connection was pre-locked")
-        held = await connection.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": _lock_key()})
+        held = await connection.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})
         if not held:
             raise AttachmentCapacityError("attachment pipeline is busy")
         await connection.commit()
@@ -160,13 +166,14 @@ async def _acquire_slot_lock(db: AsyncSession) -> AsyncConnection:
         raise
 
 
-async def _release_lock_connection(connection: AsyncConnection) -> None:
+async def _release_lock_connection(connection: AsyncConnection, *, key: int | None = None) -> None:
+    key = _lock_key() if key is None else key
     try:
         if connection.invalidated:
             return
         if connection.in_transaction():
             await connection.rollback()
-        released = await connection.scalar(text("SELECT pg_advisory_unlock(:key)"), {"key": _lock_key()})
+        released = await connection.scalar(text("SELECT pg_advisory_unlock(:key)"), {"key": key})
         if not released:
             raise RuntimeError("attachment pipeline lock release failed")
         await connection.rollback()
@@ -181,7 +188,9 @@ async def _release_slot_lock(reservation: ReservedAttachment) -> None:
     if reservation.slot_released:
         return
     try:
-        await _release_lock_connection(reservation.lock_connection)
+        if reservation.lock_connection is not None:
+            await _release_lock_connection(reservation.lock_connection)
+            reservation.lock_connection = None
     finally:
         reservation.slot_released = True
 
@@ -191,9 +200,22 @@ async def maintenance_pipeline_lock(db: AsyncSession):
     """Serialize non-user recovery with the normal scan/promotion pipeline."""
     connection = await _acquire_slot_lock(db)
     try:
-        yield
+        async with _staging_metadata_lock(db):
+            yield
     finally:
         await _release_lock_connection(connection)
+
+
+@asynccontextmanager
+async def _staging_metadata_lock(db: AsyncSession):
+    # Recovery's snapshot and unreferenced-file sweep must exclude new file
+    # creation, while existing nonexpired staging streams remain independent.
+    key = _storage_lock_key()
+    connection = await _acquire_slot_lock(db, key=key)
+    try:
+        yield
+    finally:
+        await _release_lock_connection(connection, key=key)
 
 
 async def _locked_task(db: AsyncSession, scope: RequestScope, preauthorized: AgentTask) -> AgentTask:
@@ -250,13 +272,20 @@ def _audit(db: AsyncSession, attachment: AgentTaskAttachment, actor_id: UUID, ac
 
 
 async def reserve_upload(db: AsyncSession, scope: RequestScope, task_id: UUID) -> ReservedAttachment:
-    """Reserve one serialized task slot and commit before a caller reads bytes."""
+    """Reserve task/principal quota and commit without taking scanner capacity."""
     binding = db.info.get("tenant_binding")
     if binding is not None and not isinstance(binding, TenantBinding):
         raise AttachmentSourceChanged("attachment tenant binding changed")
     preauthorized = await task_service.get_task_for_view(db, scope, task_id)
-    lock_connection = await _acquire_slot_lock(db)
     try:
+        # Serialize this principal's inflight quota across all of their tasks.
+        # The row lock lasts only through the reservation commit, never input.
+        # Serialize quota writers while allowing audit inserts to take the
+        # uploader foreign key's KEY SHARE lock during final task publication.
+        user_id = await db.scalar(select(User.user_id).where(User.user_id == scope.user.user_id)
+                                  .with_for_update(key_share=True))
+        if user_id is None:
+            raise AttachmentSourceChanged("attachment uploader changed")
         task = await _locked_task(db, scope, preauthorized)
         if task.status not in {"ready", "paused"}:
             raise AttachmentTaskStateError("task is not accepting attachments")
@@ -276,6 +305,18 @@ async def reserve_upload(db: AsyncSession, scope: RequestScope, task_id: UUID) -
         )
         if active_count >= settings.AGENT_TASK_ATTACHMENT_MAX_PER_TASK:
             raise AttachmentCapacityError("attachment capacity reached")
+        inflight_count = await db.scalar(select(func.count()).select_from(AgentTaskAttachment).where(
+            AgentTaskAttachment.uploaded_by == scope.user.user_id,
+            or_(
+                AgentTaskAttachment.status == "promoting",
+                (AgentTaskAttachment.status == "scanning") & or_(
+                    AgentTaskAttachment.reservation_expires_at.is_(None),
+                    AgentTaskAttachment.reservation_expires_at > now,
+                ),
+            ),
+        ))
+        if inflight_count >= settings.AGENT_TASK_ATTACHMENT_MAX_PER_TASK:
+            raise AttachmentCapacityError("attachment uploader inflight capacity reached")
         tenant_id, generation, namespace = _storage_namespace(binding)
         attachment = AgentTaskAttachment(
             task_id=task.task_id,
@@ -300,12 +341,9 @@ async def reserve_upload(db: AsyncSession, scope: RequestScope, task_id: UUID) -
             db=db,
             scope=scope,
             binding=binding,
-            lock_connection=lock_connection,
         )
     except BaseException:
         await db.rollback()
-        await _release_slot_lock(ReservedAttachment(task_id=task_id, attachment_id=task_id, db=db,
-            scope=scope, binding=binding, lock_connection=lock_connection))
         raise
 
 
@@ -358,13 +396,19 @@ async def receive_and_scan(
     size = 0
     digest = hashlib.sha256()
     try:
-        attachment = await db.get(AgentTaskAttachment, reservation.attachment_id)
-        if attachment is None or attachment.status != "scanning":
-            raise LookupError("attachment reservation not found")
-        file_handle = storage.create_staging(_namespace(attachment), attachment.attachment_id)
+        async with _staging_metadata_lock(db):
+            attachment = await db.get(AgentTaskAttachment, reservation.attachment_id, populate_existing=True)
+            if attachment is None or attachment.status != "scanning":
+                raise LookupError("attachment reservation not found")
+            deadline = attachment.reservation_expires_at
+            if deadline is None or deadline <= _now():
+                raise _ReservationExpired("attachment reservation expired")
+            file_handle = storage.create_staging(_namespace(attachment), attachment.attachment_id)
+            await db.commit()
 
-        async def staged_chunks() -> AsyncIterator[bytes]:
-            nonlocal size
+        # Client-controlled pacing consumes only the caller's durable quota.
+        # The scanner is admitted only after the bounded file is complete.
+        async with asyncio.timeout((deadline - _now()).total_seconds()):
             async for chunk in chunks:
                 if not isinstance(chunk, bytes):
                     raise AttachmentInputLimitError("attachment input must be bytes")
@@ -373,12 +417,20 @@ async def receive_and_scan(
                     raise AttachmentInputLimitError("attachment input limit exceeded")
                 file_handle.write(chunk)
                 digest.update(chunk)
-                yield chunk
+            file_handle.flush()
+            file_handle.seek(0)
+            reservation.lock_connection = await _acquire_slot_lock(db)
+            # Recovery may have expired this row while the stream was stalled.
+            attachment = await db.get(AgentTaskAttachment, reservation.attachment_id, populate_existing=True)
+            if (attachment is None or attachment.status != "scanning"
+                    or attachment.reservation_expires_at is None or attachment.reservation_expires_at <= _now()):
+                raise _ReservationExpired("attachment reservation expired")
+            await db.commit()
 
-        remaining = (attachment.reservation_expires_at - _now()).total_seconds() if attachment.reservation_expires_at else 0
-        if remaining <= 0:
-            raise _ReservationExpired("attachment reservation expired")
-        async with asyncio.timeout(remaining):
+            async def staged_chunks() -> AsyncIterator[bytes]:
+                while chunk := file_handle.read(64 * 1024):
+                    yield chunk
+
             scan = await clamav_scan.scan_stream(
                 staged_chunks(),
                 host=settings.AGENT_TASK_ATTACHMENT_CLAMAV_HOST,
@@ -445,6 +497,11 @@ async def receive_and_scan(
         await db.commit()
         await db.refresh(attachment)
         return _view(attachment)
+    except AttachmentCapacityError:
+        if file_handle is not None:
+            file_handle.close()
+        await _transition_failure(reservation, status="failed_storage", failure_code="scanner_busy")
+        raise
     except AttachmentSourceChanged:
         if file_handle is not None:
             file_handle.close()
@@ -480,7 +537,11 @@ async def receive_and_scan(
         assert attachment is not None
         return _view(attachment)
     finally:
-        await _release_slot_lock(reservation)
+        try:
+            if file_handle is not None:
+                file_handle.close()
+        finally:
+            await _release_slot_lock(reservation)
 
 
 # Aliasing the primitive error keeps the narrow exception clause readable while

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { User } from "../types";
 
 const api = vi.hoisted(() => ({ login: vi.fn(), getMe: vi.fn(), refreshToken: vi.fn() }));
@@ -344,5 +344,38 @@ describe("idle storage and usable refresh tokens", () => {
       storedRefreshToken: "bob-refresh",
       state: { token: null, user: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null },
     });
+  });
+});
+
+
+afterEach(() => { vi.unstubAllGlobals(); });
+
+describe("server-side logout", () => {
+  it("revokes the captured refresh session while clearing local state immediately", async () => {
+    const fetchRequest = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchRequest);
+    localStorage.setItem("access_token", "logout-access");
+    localStorage.setItem("refresh_token", "logout-refresh");
+    useAuthStore.setState({ token: "logout-access", user: oldUser });
+    useAuthStore.getState().logout();
+    expect(localStorage.getItem("refresh_token")).toBeNull();
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(fetchRequest).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ refresh_token: "logout-refresh" }),
+      headers: expect.objectContaining({ Authorization: "Bearer logout-refresh" }),
+    }));
+  });
+
+  it("does not restore an identity when revocation fails after a new login", async () => {
+    const pending = deferred<Response>();
+    void pending.promise.catch(() => {});
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(pending.promise));
+    localStorage.setItem("refresh_token", "old-refresh");
+    useAuthStore.getState().logout();
+    localStorage.setItem("access_token", "new-access");
+    useAuthStore.setState({ token: "new-access", user: newUser });
+    pending.reject(new Error("offline"));
+    await Promise.resolve();
+    expect(useAuthStore.getState().token).toBe("new-access");
   });
 });

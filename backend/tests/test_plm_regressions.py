@@ -23,7 +23,7 @@ from app.api import plm as plm_api
 from app.core.deps import get_request_scope
 from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.core.permissions import PermissionLevel, Module, get_user_permission
-from app.models.plm import PLMPartFMEALink
+from app.models.plm import PLMConnection, PLMPartFMEALink
 from app.models.special_characteristic import SpecialCharacteristic as SpecialCharacteristicModel
 from app.models.special_characteristic_link import SpecialCharacteristicLink
 from app.schemas import plm as plm_schemas
@@ -58,6 +58,21 @@ class _FakeDb:
         self.executed = []
         self.commits = 0
         self.flushed = 0
+        # Orchestration fixtures describe valid, same-scope parents. Keep these
+        # identity lookups separate from queued query results; real missing and
+        # cross-scope parent behavior is covered by test_security_scope_db.py.
+        self.connections = {
+            item.connection_id: PLMConnection(
+                connection_id=item.connection_id,
+                product_line_code=getattr(item, "product_line_code", None),
+                factory_id=getattr(item, "factory_id", None),
+            )
+            for item in self._results if getattr(item, "connection_id", None)
+        }
+
+    async def get(self, model, key):
+        assert model is PLMConnection
+        return self.connections.get(key)
 
     async def execute(self, stmt):
         self.executed.append(stmt)

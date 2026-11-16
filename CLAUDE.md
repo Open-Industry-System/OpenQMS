@@ -91,7 +91,7 @@ Requires `.env.e2e` (copy from `.env.e2e.example`) for LLM credentials. See `doc
 
 | Username | Password | Role |
 |----------|----------|------|
-| admin | Admin@2026 | admin |
+| admin | Private bootstrap CLI | admin |
 | engineer | Engineer@2026 | quality_engineer |
 | manager | Manager@2026 | manager |
 | viewer | Viewer@2026 | viewer |

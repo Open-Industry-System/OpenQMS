@@ -74,6 +74,10 @@ async def test_masked_key_sentinel_keeps_stored_key(db, admin_user):
     """Submitting the masked sentinel must not overwrite the stored key."""
     real_key = "sk-real-key-" + uuid.uuid4().hex
     await _seed_setting(db, "llm_api_key", real_key)
+    await _seed_setting(db, "llm_provider", "openai")
+    await _seed_setting(db, "llm_base_url", "")
+    await _seed_setting(db, "embedding_provider", "")
+    await _seed_setting(db, "embedding_base_url", "")
 
     await update_ai_config(db, _make_update(), admin_user.user_id, SimpleNamespace())
 

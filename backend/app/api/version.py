@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access
+from app.core.factory_scope import authorize_object, check_factory_access
 from app.core.permissions import Module, PermissionLevel, require_permission
 from app.database import get_db
 from app.models.user import User
@@ -63,6 +63,8 @@ async def list_fmea_version_list(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
@@ -84,6 +86,8 @@ async def get_fmea_version_detail(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     version = await get_fmea_version(db, fmea_id, major, minor)
     if version is None:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -98,12 +102,14 @@ async def manual_create_fmea_version(
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
     check_factory_access(fmea.factory_id, scope)
     version = await create_fmea_version(
-        db, fmea, "manual", req.change_summary, user.user_id,
+        db, fmea, "manual", req.change_summary, user.user_id, scope=scope,
     )
     return FMEAVersionDetail.model_validate(version)
 
@@ -118,13 +124,15 @@ async def rollback_fmea_version(
     user: User = Depends(require_permission(Module.FMEA, PermissionLevel.APPROVE)),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     fmea = await fmea_service.get_fmea(db, fmea_id)
     if fmea is None:
         raise HTTPException(status_code=404, detail="FMEA not found")
     check_factory_access(fmea.factory_id, scope)
     try:
         version = await rollback_fmea(
-            db, fmea, target_major, target_minor, req.reason, user.user_id,
+            db, fmea, target_major, target_minor, req.reason, user.user_id, scope=scope,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -141,6 +149,8 @@ async def compare_fmea_versions(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     v1 = await get_fmea_version(db, fmea_id, major1, minor1)
     v2 = await get_fmea_version(db, fmea_id, major2, minor2)
     if v1 is None or v2 is None:
@@ -169,6 +179,8 @@ async def verify_fmea_version_integrity(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.fmea import FMEADocument
+    await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA)
     version = await get_fmea_version(db, fmea_id, major, minor)
     if version is None:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -192,6 +204,8 @@ async def list_cp_version_list(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
@@ -213,6 +227,8 @@ async def get_cp_version_detail(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     version = await get_cp_version(db, cp_id, major, minor)
     if version is None:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -224,15 +240,17 @@ async def manual_create_cp_version(
     cp_id: uuid.UUID,
     req: ManualVersionCreate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.CREATE)),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.CREATE)),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
     check_factory_access(cp.factory_id, scope)
     version = await create_cp_version(
-        db, cp, "manual", req.change_summary, user.user_id,
+        db, cp, "manual", req.change_summary, user.user_id, scope=scope,
     )
     return ControlPlanVersionDetail.model_validate(version)
 
@@ -244,16 +262,18 @@ async def rollback_cp_version(
     target_minor: int,
     req: RollbackRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_permission(Module.FMEA, PermissionLevel.APPROVE)),
+    user: User = Depends(require_permission(Module.PLANNING, PermissionLevel.APPROVE)),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     cp = await control_plan_service.get_control_plan(db, cp_id)
     if cp is None:
         raise HTTPException(status_code=404, detail="控制计划不存在")
     check_factory_access(cp.factory_id, scope)
     try:
         version = await rollback_control_plan(
-            db, cp, target_major, target_minor, req.reason, user.user_id,
+            db, cp, target_major, target_minor, req.reason, user.user_id, scope=scope,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -270,6 +290,8 @@ async def compare_cp_versions(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     v1 = await get_cp_version(db, cp_id, major1, minor1)
     v2 = await get_cp_version(db, cp_id, major2, minor2)
     if v1 is None or v2 is None:
@@ -302,6 +324,8 @@ async def verify_cp_version_integrity(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     version = await get_cp_version(db, cp_id, major, minor)
     if version is None:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -323,6 +347,8 @@ async def get_sync_preview(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     try:
         return await build_sync_preview(db, cp_id, source_fmea_version_id, scope=scope)
     except control_plan_service.CharacteristicImportError as exc:
@@ -336,6 +362,8 @@ async def sync_from_fmea(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    from app.models.control_plan import ControlPlan
+    await authorize_object(db, scope, ControlPlan, cp_id, Module.PLANNING)
     try:
         return await apply_sync_preview(db, cp_id, req, scope.user.user_id, scope=scope)
     except control_plan_service.CharacteristicImportError as exc:

@@ -1,3 +1,4 @@
+import copy
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Optional
@@ -22,7 +23,8 @@ from app.models.mes import (
 )
 from app.schemas import mes as schemas
 from app.services.mes_connector import get_mes_connector_by_config, test_mes_connection
-from app.services.mes_crypto import encrypt_credential, hash_api_key, sanitize_config
+from app.services.mes_crypto import encrypt_credential, encrypt_bound_credential, hash_api_key, sanitize_config
+from app.services.connector_security import credential_context
 from app.services.mes_service import MESIngestionService, MESSyncService
 
 router = APIRouter(prefix="/api/mes", tags=["mes"])
@@ -80,7 +82,10 @@ def _process_credentials(config: dict) -> dict:
         plaintext = auth_config.get(field)
         if plaintext:
             encrypted_field = f"{field}_encrypted"
-            auth_config[encrypted_field] = encrypt_credential(plaintext)
+            auth_config[encrypted_field] = (
+                encrypt_bound_credential(plaintext, credential_context(config))
+                if config.get("base_url") else encrypt_credential(plaintext)
+            )
             auth_config.pop(field, None)
 
     return config
@@ -89,6 +94,25 @@ def _process_credentials(config: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Helper: strip "***" placeholders from auth_config
 # ---------------------------------------------------------------------------
+
+def _prepare_connection_update(old_type: str, old: dict, new_type: str, submitted: dict) -> dict:
+    """Retained credentials cannot cross connector, auth or canonical origin."""
+    merged = {**copy.deepcopy(old), **copy.deepcopy(submitted)}
+    def boundary(connector_type, config):
+        if connector_type != "rest":
+            return connector_type
+        try:
+            return credential_context(config)
+        except ValueError:
+            # Legacy malformed origins can be repaired, but never retain secrets.
+            return (connector_type, "invalid-origin")
+    if boundary(old_type, old) != boundary(new_type, merged):
+        # Accept only fresh plaintext fields explicitly re-entered by the user.
+        supplied_auth = submitted.get("auth_config") or {}
+        merged["auth_config"] = {k: v for k, v in supplied_auth.items()
+                                 if not k.endswith(("_encrypted", "_hash")) and v not in ("***", "********")}
+    return merged
+
 
 def _strip_placeholder_credentials(config: dict) -> dict:
     """Remove fields with '***' placeholder values from auth_config."""
@@ -273,8 +297,13 @@ async def update_connection(
         raise HTTPException(status_code=404, detail="Connection not found")
 
     # Merge config
-    if req.config is not None:
-        merged_config = {**(conn.config or {}), **req.config}
+    if req.config is not None or req.connector_type is not None:
+        try:
+            merged_config = _prepare_connection_update(
+                conn.connector_type, conn.config or {}, req.connector_type or conn.connector_type, req.config or {}
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         merged_config = _strip_placeholder_credentials(merged_config)
 
         # Validate merged config

@@ -188,4 +188,18 @@ class PreviewRemoteTests(unittest.TestCase):
             with self.assertRaises(ValueError): obj.rollout(images)
             publish.assert_not_called()
 
+
+
+class PreviewERPEgressTests(unittest.TestCase):
+    def test_preview_erp_policy_is_fixed_empty_and_cannot_inherit_production_allowlist(self):
+        import yaml
+        root = Path(__file__).resolve().parents[1]
+        configuration = yaml.safe_load((root / 'compose.preview.yml').read_text())
+        self.assertEqual(configuration['x-app-env']['ERP_ALLOWED_ORIGINS'], '{}')
+        obj = release()
+        with patch.object(obj,'verify'), patch.object(obj,'settings',return_value={}), patch.dict(m.os.environ, {'ERP_ALLOWED_ORIGINS':'host-policy-must-not-propagate'}):
+            _, environment = obj.compose_command(['config'])
+        self.assertNotIn('ERP_ALLOWED_ORIGINS', environment)
+
+
 if __name__ == '__main__': unittest.main()

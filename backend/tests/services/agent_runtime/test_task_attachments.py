@@ -140,29 +140,19 @@ async def test_reservation_is_scanning_for_exactly_180_seconds(owned_task, attac
 
 
 @pytest.mark.asyncio
-async def test_reservation_uses_one_global_pipeline_slot_and_abandon_releases_it(
+async def test_reservations_do_not_hold_the_global_scanner_slot(
     owned_task, attachment_settings,
 ):
-    """Regression: a reservation on any task blocks every other pipeline until request cleanup."""
+    """Reservations consume task/principal quota without reserving scanner capacity."""
     service = attachment_service()
     first = await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
-    other = AgentTask(
-        initiator_id=owned_task.scope.user.user_id,
-        executor_user_id=owned_task.scope.user.user_id,
-        preferred_installation_id=owned_task.plugin_id,
-        target_capa_id=owned_task.target_capa_id,
-        factory_id=owned_task.factory_id,
-        request_key=uuid.uuid4().hex,
-        status="ready",
-    )
-    owned_task.db.add(other)
-    await owned_task.db.commit()
-    with pytest.raises(service.AttachmentCapacityError):
-        await service.reserve_upload(owned_task.db, owned_task.scope, other.task_id)
-
-    await service.abandon_upload(first)
-    second = await service.reserve_upload(owned_task.db, owned_task.scope, other.task_id)
-    await service.abandon_upload(second)
+    try:
+        async with service.maintenance_pipeline_lock(owned_task.db):
+            pass
+        second = await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
+        await service.abandon_upload(second)
+    finally:
+        await service.abandon_upload(first)
 
 
 @pytest.mark.asyncio
@@ -607,3 +597,253 @@ async def test_attachment_audits_never_contain_filename_content_storage_or_daemo
     for forbidden in ["filename", "clean", "storage_key", "path", "clamav"]:
         assert forbidden not in serialized
     await service.abandon_upload(reservation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cross_tenant", [False, True])
+async def test_stalled_upload_does_not_block_other_task_scan_or_recovery(
+    committed_runtime, second_committed_runtime, attachment_settings, monkeypatch, cross_tenant,
+):
+    """Real concurrent sessions/streams share storage while slow network owns no scanner slot."""
+    from app.services.agent_runtime import attachment_recovery
+    from app.services.agent_runtime.attachment_storage import AttachmentNamespace
+    service = attachment_service()
+    owned = committed_runtime
+    staged = asyncio.Event()
+    stalled = asyncio.Event()
+    scanner_calls = []
+
+    async def slow_chunks():
+        yield b"partial"
+        staged.set()
+        await stalled.wait()
+        yield b"-complete"
+
+    async def clean_scan(reader, **_kwargs):
+        value = b"".join([chunk async for chunk in reader])
+        scanner_calls.append(value)
+        return service.clamav_scan.ScanResult("clean", "test-scanner", None)
+
+    monkeypatch.setattr(service.clamav_scan, "scan_stream", clean_scan)
+    async with owned.factory(binding=owned.binding) as slow_db, second_committed_runtime.factory(binding=second_committed_runtime.binding) as other_db, owned.factory(binding=owned.binding) as fast_db:
+        user = await slow_db.get(User, owned.user_id)
+        scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), user)
+        original = await slow_db.get(AgentTask, owned.task_id)
+        fast_task = AgentTask(initiator_id=user.user_id, executor_user_id=user.user_id,
+            preferred_installation_id=owned.plugin_id, target_capa_id=original.target_capa_id,
+            factory_id=original.factory_id, request_key=uuid.uuid4().hex, status="ready")
+        slow_db.add(fast_task)
+        await slow_db.commit()
+        slow_reservation = await service.reserve_upload(slow_db, scope, owned.task_id)
+        slow = asyncio.create_task(service.receive_and_scan(slow_reservation, slow_chunks()))
+        try:
+            await asyncio.wait_for(staged.wait(), 5)
+            assert scanner_calls == [], "client pacing must finish before scanner admission"
+            if cross_tenant:
+                other_user = await other_db.get(User, second_committed_runtime.user_id)
+                fast_scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), other_user)
+                fast_session, fast_id = other_db, second_committed_runtime.task_id
+            else:
+                fast_user = await fast_db.get(User, owned.user_id)
+                fast_scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), fast_user)
+                fast_session, fast_id = fast_db, fast_task.task_id
+            fast_reservation = await asyncio.wait_for(service.reserve_upload(fast_session, fast_scope, fast_id), 5)
+            result = await asyncio.wait_for(service.receive_and_scan(fast_reservation, chunks([b"clean"])), 5)
+            assert result.status == "available"
+            assert scanner_calls == [b"clean"]
+            namespace = AttachmentNamespace(owned.binding.tenant_id, owned.binding.generation,
+                f"tenant_{owned.binding.tenant_id.hex}_{owned.binding.generation}")
+            async with owned.factory(binding=owned.binding) as recovery_db:
+                stats = await asyncio.wait_for(attachment_recovery.reconcile_live_namespace(
+                    recovery_db, namespace, service._storage(), now=datetime.now(UTC)), 5)
+            assert stats.failed_scanning == 0
+            assert stats.unreferenced_objects == 0
+            assert service._storage().list_attachment_ids(namespace, "staging") == {slow_reservation.attachment_id}
+        finally:
+            slow.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await slow
+        row = await slow_db.get(AgentTaskAttachment, slow_reservation.attachment_id)
+        assert (row.status, row.failure_code) == ("failed_storage", "cancelled")
+        assert service._storage().list_attachment_ids(namespace, "staging") == set()
+
+
+@pytest.mark.asyncio
+async def test_principal_inflight_quota_spans_multiple_tasks(owned_task, attachment_settings):
+    service = attachment_service()
+    reservations = []
+    try:
+        for _ in range(5):
+            reservations.append(await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id))
+        other = AgentTask(initiator_id=owned_task.scope.user.user_id, executor_user_id=owned_task.scope.user.user_id,
+            preferred_installation_id=owned_task.plugin_id, target_capa_id=owned_task.target_capa_id,
+            factory_id=owned_task.factory_id, request_key=uuid.uuid4().hex, status="ready")
+        owned_task.db.add(other)
+        await owned_task.db.commit()
+        with pytest.raises(service.AttachmentCapacityError):
+            await service.reserve_upload(owned_task.db, owned_task.scope, other.task_id)
+    finally:
+        for reservation in reservations:
+            await service.abandon_upload(reservation)
+
+
+@pytest.mark.asyncio
+async def test_scanner_busy_after_staging_cleans_object_and_releases_quota(
+    owned_task, attachment_settings, monkeypatch,
+):
+    from unittest.mock import AsyncMock
+    service = attachment_service()
+    scanner = AsyncMock()
+    monkeypatch.setattr(service.clamav_scan, "scan_stream", scanner)
+    scanner_connection = await service._acquire_slot_lock(owned_task.db)
+    try:
+        reservation = await service.reserve_upload(owned_task.db, owned_task.scope, owned_task.task_id)
+        with pytest.raises(service.AttachmentCapacityError):
+            await service.receive_and_scan(reservation, chunks([b"clean"]))
+        row = await owned_task.db.get(AgentTaskAttachment, reservation.attachment_id)
+        assert (row.status, row.failure_code) == ("failed_storage", "scanner_busy")
+        scanner.assert_not_called()
+        assert reservation.slot_released
+        assert service._storage().list_attachment_ids(service._namespace(row), "staging") == set()
+    finally:
+        await service._release_lock_connection(scanner_connection)
+    async with service.maintenance_pipeline_lock(owned_task.db):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_recovery_expiring_live_staging_cannot_be_resurrected(
+    committed_runtime, attachment_settings, monkeypatch,
+):
+    from unittest.mock import AsyncMock
+    from app.services.agent_runtime import attachment_recovery
+    service = attachment_service()
+    owned = committed_runtime
+    staged = asyncio.Event()
+    resume = asyncio.Event()
+    async def slow_chunks():
+        yield b"partial"
+        staged.set()
+        await resume.wait()
+        yield b"complete"
+    scanner = AsyncMock()
+    monkeypatch.setattr(service.clamav_scan, "scan_stream", scanner)
+    async with owned.factory(binding=owned.binding) as upload:
+        user = await upload.get(User, owned.user_id)
+        scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), user)
+        reservation = await service.reserve_upload(upload, scope, owned.task_id)
+        receiving = asyncio.create_task(service.receive_and_scan(reservation, slow_chunks()))
+        try:
+            await asyncio.wait_for(staged.wait(), 5)
+            row = await upload.get(AgentTaskAttachment, reservation.attachment_id)
+            namespace = service._namespace(row)
+            async with owned.factory(binding=owned.binding) as recovery_db:
+                stats = await attachment_recovery.reconcile_live_namespace(recovery_db, namespace,
+                    service._storage(), now=row.reservation_expires_at + timedelta(seconds=1))
+            assert stats.failed_scanning == 1
+            resume.set()
+            result = await asyncio.wait_for(receiving, 5)
+            assert result.status == "failed_storage"
+            scanner.assert_not_called()
+            for area in ("staging", "clean"):
+                assert service._storage().list_attachment_ids(namespace, area) == set()
+        finally:
+            if not receiving.done():
+                receiving.cancel()
+                await asyncio.gather(receiving, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cross_task_reservations_enforce_principal_quota(
+    committed_runtime, attachment_settings,
+):
+    from contextlib import AsyncExitStack
+    service = attachment_service()
+    owned = committed_runtime
+    async with owned.factory(binding=owned.binding) as setup:
+        original = await setup.get(AgentTask, owned.task_id)
+        task_ids = [original.task_id]
+        for _ in range(5):
+            task = AgentTask(initiator_id=owned.user_id, executor_user_id=owned.user_id,
+                preferred_installation_id=owned.plugin_id, target_capa_id=original.target_capa_id,
+                factory_id=original.factory_id, request_key=uuid.uuid4().hex, status="ready")
+            setup.add(task)
+            await setup.flush()
+            task_ids.append(task.task_id)
+        await setup.commit()
+    async with AsyncExitStack() as stack:
+        sessions = [await stack.enter_async_context(owned.factory(binding=owned.binding)) for _ in task_ids]
+        async def reserve(db, task_id):
+            user = await db.get(User, owned.user_id)
+            scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), user)
+            return await service.reserve_upload(db, scope, task_id)
+        results = await asyncio.wait_for(asyncio.gather(*[
+            reserve(db, task_id) for db, task_id in zip(sessions, task_ids)
+        ], return_exceptions=True), 10)
+        reservations = [result for result in results if isinstance(result, service.ReservedAttachment)]
+        try:
+            assert len(reservations) == 5
+            assert sum(isinstance(result, service.AttachmentCapacityError) for result in results) == 1
+        finally:
+            for reservation in reservations:
+                await service.abandon_upload(reservation)
+
+
+@pytest.mark.asyncio
+async def test_publication_and_same_user_reservation_do_not_deadlock(
+    committed_runtime, attachment_settings, monkeypatch,
+):
+    """Quota locking must permit publication's AuditLog uploader foreign-key lock."""
+    service = attachment_service()
+    owned = committed_runtime
+    publication_has_task_lock = asyncio.Event()
+    reservation_has_user_lock = asyncio.Event()
+    async def clean_scan(reader, **_kwargs):
+        async for _ in reader:
+            pass
+        return service.clamav_scan.ScanResult("clean", "test-scanner", None)
+    monkeypatch.setattr(service.clamav_scan, "scan_stream", clean_scan)
+    async with owned.factory(binding=owned.binding) as publishing_db, owned.factory(binding=owned.binding) as reserving_db:
+        user = await publishing_db.get(User, owned.user_id)
+        scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), user)
+        first = await service.reserve_upload(publishing_db, scope, owned.task_id)
+        rival_user = await reserving_db.get(User, owned.user_id)
+        rival_scope = RequestScope(FactoryScope([], None), None, ProductLineScope("NONE", None), rival_user)
+        locked_task = service._locked_task
+        publication_task_locks = 0
+        async def observe_task_lock(db, current_scope, task):
+            nonlocal publication_task_locks
+            locked = await locked_task(db, current_scope, task)
+            if db is publishing_db:
+                publication_task_locks += 1
+                if publication_task_locks == 2:
+                    publication_has_task_lock.set()
+                    await asyncio.wait_for(reservation_has_user_lock.wait(), 5)
+            return locked
+        monkeypatch.setattr(service, "_locked_task", observe_task_lock)
+        scalar = reserving_db.scalar
+        async def observe_user_lock(statement, *args, **kwargs):
+            result = await scalar(statement, *args, **kwargs)
+            descriptions = getattr(statement, "column_descriptions", [])
+            if (getattr(statement, "_for_update_arg", None) is not None
+                    and descriptions and descriptions[0].get("entity") is User):
+                reservation_has_user_lock.set()
+            return result
+        monkeypatch.setattr(reserving_db, "scalar", observe_user_lock)
+        async def reserve_rival():
+            await asyncio.wait_for(publication_has_task_lock.wait(), 5)
+            return await service.reserve_upload(reserving_db, rival_scope, owned.task_id)
+        operations = [asyncio.create_task(service.receive_and_scan(first, chunks([b"clean"]))),
+            asyncio.create_task(reserve_rival())]
+        second = None
+        try:
+            published, second = await asyncio.wait_for(asyncio.gather(*operations), 10)
+            assert published.status == "available"
+            assert reservation_has_user_lock.is_set()
+        finally:
+            for operation in operations:
+                if not operation.done():
+                    operation.cancel()
+            await asyncio.gather(*operations, return_exceptions=True)
+            if second is not None:
+                await service.abandon_upload(second)

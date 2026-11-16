@@ -30,6 +30,7 @@ async def list_fmeas(
     pending: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
+    accessible_factory_ids: list[uuid.UUID] | None = None,
     fmea_type: str | None = None,
     search: str | None = None,
 ) -> tuple[list[FMEADocument], int]:
@@ -53,6 +54,9 @@ async def list_fmeas(
         query = query.where(FMEADocument.product_line_code.in_(allowed_product_line_codes))
         count_query = count_query.where(FMEADocument.product_line_code.in_(allowed_product_line_codes))
 
+    if accessible_factory_ids is not None:
+        query = query.where(FMEADocument.factory_id.in_(accessible_factory_ids))
+        count_query = count_query.where(FMEADocument.factory_id.in_(accessible_factory_ids))
     if factory_id is not None:
         query = query.where(FMEADocument.factory_id == factory_id)
         count_query = count_query.where(FMEADocument.factory_id == factory_id)
@@ -285,6 +289,7 @@ async def _apply_fmea_update(
     product_line_code: str | None = None,
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
+    scope=None,
 ) -> FMEADocument:
     """无提交核心：执行 update_fmea 的全部副作用但不 commit/refresh，供 auto_fill_d7 单事务复用。"""
     observed_product_line = fmea.product_line_code
@@ -300,6 +305,16 @@ async def _apply_fmea_update(
         .execution_options(populate_existing=True)
     )
     fresh = result.scalar_one()
+    if scope is not None:
+        from app.core.factory_scope import check_factory_access, check_product_line_access
+        check_factory_access(fresh.factory_id, scope)
+        check_product_line_access(fresh.product_line_code, scope)
+        if product_line_code is not None:
+            check_product_line_access(product_line_code, scope)
+            from app.core.factory_scope import resolve_create_factory_id
+            destination_factory = await resolve_create_factory_id(db, scope, product_line_code)
+            if destination_factory != fresh.factory_id:
+                raise ValueError("产品线必须属于当前工厂")
     if (
         product_line_code is not None
         and fresh.product_line_code != observed_product_line
@@ -383,10 +398,11 @@ async def update_fmea(
     lock_version: int | None = None,
     confirmed_latest_lock_version: int | None = None,
     adoptions: list | None = None,
+    scope=None,
 ) -> FMEADocument:
     fmea = await _apply_fmea_update(
         db, fmea, title, graph_data, user_id, product_line_code,
-        lock_version, confirmed_latest_lock_version,
+        lock_version, confirmed_latest_lock_version, scope=scope,
     )
     if adoptions:
         from app.services.adoption_audit import write_adoption_audits
@@ -396,7 +412,7 @@ async def update_fmea(
     return fmea
 
 
-async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) -> None:
+async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID, scope=None) -> None:
     from app.services.capa_review_source_guard import (
         assert_source_references_unchanged,
         lock_source_capa_references,
@@ -423,6 +439,10 @@ async def delete_fmea(db: AsyncSession, fmea_id: uuid.UUID, user_id: uuid.UUID) 
         or fresh.product_line_code != observed_product_line
     ):
         raise ValueError("product_line_changed_again")
+    if scope is not None:
+        from app.core.factory_scope import check_factory_access, check_product_line_access
+        check_factory_access(fresh.factory_id, scope)
+        check_product_line_access(fresh.product_line_code, scope)
     fmea = fresh
     await assert_source_references_unchanged(db, "fmea", fmea_id, locked_capa_ids)
     # Audit log for deletion
@@ -484,7 +504,12 @@ async def transition_fmea(
     target_status: str,
     user_id: uuid.UUID,
     reason: str | None = None,
+    scope=None,
 ) -> FMEADocument:
+    if scope is not None:
+        from app.core.factory_scope import authorize_object
+        from app.core.permissions import Module
+        fmea = await authorize_object(db, scope, FMEADocument, fmea.fmea_id, Module.FMEA, lock=True)
     current = FMEAState(fmea.status)
     target = FMEAState(target_status)
 

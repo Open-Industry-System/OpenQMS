@@ -6,6 +6,7 @@ Provides:
 - Config sanitization for API responses
 """
 
+import json
 import hashlib
 import hmac
 import os
@@ -53,6 +54,21 @@ def decrypt_credential(ciphertext: str) -> str:
     """Decrypt outbound credential. Only called at runtime during push_quality_event."""
     fernet = _get_fernet()
     return fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+
+
+def encrypt_bound_credential(plaintext: str, context: str) -> str:
+    """Fernet authenticates the destination/auth context alongside the secret."""
+    return encrypt_credential(json.dumps({"context": context, "value": plaintext}))
+
+
+def decrypt_bound_credential(ciphertext: str, context: str) -> str:
+    try:
+        envelope = json.loads(decrypt_credential(ciphertext))
+        if envelope["context"] != context or not isinstance(envelope["value"], str):
+            raise ValueError("Credential origin binding mismatch")
+        return envelope["value"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ValueError("Credential origin binding missing or mismatched; re-enter credentials") from exc
 
 
 # ---- Response sanitization ----
