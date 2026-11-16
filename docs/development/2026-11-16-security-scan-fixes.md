@@ -90,3 +90,5 @@ PR #38首轮 `Test OpenQMS`（run `43827639514`）的 `oracle-automation-checks`
 整合提交 `ec762a2e` 的远端后端收据为5660 passed /4 failed /4 skipped /89 deselected（run `43834841282`，115分钟）。4项失败均在新增的真实SDK HTTP边界测试：CI解析到OpenAI3.51.0/httpx2 2.16.1，原测试给SDK默认httpx2客户端注入httpx 0.27.2响应，造成流类型断言失败；D5完整材料拒绝仅为日志中的预期保护输出，不是实际失败项。370692字节产物SHA256为 `21dbc461dc47fede7dd39f6480b423b853fb39f3aa9c70b63ee91fc65bb43b13`。
 
 隔离环境精确复现4 failed /48 passed。测试现在沿用项目既有的SDK传输识别方式，为实际默认HTTP客户端匹配MockTransport与Response；生产代码、SDK依赖范围及所有密钥断言均保持不变。OpenAI2.41.1与3.51.0环境分别运行连接器安全和运行器合同，共116项均通过，启用纯测试网络禁止保护，未请求真实提供商。新提交仍须等待远端必需检查完成后才合并。
+
+新版SDK的本机R5 API验收另得到67 passed /1 failed：重定向保护实际抛出 `PermissionError(Model deployment unavailable)`，SDK2会包装成APIConnectionError，而SDK3直接保留该异常。仅调整原生测试兼容这两种形式，并新增对根因类型和固定拒绝原因的断言；继续保留目标A请求恰好一次、目标B请求为零的原断言。SDK2/3分别2项通过；完整新版原生门禁将在新head重新执行，不将67项通过当作整轮成功。
