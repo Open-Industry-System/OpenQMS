@@ -285,12 +285,12 @@ def test_make_marker_constants_match_the_receipted_runner_contract() -> None:
 def test_backend_workflow_uses_verified_prepare_and_deterministic_make_path() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = yaml.safe_load((root / '.github/workflows/test.yml').read_text())
-    backend = workflow['jobs']['backend-tests']
+    backend = workflow['jobs']['backend-full']
     options = backend['services']['postgres']['options']
     for label in (
         '--label openqms.ci.run=${{ github.run_id }}',
         '--label openqms.ci.attempt=${{ github.run_attempt }}',
-        '--label openqms.ci.job=backend-tests',
+        '--label openqms.ci.job=backend-full',
     ):
         assert label in options
 
@@ -299,7 +299,7 @@ def test_backend_workflow_uses_verified_prepare_and_deterministic_make_path() ->
         'PG15_CONTAINER': '${{ job.services.postgres.id }}',
         'GITHUB_RUN_ID': '${{ github.run_id }}',
         'GITHUB_RUN_ATTEMPT': '${{ github.run_attempt }}',
-        'GITHUB_JOB': 'backend-tests',
+        'GITHUB_JOB': 'backend-full',
         "TEST_DATABASE_URL": "postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test",
     }
     assert 'Prepare verified test database' not in steps

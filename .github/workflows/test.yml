@@ -65,10 +65,55 @@ jobs:
             ${{ env.OPENQMS_TEST_ARTIFACTS }}/sdk/**/*-filtered.log
           if-no-files-found: error
 
-  backend-tests:
+  backend-route:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.route.outputs.docs_only }}
+    env:
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify complete PR using trusted base policy
+        id: route
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REQUIRE_PREVIEW_RECEIPTS: ${{ vars.ORACLE_AUTODEPLOY_ENABLED == 'true' && vars.ORACLE_PREVIEW_ENABLED == 'true' }}
+        run: |
+          set -euo pipefail
+          # Main pushes always run the full backend; no PR policy is needed.
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo 'docs_only=false' >> "$GITHUB_OUTPUT"
+            echo 'Backend routing: full backend (main push).' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "${REQUIRE_PREVIEW_RECEIPTS:-false}" = true ]; then
+            echo 'docs_only=false' >> "$GITHUB_OUTPUT"
+            echo 'Backend routing: full backend (preview publication requires API receipts).' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git cat-file -e "$BASE_SHA^{commit}"
+          # Bootstrap rollout: bases predating this policy cannot take a shortcut.
+          if ! git cat-file -e "$BASE_SHA:scripts/ci/backend_route.py"; then
+            echo 'docs_only=false' >> "$GITHUB_OUTPUT"
+            echo 'Backend routing: full backend (trusted base policy not available).' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git show "$BASE_SHA:scripts/ci/backend_route.py" > "$RUNNER_TEMP/backend-route.py"
+          python "$RUNNER_TEMP/backend-route.py" classify
+
+  backend-full:
+    needs: [backend-route]
+    if: ${{ always() && !cancelled() && needs.backend-route.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     env:
-      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/backend-tests
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/backend-full
       OPENQMS_CI_SHA: ${{ github.sha }}
       LLM_PROVIDER: ""
       LLM_API_KEY: ""
@@ -89,7 +134,7 @@ jobs:
           --health-retries 5
           --label openqms.ci.run=${{ github.run_id }}
           --label openqms.ci.attempt=${{ github.run_attempt }}
-          --label openqms.ci.job=backend-tests
+          --label openqms.ci.job=backend-full
         ports:
           - 5432/tcp
 
@@ -143,7 +188,7 @@ jobs:
           PG15_CONTAINER: ${{ job.services.postgres.id }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-          GITHUB_JOB: backend-tests
+          GITHUB_JOB: backend-full
           TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
         run: make check-backend SDK_PYTHON_BIN=python
 
@@ -161,7 +206,7 @@ jobs:
           PG15_CONTAINER: ${{ job.services.postgres.id }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-          GITHUB_JOB: backend-tests
+          GITHUB_JOB: backend-full
           DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
           TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
         run: |
@@ -199,6 +244,34 @@ jobs:
             ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
             ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
           if-no-files-found: error
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    needs: [backend-route, backend-full]
+    if: always()
+    env:
+      LLM_PROVIDER: ""
+      LLM_API_KEY: ""
+      LLM_BASE_URL: ""
+      EMBEDDING_PROVIDER: ""
+      EMBEDDING_API_KEY: ""
+    steps:
+      - name: Require the selected backend result
+        env:
+          ROUTE_RESULT: ${{ needs.backend-route.result }}
+          DOCS_ONLY: ${{ needs.backend-route.outputs.docs_only }}
+          BACKEND_RESULT: ${{ needs.backend-full.result }}
+        run: |
+          set -euo pipefail
+          echo "Backend routing=$ROUTE_RESULT docs_only=$DOCS_ONLY backend=$BACKEND_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          [ "$ROUTE_RESULT" = success ] || exit 1
+          if [ "$DOCS_ONLY" = true ]; then
+            [ "$BACKEND_RESULT" = skipped ] || exit 1
+          elif [ "$DOCS_ONLY" = false ]; then
+            [ "$BACKEND_RESULT" = success ] || exit 1
+          else
+            exit 1
+          fi
 
   frontend-checks:
     runs-on: ubuntu-latest

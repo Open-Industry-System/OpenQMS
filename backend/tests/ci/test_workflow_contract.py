@@ -139,15 +139,15 @@ def test_automatic_workflow_is_secretless_on_main_pushes_and_main_pull_requests(
 
 
 def test_backend_uses_a_verified_random_port_database_before_every_database_consumer() -> None:
-    backend = _jobs(_load_workflow(AUTOMATIC_PATH))['backend-tests']
-    _postgres_environment(backend, 'backend-tests')
+    backend = _jobs(_load_workflow(AUTOMATIC_PATH))['backend-full']
+    _postgres_environment(backend, 'backend-full')
     steps = _named_steps(backend)
     prepare = steps['Run deterministic backend acceptance']
     required_env = {
         'PG15_CONTAINER': '${{ job.services.postgres.id }}',
         'GITHUB_RUN_ID': '${{ github.run_id }}',
         'GITHUB_RUN_ATTEMPT': '${{ github.run_attempt }}',
-        'GITHUB_JOB': 'backend-tests',
+        'GITHUB_JOB': 'backend-full',
         "TEST_DATABASE_URL": "postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test",
     }
     assert isinstance(prepare.get('env'), Mapping)
@@ -251,7 +251,7 @@ def test_sdk_matrix_is_secretless_dependency_free_and_uploads_only_safe_evidence
 
 
 def test_backend_explicitly_installs_pinned_sdk_build_tools_before_make() -> None:
-    job = _jobs(_load_workflow(AUTOMATIC_PATH))['backend-tests']
+    job = _jobs(_load_workflow(AUTOMATIC_PATH))['backend-full']
     steps = _named_steps(job)
     install = steps['Install SDK developer build tools']
     assert install['run'].strip() == 'python -m pip install setuptools==79.0.1'
@@ -362,6 +362,10 @@ def _assert_safe_expressions(workflow: Mapping[str, object]) -> None:
         # Exempt only these two validated fields, never the rest of the workflow.
         setup['with']['python-version'] = '3.11'
         upload['with']['name'] = 'sdk-checks-3.11-evidence'
+    worker = _jobs(checked).get('backend-full')
+    if worker is not None:
+        assert worker['if'] == "${{ always() && !cancelled() && needs.backend-route.outputs.docs_only != 'true' }}"
+        worker['if'] = 'validated backend routing predicate'
     serialized = '\n'.join(_strings(checked))
     assert '/Users/' not in serialized
     expressions = re.findall(r'\$\{\{\s*([^}]+?)\s*}}', serialized)
@@ -409,7 +413,7 @@ def test_workflow_expressions_and_artifacts_remain_safe_and_sanitized() -> None:
 
 
 def test_real_evidence_has_explicit_roots_always_uploads_and_sha_binding():
-    for path, names in ((AUTOMATIC_PATH, ('backend-tests', 'browser-protection', 'frontend-checks')),
+    for path, names in ((AUTOMATIC_PATH, ('backend-full', 'browser-protection', 'frontend-checks')),
                         (ACCEPTANCE_PATH, ('live-capa', 'scanner'))):
         jobs = _jobs(_load_workflow(path))
         for name in names:
@@ -441,20 +445,20 @@ def test_real_evidence_has_explicit_roots_always_uploads_and_sha_binding():
 
 def test_pr_pip_caches_cover_manifests_without_replacing_installation():
     jobs = _jobs(_load_workflow(AUTOMATIC_PATH))
-    for name in ('backend-tests', 'browser-protection'):
+    for name in ('backend-full', 'browser-protection'):
         steps = _named_steps(jobs[name])
         setup = steps['Set up Python']['with']
         assert setup['cache'] == 'pip'
         paths = setup['cache-dependency-path'].splitlines()
         expected = (['backend/requirements.txt', 'sdk/python/pyproject.toml', '.github/workflows/test.yml']
-                    if name == 'backend-tests' else ['backend/requirements.txt'])
+                    if name == 'backend-full' else ['backend/requirements.txt'])
         assert paths == expected
         assert all((ROOT / path).is_file() for path in paths)
-        install = steps['Install dependencies' if name == 'backend-tests' else 'Install backend dependencies']['run']
+        install = steps['Install dependencies' if name == 'backend-full' else 'Install backend dependencies']['run']
         assert 'python -m pip install --upgrade pip' in install
         assert 'pip install -r requirements.txt' in install
     assert steps['Set up Python']['with']['python-version'] == '3.12'
-    assert 'setuptools==79.0.1' in _named_steps(jobs['backend-tests'])['Install SDK developer build tools']['run']
+    assert 'setuptools==79.0.1' in _named_steps(jobs['backend-full'])['Install SDK developer build tools']['run']
 
 
 @pytest.mark.parametrize('event,branch,action,expected', [
@@ -496,6 +500,8 @@ def test_pr_jobs_keep_merge_candidate_checkout_and_failure_semantics():
         assert 'continue-on-error' not in job
         if name == 'docs-check':
             assert job['if'] == "github.event_name == 'pull_request'"
+        elif name in {'backend-tests', 'backend-full'}:
+            assert 'if' in job
         else:
             assert 'if' not in job
         for step in _steps(job):
@@ -507,7 +513,7 @@ def test_pr_jobs_keep_merge_candidate_checkout_and_failure_semantics():
 def test_r5_native_trial_is_manual_and_separate_from_portable_pr_checks() -> None:
     automatic = _load_workflow(AUTOMATIC_PATH)
     assert set(_jobs(automatic)) == {
-        'sdk-checks', 'backend-tests', 'browser-protection', 'frontend-checks',
+        'sdk-checks', 'backend-route', 'backend-full', 'backend-tests', 'browser-protection', 'frontend-checks',
         'docs-check', 'oracle-automation-checks',
     }
     workflow = _load_workflow(R5_NATIVE_PATH)
