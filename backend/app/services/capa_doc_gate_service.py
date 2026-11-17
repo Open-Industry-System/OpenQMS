@@ -74,8 +74,12 @@ async def _lock_doc_gate_write(
 
 async def generate_impact_analysis(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
     """Three-phase: phase1 lock+demote+stale-recovery+running+commit; phase2 LLM; phase3 CAS."""
+    from sqlalchemy import inspect
     from app.services.capa_r6_local_closure import eligible
-    if await eligible(db,capa.report_id): raise PermissionError('Restricted report requires manual analysis')
+    identity = inspect(capa).identity
+    if identity is None:
+        raise ValueError("CAPA input is not persisted")
+    if await eligible(db,identity[0]): raise PermissionError('Restricted report requires manual analysis')
     p1 = await _phase1_create_running(db, capa, user_id)
     if p1["status"] in ("blocked", "failed", "running", "superseded"):
         return p1
@@ -185,9 +189,13 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
 
 async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
     from types import SimpleNamespace
+    from sqlalchemy import inspect
     from app.services.capa_d4_material import legacy_capa_read_binding
+    identity = inspect(capa).identity
+    if identity is None:
+        raise ValueError("CAPA input is not persisted")
     actor = SimpleNamespace(user_id=p1["actor_id"])
-    report_id = capa.report_id
+    report_id = identity[0]
     initial_binding = await legacy_capa_read_binding(db, actor, report_id,
         required_level=PermissionLevel.EDIT)
     async def fence():

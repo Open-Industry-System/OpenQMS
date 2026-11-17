@@ -177,6 +177,10 @@ class TestRecommendIntegrationForToolTrend:
     def _patch(self, svc, monkeypatch, *, build_client, complete_json=None):
         fmea = _StubFmea()
         monkeypatch.setattr(svc, "_get_fmea_or_404", AsyncMock(return_value=fmea))
+        # These DB-free tests exercise tool/trend orchestration, not the real
+        # source/egress gates covered by the owned-database fence tests.
+        monkeypatch.setattr(svc, "_current_target_state", AsyncMock(return_value=(0, str(fmea.factory_id), fmea.product_line_code)))
+        monkeypatch.setattr(svc, "require_current_release", AsyncMock())
         monkeypatch.setattr(svc, "_get_cached", AsyncMock(return_value=None))
         monkeypatch.setattr(svc, "_assemble_context", AsyncMock(return_value={}))
         monkeypatch.setattr(svc, "_cache_result", AsyncMock())

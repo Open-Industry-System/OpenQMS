@@ -18,7 +18,7 @@ def test_capa_summary_is_target_required_without_lowering_deny():
     summary = get_capability("capa.d4.summary.masked.v1")
     assert summary.target_required is True
     assert summary.approval_floor == ApprovalFloor.DENY
-    assert get_capability("capa.d4.candidate.propose.v1").target_required is False
+    assert get_capability("capa.d4.candidate.propose.v1").target_required is True
 
 
 def test_profiles_reuse_module_owned_baseline_without_enabling_writes():

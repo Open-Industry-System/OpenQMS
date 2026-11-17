@@ -98,7 +98,9 @@ async def run_chain(exercise, *, live=True, semantic_review=None):
     review_path = exercise.directory / 'employee-d5-review.json'
     if semantic_review is not None:
         write_private(review_path, semantic_review(exercise, task, proposals))
-    for _ in range(2400):
+    # Bounded nominal 1800s for an actual employee semantic decision; this
+    # does not change model/application budgets or accept proposals automatically.
+    for _ in range(36000):
         if review_path.exists():
             break
         await asyncio.sleep(.05)
