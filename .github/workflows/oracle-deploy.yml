@@ -49,8 +49,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: read
-      issues: write
+      pull-requests: write
+      issues: read
     if: needs.authorize.outputs.kind == 'production' || vars.ORACLE_PREVIEW_ENABLED == 'true'
     needs: authorize
     runs-on: ubuntu-24.04

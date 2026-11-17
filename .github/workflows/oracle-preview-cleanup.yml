@@ -6,8 +6,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
-  issues: write
+  pull-requests: write
+  issues: read
 
 concurrency:
   group: oracle-preview-cleanup-${{ github.event.pull_request.number }}

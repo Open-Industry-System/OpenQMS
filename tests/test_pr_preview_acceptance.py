@@ -256,7 +256,18 @@ def test_deployment_begin_and_failure_are_wired_around_secret_use():
     assert workflow.index('--deployment-result started') < workflow.index('Prepare pinned SSH identity')
     assert workflow.index('Remove runner credentials') < workflow.index('--deployment-result failure')
     assert "steps.preview-start.outcome == 'success'" in workflow
-    assert 'issues: write' in workflow
+
+
+@pytest.mark.parametrize('name', ['pr-preview-acceptance', 'oracle-deploy', 'oracle-preview-cleanup'])
+def test_pr_notification_permissions(name):
+    from yaml import safe_load
+    config = safe_load((Path(__file__).parents[1] / f'.github/workflows/{name}.yml').read_text())
+    permissions = config['jobs']['deploy']['permissions'] if name == 'oracle-deploy' else config['permissions']
+    assert permissions['pull-requests'] == 'write'
+    assert permissions['issues'] == 'read'
+    assert permissions['contents'] == 'read'
+    if name == 'oracle-deploy':
+        assert config['permissions']['pull-requests'] == 'read'
 
 
 @pytest.mark.parametrize(('body', 'expected'), [(BODY, 'success'), ('', 'failure')])
