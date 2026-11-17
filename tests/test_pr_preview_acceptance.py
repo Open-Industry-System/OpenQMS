@@ -257,3 +257,23 @@ def test_deployment_begin_and_failure_are_wired_around_secret_use():
     assert workflow.index('Remove runner credentials') < workflow.index('--deployment-result failure')
     assert "steps.preview-start.outcome == 'success'" in workflow
     assert 'issues: write' in workflow
+
+
+@pytest.mark.parametrize(('body', 'expected'), [(BODY, 'success'), ('', 'failure')])
+def test_metadata_error_preserves_plan_result_and_blocks_acceptance(monkeypatch, tmp_path, body, expected):
+    from unittest.mock import Mock
+    import sys
+
+    pr = dict(number=42, head={'sha': 'a' * 40}, body=body)
+    api = Mock(repo='owner/repo')
+    api.pages.side_effect = [[pr], PermissionError('metadata unavailable')]
+    api.notice.side_effect = PermissionError('metadata unavailable')
+    monkeypatch.setattr(m, 'API', lambda: api)
+    monkeypatch.setattr(sys, 'argv', ['pr-preview-acceptance.py'])
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(tmp_path / 'summary'))
+
+    m.main()
+
+    states = {context: state for (_, context, state, _), _kwargs in api.status.call_args_list}
+    assert states == {m.PLAN: expected, m.ACCEPT: 'pending'}
+    assert 'metadata unavailable' in (tmp_path / 'summary').read_text()
