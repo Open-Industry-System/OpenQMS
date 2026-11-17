@@ -35,6 +35,7 @@ SDK_CHECK := "$(SDK_PYTHON_BIN)" "$(CURDIR)/sdk/python/scripts/check-sdk.py"
 
 .PHONY: help check check-backend check-browser check-live check-test-db check-frontend-tsc check-frontend-build check-frontend \
 	check-sdk-unit check-sdk-loopback check-sdk-wheel check-sdk \
+	check-agent-isolation-pure check-agent-isolation-linux \
 	doc-gate-preflight deploy-migrate deploy-release
 
 help:
@@ -47,6 +48,8 @@ help:
 	@echo "  check-live         — isolated explicit provider acceptance (verified test DB)"
 	@echo "  agent-attachment-e2e — actual pinned-ClamAV process + browser gate"
 	@echo "  check-frontend     — frontend tsc --noEmit + vite build"
+	@echo "  check-agent-isolation-pure  — D4 isolation pure layer (no resources)"
+	@echo "  check-agent-isolation-linux — D4 isolation Linux layer (needs OPENQMS_ISOLATION_*)"
 	@echo "  doc-gate-preflight — D8 doc-gate CP lineage scan (exit 1 = blocked_modify/stale_analysis/invalid_waiver)"
 	@echo "  deploy-migrate     — alembic upgrade head on DATABASE_URL (infra only; no app traffic)"
 	@echo "  deploy-release     — SERIAL release (requires distinct DATABASE_URL, TEST_DATABASE_URL, ROLLOUT_CMD)"
@@ -103,6 +106,17 @@ check-test-db:
 	@cd $(BACKEND_DIR) && SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. $(PYTHON_BIN) -m tests.ci.prepare_database
 
 check-frontend: check-frontend-tsc check-frontend-build
+
+# ── D4 receiver isolation gates (opt-in; never part of `check`) ─────────
+# The pure layer creates nothing. The Linux layer needs an explicit host and
+# creates only uniquely named, precisely reclaimed test resources; it is NOT part
+# of `make check` and must never run implicitly.
+agent_isolation_python ?= $(PYTHON_BIN)
+check-agent-isolation-pure:
+	@$(agent_isolation_python) scripts/agent_d4_isolation/check.py --layer pure
+
+check-agent-isolation-linux:
+	@$(agent_isolation_python) scripts/agent_d4_isolation/check.py --layer linux
 
 # ── Deploy gate ────────────────────────────────────────────────────────
 # Release/deploy pipelines MUST use `make deploy-release` against the environment
