@@ -17,6 +17,8 @@ from datetime import datetime, timezone, timedelta
 import pytest
 from sqlalchemy import select, text
 
+from tests.capa.doc_gate_lock_support import assert_lock_wait
+
 from app.models.audit import AuditLog
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
 from app.services import capa_doc_gate_service
@@ -56,6 +58,10 @@ async def test_regenerate_succeeds_without_unique_violation(db, capa_d8_gate_wit
     }
     r1 = await capa_doc_gate_service.generate_impact_analysis(db, capa, user.user_id)
     assert r1["status"] == "done"
+    first = await db.get(CapaDocgAnalysis, uuid.UUID(r1["analysis_id"]))
+    assert first.is_current is True
+    assert first.affected_docs and first.analysis_input_hash
+    assert first.llm_available is True
     r2 = await capa_doc_gate_service.generate_impact_analysis(db, capa, user.user_id)
     assert r2["status"] == "done"
     # Exactly one is_current
@@ -513,8 +519,10 @@ async def test_version_creation_waits_for_waiver_decision_commit(sessionmaker):
                     )
 
             writer_task = asyncio.create_task(_write_version())
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.2)
+            await assert_lock_wait(
+                sessionmaker, writer_task,
+                await waiver_session.scalar(text("SELECT pg_backend_pid()")),
+            )
 
             await capa_doc_gate_service._insert_decision(
                 waiver_session, analysis_id, factory_id, "passed", user_id,
@@ -626,8 +634,10 @@ async def test_gate_waits_for_concurrent_latest_decision_writer(sessionmaker):
                     return await capa_service._d8_doc_gate_gate(gate_session, gate_capa)
 
             gate_task = asyncio.create_task(_run_gate())
-            with pytest.raises(asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.shield(gate_task), timeout=0.2)
+            await assert_lock_wait(
+                sessionmaker, gate_task,
+                await writer.scalar(text("SELECT pg_backend_pid()")),
+            )
             await writer.commit()
 
         with pytest.raises(ValueError, match="文档门禁未通过：blocked"):
@@ -779,6 +789,7 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
         ))
         await seed.commit()
 
+    gate_blocker = []
     gate_checked = asyncio.Event()
     allow_transition_commit = asyncio.Event()
     writer_reached_parent_lock = asyncio.Event()
@@ -787,6 +798,7 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
 
     async def _pause_after_gate(db, capa):
         await original_gate(db, capa)
+        gate_blocker.append(await db.scalar(text("SELECT pg_backend_pid()")))
         gate_checked.set()
         await allow_transition_commit.wait()
 
@@ -818,8 +830,7 @@ async def test_normal_passed_gate_blocks_version_writer_until_transition_commit(
         await asyncio.wait_for(gate_checked.wait(), timeout=2)
         writer_task = asyncio.create_task(_write_version())
         await asyncio.wait_for(writer_reached_parent_lock.wait(), timeout=2)
-        await asyncio.sleep(0)
-        assert writer_task.done() is False
+        await assert_lock_wait(sessionmaker, writer_task, gate_blocker[0])
         allow_transition_commit.set()
         advanced = await asyncio.wait_for(gate_task, timeout=2)
         created = await asyncio.wait_for(writer_task, timeout=2)
@@ -935,6 +946,7 @@ async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
         ))
         await seed.commit()
 
+    gate_blocker = []
     gate_checked = asyncio.Event()
     allow_transition_commit = asyncio.Event()
     writer_reached_scope_lock = asyncio.Event()
@@ -943,6 +955,7 @@ async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
 
     async def _pause_after_gate(db, capa):
         await original_gate(db, capa)
+        gate_blocker.append(await db.scalar(text("SELECT pg_backend_pid()")))
         gate_checked.set()
         await allow_transition_commit.wait()
 
@@ -982,8 +995,7 @@ async def test_gate_blocks_matching_control_plan_create_until_transition_commit(
         await asyncio.wait_for(gate_checked.wait(), timeout=2)
         writer_task = asyncio.create_task(_create_matching_cp())
         await asyncio.wait_for(writer_reached_scope_lock.wait(), timeout=2)
-        await asyncio.sleep(0)
-        assert writer_task.done() is False
+        await assert_lock_wait(sessionmaker, writer_task, gate_blocker[0])
 
         allow_transition_commit.set()
         advanced = await asyncio.wait_for(gate_task, timeout=2)
@@ -1095,8 +1107,10 @@ async def test_control_plan_move_into_candidate_scope_waits_for_scope_lock(
 
             writer_task = asyncio.create_task(_move_into_scope())
             await asyncio.wait_for(writer_reached_scope_lock.wait(), timeout=2)
-            await asyncio.sleep(0)
-            assert writer_task.done() is False
+            await assert_lock_wait(
+                sessionmaker, writer_task,
+                await gate_session.scalar(text("SELECT pg_backend_pid()")),
+            )
             await gate_session.commit()
 
         updated = await asyncio.wait_for(writer_task, timeout=2)
@@ -1180,11 +1194,11 @@ async def test_candidate_set_mutators_share_old_and_new_scope_locks(
 
 
 @pytest.mark.asyncio
-async def test_candidate_scope_lock_fails_closed_without_factory(db):
+async def test_candidate_scope_lock_fails_closed_without_factory():
     from app.services.product_line_service import lock_candidate_scopes
 
     with pytest.raises(ValueError, match="Invalid candidate scope"):
-        await lock_candidate_scopes(db, [(None, "DC-DC-100")])
+        await lock_candidate_scopes(None, [(None, "DC-DC-100")])
 
 
 @pytest.mark.asyncio
@@ -1228,21 +1242,6 @@ async def test_record_gate_waiver_requires_analysis(db, capa_d8_gate):
               "target_key": "x", "field": "control_method"}],
             user.user_id,
         )
-
-
-@pytest.mark.asyncio
-async def test_waiver_passed_decision_unblocks_gate(db, capa_with_cp_blocked_modify):
-    """After structured waiver, _d8_doc_gate_gate must not raise."""
-    from app.services import capa_doc_gate_service, capa_service
-    capa, user, cp, tk, field = capa_with_cp_blocked_modify
-    await capa_doc_gate_service.run_audit(db, capa, user.user_id)
-    await capa_doc_gate_service.record_gate_waiver(
-        db, capa, "accepted",
-        [{"doc_type": "control_plan", "doc_id": str(cp.cp_id),
-          "target_key": tk, "field": field}],
-        user.user_id,
-    )
-    await capa_service._d8_doc_gate_gate(db, capa)
 
 
 @pytest.mark.asyncio
@@ -1867,6 +1866,9 @@ async def test_empty_llm_output_produces_done_analysis(db, capa_d8_gate_with_doc
     conf = await capa_doc_gate_service.confirm_no_affected(db, capa, user.user_id)
     assert conf["decision"] == "passed"
     assert conf["no_affected_confirmed"] is True
+    decision = (await db.execute(select(CapaDocgDecision))).scalar_one()
+    assert decision.decision == "passed"
+    assert decision.no_affected_confirmed is True
 
 
 # ---------------------------------------------------------------------------

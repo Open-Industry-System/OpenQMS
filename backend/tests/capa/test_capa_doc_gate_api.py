@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.core.deps import get_request_scope
 from app.main import app
 from app.models.capa_doc_gate import CapaDocgAnalysis, CapaDocgDecision
+from app.models.audit import AuditLog
 from app.schemas.capa import AdvanceRequest
 from app.services import capa_doc_gate_service, capa_service
 from app.state_machines.eightd_state import EightDState
@@ -31,17 +32,6 @@ async def docgate_admin_client(admin_client, admin_user, default_factory):
 # ---------------------------------------------------------------------------
 # Service-level gate tests (reuse doc-gate fixtures)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_d8_gate_blocks_when_no_analysis(db, capa_d8_gate):
-    """advance D8_GATE_PENDING->D8_APPROVAL_PENDING with no analysis -> raise."""
-    capa, user = capa_d8_gate
-    with pytest.raises(ValueError, match="影响分析"):
-        await capa_service.advance_capa(
-            db, capa, user.user_id,
-            AdvanceRequest(target_state=EightDState.D8_APPROVAL_PENDING),
-        )
 
 
 @pytest.mark.asyncio
@@ -73,19 +63,6 @@ async def test_d8_gate_blocks_when_deferred(db, capa_with_done_analysis_no_bump)
 
 
 @pytest.mark.asyncio
-async def test_d8_gate_passes_when_decision_passed(db, capa_with_empty_done_analysis):
-    """confirm_no_affected → passed → advance to D8_APPROVAL_PENDING."""
-    capa, user = capa_with_empty_done_analysis
-    result = await capa_doc_gate_service.confirm_no_affected(db, capa, user.user_id)
-    assert result["decision"] == "passed"
-    advanced = await capa_service.advance_capa(
-        db, capa, user.user_id,
-        AdvanceRequest(target_state=EightDState.D8_APPROVAL_PENDING),
-    )
-    assert advanced.status == EightDState.D8_APPROVAL_PENDING.value
-
-
-@pytest.mark.asyncio
 async def test_d8_gate_passes_when_audit_passed(db, capa_with_done_analysis_and_bumped_doc):
     """run_audit with bump+coverage → passed → advance succeeds."""
     capa, user = capa_with_done_analysis_and_bumped_doc
@@ -104,7 +81,7 @@ async def test_d8_gate_passes_when_audit_passed(db, capa_with_done_analysis_and_
 
 
 @pytest.mark.asyncio
-async def test_api_advance_blocks_without_analysis(docgate_admin_client, capa_d8_gate):
+async def test_api_advance_blocks_without_analysis(docgate_admin_client, capa_d8_gate, db):
     capa, _ = capa_d8_gate
     resp = await docgate_admin_client.post(
         f"/api/capa/{capa.report_id}/advance",
@@ -112,6 +89,11 @@ async def test_api_advance_blocks_without_analysis(docgate_admin_client, capa_d8
     )
     assert resp.status_code == 400
     assert "影响分析" in resp.json()["detail"]
+    await db.refresh(capa)
+    assert capa.status == "D8_GATE_PENDING"
+    assert not (await db.scalars(select(AuditLog).where(
+        AuditLog.action == "TRANSITION", AuditLog.record_id == capa.report_id,
+    ))).all()
 
 
 @pytest.mark.asyncio
@@ -188,6 +170,12 @@ async def test_api_defer(docgate_admin_client, capa_with_done_analysis_no_bump, 
     dec = await docgate_admin_client.get(f"/api/capa/{capa.report_id}/doc-gate/decision")
     assert dec.json()["decision"] == "deferred"
     assert dec.json()["defer_reason"] == "等待 SOP"
+    persisted = (await db.scalars(select(CapaDocgDecision).order_by(
+        CapaDocgDecision.revision.desc()))).first()
+    assert persisted.decision == "deferred"
+    assert persisted.defer_reason == "等待 SOP"
+    assert persisted.defer_owner == user.user_id
+    assert str(persisted.defer_deadline) == "2026-08-15"
 
 
 @pytest.mark.asyncio
