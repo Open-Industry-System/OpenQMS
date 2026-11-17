@@ -14,7 +14,7 @@ def run(event='pull_request'):
     return dict(id=42, name='Test OpenQMS', path='.github/workflows/test.yml', status='completed', conclusion='success', event=event, head_sha=HEAD, head_branch='feature', repository={'full_name':REPO}, head_repository={'full_name':REPO}, pull_requests=[{'number':7}])
 
 def pr():
-    return dict(number=7, state='open', draft=False, user={'login':'alice'}, head={'sha':HEAD,'repo':{'full_name':REPO}}, base={'sha':BASE,'ref':'main','repo':{'full_name':REPO}}, merge_commit_sha=SHA)
+    return dict(number=7, body='<!-- preview-test-plan:start -->\n### 影响范围\n质量报告列表与只读权限。\n### 验收步骤\n| 检查项 | 操作步骤 | 预期结果 |\n| --- | --- | --- |\n| 列表筛选 | 登录并筛选报告状态 | 只显示对应状态报告 |\n### 权限与回归\n只读用户修改应拒绝，刷新后列表筛选保持。\n<!-- preview-test-plan:end -->', state='open', draft=False, user={'login':'alice'}, head={'sha':HEAD,'repo':{'full_name':REPO}}, base={'sha':BASE,'ref':'main','repo':{'full_name':REPO}}, merge_commit_sha=SHA)
 
 def test_current_trusted_merge():
     assert gate.resolve(run(), REPO, 'main', pr(), 'write', SHA)['sha']==SHA
@@ -206,3 +206,16 @@ def test_ignored_log_metadata_still_validated(unsafe):
         z.writestr(entry,b'ignored')
     api.data['/actions/artifacts/0/zip']=output.getvalue()
     with pytest.raises(ValueError,match='unsafe artifact path|symlink artifact entry'):gate.verify(api,42,REPO)
+
+
+def test_missing_preview_plan_blocks_publication():
+    api = API()
+    ci = run(); ci.update(run_attempt=2)
+    api.data['/actions/runs/42'] = ci
+    api.data['/pulls/7'] = dict(pr(), body='No acceptance plan')
+    api.data['/git/ref/heads/main'] = {'object': {'sha': BASE}}
+    api.data['/collaborators/alice/permission'] = {'permission': 'write'}
+    api.data['/git/ref/pull/7/merge'] = {'object': {'sha': SHA}}
+    api.data[f'/git/commits/{SHA}'] = {'parents': [{'sha': BASE}, {'sha': HEAD}]}
+    with pytest.raises(ValueError, match='验收计划'):
+        gate.verify(api, 42, REPO)

@@ -104,6 +104,10 @@ def verify(api, run_id, repository):
     else:
         require(re.fullmatch('[A-Za-z0-9_./-]+',default) and '..' not in default, 'invalid default branch')
         current=api.get(f'/git/ref/heads/{default}')['object']['sha']
+    if pr is not None:
+        import runpy
+        from pathlib import Path
+        runpy.run_path(str(Path(__file__).with_name('pr-preview-acceptance.py')))['test_plan'](pr.get('body'))
     plan=resolve(run,repository,default,pr,permission,current)
     jobs=api.get(f'/actions/runs/{run_id}/attempts/{run["run_attempt"]}/jobs?per_page=100')
     require(jobs['total_count'] <= 100, 'too many jobs')

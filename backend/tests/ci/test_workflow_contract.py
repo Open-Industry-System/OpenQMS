@@ -461,6 +461,10 @@ def test_pr_pip_caches_cover_manifests_without_replacing_installation():
     ('pull_request', 'main', 'opened', True),
     ('pull_request', 'main', 'synchronize', True),
     ('pull_request', 'main', 'reopened', True),
+    ('pull_request', 'main', 'edited', True),
+    ('pull_request', 'main', 'ready_for_review', True),
+    ('pull_request', 'main', 'labeled', False),
+    ('pull_request', 'develop', 'edited', False),
     ('pull_request', 'main', 'closed', False),
     ('pull_request', 'develop', 'opened', False),
     ('push', 'main', None, True),
@@ -473,10 +477,15 @@ def test_literal_branch_event_matrix(event, branch, action, expected):
     workflow = _load_workflow(AUTOMATIC_PATH)
     triggers = workflow['on']
     # Literal branches only: no custom glob emulator or production event router.
-    assert triggers == {'push': {'branches': ['main']}, 'pull_request': {'branches': ['main']}}
+    assert triggers == {
+        'push': {'branches': ['main']},
+        'pull_request': {'branches': ['main'], 'types': [
+            'opened', 'synchronize', 'reopened', 'edited', 'ready_for_review',
+        ]},
+    }
     matched = event in triggers and branch in triggers[event]['branches']
     if event == 'pull_request':
-        matched = matched and action in ('opened', 'synchronize', 'reopened')
+        matched = matched and action in triggers['pull_request']['types']
     assert matched is expected
 
 
