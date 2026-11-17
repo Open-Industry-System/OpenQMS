@@ -253,7 +253,7 @@ def test_fresh_chain_cross_references_actual_records_not_truthy_summary():
             evidence.validate_chain(*args)
 
 
-def synthetic_provenance(tmp_path, monkeypatch):
+def synthetic_provenance(tmp_path, monkeypatch, *, addresses=None):
     """Create a local SYNTHETIC FORMAT repository; no database/provider exists."""
     import hmac
     import subprocess
@@ -329,6 +329,8 @@ def synthetic_provenance(tmp_path, monkeypatch):
         models[name].update(enabled=True, tenant_generation=1, created_by='synthetic-actor', name='synthetic-format-only',
             executor_pins=dict(policy_sha256=evidence.digest(fingerprint), artifact_sha256=policy['artifact_sha256'],
                 interpreter_sha256=policy['interpreter_sha256'], launcher_sha256=policy['launcher_sha256'], profile=policy['profile']))
+        if addresses is not None:
+            models[name]['allowed_addresses'] = addresses
         fields = ('deployment_id', 'name', 'version', 'tenant_generation', 'kind', 'provider', 'model', 'base_url',
                   'allowed_addresses', 'credential_ref', 'executor_pins', 'created_by')
         signed = {key: models[name][key] for key in fields}
@@ -342,6 +344,26 @@ def synthetic_provenance(tmp_path, monkeypatch):
     monkeypatch.setenv('R6_SWITCH_AUTHORITY_FILE', authority_ref['path'])
     execution = dict(resource=resource_ref, build=build_ref, build_config=config_ref, authority=authority_ref)
     return values, candidate, configurations, execution, repo
+
+
+@pytest.mark.parametrize(('addresses', 'accepted'), [
+    (['198.18.14.88'], True),
+    (['127.0.0.1'], False),
+    (['192.168.1.1'], False),
+    (['169.254.169.254'], False),
+    (['198.18.14.88', '127.0.0.1'], False),
+    (['not-an-ip'], False),
+    ([], False),
+])
+def test_provenance_checks_signed_cloud_address_pins(tmp_path, monkeypatch, addresses, accepted):
+    values, candidate, configurations, execution, repo = synthetic_provenance(
+        tmp_path, monkeypatch, addresses=addresses,
+    )
+    if accepted:
+        evidence.validate_provenance(values, candidate, configurations, execution, repo=repo)
+        values['models']['d4']['allowed_addresses'] = ['198.18.14.89']
+    with pytest.raises(ValueError):
+        evidence.validate_provenance(values, candidate, configurations, execution, repo=repo)
 
 
 def test_provenance_binds_source_owner_config_build_operators_and_normal_pins(tmp_path, monkeypatch):

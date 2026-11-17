@@ -345,6 +345,17 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
+def _accepted_cloud_pin(value):
+    address = ipaddress.ip_address(value)
+    # A local resolver can assign RFC 2544 addresses to public HTTPS hosts.
+    # This only classifies signed evidence. The runtime binds DNS to the
+    # registered addresses and verifies TLS for the original hostname.
+    return address.is_global or (
+        isinstance(address, ipaddress.IPv4Address)
+        and address in ipaddress.IPv4Network('198.18.0.0/15')
+    )
+
+
 def validate_provenance(values, candidate, configurations, execution, *, repo=None):
     """Bind source, SDK, operators, ownership and normal immutable approvals."""
     repo = Path(repo or Path(__file__).resolve().parents[3]).resolve()
@@ -443,7 +454,7 @@ def validate_provenance(values, candidate, configurations, execution, *, repo=No
         if (model['enabled'] is not True or model['tenant_generation'] != target['tenant']['generation']
                 or policy['tenant_id'] != target['tenant']['tenant_id'] or policy['tenant_generation'] != target['tenant']['generation']
                 or model['executor_pins'] != pins or not hmac.compare_digest(model['config_hmac'], signature)
-                or not model['allowed_addresses'] or not all(ipaddress.ip_address(address).is_global for address in model['allowed_addresses'])
+                or not model['allowed_addresses'] or not all(_accepted_cloud_pin(address) for address in model['allowed_addresses'])
                 or hashlib.sha256(Path(policy['artifact']).read_bytes()).hexdigest() != policy['artifact_sha256']
                 or hashlib.sha256(Path(policy['interpreter']).read_bytes()).hexdigest() != policy['interpreter_sha256']):
             raise ValueError('normal immutable cloud deployment approval/pins differ')
