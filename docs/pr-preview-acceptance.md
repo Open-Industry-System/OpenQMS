@@ -2,6 +2,7 @@
 
 1. 创建 PR 时填写模板中的预览验收计划：影响页面/角色/流程、每项操作步骤及预期结果、权限拒绝与回归检查。至少一条具体场景；保留模板标记与表头，替换所有占位内容。已有 PR 也须补充这一部分，草稿同样适用。
 2. `PR test plan` 自动检查描述。缺失章节、空表或占位内容会失败并要求补充。修改 PR 描述会重新检查并触发 CI；可信部署资格门禁也会读取最新描述，未补齐则不发布。
+   预览元数据读取或通知失败时，已校验的计划保留其格式检查结果，人工验收保持等待。可在工作流日志与 Summary 查看具体失败操作。
 3. 完整 CI 通过后，Oracle 工作流发布 `https://pr-<编号>.preview.openqms.smartindustry.world`。人工验收检查不阻塞预览部署。发布成功时产生受信工作流 artifact，绑定仓库、PR、head SHA 和实际 merge SHA。
 4. 人工打开预览，逐项执行计划。从 PR 下“测试环境已就绪”评论（或 **PR preview acceptance** 工作流 Summary）复制完整的 `/preview-accept <head SHA> <发布 run ID> <计划摘要>` 命令，在 PR 评论中另附具体测试结果或截图链接。命令自身不能视为测试结果。默认允许作者或具有 write/maintain/admin 权限的协作者确认；Bot 账号、无写权限账号、部署前的评论均不被接受。若需独立审核，将受信 workflow 中 `REQUIRE_INDEPENDENT_REVIEWER` 改为 `'true'`。
 5. main 规则集须将 `PR test plan` 与 `Preview human acceptance` 加入必需状态检查，保留原完整 CI 检查与严格最新 main 要求。两项成功后才能合并。不得通过删检查或管理员绕过代替验收。
