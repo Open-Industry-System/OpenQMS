@@ -1,10 +1,17 @@
 # OpenQMS
 
-> OpenQMS is a full-stack quality management platform for manufacturing, covering FMEA (AIAG-VDA 7-step), 8D/CAPA, SPC, MSA, IQC, supplier management, and more — built for IATF 16949 compliance.
-
-开箱即用的质量管理体系平台，面向制造业，覆盖 AIAG-VDA PFMEA/DFMEA、8D/CAPA、SPC、MSA、IQC、供应商管理等核心模块，助力 IATF 16949 合规。
+OpenQMS 是面向制造业的模块化质量管理平台，覆盖 FMEA 风险分析、控制计划、来料检验、统计过程控制和 8D 纠正措施，支持 IATF 16949 相关质量流程。
 
 **[English documentation →](README_EN.md)**
+
+## 业务模块如何与 AI Agent 协作
+
+以一份 8D 报告为例：在默认关闭的 Agent 试点中，员工可以选择获准的模型部署，让 Agent 根据已验证的 D4 根因和关联的 FMEA 依据提出 D5 纠正措施。建议先存为待审条目；有权限的员工核对依据、确认措辞并采纳后，CAPA 才将其记为正式措施。[8D Agent 试点与模型配置](docs/development/r5-model-egress.md)
+
+- **统一业务依据。** 架构要求插件通过业务模块提供的接口读取上下文，沿用报告、来源记录及其版本。页面和 Agent 引用同一份质量事实，员工可以从建议追溯到依据。
+- **按任务组合能力。** 模块分别声明可读取的上下文和可执行的业务命令。Agent 可以分多轮补充信息、选择下一步；平台在每次调用时核对执行身份、插件授权和任务范围，业务模块负责状态流转、审批和审计。
+
+8D 是首个接入样板。其他质量模块按各自的数据与操作规则逐步接入。[当前架构](docs/architecture.md) · [模块化业务与 AI 插件设计](docs/superpowers/specs/2026-09-22-modular-qms-agent-architecture-design.md)
 
 ---
 
