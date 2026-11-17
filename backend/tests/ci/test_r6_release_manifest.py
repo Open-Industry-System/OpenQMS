@@ -68,3 +68,14 @@ def test_complete_release_format_has_separate_authorizer_and_target(monkeypatch)
             actual=dict(target,environment='isolated_exercise',deployment_role='synthetic_exercise');invalid['target']=actual
         else:invalid['purpose']='r6-rehearsal.v1'
         with pytest.raises(ValueError):validate_document(invalid,actual)
+
+
+def test_compatibility_certificate_rejects_unexecuted_or_single_build():
+    import importlib.util
+    from pathlib import Path
+    path=Path(__file__).resolve().parents[3]/'scripts/r6-compat-check.py'
+    spec=importlib.util.spec_from_file_location('r6_compat_check',path)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    for value in ({}, {'status':'PASS','builds':['previous-version']},
+                  {'status':'PASS','builds':['main','R5'],'drained':False}):
+        with pytest.raises(ValueError):module.validate_certificate(value)

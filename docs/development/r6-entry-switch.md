@@ -4,6 +4,14 @@
 
 ## 当前状态
 
+2026-11-17：Tasks1–9（含6B）已实现、分层验证、独立SPEC→QUALITY复审及本地提交，最近为`03180f4f71663381987b0e519c65768a76536221`。Task9真实模型主链按预先批准的同报告顺序组合方法签为COMPOSED_PASS，失败原始轮次仍FAILED；原1200执行/操作字节与提交内容等价。Task10已完成实际双进程与分层原生验收，首次fresh QUALITY的三项检查器误签已补强，新鲜完整21＋5通过，补强后最终SPEC及fresh QUALITY均APPROVED，无未解决发现。Task11新鲜全量及最终交接尚未完成，不具备用户环境切换资格。
+
+R5 PR33已merge`f8b8d9885441408503447c0ffa1aceb9f6b1060e`，head`d06f63dd9d3d687a26ea5714b39a54f14671a01f`。最近只读核对实际main为`e4bc51f9f528c2b28da3366c1bfe1fe0b0adf86e`，后续安全/测试整理尚未整合本树；详情见后文主线差异。CI优化仍由另一Agent负责，本轮不改CI、不推送/合并/部署。正式目标/批准未提供，演练候选事实不能代替正式release_manifest。
+
+当前保留的同报告资源为第三套owner-bound PG15/64323，主报告已结案、对照可编辑；业务数据与卷保留。解释器及各套资源、精确收据和失败记录见对应批次。除明确正在进行的新验收外，原登记应用/原生进程已退出、原owner DB空闲；不因测试重置历史或解冻主报告。
+
+## 开工与早期基线记录（历史，非当前执行状态）
+
 - 实施起点 `codex/r6-entry-switch-design@f03fc01b0ef9a30a85da1917c8fa8ed81fcaa9f9`，开工工作区干净。R5 PR #33 实读仍 open/draft、未合并，head `75fcc51765bd3b6b739695178a399bfa01806574`，main `d3c0ada8f57c9c8831709117c7c95cbf2d925d66`，未发生影响计划的基线变化。
 - 解释器 `/Users/sam/Documents/Code/OpenQMS/backend/.venv/bin/python`，setuptools `79.0.1`。前端在本 worktree 和冻结基线各自按 lockfile `npm ci`，不复制依赖。离线 npm 因缺缓存失败，随后联网按锁安装成功；不改 package lock 或运行代码。
 - Task 1 数据合同实现、223 项专项验证及独立 SPEC/QUALITY 复审已通过；完整冻结 `make check` 与随后串行 `make check-browser` 均已 exit0。Task 2 最终整组验证与双复审通过，Task 3 各分层与独立双复审亦完成，本地提交 `dec122a9beff9f5931d61310bba132479b28e920`；随后启动全新 Task 4 实施 agent；Task 4 现已本地提交41419001；Task 5实现、完整专项与共享分层及独立双复审亦通过；Task6核心更正已提交；Task6B本地手工门禁与正常API回审、完整专项及最终双复审亦已完成，接续Task7正常页面。尚未签收 R6 整体或切换资格。
@@ -717,3 +725,87 @@ Task11须记录本地执行源码与远端CI/合并源码的关系；本轮无pu
 同一轮受控完整双场景2PASS/0skip257.34s（7/8对端回合），source discovery28、旧task_reads40、GET投影/来源11、local_closure20、entry_switch24、D4相关原生11、前端正确5文件120及类型/构建分别PASS；旧扩大API210PASS/1FAIL不改写，旧83前端作用域按前文纠正。最终全量由Task11新鲜执行，不把这些分组相加。Task10使用本报告已结案数据读核与源保护，另用仍D6的控制报告`a12167c3-cb1a-4b08-8ef3-e610544b18e2`测试genoff下正常更正；该控制未改动，准确元数据`final/controlled-ui-e1a090cb8f36480abb402fb4b3d78ba8/task10-editable-control.json` SHA`26595ae81004a776f6bbf91b29854438b39fc348de7be8ddcc004b132cdb3838`。
 
 29个登记PID均不再存活，64323真实owner/image/container/volume核验、其他连接0、资源空闲交回。不清理同份报告/卷，不推送/合并/部署/用户环境切换，不导入其他Agent的CI或最新main安全更改。R6-safe实际compat与最终全量仍待10/11，原样main/R5仍不是安全回退版本。
+
+Task9最终本地提交`03180f4f71663381987b0e519c65768a76536221`，精确29路径，父核暂存blob与当前文件一致，1200原执行/操作字节零漂移，提交后工作树为空。新Git提交仅绑定相同内容，不改写实际模型阶段c6b＋manifest的原执行记录/不可变部署/证明。全新Task10实施者及全新SPEC已接手，继续实际兼容进程与同数据验证；不推送、合并或部署。
+
+### Task10进行中：实际进程与内部合同证据方法
+
+Task9本地03180f4f后继续同owner64323。首轮因沙箱无法访问Docker/DB被框架skip，虽然wrapper exit0，明确不是C10通过。原生授权执行后，实际候选/关闭生成兼容进程顺序启动，独立签名PID/inventory/status、同一主报告只读v5核验、D6对照更正并发/精确重放均已执行。早期checker错误要求两个不同安全核心digest已纠正：允许同核心、不同精确配置；另source revoke可返回200过滤空列表/total0且普通独立手工D5仍可见，不伪称全部403。终态用有权QE验证409，与仅VIEW无写权403分开。原已有审计不可改，旧D4/D5草稿410仅允许逐request-id/步骤/状态/报告/操作者准确匹配的新失败审计，不宽泛忽略任何增量。核心TCP场景单项PASS是部分覆盖，不能签完整C10。
+
+按独立SPEC沟通明确计划C10层次：真实登记两TCP进程承担同份主数据/当前历史/权限/人工更正/终态等；完整旧草稿首次/缓存/在途、来源/派生和旧审核材料内部合同由同精确核心两配置下的新鲜原生完整文件补足，明确非TCP。旧草稿服务不依赖新生成开关，实际合法阶段来源403/无正文/无Provider调用可以在兼容false配置有效执行；新D4/D5生成被false挡住只算关闭生成，不能当来源证明。必须逐节点观察fixture后/测试后实际开关，不接受声明值或fixture强开。未具备观察器的候选v1部分执行按中断/补充保留，v2两配置完整重跑；实际收据尚待，不能累计冒充完整通过。
+
+
+## 2026-11-17 Task10初轮实现与验证（后续QUALITY发现与补强见下）
+
+Task10仅新增兼容检查器及同份数据测试、扩展清单反例三路径；未改动原1188运行＋9执行＋3操作的1200冻结文件，也未改变Schema、模型策略、SDK或原C9失败状态。基线为Task9本地`03180f4f71663381987b0e519c65768a76536221`，候选/兼容保持同一安全核心、各自精确配置，兼容关闭新生成；不能选原main/R5作为回退目标。实际已结案主报告保持D8_CLOSURE/批准verified，不解冻、不重复采纳或导出；D6独立对照通过正常入口追加更正以验安全写入。
+
+| 本轮真实执行 | 结果与适用范围 |
+|---|---|
+| 实际登记candidate/compat TCP＋检查器故障注入 | 14/14 PASS、0skip/error/deselect、exit0、46.54s；一个顺序双进程同数据场景＋13个语义反例。精确PID/配置/构建/Schema/inventory/status，授权读取当前更正及历史/完整来源/审核/PPT、撤权过滤、旧入口410、无版本PUT、终态QE409与VIEW403分别核对 |
+| 清单格式完整文件 | 5/5 PASS、0skip/error/deselect、exit0、2.88s；缺C9/C10/错误目的/目标与演练文书等拒绝 |
+| candidate内部原生主组／额外来源材料组 | 243＋39分别PASS，均0skip/fail/error/deselect；逐节点fixture后及测试后实际生成开关TRUE/TRUE |
+| compat内部原生主组／额外来源材料组 | 243＋39分别PASS，均0skip/fail/error/deselect；实际FALSE/FALSE，不让fixture强开；旧草稿首次/缓存/在途仍真正经过来源守卫 |
+| 独立登记enabled source-probe | 完整D4交付25/25 PASS，实际TRUE/TRUE；同核心/解释器/Schema，独立探针配置仅生成开关不同；正向K2/K3＋A可交付、增加B仅A/仅B/first-round均在正文离开前零交付。不是原false兼容TCP的来源证据 |
+
+内部五组共589次通过执行，**不是一次新鲜589整套**，也不把内部节点冒称登记TCP调用。签名index绑定真实每节点配置/精确collect-only清单；检查器固定31条语义覆盖记录，逐项校验节点、分支、配置、构建、来源与收据。关闭生成503、非法阶段或Provider未配置不算来源零交付证明。旧审核反例中的历史轮次是明确夹具，结合正常TCP批准v2及终态读取，不伪称D6直接批准。每模式全部负例后再只读核验主报告：原业务/审计不变，只准入逐request-id/报告/操作者/步骤/410精确对应的安全AI_DRAFT失败审计。
+
+完整交接`/private/tmp/openqms-r6-c9/task10-final-handoff.json` SHA`4dd43b035e0f1969a5369b5fcf61094da201cd9780d4cd5c6c292130ec05410c`；以下为私有owner目录内可核对引用：
+
+| 文件 | SHA256 |
+|---|---|
+| task10-final-1794875857339652000/certificate.json | 6437b00358d036d5c2b99e8721b517a6fbbc58695cdcb4c77d4b20c7de26daa1 |
+| task10-final-1794875857339652000/c10.json | 846d9a8267559e57963537a850f15972d3299694ab8051bd241616c912af22e7 |
+| task10-final-1794875857339652000/execution-receipt.json | 585a53e065c5a93eb46837cf4408ccfd9d440c5df1825a65f940b280f29ac233 |
+| task10-index-1794875128685569000/internal-contracts.json | e75fa346fc47107e1f0157c67ef0d0af2a4cf85f58f616a9d7e0ac462d091d56 |
+| task10-release-candidate-facts.json | 98fc015e0611fac981d16b00f10000770ec97f1c6b56944ac39341933b45474c |
+| task10-closeout-1794876424764300000/closeout.json | 86d98ebaa7933110e40ddedcee8f7c5e66374276d0e59b806271009a8c1e4454 |
+
+真实stock gate为`openqms-ci-uzbpnej3/r5-api-20261117T003738009911-receipt.json` SHA`6f495b259e62a9fff122c07a35eb8a7febbf6bea83bc430c408b166943076378`；格式组为`openqms-ci-144ukxem/api-20261117T004300933226-receipt.json` SHA`06e391be390f9aca3e3a0b5110601183c801b642620f3dd3eab42d12666f1855`。绝对目录及所有其余分组收据由交接索引保存，不公布配置值。
+
+失败如实保留：首个沙箱attempt虽wrapper0但1skip，不算通过；候选v1缺逐节点实际开关见证，中断后79节点完成/第80开始，stockexit2且wrapper1，不算整组；早期过滤列表/同核心digest/终态身份oracle错误分别修正。第一次final底层14通过但导入冻结操作器清空环境，丢失stock hooks，收据counts null/FAILED，不能签收；测试恢复调用前环境与cwd后重新完整14通过。原失败不覆盖。调试中曾将专属合成测试环境一行配置打印到私有工具输出，未涉及OpenAI或生产凭据；已限制为0600/本机独占，不复制其值，保留签名链，最终仅关闭本任务所属进程/监听，不删除证据或卷。
+
+18个登记Task10应用/原生进程均已退出；原1200文件、供应商执行物/配置/SDK零漂移，64323原owner/container/image/volume身份一致、其他连接0。正式目标与批准均未提供，release-candidate facts明确production_authorized=false；**未创建正式release_manifest**。C9/C10演练候选事实可审阅，正式放行清单仍须独立正式目标与批准，不能伪造。Task11仍须新鲜全量与最终复审，不具备用户环境切换资格。
+
+
+Task10首次fresh QUALITY提出三项有效反例，收口暂缓：原C9→candidate只比部分投影，两个模式同时改动原建议可误签；原C9→candidate审计只保留子集，两个模式同时增加MODEL_EGRESS也可误签；compat两条审计没有请求一一对应，可重复同一步遗漏另一步。复审仅离线副本重签引用复现，未改原证据或业务数据。旧14/5通过仍仅对应原检查器，不覆盖这些新增反例；实施者须先补完整原始数据库比对、独立绑定历史失败尝试与逐模式精确审计双射，再新鲜重跑受影响门禁并重新SPEC→QUALITY。原1200运行文件不变时，589内部原生节点可按精确内容/配置复用，不重复宣称新鲜执行。
+
+
+### Task11预核：主线与CI独立工作再次推进
+
+2026-11-17再读GitHub确认R5 PR33仍已合并，head/merge与上述相同。实际main从`baa276aa`推进至`e4bc51f9f528c2b28da3366c1bfe1fe0b0adf86e`，仅新增PR37的一个合并提交，10路径为测试模板隔离、gate分模块计时/runner测试及文档；无业务服务、Schema或SDK差异。此为CI Agent独立工作，本树不导入、不改写其优化，继续按本树旧runner实际全量收据签收。此前安全PR38涉及public迁移分叉/权限等未来集成约束仍全部有效。只读元数据`/private/tmp/openqms-r6-c9/task11-remote-baseline-metadata.json`保留；本地执行源码、远端main与未来测试合并源码不是同一版本，未执行远端CI或声称新main已由R6验证。
+
+
+Task10补强方法已经独立SPEC批准，旧最终APPROVED被该轮新鲜复审取代：在新模式请求前，以独立签名只读baseline绑定原C9快照/报告/租户/构建/源码及父独立复核的历史清单`449c013ef951af71351b6a1fcf7de295409bd44b55b6787ec1c8a5343d80339b`。父已逐项复核原62条审计完整保留、总84条、恰22条唯一失败AI_DRAFT410历史；全部非审计数据库与C9完全相同。仅允许该精确历史22条及逐模式正常拒绝请求的精确双射，不概括豁免任意同类审计。新增字段/隐藏载荷亦拒绝。新的21项门禁及5项清单结果尚待，不使用旧14通过代替；源码v3冻结，原业务1200文件继续不变。
+
+
+补强后的首轮21门禁真实FAILED：0PASS/21FAIL、0skip、37.19s。实际场景在compat新任务创建探针收到403而非关闭生成503，后续20故障节点因无合格certificate亦失败，不误记为20项新业务漏洞或通过。候选模式已完成正常读取/对照操作及两条精确失败410审计；主报告未解冻、无模型调用。需核实403是否位于新生成守卫之前；如由原模型部署当前资格触发，独立SPEC仅准许用健康且正常获批的本地合成部署/可编辑对照验证严格false TCP的精确503、无任务保存/Provider调用，绑定其真实身份与授权来源，不修改原Terra部署/policy或将任意403当作关闭证据。私有失败目录`/private/tmp/openqms-r6-c9/task10-final-1794883633791795000`保留；重新运行前新增历史审计须精确重新复核，不泛化允许。
+
+
+随后只读诊断确认：原Terra部署enabled、代际、HMAC及执行物pins均有效，但当前DNS解析摘要与不可变许可地址集合摘要不一致，`task_service`部署资格检查在生成开关之前拒绝。诊断仅保存摘要，不修改原pins/policy/deployment或发Provider请求。独立SPEC明确批准第三个**单独登记、同安全核心、严格false**的TCP本地合成探针：使用已有健康LOCAL部署与正常员工/安装/批准资格，仅改变单独冻结的control policy/deployment配置，绑定实际PID/exe/核心/Schema/control租户报告；任务、egress及Provider前后数量不变并返回精确503。原两个主报告TCP进程的配置/数据/策略保持不变，第三探针只提供关闭生成资格证据，不冒称原compat模型来源或主报告交付证据。最终精确收据仍待。
+
+
+父独立复核新历史清单v2（`/private/tmp/openqms-r6-c9/task10-historical-audit-review-v2.json`，SHA`6bb9c5f296604f34c91a233cdcf9cd97b1fabcb50dac22f8ccdbfe4e605280c9`）通过：原62审计完整、原22失败行不变，新增恰2条候选D4/D5安全失败410，总86、历史24条唯一log/request，全部非审计数据库与原C9一致。批准仅此精确24行，不允许未来任意同类增量。独立LOCAL第三探针已返回精确503且任务/egress无新增，PID94226正常-15退出；签名`task10-local-genoff-1794884642392108000/probe.json` SHA`b985c2f9db2984491ab1fe9f2ad31236783ae5a052db001e67cfd5c5ba7c3801`，需绑定检查器新冻结及新鲜整组后才能最终签收。
+
+
+## Task10补强后新鲜整组及最终双复审通过
+
+v4源码三路径冻结SHA`bdc705f817f2a2fbd1c6fdb50ce1ad75e522dc140ff929adf9b2480a870ceacd`、父核3/3零漂移。新鲜WHOLE21 gate实际21PASS/0FAIL/0ERROR/0SKIP/0deselect、exit0、46.79s；包含真实双主进程同份数据场景、4个已先RED的原业务/审计双模式反例及3项隐藏载荷反例等共20负例。不是旧14门禁的改名/补加总；旧14与失败21收据保留。新的stock receipt为`/var/folders/lm/9f6vbj9n2778dqzqjqwsn20w0000gn/T/openqms-ci-ph__47pi/r5-api-20261117T031541541708-receipt.json`。内部五组589节点/core/index未改变，按精确内容与实际配置复用，非本轮重新执行。
+
+原C9→签名只读baseline86→候选→兼容全部非审计数据库完全一致；62原审计不变、历史24行仅按独立复核清单接受，两个模式各自准确双射D4/D5失败410审计。严格14列投影/8项changed_fields、类型、空正文元数据/未知字段/有限时长与标识保护，不能用受限载荷伴随安全错误漏过。新baseline`task10-audit-baseline-1794885239866176000/baseline.json` SHA`ef0fe8c89ad91ead840b0a51e2188128704e8fb2bc1e132532f50d0c6d5a21ee`，只读PID1825退出-15。第三LOCAL strictfalse探针最终`task10-local-genoff-1794885077671064000/probe.json` SHA`bbc04e90b9a1c4a2684467c4d8f2ffc2e8741185e283023c01ae65ece86f480e`，PID99819退出-15；任务2→2/egress14→14、正常员工/安装/批准、模型签名/许可、平台执行物及真实配置均绑定，精确503。原两个主进程配置与模型pins不变，第三探针仅关闭生成证据。
+
+以下最终v4文件在`/private/tmp/openqms-r6-c9/task10-final-1794885340905634000/`，后续format/closeout及独立复审仍须收口：
+
+| 文件 | SHA256 |
+|---|---|
+| certificate.json | 766ede4beaae37591c794a9acd1e4bdcbbd145a37da131ccb5b469268e4415fe |
+| c10.json | 5497b7908d391a0cc40c2c55a5b2c8105eee44ac47762fa030536a8be3d47e42 |
+| execution-receipt.json | 15bd1f6ab18ff09993ed25a6197d88b25b252da8233d37e5e5d66920c5d8ffed |
+
+
+最终v4 format完整文件5/5 PASS、0fail/error/skip/deselect、exit0、2.96s，真实收据`/var/folders/lm/9f6vbj9n2778dqzqjqwsn20w0000gn/T/openqms-ci-ytpuern6/api-20261117T031958585323-receipt.json`；独立checker CLI对新certificate exit0。新closeout`task10-closeout-1794885615595644000/closeout.json` SHA`6b6240c9a58b46efd0d1c834aa8874ee815da73b203e33a4d039aaf15571f7e4`，包含27个Task10应用/原生/baseline/探针原实例均退出。完整1200运行/执行/操作、供应商执行物/配置/SDK零漂移，owner64323原容器/卷/角色一致、其他连接0，资源空闲交回；仍保留证据和卷。最终SPEC重新独立执行checker已VALID，fresh QUALITY待接续，不凭初轮旧APPROVED签收本轮。
+
+
+补强后最终SPEC已APPROVED，fresh QUALITY重新复审中。正式交接改用`/private/tmp/openqms-r6-c9/task10-final-handoff-v2.json` SHA`e9559d40ddc527a23c4a61a9ad26a1c4c07127b1952377be9b1e3b576385c89a`；原v1不覆盖。父及独立SPEC各核29证据引用/哈希全部一致，原1200执行文件未变。新演练候选事实`task10-release-candidate-facts-v2.json` SHA`582f632a59301d83e483351cd3f9144c617fef7cc31ac70d1452ec35fedc7f39`仍无正式目标/批准、production_authorized=false，未创建正式release_manifest；Task11及用户正式环境授权仍独立。
+
+
+Task10最终补强SPEC→fresh QUALITY复审均APPROVED、无未解决发现。QUALITY独立执行新certificate VALID、全部20离线语义反例通过，29引用与3实现哈希匹配，未改原证据/数据。父已核sourcefreeze与引用一致、仅四文档和三实现测试路径，准备精确本地提交；随后全新Task11连续执行最终全量，不停在Task10。正式发布仍另行授权。
