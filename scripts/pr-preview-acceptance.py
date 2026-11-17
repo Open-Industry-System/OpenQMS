@@ -192,9 +192,11 @@ def reconcile(api, pr, summary):
     waiting = f'{NOTICE}\n### 等待 CI 与预览部署\n\n当前提交：`{sha}`。预览尚未就绪，请等待发布完成。\n\n预期地址：https://pr-{pr["number"]}.preview.openqms.smartindustry.world\n\n[CI 检查](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
     try:
         digest = test_plan(pr.get('body'))
-    except ValueError:
+    except ValueError as error:
+        api.status(sha, PLAN, 'failure', str(error))
+        summary.append(f'PR #{pr["number"]}: {error}')
         api.notice(pr['number'], waiting)
-        raise
+        return
     api.status(sha, PLAN, 'success', '影响范围、操作步骤、预期结果和权限回归检查齐全')
     active = latest_notified_deployment(api, pr)
     if active is not None and active['status'] != 'completed':
@@ -259,10 +261,10 @@ def main():
         try:
             reconcile(api, pr, summary)
         except Exception as error:
-            # Never leave a previous success after a failed revalidation.
-            api.status(pr['head']['sha'], PLAN, 'failure', '验收计划或元数据检查失败，请查看工作流 Summary')
-            api.status(pr['head']['sha'], ACCEPT, 'pending', '验收检查未通过，禁止沿用旧确认')
-            summary.append(f'PR #{pr["number"]}: {type(error).__name__}: {error}')
+            api.status(pr['head']['sha'], ACCEPT, 'pending', '预览元数据检查异常，请查看工作流日志后重新核验')
+            diagnostic = f'PR #{pr["number"]}: {type(error).__name__}: {error}'
+            print(diagnostic)
+            summary.append(diagnostic)
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
         out.write('\n\n'.join(summary))
 
