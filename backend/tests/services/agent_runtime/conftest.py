@@ -1,4 +1,5 @@
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 import os
 from types import SimpleNamespace
@@ -56,8 +57,8 @@ async def active_run(db, admin_user, sample_capa, enabled_plugin):
     return run, task, enabled_plugin, admin_user
 
 
-@pytest_asyncio.fixture
-async def committed_runtime(monkeypatch):
+@asynccontextmanager
+async def _committed_runtime(monkeypatch):
     """Complete fixture-owned tenant; real commits and the production transaction gate."""
     from app.config import settings
     from app.core.tenant_transaction import TenantBinding
@@ -122,3 +123,16 @@ async def committed_runtime(monkeypatch):
                 await connection.execute(text("DELETE FROM public.tenant_migrations WHERE tenant_id=:id"), {"id": row.id})
                 await connection.execute(text("DELETE FROM public.tenants WHERE id=:id"), {"id": row.id})
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def committed_runtime(monkeypatch):
+    async with _committed_runtime(monkeypatch) as runtime:
+        yield runtime
+
+
+@pytest_asyncio.fixture
+async def second_committed_runtime(monkeypatch):
+    """A distinct tenant/runtime for cross-tenant shared-resource regressions."""
+    async with _committed_runtime(monkeypatch) as runtime:
+        yield runtime

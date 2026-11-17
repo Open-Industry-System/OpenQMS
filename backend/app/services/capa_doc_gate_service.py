@@ -54,6 +54,10 @@ async def _lock_doc_gate_write(
     )
     if capa.status != "D8_GATE_PENDING":
         raise ValueError("当前状态不可写入文档门禁")
+    from types import SimpleNamespace
+    from app.services.capa_d5_measures import full_d5_material
+    capa._d5_material = await full_d5_material(db, capa,
+        scope=SimpleNamespace(user=SimpleNamespace(user_id=user_id)))
     return capa
 
 
@@ -85,6 +89,8 @@ async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD) -> dict | None
 async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
     capa = await _fresh_capa_phase(db, capa)
     capa = await _lock_doc_gate_write(db, capa, user_id)
+    from app.services.capa_d5_measures import require_legacy_d5_only
+    await require_legacy_d5_only(db, capa.report_id)
     # The parent lock is retained through phase 1's small transaction.
     # Demote old current (fail-closed: before credential check)
     await db.execute(
@@ -438,6 +444,8 @@ def _compute_input_hash(capa: CAPAEightD, candidates: list[dict]) -> str:
             for c in candidates
         ),
     }
+    if getattr(capa, '_d5_material', None):
+        payload['d5_measures'] = capa._d5_material
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
@@ -889,6 +897,21 @@ async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, 
         select(CapaDocgDecision.revision).where(CapaDocgDecision.analysis_id == analysis_id)
         .order_by(CapaDocgDecision.revision.desc()).limit(1)
     )
+    # Every decision path (audit, no-affected, defer and waiver) converges here
+    # after its last analysis/document lock wait. Cached pre-wait D5 material is
+    # not authority for committing a complete-material decision.
+    from types import SimpleNamespace
+    from app.services.capa_d5_measures import _formal_ids, full_d5_material
+    identity = (await db.execute(select(CapaDocgAnalysis.capa_id,
+        CapaDocgAnalysis.analysis_input_hash).where(CapaDocgAnalysis.analysis_id == analysis_id))).one()
+    if await _formal_ids(db, identity.capa_id):
+        level = PermissionLevel.APPROVE if waiver_items is not None else PermissionLevel.EDIT
+        current = await current_capa_actor_target(db, user_id, identity.capa_id, level)
+        candidates = await _build_allowlist(db, current)
+        current._d5_material = await full_d5_material(db, current,
+            scope=SimpleNamespace(user=SimpleNamespace(user_id=user_id)))
+        if _compute_input_hash(current, candidates) != identity.analysis_input_hash:
+            raise ValueError("分析输入已变更，请重新生成影响分析")
     db.add(CapaDocgDecision(
         analysis_id=analysis_id, audit_run_id=audit_run_id,
         revision=(max_rev if max_rev is not None else -1) + 1,

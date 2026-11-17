@@ -469,6 +469,7 @@
     "failed": "Lateral diffusion failed; retry"
   },
   "outcome": {
+    "d5Measures": "D5 formal measures",
     "title": "D8 outcome review",
     "reload": "Reload review materials",
     "round": "Review round",

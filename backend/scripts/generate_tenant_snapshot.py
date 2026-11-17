@@ -14,6 +14,7 @@ import subprocess
 from urllib.parse import urlparse
 
 EXCLUDED_PLATFORM_TABLES = frozenset({
+    "platform_login_attempts",
     "tenants", "tenant_migrations", "platform_admin_users", "reference_templates", "alembic_version",
 })
 BASE = Path(__file__).resolve().parents[1]

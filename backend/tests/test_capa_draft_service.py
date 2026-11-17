@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import app.services.capa_draft_service as capa_draft_service
 from app.config import settings
-from app.schemas.capa_draft import DraftRequest, STEP_SCHEMA_MAP
+from app.schemas.capa_draft import DraftRequest, DraftResponse, STEP_SCHEMA_MAP
 from app.services.agent import provider_adapter
 from app.services.capa_draft_service import (
     generate_draft,
@@ -47,6 +47,15 @@ def clear_state(monkeypatch):
     _in_flight.clear()
     # 固定超时，避免环境差异
     monkeypatch.setattr(settings, "CAPA_DRAFT_LLM_TIMEOUT", 15)
+    # These unit doubles represent legacy reports without formal D5 items.
+    # Actual database tests below still execute the real material query.
+    from app.services import capa_d5_measures
+    formal_ids = capa_d5_measures._formal_ids
+    async def _legacy_formal_ids(db_arg, report_id):
+        if isinstance(db_arg, MagicMock):
+            return []
+        return await formal_ids(db_arg, report_id)
+    monkeypatch.setattr(capa_d5_measures, '_formal_ids', _legacy_formal_ids)
     # Default provider_adapter stubs so MagicMock db tests don't crash on build_client.
     async def _default_client(db_arg):
         return _PC()
@@ -100,7 +109,8 @@ class TestGenerateDraftSuccess:
         req = DraftRequest(format="structured", request_id=str(uuid.uuid4()))
         resp = await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
 
-        assert resp["step"] == "d2"
+        # Validate the actual generated payload against the API response contract.
+        assert DraftResponse.model_validate(resp).step == "d2"
         assert "request_id" in resp
         assert resp["content"].startswith("问题陈述")
         assert resp["structured_data"]["problem_statement"] == "陈述"

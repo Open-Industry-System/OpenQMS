@@ -88,13 +88,15 @@ docker compose exec backend python -m app.seed
 
 | 用户名 | 密码 | 角色 | 说明 |
 |--------|------|------|------|
-| `admin` | `Admin@2026` | 系统管理员 | 全部权限，可管理用户与权限 |
+| `admin` | 私密初始化 | 系统管理员 | 全部权限，可管理用户与权限 |
 | `engineer` | `Engineer@2026` | 现场质量工程师 | FMEA/SPC/MSA 编辑，CAPA 编辑 |
 | `manager` | `Manager@2026` | 质量经理 | 审批权限，可关闭 CAPA |
 | `viewer` | `Viewer@2026` | 只读用户 | 所有模块只读 |
-| `groupadmin` | `GroupAdmin@2026` | 系统管理员（集团） | 多工厂管理权限 |
+| `groupadmin` | 私密初始化 | 系统管理员（集团） | 多工厂管理权限 |
 
-> ⚠️ 上述默认密码只适用于本地开发或实例所有者明确批准的公开演示。`qms.smartindustry.world` 是共享可写演示环境：管理员能改账号密码与数据，不得录入真实数据或真实 API 密钥；其他正式生产部署必须轮换特权密码。
+管理员启动时不自动创建，种子中的 `admin`/`groupadmin` 也没有公开口令。运行 `docker compose exec backend python -m app.cli.bootstrap_admin --username admin --replace-existing`，在私密终端交互输入安装专用密码；未运行种子的新账号不加 `--replace-existing`。升级说明见[安全修复记录](docs/development/2026-11-16-security-scan-fixes.md)。
+
+> ⚠️ 上述业务演示账号密码只适用于本地开发或实例所有者明确批准的公开演示。`qms.smartindustry.world` 是共享可写演示环境：管理员能改账号密码与数据，不得录入真实数据或真实 API 密钥；其他正式生产部署必须轮换特权密码。
 
 ### 5. API 文档
 

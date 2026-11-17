@@ -79,11 +79,24 @@ export const useAuthStore = create<AuthState>((set, get) => {
   },
 
   logout: () => {
+    const refreshToken = localStorage.getItem("refresh_token");
     activeFetchOperation = null;
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("current_factory_id");
     set({ user: null, token: null, loading: false, factoryScope: null, factories: [], currentFactoryId: null });
+    if (refreshToken) {
+      // Use the captured refresh credential to resolve its tenant even if the
+      // access token has expired. Bypass Axios refresh/retry interceptors.
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json", Authorization: `Bearer ${refreshToken}`,
+      };
+      const tenantSlug = localStorage.getItem("tenant_slug");
+      if (import.meta.env.DEV && tenantSlug) headers["X-Tenant-ID"] = tenantSlug;
+      void fetch("/api/auth/logout", {
+        method: "POST", headers, body: JSON.stringify({ refresh_token: refreshToken }), keepalive: true,
+      }).catch(() => {});
+    }
   },
 
   fetchUser: async () => {

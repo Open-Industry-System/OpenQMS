@@ -51,7 +51,7 @@ def settings():
         values[key] = value
     required = set("SITE_ADDRESS TAILSCALE_IP POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DATABASE_URL REDIS_PASSWORD REDIS_URL NEO4J_USER NEO4J_PASSWORD NEO4J_URI NEO4J_DATABASE SECRET_KEY ACCESS_TOKEN_EXPIRE_MINUTES REFRESH_TOKEN_EXPIRE_DAYS ALGORITHM GRAPH_REPOSITORY TENANT_MODE E2E_MODE LLM_PROVIDER LLM_API_KEY LLM_MODEL LLM_BASE_URL EMBEDDING_PROVIDER EMBEDDING_API_KEY EMBEDDING_MODEL EMBEDDING_BASE_URL VITE_PUBLIC_DEMO_ENABLED VITE_PUBLIC_DEMO_USERNAME VITE_PUBLIC_DEMO_PASSWORD".split())
     empty = {key for key in required if key.startswith(('LLM_', 'EMBEDDING_'))}
-    if values.keys() - required - {'VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS'} or any(not values.get(key) for key in required - empty):
+    if values.keys() - required - {'VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS', 'ERP_ALLOWED_ORIGINS'} or any(not values.get(key) for key in required - empty):
         raise ValueError('unknown or empty production setting')
     if values.get('ALGORITHM') != 'HS256' or not all(re.fullmatch(r'[0-9a-f]{48}', values.get(key, '')) for key in ('REDIS_PASSWORD', 'NEO4J_PASSWORD')):
         raise ValueError('production configuration contract failed')
@@ -66,6 +66,9 @@ def settings():
     expected = f"postgresql+asyncpg://{values['POSTGRES_USER']}:{values['POSTGRES_PASSWORD']}@db:5432/{values['POSTGRES_DB']}"
     if values['DATABASE_URL'] != expected:
         raise ValueError('production internal database contract failed')
+    # Optional for pre-upgrade environments. Export this validated file value
+    # explicitly so Compose never sees an unset/ambient ERP policy.
+    values['ERP_ALLOWED_ORIGINS'] = values.get('ERP_ALLOWED_ORIGINS') or '{}'
     return values
 
 
@@ -110,6 +113,7 @@ class Release:
         self.verify()
         env = {key: os.environ[key] for key in ('PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONTEXT') if key in os.environ}
         env['RELEASE_SHA'] = self.sha
+        env['ERP_ALLOWED_ORIGINS'] = settings()['ERP_ALLOWED_ORIGINS']
         command = ['docker', 'compose', '--project-name', 'openqms', '--project-directory', str(self.source), '--env-file', str(APP / '.env.production'), '-f', str(self.control / 'docker-compose.prod.yml'), '-f', str(self.control / 'deploy/preview-edge.override.yml')]
         if extra:
             command += ['-f', str(extra)]

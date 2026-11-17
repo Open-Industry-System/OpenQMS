@@ -1,5 +1,5 @@
 import client from "./client";
-import type { ActivityPage, ActivityQuery, AgentTask, InstallationChoice, ReadonlyCheckpoint, RuntimeResult, TaskControl, TaskControlOut, TaskCreate, TaskMessageAccepted, TaskMessageCreate } from "../types/agentTask";
+import type { ModelChoice, TaskWorkflow, ActivityPage, ActivityQuery, AgentTask, InstallationChoice, ReadonlyCheckpoint, RuntimeResult, TaskControl, TaskControlOut, TaskCreate, TaskMessageAccepted, TaskMessageCreate } from "../types/agentTask";
 // Validate every user read before retaining restricted content. Unknown keys and
 // union variants fail closed, including axios' raw invalid-JSON string fallback.
 type Check = (v: unknown) => boolean;
@@ -56,6 +56,7 @@ const checkpoint = object({
   is_latest: lit(true, false),
   prefix_eligible: lit(true, false)
 });
+const recoveryCheckpoint = object({checkpoint_type:lit('d4_recovery_v1'),checkpoint_id:uuid,task_id:uuid,run_id:uuid,lease_epoch:int(),tenant_generation:int(),accepted_message_seq:int(),update_sequence:int(1),protocol:lit('d4-recovery.v1'),resume_position:lit('restart_from_start'),created_at:date});
 const run = object({
   run_id: uuid,
   installation_id: uuid,
@@ -103,7 +104,7 @@ const variants: Record<string, Check> = {
   }),
   event: v => eventSourced(v) || eventRunning(v),
   result,
-  checkpoint,
+  checkpoint: value=>checkpoint(value) || recoveryCheckpoint(value),
 };
 const item: Check = v => {
   if (typeof v !== "object" || v === null || !("kind" in v) || typeof v.kind !== "string" || !Object.prototype.hasOwnProperty.call(variants, v.kind))
@@ -115,7 +116,7 @@ const item: Check = v => {
     data: variants[v.kind]
   })(v);
 };
-const task = object({
+const taskFields = {
   task_id: uuid,
   target_capa_id: uuid,
   factory_id: uuid,
@@ -123,7 +124,9 @@ const task = object({
   status: taskStatus,
   created_at: date,
   updated_at: date
-});
+};
+const modelDeployment = object({ deployment_id: uuid, name: str(), version: str() });
+const task: Check = value => object({ ...taskFields, model_deployment: nullable(modelDeployment) })(value) || object(taskFields)(value);
 const controlOut = object({
   control_id: uuid,
   task_id: uuid,
@@ -202,4 +205,21 @@ export async function getTaskResult(taskId: string, resultId: string, signal?: A
 }
 export async function getTaskCheckpoint(taskId: string, checkpointId: string, signal?: AbortSignal): Promise<ReadonlyCheckpoint> {
   return parse((await client.get(`${base}/${taskId}/checkpoints/${checkpointId}`, { signal })).data, checkpoint);
+}
+
+export async function listModelDeployments(signal?: AbortSignal): Promise<{items: ModelChoice[]}> {
+  return parse((await client.get('/agent/models', {signal})).data, object({items:list(object({deployment_id:uuid,name:str(),version:str(),kind:lit('local','cloud')}),0,1000)}));
+}
+export async function launchTask(taskId: string, signal?: AbortSignal): Promise<{task_id:string;status:string}> {
+  const value = parse<{task_id:string;status:string}>((await client.post(`${base}/${taskId}/launch`, {}, {signal,timeout:130000})).data, object({task_id:uuid,status:str(100)}));
+  if (value.task_id !== taskId) throw new Error('Invalid task launch');
+  return value;
+}
+export async function getTaskWorkflow(taskId:string, signal?:AbortSignal):Promise<TaskWorkflow> {
+  return parse((await client.get(`${base}/${taskId}/workflow`,{signal})).data,object({status:str(100),question:nullable(str(2000)),checkpoint_id:nullable(uuid)}));
+}
+
+export interface D5CheckpointReference {checkpoint_id:string;run_id:string;created_at:string;}
+export async function listTaskD5Checkpoints(taskId:string,page=1,signal?:AbortSignal):Promise<{items:D5CheckpointReference[];total:number;page:number;page_size:number}>{
+  return parse((await client.get(`${base}/${taskId}/d5-checkpoints`,{params:{page,page_size:20},signal})).data,object({items:list(object({checkpoint_id:uuid,run_id:uuid,created_at:date}),0,20),total:int(),page:lit(page),page_size:lit(20)}));
 }

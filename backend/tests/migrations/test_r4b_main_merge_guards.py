@@ -85,6 +85,8 @@ async def test_merged_downgrade_nonempty_d4_rolls_back_both_branches(mig_db_url,
     await asyncio.to_thread(command.upgrade, config, PUBLIC)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, 'engine', engine)
+    # Exercise the published R4b merge rollback, not a later R5 tenant.
+    monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT)
     try:
         tenant = await tenant_migrator.provision_new(_request())
         schema = tenant.schema_name
@@ -122,6 +124,8 @@ async def test_merged_downgrade_to_one_branch_rejected_before_ddl(mig_db_url, mo
     await asyncio.to_thread(command.upgrade, config, PUBLIC)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)
     monkeypatch.setattr(tenant_migrator, 'engine', engine)
+    # Exercise the published R4b merge rollback, not a later R5 tenant.
+    monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT)
     try:
         tenant = await tenant_migrator.provision_new(_request())
         schema = tenant.schema_name

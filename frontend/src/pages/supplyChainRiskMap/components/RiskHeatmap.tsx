@@ -63,7 +63,14 @@ const RiskHeatmap: React.FC<RiskHeatmapProps> = ({ data, onSupplierClick }) => {
           const col = data.columns[params.data[0]];
           const cell = row?.cells[params.data[0]];
           if (!cell) return "";
-          return `<strong>${row.supplier_name}</strong><br/>${COLUMN_LABELS[col.key] ?? col.label}: ${cell.value ?? "N/A"}${cell.diff != null ? ` (Δ${cell.diff > 0 ? "+" : ""}${cell.diff.toFixed(1)})` : ""}<br/>${t("heatmap.tooltipSource", { source: cell.source })}`;
+          const tooltip = document.createElement("div");
+          const name = document.createElement("strong");
+          name.textContent = row.supplier_name;
+          tooltip.append(name, document.createElement("br"));
+          tooltip.append(document.createTextNode(`${COLUMN_LABELS[col.key] ?? col.label}: ${cell.value ?? "N/A"}${cell.diff != null ? ` (Δ${cell.diff > 0 ? "+" : ""}${cell.diff.toFixed(1)})` : ""}`));
+          tooltip.append(document.createElement("br"));
+          tooltip.append(document.createTextNode(t("heatmap.tooltipSource", { source: cell.source })));
+          return tooltip;
         },
       },
       grid: { top: 40, right: 20, bottom: 60, left: 120 },

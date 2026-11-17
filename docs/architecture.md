@@ -1,6 +1,8 @@
 # 架构概览
 
-> R4b-2 受控任务附件采用单节点私有卷、后端流式 ClamAV 与无直链下载；拓扑和未批准的生产边界见[操作指南](development/agent-task-attachments.md)。
+> 2026-11-16 安全边界：管理员通过私密终端初始化，公开特权口令在普通认证与刷新时拒绝；refresh 前驱重放撤销家族，退出调用服务端撤销。平台登录限流状态仅保存在 `public.platform_login_attempts`；FMEA/控制计划/特殊特性/历史版本及 ERP/PLM 使用当前模块、工厂和产品线范围。外部连接器凭据绑定目标，ERP REST 使用运维批准的源/CIDR；导入在 multipart 之前限量，导出按文本处理公式前缀。逐项行为、升级要求与验证见[安全修复记录](development/2026-11-16-security-scan-fixes.md)。
+
+> R4b-2 受控任务附件采用单节点私有卷、先有界私有暂存、再以本地流交付 ClamAV 与无直链下载；拓扑和未批准的生产边界见[操作指南](development/agent-task-attachments.md)。
 
 本文档描述 OpenQMS 的系统架构、权限模型、数据流和开发约定。
 

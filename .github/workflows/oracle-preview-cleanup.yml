@@ -19,18 +19,27 @@ jobs:
     environment: oracle-preview
     steps:
       # Metadata only: never check out or execute the PR head or merge tree.
-      - uses: actions/checkout@v4
+      - id: trusted-source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.repository.default_branch }}
           path: trusted
           persist-credentials: false
       - name: Set up optional private transport
         if: vars.ORACLE_USE_TAILSCALE == 'true'
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:openqms-deploy
+      - name: Restore trusted source before introducing deployment secrets
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.trusted-source.outputs.commit }}
+          path: trusted
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
       - id: cleanup
         name: Cleanup closed preview using trusted metadata helper
         working-directory: trusted

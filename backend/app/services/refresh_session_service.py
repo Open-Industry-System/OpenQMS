@@ -46,6 +46,7 @@ async def issue_refresh_session(
     db: AsyncSession,
     user_id: uuid.UUID,
     tenant_id: str | None = None,
+    *, expires_at: datetime | None = None, session_id: uuid.UUID | None = None,
 ) -> tuple[str, datetime]:
     await db.execute(
         select(User.user_id)
@@ -53,12 +54,13 @@ async def issue_refresh_session(
         .with_for_update()
     )
     await cleanup_expired_refresh_sessions(db, user_id)
-    session_id = uuid.uuid4()
+    session_id = session_id or uuid.uuid4()
     token, expires = create_refresh_token(
         str(user_id),
         tenant_id=tenant_id,
         session_id=str(session_id),
         token_id=str(uuid.uuid4()),
+        expires_at=expires_at,
     )
     db.add(
         UserRefreshSession(
@@ -97,8 +99,13 @@ async def rotate_refresh_session(
         session is None
         or session.revoked_at is not None
         or session.expires_at < now
-        or session.token_hash != hash_refresh_token(raw_token)
     ):
+        return None
+    if session.token_hash != hash_refresh_token(raw_token):
+        # The caller has verified the JWT signature. A predecessor of this
+        # locked session is a replay: revoke the whole token family.
+        session.revoked_at = now
+        await db.flush()
         return None
 
     token, expires = create_refresh_token(
@@ -106,6 +113,7 @@ async def rotate_refresh_session(
         tenant_id=payload.get("tenant_id"),
         session_id=str(session.session_id),
         token_id=str(uuid.uuid4()),
+        expires_at=session.expires_at,
     )
     session.token_hash = hash_refresh_token(token)
     session.expires_at = expires
@@ -128,18 +136,50 @@ async def upgrade_legacy_refresh_token(
     )
     locked_user = result.scalar_one_or_none()
     now = datetime.now(UTC)
-    if (
-        locked_user is None
-        or locked_user.refresh_token != raw_token
-        or locked_user.refresh_token_expires is None
-        or locked_user.refresh_token_expires < now
-    ):
+    if (locked_user is None or locked_user.refresh_token != raw_token
+            or locked_user.refresh_token_expires is None or locked_user.refresh_token_expires < now):
+        # Legacy JWTs have no sid; derive their upgraded family deterministically
+        # without persisting plaintext or a second credential history table.
+        await db.execute(update(UserRefreshSession).where(
+            UserRefreshSession.session_id == _legacy_session_id(raw_token),
+            UserRefreshSession.user_id == user.user_id,
+            UserRefreshSession.revoked_at.is_(None),
+        ).values(revoked_at=now))
         return None
 
+    absolute_expiry = locked_user.refresh_token_expires
     locked_user.refresh_token = None
     locked_user.refresh_token_expires = None
     return await issue_refresh_session(
-        db,
-        locked_user.user_id,
-        tenant_id=tenant_id,
+        db, locked_user.user_id, tenant_id=tenant_id,
+        expires_at=absolute_expiry, session_id=_legacy_session_id(raw_token),
     )
+
+
+def _legacy_session_id(raw_token: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, "openqms:legacy-refresh:" + hash_refresh_token(raw_token))
+
+
+
+async def revoke_refresh_session(db: AsyncSession, raw_token: str, payload: dict) -> None:
+    """Revoke the family identified by an already signature-verified token."""
+    try:
+        user_id = uuid.UUID(payload["sub"])
+        session_id = uuid.UUID(payload["sid"]) if "sid" in payload else None
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return
+    if session_id is not None:
+        await db.execute(update(UserRefreshSession).where(
+            UserRefreshSession.session_id == session_id,
+            UserRefreshSession.user_id == user_id,
+            UserRefreshSession.revoked_at.is_(None),
+        ).values(revoked_at=datetime.now(UTC)))
+    else:
+        await db.execute(update(User).where(
+            User.user_id == user_id, User.refresh_token == raw_token,
+        ).values(refresh_token=None, refresh_token_expires=None))
+        await db.execute(update(UserRefreshSession).where(
+            UserRefreshSession.session_id == _legacy_session_id(raw_token),
+            UserRefreshSession.user_id == user_id,
+            UserRefreshSession.revoked_at.is_(None),
+        ).values(revoked_at=datetime.now(UTC)))

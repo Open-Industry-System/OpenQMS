@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -81,7 +82,7 @@ def pytest_sessionstart(session) -> None:
     session.config.pluginmanager.register(GateTiming(_HOOK_STATE), 'openqms-gate-timing')
     _HOOK_STATE.clear()
     _HOOK_STATE.update(selected=0, deselected=0, outcomes={}, warnings=0,
-                       collection_seconds=0.0, execution_seconds=0.0, durations={})
+                       collection_seconds=0.0, execution_seconds=0.0, durations={}, modules={})
 
 
 def _progress(event: str, nodeid: str) -> None:
@@ -106,6 +107,9 @@ def pytest_runtest_logfinish(nodeid, location) -> None:
 
 def pytest_collection_finish(session) -> None:
     _HOOK_STATE['selected'] = len(session.items)
+    identities = [(os.path.relpath(item.path, session.config.rootpath), item.nodeid.partition('::')[2])
+                  for item in session.items]
+    _HOOK_STATE['selection_sha256'] = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
 
 
 def pytest_deselected(items) -> None:
@@ -113,7 +117,14 @@ def pytest_deselected(items) -> None:
 
 
 def pytest_runtest_logreport(report) -> None:
-    phases = _HOOK_STATE['durations'].setdefault(report.nodeid, dict(setup=0.0, call=0.0, teardown=0.0))
+    # location retains the source module even when pytest renders a shortened nodeid.
+    module = report.location[0]
+    row = _HOOK_STATE['modules'].setdefault(module, dict(selected=0, setup=0.0, call=0.0, teardown=0.0))
+    if report.when == 'setup':
+        row['selected'] += 1
+    row[report.when] += report.duration
+    identity = module + '::' + report.nodeid.partition('::')[2]
+    phases = _HOOK_STATE['durations'].setdefault(identity, dict(setup=0.0, call=0.0, teardown=0.0))
     phases[report.when] = report.duration
     outcomes: dict[str, str] = _HOOK_STATE['outcomes']
     if report.when == 'call':
@@ -145,6 +156,12 @@ def pytest_terminal_summary(terminalreporter) -> None:
         'execution_seconds': round(_HOOK_STATE['execution_seconds'], 6),
         'phase_seconds': {phase: round(sum(row[phase] for row in durations.values()), 6)
                           for phase in ('setup', 'call', 'teardown')},
+        'selection_sha256': _HOOK_STATE.get('selection_sha256'),
+        'modules': [
+            {'module': module, 'selected': row['selected'],
+             'phase_seconds': {phase: round(row[phase], 6) for phase in ('setup', 'call', 'teardown')}}
+            for module, row in sorted(_HOOK_STATE['modules'].items())
+        ],
         'slowest_tests': [
             {'test': nodeid.split('[', 1)[0], 'total': round(sum(phases.values()), 6),
              **{phase: round(seconds, 6) for phase, seconds in phases.items()}}

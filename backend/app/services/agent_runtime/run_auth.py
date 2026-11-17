@@ -19,7 +19,7 @@ INVALID_TOKEN = "Invalid run credential"
 
 
 def issue_run_token(run: AgentRun, installation: AgentPluginInstallation,
-                    tenant_id: str, tenant_generation: int, *, trial=None) -> str:
+                    tenant_id: str, tenant_generation: int, *, trial=None, model_binding=None) -> str:
     now = datetime.now(UTC)
     expires = now + timedelta(minutes=settings.AGENT_RUN_TOKEN_TTL_MINUTES)
     if run.lease_expires_at is not None:
@@ -34,6 +34,9 @@ def issue_run_token(run: AgentRun, installation: AgentPluginInstallation,
             raise PermissionError(INVALID_TOKEN)
         expires = min(expires, trial.expires_at)
         claims["trial_binding_sha256"] = trial.binding_sha256
+    if model_binding is not None:
+        claims['model_deployment_id'] = str(model_binding.deployment_id)
+        claims['model_config_hmac'] = model_binding.config_hmac
     claims["exp"] = int(expires.timestamp())
     return jwt.encode(claims, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
@@ -122,5 +125,12 @@ async def verify_run_token(db: AsyncSession, token: str,
             or not run.plugin_version == plugin.plugin_version == claims["plugin_version"]
             or run.lease_epoch != claims["lease_epoch"]
             or plugin.credential_epoch != claims["credential_epoch"]):
+        raise PermissionError(INVALID_TOKEN)
+    from app.services.agent_runtime import model_egress
+    if await model_egress.is_r5_task(db, task):
+        selected = await model_egress.task_deployment(db, task)
+        if claims.get('model_deployment_id') != str(selected.deployment_id) or claims.get('model_config_hmac') != selected.config_hmac:
+            raise PermissionError(INVALID_TOKEN)
+    elif 'model_deployment_id' in claims or 'model_config_hmac' in claims:
         raise PermissionError(INVALID_TOKEN)
     return run

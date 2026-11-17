@@ -118,3 +118,52 @@ def test_invalid_timing_values_are_never_published(tmp_path, capsys, invalid):
     _publish_pytest_timing(hooks, log, ['private-timing-sentinel'])
     assert not capsys.readouterr().out
     assert not log.exists()
+
+
+@pytest.mark.parametrize('explicit_config', [False, True])
+@pytest.mark.parametrize('body,exit_code', [('pass', 0), ('assert False', 1)])
+def test_module_timings_conserve_phases_and_keep_exit_code(tmp_path, capsys, body, exit_code, explicit_config):
+    for name,case in [('a', 'pass'), ('b', body)]:
+        (tmp_path / f'test_{name}.py').write_text(
+            'import pytest, time\n'
+            '@pytest.fixture\ndef setup():\n    time.sleep(.01)\n    yield\n    time.sleep(.01)\n'
+            f'def test_case(setup):\n    time.sleep(.01)\n    {case}\n')
+    artifacts = tmp_path / 'artifacts'
+    artifacts.mkdir()
+    result = run_pytest_layer(
+        layer='api', targets=[str(tmp_path / 'test_a.py'), str(tmp_path / 'test_b.py')],
+        source={'PATH': os.environ['PATH']},
+        database_url='postgresql+asyncpg://u:private-module-secret@127.0.0.1:1/module_test',
+        artifacts=artifacts, pytest_args=['--noconftest', *(['-c', str(BACKEND / 'pytest.ini')] if explicit_config else [])])
+    assert result['exit_code'] == exit_code
+    capsys.readouterr()
+    output = next(artifacts.glob('*.log')).read_text()
+    modules = [json.loads(line.removeprefix('OPENQMS_GATE_MODULE_TIMING '))
+               for line in output.splitlines() if line.startswith('OPENQMS_GATE_MODULE_TIMING ')]
+    total = next(json.loads(line.removeprefix('OPENQMS_GATE_TIMING '))
+                 for line in output.splitlines() if line.startswith('OPENQMS_GATE_TIMING '))
+    assert len(modules) == 2
+    assert {Path(row['module']).name for row in modules} == {'test_a.py', 'test_b.py'}
+    assert all(row['selected'] == 1 for row in modules)
+    for phase in ('setup', 'call', 'teardown'):
+        assert all(row['phase_seconds'][phase] >= .01 for row in modules)
+        assert sum(row['phase_seconds'][phase] for row in modules) == pytest.approx(total['phase_seconds'][phase], abs=.00001)
+    log = next(artifacts.glob('*.log')).read_text()
+    assert 'private-module-secret' not in log
+    assert all('OPENQMS_GATE_MODULE_TIMING ' + json.dumps(row, sort_keys=True) in log for row in modules)
+
+
+@pytest.mark.parametrize('invalid', [True, -1, 'private-module-sentinel'])
+def test_invalid_module_diagnostics_are_not_published(tmp_path, capsys, invalid):
+    from tests.e2e.capa_outcome_runner import _publish_pytest_timing
+    hooks = tmp_path / 'hooks.json'
+    hooks.write_text(json.dumps({'timing': {
+        'collection_seconds': 0, 'execution_seconds': 0,
+        'phase_seconds': dict(setup=0, call=0, teardown=0), 'slowest_tests': [],
+        'modules': [{'module': 'test_case.py', 'selected': invalid,
+                     'phase_seconds': dict(setup=0, call=0, teardown=0)}],
+    }}))
+    log = tmp_path / 'filtered.log'
+    _publish_pytest_timing(hooks, log, ['private-module-sentinel'])
+    assert not capsys.readouterr().out
+    assert not log.exists()

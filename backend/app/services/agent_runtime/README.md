@@ -6,6 +6,8 @@
 
 `clamav_scan.py` is an internal ClamAV `zINSTREAM` wire client. It sends `zVERSIONCOMMANDS\0`, then `zINSTREAM\0` and big-endian chunk frames ending in a zero-length frame. It uses one bounded 60-second-or-less exchange, accepts only a strict single `OK`, `FOUND`, or `ERROR` result, and collapses connection, timeout, malformed, and daemon-error cases to `unavailable` without exposing daemon failure text.
 
+`task_attachments.py` commits per-task and per-user inflight quotas before receiving client input. Bounded staging owns no scanner slot; the scanner slot is acquired only after the complete local staging descriptor can be rewound. A separate short metadata lock coordinates staging creation with recovery snapshots and orphan sweeps. Recovery preserves live reservations and expired reservations cannot resume into publication. Busy scanner admission removes staged bytes and releases quota rather than retaining an unbounded queue.
+
 `attachment_recovery.py` is platform/maintenance-only reconciliation. It serializes
 with the attachment pipeline, finishes only durable `promoting`, expired
 `scanning`, and `purging` metadata states in the exact current live namespace,
@@ -19,3 +21,17 @@ validation/recovery failures leave attachments closed for that process. The fixe
 aggregate-only maintenance pass without accepting paths, tenants, or wildcards.
 
 These primitives are not routes and do not enable attachment upload, plugin/model delivery, or lifecycle behavior.
+
+
+## R5 D5 命令（T4 内部服务，准入未开放）
+
+`d5_commands.save_proposal` 从签名 run 重新解析目标，沿用安装→任务→运行锁，随后锁 CAPA、完整来源父行和当期 ACL。保存、并列备选及明确替代在同一事务内写建议、任务序号、命令账本和引用审计。`POST /api/agent/runtime/capa/d5/proposals` 已登记但 `model_d5_proposal_v1` 不在 profile 目录，默认拒绝；metadata、R4b 与员工凭据均不获得写能力。
+
+来源闭环与重试合同见 [R5 D5 建议服务说明](../../../../docs/development/capa-d5-proposals.md)。T6/T7 必须接入真实部署绑定、完整工具/消息释放和模型出口后才能开放。T4 的真实数据库测试只替代最终 R5 准入条件，仍执行签名 run、既有 canonical 安装/任务来源授权及实时 ACL；没有调用模型。
+
+R5 T6 adds a default-off Darwin controlled model pilot, immutable selected model
+versions/task bindings, a managed-only claim path and platform-owned pinned model
+HTTP egress. Historical task DTOs expose only the original model ID/name/version.
+Failed or unknown model sends leave control audit attempts, not usable D5 basis.
+See [R5 model egress](../../../../docs/development/r5-model-egress.md) for approval,
+credential references, exact network isolation and checkpoint compatibility.

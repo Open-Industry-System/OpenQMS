@@ -54,7 +54,7 @@ async def test_user(db, default_factory):
         await db.flush()
     user = User(
         user_id=uuid4(), username=f"e2e_admin_{uuid4().hex[:8]}",
-        display_name="E2E Admin", password_hash=hash_password("Admin@2026"),
+        display_name="E2E Admin", password_hash=hash_password("RiskE2eFixtureOnly@2026!"),
         role_id=role.id, legacy_role="admin", is_active=True,
         factory_id=default_factory.id,
     )

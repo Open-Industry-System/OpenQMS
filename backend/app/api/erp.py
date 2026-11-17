@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.erp_deps import require_erp_api_key
 from app.core.deps import RequestScope, get_request_scope
-from app.core.factory_scope import check_factory_access, resolve_create_factory_id, validate_factory_invariant
+from app.core.factory_scope import apply_integration_scope, check_product_line_access, check_factory_access, resolve_create_factory_id, validate_factory_invariant
 from app.core.permissions import Module, PermissionLevel, get_user_permission
 from app.database import get_db
 from app.models.erp import (
@@ -27,7 +27,7 @@ from app.models.erp import (
 )
 from app.schemas import erp as schemas
 from app.services.erp_connector import test_erp_connection
-from app.services.erp_crypto import decrypt_credential, encrypt_credential, hash_api_key, sanitize_config
+from app.services.erp_crypto import encrypt_credential, hash_api_key, sanitize_config
 from app.services.erp_service import ERPIngestionService, ERPTraceabilityService
 
 router = APIRouter(prefix="/api/erp", tags=["erp"])
@@ -37,8 +37,20 @@ router = APIRouter(prefix="/api/erp", tags=["erp"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _check_factory_access(entity, scope: RequestScope):
+async def _check_factory_access(entity, scope: RequestScope, db: AsyncSession):
     """Raise 404 if entity's factory_id is not in the user's accessible factories."""
+    product_line = getattr(entity, "product_line_code", None)
+    if not isinstance(entity, ERPConnection) and getattr(entity, "connection_id", None):
+        parent = await db.get(ERPConnection, entity.connection_id)
+        if parent is None:
+            raise HTTPException(status_code=404, detail="对象不存在")
+        await _check_factory_access(parent, scope, db)
+        if product_line is None:
+            product_line = parent.product_line_code
+    try:
+        check_product_line_access(product_line, scope)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail="对象不存在")
     if not hasattr(entity, "factory_id") or entity.factory_id is None:
         return
     if scope.effective_factory_id and entity.factory_id != scope.effective_factory_id:
@@ -127,6 +139,7 @@ async def create_connection(
     config = _validate_rest_config(data.connector_type, data.config)
     config = _process_credentials(config)
 
+    check_product_line_access(data.product_line_code, scope)
     factory_id = await resolve_create_factory_id(db, scope, product_line_code=data.product_line_code)
     check_factory_access(factory_id, scope)
     conn = ERPConnection(
@@ -177,8 +190,8 @@ async def list_connections(
     # Product line filtering
     if scope.pl_scope.mode == "NONE":
         return schemas.ERPConnectionListResponse(items=[], total=0, page=page, page_size=page_size)
-    elif scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
-        query = query.where(ERPConnection.product_line_code.in_(scope.pl_scope.codes))
+    elif scope.pl_scope.mode == "EXPLICIT":
+        query = query.where(ERPConnection.product_line_code.in_(scope.pl_scope.codes or []))
 
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar()
@@ -213,7 +226,7 @@ async def get_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    _check_factory_access(conn, scope)
+    await _check_factory_access(conn, scope, db)
     out = schemas.ERPConnectionOut.model_validate(conn)
     out.config = sanitize_config(out.config)
     return out
@@ -233,7 +246,15 @@ async def update_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    _check_factory_access(conn, scope)
+    await _check_factory_access(conn, scope, db)
+
+    if "product_line_code" in data.model_fields_set:
+        check_product_line_access(data.product_line_code, scope)
+    if data.product_line_code is not None:
+        destination_factory = await resolve_create_factory_id(db, scope, data.product_line_code)
+        check_factory_access(destination_factory, scope)
+        if destination_factory != conn.factory_id:
+            raise HTTPException(status_code=403, detail="产品线必须属于当前工厂")
 
     # Validate new product_line_code BEFORE applying changes
     if data.product_line_code is not None and data.product_line_code != conn.product_line_code:
@@ -266,7 +287,7 @@ async def delete_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    _check_factory_access(conn, scope)
+    await _check_factory_access(conn, scope, db)
     await db.delete(conn)
     await db.commit()
     return {"message": "Deleted"}
@@ -285,18 +306,12 @@ async def test_connection(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    _check_factory_access(conn, scope)
+    await _check_factory_access(conn, scope, db)
 
-    # Decrypt credentials for testing — use raw config, not sanitize_config
-    test_config = dict(conn.config)
-    auth_config = test_config.get("auth_config", {})
-    if isinstance(auth_config, dict):
-        for field in ("outbound_api_key", "token", "password", "secret"):
-            encrypted = auth_config.get(f"{field}_encrypted")
-            if encrypted:
-                auth_config[field] = decrypt_credential(encrypted)
+    # The connector decrypts at the send boundary. Never mutate the stored
+    # nested auth_config by adding plaintext to a shallow copy.
+    return await test_erp_connection(conn.connector_type, conn.config)
 
-    return await test_erp_connection(conn.connector_type, test_config)
 
 
 @router.post("/connections/{connection_id}/sync")
@@ -317,7 +332,7 @@ async def trigger_sync(
     conn = await db.get(ERPConnection, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    _check_factory_access(conn, scope)
+    await _check_factory_access(conn, scope, db)
     if not conn.is_active:
         raise HTTPException(status_code=400, detail="Connection is inactive")
 
@@ -364,21 +379,7 @@ async def _list_entities(
     page: int, page_size: int,
     filters: dict = None,
 ):
-    query = select(model)
-    # Factory filtering
-    if scope.effective_factory_id:
-        query = query.where(model.factory_id == scope.effective_factory_id)
-    elif scope.factory_scope.accessible_factory_ids is not None:
-        if scope.factory_scope.accessible_factory_ids:
-            query = query.where(model.factory_id.in_(scope.factory_scope.accessible_factory_ids))
-        else:
-            query = query.where(False)
-    # Product line filtering
-    if scope.pl_scope.mode == "NONE":
-        return {"items": [], "total": 0, "page": page, "page_size": page_size}
-    elif scope.pl_scope.mode == "EXPLICIT" and scope.pl_scope.codes:
-        if hasattr(model, "product_line_code"):
-            query = query.where(model.product_line_code.in_(scope.pl_scope.codes))
+    query = apply_integration_scope(select(model), model, ERPConnection, scope)
 
     if filters:
         for field, value in filters.items():
@@ -424,7 +425,7 @@ async def get_supplier(
     sup = await db.get(ERPSupplier, supplier_id)
     if not sup:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    _check_factory_access(sup, scope)
+    await _check_factory_access(sup, scope, db)
     perm = await get_user_permission(scope.user, Module.ERP, db)
     return schemas.SupplierOut.model_validate(_mask_entity(sup, perm.value))
 
@@ -443,7 +444,7 @@ async def link_supplier(
     sup = await db.get(ERPSupplier, supplier_id)
     if not sup:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    _check_factory_access(sup, scope)
+    await _check_factory_access(sup, scope, db)
     sup.openqms_supplier_id = data.supplier_id
     sup.link_status = "linked"
     await db.commit()
@@ -464,7 +465,7 @@ async def unlink_supplier(
     sup = await db.get(ERPSupplier, supplier_id)
     if not sup:
         raise HTTPException(status_code=404, detail="Supplier not found")
-    _check_factory_access(sup, scope)
+    await _check_factory_access(sup, scope, db)
     sup.openqms_supplier_id = None
     sup.link_status = "unlinked"
     await db.commit()
@@ -499,7 +500,7 @@ async def get_customer(
     cust = await db.get(ERPCustomer, customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
-    _check_factory_access(cust, scope)
+    await _check_factory_access(cust, scope, db)
     perm = await get_user_permission(scope.user, Module.ERP, db)
     return schemas.CustomerOut.model_validate(_mask_entity(cust, perm.value))
 
@@ -518,7 +519,7 @@ async def link_customer(
     cust = await db.get(ERPCustomer, customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
-    _check_factory_access(cust, scope)
+    await _check_factory_access(cust, scope, db)
     cust.openqms_customer_id = data.customer_id
     cust.link_status = "linked"
     await db.commit()
@@ -539,7 +540,7 @@ async def unlink_customer(
     cust = await db.get(ERPCustomer, customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer not found")
-    _check_factory_access(cust, scope)
+    await _check_factory_access(cust, scope, db)
     cust.openqms_customer_id = None
     cust.link_status = "unlinked"
     await db.commit()

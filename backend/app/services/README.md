@@ -41,6 +41,18 @@ verb — one module per business concept:
   DAG: recall → fusion → LLM → terminal), `capa_recommendation_service`,
   `capa_draft_service`, `llm_provider`, `llm_fusion_layer`,
   `ai_config_service`, plus the `recommendation_*.py` type/scope helpers.
+- **Source-filtered D5 history** — `capa_d5_measures` uses fresh CAPA identity,
+  tenant and object scope plus FMEA-owned source coordinate checks. Complete
+  original source sets and report/task/run/command/revision/proof associations
+  are checked before count, pagination or body reads, then rechecked before
+  return. Expired proof/node versions mark proposal basis outdated without
+  hiding authorized history. Current basis additionally requires the report
+  FMEA link, exactly one active proof and verification text/source/factory
+  consistency, matching D4 evidence semantics without runtime profile gates.
+  Legacy `d5_correction` remains ordinary text;
+  measures are projected separately. These reads grant no adoption or write
+  permission. The read scans association metadata across a report; large-history
+  performance has not yet been measured.
 - **Employee D4 candidate preview** — `capa_current_access` shares fresh namespace,
   role and object-scope reads with runtime task wrappers; `capa_d4_redaction`
   performs bounded deterministic literal/format replacement only.
@@ -245,3 +257,14 @@ metadata; the existing factory-only resolver remains available for FMEA admissio
 The API preserves FMEA checks and applies Planning VIEW plus effective/accessible
 factory and product-line intersection for CP presence. Unsupported/missing
 objects fail closed; presence is never used as document access authority.
+
+### R5 D5 consumer boundary
+
+Formal D5 measures are separate from legacy `d5_correction`. Employee reads use
+`capa_d5_measures` projections; complete exports/reviews compare the raw formal
+set and require every original source. Outcome snapshots bind measure identity,
+final-text version and complete source coordinates under the existing decision
+fences. Legacy indexes and knowledge consumers exclude formal text. Existing
+model flows without an item recipient contract fail closed when measures exist.
+See [consumer policy](../../../docs/development/capa-d5-consumers.md) for every
+consumer, test evidence and the known tenant vector namespace limitation.

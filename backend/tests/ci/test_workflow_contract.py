@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 import copy
+import os
+import subprocess
 import re
 
 import pytest
@@ -12,6 +14,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 AUTOMATIC_PATH = ROOT / '.github/workflows/test.yml'
 ACCEPTANCE_PATH = ROOT / '.github/workflows/acceptance.yml'
+R5_NATIVE_PATH = ROOT / '.github/workflows/r5-native.yml'
 PG_IMAGE = 'pgvector/pgvector:pg15'
 CLAMAV_IMAGE = (
     'clamav/clamav:1.4.3_base@sha256:'
@@ -394,7 +397,7 @@ def test_expression_contract_rejects_changed_sdk_matrix(matrix):
 
 
 def test_workflow_expressions_and_artifacts_remain_safe_and_sanitized() -> None:
-    for workflow in (_load_workflow(AUTOMATIC_PATH), _load_workflow(ACCEPTANCE_PATH)):
+    for workflow in (_load_workflow(AUTOMATIC_PATH), _load_workflow(ACCEPTANCE_PATH), _load_workflow(R5_NATIVE_PATH)):
         _assert_safe_expressions(workflow)
         for job in _jobs(workflow).values():
             for step in _steps(job):
@@ -499,3 +502,57 @@ def test_pr_jobs_keep_merge_candidate_checkout_and_failure_semantics():
             assert 'continue-on-error' not in step
             if str(step.get('uses', '')).startswith('actions/checkout@'):
                 assert 'ref' not in step.get('with', {}), 'PR must use the default merge candidate'
+
+
+def test_r5_native_trial_is_manual_and_separate_from_portable_pr_checks() -> None:
+    automatic = _load_workflow(AUTOMATIC_PATH)
+    assert set(_jobs(automatic)) == {
+        'sdk-checks', 'backend-tests', 'browser-protection', 'frontend-checks',
+        'docs-check', 'oracle-automation-checks',
+    }
+    workflow = _load_workflow(R5_NATIVE_PATH)
+    assert workflow['on'] == {'workflow_dispatch': None}
+    assert workflow['permissions'] == {'contents': 'read'}
+    assert 'concurrency' not in workflow
+    _assert_checkouts_do_not_persist_credentials(workflow)
+    preflight = _jobs(workflow)['preflight']
+    assert preflight['runs-on'] == 'ubuntu-latest'
+    assert preflight['outputs']['frozen_sha'] == '${{ steps.freeze.outputs.frozen_sha }}'
+    assert all(not str(step.get('uses', '')).startswith('actions/checkout@') for step in _steps(preflight))
+    native = _jobs(workflow)['r5-native']
+    assert native['needs'] == ['preflight']
+    assert 'if' not in native and 'continue-on-error' not in native
+    assert native['runs-on'] == ['self-hosted', 'macOS', 'openqms-r5-sandbox']
+    checkout = next(step for step in _steps(native) if str(step.get('uses', '')).startswith('actions/checkout@'))
+    assert checkout['with']['ref'] == '${{ needs.preflight.outputs.frozen_sha }}'
+    _assert_secretless(native)
+    run = _named_steps(native)['Run mandatory R5 native API and Chromium acceptance']
+    assert run['run'].strip() == 'cd backend\npython3 -B -m tests.ci.r5_native_gate "$RUNNER_TEMP/openqms-r5-native-job.json"'
+    upload = _named_steps(native)['Upload native safe receipts']
+    assert upload['if'] == 'always()'
+    assert upload['with']['if-no-files-found'] == 'error'
+    assert upload['with']['path'].strip().splitlines() == [
+        '${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json',
+        '${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log',
+    ]
+
+
+@pytest.mark.parametrize(('event', 'ref', 'sha', 'accepted'), [
+    ('workflow_dispatch', 'refs/heads/main', 'a' * 40, True),
+    ('workflow_dispatch', 'refs/heads/feature', 'a' * 40, False),
+    ('pull_request', 'refs/heads/main', 'a' * 40, False),
+    ('workflow_dispatch', 'refs/heads/main', 'invalid', False),
+])
+def test_r5_manual_preflight_rejects_other_refs_events_and_invalid_sha(tmp_path, event, ref, sha, accepted):
+    workflow = _load_workflow(R5_NATIVE_PATH)
+    freeze = _named_steps(_jobs(workflow)['preflight'])['Verify manual main dispatch and freeze SHA']
+    output = tmp_path / 'github-output'
+    result = subprocess.run(['bash', '-c', freeze['run']], capture_output=True, text=True, env={
+        'PATH': os.defpath, 'GITHUB_EVENT_NAME': event, 'GITHUB_REF': ref,
+        'GITHUB_SHA': sha, 'GITHUB_OUTPUT': str(output),
+    })
+    assert (result.returncode == 0) is accepted
+    if accepted:
+        assert output.read_text() == f'frozen_sha={sha}\n'
+    else:
+        assert not output.exists()

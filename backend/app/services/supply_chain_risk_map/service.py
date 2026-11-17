@@ -1,3 +1,5 @@
+from app.core.factory_scope import check_product_line_access
+from app.models.supplier import Supplier
 """Supply chain risk map service: snapshot generation, heatmap queries, export."""
 import json
 from datetime import date
@@ -29,6 +31,23 @@ from app.services.supply_chain_risk_map.aggregator import (
     ppm_to_risk_index,
 )
 
+
+
+
+def _snapshot_query(query, scope):
+    if scope is None:
+        return query
+    suppliers = select(Supplier.supplier_id)
+    if scope.effective_factory_id:
+        suppliers = suppliers.where(Supplier.factory_id == scope.effective_factory_id)
+    elif scope.factory_scope.accessible_factory_ids is not None:
+        suppliers = suppliers.where(Supplier.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+    query = query.where(SupplyChainRiskSnapshot.supplier_id.in_(suppliers))
+    if scope.pl_scope.mode == "NONE":
+        return query.where(False)
+    if scope.pl_scope.mode == "EXPLICIT":
+        query = query.where(SupplyChainRiskSnapshot.product_line_code.in_(scope.pl_scope.codes or []))
+    return query
 
 def current_period() -> str:
     """Return current month as YYYY-MM string."""
@@ -62,6 +81,7 @@ async def generate_snapshot(
     db: AsyncSession,
     product_line_code: Optional[str],
     period: str,
+    scope=None,
 ) -> int:
     """Calculate scores, aggregate metrics, normalize, and UPSERT snapshots.
 
@@ -72,7 +92,17 @@ async def generate_snapshot(
         raise ValueError(f"Cannot generate snapshot for {period}: only current period {current_period()} is allowed")
 
     # 1. Calculate risk scores for all suppliers
+    if scope is not None:
+        check_product_line_access(product_line_code, scope)
     scores = await calculate_all_supplier_scores(db, product_line_code)
+    if scope is not None:
+        query = select(Supplier.supplier_id)
+        if scope.effective_factory_id:
+            query = query.where(Supplier.factory_id == scope.effective_factory_id)
+        elif scope.factory_scope.accessible_factory_ids is not None:
+            query = query.where(Supplier.factory_id.in_(scope.factory_scope.accessible_factory_ids))
+        allowed = set((await db.execute(query)).scalars().all())
+        scores = [score for score in scores if score["supplier_id"] in allowed]
 
     # 2. Aggregate ERP/IQC/SCAR metrics
     supplier_ids = [s["supplier_id"] for s in scores]
@@ -145,6 +175,7 @@ async def get_heatmap_data(
     db: AsyncSession,
     product_line_code: Optional[str],
     period: Optional[str],
+    scope=None,
 ) -> HeatmapResponse:
     """Build heatmap from snapshot + previous month for diff calculation."""
     period = period or current_period()
@@ -152,7 +183,7 @@ async def get_heatmap_data(
 
     # Current period snapshots
     current_rows = (await db.execute(
-        select(SupplyChainRiskSnapshot)
+        _snapshot_query(select(SupplyChainRiskSnapshot), scope)
         .where(SupplyChainRiskSnapshot.snapshot_period == period)
         .where(
             SupplyChainRiskSnapshot.product_line_code == product_line_code
@@ -175,7 +206,7 @@ async def get_heatmap_data(
     # Previous period snapshots for diff
     prev_map = {}
     prev_rows = (await db.execute(
-        select(SupplyChainRiskSnapshot)
+        _snapshot_query(select(SupplyChainRiskSnapshot), scope)
         .where(SupplyChainRiskSnapshot.snapshot_period == prev)
         .where(
             SupplyChainRiskSnapshot.product_line_code == product_line_code
@@ -228,9 +259,10 @@ async def get_heatmap_data(
 async def get_timeline(
     db: AsyncSession,
     product_line_code: Optional[str],
+    scope=None,
 ) -> TimelineResponse:
     """Return list of periods that have snapshots, filtered by product line."""
-    query = select(SupplyChainRiskSnapshot.snapshot_period).distinct()
+    query = _snapshot_query(select(SupplyChainRiskSnapshot.snapshot_period).distinct(), scope)
     if product_line_code:
         query = query.where(SupplyChainRiskSnapshot.product_line_code == product_line_code)
     else:
@@ -239,7 +271,7 @@ async def get_timeline(
     periods = [r for (r,) in result.all()]
 
     # Count distinct suppliers in current period
-    count_query = select(func.count(SupplyChainRiskSnapshot.supplier_id.distinct()))
+    count_query = _snapshot_query(select(func.count(SupplyChainRiskSnapshot.supplier_id.distinct())), scope)
     if product_line_code:
         count_query = count_query.where(SupplyChainRiskSnapshot.product_line_code == product_line_code)
     else:
@@ -260,12 +292,13 @@ async def get_supplier_detail(
     supplier_id: UUID,
     product_line_code: Optional[str],
     period: Optional[str],
+    scope=None,
 ) -> SupplierDetailResponse:
     """Return single supplier detail with dimensions + 6-month trend."""
     period = period or current_period()
 
     snap = (await db.execute(
-        select(SupplyChainRiskSnapshot)
+        _snapshot_query(select(SupplyChainRiskSnapshot), scope)
         .where(SupplyChainRiskSnapshot.supplier_id == supplier_id)
         .where(SupplyChainRiskSnapshot.snapshot_period == period)
         .where(
@@ -296,7 +329,7 @@ async def get_supplier_detail(
 
     # 6-month trend (filtered by product_line_code and up to the selected period)
     trend_query = (
-        select(SupplyChainRiskSnapshot)
+        _snapshot_query(select(SupplyChainRiskSnapshot), scope)
         .where(SupplyChainRiskSnapshot.supplier_id == supplier_id)
         .where(
             SupplyChainRiskSnapshot.product_line_code == product_line_code
@@ -334,12 +367,13 @@ async def get_comparison(
     supplier_ids: list[UUID],
     product_line_code: Optional[str],
     period: Optional[str],
+    scope=None,
 ) -> ComparisonResponse:
     """Return side-by-side comparison of multiple suppliers."""
     period = period or current_period()
 
     snaps = (await db.execute(
-        select(SupplyChainRiskSnapshot)
+        _snapshot_query(select(SupplyChainRiskSnapshot), scope)
         .where(SupplyChainRiskSnapshot.supplier_id.in_(supplier_ids))
         .where(SupplyChainRiskSnapshot.snapshot_period == period)
         .where(
@@ -382,9 +416,12 @@ async def export_heatmap(
     product_line_code: Optional[str],
     period: Optional[str],
     format: str,
+    scope=None,
 ) -> StreamingResponse:
     """Export heatmap as CSV or Excel with conditional formatting."""
-    heatmap = await get_heatmap_data(db, product_line_code, period)
+    from app.utils.excel import append_row, csv_safe_value
+
+    heatmap = await get_heatmap_data(db, product_line_code, period, scope=scope)
 
     if format == "excel":
         from openpyxl import Workbook
@@ -395,7 +432,7 @@ async def export_heatmap(
 
         # Header
         headers = ["供应商"] + [c.label for c in heatmap.columns] + [c.label + "(来源)" for c in heatmap.columns]
-        ws.append(headers)
+        append_row(ws, headers)
 
         # Rows with conditional formatting
         for row in heatmap.rows:
@@ -404,7 +441,7 @@ async def export_heatmap(
             for cell in row.cells:
                 values.append(cell.value if cell.value is not None else "")
                 sources.append(cell.source)
-            ws.append(values + sources)
+            append_row(ws, values + sources)
 
         buf = BytesIO()
         wb.save(buf)
@@ -422,14 +459,14 @@ async def export_heatmap(
     output = StringIO()
     writer = csv.writer(output)
     headers = ["供应商"] + [c.label for c in heatmap.columns] + [c.label + "(来源)" for c in heatmap.columns]
-    writer.writerow(headers)
+    writer.writerow([csv_safe_value(value) for value in headers])
     for row in heatmap.rows:
         values = [row.supplier_name]
         sources = [""]
         for cell in row.cells:
             values.append(cell.value if cell.value is not None else "")
             sources.append(cell.source)
-        writer.writerow(values + sources)
+        writer.writerow([csv_safe_value(value) for value in values + sources])
 
     output.seek(0)
     return StreamingResponse(

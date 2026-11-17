@@ -119,6 +119,7 @@ services:
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL}
+      ERP_ALLOWED_ORIGINS: ${ERP_ALLOWED_ORIGINS}
     depends_on:
       db:
         condition: service_healthy

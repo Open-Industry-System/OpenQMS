@@ -5,6 +5,14 @@
 (openqms_app) {
 	encode zstd gzip
 
+	@excel_imports {
+		method POST
+		path /api/suppliers/import /api/suppliers/import/ /api/iqc/materials/import /api/iqc/materials/import/ /api/spc/inspection-characteristics/*/samples/import /api/spc/inspection-characteristics/*/samples/import/
+	}
+	request_body @excel_imports {
+		max_size 10551296
+	}
+
 	handle /api/* {
 		reverse_proxy backend:8000
 	}

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     AGENT_TASK_ATTACHMENT_CLAMAV_HOST: str = ""
     AGENT_TASK_ATTACHMENT_CLAMAV_PORT: int = Field(default=3310, ge=1, le=65535)
     AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=60)
+    AGENT_R5_CONTROLLED_ENABLED: bool = False
+    AGENT_R5_CONTROLLED_POLICY_FILE: str | None = None
     AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED: bool = False
     AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE: str | None = None
     AGENT_LOCAL_TRIAL_MODE: str = "disabled"
@@ -54,6 +56,9 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSIONS: int = 1536    # 1536 for OpenAI, 768 for nomic-embed-text, 1024 for BGE-M3
     SEARCH_VECTOR_WEIGHT: float = 0.7   # weight for vector search in RRF
     SEARCH_FULLTEXT_WEIGHT: float = 0.3 # weight for fulltext search in RRF
+
+    # Exact ERP origins -> deployment-approved resolved CIDRs (JSON env value).
+    ERP_ALLOWED_ORIGINS: dict[str, list[str]] = Field(default_factory=dict)
 
     # E2E test mode: enables /api/e2e/* endpoints. NEVER true in production.
     E2E_MODE: bool = False

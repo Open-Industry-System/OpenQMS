@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 
 from app.services.erp_crypto import decrypt_credential
+from app.services.connector_security import pinned_erp_destination
 
 # ---------------------------------------------------------------------------
 # Abstract base
@@ -355,20 +356,24 @@ class RESTERPConnector(ERPConnector):
         return headers
 
     async def _request(self, method: str, path: str, **kwargs) -> dict:
-        url = f"{self.base_url}{path}"
+        if method.upper() not in {"GET", "POST"}:
+            raise ValueError("ERP endpoint method must be GET or POST")
+        url, host_header, tls_host = await pinned_erp_destination(self.base_url, path)
         headers = self._get_auth_headers()
         headers.update(kwargs.pop("headers", {}))
+        headers["Host"] = host_header
 
         max_retries = self.retry_config.get("max_retries", 3)
         backoff = self.retry_config.get("backoff_seconds", [1, 2, 4])
 
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.timeout)
+            self._client = httpx.AsyncClient(timeout=self.timeout, trust_env=False, follow_redirects=False)
 
         for attempt in range(max_retries + 1):
             try:
                 response = await self._client.request(
-                    method, url, headers=headers, **kwargs
+                    method, url, headers=headers, follow_redirects=False,
+                    extensions={"sni_hostname": tls_host}, **kwargs
                 )
                 response.raise_for_status()
                 return response.json()

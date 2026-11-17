@@ -440,7 +440,8 @@ async def test_source_http_admission_precedes_technical_capa_locks(review_case, 
     try:
         path = "/api/fmea/" if doc_type == "fmea" else "/api/control-plans/"
         response = await review_http_client.delete(path + str(review_sources.identity(doc_type)))
-        expected = {"module-denied": 403, "line-denied": 403, "factory-hidden": 404,
+        # Scope-constrained identifier lookup hides inaccessible source documents.
+        expected = {"module-denied": 403, "line-denied": 404, "factory-hidden": 404,
                     "authorized-closed": 409, "authorized-open": 204 if doc_type == "fmea" else 200}[admission]
         assert response.status_code == expected, response.text
         parent_queries = [sql for sql in statements if "capa_eightd" in sql and sql.lstrip().startswith("select")]
