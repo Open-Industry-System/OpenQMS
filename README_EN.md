@@ -1,10 +1,17 @@
 # OpenQMS
 
-> OpenQMS is a full-stack quality management platform for manufacturing, covering FMEA (AIAG-VDA 7-step), 8D/CAPA, SPC, MSA, IQC, supplier management, and more — built for IATF 16949 compliance.
-
-An out-of-the-box quality management system platform for manufacturing, covering core modules including AIAG-VDA PFMEA/DFMEA, 8D/CAPA, SPC, MSA, IQC, and supplier management, empowering IATF 16949 compliance.
+OpenQMS is a modular quality management platform for manufacturers. It supports IATF 16949 quality workflows across FMEA, control plans, incoming inspection, statistical process control, and 8D corrective action.
 
 **[中文文档 →](README.md)**
+
+## How business modules work with AI agents
+
+In the opt-in 8D agent pilot, an employee can select an approved model deployment to propose D5 corrective actions based on a verified D4 root cause and its linked FMEA evidence. Proposals remain pending until an authorized employee reviews the evidence, confirms the wording, and adopts the measure in CAPA. [8D agent pilot and model configuration](docs/development/r5-model-egress.md)
+
+- **Shared business records.** The architecture gives plugins access to context through module interfaces that retain the report, source references, and versions. Employees and agents work from the same quality records, so a reviewer can trace a proposal back to its evidence.
+- **Task-scoped capabilities.** Each module declares the context it can share and the business commands it supports. An agent can request more information over several rounds and choose its next step. The platform checks the acting identity, plugin grants, and task scope on each call. The business module handles state transitions, approvals, and auditing.
+
+8D is the first integration. Other modules will define their own data access and commands as they adopt the architecture. [Current architecture](docs/architecture.md) · [Modular QMS and AI plugin design](docs/superpowers/specs/2026-09-22-modular-qms-agent-architecture-design.md)
 
 ---
 
