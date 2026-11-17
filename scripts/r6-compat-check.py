@@ -19,6 +19,11 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+
+# The reader is pure stdlib; application/database initialization is forbidden.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from tests.e2e.r6_fresh_evidence import accepted_epoch, validate_fresh_c9
 
 
 def _digest(value):
@@ -48,7 +53,19 @@ def load_reference(value):
     return json.loads(verified_bytes(value))
 
 
-def _validate_certificate(value):
+def _validate_c9(value):
+    kind = value.get("kind")
+    common = {"kind", "status", "production_authorized", "c9", "c9_snapshot",
+              "c9_readonly_manifest", "c10", "internal_contracts", "audit_baseline", "generation_off_probe"}
+    extra = {"original_failed_receipt"} if kind == "r6.compatibility-rehearsal.v1" else {"c9_execution"}
+    if kind not in {"r6.compatibility-rehearsal.v1", "r6.compatibility-rehearsal.v2"} or set(value) != common | extra:
+        raise ValueError("complete disjoint typed rehearsal fields required")
+    if value["status"] != "PASS" or value["production_authorized"] is not False:
+        raise ValueError("executed rehearsal cannot authorize production")
+    c9 = load_reference(value["c9"])
+    if kind == "r6.compatibility-rehearsal.v2":
+        validate_fresh_c9(c9, value["c9_execution"], value["c9_readonly_manifest"], value["c9_snapshot"])
+        return c9
     if set(value) != {
         "kind",
         "status",
@@ -95,6 +112,11 @@ def _validate_certificate(value):
         not in manifest["external_evidence"].values()
     ):
         raise ValueError("composed C9 must bind its actual original failed receipt")
+    return c9
+
+
+def _validate_certificate(value):
+    c9 = _validate_c9(value)
     c10 = load_reference(value["c10"])
     if c10.get("status") != "SCENARIO_ASSERTIONS_PASSED" or c10.get(
         "report_id"
@@ -347,7 +369,7 @@ def _validate_certificate(value):
             raise ValueError("actual registered PID mismatch")
         if (
             registration["status"]["state"] != "switched"
-            or registration["status"]["epoch"] != 3
+            or registration["status"]["epoch"] != accepted_epoch(snapshots[0]["original_switch"])
             or registration["accepted_document_digest"]
             != snapshots[0]["original_switch"]["current_accepted_document_digest"]
             or registration["status"]["operation_ref"]
@@ -791,6 +813,9 @@ def gate_sources():
             "scripts/r6-compat-check.py",
             "backend/tests/e2e/test_r6_rollback_compat.py",
             "backend/tests/ci/test_r6_release_manifest.py",
+            "backend/tests/ci/test_r6_fresh_evidence.py",
+            "backend/tests/e2e/r6_fresh_evidence.py",
+            "backend/tests/e2e/r6_fresh_readonly.py",
         )
     }
 

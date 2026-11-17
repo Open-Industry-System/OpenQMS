@@ -20,7 +20,7 @@ async def test_real_employee_browser_empty_root_entry():
 @pytest.mark.ci_browser
 @pytest.mark.asyncio
 @pytest.mark.parametrize('d4_question',[False,True],ids=['direct-d4','question-d4'])
-async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_question):
+async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_question,record_property):
     """Deterministic loopback model catches UI/harness gaps before paid C9.
 
     Uses the same actual application, managed worker, source receipts and
@@ -36,7 +36,7 @@ async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_q
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from uuid import uuid4
     from tests.e2e.test_r5_model_agent import call
-    from tests.e2e.test_r6_live_chain import run_chain
+    from tests.e2e.test_r6_live_chain import run_chain, record_completed_binding
     source = Path(os.environ['OPENQMS_TEST_RESOURCE_FILE']).parent
     directory = source / ('controlled-ui-' + uuid4().hex)
     directory.mkdir(mode=0o700)
@@ -69,7 +69,7 @@ async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_q
     thread.start()
     try:
         resource = json.loads((source / 'resource.json').read_text())
-        resource.update(r6_exercise_directory=str(directory), r6_controlled_model=dict(base_url=f'http://127.0.0.1:{witness.server_port}/v1'))
+        resource.update(r6_c9_execution_id=str(uuid4()), r6_exercise_directory=str(directory), r6_controlled_model=dict(base_url=f'http://127.0.0.1:{witness.server_port}/v1'))
         write_private(directory / 'resource.json', resource)
         environment = json.loads((source / 'environment.json').read_text())
         environment.update(OPENQMS_TEST_RESOURCE_FILE=str(directory / 'resource.json'),
@@ -94,6 +94,63 @@ async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_q
                 reason='员工已核对正常批准的既有控制基线和两条受控建议：仅执行已有检查、更换及记录义务，频次阈值不变，无文档影响。')
         async with Exercise() as exercise:
             await run_chain(exercise, live=False, semantic_review=reviewed)
+            observed_binding = record_completed_binding(exercise, record_property)
+            assert observed_binding['kind'] == 'r6.controlled-test-binding.v1'
+            assert observed_binding['execution_id'] == resource['r6_c9_execution_id']
+            # Authenticate the normal accepted owner/build/config before loading
+            # the newly registered generic reader. This controlled walkthrough
+            # remains explicitly ineligible for genuine cloud C9 acceptance.
+            import hashlib
+            from types import ModuleType
+            from app.database import tenant_async_session
+            from app.core.tenant_transaction import TenantBinding
+            from app.services.capa_entry_switch import status as entry_status
+            from app.services.capa_switch_evidence import authority
+            from tests.e2e.r6_fresh_evidence import READONLY_INTERFACE, registered_verifier_bytes
+            from uuid import UUID
+            chain_path = directory / 'c9-evidence.json'
+            chain_bytes = chain_path.read_bytes()
+            facts = {name: json.loads((directory / filename).read_text()) for name, filename in {
+                'chain': 'c9-evidence.json', 'prepared': 'prepared.json',
+                'd4_model': 'd4-model.json', 'd5_model': 'd5-model.json'}.items()}
+            assert facts['chain']['live_provider'] is False
+            binding = TenantBinding(UUID(exercise.data['tenant_id']), exercise.data['schema'], exercise.data['generation'], 'business')
+            with monkeypatch.context() as scope:
+                for key, value in exercise.switch_cli['env'].items():
+                    if key.startswith('R6_SWITCH_'):
+                        scope.setenv(key, value)
+                async with tenant_async_session(binding=binding) as db:
+                    target = await authority(db)
+                    accepted = await entry_status(db)
+                    assert accepted.state == 'switched'
+                    assert accepted.operation_ref == facts['chain']['switch']['operation']
+                    assert accepted.evidence['document_digest'] == facts['chain']['switch']['current_accepted_document_digest']
+            assert target == facts['chain']['switch']['target']
+            config = json.loads((directory / 'config.json').read_text())
+            def ref(path):
+                return dict(path=str(path.resolve()), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+            reader_path = Path(__file__).with_name('r6_fresh_readonly.py')
+            reader_ref = ref(reader_path)
+            authenticated = dict(resource=resource, build_config=config,
+                operator_manifest=dict(kind='r6.c9-operators.v1', owner=target['owner'],
+                    files={'prepare.py': ref(directory / 'prepare.py')}),
+                source_manifest=dict(files={'backend/tests/e2e/r6_fresh_readonly.py': reader_ref['sha256']}))
+            reader_bytes = registered_verifier_bytes(authenticated, reader_ref)
+            reader_module = ModuleType('controlled_registered_readonly')
+            exec(compile(reader_bytes, str(reader_path), 'exec'), reader_module.__dict__)
+            assert reader_module.INTERFACE == READONLY_INTERFACE
+            output = directory / 'readonly-walkthrough'
+            output.mkdir(mode=0o700)
+            reader_module.configure(directory, output, facts)
+            reader = reader_module.ReadOnlyExercise()
+            reader.clients, reader.origin, reader.output = exercise.clients, exercise.origin, output
+            before_calls = len(bodies)
+            snapshot = await reader_module.verify(reader)
+            assert len(bodies) == before_calls
+            assert snapshot['live_provider'] is False
+            assert snapshot['evidence_method'] == 'CONTROLLED_READONLY_WALKTHROUGH'
+            assert snapshot['immutable_model_before'] == snapshot['immutable_model_after']
+            assert chain_path.read_bytes() == chain_bytes
         assert len(bodies) == len(turns)
         entry=json.loads((directory/'playwright-generate-d4/task-entry.json').read_text())
         if d4_question:

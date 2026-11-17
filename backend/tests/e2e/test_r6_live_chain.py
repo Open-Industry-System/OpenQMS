@@ -298,9 +298,34 @@ async def run_chain(exercise, *, live=True, semantic_review=None):
     write_private(exercise.directory / 'live-attempt.json', dict(stage='approved-and-preserved', report_id=exercise.data['report_id']))
 
 
+def record_completed_binding(exercise, record_property):
+    # Actual original-test metadata binds this completed node to its own
+    # owner/source/normal chain outputs; no receipt is edited after the run.
+    import hashlib
+    import subprocess
+    from pathlib import Path
+    execution_id = exercise.resource['r6_c9_execution_id']
+    assert str(UUID(execution_id)) == execution_id
+    directory = exercise.directory
+    def ref(path):
+        return dict(path=str(path.resolve()), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    live = json.loads((directory / 'c9-evidence.json').read_text())['live_provider']
+    assert type(live) is bool
+    binding = dict(kind='r6.live-test-binding.v1' if live else 'r6.controlled-test-binding.v1',
+        source_revision=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=Path(__file__).resolve().parents[3], text=True).strip(),
+        execution_id=execution_id, owner_nonce=exercise.resource['owner_nonce'], report_id=exercise.data['report_id'],
+        resource=ref(Path(exercise.environment['OPENQMS_TEST_RESOURCE_FILE'])),
+        candidate_configuration=ref(directory / 'environment.json'), chain=ref(directory / 'c9-evidence.json'),
+        d4_model=ref(directory / 'd4-model.json'), d5_model=ref(directory / 'd5-model.json'),
+        attempt=ref(directory / 'live-attempt.json'), switch=ref(directory / 'build-and-switch.json'))
+    record_property('r6_live_binding' if live else 'r6_controlled_binding', json.dumps(binding, sort_keys=True, separators=(',', ':')))
+    return binding
+
+
 @pytest.mark.requires_db
 @pytest.mark.live_provider
 @pytest.mark.asyncio
-async def test_real_terra_empty_root_through_corrected_local_approval():
+async def test_real_terra_empty_root_through_corrected_local_approval(record_property):
     async with Exercise() as exercise:
         await run_chain(exercise)
+        record_completed_binding(exercise, record_property)

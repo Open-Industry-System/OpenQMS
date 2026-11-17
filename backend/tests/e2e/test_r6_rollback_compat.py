@@ -17,6 +17,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from tests.e2e.r6_fresh_evidence import preserve_caller_environment
+
 pytestmark = [pytest.mark.ci_r5_native, pytest.mark.requires_db, pytest.mark.asyncio]
 
 
@@ -27,12 +29,25 @@ def imported(name, path):
     return module
 
 
+def c9_handoff(original):
+    """Explicit v2 input; malformed fresh input never falls back to history."""
+    from tests.e2e.r6_fresh_evidence import exact
+    path = os.environ.get("R6_C10_HANDOFF")
+    if path:
+        handoff = json.loads(Path(path).read_text())
+        exact(handoff, ("kind", "c9", "c9_execution", "c9_snapshot", "c9_readonly_manifest",
+                        "readonly_verifier", "task10_editable_control"))
+        assert handoff["kind"] == "r6.c9-handoff.v2"
+        return handoff
+    return json.loads((original.parent / "task9-final-handoff.json").read_text())
+
+
 async def editable_checks(exercise, original, mode):
     """Normal JWT writes on the separate genuine, still-editable control."""
     import httpx
     from tests.e2e.r6_exercise import write_private
 
-    handoff = json.loads((original.parent / "task9-final-handoff.json").read_text())
+    handoff = c9_handoff(original)
     control_ref = handoff["task10_editable_control"]
     control_path = Path(control_ref["path"])
     assert hashlib.sha256(control_path.read_bytes()).hexdigest() == control_ref["sha256"]
@@ -197,7 +212,10 @@ async def revoked_reads(exercise, mode):
     return results
 
 
+@preserve_caller_environment
 async def test_registered_compatible_process_preserves_same_corrected_report():
+    independent_caller = dict(os.environ)
+    caller_directory = Path.cwd()
     context = {
         name: os.environ[name]
         for name in (
@@ -208,6 +226,8 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
             "R6_C10_GENOFF_PROBE",
         )
     }
+    if "R6_C10_HANDOFF" in os.environ:
+        context["R6_C10_HANDOFF"] = os.environ["R6_C10_HANDOFF"]
     context.update(
         {name: os.environ[name] for name in ("OPENQMS_GATE_HOOKS", "PYTEST_CURRENT_TEST") if name in os.environ}
     )
@@ -215,12 +235,21 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
     output = Path(os.environ["R6_C10_OUTPUT"]).resolve()
     assert output.is_dir() and output.stat().st_mode & 0o077 == 0
     assert not (output / "c10.json").exists(), "never overwrite an executed attempt"
-    # The reviewed supplemental verifier imports the original frozen launch
-    # classes. Its module-level environment is restored before either launch.
+    handoff = c9_handoff(original)
+    fresh = handoff.get("kind") == "r6.c9-handoff.v2"
     runner_environment = dict(os.environ)
     runner_directory = Path.cwd()
     try:
-        verifier = imported("c10_readonly_verifier", original / "continuation-v5/driver.py")
+        if fresh:
+            from tests.e2e.r6_fresh_evidence import load, trusted_readonly_verifier
+            execution = load(handoff["c9_execution"])
+            verifier = trusted_readonly_verifier(load(handoff["c9"]), handoff["c9_execution"],
+                handoff["c9_readonly_manifest"], handoff["c9_snapshot"], handoff["readonly_verifier"], original=original)
+            captured = verifier._verified_original
+            facts = {name: verifier._verified_facts[name] for name in ("chain", "prepared", "d4_model", "d5_model")}
+            verifier.configure(original, output, facts, load(handoff["c9_snapshot"]))
+        else:
+            verifier = imported("c10_readonly_verifier", original / "continuation-v5/driver.py")
     finally:
         os.environ.clear()
         os.environ.update(runner_environment)
@@ -232,15 +261,15 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
 
     repo = Path(__file__).resolve().parents[3]
     checker = imported("c10_checker", repo / "scripts/r6-compat-check.py")
-    env = json.loads((original / "environment.json").read_text())
+    env = captured["environment.json"] if fresh else json.loads((original / "environment.json").read_text())
     os.environ.update(env)
-    compatible_env = json.loads((original / "environment.compat.json").read_text())
+    compatible_env = captured["environment.compat.json"] if fresh else json.loads((original / "environment.compat.json").read_text())
     assert compatible_env["R6_GENERATION_ENABLED"] == "false"
     assert {k: v for k, v in env.items() if k != "R6_GENERATION_ENABLED"} == {
         k: v for k, v in compatible_env.items() if k != "R6_GENERATION_ENABLED"
     }
-    original_registry = json.loads((original / "authority.json").read_text())
-    secrets = json.loads((original / "switch-environment.json").read_text())
+    original_registry = captured["authority.json"] if fresh else json.loads((original / "authority.json").read_text())
+    secrets = captured["switch-environment.json"] if fresh else json.loads((original / "switch-environment.json").read_text())
     key, launch_key = secrets["R6_SWITCH_AUTHORITY_KEY"], secrets["R6_SWITCH_LAUNCH_ATTESTATION_KEY"]
     assert hmac.compare_digest(
         original_registry["signature"],
@@ -267,11 +296,15 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
             folder = output / mode
             folder.mkdir(mode=0o700)
             verifier.HERE = folder
-            verifier.v4.HERE = folder
+            if not fresh:
+                verifier.v4.HERE = folder
+            if fresh:
+                from tests.e2e.r6_fresh_evidence import verified_original_files
+                assert verified_original_files(execution, original) == captured
             async with verifier.ReadOnlyExercise() as exercise:
                 exercise.output = folder
                 exercise.environment = dict(environment)
-                prepared = json.loads((original / "prepared.json").read_text())["d5"]
+                prepared = (captured["prepared.json"] if fresh else json.loads((original / "prepared.json").read_text()))["d5"]
                 exercise.port = prepared["policy"]["platform_port"]
                 exercise.origin = f"http://127.0.0.1:{exercise.port}"
                 await exercise.start(live=False, profile=prepared["profile"])
@@ -310,9 +343,16 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
                 )
                 async with tenant_async_session(binding=exercise.binding()) as db:
                     target = await authority(db)
-                    document = validate_document(json.loads((original / "exercise-renewed.json").read_text()), target)
+                    if fresh:
+                        renewed = verifier._verified_facts["accepted_switch"]["renewed_document"]
+                        document_ref = {key: renewed[key] for key in ("path", "sha256")}
+                        assert Path(document_ref["path"]).resolve() == original / "exercise-renewed.json"
+                        document_value = checker.load_reference(document_ref)
+                    else:
+                        document_value = json.loads((original / "exercise-renewed.json").read_text())
+                    document = validate_document(document_value, target)
                     await verify_inventory(db, document)
-                old = json.loads((original / "build-and-switch.json").read_text())
+                old = captured["build-and-switch.json"] if fresh else json.loads((original / "build-and-switch.json").read_text())
                 command = [
                     sys.executable,
                     "-B",
@@ -327,6 +367,9 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
                     "--document",
                     str(original / "exercise-renewed.json"),
                 ]
+                if fresh:
+                    checker.verified_bytes(document_ref)
+                    assert verified_original_files(execution, original) == captured
                 process = await asyncio.create_subprocess_exec(
                     *command, env=dict(os.environ), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
                 )
@@ -335,7 +378,7 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
                 status = json.loads(stdout or stderr)
                 assert (
                     status["state"] == "switched"
-                    and status["epoch"] == 3
+                    and status["epoch"] == checker.accepted_epoch(old)
                     and status["operation_ref"] == old["operation"]
                 )
                 write_private(
@@ -344,10 +387,10 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
                 )
                 await verifier.verify(exercise)
                 if mode == "candidate":
-                    handoff = json.loads((original.parent / "task9-final-handoff.json").read_text())
+                    handoff = c9_handoff(original)
                     checker.validate_pre_attempt(
                         checker.reference(context["R6_C10_AUDIT_BASELINE"]),
-                        handoff["receipts"]["c9-evidence.json"],
+                        (handoff["c9_snapshot"] if fresh else handoff["receipts"]["c9-evidence.json"]),
                         target,
                         json.loads((folder / "c9-evidence.json").read_text()),
                     )
@@ -434,44 +477,56 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
                 provider_credential_loaded=False,
             ),
         )
-        handoff = json.loads((original.parent / "task9-final-handoff.json").read_text())
+        handoff = c9_handoff(original)
         certificate = dict(
-            kind="r6.compatibility-rehearsal.v1",
+            kind="r6.compatibility-rehearsal.v2" if fresh else "r6.compatibility-rehearsal.v1",
             status="PASS",
             production_authorized=False,
-            c9_snapshot=handoff["receipts"]["c9-evidence.json"],
-            c9_readonly_manifest=handoff["receipts"]["manifest.json"],
+            c9_snapshot=(handoff["c9_snapshot"] if fresh else handoff["receipts"]["c9-evidence.json"]),
+            c9_readonly_manifest=handoff["c9_readonly_manifest"] if fresh else handoff["receipts"]["manifest.json"],
             internal_contracts=checker.reference(context["R6_C10_INTERNAL_CONTRACTS"]),
             audit_baseline=checker.reference(context["R6_C10_AUDIT_BASELINE"]),
             generation_off_probe=checker.reference(context["R6_C10_GENOFF_PROBE"]),
-            c9=handoff["receipts"]["composed-c9-evidence.json"],
-            original_failed_receipt=handoff["original_failed_receipt"],
+            c9=handoff["c9"] if fresh else handoff["receipts"]["composed-c9-evidence.json"],
             c10=checker.reference(output / "c10.json"),
         )
-        checker.validate_certificate(certificate)
+        certificate["c9_execution" if fresh else "original_failed_receipt"] = handoff["c9_execution" if fresh else "original_failed_receipt"]
+        from tests.e2e.r6_fresh_evidence import checker_environment
+        if fresh:
+            with checker_environment(independent_caller):
+                checker.validate_certificate(certificate)
+        else:
+            checker.validate_certificate(certificate)
         write_private(output / "certificate.json", certificate)
         execution_status = "PASS"
     finally:
-        os.environ.update(context)
-        assert all(hashlib.sha256(Path(path).read_bytes()).hexdigest() == value for path, value in task_sources.items())
-        write_private(
-            output / "execution-receipt.json",
-            dict(
-                status=execution_status,
-                task_sources=task_sources,
-                processes=processes,
-                new_model_calls=0,
-                provider_credential_loaded=False,
-                error_type=None if sys.exc_info()[0] is None else sys.exc_info()[0].__name__,
-            ),
-        )
-        from app import database
+        try:
+            os.environ.update(context)
+            assert all(hashlib.sha256(Path(path).read_bytes()).hexdigest() == value for path, value in task_sources.items())
+            write_private(
+                output / "execution-receipt.json",
+                dict(
+                    status=execution_status,
+                    task_sources=task_sources,
+                    processes=processes,
+                    new_model_calls=0,
+                    provider_credential_loaded=False,
+                    error_type=None if sys.exc_info()[0] is None else sys.exc_info()[0].__name__,
+                ),
+            )
+        finally:
+            try:
+                from app import database
 
-        disposed = set()
-        for engine in [tenant_async_session.kw.get("bind"), database.engine]:
-            if engine is not None and id(engine) not in disposed:
-                await engine.dispose()
-                disposed.add(id(engine))
+                disposed = set()
+                for engine in [tenant_async_session.kw.get("bind"), database.engine]:
+                    if engine is not None and id(engine) not in disposed:
+                        await engine.dispose()
+                        disposed.add(id(engine))
+            finally:
+                os.environ.clear()
+                os.environ.update(independent_caller)
+                os.chdir(caller_directory)
 
 
 @pytest.mark.parametrize(
@@ -499,13 +554,17 @@ async def test_registered_compatible_process_preserves_same_corrected_report():
         "failed_audit_unknown_row_field",
     ],
 )
+@preserve_caller_environment
 async def test_executed_certificate_rejects_incomplete_compatibility(change, tmp_path):
+    independent_caller = dict(os.environ)
+    from tests.e2e.r6_fresh_evidence import checker_environment
     """Fault injection keeps valid content hashes; failures must be semantic."""
     repo = Path(__file__).resolve().parents[3]
     checker = imported("c10_negative_checker", repo / "scripts/r6-compat-check.py")
     output = Path(os.environ["R6_C10_OUTPUT"])
     certificate = json.loads((output / "certificate.json").read_text())
-    checker.validate_certificate(certificate)  # Positive control on the exact executed artifacts.
+    with checker_environment(independent_caller):
+        checker.validate_certificate(certificate)  # Exact executed-artifact positive control.
 
     def replaced(reference, mutate, name):
         value = checker.load_reference(reference)
@@ -624,5 +683,6 @@ async def test_executed_certificate_rejects_incomplete_compatibility(change, tmp
                 c10["processes"][1]["authority"] = replaced(c10["processes"][1]["authority"], unknown, "authority.json")
 
         certificate["c10"] = replaced(certificate["c10"], altered, "c10.json")
-    with pytest.raises(ValueError):
-        checker.validate_certificate(certificate)
+    with checker_environment(independent_caller):
+        with pytest.raises(ValueError):
+            checker.validate_certificate(certificate)
