@@ -32,6 +32,7 @@ test('actual employee restricted D4 candidate and source/version uncertainty wit
   await dialog.getByRole('button', { name: '生成受限候选' }).click();
   const response = await generated;
   expect(response.status()).toBe(200);
+  const successfulBody = response.request().postDataJSON();
   const first = await response.json();
   expect(first.data_class).toBe('restricted'); expect(first.external_delivery_allowed).toBe(false);
   expect(first.fields.some((value: {source_status:string}) => value.source_status === 'validated_reference')).toBeTruthy();
@@ -52,12 +53,22 @@ test('actual employee restricted D4 candidate and source/version uncertainty wit
   await expect(region.getByText(/扭矩12N·m/)).toBeVisible();
   await fixture('withdraw');
   await expect(region).toHaveCount(0);
-  const denied = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/d4-text-preview') && r.status() === 403);
-  await dialog.getByRole('button', { name: '生成受限候选' }).click();
-  expect(await (await denied).json()).toEqual({ detail: 'PREVIEW_ACCESS_DENIED' });
-  await expect(region).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole('region', { name: '受限正文预览' })).toHaveCount(0);
+  await expect(page.getByText(/扭矩12N·m/)).toHaveCount(0);
+  const denied = await page.request.post(`${backend}/api/capa/${report}/d4-text-preview`, {
+    headers: { Authorization: `Bearer ${login.access_token}`, 'X-Tenant-ID': process.env.AGENT_BROWSER_TENANT! },
+    data: successfulBody,
+  });
+  expect(denied.status()).toBe(403);
+  expect(await denied.json()).toEqual({ detail: 'PREVIEW_ACCESS_DENIED' });
   await fixture('restore');
+  await page.reload();
+  await trigger.click();
+  await expect(dialog.getByRole('textbox', { name: '显式替换词' })).toHaveValue('');
+  const restored = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/d4-text-preview'));
   await dialog.getByRole('button', { name: '生成受限候选' }).click();
+  expect((await restored).status()).toBe(200);
   await expect(region).toBeVisible();
   await page.route(`**/api/capa/${report}/d4-text-preview/version`, route => route.abort('failed'));
   await expect(region).toHaveCount(0);
