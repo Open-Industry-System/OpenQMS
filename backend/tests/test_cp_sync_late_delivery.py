@@ -4,7 +4,6 @@ Immutable approved snapshots are declared fixture preconditions from the existin
 transaction fixtures. Normal browser approval paths are tested separately.
 """
 import asyncio
-import re
 import uuid
 
 import pytest
@@ -29,25 +28,39 @@ pytestmark = pytest.mark.asyncio
 @pytest_asyncio.fixture
 async def runtime(sync_tenants):
     sessions, schemas = sync_tenants
-    added = ('cp_sync_outbox', 'cp_validation_runs', 'cp_validation_findings', 'cp_validation_occurrences')
+    from app.services.tenant_migrator import REVISION
+
+    # sync_tenants provisions the complete current schema. Verify that local
+    # migration output instead of recreating an obsolete partial LIKE clone.
+    tables = ('cp_sync_outbox', 'cp_validation_runs', 'cp_validation_findings', 'cp_validation_occurrences')
+    foreign_keys = text(
+        "SELECT c.conname, target.relname, target_ns.nspname "
+        "FROM pg_constraint c JOIN pg_class target ON target.oid=c.confrelid "
+        "JOIN pg_namespace target_ns ON target_ns.oid=target.relnamespace "
+        "WHERE c.conrelid=to_regclass(:table) AND c.contype='f'")
+    triggers = text(
+        "SELECT t.tgname, p.proname FROM pg_trigger t "
+        "JOIN pg_proc p ON p.oid=t.tgfoid "
+        "WHERE t.tgrelid=to_regclass(:table) AND NOT t.tgisinternal")
     async with sessions.admin_sessions() as db:
         for schema in schemas:
-            for table in added:
-                await db.execute(text(f'CREATE TABLE "{schema}"."{table}" (LIKE public."{table}" INCLUDING ALL)'))
-            for table in added:
-                constraints = (await db.execute(text(
-                    "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
-                    "WHERE conrelid=to_regclass(:table) AND contype='f'"), {'table': 'public.' + table})).all()
-                for name, definition in constraints:
-                    definition = re.sub(r'REFERENCES (?:public\.)?([a-z_]+)',
-                        lambda match: f'REFERENCES "{schema}"."{match[1]}"', definition)
-                    await db.execute(text(f'ALTER TABLE "{schema}"."{table}" ADD CONSTRAINT "{name}" {definition}'))
-                triggers = (await db.execute(text(
-                    "SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid=to_regclass(:table) AND NOT tgisinternal"),
-                    {'table': 'public.' + table})).scalars().all()
-                for definition in triggers:
-                    await db.execute(text(definition.replace(f' ON public.{table} ', f' ON "{schema}"."{table}" ')))
-        await db.commit()
+            assert (await db.execute(text(
+                f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all() == [REVISION]
+            for table in tables:
+                local = f'"{schema}"."{table}"'
+                relation = (await db.execute(text(
+                    "SELECT n.nspname, c.relkind::text FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                    "WHERE c.oid=to_regclass(:table)"), {'table': local})).one()
+                assert tuple(relation) == (schema, 'r')
+                expected_fks = (await db.execute(foreign_keys, {'table': 'public.' + table})).all()
+                actual_fks = (await db.execute(foreign_keys, {'table': local})).all()
+                assert {(name, target) for name, target, _ in actual_fks} == {
+                    (name, target) for name, target, _ in expected_fks}
+                assert all(namespace == schema for _, _, namespace in actual_fks)
+                expected_triggers = (await db.execute(triggers, {'table': 'public.' + table})).all()
+                actual_triggers = (await db.execute(triggers, {'table': local})).all()
+                assert {tuple(row) for row in actual_triggers} == {tuple(row) for row in expected_triggers}
     token = current_tenant_schema.set(schemas[0])
     try:
         yield sessions, schemas[0]
