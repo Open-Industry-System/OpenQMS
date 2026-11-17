@@ -114,6 +114,7 @@ def test_publication_requires_trusted_success_and_exact_merge(monkeypatch):
 
 def test_reopened_pr_cannot_reuse_deleted_preview(monkeypatch):
     class Fake:
+        repo = 'owner/repo'
         def __init__(self):
             self.statuses = []
         def notice(self, *args, **kwargs):
@@ -121,6 +122,8 @@ def test_reopened_pr_cannot_reuse_deleted_preview(monkeypatch):
         def status(self, sha, context, state, message):
             self.statuses.append((context, state))
         def pages(self, path):
+            if path.endswith('/comments'):
+                return []
             assert path.endswith('/timeline')
             return [dict(event='reopened', created_at='2026-11-16T02:00:00Z')]
     monkeypatch.setattr(m, 'publication', lambda *_: dict(id=42, repository={'full_name': 'owner/repo'}, updated_at='2026-11-16T01:00:00Z'))
@@ -194,3 +197,63 @@ def test_notification_and_cleanup_workflow_security():
     assert 'ORACLE_AUTODEPLOY_ENABLED' not in cleanup
     assert 'always() && steps.cleanup.outcome' in cleanup
     assert cleanup.index('deploy-oracle-preview.py --cleanup') < cleanup.index('--cleanup-result')
+
+
+def test_automatic_notice_lifecycle_never_reports_old_success_during_new_deploy(monkeypatch):
+    monkeypatch.setenv('GITHUB_RUN_ID', '77')
+    monkeypatch.setenv('GITHUB_SERVER_URL', 'https://github.com')
+    sha = 'a' * 40
+    merge = 'b' * 40
+    pr = dict(number=7, state='open', merge_commit_sha=merge, head=dict(sha=sha, repo=dict(full_name='owner/repo')), body=BODY, user=dict(login='alice'))
+    run = dict(id=77, status='in_progress', conclusion=None, path='.github/workflows/oracle-deploy.yml', event='workflow_run', updated_at='2026-11-17T01:00:00Z', repository=dict(full_name='owner/repo'))
+    class Fake:
+        repo = 'owner/repo'
+        def __init__(self):
+            self.body = None
+            self.changes = []
+        def get(self, path):
+            if '/actions/runs/' in path:
+                return run
+            return pr
+        def pages(self, path):
+            if path.endswith('/comments') and self.body:
+                return [dict(body=self.body, user=dict(login='github-actions[bot]', type='Bot'))]
+            return []
+        def notice(self, number, body, **kw):
+            self.body = body
+            self.changes.append(body)
+        def status(self, *args):
+            pass
+    api = Fake()
+    m.deployment_notice(api, 7, merge, 'started')
+    assert '正在部署' in api.body and '/actions/runs/77' in api.body
+    initial = api.body
+    # No success artifact is consulted while a newer deployment is in progress.
+    monkeypatch.setattr(m, 'publication', lambda *_: pytest.fail('old receipt used during deploy'))
+    m.reconcile(api, pr, [])
+    assert api.body == initial
+    run.update(status='completed', conclusion='failure')
+    m.reconcile(api, pr, [])
+    assert '部署未完成' in api.body and '已就绪' not in api.body
+    run.update(conclusion='success')
+    monkeypatch.setattr(m, 'publication', lambda *_: run)
+    m.reconcile(api, pr, [])
+    assert '测试环境已就绪' in api.body and '/preview-accept' in api.body
+    # A stale failure from an old merge cannot overwrite current readiness.
+    m.deployment_notice(api, 7, 'c'*40, 'failure')
+    assert '测试环境已就绪' in api.body
+    pr['state'] = 'closed'
+    m.cleanup_notice(api, 7, 'success')
+    released = api.body
+    assert '资源已释放' in released
+    m.deployment_notice(api, 7, merge, 'failure')
+    assert api.body == released
+
+
+def test_deployment_begin_and_failure_are_wired_around_secret_use():
+    workflow = (Path(__file__).parents[1] / '.github/workflows/oracle-deploy.yml').read_text()
+    assert workflow.index('Restore trusted source before') < workflow.index('--deployment-result started')
+    assert workflow.index('--deployment-result started') < workflow.index('Prepare pinned SSH identity')
+    assert workflow.index('Remove runner credentials') < workflow.index('--deployment-result failure')
+    assert "steps.preview-start.outcome == 'success'" in workflow
+    assert 'issues: write' in workflow

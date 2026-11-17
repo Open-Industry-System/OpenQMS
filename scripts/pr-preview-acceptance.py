@@ -90,12 +90,57 @@ class API:
                        input=json.dumps(dict(body=body)).encode(), stdout=subprocess.DEVNULL, check=True)
 
 
+def deployment_marker(sha, run_id):
+    return f'<!-- openqms-preview-deployment:{sha}:{run_id} -->'
+
+
+def deployment_notice(api, number, sha, result):
+    pr = api.get(f'/pulls/{number}')
+    if (pr['state'] != 'open' or pr['merge_commit_sha'] != sha
+            or pr['head']['repo']['full_name'] != api.repo):
+        return  # A stale job must not overwrite a new version or released notice.
+    run_id = int(os.environ['GITHUB_RUN_ID'])
+    url = f'https://github.com/{api.repo}/actions/runs/{run_id}'
+    phase = '测试环境正在部署' if result == 'started' else '测试环境部署未完成'
+    detail = ('CI 已通过，正在构建、迁移并验证预览环境。地址尚未就绪，请等待完成通知。'
+              if result == 'started' else '部署失败或取消，当前版本不能用于验收。请查看发布记录中的失败步骤。')
+    api.notice(number, f'{NOTICE}\n{deployment_marker(pr["head"]["sha"], run_id)}\n'
+               f'### {phase}\n\n{detail}\n\n'
+               f'预期地址：https://pr-{number}.preview.openqms.smartindustry.world\n\n'
+               f'当前提交：`{pr["head"]["sha"]}`\n\n[发布记录]({url})')
+
+
+def deployment_notice_from_run(api, pr, run):
+    sha = pr['head']['sha']
+    url = f'https://github.com/{api.repo}/actions/runs/{run["id"]}'
+    api.notice(pr['number'], f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n'
+               '### 测试环境部署未完成\n\n部署失败或取消，当前版本不能用于验收。'
+               f'\n\n预期地址：https://pr-{pr["number"]}.preview.openqms.smartindustry.world'
+               f'\n\n[发布记录]({url})')
+
+
+def latest_notified_deployment(api, pr):
+    comments = api.pages(f'/issues/{pr["number"]}/comments')
+    for c in comments:
+        if (c.get('user', {}).get('login') != 'github-actions[bot]'
+                or c.get('user', {}).get('type') != 'Bot'
+                or not (c.get('body') or '').startswith(NOTICE)):
+            continue
+        match = re.search(r'<!-- openqms-preview-deployment:([0-9a-f]{40}):([1-9][0-9]*) -->', c['body'])
+        if match and match[1] == pr['head']['sha']:
+            run = api.get(f'/actions/runs/{match[2]}')
+            if run['path'] != '.github/workflows/oracle-deploy.yml' or run['event'] != 'workflow_run':
+                raise ValueError('Invalid deployment notification source')
+            return run
+    return None
+
+
 def ready_notice(pr, run, digest):
     number = pr['number']
     sha = pr['head']['sha']
     url = f'https://pr-{number}.preview.openqms.smartindustry.world'
     command = f'/preview-accept {sha} {run["id"]} {digest}'
-    return (f'{NOTICE}\n### 测试环境已就绪\n\n'
+    return (f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n### 测试环境已就绪\n\n'
             f'- 测试地址：{url}\n- 当前提交：`{sha}`\n'
             f'- 实际部署版本：`{pr["merge_commit_sha"]}`\n'
             f'- [发布记录](https://github.com/{run["repository"]["full_name"]}/actions/runs/{run["id"]})\n\n'
@@ -144,20 +189,30 @@ def reconcile(api, pr, summary):
     sha = pr['head']['sha']
     api.status(sha, PLAN, 'pending', '正在检查 PR 验收计划')
     api.status(sha, ACCEPT, 'pending', '等待当前预览部署和人工验收')
-    waiting = f'{NOTICE}\n### 等待当前版本的测试环境与验收\n\n当前提交：`{sha}`。先前预览通知不能作为当前版本的验收依据；请等待发布完成。'
+    waiting = f'{NOTICE}\n### 等待 CI 与预览部署\n\n当前提交：`{sha}`。预览尚未就绪，请等待发布完成。\n\n预期地址：https://pr-{pr["number"]}.preview.openqms.smartindustry.world\n\n[CI 检查](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
     try:
         digest = test_plan(pr.get('body'))
     except ValueError:
-        api.notice(pr['number'], waiting, create=False)
+        api.notice(pr['number'], waiting)
         raise
     api.status(sha, PLAN, 'success', '影响范围、操作步骤、预期结果和权限回归检查齐全')
+    active = latest_notified_deployment(api, pr)
+    if active is not None and active['status'] != 'completed':
+        summary.append(f'PR #{pr["number"]}: 部署进行中，请查看 PR 通知中的发布记录。')
+        return
+    if active is not None and active['conclusion'] != 'success':
+        deployment_notice_from_run(api, pr, active)
+        summary.append(f'PR #{pr["number"]}: 部署失败或取消，请查看 PR 通知。')
+        return
     run = publication(api, pr)
+    if active is not None and (run is None or run['id'] != active['id']):
+        run = None
     lifecycle = [event['created_at'] for event in api.pages(f'/issues/{pr["number"]}/timeline')
                  if event.get('event') in {'closed', 'reopened'}]
     if run is not None and lifecycle and run['updated_at'] <= max(lifecycle):
         run = None
     if run is None:
-        api.notice(pr['number'], waiting, create=False)
+        api.notice(pr['number'], waiting)
         summary.append(f'PR #{pr["number"]}: 等待当前提交预览发布成功。')
         return
     fresh = api.get(f'/pulls/{pr["number"]}')
@@ -182,10 +237,18 @@ def reconcile(api, pr, summary):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--deployment-pr', type=int)
+    parser.add_argument('--deployment-sha')
+    parser.add_argument('--deployment-result', choices=['started', 'failure', 'cancelled'])
     parser.add_argument('--cleanup-pr', type=int)
     parser.add_argument('--cleanup-result', choices=['success', 'failure', 'cancelled'])
     args = parser.parse_args()
     api = API()
+    if args.deployment_pr is not None:
+        if args.deployment_pr <= 0 or not re.fullmatch(r'[0-9a-f]{40}', args.deployment_sha or '') or args.deployment_result is None:
+            parser.error('positive PR, exact SHA and deployment outcome required')
+        deployment_notice(api, args.deployment_pr, args.deployment_sha, args.deployment_result)
+        return
     if args.cleanup_pr is not None:
         if args.cleanup_pr <= 0 or args.cleanup_result is None:
             parser.error('positive PR and cleanup outcome required')

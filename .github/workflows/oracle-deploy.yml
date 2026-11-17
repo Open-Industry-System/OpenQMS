@@ -46,6 +46,11 @@ jobs:
           PY
 
   deploy:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: write
     if: needs.authorize.outputs.kind == 'production' || vars.ORACLE_PREVIEW_ENABLED == 'true'
     needs: authorize
     runs-on: ubuntu-24.04
@@ -84,6 +89,13 @@ jobs:
           clean: true
           fetch-depth: 0
           persist-credentials: false
+      - id: preview-start
+        name: Notify PR that preview deployment is starting
+        if: env.RELEASE_KIND == 'preview'
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/pr-preview-acceptance.py --deployment-pr "$PREVIEW_PR" --deployment-sha "$RELEASE_SHA" --deployment-result started
       - name: Prepare pinned SSH identity
         env:
           DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}
@@ -130,3 +142,9 @@ jobs:
       - name: Remove runner credentials
         if: always()
         run: rm -f "$RUNNER_TEMP/oracle-key" "$RUNNER_TEMP/oracle-known-hosts"
+      - name: Notify PR that preview deployment failed or was cancelled
+        if: (failure() || cancelled()) && steps.preview-start.outcome == 'success'
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/pr-preview-acceptance.py --deployment-pr "$PREVIEW_PR" --deployment-sha "$RELEASE_SHA" --deployment-result failure
