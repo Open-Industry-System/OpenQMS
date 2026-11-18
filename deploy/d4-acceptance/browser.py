@@ -54,7 +54,10 @@ def validate_config(config):
     if not Path(config['executor_socket']).is_absolute() or not 1 <= len(config['report_label']) <= 120:
         raise ValueError('invalid executor or report configuration')
 
-    binding = config['binding']
+    validate_binding(config['binding'])
+
+
+def validate_binding(binding):
     if set(binding) != {'pr', 'head', 'merge', 'plan', 'lease', 'report_id', 'issued_at', 'expires_at'}:
         raise ValueError('invalid acceptance binding schema')
     if type(binding['pr']) is not int or not 0 < binding['pr'] < 10**9:
@@ -85,20 +88,34 @@ def authenticated(header, config):
         return False
 
 
-def executor_call(path, payload):
+def executor_call(path, payload, *, deadline=None):
     target = Path(path)
     parent, socket_info = target.parent.lstat(), target.lstat()
     if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022
             or not stat.S_ISSOCK(socket_info.st_mode) or socket_info.st_uid != 0
             or socket_info.st_mode & 0o007):
         raise ValueError('executor socket must be owned by the trusted runtime')
+    deadline = min(deadline, time.monotonic() + 50) if deadline is not None else time.monotonic() + 50
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError('trusted executor deadline elapsed')
+        return seconds
+
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
-        channel.settimeout(50)
+        channel.settimeout(remaining())
         channel.connect(path)
+        channel.settimeout(remaining())
         channel.sendall(json.dumps(payload).encode())
         channel.shutdown(socket.SHUT_WR)
-        with channel.makefile('rb') as reply:
-            response = reply.read(MAX_MESSAGE + 1)
+        response = bytearray()
+        while len(response) <= MAX_MESSAGE:
+            channel.settimeout(remaining())
+            part = channel.recv(MAX_MESSAGE + 1 - len(response))
+            if not part:
+                break
+            response.extend(part)
     if len(response) > MAX_MESSAGE:
         raise ValueError('invalid executor response length')
     return json.loads(response)
