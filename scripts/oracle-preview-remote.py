@@ -24,21 +24,37 @@ helper = load('preview_routes', 'oracle-preview.py')
 BASE = Path('/var/lib/openqms-previews')
 TUNNEL_IMAGE = 'python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535'
 
+def release_base(pr, shared_lease=None):
+    project = BASE / ('pr-' + helper.pr_number(str(pr)))
+    parents = (BASE, project)
+    if shared_lease is not None:
+        if not re.fullmatch(r'[0-9a-f]{32}', shared_lease):
+            raise ValueError('invalid shared-test release namespace')
+        shared = project / 'shared-test'
+        parents += (shared, shared / shared_lease)
+    if any(path.is_symlink() for path in parents):
+        raise ValueError('unsafe preview release namespace')
+    return parents[-1]
+
+
 class PreviewRelease:
-    def __init__(self, pr, sha, manifest_hash, controller_hash):
+    def __init__(self, pr, sha, manifest_hash, controller_hash, *, shared_lease=None):
         self.pr = helper.pr_number(str(pr))
         if not prod.SHA.fullmatch(sha) or any(not re.fullmatch('[0-9a-f]{64}', value) for value in [manifest_hash, controller_hash]):
             raise ValueError('invalid preview immutable identity')
         self.sha = sha
         self.project = BASE / ('pr-' + self.pr)
-        self.root = self.project / 'releases' / sha
+        self.shared_lease = shared_lease
+        self.releases = release_base(pr, shared_lease) / 'releases'
+        self.root = self.releases / sha
         self.source = self.root / 'source'
         self.control = self.root / 'control'
         self.manifest_hash = manifest_hash
         self.controller_hash = controller_hash
 
     def verify(self):
-        for path in (BASE, self.project, self.project / 'releases', self.root, self.source, self.control):
+        namespace = release_base(self.pr, self.shared_lease)
+        for path in (BASE, self.project, namespace, self.releases, self.root, self.source, self.control):
             if path.is_symlink() or not path.is_dir(): raise ValueError('invalid preview directory')
         if prod.digest(self.source / '.release-manifest') != self.manifest_hash or prod.digest(self.control / 'controller.sha256') != self.controller_hash:
             raise ValueError('preview manifest changed')
@@ -246,14 +262,21 @@ class PreviewRelease:
     def initialize(self, expected):
         self.app_command(expected,'python','/run/openqms-preview-initialize.py')
 
-    def rollout(self, expected):
-        self.verify()
-        self.assert_images(expected)
-        self.compose('up','-d','--no-build','--wait','--wait-timeout','180','backend','graph-worker','web',images=expected)
+    def assert_application_running(self, expected):
         rows = helper.resources('container',self.pr)
         for service, kind in [('backend','backend'),('graph-worker','backend'),('web','web')]:
             matches = [row for row in rows if helper.labels(row,'container').get('com.docker.compose.service') == service]
             if len(matches) != 1 or not helper.owned(helper.labels(matches[0],'container'),self.pr) or not matches[0]['State']['Running'] or matches[0]['Image'] != expected[kind]:
                 raise ValueError('preview running image mismatch')
-        helper.publish(helper.ROUTES / ('pr-'+self.pr+'.caddy'), helper.route(self.pr), helper.validate, helper.reload)
-        helper.atomic(self.project / 'current-release.json', json.dumps({'sha':self.sha,'images':expected,'manifest':self.manifest_hash,'controller':self.controller_hash}))
+    def rollout(self, expected, *, publish_route=True):
+        self.verify()
+        self.assert_images(expected)
+        self.compose('up','-d','--no-build','--wait','--wait-timeout','180','backend','graph-worker','web',images=expected)
+        self.assert_application_running(expected)
+        if publish_route:
+            helper.publish(helper.ROUTES / ('pr-'+self.pr+'.caddy'), helper.route(self.pr), helper.validate, helper.reload)
+        metadata = {'sha': self.sha, 'images': expected, 'manifest': self.manifest_hash,
+                    'controller': self.controller_hash}
+        if self.shared_lease is not None:
+            metadata['shared_lease'] = self.shared_lease
+        helper.atomic(self.project / 'current-release.json', json.dumps(metadata))

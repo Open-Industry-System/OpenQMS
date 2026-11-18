@@ -29,6 +29,11 @@ if [[ -e /usr/local/lib/openqms/oracle-production ]]; then
 fi
 mv "$controller" /usr/local/lib/openqms/oracle-production
 controller=""
+# Shared-test mode is activated separately after legacy previews are drained.
+for name in oracle-shared-test-remote.py shared-test-queue.py; do
+  [[ -f "$repo/scripts/$name" && ! -L "$repo/scripts/$name" ]] || exit 1
+  install -m 0644 -o root -g root "$repo/scripts/$name" "/usr/local/lib/openqms/$name"
+done
 install -m 0755 "$repo/scripts/oracle-deploy-receiver.py" /usr/local/sbin/openqms-deploy-receiver
 install -m 0755 "$repo/scripts/oracle-backup-current.py" /usr/local/sbin/openqms-backup-current
 install -d -m 0755 /usr/local/bin

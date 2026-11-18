@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Trusted metadata-only PR plan and human preview acceptance statuses."""
 import argparse
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -14,6 +15,28 @@ ACCEPT = 'Preview human acceptance'
 START = '<!-- preview-test-plan:start -->'
 END = '<!-- preview-test-plan:end -->'
 NOTICE = '<!-- openqms-preview-notice -->'
+PREVIEW_WORKFLOW = 'oracle-deploy.yml'
+SHARED_TEST_WORKFLOW = 'oracle-shared-test.yml'
+SHARED_TEST_URL = 'https://test.preview.openqms.smartindustry.world'
+SHARED_TEST_ARTIFACT = 'shared-test-publication'
+SHANGHAI = timezone(timedelta(hours=8))
+
+
+def shared_test_enabled():
+    return os.environ.get('ORACLE_SHARED_TEST_ENABLED') == 'true'
+
+
+def preview_url(number, shared):
+    return SHARED_TEST_URL if shared else f'https://pr-{number}.preview.openqms.smartindustry.world'
+
+
+def accepts_workflow_source(run, workflow):
+    events = {'workflow_run', 'schedule', 'workflow_dispatch'} if workflow == SHARED_TEST_WORKFLOW else {'workflow_run'}
+    return run.get('path') == f'.github/workflows/{workflow}' and run.get('event') in events
+
+
+def epoch(value):
+    return int(datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp())
 
 
 def test_plan(body):
@@ -94,7 +117,7 @@ def deployment_marker(sha, run_id):
     return f'<!-- openqms-preview-deployment:{sha}:{run_id} -->'
 
 
-def deployment_notice(api, number, sha, result):
+def deployment_notice(api, number, sha, result, *, shared=False):
     pr = api.get(f'/pulls/{number}')
     if (pr['state'] != 'open' or pr['merge_commit_sha'] != sha
             or pr['head']['repo']['full_name'] != api.repo):
@@ -104,49 +127,80 @@ def deployment_notice(api, number, sha, result):
     phase = '测试环境正在部署' if result == 'started' else '测试环境部署未完成'
     detail = ('CI 已通过，正在构建、迁移并验证预览环境。地址尚未就绪，请等待完成通知。'
               if result == 'started' else '部署失败或取消，当前版本不能用于验收。请查看发布记录中的失败步骤。')
+    address = '' if shared else f'预期地址：{preview_url(number, False)}\n\n'
     api.notice(number, f'{NOTICE}\n{deployment_marker(pr["head"]["sha"], run_id)}\n'
                f'### {phase}\n\n{detail}\n\n'
-               f'预期地址：https://pr-{number}.preview.openqms.smartindustry.world\n\n'
+               f'{address}'
                f'当前提交：`{pr["head"]["sha"]}`\n\n[发布记录]({url})')
 
 
 def deployment_notice_from_run(api, pr, run):
     sha = pr['head']['sha']
     url = f'https://github.com/{api.repo}/actions/runs/{run["id"]}'
+    shared = accepts_workflow_source(run, SHARED_TEST_WORKFLOW)
+    address = '' if shared else f'\n\n预期地址：{preview_url(pr["number"], False)}'
     api.notice(pr['number'], f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n'
                '### 测试环境部署未完成\n\n部署失败或取消，当前版本不能用于验收。'
-               f'\n\n预期地址：https://pr-{pr["number"]}.preview.openqms.smartindustry.world'
+               f'{address}'
                f'\n\n[发布记录]({url})')
 
 
+def bot_notices(api, number):
+    return [
+        c['body'] for c in api.pages(f'/issues/{number}/comments')
+        if c.get('user', {}).get('login') == 'github-actions[bot]'
+        and c.get('user', {}).get('type') == 'Bot' and (c.get('body') or '').startswith(NOTICE)
+    ]
+
+
 def latest_notified_deployment(api, pr):
-    comments = api.pages(f'/issues/{pr["number"]}/comments')
-    for c in comments:
-        if (c.get('user', {}).get('login') != 'github-actions[bot]'
-                or c.get('user', {}).get('type') != 'Bot'
-                or not (c.get('body') or '').startswith(NOTICE)):
-            continue
-        match = re.search(r'<!-- openqms-preview-deployment:([0-9a-f]{40}):([1-9][0-9]*) -->', c['body'])
+    workflow = SHARED_TEST_WORKFLOW if shared_test_enabled() else PREVIEW_WORKFLOW
+    other = PREVIEW_WORKFLOW if shared_test_enabled() else SHARED_TEST_WORKFLOW
+    for body in bot_notices(api, pr['number']):
+        match = re.search(r'<!-- openqms-preview-deployment:([0-9a-f]{40}):([1-9][0-9]*) -->', body)
         if match and match[1] == pr['head']['sha']:
             run = api.get(f'/actions/runs/{match[2]}')
-            if run['path'] != '.github/workflows/oracle-deploy.yml' or run['event'] != 'workflow_run':
+            if accepts_workflow_source(run, other):
+                return None  # A notification from the previous mode cannot establish readiness.
+            if not accepts_workflow_source(run, workflow):
                 raise ValueError('Invalid deployment notification source')
             return run
     return None
 
 
+def acceptance_command(pr, run, digest):
+    command = f'/preview-accept {pr["head"]["sha"]} {run["id"]} {digest}'
+    if receipt := run.get('shared_test'):
+        command += ' ' + receipt['queue_lease']
+    return command
+
+
+def shared_identity(head, merge, plan, lease):
+    return ':'.join((head, merge, plan, lease))
+
+
 def ready_notice(pr, run, digest):
     number = pr['number']
     sha = pr['head']['sha']
-    url = f'https://pr-{number}.preview.openqms.smartindustry.world'
-    command = f'/preview-accept {sha} {run["id"]} {digest}'
-    return (f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n### 测试环境已就绪\n\n'
-            f'- 测试地址：{url}\n- 当前提交：`{sha}`\n'
+    shared = run.get('shared_test')
+    url = preview_url(number, shared)
+    command = acceptance_command(pr, run, digest)
+    if shared:
+        deadline = datetime.fromtimestamp(shared['expires_at'], SHANGHAI).strftime('%Y-%m-%d %H:%M:%S (UTC+8)')
+        validity = f'共享测试位当前用于 PR #{number}，本轮验收截止 {deadline}。\n\n'
+        ending = '验收后会清理测试资源并切换至下一项。'
+        identity = shared_identity(sha, shared['sha'], digest, shared['queue_lease'])
+        marker = f'<!-- openqms-shared-test-active:{identity} -->\n'
+    else:
+        validity = marker = ''
+        ending = '更新提交或验收计划后需重新确认。合并或关闭 PR 后，预览资源会自动释放。'
+    return (f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n{marker}### 测试环境已就绪\n\n'
+            f'{validity}- 测试地址：{url}\n- 当前提交：`{sha}`\n'
             f'- 实际部署版本：`{pr["merge_commit_sha"]}`\n'
             f'- [发布记录](https://github.com/{run["repository"]["full_name"]}/actions/runs/{run["id"]})\n\n'
             f'请按 PR 描述中的验收计划逐项测试；完成后发表新评论，复制以下命令并另附实际结果或截图链接：\n\n'
             f'```text\n{command}\n```\n\n'
-            '更新提交或验收计划后需重新确认。合并或关闭 PR 后，预览资源会自动释放。')
+            f'{ending}')
 
 
 def cleanup_notice(api, number, result):
@@ -161,27 +215,158 @@ def cleanup_notice(api, number, result):
     api.notice(number, f'{NOTICE}\n### {text}\n\n[清理记录]({run_url})')
 
 
-def publication(api, pr):
+def publication_receipt(api, artifact):
+    data = api.get(f'/actions/artifacts/{artifact["id"]}/zip', raw=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        entries = archive.infolist()
+        if len(entries) != 1 or entries[0].filename != 'preview-publication.json' or entries[0].file_size > 4096:
+            raise ValueError('Invalid publication receipt')
+        receipt = json.loads(archive.read(entries[0]))
+        if not isinstance(receipt, dict):
+            raise ValueError('Invalid publication receipt')
+        return receipt
+
+
+def receipt_matches(api, pr, receipt):
+    return (type(receipt.get('pr')) is int and receipt['pr'] == pr['number']
+            and receipt.get('head') == pr['head']['sha']
+            and receipt.get('sha') == pr['merge_commit_sha']
+            and receipt.get('repository') == api.repo)
+
+
+def shared_publication(api, pr, queue_lease):
+    # Successful polls without a deployment do not count toward discovery.
+    digest = test_plan(pr.get('body'))
+    default = api.get('')['default_branch']
+    for page in range(1, 11):
+        response = api.get(f'/actions/artifacts?name={SHARED_TEST_ARTIFACT}&per_page=100&page={page}')
+        artifacts = response['artifacts']
+        for artifact in artifacts:
+            if artifact['name'] != SHARED_TEST_ARTIFACT or artifact['expired']:
+                continue
+            reference = artifact.get('workflow_run') or {}
+            run_id = reference.get('id')
+            if (reference.get('head_branch') != default or type(run_id) is not int or run_id <= 0):
+                continue
+            run = api.get(f'/actions/runs/{run_id}')
+            if (not accepts_workflow_source(run, SHARED_TEST_WORKFLOW) or run['head_branch'] != default
+                    or run.get('conclusion') != 'success' or run.get('status') != 'completed'):
+                continue
+            receipt = publication_receipt(api, artifact)
+            if not receipt_matches(api, pr, receipt):
+                continue
+            lease = receipt.get('queue_lease')
+            expires = receipt.get('expires_at')
+            if (not isinstance(lease, str) or not re.fullmatch(r'[0-9a-f]{32}', lease)
+                    or type(expires) is not int or not 0 < expires < 2**32):
+                raise ValueError('Invalid shared test lease receipt')
+            if receipt.get('plan') == digest and (queue_lease is None or lease == queue_lease):
+                return dict(run, shared_test=receipt)
+        if len(artifacts) < 100:
+            return None
+    raise ValueError('Too many shared test publication artifacts')
+
+
+def publication(api, pr, *, queue_lease=None, shared=None):
     # Only main's successful trusted deployment workflow may attest publication.
-    runs = api.get('/actions/workflows/oracle-deploy.yml/runs?status=success&per_page=100')['workflow_runs']
+    if shared is None:
+        shared = queue_lease is not None or shared_test_enabled()
+    if shared:
+        return shared_publication(api, pr, queue_lease)
+    runs = api.get(f'/actions/workflows/{PREVIEW_WORKFLOW}/runs?status=success&per_page=100')['workflow_runs']
     default = api.get('')['default_branch']
     for run in runs:
-        if run['event'] != 'workflow_run' or run['head_branch'] != default or run['path'] != '.github/workflows/oracle-deploy.yml':
+        if run.get('head_branch') != default or not accepts_workflow_source(run, PREVIEW_WORKFLOW):
             continue
         artifacts = api.get(f'/actions/runs/{run["id"]}/artifacts?per_page=100')
         if artifacts['total_count'] > 100:
             raise ValueError('Too many publication artifacts')
         matches = [a for a in artifacts['artifacts'] if a['name'] == 'preview-publication' and not a['expired']]
-        if len(matches) != 1:
-            continue
-        with zipfile.ZipFile(io.BytesIO(api.get(f'/actions/artifacts/{matches[0]["id"]}/zip', raw=True))) as archive:
-            entries = archive.infolist()
-            if len(entries) != 1 or entries[0].filename != 'preview-publication.json' or entries[0].file_size > 4096:
-                raise ValueError('Invalid publication receipt')
-            receipt = json.loads(archive.read(entries[0]))
-        if (receipt.get('pr') == pr['number'] and receipt.get('head') == pr['head']['sha']
-                and receipt.get('sha') == pr['merge_commit_sha'] and receipt.get('repository') == api.repo):
+        if len(matches) == 1 and receipt_matches(api, pr, publication_receipt(api, matches[0])):
             return run
+    return None
+
+
+def same_release(current, pr, digest):
+    return (current['state'] == 'open'
+            and current['head']['sha'] == pr['head']['sha']
+            and current['merge_commit_sha'] == pr['merge_commit_sha']
+            and test_plan(current.get('body')) == digest)
+
+
+def deployment_after_reopen(api, pr, run):
+    lifecycle = [event['created_at'] for event in api.pages(f'/issues/{pr["number"]}/timeline')
+                 if event.get('event') in {'closed', 'reopened'}]
+    return not lifecycle or run['updated_at'] > max(lifecycle)
+
+
+def verified_acceptance(api, pr, run, digest, *, released_at=None):
+    command = acceptance_command(pr, run, digest)
+    independent = os.environ.get('REQUIRE_INDEPENDENT_REVIEWER') == 'true'
+    shared = run.get('shared_test')
+    if shared and (shared['plan'] != digest or not deployment_after_reopen(api, pr, run)):
+        return None
+    for comment in reversed(api.pages(f'/issues/{pr["number"]}/comments')):
+        login = comment.get('user', {}).get('login', '')
+        if command not in (comment.get('body') or '').splitlines() or not re.fullmatch(r'[A-Za-z0-9-]+', login):
+            continue
+        if shared:
+            last_edit = epoch(comment.get('updated_at') or comment['created_at'])
+            if last_edit >= shared['expires_at'] or (released_at is not None and last_edit >= released_at):
+                continue
+        permission = api.get(f'/collaborators/{login}/permission')['permission']
+        if accepted(comment, command, run['updated_at'], pr['user']['login'], permission, independent):
+            if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
+                raise ValueError('PR changed during acceptance; rerun required')
+            return comment
+    return None
+
+
+def shared_test_ready_notice(api, pr, run, digest):
+    receipt = run['shared_test']
+    if (not receipt_matches(api, pr, receipt) or receipt['plan'] != digest
+            or datetime.now(timezone.utc).timestamp() >= receipt['expires_at']
+            or not deployment_after_reopen(api, pr, run)
+            or not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest)):
+        return
+    if shared_release_marker(api, pr, digest):
+        return  # A repeated poll cannot put the released link back.
+    api.notice(pr['number'], ready_notice(pr, run, digest))
+
+
+def shared_test_released_notice(api, slot):
+    identity = shared_identity(slot['head'], slot['merge'], slot['plan'], slot['lease'])
+    notices = bot_notices(api, slot['pr'])
+    if any(f'<!-- openqms-shared-test-release:{identity}:' in body for body in notices):
+        return  # Retry must preserve the original cutoff for comments.
+    matches_active = any(f'<!-- openqms-shared-test-active:{identity} -->' in body for body in notices)
+    if not matches_active:
+        if any('<!-- openqms-shared-test-active:' in body for body in notices):
+            return  # The comment is already for another lease.
+        pr = api.get(f'/pulls/{slot["pr"]}')
+        if pr['head']['sha'] != slot['head'] or pr['merge_commit_sha'] != slot['merge']:
+            return
+        try:
+            if test_plan(pr.get('body')) != slot['plan']:
+                return
+        except ValueError:
+            return
+    cutoff = int(datetime.now(timezone.utc).timestamp())
+    marker = f'<!-- openqms-shared-test-release:{identity}:{slot["outcome"]}:{cutoff} -->'
+    detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
+    api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### 共享测试位已清理\n\n{detail}'
+               f'固定测试地址将用于队列中的下一项。\n\n版本：`{slot["head"]}`')
+
+
+def shared_release_marker(api, pr, digest):
+    for body in bot_notices(api, pr['number']):
+        match = re.search(
+            r'<!-- openqms-shared-test-release:([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{64}):'
+            r'([0-9a-f]{32}):(passed|failed|deploy-failed|expired|superseded):([0-9]+) -->',
+            body,
+        )
+        if match and match.group(1, 2, 3) == (pr['head']['sha'], pr['merge_commit_sha'], digest):
+            return {'lease': match[4], 'outcome': match[5], 'released_at': int(match[6])}
     return None
 
 
@@ -189,52 +374,60 @@ def reconcile(api, pr, summary):
     sha = pr['head']['sha']
     api.status(sha, PLAN, 'pending', '正在检查 PR 验收计划')
     api.status(sha, ACCEPT, 'pending', '等待当前预览部署和人工验收')
-    waiting = f'{NOTICE}\n### 等待 CI 与预览部署\n\n当前提交：`{sha}`。预览尚未就绪，请等待发布完成。\n\n预期地址：https://pr-{pr["number"]}.preview.openqms.smartindustry.world\n\n[CI 检查](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
+    shared = shared_test_enabled()
+    waiting = f'{NOTICE}\n### 等待 CI 与预览部署\n\n当前提交：`{sha}`。预览尚未就绪，请等待发布完成。\n\n'
+    if shared:
+        waiting += '共享测试位将按 PR 编号发放，轮到本 PR 时会显示可用地址。\n\n'
+    else:
+        waiting += f'预期地址：{preview_url(pr["number"], False)}\n\n'
+    waiting += f'[CI 检查](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
     try:
         digest = test_plan(pr.get('body'))
     except ValueError as error:
         api.status(sha, PLAN, 'failure', str(error))
         summary.append(f'PR #{pr["number"]}: {error}')
-        api.notice(pr['number'], waiting)
+        if not shared:
+            api.notice(pr['number'], waiting)
         return
     api.status(sha, PLAN, 'success', '影响范围、操作步骤、预期结果和权限回归检查齐全')
+    if shared and (released := shared_release_marker(api, pr, digest)):
+        if released['outcome'] == 'passed':
+            run = publication(api, pr, queue_lease=released['lease'])
+            if run and verified_acceptance(api, pr, run, digest, released_at=released['released_at']):
+                api.status(sha, ACCEPT, 'success', '有写权限的人工已确认本轮共享测试')
+        return
     active = latest_notified_deployment(api, pr)
     if active is not None and active['status'] != 'completed':
         summary.append(f'PR #{pr["number"]}: 部署进行中，请查看 PR 通知中的发布记录。')
         return
     if active is not None and active['conclusion'] != 'success':
-        deployment_notice_from_run(api, pr, active)
+        if not shared:
+            deployment_notice_from_run(api, pr, active)
         summary.append(f'PR #{pr["number"]}: 部署失败或取消，请查看 PR 通知。')
         return
     run = publication(api, pr)
     if active is not None and (run is None or run['id'] != active['id']):
         run = None
-    lifecycle = [event['created_at'] for event in api.pages(f'/issues/{pr["number"]}/timeline')
-                 if event.get('event') in {'closed', 'reopened'}]
-    if run is not None and lifecycle and run['updated_at'] <= max(lifecycle):
+    if run is not None and not deployment_after_reopen(api, pr, run):
         run = None
     if run is None:
-        api.notice(pr['number'], waiting)
+        if not shared:
+            api.notice(pr['number'], waiting)
         summary.append(f'PR #{pr["number"]}: 等待当前提交预览发布成功。')
         return
-    fresh = api.get(f'/pulls/{pr["number"]}')
-    if fresh['state'] != 'open' or fresh['head']['sha'] != sha or fresh['merge_commit_sha'] != pr['merge_commit_sha'] or test_plan(fresh.get('body')) != digest:
+    if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
         raise ValueError('PR changed before publication notification')
-    api.notice(pr['number'], ready_notice(pr, run, digest))
-    command = f'/preview-accept {sha} {run["id"]} {digest}'
-    summary.append(f'PR #{pr["number"]}: https://pr-{pr["number"]}.preview.openqms.smartindustry.world\n\n逐项测试后评论以下命令，并另写实际结果/截图链接：\n\n```text\n{command}\n```')
-    independent = os.environ.get('REQUIRE_INDEPENDENT_REVIEWER') == 'true'
-    for comment in reversed(api.pages(f'/issues/{pr["number"]}/comments')):
-        login = comment.get('user', {}).get('login', '')
-        if command not in (comment.get('body') or '').splitlines() or not re.fullmatch(r'[A-Za-z0-9-]+', login):
-            continue
-        permission = api.get(f'/collaborators/{login}/permission')['permission']
-        if accepted(comment, command, run['updated_at'], pr['user']['login'], permission, independent):
-            fresh = api.get(f'/pulls/{pr["number"]}')
-            if fresh['state'] != 'open' or fresh['head']['sha'] != sha or fresh['merge_commit_sha'] != pr['merge_commit_sha'] or test_plan(fresh.get('body')) != digest:
-                raise ValueError('PR changed during acceptance; rerun required')
-            api.status(sha, ACCEPT, 'success', '有写权限的人工已确认当前提交、部署和验收计划')
-            return
+    receipt = run.get('shared_test')
+    if receipt and datetime.now(timezone.utc).timestamp() >= receipt['expires_at']:
+        summary.append(f'PR #{pr["number"]}: 当前共享测试位已到期，等待清理。')
+    else:
+        if not shared:
+            api.notice(pr['number'], ready_notice(pr, run, digest))
+        command = acceptance_command(pr, run, digest)
+        url = preview_url(pr['number'], receipt)
+        summary.append(f'PR #{pr["number"]}: {url}\n\n逐项测试后评论以下命令，并另写实际结果/截图链接：\n\n```text\n{command}\n```')
+    if verified_acceptance(api, pr, run, digest):
+        api.status(sha, ACCEPT, 'success', '有写权限的人工已确认当前提交、部署和验收计划')
 
 
 def main():
@@ -242,6 +435,7 @@ def main():
     parser.add_argument('--deployment-pr', type=int)
     parser.add_argument('--deployment-sha')
     parser.add_argument('--deployment-result', choices=['started', 'failure', 'cancelled'])
+    parser.add_argument('--shared-test', action='store_true')
     parser.add_argument('--cleanup-pr', type=int)
     parser.add_argument('--cleanup-result', choices=['success', 'failure', 'cancelled'])
     args = parser.parse_args()
@@ -249,7 +443,7 @@ def main():
     if args.deployment_pr is not None:
         if args.deployment_pr <= 0 or not re.fullmatch(r'[0-9a-f]{40}', args.deployment_sha or '') or args.deployment_result is None:
             parser.error('positive PR, exact SHA and deployment outcome required')
-        deployment_notice(api, args.deployment_pr, args.deployment_sha, args.deployment_result)
+        deployment_notice(api, args.deployment_pr, args.deployment_sha, args.deployment_result, shared=args.shared_test)
         return
     if args.cleanup_pr is not None:
         if args.cleanup_pr <= 0 or args.cleanup_result is None:
