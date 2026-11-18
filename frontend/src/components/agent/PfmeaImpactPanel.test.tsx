@@ -110,6 +110,24 @@ describe("PfmeaImpactPanel", () => {
     expect(screen.queryByText("D4 验证记录")).toBeNull();
   });
 
+  it("shows historical suggestions with the execution pilot retired", async () => {
+    const api = {
+      ...clients(),
+      listResults: vi.fn<NonNullable<PfmeaImpactClients["listResults"]>>().mockResolvedValue({
+        items: [{ taskId: "old-task", resultId: "old-result", approvedVersionLabel: "v3.0",
+          freshness: "stale", createdAt: "2026-11-18T01:00:00Z" }],
+        hasMore: false,
+      }),
+    };
+    render(<PfmeaImpactPanel reportId="report-a" scopeKey="a" client={api} canGenerate={false} />);
+    fireEvent.change(await screen.findByRole("combobox", { name: "历史评估" }),
+      { target: { value: "old-task/old-result" } });
+    await screen.findByText("建议已过期");
+    expect(api.listTargets).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "开始评估" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "重新评估" })).toBeNull();
+  });
+
   it("clears the whole recommendation when an evidence read is no longer authorized", async () => {
     const api = clients();
     api.readEvidence.mockRejectedValueOnce({ response: { status: 403 } });

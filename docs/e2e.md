@@ -212,6 +212,10 @@ unchanged. The diagnostic helper lives only in `frontend/e2e/helpers/` and is
 shared with focused unit tests, not shipped as application behavior.
 
 
+### R7 影响评估原生验收
+
+R7 复用 `r5-api` 和 `r5-browser` 的 Darwin/独占 PG15 入口。R7 过程用例使用真实受控 worker 和隔离的确定性回环模型。必选节点登记在 `backend/tests/ci/r5_required.py`，实际结果由 runner 从 JUnit 逐项核对。定向运行可以验证单个场景，整层签收要求实际执行全部登记节点。 [R7 验收矩阵](superpowers/plans/2026-11-18-r7-8d-pfmea-impact-assessment.md)
+
 ### R5 D5 必选验收
 
 2026-11-15 Responses增量：固定目录新增配对协议迁移/兼容性8节点及原生Responses链路10节点，
