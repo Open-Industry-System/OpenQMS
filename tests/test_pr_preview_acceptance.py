@@ -290,6 +290,14 @@ def test_metadata_error_preserves_plan_result_and_blocks_acceptance(monkeypatch,
     assert 'metadata unavailable' in (tmp_path / 'summary').read_text()
 
 
+SHARED_BODY = BODY.replace(
+    '| 检查项 | 操作步骤 | 预期结果 |',
+    '| 编号 | 检查项 | 环境 | 角色 | 场景 | 操作步骤 | 预期结果 |',
+).replace('| --- | --- | --- |', '| --- | --- | --- | --- | --- | --- | --- |').replace(
+    '| 列表筛选 |', '| report-read | 列表筛选 | public | viewer | read-only |',
+)
+
+
 @pytest.fixture
 def shared_receipt_api():
     import io
@@ -298,12 +306,12 @@ def shared_receipt_api():
 
     repo = 'owner/repo'
     pr = dict(number=45, state='open', head={'sha': 'a'*40, 'repo': {'full_name': repo}},
-              merge_commit_sha='b'*40, body=BODY, user={'login': 'alice'})
+              merge_commit_sha='b'*40, body=SHARED_BODY, user={'login': 'alice'})
     run = dict(id=42, event='schedule', head_branch='main', status='completed',
                conclusion='success', path='.github/workflows/oracle-shared-test.yml',
                repository={'full_name': repo}, updated_at='2026-11-16T01:00:00Z')
     receipt = dict(repository=repo, pr=pr['number'], head=pr['head']['sha'],
-                   sha=pr['merge_commit_sha'], queue_lease='c'*32, plan=m.test_plan(BODY),
+                   sha=pr['merge_commit_sha'], queue_lease='c'*32, plan=m.test_plan(SHARED_BODY),
                    expires_at=m.epoch('2026-11-16T03:00:00Z'))
 
     class Fake:
@@ -364,7 +372,7 @@ def test_shared_publication_is_bound_to_current_plan_and_lease(shared_receipt_ap
     receipt = api.receipt
     assert m.publication(api, api.pr, queue_lease=receipt['queue_lease'])['shared_test'] == receipt
     assert m.publication(api, api.pr, queue_lease='d'*32) is None
-    api.pr['body'] = BODY.replace('刷新后', '重新登录后')
+    api.pr['body'] = SHARED_BODY.replace('刷新后', '重新登录后')
     assert m.publication(api, api.pr, queue_lease=receipt['queue_lease']) is None
 
 
@@ -385,9 +393,9 @@ def test_shared_acceptance_rejects_stale_lease_and_edit_after_expiry(shared_rece
     command = m.acceptance_command(api.pr, run, receipt['plan'])
     assert command.endswith(' ' + receipt['queue_lease'])
     stale = command.rsplit(' ', 1)[0] + ' ' + 'd'*32
-    api.comments = [comment(body=stale + '\n操作与报告状态均符合预期。')]
+    api.comments = [comment(body=stale + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) is None
-    api.comments = [comment(body=command + '\n操作与报告状态均符合预期。')]
+    api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) == api.comments[0]
     api.comments[0]['updated_at'] = '2026-11-16T03:00:00Z'
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) is None
@@ -399,7 +407,7 @@ def test_shared_release_keeps_timely_confirmation_without_republishing_url(monke
     receipt = api.receipt
     run = m.publication(api, api.pr)
     command = m.acceptance_command(api.pr, run, receipt['plan'])
-    api.comments = [comment(body=command + '\n操作与报告状态均符合预期。')]
+    api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
     slot = dict(pr=api.pr['number'], head=receipt['head'], merge=receipt['sha'],
                 plan=receipt['plan'], lease=receipt['queue_lease'], outcome='passed')
     m.shared_test_released_notice(api, slot)
@@ -475,6 +483,25 @@ def test_shared_acceptance_rejects_release_before_reopen(shared_receipt_api):
     run = m.publication(api, api.pr, queue_lease=receipt['queue_lease'])
     command = m.acceptance_command(api.pr, run, receipt['plan'])
     api.timeline = [dict(event='reopened', created_at='2026-11-16T01:01:15Z')]
-    api.comments = [comment(body=command + '\n操作与报告状态均符合预期。',
+    api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。',
                             created_at='2026-11-16T01:01:30Z')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) is None
+
+
+def test_shared_d4_does_not_accept_viewer_or_provisioned_role_as_runtime_evidence():
+    d4 = SHARED_BODY.replace('| report-read | 列表筛选 | public | viewer | read-only |',
+                            '| body-deliver | 正常正文交付 | shared | field_qe | d4-deliver |')
+    plan = m.parse_plan(d4)
+    assert m.shared_blockers(plan, {'test_roles': ['field_qe', 'manager']}) == [
+        'body-deliver：需要经核验的 Linux receiver 及浏览器交付回执',
+    ]
+    assert m.shared_blockers(m.parse_plan(SHARED_BODY), {}) == []
+    assert m.shared_blockers(m.parse_plan(BODY), {})
+
+
+def test_write_case_needs_issued_role():
+    body = SHARED_BODY.replace('| public | viewer | read-only |',
+                               '| shared | field_qe | write |')
+    plan = m.parse_plan(body)
+    assert m.shared_blockers(plan, {'test_roles': ['manager']})
+    assert not m.shared_blockers(plan, {'test_roles': ['field_qe']})

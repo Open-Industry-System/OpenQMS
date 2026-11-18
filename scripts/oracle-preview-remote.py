@@ -9,6 +9,7 @@ import re
 import secrets
 import signal
 import socket
+import stat
 import subprocess
 
 HERE = Path(__file__).resolve().parent
@@ -22,6 +23,94 @@ def load(name, filename):
 prod = load('preview_prod_contract', 'oracle-production-remote.py')
 helper = load('preview_routes', 'oracle-preview.py')
 BASE = Path('/var/lib/openqms-previews')
+SHARED_ACCOUNTS_DIR = Path('/var/lib/openqms-shared-test/credentials')
+SHARED_TEST_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
+
+
+def shared_account_path(lease):
+    if not re.fullmatch(r'[0-9a-f]{32}', lease):
+        raise ValueError('invalid shared account lease')
+    return SHARED_ACCOUNTS_DIR / (lease + '.json')
+
+
+def require_private_root_directory(path):
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ValueError('shared credential directory must be root-owned and private')
+
+
+def read_private_accounts(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 2048):
+            raise ValueError('unsafe shared account record')
+        return json.loads(stream.read(2049))
+
+
+def load_shared_accounts(pr, sha, lease):
+    path = shared_account_path(lease)
+    require_private_root_directory(path.parent.parent)
+    require_private_root_directory(path.parent)
+    binding = dict(pr=pr, merge=sha, lease=lease)
+    record = read_private_accounts(path)
+    if not isinstance(record, dict):
+        raise ValueError('invalid shared account record')
+    passwords = record.get('passwords')
+    if (set(record) != {*binding, 'passwords'}
+            or any(record.get(key) != value for key, value in binding.items())
+            or not isinstance(passwords, dict) or set(passwords) != set(SHARED_TEST_ROLES)
+            or any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{48}', value)
+                   for value in passwords.values())
+            or len(set(passwords.values())) != len(passwords)):
+        raise ValueError('invalid shared account binding')
+    return passwords
+
+
+def shared_account_roles(pr, sha, lease):
+    """Return public role names only after the exact root-owned record is checked."""
+    load_shared_accounts(str(pr), sha, lease)
+    return sorted(SHARED_TEST_ROLES.values())
+
+
+def shared_accounts(pr, sha, lease):
+    path = shared_account_path(lease)
+    require_private_root_directory(path.parent.parent)
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    require_private_root_directory(path.parent)
+    if not (path.is_file() or path.is_symlink()):
+        passwords = {name: secrets.token_urlsafe(36) for name in SHARED_TEST_ROLES}
+        descriptor = os.open(path, os.O_WRONLY | os.O_EXCL | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'w') as stream:
+            json.dump(dict(pr=pr, merge=sha, lease=lease, passwords=passwords), stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+    passwords = load_shared_accounts(pr, sha, lease)
+    hashes = {}
+    for username, password in passwords.items():
+        result = subprocess.run(
+            ['/usr/bin/htpasswd', '-niBC', '12', username], input=(password + '\n').encode(),
+            capture_output=True, timeout=10,
+        )
+        prefix = username.encode() + b':'
+        if result.returncode or not result.stdout.startswith(prefix):
+            raise ValueError('could not hash synthetic account credential')
+        digest = result.stdout[len(prefix):].strip()
+        if not re.fullmatch(rb'\$2[aby]\$12\$[A-Za-z0-9./]{53}', digest):
+            raise ValueError('invalid host bcrypt digest')
+        hashes[username] = digest.decode('ascii')
+    return json.dumps(hashes).encode()
+
+
+def remove_shared_accounts(lease):
+    path = shared_account_path(lease)
+    if path.parent.exists() or path.parent.is_symlink():
+        require_private_root_directory(path.parent.parent)
+        require_private_root_directory(path.parent)
+        path.unlink(missing_ok=True)
+
 TUNNEL_IMAGE = 'python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535'
 
 def release_base(pr, shared_lease=None):
@@ -225,17 +314,21 @@ class PreviewRelease:
         db = self.db_container()
         return json.loads(prod.run(['docker','exec',db['Id'],'psql','-XAt','-U','qms','-d','qms_preview','-c',prod.SQL]).stdout)
 
-    def app_command(self, expected, *command):
+    def app_command(self, expected, *command, input_data=None):
         self.verify()
         self.assert_images(expected)
         nonce = secrets.token_hex(16)
         name = 'openqms-pr-' + self.pr + '-operation-' + nonce
-        argv, env = self.compose_command(['run','--rm','--no-deps','--name',name,'--label','openqms.operation.owner='+nonce,'-e','PREVIEW_PR='+self.pr,'backend',*command], expected)
+        args = ['run', '--rm', '--no-deps', '--name', name,
+                '--label', 'openqms.operation.owner=' + nonce, '-e', 'PREVIEW_PR=' + self.pr]
+        if input_data is not None:
+            args += ['-T', '-i']
+        argv, env = self.compose_command([*args, 'backend', *command], expected)
         def interrupted(signum, frame):
             raise RuntimeError('preview operation interrupted')
         handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGHUP, signal.SIGTERM)}
         try:
-            result = subprocess.run(argv, env=env, capture_output=True, timeout=900)
+            result = subprocess.run(argv, env=env, input=input_data, capture_output=True, timeout=900)
             if result.returncode:
                 raise RuntimeError('bounded preview application operation failed')
         finally:
@@ -260,7 +353,14 @@ class PreviewRelease:
         self.app_command(expected,'python','-m','app.services.capa_doc_gate_preflight')
 
     def initialize(self, expected):
-        self.app_command(expected,'python','/run/openqms-preview-initialize.py')
+        command = ('python', '/run/openqms-preview-initialize.py')
+        if self.shared_lease is None:
+            self.app_command(expected, *command)
+        else:
+            self.verify()
+            self.assert_images(expected)
+            hashes = shared_accounts(self.pr, self.sha, self.shared_lease)
+            self.app_command(expected, *command, '--shared-accounts', input_data=hashes)
 
     def assert_application_running(self, expected):
         rows = helper.resources('container',self.pr)

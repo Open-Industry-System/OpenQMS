@@ -203,3 +203,54 @@ class PreviewERPEgressTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+def test_lease_credentials_persist_privately_and_only_hashes_reach_backend(tmp_path, monkeypatch):
+    import stat
+
+    root = tmp_path / 'mode'
+    root.mkdir(mode=0o700)
+    monkeypatch.setattr(m, 'SHARED_ACCOUNTS_DIR', root / 'credentials')
+
+    # The tests may run unprivileged. Preserve permission checks while
+    # exercising generation on the temporary filesystem.
+    def require_private_test_directory(path):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o700
+
+    monkeypatch.setattr(m, 'require_private_root_directory', require_private_test_directory)
+    monkeypatch.setattr(m, 'read_private_accounts', lambda path: json.loads(path.read_text()))
+    hashes = {'engineer': '$2y$12$' + 'a' * 53, 'manager': '$2y$12$' + 'b' * 53}
+    run_calls = []
+
+    def htpasswd(argv, **kwargs):
+        username = argv[-1]
+        assert argv[:-1] == ['/usr/bin/htpasswd', '-niBC', '12']
+        assert kwargs['capture_output']
+        run_calls.append((username, kwargs['input']))
+        return Mock(returncode=0, stdout=f'{username}:{hashes[username]}\n'.encode())
+
+    monkeypatch.setattr(m.subprocess, 'run', htpasswd)
+    lease = 'd' * 32
+    assert json.loads(m.shared_accounts('12', 'a' * 40, lease)) == hashes
+    first = dict(run_calls)
+    assert json.loads(m.shared_accounts('12', 'a' * 40, lease)) == hashes
+    assert first == dict(run_calls[2:])
+    credential_file = m.shared_account_path(lease)
+    assert stat.S_IMODE(credential_file.stat().st_mode) == 0o600
+    assert m.shared_account_roles(12, 'a' * 40, lease) == ['field_qe', 'manager']
+
+    obj = m.PreviewRelease('12', 'a' * 40, 'b' * 64, 'c' * 64, shared_lease=lease)
+    monkeypatch.setattr(obj, 'verify', Mock())
+    monkeypatch.setattr(obj, 'assert_images', Mock())
+    operation = Mock()
+    monkeypatch.setattr(obj, 'app_command', operation)
+    obj.initialize({})
+    assert operation.call_args.args[-1] == '--shared-accounts'
+    assert json.loads(operation.call_args.kwargs['input_data']) == hashes
+    for password in first.values():
+        assert password.strip() not in operation.call_args.kwargs['input_data']
+
+    with unittest.TestCase().assertRaisesRegex(ValueError, 'binding'):
+        m.shared_accounts('13', 'a' * 40, lease)
+    m.remove_shared_accounts(lease)
+    assert not credential_file.exists()

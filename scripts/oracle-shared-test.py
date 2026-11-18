@@ -96,7 +96,7 @@ def public_health(slot):
 def publication_receipt(api, slot):
     return dict(repository=api.repo, pr=slot['pr'], head=slot['head'],
                 sha=slot['merge'], queue_lease=slot['lease'], plan=slot['plan'],
-                expires_at=slot['expires_at'])
+                expires_at=slot['expires_at'], test_roles=slot['test_roles'])
 
 
 def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_file):
@@ -160,6 +160,8 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
     check_health(slot)
     published = ACCEPTANCE['publication'](api, pr, queue_lease=slot['lease'])
     if published is None:
+        if 'test_roles' not in slot:
+            slot = host(dict(action='ready', lease=slot['lease'], eligible=versions))
         evidence_file.write_text(json.dumps(publication_receipt(api, slot)))
     else:
         ACCEPTANCE['shared_test_ready_notice'](api, pr, published, slot['plan'])

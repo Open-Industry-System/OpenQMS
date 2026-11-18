@@ -167,13 +167,15 @@ def run(request, preview, queue_type):
         if exists(legacy_route) or helper.active_prs() != {str(slot['pr'])}:
             raise ValueError('shared-test runtime inventory is not exclusive')
         verify_rollout(preview, slot)
+        roles = preview.shared_account_roles(slot['pr'], slot['merge'], lease)
         if slot['phase'] == 'testing':
             if now >= slot['expires_at'] or not exists(fixed_route):
                 raise ValueError('shared-test route is no longer ready')
-            return slot
+            return dict(slot, test_roles=roles)
         if not exists(fixed_route):
             helper.publish(fixed_route, route(slot), helper.validate, helper.reload)
-        return queue.acknowledge(lease, 'ready', int(time.time()), ACCEPTANCE_SECONDS, request['eligible'])
+        ready = queue.acknowledge(lease, 'ready', int(time.time()), ACCEPTANCE_SECONDS, request['eligible'])
+        return dict(ready, test_roles=roles)
     if action == 'passed':
         return queue.acknowledge(lease, action, now, eligible=request['eligible'])
     if action == 'deploy-failed':
@@ -188,12 +190,14 @@ def run(request, preview, queue_type):
             helper.publish(fixed_route, None, helper.validate, helper.reload)
         # Cleanup validates every resource label and scopes deletion to this PR.
         helper.cleanup(pr)
+        preview.remove_shared_accounts(lease)
         return slot
 
     # The notification may fail after physical cleanup. Keep the lease held
     # until the caller acknowledges and the actual owned inventory is empty.
     if (exists(fixed_route) or exists(helper.ROUTES / f'pr-{pr}.caddy')
             or exists(preview.BASE / f'pr-{pr}' / 'preview.env')
+            or exists(preview.shared_account_path(lease))
             or pr in helper.active_prs()):
         raise ValueError('shared-test cleanup is not complete')
     return queue.acknowledge(lease, 'released', int(time.time()))

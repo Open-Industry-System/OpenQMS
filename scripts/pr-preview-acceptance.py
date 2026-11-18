@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+from typing import NamedTuple
 import zipfile
 
 PLAN = 'PR test plan'
@@ -39,7 +40,28 @@ def epoch(value):
     return int(datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp())
 
 
-def test_plan(body):
+LEGACY_HEADER = ('检查项', '操作步骤', '预期结果')
+ITEM_HEADER = ('编号', '检查项', '环境', '角色', '场景', '操作步骤', '预期结果')
+PUBLIC_SCENARIOS = {'read-only'}
+SHARED_SCENARIOS = {'write', 'd4-deliver', 'd4-revoke'}
+RESULT_LINE = re.compile(r'^([a-z][a-z0-9-]{0,39}): (通过|失败|受阻)$', re.M)
+
+
+class AcceptanceItem(NamedTuple):
+    id: str
+    title: str
+    environment: str
+    role: str
+    scenario: str
+
+
+class AcceptancePlan(NamedTuple):
+    digest: str
+    items: tuple[AcceptanceItem, ...]
+    classified: bool
+
+
+def parse_plan(body):
     if not isinstance(body, str) or body.count(START) != 1 or body.count(END) != 1:
         raise ValueError('补充 PR 描述中的预览验收计划（使用 PR 模板）')
     plan = body.split(START)[1].split(END)[0].strip()
@@ -50,16 +72,44 @@ def test_plan(body):
         raise ValueError('验收计划须包含影响范围、验收步骤、权限与回归')
     if any(len(sections[i].strip()) < 8 for i in [2, 6]):
         raise ValueError('影响范围和权限与回归须说明具体检查内容')
-    rows = [line.strip().strip('|').split('|') for line in sections[4].splitlines() if line.strip().startswith('|')]
-    if len(rows) < 3 or any(len(row) != 3 for row in rows):
-        raise ValueError('验收步骤须有检查项、操作步骤、预期结果三列和至少一条场景')
-    if [cell.strip() for cell in rows[0]] != ['检查项', '操作步骤', '预期结果']:
+    rows = [
+        tuple(cell.strip() for cell in line.strip().strip('|').split('|'))
+        for line in sections[4].splitlines() if line.strip().startswith('|')
+    ]
+    if len(rows) < 3 or len(rows) > 22 or any(len(row) != len(rows[0]) for row in rows):
+        raise ValueError('验收步骤须有完整表格和 1 至 20 条验收项')
+    if rows[0] not in {LEGACY_HEADER, ITEM_HEADER}:
         raise ValueError('验收表格列名不正确')
-    if not all(re.fullmatch(r':?-{3,}:?', cell.strip()) for cell in rows[1]):
+    if not all(re.fullmatch(r':?-{3,}:?', cell) for cell in rows[1]):
         raise ValueError('验收表格分隔行不正确')
-    if any(len(cell.strip()) < 2 for row in rows[2:] for cell in row):
+    if any(len(cell) < 2 for row in rows[2:] for cell in (row[-2], row[-1])):
         raise ValueError('每条验收步骤都须填写操作和预期结果')
-    return hashlib.sha256(plan.encode()).hexdigest()
+    digest = hashlib.sha256(plan.encode()).hexdigest()
+    if rows[0] == LEGACY_HEADER:
+        if any(len(row[0]) < 2 for row in rows[2:]):
+            raise ValueError('每条验收步骤都须填写检查项')
+        return AcceptancePlan(digest, (), False)
+
+    items = []
+    ids = set()
+    for item_id, title, environment, role, scenario, _, _ in rows[2:]:
+        if not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', item_id) or item_id in ids or len(title) < 2:
+            raise ValueError('验收项编号须为唯一的小写短标识，且须填写检查项名称')
+        if environment == 'public' and role == 'viewer' and scenario in PUBLIC_SCENARIOS:
+            pass
+        elif environment == 'shared' and role in {'field_qe', 'manager'} and scenario in SHARED_SCENARIOS:
+            pass
+        else:
+            raise ValueError('验收项环境、角色和场景不匹配，请使用 PR 模板中的组合')
+        ids.add(item_id)
+        items.append(AcceptanceItem(item_id, title, environment, role, scenario))
+    return AcceptancePlan(digest, tuple(items), True)
+
+
+def test_plan(body):
+    # The existing deploy authorization continues to accept valid legacy plans.
+    # Human acceptance separately requires every item to declare its environment.
+    return parse_plan(body).digest
 
 
 def accepted(comment, command, deployment_time, author, permission, independent=False):
@@ -200,7 +250,8 @@ def ready_notice(pr, run, digest):
             f'- [发布记录](https://github.com/{run["repository"]["full_name"]}/actions/runs/{run["id"]})\n\n'
             f'请按 PR 描述中的验收计划逐项测试；完成后发表新评论，复制以下命令并另附实际结果或截图链接：\n\n'
             f'```text\n{command}\n```\n\n'
-            f'{ending}')
+            + ('逐项填写验收结果，格式如 `report-read: 通过`，并另附实际测试说明。\n\n' if shared else '')
+            + ending)
 
 
 def cleanup_notice(api, number, result):
@@ -304,8 +355,13 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
     command = acceptance_command(pr, run, digest)
     independent = os.environ.get('REQUIRE_INDEPENDENT_REVIEWER') == 'true'
     shared = run.get('shared_test')
-    if shared and (shared['plan'] != digest or not deployment_after_reopen(api, pr, run)):
-        return None
+    items = ()
+    if shared:
+        plan = parse_plan(pr.get('body'))
+        if (shared['plan'] != digest or shared_blockers(plan, shared)
+                or not deployment_after_reopen(api, pr, run)):
+            return None
+        items = plan.items
     for comment in reversed(api.pages(f'/issues/{pr["number"]}/comments')):
         login = comment.get('user', {}).get('login', '')
         if command not in (comment.get('body') or '').splitlines() or not re.fullmatch(r'[A-Za-z0-9-]+', login):
@@ -314,12 +370,33 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
             last_edit = epoch(comment.get('updated_at') or comment['created_at'])
             if last_edit >= shared['expires_at'] or (released_at is not None and last_edit >= released_at):
                 continue
+        if items:
+            confirmations = RESULT_LINE.findall(comment.get('body') or '')
+            if sorted(confirmations) != sorted((item.id, '通过') for item in items):
+                continue
         permission = api.get(f'/collaborators/{login}/permission')['permission']
         if accepted(comment, command, run['updated_at'], pr['user']['login'], permission, independent):
             if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
                 raise ValueError('PR changed during acceptance; rerun required')
             return comment
     return None
+
+
+def shared_blockers(plan, receipt):
+    if not plan.classified:
+        return ['计划需要逐项声明环境、角色和场景']
+    issued_roles = receipt.get('test_roles', [])
+    if (not isinstance(issued_roles, list)
+            or any(role not in ('field_qe', 'manager') for role in issued_roles)):
+        issued_roles = []
+    return [
+        f'{item.id}：' + (
+            '需要经核验的 Linux receiver 及浏览器交付回执'
+            if item.scenario.startswith('d4-') else '需要发放本轮合成业务账号'
+        )
+        for item in plan.items
+        if item.scenario.startswith('d4-') or (item.environment == 'shared' and item.role not in issued_roles)
+    ]
 
 
 def shared_test_ready_notice(api, pr, run, digest):
@@ -331,7 +408,19 @@ def shared_test_ready_notice(api, pr, run, digest):
         return
     if shared_release_marker(api, pr, digest):
         return  # A repeated poll cannot put the released link back.
-    api.notice(pr['number'], ready_notice(pr, run, digest))
+    plan = parse_plan(pr.get('body'))
+    blockers = shared_blockers(plan, receipt)
+    notice = ready_notice(pr, run, digest)
+    if blockers:
+        # Keep the link for independently runnable checks, but do not offer a
+        # sign-off command until every required scenario has its environment.
+        marker = shared_identity(receipt['head'], receipt['sha'], digest, receipt['queue_lease'])
+        notice = (f'{NOTICE}\n{deployment_marker(receipt["head"], run["id"])}\n'
+                  f'<!-- openqms-shared-test-active:{marker} -->\n'
+                  f'### PR #{pr["number"]} 测试站点已就绪，部分验收受阻\n\n'
+                  f'{SHARED_TEST_URL} · 当前版本 `{receipt["sha"]}`\n\n'
+                  + '\n'.join(f'- {blocker}' for blocker in blockers))
+    api.notice(pr['number'], notice)
 
 
 def shared_test_released_notice(api, slot):
@@ -418,6 +507,10 @@ def reconcile(api, pr, summary):
     if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
         raise ValueError('PR changed before publication notification')
     receipt = run.get('shared_test')
+    if receipt and (blockers := shared_blockers(parse_plan(pr.get('body')), receipt)):
+        api.status(sha, ACCEPT, 'pending', '本轮共享测试缺少必要验收能力')
+        summary.append(f'PR #{pr["number"]} 受阻：' + '、'.join(blockers))
+        return
     if receipt and datetime.now(timezone.utc).timestamp() >= receipt['expires_at']:
         summary.append(f'PR #{pr["number"]}: 当前共享测试位已到期，等待清理。')
     else:

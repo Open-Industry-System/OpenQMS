@@ -45,6 +45,9 @@ def host(tmp_path, monkeypatch):
     preview = SimpleNamespace(
         helper=helper, BASE=base, PreviewRelease=Mock(return_value=release),
         prod=SimpleNamespace(regular=lambda path: path),
+        shared_account_roles=Mock(return_value=['field_qe', 'manager']),
+        shared_account_path=lambda lease: tmp_path / f'{lease}.json',
+        remove_shared_accounts=Mock(side_effect=lambda lease: (tmp_path / f'{lease}.json').unlink(missing_ok=True)),
     )
     return preview, release
 
@@ -78,6 +81,8 @@ def test_host_assigns_fixed_route_and_releases_before_next_pr(host):
     assert f'X-OpenQMS-Test-Version "{first["merge"]}"' in path.read_text()
     assert not (path.parent / 'pr-45.caddy').exists()
     assert ready['expires_at'] == 100 + 7200
+    assert ready['test_roles'] == ['field_qe', 'manager']
+    host[0].shared_account_roles.assert_called_once_with(45, first['merge'], first['lease'])
     assert run(host, 'ready', lease=first['lease'], eligible=eligible) == ready
     assert host[0].helper.reload.call_count == 1
 
@@ -245,3 +250,19 @@ def test_metadata_from_legacy_or_another_lease_cannot_activate_fixed_route(host)
         with pytest.raises(ValueError, match='version and lease'):
             run(host, 'ready', lease=slot['lease'], eligible=eligible)
     preview.helper.reload.assert_not_called()
+
+
+def test_shared_lease_cannot_be_released_with_issued_credentials_left_behind(host):
+    eligible = [identity(45), identity(46)]
+    first = run(host, 'tick', eligible=eligible)
+    opened = host[0].shared_account_path(first['lease'])
+    opened.write_text('placeholder')
+    other = host[0].shared_account_path('f' * 32)
+    other.write_text('another lease')
+    run(host, 'deploy-failed', lease=first['lease'])
+    with pytest.raises(ValueError, match='cleanup is not complete'):
+        run(host, 'released', lease=first['lease'])
+    run(host, 'release', lease=first['lease'])
+    assert not opened.exists() and other.exists()
+    assert run(host, 'released', lease=first['lease'])['phase'] == 'idle'
+    assert run(host, 'tick', eligible=eligible)['pr'] == 46

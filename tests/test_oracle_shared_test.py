@@ -49,8 +49,9 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
             return {}
         if action == 'released':
             return queue.acknowledge(request['lease'], action, now)
-        return queue.acknowledge(request['lease'], action, now, ttl_seconds=1800,
+        slot = queue.acknowledge(request['lease'], action, now, ttl_seconds=1800,
                                  eligible=request.get('eligible'))
+        return dict(slot, test_roles=['field_qe', 'manager']) if action == 'ready' else slot
 
     callbacks = {
         'deployment_notice': lambda api, pr, *args, **kwargs: events.append(('start', pr)),
