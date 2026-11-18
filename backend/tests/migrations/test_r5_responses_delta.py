@@ -63,7 +63,7 @@ def test_paired_protocol_deltas_preserve_published_parents_and_single_heads():
     for directory in ('alembic', 'alembic_tenant'):
         config = Config(); config.set_main_option('script_location', str(root / directory))
         assert ScriptDirectory.from_config(config).get_heads() == [
-            '20261118_r6_security_merge' if directory == 'alembic' else 'tv024_r6_local_capa_sources']
+            '20261118_r7_pfmea_impact' if directory == 'alembic' else 'tv025_r7_pfmea_impact']
 
 
 @pytest.mark.asyncio

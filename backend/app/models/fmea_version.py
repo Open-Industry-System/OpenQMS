@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, FetchedValue, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,9 @@ class FMEAVersion(Base):
     minor_no: Mapped[int] = mapped_column(Integer, nullable=False)
     snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     sha256_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    r7_approved_scope_generation: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), server_default=FetchedValue(),
+    )
     change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     change_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(

@@ -13,6 +13,9 @@ from app.models.agent import (
     AgentToolCall,
 )
 from app.models.agent_plugin import AgentPluginGrant, AgentPluginInstallation
+from app.models.agent_pfmea_impact import (
+    AgentPfmeaImpactBinding, AgentPfmeaImpactReceipt, AgentPfmeaImpactResultReceipt,
+)
 from app.models.agent_runtime_event import (
     AgentEventReceipt, AgentProjectionReceipt, AgentResult, AgentResultReceipt, AgentRunEvent,
 )
@@ -165,6 +168,7 @@ __all__ = [
     "AgentEventReceipt", "AgentProjectionReceipt", "AgentResult", "AgentResultReceipt", "AgentRunEvent",
     "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentPluginGrant", "AgentPluginInstallation", "AgentSession", "AgentToolCall",
     "AgentReadTask", "CapaD4RootCauseRevision", "CapaD4RootCauseSourceProof",
+    "AgentPfmeaImpactBinding", "AgentPfmeaImpactReceipt", "AgentPfmeaImpactResultReceipt",
     "AgentRestrictedProjectionReceipt", "AgentPluginDerivedSourceScope",
     "AgentTaskDerivedSourceScope", "AgentTaskSourceRequest",
     "ControlPlan", "ControlPlanItem", "QualityGoal",

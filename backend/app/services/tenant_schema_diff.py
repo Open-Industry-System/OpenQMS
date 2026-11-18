@@ -150,6 +150,28 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
     if baseline_only or predecessor is not None:
+        r7_tables = {
+            "agent_pfmea_impact_bindings", "agent_pfmea_impact_receipts",
+            "agent_pfmea_impact_result_receipts",
+        }
+        r7_objects = {
+            ("column", "fmea_documents.r7_scope_generation"),
+            ("column", "fmea_versions.r7_approved_scope_generation"),
+            ("trigger", "fmea_documents.r7_impact_target_generation"),
+            ("trigger", "fmea_versions.r7_impact_approval_generation"),
+            ("function", "r7_impact_ledger_guard()"),
+            ("trigger", "agent_results.r7_impact_result_guard"),
+            ("function", "r7_impact_result_guard()"),
+            ("function", "r7_impact_target_generation()"),
+            ("function", "r7_impact_approval_generation()"),
+        }
+        # Filter the reviewed public delta only; partially applied tenant DDL
+        # must still be visible as unexpected objects and block the upgrade.
+        reference = {key: value for key, value in reference.items()
+                     if key[1].split(".")[0] not in r7_tables and key not in r7_objects}
+    if predecessor == 'tv024_r6_local_capa_sources':
+        predecessor = None
+    if baseline_only or predecessor is not None:
         omitted={('column','capa_r6_local_sources.source_capa_id'),('column','capa_r6_local_sources.source_capa_created_at'),
                  ('constraint','capa_r6_local_sources.ck_r6_local_capa_identity')}
         reference={key:value for key,value in reference.items() if key not in omitted}

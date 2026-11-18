@@ -19,7 +19,8 @@ from app.models.tenant import Tenant
 from app.schemas.platform import TenantCreateRequest
 from app.services.tenant_schema_diff import load_snapshot_manifest
 
-REVISION = "tv024_r6_local_capa_sources"
+REVISION = "tv025_r7_pfmea_impact"
+R7_PREDECESSOR_REVISION = "tv024_r6_local_capa_sources"
 R6_CAPTURE_PREDECESSOR_REVISION = "tv023_r6_legacy_capture"
 R6_SNAPSHOT_PREDECESSOR_REVISION = "tv022_r6_local_snapshot"
 R6_RECEIPT_PREDECESSOR_REVISION = "tv021_r6_manual_receipts"
@@ -181,6 +182,8 @@ class MaintenanceContext:
                 f'SELECT version_num FROM "{schema}".tenant_schema_version'))).scalars().all()
             if versions == [REVISION]:
                 result = "current"
+            elif versions == [R7_PREDECESSOR_REVISION]:
+                result = "r7_predecessor"
             elif versions == [R6_CAPTURE_PREDECESSOR_REVISION]:
                 result = "r6_capture_predecessor"
             elif versions == [R6_SNAPSHOT_PREDECESSOR_REVISION]:
@@ -700,7 +703,7 @@ async def create_schema_if_absent(maintenance: MaintenanceContext, attempt: Main
     state = await maintenance.schema_state()
     if state == "absent":
         await maintenance.create_schema()
-    elif state not in {"empty", "current", "ancestor", "r6_capture_predecessor", "r6_snapshot_predecessor", "r6_receipt_predecessor", "r6_local_predecessor", "r6_verify_predecessor", "r6_withdraw_predecessor", "r6_input_predecessor", "r6_epoch_predecessor", "r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state not in {"empty", "current", "ancestor", "r7_predecessor", "r6_capture_predecessor", "r6_snapshot_predecessor", "r6_receipt_predecessor", "r6_local_predecessor", "r6_verify_predecessor", "r6_withdraw_predecessor", "r6_input_predecessor", "r6_epoch_predecessor", "r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         raise TenantUnavailable("partial or unknown tenant schema; manual review required")
 
 
@@ -710,8 +713,9 @@ async def migrate_if_needed(maintenance: MaintenanceContext, attempt: Maintenanc
         if await maintenance.compare_schema("public", load_snapshot_manifest(), baseline_only=True):
             raise TenantUnavailable("partial or unknown tenant schema; manual review required")
         await maintenance.run_migration(REVISION)
-    elif state in {"r6_capture_predecessor", "r6_snapshot_predecessor", "r6_receipt_predecessor", "r6_local_predecessor", "r6_verify_predecessor", "r6_withdraw_predecessor", "r6_input_predecessor", "r6_epoch_predecessor", "r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
+    elif state in {"r7_predecessor", "r6_capture_predecessor", "r6_snapshot_predecessor", "r6_receipt_predecessor", "r6_local_predecessor", "r6_verify_predecessor", "r6_withdraw_predecessor", "r6_input_predecessor", "r6_epoch_predecessor", "r6_contract_predecessor", "r5_responses_predecessor", "r5_merge_predecessor", "r5_head", "refresh_head", "r5_model_predecessor", "r5_basis_predecessor", "r5_predecessor", "characteristic_predecessor", "recovery_head", "recovery_predecessor", "delivery_predecessor", "latest_predecessor", "predecessor", "earlier_predecessor", "earliest_predecessor"}:
         predecessor = {
+            'r7_predecessor': R7_PREDECESSOR_REVISION,
             'r6_capture_predecessor': R6_CAPTURE_PREDECESSOR_REVISION,
             'r6_snapshot_predecessor': R6_SNAPSHOT_PREDECESSOR_REVISION,
             'r6_receipt_predecessor': R6_RECEIPT_PREDECESSOR_REVISION,

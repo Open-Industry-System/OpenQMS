@@ -24,7 +24,7 @@ def test_single_head_preserves_both_published_parents(directory, head, parents):
     config = Config()
     config.set_main_option("script_location", str(ROOT / directory))
     graph = ScriptDirectory.from_config(config)
-    assert graph.get_heads() == ["20261118_r6_security_merge" if directory == "alembic" else "tv024_r6_local_capa_sources"]
+    assert graph.get_heads() == ["20261118_r7_pfmea_impact" if directory == "alembic" else "tv025_r7_pfmea_impact"]
     assert set(graph.get_revision(head).down_revision) == parents
     assert parents <= {revision.revision for revision in graph.walk_revisions()}
 

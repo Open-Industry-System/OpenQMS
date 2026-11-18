@@ -33,7 +33,7 @@ def test_r6_pair_has_exact_reviewed_parents_and_unique_heads():
     public = (root / f'alembic/versions/{PUBLIC}.py').read_text()
     tenant = (root / f'alembic_tenant/versions/{TENANT}.py').read_text()
     assert public.replace(PUBLIC, TENANT).replace(PARENT, TENANT_PARENT) == tenant
-    for directory, expected in [('alembic', '20261118_r6_security_merge'), ('alembic_tenant', 'tv024_r6_local_capa_sources')]:
+    for directory, expected in [('alembic', '20261118_r7_pfmea_impact'), ('alembic_tenant', 'tv025_r7_pfmea_impact')]:
         config = Config()
         config.set_main_option('script_location', str(root / directory))
         assert ScriptDirectory.from_config(config).get_heads() == [expected]
