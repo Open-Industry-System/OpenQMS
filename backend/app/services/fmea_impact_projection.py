@@ -12,16 +12,14 @@ import json
 from typing import Iterable
 from uuid import UUID
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope
-from app.core.factory_scope import authorize_object
-from app.core.permissions import Module
 from app.models.audit import AuditLog
 from app.models.fmea import FMEADocument
 from app.models.fmea_version import FMEAVersion
+from app.services.fmea_agent_sources import visible_fmea_source
 from app.services.version_service import compute_pg_jsonb_hash, compute_snapshot_hash
 
 
@@ -70,7 +68,19 @@ class ApprovedImpactSnapshot:
     graph: dict
 
 
-async def read_approved_snapshot(
+@dataclass(frozen=True, slots=True)
+class ApprovedImpactTarget:
+    fmea_id: UUID
+    version_id: UUID
+    major_no: int
+    sha256_hash: str
+    scope_generation: UUID
+    document_no: str
+    title: str
+    has_unapproved_revision: bool
+
+
+async def read_approved_target(
     db: AsyncSession,
     scope: RequestScope,
     fmea_id: UUID,
@@ -78,38 +88,37 @@ async def read_approved_snapshot(
     factory_id: UUID,
     product_line_code: str,
     expected_version_id: UUID | None = None,
-) -> ApprovedImpactSnapshot:
-    """Read from the authorized target's newest approved version only.
-
-    The caller supplies the CAPA-owned factory and product line after resolving
-    them in the same tenant. The parent lock serializes with approval, but this
-    read alone is not the runtime's final authority or generation fence.
-    """
+    lock: bool = False,
+) -> ApprovedImpactTarget:
+    """Check live scope and publication metadata without loading either graph."""
     try:
-        target = await authorize_object(db, scope, FMEADocument, fmea_id, Module.FMEA, lock=True)
-    except HTTPException as exc:
-        if exc.status_code not in (403, 404):
-            raise
+        visible = await visible_fmea_source(db, scope, fmea_id)
+    except (PermissionError, LookupError):
         raise ImpactTargetUnavailable("Approved PFMEA unavailable") from None
-    if target.fmea_type != "PFMEA" or (target.factory_id, target.product_line_code) != (
-        factory_id, product_line_code,
-    ):
+    if (visible.factory_id, visible.product_line_code) != (factory_id, product_line_code):
+        raise ImpactTargetUnavailable("Approved PFMEA unavailable")
+    doc = FMEADocument
+    statement = select(doc.document_no, doc.title, doc.status, doc.r7_scope_generation).where(
+        doc.fmea_id == fmea_id, doc.fmea_type == "PFMEA", doc.factory_id == factory_id,
+        doc.product_line_code == product_line_code,
+    )
+    if lock:
+        statement = statement.with_for_update()
+    target = (await db.execute(statement)).one_or_none()
+    if target is None or target.r7_scope_generation is None:
         raise ImpactTargetUnavailable("Approved PFMEA unavailable")
 
     approved = FMEAVersion
-    latest = (await db.execute(
-        select(approved.version_id, approved.major_no, approved.sha256_hash).where(
-            approved.fmea_id == fmea_id,
-            approved.factory_id == factory_id,
-            approved.change_type == "approve",
-            approved.major_no >= 1,
-            approved.minor_no == 0,
-        ).order_by(approved.major_no.desc()).limit(2)
-    )).all()
+    approved_statement = select(approved.version_id, approved.major_no, approved.sha256_hash,
+        approved.r7_approved_scope_generation).where(approved.fmea_id == fmea_id, approved.factory_id == factory_id,
+        approved.change_type == "approve", approved.major_no >= 1, approved.minor_no == 0,
+    ).order_by(approved.major_no.desc()).limit(2)
+    latest = (await db.execute(approved_statement)).all()
     if not latest or (len(latest) == 2 and latest[0].major_no == latest[1].major_no):
         raise ImpactTargetUnavailable("Approved PFMEA unavailable")
-    version_id, major_no, stored_hash = latest[0]
-    if expected_version_id is not None and expected_version_id != version_id:
+    version_id, major_no, stored_hash, approval_generation = latest[0]
+    if (approval_generation != target.r7_scope_generation
+            or not stored_hash or expected_version_id is not None and expected_version_id != version_id):
         raise ImpactTargetUnavailable("Approved PFMEA unavailable")
     publication = (await db.execute(
         select(AuditLog.factory_id, AuditLog.changed_fields).where(
@@ -130,15 +139,49 @@ async def read_approved_snapshot(
         }
     ):
         raise ImpactTargetUnavailable("Approved PFMEA unavailable")
+    submitted = await db.scalar(select(approved.version_id).where(
+        approved.fmea_id == fmea_id, approved.factory_id == factory_id,
+        approved.change_type == "submit", approved.major_no == major_no,
+    ).limit(1))
+    try:
+        if await visible_fmea_source(db, scope, fmea_id) != visible:
+            raise ImpactTargetUnavailable("Approved PFMEA unavailable")
+    except PermissionError:
+        raise ImpactTargetUnavailable("Approved PFMEA unavailable") from None
+    if not lock:
+        # A picker does not retain an update lock on each candidate. Recheck
+        # after ACL waits so an away-and-back scope move cannot reuse a label.
+        generation = await db.scalar(select(doc.r7_scope_generation).where(doc.fmea_id == fmea_id))
+        if generation != approval_generation or (await db.execute(approved_statement)).all() != latest:
+            raise ImpactTargetUnavailable("Approved PFMEA unavailable")
+    return ApprovedImpactTarget(
+        fmea_id, version_id, major_no, stored_hash, approval_generation, target.document_no,
+        target.title, target.status != "approved" or submitted is not None,
+    )
+
+
+async def read_approved_snapshot(
+    db: AsyncSession,
+    scope: RequestScope,
+    fmea_id: UUID,
+    *,
+    factory_id: UUID,
+    product_line_code: str,
+    expected_version_id: UUID | None = None,
+) -> ApprovedImpactSnapshot:
+    """Read the authorized approved snapshot, holding its parent through verification."""
+    target = await read_approved_target(db, scope, fmea_id, factory_id=factory_id,
+        product_line_code=product_line_code, expected_version_id=expected_version_id, lock=True)
+    approved = FMEAVersion
     graph = await db.scalar(select(approved.snapshot).where(
-        approved.version_id == version_id, approved.fmea_id == fmea_id,
+        approved.version_id == target.version_id, approved.fmea_id == fmea_id,
     ))
-    if not isinstance(graph, dict) or not stored_hash:
+    if not isinstance(graph, dict):
         raise ImpactTargetUnavailable("Approved PFMEA unavailable")
     actual = await compute_pg_jsonb_hash(db, graph)
-    if stored_hash != actual and stored_hash != compute_snapshot_hash(graph):
+    if target.sha256_hash != actual and target.sha256_hash != compute_snapshot_hash(graph):
         raise ImpactTargetUnavailable("Approved PFMEA unavailable")
-    return ApprovedImpactSnapshot(version_id, major_no, stored_hash, graph)
+    return ApprovedImpactSnapshot(target.version_id, target.major_no, target.sha256_hash, graph)
 
 
 _FUNCTION_KINDS = {"ProcessStepFunction", "ProcessWorkElementFunction"}
