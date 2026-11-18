@@ -153,7 +153,9 @@ expected = {'__version__', 'SDKError', 'ConfigError', 'ValidationError', 'Transp
  'RuntimeMessage', 'MessageBatch', 'MessageAck', 'MessageHistory', 'Verification',
  'CapaContext', 'EventPayload', 'ResultPayload', 'Source', 'RuntimeEvent', 'RuntimeResult',
  'ReadonlyCheckpoint', 'FinishResult', 'InstallationClient', 'RunClient', 'ManagedLaunch',
- 'ModelTurn','ModelToolCall','ModelToolResult','D4CandidateCheckpoint','D4CandidateReference'}
+ 'ModelTurn','ModelToolCall','ModelToolResult','D4CandidateCheckpoint','D4CandidateReference',
+ 'PfmeaImpactRelease', 'PfmeaImpactConfirmation', 'PfmeaImpactResultRef',
+ 'PfmeaImpactAnalysis', 'PfmeaImpactAdjustment', 'PfmeaImpactAssessment'}
 assert set(sdk.__all__) == expected and len(sdk.__all__) == len(expected)
 for name in ('ClaimEnvelope', 'EncodedRequest', 'WireResponse', 'SUPPORTED_OPERATIONS'):
     assert not hasattr(sdk, name)

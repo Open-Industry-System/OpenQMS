@@ -3,6 +3,10 @@ from . import _codec
 from ._deadline import Deadline
 from ._transport import Transport
 from .errors import ClientClosed, HTTPError, ResponseTooLarge, SDKError, UnknownOutcome
+from .models import (
+    PfmeaImpactAnalysis, PfmeaImpactAssessment, PfmeaImpactConfirmation,
+    PfmeaImpactRelease, PfmeaImpactResultRef,
+)
 
 
 _DEFINITE_REJECTIONS = frozenset({400, 401, 403, 404, 409, 410, 422})
@@ -168,6 +172,48 @@ class RunClient:
         return self._call('save_d4_candidate', dict(command_key=command_key, text=text,
             supporting=supporting, opposing=opposing, missing_information=missing_information,
             operation=operation, predecessor_id=predecessor_id, correction_message_id=correction_message_id))
+
+    def _call_pfmea(self, operation, parameters, **context):
+        return self._call(operation, parameters, lease_epoch=self._claim.lease_epoch, **context)
+
+    def pfmea_impact_material(self) -> PfmeaImpactRelease:
+        """Read the current run's approved CAPA assessment material."""
+        return self._call_pfmea('pfmea_impact_material', {})
+
+    def pfmea_impact_search(
+        self, *, term: str, snapshot_digest: str, cursor: str | None = None,
+    ) -> PfmeaImpactRelease:
+        """Search only the run's fixed target. Cursors are supplied by the server."""
+        from ._pfmea import expected_snapshot
+        operation = 'pfmea_impact_search'
+        return self._call_pfmea(operation, dict(term=term, cursor=cursor),
+                                snapshot_digest=expected_snapshot(operation, snapshot_digest))
+
+    def pfmea_impact_page(
+        self, *, scope_ref: str, snapshot_digest: str, cursor: str | None = None,
+    ) -> PfmeaImpactRelease:
+        """Fetch and verify a page; verification does not acknowledge receipt."""
+        from ._pfmea import expected_snapshot
+        operation = 'pfmea_impact_page'
+        return self._call_pfmea(operation, dict(scope_ref=scope_ref, cursor=cursor),
+                                scope_ref=scope_ref, snapshot_digest=expected_snapshot(operation, snapshot_digest))
+
+    def pfmea_impact_confirm(self, page: PfmeaImpactRelease) -> PfmeaImpactConfirmation:
+        """Explicitly acknowledge the verified bytes of a canonical page."""
+        from ._pfmea import confirmation_parameters
+        operation = 'pfmea_impact_confirm'
+        if self._parent._closed or self._state != 'open':
+            raise ClientClosed(operation, kind='client_closed')
+        return self._call_pfmea(operation, confirmation_parameters(page, self._claim))
+
+    def pfmea_impact_submit(
+        self, *, operation_key: str, analyses: tuple[PfmeaImpactAnalysis, ...],
+        assessments: tuple[PfmeaImpactAssessment, ...],
+    ) -> PfmeaImpactResultRef:
+        """Submit a bounded proposal; retain the same key on explicit replay."""
+        return self._call_pfmea('pfmea_impact_result', dict(
+            operation_key=operation_key, analyses=analyses, assessments=assessments,
+        ))
 
     def finish(self, *, status):
         result = self._call('finish', dict(status=status), finish_status=status)

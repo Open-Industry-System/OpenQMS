@@ -8,6 +8,8 @@ from .models import (
     ManagedLaunch, ModelTurn, ModelToolCall, ModelToolResult, D4CandidateCheckpoint, D4CandidateReference, ClientConfig, RunClaim, Capability, Capabilities, RuntimeMessage, MessageBatch,
     MessageAck, MessageHistory, Verification, CapaContext, EventPayload,
     ResultPayload, Source, RuntimeEvent, RuntimeResult, ReadonlyCheckpoint, FinishResult,
+    PfmeaImpactRelease, PfmeaImpactConfirmation, PfmeaImpactResultRef,
+    PfmeaImpactAnalysis, PfmeaImpactAdjustment, PfmeaImpactAssessment,
 )
 
 from .client import InstallationClient, RunClient
@@ -21,4 +23,6 @@ __all__ = [
     "MessageBatch", "MessageAck", "MessageHistory", "Verification", "CapaContext",
     "EventPayload", "ResultPayload", "Source", "RuntimeEvent", "RuntimeResult",
     "ReadonlyCheckpoint", "FinishResult", "InstallationClient", "RunClient",
+    "PfmeaImpactRelease", "PfmeaImpactConfirmation", "PfmeaImpactResultRef",
+    "PfmeaImpactAnalysis", "PfmeaImpactAdjustment", "PfmeaImpactAssessment",
 ]

@@ -138,6 +138,11 @@ def test_exact_immutable_routes():
         "save_d4_checkpoint": ("POST", "/api/agent/runtime/capa/d4/checkpoints"),
         "model_turn": ("POST", "/api/agent/runtime/model/infer"),
         "model_tool": ("POST", "/api/agent/runtime/model/tools"),
+        "pfmea_impact_material": ("GET", "/api/agent/runtime/pfmea-impact/material"),
+        "pfmea_impact_search": ("POST", "/api/agent/runtime/pfmea-impact/search"),
+        "pfmea_impact_page": ("POST", "/api/agent/runtime/pfmea-impact/page"),
+        "pfmea_impact_confirm": ("POST", "/api/agent/runtime/pfmea-impact/confirm"),
+        "pfmea_impact_result": ("POST", "/api/agent/runtime/pfmea-impact/result"),
     }
     assert isinstance(models.SUPPORTED_OPERATIONS, MappingProxyType)
     assert models.SUPPORTED_OPERATIONS == expected

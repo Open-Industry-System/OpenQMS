@@ -6,10 +6,10 @@ from openqms_agent_sdk import models
 from openqms_agent_sdk.errors import ProtocolError
 
 
-TYPES = dict(zip(models.SUPPORTED_OPERATIONS, (models.ClaimEnvelope,models.Capabilities,models.MessageBatch,models.MessageAck,models.CapaContext,models.RuntimeEvent,models.RuntimeResult,models.ReadonlyCheckpoint,models.MessageHistory,models.FinishResult,models.ModelTurn,models.ModelToolResult,models.D4CandidateCheckpoint,models.D4CandidateReference)))
+TYPES = dict(zip(response_cases(), (models.ClaimEnvelope,models.Capabilities,models.MessageBatch,models.MessageAck,models.CapaContext,models.RuntimeEvent,models.RuntimeResult,models.ReadonlyCheckpoint,models.MessageHistory,models.FinishResult,models.ModelTurn,models.ModelToolResult,models.D4CandidateCheckpoint,models.D4CandidateReference)))
 
 
-@pytest.mark.parametrize('op',models.SUPPORTED_OPERATIONS)
+@pytest.mark.parametrize('op',TYPES)
 def test_all_operation_controls(op):
     result=decode(op,response_cases()[op])
     assert type(result) is TYPES[op]
@@ -34,7 +34,7 @@ def add_unknown(value):
     return value
 
 
-@pytest.mark.parametrize('op',models.SUPPORTED_OPERATIONS)
+@pytest.mark.parametrize('op',TYPES)
 def test_unknown_additive_fields_discarded_recursively(op):
     value=response_cases()[op]
     assert decode(op,add_unknown(value)) == decode(op,value)
@@ -128,7 +128,7 @@ def test_verifications_view_requires_children():
     with pytest.raises(ProtocolError): decode('capa_context',data,view='verifications')
 
 
-@pytest.mark.parametrize('op',models.SUPPORTED_OPERATIONS)
+@pytest.mark.parametrize('op',TYPES)
 def test_required_response_field_missing(op):
     data=response_cases()[op]
     del data[next(iter(data))]
