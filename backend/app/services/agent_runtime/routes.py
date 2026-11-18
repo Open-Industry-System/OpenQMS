@@ -1,5 +1,10 @@
 """Exact dedicated runtime routes; additions must explicitly register admission."""
-RUNTIME_ROUTES = frozenset({
+PFMEA_IMPACT_RUNTIME = "/api/agent/runtime/pfmea-impact"
+PFMEA_IMPACT_ROUTES = frozenset({
+    ("GET", f"{PFMEA_IMPACT_RUNTIME}/material"),
+    *(("POST", f"{PFMEA_IMPACT_RUNTIME}/{name}") for name in ("search", "page", "confirm", "infer", "result")),
+})
+RUNTIME_ROUTES = PFMEA_IMPACT_ROUTES | frozenset({
     ("POST", "/api/agent/runtime/model/infer"),
     ("POST", "/api/agent/runtime/model/tools"),
     ("POST", "/api/agent/runtime/capa/d4/candidates"),

@@ -13,7 +13,7 @@ from app.core.security import verify_token
 from app.core.tenant_transaction import TenantBinding
 from app.database import async_session
 from app.models.tenant import Tenant
-from app.services.agent_runtime.routes import RUNTIME_PATHS, RUNTIME_JWT_ROUTES
+from app.services.agent_runtime.routes import PFMEA_IMPACT_RUNTIME, RUNTIME_PATHS, RUNTIME_JWT_ROUTES
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,16 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Hide the default-off feature before auth, validation or tenant lookups.
         path = request.url.path
+        runtime_impact = path == PFMEA_IMPACT_RUNTIME or path.startswith(PFMEA_IMPACT_RUNTIME + "/")
+        employee_impact = re.match(r"/api/capa/[^/]+/pfmea-impact(?:/|$)", path)
+        if runtime_impact or employee_impact:
+            if not (settings.AGENT_TASK_RUNTIME_ENABLED and settings.AGENT_R7_PFMEA_IMPACT_ENABLED
+                    and settings.TENANT_MODE == "dev"):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"},
+                                    headers={"Cache-Control": "no-store"})
+            if runtime_impact and not local_trial_peer_allowed(request):
+                return JSONResponse(status_code=403, content={"detail": "Access denied"},
+                                    headers={"Cache-Control": "no-store"})
         if (path.rstrip('/') == '/api/agent/runtime/capa/d4/root-cause-text'
                 and not (settings.AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED
                          and settings.AGENT_TASK_RUNTIME_ENABLED

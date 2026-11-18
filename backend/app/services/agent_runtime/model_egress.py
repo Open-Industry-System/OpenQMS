@@ -37,6 +37,7 @@ class DeploymentCreate(BaseModel):
     base_url: str = Field(repr=False)
     allowed_addresses: list[str] = Field(min_length=1, max_length=10, repr=False)
     credential_ref: str = Field(min_length=1, max_length=100, repr=False)
+    profile: Literal['model_pfmea_impact_v1'] | None = None
 
 
 class InferenceRequest(BaseModel):
@@ -87,6 +88,12 @@ def _addresses(base_url):
     return addresses
 
 
+def require_local_impact_recipient(kind, allowed_addresses):
+    if (kind != 'local' or not allowed_addresses
+            or not all(ipaddress.ip_address(address).is_loopback for address in allowed_addresses)):
+        raise ValueError(UNAVAILABLE)
+
+
 def _approval(db):
     pilot = db.info.get('r5_controlled_pilot')
     from app.services.agent_runtime.r5_executor import ControlledPilot
@@ -119,12 +126,18 @@ async def register_deployment(db, actor, request):
     request = DeploymentCreate.model_validate(request)
     if request.kind not in {'local','cloud'} or request.provider != 'openai':
         raise ValueError(UNAVAILABLE)
+    pins = None
+    if request.profile is not None:
+        require_local_impact_recipient(request.kind, request.allowed_addresses)
+        from app.services.agent_runtime.pfmea_impact_activation import pins_for_admin_enrollment
+        pins = await pins_for_admin_enrollment(db)
     addresses = _addresses(request.base_url)
-    if addresses != sorted(set(request.allowed_addresses)):
+    if not addresses or addresses != sorted(set(request.allowed_addresses)):
         raise ValueError(UNAVAILABLE)
-    approval = _approval(db)
-    row = AgentModelDeployment(deployment_id=uuid4(), **request.model_dump(),
-        tenant_generation=_namespace(db).generation, executor_pins=_pins(db, approval), created_by=actor.user_id,
+    if pins is None:
+        pins = _pins(db, _approval(db))
+    row = AgentModelDeployment(deployment_id=uuid4(), **request.model_dump(exclude={'profile'}),
+        tenant_generation=_namespace(db).generation, executor_pins=pins, created_by=actor.user_id,
         enabled=True)
     row.config_hmac = _digest(db, row)
     await _require_current_admin(db, actor)

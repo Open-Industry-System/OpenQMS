@@ -1,4 +1,4 @@
-"""Internal R7 task admission. No route or runnable profile is registered here."""
+"""R7 task admission. Run creation and dispatch belong to the controlled profile."""
 from dataclasses import dataclass
 import hmac
 from typing import Literal
@@ -15,6 +15,7 @@ from app.core.tenant_transaction import TenantBinding
 from app.models.agent_model_deployment import AgentModelDeployment
 from app.models.agent_pfmea_impact import AgentPfmeaImpactBinding
 from app.models.agent_plugin import AgentPluginInstallation
+from app.models.agent_runtime_event import AgentResult
 from app.models.agent_task import AgentTask
 from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
@@ -93,15 +94,29 @@ class ImpactTaskReceipt:
 
 
 async def _controlled_activation(db, scope, request) -> ImpactActivation:
-    # The later controlled profile must verify the signed installation/deployment,
-    # grants for both objects and the permitted receiver before returning pins.
-    raise ImpactTaskUnavailable()
+    from app.services.agent_runtime.pfmea_impact_activation import resolve_activation
+    return await resolve_activation(db, scope, request)
+
+
+async def list_impact_options(db, scope, report_id, fmea_id, approved_version_id) -> list[dict]:
+    from app.services.agent_runtime.pfmea_impact_activation import list_impact_options as controlled_options
+    return await controlled_options(db, scope, report_id, fmea_id, approved_version_id)
 
 
 async def _authorize_previous_result(db, scope, request):
-    if request.previous_result_id is not None:
-        # Until the exact historical result reader is connected, a previous
-        # result ID is not sufficient authority to link or expose that result.
+    if request.previous_result_id is None:
+        return
+    from app.services.agent_runtime import pfmea_impact_history as history
+
+    predecessor_task = await db.scalar(select(AgentResult.task_id).join(
+        AgentTask, AgentTask.task_id == AgentResult.task_id,
+    ).where(AgentResult.result_id == request.previous_result_id, AgentTask.target_capa_id == request.report_id))
+    if predecessor_task is None:
+        raise ImpactTaskUnavailable()
+    lookup = history.HistoryLookup(request.report_id, predecessor_task, request.previous_result_id)
+    previous = await history.read_history_metadata(db, scope, lookup,
+        authorize=history.authorize_history_projection_sources)
+    if previous.fmea_id != request.fmea_id:
         raise ImpactTaskUnavailable()
 
 
@@ -193,13 +208,14 @@ async def _preflight_task(db, scope, request, activation):
     # CAPA owns both the formal material and its complete inherited source set.
     initial = (await read_material(db, scope, request.report_id)).binding
     await _lock_activation(db, request, activation)
+    # Predecessor history locks its task/run before document and employee rows.
+    await _authorize_previous_result(db, scope, request)
     await _lock_business_sources(db, request, scope, initial)
     current = (await read_material(db, scope, request.report_id, expected=initial)).binding
     target = await read_approved_target(db, scope, request.fmea_id, factory_id=current.factory_id,
         product_line_code=current.product_line_code, expected_version_id=request.approved_version_id)
     await read_approved_snapshot(db, scope, request.fmea_id, factory_id=current.factory_id,
         product_line_code=current.product_line_code, expected_version_id=target.version_id)
-    await _authorize_previous_result(db, scope, request)
     if await _controlled_activation(db, scope, request) != activation:
         raise ImpactTaskUnavailable()
     return ImpactTaskBinding(capa=current, target=ImpactTargetBinding(fmea_id=target.fmea_id,

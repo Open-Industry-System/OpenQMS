@@ -23,6 +23,11 @@ from app.services.fmea_agent_sources import visible_fmea_source
 from app.services.version_service import compute_pg_jsonb_hash, compute_snapshot_hash
 
 
+FMEA_IMPACT_TARGET_CAPABILITY = "fmea.pfmea_impact.target.v1"
+FMEA_IMPACT_QUERY_CAPABILITY = "fmea.pfmea_impact.query.v1"
+FMEA_SNAPSHOT_PROJECTION = "fmea.pfmea_impact.snapshot.v1"
+
+
 class ImpactTargetUnavailable(LookupError):
     """No currently authorized approved PFMEA target."""
 

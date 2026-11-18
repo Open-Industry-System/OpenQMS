@@ -5,11 +5,11 @@ bound sources and receiver. This module independently serializes accounting
 on the run row. It never commits or sends a response.
 """
 
+import hmac
+import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
-import hmac
-import json
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -36,6 +36,10 @@ from app.services.agent_runtime.pfmea_impact_release import (
 
 _MAX_RELEASES = 32
 _MAX_SOURCE_REFS = 256
+
+
+class IncompleteCoverage(PageConfirmationMismatch):
+    """This scope has valid confirmations, but the expected set is incomplete."""
 
 
 def scope_digest(scope: PageScope) -> str:
@@ -143,6 +147,7 @@ async def record_release(
     db: AsyncSession, scope: PageScope, *, module: Literal["capa", "fmea"], body: bytes,
     element_keys: Iterable[str], sources: Iterable[ImpactSourceRef],
     page_key: str | None = None, expected_page_digests: Mapping[str, str] | None = None,
+    next_cursor: str | None = None,
 ) -> UUID:
     """Reserve and flush a potentially released receipt. Commit before sending."""
     from app.models.agent_pfmea_impact import AgentPfmeaImpactReceipt
@@ -150,6 +155,8 @@ async def record_release(
     payload = make_release_payload(scope, module=module, body=body, element_keys=element_keys,
                                    sources=sources, page_key=page_key,
                                    expected_page_digests=expected_page_digests)
+    if next_cursor is not None:
+        payload["next_cursor"] = next_cursor
     if not payload["sources"]:
         raise PermissionError("Projection sources unavailable")
     await _lock_run(db, scope)
@@ -243,7 +250,7 @@ async def record_coverage(
     )
     keys = confirmed_page_keys(scope, confirmations, expected_page_digests=expected_page_digests)
     if keys != set(expected_page_digests):
-        raise PageConfirmationMismatch("Incomplete scope coverage")
+        raise IncompleteCoverage("Incomplete scope coverage")
     payload = {"confirmed_page_refs": [str(row.receipt_id) for row in rows],
                "binding_digest": scope.binding_digest, "snapshot_digest": scope.snapshot_digest,
                "scope_ref": scope.scope_ref}

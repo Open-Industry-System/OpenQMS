@@ -48,6 +48,10 @@ async def register_plugin(db: AsyncSession, actor: User, key: str, version: str,
                           manifest: dict) -> tuple[AgentPluginInstallation, str]:
     await _require_current_admin(db, actor)
     registration = PluginRegister(plugin_key=key, plugin_version=version, manifest=manifest)
+    from app.services.agent_runtime.pfmea_impact_tasks import R7_PLUGIN_KEY
+    if registration.plugin_key == R7_PLUGIN_KEY:
+        from app.services.agent_runtime.pfmea_impact_activation import require_manifest
+        require_manifest(registration.manifest)
     # begin_nested() flushes pending caller state before creating its savepoint.
     # Keep unrelated write failures outside plugin conflict translation.
     await db.flush()
@@ -175,6 +179,15 @@ async def set_plugin_enabled(db: AsyncSession, actor: User, installation_id: UUI
     await _require_current_admin(db, actor)  # Admission may have changed while waiting for the lock.
     if type(enabled) is not bool:
         raise ValueError("enabled must be boolean")
+    from app.services.agent_runtime.pfmea_impact_tasks import R7_PLUGIN_KEY
+    if plugin.plugin_key == R7_PLUGIN_KEY:
+        if enabled:
+            from app.services.agent_runtime.pfmea_impact_activation import require_pinned_installation
+            await require_pinned_installation(db, plugin, enabling=True)
+        else:
+            from app.services.agent_runtime.pfmea_impact_runtime import drain_installation
+            await drain_installation(db, plugin, actor.user_id)
+        await _require_current_admin(db, actor)
     plugin.enabled = enabled
     _audit(db, actor, plugin, "SET_PLUGIN_ENABLED")
     await db.flush()
@@ -183,6 +196,13 @@ async def set_plugin_enabled(db: AsyncSession, actor: User, installation_id: UUI
 
 async def _require_grant_enableable(db, plugin, grant, actor=None) -> None:
     from app.services.agent_runtime import model_egress
+    from app.services.agent_runtime.pfmea_impact_activation import GRANT_MATRIX, require_grant_enrollment
+    from app.services.agent_runtime.pfmea_impact_tasks import R7_PLUGIN_KEY
+    if plugin.plugin_key == R7_PLUGIN_KEY:
+        await require_grant_enrollment(db, plugin, grant, actor)
+        return
+    if grant.capability_id in GRANT_MATRIX:
+        raise ValueError("Capability cannot be enabled")
     if plugin.plugin_key == model_egress.R5_PLUGIN_KEY:
         from app.services.agent_runtime.r5_executor import ControlledPilot
         pilot = db.info.get('r5_controlled_pilot')
