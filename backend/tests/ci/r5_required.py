@@ -37,7 +37,22 @@ R5_REQUIRED = {'api': {'tests.migrations.test_r5_responses_delta': [
                                                   'test_model_delta_pair_is_static_and_has_actual_T4_predecessors',
                                                   'test_immutable_config_task_pin_and_nonempty_downgrade',
                                                   'test_current_tenant_models_match_public']},
- 'r5-api': {'tests.e2e.test_r5_responses_agent': [
+ 'r5-api': {'tests.e2e.test_r7_pfmea_impact_process': [
+                 'test_r7_native_worker_completes_paginated_assessment_and_preserves_business_state',
+                 'test_r7_native_worker_drops_late_result_when_one_inherited_source_loses_access',
+                 'test_r7_native_worker_lost_confirmation_preserves_sources_without_coverage',
+                 'test_r7_native_installation_toggle_stops_old_run_and_keeps_completed_history',
+                 'test_r7_native_projection_interruption_keeps_conservative_receipts[before-commit-0]',
+                 'test_r7_native_projection_interruption_keeps_conservative_receipts[after-commit-1]',
+                 'test_r7_native_same_page_retry_does_not_advance_coverage',
+                 'test_r7_native_incomplete_reads_cannot_prove_no_impact[insufficient_evidence]',
+                 'test_r7_native_incomplete_reads_cannot_prove_no_impact[no_impact_found]',
+                 'test_r7_native_incomplete_reads_cannot_prove_no_impact[incomplete_chain]',
+             ],
+             'tests.e2e.test_r7_pfmea_impact_history_race': [
+                 'test_history_http_orders_final_release_against_source_revocation',
+             ],
+             'tests.e2e.test_r5_responses_agent': [
                'test_actual_responses_managed_read_supplement_save_and_private_replay',
                'test_responses_tool_replay_preserves_one_report_suggestion',
                'test_responses_source_revocation_stops_next_egress',
@@ -106,7 +121,10 @@ R5_REQUIRED = {'api': {'tests.migrations.test_r5_responses_delta': [
                                                                    'test_failed_model_send_leaves_durable_control_attempt_without_usable_basis',
                                                                    'test_actual_managed_child_cannot_reach_B_but_calls_platform_model_A',
                                                                    'test_R5_checkpoint_history_is_paged_typed_current_and_keeps_original_positions']},
- 'r5-browser': {'tests.e2e.test_r5_d5_browser': ['test_browser_explicit_correction_and_selected_checkpoint_withdrawal'],
+ 'r5-browser': {'tests.e2e.test_r7_pfmea_impact_browser': [
+                    'test_real_employee_browser_r7_two_measures_history_and_archived_report',
+                ],
+                'tests.e2e.test_r5_d5_browser': ['test_browser_explicit_correction_and_selected_checkpoint_withdrawal'],
                 'tests.e2e.test_r5_d5_ui': ['test_real_two_role_R5_sidebar_and_report_collaboration'],
                 'tests.e2e.test_r6_entry_switch_browser': [
                     'test_real_employee_browser_empty_root_entry',

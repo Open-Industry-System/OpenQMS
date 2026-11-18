@@ -38,6 +38,9 @@ TARGETS = (
     'tests/capa/test_r6_entry_switch.py',
     'tests/capa/test_r6_legacy_capture.py',
     'tests/services/agent_runtime/test_task_controls.py',
+    'tests/e2e/test_r7_pfmea_impact_process.py',
+    'tests/e2e/test_r7_pfmea_impact_history_race.py',
+    'tests/e2e/test_r7_pfmea_impact_browser.py',
 )
 
 BROWSER_NODES = (
