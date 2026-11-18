@@ -187,6 +187,7 @@ async def capa_only_known_case(r6_case):
 
 
 @pytest.mark.requires_db
+@pytest.mark.ci_r5_native
 @pytest.mark.asyncio
 async def test_capa_only_known_source_can_use_normal_local_manual_work(capa_only_known_case,tmp_path):
     c=capa_only_known_case

@@ -174,6 +174,7 @@ async def r6_delivery(r5_case, request):
     return c
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_supported_report_inputs_and_single_external_source_deliver(r6_delivery, caplog):
@@ -197,6 +198,7 @@ async def test_supported_report_inputs_and_single_external_source_deliver(r6_del
         assert sidecar is not None and len(sidecar.input_bindings) == 2
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('r6_delivery', [True], indirect=True)
@@ -217,6 +219,7 @@ async def test_zero_epoch_round_trips_real_input_binding_signature_and_save(r6_d
     assert saved.status_code == 200, saved.text
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('entry', ['infer', 'first_round', 'only_B'])
@@ -286,6 +289,7 @@ async def test_extra_external_origin_never_leaves_server(r6_delivery, entry):
     assert c.witness.a.bodies == c.witness.b.bodies == []
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_historical_proposal_requires_original_sidecar_but_not_current_input_version(r6_delivery):
@@ -311,6 +315,7 @@ async def test_historical_proposal_requires_original_sidecar_but_not_current_inp
     assert denied.status_code == 200 and denied.json()['total'] == 0, denied.text
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('damage', ['missing', 'signature'])
@@ -336,6 +341,7 @@ async def test_controlled_root_save_refuses_missing_or_corrupt_sidecar(r6_delive
     assert result.status_code in {401, 403}, result.text
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_old_local_text_contract_cannot_deliver_inherited_report_inputs(r6_delivery):
@@ -355,6 +361,7 @@ async def test_old_local_text_contract_cannot_deliver_inherited_report_inputs(r6
     assert '定位销磨损' not in result.text
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_model_result_rechecks_actor_after_transport_close(r6_delivery, monkeypatch):
@@ -394,6 +401,7 @@ async def test_model_result_rechecks_actor_after_transport_close(r6_delivery, mo
             AgentD5BasisReceipt.run_id == c.run_id)) == 1
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('restart', [False, True])
@@ -458,6 +466,7 @@ async def test_normal_fmea_ABA_never_releases_again_even_after_restart(r6_delive
     assert c.witness.a.bodies == c.witness.b.bodies == []
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_normal_fmea_ABA_keeps_history_but_blocks_staff_adoption(r6_delivery):
@@ -514,6 +523,7 @@ async def test_normal_fmea_ABA_keeps_history_but_blocks_staff_adoption(r6_delive
     assert await counts() == before
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_identical_capture_reuses_origin_without_misclassifying_extra_external_source(r6_delivery):
@@ -545,6 +555,7 @@ async def test_identical_capture_reuses_origin_without_misclassifying_extra_exte
     assert response.status_code == 200 and len(c.witness.a.bodies) == 1, response.text
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('r6_delivery', ['legacy'], indirect=True)
@@ -614,6 +625,7 @@ async def test_r6_legacy_root_sealed_context_epoch_cannot_revive_after_ABA(r6_de
     assert len(c.witness.a.bodies) == 1 and c.witness.b.bodies == []
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('r6_delivery', ['legacy'], indirect=True)
@@ -661,6 +673,7 @@ async def _remove_pre_r6_root_body(c):
         await db.commit()
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('r6_delivery', ['legacy'], indirect=True)
@@ -679,6 +692,7 @@ async def test_r6_profile_does_not_bootstrap_pre_r6_missing_body_on_read(r6_deli
         assert await db.scalar(select(func.count()).select_from(AgentD5BasisReceipt).where(AgentD5BasisReceipt.report_id == c.report_id)) == 0
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_original_r5_profile_preserves_pre_r6_unmarked_root_delivery(r5_case):
@@ -702,6 +716,7 @@ async def test_original_r5_profile_preserves_pre_r6_unmarked_root_delivery(r5_ca
     assert 'context_source_epochs' not in json.dumps(c.witness.a.bodies)
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('r6_delivery', ['controlled', 'legacy'], indirect=True)

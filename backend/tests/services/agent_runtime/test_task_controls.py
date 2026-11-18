@@ -661,6 +661,7 @@ async def test_final_finish_input_read_rechecks_revocation_before_dirty_changes(
     assert await state(owned) == before
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.asyncio
 async def test_readonly_metadata_controls_continue_during_and_after_real_entry_switch(delivery,tmp_path):
     from types import SimpleNamespace

@@ -661,7 +661,11 @@ async def test_d7_actual_open_write_preserves_distinct_source_minima(review_case
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("recovery",["existing","revoked","terminal","invisible","draining","switched"])
+@pytest.mark.parametrize("recovery", [
+    "existing", "revoked", "terminal", "invisible",
+    pytest.param("draining", marks=pytest.mark.ci_r5_native),
+    pytest.param("switched", marks=pytest.mark.ci_r5_native),
+])
 async def test_adoption_real_rollback_recovers_with_same_session_user(r6_case,monkeypatch,recovery,tmp_path):
     """Real PK failure, rollback, genuine competitor commit and current admission."""
     import asyncio

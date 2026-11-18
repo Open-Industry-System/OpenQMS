@@ -34,6 +34,7 @@ async def test_unbound_legacy_candidate_requires_regeneration(r6_case):
     assert response.status_code==409,response.text
     assert (await c.report()).d4_root_cause==before.d4_root_cause
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('writer_outcome',['commit','rollback'])
@@ -68,6 +69,7 @@ async def test_real_cli_close_timeout_and_resume_preserves_writer(r6_case,tmp_pa
         assert await db.scalar(select(__import__('sqlalchemy').func.count()).select_from(AuditLog).where(AuditLog.action=='R6_FINISH_SWITCH'))==1
         assert (await db.get(CAPAEightD,c.report_id)).d4_root_cause==('admitted before durable close' if writer_outcome=='commit' else before.d4_root_cause)
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_operator_killed_while_pg_reports_blocking_remains_draining(r6_case,tmp_path):
@@ -109,6 +111,7 @@ async def test_operator_killed_while_pg_reports_blocking_remains_draining(r6_cas
     assert (await c.report()).d4_root_cause=='writer survives killed operator'
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 @pytest.mark.parametrize('change',['expired','purpose','owner','build','config_role','registry_signature','launch_artifact'])
@@ -141,6 +144,7 @@ async def test_actual_cli_rejects_wrong_evidence_before_close(r6_case,tmp_path,c
         assert actual.state=='legacy' and actual.epoch==0
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_old_before_adopt_put_committed_then_post_after_real_switch(r6_case,tmp_path):
@@ -161,6 +165,7 @@ async def test_old_before_adopt_put_committed_then_post_after_real_switch(r6_cas
         assert await db.scalar(select(func.count()).select_from(CapaAIAdoption))==0
         assert await db.scalar(select(func.count()).select_from(AuditLog).where(AuditLog.action=='UPDATE',AuditLog.record_id==c.report_id))==1
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_expired_document_requires_authorized_renewal_then_same_operation_resume(r6_case,tmp_path):
@@ -194,6 +199,7 @@ async def test_expired_document_requires_authorized_renewal_then_same_operation_
     assert finished['operation_ref']==closed['operation_ref']
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_more_than_1000_real_admissions_do_not_prevent_switch(r6_case,tmp_path):
@@ -215,6 +221,7 @@ async def test_more_than_1000_real_admissions_do_not_prevent_switch(r6_case,tmp_
         assert final.evidence['settled']['count']==1001
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_authority_expiring_while_blocked_cannot_finish(r6_case,tmp_path):
@@ -274,6 +281,7 @@ def _renewal_fixture(fixture,path,document):
     return dict(fixture,document=path,args=[*fixture['args'][:-1],str(path)])
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_two_competing_renewals_only_one_wins(r6_case,tmp_path):
@@ -303,6 +311,7 @@ async def test_two_competing_renewals_only_one_wins(r6_case,tmp_path):
     assert code==0 and finished['epoch']==3,finished
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_old_finish_waiter_rejects_renewed_authority(r6_case,tmp_path):
@@ -336,6 +345,7 @@ async def test_old_finish_waiter_rejects_renewed_authority(r6_case,tmp_path):
         if process is not None and process.returncode is None:process.kill();await process.communicate()
 
 
+@pytest.mark.ci_r5_native
 @pytest.mark.requires_db
 @pytest.mark.asyncio
 async def test_generation_change_while_operator_waits_refuses_old_authority(r6_case,tmp_path):

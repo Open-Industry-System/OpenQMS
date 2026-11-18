@@ -113,3 +113,60 @@ R5_REQUIRED = {'api': {'tests.migrations.test_r5_responses_delta': [
                     'test_controlled_normal_app_complete_employee_ui_chain[direct-d4]',
                     'test_controlled_normal_app_complete_employee_ui_chain[question-d4]',
                 ]}}
+
+# R6 cases that need the managed runtime or an independently registered
+# loopback PostgreSQL resource for the real cutover CLI.
+R5_REQUIRED['r5-api'].update({
+    'tests.services.agent_runtime.test_r6_d4_delivery': [
+        'test_supported_report_inputs_and_single_external_source_deliver',
+        'test_zero_epoch_round_trips_real_input_binding_signature_and_save[True]',
+        'test_extra_external_origin_never_leaves_server[infer]',
+        'test_extra_external_origin_never_leaves_server[first_round]',
+        'test_extra_external_origin_never_leaves_server[only_B]',
+        'test_historical_proposal_requires_original_sidecar_but_not_current_input_version',
+        'test_controlled_root_save_refuses_missing_or_corrupt_sidecar[missing]',
+        'test_controlled_root_save_refuses_missing_or_corrupt_sidecar[signature]',
+        'test_old_local_text_contract_cannot_deliver_inherited_report_inputs',
+        'test_model_result_rechecks_actor_after_transport_close',
+        'test_normal_fmea_ABA_never_releases_again_even_after_restart[False]',
+        'test_normal_fmea_ABA_never_releases_again_even_after_restart[True]',
+        'test_normal_fmea_ABA_keeps_history_but_blocks_staff_adoption',
+        'test_identical_capture_reuses_origin_without_misclassifying_extra_external_source',
+        'test_r6_legacy_root_sealed_context_epoch_cannot_revive_after_ABA[legacy]',
+        'test_r6_legacy_sidecar_required_for_history_and_new_save[missing-legacy]',
+        'test_r6_legacy_sidecar_required_for_history_and_new_save[corrupt-legacy]',
+        'test_r6_profile_does_not_bootstrap_pre_r6_missing_body_on_read[legacy]',
+        'test_original_r5_profile_preserves_pre_r6_unmarked_root_delivery',
+        'test_history_and_human_adoption_survive_generation_off_and_recipient_revocation[controlled]',
+        'test_history_and_human_adoption_survive_generation_off_and_recipient_revocation[legacy]',
+    ],
+    'tests.capa.test_capa_reviewed_writes': [
+        'test_adoption_real_rollback_recovers_with_same_session_user[draining]',
+        'test_adoption_real_rollback_recovers_with_same_session_user[switched]',
+    ],
+    'tests.capa.test_r6_entry_switch': [
+        'test_real_cli_close_timeout_and_resume_preserves_writer[commit]',
+        'test_real_cli_close_timeout_and_resume_preserves_writer[rollback]',
+        'test_operator_killed_while_pg_reports_blocking_remains_draining',
+        'test_actual_cli_rejects_wrong_evidence_before_close[expired]',
+        'test_actual_cli_rejects_wrong_evidence_before_close[purpose]',
+        'test_actual_cli_rejects_wrong_evidence_before_close[owner]',
+        'test_actual_cli_rejects_wrong_evidence_before_close[build]',
+        'test_actual_cli_rejects_wrong_evidence_before_close[config_role]',
+        'test_actual_cli_rejects_wrong_evidence_before_close[registry_signature]',
+        'test_actual_cli_rejects_wrong_evidence_before_close[launch_artifact]',
+        'test_old_before_adopt_put_committed_then_post_after_real_switch',
+        'test_expired_document_requires_authorized_renewal_then_same_operation_resume',
+        'test_more_than_1000_real_admissions_do_not_prevent_switch',
+        'test_authority_expiring_while_blocked_cannot_finish',
+        'test_two_competing_renewals_only_one_wins',
+        'test_old_finish_waiter_rejects_renewed_authority',
+        'test_generation_change_while_operator_waits_refuses_old_authority',
+    ],
+    'tests.capa.test_r6_legacy_capture': [
+        'test_capa_only_known_source_can_use_normal_local_manual_work',
+    ],
+    'tests.services.agent_runtime.test_task_controls': [
+        'test_readonly_metadata_controls_continue_during_and_after_real_entry_switch',
+    ],
+})
