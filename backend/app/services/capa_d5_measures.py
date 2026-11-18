@@ -24,7 +24,7 @@ async def _target(db, scope, report_id, access=None):
     return await current_capa_target_metadata(db, report_id, factories, lines)
 
 
-async def _visible_metadata(db, scope, report_id, access=None):
+async def _visible_metadata(db, scope, report_id, access=None, *, proposal_ids=None):
     target = await _target(db, scope, report_id, access)
     p, command = CapaD5Proposal, AgentD5Command
     proof, revision = CapaD4RootCauseSourceProof, CapaD4RootCauseRevision
@@ -46,6 +46,8 @@ async def _visible_metadata(db, scope, report_id, access=None):
               & (CapaRootCauseVerification.capa_id == p.report_id))
         .where(p.report_id == report_id)
         .order_by(p.created_at, p.proposal_id))
+    if proposal_ids is not None:
+        query = query.where(p.proposal_id.in_(proposal_ids))
     with db.no_autoflush:
         rows = (await db.execute(query)).all()
         sources = (await db.execute(select(CapaD5ProposalSource).where(
