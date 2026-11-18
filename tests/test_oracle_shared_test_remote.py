@@ -319,8 +319,16 @@ def test_release_waits_for_only_the_current_d4_allocation(host, monkeypatch, tmp
     with pytest.raises(ValueError, match='not complete'):
         run(host, 'released', lease=lease)
     assert run(host, 'tick', eligible=eligible)['pr'] == 45
-    allocation.rmdir()
+    called = []
+
+    def cleanup(active_lease):
+        called.append(active_lease)
+        assert active_lease == lease
+        allocation.rmdir()
+
+    monkeypatch.setattr(remote, 'cleanup_d4', cleanup)
     run(host, 'release', lease=lease)
     run(host, 'released', lease=lease)
+    assert called == [lease]
     assert unrelated.is_dir()
     assert run(host, 'tick', eligible=eligible)['pr'] == 46

@@ -33,7 +33,7 @@ def read_config(path):
     with os.fdopen(fd, 'rb') as stream:
         info = os.fstat(stream.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+                or stat.S_IMODE(info.st_mode) not in {0o400, 0o600} or info.st_nlink != 1):
             raise ValueError('private acceptance configuration required')
         raw = stream.read(MAX_MESSAGE + 1)
     if len(raw) > MAX_MESSAGE:
@@ -54,6 +54,11 @@ def validate_config(config):
     if not Path(config['executor_socket']).is_absolute() or not 1 <= len(config['report_label']) <= 120:
         raise ValueError('invalid executor or report configuration')
 
+    tasks = config.get('tasks')
+    if tasks is not None and (not isinstance(tasks, dict) or set(tasks) != set(SCENARIOS)
+                              or not all(canonical_uuid(task) for task in tasks.values())
+                              or len(set(tasks.values())) != len(tasks)):
+        raise ValueError('invalid dedicated acceptance tasks')
     validate_binding(config['binding'])
 
 
@@ -146,6 +151,7 @@ def validated_receipt(result, request):
 
 def handler(config, invoke):
     binding = config['binding']
+    tasks = config.get('tasks', {})
 
     class Browser(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -183,12 +189,14 @@ def handler(config, invoke):
                 self.show(404, '<p>页面不存在</p>')
                 return
             forms = ''.join(
-                f'<form method="post" action="/scenario/{key}"><button>{name}</button></form>'
+                f'<form method="post" action="/scenario/{key}"><button>{name}</button>'
+                + (f' <span>任务 <code>{tasks[key]}</code></span>' if key in tasks else '')
+                + '</form>'
                 for key, name in SCENARIOS.items()
             )
             self.show(200, f'<h1>PR #{binding["pr"]} 的 D4 验收</h1>'
                       f'<p>部署版本 <code>{html.escape(binding["merge"])}</code></p>'
-                      f'<p>合成报告 {html.escape(config["report_label"])}</p>{forms}')
+                      f'<p>合成报告 {html.escape(config["report_label"])} <code>{binding["report_id"]}</code></p>{forms}')
 
         def do_POST(self):
             if not self.authorize():
@@ -206,6 +214,8 @@ def handler(config, invoke):
             try:
                 receipt = invoke(request)
                 result = validated_receipt(receipt, request)
+                if scenario in tasks and receipt['task_id'] != tasks[scenario]:
+                    raise ValueError('receipt task does not match the current report task')
             except (OSError, ValueError, TypeError, KeyError):
                 self.show(503, '<h1>受阻</h1><p>专用执行器未返回本次操作的有效回执。</p>')
                 return

@@ -7,6 +7,14 @@ from witness import PsqlWitness, verify_delivery, verify_revocation
 
 
 def execute_case(scenario, case, binding):
+    if scenario == 'd4-revoke':
+        # A stock receiver would claim and finish the task before the same-run
+        # observation. Require its dedicated control service before any launch.
+        probe = dict(action='revocation-ready', binding=binding, task_id=case['task_id'],
+                     installation_id=case['installation_id'], grant_id=case['grant_id'])
+        reply = executor_call(case['control_socket'], probe, deadline=time.monotonic() + 2)
+        if reply != dict(probe, ready=True):
+            raise ValueError('dedicated same-run revocation control is unavailable')
     witness = PsqlWitness(
         container_id=case['db_container_id'],
         image_id=case['db_image_id'],

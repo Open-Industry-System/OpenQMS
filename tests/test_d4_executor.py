@@ -115,3 +115,25 @@ def test_case_uses_existing_pending_run_for_platform_witness(monkeypatch):
     assert response['run_id'] == pending_id
     assert observations[1]['run_id'] == pending_id
     assert observations[1]['deadline'] > time.monotonic()
+
+
+def test_revocation_requires_matching_control_before_launch(monkeypatch):
+    root = Path(__file__).parents[1] / 'deploy' / 'd4-acceptance'
+    monkeypatch.syspath_prepend(str(root))
+    cases = runpy.run_path(str(root / 'cases.py'))
+    execute = cases['execute_case']
+    seen = []
+
+    def control(path, probe, *, deadline):
+        seen.append(probe)
+        return dict(probe, ready=True, task_id='wrong-task')
+
+    monkeypatch.setitem(execute.__globals__, 'executor_call', control)
+    monkeypatch.setitem(execute.__globals__, 'PsqlWitness', lambda **kwargs: pytest.fail('opened witness'))
+    monkeypatch.setitem(execute.__globals__, 'RuntimeLaunch', lambda *args: pytest.fail('started receiver'))
+    case = {'task_id': 'test-task', 'installation_id': 'test-installation',
+            'grant_id': 'test-grant', 'control_socket': '/run/fixture'}
+    with pytest.raises(ValueError, match='dedicated same-run revocation control'):
+        execute('d4-revoke', case, {'pr': 45})
+    assert seen == [dict(action='revocation-ready', binding={'pr': 45}, task_id=case['task_id'],
+                         installation_id=case['installation_id'], grant_id=case['grant_id'])]

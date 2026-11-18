@@ -20,7 +20,10 @@ from browser import MAX_MESSAGE, SCENARIOS, validate_binding, validated_receipt
 QUEUE_ROOT = Path('/var/lib/openqms-shared-test')
 QUEUE_LOCK = Path('/run/lock/openqms-deploy.lock')
 SOCKET_DIR = Path('/run/openqms-d4-acceptance')
-SOCKET_PATH = SOCKET_DIR / 'executor.sock'
+def socket_path_for(lease):
+    if not isinstance(lease, str) or not re.fullmatch('[a-f0-9]{32}', lease):
+        raise ValueError('invalid D4 socket lease')
+    return SOCKET_DIR / ('executor-' + lease + '.sock')
 
 
 def root_private(path, directory=False):
@@ -166,17 +169,18 @@ def main():
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o750:
         raise SystemExit('protected broker socket directory required')
     os.umask(0o117)
-    with Broker(str(SOCKET_PATH), Request) as server:
+    socket_path = socket_path_for(profile['binding']['lease'])
+    with Broker(str(socket_path), Request) as server:
         server.executor = Executor(
             profile, execute_case, record=lambda receipt: persist_receipt(evidence, receipt)
         )
         server.portal_uid, server.portal_gid = profile['portal_uid'], profile['portal_gid']
-        os.chown(SOCKET_PATH, 0, server.portal_gid)
-        os.chmod(SOCKET_PATH, 0o660)
+        os.chown(socket_path, 0, server.portal_gid)
+        os.chmod(socket_path, 0o660)
         try:
             server.serve_forever()
         finally:
-            SOCKET_PATH.unlink(missing_ok=True)
+            socket_path.unlink(missing_ok=True)
 
 
 if __name__ == '__main__':

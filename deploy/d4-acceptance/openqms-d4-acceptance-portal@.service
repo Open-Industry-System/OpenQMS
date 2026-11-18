@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenQMS D4 private browser for lease %i
+BindsTo=openqms-d4-acceptance-executor@%i.service
+After=openqms-d4-acceptance-executor@%i.service
+
+[Service]
+User=openqms-d4-portal
+Group=openqms-d4-portal
+LoadCredential=portal:/run/openqms-d4-acceptance/leases/%i/portal.json
+LoadCredential=tls-cert:/etc/openqms/d4-acceptance/tls-cert.pem
+LoadCredential=tls-key:/etc/openqms/d4-acceptance/tls-key.pem
+ExecStart=/usr/bin/python3 -E -s -B /usr/local/lib/openqms/d4-acceptance/browser.py --config ${CREDENTIALS_DIRECTORY}/portal --port 8444 --cert ${CREDENTIALS_DIRECTORY}/tls-cert --key ${CREDENTIALS_DIRECTORY}/tls-key
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+LimitCORE=0
+StandardOutput=null
+StandardError=null

@@ -6,11 +6,13 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import time
 from uuid import UUID
 
 MODE = Path('/var/lib/openqms-shared-test')
 HOST = 'test.preview.openqms.smartindustry.world'
+D4_CLEANUP = Path('/usr/local/lib/openqms/d4-acceptance/cleanup.py')
 ACCEPTANCE_SECONDS = 2 * 3600
 LEASE = re.compile(r'[0-9a-f]{32}')
 REQUEST_LIMIT = 128 * 1024
@@ -193,6 +195,24 @@ def d4_evidence(slot, now):
     return evidence
 
 
+def cleanup_d4(lease):
+    try:
+        for path in (D4_CLEANUP, *D4_CLEANUP.parents):
+            info = path.lstat()
+            kind = stat.S_ISREG if path == D4_CLEANUP else stat.S_ISDIR
+            if not kind(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError('untrusted D4 cleanup installation')
+        result = subprocess.run(
+            ['/usr/bin/python3', '-E', '-s', '-B', str(D4_CLEANUP), '--lease', lease],
+            cwd='/', env={}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=180, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise ValueError('D4 allocation still requires trusted cleanup') from None
+    if result.returncode:
+        raise ValueError('D4 allocation still requires trusted cleanup')
+
+
 def run(request, preview, queue_type):
     database = state_database()
     queue = queue_type(database)
@@ -257,6 +277,8 @@ def run(request, preview, queue_type):
         # Cleanup validates every resource label and scopes deletion to this PR.
         helper.cleanup(pr)
         preview.remove_shared_accounts(lease)
+        if exists(d4_allocation):
+            cleanup_d4(lease)
         if exists(d4_allocation):
             raise ValueError('D4 allocation still requires trusted cleanup')
         return slot
