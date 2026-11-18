@@ -74,7 +74,10 @@ def docker_inventory(lease, run):
     volumes = objects('volume', owner, run)
     names = {f'/{prefix}-{case}-{role}': role for case in ('deliver', 'revoke') for role in ('api', 'postgres')}
     volume_names = {f'{prefix}-{case}-postgres-data' for case in ('deliver', 'revoke')}
-    require(len(containers) <= 4 and len(networks) <= 1 and len(volumes) <= 2,
+    receiver_name = f'/{prefix}-revoke-receiver'
+    names[receiver_name] = 'receiver'
+    revoke_api = next((row['Id'] for row in containers if row['Name'] == f'/{prefix}-revoke-api'), None)
+    require(len(containers) <= 5 and len(networks) <= 1 and len(volumes) <= 2,
             'unexpected D4 Docker inventory')
     for row in containers:
         labels = row['Config']['Labels']
@@ -84,6 +87,10 @@ def docker_inventory(lease, run):
                 and not row['HostConfig'].get('PortBindings')
                 and not row['HostConfig'].get('Privileged'),
                 'D4 cleanup container ownership mismatch')
+        if row['Name'] == receiver_name:
+            require(revoke_api and row['HostConfig'].get('NetworkMode') == 'container:' + revoke_api
+                    and row['Config'].get('User') == '2001:2001',
+                    'D4 revoke receiver namespace mismatch')
     for network in networks:
         endpoints = network.get('Containers') or {}
         require(network['Name'] == prefix and HEX64.fullmatch(network['Id'])
@@ -111,13 +118,10 @@ def native_runtimes(allocation, binding):
     require(all(profile['binding'][key] == binding[key] for key in ('pr', 'head', 'merge', 'plan', 'lease')),
             'D4 cleanup launch profile belongs to another release')
     require(set(profile['cases']) == {'d4-deliver', 'd4-revoke'}, 'D4 cleanup cases missing')
-    runtimes = []
-    for case in profile['cases'].values():
-        runtime = RuntimeLaunch(case['root'], case['manifest_sha256'], case['nonce'], case['api_container_id'])
-        require(runtime.root == Path('/run/openqms-d4-' + runtime.nonce), 'D4 cleanup native root mismatch')
-        runtimes.append(runtime)
-    require(runtimes[0].nonce != runtimes[1].nonce, 'D4 cleanup runtime identity is shared')
-    return runtimes
+    case = profile['cases']['d4-deliver']
+    runtime = RuntimeLaunch(case['root'], case['manifest_sha256'], case['nonce'], case['api_container_id'])
+    require(runtime.root == Path('/run/openqms-d4-' + runtime.nonce), 'D4 cleanup native root mismatch')
+    return (runtime,)
 
 
 def reclaim_runtime(runtime, run):
@@ -163,7 +167,7 @@ def cleanup(lease, *, run=command):
     for runtime in runtimes:
         reclaim_runtime(runtime, run)
     containers, networks, volumes = docker_inventory(lease, run)
-    for row in containers:
+    for row in sorted(containers, key=lambda row: row['Config']['Labels'][ROLE_LABEL] != 'receiver'):
         run(*DOCKER, 'container', 'rm', '--force', row['Id'])
     for row in networks:
         run(*DOCKER, 'network', 'rm', row['Id'])

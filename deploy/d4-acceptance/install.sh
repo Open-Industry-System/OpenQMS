@@ -14,7 +14,7 @@ for group in $(id -nG openqms-d4-portal); do
 done
 [[ $(id -u openqms-d4-portal) != 0 && $(id -gn openqms-d4-portal) == openqms-d4-portal ]]
 install -d -o root -g root -m 0755 "$destination"
-for name in browser.py cases.py cleanup.py executor.py issue.py portal_issue.py provision.py revoke_wire.py runtime_launch.py witness.py; do
+for name in browser.py cases.py cleanup.py executor.py issue.py portal_issue.py provision.py revoke_runtime.py revoke_wire.py runtime_launch.py witness.py; do
   [[ -f "$source_dir/$name" && ! -L "$source_dir/$name" ]]
   install -o root -g root -m 0644 "$source_dir/$name" "$destination/$name"
 done

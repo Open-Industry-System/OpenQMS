@@ -15,7 +15,7 @@ from browser import SCENARIOS, validate_binding
 from cleanup import database_binding, docker_inventory, command
 from executor import QUEUE_ROOT, hold_test_slot
 from portal_issue import write_private
-from runtime_launch import RuntimeLaunch, decode, read_owned, require, trusted_directory, verify_bundle
+from runtime_launch import IMAGE, RuntimeLaunch, decode, read_owned, require, trusted_directory, verify_bundle
 from witness import DOCKER, PsqlWitness, uuid_text
 
 
@@ -63,10 +63,11 @@ def permitted_cells(prepared, binding):
             'D4 infrastructure does not match the deployed release')
     require(set(prepared) == {'binding', 'cases'} and set(prepared['cases']) == set(SCENARIOS)
             and len(inventory) == 4, 'two exact D4 infrastructure cells required')
-    expected = {'root', 'manifest_sha256', 'nonce', 'api_container_id', 'db_container_id', 'db_image_id',
-                'db_system_identifier', 'db_host', 'api_port', 'control_socket'}
+    common = {'api_container_id', 'db_container_id', 'db_image_id',
+              'db_system_identifier', 'db_host', 'api_port'}
     for scenario, cell in prepared['cases'].items():
-        require(set(cell) == expected, 'invalid D4 cell preparation fields')
+        runtime_fields = {'root', 'manifest_sha256', 'nonce'} if scenario == 'd4-deliver' else {'revoke_image_id'}
+        require(set(cell) == common | runtime_fields, 'invalid D4 cell preparation fields')
         api = inventory[scenario[3:] + '-api']
         db = inventory[scenario[3:] + '-postgres']
         require(api['Id'] == cell['api_container_id'] and db['Id'] == cell['db_container_id']
@@ -89,18 +90,25 @@ def permitted_cells(prepared, binding):
         require(re.fullmatch('[a-z][a-z0-9-]{0,62}', cell['db_host'])
                 and type(cell['api_port']) is int and 1024 <= cell['api_port'] <= 65535,
                 'invalid D4 infrastructure endpoint')
-        runtime = RuntimeLaunch(cell['root'], cell['manifest_sha256'], cell['nonce'], cell['api_container_id'])
-        require(runtime.root == Path('/run/openqms-d4-' + runtime.nonce), 'D4 runtime root identity mismatch')
-        verify_bundle(runtime.root, runtime.manifest_sha256)
-        runtime.deployment()
-        require(runtime.journal() is None and runtime.read_state() is None, 'D4 runtime already used')
-    require(len({row['nonce'] for row in prepared['cases'].values()}) == 2, 'D4 runtime shared between cases')
+        if scenario == 'd4-deliver':
+            runtime = RuntimeLaunch(cell['root'], cell['manifest_sha256'], cell['nonce'], cell['api_container_id'])
+            require(runtime.root == Path('/run/openqms-d4-' + runtime.nonce), 'D4 runtime root identity mismatch')
+            verify_bundle(runtime.root, runtime.manifest_sha256)
+            runtime.deployment()
+            require(runtime.journal() is None and runtime.read_state() is None, 'D4 runtime already used')
+        else:
+            image = cell['revoke_image_id']
+            require(IMAGE.fullmatch(image) and image != api['Image'] and image != db['Image'],
+                    'dedicated, separately reviewed revocation image required')
+            require(command(*DOCKER, 'image', 'inspect', '--format', '{{.Id}}', image) == image,
+                    'reviewed revocation receiver image unavailable')
 
 
-def read_receiver(directory):
+def read_case_file(directory, filename):
+    require(filename in {'receiver.json', 'private-state.json'}, 'unsupported D4 private record')
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        descriptor = os.open('receiver.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+        descriptor = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
         with os.fdopen(descriptor, 'rb') as file:
             info = os.fstat(file.fileno())
             require(stat.S_ISREG(info.st_mode) and info.st_uid == info.st_gid == 2002
@@ -136,7 +144,7 @@ def seed(cell, binding, source, directory):
 
     # The per-case bind mount is already identity-checked. Open the one fixed
     # credential file directly and keep it out of Docker and process output.
-    receiver = read_receiver(directory)
+    receiver = read_case_file(directory, 'receiver.json')
     require(set(receiver) == {'origin', 'tenant_slug', 'installation_id', 'secret', 'request_key',
                               'expected_report_id'}
             and receiver['origin'] == 'http://127.0.0.1:' + str(cell['api_port'])
@@ -146,9 +154,10 @@ def seed(cell, binding, source, directory):
             and isinstance(receiver['secret'], str)
             and re.fullmatch('[A-Za-z0-9_-]{20,256}', receiver['secret'])
             and re.fullmatch('[a-f0-9]{32}', receiver['request_key']), 'D4 worker config binding mismatch')
-    private = Path(cell['root']) / 'private'
-    trusted_directory(private, private=True)
-    write_private(private / 'config.json', receiver)
+    if 'root' in cell:
+        private = Path(cell['root']) / 'private'
+        trusted_directory(private, private=True)
+        write_private(private / 'config.json', receiver)
 
     return ({key: item for key, item in cell.items() if key not in {'api_port', 'db_host'}}
             | {key: task[key] for key in ('tenant_id', 'schema', 'generation', 'task_id', 'grant_id', 'installation_id')})

@@ -53,7 +53,7 @@ def load_profile(path):
         if type(profile[field]) is not int or profile[field] <= 0:
             raise ValueError('dedicated non-root portal identity required')
     cases = tuple(profile['cases'].values())
-    for field in ('nonce', 'api_container_id', 'task_id', 'db_container_id'):
+    for field in ('api_container_id', 'task_id', 'db_container_id'):
         if cases[0][field] == cases[1][field]:
             raise ValueError('D4 scenarios require independently prepared runtime identities')
     return profile

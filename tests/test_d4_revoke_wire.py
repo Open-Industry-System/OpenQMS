@@ -3,6 +3,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import runpy
+import select
+import shutil
+import subprocess
+import sys
 from threading import Thread
 import time
 from types import SimpleNamespace
@@ -19,6 +23,9 @@ TASK = '22222222-2222-4222-8222-222222222222'
 REPORT = '33333333-3333-4333-8333-333333333333'
 INSTALL = '44444444-4444-4444-8444-444444444444'
 GRANT = '55555555-5555-4555-8555-555555555555'
+ADMIN_TOKEN = 'synthetic.cookie.admin-0123456789'
+PASSWORD = 'synthetic-issue-cli-password'
+SECRET = 'synthetic-install-secret'
 SOURCE = '/api/agent/runtime/capa/d4/root-cause-text'
 REVOKE = f'/api/admin/agent-plugins/{INSTALL}/grants/{GRANT}'
 
@@ -39,7 +46,9 @@ def endpoint():
             state.calls.append((self.command, self.path, self.headers.get('Authorization'),
                                 self.headers.get('X-Tenant-ID'), body))
             status = 200
-            if self.path.endswith('/claim') and self.path != '/api/agent/runtime/messages/claim':
+            if self.path == '/api/auth/login':
+                reply = {'access_token': ADMIN_TOKEN}
+            elif self.path.endswith('/claim') and self.path != '/api/agent/runtime/messages/claim':
                 reply = dict(lease_epoch=1, accepted_message_seq=0, has_resume_checkpoint=False,
                              lease_expires_at=STAMP, run_id=state.claim_run, task_id=TASK, token='run-test-token')
             elif self.path.endswith('/capabilities'):
@@ -76,8 +85,9 @@ def endpoint():
         thread = Thread(target=server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
         thread.start()
         config = WORKER.Config(origin=f'http://127.0.0.1:{server.server_port}', tenant_slug='d4-synthetic',
-                               installation_id=INSTALL, secret='synthetic-install-secret',
+                               installation_id=INSTALL, secret=SECRET,
                                request_key='fixture-key', expected_report_id=REPORT)
+        state.config = config
 
         def exercise():
             return OBSERVE(WORKER, config, admin_token='synthetic-admin-token', task_id=TASK, run_id=RUN,
@@ -118,3 +128,50 @@ def test_control_witness_fails_closed_without_echoing_reply(endpoint, field, val
     with pytest.raises(ValueError, match='^D4 revocation could not be witnessed$'):
         exercise()
     assert len(state.calls) == requests
+
+
+@pytest.mark.parametrize('command', [b'revoke\n', b'reject\n', None])
+def test_receiver_waits_for_controller_before_touching_exact_grant(endpoint, tmp_path, command):
+    _, state = endpoint
+    package = ROOT / 'deploy' / 'd4-acceptance'
+    for path in (package / 'revoke_receiver.py', package / 'revoke_wire.py',
+                 ROOT / 'backend' / 'examples' / 'readonly_d4_text_receiver.py'):
+        shutil.copy(path, tmp_path)
+    with subprocess.Popen([sys.executable, '-I', '-S', '-B', str(tmp_path / 'revoke_receiver.py')],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+        try:
+            receiver = {field: getattr(state.config, field) for field in WORKER.Config.__dataclass_fields__}
+            receiver['tenant_slug'] = 'd4-' + 'a' * 32
+            identities = dict(task_id=TASK, run_id=RUN, grant_id=GRANT)
+            payload = dict(receiver=receiver, admin_username='d4-admin@example.test',
+                           admin_password=PASSWORD, **identities)
+            child.stdin.write(json.dumps(payload).encode() + b'\n')
+            child.stdin.flush()
+            assert select.select([child.stdout], [], [], 5)[0]
+            authorized = json.loads(child.stdout.readline())
+            assert authorized == dict(identities, report_id=REPORT, installation_id=INSTALL, stage='authorized')
+            assert [call[1] for call in state.calls] == [
+                '/api/auth/login', '/api/agent/runtime/claim', '/api/agent/runtime/capabilities',
+                '/api/agent/runtime/messages/claim', SOURCE,
+            ]
+            assert not state.revoked
+
+            output, error = child.communicate(input=command, timeout=5)
+            if command == b'revoke\n':
+                expected = dict(identities, report_id=REPORT, installation_id=INSTALL, authorized_status=200,
+                                revoked_status=401, revoked_body_received=False)
+                assert child.returncode == 0 and json.loads(output) == expected and not error
+                assert state.calls[-2][0:3] == ('PATCH', REVOKE, 'Bearer ' + ADMIN_TOKEN)
+                assert state.calls[-2][-1] == {'enabled': False}
+                assert state.calls[-1][0:3] == ('GET', SOURCE, 'Bearer run-test-token')
+            else:
+                assert child.returncode == 1 and not output and error == b'D4_REVOCATION_BLOCKED\n'
+                assert not state.revoked
+            emitted = (json.dumps(authorized).encode() + output + error).decode()
+            assert all(secret not in emitted for secret in (
+                ADMIN_TOKEN, PASSWORD, SECRET, 'run-test-token', 'synthetic masked body',
+            ))
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)

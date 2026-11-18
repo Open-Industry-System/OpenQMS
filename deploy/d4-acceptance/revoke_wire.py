@@ -82,7 +82,8 @@ def disable_grant(worker, config, admin_token, grant_id, deadline):
                    and result.get('grant_id') == grant_id and result.get('capability_id') == worker.TEXT_CAPABILITY)
 
 
-def observe_revocation(worker, config, *, admin_token, task_id, run_id, grant_id, deadline):
+def observe_revocation(worker, config, *, admin_token, task_id, run_id, grant_id, deadline,
+                       before_revoke=None):
     """Observe a real release, then one fixed PATCH and a same-token denial.
 
     The caller supplies the already reviewed receiver module and private,
@@ -90,12 +91,12 @@ def observe_revocation(worker, config, *, admin_token, task_id, run_id, grant_id
     run. The broker must independently reconcile and reclaim it afterwards.
     """
     try:
-        return _observe(worker, config, admin_token, task_id, run_id, grant_id, deadline)
+        return _observe(worker, config, admin_token, task_id, run_id, grant_id, deadline, before_revoke)
     except Exception:
         raise ValueError('D4 revocation could not be witnessed') from None
 
 
-def _observe(worker, config, admin_token, task_id, run_id, grant_id, end):
+def _observe(worker, config, admin_token, task_id, run_id, grant_id, end, before_revoke):
     deadline = Deadline(end)
 
     class Wire(worker.FixedWire):
@@ -127,10 +128,13 @@ def _observe(worker, config, admin_token, task_id, run_id, grant_id, end):
     wire.validate_delivery(claim, config, delivery)
     del delivery
 
+    identity = dict(task_id=task_id, run_id=run_id, report_id=config.expected_report_id,
+                    installation_id=config.installation_id, grant_id=grant_id)
+    if before_revoke is not None:
+        before_revoke(identity, deadline)
+        deadline.check()
     disable_grant(worker, config, admin_token, grant_id, deadline)
     denied = request(worker, config, 'GET', RUNTIME_BODY, claim.token, None, deadline,
                      status=401, limit=256)
     worker.require(denied == INVALID_RUN)
-    return dict(task_id=task_id, run_id=run_id, report_id=config.expected_report_id,
-                installation_id=config.installation_id, grant_id=grant_id,
-                authorized_status=200, revoked_status=401, revoked_body_received=False)
+    return dict(identity, authorized_status=200, revoked_status=401, revoked_body_received=False)

@@ -1,20 +1,12 @@
 """Run the two fixed D4 scenarios against independently prepared Linux cases."""
 import time
 
-from browser import executor_call
+from revoke_runtime import run_revocation
 from runtime_launch import RuntimeLaunch
-from witness import PsqlWitness, verify_delivery, verify_revocation
+from witness import PsqlWitness, verify_delivery
 
 
 def execute_case(scenario, case, binding):
-    if scenario == 'd4-revoke':
-        # A stock receiver would claim and finish the task before the same-run
-        # observation. Require its dedicated control service before any launch.
-        probe = dict(action='revocation-ready', binding=binding, task_id=case['task_id'],
-                     installation_id=case['installation_id'], grant_id=case['grant_id'])
-        reply = executor_call(case['control_socket'], probe, deadline=time.monotonic() + 2)
-        if reply != dict(probe, ready=True):
-            raise ValueError('dedicated same-run revocation control is unavailable')
     witness = PsqlWitness(
         container_id=case['db_container_id'],
         image_id=case['db_image_id'],
@@ -31,28 +23,20 @@ def execute_case(scenario, case, binding):
             or baseline.lease_epoch != 0 or not baseline.grant_live):
         raise ValueError('prepared D4 task is not newly ready and authorized')
 
+    def snapshot(deadline):
+        return witness.snapshot(**identities, run_id=baseline.run_id, deadline=deadline)
+
+    if scenario == 'd4-revoke':
+        before, after = run_revocation(case, binding, baseline, snapshot)
+        return result(after, before.receipts, 'source_revoked')
+
     def observe(read_state, deadline):
         while time.monotonic() < deadline:
-            if read_state() is None:
-                time.sleep(.15)
-                continue
-            after = witness.snapshot(**identities, run_id=baseline.run_id, deadline=deadline)
-            if scenario == 'd4-deliver':
+            if read_state() is not None:
+                after = snapshot(deadline)
                 if after.task_status == 'completed':
                     verify_delivery(baseline, after)
                     return result(after, baseline.receipts, None)
-            elif (after.run_id and after.run_live
-                  and after.receipts == baseline.receipts + 1):
-                # The separate trusted platform control service retains the
-                # already authorized body read, then revokes that exact grant and
-                # observes denial on that exact run before stopping it.
-                observation = executor_call(case['control_socket'], {
-                    'action': 'revoke-claimed-source', 'binding': binding,
-                    **identities, 'run_id': after.run_id, 'lease_epoch': after.lease_epoch,
-                }, deadline=deadline)
-                current = witness.snapshot(**identities, run_id=after.run_id, deadline=deadline)
-                verify_revocation(after, current, observation)
-                return result(current, after.receipts, 'source_revoked')
             time.sleep(.15)
         raise TimeoutError('no verified platform outcome before receiver deadline')
 
