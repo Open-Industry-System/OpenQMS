@@ -4,6 +4,8 @@
 
 本文档描述 OpenQMS 的系统架构、权限模型、数据流和开发约定。
 
+R6 当前实现事实核对日期为 2026-11-18（Asia/Shanghai）；实际验收证据与尚未放行的条件见 [R6 操作说明](development/r6-entry-switch-operations.md)。
+
 ---
 
 ## 1. 技术栈
@@ -158,6 +160,8 @@ async def create_fmea(...):
 
 ### 4.6 Agent 模块权限内核与任务基础
 
+本节前半保留 R1–R4/SDK 的实现切片及当时验收，默认 baseline 与历史通过数不能解释为当前 R6 准入或新一轮全量结果；R6 当前路径与边界见本节末。
+
 `backend/app/services/agent/permissions/` 已有纯策略内核：模块能力声明、执行身份与插件/任务授权交集、操作审批等级与员工审批资格、投递外发判断及派生内容来源限制。8D D4 的默认 `baseline` 目录中的上下文与候选命令均为 `DENY`；`authorize()` 重新读取不可原位修改的服务端目录，拒绝未知能力及与目录声明不一致的定义；盘点见[Agent 模块能力清单](development/agent-module-capability-inventory.md)，目标行为见[模块权限设计](superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md)。
 
 能力声明由 CAPA 模块的 `capa_agent_capabilities.py` 持有；受控 profile 仅派生 summary 的审批下限，不复制或扩大写权限。无界工厂需要当前 GROUP ADMIN；无界产品线必须带明确行级豁免，模块权限不能替代范围。员工审批同时排除执行者与申请人自批。派生内容保留全部来源的版本、能力与实际投影，任一来源当前撤权整包拒绝，不得降敏投递。
@@ -184,13 +188,25 @@ R4b D4 根因本地受控交付在默认关闭的独立 dev、真实回环 profi
 
 独立元数据 Python SDK 已实现冻结 DTO/严格 codec/stdlib 同步 transport 与十操作 client，Python ≥3.11、零运行时依赖，不导入后端或访问数据库。服务端仍逐次授权，SDK 不缓存权限、解析 run token、自动重试/续租或执行消息；单调 deadline 覆盖整次操作，finish 可能已发送而缺完整确认时仅报告 unknown 并本地阻止重发。独立 unit/自有回环/实际 wheel 隔离安装以及 normal-policy 真实 HTTP fixture 已分阶段验收；Make/自动 CI 接线已双复核，冻结提交的完整本地组合门禁已通过；远端 CI 未执行，自有测试资源已在精确所有权及零其他client/测试进程核验后清理。SDK 不改变固定 worker/hash/profile/catalog 或生产准入，不开放正文附件外发、模型调用或 R5 业务写；见[SDK 交接与限制](development/agent-metadata-python-sdk.md)和[SDK README](../sdk/python/README.md)。
 
+### R6：CAPA 候选、正式材料与入口切换（当前实现，默认关闭）
+
+R6 将 D4 Agent 候选持久化、员工正式确认、现场验证和来源证明签发分开。候选不是正式根因，确认不自动生成验证记录或证明。`capa_d4_candidates`、`capa_d4_confirmation` 和 `capa_r6_delivery` 在当前身份、完整来源和材料版本锁下工作；模型每次物理交付前重新确认完整实际来源，证明不足时保留人工 D5 路径。限制随正式 D4 及后续手工改写传播，不能通过清空、替换、旧草稿或未知来源解除。
+
+`capa_d5_corrections` 保留原始采纳事实及不可变更正历史，当前措施解析最新正式文本。员工更正绑定条目与整份材料版本；相同版本并发只有一份生效。旧批准材料保持 v1 身份，含正式措施的新材料使用 v2；正文读取、审核、历史、PPT、派生和模型出口各自核验当前完整来源，内部版本 HMAC 不授权读取。CAPA 本地来源保留原对象身份及创建时间，不把 CAPA 当作 FMEA、来源证明或候选目录。
+
+受限材料通过 `capa_r6_local_closure` 完成 CAPA 本地人工预防与真实人工文档影响分析。延期阻塞，豁免沿用既有权限与精确范围；无影响必须有明确分析及员工理由。关闭前明确记录经验提取、知识沉淀、横向传播、供应商风险四通道 `NOT_EXECUTED`，不写下游正文、队列或假完成。跨模块正文传播不在 R6 准入范围。
+
+`capa_entry_switch` 以租户追加账本持久记录 legacy → draining → switched。独立短事务先关闭旧推荐写准入，再排空旧业务事务并核清提交/回滚与审计，最后确定 T；超时、租约到期或操作者进程退出保持 draining。接续须同一受信操作文书，过期需显式安全续期，不能重置账本。switched 后服务端退役旧 D4/D5 推荐、草稿及采纳，普通手工写要求当前 epoch 和材料版本；前端随 phase 单调撤下旧入口。停止新生成与切换状态分别控制，兼容回退不恢复旧入口、不降级数据库，须保留来源保护与正式更正读写。
+
+运行仍需默认关闭的任务/受控执行总开关、已批准固定安装、不可变模型部署、受控 profile、受管工件与实时授权同时满足。`R6_GENERATION_ENABLED` 自身默认 true，只有总准入全部满足才生效；置 false 仅停止新生成。代码与本地演练不代表生产启用。public 当前 R6 增量为 `20261116_r6_local_capa_sources`，tenant 为 `tv024_r6_local_capa_sources`，已发布增量不可重写；本分支未合入当前 main 的安全迁移，未来合并需追加 public merge revision 并重新做组合回归。切换与回退步骤见 [R6 操作说明](development/r6-entry-switch-operations.md)；C6–C11 证据见 [R6 台账](development/r6-entry-switch.md)及[实施计划](superpowers/plans/2026-11-15-r6-d4-d5-entry-switch.md)。
+
 ### 4.7 租户事务与独立迁移
 
 多租户业务会话在每次事务开始时重新获取共享事务锁，校验 `public.tenants` 的 active 状态、schema 与 generation，然后设置仅含租户 schema 和 `pg_catalog` 的 `SET LOCAL search_path`。跨 commit 的请求和后台任务沿用捕获的 generation；维护或重建后，旧绑定拒绝继续执行。单租户模式显式使用 public；多租户模式不回退 public。
 
 租户维护通过固定物理连接持有会话级排他锁；同一连接建立 attempt、递增 generation、执行独立 Alembic 链和原子 seed。维护事务验证 PID、attempt、generation 与锁所有权，不再申请业务共享锁。public 平台迁移与租户迁移分别记账，租户基线 `tv001_business_snapshot` 为冻结 DDL；激活前检查对象级 schema parity、seed 和隔离。
 
-普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv010_refresh_sessions`，在 `tv009_r4b_main_merge` 汇合 `tv007_characteristic_refs` 与 `tv008_d4_recovery` 后增加按浏览器隔离的 refresh 会话表。特性分支在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv005 和冻结 snapshot 不改写；tv006保留main已发布字节，与R4b仅说明首行不同（非DDL差异），两来源hash与语义等价另测。public 的无DDL `20261114_r4b_main_merge` 汇合 main 特性与 R4b 恢复两head；无DDL `20261114_production_merge` 再合并已部署的 `20260913_user_refresh_sessions` 分支，保留全部已发布节点。完整旧租户（含两侧旧head与 tv009）在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列和 refresh 会话表），不隐藏租户侧额外或部分对象。tenant降级还要求每条父路径到达同一目标并在执行后核单版本；合并head仅可降共同祖先tv006及更早，拒绝拆分merge留下多head。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。R6 前的独立迁移历史节点为 `tv010_refresh_sessions`，在 `tv009_r4b_main_merge` 汇合 `tv007_characteristic_refs` 与 `tv008_d4_recovery` 后增加按浏览器隔离的 refresh 会话表。特性分支在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv005 和冻结 snapshot 不改写；tv006保留main已发布字节，与R4b仅说明首行不同（非DDL差异），两来源hash与语义等价另测。public 的无DDL `20261114_r4b_main_merge` 汇合 main 特性与 R4b 恢复两head；无DDL `20261114_production_merge` 再合并已部署的 `20260913_user_refresh_sessions` 分支，保留全部已发布节点。完整旧租户（含两侧旧head与 tv009）在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列和 refresh 会话表），不隐藏租户侧额外或部分对象。tenant降级还要求每条父路径到达同一目标并在执行后核单版本；合并head仅可降共同祖先tv006及更早，拒绝拆分merge留下多head。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
 
 ### 4.8 主线旧单报告只读基础与集成边界
 
