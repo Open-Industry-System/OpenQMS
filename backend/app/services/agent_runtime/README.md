@@ -50,4 +50,4 @@ D4 候选保存不写 Root/V/P；普通员工确认另走 CAPA 服务，当前 E
 
 CAPA 通过 `capa_impact_material.read_material` 解析当前正式修订、验证证明和已采纳措施，产出版本及继承来源的不可变绑定。FMEA 的 `fmea_impact_projection` 读取正式批准版本，返回有界工序候选或完整工序链的规范页。批准版本须有同次发布审计记录的工厂、产品线和快照哈希，缺少范围证据的历史快照不参与评估。
 
-完成判定与释放预算为内部规则。后续任务接线须在当前权限及数据库锁内保存可能释放回执，并独立记录规范页确认。历史结果读取须复核完整历史来源。当前无 R7 用户路由、模型部署或 PFMEA 写权限。 [R7 实施计划](../../../../docs/superpowers/plans/2026-11-18-r7-8d-pfmea-impact-assessment.md)
+完成判定与释放预算为内部规则。后续任务接线须在当前权限及数据库锁内保存可能释放回执，并独立记录规范页确认。历史结果读取须复核完整历史来源。R7 任务绑定和回执使用独立持久记录。旧 CAPA 列表、控制和运行鉴权拒绝这些任务。R7 的私有策略使用独立的 `AGENT_R7_PFMEA_IMPACT_ENABLED`（默认关闭）与 `AGENT_R7_PFMEA_IMPACT_POLICY_FILE`。加载策略不开放用户路由、模型部署或 PFMEA 写权限。 [R7 实施计划](../../../../docs/superpowers/plans/2026-11-18-r7-8d-pfmea-impact-assessment.md)

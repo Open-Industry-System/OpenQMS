@@ -128,6 +128,13 @@ async def lifespan(app: FastAPI):
         tenant_mode=settings.TENANT_MODE)
     app.state.r5_credential_resolver = resolve_credential
     logger.info('R5_CONTROLLED_READY' if app.state.r5_controlled_pilot else 'R5_CONTROLLED_DISABLED')
+    from app.services.agent_runtime.pfmea_impact_pilot import load_impact_pilot
+    app.state.r7_impact_pilot = load_impact_pilot(
+        settings.AGENT_R7_PFMEA_IMPACT_POLICY_FILE,
+        enabled=settings.AGENT_R7_PFMEA_IMPACT_ENABLED,
+        runtime_enabled=settings.AGENT_TASK_RUNTIME_ENABLED,
+        tenant_mode=settings.TENANT_MODE,
+    )
     await initialize_attachment_runtime(app)
     # Accounts are created only by the host-invoked private bootstrap CLI or
     # explicit demo seeding. Startup must never publish an installation secret.
