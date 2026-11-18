@@ -111,6 +111,19 @@ async def read_snapshot(report_id, *, binding, engine=None):
                 .where(CAPAEightD.report_id == report_id))).one_or_none()
             if parent is None: raise LookupError('PREVIEW_TARGET_UNAVAILABLE')
             child = CapaRootCauseVerification
+            # Legacy preview fields carry one reference each. A cleared or
+            # replaced reference cannot represent all retained restrictions.
+            metadata=(await connection.execute(select(child.source_ref,child.r6_source_origins)
+                .where(child.capa_id==report_id))).all()
+            from app.services.capa_verification_sources import validate_origins
+            for item in metadata:
+                origins=validate_origins(item.r6_source_origins)
+                for origin in origins:
+                    if (type(item.source_ref) is not dict or origin['fmea_id']!=item.source_ref.get('fmea_id')
+                            or origin['cause_node_id']!=item.source_ref.get('cause_node_id')
+                            or origin['factory_id']!=str(parent.factory_id)
+                            or origin['product_line_code']!=parent.product_line_code):
+                        raise PermissionError('PREVIEW_ACCESS_DENIED')
             size1 = func.coalesce(func.octet_length(child.root_cause_text), 0)
             size2 = func.coalesce(func.octet_length(child.result), 0)
             budget = (await connection.execute(select(func.count().label('count'),
@@ -168,7 +181,13 @@ def _admit(snapshot, levels, factories, lines):
 async def _current(db, scope, report_id):
     levels, factories, lines = await current_capa_access(db, scope)
     target = await _target_meta(db, report_id, factories, lines)
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, scope.user.user_id, report_id)
+    from app.services.capa_verification_sources import authorize_verifications
+    await authorize_verifications(db,report_id,actor_id=scope.user.user_id)
     snapshot = await read_snapshot(report_id, binding=db.info.get('tenant_binding'))
+    await authorize_verifications(db,report_id,actor_id=scope.user.user_id)
+    await authorize_root(db, scope.user.user_id, report_id)
     _admit(snapshot, levels, factories, lines)
     if (snapshot.factory_id, snapshot.product_line_code) != (target.factory_id, target.product_line_code):
         raise PreviewConflict()

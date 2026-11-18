@@ -33,6 +33,9 @@ class OutcomeD5Measure(OutcomeModel):
     measure_id: UUID
     proposal_id: UUID
     final_text: str = Field(repr=False)
+    adopted_text: str | None = Field(default=None, repr=False)
+    correction_revision_id: UUID | None = None
+    correction_revision_no: int | None = None
     text_version: str = Field(pattern=r"^[0-9a-f]{64}$")
     adopted_by: UUID
     adopted_at: datetime
@@ -83,7 +86,7 @@ class OutcomeSupplement(OutcomeModel):
 class CapaOutcomeReview(OutcomeModel):
     report_id: UUID
     status: str
-    contract: Literal["capa.outcome-review.v1"] = "capa.outcome-review.v1"
+    contract: Literal["capa.outcome-review.v1", "capa.outcome-review.v2"] = "capa.outcome-review.v1"
     review_round_id: UUID | None
     revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     binding_status: Literal["pending", "verified", "legacy_unversioned", "unverifiable"]
@@ -93,5 +96,6 @@ class CapaOutcomeReview(OutcomeModel):
     d7_actions: list[D7NodeActionResponse] = Field(repr=False)
     doc_gate: OutcomeDocGate | None = Field(repr=False)
     documents: list[OutcomeDocumentRef]
+    local_closure: dict | None = Field(default=None, repr=False)
     decision: OutcomeDecision | None
     supplement: OutcomeSupplement = Field(repr=False)

@@ -27,7 +27,7 @@ pytestmark = pytest.mark.requires_db
 
 
 @pytest.fixture
-async def seeded_projection(sessionmaker):
+async def seeded_projection(sessionmaker, request):
     factory_id, capa_id, verification_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     role_id, actor_id = uuid.uuid4(), uuid.uuid4()
     token = uuid.uuid4().hex[:12]
@@ -63,18 +63,27 @@ async def seeded_projection(sessionmaker):
         yield factory_id, capa_id, verification_id
     finally:
         async with sessionmaker() as db:
-            await db.execute(delete(AuditLog).where(
-                AuditLog.table_name == "capa_eightd", AuditLog.record_id == capa_id,
-            ))
-            await db.execute(delete(CapaRootCauseVerification).where(CapaRootCauseVerification.capa_id == capa_id))
-            await db.execute(delete(CAPAEightD).where(CAPAEightD.report_id == capa_id))
-            await db.execute(delete(UserProductLine).where(UserProductLine.user_id == actor_id))
-            await db.execute(delete(User).where(User.user_id == actor_id))
-            await db.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
-            await db.execute(delete(RoleDefinition).where(RoleDefinition.id == role_id))
-            await db.execute(delete(ProductLine).where(ProductLine.code == line))
-            await db.execute(delete(Factory).where(Factory.id == factory_id))
-            await db.commit()
+            from app.models.capa_r6 import CapaR6MaterialVersion
+            retained = await db.scalar(select(CapaR6MaterialVersion.report_id).where(
+                CapaR6MaterialVersion.report_id == capa_id))
+            if retained is not None:
+                # A real verification write created monotonic R6 metadata.
+                # Keep its entire synthetic graph until owned DB disposal;
+                # never bypass production immutability for public cleanup.
+                request.node.user_properties.append(("retained_fixture_report", str(capa_id)))
+            else:
+                await db.execute(delete(AuditLog).where(
+                    AuditLog.table_name == "capa_eightd", AuditLog.record_id == capa_id,
+                ))
+                await db.execute(delete(CapaRootCauseVerification).where(CapaRootCauseVerification.capa_id == capa_id))
+                await db.execute(delete(CAPAEightD).where(CAPAEightD.report_id == capa_id))
+                await db.execute(delete(UserProductLine).where(UserProductLine.user_id == actor_id))
+                await db.execute(delete(User).where(User.user_id == actor_id))
+                await db.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
+                await db.execute(delete(RoleDefinition).where(RoleDefinition.id == role_id))
+                await db.execute(delete(ProductLine).where(ProductLine.code == line))
+                await db.execute(delete(Factory).where(Factory.id == factory_id))
+                await db.commit()
 
 
 @pytest.mark.asyncio

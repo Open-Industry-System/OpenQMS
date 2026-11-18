@@ -20,7 +20,7 @@ from app.models.capa_lateral_diffusion import (
 from app.models.factory import Factory
 from app.models.product_line import ProductLine
 from app.models.product_type import ProductType
-from app.models.role import RoleDefinition
+from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.user import User
 from app.schemas.capa_lateral_diffusion import LateralDecisionRequest
 from app.services.capa_lateral_diffusion_service import (
@@ -82,6 +82,9 @@ async def _seed_closed_capa_with_check(
                 factory_id=factory_id,
             )
         )
+        await s.flush()
+        s.add(RolePermission(role_id=role_id, module='capa', permission_level=3))
+        s.add(UserProductLine(user_id=user_id, product_line_code=pl_src))
         await s.flush()
         s.add(
             CAPAEightD(

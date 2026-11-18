@@ -60,6 +60,10 @@ def response_cases():
         'save_checkpoint': dict(**binding,checkpoint_id=str(U),lease_epoch=0,tenant_generation=0,accepted_message_seq=0,update_sequence=1,created_at='2026-11-03T22:00:00+08:00',sources=[source]),
         'message_history': dict(messages=[],next_sequence=3,complete=True),
         'finish': dict(**binding,task_status='completed',run_status='completed',lease_epoch=1),
+        'model_turn': dict(content=SECRET,tool_calls=[dict(id='opaque',name='read_inputs')]),
+        'model_tool': dict(status='prepared'),
+        'save_d4_checkpoint': dict(**binding,checkpoint_id=str(U),lease_epoch=1,command_watermark=0),
+        'save_d4_candidate': dict(**binding,candidate_id=str(U),command_id=str(V),report_id=str(V),state='pending',version=1),
     }
 
 

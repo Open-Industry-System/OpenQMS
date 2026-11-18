@@ -2,7 +2,9 @@
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-class _StaffCommand(BaseModel):
+from app.schemas.database_text import DatabaseTextInput
+
+class _StaffCommand(DatabaseTextInput):
     model_config = ConfigDict(extra='forbid')
     operation_key: str = Field(min_length=1, max_length=128, pattern=r'^[A-Za-z0-9._:-]+$')
 

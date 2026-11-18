@@ -16,6 +16,7 @@ class CapaDocgAnalysis(Base):
         # NOTE: full UNIQUE(capa_id, factory_id) removed (终审第七轮 P0#1) — it blocked
         # retry/regeneration. Concurrency is guarded by partial-UQs below (is_current / running).
         UniqueConstraint("analysis_id", "factory_id", name="uq_docg_analysis_factory"),
+        CheckConstraint("analysis_method IN ('model','manual')", name="ck_docg_analysis_method"),
         CheckConstraint("status IN ('running','done','failed')", name="chk_docg_analysis_status"),
         CheckConstraint(
             "(status='running' AND is_current=false AND completed_at IS NULL) "
@@ -25,7 +26,7 @@ class CapaDocgAnalysis(Base):
         ),
         CheckConstraint(
             "status!='done' OR (affected_docs IS NOT NULL AND analysis_input_hash IS NOT NULL "
-            "AND llm_available=true AND completed_at IS NOT NULL)",
+            "AND ((analysis_method='model' AND llm_available=true) OR (analysis_method='manual' AND llm_available=false)) AND completed_at IS NOT NULL)",
             name="chk_docg_analysis_done_complete",
         ),
         Index("uq_docg_analysis_current", "capa_id", unique=True, postgresql_where=text("is_current = true")),
@@ -45,6 +46,7 @@ class CapaDocgAnalysis(Base):
     affected_docs: Mapped[list | None] = mapped_column(JSONB)
     analysis_input_hash: Mapped[str | None] = mapped_column(String(64))
     llm_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    analysis_method: Mapped[str] = mapped_column(String(10), nullable=False, default="model", server_default="model")
     model: Mapped[str | None] = mapped_column(String(40))
     prompt_stats: Mapped[dict | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)

@@ -39,6 +39,13 @@ async def run_r5_ui(c,tmp_path,spec='r5-collaboration.spec.ts'):
     proposal=saved.json()['proposal_id']
     model_b=await c.admin.post('/api/agent/models',json=dict(c.model_body,name='synthetic B',base_url=f'http://127.0.0.1:{c.witness.b.server_port}/v1'))
     assert model_b.status_code==201,model_b.text
+    if spec=='r5-collaboration.spec.ts':
+        approved=await c.admin.get('/api/agent/models')
+        assert approved.status_code==200,approved.text
+        expected_models={str(c.model_id),model_b.json()['deployment_id']}
+        assert {item['deployment_id']:item['profile'] for item in approved.json()['items']
+                if item['deployment_id'] in expected_models}=={
+                    identifier:'model_d5_proposal_v1' for identifier in expected_models}
     async with c.session() as db:
         await db.execute(update(CAPAEightD).where(CAPAEightD.report_id==c.report_id).values(status='D5_CORRECTION'))
         role=await db.scalar(select(RoleDefinition).where(RoleDefinition.role_key=='field_qe'))
@@ -71,6 +78,13 @@ async def run_r5_ui(c,tmp_path,spec='r5-collaboration.spec.ts'):
     chromium=resolve_browser(frontend,os.environ)
     probe=socket.socket();probe.bind(('127.0.0.1',0));port=probe.getsockname()[1];probe.close()
     backend=str(c.client.base_url).rstrip('/')
+    if spec=='r5-collaboration.spec.ts':
+        async with c.session() as db:
+            task_table=AgentTaskMessage.__table__.metadata.tables['agent_tasks']
+            task_ids_before=set(await db.scalars(select(task_table.c.task_id)))
+            bindings_before={binding.task_id:{column.name:getattr(binding,column.name)
+                for column in binding.__table__.columns}
+                for binding in await db.scalars(select(AgentTaskModelBinding))}
     log=(tmp_path/'vite.log').open('wb');vite=browser=None
     try:
         vite=await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',str(port),'--strictPort',cwd=frontend,env=browser_environment(os.environ,{'BACKEND_URL':backend}),stdout=log,stderr=log)
@@ -82,7 +96,7 @@ async def run_r5_ui(c,tmp_path,spec='r5-collaboration.spec.ts'):
                 except httpx.HTTPError:pass
                 await asyncio.sleep(.05)
             else:pytest.fail('Owned Vite did not start')
-        env=browser_environment(os.environ,{'BACKEND_URL':backend,'AGENT_BACKEND_URL':backend,'AGENT_BROWSER_URL':f'http://127.0.0.1:{port}','AGENT_BROWSER_TENANT':c.slug,'AGENT_BROWSER_REPORT':str(c.report_id),'AGENT_BROWSER_TASK':str(c.task_id),'AGENT_HARNESS_NONCE':nonce,'AGENT_BROWSER_LOGIN':json.dumps({'username':'trial-executor','password':PASSWORD,'installation':str(c.r5_id),'model_b':model_b.json()['deployment_id'],'proposal':proposal,'checkpoint':checkpoint.json()['checkpoint_id']}),'OUTCOME_APPROVER_LOGIN':json.dumps({'username':'t8-colleague','password':PASSWORD,'user_id':str(colleague_id)}),'AGENT_BROWSER_ARTIFACTS':str(tmp_path/'playwright'),'OPENQMS_AGENT_BROWSER_EXECUTABLE':str(chromium)})
+        env=browser_environment(os.environ,{'BACKEND_URL':backend,'AGENT_BACKEND_URL':backend,'AGENT_BROWSER_URL':f'http://127.0.0.1:{port}','AGENT_BROWSER_TENANT':c.slug,'AGENT_BROWSER_REPORT':str(c.report_id),'AGENT_BROWSER_TASK':str(c.task_id),'AGENT_HARNESS_NONCE':nonce,'AGENT_BROWSER_LOGIN':json.dumps({'username':'trial-executor','password':PASSWORD,'installation':str(c.r5_id),'model_a':str(c.model_id),'model_b':model_b.json()['deployment_id'],'proposal':proposal,'checkpoint':checkpoint.json()['checkpoint_id']}),'OUTCOME_APPROVER_LOGIN':json.dumps({'username':'t8-colleague','password':PASSWORD,'user_id':str(colleague_id)}),'AGENT_BROWSER_ARTIFACTS':str(tmp_path/'playwright'),'OPENQMS_AGENT_BROWSER_EXECUTABLE':str(chromium)})
         browser=await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/@playwright/test/cli.js'),'test','--config','playwright.agent.config.ts',spec,cwd=frontend,env=env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         stdout,stderr=await asyncio.wait_for(browser.communicate(),180)
         (tmp_path/'browser.log').write_bytes(stdout+stderr)
@@ -96,7 +110,11 @@ async def run_r5_ui(c,tmp_path,spec='r5-collaboration.spec.ts'):
                 assert any(json.loads(m.content).get('predecessor_id')==proposal for m in messages if m.content.startswith('{'))
             bindings=list(await db.scalars(select(AgentTaskModelBinding)))
             if spec=='r5-collaboration.spec.ts':
-                assert any(str(b.deployment_id)==model_b.json()['deployment_id'] and b.task_id!=c.task_id for b in bindings)
+                assert set(await db.scalars(select(task_table.c.task_id)))==task_ids_before
+                assert {binding.task_id:{column.name:getattr(binding,column.name)
+                    for column in binding.__table__.columns} for binding in bindings}==bindings_before
+                assert next(binding for binding in bindings if binding.task_id==c.task_id).deployment_id==c.model_id
+                assert all(str(binding.deployment_id)!=model_b.json()['deployment_id'] for binding in bindings)
             measure=await db.scalar(select(CapaD5Measure).where(CapaD5Measure.proposal_id==proposal))
             if spec=='r5-collaboration.spec.ts':
                 assert measure.final_text=='T8 同事确认最终措施' and measure.adopted_by==colleague_id
@@ -106,7 +124,7 @@ async def run_r5_ui(c,tmp_path,spec='r5-collaboration.spec.ts'):
                 assert (await db.get(CapaD5Proposal, __import__('uuid').UUID(proposal))).state=='withdrawn'
                 assert (await db.scalar(select(CapaD5Withdrawal))).reason=='T9 selected withdrawal'
         assert len(c.witness.a.bodies)==1 and c.witness.b.bodies==[]
-        print('CHROMIUM_REAL: two roles, bound A / new B / Enter A / colleague adoption after finish; real HTTP; loopback only')
+        print('CHROMIUM_REAL: two roles, bound legacy A / legacy B excluded from new tasks / Enter A / colleague adoption after finish; real HTTP; loopback only')
     finally:
         if browser and browser.returncode is None:browser.kill();await browser.wait()
         if vite and vite.returncode is None:

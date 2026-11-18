@@ -24,6 +24,7 @@ from app.api.audit_program import router as audit_program_router
 from app.api.auditor import router as auditor_router
 from app.api.auth import router as auth_router
 from app.api.capa import router as capa_router
+from app.api.capa_r6 import router as capa_r6_router
 from app.api.capa_review_errors import register_capa_review_errors
 from app.api.change_impact import router as change_impact_router
 from app.api.collaboration import router as collaboration_router
@@ -543,6 +544,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(fmea_router)
+app.include_router(capa_r6_router)
 app.include_router(capa_router)
 app.include_router(capa_d4_text_preview_router)
 app.include_router(dashboard_router)

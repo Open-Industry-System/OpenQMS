@@ -134,6 +134,10 @@ def test_exact_immutable_routes():
         "save_checkpoint": ("POST", "/api/agent/runtime/checkpoints"),
         "message_history": ("GET", "/api/agent/runtime/messages/history"),
         "finish": ("POST", "/api/agent/runtime/finish"),
+        "save_d4_candidate": ("POST", "/api/agent/runtime/capa/d4/candidates"),
+        "save_d4_checkpoint": ("POST", "/api/agent/runtime/capa/d4/checkpoints"),
+        "model_turn": ("POST", "/api/agent/runtime/model/infer"),
+        "model_tool": ("POST", "/api/agent/runtime/model/tools"),
     }
     assert isinstance(models.SUPPORTED_OPERATIONS, MappingProxyType)
     assert models.SUPPORTED_OPERATIONS == expected

@@ -57,12 +57,14 @@ async def current_report_coordinates(db, actor_scope, report_id):
     return row
 
 
-async def record_root_revision(db, *, report_id, actor_id, write_path):
+async def record_root_revision(db, *, report_id, actor_id, write_path, added_source_ids=()):
     """Caller owns the CAPA parent lock; append in its transaction, never commit.
 
     Production writers call only after a real field mutation (or initial finding
     creation). Legacy same-value writes therefore do not bootstrap a revision.
     """
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, actor_id, report_id)
     namespace = await current_field_namespace(db)
     # Flush the caller's exact new text before selecting the scalar; no ORM body load.
     await db.flush()
@@ -76,9 +78,11 @@ async def record_root_revision(db, *, report_id, actor_id, write_path):
         CapaD4RootCauseRevision.revision_no.desc()).limit(1))
     revision = CapaD4RootCauseRevision(revision_id=uuid4(), report_id=report_id,
         revision_no=latest.revision_no + 1 if latest is not None else 1,
-        field_hmac=digest, actor_id=actor_id, write_path=write_path)
+        field_hmac=digest, actor_id=actor_id, write_path=write_path if write_path.startswith("r6:") else "r6:" + write_path)
     db.add(revision)
     await db.flush()
+    from app.services.capa_d4_material import append_root_body
+    await append_root_body(db, revision, current.d4_root_cause, added_source_ids)
     return revision
 
 

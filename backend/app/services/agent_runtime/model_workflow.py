@@ -100,8 +100,13 @@ def begin_round(identity):
 
 async def _current(db, identity, *, lock=True):
     current = await (runtime_access.lock_runtime_identity(db, identity) if lock else runtime_access.refresh_runtime_identity(db, identity))
+    if current.trial is not None and current.trial.profile == model_egress.D4_PROFILE:
+        from app.services.capa_d4_candidates import current_inputs
+        return await current_inputs(db,current,lock=lock)
     d5_commands.require_r5_admission(current)
     await model_egress.task_deployment(db, current.task, lock=lock)
+    from app.services.capa_r6_delivery import require_current_root_use
+    await require_current_root_use(db, current)
     return current
 
 
@@ -121,6 +126,17 @@ async def _messages(db, current, state):
                 'and save suitable proposals to this report using save_proposal for employee review. '
                 'Plan the steps yourself and ask for clarification when needed. '
                 'Saved proposals require separate employee adoption.')
+            if current.trial is not None and current.trial.profile == model_egress.R6_PROFILE:
+                # The fixed entry, rather than arbitrary employee prose, owns
+                # this source-free R6 review plan. All evidence/save checks
+                # remain independent of these model instructions.
+                content += ('\nR6 review plan: First read_d4. On a later turn, after the evidence '
+                    'has been delivered, use request_supplement to ask the employee whether to '
+                    'continue without additional source context. Wait for the structured '
+                    'continue_d5 response with additional_context none before saving. Then save '
+                    'exactly two independently reviewable corrective-measure proposals using '
+                    'save_proposal, grounded only in the authorized evidence, and finish. '
+                    'Do not invent facts, verification results, or employee adoption.')
         state.messages.append({'role':'user','content':content})
     state.accepted = current.run.accepted_message_seq
 
@@ -232,6 +248,9 @@ async def next_turn(db, identity, turn):
 
 
 async def execute_tool(db, identity, request):
+    if identity.trial is not None and identity.trial.profile == model_egress.D4_PROFILE:
+        from app.services.agent_runtime import d4_candidate_workflow
+        return await d4_candidate_workflow.execute_tool(db, identity, request)
     current = await _current(db, identity, lock=False)
     state = _round(current)
     async with state.lock:
@@ -330,5 +349,9 @@ async def status(db, scope, task_id):
     current=await runtime_access.verify_runtime_identity(db,state.token,db.info['tenant_binding'])
     current=await _current(db,current)
     if state.snapshot is not None:
-        await capa_d5_proposals.validate_d5_context_for_release(db,current,snapshot=state.snapshot)
+        if current.trial is not None and current.trial.profile == model_egress.D4_PROFILE:
+            from app.services.capa_d4_candidates import validate_snapshot
+            await validate_snapshot(db,current,state.snapshot)
+        else:
+            await capa_d5_proposals.validate_d5_context_for_release(db,current,snapshot=state.snapshot)
     return {'status':'waiting' if state.question else 'running','question':state.question,'checkpoint_id':state.checkpoint_id}

@@ -27,7 +27,7 @@ pytestmark = pytest.mark.requires_db
 
 
 @pytest_asyncio.fixture
-async def d5_case(committed_runtime):
+async def d5_case(committed_runtime, request):
     c = committed_runtime
     async with c.factory(binding=c.binding) as db:
         report = await db.scalar(select(CAPAEightD))
@@ -49,7 +49,7 @@ async def d5_case(committed_runtime):
         report.fmea_ref_id = docs[0].fmea_id
         verification = CapaRootCauseVerification(capa_id=report.report_id, factory_id=report.factory_id, root_cause_text='root',
             conclusion='passed', is_verified=True,
-            source_ref={'fmea_id': str(docs[0].fmea_id), 'cause_node_id': 'cause'})
+            source_ref=None if getattr(request,'param',None)=='no_verification_origins' else {'fmea_id': str(docs[0].fmea_id), 'cause_node_id': 'cause'})
         db.add(verification)
         await db.flush()
         from app.services.capa_d4_provenance import record_root_revision, verification_version
@@ -219,7 +219,22 @@ async def test_malformed_associations_fail_closed(d5_case, malformed):
         c.db.add(task)
         await c.db.flush()
         if malformed == 'revision-report':
-            c.revision.report_id = other_report.report_id
+            from sqlalchemy import text
+            from sqlalchemy.exc import IntegrityError
+            # New R6 bindings forbid this corruption through a normal write.
+            with pytest.raises(IntegrityError, match='capa_r6_root_revision_bodies_revision_id_report_id_fkey'):
+                async with c.db.begin_nested():
+                    await c.db.execute(update(CapaD4RootCauseRevision).where(
+                        CapaD4RootCauseRevision.revision_id == c.revision.revision_id
+                    ).values(report_id=other_report.report_id))
+            # Model an imported historical broken association in this owned row
+            # only. Real authorization/reads run after normal triggers resume.
+            await c.db.execute(text('SET LOCAL session_replication_role = replica'))
+            changed = await c.db.execute(update(CapaD4RootCauseRevision).where(
+                CapaD4RootCauseRevision.revision_id == c.revision.revision_id
+            ).values(report_id=other_report.report_id))
+            assert changed.rowcount == 1
+            await c.db.execute(text('SET LOCAL session_replication_role = origin'))
         elif malformed == 'command-task':
             await c.db.execute(update(AgentD5Command).values(task_id=task.task_id))
         elif malformed == 'command-proposal':
@@ -228,7 +243,10 @@ async def test_malformed_associations_fail_closed(d5_case, malformed):
         else:
             await c.db.execute(update(AgentRun).where(AgentRun.run_id == c.run_id).values(task_id=task.task_id))
     await c.db.commit()
-    assert (await read_d5_measures(c.db, c.actors[2], c.report.report_id)).total == (1 if malformed == 'command-proposal' else 0)
+    with SQLSpy(await c.db.connection()) as spy:
+        assert (await read_d5_measures(c.db, c.actors[2], c.report.report_id)).total == (1 if malformed == 'command-proposal' else 0)
+    if malformed != 'command-proposal':
+        assert not any('final_text' in sql for sql in spy.statements)
 
 
 @pytest.mark.asyncio
@@ -380,8 +398,18 @@ async def test_verification_freshness_matches_established_d4_contract(d5_case, c
         values['factory_id'] = factory.id
     # Preserve the version timestamp to exercise the direct content/coordinate
     # consistency checks used by existing D4 delivery, not version drift alone.
-    await c.db.execute(update(CapaRootCauseVerification).where(
-        CapaRootCauseVerification.verification_id == c.proof.verification_id).values(**values))
+    from sqlalchemy import text, literal_column
+    if change == 'factory':
+        # Identity drift is prohibited by current19; retain the established
+        # reader check for an untouched pre19 bad-coordinate NULL legacy row.
+        await c.db.execute(text('ALTER TABLE capa_root_cause_verification DISABLE TRIGGER r6_retain_verification_origins'))
+        values['r6_source_origins'] = literal_column('NULL')
+    try:
+        await c.db.execute(update(CapaRootCauseVerification).where(
+            CapaRootCauseVerification.verification_id == c.proof.verification_id).values(**values))
+    finally:
+        if change == 'factory':
+            await c.db.execute(text('ALTER TABLE capa_root_cause_verification ENABLE TRIGGER r6_retain_verification_origins'))
     await c.db.commit()
     after = await read_d5_proposals(c.db, c.actors[2], c.report.report_id)
     assert after.total == 2 and all(not item.basis_current for item in after.items)

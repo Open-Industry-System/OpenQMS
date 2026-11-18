@@ -7,7 +7,7 @@ import json
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, text
 
 from app.models.agent_d5_command import AgentD5Command
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
@@ -103,13 +103,18 @@ async def test_actual_launch_formal_material_race_export_and_current_revocation(
     from app.models.audit import AuditLog
     build = AsyncMock(side_effect=AssertionError('formal material reached provider setup'))
     complete = AsyncMock(side_effect=AssertionError('formal material reached model'))
+    existing_model_calls = len(c.witness.a.bodies)
+    assert existing_model_calls > 0  # Keep the preceding authorized delivery history.
     with monkeypatch.context() as patcher:
         patcher.setattr(provider_adapter, 'build_client', build)
         patcher.setattr(provider_adapter, 'complete_json', complete)
         draft = await c.client.post(f'/api/capa/{c.report_id}/draft/d5', json={
             'format': 'structured', 'request_id': str(uuid4())})
         assert draft.status_code == 403, draft.text
-        assert draft.json() == {'detail': 'D5_FULL_MATERIAL_UNAVAILABLE'}
+        assert draft.json() == {'detail': 'D4_DRAFT_MATERIAL_UNAVAILABLE'}
+        assert 'R5-T9-FORMAL-SENTINEL' not in draft.text
+        assert not {'content', 'structured_data', 'summary'} & set(draft.json())
+        assert len(c.witness.a.bodies) == existing_model_calls and c.witness.b.bodies == []
         build.assert_not_awaited()
         complete.assert_not_awaited()
     async with c.session() as db:
@@ -117,7 +122,7 @@ async def test_actual_launch_formal_material_race_export_and_current_revocation(
             AuditLog.record_id == c.report_id, AuditLog.action == 'AI_DRAFT'))
         assert audit.changed_fields['status_code'] == 403
         assert audit.changed_fields['success'] is False
-        assert audit.changed_fields['error'] == 'D5_FULL_MATERIAL_UNAVAILABLE'
+        assert audit.changed_fields['error'] == 'D4_DRAFT_MATERIAL_UNAVAILABLE'
     race=await asyncio.gather(c.client.post(f"{base}/{items[1]['proposal_id']}/adopt",json={'operation_key':'race-adopt','final_text':'race final'}),c.client.post(f"{base}/{items[1]['proposal_id']}/withdraw",json={'operation_key':'race-withdraw','reason':'race reason'}))
     assert sorted(response.status_code for response in race)==[200,409],[response.text for response in race]
     advanced=await c.client.post(f'/api/capa/{c.report_id}/advance',json={})
@@ -258,7 +263,23 @@ async def test_actual_formal_measure_full_review_snapshot_and_final_authority(r5
     assert any(item['final_text']=='R5-T9-REVIEW-FORMAL' for item in seen.json()['d5_measures'])
     expected={'target_state':'D8_CLOSURE','expected_outcome_revision':seen.json()['revision'],'expected_review_round_id':seen.json()['review_round_id']}
     async with c.session() as db:
-        await db.execute(update(CapaD5Measure).where(CapaD5Measure.proposal_id==UUID(items[0]['proposal_id'])).values(final_text='synthetic changed final'))
+        from sqlalchemy.exc import IntegrityError
+        measure_id = await db.scalar(select(CapaD5Measure.measure_id).where(
+            CapaD5Measure.proposal_id == UUID(items[0]['proposal_id'])))
+        assert measure_id is not None
+        with pytest.raises(IntegrityError, match='R6 original D5 adoption is immutable'):
+            async with db.begin_nested():
+                await db.execute(update(CapaD5Measure).where(CapaD5Measure.measure_id == measure_id)
+                    .values(final_text='synthetic changed final').execution_options(synchronize_session=False))
+        assert await db.scalar(select(CapaD5Measure.final_text).where(
+            CapaD5Measure.measure_id == measure_id)) == 'R5-T9-REVIEW-FORMAL'
+        # Exceptional imported-history tamper fixture, not a Task6 correction.
+        # Bypass only this owned row; real HTTP guards run after normal triggers resume.
+        await db.execute(text('SET LOCAL session_replication_role = replica'))
+        changed = await db.execute(update(CapaD5Measure).where(CapaD5Measure.measure_id == measure_id)
+            .values(final_text='synthetic changed final').execution_options(synchronize_session=False))
+        assert changed.rowcount == 1
+        await db.execute(text('SET LOCAL session_replication_role = origin'))
         await db.commit()
     stale=await c.client.post(path+'/advance',json=expected)
     assert stale.status_code==409 and stale.json()['detail']=='CAPA_OUTCOME_REVIEW_CHANGED',stale.text

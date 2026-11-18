@@ -25,6 +25,8 @@ async def _extract_d8_with_cleanup(
     R4+R13: 传 new_d8_closure 文本，不先 mutate capa.d8_closure。
     任意步骤失败 → savepoint rollback，旧 d8 lessons 集合保持不变，capa.d8_closure 未被修改。
     """
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa.report_id)
     capa_id = capa.report_id
     factory_id = capa.factory_id
 
@@ -99,6 +101,8 @@ async def _extract_lessons(
     text_override 非 None → 用它（Task 14 d8 抽取传新 d8_closure，不 mutate capa 字段）；
     None → 读 capa.d7_prevention（source_d_step="d7"）或 capa.d8_closure（="d8"）。
     """
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, capa.report_id)
     if text_override is not None:
         raw = text_override
     elif source_d_step == "d7":

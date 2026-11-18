@@ -20,17 +20,24 @@ test('two roles collaborate on R5 proposals with immutable sidebar recipients',a
   await page.getByRole('button',{name:'关闭任务侧栏',exact:true}).click();
   await page.getByRole('button',{name:'以本报告创建任务',exact:true}).click();
   await page.getByLabel('插件安装',{exact:true}).selectOption(details.installation);
-  await page.getByLabel('新任务模型',{exact:true}).selectOption(details.model_b);
+  await expect(page.getByLabel('新任务类型',{exact:true})).toHaveValue('d5');
+  const picker=page.getByLabel('新任务模型',{exact:true});
+  await expect(picker.locator(`option[value="${details.model_a}"]`)).toHaveCount(0);
+  await expect(picker.locator(`option[value="${details.model_b}"]`)).toHaveCount(0);
+  await expect(picker.locator('option')).toHaveCount(1);
+  await expect(page.getByText('暂无可用的批准模型部署。',{exact:true})).toBeVisible();
+  const canonicalNew=page.getByRole('button',{name:'用 所选模型 开始新任务（仅根据当前根因）',exact:true});
+  const conversationNew=page.getByRole('button',{name:'用 所选模型 开始新任务（自由对话）',exact:true});
+  await expect(canonicalNew).toBeDisabled();await expect(conversationNew).toBeDisabled();
+  await page.getByLabel('初始指令',{exact:true}).fill('T8 old B is not eligible for new tasks');
+  await expect(canonicalNew).toBeDisabled();await expect(conversationNew).toBeDisabled();
+  await expect(page.getByText('当前接收方：synthetic A · 1',{exact:true})).toBeVisible();
   await page.getByLabel('追加指令',{exact:true}).fill('T8 Enter stays A');
   const append=page.waitForResponse(r=>r.url().endsWith(`/api/agent/tasks/${task}/messages`) && r.request().method()==='POST');
   await page.getByLabel('追加指令',{exact:true}).press('Enter');expect((await append).status()).toBe(202);
   await expect(page.getByText('当前接收方：synthetic A · 1',{exact:true})).toBeVisible();
   await expect(page.getByRole('button',{name:'补充给 synthetic A',exact:true})).toBeDisabled();
-  await page.getByLabel('初始指令',{exact:true}).fill('T8 explicit new B');
-  const created=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/agent/tasks' && r.request().method()==='POST');
-  await page.getByRole('button',{name:'用 synthetic B · 1 开始新任务（仅根据当前根因）',exact:true}).click();
-  const response=await created;expect(response.status()).toBe(201);expect(response.request().postDataJSON().initial_text).toBe('deliver_d4_root_cause_candidate_v1');const createdTask=await response.json();expect(createdTask.model_deployment.deployment_id).toBe(details.model_b);expect(createdTask.status).toBe('ready');
-  await expect(page.getByText('当前接收方：synthetic B · 1',{exact:true})).toBeVisible();
+  await expect(canonicalNew).toBeDisabled();await expect(conversationNew).toBeDisabled();
   const finished=await page.request.post(`${process.env.AGENT_BACKEND_URL}/__t8_ui/complete`,{headers:{'X-Acceptance-Nonce':process.env.AGENT_HARNESS_NONCE!,'X-Tenant-ID':process.env.AGENT_BROWSER_TENANT!},data:{}});expect(finished.status(),await finished.text()).toBe(200);
   const second=await browser.newContext();const coworker=await second.newPage();
   try{
@@ -47,6 +54,7 @@ test('two roles collaborate on R5 proposals with immutable sidebar recipients',a
     await expect(coworker.getByText('T8 同事确认最终措施',{exact:true})).toBeVisible();
     await expect(coworker.locator('p').filter({hasText:/^T8 Agent 原文$/})).toBeVisible();
     await page.getByRole('button',{name:'关闭任务侧栏',exact:true}).click();
+    await expect(page.getByRole('button',{name:'关闭任务侧栏',exact:true})).toBeHidden();
     await page.getByRole('button',{name:'刷新建议',exact:true}).click();
     await expect(page.getByText('已采纳',{exact:true})).toBeVisible();
     await expect(page.getByText('T8 同事确认最终措施',{exact:true})).toBeVisible();

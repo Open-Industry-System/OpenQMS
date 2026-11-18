@@ -19,6 +19,10 @@ from app.services.ai_config_service import get_raw_ai_config  # raw (unmasked) k
 logger = logging.getLogger(__name__)
 
 
+from app.services.egress_guard import (with_delivery_guard, run_sdk_operation,
+    before_physical_request as _before_physical_request, _delivery_guard)
+
+
 @dataclass
 class ProviderClient:
     provider: str  # "openai" | "anthropic" | "local"
@@ -164,19 +168,32 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
     Both enforce MAX_RESPONSE_BYTES and use extract_json for fenced JSON.
     local: httpx POST {base_url}/api/generate (mirrors legacy LocalProvider.complete).
     """
+    if pc.provider in ('openai', 'anthropic'):
+        return await run_sdk_operation(pc.client,
+            lambda client: _complete_json_request(pc, client, prompt, response_schema))
+    return await _complete_json_request(pc, pc.client, prompt, response_schema)
+
+
+async def _complete_json_request(pc, client, prompt, response_schema):
     if pc.provider == "openai_responses":
         raise ProviderNotConfiguredError("Responses deployments use the approved R5 tool-turn route")
     messages = [{"role": "user", "content": prompt}]
     if pc.provider == "openai":
         try:
-            resp = await pc.client.chat.completions.create(
+            await _before_physical_request()
+            resp = await client.chat.completions.create(
                 model=pc.model, messages=messages,
                 response_format={"type": "json_object"},
             )
         except Exception as e:
+            await _before_physical_request()
             if "json_object" in str(e) or "response_format" in str(e):
-                logger.info("LLM rejected response_format=json_object, retrying without: %s", e)
-                resp = await pc.client.chat.completions.create(model=pc.model, messages=messages)
+                if _delivery_guard.get() is None:
+                    logger.info("LLM rejected response_format=json_object, retrying without: %s", e)
+                else:
+                    logger.info("LLM rejected response_format=json_object; retrying without it")
+                await _before_physical_request()
+                resp = await client.chat.completions.create(model=pc.model, messages=messages)
             else:
                 raise
         text = resp.choices[0].message.content or ""
@@ -186,7 +203,8 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
         # Ollama supports format=json to constrain output to JSON (helps small
         # models that otherwise emit prose → extract_json "Expecting value").
         # US-E2E-01.7/01.9: without this, qwen2.5:3b often returns non-JSON.
-        async with httpx.AsyncClient(base_url=pc.base_url, timeout=30) as client:
+        async with httpx.AsyncClient(base_url=pc.base_url, timeout=30, follow_redirects=False) as client:
+            await _before_physical_request()
             resp = await client.post(
                 "/api/generate",
                 json={
@@ -199,7 +217,8 @@ async def complete_json(pc: ProviderClient, prompt: str, response_schema: dict) 
         resp.raise_for_status()
         text = resp.json().get("response", "")
     else:  # anthropic
-        resp = await pc.client.messages.create(
+        await _before_physical_request()
+        resp = await client.messages.create(
             model=pc.model, messages=messages, max_tokens=1024,
         )
         text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")

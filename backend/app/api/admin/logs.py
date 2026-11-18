@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
@@ -29,10 +29,13 @@ async def list_audit(
     db: AsyncSession = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    items, total = await log_service.list_audit_logs(
-        db, _filters(table_name=table_name, action=action, operated_by=operated_by, start=start, end=end),
-        page, page_size,
-    )
+    try:
+        items, total = await log_service.list_audit_logs(
+            db, _filters(table_name=table_name, action=action, operated_by=operated_by, start=start, end=end),
+            page, page_size, actor_id=_admin.user_id,
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, List, Tag, Button, Form, Input, Space, App, Empty, Spin, Upload, Select } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
@@ -24,9 +24,11 @@ interface CauseOption {
 
 export default function D4VerificationCard({ capaId, canEdit, currentRootCause, fmeaRefId }: Props) {
   const { t } = useTranslation("capa");
-  const requests = useCapaChildRequests(capaId, [canEdit, fmeaRefId]);
+  const requests = useCapaChildRequests(capaId, [canEdit, fmeaRefId,currentRootCause]);
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const reloadRequest=useRef<{cancel:()=>void}|null>(null);
+  const reloadSequence=useRef(0);
   const [items, setItems] = useState<Verification[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -43,16 +45,37 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
   }, [requests, form]);
 
   const reload = async () => {
+    // Polls and mutation reloads share this latest-read owner. An older admitted
+    // response must never restore content after a newer read denies authority.
+    reloadRequest.current?.cancel();
     const request = requests.begin();
-    if (!request.current()) return;
+    reloadRequest.current=request;
+    const sequence=++reloadSequence.current;
+    const current=()=>request.current()&&reloadRequest.current===request&&reloadSequence.current===sequence;
+    if (!current()) {request.finish();return;}
     setLoading(true);
     try {
       const rows = await listVerifications(capaId, request.signal);
-      if (request.current()) setItems(rows);
-    } catch { if (request.current()) message.error(t("d4.verificationLoadFailed")); }
-    finally { if (request.current()) setLoading(false); request.finish(); }
+      if (current()) setItems(rows);
+    } catch(error) {
+      if(current()) {
+        setItems([]);setShowForm(false);setEditingCauseVid(null);setEditCauseValue(undefined);form.resetFields();setLoading(false);
+        const status=(error as {response?:{status?:number}})?.response?.status;
+        if(status&&[401,403,404,409].includes(status)){
+          setCauseOptions([]);setSelectedCause(undefined);
+          // Also invalidate any pending source-node detail read and writes.
+          requests.invalidate();
+        }
+        message.error(t("d4.verificationLoadFailed"));
+      }
+    } finally {if(current())setLoading(false);request.finish();}
   };
-  useEffect(() => { void reload(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [capaId, requests]);
+  useEffect(() => {
+    void reload();
+    const timer=setInterval(()=>void reload(),2000);
+    return()=>{clearInterval(timer);++reloadSequence.current;reloadRequest.current?.cancel();};
+    /* eslint-disable-line react-hooks/exhaustive-deps */
+  }, [capaId, requests]);
 
   useEffect(() => {
     const request = requests.begin();
@@ -183,6 +206,7 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
                       : `⏳ ${t("verification.conclusion.draft")}`}
                   </Tag>
                   <span>{rec.root_cause_text}</span>
+                  {!!rec.known_source_origins?.length && <section aria-label="继承的已知来源限制"><p>清空或替换当前引用不解除已知来源限制</p>{rec.known_source_origins.map(origin=><p key={JSON.stringify(origin)}>{origin.fmea_id} · {origin.cause_node_id} · {origin.factory_id} · {origin.product_line_code}</p>)}</section>}
                   {causeNodeId && causeFmeaId && !isEditingCause && (
                     <Tag
                       color="blue"

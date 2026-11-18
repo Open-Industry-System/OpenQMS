@@ -1,3 +1,5 @@
+import D5MeasureCorrection from './D5MeasureCorrection';
+import CapaSourceDetails from './CapaSourceDetails';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Button, Card } from 'antd';
 import { adoptD5Proposal, checkpointProposals, listD5Proposals, listD5Measures, withdrawCheckpointProposals, withdrawD5Proposal } from '../../api/d5Proposals';
@@ -18,6 +20,8 @@ function subscribeSession(callback:()=>void){
 const bounded = (s:string) => !!s.trim() && new TextEncoder().encode(s).length<=16384;
 export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
   const session=useSyncExternalStore(subscribeSession,readSession,readSession);
+  const [measureSelection,setMeasureSelection]=useState<string|null>(null);
+  const [sourceSelection,setSourceSelection]=useState<string|null>(null);
   const [page,setPage]=useState(1);
   const [measurePage,setMeasurePage]=useState(1);
   const requests=useCapaChildRequests(capaId,JSON.stringify([checkpoint,page,measurePage,session]));
@@ -34,7 +38,7 @@ export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
   const [version,setVersion]=useState(0);
   const items=snapshot?.owner===requests?snapshot.items:[];
   useEffect(()=>{
-    setSnapshot(null);setEdits({});setReasons({});setSelected([]);setReason('');setResults([]);setRetry(null);setNotice('');setBusy(false);busyRef.current=false;
+    setMeasureSelection(null);setSourceSelection(null);setSnapshot(null);setEdits({});setReasons({});setSelected([]);setReason('');setResults([]);setRetry(null);setNotice('');setBusy(false);busyRef.current=false;
   },[requests]);
   useEffect(()=>{
     let timer:ReturnType<typeof setTimeout>;
@@ -93,7 +97,7 @@ export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
     <Button disabled={busy || !!retry} onClick={()=>{requests.invalidate();setSnapshot(null);setEdits({});setReasons({});setSelected([]);setResults([]);setRetry(null);setVersion(v=>v+1);}}>刷新建议</Button>
     {items.map(item=><section key={item.proposal_id} aria-label={`建议 ${item.proposal_id}`}>
       <p>{labels[item.state]}{!item.basis_current && <> · <span>依据过时</span></>}</p>
-      <p>建议 {item.proposal_id} · 任务 {item.task_id}</p><p>{item.original_text}</p>
+      <p>建议 {item.proposal_id} · 任务 {item.task_id}</p><p>{item.original_text}</p><Button onClick={()=>setSourceSelection(item.proposal_id)}>查看建议依据 {item.proposal_id}</Button>
       {checkpoint && <label><input type="checkbox" aria-label={`选择建议 ${item.proposal_id}`} disabled={busy || !!retry || !item.can_withdraw} checked={selected.includes(item.proposal_id)} onChange={e=>setSelected(old=>e.target.checked?[...old,item.proposal_id]:old.filter(id=>id!==item.proposal_id))}/>选择建议</label>}
       {item.state==='pending' && <>
         <label>最终措施<textarea aria-label={`最终措施 ${item.proposal_id}`} value={edits[item.proposal_id]??item.original_text} disabled={busy || !!retry || !item.can_adopt} onChange={e=>setEdits({...edits,[item.proposal_id]:e.target.value})}/></label>
@@ -115,13 +119,15 @@ export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
       <h4>员工确认的正式措施</h4>
       {(snapshot?.owner===requests?snapshot.measures:[]).map(measure=><section key={measure.measure_id} aria-label={`正式措施 ${measure.measure_id}`}>
         <p>对应建议 {measure.proposal_id}</p>
-        <p>{measure.final_text}</p>
+        <p>{measure.final_text}</p><Button aria-label={`更正与历史 ${measure.measure_id}`} onClick={()=>setMeasureSelection(measure.measure_id)}>更正与历史</Button>
         <p>采纳人 {measure.adopted_by} · {measure.adopted_at}</p>
       </section>)}
       <p>正式措施第 {measurePage} 页</p>
       <Button disabled={measurePage<=1 || busy || !!retry} onClick={()=>setMeasurePage(p=>p-1)}>上一页正式措施</Button>
       <Button disabled={!snapshot || measurePage*20>=snapshot.measureTotal || busy || !!retry} onClick={()=>setMeasurePage(p=>p+1)}>下一页正式措施</Button>
     </section>
+    {snapshot?.owner===requests && measureSelection && snapshot.measures.some(item=>item.measure_id===measureSelection) && <D5MeasureCorrection capaId={capaId} measureId={measureSelection} onChanged={onChanged}/>}
+    {snapshot?.owner===requests && sourceSelection && snapshot.items.some(item=>item.proposal_id===sourceSelection) && <CapaSourceDetails capaId={capaId} kind="d5-proposal" itemId={sourceSelection}/>}
     {snapshot?.owner===requests && retry && <Button disabled={busy} onClick={()=>void execute(retry)}>重试原处理</Button>}
     <p aria-live="polite">{notice}</p>
   </Card>;

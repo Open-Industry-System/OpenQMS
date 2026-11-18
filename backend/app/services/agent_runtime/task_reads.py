@@ -15,6 +15,9 @@ from app.services.agent_runtime.task_controls import _current_run, _task_binding
 
 
 async def _text_discoverable(db, scope, target, manifest, trial, grants, levels, factories, lines):
+    if trial is not None and trial.profile in {'model_d4_candidate_v1','model_d5_proposal_r6_v1'}:
+        from app.services.agent_runtime.source_discovery import discoverable
+        return await discoverable(db,scope,target,trial)
     from datetime import UTC, datetime
     from app.models.agent_derived_source import AgentPluginDerivedSourceScope
     from app.services.agent.permissions.access import can_discover_source_plugin

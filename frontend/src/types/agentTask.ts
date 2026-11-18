@@ -2,7 +2,9 @@
 export type TaskStatus = "blocked_capability" | "ready" | "paused" | "completed" | "failed" | "cancelled";
 export type RunStatus = "pending" | "active" | "paused" | "stopped" | "completed" | "failed";
 export type TaskAction = "pause" | "resume" | "cancel" | "restart";
+export type ModelProfile = "model_d4_candidate_v1"|"model_d5_proposal_v1"|"model_d5_proposal_r6_v1";
 export interface ModelDeployment {
+  profile?: ModelProfile;
   deployment_id: string;
   name: string;
   version: string;
@@ -20,6 +22,7 @@ export interface AgentTask {
   updated_at: string;
 }
 export interface TaskCreate {
+  derived_source_scope?:{target_report_id:string;fmea_id:string;cause_node_id:string};
   model_deployment_id?: string;
   report_id: string;
   installation_id: string;

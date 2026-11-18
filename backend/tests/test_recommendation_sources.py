@@ -1,5 +1,7 @@
 import uuid
 import pytest
+
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa: F401
 from unittest.mock import AsyncMock, MagicMock
 
 from app.services.recommendation_sources import (

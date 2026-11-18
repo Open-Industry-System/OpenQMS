@@ -87,26 +87,49 @@ def _assert_verified_has_details(method, result, evidence) -> None:
         raise ValueError("已验证记录须填写验证方法、结果或证据")
 
 
-async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest):
+async def _find_existing_adoption(db: AsyncSession, capa_id, req: AdoptRequest, actor_id):
     # 幂等去重 key：同 (capa, d_step, source, item_ref, adopted_text)。item_ref 是 JSONB，
     # SQLAlchemy == None 生成 IS NULL、== {} 生成 = '{}'::jsonb，与 ix_capa_ai_adoption_dedupe 的 COALESCE 收口一致
     # 接收标量 capa_id（非 capa 对象）：rollback 会 expire capa，async 下访问 capa.report_id 会 MissingGreenlet
-    return await db.scalar(select(CapaAIAdoption).where(
+    adoption_id = await db.scalar(select(CapaAIAdoption.adoption_id).where(
         CapaAIAdoption.capa_id == capa_id,
         CapaAIAdoption.d_step == req.d_step,
         CapaAIAdoption.source == req.source,
         CapaAIAdoption.adopted_text == req.adopted_text,
         CapaAIAdoption.item_ref == req.item_ref,
     ))
+    if adoption_id is None:return None
+    from app.services.capa_d4_material import authorize_root
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    await authorize_root(db,actor_id,capa_id,PermissionLevel.EDIT)
+    await authorize_bound_sources(db,actor_id,capa_id,d_step='d5')
+    return await db.scalar(select(CapaAIAdoption).where(CapaAIAdoption.adoption_id==adoption_id))
+
+
+async def _lock_adoption_target(db,report_id,actor_id):
+    """Metadata first; body lookup follows all parent waits and live checks."""
+    from app.services.capa_d4_material import authorize_root
+    from app.services.capa_legacy_capture import authorize_bound_sources,lock_current_history_sources
+    from app.services.capa_review_guard import assert_reviewed_material_mutable
+    await authorize_root(db,actor_id,report_id,PermissionLevel.EDIT)
+    await authorize_bound_sources(db,actor_id,report_id,d_step='d5')
+    await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id==report_id).with_for_update())
+    await lock_current_history_sources(db,actor_id,report_id)
+    capa=await current_capa_actor_target(db,actor_id,report_id,PermissionLevel.EDIT)
+    assert_reviewed_material_mutable(capa)
+    return capa
 
 
 async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
+    from app.services.capa_entry_switch import admit
+    await current_capa_actor_target(db, user.user_id, capa.report_id, PermissionLevel.EDIT)
+    await admit(db, "legacy")
     actor_id = user.user_id  # rollback expires even the persisted User PK
     # This must happen before the idempotency fast-path: returning an existing
     # adoption is still a reviewed-material write admission decision.
-    capa = await lock_current_material_write(
-        db, capa, actor_id, PermissionLevel.EDIT
-    )
+    capa = await _lock_adoption_target(db,capa.report_id,actor_id)
+    from app.services.capa_legacy_capture import canonical_request
+    req = await canonical_request(db, capa, req)
     field = FIELD_MAP[req.d_step]
     # 归一化 item_ref: None (省略) → {} (空 dict)。JSONB 把 Python None 存成 JSON null 而非 SQL NULL，
     # 若不归一化，pre-query 的 IS NULL 查不到刚插的 JSON null 行，重试会撞 unique index 后 re-raise 500。
@@ -115,11 +138,16 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         req = req.model_copy(update={"item_ref": {}})
     # 幂等：重复采纳（双击/重试/代理重发）直接返回既有 adoption，不重复追加 d-step 文本、不重复 audit
     capa_id = capa.report_id  # 捕获标量，供 IntegrityError handler 在 rollback（expire capa）后使用
-    existing = await _find_existing_adoption(db, capa_id, req)
+    existing = await _find_existing_adoption(db, capa_id, req, actor_id)
     if existing is not None:
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, actor_id, capa.report_id)
         await db.refresh(capa)
+        await authorize_root(db, actor_id, capa.report_id)
         return existing, getattr(capa, field) or ""
 
+    from app.services.capa_legacy_capture import require_capture
+    await require_capture(db, capa, req, user)
     # The parent guard already holds the row lock and returned fresh data.
     previous = getattr(capa, field)
     current = previous or ""
@@ -137,7 +165,7 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         action="ADOPT_RECOMMENDATION",
         changed_fields={
             "d_step": req.d_step, "source": req.source, "stage_index": req.stage_index,
-            "adopted_text": req.adopted_text, "item_ref": req.item_ref,
+            "adopted_text": {"changed": True} if req.d_step == "d4" or req.capture_id is not None else req.adopted_text, "item_ref": req.item_ref,
         },
         operated_by=actor_id, factory_id=capa.factory_id,
     ))
@@ -147,20 +175,35 @@ async def adopt_recommendation(db: AsyncSession, capa, req: AdoptRequest, user):
         if field == "d4_root_cause" and new_value != previous:
             from app.services.capa_d4_provenance import record_root_revision
             await record_root_revision(db, report_id=capa.report_id, actor_id=actor_id, write_path="capa.adopt")
+        else:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
         await db.commit()
     except IntegrityError:
         # 并发下另一事务先插同 dedupe key（ix_capa_ai_adoption_dedupe 兜底）→ 回滚后查既有返回，幂等（不重复追加、不 500）
         # rollback 会 expire capa；async 下访问 capa.report_id 会 MissingGreenlet → 用上方捕获的标量 capa_id
         await db.rollback()
-        existing = await _find_existing_adoption(db, capa_id, req)
+        # A rollback ended the admission transaction and released its shared
+        # drain lock. Reauthorize and re-admit before any history/body lookup
+        # or parent lock in this new transaction; a crossed cutover is 410.
+        from app.services.capa_d4_material import authorize_root
+        from app.services.capa_legacy_capture import authorize_bound_sources
+        await authorize_root(db,actor_id,capa_id,PermissionLevel.EDIT)
+        await authorize_bound_sources(db,actor_id,capa_id,d_step='d5')
+        await admit(db, "legacy")
+        capa = await _lock_adoption_target(db,capa_id,actor_id)
+        existing = await _find_existing_adoption(db, capa_id, req, actor_id)
         if existing is None:
             raise   # 不是 dedupe index 冲突——不掩盖真实 DB 错误
-        capa = await lock_capa_parent(db, capa_id)
-        capa = await lock_current_material_write(
-            db, capa, actor_id, PermissionLevel.EDIT
-        )
+        await authorize_root(db,actor_id,capa_id,PermissionLevel.EDIT)
+        await authorize_bound_sources(db,actor_id,capa_id,d_step='d5')
         return existing, getattr(capa, field) or ""
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, actor_id, capa.report_id)
     await db.refresh(adoption)
+    await authorize_root(db, actor_id, capa.report_id)
     return adoption, new_value
 
 
@@ -176,6 +219,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     is_verified = (conclusion == "passed")
     if is_verified:
         _assert_verified_has_details(req.method, req.result, req.evidence_attachments)
+    await _require_verification_source_ref(db, actor_id, req.source_ref)
     if req.source_declaration is None:
         normalized_ref = await _normalize_and_validate_source_ref(db, capa, req.source_ref)
     else:
@@ -189,6 +233,10 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
     if normalized_ref is not None:
         # Source locks may have waited after parent-lock admission.
         capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    from app.services.agent_runtime.control_authority_fence import lock_employee_acl
+    await lock_employee_acl(db, (actor_id,))
+    await _require_verification_source_ref(db, actor_id, normalized_ref)
+    capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
     # Pre-generate PK so pending UPDATED audit can reference verification_id
     # before commit (model default would only fire on flush otherwise).
     vid = uuid.uuid4()
@@ -212,7 +260,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_PASSED",
             changed_fields={"verification_id": str(vid),
-                            "root_cause_text": req.root_cause_text, "method": req.method,
+                            "root_cause_text": {"changed": True}, "method": req.method,
                             "source_ref": normalized_ref},
             operated_by=actor_id, factory_id=capa.factory_id,
         ))
@@ -223,7 +271,7 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
             table_name="capa_eightd", record_id=capa.report_id,
             action="D4_VERIFICATION_FAILED",
             changed_fields={"verification_id": str(vid),
-                            "root_cause_text": req.root_cause_text, "method": req.method,
+                            "root_cause_text": {"changed": True}, "method": req.method,
                             "retry_count": capa.d4_retry_count, "source_ref": normalized_ref},
             operated_by=actor_id, factory_id=capa.factory_id,
         ))
@@ -250,19 +298,57 @@ async def create_verification(db: AsyncSession, capa, req: VerificationCreate, u
         except Exception:
             await db.rollback()
             raise
+    from app.services.capa_d4_material import bump_material, authorize_root
+    await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
+    await bump_material(db, capa.report_id)
     await db.commit()
+    await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     await db.refresh(rec)
+    await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     rec.source_proof_issued = issued
     return rec
 
 
-async def list_verifications(db: AsyncSession, capa):
+async def _require_original_verification_sources(db, capa_id, actor_id, verification_id=None, *, lock=False):
+    from app.services.capa_verification_sources import authorize_verifications
+    return await authorize_verifications(db, capa_id, actor_id=actor_id, verification_id=verification_id, lock=lock)
+
+
+async def _require_verification_source_ref(db, actor_id, ref):
+    if ref is None:
+        return
+    from types import SimpleNamespace
+    from app.services.fmea_agent_sources import visible_fmea_source
+    if actor_id is None or not isinstance(ref, dict) or set(ref) != {'fmea_id', 'cause_node_id'}:
+        raise PermissionError('Verification source unavailable')
+    try:
+        source_id = uuid.UUID(str(ref['fmea_id']))
+    except (ValueError, TypeError):
+        raise PermissionError('Verification source unavailable') from None
+    await visible_fmea_source(db, SimpleNamespace(user=SimpleNamespace(user_id=actor_id)), source_id)
+
+
+async def list_verifications(db: AsyncSession, capa, *, actor_id=None):
+    from app.services.capa_d4_material import root_metadata, authorize_root
+    _, sources = await root_metadata(db, capa.report_id)
+    if sources and actor_id is None:
+        raise PermissionError('D4_MATERIAL_UNAVAILABLE')
+    if actor_id is not None:
+        await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id)
     result = await db.execute(
         select(CapaRootCauseVerification)
         .where(CapaRootCauseVerification.capa_id == capa.report_id,
                CapaRootCauseVerification.factory_id == capa.factory_id)
         .order_by(CapaRootCauseVerification.created_at.desc()))
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    if actor_id is not None:
+        await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id)
+    return rows
 
 
 async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpdate, user):
@@ -272,6 +358,13 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     capa = await lock_current_material_write(
         db, capa, actor_id, PermissionLevel.EDIT
     )
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
+    updates = req.model_dump(exclude_unset=True)
+    if 'source_ref' in updates:
+        await _require_verification_source_ref(db, actor_id, updates['source_ref'])
+        new_ref = await _normalize_and_validate_source_ref(db, capa, updates['source_ref'])
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid, lock=True)
+    capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
     # 锁 verification 行，序列化同记录并发跃迁（去重）
     rec = await db.scalar(select(CapaRootCauseVerification).where(
         CapaRootCauseVerification.verification_id == vid,
@@ -284,11 +377,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
     updates = req.model_dump(exclude_unset=True)
     old_conclusion = rec.conclusion
     old_source_ref = rec.source_ref
-    if "source_ref" in updates:
-        new_ref = await _normalize_and_validate_source_ref(db, capa, updates["source_ref"])
-        if new_ref is not None:
-            # Do not dirty the child before source waits and current authority.
-            capa = await current_capa_actor_target(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     if "method" in updates:
         rec.method = updates["method"]
     if "result" in updates:
@@ -320,7 +409,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         passed_fields = {
             "verification_id": str(vid),
             "method": rec.method,
-            "root_cause_text": rec.root_cause_text,
+            "root_cause_text": {"changed": True},
             "retry_count": capa.d4_retry_count,
             "source_ref": rec.source_ref,
         }
@@ -339,7 +428,7 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
         passed_fields = {
             "verification_id": str(vid),
             "method": rec.method,
-            "root_cause_text": rec.root_cause_text,
+            "root_cause_text": {"changed": True},
             "source_ref": rec.source_ref,
         }
         if source_ref_changed:
@@ -368,6 +457,14 @@ async def update_verification(db: AsyncSession, capa, vid, req: VerificationUpda
                                   _LINKAGE_SOURCE_D4, actor_id))
     from app.services.capa_d4_provenance import invalidate_verification_proofs
     await invalidate_verification_proofs(db, vid)
+    from app.services.capa_d4_material import bump_material, authorize_root
+    await authorize_root(db, actor_id, capa.report_id, PermissionLevel.EDIT)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
+    await bump_material(db, capa.report_id)
     await db.commit()
+    await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     await db.refresh(rec)
+    await authorize_root(db, actor_id, capa.report_id)
+    await _require_original_verification_sources(db, capa.report_id, actor_id, vid)
     return rec

@@ -2,7 +2,7 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import update, text, literal_column
 
 from app.core.permissions import Module, PermissionLevel
 from app.models.capa import CAPAEightD, CapaRootCauseVerification
@@ -10,6 +10,17 @@ from app.models.fmea import FMEADocument
 from app.models.role import RolePermission
 from app.models.user import User
 from tests.capa.d4_preview_support import owned_d4_preview, owned_local_trial
+
+
+async def _seed_pre19_legacy_reference(db, verification_id, source_ref):
+    """Reproduce an unchanged pre19 malformed row; current writes reject it."""
+    await db.execute(text('ALTER TABLE capa_root_cause_verification DISABLE TRIGGER r6_retain_verification_origins'))
+    try:
+        await db.execute(update(CapaRootCauseVerification).where(
+            CapaRootCauseVerification.verification_id == verification_id
+        ).values(source_ref=source_ref, r6_source_origins=literal_column('NULL')))
+    finally:
+        await db.execute(text('ALTER TABLE capa_root_cause_verification ENABLE TRIGGER r6_retain_verification_origins'))
 
 
 @pytest.mark.asyncio
@@ -66,8 +77,7 @@ async def test_current_identity_coordinates_or_declared_source_loss_returns_no_p
             db.add(ProductLine(code='PREVIEW-OTHER', name='Other', factory_id=owned.factory_id)); await db.flush()
             await db.execute(update(CAPAEightD).where(CAPAEightD.report_id == owned.report_id).values(product_line_code='PREVIEW-OTHER'))
         elif damage == 'reference':
-            await db.execute(update(CapaRootCauseVerification).where(
-                CapaRootCauseVerification.verification_id == owned.verification_ids[0]).values(source_ref={'schema':'public'}))
+            await _seed_pre19_legacy_reference(db, owned.verification_ids[0], {'schema':'public'})
         elif damage == 'node': await db.execute(update(FMEADocument).where(FMEADocument.fmea_id == owned.fmea_id).values(graph_data={'nodes':[], 'edges':[]}))
         elif damage == 'source-line':
             from app.models.product_line import ProductLine
@@ -90,14 +100,22 @@ async def test_budget_is_all_or_nothing_without_success_audit(owned_d4_preview, 
             await db.execute(update(CapaRootCauseVerification).where(CapaRootCauseVerification.capa_id == owned.report_id)
                 .values(root_cause_text='x'*65536, result='x'*65536))
         elif damage == 'reference-bytes':
-            await db.execute(update(CapaRootCauseVerification).where(
-                CapaRootCauseVerification.verification_id == owned.verification_ids[0]).values(source_ref={'private':'x'*2200}))
+            await _seed_pre19_legacy_reference(db, owned.verification_ids[0], {'private':'x'*2200})
         else:
             db.add_all([CapaRootCauseVerification(capa_id=owned.report_id, factory_id=owned.factory_id,
                 root_cause_text='bounded', conclusion='pending', is_verified=False) for _ in range(199)])
         await db.commit()
-    with pytest.raises(ValueError) as error: await owned.preview()
-    assert str(error.value) == 'PREVIEW_SOURCE_LIMIT' and await owned.preview_audits() == []
+    if damage == 'reference-bytes':
+        # The HTTP/service boundary now rejects malformed source metadata before
+        # body budget checks; the low-level snapshot still enforces its budget.
+        with pytest.raises(PermissionError): await owned.preview()
+        from app.services.capa_d4_text_preview import read_snapshot
+        async with owned.session() as db:
+            with pytest.raises(ValueError, match='^PREVIEW_SOURCE_LIMIT$'):
+                await read_snapshot(owned.report_id, binding=db.info.get('tenant_binding'))
+    else:
+        with pytest.raises(ValueError, match='^PREVIEW_SOURCE_LIMIT$'): await owned.preview()
+    assert await owned.preview_audits() == []
 
 
 @pytest.mark.asyncio

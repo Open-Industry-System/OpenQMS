@@ -167,7 +167,7 @@ async def test_actual_task_binding_and_remote_claim_denial(r5_case):
     c=r5_case
     created=await c.client.post('/api/agent/tasks',json=c.create_body)
     assert created.status_code==201 and created.json()['status']=='ready',created.text
-    assert created.json().get('model_deployment') == dict(deployment_id=str(c.model_id), name='synthetic A', version='1')
+    assert created.json().get('model_deployment') == dict(deployment_id=str(c.model_id), name='synthetic A', version='1',profile='model_d5_proposal_v1')
     claim=await c.client.post('/api/agent/runtime/claim',json=dict(installation_id=str(c.r5_id),secret=c.r5_secret,request_key='remote'))
     assert claim.status_code==403,claim.text
     changed=await c.admin.post('/api/agent/models',json=dict(c.model_body,name='synthetic B',base_url=f'http://127.0.0.1:{c.witness.b.server_port}/v1'))

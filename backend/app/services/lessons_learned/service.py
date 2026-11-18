@@ -1,4 +1,5 @@
 import hashlib
+from types import SimpleNamespace
 import json
 import uuid as _uuid
 
@@ -33,6 +34,26 @@ class LessonsLearnedService:
         self.embedding = embedding
         self.fusion = LessonsFusionEngine()
 
+    async def _target_version(self):
+        from app.services.capa_d4_material import legacy_capa_read_binding
+        from app.services.fmea_agent_sources import visible_fmea_source
+        kind, doc_id, user = self._release_target
+        if kind == 'capa':
+            token = await legacy_capa_read_binding(self.db, user, doc_id)
+            factory = await self.db.scalar(select(CAPAEightD.factory_id).where(CAPAEightD.report_id == doc_id))
+        else:
+            source = await visible_fmea_source(self.db, SimpleNamespace(user=user), doc_id)
+            factory = source.factory_id
+            token = await self.db.scalar(select(FMEADocument.lock_version).where(FMEADocument.fmea_id == doc_id))
+        return token, str(factory)
+
+    async def require_current_release(self):
+        from app.services.capa_d4_material import require_legacy_candidate_bindings, require_current_egress_statement
+        await require_current_egress_statement(self.db)
+        if await self._target_version() != self._release_version:
+            raise PermissionError('D4_LESSONS_INPUT_CHANGED')
+        await require_legacy_candidate_bindings(self.db, self._release_bindings, actor=self._release_target[2])
+
     async def recommend(
         self,
         doc_id: _uuid.UUID,
@@ -41,13 +62,18 @@ class LessonsLearnedService:
         user: User,
         skip_fmea_sources: bool = False,
     ) -> LessonsLearnedResponse:
+        self._release_target = (doc_type, doc_id, user)
+        self._release_bindings = ()
+        self._release_version = await self._target_version()
         # 1. Build context
         context = await self._build_context(doc_id, doc_type, problem_description, user)
 
+        context.actor_id = user.user_id
         # 2. Check cache
         context_hash = self._compute_context_hash(context, skip_fmea_sources)
         cached = await self._get_cached(context_hash)
         if cached:
+            await self.require_current_release()
             return cached
 
         # 3. Retrieve from all sources
@@ -63,15 +89,23 @@ class LessonsLearnedService:
         all_candidates = []
         active_sources = []
         for source in sources:
+            await self.require_current_release()
             try:
-                candidates = await source.retrieve(context)
+                from app.services.egress_guard import with_delivery_guard
+                candidates = await with_delivery_guard(self.require_current_release, lambda: source.retrieve(context))
                 if candidates:
+                    from app.services.capa_d4_material import capture_legacy_candidate_bindings
+                    captured = await capture_legacy_candidate_bindings(self.db, candidates, actor=user)
+                    self._release_bindings = tuple(sorted(set(self._release_bindings + captured)))
                     all_candidates.extend(candidates)
                     active_sources.append(source.name)
+            except PermissionError:
+                raise
             except Exception:
                 # Source failures are non-fatal
                 pass
 
+        await self.require_current_release()
         # 4. Fusion
         fused = self.fusion.merge(all_candidates, context.product_line_code)
 
@@ -89,6 +123,7 @@ class LessonsLearnedService:
         # 7. Cache
         await self._cache_result(context_hash, context, response)
 
+        await self.require_current_release()
         return response
 
     async def _build_context(
@@ -152,26 +187,21 @@ class LessonsLearnedService:
         return hashlib.sha256(raw.encode()).hexdigest()
 
     async def _get_cached(self, context_hash: str) -> LessonsLearnedResponse | None:
-        stmt = (
-            select(RecommendationCache)
-            .where(RecommendationCache.trigger_type == "lessons_learned")
-            .where(RecommendationCache.context_hash == context_hash)
-            .where(RecommendationCache.fmea_id.is_(None))
-            .where(RecommendationCache.report_id.is_(None))
-            .where(RecommendationCache.expires_at > func.now())
-        )
-        result = await self.db.execute(stmt)
-        row = result.scalar_one_or_none()
-        if row:
-            suggestions = row.suggestions
-            highlights, categories = self._categorize_from_raw(suggestions)
-            return LessonsLearnedResponse(
-                highlights=highlights,
-                categories=categories,
-                source=row.source,
-                cached=True,
-            )
-        return None
+        from app.services.capa_legacy_cache import load_cache
+        await self.require_current_release()
+        cached = await load_cache(self.db, dict(kind='lessons', context_hash=context_hash, target_type=self._release_target[0],
+            target_id=str(self._release_target[1]), target_version=list(self._release_version)),
+            (RecommendationCache.trigger_type == 'lessons_learned',
+             RecommendationCache.context_hash == context_hash,
+             RecommendationCache.fmea_id.is_(None), RecommendationCache.report_id.is_(None),
+             RecommendationCache.expires_at > func.now()), actor=self._release_target[2])
+        if cached is None:
+            return None
+        cards, self._release_bindings, details = cached
+        await self.require_current_release()
+        highlights, categories = self._categorize_from_raw(cards)
+        return LessonsLearnedResponse(highlights=highlights, categories=categories,
+            source=details['source'], cached=True)
 
     async def _cache_result(
         self,
@@ -179,15 +209,22 @@ class LessonsLearnedService:
         context: LessonsLearnedContext,
         response: LessonsLearnedResponse,
     ) -> None:
+        await self.require_current_release()
+        cards = [c.model_dump() for c in self._flatten(response)]
+        from app.services.capa_legacy_cache import seal_cache
+        envelope = seal_cache(self.db, dict(kind='lessons', context_hash=context_hash, target_type=self._release_target[0],
+            target_id=str(self._release_target[1]), target_version=list(self._release_version)),
+            self._release_bindings, cards, dict(source=response.source))
         stmt = (
             pg_insert(RecommendationCache)
             .values(
                 trigger_type="lessons_learned",
+                factory_id=_uuid.UUID(self._release_version[1]),
                 context_hash=context_hash,
                 product_line_code=context.product_line_code,
                 doc_type=context.doc_type,
                 fmea_type=context.fmea_type,
-                suggestions=[c.model_dump() for c in self._flatten(response)],
+                suggestions=envelope,
                 source=response.source,
                 llm_available=False,
                 expires_at=func.now() + text("INTERVAL '24 hours'"),
@@ -196,7 +233,7 @@ class LessonsLearnedService:
                 index_elements=["trigger_type", "context_hash"],
                 index_where=text("fmea_id IS NULL AND report_id IS NULL"),
                 set_={
-                    "suggestions": [c.model_dump() for c in self._flatten(response)],
+                    "suggestions": envelope,
                     "source": response.source,
                     "llm_available": False,
                     "product_line_code": context.product_line_code,

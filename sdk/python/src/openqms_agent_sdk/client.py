@@ -85,6 +85,32 @@ class RunClient:
         self._claim = envelope.claim
         self._token = envelope.token
         self._state = 'open'
+        self._owns_parent = False
+
+    @classmethod
+    def from_launch(cls, launch):
+        from .models import ManagedLaunch, RunClaim, ClientConfig
+        from .errors import ConfigError
+        if type(launch) is not ManagedLaunch:
+            raise ConfigError('config',kind='invalid_type')
+        launch.__post_init__()
+        config=ClientConfig(launch.api_origin,tenant_slug=launch.tenant_slug,timeout=30)
+        owner=_ManagedOwner(config,launch)
+        run=cls.__new__(cls)
+        run._parent=owner
+        run._claim=RunClaim(launch.run_id,launch.task_id,launch.lease_epoch,launch.lease_expires_at,
+            launch.accepted_message_seq,launch.has_resume_checkpoint)
+        run._token=launch.token
+        run._state='open'
+        run._owns_parent=True
+        return run
+
+    def __enter__(self):
+        if self._state!='open': raise ClientClosed('close',kind='client_closed')
+        return self
+
+    def __exit__(self,*args):
+        self.close()
 
     @property
     def claim(self):
@@ -127,6 +153,22 @@ class RunClient:
     def message_history(self, *, after_sequence=0, limit=20):
         return self._call('message_history', dict(after_sequence=after_sequence, limit=limit))
 
+    def model_turn(self, *, turn=0):
+        return self._call('model_turn',dict(turn=turn))
+
+    def model_tool(self, *, call_id):
+        return self._call('model_tool',dict(call_id=call_id))
+
+    def save_d4_checkpoint(self):
+        return self._call('save_d4_checkpoint',{})
+
+    def save_d4_candidate(self, *, command_key, text, supporting=(), opposing=(),
+                          missing_information=(), operation='save', predecessor_id=None,
+                          correction_message_id=None):
+        return self._call('save_d4_candidate', dict(command_key=command_key, text=text,
+            supporting=supporting, opposing=opposing, missing_information=missing_information,
+            operation=operation, predecessor_id=predecessor_id, correction_message_id=correction_message_id))
+
     def finish(self, *, status):
         result = self._call('finish', dict(status=status), finish_status=status)
         self._state = 'closed_successfully'
@@ -136,3 +178,17 @@ class RunClient:
     def close(self):
         self._state = 'closed'
         self._token = None
+        if self._owns_parent:
+            self._parent.close()
+
+
+class _ManagedOwner:
+    def __init__(self,config,launch):
+        self._config=config
+        self._transport=Transport(config,launch=launch)
+        self._closed=False
+
+    def close(self):
+        if not self._closed:
+            self._closed=True
+            self._transport.close()

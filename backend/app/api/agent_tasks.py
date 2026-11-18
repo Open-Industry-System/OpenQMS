@@ -238,3 +238,35 @@ async def model_workflow_status(task_id: UUID, scope: RequestScope=Depends(get_r
     except (PermissionError, LookupError, ValueError):
         await db.rollback()
         raise HTTPException(status_code=403,detail='Model workflow unavailable',headers={'Cache-Control':'no-store'}) from None
+
+
+from app.schemas.agent_d4_candidate import D4BatchWithdraw
+
+@router.post('/{task_id}/d4-checkpoints/{checkpoint_id}/candidates/withdraw')
+async def withdraw_d4_checkpoint_candidates(task_id: UUID, checkpoint_id: UUID, body: D4BatchWithdraw,
+        scope: RequestScope=Depends(get_request_scope),db: AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime.d4_candidate_checkpoints import withdraw_after_checkpoint
+    result=await withdraw_after_checkpoint(db,scope,task_id,checkpoint_id,body)
+    return JSONResponse(jsonable_encoder(result),headers={'Cache-Control':'no-store'})
+
+
+@router.get('/{task_id}/d4-checkpoints')
+async def list_d4_candidate_checkpoints(task_id:UUID,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),
+        scope:RequestScope=Depends(get_request_scope),db:AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime.d4_candidate_checkpoints import history
+    try:
+        result=await history(db,scope,task_id,page=page,page_size=page_size)
+        return JSONResponse(jsonable_encoder(result),headers={'Cache-Control':'no-store'})
+    except (PermissionError,LookupError,ValueError) as error:
+        raise runtime_error(error) from None
+
+
+@router.get('/{task_id}/d4-checkpoints/{checkpoint_id}/candidates')
+async def list_d4_checkpoint_candidates(task_id:UUID,checkpoint_id:UUID,
+        scope:RequestScope=Depends(get_request_scope),db:AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime.d4_candidate_checkpoints import checkpoint_candidates
+    try:
+        result=await checkpoint_candidates(db,scope,task_id,checkpoint_id)
+        return JSONResponse(jsonable_encoder(result),headers={'Cache-Control':'no-store'})
+    except (PermissionError,LookupError,ValueError) as error:
+        raise runtime_error(error) from None

@@ -257,8 +257,9 @@ export async function autoFillD7(capaId: string, req: D7AutoFillRequest, signal?
 export async function generatePpt(
   reportId: string,
   signal?: AbortSignal,
+  reviewMode: 'model'|'local' = 'model',
 ): Promise<{ reviewStatus: string; reviewRounds: number; exportId: string | null }> {
-  const resp = await client.post(`/capa/${reportId}/ppt-export`, {}, {
+  const resp = await client.post(`/capa/${reportId}/ppt-export`, reviewMode==='local'?{review_mode:'local'}:{}, {
     responseType: "blob",
     signal,
     timeout: 120000,

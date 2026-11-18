@@ -47,11 +47,13 @@ async def backfill_entity_type(
     # from the hardcoded ENTITY_TABLE_MAP constant above — never user input.
     from_clause, pk_expr, plc_expr, fid_expr = ENTITY_TABLE_MAP[entity_type]
     hash_select = ", content_hash" if entity_type == "knowledge_entry" else ""
+    from app.services.capa_d4_material import ordinary_capa_predicate
+    capa_filter = ' WHERE ' + ordinary_capa_predicate('report_id') if entity_type == 'capa' else ''
 
     result = await db.execute(
         text(
             f"SELECT {pk_expr} AS entity_id, {plc_expr} AS product_line_code, "
-            f"{fid_expr} AS factory_id{hash_select} FROM {from_clause}"
+            f"{fid_expr} AS factory_id{hash_select} FROM {from_clause}{capa_filter}"
         )
     )
     rows = result.fetchall()
@@ -59,15 +61,22 @@ async def backfill_entity_type(
 
     for i in range(0, len(rows), batch_size):
         batch = rows[i : i + batch_size]
+        queued = 0
         for row in batch:
             row = row._mapping
+            from app.services.capa_d4_material import require_legacy_embedding_source
+            try:
+                await require_legacy_embedding_source(db, entity_type, row['entity_id'])
+            except PermissionError:
+                continue
             await enqueue_embedding(
                 db, entity_type, row["entity_id"],
                 row["product_line_code"], row["factory_id"],
                 content_hash=row["content_hash"] if entity_type == "knowledge_entry" else None,
             )
+            queued += 1
         await db.commit()
-        total += len(batch)
+        total += queued
         logger.info(f"  Enqueued {total}/{len(rows)} {entity_type} events")
 
     return total

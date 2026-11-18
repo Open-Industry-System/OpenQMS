@@ -59,6 +59,16 @@ def test_literal_root_field_write_sites_are_reviewed():
     projection = ast.parse("dict(d4_root_cause=await _bounded_field(db, target.report_id))").body[0].value.keywords[0]
     expected[('services/capa_d5_proposals.py', 'build_d5_context',
               ast.dump(projection, include_attributes=False))] = 1
+    # R6's two authorized in-memory response projections are not database
+    # writers. Review exact AST shapes and multiplicity, never whole functions.
+    for expression in ("values['d4_root_cause'] = root",
+                       "resp.d4_root_cause = await read_root(db, actor_id, capa.report_id)"):
+        projection = ast.parse(expression).body[0]
+        expected[('api/capa.py', '_capa_response_with_projections',
+                  ast.dump(projection, include_attributes=False))] = 1
+    confirmation = ast.parse("dict(d4_root_cause=value)").body[0].value.keywords[0]
+    expected[('services/capa_d4_confirmation.py', 'confirm',
+              ast.dump(confirmation, include_attributes=False))] = 1
     assert sites == expected
 
 
@@ -131,7 +141,16 @@ async def test_adopt_distinguishes_null_from_empty_root(monkeypatch, old, expect
     report = SimpleNamespace(report_id=uuid4(), factory_id=uuid4(), product_line_code='A', d4_root_cause=old)
     actor = SimpleNamespace(user_id=uuid4())
     db = SimpleNamespace(add=Mock(), commit=AsyncMock(), refresh=AsyncMock())
-    monkeypatch.setattr(service, 'lock_current_material_write', AsyncMock(return_value=report))
+    admission = AsyncMock(return_value=report)
+    monkeypatch.setattr(service, 'current_capa_actor_target', admission)
+    monkeypatch.setattr(service, '_lock_adoption_target', AsyncMock(return_value=report))
+    from app.services import capa_entry_switch, capa_legacy_capture, capa_d4_material
+    monkeypatch.setattr(capa_entry_switch, 'admit', AsyncMock())
+    canonical = AsyncMock(side_effect=lambda db, capa, request: request)
+    monkeypatch.setattr(capa_legacy_capture, 'canonical_request', canonical)
+    monkeypatch.setattr(capa_legacy_capture, 'require_capture', AsyncMock())
+    monkeypatch.setattr(capa_d4_material, 'authorize_root', AsyncMock())
+    monkeypatch.setattr(capa_d4_material, 'bump_material', AsyncMock())
     monkeypatch.setattr(service, '_find_existing_adoption', AsyncMock(return_value=None))
     monkeypatch.setattr(service, 'enqueue_embedding', AsyncMock())
     record = AsyncMock()
@@ -139,6 +158,9 @@ async def test_adopt_distinguishes_null_from_empty_root(monkeypatch, old, expect
     await service.adopt_recommendation(db, report, AdoptRequest(d_step='d4', adopted_text='', source='rule'), actor)
     assert report.d4_root_cause == ''
     assert record.await_count == expected
+    admission.assert_awaited_once_with(db, actor.user_id, report.report_id, PermissionLevel.EDIT)
+    canonical.assert_awaited_once()
+    capa_entry_switch.admit.assert_awaited_once_with(db, 'legacy')
 
 @pytest.mark.asyncio
 async def test_confirmed_change_appends_even_if_prior_digest_matches(monkeypatch):
@@ -148,6 +170,11 @@ async def test_confirmed_change_appends_even_if_prior_digest_matches(monkeypatch
     report, actor = uuid4(), uuid4()
     namespace = {'kind': 'single_public'}
     monkeypatch.setattr(provenance, 'current_field_namespace', AsyncMock(return_value=namespace))
+    from app.services import capa_d4_material
+    authorization = AsyncMock()
+    append = AsyncMock()
+    monkeypatch.setattr(capa_d4_material, 'authorize_root', authorization)
+    monkeypatch.setattr(capa_d4_material, 'append_root_body', append)
     digest = provenance.field_hmac(settings.SECRET_KEY.encode(), namespace, report, 'A')
     latest = SimpleNamespace(field_hmac=digest, revision_no=1, revision_id=uuid4())
     db = SimpleNamespace(flush=AsyncMock(), execute=AsyncMock(return_value=SimpleNamespace(one_or_none=lambda: SimpleNamespace(d4_root_cause='A'))),
@@ -155,6 +182,8 @@ async def test_confirmed_change_appends_even_if_prior_digest_matches(monkeypatch
     new = await provenance.record_root_revision(db, report_id=report, actor_id=actor, write_path='capa.update')
     assert new.revision_no == 2 and new.revision_id != latest.revision_id
     db.add.assert_called_once_with(new)
+    authorization.assert_awaited_once_with(db, actor, report)
+    append.assert_awaited_once_with(db, new, 'A', ())
 
 
 def test_write_site_scanner_detects_literal_dictionary_updates():
@@ -167,10 +196,12 @@ def test_write_site_scanner_detects_literal_dictionary_updates():
     "\nasync def create_capa_from_finding(db, report):\n    other = CAPAEightD(d4_root_cause='B')\n    await db.commit()\n",
 ])
 def test_same_file_extra_writer_is_rejected(tmp_path, monkeypatch, extra_writer):
+    import shutil
     source = (ROOT / 'services/audit_service.py').read_text()
-    (tmp_path / 'services').mkdir()
-    (tmp_path / 'api').mkdir()
-    (tmp_path / 'services/audit_service.py').write_text(source + extra_writer)
+    for area in ('services', 'api'):
+        shutil.copytree(ROOT / area, tmp_path / area, ignore=shutil.ignore_patterns('__pycache__'))
     monkeypatch.setitem(globals(), 'ROOT', tmp_path)
+    test_literal_root_field_write_sites_are_reviewed()  # intact baseline must pass
+    (tmp_path / 'services/audit_service.py').write_text(source + extra_writer)
     with pytest.raises(AssertionError):
         test_literal_root_field_write_sites_are_reviewed()

@@ -87,3 +87,7 @@ async def test_blocked_stages_source_kinds(pc_none_orchestrator, basic_d4_contex
     assert source_map[3] == "semantic_search"
     assert source_map[11] == "llm"
     assert source_map[12] == "internal"
+
+
+# Isolate prompt/orchestration units; real DB sessions still use current authority.
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa: F401,E402

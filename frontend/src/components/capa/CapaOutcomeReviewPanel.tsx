@@ -116,6 +116,7 @@ export default function CapaOutcomeReviewPanel({ reportId, status, canApprove, c
             ]} />
           </> : <Typography.Paragraph>{t('outcome.gate.unavailable')}</Typography.Paragraph>}
         </section>
+        {review.local_closure&&<section aria-label="本轮本地闭环与传播处置"><h4>{t("r6.localReviewTitle")}</h4><p>{t("r6.localReviewNote")}</p>{metadata(review.local_closure)}</section>}
         <Divider orientation="left">{t('outcome.documents')}</Divider>
         {review.documents.length === 0 && <Typography.Paragraph>{t('outcome.noDocuments')}</Typography.Paragraph>}
         {review.documents.map(doc => <section key={`${doc.module}:${doc.object_id}:${doc.version_id}`}>

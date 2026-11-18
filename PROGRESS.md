@@ -23,6 +23,87 @@
 
 # OpenQMS 开发进度
 
+## R6 当前状态（2026-11-18，本地）
+
+**真实 C9 与同报告 C10 均已通过，Task11 完成本地验收。** 本地执行源码 `be42580a`。验收脚本接受签名的 IPv4 `198.18.0.0/15` 映射地址，实际地址绑定 TLS、来源授权、部署签名及收据检查均继续适用。更新后的证据测试 99 项、清单测试 5 项通过。报告 `d4a2b072` 的原始 Terra C9 1/1 通过，实际九次模型交付。同报告 C10 21/21 通过，各模式内部 589 次执行及 31 项覆盖核验通过，C10 无新增真实模型调用。保留旧冻结和收据原值，完整执行关系见 [R6 台账](docs/development/r6-entry-switch.md)。
+
+**以下三段保留上一轮 DNS 阻塞时的状态。** **实现和确定性门禁已完成，新真实C9/同份新C10因DNS环境HOLD，Task11及R6整体未签收。** 当前`codex/r6-entry-switch-design@a80467e4`已完成受控D4候选/员工EDIT确认、完整来源继承、正式D5更正、正常员工入口、本地手工结案与旧写入排空；整片SOURCE复审符合规格。4c完整make实际PASS（6007普通API通过/4既有条件跳过，PG15 snapshot实际执行），按后续三路径浏览器修正外未变依赖闭包保留原SHA；a804完整browser2+14、前端107文件967测试、E2E类型及展开535 API/103原生进程/3 Chrome全部实际PASS，无必选skip或缺漏，不声称全树等价。
+
+新owner隔离资源及正常LOCAL D6、独立合法D5对照已完成（各7次合成接收器调用），主链正常登记/隔离切换/实际配置和脚本冻结也已完成。预付费诊断显示`api.openai.com`当前为非公网`198.18.14.88`；签名/执行器/DNS登记匹配仍不足以通过REAL公网资格。新真实模型生成0；当前新候选/兼容均UNQUALIFIED，旧C9/C10仅旧构建历史，不能用于新构建放行。已请用户恢复该域公网解析；未改DNS/代理/hosts/pins或验证器。详见[R6台账](docs/development/r6-entry-switch.md)及[操作指南](docs/development/r6-entry-switch-operations.md)。
+
+继续不依赖网络的整片源码和文档复审；网络恢复后正常重新登记并冻结，再执行新真实C9/同份新C10及最终独立复审。四项产品决定及§12本地手工门禁无需重开。当前未推送、合并、部署或切换用户环境，CI优化由另一Agent负责，R7后续。
+
+### R6阶段快照（以下为历史过程，当前状态以上方为准）
+
+
+> **2026-11-17 R6 最终确定性门禁全部通过，进入新真实链及同报告回退验收**：a804完整browser2+14、全Vitest107文件967测试、E2E类型全部PASS；明确展开专项535 API/103原生进程/3 Chrome全部实际PASS，收集/JUnit/hooks/stock精确审计每节点恰好一次、零非通过/skip/缺漏/额外，expanded父exit0/3344.145s。1867源码/15脚本/资源零漂移。4c完整make PASS原SHA按两批三路径浏览器修正后未变执行闭包限定保留，不声称全树等价或新SHA执行。新私有v6源预审及QUALITY已通过，下一步只在新owner资源正常LOCAL对照、冻结真实配置，再新Terra C9及同份新报告C10；此前旧C9/C10仅旧构建历史，当前C11尚未签收，无新付费调用。不推送、合并、部署或CI优化。
+
+> **2026-11-17 R6 a804完整浏览器门禁实际通过，剩余专项继续**：`make check-browser`实际exit0/546.457s，原生2/2PASS35.96s、普通14/14PASS508.64s，失败/错误/skip/xfail/xpass均0；普通另6214 deselected，R6 empty-root/direct/question三节点全部实际通过。1867源码/15脚本零漂移、资源前后摘要相同，原失败完整保留。4c完整make PASS仍按三路径浏览器修正后的未变执行闭包限定复用，原SHA不改写。当前串行全Vitest→E2E类型→R6展开专项尚未全部完成，真实新C9/C10及C11不提前签收；不推送、合并、部署或CI优化。
+
+> **2026-11-17 R6 预览撤权浏览器合同修正双复审通过并本地提交**：当前`a80467e4fb61c7b12da5e1ac70cb1b0e89227f18`仅改单TS测试体：撤权后旧预览/正文清除，真实员工鉴权和原合法body直接POST精确403/PREVIEW_ACCESS_DENIED，restore正常reload/reopen并生成200，遮盖/版本变化/网络不确定/关闭重置/tabhidden无poll/不采纳及业务snapshot/audit保护全部保留。实际1/1PASS22.57s，SPEC→fresh QUALITY均APPROVED；不推断具体卸载原因或整报告不可用。此前0e7完整browser父失败656.479s（native2PASS、ordinary13/14PASS，三个R6节点均PASS）保留。4c完整make按未变SDK/API/native/src编译闭包保留原SHA收据，实际收集6011/68精确等集，不声称全树等价。将以a804新干净库完整重跑browser及剩余门禁，新C9/C10/C11尚待，不推送、合并、部署或CI优化。
+
+> **2026-11-17 R6 旧任务浏览器合同修正双复审通过并本地提交，接续完整浏览器门禁**：精确两文件`0e7fd07f1e6583e03ead259a9edf170dab93528a`保留旧A任务/检查点/Enter归属/同事采纳/历史/撤权，明确旧A/B不能新建任务且任务及全部binding不变；仅补真实侧栏隐藏后刷新，不改生产筛选、超时、imports、fixtures、markers或CI。完整两个消费者2/2PASS36.57s，独立SPEC→fresh QUALITY均APPROVED；原152s及23s失败保留。实际API6011/native68收集Counter与4c原执行集合完全相等、零重复或缺漏，故4c完整make PASS按未变命令闭包保留原SHA/收据，不声称全树等价或新提交已执行该命令。新提交将完整执行make check-browser、全Vitest、E2E类型及R6展开门禁；新C9/C10仍待全部通过后执行。不推送、合并、部署或CI优化。
+
+> **2026-11-17 R6 浏览器门禁失败并停止后续执行**：完整`make check`的4c PASS保持原始证据；随后实际`make check-browser`父exit2/153.613s，原生browser收据`r5-browser-20261117T133743025992`为2 selected/1 passed/1 failed、0error/skip、152.02s、source4c且0漂移。失败为正常两角色R5侧栏/报告协作用例，正在核对具体断言及配置/业务原因，未盲重跑或改源码。串行控制器未运行后续全Vitest/E2E类型/R6展开验收，未新建新模型验收资源或发起新付费调用，C9/C10/C11均不签收。不推送、合并、部署或CI优化。
+
+> **2026-11-17 R6 当前4c完整make check实际通过，其余门禁继续**：父命令实际exit0/7695.566s，1867源码/14操作脚本零漂移、资源前后摘要相同。SDK604/17/1、普通API6007通过/4条件跳过、原生必选68/68及类型/构建均在该完整命令中执行；API stock收据`api-20261117T112911716678`另记6011 selected/217 deselected、失败/错误/xfail/xpass均0、7189.35s。4skip精确为既有Redis1和E2E_MODE3，PG15 regenerated snapshot实际PASSED；此前15项晚到交付SETUP错误已由本轮完整API闭环。正常browser bootstrap已PASS，实际`make check-browser`继续运行；全量Vitest/E2E类型及R6展开节点仍待，不能签C11或新C9/C10。私有新证据操作脚本v3已独立SPEC与fresh QUALITY源预审通过，仅源准备，未创建新资源或发出新模型调用。不推送、合并、部署或CI优化。
+
+
+> **2026-11-17 CP晚到交付夹具修复双复审通过并本地提交，完整门禁再次接续**：精确单文件提交`4c231fb5024a7cac6ebbbf656d5c13798f97653c`移除完整真实迁移后多余的4表clone/FK/trigger重建，仅以只读目录查询检查真实当前head、本地ordinary表/FK与trigger；全部18个非夹具函数及所有15用例断言不变。四个完整相关文件86/86真实PASS、零非通过，独立SPEC→fresh QUALITY均APPROVED。此前fa930全量15SETUP重复DDL及后续byte表示错误/误选层失败完整保留，不作通过。应用运行源码1188摘要9f076840不变，当前将使用另建干净final2_test数据库从SDK开始完整重跑；新C9/C10/C11仍未签收，不推送/合并/部署。
+
+
+> **2026-11-17 fa930 完整命令仍FAILED，15项准备阶段重复建表待修**：父make exit2/API exit1，7201.898s，源码/资源零漂移；终端5992passed/4skipped/217deselected/15ERROR/0failed，stock计数字段null，不签正式通过。逐节点确认15项均在CP晚到交付夹具line36重复创建完整迁移已存在的cp_sync_outbox，测试体尚未执行，并非15项业务通过后清理失败。独立SPEC已批准仅移除重复建表、保留真实本地Schema/FK/trigger并断言，所有worker/import/sync/rollback断言不变；须完整运行全部共享夹具消费者，再双复审/本地提交/新干净库完整重跑。不改生产约束或CI运行器，实际新模型尚未调用，新C9/C10/C11仍未签收。
+
+
+> **2026-11-17 R6 fa930 最终完整确定性验收运行中**：七路径工具已独立双复审并本地提交fa930253，实际干净数据库`r6_c11_cfbdb38add_final_test`（第五owned PG15/54219）启动完整串行套件，代码1867文件与14操作脚本已冻结，实际OPENQMS_CI_SHA为fa930。原失败第四套与第五调试数据/配置保留；完整make→browser→全量Vitest/E2E类型→R6参数展开节点逐项验收，当前尚无最终PASS。新真实C9及同份新报告C10将在全部确定性门禁通过后进行，旧构建证据不代新资格。不推送、合并或部署。
+
+
+> **2026-11-17 R6 新鲜主链验收工具双复审通过并本地提交，最终全量接续**：精确7路径提交`fa9302533b795cc99d33588b7532a075d50996a7`支持独立v2新鲜真实PASS证明，v1历史组合严格保持；实际执行SHA/JUnit唯一case/原始输出/owner与来源交叉绑定、加载前独立信任锚与目录闭包、只读核验、真实D4/D5审计UUID配对及D4输入收据关联均已定向验证。97单元＋冻结Chrome2场景分别PASS/零非通过，四份实际受控材料离线核对通过；独立SPEC→fresh QUALITY无未解决发现。受控记录明确非真实模型，新C9/C10/C11尚未签收。运行修复此前本地b2bc1fdd；当前fa930为下一轮完整确定性门禁最终源码，只有26份相关Markdown未提交。不推送、合并、部署或CI优化。
+
+
+> **2026-11-17 R6 Task11定向修复双复审通过并本地提交，完整重新资格待完成**：精确11路径提交`b2bc1fdd3e8b9731d39443fae8a4a386a9f8229e`修复文档分析生成入口/phase2在刷新前读取过期ORM标量的问题，保留全部当前权限、完整来源、锁和交付围栏；其余为真实完整租户/不可变历史夹具、静态预期与狭义double修正，以及强制员工复核等待的有界延长。独立SPEC→fresh QUALITY均APPROVED；5、121、378三组分别PASS、零非通过，不相加充新全量。首次父make exit2/API exit1及34F/5876P/5skip/1error终端记录保留，stock空计数不改写。旧C9/C10仅历史旧构建证据，新版typed fresh-PASS证据工具、最终全量、新C9及同份新报告C10仍待；不推送、合并、部署或CI优化。
+
+
+> **2026-11-17 R6 Task11首次全量后端FAILED，待修正复验**：完整API退出1、7255.38s；终端摘要34失败/5876通过/5跳过/1错误，stock收据因hooks/JUnit核对不成立计数字段为null，不把终端数冒称正式收据数。浏览器/其他DB分组未启动，原父命令及失败保留；正在逐项区分静态旧契约/测试double与真实权限并发问题，优先核对CP/特性及projection清理错误。冻结运行源码未改，C11未签收；Task10本地027d3e97与原C9/C10证据保留。不推送、合并、部署或CI优化。
+
+
+> **2026-11-17 R6 Task11新鲜全量进行中**：Task10已本地`027d3e97`、最终独立SPEC与fresh QUALITY均APPROVED。全新实施者新建第四套owner-bound PG15/52490（私有证据`/private/tmp/openqms-r6-c11/`），完整`make check`运行中，随后串行实际Chrome `make check-browser`、前端全量及明确R6原生目标。前三套资源/同报告历史保留，当前仅同步事实文档；尚无最终C11结果，不提前标完成或正式放行。当前main只读核对为`e4bc51f9`，CI优化与安全主线未导入本树，最终交接列明后续整合约束。
+
+
+> **2026-11-17 R6 Task10补强后最终SPEC与fresh QUALITY通过，接续Task11**：首次QUALITY的完整数据库/审计绑定与请求双射三项误签已修复并先RED后GREEN，严格隐藏载荷反例齐全。新鲜双TCP＋语义故障21/21、清单5/5分别PASS/0skip；内部candidate243＋39/compat243＋39/独立enabled来源探针25五组589次按未变核心配置复用，非新鲜589或TCP。原模型DNS资格先403的失败21保留，独立登记同核心strictfalse LOCAL探针精确503/任务与egress无新增，原主报告/模型配置不变。签名原C9→baseline86→candidate88→compat90全业务一致、历史24安全失败精确复核；31语义覆盖，原1200零漂移、27进程退出/DB空闲。新交接v2及29哈希核对见[台账](docs/development/r6-entry-switch.md)。正式目标/批准未提供，未创建正式release_manifest；Task10已精确本地提交`027d3e97e41054d4d7f05ed336f7a17a9a1a0b54`（7路径、提交后干净），全新Task11已接手新鲜全量。不推送、合并、部署或CI优化。
+
+> **2026-11-17 R6 Task9实现、同报告真实组合验收及独立双复审通过，接续10–11**：最终真实报告`d331cf97`已D8_CLOSURE/批准verified，唯一正式A采纳后更正1次、B按检查点撤回、普通手工D5并存，完整3来源I/P、本地人工门禁/4通道NOT_EXECUTED、PPT/审核/审计一致。证据方法为预先复审并写入计划的**同报告顺序COMPOSED_PASS**：真实生成原测试因人工复核超时仍FAILED303.27s，继续v1–v4仍FAILED；v5只读最终核验PASS13.724s，不能改称新鲜整轮pytest通过。继续期间新模型调用0，原9次模型请求/18条尝试与完成审计、2条D5保存命令不变。完整受控双场景2/2、目录28、task_reads40、projection11、本地门禁20、切换24、D4原生11、正确5文件前端120及类型/构建分别通过/0skip，重叠不相加；原扩大API210通过1失败保留，相关整文件补证。1188运行＋9执行＋3操作共1200文件独立双复审/父核零漂移；29PID退出、64323空闲/0其他连接，资源与可编辑对照保留。最终SPEC与全新QUALITY均APPROVED、无未解决发现。已精确本地提交`03180f4f71663381987b0e519c65768a76536221`（29路径），提交后工作树为空；全新Task10实施者已接手64323及同份保留数据。兼容实际双版本验收与最终全量仍待Task10/11；不具备用户环境切换资格，不推送/合并/部署/CI优化。详见[台账](docs/development/r6-entry-switch.md)。
+
+> **历史过程记录：2026-11-17 R6 Task9进行中快照，已由上方最终收口取代**：真实Terra已在未完成轮次生成D4并经员工确认/V/P、在检查点后保存两条D5待审，未把这两轮生成证据冒充完整员工链。完整受控正常应用/managed worker/Chromium现已走到D8结案及本地PPT；独立复审补齐实际来源核对、手工D5并存、采纳响应丢失重试、同任务侧栏撤回和严格材料断言。发现并修正D7分类未加载/旧弹窗回调的真实UI竞态；前端受影响83、类型与构建通过。另以真实DB复现完整报告投影的新令牌/旧正文，以及仅旧D5来源在返回前撤权的缺口；GET限定一次完整重读，共享响应入口/出口完整来源重验，新原生11通过、扩大API回归进行中。所有修正均先有RED和独立SPEC，不改CI/迁移/权限放行标准；仍待冻结受控全链、真实C9、双复审、Task10同份兼容及Task11最终全量。当前main已为`baa276aa`（R5PR33仍merge`f8b8d988`），新增安全/测试整理未导入本树，后续集成影响在[台账](docs/development/r6-entry-switch.md)明确记录。
+
+> **2026-11-17 R6 Task8完成，接续Tasks9–11**：Task8实现、分层验证与独立SPEC→fresh QUALITY复审已通过；85非文档路径冻结v10，1187执行文件摘要`1c019eb0d34d347410496f31c6d2e79ceccc3f0a4db77524b91d82cc6e0a0bad`，父核源码与10份已应用DDL均0漂移。独立短事务先持久关闭准入、原事务共享锁排空、提交/回滚审计核清、显式安全续期、旧入口410和当前手工版本保护已实现；023可信旧capture与024真实CAPA来源继承保护已配对应用于独占测试库。真实双应用/两个构建和同份更正数据兼容验收仍待Tasks9/10，Task11新鲜全量仍待；本批机制测试不能签C9/C10或用户环境切换。 最终受影响推荐/runtime完整文件180、inflight原生完整文件5、迁移完整文件20分别PASS/0skip；原生128组原收据126通过2失败，修正仅测试后整份inflight5通过，不改写原收据。前端受影响26文件262通过，构建通过；全仓lint仍有4项未改文件错误。所有失败与逐节点闭环、来源适用范围见[台账](docs/development/r6-entry-switch.md)。Task8已精确本地提交`c6b0a2cdff8c53bd7b6cb6fa2d8ccb9924f22220`（89路径），提交后工作树为空；全新Task9实施者已接手，新建第三套隔离资源。58064已空闲交回；不推送、合并、部署或CI优化。
+
+> **2026-11-16 R6 Task7正常员工入口通过，继续Task8**：D4候选与来源核对/员工确认、D5当前措施/正式更正/受控历史、本地D7与人工文档门禁/传播NOT_EXECUTED、只读V已知来源和本地规则版PPT接通。最终106文件952前端测试、类型检查及构建通过；后端最终56、UI合同8、native33分别PASSED/0skip（native另25普通节点deselected），早期116组的writer版本限制在台账单列，不叠加冒充全量。44路径冻结v4，SPEC及fresh QUALITY全部发现修复复核通过，父核0漂移；无DDL/SDK/CI优化变更。正常浏览器/真实模型、切换命令隔离演练、同份数据兼容回退及最终全量仍待8–11，不具备用户环境切换资格。已本地提交`d14d9a67`，提交后工作树为空；全新Task8实施者接手独占58064。不推送、合并或部署。详见[台账](docs/development/r6-entry-switch.md)。
+
+> **2026-11-16 R6 Task6B核心与正常API回审通过，接续Task7**：本地预防、genuine manual文档分析、独立空影响确认、四通道明确NOT_EXECUTED、strict manual版本/回执与完整当前来源保护已完成。新增38、迁移167、旧D7/docgate167、审核239＋后续完整120、更正57、D577、derived111、sources100分别PASSED/0skip，重叠不相加。49后端文件冻结v9、全diff及全部增量SPEC→QUALITY通过，20/21/22六DDL首次应用后无漂移。正常API旧屏拒绝/新屏批准/归档verified、supplier无输入/MES仅IDstatus已实测；正常页面、真模型、同份兼容和最终全量仍待7–11，不具备切换资格。PR33已合并、main`f8b8d988`；相对已用R5代码只有11文件CI/诊断/文档差异，无业务/SDK/迁移变化，本树不拉CI优化。详情见[台账](docs/development/r6-entry-switch.md)，Task6B已本地提交`31856359`、提交后工作树为空，全新Task7实施agent已接手；不推送、合并、部署或用户环境切换。
+
+> **2026-11-16 R6 Task 6 核心更正实现、专项与独立双复审通过，继续 Task 6B**：受限正式D5更正接通正常员工API，保留原始采纳，当前文本/受控历史统一解析；当前EDIT/完整历史来源、条目与全材料版本、并发与撤权、幂等、v1历史/v2新审核及终态保护均通过专项。新增57、既有D5完整77、审核239、R6读取100、D7/docgate167分别PASSED/0skip，不能相加冒充一次全量；19后端文件冻结v5与双复审通过，另5份相关文档，无迁移/SDK/UI/CI优化改动。受影响历史畸形夹具与有界来源/文档坐标读取的真实失败及修正见[台账](docs/development/r6-entry-switch.md)。正常本地D7/manual gate回审C6仍由6B/9补签，正常页面、真实模型、同份兼容回退和最终全量均未完成，R6尚无切换资格。R5 PR #33仍open/draft/unmerged、head75fcc517，main193746ab未变。Task6已本地提交 `f5630f09`、提交后工作树为空，全新Task6B实施agent已接手独占58064，父仅维护文档/复审。继续6B→7→8→9→10→11；无推送、合并、部署或用户环境切换。
+
+> **2026-11-16 R6 Task 5 专项验证与双复审通过，继续 Task 6 正式更正**：员工D4确认与当前EDIT/完整来源/版本、来源详情proof关系、真实历史、material v2及候选可见分页已接通，确认不自动签验证/proof。验证source_ref清空/替换后已知限制由19 JSONB与DB约束单调保留，正文/审核/preview/PPT/阶段/缓存与模型出口按完整当前资格保护；正常手工与确定性导出保留。最终API52、原生8；既有完整分组93/111/22/139/202及旧R5登记24均PASSED/0skip。迁移子pytest338通过但原wrapper因旧mandatory名失败，已只修登记并以完整8＋普通stage1的9项PASSED复验；不改写原338失败、不改CI优化。独立全diff/各增量SPEC→QUALITY批准，677文件0漂移，663AST及差异通过，public19函数与冻结DDL一致。详见 [台账](docs/development/r6-entry-switch.md) / [ADR-0020](docs/DECISIONS.md#adr-0020--d4-验证记录单调保留已知来源限制)。Task 5已本地提交 `473e3449`、提交后工作树为空，全新Task 6实施agent已启动。接续Task 6上线必需的已采纳受限D5更正；6B/正常UI/切换/真模型/同份回退/最终全量仍待，不具备R6切换资格。无推送、合并、部署或用户环境切换。
+
+> **2026-11-16 R6 Task 4 实现、分层验证与双复审通过，继续 Task 5**：在空正式 D4 下新增持久候选、独立模型输入凭据、命令幂等、检查点逐项撤回、完整来源历史及真实 SDK managed 流程；不自动产生正式根因/验证/证明。普通 API7、新原生46、SDK unit604/loopback17/wheel1、完整迁移334、共享 API223、旧 R5 原生68分别通过，均0skip；全diff及测试增量独立 SPEC→QUALITY 均通过。Task 4 已本地提交 `41419001`、提交后工作树核对干净，全新 Task 5 实施 agent 已启动；668文件冻结0漂移，详见 [台账](docs/development/r6-entry-switch.md)。配对 head `20261116_r6_d4_withdraw` / `tv018_r6_d4_withdraw`。用户已确认 [规格 §12](docs/superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#12-受限报告本地结案方案用户已确认)，新增 Task 6B、[ADR-0019](docs/DECISIONS.md#adr-0019--受限-capa-采用本地手工门禁并明确不执行传播)，待正式更正后实施；延期仍阻塞、豁免不扩大。Task 5 正在实施，已验证当前令牌绑定完整来源的v2适配；另以正常API复现验证source_ref清空/替换丢旧限制，独立技术SPEC批准追加019已知ACL marker，见 [ADR-0020](docs/DECISIONS.md#adr-0020--d4-验证记录单调保留已知来源限制)，实现及最终验收待完成。接续员工 D4 确认与来源详情 Task 5；整片 R6/真模型/同份兼容回退和最终全量尚未完成。无推送、合并、部署、用户环境切换或 CI 优化。
+
+> **2026-11-16 R6 Task 3 分层及独立双复审通过，继续全任务实施**：Tasks 1/2 已本地提交 `7899e167`、`c7f493c8`。Task 3 的来源交付/旧草稿/历史审计、持久 FMEA 代际、索引与副本保护完成；最终原生默认68 passed/0skip，普通runtime1026 passed/0skip（24独立层未选入）、旧业务515、迁移331及修正后读任务22等按各自真实运行分开记录。初始/增量 SPEC→QUALITY 均通过，失败与中断保留、不相加冒充全量，见 [台账](docs/development/r6-entry-switch.md) 和 [ADR-0018](docs/DECISIONS.md#adr-0018--r6-来源交付绑定持久更新代际旧缺失事实不回填)。Task 3 已本地提交 `dec122a9`，工作树核对干净后已启动全新 Task 4 实施 agent；先核对空根因输入凭据/新 profile/消息来源合同，新增 DDL 需技术复审。R6 最终全量和切换验收尚未完成。受限报告原强制结案链会被安全拒绝，[规格 §12](docs/superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#12-受限报告本地结案方案用户已确认)本地手工门禁/传播明确不执行方案已获用户确认，新增独立 Task 6B；待实施及运行验收，文档延期仍阻塞、豁免范围不扩大，不提前实施 R7。R5 PR #33 仍 open/draft、head75fcc517；实际main因独立CI PR #36到193746ab，仅CI/诊断/文档变化，本树不拉入该工作。真实模型按用户确认复用R5获准凭据，尚未调用云端；未切换用户环境、推送、合并或部署。
+
+> **2026-11-15 R6 Task 1 数据合同专项及双复审通过，继续全任务实施**：用户已授权 Tasks 1–11，不动 CI 优化、不推送、合并或部署。Task 1 配对迁移、完整来源/不可变历史合同和正常登录夹具完成，最终专项 **223 passed /0skip /0fail**，独立 SPEC 与 QUALITY 均通过。配对新 head 为 `20261115_r6_entry_contracts` / `tv015_r6_entry_contracts`；R5 PR #33 仍 open/draft、head `75fcc517`，main `d3c0ada8`。两套 owner-bound PG15 分离冻结基线与实施测试；冻结 f03 完整 make 与串行 browser 均 exit0（API5465/4skip、原生68/0skip、browser原生2及普通11均0skip）；这些是初始基线，不替代新 R6 最终全量。Task 2 来源继承、员工读写/预览/验证/审计保护亦已完成，最终 **203 passed /0skip /0fail /0errors**；独立 SPEC、QUALITY 和测试夹具复审均通过。继续 Task 3 的派生、模型出口与旧草稿保护。证据和复审修正见 [R6 台账](docs/development/r6-entry-switch.md)。后续真实模型按用户确认复用 R5 获准部署与凭据，密钥不进入普通测试或 Git。
+
+> **2026-11-15 R6 计划复审三项 P1 已定向修订，仍待复审**：[实施计划](docs/superpowers/plans/2026-11-15-r6-d4-d5-entry-switch.md)基于 `917422ec` 修正 Task 8 为独立短事务先持久关准入、再等待排空锁，补长事务超时/运维退出后拒新请求及新进程接续；§2.2 冻结本报告 K2/K3＋单 FMEA A 的正向与增加 B 的零交付样例，明确原 proof 仍须覆盖整段正式根因，报告输入追溯须补 R6 绑定/receipt sidecar，Task 3–5 先验可放行主链再做真实模型验收；§2.3 区分隔离演练输入与 C9/C10 后生成的正式放行清单，真实切换命令演练不再依赖最终清单，演练文书不能用于正式环境。四项产品决定和正式更正上线必需条件不变；本轮仅修订计划与进度，未执行测试/迁移/实施，Task 1 未开始，无推送、合并或部署。
+
+> **2026-11-15 R6 产品决定已确认、实施计划待复审**：用户已明确确认四项决定，已回写 [规格 §9](docs/superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md#9-用户已确认的产品决定)，并同步 §7.1、验收与回退条件。受限 D5 正式更正是上线必需，员工从正式条目入口按当前 EDIT/完整来源与条目/材料版本受控更正，采纳时文本及历次更正保留，终态核心冻结。新增 [11 任务实施计划](docs/superpowers/plans/2026-11-15-r6-d4-d5-entry-switch.md)（Task 6 正式更正、Task 7 正常 UI、Task 10 含更正历史的双版本兼容）和 [ADR-0017 决策索引](docs/DECISIONS.md#adr-0017--r6-正式根因与措施保留完整来源及版本化更正)。
+>
+> 基线仍为本树 `edcc3322`，PR #33 open/draft、head `75fcc517`，main `d3c0ada8`；本轮无运行源码集成变化。静态迁移图 public `20261115_r5_responses` / tenant `tv014_r5_responses` 各单 head，未连接环境或执行迁移。下一步仅计划复审；完整来源在新/回退双版本均通过、正式更正可用、旧写入已排空为共同切换条件。产品已确认，实现及运行验收均未开始；兼容构建 SHA、隔离资源及测试结果由执行时据实登记。CI 优化由另一 Agent 负责，不切换入口、不推送、合并或部署。
+
+> **2026-11-15 R6 文档复审修订（三项 P1）**：[入口切换规格](docs/superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md)已明确 D4 员工确认的 CAPA EDIT、报告写入范围和事务锁后重验；D4→D5 每次交付前核对正式修订继承的完整来源，R5 单一主来源证明不能替代，契约无法覆盖时走手工 D5；保留的 D2/D3/D6/D7/D8 旧草稿须覆盖受限 D4 外发及首次/缓存/在途结果返回的当前鉴权。补入 VIEW/撤 EDIT 拒绝、A＋B 来源不完整零交付、仅受限 D4 无受限 D5 的模型零调用及返回期撤权反例；新版本和安全回退构建均须实测通过后才能切换。静态源码复核完成，本轮仅修改规格和此进度，未运行测试或修改运行代码，仍停在文档复审，不编实施计划。
+
+> **2026-11-15 R6 入口切换设计待文档复审**：已在独立 worktree `/Users/sam/.codex/worktrees/r6-entry-switch-design/OpenQMS`、分支 `codex/r6-entry-switch-design` 编写 [R6 D4/D5 推荐入口切换设计](docs/superpowers/specs/2026-11-15-r6-d4-d5-entry-switch-design.md)。实时核对 main 为 `d3c0ada8`；R5 PR #33 仍 open/draft、未合并，设计从其 head `75fcc517` 建立，执行源码依据为已验证的 `2b5530c3`，两者仅四份文档有差异。旧动作到页面/API/服务/存储/审计及调用方已盘点：旧 D4 确实生成候选并可追加/替换正式根因，R5 只读已有 D4 生成 D5，不能视为等价覆盖。用户已选择补齐受控 D4 候选与员工确认后再整体切换，不允许 Agent 直接修改正式根因。规格另列来源核对 UI、受限 D4 正文读取/继承、正式措施更正、旧请求排空与手工版本保护、安全兼容回退门槛；当前 main 和原样 R5 均不能直接作为带新数据的安全回退目标。
+>
+> **下一步仅文档复审**：确认受限 D4 的整段来源限制、无现有证明时的手工 D5 路径、正式更正交付下限与切换停止受理窗口。R5 既有证据与 R6 待实测已分开，Terra pending 仅证明生成保存。尚未实施 R6、编实施计划、停用入口、迁移业务数据、推送或部署；未重跑 R5 测试。CI 优化由另一 Agent 负责，R7 后续。根工作区及 PR #33 改动保留，本轮仅修改此进度指针与设计规格。
+
 ### 2026-11-16 — #37 验收期间同步新安全主线
 
 - baa276aa新基线的验证已完成：pure373 passed／3 warnings／exit0；正常API兼容及隔离组78 passed／0 skipped／exit0，源码与依赖指纹前后不变。该轮独占容器及唯一卷、凭据已核验清理。API CLI wall320.13秒，仅作本轮兼容执行记录，不与d0c7394e的旧配置跨基线归因比较；完整新CI按当前候选重新派发。
@@ -160,7 +241,6 @@
 - 已有单次 pytest collection/execution及top20 setup/call/teardown计时，写入既有过滤log，receipt不变；诊断损坏/日志失败不改变原测试退出码。最终 CI pure **350 passed /3 warnings**，actionlint1.7.7与diff检查通过，0/1/2退出路径及未登记实例Make exit2已验证；只读复核通过。
 - 成功PR历史基线：PR run43686875078，head13d1ac1b、实际merge3d95cb91，Ubuntu26.04/Python3.12.16；backend排队2秒、执行6134秒，依赖17+2秒、首次准备7秒、重复约1.46秒、pytest子进程6071.36秒，phase分项未测得。独占PG15本地重复准备1.358/0.916秒。没有同提交/同runner的优化后Actions或pip冷热实测，不推算收益比例。
 - 最终空库正常 `make check-backend` **5269 passed /4 skipped /19 deselected /6 warnings，exit0**，新增29项CI回归，既有排除不变；D8 preflight CLEAN/0 breaks和8个引擎import均exit0。Make4612.65秒、pytest子进程4608.58秒，collection5.63秒/execution4574.43秒；setup2927.02秒/call1391.27秒/teardown253.25秒，**下一步优先慢fixture**（如tenant rebuild某例setup13.08秒而call0.12秒），不先拆两个PG job。此前因应用更新在第2207项中断的运行未计作通过。1073个执行文件前后集合/指纹一致（manifest `f1e7dfee23be245fe3815074ccd6d826e4625c95a8e1c637b995fcdf3a4645c7`）；本地receipt标识为d3c0ada8+local-ci-optimization，并非实际commit，同Actions不同runner/版本，不能换算优化比例。专用PG/唯一自有卷及凭据已精确清理，其他资源未动；日志/收据在本机/tmp/openqms-ci-baseline-local，工作树保留未提交。详细基线、事件矩阵、保护规则、验证口径和下一次PR指标见[CI证据](docs/development/backend-ci-timing.md)。未分片、未减测试、未push或merge。
-
 
 
 > **2026-11-15 远端执行源码普通CI全部成功，保留原生macOS排队限制**：最终实现`2b5530c3`的[run43703339877](https://github.com/Open-Industry-System/OpenQMS/actions/runs/43703339877)普通八个job已全部实际success（SDK3.11/3.12/3.13、frontend、Oracle、docs、browser、backend）。backend job132779100196实际receipt：**5465通过/4跳过/89 deselected/0failed/0errors/12428warnings/7526.10s/exit0**；12:23:57 UTC完成验收，随后D8 preflight、engine imports及上传、清理步骤success。browser job132779100049实际**11通过/0skip/0failed/1231warnings/222.04s/exit0**。两层frozen SHA为GitHub测试合并`031967b9`，连接器实际compare与2b文件diff为空；收尾再次核对main仍d3c0ada8、behind_by=0。原生job132779100288仍queued/steps=null，runner清单最近实读0，不能声称远端Darwin已执行或整个workflow已完成。

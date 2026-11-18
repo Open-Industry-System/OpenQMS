@@ -58,6 +58,13 @@ def _format_team_member(m) -> str:
 
 async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) -> PptContent:
     """从落库数据组装 PptContent（不渲染 pptx）。"""
+    from app.services.capa_d4_material import read_root, require_legacy_root_only
+    if scope is None:
+        await require_legacy_root_only(db, capa_id)
+    else:
+        await read_root(db, scope.user.user_id, capa_id)
+    from app.services.capa_d4_material import material_version
+    root_version = await material_version(db, capa_id)
     capa = await db.get(CAPAEightD, capa_id)
     if capa is None:
         raise ValueError("CAPA 不存在")
@@ -65,7 +72,11 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) 
     from app.services.capa_d5_measures import full_d5_material, complete_d5_text
     material = await full_d5_material(db, capa, scope=scope)
     d5_text = complete_d5_text(capa.d5_correction, material)
+    from app.services.capa_r6_local_closure import prevention_text
+    d7_text = capa.d7_prevention if scope is None else await prevention_text(db,scope.user.user_id,capa_id,capa.d7_prevention)
 
+    from app.services.capa_verification_sources import authorize_verifications
+    await authorize_verifications(db,capa_id,actor_id=None if scope is None else scope.user.user_id)
     # D4 验证记录（含 evidence_attachments）
     verifs = (await db.execute(select(CapaRootCauseVerification).where(
         CapaRootCauseVerification.capa_id == capa_id
@@ -119,7 +130,7 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) 
         PptPage("D5 永久措施", [{"label": "措施", "value": d5_text}]),
         PptPage("D6 实施验证", [{"label": "验证", "value": capa.d6_verification or ""}]),
         PptPage("D7 预防复发", [
-            {"label": "预防", "value": capa.d7_prevention or ""},
+            {"label": "预防", "value": d7_text or ""},
             *[{"label": f"node-action{i+1}", "value": str(a)} for i, a in enumerate(d7_list)],
         ]),
         PptPage("D8 关闭结论", [{"label": "结论", "value": capa.d8_closure or ""}]),
@@ -135,6 +146,13 @@ async def generate_content(db: AsyncSession, capa_id: uuid.UUID, *, scope=None) 
     # Later material queries may wait after the initial D5 projection.
     if material != await full_d5_material(db, capa, scope=scope):
         raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    if scope is None:
+        await require_legacy_root_only(db, capa_id)
+    else:
+        await read_root(db, scope.user.user_id, capa_id)
+    if root_version != await material_version(db, capa_id):
+        raise PermissionError('D4_FULL_MATERIAL_UNAVAILABLE')
+    await authorize_verifications(db,capa_id,actor_id=None if scope is None else scope.user.user_id)
     return PptContent(
         capa_id=capa_id, pages=pages,
         linked_fmea_node=linked_fmea_node, linked_scars=linked_scars,
@@ -221,8 +239,35 @@ def _validate_ppt_content(content: PptContent, capa) -> list[str]:
     return issues
 
 
-async def get_export(db: AsyncSession, export_id: uuid.UUID, capa_id: uuid.UUID) -> CapaPptExport | None:
-    """查 PPT 生成记录（供 GET /ppt-exports/{id} 回读审查报告）。"""
-    return (await db.execute(select(CapaPptExport).where(
+async def authorize_ppt_material(db,capa_id,*,scope=None):
+    """Local full-material reads need every current source, not an egress grant."""
+    from app.services.capa_d4_material import authorize_root,require_legacy_root_only
+    from app.services.capa_verification_sources import authorize_verifications
+    from app.services.capa_d5_measures import full_d5_material
+    from app.services.capa_current_access import current_capa_access
+    initial=None if scope is None else await current_capa_access(db,scope)
+    async def d4_access():
+        if scope is None: await require_legacy_root_only(db,capa_id)
+        else: await authorize_root(db,scope.user.user_id,capa_id)
+        await authorize_verifications(db,capa_id,actor_id=None if scope is None else scope.user.user_id)
+    await d4_access()
+    capa=await db.get(CAPAEightD,capa_id)
+    if capa is None: raise LookupError('CAPA unavailable')
+    await full_d5_material(db,capa,scope=scope)
+    await d4_access()
+    if scope is not None:
+        latest=await current_capa_access(db,scope)
+        def authority(access):
+            levels,factories,lines=access
+            return levels.get('capa',0),levels.get('fmea',0),factories,lines
+        if authority(initial)!=authority(latest): raise PermissionError('PPT authority changed')
+
+
+async def get_export(db: AsyncSession, export_id: uuid.UUID, capa_id: uuid.UUID, *, scope=None) -> CapaPptExport | None:
+    """Admit all source metadata before cached review JSON and recheck afterward."""
+    await authorize_ppt_material(db,capa_id,scope=scope)
+    export=(await db.execute(select(CapaPptExport).where(
         CapaPptExport.export_id == export_id, CapaPptExport.capa_id == capa_id,
     ))).scalar_one_or_none()
+    await authorize_ppt_material(db,capa_id,scope=scope)
+    return export

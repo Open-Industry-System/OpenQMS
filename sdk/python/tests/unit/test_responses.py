@@ -6,7 +6,7 @@ from openqms_agent_sdk import models
 from openqms_agent_sdk.errors import ProtocolError
 
 
-TYPES = dict(zip(models.SUPPORTED_OPERATIONS, (models.ClaimEnvelope,models.Capabilities,models.MessageBatch,models.MessageAck,models.CapaContext,models.RuntimeEvent,models.RuntimeResult,models.ReadonlyCheckpoint,models.MessageHistory,models.FinishResult)))
+TYPES = dict(zip(models.SUPPORTED_OPERATIONS, (models.ClaimEnvelope,models.Capabilities,models.MessageBatch,models.MessageAck,models.CapaContext,models.RuntimeEvent,models.RuntimeResult,models.ReadonlyCheckpoint,models.MessageHistory,models.FinishResult,models.ModelTurn,models.ModelToolResult,models.D4CandidateCheckpoint,models.D4CandidateReference)))
 
 
 @pytest.mark.parametrize('op',models.SUPPORTED_OPERATIONS)

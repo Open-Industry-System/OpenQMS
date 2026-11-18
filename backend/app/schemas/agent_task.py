@@ -19,6 +19,7 @@ class TaskCreate(BaseModel):
 
 
 class BoundModelDeployment(BaseModel):
+    profile: Literal['model_d4_candidate_v1','model_d5_proposal_v1','model_d5_proposal_r6_v1']
     deployment_id: UUID
     name: str
     version: str

@@ -659,3 +659,29 @@ async def test_final_finish_input_read_rechecks_revocation_before_dirty_changes(
                 future.cancel()
             await asyncio.gather(future, return_exceptions=True)
     assert await state(owned) == before
+
+
+@pytest.mark.asyncio
+async def test_readonly_metadata_controls_continue_during_and_after_real_entry_switch(delivery,tmp_path):
+    from types import SimpleNamespace
+    from app.models.agent_model_deployment import AgentTaskModelBinding
+    from app.models.capa import CAPAEightD
+    from tests.capa.r6_switch_support import owned_cli,cli
+    owned=delivery
+    async with owned.factory(binding=owned.binding) as db:
+        assert await db.get(AgentTaskModelBinding,owned.task_id) is None
+        task=await db.get(AgentTask,owned.task_id)
+        report_id=task.target_capa_id
+        before=(await db.execute(select(CAPAEightD.d4_root_cause,CAPAEightD.d5_correction).where(CAPAEightD.report_id==report_id))).one()
+    assert (await control(owned,'pause')).lease_epoch==2
+    fixture=await owned_cli(SimpleNamespace(binding=owned.binding,
+        session=lambda:owned.factory(binding=owned.binding),actor=lambda:SimpleNamespace(user_id=owned.user_id)),tmp_path)
+    assert (await cli(fixture,'close'))[0]==0
+    assert (await control(owned,'resume',epoch=2)).lease_epoch==3
+    assert (await control(owned,'pause',epoch=3)).lease_epoch==4
+    assert (await cli(fixture,'finish'))[0]==0
+    assert (await control(owned,'resume',epoch=4)).lease_epoch==5
+    async with owned.factory(binding=owned.binding) as db:
+        assert await db.get(AgentTaskModelBinding,owned.task_id) is None
+        assert (await db.execute(select(CAPAEightD.d4_root_cause,CAPAEightD.d5_correction).where(CAPAEightD.report_id==report_id))).one()==before
+        assert not await db.scalar(select(AuditLog.log_id).where(AuditLog.table_name=='capa_r6_entry_switches',AuditLog.action.in_(['R6_ENTRY_ADMITTED','R6_ENTRY_COMMITTED'])))
