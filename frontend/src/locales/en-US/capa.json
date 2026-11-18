@@ -555,5 +555,47 @@
     "localPptDone": "Local rules PPT exported; model review was not run.",
     "localReviewTitle": "Local closure and propagation for this review",
     "localReviewNote": "Manual analysis is recorded separately; propagation channels were explicitly not executed in this review."
+  },
+  "pfmeaImpact": {
+    "title": "Assess PFMEA impact",
+    "loading": "Loading",
+    "target": "Target PFMEA",
+    "chooseTarget": "Choose a target PFMEA",
+    "noTargets": "No approved versions are available for assessment.",
+    "approvedBaseline": "Approved baseline: {{version}}",
+    "unapprovedRevision": "An unapproved revision exists. This assessment uses the selected approved version.",
+    "start": "Start assessment",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "unavailable": "Assessment unavailable.",
+    "retry": "Could not complete the action. Please try again.",
+    "versionChanged": "Assessment inputs changed. Please confirm the selection again.",
+    "reload": "Reload",
+    "recommendation": "PFMEA impact recommendation",
+    "stale": "Recommendation is out of date",
+    "versions": "Report version: {{reportVersion}} · Approved baseline: {{approvedVersion}}",
+    "adoption": "Original formal adoption",
+    "revision": "Formal revision: {{version}}",
+    "facts": "Verified facts",
+    "inference": "Inference: {{value}}",
+    "reason": "Reason: {{value}}",
+    "adjustments": "Adjustments to review",
+    "gaps": "Information still needed",
+    "evidence": "Evidence",
+    "conclusion": {
+      "impact_found": "Impact found",
+      "no_impact_found": "No impact found",
+      "insufficient_evidence": "Insufficient evidence"
+    },
+    "status": {
+      "blocked_capability": "Waiting for run authorization",
+      "ready": "Waiting to run",
+      "queued": "Waiting to run",
+      "running": "Assessment in progress",
+      "paused": "Assessment paused",
+      "completed": "Assessment completed",
+      "failed": "Assessment failed",
+      "cancelled": "Assessment cancelled"
+    }
   }
 }

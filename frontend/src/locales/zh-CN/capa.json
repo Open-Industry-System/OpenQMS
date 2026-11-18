@@ -555,5 +555,47 @@
     "localPptDone": "本地规则版已导出；模型审查未运行。",
     "localReviewTitle": "本轮本地闭环与传播处置",
     "localReviewNote": "人工分析单独记录；传播渠道本轮按记录明确不执行。"
+  },
+  "pfmeaImpact": {
+    "title": "评估对 PFMEA 的影响",
+    "loading": "加载中",
+    "target": "目标 PFMEA",
+    "chooseTarget": "选择目标 PFMEA",
+    "noTargets": "没有可评估的批准版本。",
+    "approvedBaseline": "批准基线：{{version}}",
+    "unapprovedRevision": "已有未批准修订，本次仍评估所选批准版本。",
+    "start": "开始评估",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "unavailable": "评估暂不可用。",
+    "retry": "暂无法完成操作，请重试。",
+    "versionChanged": "评估输入已变化，请重新确认。",
+    "reload": "重新加载",
+    "recommendation": "PFMEA 影响评估建议",
+    "stale": "建议已过期",
+    "versions": "报告版本：{{reportVersion}} · 批准基线：{{approvedVersion}}",
+    "adoption": "正式采纳原版",
+    "revision": "正式修订：{{version}}",
+    "facts": "正式事实",
+    "inference": "推断：{{value}}",
+    "reason": "理由：{{value}}",
+    "adjustments": "待确认的调整",
+    "gaps": "尚需信息",
+    "evidence": "依据",
+    "conclusion": {
+      "impact_found": "有明确影响",
+      "no_impact_found": "未发现影响",
+      "insufficient_evidence": "证据不足"
+    },
+    "status": {
+      "blocked_capability": "等待运行授权",
+      "ready": "等待运行",
+      "queued": "等待运行",
+      "running": "正在评估",
+      "paused": "评估已暂停",
+      "completed": "评估已完成",
+      "failed": "评估失败",
+      "cancelled": "评估已取消"
+    }
   }
 }
