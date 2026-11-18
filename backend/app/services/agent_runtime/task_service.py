@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import RequestScope
 from app.config import settings
 from app.core.tenant_transaction import TenantBinding
+from app.models.agent_pfmea_impact import AgentPfmeaImpactBinding
 from app.models.agent_plugin import AgentPluginGrant, AgentPluginInstallation
 from app.models.agent_task import AgentRun, AgentTask, AgentTaskGrant, AgentTaskMessage
 from app.models.agent_task_request import AgentTaskSourceRequest
@@ -61,12 +62,25 @@ async def require_current_capa_view(db: AsyncSession, scope: RequestScope,
     return await _target(db, report_id, factories, lines)
 
 
+def _legacy_task_only():
+    return ~select(AgentPfmeaImpactBinding.task_id).where(
+        AgentPfmeaImpactBinding.task_id == AgentTask.task_id,
+    ).exists()
+
+
+async def is_impact_task(db: AsyncSession, task_id: UUID) -> bool:
+    with db.no_autoflush:
+        return await db.scalar(select(AgentPfmeaImpactBinding.task_id).where(
+            AgentPfmeaImpactBinding.task_id == task_id,
+        )) is not None
+
+
 async def get_task_for_control(db: AsyncSession, scope: RequestScope, task_id: UUID) -> AgentTask:
     """Owner/namespace/target and immutable receiver metadata, never bodies."""
     _, factories, lines = await _current_access(db, scope)
     with db.no_autoflush:
         task = await db.scalar(select(AgentTask).where(AgentTask.task_id == task_id,
-            AgentTask.initiator_id == scope.user.user_id,
+            _legacy_task_only(), AgentTask.initiator_id == scope.user.user_id,
             AgentTask.executor_user_id == scope.user.user_id).execution_options(populate_existing=True))
     if task is None:
         raise LookupError("Task not found")
@@ -92,7 +106,7 @@ async def list_for_initiator(db: AsyncSession, scope: RequestScope, page: int,
     query = _target_filters(select(AgentTask).join(CAPAEightD,
         (CAPAEightD.report_id == AgentTask.target_capa_id) &
         (CAPAEightD.factory_id == AgentTask.factory_id))
-        .where(AgentTask.initiator_id == scope.user.user_id,
+        .where(_legacy_task_only(), AgentTask.initiator_id == scope.user.user_id,
             AgentTask.executor_user_id == scope.user.user_id), factories, lines)
     with db.no_autoflush:
         candidates = list((await db.scalars(query.order_by(AgentTask.created_at.desc(), AgentTask.task_id)
@@ -190,6 +204,8 @@ async def _existing(db, user_id, request_key, report_id, installation_id, initia
             AgentTask.request_key == request_key).execution_options(populate_existing=True))
         if task is None:
             return None
+        if await is_impact_task(db, task.task_id):
+            raise LookupError("Task not found")
         message = await db.scalar(select(AgentTaskMessage.content).where(
             AgentTaskMessage.task_id == task.task_id, AgentTaskMessage.sequence == 1))
         source_request = await db.get(AgentTaskSourceRequest, task.task_id) if fingerprint is not None else None

@@ -67,6 +67,8 @@ def _grant(row) -> Grant | None:
 async def authorize_task(db: AsyncSession, task: AgentTask,
                          installation: AgentPluginInstallation) -> TaskAuthority:
     """Fresh scalar identity/grants at the pinned target; shared by claim/verify."""
+    if await task_service.is_impact_task(db, task.task_id):
+        raise PermissionError(run_auth.INVALID_TOKEN)
     with db.no_autoflush:
         user = await db.scalar(select(User).where(User.user_id == task.executor_user_id)
             .execution_options(populate_existing=True))
