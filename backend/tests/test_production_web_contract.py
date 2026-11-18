@@ -184,14 +184,19 @@ def test_caddy_serves_api_before_spa_fallback_on_all_required_listeners():
     assert "trusted_proxies" not in caddyfile
 
 
-def test_node_build_heap_leaves_headroom_inside_two_gib_builder():
-    dockerfile=(FRONTEND / "Dockerfile.prod").read_text()
-    build_stage,final_stage=dockerfile.split("FROM caddy:2-alpine",maxsplit=1)
-    heap=re.search(r"(?m)^ENV NODE_OPTIONS=--max-old-space-size=(\d+)\s*$",build_stage)
-    assert heap is not None, "Node build must explicitly bound its heap"
-    heap_mib=int(heap.group(1))
-    assert heap_mib > 0
-    assert 2048-heap_mib >= 512, "reserve at least 512 MiB for native/nonheap allocations"
-    assert build_stage.index("RUN npm ci") < build_stage.index("COPY frontend/ ./") < heap.start()
-    assert heap.end() < build_stage.index('RUN if [ "$VITE_PUBLIC_DEMO_ENABLED"')
-    assert "NODE_OPTIONS" not in final_stage
+def test_frontend_build_keeps_memory_budget_out_of_runtime_image():
+    dockerfile = (FRONTEND / "Dockerfile.prod").read_text()
+    build_stage, final_stage = dockerfile.split("FROM caddy:2-alpine", maxsplit=1)
+    build_command = build_stage.index('RUN if [ "$VITE_PUBLIC_DEMO_ENABLED"')
+    heap = re.search(
+        r'(?m)^ENV NODE_OPTIONS="--max-old-space-size=(\d+) --max-semi-space-size=(\d+)"$',
+        build_stage,
+    )
+    go_budget = re.search(r"(?m)^ENV GOMEMLIMIT=(\d+)MiB GOMAXPROCS=2$", build_stage)
+
+    assert heap is not None and 0 < int(heap.group(1)) <= 1408
+    assert 0 < int(heap.group(2)) <= 8
+    assert go_budget is not None and 0 < int(go_budget.group(1)) <= 128
+    assert build_stage.index("RUN npm ci") < build_stage.index("COPY frontend/ ./")
+    assert build_stage.index("COPY frontend/ ./") < heap.start() < go_budget.start() < build_command
+    assert all(name not in final_stage for name in ("NODE_OPTIONS", "GOMEMLIMIT", "GOMAXPROCS"))
