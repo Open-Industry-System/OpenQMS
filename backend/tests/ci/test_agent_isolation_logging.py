@@ -12,25 +12,41 @@ SECRET = 'sk-live-SENTINEL-0123456789abcdef'
 
 
 @pytest.fixture(autouse=True)
-def clean_logging():
-    """Install the policy, then restore the previous logging state."""
+def clean_logging(monkeypatch):
+    """Confine the isolated process's global logging hooks to each test."""
     root = logging.getLogger()
-    saved = (list(root.handlers), root.level, logging.lastResort,
-             logging.raiseExceptions, sys.excepthook, sys.unraisablehook,
-             warnings.showwarning)
+    manager = root.manager
+    logger_class = logging.getLoggerClass()
+    root_level = root.level
+    existing = {root, *(entry for entry in manager.loggerDict.values()
+                        if isinstance(entry, logging.Logger))}
+    for logger in existing:
+        for attr in ('handlers', 'propagate', 'callHandlers'):
+            # Remember whether dispatch was inherited or instance-bound.
+            monkeypatch.setitem(logger.__dict__, attr, logger.__dict__.get(attr))
+    # Leave pytest's real handlers open while install() replaces the test sink.
+    root.handlers = []
+    for owner, attrs in (
+        (logging.Logger, ('callHandlers',)),
+        (logging, ('lastResort', 'raiseExceptions', '_warnings_showwarning')),
+        (sys, ('excepthook', 'unraisablehook')),
+        (warnings, ('showwarning',)),
+    ):
+        for attr in attrs:
+            monkeypatch.setattr(owner, attr, getattr(owner, attr))
+
     try:
         policy.install()
         yield
     finally:
-        handlers, level, last_resort, raise_exc, excepthook, unraisable, warn = saved
-        root.handlers = handlers
-        root.setLevel(level)
-        logging.lastResort = last_resort
-        logging.raiseExceptions = raise_exc
-        sys.excepthook = excepthook
-        sys.unraisablehook = unraisable
-        warnings.showwarning = warn
-
+        logging.setLoggerClass(logger_class)
+        for logger in manager.loggerDict.values():
+            if isinstance(logger, logging.Logger) and logger not in existing:
+                logger.__dict__.pop('callHandlers', None)
+                if type(logger) is policy.SafeLogger:
+                    logger.__class__ = logger_class
+        # Restore the level cache as well as the root's level.
+        root.setLevel(root_level)
 
 def capture():
     stream = io.StringIO()
