@@ -96,10 +96,14 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
   if (scenario.startsWith('authority-')) {
     await expect(page.getByRole('heading', { name: '只读分析结果' })).toBeVisible();
     await expect(activity.getByText(/D4 verification metadata/)).toBeVisible();
-    const denied = page.waitForResponse(r => r.url().includes(`/api/agent/tasks/${taskId}/activity`)
-      && [401,403,404].includes(r.status()));
     await fixture(page, 'withdraw', { change: scenario.slice('authority-'.length) });
-    await denied;
+    // The directory can remove an unauthorized task before its next activity
+    // poll. Test the same employee's direct access as well as the rendered UI.
+    const denied = await page.request.get(`${backend}/api/agent/tasks/${taskId}/activity`, {
+      headers: { Authorization: `Bearer ${login.access_token}`, 'X-Tenant-ID': process.env.AGENT_BROWSER_TENANT! },
+    });
+    expect([401, 403, 404]).toContain(denied.status());
+    expect(await denied.text()).not.toContain('D4 verification metadata');
     await expect(activity).toHaveCount(0);
     await expect(page.getByTestId('agent-activity-window')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: '只读分析结果' })).toHaveCount(0);
