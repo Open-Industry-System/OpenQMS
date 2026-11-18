@@ -21,9 +21,9 @@ class ControlFenceBusy(Exception):
     """A conflicting writer won the control authorization race."""
 
 
-async def _no_wait(db, statement):
+async def _no_wait(db, statement, *, read=False):
     try:
-        return await db.execute(statement.with_for_update(nowait=True))
+        return await db.execute(statement.with_for_update(nowait=True, read=read))
     except DBAPIError as exc:
         if getattr(exc.orig, 'sqlstate', None) != '55P03':
             raise
@@ -41,30 +41,30 @@ async def lock_control_target(db, task):
     return row.report_id
 
 
-async def lock_employee_acl(db, user_ids, *, control_only=False):
+async def lock_employee_acl(db, user_ids, *, control_only=False, read=False):
     """Lock all users first, then distinct roles and their associated ACL rows."""
     users = sorted(set(user_ids), key=str)
     roles = set()
     with db.no_autoflush:
         for user_id in users:
             row = (await _no_wait(db, select(User.user_id, User.role_id).where(
-                User.user_id == user_id))).one_or_none()
+                User.user_id == user_id), read=read)).one_or_none()
             if row is None or row.role_id is None:
                 raise PermissionError('Recovery unavailable')
             roles.add(row.role_id)
         for role_id in sorted(roles, key=str):
             role = (await _no_wait(db, select(RoleDefinition.id).where(
-                RoleDefinition.id == role_id))).scalar_one_or_none()
+                RoleDefinition.id == role_id), read=read)).scalar_one_or_none()
             if role is None:
                 raise PermissionError('Recovery unavailable')
         permissions = select(RolePermission.id).where(RolePermission.role_id.in_(roles))
         if control_only:
             permissions = permissions.where(RolePermission.module.in_(['capa', 'group']))
-        await _no_wait(db, permissions.order_by(RolePermission.role_id, RolePermission.id))
+        await _no_wait(db, permissions.order_by(RolePermission.role_id, RolePermission.id), read=read)
         await _no_wait(db, select(UserFactory.id).where(UserFactory.user_id.in_(users))
-            .order_by(UserFactory.user_id, UserFactory.id))
+            .order_by(UserFactory.user_id, UserFactory.id), read=read)
         await _no_wait(db, select(UserProductLine.id).where(UserProductLine.user_id.in_(users))
-            .order_by(UserProductLine.user_id, UserProductLine.id))
+            .order_by(UserProductLine.user_id, UserProductLine.id), read=read)
 
 
 async def require_restart_target_source(db, task, authorized_source):

@@ -582,6 +582,21 @@
     "adjustments": "Adjustments to review",
     "gaps": "Information still needed",
     "evidence": "Evidence",
+    "model": "Approved model deployment",
+    "chooseModel": "Choose a deployment",
+    "noOptions": "No deployment is approved for this selection.",
+    "launch": "Run assessment",
+    "cancel": "Cancel assessment",
+    "history": "Assessment history",
+    "chooseResult": "Choose a recommendation",
+    "reassess": "Reassess",
+    "readiness": {
+      "d4_not_verified": "Confirm the D4 root cause and its verification first.",
+      "d5_not_adopted": "Formally adopt at least one D5 measure first.",
+      "sources_unavailable": "The formal sources required for this assessment are incomplete.",
+      "too_large": "The formal material exceeds this assessment's limits."
+    },
+    "kind": {"local": "Local", "cloud": "Cloud"},
     "conclusion": {
       "impact_found": "Impact found",
       "no_impact_found": "No impact found",

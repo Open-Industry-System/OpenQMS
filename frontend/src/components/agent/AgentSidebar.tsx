@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {listFMEAs,getFMEA} from '../../api/fmea';
 import {useCapaCredentialIdentity} from '../capa/useCapaViewRequests';
 import { Button, Drawer } from "antd";
@@ -9,6 +9,8 @@ import { listTaskD5Proposals, type D5Proposal } from "../../api/d5Proposals";
 import D4CandidatePanel from '../capa/D4CandidatePanel';
 import D5ProposalPanel from "../capa/D5ProposalPanel";
 import AgentActivity from "./AgentActivity";
+import PfmeaImpactPanel from "./PfmeaImpactPanel";
+import { pfmeaImpactAvailable, pfmeaImpactClient } from "../../api/pfmeaImpact";
 import AgentTaskAttachments from "./AgentTaskAttachments";
 import { useAgentTaskContext } from "./AgentTaskContext";
 import { readAgentIdentity, useAgentTaskActivity } from "./useAgentTaskActivity";
@@ -24,9 +26,34 @@ type Operation = {
   kind: "create";
   body: TaskCreate;
 };
+function PfmeaImpactEntry({reportId, identity, authorityEpoch, requestKeys}: {
+  reportId: string; identity: string; authorityEpoch: number; requestKeys: Map<string, string>;
+}) {
+  const [availability, setAvailability] = useState<Awaited<ReturnType<typeof pfmeaImpactAvailable>>>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void pfmeaImpactAvailable(reportId, controller.signal).then(state => {
+      if (!controller.signal.aborted && identity === readAgentIdentity()) setAvailability(state);
+    }).catch(() => {
+      if (!controller.signal.aborted) setAvailability(null);
+    });
+    return () => controller.abort();
+  }, [reportId, identity, authorityEpoch]);
+
+  return availability?.available ? <PfmeaImpactPanel
+    reportId={reportId}
+    scopeKey={identity}
+    authorityEpoch={authorityEpoch}
+    canGenerate={availability.canGenerate}
+    requestKeyStore={requestKeys}
+    client={pfmeaImpactClient}
+  /> : null;
+}
+
 export default function AgentSidebar(){const {identity}=useCapaCredentialIdentity();return <ScopedAgentSidebar key={identity}/>;}
 function ScopedAgentSidebar() {
   const ctx = useAgentTaskContext();
+  const impactRequestKeys = useMemo(() => new Map<string, string>(), [ctx?.identity, ctx?.creationReportId, ctx?.requestEpoch]);
   const [fmeaPage,setFmeaPage]=useState(1);
   const [fmeaChoices,setFmeaChoices]=useState<{fmea_id:string;title:string;document_no:string;status?:string}[]>([]);
   const [fmeaTotal,setFmeaTotal]=useState(0);
@@ -304,6 +331,13 @@ function ScopedAgentSidebar() {
       }}
       destroyOnClose>
       <Button onClick={() => ctx.setOpen(false)}>关闭任务侧栏</Button>
+      {ctx.open && ctx.creationReportId && <PfmeaImpactEntry
+        key={JSON.stringify([ctx.identity, ctx.creationReportId, ctx.requestEpoch])}
+        reportId={ctx.creationReportId}
+        identity={ctx.identity}
+        authorityEpoch={ctx.requestEpoch}
+        requestKeys={impactRequestKeys}
+      />}
       <label>选择任务<select
         aria-label="选择任务"
         value={ctx.selectedTask?.task_id ?? ""}

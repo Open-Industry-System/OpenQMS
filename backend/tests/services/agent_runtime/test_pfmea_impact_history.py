@@ -92,6 +92,25 @@ async def test_reader_can_differ_from_initiator_and_entire_bound_set_is_rechecke
 
 
 @pytest.mark.asyncio
+async def test_direct_evidence_requires_actual_citation_in_saved_measure(case, monkeypatch):
+    payload = {"analyses": [{"analysis_ref": "a", "fact_refs": []}],
+        "assessments": [{"analysis_ref": "a", "evidence_refs": [], "exclusion_refs": []}]}
+
+    async def read_payload(*args, **kwargs):
+        return payload
+
+    async def authorize(*args):
+        return True
+
+    monkeypatch.setattr(history, "_review_payload", read_payload)
+    with pytest.raises(history.ImpactHistoryUnavailable):
+        await history.read_history_evidence(case.db, case.scope, case.expected, SOURCE, authorize=authorize)
+    payload["assessments"][0]["evidence_refs"] = [str(SOURCE)]
+    result = await history.read_history_evidence(case.db, case.scope, case.expected, SOURCE, authorize=authorize)
+    assert result == {"label": CANDIDATE.projection_id, "text": CANDIDATE.version}
+
+
+@pytest.mark.asyncio
 async def test_revoke_between_initial_authorization_and_final_lock_denies_even_when_stale(case):
     case.revoked = case.stale = True
 

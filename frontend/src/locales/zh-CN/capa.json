@@ -582,6 +582,21 @@
     "adjustments": "待确认的调整",
     "gaps": "尚需信息",
     "evidence": "依据",
+    "model": "批准的模型部署",
+    "chooseModel": "选择一个部署",
+    "noOptions": "该评估没有可用的批准模型部署。",
+    "launch": "运行评估",
+    "cancel": "取消评估",
+    "history": "历史评估",
+    "chooseResult": "选择建议",
+    "reassess": "重新评估",
+    "readiness": {
+      "d4_not_verified": "请先确认 D4 根因及验证结果。",
+      "d5_not_adopted": "请先正式采纳至少一项 D5 措施。",
+      "sources_unavailable": "评估所需的正式来源不完整。",
+      "too_large": "正式材料超出本轮评估的范围上限。"
+    },
+    "kind": {"local": "本地", "cloud": "云端"},
     "conclusion": {
       "impact_found": "有明确影响",
       "no_impact_found": "未发现影响",
