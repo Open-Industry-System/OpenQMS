@@ -39,6 +39,31 @@ async def test_history_http_orders_final_release_against_source_revocation(nativ
     evidence_url = f"{detail_url}/sources/{source}"
     assert c.fmea_id != fixture.fmea_id
 
+    created = await fixture.employee.post(fixture.base + "/tasks", json=fixture.request | {
+        "request_key": "r7-concurrent-history-reader",
+    })
+    assert created.status_code == 201, created.text
+    launch_url = f"{fixture.base}/tasks/{created.json()['taskId']}/launch"
+    fenced, proceed = asyncio.Event(), asyncio.Event()
+    original_payload = history._review_payload
+
+    async def hold_historical_reader(*args, **kwargs):
+        fenced.set()
+        await proceed.wait()
+        return await original_payload(*args, **kwargs)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(history, "_review_payload", hold_historical_reader)
+        pending = asyncio.create_task(fixture.employee.get(detail_url))
+        try:
+            await asyncio.wait_for(fenced.wait(), 10)
+            response = await asyncio.wait_for(fixture.employee.post(launch_url), 35)
+        finally:
+            proceed.set()
+            assert (await asyncio.wait_for(pending, 10)).status_code == 200
+    assert response.status_code == 200 and response.json()["status"] == "completed", response.text
+
+
     async def change_source_scope(line, started=None):
         async with c.session() as db:
             if started is not None:

@@ -108,7 +108,7 @@ async def read_approved_target(
         doc.product_line_code == product_line_code,
     )
     if lock:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update(read=True)
     target = (await db.execute(statement)).one_or_none()
     if target is None or target.r7_scope_generation is None:
         raise ImpactTargetUnavailable("Approved PFMEA unavailable")

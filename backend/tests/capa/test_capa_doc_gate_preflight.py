@@ -560,21 +560,23 @@ async def test_verify_fmea_version_accepts_legacy_compact_hash(db, capa_d8_gate)
     db.add(fmea)
     await db.flush()
     snap = {"nodes": [{"id": "n1"}], "edges": []}
+    compact = compute_snapshot_hash(snap)
+    # Load the historical representation before modern hash normalization and
+    # approval-scope capture. Preserve both immutability guards during the read.
+    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER trg_fmea_version_hash_verify"))
+    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER r7_impact_approval_generation"))
     ver = FMEAVersion(
         version_id=uuid.uuid4(), fmea_id=fmea.fmea_id, factory_id=capa.factory_id,
-        major_no=1, minor_no=0, snapshot=snap, sha256_hash="placeholder",
+        major_no=1, minor_no=0, snapshot=snap, sha256_hash=compact,
         change_type="approve", change_summary="legacy", created_by=user.user_id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(ver)
     await db.flush()
-    compact = compute_snapshot_hash(snap)
-    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER trg_fmea_version_no_update"))
-    await db.execute(_text(
-        "UPDATE fmea_versions SET sha256_hash=:h WHERE version_id=:vid"
-    ), {"h": compact, "vid": ver.version_id})
-    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER trg_fmea_version_no_update"))
+    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER trg_fmea_version_hash_verify"))
+    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER r7_impact_approval_generation"))
     await db.refresh(ver)
+    assert ver.r7_approved_scope_generation is None
     assert ver.sha256_hash == compact
     assert await verify_fmea_version(db, ver.version_id) is True
 

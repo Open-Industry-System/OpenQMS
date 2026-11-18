@@ -188,20 +188,21 @@ async def _lock_activation(db, request, activation):
 
 
 async def _lock_business_sources(db, request, scope, capa):
+    # Reads can share the fence. Business changes still take conflicting row locks.
     report = CAPAEightD
     target = await visible_fmea_source(db, scope, request.fmea_id)
     if (target.factory_id, target.product_line_code) != (capa.factory_id, capa.product_line_code):
         raise ImpactTaskUnavailable()
     if (await _no_wait(db, select(report.report_id).where(
             report.report_id == capa.report_id, report.factory_id == capa.factory_id,
-            report.product_line_code == capa.product_line_code))).scalar_one_or_none() is None:
+            report.product_line_code == capa.product_line_code), read=True)).scalar_one_or_none() is None:
         raise ImpactTaskUnavailable()
     sources = {ref.object_id for ref in capa.sources if ref.module == "fmea"} | {request.fmea_id}
     for fmea_id in sorted(sources):
         if (await _no_wait(db, select(FMEADocument.fmea_id).where(
-                FMEADocument.fmea_id == fmea_id))).scalar_one_or_none() is None:
+                FMEADocument.fmea_id == fmea_id), read=True)).scalar_one_or_none() is None:
             raise ImpactTaskUnavailable()
-    await lock_employee_acl(db, (scope.user.user_id,))
+    await lock_employee_acl(db, (scope.user.user_id,), read=True)
 
 
 async def _preflight_task(db, scope, request, activation):

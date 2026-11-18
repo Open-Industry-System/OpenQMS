@@ -83,15 +83,16 @@ async def test_runtime_adapter_uses_current_access_not_old_user_role(monkeypatch
     task = NS(executor_user_id=user.user_id, target_capa_id=target.report_id,
         factory_id=target.factory_id, task_id=uuid4(), preferred_installation_id=installation.installation_id)
     task_grant = NS(**{**vars(plugin), 'grant_id': uuid4()})
-    # Let the real classifier read explicit non-R5 persistence, rather than
-    # returning the fake User row for every unrelated scalar query.
+    # Model an older metadata task with no specialized profile binding.
     from app.models.agent_model_deployment import AgentTaskModelBinding
+    from app.models.agent_pfmea_impact import AgentPfmeaImpactBinding
     from app.models.agent_plugin import AgentPluginInstallation
     from app.models.user import User
     class MetadataDB(ReadDB):
         async def scalar(self, query):
             entity=query.column_descriptions[0]['entity']
-            if entity is AgentTaskModelBinding:return None
+            if entity in (AgentTaskModelBinding, AgentPfmeaImpactBinding):
+                return None
             if entity is AgentPluginInstallation:return installation.plugin_key
             assert entity is User, 'Unexpected scalar query in metadata adapter fixture'
             return user
