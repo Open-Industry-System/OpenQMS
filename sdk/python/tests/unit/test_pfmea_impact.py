@@ -179,3 +179,19 @@ def test_managed_launch_accepts_only_the_r7_profile_for_r7_protocol(monkeypatch)
     ):
         with pytest.raises(sdk.ConfigError):
             sdk.ManagedLaunch.from_dict(r7 | changes)
+
+
+@pytest.mark.parametrize("reason", ("scope_incomplete", "budget_exhausted"))
+def test_query_gap_can_never_be_acknowledged_as_coverage(monkeypatch, reason):
+    from openqms_agent_sdk import ValidationError
+
+    parent, wire = make_client(monkeypatch)
+    with parent.claim_run(request_key="test") as run:
+        wire.calls.clear()
+        body = json.dumps({"gap": reason}).encode()
+        wire.responses["pfmea_impact_page"] = envelope(body=body, page=False) | {"scope_ref": SCOPE}
+        page = run.pfmea_impact_page(scope_ref=SCOPE, snapshot_digest=SNAPSHOT)
+        assert page.gap == reason and page.page_key is None and page.confirmation_token is None
+        with pytest.raises(ValidationError):
+            run.pfmea_impact_confirm(page)
+        assert [call[0] for call in wire.calls] == ["pfmea_impact_page"]

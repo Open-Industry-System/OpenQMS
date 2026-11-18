@@ -305,6 +305,7 @@ class PfmeaImpactRelease:
     page_key: str | None
     confirmation_token: str | None = field(repr=False)
     next_cursor: str | None = field(repr=False)
+    gap: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

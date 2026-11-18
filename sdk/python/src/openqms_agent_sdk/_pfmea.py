@@ -112,6 +112,7 @@ def _check_projection(body, payload_digest, page_key):
                 _text(element["node_id"], 1, 256)
                 _text(element["name"], 0, MAX_TEXT_BYTES)
                 _require(element["source_id"] is None and element["target_id"] is None)
+    return projection
 
 
 def decode_response(operation, p, *, run_id, task_id, lease_epoch, scope_ref, snapshot_digest):
@@ -138,7 +139,11 @@ def decode_response(operation, p, *, run_id, task_id, lease_epoch, scope_ref, sn
     if operation == "pfmea_impact_page":
         _require(snapshot_digest is not None, "binding")
         _require(_handle(p["scope_ref"]) == _handle(scope_ref), "binding")
-        page_key, token = _digest(p["page_key"]), _digest(p["confirmation_token"])
+        if p["page_key"] is None:
+            _require(p["confirmation_token"] is None)
+            page_key = token = None
+        else:
+            page_key, token = _digest(p["page_key"]), _digest(p["confirmation_token"])
     else:
         _require(p["scope_ref"] is None and p["page_key"] is None and p["confirmation_token"] is None)
         page_key = token = None
@@ -151,11 +156,17 @@ def decode_response(operation, p, *, run_id, task_id, lease_epoch, scope_ref, sn
         raise _Invalid("schema") from None
     _require(base64.b64encode(decoded).decode("ascii") == encoded)
     digest = _digest(p["payload_digest"])
-    _check_projection(decoded, digest, page_key)
+    projection = _check_projection(decoded, digest, page_key)
+    gap = None
+    if projection.keys() == {"gap"}:
+        _require(operation in {"pfmea_impact_search", "pfmea_impact_page"})
+        _require(projection["gap"] in ("scope_incomplete", "budget_exhausted") and cursor is None)
+        gap = projection["gap"]
+    _require(operation != "pfmea_impact_page" or page_key is not None or gap is not None)
     return models.PfmeaImpactRelease(
         receipt_id=_uuid(p["receipt_id"]), projection_bytes=decoded, payload_digest=digest,
         snapshot_digest=actual_snapshot, scope_ref=p["scope_ref"], page_key=page_key,
-        confirmation_token=token, next_cursor=cursor, **binding,
+        confirmation_token=token, next_cursor=cursor, gap=gap, **binding,
     )
 
 

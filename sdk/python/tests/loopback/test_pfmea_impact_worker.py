@@ -187,6 +187,15 @@ class WorkerTest(unittest.TestCase):
             self.assertEqual(process.returncode, 1)
             self.assertEqual(len(requests), 2)
 
+    def test_incomplete_scope_continues_without_page_confirmation(self):
+        gap = release({"gap": "scope_incomplete"}, page=True) | {
+            "page_key": None, "confirmation_token": None,
+        }
+        steps = [item for item in sequence(gap) if item[0] != "/confirm"]
+        process, requests = self.visit(steps)
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual([path for _, path, _, _ in requests], [PREFIX + route for route, _ in steps])
+
     def test_ambiguous_publication_exits_without_retry(self):
         first = sequence(release(page_body(), page=True))
         first[-1] = ("/result", None)

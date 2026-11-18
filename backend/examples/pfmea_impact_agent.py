@@ -148,6 +148,10 @@ class Runtime:
         require(0 < len(raw) <= MAX_PROJECTION and base64.b64encode(raw).decode("ascii") == encoded)
         require(compare_digest(sha256(raw).hexdigest(), expected_digest))
         projection = parse(raw)
+        if projection.keys() == {"gap"}:
+            require(route in {"page", "search"} and projection["gap"] in ("scope_incomplete", "budget_exhausted"))
+            require(value["page_key"] is None and value["confirmation_token"] is None and next_cursor is None)
+            return snapshot_digest
         if route == "page":
             key = digest(value["page_key"])
             check_page(projection, key)

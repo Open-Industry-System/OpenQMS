@@ -5,12 +5,14 @@ import json
 from base64 import b64encode, urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import asdict
 from hashlib import sha256
-from uuid import UUID
+from typing import Literal
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
 from app.config import settings
 from app.models.agent_pfmea_impact import AgentPfmeaImpactReceipt
+from app.models.audit import AuditLog
 from app.services.agent_runtime.pfmea_impact_cursor import read_cursor, sign_cursor
 from app.services.agent_runtime.pfmea_impact_ledger import (
     IncompleteCoverage,
@@ -75,6 +77,24 @@ def release_envelope(
     }
 
 
+QUERY_GAP_AUDIT = "R7_IMPACT_QUERY_GAP"
+QueryGap = Literal["scope_incomplete", "budget_exhausted"]
+
+
+async def query_gap(db, current: ImpactRuntime, reason: QueryGap, *, scope_ref: str | None = None) -> dict:
+    """Return a current read limit without constructing a source or coverage receipt."""
+    audit_id = uuid4()
+    db.add(AuditLog(
+        log_id=audit_id, table_name="agent_runs", record_id=current.run.run_id, action=QUERY_GAP_AUDIT,
+        operated_by=current.task.executor_user_id, factory_id=current.task.factory_id,
+        correlation_id=current.run.run_id, changed_fields={"lease_epoch": current.epoch, "reason": reason},
+    ))
+    response = release_envelope(_scope(current, scope_ref or "query-gap"), audit_id, _bytes({"gap": reason}))
+    response["scope_ref"] = scope_ref
+    await db.commit()
+    return response
+
+
 async def material_projection(db, current: ImpactRuntime) -> dict:
     scope = _scope(current, "capa.material")
     body = _bytes(current.material.model_dump(mode="json"))
@@ -117,8 +137,8 @@ def _step_plan(current: ImpactRuntime, scope_ref: str):
 
 async def page_projection(db, current: ImpactRuntime, *, scope_ref: str, cursor: str | None) -> dict:
     scope = _scope(current, scope_ref)
-    pages = _step_plan(current, scope_ref)
     index = 0 if cursor is None else read_cursor(scope, "page", cursor)
+    pages = _step_plan(current, scope_ref)
     if index >= len(pages):
         raise ImpactRuntimeUnavailable()
     page = pages[index]

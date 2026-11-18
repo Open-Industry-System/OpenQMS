@@ -13,7 +13,7 @@ from app.services.agent import provider_adapter
 from app.services.agent_runtime import model_egress
 from app.services.agent_runtime.pfmea_impact_activation import _deployment
 from app.services.agent_runtime.pfmea_impact_ledger import fmea_usage_from_releases
-from app.services.agent_runtime.pfmea_impact_projections import _scope, _step_plan, step_handle
+from app.services.agent_runtime.pfmea_impact_projections import QUERY_GAP_AUDIT, _scope, _step_plan, step_handle
 from app.services.agent_runtime.pfmea_impact_release import FMEA_MAX_ATTEMPTS, FMEA_MAX_BYTES, FMEA_MAX_ELEMENTS
 from app.services.agent_runtime.pfmea_impact_runtime import ImpactRuntimeUnavailable
 from app.services.egress_guard import suppress_sdk_payload_logs
@@ -28,7 +28,8 @@ Return one JSON object with no Markdown. You may request more authorized data wi
 {"kind":"page","scope_ref":"exact candidate scope ref","cursor":null}.
 Use only opaque cursors for the corresponding continuation. Confirmed page coverage is
 distinct from a finished search. A no-impact conclusion requires both applicable
-confirmed coverage and a formal exclusion from formal_exclusions. If that collection
+confirmed coverage and a formal exclusion from formal_exclusions. Treat a recorded
+query gap as a limit on what was observed. If that collection
 contains no applicable exclusion, express the evidence gap. Use exact per-measure
 CAPA source UUIDs and approved PFMEA node source UUIDs in evidence references.
 Do not guess source or node identifiers.
@@ -98,6 +99,10 @@ async def _messages(db, current):
         readings.append(reading)
 
     usage = fmea_usage_from_releases(releases)
+    gaps = (await db.scalars(select(AuditLog.changed_fields["reason"].astext).distinct().where(
+        AuditLog.correlation_id == current.run.run_id, AuditLog.action == QUERY_GAP_AUDIT,
+        AuditLog.changed_fields["lease_epoch"].astext == str(current.epoch),
+    ))).all()
     context = json.dumps({
         "formal_capa": current.material.model_dump(mode="json"), "pfmea_readings": readings,
         "approved_target": {
@@ -112,6 +117,7 @@ async def _messages(db, current):
             "new_graph_elements": FMEA_MAX_ELEMENTS - len(usage.element_keys),
         },
         "formal_exclusions": [],
+        "query_gaps": sorted(set(gaps) & {"scope_incomplete", "budget_exhausted"}),
         "complete_coverage": [{"receipt_id": str(row.receipt_id), "scope": row.payload}
                               for row in rows if row.kind == "coverage"],
     }, ensure_ascii=False, allow_nan=False)

@@ -11,9 +11,11 @@ from app.database import get_db
 from app.schemas import pfmea_impact_runtime as protocol
 from app.services.agent_runtime import pfmea_impact_inference as inference
 from app.services.agent_runtime import pfmea_impact_projections as projection
+from app.services.agent_runtime.pfmea_impact_release import ProjectionBudgetExceeded
 from app.services.agent_runtime.pfmea_impact_results import PublicationScope, publish_pfmea_impact_result
 from app.services.agent_runtime.pfmea_impact_runtime import ImpactRuntimeUnavailable, lock_runtime
 from app.services.agent_runtime.routes import PFMEA_IMPACT_RUNTIME
+from app.services.fmea_impact_projection import IncompleteImpactScope
 
 router = APIRouter(prefix=PFMEA_IMPACT_RUNTIME, tags=["pfmea-impact-runtime"], include_in_schema=False)
 _HEADERS = {"Cache-Control": "no-store"}
@@ -77,7 +79,13 @@ async def search(request: Request, db=Depends(get_db)):
     async with _operation(db):
         body = await _body(request, protocol.Search)
         current = await _current(request, db)
-        return _reply(await projection.search_projection(db, current, term=body.term, cursor=body.cursor))
+        try:
+            result = await projection.search_projection(db, current, term=body.term, cursor=body.cursor)
+        except IncompleteImpactScope:
+            result = await projection.query_gap(db, current, "scope_incomplete")
+        except ProjectionBudgetExceeded:
+            result = await projection.query_gap(db, current, "budget_exhausted")
+        return _reply(result)
 
 
 @router.post("/page")
@@ -85,7 +93,13 @@ async def page(request: Request, db=Depends(get_db)):
     async with _operation(db):
         body = await _body(request, protocol.Page)
         current = await _current(request, db)
-        return _reply(await projection.page_projection(db, current, scope_ref=body.scope_ref, cursor=body.cursor))
+        try:
+            result = await projection.page_projection(db, current, scope_ref=body.scope_ref, cursor=body.cursor)
+        except IncompleteImpactScope:
+            result = await projection.query_gap(db, current, "scope_incomplete", scope_ref=body.scope_ref)
+        except ProjectionBudgetExceeded:
+            result = await projection.query_gap(db, current, "budget_exhausted", scope_ref=body.scope_ref)
+        return _reply(result)
 
 
 @router.post("/confirm")
