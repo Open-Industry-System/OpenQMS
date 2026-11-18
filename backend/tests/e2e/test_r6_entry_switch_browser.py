@@ -1,13 +1,75 @@
 """Actual normal application and installed Chromium; no API-only substitute."""
+import asyncio
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from uuid import uuid4
+
 import pytest
 
+from tests.ci.owned_resources import verify_owned_database, verify_owned_instance
 from tests.e2e.r6_exercise import Exercise, write_private
 
+# These cases use the owner-registered Darwin managed worker and Chromium.
+pytestmark = [pytest.mark.requires_db, pytest.mark.ci_browser, pytest.mark.ci_r5_native, pytest.mark.asyncio]
 
-@pytest.mark.requires_db
-@pytest.mark.ci_browser
-@pytest.mark.asyncio
-async def test_real_employee_browser_empty_root_entry():
+
+@pytest.fixture
+def r6_browser_exercise(monkeypatch, tmp_path):
+    """Derive a private synthetic exercise from the native job's verified DB."""
+    verify_owned_database(verify_owned_instance(os.environ))
+    resource = json.loads(Path(os.environ['OPENQMS_TEST_RESOURCE_FILE']).read_bytes())
+    directory = tmp_path / 'r6-browser-exercise'
+    directory.mkdir(mode=0o700)
+    registration = directory / 'resource.json'
+    resource.update(r6_c9_execution_id=str(uuid4()), r6_exercise_directory=str(directory))
+    resource.pop('r6_controlled_model', None)
+    write_private(registration, resource)
+    database = os.environ['TEST_DATABASE_URL']
+    environment = {key: os.environ[key] for key in (
+        'PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'SECRET_KEY', 'PYTHONPATH',
+        'OPENQMS_AGENT_BROWSER_EXECUTABLE', 'OPENQMS_TEST_ARTIFACTS',
+    ) if key in os.environ}
+    environment.update(
+        DATABASE_URL=database, TEST_DATABASE_URL=database, TENANT_MODE='dev',
+        OPENQMS_TEST_RESOURCE_FILE=str(registration),
+        AGENT_TASK_RUNTIME_ENABLED='true', AGENT_R5_CONTROLLED_ENABLED='true',
+        AGENT_R5_CONTROLLED_POLICY_FILE=str(directory / 'policy.json'),
+        AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED='true',
+        R5_MODEL_CREDENTIAL_SYNTHETIC='synthetic-no-real-credential',
+        R6_GENERATION_ENABLED='true',
+    )
+    write_private(directory / 'environment.json', environment)
+    write_private(directory / 'environment.compat.json', dict(environment, R6_GENERATION_ENABLED='false'))
+    reader = Path(__file__).with_name('r6_fresh_readonly.py').resolve()
+    descriptor = dict(path=str(reader), sha256=hashlib.sha256(reader.read_bytes()).hexdigest(),
+                      interface='r6.c9-readonly.v1')
+    (directory / 'prepare.py').write_text(f'R6_READONLY_VERIFIER = {descriptor!r}\n')
+    for name in ('live.py', 'run.py'):
+        (directory / name).write_text("raise RuntimeError('Controlled browser fixture only')\n")
+    monkeypatch.setenv('OPENQMS_TEST_RESOURCE_FILE', str(registration))
+    return directory, resource, environment
+
+
+async def bootstrap(directory, environment):
+    child = await asyncio.create_subprocess_exec(
+        sys.executable, '-B', '-m', 'tests.e2e.r6_live_harness', str(directory), '--bootstrap',
+        env=environment, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await child.communicate()
+    log = directory / 'bootstrap.log'
+    log.write_bytes(out + err)
+    log.chmod(0o600)
+    assert child.returncode == 0, 'controlled tenant bootstrap failed; inspect owned log'
+
+
+async def test_real_employee_browser_empty_root_entry(r6_browser_exercise):
+    directory, _, environment = r6_browser_exercise
+    await bootstrap(directory, environment)
     async with Exercise() as exercise:
         await exercise.start()
         detail = await exercise.request('GET', exercise.root)
@@ -16,30 +78,13 @@ async def test_real_employee_browser_empty_root_entry():
         write_private(exercise.directory / 'browser-entry-receipt.json', exercise.receipts)
 
 
-@pytest.mark.requires_db
-@pytest.mark.ci_browser
-@pytest.mark.asyncio
 @pytest.mark.parametrize('d4_question',[False,True],ids=['direct-d4','question-d4'])
-async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_question,record_property):
-    """Deterministic loopback model catches UI/harness gaps before paid C9.
-
-    Uses the same actual application, managed worker, source receipts and
-    Playwright script. It is explicitly not real-model C9 acceptance.
-    """
-    import asyncio
-    import json
-    import os
-    from pathlib import Path
-    import shutil
-    import sys
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from uuid import uuid4
+async def test_controlled_normal_app_complete_employee_ui_chain(r6_browser_exercise, monkeypatch, d4_question, record_property):
+    """Test the actual app, managed worker and browser with a loopback model."""
     from tests.e2e.test_r5_model_agent import call
     from tests.e2e.test_r6_live_chain import run_chain, record_completed_binding
-    source = Path(os.environ['OPENQMS_TEST_RESOURCE_FILE']).parent
-    directory = source / ('controlled-ui-' + uuid4().hex)
-    directory.mkdir(mode=0o700)
+
+    directory, resource, environment = r6_browser_exercise
     turns = [call('read_inputs', identifier='d4-read'),
         call('save_candidate', dict(text='待验证：定位销磨损且现行检查漏执行，导致合成批次孔径超差',
             supporting=['D2孔径超差、FMEA定位销磨损和现行检查'], opposing=[], missing_information=['独立现场验证']), 'd4-save'),
@@ -68,23 +113,9 @@ async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_q
     thread = threading.Thread(target=witness.serve_forever, daemon=True)
     thread.start()
     try:
-        resource = json.loads((source / 'resource.json').read_text())
-        resource.update(r6_c9_execution_id=str(uuid4()), r6_exercise_directory=str(directory), r6_controlled_model=dict(base_url=f'http://127.0.0.1:{witness.server_port}/v1'))
+        resource['r6_controlled_model'] = dict(base_url=f'http://127.0.0.1:{witness.server_port}/v1')
         write_private(directory / 'resource.json', resource)
-        environment = json.loads((source / 'environment.json').read_text())
-        environment.update(OPENQMS_TEST_RESOURCE_FILE=str(directory / 'resource.json'),
-            AGENT_R5_CONTROLLED_POLICY_FILE=str(directory / 'policy.json'),
-            R5_MODEL_CREDENTIAL_SYNTHETIC='synthetic-no-real-credential')
-        write_private(directory / 'environment.json', environment)
-        write_private(directory / 'environment.compat.json', dict(environment, R6_GENERATION_ENABLED='false'))
-        for name in ['prepare.py', 'live.py', 'run.py']:
-            shutil.copyfile(source / name, directory / name)
-        child = await asyncio.create_subprocess_exec(sys.executable, '-B', '-m', 'tests.e2e.r6_live_harness',
-            str(directory), '--bootstrap', env=environment, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        out, err = await child.communicate()
-        (directory / 'bootstrap.log').write_bytes(out + err)
-        assert child.returncode == 0, 'controlled tenant bootstrap failed; inspect owned log'
-        monkeypatch.setenv('OPENQMS_TEST_RESOURCE_FILE', str(directory / 'resource.json'))
+        await bootstrap(directory, environment)
         def reviewed(exercise, task, proposals):
             assert {item['original_text'] for item in proposals} == {
                 '执行现行定位销检查及磨损件更换，保持既有频次和阈值。', '按现行要求记录定位销检查责任人和结果，复核漏执行记录。'}
@@ -100,7 +131,6 @@ async def test_controlled_normal_app_complete_employee_ui_chain(monkeypatch,d4_q
             # Authenticate the normal accepted owner/build/config before loading
             # the newly registered generic reader. This controlled walkthrough
             # remains explicitly ineligible for genuine cloud C9 acceptance.
-            import hashlib
             from types import ModuleType
             from app.database import tenant_async_session
             from app.core.tenant_transaction import TenantBinding

@@ -32,6 +32,7 @@ TARGETS = (
     'tests/migrations/test_r5_responses_delta.py',
     'tests/e2e/test_r5_d5_ui.py',
     'tests/e2e/test_r5_d5_browser.py',
+    'tests/e2e/test_r6_entry_switch_browser.py',
 
 )
 

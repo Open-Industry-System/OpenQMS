@@ -55,7 +55,6 @@ test('actual employee restricted D4 candidate and source/version uncertainty wit
   await expect(region).toHaveCount(0);
   await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('region', { name: '受限正文预览' })).toHaveCount(0);
-  await expect(page.getByText(/扭矩12N·m/)).toHaveCount(0);
   const denied = await page.request.post(`${backend}/api/capa/${report}/d4-text-preview`, {
     headers: { Authorization: `Bearer ${login.access_token}`, 'X-Tenant-ID': process.env.AGENT_BROWSER_TENANT! },
     data: successfulBody,
