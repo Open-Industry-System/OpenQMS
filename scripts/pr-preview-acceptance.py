@@ -20,6 +20,7 @@ PREVIEW_WORKFLOW = 'oracle-deploy.yml'
 SHARED_TEST_WORKFLOW = 'oracle-shared-test.yml'
 SHARED_TEST_URL = 'https://test.preview.openqms.smartindustry.world'
 SHARED_TEST_ARTIFACT = 'shared-test-publication'
+D4_ARTIFACT = 'shared-test-d4-evidence'
 SHANGHAI = timezone(timedelta(hours=8))
 
 
@@ -266,11 +267,11 @@ def cleanup_notice(api, number, result):
     api.notice(number, f'{NOTICE}\n### {text}\n\n[清理记录]({run_url})')
 
 
-def publication_receipt(api, artifact):
+def publication_receipt(api, artifact, filename='preview-publication.json'):
     data = api.get(f'/actions/artifacts/{artifact["id"]}/zip', raw=True)
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         entries = archive.infolist()
-        if len(entries) != 1 or entries[0].filename != 'preview-publication.json' or entries[0].file_size > 4096:
+        if len(entries) != 1 or entries[0].filename != filename or entries[0].file_size > 4096:
             raise ValueError('Invalid publication receipt')
         receipt = json.loads(archive.read(entries[0]))
         if not isinstance(receipt, dict):
@@ -285,37 +286,75 @@ def receipt_matches(api, pr, receipt):
             and receipt.get('repository') == api.repo)
 
 
-def shared_publication(api, pr, queue_lease):
-    # Successful polls without a deployment do not count toward discovery.
-    digest = test_plan(pr.get('body'))
+def shared_artifacts(api, name):
     default = api.get('')['default_branch']
     for page in range(1, 11):
-        response = api.get(f'/actions/artifacts?name={SHARED_TEST_ARTIFACT}&per_page=100&page={page}')
+        response = api.get(f'/actions/artifacts?name={name}&per_page=100&page={page}')
         artifacts = response['artifacts']
         for artifact in artifacts:
-            if artifact['name'] != SHARED_TEST_ARTIFACT or artifact['expired']:
+            if artifact['name'] != name or artifact['expired']:
                 continue
             reference = artifact.get('workflow_run') or {}
             run_id = reference.get('id')
             if (reference.get('head_branch') != default or type(run_id) is not int or run_id <= 0):
                 continue
             run = api.get(f'/actions/runs/{run_id}')
-            if (not accepts_workflow_source(run, SHARED_TEST_WORKFLOW) or run['head_branch'] != default
-                    or run.get('conclusion') != 'success' or run.get('status') != 'completed'):
-                continue
-            receipt = publication_receipt(api, artifact)
-            if not receipt_matches(api, pr, receipt):
-                continue
-            lease = receipt.get('queue_lease')
-            expires = receipt.get('expires_at')
-            if (not isinstance(lease, str) or not re.fullmatch(r'[0-9a-f]{32}', lease)
-                    or type(expires) is not int or not 0 < expires < 2**32):
-                raise ValueError('Invalid shared test lease receipt')
-            if receipt.get('plan') == digest and (queue_lease is None or lease == queue_lease):
-                return dict(run, shared_test=receipt)
+            if (accepts_workflow_source(run, SHARED_TEST_WORKFLOW) and run['head_branch'] == default
+                    and run.get('conclusion') == 'success' and run.get('status') == 'completed'
+                    and run.get('repository', {}).get('full_name') == api.repo):
+                yield run, artifact
         if len(artifacts) < 100:
-            return None
-    raise ValueError('Too many shared test publication artifacts')
+            return
+    raise ValueError('Too many shared test artifacts')
+
+
+def d4_scenarios(plan):
+    return {item.scenario for item in plan.items if item.scenario.startswith('d4-')}
+
+
+def valid_d4_evidence(receipt, proofs):
+    return (isinstance(proofs, dict) and set(proofs) <= {'d4-deliver', 'd4-revoke'}
+            and all(isinstance(proof, dict) and set(proof) == {'sha256', 'completed_at', 'expires_at'}
+                    and isinstance(proof['sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', proof['sha256'])
+                    and type(proof['completed_at']) is int and type(proof['expires_at']) is int
+                    and 0 < proof['completed_at'] < proof['expires_at'] <= receipt['expires_at']
+                    for proof in proofs.values()))
+
+
+def shared_d4_evidence(api, receipt, deployment, required):
+    identity = ('repository', 'pr', 'head', 'sha', 'queue_lease', 'plan', 'expires_at')
+    for run, artifact in shared_artifacts(api, D4_ARTIFACT):
+        evidence = publication_receipt(api, artifact, 'd4-evidence.json')
+        if (evidence.get('deployment_run') != deployment['id']
+                or any(evidence.get(key) != receipt[key] for key in identity)):
+            continue
+        proofs = evidence.get('proofs')
+        if (not valid_d4_evidence(receipt, proofs) or not required <= proofs.keys()
+                or any(proof['completed_at'] < epoch(deployment['updated_at'])
+                       or proof['completed_at'] > epoch(run['updated_at']) for proof in proofs.values())):
+            continue
+        return proofs
+    return {}
+
+
+def shared_publication(api, pr, queue_lease):
+    # Successful polls without a deployment do not count toward discovery.
+    plan = parse_plan(pr.get('body'))
+    for run, artifact in shared_artifacts(api, SHARED_TEST_ARTIFACT):
+        receipt = publication_receipt(api, artifact)
+        if not receipt_matches(api, pr, receipt):
+            continue
+        lease = receipt.get('queue_lease')
+        expires = receipt.get('expires_at')
+        if (not isinstance(lease, str) or not re.fullmatch(r'[0-9a-f]{32}', lease)
+                or type(expires) is not int or not 0 < expires < 2**32):
+            raise ValueError('Invalid shared test lease receipt')
+        if receipt.get('plan') == plan.digest and (queue_lease is None or lease == queue_lease):
+            # Proofs can only come from the separately named trusted workflow artifact.
+            if required := d4_scenarios(plan):
+                run = dict(run, d4_evidence=shared_d4_evidence(api, receipt, run, required))
+            return dict(run, shared_test=receipt)
+    return None
 
 
 def publication(api, pr, *, queue_lease=None, shared=None):
@@ -356,18 +395,26 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
     independent = os.environ.get('REQUIRE_INDEPENDENT_REVIEWER') == 'true'
     shared = run.get('shared_test')
     items = ()
+    proofs = run.get('d4_evidence', {})
     if shared:
         plan = parse_plan(pr.get('body'))
-        if (shared['plan'] != digest or shared_blockers(plan, shared)
+        if (shared['plan'] != digest or shared_blockers(plan, shared, proofs)
                 or not deployment_after_reopen(api, pr, run)):
             return None
         items = plan.items
+        if proofs and released_at is None and any(
+                int(datetime.now(timezone.utc).timestamp()) >= proof['expires_at'] for proof in proofs.values()):
+            return None
     for comment in reversed(api.pages(f'/issues/{pr["number"]}/comments')):
         login = comment.get('user', {}).get('login', '')
         if command not in (comment.get('body') or '').splitlines() or not re.fullmatch(r'[A-Za-z0-9-]+', login):
             continue
         if shared:
             last_edit = epoch(comment.get('updated_at') or comment['created_at'])
+            if proofs and any(
+                    epoch(comment['created_at']) < proof['completed_at'] or last_edit >= proof['expires_at']
+                    for proof in proofs.values()):
+                continue
             if last_edit >= shared['expires_at'] or (released_at is not None and last_edit >= released_at):
                 continue
         if items:
@@ -382,21 +429,23 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
     return None
 
 
-def shared_blockers(plan, receipt):
+def shared_blockers(plan, receipt, proofs=None, *, now=None):
     if not plan.classified:
         return ['计划需要逐项声明环境、角色和场景']
     issued_roles = receipt.get('test_roles', [])
     if (not isinstance(issued_roles, list)
             or any(role not in ('field_qe', 'manager') for role in issued_roles)):
         issued_roles = []
-    return [
-        f'{item.id}：' + (
-            '需要经核验的 Linux receiver 及浏览器交付回执'
-            if item.scenario.startswith('d4-') else '需要发放本轮合成业务账号'
-        )
-        for item in plan.items
-        if item.scenario.startswith('d4-') or (item.environment == 'shared' and item.role not in issued_roles)
-    ]
+    proofs = proofs if proofs and valid_d4_evidence(receipt, proofs) else {}
+    blockers = []
+    for item in plan.items:
+        if item.environment == 'shared' and item.role not in issued_roles:
+            blockers.append(f'{item.id}：需要发放本轮合成业务账号')
+        elif item.scenario.startswith('d4-'):
+            proof = proofs.get(item.scenario)
+            if proof is None or (now is not None and now >= proof['expires_at']):
+                blockers.append(f'{item.id}：需要经核验的 Linux receiver 及浏览器交付回执')
+    return blockers
 
 
 def shared_test_ready_notice(api, pr, run, digest):
@@ -409,7 +458,8 @@ def shared_test_ready_notice(api, pr, run, digest):
     if shared_release_marker(api, pr, digest):
         return  # A repeated poll cannot put the released link back.
     plan = parse_plan(pr.get('body'))
-    blockers = shared_blockers(plan, receipt)
+    blockers = shared_blockers(plan, receipt, run.get('d4_evidence'),
+                               now=int(datetime.now(timezone.utc).timestamp()))
     notice = ready_notice(pr, run, digest)
     if blockers:
         # Keep the link for independently runnable checks, but do not offer a
@@ -507,7 +557,9 @@ def reconcile(api, pr, summary):
     if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
         raise ValueError('PR changed before publication notification')
     receipt = run.get('shared_test')
-    if receipt and (blockers := shared_blockers(parse_plan(pr.get('body')), receipt)):
+    if receipt and (blockers := shared_blockers(
+            parse_plan(pr.get('body')), receipt, run.get('d4_evidence'),
+            now=int(datetime.now(timezone.utc).timestamp()))):
         api.status(sha, ACCEPT, 'pending', '本轮共享测试缺少必要验收能力')
         summary.append(f'PR #{pr["number"]} 受阻：' + '、'.join(blockers))
         return
@@ -519,6 +571,9 @@ def reconcile(api, pr, summary):
         command = acceptance_command(pr, run, digest)
         url = preview_url(pr['number'], receipt)
         summary.append(f'PR #{pr["number"]}: {url}\n\n逐项测试后评论以下命令，并另写实际结果/截图链接：\n\n```text\n{command}\n```')
+    if run.get('d4_evidence'):
+        summary.append(f'PR #{pr["number"]}: 等待共享测试控制器签收当前回执并确认资源清理。')
+        return
     if verified_acceptance(api, pr, run, digest):
         api.status(sha, ACCEPT, 'success', '有写权限的人工已确认当前提交、部署和验收计划')
 

@@ -99,7 +99,7 @@ def publication_receipt(api, slot):
                 expires_at=slot['expires_at'], test_roles=slot['test_roles'])
 
 
-def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_file):
+def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_file, d4_file=None):
     eligible = get_eligible()
     versions = [entry[0] for entry in eligible]
 
@@ -117,8 +117,11 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
             if run and ACCEPTANCE['verified_acceptance'](api, row[2], run, current['plan']):
                 if time.time() < current['expires_at']:
                     check_health(current)
-                    result = host(dict(action='passed', lease=current['lease'], eligible=versions))
-                    release(result)
+                    proofs = run.get('d4_evidence')
+                    request = dict(action='passed', lease=current['lease'], eligible=versions)
+                    if proofs:
+                        request.update(action='d4-passed', proofs=proofs)
+                    release(host(request))
 
     slot = host(dict(action='tick', eligible=versions))
     if slot['phase'] == 'releasing':
@@ -164,6 +167,15 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
             slot = host(dict(action='ready', lease=slot['lease'], eligible=versions))
         evidence_file.write_text(json.dumps(publication_receipt(api, slot)))
     else:
+        if d4_file is not None:
+            plan = ACCEPTANCE['parse_plan'](pr.get('body'))
+            required = ACCEPTANCE['d4_scenarios'](plan)
+            if required and not published.get('d4_evidence'):
+                proofs = host(dict(action='d4-evidence', lease=slot['lease']))
+                receipt = published['shared_test']
+                if ACCEPTANCE['valid_d4_evidence'](receipt, proofs) and required <= proofs.keys():
+                    payload = dict(receipt, proofs=proofs, deployment_run=published['id'])
+                    d4_file.write_text(json.dumps(payload))
         ACCEPTANCE['shared_test_ready_notice'](api, pr, published, slot['plan'])
     print(f'PR #{slot["pr"]} occupies the shared test slot')
 
@@ -172,6 +184,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--list', action='store_true', help='read-only eligibility check')
     parser.add_argument('--receipt', type=Path)
+    parser.add_argument('--d4-evidence', type=Path)
     args = parser.parse_args()
     api = ACCEPTANCE['API']()
     gate = GATE['GitHub'](api.repo)
@@ -184,7 +197,7 @@ def main():
         return
     if args.receipt is None:
         parser.error('--receipt is required when running the queue')
-    reconcile(api, get_eligible, queue_call, deploy, public_health, args.receipt)
+    reconcile(api, get_eligible, queue_call, deploy, public_health, args.receipt, args.d4_evidence)
 
 
 if __name__ == '__main__':

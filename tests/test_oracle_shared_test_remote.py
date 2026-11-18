@@ -266,3 +266,61 @@ def test_shared_lease_cannot_be_released_with_issued_credentials_left_behind(hos
     assert not opened.exists() and other.exists()
     assert run(host, 'released', lease=first['lease'])['phase'] == 'idle'
     assert run(host, 'tick', eligible=eligible)['pr'] == 46
+
+
+def test_d4_evidence_is_lease_scoped_redacted_and_rechecked_at_signoff(host, monkeypatch):
+    eligible = [identity(45), identity(46)]
+    first = run(host, 'tick', eligible=eligible)
+    stage_runtime(host, first)
+    slot = run(host, 'ready', lease=first['lease'], eligible=eligible)
+    lease = slot['lease']
+    binding = {key: slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease')}
+    binding.update(report_id='11111111-1111-4111-8111-111111111111', issued_at=100, expires_at=120)
+    raw = dict(binding=binding, scenario='d4-deliver', operation='a' * 32,
+               task_id='22222222-2222-4222-8222-222222222222',
+               run_id='33333333-3333-4333-8333-333333333333',
+               delivery_before=0, delivery_after=1, denial=None, completed_at=100)
+
+    def read(path):
+        assert path.parent.parent.name == lease
+        if path.name != 'd4-deliver.json':
+            raise FileNotFoundError
+        return json.dumps(raw).encode()
+
+    monkeypatch.setattr(remote, 'private_file', read)
+    proofs = run(host, 'd4-evidence', lease=lease)
+    assert set(proofs) == {'d4-deliver'}
+    assert set(proofs['d4-deliver']) == {'sha256', 'completed_at', 'expires_at'}
+    raw['binding']['head'] = 'd' * 40
+    with pytest.raises(ValueError, match='active lease'):
+        run(host, 'd4-passed', lease=lease, eligible=eligible, proofs=proofs)
+    raw['binding']['head'] = slot['head']
+    monkeypatch.setattr(remote, 'time', SimpleNamespace(time=lambda: 120))
+    with pytest.raises(ValueError, match='active lease'):
+        run(host, 'd4-passed', lease=lease, eligible=eligible, proofs=proofs)
+    monkeypatch.setattr(remote, 'time', SimpleNamespace(time=lambda: 110))
+    assert run(host, 'd4-passed', lease=lease, eligible=eligible, proofs=proofs)['phase'] == 'releasing'
+
+
+def test_release_waits_for_only_the_current_d4_allocation(host, monkeypatch, tmp_path):
+    monkeypatch.setattr(remote, 'MODE', tmp_path)
+    eligible = [identity(45), identity(46)]
+    first = run(host, 'tick', eligible=eligible)
+    stage_runtime(host, first)
+    lease = first['lease']
+    run(host, 'ready', lease=lease, eligible=eligible)
+    allocation = tmp_path / 'd4' / lease
+    allocation.mkdir(parents=True)
+    unrelated = allocation.parent / ('f' * 32)
+    unrelated.mkdir()
+    run(host, 'passed', lease=lease, eligible=eligible)
+    with pytest.raises(ValueError, match='trusted cleanup'):
+        run(host, 'release', lease=lease)
+    with pytest.raises(ValueError, match='not complete'):
+        run(host, 'released', lease=lease)
+    assert run(host, 'tick', eligible=eligible)['pr'] == 45
+    allocation.rmdir()
+    run(host, 'release', lease=lease)
+    run(host, 'released', lease=lease)
+    assert unrelated.is_dir()
+    assert run(host, 'tick', eligible=eligible)['pr'] == 46

@@ -114,10 +114,11 @@ class Executor:
             observation = self.execute(scenario, self.profile['cases'][scenario], binding)
             response = dict(payload, **observation)
             outcome = validated_receipt(response, payload)
-            if not self.is_current(binding, int(self.clock())):
+            completed_at = int(self.clock())
+            if not self.is_current(binding, completed_at):
                 raise ValueError('D4 acceptance allocation expired during execution')
             if self.record and outcome == '通过':
-                self.record(response)
+                self.record(dict(response, completed_at=completed_at))
             return response
 
 
@@ -155,6 +156,9 @@ def main():
         raise SystemExit('root Linux broker required')
     from cases import execute_case
     profile = load_profile(args.profile)
+    expected_profile = QUEUE_ROOT / 'd4' / profile['binding']['lease'] / 'profile.json'
+    if args.profile != expected_profile:
+        raise SystemExit('profile must use the protected shared-test lease path')
     evidence = args.profile.parent / 'receipts'
     evidence.mkdir(mode=0o700, exist_ok=True)
     root_private(evidence, directory=True)

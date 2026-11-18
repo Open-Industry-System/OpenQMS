@@ -18,7 +18,7 @@ python3 deploy/d4-acceptance/browser.py \
 
 ## 受信执行接线
 
-在审批后，把这组文件作为受信服务安装在 root 所有且不可由应用写入的目录。运行 `python3 executor.py --profile "$D4_EXECUTOR_PROFILE"`。该配置文件及父目录分别为 root 的 `0600` 和 `0700`。控制目录 `/run/openqms-d4-acceptance` 为 root 所有、浏览器服务组可读、权限 `0750`。Unix socket 只接受配置中的非 root 浏览器服务 UID/GID。
+在审批后，把这组文件作为受信服务安装在 root 所有且不可由应用写入的目录。运行 `python3 executor.py --profile "$D4_EXECUTOR_PROFILE"`。配置文件必须位于 `/var/lib/openqms-shared-test/d4/<lease>/profile.json`，文件及其父目录分别为 root 的 `0600` 和 `0700`。控制目录 `/run/openqms-d4-acceptance` 为 root 所有、浏览器服务组可读、权限 `0750`。Unix socket 只接受配置中的非 root 浏览器服务 UID/GID。
 
 执行配置包含相同的 `binding`、`portal_uid`、`portal_gid` 和两个 `cases`。每个场景使用独立准备的 nonce、API 容器、任务和租约数据库。必须从受审运行包准备，候选代码作为隔离应用镜像运行。每个 case 声明：
 
@@ -34,4 +34,6 @@ python3 deploy/d4-acceptance/browser.py \
 
 撤权控制服务收取固定的 `revoke-claimed-source` 请求，包含绑定、任务、报告、运行、安装、授权及运行 epoch。服务须在同一运行仍有效时固定撤权观察窗口，从本轮受信 wire 会话核对已经成功的正文请求，禁用同一来源授权，并确认仍在原运行和 epoch 上读取时返回 HTTP 401，响应未包含正文。回包只含 `task_id`、`run_id`、`report_id`、`installation_id`、`grant_id`、`authorized_status`、`revoked_status` 和 `revoked_body_received`。数据库核验再核对禁用审计和未新增交付。该受信控制服务与发放器尚未进入线上测试。
 
-执行代理在既有 Oracle 主机锁内检查测试位。原生启动器必须验证 watchdog 和 receiver 的实际回收后才返回业务结果。成功回执保存在受保护的同轮 `receipts/` 目录，浏览器只展示元数据。把该回执接入 CI 合并门禁前，D4 项保持受阻。本地实跑了 PostgreSQL 核验 SQL，使用合成表数据和模拟的撤权 wire 观察。Oracle 实际两场景及 CI 交接为 **NOT_RUN**。
+执行代理在既有 Oracle 主机锁内检查测试位。原生启动器验证 watchdog 和 receiver 的回收后，才记录成功回执及完成时间。共享测试工作流通过现有受限 SSH 通道读取活跃租约回执。GitHub artifact 只含版本和租约绑定、回执摘要及期限。门禁还要求授权人员在回执生成后、发放到期前逐项确认。Oracle 在签收时再次读取当前回执；专用发放目录清理前，队列保持当前租约。
+
+发放服务应在租约进入 `releasing` 后停止专用 HTTPS 入口与代理、撤销账号和授权、清除合成任务及独占运行资源，确认实际回收后移除本轮发放目录。Oracle 的实际发放、撤权控制、浏览器两场景、自动清理与线上 CI 交接为 **NOT_RUN**。本地 PostgreSQL 核验使用合成表数据和模拟的撤权 wire 观察。

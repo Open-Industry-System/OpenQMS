@@ -505,3 +505,58 @@ def test_write_case_needs_issued_role():
     plan = m.parse_plan(body)
     assert m.shared_blockers(plan, {'test_roles': ['manager']})
     assert not m.shared_blockers(plan, {'test_roles': ['field_qe']})
+
+
+def test_d4_acceptance_requires_trusted_current_artifact_and_timely_human_comment(shared_receipt_api, monkeypatch):
+    import io
+    import json
+    import zipfile
+
+    api = shared_receipt_api
+    api.pr['body'] = SHARED_BODY.replace('| report-read | 列表筛选 | public | viewer | read-only |',
+                                       '| body-deliver | 正常正文交付 | shared | field_qe | d4-deliver |')
+    receipt = api.receipt
+    receipt.update(plan=m.test_plan(api.pr['body']), test_roles=['field_qe'])
+    proof_time = m.epoch('2026-11-16T01:01:00Z')
+    expiry = m.epoch('2026-11-16T02:00:00Z')
+    proofs = {'d4-deliver': dict(sha256='a' * 64, completed_at=proof_time, expires_at=expiry)}
+    envelope = dict(receipt, proofs=proofs, deployment_run=42)
+    evidence_run = dict(api.run, id=43, updated_at='2026-11-16T01:02:00Z')
+    original_get = api.get
+
+    def get(path, raw=False):
+        if path == '/actions/artifacts?name=shared-test-d4-evidence&per_page=100&page=1':
+            return {'artifacts': [dict(id=10, name=m.D4_ARTIFACT, expired=False,
+                                        workflow_run={'id': 43, 'head_branch': 'main'})]}
+        if path == '/actions/runs/43':
+            return evidence_run
+        if path == '/actions/artifacts/10/zip':
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, 'w') as archive:
+                archive.writestr('d4-evidence.json', json.dumps(envelope))
+            return output.getvalue()
+        return original_get(path, raw)
+
+    monkeypatch.setattr(api, 'get', get)
+
+    def publication():
+        return m.publication(api, api.pr, queue_lease=receipt['queue_lease'])
+
+    run = publication()
+    assert run['d4_evidence'] == proofs
+    command = m.acceptance_command(api.pr, run, receipt['plan'])
+    api.comments = [comment(body=command + '\nbody-deliver: 通过\n观察到本轮正文回执。',
+                            created_at='2026-11-16T01:01:30Z')]
+    assert m.verified_acceptance(api, api.pr, run, receipt['plan'], released_at=expiry - 1)
+    api.comments[0]['created_at'] = '2026-11-16T01:00:30Z'
+    assert not m.verified_acceptance(api, api.pr, run, receipt['plan'], released_at=expiry - 1)
+    assert m.shared_blockers(m.parse_plan(api.pr['body']), receipt, proofs, now=expiry)
+
+    for field, value in [('queue_lease', 'd' * 32), ('sha', 'f' * 40), ('head', 'f' * 40),
+                         ('plan', 'f' * 64), ('deployment_run', 9)]:
+        original = envelope[field]
+        envelope[field] = value
+        assert publication()['d4_evidence'] == {}
+        envelope[field] = original
+    evidence_run['event'] = 'pull_request'
+    assert publication()['d4_evidence'] == {}
