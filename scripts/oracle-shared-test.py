@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reconcile Oracle's shared test slot using the trusted default branch."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -74,9 +75,13 @@ def deploy(slot, run_id):
     env = dict(os.environ, RELEASE_KIND='preview', RELEASE_SHA=slot['merge'],
                PREVIEW_PR=str(slot['pr']), ORACLE_SHARED_TEST_LEASE=slot['lease'],
                ORACLE_REVALIDATE_CMD=revalidate)
+    # GitHub's Git HTTPS endpoint uses the same Basic token authentication
+    # as the legacy release workflow. Scope the header to GitHub and keep the
+    # encoded credential out of the command line and deployment subprocess.
+    credential = base64.b64encode(('x-access-token:' + os.environ['GH_TOKEN']).encode()).decode('ascii')
     git_env = dict(
         env, GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='http.https://github.com/.extraheader',
-        GIT_CONFIG_VALUE_0='AUTHORIZATION: bearer ' + os.environ['GH_TOKEN'],
+        GIT_CONFIG_VALUE_0='AUTHORIZATION: basic ' + credential, GIT_TERMINAL_PROMPT='0',
     )
     subprocess.run(['git', 'fetch', '--no-tags', 'origin', slot['merge']],
                    env=git_env, cwd=ROOT, check=True)
@@ -183,6 +188,7 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--list', action='store_true', help='read-only eligibility check')
+    parser.add_argument('--retry-pr', type=int, default=0)
     parser.add_argument('--receipt', type=Path)
     parser.add_argument('--d4-evidence', type=Path)
     args = parser.parse_args()
@@ -197,6 +203,11 @@ def main():
         return
     if args.receipt is None:
         parser.error('--receipt is required when running the queue')
+    if args.retry_pr:
+        matching = next((row[0] for row in get_eligible() if row[0]['pr'] == args.retry_pr), None)
+        if matching is None:
+            parser.error('retry requires a current CI-authorized release')
+        queue_call(dict(action='retry', release=matching))
     reconcile(api, get_eligible, queue_call, deploy, public_health, args.receipt, args.d4_evidence)
 
 

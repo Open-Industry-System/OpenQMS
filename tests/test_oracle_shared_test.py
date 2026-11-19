@@ -149,3 +149,25 @@ def test_fixed_health_rejects_success_from_the_wrong_pr(monkeypatch):
         client['public_health'](slot)
     response.headers['X-OpenQMS-Test-PR'] = '45'
     client['public_health'](slot)
+
+
+def test_candidate_fetch_uses_scoped_git_https_basic_auth(monkeypatch):
+    import base64
+
+    monkeypatch.setenv('GH_TOKEN', 'test-placeholder-token')
+    calls = []
+    monkeypatch.setattr(client['subprocess'], 'run', lambda args, **params: calls.append((args, params)))
+    slot = dict(fixture_row(45)[0], lease='d' * 32)
+    client['deploy'](slot, 145)
+
+    fetch, release = calls
+    assert fetch[0] == ['git', 'fetch', '--no-tags', 'origin', slot['merge']]
+    assert 'test-placeholder-token' not in ' '.join(fetch[0])
+    environment = fetch[1]['env']
+    assert environment['GIT_CONFIG_KEY_0'] == 'http.https://github.com/.extraheader'
+    scheme, encoded = environment['GIT_CONFIG_VALUE_0'].removeprefix('AUTHORIZATION: ').split()
+    assert scheme == 'basic'
+    assert base64.b64decode(encoded).decode() == 'x-access-token:test-placeholder-token'
+    assert environment['GIT_TERMINAL_PROMPT'] == '0'
+    assert 'GIT_CONFIG_VALUE_0' not in release[1]['env']
+    assert release[1]['env']['ORACLE_SHARED_TEST_LEASE'] == slot['lease']

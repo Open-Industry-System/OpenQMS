@@ -106,6 +106,18 @@ class Queue:
                 break
             return self.describe(self.slot(connection))
 
+    def retry_failed(self, release):
+        encoded = identity(release)
+        with self.transaction() as connection:
+            if self.slot(connection):
+                raise ValueError('retry requires an idle shared test slot')
+            result = connection.execute(
+                'DELETE FROM completed WHERE release = ? AND outcome = ?', (encoded, 'deploy-failed')
+            )
+            if result.rowcount != 1:
+                raise ValueError('only an exact deployment failure may be retried')
+            return {'phase': 'idle'}
+
     def acknowledge(self, lease, event, now, ttl_seconds=None, eligible=None):
         with self.transaction() as connection:
             slot = self.slot(connection)

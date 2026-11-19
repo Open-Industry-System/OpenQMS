@@ -64,3 +64,24 @@ def test_expired_or_failed_lease_moves_on_after_cleanup(tmp_path):
     assert queue.tick([release(47)], 34)["pr"] == 46
     queue.acknowledge(second["lease"], "released", 35)
     assert queue.tick([release(45), release(46), release(47)], 36)["pr"] == 47
+
+
+def test_retry_requires_exact_cleaned_deployment_failure_and_new_lease(tmp_path):
+    queue = Queue(tmp_path / 'queue.sqlite3')
+    current = release(45)
+    eligible = [current, release(46)]
+    first = queue.tick(eligible, 10)
+    with pytest.raises(ValueError, match='idle'):
+        queue.retry_failed(current)
+    queue.acknowledge(first['lease'], 'deploy-failed', 12)
+    queue.acknowledge(first['lease'], 'released', 13)
+    with pytest.raises(ValueError, match='exact deployment failure'):
+        queue.retry_failed(release(45, 'd'))
+    assert queue.retry_failed(current) == {'phase': 'idle'}
+    retried = queue.tick(eligible, 14)
+    assert retried['pr'] == 45 and retried['lease'] != first['lease']
+    queue.acknowledge(retried['lease'], 'ready', 15, 20, eligible)
+    queue.acknowledge(retried['lease'], 'passed', 16, eligible=eligible)
+    queue.acknowledge(retried['lease'], 'released', 17)
+    with pytest.raises(ValueError, match='exact deployment failure'):
+        queue.retry_failed(current)

@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      retry_pr:
+        description: Retry the exact current release after a deployment failure
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -61,6 +66,7 @@ jobs:
       - name: Reconcile shared test queue
         env:
           GH_TOKEN: ${{ github.token }}
+          RETRY_PR: ${{ inputs.retry_pr || 0 }}
           ORACLE_SSH_TARGET: ${{ vars.ORACLE_SSH_TARGET }}
           DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
@@ -75,6 +81,7 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > "$ORACLE_KNOWN_HOSTS"
           unset DEPLOY_KEY KNOWN_HOSTS
           python3 scripts/oracle-shared-test.py \
+            --retry-pr "$RETRY_PR" \
             --receipt "$RUNNER_TEMP/preview-publication.json" \
             --d4-evidence "$RUNNER_TEMP/d4-evidence.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
