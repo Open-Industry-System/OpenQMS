@@ -22,7 +22,7 @@ from tests.migrations.test_agent_task_core import _migration_config, _sync_engin
 PUBLIC = "20261001_agent_readonly_controls"
 CONTROLS_TENANT = "tv004_agent_readonly_controls"
 LATEST = "tv009_r4b_main_merge"
-HEAD = "20261118_r7_pfmea_impact"
+HEAD = "20261118_r7_iqc_facts"
 PARENT = "20260930_agent_readonly_delivery"
 TABLES = {"agent_task_controls", "agent_readonly_checkpoints", "agent_checkpoint_receipts", "agent_task_updates"}
 COLUMNS = {
@@ -81,6 +81,7 @@ def test_reviewed_heads_and_static_equivalent_deltas(mig_db_url):
         "tv023_r6_legacy_capture",
         "tv024_r6_local_capa_sources",
         "tv025_r7_pfmea_impact",
+        "tv026_r7_iqc_facts",
     )
     root = Path(__file__).resolve().parents[2]
     public = (root / "alembic/versions/20261001_agent_readonly_controls.py").read_text()
@@ -126,7 +127,17 @@ def _history_rows(conn, schema, runtime=True, outputs=True):
     projection = "to_jsonb(t) - 'resume_checkpoint_id'"
     if not outputs:
         projection += " - 'claim_key' - 'lease_expires_at' - 'delivery_batch_id' - 'delivery_epoch'"
-    return {table: conn.execute(sa.text(f'SELECT {projection} FROM "{schema}"."{table}" t ORDER BY to_jsonb(t)::text')).scalars().all() for table in tables}
+    rows_by_table = {
+        table: conn.execute(sa.text(
+            f'SELECT {projection} FROM "{schema}"."{table}" t ORDER BY to_jsonb(t)::text'
+        )).scalars().all()
+        for table in tables
+    }
+    for task in rows_by_table.get("agent_tasks", ()):
+        # Legacy tasks keep their CAPA anchor when the IQC columns are added.
+        assert task.pop("task_type", "capa") == "capa"
+        assert task.pop("target_iqc_inspection_id", None) is None
+    return rows_by_table
 
 
 def _assert_backfill(conn, schema, ids, runtime=True, outputs=True):

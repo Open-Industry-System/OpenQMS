@@ -37,7 +37,7 @@ class DeploymentCreate(BaseModel):
     base_url: str = Field(repr=False)
     allowed_addresses: list[str] = Field(min_length=1, max_length=10, repr=False)
     credential_ref: str = Field(min_length=1, max_length=100, repr=False)
-    profile: Literal['model_pfmea_impact_v1'] | None = None
+    profile: Literal['model_pfmea_impact_v1', 'model_iqc_investigation_v1'] | None = None
 
 
 class InferenceRequest(BaseModel):
@@ -129,7 +129,10 @@ async def register_deployment(db, actor, request):
     pins = None
     if request.profile is not None:
         require_local_impact_recipient(request.kind, request.allowed_addresses)
-        from app.services.agent_runtime.pfmea_impact_activation import pins_for_admin_enrollment
+        if request.profile == "model_iqc_investigation_v1":
+            from app.services.agent_runtime.iqc_investigation_pilot import pins_for_admin_enrollment
+        else:
+            from app.services.agent_runtime.pfmea_impact_activation import pins_for_admin_enrollment
         pins = await pins_for_admin_enrollment(db)
     addresses = _addresses(request.base_url)
     if not addresses or addresses != sorted(set(request.allowed_addresses)):

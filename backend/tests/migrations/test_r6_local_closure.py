@@ -275,7 +275,7 @@ async def test_actual_nonempty_historical_tenants_upgrade_to_current_without_his
         async with engine.connect() as check:
             after=(await check.execute(sa.text(f'SELECT to_jsonb(s) FROM "{schema}".capa_r6_source_origins s ORDER BY source_id'))).scalars().all()
             assert after==before
-            assert await check.scalar(sa.text(f'SELECT version_num FROM "{schema}".tenant_schema_version'))=='tv025_r7_pfmea_impact'
+            assert await check.scalar(sa.text(f'SELECT version_num FROM "{schema}".tenant_schema_version'))=='tv026_r7_iqc_facts'
     finally:
         async with engine.begin() as cleanup:
             await cleanup.execute(sa.text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))

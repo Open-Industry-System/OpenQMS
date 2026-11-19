@@ -80,7 +80,7 @@ async def test_runtime_adapter_uses_current_access_not_old_user_role(monkeypatch
     target, levels, factories, lines, plugin, trial, manifest = authority_data(mode)
     user = NS(user_id=uuid4())  # No cached role or bypass attributes.
     installation = NS(installation_id=uuid4(), plugin_key='metadata-unit-plugin', manifest=manifest.model_dump())
-    task = NS(executor_user_id=user.user_id, target_capa_id=target.report_id,
+    task = NS(executor_user_id=user.user_id, task_type="capa", target_capa_id=target.report_id,
         factory_id=target.factory_id, task_id=uuid4(), preferred_installation_id=installation.installation_id)
     task_grant = NS(**{**vars(plugin), 'grant_id': uuid4()})
     # Model an older metadata task with no specialized profile binding.

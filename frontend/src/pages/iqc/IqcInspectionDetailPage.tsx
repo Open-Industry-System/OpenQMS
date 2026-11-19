@@ -37,6 +37,7 @@ import {
   approveConcession,
 } from "../../api/iqc";
 import { PageShell, DataCard, StatusBadge } from "../../components/design";
+import IqcInvestigationDrawer from "../../components/agent/IqcInvestigationPanel";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -238,6 +239,7 @@ export default function IqcInspectionDetailPage() {
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/iqc/inspections")}>
             {t("actions.backToList")}
           </Button>
+          {id === inspection.inspection_id && <IqcInvestigationDrawer inspectionId={id} />}
           {inspection.status === "pending" && canEdit('iqc') && (
             <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleStart}>
               {t("actions.startInspection")}

@@ -63,7 +63,7 @@ async def require_current_capa_view(db: AsyncSession, scope: RequestScope,
 
 
 def _legacy_task_only():
-    return ~select(AgentPfmeaImpactBinding.task_id).where(
+    return (AgentTask.task_type == "capa") & ~select(AgentPfmeaImpactBinding.task_id).where(
         AgentPfmeaImpactBinding.task_id == AgentTask.task_id,
     ).exists()
 
@@ -204,7 +204,7 @@ async def _existing(db, user_id, request_key, report_id, installation_id, initia
             AgentTask.request_key == request_key).execution_options(populate_existing=True))
         if task is None:
             return None
-        if await is_impact_task(db, task.task_id):
+        if task.task_type != "capa" or await is_impact_task(db, task.task_id):
             raise LookupError("Task not found")
         message = await db.scalar(select(AgentTaskMessage.content).where(
             AgentTaskMessage.task_id == task.task_id, AgentTaskMessage.sequence == 1))

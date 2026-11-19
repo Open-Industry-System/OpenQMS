@@ -14,6 +14,8 @@ from app.api.agent_task_attachments import router as agent_task_attachments_rout
 from app.api.agent_runtime import router as agent_runtime_router
 from app.api.pfmea_impact_runtime import router as pfmea_impact_runtime_router
 from app.api.pfmea_impact_tasks import router as pfmea_impact_tasks_router
+from app.api.iqc_investigations import router as iqc_investigations_router
+from app.api.iqc_investigation_runtime import router as iqc_investigation_runtime_router
 from app.api.admin.agent_plugins import router as admin_agent_plugins_router
 from app.api.admin import ai_config as admin_ai_config_api
 from app.api.admin import logs as admin_logs_api
@@ -134,6 +136,13 @@ async def lifespan(app: FastAPI):
     app.state.r7_impact_pilot = load_impact_pilot(
         settings.AGENT_R7_PFMEA_IMPACT_POLICY_FILE,
         enabled=settings.AGENT_R7_PFMEA_IMPACT_ENABLED,
+        runtime_enabled=settings.AGENT_TASK_RUNTIME_ENABLED,
+        tenant_mode=settings.TENANT_MODE,
+    )
+    from app.services.agent_runtime.iqc_investigation_pilot import load_iqc_pilot
+    app.state.iqc_investigation_pilot = load_iqc_pilot(
+        settings.AGENT_R7_IQC_INVESTIGATION_POLICY_FILE,
+        enabled=settings.AGENT_R7_IQC_INVESTIGATION_ENABLED,
         runtime_enabled=settings.AGENT_TASK_RUNTIME_ENABLED,
         tenant_mode=settings.TENANT_MODE,
     )
@@ -555,6 +564,7 @@ app.include_router(auth_router)
 app.include_router(fmea_router)
 app.include_router(capa_r6_router)
 app.include_router(pfmea_impact_tasks_router)
+app.include_router(iqc_investigations_router)
 app.include_router(capa_router)
 app.include_router(capa_d4_text_preview_router)
 app.include_router(dashboard_router)
@@ -596,6 +606,7 @@ app.include_router(agent_tasks_router)
 app.include_router(agent_task_attachments_router)
 app.include_router(agent_runtime_router)
 app.include_router(pfmea_impact_runtime_router)
+app.include_router(iqc_investigation_runtime_router)
 app.include_router(admin_agent_plugins_router)
 from app.api.admin.agent_models import router as agent_models_router
 app.include_router(agent_models_router)
