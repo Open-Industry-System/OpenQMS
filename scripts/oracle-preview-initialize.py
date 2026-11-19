@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Trusted initializer, mounted read-only and run ONLY inside isolated preview backend.
 
-Only viewer/Viewer@2026 is public. Privileged credentials are random, never
-emitted or persisted; operators may reset them through a reviewed private flow.
+The ordinary preview enables only the public viewer. A shared lease may add
+rotated credentials for allowlisted synthetic business users.
 """
 import asyncio
+import json
 import os
 import re
 import secrets
@@ -32,7 +33,32 @@ def seed_if_empty(user_count, runner=subprocess.run):
                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
 
 
-async def initialize():
+SHARED_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
+ISSUED_HASH = re.compile(r'\$2[aby]\$12\$[A-Za-z0-9./]{53}')
+
+
+def read_account_hashes(argv, stdin):
+    if not argv:
+        return {}
+    if argv != ['--shared-accounts']:
+        raise ValueError('unsupported preview initializer invocation')
+    raw = stdin.read(1025)
+    if not raw or len(raw) > 1024:
+        raise ValueError('invalid shared account hash input length')
+    accounts = json.loads(raw)
+    if (not isinstance(accounts, dict) or set(accounts) != set(SHARED_ROLES)
+            or any(not isinstance(value, str) or not ISSUED_HASH.fullmatch(value)
+                   for value in accounts.values())
+            or len(set(accounts.values())) != len(accounts)):
+        raise ValueError('invalid shared account hashes')
+    return accounts
+
+
+def account_role_is_expected(row):
+    return SHARED_ROLES.get(row.username) == row.role_key
+
+
+async def initialize(accounts):
     validate_target(os.environ)
     import bcrypt
     from sqlalchemy import text
@@ -51,12 +77,22 @@ async def initialize():
                 seed_if_empty(count)
                 # Refresh the transaction snapshot after a separate seed process.
                 await connection.commit()
-                users=(await connection.execute(text("SELECT u.user_id,u.username FROM users u JOIN role_definitions r ON r.id=u.role_id WHERE u.username <> 'viewer'"))).all()
+                users=(await connection.execute(text("SELECT u.user_id,u.username,r.role_key FROM users u JOIN role_definitions r ON r.id=u.role_id WHERE u.username <> 'viewer'"))).all()
                 if not {'admin','groupadmin','engineer','manager'} <= {row.username for row in users}:
                     raise ValueError('preview privileged account inventory incomplete')
+                if accounts:
+                    observed = {row.username for row in users if account_role_is_expected(row)}
+                    if observed != set(accounts):
+                        raise ValueError('synthetic business account role mismatch')
                 for row in users:
-                    digest=bcrypt.hashpw(secrets.token_urlsafe(36).encode(),bcrypt.gensalt()).decode()
-                    await connection.execute(text('UPDATE users SET password_hash=:digest,is_active=false,refresh_token=NULL,refresh_token_expires=NULL WHERE user_id=:identity'),dict(digest=digest,identity=row.user_id))
+                    issued = accounts.get(row.username)
+                    digest = issued
+                    if digest is None:
+                        digest = bcrypt.hashpw(secrets.token_urlsafe(36).encode(), bcrypt.gensalt()).decode()
+                    await connection.execute(
+                        text('UPDATE users SET password_hash=:digest,is_active=:active,refresh_token=NULL,refresh_token_expires=NULL WHERE user_id=:identity'),
+                        dict(digest=digest, active=issued is not None, identity=row.user_id),
+                    )
                     await connection.execute(text('UPDATE user_refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=:identity'),dict(identity=row.user_id))
                 viewer=(await connection.execute(text("SELECT u.password_hash,r.role_key FROM users u JOIN role_definitions r ON r.id=u.role_id WHERE u.username='viewer' AND u.is_active"))).one()
                 if viewer.role_key != 'viewer' or not bcrypt.checkpw(b'Viewer@2026',viewer.password_hash.encode()):
@@ -69,4 +105,4 @@ async def initialize():
         await engine.dispose()
 
 if __name__=='__main__':
-    asyncio.run(initialize())
+    asyncio.run(initialize(read_account_hashes(sys.argv[1:], sys.stdin.buffer)))

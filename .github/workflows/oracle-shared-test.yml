@@ -1,0 +1,91 @@
+name: Oracle shared test
+
+on:
+  workflow_run:
+    workflows: [Test OpenQMS]
+    types: [completed]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  issues: read
+
+concurrency:
+  group: oracle-shared-test
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success')) &&
+      vars.ORACLE_SHARED_TEST_ENABLED == 'true' &&
+      vars.ORACLE_AUTODEPLOY_ENABLED == 'true' &&
+      vars.ORACLE_PREVIEW_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: oracle-preview
+    steps:
+      - id: trusted-source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+      - name: Set up optional private transport
+        if: vars.ORACLE_USE_TAILSCALE == 'true'
+        uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:openqms-deploy
+      - name: Restore trusted source before introducing deployment secrets
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.trusted-source.outputs.commit }}
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reconcile shared test queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORACLE_SSH_TARGET: ${{ vars.ORACLE_SSH_TARGET }}
+          DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS"
+          export ORACLE_SSH_KEY="$RUNNER_TEMP/shared-test-key"
+          export ORACLE_KNOWN_HOSTS="$RUNNER_TEMP/shared-test-known-hosts"
+          trap 'rm -f "$ORACLE_SSH_KEY" "$ORACLE_KNOWN_HOSTS"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$ORACLE_SSH_KEY"
+          printf '%s\n' "$KNOWN_HOSTS" > "$ORACLE_KNOWN_HOSTS"
+          unset DEPLOY_KEY KNOWN_HOSTS
+          python3 scripts/oracle-shared-test.py \
+            --receipt "$RUNNER_TEMP/preview-publication.json" \
+            --d4-evidence "$RUNNER_TEMP/d4-evidence.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shared-test-publication
+          path: ${{ runner.temp }}/preview-publication.json
+          if-no-files-found: ignore
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shared-test-d4-evidence
+          path: ${{ runner.temp }}/d4-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30
