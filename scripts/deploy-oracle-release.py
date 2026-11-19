@@ -57,6 +57,11 @@ def validate(source):
         if not re.fullmatch(r'[1-9][0-9]{0,8}', source.get('PREVIEW_PR', '')):
             raise ValueError('preview PR required')
         result['PREVIEW_PR'] = source['PREVIEW_PR']
+    shared_lease = source.get('ORACLE_SHARED_TEST_LEASE')
+    if shared_lease:
+        if result['RELEASE_KIND'] != 'preview' or not re.fullmatch('[0-9a-f]{32}', shared_lease):
+            raise ValueError('invalid shared test lease')
+        result['ORACLE_SHARED_TEST_LEASE'] = shared_lease
     return result
 
 
@@ -68,28 +73,61 @@ def ssh_args(context):
     return ['ssh', '-i', context['ORACLE_SSH_KEY'], '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + context['ORACLE_KNOWN_HOSTS'], '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
 
 
-def remote(context, action, *, data=None):
-    command = [context['RELEASE_KIND'], action]
+def remote_command(context, action):
+    command = [context['RELEASE_KIND']]
+    if context.get('ORACLE_SHARED_TEST_LEASE'):
+        command += ['leased', context['ORACLE_SHARED_TEST_LEASE']]
+    command.append(action)
     if context['RELEASE_KIND'] == 'preview':
         command.append(context['PREVIEW_PR'])
     command += [context['RELEASE_SHA'], context['manifest_hash'], context['controller_hash']]
+    return command
+
+
+def remote(context, action, *, data=None):
+    command = remote_command(context, action)
     if action in {'identity', 'migrate', 'initialize', 'preflight', 'rollout'}:
         command.append(json.dumps(context['images'], separators=(',', ':')))
     return run(ssh_args(context) + [context['ORACLE_SSH_TARGET'], shlex.join(command)], data=data)
 
 
+class LeaseBusy(ValueError):
+    pass
+
 
 def acquire_lease(context):
-    command = [context['RELEASE_KIND'], 'lock']
-    if context['RELEASE_KIND'] == 'preview':
-        command.append(context['PREVIEW_PR'])
-    command += [context['RELEASE_SHA'], context['manifest_hash'], context['controller_hash']]
+    command = remote_command(context, 'lock')
     process = subprocess.Popen(ssh_args(context) + [context['ORACLE_SSH_TARGET'], shlex.join(command)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    if not select.select([process.stdout], [], [], 30)[0] or process.stdout.readline() != b'locked\n':
-        process.terminate()
-        process.wait(timeout=10)
-        raise ValueError('exclusive host deployment lease unavailable')
-    return process
+    readable = select.select([process.stdout], [], [], 30)[0]
+    if readable and process.stdout.readline() == b'locked\n':
+        return process
+    if readable:
+        try:
+            code = process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            if code == 75:
+                raise LeaseBusy('exclusive host deployment lease is busy')
+            raise ValueError('exclusive host deployment lease unavailable')
+    process.terminate()
+    process.wait(timeout=10)
+    raise ValueError('exclusive host deployment lease unavailable')
+
+
+def wait_for_lease(context):
+    # A shared test rollout can hold the existing host lock while a production
+    # job starts. Production waits only when the shared mode has been enabled.
+    if context['RELEASE_KIND'] != 'production' or os.environ.get('ORACLE_WAIT_FOR_DEPLOY_LEASE') != 'true':
+        return acquire_lease(context)
+    deadline = time.monotonic() + 90 * 60
+    while True:
+        try:
+            return acquire_lease(context)
+        except LeaseBusy:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(15)
 
 
 def test_environment(context):
@@ -237,7 +275,9 @@ def deploy():
                 for path in sorted(source.rglob('*')):
                     if path.is_file():
                         tar.add(path, arcname=path.relative_to(source), recursive=False)
-            lease = acquire_lease(context)
+            lease = wait_for_lease(context)
+            if os.environ.get('ORACLE_WAIT_FOR_DEPLOY_LEASE') == 'true':
+                revalidate(context)
             remote(context, 'stage', data=payload.read_bytes())
             remote(context, 'backup')  # Pins previous running image IDs before build retags.
             context['images'] = json.loads(remote(context, 'build'))

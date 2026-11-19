@@ -51,7 +51,9 @@ jobs:
       actions: read
       pull-requests: write
       issues: read
-    if: needs.authorize.outputs.kind == 'production' || vars.ORACLE_PREVIEW_ENABLED == 'true'
+    if: >-
+      needs.authorize.outputs.kind == 'production' ||
+      (vars.ORACLE_PREVIEW_ENABLED == 'true' && vars.ORACLE_SHARED_TEST_ENABLED != 'true')
     needs: authorize
     runs-on: ubuntu-24.04
     environment: oracle-${{ needs.authorize.outputs.kind }}
@@ -110,6 +112,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ORACLE_SSH_TARGET: ${{ vars.ORACLE_SSH_TARGET }}
+          ORACLE_WAIT_FOR_DEPLOY_LEASE: ${{ vars.ORACLE_SHARED_TEST_ENABLED }}
         run: |
           set -euo pipefail
           export ORACLE_SSH_KEY="$RUNNER_TEMP/oracle-key"

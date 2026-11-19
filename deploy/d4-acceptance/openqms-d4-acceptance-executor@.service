@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenQMS D4 trusted executor for lease %i
+After=docker.service
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 -E -s -B /usr/local/lib/openqms/d4-acceptance/executor.py --profile /var/lib/openqms-shared-test/d4/%i/profile.json
+UMask=0077
+LimitCORE=0
+StandardOutput=null
+StandardError=null

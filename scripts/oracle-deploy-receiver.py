@@ -26,6 +26,8 @@ for _signal in (signal.SIGTERM, signal.SIGHUP):
 
 BASE = Path('/var/lib/openqms-releases')
 INSTALLED = Path('/usr/local/lib/openqms/oracle-production')
+SHARED_ROOT = Path('/usr/local/lib/openqms')
+SHARED_MODE = Path('/var/lib/openqms-shared-test')
 
 
 def command(value):
@@ -58,9 +60,18 @@ def lease_identity(kind, pr, parts):
     return [kind, pr, *parts[1:4]]
 
 
-def hold_lock(identity):
+class LeaseBusy(BlockingIOError):
+    pass
+
+
+def hold_lock(identity, authorize=None):
     with LOCK.open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise LeaseBusy('deployment lease held by another operation') from error
+        if authorize is not None:
+            authorize()
         LEASE.write_text(json.dumps({'identity': identity, 'pid': os.getpid()}))
         LEASE.chmod(0o600)
         try:
@@ -146,6 +157,41 @@ def stage(parts, factory, base):
             shutil.rmtree(temporary)
 
 
+def shared_modules():
+    # The queue is installed beside the controller. The queue source never
+    # comes from the staged PR, and it is outside the production manifest.
+    files = ('oracle-shared-test-remote.py', 'shared-test-queue.py')
+    modules = []
+    for name in files:
+        path = SHARED_ROOT / name
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('invalid trusted shared-test control file')
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules.append(module)
+    return modules[0], modules[1].Queue
+
+
+def shared_mode():
+    # A malformed or dangling mode path must not re-enable legacy publication.
+    return SHARED_MODE.exists() or SHARED_MODE.is_symlink()
+
+
+def shared_request():
+    remote, queue_type = shared_modules()
+    if not remote.enabled():
+        raise ValueError('shared-test mode unavailable')
+    request = remote.read_request(sys.stdin.buffer)
+    os.umask(0o077)
+    with open(LOCK, 'a') as lock, open(OPERATION, 'a') as operation:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(operation, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = remote.run(request, installed('preview'), queue_type)
+    print(json.dumps(result), flush=True)
+
+
 def main():
     # ROLE is fixed by root-owned authorized_keys; the client cannot select it.
     if len(sys.argv) != 3 or sys.argv[1] not in {'production', 'preview'}:
@@ -154,6 +200,9 @@ def main():
     words = shlex.split(original)
     if not words or words[0] != role:
         raise ValueError('cross-role deployment forbidden')
+    if words == ['preview', 'queue']:
+        shared_request()
+        return
     if len(words) == 3 and words[:2] == ['preview', 'cleanup']:
         if not re.fullmatch(r'[1-9][0-9]{0,8}', words[2]):
             raise ValueError('invalid cleanup PR')
@@ -161,38 +210,65 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX)
             operation = OPERATION.open('a')
             fcntl.flock(operation, fcntl.LOCK_EX)
+            if shared_mode():
+                remote, queue_type = shared_modules()
+                remote.guard_legacy_cleanup(queue_type, words[2])
             print('READY', flush=True)
             if not select.select([sys.stdin], [], [], 120)[0] or sys.stdin.readline().strip() != 'CLEANUP':
                 raise ValueError('fresh local cleanup confirmation required')
             module = installed('preview')
             module.helper.cleanup(words[2])
         return
+    shared = role == 'preview' and shared_mode()
+    lease = None
+    if role == 'preview' and words[1:2] == ['leased']:
+        if not shared or len(words) < 4 or not re.fullmatch('[0-9a-f]{32}', words[2]):
+            raise ValueError('invalid shared-test deployment command')
+        lease = words[2]
+        original = shlex.join([role, *words[3:]])
+    elif shared:
+        raise ValueError('shared-test deployments require the queue lease')
     kind, pr, parts = command(original)
     identity = lease_identity(kind, pr, parts)
+    authorize = None
+    if shared:
+        remote, queue_type = shared_modules()
+        identity.append(lease)
+
+        def authorize():
+            remote.require_deploying(queue_type, pr, parts[1], lease)
+
     if parts[0] == 'lock':
-        hold_lock(identity)
+        hold_lock(identity, authorize)
         return
     require_lease(identity)
     with OPERATION.open('a') as operation:
         fcntl.flock(operation, fcntl.LOCK_EX)
         require_lease(identity)
-        dispatch(kind, pr, parts)
+        if authorize is not None:
+            authorize()
+        dispatch(kind, pr, parts, shared_lease=lease)
 
 
-def dispatch(kind, pr, parts):
+def dispatch(kind, pr, parts, *, shared_lease=None):
     module = installed(kind)
     if kind == 'production':
         factory, base = module.Release, BASE
     else:
-        factory = lambda sha, manifest, controller: module.PreviewRelease(pr, sha, manifest, controller)
-        base = Path('/var/lib/openqms-previews') / ('pr-' + pr)
+        factory = lambda sha, manifest, controller: module.PreviewRelease(
+            pr, sha, manifest, controller, shared_lease=shared_lease
+        )
+        base = module.release_base(pr, shared_lease)
     if parts[0] == 'stage':
         stage(parts, factory, base)
         return
     release = factory(parts[1], parts[2], parts[3])
     import json
     action = parts[0]
-    result = getattr(release, action)(json.loads(parts[4])) if len(parts) == 5 else getattr(release, action)()
+    if kind == 'preview' and action == 'rollout':
+        result = release.rollout(json.loads(parts[4]), publish_route=shared_lease is None)
+    else:
+        result = getattr(release, action)(json.loads(parts[4])) if len(parts) == 5 else getattr(release, action)()
     if result is not None:
         print(json.dumps(result))
 
@@ -200,6 +276,9 @@ def dispatch(kind, pr, parts):
 if __name__ == '__main__':
     try:
         main()
+    except LeaseBusy:
+        print('deployment lease temporarily busy', file=sys.stderr)
+        raise SystemExit(75)
     except Exception:
         print('production deployment rejected', file=sys.stderr)
         raise SystemExit(1)

@@ -9,6 +9,7 @@ import re
 import secrets
 import signal
 import socket
+import stat
 import subprocess
 
 HERE = Path(__file__).resolve().parent
@@ -22,23 +23,127 @@ def load(name, filename):
 prod = load('preview_prod_contract', 'oracle-production-remote.py')
 helper = load('preview_routes', 'oracle-preview.py')
 BASE = Path('/var/lib/openqms-previews')
+SHARED_ACCOUNTS_DIR = Path('/var/lib/openqms-shared-test/credentials')
+SHARED_TEST_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
+
+
+def shared_account_path(lease):
+    if not re.fullmatch(r'[0-9a-f]{32}', lease):
+        raise ValueError('invalid shared account lease')
+    return SHARED_ACCOUNTS_DIR / (lease + '.json')
+
+
+def require_private_root_directory(path):
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise ValueError('shared credential directory must be root-owned and private')
+
+
+def read_private_accounts(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 2048):
+            raise ValueError('unsafe shared account record')
+        return json.loads(stream.read(2049))
+
+
+def load_shared_accounts(pr, sha, lease):
+    path = shared_account_path(lease)
+    require_private_root_directory(path.parent.parent)
+    require_private_root_directory(path.parent)
+    binding = dict(pr=pr, merge=sha, lease=lease)
+    record = read_private_accounts(path)
+    if not isinstance(record, dict):
+        raise ValueError('invalid shared account record')
+    passwords = record.get('passwords')
+    if (set(record) != {*binding, 'passwords'}
+            or any(record.get(key) != value for key, value in binding.items())
+            or not isinstance(passwords, dict) or set(passwords) != set(SHARED_TEST_ROLES)
+            or any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_-]{48}', value)
+                   for value in passwords.values())
+            or len(set(passwords.values())) != len(passwords)):
+        raise ValueError('invalid shared account binding')
+    return passwords
+
+
+def shared_account_roles(pr, sha, lease):
+    """Return public role names only after the exact root-owned record is checked."""
+    load_shared_accounts(str(pr), sha, lease)
+    return sorted(SHARED_TEST_ROLES.values())
+
+
+def shared_accounts(pr, sha, lease):
+    path = shared_account_path(lease)
+    require_private_root_directory(path.parent.parent)
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    require_private_root_directory(path.parent)
+    if not (path.is_file() or path.is_symlink()):
+        passwords = {name: secrets.token_urlsafe(36) for name in SHARED_TEST_ROLES}
+        descriptor = os.open(path, os.O_WRONLY | os.O_EXCL | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'w') as stream:
+            json.dump(dict(pr=pr, merge=sha, lease=lease, passwords=passwords), stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+    passwords = load_shared_accounts(pr, sha, lease)
+    hashes = {}
+    for username, password in passwords.items():
+        result = subprocess.run(
+            ['/usr/bin/htpasswd', '-niBC', '12', username], input=(password + '\n').encode(),
+            capture_output=True, timeout=10,
+        )
+        prefix = username.encode() + b':'
+        if result.returncode or not result.stdout.startswith(prefix):
+            raise ValueError('could not hash synthetic account credential')
+        digest = result.stdout[len(prefix):].strip()
+        if not re.fullmatch(rb'\$2[aby]\$12\$[A-Za-z0-9./]{53}', digest):
+            raise ValueError('invalid host bcrypt digest')
+        hashes[username] = digest.decode('ascii')
+    return json.dumps(hashes).encode()
+
+
+def remove_shared_accounts(lease):
+    path = shared_account_path(lease)
+    if path.parent.exists() or path.parent.is_symlink():
+        require_private_root_directory(path.parent.parent)
+        require_private_root_directory(path.parent)
+        path.unlink(missing_ok=True)
+
 TUNNEL_IMAGE = 'python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535'
 
+def release_base(pr, shared_lease=None):
+    project = BASE / ('pr-' + helper.pr_number(str(pr)))
+    parents = (BASE, project)
+    if shared_lease is not None:
+        if not re.fullmatch(r'[0-9a-f]{32}', shared_lease):
+            raise ValueError('invalid shared-test release namespace')
+        shared = project / 'shared-test'
+        parents += (shared, shared / shared_lease)
+    if any(path.is_symlink() for path in parents):
+        raise ValueError('unsafe preview release namespace')
+    return parents[-1]
+
+
 class PreviewRelease:
-    def __init__(self, pr, sha, manifest_hash, controller_hash):
+    def __init__(self, pr, sha, manifest_hash, controller_hash, *, shared_lease=None):
         self.pr = helper.pr_number(str(pr))
         if not prod.SHA.fullmatch(sha) or any(not re.fullmatch('[0-9a-f]{64}', value) for value in [manifest_hash, controller_hash]):
             raise ValueError('invalid preview immutable identity')
         self.sha = sha
         self.project = BASE / ('pr-' + self.pr)
-        self.root = self.project / 'releases' / sha
+        self.shared_lease = shared_lease
+        self.releases = release_base(pr, shared_lease) / 'releases'
+        self.root = self.releases / sha
         self.source = self.root / 'source'
         self.control = self.root / 'control'
         self.manifest_hash = manifest_hash
         self.controller_hash = controller_hash
 
     def verify(self):
-        for path in (BASE, self.project, self.project / 'releases', self.root, self.source, self.control):
+        namespace = release_base(self.pr, self.shared_lease)
+        for path in (BASE, self.project, namespace, self.releases, self.root, self.source, self.control):
             if path.is_symlink() or not path.is_dir(): raise ValueError('invalid preview directory')
         if prod.digest(self.source / '.release-manifest') != self.manifest_hash or prod.digest(self.control / 'controller.sha256') != self.controller_hash:
             raise ValueError('preview manifest changed')
@@ -209,17 +314,21 @@ class PreviewRelease:
         db = self.db_container()
         return json.loads(prod.run(['docker','exec',db['Id'],'psql','-XAt','-U','qms','-d','qms_preview','-c',prod.SQL]).stdout)
 
-    def app_command(self, expected, *command):
+    def app_command(self, expected, *command, input_data=None):
         self.verify()
         self.assert_images(expected)
         nonce = secrets.token_hex(16)
         name = 'openqms-pr-' + self.pr + '-operation-' + nonce
-        argv, env = self.compose_command(['run','--rm','--no-deps','--name',name,'--label','openqms.operation.owner='+nonce,'-e','PREVIEW_PR='+self.pr,'backend',*command], expected)
+        args = ['run', '--rm', '--no-deps', '--name', name,
+                '--label', 'openqms.operation.owner=' + nonce, '-e', 'PREVIEW_PR=' + self.pr]
+        if input_data is not None:
+            args += ['-T', '-i']
+        argv, env = self.compose_command([*args, 'backend', *command], expected)
         def interrupted(signum, frame):
             raise RuntimeError('preview operation interrupted')
         handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGHUP, signal.SIGTERM)}
         try:
-            result = subprocess.run(argv, env=env, capture_output=True, timeout=900)
+            result = subprocess.run(argv, env=env, input=input_data, capture_output=True, timeout=900)
             if result.returncode:
                 raise RuntimeError('bounded preview application operation failed')
         finally:
@@ -244,16 +353,30 @@ class PreviewRelease:
         self.app_command(expected,'python','-m','app.services.capa_doc_gate_preflight')
 
     def initialize(self, expected):
-        self.app_command(expected,'python','/run/openqms-preview-initialize.py')
+        command = ('python', '/run/openqms-preview-initialize.py')
+        if self.shared_lease is None:
+            self.app_command(expected, *command)
+        else:
+            self.verify()
+            self.assert_images(expected)
+            hashes = shared_accounts(self.pr, self.sha, self.shared_lease)
+            self.app_command(expected, *command, '--shared-accounts', input_data=hashes)
 
-    def rollout(self, expected):
-        self.verify()
-        self.assert_images(expected)
-        self.compose('up','-d','--no-build','--wait','--wait-timeout','180','backend','graph-worker','web',images=expected)
+    def assert_application_running(self, expected):
         rows = helper.resources('container',self.pr)
         for service, kind in [('backend','backend'),('graph-worker','backend'),('web','web')]:
             matches = [row for row in rows if helper.labels(row,'container').get('com.docker.compose.service') == service]
             if len(matches) != 1 or not helper.owned(helper.labels(matches[0],'container'),self.pr) or not matches[0]['State']['Running'] or matches[0]['Image'] != expected[kind]:
                 raise ValueError('preview running image mismatch')
-        helper.publish(helper.ROUTES / ('pr-'+self.pr+'.caddy'), helper.route(self.pr), helper.validate, helper.reload)
-        helper.atomic(self.project / 'current-release.json', json.dumps({'sha':self.sha,'images':expected,'manifest':self.manifest_hash,'controller':self.controller_hash}))
+    def rollout(self, expected, *, publish_route=True):
+        self.verify()
+        self.assert_images(expected)
+        self.compose('up','-d','--no-build','--wait','--wait-timeout','180','backend','graph-worker','web',images=expected)
+        self.assert_application_running(expected)
+        if publish_route:
+            helper.publish(helper.ROUTES / ('pr-'+self.pr+'.caddy'), helper.route(self.pr), helper.validate, helper.reload)
+        metadata = {'sha': self.sha, 'images': expected, 'manifest': self.manifest_hash,
+                    'controller': self.controller_hash}
+        if self.shared_lease is not None:
+            metadata['shared_lease'] = self.shared_lease
+        helper.atomic(self.project / 'current-release.json', json.dumps(metadata))

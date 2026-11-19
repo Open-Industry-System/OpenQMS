@@ -7,7 +7,7 @@ on:
   issue_comment:
     types: [created, edited, deleted]
   workflow_run:
-    workflows: [Oracle deployment]
+    workflows: [Oracle deployment, Oracle shared test]
     types: [completed]
   workflow_dispatch:
 
@@ -36,4 +36,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUIRE_INDEPENDENT_REVIEWER: 'false'
+          ORACLE_SHARED_TEST_ENABLED: ${{ vars.ORACLE_SHARED_TEST_ENABLED }}
         run: python3 scripts/pr-preview-acceptance.py
