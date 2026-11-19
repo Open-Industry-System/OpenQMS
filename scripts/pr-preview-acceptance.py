@@ -455,8 +455,10 @@ def shared_test_ready_notice(api, pr, run, digest):
             or not deployment_after_reopen(api, pr, run)
             or not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest)):
         return
-    if shared_release_marker(api, pr, digest):
-        return  # A repeated poll cannot put the released link back.
+    if retired := shared_release_marker(api, pr, digest):
+        if (retired['lease'] == receipt['queue_lease']
+                or epoch(run['updated_at']) <= retired['released_at']):
+            return  # A poll cannot put a retired lease or older publication back.
     plan = parse_plan(pr.get('body'))
     blockers = shared_blockers(plan, receipt, run.get('d4_evidence'),
                                now=int(datetime.now(timezone.utc).timestamp()))

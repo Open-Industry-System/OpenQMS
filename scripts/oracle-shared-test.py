@@ -10,6 +10,7 @@ import runpy
 import shlex
 import subprocess
 import time
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -90,12 +91,23 @@ def deploy(slot, run_id):
 
 
 def public_health(slot):
-    with urllib.request.urlopen(URL + '/api/health', timeout=30) as response:
-        if (response.url != URL + '/api/health'
-                or response.headers.get('X-OpenQMS-Test-PR') != str(slot['pr'])
-                or response.headers.get('X-OpenQMS-Test-Version') != slot['merge']
-                or json.loads(response.read(4096)).get('status') != 'ok'):
-            raise RuntimeError('fixed test URL health verification failed')
+    until = time.monotonic() + 90
+    while True:
+        try:
+            with urllib.request.urlopen(URL + '/api/health', timeout=15) as response:
+                if (response.url != URL + '/api/health'
+                        or response.headers.get('X-OpenQMS-Test-PR') != str(slot['pr'])
+                        or response.headers.get('X-OpenQMS-Test-Version') != slot['merge']
+                        or json.loads(response.read(4096)).get('status') != 'ok'):
+                    raise RuntimeError('fixed test URL health verification failed')
+                return
+        except (urllib.error.URLError, TimeoutError) as error:
+            # Caddy activates the route before its first certificate is issued.
+            if isinstance(error, urllib.error.HTTPError) and error.code not in {502, 503, 504}:
+                raise
+            if time.monotonic() >= until:
+                raise
+            time.sleep(3)
 
 
 def publication_receipt(api, slot):

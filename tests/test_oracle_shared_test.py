@@ -171,3 +171,27 @@ def test_candidate_fetch_uses_scoped_git_https_basic_auth(monkeypatch):
     assert environment['GIT_TERMINAL_PROMPT'] == '0'
     assert 'GIT_CONFIG_VALUE_0' not in release[1]['env']
     assert release[1]['env']['ORACLE_SHARED_TEST_LEASE'] == slot['lease']
+
+
+def test_first_certificate_activation_allows_bounded_https_retry(monkeypatch):
+    from contextlib import nullcontext
+    from io import BytesIO
+    from urllib.error import URLError
+
+    slot = {'pr': 45, 'merge': 'a' * 40}
+    response = BytesIO(b'{"status":"ok"}')
+    response.url = client['URL'] + '/api/health'
+    response.headers = {'X-OpenQMS-Test-PR': '45', 'X-OpenQMS-Test-Version': slot['merge']}
+    requests = iter([URLError('TLS not yet available'), response])
+    waits = []
+
+    def open_url(*args, **kwargs):
+        value = next(requests)
+        if isinstance(value, Exception):
+            raise value
+        return nullcontext(value)
+
+    monkeypatch.setattr(client['urllib'].request, 'urlopen', open_url)
+    monkeypatch.setattr(client['time'], 'sleep', waits.append)
+    client['public_health'](slot)
+    assert waits == [3]
