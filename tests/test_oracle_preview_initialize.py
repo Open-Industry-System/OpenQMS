@@ -21,3 +21,34 @@ def test_only_fresh_database_seeded_and_credentials_suppressed():
 def test_seed_failure_propagates_before_publication():
     runner=Mock(side_effect=RuntimeError('seed failed'))
     with pytest.raises(RuntimeError):module.seed_if_empty(0,runner)
+
+
+def test_shared_account_input_requires_exact_roles_and_strong_distinct_hashes():
+    from io import BytesIO
+    import json
+
+    correct = {'engineer': '$2y$12$' + 'a' * 53, 'manager': '$2y$12$' + 'b' * 53}
+    assert module.read_account_hashes([], BytesIO()) == {}
+    assert module.read_account_hashes(
+        ['--shared-accounts'], BytesIO(json.dumps(correct).encode())
+    ) == correct
+
+    for invalid in (
+        dict(correct, admin=correct['engineer']),
+        dict(correct, engineer='plaintext'),
+        dict(correct, engineer=correct['manager']),
+        {'engineer': correct['engineer']},
+    ):
+        with pytest.raises(ValueError, match='shared account hashes'):
+            module.read_account_hashes(
+                ['--shared-accounts'], BytesIO(json.dumps(invalid).encode())
+            )
+
+
+def test_only_synthetic_role_bindings_can_be_enabled():
+    from types import SimpleNamespace
+
+    assert module.account_role_is_expected(SimpleNamespace(username='engineer', role_key='field_qe'))
+    assert module.account_role_is_expected(SimpleNamespace(username='manager', role_key='manager'))
+    assert not module.account_role_is_expected(SimpleNamespace(username='engineer', role_key='admin'))
+    assert not module.account_role_is_expected(SimpleNamespace(username='admin', role_key='admin'))
