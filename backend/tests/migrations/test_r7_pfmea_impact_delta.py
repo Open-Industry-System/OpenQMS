@@ -35,7 +35,7 @@ def test_r7_revision_pair_advances_each_published_head_with_the_same_ddl():
         config = Config()
         config.set_main_option("script_location", str(root / directory))
         scripts = ScriptDirectory.from_config(config)
-        assert scripts.get_heads() == [head]
+        assert scripts.get_revision(head) is not None
         assert scripts.get_revision(head).down_revision == parent
     assert public.read_text().replace(PUBLIC, TENANT).replace(PUBLIC_PARENT, TENANT_PARENT) == tenant.read_text()
 
@@ -161,15 +161,15 @@ def test_upgrade_preserves_r6_history_and_nonempty_r7_rejects_downgrade(mig_db_u
 
 
 @pytest.mark.asyncio
-async def test_empty_and_r6_tenants_match_public_after_upgrade_and_become_current(mig_db_url):
+async def test_empty_r6_and_first_slice_tenants_match_public_after_upgrade(mig_db_url):
     from app.core.tenant_transaction import stable_tenant_lock_key
     from app.services.tenant_migrator import MaintenanceAttempt, maintenance_connection, migrate_if_needed
     from app.services.tenant_schema_diff import load_snapshot_manifest
 
-    await asyncio.to_thread(command.upgrade, _migration_config(mig_db_url), PUBLIC)
+    await asyncio.to_thread(command.upgrade, _migration_config(mig_db_url), "head")
     engine = create_async_engine(mig_db_url)
     try:
-        for existing in (False, True):
+        for predecessor, state in ((None, "empty"), (TENANT_PARENT, "r7_predecessor"), (TENANT, "iqc_predecessor")):
             schema = f"tenant_r7_{uuid4().hex[:12]}"
             tenant = uuid4()
             attempt = MaintenanceAttempt(tenant, schema, 1, uuid4(), 0, stable_tenant_lock_key(tenant))
@@ -181,11 +181,9 @@ async def test_empty_and_r6_tenants_match_public_after_upgrade_and_become_curren
                     VALUES (:id,'R7 migration',:slug,:slug,:schema,'provisioning',1,:attempt)
                 """), {"id": tenant, "slug": str(tenant), "schema": schema, "attempt": attempt.attempt_id})
             async with maintenance_connection(engine, attempt) as maintenance:
-                if existing:
-                    await maintenance.run_migration(TENANT_PARENT)
-                    assert await maintenance.schema_state() == "r7_predecessor"
-                else:
-                    assert await maintenance.schema_state() == "empty"
+                if predecessor:
+                    await maintenance.run_migration(predecessor)
+                assert await maintenance.schema_state() == state
                 await migrate_if_needed(maintenance, attempt)
                 assert await maintenance.schema_state() == "current"
                 assert await maintenance.compare_schema("public", load_snapshot_manifest()) == []

@@ -55,3 +55,9 @@ CAPA 通过 `capa_impact_material.read_material` 解析当前正式修订、验�
 释放前在当前权限及数据库锁内提交可能释放回执和预算。只有独立确认了全部规范页的同一范围才能产生覆盖回执。图链缺口和预算耗尽返回有界状态，供逐措施标出待核信息；这类回复无法确认成规范页。现有正式来源没有可逐措施验证的排除依据，平台据此限制「未发现影响」的提交。结果、全部实际来源关联和 run 终态同事务保存。报告侧栏的历史列表、正文和证据按审阅者的当前权限复核原始完整来源。任务、结果和证据使用专属入口；正式 CAPA 和 PFMEA 保持业务边界。
 
 R7 的私有策略使用 `AGENT_R7_PFMEA_IMPACT_ENABLED`（默认关闭）与 `AGENT_R7_PFMEA_IMPACT_POLICY_FILE`。已启用试点可通过禁用 R7 安装停止准入并使未结束的租约失效，历史结果仍走授权读取。重开后由员工按当前正式版本创建新请求。 [R7 实施计划](../../../../docs/superpowers/plans/2026-11-18-r7-8d-pfmea-impact-assessment.md)
+
+## R7 IQC 调查建议
+
+员工在 `/api/iqc/inspections/{inspection_id}` 的专属调查端点准备、启动和审阅。任务锚定到本租户、本厂、本产线的 IQC 检验单及正式事实版本。专属 worker 在 `/api/agent/runtime/iqc-investigation` 读取正式投影，提交结构化动作和证据引用。建议、全部实际来源和运行终态在同一事务保存。详情按读者当前授权重新核查证据和调查提示。
+
+试点使用默认关闭的 `AGENT_R7_IQC_INVESTIGATION_ENABLED` 和 `AGENT_R7_IQC_INVESTIGATION_POLICY_FILE`，要求运行总开关、开发租户模式和经批准的 Darwin 本地工件。试点策略的 `employee_ids` 登记有专项发起权限的员工 UUID，启动、取数和发布时复核。历史审阅继续按当前 IQC 和全部来源权限判断。平台登记 `openqms.controlled-iqc-investigation` 安装、按单据及工厂/产线授予能力，为 `model_iqc_investigation_v1` 配置批准的本地回环接收方。受控子进程用例使用独占测试数据库和脚本接收方。 [R7 第二片实施计划](../../../../docs/superpowers/plans/2026-11-18-r7-iqc-investigation-advice.md)

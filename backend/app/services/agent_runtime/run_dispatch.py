@@ -49,6 +49,7 @@ async def claim_run(db: AsyncSession, binding: TenantBinding | None, installatio
             run = await db.scalar(select(AgentRun).join(AgentTask, AgentTask.task_id == AgentRun.task_id)
                 .where(AgentRun.installation_id == plugin.installation_id,
                     AgentTask.preferred_installation_id == plugin.installation_id, AgentTask.status == "ready",
+                    AgentTask.task_type == "capa",
                     *([AgentTask.task_id == db.info["_r5_managed_task"]] if "_r5_managed_task" in db.info else []),
                     or_(AgentRun.status == "pending", and_(AgentRun.status == "active", AgentRun.lease_expires_at <= now)))
                 .order_by(AgentRun.created_at, AgentRun.run_id).limit(1)

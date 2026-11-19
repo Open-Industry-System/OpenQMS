@@ -111,10 +111,8 @@ test('R7 employee generation, archived reevaluation, and reviewer source revocat
   expect(authorization).toBeTruthy();
   await expect(panel.getByRole('region', { name: 'PFMEA 影响评估建议', exact: true })).toBeVisible();
   await advanceFixture('revoke-source');
-  const requested = reviewer.page.waitForResponse(r => new URL(r.url()).pathname === detailPath);
-  const hidden = await requested;
-  expect(hidden.status()).toBe(404);
-  await expect(panel.getByRole('region', { name: 'PFMEA 影响评估建议', exact: true })).toHaveCount(0);
+  // Either the history list or the detail poll can discover the withdrawal first.
+  await expect(panel.getByRole('region', { name: 'PFMEA 影响评估建议', exact: true })).toHaveCount(0, { timeout: 15000 });
   for (const url of [detailPath, archived.sourcePath]) {
     const denied = await reviewer.context.request.get(`${backend}${url}`, {
       headers: { Authorization: authorization, 'X-Tenant-ID': tenant },

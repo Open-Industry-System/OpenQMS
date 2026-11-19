@@ -90,6 +90,7 @@ async def get_db(request: Request):
             )
             session.info["r5_controlled_pilot"] = getattr(request.app.state, "r5_controlled_pilot", None)
             session.info["r7_impact_pilot"] = getattr(request.app.state, "r7_impact_pilot", None)
+            session.info["iqc_investigation_pilot"] = getattr(request.app.state, "iqc_investigation_pilot", None)
             session.info["r5_credential_resolver"] = getattr(request.app.state, "r5_credential_resolver", None)
             try:
                 yield session

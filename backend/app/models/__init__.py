@@ -23,6 +23,7 @@ from app.models.agent_readonly_control import (
     AgentCheckpointReceipt, AgentReadonlyCheckpoint, AgentTaskControl, AgentTaskUpdate,
 )
 from app.models.agent_task import AgentTask, AgentRun, AgentTaskGrant, AgentTaskMessage
+from app.models.agent_iqc_investigation import IqcInvestigationBinding, IqcInvestigationReceipt
 from app.models.agent_task_attachment import AgentTaskAttachment
 from app.models.agent_review_skill import AgentReviewSkill
 from app.models.agent_read_task import AgentReadTask
@@ -163,6 +164,7 @@ __all__ = [
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
     "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
     "CapaLateralDiffusionCheck", "CapaLateralNotification",
+    "IqcInvestigationBinding", "IqcInvestigationReceipt",
     "AgentTask", "AgentRun", "AgentTaskGrant", "AgentTaskMessage", "AgentTaskAttachment",
     "AgentCheckpointReceipt", "AgentReadonlyCheckpoint", "AgentTaskControl", "AgentTaskUpdate",
     "AgentEventReceipt", "AgentProjectionReceipt", "AgentResult", "AgentResultReceipt", "AgentRunEvent",

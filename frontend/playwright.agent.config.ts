@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
 // setup/teardown, e2e reset endpoint, Docker lifecycle or conventional 5174 port.
 export default defineConfig({
   testDir: './e2e/specs',
-  testMatch: ['**/agent/readonly-sidebar.spec.ts', '**/agent/local-trial.spec.ts', '**/agent/task-attachments.spec.ts', '**/capa/d4-text-preview.spec.ts', '**/capa/outcome-review.spec.ts', '**/agent/r5-collaboration.spec.ts', '**/agent/r5-checkpoint-withdrawal.spec.ts', '**/capa/r6-entry-switch.spec.ts', '**/capa/r7-pfmea-impact.spec.ts'],
+  testMatch: ['**/agent/readonly-sidebar.spec.ts', '**/agent/local-trial.spec.ts', '**/agent/task-attachments.spec.ts', '**/capa/d4-text-preview.spec.ts', '**/capa/outcome-review.spec.ts', '**/agent/r5-collaboration.spec.ts', '**/agent/r5-checkpoint-withdrawal.spec.ts', '**/capa/r6-entry-switch.spec.ts', '**/capa/r7-pfmea-impact.spec.ts', '**/agent/r7-iqc-investigation.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,

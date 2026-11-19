@@ -37,7 +37,14 @@ R5_REQUIRED = {'api': {'tests.migrations.test_r5_responses_delta': [
                                                   'test_model_delta_pair_is_static_and_has_actual_T4_predecessors',
                                                   'test_immutable_config_task_pin_and_nonempty_downgrade',
                                                   'test_current_tenant_models_match_public']},
- 'r5-api': {'tests.e2e.test_r7_pfmea_impact_process': [
+ 'r5-api': {'tests.e2e.test_r7_iqc_investigation_process': [
+                 'test_native_iqc_worker_and_same_result_reader_hint',
+                 'test_native_paused_run_cannot_publish_late_then_restarts_clean',
+                 'test_native_closed_detailed_inspection_reads_all_measured_pages',
+                 'test_native_reinspection_changes_current_advice_without_rewriting_history',
+                 'test_native_budget_and_unused_grant_withdrawal_still_allow_safe_card',
+             ],
+             'tests.e2e.test_r7_pfmea_impact_process': [
                  'test_r7_native_worker_completes_paginated_assessment_and_preserves_business_state',
                  'test_r7_native_worker_drops_late_result_when_one_inherited_source_loses_access',
                  'test_r7_native_worker_lost_confirmation_preserves_sources_without_coverage',
@@ -121,7 +128,10 @@ R5_REQUIRED = {'api': {'tests.migrations.test_r5_responses_delta': [
                                                                    'test_failed_model_send_leaves_durable_control_attempt_without_usable_basis',
                                                                    'test_actual_managed_child_cannot_reach_B_but_calls_platform_model_A',
                                                                    'test_R5_checkpoint_history_is_paged_typed_current_and_keeps_original_positions']},
- 'r5-browser': {'tests.e2e.test_r7_pfmea_impact_browser': [
+ 'r5-browser': {'tests.e2e.test_r7_iqc_investigation_browser': [
+                    'test_native_iqc_employee_browser_generation_copy_and_reader_scope',
+                ],
+                'tests.e2e.test_r7_pfmea_impact_browser': [
                     'test_real_employee_browser_r7_two_measures_history_and_archived_report',
                 ],
                 'tests.e2e.test_r5_d5_browser': ['test_browser_explicit_correction_and_selected_checkpoint_withdrawal'],

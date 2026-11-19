@@ -150,6 +150,37 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
     if baseline_only or predecessor is not None:
+        iqc_fact_objects = {
+            ("function", "iqc_association_write_fence()"),
+            ("trigger", "iqc_inspections.iqc_association_write_fence"),
+            ("trigger", "supplier_scars.iqc_association_write_fence"),
+            ("trigger", "capa_eightd.iqc_association_write_fence"),
+            ("trigger", "agent_results.iqc_investigation_result_guard"),
+            ("function", "iqc_investigation_result_guard()"),
+            ("function", "iqc_investigation_ledger_guard()"),
+            ("column", "agent_tasks.task_type"),
+            ("column", "agent_tasks.target_iqc_inspection_id"),
+            ("constraint", "agent_tasks.ck_agent_task_typed_anchor"),
+            ("constraint", "agent_tasks.fk_agent_task_iqc_factory"),
+            ("column", "iqc_inspections.identity_generation"),
+            ("column", "iqc_inspections.inspection_revision"),
+            ("constraint", "iqc_inspections.uq_iqc_inspection_factory"),
+            ("index", "iqc_inspections.uq_iqc_inspection_factory"),
+            ("trigger", "iqc_inspections.iqc_fact_revision_guard"),
+            ("trigger", "iqc_inspection_items.iqc_item_fact_revision"),
+            ("trigger", "iqc_item_measurements.iqc_measurement_fact_revision"),
+            ("function", "iqc_fact_revision_guard()"),
+            ("function", "iqc_revise_from_detail()"),
+        }
+        anchor_column = ("column", "agent_tasks.target_capa_id")
+        if reference.get(anchor_column) == "uuid|false|||":
+            reference[anchor_column] = "uuid|true|||"
+        iqc_tables = {"agent_iqc_investigation_bindings", "agent_iqc_investigation_receipts"}
+        reference = {key: value for key, value in reference.items()
+                     if key not in iqc_fact_objects and key[1].split(".")[0] not in iqc_tables}
+    if predecessor == "tv025_r7_pfmea_impact":
+        predecessor = None
+    if baseline_only or predecessor is not None:
         r7_tables = {
             "agent_pfmea_impact_bindings", "agent_pfmea_impact_receipts",
             "agent_pfmea_impact_result_receipts",

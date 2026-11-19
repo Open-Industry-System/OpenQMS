@@ -13,7 +13,9 @@ from app.core.security import verify_token
 from app.core.tenant_transaction import TenantBinding
 from app.database import async_session
 from app.models.tenant import Tenant
-from app.services.agent_runtime.routes import PFMEA_IMPACT_RUNTIME, RUNTIME_PATHS, RUNTIME_JWT_ROUTES
+from app.services.agent_runtime.routes import (
+    IQC_INVESTIGATION_RUNTIME, PFMEA_IMPACT_RUNTIME, RUNTIME_JWT_ROUTES, RUNTIME_PATHS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,16 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         runtime_impact = path == PFMEA_IMPACT_RUNTIME or path.startswith(PFMEA_IMPACT_RUNTIME + "/")
         employee_impact = re.match(r"/api/capa/[^/]+/pfmea-impact(?:/|$)", path)
+        runtime_iqc = path == IQC_INVESTIGATION_RUNTIME or path.startswith(IQC_INVESTIGATION_RUNTIME + "/")
+        employee_iqc = re.match(r"/api/iqc/inspections/[^/]+/(?:investigation-context|investigations)(?:/|$)", path)
+        if runtime_iqc or employee_iqc:
+            if not (settings.AGENT_TASK_RUNTIME_ENABLED and settings.AGENT_R7_IQC_INVESTIGATION_ENABLED
+                    and settings.TENANT_MODE == "dev"):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"},
+                                    headers={"Cache-Control": "no-store"})
+            if runtime_iqc and not local_trial_peer_allowed(request):
+                return JSONResponse(status_code=403, content={"detail": "Access denied"},
+                                    headers={"Cache-Control": "no-store"})
         if runtime_impact or employee_impact:
             if not (settings.AGENT_TASK_RUNTIME_ENABLED and settings.AGENT_R7_PFMEA_IMPACT_ENABLED
                     and settings.TENANT_MODE == "dev"):

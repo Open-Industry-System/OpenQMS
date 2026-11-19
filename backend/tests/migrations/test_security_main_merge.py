@@ -19,7 +19,7 @@ def test_security_merge_preserves_published_parent_histories():
     config = Config()
     config.set_main_option("script_location", str(Path(__file__).resolve().parents[2] / "alembic"))
     graph = ScriptDirectory.from_config(config)
-    assert graph.get_heads() == ["20261118_r7_pfmea_impact"]
+    assert graph.get_heads() == ["20261118_r7_iqc_facts"]
     assert set(graph.get_revision(INTEGRATED_HEAD).down_revision) == {HEAD, R6_HEAD}
     assert set(graph.get_revision(HEAD).down_revision) == PARENTS
     assert graph.get_revision("20261116_platform_login_limits").down_revision == "20261114_production_merge"
