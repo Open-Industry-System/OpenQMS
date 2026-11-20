@@ -101,3 +101,17 @@ def test_test_preparation_preserves_explicit_secret(tmp_path):
     result, calls = invoke(tmp_path, 'check-test-db', SECRET_KEY='explicit-test-value')
     assert result.returncode == 0, result.stderr
     assert calls[0]['secret'] == 'explicit-test-value'
+
+
+@pytest.mark.parametrize('shard', ['0', '1'])
+def test_backend_shard_keeps_original_collection_and_builds_wheel_only_for_sdk_owner(tmp_path, shard):
+    result, calls = invoke(tmp_path, 'check-backend', BACKEND_SHARD=shard)
+    assert result.returncode == 0, result.stderr
+    assert calls[0]['args'] == ['-m', 'tests.ci.prepare_database']
+    args = calls[-1]['args']
+    assert args[args.index('--pytest-target') + 1] == 'tests'
+    assert args[args.index('--backend-shard') + 1] == shard
+    assert '--pytest-arg=--ignore=tests/test_graph_sync_worker.py' in args
+    assert '--pytest-arg=--ignore=tests/test_graph_projection.py' in args
+    assert bool(calls[-1]['wheel']) is (shard == '1')
+    assert (tmp_path / 'sdk-calls.jsonl').exists() is (shard == '1')

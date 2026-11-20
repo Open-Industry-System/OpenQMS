@@ -364,8 +364,22 @@ def _assert_safe_expressions(workflow: Mapping[str, object]) -> None:
         upload['with']['name'] = 'sdk-checks-3.11-evidence'
     worker = _jobs(checked).get('backend-full')
     if worker is not None:
-        assert worker['if'] == "${{ always() && !cancelled() && needs.backend-route.outputs.docs_only != 'true' }}"
+        assert worker['if'] == "${{ always() && !cancelled() && (needs.backend-route.result != 'success' || needs.backend-route.outputs.backend_required != 'false') }}"
         worker['if'] = 'validated backend routing predicate'
+        assert worker['strategy'] == {'fail-fast': False, 'matrix': {'include': [
+            {'shard': 'runtime', 'index': 0}, {'shard': 'remainder', 'index': 1}]}}
+        # Matrix expressions belong only in the owning worker. Validate their
+        # finite field references before exempting them from the generic check.
+        assert set(re.findall(r'\$\{\{\s*(matrix\.[^}]+?)\s*}}', '\n'.join(_strings(worker)))) == {'matrix.shard', 'matrix.index'}
+        def normalize(value):
+            if isinstance(value, str):
+                return value.replace('${{ matrix.shard }}', 'runtime').replace('${{ matrix.index }}', '0')
+            if isinstance(value, dict):
+                return {key: normalize(nested) for key, nested in value.items()}
+            if isinstance(value, list):
+                return [normalize(nested) for nested in value]
+            return value
+        checked['jobs']['backend-full'] = normalize(worker)
     serialized = '\n'.join(_strings(checked))
     assert '/Users/' not in serialized
     expressions = re.findall(r'\$\{\{\s*([^}]+?)\s*}}', serialized)
@@ -419,7 +433,7 @@ def test_real_evidence_has_explicit_roots_always_uploads_and_sha_binding():
         for name in names:
             job = jobs[name]
             env = job.get('env', {})
-            assert env.get('OPENQMS_TEST_ARTIFACTS') == '${{ github.workspace }}/ci-safe/' + name
+            assert env.get('OPENQMS_TEST_ARTIFACTS') == ('${{ github.workspace }}/ci-safe/backend-shard-${{ matrix.shard }}' if name == 'backend-full' else '${{ github.workspace }}/ci-safe/' + name)
             assert env.get('OPENQMS_CI_SHA') == ('${{ github.sha }}' if path == AUTOMATIC_PATH
                                                 else '${{ needs.preflight.outputs.frozen_sha }}')
             uploads = [s for s in _steps(job) if str(s.get('uses', '')).startswith('actions/upload-artifact@')]
