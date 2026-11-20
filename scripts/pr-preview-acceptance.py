@@ -33,7 +33,7 @@ def preview_url(number, shared):
 
 
 def accepts_workflow_source(run, workflow):
-    events = {'workflow_run', 'schedule', 'workflow_dispatch'} if workflow == SHARED_TEST_WORKFLOW else {'workflow_run'}
+    events = {'workflow_run', 'schedule', 'workflow_dispatch', 'issue_comment'} if workflow == SHARED_TEST_WORKFLOW else {'workflow_run'}
     return run.get('path') == f'.github/workflows/{workflow}' and run.get('event') in events
 
 
@@ -494,7 +494,10 @@ def shared_test_released_notice(api, slot):
             return
     cutoff = int(datetime.now(timezone.utc).timestamp())
     marker = f'<!-- openqms-shared-test-release:{identity}:{slot["outcome"]}:{cutoff} -->'
-    detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
+    if slot['outcome'] == 'switched':
+        detail = '管理员切换了测试位，本 PR 可在后续轮次继续验收。'
+    else:
+        detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
     api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### 共享测试位已清理\n\n{detail}'
                f'固定测试地址将用于队列中的下一项。\n\n版本：`{slot["head"]}`')
 
@@ -503,7 +506,7 @@ def shared_release_marker(api, pr, digest):
     for body in bot_notices(api, pr['number']):
         match = re.search(
             r'<!-- openqms-shared-test-release:([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{64}):'
-            r'([0-9a-f]{32}):(passed|failed|deploy-failed|expired|superseded):([0-9]+) -->',
+            r'([0-9a-f]{32}):(passed|failed|deploy-failed|expired|superseded|switched):([0-9]+) -->',
             body,
         )
         if match and match.group(1, 2, 3) == (pr['head']['sha'], pr['merge_commit_sha'], digest):

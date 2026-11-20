@@ -20,6 +20,7 @@ REQUEST_LIMIT = 128 * 1024
 ACTION_FIELDS = {
     'status': {'action'},
     'retry': {'action', 'release'},
+    'switch': {'action', 'comment_id', 'release', 'eligible'},
     'd4-evidence': {'action', 'lease'},
     'd4-passed': {'action', 'lease', 'eligible', 'proofs'},
     'tick': {'action', 'eligible'},
@@ -223,6 +224,11 @@ def run(request, preview, queue_type):
         return slot
     helper = preview.helper
     fixed_route = helper.ROUTES / 'shared-test.caddy'
+    if action == 'switch':
+        owned_route(fixed_route, slot, action)
+        if slot['phase'] == 'idle':
+            require_clean_start(preview)
+        return queue.request_switch(request['comment_id'], request['release'], request['eligible'])
     if action == 'retry':
         owned_route(fixed_route, slot, action)
         require_clean_start(preview)

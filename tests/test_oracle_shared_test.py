@@ -195,3 +195,33 @@ def test_first_certificate_activation_allows_bounded_https_retry(monkeypatch):
     monkeypatch.setattr(client['time'], 'sleep', waits.append)
     client['public_health'](slot)
     assert waits == [3]
+
+
+@pytest.mark.parametrize('permission, comment_patch, allowed', [
+    ('admin', {}, True),
+    ('maintain', {}, True),
+    ('write', {}, False),
+    ('read', {}, False),
+    ('admin', {'body': '/test-switch 45'}, False),
+    ('admin', {'issue_url': 'https://api.github.com/repos/owner/OpenQMS/issues/45'}, False),
+    ('admin', {'user': {'login': 'ci-bot', 'type': 'Bot'}}, False),
+])
+def test_switch_command_revalidates_live_comment_and_author(permission, comment_patch, allowed):
+    class GitHub:
+        repo = 'owner/OpenQMS'
+
+        def get(self, path):
+            if path == '/issues/comments/81':
+                return dict({'id': 81, 'body': '/test-switch',
+                             'issue_url': 'https://api.github.com/repos/owner/OpenQMS/issues/48',
+                             'user': {'login': 'reviewer', 'type': 'User'}}, **comment_patch)
+            assert path == '/collaborators/reviewer/permission'
+            return {'permission': permission}
+
+    event = {'action': 'created', 'issue': {'number': 48, 'pull_request': {'url': 'PR'}},
+             'comment': {'id': 81, 'body': '/test-switch'}}
+    if allowed:
+        assert client['switch_comment'](GitHub(), event) == (48, 81)
+    else:
+        with pytest.raises(ValueError):
+            client['switch_comment'](GitHub(), event)

@@ -53,6 +53,28 @@ def eligible_releases(api, gate_api):
     return sorted(eligible, key=lambda row: row[0]['pr'])
 
 
+def switch_comment(api, event):
+    if event.get('action') != 'created' or not event.get('issue', {}).get('pull_request'):
+        raise ValueError('test switch must be requested in a PR comment')
+    comment_id = event.get('comment', {}).get('id')
+    pr = event['issue'].get('number')
+    if (type(comment_id) is not int or not 0 < comment_id < 2**63
+            or type(pr) is not int or not 0 < pr < 10**9):
+        raise ValueError('invalid test switch comment identity')
+    comment = api.get(f'/issues/comments/{comment_id}')
+    author = comment.get('user') or {}
+    login = author.get('login') or ''
+    if (comment.get('id') != comment_id or comment.get('body', '').strip() != '/test-switch'
+            or event['comment'].get('body', '').strip() != '/test-switch'
+            or comment.get('issue_url') != f'https://api.github.com/repos/{api.repo}/issues/{pr}'
+            or author.get('type') != 'User' or not re.fullmatch(r'[A-Za-z0-9-]+', login)):
+        raise ValueError('test switch comment was removed, edited, or does not match this PR')
+    permission = api.get(f'/collaborators/{login}/permission')['permission']
+    if permission not in {'maintain', 'admin'}:
+        raise ValueError('test switch requires repository maintain or admin permission')
+    return pr, comment_id
+
+
 def queue_call(payload):
     context = dict(os.environ, PREVIEW_PR='1', RELEASE_KIND='preview', RELEASE_SHA='0' * 40,
                    ORACLE_REVALIDATE_CMD='true')
@@ -215,6 +237,14 @@ def main():
         return
     if args.receipt is None:
         parser.error('--receipt is required when running the queue')
+    if os.environ.get('GITHUB_EVENT_NAME') == 'issue_comment':
+        number, comment_id = switch_comment(api, json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()))
+        releases = [row[0] for row in get_eligible()]
+        target = next((release for release in releases if release['pr'] == number), None)
+        if target is None:
+            parser.error('test switch requires a current CI-authorized release')
+        queue_call(dict(action='switch', comment_id=comment_id, release=target, eligible=releases))
+        print(f'Test switch requested for PR #{number}', flush=True)
     if args.retry_pr:
         matching = next((row[0] for row in get_eligible() if row[0]['pr'] == args.retry_pr), None)
         if matching is None:
