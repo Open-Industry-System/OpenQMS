@@ -560,3 +560,19 @@ def test_d4_acceptance_requires_trusted_current_artifact_and_timely_human_commen
         envelope[field] = original
     evidence_run['event'] = 'pull_request'
     assert publication()['d4_evidence'] == {}
+
+
+def test_new_lease_can_publish_after_previous_deployment_failure(shared_receipt_api):
+    import time
+
+    api = shared_receipt_api
+    receipt = api.receipt
+    receipt['expires_at'] = int(time.time()) + 3600
+    run = m.publication(api, api.pr, shared=True)
+    previous_lease = 'f' * 32
+    identity = m.shared_identity(receipt['head'], receipt['sha'], receipt['plan'], previous_lease)
+    after_release = m.epoch(run['updated_at']) - 10
+    api.comments = [dict(user=dict(login='github-actions[bot]', type='Bot'),
+                         body=m.NOTICE + f'\n<!-- openqms-shared-test-release:{identity}:deploy-failed:{after_release} -->')]
+    m.shared_test_ready_notice(api, api.pr, run, receipt['plan'])
+    assert m.SHARED_TEST_URL in api.notices[-1]

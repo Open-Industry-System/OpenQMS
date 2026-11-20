@@ -4,9 +4,16 @@ on:
   workflow_run:
     workflows: [Test OpenQMS]
     types: [completed]
+  issue_comment:
+    types: [created]
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+    inputs:
+      retry_pr:
+        description: Retry the exact current release after a deployment failure
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -25,6 +32,8 @@ jobs:
       (github.event_name != 'workflow_run' ||
       (github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success')) &&
+      (github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/test-switch'))) &&
       vars.ORACLE_SHARED_TEST_ENABLED == 'true' &&
       vars.ORACLE_AUTODEPLOY_ENABLED == 'true' &&
       vars.ORACLE_PREVIEW_ENABLED == 'true'
@@ -61,6 +70,7 @@ jobs:
       - name: Reconcile shared test queue
         env:
           GH_TOKEN: ${{ github.token }}
+          RETRY_PR: ${{ inputs.retry_pr || 0 }}
           ORACLE_SSH_TARGET: ${{ vars.ORACLE_SSH_TARGET }}
           DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
@@ -75,6 +85,7 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > "$ORACLE_KNOWN_HOSTS"
           unset DEPLOY_KEY KNOWN_HOSTS
           python3 scripts/oracle-shared-test.py \
+            --retry-pr "$RETRY_PR" \
             --receipt "$RUNNER_TEMP/preview-publication.json" \
             --d4-evidence "$RUNNER_TEMP/d4-evidence.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -64,3 +64,64 @@ def test_expired_or_failed_lease_moves_on_after_cleanup(tmp_path):
     assert queue.tick([release(47)], 34)["pr"] == 46
     queue.acknowledge(second["lease"], "released", 35)
     assert queue.tick([release(45), release(46), release(47)], 36)["pr"] == 47
+
+
+def test_retry_requires_exact_cleaned_deployment_failure_and_new_lease(tmp_path):
+    queue = Queue(tmp_path / 'queue.sqlite3')
+    current = release(45)
+    eligible = [current, release(46)]
+    first = queue.tick(eligible, 10)
+    with pytest.raises(ValueError, match='idle'):
+        queue.retry_failed(current)
+    queue.acknowledge(first['lease'], 'deploy-failed', 12)
+    queue.acknowledge(first['lease'], 'released', 13)
+    with pytest.raises(ValueError, match='exact deployment failure'):
+        queue.retry_failed(release(45, 'd'))
+    assert queue.retry_failed(current) == {'phase': 'idle'}
+    retried = queue.tick(eligible, 14)
+    assert retried['pr'] == 45 and retried['lease'] != first['lease']
+    queue.acknowledge(retried['lease'], 'ready', 15, 20, eligible)
+    queue.acknowledge(retried['lease'], 'passed', 16, eligible=eligible)
+    queue.acknowledge(retried['lease'], 'released', 17)
+    with pytest.raises(ValueError, match='exact deployment failure'):
+        queue.retry_failed(current)
+
+
+def test_switch_holds_inflight_deployment_then_cleans_and_requeues(tmp_path):
+    queue = Queue(tmp_path / 'queue.sqlite3')
+    earlier, target = release(45), release(48)
+    eligible = [earlier, target]
+    initial = queue.tick(eligible, 1)
+    assert initial['pr'] == 45
+    assert queue.request_switch(11, target, eligible) == initial
+    assert queue.tick(eligible, 2) == initial
+    queue.acknowledge(initial['lease'], 'ready', 3, 60, eligible)
+    interrupted = queue.tick(eligible, 4)
+    assert interrupted['outcome'] == 'switched'
+    assert queue.tick(eligible, 5)['lease'] == initial['lease']
+    queue.acknowledge(initial['lease'], 'released', 6)
+    chosen = queue.tick(eligible, 7)
+    assert chosen['pr'] == 48
+    assert queue.request_switch(11, target, eligible) == chosen
+    queue.acknowledge(chosen['lease'], 'ready', 8, 60, eligible)
+    queue.acknowledge(chosen['lease'], 'passed', 9, eligible=eligible)
+    queue.acknowledge(chosen['lease'], 'released', 10)
+    with pytest.raises(ValueError, match='already passed'):
+        queue.request_switch(12, target, eligible)
+    assert queue.tick(eligible, 11)['pr'] == 45
+
+
+def test_switch_target_changes_before_lease_release(tmp_path):
+    queue = Queue(tmp_path / 'queue.sqlite3')
+    earlier, target = release(45), release(48)
+    initial = queue.tick([earlier, target], 1)
+    queue.acknowledge(initial['lease'], 'ready', 2, 60, [earlier, target])
+    with pytest.raises(ValueError, match='not currently eligible'):
+        queue.request_switch(1, target, [earlier])
+    queue.request_switch(1, target, [earlier, target])
+    with pytest.raises(ValueError, match='already pending'):
+        queue.request_switch(2, earlier, [earlier, target])
+    old = queue.tick([earlier, release(48, 'd')], 3)
+    assert (old['phase'], old['lease']) == ('testing', initial['lease'])
+    queue.request_switch(1, target, [earlier, target])
+    assert queue.tick([earlier, target], 4)['phase'] == 'testing'
