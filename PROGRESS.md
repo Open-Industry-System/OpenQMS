@@ -34,6 +34,8 @@
 
 # OpenQMS 开发进度
 
+> **2026-11-18 D4 receiver 隔离 I7–I10 冻结**。真实运行链、I9 六步正文、双 ready 领取、来源与撤权、credential epoch 和独立清理复核通过。整片 SPEC→QUALITY 通过。冻结环境记录纯层 597 项、Linux 173 项（48 个必选节点）、旧 receiver/launcher 104 项和 SDK 协议 480 项通过。[验收摘要](docs/development/agent-d4-local-receiver-isolation.md)
+
 ### 2026-11-16 — #37 验收期间同步新安全主线
 
 - baa276aa新基线的验证已完成：pure373 passed／3 warnings／exit0；正常API兼容及隔离组78 passed／0 skipped／exit0，源码与依赖指纹前后不变。该轮独占容器及唯一卷、凭据已核验清理。API CLI wall320.13秒，仅作本轮兼容执行记录，不与d0c7394e的旧配置跨基线归因比较；完整新CI按当前候选重新派发。
