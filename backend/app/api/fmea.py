@@ -2,6 +2,8 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import RequestScope, get_request_scope
@@ -373,11 +375,15 @@ async def recommend(
     llm_timeout = getattr(fastapi_request.app.state, "llm_timeout", None)
     embedding = getattr(fastapi_request.app.state, "embedding_provider", None)
     service = RecommendationService(db=db, graph_repo=graph_repo, llm_timeout=llm_timeout, embedding=embedding)
-    result = await service.recommend(
-        fmea_id, request, scope.user, scope, tenant_schema=tenant_schema(fastapi_request),
-    )
-    await db.commit()
-    return result
+    try:
+        result = await service.recommend(
+            fmea_id, request, scope.user, scope, tenant_schema=tenant_schema(fastapi_request),
+        )
+        await db.commit()
+        await service.require_current_release()
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE", headers={'Cache-Control': 'no-store'}) from None
+    return JSONResponse(content=jsonable_encoder(result), headers={'Cache-Control': 'no-store'})
 
 
 @router.get("/{fmea_id}/graph")
@@ -454,6 +460,10 @@ async def get_fmea_lessons(
 
     embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
-    result = await service.recommend(fmea_id, "fmea", req.problem_description if req else None, scope.user)
-    await db.commit()
-    return result
+    try:
+        result = await service.recommend(fmea_id, "fmea", req.problem_description if req else None, scope.user)
+        await db.commit()
+        await service.require_current_release()
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE", headers={'Cache-Control': 'no-store'}) from None
+    return JSONResponse(content=jsonable_encoder(result), headers={'Cache-Control': 'no-store'})

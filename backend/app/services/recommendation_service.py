@@ -570,12 +570,30 @@ class RecommendationService:
         # safe lower bound so configured providers don't look unavailable.
         self.llm_timeout = max(llm_timeout or settings.LLM_TIMEOUT, 15)
 
+    async def _current_target_state(self):
+        from types import SimpleNamespace
+        from app.services.fmea_agent_sources import visible_fmea_source
+        source = await visible_fmea_source(self.db, SimpleNamespace(user=self._release_user), self._release_fmea_id)
+        version = await self.db.scalar(select(FMEADocument.lock_version).where(
+            FMEADocument.fmea_id == self._release_fmea_id))
+        return version, str(source.factory_id), source.product_line_code
+
+    async def require_current_release(self):
+        from app.services.capa_d4_material import require_legacy_candidate_bindings, require_current_egress_statement
+        await require_current_egress_statement(self.db)
+        if await self._current_target_state() != self._release_target_state:
+            raise PermissionError('D4_RECOMMENDATION_INPUT_CHANGED')
+        await require_legacy_candidate_bindings(self.db, self._release_bindings, actor=self._release_user)
+
     async def recommend(
         self, fmea_id: _uuid.UUID, request: RecommendRequest, user: User,
         request_scope: RequestScope, tenant_schema: str,
     ) -> RecommendResponse:
         from app.core.permissions import Module, PermissionLevel, get_user_permission
 
+        self._release_user, self._release_fmea_id = user, fmea_id
+        self._release_bindings = ()
+        self._release_target_state = await self._current_target_state()
         fmea = await self._get_fmea_or_404(fmea_id)
         try:
             pc = await provider_adapter.build_client(self.db)
@@ -610,8 +628,10 @@ class RecommendationService:
             else:
                 # Cached RecommendResponse predates source_executions/context_execution/
                 # generation_execution; schema defaults ([]) keep the contract intact.
+                await self.require_current_release()
                 return cached_response
 
+        self._release_bindings = ()
         # 2. Rule engine（sync, ~1ms）
         # 传入 fmea_type 使 PFMEA 能使用 PFMEA 规则映射
         rule_context = {**request.context, "fmea_type": fmea.fmea_type}
@@ -663,12 +683,17 @@ class RecommendationService:
         else:
             source_executions.append(SourceExecution(source="graph", status="unavailable"))
 
+        recalled_bindings = []
+        await self.require_current_release()
         retriever_execs, retriever_items = await run_retrievers(
             self.db, self.embedding,
             query_text=anchor, user_product_lines=product_line_codes,
             fmea_id=fmea.fmea_id, fmea_type=fmea.fmea_type,
-            product_line_code=fmea.product_line_code, user=user,
+            product_line_code=fmea.product_line_code, user=user, source_bindings=recalled_bindings,
+            delivery_guard=self.require_current_release,
         )
+        self._release_bindings = tuple(recalled_bindings)
+        await self.require_current_release()
         source_executions.extend(retriever_execs)
         all_suggestions = self._merge_and_deduplicate(all_suggestions, retriever_items)
 
@@ -697,10 +722,13 @@ class RecommendationService:
                         for s in graph_suggestions[:5]
                     ]
                 prompt = self._build_prompt(request.trigger_type, llm_context)
+                await self.require_current_release()
                 llm_result = await asyncio.wait_for(
-                    provider_adapter.complete_json(pc, prompt, {}),
+                    provider_adapter.with_delivery_guard(self.require_current_release,
+                        lambda: provider_adapter.complete_json(pc, prompt, {})),
                     timeout=self.llm_timeout,
                 )
+                await self.require_current_release()
                 validated = SuggestionList.model_validate(llm_result)
                 llm_items = [
                     SuggestionItem(
@@ -711,6 +739,8 @@ class RecommendationService:
                 all_suggestions = self._merge_and_deduplicate(all_suggestions, llm_items)
                 source = "graph_enriched" if graph_suggestions else "hybrid"
                 llm_status = "success"
+            except PermissionError:
+                raise
             except Exception as e:
                 source = "graph" if graph_suggestions else "rule_fallback"
                 generation_execution.llm = "error"
@@ -749,8 +779,10 @@ class RecommendationService:
             generation_execution=generation_execution,
         )
 
+        await self.require_current_release()
         if source != "rule_fallback":
             await self._cache_result(fmea_id, request.trigger_type, context_hash, fmea, response, pc is not None)
+        await self.require_current_release()
         return response
 
     # -- Graph similarity methods --
@@ -1000,33 +1032,34 @@ class RecommendationService:
         self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str,
         effective_scope: str, llm_available: bool,
     ) -> tuple[RecommendResponse, bool] | None:
-        stmt = (
-            select(RecommendationCache)
-            .where(RecommendationCache.fmea_id == fmea_id)
-            .where(RecommendationCache.trigger_type == trigger_type)
-            .where(RecommendationCache.context_hash == context_hash)
-            .where(RecommendationCache.expires_at > func.now())
-        )
-        result = await self.db.execute(stmt)
-        row = result.scalar_one_or_none()
-        if row:
-            suggestions = row.suggestions
-            graph_count = sum(1 for s in suggestions if s.get("source") == "graph")
-            response = RecommendResponse(
-                suggestions=suggestions,
-                source=row.source,
-                cached=True,
-                llm_available=llm_available,
-                graph_match_count=graph_count,
-                effective_scope=effective_scope,
-            )
-            return (response, row.llm_available)
-        return None
+        from app.services.capa_legacy_cache import load_cache
+        await self.require_current_release()
+        cached = await load_cache(self.db, dict(kind='fmea', fmea_id=str(fmea_id),
+            target_state=list(self._release_target_state), trigger_type=trigger_type, context_hash=context_hash),
+            (RecommendationCache.fmea_id == fmea_id,
+             RecommendationCache.trigger_type == trigger_type,
+             RecommendationCache.context_hash == context_hash,
+             RecommendationCache.expires_at > func.now()), actor=self._release_user)
+        if cached is None:
+            return None
+        suggestions, self._release_bindings, details = cached
+        await self.require_current_release()
+        response = RecommendResponse(suggestions=suggestions, source=details['source'], cached=True,
+            llm_available=llm_available,
+            graph_match_count=sum(1 for item in suggestions if item.get('source') == 'graph'),
+            effective_scope=effective_scope)
+        return response, details['llm_available']
 
     async def _cache_result(
         self, fmea_id: _uuid.UUID, trigger_type: str, context_hash: str,
         fmea: FMEADocument, response: RecommendResponse, llm_available: bool,
     ) -> None:
+        from app.services.capa_legacy_cache import seal_cache
+        await self.require_current_release()
+        envelope = seal_cache(self.db, dict(kind='fmea', fmea_id=str(fmea_id),
+            target_state=list(self._release_target_state), trigger_type=trigger_type, context_hash=context_hash), self._release_bindings,
+            [item.model_dump() for item in response.suggestions],
+            dict(source=response.source, llm_available=llm_available))
         stmt = (
             pg_insert(RecommendationCache)
             .values(
@@ -1037,7 +1070,7 @@ class RecommendationService:
                 fmea_type=fmea.fmea_type,
                 factory_id=fmea.factory_id,
                 expires_at=func.now() + text("INTERVAL '24 hours'"),
-                suggestions=[s.model_dump() for s in response.suggestions],
+                suggestions=envelope,
                 source=response.source,
                 llm_available=llm_available,
             )
@@ -1045,7 +1078,7 @@ class RecommendationService:
                 index_elements=["fmea_id", "trigger_type", "context_hash"],
                 index_where=text("fmea_id IS NOT NULL"),
                 set_={
-                    "suggestions": [s.model_dump() for s in response.suggestions],
+                    "suggestions": envelope,
                     "source": response.source,
                     "llm_available": llm_available,
                     "product_line_code": fmea.product_line_code,

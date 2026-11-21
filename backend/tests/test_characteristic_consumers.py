@@ -250,9 +250,11 @@ async def test_two_factory_same_name_actual_writer_rejects_foreign_product_and_p
         effective_factory_id=None, pl_scope=ProductLineScope(mode='EXPLICIT', codes=[source.product_line_code, pl.code]))
     app.dependency_overrides[get_request_scope] = lambda: scope
     for doc, g in [(source, g1), (doc2, g2)]:
-        response = await admin_client.put(f'/api/fmea/{doc.fmea_id}', json={'graph_data': g, 'lock_version': 0})
+        await db.refresh(doc)
+        before_version = doc.lock_version
+        response = await admin_client.put(f'/api/fmea/{doc.fmea_id}', json={'graph_data': g, 'lock_version': doc.lock_version})
         assert response.status_code == 200, response.text
-        assert response.json()['lock_version'] == 1
+        assert response.json()['lock_version'] == before_version + 1
     await db.refresh(doc2)
     saved = deepcopy(doc2.graph_data); lock = doc2.lock_version
     audits = await db.scalar(select(func.count()).select_from(AuditLog).where(AuditLog.record_id == doc2.fmea_id))
@@ -492,6 +494,10 @@ async def test_actual_request_transaction_rolls_back_mid_extraction_failure(sync
     schema = schemas[0]
     token = current_tenant_schema.set(schema)
     ids, _ = await seed_tenant(sessions, schema)
+    async with sessions.admin_sessions() as admin:
+        slug = await admin.scalar(text('SELECT slug FROM public.tenants WHERE schema_name=:schema'),
+                                  {'schema': schema})
+        assert slug is not None
     async with sessions() as db:
         await tenant_scope(db, schema, ids[3])
         fmea = await db.get(FMEADocument, ids[5])
@@ -521,7 +527,7 @@ async def test_actual_request_transaction_rolls_back_mid_extraction_failure(sync
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
             response = await client.post(f'/api/special-characteristics/sync-from-fmea/{ids[5]}',
-                                         headers={'X-Tenant-ID': schema.replace('_', '-')})
+                                         headers={'X-Tenant-ID': slug})
         assert response.status_code == 404, response.text
         assert 'injected_mid_extraction_failure' in response.text
         assert staged_counts == [1, 2]  # failure occurred after real rows were flushed

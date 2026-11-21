@@ -33,6 +33,9 @@ export interface OutcomeD5Measure {
   measure_id: string;
   proposal_id: string;
   final_text: string;
+  adopted_text?:string;
+  correction_revision_id?:string|null;
+  correction_revision_no?:number|null;
   text_version: string;
   adopted_by: string;
   adopted_at: string;
@@ -51,7 +54,8 @@ export interface OutcomeD5Measure {
 export interface CapaOutcomeReview {
   report_id: string;
   status: string;
-  contract: 'capa.outcome-review.v1';
+  contract: 'capa.outcome-review.v1'|'capa.outcome-review.v2';
+  local_closure?: OutcomeLocalClosure|null;
   review_round_id: string | null;
   revision: string;
   binding_status: 'pending' | 'verified' | 'legacy_unversioned' | 'unverifiable';
@@ -85,14 +89,15 @@ const hash = (v: unknown) => text(v) && /^[0-9a-f]{64}$/.test(v);
 const uuid = (v: unknown) => text(v) && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
 export function isCompleteOutcomeReview(v: unknown, reportId: string, status: string): v is CapaOutcomeReview {
-  if (!record(v) || v.report_id !== reportId || v.status !== status || v.contract !== 'capa.outcome-review.v1'
+  if (!record(v) || v.report_id !== reportId || v.status !== status || !['capa.outcome-review.v1','capa.outcome-review.v2'].includes(String(v.contract))
     || !hash(v.revision) || !(v.review_round_id === null || uuid(v.review_round_id))
     || !['pending', 'verified', 'legacy_unversioned', 'unverifiable'].includes(String(v.binding_status))) return false;
+  if(!validVersionedMaterial(v,reportId))return false;
   if (!record(v.core) || !fields(v.core, ['d4_root_cause', 'd5_correction', 'd6_verification', 'd7_prevention'], nullableText)) return false;
   if (!Array.isArray(v.d5_measures) || !v.d5_measures.every(row => record(row)
     && fields(row, ['measure_id', 'proposal_id', 'adopted_by', 'revision_id', 'proof_id'], uuid)
     && text(row.final_text) && !!row.final_text.trim() && hash(row.text_version) && text(row.adopted_at)
-    && Array.isArray(row.sources) && row.sources.length > 0 && row.sources.every(source => record(source)
+    && Array.isArray(row.sources) && (v.contract==='capa.outcome-review.v2'||row.sources.length>0) && row.sources.every(source => record(source)
       && fields(source, ['source_id', 'factory_id', 'fmea_id'], uuid)
       && source.projection_id === 'fmea.failure_cause.reference.v1'
       && fields(source, ['product_line_code', 'node_id']) && hash(source.node_hmac)))) return false;
@@ -130,4 +135,36 @@ export function isCompleteOutcomeReview(v: unknown, reportId: string, status: st
     && nullableText(v.decision.actor_id) && fields(v.decision, ['operated_at', 'audit_id']))) return false;
   return record(v.supplement) && v.supplement.review_scope === 'unreviewed_supplement'
     && fields(v.supplement, ['text', 'updated_by', 'updated_at'], nullableText);
+}
+
+
+export interface OutcomeLocalClosure {eligible:true;prevention:Record<string,unknown>|null;manual_analysis:Record<string,unknown>|null;propagation:Record<string,unknown>|null;}
+function validVersionedMaterial(value:Record<string,unknown>,reportId:string):boolean{
+ const local=value.local_closure;
+ const measures=value.d5_measures;
+ if(!Array.isArray(measures))return false;
+ const corrected=measures.some(row=>record(row)&&(row.correction_revision_id!=null||row.correction_revision_no!=null));
+ if(value.contract==='capa.outcome-review.v1')return !corrected&&(local===undefined||local===null);
+ for(const row of measures){
+  if(!record(row))return false;
+  if(row.correction_revision_id!=null||row.correction_revision_no!=null){
+   if(!uuid(row.correction_revision_id)||!Number.isSafeInteger(row.correction_revision_no)||Number(row.correction_revision_no)<1||!text(row.adopted_text))return false;
+  }
+ }
+ if(local===null||local===undefined)return corrected;
+ if(!record(local)||local.eligible!==true||!['prevention','manual_analysis','propagation'].some(k=>local[k]!=null)||Object.keys(local).some(k=>k.startsWith('can_')||k==='material_version'))return false;
+ for(const kind of ['prevention','manual_analysis','propagation']){
+  const row=local[kind];if(row===null)continue;
+  if(!record(row)||!uuid(row.revision_id)||!Number.isSafeInteger(row.revision_no)||Number(row.revision_no)<1
+   ||!(row.predecessor_id===null||uuid(row.predecessor_id))||!uuid(row.actor_id)||!text(row.created_at)||!text(row.reason)||!row.reason.trim()
+   ||!record(row.input_bindings)||!Array.isArray(row.candidates)||!Array.isArray(row.sources))return false;
+  if(!row.sources.every(s=>record(s)&&['fmea','planning'].includes(String(s.module))&&uuid(s.object_id)&&uuid(s.factory_id)&&text(s.product_line_code)))return false;
+  if(row.sources.length===0&&(!uuid(row.root_snapshot_revision_id)||!Array.isArray(row.report_snapshot_sources)||row.report_snapshot_sources.length===0))return false;
+  if(row.root_snapshot_revision_id!==undefined&&!uuid(row.root_snapshot_revision_id))return false;
+  if(row.report_snapshot_sources!==undefined&&(!Array.isArray(row.report_snapshot_sources)||!row.report_snapshot_sources.every(s=>record(s)&&s.kind==='report_snapshot'&&s.module==='capa'&&s.object_id===reportId&&uuid(s.source_id)&&uuid(s.snapshot_id)&&uuid(s.factory_id)&&text(s.product_line_code)&&text(s.version)&&['capa.d2.snapshot.v1','capa.d3.snapshot.v1'].includes(String(s.projection_id)))))return false;
+  if(kind==='prevention'&&(!text(row.text)||!row.text.trim()||!text(row.basis)||!row.basis.trim()||row.analysis_id!==null||row.analysis_method!==null||row.channels!==null))return false;
+  if(kind==='manual_analysis'&&(!uuid(row.analysis_id)||row.analysis_method!=='manual'||row.text!==null||row.basis!==null||!Array.isArray(row.input_bindings.affected_docs)||row.channels!==null))return false;
+  if(kind==='propagation'&&(!record(row.channels)||Object.keys(row.channels).length!==4||!['lessons','knowledge','lateral','supplier_risk'].every(channel=>(row.channels as Record<string,unknown>)[channel]==='NOT_EXECUTED')||row.analysis_id!==null||row.analysis_method!==null||row.text!==null||row.basis!==null))return false;
+ }
+ return true;
 }

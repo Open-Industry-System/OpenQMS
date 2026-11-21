@@ -96,6 +96,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                 if (!request.current()) return;
                 await adoptRecommendation(capaId, {
                   d_step: "d5",
+                  capture_id: item.capture_id,
                   adopted_text: item.control_name,
                   source: item.match_source || "rule",
                   stage_index: item.stage_index,
@@ -188,6 +189,7 @@ export default function D5RecPanel({ capaId, beforeAdopt, onAdopted, canAdopt = 
                 if (!request.current()) return;
                 await adoptRecommendation(capaId, {
                   d_step: "d5",
+                  capture_id: item.capture_id,
                   adopted_text: item.content,
                   source: item.match_source || "rule",
                   stage_index: item.stage_index,

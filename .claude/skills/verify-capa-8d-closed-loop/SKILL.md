@@ -4,15 +4,19 @@ description: Use when asked to verify / walk through / 验收 / 走查 the OpenQ
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/README.md
-> Epic 版本：v8.1（2026-07-08）
+> Epic 版本：v8.2（2026-11-17）
 > 子故事版本表：见下表
 > 同步规则：当 README 版本号变更，本编排器必须重新核对并同步（见「维护」）。
 
 # verify-capa-8d-closed-loop（编排器）
 
+## R6 入口分支（优先于历史整套 reseed 剧本）
+
+同步 README v8.2。先识别报告 entry phase：legacy 用下文原 epic；draining 只验证旧写受理关闭；switched 按 `docs/user-stories/US-E2E-01-capa-8d-closed-loop/R6-verify.md`。只在新建、登记且核验所有权的合成测试库初始化身份/空报告，禁止对保留 C9/C10 资源 reseed、改写或重新导出。R6 真实模型、受控本地模型与兼容材料按来源分别登记；未实际走过的 UI 不标 PASS。四通道 NOT_EXECUTED 不能折算原知识/传播子故事成功。
+
 ## Overview
 
-US-E2E-01 已升级为 epic 合集 v8.1（10 个子故事）。本 skill 是**编排器**，不直接执行走查步骤，而是按顺序调用 10 个子 skill，汇总各子 skill 的验收报告，输出 epic 级总览。
+US-E2E-01 已升级为 epic 合集 v8.2（10 个子故事）。本 skill 是**编排器**，不直接执行走查步骤，而是按顺序调用 10 个子 skill，汇总各子 skill 的验收报告，输出 epic 级总览。
 
 这是 acceptance walk（人可读验收报告），不是 Playwright spec——spec 写在 `frontend/e2e/specs/`。走查时**必须**用 Playwright MCP 对每个关键前端界面截图并做视觉检查（见「UI 截图验证契约」）；纯 API 冒烟不得把 UI 标 PASS。
 
@@ -26,15 +30,15 @@ US-E2E-01 已升级为 epic 合集 v8.1（10 个子故事）。本 skill 是**�
 | 子故事 | 状态 | 子 skill | AI_REQUIRED |
 |---|---|---|---|
 | 01.1 D3 遏制 | 实现态 v4（2026-07-12） | `verify-capa-8d-d3-containment` | true |
-| 01.2 推荐 12 源 | 定稿 v1（2026-07-08） | `verify-capa-8d-recommendation-sources` | true |
-| 01.3 D4 验证 + D7 node-action + 审批壳 | 定稿 v1（2026-07-08） | `verify-capa-8d-d4-d7-audit` | true |
+| 01.2 推荐 12 源 | R6 v2（2026-11-17） | `verify-capa-8d-recommendation-sources` | true |
+| 01.3 D4 验证 + D7 node-action + 审批壳 | R6 v3（2026-11-17） | `verify-capa-8d-d4-d7-audit` | true |
 | 01.4 8D↔FMEA 双向 | 定稿 v1（2026-07-08） | `verify-capa-8d-fmea-linkage` | false |
 | 01.5 8D→SCAR 触发 | 定稿 v1（2026-07-08） | `verify-capa-8d-scar-trigger` | false |
-| 01.6 供应商风险输入 | 定稿 v1（2026-07-08） | `verify-capa-8d-supplier-risk-input` | false |
-| 01.7 D8 文档门禁 | 定稿 v2（2026-07-23） | `verify-capa-8d-doc-update-gate` | true |
-| 01.8 知识库沉淀 | 定稿 v1（2026-07-08） | `verify-capa-8d-knowledge-sink` | true |
-| 01.9 横向扩散 | 定稿 v2（2026-07-21） | `verify-capa-8d-lateral-diffusion` | true |
-| 01.10 PPT 输出 | 定稿 v4（2026-07-09） | `verify-capa-8d-ppt-output` | false（审查需 LLM） |
+| 01.6 供应商风险输入 | R6 v2（2026-11-17） | `verify-capa-8d-supplier-risk-input` | false |
+| 01.7 D8 文档门禁 | R6 v4（2026-11-17） | `verify-capa-8d-doc-update-gate` | true |
+| 01.8 知识库沉淀 | R6 v3（2026-11-17） | `verify-capa-8d-knowledge-sink` | true |
+| 01.9 横向扩散 | R6 v3（2026-11-17） | `verify-capa-8d-lateral-diffusion` | true |
+| 01.10 PPT 输出 | R6 v5（2026-11-17） | `verify-capa-8d-ppt-output` | false（审查需 LLM） |
 
 ## 前置（编排器级）
 
@@ -109,7 +113,7 @@ docs/e2e/reports/US-E2E-01-<YYYY-MM-DD>/
 ```markdown
 # US-E2E-01 Epic 验收总览 — <date>
 
-- Epic 版本：v8.1（2026-07-08）
+- Epic 版本：v8.2（2026-11-17）
 - 走查时间：<开始> ~ <结束>
 - LLM 凭证：齐全 / 缺
 

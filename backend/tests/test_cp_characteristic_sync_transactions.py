@@ -28,86 +28,73 @@ from app.services import control_plan_service as imports, version_service as syn
 from app.services.agent import provider_adapter
 
 pytestmark = pytest.mark.asyncio
-EXTRAS = ('capa_eightd', 'capa_docg_analysis', 'capa_docg_audit', 'capa_docg_decision',
-          'special_characteristics', 'capa_d5_proposals', 'capa_d5_measures')
-BASE = ('factories', 'product_lines', 'role_definitions', 'users', 'role_permissions',
-        'user_factories', 'user_product_lines', 'fmea_documents', 'fmea_versions',
-        'control_plans', 'control_plan_items', 'control_plan_versions', 'audit_logs')
 
 @pytest_asyncio.fixture
-async def sync_tenants(isolated_tenants, monkeypatch):
-    sessions, schemas = isolated_tenants
-    async with sessions() as db:
-        for schema in schemas:
-            for table in EXTRAS:
-                await db.execute(text(f'CREATE TABLE "{schema}"."{table}" (LIKE public."{table}" INCLUDING ALL)'))
-            for table in EXTRAS:
-                definitions = (await db.execute(text(
-                    "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
-                    "WHERE conrelid=to_regclass(:table) AND contype='f'"), {'table': 'public.'+table})).all()
-                for name, definition in definitions:
-                    definition = re.sub(r'REFERENCES (?:public\.)?([a-z_][a-z0-9_]*)',
-                        lambda m: f'REFERENCES "{schema if m[1] in BASE+EXTRAS else "public"}"."{m[1]}"', definition)
-                    await db.execute(text(f'ALTER TABLE "{schema}"."{table}" ADD CONSTRAINT "{name}" {definition}'))
-        # Install the reviewed tenant-local guards (strict paths exclude public).
-        from alembic_tenant.snapshot.business_20260927 import DDL
-        for schema in schemas:
-            await db.execute(text(f'SET LOCAL search_path TO "{schema}", pg_catalog'))
-            for statement in DDL:
-                if statement.startswith(('CREATE FUNCTION verify_version_hash(', 'CREATE FUNCTION prevent_version_tampering(')):
-                    await db.execute(text(statement))
-            for statement in DDL:
-                if statement.startswith('CREATE TRIGGER trg_') and '_version_' in statement:
-                    name = statement.split()[2]
-                    table = statement.split(' ON ')[1].split()[0]
-                    await db.execute(text(f'DROP TRIGGER {name} ON {table}'))
-                    await db.execute(text(statement))
-        await db.commit()
-    # Exercise main's real tenant-session admission, not search_path-only authority.
+async def sync_tenants(monkeypatch):
+    """Real current tenant schemas, including local R6 FKs and guards.
+
+    Partial LIKE clones could resolve a new R6 relation through public and
+    point its report FK at a different namespace. Provision the actual paired
+    schema instead; retain real commits, expired ORM inputs and all races.
+    """
+    import os
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+    from tests.embedding_isolation import require_isolated_test_database
+    from app import database
     from app.config import settings
+    from app.core import tenant_context
     from app.core.tenant_transaction import TenantBinding
     from app.database import TenantSession
-    from sqlalchemy.ext.asyncio import AsyncSession
-    bindings = {schema: TenantBinding(uuid.uuid4(), schema, 1, 'business') for schema in schemas}
-    async with sessions() as db:
-        for binding in bindings.values():
-            await db.execute(text("INSERT INTO public.tenants (id,name,slug,subdomain,schema_name,status,generation) "
-                                  "VALUES (:id,:schema,:slug,:slug,:schema,'active',1)"),
-                             {'id': binding.tenant_id, 'schema': binding.schema_name, 'slug': binding.schema_name.replace('_', '-')})
-        await db.commit()
+    from app.schemas.platform import TenantCreateRequest
+    from app.services import tenant_migrator
+
+    engine = create_async_engine(require_isolated_test_database(os.environ), poolclass=NullPool)
+    sessions = async_sessionmaker(engine, expire_on_commit=True)
     monkeypatch.setattr(settings, 'TENANT_MODE', 'dev')
-    # Normal request/background entry points use the same real NullPool test
-    # engine; pooled connections cannot survive pytest's per-test event loops.
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-    from app import database
-    from app.core import tenant_context
+    monkeypatch.setattr(tenant_migrator, 'engine', engine)
     monkeypatch.setattr(database, 'tenant_async_session', async_sessionmaker(
-        sessions.kw['bind'], class_=AsyncSession, sync_session_class=TenantSession,
-        expire_on_commit=False))
+        engine, class_=AsyncSession, sync_session_class=TenantSession, expire_on_commit=False))
     monkeypatch.setattr(tenant_context, 'async_session', async_sessionmaker(
-        sessions.kw['bind'], class_=AsyncSession, expire_on_commit=False))
-
-    @asynccontextmanager
-    async def bound_sessions(*, expire_on_commit=True):
-        binding = bindings[current_tenant_schema.get()]
-        token = current_tenant_binding.set(binding)
-        try:
-            async with AsyncSession(bind=sessions.kw['bind'], sync_session_class=TenantSession,
-                                    binding=binding, expire_on_commit=expire_on_commit) as db:
-                yield db
-        finally:
-            current_tenant_binding.reset(token)
-
-    # DDL setup is owner maintenance, not an unbound business session.
-    bound_sessions.admin_sessions = sessions
-
+        engine, class_=AsyncSession, expire_on_commit=False))
+    slugs = ['cp-sync-' + uuid.uuid4().hex[:12] for _ in range(2)]
+    bindings, schemas = {}, []
     try:
+        for slug in slugs:
+            tenant = await tenant_migrator.provision_new(TenantCreateRequest(
+                name='CP sync fixture', slug=slug, admin_email='cp-sync@example.test',
+                admin_password='fixture-bootstrap-password'))
+            schemas.append(tenant.schema_name)
+            bindings[tenant.schema_name] = TenantBinding(
+                tenant.id, tenant.schema_name, tenant.generation, 'business')
+
+        @asynccontextmanager
+        async def bound_sessions(*, expire_on_commit=True):
+            binding = bindings[current_tenant_schema.get()]
+            token = current_tenant_binding.set(binding)
+            try:
+                async with AsyncSession(bind=engine, sync_session_class=TenantSession,
+                                        binding=binding, expire_on_commit=expire_on_commit) as db:
+                    yield db
+            finally:
+                current_tenant_binding.reset(token)
+
+        bound_sessions.admin_sessions = sessions
         yield bound_sessions, schemas
     finally:
-        async with sessions() as db:
-            for binding in bindings.values():
-                await db.execute(text('DELETE FROM public.tenants WHERE id=:id'), {'id': binding.tenant_id})
-            await db.commit()
+        # Exact fixture-owned schemas only, including a partially provisioned
+        # own slug. Public business tables and immutable rows are never altered.
+        async with engine.begin() as conn:
+            for slug in slugs:
+                row = (await conn.execute(text(
+                    'SELECT id,schema_name FROM public.tenants WHERE slug=:slug'),
+                    {'slug': slug})).one_or_none()
+                if row is not None:
+                    assert re.fullmatch(r'tenant_[a-z0-9_]+', row.schema_name)
+                    await conn.execute(text(f'DROP SCHEMA IF EXISTS "{row.schema_name}" CASCADE'))
+                    await conn.execute(text('DELETE FROM public.tenant_migrations WHERE tenant_id=:id'), {'id': row.id})
+                    await conn.execute(text('DELETE FROM public.tenants WHERE id=:id'), {'id': row.id})
+        await engine.dispose()
 
 async def prepared(sessions, schema, *, ids=None, deletion=False):
     token = current_tenant_schema.set(schema)
@@ -352,6 +339,8 @@ async def test_actual_multiphase_orchestration_refreshes_tenant_inputs_and_order
                 assert 'public' not in path, 'phase handoff must retain strict tenant namespace'
                 return await input_state(session, *args, **kwargs)
             monkeypatch.setattr(gate, 'cp_input_state', strict_input_state)
+            from sqlalchemy import inspect
+            assert 'report_id' in inspect(capa).expired_attributes
             result = await gate.generate_impact_analysis(db, capa, ids[3])
             assert result['status'] == 'done'
             assert not db.in_transaction()

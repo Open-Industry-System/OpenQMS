@@ -143,3 +143,22 @@ def request_source_fingerprint(key, tenant_id, initiator_id, request):
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False,
                      separators=(',', ':'), allow_nan=False).encode('utf-8')
     return hmac.new(key, b'openqms.d4.task-request.v1\n' + raw, hashlib.sha256).hexdigest()
+
+
+async def validate_d4_input_source(db, scope, target, source):
+    """An explicitly approved FMEA input need not be the formal proof's link."""
+    from app.services.capa_agent_capabilities import D4_FMEA_INPUT_CONTRACT
+    from app.services.fmea_agent_sources import visible_fmea_source, failure_cause_version
+    from app.services.agent.permissions.derived_sources import SourceUnavailable
+    contract = D4_FMEA_INPUT_CONTRACT
+    if source is None or source.target_report_id != target.report_id:
+        raise SourceUnavailable()
+    declared = DerivedSourceScope(target.report_id, contract.capability_id, Module.FMEA,
+        contract.source_projection_id, source.fmea_id, source.cause_node_id)
+    visible = await visible_fmea_source(db, scope, declared.fmea_id)
+    if (visible.factory_id, visible.product_line_code) != (target.factory_id, target.product_line_code):
+        raise SourceUnavailable()
+    await failure_cause_version(db, visible, declared.cause_node_id, diagnose_invalid_node=True)
+    if await visible_fmea_source(db, scope, declared.fmea_id) != visible:
+        raise SourceUnavailable()
+    return declared

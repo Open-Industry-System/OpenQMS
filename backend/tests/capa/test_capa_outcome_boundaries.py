@@ -33,8 +33,15 @@ async def test_real_8mib_preflight_does_not_load_oversized_body(review_case, loc
         else:
             value = oversized if location == 'result' else [{'name': oversized}] if location == 'evidence' else {'bad': oversized}
             field = 'evidence_attachments' if location == 'evidence' else location
+            if location == 'source_ref':
+                # Explicit legacy malformed data: normal R6 writes correctly
+                # reject this shape. Restore the one guard before commit;
+                # transactional DDL rolls back too if fixture setup fails.
+                await db.execute(text('ALTER TABLE capa_root_cause_verification DISABLE TRIGGER r6_retain_verification_origins'))
             await db.execute(update(CapaRootCauseVerification).where(CapaRootCauseVerification.verification_id ==
                 review_case.verification_id).values(**{field: value}))
+            if location == 'source_ref':
+                await db.execute(text('ALTER TABLE capa_root_cause_verification ENABLE TRIGGER r6_retain_verification_origins'))
         await db.commit()
     statements = []
     def record(conn, cursor, statement, parameters, context, executemany):

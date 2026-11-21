@@ -1,7 +1,7 @@
 # 子故事 US-E2E-01.9：横向扩散预警与通知
 
-**状态**: 定稿 v2（2026-07-21）  
-**所属 epic**: US-E2E-01（README.md v8.1）  
+**状态**: R6 契约同步 v3（2026-11-17）；历史验收不转签
+**所属 epic**: US-E2E-01（README.md v8.2）
 **关联 skill**: `verify-capa-8d-lateral-diffusion`  
 **前置**: 01.3、01.4、01.8（8D 根因/预防 + FMEA 关联 + 知识沉淀就绪，方有扩散判定依据）  
 **AI_REQUIRED**: true（有类似产品命中时：无 LLM 凭证 → `BLOCKED`；LLM 阶段失败 → `FAILED`。无类似产品命中时不调 LLM，关闭可成功）  
@@ -12,6 +12,12 @@
 > - 产品粒度说明：系统以 `product_type` 聚合（故事原 `product_id` 映射为 `product_type_code`）。  
 > - 审计 `LATERAL_NOTIFICATION_SKIPPED` 明确含 `skip_reason`。  
 > - E2E 要求一次关闭路径可见四依据并集。
+
+## R6 当前范围（优先于下文历史全链场景）
+
+R6 受限材料的横向传播在审批前明确 NOT_EXECUTED；不创建携带正文的传播记录、通知或待执行任务。不得把未执行写成已传播。原跨产品线横向能力需独立来源及出口准入，不因 CAPA 本地结案开放。
+
+本版本走查入口为 [R6 验证剧本](R6-verify.md)。旧剧本和旧结果保留，不能充当本版签收。真实模型 C9、同数据兼容 C10、全量 C11 分别记账；不宣称全部 epic 或生产启用。
 
 ## 故事
 

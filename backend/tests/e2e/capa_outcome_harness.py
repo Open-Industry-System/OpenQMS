@@ -86,8 +86,11 @@ class OwnedOutcome:
         async with self.session_factory() as db:
             result = {}
             for name in SNAPSHOT_TABLES:
+                # Only durable admission starts are outside the business txn;
+                # preserve completion witnesses and all material/audit writes.
+                where = " WHERE NOT (t.table_name='capa_r6_entry_switches' AND t.action='R6_ENTRY_ADMITTED')" if name == 'audit_logs' else ''
                 result[name] = await db.scalar(text(
-                    f"SELECT coalesce(jsonb_agg(r ORDER BY r::text), '[]'::jsonb) FROM (SELECT to_jsonb(t) r FROM {name} t) q"))
+                    f"SELECT coalesce(jsonb_agg(r ORDER BY r::text), '[]'::jsonb) FROM (SELECT to_jsonb(t) r FROM {name} t{where}) q"))
             return result
 
     async def permission(self, module, level):

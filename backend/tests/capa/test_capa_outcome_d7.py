@@ -88,8 +88,12 @@ async def test_d7_secondary_document_is_not_rebound_to_primary_fmea(review_case,
     {'fmea_id': 'bad', 'cause_node_id': 'cause', 'extra': 1}])
 async def test_unknown_verification_source_shape_fails_whole_read(review_case, bad):
     async with review_case.session_factory() as db:
+        # Historical malformed input only; normal R6 writes reject it. The
+        # exact guard is restored before commit (or by transaction rollback).
+        await db.execute(text('ALTER TABLE capa_root_cause_verification DISABLE TRIGGER r6_retain_verification_origins'))
         await db.execute(update(CapaRootCauseVerification).where(CapaRootCauseVerification.verification_id ==
             review_case.verification_id).values(source_ref=bad))
+        await db.execute(text('ALTER TABLE capa_root_cause_verification ENABLE TRIGGER r6_retain_verification_origins'))
         await db.commit()
     with pytest.raises(PermissionError):
         await read(review_case)

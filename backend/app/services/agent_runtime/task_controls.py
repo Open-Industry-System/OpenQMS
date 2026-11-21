@@ -32,7 +32,7 @@ def _run_binding(run: AgentRun | None) -> tuple | None:
 
 async def _user_authority(db, scope, task_id, task_binding, run_binding):
     run = await _current_run(db, task_id)
-    task = await task_service.get_task_for_view(db, scope, task_id)
+    task = await task_service.get_task_for_control(db, scope, task_id)
     if _task_binding(task) != task_binding or _run_binding(run) != run_binding:
         # Never acquire another INSTALL or TASK after waiting on this Task/Run.
         raise ValueError("Task association changed")
@@ -75,7 +75,22 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
     request = TaskControl.model_validate(body)
     # Namespace and user business access precede any business lock. Identity and
     # relationship snapshots come from fresh rows, never caller-owned ORM facts.
-    task = await task_service.get_task_for_view(db, scope, task_id)
+    task = await task_service.get_task_for_control(db, scope, task_id)
+    if request.action in {"resume", "restart"}:
+        from app.services.agent_runtime.model_egress import is_r5_task
+        from app.services.capa_agent_capabilities import D5_SAVE_CAPABILITY, D5_REPLACE_CAPABILITY
+        from app.models.agent_task import AgentTaskGrant
+        # Server-persisted model identity (including a corrupt dedicated R5
+        # installation) or granted writer capability determines admission.
+        # Read-only/older text task controls never grant a recommendation write.
+        with db.no_autoflush:
+            writer_grant = await db.scalar(select(AgentTaskGrant.grant_id).where(
+                AgentTaskGrant.task_id == task_id,
+                AgentTaskGrant.capability_id.in_([
+                    'capa.d4.candidate.propose.v1', D5_SAVE_CAPABILITY, D5_REPLACE_CAPABILITY])).limit(1))
+        if writer_grant is not None or await is_r5_task(db, task):
+            from app.services.capa_entry_switch import admit
+            await admit(db, "current")
     run = await _current_run(db, task_id)
     task_binding, run_binding = _task_binding(task), _run_binding(run)
     installation_id = task.preferred_installation_id
@@ -92,7 +107,7 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
     # An exact already-committed operation can legitimately have replaced the
     # initial current Run while we waited. Re-admit the current user first, then
     # use the durable original request as retry proof before rebasing that Run.
-    task = await task_service.get_task_for_view(db, scope, task_id)
+    task = await task_service.get_task_for_control(db, scope, task_id)
     if _task_binding(task) != task_binding:
         raise ValueError("Task association changed")
     with db.no_autoflush:
@@ -248,6 +263,9 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             if text_restart:
                 from app.models.agent_d4_recovery import D4RecoveryRestart
                 from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
+                from app.services.capa_d4_candidates import is_d4_task
+                if await is_d4_task(db,task):
+                    from app.services.capa_d4_candidates import START_MESSAGE
                 if await d4_recovery.validate_message_position(db, task_id, restart_message_watermark) != position:
                     raise ValueError('Recovery position unavailable')
                 if position:
@@ -285,7 +303,7 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             # Flush all side effects before the last fresh authorization. The
             # caller owns installation/task/run locks; failure rolls all back.
             await db.flush()
-            task = await task_service.get_task_for_view(db, scope, task_id)
+            task = await task_service.get_task_for_control(db, scope, task_id)
             if _task_binding(task) != task_binding:
                 raise PermissionError('Recovery unavailable')
             installation = await db.scalar(select(AgentPluginInstallation).where(
@@ -301,7 +319,7 @@ async def control_task(db: AsyncSession, scope: RequestScope, task_id: UUID,
             if position_now is None or position_now[0] != message_id:
                 raise PermissionError('Recovery unavailable')
             # Re-admit both the user and runtime after the final message read.
-            task = await task_service.get_task_for_view(db, scope, task_id)
+            task = await task_service.get_task_for_control(db, scope, task_id)
             if _task_binding(task) != task_binding:
                 raise PermissionError('Recovery unavailable')
             final = await runtime_access.authorize_task(db, task, installation)

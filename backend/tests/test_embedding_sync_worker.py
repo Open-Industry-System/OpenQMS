@@ -364,7 +364,7 @@ async def test_worker_mark_failed_on_embed_error(sessionmaker, vector_db):
 
             class _FailingProvider(_FakeProvider):
                 async def embed(self, texts: list[str]) -> list[list[float]]:
-                    raise RuntimeError("embed failed")
+                    raise RuntimeError("PRIVATE_EMBED_ERROR_CANARY")
 
             provider = _FailingProvider(dimensions=dim)
             await process_batch_once(db, provider)
@@ -378,10 +378,11 @@ async def test_worker_mark_failed_on_embed_error(sessionmaker, vector_db):
             )
             event = row.fetchone()
             assert event is not None
-            assert event[0] != "processing"
+            assert event[0] == "pending"
             assert event[1] == 1
             assert event[2] is not None
-            assert "embed failed" in event[2]
+            assert event[2] == "Provider request failed: RuntimeError"
+            assert "PRIVATE_EMBED_ERROR_CANARY" not in event[2]
     finally:
         await _teardown_worker_fixtures(sessionmaker, fx)
 
@@ -597,7 +598,7 @@ async def test_worker_dead_letter_marks_failed(sessionmaker, vector_db, default_
 
         class _FailingProvider(_FakeProvider):
             async def embed(self, texts: list[str]) -> list[list[float]]:
-                raise RuntimeError("embed failed")
+                raise RuntimeError("PRIVATE_EMBED_ERROR_CANARY")
 
         provider = _FailingProvider(dimensions=dim)
         await process_batch_once(db, provider)
@@ -620,7 +621,8 @@ async def test_worker_dead_letter_marks_failed(sessionmaker, vector_db, default_
         assert event is not None
         assert event[0] == "dead_letter"
         assert event[1] == 5
-        assert "embed failed" in (event[2] or "")
+        assert event[2] == "Provider request failed: RuntimeError"
+        assert "PRIVATE_EMBED_ERROR_CANARY" not in event[2]
 
         await db.execute(
             text("DELETE FROM embedding_sync_outbox WHERE entity_id = :eid"),

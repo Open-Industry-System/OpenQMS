@@ -28,8 +28,24 @@ async def get_runtime_identity(request: Request, db: AsyncSession = Depends(get_
     if not header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid run credential")
     try:
-        return await runtime_access.verify_runtime_identity(db, header[7:],
-            getattr(request.state, "tenant_binding", None))
+        names=('X-OpenQMS-Task','X-OpenQMS-Run','X-OpenQMS-Lease','X-OpenQMS-Deployment')
+        pins=tuple(request.headers.get(name) for name in names)
+        namespace=getattr(request.state,'tenant_binding',None)
+        if any(value is not None for value in pins):
+            from app.models.agent_task import AgentTask
+            from app.models.agent_model_deployment import AgentTaskModelBinding,AgentModelDeployment
+            from app.services.agent_runtime import model_egress,run_auth
+            # Signature/namespace/lease and actual bound receiver are verified
+            # before metadata expectations; source projections are not read yet.
+            run=await run_auth.verify_run_token(db,header[7:],namespace)
+            task=await db.get(AgentTask,run.task_id,populate_existing=True)
+            binding=None if task is None else await db.get(AgentTaskModelBinding,task.task_id,populate_existing=True)
+            recipient=None if binding is None else await db.get(AgentModelDeployment,binding.deployment_id,populate_existing=True)
+            if (task is None or recipient is None or model_egress.deployment_profile(recipient)!=model_egress.D4_PROFILE
+                    or binding.config_hmac!=recipient.config_hmac
+                    or pins!=(str(task.task_id),str(run.run_id),str(run.lease_epoch),str(binding.deployment_id))):
+                raise PermissionError('Invalid managed binding')
+        return await runtime_access.verify_runtime_identity(db,header[7:],namespace)
     except PermissionError:
         raise HTTPException(status_code=401, detail="Invalid run credential") from None
 
@@ -192,3 +208,33 @@ async def model_tool(body: model_workflow.ToolRequest, identity=Depends(get_runt
     except (DBAPIError, OSError):
         await db.rollback()
         raise HTTPException(status_code=409, detail='Retry original issued tool ID', headers={'Cache-Control':'no-store'}) from None
+
+
+from app.schemas.agent_d4_candidate import D4CandidateCommand
+
+@router.post('/capa/d4/candidates')
+async def d4_candidate_command(body: D4CandidateCommand, identity=Depends(get_runtime_identity), db: AsyncSession=Depends(get_db)):
+    from app.services.capa_d4_candidates import save_candidate
+    try:
+        result = await save_candidate(db, identity, body)
+        return JSONResponse(jsonable_encoder(result), headers={'Cache-Control':'no-store'})
+    except PermissionError:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='D4 candidate unavailable', headers={'Cache-Control':'no-store'}) from None
+    except (ValueError, ReviewedContentLocked, DBAPIError):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail='D4 candidate conflict', headers={'Cache-Control':'no-store'}) from None
+
+
+@router.post('/capa/d4/checkpoints')
+async def d4_candidate_checkpoint(body: D5CheckpointCreate, identity=Depends(get_runtime_identity), db: AsyncSession=Depends(get_db)):
+    from app.services.agent_runtime.d4_candidate_checkpoints import save_checkpoint
+    try:
+        result=await save_checkpoint(db,identity)
+        return JSONResponse(jsonable_encoder(result),headers={'Cache-Control':'no-store'})
+    except PermissionError:
+        await db.rollback()
+        raise HTTPException(status_code=403,detail='D4 checkpoint unavailable',headers={'Cache-Control':'no-store'}) from None
+    except (ValueError,ReviewedContentLocked,DBAPIError):
+        await db.rollback()
+        raise HTTPException(status_code=409,detail='D4 checkpoint conflict',headers={'Cache-Control':'no-store'}) from None
