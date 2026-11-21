@@ -37,7 +37,7 @@ def summarize(payload: dict | list, run: dict | None = None) -> dict:
     workers = [job for job in jobs if job['name'] == 'backend-full'
                or job['name'].startswith('backend-full (')]
     if {job['name'] for job in workers} not in (
-        {'backend-full'}, {'backend-full (runtime)', 'backend-full (remainder)'},
+        {'backend-full'}, {'backend-full (selected)'}, {'backend-full (runtime)', 'backend-full (remainder)'},
     ):
         raise ValueError('missing or unexpected backend workers')
     backend = [route, *workers, gate]

@@ -17,6 +17,7 @@ from xml.etree import ElementTree
 
 from tests.ci.acceptance_config import validate_live_configuration
 from tests.ci.gate_results import (
+    API_EXCLUDED_MARKS,
     COUNTS,
     merge_summaries,
     read_hook_summary,
@@ -44,7 +45,7 @@ SCANNER_RUNTIME_KEYS = frozenset({
     'AGENT_ATTACHMENT_BROWSER_NONCE',
 })
 MARKS = {
-    'api': 'not ci_browser and not ci_r5_native and not live_provider and not real_scanner',
+    'api': ' and '.join(f'not {mark}' for mark in API_EXCLUDED_MARKS),
     'browser': 'ci_browser and not ci_r5_native and not live_provider and not real_scanner',
     'r5-api': 'ci_r5_native and not ci_browser and not live_provider and not real_scanner',
     'r5-browser': 'ci_r5_native and ci_browser and not live_provider and not real_scanner',
@@ -362,8 +363,11 @@ def run_pytest_layer(
     live_configuration: Mapping[str, str] | None = None, python: str | None = None,
     pytest_args: Sequence[str] = (), pytest_entrypoint: Sequence[str] = ('-m', 'tests.ci.pytest_bootstrap'),
     backend_shard: int | None = None,
+    backend_groups: dict[str, tuple[str, ...]] | None = None,
 ) -> dict:
     """Run one isolated pytest child and publish only its filtered log and receipt."""
+    if backend_groups is not None and (layer != 'api' or backend_shard is not None):
+        raise ValueError('backend groups require ordinary API acceptance without sharding')
     if backend_shard is not None and (layer != 'api' or type(backend_shard) is not int or backend_shard not in (0, 1)):
         raise ValueError('backend shards apply only to ordinary API acceptance')
     environment = build_layer_environment(source, database_url, layer, live_configuration)
@@ -372,6 +376,8 @@ def run_pytest_layer(
     private_junit = Path(private.name) / f'{stem}.xml'
     private_hooks = Path(private.name) / f'{stem}.hooks.json'
     environment['OPENQMS_GATE_HOOKS'] = str(private_hooks)
+    if backend_groups is not None:
+        environment['OPENQMS_ROUTED_BACKEND'] = '1'
     command = build_pytest_command(
         layer, targets, private_junit, private_hooks, python=python, pytest_args=pytest_args,
         pytest_entrypoint=pytest_entrypoint,
@@ -444,6 +450,13 @@ def run_pytest_layer(
                         _require_sdk_process_success(private_junit, summary)
                     if _includes_d4_text_process(mandatory_targets):
                         _require_d4_text_process_success(private_junit, summary)
+                    if backend_groups is not None:
+                        from tests.ci.backend_groups import require_group_execution
+
+                        if summary['xpassed']:
+                            raise ValueError('routed backend run has XPASS')
+                        groups, selection_sha = require_group_execution(backend_groups, private_hooks, summary)
+                        receipt.update(backend_groups=groups, backend_selection_sha256=selection_sha)
             except ValueError:
                 pass
             else:
@@ -496,6 +509,7 @@ def _live_configuration(source: Mapping[str, str], profile: Path | None) -> dict
 def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=('api', 'browser', 'r5-api', 'r5-browser', 'live', 'acceptance'))
+    parser.add_argument('--backend-groups', help='comma-separated routed API groups')
     parser.add_argument('--backend-shard', type=int, choices=(0, 1), help='whole-module partition of the full ordinary backend suite')
     parser.add_argument('--test-profile', type=Path, help='explicit non-interpolated live provider profile')
     parser.add_argument('--pytest-target', action='append', dest='targets', help='override default target; repeatable')
@@ -505,6 +519,14 @@ def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _arguments(argv)
+    backend_groups = None
+    if args.backend_groups is not None:
+        from tests.ci.backend_groups import group_names, pytest_targets, resolve_targets
+
+        if args.mode != 'api' or args.targets or args.backend_shard is not None:
+            raise ValueError('backend groups require API mode and own its target selection')
+        backend_groups = resolve_targets(BACKEND_DIR, group_names(args.backend_groups))
+        args.targets = pytest_targets(backend_groups)
     if args.backend_shard is not None and (args.mode != 'api' or args.targets != ['tests']):
         raise ValueError('backend shard requires api --pytest-target tests')
     from tests.ci.browser_runtime import resolve_browser
@@ -535,6 +557,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             live_configuration=live if layer == 'live' else None,
             python=source.get('OPENQMS_OUTCOME_PYTHON'), pytest_args=tuple(args.pytest_args or ()),
             backend_shard=args.backend_shard,
+            **({'backend_groups': backend_groups} if backend_groups is not None else {}),
         ))
     status = 0 if all(receipt['status'] == 'PASSED' for receipt in receipts) else 1
     print('TASK7_EXIT: mode=' + args.mode + '; code=' + str(status))

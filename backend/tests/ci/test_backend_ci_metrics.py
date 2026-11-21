@@ -60,3 +60,11 @@ def test_incomplete_or_mixed_attempts_have_no_publishable_metric(mutation):
         jobs[1]['run_id'] = 999
     with pytest.raises(ValueError):
         metrics.summarize({'jobs': jobs})
+
+
+def test_selected_job_reports_actual_wait_and_runner_cost():
+    jobs = [job('backend-route', '00', '01', 1), job('backend-full (selected)', '01', '03', 2),
+            job('backend-tests', '04', '05', 3)]
+    result = metrics.summarize({'jobs': jobs})
+    assert result['backend_wait_seconds'] == 5 * 60
+    assert result['backend_runner_minutes'] == 4

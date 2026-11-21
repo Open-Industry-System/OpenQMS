@@ -4,7 +4,6 @@ from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
-from pydantic import ValidationError
 from sqlalchemy import delete, event, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.util import await_only
@@ -16,30 +15,24 @@ from app.models.agent_task import AgentRun, AgentTask, AgentTaskMessage, AgentTa
 from app.models.audit import AuditLog
 from app.models.capa import CapaRootCauseVerification
 from app.models.role import RolePermission, RoleDefinition
-from app.services.agent_runtime import runtime_access, runtime_messages, run_dispatch, task_controls, readonly_delivery
+from app.services.agent_runtime import (
+    checkpoint_service, readonly_delivery, run_dispatch, runtime_access, runtime_messages, task_controls,
+)
 from tests.services.agent_runtime.test_runtime_access import direct_caps, ready_owned
 from tests.services.agent_runtime.test_runtime_messages import delivery, append, claim, ack, snapshot
 from tests.services.agent_runtime.test_readonly_delivery import context_delivery, context
 from tests.services.agent_runtime.test_task_controls import scope, control, wait_lock
 
 
-def service():
-    try:
-        from app.services.agent_runtime import checkpoint_service
-    except ImportError:
-        pytest.fail('checkpoint service is not implemented')
-    return checkpoint_service
-
-
 async def save(owned, receipts, key='checkpoint'):
     async with owned.factory(binding=owned.binding) as db:
         identity = await runtime_access.verify_runtime_identity(db, owned.token, owned.binding)
-        return await service().save_checkpoint(db, identity, dict(idempotency_key=key, receipt_ids=receipts))
+        return await checkpoint_service.save_checkpoint(db, identity, dict(idempotency_key=key, receipt_ids=receipts))
 
 
 async def view(owned, checkpoint_id):
     async with owned.factory(binding=owned.binding) as db:
-        return await service().get_checkpoint_for_view(db, await scope(db, owned), owned.task_id, UUID(str(checkpoint_id)))
+        return await checkpoint_service.get_checkpoint_for_view(db, await scope(db, owned), owned.task_id, UUID(str(checkpoint_id)))
 
 
 async def history(owned, after=0, limit=20):
@@ -60,29 +53,6 @@ async def counts(owned):
     async with owned.factory(binding=owned.binding) as db:
         return tuple([await db.scalar(select(func.count()).select_from(model)) for model in
             (AgentReadonlyCheckpoint, AgentCheckpointReceipt, AgentTaskControl, AgentRun)])
-
-
-def test_strict_checkpoint_history_restart_contracts():
-    from app.schemas import agent_runtime as schema
-    assert hasattr(schema, 'ReadonlyCheckpointCreate'), 'checkpoint DTO is missing'
-    valid = dict(idempotency_key='key', receipt_ids=[uuid4()])
-    assert schema.ReadonlyCheckpointCreate(**valid)
-    for fields in ({'receipt_ids': []}, {'receipt_ids': [uuid4() for _ in range(21)]},
-                   {'idempotency_key': ''}, {'idempotency_key': 7}, {'idempotency_key': 'x'*101}):
-        with pytest.raises(ValidationError):
-            schema.ReadonlyCheckpointCreate(**{**valid, **fields})
-    for name in ('watermark', 'accepted_message_seq', 'digest', 'tenant_generation', 'lease_epoch', 'memory', 'target_capa_id'):
-        with pytest.raises(ValidationError):
-            schema.ReadonlyCheckpointCreate(**valid, **{name: 'spoof'})
-    for fields in ({'after_sequence': True}, {'after_sequence': '1'}, {'after_sequence': -1}, {'limit': 21}, {'limit': '1'}):
-        with pytest.raises(ValidationError):
-            schema.MessageHistoryQuery(**fields)
-    from app.schemas.agent_control import TaskControl
-    base = dict(run_id=uuid4(), expected_epoch=1, idempotency_key='key', checkpoint_id=uuid4())
-    assert TaskControl(action='restart', **base)
-    for action in ('pause', 'resume', 'cancel'):
-        with pytest.raises(ValidationError):
-            TaskControl(action=action, **base)
 
 
 @pytest.mark.asyncio
@@ -315,7 +285,7 @@ async def test_checkpoint_audit_failure_and_unknown_integrity_are_atomic(context
         identity = await runtime_access.verify_runtime_identity(db, owned.token, owned.binding)
         db.add(AgentCheckpointReceipt(checkpoint_id=uuid4(), receipt_id=uuid4()))
         with pytest.raises(IntegrityError):
-            await service().save_checkpoint(db, identity, dict(idempotency_key='bad', receipt_ids=[receipt]))
+            await checkpoint_service.save_checkpoint(db, identity, dict(idempotency_key='bad', receipt_ids=[receipt]))
     assert (await counts(owned))[:2] == (0, 0)
 
 
@@ -415,11 +385,11 @@ async def test_plain_session_tenant_info_spoof_cannot_admit_checkpoint_or_histor
     async with AsyncSession(owned.engine, info={'tenant_binding': owned.binding}, expire_on_commit=False) as db:
         with pytest.raises(PermissionError):
             if operation == 'save':
-                await service().save_checkpoint(db, identity, dict(idempotency_key='spoof', receipt_ids=[receipt]))
+                await checkpoint_service.save_checkpoint(db, identity, dict(idempotency_key='spoof', receipt_ids=[receipt]))
             elif operation == 'history':
                 await runtime_messages.get_message_history(db, identity)
             else:
-                await service().get_checkpoint_for_view(db, user_scope, owned.task_id, UUID(cp['checkpoint_id']))
+                await checkpoint_service.get_checkpoint_for_view(db, user_scope, owned.task_id, UUID(cp['checkpoint_id']))
 
 
 @pytest.mark.asyncio

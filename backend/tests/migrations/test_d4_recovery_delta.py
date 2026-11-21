@@ -10,6 +10,7 @@ from sqlalchemy.pool import NullPool
 
 from app.schemas.platform import TenantCreateRequest
 from app.services import tenant_migrator
+from tests.migrations.agent_delta_support import assert_public_delta, assert_tenant_delta
 from tests.migrations.test_agent_task_core import _migration_config, _sync_engine
 
 PUBLIC = '20261113_d4_recovery'
@@ -21,42 +22,21 @@ TABLES = {'agent_d4_recovery_checkpoints', 'agent_d4_recovery_restarts', 'agent_
 
 @pytest.mark.parametrize('ancestor', [None, PUBLIC_PARENT])
 def test_public_recovery_tables_at_head(mig_db_url, ancestor):
-    config = _migration_config(mig_db_url)
-    if ancestor:
-        command.upgrade(config, ancestor)
-    command.upgrade(config, PUBLIC)
-    engine = _sync_engine(mig_db_url)
-    try:
-        with engine.connect() as conn:
-            assert TABLES <= set(sa.inspect(conn).get_table_names())
-            assert conn.scalar(sa.text('SELECT version_num FROM alembic_version')) == PUBLIC
-    finally:
-        engine.dispose()
+    assert_public_delta(mig_db_url, predecessor=ancestor, revision=PUBLIC, tables=TABLES)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('ancestor', [None, TENANT_PARENT])
 async def test_tenant_recovery_tables_at_head(mig_db_url, monkeypatch, ancestor):
-    config = _migration_config(mig_db_url)
-    await asyncio.to_thread(command.upgrade, config, PUBLIC_PARENT if ancestor else PUBLIC)
-    engine = create_async_engine(mig_db_url, poolclass=NullPool)
-    monkeypatch.setattr(tenant_migrator, 'engine', engine)
-    monkeypatch.setattr(tenant_migrator, 'REVISION', ancestor or TENANT)
-    try:
-        tenant = await tenant_migrator.provision_new(TenantCreateRequest(
-            name='Recovery delta', slug='recovery-' + uuid.uuid4().hex[:10],
-            admin_email='recovery@example.test', admin_password='D4TestPassword123',
-        ))
-        if ancestor:
-            await asyncio.to_thread(command.upgrade, config, PUBLIC)
-            monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT)
-            tenant = await tenant_migrator.resume_tenant(tenant.id)
-        async with engine.connect() as conn:
-            names = await conn.run_sync(lambda c: set(sa.inspect(c).get_table_names(schema=tenant.schema_name)))
-            assert TABLES <= names
-            assert await conn.scalar(sa.text(f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == TENANT
-    finally:
-        await engine.dispose()
+    await assert_tenant_delta(
+        mig_db_url,
+        monkeypatch,
+        public_predecessor=PUBLIC_PARENT,
+        public_revision=PUBLIC,
+        tenant_predecessor=ancestor,
+        tenant_revision=TENANT,
+        tables=TABLES,
+    )
 
 
 def _seed_recovery(conn, schema='public', *, restart=False, binding_only=False):

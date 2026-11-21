@@ -59,7 +59,6 @@ async def messages(owned, first, last):
 
 def test_activity_query_strict_bounded_window_contract():
     import app.schemas.agent_control as mod
-    assert hasattr(mod, 'ActivityQuery'), 'strict activity query missing'
     assert mod.ActivityQuery(before_sequence=51, window_end_sequence=100, page_size=50)
     assert mod.ActivityQuery(before_sequence=9223372036854775808, window_end_sequence=9223372036854775807)
     for fields in ({'before_sequence': 1}, {'before_sequence': 102, 'window_end_sequence':100},

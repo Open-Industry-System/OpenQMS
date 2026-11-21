@@ -31,9 +31,98 @@ DIMENSION = re.compile(r'(-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))(px|rem|em)?\Z')
 PLAIN_TEXT = re.compile(r'[^\x00-\x1f\x7f<>{}\\$]{1,240}\Z')
 
 
-def routing(reason: str, paths: list[str], *, docs_only: bool = False, backend_required: bool = True) -> dict:
+ROUTING_PROTOCOL = 2
+
+# Versioned migrations with a known business boundary. Any other migration or
+# shared migration tooling follows the full fallback.
+RUNTIME_MIGRATIONS = (
+    r'backend/alembic/versions/(?:20260926_agent_task_core|20260930_agent_readonly_delivery|'
+    r'20261001_agent_readonly_controls|20261109_d4_text_delivery|20261113_d4_recovery|'
+    r'20261114_r5_(?:d5_basis|d5_proposals|models)|20261115_r5_responses)\.py',
+    r'backend/alembic_tenant/versions/(?:tv002_agent_task_core|tv003_agent_readonly_delivery|'
+    r'tv004_agent_readonly_controls|tv007_d4_text_delivery|tv008_d4_recovery|tv010_r5_d5_proposals|'
+    r'tv011_r5_d5_basis|tv012_r5_models|tv014_r5_responses)\.py',
+)
+
+# Only understood surfaces are allowed to narrow CI. Common auth, database
+# sessions, infrastructure, shared fixtures and unknown paths match no group.
+SOURCE_GROUPS = {
+    'receiver': (
+        r'sdk/.+', r'deploy/d4-acceptance/.+', r'backend/examples/readonly_d4_text_receiver\.py',
+        r'backend/tests/(?:e2e/(?:test_(?:agent|readonly|d4|r5)_\w+|(?:d4_text|sdk_process|agent_local)_\w+)|cli/test_d4_text_\w+)\.py',
+    ),
+    'runtime': (
+        r'backend/app/(?:api|services)/agent/.+\.py',
+        r'backend/app/services/agent_runtime/\w+\.py',
+        r'backend/app/(?:api|schemas|models)/agent(?:_\w+)?\.py',
+        r'backend/app/api/admin/agent_\w+\.py',
+        r'backend/app/(?:cli|core)/agent_(?:local_trial|task_attachments)\.py',
+        r'backend/app/services/(?:agent_review_skill_service|adoption_audit)\.py',
+        r'backend/app/services/(?:capa_agent_(?:capabilities|projection)|capa_current_access|capa_d4_(?:provenance|redaction|text_preview)|capa_d5_(?:measures|proposals)|capa_review_source_guard|fmea_agent_sources)\.py',
+        r'backend/app/api/capa(?:_d4_text_preview)?\.py',
+        r'backend/app/models/capa_d[45]_\w+\.py',
+        r'backend/tests/(?:api/(?:agent/test_\w+|test_(?:admin_agent|agent|d4|readonly|runtime|trial)_\w+)|services/(?:agent|agent_runtime)/\w+)\.py',
+        r'backend/tests/test_(?:agent_review_skill|adoption_audit)\w*\.py',
+        *RUNTIME_MIGRATIONS,
+    ),
+    'capa': (
+        r'backend/app/(?:api|services|schemas|models)/(?:capa\w*|fmea\w*|scar\w*|iqc\w*|control_plan\w*|cp_sync_\w+|adoption_audit|knowledge_sink_service|graph_projection_service|aql_engine)\.py',
+        r'backend/app/state_machines/(?:eightd_state|fmea_state)\.py',
+        r'backend/app/services/mes_service\.py',
+        r'backend/app/graph/.+\.py',
+        r'backend/tests/capa/\w+\.py',
+        r'backend/tests/services/test_(?:capa_\w+|knowledge_entry_source)\.py',
+        r'backend/tests/test_(?:capa|eightd|d7|adoption_audit)\w*\.py',
+    ),
+    'tenant': (
+        *RUNTIME_MIGRATIONS,
+        r'backend/app/services/(?:tenant_schema_diff|tenant_test_rebuild)\.py',
+        r'backend/tests/(?:migrations|test_multitenancy)/.+', r'backend/tests/test_migration\w+\.py',
+    ),
+    'iqc': (
+        r'backend/app/(?:api|schemas|services|models)/(?:iqc\w*|scar\w*|aql_engine)\.py',
+        r'backend/tests/test_(?:iqc|scar)\w*\.py',
+    ),
+    'fmea': (
+        r'backend/app/(?:api|services|schemas|models)/fmea\w*\.py',
+        r'backend/app/state_machines/fmea_state\.py', r'backend/app/graph/.+\.py',
+        r'backend/app/services/graph_projection_service\.py', r'backend/app/api/graph\.py',
+        r'backend/tests/(?:fmea/.+|test_(?:fmea|dfmea|pfmea|graph|delete_fmea|collaboration)\w*\.py)',
+    ),
+    'msa': (
+        r'backend/app/(?:api|schemas|services|models)/(?:msa\w*|(?:grr|bias|linearity|stability|attribute)(?:_(?:service|engine))?)\.py',
+        r'backend/tests/test_msa_service\.py',
+    ),
+    'spc': (
+        r'backend/app/(?:api|schemas|services|models)/spc\w*\.py', r'backend/app/test_spc_engine\.py',
+        r'backend/app/services/mes_service\.py',
+        r'backend/tests/test_spc\w*\.py',
+    ),
+    'apqp': (
+        r'backend/app/(?:api|schemas|services|models)/apqp(?:_service)?\.py',
+        r'backend/tests/test_apqp_service\.py',
+    ),
+    'ppap': (
+        r'backend/app/(?:api|schemas|services|models)/ppap(?:_service)?\.py',
+        r'backend/tests/test_ppap_service\.py',
+    ),
+    'control_plan': (
+        r'backend/app/(?:api|schemas|services|models)/(?:control_plan\w*|cp_\w+)\.py',
+        r'backend/app/services/cp_validation/.+\.py',
+        r'backend/app/services/capa_doc_gate_service\.py',
+        r'backend/tests/test_(?:control_plan|cp_)\w*\.py',
+    ),
+    'integrations': (
+        r'backend/app/(?:api|schemas|services|models)/(?:erp\w*|mes\w*|plm\w*|connector_security)\.py',
+        r'backend/tests/test_(?:erp|mes|plm|connector_security)\w*\.py',
+    ),
+}
+GROUP_PATHS = {group: tuple(map(re.compile, patterns)) for group, patterns in SOURCE_GROUPS.items()}
+
+def routing(reason: str, paths: list[str], *, docs_only: bool = False, backend_required: bool = True, groups: tuple[str, ...] = ()) -> dict:
     return {'docs_only': docs_only, 'backend_required': backend_required,
-            'reason': reason, 'route_reason': reason, 'paths': paths}
+            'reason': reason, 'route_reason': reason, 'paths': paths,
+            'groups': list(groups) or (['full'] if backend_required else [])}
 
 
 def changed_entries(raw: bytes) -> list[tuple[str, list[str]]]:
@@ -73,7 +162,26 @@ def classify_diff(raw: bytes) -> dict:
         # Paths only establish eligibility. The committed old/new contents must
         # pass the checks below before a frontend change can skip the backend.
         return routing('presentation_content_check_required', paths)
-    return routing('full_backend_required', paths)
+    groups = set()
+    for path in paths:
+        if DOC_PATH.fullmatch(path):
+            continue
+        impacted = {group for group, patterns in GROUP_PATHS.items() if any(p.fullmatch(path) for p in patterns)}
+        if not impacted:
+            return routing('full_backend_required', paths)
+        groups.update(impacted)
+        if path.startswith('backend/app/models/'):
+            groups.add('tenant')
+    # Follow shared behavior into consumers, not just the source directory.
+    if 'runtime' in groups or 'fmea' in groups:
+        groups.update(('receiver', 'capa'))
+    if 'fmea' in groups:
+        groups.update(('control_plan', 'integrations'))
+    if 'spc' in groups:
+        groups.update(('msa', 'capa', 'fmea', 'control_plan', 'integrations', 'receiver'))
+    if 'iqc' in groups or 'control_plan' in groups:
+        groups.add('capa')
+    return routing('mapped_modules', paths, groups=('basic', *sorted(groups)))
 
 
 def safe_dimension(prop: str, value: str) -> bool:
@@ -156,8 +264,6 @@ def classify_pr(repo: Path, event_name: str, payload: dict, *, require_preview_r
         raise ValueError('invalid pull request payload')
     if event_name != 'pull_request' or pr.get('base', {}).get('ref') != 'main':
         return routing('not_main_pull_request', [])
-    if require_preview_receipts:
-        return routing('preview_receipts_required', [])
     base, head = pr['base']['sha'], pr['head']['sha']
     if not SHA.fullmatch(base) or not SHA.fullmatch(head):
         raise ValueError('invalid PR revisions')
@@ -174,13 +280,15 @@ def classify_pr(repo: Path, event_name: str, payload: dict, *, require_preview_r
         raise ValueError('missing or ambiguous merge base')
     raw = git('diff', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '--find-renames', merge_base[0], head, '--')
     result = classify_diff(raw)
-    if result['reason'] in {'allowlisted_markdown_only', 'presentation_content_check_required'}:
+    if result['groups'] != ['full'] or result['reason'] == 'presentation_content_check_required':
         # Inspect both trees, including the old side of document deletions and
         # renames. Symlinks, executable files and submodules never qualify.
         for revision in (merge_base[0], head):
             entries = git('ls-tree', '-z', revision, '--', *result['paths'])
             if any(entry and entry.split(b'\t', 1)[0].split()[:2] != [b'100644', b'blob'] for entry in entries.split(b'\0')):
-                result = routing('non_regular_document' if result['docs_only'] else 'non_regular_presentation', result['paths'])
+                reason = ('non_regular_document' if result['docs_only'] else 'non_regular_presentation'
+                          if result['reason'] == 'presentation_content_check_required' else 'non_regular_module')
+                result = routing(reason, result['paths'])
                 break
     if result['reason'] == 'presentation_content_check_required':
         kinds = set()
@@ -212,6 +320,8 @@ def classify_pr(repo: Path, event_name: str, payload: dict, *, require_preview_r
             else:
                 reason = 'presentation_only'
             result = routing(reason, result['paths'], backend_required=False)
+    if require_preview_receipts and not result['backend_required']:
+        result = routing(f'preview_basic_{result["route_reason"]}', result['paths'], groups=('basic',))
     return {**result, 'base_sha': base, 'head_sha': head, 'merge_base': merge_base[0]}
 
 
@@ -220,6 +330,7 @@ def publish(result: dict) -> None:
         output.write(f'docs_only={str(result["docs_only"]).lower()}\n')
         output.write(f'backend_required={str(result["backend_required"]).lower()}\n')
         output.write(f'route_reason={result["route_reason"]}\n')
+        output.write(f'backend_groups={",".join(result["groups"]) or "skip"}\n')
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
         summary.write('### Backend routing\n\n')
         summary.write('```json\n' + json.dumps(result, ensure_ascii=True, indent=2) + '\n```\n')

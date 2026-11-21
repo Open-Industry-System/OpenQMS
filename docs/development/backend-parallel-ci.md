@@ -1,6 +1,6 @@
 # 后端双分片 CI
 
-普通后端改为两个独立的 PostgreSQL matrix job：`backend-full (runtime)` 和
+完整后端由两个独立的 PostgreSQL matrix job 执行：`backend-full (runtime)` 和
 `backend-full (remainder)`。必需检查仍叫 `backend-tests`，只有两片的真实执行
 收据都通过校验后才成功。前端、浏览器、main push 和整条 workflow 的取消策略保留。
 
@@ -71,11 +71,9 @@ matrix 的真实 `GITHUB_JOB` 为 `backend-full`，与校验使用的 job label 
 路由 job 成功并明确给出允许的快路径原因，且 matrix 全部 skipped，`backend-tests`
 才接受跳过。路由失败、缺字段、未知原因和非成功的必跑 matrix 均失败。
 
-main push、需预览发布收据的 PR、缺可信 base 策略时均明确运行两片。可信 base 仍是
-旧版且没有 `backend_required` 时，workflow 保留旧 `docs_only` 输出并补充
-`backend_required=true`、`route_reason=legacy_policy_full`，因此首次上线期间也跑全量。
-前端与浏览器检查继续正常运行，低风险路径的边界见
-[快路径说明](backend-docs-fast-path.md)。
+main push、公共基础变更、未知影响或缺少可信 base 策略时运行两片。可信 base 支持模块路由后，已知业务路径可选择基础与相关组，由单个 `backend-full (selected)` worker 执行。预览要求 API 收据时，原本可跳过的快路径运行基础组。汇总验证选组与收据来自同一 SHA，并继续发布 Oracle 所用的唯一 API 收据。兼容旧可信 base 的既有快路径和全量回退规则。
+
+前端与浏览器检查继续正常运行。范围见[模块路由](backend-ci-module-routing.md)和[快路径说明](backend-docs-fast-path.md)。
 
 ## 测量口径
 
