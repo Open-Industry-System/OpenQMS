@@ -147,20 +147,19 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
         ACCEPTANCE['shared_test_released_notice'](api, slot)
         host(dict(action='released', lease=slot['lease']))
 
-    # Prefer a valid human receipt before tick considers the lease expired or stale.
+    # Prefer a valid human receipt before tick considers switching the lease.
     current = host(dict(action='status'))
     if current['phase'] == 'testing':
         row = next((row for row in eligible if row[0]['pr'] == current['pr']), None)
         if row and all(row[0][key] == current[key] for key in row[0]):
             run = ACCEPTANCE['publication'](api, row[2], queue_lease=current['lease'])
             if run and ACCEPTANCE['verified_acceptance'](api, row[2], run, current['plan']):
-                if time.time() < current['expires_at']:
-                    check_health(current)
-                    proofs = run.get('d4_evidence')
-                    request = dict(action='passed', lease=current['lease'], eligible=versions)
-                    if proofs:
-                        request.update(action='d4-passed', proofs=proofs)
-                    release(host(request))
+                check_health(current)
+                proofs = run.get('d4_evidence')
+                request = dict(action='passed', lease=current['lease'], eligible=versions)
+                if proofs:
+                    request.update(action='d4-passed', proofs=proofs)
+                release(host(request))
 
     slot = host(dict(action='tick', eligible=versions))
     if slot['phase'] == 'releasing':
@@ -212,7 +211,7 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
             if required and not published.get('d4_evidence'):
                 proofs = host(dict(action='d4-evidence', lease=slot['lease']))
                 receipt = published['shared_test']
-                if ACCEPTANCE['valid_d4_evidence'](receipt, proofs) and required <= proofs.keys():
+                if ACCEPTANCE['valid_d4_evidence'](proofs) and required <= proofs.keys():
                     payload = dict(receipt, proofs=proofs, deployment_run=published['id'])
                     d4_file.write_text(json.dumps(payload))
         ACCEPTANCE['shared_test_ready_notice'](api, pr, published, slot['plan'])

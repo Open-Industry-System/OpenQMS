@@ -80,14 +80,17 @@ check-sdk-unit check-sdk-loopback check-sdk-wheel check-sdk:
 
 check-backend: check-test-db
 	@set -euo pipefail; umask 077; \
-	mkdir -p "$(SDK_ARTIFACT_ROOT)"; \
-	root="$$(cd "$(SDK_ARTIFACT_ROOT)" && pwd -P)"; \
-	artifacts="$$(mktemp -d "$$root/sdk-backend-XXXXXX")"; \
-	"$(SDK_PYTHON_BIN)" "$(CURDIR)/sdk/python/scripts/build-wheel.py" \
-		--source "$(CURDIR)/sdk/python" --artifacts "$$artifacts" > "$$artifacts/build.json"; \
-	wheel="$$("$(SDK_PYTHON_BIN)" -c 'import hashlib,json,pathlib,sys; data=json.load(open(sys.argv[1])); wheel=pathlib.Path(data["wheel_path"]); assert wheel.is_absolute() and wheel.is_file() and wheel.is_relative_to(pathlib.Path(sys.argv[1]).parent); assert hashlib.sha256(wheel.read_bytes()).hexdigest() == data["wheel_sha256"]; print(wheel)' "$$artifacts/build.json")"; \
+	wheel=""; \
+	if [ "$(BACKEND_SHARD)" != 0 ]; then \
+	  mkdir -p "$(SDK_ARTIFACT_ROOT)"; \
+	  root="$$(cd "$(SDK_ARTIFACT_ROOT)" && pwd -P)"; \
+	  artifacts="$$(mktemp -d "$$root/sdk-backend-XXXXXX")"; \
+	  "$(SDK_PYTHON_BIN)" "$(CURDIR)/sdk/python/scripts/build-wheel.py" \
+	    --source "$(CURDIR)/sdk/python" --artifacts "$$artifacts" > "$$artifacts/build.json"; \
+	  wheel="$$("$(SDK_PYTHON_BIN)" -c 'import hashlib,json,pathlib,sys; data=json.load(open(sys.argv[1])); wheel=pathlib.Path(data["wheel_path"]); assert wheel.is_absolute() and wheel.is_file() and wheel.is_relative_to(pathlib.Path(sys.argv[1]).parent); assert hashlib.sha256(wheel.read_bytes()).hexdigest() == data["wheel_sha256"]; print(wheel)' "$$artifacts/build.json")"; \
+	fi; \
 	cd $(BACKEND_DIR) && OPENQMS_SDK_WHEEL="$$wheel" SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. \
-		$(CI_RUNNER) api --pytest-target tests $(PYTEST_IGNORES)
+		$(CI_RUNNER) api --pytest-target tests $(if $(BACKEND_SHARD),--backend-shard $(BACKEND_SHARD),) $(PYTEST_IGNORES)
 
 check-browser: check-test-db $(R5_NATIVE_BROWSER_TARGET)
 	cd $(BACKEND_DIR) && SECRET_KEY=$${SECRET_KEY:-test-secret-key-for-ci-only} PYTHONPATH=. \
