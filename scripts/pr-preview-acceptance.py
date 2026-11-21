@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Trusted metadata-only PR plan and human preview acceptance statuses."""
 import argparse
+from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import io
@@ -44,7 +45,7 @@ LEGACY_HEADER = ('检查项', '操作步骤', '预期结果')
 ITEM_HEADER = ('编号', '检查项', '环境', '角色', '场景', '操作步骤', '预期结果')
 PUBLIC_SCENARIOS = {'read-only'}
 SHARED_SCENARIOS = {'write', 'd4-deliver', 'd4-revoke'}
-RESULT_LINE = re.compile(r'^([a-z][a-z0-9-]{0,39}): (通过|失败|受阻)$', re.M)
+RESULT_LINE = re.compile(r'([a-z][a-z0-9-]{0,39})\s*[:：]\s*(通过|失败|受阻)')
 
 
 class AcceptanceItem(NamedTuple):
@@ -112,13 +113,28 @@ def test_plan(body):
     return parse_plan(body).digest
 
 
+def confirmation_commands(lines):
+    return {' '.join(parts) for line in lines if (parts := line.split()) and parts[0] == '/preview-accept'}
+
+
+def confirmation_rejection(comment, command, deployment_time, author, permission, independent):
+    user = comment.get('user') or {}
+    if user.get('type') != 'User' or permission not in {'write', 'maintain', 'admin'}:
+        return '评论人需要仓库写权限'
+    if independent and user.get('login') == author:
+        return '本轮需要 PR 作者之外的验收人员确认'
+    lines = (comment.get('body') or '').splitlines()
+    if command not in confirmation_commands(lines):
+        return '验收命令与当前提交、计划或测试轮次不匹配'
+    if comment['created_at'] < deployment_time:
+        return '评论早于本轮部署，请提交一条新评论'
+    if len('\n'.join(line for line in lines if ' '.join(line.split()) != command).strip()) < 8:
+        return '请补充实际测试结果或截图链接'
+    return None
+
+
 def accepted(comment, command, deployment_time, author, permission, independent=False):
-    user = comment.get('user', {})
-    return (user.get('type') == 'User' and permission in {'write', 'maintain', 'admin'}
-            and (not independent or user.get('login') != author)
-            and command in (comment.get('body') or '').splitlines()
-            and len((comment.get('body') or '').replace(command, '').strip()) >= 8
-            and comment['created_at'] >= deployment_time)
+    return confirmation_rejection(comment, command, deployment_time, author, permission, independent) is None
 
 
 class API:
@@ -225,6 +241,13 @@ def acceptance_command(pr, run, digest):
     return command
 
 
+def acceptance_template(pr, run, digest):
+    lines = [acceptance_command(pr, run, digest)]
+    if run.get('shared_test'):
+        lines.extend(f'{item.id}: <通过、失败或受阻>' for item in parse_plan(pr.get('body')).items)
+    return '\n'.join(lines)
+
+
 def shared_identity(head, merge, plan, lease):
     return ':'.join((head, merge, plan, lease))
 
@@ -234,7 +257,7 @@ def ready_notice(pr, run, digest):
     sha = pr['head']['sha']
     shared = run.get('shared_test')
     url = preview_url(number, shared)
-    command = acceptance_command(pr, run, digest)
+    template = acceptance_template(pr, run, digest)
     if shared:
         validity = f'共享测试位当前用于 PR #{number}，等待人工验收。\n\n'
         ending = '验收后会清理测试资源并切换至下一项。'
@@ -247,10 +270,10 @@ def ready_notice(pr, run, digest):
             f'{validity}- 测试地址：{url}\n- 当前提交：`{sha}`\n'
             f'- 实际部署版本：`{pr["merge_commit_sha"]}`\n'
             f'- [发布记录](https://github.com/{run["repository"]["full_name"]}/actions/runs/{run["id"]})\n\n'
-            f'请按 PR 描述中的验收计划逐项测试；完成后发表新评论，复制以下命令并另附实际结果或截图链接：\n\n'
-            f'```text\n{command}\n```\n\n'
-            + ('逐项填写验收结果，格式如 `report-read: 通过`，并另附实际测试说明。\n\n' if shared else '')
-            + ending)
+            f'完成 PR 中的验收步骤后，复制下面的模板到一条新评论，填写各项结果，并附实际测试说明或截图。\n\n'
+            f'```text\n{template}\n```\n\n'
+            f'验收状态和未通过原因会显示在 PR 检查中。 [验收检查](https://github.com/{run["repository"]["full_name"]}/pull/{number}/checks)\n\n'
+            f'{ending}')
 
 
 def cleanup_notice(api, number, result):
@@ -388,7 +411,22 @@ def deployment_after_reopen(api, pr, run):
     return not lifecycle or run['updated_at'] > max(lifecycle)
 
 
-def verified_acceptance(api, pr, run, digest, *, released_at=None):
+def result_rejection(items, lines):
+    expected = [item.id for item in items]
+    matches = [match.groups() for line in lines if (match := RESULT_LINE.fullmatch(line.strip()))]
+    counts = Counter(item for item, _ in matches)
+    missing = [item for item in expected if item not in counts]
+    unexpected = sorted(counts.keys() - set(expected))
+    duplicates = [item for item in expected if counts[item] > 1]
+    failures = [f'{item}（{result}）' for item, result in matches if item in expected and result != '通过']
+    reasons = [label + ' ' + '、'.join(values) for label, values in (
+        ('缺少验收结果', missing), ('计划没有这些验收项', unexpected),
+        ('验收项重复', duplicates), ('验收项未通过', failures),
+    ) if values]
+    return '。'.join(reasons) or None
+
+
+def acceptance_result(api, pr, run, digest, *, released_at=None):
     command = acceptance_command(pr, run, digest)
     independent = os.environ.get('REQUIRE_INDEPENDENT_REVIEWER') == 'true'
     shared = run.get('shared_test')
@@ -396,35 +434,57 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
     proofs = run.get('d4_evidence', {})
     if shared:
         plan = parse_plan(pr.get('body'))
-        if (shared['plan'] != digest or shared_blockers(plan, shared, proofs)
-                or not deployment_after_reopen(api, pr, run)):
-            return None
+        if shared['plan'] != digest:
+            return None, '验收计划已更新，等待当前计划的发布回执'
+        if blockers := shared_blockers(plan, shared, proofs):
+            return None, '。'.join(blockers)
+        if not deployment_after_reopen(api, pr, run):
+            return None, 'PR 已重新打开，等待本轮预览部署'
         items = plan.items
         if proofs and released_at is None and any(
                 int(datetime.now(timezone.utc).timestamp()) >= proof['expires_at'] for proof in proofs.values()):
-            return None
+            return None, '本轮 D4 专用验收回执已到期'
+    latest_rejection = None
     for comment in reversed(api.pages(f'/issues/{pr["number"]}/comments')):
-        login = comment.get('user', {}).get('login', '')
-        if command not in (comment.get('body') or '').splitlines() or not re.fullmatch(r'[A-Za-z0-9-]+', login):
+        user = comment.get('user') or {}
+        login = user.get('login', '')
+        if user.get('type') != 'User' or not re.fullmatch(r'[A-Za-z0-9-]+', login):
+            continue
+        lines = (comment.get('body') or '').splitlines()
+        commands = confirmation_commands(lines)
+        if not commands:
+            continue
+        if command not in commands:
+            latest_rejection = latest_rejection or '验收命令与当前提交、计划或测试轮次不匹配，请复制本轮模板'
             continue
         if shared:
             last_edit = epoch(comment.get('updated_at') or comment['created_at'])
             if proofs and any(
                     epoch(comment['created_at']) < proof['completed_at'] or last_edit >= proof['expires_at']
                     for proof in proofs.values()):
+                latest_rejection = latest_rejection or '评论必须在本轮 D4 回执生成后、有效期内提交'
                 continue
             if released_at is not None and last_edit >= released_at:
+                latest_rejection = latest_rejection or '评论在本轮测试位回收后提交或修改'
                 continue
-        if items:
-            confirmations = RESULT_LINE.findall(comment.get('body') or '')
-            if sorted(confirmations) != sorted((item.id, '通过') for item in items):
-                continue
+        if items and (reason := result_rejection(items, lines)):
+            latest_rejection = latest_rejection or reason
+            continue
         permission = api.get(f'/collaborators/{login}/permission')['permission']
-        if accepted(comment, command, run['updated_at'], pr['user']['login'], permission, independent):
-            if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
-                raise ValueError('PR changed during acceptance; rerun required')
-            return comment
-    return None
+        reason = confirmation_rejection(comment, command, run['updated_at'], pr['user']['login'],
+                                        permission, independent)
+        if reason:
+            latest_rejection = latest_rejection or reason
+            continue
+        if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
+            raise ValueError('PR changed during acceptance; rerun required')
+        return comment, None
+    return None, latest_rejection or '等待有写权限的验收人员提交本轮验收评论'
+
+
+def verified_acceptance(api, pr, run, digest, *, released_at=None):
+    comment, _ = acceptance_result(api, pr, run, digest, released_at=released_at)
+    return comment
 
 
 def shared_blockers(plan, receipt, proofs=None, *, now=None):
@@ -532,18 +592,28 @@ def reconcile(api, pr, summary):
         return
     api.status(sha, PLAN, 'success', '影响范围、操作步骤、预期结果和权限回归检查齐全')
     if shared and (released := shared_release_marker(api, pr, digest)):
+        reason = '本轮测试位已清理，等待重新部署后验收'
         if released['outcome'] == 'passed':
             run = publication(api, pr, queue_lease=released['lease'])
-            if run and verified_acceptance(api, pr, run, digest, released_at=released['released_at']):
-                api.status(sha, ACCEPT, 'success', '有写权限的人工已确认本轮共享测试')
+            reason = '本轮测试位已清理，当前缺少有效发布回执'
+            if run:
+                accepted_comment, reason = acceptance_result(api, pr, run, digest,
+                                                             released_at=released['released_at'])
+                if accepted_comment:
+                    api.status(sha, ACCEPT, 'success', '有写权限的人工已确认本轮共享测试')
+                    return
+        api.status(sha, ACCEPT, 'pending', reason)
+        summary.append(f'PR #{pr["number"]}: {reason}')
         return
     active = latest_notified_deployment(api, pr)
     if active is not None and active['status'] != 'completed':
+        api.status(sha, ACCEPT, 'pending', '当前预览正在部署，请查看 PR 发布通知')
         summary.append(f'PR #{pr["number"]}: 部署进行中，请查看 PR 通知中的发布记录。')
         return
     if active is not None and active['conclusion'] != 'success':
         if not shared:
             deployment_notice_from_run(api, pr, active)
+        api.status(sha, ACCEPT, 'pending', '当前预览部署失败或取消，请查看 PR 发布记录')
         summary.append(f'PR #{pr["number"]}: 部署失败或取消，请查看 PR 通知。')
         return
     run = publication(api, pr)
@@ -567,14 +637,17 @@ def reconcile(api, pr, summary):
         return
     if not shared:
         api.notice(pr['number'], ready_notice(pr, run, digest))
-    command = acceptance_command(pr, run, digest)
+    template = acceptance_template(pr, run, digest)
     url = preview_url(pr['number'], receipt)
-    summary.append(f'PR #{pr["number"]}: {url}\n\n逐项测试后评论以下命令，并另写实际结果/截图链接：\n\n```text\n{command}\n```')
-    if run.get('d4_evidence'):
-        summary.append(f'PR #{pr["number"]}: 等待共享测试控制器签收当前回执并确认资源清理。')
-        return
-    if verified_acceptance(api, pr, run, digest):
+    summary.append(f'PR #{pr["number"]}: {url}\n\n逐项测试后填写并提交以下模板，附上实际测试说明或截图。\n\n```text\n{template}\n```')
+    accepted_comment, reason = acceptance_result(api, pr, run, digest)
+    if accepted_comment and not run.get('d4_evidence'):
         api.status(sha, ACCEPT, 'success', '有写权限的人工已确认当前提交、部署和验收计划')
+        return
+    if accepted_comment:
+        reason = '等待共享测试控制器签收当前回执并确认资源清理'
+    api.status(sha, ACCEPT, 'pending', reason)
+    summary.append(f'PR #{pr["number"]} 验收待通过：{reason}')
 
 
 def main():

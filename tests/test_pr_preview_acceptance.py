@@ -73,8 +73,8 @@ def test_deleted_confirmation_and_changed_plan_revoke_success():
         assert api.statuses[-1] == (m.ACCEPT, 'success')
         api.comments = []
         m.reconcile(api, pr, [])
-        assert api.statuses[-1] == (m.PLAN, 'success')
-        assert (m.ACCEPT, 'pending') in api.statuses[-3:]
+        assert api.statuses[-1] == (m.ACCEPT, 'pending')
+        assert (m.PLAN, 'success') in api.statuses[-3:]
         api.comments = [comment(body=cmd + '\n所有测试通过，具体结果见截图链接。')]
         pr['body'] = BODY.replace('刷新后', '重新登录后')
         m.reconcile(api, pr, [])
@@ -436,6 +436,7 @@ def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api
     assert m.SHARED_TEST_URL in body and 'PR #45' in body
     assert api.receipt['queue_lease'] in body
     assert '等待人工验收' in body and '本轮验收截止' not in body
+    assert 'report-read: <通过、失败或受阻>' in body
 
 
 @pytest.mark.parametrize('ending', ['closed', 'updated'])
@@ -579,3 +580,44 @@ def test_new_lease_can_publish_after_previous_deployment_failure(shared_receipt_
                          body=m.NOTICE + f'\n<!-- openqms-shared-test-release:{identity}:deploy-failed:{after_release} -->')]
     m.shared_test_ready_notice(api, api.pr, run, receipt['plan'])
     assert m.SHARED_TEST_URL in api.notices[-1]
+
+
+@pytest.mark.parametrize('result', ['report-read:通过', 'report-read：通过', '  report-read ： 通过  '])
+def test_shared_acceptance_allows_crlf_chinese_colons_and_whitespace(shared_receipt_api, result):
+    api = shared_receipt_api
+    run = m.publication(api, api.pr, shared=True)
+    command = m.acceptance_command(api.pr, run, api.receipt['plan'])
+    api.comments = [comment(body='  ' + command.replace(' ', '  ') + '  \r\n' + result
+                            + '\r\n刷新后报告仍可读取。\r\n')]
+    assert m.verified_acceptance(api, api.pr, run, api.receipt['plan']) == api.comments[0]
+
+
+@pytest.mark.parametrize('result,reason', [
+    ('report-read: <通过、失败或受阻>', '缺少验收结果 report-read'),
+    ('ci-home: 通过', '缺少验收结果 report-read。计划没有这些验收项 ci-home'),
+    ('report-read：受阻', '验收项未通过 report-read（受阻）'),
+    ('report-read: 通过\r\nreport-read：失败', '验收项重复 report-read。验收项未通过 report-read（失败）'),
+])
+def test_current_result_explains_rejection_without_accepting_it(shared_receipt_api, result, reason):
+    api = shared_receipt_api
+    run = m.publication(api, api.pr, shared=True)
+    digest = api.receipt['plan']
+    cmd = m.acceptance_command(api.pr, run, digest)
+    api.comments = [comment(body=f'{cmd}\r\n{result}\r\n实际验收结果见说明。')]
+    assert m.acceptance_result(api, api.pr, run, digest) == (None, reason)
+
+
+def test_reconcile_reports_wrong_lease_and_real_item_in_template(shared_receipt_api, monkeypatch):
+    monkeypatch.setenv('ORACLE_SHARED_TEST_ENABLED', 'true')
+    api = shared_receipt_api
+    run = m.publication(api, api.pr, shared=True)
+    command = m.acceptance_command(api.pr, run, api.receipt['plan'])
+    api.comments = [comment(body=command.rsplit(' ', 1)[0] + ' ' + 'd'*32
+                            + '\nreport-read: 通过\n实际验收记录已上传。')]
+    checks = []
+    monkeypatch.setattr(api, 'status', lambda _, context, state, description: checks.append((context, state, description)))
+    summary = []
+    m.reconcile(api, api.pr, summary)
+    assert checks[-1][:2] == (m.ACCEPT, 'pending')
+    assert '测试轮次不匹配' in checks[-1][2]
+    assert any('report-read: <通过、失败或受阻>' in entry for entry in summary)
