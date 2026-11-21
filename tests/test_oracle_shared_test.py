@@ -40,7 +40,7 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
     def host(request):
         action = request['action']
         if action == 'tick':
-            return queue.tick(request['eligible'], now)
+            return queue.tick(request['eligible'])
         if action == 'status':
             with queue.transaction() as conn:
                 return queue.describe(queue.slot(conn))
@@ -48,8 +48,8 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
             events.append(('clean', request['lease']))
             return {}
         if action == 'released':
-            return queue.acknowledge(request['lease'], action, now)
-        slot = queue.acknowledge(request['lease'], action, now, ttl_seconds=1800,
+            return queue.acknowledge(request['lease'], action)
+        slot = queue.acknowledge(request['lease'], action,
                                  eligible=request.get('eligible'))
         return dict(slot, test_roles=['field_qe', 'manager']) if action == 'ready' else slot
 

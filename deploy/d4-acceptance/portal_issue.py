@@ -30,8 +30,7 @@ def issue(profile_path, origin):
         profile = load_profile(profile_path)
         binding = profile['binding']
         slot = database_binding(lease, 'testing')
-        if (any(binding[key] != slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease'))
-                or binding['expires_at'] > slot['expires_at']):
+        if any(binding[key] != slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease')):
             raise ValueError('D4 profile does not match the active test slot')
 
         directory = RUN_ROOT / lease

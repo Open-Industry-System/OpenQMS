@@ -9,7 +9,6 @@ import json
 import re
 import sqlite3
 import sys
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -108,7 +107,7 @@ class Queue:
             connection.execute('INSERT INTO switch_requests VALUES (?, ?, ?)', (comment_id, requested, pending))
             return self.describe(slot)
 
-    def tick(self, eligible, now):
+    def tick(self, eligible):
         releases = self.snapshot(eligible)
         current = set(releases.values())
         with self.transaction() as connection:
@@ -123,8 +122,8 @@ class Queue:
             if slot:
                 if slot['phase'] == 'testing':
                     obsolete = slot['release'] not in current
-                    if obsolete or now >= slot['expires_at']:
-                        self.release(connection, 'superseded' if obsolete else 'expired')
+                    if obsolete:
+                        self.release(connection, 'superseded')
                     elif request and request['release'] != slot['release']:
                         self.release(connection, 'switched')
                 return self.describe(self.slot(connection))
@@ -161,7 +160,7 @@ class Queue:
                 raise ValueError('only an exact deployment failure may be retried')
             return {'phase': 'idle'}
 
-    def acknowledge(self, lease, event, now, ttl_seconds=None, eligible=None):
+    def acknowledge(self, lease, event, eligible=None):
         with self.transaction() as connection:
             slot = self.slot(connection)
             if not slot or slot['lease'] != lease:
@@ -174,17 +173,10 @@ class Queue:
                     raise ValueError('release is no longer eligible')
 
             if event == 'ready' and phase == 'deploying':
-                if type(ttl_seconds) is not int or not 0 < ttl_seconds <= 24 * 3600:
-                    raise ValueError('acceptance window must be between 1 and 86400 seconds')
-                connection.execute(
-                    "UPDATE slot SET phase = 'testing', expires_at = ? WHERE singleton = 1",
-                    (now + ttl_seconds,),
-                )
+                connection.execute("UPDATE slot SET phase = 'testing', expires_at = NULL WHERE singleton = 1")
             elif event == 'deploy-failed' and phase == 'deploying':
                 self.release(connection, event)
             elif event in {'passed', 'failed'} and phase == 'testing':
-                if now >= slot['expires_at']:
-                    raise ValueError('acceptance window expired')
                 self.release(connection, event)
             elif event == 'released' and phase == 'releasing':
                 if slot['outcome'] != 'switched':
@@ -212,15 +204,13 @@ def main():
     acknowledge = subcommands.add_parser('acknowledge')
     acknowledge.add_argument('lease')
     acknowledge.add_argument('event', choices=['ready', 'deploy-failed', 'passed', 'failed', 'released'])
-    acknowledge.add_argument('--ttl-seconds', type=int)
     args = parser.parse_args()
     queue = Queue(args.database)
-    now = int(time.time())
     if args.command == 'tick':
-        result = queue.tick(json.load(sys.stdin), now)
+        result = queue.tick(json.load(sys.stdin))
     else:
         current = json.load(sys.stdin) if args.event in {'ready', 'passed', 'failed'} else None
-        result = queue.acknowledge(args.lease, args.event, now, args.ttl_seconds, current)
+        result = queue.acknowledge(args.lease, args.event, eligible=current)
     print(json.dumps(result, sort_keys=True))
 
 
