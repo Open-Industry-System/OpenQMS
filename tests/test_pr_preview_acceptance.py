@@ -386,7 +386,7 @@ def test_shared_publication_requires_approved_workflow_run(shared_receipt_api, c
     assert m.publication(api, api.pr, queue_lease=api.receipt['queue_lease']) is None
 
 
-def test_shared_acceptance_rejects_stale_lease_and_edit_after_expiry(shared_receipt_api):
+def test_shared_acceptance_rejects_stale_lease_and_accepts_after_legacy_deadline(shared_receipt_api):
     api = shared_receipt_api
     receipt = api.receipt
     run = m.publication(api, api.pr, queue_lease=receipt['queue_lease'])
@@ -398,7 +398,9 @@ def test_shared_acceptance_rejects_stale_lease_and_edit_after_expiry(shared_rece
     api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) == api.comments[0]
     api.comments[0]['updated_at'] = '2026-11-16T03:00:00Z'
-    assert m.verified_acceptance(api, api.pr, run, receipt['plan']) is None
+    assert m.verified_acceptance(api, api.pr, run, receipt['plan']) == api.comments[0]
+    assert m.verified_acceptance(api, api.pr, run, receipt['plan'],
+                                 released_at=m.epoch('2026-11-16T02:59:00Z')) is None
 
 
 def test_shared_release_keeps_timely_confirmation_without_republishing_url(monkeypatch, shared_receipt_api):
@@ -433,6 +435,7 @@ def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api
     body = m.ready_notice(api.pr, run, api.receipt['plan'])
     assert m.SHARED_TEST_URL in body and 'PR #45' in body
     assert api.receipt['queue_lease'] in body
+    assert '等待人工验收' in body and '本轮验收截止' not in body
 
 
 @pytest.mark.parametrize('ending', ['closed', 'updated'])

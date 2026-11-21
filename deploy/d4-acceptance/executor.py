@@ -67,9 +67,9 @@ def current_binding(binding, now):
     root_private(path)
     with contextlib.closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as connection:
         slot = connection.execute(
-            'SELECT lease, release, phase, expires_at FROM slot WHERE singleton = 1'
+            'SELECT lease, release, phase FROM slot WHERE singleton = 1'
         ).fetchone()
-    if not slot or slot[0] != binding['lease'] or slot[2] != 'testing' or now >= slot[3]:
+    if not slot or slot[0] != binding['lease'] or slot[2] != 'testing':
         return False
     identity = json.loads(slot[1])
     return all(identity[key] == binding[key] for key in ('pr', 'head', 'merge', 'plan'))
