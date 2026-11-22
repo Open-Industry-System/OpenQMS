@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +14,16 @@ if TYPE_CHECKING:
 
 class IqcInspection(Base):
     __tablename__ = "iqc_inspections"
+    __table_args__ = (
+        UniqueConstraint("inspection_id", "factory_id", name="uq_iqc_inspection_factory"),
+    )
+
+    identity_generation: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()")
+    )
+    inspection_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
 
     inspection_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4

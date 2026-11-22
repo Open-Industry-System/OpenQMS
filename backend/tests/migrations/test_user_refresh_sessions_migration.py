@@ -14,7 +14,7 @@ from tests.conftest import _test_db_url
 
 
 REV = "20260913_user_refresh_sessions"
-PUBLIC_HEAD = "20261118_r7_pfmea_impact"
+PUBLIC_HEAD = "20261118_r7_iqc_facts"
 DOWN_REV = "20260727_warranty_factory_id"
 TABLE = "user_refresh_sessions"
 OLD_FILENAME = "20260913_user_refresh_sessions.py"

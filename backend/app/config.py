@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     AGENT_R5_CONTROLLED_POLICY_FILE: str | None = None
     AGENT_R7_PFMEA_IMPACT_ENABLED: bool = False
     AGENT_R7_PFMEA_IMPACT_POLICY_FILE: str | None = None
+    AGENT_R7_IQC_INVESTIGATION_ENABLED: bool = False
+    AGENT_R7_IQC_INVESTIGATION_POLICY_FILE: str | None = None
     AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED: bool = False
     AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE: str | None = None
     AGENT_LOCAL_TRIAL_MODE: str = "disabled"

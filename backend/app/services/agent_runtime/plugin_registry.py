@@ -52,6 +52,9 @@ async def register_plugin(db: AsyncSession, actor: User, key: str, version: str,
     if registration.plugin_key == R7_PLUGIN_KEY:
         from app.services.agent_runtime.pfmea_impact_activation import require_manifest
         require_manifest(registration.manifest)
+    if registration.plugin_key == "openqms.controlled-iqc-investigation":
+        from app.services.agent_runtime.iqc_investigation_pilot import require_manifest as require_iqc_manifest
+        require_iqc_manifest(registration.manifest)
     # begin_nested() flushes pending caller state before creating its savepoint.
     # Keep unrelated write failures outside plugin conflict translation.
     await db.flush()
@@ -188,6 +191,14 @@ async def set_plugin_enabled(db: AsyncSession, actor: User, installation_id: UUI
             from app.services.agent_runtime.pfmea_impact_runtime import drain_installation
             await drain_installation(db, plugin, actor.user_id)
         await _require_current_admin(db, actor)
+    if plugin.plugin_key == "openqms.controlled-iqc-investigation":
+        if enabled:
+            from app.services.agent_runtime.iqc_investigation_pilot import require_pinned_installation
+            await require_pinned_installation(db, plugin, enabling=True)
+        else:
+            from app.services.agent_runtime.iqc_investigation_runtime import drain_installation
+            await drain_installation(db, plugin, actor.user_id)
+        await _require_current_admin(db, actor)
     plugin.enabled = enabled
     _audit(db, actor, plugin, "SET_PLUGIN_ENABLED")
     await db.flush()
@@ -201,6 +212,13 @@ async def _require_grant_enableable(db, plugin, grant, actor=None) -> None:
     if plugin.plugin_key == R7_PLUGIN_KEY:
         await require_grant_enrollment(db, plugin, grant, actor)
         return
+    if plugin.plugin_key == "openqms.controlled-iqc-investigation":
+        from app.services.agent_runtime.iqc_investigation_pilot import require_grant_enrollment as require_iqc_grant
+        await require_iqc_grant(db, plugin, grant, actor)
+        return
+    from app.services.agent_runtime.iqc_investigation_pilot import IQC_CAPABILITIES
+    if grant.capability_id in IQC_CAPABILITIES:
+        raise ValueError("Capability cannot be enabled")
     if grant.capability_id in GRANT_MATRIX:
         raise ValueError("Capability cannot be enabled")
     if plugin.plugin_key == model_egress.R5_PLUGIN_KEY:
