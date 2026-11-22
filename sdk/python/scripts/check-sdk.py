@@ -118,6 +118,11 @@ def pytest_layer(layer, workspace, env):
                 and child.get('pure') is (layer == 'unit')
                 and child.get('exit') == code):
             result.update({k: child[k] for k in (*COUNTERS, 'elapsed')})
+            positions = child.get('failed_test_positions')
+            if (type(positions) is list and len(positions) <= 10
+                    and type(result['selected']) is int
+                    and all(type(value) is int and 1 <= value <= result['selected'] for value in positions)):
+                result['failed_test_positions'] = positions
             if pytest_passed(result):
                 result['status'] = 'PASS'
     except (OSError, ValueError, KeyError, TypeError):

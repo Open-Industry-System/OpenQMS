@@ -37,9 +37,14 @@ def pytest_arguments(layer):
 class Counts:
     def __init__(self):
         self.values = dict.fromkeys(COUNTERS, 0)
+        self.test_positions = {}
+        self.failed_test_positions = []
 
     def pytest_collection_finish(self, session):
         self.values['selected'] = len(session.items)
+        self.test_positions = {
+            item.nodeid: position for position, item in enumerate(session.items, start=1)
+        }
 
     def pytest_deselected(self, items):
         self.values['deselected'] += len(items)
@@ -51,6 +56,11 @@ class Counts:
             self.values['skipped'] += 1
 
     def pytest_runtest_logreport(self, report):
+        # Keep collection positions only. Test IDs and tracebacks can contain fixture data.
+        if report.failed and len(self.failed_test_positions) < 10:
+            position = self.test_positions.get(report.nodeid)
+            if position is not None and position not in self.failed_test_positions:
+                self.failed_test_positions.append(position)
         if hasattr(report, 'wasxfail'):
             if report.skipped:
                 self.values['xfailed'] += 1
@@ -87,7 +97,8 @@ def run_pytest(layer, receipt):
         with redirect_stdout(sink), redirect_stderr(sink):
             code = int(pytest.main(pytest_arguments(layer), plugins=[counts]))
     result = dict(counts.values, exit=code, elapsed=time.monotonic() - started,
-                  layer=layer, pure=(layer == 'unit'))
+                  layer=layer, pure=(layer == 'unit'),
+                  failed_test_positions=counts.failed_test_positions)
     with Path(receipt).open('x', encoding='utf-8') as stream:
         os.chmod(receipt, 0o600)
         json.dump(result, stream, sort_keys=True)

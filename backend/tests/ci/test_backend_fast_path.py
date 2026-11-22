@@ -346,7 +346,7 @@ def test_classification_errors_publish_full_and_fail(presentation_repository, tm
         'REQUIRE_PREVIEW_RECEIPTS': 'false',
     }, capture_output=True, text=True)
     assert result.returncode == 1
-    assert output.read_text() == 'docs_only=false\nbackend_required=true\nroute_reason=classification_error\n'
+    assert output.read_text() == 'docs_only=false\nbackend_required=true\nroute_reason=classification_error\nbackend_groups=full\n'
     assert 'classification_error' in summary.read_text()
 
 
@@ -360,7 +360,8 @@ def test_main_push_other_base_and_preview_never_shortcut(presentation_repository
     head = commit(repo)
     result = route.classify_pr(repo, 'pull_request', event(base, head), require_preview_receipts=True)
     assert result['backend_required'] is True
-    assert result['route_reason'] == 'preview_receipts_required'
+    assert result['route_reason'] == 'preview_basic_presentation_text_only'
+    assert result['groups'] == ['basic']
 
 
 def test_legitimate_skip_publishes_explicit_reason(presentation_repository, tmp_path):
@@ -376,5 +377,87 @@ def test_legitimate_skip_publishes_explicit_reason(presentation_repository, tmp_
         'REQUIRE_PREVIEW_RECEIPTS': 'false',
     }, capture_output=True, text=True)
     assert result.returncode == 0
-    assert output.read_text() == 'docs_only=false\nbackend_required=false\nroute_reason=presentation_text_only\n'
+    assert output.read_text() == 'docs_only=false\nbackend_required=false\nroute_reason=presentation_text_only\nbackend_groups=skip\n'
     assert 'presentation_text_only' in summary.read_text()
+
+
+@pytest.mark.parametrize('path, groups', [
+    ('sdk/python/pyproject.toml', ['basic', 'receiver']),
+    ('deploy/d4-acceptance/revoke-receiver.Dockerfile', ['basic', 'receiver']),
+    ('backend/app/services/agent_runtime/trial_launcher.py', ['basic', 'capa', 'receiver', 'runtime']),
+    ('backend/app/services/agent_runtime/control_authority_fence.py', ['basic', 'capa', 'receiver', 'runtime']),
+    ('backend/app/services/agent_runtime/checkpoint_service.py', ['basic', 'capa', 'receiver', 'runtime']),
+    ('backend/app/services/capa_agent_projection.py', ['basic', 'capa', 'receiver', 'runtime']),
+    ('backend/app/api/capa.py', ['basic', 'capa', 'receiver', 'runtime']),
+    ('backend/app/services/capa_doc_gate_service.py', ['basic', 'capa', 'control_plan']),
+    ('backend/app/services/mes_service.py',
+     ['basic', 'capa', 'control_plan', 'fmea', 'integrations', 'msa', 'receiver', 'spc']),
+    ('backend/app/services/capa_d4_redaction.py', ['basic', 'capa', 'receiver', 'runtime']),
+    ('backend/app/services/graph_projection_service.py',
+     ['basic', 'capa', 'control_plan', 'fmea', 'integrations', 'receiver']),
+    ('backend/app/services/fmea_agent_sources.py',
+     ['basic', 'capa', 'control_plan', 'fmea', 'integrations', 'receiver', 'runtime']),
+    ('backend/app/models/capa_d5_proposal.py', ['basic', 'capa', 'receiver', 'runtime', 'tenant']),
+    ('backend/app/models/unknown_future_model.py', ['full']),
+    ('backend/alembic_tenant/versions/tv008_d4_recovery.py',
+     ['basic', 'capa', 'receiver', 'runtime', 'tenant']),
+    ('backend/alembic_tenant/versions/20261121_example.py', ['full']),
+    ('backend/alembic/env.py', ['full']),
+    ('backend/app/services/tenant_migrator.py', ['full']),
+    ('backend/tests/migrations/test_tenant_schema_parity.py', ['basic', 'tenant']),
+    ('backend/app/core/deps.py', ['full']),
+    ('backend/app/core/tenant_context.py', ['full']),
+    ('backend/requirements.txt', ['full']),
+    ('backend/tests/conftest.py', ['full']),
+    ('backend/tests/ci/prepare_database.py', ['full']),
+    ('.github/workflows/test.yml', ['full']),
+    ('scripts/ci/backend_route.py', ['full']),
+    ('unrecognized/path.py', ['full']),
+])
+def test_dependency_routes(path, groups):
+    assert load_route().classify_diff(b'M\0' + path.encode() + b'\0')['groups'] == groups
+
+
+@pytest.mark.parametrize('operation,groups', [
+    ('modify', ['basic', 'msa']),
+    ('delete', ['basic', 'msa']),
+    ('rename', ['basic', 'apqp', 'msa']),
+    ('mixed_backend', ['basic', 'capa', 'iqc', 'msa']),
+    ('mixed_presentation', ['full']),
+    ('symlink', ['full']),
+])
+def test_complete_git_diffs_choose_expected_groups(presentation_repository, operation, groups):
+    repo = presentation_repository
+    grr = 'backend/app/services/grr_service.py'
+    write(repo, grr, 'print(1)\n')
+    base = commit(repo)
+    if operation == 'delete':
+        git(repo, 'rm', grr)
+    elif operation == 'rename':
+        git(repo, 'mv', grr, 'backend/app/services/apqp_service.py')
+    elif operation == 'symlink':
+        path = repo / grr
+        path.unlink()
+        path.symlink_to('apqp_service.py')
+    else:
+        write(repo, grr, 'print(2)\n')
+        if operation == 'mixed_backend':
+            write(repo, 'backend/app/services/iqc_inspection_service.py', 'print(3)\n')
+        elif operation == 'mixed_presentation':
+            edit_text(repo)
+    commit(repo)
+    assert classify(repo, base)['groups'] == groups
+
+
+def test_preview_keeps_related_modules_and_pure_docs_get_a_basic_receipt(repository):
+    base = git(repository, 'rev-parse', 'HEAD')
+    write(repository, 'README.md', 'Documentation')
+    head = commit(repository)
+    route = load_route()
+    result = route.classify_pr(repository, 'pull_request', event(base, head), require_preview_receipts=True)
+    assert result['groups'] == ['basic']
+    assert result['reason'] == 'preview_basic_allowlisted_markdown_only'
+    write(repository, 'backend/app/services/grr_service.py', 'print(1)\n')
+    head = commit(repository)
+    result = route.classify_pr(repository, 'pull_request', event(base, head), require_preview_receipts=True)
+    assert result['groups'] == ['basic', 'msa']

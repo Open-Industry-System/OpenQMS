@@ -424,3 +424,26 @@ def test_production_controller_propagates_only_file_erp_policy_with_safe_legacy_
     compose = next(options for argv,options in calls if argv[:2] == ['docker','compose'])
     assert compose['env']['ERP_ALLOWED_ORIGINS'] == expected
     assert 'DATABASE_URL' not in compose['env']
+
+
+def test_shared_runner_umask_preserves_release_metadata_archive_contract(tmp_path):
+    import os
+    import tarfile
+
+    local = module('deploy-oracle-release')
+    source = tmp_path / 'source'
+    source.mkdir(mode=0o700)
+    bundle = tmp_path / 'release.tar'
+    expected = {'.release-manifest': b'fixture-manifest\n', '.release-sha': b'a' * 40 + b'\n'}
+    previous = os.umask(0o077)
+    try:
+        local.write_release_metadata(source, expected['.release-manifest'], 'a' * 40)
+        with tarfile.open(bundle, 'w') as archive:
+            for name in expected:
+                archive.add(source / name, arcname=name)
+    finally:
+        os.umask(previous)
+    assert source.stat().st_mode & 0o777 == 0o700
+    with tarfile.open(bundle) as archive:
+        assert {entry.name: entry.mode for entry in archive} == dict.fromkeys(expected, 0o644)
+        assert {name: archive.extractfile(name).read() for name in expected} == expected

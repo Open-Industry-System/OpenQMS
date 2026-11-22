@@ -1,15 +1,19 @@
 """PostgreSQL evidence for isolated R5 proposal metadata."""
 import asyncio
+import os
 import uuid
 
 import pytest
 import sqlalchemy as sa
 from alembic import command
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.schemas.platform import TenantCreateRequest
 from app.services import tenant_migrator
+from tests.ci.database_template import fixture_database
+from tests.migrations.agent_delta_support import assert_public_delta, assert_tenant_delta
 from tests.migrations.test_agent_task_core import _migration_config, _sync_engine
 
 PUBLIC = '20261114_r5_d5_proposals'
@@ -21,44 +25,21 @@ TABLES = {'capa_d5_proposals', 'capa_d5_proposal_sources', 'capa_d5_measures', '
 
 @pytest.mark.parametrize('ancestor', [None, PUBLIC_PARENT])
 def test_public_recovery_tables_at_head(mig_db_url, ancestor):
-    config = _migration_config(mig_db_url)
-    if ancestor:
-        command.upgrade(config, ancestor)
-    command.upgrade(config, PUBLIC)
-    engine = _sync_engine(mig_db_url)
-    try:
-        with engine.connect() as conn:
-            assert TABLES <= set(sa.inspect(conn).get_table_names())
-            assert conn.scalar(sa.text('SELECT version_num FROM alembic_version')) == PUBLIC
-    finally:
-        engine.dispose()
+    assert_public_delta(mig_db_url, predecessor=ancestor, revision=PUBLIC, tables=TABLES)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('ancestor', [None, TENANT_PARENT])
 async def test_tenant_recovery_tables_at_head(mig_db_url, monkeypatch, ancestor):
-    config = _migration_config(mig_db_url)
-    await asyncio.to_thread(command.upgrade, config, PUBLIC_PARENT if ancestor else PUBLIC)
-    engine = create_async_engine(mig_db_url, poolclass=NullPool)
-    monkeypatch.setattr(tenant_migrator, 'engine', engine)
-    monkeypatch.setattr(tenant_migrator, 'REVISION', ancestor or TENANT)
-    try:
-        tenant = await tenant_migrator.provision_new(TenantCreateRequest(
-            name='Recovery delta', slug='recovery-' + uuid.uuid4().hex[:10],
-            admin_email='recovery@example.test', admin_password='D4TestPassword123',
-        ))
-        if ancestor:
-            await asyncio.to_thread(command.upgrade, config, PUBLIC)
-            monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT)
-            tenant = await tenant_migrator.resume_tenant(tenant.id)
-        async with engine.connect() as conn:
-            names = await conn.run_sync(lambda c: set(sa.inspect(c).get_table_names(schema=tenant.schema_name)))
-            assert TABLES <= names
-            assert await conn.scalar(sa.text(f'SELECT version_num FROM "{tenant.schema_name}".tenant_schema_version')) == TENANT
-    finally:
-        await engine.dispose()
-
-
+    await assert_tenant_delta(
+        mig_db_url,
+        monkeypatch,
+        public_predecessor=PUBLIC_PARENT,
+        public_revision=PUBLIC,
+        tenant_predecessor=ancestor,
+        tenant_revision=TENANT,
+        tables=TABLES,
+    )
 
 
 def _seed_proposal(conn, schema="public"):
@@ -78,30 +59,46 @@ def _seed_proposal(conn, schema="public"):
     return ids
 
 
+@pytest.fixture(scope='module')
+def migrated_proposal_constraints():
+    """Migrate and seed once. Each constraint case rolls back its own transaction."""
+    with fixture_database(os.environ) as database:
+        # Alembic gives DATABASE_URL precedence over its explicit config URL.
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setenv('DATABASE_URL', database.async_url)
+            command.upgrade(_migration_config(database.async_url), PUBLIC)
+        engine = _sync_engine(database.async_url)
+        try:
+            with engine.begin() as conn:
+                ids = _seed_proposal(conn)
+            yield engine, ids
+        finally:
+            engine.dispose()
+
+
 @pytest.mark.parametrize('violation', ['key', 'sequence', 'delete', 'null', 'state', 'hmac', 'missing_proof'])
-def test_real_constraints_reject_invalid_writes(mig_db_url, violation):
-    from sqlalchemy.exc import IntegrityError
-    command.upgrade(_migration_config(mig_db_url), PUBLIC)
-    engine = _sync_engine(mig_db_url)
-    try:
-        with engine.begin() as conn:
-            ids = _seed_proposal(conn)
-            with pytest.raises(IntegrityError), conn.begin_nested():
-                if violation in {'key','sequence'}:
-                    conn.execute(sa.text("INSERT INTO agent_d5_commands (command_id,task_id,run_id,proposal_id,operation,command_key,request_hmac,sequence) VALUES (:new,:task_id,:run_id,:proposal_id,'save',:key,:hmac,:seq)"),
-                                 dict(ids,new=uuid.uuid4(),key='first' if violation=='key' else 'second',hmac='a'*64,seq=2 if violation=='key' else 1))
-                elif violation == 'delete':
-                    conn.execute(sa.text('DELETE FROM agent_tasks WHERE task_id=:task_id'), ids)
-                elif violation == 'null':
-                    conn.execute(sa.text('UPDATE capa_d5_proposals SET original_text=NULL'))
-                elif violation == 'missing_proof':
-                    conn.execute(sa.text('UPDATE capa_d5_proposals SET proof_id=:missing'), {'missing':uuid.uuid4()})
-                elif violation == 'state':
-                    conn.execute(sa.text("UPDATE capa_d5_proposals SET state='invalid'"))
-                else:
-                    conn.execute(sa.text("UPDATE agent_d5_commands SET request_hmac='invalid'"))
-    finally:
-        engine.dispose()
+def test_real_constraints_reject_invalid_writes(migrated_proposal_constraints, violation):
+    engine, ids = migrated_proposal_constraints
+    with engine.connect() as conn:
+        with pytest.raises(IntegrityError), conn.begin_nested():
+            if violation in {'key', 'sequence'}:
+                command_row = dict(ids, new=uuid.uuid4(), key='first' if violation == 'key' else 'second',
+                                   hmac='a'*64, seq=2 if violation == 'key' else 1)
+                conn.execute(sa.text("""
+                    INSERT INTO agent_d5_commands
+                        (command_id, task_id, run_id, proposal_id, operation, command_key, request_hmac, sequence)
+                    VALUES (:new, :task_id, :run_id, :proposal_id, 'save', :key, :hmac, :seq)
+                """), command_row)
+            elif violation == 'delete':
+                conn.execute(sa.text('DELETE FROM agent_tasks WHERE task_id=:task_id'), ids)
+            elif violation == 'null':
+                conn.execute(sa.text('UPDATE capa_d5_proposals SET original_text=NULL'))
+            elif violation == 'missing_proof':
+                conn.execute(sa.text('UPDATE capa_d5_proposals SET proof_id=:missing'), {'missing': uuid.uuid4()})
+            elif violation == 'state':
+                conn.execute(sa.text("UPDATE capa_d5_proposals SET state='invalid'"))
+            else:
+                conn.execute(sa.text("UPDATE agent_d5_commands SET request_hmac='invalid'"))
 
 
 def test_populated_downgrade_refused_atomically(mig_db_url):
@@ -162,7 +159,6 @@ def test_empty_downgrade_preserves_legacy_d5(mig_db_url):
 
 def test_measure_source_and_staff_receipt_uniqueness(mig_db_url):
     from app.database import TenantBase
-    from sqlalchemy.exc import IntegrityError
     command.upgrade(_migration_config(mig_db_url), PUBLIC)
     engine = _sync_engine(mig_db_url)
     try:
