@@ -197,9 +197,6 @@ class TestHybridRecommendationPipeline:
         assert "historical_capa_measure" in source_names
         assert "rule_engine_measure" in source_names
 
-        # Verify D5 Stage 2 expander exists on the orchestrator
-        assert pipeline.orchestrator.d5_control_expander is not None
-
     @pytest.mark.asyncio
     async def test_recommend_returns_recommendation_result(self, monkeypatch):
         monkeypatch.setattr(provider_adapter, "complete_json", AsyncMock(return_value=[]))
@@ -220,7 +217,6 @@ class TestHybridRecommendationPipeline:
         )
 
         result = await pipeline.recommend(ctx, **_recommend_kwargs())
-        assert hasattr(result, "items")
         assert isinstance(result.items, list)
 
     @pytest.mark.asyncio

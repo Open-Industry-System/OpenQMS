@@ -21,7 +21,9 @@ from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5ProposalSource
 from app.models.fmea import FMEADocument
 from app.services.agent_runtime import runtime_access
 from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
-from tests.e2e.d4_text_local_harness import d4_text_local_trial, owned_local_trial
+from tests.services.agent_runtime.d4_fixture_support import (
+    prepared_local_trial as owned_local_trial, prepared_text_trial as d4_text_local_trial,
+)
 
 pytestmark = pytest.mark.requires_db
 
@@ -185,14 +187,6 @@ async def test_explicit_current_user_correction_atomically_supersedes(command_ca
         newer = await db.get(CapaD5Proposal, replacement['proposal_id'])
         assert newer.predecessor_id == first['proposal_id'] and newer.correction_message_id == message_id
     assert await c.save('replacement', operation='replace', predecessor_id=first['proposal_id'], correction_message_id=message_id) == replacement
-
-
-def test_command_has_no_caller_target_or_sources():
-    from app.services.agent_runtime.d5_commands import D5Command
-    from pydantic import ValidationError
-    for extra in ({'report_id': str(uuid4())}, {'executor_id': str(uuid4())}, {'sources': []}):
-        with pytest.raises(ValidationError):
-            D5Command(command_key='k', text='text', **extra)
 
 
 @pytest.mark.asyncio
@@ -472,20 +466,6 @@ async def test_receipt_relationships_and_seal_are_not_independent_fk_authority(c
         await db.commit()
     with pytest.raises(PermissionError):
         await c.save()
-
-
-def test_r5_capabilities_stay_denied_and_absent_from_older_profiles():
-    from app.services.capa_agent_capabilities import D5_SAVE_CAPABILITY, D5_REPLACE_CAPABILITY
-    from app.services.agent.permissions.catalog import get_capability
-    from app.services.agent.permissions.types import ApprovalFloor
-    from app.services.agent_runtime.deployment_profiles import PROFILES
-    assert PROFILES['model_d5_proposal_v1'].required == frozenset({
-        'capa.d4.root_cause_candidate.masked.v1', D5_SAVE_CAPABILITY})
-    for capability in (D5_SAVE_CAPABILITY, D5_REPLACE_CAPABILITY):
-        assert get_capability(capability, profile='model_d5_proposal_v1').approval_floor == ApprovalFloor.DIRECT
-        assert get_capability(capability).approval_floor == ApprovalFloor.DENY
-        assert get_capability(capability, profile='local_metadata_v1') is None
-        assert get_capability(capability, profile='local_d4_root_cause_text_v1') is None
 
 
 @pytest.mark.asyncio

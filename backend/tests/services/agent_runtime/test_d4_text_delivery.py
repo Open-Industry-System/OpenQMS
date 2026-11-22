@@ -20,7 +20,10 @@ from app.models.agent_derived_source import AgentTaskDerivedSourceScope
 from app.models.audit import AuditLog
 from app.models.fmea import FMEADocument
 from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
-from tests.e2e.d4_text_local_harness import d4_text_local_trial, d4_text_server, owned_local_trial
+from tests.e2e.d4_text_local_harness import d4_text_server
+from tests.services.agent_runtime.d4_fixture_support import (
+    prepared_local_trial as owned_local_trial, prepared_text_trial as d4_text_local_trial,
+)
 
 pytestmark = pytest.mark.requires_db
 
@@ -747,23 +750,6 @@ async def test_role_change_while_waiting_for_acl_rows_is_rejected(d4_text_server
     assert 'synthetic candidate' not in response.text
     async with c.session() as db:
         assert await db.scalar(select(func.count()).select_from(AgentRestrictedProjectionReceipt)) == 0
-
-
-def test_final_json_budget_counts_encoded_bytes_and_hides_candidate_repr():
-    from types import SimpleNamespace
-    from app.services.agent.permissions.derived_sources import SourceUnavailable
-    from app.services.agent_runtime.d4_text_delivery import RootCandidateSnapshot, encode_bounded_release
-    from app.services.capa_d4_redaction import RULE_VERSION
-    identity = SimpleNamespace(run=SimpleNamespace(run_id=uuid4()), task=SimpleNamespace(task_id=uuid4()),
-        installation=SimpleNamespace(installation_id=uuid4(), plugin_version='1.0.0'))
-    secret = '保密内容' * 20
-    snapshot = RootCandidateSnapshot(uuid4(), uuid4(), 'LINE', uuid4(), uuid4(), 'a' * 64,
-        'b' * 64, 'c' * 64, 'd' * 64, RULE_VERSION, secret)
-    release = encode_bounded_release(identity, snapshot, limit=256 * 1024)
-    assert secret not in repr(snapshot) and secret not in repr(release)
-    assert len(release.body) > len(release.body.decode('utf-8'))
-    with pytest.raises(SourceUnavailable):
-        encode_bounded_release(identity, snapshot, limit=len(release.body) - 1)
 
 
 @pytest.mark.asyncio

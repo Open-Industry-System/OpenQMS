@@ -14,6 +14,7 @@ from urllib.parse import quote, unquote, urlsplit
 from xml.etree import ElementTree
 
 
+API_EXCLUDED_MARKS = ('ci_browser', 'ci_r5_native', 'live_provider', 'real_scanner')
 COUNTS = ('selected', 'passed', 'failed', 'errors', 'skipped', 'xfailed', 'xpassed', 'deselected', 'warnings')
 _AUTHORIZATION = re.compile(r'(?im)^(authorization\s*:\s*)([^\r\n]+)$')
 
@@ -84,6 +85,19 @@ def pytest_sessionstart(session) -> None:
     _HOOK_STATE.update(selected=0, deselected=0, outcomes={}, warnings=0,
                        collection_seconds=0.0, execution_seconds=0.0, durations={}, modules={})
 
+    if os.environ.get('OPENQMS_ROUTED_BACKEND') == '1':
+        _HOOK_STATE['routed'] = {'collected_files': set(), 'expected': [], 'selected': [], 'executed': {}}
+
+
+def pytest_itemcollected(item) -> None:
+    # This hook precedes marker filtering. It distinguishes an omitted source
+    # file from one whose collected nodes belong only to a dedicated gate.
+    if routed := _HOOK_STATE.get('routed'):
+        module = item.path.relative_to(item.config.rootpath).as_posix()
+        routed['collected_files'].add(module)
+        if not any(item.get_closest_marker(mark) for mark in API_EXCLUDED_MARKS):
+            routed['expected'].append(module + '::' + item.nodeid.partition('::')[2])
+
 
 def _progress(event: str, nodeid: str) -> None:
     if not os.environ.get('OPENQMS_GATE_HOOKS'):
@@ -109,6 +123,8 @@ def pytest_collection_finish(session) -> None:
     _HOOK_STATE['selected'] = len(session.items)
     identities = [(os.path.relpath(item.path, session.config.rootpath), item.nodeid.partition('::')[2])
                   for item in session.items]
+    if routed := _HOOK_STATE.get('routed'):
+        routed['selected'] = [f'{file}::{case}' for file, case in identities]
     _HOOK_STATE['selection_sha256'] = hashlib.sha256(json.dumps(identities, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -136,6 +152,11 @@ def pytest_runtest_logreport(report) -> None:
         outcomes[report.nodeid] = 'errors'
     elif report.when == 'setup' and report.skipped:
         outcomes[report.nodeid] = 'skipped'
+    if routed := _HOOK_STATE.get('routed'):
+        execution = routed['executed'].setdefault(identity, {'phases': []})
+        execution['phases'].append(report.when)
+        if report.nodeid in outcomes:
+            execution['outcome'] = outcomes[report.nodeid]
 
 
 def pytest_terminal_summary(terminalreporter) -> None:
@@ -168,6 +189,8 @@ def pytest_terminal_summary(terminalreporter) -> None:
             for nodeid, phases in sorted(durations.items(), key=lambda item: sum(item[1].values()), reverse=True)[:20]
         ],
     }
+    if routed := _HOOK_STATE.get('routed'):
+        summary['routed'] = {**routed, 'collected_files': sorted(routed['collected_files'])}
     output = Path(destination)
     output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     output.write_text(json.dumps(summary, sort_keys=True) + '\n')
