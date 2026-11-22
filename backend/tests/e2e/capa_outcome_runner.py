@@ -51,6 +51,7 @@ MARKS = {
     'live': 'live_provider',
     'scanner': 'real_scanner and not live_provider',
 }
+BACKEND_IGNORES = ('tests/test_graph_sync_worker.py', 'tests/test_graph_projection.py')
 DEFAULT_TARGETS = {
     'api': (
         'tests/capa/test_capa_review_concurrency.py',
@@ -360,8 +361,11 @@ def run_pytest_layer(
     *, layer: str, targets: Sequence[str], source: Mapping[str, str], database_url: str, artifacts: Path,
     live_configuration: Mapping[str, str] | None = None, python: str | None = None,
     pytest_args: Sequence[str] = (), pytest_entrypoint: Sequence[str] = ('-m', 'tests.ci.pytest_bootstrap'),
+    backend_shard: int | None = None,
 ) -> dict:
     """Run one isolated pytest child and publish only its filtered log and receipt."""
+    if backend_shard is not None and (layer != 'api' or type(backend_shard) is not int or backend_shard not in (0, 1)):
+        raise ValueError('backend shards apply only to ordinary API acceptance')
     environment = build_layer_environment(source, database_url, layer, live_configuration)
     stem = f'{layer}-{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")}'
     private = private_result_directory()
@@ -372,6 +376,11 @@ def run_pytest_layer(
         layer, targets, private_junit, private_hooks, python=python, pytest_args=pytest_args,
         pytest_entrypoint=pytest_entrypoint,
     )
+    shard_evidence = Path(private.name) / f'{stem}.shard.json'
+    if backend_shard is not None:
+        environment['OPENQMS_BACKEND_SHARD'] = str(backend_shard)
+        environment['OPENQMS_BACKEND_SHARD_EVIDENCE'] = str(shard_evidence)
+        command += ['-p', 'tests.ci.backend_shards']
     log_path = artifacts / f'{stem}.log'
     receipt_path = artifacts / f'{stem}-receipt.json'
     secrets = [
@@ -416,25 +425,46 @@ def run_pytest_layer(
             receipt.update(summary, exit_code=exit_code)
             _publish_pytest_timing(private_hooks, log_path, secrets)
             try:
-                _require_r5_success(private_junit, summary, layer, targets)
+                mandatory_targets = targets
+                if backend_shard is not None:
+                    from tests.ci.backend_shards import module_shard
+                    # Keep the original exact mandatory-node checks in each
+                    # owning runner; aggregate execution evidence checks again.
+                    files = [SDK_PROCESS_TARGET, D4_TEXT_PROCESS_TARGET,
+                             *(name.replace('.', '/') + '.py' for name in R5_REQUIRED.get(layer, {}))]
+                    mandatory_targets = tuple(file for file in files if module_shard(file) == backend_shard
+                                              and any((BACKEND_DIR / file).resolve().is_relative_to(
+                                                  (BACKEND_DIR / target.split('::', 1)[0]).resolve()) for target in targets))
+                _require_r5_success(private_junit, summary, layer, mandatory_targets)
                 if layer in {'browser', 'r5-browser', 'live', 'scanner'}:
                     require_gate_success(summary, exit_code)
                 else:
                     _require_completed_layer(summary, exit_code)
-                    if _includes_sdk_process(targets):
+                    if _includes_sdk_process(mandatory_targets):
                         _require_sdk_process_success(private_junit, summary)
-                    if _includes_d4_text_process(targets):
+                    if _includes_d4_text_process(mandatory_targets):
                         _require_d4_text_process_success(private_junit, summary)
             except ValueError:
                 pass
             else:
-                receipt['status'] = 'PASSED'
+                if backend_shard is not None:
+                    try:
+                        evidence = json.loads(shard_evidence.read_text())
+                        if evidence.get('index') != backend_shard or len(evidence.get('selected_nodes', [])) != summary['selected']:
+                            raise ValueError('backend shard evidence is incomplete')
+                        receipt['backend_shard'] = evidence
+                    except (OSError, ValueError, TypeError):
+                        pass
+                    else:
+                        receipt['status'] = 'PASSED'
+                else:
+                    receipt['status'] = 'PASSED'
     finally:
         if layer == 'scanner':
             from tests.ci.acceptance_evidence import scanner_observations
 
             receipt['observations'] = scanner_observations(private_junit)
-        for private_file in (private_junit, private_hooks):
+        for private_file in (private_junit, private_hooks, shard_evidence):
             private_file.unlink(missing_ok=True)
         private.cleanup()
         receipt['elapsed_seconds'] = round(time.monotonic() - started, 2)
@@ -443,7 +473,12 @@ def run_pytest_layer(
         if 'observations' in receipt:
             receipt['observations'] = {name: redact(value, secrets) for name, value in receipt['observations'].items()}
         _write_receipt(receipt_path, receipt)
-        print('pytest receipt=' + str(receipt_path) + ' ' + json.dumps(receipt, sort_keys=True))
+        public_receipt = {key: value for key, value in receipt.items() if key != 'backend_shard'}
+        if 'backend_shard' in receipt:
+            evidence = receipt['backend_shard']
+            public_receipt['backend_shard'] = {'index': evidence['index'],
+                                              'selected_count': len(evidence['selected_nodes'])}
+        print('pytest receipt=' + str(receipt_path) + ' ' + json.dumps(public_receipt, sort_keys=True))
         if receipt['status'] != 'PASSED' and log_path.is_file():
             print('pytest filtered failure log:\n' + log_path.read_text())
     return receipt
@@ -461,6 +496,7 @@ def _live_configuration(source: Mapping[str, str], profile: Path | None) -> dict
 def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=('api', 'browser', 'r5-api', 'r5-browser', 'live', 'acceptance'))
+    parser.add_argument('--backend-shard', type=int, choices=(0, 1), help='whole-module partition of the full ordinary backend suite')
     parser.add_argument('--test-profile', type=Path, help='explicit non-interpolated live provider profile')
     parser.add_argument('--pytest-target', action='append', dest='targets', help='override default target; repeatable')
     parser.add_argument('--pytest-arg', action='append', dest='pytest_args', help='additional pytest option; repeatable')
@@ -469,6 +505,8 @@ def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _arguments(argv)
+    if args.backend_shard is not None and (args.mode != 'api' or args.targets != ['tests']):
+        raise ValueError('backend shard requires api --pytest-target tests')
     from tests.ci.browser_runtime import resolve_browser
     from tests.ci.owned_resources import artifact_directory, verify_owned_database, verify_owned_instance
 
@@ -496,6 +534,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             layer=layer, targets=targets, source=source, database_url=database_url, artifacts=artifacts,
             live_configuration=live if layer == 'live' else None,
             python=source.get('OPENQMS_OUTCOME_PYTHON'), pytest_args=tuple(args.pytest_args or ()),
+            backend_shard=args.backend_shard,
         ))
     status = 0 if all(receipt['status'] == 'PASSED' for receipt in receipts) else 1
     print('TASK7_EXIT: mode=' + args.mode + '; code=' + str(status))

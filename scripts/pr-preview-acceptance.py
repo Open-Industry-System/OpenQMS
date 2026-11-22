@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Trusted metadata-only PR plan and human preview acceptance statuses."""
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import hashlib
 import io
 import json
@@ -21,7 +21,6 @@ SHARED_TEST_WORKFLOW = 'oracle-shared-test.yml'
 SHARED_TEST_URL = 'https://test.preview.openqms.smartindustry.world'
 SHARED_TEST_ARTIFACT = 'shared-test-publication'
 D4_ARTIFACT = 'shared-test-d4-evidence'
-SHANGHAI = timezone(timedelta(hours=8))
 
 
 def shared_test_enabled():
@@ -33,7 +32,7 @@ def preview_url(number, shared):
 
 
 def accepts_workflow_source(run, workflow):
-    events = {'workflow_run', 'schedule', 'workflow_dispatch'} if workflow == SHARED_TEST_WORKFLOW else {'workflow_run'}
+    events = {'workflow_run', 'schedule', 'workflow_dispatch', 'issue_comment'} if workflow == SHARED_TEST_WORKFLOW else {'workflow_run'}
     return run.get('path') == f'.github/workflows/{workflow}' and run.get('event') in events
 
 
@@ -237,8 +236,7 @@ def ready_notice(pr, run, digest):
     url = preview_url(number, shared)
     command = acceptance_command(pr, run, digest)
     if shared:
-        deadline = datetime.fromtimestamp(shared['expires_at'], SHANGHAI).strftime('%Y-%m-%d %H:%M:%S (UTC+8)')
-        validity = f'共享测试位当前用于 PR #{number}，本轮验收截止 {deadline}。\n\n'
+        validity = f'共享测试位当前用于 PR #{number}，等待人工验收。\n\n'
         ending = '验收后会清理测试资源并切换至下一项。'
         identity = shared_identity(sha, shared['sha'], digest, shared['queue_lease'])
         marker = f'<!-- openqms-shared-test-active:{identity} -->\n'
@@ -312,12 +310,12 @@ def d4_scenarios(plan):
     return {item.scenario for item in plan.items if item.scenario.startswith('d4-')}
 
 
-def valid_d4_evidence(receipt, proofs):
+def valid_d4_evidence(proofs):
     return (isinstance(proofs, dict) and set(proofs) <= {'d4-deliver', 'd4-revoke'}
             and all(isinstance(proof, dict) and set(proof) == {'sha256', 'completed_at', 'expires_at'}
                     and isinstance(proof['sha256'], str) and re.fullmatch(r'[0-9a-f]{64}', proof['sha256'])
                     and type(proof['completed_at']) is int and type(proof['expires_at']) is int
-                    and 0 < proof['completed_at'] < proof['expires_at'] <= receipt['expires_at']
+                    and 0 < proof['completed_at'] < proof['expires_at']
                     for proof in proofs.values()))
 
 
@@ -329,7 +327,7 @@ def shared_d4_evidence(api, receipt, deployment, required):
                 or any(evidence.get(key) != receipt[key] for key in identity)):
             continue
         proofs = evidence.get('proofs')
-        if (not valid_d4_evidence(receipt, proofs) or not required <= proofs.keys()
+        if (not valid_d4_evidence(proofs) or not required <= proofs.keys()
                 or any(proof['completed_at'] < epoch(deployment['updated_at'])
                        or proof['completed_at'] > epoch(run['updated_at']) for proof in proofs.values())):
             continue
@@ -347,7 +345,7 @@ def shared_publication(api, pr, queue_lease):
         lease = receipt.get('queue_lease')
         expires = receipt.get('expires_at')
         if (not isinstance(lease, str) or not re.fullmatch(r'[0-9a-f]{32}', lease)
-                or type(expires) is not int or not 0 < expires < 2**32):
+                or (expires is not None and (type(expires) is not int or not 0 < expires < 2**32))):
             raise ValueError('Invalid shared test lease receipt')
         if receipt.get('plan') == plan.digest and (queue_lease is None or lease == queue_lease):
             # Proofs can only come from the separately named trusted workflow artifact.
@@ -415,7 +413,7 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
                     epoch(comment['created_at']) < proof['completed_at'] or last_edit >= proof['expires_at']
                     for proof in proofs.values()):
                 continue
-            if last_edit >= shared['expires_at'] or (released_at is not None and last_edit >= released_at):
+            if released_at is not None and last_edit >= released_at:
                 continue
         if items:
             confirmations = RESULT_LINE.findall(comment.get('body') or '')
@@ -436,7 +434,7 @@ def shared_blockers(plan, receipt, proofs=None, *, now=None):
     if (not isinstance(issued_roles, list)
             or any(role not in ('field_qe', 'manager') for role in issued_roles)):
         issued_roles = []
-    proofs = proofs if proofs and valid_d4_evidence(receipt, proofs) else {}
+    proofs = proofs if proofs and valid_d4_evidence(proofs) else {}
     blockers = []
     for item in plan.items:
         if item.environment == 'shared' and item.role not in issued_roles:
@@ -451,12 +449,13 @@ def shared_blockers(plan, receipt, proofs=None, *, now=None):
 def shared_test_ready_notice(api, pr, run, digest):
     receipt = run['shared_test']
     if (not receipt_matches(api, pr, receipt) or receipt['plan'] != digest
-            or datetime.now(timezone.utc).timestamp() >= receipt['expires_at']
             or not deployment_after_reopen(api, pr, run)
             or not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest)):
         return
-    if shared_release_marker(api, pr, digest):
-        return  # A repeated poll cannot put the released link back.
+    if retired := shared_release_marker(api, pr, digest):
+        if (retired['lease'] == receipt['queue_lease']
+                or epoch(run['updated_at']) <= retired['released_at']):
+            return  # A poll cannot put a retired lease or older publication back.
     plan = parse_plan(pr.get('body'))
     blockers = shared_blockers(plan, receipt, run.get('d4_evidence'),
                                now=int(datetime.now(timezone.utc).timestamp()))
@@ -492,7 +491,10 @@ def shared_test_released_notice(api, slot):
             return
     cutoff = int(datetime.now(timezone.utc).timestamp())
     marker = f'<!-- openqms-shared-test-release:{identity}:{slot["outcome"]}:{cutoff} -->'
-    detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
+    if slot['outcome'] == 'switched':
+        detail = '管理员切换了测试位，本 PR 可在后续轮次继续验收。'
+    else:
+        detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
     api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### 共享测试位已清理\n\n{detail}'
                f'固定测试地址将用于队列中的下一项。\n\n版本：`{slot["head"]}`')
 
@@ -501,7 +503,7 @@ def shared_release_marker(api, pr, digest):
     for body in bot_notices(api, pr['number']):
         match = re.search(
             r'<!-- openqms-shared-test-release:([0-9a-f]{40}):([0-9a-f]{40}):([0-9a-f]{64}):'
-            r'([0-9a-f]{32}):(passed|failed|deploy-failed|expired|superseded):([0-9]+) -->',
+            r'([0-9a-f]{32}):(passed|failed|deploy-failed|expired|superseded|switched):([0-9]+) -->',
             body,
         )
         if match and match.group(1, 2, 3) == (pr['head']['sha'], pr['merge_commit_sha'], digest):
@@ -563,14 +565,11 @@ def reconcile(api, pr, summary):
         api.status(sha, ACCEPT, 'pending', '本轮共享测试缺少必要验收能力')
         summary.append(f'PR #{pr["number"]} 受阻：' + '、'.join(blockers))
         return
-    if receipt and datetime.now(timezone.utc).timestamp() >= receipt['expires_at']:
-        summary.append(f'PR #{pr["number"]}: 当前共享测试位已到期，等待清理。')
-    else:
-        if not shared:
-            api.notice(pr['number'], ready_notice(pr, run, digest))
-        command = acceptance_command(pr, run, digest)
-        url = preview_url(pr['number'], receipt)
-        summary.append(f'PR #{pr["number"]}: {url}\n\n逐项测试后评论以下命令，并另写实际结果/截图链接：\n\n```text\n{command}\n```')
+    if not shared:
+        api.notice(pr['number'], ready_notice(pr, run, digest))
+    command = acceptance_command(pr, run, digest)
+    url = preview_url(pr['number'], receipt)
+    summary.append(f'PR #{pr["number"]}: {url}\n\n逐项测试后评论以下命令，并另写实际结果/截图链接：\n\n```text\n{command}\n```')
     if run.get('d4_evidence'):
         summary.append(f'PR #{pr["number"]}: 等待共享测试控制器签收当前回执并确认资源清理。')
         return

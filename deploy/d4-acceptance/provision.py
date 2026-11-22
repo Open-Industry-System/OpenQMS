@@ -172,8 +172,8 @@ def provision(lease):
         prepared = decode(read_owned(directory / 'prepared.json', 32768, private=True))
         binding = prepared['binding']
         validate_binding(binding)
-        require(all(binding[key] == slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease'))
-                and binding['expires_at'] <= slot['expires_at'], 'D4 preparation does not match current test slot')
+        require(all(binding[key] == slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease')),
+                'D4 preparation does not match current test slot')
         require(not (directory / 'profile.json').exists() and not (directory / 'profile.json').is_symlink(),
                 'D4 profile already exists')
         permitted_cells(prepared, binding)

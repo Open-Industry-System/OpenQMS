@@ -80,7 +80,7 @@ def test_host_assigns_fixed_route_and_releases_before_next_pr(host):
     assert 'openqms-pr-45-web:8080' in path.read_text()
     assert f'X-OpenQMS-Test-Version "{first["merge"]}"' in path.read_text()
     assert not (path.parent / 'pr-45.caddy').exists()
-    assert ready['expires_at'] == 100 + 7200
+    assert ready['expires_at'] is None
     assert ready['test_roles'] == ['field_qe', 'manager']
     host[0].shared_account_roles.assert_called_once_with(45, first['merge'], first['lease'])
     assert run(host, 'ready', lease=first['lease'], eligible=eligible) == ready
