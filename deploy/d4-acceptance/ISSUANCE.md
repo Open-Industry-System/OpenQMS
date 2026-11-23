@@ -5,7 +5,7 @@
 调用时把主机审查过的脚本副本注入容器解释器，或将其在容器内挂载为只读。只在确认容器 ID、候选构建、租约标签、内部网络和数据库实例后调用。容器进程为 UID/GID 2002，脚本通过 stdin 接收一份 JSON。两个阶段使用完全相同的输入。
 
 - `binding` 包含当前 `pr`、`head`、`merge`、`plan`、`lease`、`report_id`、`issued_at` 和 `expires_at`。
-- `db_host` 是候选 API 的 `DATABASE_URL` 使用的专用数据库内部 DNS 名称。数据库名为 `qms_d4_acceptance`，其 `pg_control_system()` 系统标识必须等于 `db_system_identifier`。DB 初始化需要授予 API 用户读取该标识的权限，并完成应用正常初始化。先创建无写权限的 `openqms_d4_witness` 角色，由受信数据库初始化程序授予该角色读取 `pg_control_system()` 的权限。发放脚本为它授权读取当前新建租户的验收元数据列。
+- `db_host` 对于正常交付是固定 Unix socket 路径 `/run/openqms-d4-db`，对于撤权场景是候选 API 的 `DATABASE_URL` 使用的专用数据库内部 DNS 名称。数据库名为 `qms_d4_acceptance`，其 `pg_control_system()` 系统标识必须等于 `db_system_identifier`。DB 初始化需要授予 API 用户读取该标识的权限，并完成应用正常初始化。先创建无写权限的 `openqms_d4_witness` 角色，由受信数据库初始化程序授予该角色读取 `pg_control_system()` 的权限。发放脚本为它授权读取当前新建租户的验收元数据列。
 - `api_port` 为容器内部的数字回环 API 监听端口。设置 `TENANT_MODE=dev`、`AGENT_TASK_RUNTIME_ENABLED=true`、`AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED=true`，以及 `AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE=/run/openqms-d4-issue/policy.json`。
 - 在独占容器中挂载 `/run/openqms-d4-issue`。目录归 API UID 所有，模式 `0700`，文件模式 `0600`。每个 case 使用新的目录。
 
