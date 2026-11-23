@@ -551,12 +551,22 @@ def shared_test_released_notice(api, slot):
             return
     cutoff = int(datetime.now(timezone.utc).timestamp())
     marker = f'<!-- openqms-shared-test-release:{identity}:{slot["outcome"]}:{cutoff} -->'
-    if slot['outcome'] == 'switched':
-        detail = '管理员切换了测试位，本 PR 可在后续轮次继续验收。'
+    if slot['outcome'] == 'deploy-failed':
+        heading = '共享测试部署失败'
+        detail = '本轮部署失败，当前版本没有可用于验收的测试环境。失败资源已回收，修复后可重试。'
+        run_id = os.environ.get('GITHUB_RUN_ID', '')
+        repo = os.environ.get('GITHUB_REPOSITORY', '')
+        if (repo == api.repo and re.fullmatch(r'[A-Za-z0-9-]+/(?!\.\.?$)[A-Za-z0-9_.-]+', repo)
+                and re.fullmatch(r'[1-9][0-9]*', run_id)):
+            detail += f'\n\n[工作流日志](https://github.com/{repo}/actions/runs/{run_id})'
     else:
-        detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
-    api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### 共享测试位已清理\n\n{detail}'
-               f'固定测试地址将用于队列中的下一项。\n\n版本：`{slot["head"]}`')
+        heading = '共享测试位已清理'
+        if slot['outcome'] == 'switched':
+            detail = '管理员切换了测试位，本 PR 可在后续轮次继续验收。'
+        else:
+            detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
+        detail += '固定测试地址将用于队列中的下一项。'
+    api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### {heading}\n\n{detail}\n\n版本：`{slot["head"]}`')
 
 
 def shared_release_marker(api, pr, digest):

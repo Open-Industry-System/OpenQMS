@@ -1,6 +1,6 @@
 # Oracle 共享测试环境排队
 
-测试站点固定为 `https://test.preview.openqms.smartindustry.world`。它一次承载一个 PR，在响应中提供 `X-OpenQMS-Test-PR`、`X-OpenQMS-Test-Version`，PR 评论显示编号、完整版本、截止时间和验收命令。CI 通过并满足现有部署门禁的 PR 自动入队，空位分给编号最小的合格 PR。同 PR 的新提交使用 GitHub 当前 head，版本身份还绑定实际 merge SHA 和验收计划摘要。
+测试站点固定为 `https://test.preview.openqms.smartindustry.world`。它一次承载一个 PR，在响应中提供 `X-OpenQMS-Test-PR`、`X-OpenQMS-Test-Version`，预览成功后的 PR 评论显示编号、完整版本和验收命令。CI 通过并满足现有部署门禁的 PR 自动入队，空位分给编号最小的合格 PR。同 PR 的新提交使用 GitHub 当前 head，版本身份还绑定实际 merge SHA 和验收计划摘要。
 
 ## 运行契约
 
@@ -15,7 +15,7 @@
 
 `Oracle shared test` 在 Test OpenQMS 完成时及定时运行，使用 `oracle-preview` Environment 的既有审批和凭据。定时触发每 5 分钟检查签收、版本变更和手动切换，实际触发时间由 GitHub 决定。签收沿用人工验收门禁，匹配当前 PR、head、merge、计划及发放标识。只有获得判定为有效的人工确认，调度器才能按「验收通过」释放。归档只收录版本、发放标识及回执元数据。验收状态与真实的人工评审绑定，测试位切换后保留有效签收。
 
-共享测试位等待人工确认，空闲时间不会触发清理。D4 专用账号与回执仍按各自的有效期核验。
+成功发布的共享测试位等待人工确认，空闲时间不会触发清理。D4 专用账号与回执仍按各自的有效期核验。
 
 ## 手动切换测试位
 
@@ -25,7 +25,7 @@
 
 ## 部署失败后重试
 
-先打开 PR 评论中的发布记录，确认失败步骤和实际构建版本。修复故障后，在测试位空闲时，从 GitHub Actions 的 `Oracle shared test` 手动运行默认分支，并将 `retry_pr` 填为对应 PR 编号。
+部署失败时，PR 评论显示「共享测试部署失败」和工作流日志。失败资源回收后，本轮没有可验收的预览。打开工作流日志，核对失败步骤和实际构建版本。修复故障后，在测试位空闲时，从 GitHub Actions 的 `Oracle shared test` 手动运行默认分支，并将 `retry_pr` 填为对应 PR 编号。
 
 ```bash
 gh workflow run oracle-shared-test.yml --ref main -f retry_pr=45

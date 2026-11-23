@@ -426,6 +426,37 @@ def test_shared_release_keeps_timely_confirmation_without_republishing_url(monke
     assert len(api.notices) == 1
 
 
+@pytest.mark.parametrize('repo,run_id,has_log', [
+    ('owner/repo', '42', True),
+    ('other/repo', '42', False),
+    ('owner/repo', '42) [untrusted](https://example.invalid', False),
+    ('owner/repo', None, False),
+])
+def test_shared_deploy_failure_notice_distinguishes_failed_release(monkeypatch, shared_receipt_api,
+                                                                repo, run_id, has_log):
+    monkeypatch.setenv('GITHUB_REPOSITORY', repo)
+    if run_id is None:
+        monkeypatch.delenv('GITHUB_RUN_ID', raising=False)
+    else:
+        monkeypatch.setenv('GITHUB_RUN_ID', run_id)
+    api = shared_receipt_api
+    receipt = api.receipt
+    slot = dict(pr=api.pr['number'], head=receipt['head'], merge=receipt['sha'],
+                plan=receipt['plan'], lease=receipt['queue_lease'], outcome='deploy-failed')
+    m.shared_test_released_notice(api, slot)
+    m.shared_test_released_notice(api, slot)
+    assert len(api.notices) == 1
+    body = api.notices[0]
+    assert '### 共享测试部署失败' in body
+    assert '当前版本没有可用于验收的测试环境' in body
+    assert '共享测试位已清理' not in body
+    assert m.SHARED_TEST_URL not in body
+    assert ('[工作流日志]' in body) is has_log
+    if has_log:
+        assert '[工作流日志](https://github.com/owner/repo/actions/runs/42)' in body
+    assert m.shared_release_marker(api, api.pr, receipt['plan'])['outcome'] == 'deploy-failed'
+
+
 def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api):
     monkeypatch.setenv('GITHUB_RUN_ID', '42')
     api = shared_receipt_api
