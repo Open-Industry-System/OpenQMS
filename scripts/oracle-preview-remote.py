@@ -27,6 +27,18 @@ SHARED_ACCOUNTS_DIR = Path('/var/lib/openqms-shared-test/credentials')
 SHARED_TEST_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
 
 
+def shared_demo_web_build_args():
+    initializer = load('preview_initializer', 'oracle-preview-initialize.py')
+    public_viewer = initializer.PUBLIC_VIEWER
+    public_accounts = json.dumps(initializer.public_demo_accounts(), separators=(',', ':'))
+    return [
+        '--build-arg', 'VITE_PUBLIC_DEMO_ENABLED=true',
+        '--build-arg', 'VITE_PUBLIC_DEMO_USERNAME=' + public_viewer['username'],
+        '--build-arg', 'VITE_PUBLIC_DEMO_PASSWORD=' + public_viewer['password'],
+        '--build-arg', 'VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=' + public_accounts,
+    ]
+
+
 def shared_account_path(lease):
     if not re.fullmatch(r'[0-9a-f]{32}', lease):
         raise ValueError('invalid shared account lease')
@@ -261,6 +273,8 @@ class PreviewRelease:
             raise ValueError('bounded preview builder required')
         for kind, dockerfile, context in [('backend','backend/Dockerfile','backend'),('web','frontend/Dockerfile.prod','.')]:
             build_args = ['--build-arg', 'PIP_INDEX_URL=https://pypi.org/simple'] if kind == 'backend' else []
+            if kind == 'web' and self.shared_lease is not None:
+                build_args = shared_demo_web_build_args()
             prod.run(['docker','buildx','build','--builder','openqms-preview-builder','--load','--label','org.opencontainers.image.revision='+self.sha,'--build-arg','RELEASE_SHA='+self.sha,*build_args,'-t',self.tags()[kind],'-f',str(self.source / dockerfile),str(self.source / context)])
         ids = self.image_ids()
         self.compose('up','-d','--wait','--wait-timeout','240','db','redis','neo4j','db-tunnel',images=ids)

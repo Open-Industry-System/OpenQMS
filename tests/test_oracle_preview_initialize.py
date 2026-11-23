@@ -52,3 +52,50 @@ def test_only_synthetic_role_bindings_can_be_enabled():
     assert module.account_role_is_expected(SimpleNamespace(username='manager', role_key='manager'))
     assert not module.account_role_is_expected(SimpleNamespace(username='engineer', role_key='admin'))
     assert not module.account_role_is_expected(SimpleNamespace(username='admin', role_key='admin'))
+
+
+@pytest.mark.parametrize('existing_role', ['field_qe', 'admin'])
+def test_public_demo_provision_matches_only_intended_roles_and_scopes(existing_role):
+    from asyncio import run
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    sources = {
+        'engineer': SimpleNamespace(user_id='private-engineer'),
+        'manager': SimpleNamespace(user_id='private-manager'),
+    }
+    demo_identities = {
+        'demo-engineer': SimpleNamespace(user_id='public-engineer', role_key=existing_role),
+        'demo-manager': SimpleNamespace(user_id='public-manager', role_key='manager'),
+    }
+
+    async def execute(sql, params):
+        if sql.lstrip().startswith('SELECT'):
+            return SimpleNamespace(one=lambda: demo_identities[params['username']])
+
+    connection = AsyncMock()
+    connection.execute.side_effect = execute
+
+    async def provision():
+        return {
+            identity: digest
+            async for identity, digest in module.enable_public_demo_users(
+                connection, lambda sql: sql, lambda password: 'hash:' + password, sources,
+            )
+        }
+
+    if existing_role == 'admin':
+        with pytest.raises(ValueError, match='demo account role mismatch'):
+            run(provision())
+        assert connection.execute.await_count == 2
+        return
+
+    public_pass = {v['username']: v['password'] for v in module.public_demo_accounts()}
+    assert run(provision()) == {f'public-{name}': 'hash:' + public_pass[f'demo-{name}']
+                                for name in sources}
+    observed_scopes = {}
+    for call in connection.execute.await_args_list:
+        sql, params = call.args
+        if 'FROM user_factories' in sql or 'FROM user_product_lines' in sql:
+            observed_scopes.setdefault(params['demo_id'], set()).add(params['source_id'])
+    assert observed_scopes == {f'public-{name}': {f'private-{name}'} for name in sources}

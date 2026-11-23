@@ -5,8 +5,11 @@ import { SharedD4AcceptanceLink } from "./AppLayout";
 const SHARED_HOSTNAME = "test.preview.openqms.smartindustry.world";
 
 describe("SharedD4AcceptanceLink", () => {
-  it.each(["field_qe", "manager"])("directs %s to the trusted D4 portal", (roleKey) => {
-    render(<SharedD4AcceptanceLink roleKey={roleKey} hostname={SHARED_HOSTNAME} />);
+  it.each([
+    ["engineer", "field_qe"],
+    ["manager", "manager"],
+  ])("directs the private %s account to the trusted D4 portal", (username, roleKey) => {
+    render(<SharedD4AcceptanceLink username={username} roleKey={roleKey} hostname={SHARED_HOSTNAME} />);
 
     const link = screen.getByRole("link", { name: "D4 Acceptance" });
     expect(link).toHaveAttribute("href", "https://d4.preview.openqms.smartindustry.world/");
@@ -14,8 +17,16 @@ describe("SharedD4AcceptanceLink", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  it.each([undefined, "viewer", "admin"])("hides the entry for %s", (roleKey) => {
-    render(<SharedD4AcceptanceLink roleKey={roleKey} hostname={SHARED_HOSTNAME} />);
+  it.each([
+    [undefined, undefined],
+    ["viewer", "viewer"],
+    ["admin", "admin"],
+    ["engineer", undefined],
+    ["engineer", "manager"],
+    ["demo-engineer", "field_qe"],
+    ["demo-manager", "manager"],
+  ])("hides the entry for %s with role %s", (username, roleKey) => {
+    render(<SharedD4AcceptanceLink username={username} roleKey={roleKey} hostname={SHARED_HOSTNAME} />);
 
     expect(screen.queryByRole("link", { name: "D4 Acceptance" })).toBeNull();
   });
@@ -25,7 +36,7 @@ describe("SharedD4AcceptanceLink", () => {
     "pr-45.preview.openqms.smartindustry.world",
     "test.preview.openqms.smartindustry.world.example",
   ])("hides the entry outside the shared site at %s", (hostname) => {
-    render(<SharedD4AcceptanceLink roleKey="manager" hostname={hostname} />);
+    render(<SharedD4AcceptanceLink username="manager" roleKey="manager" hostname={hostname} />);
 
     expect(screen.queryByRole("link", { name: "D4 Acceptance" })).toBeNull();
   });

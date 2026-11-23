@@ -131,6 +131,9 @@ def test_shared_accounts_get_only_their_assigned_scenario(shared_config):
 
     with portal(shared_config, invoke) as port:
         assert fetch(port, 'GET', username='viewer', password='viewer-fixture')[0] == 401
+        for username in ('demo-engineer', 'demo-manager'):
+            assert fetch(port, 'POST', '/scenario/d4-deliver', username=username, password='public-fixture',
+                         origin=shared_config['origin'])[0] == 401
         assert fetch(port, 'GET', username=None, headers={
             'Authorization': 'Bearer candidate-fixture', 'X-Role': 'manager',
         })[0] == 401
