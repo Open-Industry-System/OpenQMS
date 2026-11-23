@@ -20,8 +20,10 @@ from app.models.factory import UserFactory
 from app.models.role import RoleDefinition, RolePermission, UserProductLine
 from app.models.user import User
 from tests.ci.browser_runtime import browser_environment, resolve_browser
-from tests.services.agent_runtime.test_r5_model_binding import r5_case, d4_text_local_trial, owned_local_trial, _managed_claim
 from tests.e2e.agent_local_trial_harness import PASSWORD
+from tests.e2e.d4_text_local_harness import d4_text_local_trial, owned_local_trial
+from tests.e2e.test_r5_model_agent import _managed_claim
+from tests.services.agent_runtime.test_r5_model_binding import r5_case
 
 pytestmark = [pytest.mark.ci_r5_native, pytest.mark.requires_db, pytest.mark.ci_browser]
 
@@ -67,54 +69,103 @@ async def run_r5_ui(c,tmp_path,spec='r5-collaboration.spec.ts'):
             await db.execute(update(RolePermission).where(RolePermission.role_id==role.id,RolePermission.module=='fmea').values(permission_level=0))
             await db.commit()
         return {'revoked':True}
-    frontend=Path(__file__).resolve().parents[3]/'frontend'
-    chromium=resolve_browser(frontend,os.environ)
-    probe=socket.socket();probe.bind(('127.0.0.1',0));port=probe.getsockname()[1];probe.close()
-    backend=str(c.client.base_url).rstrip('/')
-    log=(tmp_path/'vite.log').open('wb');vite=browser=None
-    try:
-        vite=await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',str(port),'--strictPort',cwd=frontend,env=browser_environment(os.environ,{'BACKEND_URL':backend}),stdout=log,stderr=log)
-        async with httpx.AsyncClient(trust_env=False) as client:
-            for _ in range(300):
-                if vite.returncode is not None:pytest.fail('Owned Vite exited')
+    await run_r5_browser(c, tmp_path, spec, {
+        'AGENT_BROWSER_TASK': str(c.task_id),
+        'AGENT_HARNESS_NONCE': nonce,
+        'AGENT_BROWSER_LOGIN': json.dumps({
+            'username': 'trial-executor', 'password': PASSWORD,
+            'installation': str(c.r5_id), 'model_b': model_b.json()['deployment_id'],
+            'proposal': proposal, 'checkpoint': checkpoint.json()['checkpoint_id'],
+        }),
+        'OUTCOME_APPROVER_LOGIN': json.dumps({
+            'username': 't8-colleague', 'password': PASSWORD, 'user_id': str(colleague_id),
+        }),
+    })
+    async with c.session() as db:
+        messages=list(await db.scalars(select(AgentTaskMessage).where(AgentTaskMessage.task_id==c.task_id)))
+        if spec=='r5-collaboration.spec.ts':
+            assert any(m.content=='T8 Enter stays A' for m in messages)
+        else:
+            assert any(json.loads(m.content).get('predecessor_id')==proposal for m in messages if m.content.startswith('{'))
+        bindings=list(await db.scalars(select(AgentTaskModelBinding)))
+        if spec=='r5-collaboration.spec.ts':
+            assert any(str(b.deployment_id)==model_b.json()['deployment_id'] and b.task_id!=c.task_id for b in bindings)
+        measure=await db.scalar(select(CapaD5Measure).where(CapaD5Measure.proposal_id==proposal))
+        if spec=='r5-collaboration.spec.ts':
+            assert measure.final_text=='T8 同事确认最终措施' and measure.adopted_by==colleague_id
+        else:
+            from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5Withdrawal
+            assert measure is None
+            assert (await db.get(CapaD5Proposal, __import__('uuid').UUID(proposal))).state=='withdrawn'
+            assert (await db.scalar(select(CapaD5Withdrawal))).reason=='T9 selected withdrawal'
+    assert len(c.witness.a.bodies)==1 and c.witness.b.bodies==[]
+    print('CHROMIUM_REAL: two roles, bound A / new B / Enter A / colleague adoption after finish; real HTTP; loopback only')
+
+
+async def run_r5_browser(c, tmp_path, spec, runtime):
+    frontend = Path(__file__).resolve().parents[3] / 'frontend'
+    chromium = resolve_browser(frontend, os.environ)
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    backend = str(c.client.base_url).rstrip('/')
+    browser_url = f'http://127.0.0.1:{port}'
+    vite = browser = None
+    with (tmp_path / 'vite.log').open('wb') as log:
+        try:
+            vite = await asyncio.create_subprocess_exec(
+                'node', str(frontend / 'node_modules/vite/bin/vite.js'),
+                '--host', '127.0.0.1', '--port', str(port), '--strictPort', cwd=frontend,
+                env=browser_environment(os.environ, {'BACKEND_URL': backend}), stdout=log, stderr=log,
+            )
+            async with httpx.AsyncClient(trust_env=False) as client:
+                for _ in range(300):
+                    if vite.returncode is not None:
+                        pytest.fail('Owned Vite exited')
+                    try:
+                        if (await client.get(browser_url, timeout=1)).status_code == 200:
+                            break
+                    except httpx.HTTPError:
+                        pass
+                    await asyncio.sleep(.05)
+                else:
+                    pytest.fail('Owned Vite did not start')
+            env = browser_environment(os.environ, {
+                'BACKEND_URL': backend,
+                'AGENT_BACKEND_URL': backend,
+                'AGENT_BROWSER_URL': browser_url,
+                'AGENT_BROWSER_TENANT': c.slug,
+                'AGENT_BROWSER_REPORT': str(c.report_id),
+                'AGENT_BROWSER_ARTIFACTS': str(tmp_path / 'playwright'),
+                'OPENQMS_AGENT_BROWSER_EXECUTABLE': str(chromium),
+                **runtime,
+            })
+            browser = await asyncio.create_subprocess_exec(
+                'node', str(frontend / 'node_modules/@playwright/test/cli.js'),
+                'test', '--config', 'playwright.agent.config.ts', spec, cwd=frontend, env=env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(browser.communicate(), 180)
+            (tmp_path / 'browser.log').write_bytes(stdout + stderr)
+            assert browser.returncode == 0, (stdout + stderr).decode()
+            assert b'1 passed' in stdout and b'skipped' not in stdout
+        finally:
+            if browser and browser.returncode is None:
+                browser.kill()
+                await browser.wait()
+            if vite and vite.returncode is None:
+                vite.terminate()
                 try:
-                    if (await client.get(f'http://127.0.0.1:{port}',timeout=1)).status_code==200:break
-                except httpx.HTTPError:pass
-                await asyncio.sleep(.05)
-            else:pytest.fail('Owned Vite did not start')
-        env=browser_environment(os.environ,{'BACKEND_URL':backend,'AGENT_BACKEND_URL':backend,'AGENT_BROWSER_URL':f'http://127.0.0.1:{port}','AGENT_BROWSER_TENANT':c.slug,'AGENT_BROWSER_REPORT':str(c.report_id),'AGENT_BROWSER_TASK':str(c.task_id),'AGENT_HARNESS_NONCE':nonce,'AGENT_BROWSER_LOGIN':json.dumps({'username':'trial-executor','password':PASSWORD,'installation':str(c.r5_id),'model_b':model_b.json()['deployment_id'],'proposal':proposal,'checkpoint':checkpoint.json()['checkpoint_id']}),'OUTCOME_APPROVER_LOGIN':json.dumps({'username':'t8-colleague','password':PASSWORD,'user_id':str(colleague_id)}),'AGENT_BROWSER_ARTIFACTS':str(tmp_path/'playwright'),'OPENQMS_AGENT_BROWSER_EXECUTABLE':str(chromium)})
-        browser=await asyncio.create_subprocess_exec('node',str(frontend/'node_modules/@playwright/test/cli.js'),'test','--config','playwright.agent.config.ts',spec,cwd=frontend,env=env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
-        stdout,stderr=await asyncio.wait_for(browser.communicate(),180)
-        (tmp_path/'browser.log').write_bytes(stdout+stderr)
-        assert browser.returncode==0,(stdout+stderr).decode()
-        assert b'1 passed' in stdout and b'skipped' not in stdout
-        async with c.session() as db:
-            messages=list(await db.scalars(select(AgentTaskMessage).where(AgentTaskMessage.task_id==c.task_id)))
-            if spec=='r5-collaboration.spec.ts':
-                assert any(m.content=='T8 Enter stays A' for m in messages)
-            else:
-                assert any(json.loads(m.content).get('predecessor_id')==proposal for m in messages if m.content.startswith('{'))
-            bindings=list(await db.scalars(select(AgentTaskModelBinding)))
-            if spec=='r5-collaboration.spec.ts':
-                assert any(str(b.deployment_id)==model_b.json()['deployment_id'] and b.task_id!=c.task_id for b in bindings)
-            measure=await db.scalar(select(CapaD5Measure).where(CapaD5Measure.proposal_id==proposal))
-            if spec=='r5-collaboration.spec.ts':
-                assert measure.final_text=='T8 同事确认最终措施' and measure.adopted_by==colleague_id
-            else:
-                from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5Withdrawal
-                assert measure is None
-                assert (await db.get(CapaD5Proposal, __import__('uuid').UUID(proposal))).state=='withdrawn'
-                assert (await db.scalar(select(CapaD5Withdrawal))).reason=='T9 selected withdrawal'
-        assert len(c.witness.a.bodies)==1 and c.witness.b.bodies==[]
-        print('CHROMIUM_REAL: two roles, bound A / new B / Enter A / colleague adoption after finish; real HTTP; loopback only')
-    finally:
-        if browser and browser.returncode is None:browser.kill();await browser.wait()
-        if vite and vite.returncode is None:
-            vite.terminate()
-            try:await asyncio.wait_for(vite.wait(),10)
-            except asyncio.TimeoutError:vite.kill();await vite.wait()
-        log.close()
-        (tmp_path/'owned-processes.json').write_text(json.dumps({'vite_pid':vite.pid if vite else None,'vite_exit':vite.returncode if vite else None,'browser_pid':browser.pid if browser else None,'browser_exit':browser.returncode if browser else None}))
+                    await asyncio.wait_for(vite.wait(), 10)
+                except asyncio.TimeoutError:
+                    vite.kill()
+                    await vite.wait()
+            (tmp_path / 'owned-processes.json').write_text(json.dumps({
+                'vite_pid': vite.pid if vite else None,
+                'vite_exit': vite.returncode if vite else None,
+                'browser_pid': browser.pid if browser else None,
+                'browser_exit': browser.returncode if browser else None,
+            }))
 
 
 @pytest.mark.asyncio

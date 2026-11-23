@@ -24,8 +24,12 @@ async function selectA(page: Page) {
   const chooser = page.getByRole('combobox', { name: '选择任务' });
   await expect(chooser.locator(`option[value="${taskId}"]`)).toBeAttached();
   await chooser.selectOption(taskId);
-  await expect(page.getByRole('link', { name: `目标报告 ${report}` })).toBeVisible();
+  await expect(reportLink(page)).toBeVisible();
 }
+async function details(page: Page) {
+  await page.getByRole('button', { name: '任务详情', exact: true }).click();
+}
+const reportLink = (page: Page) => page.getByRole('region', { name: '任务活动' }).locator(`a[href="/capa/${report}"]`).first();
 async function sequences(page: Page) {
   return page.getByTestId('agent-activity-window').locator(':scope > li').evaluateAll(
     rows => rows.map(row => Number(row.getAttribute('data-sequence'))));
@@ -73,8 +77,10 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
     });
   }
   const authMe = page.waitForResponse(r => r.url().includes('/api/auth/me') && r.status() === 200);
+  const available = page.waitForResponse(r => new URL(r.url()).pathname === '/api/agent/tasks/availability', { timeout: 20000 });
   await page.goto(`/capa/${report}`);
   await authMe; // real frontend AuthMe + current permissions after actual login
+  expect((await available).status()).toBe(200);
   await selectA(page);
   const activity = page.getByRole('region', { name: '任务活动' });
 
@@ -82,13 +88,14 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
     const winner = scenario.slice('race-'.length);
     const outcome = await fixture(page, 'race', { winner });
     expect(outcome.task_status).toBe(winner === 'append' ? 'ready' : 'completed');
-    await expect(activity.getByText(`任务状态 ${outcome.task_status}`, { exact: true })).toBeVisible();
     if (winner === 'append') {
       await expect(activity.getByText('real racing new instruction', { exact: true })).toBeVisible();
       await expect(activity.getByText('排队中', { exact: true })).toBeVisible();
+      await details(page);
       await expect(activity.getByText(/当前运行 .* · active/)).toBeVisible();
     } else {
       await expect(activity.getByText('real racing new instruction', { exact: true })).toHaveCount(0);
+      await details(page);
       await expect(activity.getByText(/当前运行 .* · completed/)).toBeVisible();
     }
     return;
@@ -107,7 +114,15 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
     return;
   }
   if (scenario === 'window') {
-    await expect.poll(() => sequences(page)).toEqual(range(1,100));
+    // Sequence 2 is run_created, shown only in task details.
+    await expect.poll(() => sequences(page)).toEqual(range(1,100).filter(n => n !== 2));
+    const dialogue = page.getByRole('region', { name: '任务对话' });
+    const reading = dialogue.locator('li[data-sequence="60"]');
+    await reading.evaluate(row => row.scrollIntoView({ block: 'center' }));
+    const backToLatest = page.getByRole('button', { name: '回到最新消息' });
+    await expect(backToLatest).toBeVisible();
+    const readingTop = () => reading.evaluate(row => row.getBoundingClientRect().top);
+    const initialTop = await readingTop();
     let secondReached!: () => void;
     const secondPending = new Promise<void>(resolve => { secondReached = resolve; });
     let releaseSecond!: () => void;
@@ -137,6 +152,9 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
     // Real appends commit individually; establish the last complete window first.
     await fixture(page, 'seed', { target: 109 });
     await expect.poll(() => sequences(page)).toEqual(range(10,109));
+    expect(Math.abs(await readingTop() - initialTop)).toBeLessThan(4);
+    await backToLatest.click();
+    await expect.poll(() => dialogue.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(4);
     const firstLatest = page.waitForResponse(async response => {
       const url = new URL(response.url());
       return url.pathname === `/api/agent/tasks/${taskId}/activity`
@@ -199,13 +217,15 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
   expect(checkpointResponse.status()).toBe(200);
   const resultRow = activity.locator('li[data-sequence]').filter({ has: page.getByRole('heading', { name: '只读分析结果', exact: true }) });
   const checkpointRow = activity.locator('li[data-sequence]').filter({ has: page.getByRole('heading', { name: `只读检查点 ${first.output.checkpoint_id}`, exact: true }) });
+  await resultRow.getByText('查看结果证据', { exact: true }).click();
   await sourceGeometry(resultRow, activity, (await resultResponse.json()).sources, 'result');
-  await sourceGeometry(checkpointRow, activity, (await checkpointResponse.json()).sources, 'checkpoint');
   await page.getByRole('heading', { name: '只读分析结果' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/tmp/openqms_r3_sidebar_verified.png' });
+  await details(page);
+  await sourceGeometry(checkpointRow, activity, (await checkpointResponse.json()).sources, 'checkpoint');
   await page.getByRole('heading', { name: `只读检查点 ${first.output.checkpoint_id}` }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '/tmp/openqms_r3_sidebar_checkpoint_verified.png' });
-  await page.getByRole('link', { name: `目标报告 ${report}` }).click();
+  await reportLink(page).click();
   await expect(page).toHaveURL(new RegExp(`/capa/${report}$`));
   await page.getByRole('button', { name: '关闭任务侧栏' }).click();
   // Real SPA navigation and real factory/product-line selectors retain Task A.
@@ -218,22 +238,25 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
   await expect(page).toHaveURL(new RegExp(`/capa/${reportB}$`));
   await open(page);
   await expect(page.getByRole('combobox', { name: '选择任务' })).toHaveValue(taskId);
-  await expect(page.getByRole('link', { name: `目标报告 ${report}` })).toBeVisible();
+  await expect(reportLink(page)).toBeVisible();
   expect((await fixture(page, 'state')).tasks).toHaveLength(1);
   await page.getByRole('button', { name: '关闭任务侧栏' }).click();
   await page.getByRole('button', { name: '以本报告创建任务' }).click();
-  await page.getByRole('textbox', { name: '初始指令' }).fill('显式为报告 B 创建任务');
+  await expect(page.getByRole('textbox', { name: '初始指令' })).toHaveCount(0);
   const create = page.waitForResponse(r => r.request().method()==='POST' && new URL(r.url()).pathname==='/api/agent/tasks');
   await page.getByRole('button', { name: '创建任务', exact: true }).click();
   const created = await (await create).json();
   expect(created.target_capa_id).toBe(reportB);
   expect(created.task_id).not.toBe(taskId);
   expect((await fixture(page, 'state')).tasks).toHaveLength(2);
+  await details(page);
   await expect(activity.getByText('任务状态 ready', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '取消任务' }).click();
   await expect(activity.getByText('任务状态 cancelled', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '返回对话', exact: true }).click();
   await expect(activity.getByText('排队中：终止时未确认接收（不代表已处理）', { exact: true })).toBeVisible();
   await page.getByRole('combobox', { name: '选择任务' }).selectOption(taskId);
+  await details(page);
   await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeEnabled();
   // Lost response retry uses the exact original body/key and server single op.
   const controlBodies: string[] = [];
@@ -253,10 +276,16 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
   expect((await fixture(page, 'state')).controls).toBe(1);
   expect((await fixture(page, 'state')).pause_audits).toBe(1);
   await page.unroute(`**/api/agent/tasks/${taskId}/control`);
-  await page.getByRole('textbox', { name: '追加指令' }).fill('暂停期间追加的新指令');
-  await page.getByRole('button', { name: '发送指令' }).click();
-  await expect(activity.getByText('暂停期间追加的新指令', { exact: true })).toBeVisible();
-  await expect(activity.getByText('排队中', { exact: true })).toBeVisible();
+  // This fixed worker takes no interactive free text. Retain the existing runtime
+  // checkpoint/prefix regression by appending through the employee API fixture.
+  await expect(page.getByRole('textbox', { name: '追加指令' })).toHaveCount(0);
+  const append = async (content: string, idempotency_key: string) => {
+    const response = await page.request.post(`${backend}/api/agent/tasks/${taskId}/messages`, {
+      data: { content, idempotency_key }, headers,
+    });
+    expect(response.status()).toBe(202);
+  };
+  await append('暂停期间追加的新指令', 'readonly-browser-paused');
   await page.getByRole('button', { name: '继续', exact: true }).click();
   await expect(activity.getByText('任务状态 ready', { exact: true })).toBeVisible();
   await fixture(page, 'start', { hold: true });
@@ -281,8 +310,7 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
   await page.getByRole('button', { name: '暂停', exact: true }).click();
   await expect(activity.getByText('任务状态 paused', { exact: true })).toBeVisible();
   await fixture(page, 'edit');
-  await page.getByRole('textbox', { name: '追加指令' }).fill('检查点后新增指令');
-  await page.getByRole('button', { name: '发送指令' }).click();
+  await append('检查点后新增指令', 'readonly-browser-post-checkpoint');
   const latestCheckpoint = activity.locator('li[data-sequence]').filter({ hasText: `只读检查点 ${resumed.output.checkpoint_id}` });
   await latestCheckpoint.getByRole('button', { name: '从此检查点重启' }).click();
   await expect(activity.getByText(/当前运行 .* · pending/)).toBeVisible();

@@ -28,12 +28,15 @@ async def test_new_user_gets_off_before_tenant_auth_query_body_all_methods(monke
 async def test_real_user_static_routes_activity_strict_queries_and_domain(ready_owned,monkeypatch):
     import app.database as database
     from app.models.agent_task import AgentTask
+    from app.models.capa import CAPAEightD
     owned=ready_owned
     monkeypatch.setattr(settings,'AGENT_TASK_RUNTIME_ENABLED',True)
     monkeypatch.setattr(database,'tenant_async_session',owned.factory)
     headers={'Authorization':'Bearer '+create_access_token({'sub':str(owned.user_id),'tenant_id':str(owned.binding.tenant_id)})}
     async with owned.factory(binding=owned.binding) as db:
-        report=(await db.get(AgentTask,owned.task_id)).target_capa_id
+        task = await db.get(AgentTask, owned.task_id)
+        report = task.target_capa_id
+        document_no = (await db.get(CAPAEightD, report)).document_no
     await messages(owned,1,2)
     assert not app.dependency_overrides
     async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
@@ -42,11 +45,18 @@ async def test_real_user_static_routes_activity_strict_queries_and_domain(ready_
         assert response.json()=={'enabled':True}
         response=await client.get('/api/agent/tasks/installations',params={'report_id':str(report)},headers=headers)
         assert response.status_code==200,response.text
-        assert set(response.json()['items'][0])=={'installation_id','plugin_key','plugin_version'}
+        installation = next(item for item in response.json()['items']
+                            if item['installation_id'] == str(task.preferred_installation_id))
+        assert set(installation) == {'installation_id','plugin_key','plugin_version'}
         path='/api/agent/tasks/'+str(owned.task_id)+'/activity'
         response=await client.get(path,params={'page_size':'1'},headers=headers)
         assert response.status_code==200,response.text
         assert response.json()['window_end_sequence']==2
+        assert response.json()['context'] == {
+            'document_no': document_no,
+            'plugin_key': installation['plugin_key'],
+            'plugin_version': installation['plugin_version'],
+        }
         for params in ({'before_sequence':'1'},{'before_sequence':'4','window_end_sequence':'2'}, {'window_end_sequence':'-1'},
                        {'page_size':'true'}, {'page_size':'+1'},{'page_size':'1.0'},{'page_size':'51'},
                        {'window_end_sequence':str(2**63)}, {'before_sequence':str(2**63+1),'window_end_sequence':str(2**63-1)}, {'spoof':'x'}):

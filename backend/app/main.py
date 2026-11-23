@@ -12,6 +12,7 @@ from app.api.capa_d4_text_preview import router as capa_d4_text_preview_router
 from app.api.agent_tasks import router as agent_tasks_router
 from app.api.agent_task_attachments import router as agent_task_attachments_router
 from app.api.agent_runtime import router as agent_runtime_router
+from app.api.agent_workspace import router as agent_workspace_router
 from app.api.admin.agent_plugins import router as admin_agent_plugins_router
 from app.api.admin import ai_config as admin_ai_config_api
 from app.api.admin import logs as admin_logs_api
@@ -583,6 +584,7 @@ app.include_router(agent_api.router)
 app.include_router(agent_tasks_router)
 app.include_router(agent_task_attachments_router)
 app.include_router(agent_runtime_router)
+app.include_router(agent_workspace_router)
 app.include_router(admin_agent_plugins_router)
 from app.api.admin.agent_models import router as agent_models_router
 app.include_router(agent_models_router)

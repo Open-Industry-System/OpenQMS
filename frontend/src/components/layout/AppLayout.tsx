@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { Layout, Menu, Button, Avatar, Dropdown, Space, Select, Tooltip, Badge } from "antd";
 import { AgentTaskProvider } from "../agent/AgentTaskContext";
 import AgentSidebar from "../agent/AgentSidebar";
+import WorkspaceAssistant from "../agent/WorkspaceAssistant";
 import LanguageSwitcher from "../LanguageSwitcher";
 import type { MenuProps } from "antd";
 import {
@@ -538,6 +539,7 @@ export default function AppLayout() {
           <AgentTaskProvider>
             <AgentSidebar />
             <Outlet />
+            <WorkspaceAssistant />
           </AgentTaskProvider>
         </Content>
       </Layout>

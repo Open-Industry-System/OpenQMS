@@ -7,24 +7,43 @@ export function readAgentIdentity(): string {
   return user?.user_id && (token || localStorage.getItem("access_token")) ? JSON.stringify([user.user_id, localStorage.getItem("tenant_slug") ?? ""]) : "";
 }
 export const readAgentCredential = () => localStorage.getItem("access_token") ?? useAuthStore.getState().token ?? "";
-export type ActivityStatus = "loading" | "ready" | "interrupted" | "denied";
+export function readAgentScope(): string {
+  const { user, currentFactoryId, factoryScope } = useAuthStore.getState();
+  return JSON.stringify([
+    localStorage.getItem("current_factory_id"), currentFactoryId, factoryScope,
+    user?.role_key, user?.permissions, user?.product_lines, user?.bypass_row_level_security, user?.is_active,
+  ]);
+}
+const MAX_CONSECUTIVE_FAILURES = 3;
+type StoppedStatus = "offline" | "denied";
+export type ActivityStatus = "loading" | "ready" | "interrupted" | StoppedStatus;
 interface Options {
   taskId: string | null;
   identity: string;
   credential: string;
   open: boolean;
+  scope?: string;
   requestEpoch: number;
+  selectionEpoch?: number;
 }
 interface Snapshot {
   key: string;
   page: ActivityPage | null;
   status: ActivityStatus;
 }
-export function useAgentTaskActivity({ taskId, identity, credential, open, requestEpoch }: Options) {
+interface PollingState {
+  key: string;
+  requestEpoch: number;
+  failures: number;
+  stopped?: StoppedStatus;
+}
+export function useAgentTaskActivity({ taskId, identity, credential, open, requestEpoch, selectionEpoch = 0, scope = readAgentScope() }: Options) {
   const [visible, setVisible] = useState(!document.hidden);
   const [visibilityEpoch, setVisibilityEpoch] = useState(0);
-  const key = JSON.stringify([taskId, identity, credential, open, visible, visibilityEpoch, requestEpoch]);
+  const connectionKey = JSON.stringify([taskId, identity, credential, scope, open, selectionEpoch]);
+  const key = JSON.stringify([connectionKey, visible, visibilityEpoch]);
   const [snapshot, setSnapshot] = useState<Snapshot>({ key, page: null, status: "loading" });
+  const polling = useRef<PollingState | null>(null);
   const generation = useRef(0);
   const activeController = useRef<AbortController | null>(null);
   const latestKey = useRef(key);
@@ -44,8 +63,17 @@ export function useAgentTaskActivity({ taskId, identity, credential, open, reque
     const controller = new AbortController();
     activeController.current = controller;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const live = () => generation.current === epoch && latestKey.current === key && !controller.signal.aborted && open && !document.hidden && identity === readAgentIdentity() && credential === readAgentCredential();
-    setSnapshot({ key, page: null, status: "loading" });
+    const live = () => generation.current === epoch && latestKey.current === key && !controller.signal.aborted && open && !document.hidden && identity === readAgentIdentity() && credential === readAgentCredential() && scope === readAgentScope();
+    // A tab visibility change pauses polling, without clearing an outage or a denial.
+    const state: PollingState = polling.current?.key === connectionKey && polling.current.requestEpoch === requestEpoch
+      ? polling.current : { key: connectionKey, requestEpoch, failures: 0 };
+    polling.current = state;
+    if (state.stopped) {
+      setSnapshot({ key, page: null, status: state.stopped });
+      return () => controller.abort();
+    }
+    setSnapshot(previous => previous.key === key && previous.status === "ready"
+      ? previous : { key, page: null, status: "loading" });
     if (!taskId || !identity || !open || !visible)
       return () => controller.abort();
     async function cycle() {
@@ -73,6 +101,7 @@ export function useAgentTaskActivity({ taskId, identity, credential, open, reque
           return;
         }
         const rows = new Map([...history?.items ?? [], ...latest.items].map(item => [item.sequence, item]));
+        state.failures = 0;
         setSnapshot({
           key, status: "ready", page: {
             ...latest,
@@ -94,9 +123,12 @@ export function useAgentTaskActivity({ taskId, identity, credential, open, reque
             status?: number;
           };
         })?.response?.status;
-        const denied = status === 401 || status === 403 || status === 404;
-        setSnapshot({ key, page: null, status: denied ? "denied" : "interrupted" });
-        if (denied)
+        if (status === 401 || status === 403 || status === 404)
+          state.stopped = "denied";
+        else if (++state.failures >= MAX_CONSECUTIVE_FAILURES)
+          state.stopped = "offline";
+        setSnapshot({ key, page: null, status: state.stopped ?? "interrupted" });
+        if (state.stopped)
           return;
         delay = 5000;
       }
@@ -110,9 +142,9 @@ export function useAgentTaskActivity({ taskId, identity, credential, open, reque
       if (timer)
         clearTimeout(timer);
     };
-  }, [taskId, identity, credential, open, visible, visibilityEpoch, requestEpoch, key]);
+  }, [taskId, identity, credential, scope, open, visible, requestEpoch, connectionKey, key]);
   // Gate presentation synchronously as well as at promise completion. No effect
   // can flash one user's retained body during another user's render.
-  const current = snapshot.key === key && identity === readAgentIdentity() && credential === readAgentCredential() && open && visible && !document.hidden;
+  const current = snapshot.key === key && identity === readAgentIdentity() && credential === readAgentCredential() && scope === readAgentScope() && open && visible && !document.hidden;
   return { page: current ? snapshot.page : null, status: current ? snapshot.status : "loading" as ActivityStatus };
 }

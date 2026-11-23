@@ -7,8 +7,8 @@ def test_r5_controlled_executor_is_a_separate_fail_closed_entry():
 
 
 def test_executor_allows_platform_only_and_cannot_read_unapproved_file(tmp_path):
-    import hashlib
     import json
+    import shutil
     import socket
     import sys
     from app.services.agent_runtime.r5_executor import ExecutorApproval, run_controlled
@@ -24,6 +24,39 @@ def test_executor_allows_platform_only_and_cannot_read_unapproved_file(tmp_path)
         result = run_controlled(approval, platform_port=a.getsockname()[1], request=b'{}', timeout=5)
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout) == ['allowed', 'denied', 'denied']
+
+        node = shutil.which('node')
+        assert node, 'Standalone Node is required for R5 Pi sandbox acceptance'
+        node_artifact = tmp_path / 'plugin.mjs'
+        node_artifact.write_text(f"""
+import {{ readFileSync, writeFileSync }} from 'node:fs';
+import {{ createConnection }} from 'node:net';
+import {{ spawnSync }} from 'node:child_process';
+function connect(port) {{
+  return new Promise(resolve => {{
+    const socket = createConnection({{host:'127.0.0.1', port}});
+    const report = value => {{ socket.destroy(); resolve(value); }};
+    socket.once('connect', () => report('allowed'));
+    socket.once('error', () => report('denied'));
+    socket.setTimeout(1000, () => report('denied'));
+  }});
+}}
+const checks = [await connect({a.getsockname()[1]}), await connect({b.getsockname()[1]})];
+try {{ readFileSync({json.dumps(str(secret))}); checks.push('read'); }}
+catch {{ checks.push('denied'); }}
+try {{ writeFileSync('child-write', 'test'); checks.push('written'); }}
+catch {{ checks.push('denied'); }}
+checks.push(spawnSync('/bin/sh', ['-c', 'exit 0']).status === 0 ? 'spawned' : 'denied');
+process.stdout.write(JSON.stringify(checks));
+""")
+        node_approval = ExecutorApproval.approve(node_artifact, node, runtime='node')
+        result = run_controlled(node_approval, platform_port=a.getsockname()[1], request=b'{}', timeout=5)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == ['allowed', 'denied', 'denied', 'denied', 'denied']
+        node_artifact.write_text('process.exit(0)')
+        with pytest.raises(PermissionError, match='Controlled executor unavailable'):
+            run_controlled(node_approval, platform_port=a.getsockname()[1], request=b'{}', timeout=5)
+
         b.settimeout(.1)
         try:
             b.accept()
@@ -323,9 +356,49 @@ async def test_cloud_TLS_pins_IP_preserves_hostname_SNI_and_validates_certificat
         for s,t in zip([c.a,c.b],c.threads):s.shutdown();s.server_close();t.join()
 
 
-def test_R5_policy_can_be_loaded_only_by_server_enrollment():
-    from app.services.agent_runtime import r5_executor
-    assert hasattr(r5_executor,'load_controlled_pilot'), 'no server-owned controlled pilot enrollment'
+def test_R5_policy_can_be_loaded_only_by_server_enrollment(tmp_path):
+    import json
+    import os
+    import shutil
+    from dataclasses import asdict
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+    from app.services.agent_runtime.r5_executor import ExecutorApproval, load_controlled_pilot
+
+    node = shutil.which('node')
+    assert node, 'Standalone Node is required for R5 Pi sandbox acceptance'
+    artifact = tmp_path / 'worker.mjs'
+    artifact.write_text('process.exit(0)')
+    approval = ExecutorApproval.approve(artifact, node, runtime='node')
+    data = {key: str(value) for key, value in asdict(approval).items()}
+    data.update(schema_version=1, tenant_id=str(uuid4()), tenant_generation=1,
+                installation_id=str(uuid4()), credential_epoch=0, plugin_version='1.0',
+                platform_port=8000, expires_at=(datetime.now(UTC) + timedelta(minutes=1)).isoformat())
+    private = tmp_path.resolve() / 'private'
+    private.mkdir(mode=0o700)
+    policy = private / 'r5.json'
+    policy.write_text(json.dumps(data))
+    policy.chmod(0o600)
+    kwargs = {'enabled': True, 'runtime_enabled': True, 'tenant_mode': 'dev'}
+    assert load_controlled_pilot(policy, **kwargs).approval == approval
+    assert load_controlled_pilot(policy, **dict(kwargs, enabled=False)) is None
+    policy.write_text(json.dumps(dict(data, runtime='unknown')))
+    assert load_controlled_pilot(policy, **kwargs) is None
+
+    # Runtime verification must detect replacement bytes even if the writer
+    # preserves both file size and modification time.
+    interpreter = tmp_path / 'synthetic-node'
+    interpreter.write_bytes(b'approved bytes')
+    pinned = ExecutorApproval.approve(artifact, interpreter, runtime='node')
+    pinned.verify()
+    original_stat = interpreter.stat()
+    interpreter.write_bytes(b'modified bytes')
+    os.utime(interpreter, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    assert interpreter.stat().st_mtime_ns == original_stat.st_mtime_ns
+    with pytest.raises(PermissionError, match='Controlled executor unavailable'):
+        pinned.verify()
+    with pytest.raises(PermissionError, match='Controlled executor unavailable'):
+        pinned.verify(full_interpreter=True)
 
 
 @pytest.mark.asyncio

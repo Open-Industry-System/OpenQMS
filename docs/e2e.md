@@ -214,12 +214,12 @@ shared with focused unit tests, not shipped as application behavior.
 
 ### R5 D5 必选验收
 
-2026-11-15 Responses增量：固定目录新增配对协议迁移/兼容性8节点及原生Responses链路10节点，
-当前为portable migration37、native API68、native browser2，共107必选节点。普通CI仍使用
-确定性模型；真实OpenAI专用凭据只注入经批准的独立CLOUD试用后端，不能进入CI、Vite或插件环境。
+固定目录包含 37 个 portable migration、68 个 native API 和 3 个 native browser 场景，共 108 个必选节点。
+普通 CI 使用确定性模型。真实 OpenAI 专用凭据只注入经批准的独立 CLOUD 试用后端，禁止传入 CI、Vite 或插件环境。
 
 R5 过程/模型/迁移节点列在 `backend/tests/ci/r5_required.py`，portable api 必须执行迁移，r5-api 必须执行原生过程/模型；
-`test_r5_d5_ui.py` 与 `test_r5_d5_browser.py` 在 r5-browser 层执行各自真实 Chromium spec。
+`test_r5_d5_ui.py`、`test_r5_d5_browser.py` 和 `test_r5_sidebar_chat.py` 在 r5-browser 层执行各自
+真实 Chromium spec。侧栏对话场景从页面启动 Pi worker，并通过回环模型验证多轮回复和 D5 建议。
 runner 按 JUnit classname/name 核对固定节点集合、重复、失败及跳过，不能用收集成功或
 普通层其他通过项替代。选择整个 tests 或相应文件时合同生效；单独节点调试应直接用
 pytest_bootstrap，不以部分调试收据作为整层通过。修改参数化节点时同步更新固定目录和
@@ -242,6 +242,11 @@ pytest_bootstrap，不以部分调试收据作为整层通过。修改参数化�
 `make check-r5-native` 串行运行两层。unsupported host 的显式 native 入口直接失败，
 不访问数据库或做环境跳过；其行为有离线测试。
 
+本机运行前，把官方独立版 Node 24 放在 `PATH` 的最前面，在
+`backend/examples/pi_d5_agent` 运行 `npm ci --ignore-scripts --no-audit --no-fund` 和
+`npm --ignore-scripts run build` 生成 `dist/worker.mjs`。原生 API 和侧栏 Chromium 场景
+用同一构建产物。独立版 Node 可在现有沙箱内启动。
+
 R5 macOS试点使用独立手动工作流 `.github/workflows/r5-native.yml`（`R5 macOS pilot acceptance`），
 只接受main上的 `workflow_dispatch`；普通PR及main push的 `Test OpenQMS` 不再派发此job。
 普通Linux后端、浏览器、迁移、权限及SDK检查继续运行，既有8项PR必需检查保持不变。
@@ -257,10 +262,11 @@ Ubuntu preflight校验事件、main ref和SHA格式，冻结本次dispatch的mai
 `[self-hosted, macOS, openqms-r5-sandbox]`，checkout精确冻结SHA。feature分支dispatch会失败，
 不会将其代码送入native runner。手动工作流保留 `r5-native` job名、45分钟超时、原生API＋Chromium
 完整固定目录、job绑定独占PG15及失败／缺失／skip拒绝语义；没有匹配runner会等待，缺少bundle会失败。
+工作流设置官方 Node 24，并在验证入口运行前用锁文件构建和测试 Pi worker。
 手动试点验收是独立结果，普通Linux CI成功不代表macOS原生验收成功，也不代表Linux沙箱已实现。
 
 runner/hook 配置与远端原生执行仍为 **PENDING / NOT RUN**：需要维护者配置此专用 runner，
-预装项目依赖、setuptools79.0.1、Node、Chromium、sandbox-exec、Docker 与缓存 PG15；
+预装项目依赖、setuptools79.0.1、Chromium、sandbox-exec、Docker 与缓存 PG15；
 每个 job 的 hook 必须新建独占 PG15 实例，并在 `$RUNNER_TEMP/openqms-r5-native-job.json`
 写 owner-only（0600）JSON：`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`、`GITHUB_JOB`、
 `created_unix`、`owner_nonce`、`OPENQMS_TEST_RESOURCE_FILE`、`TEST_DATABASE_URL`。

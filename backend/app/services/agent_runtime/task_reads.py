@@ -8,7 +8,7 @@ from app.models.agent_plugin import AgentPluginGrant, AgentPluginInstallation
 from app.models.capa import CAPAEightD
 from app.models.agent_readonly_control import AgentTaskControl, AgentTaskUpdate
 from app.models.agent_task import AgentRun, AgentTaskMessage
-from app.schemas.agent_control import ActivityQuery, ActivityPage, InstallationDirectory, InstallationChoice
+from app.schemas.agent_control import ActivityContext, ActivityQuery, ActivityPage, InstallationDirectory, InstallationChoice
 from app.schemas.agent_plugin import PluginManifest
 from app.services.agent_runtime import checkpoint_service, readonly_delivery, task_service
 from app.services.agent_runtime.task_controls import _current_run, _task_binding
@@ -346,10 +346,18 @@ async def get_activity(db, scope, task_id: UUID, *, before_sequence=None,
         if run is not None:
             run = await _run(db, task, run.run_id)
         await _final_sources(db, scope, task, items)
+        with db.no_autoflush:
+            context = (await db.execute(select(
+                CAPAEightD.document_no, AgentPluginInstallation.plugin_key, AgentPluginInstallation.plugin_version,
+            ).select_from(CAPAEightD).join(AgentPluginInstallation,
+                AgentPluginInstallation.installation_id == task.preferred_installation_id,
+            ).where(CAPAEightD.report_id == task.target_capa_id, CAPAEightD.factory_id == task.factory_id))).one()
         task = await task_service.get_task_for_view(db, scope, task_id)
         if _task_binding(task) != binding:
             raise PermissionError("Activity association unavailable")
         return ActivityPage(task_id=task_id, task_status=task.status,
+            context=ActivityContext(document_no=context.document_no, plugin_key=context.plugin_key,
+                plugin_version=context.plugin_version),
             run_id=None if run is None else run.run_id, run_status=None if run is None else run.status,
             lease_epoch=None if run is None else run.lease_epoch,
             window_end_sequence=window, next_before_sequence=page[-1].sequence if more else None,

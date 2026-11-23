@@ -118,17 +118,32 @@ async def create_fmea(
     product_line_code: str = "DC-DC-100",
     factory_id: uuid.UUID | None = None,
 ) -> FMEADocument:
+    try:
+        fmea = await create_fmea_no_commit(
+            db, title, document_no, fmea_type, user_id, product_line_code, factory_id,
+        )
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        raise ValueError(f"FMEA document number '{document_no}' already exists.") from e
+
+    await db.refresh(fmea)
+    return fmea
+
+
+async def create_fmea_no_commit(
+    db: AsyncSession, title: str, document_no: str, fmea_type: str, user_id: uuid.UUID,
+    product_line_code: str,
+    factory_id: uuid.UUID | None,
+    *,
+    fmea_id: uuid.UUID | None = None,
+    workspace_source_report_id: uuid.UUID | None = None,
+) -> FMEADocument:
+    """Stage the document, audit entry and outbox events in the caller's transaction."""
     await lock_candidate_scopes(db, [(factory_id, product_line_code)])
     await validate_product_line(db, product_line_code)
-    # Check if duplicate document_no exists
-    existing_result = await db.execute(
-        select(FMEADocument).where(FMEADocument.document_no == document_no)
-    )
-    if existing_result.scalar_one_or_none():
-        raise ValueError(f"FMEA document number '{document_no}' already exists.")
+    fmea_id = fmea_id or uuid.uuid4()
 
-    fmea_id = uuid.uuid4()
-    
     # Initialize templates based on FMEA type
     graph_data = {"nodes": [], "edges": []}
     if fmea_type == "PFMEA":
@@ -155,6 +170,7 @@ async def create_fmea(
         title=title,
         document_no=document_no,
         fmea_type=fmea_type,
+        status=FMEAState.DRAFT.value,
         product_line_code=product_line_code,
         created_by=user_id,
         updated_by=user_id,
@@ -164,20 +180,27 @@ async def create_fmea(
     db.add(fmea)
 
     # Audit log
-    audit_log = AuditLog(
+    changed_fields = {
+        "title": title,
+        "document_no": document_no,
+        "fmea_type": fmea_type,
+        "product_line_code": product_line_code,
+        "status": fmea.status,
+    }
+    correlation_id = None
+    if workspace_source_report_id is not None:
+        changed_fields["workspace_source_report_id"] = str(workspace_source_report_id)
+        correlation_id = fmea_id
+    db.add(AuditLog(
+        log_id=correlation_id or uuid.uuid4(),
         table_name="fmea_documents",
         record_id=fmea_id,
         action="CREATE",
-        changed_fields={
-            "title": title,
-            "document_no": document_no,
-            "fmea_type": fmea_type,
-            "product_line_code": product_line_code,
-            "status": fmea.status,
-        },
+        changed_fields=changed_fields,
         operated_by=user_id,
-    )
-    db.add(audit_log)
+        factory_id=factory_id,
+        correlation_id=correlation_id,
+    ))
 
     # Outbox: enqueue Neo4j projection sync
     db.add(GraphSyncOutbox(
@@ -188,13 +211,6 @@ async def create_fmea(
     ))
 
     await enqueue_embedding(db, "fmea_node", fmea.fmea_id, fmea.product_line_code, fmea.factory_id)
-    try:
-        await db.commit()
-    except IntegrityError as e:
-        await db.rollback()
-        raise ValueError(f"FMEA document number '{document_no}' already exists.") from e
-
-    await db.refresh(fmea)
     return fmea
 
 

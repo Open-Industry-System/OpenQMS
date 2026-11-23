@@ -5,9 +5,10 @@ interface Props {
   task: AgentTask;
   page: ActivityPage;
   pending: boolean;
+  technicalOnly?: boolean;
   onControl: (action: TaskAction, checkpointId?: string) => void;
 }
-function Sources({ sources }: {
+export function Sources({ sources }: {
   sources: RuntimeSource[];
 }) {
   return <ul>{sources.map(source => <li key={source.receipt_id}>
@@ -18,18 +19,46 @@ function Sources({ sources }: {
     <div>数据级别 {source.data_class}</div>
   </li>)}</ul>;
 }
+export function TaskMessageText({ content, model }: { content: string; model: boolean }) {
+  let label = content;
+  if (content === "deliver_d4_root_cause_candidate_v1") {
+    label = model ? "仅根据当前根因创建建议任务" : "读取当前根因";
+  }
+  else if (content === '{"intent":"continue_d5","additional_context":"none"}') label = "继续（无额外资料）";
+  else if (/^\{"intent":"replace_d5","predecessor_id":"[a-f0-9-]+"\}$/i.test(content)) label = "明确更正选中建议";
+  return <p>{label}</p>;
+}
+export function taskMessageState(state: "queued" | "claimed" | "received", status?: string) {
+  if (state === "received") return "已确认接收";
+  const label = state === "queued" ? "排队中" : "已领取";
+  return status === "failed" || status === "cancelled"
+    ? `${label}：终止时未确认接收（不代表已处理）` : label;
+}
+export function TaskResult({ result }: { result: Extract<ActivityItem, { kind: "result" }>["data"] }) {
+  const labels = {
+    explanations: "解释",
+    support: "支持证据",
+    opposition: "反对证据",
+    missing_information: "缺失信息",
+    conditional_recommendations: "条件建议",
+  } as const;
+  return <>
+    <h4>只读分析结果</h4>
+    {(Object.keys(labels) as (keyof typeof labels)[]).map(key => result.payload[key].length > 0 && <div key={key}>
+      <strong>{labels[key]}</strong>
+      <ul>{result.payload[key].map((value, index) => <li key={index}>{value}</li>)}</ul>
+    </div>)}
+    <details><summary>查看结果证据</summary><Sources sources={result.sources} /></details>
+  </>;
+}
 function Row({ item, task, page, pending, onControl }: Pick<Props, "task" | "page" | "pending" | "onControl"> & {
   item: ActivityItem;
 }) {
   switch (item.kind) {
-    case "message": {
-      const terminal = page.task_status === "failed" || page.task_status === "cancelled";
-      const state = item.data.state === "received" ? "已确认接收" : `${item.data.state === "queued" ? "排队中" : "已领取"}${terminal ? "：终止时未确认接收（不代表已处理）" : ""}`;
-      return <>
-        <p>{task.model_deployment && item.data.content === "deliver_d4_root_cause_candidate_v1" ? "仅根据当前根因创建建议任务" : item.data.content}</p>
-        <span>{state}</span>
-      </>;
-    }
+    case "message": return <>
+      <TaskMessageText content={item.data.content} model={Boolean(task.model_deployment)} />
+      <span>{taskMessageState(item.data.state, page.task_status)}</span>
+    </>;
     case "ack": return <p>插件已确认接收批次 {item.data.batch_id}</p>;
     case "run_created":
     case "claim":
@@ -48,18 +77,7 @@ function Row({ item, task, page, pending, onControl }: Pick<Props, "task" | "pag
       <p>{item.data.payload.stage}</p>
       <p>{item.data.payload.message}</p>{item.data.payload.completed !== null && <p>进度 {item.data.payload.completed} / {item.data.payload.total ?? "未知"}</p>}<Sources sources={item.data.sources} />
     </>;
-    case "result": return <>
-      <h4>只读分析结果</h4>{Object.entries(item.data.payload).map(([key, values]) => <div key={key}>
-        <strong>{({
-          explanations: "解释",
-          support: "支持证据",
-          opposition: "反对证据",
-          missing_information: "缺失信息",
-          conditional_recommendations: "条件建议"
-        } as Record<string, string>)[key]}</strong>
-        <ul>{values.map((text: string, i: number) => <li key={i}>{text}</li>)}</ul>
-      </div>)}<Sources sources={item.data.sources} />
-    </>;
+    case "result": return <TaskResult result={item.data} />;
     case "checkpoint": {
       const cp = item.data;
       if ('checkpoint_type' in cp) return <>
@@ -79,12 +97,12 @@ function Row({ item, task, page, pending, onControl }: Pick<Props, "task" | "pag
     }
   }
 }
-export default function AgentActivity({ task, page, pending, onControl }: Props) {
+export default function AgentActivity({ task, page, pending, onControl, technicalOnly = false }: Props) {
   const terminal = ["completed", "failed", "cancelled"].includes(page.task_status);
   const currentRun = [...page.items].reverse().find(item => (item.kind === "run_created" || item.kind === "claim" || item.kind === "finish") && item.data.run_id === page.run_id);
   const runData = currentRun && (currentRun.kind === "run_created" || currentRun.kind === "claim" || currentRun.kind === "finish") ? currentRun.data : null;
-  return <section aria-label="任务活动" style={{ overflowWrap: "anywhere" }}>
-    <Link to={`/capa/${task.target_capa_id}`}>目标报告 {task.target_capa_id}</Link>
+  return <section aria-label={technicalOnly ? "运行与控制" : "任务活动"} style={{ overflowWrap: "anywhere" }}>
+    {!technicalOnly && <Link to={`/capa/${task.target_capa_id}`}>目标报告 {task.target_capa_id}</Link>}
     <p>任务 {task.task_id}</p>
     <p>插件安装 {runData?.installation_id ?? task.preferred_installation_id}</p>
     <p>插件版本 {runData?.plugin_version ?? "当前窗口未提供"}</p>
@@ -101,7 +119,7 @@ export default function AgentActivity({ task, page, pending, onControl }: Props)
         onClick={() => onControl("resume")}>继续</Button>
       <Button disabled={pending || terminal} onClick={() => onControl("cancel")}>取消任务</Button>
     </div>
-    <ol data-testid="agent-activity-window">{page.items.map(item => <li key={item.sequence} data-sequence={item.sequence}>
+    <ol data-testid={technicalOnly ? "agent-technical-window" : "agent-activity-window"}>{page.items.filter(item => !technicalOnly || (item.kind !== "message" && item.kind !== "result")).map(item => <li key={item.sequence} data-sequence={item.sequence}>
       <time>{item.created_at}</time>
       <Row item={item} task={task} page={page} pending={pending} onControl={onControl} />
     </li>)}</ol>

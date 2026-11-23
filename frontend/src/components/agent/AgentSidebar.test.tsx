@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, act, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor, cleanup, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { useAuthStore } from "../../store/authStore";
@@ -7,7 +7,7 @@ import AgentSidebar from "./AgentSidebar";
 import type { ActivityPage } from "../../types/agentTask";
 import * as api from "../../api/agentTasks";
 import * as proposals from "../../api/d5Proposals";
-vi.mock("../../api/d5Proposals",()=>({listD5Proposals:vi.fn(),listTaskD5Proposals:vi.fn(),listD5Measures:vi.fn(),checkpointProposals:vi.fn()}));
+vi.mock("../../api/d5Proposals",()=>({listD5Proposals:vi.fn(),listTaskD5Proposals:vi.fn(),listTaskD5Results:vi.fn(),listD5Measures:vi.fn(),checkpointProposals:vi.fn()}));
 vi.mock("../../api/agentTasks", async () => ({
   ...await vi.importActual("../../api/agentTasks"),
   getTaskAvailability: vi.fn(),
@@ -35,6 +35,7 @@ const task = {
   created_at: "2026-10-01T00:00:00Z",
   updated_at: "2026-10-01T00:00:00Z"
 };
+const bound = { ...task, model_deployment: { deployment_id: a, name: "模型甲", version: "1" } };
 const page = {
   task_id: a,
   task_status: "ready" as const,
@@ -53,6 +54,7 @@ function TestPage({ report = a }: {
   return <>
     <button onClick={() => ctx?.beginCreate(report)}>创建 {report}</button>
     <button onClick={() => ctx?.selectTask(task)}>选择 A</button>
+    <button onClick={() => ctx?.selectTask(bound)}>选择模型任务</button>
     <span>页面 {report}</span>
     <span>地址 {location.pathname}</span>
     <span>选中任务 {ctx?.selectedTask?.task_id ?? "无"}</span>
@@ -71,13 +73,22 @@ function Harness({ report = a }: {
 async function select() {
   await waitFor(() => expect(screen.getByRole("button", { name: "Agent 任务" })).toBeInTheDocument());
   fireEvent.click(screen.getByRole("button", { name: "选择 A" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled());
+  await screen.findByRole("region", { name: "任务对话" });
+}
+async function selectModel() {
+  await screen.findByRole("button", { name: "Agent 任务" });
+  fireEvent.click(screen.getByRole("button", { name: "选择模型任务" }));
+  await waitFor(() => expect(screen.getByLabelText("追加指令")).toBeEnabled());
+}
+async function showDetails(model = false) {
+  fireEvent.click(await screen.findByRole("button", { name: "任务详情" }));
+  if (model) fireEvent.click(screen.getByText("建议与检查点", { selector: "summary" }));
 }
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   localStorage.setItem("access_token", "jwt");
-  useAuthStore.setState({ user: { user_id: "u1" } as any, token: "jwt" });
+  useAuthStore.setState({ user: { user_id: "u1" } as any, token: "jwt", currentFactoryId: null, factoryScope: null });
   vi.mocked(api.getTaskAvailability).mockResolvedValue({ enabled: true });
   vi.mocked(api.listTasks).mockResolvedValue({
     items: [task],
@@ -86,6 +97,7 @@ beforeEach(() => {
     page_size: 20
   });
   vi.mocked(api.listTaskInstallations).mockResolvedValue({ items: [{ installation_id: a, plugin_key: "readonly", plugin_version: "1.0" }] });
+  vi.mocked(proposals.listTaskD5Results).mockResolvedValue([]);
   vi.mocked(proposals.listTaskD5Proposals).mockResolvedValue({items:[{proposal_id:b,task_id:a,original_text:"旧建议",state:"pending",basis_current:true,can_adopt:true,can_withdraw:true,created_at:task.created_at}],total:1,page:1,page_size:20});
   vi.mocked(api.listTaskD5Checkpoints).mockResolvedValue({items:[],total:0,page:1,page_size:20});
   vi.mocked(proposals.listD5Measures).mockResolvedValue({legacy_text:null,items:[],total:0,page:1,page_size:20});
@@ -99,6 +111,48 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("global user task sidebar", () => {
+  it("stops task and workflow polling during an outage and reconnects on request", async () => {
+    vi.useFakeTimers();
+    let finishOldWorkflow!: (value: Awaited<ReturnType<typeof api.getTaskWorkflow>>) => void;
+    const oldWorkflow = new Promise<Awaited<ReturnType<typeof api.getTaskWorkflow>>>(resolve => {
+      finishOldWorkflow = resolve;
+    });
+    vi.mocked(api.getTaskActivity).mockReset().mockRejectedValue(new Error("connection interrupted"))
+      .mockResolvedValueOnce(page);
+    vi.mocked(api.getTaskWorkflow).mockReset().mockReturnValue(oldWorkflow)
+      .mockResolvedValueOnce({ status: "waiting", question: "旧问题", checkpoint_id: null });
+    render(<Harness />);
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "选择模型任务" }));
+    await act(async () => {});
+    expect(screen.getByText("旧问题")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(api.getTaskWorkflow).toHaveBeenCalledTimes(2);
+    const oldSignal = vi.mocked(api.getTaskWorkflow).mock.calls[1][1];
+
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByText("连接中断，重试中")).toBeInTheDocument();
+    expect(screen.queryByText("旧问题")).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(10000));
+    expect(screen.getByText("暂时无法连接任务服务")).toBeInTheDocument();
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () => {
+      finishOldWorkflow({ status: "waiting", question: "迟到问题", checkpoint_id: null });
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(api.getTaskActivity).toHaveBeenCalledTimes(4);
+    expect(api.getTaskWorkflow).toHaveBeenCalledTimes(2);
+
+    vi.mocked(api.getTaskActivity).mockResolvedValue(page);
+    vi.mocked(api.getTaskWorkflow).mockResolvedValue({ status: "waiting", question: "重新连接后的问题", checkpoint_id: null });
+    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+    await act(async () => {});
+    expect(api.getTaskActivity).toHaveBeenCalledTimes(5);
+    expect(api.listTasks).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("重新连接后的问题")).toBeInTheDocument();
+    expect(screen.queryByText("迟到问题")).toBeNull();
+    expect(screen.queryByRole("button", { name: "重新连接" })).toBeNull();
+  });
   it.each([401, 403, 404])("directory %s withdraws all activity immediately and ignores an outstanding old poll without a deny loop", async (status) => {
     vi.useFakeTimers();
     const restricted: ActivityPage = {
@@ -171,7 +225,6 @@ describe("global user task sidebar", () => {
     });
     expect(screen.getByText("受限目录测试指令")).toBeInTheDocument();
     expect(screen.getByText("受限目录测试结果")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
@@ -204,9 +257,12 @@ describe("global user task sidebar", () => {
   it("mounts the selected task attachment panel after activity without changing runtime controls", async () => {
     render(<Harness />);
     await select();
+    expect(screen.queryByTestId("task-attachments")).toBeNull();
+    await showDetails();
+    fireEvent.click(screen.getByText("任务附件", { selector: "summary" }));
     expect(screen.getByTestId("task-attachments")).toHaveTextContent(`附件任务 ${a}`);
     expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "发送指令" })).toBeDisabled();
+    expect(screen.queryByLabelText("追加指令")).toBeNull();
   });
   it("follows the fixed report link through SPA navigation and retains the selected task", async () => {
     render(<Harness />);
@@ -220,13 +276,13 @@ describe("global user task sidebar", () => {
     await select();
     view.rerender(<Harness report={b} />);
     act(() => useAuthStore.setState({ currentFactoryId: b }));
-    expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument();
+    await screen.findByRole("link", { name: `目标报告 ${a}` });
     act(() => {
       localStorage.setItem("access_token", "jwt2");
       useAuthStore.setState({ token: "jwt2" });
     });
     await waitFor(() => expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument());
-    expect(api.getTaskAvailability).toHaveBeenCalledTimes(1);
+    expect(api.getTaskAvailability).toHaveBeenCalledTimes(2);
   });
   it("paginates only the current user task directory while preserving selected task", async () => {
     vi.mocked(api.listTasks).mockResolvedValueOnce({
@@ -306,15 +362,15 @@ describe("global user task sidebar", () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByRole("button", { name: "Agent 任务" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: `创建 ${a}` }));
-    await waitFor(() => expect(screen.getByLabelText("初始指令")).toBeEnabled());
-    fireEvent.change(screen.getByLabelText("初始指令"), { target: { value: "读取事实" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "创建任务" })).toBeEnabled());
+    expect(screen.queryByLabelText("初始指令")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
     await waitFor(() => expect(api.createTask).toHaveBeenCalled());
     expect(api.createTask).toHaveBeenCalledWith({
       report_id: a,
       installation_id: a,
       request_key: expect.any(String),
-      initial_text: "读取事实"
+      initial_text: "读取当前报告的 D4 元数据"
     }, expect.any(AbortSignal));
   });
   it("unconfirmed append retries same original body/key despite input changes; duplicate clicks prevented", async () => {
@@ -323,16 +379,16 @@ describe("global user task sidebar", () => {
       reject = r;
     })).mockResolvedValueOnce({ message_id: b, sequence: 1, state: "accepted" });
     render(<Harness />);
-    await select();
+    await selectModel();
     fireEvent.change(screen.getByLabelText("追加指令"), { target: { value: "原始指令" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送指令" }));
-    fireEvent.click(screen.getByRole("button", { name: "发送指令" }));
+    fireEvent.click(screen.getByRole("button", { name: "补充给 模型甲" }));
+    fireEvent.click(screen.getByRole("button", { name: "补充给 模型甲" }));
     expect(api.appendTaskMessage).toHaveBeenCalledTimes(1);
     await act(async () => reject(new Error("lost response")));
     fireEvent.click(screen.getByRole("button", { name: "重试发送原指令" }));
     await waitFor(() => expect(api.appendTaskMessage).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.appendTaskMessage).mock.calls[0][1]).toEqual(vi.mocked(api.appendTaskMessage).mock.calls[1][1]);
-    expect(screen.getByRole("status")).toHaveTextContent("指令已入队");
+    expect(screen.getByRole("status")).toHaveTextContent("已确认接收");
   });
   it("control lost response retry preserves epoch/action/key; 409 refreshes current state and new command uses fresh epoch", async () => {
     vi.mocked(api.controlTask).mockRejectedValueOnce(new Error("lost")).mockRejectedValueOnce({ response: { status: 409 } }).mockResolvedValueOnce({
@@ -345,6 +401,7 @@ describe("global user task sidebar", () => {
     });
     render(<Harness />);
     await select();
+    await showDetails();
     fireEvent.click(screen.getByRole("button", { name: "暂停" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "重试原控制操作" })).toBeInTheDocument());
     vi.mocked(api.getTaskActivity).mockResolvedValue({ ...page, lease_epoch: 4 });
@@ -394,6 +451,7 @@ it('sends correction only as explicit source-free intent for a current-task pend
   vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
   render(<Harness />); await select();
   fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  await showDetails(true);
   fireEvent.change(await screen.findByLabelText('更正当前任务建议'),{target:{value:b}});
   fireEvent.click(screen.getByRole('button',{name:'明确更正选中建议'}));
   await waitFor(()=>expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:JSON.stringify({intent:'replace_d5',predecessor_id:b}),idempotency_key:expect.any(String)},expect.any(AbortSignal)));
@@ -420,6 +478,7 @@ it('clears an old model question on workflow denial without switching recipients
   await screen.findByText('受限旧问题');
   await waitFor(()=>expect(screen.queryByText('受限旧问题')).toBeNull(),{timeout:2500});
   expect(screen.getByText('当前接收方：模型甲 · 1')).toBeInTheDocument();
+  expect(screen.getByLabelText('追加指令')).toBeDisabled();
   expect(api.launchTask).not.toHaveBeenCalled();
 });
 it('explicit source-free start uses selected approved model without rewriting free initial text',async()=>{
@@ -453,6 +512,7 @@ it('allows explicitly choosing an earlier checkpoint instead of silently using l
   vi.mocked(api.getTaskWorkflow).mockResolvedValue({status:'waiting',question:'当前问题',checkpoint_id:run});
   render(<Harness/>);await select();
   fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  await showDetails(true);
   fireEvent.change(await screen.findByLabelText('选择处理范围检查点'),{target:{value:b}});
   await waitFor(()=>expect(proposals.checkpointProposals).toHaveBeenCalledWith(a,b,expect.any(AbortSignal)));
   expect(screen.getByLabelText('选择处理范围检查点')).toHaveValue(b);
@@ -465,9 +525,138 @@ it('pages current-task pending correction choices rather than being trapped by t
   vi.mocked(proposals.listTaskD5Proposals).mockImplementation(async(_report,_task,page)=>({items:page===2?[current(b)]:Array.from({length:20},(_,i)=>current(`current-${i}`)),total:21,page:page??1,page_size:20}));
   render(<Harness/>);await select();
   fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  await showDetails(true);
   fireEvent.click(await screen.findByRole('button',{name:'下一页待更正建议'}));
   await waitFor(()=>expect(proposals.listTaskD5Proposals).toHaveBeenLastCalledWith(a,a,2,expect.any(AbortSignal)));
   fireEvent.change(screen.getByLabelText('更正当前任务建议'),{target:{value:b}});
   fireEvent.click(screen.getByRole('button',{name:'明确更正选中建议'}));
   await waitFor(()=>expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:JSON.stringify({intent:'replace_d5',predecessor_id:b}),idempotency_key:expect.any(String)},expect.any(AbortSignal)));
+});
+
+it("keeps IME confirmation and Shift+Enter in the draft, then sends a single multiline message", async () => {
+  vi.mocked(api.appendTaskMessage).mockResolvedValue({ message_id: b, sequence: 1, state: "queued" });
+  render(<Harness />);
+  await selectModel();
+  const input = screen.getByLabelText("追加指令");
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: "压装异常" } });
+  expect(fireEvent.keyDown(input, { key: "Enter", isComposing: false })).toBe(true);
+  fireEvent.compositionEnd(input);
+  expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })).toBe(true);
+  expect(fireEvent.keyDown(input, { key: "Enter", shiftKey: true })).toBe(true);
+  expect(api.appendTaskMessage).not.toHaveBeenCalled();
+
+  fireEvent.change(input, { target: { value: "压装异常\n下午补充数据" } });
+  expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("消息排队中"));
+  expect(api.appendTaskMessage).toHaveBeenCalledExactlyOnceWith(
+    a, { content: "压装异常\n下午补充数据", idempotency_key: expect.any(String) }, expect.any(AbortSignal),
+  );
+});
+
+it("discards a late workflow and an unconfirmed append when switching tasks", async () => {
+  const other = { ...bound, task_id: b, target_capa_id: b, model_deployment: { deployment_id: b, name: "模型乙", version: "2" } };
+  vi.mocked(api.listTasks).mockResolvedValue({ items: [bound, other], total: 2, page: 1, page_size: 20 });
+  vi.mocked(api.getTaskActivity).mockImplementation(async id => ({ ...page, task_id: id }));
+  let finishAppend!: (value: Awaited<ReturnType<typeof api.appendTaskMessage>>) => void;
+  let finishWorkflow!: (value: Awaited<ReturnType<typeof api.getTaskWorkflow>>) => void;
+  vi.mocked(api.appendTaskMessage).mockReturnValue(new Promise(resolve => { finishAppend = resolve; }));
+  vi.mocked(api.getTaskWorkflow).mockResolvedValueOnce({ status: "running", question: null, checkpoint_id: null })
+    .mockImplementation(id => id === a
+      ? new Promise(resolve => { finishWorkflow = resolve; })
+      : Promise.resolve({ status: "waiting", question: "乙的问题", checkpoint_id: null }));
+  render(<Harness />);
+  await selectModel();
+  const input = screen.getByLabelText("追加指令");
+  fireEvent.change(input, { target: { value: "甲的草稿" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(finishWorkflow).toBeDefined(), { timeout: 2000 });
+  const oldSignal = vi.mocked(api.appendTaskMessage).mock.calls[0][2];
+  const oldPoll = vi.mocked(api.getTaskWorkflow).mock.calls.slice().reverse().find(call => call[0] === a);
+  fireEvent.change(screen.getByLabelText("选择任务"), { target: { value: b } });
+  await screen.findByText("乙的问题");
+  expect(oldSignal?.aborted).toBe(true);
+  expect(oldPoll?.[1]?.aborted).toBe(true);
+  await act(async () => {
+    finishAppend({ message_id: a, sequence: 1, state: "accepted" });
+    finishWorkflow({ status: "waiting", question: "甲的迟到问题", checkpoint_id: null });
+  });
+  expect(screen.queryByText("甲的迟到问题")).toBeNull();
+  expect(screen.queryByText("消息已确认接收。")).toBeNull();
+  expect(screen.getByLabelText("追加指令")).toHaveValue("");
+});
+
+it("keeps a reauthorized task selected after a factory change but clears its old draft", async () => {
+  render(<Harness />);
+  await selectModel();
+  fireEvent.change(screen.getByLabelText("追加指令"), { target: { value: "上一工厂的草稿" } });
+  const oldPoll = vi.mocked(api.getTaskWorkflow).mock.calls[0][1];
+  act(() => useAuthStore.setState({ currentFactoryId: b }));
+  await waitFor(() => expect(screen.getByLabelText("追加指令")).toBeEnabled());
+  expect(oldPoll?.aborted).toBe(true);
+  expect(screen.getByLabelText("追加指令")).toHaveValue("");
+});
+
+it.each(["completed", "cancelled", "failed"] as const)("renders %s model conversations read-only", async task_status => {
+  vi.mocked(api.getTaskActivity).mockResolvedValue({ ...page, task_status });
+  render(<Harness />);
+  await screen.findByRole("button", { name: "Agent 任务" });
+  fireEvent.click(screen.getByRole("button", { name: "选择模型任务" }));
+  const input = await screen.findByLabelText("追加指令");
+  expect(input).toBeDisabled();
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(screen.getByRole("button", { name: "补充给 模型甲" })).toBeDisabled();
+  expect(api.appendTaskMessage).not.toHaveBeenCalled();
+});
+
+it("places server questions between employee turns and ignores runtime progress as a reply", async () => {
+  const timeline: ActivityPage = {
+    ...page, window_end_sequence: 3,
+    items: [
+      { kind: "message", sequence: 1, created_at: "2026-10-01T00:00:01Z",
+        data: { message_id: a, sequence: 1, author_id: a, state: "received", content: "开始", data_class: "restricted" } },
+      { kind: "event", sequence: 2, created_at: "2026-10-01T00:00:02Z",
+        data: { event_id: b, task_id: a, run_id: run, event_type: "progress", presentation_code: "plugin_running",
+          created_at: "2026-10-01T00:00:02Z", sources: [] } },
+      { kind: "message", sequence: 3, created_at: "2026-10-01T00:00:04Z",
+        data: { message_id: b, sequence: 2, author_id: a, state: "claimed", content: "继续", data_class: "restricted" } },
+    ],
+  };
+  vi.mocked(api.getTaskActivity).mockResolvedValue(timeline);
+  vi.mocked(api.getTaskWorkflow).mockResolvedValue({
+    status: "running", question: null, checkpoint_id: null, run_id: run, lease_epoch: 3,
+    questions: [{ question_id: run, text: "请核对班次", created_at: "2026-10-01T00:00:03Z" }],
+  });
+  render(<Harness />);
+  await selectModel();
+  const conversation = within(screen.getByRole("region", { name: "任务对话" }));
+  const rows = conversation.getAllByRole("listitem");
+  expect(rows).toHaveLength(3);
+  expect(rows[0]).toHaveTextContent("我");
+  expect(rows[0]).toHaveTextContent("已确认接收");
+  expect(rows[1]).toHaveTextContent("请核对班次");
+  expect(rows[2]).toHaveTextContent("已领取");
+  expect(conversation.queryByText("插件报告运行中")).toBeNull();
+});
+
+it("keeps the creation request for another report when the current model is revoked", async () => {
+  let revoke!: (reason: unknown) => void;
+  let finishCreate!: (value: Awaited<ReturnType<typeof api.createTask>>) => void;
+  vi.mocked(api.getTaskWorkflow)
+    .mockResolvedValueOnce({ status: "running", question: null, checkpoint_id: null })
+    .mockImplementation(() => new Promise((_, reject) => { revoke = reject; }));
+  vi.mocked(api.createTask).mockReturnValue(new Promise(resolve => { finishCreate = resolve; }));
+  vi.mocked(api.getTaskActivity).mockImplementation(async id => ({ ...page, task_id: id }));
+  render(<Harness report={b} />);
+  await selectModel();
+  fireEvent.click(screen.getByRole("button", { name: `创建 ${b}` }));
+  const create = await screen.findByRole("button", { name: "创建任务" });
+  await waitFor(() => expect(create).toBeEnabled());
+  fireEvent.click(create);
+  const signal = vi.mocked(api.createTask).mock.calls[0][1];
+  await waitFor(() => expect(revoke).toBeDefined(), { timeout: 2000 });
+  await act(async () => revoke({ response: { status: 403 } }));
+  expect(signal?.aborted).toBe(false);
+  await act(async () => finishCreate({ ...task, task_id: b, target_capa_id: b }));
+  expect(await screen.findByRole("link", { name: `目标报告 ${b}` })).toBeInTheDocument();
 });

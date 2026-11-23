@@ -546,9 +546,21 @@ def test_r5_native_trial_is_manual_and_separate_from_portable_pr_checks() -> Non
     checkout = next(step for step in _steps(native) if str(step.get('uses', '')).startswith('actions/checkout@'))
     assert checkout['with']['ref'] == '${{ needs.preflight.outputs.frozen_sha }}'
     _assert_secretless(native)
-    run = _named_steps(native)['Run mandatory R5 native API and Chromium acceptance']
+    named = _named_steps(native)
+    setup = named['Set up standalone Node for the R5 Pi worker']
+    assert setup['uses'] == 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020'
+    assert setup['with'] == {'node-version': '24'}
+    build = named['Build and test the R5 Pi worker from locked dependencies']
+    assert build['working-directory'] == 'backend/examples/pi_d5_agent'
+    assert build['run'].strip().splitlines() == [
+        'npm ci --ignore-scripts --no-audit --no-fund',
+        'npm --ignore-scripts test',
+    ]
+    run = named['Run mandatory R5 native API and Chromium acceptance']
     assert run['run'].strip() == 'cd backend\npython3 -B -m tests.ci.r5_native_gate "$RUNNER_TEMP/openqms-r5-native-job.json"'
-    upload = _named_steps(native)['Upload native safe receipts']
+    steps = _steps(native)
+    assert steps.index(checkout) < steps.index(setup) < steps.index(build) < steps.index(run)
+    upload = named['Upload native safe receipts']
     assert upload['if'] == 'always()'
     assert upload['with']['if-no-files-found'] == 'error'
     assert upload['with']['path'].strip().splitlines() == [

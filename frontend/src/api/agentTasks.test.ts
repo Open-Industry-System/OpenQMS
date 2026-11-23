@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import client from "./client";
-import { getTaskActivity, createTask, appendTaskMessage, controlTask, parseActivityPage } from "./agentTasks";
+import { getTaskActivity, createTask, appendTaskMessage, controlTask, getTaskWorkflow, parseActivityPage } from "./agentTasks";
 vi.mock("./client", () => ({ default: { get: vi.fn(), post: vi.fn() } }));
 const id = "00000000-0000-4000-8000-000000000001";
 const task = {
@@ -103,4 +103,21 @@ it('accepts actual TaskOut immutable deployment, strict approved choices and lau
 it('accepts strict control-only D4 recovery checkpoints in actual R5 activity pages',()=>{
   const cp={checkpoint_type:'d4_recovery_v1',checkpoint_id:id,task_id:id,run_id:id,lease_epoch:1,tenant_generation:1,accepted_message_seq:1,update_sequence:1,protocol:'d4-recovery.v1',resume_position:'restart_from_start',created_at:task.created_at};
   expect(()=>parseActivityPage({...page,window_end_sequence:1,items:[{kind:'checkpoint',sequence:1,created_at:task.created_at,data:cp}]})).not.toThrow();
+});
+
+it("accepts the authorized activity context and rejects unrelated fields", () => {
+  const context = { document_no: "8D-002", plugin_key: "openqms.local-d4-metadata", plugin_version: "1.0" };
+  expect(parseActivityPage({ ...page, context }).context).toEqual(context);
+  expect(() => parseActivityPage({ ...page, context: { ...context, receiver_token: "hidden" } })).toThrow();
+});
+
+it("accepts timestamped questions only from an identified workflow round", async () => {
+  const value = {
+    status: "waiting", question: "请补充", checkpoint_id: null, run_id: id, lease_epoch: 3,
+    questions: [{ question_id: id, text: "请补充", created_at: task.created_at }],
+  };
+  vi.mocked(client.get).mockResolvedValueOnce({ data: value })
+    .mockResolvedValueOnce({ data: { ...value, run_id: null, lease_epoch: null } });
+  expect(await getTaskWorkflow(id)).toEqual(value);
+  await expect(getTaskWorkflow(id)).rejects.toThrow("Invalid Agent workflow history");
 });

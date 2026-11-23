@@ -14,6 +14,8 @@ test('two roles collaborate on R5 proposals with immutable sidebar recipients',a
   await login(page,context,details);
   await page.getByRole('button',{name:'Agent 任务',exact:true}).click();
   await page.getByLabel('选择任务',{exact:true}).selectOption(task);
+  await page.getByRole('button',{name:'任务详情',exact:true}).click();
+  await page.getByText('建议与检查点',{exact:true}).click();
   await expect(page.getByText('当前接收方：synthetic A · 1',{exact:true})).toBeVisible();
   await page.getByLabel('选择处理范围检查点',{exact:true}).selectOption(details.checkpoint);
   await expect(page.getByRole('region',{name:'检查点部分撤回'})).toBeVisible();

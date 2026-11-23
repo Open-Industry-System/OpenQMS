@@ -1,11 +1,12 @@
 """Darwin-only controlled pilot. Unsupported hosts and stale pins fail closed.
 
 Approval is platform-owned; never construct it from a plugin HTTP assertion.
-The interpreter uses only stdlib; the artifact gets input on stdin, no platform
-credential files/environment. Exact loopback platform port is the sole network
-exception. This entry is deliberately separate from the R4b fixed launcher.
+The approved artifact receives input on stdin. Python uses its standard library
+and Node runs a bundled Pi worker. No platform credentials enter the child's
+environment. The exact loopback platform port is the sole network exception. This entry is deliberately separate from the R4b fixed launcher.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -17,7 +18,25 @@ import tempfile
 
 
 def _sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    with Path(path).open('rb') as file:
+        return hashlib.file_digest(file, 'sha256').hexdigest()
+
+
+def _file_identity(info):
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+@lru_cache(maxsize=8)
+def _node_sha(path, identity):
+    # Frequent authorization checks can reuse a digest only for the same OS
+    # file identity. Launch still checks the interpreter bytes directly.
+    with path.open('rb') as file:
+        if _file_identity(os.fstat(file.fileno())) != identity:
+            raise PermissionError('Controlled executor unavailable')
+        digest = hashlib.file_digest(file, 'sha256').hexdigest()
+        if _file_identity(os.fstat(file.fileno())) != identity:
+            raise PermissionError('Controlled executor unavailable')
+    return digest
 
 
 @dataclass(frozen=True)
@@ -27,19 +46,29 @@ class ExecutorApproval:
     interpreter: Path
     interpreter_sha256: str
     launcher_sha256: str
+    runtime: str = 'python'
 
     @classmethod
-    def approve(cls, artifact, interpreter):
+    def approve(cls, artifact, interpreter, *, runtime='python'):
         """Called only by platform admin enrollment, not by runtime payloads."""
         artifact, interpreter = Path(artifact).resolve(strict=True), Path(interpreter).resolve(strict=True)
-        return cls(artifact, _sha(artifact), interpreter, _sha(interpreter), _sha(__file__))
+        if runtime not in ('python', 'node') or (runtime == 'node' and artifact.suffix != '.mjs'):
+            raise PermissionError('Controlled executor unavailable')
+        return cls(artifact, _sha(artifact), interpreter, _sha(interpreter), _sha(__file__), runtime)
 
-    def verify(self):
+    def verify(self, *, full_interpreter=False):
         if (platform.system() != 'Darwin' or not Path('/usr/bin/sandbox-exec').is_file()
+                or self.runtime not in ('python', 'node')
+                or (self.runtime == 'node' and self.artifact.suffix != '.mjs')
                 or self.artifact.is_symlink() or self.interpreter.is_symlink()
                 or _sha(self.artifact) != self.artifact_sha256
-                or _sha(self.interpreter) != self.interpreter_sha256
                 or _sha(__file__) != self.launcher_sha256):
+            raise PermissionError('Controlled executor unavailable')
+        if self.runtime == 'node' and not full_interpreter:
+            digest = _node_sha(self.interpreter, _file_identity(self.interpreter.stat()))
+        else:
+            digest = _sha(self.interpreter)
+        if digest != self.interpreter_sha256:
             raise PermissionError('Controlled executor unavailable')
 
 
@@ -50,9 +79,11 @@ def _literal(path):
 def sandbox_policy(approval, platform_port):
     if type(platform_port) is not int or not 1 <= platform_port <= 65535:
         raise PermissionError('Controlled executor unavailable')
-    # Only Python stdlib/runtime files and THIS artifact. No home/workspace,
-    # inherited socket, credential file, subprocess execution or write access.
-    roots = {Path(sys.base_prefix).resolve(), Path('/System'), Path('/usr/lib'), Path('/private/var/db/dyld')}
+    # Node must be self-contained apart from system libraries. A single bundle
+    # keeps package resolution outside the sandbox and needs no node_modules read.
+    roots = {Path('/System'), Path('/usr/lib'), Path('/private/var/db/dyld')}
+    if approval.runtime == 'python':
+        roots.add(Path(sys.base_prefix).resolve())
     reads = ' '.join('(subpath '+_literal(p)+')' for p in sorted(roots))
     return ('(version 1)(deny default)(allow process-exec (literal '+_literal(approval.interpreter)+'))'
         '(allow file-read-metadata)(allow file-read* (literal "/") '+reads+' (literal '+_literal(approval.artifact)+')'
@@ -65,20 +96,22 @@ def run_controlled(approval, *, platform_port, request, timeout=120):
     approval.verify()
     if type(request) is not bytes or len(request) > 1024 * 1024 or not 0 < timeout <= 120:
         raise PermissionError('Controlled executor unavailable')
-    policy = sandbox_policy(approval, platform_port)
     # Copy only verified bytes to an owned immutable-by-child location. Launch
     # and artifact pins are rechecked after copy; no caller cwd or environment.
     with tempfile.TemporaryDirectory(prefix='openqms-r5-executor-') as directory:
-        path = Path(directory).resolve() / 'plugin.py'
+        if approval.runtime == 'node':
+            filename, arguments = 'plugin.mjs', ['--no-addons', '--no-warnings']
+        else:
+            filename, arguments = 'plugin.py', ['-I', '-S']
+        path = Path(directory).resolve() / filename
         path.write_bytes(approval.artifact.read_bytes())
         path.chmod(0o400)
         if _sha(path) != approval.artifact_sha256:
             raise PermissionError('Controlled executor unavailable')
-        approval.verify()
-        copied = ExecutorApproval(path, approval.artifact_sha256, approval.interpreter,
-            approval.interpreter_sha256, approval.launcher_sha256)
+        approval.verify(full_interpreter=True)
+        copied = replace(approval, artifact=path)
         return subprocess.run(['/usr/bin/sandbox-exec', '-p', sandbox_policy(copied, platform_port),
-            str(approval.interpreter), '-I', '-S', str(path)], input=request,
+            str(approval.interpreter), *arguments, str(path)], input=request,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=directory,
             env={'LANG': 'C', 'LC_ALL': 'C'}, close_fds=True, timeout=timeout, check=False)
 
@@ -195,7 +228,7 @@ def load_controlled_pilot(path, *, enabled, runtime_enabled, tenant_mode):
         data=json.loads(_read_policy(path),object_pairs_hook=_unique_keys)
         expected={'schema_version','artifact','artifact_sha256','interpreter','interpreter_sha256','launcher_sha256',
             'tenant_id','tenant_generation','installation_id','credential_epoch','plugin_version','platform_port','expires_at'}
-        if set(data)!=expected or type(data['schema_version']) is not int or data['schema_version']!=1:
+        if set(data) - {'runtime'} != expected or type(data['schema_version']) is not int or data['schema_version']!=1:
             return None
         for name in ('tenant_generation','credential_epoch','platform_port'):
             if type(data[name]) is not int or data[name]<0: return None
@@ -204,8 +237,9 @@ def load_controlled_pilot(path, *, enabled, runtime_enabled, tenant_mode):
         expiry=datetime.fromisoformat(data['expires_at'])
         if expiry.tzinfo is None or expiry<=datetime.now(UTC):return None
         approval=ExecutorApproval(Path(data['artifact']).resolve(strict=True),data['artifact_sha256'],
-            Path(data['interpreter']).resolve(strict=True),data['interpreter_sha256'],data['launcher_sha256'])
-        approval.verify()
+            Path(data['interpreter']).resolve(strict=True),data['interpreter_sha256'],data['launcher_sha256'],
+            data.get('runtime', 'python'))
+        approval.verify(full_interpreter=True)
         return ControlledPilot(approval,UUID(data['tenant_id']),data['tenant_generation'],UUID(data['installation_id']),
             data['credential_epoch'],data['plugin_version'],data['platform_port'],expiry)
     except (OSError,ValueError,TypeError,KeyError,PermissionError):

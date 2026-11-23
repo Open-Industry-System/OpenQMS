@@ -1,5 +1,6 @@
 """Real managed artifact and deterministic HTTP model, never real credentials."""
 from pathlib import Path
+from shutil import which
 import pytest
 
 pytestmark = pytest.mark.ci_r5_native
@@ -17,8 +18,18 @@ async def _managed_claim(c):
     return result
 
 
+def _pi_worker_approval():
+    from app.services.agent_runtime.r5_executor import ExecutorApproval
+
+    artifact = Path(__file__).resolve().parents[2] / 'examples/pi_d5_agent/dist/worker.mjs'
+    assert artifact.is_file(), 'Build the R5 Pi worker with npm ci and npm run build in backend/examples/pi_d5_agent'
+    node = which('node')
+    assert node, 'R5 native acceptance requires standalone Node 24 on PATH'
+    return ExecutorApproval.approve(artifact, node, runtime='node')
+
+
 def test_actual_r5_artifact_is_present():
-    assert (Path(__file__).parents[2] / 'examples/d5_proposal_agent.py').is_file(), 'T7 managed model artifact missing'
+    _pi_worker_approval()
 
 
 @pytest.mark.asyncio
@@ -31,10 +42,7 @@ async def test_workflow_rejects_unissued_tools(r5_case):
 
 async def actual_agent(c):
     from dataclasses import replace
-    import sys
-    from app.services.agent_runtime.r5_executor import ExecutorApproval
-    artifact = Path(__file__).parents[2] / 'examples/d5_proposal_agent.py'
-    c.pilot = replace(c.pilot, approval=ExecutorApproval.approve(artifact, sys.executable))
+    c.pilot = replace(c.pilot, approval=_pi_worker_approval())
     c.app.state.r5_controlled_pilot = c.pilot
     model = await c.admin.post('/api/agent/models', json=dict(c.model_body, version='actual-agent'))
     assert model.status_code == 201, model.text
@@ -86,6 +94,9 @@ async def test_real_sandbox_model_reads_requests_checkpoint_accepts_and_saves(r5
             await asyncio.sleep(.02)
         assert status.json()['question']=='Confirm no extra source context.'
         assert status.json()['checkpoint_id']
+        waiting=status.json()
+        assert [question['text'] for question in waiting['questions']]==[waiting['question']]
+        assert UUID(waiting['run_id']) and isinstance(waiting['lease_epoch'],int)
         duplicate=await c.client.post(f'/api/agent/tasks/{task}/launch', timeout=5)
         assert duplicate.status_code==403,duplicate.text
         message = await c.client.post(f'/api/agent/tasks/{task}/messages',json={'content':'{"intent":"continue_d5","additional_context":"none"}','idempotency_key':'supplement'})
@@ -93,6 +104,10 @@ async def test_real_sandbox_model_reads_requests_checkpoint_accepts_and_saves(r5
         response = await launch
         assert response.status_code == 200, response.text
         assert response.json()['status']=='executed'
+        completed=await c.client.get(f'/api/agent/tasks/{task}/workflow')
+        assert completed.status_code==200 and completed.json()['status']=='completed',completed.text
+        assert completed.json()['questions']==[] and completed.json()['question'] is None
+        assert completed.json()['run_id'] is None and completed.json()['lease_epoch'] is None
         async with c.session() as db:
             proposals = list(await db.scalars(select(CapaD5Proposal).where(CapaD5Proposal.task_id==UUID(task))))
             assert len(proposals)==1 and proposals[0].original_text=='synthetic model corrective action'
@@ -155,12 +170,24 @@ async def test_expired_round_cannot_restart_budget_with_turn_zero(r5_case):
     from app.services.agent_runtime import model_workflow
     c=r5_case
     await _managed_claim(c)
-    scripted_model(c,[call('read_d4')])
-    await workflow_call(c)
+    await accept_initial(c)
+    scripted_model(c,[call('request_supplement',{'question':'expired synthetic question'})])
+    issued=await workflow_call(c)
+    assert (await execute(c,issued['tool_calls'][0]['id'])).json()['status']=='waiting'
     state=model_workflow._rounds[(c.binding.tenant_id,c.run_id,c.epoch)]
+    assert len(state.questions)==1
+    state.stopped=True
+    stopped=await c.client.get(f'/api/agent/tasks/{c.task_id}/workflow')
+    assert stopped.status_code==200 and stopped.json()['status']=='unavailable',stopped.text
+    assert stopped.json()['question'] is None and stopped.json()['questions']==[]
+    assert stopped.json()['run_id'] is None and stopped.json()['lease_epoch'] is None
+    state.stopped=False
     state.deadline=0
+    expired=await c.client.get(f'/api/agent/tasks/{c.task_id}/workflow')
+    assert expired.status_code==200 and expired.json()==stopped.json(),expired.text
     response=await c.client.post('/api/agent/runtime/model/infer',json={'operation':'workflow'},headers={'Authorization':'Bearer '+c.token})
     assert response.status_code==403,response.text
+    assert state.questions==[]
     assert len(c.witness.a.bodies)==1
 
 
@@ -189,6 +216,10 @@ async def test_tool_id_retries_use_original_write_and_no_arbitrary_context_can_s
 async def test_lost_server_launch_state_cannot_be_recreated_by_old_run_token(r5_case):
     c=r5_case
     await claim_without_workflow(c)
+    unavailable=await c.client.get(f'/api/agent/tasks/{c.task_id}/workflow')
+    assert unavailable.status_code==200 and unavailable.json()['status']=='unavailable',unavailable.text
+    assert unavailable.json()['question'] is None and unavailable.json()['questions']==[]
+    assert unavailable.json()['run_id'] is None and unavailable.json()['lease_epoch'] is None
     response=await c.client.post('/api/agent/runtime/model/infer',json={'operation':'workflow'},headers={'Authorization':'Bearer '+c.token})
     assert response.status_code==403,response.text
     assert c.witness.a.bodies==[]
@@ -313,16 +344,43 @@ async def test_unknown_write_can_only_replay_original_issued_id(r5_case,monkeypa
 
 @pytest.mark.asyncio
 async def test_question_status_rechecks_actual_reader_source_permissions(r5_case):
+    from datetime import datetime
+    from uuid import UUID
     from sqlalchemy import update
     from app.models.agent_plugin import AgentPluginGrant
     c=r5_case
     await _managed_claim(c)
     await accept_initial(c)
-    scripted_model(c,[call('request_supplement',{'question':'restricted synthetic source question'})])
+    scripted_model(c,[call('request_supplement',{'question':'restricted synthetic source question'}),
+        call('request_supplement',{'question':'second restricted synthetic question'},'followup')])
     first=await workflow_call(c)
     assert (await execute(c,first['tool_calls'][0]['id'])).json()['status']=='waiting'
     status=await c.client.get(f'/api/agent/tasks/{c.task_id}/workflow')
     assert status.status_code==200 and status.json()['question']=='restricted synthetic source question',status.text
+    waiting=status.json()
+    assert waiting['run_id']==str(c.run_id) and waiting['lease_epoch']==c.epoch
+    assert len(waiting['questions'])==1
+    question=waiting['questions'][0]
+    assert set(question)=={'question_id','text','created_at'}
+    assert question['text']==waiting['question'] and UUID(question['question_id'])
+    assert datetime.fromisoformat(question['created_at']).utcoffset().total_seconds()==0
+    # Polling and retried waiting tools preserve the question's stable identity.
+    assert (await execute(c,first['tool_calls'][0]['id'])).json()['status']=='waiting'
+    assert (await c.client.get(f'/api/agent/tasks/{c.task_id}/workflow')).json()==waiting
+    message=await c.client.post(f'/api/agent/tasks/{c.task_id}/messages',json={
+        'content':'员工补充了当前问题的说明。','idempotency_key':'natural-language-supplement'})
+    assert message.status_code==202,message.text
+    accepted=await execute(c,first['tool_calls'][0]['id'])
+    assert accepted.status_code==200 and accepted.json()['status']=='accepted',accepted.text
+    answered=await c.client.get(f'/api/agent/tasks/{c.task_id}/workflow')
+    assert answered.json()['status']=='running' and answered.json()['question'] is None,answered.text
+    assert answered.json()['questions']==[question]
+    second=await workflow_call(c,1)
+    assert (await execute(c,second['tool_calls'][0]['id'])).json()['status']=='waiting'
+    followup=await c.client.get(f'/api/agent/tasks/{c.task_id}/workflow')
+    assert followup.json()['question']=='second restricted synthetic question',followup.text
+    assert followup.json()['questions'][0]==question and len(followup.json()['questions'])==2
+    assert UUID(followup.json()['questions'][1]['question_id'])!=UUID(question['question_id'])
     async with c.session() as db:
         await db.execute(update(AgentPluginGrant).where(AgentPluginGrant.installation_id==c.r5_id,
             AgentPluginGrant.capability_id=='capa.d4.root_cause_candidate.masked.v1').values(enabled=False))
@@ -332,7 +390,7 @@ async def test_question_status_rechecks_actual_reader_source_permissions(r5_case
     assert (await execute(c,first['tool_calls'][0]['id'])).status_code in {401,403}
     model_denied=await c.client.post('/api/agent/runtime/model/infer',json={'operation':'workflow','turn':1},headers={'Authorization':'Bearer '+c.token})
     assert model_denied.status_code in {401,403},model_denied.text
-    assert len(c.witness.a.bodies)==1
+    assert len(c.witness.a.bodies)==2
 
 
 async def accept_initial(c):
@@ -391,6 +449,8 @@ async def test_actual_child_failure_releases_only_own_active_lease(r5_case,monke
         assert run.lease_expires_at is None and run.claim_key is None
     status=await c.client.get(f'/api/agent/tasks/{task}/workflow')
     assert status.status_code==200 and status.json()['status']==expected,status.text
+    assert status.json()['questions']==[] and status.json()['question'] is None
+    assert status.json()['run_id'] is None and status.json()['lease_epoch'] is None
     assert not r5_executor._launches
     assert c.witness.b.bodies==[]
 

@@ -1,0 +1,20 @@
+{
+  "name": "openqms-pi-d5-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "npm run build && node --test worker.test.mjs workspace-worker.test.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.75.5",
+    "@earendil-works/pi-ai": "0.75.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.7"
+  }
+}

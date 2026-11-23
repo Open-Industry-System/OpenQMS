@@ -6,6 +6,7 @@ and model tool arguments never enter control logs, checkpoints or security audit
 """
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 import json
 import time
 from types import SimpleNamespace
@@ -40,6 +41,7 @@ class Round:
     deferred_users: list = field(default_factory=list, repr=False)
     accepted: int = 0
     question: str | None = field(default=None, repr=False)
+    questions: list = field(default_factory=list, repr=False)
     checkpoint_id: str | None = None
     stopped: bool = False
     token: str = field(default="", repr=False)
@@ -62,6 +64,7 @@ def _expire(key):
         state.delivered_signature = None
         state.token = ''
         state.question = None
+        state.questions.clear()
     _expired.add(key)
 
 
@@ -280,6 +283,8 @@ async def execute_tool(db, identity, request):
                     state.checkpoint_id=str(cp['checkpoint_id']) if isinstance(cp,dict) else str(cp.checkpoint_id)
                 call['watermark']=current.run.accepted_message_seq
                 state.question=args['question']
+                state.questions.append({'question_id':str(uuid4()), 'text':state.question,
+                    'created_at':datetime.now(UTC).isoformat()})
             batch=await runtime_messages.claim_messages(db,current,20)
             if not batch.messages:
                 return {'status':'waiting'}
@@ -323,12 +328,19 @@ async def status(db, scope, task_id):
     from app.models.agent_task import AgentRun
     run=await db.scalar(select(AgentRun).where(AgentRun.task_id==task_id,AgentRun.status=='active'))
     if run is None:
-        return {'status':task.status,'question':None,'checkpoint_id':None}
+        return {'status':task.status,'question':None,'questions':[],'checkpoint_id':None,
+            'run_id':None,'lease_epoch':None}
     state=_rounds.get((db.info['tenant_binding'].tenant_id,run.run_id,run.lease_epoch))
-    if state is None or state.deadline<=time.monotonic():
-        return {'status':'unavailable','question':None,'checkpoint_id':None}
+    if state is None or state.stopped or state.deadline<=time.monotonic():
+        return {'status':'unavailable','question':None,'questions':[],'checkpoint_id':None,
+            'run_id':None,'lease_epoch':None}
     current=await runtime_access.verify_runtime_identity(db,state.token,db.info['tenant_binding'])
     current=await _current(db,current)
     if state.snapshot is not None:
         await capa_d5_proposals.validate_d5_context_for_release(db,current,snapshot=state.snapshot)
-    return {'status':'waiting' if state.question else 'running','question':state.question,'checkpoint_id':state.checkpoint_id}
+    if state.stopped or state.deadline<=time.monotonic():
+        return {'status':'unavailable','question':None,'questions':[],'checkpoint_id':None,
+            'run_id':None,'lease_epoch':None}
+    return {'status':'waiting' if state.question else 'running','question':state.question,
+        'questions':list(state.questions),'checkpoint_id':state.checkpoint_id,
+        'run_id':str(current.run.run_id),'lease_epoch':current.run.lease_epoch}
