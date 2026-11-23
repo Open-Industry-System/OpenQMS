@@ -23,8 +23,11 @@ def test_matrix_keeps_two_independent_postgres_workers_and_one_required_check():
     workflow = jobs()
     worker = workflow['backend-full']
     assert worker['name'] == 'backend-full (${{ matrix.shard }})'
-    assert worker['strategy'] == {'fail-fast': False, 'matrix': {'include': [
-        {'shard': 'runtime', 'index': 0}, {'shard': 'remainder', 'index': 1}]}}
+    assert worker['strategy']['fail-fast'] is False
+    workers = worker['strategy']['matrix']['include']
+    assert 'startsWith(needs.backend-route.outputs.backend_groups' in workers
+    assert '[{"shard":"selected","index":-1}]' in workers
+    assert '[{"shard":"runtime","index":0},{"shard":"remainder","index":1}]' in workers
     assert worker['needs'] == ['backend-route']
     assert worker['services']['postgres']['ports'] == ['5432/tcp']
     assert 'openqms.ci.job=backend-full' in worker['services']['postgres']['options']
@@ -35,32 +38,35 @@ def test_matrix_keeps_two_independent_postgres_workers_and_one_required_check():
     assert steps['Run deterministic backend acceptance']['env']['GITHUB_JOB'] == 'backend-full'
     for name in ('Run manual tests', 'D8 doc-gate preflight (against migrated test DB)',
                  'Run engine import checks', 'Install SDK developer build tools'):
-        assert steps[name]['if'] == "matrix.shard == 'remainder'"
+        assert steps[name]['if'] == "matrix.shard != 'runtime'"
     assert steps['Upload actual safe receipts and logs']['with']['name'] == 'backend-shard-${{ matrix.shard }}-evidence'
     required = workflow['backend-tests']
     assert required['needs'] == ['backend-route', 'backend-full'] and required['if'] == 'always()'
     steps = {step['name']: step for step in required['steps'] if 'name' in step}
     assert steps['Require the selected backend result']['run'] == 'python scripts/ci/backend_gate.py'
-    assert steps['Download both backend shard receipts']['with']['pattern'] == 'backend-shard-*-evidence'
+    assert steps['Download backend receipts']['with']['pattern'] == 'backend-shard-*-evidence'
     assert 'tests.ci.backend_shards' in steps['Verify actual complete and disjoint execution']['run']
-    assert steps['Upload combined compatible API receipt']['with']['name'] == 'backend-tests-evidence'
+    assert steps['Upload verified compatible API receipt']['with']['name'] == 'backend-tests-evidence'
+    verify_selected = steps['Verify selected group execution and receipt']
+    assert 'tests.ci.backend_groups "$ROUTED_GROUPS"' in verify_selected['run']
+    assert verify_selected['if'] == "startsWith(needs.backend-route.outputs.backend_groups, 'basic')"
     assert 'pip install' not in str(required)
 
 
 @pytest.mark.parametrize('reason', sorted(gate.FAST_REASONS))
 def test_explicit_successful_shortcut_requires_skipped_workers(reason):
     docs = str(reason == 'allowlisted_markdown_only').lower()
-    assert gate.require_backend_result('success', 'false', reason, docs, 'skipped') is False
+    assert gate.require_backend_result('success', 'false', reason, docs, 'skipped', 'skip') is False
     for result in ('success', 'failure', 'cancelled', ''):
         with pytest.raises(ValueError):
-            gate.require_backend_result('success', 'false', reason, docs, result)
+            gate.require_backend_result('success', 'false', reason, docs, result, 'skip')
 
 
 @pytest.mark.parametrize('route', ('failure', 'cancelled', 'skipped', ''))
 @pytest.mark.parametrize('required', ('true', 'false', ''))
 def test_bad_route_never_passes(route, required):
     with pytest.raises(ValueError):
-        gate.require_backend_result(route, required, 'allowlisted_markdown_only', 'true', 'skipped')
+        gate.require_backend_result(route, required, 'allowlisted_markdown_only', 'true', 'skipped', 'skip')
 
 
 @pytest.mark.parametrize('required,reason,docs,result', [
@@ -73,22 +79,25 @@ def test_bad_route_never_passes(route, required):
 ])
 def test_missing_inconsistent_and_failed_results_never_pass(required, reason, docs, result):
     with pytest.raises(ValueError):
-        gate.require_backend_result('success', required, reason, docs, result)
+        gate.require_backend_result('success', required, reason, docs, result, 'skip' if required == 'false' else 'full')
 
 
 def test_required_success_still_requires_actual_receipt_verification():
-    assert gate.require_backend_result('success', 'true', 'main_push', 'false', 'success') is True
-    assert gate.require_backend_result('success', 'true', 'legacy_policy_full', 'true', 'success') is True
+    assert gate.require_backend_result('success', 'true', 'main_push', 'false', 'success', 'full') is True
+    assert gate.require_backend_result('success', 'true', 'legacy_policy_full', 'true', 'success', 'full') is True
     step = next(step for step in jobs()['backend-tests']['steps'] if step.get('name') == 'Verify actual complete and disjoint execution')
-    assert step['if'] == "needs.backend-route.outputs.backend_required != 'false'"
+    assert step['if'] == "needs.backend-route.outputs.backend_groups == 'full'"
 
 
 @pytest.mark.parametrize('event,preview,policy,expected', [
-    ('push', False, 'new', ('false', 'true', 'main_push')),
-    ('pull_request', True, 'new', ('false', 'true', 'preview_receipts_required')),
-    ('pull_request', False, 'missing', ('false', 'true', 'trusted_base_policy_unavailable')),
-    ('pull_request', False, 'old', ('true', 'true', 'legacy_policy_full')),
-    ('pull_request', False, 'new', ('false', 'false', 'presentation_only')),
+    ('push', False, 'new', ('false', 'true', 'main_push', 'full')),
+    ('pull_request', True, 'presentation', ('false', 'true', 'preview_receipts_required', 'full')),
+    ('pull_request', True, 'new', ('false', 'true', 'preview_basic_presentation_only', 'basic')),
+    ('pull_request', False, 'missing', ('false', 'true', 'trusted_base_policy_unavailable', 'full')),
+    ('pull_request', False, 'old', ('true', 'true', 'legacy_policy_full', 'full')),
+    ('pull_request', False, 'presentation', ('false', 'false', 'presentation_only', 'skip')),
+    ('pull_request', False, 'new', ('false', 'true', 'mapped_modules', 'basic,msa')),
+    ('pull_request', False, 'missing_groups', None),
 ])
 def test_real_routing_shell_uses_trusted_base_and_old_policy_falls_back_to_full(tmp_path, event, preview, policy, expected):
     repo = tmp_path / 'repo'
@@ -102,8 +111,17 @@ def test_real_routing_shell_uses_trusted_base_and_old_policy_falls_back_to_full(
     path = repo / 'scripts/ci/backend_route.py'
     if policy != 'missing':
         path.parent.mkdir(parents=True)
-        output = 'docs_only=true\\n' if policy == 'old' else 'docs_only=false\\nbackend_required=false\\nroute_reason=presentation_only\\n'
-        path.write_text('import os\nwith open(os.environ["GITHUB_OUTPUT"], "a") as output:\n    output.write(' + repr(output.replace('\\n', '\n')) + ')\n')
+        header = 'ROUTING_PROTOCOL = 2\n' if policy in {'new', 'missing_groups'} else ''
+        if policy == 'old':
+            output = 'docs_only=true\n'
+        elif policy == 'presentation':
+            output = 'docs_only=false\nbackend_required=false\nroute_reason=presentation_only\n'
+        else:
+            reason, groups = ('preview_basic_presentation_only', 'basic') if preview else ('mapped_modules', 'basic,msa')
+            output = f'docs_only=false\nbackend_required=true\nroute_reason={reason}\nbackend_groups={groups}\n'
+        if policy == 'missing_groups':
+            output = 'docs_only=false\nbackend_required=true\nroute_reason=mapped_modules\n'
+        path.write_text(header + 'import os\nwith open(os.environ["GITHUB_OUTPUT"], "a") as output:\n    output.write(' + repr(output) + ')\n')
     git('add', '.')
     git('commit', '-qm', 'trusted policy')
     sha = git('rev-parse', 'HEAD')
@@ -117,21 +135,33 @@ def test_real_routing_shell_uses_trusted_base_and_old_policy_falls_back_to_full(
         'REQUIRE_PREVIEW_RECEIPTS': str(preview).lower(), 'GITHUB_OUTPUT': str(outputs),
         'GITHUB_STEP_SUMMARY': str(summary), 'RUNNER_TEMP': str(tmp_path),
     })
+    if expected is None:
+        assert result.returncode == 1
+        assert not outputs.exists()
+        return
     assert result.returncode == 0, result.stderr
     fields = dict(line.split('=', 1) for line in outputs.read_text().splitlines())
-    assert (fields['docs_only'], fields['backend_required'], fields['route_reason']) == expected
+    assert (fields['docs_only'], fields['backend_required'], fields['route_reason'], fields['backend_groups']) == expected
 
 
-@pytest.mark.parametrize('required,reason,docs,result,exit_code', [
-    ('true', 'main_push', 'false', 'success', 0),
-    ('false', 'allowlisted_markdown_only', 'true', 'skipped', 0),
-    ('true', 'main_push', 'false', 'cancelled', 1),
+@pytest.mark.parametrize('required,reason,docs,result,groups,exit_code', [
+    ('true', 'main_push', 'false', 'success', 'full', 0),
+    ('false', 'allowlisted_markdown_only', 'true', 'skipped', 'skip', 0),
+    ('true', 'mapped_modules', 'false', 'success', 'basic,msa', 0),
+    ('true', 'preview_basic_presentation_only', 'false', 'success', 'basic', 0),
+    ('true', 'main_push', 'false', 'cancelled', 'full', 1),
+    ('true', 'mapped_modules', 'false', 'failure', 'basic,msa', 1),
+    ('true', 'mapped_modules', 'false', 'cancelled', 'basic,msa', 1),
+    ('true', 'mapped_modules', 'false', 'skipped', 'basic,msa', 1),
+    ('true', 'mapped_modules', 'false', '', 'basic,msa', 1),
+    ('true', 'mapped_modules', 'false', 'success', '', 1),
+    ('true', 'mapped_modules', 'false', 'success', 'basic', 1),
 ])
-def test_real_gate_cli_uses_workflow_environment(tmp_path, required, reason, docs, result, exit_code):
+def test_real_gate_cli_uses_workflow_environment(tmp_path, required, reason, docs, result, groups, exit_code):
     summary = tmp_path / 'summary'
     completed = subprocess.run([sys.executable, str(ROOT / 'scripts/ci/backend_gate.py')],
         capture_output=True, text=True, env={'PATH': os.environ['PATH'], 'ROUTE_RESULT': 'success',
             'BACKEND_REQUIRED': required, 'ROUTE_REASON': reason, 'DOCS_ONLY': docs,
-            'BACKEND_RESULT': result, 'GITHUB_STEP_SUMMARY': str(summary)})
+            'BACKEND_RESULT': result, 'BACKEND_GROUPS': groups, 'GITHUB_STEP_SUMMARY': str(summary)})
     assert completed.returncode == exit_code
     assert summary.exists() is (exit_code == 0)

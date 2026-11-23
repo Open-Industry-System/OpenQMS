@@ -84,11 +84,18 @@ def remote_command(context, action):
     return command
 
 
+class RemoteStepError(RuntimeError):
+    pass
+
+
 def remote(context, action, *, data=None):
     command = remote_command(context, action)
     if action in {'identity', 'migrate', 'initialize', 'preflight', 'rollout'}:
         command.append(json.dumps(context['images'], separators=(',', ':')))
-    return run(ssh_args(context) + [context['ORACLE_SSH_TARGET'], shlex.join(command)], data=data)
+    try:
+        return run(ssh_args(context) + [context['ORACLE_SSH_TARGET'], shlex.join(command)], data=data)
+    except RuntimeError as error:
+        raise RemoteStepError(f'Oracle release stopped at remote {action}') from error
 
 
 class LeaseBusy(ValueError):
@@ -229,6 +236,15 @@ def cleanup_test(context):
     run(['docker', 'rm', '-f', '-v', context['test_container_id']])
 
 
+def write_release_metadata(source, manifest, sha):
+    # The private parent stays 0700. These two non-secret transport members
+    # have the explicit file mode required by the receiving archive contract.
+    for name, data in (('.release-manifest', manifest), ('.release-sha', (sha + '\n').encode('ascii'))):
+        metadata = source / name
+        metadata.write_bytes(data)
+        metadata.chmod(0o644)
+
+
 def deploy():
     context = validate(os.environ)
     revalidate(context)  # No source material, target secrets or server mutation before eligibility.
@@ -252,8 +268,9 @@ def deploy():
             tar.extractall(source, filter='data')
         paths = run(['git', '-C', str(TRUSTED), 'ls-tree', '-r', '-z', '--name-only', sha])
         manifest = source / '.release-manifest'
-        manifest.write_bytes(run([sys.executable, str(TRUSTED / 'scripts/check-release-tree.py'), 'create', '--root', str(source)], data=paths))
-        (source / '.release-sha').write_text(sha + '\n')
+        manifest_data = run([sys.executable, str(TRUSTED / 'scripts/check-release-tree.py'), 'create',
+                             '--root', str(source)], data=paths)
+        write_release_metadata(source, manifest_data, sha)
         context['manifest_hash'] = sha256(manifest)
         context['manifest'] = str(manifest)
         controller = ''.join(f'{sha256(TRUSTED / name)}  {name}\n' for name in sorted(CONTROLLER_FILES))
@@ -362,6 +379,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except RemoteStepError as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1)
     except Exception:
-        print('Oracle production release failed; inspect private runner evidence', file=sys.stderr)
+        print('Oracle release failed; inspect private runner evidence', file=sys.stderr)
         raise SystemExit(1)

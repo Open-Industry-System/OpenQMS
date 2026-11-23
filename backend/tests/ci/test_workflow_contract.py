@@ -366,8 +366,8 @@ def _assert_safe_expressions(workflow: Mapping[str, object]) -> None:
     if worker is not None:
         assert worker['if'] == "${{ always() && !cancelled() && (needs.backend-route.result != 'success' || needs.backend-route.outputs.backend_required != 'false') }}"
         worker['if'] = 'validated backend routing predicate'
-        assert worker['strategy'] == {'fail-fast': False, 'matrix': {'include': [
-            {'shard': 'runtime', 'index': 0}, {'shard': 'remainder', 'index': 1}]}}
+        assert worker['strategy'] == {'fail-fast': False, 'matrix': {'include': '${{ fromJSON(needs.backend-route.result == \'success\' && startsWith(needs.backend-route.outputs.backend_groups, \'basic\') && \'[{"shard":"selected","index":-1}]\' || \'[{"shard":"runtime","index":0},{"shard":"remainder","index":1}]\') }}'}}
+        worker['strategy']['matrix']['include'] = 'validated backend strategy'
         # Matrix expressions belong only in the owning worker. Validate their
         # finite field references before exempting them from the generic check.
         assert set(re.findall(r'\$\{\{\s*(matrix\.[^}]+?)\s*}}', '\n'.join(_strings(worker)))) == {'matrix.shard', 'matrix.index'}

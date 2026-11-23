@@ -13,7 +13,6 @@ from sqlalchemy.pool import NullPool
 from app.models.agent_plugin import AgentPluginInstallation
 from app.models.capa import CAPAEightD
 from app.models.product_line import ProductLine
-from tests.services.agent_runtime.d4_fixture_support import runtime_tenant_template
 
 
 @pytest_asyncio.fixture

@@ -234,8 +234,10 @@ def test_make_layered_targets_use_receipted_runner_and_verified_single_database_
     assert 'docker compose --env-file /dev/null' in scanner
     assert f'-f "{Path(__file__).resolve().parents[3] / "docker-compose.yml"}"' in scanner
     assert 'docker compose config' not in scanner
-    for output, mode in ((backend, 'api'), (browser, 'browser')):
-        assert f'capa_outcome_runner.py {mode} --pytest-target tests' in output
+    assert 'selection=(--pytest-target tests)' in backend
+    assert 'capa_outcome_runner.py api "${selection[@]}"' in backend
+    assert 'capa_outcome_runner.py browser --pytest-target tests' in browser
+    for output in (backend, browser):
         assert '--pytest-arg=--ignore=tests/test_graph_sync_worker.py' in output
         assert '--pytest-arg=--ignore=tests/test_graph_projection.py' in output
     assert 'capa_outcome_runner.py live' in live

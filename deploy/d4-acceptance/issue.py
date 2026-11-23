@@ -12,12 +12,13 @@ import secrets
 import stat
 import sys
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID, uuid4
 
 
 PRIVATE = Path('/run/openqms-d4-issue')
 POLICY = PRIVATE / 'policy.json'
+DB_SOCKET = '/run/openqms-d4-db'
 CAPABILITY = 'capa.d4.root_cause_candidate.masked.v1'
 PLUGIN = 'openqms.local-d4-root-cause-text'
 SOURCE_NODE = 'cause-A'
@@ -64,17 +65,25 @@ def input_config(config, env, uid, gid, now):
             or not 0 < binding['expires_at'] - binding['issued_at'] <= 3600):
         raise ValueError('invalid D4 issuance window')
     host, cluster, port = (config[key] for key in ('db_host', 'db_system_identifier', 'api_port'))
-    if (not isinstance(host, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', host)
+    if (not isinstance(host, str) or (host != DB_SOCKET and not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', host))
             or not isinstance(cluster, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', cluster)
             or type(port) is not int or not 1024 <= port <= 65535):
         raise ValueError('invalid isolated D4 target')
     url = urlsplit(env.get('DATABASE_URL', ''))
+    if host == DB_SOCKET:
+        # SQLAlchemy takes the asyncpg Unix socket directory from the host query field.
+        matches_database_endpoint = (
+            url.hostname is None and url.port is None
+            and parse_qsl(url.query, keep_blank_values=True) == [('host', DB_SOCKET)]
+        )
+    else:
+        matches_database_endpoint = url.hostname == host and not url.query
     if (uid != 2002 or gid != 2002 or env.get('TENANT_MODE') != 'dev'
             or env.get('AGENT_TASK_RUNTIME_ENABLED') != 'true'
             or env.get('AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED') != 'true'
             or env.get('AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE') != str(POLICY)
-            or url.scheme != 'postgresql+asyncpg' or url.hostname != host
-            or url.path != '/qms_d4_acceptance' or url.query or url.fragment):
+            or url.scheme != 'postgresql+asyncpg' or not matches_database_endpoint
+            or url.path != '/qms_d4_acceptance' or url.fragment):
         raise ValueError('D4 fixture issuer requires the dedicated test API and database')
 
 

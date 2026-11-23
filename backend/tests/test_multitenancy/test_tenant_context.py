@@ -214,18 +214,15 @@ async def test_get_db_rejects_uncaptured_or_mismatched_binding_before_session(ca
     assert current_tenant_schema.get() is None
 
 
-def test_context_var_default_is_none():
-    """current_tenant_schema defaults to None (no tenant context)."""
-    from app.core.tenant_utils import current_tenant_schema
-    assert current_tenant_schema.get() is None
-
-
 def test_context_var_set_and_reset():
     """current_tenant_schema can be set and reset without leaking."""
     from app.core.tenant_utils import current_tenant_schema
+    assert current_tenant_schema.get() is None
     token = current_tenant_schema.set("tenant_test")
-    assert current_tenant_schema.get() == "tenant_test"
-    current_tenant_schema.reset(token)
+    try:
+        assert current_tenant_schema.get() == "tenant_test"
+    finally:
+        current_tenant_schema.reset(token)
     assert current_tenant_schema.get() is None
 
 

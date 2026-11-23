@@ -17,8 +17,6 @@ from sqlalchemy.pool import NullPool
 
 from tests.ci.database_template import fixture_database, freeze_template
 from tests.ci.prepare_database import run_migrations
-from tests.e2e.agent_local_trial_harness import PASSWORD, owned_local_trial as normal_local_trial
-from tests.e2e.d4_text_local_harness import d4_text_local_trial as normal_text_trial
 
 
 @pytest.fixture(scope='session')
@@ -27,6 +25,7 @@ def runtime_tenant_template():
     from app.config import settings
     from app.schemas.platform import TenantCreateRequest
     from app.services import tenant_migrator
+    from tests.e2e.agent_local_trial_harness import PASSWORD
 
     with fixture_database(os.environ) as template:
         run_migrations(template, template.async_url)
@@ -73,6 +72,8 @@ async def prepared_local_trial(runtime_tenant_template, monkeypatch, tmp_path):
     from app.core.tenant_utils import slug_to_schema_name
     from app.services import tenant_migrator
 
+    from tests.e2e.agent_local_trial_harness import owned_local_trial as normal_local_trial
+
     template, tenant_id = runtime_tenant_template
     with fixture_database(os.environ, template=template) as database:
         _select_database(database, monkeypatch, tmp_path)
@@ -112,7 +113,7 @@ async def prepared_text_trial(owned_local_trial, monkeypatch, tmp_path):
     """Bootstrap via ASGI; test bodies retain their real TCP/process witnesses."""
     from tests.e2e import d4_text_local_harness
 
-    fixture = normal_text_trial.__wrapped__(owned_local_trial, monkeypatch, tmp_path)
+    fixture = d4_text_local_harness.d4_text_local_trial.__wrapped__(owned_local_trial, monkeypatch, tmp_path)
     try:
         with pytest.MonkeyPatch.context() as preparation:
             preparation.setattr(d4_text_local_harness, 'd4_text_tcp_trial', _inprocess_setup)
