@@ -16,7 +16,7 @@ pytestmark = [pytest.mark.requires_db, pytest.mark.asyncio]
 
 async def test_committed_mutation_and_failed_case_leave_next_runtime_clean(
         runtime_tenant_template, tmp_path):
-    template, _ = runtime_tenant_template
+    template, _, slug = runtime_tenant_template
     databases = []
     for index in range(2):
         path = tmp_path / str(index)
@@ -25,7 +25,8 @@ async def test_committed_mutation_and_failed_case_leave_next_runtime_clean(
             fixture = prepared_local_trial.__wrapped__(runtime_tenant_template, patch, path)
             try:
                 case = await anext(fixture)
-                assert case.binding.schema_name == slug_to_schema_name(case.slug)
+                assert case.slug == slug
+                assert case.binding.schema_name == slug_to_schema_name(slug)
                 databases.append(os.environ['TEST_DATABASE_URL'])
                 async with case.session() as db:
                     assert (await db.get(User, case.user_id)).is_active
