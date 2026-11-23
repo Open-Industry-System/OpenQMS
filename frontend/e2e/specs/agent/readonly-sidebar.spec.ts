@@ -320,5 +320,7 @@ test(`actual readonly sidebar ${scenario}`, async ({ page, context }) => {
   expect(restarted.output.run_id).not.toBe(first.output.run_id);
   expect(restarted.history).toEqual([[1,2,3]]);
   await expect(activity.getByText('任务状态 completed', { exact: true })).toBeVisible();
-  await expect(activity.getByText(/1 failed/)).toBeVisible();
+  await page.getByRole('button', { name: '返回对话', exact: true }).click();
+  const dialogue = activity.getByRole('region', { name: '任务对话' });
+  await expect(dialogue.getByText(/1 failed/)).toBeVisible();
 });
