@@ -25,6 +25,7 @@ from uuid import UUID, uuid4
 
 
 SCENARIOS = {'d4-deliver': '正常正文交付', 'd4-revoke': '撤权后交付'}
+SHARED_ACCOUNT_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
 MAX_MESSAGE = 8192
 
 
@@ -41,16 +42,41 @@ def read_config(path):
     return json.loads(raw)
 
 
+def valid_password_verifier(record):
+    return all(
+        isinstance(record.get(name), str) and re.fullmatch(f'[0-9a-f]{{{size}}}', record[name])
+        for name, size in (('salt', 32), ('password_digest', 128))
+    )
+
+
+def validate_accounts(config):
+    legacy_fields = {'username', 'salt', 'password_digest'}
+    if not {'accounts', 'scenario_roles'} & config.keys():
+        username = config.get('username')
+        if (not isinstance(username, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', username)
+                or not valid_password_verifier(config)):
+            raise ValueError('invalid dedicated acceptance credential')
+        return
+
+    accounts, roles = config.get('accounts'), config.get('scenario_roles')
+    if (legacy_fields & config.keys() or not isinstance(accounts, dict) or not accounts
+            or not accounts.keys() <= SHARED_ACCOUNT_ROLES.keys()
+            or not isinstance(roles, dict) or roles.keys() != SCENARIOS.keys()
+            or any(not isinstance(account, dict) or set(account) != {'role', 'salt', 'password_digest'}
+                   or account['role'] != SHARED_ACCOUNT_ROLES[username] or not valid_password_verifier(account)
+                   for username, account in accounts.items())):
+        raise ValueError('invalid shared acceptance accounts')
+    issued_roles = {account['role'] for account in accounts.values()}
+    if any(not isinstance(role, str) or role not in issued_roles for role in roles.values()):
+        raise ValueError('invalid shared acceptance scenario roles')
+
+
 def validate_config(config):
     origin = urlsplit(config['origin'])
     if (origin.scheme != 'https' or not origin.hostname or origin.username is not None
             or origin.path or origin.query or origin.fragment):
         raise ValueError('an exact HTTPS acceptance origin is required')
-    if not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', config['username']):
-        raise ValueError('invalid dedicated acceptance account')
-    sizes = {'salt': 32, 'password_digest': 128}
-    if any(not re.fullmatch(f'[0-9a-f]{{{size}}}', config[name]) for name, size in sizes.items()):
-        raise ValueError('invalid dedicated acceptance password verifier')
+    validate_accounts(config)
     if not Path(config['executor_socket']).is_absolute() or not 1 <= len(config['report_label']) <= 120:
         raise ValueError('invalid executor or report configuration')
 
@@ -78,19 +104,28 @@ def validate_binding(binding):
 
 
 
-def authenticated(header, config):
+def authenticated_role(header, config):
     if not header or not header.startswith('Basic ') or len(header) > 512:
-        return False
+        return None
     try:
         username, password = base64.b64decode(header[6:], validate=True).split(b':', 1)
         if len(password) > 128:
-            return False
-        salt = bytes.fromhex(config['salt'])
-        expected = bytes.fromhex(config['password_digest'])
+            return None
+        if 'accounts' in config:
+            account = config['accounts'].get(username.decode('ascii'))
+            if account is None:
+                return None
+            role = account['role']
+        else:
+            if not hmac.compare_digest(username, config['username'].encode()):
+                return None
+            account, role = config, 'legacy'
+        salt = bytes.fromhex(account['salt'])
+        expected = bytes.fromhex(account['password_digest'])
         actual = hashlib.scrypt(password, salt=salt, n=2**14, r=8, p=1)
-        return hmac.compare_digest(username, config['username'].encode()) and hmac.compare_digest(actual, expected)
+        return role if hmac.compare_digest(actual, expected) else None
     except (ValueError, binascii.Error):
-        return False
+        return None
 
 
 def executor_call(path, payload, *, deadline=None):
@@ -152,6 +187,10 @@ def validated_receipt(result, request):
 def handler(config, invoke):
     binding = config['binding']
     tasks = config.get('tasks', {})
+    scenario_roles = config.get('scenario_roles')
+
+    def can_run(role, scenario):
+        return scenario_roles is None or scenario_roles[scenario] == role
 
     class Browser(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -176,14 +215,20 @@ def handler(config, invoke):
         def authorize(self):
             if time.time() >= binding['expires_at']:
                 self.show(410, '<p>本轮验收已到期</p>')
-                return False
-            if not authenticated(self.headers.get('Authorization'), config):
-                self.show(401, '<p>需要本轮验收账号</p>', challenge=True)
-                return False
-            return True
+                return None
+            role = authenticated_role(self.headers.get('Authorization'), config)
+            if role is None:
+                prompt = '请使用本轮共享测试账号登录' if scenario_roles is not None else '需要本轮验收账号'
+                self.show(401, f'<p>{prompt}</p>', challenge=True)
+                return None
+            if scenario_roles is not None and role not in scenario_roles.values():
+                self.show(403, '<p>该账号没有本轮 D4 验收权限</p>')
+                return None
+            return role
 
         def do_GET(self):
-            if not self.authorize():
+            role = self.authorize()
+            if role is None:
                 return
             if self.path != '/':
                 self.show(404, '<p>页面不存在</p>')
@@ -192,14 +237,15 @@ def handler(config, invoke):
                 f'<form method="post" action="/scenario/{key}"><button>{name}</button>'
                 + (f' <span>任务 <code>{tasks[key]}</code></span>' if key in tasks else '')
                 + '</form>'
-                for key, name in SCENARIOS.items()
+                for key, name in SCENARIOS.items() if can_run(role, key)
             )
             self.show(200, f'<h1>PR #{binding["pr"]} 的 D4 验收</h1>'
                       f'<p>部署版本 <code>{html.escape(binding["merge"])}</code></p>'
                       f'<p>合成报告 {html.escape(config["report_label"])} <code>{binding["report_id"]}</code></p>{forms}')
 
         def do_POST(self):
-            if not self.authorize():
+            role = self.authorize()
+            if role is None:
                 return
             if self.headers.get('Origin') != config['origin']:
                 self.show(403, '<p>请求来源不允许</p>')
@@ -209,6 +255,9 @@ def handler(config, invoke):
                     or self.headers.get('Content-Length', '0') != '0'
                     or self.headers.get('Transfer-Encoding')):
                 self.show(400, '<p>仅可选择已登记的场景</p>')
+                return
+            if not can_run(role, scenario):
+                self.show(403, '<p>该账号没有此项验收权限</p>')
                 return
             request = dict(binding=binding, scenario=scenario, operation=uuid4().hex)
             try:
