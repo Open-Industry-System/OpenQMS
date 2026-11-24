@@ -470,6 +470,54 @@ def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api
     assert 'report-read: <通过、失败或受阻>' in body
 
 
+def test_shared_publication_updates_comment_in_the_deploy_run(monkeypatch, shared_receipt_api):
+    monkeypatch.setenv('GITHUB_RUN_ID', '42')
+    api = shared_receipt_api
+    api.run.update(status='in_progress', conclusion=None)
+    m.deployment_notice(api, api.pr['number'], api.receipt['sha'], 'started', shared=True)
+    assert m.publication(api, api.pr, shared=True) is None
+
+    m.shared_publication_notice(api, api.receipt)
+
+    assert len(api.notices) == 2
+    assert '### 测试环境已就绪' in api.notices[-1]
+    assert m.SHARED_TEST_URL in api.notices[-1]
+    assert f'/preview-accept {api.receipt["head"]} 42 {api.receipt["plan"]} {api.receipt["queue_lease"]}' in api.notices[-1]
+    assert m.publication(api, api.pr, shared=True) is None
+
+
+@pytest.mark.parametrize('change', ['head', 'merge', 'plan', 'retired', 'failed', 'other-workflow'])
+def test_shared_publication_notice_refuses_invalid_release(monkeypatch, shared_receipt_api, change):
+    monkeypatch.setenv('GITHUB_RUN_ID', '42')
+    api = shared_receipt_api
+    api.run.update(status='in_progress', conclusion=None)
+    receipt = api.receipt.copy()
+    m.deployment_notice(api, api.pr['number'], receipt['sha'], 'started', shared=True)
+    if change == 'head':
+        api.pr['head']['sha'] = 'd' * 40
+    elif change == 'merge':
+        api.pr['merge_commit_sha'] = 'd' * 40
+    elif change == 'plan':
+        api.pr['body'] = SHARED_BODY.replace('刷新后', '重新登录后')
+    elif change == 'retired':
+        m.shared_test_released_notice(api, dict(pr=receipt['pr'], head=receipt['head'],
+                                               merge=receipt['sha'], plan=receipt['plan'],
+                                               lease=receipt['queue_lease'], outcome='switched'))
+    elif change == 'failed':
+        api.run.update(status='completed', conclusion='failure')
+    elif change == 'other-workflow':
+        api.run['path'] = '.github/workflows/oracle-deploy.yml'
+
+    count = len(api.notices)
+    if change in {'failed', 'other-workflow'}:
+        with pytest.raises(ValueError, match='notification source'):
+            m.shared_publication_notice(api, receipt)
+    else:
+        m.shared_publication_notice(api, receipt)
+    assert len(api.notices) == count
+    assert m.SHARED_TEST_URL not in api.notices[-1]
+
+
 @pytest.mark.parametrize('ending', ['closed', 'updated'])
 def test_shared_release_removes_link_when_pr_is_closed_or_updated(shared_receipt_api, ending):
     import time

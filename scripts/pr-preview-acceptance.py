@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 from typing import NamedTuple
@@ -532,6 +533,20 @@ def shared_test_ready_notice(api, pr, run, digest):
     api.notice(pr['number'], notice)
 
 
+def shared_publication_notice(api, receipt):
+    # Called by the serialized shared-test job after it uploads its own receipt.
+    # Acceptance still discovers receipts only from completed, successful runs.
+    run_id = int(os.environ['GITHUB_RUN_ID'])
+    run = api.get(f'/actions/runs/{run_id}')
+    if (run['id'] != run_id or run['status'] != 'in_progress'
+            or not accepts_workflow_source(run, SHARED_TEST_WORKFLOW)
+            or run['head_branch'] != api.get('')['default_branch']
+            or run['repository']['full_name'] != api.repo):
+        raise ValueError('Invalid shared test publication notification source')
+    pr = api.get(f'/pulls/{receipt["pr"]}')
+    shared_test_ready_notice(api, pr, dict(run, shared_test=receipt), receipt['plan'])
+
+
 def shared_test_released_notice(api, slot):
     identity = shared_identity(slot['head'], slot['merge'], slot['plan'], slot['lease'])
     notices = bot_notices(api, slot['pr'])
@@ -666,10 +681,14 @@ def main():
     parser.add_argument('--deployment-sha')
     parser.add_argument('--deployment-result', choices=['started', 'failure', 'cancelled'])
     parser.add_argument('--shared-test', action='store_true')
+    parser.add_argument('--shared-publication-notice', type=Path)
     parser.add_argument('--cleanup-pr', type=int)
     parser.add_argument('--cleanup-result', choices=['success', 'failure', 'cancelled'])
     args = parser.parse_args()
     api = API()
+    if args.shared_publication_notice is not None:
+        shared_publication_notice(api, json.loads(args.shared_publication_notice.read_text()))
+        return
     if args.deployment_pr is not None:
         if args.deployment_pr <= 0 or not re.fullmatch(r'[0-9a-f]{40}', args.deployment_sha or '') or args.deployment_result is None:
             parser.error('positive PR, exact SHA and deployment outcome required')
