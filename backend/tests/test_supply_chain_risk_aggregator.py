@@ -210,6 +210,64 @@ async def test_open_scar_count_time_point_logic(db, test_user):
     assert metrics["open_scar_count"] == 2
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("product_line_code", "expected_count"),
+    [("SCAR-LINE-A", 3), ("SCAR-LINE-B", 2), ("SCAR-LINE-C", 0), (None, 6)],
+)
+async def test_shared_supplier_scar_count_respects_product_line_and_month_end(
+    db, test_user, product_line_code, expected_count
+):
+    """A line snapshot counts only that line, while a global snapshot counts all."""
+    from app.models.supplier import Supplier, SupplierSCAR
+
+    supplier = Supplier(
+        supplier_id=uuid4(), supplier_no="T-SCAR-SHARED", name="Shared supplier",
+        short_name="Shared",
+        status="approved", created_by=test_user.user_id, factory_id=test_user.factory_id,
+    )
+    other_supplier = Supplier(
+        supplier_id=uuid4(), supplier_no="T-SCAR-OTHER", name="Other supplier",
+        short_name="Other",
+        status="approved", created_by=test_user.user_id, factory_id=test_user.factory_id,
+    )
+    db.add_all([supplier, other_supplier])
+    await db.flush()
+
+    cases = [
+        ("SCAR-LINE-A", date(2026, 6, 1), None),
+        ("SCAR-LINE-A", date(2026, 6, 1), date(2026, 7, 1)),
+        ("SCAR-LINE-A", date(2026, 6, 30), None),
+        ("SCAR-LINE-A", date(2026, 6, 1), date(2026, 6, 30)),
+        ("SCAR-LINE-A", date(2026, 6, 1), date(2026, 6, 29)),
+        ("SCAR-LINE-A", date(2026, 7, 1), None),
+        ("SCAR-LINE-B", date(2026, 6, 10), None),
+        ("SCAR-LINE-B", date(2026, 6, 1), date(2026, 7, 1)),
+        (None, date(2026, 6, 10), None),
+    ]
+    for line, issued, closed in cases:
+        db.add(SupplierSCAR(
+            scar_id=uuid4(), scar_no=f"SCAR-{uuid4().hex}",
+            supplier_id=supplier.supplier_id, factory_id=test_user.factory_id,
+            product_line_code=line, source_type="internal", description="scope regression",
+            status="closed" if closed else "open", issued_date=issued, closed_date=closed,
+        ))
+    db.add(SupplierSCAR(
+        scar_id=uuid4(), scar_no=f"SCAR-{uuid4().hex}",
+        supplier_id=other_supplier.supplier_id, factory_id=test_user.factory_id,
+        product_line_code="SCAR-LINE-A", source_type="internal", description="other supplier",
+        status="open", issued_date=date(2026, 6, 10),
+    ))
+    await db.flush()
+
+    result = await aggregate_supply_chain_metrics(
+        db, [supplier.supplier_id], product_line_code, "2026-06"
+    )
+
+    assert set(result) == {supplier.supplier_id}
+    assert result[supplier.supplier_id]["open_scar_count"] == expected_count
+
+
 # --- Pure function tests (no DB needed) ---
 
 def test_normalize_higher_is_risk():

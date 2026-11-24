@@ -218,6 +218,7 @@ async def test_nulls_not_distinct_prevents_duplicate_snapshot(db, admin_user):
     product_line_code validates the unique constraint behavior regardless.
     """
     from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
+    from app.models.product_line import ProductLine
     from app.models.supplier import Supplier
     from app.services.supply_chain_risk_map.service import current_period
     from sqlalchemy.exc import IntegrityError
@@ -226,11 +227,15 @@ async def test_nulls_not_distinct_prevents_duplicate_snapshot(db, admin_user):
                          short_name="DT", status="approved", created_by=admin_user.user_id,
                          factory_id=admin_user.factory_id)
     db.add(supplier)
+    line_code = f"DUP-{uuid4().hex[:12]}"
+    db.add(ProductLine(
+        code=line_code, name="Snapshot uniqueness fixture", factory_id=admin_user.factory_id,
+    ))
     await db.commit()
 
     s1 = SupplyChainRiskSnapshot(
         snapshot_id=uuid4(), supplier_id=supplier.supplier_id,
-        product_line_code="DC-DC-100", snapshot_period=current_period(),
+        product_line_code=line_code, snapshot_period=current_period(),
         risk_score=10, risk_level="low",
         quality_score=5, delivery_score=3, compliance_score=2,
     )
@@ -239,7 +244,7 @@ async def test_nulls_not_distinct_prevents_duplicate_snapshot(db, admin_user):
 
     s2 = SupplyChainRiskSnapshot(
         snapshot_id=uuid4(), supplier_id=supplier.supplier_id,
-        product_line_code="DC-DC-100", snapshot_period=current_period(),
+        product_line_code=line_code, snapshot_period=current_period(),
         risk_score=15, risk_level="low",
         quality_score=8, delivery_score=4, compliance_score=3,
     )

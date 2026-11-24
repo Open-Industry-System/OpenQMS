@@ -61,7 +61,7 @@ async def aggregate_supply_chain_metrics(
     await _query_erp_on_time(db, supplier_ids, product_line_code, period_start, period_end, result)
     await _query_purchase_amount_pct(db, supplier_ids, product_line_code, period_start, period_end, result)
     await _query_delivery_delay(db, supplier_ids, product_line_code, period_start, period_end, result)
-    await _query_scar_count(db, supplier_ids, period_end, result)
+    await _query_scar_count(db, supplier_ids, product_line_code, period_end, result)
     await _query_ppm(db, supplier_ids, product_line_code, period_start, period_end, result)
 
     return result
@@ -216,18 +216,28 @@ async def _query_delivery_delay(
 async def _query_scar_count(
     db: AsyncSession,
     supplier_ids: list[UUID],
+    product_line_code: Optional[str],
     period_end: date,
     result: dict[UUID, dict],
 ) -> None:
-    query = text("""
+    pl_filter = "AND product_line_code = :pl_code" if product_line_code else ""
+    params: dict = {
+        "sids": [str(s) for s in supplier_ids],
+        "period_end": period_end,
+    }
+    if product_line_code:
+        params["pl_code"] = product_line_code
+
+    query = text(f"""
         SELECT supplier_id, COUNT(*) AS cnt
         FROM supplier_scars
         WHERE supplier_id = ANY(:sids)
           AND issued_date <= :period_end
           AND (closed_date IS NULL OR closed_date > :period_end)
+          {pl_filter}
         GROUP BY supplier_id
     """)
-    rows = (await db.execute(query, {"sids": [str(s) for s in supplier_ids], "period_end": period_end})).mappings().all()
+    rows = (await db.execute(query, params)).mappings().all()
     for row in rows:
         result[row["supplier_id"]]["open_scar_count"] = row["cnt"]
 
