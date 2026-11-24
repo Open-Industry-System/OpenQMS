@@ -28,6 +28,14 @@ describe("getPublicDemoConfig", () => {
     expect(getPublicDemoConfig(env)).toBeNull();
   });
 
+  it.each(["admin", " GroupAdmin "])("rejects %s as the Viewer account", (username) => {
+    expect(getPublicDemoConfig({
+      ...completeEnv,
+      VITE_PUBLIC_DEMO_USERNAME: username,
+      VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS: additionalAccounts,
+    })).toBeNull();
+  });
+
   it("keeps Viewer-only configuration backward compatible", () => {
     expect(getPublicDemoConfig(completeEnv)).toEqual({
       username: "viewer",
