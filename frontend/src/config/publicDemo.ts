@@ -76,7 +76,7 @@ export function getPublicDemoConfig(
 
   const username = env.VITE_PUBLIC_DEMO_USERNAME?.trim();
   const password = env.VITE_PUBLIC_DEMO_PASSWORD;
-  if (!username || !password?.trim()) return null;
+  if (!username || !password?.trim() || ["admin", "groupadmin"].includes(username.toLowerCase())) return null;
 
   const config = { username, password };
   const additionalAccountsValue = env.VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS;
