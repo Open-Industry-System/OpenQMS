@@ -5,11 +5,9 @@ import { UserOutlined, LockOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useAuthStore } from "../../store/authStore";
 import LanguageSwitcher from "../../components/LanguageSwitcher";
-import { getPublicDemoConfig } from "../../config/publicDemo";
+import { getAdditionalDemoRole, getPublicDemoConfig } from "../../config/publicDemo";
 
 const { Title, Text } = Typography;
-
-type DemoRole = "viewer" | "engineer" | "manager";
 
 export default function LoginPage() {
   const { t } = useTranslation("login");
@@ -25,7 +23,7 @@ export default function LoginPage() {
       { username: configuredDemo.username, password: configuredDemo.password, role: "viewer" as const },
       ...(configuredDemo.additionalAccounts ?? []).map((account) => ({
         ...account,
-        role: account.username as Exclude<DemoRole, "viewer">,
+        role: getAdditionalDemoRole(account.username),
       })),
     ]
     : [];

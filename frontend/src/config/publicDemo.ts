@@ -5,9 +5,20 @@ export interface PublicDemoEnv {
   readonly VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS?: string;
 }
 
+const ADDITIONAL_DEMO_USERNAME_PAIRS = [
+  ["engineer", "manager"],
+  ["demo-engineer", "demo-manager"],
+] as const;
+
+type AdditionalDemoUsername = (typeof ADDITIONAL_DEMO_USERNAME_PAIRS)[number][number];
+
 export interface PublicDemoAccount {
-  username: string;
+  username: AdditionalDemoUsername;
   password: string;
+}
+
+export function getAdditionalDemoRole(username: AdditionalDemoUsername) {
+  return username === "engineer" || username === "demo-engineer" ? "engineer" : "manager";
 }
 
 export interface PublicDemoConfig {
@@ -15,8 +26,6 @@ export interface PublicDemoConfig {
   password: string;
   additionalAccounts?: PublicDemoAccount[];
 }
-
-const ADDITIONAL_DEMO_USERNAMES = ["engineer", "manager"] as const;
 
 function parseAdditionalAccounts(value: string): PublicDemoAccount[] | null {
   let parsed: unknown;
@@ -26,9 +35,9 @@ function parseAdditionalAccounts(value: string): PublicDemoAccount[] | null {
     return null;
   }
 
-  if (!Array.isArray(parsed) || parsed.length !== ADDITIONAL_DEMO_USERNAMES.length) return null;
+  if (!Array.isArray(parsed) || parsed.length !== 2) return null;
 
-  const accounts = new Map<string, PublicDemoAccount>();
+  const passwordsByUsername = new Map<string, string>();
   for (const account of parsed) {
     if (
       !account
@@ -43,16 +52,21 @@ function parseAdditionalAccounts(value: string): PublicDemoAccount[] | null {
     if (typeof rawUsername !== "string" || typeof password !== "string") return null;
 
     const username = rawUsername.trim();
-    if (
-      !ADDITIONAL_DEMO_USERNAMES.includes(username as typeof ADDITIONAL_DEMO_USERNAMES[number])
-      || !password.trim()
-      || accounts.has(username)
-    ) return null;
-
-    accounts.set(username, { username, password });
+    if (!password.trim() || passwordsByUsername.has(username)) return null;
+    passwordsByUsername.set(username, password);
   }
 
-  return ADDITIONAL_DEMO_USERNAMES.map((username) => accounts.get(username)!);
+  for (const [engineer, manager] of ADDITIONAL_DEMO_USERNAME_PAIRS) {
+    const engineerPassword = passwordsByUsername.get(engineer);
+    const managerPassword = passwordsByUsername.get(manager);
+    if (engineerPassword !== undefined && managerPassword !== undefined) {
+      return [
+        { username: engineer, password: engineerPassword },
+        { username: manager, password: managerPassword },
+      ];
+    }
+  }
+  return null;
 }
 
 export function getPublicDemoConfig(
