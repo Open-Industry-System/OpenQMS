@@ -1,57 +1,57 @@
-# Oracle 共享测试环境排队
+# Warteschlange der gemeinsamen Oracle-Testumgebung
 
-测试站点固定为 `https://test.preview.openqms.smartindustry.world`。它一次承载一个 PR，在响应中提供 `X-OpenQMS-Test-PR`、`X-OpenQMS-Test-Version`，预览成功后的 PR 评论显示编号、完整版本和验收命令。CI 通过并满足现有部署门禁的 PR 自动入队，空位分给编号最小的合格 PR。同 PR 的新提交使用 GitHub 当前 head，版本身份还绑定实际 merge SHA 和验收计划摘要。
+Die Testsite ist fest `https://test.preview.openqms.smartindustry.world`. Sie trägt jeweils einen PR, liefert in den Antworten `X-OpenQMS-Test-PR` und `X-OpenQMS-Test-Version`, und nach erfolgreicher Vorschau zeigt der PR-Kommentar Nummer, vollständige Version und Abnahmebefehl. PRs, deren CI bestanden hat und die die bestehenden Deployment-Gates erfüllen, werden automatisch eingereiht; ein freier Platz geht an den berechtigten PR mit der kleinsten Nummer. Neue Commits desselben PRs verwenden den aktuellen GitHub-Head; die Versionsidentität bindet außerdem die tatsächliche Merge-SHA und den Digest des Abnahmeplans.
 
-## 运行契约
+## Laufzeitvertrag
 
-| 阶段 | 行为 |
+| Phase | Verhalten |
 | --- | --- |
-| 空闲 | 根据完整、实时的合格列表领取编号最小的未处理版本 |
-| 部署中 | 锁住 PR 和受信发放标识，走已有 Oracle 构建、隔离、迁移和启动流程 |
-| 验收中 | 校验实际运行镜像后发布固定地址，验证 HTTPS 健康和版本标识。测试位保留至人工验收 |
-| 清理中 | 停用固定地址，按发放标识清理预览栈和账号。旧评论更新后才解锁，下一项可领取 |
+| Frei | Aus der vollständigen, aktuellen Liste berechtigter PRs die noch nicht bearbeitete Version mit der kleinsten Nummer übernehmen |
+| Deployment | PR und vertrauenswürdige Ausgabekennung sperren, bestehenden Oracle-Ablauf für Build, Isolation, Migration und Start durchlaufen |
+| Abnahme | Nach Prüfung des tatsächlich laufenden Images die feste Adresse veröffentlichen, HTTPS-Health und Versionskennung prüfen. Der Testplatz bleibt bis zur manuellen Abnahme erhalten |
+| Bereinigung | Feste Adresse deaktivieren, Vorschau-Stack und Konten anhand der Ausgabekennung bereinigen. Erst nach Aktualisierung des alten Kommentars wird entsperrt und der nächste Eintrag kann übernommen werden |
 
-测试状态存放在 Oracle 的 root 独占目录，SSH 保留生产与预览两种角色。队列命令仅由现有预览角色执行，字段固定。发布和清理共用现有 Oracle 主机锁。轮询查询失败时停止，避免把请求失败当成无 PR。新 PR 按默认顺序等待。管理员可通过评论指定下一轮。活跃版本被更新、关闭或无法部署时进入清理，然后处理下一项。相同 PR、head、merge 和计划组合默认只发放一次。部署失败并清理完成后，可按下节显式重试。
+Der Teststatus liegt in einem root-exklusiven Verzeichnis auf Oracle; SSH behält die beiden Rollen Produktion und Vorschau. Warteschlangenbefehle führt nur die bestehende Vorschaurolle mit festen Feldern aus. Release und Bereinigung teilen sich die bestehende Sperre auf dem Oracle-Host. Schlägt eine Abfrage beim Polling fehl, wird angehalten, damit ein fehlgeschlagener Request nicht als „kein PR“ gedeutet wird. Neue PRs warten in der Standardreihenfolge. Administratoren können per Kommentar die nächste Runde festlegen. Wird die aktive Version aktualisiert, geschlossen oder lässt sie sich nicht deployen, wird bereinigt und danach der nächste Eintrag bearbeitet. Dieselbe Kombination aus PR, Head, Merge und Plan wird standardmäßig nur einmal ausgegeben. Nach einem fehlgeschlagenen Deployment mit abgeschlossener Bereinigung ist ein expliziter Neuversuch gemäß dem nächsten Abschnitt möglich.
 
-`Oracle shared test` 在 Test OpenQMS 完成时及定时运行，使用 `oracle-preview` Environment 的既有审批和凭据。定时触发每 5 分钟检查签收、版本变更和手动切换，实际触发时间由 GitHub 决定。签收沿用人工验收门禁，匹配当前 PR、head、merge、计划及发放标识。只有获得判定为有效的人工确认，调度器才能按「验收通过」释放。归档只收录版本、发放标识及回执元数据。验收状态与真实的人工评审绑定，测试位切换后保留有效签收。
+`Oracle shared test` läuft bei Abschluss von Test OpenQMS sowie zeitgesteuert und verwendet die bestehende Freigabe und die Zugangsdaten des Environments `oracle-preview`. Der Zeitplan prüft alle 5 Minuten auf Abnahme, Versionsänderungen und manuelle Umschaltung; der tatsächliche Startzeitpunkt bestimmt GitHub. Die Abnahme folgt dem Gate für die manuelle Abnahme und muss zu aktuellem PR, Head, Merge, Plan und Ausgabekennung passen. Nur bei einer als gültig bewerteten menschlichen Bestätigung gibt der Scheduler mit „Abnahme bestanden“ frei. Archiviert werden nur Version, Ausgabekennung und Quittungsmetadaten. Der Abnahmestatus ist an die echte menschliche Prüfung gebunden; nach einem Wechsel des Testplatzes bleibt eine gültige Abnahme erhalten.
 
-成功发布的共享测试位等待人工确认，空闲时间不会触发清理。D4 专用账号与回执仍按各自的有效期核验。
+Ein erfolgreich veröffentlichter gemeinsamer Testplatz wartet auf die manuelle Bestätigung; Leerlaufzeit löst keine Bereinigung aus. Dedizierte D4-Konten und -Quittungen werden weiterhin nach ihrer jeweiligen Gültigkeit geprüft.
 
-## 手动切换测试位
+## Testplatz manuell umschalten
 
-在目标 PR 下发一条只包含 `/test-switch` 的新评论。发起人须有仓库 Maintain 或 Admin 权限，目标 PR 的当前 head、实际 merge 提交及验收计划须通过发布门禁。已经签收的版本保持通过记录。
+Unter dem Ziel-PR einen neuen Kommentar posten, der nur `/test-switch` enthält. Die auslösende Person benötigt Maintain- oder Admin-Rechte im Repository; aktueller Head, tatsächlicher Merge-Commit und Abnahmeplan des Ziel-PRs müssen das Release-Gate bestehen. Bereits abgenommene Versionen behalten ihren Status.
 
-当前正在部署时，队列保留切换请求，等本轮部署结束再处理。当前正在验收时，队列先清理原测试资源，再给目标 PR 发放新租约。被切换的 PR 在之后重新排队，验收进度随旧租约结束。目标更新或关闭后，旧请求失效，可在新版本 CI 通过后重新发评论。
+Läuft gerade ein Deployment, hält die Warteschlange die Umschaltanfrage zurück, bis diese Runde beendet ist. Läuft gerade eine Abnahme, bereinigt die Warteschlange zuerst die bisherigen Testressourcen und vergibt dann eine neue Lease an den Ziel-PR. Der verdrängte PR wird danach neu eingereiht; sein Abnahmefortschritt endet mit der alten Lease. Wird das Ziel aktualisiert oder geschlossen, verfällt die alte Anfrage; nach bestandener CI der neuen Version kann erneut kommentiert werden.
 
-## 部署失败后重试
+## Neuversuch nach fehlgeschlagenem Deployment
 
-部署失败时，PR 评论显示「共享测试部署失败」和工作流日志。失败资源回收后，本轮没有可验收的预览。打开工作流日志，核对失败步骤和实际构建版本。修复故障后，在测试位空闲时，从 GitHub Actions 的 `Oracle shared test` 手动运行默认分支，并将 `retry_pr` 填为对应 PR 编号。
+Bei einem fehlgeschlagenen Deployment zeigt der PR-Kommentar „Shared test deployment failed“ samt Workflow-Log. Nachdem die fehlerhaften Ressourcen zurückgewonnen sind, gibt es in dieser Runde keine abnehmbare Vorschau. Workflow-Log öffnen, fehlgeschlagenen Schritt und tatsächlich gebaute Version prüfen. Nach Behebung des Fehlers bei freiem Testplatz in GitHub Actions `Oracle shared test` manuell auf dem Standardbranch starten und `retry_pr` auf die betreffende PR-Nummer setzen.
 
 ```bash
 gh workflow run oracle-shared-test.yml --ref main -f retry_pr=45
 ```
 
-队列仅重新开放已清理、结果为 `deploy-failed` 的当前 CI 合格版本。重试会发放新租约，继续按 PR 编号领位。已验收、已过期、正在运行或与当前 PR 版本不符的记录无法通过此入口重试。
+Die Warteschlange öffnet nur bereinigte Einträge mit Ergebnis `deploy-failed` der aktuellen CI-berechtigten Version erneut. Ein Neuversuch vergibt eine neue Lease und reiht weiterhin nach PR-Nummer ein. Bereits abgenommene, abgelaufene, laufende oder nicht zur aktuellen PR-Version passende Einträge lassen sich über diesen Weg nicht erneut versuchen.
 
-队列通过 Git HTTPS 拉取 CI 验证的实际 merge 提交。固定地址首次启用时，健康检查会给 TLS 证书签发留出有限重试窗口。只有 HTTPS 健康检查成功且响应中的 PR 编号和版本匹配，才会生成发布回执。
+Die Warteschlange holt den von CI verifizierten tatsächlichen Merge-Commit per Git über HTTPS. Bei der ersten Aktivierung der festen Adresse lässt die Health-Prüfung ein begrenztes Wiederholungsfenster für die Ausstellung des TLS-Zertifikats. Eine Release-Quittung entsteht nur, wenn die HTTPS-Health-Prüfung erfolgreich ist und PR-Nummer sowie Version in der Antwort übereinstimmen.
 
-## 审批和上线顺序
+## Freigabe und Reihenfolge der Inbetriebnahme
 
-1. 按既有流程审批和合入本改动。检查本次受信控制器摘要变更，安排本次接线提交的 main 自动发布保留在既有生产审批环节，避免测试接线随合入切换生产应用。在无发布任务占用时，从已审批的默认分支更新 Oracle 控制器。部署中的生产应用不需要重启。安装前后核对生产发布指针、运行镜像及健康状态。
-2. 审批已有预览的停用窗口。停止旧预览入口发放，并用现有受信清理程序回收已登记的预览栈。共享队列首次领取前校验无旧预览容器、网络、数据卷、路由及预览环境文件。历史源码归档保留。确认实际公网 DNS 和证书能覆盖固定地址。
-3. 创建 root 专属状态目录 `sudo install -d -o root -g root -m 0700 /var/lib/openqms-shared-test`。在确认主机就绪后设置仓库变量 `ORACLE_SHARED_TEST_ENABLED=true`。该变量使旧的逐 PR 自动发布及清理让位于共享队列，生产发布仍走原任务。触发首次 `Oracle shared test` 验证。
-4. 对真实开放 PR 验证顺序。观察第一个 PR 的固定地址返回其实际版本，第二个合格 PR 仍在等待。在新的浏览器会话中完成必须的人工检查并确认，再核对旧版本容器、数据卷、私网、路由和账号文件已清理，以及同一网址响应变为下一个 PR 的版本。需要 D4 receiver 或测试写入身份的 PR，必须先取得这些能力，再签收。关闭模式前先停止新发放并清理队列的活跃测试位，避免留下一个可被误识别的固定路由。
+1. Diese Änderung nach dem bestehenden Verfahren freigeben und mergen. Die geänderte Prüfsumme des vertrauenswürdigen Controllers prüfen und dafür sorgen, dass das automatische main-Release dieses Verdrahtungs-Commits im bestehenden Produktionsfreigabeschritt bleibt, damit der Merge der Testverdrahtung nicht die Produktionsanwendung umschaltet. Wenn kein Release-Job läuft, den Oracle-Controller aus dem freigegebenen Standardbranch aktualisieren. Die laufende Produktionsanwendung muss nicht neu gestartet werden. Vor und nach der Installation Release-Zeiger, laufende Images und Health der Produktion prüfen.
+2. Das Abschaltfenster der bestehenden Vorschauen freigeben. Die Ausgabe über den alten Vorschaueinstieg stoppen und die registrierten Vorschau-Stacks mit dem bestehenden vertrauenswürdigen Bereinigungsprogramm zurückgewinnen. Vor der ersten Übernahme durch die gemeinsame Warteschlange prüfen, dass keine alten Vorschau-Container, -Netze, -Volumes, -Routen oder -Umgebungsdateien übrig sind. Historische Quellarchive bleiben erhalten. Bestätigen, dass öffentliches DNS und Zertifikat die feste Adresse tatsächlich abdecken.
+3. Das root-exklusive Statusverzeichnis anlegen: `sudo install -d -o root -g root -m 0700 /var/lib/openqms-shared-test`. Nach bestätigter Bereitschaft des Hosts die Repository-Variable `ORACLE_SHARED_TEST_ENABLED=true` setzen. Damit treten das alte automatische Release und die Bereinigung pro PR zugunsten der gemeinsamen Warteschlange zurück; Produktions-Releases laufen weiter über den ursprünglichen Job. Den ersten Lauf von `Oracle shared test` zur Prüfung auslösen.
+4. Die Reihenfolge mit echten offenen PRs prüfen: Die feste Adresse liefert die tatsächliche Version des ersten PRs, der zweite berechtigte PR wartet noch. In einer neuen Browsersitzung die erforderlichen manuellen Prüfungen durchführen und bestätigen, dann prüfen, dass Container, Volumes, privates Netz, Route und Kontodateien der alten Version bereinigt sind und dieselbe Adresse nun die Version des nächsten PRs liefert. PRs, die einen D4-Receiver oder eine schreibende Testidentität benötigen, müssen diese Fähigkeiten vor der Abnahme erhalten. Vor dem Abschalten des Modus zuerst neue Ausgaben stoppen und den aktiven Testplatz der Warteschlange bereinigen, damit keine fest vergebene Route zurückbleibt, die falsch zugeordnet werden könnte.
 
-## 核验记录
+## Prüfprotokoll
 
-只读预检使用当前开放的 PR #45 和 PR #46。#45 的完整 CI 和实际 merge 收据通过核验，#46 的修订 CI 在检查时仍在执行。本地复演使用两个 PR 的实际 head、merge 和计划摘要。#46 的 CI 成功、#45 的人工签收及 Oracle 物理清理在复演中由测试输入模拟。隔离测试覆盖编号排序、锁定版本、签收、清理确认及固定地址发布回执。Google 公共解析确认固定域名 A 记录为 Oracle 公网 IP。Oracle 实际固定路由切换与真人验收为 **NOT_RUN**，将在既有审批完成后进行。此任务的排队接线复用现有预览初始化，D4 浏览器运行链和扩展合成业务身份仍待独立接入。
+Die Nur-Lese-Vorprüfung verwendete die damals offenen PRs #45 und #46. Vollständige CI und tatsächliche Merge-Quittung von #45 wurden verifiziert; die überarbeitete CI von #46 lief zum Prüfzeitpunkt noch. Die lokale Nachstellung verwendete tatsächliche Heads, Merges und Plan-Digests beider PRs. Erfolgreiche CI von #46, manuelle Abnahme von #45 und die physische Bereinigung auf Oracle wurden dabei durch Testeingaben simuliert. Isolierte Tests decken Sortierung nach Nummer, Versionssperre, Abnahme, Bereinigungsbestätigung und Release-Quittung der festen Adresse ab. Der öffentliche Google-Resolver bestätigt den A-Eintrag der festen Domain auf die öffentliche Oracle-IP. Die tatsächliche Umschaltung der festen Route auf Oracle und die Abnahme durch echte Personen sind **NOT_RUN** und folgen nach Abschluss der bestehenden Freigabe. Die Warteschlangen-Verdrahtung verwendet die bestehende Vorschau-Initialisierung wieder; die D4-Browser-Laufzeitkette und erweiterte synthetische Fachidentitäten werden separat angebunden.
 
 
-## 测试账号与 D4 接入前提
+## Testkonten und Voraussetzungen für D4
 
-- 固定共享测试站的登录页显示 Viewer、Engineer 和 Manager 三种演示账号及一键填充。公开的 `demo-engineer` 和 `demo-manager` 体验同等业务角色，操作限于本轮独占合成数据库。请勿输入真实或个人数据。
-- 执行 D4 验收的 `engineer` 和 `manager` 在每个测试位独立生成随机口令，由受信操作员通过既有私下渠道发放。安装控制器时确认 `/usr/bin/htpasswd` 可用，Ubuntu 上由 `apache2-utils` 提供。公开回执只含角色名。清理同步撤下路由、销毁独占库和移除本轮凭据文件。
-- 共享测试页眉为 Engineer 和 Manager 提供 D4 验收入口。门户复用当前测试位账号，逐项按验收计划分配角色，在独立 HTTPS 域名上校验身份。
-- 现有公开预览继续使用 Viewer。共享站点的验收计划用七列表格声明编号、环境、角色、场景、操作及预期结果。三列旧计划可用于发布资格核验，进入共享签收前须补分类。缺少角色或 D4 运行回执的必要项标为受阻。就绪、CI 通过和历史运行记录不能清除该状态。
-- PR #45 的第 1 项可在现有公开预览以 Viewer 执行。第 2、3 项依赖已审核的专用 Linux 运行包和合成租户部署。现有 Preview Compose 使用 single 模式和常规应用网络。接入时为当前发放建立独占的候选 API 容器和合成租户库，按 #45 的 controller 合约验证 UID、cgroup、镜像及仅一个 IPv4 回环监听。专用 API 使用 dev 租户策略，单次授予最长一小时。受信宿主服务从已审查的固定包发放任务和 receiver，浏览器只提交固定场景。不要从待测 PR 源码目录启动 root 进程。
-- 用真实浏览器操作合成报告与任务。对正常交付独立读取平台侧记录，核对本轮报告、任务、运行和已接收消息。撤权应针对已领取任务禁用来源 grant，再确认正文读取被拒、交付记录未增加。分别检查无权账号的拒绝路径。清理前核对精确测试位及 receiver、API、数据库身份。浏览器的逐项回执通过可信发布记录关联当前 PR、head、merge、计划和发放。账号发放以及队列接线可以先审批，D4 执行器部署和对应真实浏览器验收目前为 **NOT_RUN**。
+- Die Login-Seite der festen gemeinsamen Testsite zeigt die drei Demo-Konten Viewer, Engineer und Manager mit Ein-Klick-Ausfüllen. Die öffentlichen Konten `demo-engineer` und `demo-manager` entsprechen denselben Fachrollen; ihre Aktionen beschränken sich auf die exklusive synthetische Datenbank dieser Runde. Bitte keine echten oder personenbezogenen Daten eingeben.
+- Die für die D4-Abnahme verwendeten Konten `engineer` und `manager` erhalten pro Testplatz zufällige Passwörter, die ein vertrauenswürdiger Operator über den bestehenden privaten Kanal ausgibt. Bei der Installation des Controllers sicherstellen, dass `/usr/bin/htpasswd` vorhanden ist (unter Ubuntu aus `apache2-utils`). Öffentliche Quittungen enthalten nur Rollennamen. Die Bereinigung entfernt gleichzeitig die Route, zerstört die exklusive Datenbank und entfernt die Zugangsdateien dieser Runde.
+- Die Kopfzeile der gemeinsamen Testsite bietet Engineer und Manager einen Einstieg zur D4-Abnahme. Das Portal verwendet das Konto des aktuellen Testplatzes, weist Rollen gemäß Abnahmeplan pro Prüfpunkt zu und prüft die Identität auf einer separaten HTTPS-Domain.
+- Bestehende öffentliche Vorschauen verwenden weiterhin den Viewer. Der Abnahmeplan der gemeinsamen Site deklariert in einer siebenspaltigen Tabelle ID, Umgebung, Rolle, Szenario, Schritte und erwartetes Ergebnis. Alte dreispaltige Pläne genügen für die Release-Berechtigung, müssen vor der gemeinsamen Abnahme aber klassifiziert werden. Pflichtpunkte ohne Rolle oder ohne D4-Laufzeitquittung werden als blockiert markiert. Bereitschaft, bestandene CI und historische Läufe heben diesen Status nicht auf.
+- Punkt 1 von PR #45 lässt sich in der bestehenden öffentlichen Vorschau als Viewer ausführen. Punkte 2 und 3 setzen das geprüfte dedizierte Linux-Laufzeitpaket und das Deployment eines synthetischen Mandanten voraus. Das bestehende Preview-Compose nutzt den single-Modus und das reguläre Anwendungsnetz. Bei der Anbindung wird für die aktuelle Ausgabe ein exklusiver Kandidaten-API-Container mit synthetischer Mandantendatenbank angelegt und gemäß Controller-Vertrag von #45 auf UID, cgroup, Image und genau einen IPv4-Loopback-Listener geprüft. Die dedizierte API verwendet die dev-Mandantenstrategie, eine einzelne Gewährung gilt höchstens eine Stunde. Ein vertrauenswürdiger Host-Dienst gibt Aufgaben und Receiver aus dem geprüften festen Paket aus; der Browser übermittelt nur feste Szenarien. Keine root-Prozesse aus dem Quellverzeichnis des zu testenden PRs starten.
+- Synthetischen Bericht und Aufgabe mit einem echten Browser bedienen. Bei normaler Auslieferung die plattformseitigen Datensätze unabhängig lesen und Bericht, Aufgabe, Lauf und empfangene Nachrichten dieser Runde prüfen. Beim Rechteentzug für die bereits übernommene Aufgabe den Quell-Grant deaktivieren und anschließend bestätigen, dass das Lesen des Textes abgelehnt wird und kein Auslieferungseintrag hinzukommt. Ablehnungspfade für Konten ohne Berechtigung separat prüfen. Vor der Bereinigung exakten Testplatz sowie Identität von Receiver, API und Datenbank prüfen. Die Quittungen des Browsers je Prüfpunkt werden über vertrauenswürdige Release-Aufzeichnungen mit aktuellem PR, Head, Merge, Plan und Ausgabe verknüpft. Kontoausgabe und Warteschlangen-Verdrahtung können vorab freigegeben werden; Deployment des D4-Executors und die zugehörige echte Browser-Abnahme sind derzeit **NOT_RUN**.

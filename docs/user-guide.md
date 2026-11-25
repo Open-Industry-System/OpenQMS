@@ -1,75 +1,75 @@
-# 用户指南
+# Benutzerhandbuch
 
-本文档介绍 OpenQMS 的通用操作，包括登录、导航、权限说明和常见操作流程。
-
----
-
-## 1. 登录
-
-1. 浏览器访问系统地址。公开首页为 `/`，登录入口为 `/login`；仪表盘和所有业务页面仍需认证及相应模块权限。
-2. 在登录页面输入用户名和密码。
-3. 登录成功后自动跳转到仪表盘。
-
-**会话续期**：访问 Token 有效期为 120 分钟。浏览器会使用当前浏览器会话的轮换 Refresh Token 自动续期，并在多个标签页之间同步最新会话代次；续期成功后会安全地重新加载当前用户及权限。Refresh 有效期按最近一次成功续期滚动计算，长期不活跃、重放旧 Token、账号停用或管理员重置密码都会要求重新登录。密码重置会撤销 Refresh 会话，但已经签发的无状态访问 Token 最长仍可能继续有效 120 分钟。
+Dieses Dokument beschreibt die allgemeine Bedienung von OpenQMS: Anmeldung, Navigation, Berechtigungen und häufige Abläufe.
 
 ---
 
-## 2. 导航
+## 1. Anmeldung
 
-系统左侧为功能导航菜单，按功能域分组：
+1. Die Systemadresse im Browser aufrufen. Die öffentliche Startseite ist `/`, die Anmeldung erreichen Sie unter `/login`; Dashboard und alle Fachseiten erfordern weiterhin eine Anmeldung und die passende Modulberechtigung.
+2. Auf der Anmeldeseite Benutzername und Passwort eingeben.
+3. Nach erfolgreicher Anmeldung erfolgt die Weiterleitung zum Dashboard.
 
-| 菜单组 | 模块 |
+**Sitzungsverlängerung**: Das Zugriffstoken ist 120 Minuten gültig. Der Browser verlängert es automatisch mit dem rotierenden Refresh-Token der aktuellen Browsersitzung und synchronisiert die neueste Sitzungsgeneration über mehrere Tabs; nach erfolgreicher Verlängerung werden der aktuelle Benutzer und seine Berechtigungen sicher neu geladen. Die Refresh-Gültigkeit wird ab der letzten erfolgreichen Verlängerung rollierend berechnet. Längere Inaktivität, das Wiederverwenden eines alten Tokens, eine Kontodeaktivierung oder ein Passwort-Reset durch den Administrator erfordern eine erneute Anmeldung. Ein Passwort-Reset widerruft die Refresh-Sitzungen, ein bereits ausgestelltes zustandsloses Zugriffstoken kann jedoch noch bis zu 120 Minuten gültig bleiben.
+
+---
+
+## 2. Navigation
+
+Links befindet sich das Navigationsmenü, gruppiert nach Fachbereichen:
+
+| Menügruppe | Module |
 |--------|------|
-| 策划与 FMEA | FMEA、控制计划、APQP、PPAP、特殊特性 |
-| 问题管理 | 8D/CAPA、SCAR |
-| 来料与供应商 | IQC、供应商、供应商风险 |
-| 过程与测量 | SPC、MSA |
-| 客户质量 | 客诉、客户审核 |
-| 体系与评审 | 管理评审、内部审核、质量目标 |
-| 集成 | ERP、MES、PLM |
-| 集团 | 多工厂看板、工厂对比 |
+| Planung & FMEA | FMEA, Produktionslenkungsplan, APQP, PPAP, besondere Merkmale |
+| Problemmanagement | 8D/CAPA, SCAR |
+| Wareneingang & Lieferanten | Wareneingangsprüfung (IQC), Lieferanten, Lieferantenrisiko |
+| Prozess & Messung | SPC, MSA |
+| Kundenqualität | Reklamationen, Kundenaudits |
+| System & Bewertung | Managementbewertung, interne Audits, Qualitätsziele |
+| Integration | ERP, MES, PLM |
+| Konzern | Mehrwerks-Dashboard, Werksvergleich |
 
-菜单项根据用户权限自动隐藏：如果用户对某模块无 VIEW 权限，则对应菜单不显示。
-
----
-
-## 3. 工厂与产品线切换
-
-右上角提供工厂和产品线选择器：
-
-- **工厂切换**：管理员可切换到不同工厂查看数据。
-- **产品线过滤**：选择产品线后，列表页仅显示该产品线下的数据。
-
-> 注意：集团管理员（groupadmin）可看到所有工厂数据，普通用户仅能访问分配的工厂。
+Menüeinträge werden je nach Berechtigung automatisch ausgeblendet: Fehlt dem Benutzer für ein Modul die Stufe VIEW, erscheint der Menüeintrag nicht.
 
 ---
 
-## 4. 通用列表页操作
+## 3. Werk und Produktlinie wechseln
 
-所有列表页共享以下操作模式：
+Oben rechts gibt es eine Auswahl für Werk und Produktlinie:
 
-| 操作 | 说明 |
+- **Werk wechseln**: Administratoren können zu einem anderen Werk wechseln und dessen Daten ansehen.
+- **Produktlinienfilter**: Nach Auswahl einer Produktlinie zeigen Listenseiten nur noch deren Daten.
+
+> Hinweis: Konzernadministratoren (groupadmin) sehen die Daten aller Werke, normale Benutzer nur die ihnen zugeordneten Werke.
+
+---
+
+## 4. Allgemeine Bedienung von Listenseiten
+
+Alle Listenseiten folgen demselben Bedienmuster:
+
+| Aktion | Beschreibung |
 |------|------|
-| 搜索 | 顶部搜索框，按编号/标题模糊搜索 |
-| 分页 | 底部分页器，支持每页条数切换 |
-| 新建 | 右上角"新建"按钮（需 CREATE 权限） |
-| 筛选 | 产品线/状态/日期范围等筛选条件 |
-| 导出 | 部分列表支持 Excel 导出 |
+| Suchen | Suchfeld oben, unscharfe Suche nach Nummer/Titel |
+| Blättern | Paginierung unten, Anzahl pro Seite umschaltbar |
+| Neu | Schaltfläche „Neu“ oben rechts (erfordert CREATE) |
+| Filtern | Filter nach Produktlinie, Status, Zeitraum usw. |
+| Export | Einige Listen unterstützen den Excel-Export |
 
-**权限说明**：
+**Berechtigungen**:
 
-- **VIEW** 等级：可查看列表和详情，新建/编辑按钮隐藏或禁用。
-- **CREATE** 等级：可创建新记录。
-- **EDIT** 等级：可编辑已有记录。
-- **APPROVE** 等级：可审批/关闭/归档。
+- **VIEW**: Listen und Details ansehen; Schaltflächen für Neu/Bearbeiten sind ausgeblendet oder deaktiviert.
+- **CREATE**: Neue Datensätze anlegen.
+- **EDIT**: Bestehende Datensätze bearbeiten.
+- **APPROVE**: Freigeben, abschließen, archivieren.
 
 ---
 
-## 5. 审批与状态流转
+## 5. Freigaben und Statusübergänge
 
-多数文档有状态生命周期：
+Die meisten Dokumente haben einen Status-Lebenszyklus:
 
-| 模块 | 状态流转 |
+| Modul | Statusübergänge |
 |------|----------|
 | FMEA | `draft` → `in_review` → `approved` |
 | 8D/CAPA | `D1_TEAM` → `D2_DESC` → ... → `D7_PREVENT` → `D8_CLOSURE` |
@@ -77,43 +77,43 @@
 | APQP | `planning` → `design` → `process` → `product` → `feedback` |
 | PPAP | `draft` → `under_review` → `approved` / `rejected` → `resubmit` |
 
-**通用规则**：
-- 非审批步骤：CREATE/EDIT 权限可推进。
-- 审批步骤（如 FMEA approved、CAPA D7/D8）：仅 APPROVE 及以上权限可操作。
-- 查看者（VIEW）只能浏览，无法编辑或推进。
+**Allgemeine Regeln**:
+- Schritte ohne Freigabe: mit CREATE/EDIT weiterschaltbar.
+- Freigabeschritte (z. B. FMEA approved, CAPA D7/D8): nur ab APPROVE.
+- Betrachter (VIEW) können nur ansehen, nicht bearbeiten oder weiterschalten.
 
 ---
 
-## 6. 角色概览
+## 6. Rollenübersicht
 
-| 角色 | role_key | 典型职责 |
+| Rolle | role_key | Typische Aufgaben |
 |------|----------|----------|
-| 系统管理员 | `admin` | 用户管理、权限配置、所有模块完全控制 |
-| 质量经理 | `manager` | 审批 FMEA/CAPA、关闭 8D、管理评审 |
-| 现场质量工程师 | `field_qe` | FMEA/SPC/MSA 编辑、CAPA 步骤推进 |
-| 前期策划质量工程师 | `planning_qe` | FMEA/控制计划/PPAP/特殊特性编辑 |
-| 供应商质量工程师 | `supplier_qe` | 供应商/IQC/SCAR 编辑 |
-| 客户质量工程师 | `customer_qe` | 客诉/客户审核编辑 |
-| 只读用户 | `viewer` | 查看所有数据，不可创建/编辑 |
+| Systemadministrator | `admin` | Benutzerverwaltung, Berechtigungen, Vollzugriff auf alle Module |
+| Qualitätsmanager | `manager` | FMEA/CAPA freigeben, 8D abschließen, Managementbewertung |
+| Qualitätsingenieur Fertigung | `field_qe` | FMEA/SPC/MSA bearbeiten, CAPA-Schritte vorantreiben |
+| Qualitätsingenieur Vorausplanung | `planning_qe` | FMEA, Produktionslenkungspläne, PPAP, besondere Merkmale bearbeiten |
+| Lieferantenqualitätsingenieur | `supplier_qe` | Lieferanten, Wareneingangsprüfung (IQC), SCAR bearbeiten |
+| Kundenqualitätsingenieur | `customer_qe` | Reklamationen und Kundenaudits bearbeiten |
+| Nur-Lese-Benutzer | `viewer` | Alle Daten ansehen, kein Anlegen/Bearbeiten |
 
-> 详细权限矩阵请参考 [权限参考](permissions.md)。
+> Die vollständige Berechtigungsmatrix steht in der [Berechtigungsreferenz](permissions.md).
 
 ---
 
-## 7. 常见问题
+## 7. Häufige Fragen
 
-### 忘记密码怎么办？
+### Passwort vergessen?
 
-系统暂不支持自助重置密码。请联系管理员通过后台重置。
+Ein Self-Service-Passwort-Reset wird derzeit nicht unterstützt. Bitte wenden Sie sich an den Administrator, der das Passwort in der Verwaltung zurücksetzt.
 
-### 为什么看不到某个模块？
+### Warum sehe ich ein Modul nicht?
 
-该模块的权限等级为 NONE（0），请联系管理员在"权限管理"中分配 VIEW 及以上权限。
+Die Berechtigungsstufe für dieses Modul ist NONE (0). Bitten Sie den Administrator, Ihnen in der „Berechtigungsverwaltung“ mindestens VIEW zu geben.
 
-### 切换工厂后数据没变？
+### Nach dem Werkswechsel ändern sich die Daten nicht?
 
-部分页面有产品线筛选条件，请确认产品线选择器是否切换到了对应的产品线。
+Einige Seiten filtern zusätzlich nach Produktlinie. Prüfen Sie, ob die Produktlinienauswahl auf die passende Produktlinie umgestellt ist.
 
-### 如何导出数据？
+### Wie exportiere ich Daten?
 
-部分列表页（如供应商、SPC）提供 Excel 导出按钮。未提供导出功能的页面可通过 API 直接导出，参考 [API 文档](http://localhost:8000/docs)。
+Einige Listenseiten (z. B. Lieferanten, SPC) bieten eine Schaltfläche für den Excel-Export. Seiten ohne Exportfunktion lassen sich direkt über die API exportieren, siehe [API-Dokumentation](http://localhost:8000/docs).

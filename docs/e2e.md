@@ -33,86 +33,104 @@ The seeded Compose suite has no committed credential template. Supply an authori
 3. Add `data-e2e` attributes to the production component if missing (testability only).
 4. Run `make e2e TEST_ARGS="--grep <name>"` to verify in isolation.
 
-## CI 分层验收（Task 7）
+## Geschichtete CI-Abnahme (Task 7)
 
-此分层 CI 与上面的手工 Compose E2E 独立。它使用经过归属核验的单一
-PostgreSQL 测试目标，普通层不设置 `E2E_MODE`，并显式清空 provider 与 embedding
-凭据。不要借用 `make e2e-*` 的 reset/seed，或把其历史收据作为 CI 的通过证据。
+Diese geschichtete CI ist unabhängig von der manuellen Compose-E2E oben. Sie verwendet ein
+einziges PostgreSQL-Testziel mit geprüfter Zugehörigkeit, setzt in den normalen Schichten kein
+`E2E_MODE` und leert Provider- und Embedding-Zugangsdaten ausdrücklich. Reset/Seed aus
+`make e2e-*` nicht mitbenutzen und deren historische Quittungen nicht als CI-Nachweis verwenden.
 
-### 本地受控入口
+### Kontrollierte lokale Einstiegspunkte
 
-在新鲜 source export 中先提供 `OPENQMS_TEST_RESOURCE_FILE` 和唯一的
-`TEST_DATABASE_URL`，再按层运行以下 Make 入口：
+In einem frischen Source-Export zuerst `OPENQMS_TEST_RESOURCE_FILE` und genau ein
+`TEST_DATABASE_URL` setzen, dann die Make-Ziele schichtweise ausführen:
 
 ```bash
-make check             # check-backend + check-frontend；不包含 browser/live/scanner
-make check-backend     # 核验、建库/迁移同一测试目标，再运行 deterministic pytest
-make check-browser     # 同一已核验目标上的 deterministic Chromium 保护层
-make check-live        # 仅显式授权的 live provider 层
-make agent-attachment-e2e  # 独立实际 ClamAV 过程＋host browser gate
+make check             # check-backend + check-frontend; ohne browser/live/scanner
+make check-backend     # Ziel prüfen, Datenbank anlegen/migrieren, dann deterministisches pytest
+make check-browser     # deterministische Chromium-Schutzschicht auf demselben geprüften Ziel
+make check-live        # nur ausdrücklich freigegebene Live-Provider-Schicht
+make agent-attachment-e2e  # eigenständiger echter ClamAV-Prozess + Host-Browser-Gate
 ```
 
-`make check-test-db` 是 check/check-backend/check-browser/check-live 的前置步骤：它先核验 container 归属，再仅创建
-`*_test` 数据库并执行迁移。`make check-browser` 只解析项目已安装的 Chromium；
-不会下载浏览器。前端依赖必须在 export 内由 lockfile 执行 `npm ci` 安装，不能复制
-`node_modules` 或以 `npm install` 替代。`agent-attachment-e2e` 是独立 scanner gate，
-不属于 `make check`。
+`make check-test-db` ist Vorstufe von check/check-backend/check-browser/check-live: Es prüft zuerst die
+Zugehörigkeit des Containers, legt dann ausschließlich `*_test`-Datenbanken an und migriert sie.
+`make check-browser` verwendet nur das im Projekt installierte Chromium und lädt keinen Browser
+herunter. Frontend-Abhängigkeiten müssen im Export per `npm ci` aus der Lockfile installiert werden;
+`node_modules` kopieren oder `npm install` stattdessen verwenden ist nicht zulässig. `agent-attachment-e2e`
+ist ein eigenständiges Scanner-Gate und nicht Teil von `make check`.
 
-本地 resource registration 是禁止 group/world 写入的 secret-free JSON（允许 0644；建议 0600），至少含
-`container`、完整 `container_id`、`owner_nonce`、`image`、`host`、`port`、
-`test_database`、`application_database` 与可选 `volume`。容器必须带
-`openqms.owner=<owner_nonce>` 标签，端口必须精确匹配 loopback URL；注册文件不含
-URL、密码或 provider 配置。若本地同时设置 `PG15_CONTAINER` 供快照工具使用，
-它必须等于登记的容器名称或完整 ID，且不得混入 CI run/job metadata。迁移 fixture
-只在实际创建自己的临时库后登记 `OPENQMS_MIGRATION_TEST_DATABASE_URL`；快照工具
-仅允许该登记的 `*_test` URL 或基础测试库，且实例端点、用户和凭据必须一致。
-CI service 改用 `PG15_CONTAINER` 与
-`openqms.ci.run` / `openqms.ci.attempt` / `openqms.ci.job` 三个标签，不能伪造
-GitHub metadata 走本地路径。
+Die lokale Ressourcenregistrierung ist ein JSON ohne Secrets, das für group/world nicht beschreibbar ist
+(0644 erlaubt, 0600 empfohlen), mit mindestens `container`, vollständiger `container_id`, `owner_nonce`,
+`image`, `host`, `port`, `test_database`, `application_database` und optional `volume`. Der Container
+muss das Label `openqms.owner=<owner_nonce>` tragen, der Port muss exakt zur Loopback-URL passen; die
+Registrierungsdatei enthält weder URL noch Passwort noch Provider-Konfiguration. Wird lokal zusätzlich
+`PG15_CONTAINER` für die Snapshot-Werkzeuge gesetzt, muss es dem registrierten Containernamen oder der
+vollständigen ID entsprechen und darf keine CI-Run-/Job-Metadaten enthalten. Die Migrations-Fixture
+registriert `OPENQMS_MIGRATION_TEST_DATABASE_URL` erst, nachdem sie ihre eigene temporäre Datenbank
+tatsächlich angelegt hat; die Snapshot-Werkzeuge erlauben nur diese registrierte `*_test`-URL oder die
+Basis-Testdatenbank, wobei Instanzendpunkt, Benutzer und Zugangsdaten übereinstimmen müssen.
+CI-Services verwenden stattdessen `PG15_CONTAINER` und die drei Labels
+`openqms.ci.run` / `openqms.ci.attempt` / `openqms.ci.job`; GitHub-Metadaten dürfen nicht gefälscht
+werden, um den lokalen Pfad zu nehmen.
 
-### 环境、收据与状态
+### Umgebung, Quittungen und Status
 
-普通 api/browser/scanner 子进程只接收白名单的系统/运行变量；`LLM_*`、
-`OPENAI_*`、`ANTHROPIC_*` 和 `EMBEDDING_*` 凭据清空；SDK 的
-`OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` 从子进程环境移除，而非设为空字符串，
-避免 SDK 把空值当成实际端点。应用 `LLM_BASE_URL` 等字段仍显式清空；
-`LLM_TIMEOUT` 不以空字符串注入。live 仅接受显式 `--test-profile` 或 live job 的 Environment 配置，且 profile
-只进入 live 子进程；不能隐式读取 `.env` 或继承代理/ambient provider 值。
-可选 `LLM_TIMEOUT` 未设置或为空时为 30 秒；显式提供时必须是 1–120 的整数。
-显式 `OPENQMS_AGENT_BROWSER_EXECUTABLE` 在 controller 解析为绝对、已验证的可执行路径，
-仅该已允许的键传入 browser/live/scanner pytest 子进程，不因缓存缺失改用其他浏览器。
+Normale api/browser/scanner-Unterprozesse erhalten nur freigegebene System-/Laufzeitvariablen;
+Zugangsdaten `LLM_*`, `OPENAI_*`, `ANTHROPIC_*` und `EMBEDDING_*` werden geleert; die SDK-Variablen
+`OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` werden aus der Unterprozessumgebung entfernt statt auf leere
+Zeichenketten gesetzt, damit das SDK keinen leeren Wert als echten Endpunkt nutzt. Anwendungsfelder wie
+`LLM_BASE_URL` werden weiterhin ausdrücklich geleert; `LLM_TIMEOUT` wird nicht als leere Zeichenkette
+injiziert. Live akzeptiert nur ein explizites `--test-profile` oder die Environment-Konfiguration des
+Live-Jobs, und das Profil gelangt nur in den Live-Unterprozess; `.env` wird nicht implizit gelesen, und
+Proxy- oder ambient gesetzte Provider-Werte werden nicht geerbt. Ist das optionale `LLM_TIMEOUT` nicht
+gesetzt oder leer, gilt 30 Sekunden; explizit gesetzt muss es eine ganze Zahl von 1–120 sein. Ein
+explizites `OPENQMS_AGENT_BROWSER_EXECUTABLE` löst der Controller zu einem absoluten, geprüften
+ausführbaren Pfad auf; nur dieser erlaubte Schlüssel geht an die pytest-Unterprozesse von
+browser/live/scanner, und bei fehlendem Cache wird nicht auf einen anderen Browser ausgewichen.
 
-runner 将 raw JUnit 与 hook 文件保存在私有临时目录，只发布过滤后的 log 与 JSON
-receipt。receipt 记录 selected/passed/failed/errors/skipped/xfail/xpass/deselected/
-warnings、命令、退出码和耗时。browser/live/scanner 显式 gate 不接受 skip、xfail
-或 xpass；普通 backend 层如实记录既有环境依赖 skip，不将被跳过用例称为通过。
-所有层均要求非零实际选中数、完整 receipt 且退出码为零。
-GitHub 每个执行层显式设置专用 `OPENQMS_TEST_ARTIFACTS` 目录，`always()` 上传实际
-`*-receipt.json` 和过滤后的 `*.log`，包括失败结果；frontend 类型/构建分别保留实际命令、
-日志与退出码（不是 pytest 计数）。runner 在控制台显示目录、计数与退出码，失败时显示
-过滤后的诊断。不要上传 raw XML/hooks、profile/env、resource registration 或整个临时根目录。
-本地可设置一个新的专用绝对目录；未设置时由 runner 分配并打印目录，不复用既有收据。
+Der Runner speichert rohe JUnit- und Hook-Dateien in einem privaten temporären Verzeichnis und
+veröffentlicht nur gefilterte Logs und JSON-Quittungen. Eine Quittung erfasst
+selected/passed/failed/errors/skipped/xfail/xpass/deselected/warnings, Befehl, Exit-Code und Dauer. Die
+expliziten Gates browser/live/scanner akzeptieren weder skip noch xfail noch xpass; die normale
+Backend-Schicht erfasst bestehende umgebungsbedingte Skips wahrheitsgemäß und bezeichnet übersprungene
+Fälle nicht als bestanden. Alle Schichten verlangen eine von null verschiedene Anzahl tatsächlich
+ausgewählter Tests, eine vollständige Quittung und Exit-Code null.
+GitHub setzt für jede Ausführungsschicht ein eigenes Verzeichnis `OPENQMS_TEST_ARTIFACTS` und lädt mit
+`always()` die tatsächlichen `*-receipt.json` und gefilterten `*.log` hoch, auch bei Fehlschlag;
+Typprüfung und Build des Frontends behalten jeweils tatsächlichen Befehl, Log und Exit-Code (keine
+pytest-Zähler). Der Runner zeigt Verzeichnis, Zähler und Exit-Code in der Konsole und bei Fehlschlag die
+gefilterte Diagnose. Weder rohe XML-/Hook-Dateien noch Profile/env, Ressourcenregistrierung oder das
+ganze temporäre Wurzelverzeichnis hochladen. Lokal kann ein neues dediziertes absolutes Verzeichnis
+gesetzt werden; ohne Angabe vergibt der Runner eines, gibt es aus und verwendet keine alten Quittungen.
 
-scanner 在 owned Compose teardown 前从已停止的 process 容器导出实际收据/日志至
-`<artifacts>/process/`，host browser 写入 `<artifacts>/browser/`；导出只复制受控普通文件，
-以 host 用户重新创建可读文件，不继承容器 root 的 0600 所有权。process receipt 仅提取
-测试的安全 observations：daemon/definitions 的 VERSIONCOMMANDS、EICAR FOUND、解析阶段、
-恶意/加密/展开限制拒绝与 clean 下载；不复制原始 XML。`cleanup.json` 记录 export/down/
-资源检查退出码及实际剩余容器/卷/网络数，失败也保留。清理只限本次随机 project，保留
-controller 已登记的 PG container、volume 与其他项目资源。
+Der Scanner exportiert vor dem Teardown seines eigenen Compose-Projekts die tatsächlichen Quittungen und
+Logs aus dem gestoppten Prozesscontainer nach `<artifacts>/process/`, der Host-Browser schreibt nach
+`<artifacts>/browser/`; der Export kopiert nur kontrollierte reguläre Dateien und legt sie als Host-Benutzer
+lesbar neu an, ohne die 0600-Eigentümerschaft von root im Container zu übernehmen. Die Prozessquittung
+übernimmt nur sichere Beobachtungen aus den Tests: VERSIONCOMMANDS von Daemon/Definitionen, EICAR FOUND,
+Parsing-Phasen, Ablehnungen wegen Schadcode/Verschlüsselung/Entpackgrenzen und saubere Downloads; rohes
+XML wird nicht kopiert. `cleanup.json` erfasst die Exit-Codes von Export, down und Ressourcenprüfung sowie
+die tatsächlich verbliebenen Container/Volumes/Netze, auch bei Fehlschlag. Die Bereinigung beschränkt sich
+auf das zufällige Projekt dieses Laufs; der vom Controller registrierte PG-Container, dessen Volume und
+Ressourcen anderer Projekte bleiben erhalten.
 
-### GitHub 边界
+### Grenzen auf GitHub
 
-自动 workflow 在所有分支 push 与指向 `main` 的 PR 运行；fork PR 无密钥。真实 live
-和 scanner 仅为 `workflow_dispatch`，只允许 main：preflight 先冻结 main SHA，
-后续 job checkout 该 SHA。summary 验证实际 receipt 的 SHA、完整计数、命令、
-退出码和非空 log；scanner 还必须有两个 stage、实际 observations 与成功 cleanup；
-单独写出的 PASSED wrapper 不能代替实际结果。workflow_dispatch 文件必须先正式进入
-默认分支 main，才能执行远端手动事件。仅 live job 使用固定 `ci-acceptance` Environment
-及其审批、测试模型配置；scanner job 不读取模型凭据，也不依赖该 Environment。管理员只需配置 main/Environment 的审批人与允许的测试配置，不在
-文档或 workflow 中代为配置 secrets、Environment 或分支保护。未获 push/dispatch
-授权、未触发的远端自动或手动 gate 分别记录 `BLOCKED` / `NOT_REQUESTED`，绝不能用
-本地或静态收据替代。
+Der automatische Workflow läuft bei Pushes auf alle Branches und bei PRs gegen `main`; Fork-PRs erhalten
+keine Secrets. Echte Live- und Scanner-Läufe gibt es nur per `workflow_dispatch` und nur auf main: Der
+Preflight friert zuerst die main-SHA ein, nachfolgende Jobs checken genau diese SHA aus. Die Summary prüft
+SHA, vollständige Zähler, Befehl, Exit-Code und nicht leeres Log der tatsächlichen Quittung; der Scanner
+braucht zusätzlich zwei Stufen, tatsächliche Beobachtungen und eine erfolgreiche Bereinigung; ein separat
+geschriebener PASSED-Wrapper ersetzt kein echtes Ergebnis. Eine workflow_dispatch-Datei muss zuerst
+regulär im Standardbranch main liegen, bevor manuelle Remote-Ereignisse möglich sind. Nur der Live-Job
+verwendet das feste Environment `ci-acceptance` mit dessen Freigabe und Testmodellkonfiguration; der
+Scanner-Job liest keine Modellzugangsdaten und hängt nicht von diesem Environment ab. Administratoren
+konfigurieren nur Freigabeberechtigte für main/Environment und die erlaubte Testkonfiguration; Secrets,
+Environments oder Branch-Schutz werden weder in der Dokumentation noch im Workflow stellvertretend
+eingerichtet. Fehlt die Berechtigung für push/dispatch oder wurde ein automatisches bzw. manuelles
+Remote-Gate nicht ausgelöst, wird `BLOCKED` bzw. `NOT_REQUESTED` erfasst; lokale oder statische
+Quittungen ersetzen das nie.
 
 ## Owned CAPA outcome-review acceptance (Task 7)
 
@@ -212,68 +230,94 @@ unchanged. The diagnostic helper lives only in `frontend/e2e/helpers/` and is
 shared with focused unit tests, not shipped as application behavior.
 
 
-### R5 D5 必选验收
+### Pflichtabnahme R5 D5
 
-2026-11-15 Responses增量：固定目录新增配对协议迁移/兼容性8节点及原生Responses链路10节点，
-当前为portable migration37、native API68、native browser2，共107必选节点。普通CI仍使用
-确定性模型；真实OpenAI专用凭据只注入经批准的独立CLOUD试用后端，不能进入CI、Vite或插件环境。
+Responses-Erweiterung vom 2026-11-15: Der feste Katalog enthält zusätzlich 8 Knoten für Migration und
+Kompatibilität des Paarprotokolls sowie 10 Knoten für die native Responses-Kette; aktuell sind es
+portable migration 37, native API 68 und native browser 2, insgesamt 107 Pflichtknoten. Die normale CI
+verwendet weiterhin ein deterministisches Modell; echte dedizierte OpenAI-Zugangsdaten werden nur in
+ein freigegebenes, separates CLOUD-Versuchs-Backend injiziert und gelangen nie in CI, Vite oder
+Plugin-Umgebungen.
 
-R5 过程/模型/迁移节点列在 `backend/tests/ci/r5_required.py`，portable api 必须执行迁移，r5-api 必须执行原生过程/模型；
-`test_r5_d5_ui.py` 与 `test_r5_d5_browser.py` 在 r5-browser 层执行各自真实 Chromium spec。
-runner 按 JUnit classname/name 核对固定节点集合、重复、失败及跳过，不能用收集成功或
-普通层其他通过项替代。选择整个 tests 或相应文件时合同生效；单独节点调试应直接用
-pytest_bootstrap，不以部分调试收据作为整层通过。修改参数化节点时同步更新固定目录和
-`test_layer_selection.py` 的实际收集/分层校验。
+R5-Prozess-, Modell- und Migrationsknoten stehen in `backend/tests/ci/r5_required.py`; portable api muss
+die Migrationen ausführen, r5-api die nativen Prozess-/Modellknoten. `test_r5_d5_ui.py` und
+`test_r5_d5_browser.py` führen in der Schicht r5-browser jeweils ihre echte Chromium-Spec aus. Der
+Runner gleicht die feste Knotenmenge anhand von JUnit classname/name ab, einschließlich Duplikaten,
+Fehlschlägen und Skips; erfolgreiches Sammeln oder andere bestandene Tests der normalen Schichten ersetzen
+das nicht. Der Vertrag gilt, wenn das gesamte tests-Verzeichnis oder die betreffenden Dateien ausgewählt
+werden; Einzelknoten werden direkt mit pytest_bootstrap debuggt, und Teilquittungen aus dem Debugging
+gelten nicht als bestandene Schicht. Bei Änderungen an parametrisierten Knoten den festen Katalog und die
+tatsächliche Sammlungs-/Schichtprüfung in `test_layer_selection.py` mit aktualisieren.
 
-普通 API/browser child 使用现有环境白名单，清空 provider/embedding 配置，丢弃 R5 平台
-凭据和私有 pilot 路径；R5 fixture 仅创建合成回环模型和专用短期沙箱批准，不读取真实
-部署配置。受控沙箱实际执行依赖 Darwin 的 sandbox-exec；不支持的主机继续拒绝，不能
-以 skip 代替 R5 通过。当前 Ubuntu CI 不构成 Darwin 试点执行证据；完整 R5 门禁须在
-已登记专用 PostgreSQL、已安装 Chromium 和 Darwin 执行器的授权主机运行。
+Normale API-/Browser-Unterprozesse verwenden die bestehende Umgebungs-Allowlist, leeren die
+Provider-/Embedding-Konfiguration und verwerfen R5-Plattformzugangsdaten und private Pilotpfade; die
+R5-Fixture erzeugt nur ein synthetisches Loopback-Modell und eine dedizierte kurzlebige Sandbox-Freigabe
+und liest keine echte Deployment-Konfiguration. Die kontrollierte Sandbox benötigt zur tatsächlichen
+Ausführung sandbox-exec unter Darwin; nicht unterstützte Hosts lehnen weiterhin ab, und ein Skip ersetzt
+kein bestandenes R5. Die aktuelle Ubuntu-CI ist kein Nachweis für eine Darwin-Pilotausführung; das
+vollständige R5-Gate muss auf einem freigegebenen Host mit registrierter dedizierter PostgreSQL,
+installiertem Chromium und Darwin-Executor laufen.
 
-新层复跑仍用同一验证资源、串行数据库验收。原始 HTTP/浏览器日志、临时证书、数据库
-连接和策略文件保留在私有目录；交付记录只含命令、节点、计数、版本和安全控制引用。
-真实 LOCAL/CLOUD 模型试用均待登记端点和专用凭据，不因确定性回环通过而勾选。
+Wiederholungen der neuen Schichten verwenden dieselbe geprüfte Ressource und eine serielle
+Datenbankabnahme. Rohe HTTP-/Browser-Logs, temporäre Zertifikate, Datenbankverbindungen und
+Richtliniendateien bleiben in privaten Verzeichnissen; Übergabeprotokolle enthalten nur Befehle, Knoten,
+Zähler, Versionen und Verweise auf Sicherheitskontrollen. Echte LOCAL-/CLOUD-Modellversuche warten auf
+registrierte Endpunkte und dedizierte Zugangsdaten und werden nicht wegen eines bestandenen
+deterministischen Loopbacks abgehakt.
 
 
-`ci_r5_native` 明确分离原生测试。portable api/browser 都排除此标记；专门
-`r5-api`/`r5-browser` 用固定目录逐项要求真实执行。Darwin 上 `make check` 自动加
-`check-r5-api`，`make check-browser` 自动加 `check-r5-browser`，也可用
-`make check-r5-native` 串行运行两层。unsupported host 的显式 native 入口直接失败，
-不访问数据库或做环境跳过；其行为有离线测试。
+`ci_r5_native` trennt native Tests ausdrücklich ab. Portable api/browser schließen diesen Marker aus; die
+eigenen Schichten `r5-api`/`r5-browser` verlangen anhand des festen Katalogs die tatsächliche Ausführung
+jedes Knotens. Unter Darwin ergänzt `make check` automatisch `check-r5-api` und `make check-browser`
+automatisch `check-r5-browser`; alternativ führt `make check-r5-native` beide Schichten seriell aus. Auf
+nicht unterstützten Hosts schlägt der explizite native Einstieg direkt fehl, ohne Datenbankzugriff oder
+Umgebungs-Skip; dieses Verhalten ist offline getestet.
 
-R5 macOS试点使用独立手动工作流 `.github/workflows/r5-native.yml`（`R5 macOS pilot acceptance`），
-只接受main上的 `workflow_dispatch`；普通PR及main push的 `Test OpenQMS` 不再派发此job。
-普通Linux后端、浏览器、迁移、权限及SDK检查继续运行，既有8项PR必需检查保持不变。
-这项调整针对部署目标为Linux的常规CI，不改变R5受控执行器仍限Darwin/dev、默认关闭的边界。
+Der R5-macOS-Pilot verwendet den separaten manuellen Workflow `.github/workflows/r5-native.yml`
+(`R5 macOS pilot acceptance`) und akzeptiert nur `workflow_dispatch` auf main; `Test OpenQMS` startet
+diesen Job bei normalen PRs und main-Pushes nicht mehr. Normale Linux-Prüfungen für Backend, Browser,
+Migration, Berechtigungen und SDK laufen weiter; die bestehenden 8 Pflichtchecks für PRs bleiben
+unverändert. Diese Anpassung betrifft die reguläre CI für das Linux-Deployment-Ziel und ändert nichts
+daran, dass der kontrollierte R5-Executor auf Darwin/dev beschränkt und standardmäßig deaktiviert ist.
 
-工作流进入main后，需要验收macOS试点时手动运行：
+Liegt der Workflow in main, wird er für eine Abnahme des macOS-Piloten manuell gestartet:
 
 ```bash
 gh workflow run r5-native.yml --ref main --repo Open-Industry-System/OpenQMS
 ```
 
-Ubuntu preflight校验事件、main ref和SHA格式，冻结本次dispatch的main提交；通过后才可分配
-`[self-hosted, macOS, openqms-r5-sandbox]`，checkout精确冻结SHA。feature分支dispatch会失败，
-不会将其代码送入native runner。手动工作流保留 `r5-native` job名、45分钟超时、原生API＋Chromium
-完整固定目录、job绑定独占PG15及失败／缺失／skip拒绝语义；没有匹配runner会等待，缺少bundle会失败。
-手动试点验收是独立结果，普通Linux CI成功不代表macOS原生验收成功，也不代表Linux沙箱已实现。
+Der Ubuntu-Preflight prüft Ereignis, main-Ref und SHA-Format und friert den main-Commit dieses Dispatch
+ein; erst danach kann `[self-hosted, macOS, openqms-r5-sandbox]` zugewiesen und genau die eingefrorene
+SHA ausgecheckt werden. Ein Dispatch auf einem Feature-Branch schlägt fehl und bringt dessen Code nicht
+auf den nativen Runner. Der manuelle Workflow behält den Jobnamen `r5-native`, 45 Minuten Timeout, den
+vollständigen festen Katalog aus nativer API + Chromium, eine jobgebundene exklusive PG15 sowie die
+Ablehnung bei Fehlschlag, Fehlen oder Skip; ohne passenden Runner wird gewartet, ohne Bundle schlägt der
+Lauf fehl. Die manuelle Pilotabnahme ist ein eigenständiges Ergebnis: Eine erfolgreiche normale
+Linux-CI bedeutet weder eine bestandene native macOS-Abnahme noch eine umgesetzte Linux-Sandbox.
 
-runner/hook 配置与远端原生执行仍为 **PENDING / NOT RUN**：需要维护者配置此专用 runner，
-预装项目依赖、setuptools79.0.1、Node、Chromium、sandbox-exec、Docker 与缓存 PG15；
-每个 job 的 hook 必须新建独占 PG15 实例，并在 `$RUNNER_TEMP/openqms-r5-native-job.json`
-写 owner-only（0600）JSON：`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`、`GITHUB_JOB`、
-`created_unix`、`owner_nonce`、`OPENQMS_TEST_RESOURCE_FILE`、`TEST_DATABASE_URL`。
-登记文件仍按现有 owned_resources 合同核容器完整 ID、owner 标签、镜像、回环端口与
-专用测试库。bundle 必须匹配实际 job，15分钟内创建，owner 与登记一致；不接受共享或
-历史资源回退。入口不读取 dotenv/真实 provider，不搜索资源、不创建或删除资源；
-每轮 hook 按自身生命周期保留或精确处置所登记资源。未配置 runner 不等于已通过。
-仅上传现有过滤日志和控制收据，bundle/登记/凭据/原始截图不上传。
+Runner-/Hook-Konfiguration und native Remote-Ausführung sind weiterhin **PENDING / NOT RUN**: Ein
+Maintainer muss diesen dedizierten Runner einrichten und Projektabhängigkeiten, setuptools 79.0.1, Node,
+Chromium, sandbox-exec, Docker und eine gecachte PG15 vorinstallieren. Der Hook jedes Jobs muss eine neue
+exklusive PG15-Instanz anlegen und unter `$RUNNER_TEMP/openqms-r5-native-job.json` ein nur für den
+Eigentümer lesbares (0600) JSON schreiben: `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_JOB`,
+`created_unix`, `owner_nonce`, `OPENQMS_TEST_RESOURCE_FILE`, `TEST_DATABASE_URL`. Die
+Registrierungsdatei wird weiterhin nach dem bestehenden owned_resources-Vertrag auf vollständige
+Container-ID, Owner-Label, Image, Loopback-Port und dedizierte Testdatenbank geprüft. Das Bundle muss zum
+tatsächlichen Job passen, innerhalb von 15 Minuten erstellt worden sein und denselben Owner wie die
+Registrierung haben; gemeinsame oder historische Ressourcen werden nicht als Ausweichlösung akzeptiert.
+Der Einstieg liest weder dotenv noch echte Provider, sucht keine Ressourcen und legt keine an oder löscht
+sie; jeder Hook behält oder entsorgt registrierte Ressourcen exakt nach seinem eigenen Lebenszyklus. Ein
+nicht konfigurierter Runner gilt nicht als bestanden. Hochgeladen werden nur die vorhandenen gefilterten
+Logs und Kontrollquittungen, nicht Bundle, Registrierung, Zugangsdaten oder rohe Screenshots.
 
 
-本轮专属库允许按已登记 owner 使用随机 `*_test` 名称；embedding/独立事务测试 helper
-保留原显式 `qms_test` 配置，并只对其他名称走现有容器归属及实际数据库身份双重核验。
-这不改变 characteristic 浏览器 bootstrap 的专用端点限制。`mig_db_url` 在创建自己的
-`qms_migtest_<32hex>_test` 后暂设 DATABASE_URL 时，helper 仅对与已登记父库同
-连接身份、无 query、相同 driver 且精确匹配 recorded URL 的情况，用验证副本恢复父库
-配置；不重写实际环境、不允许任意 sibling DB，不删除任何连接/名称或 libpq 保护。
+Die exklusive Datenbank dieser Runde darf für den registrierten Owner einen zufälligen `*_test`-Namen
+tragen; die Helper für Embedding- und unabhängige Transaktionstests behalten die ursprüngliche explizite
+`qms_test`-Konfiguration und prüfen andere Namen zusätzlich über Containerzugehörigkeit und tatsächliche
+Datenbankidentität. Die Beschränkung des characteristic-Browser-Bootstraps auf den dedizierten Endpunkt
+ändert sich dadurch nicht. Wenn `mig_db_url` nach dem Anlegen seines eigenen
+`qms_migtest_<32hex>_test` vorübergehend DATABASE_URL setzt, stellt der Helper die Konfiguration der
+Elterndatenbank nur dann aus der geprüften Kopie wieder her, wenn Verbindungsidentität, fehlende Query,
+Treiber und exakte registrierte URL mit der registrierten Elterndatenbank übereinstimmen; die tatsächliche
+Umgebung wird nicht umgeschrieben, beliebige Geschwisterdatenbanken sind nicht erlaubt, und keine
+Verbindung, kein Name und kein libpq-Schutz wird entfernt.

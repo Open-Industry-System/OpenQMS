@@ -305,7 +305,7 @@ Rollback operations are performed via `PUT /api/capa/{report_id}` updating the s
     "d4_retry_count": 3,
     "...": "..."
   },
-  "warning": "建议升级处理（D4 验证已回退 3 次）"
+  "warning": "Escalation recommended (D4 verification rolled back 3 times)"
 }
 ```
 
