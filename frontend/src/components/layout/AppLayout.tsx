@@ -323,6 +323,31 @@ export function filterMenuByPermission(
 }
 
 
+export function SharedD4AcceptanceLink({ username, roleKey, hostname }: {
+  username?: string;
+  roleKey?: string;
+  hostname: string;
+}) {
+  const { t } = useTranslation("layout");
+  const isAcceptanceAccount = (username === "engineer" && roleKey === "field_qe")
+    || (username === "manager" && roleKey === "manager");
+  if (hostname !== "test.preview.openqms.smartindustry.world" || !isAcceptanceAccount) {
+    return null;
+  }
+
+  return (
+    <a
+      href="https://d4.preview.openqms.smartindustry.world/"
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ color: "var(--qf-cyan)" }}
+    >
+      {t("header.d4Acceptance")}
+    </a>
+  );
+}
+
+
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
@@ -503,6 +528,11 @@ export default function AppLayout() {
                   </Select.Option>
                 ))}
               </Select>
+            <SharedD4AcceptanceLink
+              username={user?.username}
+              roleKey={user?.is_active ? user.role_key : undefined}
+              hostname={window.location.hostname}
+            />
             <LanguageSwitcher />
             <Dropdown
               menu={{

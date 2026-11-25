@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 from typing import NamedTuple
@@ -532,6 +533,20 @@ def shared_test_ready_notice(api, pr, run, digest):
     api.notice(pr['number'], notice)
 
 
+def shared_publication_notice(api, receipt):
+    # Called by the serialized shared-test job after it uploads its own receipt.
+    # Acceptance still discovers receipts only from completed, successful runs.
+    run_id = int(os.environ['GITHUB_RUN_ID'])
+    run = api.get(f'/actions/runs/{run_id}')
+    if (run['id'] != run_id or run['status'] != 'in_progress'
+            or not accepts_workflow_source(run, SHARED_TEST_WORKFLOW)
+            or run['head_branch'] != api.get('')['default_branch']
+            or run['repository']['full_name'] != api.repo):
+        raise ValueError('Invalid shared test publication notification source')
+    pr = api.get(f'/pulls/{receipt["pr"]}')
+    shared_test_ready_notice(api, pr, dict(run, shared_test=receipt), receipt['plan'])
+
+
 def shared_test_released_notice(api, slot):
     identity = shared_identity(slot['head'], slot['merge'], slot['plan'], slot['lease'])
     notices = bot_notices(api, slot['pr'])
@@ -551,12 +566,22 @@ def shared_test_released_notice(api, slot):
             return
     cutoff = int(datetime.now(timezone.utc).timestamp())
     marker = f'<!-- openqms-shared-test-release:{identity}:{slot["outcome"]}:{cutoff} -->'
-    if slot['outcome'] == 'switched':
-        detail = '管理员切换了测试位，本 PR 可在后续轮次继续验收。'
+    if slot['outcome'] == 'deploy-failed':
+        heading = '共享测试部署失败'
+        detail = '本轮部署失败，当前版本没有可用于验收的测试环境。失败资源已回收，修复后可重试。'
+        run_id = os.environ.get('GITHUB_RUN_ID', '')
+        repo = os.environ.get('GITHUB_REPOSITORY', '')
+        if (repo == api.repo and re.fullmatch(r'[A-Za-z0-9-]+/(?!\.\.?$)[A-Za-z0-9_.-]+', repo)
+                and re.fullmatch(r'[1-9][0-9]*', run_id)):
+            detail += f'\n\n[工作流日志](https://github.com/{repo}/actions/runs/{run_id})'
     else:
-        detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
-    api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### 共享测试位已清理\n\n{detail}'
-               f'固定测试地址将用于队列中的下一项。\n\n版本：`{slot["head"]}`')
+        heading = '共享测试位已清理'
+        if slot['outcome'] == 'switched':
+            detail = '管理员切换了测试位，本 PR 可在后续轮次继续验收。'
+        else:
+            detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
+        detail += '固定测试地址将用于队列中的下一项。'
+    api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### {heading}\n\n{detail}\n\n版本：`{slot["head"]}`')
 
 
 def shared_release_marker(api, pr, digest):
@@ -656,10 +681,14 @@ def main():
     parser.add_argument('--deployment-sha')
     parser.add_argument('--deployment-result', choices=['started', 'failure', 'cancelled'])
     parser.add_argument('--shared-test', action='store_true')
+    parser.add_argument('--shared-publication-notice', type=Path)
     parser.add_argument('--cleanup-pr', type=int)
     parser.add_argument('--cleanup-result', choices=['success', 'failure', 'cancelled'])
     args = parser.parse_args()
     api = API()
+    if args.shared_publication_notice is not None:
+        shared_publication_notice(api, json.loads(args.shared_publication_notice.read_text()))
+        return
     if args.deployment_pr is not None:
         if args.deployment_pr <= 0 or not re.fullmatch(r'[0-9a-f]{40}', args.deployment_sha or '') or args.deployment_result is None:
             parser.error('positive PR, exact SHA and deployment outcome required')
