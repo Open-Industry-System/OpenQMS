@@ -20,6 +20,7 @@ import time
 from urllib.parse import quote
 
 TRUSTED = Path(__file__).resolve().parents[1]
+MAC_PREVIEW_SSH_HOST = 'ssh-test-openqms.smartindustry.world'
 CONTROLLER_FILES = ('scripts/oracle-production-remote.py', 'scripts/check-release-tree.py', 'docker-compose.prod.yml', 'deploy/preview-edge.override.yml', 'deploy/production-edge-Caddyfile', 'compose.preview.yml', 'scripts/oracle-preview-remote.py', 'scripts/oracle-preview.py', 'scripts/oracle-preview-initialize.py', 'scripts/oracle-preview-db-tunnel.py', 'deploy/preview-Caddyfile')
 
 
@@ -57,6 +58,12 @@ def validate(source):
         if not re.fullmatch(r'[1-9][0-9]{0,8}', source.get('PREVIEW_PR', '')):
             raise ValueError('preview PR required')
         result['PREVIEW_PR'] = source['PREVIEW_PR']
+    transport = source.get('ORACLE_PREVIEW_SSH_TRANSPORT', '')
+    if transport:
+        if (transport != 'cloudflare' or result['RELEASE_KIND'] != 'preview'
+                or target != f'openqms-deploy@{MAC_PREVIEW_SSH_HOST}'):
+            raise ValueError('Cloudflare SSH requires the dedicated Mac preview target')
+        result['ORACLE_PREVIEW_SSH_TRANSPORT'] = transport
     shared_lease = source.get('ORACLE_SHARED_TEST_LEASE')
     if shared_lease:
         if result['RELEASE_KIND'] != 'preview' or not re.fullmatch('[0-9a-f]{32}', shared_lease):
@@ -70,7 +77,10 @@ def revalidate(context):
 
 
 def ssh_args(context):
-    return ['ssh', '-i', context['ORACLE_SSH_KEY'], '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + context['ORACLE_KNOWN_HOSTS'], '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
+    args = ['ssh', '-i', context['ORACLE_SSH_KEY'], '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + context['ORACLE_KNOWN_HOSTS'], '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
+    if context.get('ORACLE_PREVIEW_SSH_TRANSPORT') == 'cloudflare':
+        args += ['-o', f'ProxyCommand=/usr/local/bin/cloudflared access ssh --hostname {MAC_PREVIEW_SSH_HOST}']
+    return args
 
 
 def remote_command(context, action):

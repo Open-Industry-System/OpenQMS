@@ -1,0 +1,10 @@
+{
+	admin unix//tmp/openqms-caddy-admin.sock
+	auto_https off
+}
+
+http://:8080 {
+	respond "Shared test slot is idle." 503
+}
+
+import /etc/openqms/preview-routes/*.caddy

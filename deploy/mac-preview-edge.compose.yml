@@ -1,0 +1,20 @@
+name: openqms-mac-preview-edge
+services:
+  gateway:
+    image: caddy:2-alpine
+    container_name: openqms-web-1
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 128m
+    pids_limit: 64
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    ports: ["127.0.0.1:18080:8080"]
+    volumes:
+      - /etc/openqms/mac-preview-edge-Caddyfile:/etc/caddy/Caddyfile:ro
+      - /etc/openqms/preview-routes:/etc/openqms/preview-routes:ro
+    networks: [edge]
+networks:
+  edge:
+    external: true
+    name: openqms-preview-edge
