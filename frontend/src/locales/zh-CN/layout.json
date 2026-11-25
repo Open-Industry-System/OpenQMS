@@ -64,6 +64,7 @@
     "reviewSkills": "审查技能管理"
   },
   "header": {
+    "d4Acceptance": "D4 验收",
     "selectFactory": "选择工厂",
     "allProductLines": "全部产品线",
     "logout": "退出登录",

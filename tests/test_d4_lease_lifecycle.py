@@ -1,4 +1,5 @@
 from contextlib import nullcontext
+import hashlib
 import importlib
 import json
 from pathlib import Path
@@ -28,7 +29,7 @@ def binding():
                 report_id=str(uuid4()), issued_at=now - 1, expires_at=now + 60)
 
 
-def test_portal_credential_is_generated_once_root_private_and_bound(tmp_path, services, monkeypatch, capsys):
+def test_portal_uses_exact_slot_accounts_without_new_passwords(tmp_path, services, monkeypatch, capsys):
     _, portal, _ = services
     test_binding = binding()
     monkeypatch.setattr(portal, 'QUEUE_ROOT', tmp_path)
@@ -43,23 +44,41 @@ def test_portal_credential_is_generated_once_root_private_and_bound(tmp_path, se
     }})
     slot = dict(test_binding, head='e' * 40)
     monkeypatch.setattr(portal, 'database_binding', lambda *args: slot)
+    passwords = {'engineer': 'fixture-engineer-password', 'manager': 'fixture-manager-password'}
+    lookups = []
+
+    def shared_passwords(requested):
+        lookups.append(requested)
+        return passwords
+
+    monkeypatch.setattr(portal, 'shared_passwords', shared_passwords)
     profile = tmp_path / 'd4' / LEASE / 'profile.json'
     profile.parent.mkdir(parents=True)
+    roles = {'d4-deliver': 'field_qe', 'd4-revoke': 'manager'}
     with pytest.raises(ValueError, match='active test slot'):
-        portal.issue(profile, 'https://test.example')
-    assert not (run_root / LEASE).exists()
+        portal.issue(profile, 'https://test.example', scenario_roles=roles)
+    assert not (run_root / LEASE).exists() and not lookups
     slot.update(test_binding)
-    portal.issue(profile, 'https://test.example')
-    handoff = profile.parent / 'portal-credential.json'
-    handed = json.loads(handoff.read_text())
-    verifier = json.loads((run_root / LEASE / 'portal.json').read_text())
-    assert verifier['binding'] == test_binding and verifier['username'] == handed['username']
-    assert handed['password'] not in json.dumps(verifier)
-    assert handoff.stat().st_mode & 0o777 == 0o600
+    portal.issue(profile, 'https://test.example', scenario_roles=roles)
+    config = run_root / LEASE / 'portal.json'
+    stored = config.read_text()
+    verifier = json.loads(stored)
+    assert lookups == [test_binding]
+    assert verifier['binding'] == test_binding and verifier['scenario_roles'] == roles
+    assert set(verifier['accounts']) == set(passwords)
+    assert verifier['accounts']['engineer']['role'] == 'field_qe'
+    assert verifier['accounts']['manager']['role'] == 'manager'
+    for username, password in passwords.items():
+        entry = verifier['accounts'][username]
+        assert hashlib.scrypt(password.encode(), salt=bytes.fromhex(entry['salt']),
+                              n=16384, r=8, p=1).hex() == entry['password_digest']
+        assert password not in stored
+    assert config.stat().st_mode & 0o777 == 0o600
+    assert not (profile.parent / 'portal-credential.json').exists()
     assert capsys.readouterr() == ('', '')
     with pytest.raises(ValueError, match='already'):
-        portal.issue(profile, 'https://test.example')
-    assert json.loads(handoff.read_text()) == handed
+        portal.issue(profile, 'https://test.example', scenario_roles=roles)
+    assert config.read_text() == stored
 
 
 @pytest.mark.parametrize('delivery_network', ['legacy-bridge', 'none'])

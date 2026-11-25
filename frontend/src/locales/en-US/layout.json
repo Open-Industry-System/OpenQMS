@@ -64,6 +64,7 @@
     "reviewSkills": "Review Skills"
   },
   "header": {
+    "d4Acceptance": "D4 Acceptance",
     "selectFactory": "Select Factory",
     "allProductLines": "All Product Lines",
     "logout": "Logout",

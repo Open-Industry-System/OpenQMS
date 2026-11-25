@@ -14,10 +14,11 @@ import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-URL = 'https://test.preview.openqms.smartindustry.world'
 GATE = runpy.run_path(str(ROOT / 'scripts/oracle-ci-gate.py'))
 ACCEPTANCE = runpy.run_path(str(ROOT / 'scripts/pr-preview-acceptance.py'))
 RELEASE = runpy.run_path(str(ROOT / 'scripts/deploy-oracle-release.py'))
+ORACLE_TEST_URL = ACCEPTANCE['SHARED_TEST_URL']
+MAC_TEST_URL = ACCEPTANCE['MAC_SHARED_TEST_URL']
 
 
 def eligible_releases(api, gate_api):
@@ -112,12 +113,19 @@ def deploy(slot, run_id):
                    env=env, cwd=ROOT, check=True)
 
 
+def shared_origin():
+    if os.environ.get('ORACLE_PREVIEW_SSH_TRANSPORT') == 'cloudflare':
+        return MAC_TEST_URL
+    return ORACLE_TEST_URL
+
+
 def public_health(slot):
+    health_url = shared_origin() + '/api/health'
     until = time.monotonic() + 90
     while True:
         try:
-            with urllib.request.urlopen(URL + '/api/health', timeout=15) as response:
-                if (response.url != URL + '/api/health'
+            with urllib.request.urlopen(health_url, timeout=15) as response:
+                if (response.url != health_url
                         or response.headers.get('X-OpenQMS-Test-PR') != str(slot['pr'])
                         or response.headers.get('X-OpenQMS-Test-Version') != slot['merge']
                         or json.loads(response.read(4096)).get('status') != 'ok'):
@@ -135,7 +143,7 @@ def public_health(slot):
 def publication_receipt(api, slot):
     return dict(repository=api.repo, pr=slot['pr'], head=slot['head'],
                 sha=slot['merge'], queue_lease=slot['lease'], plan=slot['plan'],
-                expires_at=slot['expires_at'], test_roles=slot['test_roles'])
+                expires_at=slot['expires_at'], test_roles=slot['test_roles'], url=shared_origin())
 
 
 def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_file, d4_file=None):

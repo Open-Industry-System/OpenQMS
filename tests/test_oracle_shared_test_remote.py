@@ -33,6 +33,7 @@ def host(tmp_path, monkeypatch):
     monkeypatch.setattr(remote, 'state_database', lambda: db)
     monkeypatch.setattr(remote, 'time', SimpleNamespace(time=lambda: 100))
     helper = load('oracle-preview')
+    helper.mac_shared_profile = Mock(return_value=False)
     helper.ROUTES = tmp_path / 'routes'
     helper.ROUTES.mkdir()
     helper.active_prs = Mock(return_value=set())
@@ -69,14 +70,16 @@ def stage_runtime(host, slot, sha=None):
     return release
 
 
-def test_host_assigns_fixed_route_and_releases_before_next_pr(host):
+@pytest.mark.parametrize('mac, origin', [(False, remote.HOST), (True, remote.MAC_ORIGIN)])
+def test_host_assigns_fixed_route_and_releases_before_next_pr(host, mac, origin):
+    host[0].helper.mac_shared_profile.return_value = mac
     eligible = [identity(46), identity(45)]
     first = run(host, 'tick', eligible=eligible)
     assert first['pr'] == 45
     stage_runtime(host, first)
     ready = run(host, 'ready', lease=first['lease'], eligible=eligible)
     path = host[0].helper.ROUTES / 'shared-test.caddy'
-    assert remote.HOST in path.read_text()
+    assert path.read_text().startswith(origin + ' {\n')
     assert 'openqms-pr-45-web:8080' in path.read_text()
     assert f'X-OpenQMS-Test-Version "{first["merge"]}"' in path.read_text()
     assert not (path.parent / 'pr-45.caddy').exists()

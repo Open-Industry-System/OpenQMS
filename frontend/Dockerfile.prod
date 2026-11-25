@@ -5,7 +5,10 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ ./
-ENV NODE_OPTIONS=--max-old-space-size=1536
+# Leave headroom for Vite's native allocations and the esbuild subprocess.
+ENV NODE_OPTIONS="--max-old-space-size=1408 --max-semi-space-size=8" \
+    GOMEMLIMIT=128MiB \
+    GOMAXPROCS=2
 
 ARG VITE_PUBLIC_DEMO_ENABLED=false
 ARG VITE_PUBLIC_DEMO_USERNAME=
