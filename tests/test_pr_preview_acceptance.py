@@ -386,6 +386,13 @@ def test_shared_publication_requires_approved_workflow_run(shared_receipt_api, c
     assert m.publication(api, api.pr, queue_lease=api.receipt['queue_lease']) is None
 
 
+def test_shared_publication_requires_recognized_test_site(shared_receipt_api):
+    api = shared_receipt_api
+    api.receipt['url'] = 'https://unrelated.example'
+    with pytest.raises(ValueError, match='Invalid shared test publication URL'):
+        m.publication(api, api.pr, queue_lease=api.receipt['queue_lease'])
+
+
 def test_shared_acceptance_rejects_stale_lease_and_accepts_after_legacy_deadline(shared_receipt_api):
     api = shared_receipt_api
     receipt = api.receipt
@@ -470,9 +477,12 @@ def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api
     assert 'report-read: <通过、失败或受阻>' in body
 
 
-def test_shared_publication_updates_comment_in_the_deploy_run(monkeypatch, shared_receipt_api):
+@pytest.mark.parametrize('origin', [m.SHARED_TEST_URL, m.MAC_SHARED_TEST_URL])
+def test_shared_publication_updates_comment_in_the_deploy_run(monkeypatch, shared_receipt_api, origin):
     monkeypatch.setenv('GITHUB_RUN_ID', '42')
     api = shared_receipt_api
+    if origin == m.MAC_SHARED_TEST_URL:
+        api.receipt['url'] = origin
     api.run.update(status='in_progress', conclusion=None)
     m.deployment_notice(api, api.pr['number'], api.receipt['sha'], 'started', shared=True)
     assert m.publication(api, api.pr, shared=True) is None
@@ -481,7 +491,7 @@ def test_shared_publication_updates_comment_in_the_deploy_run(monkeypatch, share
 
     assert len(api.notices) == 2
     assert '### 测试环境已就绪' in api.notices[-1]
-    assert m.SHARED_TEST_URL in api.notices[-1]
+    assert origin in api.notices[-1]
     assert f'/preview-accept {api.receipt["head"]} 42 {api.receipt["plan"]} {api.receipt["queue_lease"]}' in api.notices[-1]
     assert m.publication(api, api.pr, shared=True) is None
 
@@ -635,6 +645,9 @@ def test_d4_acceptance_requires_trusted_current_artifact_and_timely_human_commen
     assert not m.verified_acceptance(api, api.pr, run, receipt['plan'], released_at=expiry - 1)
     assert m.shared_blockers(m.parse_plan(api.pr['body']), receipt, proofs, now=expiry)
 
+    envelope['url'] = m.MAC_SHARED_TEST_URL
+    assert publication()['d4_evidence'] == {}
+    del envelope['url']
     for field, value in [('queue_lease', 'd' * 32), ('sha', 'f' * 40), ('head', 'f' * 40),
                          ('plan', 'f' * 64), ('deployment_run', 9)]:
         original = envelope[field]
