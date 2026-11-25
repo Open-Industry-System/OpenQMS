@@ -1,143 +1,145 @@
-# 架构概览
+# Architekturüberblick
 
-> 2026-11-16 安全边界：管理员通过私密终端初始化，公开特权口令在普通认证与刷新时拒绝；refresh 前驱重放撤销家族，退出调用服务端撤销。平台登录限流状态仅保存在 `public.platform_login_attempts`；FMEA/控制计划/特殊特性/历史版本及 ERP/PLM 使用当前模块、工厂和产品线范围。外部连接器凭据绑定目标，ERP REST 使用运维批准的源/CIDR；导入在 multipart 之前限量，导出按文本处理公式前缀。逐项行为、升级要求与验证见[安全修复记录](development/2026-11-16-security-scan-fixes.md)。
+> Sicherheitsgrenzen vom 2026-11-16: Administratoren werden über ein privates Terminal initialisiert; öffentliche privilegierte Passwörter werden bei normaler Anmeldung und Refresh abgelehnt; ein Replay eines Refresh-Vorgängers widerruft die ganze Token-Familie, Abmelden widerruft serverseitig. Der Zustand des Plattform-Login-Rate-Limits liegt ausschließlich in `public.platform_login_attempts`; FMEA, Produktionslenkungsplan, besondere Merkmale, historische Versionen sowie ERP/PLM verwenden den aktuellen Modul-, Werks- und Produktlinienbereich. Zugangsdaten externer Konnektoren sind an ihr Ziel gebunden, ERP-REST nutzt vom Betrieb freigegebene Origins/CIDRs; Importe werden vor dem multipart-Parsing begrenzt, Exporte behandeln Formelpräfixe als Text. Einzelverhalten, Upgrade-Anforderungen und Prüfung siehe [Protokoll der Sicherheitskorrekturen](development/2026-11-16-security-scan-fixes.md).
 
-> R4b-2 受控任务附件采用单节点私有卷、先有界私有暂存、再以本地流交付 ClamAV 与无直链下载；拓扑和未批准的生产边界见[操作指南](development/agent-task-attachments.md)。
+> Kontrollierte Aufgabenanhänge (R4b-2) verwenden ein privates Volume auf einem einzelnen Knoten, zuerst begrenztes privates Staging, dann lokale Stream-Übergabe an ClamAV und Download ohne Direktlinks; Topologie und nicht freigegebene Produktionsgrenzen siehe [Betriebsanleitung](development/agent-task-attachments.md).
 
-本文档描述 OpenQMS 的系统架构、权限模型、数据流和开发约定。
+Dieses Dokument beschreibt Systemarchitektur, Berechtigungsmodell, Datenflüsse und Entwicklungskonventionen von OpenQMS.
 
 ---
 
-## 1. 技术栈
+## 1. Technologie-Stack
 
-| 层 | 技术 | 说明 |
+| Schicht | Technologie | Beschreibung |
 |----|------|------|
-| 后端 | Python 3.11 / FastAPI 0.115 | async 框架，自动生成 OpenAPI 文档 |
-| ORM | SQLAlchemy 2.0 (async) | UUID v4 主键，异步 session |
-| 数据库 | PostgreSQL 15 | JSONB 图模型存储，GIN 索引 |
-| 缓存 | Redis 7 | 已配置，暂未实现缓存逻辑 |
-| 知识图谱 | Neo4j 5 Community | FMEA/CP 关联可视化与智能推荐 |
-| AI | Ollama | 本地 LLM 推理，用于推荐引擎 |
-| 前端 | React 18 / TypeScript 5.6 | 单页应用 |
-| 构建 | Vite 5.4 | 开发服务器 + 代理 |
-| UI 框架 | Ant Design 5.21 | 中文本地化 |
-| 状态管理 | Zustand | 仅 auth 状态 |
-| 迁移 | Alembic | 手写迁移文件 |
-| 容器 | Docker Compose | 6 服务编排 |
+| Backend | Python 3.11 / FastAPI 0.115 | async-Framework, automatisch generierte OpenAPI-Dokumentation |
+| ORM | SQLAlchemy 2.0 (async) | UUID-v4-Primärschlüssel, asynchrone Session |
+| Datenbank | PostgreSQL 15 | Speicherung des JSONB-Graphmodells, GIN-Indizes |
+| Cache | Redis 7 | Konfiguriert, noch keine Cache-Logik |
+| Wissensgraph | Neo4j 5 Community | Visualisierung von FMEA/CP-Verknüpfungen und intelligente Empfehlungen |
+| KI | Ollama | Lokale LLM-Inferenz für die Empfehlungs-Engine |
+| Frontend | React 18 / TypeScript 5.6 | Single-Page-Anwendung |
+| Build | Vite 5.4 | Entwicklungsserver + Proxy |
+| UI-Framework | Ant Design 5 | Lokalisierung Deutsch (Standard) und Englisch |
+| Zustandsverwaltung | Zustand | Auth, Produktlinie, Werk |
+| Migrationen | Alembic | Handgeschriebene Migrationsdateien |
+| Container | Docker Compose | Orchestrierung der Dienste |
 
 ---
 
-## 2. 目录结构
+## 2. Verzeichnisstruktur
 
 ```
 OpenQMS/
 ├── backend/
 │   ├── app/
-│   │   ├── api/            # 路由处理器（薄层）：解析请求、调用 service、返回响应
-│   │   ├── services/       # 业务逻辑层：所有 CRUD + AuditLog 手动写入
-│   │   ├── models/         # SQLAlchemy 2.0 ORM 模型（UUID PK, DeclarativeBase）
-│   │   ├── schemas/         # Pydantic v2 请求/响应 schema
+│   │   ├── api/            # Routen-Handler (dünn): Anfrage parsen, Service aufrufen, Antwort liefern
+│   │   ├── services/       # Geschäftslogik: alle CRUD + manuelles AuditLog
+│   │   ├── models/         # SQLAlchemy-2.0-ORM-Modelle (UUID-PK, DeclarativeBase)
+│   │   ├── schemas/         # Pydantic-v2-Request-/Response-Schemas
 │   │   ├── core/
-│   │   │   ├── security.py  # bcrypt 密码哈希 + JWT/HS256 签发/验证
-│   │   │   ├── deps.py      # FastAPI 依赖注入（get_current_user 等）
-│   │   │   ├── permissions.py # Module/PermissionLevel 枚举 + require_permission 装饰器
-│   │   │   └── factory_scope.py # 工厂/产品线范围过滤
-│   │   ├── main.py          # FastAPI app 入口，路由注册，中间件
-│   │   └── seed.py          # 演示数据种子脚本
-│   ├── alembic/             # 数据库迁移
-│   └── tests/               # pytest 后端测试（含 factory_id fixtures + 多模块回归）
+│   │   │   ├── security.py  # bcrypt-Passwort-Hash + JWT/HS256 ausstellen/prüfen
+│   │   │   ├── deps.py      # FastAPI-Dependency-Injection (get_current_user usw.)
+│   │   │   ├── permissions.py # Enums Module/PermissionLevel + require_permission
+│   │   │   └── factory_scope.py # Filter für Werks-/Produktlinienbereich
+│   │   ├── i18n/            # Übersetzung von API-Meldungen je Accept-Language
+│   │   ├── main.py          # FastAPI-App-Einstieg, Routenregistrierung, Middleware
+│   │   └── seed.py          # Seed-Skript für Demodaten
+│   ├── alembic/             # Datenbankmigrationen
+│   └── tests/               # pytest-Backend-Tests (inkl. factory_id-Fixtures + modulübergreifende Regression)
 ├── frontend/
 │   ├── src/
-│   │   ├── api/             # Axios 实例 + 按模块划分的 API 函数
-│   │   ├── components/      # 布局组件（AppLayout）+ 共享组件（KPICard）
+│   │   ├── api/             # Axios-Instanz + API-Funktionen pro Modul
+│   │   ├── components/      # Layoutkomponenten (AppLayout) + gemeinsame Komponenten (KPICard)
 │   │   ├── hooks/
-│   │   │   └── usePermission.ts # 权限钩子（ModuleKey × PermissionLevel）
-│   │   ├── pages/           # 按模块组织的页面组件
+│   │   │   └── usePermission.ts # Berechtigungs-Hook (ModuleKey × PermissionLevel)
+│   │   ├── i18n/ / locales/ # Übersetzungen de-DE / en-US, tr()-Helfer
+│   │   ├── pages/           # Seitenkomponenten nach Modul
 │   │   ├── store/
-│   │   │   └── authStore.ts  # Zustand auth 状态（token, user, permissions）
+│   │   │   └── authStore.ts  # Zustand-Store für Auth (token, user, permissions)
 │   │   ├── types/
-│   │   │   └── index.ts     # 全局 TypeScript 接口
+│   │   │   └── index.ts     # Globale TypeScript-Interfaces
 │   │   ├── utils/
-│   │   │   ├── fmea.ts      # AIAG-VDA AP 查找表
-│   │   │   └── fmeaTable.ts  # graph↔spreadsheet 双向转换
-│   │   └── App.tsx          # 路由定义 + ProtectedRoute 守卫
+│   │   │   ├── fmea.ts      # AIAG-VDA-AP-Tabelle
+│   │   │   └── fmeaTable.ts  # Bidirektionale Umwandlung graph↔spreadsheet
+│   │   └── App.tsx          # Routendefinition + ProtectedRoute
 │   └── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
 └── docs/
     ├── deployment.md
-    ├── architecture.md         # 本文档
+    ├── architecture.md         # Dieses Dokument
     ├── permissions.md
     ├── user-guide.md
     ├── admin-guide.md
     ├── development.md
     └── modules/
-        └── *.md                 # 按功能域的模块手册
+        └── *.md                 # Modulhandbücher nach Fachbereich
 ```
 
 ---
 
-## 3. 请求处理流程
+## 3. Ablauf der Anfrageverarbeitung
 
 ```
-浏览器 → Vite Dev Server (:5173)
-          ↓ /api/* 代理
-        Nginx / Vite Proxy
+Browser → Vite Dev Server (:5173)
+          ↓ /api/* Proxy
+        Nginx / Vite-Proxy
           ↓
 FastAPI (:8000)
-  ├── CORS 中间件
-  ├── JWT 认证 (get_current_user)
-  ├── 权限检查 (require_permission)
-  ├── API 路由 (api/*.py)
+  ├── CORS-Middleware
+  ├── JWT-Authentifizierung (get_current_user)
+  ├── Berechtigungsprüfung (require_permission)
+  ├── API-Routen (api/*.py)
   │     ↓
-  ├── Service 层 (services/*.py)
-  │     ├── 业务逻辑
-  │     ├── AuditLog 写入
+  ├── Service-Schicht (services/*.py)
+  │     ├── Geschäftslogik
+  │     ├── AuditLog schreiben
   │     └── ValueError → HTTPException
   └── SQLAlchemy AsyncSession
         ↓
       PostgreSQL
 ```
 
-**关键约定**：
-- API 层只做请求解析和响应格式化，不包含业务逻辑。
-- Service 层承担所有业务逻辑，手动写 `AuditLog`。
-- Service 层抛出 `ValueError`，API 层转换为 `HTTPException`。
-- 列表端点统一返回 `{ items, total, page, page_size }`。
+**Wichtige Konventionen**:
+- Die API-Schicht parst nur Anfragen und formatiert Antworten, ohne Geschäftslogik.
+- Die Service-Schicht trägt die gesamte Geschäftslogik und schreibt `AuditLog` manuell.
+- Die Service-Schicht wirft `ValueError`, die API-Schicht wandelt in `HTTPException` um.
+- Listen-Endpunkte liefern einheitlich `{ items, total, page, page_size }`.
 
 ---
 
-## 4. 权限模型
+## 4. Berechtigungsmodell
 
-### 4.1 模型结构
+### 4.1 Aufbau
 
-OpenQMS 使用**角色 + 模块权限等级 + 工厂/产品线范围**三级权限模型：
+OpenQMS verwendet ein dreistufiges Modell aus **Rolle + Modul-Berechtigungsstufe + Werks-/Produktlinienbereich**:
 
 ```
-用户 → 角色 (role_key)
-      → 角色权限 (role_permissions: module × permission_level)
-      → 工厂范围 (user_factories)
-      → 产品线范围 (user_product_lines)
+Benutzer → Rolle (role_key)
+         → Rollenberechtigungen (role_permissions: module × permission_level)
+         → Werksbereich (user_factories)
+         → Produktlinienbereich (user_product_lines)
 ```
 
 ### 4.2 PermissionLevel
 
-| 等级 | 常量 | 说明 |
+| Stufe | Konstante | Beschreibung |
 |:----:|------|------|
-| 0 | NONE | 无权限，不可访问 |
-| 1 | VIEW | 只读 |
-| 2 | CREATE | 可创建 |
-| 3 | EDIT | 可编辑 |
-| 4 | APPROVE | 可审批 |
-| 5 | ADMIN | 完全控制 |
+| 0 | NONE | Keine Berechtigung, kein Zugriff |
+| 1 | VIEW | Nur lesen |
+| 2 | CREATE | Anlegen |
+| 3 | EDIT | Bearbeiten |
+| 4 | APPROVE | Freigeben |
+| 5 | ADMIN | Vollzugriff |
 
-### 4.3 前端权限钩子
+### 4.3 Berechtigungs-Hook im Frontend
 
 ```typescript
 // frontend/src/hooks/usePermission.ts
 const { canView, canCreate, canEdit, canApprove, canAdmin, isAdmin, roleKey } = usePermission();
 
-// 按模块检查
+// Prüfung pro Modul
 canView("fmea")      // PermissionLevel >= 1
 canCreate("fmea")    // PermissionLevel >= 2
 canEdit("fmea")      // PermissionLevel >= 3
@@ -145,7 +147,7 @@ canApprove("fmea")   // PermissionLevel >= 4
 canAdmin("fmea")     // PermissionLevel >= 5
 ```
 
-### 4.4 后端权限装饰器
+### 4.4 Berechtigungsprüfung im Backend
 
 ```python
 # backend/app/core/permissions.py
@@ -154,77 +156,77 @@ async def create_fmea(...):
     ...
 ```
 
-### 4.5 完整权限矩阵
+### 4.5 Vollständige Berechtigungsmatrix
 
-详见 [权限参考](permissions.md)。
+Siehe [Berechtigungsreferenz](permissions.md).
 
-### 4.6 Agent 模块权限内核与任务基础
+### 4.6 Berechtigungskern der Agent-Module und Aufgabenbasis
 
-`backend/app/services/agent/permissions/` 已有纯策略内核：模块能力声明、执行身份与插件/任务授权交集、操作审批等级与员工审批资格、投递外发判断及派生内容来源限制。8D D4 的默认 `baseline` 目录中的上下文与候选命令均为 `DENY`；`authorize()` 重新读取不可原位修改的服务端目录，拒绝未知能力及与目录声明不一致的定义；盘点见[Agent 模块能力清单](development/agent-module-capability-inventory.md)，目标行为见[模块权限设计](superpowers/specs/2026-09-26-qms-agent-module-permissions-design.md)。
+`backend/app/services/agent/permissions/` enthält einen reinen Richtlinienkern: Fähigkeitserklärungen der Module, Schnittmenge aus ausführender Identität und Plugin-/Aufgaben-Grants, Freigabestufen für Operationen und Freigabeberechtigung von Mitarbeitenden, Bewertung ausgehender Auslieferung sowie Herkunftsbeschränkungen abgeleiteter Inhalte. Im Standardkatalog `baseline` für 8D D4 sind Kontexte und Kandidatenbefehle `DENY`; `authorize()` liest den nicht an Ort und Stelle änderbaren Serverkatalog neu ein und lehnt unbekannte Fähigkeiten sowie vom Katalog abweichende Definitionen ab.
 
-能力声明由 CAPA 模块的 `capa_agent_capabilities.py` 持有；受控 profile 仅派生 summary 的审批下限，不复制或扩大写权限。无界工厂需要当前 GROUP ADMIN；无界产品线必须带明确行级豁免，模块权限不能替代范围。员工审批同时排除执行者与申请人自批。派生内容保留全部来源的版本、能力与实际投影，任一来源当前撤权整包拒绝，不得降敏投递。
+Die Fähigkeitserklärungen liegen im CAPA-Modul in `capa_agent_capabilities.py`; kontrollierte Profile leiten nur die Freigabeuntergrenze für summary ab und kopieren oder erweitern keine Schreibrechte. Ein unbegrenzter Werksbereich erfordert aktuelles GROUP ADMIN; eine unbegrenzte Produktlinie braucht eine ausdrückliche Zeilenausnahme, Modulrechte ersetzen keinen Bereich. Freigaben durch Mitarbeitende schließen Selbstfreigabe durch Ausführende und Antragstellende aus. Abgeleitete Inhalte behalten Version, Fähigkeit und tatsächliche Projektion aller Quellen; wird eine Quelle aktuell entzogen, wird das ganze Paket abgelehnt, eine herabgestufte Auslieferung ist nicht erlaubt.
 
-权限内核已用于新任务服务的只读授权派生；现有 Agent gateway、模型调用和审批 API 仍按原路径执行。租户内已有禁用默认值的插件安装与长期授权表；持久任务、运行、只读任务授权与受限消息已有独立模型和显式 public/tenant 迁移。安装注册/轮换服务仅持久化密钥 hash，返回一次性 secret；管理员身份与权限在每次写入时重读，事务由调用方提交。
+Der Berechtigungskern wird für die Nur-Lese-Autorisierung des neuen Aufgabenservices verwendet; bestehendes Agent-Gateway, Modellaufrufe und Freigabe-API laufen weiterhin über ihre ursprünglichen Pfade. Im Mandanten gibt es Tabellen für Plugin-Installationen und langfristige Grants mit deaktivierten Standardwerten; persistente Aufgaben, Läufe, Nur-Lese-Aufgaben-Grants und eingeschränkte Nachrichten haben eigene Modelle und ausdrückliche public-/tenant-Migrationen. Der Service für Installationsregistrierung/-rotation speichert nur den Schlüssel-Hash und liefert das Secret einmalig; Identität und Berechtigung des Administrators werden bei jedem Schreiben neu gelesen, den Commit übernimmt der Aufrufer.
 
-独立运行 JWT 有专门的 issuer/audience/type 与租户 generation、安装/租约 epoch，且有效期不超过当前租约；缺租约或已到期记录不能作为运行身份。多租户验证要求真正的逐事务绑定会话，每次操作重查登记、运行、任务、安装、执行用户及当前角色、工厂/产品线和两层 grant。普通用户凭据与运行凭据不互相授权。
+Ein eigenes Lauf-JWT hat eigene issuer/audience/type, Mandanten-Generation sowie Installations-/Lease-Epoch und gilt höchstens bis zum Ende der aktuellen Lease; Datensätze ohne oder mit abgelaufener Lease taugen nicht als Laufidentität. Mandantenfähige Prüfungen verlangen eine echte, je Transaktion gebundene Session; jede Operation prüft erneut Registrierung, Lauf, Aufgabe, Installation, ausführenden Benutzer mit aktueller Rolle, Werk/Produktlinie und beide Grant-Ebenen. Normale Benutzer-Zugangsdaten und Lauf-Zugangsdaten berechtigen sich nicht gegenseitig.
 
-目标绑定任务服务已接入当前角色、工厂和产品线权限，创建、列表、详情与重试均重新授权；只读 grant 固定报告，默认 DENY 生成阻塞任务，不产生运行。发起者消息追加已按任务锁分配序号、处理幂等并在锁后重新授权，正文为 restricted。用户任务/消息与管理员插件/长期 grant API 已接入，`AGENT_TASK_RUNTIME_ENABLED` 默认关闭，关闭时在租户解析前返回 404。管理员配置不改变规范能力下限。现有角色权限和旧 Agent 工具仍按原路径执行。
+Der zielgebundene Aufgabenservice ist an aktuelle Rolle, Werk und Produktlinie angebunden; Anlegen, Liste, Detail und Wiederholung autorisieren jeweils neu; Nur-Lese-Grants fixieren den Bericht, das Standard-DENY erzeugt eine blockierte Aufgabe ohne Lauf. Nachrichtenanhänge des Initiators vergeben Sequenznummern unter der Aufgabensperre, sind idempotent und autorisieren nach der Sperre erneut; der Text ist restricted. Benutzer-APIs für Aufgaben/Nachrichten sowie Administrator-APIs für Plugins/langfristige Grants sind angebunden; `AGENT_TASK_RUNTIME_ENABLED` ist standardmäßig aus und liefert dann vor der Mandantenauflösung 404. Administratorkonfiguration ändert die normierte Fähigkeitsuntergrenze nicht. Bestehende Rollenrechte und alte Agent-Werkzeuge laufen weiter über ihre ursprünglichen Pfade.
 
-R2 的领取运行与能力发现接口已实现并通过两阶段复核。安装密钥仅用于在已路由租户中领取固定安装的运行；领取和后续变更共用安装→任务→运行锁顺序，锁等待后重新核对关系和权限。领取幂等键约束当前租约，过期重领递增 epoch；能力发现只返回服务端规范条目。消息领取/连续确认也已通过两阶段复核：当前运行及租约绑定稳定批次，数据库行证明实际领取与接受，部分确认和重试不重复接受；读后再次完整授权，安全审计与状态原子提交。可信部署交付策略默认空，原始消息仅在显式许可的受控插件策略下交付。只读投影也已验收：独立连接先设置 REPEATABLE READ READ ONLY，再绑定租户；显式元数据字段与验证记录共用完整 digest。读取期间允许撤权提交，交付前完整刷新权限、核对当次获授权的目标产品线，再原子保存 receipt 和安全审计。事件和结果已验收：有界 DTO、当前运行的复数 receipt 校验、串行幂等与安全审计原子提交。自由结果固定 restricted，来源标签继承 internal。普通用户历史读取独立检查任务和全部来源的当前业务权限，不依赖插件仍启用或运行仍活跃。独立 stdlib 进程已通过实际 HTTP 两轮依赖查询、消息确认和双 receipt 事件/结果验收（22 项测试）；最终完整后端及前端类型/构建门禁通过，证据见[R2 计划](superpowers/plans/2026-09-30-agent-readonly-metadata-integration.md)。
+Lauf-Übernahme und Fähigkeitserkennung aus R2 sind umgesetzt und haben die zweistufige Prüfung bestanden. Das Installations-Secret dient nur dazu, im gerouteten Mandanten einen Lauf der festen Installation zu übernehmen; Übernahme und spätere Änderungen teilen die Sperrfolge Installation→Aufgabe→Lauf, nach dem Warten auf Sperren werden Beziehungen und Berechtigungen erneut geprüft. Der Idempotenzschlüssel der Übernahme bindet die aktuelle Lease, eine erneute Übernahme nach Ablauf erhöht den Epoch; die Fähigkeitserkennung liefert nur normierte Servereinträge. Nachrichtenübernahme und fortlaufende Bestätigung haben die zweistufige Prüfung ebenfalls bestanden: Aktueller Lauf und Lease binden stabile Stapel, Datenbankzeilen belegen tatsächliche Übernahme und Annahme, Teilbestätigungen und Wiederholungen akzeptieren nichts doppelt; nach dem Lesen wird erneut vollständig autorisiert, Sicherheitsaudit und Status werden atomar committet. Die vertrauenswürdige Deployment-Auslieferungsrichtlinie ist standardmäßig leer; Originalnachrichten werden nur unter ausdrücklich erlaubter kontrollierter Plugin-Richtlinie ausgeliefert. Die Nur-Lese-Projektion ist abgenommen: Eine separate Verbindung setzt zuerst REPEATABLE READ READ ONLY und bindet dann den Mandanten; explizite Metadatenfelder und Verifizierungsdatensätze teilen einen vollständigen Digest. Während des Lesens sind Rechteentzüge erlaubt; vor der Auslieferung werden Berechtigungen vollständig aufgefrischt, die Produktlinie des jeweils autorisierten Ziels geprüft und dann Receipt und Sicherheitsaudit atomar gespeichert. Ereignisse und Ergebnisse sind abgenommen: begrenzte DTOs, Prüfung mehrerer Receipts des aktuellen Laufs, serielle Idempotenz und atomarer Commit des Sicherheitsaudits. Freie Ergebnisse sind fest restricted, Herkunftslabels erben internal. Historisches Lesen durch normale Benutzer prüft Aufgabe und alle Quellen unabhängig auf aktuelle Fachberechtigung und hängt nicht davon ab, dass das Plugin noch aktiv oder der Lauf noch aktiv ist. Ein eigenständiger stdlib-Prozess hat über echtes HTTP zwei abhängige Abfragerunden, Nachrichtenbestätigung und Ereignis/Ergebnis mit doppeltem Receipt abgenommen (22 Tests); die abschließenden vollständigen Backend- und Frontend-Gates (Typprüfung/Build) sind bestanden.
 
-R3 的控制幂等、只读检查点/receipt 关联、任务活动序号及运行恢复引用模型和两条 v4 增量迁移已验收；历史任务记录确定性回填，运行创建不被误标为领取。活动记录服务已验收：初始输入/运行创建及有效领取、消息追加、ACK、事件和结果与其活动指针原子提交，幂等重试不重复；消息实际批次领取会持久化 claimed 状态。用户暂停/继续/取消和插件 completed/failed 完成接口已验收，控制原子更新状态、epoch、租约、活动指针和审计；成功完成在 TASK 锁内核对没有未确认输入及接受前缀一致，控制/完成写入前重验当前权限。只读检查点保存、已确认输入分页重读、用户当前来源授权的历史浏览及最新安全检查点重开已验收；重开原子停止旧运行并建立继承接受水位的新运行，重新领取后读取当前元数据，旧 receipt 不用于新运行输出。当前来源活动窗口与安装目录已验收：窗口绑定本轮 W，逐对象及末尾重新核对全部实际来源，任一来源失效整页拒绝；安装目录重验实际目标、固定版本安装和授权。统一侧栏已验收：AppLayout 持有固定目标的任务选择，CAPA 仅通过显式动作创建；用户 API 的两页轮询按本轮边界整体替换，关闭、隐藏、身份变化或拒绝时撤回内容，重试保持原幂等键及参数；状态与证据见[R3 计划](superpowers/plans/2026-10-01-agent-sidebar-readonly-controls.md)。 R3 领取响应提供接受水位与恢复检查点标识；独立 stdlib 样例先重读已确认前缀，再读取当前元数据，以新 epoch 的幂等键生成输出。真实进程与八个浏览器场景通过两阶段复核，取消保留未确认消息的 queued/claimed 投递区分及原批次证明。整片代码复核通过，R3 最终冻结后端2731 passed / 4 skipped / 3 xfailed / 2 xpassed，前端78项及类型/构建通过。默认关闭与可信交付边界保持不变。
+Steuerungs-Idempotenz, Nur-Lese-Checkpoint/Receipt-Verknüpfung, Aktivitätssequenzen und das Referenzmodell für Laufwiederaufnahme aus R3 sowie zwei v4-Inkrementmigrationen sind abgenommen; historische Aufgaben werden deterministisch nachgefüllt, Laufanlage wird nicht fälschlich als Übernahme markiert. Der Aktivitätsservice ist abgenommen: Anfangseingabe/Laufanlage und gültige Übernahme, Nachrichtenanhang, ACK, Ereignisse und Ergebnisse werden mit ihrem Aktivitätszeiger atomar committet, idempotente Wiederholungen ohne Duplikate; die tatsächliche Stapelübernahme speichert den Status claimed. Pausieren/Fortsetzen/Abbrechen durch Benutzer und completed/failed durch Plugins sind abgenommen; Steuerungen aktualisieren Status, Epoch, Lease, Aktivitätszeiger und Audit atomar; ein erfolgreicher Abschluss prüft unter der TASK-Sperre, dass keine unbestätigten Eingaben vorliegen und das akzeptierte Präfix konsistent ist; vor dem Schreiben von Steuerung/Abschluss werden aktuelle Berechtigungen erneut geprüft. Speichern von Nur-Lese-Checkpoints, seitenweises Neulesen bestätigter Eingaben, historisches Durchsuchen mit aktueller Quellautorisierung des Benutzers und Wiederöffnen ab dem neuesten sicheren Checkpoint sind abgenommen; das Wiederöffnen stoppt atomar den alten Lauf und legt einen neuen mit geerbtem Annahme-Wasserstand an, liest nach erneuter Übernahme die aktuellen Metadaten, und alte Receipts werden nicht für Ausgaben des neuen Laufs verwendet. Aktivitätsfenster über aktuelle Quellen und Installationskatalog sind abgenommen: Das Fenster bindet die aktuelle Runde W, prüft pro Objekt und am Ende alle tatsächlichen Quellen erneut, und eine ungültige Quelle lehnt die ganze Seite ab; der Installationskatalog prüft tatsächliches Ziel, Installation der festen Version und Autorisierung erneut. Die einheitliche Seitenleiste ist abgenommen: AppLayout hält die Aufgabenauswahl mit festem Ziel, CAPA legt nur über eine ausdrückliche Aktion an; das zweiseitige Polling der Benutzer-API ersetzt pro Runde vollständig, Schließen, Ausblenden, Identitätswechsel oder Ablehnung ziehen Inhalte zurück, Wiederholungen behalten Idempotenzschlüssel und Parameter. Die Übernahmeantwort von R3 liefert Annahme-Wasserstand und Kennung des Wiederaufnahme-Checkpoints; das eigenständige stdlib-Beispiel liest zuerst das bestätigte Präfix neu, dann die aktuellen Metadaten, und erzeugt Ausgaben mit Idempotenzschlüsseln des neuen Epochs. Echte Prozesse und acht Browser-Szenarien haben die zweistufige Prüfung bestanden; Abbrechen erhält die Unterscheidung queued/claimed unbestätigter Nachrichten und den ursprünglichen Stapelnachweis. Die Code-Prüfung des gesamten Abschnitts ist bestanden; R3 eingefroren mit Backend 2731 passed / 4 skipped / 3 xfailed / 2 xpassed, Frontend 78 Tests sowie Typprüfung/Build bestanden. Standardabschaltung und Grenzen der vertrauenswürdigen Auslieferung bleiben unverändert.
 
-R4a 的元数据本地受控试用已实现：lifespan 一次加载严格安全文件为冻结策略，`get_db` 只传递真实 app-state 引用，缺失引用默认空策略。规范目录 profile 不可变，只有当前 dev 租户/generation、安装/epoch、执行人和报告坐标精确匹配才选择 `local_metadata_v1`；仅 summary 为 DIRECT，默认 baseline 和命令仍 DENY。正常管理员有界 grant、用户安装目录、单报告任务派生及每次运行授权共用此选择；策略不能替代当前身份、业务范围、manifest 和两层 grant。
+Der lokale kontrollierte Metadaten-Versuch aus R4a ist umgesetzt: lifespan lädt einmalig eine strikte Sicherheitsdatei als eingefrorene Richtlinie, `get_db` reicht nur eine echte app-state-Referenz weiter, fehlende Referenzen ergeben standardmäßig eine leere Richtlinie. Das Profil des normierten Katalogs ist unveränderlich; nur wenn aktueller dev-Mandant/Generation, Installation/Epoch, ausführende Person und Berichtskoordinaten exakt übereinstimmen, wird `local_metadata_v1` gewählt; nur summary ist DIRECT, Standard-Baseline und Befehle bleiben DENY. Begrenzte Grants regulärer Administratoren, Installationskatalog der Benutzer, Ableitung von Einzelberichtsaufgaben und die Autorisierung jedes Laufs teilen diese Auswahl; die Richtlinie ersetzt weder aktuelle Identität noch Fachbereich, Manifest oder die beiden Grant-Ebenen.
 
-试用 JWT 绑定声明 SHA-256，租约与令牌到期均不超过策略有效期，锁后与最终交付重新授权。永久撤销在安装锁中原子关闭、换随机不返回密钥 hash、递增 epoch 及审计；旧密钥/JWT/声明不能通过再 enabled 恢复，历史仍按当前业务/来源授权读取。显式 local_metadata 的入口在早期关闭 404 后、租户/body/数据库前检查真实回环 peer，拒绝 forwarded headers。固定 CLI 只运行审计过的 stdlib worker 字节，私有凭据文件、最小环境、输出/时间上限和自有子进程回收，不提供模型调用、正文/附件、业务写入或 OS/生产隔离。正常配置下进程与 Chromium 聚焦验收已通过；整片冻结门禁证据见[R4a 台账](superpowers/plans/2026-10-02-agent-metadata-local-trial.md)，运维流程见[本地试用指南](development/agent-local-trial.md)。默认关闭，R4b/生产门禁独立。
+Das Versuchs-JWT bindet den SHA-256 der Erklärung; Lease und Token laufen höchstens bis zum Ende der Richtliniengültigkeit; nach der Sperre und vor der abschließenden Auslieferung wird erneut autorisiert. Ein dauerhafter Widerruf schließt unter der Installationssperre atomar, tauscht gegen einen zufälligen, nicht zurückgegebenen Schlüssel-Hash, erhöht den Epoch und auditiert; alte Schlüssel/JWTs/Erklärungen lassen sich durch erneutes Aktivieren nicht wiederherstellen, die Historie wird weiterhin nach aktueller Fach-/Quellautorisierung gelesen. Ein ausdrücklicher local_metadata-Einstieg prüft nach dem frühen 404 im deaktivierten Zustand und vor Mandant/Body/Datenbank auf einen echten Loopback-Peer und lehnt forwarded-Header ab. Das feste CLI führt nur auditierte stdlib-Worker-Bytes aus, mit privater Zugangsdatei, minimaler Umgebung, Ausgabe-/Zeitlimits und Einsammeln eigener Unterprozesse; es bietet keine Modellaufrufe, keinen Text/Anhang, keine fachlichen Schreibvorgänge und keine OS-/Produktionsisolation. Unter Normalkonfiguration ist die fokussierte Abnahme von Prozess und Chromium bestanden; Betriebsablauf siehe [Anleitung zum lokalen Versuch](development/agent-local-trial.md). Standardmäßig deaktiviert; die Gates für R4b und Produktion sind unabhängig.
 
-R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收口既有当前 namespace/角色/对象范围，运行时旧入口保留；纯规则与显式字面词只处理三个D4正文位置，输出固定restricted/未批准降敏/外发关闭。预览服务先验证预算再在捕获租户的独立RR/READ ONLY快照读取显式字段，明确FMEA引用重验当前源权限/坐标/节点，仅返回有权来源元数据，不加载图/标题/附件。源版本用域分离HMAC；最终重查当前权限和源版本后只提交安全审计，不写原文/状态/outbox。三个普通用户接口受独立默认关闭开关和内容安全输入/错误边界保护，运行凭据不适用。只读组件不缓存正文或词语，2秒可见校验、30秒本地最长生命周期，失权/不确定/关闭隐藏时撤回私密内容及词语；旧响应按身份/目标/请求轮次隔离。实际员工API/Chromium已贯通；完整冻结证据见[R4b-1台账](superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)，操作与规则限制见[员工预览指南](development/capa-d4-text-preview.md)。不扩展R4a插件目录或任何正文/模型外发，附件/SDK/部署与正式降敏门禁仍独立。
+R4b-1 ergänzt die Grundlage für interne geschwärzte D4-Textkandidaten für Mitarbeitende: `capa_current_access` bündelt die bestehenden Regeln für aktuellen Namespace, Rolle und Objektbereich, alte Laufzeiteinstiege bleiben bestehen; reine Regeln und ausdrückliche Literalbegriffe verarbeiten nur drei D4-Textpositionen, die Ausgabe ist fest restricted, ohne freigegebene Herabstufung und ohne externe Auslieferung. Der Vorschauservice prüft zuerst das Budget und liest dann die ausdrücklichen Felder in einem separaten RR/READ-ONLY-Snapshot des erfassten Mandanten; ausdrückliche FMEA-Referenzen prüfen aktuelle Quellberechtigung, Koordinaten und Knoten erneut, geliefert werden nur Metadaten berechtigter Quellen, ohne Graph, Titel oder Anhänge zu laden. Quellversionen verwenden ein domänengetrenntes HMAC; nach abschließender erneuter Prüfung von Berechtigung und Quellversion wird nur das Sicherheitsaudit committet, weder Originaltext noch Status noch Outbox werden geschrieben. Die drei Schnittstellen für normale Benutzer sind durch einen eigenen, standardmäßig deaktivierten Schalter sowie Eingabe-/Fehlergrenzen der Inhaltssicherheit geschützt; Lauf-Zugangsdaten gelten hier nicht. Die Nur-Lese-Komponente cacht weder Text noch Begriffe, prüft sichtbar alle 2 Sekunden, lebt lokal höchstens 30 Sekunden und zieht bei Rechteverlust, Unsicherheit, Schließen oder Ausblenden private Inhalte und Begriffe zurück; alte Antworten werden nach Identität, Ziel und Anfragerunde getrennt. Echte Mitarbeiter-API und Chromium sind durchgängig verbunden; Bedienung und Regelgrenzen siehe [Vorschau-Anleitung für Mitarbeitende](development/capa-d4-text-preview.md). Der R4a-Plugin-Katalog wird nicht erweitert, es gibt keine Text- oder Modellweitergabe; Anhänge, SDK, Deployment und das Gate für formale Herabstufung bleiben unabhängig.
 
-兼容的内部 `agent_read_tasks`/`agent.read_task_service` 仍限单租户：为当前用户可见的单个 CAPA 创建 24 小时任务，检查时重验当前权限和固定对象范围，支持撤销与审计；没有新增 HTTP、插件或模型入口。其对象级 Grant 不改变 baseline DENY。共享 `capa_agent_projection.build_masked_d4_projection(capa_id, *, binding=None, engine=None)` 仅接受服务端绑定/引擎：单租户显式 public，多租户要求 business binding 并核验当前登记/generation；先设置独立 REPEATABLE READ READ ONLY，再读取固定元数据和同工厂 D4 验证子记录，计算完整稳定摘要，不加载正文/附件/ORM 全量状态。运行路径在最终交付前继续复核当前权限与全部来源。
+Die kompatiblen internen `agent_read_tasks`/`agent.read_task_service` sind weiterhin auf einen Mandanten beschränkt: Für ein einzelnes, dem aktuellen Benutzer sichtbares CAPA wird eine 24-Stunden-Aufgabe angelegt; bei jeder Prüfung werden aktuelle Berechtigung und fester Objektbereich erneut geprüft, Widerruf und Audit werden unterstützt; es gibt keine neuen HTTP-, Plugin- oder Modelleinstiege. Der objektbezogene Grant ändert die Baseline-DENY nicht. Das gemeinsame `capa_agent_projection.build_masked_d4_projection(capa_id, *, binding=None, engine=None)` akzeptiert nur serverseitige Bindung/Engine: im Einzelmandanten ausdrücklich public, im Mehrmandantenbetrieb eine business-Bindung mit Prüfung von aktueller Registrierung/Generation; zuerst wird ein separates REPEATABLE READ READ ONLY gesetzt, dann werden feste Metadaten und D4-Verifizierungsunterdatensätze desselben Werks gelesen und ein vollständiger stabiler Digest berechnet, ohne Text, Anhänge oder den gesamten ORM-Zustand zu laden. Laufpfade prüfen vor der abschließenden Auslieferung weiterhin aktuelle Berechtigungen und alle Quellen.
 
-R4b D4 根因本地受控交付在默认关闭的独立 dev、真实回环 profile 下，以员工显式完整性声明、受控修订和 FMEA 来源验证为基础；插件与任务各自保存精确来源范围，并固定同一父 grant。固定只读接收器经过消息门禁读取单字段 RR/READ ONLY 有界脱敏候选，最终重验并提交独立 restricted receipt，未授模型或生产外发。用户显式的受限 restart 只保存控制坐标，从固定入口重新执行、重读当前事实并生成新 receipt；不恢复 Agent 记忆、不借旧 receipt 或扩大原授权。checkpoint/restart 与停止控制有提交前权限围栏，来源先核可见性；并发权限维护可能使旧 metadata 停止控制短暂返回 503。恢复对历史证明、修订和验证元数据逐行加锁，随历史线性增长，尚无大历史性能证据。范围、证据及资源保留状态见[本地交付指南](development/capa-d4-local-text-delivery.md)，恢复合同见[受限恢复规格](superpowers/specs/2026-11-13-agent-d4-restricted-restart-design.md)。
+Die lokale kontrollierte Auslieferung der D4-Grundursache aus R4b basiert in einem standardmäßig deaktivierten, separaten dev-Profil mit echtem Loopback auf ausdrücklicher Vollständigkeitserklärung der Mitarbeitenden, kontrollierter Revision und FMEA-Quellverifizierung; Plugin und Aufgabe speichern jeweils ihren exakten Quellbereich und fixieren denselben Eltern-Grant. Ein fester Nur-Lese-Empfänger liest über das Nachrichten-Gate einen begrenzten geschwärzten Einzelfeldkandidaten aus RR/READ ONLY, prüft abschließend erneut und committet einen eigenen restricted-Receipt; es gibt keine Modell- oder Produktionsweitergabe. Ein vom Benutzer ausdrücklich ausgelöster eingeschränkter Neustart speichert nur Steuerkoordinaten, führt über den festen Einstieg erneut aus, liest aktuelle Fakten neu und erzeugt einen neuen Receipt; er stellt weder Agent-Gedächtnis wieder her noch verwendet er alte Receipts oder erweitert die ursprüngliche Autorisierung. Checkpoint/Neustart und Stopp-Steuerung haben Berechtigungsgrenzen vor dem Commit, Quellen werden zuerst auf Sichtbarkeit geprüft; parallele Berechtigungspflege kann die Stopp-Steuerung alter Metadaten kurzzeitig mit 503 beantworten. Die Wiederaufnahme sperrt historische Nachweise, Revisionen und Verifizierungsmetadaten zeilenweise und wächst linear mit der Historie; für große Historien gibt es noch keine Performancenachweise.
 
-独立元数据 Python SDK 已实现冻结 DTO/严格 codec/stdlib 同步 transport 与十操作 client，Python ≥3.11、零运行时依赖，不导入后端或访问数据库。服务端仍逐次授权，SDK 不缓存权限、解析 run token、自动重试/续租或执行消息；单调 deadline 覆盖整次操作，finish 可能已发送而缺完整确认时仅报告 unknown 并本地阻止重发。独立 unit/自有回环/实际 wheel 隔离安装以及 normal-policy 真实 HTTP fixture 已分阶段验收；Make/自动 CI 接线已双复核，冻结提交的完整本地组合门禁已通过；远端 CI 未执行，自有测试资源已在精确所有权及零其他client/测试进程核验后清理。SDK 不改变固定 worker/hash/profile/catalog 或生产准入，不开放正文附件外发、模型调用或 R5 业务写；见[SDK 交接与限制](development/agent-metadata-python-sdk.md)和[SDK README](../sdk/python/README.md)。
+Ein eigenständiges Python-SDK für Metadaten implementiert eingefrorene DTOs, einen strikten Codec, synchronen stdlib-Transport und einen Client mit zehn Operationen, für Python ≥3.11 ohne Laufzeitabhängigkeiten; es importiert kein Backend und greift nicht auf die Datenbank zu. Der Server autorisiert weiterhin bei jedem Aufruf; das SDK cacht keine Berechtigungen, parst keine Lauf-Tokens, wiederholt oder verlängert nicht automatisch und führt keine Nachrichten aus; eine monotone Deadline deckt die ganze Operation ab; wurde finish möglicherweise gesendet, aber nicht vollständig bestätigt, wird nur unknown gemeldet und ein erneutes Senden lokal verhindert. Unit-Tests, eigene Loopback-Tests, isolierte Installation des echten Wheels und die echte HTTP-Fixture unter normal-policy sind stufenweise abgenommen; die Make-/CI-Anbindung ist doppelt geprüft, das vollständige lokale Kombinations-Gate des eingefrorenen Commits ist bestanden; Remote-CI wurde nicht ausgeführt. Das SDK ändert weder festen Worker/Hash/Profil/Katalog noch Produktionszulassung und öffnet weder Weitergabe von Text/Anhängen noch Modellaufrufe noch fachliches Schreiben in R5; siehe [SDK-README](../sdk/python/README.md).
 
-### 4.7 租户事务与独立迁移
+### 4.7 Mandantentransaktionen und unabhängige Migration
 
-多租户业务会话在每次事务开始时重新获取共享事务锁，校验 `public.tenants` 的 active 状态、schema 与 generation，然后设置仅含租户 schema 和 `pg_catalog` 的 `SET LOCAL search_path`。跨 commit 的请求和后台任务沿用捕获的 generation；维护或重建后，旧绑定拒绝继续执行。单租户模式显式使用 public；多租户模式不回退 public。
+Mandantenfähige Geschäftssitzungen holen zu Beginn jeder Transaktion erneut eine gemeinsame Transaktionssperre, prüfen in `public.tenants` Status active, Schema und Generation und setzen dann `SET LOCAL search_path` nur auf Mandantenschema und `pg_catalog`. Anfragen und Hintergrundaufgaben über mehrere Commits hinweg behalten die erfasste Generation; nach Wartung oder Neuaufbau lehnen alte Bindungen die Fortsetzung ab. Der Einzelmandantenmodus verwendet ausdrücklich public; im Mehrmandantenmodus gibt es keinen Rückfall auf public.
 
-租户维护通过固定物理连接持有会话级排他锁；同一连接建立 attempt、递增 generation、执行独立 Alembic 链和原子 seed。维护事务验证 PID、attempt、generation 与锁所有权，不再申请业务共享锁。public 平台迁移与租户迁移分别记账，租户基线 `tv001_business_snapshot` 为冻结 DDL；激活前检查对象级 schema parity、seed 和隔离。
+Mandantenwartung hält über eine feste physische Verbindung eine exklusive Sitzungssperre; auf derselben Verbindung werden ein attempt angelegt, die Generation erhöht, die eigene Alembic-Kette ausgeführt und atomar gesät. Wartungstransaktionen prüfen PID, attempt, Generation und Sperrbesitz und fordern keine gemeinsame Geschäftssperre mehr an. public-Plattformmigrationen und Mandantenmigrationen werden getrennt geführt; die Mandanten-Baseline `tv001_business_snapshot` ist eingefrorene DDL; vor der Aktivierung werden Schema-Parität auf Objektebene, Seed und Isolation geprüft.
 
-普通恢复只处理同一租户的已知完整阶段，拒绝未知或部分 schema，不删除数据。当前独立迁移 head 为 `tv010_refresh_sessions`，在 `tv009_r4b_main_merge` 汇合 `tv007_characteristic_refs` 与 `tv008_d4_recovery` 后增加按浏览器隔离的 refresh 会话表。特性分支在 tv006 的 `agent_read_tasks` 后仅增加 CP 行 JSONB 来源引用和特殊特性 UUID 来源字段；public 的 `20261108_merge_characteristics` 无 DDL 地合并 `20261101_char_refs` 与 `20261103_merge_agent_foundations`，保留两条已发布历史。tv001–tv005 和冻结 snapshot 不改写；tv006保留main已发布字节，与R4b仅说明首行不同（非DDL差异），两来源hash与语义等价另测。public 的无DDL `20261114_r4b_main_merge` 汇合 main 特性与 R4b 恢复两head；无DDL `20261114_production_merge` 再合并已部署的 `20260913_user_refresh_sessions` 分支，保留全部已发布节点。完整旧租户（含两侧旧head与 tv009）在同一维护连接、排他锁及 generation 下前向升级；旧版本 parity 仅从 public 参考扣除该版本之后已审定的累计增量（含两个特性来源列和 refresh 会话表），不隐藏租户侧额外或部分对象。tenant降级还要求每条父路径到达同一目标并在执行后核单版本；合并head仅可降共同祖先tv006及更早，拒绝拆分merge留下多head。当前 head 必须匹配最新 public 的全部业务对象，缺少或改坏来源列同样拒绝。导出测试仍绑定冻结 manifest 中的 public head，而非将新字段反写历史 snapshot。离线测试重建另有显式入口：要求精确无凭据清单、测试库、环境开关、观察到 backend/graph-worker 已停止及数据库无其他客户端；在排他锁内再次校验，并拒绝跨 schema 依赖。失败保留证据，普通恢复不能绕过未完成的重建。规格与实施记录见[独立租户迁移](superpowers/specs/2026-09-27-independent-tenant-migration-design.md)。
+Eine normale Wiederaufnahme behandelt nur bekannte vollständige Phasen desselben Mandanten, lehnt unbekannte oder teilweise Schemas ab und löscht keine Daten. Der aktuelle Head der unabhängigen Migration ist `tv010_refresh_sessions`: Nachdem `tv009_r4b_main_merge` `tv007_characteristic_refs` und `tv008_d4_recovery` zusammengeführt hat, wird eine nach Browser getrennte Tabelle für Refresh-Sessions ergänzt. Der Merkmals-Branch ergänzt nach `agent_read_tasks` aus tv006 nur JSONB-Quellreferenzen in CP-Zeilen und UUID-Quellfelder für besondere Merkmale; public `20261108_merge_characteristics` führt ohne DDL `20261101_char_refs` und `20261103_merge_agent_foundations` zusammen und bewahrt beide veröffentlichten Historien. tv001–tv005 und der eingefrorene Snapshot werden nicht umgeschrieben; tv006 behält die in main veröffentlichten Bytes und unterscheidet sich von R4b nur in der Beschreibungszeile (keine DDL-Differenz); Hash und semantische Gleichwertigkeit beider Quellen werden separat getestet. Das public `20261114_r4b_main_merge` ohne DDL führt die beiden Heads aus main-Merkmalen und R4b-Wiederaufnahme zusammen; das ebenfalls DDL-freie `20261114_production_merge` verbindet zusätzlich den bereits deployten Branch `20260913_user_refresh_sessions` und bewahrt alle veröffentlichten Knoten. Vollständige alte Mandanten (inkl. beider alter Heads und tv009) werden auf derselben Wartungsverbindung unter exklusiver Sperre und Generation vorwärts aktualisiert; die Parität alter Versionen zieht von der public-Referenz nur die geprüften kumulativen Inkremente nach dieser Version ab (einschließlich der beiden Merkmals-Quellspalten und der Refresh-Session-Tabelle) und verdeckt keine zusätzlichen oder teilweisen Objekte auf Mandantenseite. Ein Mandanten-Downgrade verlangt zusätzlich, dass jeder Elternpfad dasselbe Ziel erreicht, und prüft danach auf genau eine Version; Merge-Heads lassen sich nur auf den gemeinsamen Vorfahren tv006 oder früher herabstufen, das Aufspalten eines Merges in mehrere Heads wird abgelehnt. Der aktuelle Head muss allen Geschäftsobjekten des neuesten public entsprechen; fehlende oder beschädigte Quellspalten werden ebenfalls abgelehnt. Exporttests bleiben an den public-Head im eingefrorenen Manifest gebunden und schreiben neue Felder nicht in den historischen Snapshot zurück. Für den Offline-Neuaufbau von Tests gibt es einen eigenen ausdrücklichen Einstieg: exaktes Inventar ohne Zugangsdaten, Testdatenbank, Umgebungsschalter, beobachtetes Anhalten von backend/graph-worker und keine anderen Datenbankclients; unter der exklusiven Sperre wird erneut geprüft, und schemaübergreifende Abhängigkeiten werden abgelehnt. Bei Fehlschlag bleiben Nachweise erhalten; eine normale Wiederaufnahme kann einen unvollständigen Neuaufbau nicht umgehen.
 
-### 4.8 主线旧单报告只读基础与集成边界
+### 4.8 Alte Einzelbericht-Nur-Lese-Basis im Hauptzweig und Integrationsgrenzen
 
-`backend/app/services/capa_agent_capabilities.py` 持有 CAPA 规范只读声明；默认两能力仍为 `DENY`，summary 必须有明确目标。平台目录仅对服务端受限本地 profile 覆盖 summary 的审批下限，不接受调用方声明降权。无界工厂范围需要 `GROUP ADMIN`，无界产品线需要现场解析的显式行级豁免；豁免不代替工厂、业务模块或两层 grant。审批按能力 owner 模块权限及专门审批授权判定，同时排除执行者与请求发起人自批，`DENY` 不可批准。
+`backend/app/services/capa_agent_capabilities.py` hält die normierte Nur-Lese-Erklärung von CAPA; beide Standardfähigkeiten sind `DENY`, summary braucht ein ausdrückliches Ziel. Der Plattformkatalog überschreibt nur für serverseitige eingeschränkte lokale Profile die Freigabeuntergrenze von summary und akzeptiert keine vom Aufrufer erklärte Herabstufung. Ein unbegrenzter Werksbereich erfordert `GROUP ADMIN`, eine unbegrenzte Produktlinie eine vor Ort aufgelöste ausdrückliche Zeilenausnahme; die Ausnahme ersetzt weder Werk noch Fachmodul noch die beiden Grant-Ebenen. Freigaben werden nach den Modulrechten des Fähigkeitseigentümers und eigener Freigabeberechtigung beurteilt; Selbstfreigabe durch Ausführende und Antragstellende ist ausgeschlossen, `DENY` ist nicht freigebbar.
 
-主线保留 `AgentReadTask` / `agent_read_tasks` 及 `read_task_service`，它们是独立旧单报告基础，不是 `AgentTask` / `AgentRun` 的替代或迁移版。旧服务仅支持 `TENANT_MODE=single`，创建 24 小时授权、逐次重查范围、撤销及审计，不新增 HTTP/插件/模型入口，也不开放 baseline 能力。公共投影函数沿用运行时的独立 RR/READ ONLY 连接；多租户读取必须有服务器捕获的有效业务绑定，缺绑定不回退 public。
+Der Hauptzweig behält `AgentReadTask` / `agent_read_tasks` und `read_task_service` als eigenständige alte Einzelbericht-Basis; sie ersetzen `AgentTask` / `AgentRun` nicht und sind keine migrierte Fassung davon. Der alte Service unterstützt nur `TENANT_MODE=single`, legt 24-Stunden-Autorisierungen an, prüft den Bereich bei jedem Aufruf neu, unterstützt Widerruf und Audit, ergänzt keine HTTP-/Plugin-/Modelleinstiege und öffnet keine Baseline-Fähigkeiten. Die gemeinsame Projektionsfunktion nutzt die separate RR/READ-ONLY-Verbindung der Laufzeit; mandantenfähiges Lesen braucht eine vom Server erfasste gültige Geschäftsbindung, ohne Bindung gibt es keinen Rückfall auf public.
 
-来源标签同时保留 owner、对象、能力、实际投影和版本；历史输出在当前业务 ACL 校验通过后，才生成四键来源授权集合，并在序列化前后再次复核。保存旧 receipt 或 digest 正确不能替代当前来源授权。原两条 public Agent 迁移链由 `20261102_agent_mainline_merge` 显式合并，独立 tenant `tv006_agent_read_tasks` 补齐旧表，不修改冻结基线。详情见[本轮实施计划](superpowers/plans/2026-11-02-agent-main-semantic-integration.md)。
+Herkunftslabels bewahren Eigentümer, Objekt, Fähigkeit, tatsächliche Projektion und Version; historische Ausgaben erzeugen erst nach bestandener Prüfung der aktuellen fachlichen ACL die Vier-Schlüssel-Menge der Quellautorisierung und prüfen vor und nach der Serialisierung erneut. Gespeicherte alte Receipts oder korrekte Digests ersetzen keine aktuelle Quellautorisierung. Die beiden ursprünglichen public-Agent-Migrationsketten werden ausdrücklich über `20261102_agent_mainline_merge` zusammengeführt; das eigenständige tenant-`tv006_agent_read_tasks` ergänzt die alte Tabelle, ohne die eingefrorene Baseline zu ändern.
 
 ---
 
-## 5. 数据模型概览
+## 5. Datenmodell im Überblick
 
-### 5.1 核心表
+### 5.1 Kerntabellen
 
-| 表 | 说明 | 主键 |
+| Tabelle | Beschreibung | Primärschlüssel |
 |----|------|------|
-| `users` | 用户 | UUID |
-| `role_definitions` | 角色定义（7 个预设角色） | UUID |
-| `role_permissions` | 角色×模块×权限等级 | UUID |
-| `user_factories` | 用户-工厂范围 | UUID |
-| `user_product_lines` | 用户-产品线范围 | UUID |
-| `factories` | 工厂 | UUID |
-| `product_lines` | 产品线 | UUID |
-| `product_types` | 产品类型主数据（跨工厂共享，被 product_lines 引用） | String (code) |
-| `fmea_documents` | FMEA 文档（JSONB graph_data） | UUID |
-| `capa_eightd` | 8D/CAPA 报告 | UUID |
-| `audit_logs` | 审计日志 | UUID |
+| `users` | Benutzer | UUID |
+| `role_definitions` | Rollendefinitionen (7 vordefinierte Rollen) | UUID |
+| `role_permissions` | Rolle × Modul × Berechtigungsstufe | UUID |
+| `user_factories` | Werksbereich der Benutzer | UUID |
+| `user_product_lines` | Produktlinienbereich der Benutzer | UUID |
+| `factories` | Werke | UUID |
+| `product_lines` | Produktlinien | UUID |
+| `product_types` | Stammdaten Produkttypen (werksübergreifend, von product_lines referenziert) | String (code) |
+| `fmea_documents` | FMEA-Dokumente (JSONB graph_data) | UUID |
+| `capa_eightd` | 8D/CAPA-Berichte | UUID |
+| `audit_logs` | Audit-Log | UUID |
 
-### 5.2 FMEA 图模型
+### 5.2 FMEA-Graphmodell
 
-FMEA 使用 JSONB 列 `graph_data` 存储图结构：
+Die FMEA speichert die Graphstruktur in der JSONB-Spalte `graph_data`:
 
 ```
 {
@@ -240,169 +242,167 @@ FMEA 使用 JSONB 列 `graph_data` 存储图结构：
 }
 ```
 
-前端 `fmeaTable.ts` 负责图结构与表格行的双向转换。
+`fmeaTable.ts` im Frontend wandelt bidirektional zwischen Graphstruktur und Tabellenzeilen um.
 
-### 5.3 CAPA 8D 状态机
+### 5.3 Zustandsautomat CAPA 8D
 
-`capa_eightd` 的状态流转由 `backend/app/state_machines/eightd_state.py` 定义，严格顺序推进：
+Die Statusübergänge von `capa_eightd` definiert `backend/app/state_machines/eightd_state.py`, streng in Reihenfolge:
 
 ```
 D1_TEAM → D2_DESCRIPTION → D3_INTERIM → D4_ROOT_CAUSE → D5_CORRECTION
   → D6_VERIFICATION → D7_PREVENTION → D7_COMPLETED → D8_GATE_PENDING
   → D8_APPROVAL_PENDING → D8_CLOSURE → ARCHIVED
                      ↑                                   │
-                     └───── 驳回（reject） ──────────────┘
+                     └───── Zurückweisung (reject) ──────┘
 ```
 
-**边权限**：
-- `D8_APPROVAL_PENDING → D8_CLOSURE`、 `D8_APPROVAL_PENDING → D7_PREVENTION`（驳回）、`D8_CLOSURE → ARCHIVED` 需 `APPROVE` 权限；
-- 其余推进边（`D1_TEAM → … → D8_APPROVAL_PENDING`）需 `EDIT` 权限。
+**Rechte je Übergang**:
+- `D8_APPROVAL_PENDING → D8_CLOSURE`, `D8_APPROVAL_PENDING → D7_PREVENTION` (Zurückweisung) und `D8_CLOSURE → ARCHIVED` erfordern `APPROVE`;
+- alle übrigen Übergänge (`D1_TEAM → … → D8_APPROVAL_PENDING`) erfordern `EDIT`.
 
-**关键门控**：
-- `D4_ROOT_CAUSE → D5_CORRECTION`：至少存在一条 `is_verified=true` 的根因验证记录；
-- `D7_PREVENTION → D7_COMPLETED`：所有 D7 node-action 已处理（confirmed / skipped / auto_filled）；
-- `D7_COMPLETED → D8_GATE_PENDING → D8_APPROVAL_PENDING`：由 01.7 文档更新门禁衔接；
-- `D8_APPROVAL_PENDING → D8_CLOSURE`：需审批权限并写审计；驳回回退时记录 `reject_reason`。
+**Wichtige Gates**:
+- `D4_ROOT_CAUSE → D5_CORRECTION`: mindestens ein Verifizierungsdatensatz der Grundursache mit `is_verified=true`;
+- `D7_PREVENTION → D7_COMPLETED`: alle D7-node-actions sind bearbeitet (confirmed / skipped / auto_filled);
+- `D7_COMPLETED → D8_GATE_PENDING → D8_APPROVAL_PENDING`: über das Gate für Dokumentaktualisierungen verbunden;
+- `D8_APPROVAL_PENDING → D8_CLOSURE`: erfordert Freigaberecht und schreibt ein Audit; bei Zurückweisung wird `reject_reason` erfasst.
 
 ---
 
-## 6. 模块间数据流
+## 6. Datenflüsse zwischen Modulen
 
 ```
-FMEA ──→ 特殊特性 (SC/CC) ──→ 控制计划 (CP)
+FMEA ──→ Besondere Merkmale (SC/CC) ──→ Produktionslenkungsplan (CP)
   │                                  │
   │                                  ↓
-  └──→ 8D/CAPA ←── SCAR ←── IQC 来料检验
+  └──→ 8D/CAPA ←── SCAR ←── Wareneingangsprüfung (IQC)
         │    ↑         ↑
         │    │         │
-        └→ SPC 控制图   供应商管理
+        └→ SPC-Regelkarten   Lieferantenmanagement
              │              │
              └──→ MSA ←────┘
 
-客诉/RMA → SCAR → 供应商
+Reklamation/RMA → SCAR → Lieferant
   │                   │
   └→ FMEA ←───────────┘
 
-管理评审 ← 质量目标 ← KPI 数据
+Managementbewertung ← Qualitätsziele ← KPI-Daten
   ↑
-  ├── CAPA 状态汇总
-  ├── SPC 过程能力
-  └── 客诉/供应商指标
+  ├── CAPA-Statusübersicht
+  ├── SPC-Prozessfähigkeit
+  └── Kennzahlen Reklamationen/Lieferanten
 
-ERP/MES/PLM ──→ 看板数据同步
-知识图谱 ← FMEA/CP 关联数据
-集团管理 ← 多工厂聚合
+ERP/MES/PLM ──→ Synchronisation der Dashboard-Daten
+Wissensgraph ← Verknüpfungsdaten FMEA/CP
+Konzernverwaltung ← Aggregation mehrerer Werke
 ```
 
 ---
 
-## 7. API 文档
+## 7. API-Dokumentation
 
-FastAPI 自动生成交互式 API 文档：
+FastAPI erzeugt automatisch eine interaktive API-Dokumentation:
 
-| 文档类型 | URL | 说明 |
+| Dokumentationsart | URL | Beschreibung |
 |----------|-----|------|
-| Swagger UI | `http://localhost:8000/docs` | 交互式 API 测试界面 |
-| ReDoc | `http://localhost:8000/redoc` | 可读性更好的 API 参考 |
+| Swagger UI | `http://localhost:8000/docs` | Interaktive Testoberfläche |
+| ReDoc | `http://localhost:8000/redoc` | Besser lesbare API-Referenz |
 
-所有 API 端点路径以 `/api/` 开头，认证方式为 Bearer Token（JWT）。
+Alle API-Pfade beginnen mit `/api/`; die Authentifizierung erfolgt per Bearer-Token (JWT).
 
 ---
 
-## 8. 8D PPT 输出与审查 Skill 管理
+## 8. 8D-PPT-Ausgabe und Verwaltung der Prüf-Skills
 
-### 8.1 8D 报告 PPT 生成
+### 8.1 Erzeugung des 8D-Berichts als PPT
 
-D8 关闭后，用户可一键生成 8D 报告 PPT（python-pptx），包含封面 + D1-D8 各页 + 联动附录（根因验证证据附件）。
+Nach dem D8-Abschluss können Benutzer mit einem Klick eine 8D-Präsentation (python-pptx) erzeugen: Deckblatt + je eine Seite für D1–D8 + verknüpfter Anhang (Nachweise der Grundursachenverifizierung).
 
-**数据流**：
+**Datenfluss**:
 
 ```
-用户点击「生成 PPT」→ POST /api/capa/{id}/ppt-export
-  ├── capa_ppt_service.generate_content()  → 从 capa_eightd 各 D 步字段组装 PptContent
-  ├── capa_ppt_review_service.review_and_correct() → 规则校验 + 3 轮 LLM 审查闭环
-  │     ├── 规则校验：_validate_ppt_content() 返回 issues，触发 regenerate-from-DB
-  │     ├── 第 1 轮：LLM 审查内容质量 → 返回 issues + suggestions
-  │     ├── 第 2 轮：regenerate_from_db() → 从数据库重新生成 PptContent（非 LLM 改写）
-  │     └── 第 3 轮：LLM 最终审查 → 返回 review_status (skipped/passed/needs_review)
-  ├── capa_ppt_service.render_pptx()     → 生成 .pptx 字节流
-  └── 写入 capa_ppt_export 表 + AuditLog
+Benutzer klickt „PPT erzeugen“ → POST /api/capa/{id}/ppt-export
+  ├── capa_ppt_service.generate_content()  → PptContent aus den D-Feldern von capa_eightd zusammenstellen
+  ├── capa_ppt_review_service.review_and_correct() → Regelprüfung + Prüfschleife mit 3 LLM-Runden
+  │     ├── Regelprüfung: _validate_ppt_content() liefert issues, löst regenerate-from-DB aus
+  │     ├── Runde 1: LLM prüft die Inhaltsqualität → issues + suggestions
+  │     ├── Runde 2: regenerate_from_db() → PptContent neu aus der Datenbank (keine LLM-Umformulierung)
+  │     └── Runde 3: abschließende LLM-Prüfung → review_status (skipped/passed/needs_review)
+  ├── capa_ppt_service.render_pptx()     → .pptx-Bytestrom erzeugen
+  └── In Tabelle capa_ppt_export + AuditLog schreiben
 ```
 
-**关键表**：
+**Wichtige Tabellen**:
 
-| 表 | 说明 |
+| Tabelle | Beschreibung |
 |----|------|
-| `capa_ppt_export` | PPT 导出记录（export_id、capa_id、factory_id、tenant_schema、generated_at、generated_by、version `YYYYMMDDTHHMMSSZ`、file_url 恒为 `None`、review_status、review_rounds、review_report JSONB、created_at） |
-| `agent_review_skill` | 审查 skill 配置（skill_id、tenant_schema 租户隔离、`name` 固定为 `capa_ppt_review`、content Text、version、is_active、updated_by、updated_at、created_at；唯一性由 `COALESCE(tenant_schema, '')` 表达式索引保证） |
+| `capa_ppt_export` | PPT-Exportdatensätze (export_id, capa_id, factory_id, tenant_schema, generated_at, generated_by, version `YYYYMMDDTHHMMSSZ`, file_url stets `None`, review_status, review_rounds, review_report JSONB, created_at) |
+| `agent_review_skill` | Konfiguration der Prüf-Skills (skill_id, tenant_schema zur Mandantentrennung, `name` fest `capa_ppt_review`, content Text, version, is_active, updated_by, updated_at, created_at; Eindeutigkeit über einen Ausdrucksindex auf `COALESCE(tenant_schema, '')`) |
 
-**权限**：
-- 生成按钮：`canCreate('capa')`（L2，quality_engineer 及以上）
-- 可见状态：仅 D8_CLOSURE / ARCHIVED 状态可见
-- 管理页：`require_admin`（admin 角色专属）
+**Berechtigungen**:
+- Schaltfläche zum Erzeugen: `canCreate('capa')` (L2, ab quality_engineer)
+- Sichtbar nur in den Status D8_CLOSURE / ARCHIVED
+- Verwaltungsseite: `require_admin` (nur Rolle admin)
 
-### 8.2 审查 Skill 管理
+### 8.2 Verwaltung der Prüf-Skills
 
-审查 skill 是 LLM 审查的提示词模板，由管理员通过 `/api/admin/review-skills` 端点管理：
+Ein Prüf-Skill ist die Prompt-Vorlage der LLM-Prüfung und wird von Administratoren über die Endpunkte `/api/admin/review-skills` verwaltet:
 
-- **默认 skill**：迁移 seed 写入 `agent_review_skill` 表（name=`capa_ppt_review`），含 D1-D8 各页审查标准
-- **租户隔离**：按 `tenant_schema` 支持租户级自定义 skill 内容；`name` 固定为 `capa_ppt_review`，未找到租户配置时回退到公共默认
-- **操作**：管理员可读取/更新 skill（`GET /api/admin/review-skills`、`GET /api/admin/review-skills/{name}`、`PUT /api/admin/review-skills/{name}`，无 DELETE 端点）
-- **去重**：按 `name` + `tenant_schema` 去重，租户自定义优先于公共默认
+- **Standard-Skill**: Der Migrations-Seed schreibt ihn in die Tabelle `agent_review_skill` (name=`capa_ppt_review`), mit Prüfkriterien für die Seiten D1–D8
+- **Mandantentrennung**: Über `tenant_schema` sind mandantenspezifische Skill-Inhalte möglich; `name` ist fest `capa_ppt_review`; ohne Mandantenkonfiguration wird auf den öffentlichen Standard zurückgegriffen
+- **Operationen**: Administratoren können Skills lesen/aktualisieren (`GET /api/admin/review-skills`, `GET /api/admin/review-skills/{name}`, `PUT /api/admin/review-skills/{name}`; kein DELETE-Endpunkt)
+- **Deduplizierung**: nach `name` + `tenant_schema`; mandantenspezifische Inhalte haben Vorrang vor dem öffentlichen Standard
 
-### 8.3 3 轮 LLM 审查闭环
+### 8.3 Prüfschleife mit 3 LLM-Runden
 
-`capa_ppt_review_service` 实现「审查 → 校正 → 再审查」的 3 轮闭环（v3：校正现含 LLM 改写）：
+`capa_ppt_review_service` setzt die Schleife „prüfen → korrigieren → erneut prüfen“ in 3 Runden um (v3: die Korrektur umfasst nun eine LLM-Umformulierung):
 
-1. **审查**：调用 LLM 审查 PptContent 质量，返回 issues + suggestions
-2. **校正**（分两类）：
-   - 规则 issues（结构/数据缺口）→ `_correct_by_issues()` 重新查数据（`generate_content`）；残留短路 `needs_review`
-   - LLM 内容建议 → `_correct_by_suggestions()` 调 LLM 改写各页 section 的 value（**仅呈现层，不编造数据、不动 linked/verification 落库事实**；结构不符回退原内容）
-3. **最终审查**：LLM 确认校正后的内容，返回 `review_status`（`skipped`/`passed`/`needs_review`）
+1. **Prüfen**: LLM prüft die Qualität von PptContent und liefert issues + suggestions
+2. **Korrigieren** (zwei Arten):
+   - Regel-issues (Struktur-/Datenlücken) → `_correct_by_issues()` fragt die Daten neu ab (`generate_content`); verbleibende Probleme führen direkt zu `needs_review`
+   - Inhaltsvorschläge des LLM → `_correct_by_suggestions()` lässt das LLM die value-Werte der section je Seite umformulieren (**nur Darstellungsschicht, keine erfundenen Daten, keine Änderung an gespeicherten Fakten zu linked/verification**; bei abweichender Struktur Rückfall auf den Originalinhalt)
+3. **Abschließende Prüfung**: LLM bestätigt den korrigierten Inhalt und liefert `review_status` (`skipped`/`passed`/`needs_review`)
 
-- **v4 事实真实性保护**：结构校验只能保证页/section/label 不变，无法保证 LLM 未篡改事实值。故**首轮即通过（无校正，内容 DB-faithful）→ `passed`；任何经 LLM 校正采用的内容 → 强制 `needs_review`** + 报告标注「需人工复核确认未编造数据」（守 §70「内容来自落库数据」/§101「不编造数据」）。校正回退原内容（结构不符/破坏规则/LLM 异常）不计为「校正过」，首轮通过仍可 `passed`。
-- 内置规则校验残留 issues（结构/数据缺口，校正无法补全）→ `review_status="needs_review"` + 报告暴露 issues，短路不耗 LLM 轮次；LLM 未配置且无规则 issues → `review_status="skipped"`
-- 校正 LLM 异常 → 不上抛 500：审查已产出报告，仅自动校正失败 → 回退原内容，最终 needs_review + 报告（保留用户可见信息）
-- 审查 LLM 运行时异常（超时/鉴权/响应格式，非「未配置」）属故事 §92 FAILED 条件，不降级为 `needs_review`：异常上抛，API 层转 500 且不落 export 记录
-- 审查结果写入 `capa_ppt_export.review_status` + `review_rounds` + `review_report`
+- **v4 Schutz der Faktentreue**: Die Strukturprüfung stellt nur sicher, dass Seiten/sections/labels unverändert sind, nicht dass das LLM keine Faktenwerte verfälscht hat. Daher gilt: **besteht schon die erste Runde (ohne Korrektur, Inhalt datenbanktreu) → `passed`; jeder per LLM korrigierte und übernommene Inhalt → zwingend `needs_review`**, mit Vermerk im Bericht „manuell prüfen, dass keine Daten erfunden wurden“ (Inhalte müssen aus gespeicherten Daten stammen; Daten dürfen nicht erfunden werden). Ein Rückfall auf den Originalinhalt (Struktur passt nicht/Regel verletzt/LLM-Fehler) zählt nicht als „korrigiert“; eine in Runde 1 bestandene Prüfung kann weiterhin `passed` sein.
+- Verbleiben nach der eingebauten Regelprüfung issues (Struktur-/Datenlücken, durch Korrektur nicht behebbar) → `review_status="needs_review"`, der Bericht zeigt die issues, ohne LLM-Runden zu verbrauchen; ist kein LLM konfiguriert und gibt es keine Regel-issues → `review_status="skipped"`
+- Fehler des Korrektur-LLM führen nicht zu 500: Die Prüfung hat bereits einen Bericht erzeugt, nur die automatische Korrektur schlug fehl → Rückfall auf den Originalinhalt, abschließend needs_review + Bericht (benutzersichtbare Informationen bleiben erhalten)
+- Laufzeitfehler des Prüf-LLM (Timeout/Authentifizierung/Antwortformat, nicht „nicht konfiguriert“) gelten als FAILED und werden nicht zu `needs_review` herabgestuft: Der Fehler wird weitergereicht, die API-Schicht liefert 500 und speichert keinen Exportdatensatz
+- Prüfergebnisse werden in `capa_ppt_export.review_status` + `review_rounds` + `review_report` geschrieben
 
 ---
 
-## 9. 已知限制
+## 9. Bekannte Einschränkungen
 
-| 限制 | 说明 |
+| Einschränkung | Beschreibung |
 |------|------|
-| 测试覆盖持续完善 | 后端已迁移至 pytest（含 factory_id fixtures、多模块回归与 API 守卫测试），前端使用 vitest 覆盖关键工具与页面；部分历史模块仍需补齐 fixture |
-| 无状态 access JWT 撤销窗口 | refresh 按浏览器哈希保存并轮换；密码重置撤销 refresh 会话，已签发 access JWT 仍可持续到原过期时间。前端按身份代次协调刷新；CAPA 私有读取拒绝后不重放旧操作。 |
-| 无登录限速 | 登录接口无速率限制 |
-| Redis 未使用 | 已配置但未实现缓存逻辑 |
-| 前端权限守卫不全 | `/knowledge-graph`、`/change-impact`、MES 路由无 `requiredModule` 守卫 |
+| Testabdeckung wird laufend ausgebaut | Das Backend nutzt pytest (inkl. factory_id-Fixtures, modulübergreifender Regression und API-Schutztests), das Frontend vitest für zentrale Werkzeuge und Seiten; einige ältere Module brauchen noch Fixtures |
+| Widerrufsfenster für zustandslose Access-JWTs | Refresh-Tokens werden pro Browser gehasht gespeichert und rotiert; ein Passwort-Reset widerruft die Refresh-Sessions, bereits ausgestellte Access-JWTs bleiben bis zu ihrem ursprünglichen Ablauf gültig. Das Frontend koordiniert Refreshs nach Identitätsgeneration; abgelehnte private CAPA-Lesezugriffe wiederholen keine alten Operationen. |
+| Redis ungenutzt | Konfiguriert, aber ohne Cache-Logik |
 
 ---
 
-## 10. 分层验收与发布边界
+## 10. Geschichtete Abnahme und Release-Grenzen
 
-测试基础设施通过独立 SDK、backend、确定性 browser、frontend、显式 scanner/live 层执行；`make check`
-组合 SDK、backend 与前端检查，不隐式调用真实模型或扫描器。SDK 分 unit（Python socket audit）、自有 loopback 和实际 wheel 隔离安装三层，独立解释器与零运行时依赖，不要求数据库或 backend requirements；Python audit 不等于 OS 沙箱。backend 层先离线构建当前 SDK wheel，再经专用资源变量显式传给 normal-policy HTTP fixture，不复用旧构建回执。每层根据实际选择、JUnit/hook计数、
-退出码和过滤日志生成收据；显式gate的零选中、skip/xfail/xpass或缺失收据不得算成功。
-backend保留未配置依赖的实际skip，不把它们记为passed。
+Die Testinfrastruktur läuft über getrennte Schichten: SDK, Backend, deterministischer Browser, Frontend sowie ausdrückliche Scanner-/Live-Schichten; `make check`
+kombiniert SDK-, Backend- und Frontend-Prüfungen und ruft weder implizit echte Modelle noch Scanner auf. Das SDK ist in Unit-Tests (Python-socket-audit), eigene Loopback-Tests und isolierte Installation des echten Wheels gegliedert, mit eigenem Interpreter und ohne Laufzeitabhängigkeiten, ohne Datenbank oder Backend-requirements; ein Python-audit ist keine OS-Sandbox. Die Backend-Schicht baut zuerst offline das aktuelle SDK-Wheel und übergibt es über eine eigene Ressourcenvariable ausdrücklich an die HTTP-Fixture unter normal-policy, ohne alte Build-Quittungen wiederzuverwenden. Jede Schicht erzeugt anhand tatsächlicher Auswahl, JUnit-/Hook-Zähler,
+Exit-Code und gefilterter Logs eine Quittung; null ausgewählte Tests, skip/xfail/xpass oder fehlende Quittungen gelten bei expliziten Gates nicht als Erfolg.
+Das Backend behält tatsächliche Skips nicht konfigurierter Abhängigkeiten und zählt sie nicht als passed.
 
-公共迁移、pytest与受控fixture使用同一已核验PostgreSQL目标。核验涵盖容器完整ID、owner标签、
-镜像、绑定地址/端口及数据库身份；localhost规范为IPv4，IPv6显式使用::1，libpq额外路由参数拒绝，
-核验与实际两种驱动使用同一数字地址。known Python测试入口在应用导入前禁隐式dotenv；pure模式
-不做collection探库并拒绝项目支持的网络/数据库入口，不冒称任意进程的OS沙箱。
+Öffentliche Migrationen, pytest und kontrollierte Fixtures verwenden dasselbe geprüfte PostgreSQL-Ziel. Geprüft werden vollständige Container-ID, Owner-Label,
+Image, gebundene Adresse/Port und Datenbankidentität; localhost wird als IPv4 normiert, IPv6 verwendet ausdrücklich ::1, zusätzliche libpq-Routingparameter werden abgelehnt,
+und Prüfung sowie tatsächliche Verbindung beider Treiber nutzen dieselbe numerische Adresse. Bekannte Python-Testeinstiege sperren implizites dotenv vor dem Import der Anwendung; der pure-Modus
+fragt beim Sammeln keine Datenbank ab und lehnt vom Projekt unterstützte Netzwerk-/Datenbankeinstiege ab, ohne sich als OS-Sandbox für beliebige Prozesse auszugeben.
 
-普通/browser子进程无模型凭据或E2E_MODE回填；浏览器环境采用固定白名单并严格保留已验证的
-显式Chromium路径。scanner固定镜像、随机自有Compose项目，先导出实际证据再teardown并核余量。
-远端手动workflow仍要求main、冻结提交与显式管理员配置；本地门禁通过不代表远端已执行、生产已启用，
-也不授权main更新或部署。当前接入与新鲜结果见[CI集成交接](development/agent-ci-integration-gates.md)。
-现有SDK、正文/附件外发及业务写入的未实现部分仍按独立设计与阶段门禁推进。
+Normale und Browser-Unterprozesse erhalten weder Modellzugangsdaten noch ein nachgetragenes E2E_MODE; die Browserumgebung nutzt eine feste Allowlist und behält streng den geprüften
+ausdrücklichen Chromium-Pfad. Der Scanner verwendet ein festes Image und ein zufälliges eigenes Compose-Projekt, exportiert zuerst die tatsächlichen Nachweise, baut dann ab und prüft Rückstände.
+Manuelle Remote-Workflows verlangen weiterhin main, einen eingefrorenen Commit und ausdrückliche Administratorkonfiguration; ein bestandenes lokales Gate bedeutet weder eine Remote-Ausführung noch eine aktivierte Produktion
+und berechtigt weder zu main-Updates noch zu Deployments.
+Noch nicht umgesetzte Teile von SDK, Weitergabe von Text/Anhängen und fachlichem Schreiben folgen weiterhin eigenen Entwürfen und Phasen-Gates.
 
 
-### Oracle 发布控制器与 PR 预览
+### Oracle-Release-Controller und PR-Vorschau
 
-自动部署由默认分支上的受信任工作流读取 Test OpenQMS 的实际检查结果，验证受检提交、当前主线或 PR 合并引用、作者权限和收据计数。普通测试阶段没有部署凭据；部署阶段不在 runner 上执行 PR 的安装脚本、Makefile、迁移或应用导入。生产与预览使用独立 GitHub Environment 和绑定角色的 SSH 密钥；服务器接收器只允许固定操作并持有发布及操作锁。
+Automatische Deployments liest ein vertrauenswürdiger Workflow im Standardbranch anhand der tatsächlichen Prüfergebnisse von Test OpenQMS; er verifiziert geprüften Commit, aktuellen main- bzw. PR-Merge-Ref, Autorenrechte und Quittungszähler. Die normale Testphase hat keine Deployment-Zugangsdaten; in der Deployment-Phase werden auf dem Runner weder Installationsskripte noch Makefile, Migrationen oder Anwendungsimporte des PRs ausgeführt. Produktion und Vorschau verwenden getrennte GitHub-Environments und rollengebundene SSH-Schlüssel; der Empfänger auf dem Server erlaubt nur feste Operationen und hält Release- und Operationssperren.
 
-自动化控制器与交互式生产包装器分开保存，执行同等环境和身份校验，通过 `make deploy-release` 串行控制目标身份、迁移、准确 CI 结果确认、初始化、预检和发布。应用操作在受资源限制的容器内执行。预览使用独立数据库、密钥、卷和私有网络，只有 web 加入边缘网络；公开账号仅保留只读 Viewer。生产 Caddy 的管理入口为容器内 Unix socket，预览路由经校验后重载。生产迁移前备份，应用发布失败按已锁定镜像恢复，不自动回退数据库。
+Automatisierungs-Controller und interaktiver Produktions-Wrapper werden getrennt gehalten, führen gleichwertige Umgebungs- und Identitätsprüfungen aus und steuern über `make deploy-release` seriell Zielidentität, Migration, Bestätigung des exakten CI-Ergebnisses, Initialisierung, Preflight und Release. Anwendungsoperationen laufen in ressourcenbegrenzten Containern. Vorschauen nutzen eigene Datenbanken, Schlüssel, Volumes und private Netze; nur web tritt dem Edge-Netz bei, öffentlich bleibt nur der Nur-Lese-Viewer. Der Admin-Zugang des Produktions-Caddy ist ein Unix-Socket im Container, Vorschau-Routen werden nach Prüfung neu geladen. Vor Produktionsmigrationen wird gesichert; ein fehlgeschlagenes Anwendungs-Release wird über das gesperrte Image wiederhergestellt, die Datenbank wird nicht automatisch zurückgesetzt.
 
-实现与配置见 [自动部署指南](oracle-automation.md) 和 [服务器控制器](oracle-production-setup.md)。实现存在不代表服务器已安装或开关已启用；执行证据与剩余条件记录在 PROGRESS.md。
+Umsetzung und Konfiguration siehe [Automatisches Deployment](oracle-automation.md) und [Server-Controller](oracle-production-setup.md). Vorhandene Implementierung bedeutet nicht, dass der Server installiert oder die Schalter aktiviert sind; Nachweise und verbleibende Bedingungen stehen in PROGRESS.md.
