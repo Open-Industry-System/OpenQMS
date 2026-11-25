@@ -42,11 +42,11 @@ def epoch(value):
     return int(datetime.strptime(value, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp())
 
 
-LEGACY_HEADER = ('检查项', '操作步骤', '预期结果')
-ITEM_HEADER = ('编号', '检查项', '环境', '角色', '场景', '操作步骤', '预期结果')
+LEGACY_HEADER = ('Check', 'Steps', 'Expected result')
+ITEM_HEADER = ('ID', 'Check', 'Environment', 'Role', 'Scenario', 'Steps', 'Expected result')
 PUBLIC_SCENARIOS = {'read-only'}
 SHARED_SCENARIOS = {'write', 'd4-deliver', 'd4-revoke'}
-RESULT_LINE = re.compile(r'([a-z][a-z0-9-]{0,39})\s*[:：]\s*(通过|失败|受阻)')
+RESULT_LINE = re.compile(r'([a-z][a-z0-9-]{0,39})\s*[:：]\s*(pass|fail|blocked)')
 
 
 class AcceptanceItem(NamedTuple):
@@ -65,44 +65,44 @@ class AcceptancePlan(NamedTuple):
 
 def parse_plan(body):
     if not isinstance(body, str) or body.count(START) != 1 or body.count(END) != 1:
-        raise ValueError('补充 PR 描述中的预览验收计划（使用 PR 模板）')
+        raise ValueError('Add the preview acceptance plan to the PR description (use the PR template)')
     plan = body.split(START)[1].split(END)[0].strip()
-    if END not in body.split(START)[1] or re.search(r'请填写|待补充|(?i:\bTODO\b|\bTBD\b)', plan):
-        raise ValueError('请用具体检查项替换验收计划占位内容')
-    sections = re.split(r'^### (影响范围|验收步骤|权限与回归)\s*$', plan, flags=re.M)
-    if len(sections) != 7 or sections[1::2] != ['影响范围', '验收步骤', '权限与回归']:
-        raise ValueError('验收计划须包含影响范围、验收步骤、权限与回归')
+    if END not in body.split(START)[1] or re.search(r'Please fill in|To be completed|(?i:\bTODO\b|\bTBD\b)', plan):
+        raise ValueError('Replace the acceptance plan placeholders with concrete checks')
+    sections = re.split(r'^### (Scope|Acceptance steps|Permissions and regression)\s*$', plan, flags=re.M)
+    if len(sections) != 7 or sections[1::2] != ['Scope', 'Acceptance steps', 'Permissions and regression']:
+        raise ValueError('The acceptance plan must contain Scope, Acceptance steps and Permissions and regression')
     if any(len(sections[i].strip()) < 8 for i in [2, 6]):
-        raise ValueError('影响范围和权限与回归须说明具体检查内容')
+        raise ValueError('Scope and Permissions and regression must describe concrete checks')
     rows = [
         tuple(cell.strip() for cell in line.strip().strip('|').split('|'))
         for line in sections[4].splitlines() if line.strip().startswith('|')
     ]
     if len(rows) < 3 or len(rows) > 22 or any(len(row) != len(rows[0]) for row in rows):
-        raise ValueError('验收步骤须有完整表格和 1 至 20 条验收项')
+        raise ValueError('Acceptance steps need a complete table with 1 to 20 items')
     if rows[0] not in {LEGACY_HEADER, ITEM_HEADER}:
-        raise ValueError('验收表格列名不正确')
+        raise ValueError('The acceptance table has wrong column names')
     if not all(re.fullmatch(r':?-{3,}:?', cell) for cell in rows[1]):
-        raise ValueError('验收表格分隔行不正确')
+        raise ValueError('The acceptance table has a wrong separator row')
     if any(len(cell) < 2 for row in rows[2:] for cell in (row[-2], row[-1])):
-        raise ValueError('每条验收步骤都须填写操作和预期结果')
+        raise ValueError('Every acceptance step needs steps and an expected result')
     digest = hashlib.sha256(plan.encode()).hexdigest()
     if rows[0] == LEGACY_HEADER:
         if any(len(row[0]) < 2 for row in rows[2:]):
-            raise ValueError('每条验收步骤都须填写检查项')
+            raise ValueError('Every acceptance step needs a check')
         return AcceptancePlan(digest, (), False)
 
     items = []
     ids = set()
     for item_id, title, environment, role, scenario, _, _ in rows[2:]:
         if not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', item_id) or item_id in ids or len(title) < 2:
-            raise ValueError('验收项编号须为唯一的小写短标识，且须填写检查项名称')
+            raise ValueError('Each item ID must be a unique short lowercase identifier and each item needs a check name')
         if environment == 'public' and role == 'viewer' and scenario in PUBLIC_SCENARIOS:
             pass
         elif environment == 'shared' and role in {'field_qe', 'manager'} and scenario in SHARED_SCENARIOS:
             pass
         else:
-            raise ValueError('验收项环境、角色和场景不匹配，请使用 PR 模板中的组合')
+            raise ValueError('Item environment, role and scenario do not match; use a combination from the PR template')
         ids.add(item_id)
         items.append(AcceptanceItem(item_id, title, environment, role, scenario))
     return AcceptancePlan(digest, tuple(items), True)
@@ -121,16 +121,16 @@ def confirmation_commands(lines):
 def confirmation_rejection(comment, command, deployment_time, author, permission, independent):
     user = comment.get('user') or {}
     if user.get('type') != 'User' or permission not in {'write', 'maintain', 'admin'}:
-        return '评论人需要仓库写权限'
+        return 'The commenter needs repository write permission'
     if independent and user.get('login') == author:
-        return '本轮需要 PR 作者之外的验收人员确认'
+        return 'This round needs confirmation by a reviewer other than the PR author'
     lines = (comment.get('body') or '').splitlines()
     if command not in confirmation_commands(lines):
-        return '验收命令与当前提交、计划或测试轮次不匹配'
+        return 'The acceptance command does not match the current commit, plan or test round'
     if comment['created_at'] < deployment_time:
-        return '评论早于本轮部署，请提交一条新评论'
+        return 'The comment predates this deployment; post a new comment'
     if len('\n'.join(line for line in lines if ' '.join(line.split()) != command).strip()) < 8:
-        return '请补充实际测试结果或截图链接'
+        return 'Add actual test results or screenshot links'
     return None
 
 
@@ -191,25 +191,25 @@ def deployment_notice(api, number, sha, result, *, shared=False):
         return  # A stale job must not overwrite a new version or released notice.
     run_id = int(os.environ['GITHUB_RUN_ID'])
     url = f'https://github.com/{api.repo}/actions/runs/{run_id}'
-    phase = '测试环境正在部署' if result == 'started' else '测试环境部署未完成'
-    detail = ('CI 已通过，正在构建、迁移并验证预览环境。地址尚未就绪，请等待完成通知。'
-              if result == 'started' else '部署失败或取消，当前版本不能用于验收。请查看发布记录中的失败步骤。')
-    address = '' if shared else f'预期地址：{preview_url(number, False)}\n\n'
+    phase = 'Test environment is deploying' if result == 'started' else 'Test environment deployment not completed'
+    detail = ('CI passed; the preview environment is being built, migrated and verified. The address is not available yet; wait for the completion notice.'
+              if result == 'started' else 'Deployment failed or was cancelled; this version cannot be used for acceptance. See the failed step in the release log.')
+    address = '' if shared else f'Expected address: {preview_url(number, False)}\n\n'
     api.notice(number, f'{NOTICE}\n{deployment_marker(pr["head"]["sha"], run_id)}\n'
                f'### {phase}\n\n{detail}\n\n'
                f'{address}'
-               f'当前提交：`{pr["head"]["sha"]}`\n\n[发布记录]({url})')
+               f'Current commit: `{pr["head"]["sha"]}`\n\n[Release log]({url})')
 
 
 def deployment_notice_from_run(api, pr, run):
     sha = pr['head']['sha']
     url = f'https://github.com/{api.repo}/actions/runs/{run["id"]}'
     shared = accepts_workflow_source(run, SHARED_TEST_WORKFLOW)
-    address = '' if shared else f'\n\n预期地址：{preview_url(pr["number"], False)}'
+    address = '' if shared else f'\n\nExpected address: {preview_url(pr["number"], False)}'
     api.notice(pr['number'], f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n'
-               '### 测试环境部署未完成\n\n部署失败或取消，当前版本不能用于验收。'
+               '### Test environment deployment not completed\n\nDeployment failed or was cancelled; this version cannot be used for acceptance.'
                f'{address}'
-               f'\n\n[发布记录]({url})')
+               f'\n\n[Release log]({url})')
 
 
 def bot_notices(api, number):
@@ -245,7 +245,7 @@ def acceptance_command(pr, run, digest):
 def acceptance_template(pr, run, digest):
     lines = [acceptance_command(pr, run, digest)]
     if run.get('shared_test'):
-        lines.extend(f'{item.id}: <通过、失败或受阻>' for item in parse_plan(pr.get('body')).items)
+        lines.extend(f'{item.id}: <pass, fail or blocked>' for item in parse_plan(pr.get('body')).items)
     return '\n'.join(lines)
 
 
@@ -260,20 +260,20 @@ def ready_notice(pr, run, digest):
     url = preview_url(number, shared)
     template = acceptance_template(pr, run, digest)
     if shared:
-        validity = f'共享测试位当前用于 PR #{number}，等待人工验收。\n\n'
-        ending = '验收后会清理测试资源并切换至下一项。'
+        validity = f'The shared test slot is currently assigned to PR #{number}, awaiting manual acceptance.\n\n'
+        ending = 'After acceptance the test resources are cleaned up and the next item is deployed.'
         identity = shared_identity(sha, shared['sha'], digest, shared['queue_lease'])
         marker = f'<!-- openqms-shared-test-active:{identity} -->\n'
     else:
         validity = marker = ''
-        ending = '更新提交或验收计划后需重新确认。合并或关闭 PR 后，预览资源会自动释放。'
-    return (f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n{marker}### 测试环境已就绪\n\n'
-            f'{validity}- 测试地址：{url}\n- 当前提交：`{sha}`\n'
-            f'- 实际部署版本：`{pr["merge_commit_sha"]}`\n'
-            f'- [发布记录](https://github.com/{run["repository"]["full_name"]}/actions/runs/{run["id"]})\n\n'
-            f'完成 PR 中的验收步骤后，复制下面的模板到一条新评论，填写各项结果，并附实际测试说明或截图。\n\n'
+        ending = 'New commits or plan changes require a new confirmation. Preview resources are released automatically once the PR is merged or closed.'
+    return (f'{NOTICE}\n{deployment_marker(sha, run["id"])}\n{marker}### Test environment is ready\n\n'
+            f'{validity}- Test address: {url}\n- Current commit: `{sha}`\n'
+            f'- Deployed version: `{pr["merge_commit_sha"]}`\n'
+            f'- [Release log](https://github.com/{run["repository"]["full_name"]}/actions/runs/{run["id"]})\n\n'
+            f'After completing the acceptance steps from the PR, copy the template below into a new comment, fill in each result and attach actual test notes or screenshots.\n\n'
             f'```text\n{template}\n```\n\n'
-            f'验收状态和未通过原因会显示在 PR 检查中。 [验收检查](https://github.com/{run["repository"]["full_name"]}/pull/{number}/checks)\n\n'
+            f'Acceptance status and failure reasons are shown in the PR checks. [Acceptance check](https://github.com/{run["repository"]["full_name"]}/pull/{number}/checks)\n\n'
             f'{ending}')
 
 
@@ -282,11 +282,11 @@ def cleanup_notice(api, number, result):
     if pr['state'] != 'closed':
         raise ValueError('PR reopened; refusing stale cleanup notification')
     if result == 'success':
-        text = '预览资源已释放\n\nPR 已合并或关闭。预览路由、容器、数据卷、私网及预览 secret 文件的清理流程已完成，测试地址已停用。生产环境与共享基础设施保留。'
+        text = 'Preview resources released\n\nThe PR was merged or closed. Cleanup of preview routes, containers, volumes, private network and preview secret files has completed; the test address is disabled. Production and shared infrastructure are kept.'
     else:
-        text = '预览资源清理未完成\n\n自动清理失败或中断，请检查清理工作流并重试；当前不能确认资源已释放。'
+        text = 'Preview resource cleanup not completed\n\nAutomatic cleanup failed or was interrupted; check the cleanup workflow and retry. Release of the resources cannot be confirmed.'
     run_url = os.environ['GITHUB_SERVER_URL']+'/'+api.repo+'/actions/runs/'+os.environ['GITHUB_RUN_ID']
-    api.notice(number, f'{NOTICE}\n### {text}\n\n[清理记录]({run_url})')
+    api.notice(number, f'{NOTICE}\n### {text}\n\n[Cleanup log]({run_url})')
 
 
 def publication_receipt(api, artifact, filename='preview-publication.json'):
@@ -419,12 +419,12 @@ def result_rejection(items, lines):
     missing = [item for item in expected if item not in counts]
     unexpected = sorted(counts.keys() - set(expected))
     duplicates = [item for item in expected if counts[item] > 1]
-    failures = [f'{item}（{result}）' for item, result in matches if item in expected and result != '通过']
-    reasons = [label + ' ' + '、'.join(values) for label, values in (
-        ('缺少验收结果', missing), ('计划没有这些验收项', unexpected),
-        ('验收项重复', duplicates), ('验收项未通过', failures),
+    failures = [f'{item} ({result})' for item, result in matches if item in expected and result != 'pass']
+    reasons = [label + ' ' + ', '.join(values) for label, values in (
+        ('Missing results for', missing), ('Not in the plan:', unexpected),
+        ('Duplicate results for', duplicates), ('Failed items:', failures),
     ) if values]
-    return '。'.join(reasons) or None
+    return '. '.join(reasons) or None
 
 
 def acceptance_result(api, pr, run, digest, *, released_at=None):
@@ -436,15 +436,15 @@ def acceptance_result(api, pr, run, digest, *, released_at=None):
     if shared:
         plan = parse_plan(pr.get('body'))
         if shared['plan'] != digest:
-            return None, '验收计划已更新，等待当前计划的发布回执'
+            return None, 'The acceptance plan changed; waiting for the release receipt of the current plan'
         if blockers := shared_blockers(plan, shared, proofs):
-            return None, '。'.join(blockers)
+            return None, '. '.join(blockers)
         if not deployment_after_reopen(api, pr, run):
-            return None, 'PR 已重新打开，等待本轮预览部署'
+            return None, 'The PR was reopened; waiting for the current preview deployment'
         items = plan.items
         if proofs and released_at is None and any(
                 int(datetime.now(timezone.utc).timestamp()) >= proof['expires_at'] for proof in proofs.values()):
-            return None, '本轮 D4 专用验收回执已到期'
+            return None, 'The current dedicated D4 acceptance receipt has expired'
     latest_rejection = None
     for comment in reversed(api.pages(f'/issues/{pr["number"]}/comments')):
         user = comment.get('user') or {}
@@ -456,17 +456,17 @@ def acceptance_result(api, pr, run, digest, *, released_at=None):
         if not commands:
             continue
         if command not in commands:
-            latest_rejection = latest_rejection or '验收命令与当前提交、计划或测试轮次不匹配，请复制本轮模板'
+            latest_rejection = latest_rejection or 'The acceptance command does not match the current commit, plan or test round; copy the current template'
             continue
         if shared:
             last_edit = epoch(comment.get('updated_at') or comment['created_at'])
             if proofs and any(
                     epoch(comment['created_at']) < proof['completed_at'] or last_edit >= proof['expires_at']
                     for proof in proofs.values()):
-                latest_rejection = latest_rejection or '评论必须在本轮 D4 回执生成后、有效期内提交'
+                latest_rejection = latest_rejection or 'The comment must be posted after the current D4 receipt was issued and before it expires'
                 continue
             if released_at is not None and last_edit >= released_at:
-                latest_rejection = latest_rejection or '评论在本轮测试位回收后提交或修改'
+                latest_rejection = latest_rejection or 'The comment was posted or edited after the current test slot was released'
                 continue
         if items and (reason := result_rejection(items, lines)):
             latest_rejection = latest_rejection or reason
@@ -480,7 +480,7 @@ def acceptance_result(api, pr, run, digest, *, released_at=None):
         if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
             raise ValueError('PR changed during acceptance; rerun required')
         return comment, None
-    return None, latest_rejection or '等待有写权限的验收人员提交本轮验收评论'
+    return None, latest_rejection or 'Waiting for a reviewer with write permission to post the current acceptance comment'
 
 
 def verified_acceptance(api, pr, run, digest, *, released_at=None):
@@ -490,7 +490,7 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
 
 def shared_blockers(plan, receipt, proofs=None, *, now=None):
     if not plan.classified:
-        return ['计划需要逐项声明环境、角色和场景']
+        return ['The plan must declare environment, role and scenario for every item']
     issued_roles = receipt.get('test_roles', [])
     if (not isinstance(issued_roles, list)
             or any(role not in ('field_qe', 'manager') for role in issued_roles)):
@@ -499,11 +499,11 @@ def shared_blockers(plan, receipt, proofs=None, *, now=None):
     blockers = []
     for item in plan.items:
         if item.environment == 'shared' and item.role not in issued_roles:
-            blockers.append(f'{item.id}：需要发放本轮合成业务账号')
+            blockers.append(f'{item.id}: needs the current synthetic business account')
         elif item.scenario.startswith('d4-'):
             proof = proofs.get(item.scenario)
             if proof is None or (now is not None and now >= proof['expires_at']):
-                blockers.append(f'{item.id}：需要经核验的 Linux receiver 及浏览器交付回执')
+                blockers.append(f'{item.id}: needs a verified Linux receiver and browser delivery receipt')
     return blockers
 
 
@@ -527,8 +527,8 @@ def shared_test_ready_notice(api, pr, run, digest):
         marker = shared_identity(receipt['head'], receipt['sha'], digest, receipt['queue_lease'])
         notice = (f'{NOTICE}\n{deployment_marker(receipt["head"], run["id"])}\n'
                   f'<!-- openqms-shared-test-active:{marker} -->\n'
-                  f'### PR #{pr["number"]} 测试站点已就绪，部分验收受阻\n\n'
-                  f'{SHARED_TEST_URL} · 当前版本 `{receipt["sha"]}`\n\n'
+                  f'### PR #{pr["number"]} test site is ready, some acceptance items are blocked\n\n'
+                  f'{SHARED_TEST_URL} · current version `{receipt["sha"]}`\n\n'
                   + '\n'.join(f'- {blocker}' for blocker in blockers))
     api.notice(pr['number'], notice)
 
@@ -567,21 +567,21 @@ def shared_test_released_notice(api, slot):
     cutoff = int(datetime.now(timezone.utc).timestamp())
     marker = f'<!-- openqms-shared-test-release:{identity}:{slot["outcome"]}:{cutoff} -->'
     if slot['outcome'] == 'deploy-failed':
-        heading = '共享测试部署失败'
-        detail = '本轮部署失败，当前版本没有可用于验收的测试环境。失败资源已回收，修复后可重试。'
+        heading = 'Shared test deployment failed'
+        detail = 'This deployment failed; there is no test environment for acceptance of the current version. Failed resources were reclaimed; retry after fixing.'
         run_id = os.environ.get('GITHUB_RUN_ID', '')
         repo = os.environ.get('GITHUB_REPOSITORY', '')
         if (repo == api.repo and re.fullmatch(r'[A-Za-z0-9-]+/(?!\.\.?$)[A-Za-z0-9_.-]+', repo)
                 and re.fullmatch(r'[1-9][0-9]*', run_id)):
-            detail += f'\n\n[工作流日志](https://github.com/{repo}/actions/runs/{run_id})'
+            detail += f'\n\n[Workflow log](https://github.com/{repo}/actions/runs/{run_id})'
     else:
-        heading = '共享测试位已清理'
+        heading = 'Shared test slot cleaned up'
         if slot['outcome'] == 'switched':
-            detail = '管理员切换了测试位，本 PR 可在后续轮次继续验收。'
+            detail = 'An administrator switched the test slot; this PR can continue acceptance in a later round.'
         else:
-            detail = '本轮验收已完成。' if slot['outcome'] == 'passed' else '本轮测试位已结束，人工验收检查仍需通过。'
-        detail += '固定测试地址将用于队列中的下一项。'
-    api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### {heading}\n\n{detail}\n\n版本：`{slot["head"]}`')
+            detail = 'Acceptance for this round is complete. ' if slot['outcome'] == 'passed' else 'The current test slot has ended; the manual acceptance check still has to pass. '
+        detail += 'The fixed test address will be used for the next item in the queue.'
+    api.notice(slot['pr'], f'{NOTICE}\n{marker}\n### {heading}\n\n{detail}\n\nVersion: `{slot["head"]}`')
 
 
 def shared_release_marker(api, pr, digest):
@@ -598,15 +598,15 @@ def shared_release_marker(api, pr, digest):
 
 def reconcile(api, pr, summary):
     sha = pr['head']['sha']
-    api.status(sha, PLAN, 'pending', '正在检查 PR 验收计划')
-    api.status(sha, ACCEPT, 'pending', '等待当前预览部署和人工验收')
+    api.status(sha, PLAN, 'pending', 'Checking the PR acceptance plan')
+    api.status(sha, ACCEPT, 'pending', 'Waiting for the current preview deployment and manual acceptance')
     shared = shared_test_enabled()
-    waiting = f'{NOTICE}\n### 等待 CI 与预览部署\n\n当前提交：`{sha}`。预览尚未就绪，请等待发布完成。\n\n'
+    waiting = f'{NOTICE}\n### Waiting for CI and preview deployment\n\nCurrent commit: `{sha}`. The preview is not available yet; wait for the release to finish.\n\n'
     if shared:
-        waiting += '共享测试位将按 PR 编号发放，轮到本 PR 时会显示可用地址。\n\n'
+        waiting += 'Shared test slots are assigned by PR number; the address is shown when it is the turn of this PR.\n\n'
     else:
-        waiting += f'预期地址：{preview_url(pr["number"], False)}\n\n'
-    waiting += f'[CI 检查](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
+        waiting += f'Expected address: {preview_url(pr["number"], False)}\n\n'
+    waiting += f'[CI checks](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
     try:
         digest = test_plan(pr.get('body'))
     except ValueError as error:
@@ -615,31 +615,31 @@ def reconcile(api, pr, summary):
         if not shared:
             api.notice(pr['number'], waiting)
         return
-    api.status(sha, PLAN, 'success', '影响范围、操作步骤、预期结果和权限回归检查齐全')
+    api.status(sha, PLAN, 'success', 'Scope, steps, expected results and permission regression checks are complete')
     if shared and (released := shared_release_marker(api, pr, digest)):
-        reason = '本轮测试位已清理，等待重新部署后验收'
+        reason = 'The current test slot was cleaned up; waiting for redeployment before acceptance'
         if released['outcome'] == 'passed':
             run = publication(api, pr, queue_lease=released['lease'])
-            reason = '本轮测试位已清理，当前缺少有效发布回执'
+            reason = 'The current test slot was cleaned up; no valid release receipt available'
             if run:
                 accepted_comment, reason = acceptance_result(api, pr, run, digest,
                                                              released_at=released['released_at'])
                 if accepted_comment:
-                    api.status(sha, ACCEPT, 'success', '有写权限的人工已确认本轮共享测试')
+                    api.status(sha, ACCEPT, 'success', 'A human with write permission confirmed this shared test round')
                     return
         api.status(sha, ACCEPT, 'pending', reason)
         summary.append(f'PR #{pr["number"]}: {reason}')
         return
     active = latest_notified_deployment(api, pr)
     if active is not None and active['status'] != 'completed':
-        api.status(sha, ACCEPT, 'pending', '当前预览正在部署，请查看 PR 发布通知')
-        summary.append(f'PR #{pr["number"]}: 部署进行中，请查看 PR 通知中的发布记录。')
+        api.status(sha, ACCEPT, 'pending', 'The current preview is deploying; see the PR release notice')
+        summary.append(f'PR #{pr["number"]}: deployment in progress, see the release log in the PR notice.')
         return
     if active is not None and active['conclusion'] != 'success':
         if not shared:
             deployment_notice_from_run(api, pr, active)
-        api.status(sha, ACCEPT, 'pending', '当前预览部署失败或取消，请查看 PR 发布记录')
-        summary.append(f'PR #{pr["number"]}: 部署失败或取消，请查看 PR 通知。')
+        api.status(sha, ACCEPT, 'pending', 'The current preview deployment failed or was cancelled; see the PR release log')
+        summary.append(f'PR #{pr["number"]}: deployment failed or was cancelled, see the PR notice.')
         return
     run = publication(api, pr)
     if active is not None and (run is None or run['id'] != active['id']):
@@ -649,7 +649,7 @@ def reconcile(api, pr, summary):
     if run is None:
         if not shared:
             api.notice(pr['number'], waiting)
-        summary.append(f'PR #{pr["number"]}: 等待当前提交预览发布成功。')
+        summary.append(f'PR #{pr["number"]}: Waiting for the preview of the current commit to be published.')
         return
     if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
         raise ValueError('PR changed before publication notification')
@@ -657,22 +657,22 @@ def reconcile(api, pr, summary):
     if receipt and (blockers := shared_blockers(
             parse_plan(pr.get('body')), receipt, run.get('d4_evidence'),
             now=int(datetime.now(timezone.utc).timestamp()))):
-        api.status(sha, ACCEPT, 'pending', '本轮共享测试缺少必要验收能力')
-        summary.append(f'PR #{pr["number"]} 受阻：' + '、'.join(blockers))
+        api.status(sha, ACCEPT, 'pending', 'This shared test round lacks required acceptance capabilities')
+        summary.append(f'PR #{pr["number"]} blocked: ' + '; '.join(blockers))
         return
     if not shared:
         api.notice(pr['number'], ready_notice(pr, run, digest))
     template = acceptance_template(pr, run, digest)
     url = preview_url(pr['number'], receipt)
-    summary.append(f'PR #{pr["number"]}: {url}\n\n逐项测试后填写并提交以下模板，附上实际测试说明或截图。\n\n```text\n{template}\n```')
+    summary.append(f'PR #{pr["number"]}: {url}\n\nTest each item, then fill in and post the template below with actual test notes or screenshots.\n\n```text\n{template}\n```')
     accepted_comment, reason = acceptance_result(api, pr, run, digest)
     if accepted_comment and not run.get('d4_evidence'):
-        api.status(sha, ACCEPT, 'success', '有写权限的人工已确认当前提交、部署和验收计划')
+        api.status(sha, ACCEPT, 'success', 'A human with write permission confirmed the current commit, deployment and acceptance plan')
         return
     if accepted_comment:
-        reason = '等待共享测试控制器签收当前回执并确认资源清理'
+        reason = 'Waiting for the shared test controller to sign off the current receipt and confirm cleanup'
     api.status(sha, ACCEPT, 'pending', reason)
-    summary.append(f'PR #{pr["number"]} 验收待通过：{reason}')
+    summary.append(f'PR #{pr["number"]} acceptance pending: {reason}')
 
 
 def main():
@@ -704,7 +704,7 @@ def main():
         try:
             reconcile(api, pr, summary)
         except Exception as error:
-            api.status(pr['head']['sha'], ACCEPT, 'pending', '预览元数据检查异常，请查看工作流日志后重新核验')
+            api.status(pr['head']['sha'], ACCEPT, 'pending', 'Preview metadata check failed; review the workflow log and re-verify')
             diagnostic = f'PR #{pr["number"]}: {type(error).__name__}: {error}'
             print(diagnostic)
             summary.append(diagnostic)

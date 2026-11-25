@@ -6,30 +6,30 @@ spec = importlib.util.spec_from_file_location('acceptance', Path(__file__).paren
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 BODY = '''<!-- preview-test-plan:start -->
-### 影响范围
-质量报告列表与 Viewer 只读权限。
-### 验收步骤
-| 检查项 | 操作步骤 | 预期结果 |
+### Scope
+Quality report list and Viewer read-only access.
+### Acceptance steps
+| Check | Steps | Expected result |
 | --- | --- | --- |
-| 列表筛选 | Viewer 登录后筛选报告状态 | 仅显示符合状态的报告 |
-### 权限与回归
-使用 Viewer 尝试修改，预期拒绝；刷新后筛选结果一致。
+| List filter | Viewer logs in and filters by report status | Only reports with that status are shown |
+### Permissions and regression
+Viewer tries to edit and is rejected; after refresh the filter result is unchanged.
 <!-- preview-test-plan:end -->'''
 
 
 def test_valid_plan_digest_changes_with_plan_but_not_description():
-    assert m.test_plan(BODY) == m.test_plan('改动说明\n' + BODY)
-    assert m.test_plan(BODY) != m.test_plan(BODY.replace('刷新后', '重新登录后'))
+    assert m.test_plan(BODY) == m.test_plan('Summary\n' + BODY)
+    assert m.test_plan(BODY) != m.test_plan(BODY.replace('after refresh', 'after re-login'))
 
 
-@pytest.mark.parametrize('body', [None, '', BODY.replace('Viewer', '请填写'), BODY.replace('列表筛选', 'TODO'), BODY.replace('操作步骤', '预期结果'), BODY.replace('### 权限与回归', '### 其他内容'), BODY.replace('Viewer 登录后筛选报告状态', ''), BODY + BODY, BODY.replace('| 列表筛选 | Viewer 登录后筛选报告状态 | 仅显示符合状态的报告 |', '')])
+@pytest.mark.parametrize('body', [None, '', BODY.replace('Viewer', 'Please fill in'), BODY.replace('List filter', 'TODO'), BODY.replace('Steps', 'Expected result'), BODY.replace('### Permissions and regression', '### Other'), BODY.replace('Viewer logs in and filters by report status', ''), BODY + BODY, BODY.replace('| List filter | Viewer logs in and filters by report status | Only reports with that status are shown |', '')])
 def test_invalid_plans(body):
     with pytest.raises(ValueError):
         m.test_plan(body)
 
 
 def comment(**changes):
-    result = dict(user=dict(login='alice', type='User'), body='/preview-accept abc 1 digest\n实际通过，截图在报告附件中。', created_at='2026-11-16T01:01:00Z')
+    result = dict(user=dict(login='alice', type='User'), body='/preview-accept abc 1 digest\nPassed in practice, screenshots attached to the report.', created_at='2026-11-16T01:01:00Z')
     result.update(changes)
     return result
 
@@ -41,7 +41,7 @@ def test_human_confirmation_current_and_author_policy():
     assert m.accepted(comment(user=dict(login='bob', type='User')), *args, independent=True)
 
 
-@pytest.mark.parametrize('change,permission', [({'user': dict(login='bot', type='Bot')}, 'admin'), ({}, 'read'), ({'created_at': '2026-11-16T00:00:00Z'}, 'write'), ({'body': '/preview-accept abc 1 digest'}, 'write'), ({'body': '/preview-accept old 1 digest\n实际通过，截图在附件中'}, 'write'), ({'body': '> /preview-accept abc 1 digest\n实际通过，截图在附件中'}, 'write')])
+@pytest.mark.parametrize('change,permission', [({'user': dict(login='bot', type='Bot')}, 'admin'), ({}, 'read'), ({'created_at': '2026-11-16T00:00:00Z'}, 'write'), ({'body': '/preview-accept abc 1 digest'}, 'write'), ({'body': '/preview-accept old 1 digest\nPassed in practice, screenshots attached'}, 'write'), ({'body': '> /preview-accept abc 1 digest\nPassed in practice, screenshots attached'}, 'write')])
 def test_false_confirmations(change, permission):
     assert not m.accepted(comment(**change), '/preview-accept abc 1 digest', '2026-11-16T01:00:00Z', 'alice', permission)
 
@@ -68,15 +68,15 @@ def test_deleted_confirmation_and_changed_plan_revoke_success():
     m.publication = lambda *_: dict(id=42, repository={'full_name': 'owner/repo'}, updated_at='2026-11-16T01:00:00Z')
     try:
         cmd = f'/preview-accept {"a"*40} 42 {m.test_plan(BODY)}'
-        api.comments = [comment(body=cmd + '\n所有测试通过，具体结果见截图链接。')]
+        api.comments = [comment(body=cmd + '\nAll tests passed, see screenshot links for details.')]
         m.reconcile(api, pr, [])
         assert api.statuses[-1] == (m.ACCEPT, 'success')
         api.comments = []
         m.reconcile(api, pr, [])
         assert api.statuses[-1] == (m.ACCEPT, 'pending')
         assert (m.PLAN, 'success') in api.statuses[-3:]
-        api.comments = [comment(body=cmd + '\n所有测试通过，具体结果见截图链接。')]
-        pr['body'] = BODY.replace('刷新后', '重新登录后')
+        api.comments = [comment(body=cmd + '\nAll tests passed, see screenshot links for details.')]
+        pr['body'] = BODY.replace('after refresh', 'after re-login')
         m.reconcile(api, pr, [])
         assert (m.ACCEPT, 'pending') in api.statuses[-3:]
         assert api.statuses[-1] != (m.ACCEPT, 'success')
@@ -132,7 +132,7 @@ def test_reopened_pr_cannot_reuse_deleted_preview(monkeypatch):
     summary = []
     m.reconcile(api, pr, summary)
     assert all(state != 'success' for context, state in api.statuses if context == m.ACCEPT)
-    assert '等待' in summary[0]
+    assert 'aiting' in summary[0]
 
 
 def test_notification_upsert_only_owns_bot_comment(monkeypatch):
@@ -179,10 +179,10 @@ def test_cleanup_success_informs_merged_and_closed_prs(monkeypatch, merged):
     monkeypatch.setenv('GITHUB_RUN_ID', '42')
     api = Fake()
     m.cleanup_notice(api, 7, 'success')
-    assert '预览资源已释放' in api.body and '测试地址已停用' in api.body
+    assert 'Preview resources released' in api.body and 'test address is disabled' in api.body
     assert '/actions/runs/42' in api.body
     m.cleanup_notice(api, 7, 'failure')
-    assert '清理未完成' in api.body and '不能确认资源已释放' in api.body
+    assert 'cleanup not completed' in api.body and 'cannot be confirmed' in api.body
     api.get = lambda _: dict(state='open')
     with pytest.raises(ValueError, match='reopened'):
         m.cleanup_notice(api, 7, 'success')
@@ -226,7 +226,7 @@ def test_automatic_notice_lifecycle_never_reports_old_success_during_new_deploy(
             pass
     api = Fake()
     m.deployment_notice(api, 7, merge, 'started')
-    assert '正在部署' in api.body and '/actions/runs/77' in api.body
+    assert 'is deploying' in api.body and '/actions/runs/77' in api.body
     initial = api.body
     # No success artifact is consulted while a newer deployment is in progress.
     monkeypatch.setattr(m, 'publication', lambda *_: pytest.fail('old receipt used during deploy'))
@@ -234,18 +234,18 @@ def test_automatic_notice_lifecycle_never_reports_old_success_during_new_deploy(
     assert api.body == initial
     run.update(status='completed', conclusion='failure')
     m.reconcile(api, pr, [])
-    assert '部署未完成' in api.body and '已就绪' not in api.body
+    assert 'deployment not completed' in api.body and 'is ready' not in api.body
     run.update(conclusion='success')
     monkeypatch.setattr(m, 'publication', lambda *_: run)
     m.reconcile(api, pr, [])
-    assert '测试环境已就绪' in api.body and '/preview-accept' in api.body
+    assert 'Test environment is ready' in api.body and '/preview-accept' in api.body
     # A stale failure from an old merge cannot overwrite current readiness.
     m.deployment_notice(api, 7, 'c'*40, 'failure')
-    assert '测试环境已就绪' in api.body
+    assert 'Test environment is ready' in api.body
     pr['state'] = 'closed'
     m.cleanup_notice(api, 7, 'success')
     released = api.body
-    assert '资源已释放' in released
+    assert 'resources released' in released
     m.deployment_notice(api, 7, merge, 'failure')
     assert api.body == released
 
@@ -291,10 +291,10 @@ def test_metadata_error_preserves_plan_result_and_blocks_acceptance(monkeypatch,
 
 
 SHARED_BODY = BODY.replace(
-    '| 检查项 | 操作步骤 | 预期结果 |',
-    '| 编号 | 检查项 | 环境 | 角色 | 场景 | 操作步骤 | 预期结果 |',
+    '| Check | Steps | Expected result |',
+    '| ID | Check | Environment | Role | Scenario | Steps | Expected result |',
 ).replace('| --- | --- | --- |', '| --- | --- | --- | --- | --- | --- | --- |').replace(
-    '| 列表筛选 |', '| report-read | 列表筛选 | public | viewer | read-only |',
+    '| List filter |', '| report-read | List filter | public | viewer | read-only |',
 )
 
 
@@ -372,7 +372,7 @@ def test_shared_publication_is_bound_to_current_plan_and_lease(shared_receipt_ap
     receipt = api.receipt
     assert m.publication(api, api.pr, queue_lease=receipt['queue_lease'])['shared_test'] == receipt
     assert m.publication(api, api.pr, queue_lease='d'*32) is None
-    api.pr['body'] = SHARED_BODY.replace('刷新后', '重新登录后')
+    api.pr['body'] = SHARED_BODY.replace('after refresh', 'after re-login')
     assert m.publication(api, api.pr, queue_lease=receipt['queue_lease']) is None
 
 
@@ -393,9 +393,9 @@ def test_shared_acceptance_rejects_stale_lease_and_accepts_after_legacy_deadline
     command = m.acceptance_command(api.pr, run, receipt['plan'])
     assert command.endswith(' ' + receipt['queue_lease'])
     stale = command.rsplit(' ', 1)[0] + ' ' + 'd'*32
-    api.comments = [comment(body=stale + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
+    api.comments = [comment(body=stale + '\nreport-read: pass\nSteps and report status as expected.')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) is None
-    api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
+    api.comments = [comment(body=command + '\nreport-read: pass\nSteps and report status as expected.')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) == api.comments[0]
     api.comments[0]['updated_at'] = '2026-11-16T03:00:00Z'
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) == api.comments[0]
@@ -409,14 +409,14 @@ def test_shared_release_keeps_timely_confirmation_without_republishing_url(monke
     receipt = api.receipt
     run = m.publication(api, api.pr)
     command = m.acceptance_command(api.pr, run, receipt['plan'])
-    api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
+    api.comments = [comment(body=command + '\nreport-read: pass\nSteps and report status as expected.')]
     slot = dict(pr=api.pr['number'], head=receipt['head'], merge=receipt['sha'],
                 plan=receipt['plan'], lease=receipt['queue_lease'], outcome='passed')
     m.shared_test_released_notice(api, slot)
     m.shared_test_released_notice(api, slot)
     assert len(api.notices) == 1
     assert m.SHARED_TEST_URL not in api.notices[0]
-    assert '共享测试位已清理' in api.notices[0]
+    assert 'Shared test slot cleaned up' in api.notices[0]
     m.reconcile(api, api.pr, [])
     assert api.statuses[-1] == (m.ACCEPT, 'success')
     assert len(api.notices) == 1
@@ -447,13 +447,13 @@ def test_shared_deploy_failure_notice_distinguishes_failed_release(monkeypatch, 
     m.shared_test_released_notice(api, slot)
     assert len(api.notices) == 1
     body = api.notices[0]
-    assert '### 共享测试部署失败' in body
-    assert '当前版本没有可用于验收的测试环境' in body
-    assert '共享测试位已清理' not in body
+    assert '### Shared test deployment failed' in body
+    assert 'no test environment for acceptance of the current version' in body
+    assert 'Shared test slot cleaned up' not in body
     assert m.SHARED_TEST_URL not in body
-    assert ('[工作流日志]' in body) is has_log
+    assert ('[Workflow log]' in body) is has_log
     if has_log:
-        assert '[工作流日志](https://github.com/owner/repo/actions/runs/42)' in body
+        assert '[Workflow log](https://github.com/owner/repo/actions/runs/42)' in body
     assert m.shared_release_marker(api, api.pr, receipt['plan'])['outcome'] == 'deploy-failed'
 
 
@@ -466,8 +466,8 @@ def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api
     body = m.ready_notice(api.pr, run, api.receipt['plan'])
     assert m.SHARED_TEST_URL in body and 'PR #45' in body
     assert api.receipt['queue_lease'] in body
-    assert '等待人工验收' in body and '本轮验收截止' not in body
-    assert 'report-read: <通过、失败或受阻>' in body
+    assert 'awaiting manual acceptance' in body and 'acceptance deadline' not in body
+    assert 'report-read: <pass, fail or blocked>' in body
 
 
 def test_shared_publication_updates_comment_in_the_deploy_run(monkeypatch, shared_receipt_api):
@@ -480,7 +480,7 @@ def test_shared_publication_updates_comment_in_the_deploy_run(monkeypatch, share
     m.shared_publication_notice(api, api.receipt)
 
     assert len(api.notices) == 2
-    assert '### 测试环境已就绪' in api.notices[-1]
+    assert '### Test environment is ready' in api.notices[-1]
     assert m.SHARED_TEST_URL in api.notices[-1]
     assert f'/preview-accept {api.receipt["head"]} 42 {api.receipt["plan"]} {api.receipt["queue_lease"]}' in api.notices[-1]
     assert m.publication(api, api.pr, shared=True) is None
@@ -498,7 +498,7 @@ def test_shared_publication_notice_refuses_invalid_release(monkeypatch, shared_r
     elif change == 'merge':
         api.pr['merge_commit_sha'] = 'd' * 40
     elif change == 'plan':
-        api.pr['body'] = SHARED_BODY.replace('刷新后', '重新登录后')
+        api.pr['body'] = SHARED_BODY.replace('after refresh', 'after re-login')
     elif change == 'retired':
         m.shared_test_released_notice(api, dict(pr=receipt['pr'], head=receipt['head'],
                                                merge=receipt['sha'], plan=receipt['plan'],
@@ -539,9 +539,9 @@ def test_shared_release_removes_link_when_pr_is_closed_or_updated(shared_receipt
     m.shared_test_released_notice(api, {**retired, 'lease': 'f'*32})
     assert len(api.notices) == 1  # The old route can only be retired by its own lease.
     m.shared_test_released_notice(api, retired)
-    assert '共享测试位已清理' in api.notices[-1]
+    assert 'Shared test slot cleaned up' in api.notices[-1]
     assert m.SHARED_TEST_URL not in api.notices[-1]
-    assert '本轮验收已完成' not in api.notices[-1]
+    assert 'Acceptance for this round is complete' not in api.notices[-1]
 
 
 def test_shared_reconcile_never_writes_comments(monkeypatch, shared_receipt_api):
@@ -566,17 +566,17 @@ def test_shared_acceptance_rejects_release_before_reopen(shared_receipt_api):
     run = m.publication(api, api.pr, queue_lease=receipt['queue_lease'])
     command = m.acceptance_command(api.pr, run, receipt['plan'])
     api.timeline = [dict(event='reopened', created_at='2026-11-16T01:01:15Z')]
-    api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。',
+    api.comments = [comment(body=command + '\nreport-read: pass\nSteps and report status as expected.',
                             created_at='2026-11-16T01:01:30Z')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) is None
 
 
 def test_shared_d4_does_not_accept_viewer_or_provisioned_role_as_runtime_evidence():
-    d4 = SHARED_BODY.replace('| report-read | 列表筛选 | public | viewer | read-only |',
-                            '| body-deliver | 正常正文交付 | shared | field_qe | d4-deliver |')
+    d4 = SHARED_BODY.replace('| report-read | List filter | public | viewer | read-only |',
+                            '| body-deliver | Normal text delivery | shared | field_qe | d4-deliver |')
     plan = m.parse_plan(d4)
     assert m.shared_blockers(plan, {'test_roles': ['field_qe', 'manager']}) == [
-        'body-deliver：需要经核验的 Linux receiver 及浏览器交付回执',
+        'body-deliver: needs a verified Linux receiver and browser delivery receipt',
     ]
     assert m.shared_blockers(m.parse_plan(SHARED_BODY), {}) == []
     assert m.shared_blockers(m.parse_plan(BODY), {})
@@ -596,8 +596,8 @@ def test_d4_acceptance_requires_trusted_current_artifact_and_timely_human_commen
     import zipfile
 
     api = shared_receipt_api
-    api.pr['body'] = SHARED_BODY.replace('| report-read | 列表筛选 | public | viewer | read-only |',
-                                       '| body-deliver | 正常正文交付 | shared | field_qe | d4-deliver |')
+    api.pr['body'] = SHARED_BODY.replace('| report-read | List filter | public | viewer | read-only |',
+                                       '| body-deliver | Normal text delivery | shared | field_qe | d4-deliver |')
     receipt = api.receipt
     receipt.update(plan=m.test_plan(api.pr['body']), test_roles=['field_qe'])
     proof_time = m.epoch('2026-11-16T01:01:00Z')
@@ -628,7 +628,7 @@ def test_d4_acceptance_requires_trusted_current_artifact_and_timely_human_commen
     run = publication()
     assert run['d4_evidence'] == proofs
     command = m.acceptance_command(api.pr, run, receipt['plan'])
-    api.comments = [comment(body=command + '\nbody-deliver: 通过\n观察到本轮正文回执。',
+    api.comments = [comment(body=command + '\nbody-deliver: pass\nObserved the current text receipt.',
                             created_at='2026-11-16T01:01:30Z')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan'], released_at=expiry - 1)
     api.comments[0]['created_at'] = '2026-11-16T01:00:30Z'
@@ -661,28 +661,28 @@ def test_new_lease_can_publish_after_previous_deployment_failure(shared_receipt_
     assert m.SHARED_TEST_URL in api.notices[-1]
 
 
-@pytest.mark.parametrize('result', ['report-read:通过', 'report-read：通过', '  report-read ： 通过  '])
+@pytest.mark.parametrize('result', ['report-read:pass', 'report-read：pass', '  report-read ： pass  '])
 def test_shared_acceptance_allows_crlf_chinese_colons_and_whitespace(shared_receipt_api, result):
     api = shared_receipt_api
     run = m.publication(api, api.pr, shared=True)
     command = m.acceptance_command(api.pr, run, api.receipt['plan'])
     api.comments = [comment(body='  ' + command.replace(' ', '  ') + '  \r\n' + result
-                            + '\r\n刷新后报告仍可读取。\r\n')]
+                            + '\r\nAfter refresh the report is still readable.\r\n')]
     assert m.verified_acceptance(api, api.pr, run, api.receipt['plan']) == api.comments[0]
 
 
 @pytest.mark.parametrize('result,reason', [
-    ('report-read: <通过、失败或受阻>', '缺少验收结果 report-read'),
-    ('ci-home: 通过', '缺少验收结果 report-read。计划没有这些验收项 ci-home'),
-    ('report-read：受阻', '验收项未通过 report-read（受阻）'),
-    ('report-read: 通过\r\nreport-read：失败', '验收项重复 report-read。验收项未通过 report-read（失败）'),
+    ('report-read: <pass, fail or blocked>', 'Missing results for report-read'),
+    ('ci-home: pass', 'Missing results for report-read. Not in the plan: ci-home'),
+    ('report-read：blocked', 'Failed items: report-read (blocked)'),
+    ('report-read: pass\r\nreport-read：fail', 'Duplicate results for report-read. Failed items: report-read (fail)'),
 ])
 def test_current_result_explains_rejection_without_accepting_it(shared_receipt_api, result, reason):
     api = shared_receipt_api
     run = m.publication(api, api.pr, shared=True)
     digest = api.receipt['plan']
     cmd = m.acceptance_command(api.pr, run, digest)
-    api.comments = [comment(body=f'{cmd}\r\n{result}\r\n实际验收结果见说明。')]
+    api.comments = [comment(body=f'{cmd}\r\n{result}\r\nSee notes for actual acceptance results.')]
     assert m.acceptance_result(api, api.pr, run, digest) == (None, reason)
 
 
@@ -692,11 +692,11 @@ def test_reconcile_reports_wrong_lease_and_real_item_in_template(shared_receipt_
     run = m.publication(api, api.pr, shared=True)
     command = m.acceptance_command(api.pr, run, api.receipt['plan'])
     api.comments = [comment(body=command.rsplit(' ', 1)[0] + ' ' + 'd'*32
-                            + '\nreport-read: 通过\n实际验收记录已上传。')]
+                            + '\nreport-read: pass\nActual acceptance record uploaded.')]
     checks = []
     monkeypatch.setattr(api, 'status', lambda _, context, state, description: checks.append((context, state, description)))
     summary = []
     m.reconcile(api, api.pr, summary)
     assert checks[-1][:2] == (m.ACCEPT, 'pending')
-    assert '测试轮次不匹配' in checks[-1][2]
-    assert any('report-read: <通过、失败或受阻>' in entry for entry in summary)
+    assert 'test round' in checks[-1][2]
+    assert any('report-read: <pass, fail or blocked>' in entry for entry in summary)

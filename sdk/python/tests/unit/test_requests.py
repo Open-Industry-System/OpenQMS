@@ -11,7 +11,7 @@ def cases():
         ('claim_messages', {}, {'limit':20}),
         ('ack_messages', dict(batch_id=U, through_sequence=1), dict(batch_id=str(U), through_sequence=1)),
         ('record_event', dict(idempotency_key='k', event_type='progress', payload=models.EventPayload(completed=2,total=1)), dict(idempotency_key='k',event_type='progress',payload=dict(stage=None,message=None,completed=2,total=1),receipt_ids=[])),
-        ('save_result', dict(idempotency_key='k',payload=models.ResultPayload(explanations=('中文',)),receipt_ids=(V,U,V)), dict(idempotency_key='k',payload=dict(explanations=['中文'],support=[],opposition=[],missing_information=[],conditional_recommendations=[]),receipt_ids=[str(V),str(U),str(V)])),
+        ('save_result', dict(idempotency_key='k',payload=models.ResultPayload(explanations=('Prüfbericht',)),receipt_ids=(V,U,V)), dict(idempotency_key='k',payload=dict(explanations=['Prüfbericht'],support=[],opposition=[],missing_information=[],conditional_recommendations=[]),receipt_ids=[str(V),str(U),str(V)])),
         ('save_checkpoint',dict(idempotency_key='k',receipt_ids=(U,)),dict(idempotency_key='k',receipt_ids=[str(U)])),
         ('finish',dict(status='completed'),dict(status='completed')),
     ]
@@ -149,7 +149,7 @@ def test_never_stringifies_arbitrary_input():
 
 
 def test_budget_includes_exact_utf8_boundary(monkeypatch):
-    params=dict(installation_id=U,secret=SECRET,request_key='中文')
+    params=dict(installation_id=U,secret=SECRET,request_key='Prüfbericht')
     body=codec().encode_request('claim',params).body
     monkeypatch.setattr(models,'REQUEST_BUDGET',len(body))
     assert codec().encode_request('claim',params).body == body

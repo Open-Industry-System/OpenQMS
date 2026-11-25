@@ -1,22 +1,22 @@
-## 改动说明
+## Änderungsbeschreibung
 
-说明本次修改解决的问题。
+Beschreiben Sie, welches Problem diese Änderung löst.
 
 <!-- preview-test-plan:start -->
-### 影响范围
-请填写：受影响的页面、角色、业务流程及不涉及的范围。
+### Scope
+Please fill in: betroffene Seiten, Rollen und Geschäftsprozesse sowie ausdrücklich nicht betroffene Bereiche.
 
-### 验收步骤
-| 编号 | 检查项 | 环境 | 角色 | 场景 | 操作步骤 | 预期结果 |
+### Acceptance steps
+| ID | Check | Environment | Role | Scenario | Steps | Expected result |
 | --- | --- | --- | --- | --- | --- | --- |
-| 请填写 | 请填写 | 请填写 | 请填写 | 请填写 | 请填写 | 请填写 |
+| Please fill in | Please fill in | Please fill in | Please fill in | Please fill in | Please fill in | Please fill in |
 
-### 权限与回归
-请填写：权限拒绝、边界/异常和已有功能的回归检查；不适用时说明具体原因。
+### Permissions and regression
+Please fill in: Berechtigungsablehnung, Grenz-/Fehlerfälle und Regression bestehender Funktionen; falls nicht zutreffend, den konkreten Grund nennen.
 <!-- preview-test-plan:end -->
 
-## 人工预览验收
+## Manuelle Vorschau-Abnahme
 
-每个编号使用唯一的小写短标识。只读使用 `public / viewer / read-only`，合成业务操作使用 `shared / field_qe 或 manager / write`。D4 正文和撤权使用 `d4-deliver`、`d4-revoke`，须有专用 receiver 与浏览器证据。共享测试按编号填结果，例如 `report-read: 通过`。
+Jede ID ist ein eindeutiger, kurzer Bezeichner in Kleinbuchstaben. Für reines Lesen `public / viewer / read-only` verwenden, für synthetische Geschäftsaktionen `shared / field_qe oder manager / write`. D4-Textauslieferung und Rechteentzug verwenden `d4-deliver` bzw. `d4-revoke` und benötigen einen eigenen Receiver sowie Browser-Nachweise. Im gemeinsamen Testplatz wird das Ergebnis je ID eingetragen, z. B. `report-read: pass` (erlaubt: `pass`, `fail`, `blocked`).
 
-CI 通过并发布预览后，在实际环境逐项执行上面的步骤。从 PR 下“测试环境已就绪”的自动评论（或 `PR preview acceptance` 工作流 Summary）复制绑定本次提交、部署和计划的 `/preview-accept` 命令，作为 PR 评论提交，并附实际结果/截图链接。机器人不能代替人工确认；新提交或修改验收计划后须重新确认。
+Nachdem CI bestanden hat und die Vorschau veröffentlicht ist, führen Sie die obigen Schritte in der echten Umgebung aus. Kopieren Sie aus dem automatischen Kommentar „Test environment is ready“ (oder der Summary des Workflows `PR preview acceptance`) den an Commit, Deployment und Plan gebundenen Befehl `/preview-accept`, posten Sie ihn als PR-Kommentar und hängen Sie tatsächliche Ergebnisse bzw. Screenshot-Links an. Der Bot ersetzt keine menschliche Bestätigung; nach neuen Commits oder Planänderungen ist eine erneute Bestätigung nötig.

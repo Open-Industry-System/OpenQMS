@@ -38,8 +38,8 @@ PUBLIC_VIEWER = {'username': 'viewer', 'password': 'Viewer@2026'}
 # These fixture passwords are deliberately displayed only on the shared preview.
 # D4 acceptance keeps the separate, randomly issued engineer and manager accounts.
 PUBLIC_DEMO_USERS = {
-    'demo-engineer': ('engineer', '质量工程师（公开演示）', 'DemoEngineer@2026'),
-    'demo-manager': ('manager', '质量经理（公开演示）', 'DemoManager@2026'),
+    'demo-engineer': ('engineer', 'Quality Engineer (public demo)', 'DemoEngineer@2026'),
+    'demo-manager': ('manager', 'Quality Manager (public demo)', 'DemoManager@2026'),
 }
 ISSUED_HASH = re.compile(r'\$2[aby]\$12\$[A-Za-z0-9./]{53}')
 

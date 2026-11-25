@@ -120,7 +120,7 @@ class Executor:
             completed_at = int(self.clock())
             if not self.is_current(binding, completed_at):
                 raise ValueError('D4 acceptance allocation expired during execution')
-            if self.record and outcome == '通过':
+            if self.record and outcome == 'pass':
                 self.record(dict(response, completed_at=completed_at))
             return response
 

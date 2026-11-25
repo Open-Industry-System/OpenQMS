@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 
-SCENARIOS = {'d4-deliver': '正常正文交付', 'd4-revoke': '撤权后交付'}
+SCENARIOS = {'d4-deliver': 'Normal text delivery', 'd4-revoke': 'Delivery after revocation'}
 SHARED_ACCOUNT_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
 MAX_MESSAGE = 8192
 
@@ -181,7 +181,7 @@ def validated_receipt(result, request):
         passed = after == before + 1 and result['denial'] is None
     else:
         passed = after == before and result['denial'] == 'source_revoked'
-    return '通过' if passed else '失败'
+    return 'pass' if passed else 'fail'
 
 
 def handler(config, invoke):
@@ -201,7 +201,7 @@ def handler(config, invoke):
 
         def show(self, status, fragment, *, challenge=False):
             text = ('<!doctype html><html lang="zh"><meta charset="utf-8">'
-                    '<title>D4 专用验收</title>' + fragment + '</html>').encode()
+                    '<title>D4 acceptance</title>' + fragment + '</html>').encode()
             self.send_response(status)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', str(len(text)))
@@ -214,15 +214,15 @@ def handler(config, invoke):
 
         def authorize(self):
             if time.time() >= binding['expires_at']:
-                self.show(410, '<p>本轮验收已到期</p>')
+                self.show(410, '<p>This acceptance round has expired</p>')
                 return None
             role = authenticated_role(self.headers.get('Authorization'), config)
             if role is None:
-                prompt = '请使用本轮共享测试账号登录' if scenario_roles is not None else '需要本轮验收账号'
+                prompt = 'Log in with the current shared test account' if scenario_roles is not None else 'The current acceptance account is required'
                 self.show(401, f'<p>{prompt}</p>', challenge=True)
                 return None
             if scenario_roles is not None and role not in scenario_roles.values():
-                self.show(403, '<p>该账号没有本轮 D4 验收权限</p>')
+                self.show(403, '<p>This account has no D4 acceptance permission for this round</p>')
                 return None
             return role
 
@@ -231,33 +231,33 @@ def handler(config, invoke):
             if role is None:
                 return
             if self.path != '/':
-                self.show(404, '<p>页面不存在</p>')
+                self.show(404, '<p>Page not found</p>')
                 return
             forms = ''.join(
                 f'<form method="post" action="/scenario/{key}"><button>{name}</button>'
-                + (f' <span>任务 <code>{tasks[key]}</code></span>' if key in tasks else '')
+                + (f' <span>Task <code>{tasks[key]}</code></span>' if key in tasks else '')
                 + '</form>'
                 for key, name in SCENARIOS.items() if can_run(role, key)
             )
-            self.show(200, f'<h1>PR #{binding["pr"]} 的 D4 验收</h1>'
-                      f'<p>部署版本 <code>{html.escape(binding["merge"])}</code></p>'
-                      f'<p>合成报告 {html.escape(config["report_label"])} <code>{binding["report_id"]}</code></p>{forms}')
+            self.show(200, f'<h1>PR #{binding["pr"]} D4 acceptance</h1>'
+                      f'<p>Deployed version <code>{html.escape(binding["merge"])}</code></p>'
+                      f'<p>Synthetic report {html.escape(config["report_label"])} <code>{binding["report_id"]}</code></p>{forms}')
 
         def do_POST(self):
             role = self.authorize()
             if role is None:
                 return
             if self.headers.get('Origin') != config['origin']:
-                self.show(403, '<p>请求来源不允许</p>')
+                self.show(403, '<p>Request origin not allowed</p>')
                 return
             scenario = self.path.removeprefix('/scenario/')
             if (not self.path.startswith('/scenario/') or scenario not in SCENARIOS
                     or self.headers.get('Content-Length', '0') != '0'
                     or self.headers.get('Transfer-Encoding')):
-                self.show(400, '<p>仅可选择已登记的场景</p>')
+                self.show(400, '<p>Only registered scenarios can be selected</p>')
                 return
             if not can_run(role, scenario):
-                self.show(403, '<p>该账号没有此项验收权限</p>')
+                self.show(403, '<p>This account has no permission for this acceptance item</p>')
                 return
             request = dict(binding=binding, scenario=scenario, operation=uuid4().hex)
             try:
@@ -266,16 +266,16 @@ def handler(config, invoke):
                 if scenario in tasks and receipt['task_id'] != tasks[scenario]:
                     raise ValueError('receipt task does not match the current report task')
             except (OSError, ValueError, TypeError, KeyError):
-                self.show(503, '<h1>受阻</h1><p>专用执行器未返回本次操作的有效回执。</p>')
+                self.show(503, '<h1>Blocked</h1><p>The dedicated executor returned no valid receipt for this action.</p>')
                 return
             if time.time() >= binding['expires_at']:
-                self.show(410, '<p>本轮验收已到期</p>')
+                self.show(410, '<p>This acceptance round has expired</p>')
                 return
-            self.show(200, f'<h1>{SCENARIOS[scenario]}：{result}</h1>'
-                      f'<p>任务 <code>{receipt["task_id"]}</code></p>'
-                      f'<p>运行 <code>{receipt["run_id"]}</code></p>'
-                      f'<p>交付记录 {receipt["delivery_before"]} → {receipt["delivery_after"]}</p>'
-                      '<a href="/">返回合成报告</a>')
+            self.show(200, f'<h1>{SCENARIOS[scenario]}: {result}</h1>'
+                      f'<p>Task <code>{receipt["task_id"]}</code></p>'
+                      f'<p>Run <code>{receipt["run_id"]}</code></p>'
+                      f'<p>Delivery records {receipt["delivery_before"]} → {receipt["delivery_after"]}</p>'
+                      '<a href="/">Back to the synthetic report</a>')
 
     return Browser
 
