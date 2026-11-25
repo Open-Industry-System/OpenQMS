@@ -1,6 +1,6 @@
 # Oracle 共享测试环境排队
 
-测试站点固定为 `https://test.preview.openqms.smartindustry.world`。它一次承载一个 PR，在响应中提供 `X-OpenQMS-Test-PR`、`X-OpenQMS-Test-Version`，PR 评论显示编号、完整版本、截止时间和验收命令。CI 通过并满足现有部署门禁的 PR 自动入队，空位分给编号最小的合格 PR。同 PR 的新提交使用 GitHub 当前 head，版本身份还绑定实际 merge SHA 和验收计划摘要。
+测试站点固定为 `https://test.preview.openqms.smartindustry.world`。它一次承载一个 PR，在响应中提供 `X-OpenQMS-Test-PR`、`X-OpenQMS-Test-Version`，预览成功后的 PR 评论显示编号、完整版本和验收命令。CI 通过并满足现有部署门禁的 PR 自动入队，空位分给编号最小的合格 PR。同 PR 的新提交使用 GitHub 当前 head，版本身份还绑定实际 merge SHA 和验收计划摘要。
 
 ## 运行契约
 
@@ -15,7 +15,7 @@
 
 `Oracle shared test` 在 Test OpenQMS 完成时及定时运行，使用 `oracle-preview` Environment 的既有审批和凭据。定时触发每 5 分钟检查签收、版本变更和手动切换，实际触发时间由 GitHub 决定。签收沿用人工验收门禁，匹配当前 PR、head、merge、计划及发放标识。只有获得判定为有效的人工确认，调度器才能按「验收通过」释放。归档只收录版本、发放标识及回执元数据。验收状态与真实的人工评审绑定，测试位切换后保留有效签收。
 
-共享测试位等待人工确认，空闲时间不会触发清理。D4 专用账号与回执仍按各自的有效期核验。
+成功发布的共享测试位等待人工确认，空闲时间不会触发清理。D4 专用账号与回执仍按各自的有效期核验。
 
 ## 手动切换测试位
 
@@ -25,7 +25,7 @@
 
 ## 部署失败后重试
 
-先打开 PR 评论中的发布记录，确认失败步骤和实际构建版本。修复故障后，在测试位空闲时，从 GitHub Actions 的 `Oracle shared test` 手动运行默认分支，并将 `retry_pr` 填为对应 PR 编号。
+部署失败时，PR 评论显示「共享测试部署失败」和工作流日志。失败资源回收后，本轮没有可验收的预览。打开工作流日志，核对失败步骤和实际构建版本。修复故障后，在测试位空闲时，从 GitHub Actions 的 `Oracle shared test` 手动运行默认分支，并将 `retry_pr` 填为对应 PR 编号。
 
 ```bash
 gh workflow run oracle-shared-test.yml --ref main -f retry_pr=45
@@ -49,7 +49,9 @@ gh workflow run oracle-shared-test.yml --ref main -f retry_pr=45
 
 ## 测试账号与 D4 接入前提
 
-- 共享测试只启用种子库中的 Viewer、工程师和经理。工程师和经理在每个测试位独立生成随机口令。受信操作员从 Oracle 上该测试位的 root 独占凭据文件发放，使用既有私下渠道。安装控制器时确认 `/usr/bin/htpasswd` 可用，Ubuntu 上由 `apache2-utils` 提供。发放信息的公开回执只含角色名。清理同步撤下路由、销毁独占库和移除当前发放的凭据文件，下一项随后领取。
+- 固定共享测试站的登录页显示 Viewer、Engineer 和 Manager 三种演示账号及一键填充。公开的 `demo-engineer` 和 `demo-manager` 体验同等业务角色，操作限于本轮独占合成数据库。请勿输入真实或个人数据。
+- 执行 D4 验收的 `engineer` 和 `manager` 在每个测试位独立生成随机口令，由受信操作员通过既有私下渠道发放。安装控制器时确认 `/usr/bin/htpasswd` 可用，Ubuntu 上由 `apache2-utils` 提供。公开回执只含角色名。清理同步撤下路由、销毁独占库和移除本轮凭据文件。
+- 共享测试页眉为 Engineer 和 Manager 提供 D4 验收入口。门户复用当前测试位账号，逐项按验收计划分配角色，在独立 HTTPS 域名上校验身份。
 - 现有公开预览继续使用 Viewer。共享站点的验收计划用七列表格声明编号、环境、角色、场景、操作及预期结果。三列旧计划可用于发布资格核验，进入共享签收前须补分类。缺少角色或 D4 运行回执的必要项标为受阻。就绪、CI 通过和历史运行记录不能清除该状态。
 - PR #45 的第 1 项可在现有公开预览以 Viewer 执行。第 2、3 项依赖已审核的专用 Linux 运行包和合成租户部署。现有 Preview Compose 使用 single 模式和常规应用网络。接入时为当前发放建立独占的候选 API 容器和合成租户库，按 #45 的 controller 合约验证 UID、cgroup、镜像及仅一个 IPv4 回环监听。专用 API 使用 dev 租户策略，单次授予最长一小时。受信宿主服务从已审查的固定包发放任务和 receiver，浏览器只提交固定场景。不要从待测 PR 源码目录启动 root 进程。
 - 用真实浏览器操作合成报告与任务。对正常交付独立读取平台侧记录，核对本轮报告、任务、运行和已接收消息。撤权应针对已领取任务禁用来源 grant，再确认正文读取被拒、交付记录未增加。分别检查无权账号的拒绝路径。清理前核对精确测试位及 receiver、API、数据库身份。浏览器的逐项回执通过可信发布记录关联当前 PR、head、merge、计划和发放。账号发放以及队列接线可以先审批，D4 执行器部署和对应真实浏览器验收目前为 **NOT_RUN**。

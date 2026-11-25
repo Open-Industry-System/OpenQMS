@@ -2,7 +2,7 @@
 """Trusted initializer, mounted read-only and run ONLY inside isolated preview backend.
 
 The ordinary preview enables only the public viewer. A shared lease may add
-rotated credentials for allowlisted synthetic business users.
+rotated acceptance credentials plus two public synthetic demonstration users.
 """
 import asyncio
 import json
@@ -34,6 +34,13 @@ def seed_if_empty(user_count, runner=subprocess.run):
 
 
 SHARED_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
+PUBLIC_VIEWER = {'username': 'viewer', 'password': 'Viewer@2026'}
+# These fixture passwords are deliberately displayed only on the shared preview.
+# D4 acceptance keeps the separate, randomly issued engineer and manager accounts.
+PUBLIC_DEMO_USERS = {
+    'demo-engineer': ('engineer', '质量工程师（公开演示）', 'DemoEngineer@2026'),
+    'demo-manager': ('manager', '质量经理（公开演示）', 'DemoManager@2026'),
+}
 ISSUED_HASH = re.compile(r'\$2[aby]\$12\$[A-Za-z0-9./]{53}')
 
 
@@ -58,6 +65,47 @@ def account_role_is_expected(row):
     return SHARED_ROLES.get(row.username) == row.role_key
 
 
+def public_demo_accounts():
+    return [
+        {'username': username, 'password': password}
+        for username, (_, _, password) in PUBLIC_DEMO_USERS.items()
+    ]
+
+
+async def enable_public_demo_users(connection, text, hash_password, sources):
+    for username, (source, display_name, password) in PUBLIC_DEMO_USERS.items():
+        source_user = sources[source]
+        role = SHARED_ROLES[source]
+        digest = hash_password(password)
+        await connection.execute(text("""
+            INSERT INTO users (user_id, username, display_name, password_hash,
+                               role_id, legacy_role, factory_id, is_active)
+            SELECT gen_random_uuid(), :username, :display_name, :digest,
+                   role_id, :role, factory_id, false
+            FROM users WHERE user_id = :source_id
+            ON CONFLICT (username) DO NOTHING
+        """), dict(username=username, display_name=display_name, digest=digest, role=role, source_id=source_user.user_id))
+        demo = (await connection.execute(text("""
+            SELECT u.user_id, r.role_key FROM users u
+            JOIN role_definitions r ON r.id=u.role_id WHERE u.username=:username
+        """), {'username': username})).one()
+        if demo.role_key != role:
+            raise ValueError('shared demo account role mismatch')
+        ids = dict(demo_id=demo.user_id, source_id=source_user.user_id)
+        await connection.execute(text("""
+            UPDATE users AS demo SET factory_id = source.factory_id, legacy_role = :role
+            FROM users AS source WHERE demo.user_id=:demo_id AND source.user_id=:source_id
+        """), dict(ids, role=role))
+        # Keep direct scope assignments the same as the corresponding role fixture.
+        for table, scope in (('user_factories', 'factory_id'), ('user_product_lines', 'product_line_code')):
+            await connection.execute(text(f'DELETE FROM {table} WHERE user_id=:demo_id'), ids)
+            await connection.execute(text(f"""
+                INSERT INTO {table} (id, user_id, {scope})
+                SELECT gen_random_uuid(), :demo_id, {scope} FROM {table} WHERE user_id=:source_id
+            """), ids)
+        yield demo.user_id, digest
+
+
 async def initialize(accounts):
     validate_target(os.environ)
     import bcrypt
@@ -80,25 +128,31 @@ async def initialize(accounts):
                 users=(await connection.execute(text("SELECT u.user_id,u.username,r.role_key FROM users u JOIN role_definitions r ON r.id=u.role_id WHERE u.username <> 'viewer'"))).all()
                 if not {'admin','groupadmin','engineer','manager'} <= {row.username for row in users}:
                     raise ValueError('preview privileged account inventory incomplete')
+
+                def hash_password(password):
+                    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+                enabled = {row.user_id: accounts[row.username] for row in users if row.username in accounts}
                 if accounts:
-                    observed = {row.username for row in users if account_role_is_expected(row)}
-                    if observed != set(accounts):
+                    sources = {row.username: row for row in users if account_role_is_expected(row)}
+                    if sources.keys() != accounts.keys():
                         raise ValueError('synthetic business account role mismatch')
-                for row in users:
-                    issued = accounts.get(row.username)
-                    digest = issued
-                    if digest is None:
-                        digest = bcrypt.hashpw(secrets.token_urlsafe(36).encode(), bcrypt.gensalt()).decode()
+                    async for identity, digest in enable_public_demo_users(connection, text, hash_password, sources):
+                        enabled[identity] = digest
+
+                for identity in {row.user_id for row in users} | enabled.keys():
+                    digest = enabled[identity] if identity in enabled else hash_password(secrets.token_urlsafe(36))
                     await connection.execute(
                         text('UPDATE users SET password_hash=:digest,is_active=:active,refresh_token=NULL,refresh_token_expires=NULL WHERE user_id=:identity'),
-                        dict(digest=digest, active=issued is not None, identity=row.user_id),
+                        dict(digest=digest, active=identity in enabled, identity=identity),
                     )
-                    await connection.execute(text('UPDATE user_refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=:identity'),dict(identity=row.user_id))
+                    await connection.execute(text('UPDATE user_refresh_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=:identity'),dict(identity=identity))
                 viewer=(await connection.execute(text("SELECT u.password_hash,r.role_key FROM users u JOIN role_definitions r ON r.id=u.role_id WHERE u.username='viewer' AND u.is_active"))).one()
-                if viewer.role_key != 'viewer' or not bcrypt.checkpw(b'Viewer@2026',viewer.password_hash.encode()):
+                if viewer.role_key != 'viewer' or not bcrypt.checkpw(PUBLIC_VIEWER['password'].encode(),viewer.password_hash.encode()):
                     raise ValueError('public readonly preview login unavailable')
                 await connection.commit()
             finally:
+                await connection.rollback()
                 await connection.execute(text('SELECT pg_advisory_unlock(728913702)'))
                 await connection.commit()
     finally:
