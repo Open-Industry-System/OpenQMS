@@ -5,7 +5,11 @@ import httpx
 import pytest
 
 from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
-from tests.e2e.d4_text_local_harness import d4_text_local_trial, d4_text_server, owned_local_trial
+from tests.e2e.d4_text_local_harness import d4_text_server
+from tests.services.agent_runtime.d4_fixture_support import (
+    prepared_local_trial as owned_local_trial,
+    prepared_text_trial as d4_text_local_trial,
+)
 
 pytestmark = [pytest.mark.requires_db, pytest.mark.asyncio]
 
@@ -81,26 +85,46 @@ async def test_paused_text_checkpoint_is_idempotent_and_activity_visible(d4_text
         assert corrupted_retry.status_code == 403
 
 
-@pytest.mark.parametrize('task_id,checkpoint_id,body', [
-    ('sensitive-task', None, {'run_id': str(uuid4()), 'expected_epoch': 1}),
-    (str(uuid4()), None, {'run_id': 'sensitive-run', 'expected_epoch': 1}),
-    (str(uuid4()), None, {'run_id': str(uuid4()), 'expected_epoch': 'sensitive-epoch'}),
-    (str(uuid4()), None, {'run_id': str(uuid4()), 'expected_epoch': True}),
-    (str(uuid4()), None, {'run_id': str(uuid4()), 'expected_epoch': 1, 'sensitive-key': 'sensitive-value'}),
-    (str(uuid4()), None, ['sensitive-value']),
-    (str(uuid4()), 'sensitive-checkpoint', None),
-], ids=['invalid-task', 'invalid-run', 'invalid-epoch', 'boolean-epoch',
-        'extra-field', 'invalid-body', 'invalid-checkpoint'])
-async def test_recovery_validation_is_locally_redacted(d4_text_server, task_id, checkpoint_id, body):
+def _assert_invalid_request(response, case):
+    assert response.status_code == 422, case
+    assert 'sensitive' not in response.text, case
+    assert response.json() == {'detail': 'Invalid request'}, case
+
+
+async def test_recovery_post_validation_is_locally_redacted(d4_text_server):
     c = d4_text_server
-    path = f'/api/agent/tasks/{task_id}/d4-recovery-checkpoints'
+    valid_task = str(uuid4())
+    valid_run = str(uuid4())
+    valid_body = {'run_id': valid_run, 'expected_epoch': 1}
+    url = '/api/agent/tasks/{task_id}/d4-recovery-checkpoints'
+    path = url.format(task_id=valid_task)
+    headers = {'Authorization': 'Bearer ' + c.user_token, 'X-Tenant-ID': c.slug}
+    invalid_posts = [
+        ('invalid-task', url.format(task_id='sensitive-task'), valid_body),
+        ('invalid-run', path, {**valid_body, 'run_id': 'sensitive-run'}),
+        ('invalid-epoch', path, {**valid_body, 'expected_epoch': 'sensitive-epoch'}),
+        ('boolean-epoch', path, {**valid_body, 'expected_epoch': True}),
+        ('extra-field', path, {**valid_body, 'sensitive-key': 'sensitive-value'}),
+        ('invalid-body', path, ['sensitive-value']),
+    ]
+    # None of these malformed submissions changes task state. Use one
+    # authenticated server and report the input label on each assertion.
+    async with httpx.AsyncClient(base_url=c.text_base_url, timeout=15) as client:
+        responses = [
+            (case, await client.post(post_path, headers=headers, json=body))
+            for case, post_path, body in invalid_posts
+        ]
+    for case, response in responses:
+        _assert_invalid_request(response, case)
+
+
+async def test_recovery_get_validation_is_locally_redacted(d4_text_server):
+    c = d4_text_server
+    path = f'/api/agent/tasks/{uuid4()}/d4-recovery-checkpoints/sensitive-checkpoint'
     headers = {'Authorization': 'Bearer ' + c.user_token, 'X-Tenant-ID': c.slug}
     async with httpx.AsyncClient(base_url=c.text_base_url, timeout=15) as client:
-        response = (await client.get(path + '/' + checkpoint_id, headers=headers) if checkpoint_id
-                    else await client.post(path, headers=headers, json=body))
-    assert response.status_code == 422
-    assert response.json() == {'detail': 'Invalid request'}
-    assert 'sensitive' not in response.text
+        response = await client.get(path, headers=headers)
+    _assert_invalid_request(response, 'invalid-checkpoint')
 
 
 @pytest.mark.parametrize('revoked_kind', ['grant', 'plugin', 'policy'])

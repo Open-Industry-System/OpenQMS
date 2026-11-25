@@ -14,6 +14,7 @@ import time
 from browser import SCENARIOS, validate_binding
 from cleanup import database_binding, docker_inventory, command
 from executor import QUEUE_ROOT, hold_test_slot
+from issue import DB_SOCKET
 from portal_issue import write_private
 from runtime_launch import IMAGE, RuntimeLaunch, decode, read_owned, require, trusted_directory, verify_bundle
 from witness import DOCKER, PsqlWitness, uuid_text
@@ -21,6 +22,7 @@ from witness import DOCKER, PsqlWitness, uuid_text
 
 ISSUE = Path(__file__).with_name('issue.py')
 PRIVATE = '/run/openqms-d4-issue'
+POSTGRES_SOCKET = '/var/run/postgresql'
 PYTHON = ('/usr/local/bin/python', '-I', '-B')
 
 
@@ -52,6 +54,24 @@ def wait_health(api, port):
     raise ValueError('D4 candidate API did not become ready')
 
 
+def matches_bind_mount(mount, source, destination, *, writable):
+    return (mount['Type'] == 'bind' and mount['Source'] == str(source)
+            and mount['Destination'] == destination and mount['RW'] is writable)
+
+
+def verified_socket_mount(api_mount, database, directory):
+    if not (matches_bind_mount(api_mount, directory, DB_SOCKET, writable=False)
+            and any(matches_bind_mount(mount, directory, POSTGRES_SOCKET, writable=True)
+                    for mount in database['Mounts'])):
+        return False
+    directory_info = directory.lstat()
+    if (not stat.S_ISDIR(directory_info.st_mode) or directory_info.st_mode & 0o022
+            or directory_info.st_uid == 0):
+        return False
+    socket_info = (directory / '.s.PGSQL.5432').lstat()
+    return stat.S_ISSOCK(socket_info.st_mode) and socket_info.st_uid == directory_info.st_uid
+
+
 def permitted_cells(prepared, binding):
     containers, _, _ = docker_inventory(binding['lease'], command)
     inventory = {'-'.join(entry['Name'].rsplit('-', 2)[-2:]): entry
@@ -75,21 +95,32 @@ def permitted_cells(prepared, binding):
                 and api['State']['Running'] and db['State']['Running']
                 and api['Config']['User'] == '2002:2002'
                 and api['HostConfig']['CapDrop'] == ['ALL']
-                and not api['HostConfig'].get('CapAdd')
-                and set(api['NetworkSettings']['Networks']) == {'openqms-d4-' + binding['lease']},
+                and not api['HostConfig'].get('CapAdd'),
                 'D4 candidate API or database identity mismatch')
         directory = QUEUE_ROOT / 'd4' / binding['lease'] / scenario
         mounts = api['Mounts']
-        require(len(mounts) == 1 and all(
-            mount['Type'] == 'bind' and mount['Source'] == str(directory)
-            and mount['Destination'] == PRIVATE and mount['RW'] is True for mount in mounts
-        ), 'D4 API has a mount outside its private fixture directory')
+        fixture = [mount for mount in mounts if matches_bind_mount(mount, directory, PRIVATE, writable=True)]
+        require(len(fixture) == 1, 'D4 API has an invalid private fixture mount')
+        if scenario == 'd4-deliver':
+            # A Docker bridge starts embedded DNS in this namespace. The native
+            # receiver requires only its candidate's loopback listener.
+            require(api['HostConfig']['NetworkMode'] == 'none'
+                    and set(api['NetworkSettings']['Networks']) == {'none'}
+                    and cell['db_host'] == DB_SOCKET,
+                    'D4 native delivery requires an isolated API namespace')
+            require(len(mounts) == 2 and any(
+                verified_socket_mount(mount, db, directory.with_name('d4-deliver-db-socket'))
+                for mount in mounts if mount is not fixture[0]
+            ), 'D4 native delivery requires its own read-only database socket')
+        else:
+            require(set(api['NetworkSettings']['Networks']) == {'openqms-d4-' + binding['lease']}
+                    and len(mounts) == 1 and re.fullmatch('[a-z][a-z0-9-]{0,62}', cell['db_host']),
+                    'D4 revocation requires the isolated lease bridge and fixture mount')
         info = directory.lstat()
         require(directory.is_dir() and not directory.is_symlink() and info.st_uid == info.st_gid == 2002
                 and info.st_mode & 0o777 == 0o700, 'D4 API fixture directory ownership mismatch')
-        require(re.fullmatch('[a-z][a-z0-9-]{0,62}', cell['db_host'])
-                and type(cell['api_port']) is int and 1024 <= cell['api_port'] <= 65535,
-                'invalid D4 infrastructure endpoint')
+        require(type(cell['api_port']) is int and 1024 <= cell['api_port'] <= 65535,
+                'invalid D4 infrastructure API endpoint')
         if scenario == 'd4-deliver':
             runtime = RuntimeLaunch(cell['root'], cell['manifest_sha256'], cell['nonce'], cell['api_container_id'])
             require(runtime.root == Path('/run/openqms-d4-' + runtime.nonce), 'D4 runtime root identity mismatch')
@@ -172,8 +203,8 @@ def provision(lease):
         prepared = decode(read_owned(directory / 'prepared.json', 32768, private=True))
         binding = prepared['binding']
         validate_binding(binding)
-        require(all(binding[key] == slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease'))
-                and binding['expires_at'] <= slot['expires_at'], 'D4 preparation does not match current test slot')
+        require(all(binding[key] == slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease')),
+                'D4 preparation does not match current test slot')
         require(not (directory / 'profile.json').exists() and not (directory / 'profile.json').is_symlink(),
                 'D4 profile already exists')
         permitted_cells(prepared, binding)

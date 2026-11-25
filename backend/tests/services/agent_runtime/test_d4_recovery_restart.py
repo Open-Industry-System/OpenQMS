@@ -5,7 +5,10 @@ import httpx
 import pytest
 
 from app.services.agent_runtime.message_delivery_policy import START_MESSAGE
-from tests.e2e.d4_text_local_harness import d4_text_local_trial, d4_text_server, owned_local_trial
+from tests.e2e.d4_text_local_harness import d4_text_server
+from tests.services.agent_runtime.d4_fixture_support import (
+    prepared_local_trial as owned_local_trial, prepared_text_trial as d4_text_local_trial,
+)
 
 pytestmark = [pytest.mark.requires_db, pytest.mark.asyncio]
 

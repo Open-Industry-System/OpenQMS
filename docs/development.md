@@ -226,9 +226,11 @@ make check-frontend-build # 生产构建
 make check SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # SDK + backend + tsc + build
 ```
 
+普通 main PR 的后端检查按 [模块路由](development/backend-ci-module-routing.md) 选择相关组。默认本地 `make check-backend` 和 main push 执行完整套件。
+
 SDK 的 `SDK_PYTHON_BIN` 默认 `python3`，与 backend 的 `PYTHON_BIN` 独立；须由调用者提供 Python ≥3.11、pytest、pip 与实际 setuptools==79.0.1，检查入口不会安装或放宽构建版本。`check-sdk-unit`、`check-sdk-loopback`、`check-sdk-wheel` 可独立执行，无数据库/backend requirements 依赖；`check-sdk` 聚合三层。backend 检查先离线构建当前源码 wheel，验证构建 JSON 返回的实际路径和 SHA256，再用专用 `OPENQMS_SDK_WHEEL` 传给真实 HTTP fixture；缺 wheel 不 skip。构建/安装与测试证据写入本次私有子目录，可通过 `SDK_ARTIFACT_ROOT` 指定父目录。详见[SDK 使用与安全边界](../sdk/python/README.md)。
 
-`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。后端层只允许 `not ci_browser
+`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。后端层只允许 `not ci_browser and not ci_r5_native
 and not live_provider and not real_scanner`；graph worker/projection 的既有两项排除仍由
 Make 参数显式传递。可通过 `python scripts/check-ci-pure.py tests/ci/
 tests/e2e/test_capa_outcome_runner.py -q -rA` 运行 CI 基础设施纯测试。pure 模式要求
@@ -272,6 +274,8 @@ runner 仅发布已脱敏的 receipt/log；原始 JUnit/hooks 与配置文件保
 删除或 prune controller 保留的 container/volume；只清理本次创建的 runner artifact。
 
 ### 4.3 GitHub 自动与手动层
+
+普通后端在两个独立 PostgreSQL job 中按完整测试模块分组，汇总检查仍为 `backend-tests`；本地省略 `BACKEND_SHARD` 时继续运行完整集合。可信 base 分类器允许既有文档与严格受限的公共首页展示改动跳过完整后端，前端类型、构建和浏览器检查继续运行。分组、失败门禁、计时口径与本次验收见[后端 CI 优化记录](development/backend-ci-optimization.md)。
 
 Chromium jobs（自动 browser-protection、手动 live-capa/scanner）固定 `ubuntu-24.04`，避免 `ubuntu-latest` 升级到当前 Playwright 不支持的系统。SDK 默认端点的无网络测试使用各 SDK 的公开默认 HTTP client 及其匹配 transport，不能把旧 `httpx` 对象注入已切换 `httpx2` 的 SDK；仍须严格校验官方 URL、移除 ambient override 并禁止真实请求。
 

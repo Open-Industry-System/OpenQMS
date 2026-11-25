@@ -18,6 +18,7 @@ jobs:
   sdk-checks:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.11', '3.12', '3.13']
     env:
@@ -69,6 +70,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       docs_only: ${{ steps.route.outputs.docs_only }}
+      backend_required: ${{ steps.route.outputs.backend_required }}
+      route_reason: ${{ steps.route.outputs.route_reason }}
+      backend_groups: ${{ steps.route.outputs.backend_groups }}
     env:
       LLM_PROVIDER: ""
       LLM_API_KEY: ""
@@ -90,30 +94,68 @@ jobs:
           # Main pushes always run the full backend; no PR policy is needed.
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
             echo 'docs_only=false' >> "$GITHUB_OUTPUT"
+            echo 'backend_required=true' >> "$GITHUB_OUTPUT"
+            echo 'backend_groups=full' >> "$GITHUB_OUTPUT"
+            echo 'route_reason=main_push' >> "$GITHUB_OUTPUT"
             echo 'Backend routing: full backend (main push).' >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if [ "${REQUIRE_PREVIEW_RECEIPTS:-false}" = true ]; then
-            echo 'docs_only=false' >> "$GITHUB_OUTPUT"
-            echo 'Backend routing: full backend (preview publication requires API receipts).' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           git cat-file -e "$BASE_SHA^{commit}"
           # Bootstrap rollout: bases predating this policy cannot take a shortcut.
           if ! git cat-file -e "$BASE_SHA:scripts/ci/backend_route.py"; then
             echo 'docs_only=false' >> "$GITHUB_OUTPUT"
+            echo 'backend_required=true' >> "$GITHUB_OUTPUT"
+            echo 'backend_groups=full' >> "$GITHUB_OUTPUT"
+            echo 'route_reason=trusted_base_policy_unavailable' >> "$GITHUB_OUTPUT"
             echo 'Backend routing: full backend (trusted base policy not available).' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           git show "$BASE_SHA:scripts/ci/backend_route.py" > "$RUNNER_TEMP/backend-route.py"
-          python "$RUNNER_TEMP/backend-route.py" classify
+          route_outputs="$RUNNER_TEMP/backend-route.outputs"
+          : > "$route_outputs"
+          has_group_policy=false
+          if grep -Fxq 'ROUTING_PROTOCOL = 2' "$RUNNER_TEMP/backend-route.py"; then
+            has_group_policy=true
+          elif [ "${REQUIRE_PREVIEW_RECEIPTS:-false}" = true ]; then
+            printf '%s\n' 'docs_only=false' 'backend_required=true' 'backend_groups=full' \
+              'route_reason=preview_receipts_required' >> "$GITHUB_OUTPUT"
+            echo 'Backend routing: full backend (older base policy and preview requires a receipt).' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! GITHUB_OUTPUT="$route_outputs" python "$RUNNER_TEMP/backend-route.py" classify; then
+            cat "$route_outputs" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if [ "$has_group_policy" = true ]; then
+            grep -q '^backend_groups=' "$route_outputs"
+          else
+            # Keep both legacy base contracts during rollout.
+            if ! grep -q '^backend_required=' "$route_outputs"; then
+              echo 'backend_required=true' >> "$route_outputs"
+              echo 'route_reason=legacy_policy_full' >> "$route_outputs"
+            fi
+            if grep -Fxq 'backend_required=false' "$route_outputs"; then
+              echo 'backend_groups=skip' >> "$route_outputs"
+            else
+              echo 'backend_groups=full' >> "$route_outputs"
+            fi
+          fi
+          cat "$route_outputs" >> "$GITHUB_OUTPUT"
 
   backend-full:
+    name: backend-full (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: >-
+          ${{ fromJSON(needs.backend-route.result == 'success' && startsWith(needs.backend-route.outputs.backend_groups, 'basic')
+          && '[{"shard":"selected","index":-1}]'
+          || '[{"shard":"runtime","index":0},{"shard":"remainder","index":1}]') }}
     needs: [backend-route]
-    if: ${{ always() && !cancelled() && needs.backend-route.outputs.docs_only != 'true' }}
+    if: ${{ always() && !cancelled() && (needs.backend-route.result != 'success' || needs.backend-route.outputs.backend_required != 'false') }}
     runs-on: ubuntu-latest
     env:
-      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/backend-full
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/backend-shard-${{ matrix.shard }}
       OPENQMS_CI_SHA: ${{ github.sha }}
       LLM_PROVIDER: ""
       LLM_API_KEY: ""
@@ -135,6 +177,7 @@ jobs:
           --label openqms.ci.run=${{ github.run_id }}
           --label openqms.ci.attempt=${{ github.run_attempt }}
           --label openqms.ci.job=backend-full
+          --label openqms.ci.shard=${{ matrix.shard }}
         ports:
           - 5432/tcp
 
@@ -161,6 +204,7 @@ jobs:
 
       # Developer build tool, not a backend or SDK runtime dependency.
       - name: Install SDK developer build tools
+        if: matrix.shard != 'runtime'
         env:
           LLM_PROVIDER: ""
           LLM_API_KEY: ""
@@ -170,6 +214,7 @@ jobs:
         run: python -m pip install setuptools==79.0.1
 
       - name: Run manual tests
+        if: matrix.shard != 'runtime'
         env:
           SECRET_KEY: test-secret-key-for-ci-only
         run: |
@@ -179,6 +224,8 @@ jobs:
 
       - name: Run deterministic backend acceptance
         env:
+          BACKEND_WORKER: ${{ matrix.shard }}
+          ROUTED_GROUPS: ${{ needs.backend-route.outputs.backend_groups }}
           SECRET_KEY: test-secret-key-for-ci-only
           LLM_PROVIDER: ""
           LLM_API_KEY: ""
@@ -190,9 +237,19 @@ jobs:
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           GITHUB_JOB: backend-full
           TEST_DATABASE_URL: postgresql+asyncpg://qms:qms_dev_2026@localhost:${{ job.services.postgres.ports['5432'] }}/qms_test
-        run: make check-backend SDK_PYTHON_BIN=python
+        run: |
+          set -euo pipefail
+          case "$BACKEND_WORKER" in
+            selected) BACKEND_GROUPS="$ROUTED_GROUPS" make check-backend SDK_PYTHON_BIN=python ;;
+            runtime|remainder)
+              unset BACKEND_GROUPS
+              make check-backend SDK_PYTHON_BIN=python BACKEND_SHARD=${{ matrix.index }}
+              ;;
+            *) exit 1 ;;
+          esac
 
       - name: D8 doc-gate preflight (against migrated test DB)
+        if: matrix.shard != 'runtime'
         # A clean migrated CI DB must report no broken CP lineage. Deployment
         # gating remains the explicit target DATABASE_URL command documented in
         # docs/deployment.md; this check never reads a local environment file.
@@ -214,6 +271,7 @@ jobs:
           PYTHONPATH=. python -m app.services.capa_doc_gate_preflight
 
       - name: Run engine import checks
+        if: matrix.shard != 'runtime'
         env:
           SECRET_KEY: test-secret-key-for-ci-only
         run: |
@@ -239,7 +297,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-tests-evidence
+          name: backend-shard-${{ matrix.shard }}-evidence
           path: |
             ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
             ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
@@ -250,28 +308,57 @@ jobs:
     needs: [backend-route, backend-full]
     if: always()
     env:
+      OPENQMS_TEST_ARTIFACTS: ${{ github.workspace }}/ci-safe/backend-tests
+      OPENQMS_CI_SHA: ${{ github.sha }}
       LLM_PROVIDER: ""
       LLM_API_KEY: ""
       LLM_BASE_URL: ""
       EMBEDDING_PROVIDER: ""
       EMBEDDING_API_KEY: ""
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Require the selected backend result
         env:
           ROUTE_RESULT: ${{ needs.backend-route.result }}
+          BACKEND_REQUIRED: ${{ needs.backend-route.outputs.backend_required }}
+          ROUTE_REASON: ${{ needs.backend-route.outputs.route_reason }}
           DOCS_ONLY: ${{ needs.backend-route.outputs.docs_only }}
           BACKEND_RESULT: ${{ needs.backend-full.result }}
+          BACKEND_GROUPS: ${{ needs.backend-route.outputs.backend_groups }}
+        run: python scripts/ci/backend_gate.py
+      - name: Download backend receipts
+        if: needs.backend-route.outputs.backend_required != 'false'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: backend-shard-*-evidence
+          path: ${{ github.workspace }}/ci-safe/backend-shards
+      - name: Verify actual complete and disjoint execution
+        if: needs.backend-route.outputs.backend_groups == 'full'
         run: |
-          set -euo pipefail
-          echo "Backend routing=$ROUTE_RESULT docs_only=$DOCS_ONLY backend=$BACKEND_RESULT" >> "$GITHUB_STEP_SUMMARY"
-          [ "$ROUTE_RESULT" = success ] || exit 1
-          if [ "$DOCS_ONLY" = true ]; then
-            [ "$BACKEND_RESULT" = skipped ] || exit 1
-          elif [ "$DOCS_ONLY" = false ]; then
-            [ "$BACKEND_RESULT" = success ] || exit 1
-          else
-            exit 1
-          fi
+          cd backend
+          PYTHONPATH=. python -m tests.ci.backend_shards \
+            --receipts "$GITHUB_WORKSPACE/ci-safe/backend-shards" --sha "$OPENQMS_CI_SHA" \
+            --output "$OPENQMS_TEST_ARTIFACTS"
+      - name: Verify selected group execution and receipt
+        if: startsWith(needs.backend-route.outputs.backend_groups, 'basic')
+        env:
+          ROUTED_GROUPS: ${{ needs.backend-route.outputs.backend_groups }}
+        run: |
+          cd backend
+          PYTHONPATH=. python -m tests.ci.backend_groups "$ROUTED_GROUPS" \
+            --receipts "$GITHUB_WORKSPACE/ci-safe/backend-shards" --sha "$OPENQMS_CI_SHA" \
+            --output "$OPENQMS_TEST_ARTIFACTS"
+      - name: Upload verified compatible API receipt
+        if: always() && needs.backend-route.outputs.backend_required != 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-tests-evidence
+          path: |
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*-receipt.json
+            ${{ env.OPENQMS_TEST_ARTIFACTS }}/*.log
+          if-no-files-found: error
 
   frontend-checks:
     runs-on: ubuntu-latest

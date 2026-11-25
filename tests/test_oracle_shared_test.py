@@ -27,7 +27,9 @@ def fixture_row(pr):
     )
 
 
-def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_path, monkeypatch):
+@pytest.mark.parametrize('transport,origin', [('', 'ORACLE_TEST_URL'), ('cloudflare', 'MAC_TEST_URL')])
+def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_path, monkeypatch, transport, origin):
+    monkeypatch.setenv('ORACLE_PREVIEW_SSH_TRANSPORT', transport)
     queue = core['Queue'](tmp_path / 'queue.sqlite')
     events = []
     published = {}
@@ -40,7 +42,7 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
     def host(request):
         action = request['action']
         if action == 'tick':
-            return queue.tick(request['eligible'], now)
+            return queue.tick(request['eligible'])
         if action == 'status':
             with queue.transaction() as conn:
                 return queue.describe(queue.slot(conn))
@@ -48,8 +50,8 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
             events.append(('clean', request['lease']))
             return {}
         if action == 'released':
-            return queue.acknowledge(request['lease'], action, now)
-        slot = queue.acknowledge(request['lease'], action, now, ttl_seconds=1800,
+            return queue.acknowledge(request['lease'], action)
+        slot = queue.acknowledge(request['lease'], action,
                                  eligible=request.get('eligible'))
         return dict(slot, test_roles=['field_qe', 'manager']) if action == 'ready' else slot
 
@@ -74,6 +76,7 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
     first = json.loads(receipt.read_text())
     assert first['pr'] == 45
     assert first['sha'] == next_candidates[1][0]['merge']
+    assert first['url'] == client[origin]
     assert events == [('start', 45), ('deploy', 45, 145), ('health', 45)]
     published[first['queue_lease']] = {'id': 12}
 
@@ -132,20 +135,107 @@ def test_production_waits_for_shared_host_lock_but_not_auth_errors(monkeypatch):
         wait({'RELEASE_KIND': 'production'})
 
 
-def test_fixed_health_rejects_success_from_the_wrong_pr(monkeypatch):
+@pytest.mark.parametrize('transport,origin', [('', 'ORACLE_TEST_URL'), ('cloudflare', 'MAC_TEST_URL')])
+def test_fixed_health_rejects_success_from_wrong_pr_or_origin(monkeypatch, transport, origin):
     from contextlib import nullcontext
     from io import BytesIO
 
+    monkeypatch.setenv('ORACLE_PREVIEW_SSH_TRANSPORT', transport)
     slot = {'pr': 45, 'merge': 'a' * 40}
     response = BytesIO(b'{"status":"ok"}')
-    response.url = client['URL'] + '/api/health'
+    health_url = client[origin] + '/api/health'
+    response.url = health_url
     response.headers = {
         'X-OpenQMS-Test-PR': '46',
         'X-OpenQMS-Test-Version': slot['merge'],
     }
-    monkeypatch.setattr(client['urllib'].request, 'urlopen',
-                        lambda *args, **kwargs: nullcontext(response))
+    def open_health(url, timeout):
+        assert url == health_url
+        return nullcontext(response)
+
+    monkeypatch.setattr(client['urllib'].request, 'urlopen', open_health)
     with pytest.raises(RuntimeError, match='version|health'):
         client['public_health'](slot)
     response.headers['X-OpenQMS-Test-PR'] = '45'
+    response.url = 'https://unrelated.example/api/health'
+    with pytest.raises(RuntimeError, match='health'):
+        client['public_health'](slot)
+    response.url = health_url
     client['public_health'](slot)
+
+
+def test_candidate_fetch_uses_scoped_git_https_basic_auth(monkeypatch):
+    import base64
+
+    monkeypatch.setenv('GH_TOKEN', 'test-placeholder-token')
+    calls = []
+    monkeypatch.setattr(client['subprocess'], 'run', lambda args, **params: calls.append((args, params)))
+    slot = dict(fixture_row(45)[0], lease='d' * 32)
+    client['deploy'](slot, 145)
+
+    fetch, release = calls
+    assert fetch[0] == ['git', 'fetch', '--no-tags', 'origin', slot['merge']]
+    assert 'test-placeholder-token' not in ' '.join(fetch[0])
+    environment = fetch[1]['env']
+    assert environment['GIT_CONFIG_KEY_0'] == 'http.https://github.com/.extraheader'
+    scheme, encoded = environment['GIT_CONFIG_VALUE_0'].removeprefix('AUTHORIZATION: ').split()
+    assert scheme == 'basic'
+    assert base64.b64decode(encoded).decode() == 'x-access-token:test-placeholder-token'
+    assert environment['GIT_TERMINAL_PROMPT'] == '0'
+    assert 'GIT_CONFIG_VALUE_0' not in release[1]['env']
+    assert release[1]['env']['ORACLE_SHARED_TEST_LEASE'] == slot['lease']
+
+
+def test_first_certificate_activation_allows_bounded_https_retry(monkeypatch):
+    from contextlib import nullcontext
+    from io import BytesIO
+    from urllib.error import URLError
+
+    monkeypatch.delenv('ORACLE_PREVIEW_SSH_TRANSPORT', raising=False)
+    slot = {'pr': 45, 'merge': 'a' * 40}
+    response = BytesIO(b'{"status":"ok"}')
+    response.url = client['ORACLE_TEST_URL'] + '/api/health'
+    response.headers = {'X-OpenQMS-Test-PR': '45', 'X-OpenQMS-Test-Version': slot['merge']}
+    requests = iter([URLError('TLS not yet available'), response])
+    waits = []
+
+    def open_url(*args, **kwargs):
+        value = next(requests)
+        if isinstance(value, Exception):
+            raise value
+        return nullcontext(value)
+
+    monkeypatch.setattr(client['urllib'].request, 'urlopen', open_url)
+    monkeypatch.setattr(client['time'], 'sleep', waits.append)
+    client['public_health'](slot)
+    assert waits == [3]
+
+
+@pytest.mark.parametrize('permission, comment_patch, allowed', [
+    ('admin', {}, True),
+    ('maintain', {}, True),
+    ('write', {}, False),
+    ('read', {}, False),
+    ('admin', {'body': '/test-switch 45'}, False),
+    ('admin', {'issue_url': 'https://api.github.com/repos/owner/OpenQMS/issues/45'}, False),
+    ('admin', {'user': {'login': 'ci-bot', 'type': 'Bot'}}, False),
+])
+def test_switch_command_revalidates_live_comment_and_author(permission, comment_patch, allowed):
+    class GitHub:
+        repo = 'owner/OpenQMS'
+
+        def get(self, path):
+            if path == '/issues/comments/81':
+                return dict({'id': 81, 'body': '/test-switch',
+                             'issue_url': 'https://api.github.com/repos/owner/OpenQMS/issues/48',
+                             'user': {'login': 'reviewer', 'type': 'User'}}, **comment_patch)
+            assert path == '/collaborators/reviewer/permission'
+            return {'permission': permission}
+
+    event = {'action': 'created', 'issue': {'number': 48, 'pull_request': {'url': 'PR'}},
+             'comment': {'id': 81, 'body': '/test-switch'}}
+    if allowed:
+        assert client['switch_comment'](GitHub(), event) == (48, 81)
+    else:
+        with pytest.raises(ValueError):
+            client['switch_comment'](GitHub(), event)

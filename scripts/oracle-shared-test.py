@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Reconcile Oracle's shared test slot using the trusted default branch."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -9,13 +10,15 @@ import runpy
 import shlex
 import subprocess
 import time
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-URL = 'https://test.preview.openqms.smartindustry.world'
 GATE = runpy.run_path(str(ROOT / 'scripts/oracle-ci-gate.py'))
 ACCEPTANCE = runpy.run_path(str(ROOT / 'scripts/pr-preview-acceptance.py'))
 RELEASE = runpy.run_path(str(ROOT / 'scripts/deploy-oracle-release.py'))
+ORACLE_TEST_URL = ACCEPTANCE['SHARED_TEST_URL']
+MAC_TEST_URL = ACCEPTANCE['MAC_SHARED_TEST_URL']
 
 
 def eligible_releases(api, gate_api):
@@ -51,6 +54,28 @@ def eligible_releases(api, gate_api):
     return sorted(eligible, key=lambda row: row[0]['pr'])
 
 
+def switch_comment(api, event):
+    if event.get('action') != 'created' or not event.get('issue', {}).get('pull_request'):
+        raise ValueError('test switch must be requested in a PR comment')
+    comment_id = event.get('comment', {}).get('id')
+    pr = event['issue'].get('number')
+    if (type(comment_id) is not int or not 0 < comment_id < 2**63
+            or type(pr) is not int or not 0 < pr < 10**9):
+        raise ValueError('invalid test switch comment identity')
+    comment = api.get(f'/issues/comments/{comment_id}')
+    author = comment.get('user') or {}
+    login = author.get('login') or ''
+    if (comment.get('id') != comment_id or comment.get('body', '').strip() != '/test-switch'
+            or event['comment'].get('body', '').strip() != '/test-switch'
+            or comment.get('issue_url') != f'https://api.github.com/repos/{api.repo}/issues/{pr}'
+            or author.get('type') != 'User' or not re.fullmatch(r'[A-Za-z0-9-]+', login)):
+        raise ValueError('test switch comment was removed, edited, or does not match this PR')
+    permission = api.get(f'/collaborators/{login}/permission')['permission']
+    if permission not in {'maintain', 'admin'}:
+        raise ValueError('test switch requires repository maintain or admin permission')
+    return pr, comment_id
+
+
 def queue_call(payload):
     context = dict(os.environ, PREVIEW_PR='1', RELEASE_KIND='preview', RELEASE_SHA='0' * 40,
                    ORACLE_REVALIDATE_CMD='true')
@@ -74,9 +99,13 @@ def deploy(slot, run_id):
     env = dict(os.environ, RELEASE_KIND='preview', RELEASE_SHA=slot['merge'],
                PREVIEW_PR=str(slot['pr']), ORACLE_SHARED_TEST_LEASE=slot['lease'],
                ORACLE_REVALIDATE_CMD=revalidate)
+    # GitHub's Git HTTPS endpoint uses the same Basic token authentication
+    # as the legacy release workflow. Scope the header to GitHub and keep the
+    # encoded credential out of the command line and deployment subprocess.
+    credential = base64.b64encode(('x-access-token:' + os.environ['GH_TOKEN']).encode()).decode('ascii')
     git_env = dict(
         env, GIT_CONFIG_COUNT='1', GIT_CONFIG_KEY_0='http.https://github.com/.extraheader',
-        GIT_CONFIG_VALUE_0='AUTHORIZATION: bearer ' + os.environ['GH_TOKEN'],
+        GIT_CONFIG_VALUE_0='AUTHORIZATION: basic ' + credential, GIT_TERMINAL_PROMPT='0',
     )
     subprocess.run(['git', 'fetch', '--no-tags', 'origin', slot['merge']],
                    env=git_env, cwd=ROOT, check=True)
@@ -84,19 +113,37 @@ def deploy(slot, run_id):
                    env=env, cwd=ROOT, check=True)
 
 
+def shared_origin():
+    if os.environ.get('ORACLE_PREVIEW_SSH_TRANSPORT') == 'cloudflare':
+        return MAC_TEST_URL
+    return ORACLE_TEST_URL
+
+
 def public_health(slot):
-    with urllib.request.urlopen(URL + '/api/health', timeout=30) as response:
-        if (response.url != URL + '/api/health'
-                or response.headers.get('X-OpenQMS-Test-PR') != str(slot['pr'])
-                or response.headers.get('X-OpenQMS-Test-Version') != slot['merge']
-                or json.loads(response.read(4096)).get('status') != 'ok'):
-            raise RuntimeError('fixed test URL health verification failed')
+    health_url = shared_origin() + '/api/health'
+    until = time.monotonic() + 90
+    while True:
+        try:
+            with urllib.request.urlopen(health_url, timeout=15) as response:
+                if (response.url != health_url
+                        or response.headers.get('X-OpenQMS-Test-PR') != str(slot['pr'])
+                        or response.headers.get('X-OpenQMS-Test-Version') != slot['merge']
+                        or json.loads(response.read(4096)).get('status') != 'ok'):
+                    raise RuntimeError('fixed test URL health verification failed')
+                return
+        except (urllib.error.URLError, TimeoutError) as error:
+            # Caddy activates the route before its first certificate is issued.
+            if isinstance(error, urllib.error.HTTPError) and error.code not in {502, 503, 504}:
+                raise
+            if time.monotonic() >= until:
+                raise
+            time.sleep(3)
 
 
 def publication_receipt(api, slot):
     return dict(repository=api.repo, pr=slot['pr'], head=slot['head'],
                 sha=slot['merge'], queue_lease=slot['lease'], plan=slot['plan'],
-                expires_at=slot['expires_at'], test_roles=slot['test_roles'])
+                expires_at=slot['expires_at'], test_roles=slot['test_roles'], url=shared_origin())
 
 
 def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_file, d4_file=None):
@@ -108,20 +155,19 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
         ACCEPTANCE['shared_test_released_notice'](api, slot)
         host(dict(action='released', lease=slot['lease']))
 
-    # Prefer a valid human receipt before tick considers the lease expired or stale.
+    # Prefer a valid human receipt before tick considers switching the lease.
     current = host(dict(action='status'))
     if current['phase'] == 'testing':
         row = next((row for row in eligible if row[0]['pr'] == current['pr']), None)
         if row and all(row[0][key] == current[key] for key in row[0]):
             run = ACCEPTANCE['publication'](api, row[2], queue_lease=current['lease'])
             if run and ACCEPTANCE['verified_acceptance'](api, row[2], run, current['plan']):
-                if time.time() < current['expires_at']:
-                    check_health(current)
-                    proofs = run.get('d4_evidence')
-                    request = dict(action='passed', lease=current['lease'], eligible=versions)
-                    if proofs:
-                        request.update(action='d4-passed', proofs=proofs)
-                    release(host(request))
+                check_health(current)
+                proofs = run.get('d4_evidence')
+                request = dict(action='passed', lease=current['lease'], eligible=versions)
+                if proofs:
+                    request.update(action='d4-passed', proofs=proofs)
+                release(host(request))
 
     slot = host(dict(action='tick', eligible=versions))
     if slot['phase'] == 'releasing':
@@ -173,7 +219,7 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
             if required and not published.get('d4_evidence'):
                 proofs = host(dict(action='d4-evidence', lease=slot['lease']))
                 receipt = published['shared_test']
-                if ACCEPTANCE['valid_d4_evidence'](receipt, proofs) and required <= proofs.keys():
+                if ACCEPTANCE['valid_d4_evidence'](proofs) and required <= proofs.keys():
                     payload = dict(receipt, proofs=proofs, deployment_run=published['id'])
                     d4_file.write_text(json.dumps(payload))
         ACCEPTANCE['shared_test_ready_notice'](api, pr, published, slot['plan'])
@@ -183,6 +229,7 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--list', action='store_true', help='read-only eligibility check')
+    parser.add_argument('--retry-pr', type=int, default=0)
     parser.add_argument('--receipt', type=Path)
     parser.add_argument('--d4-evidence', type=Path)
     args = parser.parse_args()
@@ -197,6 +244,19 @@ def main():
         return
     if args.receipt is None:
         parser.error('--receipt is required when running the queue')
+    if os.environ.get('GITHUB_EVENT_NAME') == 'issue_comment':
+        number, comment_id = switch_comment(api, json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text()))
+        releases = [row[0] for row in get_eligible()]
+        target = next((release for release in releases if release['pr'] == number), None)
+        if target is None:
+            parser.error('test switch requires a current CI-authorized release')
+        queue_call(dict(action='switch', comment_id=comment_id, release=target, eligible=releases))
+        print(f'Test switch requested for PR #{number}', flush=True)
+    if args.retry_pr:
+        matching = next((row[0] for row in get_eligible() if row[0]['pr'] == args.retry_pr), None)
+        if matching is None:
+            parser.error('retry requires a current CI-authorized release')
+        queue_call(dict(action='retry', release=matching))
     reconcile(api, get_eligible, queue_call, deploy, public_health, args.receipt, args.d4_evidence)
 
 

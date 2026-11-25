@@ -234,7 +234,7 @@ def test_hook_counts_actual_reports(when, outcome, xfail, expected):
     from types import SimpleNamespace
     pure = load('check-sdk-pure.py')
     counter = pure.Counts()
-    report = SimpleNamespace(when=when, passed=outcome == 'passed',
+    report = SimpleNamespace(nodeid='fixture', when=when, passed=outcome == 'passed',
         failed=outcome == 'failed', skipped=outcome == 'skipped', longrepr='')
     if xfail:
         report.wasxfail = 'fixture'
@@ -246,9 +246,45 @@ def test_hook_counts_actual_reports(when, outcome, xfail, expected):
 def test_strict_xpass_is_counted_not_hidden_as_ordinary_failure():
     from types import SimpleNamespace
     counter = load('check-sdk-pure.py').Counts()
-    counter.pytest_runtest_logreport(SimpleNamespace(when='call', passed=False,
-        failed=True, skipped=False, longrepr='[XPASS(strict)] fixture'))
+    counter.pytest_runtest_logreport(SimpleNamespace(nodeid='fixture', when='call',
+        passed=False, failed=True, skipped=False, longrepr='[XPASS(strict)] fixture'))
     assert counter.values['xpassed'] == 1
+
+
+def test_failure_diagnostics_record_only_collection_positions():
+    from types import SimpleNamespace
+    counter = load('check-sdk-pure.py').Counts()
+    fixture_id = 'test_example[private-fixture-data]'
+    counter.pytest_collection_finish(SimpleNamespace(items=[
+        SimpleNamespace(nodeid='test_other'),
+        SimpleNamespace(nodeid=fixture_id),
+    ]))
+    for phase in ('call', 'teardown'):
+        counter.pytest_runtest_logreport(SimpleNamespace(nodeid=fixture_id, when=phase,
+            passed=False, failed=True, skipped=False, longrepr='private failure details'))
+    assert counter.failed_test_positions == [2]
+
+
+@pytest.mark.parametrize('positions,expected', [
+    ([2], [2]),
+    (['private failure details'], None),
+    ([True, 3], None),
+    ([1] * 11, None),
+])
+def test_gate_exposes_only_valid_failure_positions(tmp_path, monkeypatch, positions, expected):
+    check = load('check-sdk.py')
+
+    def fail(command, **kwargs):
+        receipt = dict.fromkeys(check.COUNTERS, 0)
+        receipt.update(selected=2, passed=1, failed=1, exit=1, elapsed=0.01,
+                       layer='unit', pure=True, failed_test_positions=positions)
+        (tmp_path / 'unit-pytest.json').write_text(json.dumps(receipt))
+        return subprocess.CompletedProcess(command, 1)
+
+    fake_popen(monkeypatch, check, fail)
+    result = check.pytest_layer('unit', tmp_path, check.environment(tmp_path))
+    assert result['status'] == 'FAIL'
+    assert result.get('failed_test_positions') == expected
 
 
 @pytest.mark.parametrize('code', [1, 5, 124])

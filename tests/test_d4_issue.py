@@ -50,6 +50,33 @@ def test_requires_dedicated_database_and_live_lease(config, env):
         issue.input_config(config, env, 2002, 2002, 1600)
 
 
+@pytest.mark.parametrize('socket_path', ['/run/openqms-d4-db', '%2Frun%2Fopenqms-d4-db'])
+def test_accepts_exact_dedicated_database_socket(config, env, socket_path):
+    dsn = 'postgresql+asyncpg://issuer:instance-password@/qms_d4_acceptance?host=' + socket_path
+    issue.input_config(dict(config, db_host=issue.DB_SOCKET), dict(env, DATABASE_URL=dsn), 2002, 2002, 1500)
+
+
+@pytest.mark.parametrize('authority,query', [
+    ('', ''),
+    ('', 'host=/run/other-db'),
+    ('', 'host=/run/openqms-d4-db&host=/run/other-db'),
+    ('', 'host=/run/openqms-d4-db&port=5433'),
+    ('', 'host=/run/openqms-d4-db&unexpected='),
+    ('postgres', 'host=/run/openqms-d4-db'),
+    (':5433', 'host=/run/openqms-d4-db'),
+])
+def test_rejects_other_endpoints_for_dedicated_database_socket(config, env, authority, query):
+    dsn = f'postgresql+asyncpg://issuer:instance-password@{authority}/qms_d4_acceptance?{query}'
+    with pytest.raises(ValueError, match='dedicated test'):
+        issue.input_config(dict(config, db_host=issue.DB_SOCKET), dict(env, DATABASE_URL=dsn), 2002, 2002, 1500)
+
+
+def test_rejects_socket_query_for_dns_database_host(config, env):
+    dsn = env['DATABASE_URL'] + '?host=/run/openqms-d4-db'
+    with pytest.raises(ValueError, match='dedicated test'):
+        issue.input_config(config, dict(env, DATABASE_URL=dsn), 2002, 2002, 1500)
+
+
 def test_real_application_routes_and_private_issuance_record(config, tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, 'app.services.agent_runtime.local_d4_text_policy',
                         SimpleNamespace(TEXT_WORKER_SHA256='a' * 64))

@@ -1,8 +1,8 @@
 # D4 浏览器入口
 
-本入口部署在受信 HTTPS 域名。它为一次发放展示合成报告标识和两项固定操作，浏览器向 `/scenario/d4-deliver` 或 `/scenario/d4-revoke` 发送空 POST。只能用本轮专用账号登录。入口拒绝跨来源操作、超期发放及身份不一致的回执。缺少执行器或真实回执时显示「受阻」。
+本入口部署在受信 HTTPS 域名。它为一次发放展示合成报告标识和两项固定操作，浏览器向 `/scenario/d4-deliver` 或 `/scenario/d4-revoke` 发送空 POST。可从共享测试站页眉的「D4 验收」进入。使用当前测试位的 Engineer 或 Manager 账号登录，入口只开放验收计划分配给该角色的操作。入口拒绝跨来源操作、超期发放及身份不一致的回执。缺少执行器或真实回执时显示「受阻」。
 
-服务实例通过受保护的独立配置文件绑定 PR、head、merge、计划、测试位、合成报告和起止时间。配置文件归服务用户所有，权限为 `0600`。它包含独立的 `username`、16 字节十六进制 `salt`、以 scrypt 参数 `n=16384,r=8,p=1` 生成的十六进制 `password_digest`、`origin`、`executor_socket` 和 `report_label`。在 `binding` 中填写 `pr`、`head`、`merge`、`plan`、`lease`、`report_id`、整数 Unix 秒 `issued_at` 和 `expires_at`。单轮最长一小时。使用与候选应用不同的独立登录凭据。
+服务实例通过受保护的独立配置文件绑定 PR、head、merge、计划、测试位、合成报告和起止时间。配置文件归服务用户所有，权限为 `0600`。它包含共享账号的 `accounts`（每个账号有 `role`、16 字节十六进制 `salt` 和用 scrypt 参数 `n=16384,r=8,p=1` 生成的 `password_digest`）、验收计划对应的 `scenario_roles`、`origin`、`executor_socket` 和 `report_label`。在 `binding` 中填写 `pr`、`head`、`merge`、`plan`、`lease`、`report_id`、整数 Unix 秒 `issued_at` 和 `expires_at`。单轮最长一小时。独立 HTTPS 入口会提示输入共享测试账号。受信主机从当前测试位的 root 专属发放记录生成校验值；候选应用登录令牌和角色声明不参与门户身份校验。
 
 部署入口的调用形式：
 
@@ -43,8 +43,11 @@ python3 deploy/d4-acceptance/browser.py \
 
 1. 在 Oracle 审批完成后，从受审版本运行 `bash deploy/d4-acceptance/install.sh`。它安装专用服务和受信脚本。受信 HTTPS 网关指向宿主回环 8444，并为专用域名使用 `/etc/openqms/d4-acceptance/tls-cert.pem` 与 `tls-key.pem`。私钥由 root 管理，systemd 通过服务凭据交给浏览器进程。
 2. 在活跃的共享测试租约中准备两个同构隔离 case。使用同一受审候选 backend 镜像，两个独立 API、数据库和私密目录。创建 root 独占的租约目录，再按下述命名和标签准备 Docker 对象。取得容器与数据库标识后，在准备 native root 之前登记 `/var/lib/openqms-shared-test/d4/<lease>/prepared.json`（0600）。文件有 `binding` 和 `cases` 两个字段，`binding` 使用当前版本和同一个新合成报告 UUID。每个 case 配置 `api_container_id`、`db_container_id`、`db_image_id`、`db_system_identifier`、`db_host` 和 `api_port`。正常交付另填 `root`、`manifest_sha256`、`nonce`。撤权另填 `revoke_image_id`。参照 [合成任务发放](ISSUANCE.md)。
-3. Docker 对象使用 `openqms.d4-acceptance.lease=<lease>` 标签，API 和数据库另用 role 标签 `openqms.d4-acceptance.role=api` 或 `postgres`。网络为内部桥 `openqms-d4-<lease>`；容器名分别为 `openqms-d4-<lease>-{deliver,revoke}-{api,postgres}`，数据卷名以 `-postgres-data` 结尾。每个 API 只挂载该租约对应 `d4-deliver` 或 `d4-revoke` 的私密目录到 `/run/openqms-d4-issue`，目录为 UID/GID 2002 的 0700。两个 case 的密钥留在各自的独占文件里，回执只引用标识。
-4. 以 root 调用 `python3 /usr/local/lib/openqms/d4-acceptance/provision.py --lease <lease>`。它核对候选镜像实际 ID、初始化真实租户和任务，从 PostgreSQL 独立核对待领取状态，并写入受保护的 profile。随后调用 `python3 /usr/local/lib/openqms/d4-acceptance/portal_issue.py --profile /var/lib/openqms-shared-test/d4/<lease>/profile.json --origin https://<private-host>`，从 root 专属 `portal-credential.json` 经既有私下渠道发放账号。启动 `openqms-d4-acceptance-portal@<lease>.service`，它会启动本轮执行服务。
+3. Docker 对象使用 `openqms.d4-acceptance.lease=<lease>` 标签，API 和数据库另用 role 标签 `openqms.d4-acceptance.role=api` 或 `postgres`。容器名为 `openqms-d4-<lease>-{deliver,revoke}-{api,postgres}`，数据卷名以 `-postgres-data` 结尾。各 API 将该租约对应的 `d4-deliver` 或 `d4-revoke` 私密目录挂载到 `/run/openqms-d4-issue`，目录为 UID/GID 2002 的 0700。两个 case 的密钥留在各自的独占文件里，回执只引用标识。
+   - 两个 PostgreSQL 实例与撤权 API 位于内部桥 `openqms-d4-<lease>`，撤权 API 使用其独占数据库的内部 DNS 名称。
+   - 正常交付 API 使用 `--network none`。原生 receiver 要求其网络命名空间只监听一个数字回环 API 端口。Docker 自定义桥会增加 DNS 监听与 nftables 规则，与这项检查冲突。
+   - 创建 `/var/lib/openqms-shared-test/d4/<lease>/d4-deliver-db-socket`，归该合成 PostgreSQL 的非 root UID 所有，目录权限为 0755。正常交付数据库将该目录以可写方式挂载到 `/var/run/postgresql`，保留默认 5432 socket 端口并关闭 TCP 监听。正常交付 API 将同一目录以只读方式挂载到 `/run/openqms-d4-db`。该 case 的 `prepared.json` 字段 `db_host` 填 `/run/openqms-d4-db`，API 的合成 DSN 使用 `postgresql+asyncpg://<synthetic-user>:<password>@/qms_d4_acceptance?host=/run/openqms-d4-db`。发放前核对两个容器的挂载源是同一租约目录，且 PostgreSQL socket 归该目录所有者。
+4. 以 root 调用 `python3 /usr/local/lib/openqms/d4-acceptance/provision.py --lease <lease>`。它核对候选镜像实际 ID、初始化真实租户和任务，从 PostgreSQL 独立核对待领取状态，并写入受保护的 profile。随后调用 `python3 /usr/local/lib/openqms/d4-acceptance/portal_issue.py --profile /var/lib/openqms-shared-test/d4/<lease>/profile.json --origin https://<private-host> --deliver-role field_qe --revoke-role field_qe`。这里使用 #45 的角色设置，其他 PR 按与当前租约计划摘要匹配的验收计划填写两项角色。共享测试账号继续从原有 root 专属记录经私下渠道发放。启动 `openqms-d4-acceptance-portal@<lease>.service`，它会启动本轮执行服务。
 5. 队列退役触发已安装的 `cleanup.py`。它验证当前正在清理的租约，停止该轮服务，验证已使用的 native receiver 回收，删除该轮独占 Docker 对象、凭据和租约目录。无法核实回收时，队列保留原租约，下次轮询可重试。
 
 从审查通过的源码根目录构建撤权 receiver，显式指定已批准的 Python 基础镜像 digest。Dockerfile 核验复用的只读 receiver worker 文件摘要。

@@ -162,24 +162,72 @@ class PreviewRemoteTests(unittest.TestCase):
                     self.assertEqual(docker.call_args.args[0],['docker','inspect','buildx_buildkit_openqms-preview-builder0'])
 
     def test_canonical_nanocpus_builder_runs_builds(self):
-        obj = release()
-        config = {'Memory':2147483648,'NanoCpus':2000000000,
-                  'PidsLimit':512,'CpuQuota':0,'CpuPeriod':0}
-        inspected = Mock(stdout=json.dumps([{'HostConfig':config}]))
         images = {'backend':'sha256:'+'a'*64,'web':'sha256:'+'b'*64}
-        with patch.object(obj,'verify'), patch.object(obj,'provision'), patch.object(m.prod,'digest',return_value='same'), patch.object(m.prod,'run',return_value=inspected) as docker, patch.object(obj,'image_ids',return_value=images), patch.object(obj,'compose'):
-            self.assertEqual(obj.build(),images)
-            builds=[call for call in docker.call_args_list if call.args[0][:3]==['docker','buildx','build']]
-            self.assertEqual(len(builds),2)
-            backend,web=[call.args[0] for call in builds]
-            def build_args(argv):
-                return [argv[i+1] for i,value in enumerate(argv) if value=='--build-arg']
-            self.assertIn('PIP_INDEX_URL=https://pypi.org/simple',build_args(backend))
-            self.assertFalse(any(arg.startswith('PIP_INDEX_URL=') for arg in build_args(web)))
-            self.assertIn('RELEASE_SHA='+obj.sha,build_args(backend))
-            self.assertIn('RELEASE_SHA='+obj.sha,build_args(web))
-            self.assertEqual(backend[-1],str(obj.source/'backend'))
-            self.assertEqual(web[-1],str(obj.source/'.'))
+        for mac, lease, memory in ((False, None, 2147483648), (False, 'd' * 32, 2147483648),
+                                   (True, 'd' * 32, 3758096384)):
+            obj = m.PreviewRelease('12', 'a' * 40, 'b' * 64, 'c' * 64, shared_lease=lease)
+            config = {'Memory': memory, 'NanoCpus': 2000000000, 'PidsLimit': 512, 'CpuQuota': 0, 'CpuPeriod': 0}
+            builder = {'HostConfig': config}
+            if mac:
+                config['NetworkMode'] = m.MAC_BUILD_NETWORK
+                builder['NetworkSettings'] = {'Networks': {m.MAC_BUILD_NETWORK: {}}}
+            inspected = Mock(stdout=json.dumps([builder]))
+            with self.subTest(mac=mac, lease=lease), patch.object(m.helper, 'mac_shared_profile', return_value=mac), patch.object(obj,'verify'), patch.object(obj,'provision'), patch.object(m.prod,'digest',return_value='same'), patch.object(m.prod,'run',return_value=inspected) as docker, patch.object(obj,'image_ids',return_value=images), patch.object(obj,'compose'):
+                self.assertEqual(obj.build(),images)
+                builds=[call for call in docker.call_args_list if call.args[0][:3]==['docker','buildx','build']]
+                self.assertEqual(len(builds),2)
+                backend,web=[call.args[0] for call in builds]
+                def build_args(argv):
+                    return [argv[i+1] for i,value in enumerate(argv) if value=='--build-arg']
+                self.assertIn('PIP_INDEX_URL=https://pypi.org/simple',build_args(backend))
+                self.assertFalse(any(arg.startswith('PIP_INDEX_URL=') for arg in build_args(web)))
+                self.assertIn('RELEASE_SHA='+obj.sha,build_args(backend))
+                self.assertIn('RELEASE_SHA='+obj.sha,build_args(web))
+                self.assertEqual(backend[-1],str(obj.source/'backend'))
+                self.assertEqual(web[-1],str(obj.source/'.'))
+                self.assertFalse(any(arg.startswith('VITE_PUBLIC_DEMO_') for arg in build_args(backend)))
+                demo_args = [arg for arg in build_args(web) if arg.startswith('VITE_PUBLIC_DEMO_')]
+                if lease is None:
+                    self.assertEqual(demo_args, [])
+                else:
+                    demo = dict(arg.split('=', 1) for arg in demo_args)
+                    self.assertEqual(demo['VITE_PUBLIC_DEMO_ENABLED'], 'true')
+                    self.assertEqual(demo['VITE_PUBLIC_DEMO_USERNAME'], 'viewer')
+                    self.assertTrue(demo['VITE_PUBLIC_DEMO_PASSWORD'])
+                    accounts = json.loads(demo['VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS'])
+                    self.assertEqual([account['username'] for account in accounts],
+                                     ['demo-engineer', 'demo-manager'])
+                    self.assertTrue(all(set(account) == {'username', 'password'} and account['password']
+                                        for account in accounts))
+
+    def test_builder_memory_bound_cannot_be_raised_without_mac_shared_lease(self):
+        for mac, lease, memory in ((False, 'd' * 32, 3758096384), (True, 'd' * 32, 3758096385),
+                                   (True, None, 3758096384)):
+            obj = m.PreviewRelease('12', 'a' * 40, 'b' * 64, 'c' * 64, shared_lease=lease)
+            config = {'Memory': memory, 'NanoCpus': 2000000000, 'PidsLimit': 512, 'CpuQuota': 0, 'CpuPeriod': 0}
+            inspected = Mock(stdout=json.dumps([{'HostConfig': config}]))
+            with self.subTest(mac=mac, lease=lease, memory=memory), patch.object(m.helper, 'mac_shared_profile', return_value=mac), patch.object(obj, 'verify'), patch.object(obj, 'provision'), patch.object(m.prod, 'digest', return_value='same'), patch.object(m.prod, 'run', return_value=inspected) as docker:
+                with self.assertRaisesRegex(ValueError, 'bounded preview builder'):
+                    obj.build()
+                docker.assert_called_once()
+
+    def test_mac_builder_refuses_default_or_additional_networks(self):
+        obj = m.PreviewRelease('12', 'a' * 40, 'b' * 64, 'c' * 64, shared_lease='d' * 32)
+        for network_mode, networks in (('bridge', {'bridge': {}}),
+                                       (m.MAC_BUILD_NETWORK, {m.MAC_BUILD_NETWORK: {}, 'bridge': {}})):
+            config = {'Memory': 3758096384, 'NanoCpus': 2000000000, 'PidsLimit': 512,
+                      'CpuQuota': 0, 'CpuPeriod': 0, 'NetworkMode': network_mode}
+            builder = {'HostConfig': config, 'NetworkSettings': {'Networks': networks}}
+            inspected = Mock(stdout=json.dumps([builder]))
+            with self.subTest(networks=networks), patch.object(m.helper, 'mac_shared_profile', return_value=True), patch.object(obj, 'verify'), patch.object(obj, 'provision'), patch.object(m.prod, 'digest', return_value='same'), patch.object(m.prod, 'run', return_value=inspected) as docker:
+                with self.assertRaisesRegex(ValueError, 'dedicated build network'):
+                    obj.build()
+                docker.assert_called_once()
+
+    def test_mac_profile_refuses_unleased_preview_before_verifying_release(self):
+        with patch.object(m.helper, 'mac_shared_profile', return_value=True):
+            with self.assertRaisesRegex(ValueError, 'requires a shared-test lease'):
+                release().verify()
 
     def test_bad_runtime_image_never_publishes_route(self):
         obj = release()

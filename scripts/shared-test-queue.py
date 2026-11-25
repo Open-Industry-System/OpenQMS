@@ -9,7 +9,6 @@ import json
 import re
 import sqlite3
 import sys
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -49,6 +48,9 @@ class Queue:
             connection.execute('''CREATE TABLE IF NOT EXISTS completed (
                 release TEXT PRIMARY KEY, outcome TEXT NOT NULL
             )''')
+            connection.execute('''CREATE TABLE IF NOT EXISTS switch_requests (
+                comment_id INTEGER PRIMARY KEY, release TEXT NOT NULL, pending INTEGER NOT NULL
+            )''')
             yield connection
             connection.commit()
         finally:
@@ -81,20 +83,60 @@ class Queue:
             releases[pr] = encoded
         return releases
 
-    def tick(self, eligible, now):
+    def request_switch(self, comment_id, release, eligible):
+        if type(comment_id) is not int or not 0 < comment_id < 2**63:
+            raise ValueError('invalid switch comment ID')
+        requested = identity(release)
+        if self.snapshot(eligible).get(release['pr']) != requested:
+            raise ValueError('switch target is not currently eligible')
+        with self.transaction() as connection:
+            replay = connection.execute(
+                'SELECT release FROM switch_requests WHERE comment_id = ?', (comment_id,)
+            ).fetchone()
+            if replay:
+                if replay['release'] != requested:
+                    raise ValueError('switch comment is already bound to a different version')
+                return self.describe(self.slot(connection))
+            if connection.execute('SELECT 1 FROM switch_requests WHERE pending = 1').fetchone():
+                raise ValueError('another switch is already pending')
+            outcome = connection.execute('SELECT outcome FROM completed WHERE release = ?', (requested,)).fetchone()
+            if outcome and outcome['outcome'] == 'passed':
+                raise ValueError('switch target already passed acceptance')
+            slot = self.slot(connection)
+            pending = slot is None or slot['release'] != requested or slot['phase'] == 'releasing'
+            connection.execute('INSERT INTO switch_requests VALUES (?, ?, ?)', (comment_id, requested, pending))
+            return self.describe(slot)
+
+    def tick(self, eligible):
         releases = self.snapshot(eligible)
         current = set(releases.values())
         with self.transaction() as connection:
+            request = connection.execute(
+                'SELECT comment_id, release FROM switch_requests WHERE pending = 1'
+            ).fetchone()
+            if request and request['release'] not in current:
+                connection.execute('UPDATE switch_requests SET pending = 0 WHERE comment_id = ?',
+                                   (request['comment_id'],))
+                request = None
             slot = self.slot(connection)
             if slot:
                 if slot['phase'] == 'testing':
                     obsolete = slot['release'] not in current
-                    if obsolete or now >= slot['expires_at']:
-                        self.release(connection, 'superseded' if obsolete else 'expired')
+                    if obsolete:
+                        self.release(connection, 'superseded')
+                    elif request and request['release'] != slot['release']:
+                        self.release(connection, 'switched')
                 return self.describe(self.slot(connection))
 
-            for pr in sorted(releases):
-                release = releases[pr]
+            if request:
+                preferred = request['release']
+                connection.execute('UPDATE switch_requests SET pending = 0 WHERE comment_id = ?',
+                                   (request['comment_id'],))
+                connection.execute("DELETE FROM completed WHERE release = ? AND outcome != 'passed'", (preferred,))
+                ordered = [preferred, *(releases[pr] for pr in sorted(releases) if releases[pr] != preferred)]
+            else:
+                ordered = [releases[pr] for pr in sorted(releases)]
+            for release in ordered:
                 if connection.execute(
                     'SELECT 1 FROM completed WHERE release = ?', (release,)
                 ).fetchone():
@@ -106,7 +148,19 @@ class Queue:
                 break
             return self.describe(self.slot(connection))
 
-    def acknowledge(self, lease, event, now, ttl_seconds=None, eligible=None):
+    def retry_failed(self, release):
+        encoded = identity(release)
+        with self.transaction() as connection:
+            if self.slot(connection):
+                raise ValueError('retry requires an idle shared test slot')
+            result = connection.execute(
+                'DELETE FROM completed WHERE release = ? AND outcome = ?', (encoded, 'deploy-failed')
+            )
+            if result.rowcount != 1:
+                raise ValueError('only an exact deployment failure may be retried')
+            return {'phase': 'idle'}
+
+    def acknowledge(self, lease, event, eligible=None):
         with self.transaction() as connection:
             slot = self.slot(connection)
             if not slot or slot['lease'] != lease:
@@ -119,22 +173,16 @@ class Queue:
                     raise ValueError('release is no longer eligible')
 
             if event == 'ready' and phase == 'deploying':
-                if type(ttl_seconds) is not int or not 0 < ttl_seconds <= 24 * 3600:
-                    raise ValueError('acceptance window must be between 1 and 86400 seconds')
-                connection.execute(
-                    "UPDATE slot SET phase = 'testing', expires_at = ? WHERE singleton = 1",
-                    (now + ttl_seconds,),
-                )
+                connection.execute("UPDATE slot SET phase = 'testing', expires_at = NULL WHERE singleton = 1")
             elif event == 'deploy-failed' and phase == 'deploying':
                 self.release(connection, event)
             elif event in {'passed', 'failed'} and phase == 'testing':
-                if now >= slot['expires_at']:
-                    raise ValueError('acceptance window expired')
                 self.release(connection, event)
             elif event == 'released' and phase == 'releasing':
-                connection.execute(
-                    'INSERT INTO completed VALUES (?, ?)', (slot['release'], slot['outcome'])
-                )
+                if slot['outcome'] != 'switched':
+                    connection.execute(
+                        'INSERT INTO completed VALUES (?, ?)', (slot['release'], slot['outcome'])
+                    )
                 connection.execute('DELETE FROM slot WHERE singleton = 1')
             else:
                 raise ValueError('event does not match slot phase')
@@ -156,15 +204,13 @@ def main():
     acknowledge = subcommands.add_parser('acknowledge')
     acknowledge.add_argument('lease')
     acknowledge.add_argument('event', choices=['ready', 'deploy-failed', 'passed', 'failed', 'released'])
-    acknowledge.add_argument('--ttl-seconds', type=int)
     args = parser.parse_args()
     queue = Queue(args.database)
-    now = int(time.time())
     if args.command == 'tick':
-        result = queue.tick(json.load(sys.stdin), now)
+        result = queue.tick(json.load(sys.stdin))
     else:
         current = json.load(sys.stdin) if args.event in {'ready', 'passed', 'failed'} else None
-        result = queue.acknowledge(args.lease, args.event, now, args.ttl_seconds, current)
+        result = queue.acknowledge(args.lease, args.event, eligible=current)
     print(json.dumps(result, sort_keys=True))
 
 

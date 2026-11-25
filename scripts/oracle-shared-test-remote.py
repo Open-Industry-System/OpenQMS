@@ -12,13 +12,15 @@ from uuid import UUID
 
 MODE = Path('/var/lib/openqms-shared-test')
 HOST = 'test.preview.openqms.smartindustry.world'
+MAC_ORIGIN = 'http://test-openqms.smartindustry.world:8080'
 D4_CLEANUP = Path('/usr/local/lib/openqms/d4-acceptance/cleanup.py')
-ACCEPTANCE_SECONDS = 2 * 3600
 LEASE = re.compile(r'[0-9a-f]{32}')
 REQUEST_LIMIT = 128 * 1024
 
 ACTION_FIELDS = {
     'status': {'action'},
+    'retry': {'action', 'release'},
+    'switch': {'action', 'comment_id', 'release', 'eligible'},
     'd4-evidence': {'action', 'lease'},
     'd4-passed': {'action', 'lease', 'eligible', 'proofs'},
     'tick': {'action', 'eligible'},
@@ -99,10 +101,10 @@ def read_request(source):
     return request
 
 
-def route(slot):
+def route(slot, *, mac=False):
     pr, merge = slot['pr'], slot['merge']
     return (
-        f'{HOST} {{\n'
+        f'{MAC_ORIGIN if mac else HOST} {{\n'
         f'\treverse_proxy openqms-pr-{pr}-web:8080 {{\n'
         f'\t\theader_down X-OpenQMS-Test-PR "{pr}"\n'
         f'\t\theader_down X-OpenQMS-Test-Version "{merge}"\n'
@@ -111,12 +113,12 @@ def route(slot):
     )
 
 
-def owned_route(path, slot, action):
+def owned_route(path, slot, action, *, mac=False):
     # Also inspect symlinks with missing targets. Never overwrite an unmanaged
     # route or remove something installed outside the shared scheduler.
     if path.is_symlink():
         raise ValueError('shared-test route cannot be a symlink')
-    if exists(path) and (slot['phase'] == 'idle' or path.read_text() != route(slot)):
+    if exists(path) and (slot['phase'] == 'idle' or path.read_text() != route(slot, mac=mac)):
         raise ValueError(f'unrelated shared-test route during {action}')
 
 
@@ -159,7 +161,7 @@ def private_file(path):
 
 
 def d4_evidence(slot, now):
-    if slot['phase'] != 'testing' or now >= slot['expires_at']:
+    if slot['phase'] != 'testing':
         return {}
     directory = MODE / 'd4' / slot['lease'] / 'receipts'
     evidence = {}
@@ -180,7 +182,7 @@ def d4_evidence(slot, now):
                 or any(binding[key] != slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease'))
                 or not all(type(value) is int for value in (completed, binding['issued_at'], binding['expires_at']))
                 or not binding['issued_at'] <= completed <= now
-                or not completed < binding['expires_at'] <= slot['expires_at']
+                or not completed < binding['expires_at']
                 or not 0 < binding['expires_at'] - binding['issued_at'] <= 3600
                 or receipt['scenario'] != scenario
                 or not LEASE.fullmatch(receipt['operation'])
@@ -221,12 +223,22 @@ def run(request, preview, queue_type):
     if action == 'status':
         return slot
     helper = preview.helper
+    mac = helper.mac_shared_profile()
     fixed_route = helper.ROUTES / 'shared-test.caddy'
+    if action == 'switch':
+        owned_route(fixed_route, slot, action, mac=mac)
+        if slot['phase'] == 'idle':
+            require_clean_start(preview)
+        return queue.request_switch(request['comment_id'], request['release'], request['eligible'])
+    if action == 'retry':
+        owned_route(fixed_route, slot, action, mac=mac)
+        require_clean_start(preview)
+        return queue.retry_failed(request['release'])
     if action == 'tick':
-        owned_route(fixed_route, slot, action)
+        owned_route(fixed_route, slot, action, mac=mac)
         if slot['phase'] == 'idle' and request['eligible']:
             require_clean_start(preview)
-        return queue.tick(request['eligible'], int(time.time()))
+        return queue.tick(request['eligible'])
 
     lease = request['lease']
     if slot.get('lease') != lease:
@@ -241,19 +253,19 @@ def run(request, preview, queue_type):
         queue.snapshot(request['eligible'])
         if identity not in request['eligible']:
             raise ValueError('shared-test version is no longer eligible')
-        owned_route(fixed_route, slot, action)
+        owned_route(fixed_route, slot, action, mac=mac)
         legacy_route = helper.ROUTES / f'pr-{slot["pr"]}.caddy'
         if exists(legacy_route) or helper.active_prs() != {str(slot['pr'])}:
             raise ValueError('shared-test runtime inventory is not exclusive')
         verify_rollout(preview, slot)
         roles = preview.shared_account_roles(slot['pr'], slot['merge'], lease)
         if slot['phase'] == 'testing':
-            if now >= slot['expires_at'] or not exists(fixed_route):
+            if not exists(fixed_route):
                 raise ValueError('shared-test route is no longer ready')
             return dict(slot, test_roles=roles)
         if not exists(fixed_route):
-            helper.publish(fixed_route, route(slot), helper.validate, helper.reload)
-        ready = queue.acknowledge(lease, 'ready', int(time.time()), ACCEPTANCE_SECONDS, request['eligible'])
+            helper.publish(fixed_route, route(slot, mac=mac), helper.validate, helper.reload)
+        ready = queue.acknowledge(lease, 'ready', eligible=request['eligible'])
         return dict(ready, test_roles=roles)
     if action == 'd4-passed':
         proofs = request['proofs']
@@ -262,13 +274,13 @@ def run(request, preview, queue_type):
                 or any(current_proofs[key] != proof for key, proof in proofs.items())):
             raise ValueError('D4 receipts no longer match active lease')
     if action in {'passed', 'd4-passed'}:
-        return queue.acknowledge(lease, 'passed', now, eligible=request['eligible'])
+        return queue.acknowledge(lease, 'passed', eligible=request['eligible'])
     if action == 'deploy-failed':
-        return queue.acknowledge(lease, action, now)
+        return queue.acknowledge(lease, action)
     if action not in {'release', 'released'} or slot['phase'] != 'releasing':
         raise ValueError('shared-test release does not match slot phase')
 
-    owned_route(fixed_route, slot, action)
+    owned_route(fixed_route, slot, action, mac=mac)
     pr = str(slot['pr'])
     d4_allocation = MODE / 'd4' / lease
     if action == 'release':
@@ -291,4 +303,4 @@ def run(request, preview, queue_type):
             or exists(d4_allocation)
             or pr in helper.active_prs()):
         raise ValueError('shared-test cleanup is not complete')
-    return queue.acknowledge(lease, 'released', int(time.time()))
+    return queue.acknowledge(lease, 'released')

@@ -73,8 +73,8 @@ def test_deleted_confirmation_and_changed_plan_revoke_success():
         assert api.statuses[-1] == (m.ACCEPT, 'success')
         api.comments = []
         m.reconcile(api, pr, [])
-        assert api.statuses[-1] == (m.PLAN, 'success')
-        assert (m.ACCEPT, 'pending') in api.statuses[-3:]
+        assert api.statuses[-1] == (m.ACCEPT, 'pending')
+        assert (m.PLAN, 'success') in api.statuses[-3:]
         api.comments = [comment(body=cmd + '\n所有测试通过，具体结果见截图链接。')]
         pr['body'] = BODY.replace('刷新后', '重新登录后')
         m.reconcile(api, pr, [])
@@ -386,7 +386,14 @@ def test_shared_publication_requires_approved_workflow_run(shared_receipt_api, c
     assert m.publication(api, api.pr, queue_lease=api.receipt['queue_lease']) is None
 
 
-def test_shared_acceptance_rejects_stale_lease_and_edit_after_expiry(shared_receipt_api):
+def test_shared_publication_requires_recognized_test_site(shared_receipt_api):
+    api = shared_receipt_api
+    api.receipt['url'] = 'https://unrelated.example'
+    with pytest.raises(ValueError, match='Invalid shared test publication URL'):
+        m.publication(api, api.pr, queue_lease=api.receipt['queue_lease'])
+
+
+def test_shared_acceptance_rejects_stale_lease_and_accepts_after_legacy_deadline(shared_receipt_api):
     api = shared_receipt_api
     receipt = api.receipt
     run = m.publication(api, api.pr, queue_lease=receipt['queue_lease'])
@@ -398,7 +405,9 @@ def test_shared_acceptance_rejects_stale_lease_and_edit_after_expiry(shared_rece
     api.comments = [comment(body=command + '\nreport-read: 通过\n操作与报告状态均符合预期。')]
     assert m.verified_acceptance(api, api.pr, run, receipt['plan']) == api.comments[0]
     api.comments[0]['updated_at'] = '2026-11-16T03:00:00Z'
-    assert m.verified_acceptance(api, api.pr, run, receipt['plan']) is None
+    assert m.verified_acceptance(api, api.pr, run, receipt['plan']) == api.comments[0]
+    assert m.verified_acceptance(api, api.pr, run, receipt['plan'],
+                                 released_at=m.epoch('2026-11-16T02:59:00Z')) is None
 
 
 def test_shared_release_keeps_timely_confirmation_without_republishing_url(monkeypatch, shared_receipt_api):
@@ -424,6 +433,37 @@ def test_shared_release_keeps_timely_confirmation_without_republishing_url(monke
     assert len(api.notices) == 1
 
 
+@pytest.mark.parametrize('repo,run_id,has_log', [
+    ('owner/repo', '42', True),
+    ('other/repo', '42', False),
+    ('owner/repo', '42) [untrusted](https://example.invalid', False),
+    ('owner/repo', None, False),
+])
+def test_shared_deploy_failure_notice_distinguishes_failed_release(monkeypatch, shared_receipt_api,
+                                                                repo, run_id, has_log):
+    monkeypatch.setenv('GITHUB_REPOSITORY', repo)
+    if run_id is None:
+        monkeypatch.delenv('GITHUB_RUN_ID', raising=False)
+    else:
+        monkeypatch.setenv('GITHUB_RUN_ID', run_id)
+    api = shared_receipt_api
+    receipt = api.receipt
+    slot = dict(pr=api.pr['number'], head=receipt['head'], merge=receipt['sha'],
+                plan=receipt['plan'], lease=receipt['queue_lease'], outcome='deploy-failed')
+    m.shared_test_released_notice(api, slot)
+    m.shared_test_released_notice(api, slot)
+    assert len(api.notices) == 1
+    body = api.notices[0]
+    assert '### 共享测试部署失败' in body
+    assert '当前版本没有可用于验收的测试环境' in body
+    assert '共享测试位已清理' not in body
+    assert m.SHARED_TEST_URL not in body
+    assert ('[工作流日志]' in body) is has_log
+    if has_log:
+        assert '[工作流日志](https://github.com/owner/repo/actions/runs/42)' in body
+    assert m.shared_release_marker(api, api.pr, receipt['plan'])['outcome'] == 'deploy-failed'
+
+
 def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api):
     monkeypatch.setenv('GITHUB_RUN_ID', '42')
     api = shared_receipt_api
@@ -433,6 +473,59 @@ def test_shared_url_only_appears_in_ready_notice(monkeypatch, shared_receipt_api
     body = m.ready_notice(api.pr, run, api.receipt['plan'])
     assert m.SHARED_TEST_URL in body and 'PR #45' in body
     assert api.receipt['queue_lease'] in body
+    assert '等待人工验收' in body and '本轮验收截止' not in body
+    assert 'report-read: <通过、失败或受阻>' in body
+
+
+@pytest.mark.parametrize('origin', [m.SHARED_TEST_URL, m.MAC_SHARED_TEST_URL])
+def test_shared_publication_updates_comment_in_the_deploy_run(monkeypatch, shared_receipt_api, origin):
+    monkeypatch.setenv('GITHUB_RUN_ID', '42')
+    api = shared_receipt_api
+    if origin == m.MAC_SHARED_TEST_URL:
+        api.receipt['url'] = origin
+    api.run.update(status='in_progress', conclusion=None)
+    m.deployment_notice(api, api.pr['number'], api.receipt['sha'], 'started', shared=True)
+    assert m.publication(api, api.pr, shared=True) is None
+
+    m.shared_publication_notice(api, api.receipt)
+
+    assert len(api.notices) == 2
+    assert '### 测试环境已就绪' in api.notices[-1]
+    assert origin in api.notices[-1]
+    assert f'/preview-accept {api.receipt["head"]} 42 {api.receipt["plan"]} {api.receipt["queue_lease"]}' in api.notices[-1]
+    assert m.publication(api, api.pr, shared=True) is None
+
+
+@pytest.mark.parametrize('change', ['head', 'merge', 'plan', 'retired', 'failed', 'other-workflow'])
+def test_shared_publication_notice_refuses_invalid_release(monkeypatch, shared_receipt_api, change):
+    monkeypatch.setenv('GITHUB_RUN_ID', '42')
+    api = shared_receipt_api
+    api.run.update(status='in_progress', conclusion=None)
+    receipt = api.receipt.copy()
+    m.deployment_notice(api, api.pr['number'], receipt['sha'], 'started', shared=True)
+    if change == 'head':
+        api.pr['head']['sha'] = 'd' * 40
+    elif change == 'merge':
+        api.pr['merge_commit_sha'] = 'd' * 40
+    elif change == 'plan':
+        api.pr['body'] = SHARED_BODY.replace('刷新后', '重新登录后')
+    elif change == 'retired':
+        m.shared_test_released_notice(api, dict(pr=receipt['pr'], head=receipt['head'],
+                                               merge=receipt['sha'], plan=receipt['plan'],
+                                               lease=receipt['queue_lease'], outcome='switched'))
+    elif change == 'failed':
+        api.run.update(status='completed', conclusion='failure')
+    elif change == 'other-workflow':
+        api.run['path'] = '.github/workflows/oracle-deploy.yml'
+
+    count = len(api.notices)
+    if change in {'failed', 'other-workflow'}:
+        with pytest.raises(ValueError, match='notification source'):
+            m.shared_publication_notice(api, receipt)
+    else:
+        m.shared_publication_notice(api, receipt)
+    assert len(api.notices) == count
+    assert m.SHARED_TEST_URL not in api.notices[-1]
 
 
 @pytest.mark.parametrize('ending', ['closed', 'updated'])
@@ -552,6 +645,9 @@ def test_d4_acceptance_requires_trusted_current_artifact_and_timely_human_commen
     assert not m.verified_acceptance(api, api.pr, run, receipt['plan'], released_at=expiry - 1)
     assert m.shared_blockers(m.parse_plan(api.pr['body']), receipt, proofs, now=expiry)
 
+    envelope['url'] = m.MAC_SHARED_TEST_URL
+    assert publication()['d4_evidence'] == {}
+    del envelope['url']
     for field, value in [('queue_lease', 'd' * 32), ('sha', 'f' * 40), ('head', 'f' * 40),
                          ('plan', 'f' * 64), ('deployment_run', 9)]:
         original = envelope[field]
@@ -560,3 +656,60 @@ def test_d4_acceptance_requires_trusted_current_artifact_and_timely_human_commen
         envelope[field] = original
     evidence_run['event'] = 'pull_request'
     assert publication()['d4_evidence'] == {}
+
+
+def test_new_lease_can_publish_after_previous_deployment_failure(shared_receipt_api):
+    import time
+
+    api = shared_receipt_api
+    receipt = api.receipt
+    receipt['expires_at'] = int(time.time()) + 3600
+    run = m.publication(api, api.pr, shared=True)
+    previous_lease = 'f' * 32
+    identity = m.shared_identity(receipt['head'], receipt['sha'], receipt['plan'], previous_lease)
+    after_release = m.epoch(run['updated_at']) - 10
+    api.comments = [dict(user=dict(login='github-actions[bot]', type='Bot'),
+                         body=m.NOTICE + f'\n<!-- openqms-shared-test-release:{identity}:deploy-failed:{after_release} -->')]
+    m.shared_test_ready_notice(api, api.pr, run, receipt['plan'])
+    assert m.SHARED_TEST_URL in api.notices[-1]
+
+
+@pytest.mark.parametrize('result', ['report-read:通过', 'report-read：通过', '  report-read ： 通过  '])
+def test_shared_acceptance_allows_crlf_chinese_colons_and_whitespace(shared_receipt_api, result):
+    api = shared_receipt_api
+    run = m.publication(api, api.pr, shared=True)
+    command = m.acceptance_command(api.pr, run, api.receipt['plan'])
+    api.comments = [comment(body='  ' + command.replace(' ', '  ') + '  \r\n' + result
+                            + '\r\n刷新后报告仍可读取。\r\n')]
+    assert m.verified_acceptance(api, api.pr, run, api.receipt['plan']) == api.comments[0]
+
+
+@pytest.mark.parametrize('result,reason', [
+    ('report-read: <通过、失败或受阻>', '缺少验收结果 report-read'),
+    ('ci-home: 通过', '缺少验收结果 report-read。计划没有这些验收项 ci-home'),
+    ('report-read：受阻', '验收项未通过 report-read（受阻）'),
+    ('report-read: 通过\r\nreport-read：失败', '验收项重复 report-read。验收项未通过 report-read（失败）'),
+])
+def test_current_result_explains_rejection_without_accepting_it(shared_receipt_api, result, reason):
+    api = shared_receipt_api
+    run = m.publication(api, api.pr, shared=True)
+    digest = api.receipt['plan']
+    cmd = m.acceptance_command(api.pr, run, digest)
+    api.comments = [comment(body=f'{cmd}\r\n{result}\r\n实际验收结果见说明。')]
+    assert m.acceptance_result(api, api.pr, run, digest) == (None, reason)
+
+
+def test_reconcile_reports_wrong_lease_and_real_item_in_template(shared_receipt_api, monkeypatch):
+    monkeypatch.setenv('ORACLE_SHARED_TEST_ENABLED', 'true')
+    api = shared_receipt_api
+    run = m.publication(api, api.pr, shared=True)
+    command = m.acceptance_command(api.pr, run, api.receipt['plan'])
+    api.comments = [comment(body=command.rsplit(' ', 1)[0] + ' ' + 'd'*32
+                            + '\nreport-read: 通过\n实际验收记录已上传。')]
+    checks = []
+    monkeypatch.setattr(api, 'status', lambda _, context, state, description: checks.append((context, state, description)))
+    summary = []
+    m.reconcile(api, api.pr, summary)
+    assert checks[-1][:2] == (m.ACCEPT, 'pending')
+    assert '测试轮次不匹配' in checks[-1][2]
+    assert any('report-read: <通过、失败或受阻>' in entry for entry in summary)

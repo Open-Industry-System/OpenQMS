@@ -300,7 +300,23 @@ def test_shared_preview_config_requires_pr_and_pins_known_hosts(local_config):
     args = local.ssh_args(context)
     assert 'StrictHostKeyChecking=yes' in args
     assert 'UserKnownHostsFile=' + context['ORACLE_KNOWN_HOSTS'] in args
+    assert not any(arg.startswith('ProxyCommand=') for arg in args)
     assert '-tt' not in args
+
+
+def test_cloudflare_proxy_is_only_for_pinned_mac_preview(local_config):
+    local = module('deploy-oracle-release')
+    config = dict(local_config, RELEASE_KIND='preview', PREVIEW_PR='17',
+                  ORACLE_PREVIEW_SSH_TRANSPORT='cloudflare',
+                  ORACLE_SSH_TARGET='openqms-deploy@ssh-test-openqms.smartindustry.world')
+    args = local.ssh_args(local.validate(config))
+    assert 'ProxyCommand=/usr/local/bin/cloudflared access ssh --hostname ssh-test-openqms.smartindustry.world' in args
+    assert 'UserKnownHostsFile=' + config['ORACLE_KNOWN_HOSTS'] in args
+    assert 'StrictHostKeyChecking=yes' in args
+    for wrong in ({'RELEASE_KIND': 'production'}, {'ORACLE_SSH_TARGET': local_config['ORACLE_SSH_TARGET']},
+                  {'ORACLE_PREVIEW_SSH_TRANSPORT': '/tmp/untrusted-command'}):
+        with pytest.raises(ValueError, match='dedicated Mac preview target'):
+            local.validate(dict(config, **wrong))
 
 
 def test_checks_env_removes_target_and_provider_secrets_and_ambient_ci_identity(local_config, monkeypatch):
@@ -424,3 +440,26 @@ def test_production_controller_propagates_only_file_erp_policy_with_safe_legacy_
     compose = next(options for argv,options in calls if argv[:2] == ['docker','compose'])
     assert compose['env']['ERP_ALLOWED_ORIGINS'] == expected
     assert 'DATABASE_URL' not in compose['env']
+
+
+def test_shared_runner_umask_preserves_release_metadata_archive_contract(tmp_path):
+    import os
+    import tarfile
+
+    local = module('deploy-oracle-release')
+    source = tmp_path / 'source'
+    source.mkdir(mode=0o700)
+    bundle = tmp_path / 'release.tar'
+    expected = {'.release-manifest': b'fixture-manifest\n', '.release-sha': b'a' * 40 + b'\n'}
+    previous = os.umask(0o077)
+    try:
+        local.write_release_metadata(source, expected['.release-manifest'], 'a' * 40)
+        with tarfile.open(bundle, 'w') as archive:
+            for name in expected:
+                archive.add(source / name, arcname=name)
+    finally:
+        os.umask(previous)
+    assert source.stat().st_mode & 0o777 == 0o700
+    with tarfile.open(bundle) as archive:
+        assert {entry.name: entry.mode for entry in archive} == dict.fromkeys(expected, 0o644)
+        assert {name: archive.extractfile(name).read() for name in expected} == expected

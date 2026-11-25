@@ -36,10 +36,10 @@ def database_binding(lease, phase):
     root_private(path)
     with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as connection:
         slot = connection.execute(
-            'SELECT lease, release, phase, expires_at FROM slot WHERE singleton = 1'
+            'SELECT lease, release, phase FROM slot WHERE singleton = 1'
         ).fetchone()
     require(slot and slot[0] == lease and slot[2] == phase, 'D4 lease phase does not authorize this action')
-    return dict(json.loads(slot[1]), lease=lease, expires_at=slot[3])
+    return dict(json.loads(slot[1]), lease=lease)
 
 
 def stop_unit(unit, run=command):
@@ -81,9 +81,13 @@ def docker_inventory(lease, run):
             'unexpected D4 Docker inventory')
     for row in containers:
         labels = row['Config']['Labels']
+        network_names = set(row['NetworkSettings']['Networks'])
+        allowed_networks = {prefix}
+        if row['Name'] == f'/{prefix}-deliver-api' and row['HostConfig'].get('NetworkMode') == 'none':
+            allowed_networks = {'none'}
         require(row['Name'] in names and labels.get(LEASE_LABEL) == lease
                 and labels.get(ROLE_LABEL) == names[row['Name']] and HEX64.fullmatch(row['Id'])
-                and set(row['NetworkSettings']['Networks']) <= {prefix}
+                and network_names <= allowed_networks
                 and not row['HostConfig'].get('PortBindings')
                 and not row['HostConfig'].get('Privileged'),
                 'D4 cleanup container ownership mismatch')

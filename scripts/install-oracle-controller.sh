@@ -6,6 +6,23 @@ set -euo pipefail
 repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 exec 9>/run/lock/openqms-deploy.lock
 flock -x 9
+mac_preview=$(python3 -B - "$repo/scripts/oracle-preview.py" <<'PY'
+import runpy
+import sys
+
+print('true' if runpy.run_path(sys.argv[1])['mac_shared_profile']() else 'false')
+PY
+)
+preview_memory=2g
+ssh_permit_open='127.0.0.1:5432 127.0.0.1:25432 127.0.0.1:25433'
+if [[ "$mac_preview" == true ]]; then
+  preview_memory=3584m
+  ssh_permit_open='127.0.0.1:25432 127.0.0.1:25433'
+  [[ "$(docker network inspect --format '{{.Driver}} {{index .Options "com.docker.network.bridge.name"}} {{.EnableIPv6}}' openqms-preview-build)" == 'bridge br-oq-build false' ]] || {
+    echo 'Provision the filtered Mac build bridge br-oq-build as openqms-preview-build first' >&2
+    exit 1
+  }
+fi
 install -d -m 0755 /usr/local/lib/openqms
 controller=$(mktemp -d /usr/local/lib/openqms/.oracle-production.XXXXXXXX)
 trap 'if [[ -n "${controller:-}" && -d "$controller" ]]; then rm -rf -- "$controller"; fi' EXIT
@@ -58,26 +75,31 @@ install -d -m 0755 -o root -g root /home/openqms-deploy/.ssh
 touch /home/openqms-deploy/.ssh/authorized_keys
 chown root:root /home/openqms-deploy/.ssh/authorized_keys
 chmod 0644 /home/openqms-deploy/.ssh/authorized_keys
-python3 - /home/openqms-deploy/.ssh/authorized_keys <<'PYKEYS'
+python3 - /home/openqms-deploy/.ssh/authorized_keys "$mac_preview" <<'PYKEYS'
 from pathlib import Path
 import sys
 production='restrict,port-forwarding,permitopen="127.0.0.1:5432",command="/usr/local/bin/openqms-deploy-ssh production"'
 preview='restrict,port-forwarding,permitopen="127.0.0.1:25432",permitopen="127.0.0.1:25433",command="/usr/local/bin/openqms-deploy-ssh preview"'
+allowed = (preview,) if sys.argv[2] == 'true' else (production, preview)
 for line in Path(sys.argv[1]).read_text().splitlines():
     if not line.strip() or line.lstrip().startswith('#'): continue
-    if not any(line.startswith(options + ' ssh-ed25519 ') for options in (production,preview)):
+    if not any(line.startswith(options + ' ssh-ed25519 ') for options in allowed):
         raise SystemExit('existing deployment key lacks required role/forwarding restrictions')
 PYKEYS
 install -d -m 0700 -o root -g root /var/lib/openqms-releases /var/lib/openqms-previews
 install -d -m 0755 -o root -g root /etc/openqms /etc/openqms/preview-routes
-install -m 0644 "$repo/deploy/production-edge-Caddyfile" /etc/openqms/production-edge-Caddyfile
+if [[ "$mac_preview" == true ]]; then
+  install -m 0644 "$repo/deploy/mac-preview-edge-Caddyfile" "$repo/deploy/mac-preview-edge.compose.yml" /etc/openqms/
+else
+  install -m 0644 "$repo/deploy/production-edge-Caddyfile" /etc/openqms/production-edge-Caddyfile
+fi
 install -m 0644 "$repo/deploy/preview-Caddyfile" /etc/openqms/preview-Caddyfile
 cat > /etc/sudoers.d/openqms-deploy <<'EOF'
 openqms-deploy ALL=(root) NOPASSWD: /usr/local/sbin/openqms-deploy-receiver *
 EOF
 chmod 0440 /etc/sudoers.d/openqms-deploy
 visudo -cf /etc/sudoers.d/openqms-deploy >/dev/null
-cat > /etc/ssh/sshd_config.d/90-openqms-deploy.conf <<'EOF'
+cat > /etc/ssh/sshd_config.d/90-openqms-deploy.conf <<EOF
 Match User openqms-deploy
     AuthenticationMethods publickey
     PasswordAuthentication no
@@ -86,20 +108,38 @@ Match User openqms-deploy
     X11Forwarding no
     AllowAgentForwarding no
     AllowTcpForwarding local
-    PermitOpen 127.0.0.1:5432 127.0.0.1:25432 127.0.0.1:25433
+    PermitOpen $ssh_permit_open
 Match all
 EOF
 sshd -t
 # Reload only after sshd validates; the operator retains their existing admin session.
 systemctl reload ssh
 if ! docker network inspect openqms-preview-edge >/dev/null 2>&1; then
-  docker network create openqms-preview-edge >/dev/null
+  edge_options=()
+  if [[ "$mac_preview" == true ]]; then
+    edge_options=(--opt com.docker.network.bridge.name=br-oq-edge)
+  fi
+  docker network create "${edge_options[@]}" openqms-preview-edge >/dev/null
+fi
+if [[ "$mac_preview" == true ]]; then
+  [[ "$(docker network inspect --format '{{.Driver}} {{index .Options "com.docker.network.bridge.name"}} {{.EnableIPv6}}' openqms-preview-edge)" == 'bridge br-oq-edge false' ]] || {
+    echo 'Mac preview requires the guarded br-oq-edge bridge with IPv6 disabled' >&2
+    exit 1
+  }
 fi
 # Resource-bounded isolated preview builder; no production app resources are reset.
 if ! docker buildx inspect openqms-preview-builder >/dev/null 2>&1; then
-  docker buildx create --name openqms-preview-builder --driver docker-container --driver-opt memory=2g >/dev/null
+  build_options=(--driver-opt "memory=$preview_memory")
+  if [[ "$mac_preview" == true ]]; then
+    build_options+=(--driver-opt network=openqms-preview-build)
+  fi
+  docker buildx create --name openqms-preview-builder --driver docker-container "${build_options[@]}" >/dev/null
 fi
 docker buildx inspect --bootstrap openqms-preview-builder >/dev/null
+if [[ "$mac_preview" == true && "$(docker inspect --format '{{.HostConfig.NetworkMode}} {{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' buildx_buildkit_openqms-preview-builder0)" != 'openqms-preview-build openqms-preview-build' ]]; then
+  echo 'Mac preview requires the BuildKit container attached only to openqms-preview-build' >&2
+  exit 1
+fi
 # Noncanonical CFS fields can override NanoCPUs at runtime even when inspect looks bounded.
 quota=$(docker inspect --format '{{.HostConfig.CpuQuota}}' buildx_buildkit_openqms-preview-builder0)
 period=$(docker inspect --format '{{.HostConfig.CpuPeriod}}' buildx_buildkit_openqms-preview-builder0)
@@ -107,5 +147,9 @@ if [[ "$quota" != 0 || "$period" != 0 ]]; then
   echo 'preview builder has legacy CFS settings; administrator must review and recreate this dedicated builder' >&2
   exit 1
 fi
-docker update --cpus 2 --memory 2g --pids-limit 512 buildx_buildkit_openqms-preview-builder0 >/dev/null
-printf '%s\n' 'Trusted Oracle controller installed; install separate restricted public keys before enabling workflows.'
+docker update --cpus 2 --memory "$preview_memory" --pids-limit 512 buildx_buildkit_openqms-preview-builder0 >/dev/null
+if [[ "$mac_preview" == true ]]; then
+  printf '%s\n' 'Trusted Mac preview controller installed; start the dedicated preview gateway and verify the restricted preview key.'
+else
+  printf '%s\n' 'Trusted Oracle controller installed; install separate restricted public keys before enabling workflows.'
+fi

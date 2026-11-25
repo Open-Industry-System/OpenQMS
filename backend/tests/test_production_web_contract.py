@@ -1,4 +1,5 @@
 import re
+import shlex
 from pathlib import Path
 
 
@@ -187,16 +188,19 @@ def test_caddy_serves_api_before_spa_fallback_on_all_required_listeners():
 def test_frontend_build_keeps_memory_budget_out_of_runtime_image():
     dockerfile = (FRONTEND / "Dockerfile.prod").read_text()
     build_stage, final_stage = dockerfile.split("FROM caddy:2-alpine", maxsplit=1)
-    build_command = build_stage.index('RUN if [ "$VITE_PUBLIC_DEMO_ENABLED"')
-    heap = re.search(
-        r'(?m)^ENV NODE_OPTIONS="--max-old-space-size=(\d+) --max-semi-space-size=(\d+)"$',
-        build_stage,
-    )
-    go_budget = re.search(r"(?m)^ENV GOMEMLIMIT=(\d+)MiB GOMAXPROCS=2$", build_stage)
-
-    assert heap is not None and 0 < int(heap.group(1)) <= 1408
-    assert 0 < int(heap.group(2)) <= 8
-    assert go_budget is not None and 0 < int(go_budget.group(1)) <= 128
-    assert build_stage.index("RUN npm ci") < build_stage.index("COPY frontend/ ./")
-    assert build_stage.index("COPY frontend/ ./") < heap.start() < go_budget.start() < build_command
+    build_stage = build_stage.replace("\\\n", " ")
+    node_env = re.search(r"(?m)^ENV (NODE_OPTIONS=.*)$", build_stage)
+    assert node_env is not None, "build stage must set NODE_OPTIONS"
+    variables = dict(assignment.split("=", maxsplit=1) for assignment in shlex.split(node_env.group(1)))
+    node_options = variables["NODE_OPTIONS"]
+    heap = re.search(r"(?:^|\s)--max-old-space-size=(\d+)(?:\s|$)", node_options)
+    assert heap is not None, "Node build must explicitly bound its heap"
+    semi_space = re.search(r"(?:^|\s)--max-semi-space-size=(\d+)(?:\s|$)", node_options)
+    go_memory = re.fullmatch(r"(\d+)MiB", variables.get("GOMEMLIMIT", ""))
+    assert 0 < int(heap.group(1)) <= 1408
+    assert semi_space is not None and 0 < int(semi_space.group(1)) <= 8
+    assert go_memory is not None and 0 < int(go_memory.group(1)) <= 128
+    assert variables.get("GOMAXPROCS") == "2"
+    assert build_stage.index("RUN npm ci") < build_stage.index("COPY frontend/ ./") < node_env.start()
+    assert node_env.end() < build_stage.index('RUN if [ "$VITE_PUBLIC_DEMO_ENABLED"')
     assert all(name not in final_stage for name in ("NODE_OPTIONS", "GOMEMLIMIT", "GOMAXPROCS"))

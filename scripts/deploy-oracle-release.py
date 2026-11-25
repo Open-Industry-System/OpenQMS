@@ -20,6 +20,7 @@ import time
 from urllib.parse import quote
 
 TRUSTED = Path(__file__).resolve().parents[1]
+MAC_PREVIEW_SSH_HOST = 'ssh-test-openqms.smartindustry.world'
 CONTROLLER_FILES = ('scripts/oracle-production-remote.py', 'scripts/check-release-tree.py', 'docker-compose.prod.yml', 'deploy/preview-edge.override.yml', 'deploy/production-edge-Caddyfile', 'compose.preview.yml', 'scripts/oracle-preview-remote.py', 'scripts/oracle-preview.py', 'scripts/oracle-preview-initialize.py', 'scripts/oracle-preview-db-tunnel.py', 'deploy/preview-Caddyfile')
 
 
@@ -57,6 +58,12 @@ def validate(source):
         if not re.fullmatch(r'[1-9][0-9]{0,8}', source.get('PREVIEW_PR', '')):
             raise ValueError('preview PR required')
         result['PREVIEW_PR'] = source['PREVIEW_PR']
+    transport = source.get('ORACLE_PREVIEW_SSH_TRANSPORT', '')
+    if transport:
+        if (transport != 'cloudflare' or result['RELEASE_KIND'] != 'preview'
+                or target != f'openqms-deploy@{MAC_PREVIEW_SSH_HOST}'):
+            raise ValueError('Cloudflare SSH requires the dedicated Mac preview target')
+        result['ORACLE_PREVIEW_SSH_TRANSPORT'] = transport
     shared_lease = source.get('ORACLE_SHARED_TEST_LEASE')
     if shared_lease:
         if result['RELEASE_KIND'] != 'preview' or not re.fullmatch('[0-9a-f]{32}', shared_lease):
@@ -70,7 +77,10 @@ def revalidate(context):
 
 
 def ssh_args(context):
-    return ['ssh', '-i', context['ORACLE_SSH_KEY'], '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + context['ORACLE_KNOWN_HOSTS'], '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
+    args = ['ssh', '-i', context['ORACLE_SSH_KEY'], '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + context['ORACLE_KNOWN_HOSTS'], '-o', 'ConnectionAttempts=1', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
+    if context.get('ORACLE_PREVIEW_SSH_TRANSPORT') == 'cloudflare':
+        args += ['-o', f'ProxyCommand=/usr/local/bin/cloudflared access ssh --hostname {MAC_PREVIEW_SSH_HOST}']
+    return args
 
 
 def remote_command(context, action):
@@ -84,11 +94,18 @@ def remote_command(context, action):
     return command
 
 
+class RemoteStepError(RuntimeError):
+    pass
+
+
 def remote(context, action, *, data=None):
     command = remote_command(context, action)
     if action in {'identity', 'migrate', 'initialize', 'preflight', 'rollout'}:
         command.append(json.dumps(context['images'], separators=(',', ':')))
-    return run(ssh_args(context) + [context['ORACLE_SSH_TARGET'], shlex.join(command)], data=data)
+    try:
+        return run(ssh_args(context) + [context['ORACLE_SSH_TARGET'], shlex.join(command)], data=data)
+    except RuntimeError as error:
+        raise RemoteStepError(f'Oracle release stopped at remote {action}') from error
 
 
 class LeaseBusy(ValueError):
@@ -229,6 +246,15 @@ def cleanup_test(context):
     run(['docker', 'rm', '-f', '-v', context['test_container_id']])
 
 
+def write_release_metadata(source, manifest, sha):
+    # The private parent stays 0700. These two non-secret transport members
+    # have the explicit file mode required by the receiving archive contract.
+    for name, data in (('.release-manifest', manifest), ('.release-sha', (sha + '\n').encode('ascii'))):
+        metadata = source / name
+        metadata.write_bytes(data)
+        metadata.chmod(0o644)
+
+
 def deploy():
     context = validate(os.environ)
     revalidate(context)  # No source material, target secrets or server mutation before eligibility.
@@ -252,8 +278,9 @@ def deploy():
             tar.extractall(source, filter='data')
         paths = run(['git', '-C', str(TRUSTED), 'ls-tree', '-r', '-z', '--name-only', sha])
         manifest = source / '.release-manifest'
-        manifest.write_bytes(run([sys.executable, str(TRUSTED / 'scripts/check-release-tree.py'), 'create', '--root', str(source)], data=paths))
-        (source / '.release-sha').write_text(sha + '\n')
+        manifest_data = run([sys.executable, str(TRUSTED / 'scripts/check-release-tree.py'), 'create',
+                             '--root', str(source)], data=paths)
+        write_release_metadata(source, manifest_data, sha)
         context['manifest_hash'] = sha256(manifest)
         context['manifest'] = str(manifest)
         controller = ''.join(f'{sha256(TRUSTED / name)}  {name}\n' for name in sorted(CONTROLLER_FILES))
@@ -362,6 +389,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except RemoteStepError as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1)
     except Exception:
-        print('Oracle production release failed; inspect private runner evidence', file=sys.stderr)
+        print('Oracle release failed; inspect private runner evidence', file=sys.stderr)
         raise SystemExit(1)

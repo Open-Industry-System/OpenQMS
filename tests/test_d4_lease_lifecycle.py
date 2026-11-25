@@ -1,9 +1,12 @@
 from contextlib import nullcontext
+import hashlib
 import importlib
 import json
 from pathlib import Path
 import secrets
+import stat
 from time import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -26,7 +29,7 @@ def binding():
                 report_id=str(uuid4()), issued_at=now - 1, expires_at=now + 60)
 
 
-def test_portal_credential_is_generated_once_root_private_and_bound(tmp_path, services, monkeypatch, capsys):
+def test_portal_uses_exact_slot_accounts_without_new_passwords(tmp_path, services, monkeypatch, capsys):
     _, portal, _ = services
     test_binding = binding()
     monkeypatch.setattr(portal, 'QUEUE_ROOT', tmp_path)
@@ -41,26 +44,45 @@ def test_portal_credential_is_generated_once_root_private_and_bound(tmp_path, se
     }})
     slot = dict(test_binding, head='e' * 40)
     monkeypatch.setattr(portal, 'database_binding', lambda *args: slot)
+    passwords = {'engineer': 'fixture-engineer-password', 'manager': 'fixture-manager-password'}
+    lookups = []
+
+    def shared_passwords(requested):
+        lookups.append(requested)
+        return passwords
+
+    monkeypatch.setattr(portal, 'shared_passwords', shared_passwords)
     profile = tmp_path / 'd4' / LEASE / 'profile.json'
     profile.parent.mkdir(parents=True)
+    roles = {'d4-deliver': 'field_qe', 'd4-revoke': 'manager'}
     with pytest.raises(ValueError, match='active test slot'):
-        portal.issue(profile, 'https://test.example')
-    assert not (run_root / LEASE).exists()
+        portal.issue(profile, 'https://test.example', scenario_roles=roles)
+    assert not (run_root / LEASE).exists() and not lookups
     slot.update(test_binding)
-    portal.issue(profile, 'https://test.example')
-    handoff = profile.parent / 'portal-credential.json'
-    handed = json.loads(handoff.read_text())
-    verifier = json.loads((run_root / LEASE / 'portal.json').read_text())
-    assert verifier['binding'] == test_binding and verifier['username'] == handed['username']
-    assert handed['password'] not in json.dumps(verifier)
-    assert handoff.stat().st_mode & 0o777 == 0o600
+    portal.issue(profile, 'https://test.example', scenario_roles=roles)
+    config = run_root / LEASE / 'portal.json'
+    stored = config.read_text()
+    verifier = json.loads(stored)
+    assert lookups == [test_binding]
+    assert verifier['binding'] == test_binding and verifier['scenario_roles'] == roles
+    assert set(verifier['accounts']) == set(passwords)
+    assert verifier['accounts']['engineer']['role'] == 'field_qe'
+    assert verifier['accounts']['manager']['role'] == 'manager'
+    for username, password in passwords.items():
+        entry = verifier['accounts'][username]
+        assert hashlib.scrypt(password.encode(), salt=bytes.fromhex(entry['salt']),
+                              n=16384, r=8, p=1).hex() == entry['password_digest']
+        assert password not in stored
+    assert config.stat().st_mode & 0o777 == 0o600
+    assert not (profile.parent / 'portal-credential.json').exists()
     assert capsys.readouterr() == ('', '')
     with pytest.raises(ValueError, match='already'):
-        portal.issue(profile, 'https://test.example')
-    assert json.loads(handoff.read_text()) == handed
+        portal.issue(profile, 'https://test.example', scenario_roles=roles)
+    assert config.read_text() == stored
 
 
-def test_cleanup_only_reclaims_dedicated_owned_inventory(tmp_path, services, monkeypatch):
+@pytest.mark.parametrize('delivery_network', ['legacy-bridge', 'none'])
+def test_cleanup_only_reclaims_dedicated_owned_inventory(tmp_path, services, monkeypatch, delivery_network):
     cleanup, _, _ = services
     monkeypatch.setattr(cleanup, 'QUEUE_ROOT', tmp_path)
     monkeypatch.setattr(cleanup, 'RUN_ROOT', tmp_path / 'run')
@@ -87,16 +109,18 @@ def test_cleanup_only_reclaims_dedicated_owned_inventory(tmp_path, services, mon
 
     prefix = 'openqms-d4-' + LEASE
     container_id = 'b' * 64
+    network = 'none' if delivery_network == 'none' else prefix
     inventory = {
         'container': [{
             'Id': container_id, 'Name': '/' + prefix + '-deliver-api',
             'Config': {'Labels': {cleanup.LEASE_LABEL: LEASE, cleanup.ROLE_LABEL: 'api'}},
-            'NetworkSettings': {'Networks': {prefix: {}}}, 'HostConfig': {},
+            'NetworkSettings': {'Networks': {network: {}}},
+            'HostConfig': {'NetworkMode': network},
         }],
         'network': [{
             'Id': 'c' * 64, 'Name': prefix, 'Labels': {cleanup.LEASE_LABEL: LEASE},
             'Internal': True, 'Driver': 'bridge',
-            'Containers': {container_id: {}},
+            'Containers': {} if network == 'none' else {container_id: {}},
         }],
         'volume': [{
             'Name': prefix + '-deliver-postgres-data', 'Labels': {cleanup.LEASE_LABEL: LEASE},
@@ -153,3 +177,83 @@ def test_provision_rejects_a_task_from_a_different_report(services, monkeypatch)
     with pytest.raises(RuntimeError, match='seeded allocation'):
         provision.seed(cell, test_binding, 'reviewed helper', Path('/unused'))
     assert stages == ['prepare', 'task']
+
+
+@pytest.mark.parametrize('invalid, reason', [
+    (None, None),
+    ('delivery-bridge', 'isolated API namespace'),
+    ('socket-writable', 'read-only database socket'),
+    ('wrong-db-socket', 'read-only database socket'),
+    ('wrong-socket-owner', 'read-only database socket'),
+    ('extra-mount', 'read-only database socket'),
+    ('revocation-none', 'revocation requires the isolated lease bridge'),
+])
+def test_provision_enforces_case_networks_and_socket_ownership(services, monkeypatch, invalid, reason):
+    _, _, provision = services
+    test_binding = binding()
+    prefix = 'openqms-d4-' + LEASE
+    launch_nonce = 'a' * 64
+    launch_root = Path('/run/openqms-d4-' + launch_nonce)
+    allocation = provision.QUEUE_ROOT / 'd4' / LEASE
+    socket_dir = allocation / 'd4-deliver-db-socket'
+    images = {'backend': 'sha256:' + '1' * 64, 'database': 'sha256:' + '2' * 64}
+    release = dict(sha=test_binding['merge'], shared_lease=LEASE, images=images)
+
+    def inspected_mount(source, destination, writable):
+        return {'Type': 'bind', 'Source': str(source), 'Destination': destination, 'RW': writable}
+
+    def path_info(path):
+        if path == socket_dir:
+            return SimpleNamespace(st_uid=999, st_mode=stat.S_IFDIR | 0o755)
+        if path.parent == socket_dir:
+            owner = 1000 if invalid == 'wrong-socket-owner' else 999
+            return SimpleNamespace(st_uid=owner, st_mode=stat.S_IFSOCK | 0o777)
+        return SimpleNamespace(st_uid=2002, st_gid=2002, st_mode=stat.S_IFDIR | 0o700)
+
+    monkeypatch.setattr(Path, 'lstat', path_info)
+    monkeypatch.setattr(Path, 'is_dir', lambda _: True)
+    monkeypatch.setattr(provision, 'trusted_directory', lambda _: None)
+    monkeypatch.setattr(provision, 'read_owned', lambda *_: json.dumps(release))
+    monkeypatch.setattr(provision, 'verify_bundle', lambda *_: None)
+    monkeypatch.setattr(provision, 'RuntimeLaunch', lambda *_: SimpleNamespace(
+        root=launch_root, nonce=launch_nonce, manifest_sha256='c' * 64, deployment=lambda: None,
+        journal=lambda: None, read_state=lambda: None,
+    ))
+    monkeypatch.setattr(provision, 'command', lambda *args: args[-1])
+    inventory, cells = [], {}
+    for index, name in enumerate(('deliver', 'revoke'), start=1):
+        scenario = 'd4-' + name
+        deliver = name == 'deliver'
+        api_id = str(index) * 64
+        db_id = str(index + 2) * 64
+        mode = 'none' if (deliver and invalid != 'delivery-bridge') or invalid == 'revocation-none' else prefix
+        mounts = [inspected_mount(allocation / scenario, provision.PRIVATE, True)]
+        db_mounts = []
+        if deliver:
+            mounts.append(inspected_mount(socket_dir, provision.DB_SOCKET, invalid == 'socket-writable'))
+            if invalid == 'extra-mount':
+                mounts.append(inspected_mount('/unexpected', '/unexpected', False))
+            db_source = socket_dir.with_name('wrong-allocation') if invalid == 'wrong-db-socket' else socket_dir
+            db_mounts.append(inspected_mount(db_source, provision.POSTGRES_SOCKET, True))
+        inventory.extend((
+            {'Name': f'/{prefix}-{name}-api', 'Id': api_id, 'Image': images['backend'],
+             'State': {'Running': True}, 'Config': {'User': '2002:2002'}, 'Mounts': mounts,
+             'HostConfig': {'NetworkMode': mode, 'CapDrop': ['ALL']},
+             'NetworkSettings': {'Networks': {mode: {}}}},
+            {'Name': f'/{prefix}-{name}-postgres', 'Id': db_id, 'Image': images['database'],
+             'State': {'Running': True}, 'Mounts': db_mounts},
+        ))
+        cells[scenario] = dict(
+            api_container_id=api_id, db_container_id=db_id, db_image_id=images['database'],
+            db_system_identifier='1234567890', db_host=provision.DB_SOCKET if deliver else 'revoke-db',
+            api_port=18777,
+        )
+    cells['d4-deliver'].update(root=str(launch_root), manifest_sha256='c' * 64, nonce=launch_nonce)
+    cells['d4-revoke']['revoke_image_id'] = 'sha256:' + '3' * 64
+    monkeypatch.setattr(provision, 'docker_inventory', lambda *_: (inventory, [], []))
+    prepared = {'binding': test_binding, 'cases': cells}
+    if reason:
+        with pytest.raises(RuntimeError, match=reason):
+            provision.permitted_cells(prepared, test_binding)
+    else:
+        provision.permitted_cells(prepared, test_binding)

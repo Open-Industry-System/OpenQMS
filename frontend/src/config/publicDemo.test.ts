@@ -28,6 +28,14 @@ describe("getPublicDemoConfig", () => {
     expect(getPublicDemoConfig(env)).toBeNull();
   });
 
+  it.each(["admin", " GroupAdmin "])("rejects %s as the Viewer account", (username) => {
+    expect(getPublicDemoConfig({
+      ...completeEnv,
+      VITE_PUBLIC_DEMO_USERNAME: username,
+      VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS: additionalAccounts,
+    })).toBeNull();
+  });
+
   it("keeps Viewer-only configuration backward compatible", () => {
     expect(getPublicDemoConfig(completeEnv)).toEqual({
       username: "viewer",
@@ -49,7 +57,23 @@ describe("getPublicDemoConfig", () => {
     });
   });
 
+  it("accepts both isolated shared-preview aliases in stable role order", () => {
+    const demoAccounts = [
+      { username: "demo-engineer", password: "demo-engineer-sentinel" },
+      { username: "demo-manager", password: "demo-manager-sentinel" },
+    ];
+    const result = getPublicDemoConfig({
+      ...completeEnv,
+      VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS: JSON.stringify([...demoAccounts].reverse()),
+    });
+    expect(result?.additionalAccounts).toEqual(demoAccounts);
+  });
+
   it.each([
+    ["a private username mixed with a shared-preview alias", JSON.stringify([
+      { username: "engineer", password: "engineer-sentinel" },
+      { username: "demo-manager", password: "demo-manager-sentinel" },
+    ])],
     ["malformed JSON", "["],
     ["an incomplete account set", JSON.stringify([
       { username: "engineer", password: "engineer-sentinel" },

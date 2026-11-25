@@ -39,6 +39,7 @@ from app.models.plm import PLMConnection
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition
 from app.models.user import User
+from tests.services.agent_runtime.d4_fixture_support import runtime_tenant_template
 
 
 # ── Shared migration-test helpers ───────────────────────────────────────────
