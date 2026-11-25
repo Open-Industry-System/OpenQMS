@@ -13,7 +13,7 @@ Beispiel 8D-Bericht: Im standardmäßig deaktivierten Agent-Pilotbetrieb können
 - **Einheitliche fachliche Grundlage.** Die Architektur verlangt, dass Plugins den Kontext über die Schnittstellen der Fachmodule lesen und dabei Berichte, Quellnachweise und deren Versionen weiterverwenden. Oberfläche und Agent beziehen sich auf dieselben Qualitätsfakten; Mitarbeitende können jeden Vorschlag bis zu seiner Grundlage zurückverfolgen.
 - **Fähigkeiten je Aufgabe kombinieren.** Jedes Modul deklariert, welchen Kontext es bereitstellt und welche fachlichen Befehle ausführbar sind. Der Agent kann über mehrere Runden Informationen ergänzen und den nächsten Schritt wählen; die Plattform prüft bei jedem Aufruf Identität, Plugin-Berechtigung und Aufgabenumfang, während das Fachmodul für Statuswechsel, Freigaben und Audit zuständig ist.
 
-8D ist das erste angebundene Muster. Weitere Qualitätsmodule werden schrittweise nach ihren eigenen Daten- und Bedienregeln angebunden. [Aktuelle Architektur](docs/architecture.md) · [Design: modulares QMS und KI-Plugins](docs/superpowers/specs/2026-09-22-modular-qms-agent-architecture-design.md)
+8D ist das erste angebundene Muster. Weitere Qualitätsmodule werden schrittweise nach ihren eigenen Daten- und Bedienregeln angebunden. [Aktuelle Architektur](docs/architecture.md) · [Roadmap](docs/ROADMAP.md)
 
 ---
 

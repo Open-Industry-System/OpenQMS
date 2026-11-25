@@ -13,7 +13,7 @@ In the opt-in 8D agent pilot, an employee can select an approved model deploymen
 - **Shared business records.** The architecture gives plugins access to context through module interfaces that retain the report, source references, and versions. Employees and agents work from the same quality records, so a reviewer can trace a proposal back to its evidence.
 - **Task-scoped capabilities.** Each module declares the context it can share and the business commands it supports. An agent can request more information over several rounds and choose its next step. The platform checks the acting identity, plugin grants, and task scope on each call. The business module handles state transitions, approvals, and auditing.
 
-8D is the first integration. Other modules will define their own data access and commands as they adopt the architecture. [Current architecture](docs/architecture.md) · [Modular QMS and AI plugin design](docs/superpowers/specs/2026-09-22-modular-qms-agent-architecture-design.md)
+8D is the first integration. Other modules will define their own data access and commands as they adopt the architecture. [Current architecture](docs/architecture.md) · [Roadmap](docs/ROADMAP.md)
 
 ---
 

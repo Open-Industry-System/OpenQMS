@@ -164,7 +164,7 @@ PostgreSQL 15 (asyncpg), 50+ tables across 7 modules. Multi-tenant with factory 
 - Backend messages stay in their original (Chinese) source form; `backend/app/i18n` translates JSON responses per `Accept-Language` (catalog `backend/app/i18n/messages.json`) and appends an output-language directive to LLM prompts. Add new user-facing backend messages to the catalog.
 - Document numbering: `PFMEA-2026-001`, `DFMEA-2026-001`, `8D-2026-001`
 - Product line: `DC-DC-100` (seed data default)
-- Severity values (stored data, unchanged): `致命`, `严重`, `一般`, `轻微` — displayed via translations
+- Severity values are stored data in their legacy (Chinese) literal form (fatal / serious / general / minor), unchanged in the DB and displayed via translations
 - Every CRUD operation manually creates an `AuditLog` in its service method
 - FMEA graph nodes carry AIAG-VDA 7-step properties
 - `frontend/src/utils/fmea.ts` has the AIAG-VDA Action Priority lookup table (H/M/L from S×O×D)
@@ -191,14 +191,3 @@ The JSONB graph is the most complex part of the system:
 - Redis configured but no caching logic implemented
 - Frontend bundle is 5.5MB — needs code splitting
 - Some Alembic migration numbers overlap; needs normalization
-
-## User Story ↔ Skill 同步规则
-
-每个 `verify-*` skill 是某条用户故事的**派生走查剧本**（单向派生）：
-
-- 源头：`docs/user-stories/US-<id>-<name>.md`（含「状态: 定稿 vX（日期）」）
-- 派生：`.claude/skills/verify-<name>/SKILL.md`（顶部声明依据的故事版本）
-
-**规则**：当用户故事的版本号或日期变更，对应 skill 剧本必须重新核对并同步，
-更新顶部版本声明后才能用于走查。agent 每次跑 `verify-*` skill 前先比对
-skill 内记的故事版本与用户故事顶部实际版本——不一致则停下、提示用户先同步。
