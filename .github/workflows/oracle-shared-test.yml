@@ -88,7 +88,9 @@ jobs:
             --retry-pr "$RETRY_PR" \
             --receipt "$RUNNER_TEMP/preview-publication.json" \
             --d4-evidence "$RUNNER_TEMP/d4-evidence.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Upload shared test publication receipt
+        id: publication
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: shared-test-publication
           path: ${{ runner.temp }}/preview-publication.json
@@ -100,3 +102,11 @@ jobs:
           path: ${{ runner.temp }}/d4-evidence.json
           if-no-files-found: ignore
           retention-days: 30
+      - name: Update the PR comment after successful publication
+        if: steps.publication.outputs.artifact-id != ''
+        # A transient GitHub API error must not invalidate the uploaded receipt.
+        # The next scheduled reconciliation can retry the comment update.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/pr-preview-acceptance.py --shared-publication-notice "$RUNNER_TEMP/preview-publication.json"

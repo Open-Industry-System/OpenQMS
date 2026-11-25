@@ -16,11 +16,11 @@ const accounts = [
   { role: "Manager", username: "manager", password: "manager-sentinel" },
 ];
 
-function configureMultiRoleDemo() {
+function configureMultiRoleDemo(configuredAccounts = accounts) {
   vi.stubEnv("VITE_PUBLIC_DEMO_ENABLED", "true");
-  vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", accounts[0].username);
-  vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", accounts[0].password);
-  vi.stubEnv("VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS", JSON.stringify(accounts.slice(1).reverse().map(({ username, password }) => ({ username, password }))));
+  vi.stubEnv("VITE_PUBLIC_DEMO_USERNAME", configuredAccounts[0].username);
+  vi.stubEnv("VITE_PUBLIC_DEMO_PASSWORD", configuredAccounts[0].password);
+  vi.stubEnv("VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS", JSON.stringify(configuredAccounts.slice(1).reverse().map(({ username, password }) => ({ username, password }))));
 }
 
 function renderLogin(path = "/login?demo=viewer") {
@@ -89,6 +89,27 @@ describe("LoginPage public demo", () => {
       expect(screen.getByPlaceholderText("Username")).toHaveValue(account.username);
       expect(screen.getByPlaceholderText("Password")).toHaveValue(account.password);
     }
+    expect(login).not.toHaveBeenCalled();
+  });
+
+  it("shows and prefills all three shared-preview accounts under their role labels", () => {
+    const sharedPreviewAccounts = [
+      accounts[0],
+      { ...accounts[1], username: "demo-engineer", password: "demo-engineer-sentinel" },
+      { ...accounts[2], username: "demo-manager", password: "demo-manager-sentinel" },
+    ];
+    configureMultiRoleDemo(sharedPreviewAccounts);
+    renderLogin("/login");
+
+    for (const account of sharedPreviewAccounts) {
+      expect(screen.getByText(account.username)).toBeInTheDocument();
+      expect(screen.getByText(account.password)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: `Use ${account.role} account` }));
+      expect(screen.getByPlaceholderText("Username")).toHaveValue(account.username);
+      expect(screen.getByPlaceholderText("Password")).toHaveValue(account.password);
+    }
+    expect(screen.queryByText("engineer", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("manager", { exact: true })).not.toBeInTheDocument();
     expect(login).not.toHaveBeenCalled();
   });
 
