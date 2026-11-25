@@ -25,6 +25,7 @@ helper = load('preview_routes', 'oracle-preview.py')
 BASE = Path('/var/lib/openqms-previews')
 SHARED_ACCOUNTS_DIR = Path('/var/lib/openqms-shared-test/credentials')
 SHARED_TEST_ROLES = {'engineer': 'field_qe', 'manager': 'manager'}
+MAC_BUILD_NETWORK = 'openqms-preview-build'
 
 
 def shared_demo_web_build_args():
@@ -154,6 +155,8 @@ class PreviewRelease:
         self.controller_hash = controller_hash
 
     def verify(self):
+        if helper.mac_shared_profile() and self.shared_lease is None:
+            raise ValueError('Mac preview host requires a shared-test lease')
         namespace = release_base(self.pr, self.shared_lease)
         for path in (BASE, self.project, namespace, self.releases, self.root, self.source, self.control):
             if path.is_symlink() or not path.is_dir(): raise ValueError('invalid preview directory')
@@ -268,9 +271,15 @@ class PreviewRelease:
         self.provision()
         if prod.digest(Path('/etc/openqms/preview-Caddyfile')) != prod.digest(self.control / 'deploy/preview-Caddyfile'):
             raise ValueError('preview Caddy installation changed')
-        builder = json.loads(prod.run(['docker','inspect','buildx_buildkit_openqms-preview-builder0']).stdout)[0]['HostConfig']
-        if not (0 < builder.get('Memory',0) <= 2147483648 and 0 < builder.get('NanoCpus',0) <= 2000000000 and 0 < builder.get('PidsLimit',0) <= 512 and builder.get('CpuQuota') == 0 and builder.get('CpuPeriod') == 0):
+        inspected = json.loads(prod.run(['docker','inspect','buildx_buildkit_openqms-preview-builder0']).stdout)[0]
+        builder = inspected['HostConfig']
+        mac = self.shared_lease is not None and helper.mac_shared_profile()
+        memory_limit = 3758096384 if mac else 2147483648
+        if not (0 < builder.get('Memory',0) <= memory_limit and 0 < builder.get('NanoCpus',0) <= 2000000000 and 0 < builder.get('PidsLimit',0) <= 512 and builder.get('CpuQuota') == 0 and builder.get('CpuPeriod') == 0):
             raise ValueError('bounded preview builder required')
+        if mac and (builder.get('NetworkMode') != MAC_BUILD_NETWORK
+                    or set(inspected.get('NetworkSettings', {}).get('Networks', {})) != {MAC_BUILD_NETWORK}):
+            raise ValueError('Mac preview builder requires its dedicated build network')
         for kind, dockerfile, context in [('backend','backend/Dockerfile','backend'),('web','frontend/Dockerfile.prod','.')]:
             build_args = ['--build-arg', 'PIP_INDEX_URL=https://pypi.org/simple'] if kind == 'backend' else []
             if kind == 'web' and self.shared_lease is not None:

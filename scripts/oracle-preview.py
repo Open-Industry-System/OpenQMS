@@ -10,11 +10,29 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
 
 ROUTES = Path('/etc/openqms/preview-routes')
 CADDY = 'openqms-web-1'
+MAC_SHARED_PROFILE = Path('/etc/openqms/mac-shared-test')
+PRODUCTION_STATE = (Path('/opt/openqms/.env.production'), Path('/var/lib/openqms-releases/current-release'))
+
+
+def mac_shared_profile():
+    try:
+        marker = MAC_SHARED_PROFILE.lstat()
+    except FileNotFoundError:
+        return False
+    parent = MAC_SHARED_PROFILE.parent.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022
+            or not stat.S_ISREG(marker.st_mode) or marker.st_uid != 0
+            or stat.S_IMODE(marker.st_mode) != 0o600 or marker.st_nlink != 1 or marker.st_size):
+        raise ValueError('invalid Mac shared-test host profile')
+    if any(path.exists() or path.is_symlink() for path in PRODUCTION_STATE):
+        raise ValueError('Mac shared-test profile requires a dedicated preview host')
+    return True
 
 def pr_number(value):
     if not re.fullmatch(r'[1-9][0-9]{0,8}', value):

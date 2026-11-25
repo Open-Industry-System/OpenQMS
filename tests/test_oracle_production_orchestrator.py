@@ -300,7 +300,23 @@ def test_shared_preview_config_requires_pr_and_pins_known_hosts(local_config):
     args = local.ssh_args(context)
     assert 'StrictHostKeyChecking=yes' in args
     assert 'UserKnownHostsFile=' + context['ORACLE_KNOWN_HOSTS'] in args
+    assert not any(arg.startswith('ProxyCommand=') for arg in args)
     assert '-tt' not in args
+
+
+def test_cloudflare_proxy_is_only_for_pinned_mac_preview(local_config):
+    local = module('deploy-oracle-release')
+    config = dict(local_config, RELEASE_KIND='preview', PREVIEW_PR='17',
+                  ORACLE_PREVIEW_SSH_TRANSPORT='cloudflare',
+                  ORACLE_SSH_TARGET='openqms-deploy@ssh-test-openqms.smartindustry.world')
+    args = local.ssh_args(local.validate(config))
+    assert 'ProxyCommand=/usr/local/bin/cloudflared access ssh --hostname ssh-test-openqms.smartindustry.world' in args
+    assert 'UserKnownHostsFile=' + config['ORACLE_KNOWN_HOSTS'] in args
+    assert 'StrictHostKeyChecking=yes' in args
+    for wrong in ({'RELEASE_KIND': 'production'}, {'ORACLE_SSH_TARGET': local_config['ORACLE_SSH_TARGET']},
+                  {'ORACLE_PREVIEW_SSH_TRANSPORT': '/tmp/untrusted-command'}):
+        with pytest.raises(ValueError, match='dedicated Mac preview target'):
+            local.validate(dict(config, **wrong))
 
 
 def test_checks_env_removes_target_and_provider_secrets_and_ambient_ci_identity(local_config, monkeypatch):
