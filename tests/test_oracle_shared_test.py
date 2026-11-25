@@ -27,7 +27,9 @@ def fixture_row(pr):
     )
 
 
-def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_path, monkeypatch):
+@pytest.mark.parametrize('transport,origin', [('', 'ORACLE_TEST_URL'), ('cloudflare', 'MAC_TEST_URL')])
+def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_path, monkeypatch, transport, origin):
+    monkeypatch.setenv('ORACLE_PREVIEW_SSH_TRANSPORT', transport)
     queue = core['Queue'](tmp_path / 'queue.sqlite')
     events = []
     published = {}
@@ -74,6 +76,7 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
     first = json.loads(receipt.read_text())
     assert first['pr'] == 45
     assert first['sha'] == next_candidates[1][0]['merge']
+    assert first['url'] == client[origin]
     assert events == [('start', 45), ('deploy', 45, 145), ('health', 45)]
     published[first['queue_lease']] = {'id': 12}
 
@@ -132,22 +135,32 @@ def test_production_waits_for_shared_host_lock_but_not_auth_errors(monkeypatch):
         wait({'RELEASE_KIND': 'production'})
 
 
-def test_fixed_health_rejects_success_from_the_wrong_pr(monkeypatch):
+@pytest.mark.parametrize('transport,origin', [('', 'ORACLE_TEST_URL'), ('cloudflare', 'MAC_TEST_URL')])
+def test_fixed_health_rejects_success_from_wrong_pr_or_origin(monkeypatch, transport, origin):
     from contextlib import nullcontext
     from io import BytesIO
 
+    monkeypatch.setenv('ORACLE_PREVIEW_SSH_TRANSPORT', transport)
     slot = {'pr': 45, 'merge': 'a' * 40}
     response = BytesIO(b'{"status":"ok"}')
-    response.url = client['URL'] + '/api/health'
+    health_url = client[origin] + '/api/health'
+    response.url = health_url
     response.headers = {
         'X-OpenQMS-Test-PR': '46',
         'X-OpenQMS-Test-Version': slot['merge'],
     }
-    monkeypatch.setattr(client['urllib'].request, 'urlopen',
-                        lambda *args, **kwargs: nullcontext(response))
+    def open_health(url, timeout):
+        assert url == health_url
+        return nullcontext(response)
+
+    monkeypatch.setattr(client['urllib'].request, 'urlopen', open_health)
     with pytest.raises(RuntimeError, match='version|health'):
         client['public_health'](slot)
     response.headers['X-OpenQMS-Test-PR'] = '45'
+    response.url = 'https://unrelated.example/api/health'
+    with pytest.raises(RuntimeError, match='health'):
+        client['public_health'](slot)
+    response.url = health_url
     client['public_health'](slot)
 
 
@@ -178,9 +191,10 @@ def test_first_certificate_activation_allows_bounded_https_retry(monkeypatch):
     from io import BytesIO
     from urllib.error import URLError
 
+    monkeypatch.delenv('ORACLE_PREVIEW_SSH_TRANSPORT', raising=False)
     slot = {'pr': 45, 'merge': 'a' * 40}
     response = BytesIO(b'{"status":"ok"}')
-    response.url = client['URL'] + '/api/health'
+    response.url = client['ORACLE_TEST_URL'] + '/api/health'
     response.headers = {'X-OpenQMS-Test-PR': '45', 'X-OpenQMS-Test-Version': slot['merge']}
     requests = iter([URLError('TLS not yet available'), response])
     waits = []

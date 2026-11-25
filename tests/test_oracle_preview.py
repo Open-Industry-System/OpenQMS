@@ -1,8 +1,10 @@
 import importlib.util
 import pathlib
+import stat
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('preview', ROOT / 'scripts/oracle-preview.py')
@@ -10,6 +12,33 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 class PreviewTests(unittest.TestCase):
+    def test_mac_profile_absent_defaults_to_oracle(self):
+        marker = Mock()
+        marker.lstat.side_effect = FileNotFoundError
+        with patch.object(m, 'MAC_SHARED_PROFILE', marker):
+            self.assertFalse(m.mac_shared_profile())
+
+    def test_mac_profile_requires_private_root_marker_on_dedicated_host(self):
+        marker = Mock()
+        marker.parent.lstat.return_value = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+        settings = dict(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_nlink=1, st_size=0)
+        marker.lstat.return_value = SimpleNamespace(**settings)
+        production = Mock()
+        production.exists.return_value = False
+        production.is_symlink.return_value = False
+        with patch.object(m, 'MAC_SHARED_PROFILE', marker), patch.object(m, 'PRODUCTION_STATE', (production,)):
+            self.assertTrue(m.mac_shared_profile())
+            for change in (dict(st_mode=stat.S_IFLNK | 0o600), dict(st_mode=stat.S_IFREG | 0o644),
+                           dict(st_uid=1000), dict(st_nlink=2), dict(st_size=1)):
+                with self.subTest(change=change):
+                    marker.lstat.return_value = SimpleNamespace(**(settings | change))
+                    with self.assertRaisesRegex(ValueError, 'invalid Mac shared-test host profile'):
+                        m.mac_shared_profile()
+            marker.lstat.return_value = SimpleNamespace(**settings)
+            production.is_symlink.return_value = True
+            with self.assertRaisesRegex(ValueError, 'dedicated preview host'):
+                m.mac_shared_profile()
+
     def test_numeric_pr_only(self):
         for bad in ['0', '-1', '01', '../1', '1;id', '1\n', '1000000000']:
             with self.assertRaises(ValueError): m.pr_number(bad)

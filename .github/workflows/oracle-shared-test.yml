@@ -39,7 +39,7 @@ jobs:
       vars.ORACLE_PREVIEW_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    environment: oracle-preview
+    environment: ${{ vars.ORACLE_PREVIEW_SSH_TRANSPORT == 'cloudflare' && 'mac-preview' || 'oracle-preview' }}
     steps:
       - id: trusted-source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -54,12 +54,22 @@ jobs:
         with:
           node-version: '20'
       - name: Set up optional private transport
-        if: vars.ORACLE_USE_TAILSCALE == 'true'
+        if: vars.ORACLE_USE_TAILSCALE == 'true' && vars.ORACLE_PREVIEW_SSH_TRANSPORT != 'cloudflare'
         uses: tailscale/github-action@6cae46e2d796f265265cfcf628b72a32b4d7cade # v3
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:openqms-deploy
+      - name: Install pinned Cloudflare SSH client
+        if: vars.ORACLE_PREVIEW_SSH_TRANSPORT == 'cloudflare'
+        run: |
+          set -euo pipefail
+          client="$RUNNER_TEMP/cloudflared-linux-amd64"
+          curl --proto '=https' --proto-redir '=https' --fail --silent --show-error --location --retry 3 \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.11.2/cloudflared-linux-amd64 \
+            --output "$client"
+          printf '%s  %s\n' '56f13335143ec0e22772963290683a84a04114a35ec64cbc794a4d39ff9bb8cf' "$client" | sha256sum --check --status
+          sudo install -m 0755 "$client" /usr/local/bin/cloudflared
       - name: Restore trusted source before introducing deployment secrets
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -71,7 +81,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RETRY_PR: ${{ inputs.retry_pr || 0 }}
-          ORACLE_SSH_TARGET: ${{ vars.ORACLE_SSH_TARGET }}
+          ORACLE_PREVIEW_SSH_TRANSPORT: ${{ vars.ORACLE_PREVIEW_SSH_TRANSPORT }}
+          ORACLE_SSH_TARGET: ${{ vars.ORACLE_PREVIEW_SSH_TRANSPORT == 'cloudflare' && 'openqms-deploy@ssh-test-openqms.smartindustry.world' || vars.ORACLE_SSH_TARGET }}
           DEPLOY_KEY: ${{ secrets.ORACLE_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
         run: |

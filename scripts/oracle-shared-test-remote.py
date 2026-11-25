@@ -12,6 +12,7 @@ from uuid import UUID
 
 MODE = Path('/var/lib/openqms-shared-test')
 HOST = 'test.preview.openqms.smartindustry.world'
+MAC_ORIGIN = 'http://test-openqms.smartindustry.world:8080'
 D4_CLEANUP = Path('/usr/local/lib/openqms/d4-acceptance/cleanup.py')
 LEASE = re.compile(r'[0-9a-f]{32}')
 REQUEST_LIMIT = 128 * 1024
@@ -100,10 +101,10 @@ def read_request(source):
     return request
 
 
-def route(slot):
+def route(slot, *, mac=False):
     pr, merge = slot['pr'], slot['merge']
     return (
-        f'{HOST} {{\n'
+        f'{MAC_ORIGIN if mac else HOST} {{\n'
         f'\treverse_proxy openqms-pr-{pr}-web:8080 {{\n'
         f'\t\theader_down X-OpenQMS-Test-PR "{pr}"\n'
         f'\t\theader_down X-OpenQMS-Test-Version "{merge}"\n'
@@ -112,12 +113,12 @@ def route(slot):
     )
 
 
-def owned_route(path, slot, action):
+def owned_route(path, slot, action, *, mac=False):
     # Also inspect symlinks with missing targets. Never overwrite an unmanaged
     # route or remove something installed outside the shared scheduler.
     if path.is_symlink():
         raise ValueError('shared-test route cannot be a symlink')
-    if exists(path) and (slot['phase'] == 'idle' or path.read_text() != route(slot)):
+    if exists(path) and (slot['phase'] == 'idle' or path.read_text() != route(slot, mac=mac)):
         raise ValueError(f'unrelated shared-test route during {action}')
 
 
@@ -222,18 +223,19 @@ def run(request, preview, queue_type):
     if action == 'status':
         return slot
     helper = preview.helper
+    mac = helper.mac_shared_profile()
     fixed_route = helper.ROUTES / 'shared-test.caddy'
     if action == 'switch':
-        owned_route(fixed_route, slot, action)
+        owned_route(fixed_route, slot, action, mac=mac)
         if slot['phase'] == 'idle':
             require_clean_start(preview)
         return queue.request_switch(request['comment_id'], request['release'], request['eligible'])
     if action == 'retry':
-        owned_route(fixed_route, slot, action)
+        owned_route(fixed_route, slot, action, mac=mac)
         require_clean_start(preview)
         return queue.retry_failed(request['release'])
     if action == 'tick':
-        owned_route(fixed_route, slot, action)
+        owned_route(fixed_route, slot, action, mac=mac)
         if slot['phase'] == 'idle' and request['eligible']:
             require_clean_start(preview)
         return queue.tick(request['eligible'])
@@ -251,7 +253,7 @@ def run(request, preview, queue_type):
         queue.snapshot(request['eligible'])
         if identity not in request['eligible']:
             raise ValueError('shared-test version is no longer eligible')
-        owned_route(fixed_route, slot, action)
+        owned_route(fixed_route, slot, action, mac=mac)
         legacy_route = helper.ROUTES / f'pr-{slot["pr"]}.caddy'
         if exists(legacy_route) or helper.active_prs() != {str(slot['pr'])}:
             raise ValueError('shared-test runtime inventory is not exclusive')
@@ -262,7 +264,7 @@ def run(request, preview, queue_type):
                 raise ValueError('shared-test route is no longer ready')
             return dict(slot, test_roles=roles)
         if not exists(fixed_route):
-            helper.publish(fixed_route, route(slot), helper.validate, helper.reload)
+            helper.publish(fixed_route, route(slot, mac=mac), helper.validate, helper.reload)
         ready = queue.acknowledge(lease, 'ready', eligible=request['eligible'])
         return dict(ready, test_roles=roles)
     if action == 'd4-passed':
@@ -278,7 +280,7 @@ def run(request, preview, queue_type):
     if action not in {'release', 'released'} or slot['phase'] != 'releasing':
         raise ValueError('shared-test release does not match slot phase')
 
-    owned_route(fixed_route, slot, action)
+    owned_route(fixed_route, slot, action, mac=mac)
     pr = str(slot['pr'])
     d4_allocation = MODE / 'd4' / lease
     if action == 'release':
