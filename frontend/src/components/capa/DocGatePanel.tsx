@@ -26,6 +26,7 @@ import {
   type DocGateAuditRow,
   type DocGateDecision,
 } from "../../api/capa";
+import { tr } from "../../i18n/tr";
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -128,11 +129,11 @@ export default function DocGatePanel({
       if (!request.current()) return;
       setAnalysis(result as DocGateAnalysis);
       if (result.status === "running") {
-        message.info(t("docGate.retryAfter", "生成进行中，请稍后刷新"));
+        message.info(t("docGate.retryAfter"));
       } else if (result.status === "done") {
-        message.success(t("docGate.generateDone", "影响分析已生成"));
+        message.success(t("docGate.generateDone"));
       } else if (result.status === "failed") {
-        message.error(result.error || t("docGate.generateFailed", "影响分析失败"));
+        message.error(result.error || t("docGate.generateFailed"));
       }
       await load();
       if (!request.current()) return;
@@ -140,7 +141,7 @@ export default function DocGatePanel({
       if (!request.current()) return;
       if (isBlockedError(e)) {
         setBlocked(true);
-        setAnalysis({ status: "failed", error: "LLM 未配置", is_current: false });
+        setAnalysis({ status: "failed", error: tr("Kein LLM konfiguriert", "LLM not configured"), is_current: false });
       } else {
         message.error(errMsg(e));
       }
@@ -161,8 +162,8 @@ export default function DocGatePanel({
       setDecision({ decision: result.decision as DocGateDecision["decision"] });
       message.success(
         result.decision === "passed"
-          ? t("docGate.auditPassed", "审核通过")
-          : t("docGate.auditBlocked", "审核未通过，门禁阻断"),
+          ? t("docGate.auditPassed")
+          : t("docGate.auditBlocked"),
       );
       await load();
       if (!request.current()) return;
@@ -185,7 +186,7 @@ export default function DocGatePanel({
         decision: result.decision as DocGateDecision["decision"],
         no_affected_confirmed: result.no_affected_confirmed,
       });
-      message.success(t("docGate.confirmEmptyDone", "已确认无受影响文档"));
+      message.success(t("docGate.confirmEmptyDone"));
       await load();
       if (!request.current()) return;
     } catch (e: unknown) {
@@ -206,7 +207,7 @@ export default function DocGatePanel({
         deadline: values.deadline.format("YYYY-MM-DD"),
       }, request.signal);
       if (!request.current()) return;
-      message.success(t("docGate.deferDone", "已记录延期（门禁仍阻断）"));
+      message.success(t("docGate.deferDone"));
       setDeferOpen(false);
       deferForm.resetFields();
       await load();
@@ -227,14 +228,14 @@ export default function DocGatePanel({
       if (!request.current()) return;
       await onAdvanced?.();
       if (!request.current()) return;
-      message.success(t("docGate.advanceDone", "已推进到审批"));
+      message.success(t("docGate.advanceDone"));
     } catch (e: unknown) {
       if (!request.current()) return;
       const msg = errMsg(e);
       if (msg.includes("文档已变更")) {
-        message.error(t("docGate.docChanged", "文档已变更，请重新审核"));
+        message.error(t("docGate.docChanged"));
       } else if (msg.includes("分析输入已变更")) {
-        message.error(t("docGate.inputChanged", "分析输入已变更，请重新生成"));
+        message.error(t("docGate.inputChanged"));
       } else {
         message.error(msg);
       }
@@ -252,7 +253,7 @@ export default function DocGatePanel({
   const decisionPassed = decision?.decision === "passed";
 
   const statusTag = () => {
-    if (!analysis) return <Tag data-e2e="doc-gate-status">{t("docGate.noAnalysis", "未分析")}</Tag>;
+    if (!analysis) return <Tag data-e2e="doc-gate-status">{t("docGate.noAnalysis")}</Tag>;
     if (analysis.status === "running") return <Tag color="processing" data-e2e="doc-gate-status">running</Tag>;
     if (analysis.status === "done") return <Tag color="success" data-e2e="doc-gate-status">done</Tag>;
     if (analysis.status === "failed") return <Tag color="error" data-e2e="doc-gate-status">failed</Tag>;
@@ -261,7 +262,7 @@ export default function DocGatePanel({
 
   return (
     <Card
-      title={t("docGate.title", "D8 文档更新审核门禁")}
+      title={t("docGate.title")}
       data-e2e="doc-gate-panel"
       loading={loading}
       extra={statusTag()}
@@ -274,7 +275,7 @@ export default function DocGatePanel({
             type="warning"
             showIcon
             data-e2e="doc-gate-blocked-banner"
-            message={t("docGate.blocked", "LLM 凭证未配置，影响分析被阻断")}
+            message={t("docGate.blocked")}
           />
         )}
         {analysis?.status === "failed" && !blocked && (
@@ -282,7 +283,7 @@ export default function DocGatePanel({
             type="error"
             showIcon
             data-e2e="doc-gate-failed-banner"
-            message={t("docGate.failed", "影响分析失败")}
+            message={t("docGate.failed")}
             description={analysis.error || undefined}
           />
         )}
@@ -296,7 +297,7 @@ export default function DocGatePanel({
               onClick={handleGenerate}
               data-e2e="doc-gate-generate"
             >
-              {analysis ? t("docGate.regenerate", "重新生成影响分析") : t("docGate.generate", "生成影响分析")}
+              {analysis ? t("docGate.regenerate") : t("docGate.generate")}
             </Button>
           )}
           {canEdit && isDone && (
@@ -306,7 +307,7 @@ export default function DocGatePanel({
               onClick={handleGenerate}
               data-e2e="doc-gate-regenerate"
             >
-              {t("docGate.regenerate", "重新生成影响分析")}
+              {t("docGate.regenerate")}
             </Button>
           )}
         </Space>
@@ -314,17 +315,17 @@ export default function DocGatePanel({
         {/* Zone 2: Affected docs list */}
         {isDone && (
           <div data-e2e="doc-gate-affected-list">
-            <Text strong>{t("docGate.affectedTitle", "受影响文档")}</Text>
+            <Text strong>{t("docGate.affectedTitle")}</Text>
             {isEmpty ? (
               <Alert
                 type="info"
                 style={{ marginTop: 8 }}
                 data-e2e="doc-gate-empty-list"
-                message={t("docGate.emptyList", "影响清单为空，请确认确实无受影响文档")}
+                message={t("docGate.emptyList")}
                 action={
                   canEdit ? (
                     <Button size="small" onClick={handleConfirmEmpty} data-e2e="doc-gate-confirm-empty">
-                      {t("docGate.confirmEmpty", "确认无受影响文档")}
+                      {t("docGate.confirmEmpty")}
                     </Button>
                   ) : undefined
                 }
@@ -337,15 +338,15 @@ export default function DocGatePanel({
                 rowKey={(r) => `${r.doc_type}-${r.doc_id}`}
                 dataSource={affectedDocs}
                 columns={[
-                  { title: t("docGate.colType", "类型"), dataIndex: "doc_type", width: 120 },
-                  { title: t("docGate.colName", "名称"), dataIndex: "doc_name" },
+                  { title: t("docGate.colType"), dataIndex: "doc_type", width: 120 },
+                  { title: t("docGate.colName"), dataIndex: "doc_name" },
                   {
-                    title: t("docGate.colKeyPoints", "关键点"),
+                    title: t("docGate.colKeyPoints"),
                     dataIndex: "key_points",
                     render: (kps: unknown[]) => kps?.length ?? 0,
                   },
                   {
-                    title: t("docGate.colSuggestion", "更新建议"),
+                    title: t("docGate.colSuggestion"),
                     dataIndex: "update_suggestion",
                     ellipsis: true,
                   },
@@ -371,7 +372,7 @@ export default function DocGatePanel({
                   onClick={handleAudit}
                   data-e2e="doc-gate-run-audit"
                 >
-                  {t("docGate.runAudit", "运行文档审核")}
+                  {t("docGate.runAudit")}
                 </Button>
               )}
               {canEdit && decision?.decision === "blocked" && (
@@ -380,7 +381,7 @@ export default function DocGatePanel({
                   onClick={() => setDeferOpen(true)}
                   data-e2e="doc-gate-defer-btn"
                 >
-                  {t("docGate.defer", "记录延期")}
+                  {t("docGate.defer")}
                 </Button>
               )}
             </Space>
@@ -432,9 +433,9 @@ export default function DocGatePanel({
                   rowExpandable: (r) => (r.coverage?.length ?? 0) > 0,
                 }}
                 columns={[
-                  { title: t("docGate.colName", "名称"), dataIndex: "doc_name" },
+                  { title: t("docGate.colName"), dataIndex: "doc_name" },
                   {
-                    title: t("docGate.colStatus", "状态"),
+                    title: t("docGate.colStatus"),
                     dataIndex: "status",
                     render: (s: string) => (
                       <Tag color={s === "passed" ? "success" : s === "incomplete" ? "warning" : "default"}>
@@ -443,7 +444,7 @@ export default function DocGatePanel({
                     ),
                   },
                   {
-                    title: t("docGate.colVersion", "版本"),
+                    title: t("docGate.colVersion"),
                     render: (_: unknown, r: DocGateAuditRow) => {
                       const before = r.version_before as { major?: number; minor?: number } | null | undefined;
                       const after = r.version_after as { major?: number; minor?: number } | null | undefined;
@@ -453,12 +454,12 @@ export default function DocGatePanel({
                     },
                   },
                   {
-                    title: t("docGate.colCoverage", "覆盖"),
+                    title: t("docGate.colCoverage"),
                     render: (_: unknown, r: DocGateAuditRow) =>
                       `${r.covered_count}/${r.total_count}`,
                   },
                   {
-                    title: t("docGate.colBump", "版本变更"),
+                    title: t("docGate.colBump"),
                     dataIndex: "version_bump",
                     render: (v: boolean) => (v ? "✓" : "—"),
                   },
@@ -470,7 +471,7 @@ export default function DocGatePanel({
 
         {/* Zone 4: Decision + advance */}
         <div data-e2e="doc-gate-decision-zone">
-          <Text strong>{t("docGate.decisionTitle", "门禁决策")}: </Text>
+          <Text strong>{t("docGate.decisionTitle")}: </Text>
           {decision?.decision ? (
             <Tag
               color={
@@ -482,14 +483,14 @@ export default function DocGatePanel({
               {decision.decision}
             </Tag>
           ) : (
-            <Tag data-e2e="doc-gate-decision">{t("docGate.noDecision", "尚未决策")}</Tag>
+            <Tag data-e2e="doc-gate-decision">{t("docGate.noDecision")}</Tag>
           )}
           {decision?.no_affected_confirmed && (
-            <Tag color="blue">{t("docGate.emptyConfirmed", "空清单已确认")}</Tag>
+            <Tag color="blue">{t("docGate.emptyConfirmed")}</Tag>
           )}
           {decision?.defer_reason && (
             <Paragraph type="secondary" style={{ marginTop: 4 }}>
-              {t("docGate.deferInfo", "延期")}: {decision.defer_reason}
+              {t("docGate.deferInfo")}: {decision.defer_reason}
               {decision.defer_deadline ? ` / ${decision.defer_deadline}` : ""}
             </Paragraph>
           )}
@@ -502,7 +503,7 @@ export default function DocGatePanel({
                 onClick={handleAdvance}
                 data-e2e="doc-gate-advance"
               >
-                {t("docGate.advance", "推进到审批")}
+                {t("docGate.advance")}
               </Button>
             </div>
           )}
@@ -510,31 +511,31 @@ export default function DocGatePanel({
       </Space>
 
       <Modal
-        title={t("docGate.deferTitle", "记录延期（仍阻断推进）")}
+        title={t("docGate.deferTitle")}
         open={deferOpen}
         onOk={handleDefer}
         onCancel={() => setDeferOpen(false)}
-        okText={t("docGate.deferConfirm", "确认延期")}
+        okText={t("docGate.deferConfirm")}
         data-e2e="doc-gate-defer-modal"
       >
         <Form form={deferForm} layout="vertical">
           <Form.Item
             name="reason"
-            label={t("docGate.deferReason", "延期原因")}
-            rules={[{ required: true, message: t("docGate.deferReasonRequired", "必填") }]}
+            label={t("docGate.deferReason")}
+            rules={[{ required: true, message: t("docGate.deferReasonRequired") }]}
           >
             <TextArea rows={3} data-e2e="doc-gate-defer-reason" />
           </Form.Item>
           <Form.Item
             name="owner_id"
-            label={t("docGate.deferOwner", "负责人 user_id")}
+            label={t("docGate.deferOwner")}
             rules={[{ required: true }]}
           >
             <Input data-e2e="doc-gate-defer-owner" />
           </Form.Item>
           <Form.Item
             name="deadline"
-            label={t("docGate.deferDeadline", "截止日期")}
+            label={t("docGate.deferDeadline")}
             rules={[{ required: true }]}
             initialValue={dayjs().add(7, "day")}
           >

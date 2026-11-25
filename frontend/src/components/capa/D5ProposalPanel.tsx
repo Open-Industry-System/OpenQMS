@@ -5,9 +5,10 @@ import type { D5BatchResult, D5Proposal, D5Measure } from '../../api/d5Proposals
 import { useAuthStore } from '../../store/authStore';
 import { readAgentIdentity, readAgentCredential } from '../agent/useAgentTaskActivity';
 import { useCapaChildRequests } from './useCapaViewRequests';
+import { tr, useTr } from "../../i18n/tr";
 interface Props {capaId:string; checkpoint?:{taskId:string;checkpointId:string}; onChanged?:()=>void;}
 type Operation = {kind:'adopt'|'withdraw';id:string;key:string;value:string} | {kind:'batch';key:string;value:string;ids:string[]};
-const labels = {pending:'待审',adopted:'已采纳',withdrawn:'已撤回',superseded:'已替代'};
+const labels = () => ({pending:tr("Zu prüfen", "Pending review"),adopted:tr("Übernommen", "Adopted"),withdrawn:tr("Zurückgezogen", "Withdrawn"),superseded:tr("Ersetzt", "Superseded")});
 const readSession=()=>JSON.stringify([readAgentIdentity(),readAgentCredential()]);
 function subscribeSession(callback:()=>void){
   const unsubscribe=useAuthStore.subscribe(callback);
@@ -17,6 +18,7 @@ function subscribeSession(callback:()=>void){
 }
 const bounded = (s:string) => !!s.trim() && new TextEncoder().encode(s).length<=16384;
 export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
+  useTr();
   const session=useSyncExternalStore(subscribeSession,readSession,readSession);
   const [page,setPage]=useState(1);
   const [measurePage,setMeasurePage]=useState(1);
@@ -60,7 +62,7 @@ export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
         if(request.current()){
           setSnapshot(null);setEdits({});setReasons({});setSelected([]);
           setRetry(null);
-          setNotice('建议不可用；已清除旧文本，请检查当前权限。');
+          setNotice(tr("Vorschläge nicht verfügbar; alter Text wurde entfernt, bitte Berechtigungen prüfen.", "Proposals unavailable; old text cleared, please check your permissions."));
         }
       } finally {if(request.current()) timer=setTimeout(load,2000);}
     }
@@ -71,7 +73,7 @@ export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
     if(busyRef.current || snapshot?.owner!==requests) return;
     const request=requests.begin();
     if(!request.current()) return;
-    busyRef.current=true;setBusy(true);setNotice('提交中');
+    busyRef.current=true;setBusy(true);setNotice(tr("Wird gesendet", "Submitting"));
     try {
       if(op.kind==='batch'){
         if(!checkpoint)return;
@@ -79,50 +81,50 @@ export default function D5ProposalPanel({capaId,checkpoint,onChanged}:Props) {
         if(request.current())setResults(value);
       }else if(op.kind==='adopt') await adoptD5Proposal(capaId,op.id,{operation_key:op.key,final_text:op.value},request.signal);
       else await withdrawD5Proposal(capaId,op.id,{operation_key:op.key,reason:op.value},request.signal);
-      if(request.current()){setRetry(null);setNotice('处理已确认');setSnapshot(null);setEdits({});setReasons({});setSelected([]);setVersion(n=>n+1);onChanged?.();}
+      if(request.current()){setRetry(null);setNotice(tr("Verarbeitung bestätigt", "Processing confirmed"));setSnapshot(null);setEdits({});setReasons({});setSelected([]);setVersion(n=>n+1);onChanged?.();}
     }catch(error){
       if(!request.current())return;
       const status=(error as {response?:{status?:number}})?.response?.status;
       if(status && [401,403,404,409,422].includes(status)){
-        setRetry(null);setSnapshot(null);setEdits({});setReasons({});setSelected([]);setResults([]);setNotice('资格或状态已变化，正在刷新建议。');setVersion(n=>n+1);
-      }else{setRetry(op);setNotice('操作尚未确认；重试会发送原请求。');}
+        setRetry(null);setSnapshot(null);setEdits({});setReasons({});setSelected([]);setResults([]);setNotice(tr("Berechtigung oder Status hat sich geändert, Vorschläge werden neu geladen.", "Eligibility or state changed, refreshing proposals."));setVersion(n=>n+1);
+      }else{setRetry(op);setNotice(tr("Vorgang noch nicht bestätigt; Wiederholen sendet die ursprüngliche Anfrage.", "Operation not confirmed yet; retry sends the original request."));}
     }finally{if(request.current()){busyRef.current=false;setBusy(false);}request.finish();}
   }
-  return <Card size="small" title="Agent D5 建议" style={{marginBottom:16}}>
-    <p>建议归属本报告；任务结束后仍按当前资格逐项处理。</p>
-    <Button disabled={busy || !!retry} onClick={()=>{requests.invalidate();setSnapshot(null);setEdits({});setReasons({});setSelected([]);setResults([]);setRetry(null);setVersion(v=>v+1);}}>刷新建议</Button>
-    {items.map(item=><section key={item.proposal_id} aria-label={`建议 ${item.proposal_id}`}>
-      <p>{labels[item.state]}{!item.basis_current && <> · <span>依据过时</span></>}</p>
-      <p>建议 {item.proposal_id} · 任务 {item.task_id}</p><p>{item.original_text}</p>
-      {checkpoint && <label><input type="checkbox" aria-label={`选择建议 ${item.proposal_id}`} disabled={busy || !!retry || !item.can_withdraw} checked={selected.includes(item.proposal_id)} onChange={e=>setSelected(old=>e.target.checked?[...old,item.proposal_id]:old.filter(id=>id!==item.proposal_id))}/>选择建议</label>}
+  return <Card size="small" title={tr("Agent-D5-Vorschläge", "Agent D5 proposals")} style={{marginBottom:16}}>
+    <p>{tr("Vorschläge gehören zu diesem Bericht; nach Ende der Aufgabe werden sie weiterhin einzeln nach aktueller Berechtigung bearbeitet.", "Proposals belong to this report; after the task ends they are still handled one by one per current eligibility.")}</p>
+    <Button disabled={busy || !!retry} onClick={()=>{requests.invalidate();setSnapshot(null);setEdits({});setReasons({});setSelected([]);setResults([]);setRetry(null);setVersion(v=>v+1);}}>{tr("Vorschläge aktualisieren", "Refresh proposals")}</Button>
+    {items.map(item=><section key={item.proposal_id} aria-label={tr(`Vorschlag ${item.proposal_id}`, `Proposal ${item.proposal_id}`)}>
+      <p>{labels()[item.state]}{!item.basis_current && <> · <span>{tr("Grundlage veraltet", "Basis outdated")}</span></>}</p>
+      <p>{tr("Vorschlag", "Proposal")} {item.proposal_id} · {tr("Aufgabe", "Task")} {item.task_id}</p><p>{item.original_text}</p>
+      {checkpoint && <label><input type="checkbox" aria-label={tr(`Vorschlag ${item.proposal_id} auswählen`, `Select proposal ${item.proposal_id}`)} disabled={busy || !!retry || !item.can_withdraw} checked={selected.includes(item.proposal_id)} onChange={e=>setSelected(old=>e.target.checked?[...old,item.proposal_id]:old.filter(id=>id!==item.proposal_id))}/>{tr("Vorschlag auswählen", "Select proposal")}</label>}
       {item.state==='pending' && <>
-        <label>最终措施<textarea aria-label={`最终措施 ${item.proposal_id}`} value={edits[item.proposal_id]??item.original_text} disabled={busy || !!retry || !item.can_adopt} onChange={e=>setEdits({...edits,[item.proposal_id]:e.target.value})}/></label>
-        <Button aria-label={`采纳 ${item.proposal_id}`} disabled={busy || !!retry || !item.can_adopt || !bounded(edits[item.proposal_id]??item.original_text)} onClick={()=>void execute({kind:'adopt',id:item.proposal_id,key:crypto.randomUUID(),value:edits[item.proposal_id]??item.original_text})}>采纳</Button>
-        <label>撤回原因<textarea aria-label={`撤回原因 ${item.proposal_id}`} value={reasons[item.proposal_id]??''} disabled={busy || !!retry || !item.can_withdraw} onChange={e=>setReasons({...reasons,[item.proposal_id]:e.target.value})}/></label>
-        <Button aria-label={`撤回 ${item.proposal_id}`} disabled={busy || !!retry || !item.can_withdraw || !bounded(reasons[item.proposal_id]??'')} onClick={()=>void execute({kind:'withdraw',id:item.proposal_id,key:crypto.randomUUID(),value:reasons[item.proposal_id]})}>撤回</Button>
+        <label>{tr("Endgültige Maßnahme", "Final measure")}<textarea aria-label={tr(`Endgültige Maßnahme ${item.proposal_id}`, `Final measure ${item.proposal_id}`)} value={edits[item.proposal_id]??item.original_text} disabled={busy || !!retry || !item.can_adopt} onChange={e=>setEdits({...edits,[item.proposal_id]:e.target.value})}/></label>
+        <Button aria-label={tr(`Übernehmen ${item.proposal_id}`, `Adopt ${item.proposal_id}`)} disabled={busy || !!retry || !item.can_adopt || !bounded(edits[item.proposal_id]??item.original_text)} onClick={()=>void execute({kind:'adopt',id:item.proposal_id,key:crypto.randomUUID(),value:edits[item.proposal_id]??item.original_text})}>{tr("Übernehmen", "Adopt")}</Button>
+        <label>{tr("Rückzugsgrund", "Withdrawal reason")}<textarea aria-label={tr(`Rückzugsgrund ${item.proposal_id}`, `Withdrawal reason ${item.proposal_id}`)} value={reasons[item.proposal_id]??''} disabled={busy || !!retry || !item.can_withdraw} onChange={e=>setReasons({...reasons,[item.proposal_id]:e.target.value})}/></label>
+        <Button aria-label={tr(`Zurückziehen ${item.proposal_id}`, `Withdraw ${item.proposal_id}`)} disabled={busy || !!retry || !item.can_withdraw || !bounded(reasons[item.proposal_id]??'')} onClick={()=>void execute({kind:'withdraw',id:item.proposal_id,key:crypto.randomUUID(),value:reasons[item.proposal_id]})}>{tr("Zurückziehen", "Withdraw")}</Button>
       </>}
     </section>)}
-    {checkpoint && <section aria-label="检查点部分撤回">
-      <p>仅撤回当前检查点之后选中的建议，逐项返回结果。</p>
-      <label>批量撤回原因<textarea aria-label="批量撤回原因" value={snapshot?.owner===requests?reason:''} disabled={busy || !!retry} onChange={e=>setReason(e.target.value)}/></label>
-      <Button disabled={snapshot?.owner!==requests || busy || !!retry || !selected.length || !bounded(reason)} onClick={()=>void execute({kind:'batch',ids:[...selected],key:crypto.randomUUID(),value:reason})}>撤回选中建议</Button>
+    {checkpoint && <section aria-label={tr("Teilweiser Rückzug ab Checkpoint", "Partial withdrawal at checkpoint")}>
+      <p>{tr("Zieht nur die ausgewählten Vorschläge nach dem aktuellen Checkpoint zurück und meldet das Ergebnis einzeln.", "Withdraws only the selected proposals after the current checkpoint and reports each result.")}</p>
+      <label>{tr("Grund für Sammelrückzug", "Batch withdrawal reason")}<textarea aria-label={tr("Grund für Sammelrückzug", "Batch withdrawal reason")} value={snapshot?.owner===requests?reason:''} disabled={busy || !!retry} onChange={e=>setReason(e.target.value)}/></label>
+      <Button disabled={snapshot?.owner!==requests || busy || !!retry || !selected.length || !bounded(reason)} onClick={()=>void execute({kind:'batch',ids:[...selected],key:crypto.randomUUID(),value:reason})}>{tr("Ausgewählte Vorschläge zurückziehen", "Withdraw selected proposals")}</Button>
       {(snapshot?.owner===requests?results:[]).map(result=><p key={result.proposal_id}>{result.proposal_id}：{result.outcome}</p>)}
     </section>}
-    <p>建议第 {page} 页</p>
-    <Button disabled={page<=1 || busy || !!retry} onClick={()=>setPage(p=>p-1)}>上一页建议</Button>
-    <Button disabled={!snapshot || page*20>=snapshot.total || busy || !!retry} onClick={()=>setPage(p=>p+1)}>下一页建议</Button>
-    <section aria-label="正式 D5 措施">
-      <h4>员工确认的正式措施</h4>
-      {(snapshot?.owner===requests?snapshot.measures:[]).map(measure=><section key={measure.measure_id} aria-label={`正式措施 ${measure.measure_id}`}>
-        <p>对应建议 {measure.proposal_id}</p>
+    <p>{tr(`Vorschläge Seite ${page}`, `Proposals page ${page}`)}</p>
+    <Button disabled={page<=1 || busy || !!retry} onClick={()=>setPage(p=>p-1)}>{tr("Vorherige Vorschlagsseite", "Previous proposal page")}</Button>
+    <Button disabled={!snapshot || page*20>=snapshot.total || busy || !!retry} onClick={()=>setPage(p=>p+1)}>{tr("Nächste Vorschlagsseite", "Next proposal page")}</Button>
+    <section aria-label={tr("Formale D5-Maßnahmen", "Formal D5 measures")}>
+      <h4>{tr("Von Mitarbeitenden bestätigte formale Maßnahmen", "Formal measures confirmed by staff")}</h4>
+      {(snapshot?.owner===requests?snapshot.measures:[]).map(measure=><section key={measure.measure_id} aria-label={tr(`Formale Maßnahme ${measure.measure_id}`, `Formal measure ${measure.measure_id}`)}>
+        <p>{tr("Zugehöriger Vorschlag", "Corresponding proposal")} {measure.proposal_id}</p>
         <p>{measure.final_text}</p>
-        <p>采纳人 {measure.adopted_by} · {measure.adopted_at}</p>
+        <p>{tr("Übernommen von", "Adopted by")} {measure.adopted_by} · {measure.adopted_at}</p>
       </section>)}
-      <p>正式措施第 {measurePage} 页</p>
-      <Button disabled={measurePage<=1 || busy || !!retry} onClick={()=>setMeasurePage(p=>p-1)}>上一页正式措施</Button>
-      <Button disabled={!snapshot || measurePage*20>=snapshot.measureTotal || busy || !!retry} onClick={()=>setMeasurePage(p=>p+1)}>下一页正式措施</Button>
+      <p>{tr(`Formale Maßnahmen Seite ${measurePage}`, `Formal measures page ${measurePage}`)}</p>
+      <Button disabled={measurePage<=1 || busy || !!retry} onClick={()=>setMeasurePage(p=>p-1)}>{tr("Vorherige Maßnahmenseite", "Previous measure page")}</Button>
+      <Button disabled={!snapshot || measurePage*20>=snapshot.measureTotal || busy || !!retry} onClick={()=>setMeasurePage(p=>p+1)}>{tr("Nächste Maßnahmenseite", "Next measure page")}</Button>
     </section>
-    {snapshot?.owner===requests && retry && <Button disabled={busy} onClick={()=>void execute(retry)}>重试原处理</Button>}
+    {snapshot?.owner===requests && retry && <Button disabled={busy} onClick={()=>void execute(retry)}>{tr("Ursprünglichen Vorgang wiederholen", "Retry original operation")}</Button>}
     <p aria-live="polite">{notice}</p>
   </Card>;
 }

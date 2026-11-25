@@ -56,7 +56,8 @@
     "completed": "Abgeschlossen",
     "failed": "Fehlgeschlagen",
     "active": "Aktiv",
-    "inactive": "Inaktiv"
+    "inactive": "Inaktiv",
+    "loading": "Wird geladen"
   },
   "empty": {
     "data": "Keine Daten",
@@ -88,6 +89,9 @@
     "confirmDelete": "Wirklich löschen?",
     "confirmOperation": "Diesen Vorgang bestätigen?",
     "loading": "Wird geladen ...",
-    "noPermission": "Keine Berechtigung für diesen Vorgang"
-  }
+    "noPermission": "Keine Berechtigung für diesen Vorgang",
+    "addFailed": "Hinzufügen fehlgeschlagen",
+    "updateFailed": "Aktualisierung fehlgeschlagen"
+  },
+  "noData": "Keine Daten"
 }

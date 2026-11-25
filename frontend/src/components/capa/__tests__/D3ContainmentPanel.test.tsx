@@ -12,7 +12,7 @@ const mockCapa: CAPAReport = {
   title: "Test CAPA",
   product_line_code: "DC-DC-100",
   status: "D3_INTERIM",
-  severity: "严重",
+  severity: "Critical",
   d1_team: [],
   d2_description: null,
   d3_interim: null,
@@ -96,8 +96,8 @@ describe("D3ContainmentPanel", () => {
 
     // Switch to historical run
     fireEvent.mouseDown(screen.getByRole("combobox"));
-    await waitFor(() => expect(screen.getByText(/代次 2026-01-01/)).toBeInTheDocument());
-    fireEvent.click(screen.getByText(/代次 2026-01-01/));
+    await waitFor(() => expect(screen.getByText(/Run 2026-01-01/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText(/Run 2026-01-01/));
 
     await waitFor(() => expect(screen.queryByTestId("d3-import-button")).not.toBeInTheDocument());
     expect(screen.queryByTestId("d3-execution-add")).not.toBeInTheDocument();

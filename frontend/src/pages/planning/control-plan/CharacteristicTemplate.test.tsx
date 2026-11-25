@@ -50,9 +50,9 @@ describe("Control Plan standard template and write boundary", () => {
     await i18n.changeLanguage("de-DE");
     render(<App><MemoryRouter initialEntries={["/control-plans/cp-1"]}><Routes><Route path="/control-plans/:id" element={<ControlPlanEditorPage />} /></Routes></MemoryRouter></App>);
     await waitFor(() => expect(mocks.getControlPlan).toHaveBeenCalled());
-    expect(screen.getAllByRole("columnheader", { name: "产品特性" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("columnheader", { name: "过程特性" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("columnheader", { name: "反应计划" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("columnheader", { name: "Produktmerkmal" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("columnheader", { name: "Prozessmerkmal" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("columnheader", { name: "Reaktionsplan" }).length).toBeGreaterThan(0);
     expect(screen.queryByText("内部来源元数据")).not.toBeInTheDocument();
   });
 

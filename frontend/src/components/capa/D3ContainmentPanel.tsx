@@ -40,11 +40,11 @@ const adviceTypeColors: Record<D3AdviceType, string> = {
 // Map a stable backend error code to a localized, user-facing banner title.
 // `superseded` = the run/report/generation was overtaken by a newer import (not a
 // plain LLM failure) — distinct message so the user knows to refresh, not just retry.
-function d3ErrorTitle(t: (k: string, d: string) => string, code: string | null | undefined): string {
-  if (code === "superseded") return t("d3.superseded", "已被 newer 代次取代，请刷新");
-  if (code === "blocked") return t("d3.blocked", "LLM 凭证未配置，生成被阻断");
-  if (code === "stale") return t("d3.stale", "上次生成超时，请重试");
-  return t("d3.reportFailed", "生成失败");
+function d3ErrorTitle(t: (k: string) => string, code: string | null | undefined): string {
+  if (code === "superseded") return t("d3.superseded");
+  if (code === "blocked") return t("d3.blocked");
+  if (code === "stale") return t("d3.stale");
+  return t("d3.reportFailed");
 }
 
 type ModalMode = "adopt" | "reject" | "execution" | null;
@@ -139,7 +139,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       setRuns(data);
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.loadRunsFailed", "加载代次失败"));
+      message.error(t("d3.loadRunsFailed"));
     } finally {
       request.finish();
       if (request.current()) setLoading(false);
@@ -155,7 +155,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       setSnapshots(data);
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.loadSnapshotsFailed", "加载快照失败"));
+      message.error(t("d3.loadSnapshotsFailed"));
     } finally { request.finish(); }
   };
 
@@ -180,7 +180,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
         setReport(null);
         setReportAttemptError(null);
       } else {
-        message.error(t("d3.loadReportFailed", "加载报告失败"));
+        message.error(t("d3.loadReportFailed"));
       }
     } finally { request.finish(); }
   };
@@ -203,7 +203,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       );
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.loadAdviceFailed", "加载建议失败"));
+      message.error(t("d3.loadAdviceFailed"));
     } finally { request.finish(); }
   };
 
@@ -216,7 +216,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       setAdoptions(data);
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.loadAdoptionsFailed", "加载采纳记录失败"));
+      message.error(t("d3.loadAdoptionsFailed"));
     } finally { request.finish(); }
   };
 
@@ -229,7 +229,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       setExecutions(data);
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.loadExecutionsFailed", "加载执行记录失败"));
+      message.error(t("d3.loadExecutionsFailed"));
     } finally { request.finish(); }
   };
 
@@ -240,12 +240,12 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       await importD3Containment(capa.report_id, undefined, request.signal);
       if (!request.current()) return;
-      message.success(t("d3.importSuccess", "导入成功"));
+      message.success(t("d3.importSuccess"));
       await loadRuns();
       if (!request.current()) return;
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.importFailed", "导入失败"));
+      message.error(t("d3.importFailed"));
     } finally {
       request.finish();
       if (request.current()) setImporting(false);
@@ -260,12 +260,12 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     try {
       await generateD3Report(capa.report_id, { run_id: currentRun.run_id }, request.signal);
       if (!request.current()) return;
-      message.success(t("d3.reportGenerated", "报告生成中"));
+      message.success(t("d3.reportGenerated"));
       await loadReport(currentRun?.run_id);
       if (!request.current()) return;
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.reportGenerateFailed", "报告生成失败"));
+      message.error(t("d3.reportGenerateFailed"));
     } finally {
       request.finish();
       if (request.current()) setGeneratingReport(false);
@@ -280,19 +280,19 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     // reads the current report). Gate here so the user gets a clear hint instead of
     // a generic "建议生成失败" from the backend's "需先生成影响报告" check.
     if (!report || report.status !== "done") {
-      message.warning(t("d3.adviceNeedsReport", "需先生成影响报告才能生成建议"));
+      message.warning(t("d3.adviceNeedsReport"));
       request.finish(); return;
     }
     setGeneratingAdvice(true);
     try {
       await generateD3Advice(capa.report_id, { run_id: currentRun.run_id }, request.signal);
       if (!request.current()) return;
-      message.success(t("d3.adviceGenerated", "建议生成中"));
+      message.success(t("d3.adviceGenerated"));
       await loadAdvice(currentRun?.run_id);
       if (!request.current()) return;
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.adviceGenerateFailed", "建议生成失败"));
+      message.error(t("d3.adviceGenerateFailed"));
     } finally {
       request.finish();
       if (request.current()) setGeneratingAdvice(false);
@@ -332,7 +332,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
         adopted_text: adoptedText,
       }, request.signal);
       if (!request.current()) return;
-      message.success(t("d3.acceptSuccess", "已采纳"));
+      message.success(t("d3.acceptSuccess"));
       closeModal();
       await loadAdoptions();
       if (!request.current()) return;
@@ -340,7 +340,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       if (!request.current()) return;
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.acceptFailed", "采纳失败"));
+      message.error(t("d3.acceptFailed"));
     } finally { request.finish(); }
   };
 
@@ -354,13 +354,13 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
         adopted_text: null,
       }, request.signal);
       if (!request.current()) return;
-      message.success(t("d3.rejectSuccess", "已拒绝"));
+      message.success(t("d3.rejectSuccess"));
       closeModal();
       await loadAdvice(currentRun?.run_id);
       if (!request.current()) return;
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.rejectFailed", "拒绝失败"));
+      message.error(t("d3.rejectFailed"));
     } finally { request.finish(); }
   };
 
@@ -368,7 +368,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
     const request = requests.begin();
     if (!request.current()) return;
     if (!executionMeasure.trim()) {
-      message.warning(t("d3.measureRequired", "请填写措施"));
+      message.warning(t("d3.measureRequired"));
       request.finish(); return;
     }
     try {
@@ -380,7 +380,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
           : [],
       }, request.signal);
       if (!request.current()) return;
-      message.success(t("d3.executionAdded", "执行记录已添加"));
+      message.success(t("d3.executionAdded"));
       closeModal();
       await loadExecutions(currentRun?.run_id);
       if (!request.current()) return;
@@ -392,7 +392,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       message.error(
         typeof detail === "string"
           ? detail
-          : t("d3.executionAddFailed", "添加执行记录失败"),
+          : t("d3.executionAddFailed"),
       );
     } finally { request.finish(); }
   };
@@ -408,7 +408,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       if (!request.current()) return;
     } catch {
       if (!request.current()) return;
-      message.error(t("d3.executionUpdateFailed", "更新执行记录失败"));
+      message.error(t("d3.executionUpdateFailed"));
     } finally { request.finish(); }
   };
 
@@ -438,7 +438,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
         <Alert
           type="error"
           showIcon
-          message={t("d3.runFailed", "代次失败")}
+          message={t("d3.runFailed")}
           description={report?.error || currentRun.status}
           style={{ marginBottom: 16 }}
         />
@@ -449,7 +449,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
         <Alert
           type="info"
           showIcon
-          message={t("d3.runRunning", "正在运行")}
+          message={t("d3.runRunning")}
           style={{ marginBottom: 16 }}
         />
       );
@@ -460,7 +460,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
   return (
     <Card
       size="small"
-      title={t("d3.title", "D3 临时遏制措施")}
+      title={t("d3.title")}
       extra={
         showImportButton && (
           <Button
@@ -470,7 +470,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             onClick={handleImport}
             data-e2e="d3-import-button"
           >
-            {t("d3.import", "导入")}
+            {t("d3.import")}
           </Button>
         )
       }
@@ -480,7 +480,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       {/* Run switcher for historical runs */}
       {historicalRuns.length > 0 && (
         <Space style={{ marginBottom: 16 }}>
-          <Text strong>{t("d3.selectRun", "选择代次")}</Text>
+          <Text strong>{t("d3.selectRun")}</Text>
           <Select
             style={{ width: 200 }}
             value={selectedRunId || actualCurrentRun?.run_id}
@@ -492,10 +492,10 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
               }
             }}
             options={[
-              { value: actualCurrentRun?.run_id, label: t("d3.currentRun", "当前代次") },
+              { value: actualCurrentRun?.run_id, label: t("d3.currentRun") },
               ...historicalRuns.map(r => ({
                 value: r.run_id,
-                label: `${t("d3.runLabel", "代次")} ${r.created_at}`,
+                label: `${t("d3.runLabel")} ${r.created_at}`,
               })),
             ]}
           />
@@ -505,7 +505,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       {/* 4 Snapshot Cards */}
       {(snapshots.length > 0) && (
         <Space direction="vertical" style={{ width: "100%", marginBottom: 16 }}>
-          <Text strong>{t("d3.snapshotsTitle", "数据快照")}</Text>
+          <Text strong>{t("d3.snapshotsTitle")}</Text>
           {(["inventory", "shipment", "iqc", "spc"] as const).map(type => (
             <Card
               key={type}
@@ -519,7 +519,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                 dataSource={snapshotsByType[type]}
                 renderItem={(s) => (
                   <List.Item>
-                    <Text>{t("d3.recordCount", "记录数")}: {s.record_count}</Text>
+                    <Text>{t("d3.recordCount")}: {s.record_count}</Text>
                     <Tag>{s.snapshot_type}</Tag>
                   </List.Item>
                 )}
@@ -530,19 +530,19 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       )}
 
       {/* Impact Report */}
-      <Card size="small" title={t("d3.reportTitle", "影响报告")} style={{ marginBottom: 16 }}>
+      <Card size="small" title={t("d3.reportTitle")} style={{ marginBottom: 16 }}>
         <Space direction="vertical" style={{ width: "100%" }}>
           {report ? (
             <>
               {report.risk_level && (
                 <Text>
-                  {t("d3.riskLevel", "风险等级")}: {report.risk_level} ({t("d3.riskFloor", "底线")}: {report.risk_floor})
+                  {t("d3.riskLevel")}: {report.risk_level} ({t("d3.riskFloor")}: {report.risk_floor})
                 </Text>
               )}
               {report.risk_explanation && <Text>{report.risk_explanation}</Text>}
               {!!report.customer_impact?.length && (
                 <Text>
-                  {t("d3.customerImpact", "客户影响")}: {report.customer_impact.length} 条
+                  {t("d3.customerImpact")}: {report.customer_impact.length}
                 </Text>
               )}
               {(report.status === "failed" || report.status === "superseded") && (
@@ -552,8 +552,8 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                   message={d3ErrorTitle(t, report.error)}
                   description={
                     report.error === "superseded"
-                      ? t("d3.supersededHint", "当前 run 已被新导入取代，请切换或重新导入后重试")
-                      : report.error || t("d3.reportFailedHint", "可点击下方按钮重试")
+                      ? t("d3.supersededHint")
+                      : report.error || t("d3.reportFailedHint")
                   }
                   style={{ marginTop: 8 }}
                   data-e2e="d3-report-failed-banner"
@@ -572,7 +572,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             </>
           ) : (
             <Text type="secondary">
-              {t("d3.noReport", "尚未生成报告，或上次生成失败。点击下方按钮生成/重试。")}
+              {t("d3.noReport")}
             </Text>
           )}
         </Space>
@@ -585,16 +585,16 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             data-e2e="d3-generate-report"
           >
             {!report
-              ? t("d3.generateReport", "生成报告")
+              ? t("d3.generateReport")
               : report.status === "failed"
-                ? t("d3.retryReport", "重试生成报告")
-                : t("d3.regenerateReport", "重新生成")}
+                ? t("d3.retryReport")
+                : t("d3.regenerateReport")}
           </Button>
         )}
       </Card>
 
       {/* AI Advice */}
-      <Card size="small" title={t("d3.adviceTitle", "AI 建议")} style={{ marginBottom: 16 }} data-e2e="d3-advice-card">
+      <Card size="small" title={t("d3.adviceTitle")} style={{ marginBottom: 16 }} data-e2e="d3-advice-card">
         {adviceError && (
           <Alert
             type="error"
@@ -629,7 +629,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                         icon={<CheckOutlined />}
                         onClick={() => openAdoptModal(item)}
                       >
-                        {t("d3.accept", "采纳")}
+                        {t("d3.accept")}
                       </Button>,
                       <Button
                         key="reject"
@@ -639,7 +639,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                         icon={<CloseOutlined />}
                         onClick={() => openRejectModal(item)}
                       >
-                        {t("d3.reject", "拒绝")}
+                        {t("d3.reject")}
                       </Button>,
                     ]
                   : undefined
@@ -677,14 +677,14 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
               data-e2e="d3-generate-advice"
             >
               {adviceError
-                ? t("d3.retryAdvice", "重试生成建议")
+                ? t("d3.retryAdvice")
                 : advice.length === 0
-                  ? t("d3.generateAdvice", "生成建议")
-                  : t("d3.regenerateAdvice", "重新生成建议")}
+                  ? t("d3.generateAdvice")
+                  : t("d3.regenerateAdvice")}
             </Button>
             {(!report || report.status !== "done") && (
               <Text type="secondary" style={{ marginLeft: 8 }} data-e2e="d3-advice-needs-report-hint">
-                {t("d3.adviceNeedsReport", "需先生成影响报告才能生成建议")}
+                {t("d3.adviceNeedsReport")}
               </Text>
             )}
           </>
@@ -693,7 +693,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
 
       {/* Adoption List */}
       {adoptions.length > 0 && (
-        <Card size="small" title={t("d3.adoptionsTitle", "采纳记录")} style={{ marginBottom: 16 }} data-e2e="d3-adoption-list">
+        <Card size="small" title={t("d3.adoptionsTitle")} style={{ marginBottom: 16 }} data-e2e="d3-adoption-list">
           <List
             dataSource={adoptions}
             renderItem={(item) => (
@@ -716,7 +716,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       )}
 
       {/* Execution List */}
-      <Card size="small" title={t("d3.executionsTitle", "执行记录")} data-e2e="d3-execution-list">
+      <Card size="small" title={t("d3.executionsTitle")} data-e2e="d3-execution-list">
         <List
           dataSource={executions}
           renderItem={(item) => (
@@ -728,7 +728,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                     <Text type="secondary">{item.result_status}</Text>
                     {item.evidence_refs?.[0] && (
                       <Button type="link" size="small" href={String(item.evidence_refs[0].url || "")} target="_blank">
-                        {t("d3.evidenceLink", "证据")}
+                        {t("d3.evidenceLink")}
                       </Button>
                     )}
                     {!isReadOnly && (
@@ -739,10 +739,10 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
                         style={{ width: 120 }}
                         data-e2e="d3-execution-status-change"
                         options={[
-                          { value: "in_progress", label: t("d3.status.in_progress", "进行中") },
-                          { value: "completed", label: t("d3.status.completed", "已完成") },
-                          { value: "pending", label: t("d3.status.pending", "待处理") },
-                          { value: "failed", label: t("d3.status.failed", "失败") },
+                          { value: "in_progress", label: t("d3.status.in_progress") },
+                          { value: "completed", label: t("d3.status.completed") },
+                          { value: "pending", label: t("d3.status.pending") },
+                          { value: "failed", label: t("d3.status.failed") },
                         ]}
                       />
                     )}
@@ -760,7 +760,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
             data-e2e="d3-execution-add"
             style={{ marginTop: 8 }}
           >
-            {t("d3.addExecution", "添加执行记录")}
+            {t("d3.addExecution")}
           </Button>
         )}
       </Card>
@@ -768,13 +768,13 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       {/* Adopt Modal */}
       <Modal
         open={modalMode === "adopt"}
-        title={t("d3.acceptAdviceTitle", "采纳建议")}
+        title={t("d3.acceptAdviceTitle")}
         onCancel={closeModal}
         onOk={handleAdoptOk}
-        okText={t("d3.accept", "采纳")}
+        okText={t("d3.accept")}
       >
         <Form layout="vertical">
-          <Form.Item label={t("d3.adoptedTextLabel", "采纳文本")}>
+          <Form.Item label={t("d3.adoptedTextLabel")}>
             <TextArea
               rows={4}
               value={adoptedText}
@@ -788,14 +788,14 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       {/* Reject Modal */}
       <Modal
         open={modalMode === "reject"}
-        title={t("d3.rejectAdviceTitle", "拒绝建议")}
+        title={t("d3.rejectAdviceTitle")}
         onCancel={closeModal}
         onOk={handleRejectOk}
-        okText={t("d3.reject", "拒绝")}
+        okText={t("d3.reject")}
         okButtonProps={{ danger: true }}
       >
         <Form layout="vertical">
-          <Form.Item label={t("d3.rejectReasonLabel", "拒绝理由")}>
+          <Form.Item label={t("d3.rejectReasonLabel")}>
             <TextArea
               rows={3}
               value={rejectReason}
@@ -809,14 +809,14 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
       {/* Execution Modal */}
       <Modal
         open={modalMode === "execution"}
-        title={t("d3.addExecutionTitle", "添加执行记录")}
+        title={t("d3.addExecutionTitle")}
         onCancel={closeModal}
         onOk={handleExecutionOk}
-        okText={t("d3.addExecution", "添加")}
+        okText={t("d3.addExecution")}
         okButtonProps={{ "data-e2e": "d3-execution-save" }}
       >
         <Form layout="vertical">
-          <Form.Item label={t("d3.executionMeasureLabel", "措施")}>
+          <Form.Item label={t("d3.executionMeasureLabel")}>
             <TextArea
               rows={3}
               value={executionMeasure}
@@ -824,7 +824,7 @@ export default function D3ContainmentPanel({ capa, canEdit }: D3ContainmentPanel
               data-e2e="d3-execution-measure"
             />
           </Form.Item>
-          <Form.Item label={t("d3.evidenceUrlLabel", "证据 URL")}>
+          <Form.Item label={t("d3.evidenceUrlLabel")}>
             <Input
               value={executionEvidenceUrl}
               onChange={(e) => setExecutionEvidenceUrl(e.target.value)}

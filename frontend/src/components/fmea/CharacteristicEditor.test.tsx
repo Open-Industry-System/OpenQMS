@@ -33,20 +33,20 @@ describe("CharacteristicEditor", () => {
     const onChange = vi.fn();
     render(<StatefulEditor onChange={onChange} />);
 
-    fireEvent.click(screen.getByText("新增产品特性"));
-    fireEvent.change(screen.getByLabelText("特性名称"), { target: { value: "贴装偏移量" } });
-    fireEvent.change(screen.getByLabelText("规范／公差"), { target: { value: "≤ 0.05" } });
-    fireEvent.click(screen.getByRole("button", { name: "确认特性" }));
+    fireEvent.click(screen.getByText("Add Product characteristic"));
+    fireEvent.change(screen.getByLabelText("Characteristic name"), { target: { value: "贴装偏移量" } });
+    fireEvent.change(screen.getByLabelText("Specification / tolerance"), { target: { value: "≤ 0.05" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm characteristic" }));
 
-    fireEvent.click(screen.getByText("新增产品特性"));
-    const nameInputs = screen.getAllByLabelText("特性名称");
-    const specificationInputs = screen.getAllByLabelText("规范／公差");
-    const classificationInputs = screen.getAllByLabelText("特殊分类");
+    fireEvent.click(screen.getByText("Add Product characteristic"));
+    const nameInputs = screen.getAllByLabelText("Characteristic name");
+    const specificationInputs = screen.getAllByLabelText("Specification / tolerance");
+    const classificationInputs = screen.getAllByLabelText("Special classification");
     fireEvent.change(nameInputs[nameInputs.length - 1], { target: { value: "表面状态" } });
     fireEvent.change(specificationInputs[specificationInputs.length - 1], { target: { value: "无划伤" } });
     fireEvent.mouseDown(classificationInputs[classificationInputs.length - 1]);
     fireEvent.click(screen.getByText("SC", { selector: ".ant-select-item-option-content" }));
-    fireEvent.click(screen.getByRole("button", { name: "确认特性" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm characteristic" }));
 
     expect(onChange).toHaveBeenLastCalledWith([
       expect.objectContaining({ name: "贴装偏移量", specification: "≤ 0.05", classification: null }),
@@ -78,15 +78,15 @@ describe("CharacteristicEditor", () => {
   it("shows required feedback for an existing blank name without persisting it and recovers with the same UUID", () => {
     const onChange = vi.fn();
     render(<CharacteristicEditor value={[productCharacteristic]} allowedKind="product" productOptions={[]} readOnly={false} onChange={onChange} />);
-    const input = screen.getByLabelText("特性名称");
+    const input = screen.getByLabelText("Characteristic name");
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.blur(input);
-    expect(screen.getByText("请输入特性名称")).toBeInTheDocument();
+    expect(screen.getByText("Please enter a characteristic name")).toBeInTheDocument();
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: "恢复名称" } });
     fireEvent.blur(input);
-    expect(screen.queryByText("请输入特性名称")).not.toBeInTheDocument();
+    expect(screen.queryByText("Please enter a characteristic name")).not.toBeInTheDocument();
     expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ id: "char-1", name: "恢复名称" })]);
   });
 
@@ -102,7 +102,7 @@ describe("CharacteristicEditor", () => {
       />,
     );
 
-    expect(screen.getByText("历史功能字段仅供参考，请确认后录入结构化特性。")).toBeInTheDocument();
+    expect(screen.getByText("Legacy function fields are for reference only; please review and enter structured characteristics.")).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -117,7 +117,7 @@ describe("CharacteristicEditor", () => {
       />,
     );
 
-    expect(screen.queryByText("关联产品特性")).not.toBeInTheDocument();
-    expect(screen.getByText("产品特性")).toBeInTheDocument();
+    expect(screen.queryByText("Linked product characteristic")).not.toBeInTheDocument();
+    expect(screen.getByText("Product characteristic")).toBeInTheDocument();
   });
 });

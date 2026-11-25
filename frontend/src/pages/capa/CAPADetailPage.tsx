@@ -44,6 +44,7 @@ import { useAuthStore } from "../../store/authStore";
 import { usePermission } from "../../hooks/usePermission";
 import { useAgentTaskContext } from "../../components/agent/AgentTaskContext";
 import { PageShell, StatusBadge, DataCard } from "../../components/design";
+import { tr } from "../../i18n/tr";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -129,19 +130,19 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     const subLabelKey = capa?.status ? stepSubLabelKey[capa.status] : undefined;
     const subLabel = subLabelKey ? t(subLabelKey) : undefined;
     return [
-      { title: t("steps.d1", "D1 团队组建") },
-      { title: t("steps.d2", "D2 问题描述") },
-      { title: t("steps.d3", "D3 临时措施") },
-      { title: t("steps.d4", "D4 根因分析") },
-      { title: t("steps.d5", "D5 永久措施") },
-      { title: t("steps.d6", "D6 实施验证") },
+      { title: t("steps.d1") },
+      { title: t("steps.d2") },
+      { title: t("steps.d3") },
+      { title: t("steps.d4") },
+      { title: t("steps.d5") },
+      { title: t("steps.d6") },
       {
-        title: t("steps.d7", "D7 预防复发"),
+        title: t("steps.d7"),
         // D7 主步骤副标：仅 D7_COMPLETED 时显示
         description: capa?.status === "D7_COMPLETED" ? subLabel : undefined,
       },
       {
-        title: t("steps.d8", "D8 关闭"),
+        title: t("steps.d8"),
         // D8 主步骤副标：D8_GATE_PENDING/D8_APPROVAL_PENDING/ARCHIVED 时显示
         description: ["D8_GATE_PENDING", "D8_APPROVAL_PENDING", "ARCHIVED"].includes(capa?.status ?? "")
           ? subLabel : undefined,
@@ -152,11 +153,11 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   }, [t, capa?.status]);
 
   const roleOptions = [
-    { value: "quality_engineer", label: t("team.roles.quality_engineer", "质量工程师") },
-    { value: "process_engineer", label: t("team.roles.process_engineer", "工艺工程师") },
-    { value: "rd_engineer", label: t("team.roles.rd_engineer", "研发工程师") },
-    { value: "project_manager", label: t("team.roles.project_manager", "项目经理") },
-    { value: "production_supervisor", label: t("team.roles.production_supervisor", "生产主管") },
+    { value: "quality_engineer", label: t("team.roles.quality_engineer") },
+    { value: "process_engineer", label: t("team.roles.process_engineer") },
+    { value: "rd_engineer", label: t("team.roles.rd_engineer") },
+    { value: "project_manager", label: t("team.roles.project_manager") },
+    { value: "production_supervisor", label: t("team.roles.production_supervisor") },
   ];
 
   useEffect(() => {
@@ -171,7 +172,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
         request.cancel();
         setLessonsLoading(false);
         setLessonsModalOpen(false);
-        message.warning(t("messages.searchTimeout", "检索超时，请稍后在编辑过程中使用推荐功能"));
+        message.warning(t("messages.searchTimeout"));
       }, 10000);
 
       const problemDescription = location.state?.problemDescription;
@@ -190,7 +191,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
           if (!request.current()) return;
           clearTimeout(timeoutId);
           if (!axios.isCancel(err)) {
-            message.error(t("messages.searchFailed", "检索经验教训失败"));
+            message.error(t("messages.searchFailed"));
           }
           setLessonsLoading(false);
         }).finally(request.finish);
@@ -330,16 +331,16 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       if (!request.current()) return;
       setCapa((prev) => (prev ? { ...prev, lateral_diffusion: proj } : prev));
       setLateralModalOpen(false);
-      message.success(t("lateral.decideSuccess", "横向扩散决策已保存"));
+      message.success(t("lateral.decideSuccess"));
     } catch (e: unknown) {
       if (!request.current()) return;
       message.error(
         formatCapaAdvanceError(
           e,
-          t("lateral.decideFailed", "横向扩散决策失败"),
+          t("lateral.decideFailed"),
           {
-            blocked: t("lateral.blocked", "横向扩散被阻断：LLM 未配置"),
-            failed: t("lateral.failed", "横向扩散失败，可重试"),
+            blocked: t("lateral.blocked"),
+            failed: t("lateral.failed"),
           },
         ),
       );
@@ -357,16 +358,16 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       const proj = await rerunLateralDiffusion(id, request.signal);
       if (!request.current()) return;
       setCapa((prev) => (prev ? { ...prev, lateral_diffusion: proj } : prev));
-      message.success(t("lateral.rerun", "重新检查"));
+      message.success(t("lateral.rerun"));
     } catch (e: unknown) {
       if (!request.current()) return;
       message.error(
         formatCapaAdvanceError(
           e,
-          t("lateral.failed", "横向扩散失败，可重试"),
+          t("lateral.failed"),
           {
-            blocked: t("lateral.blocked", "横向扩散被阻断：LLM 未配置"),
-            failed: t("lateral.failed", "横向扩散失败，可重试"),
+            blocked: t("lateral.blocked"),
+            failed: t("lateral.failed"),
           },
         ),
       );
@@ -396,15 +397,15 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       const status = (e as { response?: { status?: number } })?.response?.status;
       if (status === 403) {
         setKnowledgeLoadError(
-          t("knowledge.loadForbidden", "无权限查看知识库条目"),
+          t("knowledge.loadForbidden"),
         );
       } else if (status && status >= 500) {
         setKnowledgeLoadError(
-          t("knowledge.loadServerError", "知识库加载失败，请稍后重试"),
+          t("knowledge.loadServerError"),
         );
       } else {
         setKnowledgeLoadError(
-          t("knowledge.loadFailed", "知识库加载失败，请稍后重试"),
+          t("knowledge.loadFailed"),
         );
       }
     } finally {
@@ -425,8 +426,8 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   }, [capa?.report_id, capa?.status]);
 
   const sinkErrorLabels = {
-    blocked: t("knowledge.sinkBlocked", "知识库沉淀被阻断：LLM 未配置，请在 AI 配置中设置凭证"),
-    failed: t("knowledge.sinkFailed", "知识库沉淀失败，可重试关闭或重新沉淀"),
+    blocked: t("knowledge.sinkBlocked"),
+    failed: t("knowledge.sinkFailed"),
   };
 
   const handleResinkKnowledge = async () => {
@@ -437,7 +438,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     try {
       const result = await sinkKnowledge(id, request.signal);
       if (!request.current()) return;
-      message.success(t("knowledge.resinkSuccess", "知识库已重新沉淀"));
+      message.success(t("knowledge.resinkSuccess"));
       setKnowledgeEntry((prev) =>
         prev
           ? {
@@ -470,7 +471,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       if (!request.current()) return;
       const msg = formatCapaAdvanceError(
         e,
-        t("knowledge.resinkFailed", "重新沉淀失败"),
+        t("knowledge.resinkFailed"),
         sinkErrorLabels,
       );
       setKnowledgeError(msg);
@@ -488,9 +489,9 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   };
 
   const embeddingStatusLabel = (status: string | undefined): string => {
-    if (status === "ready") return t("knowledge.embeddingReady", "向量就绪");
-    if (status === "failed") return t("knowledge.embeddingFailed", "向量失败");
-    return t("knowledge.embeddingPending", "向量处理中");
+    if (status === "ready") return t("knowledge.embeddingReady");
+    if (status === "failed") return t("knowledge.embeddingFailed");
+    return t("knowledge.embeddingPending");
   };
 
   const currentStep = capa ? (stepIndex[capa.status] ?? 0) : 0;
@@ -517,7 +518,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
         if (throwOnError) throw new axios.CanceledError("CAPA view invalidated");
         return;
       }
-      message.error(tc("messages.saveFailed", "保存失败"));
+      message.error(tc("messages.saveFailed"));
       if (throwOnError) throw e;
     } finally {
       if (request.current()) setSaving(false);
@@ -594,7 +595,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     if (prev !== undefined) {
       setLocalData((p) => ({ ...p, [field]: prev }));
       handleUpdate(field, prev);
-      message.success(t("messages.undoSuccess", "已撤销 AI 修改"));
+      message.success(t("messages.undoSuccess"));
     }
   };
 
@@ -613,7 +614,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               icon={<UndoOutlined />}
               onClick={() => handleUndo(field)}
             >
-              {t("actions.undoChange", "撤销修改")}
+              {t("actions.undoChange")}
             </Button>
           )}
           {showAIButton && (
@@ -633,7 +634,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
   const reportAdvanceError = (e: unknown) => {
     message.error(
-      formatCapaAdvanceError(e, t("messages.advanceFailed", "推进失败"), sinkErrorLabels),
+      formatCapaAdvanceError(e, t("messages.advanceFailed"), sinkErrorLabels),
     );
   };
 
@@ -656,7 +657,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       const updated = await advanceCAPA(id, target ? { target_state: target } : {}, request.signal);
       if (!request.current()) return;
       setCapa(updated);
-      message.success(t("messages.advanceSuccess", "已推进到下一步"));
+      message.success(t("messages.advanceSuccess"));
     } catch (e: unknown) {
       if (!request.current()) return;
       reportAdvanceError(e);
@@ -672,7 +673,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     const skipReasonsList = d7UnconfirmedItems.map((item) => ({
       fmea_id: item.fmea_id,
       node_id: item.failure_mode_node_id,
-      reason: globalReason || t("d7.skipReasonEmpty", "未填写理由"),
+      reason: globalReason || t("d7.skipReasonEmpty"),
     }));
 
     try {
@@ -682,7 +683,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       }, request.signal);
       if (!request.current()) return;
       setCapa(updated);
-      message.success(t("messages.advanceSuccess", "已推进到下一步"));
+      message.success(t("messages.advanceSuccess"));
       setD7SkipReasons({});
       setD7UnconfirmedItems([]);
     } catch (e: unknown) {
@@ -749,7 +750,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       const updated = await advanceCAPA(id, {}, request.signal);  // target_state 缺省 → ARCHIVED（线性）
       if (!request.current()) return;
       setCapa(updated);
-      message.success(t("messages.archiveSuccess", "已归档"));
+      message.success(t("messages.archiveSuccess"));
     } catch (e: unknown) {
       if (!request.current()) return;
       reportAdvanceError(e);
@@ -797,16 +798,16 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       if (!request.current()) return;
       setCapa(updated);
       setLinkModal(false);
-      message.success(t("messages.linkFMEASuccess", "已关联 FMEA"));
-    } catch { if (request.current()) message.error(t("messages.linkFMEAFailed", "关联失败")); }
+      message.success(t("messages.linkFMEASuccess"));
+    } catch { if (request.current()) message.error(t("messages.linkFMEAFailed")); }
     finally { request.finish(); }
   };
 
   const buildScarDescriptionPrefill = (report: CAPAReport) => {
     // Narrative only — lots live in affected_batches so [] = clear is honored server-side
     const parts = [`${report.document_no} ${report.title}`.trim()];
-    if (report.d2_description) parts.push(`[问题描述] ${report.d2_description}`);
-    if (report.d4_root_cause) parts.push(`[根因] ${report.d4_root_cause}`);
+    if (report.d2_description) parts.push(tr(`[Problembeschreibung] ${report.d2_description}`, `[Problem description] ${report.d2_description}`));
+    if (report.d4_root_cause) parts.push(tr(`[Grundursache] ${report.d4_root_cause}`, `[Root cause] ${report.d4_root_cause}`));
     return parts.join("\n");
   };
 
@@ -847,14 +848,14 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       setCapa(updated);
       // If backend froze (input already exists), reflect lock for subsequent edits
       if (updated.supplier_risk_input) setSupplierLocked(true);
-      message.success(t("messages.supplierSaved", "供应商已保存"));
+      message.success(t("messages.supplierSaved"));
     } catch (err: any) {
       if (!request.current()) return;
       const detail = err?.response?.data?.detail;
       if (typeof detail === "string" && detail.includes("供应商风险输入")) {
         setSupplierLocked(true);
       }
-      message.error(detail || t("messages.supplierSaveFailed", "供应商保存失败"));
+      message.error(detail || t("messages.supplierSaveFailed"));
     } finally { request.finish(); }
   };
 
@@ -880,11 +881,11 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
       setCapa(updated);
       setScarModalOpen(false);
       scarForm.resetFields();
-      message.success(t("messages.triggerScarSuccess", "SCAR 发起成功"));
+      message.success(t("messages.triggerScarSuccess"));
     } catch (err: any) {
       if (!request.current()) return;
       if (err?.errorFields) return; // form validation
-      message.error(t("messages.triggerScarFailed", "SCAR 发起失败"));
+      message.error(t("messages.triggerScarFailed"));
     } finally {
       if (request.current()) setScarSubmitting(false);
       request.finish();
@@ -892,22 +893,22 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
   };
 
   if (loading) return <Spin size="large" style={{ display: "block", margin: "100px auto" }} />;
-  if (!capa) return <Empty description={t("messages.capaNotFound", "8D 报告未找到")} />;
+  if (!capa) return <Empty description={t("messages.capaNotFound")} />;
 
   const actions = (
     <Space>
       {agentTasks?.available && (
-        <Button onClick={() => agentTasks.beginCreate(capa.report_id)}>以本报告创建任务</Button>
+        <Button onClick={() => agentTasks.beginCreate(capa.report_id)}>{tr("Aufgabe aus diesem Bericht anlegen", "Create task from this report")}</Button>
       )}
       {capa.fmea_ref_id && (
         <Tag style={{ background: "var(--qf-green-dim)", color: "var(--qf-green)", borderColor: "var(--qf-green)" }} icon={<LinkOutlined />}>
-          {t("fmea.linked", "已关联 FMEA")}
+          {t("fmea.linked")}
         </Tag>
       )}
       <RelatedFMEALink fmeaRefId={capa.fmea_ref_id ?? null} fmeaNodeId={capa.fmea_node_id ?? null} />
       {coreEditable && (
         <Button icon={<LinkOutlined />} onClick={() => setLinkModal(true)}>
-          {capa.fmea_ref_id ? t("fmea.changeFMEA", "更换FMEA关联") : t("fmea.linkFMEA", "关联FMEA")}
+          {capa.fmea_ref_id ? t("fmea.changeFMEA") : t("fmea.linkFMEA")}
         </Button>
       )}
       {capa.status !== "ARCHIVED" && canEdit('capa') && (
@@ -915,21 +916,21 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
           {capa.status === "D8_APPROVAL_PENDING" && canApprove('capa') && (decisionReady || decisionBusy) && (
             <>
               <Button type="primary" disabled={!decisionReady} loading={decisionBusy} icon={<CheckOutlined />} onClick={handleApprove} data-e2e="capa-approve" data-testid="capa-outcome-approve">
-                {t("reject.approve", "审批关闭")}
+                {t("reject.approve")}
               </Button>
               <Button danger disabled={!decisionReady} icon={<UndoOutlined />} onClick={() => { if (decisionReady) setRejectDialogOpen(true); }} data-e2e="capa-reject">
-                {t("reject.confirm", "驳回")}
+                {t("reject.confirm")}
               </Button>
             </>
           )}
           {capa.status === "D8_CLOSURE" && canApprove('capa') && (
             <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleArchive} data-e2e="capa-archive">
-              {t("reject.archive", "归档")}
+              {t("reject.archive")}
             </Button>
           )}
           {!["D8_GATE_PENDING", "D8_APPROVAL_PENDING", "D8_CLOSURE"].includes(capa.status) && (
             <Button type="primary" icon={<ArrowRightOutlined />} onClick={handleAdvance} data-e2e="capa-advance">
-              {t("actions.advance", "推进下一步")}
+              {t("actions.advance")}
             </Button>
           )}
         </>
@@ -951,7 +952,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
   return (
     <PageShell
-      title={<Space><Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>{tc("actions.back", "返回")}</Button><Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{capa.title}</Title></Space>}
+      title={<Space><Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/capa")}>{tc("actions.back")}</Button><Title level={4} style={{ margin: 0, color: "var(--qf-text-primary)" }}>{capa.title}</Title></Space>}
       subtitle={subtitle}
       actions={actions}
     >
@@ -972,7 +973,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               credentialIdentity={credentialIdentity} onReviewChange={onOutcomeReview} />
           )}
           <D5ProposalPanel capaId={id!} onChanged={() => refreshCapa()} />
-          {capa.status !== "D8_APPROVAL_PENDING" && <DataCard title={t("detail.currentStepDetails", "当前步骤详情")}>
+          {capa.status !== "D8_APPROVAL_PENDING" && <DataCard title={t("detail.currentStepDetails")}>
             {capa.status === "D1_TEAM" && (
               <div>
                 <Table
@@ -982,10 +983,10 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                   size="small"
                   pagination={false}
                   columns={[
-                    { title: t("team.name", "成员姓名"), dataIndex: "name", key: "name" },
-                    { title: t("team.role", "项目职责"), dataIndex: "role", key: "role" },
+                    { title: t("team.name"), dataIndex: "name", key: "name" },
+                    { title: t("team.role"), dataIndex: "role", key: "role" },
                     {
-                      title: tc("table.operations", "操作"),
+                      title: tc("table.operations"),
                       key: "action",
                       width: 80,
                       render: (_, record: any) => (
@@ -1008,7 +1009,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                 {canEdit('capa') && (
                   <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
                     <Input
-                      placeholder={t("team.namePlaceholder", "成员姓名")}
+                      placeholder={t("team.namePlaceholder")}
                       value={newMemberName}
                       onChange={(e) => setNewMemberName(e.target.value)}
                       style={{ width: 150 }}
@@ -1024,14 +1025,14 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                       icon={<PlusOutlined />}
                       onClick={() => {
                         if (!newMemberName.trim()) {
-                          message.warning(t("messages.enterName", "请输入姓名"));
+                          message.warning(t("messages.enterName"));
                           return;
                         }
                         const exists = (localData.d1_team || []).some(
                           (m: any) => m.name === newMemberName.trim()
                         );
                         if (exists) {
-                          message.warning(t("messages.memberExists", "成员已存在"));
+                          message.warning(t("messages.memberExists"));
                           return;
                         }
                         const newTeam = [
@@ -1042,7 +1043,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                         setNewMemberName("");
                       }}
                     >
-                      {t("actions.addMember", "添加成员")}
+                      {t("actions.addMember")}
                     </Button>
                   </div>
                 )}
@@ -1051,7 +1052,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
             {capa.status === "D2_DESCRIPTION" && (
               <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d2", t("fields.d2Label", "5W2H 问题描述"))}>
+                <Form.Item label={renderLabelWithDraft("d2", t("fields.d2Label"))}>
                   <TextArea
                     rows={6}
                     disabled={!canEdit('capa')}
@@ -1068,7 +1069,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               <>
                 <D3ContainmentPanel capa={capa} canEdit={coreEditable} />
                 <Form layout="vertical">
-                  <Form.Item label={renderLabelWithDraft("d3", t("fields.d3Label", "临时遏制措施"))}>
+                  <Form.Item label={renderLabelWithDraft("d3", t("fields.d3Label"))}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -1094,7 +1095,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                 <D4TextRedactionPreview reportId={id!} />
                 <D4VerificationCard capaId={id!} canEdit={coreEditable} currentRootCause={localData.d4_root_cause} fmeaRefId={capa.fmea_ref_id ?? null} />
                 <Form layout="vertical">
-                  <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label", "根因分析 (5Why / 鱼骨图)"))}>
+                  <Form.Item label={renderLabelWithDraft("d4", t("fields.d4Label"))}>
                     <TextArea
                       rows={6}
                       disabled={!canEdit('capa')}
@@ -1118,7 +1119,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                   onAdopted={() => refreshCapa()}
                 />
                 <Form layout="vertical">
-                  <Form.Item label={renderLabelWithDraft("d5", t("fields.d5Label", "永久纠正措施"))}>
+                  <Form.Item label={renderLabelWithDraft("d5", t("fields.d5Label"))}>
                     <TextArea
                       rows={4}
                       disabled={!canEdit('capa')}
@@ -1133,7 +1134,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
             {capa.status === "D6_VERIFICATION" && (
               <Form layout="vertical">
-                <Form.Item label={renderLabelWithDraft("d6", t("fields.d6Label", "效果验证"))}>
+                <Form.Item label={renderLabelWithDraft("d6", t("fields.d6Label"))}>
                   <TextArea
                     rows={4}
                     disabled={!canEdit('capa')}
@@ -1148,7 +1149,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
             {["D7_PREVENTION", "D7_COMPLETED", "D8_GATE_PENDING"].includes(capa.status) && (
               <>
                 <Form layout="vertical">
-                  <Form.Item label={renderLabelWithDraft("d7", t("fields.d7Label", "预防复发措施"))}>
+                  <Form.Item label={renderLabelWithDraft("d7", t("fields.d7Label"))}>
                     <TextArea
                       rows={4}
                       disabled={capa.status !== "D7_PREVENTION" || !canEdit('capa')}
@@ -1195,19 +1196,19 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               </Form>
             )}
 
-            {capa.status === "ARCHIVED" && <Empty description={t("messages.reportArchived", "报告已归档")} />}
+            {capa.status === "ARCHIVED" && <Empty description={t("messages.reportArchived")} />}
           </DataCard>}
         </Col>
 
         <Col xs={24} lg={8}>
-          <DataCard title={t("detail.reportInfo", "报告信息")}>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.documentNo", "编号")}:</Text> <span style={{ fontFamily: "var(--qf-font-mono)" }}>{capa.document_no}</span></p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.status", "状态")}:</Text> <span data-e2e="capa-status" data-testid="capa-status">{capa.status}</span></p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.severity", "严重等级")}:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.dueDate", "期限")}:</Text> {capa.due_date || t("detail.notSet", "未设定")}</p>
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedFMEA", "关联 FMEA")}:</Text> {capa.fmea_ref_id || t("detail.notLinked", "未关联")}</p>
+          <DataCard title={t("detail.reportInfo")}>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.documentNo")}:</Text> <span style={{ fontFamily: "var(--qf-font-mono)" }}>{capa.document_no}</span></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.status")}:</Text> <span data-e2e="capa-status" data-testid="capa-status">{capa.status}</span></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.severity")}:</Text> <StatusBadge status={severityMap[capa.severity] || "warning"}>{capa.severity}</StatusBadge></p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.dueDate")}:</Text> {capa.due_date || t("detail.notSet")}</p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedFMEA")}:</Text> {capa.fmea_ref_id || t("detail.notLinked")}</p>
             <p data-e2e="capa-supplier-row">
-              <Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.supplier", "关联供应商")}:</Text>{" "}
+              <Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.supplier")}:</Text>{" "}
               {supplierEditable ? (
                 <Select
                   data-e2e="capa-supplier-select"
@@ -1216,7 +1217,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                   filterOption={false}
                   style={{ minWidth: 220 }}
                   size="small"
-                  placeholder={t("fields.supplierPlaceholder", "请选择供应商")}
+                  placeholder={t("fields.supplierPlaceholder")}
                   value={capa.supplier_id || undefined}
                   onSearch={async (q) => {
                     const seq = ++supplierSearchSeq.current;
@@ -1253,7 +1254,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               ) : (
                 <span data-e2e="capa-supplier-readonly">
                   {(() => {
-                    if (!capa.supplier_id) return t("detail.notLinked", "未关联");
+                    if (!capa.supplier_id) return t("detail.notLinked");
                     if (capa.supplier_no) {
                       return capa.supplier_name
                         ? `${capa.supplier_no} - ${capa.supplier_name}`
@@ -1263,13 +1264,13 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                     return s ? `${s.supplier_no} - ${s.name}` : capa.supplier_id;
                   })()}
                   {(supplierLocked || !!capa.supplier_risk_input) && capa.supplier_id && (
-                    <Tag style={{ marginLeft: 8 }}>{t("detail.supplierLocked", "已锁定")}</Tag>
+                    <Tag style={{ marginLeft: 8 }}>{t("detail.supplierLocked")}</Tag>
                   )}
                 </span>
               )}
             </p>
             <p>
-              <Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedSCAR", "关联 SCAR")}:</Text>{" "}
+              <Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.relatedSCAR")}:</Text>{" "}
               {capa.linked_scar ? (
                 <a
                   data-e2e="capa-linked-scar"
@@ -1281,17 +1282,17 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               ) : coreEditable &&
                 !["D1_TEAM", "D2_DESCRIPTION"].includes(capa.status) ? (
                 <Button data-e2e="capa-trigger-scar" size="small" onClick={openScarModal}>
-                  {t("actions.triggerScar", "发起 SCAR")}
+                  {t("actions.triggerScar")}
                 </Button>
               ) : (
-                t("detail.notLinked", "未关联")
+                t("detail.notLinked")
               )}
             </p>
             {capa.supplier_risk_input && (
               <div style={{ marginBottom: 12 }}>
                 <p style={{ marginBottom: 4 }}>
                   <Text strong style={{ color: "var(--qf-text-secondary)" }}>
-                    {t("riskInput.related", "供应商风险输入")}:
+                    {t("riskInput.related")}:
                   </Text>
                 </p>
                 <SupplierRiskInputCard
@@ -1305,9 +1306,9 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                       if (!request.current()) return;
                       await refreshCapa();
                       if (!request.current()) return;
-                      message.success(t("riskInput.confirmSuccess", "复发确认已保存"));
+                      message.success(t("riskInput.confirmSuccess"));
                     } catch {
-                      if (request.current()) message.error(t("riskInput.confirmFailed", "复发确认失败"));
+                      if (request.current()) message.error(t("riskInput.confirmFailed"));
                     } finally { request.finish(); }
                   }}
                 />
@@ -1327,12 +1328,12 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
               onDecide={handleLateralDecide}
               loading={lateralLoading}
             />
-            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt", "创建时间")}:</Text> {formatDateTime(capa.created_at)}</p>
+            <p><Text strong style={{ color: "var(--qf-text-secondary)" }}>{t("detail.createdAt")}:</Text> {formatDateTime(capa.created_at)}</p>
           </DataCard>
 
           {isKnowledgeStatus && (
             <div data-e2e="capa-knowledge-card" style={{ marginTop: 16 }}>
-              <DataCard title={t("knowledge.title", "知识库沉淀")}>
+              <DataCard title={t("knowledge.title")}>
                 {knowledgeError && (
                   <Alert
                     type="error"
@@ -1359,20 +1360,20 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                       onClick={() => capa && void loadKnowledgeEntry(capa)}
                       data-e2e="capa-knowledge-reload"
                     >
-                      {t("knowledge.reload", "重新加载")}
+                      {t("knowledge.reload")}
                     </Button>
                   </div>
                 ) : knowledgeEntry ? (
                   <div data-e2e="capa-knowledge-entry">
                     <p>
                       <Text strong style={{ color: "var(--qf-text-secondary)" }}>
-                        {t("knowledge.summary", "经验摘要")}:
+                        {t("knowledge.summary")}:
                       </Text>{" "}
-                      {knowledgeEntry.lesson_summary || t("knowledge.summaryEmpty", "（暂无摘要）")}
+                      {knowledgeEntry.lesson_summary || t("knowledge.summaryEmpty")}
                     </p>
                     <p>
                       <Text strong style={{ color: "var(--qf-text-secondary)" }}>
-                        {t("knowledge.embeddingStatus", "向量状态")}:
+                        {t("knowledge.embeddingStatus")}:
                       </Text>{" "}
                       <Tag
                         color={embeddingStatusColor(knowledgeEntry.embedding_status)}
@@ -1384,7 +1385,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                     {knowledgeEntry.tags?.length > 0 && (
                       <p>
                         <Text strong style={{ color: "var(--qf-text-secondary)" }}>
-                          {t("knowledge.tags", "标签")}:
+                          {t("knowledge.tags")}:
                         </Text>{" "}
                         {knowledgeEntry.tags.map((tag) => (
                           <Tag key={tag}>{tag}</Tag>
@@ -1399,7 +1400,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                         onClick={handleResinkKnowledge}
                         data-e2e="capa-knowledge-resink"
                       >
-                        {t("knowledge.resink", "重新沉淀")}
+                        {t("knowledge.resink")}
                       </Button>
                     )}
                   </div>
@@ -1409,7 +1410,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                       type="warning"
                       showIcon
                       style={{ marginBottom: 12 }}
-                      message={t("knowledge.missing", "尚未沉淀知识条目")}
+                      message={t("knowledge.missing")}
                     />
                     {canEdit("capa") && (
                       <Button
@@ -1420,7 +1421,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                         onClick={handleResinkKnowledge}
                         data-e2e="capa-knowledge-resink"
                       >
-                        {t("knowledge.resink", "重新沉淀")}
+                        {t("knowledge.resink")}
                       </Button>
                     )}
                   </div>
@@ -1430,11 +1431,11 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
           )}
 
           {linkModal && coreEditable && (
-            <DataCard title={t("fmea.selectTitle", "选择关联的 FMEA")} style={{ marginTop: 16 }}>
+            <DataCard title={t("fmea.selectTitle")} style={{ marginTop: 16 }}>
               <Select
                 showSearch
                 style={{ width: "100%" }}
-                placeholder={t("fmea.searchPlaceholder", "搜索 FMEA 文档")}
+                placeholder={t("fmea.searchPlaceholder")}
                 filterOption={(input, option) =>
                   (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
                 }
@@ -1444,34 +1445,34 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
                 }))}
                 onChange={(val) => handleLinkFMEA(val)}
               />
-              <Button style={{ marginTop: 8 }} onClick={() => setLinkModal(false)}>{tc("actions.cancel", "取消")}</Button>
+              <Button style={{ marginTop: 8 }} onClick={() => setLinkModal(false)}>{tc("actions.cancel")}</Button>
             </DataCard>
           )}
         </Col>
       </Row>
 
       <Modal
-        title={t("d7.skipDialogTitle", "⚠️ 以下 FMEA 节点尚未确认")}
+        title={t("d7.skipDialogTitle")}
         open={d7SkipDialogOpen && coreEditable && capa.status === "D7_PREVENTION"}
         onOk={handleD7SkipConfirm}
         onCancel={() => setD7SkipDialogOpen(false)}
-        okText={t("d7.skipConfirm", "确认跳过并推进")}
-        cancelText={tc("actions.cancel", "取消")}
+        okText={t("d7.skipConfirm")}
+        cancelText={tc("actions.cancel")}
         width={600}
       >
-        <p>{t("d7.skipDialogDescription", "以下推荐的 FMEA 节点尚未标记为「已更新」或「无需更新」：")}</p>
+        <p>{t("d7.skipDialogDescription")}</p>
         <ul>
           {d7UnconfirmedItems.map((item) => (
             <li key={item.failure_mode_node_id}>
               {item.failure_mode_name}
-              {item.failure_cause_node_id && ` (${t("d7.causeLabel", "原因")}: ${item.failure_cause_node_id})`}
+              {item.failure_cause_node_id && ` (${t("d7.causeLabel")}: ${item.failure_cause_node_id})`}
             </li>
           ))}
         </ul>
-        <p>{t("d7.skipReasonLabel", "如需跳过，请填写理由（可选）：")}</p>
+        <p>{t("d7.skipReasonLabel")}</p>
         <Input.TextArea
           rows={3}
-          placeholder={t("d7.skipReasonPlaceholder", "跳过理由（可选）")}
+          placeholder={t("d7.skipReasonPlaceholder")}
           value={d7SkipReasons["__global__"] || ""}
           onChange={(e) =>
             setD7SkipReasons({ ...d7SkipReasons, __global__: e.target.value })
@@ -1481,25 +1482,25 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
 
       <Modal
         open={rejectDialogOpen}
-        title={t("reject.title", "驳回 8D")}
+        title={t("reject.title")}
         onCancel={() => { setRejectDialogOpen(false); setRejectReason(""); }}
         onOk={handleRejectSubmit}
-        okText={t("reject.confirm", "驳回")}
+        okText={t("reject.confirm")}
         confirmLoading={decisionBusy}
         okButtonProps={{ danger: true, disabled: !decisionReady || !rejectReason.trim() }}
-        cancelText={tc("actions.cancel", "取消")}
+        cancelText={tc("actions.cancel")}
       >
         <Input.TextArea
           value={rejectReason}
           onChange={(e) => setRejectReason(e.target.value)}
-          placeholder={t("reject.reasonPlaceholder", "请填写驳回理由（必填）")}
+          placeholder={t("reject.reasonPlaceholder")}
           rows={4}
           data-e2e="capa-reject-reason"
         />
       </Modal>
 
       <Modal
-        title={t("scar.modalTitle", "从 8D 发起 SCAR")}
+        title={t("scar.modalTitle")}
         open={scarModalOpen && coreEditable}
         onCancel={() => {
           setScarModalOpen(false);
@@ -1507,21 +1508,21 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
         }}
         onOk={handleTriggerScar}
         confirmLoading={scarSubmitting}
-        okText={t("actions.triggerScar", "发起 SCAR")}
-        cancelText={tc("actions.cancel", "取消")}
+        okText={t("actions.triggerScar")}
+        cancelText={tc("actions.cancel")}
         destroyOnHidden
         width={640}
       >
         <Form form={scarForm} layout="vertical">
           <Form.Item
             name="supplier_id"
-            label={t("scar.supplier", "供应商")}
-            rules={[{ required: true, message: t("scar.supplierRequired", "请选择供应商") }]}
+            label={t("scar.supplier")}
+            rules={[{ required: true, message: t("scar.supplierRequired") }]}
           >
             <Select
               showSearch
               filterOption={false}
-              placeholder={t("scar.supplier", "供应商")}
+              placeholder={t("scar.supplier")}
               onSearch={async (search) => {
                 const request = requests.begin();
                 try {
@@ -1537,22 +1538,22 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
           </Form.Item>
           <Form.Item
             name="description"
-            label={t("scar.description", "问题描述")}
-            rules={[{ required: true, message: t("scar.descriptionRequired", "请输入问题描述") }]}
+            label={t("scar.description")}
+            rules={[{ required: true, message: t("scar.descriptionRequired") }]}
           >
             <TextArea rows={5} />
           </Form.Item>
-          <Form.Item name="requested_action" label={t("scar.requestedAction", "要求措施")}>
+          <Form.Item name="requested_action" label={t("scar.requestedAction")}>
             <TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="due_date" label={t("scar.dueDate", "到期日")}>
+          <Form.Item name="due_date" label={t("scar.dueDate")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item name="affected_batches" label={t("scar.affectedBatches", "受影响批次")}>
+          <Form.Item name="affected_batches" label={t("scar.affectedBatches")}>
             <Select
               mode="tags"
               tokenSeparators={[",", "\n"]}
-              placeholder={t("scar.affectedBatchesPlaceholder", "输入批次号后回车添加")}
+              placeholder={t("scar.affectedBatchesPlaceholder")}
               open={false}
             />
           </Form.Item>

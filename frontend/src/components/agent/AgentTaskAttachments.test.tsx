@@ -39,7 +39,7 @@ describe("AgentTaskAttachments", () => {
     expect(api.uploadTaskAttachment).not.toHaveBeenCalled();
     expect(api.listTaskAttachments).not.toHaveBeenCalled();
     resolveAvailability({ enabled: true });
-    await screen.findByText("任务私有附件");
+    await screen.findByText("Private task attachments");
     expect(api.listTaskAttachments).toHaveBeenCalledWith(taskId, expect.any(AbortSignal));
   });
 
@@ -48,12 +48,12 @@ describe("AgentTaskAttachments", () => {
     vi.mocked(api.listTaskAttachments).mockReturnValue(new Promise((_, reject) => { rejectList = reject; }));
     render(<AgentTaskAttachments taskId={taskId} identity="u1" credential="jwt" open requestEpoch={1} />);
 
-    await screen.findByText("任务私有附件");
-    const picker = screen.getByLabelText("选择附件");
+    await screen.findByText("Private task attachments");
+    const picker = screen.getByLabelText("Choose attachment");
     fireEvent.change(picker, { target: { files: [new File(["safe"], "local.pdf", { type: "application/pdf" })] } });
     await waitFor(() => expect(screen.getByText("local.pdf")).toBeInTheDocument());
     rejectList({ response: { status: 403 } });
-    await waitFor(() => expect(screen.queryByText("任务私有附件")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Private task attachments")).toBeNull());
     expect(screen.queryByText("local.pdf")).toBeNull();
   });
 
@@ -64,9 +64,9 @@ describe("AgentTaskAttachments", () => {
     vi.mocked(api.deleteTaskAttachment).mockReturnValue(new Promise<void>(resolve => { resolveDelete = resolve; }));
     const view = render(<AgentTaskAttachments taskId={taskId} identity="u1" credential="jwt" open requestEpoch={1} />);
 
-    await screen.findByRole("button", { name: "下载" });
-    fireEvent.click(screen.getByRole("button", { name: "下载" }));
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    await screen.findByRole("button", { name: "Download" });
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     const downloadSignal = vi.mocked(api.downloadTaskAttachment).mock.calls[0][2];
     const deleteSignal = vi.mocked(api.deleteTaskAttachment).mock.calls[0][2];
     view.rerender(<AgentTaskAttachments taskId={taskId} identity="u2" credential="jwt" open requestEpoch={2} />);
@@ -85,8 +85,8 @@ describe("AgentTaskAttachments", () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(<AgentTaskAttachments taskId={taskId} identity="u1" credential="jwt" open requestEpoch={1} />);
 
-    await screen.findByRole("button", { name: "下载" });
-    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    await screen.findByRole("button", { name: "Download" });
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
     await waitFor(() => expect(create).toHaveBeenCalledWith(blob));
     expect(click).toHaveBeenCalledOnce();
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:attachment"));

@@ -20,7 +20,7 @@ describe('FunctionTreeEditor', () => {
     ];
     const onChange = vi.fn();
     render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />, { wrapper: I18nTestWrapper });
-    fireEvent.click(screen.getByRole('button', { name: /addStepFunction|添加过程步骤功能/ }));
+    fireEvent.click(screen.getByRole('button', { name: /addStepFunction|Funktion Prozessschritt hinzufügen/ }));
     expect(onChange).toHaveBeenCalled();
     const [, newEdges] = onChange.mock.calls[0];
     expect(newEdges.some((e: GraphEdge) => e.type === 'HAS_FUNCTION')).toBe(true);
@@ -61,7 +61,7 @@ describe('FunctionTreeEditor', () => {
     const onChange = vi.fn();
     render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />, { wrapper: I18nTestWrapper });
     // click the add-step-function button for ps2 (贴装B)
-    fireEvent.click(screen.getByRole('button', { name: /addStepFunction.*OP20|添加过程步骤功能.*OP20/ }));
+    fireEvent.click(screen.getByRole('button', { name: /addStepFunction.*OP20|Funktion Prozessschritt hinzufügen.*OP20/ }));
     const [, newEdges] = onChange.mock.calls[0];
     const mapped = newEdges.filter((e: GraphEdge) => e.type === 'FUNCTION_MAPPED_TO');
     expect(mapped.length).toBe(1);
@@ -82,7 +82,7 @@ describe('FunctionTreeEditor', () => {
     render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />,
       { wrapper: I18nTestWrapper },
     );
-    fireEvent.click(screen.getByRole('button', { name: /addStepFunction.*OP20|添加过程步骤功能.*OP20/ }));
+    fireEvent.click(screen.getByRole('button', { name: /addStepFunction.*OP20|Funktion Prozessschritt hinzufügen.*OP20/ }));
     expect(onChange).toHaveBeenCalled();
     const [newNodes, newEdges] = onChange.mock.calls[0];
     // An ItemFunction was auto-created and linked to pi2
@@ -113,7 +113,7 @@ describe('FunctionTreeEditor', () => {
     const onChange = vi.fn();
     render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />, { wrapper: I18nTestWrapper });
     // click add-work-element-function for we2 (机B, under ps2)
-    fireEvent.click(screen.getByRole('button', { name: /addWorkElementFunction.*机B|添加作业要素功能.*机B/ }));
+    fireEvent.click(screen.getByRole('button', { name: /addWorkElementFunction.*机B|Funktion Arbeitselement hinzufügen.*机B/ }));
     const [, newEdges] = onChange.mock.calls[0];
     const mapped = newEdges.filter((e: GraphEdge) => e.type === 'FUNCTION_MAPPED_TO');
     expect(mapped.length).toBe(1);
@@ -136,8 +136,8 @@ describe('FunctionTreeEditor', () => {
 
     render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={() => {}} />, { wrapper: I18nTestWrapper });
 
-    expect(screen.getByText('新增产品特性')).toBeInTheDocument();
-    expect(screen.getByText('新增过程特性')).toBeInTheDocument();
+    expect(screen.getByText('Add Product characteristic')).toBeInTheDocument();
+    expect(screen.getByText('Add Process characteristic')).toBeInTheDocument();
   });
 
   it('confirms reference impacts before deleting a product characteristic and cleans the process reference', () => {
@@ -161,7 +161,7 @@ describe('FunctionTreeEditor', () => {
     });
 
     render(<FunctionTreeEditor nodes={nodes} edges={edges} fmeaId="f1" onChange={onChange} />, { wrapper: I18nTestWrapper });
-    fireEvent.click(screen.getByRole('button', { name: /删除产品特性/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Delete Product characteristic/ }));
 
     expect(confirm).toHaveBeenCalledOnce();
     const [updatedNodes] = onChange.mock.calls[0];

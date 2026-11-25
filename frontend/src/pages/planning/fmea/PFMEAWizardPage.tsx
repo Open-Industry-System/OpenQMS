@@ -23,6 +23,7 @@ import { orderStructureNodes } from '../../../utils/wizardStructureOrder';
 import RiskTable from '../../../components/pfmea/RiskTable';
 import { createWizardFailureChain, ensureCauseControls } from '../../../utils/wizardGraphNormalize';
 import { usePfmeaRules } from '../../../utils/pfmeaRules';
+import { tr } from "../../../i18n/tr";
 
 const { Title, Paragraph } = Typography;
 
@@ -212,9 +213,9 @@ export default function PFMEAWizardPage() {
     const liveHash = computeHash(nodesRef.current, edgesRef.current, scopeRef.current);
     if (liveHash !== lastSavedHashRef.current) {
       Modal.confirm({
-        title: t('wizard.page.confirmLeaveTitle', { defaultValue: '离开向导？' }),
-        content: t('wizard.page.confirmLeave', { defaultValue: '有未保存的更改，确定离开吗？' }),
-        okText: t('wizard.page.confirmLeaveOk', { defaultValue: '离开' }),
+        title: t('wizard.page.confirmLeaveTitle'),
+        content: t('wizard.page.confirmLeave'),
+        okText: t('wizard.page.confirmLeaveOk'),
         cancelText: t('wizard.page.confirmEmptyDraftCancel'),
         okButtonProps: { danger: true },
         onOk: () => navigate('/fmea'),
@@ -366,10 +367,10 @@ export default function PFMEAWizardPage() {
                 <Select size="small" placeholder={t('wizard.structure.classification4M')} value={node.classification || undefined}
                   onChange={v => handleClassificationChange(node.id, v)}
                   options={[
-                    { value: 'Man', label: '人 Man' },
-                    { value: 'Machine', label: '机 Machine' },
-                    { value: 'Material', label: '料 Material' },
-                    { value: 'Environment', label: '环 Environment' },
+                    { value: 'Man', label: tr("Mensch (Man)", "Man") },
+                    { value: 'Machine', label: tr("Maschine (Machine)", "Machine") },
+                    { value: 'Material', label: tr("Material", "Material") },
+                    { value: 'Environment', label: tr("Mitwelt (Environment)", "Environment") },
                   ]}
                   style={{ width: 120 }} />
               )}

@@ -55,7 +55,7 @@ function TestPage({ report = a }: {
     <button onClick={() => ctx?.selectTask(task)}>选择 A</button>
     <span>页面 {report}</span>
     <span>地址 {location.pathname}</span>
-    <span>选中任务 {ctx?.selectedTask?.task_id ?? "无"}</span>
+    <span>选中任务 {ctx?.selectedTask?.task_id ?? "none"}</span>
   </>;
 }
 function Harness({ report = a }: {
@@ -69,9 +69,9 @@ function Harness({ report = a }: {
   </MemoryRouter>;
 }
 async function select() {
-  await waitFor(() => expect(screen.getByRole("button", { name: "Agent 任务" })).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Agent tasks" })).toBeInTheDocument());
   fireEvent.click(screen.getByRole("button", { name: "选择 A" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled());
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -171,22 +171,22 @@ describe("global user task sidebar", () => {
     });
     expect(screen.getByText("受限目录测试指令")).toBeInTheDocument();
     expect(screen.getByText("受限目录测试结果")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
     expect(api.getTaskActivity).toHaveBeenCalledTimes(2);
     const oldSignal = vi.mocked(api.getTaskActivity).mock.calls[1][2];
-    fireEvent.click(screen.getByRole("button", { name: "下一页任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next task page" }));
     await act(async () => {
       rejectDirectory({ response: { status } });
     });
-    expect(screen.getByText("选中任务 无")).toBeInTheDocument();
+    expect(screen.getByText("选中任务 none")).toBeInTheDocument();
     expect(screen.queryByText("受限目录测试指令")).toBeNull();
     expect(screen.queryByText("受限目录测试结果")).toBeNull();
-    expect(screen.queryByRole("link", { name: `目标报告 ${a}` })).toBeNull();
-    expect(screen.queryByRole("button", { name: "暂停" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "发送指令" })).toBeNull();
+    expect(screen.queryByRole("link", { name: `Target report ${a}` })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send instruction" })).toBeNull();
     expect(oldSignal?.aborted).toBe(true);
     await act(async () => {
       resolveOld(restricted);
@@ -199,33 +199,33 @@ describe("global user task sidebar", () => {
     expect(screen.queryByText("受限目录测试结果")).toBeNull();
     expect(api.getTaskActivity).toHaveBeenCalledTimes(2);
     expect(api.listTasks).toHaveBeenCalledTimes(3);
-    expect(screen.getByRole("button", { name: "下一页任务" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next task page" })).toBeDisabled();
   });
   it("mounts the selected task attachment panel after activity without changing runtime controls", async () => {
     render(<Harness />);
     await select();
     expect(screen.getByTestId("task-attachments")).toHaveTextContent(`附件任务 ${a}`);
-    expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "发送指令" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send instruction" })).toBeDisabled();
   });
   it("follows the fixed report link through SPA navigation and retains the selected task", async () => {
     render(<Harness />);
     await select();
-    fireEvent.click(screen.getByRole("link", { name: `目标报告 ${a}` }));
+    fireEvent.click(screen.getByRole("link", { name: `Target report ${a}` }));
     await waitFor(() => expect(screen.getByText(`地址 /capa/${a}`)).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: `Target report ${a}` })).toBeInTheDocument();
   });
   it("A target persists across B navigation and factory/PL selection; JWT refresh preserves selection", async () => {
     const view = render(<Harness />);
     await select();
     view.rerender(<Harness report={b} />);
     act(() => useAuthStore.setState({ currentFactoryId: b }));
-    expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: `Target report ${a}` })).toBeInTheDocument();
     act(() => {
       localStorage.setItem("access_token", "jwt2");
       useAuthStore.setState({ token: "jwt2" });
     });
-    await waitFor(() => expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("link", { name: `Target report ${a}` })).toBeInTheDocument());
     expect(api.getTaskAvailability).toHaveBeenCalledTimes(1);
   });
   it("paginates only the current user task directory while preserving selected task", async () => {
@@ -242,38 +242,38 @@ describe("global user task sidebar", () => {
     });
     render(<Harness />);
     await select();
-    await waitFor(() => expect(screen.getByRole("button", { name: "下一页任务" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "下一页任务" }));
-    await waitFor(() => expect(screen.getByText("任务目录第 2 页")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next task page" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Next task page" }));
+    await waitFor(() => expect(screen.getByText("Task directory page 2")).toBeInTheDocument());
     expect(api.listTasks).toHaveBeenLastCalledWith({ page: 2, page_size: 20 }, expect.any(AbortSignal));
-    expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: `Target report ${a}` })).toBeInTheDocument();
   });
   it("same-user credential refresh reauthorizes a denied activity without losing the target", async () => {
     vi.mocked(api.getTaskActivity).mockRejectedValueOnce({ response: { status: 401 } }).mockResolvedValue(page);
     render(<Harness />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Agent 任务" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Agent tasks" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "选择 A" }));
-    await waitFor(() => expect(screen.getByText("任务访问已失效")).toBeInTheDocument());
-    expect(screen.queryByRole("link", { name: `目标报告 ${a}` })).toBeNull();
+    await waitFor(() => expect(screen.getByText("Task access expired")).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: `Target report ${a}` })).toBeNull();
     act(() => {
       localStorage.setItem("access_token", "new-jwt");
       useAuthStore.setState({ token: "new-jwt" });
     });
-    await waitFor(() => expect(screen.getByRole("link", { name: `目标报告 ${a}` })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("link", { name: `Target report ${a}` })).toBeInTheDocument());
     expect(api.getTaskAvailability).toHaveBeenCalledTimes(1);
   });
   it("same-window tenant change is detected by bounded identity polling", async () => {
     render(<Harness />);
     await select();
     localStorage.setItem("tenant_slug", "other");
-    await waitFor(() => expect(screen.queryByRole("link", { name: `目标报告 ${a}` })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("link", { name: `Target report ${a}` })).toBeNull());
   });
   it("logout clears body and selection immediately", async () => {
     render(<Harness />);
     await select();
     act(() => useAuthStore.getState().logout());
-    expect(screen.queryByRole("link", { name: `目标报告 ${a}` })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Agent 任务" })).toBeNull();
+    expect(screen.queryByRole("link", { name: `Target report ${a}` })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agent tasks" })).toBeNull();
   });
   it("tenant storage change clears selected task before presenting old content", async () => {
     render(<Harness />);
@@ -282,7 +282,7 @@ describe("global user task sidebar", () => {
       localStorage.setItem("tenant_slug", "other");
       window.dispatchEvent(new Event("storage"));
     });
-    expect(screen.queryByRole("link", { name: `目标报告 ${a}` })).toBeNull();
+    expect(screen.queryByRole("link", { name: `Target report ${a}` })).toBeNull();
   });
   it("404 availability hides task entry", async () => {
     vi.mocked(api.getTaskAvailability).mockRejectedValue({ response: { status: 404 } });
@@ -290,25 +290,25 @@ describe("global user task sidebar", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(screen.queryByRole("button", { name: "Agent 任务" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agent tasks" })).toBeNull();
   });
   it("empty directory disables creation with explanation and no secret fields", async () => {
     vi.mocked(api.listTaskInstallations).mockResolvedValue({ items: [] });
     render(<Harness />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Agent 任务" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Agent tasks" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: `创建 ${a}` }));
-    await waitFor(() => expect(screen.getByText("暂无适用于本报告的插件安装，无法创建任务。")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "创建任务" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByText("No plugin installation available for this report; cannot create a task.")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Create task" })).toBeDisabled();
     expect(screen.queryByLabelText(/secret|密钥/i)).toBeNull();
   });
   it("creates with exact immutable explicit report body", async () => {
     vi.mocked(api.createTask).mockResolvedValue(task);
     render(<Harness />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Agent 任务" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Agent tasks" })).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: `创建 ${a}` }));
-    await waitFor(() => expect(screen.getByLabelText("初始指令")).toBeEnabled());
-    fireEvent.change(screen.getByLabelText("初始指令"), { target: { value: "读取事实" } });
-    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+    await waitFor(() => expect(screen.getByLabelText("Initial instruction")).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("Initial instruction"), { target: { value: "读取事实" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
     await waitFor(() => expect(api.createTask).toHaveBeenCalled());
     expect(api.createTask).toHaveBeenCalledWith({
       report_id: a,
@@ -324,15 +324,15 @@ describe("global user task sidebar", () => {
     })).mockResolvedValueOnce({ message_id: b, sequence: 1, state: "accepted" });
     render(<Harness />);
     await select();
-    fireEvent.change(screen.getByLabelText("追加指令"), { target: { value: "原始指令" } });
-    fireEvent.click(screen.getByRole("button", { name: "发送指令" }));
-    fireEvent.click(screen.getByRole("button", { name: "发送指令" }));
+    fireEvent.change(screen.getByLabelText("Additional instruction"), { target: { value: "原始指令" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send instruction" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send instruction" }));
     expect(api.appendTaskMessage).toHaveBeenCalledTimes(1);
     await act(async () => reject(new Error("lost response")));
-    fireEvent.click(screen.getByRole("button", { name: "重试发送原指令" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resend original instruction" }));
     await waitFor(() => expect(api.appendTaskMessage).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.appendTaskMessage).mock.calls[0][1]).toEqual(vi.mocked(api.appendTaskMessage).mock.calls[1][1]);
-    expect(screen.getByRole("status")).toHaveTextContent("指令已入队");
+    expect(screen.getByRole("status")).toHaveTextContent("Instruction queued");
   });
   it("control lost response retry preserves epoch/action/key; 409 refreshes current state and new command uses fresh epoch", async () => {
     vi.mocked(api.controlTask).mockRejectedValueOnce(new Error("lost")).mockRejectedValueOnce({ response: { status: 409 } }).mockResolvedValueOnce({
@@ -345,14 +345,14 @@ describe("global user task sidebar", () => {
     });
     render(<Harness />);
     await select();
-    fireEvent.click(screen.getByRole("button", { name: "暂停" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "重试原控制操作" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry original control action" })).toBeInTheDocument());
     vi.mocked(api.getTaskActivity).mockResolvedValue({ ...page, lease_epoch: 4 });
-    fireEvent.click(screen.getByRole("button", { name: "重试原控制操作" }));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("状态已变化，已刷新"));
+    fireEvent.click(screen.getByRole("button", { name: "Retry original control action" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("State changed and was refreshed"));
     expect(vi.mocked(api.controlTask).mock.calls[0][1]).toEqual(vi.mocked(api.controlTask).mock.calls[1][1]);
-    await waitFor(() => expect(screen.getByText("运行轮次 4")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "暂停" }));
+    await waitFor(() => expect(screen.getByText("Run epoch 4")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(api.controlTask).toHaveBeenCalledTimes(3));
     expect(vi.mocked(api.controlTask).mock.calls[2][1].expected_epoch).toBe(4);
     expect(vi.mocked(api.controlTask).mock.calls[2][1].idempotency_key).not.toBe(vi.mocked(api.controlTask).mock.calls[0][1].idempotency_key);
@@ -367,16 +367,16 @@ it("keeps Enter addressed to bound A after selecting B; only explicit new task u
   vi.mocked(api.createTask).mockResolvedValue({...bound,task_id:b,model_deployment:{deployment_id:b,name:"模型乙",version:"2"}});
   render(<Harness />);
   await select();
-  fireEvent.change(screen.getByLabelText("选择任务"),{target:{value:a}});
-  await waitFor(() => expect(screen.getByText("当前接收方：模型甲 · 1")).toBeInTheDocument());
+  fireEvent.change(screen.getByLabelText("Select task"),{target:{value:a}});
+  await waitFor(() => expect(screen.getByText("Current recipient: 模型甲 · 1")).toBeInTheDocument());
   fireEvent.click(screen.getByRole("button",{name:`创建 ${a}`}));
-  await waitFor(() => expect(screen.getByLabelText("新任务模型")).toBeEnabled());
-  fireEvent.change(screen.getByLabelText("新任务模型"),{target:{value:b}});
-  fireEvent.change(screen.getByLabelText("追加指令"),{target:{value:"继续甲"}});
-  fireEvent.keyDown(screen.getByLabelText("追加指令"),{key:"Enter",code:"Enter"});
+  await waitFor(() => expect(screen.getByLabelText("New task model")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("New task model"),{target:{value:b}});
+  fireEvent.change(screen.getByLabelText("Additional instruction"),{target:{value:"继续甲"}});
+  fireEvent.keyDown(screen.getByLabelText("Additional instruction"),{key:"Enter",code:"Enter"});
   await waitFor(() => expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:"继续甲",idempotency_key:expect.any(String)},expect.any(AbortSignal)));
-  fireEvent.change(screen.getByLabelText("初始指令"),{target:{value:"新任务乙"}});
-  fireEvent.click(screen.getByRole("button",{name:"用 模型乙 · 2 开始新任务（自由对话）"}));
+  fireEvent.change(screen.getByLabelText("Initial instruction"),{target:{value:"新任务乙"}});
+  fireEvent.click(screen.getByRole("button",{name:"Start new task with 模型乙 · 2 (free chat)"}));
   await waitFor(() => expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({model_deployment_id:b,initial_text:"新任务乙"}),expect.any(AbortSignal)));
 });
 it("polls model questions and accepts supplement while launch is pending",async()=>{
@@ -384,18 +384,18 @@ it("polls model questions and accepts supplement while launch is pending",async(
   vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:"模型甲",version:"1"}}],total:1,page:1,page_size:20});
   vi.mocked(api.launchTask).mockReturnValue(new Promise(()=>{}));
   render(<Harness />); await select();
-  fireEvent.change(screen.getByLabelText("选择任务"),{target:{value:a}});
-  fireEvent.click(await screen.findByRole("button",{name:"启动模型任务"}));
+  fireEvent.change(screen.getByLabelText("Select task"),{target:{value:a}});
+  fireEvent.click(await screen.findByRole("button",{name:"Launch model task"}));
   await waitFor(()=>expect(api.launchTask).toHaveBeenCalledTimes(1));
   expect(await screen.findByText("请补充")).toBeInTheDocument();
-  expect(screen.getByLabelText("追加指令")).toBeEnabled();
+  expect(screen.getByLabelText("Additional instruction")).toBeEnabled();
 });
 it('sends correction only as explicit source-free intent for a current-task pending proposal',async()=>{
   vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
   render(<Harness />); await select();
-  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
-  fireEvent.change(await screen.findByLabelText('更正当前任务建议'),{target:{value:b}});
-  fireEvent.click(screen.getByRole('button',{name:'明确更正选中建议'}));
+  fireEvent.change(screen.getByLabelText('Select task'),{target:{value:a}});
+  fireEvent.change(await screen.findByLabelText('Correct current task proposal'),{target:{value:b}});
+  fireEvent.click(screen.getByRole('button',{name:'Explicitly correct selected proposal'}));
   await waitFor(()=>expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:JSON.stringify({intent:'replace_d5',predecessor_id:b}),idempotency_key:expect.any(String)},expect.any(AbortSignal)));
 });
 it('discards late model options after changing the creation report',async()=>{
@@ -403,59 +403,59 @@ it('discards late model options after changing the creation report',async()=>{
   vi.mocked(api.listModelDeployments).mockReturnValueOnce(new Promise(r=>{resolve=r})).mockResolvedValue({items:[]});
   vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:'openqms.controlled-d5-model',plugin_version:'1'}]});
   const view=render(<Harness />);
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Agent 任务'})).toBeInTheDocument());
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Agent tasks'})).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button',{name:`创建 ${a}`}));
   await waitFor(()=>expect(api.listModelDeployments).toHaveBeenCalledTimes(1));
   view.rerender(<Harness report={b}/>);
   fireEvent.click(screen.getByRole('button',{name:`创建 ${b}`}));
   await act(async()=>resolve({items:[{deployment_id:a,name:'迟到旧模型',version:'1',kind:'local'}]}));
   expect(screen.queryByText(/迟到旧模型/)).toBeNull();
-  expect(screen.getByRole('button',{name:'用 所选模型 开始新任务（自由对话）'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Start new task with selected model (free chat)'})).toBeDisabled();
 });
 it('clears an old model question on workflow denial without switching recipients',async()=>{
   vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
   vi.mocked(api.getTaskWorkflow).mockResolvedValueOnce({status:'waiting',question:'受限旧问题',checkpoint_id:null}).mockRejectedValue({response:{status:403}});
   render(<Harness />);await select();
-  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
+  fireEvent.change(screen.getByLabelText('Select task'),{target:{value:a}});
   await screen.findByText('受限旧问题');
   await waitFor(()=>expect(screen.queryByText('受限旧问题')).toBeNull(),{timeout:2500});
-  expect(screen.getByText('当前接收方：模型甲 · 1')).toBeInTheDocument();
+  expect(screen.getByText('Current recipient: 模型甲 · 1')).toBeInTheDocument();
   expect(api.launchTask).not.toHaveBeenCalled();
 });
 it('explicit source-free start uses selected approved model without rewriting free initial text',async()=>{
   vi.mocked(api.listTaskInstallations).mockResolvedValue({items:[{installation_id:a,plugin_key:'openqms.controlled-d5-model',plugin_version:'1'}]});
   vi.mocked(api.createTask).mockReturnValue(new Promise(()=>{}));
   render(<Harness />);
-  await waitFor(()=>expect(screen.getByRole('button',{name:'Agent 任务'})).toBeInTheDocument());
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Agent tasks'})).toBeInTheDocument());
   fireEvent.click(screen.getByRole('button',{name:`创建 ${a}`}));
-  fireEvent.change(await screen.findByLabelText('新任务模型'),{target:{value:b}});
-  fireEvent.change(screen.getByLabelText('初始指令'),{target:{value:'保留自由输入'}});
-  fireEvent.click(screen.getByRole('button',{name:'用 模型乙 · 2 开始新任务（仅根据当前根因）'}));
+  fireEvent.change(await screen.findByLabelText('New task model'),{target:{value:b}});
+  fireEvent.change(screen.getByLabelText('Initial instruction'),{target:{value:'保留自由输入'}});
+  fireEvent.click(screen.getByRole('button',{name:'Start new task with 模型乙 · 2 (current root cause only)'}));
   await waitFor(()=>expect(api.createTask).toHaveBeenCalledWith({report_id:a,installation_id:a,model_deployment_id:b,request_key:expect.any(String),initial_text:'deliver_d4_root_cause_candidate_v1'},expect.any(AbortSignal)));
-  expect(screen.getByLabelText('初始指令')).toHaveValue('保留自由输入');
+  expect(screen.getByLabelText('Initial instruction')).toHaveValue('保留自由输入');
 });
 it('does not offer another launch while the current server run is active',async()=>{
   vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
   render(<Harness />);await select();
-  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
-  expect(await screen.findByRole('button',{name:'启动模型任务'})).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Select task'),{target:{value:a}});
+  expect(await screen.findByRole('button',{name:'Launch model task'})).toBeDisabled();
 });
 
 it('names the bound recipient on the normal send action',async()=>{
   vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
   render(<Harness/>);await select();
-  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
-  expect(await screen.findByRole('button',{name:'补充给 模型甲'})).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Select task'),{target:{value:a}});
+  expect(await screen.findByRole('button',{name:'Add to 模型甲'})).toBeInTheDocument();
 });
 it('allows explicitly choosing an earlier checkpoint instead of silently using latest workflow checkpoint',async()=>{
   vi.mocked(api.listTasks).mockResolvedValue({items:[{...task,model_deployment:{deployment_id:a,name:'模型甲',version:'1'}}],total:1,page:1,page_size:20});
   vi.mocked(api.listTaskD5Checkpoints).mockResolvedValue({items:[{checkpoint_id:b,run_id:run,created_at:task.created_at}],total:1,page:1,page_size:20});
   vi.mocked(api.getTaskWorkflow).mockResolvedValue({status:'waiting',question:'当前问题',checkpoint_id:run});
   render(<Harness/>);await select();
-  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
-  fireEvent.change(await screen.findByLabelText('选择处理范围检查点'),{target:{value:b}});
+  fireEvent.change(screen.getByLabelText('Select task'),{target:{value:a}});
+  fireEvent.change(await screen.findByLabelText('Select scope checkpoint'),{target:{value:b}});
   await waitFor(()=>expect(proposals.checkpointProposals).toHaveBeenCalledWith(a,b,expect.any(AbortSignal)));
-  expect(screen.getByLabelText('选择处理范围检查点')).toHaveValue(b);
+  expect(screen.getByLabelText('Select scope checkpoint')).toHaveValue(b);
 });
 
 it('pages current-task pending correction choices rather than being trapped by the first report page',async()=>{
@@ -464,10 +464,10 @@ it('pages current-task pending correction choices rather than being trapped by t
   vi.mocked(proposals.listD5Proposals).mockResolvedValue({items:Array.from({length:20},(_,i)=>({...current(`old-${i}`),task_id:'other-task'})),total:41,page:1,page_size:20});
   vi.mocked(proposals.listTaskD5Proposals).mockImplementation(async(_report,_task,page)=>({items:page===2?[current(b)]:Array.from({length:20},(_,i)=>current(`current-${i}`)),total:21,page:page??1,page_size:20}));
   render(<Harness/>);await select();
-  fireEvent.change(screen.getByLabelText('选择任务'),{target:{value:a}});
-  fireEvent.click(await screen.findByRole('button',{name:'下一页待更正建议'}));
+  fireEvent.change(screen.getByLabelText('Select task'),{target:{value:a}});
+  fireEvent.click(await screen.findByRole('button',{name:'Next correction page'}));
   await waitFor(()=>expect(proposals.listTaskD5Proposals).toHaveBeenLastCalledWith(a,a,2,expect.any(AbortSignal)));
-  fireEvent.change(screen.getByLabelText('更正当前任务建议'),{target:{value:b}});
-  fireEvent.click(screen.getByRole('button',{name:'明确更正选中建议'}));
+  fireEvent.change(screen.getByLabelText('Correct current task proposal'),{target:{value:b}});
+  fireEvent.click(screen.getByRole('button',{name:'Explicitly correct selected proposal'}));
   await waitFor(()=>expect(api.appendTaskMessage).toHaveBeenCalledWith(a,{content:JSON.stringify({intent:'replace_d5',predecessor_id:b}),idempotency_key:expect.any(String)},expect.any(AbortSignal)));
 });

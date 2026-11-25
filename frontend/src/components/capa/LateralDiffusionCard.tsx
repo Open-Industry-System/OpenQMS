@@ -24,13 +24,13 @@ export function LateralDiffusionCard({
   return (
     <Card
       size="small"
-      title={t("lateral.title", "横向扩散预警")}
+      title={t("lateral.title")}
       data-e2e="lateral-diffusion-card"
       style={{ marginTop: 16 }}
       extra={
         canEdit && undecided && onRerun ? (
           <Button size="small" loading={rerunLoading} onClick={() => onRerun()}>
-            {t("lateral.rerun", "重新检查")}
+            {t("lateral.rerun")}
           </Button>
         ) : null
       }
@@ -42,17 +42,17 @@ export function LateralDiffusionCard({
             {projection.decision}
           </Tag>
         )}
-        {projection.truncated && <Tag color="orange">{t("lateral.truncated", "已截断")}</Tag>}
+        {projection.truncated && <Tag color="orange">{t("lateral.truncated")}</Tag>}
       </Space>
 
       {projection.status === "empty" ? (
         <Typography.Text type="secondary">
-          {t("lateral.empty", "未命中类似产品")}
+          {t("lateral.empty")}
         </Typography.Text>
       ) : (
         <>
           <Typography.Paragraph style={{ marginBottom: 8 }}>
-            {t("lateral.hitCount", "命中类型 {{n}} 个", {
+            {t("lateral.hitCount", {
               n: projection.similar_products?.length || 0,
             })}
           </Typography.Paragraph>
@@ -70,7 +70,7 @@ export function LateralDiffusionCard({
       {(projection.notifications || []).length > 0 && (
         <div style={{ marginTop: 12 }} data-e2e="lateral-notifications">
           <Typography.Text type="secondary">
-            {t("lateral.notifications", "通知记录")}
+            {t("lateral.notifications")}
           </Typography.Text>
           {(projection.notifications || []).map((n) => (
             <div key={n.notification_id} style={{ fontSize: 12 }}>

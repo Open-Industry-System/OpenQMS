@@ -116,12 +116,12 @@ describe("PFMEAWizardPage adoptions", () => {
 
   it("forwards the adoption through the debounced save path to updateFMEA", async () => {
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
 
     // Advance to step 3 (failure analysis) where the SmartSuggestionDropdowns live.
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
 
     // The mocked failure_mode dropdown renders; clicking it fires onSelect with a
     // suggestion that carries a recommendation_id.

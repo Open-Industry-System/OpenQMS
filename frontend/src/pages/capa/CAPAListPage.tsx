@@ -69,7 +69,7 @@ export default function CAPAListPage() {
       })
       .catch(() => {
         setSuppliers([]);
-        setSupplierLoadError(t("fields.supplierLoadFailed", "供应商列表加载失败"));
+        setSupplierLoadError(t("fields.supplierLoadFailed"));
       });
   }, [t]);
 
@@ -88,7 +88,7 @@ export default function CAPAListPage() {
       if (seq !== supplierSearchSeq.current) return;
       // Keep existing options; surface error only if list is empty.
       if (suppliers.length === 0) {
-        setSupplierLoadError(t("fields.supplierLoadFailed", "供应商列表加载失败"));
+        setSupplierLoadError(t("fields.supplierLoadFailed"));
       }
     }
   };
@@ -122,34 +122,34 @@ export default function CAPAListPage() {
         supplier_id: values.supplier_id || null,
       };
       const capa = await createCAPA(payload);
-      message.success(tc("messages.operationSuccess", "8D 报告创建成功"));
+      message.success(tc("messages.operationSuccess"));
       setModalOpen(false);
       form.resetFields();
       navigate(`/capa/${capa.report_id}`, { state: { showLessonsLearned: true, problemDescription: values.problem_description } });
-    } catch { message.error(tc("messages.operationFailed", "创建失败")); }
+    } catch { message.error(tc("messages.operationFailed")); }
   };
 
   const columns = [
-    { title: t("fields.documentNo", "报告编号"), dataIndex: "document_no", key: "document_no", width: 150 },
-    { title: t("fields.title", "标题"), dataIndex: "title", key: "title", ellipsis: true },
+    { title: t("fields.documentNo"), dataIndex: "document_no", key: "document_no", width: 150 },
+    { title: t("fields.title"), dataIndex: "title", key: "title", ellipsis: true },
     {
-      title: t("fields.currentStep", "当前步骤"), dataIndex: "status", key: "status", width: 140,
+      title: t("fields.currentStep"), dataIndex: "status", key: "status", width: 140,
       render: (s: string) => <StatusBadge status={statusVariant(s)}>{statusLabels[s] || s}</StatusBadge>,
     },
     {
-      title: t("fields.severity", "严重等级"), dataIndex: "severity", key: "severity", width: 90,
+      title: t("fields.severity"), dataIndex: "severity", key: "severity", width: 90,
       render: (s: string) => <StatusBadge status={severityVariant(s)}>{s}</StatusBadge>,
     },
-    { title: t("fields.dueDate", "期限"), dataIndex: "due_date", key: "due_date", width: 110, render: (v: string | null) => v || "-" },
+    { title: t("fields.dueDate"), dataIndex: "due_date", key: "due_date", width: 110, render: (v: string | null) => v || "-" },
     {
-      title: t("fields.createdAt", "更新时间"), dataIndex: "updated_at", key: "updated_at", width: 170,
+      title: t("fields.createdAt"), dataIndex: "updated_at", key: "updated_at", width: 170,
       render: (v: string) => formatDateTime(v),
     },
     {
-      title: tc("table.operations", "操作"), key: "actions", width: 80,
+      title: tc("table.operations"), key: "actions", width: 80,
       render: (_: unknown, record: CAPAReport) => (
         <Button type="link" icon={<FileTextOutlined />} onClick={() => navigate(`/capa/${record.report_id}`)}>
-          {t("actions.handle", "处理")}
+          {t("actions.handle")}
         </Button>
       ),
     },
@@ -158,28 +158,28 @@ export default function CAPAListPage() {
   return (
     <PageShell
       title={t("title", "8D / CAPA")}
-      subtitle={t("subtitle", "客诉与质量问题闭环追踪")}
+      subtitle={t("subtitle")}
       actions={
         canEdit("capa") ? (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} data-e2e="capa-create">{t("actions.create", "新建 8D")}</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)} data-e2e="capa-create">{t("actions.create")}</Button>
         ) : undefined
       }
     >
-      <DataCard title={t("listTitle", "8D 报告列表")} noPadding>
+      <DataCard title={t("listTitle")} noPadding>
         <Table className="qf-table" columns={columns} dataSource={data} rowKey="report_id" loading={loading}
           onRow={(record) => ({ 'data-e2e': `row-${record.document_no}` } as any)}
           pagination={{ current: page, total, pageSize: 20, onChange: (p) => { setPage(p); fetchData(p); } }}
         />
       </DataCard>
-      <Modal title={t("actions.create", "新建 8D 报告")} open={modalOpen} onOk={() => form.submit()} onCancel={() => setModalOpen(false)}>
+      <Modal title={t("actions.create")} open={modalOpen} onOk={() => form.submit()} onCancel={() => setModalOpen(false)}>
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="document_no" label={t("fields.documentNo", "报告编号")} rules={[{ required: true }]}>
-            <Input placeholder={t("fields.documentNoPlaceholder", "如 8D-2026-001")} />
+          <Form.Item name="document_no" label={t("fields.documentNo")} rules={[{ required: true }]}>
+            <Input placeholder={t("fields.documentNoPlaceholder")} />
           </Form.Item>
-          <Form.Item name="title" label={t("fields.title", "标题")} rules={[{ required: true }]}>
-            <Input placeholder={t("fields.titlePlaceholder", "如 焊接不良客诉")} />
+          <Form.Item name="title" label={t("fields.title")} rules={[{ required: true }]}>
+            <Input placeholder={t("fields.titlePlaceholder")} />
           </Form.Item>
-          <Form.Item name="severity" label={t("fields.severity", "严重等级")} initialValue="一般">
+          <Form.Item name="severity" label={t("fields.severity")} initialValue="一般">
             <Select options={[
                     { value: "致命", label: t("severity.fatal") },
                     { value: "严重", label: t("severity.serious") },
@@ -187,12 +187,12 @@ export default function CAPAListPage() {
                     { value: "轻微", label: t("severity.minor") },
                   ]} />
           </Form.Item>
-          <Form.Item name="due_date" label={t("fields.dueDate", "完成期限")}>
+          <Form.Item name="due_date" label={t("fields.dueDate")}>
             <DatePicker style={{ width: "100%" }} />
           </Form.Item>
           <Form.Item
             name="supplier_id"
-            label={t("fields.supplier", "关联供应商")}
+            label={t("fields.supplier")}
             extra={supplierLoadError || undefined}
           >
             <Select
@@ -204,13 +204,13 @@ export default function CAPAListPage() {
               placeholder={
                 supplierLoadError
                   ? supplierLoadError
-                  : t("fields.supplierPlaceholder", "请选择供应商")
+                  : t("fields.supplierPlaceholder")
               }
               options={suppliers.map((s) => ({ value: s.supplier_id, label: `${s.supplier_no} - ${s.name}` }))}
             />
           </Form.Item>
-          <Form.Item name="problem_description" label={t("fields.problemDescription", "问题描述（可选）")}>
-            <Input.TextArea rows={2} placeholder={t("fields.problemDescriptionPlaceholder", "简述问题现象（可选，用于智能推荐）")} />
+          <Form.Item name="problem_description" label={t("fields.problemDescription")}>
+            <Input.TextArea rows={2} placeholder={t("fields.problemDescriptionPlaceholder")} />
           </Form.Item>
         </Form>
       </Modal>

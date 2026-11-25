@@ -104,7 +104,7 @@ const baseCapa: CAPAReport = {
   document_no: "8D-001",
   title: "Test CAPA",
   status: "D3_INTERIM",
-  severity: "严重",
+  severity: "Critical",
   product_line_code: "DC-DC-100",
   factory_id: "fac-1",
   customer_name: null,
@@ -143,7 +143,7 @@ describe("D3ContainmentPanel", () => {
     // Switch to historical run
     const selector = screen.getByRole("combobox");
     fireEvent.mouseDown(selector);
-    const histOption = screen.getByText(/代次.*2026-07-11/);
+    const histOption = screen.getByText(/Run.*2026-07-11/);
     fireEvent.click(histOption);
 
     await waitFor(() => expect(screen.queryByTestId("d3-generate-report")).not.toBeInTheDocument());
@@ -154,7 +154,7 @@ describe("D3ContainmentPanel", () => {
 
     // Switch back to current run
     fireEvent.mouseDown(selector);
-    const currentOption = screen.getByText("当前代次");
+    const currentOption = screen.getByText("Current run");
     fireEvent.click(currentOption);
 
     await waitFor(() => expect(screen.queryByTestId("d3-generate-report")).toBeInTheDocument());
@@ -168,7 +168,7 @@ describe("D3ContainmentPanel", () => {
 
     await waitFor(() => expect(screen.getByTestId("d3-advice-card")).toBeInTheDocument());
     expect(screen.getByTestId("d3-generate-advice")).toBeInTheDocument();
-    expect(screen.getByTestId("d3-generate-advice")).toHaveTextContent("生成建议");
+    expect(screen.getByTestId("d3-generate-advice")).toHaveTextContent("Generate advice");
   });
 
   it("shows error banner and retry button when advice generation failed", async () => {
@@ -177,7 +177,7 @@ describe("D3ContainmentPanel", () => {
 
     await waitFor(() => expect(screen.getByTestId("d3-advice-failed-banner")).toBeInTheDocument());
     expect(screen.getByTestId("d3-generate-advice")).toBeInTheDocument();
-    expect(screen.getByTestId("d3-generate-advice")).toHaveTextContent("重试生成建议");
+    expect(screen.getByTestId("d3-generate-advice")).toHaveTextContent("Retry advice generation");
   });
 
   it("shows regenerate button when report is done, retry when failed, and attempt banner on newer failed retry", async () => {
@@ -191,7 +191,7 @@ describe("D3ContainmentPanel", () => {
     renderPanel();
 
     const btn = await waitFor(() => screen.getByTestId("d3-generate-report"));
-    expect(btn).toHaveTextContent("重新生成");
+    expect(btn).toHaveTextContent("Regenerate");
     // newer failed retry alongside the still-valid done report → warning banner
     expect(screen.getByTestId("d3-report-attempt-banner")).toBeInTheDocument();
 
@@ -199,13 +199,13 @@ describe("D3ContainmentPanel", () => {
     vi.mocked(getD3Report).mockResolvedValue(mockFailedReport);
     const selector = screen.getByRole("combobox");
     fireEvent.mouseDown(selector);
-    fireEvent.click(screen.getByText(/代次.*2026-07-11/));
+    fireEvent.click(screen.getByText(/Run.*2026-07-11/));
     // historical is read-only → button hidden; switch back to current to reload
     fireEvent.mouseDown(selector);
-    fireEvent.click(screen.getByText("当前代次"));
+    fireEvent.click(screen.getByText("Current run"));
 
     await waitFor(() => expect(screen.getByTestId("d3-generate-report")).toBeInTheDocument());
-    expect(screen.getByTestId("d3-generate-report")).toHaveTextContent("重试生成报告");
+    expect(screen.getByTestId("d3-generate-report")).toHaveTextContent("Retry report generation");
   });
 
   it("shows regenerate-advice button when advice exists and report is done (not terminal)", async () => {
@@ -226,7 +226,7 @@ describe("D3ContainmentPanel", () => {
     renderPanel();
 
     const btn = await waitFor(() => screen.getByTestId("d3-generate-advice"));
-    expect(btn).toHaveTextContent("重新生成建议");
+    expect(btn).toHaveTextContent("Regenerate advice");
     expect(btn).not.toBeDisabled();
   });
 
@@ -251,7 +251,7 @@ describe("D3ContainmentPanel", () => {
 
     const banner = await waitFor(() => screen.getByTestId("d3-report-failed-banner"));
     // superseded → warning-type banner with superseded message (not generic failure)
-    expect(banner).toHaveTextContent("已被 newer 代次取代");
+    expect(banner).toHaveTextContent("Superseded by a newer run");
   });
 
   it("shows superseded attempt banner when current done report has a newer superseded retry", async () => {
@@ -264,7 +264,7 @@ describe("D3ContainmentPanel", () => {
     renderPanel();
 
     const banner = await waitFor(() => screen.getByTestId("d3-report-attempt-banner"));
-    expect(banner).toHaveTextContent("已被 newer 代次取代");
+    expect(banner).toHaveTextContent("Superseded by a newer run");
   });
 
   it("surfaces the backend detail when execution validation fails", async () => {

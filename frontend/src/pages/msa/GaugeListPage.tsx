@@ -407,10 +407,10 @@ export default function GaugeListPage() {
             <Input type="number" />
           </Form.Item>
           <Form.Item label={t("gauge.fields.measuring_range")} name="measuring_range">
-            <Input placeholder={t("gauge.placeholders.measuring_range", { defaultValue: "如: 0-150mm" })} />
+            <Input placeholder={t("gauge.placeholders.measuring_range")} />
           </Form.Item>
           <Form.Item label={t("gauge.fields.department")} name="department">
-            <Select allowClear placeholder={t("gauge.placeholders.selectDepartment", { defaultValue: "选择部门" })}>
+            <Select allowClear placeholder={t("gauge.placeholders.selectDepartment")}>
               <Option value="IQC">{t("gauge.department.IQC")}</Option>
               <Option value="PQC">{t("gauge.department.PQC")}</Option>
               <Option value="OQC">{t("gauge.department.OQC")}</Option>

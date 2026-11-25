@@ -47,8 +47,8 @@ it.each(['de-DE', 'en-US'])('shows read-only gate decision and waiver responsibi
   vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);
   render(view());
   const section = await screen.findByTestId('capa-outcome-doc-gate');
-  expect(section).toHaveTextContent(language === 'de-DE' ? '文档门禁决定' : 'Document gate decision');
-  expect(section).toHaveTextContent(language === 'de-DE' ? '已通过' : 'Passed');
+  expect(section).toHaveTextContent(language === 'de-DE' ? 'Entscheidung des Dokumenten-Gates' : 'Document gate decision');
+  expect(section).toHaveTextContent(language === 'de-DE' ? 'Bestanden' : 'Passed');
   expect(section).toHaveTextContent(value.doc_gate!.waiver_reason);
   expect(section).toHaveTextContent('removed-item');
   expect(section).toHaveTextContent(source);
@@ -60,11 +60,11 @@ it('shows explicit no-affected confirmation and honest absent historical gate', 
   const value = structuredClone(fixture); value.doc_gate!.no_affected_confirmed = true;
   vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);
   const { unmount } = render(view());
-  expect(await screen.findByTestId('capa-outcome-doc-gate')).toHaveTextContent('已确认无受影响文档');
+  expect(await screen.findByTestId('capa-outcome-doc-gate')).toHaveTextContent('Keine betroffenen Dokumente bestätigt');
   unmount();
   vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...fixture, status: 'ARCHIVED', doc_gate: null });
   render(view('A', 'ARCHIVED'));
-  expect(await screen.findByTestId('capa-outcome-doc-gate')).toHaveTextContent('无历史门禁决定记录');
+  expect(await screen.findByTestId('capa-outcome-doc-gate')).toHaveTextContent('Keine historische Gate-Entscheidung erfasst');
 });
 
 it.each(['missing', 'pending null', 'partial', 'malformed waiver'])('rejects incomplete gate context: %s', async kind => {
@@ -90,12 +90,12 @@ it('shows actual complete DTO materials, source versions and escaped evidence; s
   render(view());
   expect(await screen.findByText('实施后复测合格')).toBeInTheDocument();
   expect(screen.getByText('更换扭矩控制工具')).toBeInTheDocument();
-  expect(screen.getByText('结案后补充，未纳入本次审核')).toBeInTheDocument();
+  expect(screen.getByText('Nachtrag nach Abschluss – nicht Teil dieser Prüfung')).toBeInTheDocument();
   expect(screen.getByTestId('capa-outcome-core')).not.toHaveTextContent('补充说明');
   expect(screen.getByTestId('capa-outcome-core')).not.toHaveTextContent('有效');
   expect(screen.getByText('新版点检')).toBeInTheDocument();
-  expect(screen.getByTestId('capa-outcome-d7')).toHaveTextContent('待确认');
-  expect(screen.getByTestId('capa-outcome-d7')).not.toHaveTextContent('已验证');
+  expect(screen.getByTestId('capa-outcome-d7')).toHaveTextContent('Bestätigung ausstehend');
+  expect(screen.getByTestId('capa-outcome-d7')).not.toHaveTextContent('Verifiziert');
   expect(screen.getByText('a'.repeat(64))).toBeInTheDocument();
   expect(screen.getByText('b'.repeat(64))).toBeInTheDocument();
   expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument();
@@ -114,7 +114,7 @@ it.each(['D8_CLOSURE', 'ARCHIVED'])('exposes immutable core semantics in %s for 
 it.each([401, 403, 404, 409])('withdraws a prior token before reload and on %s, without partial material fallback', async status => {
   render(view()); await screen.findByText('实施后复测合格');
   const read = deferred<CapaOutcomeReview>(); vi.mocked(capaApi.getCapaOutcomeReview).mockReturnValueOnce(read.promise);
-  fireEvent.click(screen.getByRole('button', { name: '重新加载审核材料' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Prüfunterlagen neu laden' }));
   expect(changed).toHaveBeenLastCalledWith(null);
   expect(screen.queryByText('实施后复测合格')).not.toBeInTheDocument();
   await act(async () => read.reject({ response: { status } }));
@@ -142,8 +142,8 @@ it.each(['legacy_unversioned', 'unverifiable', 'verified'] as const)('labels %s 
   vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...fixture, status: 'D8_CLOSURE', binding_status, review_round_id: null,
     decision: binding_status === 'verified' ? { action: 'approved', actor_id: id, operated_at: '2026-10-23T00:00:00Z', audit_id: source } : null });
   render(view('A', 'D8_CLOSURE')); await screen.findByText('实施后复测合格');
-  expect(screen.getByTestId('capa-outcome-binding')).toHaveTextContent(binding_status === 'legacy_unversioned' ? '历史记录，未绑定审核版本' : binding_status === 'unverifiable' ? '无法验证审核绑定' : '已核对审核版本');
-  expect(screen.queryByRole('button', { name: /审批|驳回/ })).not.toBeInTheDocument();
+  expect(screen.getByTestId('capa-outcome-binding')).toHaveTextContent(binding_status === 'legacy_unversioned' ? 'Altdatensatz – keine gebundene Prüfversion' : binding_status === 'unverifiable' ? 'Bindung der Prüfung nicht verifizierbar' : 'Prüfversion verifiziert');
+  expect(screen.queryByRole('button', { name: /Freigegeben|Ablehnen/ })).not.toBeInTheDocument();
 });
 
 it.each(['missing documents', 'wrong report', 'missing core', 'wrong status', 'missing necessary source', 'unknown source shape'])('fails closed for partial or mismatched DTO: %s', async kind => {
@@ -192,9 +192,9 @@ it.each([true, false])('shows supplement audit responsibility or honest null fal
     binding_status: 'legacy_unversioned', supplement });
   render(view('A', 'D8_CLOSURE')); await screen.findByText('结案补充但未审核');
   const section = screen.getByTestId('capa-outcome-supplement');
-  expect(section).toHaveTextContent('结案后补充，未纳入本次审核');
+  expect(section).toHaveTextContent('Nachtrag nach Abschluss – nicht Teil dieser Prüfung');
   expect(section).toHaveTextContent(available ? `${source} · 2026-10-24T12:34:56Z` : '— · —');
-  expect(section).not.toHaveTextContent('已批准');
+  expect(section).not.toHaveTextContent('Freigegeben');
   expect(screen.getByTestId('capa-outcome-core')).not.toHaveTextContent(supplement.text);
 });
 

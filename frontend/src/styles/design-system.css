@@ -42,8 +42,8 @@
   --qf-text-disabled: #4b5163;
 
   /* 字体 */
-  --qf-font-display: "优设标题黑", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --qf-font-body: "Chakra Petch", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --qf-font-display: "Chakra Petch", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --qf-font-body: "Chakra Petch", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --qf-font-mono: "JetBrains Mono", "SF Mono", "Consolas", monospace;
 
   /* 间距 */

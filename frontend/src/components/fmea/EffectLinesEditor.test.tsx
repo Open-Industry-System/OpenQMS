@@ -29,14 +29,14 @@ describe("EffectLinesEditor", () => {
   it("add button calls onAddEffect", () => {
     const props = baseProps();
     render(<EffectLinesEditor {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: /添加失效影响/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Add failure effect/i }));
     expect(props.onAddEffect).toHaveBeenCalledTimes(1);
   });
 
   it("delete button calls onDeleteEffect with the effect id", () => {
     const props = baseProps();
     render(<EffectLinesEditor {...props} />);
-    const deleteBtns = screen.getAllByRole("button", { name: /删除后果/i });
+    const deleteBtns = screen.getAllByRole("button", { name: /Delete effect/i });
     fireEvent.click(deleteBtns[0]); // delete fe1
     expect(props.onDeleteEffect).toHaveBeenCalledWith("fe1");
   });

@@ -27,17 +27,17 @@ export default function MESOrdersPage() {
   const productLine = useProductLineStore((s) => s.selected);
 
   const statusLabels = useMemo(() => ({
-    planned: t("orders.status.planned", "计划中"),
-    in_progress: t("orders.status.inProgress", "进行中"),
-    completed: t("orders.status.completed", "已完成"),
-    closed: t("orders.status.closed", "已关闭"),
+    planned: t("orders.status.planned"),
+    in_progress: t("orders.status.inProgress"),
+    completed: t("orders.status.completed"),
+    closed: t("orders.status.closed"),
   }), [t]);
 
   const statusFilterOptions = useMemo(() => [
-    { value: "planned", label: t("orders.status.planned", "计划中") },
-    { value: "in_progress", label: t("orders.status.inProgress", "进行中") },
-    { value: "completed", label: t("orders.status.completed", "已完成") },
-    { value: "closed", label: t("orders.status.closed", "已关闭") },
+    { value: "planned", label: t("orders.status.planned") },
+    { value: "in_progress", label: t("orders.status.inProgress") },
+    { value: "completed", label: t("orders.status.completed") },
+    { value: "closed", label: t("orders.status.closed") },
   ], [t]);
 
   const fetchData = (p: number = page, currentStatus?: string, plCode?: string | null) => {
@@ -47,7 +47,7 @@ export default function MESOrdersPage() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error(t("orders.messages.loadFailed", "加载生产工单失败")))
+      .catch(() => message.error(t("orders.messages.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -62,30 +62,30 @@ export default function MESOrdersPage() {
   };
 
   const columns = useMemo(() => [
-    { title: t("orders.columns.orderNo", "工单号"), dataIndex: "order_no", key: "order_no", width: 140 },
+    { title: t("orders.columns.orderNo"), dataIndex: "order_no", key: "order_no", width: 140 },
     {
-      title: t("orders.columns.productModel", "产品型号"),
+      title: t("orders.columns.productModel"),
       dataIndex: "product_model",
       key: "product_model",
       ellipsis: true,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("orders.columns.plannedQty", "计划数量"),
+      title: t("orders.columns.plannedQty"),
       dataIndex: "planned_qty",
       key: "planned_qty",
       width: 100,
       render: (v: number | null) => v ?? "—",
     },
     {
-      title: t("orders.columns.actualQty", "实际数量"),
+      title: t("orders.columns.actualQty"),
       dataIndex: "actual_qty",
       key: "actual_qty",
       width: 100,
       render: (v: number | null) => v ?? "—",
     },
     {
-      title: t("orders.columns.status", "状态"),
+      title: t("orders.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
@@ -96,14 +96,14 @@ export default function MESOrdersPage() {
       ),
     },
     {
-      title: t("orders.columns.startedAt", "开始时间"),
+      title: t("orders.columns.startedAt"),
       dataIndex: "started_at",
       key: "started_at",
       width: 170,
       render: (v: string | null) => v ? formatDateTime(v) : "—",
     },
     {
-      title: t("orders.columns.completedAt", "完成时间"),
+      title: t("orders.columns.completedAt"),
       dataIndex: "completed_at",
       key: "completed_at",
       width: 170,
@@ -113,10 +113,10 @@ export default function MESOrdersPage() {
 
   return (
     <PageShell
-      title={t("orders.title", "生产工单")}
+      title={t("orders.title")}
       actions={
         <Select
-          placeholder={t("orders.filterPlaceholder", "筛选状态")}
+          placeholder={t("orders.filterPlaceholder")}
           allowClear
           style={{ width: 140 }}
           value={statusFilter || undefined}
@@ -125,7 +125,7 @@ export default function MESOrdersPage() {
         />
       }
     >
-      <DataCard title={t("orders.title", "生产工单")}>
+      <DataCard title={t("orders.title")}>
         <Table
           columns={columns}
           dataSource={data}

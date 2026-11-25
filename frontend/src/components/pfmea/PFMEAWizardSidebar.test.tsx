@@ -33,7 +33,7 @@ describe('PFMEAWizardSidebar', () => {
         maxReachableStep={0} warnings={[]} structureNodes={[]} edges={[]} />,
       { wrapper: I18nTestWrapper },
     );
-    expect(screen.getAllByText(/5T范围|5T Scope|结构分析|Structure Analysis/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/5T-Umfang|5T Scope|Strukturanalyse|Structure Analysis/i).length).toBeGreaterThan(0);
   });
 
   it('renders ProcessItem/ProcessStep/WorkElement in structure tree', () => {

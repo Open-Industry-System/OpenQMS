@@ -16,6 +16,12 @@
     "loadFailed": "Laden fehlgeschlagen",
     "errors": {
       "loadFailed": "ERP-Dashboard-Daten konnten nicht geladen werden"
+    },
+    "syncStatus": {
+      "completed": "Abgeschlossen",
+      "failed": "Fehlgeschlagen",
+      "running": "Wird synchronisiert",
+      "pending": "Ausstehend"
     }
   },
   "syncStatus": {
@@ -69,7 +75,8 @@
         "title": "OpenQMS-Lieferant verknüpfen",
         "description": "Zu verknüpfenden OpenQMS-Lieferanten wählen:",
         "placeholder": "Bitte Lieferanten wählen",
-        "okText": "Verknüpfung bestätigen"
+        "okText": "Verknüpfung bestätigen",
+        "selectPrompt": "Zu verknüpfenden OpenQMS-Lieferanten wählen:"
       },
       "messages": {
         "loadFailed": "Lieferanten konnten nicht geladen werden",
@@ -78,7 +85,22 @@
         "unlinkSuccess": "Verknüpfung erfolgreich gelöst",
         "linkFailed": "Verknüpfen fehlgeschlagen",
         "unlinkFailed": "Lösen der Verknüpfung fehlgeschlagen"
-      }
+      },
+      "errors": {
+        "loadFailed": "Lieferanten konnten nicht geladen werden",
+        "loadSupplierListFailed": "Lieferantenliste konnte nicht geladen werden"
+      },
+      "columns": {
+        "code": "Lieferantennummer",
+        "name": "Name",
+        "status": "Status",
+        "linkStatus": "Verknüpfungsstatus"
+      },
+      "actions": {
+        "link": "Verknüpfen",
+        "unlink": "Verknüpfung lösen"
+      },
+      "cardTitle": "Lieferanten"
     },
     "customers": {
       "link": "Verknüpfen",
@@ -87,7 +109,8 @@
         "title": "OpenQMS-Kunde verknüpfen",
         "description": "Zu verknüpfenden OpenQMS-Kunden wählen:",
         "placeholder": "Bitte Kunden wählen",
-        "okText": "Verknüpfung bestätigen"
+        "okText": "Verknüpfung bestätigen",
+        "selectPrompt": "Zu verknüpfenden OpenQMS-Kunden wählen:"
       },
       "messages": {
         "loadFailed": "Kunden konnten nicht geladen werden",
@@ -96,17 +119,67 @@
         "unlinkSuccess": "Verknüpfung erfolgreich gelöst",
         "linkFailed": "Verknüpfen fehlgeschlagen",
         "unlinkFailed": "Lösen der Verknüpfung fehlgeschlagen"
-      }
+      },
+      "errors": {
+        "loadFailed": "Kunden konnten nicht geladen werden",
+        "loadCustomerListFailed": "Kundenliste konnte nicht geladen werden"
+      },
+      "columns": {
+        "code": "Kundennummer",
+        "name": "Name",
+        "status": "Status",
+        "linkStatus": "Verknüpfungsstatus"
+      },
+      "actions": {
+        "link": "Verknüpfen",
+        "unlink": "Verknüpfung lösen"
+      },
+      "cardTitle": "Kunden"
     },
     "materials": {
       "messages": {
         "loadFailed": "Materialien konnten nicht geladen werden"
-      }
+      },
+      "errors": {
+        "loadFailed": "Materialien konnten nicht geladen werden"
+      },
+      "columns": {
+        "code": "Materialnummer",
+        "name": "Name",
+        "specification": "Spezifikation",
+        "unit": "Einheit",
+        "isPurchased": "Zukaufteil",
+        "isManufactured": "Eigenfertigung",
+        "status": "Status"
+      },
+      "yes": "Ja",
+      "no": "Nein",
+      "searchPlaceholder": "Nach Materialnummer oder Name suchen",
+      "cardTitle": "Materialien"
     },
     "locations": {
       "messages": {
         "loadFailed": "Lagerorte konnten nicht geladen werden"
-      }
+      },
+      "types": {
+        "warehouse": "Lager",
+        "zone": "Zone",
+        "bin": "Lagerplatz",
+        "line": "Linie"
+      },
+      "errors": {
+        "loadFailed": "Lagerorte konnten nicht geladen werden"
+      },
+      "columns": {
+        "code": "Lagerortcode",
+        "warehouseCode": "Lagercode",
+        "zoneCode": "Zonencode",
+        "type": "Typ",
+        "enabled": "Aktiviert"
+      },
+      "yes": "Ja",
+      "no": "Nein",
+      "cardTitle": "Lagerorte"
     }
   },
   "connections": {
@@ -122,7 +195,8 @@
       "productLineCode": "Produktliniencode",
       "status": "Status",
       "createdAt": "Angelegt am",
-      "actions": "Aktionen"
+      "actions": "Aktionen",
+      "productLine": "Produktliniencode"
     },
     "typeLabels": {
       "mock": "Mock",
@@ -180,8 +254,15 @@
       "testSuccess": "Verbindungstest erfolgreich",
       "testFailed": "Verbindungstest fehlgeschlagen",
       "syncTriggered": "Synchronisierung ausgelöst, startet innerhalb von 30 Sekunden im Hintergrund",
-      "syncFailed": "Synchronisierung konnte nicht ausgelöst werden"
-    }
+      "syncFailed": "Synchronisierung konnte nicht ausgelöst werden",
+      "testFailedWithMsg": "Verbindungstest fehlgeschlagen: {{message}}"
+    },
+    "actions": {
+      "test": "Testen",
+      "sync": "Synchronisieren",
+      "create": "Neue Verbindung"
+    },
+    "cardTitle": "Verbindungsliste"
   },
   "salesAndCost": {
     "title": "Vertrieb & Kosten",
@@ -221,6 +302,58 @@
       "loadSalesOrdersFailed": "Kundenaufträge konnten nicht geladen werden",
       "loadShipmentsFailed": "Lieferungen konnten nicht geladen werden",
       "loadCostRecordsFailed": "Kostenbuchungen konnten nicht geladen werden"
+    },
+    "salesOrders": {
+      "errors": {
+        "loadFailed": "Kundenaufträge konnten nicht geladen werden"
+      },
+      "columns": {
+        "soNumber": "Auftrags-Nr.",
+        "lineNumber": "Pos.",
+        "customerCode": "Kundennummer",
+        "materialCode": "Materialnummer",
+        "quantity": "Menge",
+        "unitPrice": "Stückpreis",
+        "status": "Status",
+        "deliveryDate": "Liefertermin"
+      },
+      "cardTitle": "Kundenaufträge"
+    },
+    "shipments": {
+      "errors": {
+        "loadFailed": "Lieferungen konnten nicht geladen werden"
+      },
+      "columns": {
+        "shipmentNumber": "Lieferschein-Nr.",
+        "customerCode": "Kundennummer",
+        "materialCode": "Materialnummer",
+        "lotNo": "Charge",
+        "quantity": "Menge",
+        "shipmentDate": "Versanddatum",
+        "linkStatus": "Verknüpfungsstatus"
+      },
+      "cardTitle": "Lieferungen"
+    },
+    "costRecords": {
+      "categories": {
+        "prevention": "Fehlerverhütungskosten",
+        "appraisal": "Prüfkosten",
+        "internalFailure": "Interne Fehlerkosten",
+        "externalFailure": "Externe Fehlerkosten"
+      },
+      "errors": {
+        "loadFailed": "Kostenbuchungen konnten nicht geladen werden"
+      },
+      "columns": {
+        "category": "Kostenkategorie",
+        "type": "Kostenart",
+        "amount": "Betrag",
+        "currency": "Währung",
+        "period": "Periode",
+        "sourceDocument": "Quellbeleg",
+        "description": "Beschreibung"
+      },
+      "cardTitle": "Kostenbuchungen"
     }
   },
   "supplyChain": {
@@ -263,6 +396,53 @@
     "messages": {
       "loadPurchaseOrdersFailed": "Bestellungen konnten nicht geladen werden",
       "loadInventoryFailed": "Lagerbestände konnten nicht geladen werden"
+    },
+    "purchaseOrders": {
+      "status": {
+        "draft": "Entwurf",
+        "submitted": "Übermittelt",
+        "confirmed": "Bestätigt",
+        "partiallyReceived": "Teilweise eingegangen",
+        "received": "Eingegangen",
+        "closed": "Geschlossen"
+      },
+      "errors": {
+        "loadFailed": "Bestellungen konnten nicht geladen werden"
+      },
+      "columns": {
+        "poNumber": "Bestell-Nr.",
+        "lineNumber": "Pos.",
+        "supplierCode": "Lieferantennummer",
+        "materialCode": "Materialnummer",
+        "quantity": "Menge",
+        "receivedQuantity": "Eingegangen",
+        "lotNo": "Charge",
+        "status": "Status",
+        "deliveryDate": "Liefertermin"
+      },
+      "filterPlaceholder": "Status filtern",
+      "cardTitle": "Bestellungen"
+    },
+    "inventory": {
+      "status": {
+        "available": "Verfügbar",
+        "restricted": "Eingeschränkt",
+        "blocked": "Gesperrt",
+        "inInspection": "In Prüfung"
+      },
+      "errors": {
+        "loadFailed": "Lagerbestände konnten nicht geladen werden"
+      },
+      "columns": {
+        "materialCode": "Materialnummer",
+        "locationCode": "Lagerortcode",
+        "lotNo": "Charge",
+        "supplierLotNo": "Lieferantencharge",
+        "quantity": "Menge",
+        "unit": "Einheit",
+        "inventoryStatus": "Bestandsstatus"
+      },
+      "cardTitle": "Lagerbestände"
     }
   },
   "traceability": {
@@ -278,6 +458,13 @@
     "noData": "Keine Rückverfolgungsdaten gefunden",
     "errors": {
       "queryFailed": "Rückverfolgungsabfrage fehlgeschlagen"
-    }
+    },
+    "cardTitle": "Rückverfolgungsabfrage",
+    "searchPlaceholder": "Chargennummer eingeben",
+    "actions": {
+      "search": "Suchen"
+    },
+    "nodesTitle": "Rückverfolgungsknoten",
+    "edgesTitle": "Rückverfolgungsbeziehungen"
   }
 }

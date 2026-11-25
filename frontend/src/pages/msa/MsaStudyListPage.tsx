@@ -336,7 +336,7 @@ export default function MsaStudyListPage() {
       >
         <Form form={createForm} layout="vertical">
           <Form.Item label={t("study.selectType")} name="study_type" rules={[{ required: true }]}>
-            <Select placeholder={t("study.placeholders.selectType", { defaultValue: "选择研究类型" })}>
+            <Select placeholder={t("study.placeholders.selectType")}>
               <Option value="grr">{t("study.type.grr")}（{t("study.method.average_range")}）</Option>
               <Option value="bias">{t("study.type.bias")}</Option>
               <Option value="linearity">{t("study.type.linearity")}</Option>

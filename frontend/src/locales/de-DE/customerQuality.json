@@ -2,7 +2,10 @@
   "page": {
     "title": "Kundenqualität",
     "complaintDetailTitle": "Reklamationsdetails",
-    "rmaDetailTitle": "RMA-Details"
+    "rmaDetailTitle": "RMA-Details",
+    "subtitle": "Reklamationen, RMA und Kundenprofile",
+    "workbenchTitle": "Arbeitsbereich Kundenqualität",
+    "listTitle": "Kundenauditpläne"
   },
   "kpi": {
     "customers": "Kunden",
@@ -224,11 +227,15 @@
       "auditScope": "Auditumfang",
       "plannedDate": "Geplantes Datum",
       "auditCriteria": "Auditkriterien"
-    }
+    },
+    "subtitle": "Details des Kundenaudits",
+    "basicInfo": "Grunddaten",
+    "findingsAndConfirmation": "Feststellungen und Bestätigung"
   },
   "sections": {
     "linksAndEvidence": "Verknüpfungen & Nachweise",
-    "auditConfirmationAttachments": "Anhänge zur Auditbestätigung:"
+    "auditConfirmationAttachments": "Anhänge zur Auditbestätigung:",
+    "confirmAttachments": "Bestätigungsanhänge"
   },
   "modal": {
     "newCustomer": "Neuer Kunde",

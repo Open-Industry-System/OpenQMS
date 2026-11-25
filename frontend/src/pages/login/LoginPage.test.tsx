@@ -118,6 +118,6 @@ describe("LoginPage public demo", () => {
     await i18n.changeLanguage("de-DE");
     renderLogin("/login");
 
-    expect(screen.getByText("其他访问者可以修改共享演示数据。请勿输入真实或个人数据。")).toBeInTheDocument();
+    expect(screen.getByText("Andere Besucher können gemeinsame Demodaten ändern. Keine echten oder personenbezogenen Daten eingeben.")).toBeInTheDocument();
   });
 });

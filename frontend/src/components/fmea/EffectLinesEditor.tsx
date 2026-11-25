@@ -3,6 +3,7 @@ import { Button } from "antd";
 import type { ReactElement } from "react";
 import type { GraphNode } from "../../types";
 import SmartSuggestionDropdown from "../dfmea/SmartSuggestionDropdown";
+import { tr, useTr } from "../../i18n/tr";
 
 export interface EffectLinesEditorProps {
   effectIds: string[];
@@ -18,6 +19,7 @@ export interface EffectLinesEditorProps {
 }
 
 export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactElement {
+  useTr();
   const {
     effectIds, nodeMap, fmeaId, functionDescription, failureModeName, processStep,
     disabled, updateNode, onAddEffect, onDeleteEffect,
@@ -45,7 +47,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
                 danger
                 icon={<DeleteOutlined />}
                 onClick={() => onDeleteEffect(effectId)}
-                aria-label="删除后果"
+                aria-label={tr("Folge löschen", "Delete effect")}
               />
             )}
           </div>
@@ -53,7 +55,7 @@ export default function EffectLinesEditor(props: EffectLinesEditorProps): ReactE
       })}
       {!disabled && (
         <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={onAddEffect}>
-          添加失效影响
+          {tr("Fehlerfolge hinzufügen", "Add failure effect")}
         </Button>
       )}
     </div>

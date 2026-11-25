@@ -6,5 +6,5 @@ export const getCustomerTypeMap = (t: TFunction) => ({
   OEM: t("customerType.OEM", "OEM"),
   "Tier 1": t("customerType.Tier 1", "Tier 1"),
   "Tier 2": t("customerType.Tier 2", "Tier 2"),
-  other: t("customerType.other", "其他"),
+  other: t("customerType.other"),
 });

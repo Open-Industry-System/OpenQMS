@@ -81,25 +81,25 @@ describe("PFMEAWizardPage", () => {
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
     await waitFor(() => expect(getFMEA).toHaveBeenCalled());
     await waitFor(() => {
-      expect(screen.queryByText(/PFMEA向导|PFMEA Wizard/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/PFMEA-Assistent|PFMEA Wizard/i)).not.toBeInTheDocument();
     });
   });
 
   it("renders Step 0 scope fields and adds a ProcessStep in Step 1", async () => {
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导|PFMEA Wizard/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent|PFMEA Wizard/i));
 
-    fireEvent.click(screen.getByRole("button", { name: /下一步|nextStep/i }));
-    await waitFor(() => screen.getByText(/添加过程步骤|addProcessStep/i));
+    fireEvent.click(screen.getByRole("button", { name: /Nächster Schritt|nextStep/i }));
+    await waitFor(() => screen.getByText(/Prozessschritt hinzufügen|addProcessStep/i));
   });
 
   it("Step 2 renders the FunctionTreeEditor", async () => {
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to step 2
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    await waitFor(() => screen.getByText(/addItemFunction|添加过程项目功能/i));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    await waitFor(() => screen.getByText(/addItemFunction|Funktion Prozesselement hinzufügen/i));
   });
 
   it("Step 4 renders the RiskTable with severity dialog and CC/SC column", async () => {
@@ -130,12 +130,12 @@ describe("PFMEAWizardPage", () => {
     };
     vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to step 4 (0 -> 1 -> 2 -> 3 -> 4)
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
 
     // RiskTable renders an AP tag (H/M/L) or the class column (CC/SC/-)
     await waitFor(() => {
@@ -175,22 +175,22 @@ describe("PFMEAWizardPage", () => {
     };
     vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to step 3
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
 
     // 4M cause hint tags should appear
     await waitFor(() => {
-      expect(screen.getByText("操作未按SOP")).toBeInTheDocument();
+      expect(screen.getByText("SOP not followed")).toBeInTheDocument();
     });
-    expect(screen.getByText("设备校准漂移")).toBeInTheDocument();
+    expect(screen.getByText("Equipment calibration drift")).toBeInTheDocument();
 
     // Clicking a hint populates the empty cause node
-    fireEvent.click(screen.getByText("操作未按SOP"));
+    fireEvent.click(screen.getByText("SOP not followed"));
     await waitFor(() => {
-      expect(screen.getByDisplayValue("操作未按SOP")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("SOP not followed")).toBeInTheDocument();
     });
   });
 
@@ -216,19 +216,19 @@ describe("PFMEAWizardPage", () => {
     };
     vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to step 3 (0 -> 1 -> 2 -> 3)
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
-    fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
+    fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
 
-    await waitFor(() => screen.getByRole("button", { name: /添加失效链|addFailureChain/i }));
+    await waitFor(() => screen.getByRole("button", { name: /Fehlerkette hinzufügen|addFailureChain/i }));
     expect(screen.getByText("Machine:贴片机吸嘴, Man:操作员")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /添加失效链|addFailureChain/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Fehlerkette hinzufügen|addFailureChain/i }));
     await waitFor(() => {
       // After adding a failure chain, the failure_mode SmartSuggestionDropdown label appears.
-      expect(screen.getAllByText(/失效模式|failureMode/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Fehlerart|failureMode/i).length).toBeGreaterThan(0);
     });
   });
 
@@ -268,28 +268,28 @@ describe("PFMEAWizardPage", () => {
     };
     vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to step 5 (0 -> 1 -> 2 -> 3 -> 4 -> 5)
     for (let i = 0; i < 5; i++) {
-      fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+      fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
     }
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText(/负责人|responsible/i)).toBeInTheDocument();
-      expect(screen.getByPlaceholderText(/计划完成日期|Planned Completion Date/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Verantwortlich|responsible/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Geplanter Abschlusstermin|Planned Completion Date/i)).toBeInTheDocument();
     });
   });
 
   it("finish is disabled until all gates pass", async () => {
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to step 6 (0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 6)
     for (let i = 0; i < 6; i++) {
-      fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+      fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
     }
 
     await waitFor(() => {
-      const finishBtn = screen.getByRole("button", { name: /完成创建|finish/i });
+      const finishBtn = screen.getByRole("button", { name: /Erstellung abschließen|finish/i });
       expect(finishBtn).toBeDisabled();
     });
   });
@@ -345,18 +345,18 @@ describe("PFMEAWizardPage", () => {
     };
     vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
     render(<PFMEAWizardPage />, { wrapper: FinishRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to step 6
     for (let i = 0; i < 6; i++) {
-      fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+      fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
     }
 
     await waitFor(() => {
-      const finishBtn = screen.getByRole("button", { name: /完成创建|finish/i });
+      const finishBtn = screen.getByRole("button", { name: /Erstellung abschließen|finish/i });
       expect(finishBtn).toBeEnabled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /完成创建|finish/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Erstellung abschließen|finish/i }));
 
     await waitFor(() => {
       expect(updateFMEA).toHaveBeenCalledWith(
@@ -412,10 +412,10 @@ describe("PFMEAWizardPage", () => {
     };
     vi.mocked(getFMEA).mockResolvedValue(doc as unknown as FMEADocument);
     render(<PFMEAWizardPage />, { wrapper: I18nTestRouterWrapper });
-    await waitFor(() => screen.getByText(/PFMEA向导/i));
+    await waitFor(() => screen.getByText(/PFMEA-Assistent/i));
     // advance to the optimization step (0 -> 1 -> 2 -> 3 -> 4 -> 5)
     for (let i = 0; i < 5; i++) {
-      fireEvent.click(screen.getByRole("button", { name: /nextStep|下一步/i }));
+      fireEvent.click(screen.getByRole("button", { name: /nextStep|Nächster Schritt/i }));
     }
 
     // The status Select is inside the optimization Card. Open it and assert the

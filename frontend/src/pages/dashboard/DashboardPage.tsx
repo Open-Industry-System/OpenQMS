@@ -109,7 +109,7 @@ export default function DashboardPage() {
       return widgetsResp;
     } catch (e) {
       console.error("Dashboard fetch error:", e);
-      message.error(t("messages.loadFailed", "仪表盘加载失败"));
+      message.error(t("messages.loadFailed"));
       return null;
     } finally {
       setLoading(false);
@@ -139,12 +139,12 @@ export default function DashboardPage() {
       setLayout(sanitized);
       setIsEditing(false);
       setEditLayout(null);
-      message.success(t("messages.saveSuccess", "布局已保存"));
+      message.success(t("messages.saveSuccess"));
       const widgetTypes = [...new Set(sanitized.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error(t("messages.saveFailed", "保存失败"));
+      message.error(t("messages.saveFailed"));
     }
   };
 
@@ -159,12 +159,12 @@ export default function DashboardPage() {
       await saveDashboardLayout({ lg: resetLayout });
       setLayout(resetLayout);
       setEditLayout(resetLayout);
-      message.success(t("messages.resetSuccess", "已恢复默认布局"));
+      message.success(t("messages.resetSuccess"));
       const widgetTypes = [...new Set(resetLayout.map((w) => w.type))];
       const widgetsResp = await getDashboardWidgets(widgetTypes, productLine || undefined);
       setData(widgetsResp);
     } catch {
-      message.error(t("messages.resetFailed", "恢复失败"));
+      message.error(t("messages.resetFailed"));
     }
   };
 
@@ -188,23 +188,23 @@ export default function DashboardPage() {
   const actions = isEditing ? (
     <Space>
       <Button icon={<CheckOutlined />} type="primary" onClick={handleSave}>
-        {t("actions.done", "完成")}
+        {t("actions.done")}
       </Button>
       <Button icon={<CloseOutlined />} onClick={handleCancel}>
-        {tc("actions.cancel", "取消")}
+        {tc("actions.cancel")}
       </Button>
       <Button icon={<RollbackOutlined />} onClick={handleReset}>
-        {t("actions.resetDefault", "恢复默认")}
+        {t("actions.resetDefault")}
       </Button>
     </Space>
   ) : (
     <Space>
       <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>
-        {tc("actions.refresh", "刷新")}
+        {tc("actions.refresh")}
       </Button>
       {canEditDashboard && (
         <Button icon={<EditOutlined />} onClick={handleEdit}>
-          {t("actions.editLayout", "编辑布局")}
+          {t("actions.editLayout")}
         </Button>
       )}
     </Space>
@@ -212,8 +212,8 @@ export default function DashboardPage() {
 
   return (
     <PageShell
-      title={t("page.title", "质量仪表盘")}
-      subtitle={t("page.subtitle", "全局质量态势 · KPI · 预警 · 近期动态")}
+      title={t("page.title")}
+      subtitle={t("page.subtitle")}
       actions={actions}
       fullHeight
     >

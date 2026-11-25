@@ -61,7 +61,7 @@ function SalesOrdersTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error(t("salesAndCost.salesOrders.errors.loadFailed", "加载销售订单失败")))
+        .catch(() => message.error(t("salesAndCost.salesOrders.errors.loadFailed")))
         .finally(() => setLoading(false));
     },
     [message, t],
@@ -73,40 +73,40 @@ function SalesOrdersTab() {
 
   const columns = [
     {
-      title: t("salesAndCost.salesOrders.columns.soNumber", "销售订单号"),
+      title: t("salesAndCost.salesOrders.columns.soNumber"),
       dataIndex: "so_number",
       key: "so_number",
       width: 160,
     },
     {
-      title: t("salesAndCost.salesOrders.columns.lineNumber", "行号"),
+      title: t("salesAndCost.salesOrders.columns.lineNumber"),
       dataIndex: "line_number",
       key: "line_number",
       width: 80,
     },
     {
-      title: t("salesAndCost.salesOrders.columns.customerCode", "客户编码"),
+      title: t("salesAndCost.salesOrders.columns.customerCode"),
       dataIndex: "customer_code",
       key: "customer_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.salesOrders.columns.materialCode", "物料编码"),
+      title: t("salesAndCost.salesOrders.columns.materialCode"),
       dataIndex: "material_code",
       key: "material_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.salesOrders.columns.quantity", "数量"),
+      title: t("salesAndCost.salesOrders.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v?.toLocaleString() ?? "—",
     },
     {
-      title: t("salesAndCost.salesOrders.columns.unitPrice", "单价"),
+      title: t("salesAndCost.salesOrders.columns.unitPrice"),
       dataIndex: "unit_price",
       key: "unit_price",
       width: 100,
@@ -114,7 +114,7 @@ function SalesOrdersTab() {
         v != null ? `€${v.toFixed(2)}` : "—",
     },
     {
-      title: t("salesAndCost.salesOrders.columns.status", "状态"),
+      title: t("salesAndCost.salesOrders.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 100,
@@ -123,7 +123,7 @@ function SalesOrdersTab() {
       ),
     },
     {
-      title: t("salesAndCost.salesOrders.columns.deliveryDate", "交货日期"),
+      title: t("salesAndCost.salesOrders.columns.deliveryDate"),
       dataIndex: "delivery_date",
       key: "delivery_date",
       width: 120,
@@ -132,7 +132,7 @@ function SalesOrdersTab() {
   ];
 
   return (
-    <DataCard title={t("salesAndCost.salesOrders.cardTitle", "销售订单")}>
+    <DataCard title={t("salesAndCost.salesOrders.cardTitle")}>
       <Table
         className="qf-table"
         columns={columns}
@@ -172,7 +172,7 @@ function ShipmentsTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error(t("salesAndCost.shipments.errors.loadFailed", "加载发货记录失败")))
+        .catch(() => message.error(t("salesAndCost.shipments.errors.loadFailed")))
         .finally(() => setLoading(false));
     },
     [message, t],
@@ -184,48 +184,48 @@ function ShipmentsTab() {
 
   const columns = [
     {
-      title: t("salesAndCost.shipments.columns.shipmentNumber", "发货单号"),
+      title: t("salesAndCost.shipments.columns.shipmentNumber"),
       dataIndex: "shipment_number",
       key: "shipment_number",
       width: 140,
     },
     {
-      title: t("salesAndCost.shipments.columns.customerCode", "客户编码"),
+      title: t("salesAndCost.shipments.columns.customerCode"),
       dataIndex: "customer_code",
       key: "customer_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.shipments.columns.materialCode", "物料编码"),
+      title: t("salesAndCost.shipments.columns.materialCode"),
       dataIndex: "material_code",
       key: "material_code",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.shipments.columns.lotNo", "批次号"),
+      title: t("salesAndCost.shipments.columns.lotNo"),
       dataIndex: "lot_no",
       key: "lot_no",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.shipments.columns.quantity", "数量"),
+      title: t("salesAndCost.shipments.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v?.toLocaleString() ?? "—",
     },
     {
-      title: t("salesAndCost.shipments.columns.shipmentDate", "发货日期"),
+      title: t("salesAndCost.shipments.columns.shipmentDate"),
       dataIndex: "shipment_date",
       key: "shipment_date",
       width: 120,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.shipments.columns.linkStatus", "关联状态"),
+      title: t("salesAndCost.shipments.columns.linkStatus"),
       dataIndex: "link_status",
       key: "link_status",
       width: 100,
@@ -236,7 +236,7 @@ function ShipmentsTab() {
   ];
 
   return (
-    <DataCard title={t("salesAndCost.shipments.cardTitle", "发货记录")}>
+    <DataCard title={t("salesAndCost.shipments.cardTitle")}>
       <Table
         className="qf-table"
         columns={columns}
@@ -269,10 +269,10 @@ function CostRecordsTab() {
   const productLine = useProductLineStore((s) => s.selected);
 
   const costCategoryLabels = useMemo((): Record<string, string> => ({
-    prevention: t("salesAndCost.costRecords.categories.prevention", "预防成本"),
-    appraisal: t("salesAndCost.costRecords.categories.appraisal", "鉴定成本"),
-    internal_failure: t("salesAndCost.costRecords.categories.internalFailure", "内部损失"),
-    external_failure: t("salesAndCost.costRecords.categories.externalFailure", "外部损失"),
+    prevention: t("salesAndCost.costRecords.categories.prevention"),
+    appraisal: t("salesAndCost.costRecords.categories.appraisal"),
+    internal_failure: t("salesAndCost.costRecords.categories.internalFailure"),
+    external_failure: t("salesAndCost.costRecords.categories.externalFailure"),
   }), [t]);
 
   const fetchData = useCallback(
@@ -283,7 +283,7 @@ function CostRecordsTab() {
           setData(res.items);
           setTotal(res.total);
         })
-        .catch(() => message.error(t("salesAndCost.costRecords.errors.loadFailed", "加载成本记录失败")))
+        .catch(() => message.error(t("salesAndCost.costRecords.errors.loadFailed")))
         .finally(() => setLoading(false));
     },
     [message, t],
@@ -302,48 +302,48 @@ function CostRecordsTab() {
 
   const columns = [
     {
-      title: t("salesAndCost.costRecords.columns.category", "成本类别"),
+      title: t("salesAndCost.costRecords.columns.category"),
       dataIndex: "cost_category",
       key: "cost_category",
       width: 120,
       render: (v: string) => costCategoryLabels[v] || v,
     },
     {
-      title: t("salesAndCost.costRecords.columns.type", "成本类型"),
+      title: t("salesAndCost.costRecords.columns.type"),
       dataIndex: "cost_type",
       key: "cost_type",
       width: 140,
     },
     {
-      title: t("salesAndCost.costRecords.columns.amount", "金额"),
+      title: t("salesAndCost.costRecords.columns.amount"),
       dataIndex: "amount",
       key: "amount",
       width: 120,
       render: (v: number) => `€${v.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
     },
     {
-      title: t("salesAndCost.costRecords.columns.currency", "货币"),
+      title: t("salesAndCost.costRecords.columns.currency"),
       dataIndex: "currency",
       key: "currency",
       width: 80,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.costRecords.columns.period", "期间"),
+      title: t("salesAndCost.costRecords.columns.period"),
       dataIndex: "period_month",
       key: "period_month",
       width: 100,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.costRecords.columns.sourceDocument", "来源单据"),
+      title: t("salesAndCost.costRecords.columns.sourceDocument"),
       dataIndex: "source_document_no",
       key: "source_document_no",
       width: 140,
       render: (v: string | null) => v || "—",
     },
     {
-      title: t("salesAndCost.costRecords.columns.description", "描述"),
+      title: t("salesAndCost.costRecords.columns.description"),
       dataIndex: "description",
       key: "description",
       ellipsis: true,
@@ -352,7 +352,7 @@ function CostRecordsTab() {
   ];
 
   return (
-    <DataCard title={t("salesAndCost.costRecords.cardTitle", "成本记录")}>
+    <DataCard title={t("salesAndCost.costRecords.cardTitle")}>
       <Row gutter={16} style={{ marginBottom: 16 }}>
         {Object.entries(coqSummary).map(([cat, amount]) => (
           <Col key={cat} span={6}>
@@ -393,14 +393,14 @@ export default function ERPSalesAndCostPage() {
   const [activeTab, setActiveTab] = useState("sales_orders");
 
   return (
-    <PageShell title={t("salesAndCost.title", "销售与成本")}>
+    <PageShell title={t("salesAndCost.title")}>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
         items={[
-          { key: "sales_orders", label: t("salesAndCost.tabs.salesOrders", "销售订单"), children: <SalesOrdersTab /> },
-          { key: "shipments", label: t("salesAndCost.tabs.shipments", "发货记录"), children: <ShipmentsTab /> },
-          { key: "cost_records", label: t("salesAndCost.tabs.costRecords", "成本记录"), children: <CostRecordsTab /> },
+          { key: "sales_orders", label: t("salesAndCost.tabs.salesOrders"), children: <SalesOrdersTab /> },
+          { key: "shipments", label: t("salesAndCost.tabs.shipments"), children: <ShipmentsTab /> },
+          { key: "cost_records", label: t("salesAndCost.tabs.costRecords"), children: <CostRecordsTab /> },
         ]}
       />
     </PageShell>

@@ -60,8 +60,8 @@ describe("escaped, provenance-aware activity", () => {
       page={{ ...base, task_status: "ready", run_status: "pending" }}
       onControl={control}
       pending={false} />);
-    expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "暂停" }));
+    expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(control).toHaveBeenCalledWith("pause");
   });
   it("shows immutable target, escaped messages, received alias and actual queued/claimed terminal distinction", () => {
@@ -84,12 +84,12 @@ describe("escaped, provenance-aware activity", () => {
       }}
       onControl={vi.fn()}
       pending={false} />);
-    expect(screen.getByRole("link", { name: `目标报告 ${id}` })).toHaveAttribute("href", `/capa/${id}`);
+    expect(screen.getByRole("link", { name: `Target report ${id}` })).toHaveAttribute("href", `/capa/${id}`);
     expect(screen.getAllByText("<img src=x onerror=alert(1)>")).toHaveLength(3);
     expect(document.querySelector("img")).toBeNull();
-    expect(screen.getByText("已确认接收")).toBeInTheDocument();
-    expect(screen.getByText("排队中：终止时未确认接收（不代表已处理）")).toBeInTheDocument();
-    expect(screen.getByText("已领取：终止时未确认接收（不代表已处理）")).toBeInTheDocument();
+    expect(screen.getByText("Receipt confirmed")).toBeInTheDocument();
+    expect(screen.getByText("Queued: Not confirmed at termination (does not mean processed)")).toBeInTheDocument();
+    expect(screen.getByText("Claimed: Not confirmed at termination (does not mean processed)")).toBeInTheDocument();
   });
   it("unsourced progress is only fixed plugin-running presentation", () => {
     render(<AgentActivity
@@ -112,30 +112,30 @@ describe("escaped, provenance-aware activity", () => {
       }}
       onControl={vi.fn()}
       pending={false} />);
-    expect(screen.getByText("插件报告运行中")).toBeInTheDocument();
+    expect(screen.getByText("Plugin reports running")).toBeInTheDocument();
   });
   it("shows full checkpoint source/digest and sends checkpoint only when current paused run eligible", () => {
     const control = vi.fn();
     render(<AgentActivity task={task} page={{ ...base, items: [cp()] }} onControl={control} pending={false} />);
-    expect(screen.getByText(`摘要 ${source.projection_digest}`)).toBeInTheDocument();
-    expect(screen.getByText(`来源版本 ${source.projection_id}`)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "从此检查点重启" }));
+    expect(screen.getByText(`Digest ${source.projection_digest}`)).toBeInTheDocument();
+    expect(screen.getByText(`Source version ${source.projection_id}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart from this checkpoint" }));
     expect(control).toHaveBeenCalledWith("restart", id);
-    expect(screen.getByText(/重新读取当前事实/)).toBeInTheDocument();
+    expect(screen.getByText(/re-reads current facts/)).toBeInTheDocument();
   });
   it.each([{ task_status: "ready", run_status: "active", run_id: run }, { task_status: "paused", run_status: "active", run_id: run }, { task_status: "paused", run_status: "paused", run_id: id }])("disables CP against current server state %j", state => {
     render(<AgentActivity task={task} page={{ ...base, ...state, items: [cp()] } as any} onControl={vi.fn()} pending={false} />);
-    expect(screen.getByRole("button", { name: "从此检查点重启" })).toBeDisabled();
-    expect(screen.getByText(/当前任务与运行须已暂停/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart from this checkpoint" })).toBeDisabled();
+    expect(screen.getByText(/Task and run must be paused/)).toBeInTheDocument();
   });
   it("historical/latest-ineligible CP is disabled with reason", () => {
     render(<AgentActivity task={task} page={{ ...base, items: [cp(false)] }} onControl={vi.fn()} pending={false} />);
-    expect(screen.getByRole("button", { name: "从此检查点重启" })).toBeDisabled();
-    expect(screen.getByText(/仅最新且消息前缀有效的检查点/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart from this checkpoint" })).toBeDisabled();
+    expect(screen.getByText(/Only the latest checkpoint with a valid message prefix/)).toBeInTheDocument();
   });
 });
 it('renders recognized R5 source-free start as a business label',()=>{
   render(<AgentActivity task={{...task,model_deployment:{deployment_id:id,name:'A',version:'1'}}} page={{...base,items:[{sequence:1,created_at:task.created_at,kind:'message',data:{message_id:id,author_id:id,sequence:1,content:'deliver_d4_root_cause_candidate_v1',data_class:'restricted',state:'queued'}}]}} onControl={vi.fn()} pending={false}/>);
-  expect(screen.getByText('仅根据当前根因创建建议任务')).toBeInTheDocument();
+  expect(screen.getByText('Create proposal task from current root cause only')).toBeInTheDocument();
   expect(screen.queryByText('deliver_d4_root_cause_candidate_v1')).toBeNull();
 });

@@ -10,6 +10,7 @@ import {
   getSameStepProductCharacteristicOptions,
   updateFunctionCharacteristics,
 } from '../../utils/fmeaCharacteristics';
+import { tr } from "../../i18n/tr";
 
 interface FunctionTreeEditorProps {
   nodes: GraphNode[];
@@ -49,10 +50,10 @@ export default function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: F
 
     if (impacts.length > 0) {
       Modal.confirm({
-        title: '删除产品特性会清除关联',
-        content: `以下过程特性将失去关联：${impacts.map((impact) => impact.characteristicName).join('、')}。确认继续吗？`,
-        okText: '确认删除',
-        cancelText: '取消',
+        title: tr("Löschen des Produktmerkmals entfernt Verknüpfungen", "Deleting the product characteristic removes links"),
+        content: tr(`Folgende Prozessmerkmale verlieren ihre Verknüpfung: ${impacts.map((impact) => impact.characteristicName).join(", ")}. Fortfahren?`, `The following process characteristics will lose their link: ${impacts.map((impact) => impact.characteristicName).join(", ")}. Continue?`),
+        okText: tr("Löschen bestätigen", "Confirm delete"),
+        cancelText: tr("Abbrechen", "Cancel"),
         okButtonProps: { danger: true },
         onOk: applyChange,
       });
@@ -136,11 +137,11 @@ export default function FunctionTreeEditor({ nodes, edges, fmeaId, onChange }: F
       <Space direction="vertical" style={{ width: '100%' }}>
         {!hasStructuredCharacteristics && fn.type === 'ProcessStepFunction' && (
           <Input size="small" addonBefore={t('wizard.function.specification')} value={fn.specification ?? ''}
-            onChange={(e) => updateNode(fn.id, { specification: e.target.value })} placeholder="偏移度 <= 0.05mm" />
+            onChange={(e) => updateNode(fn.id, { specification: e.target.value })} placeholder={tr("Versatz <= 0,05 mm", "Offset <= 0.05 mm")} />
         )}
         {!hasStructuredCharacteristics && fn.type === 'ProcessWorkElementFunction' && (
           <Input size="small" addonBefore={t('wizard.function.requirement')} value={fn.requirement ?? ''}
-            onChange={(e) => updateNode(fn.id, { requirement: e.target.value })} placeholder="贴装压力 3.0±0.5N" />
+            onChange={(e) => updateNode(fn.id, { requirement: e.target.value })} placeholder={tr("Bestückdruck 3,0±0,5 N", "Placement pressure 3.0±0.5 N")} />
         )}
         {!hasStructuredCharacteristics && allowClass && (
           <Select size="small" value={fn.classification || undefined} placeholder={t('wizard.function.specialCharacteristic')}

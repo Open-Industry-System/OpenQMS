@@ -175,7 +175,10 @@
       "conflictTitle": "Dokument geändert",
       "conflictContent": "Diese FMEA wurde in einer anderen Sitzung geändert. Vor dem Bearbeiten ist ein Neuladen erforderlich. Ihre nicht gespeicherten lokalen Änderungen werden verworfen.",
       "conflictReload": "Neu laden",
-      "structureGap": "Sie haben [{{tool}}] gewählt, es existiert aber kein zugehöriger {{nodeType}}-Knoten. Fügen Sie ggf. einen hinzu, um diese Analysemethode abzubilden."
+      "structureGap": "Sie haben [{{tool}}] gewählt, es existiert aber kein zugehöriger {{nodeType}}-Knoten. Fügen Sie ggf. einen hinzu, um diese Analysemethode abzubilden.",
+      "confirmLeaveTitle": "Assistent verlassen?",
+      "confirmLeave": "Es gibt ungespeicherte Änderungen. Wirklich verlassen?",
+      "confirmLeaveOk": "Verlassen"
     },
     "guidance": {
       "step0": {

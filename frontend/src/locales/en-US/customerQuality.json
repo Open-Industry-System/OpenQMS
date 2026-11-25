@@ -2,7 +2,10 @@
   "page": {
     "title": "Customer Quality",
     "complaintDetailTitle": "Complaint Detail",
-    "rmaDetailTitle": "RMA Detail"
+    "rmaDetailTitle": "RMA Detail",
+    "subtitle": "Complaints, RMA and customer profiles",
+    "workbenchTitle": "Customer Quality Workbench",
+    "listTitle": "Customer audit plans"
   },
   "kpi": {
     "customers": "Customers",
@@ -224,11 +227,15 @@
       "auditScope": "Audit Scope",
       "plannedDate": "Planned Date",
       "auditCriteria": "Audit Criteria"
-    }
+    },
+    "subtitle": "Customer audit details",
+    "basicInfo": "Basic information",
+    "findingsAndConfirmation": "Findings and confirmation"
   },
   "sections": {
     "linksAndEvidence": "Links & Evidence",
-    "auditConfirmationAttachments": "Audit Confirmation Attachments:"
+    "auditConfirmationAttachments": "Audit Confirmation Attachments:",
+    "confirmAttachments": "Confirmation attachments"
   },
   "modal": {
     "newCustomer": "New Customer",

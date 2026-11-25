@@ -1,54 +1,52 @@
 // frontend/src/utils/pfmeaRules.ts
+import { tr } from "../i18n/tr";
 
 export interface FailureChain {
   effects: string[];
   causes: string[];
 }
 
-const VERB_PATTERNS: Record<string, string[]> = {
-  焊接: ['焊点虚焊', '焊点桥连', '焊料不足', '焊点气孔'],
-  装配: ['装配错位', '漏装', '错装', '装配过紧/过松'],
-  注塑: ['缺料', '飞边', '缩水', '气泡'],
-  涂装: ['涂层不均', '漏涂', '涂层过厚/过薄', '色差'],
-  压装: ['压装不到位', '压装过载', '压装偏斜', '压装扭矩不稳'],
-  贴装: ['贴装偏移', '贴装漏件', '贴装反件', '贴装压力异常'],
-};
+type Bi = [de: string, en: string];
 
-const FAILURE_CHAIN_MAP: Record<string, FailureChain> = {
-  贴装偏移: {
-    effects: ['电控板功能丧失', '整机无法启动', '客户退货'],
-    causes: ['贴装吸嘴磨损', '贴装压力设定偏小', '设备校准漂移', '来料器件偏置'],
-  },
-  压装不到位: {
-    effects: ['连接松动', '异响', '功能间歇性失效'],
-    causes: ['压头行程未校准', '压力传感器漂移', '来料尺寸超差', '操作未按SOP'],
-  },
-  焊点虚焊: {
-    effects: ['电路断开', '信号中断', '功能丧失'],
-    causes: ['焊接温度不足', '焊膏活性不足', '贴装压力不足', '环境湿度过高'],
-  },
-};
+// Process keywords (German and English stems, matched case-insensitively) → typical failure modes.
+const VERB_PATTERNS: { match: string[]; modes: Bi[] }[] = [
+  { match: ["löt", "schweiß", "solder", "weld"], modes: [["Kalte Lötstelle", "Cold solder joint"], ["Lötbrücke", "Solder bridge"], ["Zu wenig Lot", "Insufficient solder"], ["Lunker in der Lötstelle", "Voids in solder joint"]] },
+  { match: ["montage", "montier", "assembl"], modes: [["Montageversatz", "Assembly misalignment"], ["Teil fehlt", "Missing part"], ["Falsches Teil verbaut", "Wrong part assembled"], ["Montage zu fest/zu lose", "Assembly too tight/too loose"]] },
+  { match: ["spritzg", "inject", "molding", "moulding"], modes: [["Unvollständige Füllung", "Short shot"], ["Gratbildung", "Flash"], ["Einfallstellen", "Sink marks"], ["Lufteinschlüsse", "Air bubbles"]] },
+  { match: ["lackier", "beschicht", "paint", "coat"], modes: [["Ungleichmäßige Beschichtung", "Uneven coating"], ["Fehlende Beschichtung", "Missing coating"], ["Schichtdicke zu hoch/zu niedrig", "Coating too thick/too thin"], ["Farbabweichung", "Color deviation"]] },
+  { match: ["einpress", "press-fit", "press fit", "pressing"], modes: [["Einpresstiefe nicht erreicht", "Press-fit depth not reached"], ["Überlast beim Einpressen", "Press-fit overload"], ["Schräg eingepresst", "Press-fit misaligned"], ["Einpressmoment instabil", "Unstable press-fit torque"]] },
+  { match: ["bestück", "placement", "mount", "smt"], modes: [["Bestückversatz", "Placement offset"], ["Bauteil fehlt", "Missing component"], ["Bauteil verpolt", "Reversed component"], ["Bestückdruck auffällig", "Abnormal placement pressure"]] },
+];
 
-const M4_CAUSE_HINTS: Record<string, string[]> = {
-  Man: ['操作未按SOP', '培训不足', '疲劳/疏忽', '人员换线未验证'],
-  Machine: ['设备校准漂移', '设备磨损', '设备参数漂移', '预防性维护缺失'],
-  Material: ['来料尺寸超差', '来料材质不符', '辅料过期', '批次不一致'],
-  Environment: ['温湿度超范围', '粉尘/洁净度不足', '静电(ESD)', '照明不足'],
+const FAILURE_CHAIN_MAP: { modes: string[]; effects: Bi[]; causes: Bi[] }[] = [
+  { modes: ["Bestückversatz", "Placement offset"], effects: [["Funktionsverlust der Steuerplatine", "Control board function loss"], ["Gerät startet nicht", "Unit fails to start"], ["Kundenrücksendung", "Customer return"]], causes: [["Pipettenverschleiß", "Worn placement nozzle"], ["Bestückdruck zu niedrig eingestellt", "Placement pressure set too low"], ["Kalibrierdrift der Anlage", "Equipment calibration drift"], ["Bauteilversatz im Anlieferzustand", "Incoming component offset"]] },
+  { modes: ["Einpresstiefe nicht erreicht", "Press-fit depth not reached"], effects: [["Lockere Verbindung", "Loose connection"], ["Störgeräusch", "Abnormal noise"], ["Sporadischer Funktionsausfall", "Intermittent function failure"]], causes: [["Pressenhub nicht kalibriert", "Press stroke not calibrated"], ["Drift des Drucksensors", "Pressure sensor drift"], ["Maßabweichung am Zukaufteil", "Incoming dimension out of tolerance"], ["Arbeitsanweisung nicht eingehalten", "SOP not followed"]] },
+  { modes: ["Kalte Lötstelle", "Cold solder joint"], effects: [["Stromkreis unterbrochen", "Open circuit"], ["Signalunterbrechung", "Signal interruption"], ["Funktionsverlust", "Function loss"]], causes: [["Löttemperatur zu niedrig", "Soldering temperature too low"], ["Lotpaste zu wenig aktiv", "Insufficient solder paste activity"], ["Bestückdruck zu gering", "Insufficient placement pressure"], ["Luftfeuchtigkeit zu hoch", "Ambient humidity too high"]] },
+];
+
+const M4_CAUSE_HINTS: Record<string, Bi[]> = {
+  Man: [["Arbeitsanweisung nicht eingehalten", "SOP not followed"], ["Unzureichende Schulung", "Insufficient training"], ["Ermüdung/Unachtsamkeit", "Fatigue/carelessness"], ["Personalwechsel nicht freigegeben", "Operator change not verified"]],
+  Machine: [["Kalibrierdrift der Anlage", "Equipment calibration drift"], ["Anlagenverschleiß", "Equipment wear"], ["Parameterdrift der Anlage", "Equipment parameter drift"], ["Fehlende vorbeugende Instandhaltung", "Missing preventive maintenance"]],
+  Material: [["Maßabweichung am Zukaufteil", "Incoming dimension out of tolerance"], ["Falscher Werkstoff angeliefert", "Wrong incoming material"], ["Hilfsstoff abgelaufen", "Expired auxiliary material"], ["Chargen uneinheitlich", "Inconsistent batches"]],
+  Environment: [["Temperatur/Feuchte außerhalb des Bereichs", "Temperature/humidity out of range"], ["Staub/Sauberkeit unzureichend", "Insufficient cleanliness/dust"], ["Elektrostatik (ESD)", "Electrostatic discharge (ESD)"], ["Unzureichende Beleuchtung", "Insufficient lighting"]],
 };
 
 export function usePfmeaRules() {
+  const pick = (items: Bi[]) => items.map(([de, en]) => tr(de, en));
+
   const generateFailureModes = (stepFunctionText: string): string[] => {
-    const text = stepFunctionText ?? '';
-    for (const verb of Object.keys(VERB_PATTERNS)) {
-      if (text.includes(verb)) return VERB_PATTERNS[verb];
-    }
-    return [];
+    const text = (stepFunctionText ?? "").toLowerCase();
+    const hit = VERB_PATTERNS.find(({ match }) => match.some((m) => text.includes(m)));
+    return hit ? pick(hit.modes) : [];
   };
 
-  const suggestFailureChain = (failureMode: string): FailureChain =>
-    FAILURE_CHAIN_MAP[failureMode] ?? { effects: [], causes: [] };
+  const suggestFailureChain = (failureMode: string): FailureChain => {
+    const hit = FAILURE_CHAIN_MAP.find(({ modes }) => modes.includes(failureMode));
+    return hit ? { effects: pick(hit.effects), causes: pick(hit.causes) } : { effects: [], causes: [] };
+  };
 
-  const suggest4MCauses = (): Record<string, string[]> => ({ ...M4_CAUSE_HINTS });
+  const suggest4MCauses = (): Record<string, string[]> =>
+    Object.fromEntries(Object.entries(M4_CAUSE_HINTS).map(([k, v]) => [k, pick(v)]));
 
   return { generateFailureModes, suggestFailureChain, suggest4MCauses };
 }

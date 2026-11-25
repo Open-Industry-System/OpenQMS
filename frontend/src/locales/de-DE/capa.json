@@ -62,7 +62,10 @@
     "d8Label": "Abschlussbestätigung",
     "supplierLoadFailed": "Lieferanten konnten nicht geladen werden",
     "supplier": "Lieferant",
-    "supplierPlaceholder": "Lieferant wählen"
+    "supplierPlaceholder": "Lieferant wählen",
+    "documentNoPlaceholder": "z. B. 8D-2026-001",
+    "titlePlaceholder": "z. B. Kundenreklamation Lötfehler",
+    "problemDescriptionPlaceholder": "Problem kurz beschreiben (optional, für intelligente Empfehlungen)"
   },
   "messages": {
     "createSuccess": "8D-Bericht angelegt",
@@ -153,7 +156,9 @@
     "linked": "Verknüpfte FMEA",
     "selectTitle": "Zugehörige FMEA wählen",
     "searchPlaceholder": "FMEA-Dokument suchen",
-    "failureModeSuffix": " (Fehlerart)"
+    "failureModeSuffix": " (Fehlerart)",
+    "changeFMEA": "FMEA-Verknüpfung ändern",
+    "linkFMEA": "FMEA verknüpfen"
   },
   "d4": {
     "title": "D4-Empfehlungen zur Grundursache",
@@ -218,7 +223,11 @@
     },
     "cause": "FMEA-Ursache",
     "selectCause": "Fehlerursache wählen",
-    "linkFmeaFirst": "Zuerst eine FMEA verknüpfen"
+    "linkFmeaFirst": "Zuerst eine FMEA verknüpfen",
+    "saveCause": "Ursache speichern",
+    "clearCause": "Leeren",
+    "editCause": "Ursache ändern",
+    "setCause": "Ursache verknüpfen"
   },
   "d5": {
     "title": "D5-Empfehlungen zu Abstellmaßnahmen",
@@ -290,7 +299,8 @@
     "skipReasonPlaceholder": "Grund für das Überspringen (optional)",
     "skipReasonEmpty": "Kein Grund angegeben",
     "skipConfirm": "Überspringen bestätigen und weiter",
-    "actionFailed": "Aktion konnte nicht gespeichert werden"
+    "actionFailed": "Aktion konnte nicht gespeichert werden",
+    "ruleSuggestions": "Vorbeugungsvorschläge der Regel-Engine"
   },
   "draft": {
     "button": "KI-Entwurf",
@@ -427,7 +437,8 @@
     "colSuggestion": "Aktualisierungsvorschlag",
     "colStatus": "Status",
     "colCoverage": "Abdeckung",
-    "colBump": "Versionserhöhung"
+    "colBump": "Versionserhöhung",
+    "colVersion": "Version"
   },
   "sources": {
     "header": "Dokumentverknüpfung",
@@ -450,7 +461,11 @@
     "resinkSuccess": "Wissen erfolgreich erneut gespeichert",
     "resinkFailed": "Erneutes Speichern fehlgeschlagen",
     "sinkBlocked": "Wissensspeicherung blockiert: Kein LLM konfiguriert. Zugangsdaten in der KI-Konfiguration hinterlegen.",
-    "sinkFailed": "Wissensspeicherung fehlgeschlagen; Abschluss wiederholen oder erneut speichern"
+    "sinkFailed": "Wissensspeicherung fehlgeschlagen; Abschluss wiederholen oder erneut speichern",
+    "loadForbidden": "Keine Berechtigung, Wissenseinträge anzuzeigen",
+    "loadServerError": "Wissensbasis konnte nicht geladen werden, bitte später erneut versuchen",
+    "loadFailed": "Wissensbasis konnte nicht geladen werden, bitte später erneut versuchen",
+    "reload": "Neu laden"
   },
   "lateral": {
     "title": "Warnung zur Übertragung auf andere Produkte",
@@ -480,7 +495,11 @@
     "d7": "D7-Aktionsprotokoll",
     "gate": {
       "title": "Entscheidung des Dokumenten-Gates",
-      "decision": { "passed": "Bestanden", "blocked": "Blockiert", "deferred": "Zurückgestellt" },
+      "decision": {
+        "passed": "Bestanden",
+        "blocked": "Blockiert",
+        "deferred": "Zurückgestellt"
+      },
       "decisionId": "ID der Gate-Entscheidung",
       "revision": "Gate-Stand",
       "decidedBy": "Entschieden von",
@@ -541,5 +560,74 @@
       "passed": "Verifizierung bestanden",
       "failed": "Verifizierung nicht bestanden"
     }
+  },
+  "d3": {
+    "superseded": "Durch einen neueren Lauf ersetzt, bitte neu laden",
+    "blocked": "Keine LLM-Zugangsdaten konfiguriert, Erzeugung blockiert",
+    "stale": "Letzte Erzeugung hat das Zeitlimit überschritten, bitte erneut versuchen",
+    "reportFailed": "Erzeugung fehlgeschlagen",
+    "loadRunsFailed": "Läufe konnten nicht geladen werden",
+    "loadSnapshotsFailed": "Snapshots konnten nicht geladen werden",
+    "loadReportFailed": "Bericht konnte nicht geladen werden",
+    "loadAdviceFailed": "Vorschläge konnten nicht geladen werden",
+    "loadAdoptionsFailed": "Übernahmen konnten nicht geladen werden",
+    "loadExecutionsFailed": "Umsetzungsnachweise konnten nicht geladen werden",
+    "importSuccess": "Import erfolgreich",
+    "importFailed": "Import fehlgeschlagen",
+    "reportGenerated": "Bericht wird erzeugt",
+    "reportGenerateFailed": "Berichterzeugung fehlgeschlagen",
+    "adviceNeedsReport": "Vor den Vorschlägen muss zuerst ein Auswirkungsbericht erzeugt werden",
+    "adviceGenerated": "Vorschläge werden erzeugt",
+    "adviceGenerateFailed": "Erzeugung der Vorschläge fehlgeschlagen",
+    "acceptSuccess": "Übernommen",
+    "acceptFailed": "Übernahme fehlgeschlagen",
+    "rejectSuccess": "Abgelehnt",
+    "rejectFailed": "Ablehnen fehlgeschlagen",
+    "measureRequired": "Bitte Maßnahme eingeben",
+    "executionAdded": "Umsetzungsnachweis hinzugefügt",
+    "executionAddFailed": "Umsetzungsnachweis konnte nicht hinzugefügt werden",
+    "executionUpdateFailed": "Umsetzungsnachweis konnte nicht aktualisiert werden",
+    "runFailed": "Lauf fehlgeschlagen",
+    "runRunning": "Läuft",
+    "title": "D3 Sofortmaßnahmen",
+    "import": "Importieren",
+    "selectRun": "Lauf wählen",
+    "currentRun": "Aktueller Lauf",
+    "runLabel": "Lauf",
+    "snapshotsTitle": "Daten-Snapshots",
+    "recordCount": "Anzahl Datensätze",
+    "reportTitle": "Auswirkungsbericht",
+    "riskLevel": "Risikostufe",
+    "riskFloor": "Untergrenze",
+    "customerImpact": "Kundenauswirkung",
+    "supersededHint": "Der aktuelle Lauf wurde durch einen neuen Import ersetzt; bitte wechseln oder neu importieren und erneut versuchen",
+    "reportFailedHint": "Zum Wiederholen unten auf die Schaltfläche klicken",
+    "noReport": "Noch kein Bericht erzeugt oder letzte Erzeugung fehlgeschlagen. Zum Erzeugen/Wiederholen unten klicken.",
+    "generateReport": "Bericht erzeugen",
+    "retryReport": "Berichterzeugung wiederholen",
+    "regenerateReport": "Neu erzeugen",
+    "adviceTitle": "KI-Vorschläge",
+    "accept": "Übernehmen",
+    "reject": "Ablehnen",
+    "retryAdvice": "Vorschläge erneut erzeugen",
+    "generateAdvice": "Vorschläge erzeugen",
+    "regenerateAdvice": "Vorschläge neu erzeugen",
+    "adoptionsTitle": "Übernahmen",
+    "executionsTitle": "Umsetzungsnachweise",
+    "evidenceLink": "Nachweis",
+    "status": {
+      "in_progress": "In Bearbeitung",
+      "completed": "Abgeschlossen",
+      "pending": "Ausstehend",
+      "failed": "Fehlgeschlagen"
+    },
+    "addExecution": "Umsetzungsnachweis hinzufügen",
+    "acceptAdviceTitle": "Vorschlag übernehmen",
+    "adoptedTextLabel": "Übernommener Text",
+    "rejectAdviceTitle": "Vorschlag ablehnen",
+    "rejectReasonLabel": "Ablehnungsgrund",
+    "addExecutionTitle": "Umsetzungsnachweis hinzufügen",
+    "executionMeasureLabel": "Maßnahme",
+    "evidenceUrlLabel": "Nachweis-URL"
   }
 }

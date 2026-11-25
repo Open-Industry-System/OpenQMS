@@ -191,7 +191,7 @@ function makeDoc(fmeaType: "PFMEA" | "DFMEA", stepFuncClass: string, fmClass: st
     { id: "ps", type: "ProcessStep", name: "贴装", process_number: "OP10", ...Z } as GraphNode,
     psf,
     fm,
-    { id: "fe", type: "FailureEffect", name: "功能丧失", severity: 8 } as GraphNode,
+    { id: "fe", type: "FailureEffect", name: "Function loss", severity: 8 } as GraphNode,
     { id: "fc", type: "FailureCause", name: "吸嘴磨损", occurrence: 4 } as GraphNode,
     { id: "pc", type: "PreventionControl", name: "校准" } as GraphNode,
     { id: "dc", type: "DetectionControl", name: "AOI", detection: 3 } as GraphNode,
@@ -339,10 +339,10 @@ describe("FMEAEditorPage Class column", () => {
     });
     renderEditor();
 
-    await screen.findByText("新增产品特性");
-    fireEvent.click(screen.getByText("新增产品特性"));
-    fireEvent.change(screen.getByLabelText("特性名称"), { target: { value: "本地偏移量" } });
-    fireEvent.click(screen.getByRole("button", { name: "确认特性" }));
+    await screen.findByText("Add Product characteristic");
+    fireEvent.click(screen.getByText("Add Product characteristic"));
+    fireEvent.change(screen.getByLabelText("Characteristic name"), { target: { value: "本地偏移量" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm characteristic" }));
     fireEvent.click(screen.getByRole("button", { name: /actions\.save/i }));
 
     await waitFor(() => expect(screen.getByTestId("conflict-resolution")).toHaveTextContent("conflict:characteristics"));
@@ -415,7 +415,7 @@ describe("FMEAEditorPage Class column", () => {
       timeframe: "2026-Q3",
       tool: "SMT 产线",
       task: "贴装工艺",
-      trend: "无",
+      trend: "none",
     };
     const doc = makeDoc("PFMEA", "CC", "");
     doc.graph_data = { ...doc.graph_data, wizardScope };
