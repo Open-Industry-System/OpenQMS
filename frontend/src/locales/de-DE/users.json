@@ -1,0 +1,38 @@
+{
+  "title": "Benutzerverwaltung",
+  "create": "Benutzer anlegen",
+  "edit": "Bearbeiten",
+  "deactivate": "Deaktivieren",
+  "activate": "Aktivieren",
+  "delete": "Löschen",
+  "resetPassword": "Passwort zurücksetzen",
+  "editModalTitle": "Benutzer bearbeiten",
+  "noDefaultFactory": "Keines",
+  "passwordHint": "Leer lassen, um es nicht zu ändern; mind. 8 Zeichen mit Groß-/Kleinbuchstaben, Ziffer und Sonderzeichen",
+  "confirmDeleteTitle": "Benutzer löschen",
+  "confirmDeleteContent": "Endgültiges Löschen kann nicht rückgängig gemacht werden. Hat der Benutzer verknüpfte Geschäftsdaten, schlägt das Löschen fehl – deaktivieren Sie ihn stattdessen.",
+  "cannotDeactivateSelf": "Sie können sich nicht selbst deaktivieren",
+  "cannotDeleteSelf": "Sie können sich nicht selbst löschen",
+  "actions": "Aktionen",
+  "fields": {
+    "username": "Benutzername",
+    "password": "Passwort",
+    "display_name": "Anzeigename",
+    "email": "E-Mail",
+    "role_key": "Rolle",
+    "is_active": "Status",
+    "factories": "Zugängliche Werke",
+    "defaultFactory": "Standardwerk"
+  },
+  "createModalTitle": "Benutzer anlegen",
+  "messages": {
+    "created": "Benutzer angelegt",
+    "createFailed": "Anlegen fehlgeschlagen",
+    "updated": "Benutzer aktualisiert",
+    "updateFailed": "Aktualisierung fehlgeschlagen",
+    "deleted": "Benutzer gelöscht",
+    "deleteFailed": "Löschen fehlgeschlagen"
+  },
+  "active": "Aktiv",
+  "inactive": "Inaktiv"
+}

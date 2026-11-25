@@ -1,0 +1,146 @@
+{
+  "pageTitle": {
+    "list": "Managementbewertung",
+    "detail": "Details der Managementbewertung"
+  },
+  "pageSubtitle": {
+    "list": "Pläne für die Managementbewertung der Qualität",
+    "detail": ""
+  },
+  "filter": {
+    "statusPlaceholder": "Nach Status filtern"
+  },
+  "status": {
+    "review": {
+      "draft": "Entwurf",
+      "data_collected": "Daten erfasst",
+      "in_review": "In Bewertung",
+      "closed": "Geschlossen"
+    },
+    "report": {
+      "none": "Nicht erstellt",
+      "draft": "Entwurf",
+      "final": "Final"
+    },
+    "output": {
+      "pending": "Ausstehend",
+      "in_progress": "In Bearbeitung",
+      "completed": "Verifizierung ausstehend",
+      "verified": "Verifiziert"
+    }
+  },
+  "category": {
+    "improvement_opportunity": "Verbesserungspotenzial",
+    "system_change": "Systemänderung",
+    "resource_need": "Ressourcenbedarf"
+  },
+  "dataSource": {
+    "previousReviewActions": "1. Maßnahmen aus vorherigen Managementbewertungen",
+    "qualityGoals": "2. Erreichung der Qualitätsziele",
+    "internalAudits": "3. Auditergebnisse",
+    "capaStats": "4. Nichtkonformitäten und Korrekturmaßnahmen",
+    "fmeaRisks": "5. FMEA-Risikoanalyse",
+    "spcCapability": "6. SPC-Prozessfähigkeit",
+    "supplierPerformance": "7. Leistung externer Lieferanten",
+    "externalFactors": "8. Änderungen interner und externer Themen",
+    "resourceAdequacy": "9. Angemessenheit der Ressourcen",
+    "customerSatisfaction": "10. Kundenzufriedenheit und Rückmeldungen",
+    "equipmentMonitoring": "11. Überwachungs- und Messergebnisse (Anlagen)",
+    "copq": "12. Kosten schlechter Qualität",
+    "manufacturingFeasibility": "13. Bewertung der Herstellbarkeit",
+    "manualTag": "Manuelle Eingabe",
+    "pendingModule": "Wird nach Aktivierung des Moduls automatisch umgestellt",
+    "noData": "Keine Daten"
+  },
+  "card": {
+    "dataPackage": "Eingabedatenpaket der Bewertung",
+    "meetingMinutes": "Besprechungsprotokoll",
+    "outputs": "Ergebnisse & Maßnahmen der Bewertung",
+    "report": "Bericht zur Managementbewertung",
+    "historyVersions": "Versionsverlauf",
+    "reviewList": "Bewertungsliste"
+  },
+  "table": {
+    "docNo": "Dok.-Nr.",
+    "title": "Titel",
+    "reviewDate": "Bewertungsdatum",
+    "productLine": "Produktlinie",
+    "category": "Kategorie",
+    "description": "Beschreibung",
+    "dueDate": "Fälligkeitsdatum",
+    "status": "Status",
+    "operations": "Aktionen"
+  },
+  "actions": {
+    "newReview": "Neue Bewertung",
+    "collectData": "Daten erfassen",
+    "refreshData": "Daten aktualisieren",
+    "backToDraft": "Zurück zum Entwurf",
+    "startReview": "Bewertung starten",
+    "closeReview": "Bewertung schließen",
+    "reopenReview": "Wieder öffnen",
+    "addOutput": "Maßnahme hinzufügen",
+    "start": "Starten",
+    "complete": "Abschließen",
+    "verify": "Verifizieren",
+    "exportMarkdown": "Als Markdown exportieren",
+    "generateReport": "Bericht per KI erstellen",
+    "regenerate": "Neu erstellen",
+    "saveDraft": "Entwurf speichern",
+    "finalize": "Finalisieren & archivieren",
+    "reopenEdit": "Zur Bearbeitung wieder öffnen",
+    "restoreDraft": "Als Entwurf wiederherstellen",
+    "cancelPreview": "Vorschau abbrechen"
+  },
+  "form": {
+    "category": "Kategorie",
+    "description": "Beschreibung",
+    "dueDate": "Fälligkeitsdatum",
+    "verificationNotes": "Ergebnis der Verifizierung"
+  },
+  "modal": {
+    "addOutput": "Maßnahme hinzufügen",
+    "effectVerification": "Wirksamkeitsprüfung"
+  },
+  "report": {
+    "statusLabel": "Berichtsstatus: ",
+    "noReportData": "Keine Berichtsdaten. Auf „Bericht per KI erstellen“ klicken, um zu beginnen.",
+    "previewingVersion": "Vorschau der historischen Version v{{version}}",
+    "restoreConfirmTitle": "Als Entwurf wiederherstellen?",
+    "restoreConfirmContent": "Inhalt der Version v{{version}} als aktuellen Entwurf wiederherstellen? Der aktuelle Entwurf wird überschrieben.",
+    "regenerateConfirmTitle": "Neu erstellen bestätigen?",
+    "regenerateConfirmContent": "Beim Neuerstellen werden manuelle Änderungen im aktuellen Entwurf überschrieben."
+  },
+  "sectionEditor": {
+    "aiAnalysis": "KI-Analyse:",
+    "keyFindings": "Wichtigste Erkenntnisse:",
+    "recommendations": "Empfehlungen:",
+    "placeholder": "Manuelle Änderungen hier eingeben; sie haben beim Export Vorrang ..."
+  },
+  "descriptions": {
+    "title": "Thema der Bewertung",
+    "reviewDate": "Bewertungsdatum",
+    "actualDate": "Tatsächliches Datum",
+    "productLine": "Produktlinie",
+    "allPlants": "Alle Werke",
+    "location": "Ort"
+  },
+  "messages": {
+    "loadFailed": "Laden fehlgeschlagen",
+    "operationSuccess": "Vorgang erfolgreich",
+    "collectFailed": "Daten konnten nicht erfasst werden",
+    "saveDraftSuccess": "Entwurf gespeichert",
+    "saveDraftFailed": "Speichern fehlgeschlagen",
+    "finalizeSuccess": "Bericht finalisiert und archiviert",
+    "finalizeFailed": "Finalisieren fehlgeschlagen",
+    "reopenSuccess": "Bericht wieder geöffnet",
+    "reopenFailed": "Wieder öffnen fehlgeschlagen",
+    "exportFailed": "Export fehlgeschlagen",
+    "generateFailed": "Erstellung fehlgeschlagen",
+    "restoreSuccess": "Als Entwurf wiederhergestellt"
+  },
+  "confirm": {
+    "reopenReview": "Wiedereröffnen bestätigen?",
+    "deleteOutput": "Löschen bestätigen?"
+  }
+}

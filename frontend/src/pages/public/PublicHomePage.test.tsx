@@ -109,9 +109,9 @@ describe("PublicHomePage", () => {
     );
   });
 
-  it("switches the visible copy to Chinese", async () => {
+  it("switches the visible copy to German", async () => {
     renderPage();
-    fireEvent.click(screen.getByText("中文"));
-    expect(await screen.findByRole("heading", { name: "让质量数据，转化为可执行智能。" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Deutsch"));
+    expect(await screen.findByRole("heading", { name: "Qualitätsdaten in umsetzbares Wissen verwandeln." })).toBeInTheDocument();
   });
 });

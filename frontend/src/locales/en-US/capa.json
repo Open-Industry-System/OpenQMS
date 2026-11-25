@@ -62,7 +62,10 @@
     "d8Label": "Closure Confirmation",
     "supplierLoadFailed": "Failed to load suppliers",
     "supplier": "Supplier",
-    "supplierPlaceholder": "Select supplier"
+    "supplierPlaceholder": "Select supplier",
+    "documentNoPlaceholder": "e.g. 8D-2026-001",
+    "titlePlaceholder": "e.g. Solder defect complaint",
+    "problemDescriptionPlaceholder": "Briefly describe the problem (optional, used for smart recommendations)"
   },
   "messages": {
     "createSuccess": "8D report created",
@@ -153,7 +156,9 @@
     "linked": "Linked FMEA",
     "selectTitle": "Select Related FMEA",
     "searchPlaceholder": "Search FMEA document",
-    "failureModeSuffix": " (Failure Mode)"
+    "failureModeSuffix": " (Failure Mode)",
+    "changeFMEA": "Change FMEA link",
+    "linkFMEA": "Link FMEA"
   },
   "d4": {
     "title": "D4 Root Cause Recommendations",
@@ -218,7 +223,11 @@
     },
     "cause": "FMEA Cause",
     "selectCause": "Select failure cause",
-    "linkFmeaFirst": "Link an FMEA first"
+    "linkFmeaFirst": "Link an FMEA first",
+    "saveCause": "Save cause",
+    "clearCause": "Clear",
+    "editCause": "Edit cause",
+    "setCause": "Link cause"
   },
   "d5": {
     "title": "D5 Corrective Action Recommendations",
@@ -290,7 +299,8 @@
     "skipReasonPlaceholder": "Skip reason (optional)",
     "skipReasonEmpty": "No reason provided",
     "skipConfirm": "Confirm Skip and Advance",
-    "actionFailed": "Action save failed"
+    "actionFailed": "Action save failed",
+    "ruleSuggestions": "Rule engine prevention suggestions"
   },
   "draft": {
     "button": "AI Draft",
@@ -427,7 +437,8 @@
     "colSuggestion": "Update suggestion",
     "colStatus": "Status",
     "colCoverage": "Coverage",
-    "colBump": "Version bump"
+    "colBump": "Version bump",
+    "colVersion": "Version"
   },
   "sources": {
     "header": "Document Link",
@@ -450,7 +461,11 @@
     "resinkSuccess": "Knowledge resunk successfully",
     "resinkFailed": "Resink failed",
     "sinkBlocked": "Knowledge sink blocked: LLM is not configured. Set credentials in AI Config.",
-    "sinkFailed": "Knowledge sink failed; retry close or resink"
+    "sinkFailed": "Knowledge sink failed; retry close or resink",
+    "loadForbidden": "No permission to view knowledge entries",
+    "loadServerError": "Failed to load knowledge base, please try again later",
+    "loadFailed": "Failed to load knowledge base, please try again later",
+    "reload": "Reload"
   },
   "lateral": {
     "title": "Lateral Diffusion Alert",
@@ -480,7 +495,11 @@
     "d7": "D7 action records",
     "gate": {
       "title": "Document gate decision",
-      "decision": { "passed": "Passed", "blocked": "Blocked", "deferred": "Deferred" },
+      "decision": {
+        "passed": "Passed",
+        "blocked": "Blocked",
+        "deferred": "Deferred"
+      },
       "decisionId": "Gate decision ID",
       "revision": "Gate revision",
       "decidedBy": "Decided by",
@@ -541,5 +560,74 @@
       "passed": "Verification passed",
       "failed": "Verification failed"
     }
+  },
+  "d3": {
+    "superseded": "Superseded by a newer run, please refresh",
+    "blocked": "LLM credentials not configured, generation blocked",
+    "stale": "Last generation timed out, please retry",
+    "reportFailed": "Generation failed",
+    "loadRunsFailed": "Failed to load runs",
+    "loadSnapshotsFailed": "Failed to load snapshots",
+    "loadReportFailed": "Failed to load report",
+    "loadAdviceFailed": "Failed to load advice",
+    "loadAdoptionsFailed": "Failed to load adoptions",
+    "loadExecutionsFailed": "Failed to load executions",
+    "importSuccess": "Import successful",
+    "importFailed": "Import failed",
+    "reportGenerated": "Generating report",
+    "reportGenerateFailed": "Report generation failed",
+    "adviceNeedsReport": "An impact report must be generated before advice",
+    "adviceGenerated": "Generating advice",
+    "adviceGenerateFailed": "Advice generation failed",
+    "acceptSuccess": "Accepted",
+    "acceptFailed": "Accept failed",
+    "rejectSuccess": "Rejected",
+    "rejectFailed": "Reject failed",
+    "measureRequired": "Please enter a measure",
+    "executionAdded": "Execution record added",
+    "executionAddFailed": "Failed to add execution record",
+    "executionUpdateFailed": "Failed to update execution record",
+    "runFailed": "Run failed",
+    "runRunning": "Running",
+    "title": "D3 Interim Containment",
+    "import": "Import",
+    "selectRun": "Select run",
+    "currentRun": "Current run",
+    "runLabel": "Run",
+    "snapshotsTitle": "Data snapshots",
+    "recordCount": "Record count",
+    "reportTitle": "Impact report",
+    "riskLevel": "Risk level",
+    "riskFloor": "Floor",
+    "customerImpact": "Customer impact",
+    "supersededHint": "The current run was superseded by a new import; switch or re-import and retry",
+    "reportFailedHint": "Click the button below to retry",
+    "noReport": "No report generated yet, or the last attempt failed. Click below to generate/retry.",
+    "generateReport": "Generate report",
+    "retryReport": "Retry report generation",
+    "regenerateReport": "Regenerate",
+    "adviceTitle": "AI advice",
+    "accept": "Accept",
+    "reject": "Reject",
+    "retryAdvice": "Retry advice generation",
+    "generateAdvice": "Generate advice",
+    "regenerateAdvice": "Regenerate advice",
+    "adoptionsTitle": "Adoptions",
+    "executionsTitle": "Execution records",
+    "evidenceLink": "Evidence",
+    "status": {
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "pending": "Pending",
+      "failed": "Failed"
+    },
+    "addExecution": "Add execution record",
+    "acceptAdviceTitle": "Accept advice",
+    "adoptedTextLabel": "Adopted text",
+    "rejectAdviceTitle": "Reject advice",
+    "rejectReasonLabel": "Reject reason",
+    "addExecutionTitle": "Add execution record",
+    "executionMeasureLabel": "Measure",
+    "evidenceUrlLabel": "Evidence URL"
   }
 }

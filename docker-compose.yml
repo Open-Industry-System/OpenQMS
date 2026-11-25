@@ -179,7 +179,7 @@ services:
       AGENT_TASK_ATTACHMENT_STORAGE_ROOT: /var/lib/openqms/attachments
       AGENT_TASK_ATTACHMENT_CLAMAV_HOST: clamav
       AGENT_TASK_ATTACHMENT_CLAMAV_PORT: "3310"
-      AGENT_ATTACHMENT_BROWSER_NONCE: ${AGENT_ATTACHMENT_BROWSER_NONCE:?set by make agent-attachment-e2e}
+      AGENT_ATTACHMENT_BROWSER_NONCE: ${AGENT_ATTACHMENT_BROWSER_NONCE:-}
     volumes:
       - agent_attachment_e2e_storage:/var/lib/openqms/attachments
       - agent_attachment_e2e_runtime:/var/run/openqms/agent-attachment-e2e

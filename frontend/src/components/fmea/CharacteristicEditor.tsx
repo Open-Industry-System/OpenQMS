@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Button, Card, Input, Select, Space, Typography } from "antd";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { Characteristic } from "../../types";
+import { tr, useTr } from "../../i18n/tr";
 
 export interface CharacteristicEditorProps {
   value: Characteristic[] | null | undefined;
@@ -30,12 +31,13 @@ export default function CharacteristicEditor({
   readOnly,
   onChange,
 }: CharacteristicEditorProps) {
+  useTr();
   const [draft, setDraft] = useState<DraftCharacteristic | null>(null);
   const [draftNameError, setDraftNameError] = useState(false);
   const [edits, setEdits] = useState<Record<string, Partial<Characteristic>>>({});
   const characteristics = value ?? [];
   const legacy = value == null;
-  const kindLabel = allowedKind === "product" ? "产品特性" : "过程特性";
+  const kindLabel = allowedKind === "product" ? tr("Produktmerkmal", "Product characteristic") : tr("Prozessmerkmal", "Process characteristic");
 
   const updateDraft = <K extends keyof DraftCharacteristic>(key: K, nextValue: DraftCharacteristic[K]) => {
     if (!draft) return;
@@ -84,7 +86,7 @@ export default function CharacteristicEditor({
         <Alert
           type="info"
           showIcon
-          message="历史功能字段仅供参考，请确认后录入结构化特性。"
+          message={tr("Historische Funktionsfelder dienen nur als Referenz; bitte prüfen und strukturierte Merkmale erfassen.", "Legacy function fields are for reference only; please review and enter structured characteristics.")}
         />
       )}
       {characteristics.map((characteristic) => {
@@ -94,7 +96,7 @@ export default function CharacteristicEditor({
             <Space direction="vertical" size={6} style={{ width: "100%" }}>
               <Typography.Text strong>{kindLabel}</Typography.Text>
               <Input
-                aria-label="特性名称"
+                aria-label={tr("Merkmalsname", "Characteristic name")}
                 value={current.name}
                 status={!current.name.trim() ? "error" : undefined}
                 aria-invalid={!current.name.trim()}
@@ -102,9 +104,9 @@ export default function CharacteristicEditor({
                 onChange={(event) => setExistingEdit(characteristic.id, { name: event.target.value })}
                 onBlur={() => commitExisting(characteristic)}
               />
-              {!current.name.trim() && <Typography.Text type="danger">请输入特性名称</Typography.Text>}
+              {!current.name.trim() && <Typography.Text type="danger">{tr("Bitte Merkmalsnamen eingeben", "Please enter a characteristic name")}</Typography.Text>}
               <Input
-                aria-label="规范／公差"
+                aria-label={tr("Spezifikation / Toleranz", "Specification / tolerance")}
                 value={current.specification ?? ""}
                 disabled={readOnly}
                 onChange={(event) => setExistingEdit(characteristic.id, { specification: event.target.value || null })}
@@ -112,7 +114,7 @@ export default function CharacteristicEditor({
               />
               <Space wrap>
                 <Input
-                  aria-label="单位"
+                  aria-label={tr("Einheit", "Unit")}
                   value={current.unit ?? ""}
                   disabled={readOnly}
                   onChange={(event) => setExistingEdit(characteristic.id, { unit: event.target.value || null })}
@@ -120,11 +122,11 @@ export default function CharacteristicEditor({
                   style={{ width: 96 }}
                 />
                 <Select
-                  aria-label="特殊分类"
+                  aria-label={tr("Besondere Klassifizierung", "Special classification")}
                   value={current.classification ?? undefined}
                   disabled={readOnly}
                   allowClear
-                  placeholder="特殊分类"
+                  placeholder={tr("Besondere Klassifizierung", "Special classification")}
                   options={[{ value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
                   onChange={(classification) => {
                     onChange(characteristics.map((item) => item.id === characteristic.id ? { ...item, classification: classification ?? null } : item));
@@ -132,7 +134,7 @@ export default function CharacteristicEditor({
                   style={{ minWidth: 110 }}
                 />
                 <Input
-                  aria-label="依据"
+                  aria-label={tr("Grundlage", "Basis")}
                   value={current.reference ?? ""}
                   disabled={readOnly}
                   onChange={(event) => setExistingEdit(characteristic.id, { reference: event.target.value || null })}
@@ -142,11 +144,11 @@ export default function CharacteristicEditor({
               </Space>
               {allowedKind === "process" && (
                 <Select
-                  aria-label="关联产品特性"
+                  aria-label={tr("Verknüpftes Produktmerkmal", "Linked product characteristic")}
                   mode="multiple"
                   value={current.related_product_characteristic_ids}
                   disabled={readOnly}
-                  placeholder="关联产品特性"
+                  placeholder={tr("Verknüpftes Produktmerkmal", "Linked product characteristic")}
                   options={productOptions.map((option) => ({ value: option.id, label: option.name }))}
                   onChange={(relatedProductCharacteristicIds) => {
                     onChange(characteristics.map((item) => item.id === characteristic.id ? {
@@ -162,10 +164,10 @@ export default function CharacteristicEditor({
                   danger
                   type="text"
                   icon={<DeleteOutlined />}
-                  aria-label={`删除${kindLabel}`}
+                  aria-label={tr(`${kindLabel} löschen`, `Delete ${kindLabel}`)}
                   onClick={() => onChange(characteristics.filter((item) => item.id !== characteristic.id))}
                 >
-                  删除
+                  {tr("Löschen", "Delete")}
                 </Button>
               )}
             </Space>
@@ -175,66 +177,66 @@ export default function CharacteristicEditor({
       {draft && (
         <Card size="small" style={{ marginBottom: 0 }}>
           <Space direction="vertical" size={6} style={{ width: "100%" }}>
-            <Typography.Text strong>新增{kindLabel}</Typography.Text>
+            <Typography.Text strong>{tr(`${kindLabel} hinzufügen`, `Add ${kindLabel}`)}</Typography.Text>
             <Input
-              aria-label="特性名称"
+              aria-label={tr("Merkmalsname", "Characteristic name")}
               value={draft.name}
               status={draftNameError ? "error" : undefined}
-              placeholder="请输入特性名称"
+              placeholder={tr("Bitte Merkmalsnamen eingeben", "Please enter a characteristic name")}
               onChange={(event) => updateDraft("name", event.target.value)}
             />
-            {draftNameError && <Typography.Text type="danger">请输入特性名称</Typography.Text>}
+            {draftNameError && <Typography.Text type="danger">{tr("Bitte Merkmalsnamen eingeben", "Please enter a characteristic name")}</Typography.Text>}
             <Input
-              aria-label="规范／公差"
+              aria-label={tr("Spezifikation / Toleranz", "Specification / tolerance")}
               value={draft.specification ?? ""}
-              placeholder="规范／公差"
+              placeholder={tr("Spezifikation / Toleranz", "Specification / tolerance")}
               onChange={(event) => updateDraft("specification", event.target.value || null)}
             />
             <Space wrap>
               <Input
-                aria-label="单位"
+                aria-label={tr("Einheit", "Unit")}
                 value={draft.unit ?? ""}
-                placeholder="单位"
+                placeholder={tr("Einheit", "Unit")}
                 onChange={(event) => updateDraft("unit", event.target.value || null)}
                 style={{ width: 96 }}
               />
               <Select
-                aria-label="特殊分类"
+                aria-label={tr("Besondere Klassifizierung", "Special classification")}
                 value={draft.classification ?? undefined}
                 allowClear
-                placeholder="特殊分类"
+                placeholder={tr("Besondere Klassifizierung", "Special classification")}
                 options={[{ value: "CC", label: "CC" }, { value: "SC", label: "SC" }]}
                 onChange={(classification) => updateDraft("classification", classification ?? null)}
                 style={{ minWidth: 110 }}
               />
               <Input
-                aria-label="依据"
+                aria-label={tr("Grundlage", "Basis")}
                 value={draft.reference ?? ""}
-                placeholder="依据"
+                placeholder={tr("Grundlage", "Basis")}
                 onChange={(event) => updateDraft("reference", event.target.value || null)}
                 style={{ minWidth: 140 }}
               />
             </Space>
             {allowedKind === "process" && (
               <Select
-                aria-label="关联产品特性"
+                aria-label={tr("Verknüpftes Produktmerkmal", "Linked product characteristic")}
                 mode="multiple"
                 value={draft.related_product_characteristic_ids}
-                placeholder="关联产品特性"
+                placeholder={tr("Verknüpftes Produktmerkmal", "Linked product characteristic")}
                 options={productOptions.map((option) => ({ value: option.id, label: option.name }))}
                 onChange={(relatedProductCharacteristicIds) => updateDraft("related_product_characteristic_ids", relatedProductCharacteristicIds)}
               />
             )}
             <Space>
-              <Button size="small" type="primary" onClick={commitDraft}>确认特性</Button>
-              <Button size="small" onClick={() => { setDraft(null); setDraftNameError(false); }}>取消</Button>
+              <Button size="small" type="primary" onClick={commitDraft}>{tr("Merkmal bestätigen", "Confirm characteristic")}</Button>
+              <Button size="small" onClick={() => { setDraft(null); setDraftNameError(false); }}>{tr("Abbrechen", "Cancel")}</Button>
             </Space>
           </Space>
         </Card>
       )}
       {!readOnly && !draft && (
         <Button size="small" icon={<PlusOutlined />} onClick={() => setDraft(emptyDraft(allowedKind))}>
-          新增{kindLabel}
+          {tr(`${kindLabel} hinzufügen`, `Add ${kindLabel}`)}
         </Button>
       )}
     </Space>

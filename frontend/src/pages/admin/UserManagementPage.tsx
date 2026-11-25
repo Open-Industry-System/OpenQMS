@@ -8,6 +8,25 @@ import {
 } from "../../api/auth";
 import { useAuthStore } from "../../store/authStore";
 import type { User, AssignableRoleOption, RegisterRequest, UserUpdateRequest, Factory } from "../../types";
+import { tr } from "../../i18n/tr";
+
+const ROLE_LABELS_DE: Record<string, string> = {
+  admin: "Systemadministrator",
+  group_admin: "Konzernadministrator",
+  manager: "Qualitätsmanager",
+  quality_engineer: "Qualitätsingenieur",
+  engineer: "Qualitätsingenieur",
+  viewer: "Nur-Lese-Benutzer",
+  customer_qe: "Kundenqualitätsingenieur",
+  supplier_qe: "Lieferantenqualitätsingenieur",
+  field_qe: "Fertigungsqualitätsingenieur",
+  planning_qe: "Qualitätsingenieur Vorausplanung",
+  auditor: "Auditor",
+};
+
+function roleLabel(r: AssignableRoleOption): string {
+  return tr(ROLE_LABELS_DE[r.role_key] ?? r.name_en ?? r.role_key, r.name_en || r.role_key);
+}
 
 /**
  * 把后端 422/400 错误转成可渲染字符串（同创建弹窗）。避免 React 因对象子节点崩溃。
@@ -194,7 +213,7 @@ export default function UserManagementPage() {
           <Form.Item name="display_name" label={t("fields.display_name")}><Input /></Form.Item>
           <Form.Item name="email" label={t("fields.email")}><Input /></Form.Item>
           <Form.Item name="role_key" label={t("fields.role_key")} rules={[{ required: true }]}>
-            <Select options={roles.map((r) => ({ value: r.role_key, label: r.name_zh || r.role_key }))} />
+            <Select options={roles.map((r) => ({ value: r.role_key, label: roleLabel(r) }))} />
           </Form.Item>
         </Form>
       </Modal>
@@ -207,7 +226,7 @@ export default function UserManagementPage() {
           <Form.Item name="display_name" label={t("fields.display_name")}><Input /></Form.Item>
           <Form.Item name="email" label={t("fields.email")}><Input /></Form.Item>
           <Form.Item name="role_key" label={t("fields.role_key")} rules={[{ required: true }]}>
-            <Select options={roles.map((r) => ({ value: r.role_key, label: r.name_zh || r.role_key }))} />
+            <Select options={roles.map((r) => ({ value: r.role_key, label: roleLabel(r) }))} />
           </Form.Item>
           <Form.Item name="is_active" label={t("fields.is_active")} valuePropName="checked"><Switch /></Form.Item>
           <Form.Item name="factory_ids" label={t("fields.factories")}>

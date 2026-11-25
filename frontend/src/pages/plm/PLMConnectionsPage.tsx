@@ -17,7 +17,7 @@ import { usePermission } from "../../hooks/usePermission";
 import { PageShell, DataCard, StatusBadge } from "../../components/design";
 
 export default function PLMConnectionsPage() {
-  const { t } = useTranslation("plm");
+  const { t, i18n } = useTranslation("plm");
   const { t: tc } = useTranslation("common");
   const { message, modal: modalConfirm } = App.useApp();
   const { canCreate, canEdit, canAdmin } = usePermission();
@@ -190,7 +190,7 @@ export default function PLMConnectionsPage() {
       dataIndex: "created_at",
       key: "created_at",
       width: 170,
-      render: (v: string) => new Date(v).toLocaleString("zh-CN"),
+      render: (v: string) => new Date(v).toLocaleString(i18n.language),
     },
     {
       title: t("connections.columns.actions"),

@@ -24,15 +24,15 @@ def test_main_demo_builders_keep_dcdc_characteristics_independent_and_unclassifi
     assert offset == [{
         "id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID),
         "kind": "product",
-        "name": "元器件贴装偏移量",
-        "specification": "≤0.05 mm（模拟演示值）",
+        "name": "Bestückversatz der Bauteile",
+        "specification": "≤0,05 mm (simulierter Demowert)",
         "classification": None,
     }]
     assert force == [{
         "id": str(DCDC_PLACEMENT_FORCE_CHARACTERISTIC_ID),
         "kind": "process",
-        "name": "贴装力",
-        "specification": "3.0±0.5 N（模拟演示值）",
+        "name": "Bestückkraft",
+        "specification": "3,0±0,5 N (simulierter Demowert)",
         "classification": None,
         "related_product_characteristic_ids": [str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID)],
     }]
@@ -58,8 +58,8 @@ def test_main_demo_pfmea_maps_to_two_distinct_rows_with_fixed_source_identity():
     assert result.issues == ()
     assert [(item.fields["product_characteristic"], item.fields["process_characteristic"])
             for item in result.items] == [
-        ("元器件贴装偏移量", None),
-        (None, "贴装力"),
+        ("Bestückversatz der Bauteile", None),
+        (None, "Bestückkraft"),
     ]
     assert [item.fields["special_class"] for item in result.items] == [None, None]
     assert [item.source_ref.function_id for item in result.items] == ["psf_1", "wef_1"]
@@ -75,18 +75,18 @@ def test_main_demo_control_plan_rows_are_complete_but_not_approved_provenance():
     assert len(rows) == 2
     assert all(row["source_fmea_node_id"] == row["source_characteristic_ref"]["step_id"] for row in rows)
     offset, force = rows
-    assert offset["product_characteristic"] == "元器件贴装偏移量"
+    assert offset["product_characteristic"] == "Bestückversatz der Bauteile"
     assert offset["process_characteristic"] is None
-    assert offset["evaluation_method"] == "在线 AOI 检测元器件位置"
-    assert offset["sample_size"] == "每件"
-    assert offset["sample_frequency"] == "每件"
-    assert "隔离本批次" in offset["reaction_plan"]
+    assert offset["evaluation_method"] == "Inline-AOI-Prüfung der Bauteilposition"
+    assert offset["sample_size"] == "Jedes Teil"
+    assert offset["sample_frequency"] == "Jedes Teil"
+    assert "Charge sperren" in offset["reaction_plan"]
     assert force["product_characteristic"] is None
-    assert force["process_characteristic"] == "贴装力"
-    assert force["evaluation_method"] == "贴装设备贴装力传感器监控"
-    assert force["sample_size"] == "每次贴装动作"
-    assert force["sample_frequency"] == "每次贴装动作"
-    assert "自上次合格确认以来产品" in force["reaction_plan"]
+    assert force["process_characteristic"] == "Bestückkraft"
+    assert force["evaluation_method"] == "Überwachung der Bestückkraft per Sensor"
+    assert force["sample_size"] == "Jeder Bestückvorgang"
+    assert force["sample_frequency"] == "Jeder Bestückvorgang"
+    assert "seit letzter i.O.-Bestätigung" in force["reaction_plan"]
     assert all(row["special_class"] is None for row in rows)
     assert all(row["source_characteristic_ref"]["accepted_source_version_id"] is None for row in rows)
 
@@ -104,10 +104,10 @@ def test_dcdc_design_example_reuses_only_declared_demo_product_requirement():
     assert product_characteristics == [{
         "id": "00000000-0000-0000-0000-00000000d001",
         "kind": "product",
-        "name": "元器件贴装偏移量",
-        "specification": "≤0.05 mm（模拟演示值）",
+        "name": "Bestückversatz der Bauteile",
+        "specification": "≤0,05 mm (simulierter Demowert)",
         "classification": None,
-        "reference": "演示需求，待确认",
+        "reference": "Demoanforderung, zu bestätigen",
     }]
     assert all(node.get("type") not in {"ProcessStep", "ProcessWorkElement"}
                for node in graph["nodes"] if node["id"] in {"d_sys_1", "d_sub_1", "d_cmp_1"})
@@ -173,7 +173,7 @@ def test_demo_product_lines_include_an_active_bms_scope_with_existing_type():
 
     assert next(line for line in lines if line["code"] == "BMS-DEMO") == {
         "code": "BMS-DEMO",
-        "name": "BMS 独立演示产品线",
+        "name": "BMS – eigenständige Demo-Produktlinie",
         "product_type_code": "POWER",
         "factory_id": factory_id,
         "is_active": True,

@@ -18,11 +18,11 @@ function candidate() {
 async function flush() { await act(async () => { for (let i=0;i<8;i++) await Promise.resolve(); }); }
 async function open() {
   await flush();
-  fireEvent.click(screen.getByRole('button', { name: '正文脱敏候选预览' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Redacted text preview' }));
   await flush();
 }
 async function generate() {
-  fireEvent.click(screen.getByRole('button', { name: '生成受限候选' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Generate restricted candidate' }));
   await flush();
 }
 beforeEach(() => {
@@ -54,13 +54,13 @@ it('does no body fetch before explicit generation and renders text without editi
   await generate();
   expect(screen.getByText(/受限技术叙述/)).toBeVisible();
   expect(document.querySelector('img[src="x"]')).toBeNull();
-  expect(screen.queryByRole('button', { name: /替换|采纳|保存/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Replace|Adopt|Save/ })).toBeNull();
   expect(writes).not.toHaveBeenCalled();
   view.unmount();
 });
 it.each(['network','version','denial'])('withdraws content on %s uncertainty at the next version check', async damage => {
   render(<D4TextRedactionPreview reportId={id} />); await open();
-  fireEvent.change(screen.getByRole('textbox', { name: '显式替换词' }), { target: { value: 'PRIVATE TERM' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Explicit replacement terms' }), { target: { value: 'PRIVATE TERM' } });
   await generate();
   expect(screen.getByText(/受限技术叙述/)).toBeVisible();
   version = async () => {
@@ -69,18 +69,18 @@ it.each(['network','version','denial'])('withdraws content on %s uncertainty at 
   };
   await act(() => vi.advanceTimersByTimeAsync(2000)); await flush();
   expect(screen.queryByText(/受限技术叙述/)).toBeNull();
-  expect(screen.getByRole('textbox', { name: '显式替换词' })).toHaveValue('');
+  expect(screen.getByRole('textbox', { name: 'Explicit replacement terms' })).toHaveValue('');
 });
 it('expires independently of network progress and clears terms on close', async () => {
   render(<D4TextRedactionPreview reportId={id} />); await open();
-  fireEvent.change(screen.getByRole('textbox', { name: '显式替换词' }), { target: { value: 'PRIVATE TERM' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Explicit replacement terms' }), { target: { value: 'PRIVATE TERM' } });
   await generate();
   version = () => new Promise(() => {});
   await act(() => vi.advanceTimersByTimeAsync(30001)); await flush();
   expect(screen.queryByText(/受限技术叙述/)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '关闭预览' })); await flush();
+  fireEvent.click(screen.getByRole('button', { name: 'Close preview' })); await flush();
   await open();
-  expect(screen.getByRole('textbox', { name: '显式替换词' })).toHaveValue('');
+  expect(screen.getByRole('textbox', { name: 'Explicit replacement terms' })).toHaveValue('');
 });
 it('client clock skew cannot extend the local 30 second candidate lifetime', async () => {
   create = async () => {
@@ -96,11 +96,11 @@ it('client clock skew cannot extend the local 30 second candidate lifetime', asy
 });
 it('draft changes clear content and late old responses cannot republish after a target change', async () => {
   const view = render(<D4TextRedactionPreview reportId={id} />); await open(); await generate();
-  fireEvent.change(screen.getByRole('textbox', { name: '显式替换词' }), { target: { value: 'NEW' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Explicit replacement terms' }), { target: { value: 'NEW' } });
   expect(screen.queryByText(/受限技术叙述/)).toBeNull();
   let release!: (value: unknown) => void;
   create = () => new Promise(resolve => { release = resolve; });
-  fireEvent.click(screen.getByRole('button', { name: '生成受限候选' })); await flush();
+  fireEvent.click(screen.getByRole('button', { name: 'Generate restricted candidate' })); await flush();
   view.rerender(<D4TextRedactionPreview reportId="00000000-0000-4000-8000-000000000002" />);
   await flush(); release(candidate()); await flush();
   expect(screen.queryByText(/受限技术叙述/)).toBeNull();

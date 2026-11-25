@@ -1,0 +1,213 @@
+{
+  "title": "SPC-Regelkarte",
+  "list": {
+    "title": "SPC-Regelkarten",
+    "totalCharacteristics": "Prüfmerkmale gesamt",
+    "lockedLimits": "Grenzen fixiert",
+    "unlockedLimits": "Grenzen automatisch berechnet",
+    "newBatchesThisWeek": "Neue Chargen diese Woche",
+    "newCharacteristic": "Neues Prüfmerkmal",
+    "searchPlaceholder": "Prozessname suchen",
+    "view": "Anzeigen",
+    "confirmDelete": "Wirklich löschen?",
+    "columns": {
+      "characteristic_name": "Merkmalsname",
+      "process_name": "Prozessname",
+      "chart_type": "Kartentyp",
+      "spec_upper": "OSG",
+      "spec_lower": "USG",
+      "control_limits_locked": "Status Eingriffsgrenzen",
+      "updated_at": "Aktualisiert am"
+    },
+    "limitStatus": {
+      "locked": "Fixiert",
+      "auto": "Automatisch berechnet"
+    },
+    "form": {
+      "process_name": "Prozessname",
+      "processPlaceholder": "z. B. SMT-Löten",
+      "characteristic_name": "Merkmalsname",
+      "characteristicPlaceholder": "z. B. Lothöhe",
+      "chart_type": "Kartentyp",
+      "subgroup_size": "Stichprobenumfang",
+      "spec_lower": "USG",
+      "spec_upper": "OSG",
+      "target_value": "Sollwert",
+      "fixedSampleAlert": "Bei NP-/C-Karten muss der Stichprobenumfang je Charge konstant bleiben."
+    },
+    "createSuccess": "Prüfmerkmal angelegt",
+    "createFailed": "Anlegen fehlgeschlagen",
+    "deleteSuccess": "Erfolgreich gelöscht",
+    "deleteFailed": "Löschen fehlgeschlagen"
+  },
+  "chartType": {
+    "xbar_r": "X̄-R-Karte (Mittelwert-Spannweite)",
+    "imr": "I-MR-Karte (Einzelwert-gleitende Spannweite)",
+    "histogram": "Histogramm",
+    "p": "p-Karte (Fehleranteil)",
+    "np": "np-Karte (Anzahl fehlerhafter Einheiten)",
+    "c": "c-Karte (Fehleranzahl)",
+    "u": "u-Karte (Fehler pro Einheit)"
+  },
+  "detail": {
+    "back": "Zurück",
+    "notFound": "Prüfmerkmal nicht gefunden",
+    "loadFailed": "Daten konnten nicht geladen werden",
+    "lockSuccess": "Eingriffsgrenzen fixiert",
+    "unlockSuccess": "Eingriffsgrenzen freigegeben",
+    "operationFailed": "Vorgang fehlgeschlagen",
+    "ruleUpdateSuccess": "Regeleinstellungen aktualisiert",
+    "ruleUpdateFailed": "Regeln konnten nicht aktualisiert werden",
+    "sampleEntrySuccess": "Stichprobe erfolgreich erfasst",
+    "sampleEntryFailed": "Stichprobe konnte nicht erfasst werden",
+    "batchNoRequired": "Bitte Chargennummer eingeben",
+    "inspectedCountRequired": "Die geprüfte Menge muss größer als 0 sein",
+    "defectCountNonNegative": "Die Fehleranzahl darf nicht negativ sein",
+    "defectCountExceeds": "Die Fehleranzahl darf die geprüfte Menge nicht überschreiten",
+    "sampleValueRequired": "Bitte mindestens einen Messwert eingeben",
+    "alarmAckSuccess": "Alarm quittiert",
+    "alarmAckFailed": "Quittieren fehlgeschlagen",
+    "capaCreateSuccess": "8D angelegt: {{docNo}}",
+    "capaCreateFailed": "8D konnte nicht angelegt werden",
+    "tabs": {
+      "chart": "Regelkarte",
+      "capability": "Prozessfähigkeit",
+      "data": "Datenerfassung",
+      "alarms": "Alarmprotokoll"
+    },
+    "basicInfo": {
+      "title": "Grunddaten",
+      "process_name": "Prozessname",
+      "characteristic_name": "Merkmalsname",
+      "spec_upper": "OSG",
+      "spec_lower": "USG",
+      "target_value": "Sollwert",
+      "subgroup_size": "Stichprobenumfang"
+    },
+    "limitManagement": {
+      "title": "Verwaltung der Eingriffsgrenzen",
+      "lock": "Eingriffsgrenzen fixieren",
+      "unlock": "Eingriffsgrenzen freigeben",
+      "version": "Version der Eingriffsgrenzen",
+      "locked": "Eingriffsgrenzen fixiert",
+      "auto": "Eingriffsgrenzen automatisch berechnet"
+    },
+    "rules": {
+      "title": "Alarmregeln",
+      "rule1": "Regel 1: Außerhalb der Eingriffsgrenzen",
+      "rule2": "Regel 2: 9 aufeinanderfolgende Punkte auf derselben Seite",
+      "rule3": "Regel 3: 6 aufeinanderfolgende Punkte steigend/fallend",
+      "rule4": "Regel 4: 14 aufeinanderfolgende Punkte abwechselnd auf/ab",
+      "rule5": "Regel 5: 2 von 3 aufeinanderfolgenden Punkten in Zone A",
+      "rule6": "Regel 6: 4 von 5 aufeinanderfolgenden Punkten außerhalb Zone B",
+      "rule7": "Regel 7: 15 aufeinanderfolgende Punkte in Zone C",
+      "rule8": "Regel 8: 8 aufeinanderfolgende Punkte außerhalb Zone C"
+    },
+    "capability": {
+      "grade": "Stufe: {{grade}}",
+      "cp": "Cp",
+      "cpk": "Cpk",
+      "pp": "Pp",
+      "ppk": "Ppk",
+      "cm": "Cm",
+      "cmk": "Cmk",
+      "theoretical_ppm": "Theoretischer PPM",
+      "actual_ppm": "Tatsächlicher PPM",
+      "advice": "Analysehinweis",
+      "empty": "Zu wenige Daten für die Prozessfähigkeitsanalyse (mindestens 2 Chargen/Stichproben erforderlich)"
+    },
+    "dataEntry": {
+      "single": "Einzelcharge",
+      "batch": "Massenimport",
+      "history": "Verlauf",
+      "batchNo": "Chargennummer",
+      "batchPlaceholder": "z. B. BATCH-20260521-001",
+      "sampledAt": "Entnommen am",
+      "attributeEntry": "Erfassung attributiver Daten",
+      "inspectedCount": "Geprüfte Menge n",
+      "defectCount": "Anzahl fehlerhaft/Fehler",
+      "sampleValues": "Messwerte (empfohlen {{size}})",
+      "addSample": "Messwert hinzufügen",
+      "submitBatch": "Charge absenden",
+      "uploadExcel": "Excel-Massenimport hochladen",
+      "templateHintVariable": "Je Zeile: Chargennummer*, Entnahmezeit*, Messwert 1{{extra}}",
+      "templateHintAttribute": "Je Zeile: Chargennummer*, Entnahmezeit*, Geprüfte Menge, Fehleranzahl"
+    },
+    "history": {
+      "index": "Index",
+      "batchNo": "Chargennummer",
+      "sampledAt": "Entnommen am",
+      "xValue": "Mittelwert / X",
+      "rValue": "Spannweite / MR",
+      "alarm": "Alarm",
+      "normal": "Normal",
+      "rule": "Regel {{rules}}"
+    },
+    "alarm": {
+      "ruleNo": "Regel-Nr.",
+      "triggeredAt": "Ausgelöst am",
+      "severity": "Schweregrad",
+      "status": "Status",
+      "linkedCapa": "Verknüpfter 8D",
+      "linkedFmea": "Verknüpfte FMEA",
+      "confirm": "Quittieren",
+      "viewFmea": "FMEA-Empfehlungen anzeigen",
+      "createCapa": "8D anlegen",
+      "linked": "Verknüpft",
+      "notLinked": "Nicht verknüpft",
+      "severityLevels": {
+        "critical": "Kritisch",
+        "major": "Hoch",
+        "minor": "Gering"
+      },
+      "statuses": {
+        "open": "Offen",
+        "acknowledged": "Quittiert",
+        "closed": "Geschlossen"
+      }
+    },
+    "chart": {
+      "xbarTitle": "X̄-Karte",
+      "iTitle": "I-Karte (Einzelwert)",
+      "rTitle": "R-Karte (Spannweite)",
+      "mrTitle": "MR-Karte (gleitende Spannweite)",
+      "statisticValue": "Kennwert",
+      "ucl": "OEG",
+      "lcl": "UEG",
+      "cl": "ML"
+    }
+  },
+  "versionPanel": {
+    "title": "Versionen der Eingriffsgrenzen",
+    "button": "Versionsverwaltung",
+    "current": "Aktuell",
+    "activate": "Als aktuell setzen",
+    "loadFailed": "Versionsliste konnte nicht geladen werden",
+    "activateSuccess": "Version der Eingriffsgrenzen gewechselt",
+    "activateFailed": "Wechsel fehlgeschlagen",
+    "empty": "Keine fixierten Versionen der Eingriffsgrenzen"
+  },
+  "fmeaMatch": {
+    "title": "Empfohlene FMEA-Verknüpfungen",
+    "cancel": "Abbrechen",
+    "createCapa": "CAPA-8D anlegen",
+    "summary": "SPC-Alarm: {{icCode}} | Prozess: {{processName}} | Merkmal: {{characteristicName}}",
+    "loadFailed": "Empfehlungen konnten nicht abgerufen werden",
+    "confirmFailed": "Verknüpfung konnte nicht bestätigt werden",
+    "empty": "Keine zugehörigen FMEA-Fehlerarten gefunden",
+    "refresh": "Aktualisieren",
+    "loading": "Empfehlungen werden geladen ...",
+    "matchScore": "Übereinstimmung {{score}} %",
+    "path": "Pfad: {{path}}",
+    "failureCauses": "Fehlerursachen: {{causes}}",
+    "controls": "Maßnahmen: {{count}}",
+    "selected": "Ausgewählt: {{name}}",
+    "source": {
+      "control_plan": "Verknüpfung über Produktionslenkungsplan",
+      "process_name": "Übereinstimmung Prozessname",
+      "characteristic_name": "Übereinstimmung Merkmalsname",
+      "select": "Diese Verknüpfung wählen",
+      "selected": "Ausgewählt"
+    }
+  }
+}

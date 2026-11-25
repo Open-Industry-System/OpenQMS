@@ -17,7 +17,7 @@ Two files, both small:
   every translation file, parses the path into `{ language, namespace }`,
   initialises `i18next` with `LanguageDetector` +
   `initReactI18next`, and exports the configured instance as default.
-  Also exports `SUPPORTED_LANGUAGES = ["zh-CN", "en-US"] as const` and
+  Also exports `SUPPORTED_LANGUAGES = ["de-DE", "en-US"] as const` and
   the matching `SupportedLanguage` type.
 - `i18next.d.ts` — TypeScript module augmentation for `react-i18next`
   declaring `defaultNS: "common"` and a generic resources shape so
@@ -37,8 +37,8 @@ Conventions every caller relies on:
 
 - **Default namespace is `common`.** `useTranslation()` with no
   argument reads `locales/<lang>/common.json`.
-- **Fallback language is `zh-CN`.** A missing key in `en-US` falls
-  back to the Chinese string.
+- **Fallback language is `de-DE`.** A missing key in `en-US` falls
+  back to the German string. The default UI language is German.
 - **Active language is persisted to `localStorage` under the key
   `openqms_locale`.** Detection order: `localStorage` → `navigator`.
 - **Interpolation does not HTML-escape** (`escapeValue: false`);
@@ -49,13 +49,13 @@ Conventions every caller relies on:
 ## Conventions & Constraints
 
 - **One namespace per JSON file.** The file name (without extension)
-  becomes the namespace, e.g. `locales/zh-CN/fmea.json` →
+  becomes the namespace, e.g. `locales/de-DE/fmea.json` →
   namespace `fmea`. Adding a new locale file automatically registers
   a new namespace; no list to maintain.
-- **`zh-CN` is the source of truth.** New keys land in `zh-CN`
+- **`de-DE` is the source of truth.** New keys land in `de-DE`
   first; `en-US` mirrors it. The `ns` option is computed from the
-  `zh-CN` namespace set, so an `en-US`-only file would not register.
-- **Language codes are hyphenated (`zh-CN`, `en-US`)**, not
+  `de-DE` namespace set, so an `en-US`-only file would not register.
+- **Language codes are hyphenated (`de-DE`, `en-US`)**, not
   underscored. The folder names under `../locales/` must match
   `SUPPORTED_LANGUAGES` exactly.
 - **Don't import this module from `utils/` helpers that should stay

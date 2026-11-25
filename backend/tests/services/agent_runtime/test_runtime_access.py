@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from jose import jwt
+import jwt
 from pydantic import ValidationError
 from sqlalchemy import delete, select, update
 
@@ -19,6 +19,11 @@ from app.models.role import RoleDefinition, RolePermission
 from app.models.user import User
 from app.services.agent.permissions import catalog
 from app.services.agent.permissions.types import ApprovalFloor
+
+
+def _unverified_claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
 
 SUMMARY = "capa.d4.summary.masked.v1"
 
@@ -88,7 +93,7 @@ async def test_claim_has_lease_idempotency_and_no_business_object_selector(db, p
     assert set(result.model_dump()) == {"run_id", "task_id", "token", "lease_epoch", "lease_expires_at", "accepted_message_seq", "has_resume_checkpoint"}
     assert result.run_id == pending[0].run_id and result.lease_epoch == 1
     assert 0 < (result.lease_expires_at - datetime.now(UTC)).total_seconds() <= 300
-    claims = jwt.get_unverified_claims(result.token)
+    claims = _unverified_claims(result.token)
     assert claims["exp"] <= result.lease_expires_at.timestamp()
     retry = await claim(db, pending)
     assert retry.run_id == result.run_id and retry.lease_epoch == result.lease_epoch
@@ -170,7 +175,7 @@ async def test_user_platform_refresh_and_spoofed_run_claims_reject(db, pending, 
     result = await claim(db, pending)
     tokens = [create_access_token({"sub": str(pending[3].user_id)}),
         create_platform_admin_token(str(pending[3].user_id)), create_refresh_token(str(pending[3].user_id))[0]]
-    claims = jwt.get_unverified_claims(result.token)
+    claims = _unverified_claims(result.token)
     for overrides in ({"tenant_generation": 1}, {"installation_id": str(uuid.uuid4())},
                       {"plugin_version": "other"}, {"aud": ["openqms-agent-runtime"]}):
         tokens.append(jwt.encode({**claims, **overrides}, settings.SECRET_KEY, algorithm=settings.ALGORITHM))

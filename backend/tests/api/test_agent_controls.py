@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
+import jwt
 from sqlalchemy import select
 
 from app.config import settings
@@ -13,6 +13,11 @@ from app.models.agent_readonly_control import AgentTaskControl
 from tests.services.agent_runtime.conftest import committed_runtime
 from tests.services.agent_runtime.test_runtime_access import direct_caps, ready_owned
 from tests.services.agent_runtime.test_runtime_messages import delivery
+
+
+def _unverified_claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
 
 
 @pytest.mark.asyncio
@@ -77,7 +82,7 @@ async def test_actual_finish_http_domain_registry_terminal_token_and_fixed_failu
                       create_platform_admin_token(str(owned.user_id)), create_refresh_token(str(owned.user_id))[0]):
             response = await client.post(path, json={"status": "completed"}, headers={"X-Tenant-ID": slug, "Authorization": "Bearer "+token})
             assert response.status_code == 401, response.text
-        claims = jwt.get_unverified_claims(owned.token)
+        claims = _unverified_claims(owned.token)
         stale = jwt.encode({**claims, "tenant_generation": claims["tenant_generation"]+1}, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
         assert (await client.post(path, json={"status": "completed"}, headers={"Authorization": "Bearer "+stale})).status_code == 401
         assert (await client.get(path, headers=auth)).status_code == 400

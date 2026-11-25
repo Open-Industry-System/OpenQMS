@@ -32,16 +32,16 @@ export default function ERPDashboardPage() {
   const [loading, setLoading] = useState(true);
 
   const syncStatusLabels = useMemo((): Record<string, string> => ({
-    completed: t("dashboard.syncStatus.completed", "已完成"),
-    failed: t("dashboard.syncStatus.failed", "失败"),
-    running: t("dashboard.syncStatus.running", "同步中"),
-    pending: t("dashboard.syncStatus.pending", "待同步"),
+    completed: t("dashboard.syncStatus.completed"),
+    failed: t("dashboard.syncStatus.failed"),
+    running: t("dashboard.syncStatus.running"),
+    pending: t("dashboard.syncStatus.pending"),
   }), [t]);
 
   useEffect(() => {
     fetchERPDashboard()
       .then(setData)
-      .catch(() => message.error(t("dashboard.errors.loadFailed", "加载 ERP 看板数据失败")))
+      .catch(() => message.error(t("dashboard.errors.loadFailed")))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productLine]);
@@ -55,14 +55,14 @@ export default function ERPDashboardPage() {
   }
 
   if (!data) {
-    return <div style={{ padding: 24 }}>{t("dashboard.errors.loadFailed", "加载失败")}</div>;
+    return <div style={{ padding: 24 }}>{t("dashboard.errors.loadFailed")}</div>;
   }
 
   return (
-    <PageShell title={t("dashboard.title", "ERP 集成看板")}>
+    <PageShell title={t("dashboard.title")}>
       {/* Sync Health */}
       <DataCard
-        title={t("dashboard.syncHealth", "同步健康")}
+        title={t("dashboard.syncHealth")}
         style={{ marginBottom: 16 }}
         extra={
           <Space>
@@ -78,7 +78,7 @@ export default function ERPDashboardPage() {
         }
       >
         {data.sync_health.length === 0 ? (
-          <span style={{ color: "#999" }}>{t("dashboard.noSyncData", "暂无同步数据")}</span>
+          <span style={{ color: "#999" }}>{t("dashboard.noSyncData")}</span>
         ) : (
           <Row gutter={[16, 8]}>
             {data.sync_health.map((s) => (
@@ -105,7 +105,7 @@ export default function ERPDashboardPage() {
           } else if (kpi.status === "warning") {
             icon = <WarningOutlined />;
             color = "#faad14";
-          } else if (kpi.label.includes("成本") || kpi.label.includes("COQ")) {
+          } else if (/成本|kosten|cost|COQ/i.test(kpi.label)) {
             icon = <DollarOutlined />;
           }
 
@@ -126,9 +126,9 @@ export default function ERPDashboardPage() {
       {/* COQ Summary */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} lg={12}>
-          <DataCard title={t("dashboard.coqSummary", "COQ 成本摘要（本月）")}>
+          <DataCard title={t("dashboard.coqSummary")}>
             {Object.keys(data.coq_summary).length === 0 ? (
-              <span style={{ color: "#999" }}>{tc("noData", "暂无数据")}</span>
+              <span style={{ color: "#999" }}>{tc("noData")}</span>
             ) : (
               <Row gutter={[16, 16]}>
                 {Object.entries(data.coq_summary).map(([cat, amount]) => (
@@ -136,7 +136,7 @@ export default function ERPDashboardPage() {
                     <Statistic
                       title={cat}
                       value={amount}
-                      prefix="¥"
+                      prefix="€"
                       precision={2}
                     />
                   </Col>
@@ -148,19 +148,19 @@ export default function ERPDashboardPage() {
 
         {/* Quick Links */}
         <Col xs={24} lg={12}>
-          <DataCard title={t("dashboard.quickLinks", "快速入口")}>
+          <DataCard title={t("dashboard.quickLinks")}>
             <Space direction="vertical" style={{ width: "100%" }} size={8}>
               <Link to="/erp/connections">
-                <Button icon={<LinkOutlined />} block>{t("dashboard.links.connections", "连接管理")}</Button>
+                <Button icon={<LinkOutlined />} block>{t("dashboard.links.connections")}</Button>
               </Link>
               <Link to="/erp/master-data">
-                <Button icon={<SyncOutlined />} block>{t("dashboard.links.masterData", "主数据管理")}</Button>
+                <Button icon={<SyncOutlined />} block>{t("dashboard.links.masterData")}</Button>
               </Link>
               <Link to="/erp/supply-chain">
-                <Button icon={<WarningOutlined />} block>{t("dashboard.links.supplyChain", "供应链管理")}</Button>
+                <Button icon={<WarningOutlined />} block>{t("dashboard.links.supplyChain")}</Button>
               </Link>
               <Link to="/erp/traceability">
-                <Button block>{t("dashboard.links.traceability", "批次追溯")}</Button>
+                <Button block>{t("dashboard.links.traceability")}</Button>
               </Link>
             </Space>
           </DataCard>

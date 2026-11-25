@@ -16,6 +16,12 @@
     "loadFailed": "Load failed",
     "errors": {
       "loadFailed": "Failed to load ERP dashboard data"
+    },
+    "syncStatus": {
+      "completed": "Completed",
+      "failed": "Failed",
+      "running": "Syncing",
+      "pending": "Pending"
     }
   },
   "syncStatus": {
@@ -69,7 +75,8 @@
         "title": "Link OpenQMS Supplier",
         "description": "Select the OpenQMS supplier to link:",
         "placeholder": "Please select a supplier",
-        "okText": "Confirm Link"
+        "okText": "Confirm Link",
+        "selectPrompt": "Select the OpenQMS supplier to link:"
       },
       "messages": {
         "loadFailed": "Failed to load suppliers",
@@ -78,7 +85,22 @@
         "unlinkSuccess": "Unlinked successfully",
         "linkFailed": "Link failed",
         "unlinkFailed": "Unlink failed"
-      }
+      },
+      "errors": {
+        "loadFailed": "Failed to load suppliers",
+        "loadSupplierListFailed": "Failed to load supplier list"
+      },
+      "columns": {
+        "code": "Supplier code",
+        "name": "Name",
+        "status": "Status",
+        "linkStatus": "Link status"
+      },
+      "actions": {
+        "link": "Link",
+        "unlink": "Unlink"
+      },
+      "cardTitle": "Suppliers"
     },
     "customers": {
       "link": "Link",
@@ -87,7 +109,8 @@
         "title": "Link OpenQMS Customer",
         "description": "Select the OpenQMS customer to link:",
         "placeholder": "Please select a customer",
-        "okText": "Confirm Link"
+        "okText": "Confirm Link",
+        "selectPrompt": "Select the OpenQMS customer to link:"
       },
       "messages": {
         "loadFailed": "Failed to load customers",
@@ -96,17 +119,67 @@
         "unlinkSuccess": "Unlinked successfully",
         "linkFailed": "Link failed",
         "unlinkFailed": "Unlink failed"
-      }
+      },
+      "errors": {
+        "loadFailed": "Failed to load customers",
+        "loadCustomerListFailed": "Failed to load customer list"
+      },
+      "columns": {
+        "code": "Customer code",
+        "name": "Name",
+        "status": "Status",
+        "linkStatus": "Link status"
+      },
+      "actions": {
+        "link": "Link",
+        "unlink": "Unlink"
+      },
+      "cardTitle": "Customers"
     },
     "materials": {
       "messages": {
         "loadFailed": "Failed to load materials"
-      }
+      },
+      "errors": {
+        "loadFailed": "Failed to load materials"
+      },
+      "columns": {
+        "code": "Material code",
+        "name": "Name",
+        "specification": "Specification",
+        "unit": "Unit",
+        "isPurchased": "Purchased",
+        "isManufactured": "Manufactured",
+        "status": "Status"
+      },
+      "yes": "Yes",
+      "no": "No",
+      "searchPlaceholder": "Search by material code or name",
+      "cardTitle": "Materials"
     },
     "locations": {
       "messages": {
         "loadFailed": "Failed to load locations"
-      }
+      },
+      "types": {
+        "warehouse": "Warehouse",
+        "zone": "Zone",
+        "bin": "Bin",
+        "line": "Line"
+      },
+      "errors": {
+        "loadFailed": "Failed to load locations"
+      },
+      "columns": {
+        "code": "Location code",
+        "warehouseCode": "Warehouse code",
+        "zoneCode": "Zone code",
+        "type": "Type",
+        "enabled": "Enabled"
+      },
+      "yes": "Yes",
+      "no": "No",
+      "cardTitle": "Locations"
     }
   },
   "connections": {
@@ -122,7 +195,8 @@
       "productLineCode": "Product Line Code",
       "status": "Status",
       "createdAt": "Created At",
-      "actions": "Actions"
+      "actions": "Actions",
+      "productLine": "Product line code"
     },
     "typeLabels": {
       "mock": "Mock",
@@ -180,8 +254,15 @@
       "testSuccess": "Connection test successful",
       "testFailed": "Connection test failed",
       "syncTriggered": "Sync triggered, will start in the background within 30 seconds",
-      "syncFailed": "Failed to trigger sync"
-    }
+      "syncFailed": "Failed to trigger sync",
+      "testFailedWithMsg": "Connection test failed: {{message}}"
+    },
+    "actions": {
+      "test": "Test",
+      "sync": "Sync",
+      "create": "New connection"
+    },
+    "cardTitle": "Connection list"
   },
   "salesAndCost": {
     "title": "Sales & Cost",
@@ -221,6 +302,58 @@
       "loadSalesOrdersFailed": "Failed to load sales orders",
       "loadShipmentsFailed": "Failed to load shipments",
       "loadCostRecordsFailed": "Failed to load cost records"
+    },
+    "salesOrders": {
+      "errors": {
+        "loadFailed": "Failed to load sales orders"
+      },
+      "columns": {
+        "soNumber": "SO no.",
+        "lineNumber": "Line no.",
+        "customerCode": "Customer code",
+        "materialCode": "Material code",
+        "quantity": "Quantity",
+        "unitPrice": "Unit price",
+        "status": "Status",
+        "deliveryDate": "Delivery date"
+      },
+      "cardTitle": "Sales orders"
+    },
+    "shipments": {
+      "errors": {
+        "loadFailed": "Failed to load shipments"
+      },
+      "columns": {
+        "shipmentNumber": "Shipment no.",
+        "customerCode": "Customer code",
+        "materialCode": "Material code",
+        "lotNo": "Lot no.",
+        "quantity": "Quantity",
+        "shipmentDate": "Shipment date",
+        "linkStatus": "Link status"
+      },
+      "cardTitle": "Shipments"
+    },
+    "costRecords": {
+      "categories": {
+        "prevention": "Prevention cost",
+        "appraisal": "Appraisal cost",
+        "internalFailure": "Internal failure cost",
+        "externalFailure": "External failure cost"
+      },
+      "errors": {
+        "loadFailed": "Failed to load cost records"
+      },
+      "columns": {
+        "category": "Cost category",
+        "type": "Cost type",
+        "amount": "Amount",
+        "currency": "Currency",
+        "period": "Period",
+        "sourceDocument": "Source document",
+        "description": "Description"
+      },
+      "cardTitle": "Cost records"
     }
   },
   "supplyChain": {
@@ -263,6 +396,53 @@
     "messages": {
       "loadPurchaseOrdersFailed": "Failed to load purchase orders",
       "loadInventoryFailed": "Failed to load inventory balances"
+    },
+    "purchaseOrders": {
+      "status": {
+        "draft": "Draft",
+        "submitted": "Submitted",
+        "confirmed": "Confirmed",
+        "partiallyReceived": "Partially received",
+        "received": "Received",
+        "closed": "Closed"
+      },
+      "errors": {
+        "loadFailed": "Failed to load purchase orders"
+      },
+      "columns": {
+        "poNumber": "PO no.",
+        "lineNumber": "Line no.",
+        "supplierCode": "Supplier code",
+        "materialCode": "Material code",
+        "quantity": "Quantity",
+        "receivedQuantity": "Received",
+        "lotNo": "Lot no.",
+        "status": "Status",
+        "deliveryDate": "Delivery date"
+      },
+      "filterPlaceholder": "Filter status",
+      "cardTitle": "Purchase orders"
+    },
+    "inventory": {
+      "status": {
+        "available": "Available",
+        "restricted": "Restricted",
+        "blocked": "Blocked",
+        "inInspection": "In inspection"
+      },
+      "errors": {
+        "loadFailed": "Failed to load inventory balances"
+      },
+      "columns": {
+        "materialCode": "Material code",
+        "locationCode": "Location code",
+        "lotNo": "Lot no.",
+        "supplierLotNo": "Supplier lot no.",
+        "quantity": "Quantity",
+        "unit": "Unit",
+        "inventoryStatus": "Inventory status"
+      },
+      "cardTitle": "Inventory balances"
     }
   },
   "traceability": {
@@ -278,6 +458,13 @@
     "noData": "No traceability data found",
     "errors": {
       "queryFailed": "Traceability query failed"
-    }
+    },
+    "cardTitle": "Traceability query",
+    "searchPlaceholder": "Enter lot number",
+    "actions": {
+      "search": "Search"
+    },
+    "nodesTitle": "Traceability nodes",
+    "edgesTitle": "Traceability relationships"
   }
 }

@@ -15,6 +15,7 @@ from pptx.util import Inches, Pt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.i18n import request_language, translate
 from app.models.capa import (
     CapaD7NodeAction,
     CAPAEightD,
@@ -172,6 +173,36 @@ async def _load_linked_risk_alerts(db: AsyncSession, capa) -> list[dict]:
     return [{"alert_id": str(r.alert_id), "risk_level": r.risk_level, "status": r.status} for r in rows]
 
 
+# Page titles/labels of the exported deck, rendered in the request's UI language.
+_PPT_TEXT = {
+    "封面": ("Deckblatt", "Cover"), "D1 团队": ("D1 Team", "D1 Team"),
+    "D2 问题描述": ("D2 Problembeschreibung", "D2 Problem description"),
+    "D3 遏制措施": ("D3 Sofortmaßnahmen", "D3 Containment"), "D4 根因分析": ("D4 Ursachenanalyse", "D4 Root cause analysis"),
+    "D5 永久措施": ("D5 Abstellmaßnahmen", "D5 Permanent corrective actions"),
+    "D6 实施验证": ("D6 Wirksamkeitsprüfung", "D6 Implementation verification"),
+    "D7 预防复发": ("D7 Wiederholung verhindern", "D7 Prevent recurrence"), "D8 关闭结论": ("D8 Abschluss", "D8 Closure"),
+    "联动附录": ("Anhang Verknüpfungen", "Linked appendix"), "生成信息": ("Erstellungsinformationen", "Generation info"),
+    "无": ("keine", "none"),
+}
+
+
+def _tr(text: str) -> str:
+    lang = request_language.get()
+    hit = _PPT_TEXT.get(text)
+    if hit and lang in ("de", "en"):
+        return hit[0 if lang == "de" else 1]
+    return translate(text, lang)
+
+
+def _tr_meta(version, review_status, review_rounds) -> str:
+    lang = request_language.get()
+    if lang == "de":
+        return f"Version: {version} | Prüfstatus: {review_status} | Prüfrunden: {review_rounds}"
+    if lang == "en":
+        return f"Version: {version} | Review status: {review_status} | Review rounds: {review_rounds}"
+    return f"版本: {version} | 审查状态: {review_status} | 审查轮数: {review_rounds}"
+
+
 def render_pptx(
     content: PptContent, meta: ExportMeta, review_status: str, review_rounds: int,
 ) -> bytes:
@@ -181,18 +212,18 @@ def render_pptx(
     for page in content.pages:
         slide = prs.slides.add_slide(prs.slide_layouts[6])  # 6 = blank（无标题占位符，避免与手绘标题文本框重复）
         title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.6))
-        title_box.text_frame.text = page.title
+        title_box.text_frame.text = _tr(page.title)
         title_box.text_frame.paragraphs[0].runs[0].font.size = Pt(28)
         body_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.2), Inches(9), Inches(5))
         tf = body_box.text_frame
         for i, sec in enumerate(page.sections):
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-            p.text = f"{sec['label']}: {sec['value']}"
+            p.text = f"{_tr(sec['label'])}: {_tr(sec['value'])}"
             p.font.size = Pt(14)
         # 第 11 页「生成信息」用 meta + review 填充
         if page.title == "生成信息":
             p = tf.add_paragraph()
-            p.text = f"版本: {meta.version} | 审查状态: {review_status} | 审查轮数: {review_rounds}"
+            p.text = _tr_meta(meta.version, review_status, review_rounds)
             p.font.size = Pt(12)
     output = BytesIO()
     prs.save(output)

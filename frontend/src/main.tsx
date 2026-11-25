@@ -6,31 +6,31 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ConfigProvider, App as AntdApp } from "antd";
 import type { Locale } from "antd/es/locale";
-import zhCN from "antd/locale/zh_CN";
+import deDE from "antd/locale/de_DE";
 import dayjs from "dayjs";
-import "dayjs/locale/zh-cn";
+import "dayjs/locale/de";
 import "dayjs/locale/en";
 import i18n from "./i18n";
 import App from "./App";
 import { darkTheme } from "./utils/darkTheme";
 
 function updateHtmlLang(lang: string) {
-  document.documentElement.lang = lang === "zh-CN" ? "zh-CN" : "en";
+  document.documentElement.lang = lang === "en-US" ? "en" : "de";
   document.title = i18n.t("app.title");
 }
 
 function I18nConfigProvider({ children }: { children: React.ReactNode }) {
-  const [antdLocale, setAntdLocale] = useState<Locale>(zhCN);
+  const [antdLocale, setAntdLocale] = useState<Locale>(deDE);
 
   useEffect(() => {
     const apply = async (lang: string) => {
       const loader: () => Promise<Locale> =
         lang === "en-US"
           ? () => import("antd/locale/en_US").then((m) => m.default)
-          : () => Promise.resolve(zhCN);
+          : () => Promise.resolve(deDE);
       const locale = await loader();
       setAntdLocale(locale);
-      dayjs.locale(lang === "zh-CN" ? "zh-cn" : "en");
+      dayjs.locale(lang === "en-US" ? "en" : "de");
       updateHtmlLang(lang);
     };
     apply(i18n.language);

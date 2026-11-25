@@ -11,7 +11,7 @@ import sys
 DOC_PATH = re.compile(r'(?:(?:README|README_EN|PROGRESS)\.md|docs/superpowers/(?:specs|plans)/[^/\x00-\x1f\x7f]+\.md)\Z')
 SHA = re.compile(r'[0-9a-f]{40}\Z')
 STYLE_PATH = 'frontend/src/pages/public/PublicHomePage.css'
-TEXT_PATHS = frozenset(f'frontend/src/locales/{locale}/home.json' for locale in ('zh-CN', 'en-US'))
+TEXT_PATHS = frozenset(f'frontend/src/locales/{locale}/home.json' for locale in ('de-DE', 'en-US'))
 # These values are rendered as plain text on the public landing page. Business,
 # permission, demo/account, navigation and interpolation settings are excluded.
 TEXT_KEYS = frozenset({('hero', 'eyebrow'), ('hero', 'title'), ('footer', 'tagline')})

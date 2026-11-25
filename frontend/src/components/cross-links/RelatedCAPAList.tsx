@@ -40,7 +40,7 @@ export default function RelatedCAPAList({ fmeaId, fmeaNodeId }: { fmeaId: string
   if (!items.length) {
     return (
       <div data-e2e="related-capa-list">
-        <Empty description={t("relatedCapa.empty", "无关联 8D")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description={t("relatedCapa.empty")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       </div>
     );
   }

@@ -67,7 +67,7 @@ export default function AqlProfileDetailPage() {
 
   const stateCfg = profile ? (stateMap[profile.state] || { label: profile.state, status: 'default' as const }) : null;
 
-  const formatDate = (v: string | null) => v ? new Date(v).toLocaleDateString(i18n.language || 'zh-CN') : '—';
+  const formatDate = (v: string | null) => v ? new Date(v).toLocaleDateString(i18n.language || 'de-DE') : '—';
 
   const recColumns = [
     { title: t('table.recommendedAql'), dataIndex: 'recommended_aql', width: 90 },

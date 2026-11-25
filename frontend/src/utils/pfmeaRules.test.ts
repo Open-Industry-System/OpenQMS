@@ -6,13 +6,13 @@ describe('usePfmeaRules', () => {
   const rules = usePfmeaRules();
 
   it('generateFailureModes returns process-verb-based modes', () => {
-    const modes = rules.generateFailureModes('贴装电子元器件');
+    const modes = rules.generateFailureModes('SMT placement of electronic components');
     expect(modes.length).toBeGreaterThan(0);
-    expect(modes.some((m) => m.includes('偏移') || m.includes('漏件'))).toBe(true);
+    expect(modes.some((m) => m.includes('offset') || m.includes('Missing'))).toBe(true);
   });
 
   it('suggestFailureChain returns effects+causes for a known PFMEA mode', () => {
-    const chain = rules.suggestFailureChain('贴装偏移');
+    const chain = rules.suggestFailureChain('Placement offset');
     expect(chain.effects.length).toBeGreaterThan(0);
     expect(chain.causes.length).toBeGreaterThan(0);
   });

@@ -72,6 +72,7 @@ import { diffGraphs } from "../../../utils/graphDiff";
 import type { ConflictInfo } from "../../../types/collaboration";
 import type { GraphDiff } from "../../../utils/graphDiff";
 import { PageShell, DataCard, StatusBadge } from "../../../components/design";
+import { tr } from "../../../i18n/tr";
 
 const { Text } = Typography;
 
@@ -732,10 +733,10 @@ export default function FMEAEditorPage() {
 
     if (impacts.length > 0) {
       Modal.confirm({
-        title: "删除产品特性会清除关联",
-        content: `以下过程特性将失去关联：${impacts.map((impact) => impact.characteristicName).join("、")}。确认继续吗？`,
-        okText: "确认删除",
-        cancelText: "取消",
+        title: tr("Löschen des Produktmerkmals entfernt Verknüpfungen", "Deleting the product characteristic removes links"),
+        content: tr(`Folgende Prozessmerkmale verlieren ihre Verknüpfung: ${impacts.map((impact) => impact.characteristicName).join(", ")}. Fortfahren?`, `The following process characteristics will lose their link: ${impacts.map((impact) => impact.characteristicName).join(", ")}. Continue?`),
+        okText: tr("Löschen bestätigen", "Confirm delete"),
+        cancelText: tr("Abbrechen", "Cancel"),
         okButtonProps: { danger: true },
         onOk: applyChange,
       });
@@ -809,7 +810,7 @@ export default function FMEAEditorPage() {
   const canDragSortStructure = canEdit("fmea");
   const structureTree = useMemo(() => buildStructureTree(nodes, edges), [nodes, edges]);
   // live-reorder 预览树：拖拽经过合法同级时按 preview 重排兄弟，让用户看到落点、提高成功率。
-  // 松手提交 / 取消回滚（preview 清空 → 回到真实顺序）。
+  // 松手提交 / {tr("Abbrechen", "Cancel")}回滚（preview 清空 → 回到真实顺序）。
   const displayTree = useMemo(
     () => (preview ? buildStructureTree(preview.nodes, preview.edges) : structureTree),
     [preview, structureTree],
@@ -958,9 +959,9 @@ export default function FMEAEditorPage() {
     };
     if (impacts.length > 0) {
       Modal.confirm({
-        title: "删除产品特性会清除关联",
-        content: `以下过程特性将失去关联：${impacts.map((impact) => impact.characteristicName).join("、")}。确认继续吗？`,
-        okText: "确认删除", cancelText: "取消", okButtonProps: { danger: true },
+        title: tr("Löschen des Produktmerkmals entfernt Verknüpfungen", "Deleting the product characteristic removes links"),
+        content: tr(`Folgende Prozessmerkmale verlieren ihre Verknüpfung: ${impacts.map((impact) => impact.characteristicName).join(", ")}. Fortfahren?`, `The following process characteristics will lose their link: ${impacts.map((impact) => impact.characteristicName).join(", ")}. Continue?`),
+        okText: tr("Löschen bestätigen", "Confirm delete"), cancelText: tr("Abbrechen", "Cancel"), okButtonProps: { danger: true },
         onOk: applyDelete,
       });
       return;

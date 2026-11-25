@@ -2,7 +2,9 @@
 
 OpenQMS is a modular quality management platform for manufacturers. It supports IATF 16949 quality workflows across FMEA, control plans, incoming inspection, statistical process control, and 8D corrective action.
 
-**[中文文档 →](README.md)**
+**[Deutsche Dokumentation →](README.md)** · **[Raspberry Pi deployment (German) →](docs/raspberry-pi.md)** · **[Security review (German) →](docs/sicherheitspruefung.md)**
+
+> This fork ships a German UI (default) with an English language switch; the Chinese UI language was removed.
 
 ## How business modules work with AI agents
 

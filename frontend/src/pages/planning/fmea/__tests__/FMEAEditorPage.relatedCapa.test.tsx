@@ -261,9 +261,9 @@ it.each(["fn1", "ps"])("editor confirms surviving relation impacts on deleting %
   const row = await screen.findByTestId(`fmea-structure-node-${deletedRoot}`);
   fireEvent.click(within(row).getByRole("img", { name: "delete" }).closest("button")!);
   fireEvent.click(await screen.findByRole("button", { name: "OK" }));
-  expect(await screen.findByText("以下过程特性将失去关联：affected-process。确认继续吗？")).toBeInTheDocument();
+  expect(await screen.findByText("The following process characteristics will lose their link: affected-process. Continue?")).toBeInTheDocument();
   expect(screen.getByTestId("fmea-structure-node-fn1")).toBeInTheDocument();
-  const confirmations = screen.getAllByRole("button", { name: "确认删除" });
+  const confirmations = screen.getAllByRole("button", { name: "Confirm delete" });
   fireEvent.click(confirmations[confirmations.length - 1]);
   await waitFor(() => expect(screen.queryByTestId("fmea-structure-node-fn1")).not.toBeInTheDocument());
   fireEvent.click(screen.getByRole("button", { name: /actions.save/ }));

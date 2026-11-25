@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
+import jwt
 from sqlalchemy import text
 
 from app.config import settings
@@ -13,6 +13,11 @@ from tests.services.agent_runtime.conftest import committed_runtime
 from tests.services.agent_runtime.test_runtime_access import direct_caps, ready_owned
 from tests.services.agent_runtime.test_runtime_messages import delivery
 from tests.services.agent_runtime.test_readonly_delivery import context_delivery
+
+
+def _unverified_claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
 
 PATH = "/api/agent/runtime/capa/context"
 
@@ -58,7 +63,7 @@ async def test_actual_context_http_without_target_then_strict_queries_and_token_
         for token in ordinary:
             response = await client.get(PATH, headers={"X-Tenant-ID": slug, "Authorization": "Bearer "+token})
             assert response.status_code == 401 and "SECRET" not in response.text
-        claims = jwt.get_unverified_claims(owned.token)
+        claims = _unverified_claims(owned.token)
         for overrides in ({"tenant_generation": claims["tenant_generation"]+1}, {"tenant_id": str(uuid.uuid4())}):
             token = jwt.encode({**claims, **overrides}, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
             response = await client.get(PATH, headers={"X-Tenant-ID": slug, "Authorization": "Bearer "+token})

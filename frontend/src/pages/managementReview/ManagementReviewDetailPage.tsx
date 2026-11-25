@@ -70,9 +70,9 @@ export default function ManagementReviewDetailPage() {
     try {
       const updated = await action();
       setReview(updated);
-      message.success(tc("messages.operationSuccess", "操作成功"));
+      message.success(tc("messages.operationSuccess"));
     } catch (e: unknown) {
-      message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || tc("messages.operationFailed", "操作失败"));
+      message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || tc("messages.operationFailed"));
     }
   };
 
@@ -101,7 +101,7 @@ export default function ManagementReviewDetailPage() {
               </Descriptions.Item>
             ))}
           </Descriptions>
-        ) : <span style={{ color: "#999" }}>{t("dataSource.noData", "暂无数据")}</span>,
+        ) : <span style={{ color: "#999" }}>{t("dataSource.noData")}</span>,
       });
     }
   }
@@ -117,7 +117,7 @@ export default function ManagementReviewDetailPage() {
           defaultValue={String(manualInputs[src.key] || "")}
           disabled={isClosed || !canEdit('management_review')}
           onBlur={(e) => handleSaveManualInput(src.key, e.target.value)}
-          placeholder={tc("status.loading", "请输入...")}
+          placeholder={tc("status.loading")}
         />
       ),
     });
@@ -130,10 +130,10 @@ export default function ManagementReviewDetailPage() {
     const summary = (parsed as { summary?: string })?.summary || "";
     dataPackageItems.push({
       key: src.key,
-      label: <>{src.title} <Tag color="orange">{t("dataSource.manualTag", "手动录入")}</Tag></>,
+      label: <>{src.title} <Tag color="orange">{t("dataSource.manualTag")}</Tag></>,
       children: (
         <Space direction="vertical" style={{ width: "100%" }}>
-          <Tag color="blue">{t("dataSource.pendingModule", "待模块上线后自动切换")}</Tag>
+          <Tag color="blue">{t("dataSource.pendingModule")}</Tag>
           <TextArea
             rows={3}
             defaultValue={summary}
@@ -142,7 +142,7 @@ export default function ManagementReviewDetailPage() {
               const val = { ...parsed, summary: e.target.value };
               handleSaveManualInput(src.key, val);
             }}
-            placeholder={t("dataSource.noData", "请输入汇总文字...")}
+            placeholder={t("dataSource.noData")}
           />
         </Space>
       ),
@@ -152,48 +152,48 @@ export default function ManagementReviewDetailPage() {
   // Output table columns
   const outputColumns = [
     {
-      title: t("table.category", "类别"), dataIndex: "category", width: 120,
+      title: t("table.category"), dataIndex: "category", width: 120,
       render: (c: string) => categoryLabels[c] || c,
     },
-    { title: t("table.description", "描述"), dataIndex: "description" },
+    { title: t("table.description"), dataIndex: "description" },
     {
-      title: t("table.dueDate", "截止日期"), dataIndex: "due_date", width: 120,
+      title: t("table.dueDate"), dataIndex: "due_date", width: 120,
       render: (v: string | null) => v || "-",
     },
     {
-      title: t("table.status", "状态"), dataIndex: "status", width: 100,
+      title: t("table.status"), dataIndex: "status", width: 100,
       render: (st: string) => {
         return <StatusBadge status={outputStatusColor[st] || "default"}>{outputStatusMap[st] || st}</StatusBadge>;
       },
     },
     {
-      title: tc("table.operations", "操作"), width: 200,
+      title: tc("table.operations"), width: 200,
       render: (_: unknown, record: ReviewOutput) => (
         <Space>
           {!isClosed && record.status === "pending" && (
             <Button size="small" onClick={async () => {
               await updateOutput(id!, record.output_id, { status: "in_progress" });
               fetchData();
-            }}>{t("actions.start", "开始")}</Button>
+            }}>{t("actions.start")}</Button>
           )}
           {!isClosed && record.status === "in_progress" && (
             <Button size="small" type="primary" onClick={async () => {
               await updateOutput(id!, record.output_id, { status: "completed" });
               fetchData();
-            }}>{t("actions.complete", "完成")}</Button>
+            }}>{t("actions.complete")}</Button>
           )}
           {record.status === "completed" && canApprove('management_review') && (
             <Button size="small" type="primary" onClick={() => {
               setActiveOutput(record);
               setVerifyModalOpen(true);
-            }}>{t("actions.verify", "验证")}</Button>
+            }}>{t("actions.verify")}</Button>
           )}
           {!isClosed && (
-            <Popconfirm title={t("confirm.deleteOutput", "确认删除?")} onConfirm={async () => {
+            <Popconfirm title={t("confirm.deleteOutput")} onConfirm={async () => {
               await deleteOutput(id!, record.output_id);
               fetchData();
             }}>
-              <Button size="small" danger>{tc("actions.delete", "删除")}</Button>
+              <Button size="small" danger>{tc("actions.delete")}</Button>
             </Popconfirm>
           )}
         </Space>
@@ -203,28 +203,28 @@ export default function ManagementReviewDetailPage() {
 
   return (
     <PageShell
-      title={t("pageTitle.detail", "管理评审详情")}
+      title={t("pageTitle.detail")}
       actions={
         <Space>
           {s === "draft" && !!canEdit('management_review') && (
-            <Button type="primary" onClick={() => handleTransition(() => collectData(id!))}>{t("actions.collectData", "汇总数据")}</Button>
+            <Button type="primary" onClick={() => handleTransition(() => collectData(id!))}>{t("actions.collectData")}</Button>
           )}
           {s === "data_collected" && !!canEdit('management_review') && (
             <>
-              <Button onClick={() => handleTransition(() => refreshData(id!))}>{t("actions.refreshData", "刷新数据")}</Button>
-              <Button onClick={() => handleTransition(() => backToDraft(id!))}>{t("actions.backToDraft", "返回草稿")}</Button>
-              <Button type="primary" onClick={() => handleTransition(() => startReview(id!))}>{t("actions.startReview", "开始评审")}</Button>
+              <Button onClick={() => handleTransition(() => refreshData(id!))}>{t("actions.refreshData")}</Button>
+              <Button onClick={() => handleTransition(() => backToDraft(id!))}>{t("actions.backToDraft")}</Button>
+              <Button type="primary" onClick={() => handleTransition(() => startReview(id!))}>{t("actions.startReview")}</Button>
             </>
           )}
           {s === "in_review" && canApprove('management_review') && (
-            <Button type="primary" onClick={() => handleTransition(() => closeReview(id!))}>{t("actions.closeReview", "关闭评审")}</Button>
+            <Button type="primary" onClick={() => handleTransition(() => closeReview(id!))}>{t("actions.closeReview")}</Button>
           )}
           {s === "closed" && canApprove('management_review') && (
-            <Popconfirm title={t("confirm.reopenReview", "确认重新打开?")} onConfirm={() => handleTransition(() => reopenReview(id!))}>
-              <Button>{t("actions.reopenReview", "重新打开")}</Button>
+            <Popconfirm title={t("confirm.reopenReview")} onConfirm={() => handleTransition(() => reopenReview(id!))}>
+              <Button>{t("actions.reopenReview")}</Button>
             </Popconfirm>
           )}
-          <Button onClick={() => navigate("/management-reviews")}>{tc("actions.back", "返回列表")}</Button>
+          <Button onClick={() => navigate("/management-reviews")}>{tc("actions.back")}</Button>
         </Space>
       }
     >
@@ -232,24 +232,24 @@ export default function ManagementReviewDetailPage() {
         {/* Basic info */}
         <DataCard title={<Space><span>{review.doc_no}</span><StatusBadge status={statusColor[s] || "info"}>{statusMap[s]}</StatusBadge></Space>}>
           <Descriptions column={2}>
-            <Descriptions.Item label={t("descriptions.title", "评审主题")}>{review.title}</Descriptions.Item>
-            <Descriptions.Item label={t("descriptions.reviewDate", "评审日期")}>{review.review_date}</Descriptions.Item>
-            <Descriptions.Item label={t("descriptions.actualDate", "实际日期")}>{review.actual_date || "-"}</Descriptions.Item>
-            <Descriptions.Item label={t("descriptions.productLine", "产品线")}>{review.product_line_code || t("descriptions.allPlants", "全厂")}</Descriptions.Item>
-            <Descriptions.Item label={t("descriptions.location", "地点")}>{review.location || "-"}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.title")}>{review.title}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.reviewDate")}>{review.review_date}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.actualDate")}>{review.actual_date || "-"}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.productLine")}>{review.product_line_code || t("descriptions.allPlants")}</Descriptions.Item>
+            <Descriptions.Item label={t("descriptions.location")}>{review.location || "-"}</Descriptions.Item>
           </Descriptions>
         </DataCard>
 
         {/* Data package */}
         {(s === "data_collected" || s === "in_review" || s === "closed") && (
-          <DataCard title={t("card.dataPackage", "评审输入数据包")}>
+          <DataCard title={t("card.dataPackage")}>
             <Collapse items={dataPackageItems} />
           </DataCard>
         )}
 
         {/* Meeting minutes */}
         {(s === "in_review" || s === "closed") && (
-          <DataCard title={t("card.meetingMinutes", "会议纪要")}>
+          <DataCard title={t("card.meetingMinutes")}>
             <TextArea
               rows={6}
               defaultValue={review.meeting_minutes || ""}
@@ -259,7 +259,7 @@ export default function ManagementReviewDetailPage() {
                 const updated = await updateManagementReview(id, { meeting_minutes: e.target.value });
                 setReview(updated);
               }}
-              placeholder={t("card.meetingMinutes", "请输入评审会议纪要...")}
+              placeholder={t("card.meetingMinutes")}
             />
           </DataCard>
         )}
@@ -267,9 +267,9 @@ export default function ManagementReviewDetailPage() {
         {/* Outputs */}
         {(s === "in_review" || s === "closed") && (
           <DataCard
-            title={t("card.outputs", "评审输出措施")}
+            title={t("card.outputs")}
             extra={!isClosed && !!canEdit('management_review') ? (
-              <Button type="primary" onClick={() => setOutputModalOpen(true)}>{t("actions.addOutput", "添加措施")}</Button>
+              <Button type="primary" onClick={() => setOutputModalOpen(true)}>{t("actions.addOutput")}</Button>
             ) : undefined}
           >
             <Table rowKey="output_id" columns={outputColumns} dataSource={outputs} pagination={false} size="small" className="qf-table" />
@@ -281,7 +281,7 @@ export default function ManagementReviewDetailPage() {
 
         {/* Add output modal */}
         <Modal
-          title={t("modal.addOutput", "添加措施")}
+          title={t("modal.addOutput")}
           open={outputModalOpen}
           onCancel={() => setOutputModalOpen(false)}
           onOk={async () => {
@@ -293,17 +293,17 @@ export default function ManagementReviewDetailPage() {
           }}
         >
           <Form form={form} layout="vertical">
-            <Form.Item name="category" label={t("form.category", "类别")} rules={[{ required: true }]}>
+            <Form.Item name="category" label={t("form.category")} rules={[{ required: true }]}>
               <Select>
                 <Select.Option value="improvement_opportunity">{categoryLabels.improvement_opportunity}</Select.Option>
                 <Select.Option value="system_change">{categoryLabels.system_change}</Select.Option>
                 <Select.Option value="resource_need">{categoryLabels.resource_need}</Select.Option>
               </Select>
             </Form.Item>
-            <Form.Item name="description" label={t("form.description", "描述")} rules={[{ required: true }]}>
+            <Form.Item name="description" label={t("form.description")} rules={[{ required: true }]}>
               <TextArea rows={3} />
             </Form.Item>
-            <Form.Item name="due_date" label={t("form.dueDate", "截止日期")}>
+            <Form.Item name="due_date" label={t("form.dueDate")}>
               <DatePicker style={{ width: "100%" }} />
             </Form.Item>
           </Form>
@@ -311,7 +311,7 @@ export default function ManagementReviewDetailPage() {
 
         {/* Verify output modal */}
         <Modal
-          title={t("modal.effectVerification", "效果验证")}
+          title={t("modal.effectVerification")}
           open={verifyModalOpen}
           onCancel={() => { setVerifyModalOpen(false); setActiveOutput(null); }}
           onOk={async () => {
@@ -326,8 +326,8 @@ export default function ManagementReviewDetailPage() {
           }}
         >
           <Form form={verifyForm} layout="vertical">
-            <Form.Item name="verification_notes" label={t("form.verificationNotes", "验证结论")} rules={[{ required: true }]}>
-              <TextArea rows={3} placeholder={t("form.verificationNotes", "请输入效果验证结论...")} />
+            <Form.Item name="verification_notes" label={t("form.verificationNotes")} rules={[{ required: true }]}>
+              <TextArea rows={3} placeholder={t("form.verificationNotes")} />
             </Form.Item>
           </Form>
         </Modal>

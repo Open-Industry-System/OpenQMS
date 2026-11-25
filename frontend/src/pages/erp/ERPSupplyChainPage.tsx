@@ -33,12 +33,12 @@ function PurchaseOrdersTab() {
   const [statusFilter, setStatusFilter] = useState<string>("");
 
   const poStatusLabel = useMemo((): Record<string, string> => ({
-    draft: t("supplyChain.purchaseOrders.status.draft", "草稿"),
-    submitted: t("supplyChain.purchaseOrders.status.submitted", "已提交"),
-    confirmed: t("supplyChain.purchaseOrders.status.confirmed", "已确认"),
-    partially_received: t("supplyChain.purchaseOrders.status.partiallyReceived", "部分收货"),
-    received: t("supplyChain.purchaseOrders.status.received", "已收货"),
-    closed: t("supplyChain.purchaseOrders.status.closed", "已关闭"),
+    draft: t("supplyChain.purchaseOrders.status.draft"),
+    submitted: t("supplyChain.purchaseOrders.status.submitted"),
+    confirmed: t("supplyChain.purchaseOrders.status.confirmed"),
+    partially_received: t("supplyChain.purchaseOrders.status.partiallyReceived"),
+    received: t("supplyChain.purchaseOrders.status.received"),
+    closed: t("supplyChain.purchaseOrders.status.closed"),
   }), [t]);
 
   const fetchData = (p: number, status?: string, plCode?: string | null) => {
@@ -54,7 +54,7 @@ function PurchaseOrdersTab() {
           setTotal(res.total);
         }
       })
-      .catch(() => message.error(t("supplyChain.purchaseOrders.errors.loadFailed", "加载采购订单失败")))
+      .catch(() => message.error(t("supplyChain.purchaseOrders.errors.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -68,27 +68,27 @@ function PurchaseOrdersTab() {
   };
 
   const columns = [
-    { title: t("supplyChain.purchaseOrders.columns.poNumber", "采购单号"), dataIndex: "po_number", key: "po_number", width: 140 },
-    { title: t("supplyChain.purchaseOrders.columns.lineNumber", "行号"), dataIndex: "line_number", key: "line_number", width: 80 },
-    { title: t("supplyChain.purchaseOrders.columns.supplierCode", "供应商编码"), dataIndex: "supplier_code", key: "supplier_code", width: 130, render: (v: string | null) => v || "—" },
-    { title: t("supplyChain.purchaseOrders.columns.materialCode", "物料编码"), dataIndex: "material_code", key: "material_code", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.purchaseOrders.columns.poNumber"), dataIndex: "po_number", key: "po_number", width: 140 },
+    { title: t("supplyChain.purchaseOrders.columns.lineNumber"), dataIndex: "line_number", key: "line_number", width: 80 },
+    { title: t("supplyChain.purchaseOrders.columns.supplierCode"), dataIndex: "supplier_code", key: "supplier_code", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.purchaseOrders.columns.materialCode"), dataIndex: "material_code", key: "material_code", width: 130, render: (v: string | null) => v || "—" },
     {
-      title: t("supplyChain.purchaseOrders.columns.quantity", "数量"),
+      title: t("supplyChain.purchaseOrders.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 90,
       render: (v: number | null) => v ?? "—",
     },
     {
-      title: t("supplyChain.purchaseOrders.columns.receivedQuantity", "已收货"),
+      title: t("supplyChain.purchaseOrders.columns.receivedQuantity"),
       dataIndex: "received_quantity",
       key: "received_quantity",
       width: 90,
       render: (v: number | null) => v ?? "—",
     },
-    { title: t("supplyChain.purchaseOrders.columns.lotNo", "批次号"), dataIndex: "lot_no", key: "lot_no", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.purchaseOrders.columns.lotNo"), dataIndex: "lot_no", key: "lot_no", width: 130, render: (v: string | null) => v || "—" },
     {
-      title: t("supplyChain.purchaseOrders.columns.status", "状态"),
+      title: t("supplyChain.purchaseOrders.columns.status"),
       dataIndex: "status",
       key: "status",
       width: 110,
@@ -99,7 +99,7 @@ function PurchaseOrdersTab() {
       ),
     },
     {
-      title: t("supplyChain.purchaseOrders.columns.deliveryDate", "交货日期"),
+      title: t("supplyChain.purchaseOrders.columns.deliveryDate"),
       dataIndex: "delivery_date",
       key: "delivery_date",
       width: 120,
@@ -111,7 +111,7 @@ function PurchaseOrdersTab() {
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
         <Select
-          placeholder={t("supplyChain.purchaseOrders.filterPlaceholder", "筛选状态")}
+          placeholder={t("supplyChain.purchaseOrders.filterPlaceholder")}
           allowClear
           style={{ width: 140 }}
           value={statusFilter || undefined}
@@ -119,7 +119,7 @@ function PurchaseOrdersTab() {
           options={Object.entries(poStatusLabel).map(([value, label]) => ({ value, label }))}
         />
       </div>
-      <DataCard title={t("supplyChain.purchaseOrders.cardTitle", "采购订单")}>
+      <DataCard title={t("supplyChain.purchaseOrders.cardTitle")}>
         <Table
           columns={columns}
           dataSource={data}
@@ -157,10 +157,10 @@ function InventoryBalancesTab() {
   const [page, setPage] = useState(1);
 
   const invStatusLabel = useMemo((): Record<string, string> => ({
-    available: t("supplyChain.inventory.status.available", "可用"),
-    restricted: t("supplyChain.inventory.status.restricted", "受限"),
-    blocked: t("supplyChain.inventory.status.blocked", "冻结"),
-    in_inspection: t("supplyChain.inventory.status.inInspection", "检验中"),
+    available: t("supplyChain.inventory.status.available"),
+    restricted: t("supplyChain.inventory.status.restricted"),
+    blocked: t("supplyChain.inventory.status.blocked"),
+    in_inspection: t("supplyChain.inventory.status.inInspection"),
   }), [t]);
 
   const fetchData = (p: number, plCode?: string | null) => {
@@ -170,7 +170,7 @@ function InventoryBalancesTab() {
         setData(res.items);
         setTotal(res.total);
       })
-      .catch(() => message.error(t("supplyChain.inventory.errors.loadFailed", "加载库存余额失败")))
+      .catch(() => message.error(t("supplyChain.inventory.errors.loadFailed")))
       .finally(() => setLoading(false));
   };
 
@@ -178,20 +178,20 @@ function InventoryBalancesTab() {
   }, [productLine]);
 
   const columns = [
-    { title: t("supplyChain.inventory.columns.materialCode", "物料编码"), dataIndex: "material_code", key: "material_code", width: 140 },
-    { title: t("supplyChain.inventory.columns.locationCode", "库位编码"), dataIndex: "location_code", key: "location_code", width: 130 },
-    { title: t("supplyChain.inventory.columns.lotNo", "批次号"), dataIndex: "lot_no", key: "lot_no", width: 130 },
-    { title: t("supplyChain.inventory.columns.supplierLotNo", "供应商批次号"), dataIndex: "supplier_lot_no", key: "supplier_lot_no", width: 130, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.inventory.columns.materialCode"), dataIndex: "material_code", key: "material_code", width: 140 },
+    { title: t("supplyChain.inventory.columns.locationCode"), dataIndex: "location_code", key: "location_code", width: 130 },
+    { title: t("supplyChain.inventory.columns.lotNo"), dataIndex: "lot_no", key: "lot_no", width: 130 },
+    { title: t("supplyChain.inventory.columns.supplierLotNo"), dataIndex: "supplier_lot_no", key: "supplier_lot_no", width: 130, render: (v: string | null) => v || "—" },
     {
-      title: t("supplyChain.inventory.columns.quantity", "数量"),
+      title: t("supplyChain.inventory.columns.quantity"),
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
       render: (v: number | null) => v ?? "—",
     },
-    { title: t("supplyChain.inventory.columns.unit", "单位"), dataIndex: "unit", key: "unit", width: 70, render: (v: string | null) => v || "—" },
+    { title: t("supplyChain.inventory.columns.unit"), dataIndex: "unit", key: "unit", width: 70, render: (v: string | null) => v || "—" },
     {
-      title: t("supplyChain.inventory.columns.inventoryStatus", "库存状态"),
+      title: t("supplyChain.inventory.columns.inventoryStatus"),
       dataIndex: "inventory_status",
       key: "inventory_status",
       width: 110,
@@ -204,7 +204,7 @@ function InventoryBalancesTab() {
   ];
 
   return (
-    <DataCard title={t("supplyChain.inventory.cardTitle", "库存余额")}>
+    <DataCard title={t("supplyChain.inventory.cardTitle")}>
       <Table
         columns={columns}
         dataSource={data}
@@ -229,12 +229,12 @@ export default function ERPSupplyChainPage() {
   const [activeTab, setActiveTab] = useState("purchase_orders");
 
   const tabItems = [
-    { key: "purchase_orders", label: t("supplyChain.tabs.purchaseOrders", "采购订单"), children: <PurchaseOrdersTab /> },
-    { key: "inventory", label: t("supplyChain.tabs.inventory", "库存余额"), children: <InventoryBalancesTab /> },
+    { key: "purchase_orders", label: t("supplyChain.tabs.purchaseOrders"), children: <PurchaseOrdersTab /> },
+    { key: "inventory", label: t("supplyChain.tabs.inventory"), children: <InventoryBalancesTab /> },
   ];
 
   return (
-    <PageShell title={t("supplyChain.title", "ERP 供应链")}>
+    <PageShell title={t("supplyChain.title")}>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}

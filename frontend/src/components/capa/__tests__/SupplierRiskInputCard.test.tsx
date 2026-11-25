@@ -19,15 +19,15 @@ const base = {
 };
 
 beforeEach(async () => {
-  await i18n.changeLanguage("zh-CN");
+  await i18n.changeLanguage("de-DE");
 });
 
 describe("SupplierRiskInputCard", () => {
   it("shows confirm buttons when processed and repeat_confirmed null and editable", () => {
     const onConfirm = vi.fn();
     render(<SupplierRiskInputCard input={base} canEdit={true} onConfirm={onConfirm} />);
-    expect(screen.getByText(/系统判定曾复发/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/是，属复发/));
+    expect(screen.getByText(/Das System hat eine Wiederholung erkannt/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Ja, Wiederholung/));
     expect(onConfirm).toHaveBeenCalledWith(true);
   });
 
@@ -39,7 +39,7 @@ describe("SupplierRiskInputCard", () => {
         onConfirm={vi.fn()}
       />,
     );
-    expect(screen.queryByText(/是，属复发/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ja, Wiederholung/)).not.toBeInTheDocument();
   });
 
   it("shows unavailable message when no FMEA", () => {
@@ -50,7 +50,7 @@ describe("SupplierRiskInputCard", () => {
         onConfirm={vi.fn()}
       />,
     );
-    expect(screen.getByText(/未关联 FMEA/)).toBeInTheDocument();
+    expect(screen.getByText(/Keine FMEA verknüpft/)).toBeInTheDocument();
   });
 
   it("shows fixed state when confirmed", () => {
@@ -61,6 +61,6 @@ describe("SupplierRiskInputCard", () => {
         onConfirm={vi.fn()}
       />,
     );
-    expect(screen.getByText(/已确认：复发/)).toBeInTheDocument();
+    expect(screen.getByText(/Bestätigt: Wiederholung/)).toBeInTheDocument();
   });
 });

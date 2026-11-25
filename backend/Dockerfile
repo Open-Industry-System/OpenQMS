@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 ARG RELEASE_SHA
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=https://pypi.org/simple
 LABEL org.opencontainers.image.revision=$RELEASE_SHA
 
 WORKDIR /app

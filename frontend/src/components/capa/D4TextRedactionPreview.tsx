@@ -4,9 +4,11 @@ import { createD4TextPreview, getD4PreviewAvailability, getD4PreviewVersion } fr
 import { useAuthStore } from '../../store/authStore';
 import { useProductLineStore } from '../../store/productLineStore';
 import type { D4TextPreview } from '../../types/capaD4TextPreview';
+import { tr, useTr } from "../../i18n/tr";
 
-const labels = { d4_root_cause: 'D4 根因正文', root_cause_text: '验证根因文本', result: '验证结果文本' };
+const labels = () => ({ d4_root_cause: tr("D4-Grundursachentext", "D4 root cause text"), root_cause_text: tr("Text der verifizierten Grundursache", "Verification root cause text"), result: tr("Text des Verifizierungsergebnisses", "Verification result text") });
 export default function D4TextRedactionPreview({ reportId }: { reportId: string }) {
+  useTr();
   const userId = useAuthStore(state => state.user?.user_id);
   const token = useAuthStore(state => state.token);
   const factory = useAuthStore(state => state.currentFactoryId);
@@ -57,7 +59,7 @@ export default function D4TextRedactionPreview({ reportId }: { reportId: string 
     let active = true, checking = false;
     const alive = () => active && currentSession.current === captured && epoch.current === capturedEpoch && !document.hidden;
     const expiry = window.setTimeout(() => {
-      if (alive()) withdraw('候选已到期，请重新生成。');
+      if (alive()) withdraw(tr("Kandidat ist abgelaufen, bitte neu erzeugen.", "Candidate expired, please regenerate."));
     }, Math.min(30000, Math.max(0, Date.parse(visible.expires_at) - Date.now())));
     const poll = window.setInterval(() => {
       if (!alive() || checking) return;
@@ -66,10 +68,10 @@ export default function D4TextRedactionPreview({ reportId }: { reportId: string 
       versionController.current = controller;
       void getD4PreviewVersion(reportId, controller.signal).then(value => {
         if (alive() && (value.source_version !== visible.source_version || value.rule_version !== visible.rule_version)) {
-          withdraw('来源已变化，请重新生成候选。', true);
+          withdraw(tr("Quelle hat sich geändert, bitte Kandidaten neu erzeugen.", "Source changed, please regenerate the candidate."), true);
         }
       }).catch(() => {
-        if (alive()) withdraw('无法确认当前访问或来源，候选已撤回。', true);
+        if (alive()) withdraw(tr("Zugriff oder Quelle konnte nicht bestätigt werden, Kandidat wurde zurückgezogen.", "Could not confirm access or source; candidate withdrawn."), true);
       }).finally(() => { checking = false; });
     }, 2000);
     return () => {
@@ -86,12 +88,12 @@ export default function D4TextRedactionPreview({ reportId }: { reportId: string 
       const replacement_terms = terms.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
       const value = await createD4TextPreview(reportId, { replacement_terms }, controller.signal);
       if (controller.signal.aborted || currentSession.current !== captured || epoch.current !== capturedEpoch || document.hidden) return;
-      if (Date.parse(value.expires_at) <= Date.now()) { withdraw('候选已到期，请重新生成。'); return; }
+      if (Date.parse(value.expires_at) <= Date.now()) { withdraw(tr("Kandidat ist abgelaufen, bitte neu erzeugen.", "Candidate expired, please regenerate.")); return; }
       setCandidate({ session: captured, value }); setNotice('');
     } catch (error) {
       if (!controller.signal.aborted && currentSession.current === captured && epoch.current === capturedEpoch) {
         const status = (error as { response?: { status?: number } })?.response?.status;
-        withdraw('无法生成候选，请检查替换词及当前对象访问权限。', [401, 403, 404].includes(status ?? 0));
+        withdraw(tr("Kandidat kann nicht erzeugt werden, bitte Ersetzungsbegriffe und Zugriffsrechte prüfen.", "Cannot generate candidate; check replacement terms and object access."), [401, 403, 404].includes(status ?? 0));
       }
     } finally {
       if (!controller.signal.aborted && currentSession.current === captured && epoch.current === capturedEpoch) setPending(false);
@@ -99,35 +101,35 @@ export default function D4TextRedactionPreview({ reportId }: { reportId: string 
   }
   if (!available) return null;
   return <>
-    <Button onClick={() => setOpen(true)}>正文脱敏候选预览</Button>
-    {open && <Modal title="D4 正文脱敏候选预览" open onCancel={close} destroyOnClose transitionName="" maskTransitionName=""
+    <Button onClick={() => setOpen(true)}>{tr("Vorschau anonymisierter Text", "Redacted text preview")}</Button>
+    {open && <Modal title={tr("D4: Vorschau anonymisierter Text", "D4 redacted text preview")} open onCancel={close} destroyOnClose transitionName="" maskTransitionName=""
       width={760} styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
-      footer={<Button onClick={close}>关闭预览</Button>}>
-      <Alert type="warning" showIcon message="受限脱敏候选，可能仍含敏感内容"
-        description="规则替换不代表完全脱敏或已批准降敏。仅供内部检查，不向插件或模型交付，不改写业务原文。" />
+      footer={<Button onClick={close}>{tr("Vorschau schließen", "Close preview")}</Button>}>
+      <Alert type="warning" showIcon message={tr("Eingeschränkter anonymisierter Kandidat – kann noch sensible Inhalte enthalten", "Restricted redaction candidate – may still contain sensitive content")}
+        description={tr("Regelbasierte Ersetzung bedeutet keine vollständige oder freigegebene Anonymisierung. Nur zur internen Prüfung, wird nicht an Plugins oder Modelle übergeben und ändert den Originaltext nicht.", "Rule-based replacement is not full or approved redaction. For internal review only; never delivered to plugins or models and does not modify the original text.")} />
       <label style={{ display: 'block', marginTop: 16 }}>
-        显式替换词
-        <Input.TextArea aria-label="显式替换词" value={terms} rows={3} maxLength={8192}
-          placeholder="每行一个需遮盖的词，最多50项；按字面匹配，不接受正则。"
+        {tr("Explizite Ersetzungsbegriffe", "Explicit replacement terms")}
+        <Input.TextArea aria-label={tr("Explizite Ersetzungsbegriffe", "Explicit replacement terms")} value={terms} rows={3} maxLength={8192}
+          placeholder={tr("Ein Begriff pro Zeile, höchstens 50; wörtlicher Abgleich, keine regulären Ausdrücke.", "One term per line, max. 50; literal match, no regular expressions.")}
           onChange={event => { withdraw(); setTerms(event.target.value); }} />
       </label>
-      <Button aria-label="生成受限候选" style={{ marginTop: 12 }} onClick={() => void generate()} loading={pending} disabled={pending}>生成受限候选</Button>
+      <Button aria-label={tr("Eingeschränkten Kandidaten erzeugen", "Generate restricted candidate")} style={{ marginTop: 12 }} onClick={() => void generate()} loading={pending} disabled={pending}>{tr("Eingeschränkten Kandidaten erzeugen", "Generate restricted candidate")}</Button>
       {notice && <p role="status" aria-live="polite">{notice}</p>}
-      {visible && <section aria-label="受限正文预览" style={{ marginTop: 16 }}>
-        <Space wrap><Tag color="warning">restricted</Tag><Tag>未批准降敏</Tag><Tag>外发关闭</Tag></Space>
+      {visible && <section aria-label={tr("Eingeschränkte Textvorschau", "Restricted text preview")} style={{ marginTop: 16 }}>
+        <Space wrap><Tag color="warning">restricted</Tag><Tag>{tr("Anonymisierung nicht freigegeben", "Redaction not approved")}</Tag><Tag>{tr("Weitergabe deaktiviert", "Export disabled")}</Tag></Space>
         <Typography.Paragraph style={{ fontFamily: 'monospace', overflowWrap: 'anywhere', marginTop: 8 }}>
-          源版本 {visible.source_version}<br />规则 {visible.rule_version}<br />有效至 {visible.expires_at}
+          {tr("Quellversion", "Source version")} {visible.source_version}<br />{tr("Regel", "Rule")} {visible.rule_version}<br />{tr("Gültig bis", "Valid until")} {visible.expires_at}
         </Typography.Paragraph>
         {visible.fields.map(value => <section key={`${value.verification_id}:${value.field}`}
           style={{ borderTop: '1px solid #d9d9d9', paddingBlock: 12 }}>
-          <Typography.Title level={5}>{labels[value.field]}</Typography.Title>
-          {value.verification_id && <p style={{ overflowWrap: 'anywhere' }}>验证记录 {value.verification_id}</p>}
-          <Tag>{value.source_status === 'unverified' ? '语义来源未确认' : '引用已校验（非降敏批准）'}</Tag>
+          <Typography.Title level={5}>{labels()[value.field]}</Typography.Title>
+          {value.verification_id && <p style={{ overflowWrap: 'anywhere' }}>{tr("Verifizierung", "Verification")} {value.verification_id}</p>}
+          <Tag>{value.source_status === 'unverified' ? tr("Semantische Quelle nicht bestätigt", "Semantic source unconfirmed") : tr("Verweis geprüft (keine Anonymisierungsfreigabe)", "Reference verified (not a redaction approval)")}</Tag>
           <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontFamily: 'inherit', marginBlock: 10 }}>
-            {value.redacted_text ?? '暂无正文'}
+            {value.redacted_text ?? tr("Kein Text vorhanden", "No text")}
           </pre>
-          <p>规则命中 {Object.entries(value.match_counts).map(([kind, count]) => `${kind}: ${count}`).join(' · ') || '无'}</p>
-          {value.source_ref && <p style={{ overflowWrap: 'anywhere' }}>FMEA 来源 {value.source_ref.object_id} · 节点 {value.source_ref.node_id} · 版本 {value.source_ref.version}</p>}
+          <p>{tr("Regeltreffer", "Rule matches")} {Object.entries(value.match_counts).map(([kind, count]) => `${kind}: ${count}`).join(' · ') || tr("keine", "none")}</p>
+          {value.source_ref && <p style={{ overflowWrap: 'anywhere' }}>{tr("FMEA-Quelle", "FMEA source")} {value.source_ref.object_id} · {tr("Knoten", "Node")} {value.source_ref.node_id} · {tr("Version", "Version")} {value.source_ref.version}</p>}
         </section>)}
       </section>}
     </Modal>}

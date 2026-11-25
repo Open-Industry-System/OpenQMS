@@ -54,41 +54,41 @@ export default function ManagementReviewListPage() {
   }, [page, statusFilter, selectedPL]);
 
   const columns = [
-    { title: t("table.docNo", "编号"), dataIndex: "doc_no", key: "doc_no", width: 140 },
-    { title: t("table.title", "主题"), dataIndex: "title", key: "title" },
-    { title: t("table.reviewDate", "评审日期"), dataIndex: "review_date", key: "review_date", width: 120 },
+    { title: t("table.docNo"), dataIndex: "doc_no", key: "doc_no", width: 140 },
+    { title: t("table.title"), dataIndex: "title", key: "title" },
+    { title: t("table.reviewDate"), dataIndex: "review_date", key: "review_date", width: 120 },
     {
-      title: t("table.status", "状态"), dataIndex: "status", key: "status", width: 120,
+      title: t("table.status"), dataIndex: "status", key: "status", width: 120,
       render: (s: string) => {
         return <StatusBadge status={statusColor[s] || "info"}>{statusMap[s] || s}</StatusBadge>;
       },
     },
     {
-      title: t("table.productLine", "产品线"), dataIndex: "product_line_code", key: "product_line_code", width: 120,
-      render: (v: string | null) => v || t("descriptions.allPlants", "全厂"),
+      title: t("table.productLine"), dataIndex: "product_line_code", key: "product_line_code", width: 120,
+      render: (v: string | null) => v || t("descriptions.allPlants"),
     },
     {
-      title: tc("table.operations", "操作"), key: "action", width: 80,
+      title: tc("table.operations"), key: "action", width: 80,
       render: (_: unknown, record: ManagementReview) => (
-        <Button type="link" onClick={() => navigate(`/management-reviews/${record.review_id}`)}>{tc("actions.view", "查看")}</Button>
+        <Button type="link" onClick={() => navigate(`/management-reviews/${record.review_id}`)}>{tc("actions.view")}</Button>
       ),
     },
   ];
 
   return (
     <PageShell
-      title={t("pageTitle.list", "管理评审")}
-      subtitle={t("pageSubtitle.list", "管理层质量评审计划")}
+      title={t("pageTitle.list")}
+      subtitle={t("pageSubtitle.list")}
       actions={
         canEdit('management_review') && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/management-reviews/new")}>{t("actions.newReview", "新建评审")}</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/management-reviews/new")}>{t("actions.newReview")}</Button>
         )
       }
     >
-      <DataCard title={t("card.reviewList", "评审清单")}>
+      <DataCard title={t("card.reviewList")}>
         <Space style={{ marginBottom: 16 }}>
           <Select
-            allowClear placeholder={t("filter.statusPlaceholder", "状态筛选")} style={{ width: 150 }}
+            allowClear placeholder={t("filter.statusPlaceholder")} style={{ width: 150 }}
             value={statusFilter}
             onChange={(v) => { setStatusFilter(v); setPage(1); }}
           >

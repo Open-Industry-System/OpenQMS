@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import enGraph from "../locales/en-US/graph.json";
-import zhGraph from "../locales/zh-CN/graph.json";
+import zhGraph from "../locales/de-DE/graph.json";
 import {
   DEFAULT_NODE_STYLE,
   DFMEA_LEGEND_NODE_TYPES,
@@ -71,7 +71,7 @@ describe("graphPresentation", () => {
     }
   });
 
-  it("has zh-CN and en-US locale entries for every known graph enum", () => {
+  it("has de-DE and en-US locale entries for every known graph enum", () => {
     for (const presentation of Object.values(NODE_PRESENTATION)) {
       const key = presentation.translationKey.replace("nodeTypes.", "");
       expect(zhGraph.nodeTypes[key as keyof typeof zhGraph.nodeTypes]).toBeTruthy();
@@ -130,7 +130,7 @@ describe("graphPresentation", () => {
       expect(getNodeTypeKey("FailureMode", "DFMEA")).toBe("nodeTypes.failureMode");
     });
 
-    it("has zh-CN and en-US locale entries for every DFMEA override key", () => {
+    it("has de-DE and en-US locale entries for every DFMEA override key", () => {
       for (const key of ["hasSubsystem", "hasComponent"] as const) {
         expect(zhGraph.edgeTypes[key]).toBeTruthy();
         expect(enGraph.edgeTypes[key]).toBeTruthy();
@@ -200,7 +200,7 @@ describe("graphPresentation", () => {
     });
   });
 
-  it("has zh-CN and en-US locale entries for the new edge-legend keys", () => {
+  it("has de-DE and en-US locale entries for the new edge-legend keys", () => {
     expect(zhGraph.edgeTypes.causeBranch).toBeTruthy();
     expect(enGraph.edgeTypes.causeBranch).toBeTruthy();
     expect(zhGraph.edgeTypes.structuralChain).toBeTruthy();

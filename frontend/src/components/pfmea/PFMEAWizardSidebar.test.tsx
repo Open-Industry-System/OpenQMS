@@ -4,18 +4,18 @@ import { I18nextProvider } from 'react-i18next';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import PFMEAWizardSidebar from './PFMEAWizardSidebar';
-import zhPFMEA from '../../locales/zh-CN/pfmea.json';
+import zhPFMEA from '../../locales/de-DE/pfmea.json';
 import type { GraphNode, GraphEdge } from '../../types';
 
 const i18nTest = i18n.createInstance();
 i18nTest
   .use(initReactI18next)
   .init({
-    lng: 'zh-CN',
-    fallbackLng: 'zh-CN',
+    lng: 'de-DE',
+    fallbackLng: 'de-DE',
     interpolation: { escapeValue: false },
     resources: {
-      'zh-CN': { pfmea: zhPFMEA },
+      'de-DE': { pfmea: zhPFMEA },
     },
   });
 
@@ -33,7 +33,7 @@ describe('PFMEAWizardSidebar', () => {
         maxReachableStep={0} warnings={[]} structureNodes={[]} edges={[]} />,
       { wrapper: I18nTestWrapper },
     );
-    expect(screen.getAllByText(/5T范围|5T Scope|结构分析|Structure Analysis/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/5T-Umfang|5T Scope|Strukturanalyse|Structure Analysis/i).length).toBeGreaterThan(0);
   });
 
   it('renders ProcessItem/ProcessStep/WorkElement in structure tree', () => {

@@ -1,0 +1,97 @@
+{
+  "pageTitle": {
+    "list": "SCAR-Verwaltung",
+    "detail": "SCAR-Details",
+    "subtitle": "Korrekturmaßnahmenanforderungen an Lieferanten"
+  },
+  "status": {
+    "open": "Offen",
+    "in_progress": "In Bearbeitung",
+    "responded": "Beantwortet",
+    "verified": "Verifiziert",
+    "closed": "Geschlossen"
+  },
+  "source": {
+    "iqc": "Ablehnung Wareneingang",
+    "complaint": "Kundenreklamation",
+    "rma": "RMA",
+    "manual": "Manuell"
+  },
+  "tabs": {
+    "all": "Alle",
+    "pending": "Offen",
+    "responded": "Beantwortet",
+    "verified": "Verifiziert",
+    "closed": "Geschlossen"
+  },
+  "table": {
+    "scarNo": "SCAR-Nr.",
+    "supplier": "Lieferant",
+    "source": "Quelle",
+    "status": "Status",
+    "issuedDate": "Ausstellungsdatum",
+    "dueDate": "Fälligkeitsdatum",
+    "operations": "Aktionen"
+  },
+  "actions": {
+    "newScar": "Neue SCAR",
+    "view": "Anzeigen",
+    "start": "Starten",
+    "respond": "Antwort absenden",
+    "verify": "Verifizieren",
+    "reject": "Ablehnen",
+    "close": "Schließen",
+    "reopen": "Wieder öffnen",
+    "createLinked8D": "Verknüpften 8D anlegen"
+  },
+  "card": {
+    "scarInfo": "SCAR-Informationen",
+    "supplierResponse": "Antwort des Lieferanten",
+    "capaLink": "CAPA-Verknüpfung",
+    "resolutionSummary": "Zusammenfassung der Lösung",
+    "list": "SCAR-Liste"
+  },
+  "descriptions": {
+    "supplier": "Lieferant",
+    "source": "Quelle",
+    "productLine": "Produktlinie",
+    "issuedDate": "Ausstellungsdatum",
+    "dueDate": "Fälligkeitsdatum",
+    "closedDate": "Abschlussdatum",
+    "description": "Beschreibung",
+    "requestedAction": "Angeforderte Maßnahme"
+  },
+  "modal": {
+    "submitResponse": "Lieferantenantwort absenden",
+    "closeScar": "SCAR schließen",
+    "createLinked8D": "Verknüpften 8D anlegen",
+    "createLinked8DContent": "Aus dieser SCAR wird ein neuer 8D-/CAPA-Datensatz erzeugt und automatisch verknüpft.",
+    "scarLabel": "SCAR:",
+    "descriptionLabel": "Beschreibung:"
+  },
+  "placeholder": {
+    "supplierResponse": "Antwort des Lieferanten eingeben",
+    "resolutionSummary": "Zusammenfassung der Lösung eingeben"
+  },
+  "messages": {
+    "createSuccess": "SCAR erfolgreich angelegt",
+    "statusUpdated": "Status aktualisiert",
+    "capaLinked": "CAPA angelegt und verknüpft",
+    "enterResponse": "Bitte Antwort des Lieferanten eingeben",
+    "enterResolution": "Bitte Zusammenfassung der Lösung eingeben"
+  },
+  "empty": {
+    "noResponse": "Noch keine Antwort",
+    "notLinked": "Nicht verknüpft"
+  },
+  "severity": {
+    "normal": "Normal"
+  },
+  "linked": {
+    "linked8D": "Verknüpfter 8D:"
+  },
+  "validation": {
+    "supplierRequired": "Bitte Lieferanten auswählen",
+    "descriptionRequired": "Bitte Beschreibung eingeben"
+  }
+}

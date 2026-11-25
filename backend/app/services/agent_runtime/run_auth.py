@@ -3,7 +3,8 @@ import re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from jose import JWTError, jwt
+import jwt
+from jwt import PyJWTError as JWTError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,7 +45,7 @@ def issue_run_token(run: AgentRun, installation: AgentPluginInstallation,
 def _claims(token: str) -> dict:
     try:
         claims = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
-            issuer=RUN_ISSUER, audience=RUN_AUDIENCE, options={"require_exp": True})
+            issuer=RUN_ISSUER, audience=RUN_AUDIENCE, options={"require": ["exp"]})
         if (claims.get("iss") != RUN_ISSUER or claims.get("aud") != RUN_AUDIENCE
                 or claims.get("type") != "agent_run" or type(claims.get("exp")) is not int):
             raise ValueError

@@ -297,7 +297,7 @@ export default function D7RecPanel({
       {rule.length > 0 && (
         <>
           <Text strong style={{ display: "block", marginBottom: 8 }}>
-            {t("d7.ruleSuggestions", { defaultValue: "规则引擎预防建议" })}
+            {t("d7.ruleSuggestions")}
           </Text>
           <List
             size="small"

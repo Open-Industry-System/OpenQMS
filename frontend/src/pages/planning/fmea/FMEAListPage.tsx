@@ -191,7 +191,7 @@ export default function FMEAListPage() {
       dataIndex: "updated_at",
       key: "updated_at",
       width: 180,
-      render: (v: string) => new Date(v).toLocaleString(i18n.language || "zh-CN"),
+      render: (v: string) => new Date(v).toLocaleString(i18n.language || "de-DE"),
     },
     {
       title: t("list.columns.actions"),

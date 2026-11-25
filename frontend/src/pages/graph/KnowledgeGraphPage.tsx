@@ -25,17 +25,17 @@ export default function KnowledgeGraphPage() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   const typeOptions = useMemo(() => [
-    { value: "FailureMode", label: t("search.failureMode", "失效模式") },
-    { value: "FailureCause", label: t("search.failureCause", "失效原因") },
-    { value: "FailureEffect", label: t("search.failureEffect", "失效影响") },
-    { value: "Function", label: t("search.function", "功能") },
+    { value: "FailureMode", label: t("search.failureMode") },
+    { value: "FailureCause", label: t("search.failureCause") },
+    { value: "FailureEffect", label: t("search.failureEffect") },
+    { value: "Function", label: t("search.function") },
   ], [t]);
 
   const riskColumns = useMemo(() => [
-    { title: t("search.failureMode", "失效模式"), dataIndex: "name", key: "name" },
+    { title: t("search.failureMode"), dataIndex: "name", key: "name" },
     { title: "RPN", dataIndex: "rpn", key: "rpn", width: 80 },
     {
-      title: t("search.columns.sourceFmea", "来源 FMEA"),
+      title: t("search.columns.sourceFmea"),
       dataIndex: "document_no",
       key: "document_no",
       render: (v: string, record: { node_id: string; fmea_id: string }) => (
@@ -49,24 +49,24 @@ export default function KnowledgeGraphPage() {
       ),
     },
     {
-      title: tc("table.operations", "操作"),
+      title: tc("table.operations"),
       key: "action",
       render: (_: unknown, record: { node_id: string; fmea_id: string }) => (
         <Button
           size="small"
           onClick={() => navigate(`/fmea/${record.fmea_id}?tab=graph&highlightNode=${record.node_id}`)}
         >
-          {t("search.viewGraph", "查看图谱")}
+          {t("search.viewGraph")}
         </Button>
       ),
     },
   ], [t, tc, navigate]);
 
   const searchColumns = useMemo(() => [
-    { title: t("search.columns.name", "名称"), dataIndex: "name", key: "name" },
-    { title: t("search.columns.type", "类型"), dataIndex: "type", key: "type", width: 120 },
+    { title: t("search.columns.name"), dataIndex: "name", key: "name" },
+    { title: t("search.columns.type"), dataIndex: "type", key: "type", width: 120 },
     {
-      title: t("search.columns.sourceFmea", "来源 FMEA"),
+      title: t("search.columns.sourceFmea"),
       dataIndex: "document_no",
       key: "document_no",
       render: (v: string, record: { node_id: string; fmea_id: string }) => (
@@ -79,14 +79,14 @@ export default function KnowledgeGraphPage() {
       ),
     },
     {
-      title: tc("table.operations", "操作"),
+      title: tc("table.operations"),
       key: "action",
       render: (_: unknown, record: { node_id: string; fmea_id: string }) => (
         <Button
           size="small"
           onClick={() => navigate(`/fmea/${record.fmea_id}?tab=graph&highlightNode=${record.node_id}`)}
         >
-          {t("search.view", "查看")}
+          {t("search.view")}
         </Button>
       ),
     },
@@ -118,7 +118,7 @@ export default function KnowledgeGraphPage() {
   if (!productLineCode) {
     return (
       <DataCard title={null}>
-        <Empty description={t("search.selectProductLine", "请先选择产品线")} />
+        <Empty description={t("search.selectProductLine")} />
       </DataCard>
     );
   }
@@ -126,41 +126,41 @@ export default function KnowledgeGraphPage() {
   const tabItems = [
     {
       key: "overview",
-      label: <span><BarChartOutlined /> {t("page.overview", "总览 / 风险地图")}</span>,
+      label: <span><BarChartOutlined /> {t("page.overview")}</span>,
       children: statsLoading ? (
         <Spin size="large" style={{ display: "block", margin: "60px auto" }} />
       ) : stats ? (
         <Space direction="vertical" size="large" style={{ width: "100%" }}>
           <Row gutter={16}>
             <Col span={6}>
-              <DataCard title={null}><Statistic title={t("overview.totalFmeas", "FMEA 总数")} value={stats.total_fmeas} /></DataCard>
+              <DataCard title={null}><Statistic title={t("overview.totalFmeas")} value={stats.total_fmeas} /></DataCard>
             </Col>
             <Col span={6}>
-              <DataCard title={null}><Statistic title={t("overview.totalNodes", "节点总数")} value={stats.total_nodes} /></DataCard>
+              <DataCard title={null}><Statistic title={t("overview.totalNodes")} value={stats.total_nodes} /></DataCard>
             </Col>
             <Col span={6}>
               <DataCard title={null}>
                 <Statistic
-                  title={t("overview.highApNodes", "高优先级失效模式 (AP=H)")}
+                  title={t("overview.highApNodes")}
                   value={stats.high_ap_nodes?.length || 0}
                   prefix={<FireOutlined style={{ color: "#ff4d4f" }} />}
                 />
               </DataCard>
             </Col>
             <Col span={6}>
-              <DataCard title={null}><Statistic title={t("overview.avgRpn", "平均 RPN")} value={stats.avg_rpn || 0} precision={1} /></DataCard>
+              <DataCard title={null}><Statistic title={t("overview.avgRpn")} value={stats.avg_rpn || 0} precision={1} /></DataCard>
             </Col>
           </Row>
-          <DataCard title={t("overview.apDistribution", "AP 分布")}>
+          <DataCard title={t("overview.apDistribution")}>
             <Space size="large">
-              <StatusBadge status="error">{t("nodeDetail.apHigh", "高 (H)")}: {stats.ap_distribution?.H || 0}</StatusBadge>
-              <StatusBadge status="info">{t("nodeDetail.apMedium", "中 (M)")}: {stats.ap_distribution?.M || 0}</StatusBadge>
-              <StatusBadge status="success">{t("nodeDetail.apLow", "低 (L)")}: {stats.ap_distribution?.L || 0}</StatusBadge>
+              <StatusBadge status="error">{t("nodeDetail.apHigh")}: {stats.ap_distribution?.H || 0}</StatusBadge>
+              <StatusBadge status="info">{t("nodeDetail.apMedium")}: {stats.ap_distribution?.M || 0}</StatusBadge>
+              <StatusBadge status="success">{t("nodeDetail.apLow")}: {stats.ap_distribution?.L || 0}</StatusBadge>
             </Space>
           </DataCard>
           <DataCard
-            title={t("overview.topHighAp", "高优先级失效模式 Top 10")}
-            extra={<StatusBadge status="error">{t("overview.topHighApExtra", "AP = H (高优先级)")}</StatusBadge>}
+            title={t("overview.topHighAp")}
+            extra={<StatusBadge status="error">{t("overview.topHighApExtra")}</StatusBadge>}
           >
             <Table
               className="qf-table"
@@ -171,7 +171,7 @@ export default function KnowledgeGraphPage() {
               size="small"
             />
           </DataCard>
-          <DataCard title={t("overview.nodeTypeDistribution", "节点类型分布")}>
+          <DataCard title={t("overview.nodeTypeDistribution")}>
             <Space wrap>
               {Object.entries(stats.node_type_distribution || {}).map(([type, count]) => (
                 <Tag key={type}>{type}: {count}</Tag>
@@ -180,18 +180,18 @@ export default function KnowledgeGraphPage() {
           </DataCard>
         </Space>
       ) : (
-        <Empty description={t("search.noStats", "暂无统计数据")} />
+        <Empty description={t("search.noStats")} />
       ),
     },
     {
       key: "search",
-      label: <span><SearchOutlined /> {t("page.keywordSearch", "历史关键词搜索")}</span>,
+      label: <span><SearchOutlined /> {t("page.keywordSearch")}</span>,
       children: (
         <>
           <Space style={{ marginBottom: 16 }}>
             <Select value={searchType} onChange={setSearchType} options={typeOptions} style={{ width: 140 }} />
             <Input.Search
-              placeholder={t("search.placeholder", "输入关键词搜索...")}
+              placeholder={t("search.placeholder")}
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
               onSearch={handleSearch}
@@ -213,13 +213,13 @@ export default function KnowledgeGraphPage() {
     },
     {
       key: "semantic",
-      label: <span><RobotOutlined /> {t("page.semanticSearch", "语义搜索")}</span>,
+      label: <span><RobotOutlined /> {t("page.semanticSearch")}</span>,
       children: <SemanticSearchTab />,
     },
   ];
 
   return (
-    <PageShell title={t("page.title", "知识图谱")}>
+    <PageShell title={t("page.title")}>
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
     </PageShell>
   );

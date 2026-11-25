@@ -3,6 +3,7 @@ import { capaRequestOwner } from "./capaRequestOwnership";
 import { AuthGenerationChangedError } from "../utils/authGeneration";
 import { classifyToken, getTokenSubject } from "../utils/jwt";
 import { useAuthStore } from "../store/authStore";
+import i18n from "../i18n";
 
 const client = axios.create({
   baseURL: "/api",
@@ -56,6 +57,9 @@ client.interceptors.request.use((config) => {
   if (token && !bearerToken(config.headers)) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+
+  // Backend translates its messages into the selected UI language.
+  config.headers["Accept-Language"] = i18n.language || "de-DE";
 
   // Development mode: inject X-Tenant-ID header from localStorage
   if (import.meta.env.DEV) {

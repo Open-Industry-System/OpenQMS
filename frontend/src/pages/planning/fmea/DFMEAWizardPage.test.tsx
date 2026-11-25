@@ -95,7 +95,7 @@ async function goToStep3() {
 }
 
 const AI_RESPONSE = {
-  suggestions: [{ name: "采集精度不足", confidence: 0.8, source: "llm" as const, explanation: "x" }],
+  suggestions: [{ name: "Insufficient acquisition accuracy", confidence: 0.8, source: "llm" as const, explanation: "x" }],
   source: "hybrid" as const,
   cached: false,
   llm_available: true,
@@ -151,8 +151,8 @@ describe("DFMEAWizardPage Step 2 structured characteristics", () => {
     await screen.findByText("wizard.page.nextStep");
     fireEvent.click(screen.getByText("wizard.steps.2"));
 
-    expect(await screen.findByText("新增产品特性")).toBeInTheDocument();
-    expect(screen.queryByText("新增过程特性")).not.toBeInTheDocument();
+    expect(await screen.findByText("Add Product characteristic")).toBeInTheDocument();
+    expect(screen.queryByText("Add Process characteristic")).not.toBeInTheDocument();
   });
 });
 
@@ -177,7 +177,7 @@ describe("DFMEAWizardPage Step 3 失效分析 — AI recommend wiring", () => {
     }
 
     mocks.getRecommendations.mockClear();
-    await typeAndWait(inputs[1], "控制偏差");
+    await typeAndWait(inputs[1], "Control deviation");
     {
       const call = mocks.getRecommendations.mock.calls[0][1];
       expect(call.trigger_type).toBe("failure_effect");
@@ -186,7 +186,7 @@ describe("DFMEAWizardPage Step 3 失效分析 — AI recommend wiring", () => {
     }
 
     mocks.getRecommendations.mockClear();
-    await typeAndWait(inputs[2], "传感器故障");
+    await typeAndWait(inputs[2], "Sensor failure");
     {
       const call = mocks.getRecommendations.mock.calls[0][1];
       expect(call.trigger_type).toBe("failure_cause");
@@ -202,9 +202,9 @@ describe("DFMEAWizardPage Step 3 失效分析 — AI recommend wiring", () => {
 function makeHighRiskDoc(): FMEADocument {
   const nodes: GraphNode[] = [
     node("func1", "ProcessStepFunction", "采集电压"),
-    { ...node("fm1", "FailureMode", "采集失效") },
+    { ...node("fm1", "FailureMode", "Acquisition fails") },
     { ...node("fe1", "FailureEffect", "数据错误"), severity: 9 },
-    { ...node("fc1", "FailureCause", "传感器故障"), occurrence: 4 },
+    { ...node("fc1", "FailureCause", "Sensor failure"), occurrence: 4 },
     { ...node("pc1", "PreventionControl", "现行预防") },
     { ...node("dc1", "DetectionControl", "现行探测"), detection: 7 },
   ];
@@ -225,9 +225,9 @@ function makeHighRiskDoc(): FMEADocument {
 function makeLowRiskDoc(): FMEADocument {
   const nodes: GraphNode[] = [
     node("func1", "ProcessStepFunction", "采集电压"),
-    node("fm1", "FailureMode", "采集失效"),
+    node("fm1", "FailureMode", "Acquisition fails"),
     { ...node("fe1", "FailureEffect", "数据错误"), severity: 2 },
-    { ...node("fc1", "FailureCause", "传感器故障"), occurrence: 1 },
+    { ...node("fc1", "FailureCause", "Sensor failure"), occurrence: 1 },
     node("pc1", "PreventionControl", "现行预防"),
     { ...node("dc1", "DetectionControl", "现行探测"), detection: 1 },
   ];
@@ -270,7 +270,7 @@ describe("DFMEAWizardPage Step 5 优化 — redesigned per reference", () => {
 
     // AP badge + failure mode name visible (addresses "看不到哪个 AP=H")
     expect(screen.getByText("wizard.optimization.apBadge")).toBeInTheDocument();
-    expect(screen.getByText("采集失效")).toBeInTheDocument();
+    expect(screen.getByText("Acquisition fails")).toBeInTheDocument();
 
     // Reference optimization columns all present as Field labels
     for (const key of [

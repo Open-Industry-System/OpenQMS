@@ -6,13 +6,14 @@ import { PageShell } from "../../components/design";
 import DashboardView from "./components/DashboardView";
 import SupplierDetailView from "./components/SupplierDetailView";
 import CompareView from "./components/CompareView";
+import { tr } from "../../i18n/tr";
 
 export default function SupplierQualityPage() {
   const { t } = useTranslation("supplier");
   const [activeTab, setActiveTab] = useState("dashboard");
 
   return (
-    <PageShell title="供应商质量管理">
+    <PageShell title={tr("Lieferantenqualität", "Supplier Quality Management")}>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}

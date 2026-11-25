@@ -28,7 +28,7 @@ export default function ERPTraceabilityPage() {
       const res = await queryERPTraceability(lotNo.trim(), direction);
       setResult(res);
     } catch {
-      message.error(t("traceability.errors.queryFailed", "追溯查询失败"));
+      message.error(t("traceability.errors.queryFailed"));
       setResult(null);
     } finally {
       setLoading(false);
@@ -41,11 +41,11 @@ export default function ERPTraceabilityPage() {
     : new Map();
 
   return (
-    <PageShell title={t("traceability.title", "批次追溯")}>
-      <DataCard title={t("traceability.cardTitle", "追溯查询")}>
+    <PageShell title={t("traceability.title")}>
+      <DataCard title={t("traceability.cardTitle")}>
         <div style={{ display: "flex", gap: 16, marginBottom: 16, alignItems: "center" }}>
           <Input
-            placeholder={t("traceability.searchPlaceholder", "输入批次号")}
+            placeholder={t("traceability.searchPlaceholder")}
             value={lotNo}
             onChange={(e) => setLotNo(e.target.value)}
             onPressEnter={handleSearch}
@@ -55,11 +55,11 @@ export default function ERPTraceabilityPage() {
             value={direction}
             onChange={(e) => setDirection(e.target.value)}
           >
-            <Radio.Button value="forward">{t("traceability.direction.forward", "正向（原料 → 客户）")}</Radio.Button>
-            <Radio.Button value="backward">{t("traceability.direction.backward", "反向（客户 → 原料）")}</Radio.Button>
+            <Radio.Button value="forward">{t("traceability.direction.forward")}</Radio.Button>
+            <Radio.Button value="backward">{t("traceability.direction.backward")}</Radio.Button>
           </Radio.Group>
           <Button type="primary" onClick={handleSearch} loading={loading}>
-            {t("traceability.actions.search", "查询")}
+            {t("traceability.actions.search")}
           </Button>
         </div>
 
@@ -79,7 +79,7 @@ export default function ERPTraceabilityPage() {
 
         {result && (
           <>
-            <h3 style={{ marginBottom: 16 }}>{t("traceability.nodesTitle", "追溯节点")}</h3>
+            <h3 style={{ marginBottom: 16 }}>{t("traceability.nodesTitle")}</h3>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 24 }}>
               {result.nodes.map((node) => (
                 <DataCard
@@ -96,7 +96,7 @@ export default function ERPTraceabilityPage() {
 
             {result.edges.length > 0 && (
               <>
-                <h3 style={{ marginBottom: 16 }}>{t("traceability.edgesTitle", "追溯关系")}</h3>
+                <h3 style={{ marginBottom: 16 }}>{t("traceability.edgesTitle")}</h3>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {result.edges.map((edge, i) => (
                     <div key={i}>
@@ -113,7 +113,7 @@ export default function ERPTraceabilityPage() {
             )}
 
             {result.nodes.length === 0 && (
-              <Alert type="info" message={t("traceability.noData", "未找到追溯数据")} />
+              <Alert type="info" message={t("traceability.noData")} />
             )}
           </>
         )}

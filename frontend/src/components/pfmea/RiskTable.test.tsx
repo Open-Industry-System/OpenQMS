@@ -11,7 +11,7 @@ const baseRow = () => {
   const nodes: GraphNode[] = [
     { id: 'psf', type: 'ProcessStepFunction', name: '准确贴装', classification: 'CC', ...Z },
     { id: 'fm', type: 'FailureMode', name: '贴装偏移', ...Z },
-    { id: 'fe', type: 'FailureEffect', name: '功能丧失', ...Z, severity_plant: 0, severity_customer: 0, severity_user: 0 },
+    { id: 'fe', type: 'FailureEffect', name: 'Function loss', ...Z, severity_plant: 0, severity_customer: 0, severity_user: 0 },
     { id: 'fc', type: 'FailureCause', name: '吸嘴磨损', ...Z },
     { id: 'pc', type: 'PreventionControl', name: '校准', ...Z },
     { id: 'dc', type: 'DetectionControl', name: 'AOI', ...Z },
@@ -79,8 +79,8 @@ describe('RiskTable', () => {
     render(<RiskTable nodes={nodes} edges={edges} fmeaId="f1" onChange={() => {}} />, { wrapper: I18nTestWrapper });
     const severityButton = screen.getByRole('button', { name: /severity/i });
     await user.click(severityButton);
-    expect(await screen.findByText('三段式严重度评分')).toBeInTheDocument();
-    expect(await screen.findByText('本厂严重度')).toBeInTheDocument();
+    expect(await screen.findByText('Dreistufige Bewertung der Bedeutung')).toBeInTheDocument();
+    expect(await screen.findByText('Bedeutung Werk')).toBeInTheDocument();
   });
 
   it('does NOT open the severity popover on hover (click-only)', async () => {
@@ -91,10 +91,10 @@ describe('RiskTable', () => {
     await user.hover(severityButton);
     // give rc-trigger's hover delay a chance to fire — must still NOT open
     await new Promise((r) => setTimeout(r, 250));
-    expect(screen.queryByText('三段式严重度评分')).not.toBeInTheDocument();
+    expect(screen.queryByText('Dreistufige Bewertung der Bedeutung')).not.toBeInTheDocument();
     // click still opens it
     await user.click(severityButton);
-    expect(await screen.findByText('三段式严重度评分')).toBeInTheDocument();
+    expect(await screen.findByText('Dreistufige Bewertung der Bedeutung')).toBeInTheDocument();
   });
   describe('computeSeverity', () => {
     it('returns the max of the three sub-fields', () => {

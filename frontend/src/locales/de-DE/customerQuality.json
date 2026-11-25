@@ -1,0 +1,352 @@
+{
+  "page": {
+    "title": "Kundenqualität",
+    "complaintDetailTitle": "Reklamationsdetails",
+    "rmaDetailTitle": "RMA-Details",
+    "subtitle": "Reklamationen, RMA und Kundenprofile",
+    "workbenchTitle": "Arbeitsbereich Kundenqualität",
+    "listTitle": "Kundenauditpläne"
+  },
+  "kpi": {
+    "customers": "Kunden",
+    "openComplaints": "Offene Reklamationen",
+    "overdueComplaints": "Überfällige Reklamationen",
+    "rmaCount": "Anzahl RMA",
+    "impactQty": "Betroffene Menge",
+    "spcCpk": "SPC-CPK",
+    "warrantyCost": "Gewährleistungskosten",
+    "customerSatisfaction": "Kundenzufriedenheit",
+    "customerAudit": "Kundenaudit",
+    "auditCount": "{{count}}-mal",
+    "findingCount": "Feststellungen {{count}}",
+    "total": "Gesamt",
+    "planned": "Geplant",
+    "inProgress": "In Durchführung",
+    "completed": "Abgeschlossen",
+    "openFindings": "Offene Feststellungen",
+    "majorNc": "Hauptabweichungen",
+    "confirmed": "Bestätigt",
+    "pendingConfirmation": "Bestätigung ausstehend",
+    "confirmedFindings": "Bestätigte Feststellungen",
+    "pendingConfirmations": "Ausstehende Bestätigungen"
+  },
+  "tabs": {
+    "overview": "Übersicht",
+    "complaints": "Reklamationen",
+    "rma": "RMA",
+    "profile": "Profil",
+    "shipments": "Lieferungen",
+    "findings": "Feststellungen",
+    "findingsWithCount": "Feststellungen ({{count}})",
+    "confirmation": "Bestätigung"
+  },
+  "actions": {
+    "myTodos": "Meine Aufgaben",
+    "newCustomer": "Neuer Kunde",
+    "newComplaint": "Neue Reklamation",
+    "newRma": "Neue RMA",
+    "newShipment": "Neue Lieferung",
+    "handle": "Bearbeiten",
+    "analyze": "Analysieren",
+    "createScar": "SCAR anlegen",
+    "viewScar": "SCAR anzeigen",
+    "investigate": "Untersuchen",
+    "markResponded": "Als beantwortet markieren",
+    "updateLinks": "Verknüpfungen aktualisieren",
+    "markActionPending": "Maßnahme ausstehend",
+    "startAudit": "Audit starten",
+    "completeAudit": "Audit abschließen",
+    "backToList": "Zurück zur Liste",
+    "startRectification": "Korrektur starten",
+    "customerConfirm": "Kundenbestätigung",
+    "uploadConfirmationLetter": "Bestätigungsschreiben hochladen",
+    "addAttachment": "Anhang hinzufügen"
+  },
+  "table": {
+    "operations": "Aktionen",
+    "customer": {
+      "risk": "Risiko",
+      "code": "Kundennummer",
+      "name": "Kundenname"
+    },
+    "complaint": {
+      "no": "Nr.",
+      "severity": "Schweregrad",
+      "batchNo": "Charge",
+      "status": "Status",
+      "dueDate": "Fälligkeitsdatum",
+      "description": "Beschreibung"
+    },
+    "rma": {
+      "no": "Nr.",
+      "returnQty": "Rücksendemenge",
+      "batchNo": "Charge",
+      "status": "Status",
+      "responsibility": "Verantwortung",
+      "defectType": "Fehlerart"
+    },
+    "shipment": {
+      "date": "Datum",
+      "quantity": "Menge",
+      "batchNo": "Charge",
+      "destination": "Ziel"
+    },
+    "audit": {
+      "no": "Nr.",
+      "customerName": "Kundenname",
+      "customerType": "Kundentyp",
+      "auditMode": "Auditform",
+      "auditScope": "Auditumfang",
+      "plannedDate": "Geplantes Datum",
+      "status": "Status"
+    },
+    "finding": {
+      "clause": "Abschnitt",
+      "type": "Art",
+      "description": "Beschreibung",
+      "rootCause": "Grundursache",
+      "correctiveAction": "Korrekturmaßnahme",
+      "status": "Status",
+      "customerConfirm": "Kundenbestätigung",
+      "capa": "CAPA"
+    }
+  },
+  "form": {
+    "customer": {
+      "customerCode": "Kundennummer",
+      "name": "Kundenname",
+      "segment": "Segment",
+      "contactName": "Ansprechpartner",
+      "contactEmail": "E-Mail",
+      "contactPhone": "Telefon",
+      "ppmTarget": "PPM-Ziel",
+      "annualShipmentQty": "Jährliche Liefermenge",
+      "notes": "Notizen"
+    },
+    "complaint": {
+      "complaintNo": "Reklamations-Nr.",
+      "category": "Kategorie",
+      "severity": "Schweregrad",
+      "productId": "Produkt-ID",
+      "batchNo": "Charge",
+      "serialNumber": "Seriennummer",
+      "impactQty": "Betroffene Menge",
+      "occurredDate": "Aufgetreten am",
+      "receivedDate": "Eingegangen am",
+      "dueDate": "Fälligkeitsdatum",
+      "defectDesc": "Fehlerbeschreibung",
+      "supplierResponsibility": "Lieferantenverantwortung",
+      "preliminaryResponse": "Erste Stellungnahme",
+      "rootCause": "Grundursache",
+      "correctiveAction": "Korrekturmaßnahme"
+    },
+    "rma": {
+      "rmaNo": "RMA-Nr.",
+      "complaintId": "Zugehörige Reklamation",
+      "productId": "Produkt-ID",
+      "batchNo": "Charge",
+      "serialNumber": "Seriennummer",
+      "returnQty": "Rücksendemenge",
+      "defectType": "Fehlerart",
+      "responsibility": "Verantwortung",
+      "trackingNumber": "Sendungsnummer",
+      "receivedDate": "Eingegangen am",
+      "analysisResult": "Analyseergebnis",
+      "correctiveAction": "Korrekturmaßnahme"
+    },
+    "scar": {
+      "supplier": "Verantwortlicher Lieferant",
+      "selectSupplier": "Lieferant wählen",
+      "supplierRequired": "Bitte Lieferanten wählen",
+      "description": "Problembeschreibung",
+      "requestedAction": "Angeforderte Maßnahme",
+      "dueDate": "Fälligkeitsdatum"
+    },
+    "shipment": {
+      "shipmentDate": "Versanddatum",
+      "quantity": "Menge",
+      "batchNo": "Charge",
+      "destination": "Ziel",
+      "notes": "Notizen"
+    },
+    "audit": {
+      "customerName": "Kundenname",
+      "customerNamePlaceholder": "z. B. Volkswagen, BMW",
+      "customerType": "Kundentyp",
+      "selectCustomerType": "Kundentyp wählen",
+      "auditMode": "Auditform",
+      "selectAuditMode": "Auditform wählen",
+      "auditScope": "Auditumfang",
+      "auditCriteria": "Auditkriterien",
+      "plannedDate": "Geplantes Datum",
+      "leadAuditor": "Leitender Auditor",
+      "selectLeadAuditor": "Leitenden Auditor wählen",
+      "validation": {
+        "customerNameRequired": "Bitte Kundennamen eingeben",
+        "customerTypeRequired": "Bitte Kundentyp wählen",
+        "auditScopeRequired": "Bitte Auditumfang eingeben",
+        "auditCriteriaRequired": "Bitte Auditkriterien eingeben",
+        "plannedDateRequired": "Bitte Datum wählen"
+      }
+    },
+    "finding": {
+      "findingType": "Art der Feststellung",
+      "clauseRef": "Normabschnitt",
+      "clauseRefPlaceholder": "z. B. 8.5.1",
+      "description": "Beschreibung der Abweichung",
+      "rootCause": "Grundursache",
+      "correction": "Sofortkorrektur",
+      "correctiveAction": "Korrekturmaßnahme",
+      "dueDate": "Fälligkeitsdatum"
+    },
+    "confirm": {
+      "confirmationDate": "Bestätigungsdatum"
+    },
+    "attachments": {
+      "fileName": "Dateiname",
+      "fileLink": "Dateilink"
+    },
+    "links": {
+      "complaintId": "ID der zugehörigen Reklamation",
+      "capaRefId": "ID der zugehörigen CAPA",
+      "fmeaRefId": "ID der zugehörigen FMEA",
+      "eightDNo": "Neue 8D-Nr.",
+      "eightDPlaceholder": "z. B. 8D-2026-010"
+    }
+  },
+  "detail": {
+    "customerCode": "Kundennummer: ",
+    "segment": "Segment: ",
+    "ppmTarget": "PPM-Ziel: ",
+    "annualShipmentQty": "Jährliche Liefermenge: ",
+    "contactName": "Ansprechpartner: ",
+    "audit": {
+      "customerName": "Kundenname",
+      "customerType": "Kundentyp",
+      "auditMode": "Auditform",
+      "auditScope": "Auditumfang",
+      "plannedDate": "Geplantes Datum",
+      "auditCriteria": "Auditkriterien"
+    },
+    "subtitle": "Details des Kundenaudits",
+    "basicInfo": "Grunddaten",
+    "findingsAndConfirmation": "Feststellungen und Bestätigung"
+  },
+  "sections": {
+    "linksAndEvidence": "Verknüpfungen & Nachweise",
+    "auditConfirmationAttachments": "Anhänge zur Auditbestätigung:",
+    "confirmAttachments": "Bestätigungsanhänge"
+  },
+  "modal": {
+    "newCustomer": "Neuer Kunde",
+    "newComplaint": "Neue Reklamation",
+    "newRma": "Neue RMA",
+    "createScar": "SCAR anlegen",
+    "editShipment": "Lieferung bearbeiten",
+    "newShipment": "Neue Lieferung",
+    "newAudit": "Neues Kundenaudit",
+    "editFinding": "Feststellung bearbeiten",
+    "newFinding": "Neue Feststellung",
+    "customerConfirm": "Kunde bestätigt Korrektur",
+    "uploadConfirmationLetter": "Bestätigungsschreiben hochladen"
+  },
+  "status": {
+    "complaint": {
+      "open": "Eingegangen",
+      "investigating": "In Untersuchung",
+      "responded": "Beantwortet",
+      "closed": "Geschlossen",
+      "cancelled": "Storniert"
+    },
+    "rma": {
+      "open": "Erfasst",
+      "analysis": "In Analyse",
+      "action_pending": "Maßnahme ausstehend",
+      "closed": "Geschlossen",
+      "cancelled": "Storniert"
+    },
+    "audit": {
+      "planned": "Geplant",
+      "in_progress": "In Durchführung",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgesagt"
+    },
+    "finding": {
+      "open": "Offen",
+      "in_progress": "In Bearbeitung",
+      "closed": "Geschlossen"
+    },
+    "confirmed": "Bestätigt",
+    "pendingConfirmation": "Ausstehend"
+  },
+  "category": {
+    "safety": "Sicherheit",
+    "function": "Funktion",
+    "appearance": "Aussehen",
+    "delivery": "Lieferung"
+  },
+  "severity": {
+    "fatal": "Kritisch",
+    "serious": "Schwer",
+    "general": "Mittel",
+    "minor": "Gering"
+  },
+  "responsibility": {
+    "supplier": "Lieferant",
+    "internal": "Intern",
+    "transport": "Transport",
+    "customer_misuse": "Fehlgebrauch durch Kunden",
+    "unknown": "Unbekannt"
+  },
+  "customerType": {
+    "OEM": "OEM",
+    "Tier 1": "Tier 1",
+    "Tier 2": "Tier 2",
+    "other": "Sonstige"
+  },
+  "auditMode": {
+    "on_site": "Vor Ort",
+    "remote": "Remote"
+  },
+  "findingType": {
+    "major_nc": "Hauptabweichung",
+    "minor_nc": "Nebenabweichung",
+    "ofi": "Verbesserungspotenzial",
+    "observation": "Beobachtung"
+  },
+  "messages": {
+    "loadDataFailed": "Kundenqualitätsdaten konnten nicht geladen werden",
+    "loadShipmentsFailed": "Lieferungen konnten nicht geladen werden",
+    "scarCreateSuccess": "SCAR erfolgreich angelegt",
+    "scarCreateFailed": "SCAR konnte nicht angelegt werden",
+    "customerCreateSuccess": "Kunde erfolgreich angelegt",
+    "customerCreateFailed": "Kunde konnte nicht angelegt werden",
+    "complaintCreateSuccess": "Reklamation erfolgreich angelegt",
+    "complaintCreateFailed": "Reklamation konnte nicht angelegt werden",
+    "rmaCreateSuccess": "RMA erfolgreich angelegt",
+    "rmaCreateFailed": "RMA konnte nicht angelegt werden",
+    "selectCustomerAndProductLine": "Bitte zuerst Kunden und Produktlinie wählen",
+    "confirmDeleteShipment": "Lieferung vom {{date}} löschen?",
+    "loadComplaintFailed": "Reklamation konnte nicht geladen werden",
+    "investigationStarted": "Untersuchung gestartet",
+    "markedResponded": "Als beantwortet markiert",
+    "cancelled": "Storniert",
+    "closed": "Geschlossen",
+    "linksUpdated": "Verknüpfungen aktualisiert",
+    "linksUpdateFailed": "Verknüpfungen konnten nicht aktualisiert werden",
+    "rmaLoadFailed": "RMA konnte nicht geladen werden",
+    "analysisStarted": "Analyse gestartet",
+    "markedActionPending": "Als „Maßnahme ausstehend“ markiert",
+    "loadFailed": "Laden fehlgeschlagen",
+    "createAuditSuccess": "Erfolgreich angelegt",
+    "createAuditFailed": "Anlegen fehlgeschlagen",
+    "confirmCloseFinding": "Schließen bestätigen? Alle Abschlussbedingungen müssen erfüllt sein",
+    "confirmCreateCapa": "CAPA anlegen?",
+    "capaCreated": "CAPA angelegt",
+    "capaCreateFailed": "CAPA konnte nicht angelegt werden",
+    "confirmSuccess": "Erfolgreich bestätigt",
+    "confirmFailed": "Bestätigung fehlgeschlagen",
+    "auditConfirmSuccess": "Audit erfolgreich bestätigt",
+    "auditConfirmFailed": "Audit konnte nicht bestätigt werden"
+  }
+}

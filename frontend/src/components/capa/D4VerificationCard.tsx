@@ -217,8 +217,8 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
                       allowClear
                       placeholder={
                         fmeaRefId
-                          ? t("d4.selectCause", "选择失效原因")
-                          : t("d4.linkFmeaFirst", "请先关联 FMEA")
+                          ? t("d4.selectCause")
+                          : t("d4.linkFmeaFirst")
                       }
                       disabled={!fmeaRefId}
                       value={editCauseValue}
@@ -230,11 +230,11 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
                       ))}
                     </Select>
                     <Button size="small" type="primary" data-e2e={`d4-cause-save-${i}`}
-                      onClick={() => saveEditCause(rec)}>{t("d4.saveCause", "保存 Cause")}</Button>
+                      onClick={() => saveEditCause(rec)}>{t("d4.saveCause")}</Button>
                     <Button size="small" data-e2e={`d4-cause-clear-${i}`}
                       onClick={() => setEditCauseValue(undefined)}
                       disabled={!editCauseValue}>
-                      {t("d4.clearCause", "清空")}
+                      {t("d4.clearCause")}
                     </Button>
                     <Button size="small" data-e2e={`d4-cause-cancel-${i}`}
                       onClick={cancelEditCause}>{t("d4.cancel")}</Button>
@@ -249,8 +249,8 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
                     style={{ padding: 0, height: "auto" }}
                   >
                     {causeNodeId
-                      ? t("d4.editCause", "修改 Cause")
-                      : t("d4.setCause", "关联 Cause")}
+                      ? t("d4.editCause")
+                      : t("d4.setCause")}
                   </Button>
                 )}
               </Space>
@@ -294,8 +294,8 @@ export default function D4VerificationCard({ capaId, canEdit, currentRootCause, 
               allowClear
               placeholder={
                 fmeaRefId
-                  ? t("d4.selectCause", "选择失效原因")
-                  : t("d4.linkFmeaFirst", "请先关联 FMEA")
+                  ? t("d4.selectCause")
+                  : t("d4.linkFmeaFirst")
               }
               disabled={!fmeaRefId}
               onChange={(v) => setSelectedCause(v)}

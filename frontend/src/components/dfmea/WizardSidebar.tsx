@@ -87,12 +87,12 @@ export default function WizardSidebar({
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px', minHeight: 0 }}>
         {currentStep === 0 ? (
           <Empty
-            description={t('wizard.sidebar.structureHint', { defaultValue: '结构树将在第二步后出现' })}
+            description={t('wizard.sidebar.structureHint')}
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           />
         ) : treeData && treeData.length > 0 ? (
           <>
-            <SectionHeader>{t('wizard.sidebar.structureTree', { defaultValue: '结构树' })}</SectionHeader>
+            <SectionHeader>{t('wizard.sidebar.structureTree')}</SectionHeader>
             <Tree
               treeData={treeData}
               defaultExpandAll
@@ -104,7 +104,7 @@ export default function WizardSidebar({
           </>
         ) : (
           <Empty
-            description={t('wizard.sidebar.noStructure', { defaultValue: '暂无结构节点' })}
+            description={t('wizard.sidebar.noStructure')}
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           />
         )}
@@ -112,7 +112,7 @@ export default function WizardSidebar({
 
       {/* 步骤导航 */}
       <div style={{ borderTop: '1px solid var(--qf-divider)', padding: '12px 16px', flexShrink: 0 }}>
-        <SectionHeader>{t('wizard.sidebar.steps', { defaultValue: '步骤' })}</SectionHeader>
+        <SectionHeader>{t('wizard.sidebar.steps')}</SectionHeader>
         <Steps
           direction="vertical"
           size="small"

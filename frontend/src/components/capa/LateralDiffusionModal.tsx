@@ -24,7 +24,7 @@ export function LateralDiffusionModal({
   return (
     <Modal
       open={open}
-      title={t("lateral.title", "横向扩散预警")}
+      title={t("lateral.title")}
       footer={null}
       closable={false}
       maskClosable={false}
@@ -34,7 +34,6 @@ export function LateralDiffusionModal({
       <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
         {t(
           "lateral.hint",
-          "检测到类似产品可能受同一根因影响。请选择是否通知相关产品负责人（一次覆盖全部命中类型）。",
         )}
       </Typography.Paragraph>
       {projection.similar_products.map((sp) => (
@@ -70,7 +69,7 @@ export function LateralDiffusionModal({
         data-e2e="lateral-skip-reason"
         value={skipReason}
         onChange={(e) => setSkipReason(e.target.value)}
-        placeholder={t("lateral.skipReason", "不通知理由（选择不通知时必填）")}
+        placeholder={t("lateral.skipReason")}
         rows={2}
         style={{ marginBottom: 12 }}
       />
@@ -81,7 +80,7 @@ export function LateralDiffusionModal({
           loading={loading}
           onClick={() => onDecide("notify")}
         >
-          {t("lateral.notify", "通知全部")}
+          {t("lateral.notify")}
         </Button>
         <Button
           data-e2e="lateral-decide-skip"
@@ -89,7 +88,7 @@ export function LateralDiffusionModal({
           loading={loading}
           onClick={() => onDecide("skip", skipReason.trim())}
         >
-          {t("lateral.skip", "不通知")}
+          {t("lateral.skip")}
         </Button>
       </Space>
     </Modal>

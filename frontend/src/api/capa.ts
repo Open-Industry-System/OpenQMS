@@ -10,6 +10,7 @@ import type {
   D3DecideAdviceRequest, D3ExecutionCreate, D3ExecutionUpdate, D3AdviceResponse, SupplierSCAR,
   SinkKnowledgeResponse, KnowledgeSinkOutcomeDetail,
 } from "../types";
+import { tr } from "../i18n/tr";
 
 const signalOptions = (signal?: AbortSignal) => signal ? [{ signal }] as const : [] as const;
 
@@ -153,20 +154,20 @@ export function formatCapaAdvanceError(
         o.outcome === "blocked"
           ? labels?.blocked ||
             (isLateral
-              ? "横向扩散被阻断：LLM 未配置"
-              : "知识库沉淀被阻断：LLM 未配置")
+              ? tr("Übertragungsprüfung blockiert: kein LLM konfiguriert", "Lateral diffusion blocked: LLM not configured")
+              : tr("Wissensspeicherung blockiert: kein LLM konfiguriert", "Knowledge sink blocked: LLM not configured"))
           : labels?.failed ||
-            (isLateral ? "横向扩散失败，可重试" : "知识库沉淀失败，可重试");
-      return o.message ? `${base}：${o.message}` : base;
+            (isLateral ? tr("Übertragungsprüfung fehlgeschlagen, bitte erneut versuchen", "Lateral diffusion failed, please retry") : tr("Wissensspeicherung fehlgeschlagen, bitte erneut versuchen", "Knowledge sink failed, please retry"));
+      return o.message ? `${base}: ${o.message}` : base;
     }
   }
   const sink = parseKnowledgeSinkError(err);
   if (sink) {
     const base =
       sink.outcome === "blocked"
-        ? labels?.blocked || "知识库沉淀被阻断：LLM 未配置"
-        : labels?.failed || "知识库沉淀失败，可重试";
-    return sink.message ? `${base}：${sink.message}` : base;
+        ? labels?.blocked || tr("Wissensspeicherung blockiert: kein LLM konfiguriert", "Knowledge sink blocked: LLM not configured")
+        : labels?.failed || tr("Wissensspeicherung fehlgeschlagen, bitte erneut versuchen", "Knowledge sink failed, please retry");
+    return sink.message ? `${base}: ${sink.message}` : base;
   }
   if (typeof detail === "string" && detail) return detail;
   return fallback;

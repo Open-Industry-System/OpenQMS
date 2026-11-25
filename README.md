@@ -1,67 +1,85 @@
 # OpenQMS
 
-OpenQMS 是面向制造业的模块化质量管理平台，覆盖 FMEA 风险分析、控制计划、来料检验、统计过程控制和 8D 纠正措施，支持 IATF 16949 相关质量流程。
+OpenQMS ist eine modulare Qualitätsmanagement-Plattform für die Fertigung. Sie deckt FMEA-Risikoanalyse, Produktionslenkungspläne, Wareneingangsprüfung, statistische Prozessregelung (SPC) und 8D-Korrekturmaßnahmen ab und unterstützt Qualitätsprozesse nach IATF 16949.
 
-**[English documentation →](README_EN.md)**
+**[English documentation →](README_EN.md)** · **[Betrieb auf dem Raspberry Pi →](docs/raspberry-pi.md)** · **[Sicherheitsprüfung →](docs/sicherheitspruefung.md)**
 
-## 业务模块如何与 AI Agent 协作
+> Diese Fassung des Projekts hat eine deutsche Oberfläche (Standard) mit Umschaltung auf Englisch. Ein Teil der weiterführenden Dokumentation unter `docs/` liegt weiterhin nur auf Chinesisch bzw. Englisch vor.
 
-以一份 8D 报告为例：在默认关闭的 Agent 试点中，员工可以选择获准的模型部署，让 Agent 根据已验证的 D4 根因和关联的 FMEA 依据提出 D5 纠正措施。建议先存为待审条目；有权限的员工核对依据、确认措辞并采纳后，CAPA 才将其记为正式措施。[8D Agent 试点与模型配置](docs/development/r5-model-egress.md)
+## Wie die Fachmodule mit KI-Agenten zusammenarbeiten
 
-- **统一业务依据。** 架构要求插件通过业务模块提供的接口读取上下文，沿用报告、来源记录及其版本。页面和 Agent 引用同一份质量事实，员工可以从建议追溯到依据。
-- **按任务组合能力。** 模块分别声明可读取的上下文和可执行的业务命令。Agent 可以分多轮补充信息、选择下一步；平台在每次调用时核对执行身份、插件授权和任务范围，业务模块负责状态流转、审批和审计。
+Beispiel 8D-Bericht: Im standardmäßig deaktivierten Agent-Pilotbetrieb können Mitarbeitende ein freigegebenes Modell-Deployment wählen und den Agenten auf Basis der verifizierten D4-Grundursache und der verknüpften FMEA-Belege D5-Abstellmaßnahmen vorschlagen lassen. Vorschläge werden zunächst als zu prüfende Einträge gespeichert; erst wenn berechtigte Mitarbeitende die Grundlage geprüft, die Formulierung bestätigt und den Vorschlag übernommen haben, erfasst CAPA ihn als formale Maßnahme. [8D-Agent-Pilot und Modellkonfiguration](docs/development/r5-model-egress.md)
 
-8D 是首个接入样板。其他质量模块按各自的数据与操作规则逐步接入。[当前架构](docs/architecture.md) · [模块化业务与 AI 插件设计](docs/superpowers/specs/2026-09-22-modular-qms-agent-architecture-design.md)
+- **Einheitliche fachliche Grundlage.** Die Architektur verlangt, dass Plugins den Kontext über die Schnittstellen der Fachmodule lesen und dabei Berichte, Quellnachweise und deren Versionen weiterverwenden. Oberfläche und Agent beziehen sich auf dieselben Qualitätsfakten; Mitarbeitende können jeden Vorschlag bis zu seiner Grundlage zurückverfolgen.
+- **Fähigkeiten je Aufgabe kombinieren.** Jedes Modul deklariert, welchen Kontext es bereitstellt und welche fachlichen Befehle ausführbar sind. Der Agent kann über mehrere Runden Informationen ergänzen und den nächsten Schritt wählen; die Plattform prüft bei jedem Aufruf Identität, Plugin-Berechtigung und Aufgabenumfang, während das Fachmodul für Statuswechsel, Freigaben und Audit zuständig ist.
+
+8D ist das erste angebundene Muster. Weitere Qualitätsmodule werden schrittweise nach ihren eigenen Daten- und Bedienregeln angebunden. [Aktuelle Architektur](docs/architecture.md) · [Design: modulares QMS und KI-Plugins](docs/superpowers/specs/2026-09-22-modular-qms-agent-architecture-design.md)
 
 ---
 
-## 功能概览
+## Funktionsübersicht
 
-| 模块 | 说明 |
+| Modul | Beschreibung |
 |------|------|
-| **FMEA** | AIAG-VDA 七步法 PFMEA/DFMEA，图模型编辑，七步法生成向导，RPN/AP 自动计算，审批流转 |
-| **8D / CAPA** | D1–D8 步骤推进，团队组建，FMEA 关联，审批闭环 |
-| **控制计划** | PFMEA 一键生成控制计划，双向同步，版本管理 |
-| **特殊特性** | CC/SC 标识，覆盖矩阵，FMEA→CP 联动，追溯视图 |
-| **SPC** | X̄-R / I-MR / P/NP/C/U 控制图，8 大判异规则，Cp/Cpk 计算 |
-| **MSA** | GR&R、偏倚、线性、稳定性、计数型 Kappa 分析 |
-| **IQC** | AQL 抽样方案，检验批管理，AQL 优化配置 |
-| **供应商管理** | 供应商档案、绩效评价、供应商风险配置 |
-| **SCAR** | 供应商纠正措施要求，5 态生命周期 |
-| **客诉 / RMA** | 客诉接单、RMA 退货、CAPA/FMEA 联动 |
-| **APQP** | 五阶段门管理，甘特图，交付物检查表 |
-| **PPAP** | AIAG 18 要素，5 态生命周期，Level 1–5 必填映射 |
-| **管理评审** | ISO 9001 §9.3 数据包自动汇总，措施跟踪闭环 |
-| **内部审核** | 体系/过程/产品审核，检查表，发现项跟踪 |
-| **客户审核** | 审核日程，发现项追踪，整改闭环 |
-| **质量目标** | 三级目标树，审批流，仪表盘 KPI |
-| **ERP / MES / PLM** | 外部系统集成看板与数据同步 |
-| **知识图谱** | FMEA/CP 知识关联与可视化 |
-| **集团管理** | 多工厂看板，工厂对比，集团供应商与审核 |
-| **产品类型主数据** | 跨工厂共享的产品分类，产品线归属与语义搜索过滤 |
+| **FMEA** | PFMEA/DFMEA nach AIAG-VDA (7 Schritte), Graph-Editor, Erstellungsassistent, automatische RPZ/AP-Berechnung, Freigabe-Workflow |
+| **8D / CAPA** | Schrittweise D1–D8, Teambildung, FMEA-Verknüpfung, geschlossener Freigabekreislauf |
+| **Produktionslenkungsplan** | Erzeugung aus der PFMEA per Klick, bidirektionale Synchronisierung, Versionsverwaltung |
+| **Besondere Merkmale** | CC/SC-Kennzeichnung, Abdeckungsmatrix, FMEA→PLP-Verknüpfung, Rückverfolgungsansicht |
+| **SPC** | X̄-R / I-MR / p/np/c/u-Regelkarten, 8 Prüfregeln, Cp/Cpk-Berechnung |
+| **MSA** | GR&R, Bias, Linearität, Stabilität, attributive Kappa-Analyse |
+| **Wareneingangsprüfung (IQC)** | AQL-Stichprobenpläne, Prüflosverwaltung, AQL-Optimierung |
+| **Lieferantenmanagement** | Lieferantenprofile, Leistungsbewertung, Konfiguration des Lieferantenrisikos |
+| **SCAR** | Korrekturmaßnahmenanforderungen an Lieferanten, Lebenszyklus mit 5 Status |
+| **Reklamationen / RMA** | Erfassung von Kundenreklamationen, RMA-Rücksendungen, Verknüpfung mit CAPA/FMEA |
+| **APQP** | Gate-Management über fünf Phasen, Gantt-Diagramm, Checklisten für Ergebnisse |
+| **PPAP** | 18 AIAG-Elemente, Lebenszyklus mit 5 Status, Pflichtelemente je Vorlagestufe 1–5 |
+| **Managementbewertung** | Automatisches Datenpaket nach ISO 9001 §9.3, Nachverfolgung der Maßnahmen |
+| **Internes Audit** | System-, Prozess- und Produktaudits, Checklisten, Verfolgung von Feststellungen |
+| **Kundenaudit** | Auditplanung, Verfolgung von Feststellungen, Abschluss der Korrekturen |
+| **Qualitätsziele** | Dreistufiger Zielbaum, Freigabe-Workflow, KPI im Dashboard |
+| **ERP / MES / PLM** | Dashboards und Datensynchronisierung mit externen Systemen |
+| **Wissensgraph** | Verknüpfung und Visualisierung von FMEA-/PLP-Wissen |
+| **Konzernverwaltung** | Dashboard über mehrere Werke, Werksvergleich, Konzernlieferanten und -audits |
+| **Produkttyp-Stammdaten** | Werksübergreifende Produktklassifizierung, Zuordnung von Produktlinien, Filter für semantische Suche |
 
 ---
 
-## 技术栈
+## Technologie
 
-| 层 | 技术 |
+| Schicht | Technologie |
 |----|------|
-| 后端 | Python 3.11 / FastAPI 0.115 (async) / SQLAlchemy 2.0 (async) / PostgreSQL 15 / Redis 7 |
-| 前端 | React 18 / TypeScript 5.6 / Vite 5.4 / Ant Design 5.21 |
-| 基础设施 | Docker Compose / Alembic (迁移) / Neo4j 5 (知识图谱) / 外部 AI 提供商（可选） |
+| Backend | Python 3.11 / FastAPI 0.116 (async) / SQLAlchemy 2.0 (async) / PostgreSQL 15 / Redis 7 |
+| Frontend | React 18 / TypeScript 5.6 / Vite 5.4 / Ant Design 5 / i18next (Deutsch, Englisch) |
+| Infrastruktur | Docker Compose / Alembic (Migrationen) / Neo4j 5 (Wissensgraph) / externe KI-Anbieter (optional) |
 
 ---
 
-## 本地开发快速开始（非生产）
+## Betrieb im eigenen Netzwerk (Raspberry Pi)
 
-本节普通 `docker compose` 命令仅用于本地开发；修改演示密码不会把该栈变成生产配置。生产部署必须使用 `production-compose.sh` 和下方 Oracle 流程，完整步骤见 [部署指南](docs/deployment.md)。
+Für den Betrieb auf einem Raspberry Pi (oder einem anderen arm64-/x86-Server) im lokalen Netzwerk gibt es ein eigenes, abgesichertes Setup: `docker-compose.pi.yml`. Nur der Web-Port ist von außen erreichbar, Datenbank und Redis bleiben im internen Docker-Netz, alle Passwörter kommen aus einer `.env`-Datei.
 
-### 前提条件
+```bash
+cp .env.pi.example .env
+```
 
-- [Docker](https://www.docker.com/get-started) 与 Docker Compose
-- 4 GB+ 可用内存（PostgreSQL + Redis + Neo4j + 应用服务）
+```bash
+docker compose -f docker-compose.pi.yml up -d --build
+```
 
-### 1. 启动服务
+Schritt-für-Schritt-Anleitung inklusive Administratorkonto, HTTPS, Backup und Firewall: **[docs/raspberry-pi.md](docs/raspberry-pi.md)**.
+
+---
+
+## Schnellstart für die lokale Entwicklung (nicht für den Produktivbetrieb)
+
+Die einfachen `docker compose`-Befehle in diesem Abschnitt dienen nur der lokalen Entwicklung; auch mit geänderten Demopasswörtern wird daraus keine Produktivkonfiguration. Für den Betrieb im Netzwerk siehe den Abschnitt Raspberry Pi oben bzw. für die Oracle-Produktion `production-compose.sh` und den Ablauf weiter unten; vollständige Schritte im [Deployment-Leitfaden](docs/deployment.md).
+
+### Voraussetzungen
+
+- [Docker](https://www.docker.com/get-started) mit Docker Compose
+- Mindestens 4 GB freier Arbeitsspeicher (PostgreSQL + Redis + Neo4j + Anwendungsdienste)
+
+### 1. Dienste starten
 
 ```bash
 git clone https://github.com/your-org/OpenQMS.git
@@ -69,60 +87,60 @@ cd OpenQMS
 docker compose up -d
 ```
 
-等待所有容器健康（约 30 秒）：
+Warten, bis alle Container bereit sind (ca. 30 Sekunden):
 
 ```bash
-docker compose ps   # 确认 db/redis/neo4j 为 healthy，backend/frontend 为 running
+docker compose ps   # db/redis/neo4j müssen healthy, backend/frontend running sein
 ```
 
-### 2. 初始化数据库
+### 2. Datenbank initialisieren
 
 ```bash
 docker compose exec backend alembic upgrade head
 ```
 
-### 3. 导入演示数据
+### 3. Demodaten laden
 
 ```bash
 docker compose exec backend python -m app.seed
 ```
 
-输出 `Seed data created successfully!` 即成功。
+Die Ausgabe `Seed data created successfully!` bestätigt den Erfolg.
 
-### 4. 访问系统
+### 4. System aufrufen
 
-浏览器打开 **http://localhost:5173**，使用以下账号登录：
+Im Browser **http://localhost:5173** öffnen und mit einem der folgenden Konten anmelden:
 
-| 用户名 | 密码 | 角色 | 说明 |
+| Benutzername | Passwort | Rolle | Beschreibung |
 |--------|------|------|------|
-| `admin` | 私密初始化 | 系统管理员 | 全部权限，可管理用户与权限 |
-| `engineer` | `Engineer@2026` | 现场质量工程师 | FMEA/SPC/MSA 编辑，CAPA 编辑 |
-| `manager` | `Manager@2026` | 质量经理 | 审批权限，可关闭 CAPA |
-| `viewer` | `Viewer@2026` | 只读用户 | 所有模块只读 |
-| `groupadmin` | 私密初始化 | 系统管理员（集团） | 多工厂管理权限 |
+| `admin` | private Initialisierung | Systemadministrator | Alle Rechte, Verwaltung von Benutzern und Berechtigungen |
+| `engineer` | `Engineer@2026` | Fertigungsqualitätsingenieur | Bearbeitung von FMEA/SPC/MSA und CAPA |
+| `manager` | `Manager@2026` | Qualitätsmanager | Freigaberechte, kann CAPA schließen |
+| `viewer` | `Viewer@2026` | Nur-Lese-Benutzer | Alle Module nur lesend |
+| `groupadmin` | private Initialisierung | Systemadministrator (Konzern) | Verwaltungsrechte über mehrere Werke |
 
-管理员启动时不自动创建，种子中的 `admin`/`groupadmin` 也没有公开口令。运行 `docker compose exec backend python -m app.cli.bootstrap_admin --username admin --replace-existing`，在私密终端交互输入安装专用密码；未运行种子的新账号不加 `--replace-existing`。升级说明见[安全修复记录](docs/development/2026-11-16-security-scan-fixes.md)。
+Administratoren werden beim Start nicht automatisch angelegt, und `admin`/`groupadmin` aus den Demodaten haben kein öffentliches Passwort. Führen Sie `docker compose exec backend python -m app.cli.bootstrap_admin --username admin --replace-existing` aus und geben Sie das installationsspezifische Passwort in einem privaten Terminal interaktiv ein; für neue Konten ohne Demodaten `--replace-existing` weglassen. Hinweise zum Upgrade im [Protokoll der Sicherheitskorrekturen](docs/development/2026-11-16-security-scan-fixes.md).
 
-> ⚠️ 上述业务演示账号密码只适用于本地开发或实例所有者明确批准的公开演示。`qms.smartindustry.world` 是共享可写演示环境：管理员能改账号密码与数据，不得录入真实数据或真实 API 密钥；其他正式生产部署必须轮换特权密码。
+> ⚠️ Die obigen Demokonten mit Passwörtern sind nur für die lokale Entwicklung oder für öffentliche Demos gedacht, die der Betreiber ausdrücklich freigegeben hat. `qms.smartindustry.world` ist eine gemeinsam beschreibbare Demoumgebung: Administratoren können Konten, Passwörter und Daten ändern – geben Sie dort keine echten Daten oder echten API-Schlüssel ein. Jede andere produktive Installation muss die privilegierten Passwörter ändern.
 
-### 5. API 文档
+### 5. API-Dokumentation
 
-- Swagger UI：**http://localhost:8000/docs**
-- ReDoc：**http://localhost:8000/redoc**
+- Swagger UI: **http://localhost:8000/docs**
+- ReDoc: **http://localhost:8000/redoc**
 
 ---
 
-## Oracle ARM64 生产部署
+## Produktivbetrieb auf Oracle ARM64
 
-生产目标为 `qms.smartindustry.world`：Oracle Cloud ARM64 单机、`TENANT_MODE=single`、`E2E_MODE=false`，Tailscale 用于管理和私网验收，Namecheap BasicDNS 的 `qms` A 记录直指 `150.230.197.45`，由 Caddy 终止 HTTPS。生产 Compose 包含 PostgreSQL、Redis、Neo4j、backend、graph-worker 和 Caddy web；**不部署 Ollama**，此公开可写演示实例不得配置真实 LLM/Embedding API 密钥。
+Produktionsziel ist `qms.smartindustry.world`: eine einzelne Oracle-Cloud-ARM64-Maschine mit `TENANT_MODE=single` und `E2E_MODE=false`. Tailscale dient der Administration und der Abnahme im privaten Netz, der `qms`-A-Record bei Namecheap BasicDNS zeigt direkt auf `150.230.197.45`, Caddy terminiert HTTPS. Die Produktions-Compose-Datei enthält PostgreSQL, Redis, Neo4j, Backend, Graph-Worker und Caddy-Web; **Ollama wird nicht deployt**, und in dieser öffentlich beschreibbaren Demoinstanz dürfen keine echten LLM-/Embedding-API-Schlüssel konfiguriert werden.
 
-`/` 是唯一显式公开的路由保护例外，`/login` 是认证入口；仪表盘和全部业务路由仍由 `ProtectedRoute` 与模块权限保护。access JWT 有效期为 120 分钟；密码重置会撤销 refresh 会话，但已签发的无状态 access JWT 最长仍可有效到原过期时间。Caddy 固定为 `172.30.0.10`，backend 仅信任该代理地址；不要在未重跑代理探针时改变生产子网或 trusted-proxy 边界。
+`/` ist die einzige ausdrücklich öffentliche Ausnahme vom Routenschutz, `/login` ist der Einstieg zur Anmeldung; Dashboard und alle Fachrouten bleiben durch `ProtectedRoute` und Modulberechtigungen geschützt. Access-JWTs gelten 120 Minuten; ein Passwort-Reset widerruft Refresh-Sitzungen, bereits ausgestellte zustandslose Access-JWTs bleiben aber bis zu ihrem ursprünglichen Ablauf gültig. Caddy ist fest auf `172.30.0.10` gesetzt und das Backend vertraut nur dieser Proxy-Adresse; Produktions-Subnetz oder Trusted-Proxy-Grenze nicht ändern, ohne die Proxy-Prüfung erneut auszuführen.
 
-### 生产环境与 Compose 包装器
+### Produktionsumgebung und Compose-Wrapper
 
-根目录 `.env` / `.env.production` 由 Compose 使用。首次在服务器生成 `.env.production` 后，所有生产命令都必须经过包装器；它固定项目名 `openqms`、项目目录、Compose 文件和环境文件，并清除可能污染生产配置的 ambient 环境覆盖。
+Compose verwendet die `.env` / `.env.production` im Projektverzeichnis. Nachdem `.env.production` einmalig auf dem Server erzeugt wurde, müssen alle Produktionsbefehle über den Wrapper laufen; er legt Projektname `openqms`, Projektverzeichnis, Compose-Datei und Umgebungsdatei fest und entfernt Umgebungsvariablen aus der Shell, die die Produktionskonfiguration verfälschen könnten.
 
-Mac 运维仓库必须先锁定一个 tracked 内容与 HEAD 一致的不可变 release；无关 untracked 计划/参考文件不参与部署身份。部署字节只从 `git archive "$RELEASE_SHA"` 提取到权限 `0700` 的私有 stage，不再从可变 working tree 读取；path stream 同样来自 `git ls-tree` commit object。manifest 为每个 tracked 路径记录 SHA-256 与 Git 相关模式 `100644`/`100755`，并拒绝 symlink/不安全路径。Oracle 必须验证 manifest 本身、verifier、所有 tracked 文件 hash/mode 和完整 deployable path set；只排除持久运行时状态 `.env.production`、`backups/`、`.release-sha` 与 `.release-manifest`。验证成功后才写入非敏感 commit SHA marker。首次部署不做远端删除同步，任何额外/遗留 source、config 或 script 都会 fail closed。stage 在正常完成、EXIT 或信号时清理。
+Im Betriebs-Repository auf dem Mac muss zuerst ein unveränderliches Release festgelegt werden, dessen versionierte Inhalte mit HEAD übereinstimmen; nicht versionierte Plan- oder Referenzdateien gehören nicht zur Deployment-Identität. Die zu deployenden Bytes werden ausschließlich per `git archive "$RELEASE_SHA"` in eine private Stage mit Rechten `0700` extrahiert, nie aus dem veränderlichen Arbeitsverzeichnis; auch die Pfadliste stammt aus dem Commit-Objekt per `git ls-tree`. Das Manifest erfasst für jeden versionierten Pfad SHA-256 und Git-Modus `100644`/`100755` und weist Symlinks und unsichere Pfade zurück. Oracle prüft das Manifest selbst, den Verifier, Hash/Modus aller versionierten Dateien und die vollständige Menge deploybarer Pfade; ausgenommen ist nur dauerhafter Laufzeitzustand (`.env.production`, `backups/`, `.release-sha`, `.release-manifest`). Erst nach erfolgreicher Prüfung wird ein nicht vertraulicher Commit-SHA-Marker geschrieben. Das erste Deployment löscht nichts auf dem Server; zusätzliche oder übrig gebliebene Quell-, Konfigurations- oder Skriptdateien führen zum Abbruch. Die Stage wird bei normalem Ende, EXIT oder Signal entfernt.
 
 ```bash
 set +x
@@ -188,7 +206,7 @@ python3.11 -m venv "$RELEASE_STAGE/backend/.venv"
 (cd "$RELEASE_STAGE/frontend" && npm ci)
 ```
 
-以下初始化命令在 **Oracle 主机 `/opt/openqms` shell** 执行：
+Die folgenden Initialisierungsbefehle werden in der **Shell des Oracle-Hosts in `/opt/openqms`** ausgeführt:
 
 ```bash
 cd /opt/openqms
@@ -201,10 +219,10 @@ SITE_ADDRESS=qms.smartindustry.world \
 ./scripts/production-compose.sh ps
 ```
 
-浏览器可见的 Viewer 值是有意提供的只读演示凭据；默认构建仅公开 Viewer。本实例额外公开 `engineer` 与 `manager` 作为**共享可写**演示账号：只有在可选 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 配置为完整两账号 JSON 时，正常 `/login` 与 `?demo=viewer` 才展示三个账号；按钮只填表，不自动登录。`admin` 与同为管理员角色的 `groupadmin` 保持私密，绝不进入浏览器 bundle。Engineer 没有用户管理权限，Manager 只有查看权限，均不能修改其他账号密码。其他访客仍可能改动共享质量数据；此配置是公开构建输入，不是 secret，不得输入真实数据或真实 API 密钥。关闭演示时必须同时清空所有凭据变量。
+Die im Browser sichtbaren Viewer-Zugangsdaten sind bewusst bereitgestellte Nur-Lese-Demozugänge; der Standard-Build veröffentlicht nur den Viewer. Diese Instanz veröffentlicht zusätzlich `engineer` und `manager` als **gemeinsam beschreibbare** Demokonten: Nur wenn das optionale `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` mit dem vollständigen JSON beider Konten gesetzt ist, zeigen das normale `/login` und `?demo=viewer` drei Konten; die Schaltflächen füllen nur das Formular aus und melden nicht automatisch an. `admin` und das ebenfalls administrative `groupadmin` bleiben privat und gelangen nie in das Browser-Bundle. Engineer hat keine Benutzerverwaltungsrechte, Manager nur Leserechte; keiner von beiden kann Passwörter anderer Konten ändern. Andere Besucher können dennoch gemeinsame Qualitätsdaten verändern; diese Konfiguration ist eine öffentliche Build-Eingabe, kein Geheimnis – keine echten Daten oder API-Schlüssel eingeben. Beim Abschalten der Demo müssen alle Zugangsdaten-Variablen gleichzeitig geleert werden.
 
 ```env
-# 仅本实例：替换已有空值；仅当旧文件缺少该键才追加到 mode 0600 的 .env.production
+# Nur diese Instanz: vorhandenen leeren Wert ersetzen; nur anhängen, wenn der Schlüssel in der .env.production (Modus 0600) fehlt
 VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=[{"username":"engineer","password":"Engineer@2026"},{"username":"manager","password":"Manager@2026"}]
 ```
 
@@ -216,7 +234,7 @@ VITE_PUBLIC_DEMO_PASSWORD=Viewer@2026
 VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS=
 EOF
 
-# 禁用公开演示入口
+# Öffentlichen Demo-Zugang deaktivieren
 VITE_PUBLIC_DEMO_ENABLED=false \
 VITE_PUBLIC_DEMO_USERNAME= \
 VITE_PUBLIC_DEMO_PASSWORD= \
@@ -224,11 +242,11 @@ VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS= \
   npm --prefix frontend run build
 ```
 
-### 身份门禁与串行发布
+### Identitätsprüfung und serielles Release
 
-容器内 DSN 使用 `db:5432`。Mac 专用终端把 Oracle 目标隧道映射到本地 `15432`；本地 PostgreSQL `5432` 提供本次唯一 release gate 数据库。运维 shell 先清除 hostile ambient `TEST_DATABASE_URL`，在首次 `make --silent check-test-db` 前构造并导出唯一 URL，并通过显式 `CHECK_CMD` 把同一 URL、库名和 PG 参数传入 deploy-release 的 nested `make check`，绝不回落到 `qms_test`。所有 migrate/check/preflight 脚本从 `RELEASE_STAGE` 运行；stage 使用 Python 3.11 从 archive 的 `backend/requirements.txt` 创建全新 `.venv`，并使用 Node 20 对 archive 的 `frontend/package-lock.json` 执行 clean `npm ci`。不复用原 checkout 的未跟踪依赖或源码。Oracle wrapper build 后直接用 `docker image inspect` 捕获并锁定新构建的 `openqms-backend:prod` / `openqms-web:prod` sha256 image ID（graph-worker 共用 backend tag），与 `RELEASE_SHA` 关联；不能用只反映已创建容器的 Compose `images -q`。target identity 在迁移前首先复验 remote tree/marker/tag image，initializer 与 rollout 也重复同一门禁。
+Die DSN innerhalb der Container verwendet `db:5432`. Ein eigenes Terminal auf dem Mac tunnelt das Oracle-Ziel auf den lokalen Port `15432`; die lokale PostgreSQL-Instanz auf `5432` stellt die einzige Release-Gate-Datenbank für diesen Lauf bereit. Die Betriebs-Shell entfernt zunächst ein eventuell vorhandenes `TEST_DATABASE_URL` aus der Umgebung, erstellt und exportiert vor dem ersten `make --silent check-test-db` eine eindeutige URL und übergibt über ein explizites `CHECK_CMD` dieselbe URL, denselben Datenbanknamen und dieselben PG-Parameter an das verschachtelte `make check` von deploy-release – ohne jemals auf `qms_test` zurückzufallen. Alle migrate/check/preflight-Skripte laufen aus `RELEASE_STAGE`; die Stage erstellt mit Python 3.11 aus dem `backend/requirements.txt` des Archivs eine frische `.venv` und führt mit Node 20 ein sauberes `npm ci` auf dem `frontend/package-lock.json` des Archivs aus. Nicht versionierte Abhängigkeiten oder Quellen des ursprünglichen Checkouts werden nicht wiederverwendet. Nach dem Build ermittelt der Oracle-Wrapper per `docker image inspect` die sha256-Image-IDs der neu gebauten `openqms-backend:prod` / `openqms-web:prod` (der Graph-Worker nutzt das Backend-Tag), fixiert sie und verknüpft sie mit `RELEASE_SHA`; `images -q` von Compose ist ungeeignet, da es nur bereits erstellte Container widerspiegelt. Die Zielidentität prüft vor der Migration zuerst erneut Remote-Baum, Marker und Tag-Images; Initializer und Rollout wiederholen dieselbe Prüfung.
 
-Mac 专用隧道终端：
+Eigenes Tunnel-Terminal auf dem Mac:
 
 ```bash
 ssh -N \
@@ -239,10 +257,9 @@ ssh -N \
   ubuntu@100.84.141.70
 ```
 
-执行同步且保留 `RELEASE_SHA` 的 Mac 运维终端（先将占位符替换为本机测试库凭据；不得打印生产密码或 DSN）：
+Betriebs-Terminal auf dem Mac, das synchronisiert und `RELEASE_SHA` beibehält (Platzhalter zuvor durch die Zugangsdaten der lokalen Testdatenbank ersetzen; Produktionspasswörter oder DSN nie ausgeben):
 
-
-Release test database ownership: provision a dedicated pgvector/pgvector:pg15 Docker container with a random `openqms.owner` label and a loopback-only published port. Before executing this block, prepare a mode 0600 JSON registration with `container`, full `container_id`, `owner_nonce` matching that label, `image`, `host`, `port`, `test_database` set to `qms_test` matching RELEASE_GATE_DB, and `application_database` set to `postgres`. Set OPENQMS_TEST_RESOURCE_FILE to that file and LOCAL_TEST_PG* to that exact container. Do not register a business database or another task's container. `make check-test-db` verifies the registration before creating/migrating the test database; it must succeed before `make deploy-release` touches the target. Current full acceptance fixtures require `qms_test`; use that name only inside the dedicated container. Never use a shared qms_test instance. SDK build tooling is pinned in the stage venv and CHECK_CMD explicitly selects that interpreter.
+Eigentum an der Release-Testdatenbank: Stellen Sie einen eigenen Docker-Container `pgvector/pgvector:pg15` mit zufälligem `openqms.owner`-Label und nur auf Loopback veröffentlichtem Port bereit. Erstellen Sie vor Ausführung dieses Blocks eine JSON-Registrierung mit Modus 0600 mit `container`, vollständiger `container_id`, zum Label passendem `owner_nonce`, `image`, `host`, `port`, `test_database` = `qms_test` (passend zu RELEASE_GATE_DB) und `application_database` = `postgres`. Setzen Sie OPENQMS_TEST_RESOURCE_FILE auf diese Datei und LOCAL_TEST_PG* auf genau diesen Container. Registrieren Sie keine Geschäftsdatenbank und keinen Container einer anderen Aufgabe. `make check-test-db` prüft die Registrierung, bevor die Testdatenbank angelegt bzw. migriert wird; das muss erfolgreich sein, bevor `make deploy-release` das Ziel berührt. Die aktuellen Abnahme-Fixtures erfordern `qms_test`; verwenden Sie diesen Namen nur innerhalb des dedizierten Containers und nie eine gemeinsam genutzte qms_test-Instanz. Die SDK-Build-Werkzeuge sind in der venv der Stage fixiert, und CHECK_CMD wählt diesen Interpreter ausdrücklich.
 
 ```bash
 cd "$RELEASE_STAGE"
@@ -314,7 +331,7 @@ cleanup_release_stage
 trap - EXIT HUP INT TERM QUIT
 ```
 
-预公开代理探针必须在 Oracle 主机运行，并命中 Caddy 的 Tailnet HTTP site；公网证书签发后若再次探测 `qms.smartindustry.world`，必须显式设置 `SITE_SCHEME=https`。
+Die Proxy-Prüfung vor der Veröffentlichung muss auf dem Oracle-Host laufen und die Tailnet-HTTP-Site von Caddy treffen; wird nach Ausstellung des öffentlichen Zertifikats erneut gegen `qms.smartindustry.world` geprüft, muss `SITE_SCHEME=https` ausdrücklich gesetzt werden.
 
 ```bash
 COMPOSE_FILE=/opt/openqms/docker-compose.prod.yml \
@@ -326,11 +343,11 @@ LOGIN_PASSWORD=Viewer@2026 \
 ./scripts/production-compose.sh restart backend
 ```
 
-本实例已使用 Namecheap BasicDNS 的 `qms` A 记录与 Caddy HTTPS，公开 80/443；登录页只公开 Viewer、Engineer、Manager。`admin` 与 `groupadmin` 保持私密，避免访客修改账号密码和权限；其他正式生产环境仍应轮换全部演示密码。公网 SSH 22 暂按实例所有者决定保留，若以后关闭，必须先重新验证 Tailscale SSH，且单独取得授权。
+Diese Instanz nutzt bereits den `qms`-A-Record bei Namecheap BasicDNS und Caddy-HTTPS, öffentlich sind 80/443; die Login-Seite zeigt nur Viewer, Engineer und Manager. `admin` und `groupadmin` bleiben privat, damit Besucher keine Passwörter oder Berechtigungen ändern können; andere Produktivumgebungen sollten dennoch alle Demopasswörter ändern. Öffentliches SSH auf Port 22 bleibt nach Entscheidung des Betreibers vorerst offen; soll es später geschlossen werden, muss zuvor Tailscale-SSH erneut geprüft und eine gesonderte Freigabe eingeholt werden.
 
-### 备份、恢复与回滚
+### Backup, Wiederherstellung und Rollback
 
-以下备份安装、手动执行与校验命令都在 **Oracle 主机 `/opt/openqms` shell** 执行：
+Installation, manuelle Ausführung und Prüfung der Backups erfolgen in der **Shell des Oracle-Hosts in `/opt/openqms`**:
 
 ```bash
 sudo install -m 0644 deploy/openqms-backup.service /etc/systemd/system/openqms-backup.service
@@ -347,92 +364,94 @@ test -n "$latest"
 ./scripts/production-compose.sh exec -T db pg_restore --list < "$latest" >/dev/null
 ```
 
-备份脚本每天生成经 `pg_restore --list` 校验的 custom-format dump，验证成功后才发布并执行七日保留。恢复必须在停写后先导入**新的空数据库**完成演练；脚本不备份 Neo4j/Caddy 卷，也不提供覆盖生产库的一键恢复。
+Das Backup-Skript erzeugt täglich einen per `pg_restore --list` geprüften Dump im Custom-Format, veröffentlicht ihn erst nach erfolgreicher Prüfung und bewahrt sieben Tage auf. Eine Wiederherstellung muss nach Stopp der Schreibzugriffe zuerst in eine **neue, leere Datenbank** geprobt werden; das Skript sichert keine Neo4j-/Caddy-Volumes und bietet keine Ein-Klick-Wiederherstellung, die die Produktionsdatenbank überschreibt.
 
-代码回滚先在 **Mac 仓库**切换到已验证版本并按 Task 14 的同一受控 rsync 流程同步源码，再在 **Oracle 主机**重建应用服务；schema 回滚必须依据迁移兼容性和已验证备份另行决策。以下步骤保留命名卷，并以服务运行和 `ps` 检查结束：
+Für ein Code-Rollback wird zunächst im **Mac-Repository** auf eine geprüfte Version gewechselt und der Quellcode mit demselben kontrollierten rsync-Ablauf (Task 14) synchronisiert; anschließend werden die Anwendungsdienste auf dem **Oracle-Host** neu gebaut. Über ein Schema-Rollback ist anhand der Migrationskompatibilität und eines geprüften Backups gesondert zu entscheiden. Die folgenden Schritte behalten die benannten Volumes und enden mit laufenden Diensten und einer `ps`-Prüfung:
 
 ```bash
-# Mac 仓库：切换版本并完成受控源码同步
+# Mac-Repository: Version wechseln und Quellcode kontrolliert synchronisieren
 git checkout '<previous-release-tag>'
 
-# Oracle 主机 /opt/openqms：同步完成后重建并保持运行
+# Oracle-Host /opt/openqms: nach der Synchronisierung neu bauen und laufen lassen
 ./scripts/production-compose.sh config --quiet
 ./scripts/production-compose.sh up -d --build backend graph-worker web
 ./scripts/production-compose.sh ps
 ```
 
-完整双语操作手册见 [部署指南](docs/deployment.md) 与 [English Deployment Guide](docs/en/deployment.md)。
+Das vollständige zweisprachige Betriebshandbuch: [Deployment-Leitfaden (Chinesisch)](docs/deployment.md) und [English Deployment Guide](docs/en/deployment.md).
 
 ---
 
-## 模块支持状态
+## Stand der Module
 
-| 状态 | 说明 |
+| Status | Bedeutung |
 |------|------|
-| ✅ 已完善 | 前后端功能完整，含演示数据 |
-| 🔧 开发中 | 后端 API 已就绪，前端部分功能实现 |
-| 📋 规划中 | 仅有设计文档，尚未开发 |
+| ✅ Ausgereift | Frontend und Backend vollständig, mit Demodaten |
+| 🔧 In Entwicklung | Backend-API vorhanden, Frontend teilweise umgesetzt |
+| 📋 Geplant | Nur Designdokumente, noch nicht entwickelt |
 
-| 模块 | 状态 | 说明 |
+| Modul | Status | Beschreibung |
 |------|:----:|------|
-| FMEA | ✅ | PFMEA/DFMEA 编辑器，七步法生成向导，审批流转 |
-| 8D / CAPA | ✅ | D1–D8 步骤推进，FMEA 关联 |
-| 控制计划 | ✅ | PFMEA 一键生成，版本管理 |
-| 特殊特性 | ✅ | CC/SC 标识，覆盖矩阵，追溯 |
-| SPC | ✅ | 控制图 + 判异 + 过程能力 |
-| MSA | ✅ | GR&R / 偏倚 / 线性 / 稳定性 / Kappa |
-| IQC | ✅ | AQL 抽样，检验批，AQL 优化 |
-| 供应商 | ✅ | 档案 + 绩效 + 风险配置 |
-| SCAR | ✅ | 5 态生命周期 |
-| 客诉 / RMA | ✅ | 客诉 + 退货 + CAPA 联动 |
-| APQP | ✅ | 五阶段门 + 甘特图 |
-| PPAP | ✅ | 18 要素，Level 1–5 |
-| 管理评审 | ✅ | 数据包汇总 + 措施跟踪 |
-| 内部审核 | ✅ | 三类审核 + 发现项 |
-| 客户审核 | ✅ | 审核日程 + 整改闭环 |
-| 质量目标 | ✅ | 三级目标树 + KPI |
-| 供应商风险 | ✅ | 风险规则配置 + 风险看板 |
-| 供应链风险地图 | ✅ | 多维风险热力图 |
-| 集团管理 | ✅ | 多工厂看板 + 对比 + 集团供应商 |
-| 产品类型主数据 | ✅ | 跨工厂产品线分类 + 语义搜索过滤 |
-| ERP 集成 | ✅ | 看板 + 连接配置 + 数据同步 |
-| MES 集成 | ✅ | 看板 + 连接配置 + 生产/报废数据 |
-| PLM 集成 | ✅ | 零件/BOM/变更单 + Mock 连接器 |
-| 知识图谱 | ✅ | Neo4j 可视化 + FMEA/CP 关联 |
-| 变更影响 | ✅ | 影响分析 + 风险评分 |
+| FMEA | ✅ | PFMEA/DFMEA-Editor, Erstellungsassistent mit 7 Schritten, Freigabe-Workflow |
+| 8D / CAPA | ✅ | Schrittweise D1–D8, FMEA-Verknüpfung |
+| Produktionslenkungsplan | ✅ | Erzeugung aus der PFMEA, Versionsverwaltung |
+| Besondere Merkmale | ✅ | CC/SC-Kennzeichnung, Abdeckungsmatrix, Rückverfolgung |
+| SPC | ✅ | Regelkarten + Prüfregeln + Prozessfähigkeit |
+| MSA | ✅ | GR&R / Bias / Linearität / Stabilität / Kappa |
+| Wareneingangsprüfung | ✅ | AQL-Stichproben, Prüflose, AQL-Optimierung |
+| Lieferanten | ✅ | Profile + Leistung + Risikokonfiguration |
+| SCAR | ✅ | Lebenszyklus mit 5 Status |
+| Reklamationen / RMA | ✅ | Reklamationen + Rücksendungen + CAPA-Verknüpfung |
+| APQP | ✅ | Gates über fünf Phasen + Gantt-Diagramm |
+| PPAP | ✅ | 18 Elemente, Stufen 1–5 |
+| Managementbewertung | ✅ | Datenpaket + Maßnahmenverfolgung |
+| Internes Audit | ✅ | Drei Auditarten + Feststellungen |
+| Kundenaudit | ✅ | Auditplanung + Korrekturabschluss |
+| Qualitätsziele | ✅ | Dreistufiger Zielbaum + KPI |
+| Lieferantenrisiko | ✅ | Konfiguration der Risikoregeln + Risiko-Dashboard |
+| Lieferketten-Risikokarte | ✅ | Mehrdimensionale Risiko-Heatmap |
+| Konzernverwaltung | ✅ | Dashboard über mehrere Werke + Vergleich + Konzernlieferanten |
+| Produkttyp-Stammdaten | ✅ | Werksübergreifende Klassifizierung der Produktlinien + Filter für semantische Suche |
+| ERP-Integration | ✅ | Dashboard + Verbindungskonfiguration + Datensynchronisierung |
+| MES-Integration | ✅ | Dashboard + Verbindungskonfiguration + Produktions-/Ausschussdaten |
+| PLM-Integration | ✅ | Teile/Stücklisten/Änderungsaufträge + Mock-Konnektor |
+| Wissensgraph | ✅ | Neo4j-Visualisierung + FMEA-/PLP-Verknüpfung |
+| Änderungsauswirkung | ✅ | Auswirkungsanalyse + Risikobewertung |
 
 ---
 
-## 文档目录
+## Dokumentation
 
-| 文档 | 说明 |
+| Dokument | Beschreibung |
 |------|------|
-| [部署指南](docs/deployment.md) | Docker / 本地开发环境搭建 |
-| [架构概览](docs/architecture.md) | 前后端架构、权限模型、数据流 |
-| [用户指南](docs/user-guide.md) | 登录、导航、通用操作 |
-| [管理员指南](docs/admin-guide.md) | 用户管理、权限配置、工厂分配 |
-| [权限参考](docs/permissions.md) | 完整权限矩阵 |
-| [开发指南](docs/development.md) | 开发约定、添加新模块 |
-| [路线图](docs/ROADMAP.md) | 开发计划与进度 |
-| [决策日志](docs/DECISIONS.md) | 关键架构决策（ADR）及其背景与影响 |
+| [Betrieb auf dem Raspberry Pi](docs/raspberry-pi.md) | Deployment im lokalen Netzwerk (Deutsch) |
+| [Sicherheitsprüfung](docs/sicherheitspruefung.md) | Ergebnisse und offene Empfehlungen (Deutsch) |
+| [Deployment-Leitfaden](docs/deployment.md) | Docker / Einrichtung der lokalen Entwicklungsumgebung |
+| [Architekturüberblick](docs/architecture.md) | Frontend-/Backend-Architektur, Berechtigungsmodell, Datenfluss |
+| [Benutzerhandbuch](docs/user-guide.md) | Anmeldung, Navigation, allgemeine Bedienung |
+| [Administratorhandbuch](docs/admin-guide.md) | Benutzerverwaltung, Berechtigungen, Werkszuordnung |
+| [Berechtigungsreferenz](docs/permissions.md) | Vollständige Berechtigungsmatrix |
+| [Entwicklerhandbuch](docs/development.md) | Entwicklungskonventionen, neue Module hinzufügen |
+| [Roadmap](docs/ROADMAP.md) | Entwicklungsplan und Fortschritt |
+| [Entscheidungsprotokoll](docs/DECISIONS.md) | Wichtige Architekturentscheidungen (ADR) mit Hintergrund und Auswirkungen |
 
-### 模块手册
+### Modulhandbücher
 
-| 手册 | 覆盖模块 |
+| Handbuch | Module |
 |------|----------|
-| [策划与 FMEA](docs/modules/planning.md) | FMEA、控制计划、APQP、PPAP、特殊特性 |
-| [CAPA / 8D](docs/modules/capa.md) | 8D 步骤推进、审批流转 |
-| [IQC 与供应商](docs/modules/iqc-supplier.md) | 来料检验、供应商管理、供应商风险、供应链风险地图 |
-| [SPC 与 MSA](docs/modules/spc-msa.md) | 统计过程控制、测量系统分析 |
-| [客户质量](docs/modules/customer-quality.md) | 客诉、RMA、客户审核、SCAR |
-| [管理评审与质量目标](docs/modules/management-review.md) | 管理评审、质量目标、仪表盘 |
-| [ERP / MES / PLM](docs/modules/erp-mes-plm.md) | 外部系统集成 |
-| [知识图谱与变更影响](docs/modules/knowledge-graph.md) | 知识图谱可视化、变更影响分析 |
-| [集团管理](docs/modules/group.md) | 多工厂、集团供应商、集团审核 |
+| [Planung und FMEA](docs/modules/planning.md) | FMEA, Produktionslenkungsplan, APQP, PPAP, besondere Merkmale |
+| [CAPA / 8D](docs/modules/capa.md) | 8D-Schritte, Freigabe-Workflow |
+| [Wareneingang und Lieferanten](docs/modules/iqc-supplier.md) | Wareneingangsprüfung, Lieferantenmanagement, Lieferantenrisiko, Lieferketten-Risikokarte |
+| [SPC und MSA](docs/modules/spc-msa.md) | Statistische Prozessregelung, Messsystemanalyse |
+| [Kundenqualität](docs/modules/customer-quality.md) | Reklamationen, RMA, Kundenaudits, SCAR |
+| [Managementbewertung und Qualitätsziele](docs/modules/management-review.md) | Managementbewertung, Qualitätsziele, Dashboard |
+| [ERP / MES / PLM](docs/modules/erp-mes-plm.md) | Integration externer Systeme |
+| [Wissensgraph und Änderungsauswirkung](docs/modules/knowledge-graph.md) | Visualisierung des Wissensgraphen, Analyse von Änderungsauswirkungen |
+| [Konzernverwaltung](docs/modules/group.md) | Mehrere Werke, Konzernlieferanten, Konzernaudits |
 
 ---
 
-## 许可证
+## Lizenz
 
-MIT License — 详见 [LICENSE](LICENSE)。
-自动部署配置与验收见 [Oracle CI/CD 指南](docs/oracle-automation.md)；生产与预览启用状态以 PROGRESS.md 的实际执行记录为准。
+MIT-Lizenz – siehe [LICENSE](LICENSE).
+Konfiguration und Abnahme des automatischen Deployments: [Oracle-CI/CD-Leitfaden](docs/oracle-automation.md); maßgeblich für den Aktivierungsstand von Produktion und Vorschau sind die tatsächlichen Einträge in PROGRESS.md.

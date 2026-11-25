@@ -163,7 +163,7 @@ describe("CAPADetailPage D3ContainmentPanel integration", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /导入/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Import/ })).toBeInTheDocument();
     });
   });
 
@@ -188,7 +188,7 @@ describe("CAPADetailPage D3ContainmentPanel integration", () => {
       expect(screen.getAllByText("8D-2026-001").length).toBeGreaterThan(0);
     });
     // D3 panel should NOT be rendered for D4 status
-    expect(screen.queryByRole("button", { name: /导入/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Import/ })).not.toBeInTheDocument();
   });
 
   it("viewer detail page hides d3 write buttons", async () => {
@@ -208,10 +208,10 @@ describe("CAPADetailPage D3ContainmentPanel integration", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("D3 临时遏制措施")).toBeInTheDocument();
+      expect(screen.getAllByText("D3 Interim Containment").length).toBeGreaterThan(0);
     });
     // Viewer should NOT see the import button (canEdit=false)
-    expect(screen.queryByRole("button", { name: /导入/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Import/ })).not.toBeInTheDocument();
   });
 
   it("historical d3 run read-only in detail page", async () => {
@@ -239,12 +239,12 @@ describe("CAPADetailPage D3ContainmentPanel integration", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /导入/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Import/ })).toBeInTheDocument();
     });
     // Historical runs selector should appear when multiple runs exist
     // The selector text appears in the D3ContainmentPanel component
     await waitFor(() => {
-      expect(screen.getAllByText(/选择代次|当前代次/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Select run|Current run/).length).toBeGreaterThan(0);
     });
   });
 });
@@ -388,7 +388,7 @@ describe("CAPADetailPage supplier risk input", () => {
     expect(label.textContent).toContain("Label Supplier Co");
     expect(label.textContent).not.toContain(supplierId);
     // i18n may resolve to zh default or en "Locked"
-    expect(label.textContent).toMatch(/已锁定|Locked/);
+    expect(label.textContent).toMatch(/Locked|Locked/);
   });
 });
 
@@ -576,12 +576,12 @@ describe("CAPADetailPage 生成PPT button visibility", () => {
               permissions: { capa: 2 } } as any,  // CREATE level
       token: "test-token",
     });
-    const closedCapa = { ...mockCapa, status: "D8_CLOSURE", d8_closure: "已关闭" };
+    const closedCapa = { ...mockCapa, status: "D8_CLOSURE", d8_closure: "Closed" };
     vi.mocked(capaApi.getCAPA).mockResolvedValue(closedCapa as any);
 
     renderPage();
-    await waitFor(() => expect(screen.getByDisplayValue(/已关闭/)).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByRole("button", { name: /Generate PPT|生成 PPT/ })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByDisplayValue(/Closed/)).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByRole("button", { name: /Generate PPT|Generate PPT/ })).toBeInTheDocument();
   });
 
   it("viewer (capa=1 VIEW) does NOT see 生成PPT button on D8_CLOSURE", async () => {
@@ -590,12 +590,12 @@ describe("CAPADetailPage 生成PPT button visibility", () => {
               permissions: { capa: 1 } } as any,  // VIEW only
       token: "test-token",
     });
-    const closedCapa = { ...mockCapa, status: "D8_CLOSURE", d8_closure: "已关闭" };
+    const closedCapa = { ...mockCapa, status: "D8_CLOSURE", d8_closure: "Closed" };
     vi.mocked(capaApi.getCAPA).mockResolvedValue(closedCapa as any);
 
     renderPage();
-    await waitFor(() => expect(screen.getByDisplayValue(/已关闭/)).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.queryByRole("button", { name: /Generate PPT|生成 PPT/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByDisplayValue(/Closed/)).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.queryByRole("button", { name: /Generate PPT|Generate PPT/ })).not.toBeInTheDocument();
   });
 
   it("engineer (capa=2) does NOT see 生成PPT button on D7_PREVENTION (not closed)", async () => {
@@ -611,7 +611,7 @@ describe("CAPADetailPage 生成PPT button visibility", () => {
     await waitFor(() => {
       expect(screen.getByText(/5W2H Problem Description/)).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: /Generate PPT|生成 PPT/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Generate PPT|Generate PPT/ })).not.toBeInTheDocument();
   });
 });
 
@@ -764,7 +764,7 @@ describe("CAPADetailPage trigger SCAR", () => {
     fireEvent.click(triggerBtn);
 
     await waitFor(() => {
-      expect(screen.getByText(/从 8D 发起 SCAR|Trigger SCAR from 8D/)).toBeInTheDocument();
+      expect(screen.getByText(/Trigger SCAR from 8D|Trigger SCAR from 8D/)).toBeInTheDocument();
     });
 
     // Select supplier option (supplier_id, not affected_batches)
@@ -774,7 +774,7 @@ describe("CAPADetailPage trigger SCAR", () => {
     fireEvent.click(option);
 
     // Submit modal
-    const okButtons = screen.getAllByRole("button", { name: /发起 SCAR|Trigger SCAR/ });
+    const okButtons = screen.getAllByRole("button", { name: /Trigger SCAR|Trigger SCAR/ });
     const submitBtn = okButtons[okButtons.length - 1];
     fireEvent.click(submitBtn);
 
@@ -843,7 +843,7 @@ describe("CAPADetailPage knowledge sink card", () => {
     expect(screen.getByTestId("capa-knowledge-entry")).toBeInTheDocument();
     expect(screen.getByText("Lesson learned about torque")).toBeInTheDocument();
     expect(screen.getByTestId("capa-knowledge-embedding-status")).toHaveTextContent(
-      /向量就绪|Embedding ready/,
+      /Embedding ready|Embedding ready/,
     );
     expect(screen.getByTestId("capa-knowledge-resink")).toBeInTheDocument();
   });
@@ -961,7 +961,7 @@ describe("CAPADetailPage knowledge sink card", () => {
       expect(capaApi.sinkKnowledge).toHaveBeenCalledWith("test-report-id", expect.any(AbortSignal));
     });
     await waitFor(() => {
-      expect(screen.getByTestId("capa-knowledge-error")).toHaveTextContent(/沉淀失败|timeout|failed|重试/i);
+      expect(screen.getByTestId("capa-knowledge-error")).toHaveTextContent(/沉淀失败|timeout|failed|Retry/i);
     });
   });
 
@@ -1008,7 +1008,7 @@ describe("CAPADetailPage explicit Agent task target", () => {
     useAuthStore.setState({ user: { user_id: "u1", permissions: { capa: 1 } } as any, token: "test-token" });
     vi.mocked(capaApi.getCAPA).mockResolvedValue({ ...mockCapa, report_id: reportId } as any);
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "以本报告创建任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create task from this report" }));
     expect(beginCreate).toHaveBeenCalledWith(reportId);
   });
 });
@@ -1019,7 +1019,7 @@ describe("Task 5 reviewed outcome integration", () => {
     report_id: "test-report-id", status: "D8_APPROVAL_PENDING", contract: "capa.outcome-review.v1",
     review_round_id: "00000000-0000-4000-8000-000000000002", revision: "a".repeat(64), binding_status: "pending",
     d5_measures: [],
-    core: { d4_root_cause: "根因", d5_correction: "实际纠正措施", d6_verification: "实施后复测合格", d7_prevention: "预防复发" },
+    core: { d4_root_cause: "Root Cause", d5_correction: "实际纠正措施", d6_verification: "实施后复测合格", d7_prevention: "预防复发" },
     verifications: [], d7_actions: [], documents: [], decision: null,
       doc_gate: { decision_id: "00000000-0000-4000-8000-000000000003", analysis_id: "00000000-0000-4000-8000-000000000004",
         audit_run_id: null, factory_id: "00000000-0000-4000-8000-000000000005", revision: 0, decision: "passed", no_affected_confirmed: true,
@@ -1056,8 +1056,8 @@ describe("Task 5 reviewed outcome integration", () => {
     vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...review, status: "D8_CLOSURE", binding_status: "legacy_unversioned" } as any);
     renderPage();
     await screen.findByText("实施后复测合格");
-    expect(screen.queryByRole("button", { name: /关联FMEA|Link FMEA|Change FMEA/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /撤销修改/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Link FMEA|Link FMEA|Change FMEA/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Undo Change/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("capa-approve")).not.toBeInTheDocument();
     const supplement = screen.getByTestId("capa-outcome-supplement-edit");
     fireEvent.change(supplement, { target: { value: "结案后新增说明" } }); fireEvent.blur(supplement);
@@ -1068,7 +1068,7 @@ describe("Task 5 reviewed outcome integration", () => {
     renderPage(); await screen.findByText("实施后复测合格");
     fireEvent.click(screen.getByTestId("capa-reject"));
     fireEvent.change(screen.getByTestId("capa-reject-reason"), { target: { value: "  重新验证  " } });
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Reject|驳 回|驳回/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Reject|驳 回|Reject/ }));
     expect(capaApi.advanceCAPA).toHaveBeenCalledWith("test-report-id", {
       target_state: "D7_PREVENTION", reject_reason: "重新验证", expected_outcome_revision: review.revision,
       expected_review_round_id: review.review_round_id,
@@ -1084,7 +1084,7 @@ describe("Task 5 reviewed outcome integration", () => {
     if (status === 409) {
       expect(capaApi.getCAPA).toHaveBeenCalledTimes(2);
       vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...structuredClone(review), revision: "b".repeat(64) } as any);
-      fireEvent.click(screen.getByRole("button", { name: /Reload review materials|重新加载审核材料/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Reload review materials|Reload review materials/ }));
       await screen.findByText("实施后复测合格");
       expect(capaApi.advanceCAPA).toHaveBeenCalledTimes(1);
       fireEvent.click(screen.getByTestId("capa-approve"));
@@ -1145,7 +1145,7 @@ describe("Task 5 reviewed outcome integration", () => {
     fireEvent.click(screen.getByTestId("capa-reject"));
     fireEvent.change(screen.getByTestId("capa-reject-reason"), { target: { value: "PRIVATE REASON" } });
     const next = deferred<any>(); vi.mocked(capaApi.getCapaOutcomeReview).mockReturnValueOnce(next.promise);
-    fireEvent.click(screen.getByRole("button", { name: /Reload review materials|重新加载审核材料/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload review materials|Reload review materials/ }));
     const calls = vi.mocked(capaApi.getCapaOutcomeReview).mock.calls;
     const signal = calls[calls.length - 1][1]!;
     await act(async () => { useAuthStore.setState({ token: "credential-B" }); });
@@ -1161,7 +1161,7 @@ describe("Task 5 reviewed outcome integration", () => {
     vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue({ ...structuredClone(review), status: "ARCHIVED", binding_status: "verified" } as any);
     renderPage(); await screen.findByText("实施后复测合格");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Link FMEA|关联FMEA|Change FMEA|撤销修改|Undo Change|通过验证|Save verification/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Link FMEA|Link FMEA|Change FMEA|Undo Change|Undo Change|通过验证|Save verification/ })).not.toBeInTheDocument();
     expect(screen.queryByTestId("capa-ai-draft")).not.toBeInTheDocument();
     expect(screen.queryByTestId("capa-outcome-supplement-edit")).not.toBeInTheDocument();
     expect(verificationCard).not.toHaveBeenCalled();
@@ -1247,7 +1247,7 @@ describe("Task 5 reviewed outcome integration", () => {
     renderPage(); await screen.findByText("实施后复测合格");
     if (operation === "resink") fireEvent.click(await screen.findByTestId("capa-knowledge-resink"));
     const signal = operation === "lookup" ? vi.mocked(knowledgeApi.findCapaKnowledgeEntry).mock.calls[0][2]! : vi.mocked(capaApi.sinkKnowledge).mock.calls[0][1]!;
-    fireEvent.click(screen.getByRole("button", { name: /Reload review materials|重新加载审核材料/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload review materials|Reload review materials/ }));
     expect(signal.aborted).toBe(false);
     await act(async () => pending.resolve(operation === "lookup" ? entry : { entry_id: "e1", title: "Knowledge", document_no: "K-1", embedding_status: "ready" }));
     await screen.findByText("CURRENT KNOWLEDGE");

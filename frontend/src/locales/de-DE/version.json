@@ -1,0 +1,86 @@
+{
+  "rollback": {
+    "title": "Versions-Rücksetzung bestätigen",
+    "descriptionTitle": "Hinweise zur Versions-Rücksetzung",
+    "description": "Beim Zurücksetzen auf Version v{{major}}.{{minor}} wird eine neue Nebenversion mit demselben Inhalt wie die Zielversion angelegt.",
+    "irreversible": "Dieser Vorgang kann nicht rückgängig gemacht werden. Bitte mit Vorsicht fortfahren.",
+    "reasonLabel": "Grund der Rücksetzung",
+    "reasonRequired": "Bitte Grund der Rücksetzung eingeben",
+    "reasonPlaceholder": "Bitte erläutern, warum auf diese Version zurückgesetzt werden soll ...",
+    "success": "Version erfolgreich zurückgesetzt",
+    "failed": "Rücksetzung fehlgeschlagen"
+  },
+  "create": {
+    "title": "Version anlegen",
+    "summaryLabel": "Änderungszusammenfassung",
+    "summaryRequired": "Bitte Änderungszusammenfassung eingeben",
+    "summaryPlaceholder": "Bitte den wesentlichen Inhalt dieser Versionsänderung beschreiben ...",
+    "isMajor": "Hauptversion",
+    "major": "Haupt",
+    "minor": "Neben",
+    "success": "Version erfolgreich angelegt",
+    "failed": "Anlegen fehlgeschlagen"
+  },
+  "syncPreview": {
+    "title": "FMEA-Synchronisierungsvorschau",
+    "source": "Synchronisierungsquelle",
+    "fmeaVersion": "FMEA-Version: {{version}}",
+    "addCount": "Hinzufügen: {{count}}",
+    "updateCount": "Aktualisieren: {{count}}",
+    "deleteCount": "Löschen: {{count}}",
+    "loadFailed": "Synchronisierungsvorschau konnte nicht geladen werden",
+    "selectAtLeastOne": "Bitte mindestens einen Eintrag zur Synchronisierung auswählen",
+    "syncSuccess": "Synchronisierung erfolgreich",
+    "syncFailed": "Synchronisierung fehlgeschlagen",
+    "cancel": "Abbrechen",
+    "confirmSync": "Synchronisierung bestätigen",
+    "confirmNoChanges": "Keine Änderungen bestätigen",
+    "previewAgain": "Erneut Vorschau anzeigen",
+    "previewExpired": "Vorschau abgelaufen. Vor dem Bestätigen eine neue Vorschau erzeugen.",
+    "partialPending": "{{count}} Eintrag/Einträge noch ausstehend.",
+    "refreshFailedAfterSync": "Die Synchronisierung wurde übernommen, der aktuelle Produktionslenkungsplan konnte aber nicht neu geladen werden. Vor einer weiteren Bestätigung eine neue Vorschau erzeugen.",
+    "loadPreviewFailed": "Vorschau konnte nicht geladen werden",
+    "none": "Keine",
+    "columns": {
+      "action": "Aktion",
+      "stepNo": "Schritt-Nr.",
+      "currentValue": "Aktueller Wert",
+      "fmeaNewValue": "Neuer FMEA-Wert",
+      "mergedValue": "Zusammengeführter Wert",
+      "issues": "Einschränkungen"
+    },
+    "actions": {
+      "add": "Hinzufügen",
+      "sync": "Aktualisieren",
+      "delete": "Löschen"
+    }
+  },
+  "compare": {
+    "versionCompare": "Versionsvergleich",
+    "arrow": "→",
+    "all": "Alle ({{count}})",
+    "added": "Hinzugefügt ({{count}})",
+    "deleted": "Gelöscht ({{count}})",
+    "modified": "Geändert ({{count}})",
+    "loadFailed": "Vergleichsdaten konnten nicht geladen werden",
+    "noMatch": "Keine passenden Änderungen",
+    "addedTag": "Hinzugefügt",
+    "deletedTag": "Gelöscht",
+    "modifiedTag": "Geändert"
+  },
+  "history": {
+    "majorOnly": "Nur Hauptversionen",
+    "createVersion": "Version anlegen",
+    "noRecords": "Keine Versionseinträge",
+    "view": "Anzeigen",
+    "compare": "Vergleichen",
+    "rollback": "Zurücksetzen",
+    "changeTypes": {
+      "submit": "Zur Freigabe eingereicht",
+      "approve": "Freigegeben",
+      "manual": "Manuell angelegt",
+      "rollback": "Versions-Rücksetzung",
+      "fmea_sync": "FMEA-Synchronisierung"
+    }
+  }
+}

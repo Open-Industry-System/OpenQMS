@@ -2,7 +2,7 @@
   "yes": "Yes",
   "no": "No",
   "language": {
-    "zh": "中文",
+    "de": "Deutsch",
     "en": "English",
     "switch": "Switch Language"
   },
@@ -56,7 +56,8 @@
     "completed": "Completed",
     "failed": "Failed",
     "active": "Active",
-    "inactive": "Inactive"
+    "inactive": "Inactive",
+    "loading": "Loading"
   },
   "empty": {
     "data": "No data",
@@ -88,6 +89,9 @@
     "confirmDelete": "Confirm delete?",
     "confirmOperation": "Confirm this operation?",
     "loading": "Loading...",
-    "noPermission": "No permission to perform this operation"
-  }
+    "noPermission": "No permission to perform this operation",
+    "addFailed": "Add failed",
+    "updateFailed": "Update failed"
+  },
+  "noData": "No data"
 }

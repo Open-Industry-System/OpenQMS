@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { message } from 'antd';
 import { updateFMEA, type RecommendationAdoption } from '../api/fmea';
 import type { GraphData } from '../types';
+import { tr } from "../i18n/tr";
 
 interface UseWizardSaveOptions {
   fmeaId: string;
@@ -108,7 +109,7 @@ export function useWizardSave({ fmeaId, onConflict }: UseWizardSaveOptions) {
           onConflict?.(latest);
         } else {
           safeSetStatus('error');
-          if (mountedRef.current) message.error('保存失败，请重试');
+          if (mountedRef.current) message.error(tr("Speichern fehlgeschlagen, bitte erneut versuchen", "Save failed, please retry"));
         }
         return false;
       }

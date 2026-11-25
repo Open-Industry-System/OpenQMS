@@ -1,0 +1,63 @@
+# Caddy für OpenQMS auf dem Raspberry Pi – HTTPS im lokalen Netz.
+# Caddy erzeugt eine eigene lokale Zertifizierungsstelle ("tls internal").
+# Deren Stammzertifikat muss einmalig auf den Client-Rechnern als vertrauenswürdig
+# importiert werden (siehe docs/raspberry-pi.md).
+{
+	admin off
+}
+
+(openqms_app) {
+	encode zstd gzip
+
+	@excel_imports {
+		method POST
+		path /api/suppliers/import /api/suppliers/import/ /api/iqc/materials/import /api/iqc/materials/import/ /api/spc/inspection-characteristics/*/samples/import /api/spc/inspection-characteristics/*/samples/import/
+	}
+	request_body @excel_imports {
+		max_size 10551296
+	}
+	@other_api {
+		path /api/*
+		not path /api/suppliers/import* /api/iqc/materials/import* /api/spc/inspection-characteristics/*/samples/import*
+	}
+	request_body @other_api {
+		max_size 2MB
+	}
+
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle /docs* {
+		respond 404
+	}
+	handle /openapi.json {
+		respond 404
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'"
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}
+
+{$OPENQMS_HOSTNAME} {
+	tls internal
+	import openqms_app
+}
+
+# HTTP-Aufrufe auf HTTPS umleiten.
+http:// {
+	redir https://{$OPENQMS_HOSTNAME}{uri} permanent
+}

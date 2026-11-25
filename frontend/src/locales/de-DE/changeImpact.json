@@ -1,0 +1,46 @@
+{
+  "page": {
+    "title": "Änderungsauswirkungsanalyse",
+    "history": "Analyseverlauf",
+    "detail": "Analysedetails",
+    "selectHint": "Bitte links einen Verlaufseintrag auswählen, um Details anzuzeigen"
+  },
+  "report": {
+    "changeInfo": "Änderungsinformationen",
+    "nodeName": "Knotenname",
+    "type": "Typ",
+    "changeType": "Änderungsart",
+    "changeTypeAttribute": "Attribut",
+    "changeTypeStructure": "Struktur",
+    "field": "Feld",
+    "newValue": "Neuer Wert",
+    "impactScore": "Auswirkungswert",
+    "affectedNodesCount": "Betroffene Knoten",
+    "failureModeCount": "Anzahl Fehlerarten",
+    "apUpgradedCount": "Anzahl AP-Erhöhungen",
+    "affectedNodes": "Betroffene Knoten",
+    "viewInGraph": "Im Graphen anzeigen"
+  },
+  "historyTable": {
+    "time": "Zeit",
+    "nodeName": "Knotenname",
+    "changeType": "Änderungsart",
+    "impactScore": "Auswirkungswert",
+    "affectedCount": "Anzahl betroffen"
+  },
+  "affectedNode": {
+    "none": "Keine betroffenen Knoten",
+    "path": "Pfad",
+    "riskChange": "Risikoänderung",
+    "hops": "{{count}} Schritte",
+    "score": {
+      "high": "Hoch",
+      "medium": "Mittel",
+      "low": "Niedrig"
+    }
+  },
+  "messages": {
+    "loadHistoryFailed": "Verlauf konnte nicht geladen werden",
+    "loadDetailFailed": "Details konnten nicht geladen werden"
+  }
+}

@@ -53,7 +53,7 @@ describe("CAPAListPage create form supplier select", () => {
       document_no: "8D-2026-001",
       title: "T",
       status: "D1_TEAM",
-      severity: "一般",
+      severity: "General",
     } as any);
     useAuthStore.setState({
       user: {
@@ -70,28 +70,28 @@ describe("CAPAListPage create form supplier select", () => {
 
   it("renders optional supplier select via CAPA-gated options", async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /新建/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /actions\.create/ }));
 
     await waitFor(() => {
-      expect(screen.getByLabelText(/关联供应商/)).toBeInTheDocument();
+      expect(screen.getByLabelText(/fields\.supplier$/)).toBeInTheDocument();
     });
     expect(capaApi.listCapaSupplierOptions).toHaveBeenCalled();
   });
 
   it("includes supplier_id in create request when selected", async () => {
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /新建/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /actions\.create/ }));
 
-    await waitFor(() => expect(screen.getByLabelText(/关联供应商/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText(/fields\.supplier$/)).toBeInTheDocument());
 
-    fireEvent.change(screen.getByPlaceholderText(/如 8D-2026-001/), {
+    fireEvent.change(screen.getByPlaceholderText(/fields\.documentNoPlaceholder/), {
       target: { value: "8D-2026-001" },
     });
-    fireEvent.change(screen.getByPlaceholderText(/如 焊接不良客诉/), {
+    fireEvent.change(screen.getByPlaceholderText(/fields\.titlePlaceholder/), {
       target: { value: "T" },
     });
 
-    fireEvent.mouseDown(screen.getByLabelText(/关联供应商/));
+    fireEvent.mouseDown(screen.getByLabelText(/fields\.supplier$/));
     await waitFor(() => expect(screen.getByText("S-001 - Acme")).toBeInTheDocument());
     fireEvent.click(screen.getByText("S-001 - Acme"));
 

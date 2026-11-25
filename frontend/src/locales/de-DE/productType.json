@@ -1,0 +1,17 @@
+{
+  "title": "Produkttypen verwalten",
+  "fields": { "code": "Typcode", "name": "Typname", "description": "Beschreibung", "is_active": "Aktiv" },
+  "actions": { "create": "Typ anlegen", "edit": "Bearbeiten", "delete": "Deaktivieren", "cancel": "Abbrechen", "save": "Speichern" },
+  "messages": {
+    "created": "Produkttyp angelegt",
+    "updated": "Produkttyp aktualisiert",
+    "deactivated": "Produkttyp deaktiviert",
+    "deleteConfirm": "Diesen Produkttyp deaktivieren?",
+    "refused": "Deaktivierung nicht möglich: {{detail}}"
+  },
+  "productLine": {
+    "title": "Produktlinien verwalten",
+    "fields": { "product_type_code": "Produkttyp" },
+    "assignType": "Produkttyp zuordnen"
+  }
+}

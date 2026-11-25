@@ -1,0 +1,3292 @@
+[
+ [
+  "1. 以往管理评审措施落实情况",
+  "1. Umsetzung der Maßnahmen aus früheren Managementbewertungen",
+  "1. Status of actions from previous management reviews"
+ ],
+ [
+  "2. 质量目标实现程度",
+  "2. Erreichung der Qualitätsziele",
+  "2. Achievement of quality objectives"
+ ],
+ [
+  "3. 审核结果",
+  "3. Auditergebnisse",
+  "3. Audit results"
+ ],
+ [
+  "4. 不合格与纠正措施",
+  "4. Nichtkonformitäten und Korrekturmaßnahmen",
+  "4. Nonconformities and corrective actions"
+ ],
+ [
+  "5. FMEA 风险分析",
+  "5. FMEA-Risikoanalyse",
+  "5. FMEA risk analysis"
+ ],
+ [
+  "6. SPC 过程能力",
+  "6. SPC-Prozessfähigkeit",
+  "6. SPC process capability"
+ ],
+ [
+  "7. 外部供方绩效",
+  "7. Leistung externer Anbieter",
+  "7. External provider performance"
+ ],
+ [
+  "8. 内外部因素变化",
+  "8. Änderungen interner und externer Themen",
+  "8. Changes in internal and external issues"
+ ],
+ [
+  "9. 资源充分性",
+  "9. Angemessenheit der Ressourcen",
+  "9. Adequacy of resources"
+ ],
+ [
+  "10. 顾客满意与反馈",
+  "10. Kundenzufriedenheit und Rückmeldungen",
+  "10. Customer satisfaction and feedback"
+ ],
+ [
+  "11. 监视测量结果（设备）",
+  "11. Überwachungs- und Messergebnisse (Anlagen)",
+  "11. Monitoring and measurement results (equipment)"
+ ],
+ [
+  "12. 不良质量成本",
+  "12. Kosten schlechter Qualität",
+  "12. Cost of poor quality"
+ ],
+ [
+  "13. 制造可行性评估",
+  "13. Bewertung der Herstellbarkeit",
+  "13. Manufacturing feasibility assessment"
+ ],
+ [
+  "tags 须为长度 3–8 的字符串列表，实际={}",
+  "tags muss eine Liste von Zeichenketten mit Länge 3–8 sein, tatsächlich={}",
+  "tags must be a list of strings with length 3–8, actual={}"
+ ],
+ [
+  "知识库沉淀需要 LLM，当前未配置",
+  "Wissensspeicherung benötigt ein LLM, derzeit nicht konfiguriert",
+  "Knowledge sink requires an LLM, currently not configured"
+ ],
+ [
+  "LLM 返回非对象",
+  "LLM hat kein Objekt zurückgegeben",
+  "LLM did not return an object"
+ ],
+ [
+  "lesson_summary 为空或非法",
+  "lesson_summary ist leer oder ungültig",
+  "lesson_summary is empty or invalid"
+ ],
+ [
+  "知识库 upsert 后无法读取条目",
+  "Eintrag nach dem Upsert in die Wissensbasis nicht lesbar",
+  "Knowledge entry unreadable after upsert"
+ ],
+ [
+  "D3 影响范围装载失败: {}",
+  "Laden des D3-Auswirkungsbereichs fehlgeschlagen: {}",
+  "Failed to load D3 impact scope: {}"
+ ],
+ [
+  "LLM 调用失败: {}",
+  "LLM-Aufruf fehlgeschlagen: {}",
+  "LLM call failed: {}"
+ ],
+ [
+  "散热器材料升级",
+  "Werkstoff des Kühlkörpers verbessern",
+  "Upgrade heat sink material"
+ ],
+ [
+  "陶瓷电容容值调整",
+  "Kapazität des Keramikkondensators anpassen",
+  "Adjust ceramic capacitor value"
+ ],
+ [
+  "散热效率提升15%",
+  "Kühlleistung um 15 % verbessert",
+  "Cooling efficiency improved by 15%"
+ ],
+ [
+  "输出纹波降低20%",
+  "Ausgangswelligkeit um 20 % reduziert",
+  "Output ripple reduced by 20%"
+ ],
+ [
+  "source_ref 必须为对象",
+  "source_ref muss ein Objekt sein",
+  "source_ref must be an object"
+ ],
+ [
+  "source_ref 只允许 fmea_id 与 cause_node_id",
+  "source_ref erlaubt nur fmea_id und cause_node_id",
+  "source_ref only allows fmea_id and cause_node_id"
+ ],
+ [
+  "须先关联 FMEA",
+  "Zuerst eine FMEA verknüpfen",
+  "Link an FMEA first"
+ ],
+ [
+  "source_ref.fmea_id 须等于已关联 FMEA",
+  "source_ref.fmea_id muss der verknüpften FMEA entsprechen",
+  "source_ref.fmea_id must match the linked FMEA"
+ ],
+ [
+  "cause_node_id 不能为空",
+  "cause_node_id darf nicht leer sein",
+  "cause_node_id must not be empty"
+ ],
+ [
+  "目标 FMEA 不存在",
+  "Ziel-FMEA existiert nicht",
+  "Target FMEA does not exist"
+ ],
+ [
+  "目标 FMEA 跨工厂",
+  "Ziel-FMEA gehört zu einem anderen Werk",
+  "Target FMEA belongs to another plant"
+ ],
+ [
+  "目标 FMEA 跨产品线",
+  "Ziel-FMEA gehört zu einer anderen Produktlinie",
+  "Target FMEA belongs to another product line"
+ ],
+ [
+  "cause_node_id 不存在于 FMEA 图或非 FailureCause",
+  "cause_node_id existiert nicht im FMEA-Graphen oder ist keine FailureCause",
+  "cause_node_id not found in FMEA graph or not a FailureCause"
+ ],
+ [
+  "已验证记录须填写验证方法、结果或证据",
+  "Verifizierte Einträge benötigen Methode, Ergebnis oder Nachweis",
+  "Verified records require method, result or evidence"
+ ],
+ [
+  "source_ref.fmea_id 非合法 UUID",
+  "source_ref.fmea_id ist keine gültige UUID",
+  "source_ref.fmea_id is not a valid UUID"
+ ],
+ [
+  "发运记录不存在",
+  "Lieferung existiert nicht",
+  "Shipment does not exist"
+ ],
+ [
+  "客诉不存在",
+  "Reklamation existiert nicht",
+  "Complaint does not exist"
+ ],
+ [
+  "该客诉未判定为供应商责任，无法创建 SCAR",
+  "Diese Reklamation ist nicht als Lieferantenverantwortung bewertet, SCAR kann nicht angelegt werden",
+  "This complaint is not attributed to the supplier; cannot create SCAR"
+ ],
+ [
+  "该客诉已关联 SCAR，无法重复创建",
+  "Diese Reklamation ist bereits mit einer SCAR verknüpft",
+  "This complaint is already linked to a SCAR"
+ ],
+ [
+  "缺少责任供应商信息",
+  "Angaben zum verantwortlichen Lieferanten fehlen",
+  "Responsible supplier information missing"
+ ],
+ [
+  "RMA 不存在",
+  "RMA existiert nicht",
+  "RMA does not exist"
+ ],
+ [
+  "该 RMA 责任判定不是\"供应商\"，无法创建 SCAR",
+  "Die Verantwortung dieser RMA liegt nicht beim „Lieferanten“, SCAR kann nicht angelegt werden",
+  "This RMA is not attributed to the \"supplier\"; cannot create SCAR"
+ ],
+ [
+  "该 RMA 已关联 SCAR，无法重复创建",
+  "Diese RMA ist bereits mit einer SCAR verknüpft",
+  "This RMA is already linked to a SCAR"
+ ],
+ [
+  "缺少责任供应商信息（RMA 未记录供应商，请手动指定）",
+  "Angaben zum verantwortlichen Lieferanten fehlen (RMA ohne Lieferant, bitte manuell angeben)",
+  "Responsible supplier missing (RMA has no supplier, please specify manually)"
+ ],
+ [
+  "批量必须 ≥ 2",
+  "Losgröße muss ≥ 2 sein",
+  "Lot size must be ≥ 2"
+ ],
+ [
+  "检验水平必须是: {}",
+  "Prüfniveau muss eines der folgenden sein: {}",
+  "Inspection level must be one of: {}"
+ ],
+ [
+  "无对应抽样方案: 批量={}, AQL={}, 检验水平={}, 代码={}。请调整参数。",
+  "Kein passender Stichprobenplan: Losgröße={}, AQL={}, Prüfniveau={}, Kennbuchstabe={}. Bitte Parameter anpassen.",
+  "No matching sampling plan: lot size={}, AQL={}, inspection level={}, code={}. Please adjust parameters."
+ ],
+ [
+  "审核员资格已过期，请先完成资格再评审",
+  "Auditorqualifikation abgelaufen, bitte vor der Bewertung erneuern",
+  "Auditor qualification expired, please renew before reviewing"
+ ],
+ [
+  "D7 动作只能在 D7 预防复发阶段执行",
+  "D7-Aktionen sind nur in der Phase D7 Wiederholung verhindern möglich",
+  "D7 actions are only allowed in the D7 prevention phase"
+ ],
+ [
+  "需要 fmea 模块的 {} 权限",
+  "Berechtigung {} für das Modul fmea erforderlich",
+  "{} permission required for the fmea module"
+ ],
+ [
+  "D7 推荐 key 不存在于当前推荐集",
+  "D7-Empfehlungsschlüssel existiert nicht in der aktuellen Empfehlungsmenge",
+  "D7 recommendation key not in current recommendation set"
+ ],
+ [
+  "D5 永久措施为空，无法自动回填",
+  "D5-Abstellmaßnahme ist leer, automatisches Zurückschreiben nicht möglich",
+  "D5 permanent action is empty; cannot auto-fill"
+ ],
+ [
+  "规则引擎兜底推荐不支持自动回填到 FMEA",
+  "Ersatzempfehlungen der Regel-Engine können nicht automatisch in die FMEA übernommen werden",
+  "Rule-engine fallback recommendations cannot be auto-filled into the FMEA"
+ ],
+ [
+  "已自动回填",
+  "Automatisch übernommen",
+  "Auto-filled"
+ ],
+ [
+  "目标失效模式节点不存在于 FMEA graph",
+  "Ziel-Fehlerartknoten existiert nicht im FMEA-Graphen",
+  "Target failure mode node not in FMEA graph"
+ ],
+ [
+  "目标失效原因节点不存在于 FMEA graph",
+  "Ziel-Fehlerursachenknoten existiert nicht im FMEA-Graphen",
+  "Target failure cause node not in FMEA graph"
+ ],
+ [
+  "失效原因与失效模式无 CAUSE_OF 关系",
+  "Zwischen Fehlerursache und Fehlerart besteht keine CAUSE_OF-Beziehung",
+  "No CAUSE_OF relation between failure cause and failure mode"
+ ],
+ [
+  "已自动回填，不可改判",
+  "Bereits automatisch übernommen, Änderung nicht möglich",
+  "Already auto-filled; cannot change decision"
+ ],
+ [
+  "当前状态 {} 不允许发起 SCAR",
+  "Im aktuellen Status {} kann keine SCAR ausgelöst werden",
+  "Current status {} does not allow raising a SCAR"
+ ],
+ [
+  "该 8D 已关联 SCAR",
+  "Dieser 8D ist bereits mit einer SCAR verknüpft",
+  "This 8D is already linked to a SCAR"
+ ],
+ [
+  "供应商不存在",
+  "Lieferant existiert nicht",
+  "Supplier does not exist"
+ ],
+ [
+  "供应商与 8D 必须同厂",
+  "Lieferant und 8D müssen zum selben Werk gehören",
+  "Supplier and 8D must belong to the same plant"
+ ],
+ [
+  "当前状态 {} 冻结字段不可修改: {}",
+  "Im aktuellen Status {} sind eingefrorene Felder nicht änderbar: {}",
+  "Frozen fields cannot be changed in status {}: {}"
+ ],
+ [
+  "D7 推荐重算异常：FMEA 预加载不完整",
+  "Fehler bei Neuberechnung der D7-Empfehlungen: FMEA-Vorladen unvollständig",
+  "D7 recommendation recalculation error: FMEA preload incomplete"
+ ],
+ [
+  "D7 有 {} 条推荐未处置或已 stale（FMEA 变更），不可关闭",
+  "D7 hat {} unbearbeitete oder veraltete Empfehlungen (FMEA geändert), Schließen nicht möglich",
+  "D7 has {} unhandled or stale recommendations (FMEA changed); cannot close"
+ ],
+ [
+  "请先生成文档影响分析",
+  "Bitte zuerst die Dokumenten-Auswirkungsanalyse erzeugen",
+  "Please generate the document impact analysis first"
+ ],
+ [
+  "影响分析已失效，请重新生成影响分析",
+  "Auswirkungsanalyse ist ungültig, bitte neu erzeugen",
+  "Impact analysis is invalid, please regenerate"
+ ],
+ [
+  "分析输入已变更，请重新生成影响分析",
+  "Analyseeingaben haben sich geändert, bitte Auswirkungsanalyse neu erzeugen",
+  "Analysis inputs changed, please regenerate the impact analysis"
+ ],
+ [
+  "请先运行文档审核",
+  "Bitte zuerst die Dokumentenprüfung ausführen",
+  "Please run the document audit first"
+ ],
+ [
+  "文档审核版本快照非法，请重新运行审核",
+  "Versions-Snapshot der Dokumentenprüfung ungültig, bitte Prüfung erneut ausführen",
+  "Document audit version snapshot invalid, please rerun the audit"
+ ],
+ [
+  "最新文档门禁决策已变更，请重新校验",
+  "Letzte Entscheidung des Dokumenten-Gates hat sich geändert, bitte erneut prüfen",
+  "Latest document gate decision changed, please re-validate"
+ ],
+ [
+  "文档门禁未通过：{}",
+  "Dokumenten-Gate nicht bestanden: {}",
+  "Document gate not passed: {}"
+ ],
+ [
+  "供应商与 8D 不属于同一工厂",
+  "Lieferant und 8D gehören nicht zum selben Werk",
+  "Supplier and 8D do not belong to the same plant"
+ ],
+ [
+  "产品线 '{}' 不存在",
+  "Produktlinie '{}' existiert nicht",
+  "Product line '{}' does not exist"
+ ],
+ [
+  "产品线 '{}' 已停用",
+  "Produktlinie '{}' ist deaktiviert",
+  "Product line '{}' is deactivated"
+ ],
+ [
+  "产品线 '{}' 不属于当前工厂",
+  "Produktlinie '{}' gehört nicht zum aktuellen Werk",
+  "Product line '{}' does not belong to the current plant"
+ ],
+ [
+  "已关联 SCAR，禁止单独修改产品线",
+  "Mit SCAR verknüpft, Produktlinie kann nicht einzeln geändert werden",
+  "Linked to SCAR; product line cannot be changed separately"
+ ],
+ [
+  "文档已变更，请重新审核",
+  "Dokument wurde geändert, bitte erneut prüfen",
+  "Document changed, please re-audit"
+ ],
+ [
+  "已生成供应商风险输入，不可修改产品线",
+  "Lieferantenrisiko-Eingabe bereits erzeugt, Produktlinie nicht änderbar",
+  "Supplier risk input already generated; product line cannot be changed"
+ ],
+ [
+  "8D 已推进至 D7+，不可修改产品线",
+  "8D ist bereits bei D7+, Produktlinie nicht änderbar",
+  "8D already at D7+; product line cannot be changed"
+ ],
+ [
+  "已生成供应商风险输入，不可修改供应商",
+  "Lieferantenrisiko-Eingabe bereits erzeugt, Lieferant nicht änderbar",
+  "Supplier risk input already generated; supplier cannot be changed"
+ ],
+ [
+  "8D 已推进至 D7+，不可修改供应商",
+  "8D ist bereits bei D7+, Lieferant nicht änderbar",
+  "8D already at D7+; supplier cannot be changed"
+ ],
+ [
+  "D7 lessons 抽取失败，不可推进，请重试",
+  "D7-Lessons-Extraktion fehlgeschlagen, Weiterschalten nicht möglich, bitte erneut versuchen",
+  "D7 lessons extraction failed; cannot advance, please retry"
+ ],
+ [
+  "驳回需填写理由",
+  "Für die Ablehnung ist eine Begründung erforderlich",
+  "A reason is required for rejection"
+ ],
+ [
+  "D4→D5 需先填写根因并验证",
+  "D4→D5 erfordert eine eingetragene und verifizierte Grundursache",
+  "D4→D5 requires a root cause that is entered and verified"
+ ],
+ [
+  "D4→D5 需当前根因已验证",
+  "D4→D5 erfordert eine verifizierte aktuelle Grundursache",
+  "D4→D5 requires the current root cause to be verified"
+ ],
+ [
+  "D5→D6 需正式纠正措施",
+  "D5→D6 erfordert formale Abstellmaßnahmen",
+  "D5→D6 requires formal corrective actions"
+ ],
+ [
+  "不支持的审核文档类型: {}",
+  "Nicht unterstützter Dokumenttyp für die Prüfung: {}",
+  "Unsupported document type for audit: {}"
+ ],
+ [
+  "找不到对应审核批次，请重新运行文档审核",
+  "Zugehöriger Prüflauf nicht gefunden, bitte Dokumentenprüfung erneut ausführen",
+  "Audit batch not found, please rerun the document audit"
+ ],
+ [
+  "影响分析文档清单异常，请重新生成影响分析",
+  "Dokumentliste der Auswirkungsanalyse fehlerhaft, bitte neu erzeugen",
+  "Impact analysis document list invalid, please regenerate"
+ ],
+ [
+  "审核批次文档与影响分析不一致，请重新运行审核",
+  "Dokumente des Prüflaufs passen nicht zur Auswirkungsanalyse, bitte Prüfung erneut ausführen",
+  "Audit batch documents do not match the impact analysis, please rerun the audit"
+ ],
+ [
+  "本批次无 blocked_modify（CP item_id 断链）可豁免项；pending_update/incomplete/add/delete/FMEA 须先修正文档后重审",
+  "Dieser Lauf enthält keine ausnehmbaren blocked_modify-Einträge (CP item_id-Bruch); pending_update/incomplete/add/delete/FMEA müssen zuerst im Dokument korrigiert und neu geprüft werden",
+  "No waivable blocked_modify items (CP item_id break) in this batch; pending_update/incomplete/add/delete/FMEA must be fixed in the document and re-audited first"
+ ],
+ [
+  "仍有不可豁免的阻塞项（须先修正文档后重审）: doc_type={} doc_id={} (共 {} 项)",
+  "Es gibt weiterhin nicht ausnehmbare Blockaden (Dokument korrigieren und neu prüfen): doc_type={} doc_id={} (insgesamt {})",
+  "Non-waivable blockers remain (fix the document and re-audit): doc_type={} doc_id={} ({} total)"
+ ],
+ [
+  "keypoint 不在 blocked audit 的未覆盖 modify 集合中: doc={} target_key={} field={}",
+  "keypoint gehört nicht zur ungedeckten modify-Menge der blockierten Prüfung: doc={} target_key={} field={}",
+  "keypoint not in the uncovered modify set of the blocked audit: doc={} target_key={} field={}"
+ ],
+ [
+  "局部豁免被拒绝：同批次仍有未覆盖的 blocked_modify 未列入 items: doc_id={} target_key={} field={} (共 {} 项)",
+  "Teilausnahme abgelehnt: Im selben Lauf gibt es ungedeckte blocked_modify-Einträge, die nicht in items stehen: doc_id={} target_key={} field={} (insgesamt {})",
+  "Partial waiver rejected: uncovered blocked_modify items in the same batch are missing from items: doc_id={} target_key={} field={} ({} total)"
+ ],
+ [
+  "{} 非法",
+  "{} ungültig",
+  "{} invalid"
+ ],
+ [
+  "{} 非法：存在重复项",
+  "{} ungültig: doppelte Einträge",
+  "{} invalid: duplicate entries"
+ ],
+ [
+  "waiver_items 非法：不是最新 passed decision",
+  "waiver_items ungültig: keine aktuelle passed-Entscheidung",
+  "waiver_items invalid: not the latest passed decision"
+ ],
+ [
+  "waiver_items 非法：waiver_reason/items 必须同时存在",
+  "waiver_items ungültig: waiver_reason/items müssen gemeinsam vorhanden sein",
+  "waiver_items invalid: waiver_reason/items must both be present"
+ ],
+ [
+  "waiver_items 非法：缺 audit_run_id",
+  "waiver_items ungültig: audit_run_id fehlt",
+  "waiver_items invalid: audit_run_id missing"
+ ],
+ [
+  "waiver_items 非法：与 audit/live 推导结果不一致",
+  "waiver_items ungültig: weicht vom abgeleiteten Audit-/Live-Ergebnis ab",
+  "waiver_items invalid: inconsistent with audit/live derivation"
+ ],
+ [
+  "waiver audit 不完整：version_snapshot 不一致",
+  "Waiver-Prüfung unvollständig: version_snapshot inkonsistent",
+  "Waiver audit incomplete: version_snapshot inconsistent"
+ ],
+ [
+  "非法 doc_id: {}",
+  "Ungültige doc_id: {}",
+  "Invalid doc_id: {}"
+ ],
+ [
+  "审核覆盖明细异常，请重新运行审核",
+  "Prüfabdeckungsdetails fehlerhaft, bitte Prüfung erneut ausführen",
+  "Audit coverage details invalid, please rerun the audit"
+ ],
+ [
+  "影响分析 key_points 异常，请重新生成影响分析",
+  "key_points der Auswirkungsanalyse fehlerhaft, bitte neu erzeugen",
+  "Impact analysis key_points invalid, please regenerate"
+ ],
+ [
+  "审核覆盖明细不完整，请重新运行审核",
+  "Prüfabdeckungsdetails unvollständig, bitte Prüfung erneut ausführen",
+  "Audit coverage details incomplete, please rerun the audit"
+ ],
+ [
+  "审核覆盖 key_points 与影响分析不一致，请重新运行审核",
+  "key_points der Prüfabdeckung passen nicht zur Auswirkungsanalyse, bitte Prüfung erneut ausführen",
+  "Audit coverage key_points do not match the impact analysis, please rerun the audit"
+ ],
+ [
+  "waiver item 格式非法",
+  "Format des waiver item ungültig",
+  "Invalid waiver item format"
+ ],
+ [
+  "仅允许豁免 control_plan 的 blocked_modify",
+  "Ausnahmen sind nur für blocked_modify im control_plan zulässig",
+  "Only control_plan blocked_modify may be waived"
+ ],
+ [
+  "waiver item 缺 doc_id/target_key/field",
+  "waiver item ohne doc_id/target_key/field",
+  "waiver item missing doc_id/target_key/field"
+ ],
+ [
+  "重复 waiver item: {}/{}",
+  "Doppeltes waiver item: {}/{}",
+  "Duplicate waiver item: {}/{}"
+ ],
+ [
+  "审核后文档已变更，请重新运行审核",
+  "Dokument wurde nach der Prüfung geändert, bitte Prüfung erneut ausführen",
+  "Document changed after audit, please rerun the audit"
+ ],
+ [
+  "target_key={} 已存在于 latest 版本，不是 blocked_modify 断链；请重新审核或修正 CP",
+  "target_key={} existiert in der neuesten Version, kein blocked_modify-Bruch; bitte neu prüfen oder PLP korrigieren",
+  "target_key={} exists in the latest version, not a blocked_modify break; re-audit or fix the CP"
+ ],
+ [
+  "waiver_items 非法：字段不完整或含额外字段",
+  "waiver_items ungültig: Felder unvollständig oder zusätzliche Felder",
+  "waiver_items invalid: fields incomplete or extra fields present"
+ ],
+ [
+  "waiver_items 非法：doc_type",
+  "waiver_items ungültig: doc_type",
+  "waiver_items invalid: doc_type"
+ ],
+ [
+  "waiver_items 非法：audit_run_id 不匹配",
+  "waiver_items ungültig: audit_run_id passt nicht",
+  "waiver_items invalid: audit_run_id mismatch"
+ ],
+ [
+  "waiver_items 非法：字段为空",
+  "waiver_items ungültig: leeres Feld",
+  "waiver_items invalid: empty field"
+ ],
+ [
+  "waiver audit 不完整：{}",
+  "Waiver-Prüfung unvollständig: {}",
+  "Waiver audit incomplete: {}"
+ ],
+ [
+  "审核覆盖明细含重复 blocked_modify，请重新运行审核",
+  "Prüfabdeckungsdetails enthalten doppelte blocked_modify, bitte Prüfung erneut ausführen",
+  "Audit coverage details contain duplicate blocked_modify, please rerun the audit"
+ ],
+ [
+  "waiver_items 非法：UUID",
+  "waiver_items ungültig: UUID",
+  "waiver_items invalid: UUID"
+ ],
+ [
+  "未找到负责人",
+  "Verantwortlicher nicht gefunden",
+  "Owner not found"
+ ],
+ [
+  "产品线必须属于当前工厂",
+  "Produktlinie muss zum aktuellen Werk gehören",
+  "Product line must belong to the current plant"
+ ],
+ [
+  "量具 {} 不存在",
+  "Prüfmittel {} existiert nicht",
+  "Gauge {} does not exist"
+ ],
+ [
+  "量具 '{}' ({}) 当前状态为 '{}'，不可用于检验。仅 'active' 状态量具可用。",
+  "Prüfmittel '{}' ({}) hat den Status '{}' und ist nicht für Prüfungen verwendbar. Nur Prüfmittel mit Status 'active' sind zulässig.",
+  "Gauge '{}' ({}) has status '{}' and cannot be used for inspection. Only 'active' gauges are allowed."
+ ],
+ [
+  "量具 '{}' ({}) 校准已过期 (到期日: {})，请先完成校准。",
+  "Kalibrierung von Prüfmittel '{}' ({}) ist abgelaufen (fällig am: {}), bitte zuerst kalibrieren.",
+  "Calibration of gauge '{}' ({}) has expired (due: {}); please calibrate first."
+ ],
+ [
+  "仅草稿状态可以编辑",
+  "Nur Entwürfe können bearbeitet werden",
+  "Only drafts can be edited"
+ ],
+ [
+  "零件号不能为空",
+  "Teilenummer darf nicht leer sein",
+  "Part number must not be empty"
+ ],
+ [
+  "零件名称不能为空",
+  "Teilebezeichnung darf nicht leer sein",
+  "Part name must not be empty"
+ ],
+ [
+  "提交等级不能为空",
+  "Vorlagestufe darf nicht leer sein",
+  "Submission level must not be empty"
+ ],
+ [
+  "当前提交状态 {} 不允许编辑元素",
+  "Im aktuellen Einreichungsstatus {} können Elemente nicht bearbeitet werden",
+  "Elements cannot be edited in submission status {}"
+ ],
+ [
+  "元素状态不能为空",
+  "Elementstatus darf nicht leer sein",
+  "Element status must not be empty"
+ ],
+ [
+  "无效动作: {}",
+  "Ungültige Aktion: {}",
+  "Invalid action: {}"
+ ],
+ [
+  "当前状态 {} 不允许执行 {}（需要 {}）",
+  "Im aktuellen Status {} ist {} nicht erlaubt (erforderlich: {})",
+  "Current status {} does not allow {} (requires {})"
+ ],
+ [
+  "驳回原因不能为空",
+  "Ablehnungsgrund darf nicht leer sein",
+  "Rejection reason must not be empty"
+ ],
+ [
+  "仅草稿状态可以删除",
+  "Nur Entwürfe können gelöscht werden",
+  "Only drafts can be deleted"
+ ],
+ [
+  "存在未批准的必填元素",
+  "Es gibt nicht freigegebene Pflichtelemente",
+  "There are unapproved required elements"
+ ],
+ [
+  "PPAP 编号生成冲突，请重试",
+  "Konflikt bei der PPAP-Nummernvergabe, bitte erneut versuchen",
+  "PPAP number generation conflict, please retry"
+ ],
+ [
+  "无导入权限",
+  "Keine Importberechtigung",
+  "No import permission"
+ ],
+ [
+  "需要计划写权限和 FMEA 查看权限",
+  "Schreibberechtigung für Planung und Leseberechtigung für FMEA erforderlich",
+  "Planning write and FMEA view permission required"
+ ],
+ [
+  "资源不存在",
+  "Ressource existiert nicht",
+  "Resource does not exist"
+ ],
+ [
+  "缺少预览上下文，请重新 preview / 预览后导入",
+  "Vorschaukontext fehlt, bitte erneut Vorschau erzeugen und dann importieren",
+  "Preview context missing, please preview again before importing"
+ ],
+ [
+  "来源与目标范围不一致",
+  "Quell- und Zielbereich stimmen nicht überein",
+  "Source and target scope do not match"
+ ],
+ [
+  "仅草稿控制计划允许首次导入",
+  "Erstimport nur in Entwürfe von Produktionslenkungsplänen erlaubt",
+  "Initial import is only allowed into draft control plans"
+ ],
+ [
+  "控制计划已变化，请重新预览",
+  "Produktionslenkungsplan hat sich geändert, bitte erneut Vorschau erzeugen",
+  "Control plan changed, please preview again"
+ ],
+ [
+  "source_conflict: 控制计划已关联其他来源",
+  "source_conflict: Produktionslenkungsplan ist mit einer anderen Quelle verknüpft",
+  "source_conflict: control plan is linked to another source"
+ ],
+ [
+  "仅允许 PFMEA 来源",
+  "Nur PFMEA als Quelle zulässig",
+  "Only PFMEA is allowed as source"
+ ],
+ [
+  "来源必须为本 PFMEA 的真实批准快照，请重新预览",
+  "Quelle muss ein echter freigegebener Snapshot dieser PFMEA sein, bitte erneut Vorschau erzeugen",
+  "Source must be a real approved snapshot of this PFMEA, please preview again"
+ ],
+ [
+  "step_ids 与 step_nos 不可同时指定",
+  "step_ids und step_nos dürfen nicht gleichzeitig angegeben werden",
+  "step_ids and step_nos cannot both be specified"
+ ],
+ [
+  "请选择工序后重新预览；空选择不代表全部",
+  "Bitte Arbeitsgänge wählen und erneut Vorschau erzeugen; leere Auswahl bedeutet nicht „alle“",
+  "Select operations and preview again; an empty selection does not mean all"
+ ],
+ [
+  "工序选择无效，请重新预览",
+  "Ungültige Arbeitsgangauswahl, bitte erneut Vorschau erzeugen",
+  "Invalid operation selection, please preview again"
+ ],
+ [
+  "需要当前请求授权上下文",
+  "Autorisierungskontext der aktuellen Anfrage erforderlich",
+  "Authorization context of the current request required"
+ ],
+ [
+  "请选择有效候选，空或重复选择不可导入",
+  "Bitte gültige Kandidaten wählen; leere oder doppelte Auswahl kann nicht importiert werden",
+  "Select valid candidates; empty or duplicate selections cannot be imported"
+ ],
+ [
+  "控制计划不存在",
+  "Produktionslenkungsplan existiert nicht",
+  "Control plan does not exist"
+ ],
+ [
+  "资源范围已变化，请重新预览",
+  "Ressourcenbereich hat sich geändert, bitte erneut Vorschau erzeugen",
+  "Resource scope changed, please preview again"
+ ],
+ [
+  "source_conflict: 控制计划版本关联其他来源",
+  "source_conflict: Version des Produktionslenkungsplans ist mit einer anderen Quelle verknüpft",
+  "source_conflict: control plan version is linked to another source"
+ ],
+ [
+  "控制计划行范围不一致",
+  "Zeilenbereich des Produktionslenkungsplans inkonsistent",
+  "Control plan row scope inconsistent"
+ ],
+ [
+  "预览已过期，请重新预览",
+  "Vorschau abgelaufen, bitte erneut Vorschau erzeugen",
+  "Preview expired, please preview again"
+ ],
+ [
+  "候选键不属于本次预览",
+  "Kandidatenschlüssel gehört nicht zu dieser Vorschau",
+  "Candidate key does not belong to this preview"
+ ],
+ [
+  "预览存在阻塞问题，请人工确认后重新预览",
+  "Vorschau enthält blockierende Probleme, bitte manuell prüfen und erneut Vorschau erzeugen",
+  "Preview has blocking issues; review manually and preview again"
+ ],
+ [
+  "重复 item_id: {}",
+  "Doppelte item_id: {}",
+  "Duplicate item_id: {}"
+ ],
+ [
+  "item_id 不属于当前控制计划: {}",
+  "item_id gehört nicht zum aktuellen Produktionslenkungsplan: {}",
+  "item_id does not belong to the current control plan: {}"
+ ],
+ [
+  "step_nos 必须唯一匹配工序，请按 ID 重新预览",
+  "step_nos muss eindeutig einem Arbeitsgang zugeordnet sein, bitte per ID erneut Vorschau erzeugen",
+  "step_nos must map to a unique operation; preview again by ID"
+ ],
+ [
+  "source_conflict: 已有行关联其他来源",
+  "source_conflict: Vorhandene Zeile ist mit einer anderen Quelle verknüpft",
+  "source_conflict: existing row is linked to another source"
+ ],
+ [
+  "旧自由文本来源需人工确认，请使用同步流程",
+  "Alte Freitextquelle muss manuell bestätigt werden, bitte den Synchronisierungsablauf verwenden",
+  "Legacy free-text source needs manual confirmation; use the sync flow"
+ ],
+ [
+  "非法 item_id（须为空、temp-* 或本 CP 的 UUID）: {}",
+  "Ungültige item_id (muss leer, temp-* oder eine UUID dieses PLP sein): {}",
+  "Invalid item_id (must be empty, temp-* or a UUID of this CP): {}"
+ ],
+ [
+  "旧来源需人工确认，不可首次导入覆盖",
+  "Alte Quelle muss manuell bestätigt werden, Erstimport darf nicht überschreiben",
+  "Legacy source needs manual confirmation; initial import cannot overwrite"
+ ],
+ [
+  "同源多个控制行，请人工确认；不覆盖或合并",
+  "Mehrere Lenkungszeilen aus derselben Quelle, bitte manuell bestätigen; kein Überschreiben oder Zusammenführen",
+  "Multiple control rows from the same source; confirm manually; no overwrite or merge"
+ ],
+ [
+  "已有同源行原样保留，变更请使用同步流程",
+  "Vorhandene Zeilen derselben Quelle bleiben unverändert; Änderungen über den Synchronisierungsablauf",
+  "Existing rows from the same source are kept as is; use the sync flow for changes"
+ ],
+ [
+  "NP图要求每批次样本量固定一致",
+  "np-Karte erfordert einen konstanten Stichprobenumfang je Charge",
+  "NP chart requires a constant sample size per batch"
+ ],
+ [
+  "Prompt 固定部分 ({} 字符) 超过 {} 字符限制",
+  "Fester Prompt-Anteil ({} Zeichen) überschreitet das Limit von {} Zeichen",
+  "Fixed prompt part ({} chars) exceeds the {} character limit"
+ ],
+ [
+  "CAPA 报告不存在",
+  "CAPA-Bericht existiert nicht",
+  "CAPA report does not exist"
+ ],
+ [
+  "报告已归档，无法生成草稿",
+  "Bericht ist archiviert, Entwurf kann nicht erstellt werden",
+  "Report is archived; cannot create a draft"
+ ],
+ [
+  "无效的步骤",
+  "Ungültiger Schritt",
+  "Invalid step"
+ ],
+ [
+  "当前步骤为 {}，只能草拟 {} 步骤",
+  "Aktueller Schritt ist {}, nur Schritt {} kann entworfen werden",
+  "Current step is {}; only step {} can be drafted"
+ ],
+ [
+  "{} 内容不足（当前 {} 字符，至少需要 {} 字符）",
+  "{} zu kurz (aktuell {} Zeichen, mindestens {} erforderlich)",
+  "{} too short (currently {} chars, at least {} required)"
+ ],
+ [
+  "AI 草拟调用过于频繁，请稍后再试",
+  "Zu viele KI-Entwurfsanfragen, bitte später erneut versuchen",
+  "Too many AI draft requests, please try again later"
+ ],
+ [
+  "AI 服务未配置",
+  "KI-Dienst nicht konfiguriert",
+  "AI service not configured"
+ ],
+ [
+  "request_id 必须是标准 UUID v4",
+  "request_id muss eine gültige UUID v4 sein",
+  "request_id must be a standard UUID v4"
+ ],
+ [
+  "AI Prompt 配置错误",
+  "Fehler in der KI-Prompt-Konfiguration",
+  "AI prompt configuration error"
+ ],
+ [
+  "AI 服务异常，请稍后重试",
+  "Fehler im KI-Dienst, bitte später erneut versuchen",
+  "AI service error, please try again later"
+ ],
+ [
+  "请求处理中，请稍后重试",
+  "Anfrage wird verarbeitet, bitte später erneut versuchen",
+  "Request in progress, please try again later"
+ ],
+ [
+  "AI 响应超时，请重试",
+  "Zeitüberschreitung der KI-Antwort, bitte erneut versuchen",
+  "AI response timeout, please retry"
+ ],
+ [
+  "AI 服务暂时不可用，请稍后重试",
+  "KI-Dienst vorübergehend nicht verfügbar, bitte später erneut versuchen",
+  "AI service temporarily unavailable, please try again later"
+ ],
+ [
+  "AI 输出解析失败: {}",
+  "KI-Ausgabe konnte nicht verarbeitet werden: {}",
+  "Failed to parse AI output: {}"
+ ],
+ [
+  "AI 输出格式校验失败: {}",
+  "Formatprüfung der KI-Ausgabe fehlgeschlagen: {}",
+  "AI output format validation failed: {}"
+ ],
+ [
+  "角色 '{}' 不存在",
+  "Rolle '{}' existiert nicht",
+  "Role '{}' does not exist"
+ ],
+ [
+  "角色 '{}' 权限不可修改",
+  "Berechtigungen der Rolle '{}' können nicht geändert werden",
+  "Permissions of role '{}' cannot be changed"
+ ],
+ [
+  "用户 '{}' 不存在",
+  "Benutzer '{}' existiert nicht",
+  "User '{}' does not exist"
+ ],
+ [
+  "用户已分配产品线 '{}'",
+  "Benutzer ist der Produktlinie '{}' bereits zugeordnet",
+  "User is already assigned to product line '{}'"
+ ],
+ [
+  "无效模块 '{}'",
+  "Ungültiges Modul '{}'",
+  "Invalid module '{}'"
+ ],
+ [
+  "检验单不存在",
+  "Prüfauftrag existiert nicht",
+  "Inspection does not exist"
+ ],
+ [
+  "仅待检验状态可编辑",
+  "Nur Prüfaufträge im Status „ausstehend“ können bearbeitet werden",
+  "Only pending inspections can be edited"
+ ],
+ [
+  "仅待检验状态可删除",
+  "Nur Prüfaufträge im Status „ausstehend“ können gelöscht werden",
+  "Only pending inspections can be deleted"
+ ],
+ [
+  "仅检验中状态可录入结果",
+  "Ergebnisse können nur im Status „in Prüfung“ erfasst werden",
+  "Results can only be entered while inspecting"
+ ],
+ [
+  "仅已拒收的检验单可申请复检",
+  "Nachprüfung nur für zurückgewiesene Prüfaufträge möglich",
+  "Re-inspection is only possible for rejected inspections"
+ ],
+ [
+  "仅已拒收的检验单可让步接收",
+  "Sonderfreigabe nur für zurückgewiesene Prüfaufträge möglich",
+  "Concession is only possible for rejected inspections"
+ ],
+ [
+  "产品类型 '{}' 已存在",
+  "Produkttyp '{}' existiert bereits",
+  "Product type '{}' already exists"
+ ],
+ [
+  "产品类型 {} 仍被活跃产品线引用，无法停用",
+  "Produkttyp {} wird noch von aktiven Produktlinien verwendet und kann nicht deaktiviert werden",
+  "Product type {} is still used by active product lines and cannot be deactivated"
+ ],
+ [
+  "AQL档案不存在",
+  "AQL-Profil existiert nicht",
+  "AQL profile does not exist"
+ ],
+ [
+  "当前状态 {} 不允许提交经理",
+  "Im aktuellen Status {} ist keine Weiterleitung an den Manager möglich",
+  "Current status {} does not allow forwarding to the manager"
+ ],
+ [
+  "仅放宽建议需提交经理审批",
+  "Nur Lockerungsempfehlungen müssen vom Manager freigegeben werden",
+  "Only relaxation recommendations require manager approval"
+ ],
+ [
+  "当前状态 {} 不允许标记过期",
+  "Im aktuellen Status {} kann nicht als abgelaufen markiert werden",
+  "Current status {} cannot be marked as expired"
+ ],
+ [
+  "建议记录不存在",
+  "Empfehlung existiert nicht",
+  "Recommendation does not exist"
+ ],
+ [
+  "放宽建议需提交经理审批，请使用 forward 操作",
+  "Lockerungsempfehlungen benötigen eine Managerfreigabe, bitte die Aktion forward verwenden",
+  "Relaxation recommendations require manager approval; use forward"
+ ],
+ [
+  "当前状态 {} 不允许工程师批准",
+  "Im aktuellen Status {} ist keine Freigabe durch den Ingenieur möglich",
+  "Current status {} does not allow engineer approval"
+ ],
+ [
+  "当前状态 {} 不允许经理批准",
+  "Im aktuellen Status {} ist keine Freigabe durch den Manager möglich",
+  "Current status {} does not allow manager approval"
+ ],
+ [
+  "当前状态 {} 不允许工程师拒绝",
+  "Im aktuellen Status {} ist keine Ablehnung durch den Ingenieur möglich",
+  "Current status {} does not allow engineer rejection"
+ ],
+ [
+  "当前状态 {} 不允许经理拒绝",
+  "Im aktuellen Status {} ist keine Ablehnung durch den Manager möglich",
+  "Current status {} does not allow manager rejection"
+ ],
+ [
+  "产品类型 '{}' 不存在",
+  "Produkttyp '{}' existiert nicht",
+  "Product type '{}' does not exist"
+ ],
+ [
+  "产品类型 '{}' 已停用，不可分配",
+  "Produkttyp '{}' ist deaktiviert und kann nicht zugeordnet werden",
+  "Product type '{}' is deactivated and cannot be assigned"
+ ],
+ [
+  "产品线 '{}' 已存在",
+  "Produktlinie '{}' existiert bereits",
+  "Product line '{}' already exists"
+ ],
+ [
+  "产品线 {} 仍被以下模块引用，无法停用: {}",
+  "Produktlinie {} wird noch von folgenden Modulen verwendet und kann nicht deaktiviert werden: {}",
+  "Product line {} is still referenced by these modules and cannot be deactivated: {}"
+ ],
+ [
+  "MES 工单投料/产出关联尚未建立",
+  "Verknüpfung von Materialeinsatz/Ausbringung der MES-Aufträge noch nicht eingerichtet",
+  "MES work order input/output linkage not yet established"
+ ],
+ [
+  "文档已被他人修改，请刷新后再试。",
+  "Das Dokument wurde von jemand anderem geändert, bitte neu laden und erneut versuchen.",
+  "The document was modified by someone else; please refresh and try again."
+ ],
+ [
+  "无法回退：以下 {} 个关联文档仍在使用当前 FMEA 的节点数据，请先处理或归档这些文档：{}",
+  "Zurücksetzen nicht möglich: Die folgenden {} verknüpften Dokumente verwenden noch Knotendaten der aktuellen FMEA, bitte zuerst bearbeiten oder archivieren: {}",
+  "Cannot roll back: the following {} linked documents still use node data of the current FMEA; handle or archive them first: {}"
+ ],
+ [
+  "控制计划或关联来源不存在",
+  "Produktionslenkungsplan oder verknüpfte Quelle existiert nicht",
+  "Control plan or linked source does not exist"
+ ],
+ [
+  "缺少稳定预览上下文，请重新预览",
+  "Stabiler Vorschaukontext fehlt, bitte erneut Vorschau erzeugen",
+  "Stable preview context missing, please preview again"
+ ],
+ [
+  "重复候选选择",
+  "Doppelte Kandidatenauswahl",
+  "Duplicate candidate selection"
+ ],
+ [
+  "无法唯一确定批准来源，请明确选择版本",
+  "Freigegebene Quelle nicht eindeutig bestimmbar, bitte Version ausdrücklich wählen",
+  "Approved source cannot be determined uniquely; select a version explicitly"
+ ],
+ [
+  "所选候选存在冲突或保护，需复核",
+  "Ausgewählte Kandidaten haben Konflikte oder sind geschützt, Prüfung erforderlich",
+  "Selected candidates have conflicts or protections; review needed"
+ ],
+ [
+  "来源投影存在阻塞问题",
+  "Quellprojektion enthält blockierende Probleme",
+  "Source projection has blocking issues"
+ ],
+ [
+  "仍有待处理项，请选择可应用候选",
+  "Es gibt noch offene Einträge, bitte anwendbare Kandidaten wählen",
+  "Pending items remain; select applicable candidates"
+ ],
+ [
+  "无可信逐行接受基线，需人工复核",
+  "Keine vertrauenswürdige zeilenweise Abnahmebasis, manuelle Prüfung erforderlich",
+  "No trusted row-level acceptance baseline; manual review needed"
+ ],
+ [
+  "存在受控流程引用，需复核",
+  "Verweise aus gelenkten Abläufen vorhanden, Prüfung erforderlich",
+  "Controlled process references exist; review needed"
+ ],
+ [
+  "执行或特殊特性关联禁止自动删除",
+  "Ausführungs- oder Sondermerkmalsverknüpfungen dürfen nicht automatisch gelöscht werden",
+  "Execution or special characteristic links must not be deleted automatically"
+ ],
+ [
+  "人工或历史混合来源需人工确认，不重绑或删除",
+  "Manuelle oder historisch gemischte Quellen müssen manuell bestätigt werden; kein Neuverknüpfen oder Löschen",
+  "Manual or legacy mixed sources need manual confirmation; no rebinding or deletion"
+ ],
+ [
+  "本地源字段已修改，不自动删除",
+  "Lokale Quellfelder wurden geändert, kein automatisches Löschen",
+  "Local source fields modified; no automatic deletion"
+ ],
+ [
+  "保留本地源字段修改，请复核",
+  "Lokale Änderungen an Quellfeldern beibehalten, bitte prüfen",
+  "Local source field changes kept; please review"
+ ],
+ [
+  "保留执行关联，请复核适用性",
+  "Ausführungsverknüpfung beibehalten, bitte Anwendbarkeit prüfen",
+  "Execution link kept; please review applicability"
+ ],
+ [
+  "CAPA 不存在",
+  "CAPA existiert nicht",
+  "CAPA does not exist"
+ ],
+ [
+  "8D 单号",
+  "8D-Nr.",
+  "8D No."
+ ],
+ [
+  "标题",
+  "Titel",
+  "Title"
+ ],
+ [
+  "严重度",
+  "Schweregrad",
+  "Severity"
+ ],
+ [
+  "产品线",
+  "Produktlinie",
+  "Product line"
+ ],
+ [
+  "发起人",
+  "Ersteller",
+  "Initiator"
+ ],
+ [
+  "状态",
+  "Status",
+  "Status"
+ ],
+ [
+  "日期",
+  "Datum",
+  "Date"
+ ],
+ [
+  "成员",
+  "Mitglieder",
+  "Members"
+ ],
+ [
+  "描述",
+  "Beschreibung",
+  "Description"
+ ],
+ [
+  "措施",
+  "Maßnahmen",
+  "Actions"
+ ],
+ [
+  "根因",
+  "Grundursache",
+  "Root cause"
+ ],
+ [
+  "验证",
+  "Verifizierung",
+  "Verification"
+ ],
+ [
+  "预防",
+  "Vorbeugung",
+  "Prevention"
+ ],
+ [
+  "结论",
+  "Fazit",
+  "Conclusion"
+ ],
+ [
+  "关联 FMEA 节点",
+  "Verknüpfte FMEA-Knoten",
+  "Linked FMEA nodes"
+ ],
+ [
+  "验证{}",
+  "Verifizierung {}",
+  "Verification {}"
+ ],
+ [
+  "风险预警",
+  "Risikowarnung",
+  "Risk alert"
+ ],
+ [
+  "风险预警{}",
+  "Risikowarnung {}",
+  "Risk alert {}"
+ ],
+ [
+  "供应商回复为必填项",
+  "Lieferantenantwort ist erforderlich",
+  "Supplier response is required"
+ ],
+ [
+  "解决摘要为必填项",
+  "Zusammenfassung der Lösung ist erforderlich",
+  "Resolution summary is required"
+ ],
+ [
+  "SCAR 与 CAPA 必须同厂",
+  "SCAR und CAPA müssen zum selben Werk gehören",
+  "SCAR and CAPA must belong to the same plant"
+ ],
+ [
+  "SCAR 与 CAPA 必须同产品线",
+  "SCAR und CAPA müssen zur selben Produktlinie gehören",
+  "SCAR and CAPA must belong to the same product line"
+ ],
+ [
+  "目标 8D 已关联其他 SCAR",
+  "Ziel-8D ist bereits mit einer anderen SCAR verknüpft",
+  "Target 8D is already linked to another SCAR"
+ ],
+ [
+  "SCAR 已关联其他 8D，禁止换绑",
+  "SCAR ist bereits mit einem anderen 8D verknüpft, Umhängen nicht erlaubt",
+  "SCAR is already linked to another 8D; rebinding not allowed"
+ ],
+ [
+  "关联冲突：1:1 约束",
+  "Verknüpfungskonflikt: 1:1-Beschränkung",
+  "Link conflict: 1:1 constraint"
+ ],
+ [
+  "SCAR 编号生成冲突，请重试",
+  "Konflikt bei der SCAR-Nummernvergabe, bitte erneut versuchen",
+  "SCAR number generation conflict, please retry"
+ ],
+ [
+  "SPC异常: {} 触发规则{}",
+  "SPC-Auffälligkeit: {} hat Regel {} ausgelöst",
+  "SPC anomaly: {} triggered rule {}"
+ ],
+ [
+  "激活控制限必须提供变更原因 (change_reason)",
+  "Zum Aktivieren der Eingriffsgrenzen ist ein Änderungsgrund (change_reason) erforderlich",
+  "A change reason (change_reason) is required to activate control limits"
+ ],
+ [
+  "计数值图（{}）必须提供 inspected_count 和 defect_count",
+  "Attributive Karte ({}) erfordert inspected_count und defect_count",
+  "Attribute chart ({}) requires inspected_count and defect_count"
+ ],
+ [
+  "defect_count 不能超过 inspected_count",
+  "defect_count darf inspected_count nicht überschreiten",
+  "defect_count cannot exceed inspected_count"
+ ],
+ [
+  "物料不存在",
+  "Material existiert nicht",
+  "Material does not exist"
+ ],
+ [
+  "物料号 '{}' 已存在",
+  "Materialnummer '{}' existiert bereits",
+  "Material number '{}' already exists"
+ ],
+ [
+  "测试需要重新输入 API Key，不会使用已保存的密钥",
+  "Für den Test muss der API-Schlüssel neu eingegeben werden; der gespeicherte Schlüssel wird nicht verwendet",
+  "The test requires re-entering the API key; the saved key is not used"
+ ],
+ [
+  "未配置 LLM Provider（纯规则引擎模式，无需测试）",
+  "Kein LLM-Anbieter konfiguriert (reiner Regel-Engine-Modus, kein Test nötig)",
+  "No LLM provider configured (rule-engine-only mode, no test needed)"
+ ],
+ [
+  "LLM 调用成功",
+  "LLM-Aufruf erfolgreich",
+  "LLM call successful"
+ ],
+ [
+  "请求超时（{}秒）",
+  "Zeitüberschreitung der Anfrage ({} Sekunden)",
+  "Request timeout ({} seconds)"
+ ],
+ [
+  "未配置 Embedding Provider",
+  "Kein Embedding-Anbieter konfiguriert",
+  "No embedding provider configured"
+ ],
+ [
+  "向量维度 {}",
+  "Vektordimension {}",
+  "Vector dimension {}"
+ ],
+ [
+  "D8 审批需当前根因、正式措施及验证结果",
+  "D8-Freigabe erfordert aktuelle Grundursache, formale Maßnahmen und Verifizierungsergebnis",
+  "D8 approval requires current root cause, formal actions and verification result"
+ ],
+ [
+  "D8 审批需当前根因已验证",
+  "D8-Freigabe erfordert eine verifizierte aktuelle Grundursache",
+  "D8 approval requires the current root cause to be verified"
+ ],
+ [
+  "项目不在进行中，无法操作",
+  "Projekt ist nicht in Bearbeitung, Vorgang nicht möglich",
+  "Project is not in progress; operation not possible"
+ ],
+ [
+  "控制计划",
+  "Produktionslenkungsplan",
+  "Control plan"
+ ],
+ [
+  "产品线记录不存在",
+  "Produktliniendatensatz existiert nicht",
+  "Product line record does not exist"
+ ],
+ [
+  "DFMEA 记录不存在",
+  "DFMEA-Datensatz existiert nicht",
+  "DFMEA record does not exist"
+ ],
+ [
+  "PFMEA 记录不存在",
+  "PFMEA-Datensatz existiert nicht",
+  "PFMEA record does not exist"
+ ],
+ [
+  "控制计划记录不存在",
+  "Datensatz des Produktionslenkungsplans existiert nicht",
+  "Control plan record does not exist"
+ ],
+ [
+  "PPAP 提交记录不存在",
+  "PPAP-Einreichung existiert nicht",
+  "PPAP submission does not exist"
+ ],
+ [
+  "{} 记录不存在",
+  "Datensatz {} existiert nicht",
+  "{} record does not exist"
+ ],
+ [
+  "当前阶段不在进行中",
+  "Aktuelle Phase ist nicht in Bearbeitung",
+  "Current phase is not in progress"
+ ],
+ [
+  "当前阶段未提交审批",
+  "Aktuelle Phase wurde nicht zur Freigabe eingereicht",
+  "Current phase has not been submitted for approval"
+ ],
+ [
+  "项目编号生成冲突，请重试",
+  "Konflikt bei der Projektnummernvergabe, bitte erneut versuchen",
+  "Project number generation conflict, please retry"
+ ],
+ [
+  "Phase {} 需关联 {} 后方可审批通过",
+  "Phase {} kann erst nach Verknüpfung von {} freigegeben werden",
+  "Phase {} can only be approved after linking {}"
+ ],
+ [
+  "影响分析已替换，请重新生成影响分析",
+  "Auswirkungsanalyse wurde ersetzt, bitte neu erzeugen",
+  "Impact analysis was replaced, please regenerate"
+ ],
+ [
+  "已连接，获取到 {} 条供应商数据。",
+  "Verbunden, {} Lieferantendatensätze abgerufen.",
+  "Connected, retrieved {} supplier records."
+ ],
+ [
+  "工厂 '{}' 不存在",
+  "Werk '{}' existiert nicht",
+  "Plant '{}' does not exist"
+ ],
+ [
+  "工厂编码 '{}' 已存在",
+  "Werkscode '{}' existiert bereits",
+  "Plant code '{}' already exists"
+ ],
+ [
+  "工厂 '{}' 已经停用",
+  "Werk '{}' ist bereits deaktiviert",
+  "Plant '{}' is already deactivated"
+ ],
+ [
+  "工厂 '{}' 仍被 {} 条活跃产品线引用，无法停用",
+  "Werk '{}' wird noch von {} aktiven Produktlinien verwendet und kann nicht deaktiviert werden",
+  "Plant '{}' is still used by {} active product lines and cannot be deactivated"
+ ],
+ [
+  "数据不足，无法生成 AI 解读",
+  "Zu wenige Daten für eine KI-Interpretation",
+  "Insufficient data for an AI interpretation"
+ ],
+ [
+  "LLM 未配置",
+  "Kein LLM konfiguriert",
+  "LLM not configured"
+ ],
+ [
+  "AI 解读服务响应超时，请稍后重试",
+  "Zeitüberschreitung des KI-Interpretationsdienstes, bitte später erneut versuchen",
+  "AI interpretation service timed out, please try again later"
+ ],
+ [
+  "SPC 异常告警",
+  "SPC-Alarm",
+  "SPC alarm"
+ ],
+ [
+  "打开 CAPA",
+  "Offene CAPA",
+  "Open CAPA"
+ ],
+ [
+  "高 RPN 节点",
+  "Knoten mit hoher RPZ",
+  "High RPN nodes"
+ ],
+ [
+  "未确认告警",
+  "Nicht quittierte Alarme",
+  "Unacknowledged alarms"
+ ],
+ [
+  "超期 CAPA",
+  "Überfällige CAPA",
+  "Overdue CAPA"
+ ],
+ [
+  "LLM 调用超时（>{}s）",
+  "Zeitüberschreitung des LLM-Aufrufs (>{}s)",
+  "LLM call timeout (>{}s)"
+ ],
+ [
+  "需先导入遏制数据",
+  "Zuerst Eindämmungsdaten importieren",
+  "Import containment data first"
+ ],
+ [
+  "工厂不一致",
+  "Werk stimmt nicht überein",
+  "Plant mismatch"
+ ],
+ [
+  "需 4 类数据齐全",
+  "Alle 4 Datenkategorien erforderlich",
+  "All 4 data categories required"
+ ],
+ [
+  "需报告已生成",
+  "Bericht muss erzeugt sein",
+  "Report must be generated"
+ ],
+ [
+  "需记录遏制执行结果",
+  "Umsetzungsergebnis der Eindämmung muss erfasst werden",
+  "Containment execution result must be recorded"
+ ],
+ [
+  "建议不存在",
+  "Vorschlag existiert nicht",
+  "Advice does not exist"
+ ],
+ [
+  "建议 generation 不存在",
+  "Vorschlagserzeugung existiert nicht",
+  "Advice generation does not exist"
+ ],
+ [
+  "报告不存在",
+  "Bericht existiert nicht",
+  "Report does not exist"
+ ],
+ [
+  "建议不属于该 CAPA",
+  "Vorschlag gehört nicht zu dieser CAPA",
+  "Advice does not belong to this CAPA"
+ ],
+ [
+  "建议跨工厂",
+  "Vorschlag gehört zu einem anderen Werk",
+  "Advice belongs to another plant"
+ ],
+ [
+  "建议不属于当前 generation",
+  "Vorschlag gehört nicht zur aktuellen Erzeugung",
+  "Advice does not belong to the current generation"
+ ],
+ [
+  "证据最多 10 条",
+  "Höchstens 10 Nachweise",
+  "At most 10 evidence items"
+ ],
+ [
+  "报告不属于该 CAPA",
+  "Bericht gehört nicht zu dieser CAPA",
+  "Report does not belong to this CAPA"
+ ],
+ [
+  "报告跨工厂",
+  "Bericht gehört zu einem anderen Werk",
+  "Report belongs to another plant"
+ ],
+ [
+  "执行记录不存在",
+  "Umsetzungsnachweis existiert nicht",
+  "Execution record does not exist"
+ ],
+ [
+  "执行记录不属于该 CAPA",
+  "Umsetzungsnachweis gehört nicht zu dieser CAPA",
+  "Execution record does not belong to this CAPA"
+ ],
+ [
+  "执行记录跨工厂",
+  "Umsetzungsnachweis gehört zu einem anderen Werk",
+  "Execution record belongs to another plant"
+ ],
+ [
+  "非法 url scheme",
+  "Ungültiges URL-Schema",
+  "Invalid URL scheme"
+ ],
+ [
+  "非法 url scheme: protocol-relative not allowed",
+  "Ungültiges URL-Schema: protokollrelative URLs nicht erlaubt",
+  "Invalid URL scheme: protocol-relative not allowed"
+ ],
+ [
+  "非法 url scheme: 仅允许 https://、/path、./path",
+  "Ungültiges URL-Schema: nur https://, /pfad, ./pfad erlaubt",
+  "Invalid URL scheme: only https://, /path, ./path allowed"
+ ],
+ [
+  "建议未被采纳",
+  "Vorschlag wurde nicht übernommen",
+  "Advice was not adopted"
+ ],
+ [
+  "当前状态不可写入文档门禁",
+  "Im aktuellen Status kann das Dokumenten-Gate nicht beschrieben werden",
+  "Document gate cannot be written in the current status"
+ ],
+ [
+  "未生成有效影响分析",
+  "Keine gültige Auswirkungsanalyse erzeugt",
+  "No valid impact analysis generated"
+ ],
+ [
+  "空影响清单须人工确认，不可运行自动审核",
+  "Leere Auswirkungsliste muss manuell bestätigt werden, automatische Prüfung nicht möglich",
+  "An empty impact list must be confirmed manually; automatic audit not possible"
+ ],
+ [
+  "defer reason 必填",
+  "defer reason ist erforderlich",
+  "defer reason is required"
+ ],
+ [
+  "defer_owner 不存在或未激活",
+  "defer_owner existiert nicht oder ist nicht aktiv",
+  "defer_owner does not exist or is inactive"
+ ],
+ [
+  "未生成影响分析",
+  "Keine Auswirkungsanalyse erzeugt",
+  "No impact analysis generated"
+ ],
+ [
+  "仅空清单可确认",
+  "Nur eine leere Liste kann bestätigt werden",
+  "Only an empty list can be confirmed"
+ ],
+ [
+  "waiver reason 必填",
+  "waiver reason ist erforderlich",
+  "waiver reason is required"
+ ],
+ [
+  "waiver items 必填（至少一个 blocked_modify keypoint）",
+  "waiver items sind erforderlich (mindestens ein blocked_modify-keypoint)",
+  "waiver items are required (at least one blocked_modify keypoint)"
+ ],
+ [
+  "当前决策状态为 {}，只能豁免已阻塞的审核",
+  "Aktueller Entscheidungsstatus ist {}, nur blockierte Prüfungen können ausgenommen werden",
+  "Current decision status is {}; only blocked audits can be waived"
+ ],
+ [
+  "blocked 决策缺少 audit_run_id，请重新运行文档审核",
+  "blocked-Entscheidung ohne audit_run_id, bitte Dokumentenprüfung erneut ausführen",
+  "Blocked decision missing audit_run_id, please rerun the document audit"
+ ],
+ [
+  "BLOCKED: 无 LLM 凭证",
+  "BLOCKIERT: keine LLM-Zugangsdaten",
+  "BLOCKED: no LLM credentials"
+ ],
+ [
+  "影响清单文档非法",
+  "Dokument der Auswirkungsliste ungültig",
+  "Impact list document invalid"
+ ],
+ [
+  "defer_owner 无当前工厂授权",
+  "defer_owner hat keine Berechtigung für das aktuelle Werk",
+  "defer_owner has no authorization for the current plant"
+ ],
+ [
+  "空清单人工确认",
+  "Leere Liste manuell bestätigt",
+  "Empty list confirmed manually"
+ ],
+ [
+  "对象不存在或不在请求作用域内",
+  "Objekt existiert nicht oder liegt außerhalb des Anfragebereichs",
+  "Object does not exist or is outside the request scope"
+ ],
+ [
+  "特殊特性来源范围不一致，请人工复核",
+  "Quellbereich des besonderen Merkmals inkonsistent, bitte manuell prüfen",
+  "Special characteristic source scope inconsistent, please review manually"
+ ],
+ [
+  "特殊特性控制计划链接目标不存在或范围不一致",
+  "Verknüpfungsziel des besonderen Merkmals im Produktionslenkungsplan existiert nicht oder Bereich inkonsistent",
+  "Special characteristic control plan link target missing or scope inconsistent"
+ ],
+ [
+  "FMEA与控制计划范围不一致",
+  "Bereich von FMEA und Produktionslenkungsplan inkonsistent",
+  "FMEA and control plan scope inconsistent"
+ ],
+ [
+  "特殊特性不存在",
+  "Besonderes Merkmal existiert nicht",
+  "Special characteristic does not exist"
+ ],
+ [
+  "提交审批时必须填写法规引用",
+  "Beim Einreichen zur Freigabe muss ein Vorschriftenverweis angegeben werden",
+  "A regulation reference is required when submitting for approval"
+ ],
+ [
+  "提交审批时必须填写安全验证方法",
+  "Beim Einreichen zur Freigabe muss eine Methode der Sicherheitsverifizierung angegeben werden",
+  "A safety verification method is required when submitting for approval"
+ ],
+ [
+  "来源材料已变化，保留受控特殊特性，请人工复核",
+  "Quellmaterial hat sich geändert, gelenktes besonderes Merkmal bleibt erhalten, bitte manuell prüfen",
+  "Source material changed; controlled special characteristic kept, please review manually"
+ ],
+ [
+  "FMEA严重度已下降，请人工评估是否保留安全属性",
+  "FMEA-Bedeutung wurde gesenkt, bitte manuell bewerten, ob das Sicherheitsattribut erhalten bleibt",
+  "FMEA severity decreased; please assess manually whether to keep the safety attribute"
+ ],
+ [
+  "至少需要两个供应商记录才能合并",
+  "Zum Zusammenführen sind mindestens zwei Lieferantendatensätze nötig",
+  "At least two supplier records are required to merge"
+ ],
+ [
+  "部分供应商 ID 不存在",
+  "Einige Lieferanten-IDs existieren nicht",
+  "Some supplier IDs do not exist"
+ ],
+ [
+  "合并的供应商必须来自不同工厂",
+  "Zusammenzuführende Lieferanten müssen aus verschiedenen Werken stammen",
+  "Merged suppliers must come from different plants"
+ ],
+ [
+  "审核项目不存在",
+  "Auditprogramm existiert nicht",
+  "Audit program does not exist"
+ ],
+ [
+  "工厂不存在",
+  "Werk existiert nicht",
+  "Plant does not exist"
+ ],
+ [
+  "该工厂已分配到此审核项目",
+  "Dieses Werk ist dem Auditprogramm bereits zugeordnet",
+  "This plant is already assigned to the audit program"
+ ],
+ [
+  "该工厂未分配到此审核项目",
+  "Dieses Werk ist dem Auditprogramm nicht zugeordnet",
+  "This plant is not assigned to the audit program"
+ ],
+ [
+  "指定的共享档案不存在",
+  "Angegebenes gemeinsames Profil existiert nicht",
+  "Specified shared profile does not exist"
+ ],
+ [
+  "模板不存在",
+  "Vorlage existiert nicht",
+  "Template does not exist"
+ ],
+ [
+  "创建检验模板失败: {}",
+  "Anlegen der Prüfvorlage fehlgeschlagen: {}",
+  "Failed to create inspection template: {}"
+ ],
+ [
+  "更新检验模板失败: {}",
+  "Aktualisieren der Prüfvorlage fehlgeschlagen: {}",
+  "Failed to update inspection template: {}"
+ ],
+ [
+  "删除检验模板失败: {}",
+  "Löschen der Prüfvorlage fehlgeschlagen: {}",
+  "Failed to delete inspection template: {}"
+ ],
+ [
+  "D8 lessons 抽取失败，无法保存闭环总结，请重试",
+  "D8-Lessons-Extraktion fehlgeschlagen, Abschlusszusammenfassung kann nicht gespeichert werden, bitte erneut versuchen",
+  "D8 lessons extraction failed; cannot save closure summary, please retry"
+ ],
+ [
+  "不能停用自己的账号",
+  "Sie können Ihr eigenes Konto nicht deaktivieren",
+  "You cannot deactivate your own account"
+ ],
+ [
+  "不能删除自己的账号",
+  "Sie können Ihr eigenes Konto nicht löschen",
+  "You cannot delete your own account"
+ ],
+ [
+  "字段 '{}' 不能为空",
+  "Feld '{}' darf nicht leer sein",
+  "Field '{}' must not be empty"
+ ],
+ [
+  "无效角色 '{}'",
+  "Ungültige Rolle '{}'",
+  "Invalid role '{}'"
+ ],
+ [
+  "factory_ids 中存在重复工厂",
+  "factory_ids enthält doppelte Werke",
+  "factory_ids contains duplicate plants"
+ ],
+ [
+  "默认工厂必须在可访问工厂集合内",
+  "Standardwerk muss zu den zugänglichen Werken gehören",
+  "Default plant must be among the accessible plants"
+ ],
+ [
+  "不能停用或降级最后一个管理员",
+  "Der letzte Administrator kann nicht deaktiviert oder herabgestuft werden",
+  "The last administrator cannot be deactivated or downgraded"
+ ],
+ [
+  "不能删除最后一个管理员",
+  "Der letzte Administrator kann nicht gelöscht werden",
+  "The last administrator cannot be deleted"
+ ],
+ [
+  "无效或已停用的工厂 '{}'",
+  "Ungültiges oder deaktiviertes Werk '{}'",
+  "Invalid or deactivated plant '{}'"
+ ],
+ [
+  "无有效的风险规则配置",
+  "Keine gültige Konfiguration der Risikoregeln",
+  "No valid risk rule configuration"
+ ],
+ [
+  "预警不存在",
+  "Warnung existiert nicht",
+  "Alert does not exist"
+ ],
+ [
+  "只能确认开放状态的预警",
+  "Nur offene Warnungen können zur Kenntnis genommen werden",
+  "Only open alerts can be acknowledged"
+ ],
+ [
+  "供应商风险预警处置 — {}",
+  "Bearbeitung der Lieferantenrisiko-Warnung – {}",
+  "Supplier risk alert handling – {}"
+ ],
+ [
+  "只能忽略开放状态的预警",
+  "Nur offene Warnungen können ignoriert werden",
+  "Only open alerts can be ignored"
+ ],
+ [
+  "忽略预警需填写理由",
+  "Zum Ignorieren einer Warnung ist eine Begründung erforderlich",
+  "A reason is required to ignore an alert"
+ ],
+ [
+  "无效的操作: {}",
+  "Ungültige Aktion: {}",
+  "Invalid action: {}"
+ ],
+ [
+  "只能关闭已确认或已处置的预警",
+  "Nur zur Kenntnis genommene oder bearbeitete Warnungen können geschlossen werden",
+  "Only acknowledged or handled alerts can be closed"
+ ],
+ [
+  "配置不存在",
+  "Konfiguration existiert nicht",
+  "Configuration does not exist"
+ ],
+ [
+  "PPM {} 在限值 {} 以内",
+  "PPM {} innerhalb des Grenzwerts {}",
+  "PPM {} within limit {}"
+ ],
+ [
+  "批次合格率正常",
+  "Losannahmequote normal",
+  "Batch acceptance rate normal"
+ ],
+ [
+  "连续拒收 {} 批，未超阈值",
+  "{} Lose in Folge zurückgewiesen, Schwellenwert nicht überschritten",
+  "{} consecutive lots rejected, threshold not exceeded"
+ ],
+ [
+  "无超期未关闭SCAR",
+  "Keine überfälligen offenen SCAR",
+  "No overdue open SCAR"
+ ],
+ [
+  "窗口期内 {} 个SCAR，未超限值",
+  "{} SCAR im Zeitfenster, Grenzwert nicht überschritten",
+  "{} SCAR in window, limit not exceeded"
+ ],
+ [
+  "交付准时率正常",
+  "Liefertreue normal",
+  "On-time delivery normal"
+ ],
+ [
+  "评级 {}，无降级",
+  "Klasse {}, keine Herabstufung",
+  "Grade {}, no downgrade"
+ ],
+ [
+  "无即将过期证书",
+  "Keine bald ablaufenden Zertifikate",
+  "No certificates about to expire"
+ ],
+ [
+  "评价分数稳定",
+  "Bewertungspunktzahl stabil",
+  "Evaluation score stable"
+ ],
+ [
+  "未检测到安全缺陷",
+  "Keine Sicherheitsmängel erkannt",
+  "No safety defects detected"
+ ],
+ [
+  "PPM {} 超过限值 {}",
+  "PPM {} überschreitet Grenzwert {}",
+  "PPM {} exceeds limit {}"
+ ],
+ [
+  "连续 {} 批拒收，超过阈值 {}",
+  "{} Lose in Folge zurückgewiesen, Schwellenwert {} überschritten",
+  "{} consecutive lots rejected, threshold {} exceeded"
+ ],
+ [
+  "SCAR 最长超期 {} 天（限值 {} 天）",
+  "SCAR maximal {} Tage überfällig (Grenzwert {} Tage)",
+  "SCAR overdue by up to {} days (limit {} days)"
+ ],
+ [
+  "窗口期内 {} 个SCAR，超过限值 {}",
+  "{} SCAR im Zeitfenster, Grenzwert {} überschritten",
+  "{} SCAR in window, limit {} exceeded"
+ ],
+ [
+  "无评价数据",
+  "Keine Bewertungsdaten",
+  "No evaluation data"
+ ],
+ [
+  "评价数据不足，无法比较",
+  "Zu wenige Bewertungsdaten für einen Vergleich",
+  "Insufficient evaluation data to compare"
+ ],
+ [
+  "评级从 {} 降为 {}",
+  "Klasse von {} auf {} herabgestuft",
+  "Grade downgraded from {} to {}"
+ ],
+ [
+  "评价分数下降 {}，超过阈值 {}",
+  "Bewertungspunktzahl um {} gesunken, Schwellenwert {} überschritten",
+  "Evaluation score dropped by {}, threshold {} exceeded"
+ ],
+ [
+  "无 CAPA 来料不良输入",
+  "Keine CAPA-Eingabe zu Wareneingangsfehlern",
+  "No CAPA incoming defect input"
+ ],
+ [
+  "检测到安全缺陷关键词「{}」",
+  "Schlüsselwort für Sicherheitsmangel „{}“ erkannt",
+  "Safety defect keyword \"{}\" detected"
+ ],
+ [
+  "LLM_PROVIDER 未配置（纯规则引擎模式）",
+  "LLM_PROVIDER nicht konfiguriert (reiner Regel-Engine-Modus)",
+  "LLM_PROVIDER not configured (rule-engine-only mode)"
+ ],
+ [
+  "未知的 LLM_PROVIDER: {}",
+  "Unbekannter LLM_PROVIDER: {}",
+  "Unknown LLM_PROVIDER: {}"
+ ],
+ [
+  "{} 需要 LLM_API_KEY",
+  "{} benötigt LLM_API_KEY",
+  "{} requires LLM_API_KEY"
+ ],
+ [
+  "anthropic/claude 需要 LLM_API_KEY",
+  "anthropic/claude benötigt LLM_API_KEY",
+  "anthropic/claude requires LLM_API_KEY"
+ ],
+ [
+  "local/ollama 需要 LLM_BASE_URL",
+  "local/ollama benötigt LLM_BASE_URL",
+  "local/ollama requires LLM_BASE_URL"
+ ],
+ [
+  "local/ollama 需要 LLM_MODEL",
+  "local/ollama benötigt LLM_MODEL",
+  "local/ollama requires LLM_MODEL"
+ ],
+ [
+  "风险分",
+  "Risikobewertung",
+  "Risk score"
+ ],
+ [
+  "质量分",
+  "Qualitätsbewertung",
+  "Quality score"
+ ],
+ [
+  "交付分",
+  "Lieferbewertung",
+  "Delivery score"
+ ],
+ [
+  "合规分",
+  "Compliance-Bewertung",
+  "Compliance score"
+ ],
+ [
+  "ERP准时率",
+  "ERP-Liefertreue",
+  "ERP on-time rate"
+ ],
+ [
+  "采购占比",
+  "Einkaufsanteil",
+  "Purchase share"
+ ],
+ [
+  "开放SCAR",
+  "Offene SCAR",
+  "Open SCAR"
+ ],
+ [
+  "控制方法缺失",
+  "Lenkungsmethode fehlt",
+  "Control method missing"
+ ],
+ [
+  "反应计划缺失",
+  "Reaktionsplan fehlt",
+  "Reaction plan missing"
+ ],
+ [
+  "FMEA源工序已删除",
+  "FMEA-Quellarbeitsgang wurde gelöscht",
+  "FMEA source operation deleted"
+ ],
+ [
+  "工序与FMEA不一致",
+  "Arbeitsgang stimmt nicht mit FMEA überein",
+  "Operation inconsistent with FMEA"
+ ],
+ [
+  "特殊特性控制不完整",
+  "Lenkung des besonderen Merkmals unvollständig",
+  "Special characteristic control incomplete"
+ ],
+ [
+  "特性规范缺失",
+  "Merkmalsspezifikation fehlt",
+  "Characteristic specification missing"
+ ],
+ [
+  "历史双对象归属待复核",
+  "Historische Doppelobjekt-Zuordnung muss geprüft werden",
+  "Legacy dual-object ownership needs review"
+ ],
+ [
+  "密码长度至少为8位",
+  "Das Passwort muss mindestens 8 Zeichen lang sein",
+  "Password must be at least 8 characters long"
+ ],
+ [
+  "密码必须包含至少一个大写字母",
+  "Das Passwort muss mindestens einen Großbuchstaben enthalten",
+  "Password must contain at least one uppercase letter"
+ ],
+ [
+  "密码必须包含至少一个小写字母",
+  "Das Passwort muss mindestens einen Kleinbuchstaben enthalten",
+  "Password must contain at least one lowercase letter"
+ ],
+ [
+  "密码必须包含至少一个数字",
+  "Das Passwort muss mindestens eine Ziffer enthalten",
+  "Password must contain at least one digit"
+ ],
+ [
+  "密码必须包含至少一个特殊字符",
+  "Das Passwort muss mindestens ein Sonderzeichen enthalten",
+  "Password must contain at least one special character"
+ ],
+ [
+  "root_cause_text 不能为空",
+  "root_cause_text darf nicht leer sein",
+  "root_cause_text must not be empty"
+ ],
+ [
+  "权限级别必须在 0-5 之间",
+  "Berechtigungsstufe muss zwischen 0 und 5 liegen",
+  "Permission level must be between 0 and 5"
+ ],
+ [
+  "period must be one of \"月度\", \"季度\", \"年度\"",
+  "period muss \"月度\" (monatlich), \"季度\" (quartalsweise) oder \"年度\" (jährlich) sein",
+  "period must be one of \"月度\" (monthly), \"季度\" (quarterly), \"年度\" (yearly)"
+ ],
+ [
+  "需要 mes 模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul mes erforderlich",
+  "APPROVE permission required for the mes module"
+ ],
+ [
+  "无权访问该产线",
+  "Kein Zugriff auf diese Produktionslinie",
+  "No access to this production line"
+ ],
+ [
+  "需要 mes 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul mes erforderlich",
+  "VIEW permission required for the mes module"
+ ],
+ [
+  "需要 planning 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul planning erforderlich",
+  "VIEW permission required for the planning module"
+ ],
+ [
+  "需要 planning 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul planning erforderlich",
+  "CREATE permission required for the planning module"
+ ],
+ [
+  "只能编辑进行中的项目",
+  "Nur laufende Projekte können bearbeitet werden",
+  "Only active projects can be edited"
+ ],
+ [
+  "需要经理或管理员权限",
+  "Manager- oder Administratorrechte erforderlich",
+  "Manager or administrator rights required"
+ ],
+ [
+  "需要工程师或更高权限",
+  "Ingenieur- oder höhere Rechte erforderlich",
+  "Engineer or higher rights required"
+ ],
+ [
+  "仅管理员可取消项目",
+  "Nur Administratoren können Projekte abbrechen",
+  "Only administrators can cancel projects"
+ ],
+ [
+  "需要 supplier_risk 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul supplier_risk erforderlich",
+  "VIEW permission required for the supplier_risk module"
+ ],
+ [
+  "需要 supplier_risk 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul supplier_risk erforderlich",
+  "EDIT permission required for the supplier_risk module"
+ ],
+ [
+  "需要 supplier_risk 模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul supplier_risk erforderlich",
+  "APPROVE permission required for the supplier_risk module"
+ ],
+ [
+  "通知渠道不存在",
+  "Benachrichtigungskanal existiert nicht",
+  "Notification channel does not exist"
+ ],
+ [
+  "关闭预警需要审批权限",
+  "Zum Schließen einer Warnung ist eine Freigabeberechtigung erforderlich",
+  "Approval permission required to close an alert"
+ ],
+ [
+  "无权访问该产品线",
+  "Kein Zugriff auf diese Produktlinie",
+  "No access to this product line"
+ ],
+ [
+  "需要 scar 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul scar erforderlich",
+  "VIEW permission required for the scar module"
+ ],
+ [
+  "需要 scar 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul scar erforderlich",
+  "CREATE permission required for the scar module"
+ ],
+ [
+  "需要 capa 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul capa erforderlich",
+  "EDIT permission required for the capa module"
+ ],
+ [
+  "需要 manager 或 admin 权限",
+  "Manager- oder Administratorrechte erforderlich",
+  "Manager or admin rights required"
+ ],
+ [
+  "需要 engineer 或更高权限",
+  "Ingenieur- oder höhere Rechte erforderlich",
+  "Engineer or higher rights required"
+ ],
+ [
+  "需要 planning 模块的 ADMIN 权限",
+  "ADMIN-Berechtigung für das Modul planning erforderlich",
+  "ADMIN permission required for the planning module"
+ ],
+ [
+  "需要 plm 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul plm erforderlich",
+  "CREATE permission required for the plm module"
+ ],
+ [
+  "需要 plm 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul plm erforderlich",
+  "VIEW permission required for the plm module"
+ ],
+ [
+  "需要 plm 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul plm erforderlich",
+  "EDIT permission required for the plm module"
+ ],
+ [
+  "需要 plm 模块的 ADMIN 权限",
+  "ADMIN-Berechtigung für das Modul plm erforderlich",
+  "ADMIN permission required for the plm module"
+ ],
+ [
+  "node_id 长度不能超过 {}",
+  "node_id darf höchstens {} Zeichen lang sein",
+  "node_id must not exceed {} characters"
+ ],
+ [
+  "目标 FMEA 节点不存在",
+  "Ziel-FMEA-Knoten existiert nicht",
+  "Target FMEA node does not exist"
+ ],
+ [
+  "需要 special_characteristic 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul special_characteristic erforderlich",
+  "CREATE permission required for the special_characteristic module"
+ ],
+ [
+  "FMEA 类型必须是 DFMEA 或 PFMEA",
+  "FMEA-Typ muss DFMEA oder PFMEA sein",
+  "FMEA type must be DFMEA or PFMEA"
+ ],
+ [
+  "该零件不是安全件，无法确认安全特性",
+  "Dieses Teil ist kein Sicherheitsteil, Sicherheitsmerkmal kann nicht bestätigt werden",
+  "This part is not safety-related; cannot confirm a safety characteristic"
+ ],
+ [
+  "该零件不是关键特性，无法确认关键特性",
+  "Dieses Teil hat kein Schlüsselmerkmal, Schlüsselmerkmal kann nicht bestätigt werden",
+  "This part is not a key characteristic; cannot confirm a key characteristic"
+ ],
+ [
+  "该零件没有对应的待确认请求",
+  "Für dieses Teil gibt es keine offene Bestätigungsanfrage",
+  "No pending confirmation request for this part"
+ ],
+ [
+  "该请求已处理，无法重复确认",
+  "Diese Anfrage wurde bereits bearbeitet",
+  "This request has already been processed"
+ ],
+ [
+  "目标 FMEA 节点未关联该 PLM 零件",
+  "Ziel-FMEA-Knoten ist nicht mit diesem PLM-Teil verknüpft",
+  "Target FMEA node is not linked to this PLM part"
+ ],
+ [
+  "无法确定特殊特性的产品线",
+  "Produktlinie des besonderen Merkmals nicht bestimmbar",
+  "Cannot determine the product line of the special characteristic"
+ ],
+ [
+  "对象不存在",
+  "Objekt existiert nicht",
+  "Object does not exist"
+ ],
+ [
+  "需要 audit 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul audit erforderlich",
+  "VIEW permission required for the audit module"
+ ],
+ [
+  "需要 audit 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul audit erforderlich",
+  "CREATE permission required for the audit module"
+ ],
+ [
+  "需要 customer_quality 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul customer_quality erforderlich",
+  "VIEW permission required for the customer_quality module"
+ ],
+ [
+  "需要 customer_quality 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul customer_quality erforderlich",
+  "CREATE permission required for the customer_quality module"
+ ],
+ [
+  "审核计划不存在",
+  "Auditplan existiert nicht",
+  "Audit plan does not exist"
+ ],
+ [
+  "登录尝试过于频繁，请 5 分钟后再试",
+  "Zu viele Anmeldeversuche, bitte in 5 Minuten erneut versuchen",
+  "Too many login attempts, please try again in 5 minutes"
+ ],
+ [
+  "管理员密码须通过私密初始化命令更换",
+  "Das Administratorpasswort muss über den privaten Initialisierungsbefehl geändert werden",
+  "The admin password must be changed via the private bootstrap command"
+ ],
+ [
+  "用户已删除",
+  "Benutzer gelöscht",
+  "User deleted"
+ ],
+ [
+  "该用户存在关联业务记录，无法删除；建议改为停用",
+  "Dieser Benutzer hat verknüpfte Geschäftsdaten und kann nicht gelöscht werden; bitte stattdessen deaktivieren",
+  "This user has linked business records and cannot be deleted; deactivate instead"
+ ],
+ [
+  "需要 supplier 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul supplier erforderlich",
+  "VIEW permission required for the supplier module"
+ ],
+ [
+  "需要 supplier 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul supplier erforderlich",
+  "CREATE permission required for the supplier module"
+ ],
+ [
+  "需要 supplier 模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul supplier erforderlich",
+  "APPROVE permission required for the supplier module"
+ ],
+ [
+  "权限不足",
+  "Keine Berechtigung",
+  "Insufficient permission"
+ ],
+ [
+  "活跃连接",
+  "Aktive Verbindungen",
+  "Active connections"
+ ],
+ [
+  "同步状态",
+  "Synchronisierungsstatus",
+  "Sync status"
+ ],
+ [
+  "供应商关联率",
+  "Lieferanten-Verknüpfungsquote",
+  "Supplier link rate"
+ ],
+ [
+  "客户关联率",
+  "Kunden-Verknüpfungsquote",
+  "Customer link rate"
+ ],
+ [
+  "质量成本总计",
+  "Qualitätskosten gesamt",
+  "Total cost of quality"
+ ],
+ [
+  "需要 msa 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul msa erforderlich",
+  "VIEW permission required for the msa module"
+ ],
+ [
+  "需要 msa 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul msa erforderlich",
+  "CREATE permission required for the msa module"
+ ],
+ [
+  "产品类型 '{}' 已停用",
+  "Produkttyp '{}' ist deaktiviert",
+  "Product type '{}' is deactivated"
+ ],
+ [
+  "需要 management_review 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul management_review erforderlich",
+  "VIEW permission required for the management_review module"
+ ],
+ [
+  "需要 management_review 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul management_review erforderlich",
+  "CREATE permission required for the management_review module"
+ ],
+ [
+  "需要 management_review 模块的 ADMIN 权限",
+  "ADMIN-Berechtigung für das Modul management_review erforderlich",
+  "ADMIN permission required for the management_review module"
+ ],
+ [
+  "需要 management_review 模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul management_review erforderlich",
+  "APPROVE permission required for the management_review module"
+ ],
+ [
+  "需要 knowledge_graph 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul knowledge_graph erforderlich",
+  "VIEW permission required for the knowledge_graph module"
+ ],
+ [
+  "搜索服务未配置（无 embedding provider）",
+  "Suchdienst nicht konfiguriert (kein Embedding-Anbieter)",
+  "Search service not configured (no embedding provider)"
+ ],
+ [
+  "仅管理员可执行重新索引",
+  "Nur Administratoren können die Neuindizierung ausführen",
+  "Only administrators can run re-indexing"
+ ],
+ [
+  "已入队 {} 条记录等待重新索引",
+  "{} Datensätze zur Neuindizierung eingereiht",
+  "{} records queued for re-indexing"
+ ],
+ [
+  "记录不存在",
+  "Datensatz existiert nicht",
+  "Record does not exist"
+ ],
+ [
+  "需要 IQC 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul IQC erforderlich",
+  "VIEW permission required for the IQC module"
+ ],
+ [
+  "需要 IQC 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul IQC erforderlich",
+  "CREATE permission required for the IQC module"
+ ],
+ [
+  "需要 IQC 模块的 ADMIN 权限",
+  "ADMIN-Berechtigung für das Modul IQC erforderlich",
+  "ADMIN permission required for the IQC module"
+ ],
+ [
+  "需要 IQC 模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul IQC erforderlich",
+  "APPROVE permission required for the IQC module"
+ ],
+ [
+  "质量快照不存在",
+  "Qualitäts-Snapshot existiert nicht",
+  "Quality snapshot does not exist"
+ ],
+ [
+  "无权访问产品线 '{}'",
+  "Kein Zugriff auf Produktlinie '{}'",
+  "No access to product line '{}'"
+ ],
+ [
+  "需要 capa 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul capa erforderlich",
+  "VIEW permission required for the capa module"
+ ],
+ [
+  "需要 capa 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul capa erforderlich",
+  "CREATE permission required for the capa module"
+ ],
+ [
+  "目标 FMEA 不存在或不可见",
+  "Ziel-FMEA existiert nicht oder ist nicht sichtbar",
+  "Target FMEA does not exist or is not visible"
+ ],
+ [
+  "需要供应商风险模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul Lieferantenrisiko erforderlich",
+  "EDIT permission required for the supplier risk module"
+ ],
+ [
+  "无供应商风险输入记录",
+  "Keine Lieferantenrisiko-Eingabe vorhanden",
+  "No supplier risk input record"
+ ],
+ [
+  "风险输入尚未处理完成，无法确认",
+  "Risikoeingabe noch nicht fertig verarbeitet, Bestätigung nicht möglich",
+  "Risk input not yet processed; cannot confirm"
+ ],
+ [
+  "输入记录与 8D 供应商不一致",
+  "Eingabedatensatz passt nicht zum Lieferanten des 8D",
+  "Input record does not match the 8D supplier"
+ ],
+ [
+  "需要 CAPA 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul CAPA erforderlich",
+  "VIEW permission required for the CAPA module"
+ ],
+ [
+  "需要 FMEA 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul FMEA erforderlich",
+  "VIEW permission required for the FMEA module"
+ ],
+ [
+  "需要 fmea 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul fmea erforderlich",
+  "VIEW permission required for the fmea module"
+ ],
+ [
+  "需要 fmea 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul fmea erforderlich",
+  "EDIT permission required for the fmea module"
+ ],
+ [
+  "仅 D8_CLOSURE / ARCHIVED 状态可手动重沉淀",
+  "Nur im Status D8_CLOSURE / ARCHIVED kann manuell erneut gespeichert werden",
+  "Manual re-sink only in D8_CLOSURE / ARCHIVED status"
+ ],
+ [
+  "生成权限不足（需 engineer+）",
+  "Unzureichende Berechtigung zum Erzeugen (Ingenieur+ erforderlich)",
+  "Insufficient permission to generate (engineer+ required)"
+ ],
+ [
+  "8D 未关闭，不可生成 PPT",
+  "8D ist nicht geschlossen, PPT kann nicht erzeugt werden",
+  "8D not closed; cannot generate PPT"
+ ],
+ [
+  "PPT 生成记录不存在",
+  "PPT-Erzeugungsdatensatz existiert nicht",
+  "PPT generation record does not exist"
+ ],
+ [
+  "仅 D3 阶段可操作",
+  "Nur in Phase D3 möglich",
+  "Only possible in phase D3"
+ ],
+ [
+  "当前导入运行不存在",
+  "Aktueller Importlauf existiert nicht",
+  "Current import run does not exist"
+ ],
+ [
+  "D3 影响报告不存在",
+  "D3-Auswirkungsbericht existiert nicht",
+  "D3 impact report does not exist"
+ ],
+ [
+  "需先生成影响报告",
+  "Zuerst den Auswirkungsbericht erzeugen",
+  "Generate the impact report first"
+ ],
+ [
+  "仅 D8_GATE_PENDING 阶段可操作",
+  "Nur in Phase D8_GATE_PENDING möglich",
+  "Only possible in phase D8_GATE_PENDING"
+ ],
+ [
+  "需要 capa 模块的 {} 权限",
+  "Berechtigung {} für das Modul capa erforderlich",
+  "{} permission required for the capa module"
+ ],
+ [
+  "尚未生成影响分析",
+  "Noch keine Auswirkungsanalyse erzeugt",
+  "No impact analysis generated yet"
+ ],
+ [
+  "编辑权限不足",
+  "Unzureichende Bearbeitungsberechtigung",
+  "Insufficient edit permission"
+ ],
+ [
+  "审批权限不足",
+  "Unzureichende Freigabeberechtigung",
+  "Insufficient approval permission"
+ ],
+ [
+  "PPT 生成失败（审查闭环异常或渲染失败）",
+  "PPT-Erzeugung fehlgeschlagen (Fehler im Prüfkreislauf oder beim Rendern)",
+  "PPT generation failed (review loop or rendering error)"
+ ],
+ [
+  "owner_id 非法",
+  "owner_id ungültig",
+  "owner_id invalid"
+ ],
+ [
+  "需要 capa 模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul capa erforderlich",
+  "APPROVE permission required for the capa module"
+ ],
+ [
+  "LLM 凭证未配置，报告生成被阻断",
+  "Keine LLM-Zugangsdaten konfiguriert, Berichterzeugung blockiert",
+  "LLM credentials not configured; report generation blocked"
+ ],
+ [
+  "LLM 凭证未配置，建议生成被阻断",
+  "Keine LLM-Zugangsdaten konfiguriert, Vorschlagserzeugung blockiert",
+  "LLM credentials not configured; advice generation blocked"
+ ],
+ [
+  "需要 FMEA 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul FMEA erforderlich",
+  "EDIT permission required for the FMEA module"
+ ],
+ [
+  "需要计划模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Planungsmodul erforderlich",
+  "VIEW permission required for the planning module"
+ ],
+ [
+  "需要计划模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Planungsmodul erforderlich",
+  "CREATE permission required for the planning module"
+ ],
+ [
+  "已删除",
+  "Gelöscht",
+  "Deleted"
+ ],
+ [
+  "需要计划模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Planungsmodul erforderlich",
+  "APPROVE permission required for the planning module"
+ ],
+ [
+  "需要 spc 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul spc erforderlich",
+  "VIEW permission required for the spc module"
+ ],
+ [
+  "请先录入测量数据",
+  "Bitte zuerst Messdaten erfassen",
+  "Please enter measurement data first"
+ ],
+ [
+  "需要质量目标模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul Qualitätsziele erforderlich",
+  "VIEW permission required for the quality goals module"
+ ],
+ [
+  "需要质量目标模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul Qualitätsziele erforderlich",
+  "CREATE permission required for the quality goals module"
+ ],
+ [
+  "需要质量目标模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul Qualitätsziele erforderlich",
+  "APPROVE permission required for the quality goals module"
+ ],
+ [
+  "需要 dashboard 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul dashboard erforderlich",
+  "VIEW permission required for the dashboard module"
+ ],
+ [
+  "需要 dashboard 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul dashboard erforderlich",
+  "EDIT permission required for the dashboard module"
+ ],
+ [
+  "无可访问产品线",
+  "Keine zugänglichen Produktlinien",
+  "No accessible product lines"
+ ],
+ [
+  "AI 解读生成失败",
+  "Erzeugung der KI-Interpretation fehlgeschlagen",
+  "AI interpretation generation failed"
+ ],
+ [
+  "需要 PPAP 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul PPAP erforderlich",
+  "VIEW permission required for the PPAP module"
+ ],
+ [
+  "需要 PPAP 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul PPAP erforderlich",
+  "CREATE permission required for the PPAP module"
+ ],
+ [
+  "PPAP 已删除",
+  "PPAP gelöscht",
+  "PPAP deleted"
+ ],
+ [
+  "无权访问工厂 '{}'",
+  "Kein Zugriff auf Werk '{}'",
+  "No access to plant '{}'"
+ ],
+ [
+  "需要 spc 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul spc erforderlich",
+  "CREATE permission required for the spc module"
+ ],
+ [
+  "需要 spc 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul spc erforderlich",
+  "EDIT permission required for the spc module"
+ ],
+ [
+  "需要 customer_quality 模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul customer_quality erforderlich",
+  "APPROVE permission required for the customer_quality module"
+ ],
+ [
+  "需要特殊特性模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul besondere Merkmale erforderlich",
+  "VIEW permission required for the special characteristics module"
+ ],
+ [
+  "需要特殊特性模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul besondere Merkmale erforderlich",
+  "CREATE permission required for the special characteristics module"
+ ],
+ [
+  "需要特殊特性模块的 APPROVE 权限",
+  "APPROVE-Berechtigung für das Modul besondere Merkmale erforderlich",
+  "APPROVE permission required for the special characteristics module"
+ ],
+ [
+  "需要 fmea 模块的 CREATE 权限",
+  "CREATE-Berechtigung für das Modul fmea erforderlich",
+  "CREATE permission required for the fmea module"
+ ],
+ [
+  "当前状态不可编辑（仅草稿/返工可编辑）",
+  "Im aktuellen Status nicht bearbeitbar (nur Entwurf/Überarbeitung)",
+  "Not editable in the current status (draft/rework only)"
+ ],
+ [
+  "只能删除草稿或返工状态的FMEA",
+  "Nur FMEAs im Status Entwurf oder Überarbeitung können gelöscht werden",
+  "Only FMEAs in draft or rework status can be deleted"
+ ],
+ [
+  "驳回必须携带非空 reason",
+  "Für die Ablehnung ist ein nicht leerer Grund (reason) erforderlich",
+  "Rejection requires a non-empty reason"
+ ],
+ [
+  "请求过于频繁，请稍后重试",
+  "Zu viele Anfragen, bitte später erneut versuchen",
+  "Too many requests, please try again later"
+ ],
+ [
+  "该文档请求过于频繁，请稍后重试",
+  "Zu viele Anfragen für dieses Dokument, bitte später erneut versuchen",
+  "Too many requests for this document, please try again later"
+ ],
+ [
+  "向导未完成，不能提交评审",
+  "Assistent nicht abgeschlossen, Einreichen zur Prüfung nicht möglich",
+  "Wizard not completed; cannot submit for review"
+ ],
+ [
+  "completed 状态的优化措施必须填写 action_taken/completion_date/revised_occurrence/revised_detection/revised_ap",
+  "Optimierungsmaßnahmen im Status completed benötigen action_taken/completion_date/revised_occurrence/revised_detection/revised_ap",
+  "Completed optimization actions require action_taken/completion_date/revised_occurrence/revised_detection/revised_ap"
+ ],
+ [
+  "not_executed 状态的优化措施必须在关联失效原因上填写 control_sufficiency_reason 或 risk_acceptance_reason",
+  "Optimierungsmaßnahmen im Status not_executed benötigen control_sufficiency_reason oder risk_acceptance_reason an der zugehörigen Fehlerursache",
+  "not_executed optimization actions require control_sufficiency_reason or risk_acceptance_reason on the linked failure cause"
+ ],
+ [
+  "S=9-10 且 AP=H/M 的失效链必须在关联失效原因上填写 management_review_evidence",
+  "Fehlerketten mit B=9–10 und AP=H/M benötigen management_review_evidence an der zugehörigen Fehlerursache",
+  "Failure chains with S=9–10 and AP=H/M require management_review_evidence on the linked failure cause"
+ ],
+ [
+  "需要 planning 模块的 EDIT 权限",
+  "EDIT-Berechtigung für das Modul planning erforderlich",
+  "EDIT permission required for the planning module"
+ ],
+ [
+  "校验结果不存在",
+  "Prüfergebnis existiert nicht",
+  "Validation result does not exist"
+ ],
+ [
+  "只能重新打开已拒绝或已解决的项目",
+  "Nur abgelehnte oder gelöste Einträge können wieder geöffnet werden",
+  "Only rejected or resolved items can be reopened"
+ ],
+ [
+  "该控制计划的校验正在运行中",
+  "Die Prüfung dieses Produktionslenkungsplans läuft bereits",
+  "Validation of this control plan is already running"
+ ],
+ [
+  "校验执行失败",
+  "Prüfung fehlgeschlagen",
+  "Validation failed"
+ ],
+ [
+  "需要 group 模块的 VIEW 权限",
+  "VIEW-Berechtigung für das Modul group erforderlich",
+  "VIEW permission required for the group module"
+ ],
+ [
+  "需要 group 模块的 ADMIN 权限",
+  "ADMIN-Berechtigung für das Modul group erforderlich",
+  "ADMIN permission required for the group module"
+ ],
+ [
+  "不支持的审查 skill",
+  "Nicht unterstützter Prüf-Skill",
+  "Unsupported review skill"
+ ],
+ [
+  "审查 skill 不存在",
+  "Prüf-Skill existiert nicht",
+  "Review skill does not exist"
+ ],
+ [
+  "不支持的审查 skill（本切片固定 capa_ppt_review）",
+  "Nicht unterstützter Prüf-Skill (in diesem Umfang nur capa_ppt_review)",
+  "Unsupported review skill (only capa_ppt_review in this slice)"
+ ],
+ [
+  "审查标准不可为空",
+  "Prüfstandard darf nicht leer sein",
+  "Review standard must not be empty"
+ ],
+ [
+  "权限已更新",
+  "Berechtigungen aktualisiert",
+  "Permissions updated"
+ ],
+ [
+  "产品线已分配",
+  "Produktlinie zugeordnet",
+  "Product line assigned"
+ ],
+ [
+  "产品线已移除",
+  "Produktlinie entfernt",
+  "Product line removed"
+ ],
+ [
+  "无法确定工厂",
+  "Werk nicht bestimmbar",
+  "Cannot determine plant"
+ ],
+ [
+  "无权操作他人会话",
+  "Keine Berechtigung, Sitzungen anderer zu bearbeiten",
+  "Not allowed to operate on another user's session"
+ ],
+ [
+  "需要管理员权限审批此动作",
+  "Für diese Aktion ist eine Freigabe durch einen Administrator erforderlich",
+  "Administrator approval required for this action"
+ ],
+ [
+  "需要该模块的审批权限",
+  "Freigabeberechtigung für dieses Modul erforderlich",
+  "Approval permission for this module required"
+ ],
+ [
+  "动作不存在",
+  "Aktion existiert nicht",
+  "Action does not exist"
+ ],
+ [
+  "状态 {} 需显式传 target_state，不可线性推进",
+  "Status {} erfordert ein explizites target_state, kein lineares Weiterschalten",
+  "Status {} requires an explicit target_state; no linear advance"
+ ],
+ [
+  "租户已暂停",
+  "Mandant gesperrt",
+  "Tenant suspended"
+ ],
+ [
+  "租户已停用",
+  "Mandant deaktiviert",
+  "Tenant deactivated"
+ ],
+ [
+  "租户尚未就绪",
+  "Mandant noch nicht bereit",
+  "Tenant not ready yet"
+ ],
+ [
+  "无法解析租户，请使用正确的访问地址",
+  "Mandant nicht ermittelbar, bitte die korrekte Zugriffsadresse verwenden",
+  "Cannot resolve tenant, please use the correct access address"
+ ],
+ [
+  "需要 {} 模块的 {} 权限",
+  "Berechtigung {1} für das Modul {0} erforderlich",
+  "{1} permission required for the {0} module"
+ ],
+ [
+  "无法确定 factory_id：缺少 product_line_code 或默认工厂",
+  "factory_id nicht bestimmbar: product_line_code oder Standardwerk fehlt",
+  "Cannot determine factory_id: missing product_line_code or default plant"
+ ],
+ [
+  "无法确定 {} 的 factory_id：缺少 product_line_code、父对象关联或默认工厂",
+  "factory_id für {} nicht bestimmbar: product_line_code, übergeordnetes Objekt oder Standardwerk fehlt",
+  "Cannot determine factory_id for {}: missing product_line_code, parent link or default plant"
+ ],
+ [
+  "无权在工厂 '{}' 下创建记录",
+  "Keine Berechtigung, im Werk '{}' Datensätze anzulegen",
+  "No permission to create records in plant '{}'"
+ ],
+ [
+  "目标对象不在可访问产品线内",
+  "Zielobjekt liegt außerhalb der zugänglichen Produktlinien",
+  "Target object is outside the accessible product lines"
+ ],
+ [
+  "factory_id 不一致：产品线 '{}' 属于工厂 {}，但记录的 factory_id 为 {}",
+  "factory_id inkonsistent: Produktlinie '{}' gehört zu Werk {}, der Datensatz hat aber factory_id {}",
+  "factory_id mismatch: product line '{}' belongs to plant {}, but the record has factory_id {}"
+ ],
+ [
+  "factory_id 不一致：供应商属于工厂 {}，但记录的 factory_id 为 {}",
+  "factory_id inkonsistent: Lieferant gehört zu Werk {}, der Datensatz hat aber factory_id {}",
+  "factory_id mismatch: supplier belongs to plant {}, but the record has factory_id {}"
+ ],
+ [
+  "无法转换为整数: {}",
+  "Kann nicht in eine Ganzzahl umgewandelt werden: {}",
+  "Cannot convert to integer: {}"
+ ],
+ [
+  "文件超过 10MB 限制",
+  "Datei überschreitet das Limit von 10 MB",
+  "File exceeds the 10 MB limit"
+ ],
+ [
+  "工作簿 ZIP 条目过多或重复",
+  "Zu viele oder doppelte ZIP-Einträge in der Arbeitsmappe",
+  "Too many or duplicate ZIP entries in workbook"
+ ],
+ [
+  "工作表数量超过限制",
+  "Anzahl der Arbeitsblätter überschreitet das Limit",
+  "Number of worksheets exceeds the limit"
+ ],
+ [
+  "文件格式无效，仅支持 .xlsx 格式: {}",
+  "Ungültiges Dateiformat, nur .xlsx wird unterstützt: {}",
+  "Invalid file format, only .xlsx is supported: {}"
+ ],
+ [
+  "工作表不存在",
+  "Arbeitsblatt existiert nicht",
+  "Worksheet does not exist"
+ ],
+ [
+  "工作表行数或列数超过限制",
+  "Zeilen- oder Spaltenanzahl des Arbeitsblatts überschreitet das Limit",
+  "Worksheet row or column count exceeds the limit"
+ ],
+ [
+  "必须为整数，不能为小数: {}",
+  "Muss eine Ganzzahl sein, keine Dezimalzahl: {}",
+  "Must be an integer, not a decimal: {}"
+ ],
+ [
+  "必须为整数: {}",
+  "Muss eine Ganzzahl sein: {}",
+  "Must be an integer: {}"
+ ],
+ [
+  "工作簿解压大小或压缩比超过限制",
+  "Entpackte Größe oder Kompressionsrate der Arbeitsmappe überschreitet das Limit",
+  "Workbook uncompressed size or compression ratio exceeds the limit"
+ ],
+ [
+  "工作簿不允许 XML 实体声明",
+  "Arbeitsmappe darf keine XML-Entitätsdeklarationen enthalten",
+  "Workbook must not contain XML entity declarations"
+ ],
+ [
+  "导入行数超过限制",
+  "Anzahl der Importzeilen überschreitet das Limit",
+  "Number of import rows exceeds the limit"
+ ],
+ [
+  "缺少必需表头：{}",
+  "Pflichtspaltenkopf fehlt: {}",
+  "Required header missing: {}"
+ ],
+ [
+  "工作表列数超过限制",
+  "Spaltenanzahl des Arbeitsblatts überschreitet das Limit",
+  "Worksheet column count exceeds the limit"
+ ],
+ [
+  "工作簿单元格数量超过限制",
+  "Zellenanzahl der Arbeitsmappe überschreitet das Limit",
+  "Workbook cell count exceeds the limit"
+ ],
+ [
+  "工作表单元格范围超过限制",
+  "Zellbereich des Arbeitsblatts überschreitet das Limit",
+  "Worksheet cell range exceeds the limit"
+ ],
+ [
+  "默认工厂",
+  "Standardwerk",
+  "Default plant"
+ ],
+ [
+  "体系审核检查表",
+  "Checkliste Systemaudit",
+  "System audit checklist"
+ ],
+ [
+  "过程审核检查表",
+  "Checkliste Prozessaudit",
+  "Process audit checklist"
+ ],
+ [
+  "产品审核检查表",
+  "Checkliste Produktaudit",
+  "Product audit checklist"
+ ],
+ [
+  "4.1 理解组织及其环境",
+  "4.1 Verstehen der Organisation und ihres Kontextes",
+  "4.1 Understanding the organization and its context"
+ ],
+ [
+  "组织是否识别了与其宗旨相关的内外部议题？",
+  "Hat die Organisation die für ihren Zweck relevanten internen und externen Themen bestimmt?",
+  "Has the organization determined the internal and external issues relevant to its purpose?"
+ ],
+ [
+  "4.2 理解相关方需求",
+  "4.2 Verstehen der Erfordernisse interessierter Parteien",
+  "4.2 Understanding the needs of interested parties"
+ ],
+ [
+  "相关方及其要求是否被识别并监视？",
+  "Sind interessierte Parteien und ihre Anforderungen bestimmt und überwacht?",
+  "Are interested parties and their requirements identified and monitored?"
+ ],
+ [
+  "5.1 领导作用和承诺",
+  "5.1 Führung und Verpflichtung",
+  "5.1 Leadership and commitment"
+ ],
+ [
+  "最高管理者是否对质量管理体系的有效性承担责任？",
+  "Übernimmt die oberste Leitung die Rechenschaft für die Wirksamkeit des QM-Systems?",
+  "Does top management take accountability for the effectiveness of the QMS?"
+ ],
+ [
+  "6.1 应对风险和机遇的措施",
+  "6.1 Maßnahmen zum Umgang mit Risiken und Chancen",
+  "6.1 Actions to address risks and opportunities"
+ ],
+ [
+  "风险和机遇是否被识别并策划应对措施？",
+  "Sind Risiken und Chancen bestimmt und Maßnahmen dazu geplant?",
+  "Are risks and opportunities identified and actions planned?"
+ ],
+ [
+  "7.1 资源",
+  "7.1 Ressourcen",
+  "7.1 Resources"
+ ],
+ [
+  "组织是否确定和提供了所需的资源？",
+  "Hat die Organisation die erforderlichen Ressourcen bestimmt und bereitgestellt?",
+  "Has the organization determined and provided the required resources?"
+ ],
+ [
+  "8.1 运行的策划和控制",
+  "8.1 Betriebliche Planung und Steuerung",
+  "8.1 Operational planning and control"
+ ],
+ [
+  "过程是否被策划、实施、监视和改进？",
+  "Werden die Prozesse geplant, umgesetzt, überwacht und verbessert?",
+  "Are processes planned, implemented, monitored and improved?"
+ ],
+ [
+  "9.1 监视、测量、分析和评价",
+  "9.1 Überwachung, Messung, Analyse und Bewertung",
+  "9.1 Monitoring, measurement, analysis and evaluation"
+ ],
+ [
+  "是否策划并实施了所需的监视和测量活动？",
+  "Sind die erforderlichen Überwachungs- und Messtätigkeiten geplant und umgesetzt?",
+  "Are the required monitoring and measurement activities planned and implemented?"
+ ],
+ [
+  "10.2 不合格和纠正措施",
+  "10.2 Nichtkonformität und Korrekturmaßnahmen",
+  "10.2 Nonconformity and corrective action"
+ ],
+ [
+  "是否对不合格做出应对并在必要时采取纠正措施？",
+  "Wird auf Nichtkonformitäten reagiert und werden bei Bedarf Korrekturmaßnahmen ergriffen?",
+  "Are nonconformities addressed and corrective actions taken where necessary?"
+ ],
+ [
+  "过程输入",
+  "Prozesseingaben",
+  "Process inputs"
+ ],
+ [
+  "输入要求是否完整、明确并被验证？",
+  "Sind die Eingangsanforderungen vollständig, eindeutig und verifiziert?",
+  "Are input requirements complete, clear and verified?"
+ ],
+ [
+  "过程资源",
+  "Prozessressourcen",
+  "Process resources"
+ ],
+ [
+  "人员、设备、环境是否满足过程要求？",
+  "Erfüllen Personal, Anlagen und Umgebung die Prozessanforderungen?",
+  "Do personnel, equipment and environment meet process requirements?"
+ ],
+ [
+  "过程方法",
+  "Prozessmethoden",
+  "Process methods"
+ ],
+ [
+  "作业指导书/控制计划是否被有效执行？",
+  "Werden Arbeitsanweisungen/Produktionslenkungspläne wirksam umgesetzt?",
+  "Are work instructions/control plans effectively followed?"
+ ],
+ [
+  "过程监视",
+  "Prozessüberwachung",
+  "Process monitoring"
+ ],
+ [
+  "关键过程参数是否被监视并记录？",
+  "Werden kritische Prozessparameter überwacht und dokumentiert?",
+  "Are key process parameters monitored and recorded?"
+ ],
+ [
+  "过程输出",
+  "Prozessergebnisse",
+  "Process outputs"
+ ],
+ [
+  "输出是否满足规定的接收准则？",
+  "Erfüllen die Ergebnisse die festgelegten Annahmekriterien?",
+  "Do outputs meet the specified acceptance criteria?"
+ ],
+ [
+  "过程改进",
+  "Prozessverbesserung",
+  "Process improvement"
+ ],
+ [
+  "是否利用过程数据推动持续改进？",
+  "Werden Prozessdaten für die fortlaufende Verbesserung genutzt?",
+  "Are process data used to drive continual improvement?"
+ ],
+ [
+  "外观",
+  "Aussehen",
+  "Appearance"
+ ],
+ [
+  "产品外观是否符合图纸/规范要求？",
+  "Entspricht das Aussehen des Produkts den Zeichnungs-/Spezifikationsanforderungen?",
+  "Does the product appearance meet drawing/specification requirements?"
+ ],
+ [
+  "尺寸",
+  "Abmessungen",
+  "Dimensions"
+ ],
+ [
+  "关键尺寸是否在公差范围内？",
+  "Liegen die kritischen Maße innerhalb der Toleranz?",
+  "Are key dimensions within tolerance?"
+ ],
+ [
+  "功能",
+  "Funktion",
+  "Function"
+ ],
+ [
+  "产品功能测试结果是否满足规范？",
+  "Erfüllen die Ergebnisse der Funktionsprüfung die Spezifikation?",
+  "Do functional test results meet the specification?"
+ ],
+ [
+  "标识",
+  "Kennzeichnung",
+  "Identification"
+ ],
+ [
+  "产品标识、追溯信息是否完整正确？",
+  "Sind Produktkennzeichnung und Rückverfolgungsangaben vollständig und korrekt?",
+  "Are product identification and traceability information complete and correct?"
+ ],
+ [
+  "包装",
+  "Verpackung",
+  "Packaging"
+ ],
+ [
+  "包装方式和防护是否符合要求？",
+  "Entsprechen Verpackungsart und Schutz den Anforderungen?",
+  "Do packaging method and protection meet requirements?"
+ ],
+ [
+  "放宽一级所需连续合格批次",
+  "Aufeinanderfolgende angenommene Lose für eine Stufe Lockerung",
+  "Consecutive accepted lots to reduce by one level"
+ ],
+ [
+  "放宽两级所需连续合格批次",
+  "Aufeinanderfolgende angenommene Lose für zwei Stufen Lockerung",
+  "Consecutive accepted lots to reduce by two levels"
+ ],
+ [
+  "加严一级所需连续不合格批次",
+  "Aufeinanderfolgende zurückgewiesene Lose für eine Stufe Verschärfung",
+  "Consecutive rejected lots to tighten by one level"
+ ],
+ [
+  "加严两级所需连续不合格批次",
+  "Aufeinanderfolgende zurückgewiesene Lose für zwei Stufen Verschärfung",
+  "Consecutive rejected lots to tighten by two levels"
+ ],
+ [
+  "PPM加严阈值 (parts per million)",
+  "PPM-Schwelle für Verschärfung (parts per million)",
+  "PPM threshold for tightening (parts per million)"
+ ],
+ [
+  "PPM放宽阈值 (parts per million)",
+  "PPM-Schwelle für Lockerung (parts per million)",
+  "PPM threshold for reduction (parts per million)"
+ ],
+ [
+  "建议过期天数",
+  "Gültigkeit von Empfehlungen in Tagen",
+  "Recommendation expiry in days"
+ ],
+ [
+  "默认最大AQL",
+  "Standard-Höchst-AQL",
+  "Default maximum AQL"
+ ],
+ [
+  "默认最小AQL",
+  "Standard-Mindest-AQL",
+  "Default minimum AQL"
+ ],
+ [
+  "安全缺陷冻结天数",
+  "Einfrierdauer bei Sicherheitsmängeln in Tagen",
+  "Freeze days after safety defect"
+ ],
+ [
+  "默认检验水平",
+  "Standard-Prüfniveau",
+  "Default inspection level"
+ ],
+ [
+  "物料默认AQL为NULL时的回退值",
+  "Ersatzwert, wenn der Standard-AQL des Materials leer ist",
+  "Fallback when a material's default AQL is empty"
+ ],
+ [
+  "## 8D 报告 PPT 审查标准\n\n审查 PPT 内容是否符合 8D 报告要求：\n1. 封面齐全（8D 单号、标题、严重度、产品线、发起人、状态、日期）\n2. D1-D8 各页非空，内容来自落库数据\n3. D4 根因分析含验证记录（method/result/is_verified + 证据附件引用）\n4. D7 预防复发含 node-action 处置记录\n5. 联动附录含关联 FMEA 节点详情 + SCAR/供应商风险预警单号与状态\n6. 生成信息页含版本与审查状态\n返回 JSON: {passed: bool, issues: [str], suggestions: [str]}\n",
+  "## Prüfstandard für 8D-Berichts-PPT\n\nPrüfen, ob der PPT-Inhalt den Anforderungen an einen 8D-Bericht entspricht:\n1. Deckblatt vollständig (8D-Nr., Titel, Schweregrad, Produktlinie, Ersteller, Status, Datum)\n2. Seiten D1–D8 nicht leer, Inhalte stammen aus gespeicherten Daten\n3. D4-Ursachenanalyse enthält Verifizierungen (method/result/is_verified + Verweise auf Nachweisanhänge)\n4. D7 Wiederholung verhindern enthält die node-action-Bearbeitungsnachweise\n5. Anhang Verknüpfungen enthält Details der verknüpften FMEA-Knoten + SCAR-/Lieferantenrisiko-Nummern und Status\n6. Seite Erstellungsinformationen enthält Version und Prüfstatus\nRückgabe als JSON: {passed: bool, issues: [str], suggestions: [str]}\n",
+  "## 8D report PPT review standard\n\nCheck whether the PPT content meets the requirements of an 8D report:\n1. Complete cover (8D no., title, severity, product line, initiator, status, date)\n2. Pages D1–D8 not empty, content taken from stored data\n3. D4 root cause analysis includes verification records (method/result/is_verified + evidence attachment references)\n4. D7 prevent recurrence includes node-action handling records\n5. Linked appendix includes linked FMEA node details + SCAR/supplier risk alert numbers and status\n6. Generation info page includes version and review status\nReturn JSON: {passed: bool, issues: [str], suggestions: [str]}\n"
+ ]
+]

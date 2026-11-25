@@ -238,9 +238,9 @@ export default function DFMEAWizardPage() {
     const liveHash = computeHash(nodesRef.current, edgesRef.current, scopeRef.current);
     if (liveHash !== lastSavedHashRef.current) {
       Modal.confirm({
-        title: t('wizard.page.confirmLeaveTitle', { defaultValue: '离开向导？' }),
-        content: t('wizard.page.confirmLeave', { defaultValue: '有未保存的更改，确定离开吗？' }),
-        okText: t('wizard.page.confirmLeaveOk', { defaultValue: '离开' }),
+        title: t('wizard.page.confirmLeaveTitle'),
+        content: t('wizard.page.confirmLeave'),
+        okText: t('wizard.page.confirmLeaveOk'),
         cancelText: t('wizard.page.confirmEmptyDraftCancel'),
         okButtonProps: { danger: true },
         onOk: () => navigate('/fmea'),

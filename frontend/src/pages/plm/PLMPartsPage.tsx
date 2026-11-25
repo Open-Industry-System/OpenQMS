@@ -30,7 +30,7 @@ import type {
 } from "../../types/plm";
 
 export default function PLMPartsPage() {
-  const { t } = useTranslation("plm");
+  const { t, i18n } = useTranslation("plm");
   const { t: tc } = useTranslation("common");
   const { message } = App.useApp();
   const { canEdit, canCreate } = usePermission();
@@ -278,7 +278,7 @@ export default function PLMPartsPage() {
             </Descriptions.Item>
             <Descriptions.Item label={t("parts.drawer.labels.updatedAt")}>
               {drawerPart.source_updated_at
-                ? new Date(drawerPart.source_updated_at).toLocaleString("zh-CN")
+                ? new Date(drawerPart.source_updated_at).toLocaleString(i18n.language)
                 : "—"}
             </Descriptions.Item>
           </Descriptions>

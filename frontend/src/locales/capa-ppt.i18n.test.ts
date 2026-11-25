@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import zh from './zh-CN/capa.json';
+import zh from './de-DE/capa.json';
 import en from './en-US/capa.json';
 
 const locales = [
-  ['zh-CN', zh],
+  ['de-DE', zh],
   ['en-US', en],
 ] as const;
 const singleBracePlaceholder = /(?<!\{)\{rounds\}(?!\})/;

@@ -8,6 +8,7 @@ import {
   uploadTaskAttachment,
 } from "../../api/agentTaskAttachments";
 import type { AgentTaskAttachment } from "../../types/agentAttachment";
+import { tr, useTr } from "../../i18n/tr";
 
 interface Props {
   taskId: string;
@@ -20,6 +21,7 @@ interface Props {
 const denied = (error: unknown) => [401, 403, 404].includes((error as { response?: { status?: number } })?.response?.status ?? 0);
 
 export default function AgentTaskAttachments({ taskId, identity, credential = "", open = true, requestEpoch = 0 }: Props) {
+  useTr();
   const [rows, setRows] = useState<AgentTaskAttachment[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [enabled, setEnabled] = useState(false);
@@ -66,7 +68,7 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
       if (!live()) return;
       clear();
       if (denied(error)) setWithdrawn(true);
-      else setMessage("附件暂不可用。");
+      else setMessage(tr("Anhänge sind derzeit nicht verfügbar.", "Attachments are currently unavailable."));
     }).finally(() => controllers.current.delete(controller));
     return abortAll;
   // Every identity, task, credential, open-state, and epoch transition invalidates retained state.
@@ -88,7 +90,7 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
     } catch (error) {
       if (controller.signal.aborted || captured !== sessionRef.current) return;
       if (denied(error)) { clear(); setWithdrawn(true); }
-      else setMessage("上传失败，请稍后重试。");
+      else setMessage(tr("Hochladen fehlgeschlagen, bitte später erneut versuchen.", "Upload failed, please try again later."));
     } finally {
       controllers.current.delete(controller);
       if (!controller.signal.aborted && captured === sessionRef.current) setPending(false);
@@ -105,7 +107,7 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
     } catch (error) {
       if (controller.signal.aborted || captured !== sessionRef.current) return;
       if (denied(error)) { clear(); setWithdrawn(true); }
-      else setMessage("删除失败，请稍后重试。");
+      else setMessage(tr("Löschen fehlgeschlagen, bitte später erneut versuchen.", "Delete failed, please try again later."));
     } finally {
       controllers.current.delete(controller);
     }
@@ -129,24 +131,24 @@ export default function AgentTaskAttachments({ taskId, identity, credential = ""
     } catch (error) {
       if (controller.signal.aborted || captured !== sessionRef.current) return;
       if (denied(error)) { clear(); setWithdrawn(true); }
-      else setMessage("下载失败，请稍后重试。");
+      else setMessage(tr("Herunterladen fehlgeschlagen, bitte später erneut versuchen.", "Download failed, please try again later."));
     } finally {
       controllers.current.delete(controller);
     }
   }
 
   if (!open || !taskId || withdrawn) return null;
-  return <section aria-label="任务私有附件">
-    <h3>任务私有附件</h3>
-    <p>附件仅用于当前任务；完成病毒扫描前不可用，且不会发送给插件或模型。</p>
+  return <section aria-label={tr("Private Anhänge der Aufgabe", "Private task attachments")}>
+    <h3>{tr("Private Anhänge der Aufgabe", "Private task attachments")}</h3>
+    <p>{tr("Anhänge gelten nur für diese Aufgabe; sie sind erst nach dem Virenscan verfügbar und werden nicht an Plugins oder Modelle gesendet.", "Attachments are for this task only; they are unavailable until virus-scanned and are never sent to plugins or models.")}</p>
     {!enabled && !message && <Spin size="small" />}
-    <label>选择附件<input type="file" ref={inputRef} disabled={!enabled || pending} onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
-    <Button disabled={!enabled || !file || pending} onClick={() => void upload()}>上传附件</Button>
+    <label>{tr("Anhang wählen", "Choose attachment")}<input type="file" ref={inputRef} disabled={!enabled || pending} onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>
+    <Button disabled={!enabled || !file || pending} onClick={() => void upload()}>{tr("Anhang hochladen", "Upload attachment")}</Button>
     {file && <p>{file.name}</p>}
     <ul>{rows.map(item => <li key={item.attachment_id}>
-      <span>{item.display_name ?? "未命名附件"} · {item.status}</span>
-      <Button aria-label="下载" disabled={item.status !== "available"} onClick={() => void download(item)}>下载</Button>
-      <Button aria-label="删除" disabled={pending} onClick={() => void remove(item.attachment_id)}>删除</Button>
+      <span>{item.display_name ?? tr("Unbenannter Anhang", "Unnamed attachment")} · {item.status}</span>
+      <Button aria-label={tr("Herunterladen", "Download")} disabled={item.status !== "available"} onClick={() => void download(item)}>{tr("Herunterladen", "Download")}</Button>
+      <Button aria-label={tr("Löschen", "Delete")} disabled={pending} onClick={() => void remove(item.attachment_id)}>{tr("Löschen", "Delete")}</Button>
     </li>)}</ul>
     <p role="status" aria-live="polite">{message}</p>
   </section>;

@@ -1,0 +1,816 @@
+{
+  "wizard": {
+    "title": "DFMEA-Erstellungsassistent",
+    "steps": [
+      "5T-Umfang (Schritt 1)",
+      "Strukturanalyse (Schritt 2)",
+      "Funktionsanalyse (Schritt 3)",
+      "Fehleranalyse (Schritt 4)",
+      "Risikoanalyse (Schritt 5)",
+      "Optimierung (Schritt 6)",
+      "Erstellung bestätigen (Schritt 7)"
+    ],
+    "scope": {
+      "title": "Festlegung des 5T-Umfangs",
+      "description": "Bitte die 5T-Angaben für die DFMEA-Analyse ausfüllen.",
+      "team": "Team",
+      "timeframe": "Zeitrahmen",
+      "tool": "Werkzeug",
+      "task": "Aufgabe",
+      "trend": "Trend",
+      "legacyTimeframe": "Alter Wert: {{value}} (zum Aktualisieren neu wählen)",
+      "toolPresets": [
+        "Grenzdiagramm (Boundary Diagram)",
+        "Parameterdiagramm (P-Diagramm)",
+        "Schnittstellenmatrix",
+        "Funktionsanalyse",
+        "Fehlerbaumanalyse (FTA)",
+        "DFMEA-Vorlage",
+        "Lessons-Learned-Bibliothek"
+      ],
+      "trendPresets": [
+        "Historische FMEA",
+        "Feld-/Gewährleistungsdaten",
+        "Kundenreklamationen",
+        "CAPA-Datensätze",
+        "Rückruf-/Behördendaten",
+        "Auditfeststellungen",
+        "Konstruktionsänderungshistorie"
+      ],
+      "aiRecommend": "✨ KI-Empfehlung",
+      "aiRecommendLoading": "Empfehlung wird erstellt …",
+      "aiRecommendEmpty": "Keine KI-Vorschläge",
+      "aiRecommendFailed": "KI-Empfehlung fehlgeschlagen, bitte erneut versuchen",
+      "toolStructureMap": {
+        "Grenzdiagramm (Boundary Diagram)": "Interface",
+        "Schnittstellenmatrix": "Interface",
+        "Parameterdiagramm (P-Diagramm)": "DesignParameter",
+        "Boundary Diagram": "Interface",
+        "Interface Matrix": "Interface",
+        "Parameter Diagram (P-Diagram)": "DesignParameter"
+      },
+      "toolGuide": {
+        "Interface": "Sie haben [{{tool}}] gewählt. Legen Sie ggf. Schnittstellenknoten für Komponenten an, um physische/Signal-/Energieschnittstellen zu erfassen.",
+        "DesignParameter": "Sie haben [{{tool}}] gewählt. Legen Sie ggf. Konstruktionsparameter-Knoten an, um ideale/nicht ideale Reaktionen und Steuergrößen festzulegen."
+      },
+      "toolGuideNeedStructure": "Bitte zuerst ein System/eine Komponente im Strukturbaum anlegen und dann Schnittstellen-/Parameterknoten hinzufügen.",
+      "addInterfaceNode": "+ Schnittstellenknoten hinzufügen",
+      "addDesignParameterNode": "+ Parameterknoten hinzufügen"
+    },
+    "structure": {
+      "title": "Strukturanalyse",
+      "description": "Hierarchie System → Teilsystem → Komponente → Konstruktionsparameter aufbauen oder Schnittstellenknoten hinzufügen, um verschiedene Zweige zu verbinden.",
+      "addSystem": "System hinzufügen",
+      "addInterface": "Schnittstelle hinzufügen",
+      "addChild": "+ {{type}}",
+      "delete": "Löschen",
+      "empty": "Auf die Schaltfläche oben klicken, um einen Systemknoten hinzuzufügen",
+      "newSystem": "Neues System",
+      "newInterface": "Neue Schnittstelle"
+    },
+    "typeLabels": {
+      "System": "System",
+      "Subsystem": "Teilsystem",
+      "Component": "Komponente",
+      "DesignParameter": "Konstruktionsparameter",
+      "Interface": "Schnittstelle"
+    },
+    "function": {
+      "title": "Funktionsanalyse",
+      "description": "Für jede Komponente Funktion, technische Anforderung und Spezifikationsparameter festlegen.",
+      "functionDesc": "Funktionsbeschreibung",
+      "requirement": "Technische Anforderung",
+      "specification": "Spezifikationsparameter"
+    },
+    "failure": {
+      "title": "Fehleranalyse",
+      "description": "Für jede Funktion Fehlerart, Fehlerfolge und Fehlerursache festlegen. Das System schlägt anhand der Funktionsbeschreibung automatisch Fehlerarten vor.",
+      "recommended": "Empfohlen",
+      "autoRecommend": "Automatische Empfehlung anhand der Funktion:",
+      "failureMode": "Fehlerart",
+      "failureEffect": "Fehlerfolge",
+      "failureCause": "Fehlerursache",
+      "addFailureMode": "+ Fehlerart hinzufügen",
+      "addFunction": "+ Funktion hinzufügen",
+      "delete": "Löschen",
+      "newFailureMode": "Neue Fehlerart",
+      "preventionControl": "Vermeidungsmaßnahme",
+      "detectionControl": "Entdeckungsmaßnahme"
+    },
+    "risk": {
+      "title": "Risikoanalyse",
+      "description": "Bedeutung (B), Auftreten (A) und Entdeckung (E) für jede Fehlerkette bewerten.",
+      "s": "B",
+      "o": "A",
+      "d": "E",
+      "rpn": "RPZ",
+      "ap": "AP",
+      "mustOptimize": "Optimierung erforderlich",
+      "empty": "Noch keine Fehlerketten – bitte zuerst im Schritt Fehleranalyse anlegen",
+      "missingControlHint": "Bei einigen Fehlerketten fehlen Vermeidungs-/Entdeckungsmaßnahmen – bitte zuerst im Schritt Fehleranalyse ausfüllen.",
+      "controlsFirst": "Zuerst Maßnahmen ausfüllen"
+    },
+    "optimization": {
+      "title": "Optimierungsmaßnahmen",
+      "noOptimization": "Keine Pflichtoptimierung",
+      "noOptimizationHint": "Alle Fehlerarten haben eine AP ungleich H; das aktuelle Risiko ist akzeptabel.",
+      "mustOptimize": "Die folgenden {{count}} Einträge haben AP=H und erfordern Optimierungsmaßnahmen:",
+      "apBadge": "AP H",
+      "measure": "Optimierungsmaßnahme",
+      "measurePlaceholder": "Vorgeschlagene Optimierung der Vermeidung / Entdeckung",
+      "responsible": "Verantwortlich",
+      "responsiblePlaceholder": "Verantwortliche Person",
+      "dueDate": "Geplanter Abschlusstermin",
+      "status": "Status",
+      "actionTaken": "Ergriffene Maßnahme mit Nachweis",
+      "actionTakenPlaceholder": "Ergriffene Maßnahme und Nachweis",
+      "completionDate": "Abschlussdatum",
+      "revisedRatings": "Überarbeitete B / A / E",
+      "revisedAp": "AP nach Maßnahme",
+      "statusOptions": {
+        "open": "Offen",
+        "in_progress": "In Bearbeitung",
+        "completed": "Abgeschlossen",
+        "not_executed": "Nicht umgesetzt"
+      },
+      "preventionPlaceholder": "Vermeidungsmaßnahme",
+      "detectionPlaceholder": "Entdeckungsmaßnahme"
+    },
+    "confirm": {
+      "title": "Erstellung bestätigen",
+      "structureNodes": "Strukturknoten: {{count}}",
+      "functionNodes": "Funktionsknoten: {{count}}",
+      "failureChains": "Fehlerketten: {{count}}",
+      "totalNodes": "Knoten gesamt: {{count}}",
+      "totalEdges": "Kanten gesamt: {{count}}",
+      "description": "Nach der Bestätigung wird ein DFMEA-Dokument angelegt und der Editor geöffnet. Dort können Sie die Details weiter verfeinern."
+    },
+    "buttons": {
+      "cancel": "Abbrechen",
+      "prev": "Zurück",
+      "next": "Weiter",
+      "finish": "Fertigstellen"
+    },
+    "page": {
+      "title": "DFMEA-Erstellungsassistent",
+      "backToList": "Zurück zur Liste",
+      "saveDraft": "Entwurf speichern",
+      "saveSaving": "Wird gespeichert ...",
+      "saveSaved": "Gespeichert ✓",
+      "saveError": "Speichern fehlgeschlagen",
+      "nextStep": "Nächster Schritt",
+      "prevStep": "Vorheriger Schritt",
+      "finish": "Fertigstellen",
+      "completionWarning": "Folgende Schritte sind unvollständig und können nicht abgeschickt werden:",
+      "step3Incomplete": "Funktionsanalyse – für einige Komponenten sind keine Funktionen festgelegt",
+      "step4Incomplete": "Fehleranalyse – für einige Funktionen sind keine Fehlerarten festgelegt",
+      "step5Incomplete": "Risikoanalyse – bei einigen Fehlerketten fehlen B/A/E-Bewertungen",
+      "step5IncompleteMissingCause": "Risikoanalyse – bei einigen Fehlerketten ist keine Fehlerursache festgelegt (vor der Bewertung eine Ursache hinzufügen)",
+      "confirmEmptyDraftTitle": "Entwurf verwerfen?",
+      "confirmEmptyDraft": "Der aktuelle Entwurf ist leer und wird nach Bestätigung gelöscht.",
+      "confirmEmptyDraftOk": "Verwerfen und löschen",
+      "confirmEmptyDraftCancel": "Weiter bearbeiten",
+      "finishFailed": "Fertigstellen fehlgeschlagen. Bitte erneut versuchen.",
+      "loadFailed": "DFMEA-Daten konnten nicht geladen werden",
+      "conflictTitle": "Dokument geändert",
+      "conflictContent": "Diese FMEA wurde in einer anderen Sitzung geändert. Vor dem Bearbeiten ist ein Neuladen erforderlich. Ihre nicht gespeicherten lokalen Änderungen werden verworfen.",
+      "conflictReload": "Neu laden",
+      "structureGap": "Sie haben [{{tool}}] gewählt, es existiert aber kein zugehöriger {{nodeType}}-Knoten. Fügen Sie ggf. einen hinzu, um diese Analysemethode abzubilden.",
+      "confirmLeaveTitle": "Assistent verlassen?",
+      "confirmLeave": "Es gibt ungespeicherte Änderungen. Wirklich verlassen?",
+      "confirmLeaveOk": "Verlassen"
+    },
+    "guidance": {
+      "step0": {
+        "title": "Schritt 1: Festlegung des 5T-Umfangs",
+        "purpose": "Grenzen, Team und Schwerpunkt der DFMEA-Analyse festlegen, damit die Folgeschritte fokussiert bleiben.",
+        "points": "Die 5T sind inTent (Absicht), Timing (Termin), Team, Task (Aufgabe) und Tool (Werkzeug); dieser Schritt grenzt den Analyseumfang entsprechend ab.",
+        "fields": [
+          {
+            "name": "Team",
+            "desc": "Funktionsübergreifendes Kernteam: Manager (Projektleiter, entscheidet über die Akzeptanz des Risikos), Design-/Prozessverantwortliche (technische Verantwortung), Moderator (koordiniert die 7 Schritte), Design-/System-/Komponentenentwickler, Testingenieur, Qualitäts-/Zuverlässigkeitsingenieur; erweitertes Team: Fachexperten, Fertigungs-/Instandhaltungs-/Funktionssicherheitsingenieure, Einkauf, Lieferanten, Kundenvertreter."
+          },
+          {
+            "name": "Termin",
+            "desc": "Start- und Enddatum der DFMEA. Starten, sobald das Designkonzept ausreichend verstanden ist; Analyse vor dem Design-Freeze abschließen; Verbesserungsmaßnahmen vor den Werkzeugmustern umsetzen. Parallel zur Prozess-FMEA mit offenem Informationsfluss durchführen."
+          },
+          {
+            "name": "Werkzeug",
+            "desc": "Eingesetzte Analysemethoden/-werkzeuge, z. B. Strukturbaum, Block-/Grenzdiagramm, Schnittstellenanalyse, Parameterdiagramm (P-Diagramm), Funktionsbaum/-netz; falls keine Basis existiert, eine neue Basis-DFMEA erstellen."
+          },
+          {
+            "name": "Aufgabe",
+            "desc": "Umfang und Gegenstand dieser Analyse. Zu klären: Was kauft der Kunde? Gibt es neue Anforderungen? Haben wir die Designverantwortung? Auf welcher Ebene (System/Teilsystem/Komponente) wird analysiert? Wer verantwortet das Schnittstellendesign? Handelt es sich um ein neues Design, eine neue Anwendung oder eine technische Änderung?"
+          },
+          {
+            "name": "Trend",
+            "desc": "Trends aus Feldausfällen, Kundenreklamationen, Gewährleistungsdaten und Lessons Learned früherer ähnlicher Produkte als Referenz und Eingabe für diese Analyse."
+          }
+        ],
+        "example": "Team: BMS-Entwicklung, Prozesstechnik; Termin: 2026 Q1–Q3; Werkzeug: Strukturbaum + Grenzdiagramm; Aufgabe: DFMEA DC-DC-Wandler; Trend: Reklamationsstatistik von 3 früheren ähnlichen Produkten"
+      },
+      "step1": {
+        "title": "Schritt 2: Strukturanalyse",
+        "purpose": "Das Design für die technische Risikoanalyse in Systeme, Teilsysteme, Komponenten und Teile identifizieren und zerlegen.",
+        "points": "Gliederung nach übergeordnetem Element – Fokuselement – untergeordnetem Element oder Merkmal; jedes hier fehlende Element fehlt auch in der Funktionsanalyse.",
+        "fields": [
+          {
+            "name": "Ebenen des Strukturbaums",
+            "desc": "Das Design in System → Teilsystem → Komponente/Teil zerlegen, gegliedert nach übergeordnetem Element – Fokuselement – untergeordnetem Element oder Merkmalstyp, für die technische Risikoanalyse."
+          },
+          {
+            "name": "Hierarchietiefe",
+            "desc": "In der Regel höchstens 4 Ebenen; komplexe Strukturen können in Teilstrukturen (Arbeitspakete) aufgeteilt werden. Nur vom Team entwickelte oder verantwortete Teile liegen innerhalb der Grenze; Teile außerhalb können gekennzeichnet werden."
+          },
+          {
+            "name": "Schnittstellenknoten",
+            "desc": "Bildet zweigübergreifende Wechselwirkungen ab. Fünf Schnittstellenarten: physische Verbindung, Stoffaustausch, Energieübertragung, Datenübertragung, Mensch-Maschine; liefert Haupt-/Schnittstellenfunktionen als Eingabe für die Funktionsanalyse."
+          },
+          {
+            "name": "Konstruktionsparameter",
+            "desc": "Untergeordnete Merkmalstypen, z. B. geometrische Abmessungen, Werkstoff, Oberflächenbehandlung – quantifizierbare Eigenschaften."
+          },
+          {
+            "name": "Benennung",
+            "desc": "Mit Fachbegriffen benennen; jede Komponente sollte eine eigenständig analysierbare physische Einheit sein."
+          }
+        ],
+        "example": "System: BMS → Teilsystem: BMU / Lademanagement → Komponente: LTC6811; Schnittstelle: BMU↔Lademanagement (Datenübertragung)"
+      },
+      "step2": {
+        "title": "Schritt 3: Funktionsanalyse",
+        "purpose": "Sicherstellen, dass die durch Anforderungen/Spezifikationen festgelegten Funktionen den Systemelementen korrekt zugeordnet sind – als Grundlage für die Fehleranalyse.",
+        "points": "Funktionen als Substantiv + Verb im Infinitiv beschreiben (messbar); Grundfunktion, detaillierte Anforderung und Konstruktionsrandbedingung unterscheiden.",
+        "fields": [
+          {
+            "name": "Funktionsbeschreibung",
+            "desc": "Messbares Substantiv + Tätigkeitsverb im Infinitiv (liefern, aufnehmen, steuern, übertragen, erfassen). Z. B. Leistung übertragen, Zellspannung erfassen. Ein Element kann mehrere Funktionen haben (Haupt- sowie Schnittstellen-/Diagnose-/Servicefunktionen)."
+          },
+          {
+            "name": "Anforderung",
+            "desc": "Was zur Realisierung der Funktion nötig ist, bezogen auf die Funktionsleistung. Quellen: gesetzliche Anforderungen, Branchenstandards (ISO 9001/IATF 16949/ISO 26262), Kundenanforderungen (explizit + implizit), interne Anforderungen, Produktmerkmale. Grundfunktion, detaillierte Anforderung und Konstruktionsrandbedingung unterscheiden."
+          },
+          {
+            "name": "Spezifikation",
+            "desc": "Quantifizierbares Produktmerkmal mit Toleranz. Z. B. Wellendurchmesser, Oberflächengüte, Genauigkeit ±2 mV, Abtastrate ≥10 Hz."
+          }
+        ],
+        "example": "Komponente LTC6811 → Funktion: Zellspannung erfassen → Anforderung: Jede Zellspannung genau erfassen → Spezifikation: Genauigkeit ±2 mV, Abtastrate ≥10 Hz"
+      },
+      "step3": {
+        "title": "Schritt 4: Fehleranalyse",
+        "purpose": "Fehlerursachen, -arten und -folgen identifizieren und ihre Zusammenhänge darstellen, um die Risikobewertung zu ermöglichen.",
+        "points": "Fehlerkette FF←FA←FU: Fehlerfolge (auf nächste Ebene/Endnutzer/Gesetzgebung), Fehlerart (Gegenteil der Funktion), Fehlerursache (auf handhabbarer Ebene).",
+        "fields": [
+          {
+            "name": "Fehlerart (FA)",
+            "desc": "Weise, in der die Funktion nicht erfüllt werden kann, abgeleitet aus der Funktion und fachlich beschrieben. Arten: Funktionsverlust, Funktionsminderung, sporadische Funktion, teilweiser Funktionsverlust, ungewollte Funktion, Funktion außerhalb des Bereichs, verzögerte Funktion."
+          },
+          {
+            "name": "Fehlerfolge (FF)",
+            "desc": "Konsequenz der Fehlerart: Auswirkung auf das übergeordnete Produkt, den Endnutzer und gesetzliche Vorgaben; was der Nutzer bemerken oder erleben kann, einschließlich Sicherheit. Eine FA kann mehrere Folgen haben."
+          },
+          {
+            "name": "Fehlerursache (FU)",
+            "desc": "Warum die Fehlerart auftritt. Quellen: ungeeignete Auslegung der Funktionsleistung, Systemwechselwirkungen, zeitabhängige Veränderungen (Ermüdung/Verschleiß/Korrosion), äußere Umgebung, Fehlgebrauch, Bauteilstreuung, Softwareprobleme. Kurz und vollständig beschreiben, damit gezielte Maßnahmen möglich sind."
+          },
+          {
+            "name": "Aufbau der Kette",
+            "desc": "Nach FF←FA←FU gliedern, d. h. übergeordnete Folge – Fehlerart des Fokuselements – untergeordnete Fehlerursache; die drei Elemente müssen vollständig verknüpft sein."
+          }
+        ],
+        "example": "Funktion Zellspannung erfassen → Fehlerart: Erfassungsgenauigkeit unzureichend → Folge: Fehlerhafte Steuerentscheidung → Ursache: Sensoralterung / Kalibrierdrift"
+      },
+      "step4": {
+        "title": "Schritt 5: Risikoanalyse",
+        "purpose": "Risiko durch Bewertung von Bedeutung, Auftreten und Entdeckung abschätzen und die zu ergreifenden Maßnahmen priorisieren.",
+        "points": "B/A/E im Bereich 1–10 (10 = höchster Risikobeitrag); B bewertet die FF, A die Häufigkeit der FU (auf Basis der Vermeidungsmaßnahme), E die Wirksamkeit der Entdeckungsmaßnahme; die AP berechnet das System automatisch nach B→A→E.",
+        "fields": [
+          {
+            "name": "Vermeidungsmaßnahme (VM)",
+            "desc": "Bestehende/geplante Maßnahmen, die die möglichen Ursachen der FA abschwächen; Grundlage für die Bewertung des Auftretens A, bezogen auf Leistungsanforderungen. Klar und vollständig mit konkreten Tests/Verfahren angeben. Beispiele: Simulation (FEM/CFD), Designreview, Risikoanalyse, Lessons Learned, Handmuster."
+          },
+          {
+            "name": "Entdeckungsmaßnahme (EM)",
+            "desc": "Tatsächliche (geplante/durchgeführte) Aktivitäten, die das Vorliegen von FU oder FA vor der Serienfreigabe erkennen; Grundlage für die Bewertung der Entdeckung E. Konkreten Test/Plan/Ablauf angeben. Beispiele: Funktionsprüfung, Berstprüfung, Umweltprüfung, Dauerlauf, Poka-Yoke."
+          },
+          {
+            "name": "Bedeutung (B)",
+            "desc": "Schwere der Fehlerfolge, 1–10 (10 = am höchsten). 10 = gefährdet Fahrzeug-/Personensicherheit, 9 = Verstoß gegen Vorschriften, 8 = Verlust der Grundfunktion, 6 = Verlust einer Komfortfunktion, 1 = keine erkennbare Auswirkung. Bewertet nur die FF, nicht A/E."
+          },
+          {
+            "name": "Auftreten (A)",
+            "desc": "Häufigkeit der Fehlerursache, 1–10, auf Basis der Wirksamkeit der Vermeidung. 10 = neue Technologie ohne Erfahrung und ohne Vermeidungsmaßnahme, 5 = bewährte Technologie mit Detailänderungen, 1 = Vermeidungsmaßnahme schließt die Ursache aus. Expertenwissen zu ähnlichen Produkten, Gewährleistungsdatenbank und Lessons Learned heranziehen."
+          },
+          {
+            "name": "Entdeckung (E)",
+            "desc": "Entdeckbarkeit einer aufgetretenen FU/FA, 1–10, auf Basis der wirksamsten Entdeckungsmaßnahme. 10 = kein Prüfverfahren, 5 = Alterungsprüfung, 1 = Verfahren entdeckt immer. Entdeckungsfähigkeit, Zeitpunkt, Stichprobenanzahl und Bewährtheit des Prüfverfahrens berücksichtigen."
+          },
+          {
+            "name": "Aufgabenpriorität (AP)",
+            "desc": "Vom System automatisch nach der Logik B→A→E als H/M/N berechnet. H = Maßnahme zwingend, M = Maßnahme sollte, N = Maßnahme kann. B=9–10 mit AP=H/M sollte vom Management geprüft werden."
+          }
+        ],
+        "example": "B=8 (Verlust der Grundfunktion) + A=4 (bewährte Technologie, Detailänderung) + E=3 (Ausfallprüfung) → AP=H (Optimierung erforderlich)"
+      },
+      "step5": {
+        "title": "Schritt 6: Optimierungsmaßnahmen",
+        "purpose": "Vermeidungs- und Entdeckungsmaßnahmen für Fehlerketten mit weiterem Risikominderungsbedarf entwickeln und Verantwortliche festlegen.",
+        "points": "Reihenfolge der Optimierung: ① Design ändern, um FF zu beseitigen/zu mindern (B senken) ② Häufigkeit der FU senken (A senken) ③ Entdeckung verbessern (E senken); jede Maßnahme braucht einen Verantwortlichen und einen Zieltermin.",
+        "fields": [
+          {
+            "name": "Vermeidungsmaßnahme",
+            "desc": "Vermeidung verbessern, um das Auftreten A zu senken. Wege: Design ändern, technische Spezifikationen verbessern, Poka-Yoke konstruieren. Zielt auf die Fehlerursache FU."
+          },
+          {
+            "name": "Entdeckungsmaßnahme",
+            "desc": "Designverifizierung ergänzen oder ändern, um die Entdeckung E zu verbessern. Wege: Designänderung zur besseren Entdeckbarkeit, Prüfplan überarbeiten. Zielt auf FU oder FA."
+          },
+          {
+            "name": "Bedeutung (B) senken",
+            "desc": "In der Regel nur durch eine Designänderung erreichbar, die die Fehlerfolge FF beseitigt oder mindert – die höchstpriorisierte Optimierungsrichtung."
+          },
+          {
+            "name": "Verantwortlicher und Termin",
+            "desc": "Jede Maßnahme braucht einen Verantwortlichen (hält den Status aktuell und ist für die Umsetzung verantwortlich) und einen realistischen Zieltermin (gemäß Entwicklungsplan, vor Prozessvalidierung / Serienstart)."
+          },
+          {
+            "name": "Maßnahmenstatus",
+            "desc": "Noch nicht festgelegt / noch nicht entschieden / noch nicht umgesetzt / abgeschlossen / nicht umgesetzt. Nach Abschluss A und E neu bewerten und AP aktualisieren."
+          },
+          {
+            "name": "Neubewertung",
+            "desc": "Bei jeder Designänderung müssen alle betroffenen Elemente neu bewertet werden; bei einer Konzeptänderung müssen alle FMEA-Schritte für die betroffenen Teile überprüft werden."
+          }
+        ],
+        "example": "Vermeidung: redundante Sensoranordnung → A von 4 auf 2; Entdeckung: Online-Echtzeitüberwachung + Selbstdiagnose → E von 3 auf 2; Verantwortlich: Testingenieur; Ziel: vor den Werkzeugmustern"
+      },
+      "step6": {
+        "title": "Schritt 7: Erstellung bestätigen",
+        "purpose": "Vollständigkeit der Daten aller Schritte prüfen und anschließend bestätigen, um im Editor weiterzuarbeiten.",
+        "points": "Struktur, Funktionen, Fehlerketten, B/A/E und Abschluss der Maßnahmen einzeln prüfen.",
+        "fields": [
+          {
+            "name": "Vollständigkeit der Struktur",
+            "desc": "Deckt der Strukturbaum alle Systemelemente mit sinnvollen Ebenen und identifizierten Schnittstellen ab?"
+          },
+          {
+            "name": "Abdeckung der Funktionen",
+            "desc": "Haben alle Komponenten festgelegte Funktionen, Anforderungen und Spezifikationen?"
+          },
+          {
+            "name": "Vollständigkeit der Fehlerketten",
+            "desc": "Hat jede Funktion eine Fehlerart mit vollständiger FF/FA/FU-Kette?"
+          },
+          {
+            "name": "B/A/E-Bewertungen",
+            "desc": "Sind B/A/E für jede Fehlerkette bewertet und Vermeidungs- sowie Entdeckungsmaßnahmen zugeordnet?"
+          },
+          {
+            "name": "Abschluss der Maßnahmen",
+            "desc": "Haben Einträge mit AP=H/M Maßnahmen, Verantwortliche, Zieltermine und Status?"
+          }
+        ],
+        "example": "Nach der Bestätigung wird ein DFMEA-Dokument angelegt und der Editor zur weiteren Überarbeitung geöffnet"
+      },
+      "labelPurpose": "Zweck",
+      "labelPoints": "Kernpunkte",
+      "labelFields": "Ausfüllhinweise",
+      "labelExample": "Beispiel",
+      "expand": "Aufklappen",
+      "collapse": "Zuklappen"
+    },
+    "sidebar": {
+      "structureTree": "Strukturbaum",
+      "structureHint": "Der Strukturbaum erscheint nach Schritt 2",
+      "noStructure": "Noch keine Strukturknoten",
+      "steps": "Schritte"
+    }
+  },
+  "inlineRecommendations": {
+    "title": "Intelligente Empfehlungen",
+    "types": {
+      "failureModeSuggestion": "Vorschlag Fehlerart",
+      "failureEffectSuggestion": "Vorschlag Fehlerfolge",
+      "failureCauseSuggestion": "Vorschlag Fehlerursache",
+      "apAnalysis": "AP-Analyse",
+      "preventionSuggestion": "Vorschlag Vermeidungsmaßnahme",
+      "detectionSuggestion": "Vorschlag Entdeckungsmaßnahme"
+    },
+    "apply": "Übernehmen"
+  },
+  "smartSuggestion": {
+    "global": "Globale Erfahrung",
+    "currentProductType": "Gleicher Produkttyp",
+    "currentProductLine": "Nur aktuelle Produktlinie",
+    "noGlobalPermission": "(Keine globale Berechtigung, nur aktuelle Produktlinie)",
+    "actualScope": "Tatsächlicher Bereich: {{scope}}",
+    "scopeGlobal": "Global",
+    "scopeProductType": "Gleicher Produkttyp",
+    "scopeLocal": "Nur aktuelle Produktlinie",
+    "ruleEngine": "Regel-Engine",
+    "aiGenerated": "KI-generiert",
+    "from": "Aus",
+    "similarity": "Ähnlichkeit {{score}} %",
+    "confidence": {
+      "high": "Hoch",
+      "medium": "Mittel",
+      "low": "Niedrig"
+    },
+    "tooFrequent": "Zu viele Anfragen, bitte später erneut versuchen",
+    "noPermission": "Keine Berechtigung für Empfehlungen",
+    "serviceUnavailable": "Empfehlungsdienst nicht verfügbar",
+    "aiUnavailable": "KI-Vorschläge nicht verfügbar, Regel-Engine als Ersatz verwendet",
+    "ruleOnlyMode": "Nur Regel-Engine",
+    "close": "Schließen"
+  },
+  "structureTree": {
+    "addSystem": "System hinzufügen",
+    "typeLabels": {
+      "System": "System",
+      "Subsystem": "Teilsystem",
+      "Component": "Komponente"
+    },
+    "empty": "Keine Strukturknoten",
+    "editNode": "Knoten bearbeiten",
+    "addNode": "Knoten hinzufügen",
+    "type": "Typ",
+    "name": "Name",
+    "description": "Beschreibung",
+    "namePlaceholder": "z. B. BMS / BMU / LTC6811",
+    "descriptionPlaceholder": "Optionale Beschreibung"
+  },
+  "parameterDiagram": {
+    "selectNode": "Bitte links im Strukturbaum einen Komponentenknoten wählen",
+    "title": "P-Diagramm: {{name}}",
+    "sections": {
+      "inputs": "Eingangssignale",
+      "outputs": "Ausgangsreaktionen",
+      "controls": "Steuergrößen",
+      "noise_factors": "Störgrößen"
+    },
+    "noItems": "Keine Einträge",
+    "add": "Hinzufügen"
+  },
+  "rules": {
+    "optimizationHint": {
+      "H": "Hohe Priorität: Es müssen Optimierungsmaßnahmen ergriffen werden, um Bedeutung (B) oder Auftreten (A) zu senken bzw. die Entdeckung (E) zu verbessern. Designänderungen oder Redundanz werden empfohlen.",
+      "M": "Mittlere Priorität: Optimierungsmaßnahmen werden empfohlen, mit Schwerpunkt auf besserer Entdeckung oder geringerem Auftreten.",
+      "L": "Niedrige Priorität: Das aktuelle Risiko ist akzeptabel; bestehende Maßnahmen beibehalten und weiter beobachten."
+    },
+    "defaultEffects": [
+      "Funktionsminderung",
+      "Leistungsabfall des Systems"
+    ],
+    "defaultCauses": [
+      "Bauteilalterung",
+      "Umgebungseinflüsse",
+      "Fertigungsfehler"
+    ],
+    "fallbackPatterns": [
+      "{{functionDesc}} fällt aus",
+      "{{functionDesc}} nicht möglich",
+      "{{functionDesc}} ungenau",
+      "{{functionDesc}} verzögert"
+    ],
+    "measureBases": {
+      "H": {
+        "prevention": [
+          "Redundantes Design (zweikanalig / Reserve)",
+          "Zuverlässigere Bauteile wählen",
+          "Derating-Auslegung",
+          "Fail-Safe-Design"
+        ],
+        "detection": [
+          "Online-Echtzeitüberwachung",
+          "Selbstdiagnosefunktion",
+          "100 % Funktionsprüfung bei Auslieferung"
+        ]
+      },
+      "M": {
+        "prevention": [
+          "Konstruktionsparameter optimieren",
+          "Poka-Yoke-Struktur ergänzen",
+          "Bewährten Prozess wählen"
+        ],
+        "detection": [
+          "Periodische Funktionsprüfung",
+          "Prozessbegleitende Kontrolle",
+          "Wareneingangsprüfung"
+        ]
+      },
+      "L": {
+        "prevention": [
+          "Standardisiertes Design",
+          "Material qualifizierter Lieferanten verwenden"
+        ],
+        "detection": [
+          "Routineprüfung",
+          "Nachverfolgung von Kundenrückmeldungen"
+        ]
+      }
+    },
+    "modeRegex": {
+      "acquisition": "[Ee]rfass|[Ee]rkenn|[Üü]berwach|[Mm]ess",
+      "sealing": "[Dd]icht|[Uu]ndicht|[Ll]eck|[Aa]bschließ",
+      "connection": "[Vv]erbind|[Ff]üg|[Bb]efestig|[Kk]ontakt"
+    },
+    "modeSpecific": {
+      "acquisition": {
+        "prevention": [
+          "Redundante Sensoranordnung",
+          "Signalfilterung auslegen"
+        ],
+        "detection": [
+          "Plausibilisierung des Sensorsignals",
+          "Kalibrierintervall verkürzen"
+        ]
+      },
+      "sealing": {
+        "prevention": [
+          "Doppelte Dichtungsstruktur",
+          "Dichtungsnut optimieren"
+        ],
+        "detection": [
+          "Dichtheitsprüfung",
+          "Leckageüberwachung"
+        ]
+      },
+      "connection": {
+        "prevention": [
+          "Losdrehsichere Konstruktion",
+          "Vergoldung/Versilberung"
+        ],
+        "detection": [
+          "Prüfung des Übergangswiderstands",
+          "Vibrationsprüfung"
+        ]
+      }
+    },
+    "verbPatterns": [
+      {
+        "verb": "erfass",
+        "patterns": [
+          "Erfassung nicht möglich",
+          "Erfassung fällt aus",
+          "Erfassungsgenauigkeit unzureichend",
+          "Erfassung verzögert"
+        ]
+      },
+      {
+        "verb": "sammel",
+        "patterns": [
+          "Sammeln nicht möglich",
+          "Sammeln fällt aus",
+          "Sammeln unvollständig",
+          "Sammeln verzögert"
+        ]
+      },
+      {
+        "verb": "übertrag",
+        "patterns": [
+          "Übertragung nicht möglich",
+          "Übertragung fällt aus",
+          "Übertragung verfälscht",
+          "Übertragung verzögert"
+        ]
+      },
+      {
+        "verb": "send",
+        "patterns": [
+          "Senden nicht möglich",
+          "Senden fällt aus",
+          "Senden verfälscht",
+          "Senden verzögert"
+        ]
+      },
+      {
+        "verb": "steuer",
+        "patterns": [
+          "Steuerung nicht möglich",
+          "Steuerung fällt aus",
+          "Steuergenauigkeit unzureichend",
+          "Steuerung reagiert zu langsam"
+        ]
+      },
+      {
+        "verb": "regel",
+        "patterns": [
+          "Regelung nicht möglich",
+          "Regelung fällt aus",
+          "Regelgenauigkeit unzureichend",
+          "Regelung reagiert zu langsam"
+        ]
+      },
+      {
+        "verb": "erkenn",
+        "patterns": [
+          "Erkennung nicht möglich",
+          "Erkennung fällt aus",
+          "Erkennungsgenauigkeit unzureichend",
+          "Fehlerkennung"
+        ]
+      },
+      {
+        "verb": "überwach",
+        "patterns": [
+          "Überwachung nicht möglich",
+          "Überwachung fällt aus",
+          "Überwachungsgenauigkeit unzureichend",
+          "Fehlalarm der Überwachung"
+        ]
+      },
+      {
+        "verb": "mess",
+        "patterns": [
+          "Messung nicht möglich",
+          "Messung fällt aus",
+          "Messgenauigkeit unzureichend",
+          "Fehlmessung"
+        ]
+      },
+      {
+        "verb": "schütz",
+        "patterns": [
+          "Schutz fällt aus",
+          "Schutz nicht möglich",
+          "Schutz unzureichend",
+          "Fehlauslösung des Schutzes"
+        ]
+      },
+      {
+        "verb": "isolier",
+        "patterns": [
+          "Isolation fällt aus",
+          "Isolation nicht möglich",
+          "Isolation unzureichend",
+          "Isolationsfehler"
+        ]
+      },
+      {
+        "verb": "anzeig",
+        "patterns": [
+          "Anzeige nicht möglich",
+          "Anzeige fällt aus",
+          "Anzeige fehlerhaft",
+          "Anzeige verzögert"
+        ]
+      },
+      {
+        "verb": "rückmeld",
+        "patterns": [
+          "Rückmeldung nicht möglich",
+          "Rückmeldung fällt aus",
+          "Rückmeldung fehlerhaft",
+          "Rückmeldung verzögert"
+        ]
+      },
+      {
+        "verb": "speicher",
+        "patterns": [
+          "Speichern nicht möglich",
+          "Speicher fällt aus",
+          "Datenverlust",
+          "Speicherkapazität unzureichend"
+        ]
+      },
+      {
+        "verb": "protokollier",
+        "patterns": [
+          "Protokollierung nicht möglich",
+          "Protokollierung fällt aus",
+          "Protokolldaten verloren",
+          "Protokollkapazität unzureichend"
+        ]
+      },
+      {
+        "verb": "versorg",
+        "patterns": [
+          "Versorgung nicht möglich",
+          "Versorgung fällt aus",
+          "Versorgung unzureichend",
+          "Versorgung instabil"
+        ]
+      },
+      {
+        "verb": "antreib",
+        "patterns": [
+          "Antrieb nicht möglich",
+          "Antrieb fällt aus",
+          "Antriebskraft unzureichend",
+          "Antrieb instabil"
+        ]
+      },
+      {
+        "verb": "verbind",
+        "patterns": [
+          "Verbindung fällt aus",
+          "Verbindung nicht möglich",
+          "Verbindung locker",
+          "Schlechter Kontakt"
+        ]
+      },
+      {
+        "verb": "füg",
+        "patterns": [
+          "Fügung fällt aus",
+          "Fügen nicht möglich",
+          "Fügung locker",
+          "Fügung mangelhaft"
+        ]
+      },
+      {
+        "verb": "befestig",
+        "patterns": [
+          "Befestigung fällt aus",
+          "Befestigen nicht möglich",
+          "Befestigung locker",
+          "Befestigung mangelhaft"
+        ]
+      },
+      {
+        "verb": "dicht",
+        "patterns": [
+          "Abdichtung fällt aus",
+          "Abdichten nicht möglich",
+          "Abdichtung mangelhaft",
+          "Undichtigkeit"
+        ]
+      }
+    ],
+    "failureChains": [
+      {
+        "key": "Erfassung nicht möglich",
+        "effects": [
+          "Fehlende Systemdaten",
+          "Fehlerhafte Steuerentscheidung",
+          "Funktionsminderung"
+        ],
+        "causes": [
+          "Sensordefekt",
+          "Signalstörung",
+          "Leitungsunterbrechung",
+          "Oxidierte Schnittstelle"
+        ]
+      },
+      {
+        "key": "Erfassungsgenauigkeit unzureichend",
+        "effects": [
+          "Regelabweichung",
+          "Leistungsabfall des Systems",
+          "Fehlalarm"
+        ],
+        "causes": [
+          "Sensoralterung",
+          "Kalibrierdrift",
+          "Temperatureinfluss",
+          "Elektromagnetische Störung"
+        ]
+      },
+      {
+        "key": "Steuerung nicht möglich",
+        "effects": [
+          "System außer Kontrolle",
+          "Geräteschaden",
+          "Sicherheitsrisiko"
+        ],
+        "causes": [
+          "Aktordefekt",
+          "Fehler im Regelalgorithmus",
+          "Rückmeldesignal fehlt",
+          "Störung der Stromversorgung"
+        ]
+      },
+      {
+        "key": "Abdichtung fällt aus",
+        "effects": [
+          "Medienaustritt",
+          "Umweltverschmutzung",
+          "Korrosion am Gerät",
+          "Sicherheitsrisiko"
+        ],
+        "causes": [
+          "Dichtungsalterung",
+          "Fehlerhafte Montage",
+          "Falsche Werkstoffwahl",
+          "Temperaturüberschreitung"
+        ]
+      },
+      {
+        "key": "Verbindung fällt aus",
+        "effects": [
+          "Stromkreis unterbrochen",
+          "Signalunterbrechung",
+          "Funktionsverlust",
+          "Systemstillstand"
+        ],
+        "causes": [
+          "Schlechter Kontakt",
+          "Lötfehler",
+          "Schwingungsermüdung",
+          "Korrosion"
+        ]
+      }
+    ]
+  }
+}

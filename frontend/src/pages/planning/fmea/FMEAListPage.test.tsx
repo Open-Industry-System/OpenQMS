@@ -111,7 +111,7 @@ describe("FMEAListPage filters", () => {
     renderAt("/fmea");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
-    const searchInput = screen.getByPlaceholderText(/search|搜索/i);
+    const searchInput = screen.getByPlaceholderText(/search|Suchen/i);
     fireEvent.change(searchInput, { target: { value: "焊接" } });
     fireEvent.keyDown(searchInput, { key: "Enter", code: "Enter" });
 
@@ -126,7 +126,7 @@ describe("FMEAListPage filters", () => {
     renderAt("/fmea?status=draft&type=PFMEA&high_rpn=true&search=foo&risk=high&pending_approval=true");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
-    const resetBtn = screen.getByRole("button", { name: /reset|重置/i });
+    const resetBtn = screen.getByRole("button", { name: /reset|Zurücksetzen/i });
     fireEvent.click(resetBtn);
 
     await vi.waitFor(() => {
@@ -152,7 +152,7 @@ describe("FMEAListPage pending drilldown", () => {
     renderAt("/fmea?pending=true");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByRole("button", { name: /reset|重置/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reset|Zurücksetzen/i }));
     await vi.waitFor(() => {
       const call = mocks.listFMEAs.mock.calls[mocks.listFMEAs.mock.calls.length - 1][0];
       expect(call.pending).toBeUndefined();
@@ -165,10 +165,10 @@ describe("FMEAListPage create error", () => {
   beforeEach(async () => {
     mocks.listFMEAs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
     // 锁定中文，断言本地化文案（而非英文 detail 透传）
-    await i18n.changeLanguage("zh-CN");
+    await i18n.changeLanguage("de-DE");
   });
 
-  it("maps duplicate document_no error to a localized Chinese message", async () => {
+  it("maps duplicate document_no error to a localized German message", async () => {
     // 后端在文档编号重复时返回 400 + 英文 detail，见 fmea_service.create_fmea
     const detail = "FMEA document number 'PFMEA-2026-001' already exists.";
     mocks.createFMEA.mockRejectedValueOnce({
@@ -179,7 +179,7 @@ describe("FMEAListPage create error", () => {
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
     // 打开新建弹窗
-    fireEvent.click(await screen.findByRole("button", { name: /new fmea|新建/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /new fmea|Neu/i }));
 
     // 占位符在两种语言下都含 "PFMEA-2026-001" / "SMT"，可稳定定位
     const docNoInput = await screen.findByPlaceholderText(/PFMEA-2026-001/i);
@@ -193,7 +193,7 @@ describe("FMEAListPage create error", () => {
     await vi.waitFor(() => expect(mocks.createFMEA).toHaveBeenCalled());
     // 前端映射后：英文 detail → 中文「文档编号「PFMEA-2026-001」已存在…」
     await vi.waitFor(() => {
-      expect(screen.getByText(/文档编号「PFMEA-2026-001」已存在/)).toBeInTheDocument();
+      expect(screen.getByText(/Dokumentnummer „PFMEA-2026-001“ existiert bereits/)).toBeInTheDocument();
     });
   });
 });
@@ -209,7 +209,7 @@ describe("FMEAListPage create navigation", () => {
     renderAt("/fmea");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
-    fireEvent.click(await screen.findByRole("button", { name: /new fmea|新建/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /new fmea|Neu/i }));
 
     // 选择 DFMEA：modal 中 type Select 的 option 文案是完整中文全称，匹配开头 "DFMEA -"
     const typeSelectSelector = document.querySelectorAll(".ant-select-selector")[2];
@@ -240,7 +240,7 @@ describe("FMEAListPage create navigation", () => {
     renderAt("/fmea");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
-    fireEvent.click(await screen.findByRole("button", { name: /new fmea|新建/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /new fmea|Neu/i }));
 
     const docNoInput = await screen.findByPlaceholderText(/PFMEA-2026-001/i);
     fireEvent.change(docNoInput, { target: { value: "PFMEA-2026-002" } });
@@ -275,7 +275,7 @@ describe("FMEAListPage draft navigation", () => {
     renderAt("/fmea");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
-    const editBtn = await screen.findByRole("button", { name: /edit|编辑/i });
+    const editBtn = await screen.findByRole("button", { name: /edit|Bearbeiten/i });
     fireEvent.click(editBtn);
 
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/fmea/wizard/dfmea-draft-1"));
@@ -301,7 +301,7 @@ describe("FMEAListPage draft navigation", () => {
     renderAt("/fmea");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalled());
 
-    const editBtn = await screen.findByRole("button", { name: /edit|编辑/i });
+    const editBtn = await screen.findByRole("button", { name: /edit|Bearbeiten/i });
     fireEvent.click(editBtn);
 
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/fmea/pfmea-wizard/pfmea-draft-1"));
@@ -339,7 +339,7 @@ describe("FMEAListPage delete", () => {
 
     renderAt("/fmea");
     // draft + rework 各有一个删除按钮；approved / in_review 无
-    const delButtons = await screen.findAllByRole("button", { name: /delete|删除/i });
+    const delButtons = await screen.findAllByRole("button", { name: /delete|Löschen/i });
     expect(delButtons).toHaveLength(2);
   });
 
@@ -349,7 +349,7 @@ describe("FMEAListPage delete", () => {
     renderAt("/fmea");
     await vi.waitFor(() => expect(mocks.listFMEAs).toHaveBeenCalledTimes(1));
 
-    const delBtn = await screen.findByRole("button", { name: /delete|删除/i });
+    const delBtn = await screen.findByRole("button", { name: /delete|Löschen/i });
     fireEvent.click(delBtn);
 
     // Popconfirm 的确认按钮（避免与触发按钮「删除」重名，按容器类名定位）
