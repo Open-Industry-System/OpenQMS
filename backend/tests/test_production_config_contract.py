@@ -301,7 +301,7 @@ def test_production_images_require_release_revision_build_arg_and_label():
     assert "ARG RELEASE_SHA" in backend_dockerfile
     assert "ARG RELEASE_SHA=" not in backend_dockerfile
     assert "LABEL org.opencontainers.image.revision=$RELEASE_SHA" in backend_dockerfile
-    assert "ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple" in backend_dockerfile
+    assert "ARG PIP_INDEX_URL=https://pypi.org/simple" in backend_dockerfile
     assert (
         'RUN python -m pip install --no-cache-dir --index-url "$PIP_INDEX_URL" '
         "-r requirements.txt"
@@ -494,9 +494,10 @@ def test_production_env_example_and_gitignore_contract():
 
     gitignore = (ROOT / ".gitignore").read_text().splitlines()
     env_pattern = gitignore.index(".env.*")
-    assert gitignore[env_pattern + 1 : env_pattern + 4] == [
+    assert gitignore[env_pattern + 1 : env_pattern + 5] == [
         "!.env.example",
         "!.env.production.example",
+        "!.env.pi.example",
         "backups/",
     ]
 
