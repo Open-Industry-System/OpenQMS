@@ -1,64 +1,64 @@
-# D4 正文脱敏候选预览
+# Vorschau geschwärzter D4-Textkandidaten
 
-此功能供当前有权员工检查 D4 正文的**受限脱敏候选**。格式识别与字面替换不保证消除姓名、企业身份、商业机密或所有混淆形式；输出仍是 `restricted`，未批准降敏，不能交付插件或模型。它不改写原文、验证结论或业务状态，不代替原文例外审批。
+Diese Funktion erlaubt aktuell berechtigten Mitarbeitenden, einen **eingeschränkten Schwärzungskandidaten** für D4-Texte zu prüfen. Formaterkennung und Literalersetzung garantieren nicht, dass Namen, Unternehmensidentitäten, Geschäftsgeheimnisse oder alle verschleierten Formen entfernt werden; die Ausgabe bleibt `restricted`, ist nicht für eine Herabstufung freigegeben und darf nicht an Plugins oder Modelle geliefert werden. Sie verändert weder Originaltext noch Verifizierungsergebnis oder Geschäftsstatus und ersetzt keine Freigabe von Originaltext-Ausnahmen.
 
-设计见 [R4b-1 规格](../superpowers/specs/2026-10-05-capa-d4-text-redaction-foundation-design.md)，实际 RED/GREEN、完整门禁与限制记录在[实施计划](../superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)。R4a 的独立插件仍只读取已验收元数据，正文能力没有加入插件目录或可信外发元组。
+Das eigenständige R4a-Plugin liest weiterhin nur die abgenommenen Metadaten; die Textfähigkeit ist weder im Plugin-Katalog noch in vertrauenswürdigen Weitergabe-Tupeln enthalten.
 
-## 1. 默认关闭与普通员工入口
+## 1. Standardmäßig deaktiviert, Einstieg für normale Mitarbeitende
 
-配置 `CAPA_D4_TEXT_PREVIEW_ENABLED=false` 为默认值，关闭时相关端点在租户解析、认证、正文读取和数据库查询前返回404。不改变其他 CAPA 接口或 R4a 开关。只有明确授权的自有环境才设置 true 并重启该环境；本指南与验收本身不授权启用用户/生产环境。
+`CAPA_D4_TEXT_PREVIEW_ENABLED=false` ist der Standard; im deaktivierten Zustand liefern die betreffenden Endpunkte vor Mandantenauflösung, Authentifizierung, Textzugriff und Datenbankabfrage 404. Andere CAPA-Schnittstellen und R4a-Schalter bleiben unverändert. Nur ausdrücklich freigegebene eigene Umgebungen setzen true und starten neu; diese Anleitung und die Abnahme berechtigen nicht zur Aktivierung in Benutzer- oder Produktionsumgebungen.
 
-员工从 CAPA 详情的 D4 区“正文脱敏候选预览”进入。客户端先调用只含 enabled 的 availability，关闭/无权时不发送正文预览请求。员工需使用正常用户 JWT，并保持 CAPA VIEW 和当前工厂/产品线访问；插件安装 secret、运行 JWT、客户端 owner/schema/classification 或页面选择不能授予读取权。
+Mitarbeitende öffnen in der CAPA-Detailansicht im D4-Bereich „Vorschau geschwärzter Textkandidat“. Der Client ruft zuerst availability auf, das nur enabled liefert; ist die Funktion aus oder fehlt die Berechtigung, wird keine Vorschauanfrage gesendet. Erforderlich sind ein normales Benutzer-JWT sowie weiterhin CAPA VIEW und aktueller Werks-/Produktlinienzugriff; Installations-Secrets von Plugins, Lauf-JWTs, vom Client gelieferte owner/schema/classification oder die Seitenauswahl gewähren keinen Lesezugriff.
 
-## 2. 字段和来源范围
+## 2. Felder und Quellumfang
 
-只处理：
+Verarbeitet werden nur:
 
-- 8D `d4_root_cause`。
-- 同报告验证记录 `root_cause_text`、`result`。
+- 8D `d4_root_cause`.
+- `root_cause_text` und `result` der Verifizierungsdatensätze desselben Berichts.
 
-必要标签由服务器生成：报告/验证 UUID、固定字段名、源版本/规则版本、受限分类及来源状态。报告标题、团队、D2/D5正文、附件内容/名称/URL、验证结论/方法/布尔验证状态，以及 FMEA 图/标题/正文不进入正文候选快照。人员与客户/供应商名称不通过跨模块遍历获得。
+Notwendige Labels erzeugt der Server: Berichts-/Verifizierungs-UUID, feste Feldnamen, Quell-/Regelversion, eingeschränkte Klassifizierung und Quellstatus. Berichtstitel, Team, D2-/D5-Texte, Inhalt/Name/URL von Anhängen, Verifizierungsschluss/-methode/boolescher Verifizierungsstatus sowie FMEA-Graph/-Titel/-Text gelangen nicht in den Snapshot. Personen sowie Kunden-/Lieferantennamen werden nicht durch modulübergreifende Traversierung ermittelt.
 
-无引用的手填字段标为“语义来源未确认”，仍是 restricted；它不是来源事实或降敏批准。非空 `source_ref` 必须为已有两键 FMEA/原因节点引用，并重新校验当前关联、实际工厂/产品线、FailureCause节点存在性、员工当前 FMEA VIEW 和对象范围。仅校验所需元数据/存在性，不读取 FMEA 正文用于输出。
+Manuell ausgefüllte Felder ohne Referenz werden als „semantische Quelle unbestätigt“ markiert und bleiben restricted; das ist weder eine Quellenaussage noch eine Herabstufungsfreigabe. Ein nicht leeres `source_ref` muss eine vorhandene FMEA-/Ursachenknoten-Referenz mit zwei Schlüsseln sein; erneut geprüft werden aktuelle Verknüpfung, tatsächliches Werk/Produktlinie, Existenz des FailureCause-Knotens, aktuelles FMEA VIEW der Person und Objektbereich. Geprüft werden nur benötigte Metadaten/Existenz; FMEA-Text wird für die Ausgabe nicht gelesen.
 
-来源损坏、消失或失权时**整份预览/版本拒绝**，不返回字段、摘要、源 ID、命中数或记录数。写入时已校验的引用，不等于读取时当前仍可见，更不能被客户端声明替代。
+Ist eine Quelle beschädigt, verschwunden oder die Berechtigung entzogen, wird **die gesamte Vorschau/Version abgelehnt**, ohne Felder, Zusammenfassung, Quell-ID, Trefferzahl oder Datensatzanzahl. Eine beim Schreiben geprüfte Referenz bedeutet nicht, dass sie beim Lesen noch sichtbar ist, und lässt sich nicht durch Clientangaben ersetzen.
 
-## 3. 显式替换词与规则边界
+## 3. Ausdrückliche Ersetzungsbegriffe und Regelgrenzen
 
-每行一个字面替换词，最多50项，去首尾空白后1–100字符，总UTF-8不超过8 KiB。不接受空词、规范化重复项、控制字符、任意正则、替换模板或自定义输出文字。`A+B`、`[A].*` 等按字面处理，不执行表达式；较长词优先。邮箱、常见大陆手机/标明电话、18位证件格式、HTTP/HTTPS URL、Bearer/JWT或明显凭据键值使用固定规则。
+Ein Literalbegriff pro Zeile, höchstens 50 Einträge, nach Entfernen von Leerraum 1–100 Zeichen, insgesamt höchstens 8 KiB UTF-8. Leere Begriffe, normalisierte Duplikate, Steuerzeichen, beliebige reguläre Ausdrücke, Ersetzungsvorlagen oder eigene Ausgabetexte werden nicht akzeptiert. `A+B`, `[A].*` usw. werden wörtlich behandelt und nicht als Ausdruck ausgeführt; längere Begriffe haben Vorrang. E-Mail-Adressen, gängige Mobil- und gekennzeichnete Telefonnummern, 18-stellige Ausweisnummernformate, HTTP/HTTPS-URLs, Bearer/JWT und offensichtliche Zugangsdaten-Schlüsselwertpaare werden über feste Regeln erkannt.
 
-整个匹配区间替换为固定标记，不保留姓名/号码前缀。重叠区域合并处理一次；对支持的 Unicode/casefold 形式只建立匹配与原位置映射，未匹配的业务规格、单位和编号不被归一化改写。命中计数仅按规则类别，不回显命中原词。
+Der gesamte Trefferbereich wird durch eine feste Markierung ersetzt; Präfixe von Namen/Nummern bleiben nicht stehen. Überlappende Bereiche werden zusammengeführt und einmal behandelt; für unterstützte Unicode-/casefold-Formen werden nur Treffer und Positionszuordnung zum Original gebildet, nicht getroffene Spezifikationen, Einheiten und Nummern werden nicht durch Normalisierung verändert. Trefferzahlen werden nur je Regelkategorie gezählt; getroffene Originalbegriffe werden nicht zurückgegeben.
 
-姓名、组织名称和保密术语可能完全不符合格式规则，应由有权员工显式指定。遗漏、误遮盖和人工复核需求都可能存在；即使0命中，也不会自动获得“完全脱敏”、internal 或外发许可。
+Namen, Organisationsbezeichnungen und vertrauliche Fachbegriffe passen möglicherweise zu keiner Formatregel und müssen von berechtigten Mitarbeitenden ausdrücklich angegeben werden. Auslassungen, Überschwärzung und manueller Prüfbedarf sind möglich; selbst bei 0 Treffern gibt es weder „vollständig geschwärzt“ noch internal noch eine Weitergabefreigabe.
 
-候选以纯文本显示，文本中的 HTML/URL不会被执行或跟随。弹窗没有保存、替换原文、采纳、复制原文、发布或发送模型/插件按钮。
+Kandidaten werden als reiner Text angezeigt; HTML/URLs im Text werden weder ausgeführt noch verfolgt. Der Dialog hat keine Schaltflächen zum Speichern, Ersetzen des Originals, Übernehmen, Kopieren des Originals, Veröffentlichen oder Senden an Modelle/Plugins.
 
-## 4. 预算、版本和失效
+## 4. Budget, Version und Verfall
 
-源集合最多200条验证，单正文64 KiB UTF-8、全部正文256 KiB、单个引用JSON2 KiB；预算先于加载正文/引用。超过则整份拒绝，不截断或分页返回半份候选。请求JSON在解析前最多64 KiB。空字段不生成事实文本。
+Die Quellmenge umfasst höchstens 200 Verifizierungen, 64 KiB UTF-8 pro Text, 256 KiB für alle Texte und 2 KiB je Referenz-JSON; das Budget wird vor dem Laden von Text/Referenzen geprüft. Bei Überschreitung wird der ganze Kandidat abgelehnt, ohne Kürzung oder halbe Seiten. Das Request-JSON ist vor dem Parsen auf 64 KiB begrenzt. Leere Felder erzeugen keinen Faktentext.
 
-服务器在真实捕获租户/generation的 RR/READ ONLY 快照中读取显式字段，处理后重新校验当前身份/来源及完整源版本，拒绝处理中变化的旧候选。版本是服务器域分离HMAC-SHA256，不暴露短原文的无密钥摘要；它不替代授权。候选固定携带 `restricted/redaction_candidate/not_approved/external_delivery_allowed=false`。
+Der Server liest die ausdrücklichen Felder in einem RR/READ-ONLY-Snapshot des tatsächlich erfassten Mandanten/der Generation, prüft nach der Verarbeitung aktuelle Identität/Quellen und die vollständige Quellversion erneut und lehnt Kandidaten ab, die sich währenddessen geändert haben. Die Version ist ein domänengetrenntes HMAC-SHA256 des Servers und legt keinen schlüssellosen Digest kurzer Originaltexte offen; sie ersetzt keine Autorisierung. Kandidaten tragen fest `restricted/redaction_candidate/not_approved/external_delivery_allowed=false`.
 
-成功候选最多展示30秒。弹窗可见时每2秒确认来源/规则版本；独立的本地到期计时器不因网络等待或客户端时钟落后而延长30秒。关闭/隐藏会立即卸载私密内容并清空替换词；身份、租户、报告、工厂/产品线变化或旧响应失效时，旧内容不能回填。
+Ein erfolgreicher Kandidat wird höchstens 30 Sekunden angezeigt. Solange der Dialog sichtbar ist, werden alle 2 Sekunden Quell- und Regelversion bestätigt; ein eigener lokaler Ablauf-Timer verlängert die 30 Sekunden weder durch Netzwartezeit noch durch eine nachgehende Clientuhr. Schließen/Ausblenden entfernt private Inhalte sofort und leert die Ersetzungsbegriffe; bei Wechsel von Identität, Mandant, Bericht, Werk/Produktlinie oder ungültig gewordenen alten Antworten werden alte Inhalte nicht wieder eingesetzt.
 
-服务器检测失权、来源变更或版本校验网络不确定时，候选和显式词一起撤回。修改替换词先清空旧候选，需显式重新生成。没有后台隐藏页轮询、浏览器存储、共享状态或正文缓存。失效撤回不能抹除员工此前看过的信息，不宣称全局业务写入被锁定；它防止新组件继续呈现未确认当前的候选。
+Erkennt der Server Rechteverlust, Quelländerung oder eine netzwerkbedingte Unsicherheit bei der Versionsprüfung, werden Kandidat und ausdrückliche Begriffe gemeinsam zurückgezogen. Eine Änderung der Begriffe leert zuerst den alten Kandidaten; eine Neuerzeugung muss ausdrücklich angestoßen werden. Es gibt kein Polling verborgener Seiten im Hintergrund, keinen Browserspeicher, keinen geteilten Zustand und keinen Textcache. Ein Zurückziehen kann nicht löschen, was Mitarbeitende bereits gesehen haben, und behauptet keine globale Sperre fachlicher Schreibvorgänge; es verhindert, dass neue Komponenten weiterhin einen nicht aktuell bestätigten Kandidaten zeigen.
 
-## 5. 接口与安全审计
+## 5. Schnittstellen und Sicherheitsaudit
 
-| 接口 | 含义 |
+| Schnittstelle | Bedeutung |
 |---|---|
-| `GET /api/capa/{id}/d4-text-preview/availability` | 当前普通员工和CAPA对象权限通过后仅返回 enabled；不读取正文或列举来源。 |
-| `POST /api/capa/{id}/d4-text-preview` | 只接收 replacement_terms；返回受限候选，成功后记录安全预览审计。 |
-| `GET /api/capa/{id}/d4-text-preview/version` | 当前权限下返回不含正文的源/规则版本，不写成功预览审计。 |
+| `GET /api/capa/{id}/d4-text-preview/availability` | Liefert nach bestandener Prüfung von Mitarbeitenden- und CAPA-Objektrechten nur enabled; liest keinen Text und listet keine Quellen. |
+| `POST /api/capa/{id}/d4-text-preview` | Nimmt nur replacement_terms entgegen; liefert einen eingeschränkten Kandidaten und schreibt bei Erfolg ein sicheres Vorschau-Audit. |
+| `GET /api/capa/{id}/d4-text-preview/version` | Liefert unter aktuellen Rechten Quell-/Regelversion ohne Text; schreibt kein Erfolgsaudit. |
 
-客户端对这三个固定报告端点不注入 factory_id，也不在401/403时刷新并重发含私密词的请求；其他 CAPA/业务请求保持既有行为。
+Der Client injiziert für diese drei festen Berichtsendpunkte kein factory_id und sendet Anfragen mit privaten Begriffen nach 401/403 nicht per Refresh erneut; andere CAPA-/Fachanfragen behalten ihr bisheriges Verhalten.
 
-错误为常量：关闭404；未认证401；访问或来源拒绝403；目标不存在404；输入校验422 `PREVIEW_INPUT_INVALID`（不采用会回显 input 的默认详情）；原始请求超限413 `PREVIEW_INPUT_LIMIT`；源预算409 `PREVIEW_SOURCE_LIMIT`；读取期间冲突409 `PREVIEW_SOURCE_CHANGED`；未预期故障500 `PREVIEW_UNAVAILABLE`。不把原文、词语、SQL或异常详情填回错误响应或日志。
+Fehler sind Konstanten: deaktiviert 404; nicht authentifiziert 401; Zugriffs- oder Quellablehnung 403; Ziel nicht vorhanden 404; Eingabevalidierung 422 `PREVIEW_INPUT_INVALID` (ohne die Standarddetails, die input zurückspiegeln würden); Rohanfrage zu groß 413 `PREVIEW_INPUT_LIMIT`; Quellbudget 409 `PREVIEW_SOURCE_LIMIT`; Konflikt während des Lesens 409 `PREVIEW_SOURCE_CHANGED`; unerwarteter Fehler 500 `PREVIEW_UNAVAILABLE`. Originaltext, Begriffe, SQL oder Ausnahmedetails gelangen weder in Fehlerantworten noch in Logs.
 
-唯一持久写入是成功 `PREVIEW_CAPA_D4_TEXT` AuditLog：操作者、报告/factory、规则/源版本及 outcome。不记录原文、脱敏候选、词语/词摘要、命中原词、自由错误文本。最终授权/源冲突、提交失败或失败请求没有成功审计；不写业务字段、附件、outbox或embedding，不需要迁移或新预览表。
+Der einzige dauerhafte Schreibvorgang ist ein erfolgreiches AuditLog `PREVIEW_CAPA_D4_TEXT`: Akteur, Bericht/Werk, Regel-/Quellversion und outcome. Nicht erfasst werden Originaltext, Kandidat, Begriffe/Begriffsdigests, getroffene Originalbegriffe oder freie Fehlertexte. Abschließende Autorisierungs-/Quellkonflikte, fehlgeschlagene Commits oder fehlgeschlagene Anfragen erzeugen kein Erfolgsaudit; es werden keine fachlichen Felder, Anhänge, Outbox oder Embeddings geschrieben, keine Migration und keine eigene Vorschautabelle benötigt.
 
-## 6. 验收与剩余门禁
+## 6. Abnahme und verbleibende Gates
 
-本片采用真实规则/DTO、真实提交的自有租户/快照、当前CAPA/FMEA授权和正常员工登录。浏览器使用分配的回环端口、已安装Chromium和真实新API；仅网络故障在传输边界模拟，不用假的脱敏/权限成功响应替代实际验收。旧R4a元数据进程和R3八场景独立回归，完整命令和最终证据见台账。
+Dieser Abschnitt verwendet echte Regeln/DTOs, einen echten committeten eigenen Mandanten/Snapshot, aktuelle CAPA/FMEA-Autorisierung und eine normale Mitarbeiteranmeldung. Der Browser nutzt zugewiesene Loopback-Ports, installiertes Chromium und die echte neue API; nur Netzwerkfehler werden an der Transportgrenze simuliert, gefälschte Erfolgsantworten für Schwärzung oder Rechte ersetzen keine Abnahme. Der alte R4a-Metadatenprozess und die acht R3-Szenarien laufen als eigene Regression.
 
-附件、全文搜索/索引、原文例外审批、候选降敏/发布、插件/模型正文交付、通用SDK、容器/网络与生产可信部署仍未开放。不要把员工内部预览成功当作上述门禁通过，或用候选覆盖正式根因、验证证据和业务结论。
+Anhänge, Volltextsuche/Indexierung, Freigabe von Originaltext-Ausnahmen, Herabstufung/Veröffentlichung von Kandidaten, Textauslieferung an Plugins/Modelle, allgemeines SDK, Container-/Netzwerkisolation und vertrauenswürdiges Produktions-Deployment sind weiterhin nicht geöffnet. Eine erfolgreiche interne Vorschau gilt nicht als Bestehen dieser Gates; Kandidaten dürfen formale Grundursache, Verifizierungsnachweise oder fachliche Schlussfolgerungen nicht überschreiben.
