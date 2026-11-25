@@ -111,7 +111,7 @@ function SalesOrdersTab() {
       key: "unit_price",
       width: 100,
       render: (v: number | null) =>
-        v != null ? `¥${v.toFixed(2)}` : "—",
+        v != null ? `€${v.toFixed(2)}` : "—",
     },
     {
       title: t("salesAndCost.salesOrders.columns.status", "状态"),
@@ -319,7 +319,7 @@ function CostRecordsTab() {
       dataIndex: "amount",
       key: "amount",
       width: 120,
-      render: (v: number) => `¥${v.toLocaleString("zh-CN", { minimumFractionDigits: 2 })}`,
+      render: (v: number) => `€${v.toLocaleString("de-DE", { minimumFractionDigits: 2 })}`,
     },
     {
       title: t("salesAndCost.costRecords.columns.currency", "货币"),
@@ -359,7 +359,7 @@ function CostRecordsTab() {
             <Statistic
               title={costCategoryLabels[cat] || cat}
               value={amount}
-              prefix="¥"
+              prefix="€"
               precision={2}
               valueStyle={{ color: costCategoryColors[cat] }}
             />

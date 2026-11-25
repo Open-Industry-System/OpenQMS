@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import zh from './zh-CN/pfmea.json';
+import zh from './de-DE/pfmea.json';
 import en from './en-US/pfmea.json';
 
 describe('pfmea i18n parity', () => {

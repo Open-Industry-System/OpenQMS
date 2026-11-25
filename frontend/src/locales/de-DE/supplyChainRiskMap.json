@@ -1,0 +1,80 @@
+{
+  "page": {
+    "title": "Lieferketten-Risikokarte",
+    "emptyDescription": "Keine Daten; bitte zuerst einen Snapshot erzeugen"
+  },
+  "toolbar": {
+    "allProductLines": "Alle Produktlinien",
+    "refresh": "Daten aktualisieren",
+    "export": "Exportieren",
+    "snapshotSuccess": "{{count}} Snapshots erzeugt",
+    "snapshotFailed": "Snapshot-Erzeugung fehlgeschlagen",
+    "exportFailed": "Export fehlgeschlagen"
+  },
+  "export": {
+    "csv": "CSV",
+    "excel": "Excel",
+    "failed": "Export fehlgeschlagen"
+  },
+  "detail": {
+    "selectSupplier": "Lieferanten auswählen, um Details anzuzeigen",
+    "period": "Periode",
+    "trendHeader": "Trend (letzte 6 Perioden)",
+    "riskIndex": "Risikoindex: {{index}}",
+    "dimensions": {
+      "risk_score": "Risikobewertung",
+      "quality_score": "Qualitätsbewertung",
+      "delivery_score": "Lieferbewertung",
+      "compliance_score": "Compliance-Bewertung",
+      "erp_on_time_rate": "ERP-Liefertreue",
+      "purchase_amount_pct": "Einkaufsvolumen %",
+      "open_scar_count": "Offene SCAR",
+      "ppm_value": "PPM"
+    },
+    "trendColumns": {
+      "period": "Periode",
+      "risk": "Risiko",
+      "quality": "Qualität",
+      "delivery": "Lieferung",
+      "compliance": "Compliance"
+    }
+  },
+  "comparison": {
+    "selectMultiple": "Mindestens 2 Lieferanten zum Vergleich auswählen",
+    "title": "Lieferantenvergleich",
+    "dimension": "Dimension",
+    "dimensions": {
+      "risk_score": "Risikobewertung",
+      "quality_score": "Qualitätsbewertung",
+      "delivery_score": "Lieferbewertung",
+      "compliance_score": "Compliance-Bewertung",
+      "erp_on_time_rate": "ERP-Liefertreue",
+      "purchase_amount_pct": "Einkaufsvolumen %",
+      "open_scar_count": "Offene SCAR",
+      "ppm_value": "PPM"
+    }
+  },
+  "detailPanel": {
+    "clickSupplier": "Lieferanten anklicken, um Details anzuzeigen"
+  },
+  "heatmap": {
+    "tooltipSource": "Quelle: {{source}}",
+    "columns": {
+      "risk_score": "Risikobewertung",
+      "quality_score": "Qualitätsbewertung",
+      "delivery_score": "Lieferbewertung",
+      "compliance_score": "Compliance-Bewertung",
+      "erp_on_time_rate": "ERP-Liefertreue",
+      "purchase_amount_pct": "Einkaufsvolumen %",
+      "open_scar_count": "Offene SCAR",
+      "ppm_value": "PPM"
+    }
+  },
+  "dataSource": {
+    "risk_evaluation": "Risikobewertung",
+    "erp_po": "ERP",
+    "supplier_evaluation_fallback": "Lieferantenbewertung",
+    "iqc_inspection": "Wareneingangsprüfung",
+    "missing": "Keine Daten"
+  }
+}

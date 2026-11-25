@@ -1,0 +1,87 @@
+{
+  "noPermission": "Sie haben keine Berechtigung für die Konzernverwaltung",
+  "dashboard": {
+    "title": "Konzern-Dashboard",
+    "openFMEA": "Offene FMEA",
+    "openCAPA": "Offene CAPA",
+    "overdueCAPA": "Überfällige CAPA",
+    "spcAlarms": "SPC-Alarme",
+    "pendingIQC": "Ausstehende Wareneingangsprüfungen",
+    "openSCAR": "Offene SCAR",
+    "factoryData": "Werksdaten",
+    "factoryCardTitle": "{{factory_code}} – {{factory_name}}"
+  },
+  "suppliers": {
+    "title": "Gemeinsame Lieferanten",
+    "listTitle": "Konzernlieferanten",
+    "columns": {
+      "name": "Lieferantenname",
+      "shortName": "Kurzname",
+      "unifiedCreditCode": "Steuer-/Registernummer",
+      "industry": "Branche",
+      "evaluations": "Werksbewertungen"
+    },
+    "evaluationTag": "{{factory_code}}: {{grade}} ({{score}})"
+  },
+  "factoryManagement": {
+    "title": "Werksverwaltung",
+    "listTitle": "Werke",
+    "createFactory": "Werk anlegen",
+    "editFactory": "Werk bearbeiten",
+    "newFactory": "Neues Werk",
+    "columns": {
+      "code": "Werkscode",
+      "name": "Werksname",
+      "location": "Standort",
+      "status": "Status",
+      "actions": "Aktionen"
+    },
+    "status": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv"
+    },
+    "form": {
+      "code": "Werkscode",
+      "name": "Werksname",
+      "location": "Standort",
+      "isActive": "Aktiv"
+    },
+    "placeholders": {
+      "code": "z. B. MUC-01",
+      "name": "z. B. Werk München",
+      "location": "z. B. München, Bayern"
+    },
+    "rules": {
+      "codeRequired": "Bitte Werkscode eingeben",
+      "nameRequired": "Bitte Werksnamen eingeben"
+    },
+    "messages": {
+      "loadFailed": "Werksliste konnte nicht geladen werden",
+      "updateSuccess": "Erfolgreich aktualisiert",
+      "createSuccess": "Erfolgreich angelegt",
+      "deactivateSuccess": "Deaktiviert",
+      "deactivateFailed": "Deaktivieren fehlgeschlagen"
+    },
+    "confirmDeactivate": "Möchten Sie dieses Werk wirklich deaktivieren?",
+    "deactivate": "Deaktivieren"
+  },
+  "factoryComparison": {
+    "title": "Werksvergleich",
+    "metricsTitle": "Kennzahlen Werksvergleich",
+    "columns": {
+      "code": "Werkscode",
+      "name": "Werksname"
+    }
+  },
+  "audits": {
+    "title": "Werksübergreifende Audits",
+    "listTitle": "Konzernaudits",
+    "columns": {
+      "programNo": "Programm-Nr.",
+      "auditType": "Auditart",
+      "status": "Status",
+      "factories": "Werke",
+      "findingCount": "Feststellungen"
+    }
+  }
+}

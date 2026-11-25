@@ -1,0 +1,12 @@
+{
+  "required": "Bitte {{field}} eingeben",
+  "requiredField": "{{field}} ist erforderlich",
+  "pleaseEnter": "Bitte {{field}} eingeben",
+  "pleaseSelect": "Bitte {{field}} auswählen",
+  "invalidFormat": "Format von {{field}} ist ungültig",
+  "minLength": "{{field}} muss mindestens {{count}} Zeichen lang sein",
+  "maxLength": "{{field}} darf höchstens {{count}} Zeichen lang sein",
+  "number": "{{field}} muss eine Zahl sein",
+  "min": "{{field}} darf nicht kleiner als {{min}} sein",
+  "max": "{{field}} darf nicht größer als {{max}} sein"
+}

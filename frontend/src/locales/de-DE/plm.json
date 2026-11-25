@@ -1,0 +1,192 @@
+{
+  "yes": "Ja",
+  "no": "Nein",
+  "dashboard": {
+    "title": "PLM-Dashboard",
+    "errors": {
+      "loadFailed": "PLM-Dashboard-Daten konnten nicht geladen werden"
+    },
+    "stats": {
+      "totalParts": "Teile gesamt",
+      "bomItems": "Stücklistenpositionen",
+      "pendingECNs": "Offene ECNs",
+      "pendingSCs": "Offene besondere Merkmale"
+    },
+    "recentChanges": "Letzte Änderungen",
+    "columns": {
+      "changeNumber": "Änderungs-Nr.",
+      "title": "Titel",
+      "changeType": "Änderungsart",
+      "status": "Status",
+      "priority": "Priorität",
+      "updatedAt": "Aktualisiert am"
+    }
+  },
+  "parts": {
+    "title": "PLM-Teile",
+    "listTitle": "Teileliste",
+    "searchPlaceholder": "Nach Teilenummer oder Name suchen",
+    "columns": {
+      "partNumber": "Teilenummer",
+      "name": "Name",
+      "revision": "Revision",
+      "status": "Status",
+      "safetyRelated": "Sicherheitsrelevant",
+      "keyCharacteristic": "Schlüsselmerkmal",
+      "actions": "Aktionen"
+    },
+    "actions": {
+      "detail": "Details",
+      "bom": "Stückliste",
+      "importFMEA": "FMEA importieren",
+      "confirmSC": "BM bestätigen"
+    },
+    "drawer": {
+      "title": "Teiledetails",
+      "labels": {
+        "partNumber": "Teilenummer",
+        "name": "Name",
+        "revision": "Revision",
+        "status": "Status",
+        "material": "Werkstoff",
+        "specification": "Spezifikation",
+        "safetyRelated": "Sicherheitsrelevant",
+        "keyCharacteristic": "Schlüsselmerkmal",
+        "externalId": "Externe ID",
+        "productLineCode": "Produktliniencode",
+        "updatedAt": "In PLM aktualisiert am"
+      }
+    },
+    "bom": {
+      "modalTitle": "Stückliste: {{partNumber}}",
+      "partRevision": "Teilerevision",
+      "partRevisionRequired": "Bitte Teilerevision eingeben",
+      "bomRevision": "Stücklistenrevision",
+      "bomRevisionRequired": "Bitte Stücklistenrevision eingeben",
+      "query": "Stückliste abfragen",
+      "columns": {
+        "parentPartNumber": "Übergeordnete Teilenummer",
+        "parentRevision": "Übergeordnete Revision",
+        "childPartNumber": "Untergeordnete Teilenummer",
+        "childRevision": "Untergeordnete Revision",
+        "quantity": "Menge",
+        "level": "Ebene",
+        "bomRevision": "Stücklistenrevision"
+      },
+      "import": {
+        "fmeaId": "FMEA-ID",
+        "fmeaIdRequired": "Bitte FMEA-ID eingeben",
+        "overwrite": "Vorhandene Knoten überschreiben",
+        "import": "FMEA importieren"
+      }
+    },
+    "sc": {
+      "modalTitle": "Besonderes Merkmal bestätigen: {{partNumber}}",
+      "characteristicType": "Merkmalsart",
+      "characteristicTypeRequired": "Bitte Merkmalsart wählen",
+      "safety": "Sicherheit",
+      "key": "Schlüssel",
+      "fmeaId": "FMEA-ID",
+      "fmeaIdRequired": "Bitte FMEA-ID eingeben",
+      "nodeId": "Knoten-ID",
+      "nodeIdRequired": "Bitte Knoten-ID eingeben",
+      "okText": "Bestätigen",
+      "cancelText": "Abbrechen"
+    },
+    "messages": {
+      "loadFailed": "Teile konnten nicht geladen werden",
+      "queryBomFailed": "Stückliste konnte nicht abgefragt werden",
+      "importFMEASuccess": "Stückliste in FMEA importiert",
+      "importFMEAFailed": "Import in FMEA fehlgeschlagen",
+      "scConfirmed": "Besonderes Merkmal bestätigt",
+      "scConfirmFailed": "Besonderes Merkmal konnte nicht bestätigt werden"
+    }
+  },
+  "changeOrders": {
+    "title": "PLM-Änderungsaufträge",
+    "listTitle": "Änderungsaufträge",
+    "impactAnalysis": "Auswirkungsanalyse",
+    "changeType": {
+      "ECN": "ECN",
+      "ECR": "ECR",
+      "SCN": "SCN"
+    },
+    "columns": {
+      "changeNumber": "Änderungs-Nr.",
+      "title": "Titel",
+      "changeType": "Änderungsart",
+      "status": "Status",
+      "priority": "Priorität",
+      "actions": "Aktionen"
+    },
+    "messages": {
+      "loadFailed": "Änderungsaufträge konnten nicht geladen werden",
+      "impactAnalysisTriggered": "Auswirkungsanalyse ausgelöst",
+      "impactAnalysisFailed": "Auswirkungsanalyse konnte nicht ausgelöst werden"
+    }
+  },
+  "connections": {
+    "title": "PLM-Verbindungsverwaltung",
+    "new": "Neue Verbindung",
+    "listTitle": "PLM-Verbindungen",
+    "newTitle": "Neue PLM-Verbindung",
+    "editTitle": "PLM-Verbindung bearbeiten",
+    "create": "Neue Verbindung",
+    "edit": "Bearbeiten",
+    "test": "Testen",
+    "sync": "Synchronisieren",
+    "delete": "Löschen",
+    "columns": {
+      "name": "Verbindungsname",
+      "type": "Typ",
+      "productLineCode": "Produktliniencode",
+      "status": "Status",
+      "createdAt": "Angelegt am",
+      "actions": "Aktionen"
+    },
+    "status": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv"
+    },
+    "modal": {
+      "createTitle": "Neue Verbindung",
+      "editTitle": "Verbindung bearbeiten"
+    },
+    "form": {
+      "name": "Verbindungsname",
+      "nameRequired": "Bitte Verbindungsnamen eingeben",
+      "namePlaceholder": "z. B. PLM-Teamcenter-01",
+      "connectorType": "Konnektortyp",
+      "connectorTypeRequired": "Bitte Konnektortyp wählen",
+      "productLineCode": "Produktliniencode",
+      "productLineCodeRequired": "Bitte Produktliniencode eingeben",
+      "productLineCodePlaceholder": "z. B. DC-DC-100",
+      "port": "Port",
+      "portPlaceholder": "z. B. 8080"
+    },
+    "connector": {
+      "mock": "Mock – simulierte Daten",
+      "rest": "REST-API – nicht implementiert",
+      "siemens_tc": "Siemens Teamcenter – nicht implementiert",
+      "dassault_enovia": "Dassault ENOVIA – nicht implementiert",
+      "ptc_windchill": "PTC Windchill – nicht implementiert"
+    },
+    "deleteConfirm": {
+      "title": "Löschen bestätigen",
+      "content": "Verbindung „{{name}}“ wirklich löschen?"
+    },
+    "messages": {
+      "loadFailed": "Verbindungsliste konnte nicht geladen werden",
+      "createSuccess": "Verbindung erfolgreich angelegt",
+      "createFailed": "Anlegen fehlgeschlagen",
+      "updateSuccess": "Verbindung erfolgreich aktualisiert",
+      "updateFailed": "Aktualisierung fehlgeschlagen",
+      "deleteSuccess": "Erfolgreich gelöscht",
+      "deleteFailed": "Löschen fehlgeschlagen",
+      "testSuccess": "Verbindungstest erfolgreich, {{count}} Teile gelesen",
+      "testFailed": "Verbindungstest fehlgeschlagen",
+      "syncTriggered": "Synchronisierung ausgelöst, insgesamt {{count}} Aufträge",
+      "syncFailed": "Synchronisierung konnte nicht ausgelöst werden"
+    }
+  }
+}

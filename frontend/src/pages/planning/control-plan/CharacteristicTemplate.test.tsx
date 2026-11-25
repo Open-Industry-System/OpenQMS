@@ -47,7 +47,7 @@ afterEach(async () => { await i18n.changeLanguage("en-US"); });
 
 describe("Control Plan standard template and write boundary", () => {
   it("keeps the Task 1 labels and groups without exposing source metadata", async () => {
-    await i18n.changeLanguage("zh-CN");
+    await i18n.changeLanguage("de-DE");
     render(<App><MemoryRouter initialEntries={["/control-plans/cp-1"]}><Routes><Route path="/control-plans/:id" element={<ControlPlanEditorPage />} /></Routes></MemoryRouter></App>);
     await waitFor(() => expect(mocks.getControlPlan).toHaveBeenCalled());
     expect(screen.getAllByRole("columnheader", { name: "产品特性" }).length).toBeGreaterThan(0);

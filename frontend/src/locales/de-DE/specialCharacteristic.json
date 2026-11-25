@@ -1,0 +1,251 @@
+{
+  "pageTitle": {
+    "scList": "Besondere Merkmale",
+    "scMatrix": "Abdeckungsmatrix besonderer Merkmale",
+    "scTraceability": "Rückverfolgbarkeit besonderer Merkmale",
+    "newSC": "Neues besonderes Merkmal",
+    "scDetail": "Details besonderes Merkmal",
+    "new": "Neues besonderes Merkmal",
+    "scListSubtitle": "Identifikation, Freigabe und Abdeckungsverfolgung besonderer Merkmale (CC/SC)",
+    "scMatrixSubtitle": "Abdeckungsmatrix besonderer Merkmale über DFMEA/PFMEA/Produktionslenkungsplan/MSA/Arbeitsanweisung"
+  },
+  "filter": {
+    "type": "Typfilter",
+    "source": "Quellenfilter",
+    "safetyRelated": "Sicherheitsrelevant",
+    "approvalStatus": "Freigabestatus",
+    "suggestedOnly": "Nur Vorschläge",
+    "all": "Alle"
+  },
+  "scType": {
+    "CC": "CC",
+    "SC": "SC",
+    "critical": "Kritisches Merkmal (CC)",
+    "significant": "Signifikantes Merkmal (SC)"
+  },
+  "sourceType": {
+    "DFMEA": "DFMEA",
+    "PFMEA": "PFMEA"
+  },
+  "approvalStatus": {
+    "pending": "Ausstehend",
+    "submitted": "Eingereicht",
+    "approved": "Freigegeben",
+    "rejected": "Abgelehnt"
+  },
+  "column": {
+    "scCode": "Merkmalscode",
+    "name": "Name",
+    "type": "Typ",
+    "customerSymbol": "Kundensymbol",
+    "category": "Kategorie",
+    "sourceType": "Quelltyp",
+    "sourceFMEA": "Quell-FMEA",
+    "msaStatus": "MSA-Status",
+    "actions": "Aktionen"
+  },
+  "matrixColumn": {
+    "dfmea": "DFMEA",
+    "pfmea": "PFMEA",
+    "cp": "PLP",
+    "msa": "MSA",
+    "sop": "AA"
+  },
+  "matrix": {
+    "coverageStats": "Abdeckungsstatistik",
+    "total": "Merkmale gesamt",
+    "dfmeaCoverage": "DFMEA-Abdeckung",
+    "pfmeaCoverage": "PFMEA-Abdeckung",
+    "cpCoverage": "PLP-Abdeckung",
+    "msaPass": "MSA bestanden",
+    "sopCoverage": "AA-Abdeckung",
+    "title": "Matrix besonderer Merkmale"
+  },
+  "traceability": {
+    "selectSC": "Besonderes Merkmal wählen",
+    "placeholder": "CC-/SC-Merkmal wählen",
+    "specRequirement": "Spezifikationsanforderung",
+    "fmeaSource": "FMEA-Quelle",
+    "notLinkedFMEA": "Keine FMEA-Quelle verknüpft",
+    "relatedFailureModes": "Zugehörige Fehlerarten",
+    "controlPlan": "Produktionslenkungsplan",
+    "notInControlPlan": "Nicht im Produktionslenkungsplan referenziert",
+    "step": "Schritt",
+    "specification": "Spezifikation",
+    "msaAnalysis": "MSA-Analyse",
+    "msaDescription": "Prüfmittel- & Messsystemanalyse (verwaltet über das Prüfmittelverzeichnis)",
+    "msaMissingEvidence": "Keine verknüpfte MSA-Studie; eine Kalibrierung allein ist kein MSA-Nachweis.",
+    "formalSync": "Freigegebene FMEA-Version mit formaler Synchronisierungsvorschau und Bestätigung verwenden.",
+    "spcMonitor": "SPC-Überwachung",
+    "notLinkedSPC": "Kein SPC-Prüfmerkmal verknüpft",
+    "targetValue": "Sollwert",
+    "usl": "OSG",
+    "lsl": "USG",
+    "emptySelect": "Bitte ein besonderes Merkmal wählen, um seine Rückverfolgungskette anzuzeigen",
+    "loadFailed": "Rückverfolgungskette konnte nicht geladen werden",
+    "emptyHint": "Bitte ein besonderes Merkmal wählen, um seine Rückverfolgungskette anzuzeigen"
+  },
+  "form": {
+    "scType": "Merkmalsart",
+    "scName": "Merkmalsname",
+    "scCategory": "Merkmalskategorie",
+    "customerSymbol": "Kundensymbol",
+    "specRequirement": "Spezifikationsanforderung",
+    "sopRef": "Verweis Arbeitsanweisung",
+    "supplierShared": "Mit Lieferant geteilt",
+    "supplierCode": "Lieferantennummer",
+    "category": "Merkmalskategorie",
+    "scNamePlaceholder": "Merkmalsname eingeben",
+    "scNameRequired": "Bitte Merkmalsnamen eingeben",
+    "scTypeRequired": "Bitte Merkmalsart wählen",
+    "customerSymbolPlaceholder": "Kundensymbol für besonderes Merkmal eingeben",
+    "selectPlaceholder": "Bitte wählen",
+    "sopRefPlaceholder": "Nummer oder Name der Arbeitsanweisung eingeben",
+    "specRequirementPlaceholder": "Spezifikation / Anforderung eingeben",
+    "supplierCodePlaceholder": "Lieferantennummer eingeben"
+  },
+  "category": {
+    "product": "Produktmerkmal",
+    "process": "Prozessmerkmal"
+  },
+  "placeholder": {
+    "scName": "Merkmalsname eingeben",
+    "customerSymbol": "Kennzeichnung des Kunden für besondere Merkmale",
+    "specRequirement": "Spezifikationsanforderung eingeben",
+    "sopRef": "Dokumentnummer der Arbeitsanweisung",
+    "supplierCode": "Lieferantennummer",
+    "selectType": "Bitte wählen",
+    "safetyRegulationRef": "z. B. UN ECE R100, ISO 26262",
+    "safetyVerificationMethod": "z. B. 100 % Hochspannungs-Isolationsprüfung"
+  },
+  "card": {
+    "basicInfo": "Grunddaten",
+    "sourceFMEAInfo": "Quell-FMEA",
+    "editInfo": "Bearbeitungsinformationen",
+    "createInfo": "Erstellungsinformationen",
+    "safetyCharacteristic": "Sicherheitsmerkmal"
+  },
+  "label": {
+    "scCode": "Merkmalscode",
+    "type": "Typ",
+    "productLine": "Produktlinie",
+    "sourceType": "Quelltyp",
+    "sourceFMEADoc": "Quell-FMEA-Dokument",
+    "sourceNodeId": "Quellknoten-ID",
+    "parentSC": "Übergeordnetes Merkmal",
+    "msaStatus": "MSA-Status",
+    "fmeaTitle": "FMEA-Titel",
+    "viewFMEA": "FMEA anzeigen",
+    "safetyRelated": "Sicherheitsrelevant",
+    "safetyRegulationRef": "Verweis Sicherheitsvorschrift",
+    "safetyVerificationMethod": "Methode der Sicherheitsverifizierung",
+    "submitForApproval": "Zur Freigabe einreichen",
+    "approve": "Freigeben",
+    "reject": "Ablehnen"
+  },
+  "timeline": {
+    "pending": "Ausstehend: Sicherheitsangaben ausfüllen und zur Freigabe einreichen",
+    "submitted": "Eingereicht: {{time}}",
+    "approved": "Freigegeben: {{time}}",
+    "rejected": "Abgelehnt: {{time}}{{comment}}",
+    "result": "Freigabeergebnis",
+    "pendingDescription": "Ausstehend: Sicherheitsangaben ausfüllen und zur Freigabe einreichen"
+  },
+  "action": {
+    "view": "Anzeigen",
+    "confirmSafety": "Sicherheit bestätigen",
+    "dismiss": "Verwerfen",
+    "delete": "Löschen",
+    "backToList": "Zurück zur Liste",
+    "reject": "Ablehnen"
+  },
+  "message": {
+    "loadFailed": "Besonderes Merkmal konnte nicht geladen werden",
+    "createSuccess": "Erfolgreich angelegt",
+    "saveSuccess": "Erfolgreich gespeichert",
+    "createFailed": "Anlegen fehlgeschlagen",
+    "saveFailed": "Speichern fehlgeschlagen",
+    "deleteSuccess": "Erfolgreich gelöscht",
+    "deleteFailed": "Löschen fehlgeschlagen",
+    "confirmSafetySuccess": "Als Sicherheitsmerkmal bestätigt",
+    "confirmSafetyFailed": "Bestätigung fehlgeschlagen",
+    "dismissSuccess": "Sicherheitsvorschlag verworfen",
+    "dismissFailed": "Verwerfen fehlgeschlagen",
+    "adminOnlyCancel": "Nur Administratoren oder Manager können die Sicherheitskennzeichnung aufheben",
+    "cancelSafetySuccess": "Sicherheitskennzeichnung aufgehoben",
+    "cancelFailed": "Aufheben fehlgeschlagen",
+    "safetySubmitted": "Sicherheitsmerkmal zur Freigabe eingereicht",
+    "submitFailed": "Einreichen fehlgeschlagen",
+    "approved": "Freigegeben",
+    "approveFailed": "Freigabe fehlgeschlagen",
+    "rejected": "Abgelehnt",
+    "rejectFailed": "Ablehnen fehlgeschlagen",
+    "notFound": "Besonderes Merkmal nicht gefunden",
+    "selectType": "Bitte Merkmalsart wählen",
+    "enterName": "Bitte Merkmalsnamen eingeben",
+    "enterRegulationRef": "Bitte Verweis auf Vorschrift eingeben",
+    "enterVerificationMethod": "Bitte Verifizierungsmethode eingeben"
+  },
+  "actions": {
+    "approve": "Freigeben",
+    "reject": "Ablehnen",
+    "save": "Speichern",
+    "backToList": "Zurück zur Liste",
+    "confirmSafety": "Sicherheit bestätigen",
+    "dismiss": "Verwerfen",
+    "new": "Neues besonderes Merkmal"
+  },
+  "basicInfo": {
+    "title": "Grunddaten",
+    "scCode": "Merkmalscode",
+    "type": "Merkmalsart",
+    "productLine": "Produktlinie",
+    "sourceType": "Quelltyp",
+    "sourceFmea": "Quell-FMEA",
+    "sourceNodeId": "Quellknoten-ID",
+    "parentSc": "Übergeordnetes Merkmal",
+    "msaStatus": "MSA-Status"
+  },
+  "confirm": {
+    "delete": "Dieses besondere Merkmal löschen?"
+  },
+  "coverage": {
+    "title": "Abdeckung",
+    "statsTitle": "Abdeckungsstatistik",
+    "total": "Merkmale gesamt",
+    "dfmea": "DFMEA-Abdeckung",
+    "pfmea": "PFMEA-Abdeckung",
+    "cp": "Abdeckung Produktionslenkungsplan",
+    "msa": "MSA-Bestehensquote",
+    "sop": "Abdeckung Arbeitsanweisungen"
+  },
+  "createInfo": {
+    "title": "Erstellungsinformationen"
+  },
+  "editInfo": {
+    "title": "Bearbeitungsinformationen"
+  },
+  "list": {
+    "title": "Besondere Merkmale"
+  },
+  "productLine": "Produktlinie",
+  "safety": {
+    "title": "Sicherheitsmerkmal",
+    "safetyRelated": "Sicherheitsrelevant",
+    "regulationRef": "Verweis Vorschrift / Norm",
+    "regulationRefPlaceholder": "Zutreffende Vorschrift oder Normabschnitt eingeben",
+    "regulationRefRequired": "Bitte Verweis auf Vorschrift / Norm eingeben",
+    "verificationMethod": "Verifizierungsmethode",
+    "verificationMethodPlaceholder": "Verifizierungsmethode eingeben",
+    "verificationMethodRequired": "Bitte Verifizierungsmethode eingeben",
+    "submitApproval": "Zur Freigabe einreichen",
+    "autoSwitchHint": "Sobald es als sicherheitsrelevant markiert ist, wird es automatisch zu einem SC und muss freigegeben werden"
+  },
+  "sourceFmea": {
+    "title": "Informationen zur Quell-FMEA",
+    "documentNo": "Dokumentnummer",
+    "fmeaTitle": "FMEA-Titel",
+    "viewFmea": "FMEA anzeigen",
+    "openEditor": "Editor öffnen"
+  }
+}

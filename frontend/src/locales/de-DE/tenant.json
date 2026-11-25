@@ -1,0 +1,12 @@
+{
+  "deactivated": {
+    "title": "Mandant deaktiviert",
+    "subtitle": "Ihr Mandantenkonto wurde deaktiviert. Die Daten bleiben erhalten, sind aber nicht zugänglich.",
+    "backToLogin": "Zurück zur Anmeldung"
+  },
+  "suspended": {
+    "title": "Mandant gesperrt",
+    "subtitle": "Ihr Mandantenkonto wurde gesperrt. Bitte wenden Sie sich an den Administrator.",
+    "backToLogin": "Zurück zur Anmeldung"
+  }
+}

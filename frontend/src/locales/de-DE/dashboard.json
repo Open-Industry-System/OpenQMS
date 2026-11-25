@@ -1,0 +1,202 @@
+{
+  "page": {
+    "title": "Qualitäts-Dashboard",
+    "subtitle": "Globaler Qualitätsstatus · KPI · Warnungen · Letzte Aktivitäten"
+  },
+  "actions": {
+    "editLayout": "Layout bearbeiten",
+    "done": "Fertig",
+    "resetDefault": "Standard wiederherstellen"
+  },
+  "messages": {
+    "loadFailed": "Dashboard konnte nicht geladen werden",
+    "saveSuccess": "Layout gespeichert",
+    "saveFailed": "Speichern fehlgeschlagen",
+    "resetSuccess": "Standardlayout wiederhergestellt",
+    "resetFailed": "Zurücksetzen fehlgeschlagen"
+  },
+  "widgetLibrary": {
+    "title": "Widget-Bibliothek",
+    "searchPlaceholder": "Widgets suchen ...",
+    "category": {
+      "kpi": "KPI-Kennzahlen",
+      "alert": "Warnungen",
+      "chart": "Diagramme",
+      "list": "Listen",
+      "ai": "KI / erweiterte Analyse"
+    }
+  },
+  "drilldown": {
+    "pendingFmea": "Offene FMEA",
+    "pendingCapa": "Offene CAPA",
+    "pendingComplaint": "Offene Reklamationen"
+  },
+  "widget": {
+    "unknown": "Unbekanntes Widget",
+    "pendingActions": "Offene Aufgaben",
+    "overdueTasks": "Überfällige Aufgaben",
+    "highRiskItems": "Einträge mit hohem Risiko",
+    "monthTrend": "Neue FMEAs in diesem Monat",
+    "highRpnFmeaTop5": "Top 5 FMEA mit hoher RPZ",
+    "overdueCapaTop5": "Top 5 überfällige CAPA",
+    "highPpmSuppliersTop5": "Top 5 Lieferanten mit hohem PPM",
+    "recentActions": "Letzte Aktionen",
+    "spcAbnormalCount": "SPC-Auffälligkeiten",
+    "capabilitySummary": "Übersicht Prozessfähigkeit",
+    "gaugeExpiry": "Prüfmittel-Ablauferinnerung",
+    "iqcPendingInspections": "Offene Wareneingangsprüfungen",
+    "equipmentStatus": "Übersicht Anlagenstatus",
+    "supplierPpmTrend": "PPM-Trend Lieferanten",
+    "qualityTrendAi": "KI-Interpretation Qualitätstrend"
+  },
+  "kpi": {
+    "loading": "Wird geladen ...",
+    "loadFailed": "Laden fehlgeschlagen, zum Wiederholen klicken",
+    "currentValue": "Aktueller Wert {{value}}",
+    "normal": "Normal",
+    "warning": "Warnung",
+    "danger": "Kritisch",
+    "noData": "Keine Daten",
+    "subtitle": {
+      "gaugeExpiry": "Läuft in 30 Tagen ab",
+      "spcAbnormal": "Letzte 7 Tage"
+    }
+  },
+  "equipment": {
+    "running": "In Betrieb",
+    "down": "Gestört",
+    "idle": "Leerlauf"
+  },
+  "spc": {
+    "count": "Überwachte Merkmale",
+    "avgCpk": "Durchschnittlicher CPK"
+  },
+  "alert": {
+    "empty": {
+      "highRpn": "Keine Einträge mit hoher RPZ",
+      "overdueCapa": "Keine überfälligen CAPA",
+      "highPpm": "Keine Lieferanten mit hohem PPM",
+      "supplierPpm": "Keine Daten"
+    },
+    "overdueDays": "{{days}} Tage überfällig",
+    "ppmValue": "{{ppm}} PPM"
+  },
+  "recentActions": {
+    "columns": {
+      "action": "Aktion",
+      "object": "Objekt",
+      "time": "Zeit"
+    },
+    "empty": "Keine letzten Aktionen",
+    "actionLabels": {
+      "CREATE": "Angelegt",
+      "UPDATE": "Aktualisiert",
+      "DELETE": "Gelöscht",
+      "APPROVE": "Freigegeben",
+      "TRANSITION": "Statuswechsel",
+      "ROLLBACK": "Zurückgesetzt",
+      "IMPORT_FMEA": "FMEA importiert",
+      "SYNC_FMEA": "FMEA synchronisiert",
+      "SYNC_CSR": "Kundenanforderungen synchronisiert",
+      "LINK_FMEA": "FMEA verknüpft",
+      "LINK_CAPA": "CAPA verknüpft",
+      "CREATE_SCAR": "SCAR angelegt",
+      "ANALYZE": "Analysiert",
+      "AI_DRAFT": "KI-Entwurf",
+      "AI_TREND_INTERPRET": "KI-Trendinterpretation",
+      "POPULATE_FROM_SPC": "Aus SPC übernommen",
+      "FORCE_SAVE_OVERRIDE": "Erzwungen gespeichert",
+      "AQL_ADJUST": "AQL angepasst",
+      "AQL_REC_CREATE": "AQL-Empfehlung angelegt",
+      "AQL_REC_APPROVE": "AQL-Empfehlung freigegeben",
+      "AQL_REC_REJECT": "AQL-Empfehlung abgelehnt",
+      "AQL_REC_FWD": "AQL-Empfehlung weitergeleitet",
+      "D7_SKIP_CONFIRMATION": "D7-Bestätigung übersprungen",
+      "CUSTOMER_CONFIRM": "Kundenbestätigung",
+      "mes_deactivated": "Anlage deaktiviert",
+      "other": "Aktion"
+    },
+    "moduleLabels": {
+      "fmea_documents": "FMEA",
+      "fmea_versions": "FMEA-Version",
+      "capa_eightd": "CAPA",
+      "suppliers": "Lieferant",
+      "supplier_scars": "Lieferanten-SCAR",
+      "supplier_evaluations": "Lieferantenbewertung",
+      "supplier_certifications": "Lieferantenzertifikat",
+      "supplier_ppap_submissions": "PPAP-Einreichung",
+      "supplier_ppap_elements": "PPAP-Element",
+      "customer_complaints": "Kundenreklamation",
+      "rma_records": "RMA-Datensatz",
+      "shipment_records": "Lieferung",
+      "spc_charts": "SPC-Regelkarte",
+      "iqc_inspections": "Wareneingangsprüfung",
+      "iqc_materials": "Wareneingangsmaterial",
+      "iqc_inspection_templates": "Prüfvorlage",
+      "iqc_aql_profiles": "AQL-Profil",
+      "iqc_aql_recommendations": "AQL-Empfehlung",
+      "control_plans": "Produktionslenkungsplan",
+      "control_plan_versions": "PLP-Version",
+      "special_characteristics": "Besonderes Merkmal",
+      "gauges": "Prüfmittel",
+      "gauge_calibrations": "Prüfmittelkalibrierung",
+      "grr_studies": "GRR-Studie",
+      "bias_studies": "Bias-Studie",
+      "linearity_studies": "Linearitätsstudie",
+      "stability_studies": "Stabilitätsstudie",
+      "attribute_studies": "Attributive Studie",
+      "audit_programs": "Auditprogramm",
+      "audit_plans": "Auditplan",
+      "audit_findings": "Auditfeststellung",
+      "management_reviews": "Managementbewertung",
+      "review_outputs": "Bewertungsergebnis",
+      "quality_goals": "Qualitätsziel",
+      "quality_trends": "Qualitätstrend",
+      "apqp_projects": "APQP-Projekt",
+      "mes_connections": "MES-Verbindung",
+      "factories": "Werk",
+      "users": "Benutzer",
+      "system_settings": "Systemeinstellung",
+      "other": "Datensatz"
+    },
+    "types": {
+      "fmeaDocuments": "FMEA",
+      "capaEightd": "CAPA"
+    }
+  },
+  "riskList": {
+    "empty": "Keine offenen, überfälligen oder risikoreichen Einträge",
+    "loadFailed": "Laden fehlgeschlagen",
+    "retry": "Erneut versuchen",
+    "goApprove": "Zur Freigabe",
+    "goFollowUp": "Zur Nachverfolgung",
+    "goView": "Anzeigen",
+    "supplierPpmExceeded": "Lieferanten-PPM überschritten",
+    "overdueDays": "{{days}} Tage überfällig",
+    "overdueDaysTag": "{{days}} T"
+  },
+  "relativeTime": {
+    "justNow": "Gerade eben",
+    "minutesAgo": "vor {{count}} Minuten",
+    "hoursAgo": "vor {{count}} Stunden",
+    "yesterday": "Gestern"
+  },
+  "qualityTrend": {
+    "keyEvidence": "Wichtigste Belege",
+    "suggestedActions": "Vorgeschlagene Maßnahmen",
+    "aiInterpret": "KI-Tiefeninterpretation",
+    "aiUnavailable": "Nicht verfügbar, wenn kein LLM konfiguriert ist oder zu wenige Daten vorliegen",
+    "aiError": "KI-Interpretation vorübergehend nicht verfügbar, bitte später erneut versuchen",
+    "dataUpdated": "Daten aktualisiert, klicken, um die KI-Interpretation neu zu erzeugen",
+    "noTrendData": "Keine Trenddaten",
+    "omittedModules": "Fehlende Modulberechtigungen in dieser Ansicht, ausgelassen: {{modules}}",
+    "confidence": "Konfidenz",
+    "cached": "Zwischengespeichert",
+    "yes": "Ja",
+    "no": "Nein",
+    "trend": "Trend",
+    "evidenceFormat": "{{label}}: {{value}} (Trend: {{trend}})",
+    "actionFormat": "[{{priority}}] {{text}}",
+    "confidenceFormat": "Konfidenz: {{confidence}}, zwischengespeichert: {{cached}}"
+  }
+}

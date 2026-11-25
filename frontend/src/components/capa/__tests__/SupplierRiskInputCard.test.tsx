@@ -19,7 +19,7 @@ const base = {
 };
 
 beforeEach(async () => {
-  await i18n.changeLanguage("zh-CN");
+  await i18n.changeLanguage("de-DE");
 });
 
 describe("SupplierRiskInputCard", () => {

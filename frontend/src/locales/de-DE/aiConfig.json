@@ -1,0 +1,99 @@
+{
+  "title": "KI-Modellkonfiguration",
+  "subtitle": "Laufzeitparameter für LLM- und Embedding-Anbieter konfigurieren",
+  "notice": {
+    "title": "Hinweis zur Konfiguration",
+    "description": "Die Einstellungen auf dieser Seite werden in der Datenbank gespeichert und gelten sofort. Leere Felder verwenden die Standardwerte aus den Umgebungsvariablen (.env)."
+  },
+  "actions": {
+    "save": "Konfiguration speichern",
+    "reload": "Neu laden",
+    "test": "Verbindung testen"
+  },
+  "sections": {
+    "llm": "Großes Sprachmodell (LLM)",
+    "embedding": "Embedding-Modell",
+    "search": "Suchgewichtung"
+  },
+  "fields": {
+    "llm_provider": {
+      "label": "LLM-Anbieter",
+      "tooltip": "LLM-Anbieter wählen. Leer lassen für reinen Regel-Engine-Modus (keine KI-Aufrufe).",
+      "placeholder": "Anbieter wählen",
+      "noneOption": "Keiner (Regel-Engine-Modus)"
+    },
+    "llm_api_key": {
+      "label": "API-Schlüssel",
+      "tooltip": "API-Schlüssel für den LLM-Dienst. Wird nach dem Speichern als ******** angezeigt; leer lassen, um ihn unverändert zu lassen.",
+      "placeholder": "API-Schlüssel eingeben oder leer lassen, um den aktuellen zu behalten"
+    },
+    "llm_model": {
+      "label": "Modellname",
+      "tooltip": "Modellkennung, z. B. claude-sonnet-4-6, gpt-4o, qwen2.5:7b. Leer lassen für den Standard des Anbieters.",
+      "placeholder": "z. B. claude-sonnet-4-6"
+    },
+    "llm_base_url": {
+      "label": "Basis-URL",
+      "tooltip": "Für lokale Anbieter erforderlich, z. B. http://localhost:11434 (Ollama). Für den Anbieter openai einen OpenAI-kompatiblen Endpunkt angeben; leer lassen für das offizielle api.openai.com.",
+      "placeholder": "http://localhost:11434"
+    },
+    "llm_timeout": {
+      "label": "Standard-Timeout"
+    },
+    "capa_draft_llm_timeout": {
+      "label": "Timeout CAPA-Entwurf"
+    },
+    "report_llm_timeout": {
+      "label": "Timeout Berichtserstellung"
+    },
+    "timeoutUnit": "Sekunden",
+    "embedding_provider": {
+      "label": "Embedding-Anbieter",
+      "tooltip": "Leer lassen, um den LLM-Anbieter zu übernehmen.",
+      "placeholder": "Anbieter wählen",
+      "followOption": "Wie LLM-Anbieter"
+    },
+    "embedding_api_key": {
+      "label": "API-Schlüssel",
+      "tooltip": "API-Schlüssel für den Embedding-Dienst. Wird nach dem Speichern als ******** angezeigt; leer lassen, um den LLM-Schlüssel zu verwenden.",
+      "placeholder": "API-Schlüssel eingeben oder leer lassen, um den LLM-Schlüssel zu verwenden"
+    },
+    "embedding_model": {
+      "label": "Embedding-Modell",
+      "tooltip": "z. B. text-embedding-3-small (OpenAI), nomic-embed-text (Ollama).",
+      "placeholder": "text-embedding-3-small"
+    },
+    "embedding_base_url": {
+      "label": "Embedding-Basis-URL",
+      "tooltip": "Für Ollama erforderlich, z. B. http://localhost:11434. Für den Anbieter openai einen OpenAI-kompatiblen Endpunkt angeben; leer lassen, um die LLM-Basis-URL zu verwenden.",
+      "placeholder": "http://localhost:11434"
+    },
+    "embedding_dimensions": {
+      "label": "Vektordimensionen",
+      "tooltip": "1536 für OpenAI, 768 für nomic-embed-text, 1024 für BGE-M3."
+    },
+    "search_vector_weight": {
+      "label": "Gewichtung Vektorsuche",
+      "tooltip": "Gewichtung der Vektorsuche in der hybriden RRF-Suche (0–1)."
+    },
+    "search_fulltext_weight": {
+      "label": "Gewichtung Volltextsuche",
+      "tooltip": "Gewichtung der Volltextsuche in der hybriden RRF-Suche (0–1)."
+    }
+  },
+  "messages": {
+    "loadFailed": "Konfiguration konnte nicht geladen werden",
+    "saveSuccess": "Konfiguration gespeichert und übernommen",
+    "saveFailed": "Konfiguration konnte nicht gespeichert werden",
+    "saveFailedDetail": "Konfiguration konnte nicht gespeichert werden: {{detail}}",
+    "validationFailed": "Formularprüfung fehlgeschlagen, bitte Eingaben prüfen",
+    "testFailed": "Verbindungstest fehlgeschlagen"
+  },
+  "testResult": {
+    "title": "Ergebnis des Verbindungstests",
+    "close": "Schließen",
+    "hint": "Der Test verwendet die aktuell im Formular stehenden Werte (auch ungespeicherte). Wird der API-Schlüssel als ******** angezeigt, wird der gespeicherte Schlüssel verwendet.",
+    "success": "Erfolgreich",
+    "fail": "Fehlgeschlagen"
+  }
+}

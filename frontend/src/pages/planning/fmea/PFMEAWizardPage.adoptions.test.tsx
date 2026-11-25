@@ -7,8 +7,8 @@ import { initReactI18next } from "react-i18next";
 
 import PFMEAWizardPage from "./PFMEAWizardPage";
 import { getFMEA, updateFMEA } from "../../../api/fmea";
-import zhPFMEA from "../../../locales/zh-CN/pfmea.json";
-import zhDFMEA from "../../../locales/zh-CN/dfmea.json";
+import zhPFMEA from "../../../locales/de-DE/pfmea.json";
+import zhDFMEA from "../../../locales/de-DE/dfmea.json";
 import type { FMEADocument } from "../../../types";
 import type { Suggestion } from "../../../api/recommendation";
 
@@ -16,11 +16,11 @@ const i18nTest = i18n.createInstance();
 i18nTest
   .use(initReactI18next)
   .init({
-    lng: "zh-CN",
-    fallbackLng: "zh-CN",
+    lng: "de-DE",
+    fallbackLng: "de-DE",
     interpolation: { escapeValue: false },
     resources: {
-      "zh-CN": { pfmea: zhPFMEA, dfmea: zhDFMEA },
+      "de-DE": { pfmea: zhPFMEA, dfmea: zhDFMEA },
     },
   });
 

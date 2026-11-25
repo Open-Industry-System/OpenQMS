@@ -39,7 +39,7 @@ const fixture: CapaOutcomeReview = {
     { module: 'planning', object_id: id, version_id: source, sha256: 'b'.repeat(64) }], decision: null,
   supplement: { text: '补充说明', review_scope: 'unreviewed_supplement', updated_by: null, updated_at: null },
 };
-it.each(['zh-CN', 'en-US'])('shows read-only gate decision and waiver responsibility in %s', async language => {
+it.each(['de-DE', 'en-US'])('shows read-only gate decision and waiver responsibility in %s', async language => {
   await i18n.changeLanguage(language);
   const value = structuredClone(fixture);
   value.doc_gate!.waiver_reason = '<img src=x onerror=alert(1)> historical item removed';
@@ -47,8 +47,8 @@ it.each(['zh-CN', 'en-US'])('shows read-only gate decision and waiver responsibi
   vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(value);
   render(view());
   const section = await screen.findByTestId('capa-outcome-doc-gate');
-  expect(section).toHaveTextContent(language === 'zh-CN' ? '文档门禁决定' : 'Document gate decision');
-  expect(section).toHaveTextContent(language === 'zh-CN' ? '已通过' : 'Passed');
+  expect(section).toHaveTextContent(language === 'de-DE' ? '文档门禁决定' : 'Document gate decision');
+  expect(section).toHaveTextContent(language === 'de-DE' ? '已通过' : 'Passed');
   expect(section).toHaveTextContent(value.doc_gate!.waiver_reason);
   expect(section).toHaveTextContent('removed-item');
   expect(section).toHaveTextContent(source);
@@ -84,7 +84,7 @@ const changed = vi.fn();
 const view = (identity = 'A', status = 'D8_APPROVAL_PENDING') => <App><BrowserRouter><CapaOutcomeReviewPanel
   reportId={id} status={status} canApprove credentialIdentity={identity} onReviewChange={changed}
 /></BrowserRouter></App>;
-beforeEach(async () => { await i18n.changeLanguage('zh-CN'); vi.clearAllMocks(); vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(structuredClone(fixture)); });
+beforeEach(async () => { await i18n.changeLanguage('de-DE'); vi.clearAllMocks(); vi.mocked(capaApi.getCapaOutcomeReview).mockResolvedValue(structuredClone(fixture)); });
 
 it('shows actual complete DTO materials, source versions and escaped evidence; supplement is not reviewed core', async () => {
   render(view());

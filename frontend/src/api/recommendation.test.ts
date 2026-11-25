@@ -41,6 +41,6 @@ describe("getRecommendations timeout", () => {
     const payload = mockedPost.mock.calls[0][1] as { context: Record<string, unknown> };
     expect(payload.context.task).toBe("t"); // 原 context 字段保留
     expect(typeof payload.context.language).toBe("string");
-    expect(["zh-CN", "en-US"]).toContain(payload.context.language);
+    expect(["de-DE", "en-US"]).toContain(payload.context.language);
   });
 });

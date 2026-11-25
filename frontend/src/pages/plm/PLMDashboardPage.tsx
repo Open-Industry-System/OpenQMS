@@ -22,7 +22,7 @@ const statusVariant: Record<string, string> = {
 };
 
 export default function PLMDashboardPage() {
-  const { t } = useTranslation("plm");
+  const { t, i18n } = useTranslation("plm");
   const { message } = App.useApp();
   const productLine = useProductLineStore((s) => s.selected);
   const [data, setData] = useState<PLMDashboard | null>(null);
@@ -63,7 +63,7 @@ export default function PLMDashboardPage() {
       dataIndex: "source_updated_at",
       key: "source_updated_at",
       width: 170,
-      render: (v: string | null) => (v ? new Date(v).toLocaleString("zh-CN") : "—"),
+      render: (v: string | null) => (v ? new Date(v).toLocaleString(i18n.language) : "—"),
     },
   ];
 

@@ -1,0 +1,122 @@
+{
+  "pageTitle": {
+    "apqpProjectManagement": "APQP-Projektverwaltung",
+    "apqpProjectManagementSubtitle": "APQP-Projekte anlegen, Phasen verfolgen und Ergebnisse verwalten",
+    "apqpProjects": "APQP-Projekte",
+    "newAPQPProject": "Neues APQP-Projekt",
+    "projectDetail": "Projektdetails",
+    "editProject": "Projekt bearbeiten",
+    "apqpProjectDetail": "Phasen, Ergebnisse und Gate-Freigaben des APQP-Projekts"
+  },
+  "tab": {
+    "all": "Alle",
+    "active": "Aktiv",
+    "completed": "Abgeschlossen",
+    "cancelled": "Abgebrochen"
+  },
+  "phase": {
+    "1": "Planung und Definition",
+    "2": "Produktdesign und -entwicklung",
+    "3": "Prozessdesign und -entwicklung",
+    "4": "Produkt- und Prozessvalidierung",
+    "5": "Serienanlauf, Rückmeldung, Bewertung",
+    "phaseN": "Phase {{phase}}",
+    "phaseNName": "Phase {{phase}} – {{name}}"
+  },
+  "projectStatus": {
+    "active": "Aktiv",
+    "completed": "Abgeschlossen",
+    "cancelled": "Abgebrochen"
+  },
+  "phaseStatus": {
+    "pendingApproval": "Freigabe ausstehend",
+    "inProgress": "In Bearbeitung",
+    "completed": "Abgeschlossen"
+  },
+  "kpi": {
+    "active": "Aktiv",
+    "pendingApproval": "Freigabe ausstehend",
+    "completed": "Abgeschlossen",
+    "overdue": "Überfällig"
+  },
+  "column": {
+    "projectCode": "Projektcode",
+    "projectName": "Projektname",
+    "product": "Produkt",
+    "customer": "Kunde",
+    "currentPhase": "Aktuelle Phase",
+    "phaseStatus": "Phasenstatus",
+    "targetSOP": "Ziel-SOP",
+    "projectStatus": "Projektstatus",
+    "action": "Aktion"
+  },
+  "form": {
+    "projectName": "Projektname",
+    "productName": "Produktname",
+    "productLine": "Produktlinie",
+    "customerName": "Kundenname",
+    "description": "Beschreibung",
+    "targetSOPDate": "Ziel-SOP-Datum",
+    "dfmea": "DFMEA",
+    "pfmea": "PFMEA",
+    "controlPlan": "Produktionslenkungsplan",
+    "ppap": "PPAP"
+  },
+  "placeholder": {
+    "productLine": "z. B. DC-DC-100",
+    "fmeaOptional": "FMEA-ID (optional, Texteingabe)",
+    "cpOptional": "PLP-ID (optional, Texteingabe)",
+    "ppapOptional": "PPAP-ID (optional, Texteingabe)"
+  },
+  "card": {
+    "projectInfo": "Projektinformationen",
+    "phaseProgress": "Phasenfortschritt",
+    "phaseActions": "Phasenaktionen",
+    "deliverables": "Verknüpfte Ergebnisse",
+    "phaseTimeline": "Phasen-Zeitleiste",
+    "gateHistory": "Verlauf der Gate-Reviews",
+    "projectList": "Liste der APQP-Projekte"
+  },
+  "label": {
+    "projectCode": "Projektcode",
+    "projectName": "Projektname",
+    "product": "Produkt",
+    "productLine": "Produktlinie",
+    "customer": "Kunde",
+    "targetSOP": "Ziel-SOP",
+    "createdBy": "Angelegt von",
+    "createdAt": "Angelegt am",
+    "description": "Beschreibung",
+    "currentPhase": "Aktuelle Phase",
+    "phaseStatus": "Phasenstatus",
+    "view": "Anzeigen",
+    "notLinked": "Nicht verknüpft",
+    "gateComment": "Kommentar zum Gate-Review (optional)",
+    "dfmeaPhase2": "DFMEA (Phase 2)",
+    "pfmeaPhase3": "PFMEA (Phase 3)",
+    "controlPlanPhase3": "Produktionslenkungsplan (Phase 3)",
+    "ppapPhase4": "PPAP (Phase 4)",
+    "overdue": "⚠"
+  },
+  "action": {
+    "submitForApproval": "Zur Freigabe einreichen",
+    "approveGate": "Freigeben",
+    "rejectGate": "Ablehnen",
+    "cancelProject": "Projekt abbrechen",
+    "gateSubmitted": "Eingereicht",
+    "gateApproved": "Freigegeben",
+    "gateRejected": "Abgelehnt"
+  },
+  "progress": {
+    "subModules": "Fortschritt der Teilmodule"
+  },
+  "message": {
+    "createSuccess": "Projekt erfolgreich angelegt",
+    "updateSuccess": "Erfolgreich aktualisiert",
+    "operationSuccess": "Vorgang erfolgreich",
+    "notCompleted": "Nicht abgeschlossen",
+    "enterName": "Bitte Projektnamen eingeben",
+    "enterProductName": "Bitte Produktnamen eingeben",
+    "enterProductLine": "Bitte Produktlinie eingeben"
+  }
+}

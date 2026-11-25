@@ -1,0 +1,28 @@
+{
+  "title": "OpenQMS",
+  "subtitle": "Intelligente Qualitätsmanagement-Plattform",
+  "username": "Benutzername",
+  "password": "Passwort",
+  "usernamePlaceholder": "Bitte Benutzernamen eingeben",
+  "passwordPlaceholder": "Bitte Passwort eingeben",
+  "usernameRequired": "Benutzername ist erforderlich",
+  "passwordRequired": "Passwort ist erforderlich",
+  "login": "Anmelden",
+  "loginSuccess": "Anmeldung erfolgreich",
+  "loginError": "Benutzername oder Passwort ungültig",
+  "demo": {
+    "title": "Nur-Lese-Demo (Betrachter)",
+    "description": "Alle Demo-Module ansehen, ohne Daten anzulegen, zu bearbeiten oder freizugeben.",
+    "multiRoleTitle": "Gemeinsame beschreibbare Demo",
+    "sharedWarning": "Andere Besucher können gemeinsame Demodaten ändern. Keine echten oder personenbezogenen Daten eingeben.",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "fill": "Konto {{role}} verwenden",
+    "roles": {
+      "viewer": "Betrachter",
+      "engineer": "Qualitätsingenieur",
+      "manager": "Manager"
+    }
+  },
+  "footer": "© OpenQMS · Qualitätsmanagementsystem für die Fertigung"
+}

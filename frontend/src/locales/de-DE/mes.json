@@ -1,0 +1,129 @@
+{
+  "yes": "Ja",
+  "no": "Nein",
+  "dashboard": {
+    "title": "MES-Dashboard",
+    "errors": {
+      "loadFailed": "MES-Dashboard konnte nicht geladen werden"
+    },
+    "stats": {
+      "runningEquipment": "Anlagen in Betrieb",
+      "downEquipment": "Anlagen gestört",
+      "plannedOutput": "Geplante Menge",
+      "actualOutput": "Ist-Menge"
+    },
+    "equipmentStatus": "Anlagenstatus",
+    "equipmentStatusLabels": {
+      "running": "In Betrieb",
+      "idle": "Leerlauf",
+      "down": "Gestört",
+      "changeover": "Umrüstung"
+    },
+    "columns": {
+      "equipmentName": "Anlagenname",
+      "status": "Status",
+      "availability": "Verfügbarkeit (%)",
+      "performance": "Leistung (%)",
+      "quality": "Qualität (%)",
+      "oee": "OEE (%)"
+    }
+  },
+  "orders": {
+    "title": "Fertigungsaufträge",
+    "filterPlaceholder": "Status filtern",
+    "status": {
+      "planned": "Geplant",
+      "inProgress": "In Bearbeitung",
+      "completed": "Abgeschlossen",
+      "closed": "Geschlossen"
+    },
+    "columns": {
+      "orderNo": "Auftragsnummer",
+      "productModel": "Produktmodell",
+      "plannedQty": "Plan-Menge",
+      "actualQty": "Ist-Menge",
+      "status": "Status",
+      "startedAt": "Begonnen am",
+      "completedAt": "Abgeschlossen am"
+    },
+    "messages": {
+      "loadFailed": "Fertigungsaufträge konnten nicht geladen werden"
+    }
+  },
+  "scrap": {
+    "title": "Fehlerdatensätze",
+    "filterPlaceholder": "Fehlerart filtern",
+    "defectType": {
+      "scrap": "Ausschuss",
+      "rework": "Nacharbeit",
+      "reject": "Zurückgewiesen"
+    },
+    "columns": {
+      "externalId": "Externe ID",
+      "defectType": "Fehlerart",
+      "defectCategory": "Fehlerkategorie",
+      "defectQty": "Fehlermenge",
+      "totalQty": "Gesamtmenge",
+      "defectRate": "Fehlerquote (%)",
+      "defectDescription": "Fehlerbeschreibung",
+      "recordedAt": "Erfasst am"
+    },
+    "messages": {
+      "loadFailed": "Fehlerdatensätze konnten nicht geladen werden"
+    }
+  },
+  "connections": {
+    "title": "MES-Verbindungsverwaltung",
+    "create": "Neue Verbindung",
+    "edit": "Bearbeiten",
+    "test": "Testen",
+    "sync": "Synchronisieren",
+    "delete": "Löschen",
+    "columns": {
+      "name": "Verbindungsname",
+      "type": "Typ",
+      "status": "Status",
+      "productLine": "Produktlinie",
+      "actions": "Aktionen"
+    },
+    "status": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv"
+    },
+    "modal": {
+      "createTitle": "Neue Verbindung",
+      "editTitle": "Verbindung bearbeiten"
+    },
+    "form": {
+      "name": "Verbindungsname",
+      "nameRequired": "Bitte Verbindungsnamen eingeben",
+      "namePlaceholder": "z. B. MES Linie A",
+      "connectorType": "Konnektortyp",
+      "connectorTypeRequired": "Bitte Konnektortyp wählen",
+      "productLineCode": "Produktliniencode",
+      "productLineCodePlaceholder": "z. B. DC-DC-100"
+    },
+    "connector": {
+      "mock": "Mock – simulierte Daten",
+      "rest": "REST-API"
+    },
+    "deleteConfirm": {
+      "title": "Löschen bestätigen",
+      "content": "Verbindung „{{name}}“ wirklich löschen?"
+    },
+    "messages": {
+      "loadFailed": "Verbindungsliste konnte nicht geladen werden",
+      "createSuccess": "Verbindung erfolgreich angelegt",
+      "createFailed": "Anlegen fehlgeschlagen",
+      "updateSuccess": "Verbindung erfolgreich aktualisiert",
+      "updateFailed": "Aktualisierung fehlgeschlagen",
+      "deleteSuccess": "Erfolgreich gelöscht",
+      "deleteFailed": "Löschen fehlgeschlagen",
+      "testSuccess": "Verbindungstest erfolgreich",
+      "testFailed": "Verbindungstest fehlgeschlagen",
+      "testFailedWithError": "Verbindungstest fehlgeschlagen: {{error}}",
+      "syncTriggered": "Synchronisierung ausgelöst, startet innerhalb von 30 Sekunden im Hintergrund",
+      "syncFailed": "Synchronisierung konnte nicht ausgelöst werden"
+    }
+  }
+}

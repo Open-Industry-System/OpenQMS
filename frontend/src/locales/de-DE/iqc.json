@@ -1,0 +1,274 @@
+{
+  "status": {
+    "inspection": {
+      "pending": "Ausstehend",
+      "inspecting": "In Prüfung",
+      "judged": "Bewertet",
+      "closed": "Geschlossen"
+    },
+    "result": {
+      "pending": "Ausstehend",
+      "accepted": "Angenommen",
+      "rejected": "Zurückgewiesen",
+      "concession": "Sonderfreigabe"
+    },
+    "profileState": {
+      "normal": "Normal",
+      "tightened": "Verschärft",
+      "reduced": "Reduziert",
+      "frozen": "Eingefroren"
+    },
+    "recDirection": {
+      "tighten": "Verschärfen",
+      "reduce": "Reduzieren",
+      "freeze": "Einfrieren",
+      "keep": "Beibehalten"
+    },
+    "recStatus": {
+      "pending": "Ausstehend",
+      "forwarded": "Weitergeleitet",
+      "approved": "Freigegeben",
+      "effective": "Wirksam",
+      "rejected": "Abgelehnt",
+      "expired": "Abgelaufen"
+    },
+    "approvalLevel": {
+      "manager": "Manager",
+      "engineer": "Ingenieur"
+    },
+    "yes": "Ja",
+    "no": "Nein"
+  },
+  "messages": {
+    "loadInspectionListFailed": "Prüfliste konnte nicht geladen werden",
+    "loadInspectionFailed": "Prüfung konnte nicht geladen werden",
+    "loadMaterialListFailed": "Materialliste konnte nicht geladen werden",
+    "loadProfileListFailed": "Profilliste konnte nicht geladen werden",
+    "loadRecommendationListFailed": "Empfehlungsliste konnte nicht geladen werden",
+    "loadConfigFailed": "Konfiguration konnte nicht geladen werden",
+    "inspectionStarted": "Prüfung gestartet",
+    "itemsUpdated": "Prüfpunkte aktualisiert",
+    "judgementSubmitted": "Bewertung abgesendet",
+    "inspectionClosed": "Prüfung geschlossen",
+    "scarTriggered": "SCAR ausgelöst",
+    "reinspectRequested": "Nachprüfung angefordert",
+    "concessionApproved": "Sonderfreigabe erteilt",
+    "materialUpdated": "Material aktualisiert",
+    "materialCreated": "Material angelegt",
+    "materialDeleted": "Material gelöscht",
+    "profileCreated": "Profil angelegt",
+    "configSaved": "Konfiguration gespeichert",
+    "configReset": "Konfiguration zurückgesetzt",
+    "approved": "Freigegeben",
+    "rejected": "Abgelehnt",
+    "submittedToManager": "An Manager weitergeleitet",
+    "enterRejectReason": "Bitte Ablehnungsgrund eingeben",
+    "adminOnly": "Nur Administratoren haben Zugriff auf diese Seite",
+    "profileNotFound": "Profil nicht gefunden"
+  },
+  "pageTitle": {
+    "inspectionList": "Wareneingangsprüfung",
+    "materialList": "Materialverwaltung",
+    "profileList": "Verwaltung der AQL-Profile",
+    "profileDetail": "Details AQL-Profil",
+    "recommendationList": "AQL-Optimierungsempfehlungen",
+    "aqlOptimization": "AQL-Optimierung",
+    "aqlConfig": "Konfiguration der AQL-Regelparameter"
+  },
+  "subtitle": {
+    "inspectionList": "Erfassung, Bewertung und Nachverfolgung von Wareneingangsprüfungen"
+  },
+  "list": {
+    "confirmDeleteMaterial": "Dieses Material wirklich löschen?"
+  },
+  "recommendation": {
+    "approvalLevel": "Freigabeebene",
+    "expiresAt": "Gültig bis",
+    "qualitySnapshot": "Qualitäts-Snapshot",
+    "triggerRules": "Auslösende Regeln",
+    "approve": "Freigeben",
+    "submitToManager": "An Manager weiterleiten",
+    "reject": "Ablehnen",
+    "confirmReject": "Ablehnung bestätigen"
+  },
+  "stats": {
+    "totalInspections": "Prüfungen gesamt",
+    "acceptedCount": "Angenommen",
+    "rejectedCount": "Zurückgewiesen",
+    "acceptanceRate": "Annahmequote",
+    "pendingApproval": "Freigabe ausstehend",
+    "generatedToday": "Heute erzeugt",
+    "approvedCount": "Freigegeben",
+    "rejectedCountRec": "Abgelehnt"
+  },
+  "table": {
+    "inspectionNo": "Prüf-Nr.",
+    "partNo": "Teilenummer",
+    "partName": "Teilebezeichnung",
+    "lotNo": "Charge",
+    "lotQty": "Losgröße",
+    "inspectionMode": "Prüfmodus",
+    "status": "Status",
+    "inspectionResult": "Prüfergebnis",
+    "inspectionDate": "Prüfdatum",
+    "operations": "Aktionen",
+    "sortOrder": "Nr.",
+    "category": "Kategorie",
+    "itemName": "Prüfpunkt",
+    "inspectType": "Prüfart",
+    "specUpper": "Obere Grenze",
+    "specLower": "Untere Grenze",
+    "sampleSize": "Stichprobenumfang",
+    "acceptNo": "Ac",
+    "rejectNo": "Re",
+    "defectQty": "Fehlermenge",
+    "result": "Ergebnis",
+    "remark": "Bemerkung",
+    "specification": "Spezifikation",
+    "type": "Typ",
+    "defaultAql": "Standard-AQL",
+    "defaultInspectionLevel": "Standard-Prüfniveau",
+    "unit": "Einheit",
+    "supplier": "Lieferant",
+    "materialId": "Material-ID",
+    "baseAql": "Basis-AQL",
+    "currentAql": "Aktueller AQL",
+    "state": "Zustand",
+    "frozenUntil": "Eingefroren bis",
+    "effectiveFrom": "Gültig ab",
+    "recommendedAql": "Empfohlener AQL",
+    "direction": "Richtung",
+    "triggerRules": "Auslösende Regeln",
+    "createdAt": "Angelegt am",
+    "supplierName": "Lieferantenname"
+  },
+  "detail": {
+    "inspectionInfo": "Prüfinformationen",
+    "enterResults": "Prüfergebnisse erfassen",
+    "judgement": "Bewertung",
+    "inspectionItems": "Prüfpunkte",
+    "inspectionStats": "Prüfstatistik",
+    "supplierPerformance": "Lieferantenleistung",
+    "qualityTrend": "Qualitätstrend",
+    "historyRecommendations": "Frühere Empfehlungen"
+  },
+  "form": {
+    "inspectionResult": "Prüfergebnis",
+    "defectQty": "Fehlermenge",
+    "sampleQty": "Tatsächlicher Stichprobenumfang",
+    "defectDescription": "Fehlerbeschreibung",
+    "selectResult": "Ergebnis wählen",
+    "submitResult": "Ergebnisse absenden",
+    "submitJudgement": "Bewertung absenden",
+    "partNo": "Teilenummer",
+    "partName": "Teilebezeichnung",
+    "specification": "Spezifikation",
+    "materialType": "Materialart",
+    "defaultAql": "Standard-AQL",
+    "defaultInspectionLevel": "Standard-Prüfniveau",
+    "unit": "Einheit",
+    "supplierId": "Lieferanten-ID",
+    "materialId": "Material-ID",
+    "baseAql": "Basis-AQL",
+    "currentAql": "Aktueller AQL",
+    "productLine": "Produktlinie",
+    "minAql": "Min. AQL",
+    "maxAql": "Max. AQL",
+    "inspectionLevel": "Prüfniveau"
+  },
+  "actions": {
+    "newInspection": "Neue Prüfung",
+    "newMaterial": "Neues Material",
+    "importMaterial": "Material importieren",
+    "newProfile": "Neues Profil",
+    "backToList": "Zurück zur Liste",
+    "startInspection": "Prüfung starten",
+    "closeInspection": "Prüfung schließen",
+    "triggerScar": "SCAR auslösen",
+    "requestReinspect": "Nachprüfung anfordern",
+    "approveConcession": "Sonderfreigabe",
+    "approve": "Freigeben",
+    "submitToManager": "An Manager weiterleiten",
+    "confirmReject": "Ablehnung bestätigen",
+    "resetConfig": "Standard wiederherstellen"
+  },
+  "placeholder": {
+    "inspectionSearch": "Prüf-Nr. / Teilenummer / Charge",
+    "materialSearch": "Teilenummer / Teilebezeichnung suchen",
+    "productLine": "Produktlinie",
+    "productLineWithGlobal": "Produktlinie (globaler Standard)",
+    "supplierId": "Lieferanten-ID",
+    "selectStatus": "Status",
+    "selectResult": "Ergebnis wählen",
+    "selectDirection": "Richtung",
+    "selectInspectionLevel": "Prüfniveau wählen",
+    "partNoExample": "z. B. RES-0805-10K",
+    "partNameExample": "z. B. SMD-Widerstand 0805 10 kΩ",
+    "specExample": "z. B. ±1 % 1/8 W",
+    "aqlExample": "z. B. 0,65",
+    "unitExample": "z. B. Stk, kg, m",
+    "resultJson": "Bitte Ergebnisse der Prüfpunkte im JSON-Format eingeben:\n[\n  {\"item_id\": \"...\", \"defect_qty\": 0, \"result\": \"accepted\", \"remark\": \"\"},\n  ...\n]"
+  },
+  "modal": {
+    "newMaterial": "Neues Material",
+    "editMaterial": "Material bearbeiten",
+    "newProfile": "Neues AQL-Profil",
+    "resetConfigTitle": "Konfiguration zurücksetzen",
+    "resetConfigContent": "Alle Konfigurationen wirklich auf Standard zurücksetzen? Dies kann nicht rückgängig gemacht werden."
+  },
+  "drawer": {
+    "recommendationDetail": "Empfehlungsdetails"
+  },
+  "chart": {
+    "noTrendData": "Keine Trenddaten",
+    "trendChartPlaceholder": "Trenddiagramm (@ant-design/charts erforderlich)",
+    "snapshotCount": "{{count}} Snapshot-Datenpunkte"
+  },
+  "import": {
+    "materialHint": "Je Zeile: Teilenummer*, Name*, Spezifikation, Typ, Standard-AQL, Prüfniveau, Einheit, Produktlinie"
+  },
+  "steps": {
+    "pending": "Ausstehend",
+    "inspecting": "In Prüfung",
+    "judged": "Bewertet",
+    "closed": "Geschlossen"
+  },
+  "inspectionMode": {
+    "quick": "Schnell",
+    "detailed": "Detailliert"
+  },
+  "materialType": {
+    "raw": "Rohmaterial",
+    "component": "Bauteil",
+    "part": "Teil",
+    "other": "Sonstiges"
+  },
+  "descriptions": {
+    "aqlLevel": "AQL-Stufe",
+    "inspectionLevel": "Prüfniveau",
+    "codeLetter": "Kennbuchstabe",
+    "acceptNo": "Ac",
+    "rejectNo": "Re",
+    "totalBatches": "Lose gesamt",
+    "consecutiveAccepted": "In Folge angenommen",
+    "consecutiveRejected": "In Folge zurückgewiesen",
+    "last30dBatches": "Lose (30 Tage)",
+    "last30dPpm": "PPM (30 Tage)",
+    "last90dPpm": "PPM (90 Tage)",
+    "supplierRating": "Lieferantenbewertung",
+    "openScar": "Offene SCAR",
+    "safetyDefect": "Sicherheitsfehler",
+    "linkedComplaint": "Verknüpfte Reklamation",
+    "calculatedState": "Berechneter Zustand"
+  },
+  "validation": {
+    "enterPartNo": "Bitte Teilenummer eingeben",
+    "enterPartName": "Bitte Teilebezeichnung eingeben",
+    "enterSupplierId": "Bitte Lieferanten-ID eingeben",
+    "enterMaterialId": "Bitte Material-ID eingeben",
+    "enterBaseAql": "Bitte Basis-AQL eingeben",
+    "enterCurrentAql": "Bitte aktuellen AQL eingeben",
+    "enterProductLine": "Bitte Produktlinie eingeben",
+    "enterResultJson": "Bitte Ergebnisse der Prüfpunkte eingeben"
+  }
+}

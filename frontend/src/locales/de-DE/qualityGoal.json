@@ -1,0 +1,113 @@
+{
+  "pageTitle": {
+    "list": "Qualitätsziele"
+  },
+  "pageSubtitle": {
+    "list": "QMS-Qualitätszielverwaltung · Zielsetzung · Freigabe · Zielerreichung"
+  },
+  "status": {
+    "draft": "Entwurf",
+    "pending": "Freigabe ausstehend",
+    "active": "Aktiv",
+    "archived": "Archiviert"
+  },
+  "level": {
+    "1": "Unternehmen",
+    "2": "Produktlinie",
+    "3": "Prozess"
+  },
+  "achievement": {
+    "achieved": "Erreicht",
+    "not_achieved": "Nicht erreicht",
+    "pending": "Eingabe ausstehend"
+  },
+  "period": {
+    "monthly": { "value": "月度", "label": "Monatlich" },
+    "quarterly": { "value": "季度", "label": "Quartalsweise" },
+    "yearly": { "value": "年度", "label": "Jährlich" }
+  },
+  "stats": {
+    "totalGoals": "Ziele gesamt",
+    "active": "Aktiv",
+    "pendingApproval": "Freigabe ausstehend",
+    "achievementRate": "Erreichungsquote"
+  },
+  "card": {
+    "goalList": "Liste der Qualitätsziele"
+  },
+  "tabs": {
+    "all": "Alle",
+    "pendingMe": "Wartet auf meine Freigabe",
+    "my": "Meine Ziele",
+    "draft": "Entwurf"
+  },
+  "table": {
+    "name": "Kennzahl",
+    "progress": "Fortschritt & Erreichung",
+    "target": "Ziel",
+    "actual": "Ist",
+    "period": "Zeitraum",
+    "owner": "Verantwortlich",
+    "status": "Status",
+    "operations": "Aktionen"
+  },
+  "actions": {
+    "newGoal": "Neues Ziel",
+    "updateValue": "Wert aktualisieren",
+    "archive": "Archivieren",
+    "withdraw": "Zurückziehen"
+  },
+  "form": {
+    "level": "Ebene",
+    "parentGoal": "Übergeordnetes Ziel",
+    "productLine": "Produktlinie",
+    "name": "Kennzahl",
+    "targetValue": "Zielwert",
+    "unit": "Einheit",
+    "period": "Zeitraum",
+    "owner": "Verantwortlich",
+    "description": "Beschreibung"
+  },
+  "placeholder": {
+    "rejectReason": "Ablehnungsgrund eingeben",
+    "productLine": "z. B. DC-DC-100",
+    "name": "z. B. Reklamationsquote",
+    "targetValue": "z. B. ≤500 oder ≥90 %",
+    "unit": "z. B. PPM, %",
+    "parentGoal": "Übergeordnetes Ziel wählen (auf Unternehmensebene nicht nötig)",
+    "selectLevel": "Ebene wählen",
+    "selectPeriod": "Zeitraum wählen",
+    "selectOwner": "Verantwortlichen wählen"
+  },
+  "modal": {
+    "newGoal": "Neues Qualitätsziel",
+    "editGoal": "Qualitätsziel bearbeiten",
+    "rejectReason": "Ablehnungsgrund"
+  },
+  "validation": {
+    "levelRequired": "Bitte Ebene wählen",
+    "nameRequired": "Bitte Kennzahl eingeben",
+    "targetValueRequired": "Bitte Zielwert eingeben",
+    "unitRequired": "Bitte Einheit eingeben",
+    "periodRequired": "Bitte Zeitraum wählen",
+    "ownerRequired": "Bitte Verantwortlichen wählen"
+  },
+  "messages": {
+    "loadFailed": "Daten konnten nicht geladen werden",
+    "createSuccess": "Erfolgreich angelegt",
+    "updateSuccess": "Erfolgreich aktualisiert",
+    "deleteSuccess": "Erfolgreich gelöscht",
+    "submitSuccess": "Zur Freigabe eingereicht",
+    "withdrawSuccess": "Zurückgezogen",
+    "approveSuccess": "Freigegeben",
+    "rejectSuccess": "Abgelehnt",
+    "archiveSuccess": "Archiviert",
+    "actualValueUpdated": "Istwert aktualisiert",
+    "operationFailed": "Vorgang fehlgeschlagen",
+    "updateFailed": "Aktualisierung fehlgeschlagen",
+    "deleteFailed": "Löschen fehlgeschlagen"
+  },
+  "prompt": {
+    "actualValue": "Bitte Istwert eingeben:"
+  }
+}

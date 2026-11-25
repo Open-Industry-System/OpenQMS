@@ -1,0 +1,93 @@
+{
+  "yes": "Ja",
+  "no": "Nein",
+  "language": {
+    "de": "Deutsch",
+    "en": "English",
+    "switch": "Sprache wechseln"
+  },
+  "app": {
+    "title": "OpenQMS – Intelligente Qualitätsmanagement-Plattform"
+  },
+  "actions": {
+    "save": "Speichern",
+    "submit": "Absenden",
+    "cancel": "Abbrechen",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "view": "Anzeigen",
+    "search": "Suchen",
+    "reset": "Zurücksetzen",
+    "loading": "Wird geladen",
+    "confirm": "Bestätigen",
+    "close": "Schließen",
+    "add": "Hinzufügen",
+    "refresh": "Aktualisieren",
+    "back": "Zurück",
+    "more": "Mehr",
+    "create": "Anlegen",
+    "complete": "Fertig",
+    "update": "Aktualisieren",
+    "import": "Importieren",
+    "export": "Exportieren",
+    "download": "Herunterladen",
+    "upload": "Hochladen",
+    "filter": "Filtern",
+    "sort": "Sortieren",
+    "copy": "Kopieren",
+    "move": "Verschieben",
+    "archive": "Archivieren",
+    "approve": "Freigeben",
+    "reject": "Ablehnen",
+    "revoke": "Widerrufen",
+    "send": "Senden",
+    "print": "Drucken",
+    "preview": "Vorschau",
+    "detail": "Details",
+    "settings": "Einstellungen"
+  },
+  "status": {
+    "success": "Erfolgreich",
+    "error": "Fehler",
+    "warning": "Warnung",
+    "info": "Info",
+    "pending": "Ausstehend",
+    "processing": "In Bearbeitung",
+    "completed": "Abgeschlossen",
+    "failed": "Fehlgeschlagen",
+    "active": "Aktiv",
+    "inactive": "Inaktiv"
+  },
+  "empty": {
+    "data": "Keine Daten",
+    "description": "Keine relevanten Daten",
+    "search": "Keine passenden Ergebnisse",
+    "select": "Bitte links auswählen"
+  },
+  "table": {
+    "noData": "Keine Daten",
+    "operations": "Aktionen",
+    "status": "Status",
+    "type": "Typ",
+    "selectAll": "Alle auswählen",
+    "selected": "{{count}} ausgewählt",
+    "total": "Insgesamt {{total}} Einträge"
+  },
+  "pagination": {
+    "total": "Insgesamt {{total}} Einträge"
+  },
+  "messages": {
+    "saveSuccess": "Erfolgreich gespeichert",
+    "saveFailed": "Speichern fehlgeschlagen",
+    "deleteSuccess": "Erfolgreich gelöscht",
+    "deleteFailed": "Löschen fehlgeschlagen",
+    "operationSuccess": "Vorgang erfolgreich",
+    "operationFailed": "Vorgang fehlgeschlagen",
+    "updateSuccess": "Erfolgreich aktualisiert",
+    "loadFailed": "Laden fehlgeschlagen",
+    "confirmDelete": "Wirklich löschen?",
+    "confirmOperation": "Diesen Vorgang bestätigen?",
+    "loading": "Wird geladen ...",
+    "noPermission": "Keine Berechtigung für diesen Vorgang"
+  }
+}

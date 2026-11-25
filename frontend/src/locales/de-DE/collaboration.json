@@ -1,0 +1,27 @@
+{
+  "conflict": {
+    "title": "Speicherkonflikt",
+    "documentChanged": "Das Dokument wurde von anderen geändert",
+    "changedBy": "{{user}} hat Änderungen gespeichert",
+    "changedByOther": "Das Dokument wurde während Ihrer Bearbeitung von einem anderen Benutzer gespeichert",
+    "changesCount": "Ein anderer Benutzer hat {{count}} Änderungen vorgenommen",
+    "conflictsCount": "{{count}} Konflikte",
+    "added": "{{type}} {{name}} hinzugefügt",
+    "removed": "{{type}} {{name}} entfernt",
+    "modified": "{{field}} von {{type}} {{name}} geändert",
+    "conflictTag": "Konflikt",
+    "moreChanges": "{{count}} weitere Änderungen ...",
+    "refresh": "Meine Änderungen verwerfen und neu laden",
+    "forceSave": "Erzwungen speichern (andere Änderungen überschreiben)"
+  },
+  "bar": {
+    "editing": "Bearbeitet",
+    "viewing": "Ansicht",
+    "onlyYou": "Nur Sie",
+    "onlineCount": "{{count}} Benutzer online",
+    "syncFailed": "Synchronisierung der Zusammenarbeit fehlgeschlagen"
+  },
+  "activeUser": {
+    "editing": "{{users}} bearbeitet gerade"
+  }
+}

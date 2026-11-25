@@ -1,0 +1,9 @@
+{
+  "newFailureMode": "Neue Fehlerart",
+  "newFailureEffect": "Neue Fehlerfolge",
+  "newFailureCause": "Neue Fehlerursache",
+  "designPreventionControl": "Aktuelle Vermeidungsmaßnahme (Design)",
+  "designDetectionControl": "Aktuelle Entdeckungsmaßnahme (Design)",
+  "processPreventionControl": "Aktuelle Vermeidungsmaßnahme (Prozess)",
+  "processDetectionControl": "Aktuelle Entdeckungsmaßnahme (Prozess)"
+}

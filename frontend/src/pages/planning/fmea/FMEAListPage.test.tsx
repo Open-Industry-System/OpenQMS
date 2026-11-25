@@ -165,7 +165,7 @@ describe("FMEAListPage create error", () => {
   beforeEach(async () => {
     mocks.listFMEAs.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 });
     // 锁定中文，断言本地化文案（而非英文 detail 透传）
-    await i18n.changeLanguage("zh-CN");
+    await i18n.changeLanguage("de-DE");
   });
 
   it("maps duplicate document_no error to a localized Chinese message", async () => {

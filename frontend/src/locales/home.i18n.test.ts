@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import zh from "./zh-CN/home.json";
+import zh from "./de-DE/home.json";
 import en from "./en-US/home.json";
 
 function shape(value: unknown): unknown {

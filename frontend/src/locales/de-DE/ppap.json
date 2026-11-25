@@ -1,0 +1,115 @@
+{
+  "pageTitle": {
+    "ppapManagement": "PPAP-Verwaltung",
+    "ppapManagementSubtitle": "Pakete für den Produktionsteil-Freigabeprozess einreichen, prüfen und freigeben",
+    "ppapList": "PPAP-Einreichungen",
+    "newPPAP": "Neues PPAP",
+    "ppapDetailSubtitle": "Details, Elementstatus und Freigabefortschritt der PPAP-Einreichung anzeigen"
+  },
+  "card": {
+    "ppapList": "Liste der PPAP-Einreichungen"
+  },
+  "tab": {
+    "all": "Alle",
+    "draft": "Entwurf",
+    "underReview": "In Prüfung",
+    "approved": "Freigegeben",
+    "rejected": "Abgelehnt"
+  },
+  "status": {
+    "draft": "Entwurf",
+    "underReview": "In Prüfung",
+    "approved": "Freigegeben",
+    "rejected": "Abgelehnt"
+  },
+  "elementStatus": {
+    "pending": "Ausstehend",
+    "inReview": "In Prüfung",
+    "approved": "Freigegeben",
+    "notApplicable": "Nicht zutreffend"
+  },
+  "kpi": {
+    "total": "PPAP gesamt",
+    "pending": "Ausstehend",
+    "approved": "Freigegeben",
+    "rejected": "Abgelehnt"
+  },
+  "column": {
+    "ppapNo": "PPAP-Nr.",
+    "supplier": "Lieferant",
+    "partNo": "Teilenummer",
+    "partName": "Teilebezeichnung",
+    "submissionLevel": "Vorlagestufe",
+    "status": "Status",
+    "revision": "Revision",
+    "createdAt": "Angelegt am",
+    "action": "Aktion"
+  },
+  "elementColumn": {
+    "no": "Nr.",
+    "elementName": "Elementname",
+    "required": "Erforderlich",
+    "status": "Status",
+    "reviewer": "Prüfer",
+    "reviewTime": "Geprüft am",
+    "file": "Datei",
+    "notes": "Notizen",
+    "action": "Aktion"
+  },
+  "form": {
+    "supplier": "Lieferant",
+    "partNo": "Teilenummer",
+    "partName": "Teilebezeichnung",
+    "submissionLevel": "Vorlagestufe",
+    "customerName": "Kundenname",
+    "productLine": "Produktlinie"
+  },
+  "placeholder": {
+    "searchSupplier": "Lieferant suchen"
+  },
+  "label": {
+    "required": "Ja",
+    "notRequired": "—",
+    "version": "Revision {{revision}}",
+    "status": "Status",
+    "ppapInfo": "PPAP-Informationen",
+    "rejectionReason": "Ablehnungsgrund",
+    "elements": "18 Elemente",
+    "filePath": "Dateipfad",
+    "notes": "Notizen",
+    "submissionDate": "Einreichungsdatum"
+  },
+  "level": {
+    "1": "Stufe 1",
+    "2": "Stufe 2",
+    "3": "Stufe 3",
+    "4": "Stufe 4",
+    "5": "Stufe 5"
+  },
+  "action": {
+    "submitForReview": "Zur Prüfung einreichen",
+    "approve": "Freigeben",
+    "reject": "Ablehnen",
+    "resubmit": "Erneut einreichen",
+    "delete": "Löschen",
+    "view": "Anzeigen",
+    "editElement": "Element bearbeiten"
+  },
+  "modal": {
+    "rejectTitle": "PPAP ablehnen",
+    "rejectPlaceholder": "Bitte Ablehnungsgrund eingeben",
+    "editElementTitle": "Element bearbeiten: {{name}}"
+  },
+  "message": {
+    "createSuccess": "PPAP erfolgreich angelegt",
+    "statusUpdated": "Status aktualisiert",
+    "elementUpdated": "Element aktualisiert",
+    "deleted": "PPAP gelöscht",
+    "enterRejectReason": "Bitte Ablehnungsgrund eingeben",
+    "deleteConfirmTitle": "Löschen bestätigen",
+    "deleteConfirmContent": "Möchten Sie diese PPAP-Einreichung wirklich löschen? Dies kann nicht rückgängig gemacht werden.",
+    "selectSupplier": "Bitte Lieferanten auswählen",
+    "enterPartNo": "Bitte Teilenummer eingeben",
+    "enterPartName": "Bitte Teilebezeichnung eingeben"
+  }
+}

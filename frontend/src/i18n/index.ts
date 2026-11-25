@@ -16,7 +16,7 @@ for (const [path, content] of Object.entries(modules)) {
   resources[lng][ns] = content;
 }
 
-export const SUPPORTED_LANGUAGES = ["zh-CN", "en-US"] as const;
+export const SUPPORTED_LANGUAGES = ["de-DE", "en-US"] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 i18n
@@ -24,10 +24,10 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
-    fallbackLng: "zh-CN",
+    fallbackLng: "de-DE",
     supportedLngs: SUPPORTED_LANGUAGES,
     detection: {
-      order: ["localStorage", "navigator"],
+      order: ["localStorage"],
       caches: ["localStorage"],
       lookupLocalStorage: "openqms_locale",
     },
@@ -35,7 +35,7 @@ i18n
       escapeValue: false,
     },
     defaultNS: "common",
-    ns: Object.keys(resources["zh-CN"] || {}),
+    ns: Object.keys(resources["de-DE"] || {}),
     react: {
       useSuspense: false,
     },

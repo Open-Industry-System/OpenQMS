@@ -1,0 +1,16 @@
+{
+  "title": "Protokollverwaltung",
+  "tabs": { "audit": "Audit-Protokoll", "login": "Anmeldeprotokoll", "system": "Systemprotokoll" },
+  "filters": {
+    "table_name": "Tabelle", "action": "Aktion", "operated_by": "Bearbeiter",
+    "username": "Benutzername", "result": "Ergebnis", "all": "Alle", "success": "Erfolgreich", "fail": "Fehlgeschlagen",
+    "level": "Level", "logger_name": "Logger", "timeRange": "Zeitraum", "search": "Suchen"
+  },
+  "columns": {
+    "operated_at": "Zeit", "occurred_at": "Zeit", "table_name": "Tabelle", "action": "Aktion",
+    "operated_by": "Bearbeiter", "ip": "IP", "username": "Benutzername", "result": "Ergebnis",
+    "failure_reason": "Fehlergrund", "level": "Level", "logger_name": "Logger", "message": "Meldung"
+  },
+  "expand": { "oldValues": "Alte Werte", "newValues": "Neue Werte", "changedFields": "Geänderte Felder", "traceback": "Traceback" },
+  "error": { "load": "Laden fehlgeschlagen" }
+}

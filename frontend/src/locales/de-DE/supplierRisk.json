@@ -1,0 +1,135 @@
+{
+  "page": {
+    "title": "Lieferantenrisikobewertung",
+    "evaluateAll": "Jetzt alle bewerten",
+    "evaluateSuccess": "Bewertung abgeschlossen",
+    "evaluateFailed": "Bewertung fehlgeschlagen",
+    "highRiskSuppliers": "Lieferanten mit hohem Risiko",
+    "criticalRisk": "Kritisches Risiko",
+    "openAlerts": "Offene Warnungen",
+    "avgRiskScore": "Durchschnittliche Risikobewertung",
+    "riskMatrixTitle": "Risikomatrix (Qualität vs. Lieferung)",
+    "alertListTitle": "Warnungsliste",
+    "noData": "Keine Daten"
+  },
+  "config": {
+    "title": "Konfiguration der Risikoregeln",
+    "rules": "Regelkonfiguration",
+    "channels": "Benachrichtigungskanäle"
+  },
+  "alert": {
+    "columns": {
+      "supplierNo": "Lieferanten-Nr.",
+      "supplierName": "Lieferantenname",
+      "riskLevel": "Risikostufe",
+      "riskScore": "Risikobewertung",
+      "status": "Status",
+      "snapshotDate": "Snapshot-Datum",
+      "actions": "Aktionen"
+    },
+    "placeholder": {
+      "riskLevel": "Risikostufe",
+      "status": "Status"
+    },
+    "handle": "Bearbeiten",
+    "riskLevels": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    },
+    "statuses": {
+      "open": "Offen",
+      "acknowledged": "Zur Kenntnis genommen",
+      "action_taken": "Maßnahme ergriffen",
+      "ignored": "Ignoriert",
+      "closed": "Geschlossen"
+    }
+  },
+  "channel": {
+    "add": "Kanal hinzufügen",
+    "addTitle": "Benachrichtigungskanal hinzufügen",
+    "columns": {
+      "type": "Typ",
+      "minRiskLevel": "Min. Risikostufe",
+      "enabled": "Aktiviert",
+      "actions": "Aktionen"
+    },
+    "types": {
+      "email": "E-Mail",
+      "webhook": "Webhook"
+    },
+    "minRiskLevels": {
+      "high": "Hoch",
+      "critical": "Kritisch"
+    },
+    "form": {
+      "type": "Typ",
+      "minRiskLevel": "Min. Risikostufe",
+      "emailAddresses": "E-Mail-Adressen (kommagetrennt)",
+      "webhookUrl": "Webhook-URL",
+      "secret": "Signaturschlüssel"
+    },
+    "placeholders": {
+      "emailAddresses": "a@b.de,c@d.de",
+      "webhookUrl": "https://hooks.example.com/..."
+    },
+    "messages": {
+      "created": "Angelegt",
+      "createFailed": "Anlegen fehlgeschlagen",
+      "updateFailed": "Aktualisierung fehlgeschlagen",
+      "deleted": "Gelöscht",
+      "deleteFailed": "Löschen fehlgeschlagen"
+    }
+  },
+  "handleDrawer": {
+    "title": "Warnung bearbeiten – {{supplier_name}}",
+    "labels": {
+      "riskLevel": "Risikostufe",
+      "totalScore": "Gesamtrisikobewertung",
+      "qualityScore": "Qualitätsbewertung",
+      "deliveryScore": "Lieferbewertung",
+      "complianceScore": "Compliance-Bewertung",
+      "currentStatus": "Aktueller Status"
+    },
+    "notePlaceholder": "Bearbeitungsnotiz (beim Ignorieren erforderlich)",
+    "actions": {
+      "acknowledge": "Zur Kenntnis nehmen",
+      "ignore": "Ignorieren",
+      "close": "Schließen",
+      "createScar": "SCAR anlegen",
+      "createCapa": "CAPA anlegen"
+    },
+    "messages": {
+      "ignoreReasonRequired": "Zum Ignorieren der Warnung ist ein Grund erforderlich",
+      "operationSuccess": "Vorgang erfolgreich",
+      "operationFailed": "Vorgang fehlgeschlagen",
+      "scarCreated": "SCAR angelegt",
+      "capaCreated": "CAPA angelegt",
+      "createFailed": "Anlegen fehlgeschlagen"
+    }
+  },
+  "ruleConfig": {
+    "columns": {
+      "rule": "Regel",
+      "category": "Kategorie",
+      "enabled": "Aktiviert",
+      "weight": "Gewichtung",
+      "threshold": "Schwellenwert"
+    },
+    "categories": {
+      "quality": "Qualität",
+      "delivery": "Lieferung",
+      "compliance": "Compliance"
+    },
+    "messages": {
+      "updateSuccess": "Aktualisiert",
+      "weightUpdated": "Gewichtung aktualisiert",
+      "updateFailed": "Aktualisierung fehlgeschlagen"
+    }
+  },
+  "riskMatrix": {
+    "xAxis": "Qualitätsrisikobewertung",
+    "yAxis": "Lieferrisikobewertung"
+  }
+}

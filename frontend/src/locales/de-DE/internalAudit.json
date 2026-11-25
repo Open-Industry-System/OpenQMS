@@ -1,0 +1,196 @@
+{
+  "pageTitle": {
+    "list": "Verwaltung interner Audits",
+    "detail": "Details des internen Audits"
+  },
+  "pageSubtitle": {
+    "list": "Jährliche Auditprogramme & Durchführungsverfolgung",
+    "detail": "Details des internen Auditplans"
+  },
+  "stats": {
+    "annualPrograms": "Jahresprogramme",
+    "plannedAudits": "Geplante Audits",
+    "openFindings": "Offene Feststellungen",
+    "majorNc": "Hauptabweichungen",
+    "totalFindings": "Feststellungen gesamt",
+    "minorNc": "Nebenabweichungen",
+    "ofi": "Verbesserungspotenziale",
+    "unclosed": "Nicht abgeschlossen"
+  },
+  "auditType": {
+    "system": "System",
+    "process": "Prozess",
+    "product": "Produkt"
+  },
+  "status": {
+    "audit": {
+      "planned": "Geplant",
+      "in_progress": "In Durchführung",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgesagt"
+    },
+    "finding": {
+      "open": "Offen",
+      "in_progress": "In Bearbeitung",
+      "verified": "Verifiziert",
+      "closed": "Geschlossen"
+    }
+  },
+  "findingType": {
+    "major_nc": "Hauptabweichung",
+    "minor_nc": "Nebenabweichung",
+    "ofi": "Verbesserungspotenzial",
+    "observation": "Beobachtung"
+  },
+  "resultOptions": {
+    "conform": {
+      "value": "符合",
+      "label": "Konform"
+    },
+    "nonConform": {
+      "value": "不符合",
+      "label": "Nicht konform"
+    },
+    "notApplicable": {
+      "value": "不适用",
+      "label": "Nicht zutreffend"
+    }
+  },
+  "table": {
+    "planNo": "Plan-Nr.",
+    "auditType": "Art",
+    "auditScope": "Auditumfang",
+    "plannedDate": "Geplantes Datum",
+    "leadAuditor": "Leitender Auditor",
+    "status": "Status",
+    "findingCount": "Feststellungen",
+    "operations": "Aktionen",
+    "serialNo": "Nr.",
+    "clause": "Abschnitt",
+    "question": "Frage",
+    "result": "Ergebnis",
+    "evidence": "Nachweis",
+    "note": "Notiz",
+    "clauseRef": "Normabschnitt",
+    "description": "Beschreibung",
+    "dueDate": "Fälligkeitsdatum",
+    "capa": "CAPA"
+  },
+  "actions": {
+    "newProgram": "Neues Programm",
+    "newPlan": "Neuer Plan",
+    "auditorManagement": "Auditorenverwaltung",
+    "viewDetail": "Details anzeigen",
+    "start": "Starten",
+    "complete": "Abschließen",
+    "addChecklistItem": "Checklistenpunkt hinzufügen",
+    "addFinding": "Feststellung hinzufügen",
+    "printReport": "Bericht drucken",
+    "viewCapa": "CAPA anzeigen",
+    "createCapa": "CAPA anlegen",
+    "closeFinding": "Schließen"
+  },
+  "form": {
+    "year": "Jahr",
+    "auditType": "Auditart",
+    "scope": "Auditumfang",
+    "criteria": "Auditkriterien",
+    "program": "Programm",
+    "plannedDate": "Geplantes Datum",
+    "leadAuditor": "Leitender Auditor",
+    "actualDate": "Tatsächliches Datum",
+    "teamMembers": "Teammitglieder",
+    "clauseRef": "Normabschnitt",
+    "findingType": "Art der Feststellung",
+    "description": "Beschreibung",
+    "dueDate": "Fälligkeitsdatum"
+  },
+  "placeholder": {
+    "year": "z. B. 2026",
+    "auditType": "Auditart wählen",
+    "scope": "Umfang des Audits beschreiben",
+    "criteria": "z. B. ISO 9001, IATF 16949",
+    "program": "Auditprogramm wählen",
+    "plannedDate": "Geplantes Datum wählen",
+    "leadAuditor": "Leitenden Auditor wählen",
+    "selectResult": "Ergebnis wählen",
+    "evidence": "Nachweis eingeben",
+    "note": "Notiz eingeben",
+    "clauseRef": "z. B. 4.1, 8.5.1",
+    "findingType": "Art wählen",
+    "description": "Feststellung beschreiben"
+  },
+  "modal": {
+    "newProgram": "Neues Programm",
+    "newPlan": "Neuer Plan",
+    "addFinding": "Feststellung hinzufügen"
+  },
+  "drawer": {
+    "auditorManagement": "Auditorenverwaltung"
+  },
+  "auditorTable": {
+    "username": "Benutzername",
+    "displayName": "Anzeigename",
+    "qualifications": "Qualifikationen",
+    "lastQualificationDate": "Letzte Qualifizierung"
+  },
+  "prompt": {
+    "qualifications": "Qualifikationsarten (kommagetrennt):"
+  },
+  "tabs": {
+    "all": "Alle",
+    "planned": "Geplant",
+    "in_progress": "In Durchführung",
+    "completed": "Abgeschlossen",
+    "checklist": "Checkliste",
+    "findings": "Feststellungen",
+    "report": "Auditbericht"
+  },
+  "report": {
+    "findingDistribution": "Verteilung der Feststellungen",
+    "findingList": "Liste der Feststellungen",
+    "statusLabel": "Status",
+    "dueLabel": "Fällig",
+    "noFindings": "Keine Feststellungen"
+  },
+  "card": {
+    "basicInfo": "Grunddaten",
+    "auditDetail": "Auditdetails",
+    "auditPlans": "Auditpläne"
+  },
+  "messages": {
+    "loadPlansFailed": "Auditpläne konnten nicht geladen werden",
+    "loadFindingsFailed": "Feststellungen konnten nicht geladen werden",
+    "programCreated": "Programm erfolgreich angelegt",
+    "planCreated": "Plan erfolgreich angelegt",
+    "auditStarted": "Audit gestartet",
+    "auditCompleted": "Audit abgeschlossen",
+    "planCancelled": "Plan abgesagt",
+    "auditorUpdated": "Auditordaten aktualisiert",
+    "updateFailed": "Aktualisierung fehlgeschlagen",
+    "saveFailed": "Speichern fehlgeschlagen",
+    "addFailed": "Hinzufügen fehlgeschlagen",
+    "deleteFailed": "Löschen fehlgeschlagen",
+    "findingCreated": "Feststellung angelegt",
+    "findingClosed": "Feststellung geschlossen",
+    "capaCreated": "CAPA angelegt: {{documentNo}}",
+    "createCapaFailed": "CAPA konnte nicht angelegt werden"
+  },
+  "confirm": {
+    "cancel": "Absage bestätigen?"
+  },
+  "empty": {
+    "noFinding": "Keine Feststellungen"
+  },
+  "validation": {
+    "yearRequired": "Bitte Jahr eingeben",
+    "auditTypeRequired": "Bitte Auditart wählen",
+    "scopeRequired": "Bitte Auditumfang eingeben",
+    "criteriaRequired": "Bitte Auditkriterien eingeben",
+    "programRequired": "Bitte Programm wählen",
+    "plannedDateRequired": "Bitte geplantes Datum wählen",
+    "leadAuditorRequired": "Bitte leitenden Auditor wählen",
+    "findingTypeRequired": "Bitte Art der Feststellung wählen",
+    "descriptionRequired": "Bitte Beschreibung eingeben"
+  }
+}

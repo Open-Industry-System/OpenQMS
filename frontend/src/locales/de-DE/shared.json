@@ -1,0 +1,17 @@
+{
+  "import": {
+    "title": "Massenimport",
+    "success": "{{count}} Datensätze erfolgreich importiert",
+    "failed": "Import fehlgeschlagen, bitte Dateiformat prüfen",
+    "reselect": "Andere Datei wählen",
+    "cancel": "Abbrechen",
+    "dragText": "Klicken oder .xlsx-Datei hierher ziehen, um sie hochzuladen",
+    "downloadTemplate": "Importvorlage herunterladen",
+    "fileTooLarge": "Datei überschreitet das Limit von 10 MB",
+    "columns": {
+      "row": "Zeile",
+      "field": "Feld",
+      "message": "Fehlermeldung"
+    }
+  }
+}

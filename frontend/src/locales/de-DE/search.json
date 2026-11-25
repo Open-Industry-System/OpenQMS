@@ -1,0 +1,27 @@
+{
+  "qa": {
+    "answerTitle": "💬 Antwort",
+    "sourcesTitle": "Quellen ({{count}})",
+    "relevance": "Relevanz: {{score}} %",
+    "queryTime": "Abfragezeit: {{ms}} ms | LLM: {{available}}",
+    "placeholder": "Frage in natürlicher Sprache eingeben, um historische Qualitätsdaten zu durchsuchen ...",
+    "search": "Suchen",
+    "qa": "Fragen & Antworten",
+    "switchToSearch": "Zum Suchmodus wechseln",
+    "switchToQa": "Zum Frage-Antwort-Modus wechseln",
+    "filterType": "Typ filtern",
+    "entityTypes": {
+      "fmeaNode": "FMEA-Knoten",
+      "capa": "CAPA / 8D-Bericht",
+      "auditFinding": "Auditfeststellung",
+      "complaint": "Kundenreklamation",
+      "scar": "SCAR",
+      "rma": "RMA-Rücksendung"
+    },
+    "productType": "Produkttyp",
+    "productLine": "Produktlinie",
+    "resultsFound": "{{count}} Ergebnisse in {{ms}} ms gefunden",
+    "similarity": "Ähnlichkeit: {{score}} % | Quelle: {{source}}",
+    "startSearch": "Frage eingeben, um die Suche zu starten"
+  }
+}

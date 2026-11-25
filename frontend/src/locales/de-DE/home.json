@@ -1,0 +1,75 @@
+{
+  "nav": {
+    "ai": "KI-Qualitätsintelligenz",
+    "capabilities": "Kernfunktionen",
+    "architecture": "Architektur",
+    "openSource": "Open Source",
+    "enterSystem": "Zum System"
+  },
+  "hero": {
+    "eyebrow": "KI-NATIVES QUALITÄTSMANAGEMENT",
+    "title": "Qualitätsdaten in umsetzbares Wissen verwandeln.",
+    "description": "OpenQMS bettet KI in FMEA, 8D, Prozessanalyse und Wissenswiederverwendung ein, damit Qualitätsingenieure Risiken schneller erkennen, Ursachen validieren und Erfahrungen sichern können.",
+    "demo": "Online-Demo",
+    "login": "Zum System",
+    "github": "Auf GitHub ansehen",
+    "graphLabel": "Qualitäts-KI-Kern",
+    "graphNodes": ["FMEA-Risiko", "SPC-Prozess", "8D-Abschluss", "Lieferantenqualität", "Wissensgraph"]
+  },
+  "metrics": [
+    { "value": "20+", "label": "Qualitätsmodule" },
+    { "value": "AIAG-VDA", "label": "Sieben-Schritt-Methode" },
+    { "value": "IATF 16949", "label": "Abdeckung der Kernprozesse" },
+    { "value": "MIT", "label": "Open-Source-Lizenz" }
+  ],
+  "ai": {
+    "eyebrow": "SO ARBEITET DIE KI IN OPENQMS",
+    "title": "KI ist der Copilot des Qualitätsingenieurs – kein Blackbox-Entscheider.",
+    "description": "Das System sammelt Belege aus dem Qualitätskontext, verdichtet sie zu Vorschlägen und schreibt erst nach menschlicher Bestätigung zurück. Jeder Vorschlag behält Quelle, Konfidenz und Audit-Trail.",
+    "stages": [
+      { "index": "01 · KONTEXT", "title": "Qualitätskontext verbinden", "body": "FMEA, CAPA, SPC, Wareneingang, MES, Lieferantendaten und Lessons Learned" },
+      { "index": "02 · ABRUF", "title": "Über mehrere Wege abrufen", "body": "Wissensgraph, semantische Suche, Regel-Engines und historische Fälle" },
+      { "index": "03 · SCHLUSSFOLGERUNG", "title": "Zusammenführen und Vorschläge erzeugen", "body": "Kandidaten deduplizieren, bewerten, mit Kontext anreichern und strukturiert per LLM ausgeben" },
+      { "index": "04 · GOVERNANCE", "title": "Bestätigen und auditieren", "body": "Berechtigungsprüfungen, menschliche Freigabe, Quellenkennzeichnung und Audit-Protokolle" }
+    ],
+    "useCases": [
+      { "title": "FMEA-Empfehlungen", "body": "Unterstützung bei Funktionen, Fehlern, Ursachen, Maßnahmen und Optimierungen." },
+      { "title": "8D-Ursachen und -Maßnahmen", "body": "Qualitätsdaten über 12 Stufen orchestrieren und nachvollziehbare Kandidaten erzeugen." },
+      { "title": "Fragen & Antworten zum Qualitätswissen", "body": "Hybrides RAG über historische Dokumente und Knoten, beschränkt auf die Benutzerberechtigungen." },
+      { "title": "Trendinterpretation und Entwürfe", "body": "Qualitätstrends deuten und 8D-Schritte sowie Inhalte der Managementbewertung entwerfen." }
+    ],
+    "trust": ["Sichtbare Quellen", "Nachvollziehbare Übernahme", "Datentrennung nach Werk", "Berechtigungsbasierte Ergebnisse", "Schutzmechanismen für Ein-/Ausgaben", "Mehrere Anbieter"],
+    "principleLabel": "Grundprinzip",
+    "principle": "KI umgeht keine Geschäftsregeln und ersetzt keine fachliche Freigabe. Sie bringt Qualitätswissen aus dem gesamten System in den Entscheidungsprozess."
+  },
+  "capabilities": {
+    "eyebrow": "VERNETZTES QUALITÄTSSYSTEM",
+    "title": "Ein vollständiger Qualitätskreislauf unter der KI-Schicht",
+    "items": [
+      { "title": "Risiko und Planung", "body": "FMEA · APQP · PPAP · Produktionslenkungspläne" },
+      { "title": "Prozess und Messung", "body": "SPC · MSA · Wareneingang · Besondere Merkmale" },
+      { "title": "Probleme und Verbesserung", "body": "8D/CAPA · SCAR · Reklamationen · RMA" },
+      { "title": "Qualität in der Lieferkette", "body": "Lieferantenleistung · Risikowarnungen · Kundenqualität" },
+      { "title": "Governance und Compliance", "body": "Audits · Managementbewertung · RBAC · Mehrere Werke" },
+      { "title": "Offene Integrationen", "body": "ERP · MES · PLM · API" }
+    ]
+  },
+  "architecture": {
+    "eyebrow": "MODERNE OFFENE ARCHITEKTUR",
+    "title": "Einsatzbereit, erweiterbar und zukunftsfähig",
+    "description": "Relationale Daten sichern Transaktionen und Audit-Trails, Graphdaten liefern Wissensverknüpfungen und konfigurierbare Anbieter binden KI-Dienste an.",
+    "stack": ["React + TypeScript", "FastAPI", "SQLAlchemy", "PostgreSQL", "Neo4j", "Redis", "Docker Compose"]
+  },
+  "openSource": {
+    "eyebrow": "OFFEN ENTWICKELT",
+    "title": "Mit dem Quellcode starten und das eigene Qualitätssystem aufbauen",
+    "description": "Quellcode und Deployment-Dokumentation erkunden oder mit einem Betrachterkonto den gesamten Qualitätsablauf ausprobieren.",
+    "github": "Auf GitHub ansehen",
+    "docs": "Dokumentation lesen",
+    "demo": "Demosystem öffnen"
+  },
+  "footer": {
+    "license": "OpenQMS · MIT-Lizenz",
+    "tagline": "Open-Source-Qualitätsmanagement für die Fertigung"
+  }
+}
