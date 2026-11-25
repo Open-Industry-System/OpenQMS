@@ -17,6 +17,7 @@ dist/
 .env.*
 !.env.example
 !.env.production.example
+!.env.pi.example
 backups/
 
 # ── Database / storage ───────────────────────────────────────────────────────

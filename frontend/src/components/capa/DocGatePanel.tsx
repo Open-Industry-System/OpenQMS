@@ -232,9 +232,9 @@ export default function DocGatePanel({
     } catch (e: unknown) {
       if (!request.current()) return;
       const msg = errMsg(e);
-      if (msg.includes("文档已变更")) {
+      if (["文档已变更", "Dokument wurde", "Document changed"].some((m) => msg.includes(m))) {
         message.error(t("docGate.docChanged"));
-      } else if (msg.includes("分析输入已变更")) {
+      } else if (["分析输入已变更", "Analyseeingaben haben sich geändert", "Analysis inputs changed"].some((m) => msg.includes(m))) {
         message.error(t("docGate.inputChanged"));
       } else {
         message.error(msg);

@@ -25,6 +25,12 @@ from tests.services.agent_runtime.d4_fixture_support import (
     prepared_local_trial as owned_local_trial, prepared_text_trial as d4_text_local_trial,
 )
 
+
+def _unverified_claims(token):
+    import jwt
+    return jwt.decode(token, options={"verify_signature": False})
+
+
 pytestmark = pytest.mark.requires_db
 
 
@@ -212,9 +218,9 @@ async def test_default_admission_and_missing_or_expired_token_fail_closed(comman
     missing = await c.client.post('/api/agent/runtime/capa/d5/proposals', json={
         'command_key': 'new', 'text': 'text'}, headers={'Authorization': ''})
     assert missing.status_code == 401
-    from jose import jwt
+    import jwt
     from app.config import settings
-    claims = jwt.get_unverified_claims(c.token)
+    claims = _unverified_claims(c.token)
     claims['exp'] = 1
     token = jwt.encode(claims, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     expired = await c.client.post('/api/agent/runtime/capa/d5/proposals', json={

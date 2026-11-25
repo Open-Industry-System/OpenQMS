@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 import uuid
 
 import pytest
-from jose import jwt
+import jwt
 from pydantic import ValidationError
 from sqlalchemy import event, update
 from sqlalchemy import select, text
@@ -18,6 +18,11 @@ from app.models.agent_task import AgentRun, AgentTask
 from app.models.user import User
 
 
+def _unverified_claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+
 def auth():
     from app.services.agent_runtime import run_auth
     return run_auth
@@ -28,7 +33,7 @@ def token_for(active_run, **changes):
     token = auth().issue_run_token(run, installation, "single", 0)
     if not changes:
         return token
-    payload = jwt.get_unverified_claims(token)
+    payload = _unverified_claims(token)
     payload.update(changes)
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
@@ -43,7 +48,7 @@ def test_ttl_has_bounded_configuration():
 @pytest.mark.asyncio
 async def test_runtime_token_has_short_lifetime_and_db_owned_identity(db, active_run):
     token = token_for(active_run)
-    payload = jwt.get_unverified_claims(token)
+    payload = _unverified_claims(token)
     assert payload["iss"] == payload["aud"] == "openqms-agent-runtime"
     assert payload["type"] == "agent_run"
     assert 0 < payload["exp"] - datetime.now(UTC).timestamp() <= settings.AGENT_RUN_TOKEN_TTL_MINUTES * 60
@@ -76,7 +81,7 @@ async def test_claims_require_exact_domain_types_and_values(db, active_run, chan
 @pytest.mark.parametrize("claim", ["iss", "aud", "type", "exp", "tenant_id", "tenant_generation",
     "run_id", "installation_id", "plugin_version", "lease_epoch", "credential_epoch"])
 async def test_required_claims_cannot_be_omitted(db, active_run, claim):
-    payload = jwt.get_unverified_claims(token_for(active_run))
+    payload = _unverified_claims(token_for(active_run))
     payload.pop(claim)
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     with pytest.raises(PermissionError):
@@ -85,7 +90,7 @@ async def test_required_claims_cannot_be_omitted(db, active_run, claim):
 
 @pytest.mark.asyncio
 async def test_bad_signature_rejected(db, active_run):
-    payload = jwt.get_unverified_claims(token_for(active_run))
+    payload = _unverified_claims(token_for(active_run))
     token = jwt.encode(payload, "wrong-secret", algorithm=settings.ALGORITHM)
     with pytest.raises(PermissionError):
         await auth().verify_run_token(db, token, None)
@@ -195,7 +200,7 @@ async def test_complete_tenant_runtime_admission_and_mismatch_before_business_sq
                             replace(owned.binding, tenant_id=uuid.uuid4()), replace(owned.binding, mode="maintenance")):
                 with pytest.raises(PermissionError):
                     await auth().verify_run_token(db, token, binding)
-            claims = jwt.get_unverified_claims(token)
+            claims = _unverified_claims(token)
             for changes in ({"tenant_id": str(uuid.uuid4())}, {"tenant_generation": owned.binding.generation + 1}):
                 forged = jwt.encode(dict(claims, **changes), settings.SECRET_KEY, algorithm=settings.ALGORITHM)
                 with pytest.raises(PermissionError):
@@ -294,5 +299,5 @@ def test_run_token_is_capped_by_persisted_lease(active_run):
     from datetime import timedelta
     run = active_run[0]
     run.lease_expires_at = datetime.now(UTC) + timedelta(seconds=30)
-    claims = jwt.get_unverified_claims(token_for(active_run))
+    claims = _unverified_claims(token_for(active_run))
     assert claims['exp'] <= run.lease_expires_at.timestamp()

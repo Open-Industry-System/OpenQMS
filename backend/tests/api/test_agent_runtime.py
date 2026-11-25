@@ -1,7 +1,7 @@
 """Actual runtime router admission and dedicated signed tenant fallback."""
 import pytest
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
+import jwt
 from sqlalchemy import update
 
 from app.config import settings
@@ -10,6 +10,11 @@ from app.main import app
 from app.models.agent_task import AgentRun
 from tests.services.agent_runtime.conftest import committed_runtime
 from tests.services.agent_runtime.test_runtime_access import direct_caps, ready_owned
+
+
+def _unverified_claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
 
 
 @pytest.mark.asyncio
@@ -52,7 +57,7 @@ async def test_actual_tenant_claim_and_signed_runtime_fallback(ready_owned, monk
         # A valid runtime token must NEVER resolve tenant on ordinary user paths.
         assert (await client.get("/api/agent/tasks", headers=auth)).status_code == 400
         assert (await client.get("/api/agent/tasks", headers={**auth, "X-Tenant-ID": slug})).status_code == 401
-        forged_user = jwt.encode({**jwt.get_unverified_claims(token), "sub": str(owned.user_id)}, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+        forged_user = jwt.encode({**_unverified_claims(token), "sub": str(owned.user_id)}, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
         assert (await client.get("/api/agent/tasks", headers={"X-Tenant-ID": slug, "Authorization": "Bearer " + forged_user})).status_code == 401
         assert (await client.get("/api/agent/runtime/capabilities-extra", headers=auth)).status_code == 400
         assert (await client.post("/api/agent/runtime/claim", json=request, headers=auth)).status_code == 400
@@ -60,7 +65,7 @@ async def test_actual_tenant_claim_and_signed_runtime_fallback(ready_owned, monk
             create_platform_admin_token(str(owned.user_id)), create_refresh_token(str(owned.user_id))[0]):
             response = await client.get("/api/agent/runtime/capabilities", headers={"X-Tenant-ID": slug, "Authorization": "Bearer " + ordinary})
             assert response.status_code == 401
-        claims = jwt.get_unverified_claims(token)
+        claims = _unverified_claims(token)
         stale = jwt.encode({**claims, "tenant_generation": claims["tenant_generation"]+1}, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
         assert (await client.get("/api/agent/runtime/capabilities", headers={"Authorization": "Bearer " + stale})).status_code == 401
         async with owned.factory(binding=owned.binding) as revoker:

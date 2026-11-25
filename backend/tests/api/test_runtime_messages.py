@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from jose import jwt
+import jwt
 from sqlalchemy import text
 
 from app.config import settings
@@ -12,6 +12,11 @@ from app.main import app
 from tests.services.agent_runtime.conftest import committed_runtime
 from tests.services.agent_runtime.test_runtime_access import direct_caps, ready_owned
 from tests.services.agent_runtime.test_runtime_messages import append, delivery
+
+
+def _unverified_claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
 
 
 @pytest.mark.asyncio
@@ -61,7 +66,7 @@ async def test_actual_message_http_signed_fallback_strict_body_and_domains(deliv
             for path, body in ((claim_path, {}), (ack_path, ack_body)):
                 result = await client.post(path, json=body, headers={"X-Tenant-ID": slug, "Authorization": "Bearer "+token})
                 assert result.status_code == 401 and "original restricted" not in result.text
-        claims = jwt.get_unverified_claims(owned.token)
+        claims = _unverified_claims(owned.token)
         wrong = jwt.encode({**claims, "tenant_id": str(uuid.uuid4())}, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
         assert (await client.post(claim_path, json={}, headers={"X-Tenant-ID": slug, "Authorization": "Bearer "+wrong})).status_code == 401
         stale = jwt.encode({**claims, "tenant_generation": claims["tenant_generation"]+1}, settings.SECRET_KEY, algorithm=settings.ALGORITHM)

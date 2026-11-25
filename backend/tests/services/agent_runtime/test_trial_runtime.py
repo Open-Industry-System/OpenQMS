@@ -1,13 +1,18 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from jose import jwt
+import jwt
 import pytest
 from sqlalchemy import func, select
 
 from app.models.agent_runtime_event import AgentProjectionReceipt
 from app.models.audit import AuditLog
 from tests.e2e.agent_local_trial_harness import owned_local_trial, MARKER
+
+
+def _unverified_claims(token):
+    return jwt.decode(token, options={"verify_signature": False})
+
 
 
 @pytest.mark.asyncio
@@ -20,7 +25,7 @@ async def test_trial_claim_binds_current_policy_and_caps_lease_without_retry_ext
     response = await owned.claim()
     assert response.status_code == 200, response.text
     claim = response.json()
-    claims = jwt.get_unverified_claims(claim['token'])
+    claims = _unverified_claims(claim['token'])
     assert claims.get('trial_binding_sha256') == owned.policy.entries[0].binding_sha256
     assert datetime.fromisoformat(claim['lease_expires_at']) <= owned.policy.entries[0].expires_at
     assert claims['exp'] <= owned.policy.entries[0].expires_at.timestamp()

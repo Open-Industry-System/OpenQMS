@@ -1,0 +1,122 @@
+# OpenQMS auf einem Raspberry Pi (arm64) im lokalen Netzwerk.
+# Anleitung: docs/raspberry-pi.md
+#
+#   cp .env.pi.example .env      # Werte anpassen (Passwörter!)
+#   docker compose -f docker-compose.pi.yml up -d --build
+#
+# Nur der Web-Container ist von außen erreichbar (Port 80, optional 443).
+# Datenbank und Redis liegen ausschließlich im internen Docker-Netz.
+
+services:
+  db:
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-qms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD in .env setzen}
+      POSTGRES_DB: ${POSTGRES_DB:-qms}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD in .env setzen}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+    logging: *logging
+
+  backend:
+    image: openqms-backend:pi
+    build:
+      context: ./backend
+    restart: unless-stopped
+    # Ohne Root-Rechte ausführen.
+    user: "10001:10001"
+    # Datenbank-Migrationen laufen bei jedem Start automatisch (idempotent).
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+        --proxy-headers --forwarded-allow-ips='*'
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-qms}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-qms}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY in .env setzen}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      TENANT_MODE: single
+      GRAPH_REPOSITORY: jsonb
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      ERP_ALLOWED_ORIGINS: ${ERP_ALLOWED_ORIGINS:-{}}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+    networks: [internal]
+    logging: *logging
+
+  web:
+    image: openqms-web:pi
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      OPENQMS_HOSTNAME: ${OPENQMS_HOSTNAME:-openqms.local}
+    volumes:
+      - ${CADDYFILE:-./deploy/pi/Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [internal]
+    logging: *logging
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

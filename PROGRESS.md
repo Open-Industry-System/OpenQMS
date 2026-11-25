@@ -1,3 +1,12 @@
+### 2026-11-25 — Deutsche Oberfläche, Sicherheitsprüfung, Raspberry-Pi-Deployment
+
+- Oberfläche: Deutsch (Standard) + Englisch umschaltbar; zh-CN entfernt. 42 Namensräume in `frontend/src/locales/de-DE`, 220 fehlende Schlüssel ergänzt, chinesische Fallbacks entfernt, Restliterale über `tr()`/`useTr()` (`frontend/src/i18n/tr.ts`). Gespeicherte Datenwerte (Schweregrad, Audit-Ergebnis, MSA-Typ, Perioden) bleiben unverändert.
+- Backend: Meldungen bleiben im Quelltext unverändert; `backend/app/i18n` übersetzt JSON-Antworten per `Accept-Language` (Katalog mit 603 Meldungen), LLM-Prompts erhalten eine Ausgabesprach-Anweisung, PPT-Export lokalisiert. Seed-Demodaten auf Deutsch.
+- Sicherheit: python-jose → PyJWT, FastAPI 0.116.2 / Starlette 0.48, python-multipart 0.0.34, axios/i18next/react-router aktualisiert, externe Schriftarten entfernt. Bericht: `docs/sicherheitspruefung.md`.
+- Raspberry Pi: `docker-compose.pi.yml`, `deploy/pi/Caddyfile(.https)`, `.env.pi.example`, Anleitung `docs/raspberry-pi.md`.
+- Verifikation: Frontend tsc/Build/936 Tests grün; Backend 480 Sicherheits-/Auth-Tests + 141 Seed/PPT/i18n-Tests grün, Seed auf frischer DB und Live-API-Übersetzung geprüft. Vollständiger Backend-Lauf (`make check-backend`) wurde wegen Laufzeit (>3 h in dieser Umgebung) nicht abgeschlossen; Docker-Image-Build für den Pi konnte hier wegen TLS-Proxy/Docker-Hub-Limit nicht getestet werden.
+- Nächste Schritte: vollständiger Backend-Lauf in CI; Image-Build auf dem Pi; mittelfristig Starlette 1.x, React Router v7, Cookie-basierte Sitzung.
+
 ### 2026-11-22 — 模块路由接入 PR #52
 
 - 从 PR #52 的 `e98e9c8c` 集成模块路由和测试准备改动，保留已合入 #50 的模板、完整回归双分片、展示快路径及 #52 的 Oracle 和 SDK 修复。

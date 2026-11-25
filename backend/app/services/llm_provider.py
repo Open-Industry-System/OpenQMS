@@ -4,6 +4,7 @@ import logging
 from typing import Protocol
 
 from app.config import settings as app_settings
+from app.i18n import with_output_language
 from app.services.agent.llm_json import MAX_RESPONSE_BYTES
 from app.services.agent.llm_json import extract_json as _extract_json
 
@@ -21,6 +22,7 @@ class ClaudeProvider:
         self.model = model
 
     async def complete(self, prompt: str, response_schema: dict) -> dict:
+        prompt = with_output_language(prompt)
         response = await self.client.messages.create(
             model=self.model,
             max_tokens=1024,
@@ -41,7 +43,7 @@ class OpenAIProvider:
         self.model = model
 
     async def complete(self, prompt: str, response_schema: dict) -> dict:
-        messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "user", "content": with_output_language(prompt)}]
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -80,7 +82,7 @@ class LocalProvider:
     async def complete(self, prompt: str, response_schema: dict) -> dict:
         response = await self.client.post(
             "/api/generate",
-            json={"model": self.model, "prompt": prompt, "stream": False},
+            json={"model": self.model, "prompt": with_output_language(prompt), "stream": False},
         )
         response.raise_for_status()
         text = response.json().get("response", "")

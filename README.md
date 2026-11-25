@@ -2,7 +2,9 @@
 
 OpenQMS 是面向制造业的模块化质量管理平台，覆盖 FMEA 风险分析、控制计划、来料检验、统计过程控制和 8D 纠正措施，支持 IATF 16949 相关质量流程。
 
-**[English documentation →](README_EN.md)**
+**[English documentation →](README_EN.md)** · **[Deutsch: Betrieb auf dem Raspberry Pi →](docs/raspberry-pi.md)** · **[Sicherheitsprüfung →](docs/sicherheitspruefung.md)**
+
+> Diese Fassung des Projekts hat eine deutsche Oberfläche (Standard) mit Umschaltung auf Englisch.
 
 ## 业务模块如何与 AI Agent 协作
 

@@ -852,7 +852,7 @@ function CAPADetailView({ credentialIdentity, credentialsCurrent }: { credential
     } catch (err: any) {
       if (!request.current()) return;
       const detail = err?.response?.data?.detail;
-      if (typeof detail === "string" && detail.includes("供应商风险输入")) {
+      if (typeof detail === "string" && ["供应商风险输入", "Lieferantenrisiko-Eingabe", "Supplier risk input"].some((m) => detail.includes(m))) {
         setSupplierLocked(true);
       }
       message.error(detail || t("messages.supplierSaveFailed"));

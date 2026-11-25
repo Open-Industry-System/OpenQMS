@@ -105,7 +105,7 @@ export default function ERPDashboardPage() {
           } else if (kpi.status === "warning") {
             icon = <WarningOutlined />;
             color = "#faad14";
-          } else if (kpi.label.includes("成本") || kpi.label.includes("COQ")) {
+          } else if (/成本|kosten|cost|COQ/i.test(kpi.label)) {
             icon = <DollarOutlined />;
           }
 

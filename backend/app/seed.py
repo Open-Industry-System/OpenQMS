@@ -34,30 +34,30 @@ def build_dcdc_pfmea_graph() -> dict:
     """Build the draft DC-DC 100W SMT PFMEA demonstration graph."""
     return {
         "nodes": [
-            {"id": "pi_1", "type": "ProcessItem", "name": "DC-DC 100W 模块 SMT 贴装（模拟演示）", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "ps_1", "type": "ProcessStep", "name": "SMT 元器件贴装", "process_number": "OP10", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "we_1", "type": "ProcessWorkElement", "name": "高速贴片机", "classification": "Machine", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "pif_1", "type": "ProcessItemFunction", "name": "完成 DC-DC 100W 模块电路板元器件贴装", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "pi_1", "type": "ProcessItem", "name": "SMT-Bestückung DC-DC-Modul 100 W (simulierte Demo)", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "ps_1", "type": "ProcessStep", "name": "SMT-Bauteilbestückung", "process_number": "OP10", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "we_1", "type": "ProcessWorkElement", "name": "Hochgeschwindigkeits-Bestückautomat", "classification": "Machine", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "pif_1", "type": "ProcessItemFunction", "name": "Bauteilbestückung der Leiterplatte des DC-DC-Moduls 100 W abschließen", "severity": 0, "occurrence": 0, "detection": 0},
             {
-                "id": "psf_1", "type": "ProcessStepFunction", "name": "将元器件贴装至设计位置", "severity": 0, "occurrence": 0, "detection": 0,
+                "id": "psf_1", "type": "ProcessStepFunction", "name": "Bauteile an der Sollposition bestücken", "severity": 0, "occurrence": 0, "detection": 0,
                 "characteristics": [{
-                    "id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID), "kind": "product", "name": "元器件贴装偏移量",
-                    "specification": "≤0.05 mm（模拟演示值）", "classification": None,
+                    "id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID), "kind": "product", "name": "Bestückversatz der Bauteile",
+                    "specification": "≤0,05 mm (simulierter Demowert)", "classification": None,
                 }],
             },
             {
-                "id": "wef_1", "type": "ProcessWorkElementFunction", "name": "设备以设定贴装力完成贴装", "severity": 0, "occurrence": 0, "detection": 0,
+                "id": "wef_1", "type": "ProcessWorkElementFunction", "name": "Anlage bestückt mit eingestellter Bestückkraft", "severity": 0, "occurrence": 0, "detection": 0,
                 "characteristics": [{
-                    "id": str(DCDC_PLACEMENT_FORCE_CHARACTERISTIC_ID), "kind": "process", "name": "贴装力",
-                    "specification": "3.0±0.5 N（模拟演示值）", "classification": None,
+                    "id": str(DCDC_PLACEMENT_FORCE_CHARACTERISTIC_ID), "kind": "process", "name": "Bestückkraft",
+                    "specification": "3,0±0,5 N (simulierter Demowert)", "classification": None,
                     "related_product_characteristic_ids": [str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID)],
                 }],
             },
-            {"id": "fe_1", "type": "FailureEffect", "name": "元器件贴装位置偏差导致模块功能异常", "severity": 8, "severity_plant": 4, "severity_customer": 8, "severity_user": 8, "occurrence": 0, "detection": 0},
-            {"id": "fm_1", "type": "FailureMode", "name": "元器件贴装位置偏移", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "fc_1", "type": "FailureCause", "name": "贴装吸嘴磨损导致贴装力偏离设定值", "severity": 0, "occurrence": 4, "detection": 0},
-            {"id": "pc_1", "type": "PreventionControl", "name": "开机贴装力零点确认与吸嘴预防性维护（模拟）", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "dc_1", "type": "DetectionControl", "name": "在线 AOI 检测元器件位置偏移（模拟）", "severity": 0, "occurrence": 0, "detection": 3},
+            {"id": "fe_1", "type": "FailureEffect", "name": "Positionsabweichung der Bauteile führt zu Funktionsstörung des Moduls", "severity": 8, "severity_plant": 4, "severity_customer": 8, "severity_user": 8, "occurrence": 0, "detection": 0},
+            {"id": "fm_1", "type": "FailureMode", "name": "Bestückversatz der Bauteile", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "fc_1", "type": "FailureCause", "name": "Verschleiß der Bestückpipette führt zu Abweichung der Bestückkraft", "severity": 0, "occurrence": 4, "detection": 0},
+            {"id": "pc_1", "type": "PreventionControl", "name": "Nullpunktprüfung der Bestückkraft beim Anlauf und vorbeugende Wartung der Pipette (simuliert)", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "dc_1", "type": "DetectionControl", "name": "Inline-AOI-Prüfung auf Bestückversatz (simuliert)", "severity": 0, "occurrence": 0, "detection": 3},
         ],
         "edges": [
             {"source": "pi_1", "target": "ps_1", "type": "HAS_PROCESS_STEP"},
@@ -80,19 +80,19 @@ def build_dcdc_design_dfmea_graph() -> dict:
     """Build the separate draft DC-DC design example; BMS remains independent."""
     return {
         "nodes": [
-            {"id": "d_sys_1", "type": "System", "name": "DC-DC 100W 电源模块（模拟演示）", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "d_sub_1", "type": "Subsystem", "name": "模块电路板组件", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "d_cmp_1", "type": "Component", "name": "元器件贴装界面", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "d_sys_1", "type": "System", "name": "DC-DC-Leistungsmodul 100 W (simulierte Demo)", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "d_sub_1", "type": "Subsystem", "name": "Leiterplattenbaugruppe des Moduls", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "d_cmp_1", "type": "Component", "name": "Bestückschnittstelle der Bauteile", "severity": 0, "occurrence": 0, "detection": 0},
             {
-                "id": "d_cf_1", "type": "ProcessWorkElementFunction", "name": "保持元器件贴装位置满足待确认设计需求", "severity": 0, "occurrence": 0, "detection": 0,
+                "id": "d_cf_1", "type": "ProcessWorkElementFunction", "name": "Bestückposition der Bauteile gemäß noch zu bestätigender Designanforderung halten", "severity": 0, "occurrence": 0, "detection": 0,
                 "characteristics": [{
-                    "id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID), "kind": "product", "name": "元器件贴装偏移量",
-                    "specification": "≤0.05 mm（模拟演示值）", "classification": None, "reference": "演示需求，待确认",
+                    "id": str(DCDC_PLACEMENT_OFFSET_CHARACTERISTIC_ID), "kind": "product", "name": "Bestückversatz der Bauteile",
+                    "specification": "≤0,05 mm (simulierter Demowert)", "classification": None, "reference": "Demoanforderung, zu bestätigen",
                 }],
             },
-            {"id": "d_fm_1", "type": "FailureMode", "name": "元器件贴装位置偏移", "severity": 0, "occurrence": 0, "detection": 0},
-            {"id": "d_fe_1", "type": "FailureEffect", "name": "模块功能异常", "severity": 8, "occurrence": 0, "detection": 0},
-            {"id": "d_fc_1", "type": "FailureCause", "name": "设计定位裕量待确认", "severity": 0, "occurrence": 4, "detection": 0},
+            {"id": "d_fm_1", "type": "FailureMode", "name": "Bestückversatz der Bauteile", "severity": 0, "occurrence": 0, "detection": 0},
+            {"id": "d_fe_1", "type": "FailureEffect", "name": "Funktionsstörung des Moduls", "severity": 8, "occurrence": 0, "detection": 0},
+            {"id": "d_fc_1", "type": "FailureCause", "name": "Positionierreserve des Designs zu bestätigen", "severity": 0, "occurrence": 4, "detection": 0},
         ],
         "edges": [
             {"source": "d_sys_1", "target": "d_sub_1", "type": "HAS_PROCESS_STEP"},
@@ -119,21 +119,21 @@ def build_dcdc_control_plan_item_data(fmea_id: uuid.UUID) -> list[dict]:
     }
     return [
         {
-            "sort_order": 1, "step_no": "10", "process_name": "SMT 元器件贴装", "equipment": "高速贴片机",
-            "characteristic_no": "DEMO-PC-001", "product_characteristic": "元器件贴装偏移量", "process_characteristic": None,
-            "special_class": None, "specification_tolerance": "≤0.05 mm（模拟演示值）",
-            "evaluation_method": "在线 AOI 检测元器件位置", "sample_size": "每件", "sample_frequency": "每件",
-            "control_method": "AOI 位置结果记录（模拟）",
-            "reaction_plan": "隔离本批次产品，调整贴装位置后复核首件位置并确认恢复",
+            "sort_order": 1, "step_no": "10", "process_name": "SMT-Bauteilbestückung", "equipment": "Hochgeschwindigkeits-Bestückautomat",
+            "characteristic_no": "DEMO-PC-001", "product_characteristic": "Bestückversatz der Bauteile", "process_characteristic": None,
+            "special_class": None, "specification_tolerance": "≤0,05 mm (simulierter Demowert)",
+            "evaluation_method": "Inline-AOI-Prüfung der Bauteilposition", "sample_size": "Jedes Teil", "sample_frequency": "Jedes Teil",
+            "control_method": "AOI-Positionsergebnis protokolliert (simuliert)",
+            "reaction_plan": "Charge sperren, Bestückposition korrigieren, Erstteilposition erneut prüfen und Wiederherstellung bestätigen",
             "source_fmea_node_id": "ps_1", "source_characteristic_ref": product_ref, "item_source": "fmea",
         },
         {
-            "sort_order": 2, "step_no": "10", "process_name": "SMT 元器件贴装", "equipment": "高速贴片机",
-            "characteristic_no": "DEMO-PR-001", "product_characteristic": None, "process_characteristic": "贴装力",
-            "special_class": None, "specification_tolerance": "3.0±0.5 N（模拟演示值）",
-            "evaluation_method": "贴装设备贴装力传感器监控", "sample_size": "每次贴装动作", "sample_frequency": "每次贴装动作",
-            "control_method": "贴装力实时监控（模拟）",
-            "reaction_plan": "隔离自上次合格确认以来产品，调整贴装力后确认首件贴装力恢复并记录",
+            "sort_order": 2, "step_no": "10", "process_name": "SMT-Bauteilbestückung", "equipment": "Hochgeschwindigkeits-Bestückautomat",
+            "characteristic_no": "DEMO-PR-001", "product_characteristic": None, "process_characteristic": "Bestückkraft",
+            "special_class": None, "specification_tolerance": "3,0±0,5 N (simulierter Demowert)",
+            "evaluation_method": "Überwachung der Bestückkraft per Sensor", "sample_size": "Jeder Bestückvorgang", "sample_frequency": "Jeder Bestückvorgang",
+            "control_method": "Echtzeitüberwachung der Bestückkraft (simuliert)",
+            "reaction_plan": "Produkte seit letzter i.O.-Bestätigung sperren, Bestückkraft korrigieren, Erstteil bestätigen und dokumentieren",
             "source_fmea_node_id": "ps_1", "source_characteristic_ref": process_ref, "item_source": "fmea",
         },
     ]
@@ -142,9 +142,9 @@ def build_dcdc_control_plan_item_data(fmea_id: uuid.UUID) -> list[dict]:
 def build_demo_product_line_data(factory_id: uuid.UUID) -> list[dict]:
     """Return the active product-line scopes used by the initial demo seed."""
     return [
-        {"code": "DC-DC-100", "name": "DC-DC 100W 电源模块", "product_type_code": "POWER", "factory_id": factory_id, "is_active": True},
-        {"code": "PCB-SMT-200", "name": "PCB SMT 200 贴片线", "product_type_code": "PCB", "factory_id": factory_id, "is_active": True},
-        {"code": "BMS-DEMO", "name": "BMS 独立演示产品线", "product_type_code": "POWER", "factory_id": factory_id, "is_active": True},
+        {"code": "DC-DC-100", "name": "DC-DC-Leistungsmodul 100 W", "product_type_code": "POWER", "factory_id": factory_id, "is_active": True},
+        {"code": "PCB-SMT-200", "name": "PCB-SMT-Bestücklinie 200", "product_type_code": "PCB", "factory_id": factory_id, "is_active": True},
+        {"code": "BMS-DEMO", "name": "BMS – eigenständige Demo-Produktlinie", "product_type_code": "POWER", "factory_id": factory_id, "is_active": True},
     ]
 
 
@@ -167,28 +167,28 @@ SAMPLE_GRAPH = build_dcdc_pfmea_graph()
 
 SAMPLE_DFMEA_GRAPH = {
     "nodes": [
-        {"id": "sys_1", "type": "System", "name": "电池管理系统 (BMS)", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "sub_1", "type": "Subsystem", "name": "电池监控单元 (BMU)", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "sub_2", "type": "Subsystem", "name": "热管理系统 (TMS)", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "cmp_1", "type": "Component", "name": "电压采集芯片 LTC6811", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "cmp_2", "type": "Component", "name": "NTC 温度传感器", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "sf_1", "type": "ProcessStepFunction", "name": "实时采集单体电池电压与温度", "specification": "电压精度 ±5mV, 温度精度 ±1°C", "requirement": "每 100ms 完成一轮全电芯扫描", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "cf_1", "type": "ProcessWorkElementFunction", "name": "LTC6811 提供 12通道 16bit ADC 采样", "requirement": "采样噪声 ≤ 0.5mV RMS, 通道间隔离度 ≥ 80dB", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "dfe_1", "type": "FailureEffect", "name": "电池过充/过放未被检测，导致电芯热失控起火", "severity": 10, "severity_plant": 8, "severity_customer": 10, "severity_user": 10, "occurrence": 0, "detection": 0},
-        {"id": "dfm_1", "type": "FailureMode", "name": "电压采集通道漂移导致读取值偏离真实值", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "dfc_1", "type": "FailureCause", "name": "LTC6811 参考电压源温漂超出 datasheet 规格", "severity": 0, "occurrence": 5, "detection": 0},
-        {"id": "dfc_2", "type": "FailureCause", "name": "PCB 布局不当导致采样回路引入共模噪声", "severity": 0, "occurrence": 3, "detection": 0},
-        {"id": "dpc_1", "type": "PreventionControl", "name": "ADC 参考电压选用 AEC-Q100 Grade 0 认证芯片，温漂 ≤ 10ppm/°C", "severity": 0, "occurrence": 0, "detection": 0},
-        {"id": "ddc_1", "type": "DetectionControl", "name": "BMS 上电自检：注入已知校准电压验证 ADC 通道偏差 ≤ ±3mV", "severity": 0, "occurrence": 0, "detection": 4},
-        {"id": "ddc_2", "type": "DetectionControl", "name": "相邻电芯电压交叉比对：同一模组内最大压差 ≥ 50mV 触发报警", "severity": 0, "occurrence": 0, "detection": 5},
+        {"id": "sys_1", "type": "System", "name": "Batteriemanagementsystem (BMS)", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "sub_1", "type": "Subsystem", "name": "Batterieüberwachungseinheit (BMU)", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "sub_2", "type": "Subsystem", "name": "Thermomanagementsystem (TMS)", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "cmp_1", "type": "Component", "name": "Spannungserfassungs-IC LTC6811", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "cmp_2", "type": "Component", "name": "NTC-Temperatursensor", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "sf_1", "type": "ProcessStepFunction", "name": "Zellspannung und -temperatur in Echtzeit erfassen", "specification": "Spannungsgenauigkeit ±5 mV, Temperaturgenauigkeit ±1 °C", "requirement": "Vollständiger Zellscan alle 100 ms", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "cf_1", "type": "ProcessWorkElementFunction", "name": "LTC6811 bietet 12 Kanäle mit 16-Bit-ADC-Abtastung", "requirement": "Abtastrauschen ≤ 0,5 mV RMS, Kanaltrennung ≥ 80 dB", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "dfe_1", "type": "FailureEffect", "name": "Überladung/Tiefentladung wird nicht erkannt und führt zu thermischem Durchgehen der Zelle", "severity": 10, "severity_plant": 8, "severity_customer": 10, "severity_user": 10, "occurrence": 0, "detection": 0},
+        {"id": "dfm_1", "type": "FailureMode", "name": "Drift des Spannungskanals führt zu Abweichung vom Istwert", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "dfc_1", "type": "FailureCause", "name": "Temperaturdrift der Referenzspannung des LTC6811 außerhalb der Datenblattangabe", "severity": 0, "occurrence": 5, "detection": 0},
+        {"id": "dfc_2", "type": "FailureCause", "name": "Ungünstiges PCB-Layout koppelt Gleichtaktrauschen in den Messkreis ein", "severity": 0, "occurrence": 3, "detection": 0},
+        {"id": "dpc_1", "type": "PreventionControl", "name": "ADC-Referenz mit AEC-Q100 Grade 0, Temperaturdrift ≤ 10 ppm/°C", "severity": 0, "occurrence": 0, "detection": 0},
+        {"id": "ddc_1", "type": "DetectionControl", "name": "BMS-Selbsttest beim Einschalten: bekannte Kalibrierspannung einspeisen, ADC-Abweichung ≤ ±3 mV prüfen", "severity": 0, "occurrence": 0, "detection": 4},
+        {"id": "ddc_2", "type": "DetectionControl", "name": "Kreuzvergleich benachbarter Zellen: max. Spannungsdifferenz ≥ 50 mV im Modul löst Alarm aus", "severity": 0, "occurrence": 0, "detection": 5},
         {
             "id": "dra_1",
             "type": "RecommendedAction",
-            "name": "引入独立 VREF 校准通道，BMS 每次唤醒后执行全量程三点校准",
-            "responsible": "李工",
+            "name": "Unabhängigen VREF-Kalibrierkanal einführen, BMS führt nach jedem Aufwachen eine Dreipunkt-Kalibrierung durch",
+            "responsible": "Fr. Schmidt",
             "due_date": "2026-07-30",
             "status": "in_progress",
-            "action_taken": "已完成方案设计与仿真验证，PCB layout 阶段",
+            "action_taken": "Konzept und Simulation abgeschlossen, PCB-Layout-Phase",
             "completion_date": "",
             "severity": 0,
             "occurrence": 0,
@@ -261,7 +261,7 @@ async def seed_supplier_risk_configs(db, factory_id):
         {"rule_id": "R09", "enabled": True, "category": "compliance", "weight": 8.0,
          "thresholds": {"score_decline_limit": 15}},
         {"rule_id": "R10", "enabled": True, "category": "compliance", "weight": 15.0,
-         "thresholds": {"keywords": ["安全", "安全特性", "safety"]}},
+         "thresholds": {"keywords": ["安全", "安全特性", "safety", "Sicherheit", "sicherheitsrelevant"]}},
         {"rule_id": "R11", "enabled": True, "category": "quality", "weight": 1.0,
          "thresholds": {"base_score": 10, "severe_bonus": 10, "repeat_bonus": 10}},
     ]
@@ -485,49 +485,49 @@ async def seed_gauges(db, admin_id, default_factory_id):
 
     gauges = [
         Gauge(
-            gauge_no="G-001", name="数显千分尺", model="MDC-1", manufacturer="三丰",
-            resolution=0.001, measuring_range="0-25mm", department="质量部",
-            location="IQC检验室", status="active", calibration_cycle_days=365,
+            gauge_no="G-001", name="Digitale Bügelmessschraube", model="MDC-1", manufacturer="Mitutoyo",
+            resolution=0.001, measuring_range="0-25mm", department="Qualitätsabteilung",
+            location="Prüfraum Wareneingang", status="active", calibration_cycle_days=365,
             next_calibration_date=date(2027, 5, 15),
             product_line_code="DC-DC-100", factory_id=default_factory_id,
             created_by=admin_id,
         ),
         Gauge(
-            gauge_no="G-002", name="游标卡尺", model="CD-6", manufacturer="三丰",
-            resolution=0.02, measuring_range="0-150mm", department="质量部",
-            location="SPC测量站", status="active", calibration_cycle_days=180,
+            gauge_no="G-002", name="Messschieber", model="CD-6", manufacturer="Mitutoyo",
+            resolution=0.02, measuring_range="0-150mm", department="Qualitätsabteilung",
+            location="SPC-Messplatz", status="active", calibration_cycle_days=180,
             next_calibration_date=date(2026, 11, 20),
             product_line_code="DC-DC-100", factory_id=default_factory_id,
             created_by=admin_id,
         ),
         Gauge(
-            gauge_no="G-003", name="高度尺", model="192-611", manufacturer="三丰",
-            resolution=0.01, measuring_range="0-300mm", department="质量部",
-            location="计量室", status="active", calibration_cycle_days=365,
+            gauge_no="G-003", name="Höhenmessgerät", model="192-611", manufacturer="Mitutoyo",
+            resolution=0.01, measuring_range="0-300mm", department="Qualitätsabteilung",
+            location="Messraum", status="active", calibration_cycle_days=365,
             next_calibration_date=date(2027, 3, 10),
             product_line_code="DC-DC-100", factory_id=default_factory_id,
             created_by=admin_id,
         ),
         Gauge(
-            gauge_no="G-004", name="推拉力计", model="DS2-110N", manufacturer="IMADA",
-            resolution=0.01, measuring_range="0-110N", department="质量部",
-            location="装配线工位", status="active", calibration_cycle_days=365,
+            gauge_no="G-004", name="Zug-/Druckkraftmessgerät", model="DS2-110N", manufacturer="IMADA",
+            resolution=0.01, measuring_range="0-110N", department="Qualitätsabteilung",
+            location="Montagearbeitsplatz", status="active", calibration_cycle_days=365,
             next_calibration_date=date(2027, 1, 5),
             product_line_code="DC-DC-100", factory_id=default_factory_id,
             created_by=admin_id,
         ),
         Gauge(
-            gauge_no="G-005", name="数字万用表", model="Fluke 87V", manufacturer="Fluke",
-            resolution=0.001, measuring_range="0-1000V", department="电气检验组",
-            location="电气检验室", status="active", calibration_cycle_days=365,
+            gauge_no="G-005", name="Digitalmultimeter", model="Fluke 87V", manufacturer="Fluke",
+            resolution=0.001, measuring_range="0-1000V", department="Elektrische Prüfgruppe",
+            location="Elektrisches Prüflabor", status="active", calibration_cycle_days=365,
             next_calibration_date=date(2026, 12, 1),
             product_line_code="DC-DC-100", factory_id=default_factory_id,
             created_by=admin_id,
         ),
         Gauge(
-            gauge_no="G-006", name="LCR电桥", model="IM3536", manufacturer="日置",
-            resolution=0.0001, measuring_range="0.01mΩ-100MΩ", department="电气检验组",
-            location="电气检验室", status="calibration_due", calibration_cycle_days=180,
+            gauge_no="G-006", name="LCR-Messbrücke", model="IM3536", manufacturer="Hioki",
+            resolution=0.0001, measuring_range="0.01mΩ-100MΩ", department="Elektrische Prüfgruppe",
+            location="Elektrisches Prüflabor", status="calibration_due", calibration_cycle_days=180,
             next_calibration_date=date(2026, 6, 5),
             product_line_code="DC-DC-100", factory_id=default_factory_id,
             created_by=admin_id,
@@ -541,22 +541,22 @@ async def seed_gauges(db, admin_id, default_factory_id):
         GaugeCalibration(
             gauge_id=gauges[0].gauge_id, factory_id=default_factory_id,
             calibration_date=date(2026, 5, 15), result="pass",
-            certificate_no="CAL-2026-001", calibrated_by="市计量院",
-            notes="千分尺校准合格，偏差在允许范围内",
+            certificate_no="CAL-2026-001", calibrated_by="Städtisches Eichamt",
+            notes="Bügelmessschraube kalibriert, Abweichung im zulässigen Bereich",
             next_calibration_date=date(2027, 5, 15),
         ),
         GaugeCalibration(
             gauge_id=gauges[1].gauge_id, factory_id=default_factory_id,
             calibration_date=date(2025, 11, 20), result="pass",
-            certificate_no="CAL-2025-008", calibrated_by="省计量院",
-            notes="卡尺校准合格",
+            certificate_no="CAL-2025-008", calibrated_by="Landeseichamt",
+            notes="Messschieber kalibriert",
             next_calibration_date=date(2026, 11, 20),
         ),
         GaugeCalibration(
             gauge_id=gauges[5].gauge_id, factory_id=default_factory_id,
             calibration_date=date(2025, 12, 5), result="pass",
-            certificate_no="CAL-2025-012", calibrated_by="市计量院",
-            notes="LCR电桥校准合格，下次需在2026年6月前完成",
+            certificate_no="CAL-2025-012", calibrated_by="Städtisches Eichamt",
+            notes="LCR-Messbrücke kalibriert, nächste Kalibrierung bis Juni 2026",
             next_calibration_date=date(2026, 6, 5),
         ),
     ]
@@ -585,28 +585,28 @@ async def seed_spc(db, admin_id, engineer_id, default_factory_id, fmea1_id, capa
     chars = [
         InspectionCharacteristic(
             ic_code="SPC-001", product_line="DC-DC-100", factory_id=default_factory_id,
-            process_name="SMT贴装", characteristic_name="元器件贴装偏移量（独立SPC模拟）",
+            process_name="SMT-Bestückung", characteristic_name="Bestückversatz der Bauteile (eigenständige SPC-Simulation)",
             spec_upper=Decimal("0.05"), spec_lower=Decimal("0"),
             target_value=Decimal("0.025"), chart_type="xbar_r", subgroup_size=5,
             created_by_id=admin_id,
         ),
         InspectionCharacteristic(
             ic_code="SPC-002", product_line="DC-DC-100", factory_id=default_factory_id,
-            process_name="回流焊接", characteristic_name="焊接温度",
+            process_name="Reflow-Löten", characteristic_name="Löttemperatur",
             spec_upper=Decimal("255"), spec_lower=Decimal("235"),
             target_value=Decimal("245"), chart_type="xbar_r", subgroup_size=5,
             created_by_id=admin_id,
         ),
         InspectionCharacteristic(
             ic_code="SPC-003", product_line="DC-DC-100", factory_id=default_factory_id,
-            process_name="功能测试", characteristic_name="输出电压",
+            process_name="Funktionsprüfung", characteristic_name="Ausgangsspannung",
             spec_upper=Decimal("12.6"), spec_lower=Decimal("11.4"),
             target_value=Decimal("12.0"), chart_type="xbar_r", subgroup_size=5,
             created_by_id=admin_id,
         ),
         InspectionCharacteristic(
             ic_code="SPC-004", product_line="DC-DC-100", factory_id=default_factory_id,
-            process_name="终检", characteristic_name="外观不良率",
+            process_name="Endprüfung", characteristic_name="Ausfallquote Aussehen",
             spec_upper=Decimal("3.0"), spec_lower=Decimal("0"),
             target_value=Decimal("0.5"), chart_type="p", subgroup_size=50,
             created_by_id=admin_id,
@@ -748,9 +748,9 @@ async def seed_msa(db, admin_id, default_factory_id, gauges, spc_chars):
         return
 
     grr_study = GrrStudy(
-        study_no="MSA-GRR-001", title="千分尺GRR研究 - 独立量具演示（模拟）",
+        study_no="MSA-GRR-001", title="Bügelmessschraube GRR-Studie – eigenständige Prüfmittel-Demo (simuliert)",
         method="average_range", gauge_id=gauges[0].gauge_id,
-        characteristic_name="独立量具重复性（模拟）", unit="mm",
+        characteristic_name="Wiederholpräzision Prüfmittel (simuliert)", unit="mm",
         tolerance_upper=0.05, tolerance_lower=0.0, reference_value=0.025,
         appraiser_count=3, part_count=10, trial_count=3,
         status="completed", study_date=date(2026, 5, 20),
@@ -761,7 +761,7 @@ async def seed_msa(db, admin_id, default_factory_id, gauges, spc_chars):
     await db.flush()
 
     # GRR measurements (3 appraisers × 10 parts × 3 trials)
-    appraisers = ["张工", "李工", "王工"]
+    appraisers = ["Hr. Müller", "Fr. Schmidt", "Hr. Weber"]
     for ai, appraiser in enumerate(appraisers):
         for p in range(1, 11):
             for t in range(1, 4):
@@ -787,9 +787,9 @@ async def seed_msa(db, admin_id, default_factory_id, gauges, spc_chars):
 
     # ── Bias Study ──
     bias_study = BiasStudy(
-        study_no="MSA-BIAS-001", title="千分尺偏倚分析 - 参考值25.000mm",
+        study_no="MSA-BIAS-001", title="Bias-Analyse Bügelmessschraube – Referenzwert 25,000 mm",
         gauge_id=gauges[0].gauge_id,
-        characteristic_name="测量偏倚", unit="mm",
+        characteristic_name="Messabweichung (Bias)", unit="mm",
         reference_value=25.0, sample_size=10,
         status="completed", study_date=date(2026, 5, 22),
         product_line_code="DC-DC-100", factory_id=default_factory_id,
@@ -816,9 +816,9 @@ async def seed_msa(db, admin_id, default_factory_id, gauges, spc_chars):
 
     # ── Linearity Study ──
     lin_study = LinearityStudy(
-        study_no="MSA-LIN-001", title="千分尺线性研究 - 5个参考点",
+        study_no="MSA-LIN-001", title="Linearitätsstudie Bügelmessschraube – 5 Referenzpunkte",
         gauge_id=gauges[0].gauge_id,
-        characteristic_name="测量线性", unit="mm",
+        characteristic_name="Messlinearität", unit="mm",
         tolerance_upper=0.05, tolerance_lower=0.0,
         sample_size_per_reference=5,
         status="completed", study_date=date(2026, 5, 23),
@@ -849,9 +849,9 @@ async def seed_msa(db, admin_id, default_factory_id, gauges, spc_chars):
 
     # ── Stability Study ──
     stab_study = StabilityStudy(
-        study_no="MSA-STAB-001", title="千分尺稳定性研究 - 20天监测",
+        study_no="MSA-STAB-001", title="Stabilitätsstudie Bügelmessschraube – 20 Tage",
         gauge_id=gauges[0].gauge_id,
-        characteristic_name="测量稳定性", unit="mm",
+        characteristic_name="Messstabilität", unit="mm",
         reference_value=25.0, subgroup_size=5,
         status="completed", study_date=date(2026, 5, 24),
         product_line_code="DC-DC-100", factory_id=default_factory_id,
@@ -887,7 +887,7 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
     from app.models.iqc_inspection import IqcInspection
     from app.models.iqc_inspection_item import IqcInspectionItem, IqcItemMeasurement
 
-    existing = await db.execute(select(IqcInspectionTemplate).where(IqcInspectionTemplate.template_name == "0805贴片电阻进料检验模板"))
+    existing = await db.execute(select(IqcInspectionTemplate).where(IqcInspectionTemplate.template_name == "Prüfvorlage Wareneingang SMD-Widerstand 0805"))
     if existing.scalar_one_or_none():
         return
 
@@ -896,7 +896,7 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
 
     # Template for resistors
     tmpl1 = IqcInspectionTemplate(
-        template_name="0805贴片电阻进料检验模板", material_id=mat_res[0].material_id,
+        template_name="Prüfvorlage Wareneingang SMD-Widerstand 0805", material_id=mat_res[0].material_id,
         version=1, is_active=True, factory_id=default_factory_id, created_by=admin_id,
     )
     db.add(tmpl1)
@@ -905,18 +905,18 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
     # Template items for resistors
     items1 = [
         IqcTemplateItem(template_id=tmpl1.template_id, factory_id=default_factory_id,
-                        sort_order=1, category="外观", item_name="标识清晰度",
-                        inspection_method="目视检查", inspect_type="attribute",
+                        sort_order=1, category="Aussehen", item_name="Lesbarkeit der Kennzeichnung",
+                        inspection_method="Sichtprüfung", inspect_type="attribute",
                         spec_upper=None, spec_lower=None, target_value=None,
                         unit=None, sample_size=8, aql_level=0.65),
         IqcTemplateItem(template_id=tmpl1.template_id, factory_id=default_factory_id,
-                        sort_order=2, category="外观", item_name="焊端氧化",
-                        inspection_method="目视检查", inspect_type="attribute",
+                        sort_order=2, category="Aussehen", item_name="Oxidation der Lötanschlüsse",
+                        inspection_method="Sichtprüfung", inspect_type="attribute",
                         spec_upper=None, spec_lower=None, target_value=None,
                         unit=None, sample_size=8, aql_level=1.0),
         IqcTemplateItem(template_id=tmpl1.template_id, factory_id=default_factory_id,
-                        sort_order=3, category="尺寸", item_name="阻值偏差",
-                        inspection_method="LCR电桥测量", inspect_type="variable",
+                        sort_order=3, category="Abmessungen", item_name="Widerstandsabweichung",
+                        inspection_method="Messung mit LCR-Messbrücke", inspect_type="variable",
                         spec_upper=10200.0, spec_lower=9800.0, target_value=10000.0,
                         unit="Ω", sample_size=5, aql_level=0.4),
     ]
@@ -925,7 +925,7 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
 
     # Template for capacitors
     tmpl2 = IqcInspectionTemplate(
-        template_name="0805贴片电容进料检验模板", material_id=mat_res[1].material_id,
+        template_name="Prüfvorlage Wareneingang SMD-Kondensator 0805", material_id=mat_res[1].material_id,
         version=1, is_active=True, factory_id=default_factory_id, created_by=admin_id,
     )
     db.add(tmpl2)
@@ -933,13 +933,13 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
 
     items2 = [
         IqcTemplateItem(template_id=tmpl2.template_id, factory_id=default_factory_id,
-                        sort_order=1, category="外观", item_name="表面缺陷",
-                        inspection_method="目视检查", inspect_type="attribute",
+                        sort_order=1, category="Aussehen", item_name="Oberflächenfehler",
+                        inspection_method="Sichtprüfung", inspect_type="attribute",
                         spec_upper=None, spec_lower=None, target_value=None,
                         unit=None, sample_size=8, aql_level=1.0),
         IqcTemplateItem(template_id=tmpl2.template_id, factory_id=default_factory_id,
-                        sort_order=2, category="电气", item_name="电容量",
-                        inspection_method="LCR电桥测量", inspect_type="variable",
+                        sort_order=2, category="Elektrisch", item_name="Kapazität",
+                        inspection_method="Messung mit LCR-Messbrücke", inspect_type="variable",
                         spec_upper=12.0, spec_lower=8.0, target_value=10.0,
                         unit="μF", sample_size=5, aql_level=0.65),
     ]
@@ -948,7 +948,7 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
 
     # Template for PCB
     tmpl3 = IqcInspectionTemplate(
-        template_name="DC-DC PCB板进料检验模板", material_id=mat_res[2].material_id,
+        template_name="Prüfvorlage Wareneingang DC-DC-Leiterplatte", material_id=mat_res[2].material_id,
         version=1, is_active=True, factory_id=default_factory_id, created_by=admin_id,
     )
     db.add(tmpl3)
@@ -956,13 +956,13 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
 
     items3 = [
         IqcTemplateItem(template_id=tmpl3.template_id, factory_id=default_factory_id,
-                        sort_order=1, category="外观", item_name="板面划伤",
-                        inspection_method="目视检查", inspect_type="attribute",
+                        sort_order=1, category="Aussehen", item_name="Kratzer auf der Leiterplatte",
+                        inspection_method="Sichtprüfung", inspect_type="attribute",
                         spec_upper=None, spec_lower=None, target_value=None,
                         unit=None, sample_size=3, aql_level=0.4),
         IqcTemplateItem(template_id=tmpl3.template_id, factory_id=default_factory_id,
-                        sort_order=2, category="尺寸", item_name="板厚",
-                        inspection_method="千分尺测量", inspect_type="variable",
+                        sort_order=2, category="Abmessungen", item_name="Leiterplattendicke",
+                        inspection_method="Messung mit Bügelmessschraube", inspect_type="variable",
                         spec_upper=1.7, spec_lower=1.5, target_value=1.6,
                         unit="mm", sample_size=5, aql_level=0.4),
     ]
@@ -973,7 +973,7 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
     # Inspection 1: ACCEPTED
     insp1 = IqcInspection(
         inspection_no="IQC-2026-001", supplier_id=supplier1_id,
-        part_no="RES-0805-10K", part_name="0805贴片电阻 10KΩ ±1%",
+        part_no="RES-0805-10K", part_name="SMD-Widerstand 0805 10 kΩ ±1 %",
         lot_no="LOT-2026-0501", lot_qty=5000, sample_qty=8,
         aql_level="0.65", inspection_level="II",
         inspection_result="accepted", defect_qty=0,
@@ -993,21 +993,21 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
         IqcInspectionItem(
             inspection_id=insp1.inspection_id, factory_id=default_factory_id,
             template_item_id=items1[0].item_id, sort_order=1,
-            category="外观", item_name="标识清晰度", inspect_type="attribute",
+            category="Aussehen", item_name="Lesbarkeit der Kennzeichnung", inspect_type="attribute",
             sample_size=8, accept_no=0, reject_no=1, defect_qty=0,
-            result="accepted", remark="全部合格",
+            result="accepted", remark="Alle i.O.",
         ),
         IqcInspectionItem(
             inspection_id=insp1.inspection_id, factory_id=default_factory_id,
             template_item_id=items1[1].item_id, sort_order=2,
-            category="外观", item_name="焊端氧化", inspect_type="attribute",
+            category="Aussehen", item_name="Oxidation der Lötanschlüsse", inspect_type="attribute",
             sample_size=8, accept_no=0, reject_no=1, defect_qty=0,
-            result="accepted", remark="无氧化",
+            result="accepted", remark="Keine Oxidation",
         ),
         IqcInspectionItem(
             inspection_id=insp1.inspection_id, factory_id=default_factory_id,
             template_item_id=items1[2].item_id, sort_order=3,
-            category="尺寸", item_name="阻值偏差", inspect_type="variable",
+            category="Abmessungen", item_name="Widerstandsabweichung", inspect_type="variable",
             spec_upper=10200.0, spec_lower=9800.0, target_value=10000.0,
             sample_size=5, accept_no=0, reject_no=1, defect_qty=0,
             result="accepted",
@@ -1027,10 +1027,10 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
     # Inspection 2: REJECTED
     insp2 = IqcInspection(
         inspection_no="IQC-2026-002", supplier_id=supplier1_id,
-        part_no="CAP-0805-10U", part_name="0805贴片电容 10uF ±20%",
+        part_no="CAP-0805-10U", part_name="SMD-Kondensator 0805 10 µF ±20 %",
         lot_no="LOT-2026-0505", lot_qty=3000, sample_qty=8,
         aql_level="1.0", inspection_level="II",
-        inspection_result="rejected", defect_qty=3, defect_description="3件电容量超出上限",
+        inspection_result="rejected", defect_qty=3, defect_description="3 Teile mit Kapazität über der oberen Grenze",
         status="completed", inspection_mode="full",
         material_id=mat_res[1].material_id, template_id=tmpl2.template_id,
         code_letter="D", accept_number=0, reject_number=1,
@@ -1047,17 +1047,17 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
         IqcInspectionItem(
             inspection_id=insp2.inspection_id, factory_id=default_factory_id,
             template_item_id=items2[0].item_id, sort_order=1,
-            category="外观", item_name="表面缺陷", inspect_type="attribute",
+            category="Aussehen", item_name="Oberflächenfehler", inspect_type="attribute",
             sample_size=8, accept_no=0, reject_no=1, defect_qty=0,
             result="accepted",
         ),
         IqcInspectionItem(
             inspection_id=insp2.inspection_id, factory_id=default_factory_id,
             template_item_id=items2[1].item_id, sort_order=2,
-            category="电气", item_name="电容量", inspect_type="variable",
+            category="Elektrisch", item_name="Kapazität", inspect_type="variable",
             spec_upper=12.0, spec_lower=8.0, target_value=10.0,
             sample_size=5, accept_no=0, reject_no=1, defect_qty=3,
-            result="rejected", remark="3件超上限",
+            result="rejected", remark="3 Teile über oberer Grenze",
         ),
     ]
     db.add_all(insp2_items)
@@ -1073,7 +1073,7 @@ async def seed_iqc_inspections(db, admin_id, default_factory_id, supplier1_id, i
     # Inspection 3: PENDING
     insp3 = IqcInspection(
         inspection_no="IQC-2026-003", supplier_id=supplier1_id,
-        part_no="PCB-DC-001", part_name="DC-DC电源模块PCB板",
+        part_no="PCB-DC-001", part_name="Leiterplatte DC-DC-Leistungsmodul",
         lot_no="LOT-2026-0528", lot_qty=1000, sample_qty=5,
         aql_level="0.4", inspection_level="II",
         inspection_result="pending", defect_qty=0,
@@ -1097,12 +1097,12 @@ async def seed_control_plans(db, admin_id, manager_id, default_factory_id, fmea1
         return
 
     cp = ControlPlan(
-        document_no="CP-2026-001", title="DC-DC 100W 电源模块控制计划",
+        document_no="CP-2026-001", title="Produktionslenkungsplan DC-DC-Leistungsmodul 100 W",
         fmea_ref_id=fmea1_id, product_line_code="DC-DC-100",
         factory_id=default_factory_id, status="draft", version=1,
-        phase="pre-launch", part_no="DCDC-100W-A", part_name="DC-DC 100W电源模块（模拟演示）",
-        contact_info="演示草案", drawing_rev="待确认",
-        org_factory="DEFAULT", core_group="演示草案",
+        phase="pre-launch", part_no="DCDC-100W-A", part_name="DC-DC-Leistungsmodul 100 W (simulierte Demo)",
+        contact_info="Demo-Entwurf", drawing_rev="Zu bestätigen",
+        org_factory="DEFAULT", core_group="Demo-Entwurf",
         created_by=admin_id, updated_by=admin_id,
         approved_by=None, approved_at=None,
     )
@@ -1132,8 +1132,8 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     # ── Audit Program 1: Internal quality system audit ──
     prog1 = AuditProgram(
         program_no="AP-2026-001", program_year=2026,
-        audit_type="internal", scope="IATF 16949质量管理体系内部审核",
-        criteria="IATF 16949:2016, 公司质量手册V3.2",
+        audit_type="internal", scope="Internes Audit des QM-Systems nach IATF 16949",
+        criteria="IATF 16949:2016, QM-Handbuch V3.2",
         status="in_progress", created_by=admin_id,
         product_line_code="DC-DC-100", factory_id=default_factory_id,
     )
@@ -1148,8 +1148,8 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     # ── Audit Program 2: Process audit ──
     prog2 = AuditProgram(
         program_no="AP-2026-002", program_year=2026,
-        audit_type="process", scope="SMT焊接过程审核",
-        criteria="VDA 6.3过程审核标准",
+        audit_type="process", scope="Prozessaudit SMT-Löten",
+        criteria="Prozessauditstandard VDA 6.3",
         status="planned", created_by=admin_id,
         product_line_code="DC-DC-100", factory_id=default_factory_id,
     )
@@ -1164,21 +1164,21 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     # ── Audit Plan 1 ──
     plan1 = AuditPlan(
         plan_no="AUD-2026-001", program_id=prog1.program_id,
-        audit_scope="质量管理体系全要素审核",
-        audit_criteria="IATF 16949条款8.3-8.7",
+        audit_scope="Systemaudit aller QM-Elemente",
+        audit_criteria="IATF 16949 Abschnitte 8.3–8.7",
         planned_date=date(2026, 6, 15),
         actual_date=date(2026, 6, 16),
         lead_auditor=manager_id,
         team_members=[
-            {"user_id": str(engineer_id), "name": "质量工程师", "role": "审核员"},
-            {"user_id": str(admin_id), "name": "系统管理员", "role": "审核员"},
+            {"user_id": str(engineer_id), "name": "Qualitätsingenieur", "role": "Auditor"},
+            {"user_id": str(admin_id), "name": "Systemadministrator", "role": "Auditor"},
         ],
         checklist=[
-            {"clause": "8.3.2", "question": "是否制定了设计和开发计划?", "result": "符合"},
-            {"clause": "8.3.3", "question": "设计输入是否充分?", "result": "符合"},
-            {"clause": "8.3.4", "question": "设计评审是否按计划执行?", "result": "不符合"},
-            {"clause": "8.4.2", "question": "供应商是否经过批准?", "result": "符合"},
-            {"clause": "8.5.1", "question": "生产是否在受控条件下进行?", "result": "符合"},
+            {"clause": "8.3.2", "question": "Wurde ein Entwicklungsplan erstellt?", "result": "符合"},
+            {"clause": "8.3.3", "question": "Sind die Designeingaben ausreichend?", "result": "符合"},
+            {"clause": "8.3.4", "question": "Werden Designreviews planmäßig durchgeführt?", "result": "不符合"},
+            {"clause": "8.4.2", "question": "Sind die Lieferanten freigegeben?", "result": "符合"},
+            {"clause": "8.5.1", "question": "Erfolgt die Produktion unter beherrschten Bedingungen?", "result": "符合"},
         ],
         status="completed",
         created_by=admin_id,
@@ -1193,10 +1193,10 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     finding1 = AuditFinding(
         audit_id=plan1.audit_id, factory_id=default_factory_id,
         clause_ref="8.3.4", finding_type="major",
-        description="设计评审未按计划执行，PFMEA变更后未重新评审",
-        root_cause="项目进度紧张，评审计划未被严格执行",
-        correction="立即补做设计评审，并更新评审记录",
-        corrective_action="修订设计评审流程，增加评审提醒和审批机制",
+        description="Designreview nicht planmäßig durchgeführt, nach PFMEA-Änderung nicht erneut bewertet",
+        root_cause="Enger Projektzeitplan, Reviewplan wurde nicht strikt eingehalten",
+        correction="Designreview umgehend nachholen und Reviewprotokoll aktualisieren",
+        corrective_action="Designreview-Prozess überarbeiten, Erinnerungs- und Freigabemechanismus ergänzen",
         capa_ref_id=capa1_id,
         status="in_progress", due_date=date(2026, 7, 15),
         created_by=admin_id,
@@ -1207,10 +1207,10 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     finding2 = AuditFinding(
         audit_id=plan1.audit_id, factory_id=default_factory_id,
         clause_ref="8.5.1", finding_type="minor",
-        description="SMT产线作业指导书版本未及时更新",
-        root_cause="文件管理流程执行偏差",
-        correction="更新作业指导书至最新版本",
-        corrective_action="建立文件版本自动提醒机制",
+        description="Arbeitsanweisungen der SMT-Linie nicht rechtzeitig aktualisiert",
+        root_cause="Abweichung im Dokumentenlenkungsprozess",
+        correction="Arbeitsanweisungen auf den neuesten Stand bringen",
+        corrective_action="Automatische Erinnerung für Dokumentversionen einführen",
         status="open", due_date=date(2026, 7, 30),
         created_by=admin_id,
     )
@@ -1220,7 +1220,7 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     finding3 = AuditFinding(
         audit_id=plan1.audit_id, factory_id=default_factory_id,
         clause_ref="8.4.2", finding_type="observation",
-        description="建议增加供应商现场审核频次，特别是C级供应商",
+        description="Häufigere Lieferantenaudits vor Ort empfohlen, insbesondere bei C-Lieferanten",
         status="open", due_date=date(2026, 8, 31),
         created_by=admin_id,
     )
@@ -1230,12 +1230,12 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     # ── Audit Plan 2: planned ──
     plan2 = AuditPlan(
         plan_no="AUD-2026-002", program_id=prog2.program_id,
-        audit_scope="SMT焊接过程审核",
-        audit_criteria="VDA 6.3过程审核标准",
+        audit_scope="Prozessaudit SMT-Löten",
+        audit_criteria="Prozessauditstandard VDA 6.3",
         planned_date=date(2026, 7, 20),
         lead_auditor=manager_id,
         team_members=[
-            {"user_id": str(engineer_id), "name": "质量工程师", "role": "审核员"},
+            {"user_id": str(engineer_id), "name": "Qualitätsingenieur", "role": "Auditor"},
         ],
         checklist=[],
         status="planned",
@@ -1250,8 +1250,8 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     # ── Audit Program 3: Customer audit ──
     prog3 = AuditProgram(
         program_no="AP-2026-003", program_year=2026,
-        audit_type="customer", scope="上海新能源主机厂第二方审核",
-        criteria="客户CSR要求",
+        audit_type="customer", scope="Zweitparteien-Audit durch OEM für Elektrofahrzeuge",
+        criteria="Kundenspezifische Anforderungen (CSR)",
         status="completed", created_by=admin_id,
         product_line_code="DC-DC-100", factory_id=default_factory_id,
     )
@@ -1264,20 +1264,20 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
 
     plan3 = AuditPlan(
         plan_no="AUD-2026-003", program_id=prog3.program_id,
-        audit_scope="客户第二方审核",
-        audit_criteria="上海新能源CSR + IATF 16949",
+        audit_scope="Zweitparteien-Audit durch Kunden",
+        audit_criteria="OEM-CSR + IATF 16949",
         planned_date=date(2026, 4, 10),
         actual_date=date(2026, 4, 11),
         lead_auditor=manager_id,
         team_members=[],
         checklist=[
-            {"clause": "CSR-01", "question": "24小时响应机制是否建立?", "result": "符合"},
-            {"clause": "CSR-02", "question": "批次追溯体系是否完善?", "result": "基本符合"},
+            {"clause": "CSR-01", "question": "Ist ein 24-Stunden-Reaktionsprozess eingerichtet?", "result": "符合"},
+            {"clause": "CSR-02", "question": "Ist das Chargenrückverfolgungssystem vollständig?", "result": "符合"},
         ],
         status="completed",
         created_by=admin_id,
         product_line_code="DC-DC-100",
-        audit_category="customer", customer_name="上海新能源主机厂",
+        audit_category="customer", customer_name="OEM Elektrofahrzeuge",
         customer_type="OEM",
         customer_confirmation_doc=[],
         factory_id=default_factory_id,
@@ -1288,9 +1288,9 @@ async def seed_audits(db, admin_id, engineer_id, manager_id, default_factory_id,
     finding4 = AuditFinding(
         audit_id=plan3.audit_id, factory_id=default_factory_id,
         clause_ref="CSR-02", finding_type="minor",
-        description="批次追溯系统未覆盖原材料批次信息",
-        root_cause="系统未集成原材料批次追溯模块",
-        correction="补充原材料批次追溯信息",
+        description="Chargenrückverfolgung umfasst keine Rohmaterialchargen",
+        root_cause="Modul zur Rohmaterial-Chargenverfolgung nicht integriert",
+        correction="Chargeninformationen der Rohmaterialien ergänzen",
         status="closed", due_date=date(2026, 5, 30),
         closed_at=datetime(2026, 5, 28, 10, 0, tzinfo=UTC),
         customer_confirmed=True, customer_confirmation_date=date(2026, 5, 29),
@@ -1313,13 +1313,13 @@ async def seed_ppap(db, admin_id, manager_id, default_factory_id, supplier1_id, 
     ppap1 = SupplierPPAPSubmission(
         ppap_no="PPAP-2026-001",
         supplier_id=supplier1_id, factory_id=default_factory_id,
-        part_no="RES-0805-10K", part_name="0805贴片电阻 10KΩ",
+        part_no="RES-0805-10K", part_name="SMD-Widerstand 0805 10 kΩ",
         submission_level=3, submission_date=date(2026, 3, 15),
         status="approved", approved_by=manager_id,
         approved_at=datetime(2026, 3, 25, 10, 0, tzinfo=UTC),
-        notes="Level 3全项提交，所有项目符合要求",
+        notes="Vorlage Stufe 3 vollständig, alle Elemente erfüllt",
         product_line_code="DC-DC-100",
-        customer_name="上海新能源主机厂",
+        customer_name="OEM Elektrofahrzeuge",
         created_by=admin_id,
     )
     db.add(ppap1)
@@ -1327,24 +1327,24 @@ async def seed_ppap(db, admin_id, manager_id, default_factory_id, supplier1_id, 
 
     # PPAP elements (18 standard elements)
     ppap_elements_1 = [
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=1, element_name="设计记录", status="approved", sort_order=1, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=2, element_name="工程变更文件", status="approved", sort_order=2, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=3, element_name="顾客工程批准", status="approved", sort_order=3, required=False, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=4, element_name="设计FMEA", status="approved", sort_order=4, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=5, element_name="过程流程图", status="approved", sort_order=5, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=6, element_name="过程FMEA", status="approved", sort_order=6, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=7, element_name="控制计划", status="approved", sort_order=7, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=8, element_name="测量系统分析", status="approved", sort_order=8, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=9, element_name="尺寸结果", status="approved", sort_order=9, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=10, element_name="材料/性能试验结果", status="approved", sort_order=10, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=11, element_name="初始过程研究", status="approved", sort_order=11, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=12, element_name="合格实验室文件", status="approved", sort_order=12, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=13, element_name="外观批准报告", status="na", sort_order=13, required=False),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=14, element_name="样品产品", status="approved", sort_order=14, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=15, element_name="检查辅具", status="approved", sort_order=15, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=16, element_name="顾客特殊要求", status="approved", sort_order=16, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=17, element_name="零件提交保证书", status="approved", sort_order=17, required=True, reviewed_by=manager_id),
-        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=18, element_name="零件重量记录", status="approved", sort_order=18, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=1, element_name="Konstruktionsunterlagen", status="approved", sort_order=1, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=2, element_name="Dokumente zu technischen Änderungen", status="approved", sort_order=2, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=3, element_name="Technische Freigabe durch den Kunden", status="approved", sort_order=3, required=False, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=4, element_name="Design-FMEA", status="approved", sort_order=4, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=5, element_name="Prozessablaufdiagramm", status="approved", sort_order=5, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=6, element_name="Prozess-FMEA", status="approved", sort_order=6, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=7, element_name="Produktionslenkungsplan", status="approved", sort_order=7, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=8, element_name="Messsystemanalyse", status="approved", sort_order=8, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=9, element_name="Maßliche Ergebnisse", status="approved", sort_order=9, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=10, element_name="Ergebnisse von Werkstoff-/Funktionsprüfungen", status="approved", sort_order=10, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=11, element_name="Vorläufige Prozessfähigkeitsuntersuchung", status="approved", sort_order=11, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=12, element_name="Dokumentation des qualifizierten Labors", status="approved", sort_order=12, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=13, element_name="Bericht zur Freigabe des Aussehens", status="na", sort_order=13, required=False),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=14, element_name="Musterteile", status="approved", sort_order=14, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=15, element_name="Prüfmittel/Prüfhilfsmittel", status="approved", sort_order=15, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=16, element_name="Kundenspezifische Anforderungen", status="approved", sort_order=16, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=17, element_name="Teilevorlagebestätigung (PSW)", status="approved", sort_order=17, required=True, reviewed_by=manager_id),
+        SupplierPPAPElement(submission_id=ppap1.submission_id, element_no=18, element_name="Teilegewichtsaufzeichnung", status="approved", sort_order=18, required=True, reviewed_by=manager_id),
     ]
     db.add_all(ppap_elements_1)
 
@@ -1352,10 +1352,10 @@ async def seed_ppap(db, admin_id, manager_id, default_factory_id, supplier1_id, 
     ppap2 = SupplierPPAPSubmission(
         ppap_no="PPAP-2026-002",
         supplier_id=supplier2_id, factory_id=default_factory_id,
-        part_no="PCB-DC-001", part_name="DC-DC电源模块PCB板",
+        part_no="PCB-DC-001", part_name="Leiterplatte DC-DC-Leistungsmodul",
         submission_level=1, submission_date=date(2026, 5, 28),
         status="draft",
-        notes="Level 1提交，等待审核",
+        notes="Vorlage Stufe 1, Prüfung ausstehend",
         product_line_code="DC-DC-100",
         created_by=admin_id,
     )
@@ -1363,10 +1363,10 @@ async def seed_ppap(db, admin_id, manager_id, default_factory_id, supplier1_id, 
     await db.flush()
 
     ppap_elements_2 = [
-        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=1, element_name="设计记录", status="pending", sort_order=1, required=True),
-        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=7, element_name="控制计划", status="pending", sort_order=2, required=True),
-        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=9, element_name="尺寸结果", status="pending", sort_order=3, required=True),
-        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=17, element_name="零件提交保证书", status="pending", sort_order=4, required=True),
+        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=1, element_name="Konstruktionsunterlagen", status="pending", sort_order=1, required=True),
+        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=7, element_name="Produktionslenkungsplan", status="pending", sort_order=2, required=True),
+        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=9, element_name="Maßliche Ergebnisse", status="pending", sort_order=3, required=True),
+        SupplierPPAPElement(submission_id=ppap2.submission_id, element_no=17, element_name="Teilevorlagebestätigung (PSW)", status="pending", sort_order=4, required=True),
     ]
     db.add_all(ppap_elements_2)
     await db.flush()
@@ -1385,12 +1385,12 @@ async def seed_quality_goals(db, admin_id, engineer_id, manager_id, default_fact
     goal1 = QualityGoal(
         doc_no="QG-2026-001", level=1,
         product_line_code="DC-DC-100", factory_id=default_factory_id,
-        name="DC-DC-100产品线质量目标", target_value="95%", actual_value="92.3%",
+        name="Qualitätsziele Produktlinie DC-DC-100", target_value="95%", actual_value="92.3%",
         unit="%", period="yearly", owner_id=manager_id,
         status="approved", approved_by=admin_id,
         approved_at=datetime(2026, 1, 15, 10, 0, tzinfo=UTC),
-        description="DC-DC-100产品线2026年度总质量目标",
-        data_source_formula="综合达成率",
+        description="Gesamtqualitätsziel 2026 der Produktlinie DC-DC-100",
+        data_source_formula="Gesamterreichungsgrad",
     )
     db.add(goal1)
     await db.flush()
@@ -1400,36 +1400,36 @@ async def seed_quality_goals(db, admin_id, engineer_id, manager_id, default_fact
         QualityGoal(
             doc_no="QG-2026-001-01", parent_id=goal1.goal_id, level=2,
             product_line_code="DC-DC-100", factory_id=default_factory_id,
-            name="客诉PPM目标", target_value="≤100ppm", actual_value="85ppm",
+            name="PPM-Ziel Kundenreklamationen", target_value="≤100ppm", actual_value="85ppm",
             unit="ppm", period="yearly", owner_id=engineer_id,
             status="approved", approved_by=admin_id,
             approved_at=datetime(2026, 1, 15, 10, 30, tzinfo=UTC),
-            description="客户投诉PPM控制目标",
+            description="PPM-Ziel für Kundenreklamationen",
         ),
         QualityGoal(
             doc_no="QG-2026-001-02", parent_id=goal1.goal_id, level=2,
             product_line_code="DC-DC-100", factory_id=default_factory_id,
-            name="出货合格率", target_value="≥99.5%", actual_value="99.3%",
+            name="Annahmequote Auslieferung", target_value="≥99.5%", actual_value="99.3%",
             unit="%", period="monthly", owner_id=engineer_id,
             status="approved", approved_by=admin_id,
             approved_at=datetime(2026, 1, 15, 10, 30, tzinfo=UTC),
-            description="出货批次合格率目标",
+            description="Ziel für Annahmequote der Auslieferungslose",
         ),
         QualityGoal(
             doc_no="QG-2026-001-03", parent_id=goal1.goal_id, level=2,
             product_line_code="DC-DC-100", factory_id=default_factory_id,
-            name="SPC Cpk达标率", target_value="≥1.33", actual_value="1.25",
+            name="Erreichungsquote SPC-Cpk", target_value="≥1.33", actual_value="1.25",
             unit="Cpk", period="quarterly", owner_id=engineer_id,
             status="in_progress",
-            description="关键特性Cpk达标比例",
+            description="Anteil der Schlüsselmerkmale mit erreichtem Cpk",
         ),
         QualityGoal(
             doc_no="QG-2026-001-04", parent_id=goal1.goal_id, level=2,
             product_line_code="DC-DC-100", factory_id=default_factory_id,
-            name="供应商来料合格率", target_value="≥98%", actual_value="96.5%",
+            name="Annahmequote Lieferanteneingang", target_value="≥98%", actual_value="96.5%",
             unit="%", period="monthly", owner_id=engineer_id,
             status="draft",
-            description="供应商来料批次合格率",
+            description="Losannahmequote im Lieferanteneingang",
         ),
     ]
     db.add_all(sub_goals)
@@ -1439,11 +1439,11 @@ async def seed_quality_goals(db, admin_id, engineer_id, manager_id, default_fact
     db.add(QualityGoal(
         doc_no="QG-2026-001-01-01", parent_id=sub_goals[0].goal_id, level=3,
         product_line_code="DC-DC-100", factory_id=default_factory_id,
-        name="安全相关客诉PPM", target_value="≤0ppm", actual_value="0ppm",
+        name="PPM sicherheitsrelevanter Reklamationen", target_value="≤0ppm", actual_value="0ppm",
         unit="ppm", period="yearly", owner_id=engineer_id,
         status="approved", approved_by=admin_id,
         approved_at=datetime(2026, 1, 15, 11, 0, tzinfo=UTC),
-        description="安全相关客户投诉PPM（零容忍）",
+        description="PPM sicherheitsrelevanter Kundenreklamationen (Nulltoleranz)",
     ))
     await db.flush()
     print("Seeded quality goals.")
@@ -1461,10 +1461,10 @@ async def seed_scars(db, admin_id, engineer_id, default_factory_id, supplier1_id
         scar_no="SCAR-2026-001",
         supplier_id=supplier1_id, factory_id=default_factory_id,
         source_type="incoming_inspection",
-        description="IQC检验发现0805贴片电容电容量超差，3/8样品超出上限",
+        description="Wareneingangsprüfung: Kapazität des SMD-Kondensators 0805 außerhalb Toleranz, 3/8 Muster über der oberen Grenze",
         product_line_code="DC-DC-100",
-        requested_action="请在10个工作日内提交8D报告及改善对策",
-        supplier_response="已启动内部改善，预计2周内提交8D报告",
+        requested_action="Bitte innerhalb von 10 Arbeitstagen 8D-Bericht und Verbesserungsmaßnahmen einreichen",
+        supplier_response="Interne Verbesserung gestartet, 8D-Bericht folgt innerhalb von 2 Wochen",
         status="in_progress",
         issued_by=engineer_id, issued_date=date(2026, 5, 26),
         due_date=date(2026, 6, 9),
@@ -1476,15 +1476,15 @@ async def seed_scars(db, admin_id, engineer_id, default_factory_id, supplier1_id
         scar_no="SCAR-2026-002",
         supplier_id=supplier2_id, factory_id=default_factory_id,
         source_type="complaint",
-        description="客户投诉包装材料划伤，追溯到供应商包装工艺不足",
+        description="Kundenreklamation wegen Kratzern durch Verpackung, Ursache: unzureichender Verpackungsprozess des Lieferanten",
         product_line_code="DC-DC-100",
-        requested_action="请改善包装工艺，增加防护措施",
-        supplier_response="已完成包装材料升级，增加泡沫隔板",
+        requested_action="Bitte Verpackungsprozess verbessern und Schutzmaßnahmen ergänzen",
+        supplier_response="Verpackung verbessert, Schaumstoff-Trennlagen ergänzt",
         status="closed",
         issued_by=engineer_id, issued_date=date(2026, 4, 15),
         due_date=date(2026, 5, 15),
         closed_date=date(2026, 5, 10),
-        resolution_summary="供应商已更换包装材料并增加防护措施，验证合格后关闭",
+        resolution_summary="Lieferant hat Verpackung umgestellt und Schutz ergänzt; nach erfolgreicher Verifizierung geschlossen",
     )
     db.add(scar2)
     await db.flush()
@@ -1517,12 +1517,12 @@ async def seed_mes_mock(db, admin_id, default_factory_id):
 
     # Equipment status
     equipment_list = [
-        ("EQ-001", "SMT贴片机-1", "running", 95.2, 88.5, 99.1, 83.5),
-        ("EQ-002", "SMT贴片机-2", "running", 93.8, 86.2, 98.8, 80.1),
-        ("EQ-003", "回流焊炉-1", "running", 97.5, 92.1, 99.5, 89.3),
-        ("EQ-004", "综合测试台-1", "running", 91.0, 85.0, 99.2, 76.6),
-        ("EQ-005", "AOI检测仪-1", "idle", 85.0, 78.0, 99.0, 65.5),
-        ("EQ-006", "点胶机-1", "down", 60.0, 45.0, 95.0, 25.7),
+        ("EQ-001", "SMT-Bestückautomat 1", "running", 95.2, 88.5, 99.1, 83.5),
+        ("EQ-002", "SMT-Bestückautomat 2", "running", 93.8, 86.2, 98.8, 80.1),
+        ("EQ-003", "Reflow-Ofen 1", "running", 97.5, 92.1, 99.5, 89.3),
+        ("EQ-004", "Funktionsprüfstand 1", "running", 91.0, 85.0, 99.2, 76.6),
+        ("EQ-005", "AOI-Prüfgerät 1", "idle", 85.0, 78.0, 99.0, 65.5),
+        ("EQ-006", "Dispenser 1", "down", 60.0, 45.0, 95.0, 25.7),
     ]
     for eq_code, eq_name, status, avail, perf, qual, oee in equipment_list:
         db.add(MESEquipmentStatus(
@@ -1531,15 +1531,15 @@ async def seed_mes_mock(db, admin_id, default_factory_id):
             equipment_name=eq_name, status=status,
             availability=Decimal(str(avail)), performance=Decimal(str(perf)),
             quality=Decimal(str(qual)), oee=Decimal(str(oee)),
-            downtime_reason="计划性维护" if status == "down" else None,
+            downtime_reason="Geplante Wartung" if status == "down" else None,
             recorded_at=now, product_line_code="DC-DC-100",
         ))
 
     # Production orders
     orders = [
-        ("PO-2026-001", "DCDC-100W-A", "SMT→回流焊→测试→包装", 5000, 4850, "completed"),
-        ("PO-2026-002", "DCDC-100W-B", "SMT→回流焊→测试→包装", 3000, 2850, "in_progress"),
-        ("PO-2026-003", "DCDC-100W-C", "SMT→回流焊→测试→包装", 2000, 0, "planned"),
+        ("PO-2026-001", "DCDC-100W-A", "SMT → Reflow → Prüfung → Verpackung", 5000, 4850, "completed"),
+        ("PO-2026-002", "DCDC-100W-B", "SMT → Reflow → Prüfung → Verpackung", 3000, 2850, "in_progress"),
+        ("PO-2026-003", "DCDC-100W-C", "SMT → Reflow → Prüfung → Verpackung", 2000, 0, "planned"),
     ]
     for order_no, model, route, planned, actual, status in orders:
         db.add(MESProductionOrder(
@@ -1554,10 +1554,10 @@ async def seed_mes_mock(db, admin_id, default_factory_id):
 
     # Scrap records
     scrap_types = [
-        ("焊接不良", "solder_defect", 12, 5000),
-        ("贴装偏移", "placement_error", 8, 5000),
-        ("外观划伤", "cosmetic", 5, 4850),
-        ("电气不良", "electrical", 3, 4850),
+        ("Lötfehler", "solder_defect", 12, 5000),
+        ("Bestückversatz", "placement_error", 8, 5000),
+        ("Kratzer an der Oberfläche", "cosmetic", 5, 4850),
+        ("Elektrischer Fehler", "electrical", 3, 4850),
     ]
     for defect, category, qty, total in scrap_types:
         db.add(MESScrapRecord(
@@ -1604,17 +1604,17 @@ async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, dfm
     # APQP Project 1: Active, in Phase 3
     proj1 = APQPProject(
         project_code="APQP-2026-001",
-        project_name="DC-DC 100W BMS电源模块新品开发",
-        product_name="DC-DC 100W BMS电源模块",
+        project_name="Neuentwicklung DC-DC-Leistungsmodul 100 W für BMS",
+        product_name="DC-DC-Leistungsmodul 100 W für BMS",
         product_line_code="DC-DC-100", factory_id=default_factory_id,
-        customer_name="上海新能源主机厂",
-        description="为上海新能源主机厂开发新一代DC-DC 100W BMS电源模块，满足车规级要求",
+        customer_name="OEM Elektrofahrzeuge",
+        description="Entwicklung einer neuen Generation des DC-DC-Leistungsmoduls 100 W für BMS eines Elektrofahrzeug-OEM gemäß Automotive-Anforderungen",
         target_sop_date=date(2026, 9, 1),
         team_members=[
-            {"name": "张工", "role": "项目经理", "department": "研发部"},
-            {"name": "李工", "role": "质量工程师", "department": "质量部"},
-            {"name": "王工", "role": "工艺工程师", "department": "工艺部"},
-            {"name": "赵工", "role": "采购工程师", "department": "采购部"},
+            {"name": "Hr. Müller", "role": "Projektleiter", "department": "Entwicklung"},
+            {"name": "Fr. Schmidt", "role": "Qualitätsingenieur", "department": "Qualitätsabteilung"},
+            {"name": "Hr. Weber", "role": "Prozessingenieur", "department": "Prozesstechnik"},
+            {"name": "Hr. Fischer", "role": "Einkaufsingenieur", "department": "Einkauf"},
         ],
         current_phase=3, phase_status="in_progress", project_status="active",
         phase_1_completed_at=datetime(2026, 3, 1, 10, 0, tzinfo=UTC),
@@ -1628,14 +1628,14 @@ async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, dfm
     # APQP Project 2: Completed
     proj2 = APQPProject(
         project_code="APQP-2025-003",
-        project_name="DC-DC 50W 电源模块量产导入",
-        product_name="DC-DC 50W 电源模块",
+        project_name="Serienanlauf DC-DC-Leistungsmodul 50 W",
+        product_name="DC-DC-Leistungsmodul 50 W",
         product_line_code="DC-DC-100", factory_id=default_factory_id,
-        customer_name="苏州工业控制有限公司",
-        description="DC-DC 50W工业级电源模块量产导入项目，已完成全部APQP阶段",
+        customer_name="Industriesteuerungen GmbH",
+        description="Serienanlaufprojekt für ein industrielles DC-DC-Leistungsmodul 50 W, alle APQP-Phasen abgeschlossen",
         target_sop_date=date(2026, 2, 1),
         team_members=[
-            {"name": "李工", "role": "质量工程师", "department": "质量部"},
+            {"name": "Fr. Schmidt", "role": "Qualitätsingenieur", "department": "Qualitätsabteilung"},
         ],
         current_phase=5, phase_status="completed", project_status="completed",
         phase_1_completed_at=datetime(2025, 9, 1, 10, 0, tzinfo=UTC),
@@ -1645,13 +1645,13 @@ async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, dfm
         phase_5_completed_at=datetime(2026, 2, 1, 10, 0, tzinfo=UTC),
         gate_approved_by=admin_id,
         gate_approved_at=datetime(2026, 2, 1, 10, 30, tzinfo=UTC),
-        gate_comments="项目各阶段均达标，批准量产",
+        gate_comments="Alle Projektphasen erfüllt, Serienfreigabe erteilt",
         gate_history=[
-            {"phase": 1, "approved_by": "系统管理员", "approved_at": "2025-09-01T10:00:00Z", "comments": "计划与目标确认完成"},
-            {"phase": 2, "approved_by": "系统管理员", "approved_at": "2025-10-15T14:00:00Z", "comments": "产品设计与开发阶段完成"},
-            {"phase": 3, "approved_by": "系统管理员", "approved_at": "2025-11-30T16:00:00Z", "comments": "过程设计与开发完成"},
-            {"phase": 4, "approved_by": "系统管理员", "approved_at": "2026-01-15T10:00:00Z", "comments": "产品与过程确认完成"},
-            {"phase": 5, "approved_by": "系统管理员", "approved_at": "2026-02-01T10:30:00Z", "comments": "反馈与评定完成，批准量产"},
+            {"phase": 1, "approved_by": "Systemadministrator", "approved_at": "2025-09-01T10:00:00Z", "comments": "Planung und Zielbestätigung abgeschlossen"},
+            {"phase": 2, "approved_by": "Systemadministrator", "approved_at": "2025-10-15T14:00:00Z", "comments": "Produktdesign und -entwicklung abgeschlossen"},
+            {"phase": 3, "approved_by": "Systemadministrator", "approved_at": "2025-11-30T16:00:00Z", "comments": "Prozessdesign und -entwicklung abgeschlossen"},
+            {"phase": 4, "approved_by": "Systemadministrator", "approved_at": "2026-01-15T10:00:00Z", "comments": "Produkt- und Prozessvalidierung abgeschlossen"},
+            {"phase": 5, "approved_by": "Systemadministrator", "approved_at": "2026-02-01T10:30:00Z", "comments": "Rückmeldung und Bewertung abgeschlossen, Serienfreigabe erteilt"},
         ],
         created_by=admin_id,
     )
@@ -1660,13 +1660,13 @@ async def seed_apqp(db, admin_id, engineer_id, default_factory_id, fmea1_id, dfm
     # APQP Project 3: Early phase, planning
     proj3 = APQPProject(
         project_code="APQP-2026-004",
-        project_name="车载充电机AC-DC模块新品开发",
-        product_name="AC-DC 车载充电机模块",
+        project_name="Neuentwicklung AC-DC-Modul für Onboard-Ladegerät",
+        product_name="AC-DC-Modul Onboard-Ladegerät",
         product_line_code="DC-DC-100", factory_id=default_factory_id,
-        description="新能源汽车车载充电机AC-DC模块APQP项目",
+        description="APQP-Projekt AC-DC-Modul für Onboard-Ladegeräte von Elektrofahrzeugen",
         target_sop_date=date(2027, 3, 1),
         team_members=[
-            {"name": "张工", "role": "项目经理", "department": "研发部"},
+            {"name": "Hr. Müller", "role": "Projektleiter", "department": "Entwicklung"},
         ],
         current_phase=1, phase_status="in_progress", project_status="active",
         created_by=admin_id,
@@ -1693,13 +1693,13 @@ async def seed(*, print_credentials: bool = True):
         role_result = await db.execute(select(RoleDefinition))
         existing_roles = {r.role_key for r in role_result.scalars().all()}
         _ROLES = [
-            ("admin", "系统管理员", "System Admin", True, False, True, 1),
-            ("manager", "质量经理", "Quality Manager", True, True, False, 2),
-            ("viewer", "只读用户", "Viewer", True, False, False, 3),
-            ("customer_qe", "客户质量工程师", "Customer QE", True, True, False, 4),
-            ("supplier_qe", "供应商质量工程师", "Supplier QE", True, True, False, 5),
-            ("field_qe", "现场质量工程师", "Field QE", True, True, False, 6),
-            ("planning_qe", "前期策划质量工程师", "Planning QE", True, True, False, 7),
+            ("admin", "Systemadministrator", "System Admin", True, False, True, 1),
+            ("manager", "Qualitätsmanager", "Quality Manager", True, True, False, 2),
+            ("viewer", "Nur-Lese-Benutzer", "Viewer", True, False, False, 3),
+            ("customer_qe", "Kundenqualitätsingenieur", "Customer QE", True, True, False, 4),
+            ("supplier_qe", "Lieferantenqualitätsingenieur", "Supplier QE", True, True, False, 5),
+            ("field_qe", "Fertigungsqualitätsingenieur", "Field QE", True, True, False, 6),
+            ("planning_qe", "Qualitätsingenieur Vorausplanung", "Planning QE", True, True, False, 7),
         ]
         for role_key, name_zh, name_en, is_system, is_editable, bypass, sort in _ROLES:
             if role_key not in existing_roles:
@@ -1815,7 +1815,7 @@ async def seed(*, print_credentials: bool = True):
         admin = admin_result.scalar_one_or_none()
         if not admin:
             admin = User(
-                username="admin", display_name="系统管理员",
+                username="admin", display_name="Systemadministrator",
                 password_hash=hash_password(secrets.token_urlsafe(36)),
                 role_id=roles["admin"], legacy_role="admin",
             )
@@ -1824,17 +1824,17 @@ async def seed(*, print_credentials: bool = True):
 
         # Users
         engineer = User(
-            username="engineer", display_name="质量工程师",
+            username="engineer", display_name="Qualitätsingenieur",
             password_hash=hash_password("Engineer@2026"), role_id=roles["field_qe"],
             legacy_role="field_qe",
         )
         manager = User(
-            username="manager", display_name="质量经理",
+            username="manager", display_name="Qualitätsmanager",
             password_hash=hash_password("Manager@2026"), role_id=roles["manager"],
             legacy_role="manager",
         )
         viewer = User(
-            username="viewer", display_name="只读用户",
+            username="viewer", display_name="Nur-Lese-Benutzer",
             password_hash=hash_password("Viewer@2026"), role_id=roles["viewer"],
             legacy_role="viewer",
         )
@@ -1851,15 +1851,15 @@ async def seed(*, print_credentials: bool = True):
             select(Factory).where(Factory.code == "DEFAULT")
         )).scalar_one_or_none()
         if not default_factory:
-            default_factory = Factory(code="DEFAULT", name="默认工厂", location="总部", is_active=True)
+            default_factory = Factory(code="DEFAULT", name="Standardwerk", location="Zentrale", is_active=True)
             db.add(default_factory)
             await db.flush()
 
         # Product types (cross-factory taxonomy)
         from app.models.product_type import ProductType
         pt_data = [
-            {"code": "POWER", "name": "电源类", "description": "电源模块/电源线", "is_active": True},
-            {"code": "PCB", "name": "PCB 类", "description": "印制电路板/贴片线", "is_active": True},
+            {"code": "POWER", "name": "Stromversorgung", "description": "Leistungsmodule/Stromkabel", "is_active": True},
+            {"code": "PCB", "name": "Leiterplatten", "description": "Leiterplatten/Bestücklinien", "is_active": True},
         ]
         for pt_dict in pt_data:
             existing = await db.execute(select(ProductType).where(ProductType.code == pt_dict["code"]))
@@ -1883,7 +1883,7 @@ async def seed(*, print_credentials: bool = True):
 
         # FMEA documents
         fmea1 = FMEADocument(
-            document_no="PFMEA-2026-001", title="DC-DC 100W SMT贴装PFMEA（模拟演示草案）",
+            document_no="PFMEA-2026-001", title="PFMEA SMT-Bestückung DC-DC 100 W (simulierter Demo-Entwurf)",
             fmea_type="PFMEA", status="draft", product_line_code="DC-DC-100",
             graph_data=SAMPLE_GRAPH,
             created_by=engineer.user_id, updated_by=engineer.user_id,
@@ -1891,23 +1891,23 @@ async def seed(*, print_credentials: bool = True):
             factory_id=default_factory.id,
         )
         fmea2 = FMEADocument(
-            document_no="PFMEA-2026-002", title="注塑工序PFMEA",
+            document_no="PFMEA-2026-002", title="PFMEA Spritzgießen",
             fmea_type="PFMEA", status="draft",
             graph_data={"nodes": [
-                {"id": "pi_draft", "type": "ProcessItem", "name": "新建过程项目", "severity": 0, "occurrence": 0, "detection": 0}
+                {"id": "pi_draft", "type": "ProcessItem", "name": "Neues Prozesselement", "severity": 0, "occurrence": 0, "detection": 0}
             ], "edges": []},
             created_by=engineer.user_id, updated_by=engineer.user_id,
             factory_id=default_factory.id,
         )
         fmea3 = FMEADocument(
-            document_no="DFMEA-2026-001", title="电池管理系统 (BMS) DFMEA（独立示例）",
+            document_no="DFMEA-2026-001", title="DFMEA Batteriemanagementsystem (BMS) (eigenständiges Beispiel)",
             fmea_type="DFMEA", status="in_review", product_line_code="BMS-DEMO",
             graph_data=SAMPLE_DFMEA_GRAPH,
             created_by=engineer.user_id, updated_by=engineer.user_id,
             factory_id=default_factory.id,
         )
         fmea4 = FMEADocument(
-            document_no="DFMEA-2026-002", title="DC-DC 100W 模块DFMEA（模拟演示草案）",
+            document_no="DFMEA-2026-002", title="DFMEA DC-DC-Modul 100 W (simulierter Demo-Entwurf)",
             fmea_type="DFMEA", status="draft", product_line_code="DC-DC-100",
             graph_data=build_dcdc_design_dfmea_graph(),
             created_by=engineer.user_id, updated_by=engineer.user_id,
@@ -1920,19 +1920,19 @@ async def seed(*, print_credentials: bool = True):
 
         # CAPA reports
         capa1 = CAPAEightD(
-            document_no="8D-2026-001", title="焊接不良客诉",
+            document_no="8D-2026-001", title="Kundenreklamation Lötfehler",
             status="D4_ROOT_CAUSE", severity="serious",
-            d1_team=[{"name": "张三", "role": "质量工程师"}, {"name": "李四", "role": "工艺工程师"}],
-            d2_description="客户反馈PCB组件焊接不良，影响数量500pcs",
-            d3_interim="已隔离不良批次，100%加检",
-            d4_root_cause="初步判断为回流焊温度曲线异常",
+            d1_team=[{"name": "Max Mustermann", "role": "Qualitätsingenieur"}, {"name": "Erika Musterfrau", "role": "Prozessingenieur"}],
+            d2_description="Kunde meldet Lötfehler an Leiterplattenbaugruppen, betroffene Menge 500 Stk",
+            d3_interim="Fehlerhafte Charge gesperrt, 100 % Zusatzprüfung",
+            d4_root_cause="Erste Einschätzung: abweichendes Reflow-Temperaturprofil",
             due_date=date(2026, 6, 1),
             fmea_ref_id=fmea1.fmea_id,
             created_by=engineer.user_id,
             factory_id=default_factory.id,
         )
         capa2 = CAPAEightD(
-            document_no="8D-2026-002", title="注塑尺寸超差",
+            document_no="8D-2026-002", title="Spritzgussmaß außerhalb Toleranz",
             status="D1_TEAM", severity="general",
             d1_team=[],
             due_date=date(2026, 6, 15),
@@ -1945,18 +1945,18 @@ async def seed(*, print_credentials: bool = True):
         # Historical closed review (for previous_review_outputs stats)
         review1 = ManagementReview(
             doc_no="MR-2026-001",
-            title="2026年Q1全厂管理评审",
+            title="Managementbewertung Gesamtwerk Q1/2026",
             review_date=date(2026, 3, 15),
             actual_date=date(2026, 3, 16),
             status="closed",
             product_line_code=None,  # 全厂级
-            location="质量会议室",
+            location="Qualitäts-Besprechungsraum",
             chair_person_id=manager.user_id,
             participants=[
-                {"user_id": str(engineer.user_id), "name": "质量工程师", "role": "记录员", "department": "质量部"},
-                {"user_id": str(manager.user_id), "name": "质量经理", "role": "主持人", "department": "质量部"},
+                {"user_id": str(engineer.user_id), "name": "Qualitätsingenieur", "role": "Protokollführer", "department": "Qualitätsabteilung"},
+                {"user_id": str(manager.user_id), "name": "Qualitätsmanager", "role": "Moderator", "department": "Qualitätsabteilung"},
             ],
-            meeting_minutes="评审确认质量目标达成率良好，FMEA风险控制有效。决定加强供应商绩效监控。",
+            meeting_minutes="Die Bewertung bestätigt eine gute Erreichung der Qualitätsziele und eine wirksame FMEA-Risikosteuerung. Beschluss: Überwachung der Lieferantenleistung verstärken.",
             data_package={
                 "generated_at": "2026-03-15T09:00:00Z",
                 "quality_goals": {"total": 10, "achieved": 7, "on_track": 2, "behind": 1},
@@ -1973,37 +1973,37 @@ async def seed(*, print_credentials: bool = True):
         output1_v = ReviewOutput(
             review_id=review1.review_id,
             category="improvement_opportunity",
-            description="建立供应商绩效看板，每周更新评级分布",
+            description="Dashboard für Lieferantenleistung einrichten, Klassenverteilung wöchentlich aktualisieren",
             responsible_id=engineer.user_id,
             due_date=date(2026, 4, 30),
             status="verified",
-            completion_notes="已开发供应商绩效看板模块，并完成首周数据录入",
+            completion_notes="Dashboard-Modul für Lieferantenleistung entwickelt und erste Wochendaten erfasst",
             verified_by=manager.user_id,
             verified_at=date(2026, 5, 10),
-            verification_notes="看板运行稳定，数据准确，达到预期效果",
+            verification_notes="Dashboard läuft stabil, Daten korrekt, erwartete Wirkung erreicht",
             factory_id=default_factory.id,
         )
         output2_v = ReviewOutput(
             review_id=review1.review_id,
             category="system_change",
-            description="修订采购程序文件，增加供应商准入审批流程",
+            description="Beschaffungsverfahren überarbeiten, Freigabeprozess für neue Lieferanten ergänzen",
             responsible_id=manager.user_id,
             due_date=date(2026, 5, 15),
             status="verified",
-            completion_notes="已完成程序文件修订，培训相关人员",
+            completion_notes="Verfahrensanweisung überarbeitet, betroffene Mitarbeitende geschult",
             verified_by=manager.user_id,
             verified_at=date(2026, 5, 20),
-            verification_notes="文件审批完成，培训记录完整",
+            verification_notes="Dokumentfreigabe abgeschlossen, Schulungsnachweise vollständig",
             factory_id=default_factory.id,
         )
         output3_c = ReviewOutput(
             review_id=review1.review_id,
             category="resource_need",
-            description="增配一台SPC统计分析工作站",
+            description="Zusätzlichen SPC-Auswertearbeitsplatz anschaffen",
             responsible_id=engineer.user_id,
             due_date=date(2026, 6, 1),
             status="completed",
-            completion_notes="设备已采购到位，安装调试完成",
+            completion_notes="Gerät beschafft, installiert und in Betrieb genommen",
             factory_id=default_factory.id,
         )
         db.add_all([output1_v, output2_v, output3_c])
@@ -2011,14 +2011,14 @@ async def seed(*, print_credentials: bool = True):
         # Current in-review review
         review2 = ManagementReview(
             doc_no="MR-2026-002",
-            title="DC-DC-100产品线Q2管理评审",
+            title="Managementbewertung Q2 Produktlinie DC-DC-100",
             review_date=date(2026, 5, 28),
             status="in_review",
             product_line_code="DC-DC-100",
-            location="生产线会议室",
+            location="Besprechungsraum Fertigung",
             chair_person_id=manager.user_id,
             participants=[
-                {"user_id": str(engineer.user_id), "name": "质量工程师", "role": "数据准备", "department": "质量部"},
+                {"user_id": str(engineer.user_id), "name": "Qualitätsingenieur", "role": "Datenaufbereitung", "department": "Qualitätsabteilung"},
             ],
             created_by=engineer.user_id,
             factory_id=default_factory.id,
@@ -2029,7 +2029,7 @@ async def seed(*, print_credentials: bool = True):
         output4_p = ReviewOutput(
             review_id=review2.review_id,
             category="improvement_opportunity",
-            description="优化SPC控制限设定，缩短Cpk达标周期",
+            description="Festlegung der SPC-Eingriffsgrenzen optimieren, Zeit bis zum Cpk-Ziel verkürzen",
             responsible_id=engineer.user_id,
             due_date=date(2026, 7, 15),
             status="pending",
@@ -2071,7 +2071,7 @@ async def seed(*, print_credentials: bool = True):
         iqc_materials = [
             {
                 "part_no": "RES-0805-10K",
-                "part_name": "0805贴片电阻 10KΩ ±1%",
+                "part_name": "SMD-Widerstand 0805 10 kΩ ±1 %",
                 "part_spec": "±1% 1/8W",
                 "material_type": "component",
                 "default_aql": 0.65,
@@ -2081,7 +2081,7 @@ async def seed(*, print_credentials: bool = True):
             },
             {
                 "part_no": "CAP-0805-10U",
-                "part_name": "0805贴片电容 10uF ±20%",
+                "part_name": "SMD-Kondensator 0805 10 µF ±20 %",
                 "part_spec": "±20% 16V",
                 "material_type": "component",
                 "default_aql": 1.0,
@@ -2091,8 +2091,8 @@ async def seed(*, print_credentials: bool = True):
             },
             {
                 "part_no": "PCB-DC-001",
-                "part_name": "DC-DC电源模块PCB板",
-                "part_spec": "FR-4 1.6mm 双层板",
+                "part_name": "Leiterplatte DC-DC-Leistungsmodul",
+                "part_spec": "FR-4 1,6 mm zweilagige Leiterplatte",
                 "material_type": "raw",
                 "default_aql": 0.4,
                 "default_inspection_level": "II",
@@ -2110,32 +2110,32 @@ async def seed(*, print_credentials: bool = True):
         # --- Customer Quality seed data ---
         customer1 = Customer(
             customer_code="CUS-001",
-            name="上海新能源主机厂",
-            segment="汽车",
-            contact_name="王工",
+            name="OEM Elektrofahrzeuge",
+            segment="Automotive",
+            contact_name="Hr. Weber",
             contact_email="wang.quality@example.com",
             contact_phone="021-55550001",
             csr_list=[
-                {"title": "24小时初步响应", "description": "重大质量问题需24小时内给出初步回复"},
-                {"title": "批次追溯", "description": "所有客诉需提供生产批次与围堵记录"},
+                {"title": "Erste Antwort innerhalb von 24 Stunden", "description": "Bei schwerwiegenden Qualitätsproblemen ist innerhalb von 24 Stunden eine erste Antwort zu geben"},
+                {"title": "Chargenrückverfolgung", "description": "Bei allen Reklamationen sind Fertigungscharge und Eindämmungsnachweise anzugeben"},
             ],
             ppm_target=100.0,
             annual_shipment_qty=36500,
-            notes="重点汽车客户，月度质量例会",
+            notes="Wichtiger Automobilkunde, monatliches Qualitätsmeeting",
             created_by=engineer.user_id,
             factory_id=default_factory.id,
         )
         customer2 = Customer(
             customer_code="CUS-002",
-            name="苏州工业控制有限公司",
-            segment="工业",
-            contact_name="赵经理",
+            name="Industriesteuerungen GmbH",
+            segment="Industrie",
+            contact_name="Hr. Fischer (Manager)",
             contact_email="zhao.qa@example.com",
             contact_phone="0512-55550002",
-            csr_list=[{"title": "包装标识", "description": "外箱需标识产品批号和检验状态"}],
+            csr_list=[{"title": "Verpackungskennzeichnung", "description": "Außenkarton mit Chargennummer und Prüfstatus kennzeichnen"}],
             ppm_target=250.0,
             annual_shipment_qty=18000,
-            notes="工业控制器客户",
+            notes="Kunde für Industriesteuerungen",
             created_by=engineer.user_id,
             factory_id=default_factory.id,
         )
@@ -2170,7 +2170,7 @@ async def seed(*, print_credentials: bool = True):
             serial_number="SN-DCDC-20260518-0007",
             category="safety",
             severity="致命",
-            defect_desc="客户现场反馈电源模块异常发热并触发整车报警",
+            defect_desc="Kunde meldet ungewöhnliche Erwärmung des Leistungsmoduls mit Fahrzeugalarm",
             impact_qty=12,
             occurred_date=date(2026, 5, 24),
             received_date=date(2026, 5, 26),
@@ -2196,14 +2196,14 @@ async def seed(*, print_credentials: bool = True):
             batch_no="B20260510-03",
             category="function",
             severity="严重",
-            defect_desc="客户抽检发现输出电压间歇性漂移",
+            defect_desc="Stichprobe beim Kunden zeigt sporadische Drift der Ausgangsspannung",
             impact_qty=35,
             occurred_date=date(2026, 5, 18),
             received_date=date(2026, 5, 20),
             due_date=date(2026, 5, 23),
             status="investigating",
             fmea_ref_id=fmea1.fmea_id,
-            preliminary_response="已启动批次围堵并安排样件回收分析",
+            preliminary_response="Chargeneindämmung gestartet, Rücklauf der Muster zur Analyse veranlasst",
             attachments=attachment_photo,
             assignee_id=engineer.user_id,
             supplier_responsibility=False,
@@ -2218,15 +2218,15 @@ async def seed(*, print_credentials: bool = True):
             batch_no="SMT20260428-02",
             category="appearance",
             severity="一般",
-            defect_desc="客户反馈外观轻微划伤，未影响功能",
+            defect_desc="Kunde meldet leichte Kratzer, Funktion nicht beeinträchtigt",
             impact_qty=8,
             occurred_date=date(2026, 4, 29),
             received_date=date(2026, 5, 2),
             due_date=date(2026, 5, 12),
             status="closed",
-            preliminary_response="已确认包装隔板磨损导致，完成改善",
-            root_cause="周转箱隔板磨损后保护不足",
-            corrective_action="更换隔板并增加出货外观复检",
+            preliminary_response="Ursache verschlissene Verpackungseinlage bestätigt, Verbesserung umgesetzt",
+            root_cause="Unzureichender Schutz durch verschlissene Trennlagen im Transportbehälter",
+            corrective_action="Trennlagen ersetzen und Sichtprüfung vor Versand ergänzen",
             attachments=attachment_report,
             assignee_id=engineer.user_id,
             supplier_responsibility=False,
@@ -2246,10 +2246,10 @@ async def seed(*, print_credentials: bool = True):
             batch_no="B20260518-01",
             serial_number="SN-DCDC-20260518-0007",
             return_qty=5,
-            defect_type="功能不良",
+            defect_type="Funktionsfehler",
             responsibility="internal",
-            analysis_result="待完成电气复测与热分析",
-            corrective_action="已隔离同批次库存并暂停发运",
+            analysis_result="Elektrische Nachprüfung und Thermoanalyse ausstehend",
+            corrective_action="Bestand derselben Charge gesperrt und Versand gestoppt",
             status="analysis",
             fmea_ref_id=fmea1.fmea_id,
             capa_ref_id=capa1.report_id,
@@ -2267,10 +2267,10 @@ async def seed(*, print_credentials: bool = True):
             product_id="PCB-CTRL-200",
             batch_no="SMT20260505-01",
             return_qty=3,
-            defect_type="外观缺陷",
+            defect_type="Optischer Fehler",
             responsibility="transport",
-            analysis_result="外箱挤压导致边角划伤",
-            corrective_action="通知物流更换缓冲包装",
+            analysis_result="Eckkratzer durch Quetschung des Versandkartons",
+            corrective_action="Logistik informiert, Polsterverpackung austauschen",
             status="closed",
             attachments=attachment_report,
             assignee_id=engineer.user_id,
@@ -2286,26 +2286,26 @@ async def seed(*, print_credentials: bool = True):
         from app.models.supplier import Supplier, SupplierEvaluation
         supplier1 = Supplier(
             supplier_no="SUP-2026-001",
-            name="测试供应商A",
-            short_name="供应商A",
-            contact_name="李经理",
+            name="Testlieferant A",
+            short_name="Lieferant A",
+            contact_name="Fr. Schmidt (Managerin)",
             contact_phone="021-55551001",
             contact_email="li.supplier@example.com",
-            address="上海市浦东新区张江高科技园区",
-            product_scope="电子元器件、PCB板",
+            address="Technologiepark, Musterstadt",
+            product_scope="Elektronische Bauteile, Leiterplatten",
             status="approved",
             created_by=admin.user_id,
             factory_id=default_factory.id,
         )
         supplier2 = Supplier(
             supplier_no="SUP-2026-002",
-            name="测试供应商D",
-            short_name="供应商D",
-            contact_name="张工",
+            name="Testlieferant D",
+            short_name="Lieferant D",
+            contact_name="Hr. Müller",
             contact_phone="0512-55552002",
             contact_email="zhang.supplier@example.com",
-            address="苏州市工业园区",
-            product_scope="结构件、包装材料",
+            address="Industriegebiet, Musterstadt",
+            product_scope="Strukturteile, Verpackungsmaterial",
             status="approved",
             created_by=admin.user_id,
             factory_id=default_factory.id,
@@ -2323,7 +2323,7 @@ async def seed(*, print_credentials: bool = True):
             service_score=88.0,
             total_score=91.5,
             grade="A",
-            notes="供应商表现优秀，按时交付且质量稳定",
+            notes="Hervorragende Lieferantenleistung, termingerecht und qualitativ stabil",
             evaluated_by=admin.user_id,
             factory_id=default_factory.id,
         )
@@ -2338,7 +2338,7 @@ async def seed(*, print_credentials: bool = True):
             capa_penalty=5.0,
             total_score=78.5,
             grade="B",
-            notes="供应商表现一般，存在一次CAPA需关注",
+            notes="Durchschnittliche Lieferantenleistung, eine CAPA erfordert Aufmerksamkeit",
             evaluated_by=admin.user_id,
             factory_id=default_factory.id,
         )
@@ -2354,7 +2354,7 @@ async def seed(*, print_credentials: bool = True):
         )).scalar_one_or_none()
         if not default_factory:
             # If running on fresh DB where migration hasn't created it, create it
-            default_factory = Factory(code="DEFAULT", name="默认工厂", location="总部", is_active=True)
+            default_factory = Factory(code="DEFAULT", name="Standardwerk", location="Zentrale", is_active=True)
             db.add(default_factory)
             await db.flush()
 
@@ -2368,8 +2368,8 @@ async def seed(*, print_credentials: bool = True):
                     shipment_date=date_type.today() - timedelta(days=i * 15),
                     quantity=(i + 1) * 500,
                     batch_no=f"BATCH-SHIP-2026-{i+1:03d}",
-                    destination="上海",
-                    notes=f"发运记录 {i+1}",
+                    destination="Musterstadt",
+                    notes=f"Lieferung {i+1}",
                 ))
 
         # ─── Warranty records seed ───
@@ -2382,8 +2382,8 @@ async def seed(*, print_credentials: bool = True):
                     factory_id=default_factory.id,
                     claim_date=date_type.today() - timedelta(days=i * 60),
                     amount=(i + 1) * 3500.0,
-                    failure_mode="短路" if i == 0 else ("开路" if i == 1 else "参数漂移"),
-                    description=f"保修索赔 {i+1} - {customer.name}",
+                    failure_mode="Kurzschluss" if i == 0 else ("Unterbrechung" if i == 1 else "Parameterdrift"),
+                    description=f"Garantieanspruch {i+1} - {customer.name}",
                 ))
 
         # ─── PLM demo data ───
@@ -2455,8 +2455,8 @@ async def seed(*, print_credentials: bool = True):
         # Second factory
         shanghai_factory = Factory(
             code="SH-02",
-            name="上海工厂",
-            location="上海市浦东新区",
+            name="Werk Hauptstandort",
+            location="Musterstadt",
             is_active=True,
         )
         db.add(shanghai_factory)
@@ -2478,7 +2478,7 @@ async def seed(*, print_credentials: bool = True):
         # New product line for Shanghai factory
         sh_product_line = ProductLine(
             code="SH-DC-200",
-            name="上海DC-DC 200W",
+            name="DC-DC 200 W Hauptstandort",
             is_active=True,
             factory_id=shanghai_factory.id,
         )
@@ -2516,7 +2516,7 @@ async def seed(*, print_credentials: bool = True):
         # Group admin user
         group_admin = User(
             username="groupadmin",
-            display_name="集团管理员",
+            display_name="Konzernadministrator",
             email="groupadmin@qms.example.com",
             password_hash=hash_password(secrets.token_urlsafe(36)),
             role_id=admin.role_id,  # same role as admin

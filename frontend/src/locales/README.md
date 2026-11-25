@@ -3,7 +3,7 @@
 ## Responsibility
 
 Translation string tables for the UI. The application ships
-Chinese-first (`zh-CN`) with a complete `en-US` mirror. Every page
+German-first (`de-DE`, default UI language) with a complete `en-US` mirror. Every page
 namespace lives as a single JSON file per language; the i18n loader in
 `../i18n/index.ts` picks them up via `import.meta.glob`.
 
@@ -11,10 +11,10 @@ namespace lives as a single JSON file per language; the i18n loader in
 
 Two language folders plus a parity test:
 
-- `zh-CN/` — primary source of truth, 39 namespace files. New keys
+- `de-DE/` — primary source of truth, 42 namespace files. New keys
   land here first.
-- `en-US/` — English mirror, same 39 file names. Files are kept
-  one-to-one with `zh-CN/`.
+- `en-US/` — English mirror, same 42 file names. Files are kept
+  one-to-one with `de-DE/`.
 - `pfmea.i18n.test.ts` — vitest spec that imports `pfmea.json` from
   both languages and asserts structural parity (7 wizard steps,
   guidance for all 7 steps in both).
@@ -54,19 +54,18 @@ Each namespace maps to one feature area, e.g.:
 
 - **One file per namespace per language.** Don't merge namespaces;
   don't split a namespace across files.
-- **`zh-CN` is canonical, `en-US` mirrors.** When adding a key, add
+- **`de-DE` is canonical, `en-US` mirrors.** When adding a key, add
   to both languages in the same commit. A key missing from `en-US`
-  falls back to `zh-CN` at runtime (per i18n config), but parity is
+  falls back to `de-DE` at runtime (per i18n config), but parity is
   the expectation.
 - **Keys are dotted `camelCase`**, e.g. `editor.addStep`,
   `messages.documentNoExists`, `wizard.steps.0.title`. Folder-style
   nesting in the JSON, not flat `editor_addStep` keys.
-- **Quality/severity labels stay in original form.** Chinese
-  severity terms (`致命`, `严重`, `一般`, `轻微`) and document
-  prefixes (`PFMEA-2026-001`, `DFMEA-2026-001`, `8D-2026-001`) are
-  domain identifiers; the English file translates surrounding chrome
-  but the prefix and the standard severity terms are not
-  paraphrased.
+- **Stored data values stay in original form.** Backend enum values
+  such as severity (`致命`, `严重`, `一般`, `轻微`), audit results
+  (`符合`, …) or MSA study types are stored data; locale files keep
+  them as `value`/keys and translate only the displayed label.
+  Document prefixes (`PFMEA-2026-001`, `8D-2026-001`) are not translated.
 - **Interpolation uses `{{var}}`.** ICU plural rules are not
   configured; count-style messages (e.g. `relativeTime.minutesAgo`)
   use a single string with `{{count}}`.

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Query, Request
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

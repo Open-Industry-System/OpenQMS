@@ -36,7 +36,7 @@ async def bootstrap_admin(db, *, username: str, password: str, replace_existing:
     if user is not None and not replace_existing:
         raise ValueError("Account exists; explicit --replace-existing is required")
     if user is None:
-        user = User(username=username, display_name="系统管理员", role_id=role.id,
+        user = User(username=username, display_name="Systemadministrator", role_id=role.id,
                     legacy_role="admin", password_hash=hash_password(password), is_active=True)
         db.add(user)
         await db.flush()

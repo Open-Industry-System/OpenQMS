@@ -45,7 +45,7 @@ After changing `backend/app/`, `frontend/src/`, `docker-compose.yml`, or any `Do
 
 ## Project Overview
 
-OpenQMS is a full-stack quality management platform for manufacturing. Covers FMEA (AIAG-VDA 7-step PFMEA/DFMEA), 8D/CAPA, SPC, MSA, IQC, supplier quality, customer quality, APQP, PPAP, control plans, knowledge graph, and more. UI in Chinese (zh_CN).
+OpenQMS is a full-stack quality management platform for manufacturing. Covers FMEA (AIAG-VDA 7-step PFMEA/DFMEA), 8D/CAPA, SPC, MSA, IQC, supplier quality, customer quality, APQP, PPAP, control plans, knowledge graph, and more. UI in German (de-DE, default) with an English switch (en-US); Chinese was removed from the UI.
 
 **Stack:** Python 3.11+ + FastAPI 0.115 (async) | React 18 + TypeScript 5.6 + Vite 5.4 + Ant Design 5.29 | PostgreSQL 15 + SQLAlchemy 2.0 (async) | Redis 7 (configured, no logic yet)
 
@@ -159,10 +159,12 @@ PostgreSQL 15 (asyncpg), 50+ tables across 7 modules. Multi-tenant with factory 
 
 ## Key Conventions
 
-- Chinese UI, mixed Chinese/English comments
+- German/English UI (`frontend/src/locales/{de-DE,en-US}`); code comments remain mixed Chinese/English
+- UI strings without a translation key use `tr(de, en)` / `useTr()` from `frontend/src/i18n/tr.ts`
+- Backend messages stay in their original (Chinese) source form; `backend/app/i18n` translates JSON responses per `Accept-Language` (catalog `backend/app/i18n/messages.json`) and appends an output-language directive to LLM prompts. Add new user-facing backend messages to the catalog.
 - Document numbering: `PFMEA-2026-001`, `DFMEA-2026-001`, `8D-2026-001`
 - Product line: `DC-DC-100` (seed data default)
-- Severity labels: `致命`, `严重`, `一般`, `轻微`
+- Severity values (stored data, unchanged): `致命`, `严重`, `一般`, `轻微` — displayed via translations
 - Every CRUD operation manually creates an `AuditLog` in its service method
 - FMEA graph nodes carry AIAG-VDA 7-step properties
 - `frontend/src/utils/fmea.ts` has the AIAG-VDA Action Priority lookup table (H/M/L from S×O×D)

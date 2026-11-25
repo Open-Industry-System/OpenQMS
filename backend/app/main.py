@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api import agent as agent_api
+from app.i18n.middleware import ResponseTranslationMiddleware
 from app.api.capa_d4_text_preview import router as capa_d4_text_preview_router
 from app.api.agent_tasks import router as agent_tasks_router
 from app.api.agent_task_attachments import router as agent_task_attachments_router
@@ -540,6 +541,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Outermost: translates JSON response messages into German/English per Accept-Language.
+app.add_middleware(ResponseTranslationMiddleware)
 
 app.include_router(auth_router)
 app.include_router(fmea_router)
