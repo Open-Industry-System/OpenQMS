@@ -46,7 +46,7 @@ def _normalized(text: str) -> str:
 @pytest.mark.parametrize(
     ("path", "start_heading", "end_heading"),
     [
-        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
         (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
@@ -79,7 +79,7 @@ def test_production_docs_explain_wrapper_and_data_safe_rollback(path):
     text = _text(path)
     assert "openqms" in text
     assert "production-compose.sh" in text
-    assert "ambient" in text.lower() or "环境覆盖" in text
+    assert "ambient" in text.lower() or "环境覆盖" in text or "Umgebungsvariablen aus der Shell" in text
     assert "down -v" not in text
     assert "qms.smartindustry.world" in text
     assert "Namecheap" in text
@@ -129,16 +129,16 @@ def test_docs_distinguish_compose_env_from_standalone_vite_public_values():
         assert "Viewer@2026" in text
         assert "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS" in text
         assert "Namecheap" in text
-        assert re.search(r"(?:browser-visible|浏览器可见|公开).{0,120}(?:Viewer|viewer)", text, flags=re.IGNORECASE | re.DOTALL)
+        assert re.search(r"(?:browser-visible|浏览器可见|公开|im Browser sichtbar).{0,120}(?:Viewer|viewer)", text, flags=re.IGNORECASE | re.DOTALL)
         assert "groupadmin" in text
-        assert "real data" in text or "真实数据" in text
-        assert "API key" in text or "API 密钥" in text
+        assert "real data" in text or "真实数据" in text or "echten Daten" in text
+        assert "API key" in text or "API 密钥" in text or "API-Schlüssel" in text
 
 
 @pytest.mark.parametrize(
     ("path", "replace_instruction", "append_instruction"),
     [
-        (README, "替换已有空值", "仅当旧文件缺少该键才追加"),
+        (README, "vorhandenen leeren Wert ersetzen", "nur anhängen, wenn der Schlüssel"),
         (ZH_DEPLOYMENT, "替换已有空值", "仅当旧文件缺少该键才追加"),
         (EN_DEPLOYMENT, "replace an existing blank value", "append only when the key is absent"),
     ],
@@ -152,7 +152,7 @@ def test_optional_demo_env_migration_avoids_duplicate_keys(path, replace_instruc
 @pytest.mark.parametrize(
     ("path", "start_heading", "end_heading"),
     [
-        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
         (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
@@ -269,7 +269,7 @@ def test_operator_and_oracle_use_one_tracked_immutable_release(path):
 @pytest.mark.parametrize(
     ("path", "start_heading", "end_heading"),
     [
-        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
         (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
@@ -315,7 +315,7 @@ def test_release_uses_exact_precreated_test_database_through_nested_make(
 @pytest.mark.parametrize(
     ("path", "start_heading", "end_heading"),
     [
-        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
         (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
@@ -350,13 +350,13 @@ def test_all_local_release_gates_execute_from_archive_stage(
     assert commands.index(python_venv) < commands.index(frontend_install)
     assert commands.index(frontend_install) < commands.index(stage_cd)
     assert commands.index(stage_cd) < commands.index("make deploy-release")
-    assert "mutable working tree" in text or "可变 working tree" in text
+    assert "mutable working tree" in text or "可变 working tree" in text or "veränderlichen Arbeitsverzeichnis" in text
 
 
 @pytest.mark.parametrize(
     ("path", "start_heading", "end_heading"),
     [
-        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
         (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
@@ -406,7 +406,7 @@ def test_remote_images_are_bound_to_release_before_migration(
 @pytest.mark.parametrize(
     ("path", "start_heading", "end_heading"),
     [
-        (README, "## Oracle ARM64 生产部署", "## 模块支持状态"),
+        (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
         (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
@@ -512,15 +512,15 @@ else:
 
 def test_readme_quick_start_is_explicitly_local_development_only():
     readme = _text(README)
-    assert "## 本地开发快速开始（非生产）" in readme
+    assert "## Schnellstart für die lokale Entwicklung (nicht für den Produktivbetrieb)" in readme
     local_start = _section(
         README,
-        "## 本地开发快速开始（非生产）",
-        "## Oracle ARM64 生产部署",
+        "## Schnellstart für die lokale Entwicklung (nicht für den Produktivbetrieb)",
+        "## Produktivbetrieb auf Oracle ARM64",
     )
     assert "docker compose" in local_start
     assert "production-compose.sh" in local_start
-    assert "部署指南" in local_start
+    assert "Deployment-Leitfaden" in local_start
 
 
 @pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))

@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / 'scripts/ci/backend_route.py'
 STYLE = 'frontend/src/pages/public/PublicHomePage.css'
-ZH_TEXT = 'frontend/src/locales/zh-CN/home.json'
+DE_TEXT = 'frontend/src/locales/de-DE/home.json'
 EN_TEXT = 'frontend/src/locales/en-US/home.json'
 
 
@@ -45,7 +45,7 @@ def test_complete_change_classification(raw, expected):
     assert result['backend_required'] is not expected
 
 
-@pytest.mark.parametrize('path', [STYLE, ZH_TEXT, EN_TEXT])
+@pytest.mark.parametrize('path', [STYLE, DE_TEXT, EN_TEXT])
 def test_frontend_path_alone_never_authorizes_skip(path):
     result = load_route().classify_diff(f'M\0{path}\0'.encode())
     assert result['backend_required'] is True
@@ -87,7 +87,7 @@ def repository(tmp_path):
 @pytest.fixture
 def presentation_repository(repository):
     # Use real consumed resources, rather than an invented unused fast-path file.
-    for path in (STYLE, ZH_TEXT, EN_TEXT):
+    for path in (STYLE, DE_TEXT, EN_TEXT):
         write(repository, path, (ROOT / path).read_text())
     write(repository, 'backend/app/main.py', 'print(1)\n')
     commit(repository, 'existing presentation resources')
@@ -109,7 +109,7 @@ def replace(repository, path, old, new):
     (repository / path).write_text(content.replace(old, new, 1))
 
 
-def edit_text(repository, path=ZH_TEXT, keys=('hero', 'title'), value='让质量数据帮助工程师。'):
+def edit_text(repository, path=DE_TEXT, keys=('hero', 'title'), value='Qualitätsdaten helfen Ingenieuren.'):
     content = json.loads((repository / path).read_text())
     target = content
     for key in keys[:-1]:
@@ -120,7 +120,7 @@ def edit_text(repository, path=ZH_TEXT, keys=('hero', 'title'), value='让质量
 
 @pytest.mark.parametrize('scenario, reason', [
     ('style', 'presentation_styles_only'),
-    ('zh-text', 'presentation_text_only'),
+    ('de-text', 'presentation_text_only'),
     ('en-text', 'presentation_text_only'),
     ('style-and-text', 'presentation_only'),
     ('docs-and-text', 'docs_and_presentation_only'),
@@ -130,7 +130,7 @@ def test_low_risk_presentation_changes_skip_backend(presentation_repository, sce
     base = git(repo, 'rev-parse', 'HEAD')
     if scenario in {'style', 'style-and-text'}:
         replace(repo, STYLE, 'gap: 32px;', 'gap: 36px;')
-    if scenario in {'zh-text', 'style-and-text', 'docs-and-text'}:
+    if scenario in {'de-text', 'style-and-text', 'docs-and-text'}:
         edit_text(repo)
     if scenario == 'en-text':
         edit_text(repo, EN_TEXT, ('footer', 'tagline'), 'Quality management for every manufacturing team')
@@ -212,7 +212,7 @@ def test_business_or_structural_text_changes_require_backend(presentation_reposi
     'frontend/src/pages/public/PublicHomePage.tsx',
     'frontend/src/components/ProtectedRoute.tsx',
     'frontend/src/api/auth.ts',
-    'frontend/src/locales/zh-CN/users.json',
+    'frontend/src/locales/de-DE/users.json',
     'frontend/src/config/publicDemo.ts',
     'frontend/src/styles/design-system.css',
     'backend/app/main.py', 'backend/alembic/versions/new.py',
@@ -250,25 +250,25 @@ def test_all_commits_and_real_rename_are_included(repository):
 def test_presentation_file_identity_changes_require_backend(presentation_repository, scenario):
     repo = presentation_repository
     if scenario in {'add', 'doc-to-resource'}:
-        git(repo, 'rm', ZH_TEXT)
+        git(repo, 'rm', DE_TEXT)
         if scenario == 'doc-to-resource':
-            write(repo, 'docs/superpowers/specs/text.md', (ROOT / ZH_TEXT).read_text())
+            write(repo, 'docs/superpowers/specs/text.md', (ROOT / DE_TEXT).read_text())
         commit(repo, 'prepare identity change')
     base = git(repo, 'rev-parse', 'HEAD')
     if scenario == 'delete':
-        git(repo, 'rm', ZH_TEXT)
+        git(repo, 'rm', DE_TEXT)
     elif scenario == 'rename':
-        git(repo, 'mv', ZH_TEXT, 'frontend/src/locales/zh-CN/unused.json')
+        git(repo, 'mv', DE_TEXT, 'frontend/src/locales/de-DE/unused.json')
     elif scenario == 'add':
-        write(repo, ZH_TEXT, (ROOT / ZH_TEXT).read_text())
+        write(repo, DE_TEXT, (ROOT / DE_TEXT).read_text())
     elif scenario == 'doc-to-resource':
-        (repo / ZH_TEXT).parent.mkdir(parents=True, exist_ok=True)
-        git(repo, 'mv', 'docs/superpowers/specs/text.md', ZH_TEXT)
+        (repo / DE_TEXT).parent.mkdir(parents=True, exist_ok=True)
+        git(repo, 'mv', 'docs/superpowers/specs/text.md', DE_TEXT)
     elif scenario == 'mode':
-        (repo / ZH_TEXT).chmod(0o755)
+        (repo / DE_TEXT).chmod(0o755)
     else:
-        (repo / ZH_TEXT).unlink()
-        (repo / ZH_TEXT).symlink_to('users.json')
+        (repo / DE_TEXT).unlink()
+        (repo / DE_TEXT).symlink_to('users.json')
     commit(repo)
     assert classify(repo, base)['backend_required'] is True
 
@@ -325,11 +325,11 @@ def test_classification_errors_publish_full_and_fail(presentation_repository, tm
     repo = presentation_repository
     base = git(repo, 'rev-parse', 'HEAD')
     if scenario == 'invalid-json':
-        write(repo, ZH_TEXT, '{bad json}')
+        write(repo, DE_TEXT, '{bad json}')
     elif scenario == 'duplicate-key':
-        write(repo, ZH_TEXT, '{"hero": {}, "hero": {"title": "new"}}')
+        write(repo, DE_TEXT, '{"hero": {}, "hero": {"title": "new"}}')
     elif scenario == 'non-json-number':
-        write(repo, ZH_TEXT, '{"hero": NaN}')
+        write(repo, DE_TEXT, '{"hero": NaN}')
     elif scenario == 'invalid-utf8':
         (repo / STYLE).write_bytes(b'\xff')
     else:

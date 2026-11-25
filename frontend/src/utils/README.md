@@ -38,7 +38,7 @@ Grouped by what each helper does, not alphabetical:
   document number, illegal state transition, not found) to localised
   text via `t()`.
 - **Date / time** — `dateTime.ts` (`formatDateTime` using
-  `i18n.language` so dates follow the zh-CN/en-US switch),
+  `i18n.language` so dates follow the de-DE/en-US switch),
   `relativeTime.ts` (`relativeTime` + `useRelativeTime` hook, reads
   the `dashboard` namespace).
 - **Excel I/O** — `excel.ts` shared download / import helpers used by
