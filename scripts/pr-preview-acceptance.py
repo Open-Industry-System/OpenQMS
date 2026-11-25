@@ -21,6 +21,7 @@ NOTICE = '<!-- openqms-preview-notice -->'
 PREVIEW_WORKFLOW = 'oracle-deploy.yml'
 SHARED_TEST_WORKFLOW = 'oracle-shared-test.yml'
 SHARED_TEST_URL = 'https://test.preview.openqms.smartindustry.world'
+MAC_SHARED_TEST_URL = 'https://test-openqms.smartindustry.world'
 SHARED_TEST_ARTIFACT = 'shared-test-publication'
 D4_ARTIFACT = 'shared-test-d4-evidence'
 
@@ -29,8 +30,15 @@ def shared_test_enabled():
     return os.environ.get('ORACLE_SHARED_TEST_ENABLED') == 'true'
 
 
+def shared_test_url(receipt):
+    url = receipt.get('url', SHARED_TEST_URL)
+    if url not in (SHARED_TEST_URL, MAC_SHARED_TEST_URL):
+        raise ValueError('Invalid shared test publication URL')
+    return url
+
+
 def preview_url(number, shared):
-    return SHARED_TEST_URL if shared else f'https://pr-{number}.preview.openqms.smartindustry.world'
+    return shared_test_url(shared) if shared else f'https://pr-{number}.preview.openqms.smartindustry.world'
 
 
 def accepts_workflow_source(run, workflow):
@@ -348,7 +356,8 @@ def shared_d4_evidence(api, receipt, deployment, required):
     for run, artifact in shared_artifacts(api, D4_ARTIFACT):
         evidence = publication_receipt(api, artifact, 'd4-evidence.json')
         if (evidence.get('deployment_run') != deployment['id']
-                or any(evidence.get(key) != receipt[key] for key in identity)):
+                or any(evidence.get(key) != receipt[key] for key in identity)
+                or shared_test_url(evidence) != shared_test_url(receipt)):
             continue
         proofs = evidence.get('proofs')
         if (not valid_d4_evidence(proofs) or not required <= proofs.keys()
@@ -372,6 +381,7 @@ def shared_publication(api, pr, queue_lease):
                 or (expires is not None and (type(expires) is not int or not 0 < expires < 2**32))):
             raise ValueError('Invalid shared test lease receipt')
         if receipt.get('plan') == plan.digest and (queue_lease is None or lease == queue_lease):
+            shared_test_url(receipt)
             # Proofs can only come from the separately named trusted workflow artifact.
             if required := d4_scenarios(plan):
                 run = dict(run, d4_evidence=shared_d4_evidence(api, receipt, run, required))
@@ -528,7 +538,7 @@ def shared_test_ready_notice(api, pr, run, digest):
         notice = (f'{NOTICE}\n{deployment_marker(receipt["head"], run["id"])}\n'
                   f'<!-- openqms-shared-test-active:{marker} -->\n'
                   f'### PR #{pr["number"]} 测试站点已就绪，部分验收受阻\n\n'
-                  f'{SHARED_TEST_URL} · 当前版本 `{receipt["sha"]}`\n\n'
+                  f'{shared_test_url(receipt)} · 当前版本 `{receipt["sha"]}`\n\n'
                   + '\n'.join(f'- {blocker}' for blocker in blockers))
     api.notice(pr['number'], notice)
 
