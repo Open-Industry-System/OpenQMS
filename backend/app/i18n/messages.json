@@ -3013,5 +3013,280 @@
   "工作表单元格范围超过限制",
   "Zellbereich des Arbeitsblatts überschreitet das Limit",
   "Worksheet cell range exceeds the limit"
+ ],
+ [
+  "默认工厂",
+  "Standardwerk",
+  "Default plant"
+ ],
+ [
+  "体系审核检查表",
+  "Checkliste Systemaudit",
+  "System audit checklist"
+ ],
+ [
+  "过程审核检查表",
+  "Checkliste Prozessaudit",
+  "Process audit checklist"
+ ],
+ [
+  "产品审核检查表",
+  "Checkliste Produktaudit",
+  "Product audit checklist"
+ ],
+ [
+  "4.1 理解组织及其环境",
+  "4.1 Verstehen der Organisation und ihres Kontextes",
+  "4.1 Understanding the organization and its context"
+ ],
+ [
+  "组织是否识别了与其宗旨相关的内外部议题？",
+  "Hat die Organisation die für ihren Zweck relevanten internen und externen Themen bestimmt?",
+  "Has the organization determined the internal and external issues relevant to its purpose?"
+ ],
+ [
+  "4.2 理解相关方需求",
+  "4.2 Verstehen der Erfordernisse interessierter Parteien",
+  "4.2 Understanding the needs of interested parties"
+ ],
+ [
+  "相关方及其要求是否被识别并监视？",
+  "Sind interessierte Parteien und ihre Anforderungen bestimmt und überwacht?",
+  "Are interested parties and their requirements identified and monitored?"
+ ],
+ [
+  "5.1 领导作用和承诺",
+  "5.1 Führung und Verpflichtung",
+  "5.1 Leadership and commitment"
+ ],
+ [
+  "最高管理者是否对质量管理体系的有效性承担责任？",
+  "Übernimmt die oberste Leitung die Rechenschaft für die Wirksamkeit des QM-Systems?",
+  "Does top management take accountability for the effectiveness of the QMS?"
+ ],
+ [
+  "6.1 应对风险和机遇的措施",
+  "6.1 Maßnahmen zum Umgang mit Risiken und Chancen",
+  "6.1 Actions to address risks and opportunities"
+ ],
+ [
+  "风险和机遇是否被识别并策划应对措施？",
+  "Sind Risiken und Chancen bestimmt und Maßnahmen dazu geplant?",
+  "Are risks and opportunities identified and actions planned?"
+ ],
+ [
+  "7.1 资源",
+  "7.1 Ressourcen",
+  "7.1 Resources"
+ ],
+ [
+  "组织是否确定和提供了所需的资源？",
+  "Hat die Organisation die erforderlichen Ressourcen bestimmt und bereitgestellt?",
+  "Has the organization determined and provided the required resources?"
+ ],
+ [
+  "8.1 运行的策划和控制",
+  "8.1 Betriebliche Planung und Steuerung",
+  "8.1 Operational planning and control"
+ ],
+ [
+  "过程是否被策划、实施、监视和改进？",
+  "Werden die Prozesse geplant, umgesetzt, überwacht und verbessert?",
+  "Are processes planned, implemented, monitored and improved?"
+ ],
+ [
+  "9.1 监视、测量、分析和评价",
+  "9.1 Überwachung, Messung, Analyse und Bewertung",
+  "9.1 Monitoring, measurement, analysis and evaluation"
+ ],
+ [
+  "是否策划并实施了所需的监视和测量活动？",
+  "Sind die erforderlichen Überwachungs- und Messtätigkeiten geplant und umgesetzt?",
+  "Are the required monitoring and measurement activities planned and implemented?"
+ ],
+ [
+  "10.2 不合格和纠正措施",
+  "10.2 Nichtkonformität und Korrekturmaßnahmen",
+  "10.2 Nonconformity and corrective action"
+ ],
+ [
+  "是否对不合格做出应对并在必要时采取纠正措施？",
+  "Wird auf Nichtkonformitäten reagiert und werden bei Bedarf Korrekturmaßnahmen ergriffen?",
+  "Are nonconformities addressed and corrective actions taken where necessary?"
+ ],
+ [
+  "过程输入",
+  "Prozesseingaben",
+  "Process inputs"
+ ],
+ [
+  "输入要求是否完整、明确并被验证？",
+  "Sind die Eingangsanforderungen vollständig, eindeutig und verifiziert?",
+  "Are input requirements complete, clear and verified?"
+ ],
+ [
+  "过程资源",
+  "Prozessressourcen",
+  "Process resources"
+ ],
+ [
+  "人员、设备、环境是否满足过程要求？",
+  "Erfüllen Personal, Anlagen und Umgebung die Prozessanforderungen?",
+  "Do personnel, equipment and environment meet process requirements?"
+ ],
+ [
+  "过程方法",
+  "Prozessmethoden",
+  "Process methods"
+ ],
+ [
+  "作业指导书/控制计划是否被有效执行？",
+  "Werden Arbeitsanweisungen/Produktionslenkungspläne wirksam umgesetzt?",
+  "Are work instructions/control plans effectively followed?"
+ ],
+ [
+  "过程监视",
+  "Prozessüberwachung",
+  "Process monitoring"
+ ],
+ [
+  "关键过程参数是否被监视并记录？",
+  "Werden kritische Prozessparameter überwacht und dokumentiert?",
+  "Are key process parameters monitored and recorded?"
+ ],
+ [
+  "过程输出",
+  "Prozessergebnisse",
+  "Process outputs"
+ ],
+ [
+  "输出是否满足规定的接收准则？",
+  "Erfüllen die Ergebnisse die festgelegten Annahmekriterien?",
+  "Do outputs meet the specified acceptance criteria?"
+ ],
+ [
+  "过程改进",
+  "Prozessverbesserung",
+  "Process improvement"
+ ],
+ [
+  "是否利用过程数据推动持续改进？",
+  "Werden Prozessdaten für die fortlaufende Verbesserung genutzt?",
+  "Are process data used to drive continual improvement?"
+ ],
+ [
+  "外观",
+  "Aussehen",
+  "Appearance"
+ ],
+ [
+  "产品外观是否符合图纸/规范要求？",
+  "Entspricht das Aussehen des Produkts den Zeichnungs-/Spezifikationsanforderungen?",
+  "Does the product appearance meet drawing/specification requirements?"
+ ],
+ [
+  "尺寸",
+  "Abmessungen",
+  "Dimensions"
+ ],
+ [
+  "关键尺寸是否在公差范围内？",
+  "Liegen die kritischen Maße innerhalb der Toleranz?",
+  "Are key dimensions within tolerance?"
+ ],
+ [
+  "功能",
+  "Funktion",
+  "Function"
+ ],
+ [
+  "产品功能测试结果是否满足规范？",
+  "Erfüllen die Ergebnisse der Funktionsprüfung die Spezifikation?",
+  "Do functional test results meet the specification?"
+ ],
+ [
+  "标识",
+  "Kennzeichnung",
+  "Identification"
+ ],
+ [
+  "产品标识、追溯信息是否完整正确？",
+  "Sind Produktkennzeichnung und Rückverfolgungsangaben vollständig und korrekt?",
+  "Are product identification and traceability information complete and correct?"
+ ],
+ [
+  "包装",
+  "Verpackung",
+  "Packaging"
+ ],
+ [
+  "包装方式和防护是否符合要求？",
+  "Entsprechen Verpackungsart und Schutz den Anforderungen?",
+  "Do packaging method and protection meet requirements?"
+ ],
+ [
+  "放宽一级所需连续合格批次",
+  "Aufeinanderfolgende angenommene Lose für eine Stufe Lockerung",
+  "Consecutive accepted lots to reduce by one level"
+ ],
+ [
+  "放宽两级所需连续合格批次",
+  "Aufeinanderfolgende angenommene Lose für zwei Stufen Lockerung",
+  "Consecutive accepted lots to reduce by two levels"
+ ],
+ [
+  "加严一级所需连续不合格批次",
+  "Aufeinanderfolgende zurückgewiesene Lose für eine Stufe Verschärfung",
+  "Consecutive rejected lots to tighten by one level"
+ ],
+ [
+  "加严两级所需连续不合格批次",
+  "Aufeinanderfolgende zurückgewiesene Lose für zwei Stufen Verschärfung",
+  "Consecutive rejected lots to tighten by two levels"
+ ],
+ [
+  "PPM加严阈值 (parts per million)",
+  "PPM-Schwelle für Verschärfung (parts per million)",
+  "PPM threshold for tightening (parts per million)"
+ ],
+ [
+  "PPM放宽阈值 (parts per million)",
+  "PPM-Schwelle für Lockerung (parts per million)",
+  "PPM threshold for reduction (parts per million)"
+ ],
+ [
+  "建议过期天数",
+  "Gültigkeit von Empfehlungen in Tagen",
+  "Recommendation expiry in days"
+ ],
+ [
+  "默认最大AQL",
+  "Standard-Höchst-AQL",
+  "Default maximum AQL"
+ ],
+ [
+  "默认最小AQL",
+  "Standard-Mindest-AQL",
+  "Default minimum AQL"
+ ],
+ [
+  "安全缺陷冻结天数",
+  "Einfrierdauer bei Sicherheitsmängeln in Tagen",
+  "Freeze days after safety defect"
+ ],
+ [
+  "默认检验水平",
+  "Standard-Prüfniveau",
+  "Default inspection level"
+ ],
+ [
+  "物料默认AQL为NULL时的回退值",
+  "Ersatzwert, wenn der Standard-AQL des Materials leer ist",
+  "Fallback when a material's default AQL is empty"
+ ],
+ [
+  "## 8D 报告 PPT 审查标准\n\n审查 PPT 内容是否符合 8D 报告要求：\n1. 封面齐全（8D 单号、标题、严重度、产品线、发起人、状态、日期）\n2. D1-D8 各页非空，内容来自落库数据\n3. D4 根因分析含验证记录（method/result/is_verified + 证据附件引用）\n4. D7 预防复发含 node-action 处置记录\n5. 联动附录含关联 FMEA 节点详情 + SCAR/供应商风险预警单号与状态\n6. 生成信息页含版本与审查状态\n返回 JSON: {passed: bool, issues: [str], suggestions: [str]}\n",
+  "## Prüfstandard für 8D-Berichts-PPT\n\nPrüfen, ob der PPT-Inhalt den Anforderungen an einen 8D-Bericht entspricht:\n1. Deckblatt vollständig (8D-Nr., Titel, Schweregrad, Produktlinie, Ersteller, Status, Datum)\n2. Seiten D1–D8 nicht leer, Inhalte stammen aus gespeicherten Daten\n3. D4-Ursachenanalyse enthält Verifizierungen (method/result/is_verified + Verweise auf Nachweisanhänge)\n4. D7 Wiederholung verhindern enthält die node-action-Bearbeitungsnachweise\n5. Anhang Verknüpfungen enthält Details der verknüpften FMEA-Knoten + SCAR-/Lieferantenrisiko-Nummern und Status\n6. Seite Erstellungsinformationen enthält Version und Prüfstatus\nRückgabe als JSON: {passed: bool, issues: [str], suggestions: [str]}\n",
+  "## 8D report PPT review standard\n\nCheck whether the PPT content meets the requirements of an 8D report:\n1. Complete cover (8D no., title, severity, product line, initiator, status, date)\n2. Pages D1–D8 not empty, content taken from stored data\n3. D4 root cause analysis includes verification records (method/result/is_verified + evidence attachment references)\n4. D7 prevent recurrence includes node-action handling records\n5. Linked appendix includes linked FMEA node details + SCAR/supplier risk alert numbers and status\n6. Generation info page includes version and review status\nReturn JSON: {passed: bool, issues: [str], suggestions: [str]}\n"
  ]
 ]
