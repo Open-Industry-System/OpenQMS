@@ -1,53 +1,53 @@
-# 开发指南
+# Entwicklerhandbuch
 
-> 受控任务附件（R4b-2）默认关闭、实际扫描与本地验收操作见[任务私有附件操作指南](development/agent-task-attachments.md)；该指南不构成生产对象存储或外发批准。
+> Kontrollierte Aufgabenanhänge (R4b-2) sind standardmäßig deaktiviert; tatsächliches Scannen und lokale Abnahme beschreibt die [Anleitung zu privaten Aufgabenanhängen](development/agent-task-attachments.md). Diese Anleitung ist keine Freigabe für produktiven Objektspeicher oder Datenabfluss.
 
-本文档面向 OpenQMS 的开发者，介绍项目约定、开发流程和如何添加新模块。
+Dieses Dokument richtet sich an Entwickler von OpenQMS und beschreibt Projektkonventionen, Entwicklungsablauf und das Hinzufügen neuer Module.
 
 ---
 
-## 1. 后端开发约定
+## 1. Backend-Konventionen
 
-### 1.1 代码结构
+### 1.1 Code-Struktur
 
 ```
 backend/app/
-├── api/           # 路由处理器（薄层）
-├── services/      # 业务逻辑层
-├── models/        # SQLAlchemy ORM 模型
-├── schemas/       # Pydantic v2 请求/响应 schema
-├── core/          # 安全、依赖注入、权限、工厂范围
-├── state_machines/ # 状态机（FMEAState, EightDState 等）
-├── main.py        # FastAPI 入口
-└── seed.py        # 种子数据脚本
+├── api/           # Routen-Handler (dünne Schicht)
+├── services/      # Geschäftslogik
+├── models/        # SQLAlchemy-ORM-Modelle
+├── schemas/       # Pydantic-v2-Request-/Response-Schemas
+├── core/          # Sicherheit, Dependency Injection, Berechtigungen, Werksbereich
+├── state_machines/ # Zustandsautomaten (FMEAState, EightDState usw.)
+├── main.py        # FastAPI-Einstieg
+└── seed.py        # Seed-Daten-Skript
 ```
 
-### 1.2 请求处理模式
+### 1.2 Muster der Anfrageverarbeitung
 
 ```
-API 层 (api/*.py)
-  ├── 解析请求参数
-  ├── 调用 Service 层
-  ├── 捕获 ValueError → HTTPException
-  └── 返回响应
+API-Schicht (api/*.py)
+  ├── Anfrageparameter parsen
+  ├── Service-Schicht aufrufen
+  ├── ValueError abfangen → HTTPException
+  └── Antwort zurückgeben
 
-Service 层 (services/*.py)
-  ├── 业务逻辑
-  ├── 数据库操作
-  ├── 手动写入 AuditLog
-  └── 抛出 ValueError（API 层转换）
+Service-Schicht (services/*.py)
+  ├── Geschäftslogik
+  ├── Datenbankoperationen
+  ├── AuditLog manuell schreiben
+  └── ValueError werfen (wird in der API-Schicht umgewandelt)
 ```
 
-**关键约定**：
-- API 层不包含业务逻辑。
-- Service 层手动写 `AuditLog`，不使用自动审计。
-- 列表端点统一返回 `{ items, total, page, page_size }`。
-- 错误通过 `raise ValueError("错误信息")` 抛出，API 层统一转换。
+**Wichtige Konventionen**:
+- Die API-Schicht enthält keine Geschäftslogik.
+- Die Service-Schicht schreibt `AuditLog` manuell, kein automatisches Audit.
+- Listen-Endpunkte liefern einheitlich `{ items, total, page, page_size }`.
+- Fehler werden per `raise ValueError("Fehlermeldung")` geworfen und in der API-Schicht einheitlich umgewandelt. Neue benutzersichtbare Backend-Meldungen gehören in den Katalog `backend/app/i18n/messages.json`.
 
-### 1.3 权限检查
+### 1.3 Berechtigungsprüfung
 
 ```python
-# API 层：使用 require_permission 装饰器
+# API-Schicht: require_permission als Dependency verwenden
 from app.core.permissions import require_permission, Module, PermissionLevel
 
 @router.get("/", dependencies=[Depends(require_permission(Module.FMEA, PermissionLevel.VIEW))])
@@ -55,117 +55,117 @@ async def list_fmea(...):
     ...
 ```
 
-### 1.4 数据库迁移
+### 1.4 Datenbankmigrationen
 
-平台链使用 `alembic.ini`；租户链使用 `alembic_tenant.ini`，只能由持有维护排他锁的 `MaintenanceContext.run_migration` 注入原连接执行。不要以 ORM `create_all`、手工 stamp 或复制最新 public 历史替代租户链。既有 `tv001_business_snapshot` 保持不可变，新增业务表需同时提供 public 增量和租户独立增量。
+Die Plattformkette verwendet `alembic.ini`; die Mandantenkette `alembic_tenant.ini` und darf nur über `MaintenanceContext.run_migration` mit exklusiver Wartungssperre auf der übergebenen Verbindung ausgeführt werden. ORM-`create_all`, manuelles stamp oder das Kopieren der neuesten public-Historie ersetzen die Mandantenkette nicht. Das bestehende `tv001_business_snapshot` bleibt unveränderlich; neue Geschäftstabellen brauchen sowohl ein public-Inkrement als auch ein eigenes Mandanten-Inkrement.
 
-测试租户重建默认只预览：在 backend 运行 `python -m app.cli.rebuild_test_tenants --inventory /path/inventory.json --compose-project <project>`。清单必须为 `{"test_only":true,"targets":[{"tenant_id":"UUID","slug":"slug","schema_name":"tenant_slug","generation":1,"status":"active"}]}`，不得包含凭据。只有明确需要丢弃测试数据时，才在非 production 模式及 `_test` 数据库设置 `ALLOW_TEST_TENANT_REBUILD=1`，追加 `--execute --confirm discard-test-data`；密码由交互提示读取。程序观察已存在的 backend 和 graph-worker 容器均已退出，并要求没有其他数据库客户端；它不停止服务或终止连接。失败或维护标记后需刷新精确清单再重试，普通 `resume_tenant` 不绕过重建失败证据。自动验收仅使用 fixture 创建并清理的独立数据库，不运行用户环境重建。
+Der Neuaufbau von Testmandanten zeigt standardmäßig nur eine Vorschau: im Backend `python -m app.cli.rebuild_test_tenants --inventory /path/inventory.json --compose-project <project>` ausführen. Das Inventar muss `{"test_only":true,"targets":[{"tenant_id":"UUID","slug":"slug","schema_name":"tenant_slug","generation":1,"status":"active"}]}` lauten und darf keine Zugangsdaten enthalten. Nur wenn Testdaten ausdrücklich verworfen werden sollen, außerhalb des production-Modus und auf einer `_test`-Datenbank `ALLOW_TEST_TENANT_REBUILD=1` setzen und `--execute --confirm discard-test-data` anhängen; das Passwort wird interaktiv abgefragt. Das Programm prüft, dass vorhandene backend- und graph-worker-Container beendet sind, und verlangt, dass keine anderen Datenbankclients verbunden sind; es stoppt keine Dienste und beendet keine Verbindungen. Nach einem Fehlschlag oder Wartungsmarker das exakte Inventar aktualisieren und erneut versuchen; ein normales `resume_tenant` umgeht keine Belege für einen fehlgeschlagenen Neuaufbau. Automatische Abnahmen verwenden nur von Fixtures angelegte und wieder bereinigte eigene Datenbanken und bauen keine Benutzerumgebungen neu auf.
 
-迁移文件为**手写**，不使用自动生成：
+Migrationen werden **von Hand** geschrieben, nicht automatisch generiert:
 
 ```bash
-# 创建新迁移文件
+# Neue Migrationsdatei anlegen
 alembic revision -m "add_new_table"
 
-# 应用迁移
+# Migrationen anwenden
 alembic upgrade head
 
-# 回退一个版本
+# Eine Version zurück
 alembic downgrade -1
 ```
 
-### 1.5 Agent 任务基础接口
+### 1.5 Basis-Schnittstellen für Agent-Aufgaben
 
-R1 的用户入口为 `/api/agent/tasks`（创建、分页列表、详情、追加消息），管理员入口为 `/api/admin/agent-plugins`（注册、列表/详情、启停、轮换、长期 grant）。接口受 `AGENT_TASK_RUNTIME_ENABLED` 控制，默认关闭时返回 404。R2 已实现插件领取运行、能力发现、有序消息领取/确认、D4 元数据查询/receipt、事件/结果写入和用户历史结果读取，独立进程两轮查询和最终完整检查均已通过；状态见[R2 计划](superpowers/plans/2026-09-30-agent-readonly-metadata-integration.md)。具体权限见[权限参考](permissions.md)，R1 验收记录见[R1 计划](superpowers/plans/2026-09-26-agent-task-plugin-runtime-foundation.md)。
+Der Benutzereinstieg von R1 ist `/api/agent/tasks` (anlegen, paginierte Liste, Detail, Nachricht anhängen), der Administratoreinstieg `/api/admin/agent-plugins` (registrieren, Liste/Detail, aktivieren/deaktivieren, rotieren, langfristige Grants). Die Schnittstellen werden über `AGENT_TASK_RUNTIME_ENABLED` gesteuert und liefern im standardmäßig deaktivierten Zustand 404. R2 umfasst Lauf-Übernahme durch Plugins, Fähigkeitserkennung, geordnete Nachrichtenübernahme/-bestätigung, D4-Metadatenabfrage/-Receipt, Schreiben von Ereignissen/Ergebnissen und das Lesen historischer Ergebnisse durch Benutzer; zwei Abfragerunden in einem separaten Prozess und die abschließende vollständige Prüfung sind bestanden. Die Berechtigungen im Detail stehen in der [Berechtigungsreferenz](permissions.md).
 
-注册和轮换响应只提供一次安装 secret；查询 DTO 不返回 secret 或 hash。长期 grant 默认禁用，启用检查服务端能力目录，仅 DIRECT 上下文可生效；安装开关不改变 CAPA 默认 baseline 的 DENY 声明。管理员服务沿用调用方事务，API 显式提交；任务创建与消息追加由各自服务原子提交业务元数据及安全审计。消息成功响应表示已入队，R1 不向插件或模型交付正文。多租户测试必须使用真正绑定的 TenantSession，不能用公共 session 加 info 模拟隔离。
+Registrierungs- und Rotationsantworten liefern das Installations-Secret genau einmal; Abfrage-DTOs geben weder Secret noch Hash zurück. Langfristige Grants sind standardmäßig deaktiviert, die Aktivierung prüft den serverseitigen Fähigkeitskatalog und wirkt nur im DIRECT-Kontext; der Installationsschalter ändert nicht die DENY-Erklärung der CAPA-Standard-Baseline. Administrator-Services verwenden die Transaktion des Aufrufers, die API committet explizit; Aufgabenerstellung und Nachrichtenanhang committen fachliche Metadaten und Sicherheitsaudit jeweils atomar in ihrem eigenen Service. Eine erfolgreiche Nachrichtenantwort bedeutet „eingereiht“; R1 liefert keinen Text an Plugins oder Modelle. Mandantenfähige Tests müssen eine tatsächlich gebundene TenantSession verwenden und dürfen Isolation nicht mit einer öffentlichen Session plus info simulieren.
 
-运行领取只接受安装 ID、安装 secret 与当前领取键，不接受用户、schema 或报告 ID。领取响应为任务/运行 ID、短期 token 与租约信息；后续调用用独立运行 token，每次重查当前权限和租约。示例链路使用一次性合成数据和服务端测试声明；部署可信策略默认空，插件 manifest 或请求头不能自行启用交付。
+Die Lauf-Übernahme akzeptiert nur Installations-ID, Installations-Secret und den aktuellen Übernahmeschlüssel, keine Benutzer-, Schema- oder Berichts-IDs. Die Antwort enthält Aufgaben-/Lauf-ID, ein kurzlebiges Token und Lease-Informationen; Folgeaufrufe verwenden das eigene Lauf-Token und prüfen jedes Mal aktuelle Berechtigungen und Lease. Die Beispielkette verwendet einmalige synthetische Daten und serverseitige Testdeklarationen; die vertrauenswürdige Deployment-Richtlinie ist standardmäßig leer, und weder Plugin-Manifest noch Request-Header können die Auslieferung selbst aktivieren.
 
-R3 用户 control 和插件 finish 接口已验收：请求不携带客户端授权或目标变更；在 INSTALL→TASK→RUN 锁内原子提交状态、凭据失效、活动指针和审计。完成/追加的两种真实提交顺序及末尾撤权已回归。检查点、严格有界 history 和最新安全检查点重开已验收；领取响应新增 accepted_message_seq/has_resume_checkpoint，活动窗口与安装目录已验收，最终受影响组72项通过且两阶段复核通过；统一侧栏已验收（78项聚焦测试及类型/构建通过）；控件读取最新观察的运行/epoch，网络重试保留原参数与键，目录拒绝立即撤回内容。独立样例已适配领取、历史输入、检查点与完成协议，真实 HTTP/进程及八个浏览器场景通过规格和质量复核；长串显示和取消时投递状态保留均已通过真实回归及独立复核；最终冻结后端2731 passed / 4 skipped / 3 xfailed / 2 xpassed、前端78项及类型/构建和专用E2E类型检查通过，一次性库已清理，见[R3 计划](superpowers/plans/2026-10-01-agent-sidebar-readonly-controls.md)。
+Die R3-Schnittstellen für Benutzer-control und Plugin-finish sind abgenommen: Anfragen tragen weder Client-Autorisierung noch Zieländerungen; Status, Invalidierung der Zugangsdaten, Aktivitätszeiger und Audit werden unter der Sperrfolge INSTALL→TASK→RUN atomar committet. Beide realen Commit-Reihenfolgen von Abschluss/Anhang und der Rechteentzug am Ende sind regressionsgetestet. Checkpoints, streng begrenzte history und das Wiederaufnehmen ab dem neuesten sicheren Checkpoint sind abgenommen; die Übernahmeantwort enthält zusätzlich accepted_message_seq/has_resume_checkpoint. Aktivitätsfenster und Installationsverzeichnis sind abgenommen, die betroffene Gruppe mit 72 Tests bestand ebenso wie die zweistufige Nachprüfung; die einheitliche Seitenleiste ist abgenommen (78 fokussierte Tests sowie Typprüfung/Build bestanden). Bedienelemente lesen den zuletzt beobachteten Lauf/Epoch, Netzwerk-Wiederholungen behalten ursprüngliche Parameter und Schlüssel, und eine Ablehnung durch den Katalog zieht Inhalte sofort zurück. Das eigenständige Beispiel unterstützt Übernahme, historische Eingaben, Checkpoints und das Abschlussprotokoll; echte HTTP-/Prozesstests und acht Browser-Szenarien haben Spezifikations- und Qualitätsprüfung bestanden; lange Zeichenketten und der Erhalt des Zustellstatus beim Abbrechen sind per echter Regression und unabhängiger Prüfung bestätigt. Der abschließende eingefrorene Stand: Backend 2731 passed / 4 skipped / 3 xfailed / 2 xpassed, Frontend 78 Tests sowie Typprüfung/Build und Typprüfung der dedizierten E2E bestanden; die Einmal-Datenbank wurde bereinigt.
 
-### 1.6 独立 D4 元数据插件样例
+### 1.6 Eigenständiges D4-Metadaten-Plugin (Beispiel)
 
-本节保留 R2/R3 固定 worker 协议和夹具验收说明。正常配置下的 R4a 试用应使用安全凭据文件与固定 CLI，流程见[本地试用指南](development/agent-local-trial.md)，不能通过修改 DIRECT 或可信交付目录开放环境。
+Dieser Abschnitt bewahrt die Beschreibung des festen Worker-Protokolls und der Fixture-Abnahme aus R2/R3. Ein R4a-Versuch unter Normalkonfiguration verwendet eine sichere Zugangsdatei und das feste CLI, siehe [Anleitung zum lokalen Versuch](development/agent-local-trial.md); die Umgebung darf nicht über Änderungen an DIRECT oder dem vertrauenswürdigen Auslieferungskatalog geöffnet werden.
 
-[独立插件](../backend/examples/readonly_8d_plugin.py)使用 Python 标准库，通过 HTTP 领取运行、确认按序消息、读取报告元数据，再以第一轮返回的报告 ID 查询验证记录。两份服务端 receipt 同时关联事件和 restricted 结果。样例读取规范 `D4_ROOT_CAUSE` 阶段，兼容旧验收数据的 `D4_ANALYSIS`。恢复时先按每页最多20条重读服务端已确认输入前缀，再领取新消息，不重复 ACK；消息正文不作为代码或业务命令执行；元数据统计不能确定根因或替代证据审查。
+Das [eigenständige Plugin](../backend/examples/readonly_8d_plugin.py) verwendet die Python-Standardbibliothek, übernimmt per HTTP einen Lauf, bestätigt Nachrichten in Reihenfolge, liest Berichtsmetadaten und fragt anschließend mit der in Runde eins gelieferten Berichts-ID die Verifizierungsdatensätze ab. Zwei serverseitige Receipts verknüpfen jeweils Ereignis und restricted-Ergebnis. Das Beispiel liest die normierte Phase `D4_ROOT_CAUSE` und ist mit `D4_ANALYSIS` aus alten Abnahmedaten kompatibel. Bei der Wiederaufnahme wird zuerst das serverseitig bestätigte Eingabepräfix seitenweise (höchstens 20 Einträge pro Seite) neu gelesen und erst dann werden neue Nachrichten übernommen, ohne doppeltes ACK; Nachrichtentexte werden nicht als Code oder Fachbefehl ausgeführt; Metadatenstatistiken bestimmen keine Grundursache und ersetzen keine Beweisprüfung.
 
-运行配置通过环境提供，样例不接受初始报告选择器或用户 token：
+Die Laufkonfiguration kommt aus der Umgebung; das Beispiel akzeptiert weder Auswahl eines Startberichts noch Benutzer-Token:
 
-| 环境变量 | 用途 |
+| Umgebungsvariable | Zweck |
 |---|---|
-| `OPENQMS_API_BASE_URL` | 仅 loopback HTTP/HTTPS origin，不带路径、查询、片段或用户信息。 |
-| `OPENQMS_INSTALLATION_ID` | 注册后的安装 UUID。 |
-| `OPENQMS_INSTALLATION_SECRET` | 一次提供的安装 secret。 |
-| `OPENQMS_CLAIM_KEY` | 当前租约领取的稳定键，默认 `readonly-8d-v1`。 |
-| `OPENQMS_TENANT_SLUG` | 可选开发租户路由；不是权限或可信部署声明。 |
-| `OPENQMS_READONLY_CHECKPOINT` | `off`（默认）或 `save`；保存当前服务端来源与已确认位置。 |
-| `OPENQMS_READONLY_FINISH` | `off`（默认）或 `completed`；先排空输入，再请求完成，竞争追加时安全拒绝。 |
+| `OPENQMS_API_BASE_URL` | Nur Loopback-HTTP/HTTPS-Origin, ohne Pfad, Query, Fragment oder Benutzerinformation. |
+| `OPENQMS_INSTALLATION_ID` | UUID der registrierten Installation. |
+| `OPENQMS_INSTALLATION_SECRET` | Einmalig ausgegebenes Installations-Secret. |
+| `OPENQMS_CLAIM_KEY` | Stabiler Schlüssel der aktuellen Lease-Übernahme, Standard `readonly-8d-v1`. |
+| `OPENQMS_TENANT_SLUG` | Optionales Entwicklungs-Mandantenrouting; keine Berechtigung und keine vertrauenswürdige Deployment-Erklärung. |
+| `OPENQMS_READONLY_CHECKPOINT` | `off` (Standard) oder `save`; speichert aktuelle Serverquelle und bestätigte Position. |
+| `OPENQMS_READONLY_FINISH` | `off` (Standard) oder `completed`; leert zuerst die Eingaben, fordert dann den Abschluss an und lehnt bei konkurrierendem Anhang sicher ab. |
 
-配置后从仓库根目录执行 `python backend/examples/readonly_8d_plugin.py`。样例忽略代理环境并拒绝所有 HTTP 重定向，仅输出成功记录 UUID 和完成状态；失败输出固定信息，不输出密钥、token、消息或错误响应正文。事件、结果与检查点键在后续 epoch 加入轮次，首轮键保持兼容；同一活动 epoch 再次启动命令不等于恢复任意内部流水线状态。历史输入最多1000页，完成模式的新输入最多1000批；默认只领取一批。正式目录仍为 DENY，默认开关关闭；[原进程测试](../backend/tests/e2e/test_readonly_agent_process.py)和[恢复/浏览器测试](../backend/tests/e2e/test_agent_readonly_resume_process.py)只在完整的一次性租户内配置服务端合成声明，最终证据见[R3 计划](superpowers/plans/2026-10-01-agent-sidebar-readonly-controls.md)。
+Nach der Konfiguration aus dem Repository-Wurzelverzeichnis `python backend/examples/readonly_8d_plugin.py` ausführen. Das Beispiel ignoriert Proxy-Umgebungsvariablen, lehnt alle HTTP-Weiterleitungen ab und gibt nur die UUIDs erfolgreicher Datensätze und den Abschlussstatus aus; bei Fehlern erscheint eine feste Meldung ohne Schlüssel, Token, Nachrichten oder Fehlerantworttext. Schlüssel für Ereignisse, Ergebnisse und Checkpoints erhalten ab späteren Epochs die Runde, die Schlüssel der ersten Runde bleiben kompatibel; ein erneuter Start im selben aktiven Epoch bedeutet nicht, dass ein beliebiger interner Pipeline-Zustand wiederhergestellt wird. Historische Eingaben umfassen höchstens 1000 Seiten, neue Eingaben im Abschlussmodus höchstens 1000 Stapel; standardmäßig wird nur ein Stapel übernommen. Der offizielle Katalog bleibt DENY, der Standardschalter ist aus; der [Originalprozesstest](../backend/tests/e2e/test_readonly_agent_process.py) und der [Wiederaufnahme-/Browsertest](../backend/tests/e2e/test_agent_readonly_resume_process.py) konfigurieren serverseitige synthetische Erklärungen nur innerhalb eines vollständigen Einmal-Mandanten.
 
-浏览器验收由后端 pytest 夹具启动自己的后端、Vite 和插件子进程，使用分配的本地端口与[专用 Playwright 配置](../frontend/playwright.agent.config.ts)，不调用共享 E2E 初始化、重置或容器生命周期。须预先安装前端依赖、Playwright 与 Chromium；以 `OPENQMS_AGENT_BROWSER_EXECUTABLE` 指定已安装浏览器路径，缺失时明确失败，不自动安装或跳过。使用本节前述一次性库 runner，传入 `tests/e2e/test_agent_readonly_resume_process.py tests/e2e/test_readonly_agent_process.py -q -rs`；另在 frontend 执行 `node_modules/.bin/tsc -p tsconfig.e2e.json`。验收未配置模型凭据：既有 D4 推荐接口的“LLM 凭据未配置”422提示保留，验证记录接口要求200；不将该提示认定为只读 Agent 失败。
+Die Browserabnahme startet über eine Backend-pytest-Fixture eigene Backend-, Vite- und Plugin-Unterprozesse auf zugewiesenen lokalen Ports mit der [dedizierten Playwright-Konfiguration](../frontend/playwright.agent.config.ts) und ruft weder gemeinsame E2E-Initialisierung noch Reset oder Container-Lebenszyklus auf. Frontend-Abhängigkeiten, Playwright und Chromium müssen vorab installiert sein; `OPENQMS_AGENT_BROWSER_EXECUTABLE` gibt den Pfad zum installierten Browser an, fehlt er, schlägt der Test ausdrücklich fehl, ohne automatische Installation oder Skip. Den Einmal-Datenbank-Runner aus diesem Abschnitt mit `tests/e2e/test_agent_readonly_resume_process.py tests/e2e/test_readonly_agent_process.py -q -rs` verwenden; zusätzlich im Frontend `node_modules/.bin/tsc -p tsconfig.e2e.json` ausführen. Die Abnahme konfiguriert keine Modellzugangsdaten: Der 422-Hinweis „LLM-Zugangsdaten nicht konfiguriert“ der bestehenden D4-Empfehlungsschnittstelle bleibt bestehen, die Schnittstelle der Verifizierungsdatensätze muss 200 liefern; der Hinweis gilt nicht als Fehlschlag des Nur-Lese-Agenten.
 
-### 1.7 正常配置的元数据本地试用
+### 1.7 Lokaler Metadaten-Versuch unter Normalkonfiguration
 
-R4a 已实现严格启动策略、服务端精确 profile、正常管理员 grant/用户目录/固定目标创建、绑定 JWT/期限、回环早期入口检查、永久 epoch 撤销和固定 stdlib 启动器。只在 dev、可信本地主机、回环单 worker 和无代理信任前提下试用；默认开关及 baseline DENY 不变，无迁移、正文/附件、模型或业务写能力。`python -m app.cli.agent_local_trial` 提供 `check-policy`、`run`、`revoke`，不直接访问数据库或持有维护权限；安装密钥和管理员 JWT 从独立安全文件读取，不放 argv/日志。正确注册、精确声明、自有重启、有限 grant、到期/轮换与暂时 disable/永久 revoke 语义见[操作指南](development/agent-local-trial.md)。
+R4a umfasst eine strikte Startrichtlinie, ein exaktes serverseitiges Profil, regulären Administrator-Grant/Benutzerkatalog/feste Zielerstellung, gebundenes JWT mit Frist, frühe Prüfung des Loopback-Einstiegs, dauerhaften Epoch-Widerruf und einen festen stdlib-Starter. Versuche nur unter dev, auf einem vertrauenswürdigen lokalen Host, mit Loopback, einem Worker und ohne Proxy-Vertrauen; Standardschalter und Baseline-DENY bleiben unverändert, es gibt keine Migrations-, Text-/Anhangs-, Modell- oder fachlichen Schreibfähigkeiten. `python -m app.cli.agent_local_trial` bietet `check-policy`, `run` und `revoke`, greift nicht direkt auf die Datenbank zu und hält keine Wartungsrechte; Installationsschlüssel und Administrator-JWT werden aus separaten sicheren Dateien gelesen, nicht aus argv oder Logs. Korrekte Registrierung, exakte Deklaration, eigener Neustart, begrenzter Grant, Ablauf/Rotation sowie die Semantik von vorübergehendem disable und dauerhaftem revoke beschreibt die [Betriebsanleitung](development/agent-local-trial.md).
 
-正常配置的进程/浏览器夹具通过实际 lifespan/get_db、管理员/用户 API 和固定 CLI 贯通，不替换能力目录、authorize 或 delivery；使用自有随机完整迁移测试库、分配端口及已安装 Chromium。运行 `tests/e2e/test_agent_local_trial_process.py tests/e2e/test_agent_local_trial_browser.py`；旧八场景显式选择 `readonly-sidebar.spec.ts`，新场景选择 `local-trial.spec.ts`，专用配置同时支持两者，不制造跳过结果。整片冻结验收及剩余边界见[R4a 台账](superpowers/plans/2026-10-02-agent-metadata-local-trial.md)，本地通过不关闭 R4b/生产门禁。
+Prozess- und Browser-Fixtures der Normalkonfiguration laufen durch echtes lifespan/get_db, Administrator-/Benutzer-APIs und das feste CLI, ohne Fähigkeitskatalog, authorize oder delivery zu ersetzen; sie verwenden eine eigene, zufällig benannte, vollständig migrierte Testdatenbank, zugewiesene Ports und das installierte Chromium. Ausführen: `tests/e2e/test_agent_local_trial_process.py tests/e2e/test_agent_local_trial_browser.py`; die acht alten Szenarien wählen ausdrücklich `readonly-sidebar.spec.ts`, die neuen `local-trial.spec.ts`; die dedizierte Konfiguration unterstützt beide und erzeugt keine Skip-Ergebnisse. Ein lokales Bestehen schließt die Gates für R4b bzw. Produktion nicht.
 
-### 1.8 员工内部 D4 受限正文候选
+### 1.8 Interner eingeschränkter D4-Textkandidat für Mitarbeitende
 
-`CAPA_D4_TEXT_PREVIEW_ENABLED`默认false，只控制普通员工 availability/preview/version三个端点；关闭在租户/body/DB前404，不改变R4a运行开关、目录或固定worker。`capa_current_access`共享当前namespace/身份/对象规则，旧运行时钩子保持；纯redactor不读数据库/网络，正文快照预算先于加载，明确FMEA源当前权限和版本独立复核，成功只写不含词语/文本的审计。短期候选固定restricted，不得到降敏、原文例外、插件/模型/发布许可。
+`CAPA_D4_TEXT_PREVIEW_ENABLED` ist standardmäßig false und steuert nur die drei Endpunkte availability/preview/version für normale Mitarbeitende; ist er aus, wird vor Mandant/Body/Datenbank mit 404 geantwortet, ohne R4a-Laufzeitschalter, Katalog oder festen Worker zu verändern. `capa_current_access` teilt die Regeln für aktuellen Namespace, Identität und Objekt; alte Laufzeit-Hooks bleiben bestehen. Der reine Redactor liest weder Datenbank noch Netz, das Budget für den Textschnappschuss wird vor dem Laden geprüft, aktuelle Berechtigung und Version der ausdrücklichen FMEA-Quelle werden unabhängig nachgeprüft, und ein Erfolg schreibt nur ein Audit ohne Wörter oder Text. Kurzlebige Kandidaten sind fest restricted und erhalten weder Herabstufung noch Originaltext-Ausnahme noch Plugin-/Modell-/Veröffentlichungsfreigabe.
 
-员工从D4页显式生成，只读弹窗以纯文本展示并按2秒/最长30秒撤回机制检查。成功接口只读取三个批准字段；不把验证结论/方法/人员/附件纳入正文快照。新路由专属校验映射避免默认422回显输入；Axios对固定preview路径不注入factory参数、不401刷新重发私密词。操作限制见[指南](development/capa-d4-text-preview.md)，具体证据见[实施台账](superpowers/plans/2026-10-06-capa-d4-text-redaction-foundation.md)。新浏览器夹具选择`d4-text-preview.spec.ts`，同样使用自有完整迁移库、分配端口和已安装Chromium，既有两个Agent脚本仍显式选择。
+Mitarbeitende erzeugen den Kandidaten ausdrücklich auf der D4-Seite; ein schreibgeschützter Dialog zeigt reinen Text an und prüft im Abstand von 2 Sekunden (höchstens 30 Sekunden) auf Widerruf. Die erfolgreiche Schnittstelle liest nur drei freigegebene Felder; Verifizierungsergebnis/-methode/-personen/-anhänge gehören nicht zum Textschnappschuss. Eine routeneigene Validierungsabbildung verhindert, dass die standardmäßige 422-Antwort Eingaben zurückspiegelt; Axios fügt beim festen preview-Pfad keinen factory-Parameter ein und sendet private Begriffe nach einem 401-Refresh nicht erneut. Bedienungsgrenzen siehe [Anleitung](development/capa-d4-text-preview.md). Die neue Browser-Fixture wählt `d4-text-preview.spec.ts` und verwendet ebenfalls eine eigene vollständig migrierte Datenbank, zugewiesene Ports und das installierte Chromium; die beiden bestehenden Agent-Skripte werden weiterhin ausdrücklich ausgewählt.
 
 ---
 
-## 2. 前端开发约定
+## 2. Frontend-Konventionen
 
-### 2.1 代码结构
+### 2.1 Code-Struktur
 
 ```
 frontend/src/
-├── api/           # Axios 实例 + 按模块的 API 函数
-├── components/    # 布局组件（AppLayout）+ 共享组件
+├── api/           # Axios-Instanz + API-Funktionen pro Modul
+├── components/    # Layoutkomponenten (AppLayout) + gemeinsame Komponenten
 ├── hooks/
-│   └── usePermission.ts  # 权限钩子
-├── pages/         # 按模块组织的页面组件
+│   └── usePermission.ts  # Berechtigungs-Hook
+├── pages/         # Seitenkomponenten nach Modul
 ├── store/
-│   └── authStore.ts      # Zustand auth 状态
+│   └── authStore.ts      # Zustand-Store für Auth
 ├── types/
-│   └── index.ts           # 全局 TypeScript 接口
+│   └── index.ts           # Globale TypeScript-Interfaces
 ├── utils/
-│   ├── fmea.ts             # AIAG-VDA AP 查找表
-│   └── fmeaTable.ts        # graph↔spreadsheet 转换
-└── App.tsx        # 路由定义 + ProtectedRoute
+│   ├── fmea.ts             # AIAG-VDA-AP-Tabelle
+│   └── fmeaTable.ts        # Umwandlung graph↔spreadsheet
+└── App.tsx        # Routendefinition + ProtectedRoute
 ```
 
-### 2.2 路由注册
+### 2.2 Routen registrieren
 
-新模块需在 `App.tsx` 中添加路由，并使用 `ProtectedRoute` 设置模块守卫：
+Neue Module brauchen eine Route in `App.tsx` mit Modulschutz über `ProtectedRoute`:
 
 ```tsx
 <Route path="/my-module" element={<ProtectedRoute requiredModule="my_module"><MyModulePage /></ProtectedRoute>} />
 ```
 
-### 2.3 权限钩子
+### 2.3 Berechtigungs-Hook
 
-在页面组件中使用 `usePermission` 控制按钮和表单的可见性：
+In Seitenkomponenten steuert `usePermission` die Sichtbarkeit von Schaltflächen und Formularen. Sichtbare Texte ohne Übersetzungsschlüssel laufen über `tr(de, en)` / `useTr()`:
 
 ```tsx
 const { canView, canCreate, canEdit, canApprove } = usePermission();
 
-// 隐藏创建按钮
-{canCreate("fmea") && <Button onClick={handleCreate}>新建 FMEA</Button>}
+// Schaltfläche „Neu“ ausblenden
+{canCreate("fmea") && <Button onClick={handleCreate}>{tr("Neue FMEA", "New FMEA")}</Button>}
 
-// 禁用输入框
+// Eingabefeld deaktivieren
 <Input disabled={!canEdit("fmea")} />
 ```
 
-### 2.4 API 客户端
+### 2.4 API-Client
 
-每个模块在 `api/` 目录下创建独立文件：
+Jedes Modul erhält eine eigene Datei unter `api/`:
 
 ```typescript
 // api/myModule.ts
@@ -176,123 +176,123 @@ export const getMyModule = (id: string) => client.get(`/api/my-module/${id}`);
 export const createMyModule = (data: any) => client.post('/api/my-module', data);
 ```
 
-### 2.5 构建与检查
+### 2.5 Build und Prüfung
 
 ```bash
 cd frontend
-npm run build    # TypeScript 类型检查 + Vite 构建
-npm run lint     # ESLint 检查
-npm run dev      # 开发服务器（:5173，代理 /api → :8000）
+npm run build    # TypeScript-Typprüfung + Vite-Build
+npm run lint     # ESLint
+npm run dev      # Entwicklungsserver (:5173, Proxy /api → :8000)
 ```
 
 ---
 
-## 3. 添加新模块
+## 3. Neues Modul hinzufügen
 
-### 3.1 后端步骤
+### 3.1 Backend-Schritte
 
-1. **创建模型**：在 `models/` 下创建 `my_module.py`，继承 `Base`。
-2. **注册模型**：在 `models/__init__.py` 中导入并添加到 `__all__`。
-3. **创建 schema**：在 `schemas/` 下创建 `my_module.py`，定义请求/响应 schema。
-4. **创建 service**：在 `services/` 下创建 `my_module_service.py`，实现 CRUD + AuditLog。
-5. **创建 API**：在 `api/` 下创建 `my_module.py`，定义路由。
-6. **注册路由**：在 `main.py` 中 include_router。
-7. **添加权限模块**：在 `core/permissions.py` 的 `Module` 枚举中添加 `MY_MODULE = "my_module"`。
-8. **创建迁移**：`alembic revision -m "add_my_module_tables"`，编写表创建 SQL。
-9. **添加权限数据**：在迁移中为每个角色分配 `my_module` 的权限等级。
-10. **前端同步**：在 `usePermission.ts` 的 `ModuleKey` 类型中添加 `"my_module"`。
+1. **Modell anlegen**: `my_module.py` unter `models/`, erbt von `Base`.
+2. **Modell registrieren**: in `models/__init__.py` importieren und in `__all__` aufnehmen.
+3. **Schema anlegen**: `my_module.py` unter `schemas/` mit Request-/Response-Schemas.
+4. **Service anlegen**: `my_module_service.py` unter `services/` mit CRUD + AuditLog.
+5. **API anlegen**: `my_module.py` unter `api/` mit den Routen.
+6. **Router registrieren**: per include_router in `main.py`.
+7. **Berechtigungsmodul ergänzen**: im Enum `Module` in `core/permissions.py` `MY_MODULE = "my_module"` hinzufügen.
+8. **Migration anlegen**: `alembic revision -m "add_my_module_tables"` und das SQL für die Tabellen schreiben.
+9. **Berechtigungsdaten ergänzen**: in der Migration jeder Rolle eine Stufe für `my_module` zuweisen.
+10. **Frontend synchronisieren**: im Typ `ModuleKey` in `usePermission.ts` `"my_module"` ergänzen.
 
-### 3.2 前端步骤
+### 3.2 Frontend-Schritte
 
-1. **添加类型**：在 `types/index.ts` 中定义接口。
-2. **添加 API**：在 `api/` 下创建模块 API 文件。
-3. **创建页面**：在 `pages/` 下创建 `myModule/MyModulePage.tsx`。
-4. **注册路由**：在 `App.tsx` 中添加路由 + `ProtectedRoute`。
-5. **添加菜单**：在 `components/layout/` 中添加侧边栏菜单项。
+1. **Typen ergänzen**: Interfaces in `types/index.ts` definieren.
+2. **API ergänzen**: API-Datei des Moduls unter `api/` anlegen.
+3. **Seite anlegen**: `myModule/MyModulePage.tsx` unter `pages/`.
+4. **Route registrieren**: Route + `ProtectedRoute` in `App.tsx`.
+5. **Menü ergänzen**: Eintrag in der Seitenleiste unter `components/layout/`.
 
 ---
 
-## 4. 测试
+## 4. Tests
 
-### 4.1 日常检查
+### 4.1 Tägliche Prüfung
 
-后端使用 pytest，前端使用 TypeScript/Vite 与 Vitest。常规一致性检查从仓库根目录运行：
+Das Backend nutzt pytest, das Frontend TypeScript/Vite und Vitest. Die übliche Konsistenzprüfung läuft aus dem Repository-Wurzelverzeichnis:
 
 ```bash
-make check-sdk SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # 独立 SDK 三层
-make check-backend SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # 已核验 PostgreSQL + 当前 SDK wheel
-make check-frontend-tsc  # 类型检查
-make check-frontend-build # 生产构建
-make check SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # SDK + backend + tsc + build
+make check-sdk SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # eigenständige SDK-Prüfung (drei Schichten)
+make check-backend SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # geprüfte PostgreSQL + aktuelles SDK-Wheel
+make check-frontend-tsc  # Typprüfung
+make check-frontend-build # Produktions-Build
+make check SDK_PYTHON_BIN=/absolute/path/to/developer-venv/bin/python # SDK + Backend + tsc + Build
 ```
 
-普通 main PR 的后端检查按 [模块路由](development/backend-ci-module-routing.md) 选择相关组。默认本地 `make check-backend` 和 main push 执行完整套件。
+Die Backend-Prüfung normaler PRs gegen main wählt anhand der geänderten Pfade die betroffenen Testgruppen aus (Modul-Routing). Lokales `make check-backend` ohne weitere Angaben und Pushes auf main führen die vollständige Suite aus.
 
-SDK 的 `SDK_PYTHON_BIN` 默认 `python3`，与 backend 的 `PYTHON_BIN` 独立；须由调用者提供 Python ≥3.11、pytest、pip 与实际 setuptools==79.0.1，检查入口不会安装或放宽构建版本。`check-sdk-unit`、`check-sdk-loopback`、`check-sdk-wheel` 可独立执行，无数据库/backend requirements 依赖；`check-sdk` 聚合三层。backend 检查先离线构建当前源码 wheel，验证构建 JSON 返回的实际路径和 SHA256，再用专用 `OPENQMS_SDK_WHEEL` 传给真实 HTTP fixture；缺 wheel 不 skip。构建/安装与测试证据写入本次私有子目录，可通过 `SDK_ARTIFACT_ROOT` 指定父目录。详见[SDK 使用与安全边界](../sdk/python/README.md)。
+`SDK_PYTHON_BIN` des SDK ist standardmäßig `python3` und unabhängig von `PYTHON_BIN` des Backends; der Aufrufer muss Python ≥3.11, pytest, pip und tatsächlich setuptools==79.0.1 bereitstellen, die Prüfeinstiege installieren nichts und lockern keine Build-Versionen. `check-sdk-unit`, `check-sdk-loopback` und `check-sdk-wheel` laufen einzeln und ohne Abhängigkeit von Datenbank oder Backend-requirements; `check-sdk` fasst die drei Schichten zusammen. Die Backend-Prüfung baut zuerst offline ein Wheel aus dem aktuellen Quellstand, prüft den tatsächlichen Pfad und SHA256 aus dem Build-JSON und übergibt es über ein eigenes `OPENQMS_SDK_WHEEL` an die echte HTTP-Fixture; fehlt das Wheel, wird nicht übersprungen. Nachweise zu Build/Installation und Tests landen in einem privaten Unterverzeichnis dieses Laufs; das Elternverzeichnis lässt sich über `SDK_ARTIFACT_ROOT` festlegen. Details unter [SDK-Nutzung und Sicherheitsgrenzen](../sdk/python/README.md).
 
-`make check` 不隐式运行 Chromium、真实 provider 或 ClamAV。后端层只允许 `not ci_browser and not ci_r5_native
-and not live_provider and not real_scanner`；graph worker/projection 的既有两项排除仍由
-Make 参数显式传递。可通过 `python scripts/check-ci-pure.py tests/ci/
-tests/e2e/test_capa_outcome_runner.py -q -rA` 运行 CI 基础设施纯测试。pure 模式要求
-collection 不探测数据库，误用 DB fixture 明确失败而非转成 skip；导入前禁隐式 dotenv，
-并对 Python 网络及项目已知数据库入口设置拒绝保护，已知 pytest 子进程沿同一 bootstrap。
-这不是任意 shell、Node、原生代码或不可信程序的通用 OS 网络沙箱，不得据此执行未知外部程序。
+`make check` startet weder implizit Chromium noch echte Provider oder ClamAV. Die Backend-Schicht erlaubt nur `not ci_browser and not ci_r5_native
+and not live_provider and not real_scanner`; die beiden bestehenden Ausschlüsse für graph worker/projection werden weiterhin
+explizit per Make-Parameter übergeben. Reine CI-Infrastrukturtests laufen mit `python scripts/check-ci-pure.py tests/ci/
+tests/e2e/test_capa_outcome_runner.py -q -rA`. Der pure-Modus verlangt, dass
+die Collection keine Datenbank anspricht; eine fälschlich verwendete DB-Fixture schlägt ausdrücklich fehl statt zum Skip zu werden; implizites dotenv ist vor dem Import gesperrt,
+und für Python-Netzwerkzugriffe sowie bekannte Datenbankeinstiege des Projekts gilt ein Ablehnungsschutz, den bekannte pytest-Unterprozesse über denselben Bootstrap übernehmen.
+Das ist keine allgemeine OS-Netzwerk-Sandbox für beliebige Shell-, Node-, nativen oder nicht vertrauenswürdigen Code; unbekannte externe Programme dürfen damit nicht ausgeführt werden.
 
-前端依赖使用 `npm ci`，变更锁文件后须在 CI 的 Node 20/npm 10 环境复验；不能以已有 `node_modules` 的构建通过代替干净安装。发布诊断 `doc-gate-preflight` 和迁移 `deploy-migrate` 保留调用方 `SECRET_KEY`，未提供时不生成空值覆盖 `.env`；仅在调用方未提供非空密钥时接受显式 `PYTEST_SECRET_KEY` 作为旧接口兼容，不在这些入口新增生产默认密钥。
+Frontend-Abhängigkeiten werden mit `npm ci` installiert; nach Änderungen an der Lockfile muss in der CI-Umgebung mit Node 20/npm 10 erneut geprüft werden; ein Build mit vorhandenem `node_modules` ersetzt keine saubere Installation. Die Release-Diagnose `doc-gate-preflight` und die Migration `deploy-migrate` behalten das `SECRET_KEY` des Aufrufers und überschreiben `.env` nicht mit einem leeren Wert, wenn keines übergeben wird; nur wenn der Aufrufer keinen nicht leeren Schlüssel liefert, wird aus Kompatibilität ein explizites `PYTEST_SECRET_KEY` akzeptiert. Diese Einstiege erhalten keinen neuen Produktions-Standardschlüssel.
 
-### 4.2 分层验收资源与边界
+### 4.2 Ressourcen und Grenzen der geschichteten Abnahme
 
-`make check-browser` 使用 `ci_browser and not live_provider and not real_scanner`，
-要求已安装项目 Chromium；`make check-live` 只选择 `live_provider`，必须显式授权，
-普通任务不能把 `E2E_MODE=false` 当作关闭开关。分层入口（含独立 scanner）及本地 registration 格式见
-[E2E 指南](e2e.md#ci-分层验收task-7)。调用方在 Make 之前设置禁止 group/world 写入的 secret-free
-`OPENQMS_TEST_RESOURCE_FILE` 和同一 loopback `TEST_DATABASE_URL`；本地若同时提供
-`PG15_CONTAINER`，必须匹配登记的容器名称或完整 ID，不能借用 CI metadata。SDK
-`OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` 必须移除而非置空，应用 provider 配置仍
-显式禁用。不得由旧注册、
-`run-owned.py`、固定 `/Users/` 路径或环境文件推断资源。
+`make check-browser` verwendet `ci_browser and not live_provider and not real_scanner`
+und benötigt das im Projekt installierte Chromium; `make check-live` wählt nur `live_provider` und muss ausdrücklich freigegeben sein;
+normale Aufgaben dürfen `E2E_MODE=false` nicht als Abschalter verwenden. Die geschichteten Einstiege (einschließlich des separaten Scanners) und das Format der lokalen Registrierung stehen im
+[E2E-Leitfaden](e2e.md#geschichtete-ci-abnahme-task-7). Der Aufrufer setzt vor Make ein für group/world nicht beschreibbares, secret-freies
+`OPENQMS_TEST_RESOURCE_FILE` und genau ein Loopback-`TEST_DATABASE_URL`; wird lokal zusätzlich
+`PG15_CONTAINER` gesetzt, muss es dem registrierten Containernamen oder der vollständigen ID entsprechen und darf keine CI-Metadaten verwenden. Die SDK-Variablen
+`OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` müssen entfernt statt geleert werden, die Provider-Konfiguration der Anwendung bleibt
+ausdrücklich deaktiviert. Ressourcen dürfen nicht aus alten Registrierungen,
+`run-owned.py`, festen `/Users/`-Pfaden oder Umgebungsdateien abgeleitet werden.
 
-本地资源核验在 Docker inspect 或 DB I/O 前拒绝额外的 `PGHOSTADDR`、`PGSERVICE`、
-`PGSERVICEFILE`、`PGSYSCONFDIR` 和 `PGOPTIONS`，实际 libpq 连接还固定数字回环地址。
-`localhost` 使用 IPv4 回环；仅 IPv6 的实例应显式使用 `::1`。普通测试迁移前置与测试 recipe
-共用测试专用 `SECRET_KEY` fallback，并保留调用者显式值；`doc-gate-preflight` 和
-`deploy-migrate` 则必须显式提供实际 `SECRET_KEY`，不继承测试 fallback 或旧 `PYTEST_SECRET_KEY`。
-本说明不授权执行部署命令。
+Die lokale Ressourcenprüfung lehnt vor Docker-inspect oder DB-I/O zusätzliche `PGHOSTADDR`, `PGSERVICE`,
+`PGSERVICEFILE`, `PGSYSCONFDIR` und `PGOPTIONS` ab; die tatsächliche libpq-Verbindung ist zudem auf eine numerische Loopback-Adresse festgelegt.
+`localhost` verwendet IPv4-Loopback; reine IPv6-Instanzen sollten ausdrücklich `::1` verwenden. Die Migrationsvorstufe normaler Tests und die Test-Recipes
+teilen ein testspezifisches `SECRET_KEY`-Fallback und behalten explizite Werte des Aufrufers; `doc-gate-preflight` und
+`deploy-migrate` verlangen dagegen ein ausdrücklich übergebenes echtes `SECRET_KEY` und erben weder das Test-Fallback noch das alte `PYTEST_SECRET_KEY`.
+Diese Beschreibung berechtigt nicht zur Ausführung von Deployment-Befehlen.
 
-本地 source export 只复制当前 tracked present source 与明确列出的 CI 实现文件，
-不复制 `.git`、`.env*`、`.superpowers`、`.codegraph`、cache、`node_modules` 或旧 owned
-registry；用 SHA-256 manifest 冻结后在 export 内 `npm ci`。普通/provider 凭据保持空，
-`PYTHON_BIN` 可指向操作者提供的解释器但不写入源码。收到安装脚本/浏览器缺失阻止时，
-记录为 BLOCKED 并继续可以运行的 backend/静态检查，不能绕过为升级依赖或浏览器下载。
+Ein lokaler Source-Export kopiert nur aktuell getrackte vorhandene Quellen und ausdrücklich gelistete CI-Implementierungsdateien,
+nicht `.git`, `.env*`, `.superpowers`, `.codegraph`, Caches, `node_modules` oder alte owned-Registrierungen;
+nach dem Einfrieren per SHA-256-Manifest wird im Export `npm ci` ausgeführt. Normale und Provider-Zugangsdaten bleiben leer;
+`PYTHON_BIN` darf auf einen vom Operator bereitgestellten Interpreter zeigen, wird aber nicht in den Quellcode geschrieben. Wird ein Installationsskript oder ein fehlender Browser blockiert,
+als BLOCKED erfassen und die lauffähigen Backend-/statischen Prüfungen fortsetzen; das darf nicht durch Abhängigkeits-Upgrades oder Browser-Downloads umgangen werden.
 
-runner 仅发布已脱敏的 receipt/log；原始 JUnit/hooks 与配置文件保持私有。各 job 通过专用
-`OPENQMS_TEST_ARTIFACTS`、`always()` 保留成功和失败的实际收据，而非状态包装；scanner
-在 teardown 前导出过程证据并另记清理观察，summary 校验冻结 SHA 与实际计数。可选
-`LLM_TIMEOUT` 缺省/空值为 30 秒，显式配置仍严格限制 1–120。receipt 必须记录
-命令、退出码、selected/passed/failed/errors/skipped/xfail/xpass/deselected/warnings 和
-清理范围。确认虚构 sentinel 不在 Node allowlist 或待上传产物后才能发布。不要停止、
-删除或 prune controller 保留的 container/volume；只清理本次创建的 runner artifact。
+Der Runner veröffentlicht nur geschwärzte Receipts/Logs; rohe JUnit-/Hook-Dateien und Konfigurationen bleiben privat. Jeder Job bewahrt über ein eigenes
+`OPENQMS_TEST_ARTIFACTS` und `always()` die tatsächlichen Quittungen erfolgreicher und fehlgeschlagener Läufe auf, keine Status-Wrapper; der Scanner
+exportiert Prozessnachweise vor dem Teardown und protokolliert die Bereinigung getrennt; die Summary prüft eingefrorene SHA und tatsächliche Zähler. Das optionale
+`LLM_TIMEOUT` ist ohne Angabe oder leer 30 Sekunden, explizit gesetzt streng 1–120. Ein Receipt muss
+Befehl, Exit-Code, selected/passed/failed/errors/skipped/xfail/xpass/deselected/warnings und
+Bereinigungsumfang enthalten. Veröffentlicht wird erst nach der Bestätigung, dass ein fiktiver Sentinel weder in der Node-Allowlist noch in hochzuladenden Artefakten steht. Vom Controller behaltene
+Container/Volumes nicht stoppen, löschen oder prunen; nur die in diesem Lauf erzeugten Runner-Artefakte bereinigen.
 
-### 4.3 GitHub 自动与手动层
+### 4.3 Automatische und manuelle Schichten auf GitHub
 
-普通后端在两个独立 PostgreSQL job 中按完整测试模块分组，汇总检查仍为 `backend-tests`；本地省略 `BACKEND_SHARD` 时继续运行完整集合。可信 base 分类器允许既有文档与严格受限的公共首页展示改动跳过完整后端，前端类型、构建和浏览器检查继续运行。分组、失败门禁、计时口径与本次验收见[后端 CI 优化记录](development/backend-ci-optimization.md)。
+Das normale Backend läuft in zwei unabhängigen PostgreSQL-Jobs, gruppiert nach vollständigen Testmodulen; der zusammenfassende Check bleibt `backend-tests`. Lokal ohne `BACKEND_SHARD` läuft weiterhin die vollständige Menge. Ein Klassifikator aus der vertrauenswürdigen Base erlaubt es, dass reine Dokumentationsänderungen und streng begrenzte Darstellungsänderungen der öffentlichen Startseite das vollständige Backend überspringen; Typprüfung, Build und Browserprüfungen des Frontends laufen weiter.
 
-Chromium jobs（自动 browser-protection、手动 live-capa/scanner）固定 `ubuntu-24.04`，避免 `ubuntu-latest` 升级到当前 Playwright 不支持的系统。SDK 默认端点的无网络测试使用各 SDK 的公开默认 HTTP client 及其匹配 transport，不能把旧 `httpx` 对象注入已切换 `httpx2` 的 SDK；仍须严格校验官方 URL、移除 ambient override 并禁止真实请求。
+Chromium-Jobs (automatisch browser-protection, manuell live-capa/scanner) sind fest auf `ubuntu-24.04` gesetzt, damit `ubuntu-latest` nicht auf ein System wechselt, das die aktuelle Playwright-Version nicht unterstützt. Netzwerkfreie Tests der SDK-Standardendpunkte verwenden den öffentlichen Standard-HTTP-Client des jeweiligen SDK mit passendem Transport; alte `httpx`-Objekte dürfen nicht in ein bereits auf `httpx2` umgestelltes SDK injiziert werden. Offizielle URLs werden weiterhin streng geprüft, ambient gesetzte Overrides entfernt und echte Anfragen verboten.
 
-验收子进程实时输出逐用例 start/finish 诊断，只含源测试标识和序号，不包含参数 ID/正文。父进程验证精确 JSON 结构与连续配对序列，重新构造并脱敏后才镜像到控制台，拒绝前缀碰撞、捕获输出回放和嵌套进度；这不是身份认证或成功收据。单用例120秒未完成时 pytest 保存线程堆栈，**不**因此跳过、提前通过或延长执行上限。超时取消必须核对最后 start/finish、堆栈和实际计数，不得将缺失最终收据当成通过。
+Abnahme-Unterprozesse geben je Testfall in Echtzeit start/finish-Diagnosen aus, nur mit Quelltestkennung und Laufnummer, ohne Parameter-ID oder Text. Der Elternprozess prüft exakte JSON-Struktur und lückenlos gepaarte Sequenz, baut die Ausgabe neu auf und schwärzt sie, bevor sie in die Konsole gespiegelt wird; Präfixkollisionen, Wiedergabe erfasster Ausgaben und verschachtelter Fortschritt werden abgelehnt. Das ist weder Authentifizierung noch Erfolgsquittung. Ist ein einzelner Testfall nach 120 Sekunden nicht fertig, speichert pytest die Thread-Stacks; er wird deswegen **nicht** übersprungen, vorzeitig bestanden oder länger ausgeführt. Bei einem Abbruch durch Timeout müssen letztes start/finish, Stack und tatsächliche Zähler geprüft werden; eine fehlende Abschlussquittung gilt nie als bestanden.
 
-自动 job 使用无密钥 main push 与 main PR（功能分支 push 不再重复触发；未开 PR 的功能分支也不运行 Test OpenQMS），`contents: read`、checkout
-`persist-credentials: false`。`workflow_dispatch` 的 live/scanner 只在 `main`，固定
-选项和 main-only 预检：先检查 event/ref/gate 并冻结 main SHA，才由下游 job
-使用该 SHA。workflow_dispatch 文件必须先正式进入默认分支 main；仅 live job 使用 `ci-acceptance` Environment 与模型配置，scanner 不读取
-模型密钥且不依赖该 Environment。Environment 审批者、允许的 main 与测试配置由管理员在 GitHub 配置；
-代码不读取本地 credential、不创建 Secrets/Environment/branch protection。未实际 push
-或 dispatch 的 GITHUB_AUTO/GITHUB_MANUAL 不是 PASS，分别保留 BLOCKED 或
-NOT_REQUESTED。
+Automatische Jobs laufen secret-frei bei main-Pushes und PRs gegen main (Pushes auf Feature-Branches lösen nicht erneut aus; Feature-Branches ohne offenen PR führen Test OpenQMS nicht aus), mit `contents: read` und Checkout
+`persist-credentials: false`. Live/Scanner per `workflow_dispatch` gibt es nur auf `main`, mit festen
+Optionen und main-only-Preflight: Zuerst werden event/ref/gate geprüft und die main-SHA eingefroren, erst dann
+verwenden nachfolgende Jobs diese SHA. Die workflow_dispatch-Datei muss zuerst regulär im Standardbranch main liegen; nur der Live-Job nutzt das Environment `ci-acceptance` und die Modellkonfiguration, der Scanner liest
+keine Modellschlüssel und hängt nicht von diesem Environment ab. Freigabeberechtigte des Environments, erlaubtes main und Testkonfiguration richtet der Administrator in GitHub ein;
+der Code liest keine lokalen Zugangsdaten und legt weder Secrets noch Environments oder Branch-Schutz an. GITHUB_AUTO/GITHUB_MANUAL ohne tatsächlichen push
+bzw. dispatch sind kein PASS und bleiben BLOCKED bzw.
+NOT_REQUESTED.
 
 ---
 
-## 5. 提交规范
+## 5. Commit-Konventionen
 
 ```
 <type>(<scope>): <subject>
@@ -300,9 +300,9 @@ NOT_REQUESTED。
 <body>
 ```
 
-类型：`feat` / `fix` / `docs` / `refactor` / `test` / `chore`
+Typen: `feat` / `fix` / `docs` / `refactor` / `test` / `chore`
 
-示例：
+Beispiele:
 ```
 feat(fmea): add DFMEA generation rules engine
 fix(capa): fix D7/D8 transition permission check
